@@ -68,7 +68,8 @@ export function teamRow(state: MistState, member: { id: string; name: string; gr
   const allTasks = (state.tasks as TeamTask[]).filter(t => openTask(t, id)).map(t => ({ id: t.id, title: t.title, due: t.due, overdue: !!t.due && t.due < today, target: t.target, ...(t.nudge ? { nudge: t.nudge } : {}) }))
     .sort((a, b) => Number(b.overdue) - Number(a.overdue) || (a.due || '9999').localeCompare(b.due || '9999'));
   const ownedOrders = new Set(state.orders.filter(o => o.ownerId === id).map(o => o.id));
-  const receivables = state.invoices.filter(i => ownedOrders.has(i.orderId) && isActiveMistInvoice(i) && i.open > 0 && i.due && i.due < today)
+  const ownedCustomers = new Set(state.customers.filter(c => c.ownerId === id).map(c => c.id));
+  const receivables = state.invoices.filter(i => (ownedOrders.has(i.orderId) || !!i.opening && !!i.customerId && ownedCustomers.has(i.customerId)) && isActiveMistInvoice(i) && i.open > 0 && i.due && i.due < today)
     .map(i => ({ id: i.id, code: i.code, customer: i.customer, due: i.due, open: i.open, currency: i.currency, days: daysBetween(i.due, today) })).sort((a, b) => b.days - a.days);
   const followUps = state.crm?.followUps || [];
   const busy = new Set(orders.map(o => state.orders.find(x => x.id === o.id)?.customerId));
@@ -170,7 +171,8 @@ export function teamWeekRow(state: MistState, member: { id: string; name: string
   const id = member.id, owned = state.orders.filter(o => o.ownerId === id), ownedIds = new Set(owned.map(o => o.id));
   const fresh = owned.filter(o => inWeek(o.createdAt) && !isOrderTerminated(o));
   const shipments = (state.fulfillment?.shipments || []).filter(s => s.state === 'departed' && inWeek(s.departedAt) && s.lines.some(l => ownedIds.has(l.orderId)));
-  const invoices = new Map(state.invoices.filter(i => ownedIds.has(i.orderId)).map(i => [i.id, i]));
+  const ownedCustomerIds = new Set(state.customers.filter(c => c.ownerId === id).map(c => c.id));
+  const invoices = new Map(state.invoices.filter(i => ownedIds.has(i.orderId) || !!i.opening && !!i.customerId && ownedCustomerIds.has(i.customerId)).map(i => [i.id, i]));
   const collected = state.allocations.filter(a => invoices.has(a.invoiceId)).map(a => ({ a, date: state.receipts.find(r => r.id === a.receiptId)?.date || a.createdAt })).filter(x => inWeek(x.date)).map(x => ({ currency: x.a.currency, amount: x.a.amount }));
   const customers = new Set(state.customers.filter(c => c.ownerId === id).map(c => c.id));
   const opps = (state.crm?.opportunities || []).filter(o => o.ownerId === id);

@@ -43,7 +43,7 @@ async function readFile(kind: MistImportKind, file: File): Promise<Parsed> {
   return parseImportTable(kind, XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: '' }), file.name);
 }
 
-export function BaseDataImportButton({ kind, disabled }: { kind: MistImportKind; disabled?: boolean }) {
+export function BaseDataImportButton({ kind, disabled, label: buttonLabel = '批量导入' }: { kind: MistImportKind; disabled?: boolean; label?: string }) {
   const workspace = useMistWorkspace();
   const [open, setOpen] = React.useState(false), [parsed, setParsed] = React.useState<Parsed | null>(null);
   const [busy, setBusy] = React.useState(false), [error, setError] = React.useState(''), [done, setDone] = React.useState('');
@@ -57,14 +57,14 @@ export function BaseDataImportButton({ kind, disabled }: { kind: MistImportKind;
   const blocked = !parsed ? '请先选择文件' : parsed.missing.length ? `缺少必填列：${parsed.missing.join('、')}` : !parsed.rows.length ? '文件没有数据行' : parsed.rows.length > MIST_IMPORT_MAX_ROWS ? `一次最多 ${MIST_IMPORT_MAX_ROWS} 行，请分批` : busy || workspace.pending ? '正在处理' : '';
   const submit = async () => {
     if (blocked || !parsed) return; setBusy(true); setError('');
-    try { const receipt = await workspace.run({ type: 'market.import', payload: { kind, rows: parsed.rows } } as never); const count = (receipt as { result?: { imported?: number } })?.result?.imported ?? parsed.rows.length; setDone(`已导入 ${count} 条${label}`); setParsed(null); }
+    try { const receipt = await workspace.run(kind === 'openingReceivable' ? { type: 'opening.receivable.import', payload: { rows: parsed.rows } } : { type: 'market.import', payload: { kind, rows: parsed.rows } }); const count = (receipt as { result?: { imported?: number } })?.result?.imported ?? parsed.rows.length; setDone(`已导入 ${count} 条${label}`); setParsed(null); }
     catch (problem) { setError(problem instanceof Error ? problem.message : '导入未完成'); }
     finally { setBusy(false); }
   };
   const preview = parsed?.rows.slice(0, 5) || [], shown = fields.filter(f => preview.some(r => r[f.key])).slice(0, 6);
   return <>
-    <Button icon={Upload} disabled={disabled} onClick={() => setOpen(true)}>批量导入</Button>
-    <Drawer open={open} onClose={close} title={`批量导入${label}`} sub="上线时一次录入现有资料；整批校验，全部通过才导入"
+    <Button icon={Upload} disabled={disabled} onClick={() => setOpen(true)}>{buttonLabel}</Button>
+    <Drawer open={open} onClose={close} title={`批量导入${label}`} sub={kind === 'openingReceivable' ? '登记系统启用前已开票、仍未收回的客户欠款；整批校验，全部通过才导入' : '上线时一次录入现有资料；整批校验，全部通过才导入'}
       footer={<><Button onClick={close} disabled={busy}>关闭</Button><Button variant="primary" disabled={!!blocked} onClick={() => void submit()}>{parsed?.rows.length ? `导入 ${parsed.rows.length} 行` : '导入'}</Button></>}>
       <ol className="mist-import-steps" style={{ display: 'grid', gap: 12, margin: 0, paddingLeft: 18 }}>
         <li>下载模板，按“填写说明”逐行填写（带 * 的列必填）。也可直接用已有表格，只要表头与模板列名一致。<div style={{ marginTop: 6 }}><Button icon={FileSpreadsheet} onClick={() => void downloadTemplate(kind)}>下载{label}模板</Button></div></li>
@@ -73,6 +73,7 @@ export function BaseDataImportButton({ kind, disabled }: { kind: MistImportKind;
         <li>核对预览后导入。编码重复、必填缺失、负责人或供应商对不上时整批不导入，并逐行列出原因，改好后重新选择文件即可。</li>
       </ol>
       {kind === 'product' && <p style={{ marginTop: 12 }}>产品关联供应商时，请先导入供应商。</p>}
+      {kind === 'openingReceivable' && <p style={{ marginTop: 12 }}>请先导入客户。每张发票一行，只填截至启用日仍未收回的余额；已收清的不必登记。之后到账照常在“收款与核销”核销，催收、对账单、账龄与期末调汇一并计入。</p>}
       {parsed?.ignored.length ? <Banner tone="warn" title="以下列不在模板中，将被忽略">{parsed.ignored.join('、')}</Banner> : null}
       {parsed && blocked && !busy && <Banner tone="warn" title={blocked} />}
       {preview.length > 0 && shown.length > 0 && <div style={{ marginTop: 12, overflowX: 'auto' }}><table className="mist-mini-table" aria-label="导入预览" style={{ width: '100%', borderCollapse: 'collapse' }}>

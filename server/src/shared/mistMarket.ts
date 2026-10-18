@@ -87,7 +87,7 @@ export type MarketCommand =
 
 export function createMarketState(_context:MistContext,_rootState:Partial<MistState>):MarketState { return {products:[],suppliers:[],relations:[],seasons:[],trends:[],shows:[],campaigns:[],leads:[],quotations:[],lookbooks:[]}; }
 export function marketCommandPermission(command:MarketCommand):string|null {
- if(command.type==='market.import'){try{return mistImportPermission(command.payload?.kind);}catch{throw new MistCommandError('VALIDATION','导入类型无效');}}
+ if(command.type==='market.import'){try{if(command.payload?.kind==='openingReceivable')throw 0;return mistImportPermission(command.payload?.kind);}catch{throw new MistCommandError('VALIDATION','导入类型无效');}}
  if(command.type.startsWith('market.customer.')||command.type==='market.lead.convertToCrm')return 'relations:write';
  if(command.type==='market.contact.delete')return command.payload?.kind==='supplier'?'suppliers:write':'relations:write';
  if(command.type==='market.attachment.set'){const scopes:Record<string,string>={product:'products',supplier:'suppliers',relation:'relations',season:'seasons',trend:'seasons',show:'seasons',campaign:'marketing',lead:'marketing',showLead:'seasons',quotation:'quotations',lookbook:'marketing'};const scope=scopes[command.payload.kind];if(!scope)throw new MistCommandError('VALIDATION','附件对象类型无效');return scope+':write';}

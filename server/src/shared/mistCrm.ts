@@ -1,4 +1,5 @@
 /** 客户关系切片：跟进记录与商机。只记录业务员实际登记的事实；商机金额按原币种保存，不跨币种汇总。 */
+import { mistInvoiceCustomerId } from './mistOpeningBalance';
 import { MistCommandError, isRecognizedMistInvoice, type MistContext, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { ownerChangeText, resolveMember } from './mistAccounts';
@@ -40,7 +41,7 @@ export function crmLinkTarget(root: MistState, customerId: string, link: CrmLink
   if (link.kind === 'quotation') { const row = root.market.quotations.find(item => item.id === link.id && item.customerId === customerId); return row ? { label: row.code, view: 'quotations', id: row.id } : null; }
   if (link.kind === 'invoice') {
     const inv = root.invoices.find(item => item.id === link.id && isRecognizedMistInvoice(item));
-    const owner = inv && (inv.devId ? root.devs.find(d => d.id === inv.devId)?.customerId : root.orders.find(o => o.id === inv.orderId)?.customerId);
+    const owner = inv && mistInvoiceCustomerId(root, inv);
     return inv && owner === customerId ? { label: `${inv.code} · ${inv.currency} ${inv.amount.toFixed(2)}`, view: 'invoices', id: inv.id } : null;
   }
   if (link.kind === 'order') { const row = root.orders.find(item => item.id === link.id && item.customerId === customerId); return row ? { label: row.code, view: 'orders/detail', id: row.id } : null; }
