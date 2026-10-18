@@ -3,6 +3,7 @@
 应用源码、开发验证与维护记录，当前仍在持续开发和验收。
 
 - [协作与接续规则](AGENTS.md)
+- [上线推进：方向、待办与进度（权威）](docs/GO-LIVE.md)
 - [文档导航](docs/README.md)
 - [工作停点与进度记录](docs/mist-atelier/LIVE-PROGRESS.md)
 
@@ -19,11 +20,9 @@ Bambook 是公司内部业务系统，覆盖开发与寻样、报价、订单、
 
 ## 当前工作
 
-近期收口：费用与计费闭环（[PR #114](https://github.com/guqinwen3g-netizen/bambook-main/pull/114)）、风险分级处理权限（[PR #115](https://github.com/guqinwen3g-netizen/bambook-main/pull/115)）、CI 纯文档路径分类修复（[PR #119](https://github.com/guqinwen3g-netizen/bambook-main/pull/119)）已合入；报表汇率与含退税毛利的数据契约调查（[PR #117](https://github.com/guqinwen3g-netizen/bambook-main/pull/117)）已合入，只是调查文档，报表功能尚未完成。开发轮次时间线与多版本对比（[PR #118](https://github.com/guqinwen3g-netizen/bambook-main/pull/118)）已合入。此前一批：开发轮次 / 版本 / 通知单 / 面料多形态与寄样（[PR #112](https://github.com/guqinwen3g-netizen/bambook-main/pull/112)）、订单来源 / 规格数量 / 出运与取消（[PR #108](https://github.com/guqinwen3g-netizen/bambook-main/pull/108)）、并发保存（[PR #111](https://github.com/guqinwen3g-netizen/bambook-main/pull/111)）。准确合入、部署、验证范围和后续事项以各 PR 与 Notion 原总控为准；正式环境未发布，也不代表全公司业务验收完成。
+2026-10-17 起单线自主推进上线（PR #129–#155 及之后），方向、用户定案、待办和逐项进度统一见 [docs/GO-LIVE.md](docs/GO-LIVE.md)；本节下方编号列表为多 Agent 阶段的历史记录。正式环境未发布，也不代表全公司业务验收完成。
 
-> **新 Agent 接手入口**：先读当前版本的 [长期工作与验证规则](AGENTS.md)，再读所认领任务的范围和验收条件。流程规则统一在 AGENTS.md 维护；[交接文档](docs/HANDOFF.md) 保留历史上下文，旧状态、测试覆盖和候选事项须按当前 GitHub 与代码核对。
-
-**现行开工方式（用户 2026-10-16 确认）**：完整任务包全部做完、本地自测通过后，一次性提交一个 PR 并交接，实施 Agent 随即结束本批工作，不主动查询、不检查、不等待或轮询 CI 结果；系统自动跑 CI，后续独立复核、失败处理和合入由总协调接手。总协调按用户已确认的 Agent 可用性和最新真实回执派发完整任务包，实时执行位见 Notion 原总控。旧任务单、交接或模板中让实施 Agent 等待 CI、验收或合入的冲突要求不再执行。详细分工与合入门槛见 [AGENTS.md](AGENTS.md)。
+> **新 Agent 接手入口**：先读 [AGENTS.md](AGENTS.md)（单线接力规则），再读 [docs/GO-LIVE.md](docs/GO-LIVE.md)（方向与停点）。[交接文档](docs/HANDOFF.md) 与 Notion 旧页面只作历史参考。
 
 以下为已有工作的状态记录；开始或接续任务时须核对最新分支 / PR：
 
@@ -42,9 +41,7 @@ AI 分为“工作助手”（桌面端本机、个人凭据，方案见 `docs/m
 
 ## 接下来往哪里走
 
-继续完善公司端现有业务、补齐真实集成与验收缺口。具体下一批按用户确定的优先级推进，不把客户 / 供应商独立平台默认为本轮范围。
-
-下一轮按总协调明确的完整任务包开发、本地自测、一次 PR 并交接；CI、独立复核和合入由总协调收口。中途可推送任务分支保存进度，未完成成果注明停点与下一步。工作方式见 [AGENTS.md](AGENTS.md)，详细业务与技术资料按需从 [文档导航](docs/README.md) 查找。
+按 [docs/GO-LIVE.md](docs/GO-LIVE.md)“下一步与待办”的顺序自主推进；每完成一块即测试、合入 main 并更新该文件。工作方式见 [AGENTS.md](AGENTS.md)，详细业务与技术资料按需从 [文档导航](docs/README.md) 查找。
 
 </details>
 
