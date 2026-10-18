@@ -11,6 +11,7 @@
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { MistCommandError, isRecognizedMistInvoice, type MistContext, type MistInvoice, type MistState } from './mistWorkspace';
 import { platformBusinessDate, platformCreditAppliedMinor } from './mistPlatform';
+import { payablesFxPositions } from './mistPayables';
 
 export type FxPeriodRate = { id: string; code: string; month: string; currency: string; rate: string; source: string; createdAt: string; actor: string; voided?: { at: string; actor: string; reason: string } };
 export type FxRateCommand =
@@ -26,11 +27,12 @@ export const FX_RATE_COMMANDS = ['fxrate.period.save', 'fxrate.period.void', 'fx
  *   因上月已调到上月末汇率、当月发生额也按该汇率入账，调汇额 = 月末外币余额 × (本月末汇率 − 上月末汇率)；
  * - 结汇损益（已实现）：当月结汇实际入账人民币 − 卖出外币 × 记账汇率。
  * 余额一律按月末截止：银行按流水日期；应收按开票日期，核销按到账日期计入；作废、待财务确认、已驳回的应收不计。
- * 外币应付（境外供应商）暂不纳入：本系统供应商结算为人民币。
+ * 外币应付（进口面辅料等境外供应商）：票据按发票日期、付款分配按付款日、预付抵扣按结算确认日截止，未分配到票据的供应商付款抵减应付；
+ *   合同预付款与已付未收票的先付款属于为取得货物的预付（非货币性项目），不重估。
  * 调汇须按月连续登记（首次除外），作废只能从最近一期倒着作废；登记后冻结明细，作为外部账务的期末调汇凭证依据。
  */
-export type FxRevalLineKind = 'bank' | 'receivable' | 'unapplied' | 'settlement';
-export const FX_REVAL_KIND_LABEL: Record<FxRevalLineKind, string> = { bank: '外币银行存款', receivable: '外币应收', unapplied: '待核销到账', settlement: '当月结汇' };
+export type FxRevalLineKind = 'bank' | 'receivable' | 'unapplied' | 'payable' | 'supplierUnapplied' | 'settlement';
+export const FX_REVAL_KIND_LABEL: Record<FxRevalLineKind, string> = { bank: '外币银行存款', receivable: '外币应收', unapplied: '待核销到账', payable: '外币应付', supplierUnapplied: '未分配供应商付款', settlement: '当月结汇' };
 export type FxRevalLine = { kind: FxRevalLineKind; refId: string; ref: string; currency: string; amount: number; bookRate: string; closingRate: string; bookCny: number; closingCny: number; diff: number };
 export type FxRevalCurrency = { currency: string; bookRate: string; closingRate: string; unrealized: number; realized: number; total: number };
 export type FxRevaluation = { id: string; code: string; month: string; monthEnd: string; lines: FxRevalLine[]; currencies: FxRevalCurrency[]; unrealized: number; realized: number; total: number; note: string; createdAt: string; actor: string; voided?: { at: string; actor: string; reason: string } };
@@ -116,6 +118,8 @@ export function fxRevaluationPreview(root: Root, month: string, today: string): 
     const left = minor(r.amount) - applied;
     if (left > 0) raw.push({ kind: 'unapplied', refId: r.id, ref: `${r.code} · ${r.payer}`, currency: cur(r.currency), amount: -left / 100 });
   }
+  // 外币应付为负债（负数），未分配到票据的供应商付款抵减应付（正数）；汇率上升时应付折人民币增加，形成汇兑损失。
+  for (const l of payablesFxPositions(root as any, monthEnd)) if (l.currency !== 'CNY') raw.push(l);
   for (const r of settlements) if (cur(r.currency) !== 'CNY' && cur(r.localCurrency) === 'CNY' && r.date >= monthStart && r.date <= monthEnd)
     raw.push({ kind: 'settlement', refId: r.id, ref: `${r.code} · ${r.date}`, currency: cur(r.currency), amount: r.amount, localMinor: minor(r.localAmount), dealRate: r.rate });
   const currencies = [...new Set(raw.map(l => l.currency))].sort();

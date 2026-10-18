@@ -75,4 +75,23 @@ describe('期末调汇（汇兑损益）', () => {
     expect(r.realized).toBe(0);
     expect(() => f.run({ type: 'fxrate.reval.void', payload: { id: sep, reason: 'x' } })).toThrow('请先作废后续月份 2026-10');
   });
+  it('外币应付纳入重估：按发票日与付款日截止，负债汇率上升为损失；未分配供应商付款抵减；合同预付款不重估', () => {
+    const f = setup(); seed(f.state);
+    const bill = (id: string, invoiceDate: string, amount: number) => ({ id, code: 'AP-' + id, supplierId: 'sup', supplier: 'Tessitura', invoiceNo: 'F-' + id, invoiceDate, currency: 'EUR', amount, taxAmount: 0, taxRate: '0', lines: [], terms: [], due: '2026-12-01', dueBasis: '', fileIds: [], note: '', state: 'open', registeredAt: invoiceDate + 'T02:00:00Z', registeredBy: '' });
+    const pay = (id: string, date: string, amount: number, purpose: 'bill' | 'prepayment') => ({ id, paymentId: 'pm-' + id, code: 'SP-' + id, supplierId: 'sup', supplier: 'Tessitura', date, amount, currency: 'EUR', reference: '', fileIds: [], note: '', createdAt: date + 'T03:00:00Z', actor: '', purpose });
+    (f.state as any).payables = { bills: [bill('b1', '2026-09-08', 8000), bill('b2', '2026-10-03', 1000)], payments: [pay('s1', '2026-09-15', 3000, 'bill'), pay('s2', '2026-10-05', 2000, 'bill'), pay('s3', '2026-09-16', 600, 'bill'), pay('pre', '2026-09-01', 5000, 'prepayment')],
+      allocations: [{ id: 'al1', supplierPaymentId: 's1', billId: 'b1', amount: 3000, currency: 'EUR', at: '2026-09-15T03:00:00Z', actor: '' }, { id: 'al2', supplierPaymentId: 's2', billId: 'b1', amount: 2000, currency: 'EUR', at: '2026-10-05T03:00:00Z', actor: '' }], reversals: [], plans: [], requests: [], settlements: [], deductions: [], prepaymentMoves: [] };
+    const r = fxRevaluationPreview(f.state as any, '2026-09', '2026-10-17');
+    expect(r.missing.join()).toContain('EUR');
+    f.run({ type: 'fxrate.period.save', payload: { month: '2026-08', currency: 'EUR', rate: '7.800000', source: '中间价' } } as MistCommand);
+    f.run({ type: 'fxrate.period.save', payload: { month: '2026-09', currency: 'EUR', rate: '7.900000', source: '中间价' } } as MistCommand);
+    const withRates = fxRevaluationPreview(f.state as any, '2026-09', '2026-10-17');
+    const ap = withRates.lines.filter(l => l.kind === 'payable');
+    expect(ap.map(l => [l.refId, l.amount])).toEqual([['b1', -5000]]); // 10 月 3 日的票据与 10 月 5 日的付款不计入 9 月
+    expect(withRates.lines.find(l => l.kind === 'supplierUnapplied')).toMatchObject({ refId: 's3', amount: 600 });
+    expect(withRates.lines.some(l => l.refId === 'pre')).toBe(false);
+    expect(withRates.lines.find(l => l.refId === 'b1')).toMatchObject({ bookCny: -39000, closingCny: -39500, diff: -500 });
+    expect(withRates.lines.find(l => l.refId === 's3')?.diff).toBe(60);
+    expect(withRates.currencies.find(c => c.currency === 'EUR')?.unrealized).toBe(-440);
+  });
 });

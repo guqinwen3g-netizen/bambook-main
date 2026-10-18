@@ -218,9 +218,10 @@ export function settlementInvoicedMinor(root: Root, settlementId: string, except
  * 结算中的预付抵扣按票额比例计入关联票据：每张票 = 抵扣额 × 本票对应额 ÷ 结算金额（四舍五入到分），
  * 关联票据合计达到结算金额时最后一张承担尾差。作废票据不计。
  */
-export function settlementCreditsMinor(root: Root, settlementId: string) {
+export function settlementCreditsMinor(root: Root, settlementId: string, asOf = '') {
   const s = read(root), st = s.settlements.find(x => x.id === settlementId), out = new Map<string, number>();
   if (!st || st.state !== 'confirmed') return out;
+  if (asOf && platformBusinessDate(st.confirmation?.at || st.submittedAt) > asOf) return out;
   const applied = mistMoneyMinor(st.confirmation?.prepaymentApplied || 0), total = mistMoneyMinor(st.amount);
   if (!applied || !total) return out;
   const lines = s.bills.filter(b => b.state === 'open').sort((a, b) => a.registeredAt.localeCompare(b.registeredAt) || a.code.localeCompare(b.code)).flatMap(b => b.lines.filter(l => l.settlementId === settlementId).map(l => ({ billId: b.id, amount: mistMoneyMinor(l.amount) })));
@@ -233,13 +234,13 @@ export function billPrepaymentCreditMinor(root: Root, bill: SupplierBill) {
   return [...new Set(bill.lines.map(l => l.settlementId).filter(Boolean) as string[])].reduce((n, id) => n + (settlementCreditsMinor(root, id).get(bill.id) || 0), 0);
 }
 /** 按结算不等票先付的付款（未冲回）。 */
-const advancePayments = (root: Root, settlementId: string) => read(root).payments.filter(p => p.purpose === 'settlement' && p.settlementId === settlementId && !paymentReversed(root, p.id)).sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code));
-export function settlementAdvancePaidMinor(root: Root, settlementId: string) { return advancePayments(root, settlementId).reduce((n, p) => n + mistMoneyMinor(p.amount), 0); }
+const advancePayments = (root: Root, settlementId: string, asOf = '') => read(root).payments.filter(p => p.purpose === 'settlement' && p.settlementId === settlementId && !paymentReversed(root, p.id) && (!asOf || p.date <= asOf)).sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code));
+export function settlementAdvancePaidMinor(root: Root, settlementId: string, asOf = '') { return advancePayments(root, settlementId, asOf).reduce((n, p) => n + mistMoneyMinor(p.amount), 0); }
 /** 先付款按票据登记顺序抵到关联本结算的票据：每张票最多抵到“本票对应额 − 本票预付抵扣”。 */
-export function settlementAdvanceCreditsMinor(root: Root, settlementId: string) {
-  const s = read(root), out = new Map<string, number>(); let pool = settlementAdvancePaidMinor(root, settlementId);
+export function settlementAdvanceCreditsMinor(root: Root, settlementId: string, asOf = '') {
+  const s = read(root), out = new Map<string, number>(); let pool = settlementAdvancePaidMinor(root, settlementId, asOf);
   if (!pool) return out;
-  const prepay = settlementCreditsMinor(root, settlementId);
+  const prepay = settlementCreditsMinor(root, settlementId, asOf);
   for (const b of s.bills.filter(b => b.state === 'open').sort((a, b) => a.registeredAt.localeCompare(b.registeredAt) || a.code.localeCompare(b.code))) for (const l of b.lines.filter(l => l.settlementId === settlementId)) {
     const credit = Math.min(pool, Math.max(0, mistMoneyMinor(l.amount) - (prepay.get(b.id) || 0))); if (credit <= 0) continue;
     out.set(b.id, (out.get(b.id) || 0) + credit); pool -= credit;
@@ -311,6 +312,30 @@ export function supplierPaymentUnallocatedMinor(root: Root, payment: SupplierPay
 /** 已付且未冲回的预付款，等待结算确认后抵扣。 */
 export function prepaymentHeldMinor(root: Root, payment: SupplierPayment) { return payment.purpose === 'prepayment' && !paymentReversed(root, payment.id) ? mistMoneyMinor(payment.amount) : 0; }
 
+/**
+ * 期末调汇用的外币应付头寸（截至 asOf，原币）：应付为负数（负债），未分配到票据的供应商付款为正数（抵减应付）。
+ * 截至规则：票据按发票日期（缺省登记日）；付款分配按付款日；预付抵扣按结算确认日；按结算先付按付款日；索赔扣款按登记日。
+ * 合同预付款与已付未收票的先付款属于为取得货物的预付（非货币性项目），不重估。
+ */
+export function payablesFxPositions(root: Root, asOf: string): Array<{ kind: 'payable' | 'supplierUnapplied'; refId: string; ref: string; currency: string; amount: number }> {
+  const s = read(root), out: Array<{ kind: 'payable' | 'supplierUnapplied'; refId: string; ref: string; currency: string; amount: number }> = [];
+  const paidOn = new Map(s.payments.map(p => [p.id, p.date])), day = (v: string) => (v || '').slice(0, 10);
+  for (const b of s.bills) {
+    if (b.state !== 'open' || (day(b.invoiceDate) || platformBusinessDate(b.registeredAt)) > asOf) continue;
+    const sids = [...new Set(b.lines.map(l => l.settlementId).filter(Boolean) as string[])];
+    const paid = activeAllocations(root).filter(a => a.billId === b.id && (paidOn.get(a.supplierPaymentId) || '9999') <= asOf).reduce((n, a) => n + mistMoneyMinor(a.amount), 0);
+    const credit = sids.reduce((n, id) => n + (settlementCreditsMinor(root, id, asOf).get(b.id) || 0) + (settlementAdvanceCreditsMinor(root, id, asOf).get(b.id) || 0), 0);
+    const deducted = activeDeductions(root).filter(d => d.billId === b.id && platformBusinessDate(d.at) <= asOf).reduce((n, d) => n + mistMoneyMinor(d.amount), 0);
+    const open = Math.max(0, mistMoneyMinor(b.amount) - paid - credit - deducted);
+    if (open) out.push({ kind: 'payable', refId: b.id, ref: `${b.code} · ${b.supplier}`, currency: (b.currency || '').toUpperCase(), amount: -open / 100 });
+  }
+  for (const p of s.payments) {
+    if (p.date > asOf || paymentReversed(root, p.id) || p.purpose === 'prepayment' || p.purpose === 'settlement') continue;
+    const left = mistMoneyMinor(p.amount) - activeAllocations(root).filter(a => a.supplierPaymentId === p.id).reduce((n, a) => n + mistMoneyMinor(a.amount), 0);
+    if (left > 0) out.push({ kind: 'supplierUnapplied', refId: p.id, ref: `${p.code} · ${p.supplier}`, currency: (p.currency || '').toUpperCase(), amount: left / 100 });
+  }
+  return out;
+}
 export type PayableBillView = SupplierBill & { paid: number; prepaymentCredit: number; advanceCredit: number; deducted: number; open: number; overdue: boolean; held: boolean; status: 'held' | 'unpaid' | 'partial' | 'paid' | 'void' };
 export function payableBills(root: Root, today: string): PayableBillView[] {
   return read(root).bills.map(b => {
