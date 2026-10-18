@@ -58,6 +58,7 @@ export function OrderListPage() {
   const active = family.filter(order => approvalOf(order)==='approved' && !['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款'].includes(order.state));
   const amounts = [...new Set(active.map(order => order.currency))].map(currency => ({ currency, amount: active.filter(order => order.currency === currency).reduce((sum, order) => sum + order.amount, 0) }));
   const shipped = family.filter(order => ['已出运', '履约完成', '待收尾款'].includes(order.state));
+  const partialShipped = family.filter(order => order.state === '部分出运').length;
   const unitTotals = new Map<string, number>();
   for (const line of state?.orderLines ?? []) if (active.some(order => order.id === line.orderId)) unitTotals.set(line.unit, (unitTotals.get(line.unit) ?? 0) + line.qty);
   const dayStart=new Date();dayStart.setHours(0,0,0,0);
@@ -81,7 +82,7 @@ export function OrderListPage() {
     {error && <Banner tone="bad" title="订单读取失败" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner>}
     <StatGrid>
       <StatCard icon={ClipboardList} label="在途订单" value={active.length} unit="单" foot={[...unitTotals].map(([unit, quantity]) => `${fmt(quantity)} ${unit}`).join(' · ') || '暂无在途条目'} />
-      <StatCard icon={Ship} label="已出运" value={shipped.length} unit="单" foot={shipped.map(order => order.code).join(' · ') || '暂无已出运订单'} />
+      <StatCard icon={Ship} label="已出运" value={shipped.length} unit="单" foot={[shipped.map(order => order.code).join(' · '), partialShipped ? `另有 ${partialShipped} 单部分出运` : ''].filter(Boolean).join(' · ') || '暂无已出运订单'} />
       <StatCard icon={Wallet} label="在途金额" value={fmt(amounts[0]?.amount ?? 0, 2)} unit={amounts[0]?.currency ?? ''} foot={amounts.length > 1 ? amounts.slice(1).map(item => `${fmt(item.amount, 2)} ${item.currency}`).join(' · ') : '按原币种统计'} />
       <StatCard icon={AlertTriangle} label="逾期收款" value={overdue.length} unit="笔" foot={overdue.length ? '需跟进' : '暂无逾期'} onClick={() => go('payment-vouchers',undefined,{section:`overdue:${tab}`,customerId})} />
     </StatGrid>
