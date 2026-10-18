@@ -52,7 +52,7 @@
 | `{{shipmentNumber}}` | shipment.shipmentNumber | `SHP001` |
 | `{{bookingDate}}` | shipment.bookingDate | `2026-08-10` |
 | `{{etd}}` | shipment.etd | `2026-08-15` |
-| `{{shipperName}}` | exporterProfile.nameEn | `JIANGSU PANDA CLOTHING CO.,LTD.` |
+| `{{shipperName}}` | exporterProfile.nameEn | `DEMO EXPORT CO.,LTD.` |
 | `{{consigneeName}}` | parties.consignee.name | `ABC TRADING CO.` |
 | `{{notifyParty}}` | parties.consignee.name（同收货人） | `ABC TRADING CO.` |
 | `{{carrierName}}` | parties.carrier.name | `MSC MEDITERRANEAN SHIPPING` |

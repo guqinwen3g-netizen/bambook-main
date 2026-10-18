@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { buildApprovalSignDocumentSnapshot, assertCurrentApprovalSignDocumentSnapshot,
   getApprovalSignDocumentSnapshot } from '../approvalSignDocumentSnapshotService';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 function quotation() {
   return { id: 'q-1', quotationNumber: 'QT-2026-001', version: 7, status: 'Draft', currency: 'USD',
@@ -17,7 +18,7 @@ function quotation() {
       unit: 'M', unitPrice: new Prisma.Decimal('123.4682'), amount: new Prisma.Decimal('1250.1234'), notes: 'Navy', imageUrl: null }] };
 }
 
-function prismaFor(source: any, config: any = null) {
+function prismaFor(source: any, config: any = demoExporterProfileRow()) {
   return { quotation: { findUnique: vi.fn(async () => source) },
     systemConfig: { findUnique: vi.fn(async () => config) } } as any;
 }
@@ -54,7 +55,7 @@ describe('quotation approval sign-document snapshot', () => {
       payload: { quotationId: quote.id, documentSnapshot: snapshot } };
     expect(getApprovalSignDocumentSnapshot(approval as any)).toEqual(snapshot);
     expect(snapshot).toMatchObject({ kind: 'Quotation', sourceRef: 'q-1', sourceIds: ['q-1'],
-      exporterProfileSource: { version: 0, isDefault: true },
+      exporterProfileSource: { version: 1, isDefault: false },
       data: { qt: { quotationNumber: 'QT-2026-001', salesperson: 'Mia', inquiryRef: 'INQ-2026-09',
         totalAmount: 1250.1234 }, lines: [{ unitPrice: 123.4682, amount: 1250.1234 }] },
       exactSource: { quotation: { version: 7, totalAmount: '1250.1234', salesperson: 'Mia', inquiryRef: 'INQ-2026-09',
@@ -76,6 +77,12 @@ describe('quotation approval sign-document snapshot', () => {
     quote.totalAmount = new Prisma.Decimal('1250.1244');
     await expect(assertCurrentApprovalSignDocumentSnapshot(prisma, approval as any))
       .rejects.toMatchObject({ code: 'APPROVAL_CONTENT_CHANGED', statusCode: 409 });
+  });
+
+  it('refuses to freeze a signed document while the exporter profile is not configured (no fallback seller)', async () => {
+    const quote = quotation();
+    await expect(buildApprovalSignDocumentSnapshot(prismaFor(quote, null), { kind: 'Quotation', quotationId: quote.id }))
+      .rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('出口方档案未配置') });
   });
 
   it('invalidates after seller profile version changes and refuses authoritative config read failures', async () => {

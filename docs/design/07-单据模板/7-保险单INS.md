@@ -50,7 +50,7 @@
 | `{{shipmentNumber}}` | shipment.shipmentNumber | `SHP001` |
 | `{{invoiceNo}}` | order.invoiceNumber / `INV-{shipmentNumber}` | `INV-SHP001` |
 | `{{lcNumber}}` | extras.letterOfCredit.lcNumber | `LC-2026-001` |
-| `{{insuredName}}` | exporterProfile.beneficiary | `JIANGSU PANDA CLOTHING CO.,LTD.` |
+| `{{insuredName}}` | exporterProfile.beneficiary | `DEMO EXPORT CO.,LTD.` |
 | `{{insuredAmount}}` | extras.insurance.insuredAmount | `46750.00` |
 | `{{currency}}` | extras.insurance.currency | `USD` |
 | `{{premium}}` | extras.insurance.premium | `350.00` |

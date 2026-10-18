@@ -63,14 +63,14 @@ const FABRIC_DATA = {
   template: {
     logoDataUrl: '', stampDataUrl: '', logoScale: 1, logoOffsetX: 0, logoOffsetY: 0,
     stampScale: 2, stampOffsetX: 0, stampOffsetY: 0,
-    companyName: 'Jiangsu Panda Clothing Co.,Ltd.',
-    companyAddress: 'ROOM A1028 WUYUE PLAZA,\nZHANGJIAGANG CITY,215600 PR\nCHINA',
+    companyName: 'Demo Export Co.,Ltd.',
+    companyAddress: 'ROOM 101 DEMO TOWER,\nDEMO CITY,000000 PR\nCHINA',
     paymentTerms: 'AS PER AGREEMENT',
     bankName: 'BANK OF CHINA',
-    swiftCode: 'BKCHCNBJ95L',
-    bankAddress: '111 MIDDLE RENMIN ROAD, ZHANGJIAGANG CITY',
-    beneficiary: 'JIANGSU PANDA CLOTHING CO.,LTD.',
-    usdAccountNumber: '467668133096',
+    swiftCode: 'DEMOCNXX001',
+    bankAddress: '1 DEMO ROAD, DEMO CITY',
+    beneficiary: 'DEMO EXPORT CO.,LTD.',
+    usdAccountNumber: '000000000001',
   },
 };
 

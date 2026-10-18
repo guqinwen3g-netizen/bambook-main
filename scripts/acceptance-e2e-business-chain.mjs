@@ -463,7 +463,7 @@ async function main() {
       shipmentId: created.shipmentIds[0],
       declarationDate: today, tradeTerms: 'FOB', totalValue: B1, currency: 'USD',
       customsCode: '0000', declarationPort: 'DRILL 港', destinationCountry: 'US',
-      consignee: `DRILL 整链演练客户 ${TS}`, consignor: 'Jiangsu Panda',
+      consignee: `DRILL 整链演练客户 ${TS}`, consignor: 'Demo Export',
       notes: MARK,
       lines: [{ productName: `DRILL 面料 ${TS}`, hsCode: HS_CODE, quantity: B1, unit: 'YD', unitPrice: PRICE, totalPrice: B1, currency: 'USD' }],
     });

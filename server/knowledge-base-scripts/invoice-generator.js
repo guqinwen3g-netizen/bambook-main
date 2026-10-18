@@ -29,16 +29,16 @@ try {
 // ==================== 配置常量 ====================
 
 const COMPANY_INFO = {
-  name: 'Jiangsu Panda Clothing Co.,Ltd.',
-  address: 'ROOM A1028 WUYUE PLAZA',
-  city: 'ZHANGJIAGANG CITY,215600 PR',
+  name: 'Demo Export Co.,Ltd.',
+  address: 'ROOM 101 DEMO TOWER',
+  city: 'DEMO CITY,000000 PR',
   country: 'CHINA'
 };
 
 const BANK_INFO = {
-  name: 'BANK OF CHINA ZHANGJIAGANG SUB-BRANCH',
-  swift: 'BKCHCNBJ95L',
-  account: '467668133096',
+  name: 'DEMO BANK SAMPLE SUB-BRANCH',
+  swift: 'DEMOCNXX001',
+  account: '000000000001',
   currency: 'USD'
 };
 

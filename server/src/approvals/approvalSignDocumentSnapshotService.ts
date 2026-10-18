@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { buildCompositeSourceRef } from '../customs/compositeDocumentService';
 import { assembleContractData } from '../customs/compositeDocumentService';
-import { DEFAULT_EXPORTER_PROFILE, EXPORTER_PROFILE_CONFIG_ID } from '../config/systemConfigRoute';
+import { EXPORTER_PROFILE_CONFIG_ID, EXPORTER_PROFILE_MISSING_MESSAGE } from '../config/systemConfigRoute';
 import { buildContractClausePreview, CONTRACT_FIXED_CLAUSES_VERSION, CONTRACT_TEMPLATE_VERSION } from '../templates/docTemplates/contract';
 import { loadOrderConfirmationDocData, ORDER_CONFIRMATION_TEMPLATE_VERSION } from '../templates/docTemplates/orderConfirmation';
 import { assembleQuotationDocData, buildQuotationClausePreview, freezeQuotationDocumentImages,
@@ -123,11 +123,10 @@ async function readAuthoritativeExporterProfile(prisma: any): Promise<{
   let row: any;
   try { row = await prisma.systemConfig.findUnique({ where: { id: EXPORTER_PROFILE_CONFIG_ID } }); }
   catch { throw new ApprovalSignDocumentSnapshotError('出口方档案读取失败，不能冻结签署文档。'); }
-  if (!row) return { value: jsonSafe({ nameEn: DEFAULT_EXPORTER_PROFILE.nameEn, addressEn: DEFAULT_EXPORTER_PROFILE.addressEn }),
-    source: { configId: EXPORTER_PROFILE_CONFIG_ID, version: 0, updatedAt: null, isDefault: true } };
+  if (!row) throw new ApprovalSignDocumentSnapshotError(EXPORTER_PROFILE_MISSING_MESSAGE);
   if (row.encrypted === true || !row.value || typeof row.value !== 'object' || Array.isArray(row.value))
     throw new ApprovalSignDocumentSnapshotError('出口方档案格式无法核验，不能冻结签署文档。');
-  const current = { ...DEFAULT_EXPORTER_PROFILE, ...(row.value as Record<string, unknown>) } as Record<string, unknown>;
+  const current = { ...(row.value as Record<string, unknown>) } as Record<string, unknown>;
   if (typeof current.nameEn !== 'string' || !current.nameEn.trim() || typeof current.addressEn !== 'string')
     throw new ApprovalSignDocumentSnapshotError('出口方档案缺少卖方名称或地址，不能冻结签署文档。');
   const value = { nameEn: current.nameEn, addressEn: current.addressEn };

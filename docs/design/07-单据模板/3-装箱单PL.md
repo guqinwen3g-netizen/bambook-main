@@ -50,7 +50,7 @@
 | `{{invoiceDate}}` | order.invoiceDate / 今天 | `2026-08-15` |
 | `{{poNumber}}` | order.poNumber | `PO-2026-001` |
 | `{{customsDeclarationNo}}` | shipment.customsDeclarationNumber | `2026-0890-001` |
-| `{{shipperName}}` | exporterProfile.nameEn | `JIANGSU PANDA CLOTHING CO.,LTD.` |
+| `{{shipperName}}` | exporterProfile.nameEn | `DEMO EXPORT CO.,LTD.` |
 | `{{consigneeName}}` | parties.consignee.name | `ABC TRADING CO.` |
 | `{{vessel}}` | shipment.vesselOrFlight + voyageNumber | `MSC GULSUN V.42E` |
 | `{{containerNo}}` | shipment.containerNumber | `MSCU1234567` |

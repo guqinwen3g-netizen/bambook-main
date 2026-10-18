@@ -24,14 +24,14 @@ async function main() {
     template: {
       logoDataUrl: '', stampDataUrl: '', logoScale: 1, logoOffsetX: 0, logoOffsetY: 0,
       stampScale: 2, stampOffsetX: 0, stampOffsetY: 0,
-      companyName: 'Jiangsu Panda Clothing Co.,Ltd.',
-      companyAddress: 'ROOM A1028 WUYUE PLAZA,\nZHANGJIAGANG CITY,215600 PR\nCHINA',
+      companyName: 'Demo Export Co.,Ltd.',
+      companyAddress: 'ROOM 101 DEMO TOWER,\nDEMO CITY,000000 PR\nCHINA',
       paymentTerms: 'AS PER AGREEMENT',
       bankName: 'BANK OF CHINA',
-      swiftCode: 'BKCHCNBJ95L',
-      bankAddress: '111 MIDDLE RENMIN ROAD',
-      beneficiary: 'JIANGSU PANDA CLOTHING CO.,LTD.',
-      usdAccountNumber: '467668133096',
+      swiftCode: 'DEMOCNXX001',
+      bankAddress: '1 DEMO ROAD',
+      beneficiary: 'DEMO EXPORT CO.,LTD.',
+      usdAccountNumber: '000000000001',
     },
   });
   const pdfA5 = await renderHtmlToPdf(fabric.html, { format: 'A5', landscape: true, margin: { top: '5mm', bottom: '5mm', left: '5mm', right: '5mm' } });

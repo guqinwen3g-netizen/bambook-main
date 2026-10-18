@@ -3,6 +3,7 @@
  * connection identity, SQL locks and physical producer fixtures belong to root. */
 import { Prisma } from '@prisma/client';
 import type { TokenPayload } from '../../auth/service';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 export const scopes = ['shipments:read', 'orders:read', 'invoices:read', 'customs:read', 'customs:write'];
 export const actor: TokenPayload = { userId: 'u', displayName: 'Finance', roles: ['finance'], permissions: scopes, authorizationLoaded: true } as TokenPayload;
 export const decimal = (value: string) => new Prisma.Decimal(value);
@@ -51,7 +52,7 @@ export function storage() {
     orderShipmentBatch: [{ id: 'FB', orderId: 'O', shipmentId: 'S', batchNumber: 'B-1', currency: 'USD', customerRelationId: 'R', status: 'planned', deletedAt: null }],
     relation: [{ id: 'R', name: 'Buyer', englishName: 'Buyer Ltd', ownerId: 'u', salesRepIds: [], deletedAt: null }],
     tradeDocument: [], documentVersion: [], auditLog: [], sample: [], releaseScope: [], ppSampleRelease: [], productAsset: [],
-    claimDisposition: [], repairWorkOrder: [], customsDeclaration: [], letterOfCredit: [], systemConfig: [], teamMember: [], teamDataGrant: [],
+    claimDisposition: [], repairWorkOrder: [], customsDeclaration: [], letterOfCredit: [], systemConfig: [demoExporterProfileRow()], teamMember: [], teamDataGrant: [],
   };
   const lockCalls: string[] = [], calls: string[] = [];
   let hook: ((model: string, operation: string, result: any) => void | Promise<void>) | undefined;

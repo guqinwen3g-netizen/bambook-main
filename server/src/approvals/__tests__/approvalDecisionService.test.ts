@@ -8,6 +8,7 @@ import { buildQuotationApprovalSnapshot, buildQuotationSnapshot, canonicalQuotat
 import { publishNotificationEvent } from '../../realtime';
 import { buildApprovalSignDocumentSnapshot } from '../approvalSignDocumentSnapshotService';
 import { ACTION_TOTAL_APPROVE } from '../../quotations/quotationApprovalSnapshot';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 vi.mock('../../realtime', () => ({ publishNotificationEvent: vi.fn(), publishDataChange: vi.fn() }));
 
@@ -72,7 +73,7 @@ function fixture(options: { row?: Record<string, any>; auditFail?: boolean; lose
     },
     $queryRaw: vi.fn(async () => { trace.push('lock'); return [{ id: 'a1' }]; }),
     $queryRawUnsafe: vi.fn(async () => { trace.push('source-lock'); return [{ id: 'q1' }]; }),
-    systemConfig: { findUnique: vi.fn(async () => null) },
+    systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) },
     $executeRaw: vi.fn(async () => 1),
     $transaction: vi.fn(async (callback: any) => {
       const before = row; const auditCount = audits.length; const notificationCount = notifications.length;
@@ -238,7 +239,7 @@ describe('shared approval decision atomic boundary', () => {
     const quotation = { ...decisionQuotation, quotationType:'Fabric', ownerId:'requester', quotationNumber: 'QT-1', salesperson: 'Mia', inquiryRef: 'INQ-1',
       deliveryTerms: 'FOB Shanghai', paymentTerms: '30 days', customerName: 'Buyer', customerCode: 'B-1' };
     const documentSnapshot = await buildApprovalSignDocumentSnapshot({ quotation: { findUnique: vi.fn(async () => quotation) },
-      systemConfig: { findUnique: vi.fn(async () => null) } } as any, { kind: 'Quotation', quotationId: 'q1' });
+      systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) } } as any, { kind: 'Quotation', quotationId: 'q1' });
     const commercial = buildQuotationApprovalSnapshot(quotation, ACTION_TOTAL_APPROVE, 'q1');
     const row = { id: 'a1', requesterId: 'requester', reviewerId: 'reviewer', status: 'pending',
       actionType: ACTION_TOTAL_APPROVE, targetType: 'Quotation', targetId: 'q1', risk: 'high',
@@ -265,7 +266,7 @@ describe('shared approval decision atomic boundary', () => {
     const quotation = { ...decisionQuotation, quotationNumber: 'QT-1', salesperson: 'Mia', inquiryRef: 'INQ-1',
       deliveryTerms: 'FOB Shanghai', paymentTerms: '30 days', customerName: 'Buyer', customerCode: 'B-1' };
     const documentSnapshot = await buildApprovalSignDocumentSnapshot({ quotation: { findUnique: vi.fn(async () => quotation) },
-      systemConfig: { findUnique: vi.fn(async () => null) } } as any, { kind: 'Quotation', quotationId: 'q1' });
+      systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) } } as any, { kind: 'Quotation', quotationId: 'q1' });
     const commercial = buildQuotationApprovalSnapshot(quotation, ACTION_TOTAL_APPROVE, 'q1');
     const row = { id: 'a1', requesterId: 'requester', reviewerId: 'reviewer', status: 'pending',
       actionType: ACTION_TOTAL_APPROVE, targetType: 'Quotation', targetId: 'q1', risk: 'high',

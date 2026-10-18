@@ -59,8 +59,8 @@
 |--------|------|------|
 | `{{shipmentNumber}}` | shipment.shipmentNumber | `SHP001` |
 | `{{invoiceNo}}` | order.invoiceNumber / `INV-{shipmentNumber}` | `INV-SHP001` |
-| `{{exporterName}}` | exporterProfile.nameEn | `JIANGSU PANDA CLOTHING CO.,LTD.` |
-| `{{exporterAddress}}` | exporterProfile.addressEn | `ROOM A1028...` |
+| `{{exporterName}}` | exporterProfile.nameEn | `DEMO EXPORT CO.,LTD.` |
+| `{{exporterAddress}}` | exporterProfile.addressEn | `ROOM 101...` |
 | `{{consigneeName}}` | parties.consignee.name | `ABC TRADING CO.` |
 | `{{consigneeAddress}}` | parties.consignee.address | `123 MAIN ST...` |
 | `{{originCountry}}` | customs.originCountry / lines[].originCountry | `CHINA` |

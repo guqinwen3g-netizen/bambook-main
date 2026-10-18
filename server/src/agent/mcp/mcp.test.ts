@@ -51,8 +51,8 @@ describe('Bambook MCP-like agent tools', () => {
           .mockResolvedValueOnce([
             {
               id: 'panda001',
-              name: 'Jiangsu Panda Clothing Co., Ltd.',
-              chineseName: '江苏庞大纺织服饰有限公司',
+              name: 'Demo Export Co., Ltd.',
+              chineseName: '示例纺织服饰有限公司',
               category: 'Supplier',
               type: 'Supplier',
               tags: [],
@@ -116,8 +116,8 @@ describe('Bambook MCP-like agent tools', () => {
         count: vi.fn().mockResolvedValue(1),
         findFirst: vi.fn().mockResolvedValue({
           id: 'panda001',
-          name: 'Jiangsu Panda Clothing Co., Ltd.',
-          chineseName: '江苏庞大纺织服饰有限公司',
+          name: 'Demo Export Co., Ltd.',
+          chineseName: '示例纺织服饰有限公司',
           category: 'Supplier',
           type: 'Supplier',
           primaryContactName: '王经理',
@@ -144,7 +144,7 @@ describe('Bambook MCP-like agent tools', () => {
         steps: [{
           id: 'step_1',
           toolId: 'relations.query',
-          input: { query: '江苏庞大纺织服饰有限公司', limit: 20, followUp: { getFullProfile: true } },
+          input: { query: '示例纺织服饰有限公司', limit: 20, followUp: { getFullProfile: true } },
           reason: '查公司并继续找联系人',
           dependsOn: [],
           expectedUse: '先确认关系档案，再读取完整联系人明细',
@@ -189,7 +189,7 @@ describe('Bambook MCP-like agent tools', () => {
             ok: true,
             total: 1,
             count: 1,
-            relations: [{ id: 'panda001', name: 'Jiangsu Panda Clothing Co., Ltd.', chineseName: '江苏庞大纺织服饰有限公司' }],
+            relations: [{ id: 'panda001', name: 'Demo Export Co., Ltd.', chineseName: '示例纺织服饰有限公司' }],
           }),
         } as any;
       }
@@ -198,7 +198,7 @@ describe('Bambook MCP-like agent tools', () => {
           ok: true,
           json: async () => ({
             ok: true,
-            relation: { id: 'panda001', name: 'Jiangsu Panda Clothing Co., Ltd.', primaryContactName: '王经理' },
+            relation: { id: 'panda001', name: 'Demo Export Co., Ltd.', primaryContactName: '王经理' },
           }),
         } as any;
       }
@@ -238,7 +238,7 @@ describe('Bambook MCP-like agent tools', () => {
           steps: [{
             id: 'step_1',
             toolId: 'relations.query',
-            input: { query: '江苏庞大纺织服饰有限公司', limit: 5, followUp: { getFullProfile: true } },
+            input: { query: '示例纺织服饰有限公司', limit: 5, followUp: { getFullProfile: true } },
             reason: '查公司并继续找联系人',
             dependsOn: [],
             expectedUse: '先确认关系档案，再读取完整联系人明细',
@@ -358,7 +358,7 @@ describe('Bambook MCP-like agent tools', () => {
       shipmentDate: '',
       invoiceNumber: '',
       supplierInvoiceNumber: 'SUP-INV-1',
-      millName: 'Jiangsu Panda',
+      millName: 'Demo Export',
       millRelationId: 'panda001',
       billToName: 'Peerless Billing',
       consigneeName: 'Peerless Warehouse',
