@@ -11,7 +11,7 @@ import { demoFileRecord, type DemoFileTemplate } from './mistDemoFiles';
 import { riskSignals } from './mistRisk';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 
-export const DEMO_SEED_VERSION = 18;
+export const DEMO_SEED_VERSION = 19;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -354,6 +354,17 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       const esc = state.platform?.risks.find(r => r.id === late)?.escalations?.[0];
       if (esc) run('risk 018 decide', { type: 'platform.risk.decide', payload: { id: late, escalationId: esc.id, decision: 'approved', note: '同意加班，费用记入本单成本，交期不再顺延。' } } as MistCommand, reviewer);
       run('risk 018 close', { type: 'platform.risk.transition', payload: { id: late, state: 'Resolved', resolution: '客户书面同意首批 60% 按期、余量顺延 2 天；工厂排期已确认。' } } as MistCommand, sales);
+    }
+  }
+
+  /* ───────── 询价比价：SO-G-2026-015 第二款委外加工向两家成衣厂询价，一家已报价、一家按美元报价 ───────── */
+  const rfqOrder = state.orders.find(o => o.code === 'SO-G-2026-015'), rfqLine = rfqOrder && state.orderLines.find(l => l.orderId === rfqOrder.id);
+  const jiangnanId = state.market.suppliers.find(s => s.name === '江南成衣')?.id, yuanshanId = state.market.suppliers.find(s => s.name === '远山服装')?.id;
+  if (rfqOrder && rfqLine && jiangnanId && yuanshanId) {
+    const rfq = id(run('rfq 015', { type: 'rfq.save', payload: { input: { orderId: rfqOrder.id, lineId: rfqLine.id, kind: 'processing', description: `${rfqLine.name} CMT 加工（含锁钉、整烫、包装）`, quantity: rfqLine.qty, unit: rfqLine.unit, currency: 'CNY', due: day(40), destination: '嘉兴成品仓', deadline: day(3), supplierIds: [jiangnanId, yuanshanId], note: '按确认样 PP 样工艺单；AQL 2.5 验货' } } }, sales));
+    if (rfq) {
+      run('rfq 015 quote jiangnan', { type: 'rfq.quote', payload: { id: rfq, supplierId: jiangnanId, price: '86.50', currency: 'CNY', moq: '300', promisedDue: day(35), terms: '出货后 30 天', validUntil: day(20), note: '含辅料钉装，不含主辅料' } }, sales);
+      run('rfq 015 quote yuanshan', { type: 'rfq.quote', payload: { id: rfq, supplierId: yuanshanId, price: '11.80', currency: 'USD', moq: '500', promisedDue: day(42), terms: '30% 预付，余款出货前', validUntil: day(15), note: '美元报价，越南工厂生产' } }, sales);
     }
   }
 

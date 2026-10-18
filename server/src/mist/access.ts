@@ -37,7 +37,7 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'risks', label: '风险台账', permissions: ['risk:read'], paths: [['platform', 'risks']], entityTypes: ['risk'], views: ['risks'] },
   { key: 'employees', label: '员工档案', permissions: ['hr:read'], paths: [['platform', 'employees']], entityTypes: ['employee'], views: ['hr'] },
   { key: 'assistant', label: '助手草稿', permissions: ['ai:chat'], paths: [['platform', 'assistantDrafts']], entityTypes: ['assistant'], views: ['ai-assistant'] },
-  { key: 'procurement', label: '采购合同与收货', permissions: ['procurement:read'], paths: [['fulfillment', 'purchases'], ['fulfillment', 'receipts']], entityTypes: ['procurement'], views: ['procurement'] },
+  { key: 'procurement', label: '采购合同与收货', permissions: ['procurement:read'], paths: [['fulfillment', 'purchases'], ['fulfillment', 'receipts'], ['rfqs']], entityTypes: ['procurement'], views: ['procurement'] },
   { key: 'qc', label: '质检工作台', permissions: ['qc:read'], paths: [['fulfillment', 'qcTasks'], ['fulfillment', 'qcReports']], entityTypes: ['qc'], views: ['qc-workbench'] },
   { key: 'inventory', label: '库存', permissions: ['inventory:read'], paths: [['fulfillment', 'warehouses'], ['fulfillment', 'returnReceipts'], ['fulfillment', 'receivedRecords'], ['fulfillment', 'stock'], ['fulfillment', 'stockMovements']], entityTypes: ['inventory', 'stock'], views: ['inventory'] },
   { key: 'shipments', label: '出运与装箱', permissions: ['shipments:read'], paths: [['fulfillment', 'shipments'], ['fulfillment', 'packing'], ['fulfillment', 'shippingTerms']], entityTypes: ['shipment', 'packing'], views: ['shipments', 'shipping', 'packing'] },

@@ -25,7 +25,7 @@ describe('演示工作区数据', () => {
       products: m.products, suppliers: m.suppliers, relations: m.relations, seasons: m.seasons, quotations: m.quotations, leads: m.leads, campaigns: m.campaigns, lookbooks: m.lookbooks,
       opportunities: state.crm.opportunities, followUps: state.crm.followUps, samples: f.samples, qcTasks: f.qcTasks, qcReports: f.qcReports,
       purchases: f.purchases, receipts: f.receipts, stock: f.stock, shipments: f.shipments, packing: f.packing, customs: f.customs, documents: f.documents,
-      pricing: state.platform.pricing, payments: state.payments, funding: state.orderFunding.assignments, mail: state.email.messages, orders: state.orders, letterOfCredits: state.letterOfCredits || [],
+      pricing: state.platform.pricing, payments: state.payments, funding: state.orderFunding.assignments, mail: state.email.messages, orders: state.orders, letterOfCredits: state.letterOfCredits || [], rfqs: state.rfqs || [],
     };
     for (const [name, rows] of Object.entries(slices)) expect(rows.length, name).toBeGreaterThan(0);
     expect(state.orders.every(o => o.governance?.status === 'approved')).toBe(true);

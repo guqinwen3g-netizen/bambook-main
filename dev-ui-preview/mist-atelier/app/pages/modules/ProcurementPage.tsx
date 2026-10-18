@@ -14,6 +14,8 @@ import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
+import { RfqLedger } from './SourcingRequests';
+import { readRfqs } from '../../../../../server/src/shared/mistSourcing';
 
 type Domain = FulfillmentPurchase['domain'];
 type Entry = 'purchase' | 'processing';
@@ -49,6 +51,8 @@ export function ProcurementPage() {
   const [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
+  const [rfqTab, setRfqTab] = React.useState(!!route.section?.startsWith('rfq'));
+  const presetSupplierId = route.section?.startsWith('rfq:') ? route.section.slice(4) : undefined;
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDomainChoice(null); setEntryChoice(null); } }, [route.id]);
   const day = supplierBusinessDay(new Date());
   const expectedOrderId = route.section?.startsWith('order:') ? route.section.slice(6) : undefined;
@@ -153,12 +157,17 @@ export function ProcurementPage() {
         {sourceOrder && sourceLine && <Button onClick={() => go('orders/detail', sourceOrder.id, { orderLineId: sourceLine.id, customerId: sourceOrder.customerId, section: sourceOrder.type })}>返回来源订单</Button>}
         {route.orderLineId && <Button onClick={() => go('procurement')}>查看全部采购</Button>}
         <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>导出</Button>
-        {createButton}
+        {!rfqTab && createButton}
       </>} />
     {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有采购写权限，可以查看单据与轨迹；新建、发出与交付登记由对应业务组经办人操作。</Banner></div>}
     {(error || failure) && <div className="mist-section"><Banner tone="bad" title="采购操作未完成" actions={error ? <Button onClick={() => void refresh()}>重试</Button> : undefined}>{failure || error}</Banner></div>}
     <div className="mist-section"><Segmented<Domain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${inScope.filter(p => p.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${inScope.filter(p => p.domain === 'fabric').length}` }]} /></div>
-    <Tabs<Entry> value={entry} onChange={changeEntry} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }]} />
+    <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open').length : 0 }]} />
+    {rfqTab ? <>
+      <Toolbar><SearchField value={query} onChange={setQuery} placeholder="搜索询价单号、内容、来源订单或供应商" /></Toolbar>
+      <RfqLedger state={state || undefined} day={day} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} presetSupplierId={presetSupplierId}
+        onPurchase={id => { setRfqTab(false); setPicked(id); setDrawer(true); setEntryChoice(null); go('procurement', id); }} onSupplier={id => go('suppliers', id)} />
+    </> : <>
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder="搜索单据号、供应商、内容或来源订单" />
       <Dropdown<FlagFilter> label="异常" value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'overdue', label: '已过要求交期' }, { value: 'variance', label: '数量差异' }, { value: 'returned', label: '审批退回' }]} />
@@ -174,6 +183,7 @@ export function ProcurementPage() {
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '单据详情'} drawerSub={selected?.supplier}
       list={<Card><DataTable ariaLabel={`${ENTRY_LABEL[entry]}列表`} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} />
+    </>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }
