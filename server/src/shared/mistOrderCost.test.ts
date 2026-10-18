@@ -17,6 +17,23 @@ function fixture() {
 }
 
 describe('订单实际成本与费用分摊', () => {
+  it('费用转应付票据：按票付款，不重复计成本；已转的费用须先作废票据', () => {
+    const f = fixture();
+    const supplier = f.state.market.suppliers[0];
+    const { id } = f.run('cost.expense.register', { category: 'freight', vendor: '某货代', ref: 'FW-881', date: '2026-10-15', currency: 'USD', amount: 1000, scope: 'shipment', shipmentId: f.shipment.id, basis: 'volume' });
+    const before = orderActualCost(f.state, f.o17.id, 'period', '2026-10', '2026-10-18').purchaseCny;
+    expect(() => f.run('cost.expense.payable', { id, supplierId: 'nope', due: '2026-11-15' })).toThrow('已建档的供应商');
+    expect(() => f.run('cost.expense.payable', { id, supplierId: supplier.id, due: '2026-10-01' })).toThrow('早于费用日期');
+    const bill = f.run('cost.expense.payable', { id, supplierId: supplier.id, due: '2026-11-15', taxAmount: '60' });
+    const row = f.state.payables.bills.find((b: any) => b.id === bill.id);
+    expect(row).toMatchObject({ supplierId: supplier.id, invoiceNo: 'FW-881', invoiceDate: '2026-10-15', currency: 'USD', amount: 1000, taxAmount: 60, lines: [], expenseId: id, state: 'open' });
+    expect(orderActualCost(f.state, f.o17.id, 'period', '2026-10', '2026-10-18').purchaseCny).toBe(before);
+    expect(() => f.run('cost.expense.payable', { id, supplierId: supplier.id, due: '2026-11-15' })).toThrow('已转应付票据');
+    expect(() => f.run('cost.expense.void', { id, reason: '重开' })).toThrow('请先在应付待办作废');
+    f.run('payable.bill.void', { id: bill.id, reason: '货代重开发票' });
+    f.run('cost.expense.void', { id, reason: '货代重开发票' });
+    expect(activeExpenses(f.state).some(x => x.id === id)).toBe(false);
+  });
   it('最大余数法分摊到分，合计不差一分', () => {
     expect(splitMinor(100, [1, 1, 1])).toEqual([34, 33, 33]);
     expect(splitMinor(1001, [2, 1]).reduce((a, b) => a + b, 0)).toBe(1001);

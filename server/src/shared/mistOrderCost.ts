@@ -17,6 +17,7 @@ import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { platformBusinessDate } from './mistPlatform';
 import { fxRateFor, type FxBasis, type FxResolved } from './mistFxRates';
 import { orderRebate } from './mistExportRebate';
+import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
 
 export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', other: '其他' } as const;
 export type ExpenseCategory = keyof typeof EXPENSE_CATEGORIES;
@@ -27,18 +28,27 @@ export type OrderExpense = {
   id: string; code: string; category: ExpenseCategory; vendor: string; ref: string; date: string; currency: string; amount: number; note: string;
   scope: 'shipment' | 'orders'; shipmentId?: string; shipmentCode?: string; basis: AllocationBasis; shares: ExpenseShare[];
   createdAt: string; createdBy: string; createdById: string; voided?: { at: string; actor: string; reason: string };
+  /** 已转为应付票据（按票申请付款）；票据作废后可重新登记。 */
+  payableBillId?: string;
 };
 export type OrderCostState = { expenses: OrderExpense[] };
 export type OrderCostCommand =
   | { type: 'cost.expense.register'; payload: { category: string; vendor?: string; ref?: string; date: string; currency: string; amount: number | string; note?: string; scope: 'shipment' | 'orders'; shipmentId?: string; orderIds?: string[]; basis: string; manual?: Array<{ orderId: string; amount: number | string }> } }
-  | { type: 'cost.expense.void'; payload: { id: string; reason: string } };
-export const ORDER_COST_COMMANDS = ['cost.expense.register', 'cost.expense.void'] as const;
+  | { type: 'cost.expense.void'; payload: { id: string; reason: string } }
+  | { type: 'cost.expense.payable'; payload: { id: string; supplierId: string; invoiceNo?: string; due: string; taxAmount?: number | string; note?: string } };
+export const ORDER_COST_COMMANDS = ['cost.expense.register', 'cost.expense.void', 'cost.expense.payable'] as const;
 export const orderCostCommandPermission = (_c: OrderCostCommand) => MIST_FINANCE_SCOPES.invoice;
 
 type Root = MistState & { orderCosts?: OrderCostState };
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : code === 'CONFLICT' ? 409 : 422); };
 const major = (m: number) => Math.round(m) / 100;
 export const orderExpenses = (root: MistState) => ((root as Root).orderCosts?.expenses) || [];
+/** 费用对应的有效应付票据（票据作废后视为未转）。 */
+export function expensePayableBill(root: MistState, e: Pick<OrderExpense, 'payableBillId'>): SupplierBill | undefined {
+  if (!e.payableBillId) return undefined;
+  const bill = ((root as MistState & { payables?: { bills: SupplierBill[] } }).payables?.bills || []).find(b => b.id === e.payableBillId);
+  return bill && bill.state !== 'void' ? bill : undefined;
+}
 export const activeExpenses = (root: MistState) => orderExpenses(root).filter(e => !e.voided);
 
 /** 最大余数法把 total（分）按权重分到各项，合计严格等于 total。 */
@@ -103,8 +113,29 @@ export function applyOrderCostCommand(root: MistState, command: OrderCostCommand
   if (command.type === 'cost.expense.void') {
     const e = r.orderCosts.expenses.find(x => x.id === command.payload?.id); if (!e) return fail('费用记录不存在', 'NOT_FOUND');
     if (e!.voided) fail('这笔费用已作废', 'CONFLICT');
+    const bill = expensePayableBill(root, e!);
+    if (bill) fail(`这笔费用已转应付票据 ${bill.code}，请先在应付待办作废该票据`, 'PRECONDITION');
     e!.voided = { at: c.now, actor: c.actorName, reason: text(command.payload.reason, '作废原因', 500, true) };
     return { id: e!.id };
+  }
+  if (command.type === 'cost.expense.payable') {
+    const p = command.payload || ({} as never);
+    const e = r.orderCosts.expenses.find(x => x.id === p.id); if (!e) return fail('费用记录不存在', 'NOT_FOUND');
+    if (e!.voided) fail('已作废的费用不能转应付', 'PRECONDITION');
+    const linked = expensePayableBill(root, e!); if (linked) fail(`这笔费用已转应付票据 ${linked.code}`, 'CONFLICT');
+    const supplier = (root.market?.suppliers || []).find(x => x.id === p.supplierId); if (!supplier) fail('请选择已建档的供应商（货代、报关行等先在供应商管理建档）');
+    const invoiceNo = text(p.invoiceNo ?? e!.ref, '发票号', 80, true);
+    const payables = ((root as MistState & { payables?: ReturnType<typeof createPayablesState> }).payables ||= createPayablesState());
+    if (payables.bills.some(b => b.state === 'open' && b.supplierId === supplier!.id && b.invoiceNo.trim().toLowerCase() === invoiceNo.toLowerCase())) fail(`该供应商的发票号 ${invoiceNo} 已登记过`, 'CONFLICT');
+    const due = String(p.due || ''); if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) fail('请填写付款到期日');
+    if (due < e!.date) fail('到期日不能早于费用日期');
+    const taxMinor = p.taxAmount === undefined || p.taxAmount === '' ? 0 : mistMoneyMinor(p.taxAmount as number);
+    if (taxMinor < 0 || taxMinor > mistMoneyMinor(e!.amount)) fail('税额须在 0 与费用金额之间');
+    const id = c.id();
+    const bill: SupplierBill = { id, code: nextPayableCode('AP', payables.bills, c.now), supplierId: supplier!.id, supplier: supplier!.name, invoiceNo, invoiceDate: e!.date, currency: e!.currency, amount: e!.amount, taxAmount: major(taxMinor), taxRate: '', lines: [], terms: [], due, dueBasis: `费用台账 ${e!.code}（${EXPENSE_CATEGORIES[e!.category]}）`, fileIds: [], note: text(p.note, '备注', 500), state: 'open', registeredAt: c.now, registeredBy: c.actorName, expenseId: e!.id };
+    payables.bills.push(bill); e!.payableBillId = id;
+    root.events.unshift({ id: c.id(), entityType: 'payable', entityId: id, actor: c.actorName, at: c.now, text: `费用 ${e!.code} 转应付票据 ${bill.code}（${supplier!.name} · ${e!.amount} ${e!.currency}）`, fileIds: [] });
+    return { id };
   }
   if (command.type !== 'cost.expense.register') return fail('未知操作');
   const p = command.payload || ({} as never);
