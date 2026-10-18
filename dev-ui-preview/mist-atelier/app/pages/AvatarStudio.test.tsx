@@ -11,7 +11,10 @@ vi.mock('../../../../services/authService', () => ({ updateMyProfile: update }))
 vi.mock('../runtime/auth', () => { const useMistSession = () => session; return { useMistSession, useOptionalMistSession: useMistSession }; });
 let root: Root, host: HTMLDivElement;
 const button = (t: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === t);
-const settle = async (ms = 40) => { for (let i = 0; i < 8; i++) await act(async () => { await new Promise(r => setTimeout(r, ms)); }); };
+const settle = async (check: () => void) => vi.waitFor(async () => {
+  await act(async () => { await new Promise(r => setTimeout(r, 20)); });
+  check();
+}, { timeout: 3000, interval: 20 });
 beforeEach(async () => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; update.mockReset(); session.user.avatarUrl = null;
   host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
@@ -26,7 +29,7 @@ it('generates a style avatar and saves its preset identity', async () => {
   expect(document.body.textContent).toContain('找到，属于你的样子');
   expect(button('恢复姓名首字')).toBeUndefined();
   await act(async () => button('开始探索 ↗')!.click());
-  await settle();
+  await settle(() => expect(button('就用这个')?.disabled).toBe(false));
   const apply = button('就用这个')!;
   expect(apply.disabled).toBe(false);
   await act(async () => apply.click());
@@ -45,7 +48,7 @@ it('restores initials by clearing the avatar', async () => {
 
 it('renders preset identities as generated SVG and plain URLs as-is', async () => {
   await act(async () => root.render(<><Avatar name="顾青" src="dicebear:v1:glass:c205_v6_12_12_abc-0:still" /><Avatar name="林" src="data:image/webp;base64,AAAA" /><Avatar name="王" /></>));
-  await settle();
+  await settle(() => expect(host.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/svg\+xml/));
   const imgs = [...host.querySelectorAll('img')].map(i => i.getAttribute('src') || '');
   expect(imgs[0]).toMatch(/^data:image\/svg\+xml/);
   expect(imgs[1]).toBe('data:image/webp;base64,AAAA');
