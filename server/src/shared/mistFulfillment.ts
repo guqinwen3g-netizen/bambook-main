@@ -760,6 +760,15 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
 function sourceDomain(root: MistState, s: FulfillmentSource): 'garment' | 'fabric' { if (s.kind === 'orderLine')
     return get(root.orders, s.orderId, '订单').type; return s.kind === 'version' && developmentDomain(get(root.devs, s.devId, '开发案').values)==='fabric' ? 'fabric' : 'garment'; }
 export const fulfillmentSampleRoleLabel = (role?: FulfillmentSampleRole) => ({ pp: '产前样', pioneer: '先锋样', shipping: '船样' }[role || 'pp']);
+/** 取消出运前须先撤销的事实；服务端拦截与出运页按钮提示共用同一组文字。 */
+export function shipmentCancelBlockers(root: MistState, shipment: Pick<FulfillmentShipment, 'id' | 'booking'>) {
+    const f = root.fulfillment;
+    return [
+        ...(shipment.booking ? [`已有订舱号 ${shipment.booking}，请后勤在运输安排中清空订舱号并写明原因`] : []),
+        ...(f.documents.some(d => d.shipmentId === shipment.id && d.status === 'issued') ? ['已有已出具的 CI / PL 等单据，请先作废'] : []),
+        ...(f.customs.some(c => c.shipmentId === shipment.id && c.status === 'cleared') ? ['报关已放行，不能取消'] : f.customs.some(c => c.shipmentId === shipment.id && c.status !== 'draft') ? ['已登记报关申报，请后勤先将报关改回草稿'] : []),
+    ];
+}
 export function fulfillmentProductionFact(root: MistState, productionId: string) { return root.fulfillment.productionFacts?.find(fact => fact.productionId === productionId); }
 function productionFact(root: MistState, productionId: string): FulfillmentProductionFact {
     const existing = fulfillmentProductionFact(root, productionId);
@@ -1532,8 +1541,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             requireEditableShipment(s);
             if (s.requesterId !== ctx.actorId)
                 fail('仅原业务发起人可取消');
-            if (s.booking || f.documents.some(d => d.shipmentId === s.id && d.status === 'issued') || f.customs.some(c => c.shipmentId === s.id && c.status !== 'draft'))
-                fail('已有订舱、有效单据或申报事实，请先完成对应撤销');
+            const cancelBlockers = shipmentCancelBlockers(root, s);
+            if (cancelBlockers.length)
+                fail(`不能取消：${cancelBlockers.join('；')}`);
             s.cancelReason = text(p.reason, '取消原因');
             s.state = 'cancelled';
             audit(root, ctx, 'shipment', s.id, '取消本次出运请求');

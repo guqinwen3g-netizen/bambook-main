@@ -41,7 +41,7 @@ export function assertOrderFundingIntegrity(root:Root){
    const orders=[...customer.orders.values()],assigned=orders.reduce((n,o)=>n+o.assigned,0),used=orders.reduce((n,o)=>n+Math.max(o.assigned,o.allocated),0);
    reserved+=Math.max(assigned+customer.unassigned,used);
   }
-  if(reserved>mistMoneyMinor(receipt.amount))fail('此到账已归属其他订单或客户，不能重复计入或核销；请先核实资金归属','PRECONDITION');
+  if(reserved>mistMoneyMinor(receipt.amount)){const money=(n:number)=>(n/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+receipt.currency;fail(`此到账金额 ${money(mistMoneyMinor(receipt.amount))}，归属与核销合计将达 ${money(reserved)}，超出到账金额，不能重复计入；请核对本次金额或该到账已有的归属`,'PRECONDITION');}
  }
  for(const row of active(root))if(!root.receipts.some(r=>r.id===row.receiptId))fail('归属的到账来源不存在');
  for(const order of root.orders)if(mistMoneyMinor(orderFundingCoveredAmount(root,order.id))>mistMoneyMinor(order.amount))fail('订单已归属与核销金额超过合同金额，超额部分请登记为客户余额','PRECONDITION');

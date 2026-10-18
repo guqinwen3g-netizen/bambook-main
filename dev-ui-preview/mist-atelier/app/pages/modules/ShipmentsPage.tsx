@@ -4,7 +4,7 @@ import { Anchor, Boxes, CheckCircle2, Download, FileText, Pencil, Plane, Plus, S
 import { BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, TextArea, TextInput, TextLink, Timeline, Toolbar, VerticalSteps, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
-import { fulfillmentSourceLabel } from '../../../../../server/src/shared/mistFulfillment';
+import { fulfillmentSourceLabel, shipmentCancelBlockers } from '../../../../../server/src/shared/mistFulfillment';
 import { heldShipmentRelease } from '../../../../../server/src/shared/mistRelationHold';
 import { OVER_SHIP_REQUIRED, SHORT_SHIP_HINT, pendingOverShip, shipmentToleranceCheck } from '../../../../../server/src/shared/mistOrderClosure';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -258,7 +258,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   const logisticsReason = logistics ? false : '需要后勤出运权限';
   const businessReason = business ? false : '需要订单业务权限';
   const editReason = businessReason || (packingRows.length || issued.length || customsFiled ? '已有装箱、有效单据或申报记录，不能再改请求' : false);
-  const cancelReason = businessReason || (s.requesterId !== me ? '仅原业务发起人可取消' : s.booking || issued.length || customsFiled ? '已有订舱、有效单据或申报事实，请先完成对应撤销' : false);
+  const cancelReason = businessReason || (s.requesterId !== me ? '仅原业务发起人可取消' : shipmentCancelBlockers(state, s).join('；') || false);
   const packReason = logisticsReason || (issuedCiPl ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
   const hold = heldShipmentRelease(state as any, s.customerId);
   const departReason = logisticsReason || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : hold.held && !hold.risk ? '客户往来已冻结：须先经部门主管批准带风险放行' : false);
