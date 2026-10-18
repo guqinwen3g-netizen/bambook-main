@@ -138,10 +138,10 @@ export function FinancePage() {
   const otherPending=currencies.filter(currency=>currency!==displayCurrency).map(currency=>`${fmt(cashTotal(pendingReceipts.filter(item=>item.currency===currency).map(item=>item.remaining)),2)} ${currency}`).join(' · ');
   const resolvePending=async()=>{if(working||saving||loading||operation.current)return;const bound=scope,original=pending;operation.current=true;setWorking(true);setFailure('');try{const receipt=await recover();if(receipt&&alive.current&&activeScope.current===bound&&routeScope.isCurrent()){if(original?.command?.type==='finance.importReceipts')setImportRows([]);if(original?.command?.type==='finance.payment.save')setPaymentOpen(false);toast('原操作结果已核对');}}catch(error){if(alive.current&&activeScope.current===bound)setFailure(error instanceof Error?error.message:'原请求核对失败');}finally{if(alive.current&&activeScope.current===bound){operation.current=false;setWorking(false);}}};
   const columns: Column<MistReceipt>[] = [
-    { key: 'd', header: '到账', width: '58px', render: item => <b className="mist-cell-strong">{item.date}</b> },
+    { key: 'd', header: '到账', width: '96px', render: item => <b className="mist-cell-strong">{item.date}</b> },
     { key: 'p', header: '付款方 / 附言', width: 'minmax(180px,2fr)', render: item => <><div className="mist-obj-name" style={{ fontSize: 13.5 }}>{item.payer}</div><span className="mist-cell-sub"><Mono>{item.ref}</Mono></span></> },
     { key: 'a', header: '金额', width: '120px', align: 'right', sortValue: item => item.amount, render: item => <><b className="mist-cell-strong mist-num">{fmt(item.amount, 2)}</b><span className="mist-cell-sub">{item.currency} · 余 {fmt(item.remaining, 2)}</span></> },
-    { key: 's', header: '状态', width: '96px', render: item => {const display=financeReceiptDisplay(item,fundingRows,allocations);return <Pill tone={display.tone}>{display.label}</Pill>;} },
+    { key: 's', header: '状态', width: '124px', render: item => {const display=financeReceiptDisplay(item,fundingRows,allocations);return <Pill tone={display.tone}>{display.label}</Pill>;} },
   ];
   const exportRows = () => {
     if (tab === 'pay') downloadMistCsv('付款凭证.csv', ['凭证', '日期', '收款方', '金额', '币种', '附言'], payments.map(item => [item.code, item.date, item.payee, item.amount, item.currency, item.ref]));
