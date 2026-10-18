@@ -45,6 +45,9 @@ describe('报关申报资料',()=>{
     expect(c.items).toEqual([expect.objectContaining({no:1,hsCode:'6203310000',declaredName:'男式羊毛西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号CC-AW27-COAT-014',quantity:500,unit:'件',legalQty:500,legalUnit:'件',secondQty:480,secondUnit:'千克',unitPrice:46.5,amount:23250,currency:'USD',origin:'中国',destination:'瑞典'})]);
     expect(c).toMatchObject({packages:5,netWeight:480,grossWeight:540,hsCode:'6203310000'});
     expect(customsItemsStale(f.state,c)).toBe(false);
+    // PostgreSQL jsonb 存取后键顺序改变，不应误判为已变化
+    c.items=c.items!.map(i=>Object.fromEntries(Object.entries(i).reverse()) as typeof i);
+    expect(customsItemsStale(f.state,c)).toBe(false);
     f.state.fulfillment.packing[0].netWeight=90;
     expect(customsItemsStale(f.state,c)).toBe(true);
     expect(f.state.events[0].text).toContain('生成申报商品项 1 项：USD 23250.00');
@@ -57,5 +60,37 @@ describe('报关申报资料',()=>{
     expect(()=>f.run('fulfillment.customs.items',{id:f.customsId})).toThrow('无法换算');
     f.state.fulfillment.customs[0].status='cleared';
     expect(()=>f.run('fulfillment.customs.items',{id:f.customsId})).toThrow('已放行');
+  });
+  it('生成后可逐项手工调整品名、要素与法定数量：留痕、不算出运变化；重新生成时自动值未变的调整保留',()=>{
+    const f=fixture();
+    f.run('fulfillment.customs.classify.save',suit);
+    f.run('fulfillment.customs.items',{id:f.customsId});
+    const adj={id:f.customsId,no:1,declaredName:'男式羊毛制西服上衣',elements:'3|0|机织|西服上衣|男式|100%羊毛|Northwind|货号CC-AW27-COAT-014',legalQty:500,secondQty:478.5,reason:'报关行审单：净重按磅单'};
+    expect(mistCommandPermission({type:'fulfillment.customs.item.adjust',payload:adj} as MistCommand)).toBe('customs:write');
+    expect(()=>f.run('fulfillment.customs.item.adjust',{...adj,no:9})).toThrow('不存在');
+    expect(()=>f.run('fulfillment.customs.item.adjust',{...adj,reason:''})).toThrow('调整原因');
+    expect(()=>f.run('fulfillment.customs.item.adjust',{...adj,secondQty:0})).toThrow('第二数量须大于 0');
+    f.run('fulfillment.customs.item.adjust',adj);
+    let c=f.state.fulfillment.customs[0],i=c.items![0];
+    expect(i).toMatchObject({declaredName:'男式羊毛制西服上衣',secondQty:478.5,amount:23250,quantity:500,hsCode:'6203310000',generated:{declaredName:'男式羊毛西服上衣',secondQty:480},adjusted:{actor:'陈晓',reason:'报关行审单：净重按磅单',fields:['declaredName','secondQty']}});
+    expect(f.state.events[0].text).toBe('手工调整申报商品项 1（申报品名、第二数量）：报关行审单：净重按磅单');
+    expect(customsItemsStale(f.state,c)).toBe(false);
+    expect(()=>f.run('fulfillment.customs.item.adjust',adj)).toThrow('没有改动');
+    // 装箱净重变了：第二数量自动值变了，以新值为准；品名自动值没变，保留调整
+    f.state.fulfillment.packing[0].netWeight=90;
+    expect(customsItemsStale(f.state,c)).toBe(true);
+    f.run('fulfillment.customs.items',{id:f.customsId});
+    c=f.state.fulfillment.customs[0];i=c.items![0];
+    expect(i.declaredName).toBe('男式羊毛制西服上衣');expect(i.secondQty).not.toBe(478.5);
+    expect(i.adjusted?.fields).toEqual(['declaredName']);expect(i.generated).toEqual({declaredName:'男式羊毛西服上衣'});
+    expect(f.state.events[0].text).toContain('保留 1 项手工调整');
+    expect(customsItemsStale(f.state,c)).toBe(false);
+    // 改回自动值即清除调整标记
+    f.run('fulfillment.customs.item.adjust',{...adj,declaredName:'男式羊毛西服上衣',secondQty:i.secondQty,reason:'恢复'});
+    i=f.state.fulfillment.customs[0].items![0];
+    expect(i.adjusted).toBeUndefined();expect(i.generated).toBeUndefined();
+    expect(f.state.events[0].text).toBe('申报商品项 1 恢复为自动生成值：恢复');
+    f.state.fulfillment.customs[0].status='cleared';
+    expect(()=>f.run('fulfillment.customs.item.adjust',{...adj,reason:'改单'})).toThrow('已放行');
   });
 });

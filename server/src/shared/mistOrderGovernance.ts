@@ -1,4 +1,5 @@
 /** Formal order approval and proposed commercial changes, independent of the Mist view layer. */
+import{stableJson}from'./stableJson';
 import {MistCommandError,mistOrderOwnerIds,lineAmount,mistMoneyMinor,type MistContext,type MistState,type MistOrder,type MistOrderLine,type MistCommandResult} from './mistWorkspace';
 import type {MistReviewTask} from './mistReview';
 import {ownerChangeText,resolveMember} from './mistAccounts';
@@ -61,7 +62,7 @@ function checkLineSources(root:MistState,order:GovernedOrder,lines:OrderGovernan
 }
 function snapshot(root:MistState,order:GovernedOrder,proposal?:OrderGovernanceProposal):OrderGovernanceSnapshot{return{orderId:order.id,code:order.code,type:order.type,customerId:order.customerId,customer:order.customer,season:proposal?.orderPatch.season??order.season,currency:proposal?.orderPatch.currency??order.currency,due:proposal?.orderPatch.due??order.due,contract:structuredClone(proposal?.contract||governance(order).contract),lines:structuredClone(proposal?.lines||root.orderLines.filter(l=>l.orderId===order.id).map(snapshotLine))};}
 /** The customer id is contractual identity; its display name remains frozen only for historical presentation. */
-function sameCommercialSnapshot(a:OrderGovernanceSnapshot,b:OrderGovernanceSnapshot){return JSON.stringify({...a,customer:undefined})===JSON.stringify({...b,customer:undefined});}
+function sameCommercialSnapshot(a:OrderGovernanceSnapshot,b:OrderGovernanceSnapshot){return stableJson({...a,customer:undefined})===stableJson({...b,customer:undefined});}
 function validateSubmission(root:MistState,s:OrderGovernanceSnapshot){
  idsExist(root,s.contract);if(!s.lines.length)fail('至少需要一个条目');date(s.due);currency(s.currency);
  if(s.contract.kind==='external'){if(!s.customerId||!root.customers.some(c=>c.id===s.customerId))fail('请选择实际客户');if(!s.contract.poNumber)fail('请填写PO或合同号');if(!s.contract.confirmationFileIds.length)fail('外部订单须上传客户书面确认依据');if(!s.contract.incoterm||!s.contract.deliveryPlace)fail('请记录合同贸易术语和指定地点');}
@@ -94,7 +95,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
    const reason=text(p.reason||'','变更原因',true);
    // BB-ORD-4：已有履约事实时允许改数量/单价/交期/新增条目，但守住下限、不删有事实的条目、有票/收款不改币种
    assertOrderChangeAllowed(root,order,lines,orderPatch.currency);
-   for(const line of root.orderLines.filter(l=>l.orderId===id) as ClosableLine[]){if(!line.closure||line.closure.status==='rejected')continue;const next=lines.find(l=>l.id===line.id);if(!next||next.qty!==line.qty||JSON.stringify(next.breakdown||null)!==JSON.stringify((line as ClosableLine&{breakdown?:unknown}).breakdown||null))fail(`条目「${line.style} · ${line.name}」${line.closure.status==='closed'?'已结案':'结案审批中'}，不能再改数量`,'PRECONDITION');}
+   for(const line of root.orderLines.filter(l=>l.orderId===id) as ClosableLine[]){if(!line.closure||line.closure.status==='rejected')continue;const next=lines.find(l=>l.id===line.id);if(!next||next.qty!==line.qty||stableJson(next.breakdown||null)!==stableJson((line as ClosableLine&{breakdown?:unknown}).breakdown||null))fail(`条目「${line.style} · ${line.name}」${line.closure.status==='closed'?'已结案':'结案审批中'}，不能再改数量`,'PRECONDITION');}
    g.changeDraft={contract,orderPatch,lines,reason,status:'draft'};event(root,context,order,'保存订单变更草稿，原批准内容继续生效');
   }else{g.contract=contract;g.status='draft';applySnapshot(root,order,{...snapshot(root,order),...orderPatch,contract,lines});order.state='订单草稿';order.tone='neutral';event(root,context,order,'保存订单合同草稿');}
   if((p.orderPatch as Record<string,unknown>|undefined)?.owner!==undefined)fail('负责人须按账号选择');

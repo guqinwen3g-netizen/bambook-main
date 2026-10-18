@@ -1,4 +1,5 @@
 /** AI reviews evidence; adoption edits only the manual strategy draft, never a business command. */
+import { stableJson } from "../../../../../server/src/shared/stableJson";
 import React from "react";
 import {
   Banner,
@@ -196,7 +197,7 @@ export function QuotationCostAdvisor(p: {
         : null;
       if (
         r.cost !== base.cost ||
-        JSON.stringify(r.scenario) !== JSON.stringify(scenario)
+        stableJson(r.scenario) !== stableJson(scenario)
       )
         throw Error("AI 计算回执不一致，请重新审阅");
       setResult({ ...r, advice });

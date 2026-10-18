@@ -4,9 +4,9 @@ import { Ban, ListChecks, Pencil, Plus } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, Facts, Mono, Pill, type Column } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms } from '../../../../../server/src/shared/mistFulfillment';
-import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, customsItemsStale, defaultLegalUnits, draftCustomsDeclaration, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
+import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, customsItemsStale, defaultLegalUnits, draftCustomsDeclaration, generatedItem, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
 import type { ModuleEditorSpec, ModuleValues } from './ModuleWorkbench';
-import { field, text } from './fulfillmentKit';
+import { field, number, text } from './fulfillmentKit';
 import { ActionBar, DetailBlock, type ReasonedAction } from './pageKit';
 
 const hsText = (hs: string) => hs.length === 10 ? `${hs.slice(0, 4)}.${hs.slice(4, 6)}.${hs.slice(6)}` : hs;
@@ -54,23 +54,44 @@ export function CustomsClassificationLedger({ state, domain, needle, can, locked
   </Card></div>;
 }
 
-export function CustomsItemsBlock({ record: c, state, can, locked, run, onClassify }: { record: FulfillmentCustoms; state: MistState; can: boolean; locked: boolean; run: (c: MistCommand) => Promise<unknown>; onClassify: () => void }) {
+/** 手工微调一个商品项：只改申报品名、要素与法定数量；商品编号、成交数量与总价随归类与出运，不在这里改。 */
+export function adjustItemSpec(c: FulfillmentCustoms, item: CustomsDeclarationItem, run: (c: MistCommand) => Promise<unknown>): ModuleEditorSpec {
+  const auto = generatedItem(item);
+  return {
+    title: `调整申报商品项 ${item.no}`, submitLabel: '保存调整',
+    description: `按报关行审单意见调整；商品编号 ${hsText(item.hsCode)}、成交数量 ${item.quantity} ${item.unit}、总价 ${item.currency} ${money(item.amount)} 不在这里改（改归类或出运后重新生成）。改回自动值即取消调整。`,
+    fields: [
+      { ...field('declaredName', '申报品名'), hint: `自动值：${auto.declaredName}` },
+      { ...field('elements', '申报要素', 'textarea'), hint: `按“|”分隔；自动值：${auto.elements}` },
+      { ...field('legalQty', `法定数量（${item.legalUnit}）`, 'number'), hint: `自动值：${auto.legalQty}` },
+      ...(item.secondUnit ? [{ ...field('secondQty', `第二数量（${item.secondUnit}）`, 'number'), hint: `自动值：${auto.secondQty ?? '—'}` }] : []),
+      { ...field('reason', '调整原因', 'textarea'), hint: '如“报关行审单：品名按规范申报目录”' },
+    ],
+    initialValues: { declaredName: item.declaredName, elements: item.elements, legalQty: item.legalQty, ...(item.secondUnit ? { secondQty: item.secondQty ?? '' } : {}), reason: '' },
+    submit: v => run({ type: 'fulfillment.customs.item.adjust', payload: { id: c.id, no: item.no, declaredName: text(v, 'declaredName'), elements: text(v, 'elements'), legalQty: number(v, 'legalQty'), ...(item.secondUnit ? { secondQty: number(v, 'secondQty') } : {}), reason: text(v, 'reason') } } as MistCommand),
+  };
+}
+
+export function CustomsItemsBlock({ record: c, state, can, locked, run, open, onClassify }: { record: FulfillmentCustoms; state: MistState; can: boolean; locked: boolean; run: (c: MistCommand) => Promise<unknown>; open: (spec: ModuleEditorSpec) => void; onClassify: () => void }) {
   const s = state.fulfillment.shipments.find(x => x.id === c.shipmentId);
   const draft = s ? draftCustomsDeclaration(state, s) : undefined;
   const items = c.items || [], stale = customsItemsStale(state, c);
   const closed = !s || s.state === 'departed' || s.state === 'cancelled';
   const reason = !can ? '需要报关单证权限' : c.status === 'cleared' ? '已放行的报关记录不可改动' : closed ? '出运已离港或已取消' : draft?.blockers.length ? '先处理下列问题' : false;
+  const editable = can && c.status !== 'cleared' && !closed;
   const totals = new Map<string, number>(); for (const i of items) totals.set(i.currency, Math.round(((totals.get(i.currency) || 0) + i.amount) * 100) / 100);
   const columns: Column<CustomsDeclarationItem>[] = [
     { key: 'no', header: '项号', width: '52px', render: i => i.no },
     { key: 'hs', header: '商品编号', width: '120px', render: i => <Mono>{hsText(i.hsCode)}</Mono> },
-    { key: 'name', header: '商品名称及规格型号', width: 'minmax(200px,2fr)', render: i => <div className="mist-col" style={{ gap: 2 }}><b>{i.declaredName}</b><small className="mist-muted">{i.elements}</small></div> },
+    { key: 'name', header: '商品名称及规格型号', width: 'minmax(200px,2fr)', render: i => <div className="mist-col" style={{ gap: 2 }}><b>{i.declaredName}</b><small className="mist-muted">{i.elements}</small>{i.adjusted && <small data-customs-item-adjusted={i.no}><Pill tone="warn">手工调整</Pill> {i.adjusted.fields.map(k => CUSTOMS_FIELD_LABEL[k]).join('、')} · {i.adjusted.actor} · {i.adjusted.reason}</small>}</div> },
     { key: 'qty', header: '数量及单位', width: 'minmax(120px,1fr)', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.quantity} {i.unit}</span><small className="mist-muted">法定 {i.legalQty} {i.legalUnit}{i.secondUnit ? ` · ${i.secondQty ?? '—'} ${i.secondUnit}` : ''}</small></div> },
     { key: 'price', header: '单价 / 总价', width: '140px', align: 'right', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.unitPrice}</span><b>{i.currency} {money(i.amount)}</b></div> },
+    ...(editable ? [{ key: 'act', header: '', width: '84px', align: 'right' as const, render: (i: CustomsDeclarationItem) => <Button size="sm" icon={Pencil} disabled={locked} aria-label={`调整商品项 ${i.no}`} onClick={() => open(adjustItemSpec(c, i, run))}>调整</Button> }] : []),
   ];
   return <DetailBlock title="申报商品项" aside={items.length ? <span className="mist-muted">{c.itemsBy} · {c.itemsAt?.slice(0, 16).replace('T', ' ')}</span> : undefined}>
     {items.length > 0 ? <>
       {stale && c.status !== 'cleared' && <Banner tone="warn" title="出运或装箱已变化">已生成的商品项与当前出运明细、装箱或归类不一致，请重新生成后再交报关行。</Banner>}
+      {items.some(i => i.adjusted) && <span className="mist-note">重新生成时，自动值没变的字段保留手工调整；归类、出运或装箱改动导致自动值变化的字段以新值为准。</span>}
       <DataTable ariaLabel={`${c.code} 申报商品项`} rows={items} rowKey={i => String(i.no)} columns={columns} />
       <Facts cols={4} items={[{ label: '件数', value: `${c.packages ?? 0} 件` }, { label: '毛重', value: `${c.grossWeight ?? 0} kg` }, { label: '净重', value: `${c.netWeight ?? 0} kg` }, { label: '总价', value: [...totals].map(([cur, n]) => `${cur} ${money(n)}`).join(' / ') }]} />
     </> : <span className="mist-note">尚未生成。按款号匹配商品归类，自动带出商品编号、申报品名、申报要素和法定数量；总价与 CI 同一算法，件数和重量取装箱合计。</span>}

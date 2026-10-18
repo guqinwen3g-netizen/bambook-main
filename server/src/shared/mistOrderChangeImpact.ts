@@ -2,6 +2,7 @@
  * 下限：每条目新数量 ≥ max(已完工登记数, 已排非取消出运数)；成衣有分色分码且完工按尺码登记时，每个尺码各色合计 ≥ 该尺码已完工数。
  * 现有完工/出运事实只记录到"条目 / 尺码"，没有按颜色记录，所以颜色维度无法单独设下限（如实说明，不臆造）。
  * 低于生产分配总量只提示"需同步调整生产分配"，不阻止；不自动改采购或生产数据。 */
+import{stableJson}from'./stableJson';
 import {MistCommandError,mistOrderOwnerIds,type MistContext,type MistOrder,type MistState} from './mistWorkspace';
 import {breakdownSizeTotals,type OrderLineBreakdown} from './mistOrderBreakdown';
 
@@ -51,7 +52,7 @@ export function assertOrderChangeAllowed(root:MistState,order:Pick<MistOrder,'id
   if(line.removed){const facts=[line.purchases.length&&'采购 '+line.purchases.map(p=>p.code).join('、'),line.productions.length&&'生产 '+line.productions.map(p=>p.code).join('、'),line.shipments.length&&'出运 '+line.shipments.map(s=>s.code).join('、')].filter(Boolean);if(facts.length)fail(`条目「${line.label}」已有${facts.join('；')}，不能删除，只能减量`,'PRECONDITION');continue;}
   const next=proposed.find(l=>l.id===line.lineId),prior=root.orderLines.find(l=>l.id===line.lineId&&l.orderId===order.id) as (ChangeLine&{orderId:string})|undefined;
   // 数量与分色分码都没动的条目不重核下限（避免历史溢装让交期等无关修改也被卡住）
-  if(prior&&next&&prior.qty===next.qty&&JSON.stringify(prior.breakdown||null)===JSON.stringify(next.breakdown||null))continue;
+  if(prior&&next&&prior.qty===next.qty&&stableJson(prior.breakdown||null)===stableJson(next.breakdown||null))continue;
   if(line.after!==null&&line.after<line.floor)fail(`条目「${line.label}」新数量 ${line.after} ${line.unit} 低于下限 ${line.floor} ${line.unit}（已完工 ${line.completed}、已排出运 ${line.shipped}）`);
   if(next?.breakdown?.kind==='garment'&&line.sizeCompleted.length){const totals=breakdownSizeTotals(next.breakdown);for(const done of line.sizeCompleted){const planned=totals.find(t=>t.size.toLowerCase()===done.size.toLowerCase())?.quantity??0;if(planned<done.quantity)fail(`条目「${line.label}」${done.size} 码各色合计 ${planned} 低于已完工 ${done.quantity}`);}}
  }
@@ -60,7 +61,7 @@ export function assertOrderChangeAllowed(root:MistState,order:Pick<MistOrder,'id
 
 /** 变更审批通过后：对受影响的采购单、生产分支各生成一条核对待办（不改采购或生产数据）。 */
 export function createOrderChangeTasks(root:MistState,context:MistContext,order:Pick<MistOrder,'id'|'code'|'due'>,before:ChangeLine[],after:ChangeLine[]){
- const changed=after.filter(line=>{const prior=before.find(l=>l.id===line.id);return prior&&(prior.qty!==line.qty||JSON.stringify(prior.breakdown||null)!==JSON.stringify(line.breakdown||null));});
+ const changed=after.filter(line=>{const prior=before.find(l=>l.id===line.id);return prior&&(prior.qty!==line.qty||stableJson(prior.breakdown||null)!==stableJson(line.breakdown||null));});
  let created=0;
  for(const line of changed){const facts=orderLineFacts(root,line.id),prior=before.find(l=>l.id===line.id)!,what=`${prior.qty} → ${line.qty} ${line.unit}`;
   for(const p of facts.purchases){const kind=`order-change-review:${order.id}:purchase:${p.id}`;root.tasks=root.tasks.filter(t=>!(t.kind===kind&&!t.done));root.tasks.unshift({id:context.id(),title:`订单 ${order.code} 数量已变更，请核对采购 ${p.code}（${line.style} ${what}）`,due:order.due,done:false,kind,target:{view:'procurement',id:p.id,orderLineId:line.id},assigneeIds:mistOrderOwnerIds(root,order.id)});created++;}
