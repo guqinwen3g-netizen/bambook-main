@@ -15,7 +15,7 @@
 import { MistCommandError, isRecognizedMistInvoice, mistMoneyMinor, type MistContext, type MistState } from './mistWorkspace';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { platformBusinessDate } from './mistPlatform';
-import { fxRateFor, type FxBasis, type FxResolved } from './mistFxRates';
+import { fxOrderActual, fxRateFor, type FxBasis, type FxResolved } from './mistFxRates';
 import { orderRebate } from './mistExportRebate';
 import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
 
@@ -175,6 +175,14 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   const revenue: OrderCostLine[] = invoices.map(i => line('inv:' + i.id, `发票 ${i.code}`, i.currency, mistMoneyMinor(i.amount)));
   const invoicedSame = invoices.filter(i => i.currency === o.currency).reduce((n, i) => n + mistMoneyMinor(i.amount), 0), rest = mistMoneyMinor(o.amount) - invoicedSame;
   if (rest > 0) revenue.push(line('rev:rest', invoices.length ? '未开票部分（按合同暂估）' : '合同金额（尚未开票，暂估）', o.currency, rest, { estimated: true }));
+  if (basis === 'actual' && o.currency !== 'CNY') {
+    // 实际结汇口径：本币种收入整体按“已收已结汇 → 实际汇率、其余 → 月末暂估”折算（fxOrderActual），其他币种发票仍逐张按月末暂估。
+    const same = revenue.filter(r => r.currency === o.currency), total = same.reduce((n, r) => n + mistMoneyMinor(r.amount), 0), act = fxOrderActual(root, { id: o.id, currency: o.currency, amount: major(total) }, month, asOf);
+    revenue.splice(0, revenue.length, ...revenue.filter(r => r.currency !== o.currency));
+    if (act) rates.delete(o.currency); else rates.set(o.currency, undefined);
+    if (act?.settledMinor) revenue.push({ key: 'rev:settled', label: `已收已结汇（结汇实际汇率 ${act.settledRate}）`, currency: o.currency, amount: major(act.settledMinor), cny: major(act.settledCnyMinor) });
+    if (!act || act.estimatedMinor) revenue.push({ key: 'rev:unsettled', label: act ? `未结汇 / 未收（按 ${act.period!.month} 月末 ${act.period!.rate} 暂估）` : `未结汇 / 未收（缺 ${month} 及以前的月末汇率）`, currency: o.currency, amount: major(act ? act.estimatedMinor : total), cny: act ? major(act.cnyMinor - act.settledCnyMinor) : null, estimated: true });
+  }
   // 采购：已到票金额 − 索赔扣款；未到票按合同暂估
   const bills = (root.payables?.bills || []).filter(b => b.state !== 'void'), deductions = (root.payables?.deductions || []).filter(d => !d.reversed);
   const purchases: OrderCostLine[] = [];

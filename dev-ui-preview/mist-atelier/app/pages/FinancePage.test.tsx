@@ -100,6 +100,19 @@ it('records an FX lock and a settlement against it, moving both account balances
  const table=getByRole(host,'table',{name:'公司银行账户'});expect(table.textContent).toContain('4,600.00 USD');expect(table.textContent).toContain('2,841.20 CNY');
  expect(getByRole(host,'table',{name:'锁汇与结汇记录'}).textContent).toContain('剩余 600.00 USD');
 });
+it('links a settlement to receipts in the selling account so order margins can use the actual rate; the unlinked rest stays flagged',async()=>{
+ let serial=200;const ctx={id:()=>`fl-${++serial}`,actorName:'财务',now:new Date().toISOString()};
+ for(const [name,no,currency] of [['美元户','1111','USD'],['人民币户','2222','CNY']])store.value.state=applyMistCommand(store.value.state,{type:'finance.account.save',payload:{name,bankName:'中国银行',accountNo:no,currency,openingDate:'2026-01-01',openingBalance:0}},ctx).state;
+ const usd=store.value.state.bankAccounts.find((a:any)=>a.currency==='USD');
+ store.value.state=applyMistCommand(store.value.state,{type:'finance.importReceipts',payload:{accountId:usd.id,receipts:[{date:today(),payer:'Nordic',amount:300,currency:'USD',ref:'TT-77'}]}},ctx).state;
+ const receipt=store.value.state.receipts.find((r:any)=>r.ref==='TT-77');
+ route={view:'payment-vouchers',section:'accounts'};render();
+ await click('登记结汇');expect(document.body.textContent).toContain('对应到账（用于订单实际结汇汇率）');
+ input('银行水单号','BK-7');input('卖出原币金额','400');input('入账本币金额','2840');await click('全额');await click('保存结汇');
+ expect(store.value.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'finance.fx.settle',payload:expect.objectContaining({receipts:[{receiptId:receipt.id,amount:300}]})}));
+ const fxTable=getByRole(host,'table',{name:'锁汇与结汇记录'});expect(fxTable.textContent).toContain('未对应到账 100.00 USD');
+ await click('对应到账');expect(document.body.textContent).toContain('没有未结汇的到账');
+});
 it('BB-DEV-9 lists pending development billing requests and issues invoices linked back to the development',async()=>{
  const request={id:'rq',requestedAt:'2026-10-16T00:00:00Z',requestedBy:'业务员',billTo:'客户',lines:[{kind:'making' as const,refId:'s',versionId:'v',versionLabel:'R1-A-1',label:'制作费 · 米样 SMP-1',amount:120,currency:'EUR'}],totals:[{currency:'EUR',amount:120}],state:'pending' as const,invoiceIds:[]};
  store.value.state.devs=[{id:'dev-a',code:'DEV-A',name:'测试开发',style:'',owner:'业务员',customer:'客户',customerId:'customer',due:'2026-10-30',dueRel:'',stage:4,state:'待财务开票',tone:'warn',ver:'',fac:1,img:'clay',factory:'',sample:'',fabric:'',goal:'',currentVersionId:'',versionIds:[],values:{charged:true,factories:['工厂']} as any,fileIds:[],createdAt:'',updatedAt:'',billing:{makingFees:[],request}}];
