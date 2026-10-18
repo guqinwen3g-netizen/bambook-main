@@ -54,13 +54,13 @@ const TEAM_DEFS = [
 ] as const;
 
 const DEPARTMENTS = [
-  { id: 'dept-company', name: '总公司', parentId: null },
-  { id: 'dept-sales', name: '业务部', parentId: 'dept-company' },
-  { id: 'dept-finance', name: '财务部', parentId: 'dept-company' },
-  { id: 'dept-admin', name: '行政人事部', parentId: 'dept-company' },
-  { id: 'dept-management', name: '总经办', parentId: 'dept-company' },
-  { id: 'dept-qc', name: '质量部', parentId: 'dept-company' },
-  { id: 'dept-logistics', name: '后勤部', parentId: 'dept-company' },
+  { id: 'dept-company', name: '总公司', parentId: null, businessAttributes: [] },
+  { id: 'dept-sales', name: '业务部', parentId: 'dept-company', businessAttributes: ['fabric_business', 'garment_business'] },
+  { id: 'dept-finance', name: '财务部', parentId: 'dept-company', businessAttributes: ['finance'] },
+  { id: 'dept-admin', name: '行政人事部', parentId: 'dept-company', businessAttributes: ['support'] },
+  { id: 'dept-management', name: '总经办', parentId: 'dept-company', businessAttributes: ['management'] },
+  { id: 'dept-qc', name: '质量部', parentId: 'dept-company', businessAttributes: ['fabric_qc', 'garment_qc'] },
+  { id: 'dept-logistics', name: '后勤部', parentId: 'dept-company', businessAttributes: ['logistics'] },
 ] as const;
 
 async function main() {
@@ -105,11 +105,13 @@ async function main() {
   const portalPasswordHash = await customerAuth.hashPassword(CUSTOMER_PORTAL_PASSWORD);
 
   await prisma.$transaction(async tx => {
-    for (const department of DEPARTMENTS) {
+    // 业务属性决定部门人员能办理哪些写操作（见 server/src/auth/departmentAuthorization.ts）；不设则各岗位只能查看。
+    for (const { businessAttributes, ...department } of DEPARTMENTS) {
+      const metadata = { businessAttributes: [...businessAttributes] };
       await tx.department.upsert({
         where: { id: department.id },
-        update: { name: department.name, parentId: department.parentId, status: 'active' },
-        create: { ...department, status: 'active' },
+        update: { name: department.name, parentId: department.parentId, status: 'active', metadata },
+        create: { ...department, status: 'active', metadata },
       });
     }
 

@@ -243,3 +243,19 @@ it('generates declaration items on the server once every shipped style is classi
   await click(getByRole(detail,'button',{name:'生成申报商品项'}));
   expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.items',payload:{id:'cus-s'}});
 });
+
+it('adjusts a generated declaration item by hand with a reason and shows the adjustment trail',async()=>{
+  const st=store.state!,f=st.fulfillment;f.shipments.push(shipment('s',{state:'ready'}));f.packing.push(pack('s',10));
+  const item={no:1,classificationId:'hs1',lineKeys:['l1:'],styles:['COAT-1'],hsCode:'6202930000',declaredName:'女式化纤制大衣',elements:'0|0|机织|大衣|女式|100%涤纶|无品牌|货号COAT-1',quantity:10,unit:'件',legalQty:10,legalUnit:'件',secondQty:10,secondUnit:'千克',unitPrice:50,amount:500,currency:'USD',origin:'中国',destination:'瑞典'};
+  f.customs.push({...customs('s','draft'),items:[item,{...item,no:2,declaredName:'女式棉制大衣',adjusted:{at:'2026-10-18T02:00:00Z',actor:'后勤',reason:'报关行审单',fields:['declaredName']},generated:{declaredName:'女式化纤制大衣'}}],itemsAt:'2026-10-18T01:00:00Z',itemsBy:'后勤'} as never);
+  render('cus-s');
+  const detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
+  expect(detail.querySelector('[data-customs-item-adjusted="2"]')?.textContent).toContain('申报品名 · 后勤 · 报关行审单');
+  await click(getByRole(detail,'button',{name:'调整商品项 1'}));
+  const dialog=getByRole(document.body,'dialog');
+  expect(dialog.textContent).toContain('总价 USD 500.00 不在这里改');
+  typeInto(getByRole(dialog,'textbox',{name:'申报品名'}) as HTMLInputElement,'女式涤纶制大衣');
+  typeInto(getByRole(dialog,'textbox',{name:'调整原因'}) as HTMLInputElement,'按规范申报目录');
+  await click(getByRole(dialog,'button',{name:'保存调整'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.item.adjust',payload:{id:'cus-s',no:1,declaredName:'女式涤纶制大衣',elements:item.elements,legalQty:10,secondQty:10,reason:'按规范申报目录'}});
+});

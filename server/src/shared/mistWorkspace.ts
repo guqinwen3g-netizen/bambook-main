@@ -1,3 +1,4 @@
+import{stableJson}from'./stableJson';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import {applyOpeningCommand,mistPayerMatchesInvoice,openingCommandPermission,type OpeningCommand} from './mistOpeningBalance';
 import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricRequirements,fabricRequirementError,validFabricSample,type DevelopmentDomain,type DevelopmentInitiator,type DevelopmentRequestType,type FabricDevelopmentRequirements} from './mistDevelopmentDomain';
@@ -1040,7 +1041,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(dev.closure?.kind==='cancelled')throw new MistCommandError('PRECONDITION','开发案已取消');
       const due=date(p.due,'到期日'), year=context.now.slice(0,4);
       // 开票按申请时冻结的明细；与当前合计不一致说明快照被改动，不开票。
-      if(JSON.stringify(billingTotals(request.lines))!==JSON.stringify(request.totals))throw new MistCommandError('PRECONDITION','开票明细与合计不一致，请核对后重新发起');
+      if(stableJson(billingTotals(request.lines))!==stableJson(request.totals))throw new MistCommandError('PRECONDITION','开票明细与合计不一致，请核对后重新发起');
       for(const total of request.totals){
         const id=context.id(), seq=state.invoices.filter(i=>i.code.startsWith('DI-'+year+'-')).length+1, code='DI-'+year+'-'+String(seq).padStart(4,'0');
         state.invoices.push({id,code,orderId:'',order:dev.code,customer:request.billTo,due,amount:total.amount,open:total.amount,currency:total.currency,devId:dev.id,issuedAt:platformBusinessDate(context.now)});

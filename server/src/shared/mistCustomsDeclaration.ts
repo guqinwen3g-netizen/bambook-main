@@ -3,10 +3,13 @@
  * - 商品归类库：单证员按款号建立归类档案——10 位商品编号（HS）、申报品名、申报要素（品牌类型、出口享惠情况及按章节的必报要素）、法定第一 / 第二计量单位。
  * - 申报商品项：按出运明细自动生成——每条出运明细按款号匹配归类档案；同一归类、同一成交单位与币制的明细合并为一个商品项。
  *   成交数量 = 出运数量；总价 = 出运数量 × 订单单价（与 CI 应收同一算法）；法定数量按单位换算或取装箱净重；件数、毛重、净重取装箱合计。
+ * - 手工微调：生成后可逐项调整申报品名、申报要素与法定数量（报关行审单意见常见于此），须填原因并留痕；商品编号、成交数量与总价不改（改归类或出运后重新生成，总价与 CI 一致）。
+ *   重新生成时，某项的某个字段若自动生成值没变，保留手工调整；自动值变了（归类、出运或装箱改了）则以新值为准、需要再调。
  * - 本系统只准备申报资料、交给报关行或在单一窗口录入，不代替海关申报；已放行的报关记录不再改动。
  */
 import { MistCommandError, lineAmount, mistMoneyMinor, type MistContext, type MistState } from './mistWorkspace';
 import type { FulfillmentCustoms, FulfillmentShipment } from './mistFulfillment';
+import { stableJson } from './stableJson';
 
 export type CustomsFamily = 'garment' | 'fabric';
 export const CUSTOMS_FAMILY_LABEL: Record<CustomsFamily, string> = { garment: '服装', fabric: '面料' };
@@ -20,13 +23,17 @@ export const CUSTOMS_PREFERENCES = [['0', '出口货物在最终目的国（地�
 export const CUSTOMS_MAX_ITEMS = 50;
 
 export type CustomsClassification = { id: string; code: string; family: CustomsFamily; hsCode: string; declaredName: string; brandType: string; preference: string; elements: string[]; legalUnit: string; secondUnit: string; styles: string[]; note: string; createdAt: string; actor: string; updatedAt?: string; voided?: { at: string; actor: string; reason: string } };
-export type CustomsDeclarationItem = { no: number; classificationId: string; lineKeys: string[]; styles: string[]; hsCode: string; declaredName: string; elements: string; quantity: number; unit: string; legalQty: number; legalUnit: string; secondQty: number | null; secondUnit: string; unitPrice: number; amount: number; currency: string; origin: string; destination: string };
+export type CustomsDeclarationItem = { no: number; classificationId: string; lineKeys: string[]; styles: string[]; hsCode: string; declaredName: string; elements: string; quantity: number; unit: string; legalQty: number; legalUnit: string; secondQty: number | null; secondUnit: string; unitPrice: number; amount: number; currency: string; origin: string; destination: string; generated?: Partial<Pick<CustomsDeclarationItem, CustomsAdjustableField>>; adjusted?: { at: string; actor: string; reason: string; fields: CustomsAdjustableField[] } };
+export const CUSTOMS_ADJUSTABLE_FIELDS = ['declaredName', 'elements', 'legalQty', 'secondQty'] as const;
+export type CustomsAdjustableField = typeof CUSTOMS_ADJUSTABLE_FIELDS[number];
+export const CUSTOMS_FIELD_LABEL: Record<CustomsAdjustableField, string> = { declaredName: '申报品名', elements: '申报要素', legalQty: '法定数量', secondQty: '第二数量' };
 export type CustomsDeclarationDraft = { items: CustomsDeclarationItem[]; blockers: string[]; packages: number; netWeight: number; grossWeight: number; totals: Array<{ currency: string; amount: number }> };
 export type CustomsDeclarationCommand =
   | { type: 'fulfillment.customs.classify.save'; payload: { id?: string; family: CustomsFamily; hsCode: string; declaredName: string; brandType: string; preference: string; elements: string[]; legalUnit?: string; secondUnit?: string; styles: string[]; note?: string } }
   | { type: 'fulfillment.customs.classify.void'; payload: { id: string; reason: string } }
-  | { type: 'fulfillment.customs.items'; payload: { id: string } };
-export const CUSTOMS_DECLARATION_COMMANDS = ['fulfillment.customs.classify.save', 'fulfillment.customs.classify.void', 'fulfillment.customs.items'] as const;
+  | { type: 'fulfillment.customs.items'; payload: { id: string } }
+  | { type: 'fulfillment.customs.item.adjust'; payload: { id: string; no: number; declaredName: string; elements: string; legalQty: number; secondQty?: number | null; reason: string } };
+export const CUSTOMS_DECLARATION_COMMANDS = ['fulfillment.customs.classify.save', 'fulfillment.customs.classify.void', 'fulfillment.customs.items', 'fulfillment.customs.item.adjust'] as const;
 
 type Root = MistState & { fulfillment: MistState['fulfillment'] & { customsClassifications?: CustomsClassification[] } };
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : 422); };
@@ -91,7 +98,27 @@ export function customsItemsStale(root: MistState, c: FulfillmentCustoms & { ite
   const s = root.fulfillment.shipments.find(x => x.id === c.shipmentId);
   if (!s || !c.items?.length) return false;
   const now = draftCustomsDeclaration(root, s);
-  return JSON.stringify(now.items) !== JSON.stringify(c.items);
+  return stableJson(now.items) !== stableJson(c.items.map(generatedItem));
+}
+/** 去掉手工调整、还原为自动生成时的商品项（用于与当前出运比对）。 */
+export function generatedItem(item: CustomsDeclarationItem): CustomsDeclarationItem {
+  const { generated, adjusted: _adjusted, ...rest } = item;
+  return { ...rest, ...(generated || {}) };
+}
+/** 重新生成时：同一商品项（同归类、单位、币制）中自动值未变的字段，保留原手工调整。 */
+function carryAdjustments(previous: CustomsDeclarationItem[], next: CustomsDeclarationItem[]) {
+  let kept = 0;
+  for (const item of next) {
+    const old = previous.find(p => p.adjusted && p.classificationId === item.classificationId && p.unit === item.unit && p.currency === item.currency);
+    if (!old?.adjusted || !old.generated) continue;
+    const fields = old.adjusted.fields.filter(k => k in old.generated! && old.generated![k] === item[k]);
+    if (!fields.length) continue;
+    const generated: CustomsDeclarationItem['generated'] = {};
+    for (const k of fields) { (generated as Record<string, unknown>)[k] = item[k]; (item as Record<string, unknown>)[k] = old[k]; }
+    Object.assign(item, { generated, adjusted: { ...old.adjusted, fields } });
+    kept++;
+  }
+  return kept;
 }
 
 export function applyCustomsDeclarationCommand(root: MistState, command: CustomsDeclarationCommand, ctx: MistContext): { id: string } {
@@ -140,8 +167,32 @@ export function applyCustomsDeclarationCommand(root: MistState, command: Customs
     const draft = draftCustomsDeclaration(root, s);
     if (draft.blockers.length) fail(draft.blockers.join('；'), 'PRECONDITION');
     const main = [...draft.items].sort((a, b) => b.amount - a.amount)[0];
+    const kept = carryAdjustments(c.items || [], draft.items);
     Object.assign(c, { items: draft.items, itemsAt: ctx.now, itemsBy: ctx.actorName, packages: draft.packages, netWeight: draft.netWeight, grossWeight: draft.grossWeight, hsCode: main.hsCode });
-    event(c.id, `生成申报商品项 ${draft.items.length} 项：${draft.totals.map(t => `${t.currency} ${t.amount.toFixed(2)}`).join(' / ')}；${draft.packages} 件、毛重 ${draft.grossWeight} kg、净重 ${draft.netWeight} kg`);
+    event(c.id, `生成申报商品项 ${draft.items.length} 项：${draft.totals.map(t => `${t.currency} ${t.amount.toFixed(2)}`).join(' / ')}；${draft.packages} 件、毛重 ${draft.grossWeight} kg、净重 ${draft.netWeight} kg${kept ? `；保留 ${kept} 项手工调整` : ''}`);
+    return { id: c.id };
+  }
+  if (command.type === 'fulfillment.customs.item.adjust') {
+    const p = command.payload || ({} as never);
+    const c = f.customs.find(x => x.id === p.id) as (FulfillmentCustoms & { items?: CustomsDeclarationItem[] }) | undefined || fail('报关记录不存在', 'NOT_FOUND');
+    if (c.status === 'cleared') fail('已放行的报关记录不可改动');
+    const s = f.shipments.find(x => x.id === c.shipmentId) || fail('出运不存在', 'NOT_FOUND');
+    if (s.state === 'departed' || s.state === 'cancelled') fail('出运已离港或已取消，报关记录不能再修改');
+    const item = (c.items || []).find(i => i.no === p.no) || fail('申报商品项不存在，请先生成', 'NOT_FOUND');
+    const declaredName = str(p.declaredName, '申报品名', true, 50);
+    const elements = str(p.elements, '申报要素', true, 255);
+    const qty = (v: unknown, label: string) => { const n = typeof v === 'number' ? v : Number(v); if (!Number.isFinite(n) || n <= 0) fail(`${label}须大于 0`); return round(n, 4); };
+    const legalQty = qty(p.legalQty, '法定数量');
+    const secondQty = item.secondUnit ? qty(p.secondQty, '第二数量') : null;
+    const reason = str(p.reason, '调整原因', true, 200);
+    const base = generatedItem(item), next = { declaredName, elements, legalQty, secondQty };
+    const fields = CUSTOMS_ADJUSTABLE_FIELDS.filter(k => next[k] !== base[k]);
+    const changed = CUSTOMS_ADJUSTABLE_FIELDS.filter(k => next[k] !== item[k]);
+    if (!changed.length) fail('没有改动');
+    Object.assign(item, next);
+    delete item.generated; delete item.adjusted;
+    if (fields.length) Object.assign(item, { generated: Object.fromEntries(fields.map(k => [k, base[k]])), adjusted: { at: ctx.now, actor: ctx.actorName, reason, fields } });
+    event(c.id, fields.length ? `手工调整申报商品项 ${item.no}（${changed.map(k => CUSTOMS_FIELD_LABEL[k]).join('、')}）：${reason}` : `申报商品项 ${item.no} 恢复为自动生成值：${reason}`);
     return { id: c.id };
   }
   return fail('未知报关操作');

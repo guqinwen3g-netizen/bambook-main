@@ -242,7 +242,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
     ]} />
     {c.evidence && <p className="mist-sub">放行依据：{c.evidence}</p>}
     {c.note && <p className="mist-sub">备注：{c.note}</p>}
-    <CustomsItemsBlock record={c} state={state} can={can} locked={locked} run={run} onClassify={onClassify} />
+    <CustomsItemsBlock record={c} state={state} can={can} locked={locked} run={run} open={open} onClassify={onClassify} />
     <DetailBlock title="与装箱实货核对">
       {s ? <DataTable ariaLabel={`${c.code} 装箱核对`} rows={s.lines} rowKey={line => line.lineId + ':' + (line.productionId || '')} columns={[
         { key: 'source', header: '准确条目', render: line => <SourceLink source={{ kind: 'orderLine', orderId: line.orderId, lineId: line.lineId, productionId: line.productionId }} /> },
