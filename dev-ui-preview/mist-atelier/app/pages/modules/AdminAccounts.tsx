@@ -1,6 +1,6 @@
 /** 管理后台 · 账号：公司成员身份只在这里新建或经注册审批产生（2026-10-08 决定）；角色权限仅老板可调整（2026-10-16 起），审计只读。 */
 import React from 'react';
-import { KeyRound, RefreshCw, ShieldCheck, UserPlus } from 'lucide-react';
+import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { PERMISSION_SCOPES } from '../../../../../lib/rolePermissionMatrix';
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Mono, Pill, Select, TextArea, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
@@ -160,27 +160,48 @@ const scopeLabel = (scope: string, description?: string | null) => SCOPE_LABEL[s
 const DOMAIN_LABEL: Record<string, string> = { dashboard: '经营总览', cockpit: '经营驾驶舱', customers: '客户', relations: '客户关系', marketing: '营销', emails: '邮件', quotations: '报价', orders: '订单', production: '生产', shipments: '物流', customs: '单证报关', inventory: '库存', suppliers: '供应商', products: '开发与产品', bom: '成本核算', pricing: '定价', invoices: '发票', vouchers: '收付款', finance: '财务', tax: '退税', risk: '风险', aftersales: '售后', approvals: '审批', reports: '报表', knowledge: '资料中心', hr: '人事', users: '账号', audit: '审计', settings: '设置', dictionary: '数据字典', data: '数据导入导出', tools: '业务工具', ai: 'AI 助手', seasons: '季节', development: '开发' };
 const domainOf = (scope: string) => scope.split(':')[0];
 
-/** 角色权限：老板可调整非老板角色包含的权限（服务器同样只许老板改老板角色、并记审计）。 */
+/** 权限勾选：按模块分组，可按模块、名称或代码筛选。 */
+function PermissionPicker({ catalog, value, onChange, keep, describe, disabled }: { catalog: Array<{ scope: string }>; value: string[]; onChange: (next: string[]) => void; keep: string[]; describe: (scope: string) => string; disabled?: boolean }) {
+  const [filter, setFilter] = React.useState('');
+  const scopes = [...new Set([...catalog.map(c => c.scope), ...keep])].filter(sc => sc !== '*').sort();
+  const q = filter.trim().toLowerCase();
+  const visible = scopes.filter(sc => !q || sc.toLowerCase().includes(q) || describe(sc).toLowerCase().includes(q) || (DOMAIN_LABEL[domainOf(sc)] ?? '').includes(q));
+  const groups = [...new Set(visible.map(domainOf))].map(d => ({ domain: d, scopes: visible.filter(sc => domainOf(sc) === d) }));
+  return <>
+    <Field label="筛选"><TextInput aria-label="筛选权限" placeholder="模块、权限名称或代码" value={filter} onChange={e => setFilter(e.target.value)} /></Field>
+    {groups.map(g => <div key={g.domain} className="mist-section">
+      <CardHeader title={DOMAIN_LABEL[g.domain] ?? g.domain} sub={`${g.scopes.filter(sc => value.includes(sc)).length} / ${g.scopes.length}`} />
+      <div className="mist-col">{g.scopes.map(sc => <Checkbox key={sc} label={`${describe(sc)}（${sc}）`} checked={value.includes(sc)} disabled={disabled}
+        onChange={on => onChange(on ? [...value, sc] : value.filter(x => x !== sc))} />)}</div>
+    </div>)}
+    {!groups.length && <EmptyState compact title="没有符合筛选的权限" />}
+  </>;
+}
+
+type RoleDraft = { mode: 'create' | 'rename'; role?: AdminRole; name: string; description: string; template: string; permissions: string[] };
+
+/** 角色权限：老板按公司实际岗位新建 / 改名 / 删除自定义角色，并调整非老板角色包含的权限（服务器同样只许老板办理、并记审计）。 */
 export function AdminRoles() {
   const session = useMistSession(), toast = useToast(), owner = session.hasRole('owner');
   const { data, loading, error, load } = useDirectory();
   const [catalog, setCatalog] = React.useState<Array<{ scope: string; description: string | null }> | null>(null), [catalogError, setCatalogError] = React.useState('');
-  const [editing, setEditing] = React.useState<{ role: AdminRole; next: string[] } | null>(null), [filter, setFilter] = React.useState('');
+  const [editing, setEditing] = React.useState<{ role: AdminRole; next: string[] } | null>(null);
+  const [draft, setDraft] = React.useState<RoleDraft | null>(null), [removing, setRemoving] = React.useState<AdminRole | null>(null);
   const [confirming, setConfirming] = React.useState(false), [busy, setBusy] = React.useState(false), [saveError, setSaveError] = React.useState('');
   const counts = (roleId: string) => (data?.users ?? []).filter(u => u.status === 'active' && u.roleIds.includes(roleId)).length;
-  const openEditor = async (role: AdminRole) => {
-    setFilter(''); setSaveError(''); setEditing({ role, next: [...role.permissions] });
+  const holders = (roleId: string) => (data?.users ?? []).filter(u => (u.status === 'active' || u.status === 'pending') && u.roleIds.includes(roleId));
+  const loadCatalog = async () => {
     if (catalog) return;
     try { setCatalogError(''); setCatalog((await organizationApi.listPermissions()).permissions ?? []); }
     catch (e) { setCatalogError(message(e, '权限目录读取失败')); }
   };
+  const openEditor = async (role: AdminRole) => { setSaveError(''); setEditing({ role, next: [...role.permissions] }); await loadCatalog(); };
+  const openCreate = async () => { setSaveError(''); setDraft({ mode: 'create', name: '', description: '', template: '', permissions: [] }); await loadCatalog(); };
+  const openRename = (role: AdminRole) => { setSaveError(''); setDraft({ mode: 'rename', role, name: role.name, description: role.description ?? '', template: '', permissions: [] }); };
   const added = editing ? editing.next.filter(p => !editing.role.permissions.includes(p)) : [];
   const removed = editing ? editing.role.permissions.filter(p => !editing.next.includes(p)) : [];
   const describe = (scope: string) => scopeLabel(scope, catalog?.find(c => c.scope === scope)?.description);
-  const scopes = catalog ? [...new Set([...catalog.map(c => c.scope), ...(editing?.role.permissions ?? [])])].filter(sc => sc !== '*').sort() : [];
-  const q = filter.trim().toLowerCase();
-  const visible = scopes.filter(sc => !q || sc.toLowerCase().includes(q) || describe(sc).toLowerCase().includes(q) || (DOMAIN_LABEL[domainOf(sc)] ?? '').includes(q));
-  const groups = [...new Set(visible.map(domainOf))].map(d => ({ domain: d, scopes: visible.filter(sc => domainOf(sc) === d) }));
+  const templates = (data?.roles ?? []).filter(r => !isSuperAdmin(r));
   const save = async () => {
     if (!editing || busy) return;
     setBusy(true); setSaveError('');
@@ -190,29 +211,47 @@ export function AdminRoles() {
     } catch (e) { setSaveError(message(e, '权限未保存')); setConfirming(false); }
     finally { setBusy(false); }
   };
+  const saveDraft = async () => {
+    if (!draft || busy) return;
+    const name = draft.name.trim();
+    if (!name) return setSaveError('请填写角色名称');
+    if (draft.mode === 'create' && !draft.permissions.length) return setSaveError('请至少选择一项权限');
+    setBusy(true); setSaveError('');
+    try {
+      if (draft.mode === 'create') { await organizationApi.createRole({ name, description: draft.description.trim(), permissions: draft.permissions }); toast(`已新建角色「${name}」，可在“账号”中分配给成员`); }
+      else if (draft.role) { await organizationApi.updateRole(draft.role.id, { name, description: draft.description.trim() }); toast(`已保存角色「${name}」`); }
+      setDraft(null); await load();
+    } catch (e) { setSaveError(message(e, '角色未保存')); }
+    finally { setBusy(false); }
+  };
+  const remove = async () => {
+    if (!removing || busy) return;
+    setBusy(true); setSaveError('');
+    try { await organizationApi.deleteRole(removing.id); toast(`已删除角色「${removing.name}」`); setRemoving(null); await load(); }
+    catch (e) { setSaveError(message(e, '角色未删除')); }
+    finally { setBusy(false); }
+  };
+  const removingHolders = removing ? holders(removing.id) : [];
   return <>
     {error && <Banner tone="bad" title="角色读取失败" actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>重试</Button>}>{error}</Banner>}
-    <Banner tone="neutral" title={owner ? '角色权限由老板调整' : '角色权限只读'}>{owner ? '调整后对拥有该角色的所有账号生效，并记入审计；“老板”角色固定拥有全部权限，不可调整。给账号分配角色在“账号”中办理。' : '只有老板可以调整角色包含的权限；给账号分配角色在“账号”中办理。'}</Banner>
+    <Banner tone="neutral" title={owner ? '角色由老板维护' : '角色权限只读'}>{owner ? '可按公司实际岗位新建角色并组合权限；调整后对拥有该角色的所有账号生效，并记入审计。系统角色只能调整权限，“老板”角色固定拥有全部权限。给账号分配角色在“账号”中办理。' : '只有老板可以调整角色包含的权限，或新建、删除角色；给账号分配角色在“账号”中办理。'}</Banner>
+    {owner && <Toolbar right={<Button variant="primary" icon={Plus} onClick={() => void openCreate()}>新建角色</Button>}><span className="mist-note">共 {data?.roles.length ?? 0} 个角色 · 自定义 {(data?.roles ?? []).filter(r => !r.isSystem).length} 个</span></Toolbar>}
     <Card><DataTable ariaLabel="角色" rows={data?.roles ?? []} rowKey={r => r.id} loading={loading && !data} onRowClick={owner ? r => { if (!isSuperAdmin(r)) void openEditor(r); } : undefined} columns={[
-      { key: 'name', header: '角色', width: 'minmax(160px,1fr)', render: r => <><b>{r.name}</b>{r.isSystem && <> <Pill plain>系统</Pill></>}{r.description && <div className="mist-note">{r.description}</div>}</> },
+      { key: 'name', header: '角色', width: 'minmax(160px,1fr)', render: r => <><b>{r.name}</b> <Pill plain>{r.isSystem ? '系统' : '自定义'}</Pill>{r.description && <div className="mist-note">{r.description}</div>}</> },
       { key: 'users', header: '启用账号', width: '96px', align: 'right', render: r => counts(r.id) },
       { key: 'permissions', header: '权限', width: 'minmax(260px,3fr)', render: r => r.permissions.includes('*') ? <span className="mist-note">全部权限</span> : r.permissions.length ? <span className="mist-note">{r.permissions.length} 项：{r.permissions.slice(0, 6).map(sc => scopeLabel(sc)).join('、')}{r.permissions.length > 6 ? ' 等' : ''}</span> : <span className="mist-note">无</span> },
-      ...(owner ? [{ key: 'edit', header: '', width: '110px', render: (r: AdminRole) => isSuperAdmin(r) ? <span className="mist-note">不可调整</span> : <Button size="sm" icon={ShieldCheck} onClick={() => void openEditor(r)}>调整权限</Button> }] : []),
+      ...(owner ? [{ key: 'edit', header: '', width: '260px', render: (r: AdminRole) => isSuperAdmin(r) ? <span className="mist-note">不可调整</span> : <div className="mist-row" onClick={e => e.stopPropagation()}>
+        <Button size="sm" icon={ShieldCheck} onClick={() => void openEditor(r)}>调整权限</Button>
+        {!r.isSystem && <><Button size="sm" icon={Pencil} aria-label={`编辑「${r.name}」`} onClick={() => openRename(r)}>编辑</Button><Button size="sm" variant="quiet" icon={Trash2} aria-label={`删除「${r.name}」`} onClick={() => { setSaveError(''); setRemoving(r); }}>删除</Button></>}
+      </div> }] : []),
     ]} empty={<EmptyState title="没有角色" />} /></Card>
 
     <Drawer open={!!editing} onClose={() => !busy && setEditing(null)} title={editing ? `调整「${editing.role.name}」的权限` : ''} sub={editing ? `${counts(editing.role.id)} 个启用账号使用此角色` : undefined}
       footer={<div className="mist-row"><Button variant="primary" disabled={!catalog || (!added.length && !removed.length)} onClick={() => setConfirming(true)}>保存（新增 {added.length} · 移除 {removed.length}）</Button><Button disabled={busy} onClick={() => setEditing(null)}>取消</Button></div>}>
       {editing && <>
         {saveError && <Banner tone="bad" title="未保存">{saveError}</Banner>}
-        {catalogError ? <Banner tone="bad" title="权限目录读取失败">{catalogError}</Banner> : !catalog ? <p className="mist-note">读取权限目录…</p> : <>
-          <Field label="筛选"><TextInput aria-label="筛选权限" placeholder="模块、权限名称或代码" value={filter} onChange={e => setFilter(e.target.value)} /></Field>
-          {groups.map(g => <div key={g.domain} className="mist-section">
-            <CardHeader title={DOMAIN_LABEL[g.domain] ?? g.domain} sub={`${g.scopes.filter(sc => editing.next.includes(sc)).length} / ${g.scopes.length}`} />
-            <div className="mist-col">{g.scopes.map(sc => <Checkbox key={sc} label={`${describe(sc)}（${sc}）`} checked={editing.next.includes(sc)} disabled={busy}
-              onChange={on => setEditing({ ...editing, next: on ? [...editing.next, sc] : editing.next.filter(x => x !== sc) })} />)}</div>
-          </div>)}
-          {!groups.length && <EmptyState compact title="没有符合筛选的权限" />}
-        </>}
+        {catalogError ? <Banner tone="bad" title="权限目录读取失败">{catalogError}</Banner> : !catalog ? <p className="mist-note">读取权限目录…</p> :
+          <PermissionPicker catalog={catalog} value={editing.next} keep={editing.role.permissions} describe={describe} disabled={busy} onChange={next => setEditing({ ...editing, next })} />}
       </>}
     </Drawer>
     <Dialog open={confirming} onClose={() => !busy && setConfirming(false)} tone="warn" title={editing ? `确认调整「${editing.role.name}」的权限` : ''}
@@ -221,10 +260,30 @@ export function AdminRoles() {
       {added.length > 0 && <><b>新增</b><ul>{added.map(sc => <li key={sc}>{describe(sc)}（{sc}）</li>)}</ul></>}
       {removed.length > 0 && <><b>移除</b><ul>{removed.map(sc => <li key={sc}>{describe(sc)}（{sc}）</li>)}</ul></>}
     </Dialog>
+
+    <Drawer open={!!draft} onClose={() => !busy && setDraft(null)} title={draft?.mode === 'create' ? '新建角色' : draft?.role ? `编辑「${draft.role.name}」` : ''} sub={draft?.mode === 'create' ? '按公司实际岗位命名，并组合该岗位需要的权限' : '角色名称与说明；权限在“调整权限”中修改'}
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void saveDraft()}>{draft?.mode === 'create' ? `创建角色（${draft.permissions.length} 项权限）` : '保存'}</Button><Button disabled={busy} onClick={() => setDraft(null)}>取消</Button></div>}>
+      {draft && <>
+        {saveError && <Banner tone="bad" title="未保存">{saveError}</Banner>}
+        <FormGrid cols={1}>
+          <Field label="角色名称" required hint="不超过 40 个字，不能与已有角色重名"><TextInput aria-label="角色名称" value={draft.name} maxLength={40} onChange={e => setDraft({ ...draft, name: e.target.value })} /></Field>
+          <Field label="说明"><TextArea aria-label="角色说明" value={draft.description} maxLength={200} onChange={e => setDraft({ ...draft, description: e.target.value })} /></Field>
+          {draft.mode === 'create' && <Field label="参照角色" hint="可选：先带入某个现有角色的权限，再逐项增减"><Select aria-label="参照角色" value={draft.template} onChange={e => { const template = templates.find(r => r.id === e.target.value); setDraft({ ...draft, template: e.target.value, permissions: template ? template.permissions.filter(sc => sc !== '*') : draft.permissions }); }} options={[{ value: '', label: '不参照，从空白开始' }, ...templates.map(r => ({ value: r.id, label: r.name }))]} /></Field>}
+        </FormGrid>
+        {draft.mode === 'create' && (catalogError ? <Banner tone="bad" title="权限目录读取失败">{catalogError}</Banner> : !catalog ? <p className="mist-note">读取权限目录…</p> :
+          <PermissionPicker catalog={catalog} value={draft.permissions} keep={[]} describe={describe} disabled={busy} onChange={permissions => setDraft({ ...draft, permissions })} />)}
+      </>}
+    </Drawer>
+    <Dialog open={!!removing} onClose={() => !busy && setRemoving(null)} tone="warn" title={removing ? `删除角色「${removing.name}」？` : ''}
+      description={removingHolders.length ? `还有 ${removingHolders.length} 个账号使用此角色，请先在“账号”中改派角色后再删除。` : '删除后不可恢复；该角色的权限组合与角色专属授权一并移除，记入审计。'}
+      footer={<div className="mist-row"><Button variant="danger" loading={busy} disabled={removingHolders.length > 0} onClick={() => void remove()}>删除角色</Button><Button disabled={busy} onClick={() => setRemoving(null)}>取消</Button></div>}>
+      {saveError && <Banner tone="bad" title="未删除">{saveError}</Banner>}
+      {removingHolders.length > 0 && <ul>{removingHolders.slice(0, 8).map(u => <li key={u.id}>{u.displayName}（{ACCOUNT_STATUS[u.status]?.label ?? u.status}）</li>)}</ul>}
+    </Dialog>
   </>;
 }
 
-const AUDIT_ACTIONS: Record<string, string> = { register: '提交注册', create_user: '新建账号', reactivate_user: '重新启用账号', update_user: '修改账号', update_profile: '修改个人资料', reset_password: '重置密码', disable_account: '停用账号', approve_register: '通过注册', reject_register: '拒绝注册', update_roles: '调整角色', update_role_permissions: '调整角色权限', reset_mfa: '重置两步验证', enable_mfa: '开启两步验证', disable_mfa: '关闭两步验证', login_mfa_recovery: '用恢复码登录', logout_all_sessions: '退出所有设备', erase_personal_data: '清除个人数据', create_department: '新建部门', edit_department: '修改部门', retire_department: '裁撤部门', create_team: '新建小组', update_team: '修改小组', delete_team: '解散小组', add_team_member: '加入小组', remove_team_member: '移出小组', upsert_employee: '保存员工档案', delete_employee: '删除员工档案' };
+const AUDIT_ACTIONS: Record<string, string> = { register: '提交注册', create_user: '新建账号', reactivate_user: '重新启用账号', update_user: '修改账号', update_profile: '修改个人资料', reset_password: '重置密码', disable_account: '停用账号', approve_register: '通过注册', reject_register: '拒绝注册', update_roles: '调整角色', update_role_permissions: '调整角色权限', create_role: '新建角色', update_role: '编辑角色', delete_role: '删除角色', reset_mfa: '重置两步验证', enable_mfa: '开启两步验证', disable_mfa: '关闭两步验证', login_mfa_recovery: '用恢复码登录', logout_all_sessions: '退出所有设备', erase_personal_data: '清除个人数据', create_department: '新建部门', edit_department: '修改部门', retire_department: '裁撤部门', create_team: '新建小组', update_team: '修改小组', delete_team: '解散小组', add_team_member: '加入小组', remove_team_member: '移出小组', upsert_employee: '保存员工档案', delete_employee: '删除员工档案' };
 export function AdminAuditLog() {
   const session = useMistSession();
   const [rows, setRows] = React.useState<AuditLogRow[]>([]), [total, setTotal] = React.useState(0), [page, setPage] = React.useState(0), [targetType, setTargetType] = React.useState('');

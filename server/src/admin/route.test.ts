@@ -568,3 +568,134 @@ describe('legacy admin approval decision boundaries', () => {
     expect(response.body.message).not.toContain('SQL'); expect(f.getRow()).toEqual(before);
   });
 });
+
+/** 自定义角色：老板按公司实际岗位新建 / 改名 / 删除角色并组合权限；系统角色只能调权限。 */
+describe('admin custom roles', () => {
+  function makeStore() {
+    const roles = new Map<string, any>([
+      ['role-super-admin', { id: 'role-super-admin', name: '老板', description: null, isSystem: true }],
+      ['role-sales', { id: 'role-sales', name: '业务员', description: null, isSystem: true }],
+    ]);
+    const permissions = ['orders:read', 'orders:write', 'quotations:read', '*'].map(scope => ({ id: 'perm_' + scope, scope, description: null }));
+    const rolePermissions: any[] = [{ id: 'rp1', roleId: 'role-sales', permissionId: 'perm_orders:read' }];
+    const userRoles: any[] = [];
+    const audits: any[] = [];
+    const prisma: any = {
+      role: {
+        findMany: vi.fn(async (args?: any) => [...roles.values()].map(r => args?.include ? { ...r, permissions: rolePermissions.filter(rp => rp.roleId === r.id).map(rp => ({ permission: permissions.find(p => p.id === rp.permissionId) })) } : r)),
+        findUnique: vi.fn(async ({ where }: any) => roles.get(where.id) ?? null),
+        create: vi.fn(async ({ data }: any) => { roles.set(data.id, { ...data }); return data; }),
+        update: vi.fn(async ({ where, data }: any) => { const next = { ...roles.get(where.id), ...data }; roles.set(where.id, next); return next; }),
+        delete: vi.fn(async ({ where }: any) => { roles.delete(where.id); for (let i = rolePermissions.length - 1; i >= 0; i--) if (rolePermissions[i].roleId === where.id) rolePermissions.splice(i, 1); return {}; }),
+      },
+      permission: {
+        findMany: vi.fn(async ({ where }: any) => permissions.filter(p => where.scope.in.includes(p.scope))),
+        findUnique: vi.fn(async ({ where }: any) => permissions.find(p => p.scope === where.scope) ?? null),
+      },
+      rolePermission: {
+        create: vi.fn(async ({ data }: any) => { rolePermissions.push(data); return data; }),
+        upsert: vi.fn(async ({ create }: any) => { rolePermissions.push(create); return create; }),
+        deleteMany: vi.fn(async () => ({ count: 0 })),
+      },
+      userRole: { findMany: vi.fn(async ({ where }: any) => userRoles.filter(ur => ur.roleId === where.roleId && ['active', 'pending'].includes(ur.user.status))) },
+      knowledgeAcl: { deleteMany: vi.fn(async () => ({ count: 1 })) },
+      agentPolicy: { deleteMany: vi.fn(async () => ({ count: 0 })) },
+      auditLog: { create: vi.fn(async ({ data }: any) => { audits.push(data); return data; }) },
+    };
+    prisma.$transaction = vi.fn(async (fn: any) => fn(prisma));
+    return { prisma, roles, rolePermissions, userRoles, audits };
+  }
+  const owner = () => `Bearer ${adminToken()}`;
+
+  it('owner creates a custom role combining existing permissions, recorded in audit', async () => {
+    const { prisma, roles, rolePermissions, audits } = makeStore();
+    const res = await request(makeApp(prisma)).post('/admin/roles').set('Authorization', owner())
+      .send({ name: '  跟单员 ', description: '只跟进订单', permissions: ['orders:read', 'orders:write', 'orders:read'] });
+    expect(res.status).toBe(201);
+    expect(res.body.role).toMatchObject({ name: '跟单员', description: '只跟进订单', isSystem: false, permissions: ['orders:read', 'orders:write'] });
+    const id = res.body.role.id as string;
+    expect(id).toMatch(/^role-custom-[0-9a-f]{12}$/);
+    expect(roles.get(id)).toMatchObject({ name: '跟单员', isSystem: false });
+    expect(rolePermissions.filter(rp => rp.roleId === id).map(rp => rp.permissionId).sort()).toEqual(['perm_orders:read', 'perm_orders:write']);
+    expect(audits).toEqual([expect.objectContaining({ action: 'create_role', targetType: 'Role', targetId: id, actorId: 'owner-1' })]);
+
+    const list = await request(makeApp(prisma)).get('/admin/roles').set('Authorization', owner());
+    expect(list.body.roles.map((r: any) => [r.id, r.isSystem])).toEqual([['role-sales', true], ['role-super-admin', true], [id, false]]);
+  });
+
+  it('rejects non-owner, duplicate or reserved names, the wildcard, unknown and empty permissions without writing', async () => {
+    const { prisma, roles, audits } = makeStore();
+    const app = makeApp(prisma);
+    const cases: Array<[string, any, number, string]> = [
+      [`Bearer ${plainAdminToken()}`, { name: '跟单员', permissions: ['orders:read'] }, 403, 'FORBIDDEN'],
+      [owner(), { name: ' 业务员 ', permissions: ['orders:read'] }, 409, 'DUPLICATE_ROLE_NAME'],
+      [owner(), { name: '老板', permissions: ['orders:read'] }, 409, 'DUPLICATE_ROLE_NAME'],
+      [owner(), { name: '全能', permissions: ['*'] }, 400, 'INVALID_PERMISSION'],
+      [owner(), { name: '跟单员', permissions: ['orders:read', 'made:up'] }, 400, 'INVALID_PERMISSION'],
+      [owner(), { name: '跟单员', permissions: [] }, 400, 'VALIDATION_FAILED'],
+      [owner(), { name: '   ', permissions: ['orders:read'] }, 400, 'VALIDATION_FAILED'],
+      [owner(), { name: 'x'.repeat(41), permissions: ['orders:read'] }, 400, 'VALIDATION_FAILED'],
+    ];
+    for (const [auth, body, status, error] of cases) {
+      const res = await request(app).post('/admin/roles').set('Authorization', auth).send(body);
+      expect([res.status, res.body.error], JSON.stringify(body)).toEqual([status, error]);
+    }
+    expect(roles.size).toBe(2);
+    expect(prisma.role.create).not.toHaveBeenCalled();
+    expect(audits).toEqual([]);
+  });
+
+  it('renames a custom role but never a system role', async () => {
+    const { prisma, roles, audits } = makeStore();
+    roles.set('role-custom-a', { id: 'role-custom-a', name: '跟单员', description: null, isSystem: false });
+    const app = makeApp(prisma);
+    const ok = await request(app).patch('/admin/roles/role-custom-a').set('Authorization', owner()).send({ name: '资深跟单', description: '大客户订单' });
+    expect(ok.status).toBe(200);
+    expect(roles.get('role-custom-a')).toMatchObject({ name: '资深跟单', description: '大客户订单' });
+    expect(audits[0]).toMatchObject({ action: 'update_role', detail: { before: { name: '跟单员' }, after: { name: '资深跟单' } } });
+    const system = await request(app).patch('/admin/roles/role-sales').set('Authorization', owner()).send({ name: '销售' });
+    expect([system.status, system.body.error]).toEqual([409, 'SYSTEM_ROLE']);
+    const clash = await request(app).patch('/admin/roles/role-custom-a').set('Authorization', owner()).send({ name: '业务员' });
+    expect([clash.status, clash.body.error]).toEqual([409, 'DUPLICATE_ROLE_NAME']);
+    const admin = await request(app).patch('/admin/roles/role-custom-a').set('Authorization', `Bearer ${plainAdminToken()}`).send({ name: '改名' });
+    expect(admin.status).toBe(403);
+    expect(roles.get('role-sales')!.name).toBe('业务员');
+    expect(roles.get('role-custom-a')!.name).toBe('资深跟单');
+    expect(audits).toHaveLength(1);
+  });
+
+  it('deletes an unused custom role with its role-scoped grants, but blocks roles still held by accounts and system roles', async () => {
+    const { prisma, roles, userRoles, audits } = makeStore();
+    roles.set('role-custom-a', { id: 'role-custom-a', name: '跟单员', description: null, isSystem: false });
+    userRoles.push({ roleId: 'role-custom-a', user: { status: 'active', displayName: '周敏' } });
+    const app = makeApp(prisma);
+    const held = await request(app).delete('/admin/roles/role-custom-a').set('Authorization', owner());
+    expect([held.status, held.body.error]).toEqual([409, 'ROLE_IN_USE']);
+    expect(held.body.message).toContain('周敏');
+    expect(roles.has('role-custom-a')).toBe(true);
+
+    userRoles[0].user.status = 'disabled';
+    const done = await request(app).delete('/admin/roles/role-custom-a').set('Authorization', owner());
+    expect(done.status).toBe(200);
+    expect(roles.has('role-custom-a')).toBe(false);
+    expect(prisma.knowledgeAcl.deleteMany).toHaveBeenCalledWith({ where: { roleId: 'role-custom-a' } });
+    expect(prisma.agentPolicy.deleteMany).toHaveBeenCalledWith({ where: { roleId: 'role-custom-a' } });
+    expect(audits).toEqual([expect.objectContaining({ action: 'delete_role', targetId: 'role-custom-a', detail: { name: '跟单员', description: null } })]);
+
+    const system = await request(app).delete('/admin/roles/role-sales').set('Authorization', owner());
+    expect([system.status, system.body.error]).toEqual([409, 'SYSTEM_ROLE']);
+    const missing = await request(app).delete('/admin/roles/role-custom-a').set('Authorization', owner());
+    expect(missing.status).toBe(404);
+    roles.set('role-custom-b', { id: 'role-custom-b', name: '单证', description: null, isSystem: false });
+    const admin = await request(app).delete('/admin/roles/role-custom-b').set('Authorization', `Bearer ${plainAdminToken()}`);
+    expect(admin.status).toBe(403);
+    expect(roles.has('role-custom-b')).toBe(true);
+  });
+
+  it('never adds the wildcard permission to a role other than 老板', async () => {
+    const { prisma, rolePermissions } = makeStore();
+    const res = await request(makeApp(prisma)).patch('/admin/roles/role-sales/permissions').set('Authorization', owner()).send({ addPermissions: ['*'] });
+    expect([res.status, res.body.error]).toEqual([400, 'INVALID_PERMISSION']);
+    expect(rolePermissions).toHaveLength(1);
+  });
+});
