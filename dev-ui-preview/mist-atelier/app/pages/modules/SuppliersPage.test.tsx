@@ -40,14 +40,14 @@ describe('供应商管理', () => {
     expect(list.textContent).toContain('已过期 5 天'); expect(list.textContent).toContain('20 天后到期');
     expect(list.textContent).toContain('100%');
   });
-  it('认证过期的供应商：详情提示、认证有效期、评级历史；询价比价未接入并说明原因', async () => {
+  it('认证过期的供应商：详情提示、认证有效期、评级历史；询价比价带供应商进入采购询价', async () => {
     await mount(named('江南成衣').id);
     const detail = host.querySelector('[data-supplier-detail]')!;
     expect(detail.textContent).toContain('有认证已过期');
     expect(host.querySelector('[data-supplier-certs]')!.textContent).toMatch(/BSCI.*已过期 5 天.*ISO 9001/);
     expect(detail.textContent).toMatch(/A · 2026 Q3.*B · 2026 Q2/);
-    expect(button('询价比价')!.disabled).toBe(true);
-    expect(detail.textContent).toContain('多家回价对比后转采购，尚未接入');
+    await click('询价比价');
+    expect(go).toHaveBeenLastCalledWith('procurement', undefined, { section: 'rfq:' + named('江南成衣').id });
   });
   it('已暂停的供应商显示原因与生效日，只能恢复合作', async () => {
     await mount(named('恒彩印花').id);
@@ -55,6 +55,7 @@ describe('供应商管理', () => {
     expect(detail.textContent).toContain('已暂停 · 2026-10-14 起');
     expect(detail.textContent).toContain('色牢度两批不达标');
     expect(button('恢复合作')).toBeTruthy(); expect(button('暂停合作')).toBeUndefined();
+    expect(button('询价比价')!.disabled).toBe(true); expect(detail.textContent).toContain('供应商当前不可合作，不能邀请报价');
   });
   it('暂停前列出在手业务，说明继续执行与转移未接入', async () => {
     await mount(named('华盛毛纺').id);

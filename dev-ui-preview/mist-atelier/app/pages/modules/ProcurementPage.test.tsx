@@ -157,3 +157,32 @@ it('cancels an approved contract without receipts, blocks it once goods arrived,
   expect(detail.textContent).toContain('合同已取消');expect(detail.textContent).toContain('客户取消订单');
   expect(queryByRole(detail,'button',{name:'取消合同'})).toBeNull();
 });
+
+it('compares RFQ quotes in CNY, requires a reason to award a non-lowest quote, and preselects the supplier the user came from',async()=>{
+  const st=store.state!,base={type:'成衣加工',country:'CN',address:'',capabilities:'',capacity:100,capacityUnit:'件',leadDays:7,blockReason:'',contacts:[],fileIds:[],note:'',createdAt:'',updatedAt:'',status:'active' as const};
+  st.market.suppliers=[{...base,id:'a',code:'A',name:'江南成衣',ratings:[{id:'r',grade:'A',period:'2026 Q3',note:'',at:'',actor:''}]},{...base,id:'b',code:'B',name:'远山服装'},{...base,id:'c',code:'C',name:'恒彩印花',status:'paused',statusFrom:'2026-10-01'}] as any;
+  (st as any).fxPeriodRates=[{id:'fx',currency:'USD',month:'2026-09',rate:'7.1180'}];
+  const q=(id:string,supplierId:string,supplier:string,price:number,currency:string,promisedDue:string)=>({id,supplierId,supplier,declined:false,declineReason:'',price,currency,moq:0,promisedDue,terms:'月结 30 天',validUntil:'2099-12-31',note:'',fileIds:[],at:'2026-10-12T01:00:00Z',actor:'经办人'});
+  (st as any).rfqs=[{id:'rfq1',code:'RFQ-2026-0001',orderId:'o',lineId:'l',kind:'processing',domain:'garment',description:'风衣 CMT',quantity:100,unit:'件',currency:'CNY',due:'2099-01-31',destination:'嘉兴仓',deadline:'2099-01-10',supplierIds:['a','b'],quotes:[q('qa','a','江南成衣',80,'CNY','2099-01-20'),q('qb','b','远山服装',12,'USD','2099-01-25')],note:'',state:'open',createdAt:'2026-10-11T01:00:00Z',actor:'经办人'}];
+  act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',section:'rfq:a'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));
+  expect(host.textContent).toContain('发起询价时已默认勾选 江南成衣');
+  const list=getByRole(host,'table',{name:'询价单列表'});
+  expect(list.textContent).toContain('RFQ-2026-0001');expect(list.textContent).toContain('80.00 CNY');expect(list.textContent).toContain('2 / 2 家');
+  await click(getByRole(list,'row',{name:/RFQ-2026-0001/}));
+  const detail=host.querySelector('[data-rfq-detail="rfq1"]') as HTMLElement;
+  const cmp=getByRole(detail,'table',{name:'RFQ-2026-0001 比价'});
+  expect(cmp.textContent).toContain('最低价');expect(cmp.textContent).toContain('≈ 85.416 CNY');expect(cmp.textContent).toContain('评级 A');
+  await click(getByRole(detail,'button',{name:'定标 远山服装'}));
+  let dialog=getByRole(document.body,'dialog');
+  expect(dialog.textContent).toContain('非最低价（排名第 2）');
+  await click(getByRole(dialog,'button',{name:'定标并生成采购草稿'}));
+  expect(store.run).not.toHaveBeenCalled();
+  typeInto(getByRole(dialog,'textbox',{name:'定标理由'}) as HTMLTextAreaElement,'交期更稳');
+  await click(getByRole(dialog,'button',{name:'定标并生成采购草稿'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'rfq.award',payload:{id:'rfq1',quoteId:'qb',reason:'交期更稳'}});
+  await click(getByRole(host,'button',{name:'发起询价'}));
+  dialog=getByRole(document.body,'dialog');
+  expect((getByRole(dialog,'checkbox',{name:/江南成衣/}) as HTMLInputElement).checked).toBe(true);
+  expect((getByRole(dialog,'checkbox',{name:/远山服装/}) as HTMLInputElement).checked).toBe(false);
+  expect(queryByRole(dialog,'checkbox',{name:/恒彩印花/})).toBeNull();
+});

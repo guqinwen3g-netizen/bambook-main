@@ -135,7 +135,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     ? <EmptyState icon={SearchX} title="没有符合条件的供应商" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setTypeFilter('all'); setFlagFilter('all'); }}>清除筛选</Button>} />
     : <EmptyState icon={Building2} title="还没有供应商" description="登记织造、染整、印花、成衣加工、辅料等供应商后，采购单才能选择供应商。" action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>新增供应商</Button> : undefined} />;
   const detail = selected && state
-    ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!}
+    ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
         onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
@@ -166,8 +166,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   </MistPage>;
 }
 
-function SupplierDetail({ s, state, day, can, canAdmin, canContacts, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onOpen, attachments, history }: {
-  s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
+function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onOpen, attachments, history }: {
+  s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
   onEdit: () => void; onRate: () => void; onCert: (c?: SupplierCertificate) => void; onDeleteCert: (c: SupplierCertificate) => void; onStatus: (s: MarketSupplier['status']) => void;
   onContact: (c?: MarketSupplier['contacts'][number]) => void; onOpen: (view: string, id?: string) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
@@ -191,7 +191,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, locked, per
       { label: '编辑档案', icon: Pencil, onClick: onEdit, reason: writeReason },
       { label: '评级', icon: Award, onClick: onRate, reason: adminReason },
       { label: '登记认证', icon: FileBadge, onClick: () => onCert(), reason: writeReason },
-      { label: '询价比价', icon: Scale, onClick: () => undefined, reason: '多家回价对比后转采购，尚未接入' },
+      { label: '询价比价', icon: Scale, onClick: onRfq, reason: !canProcure ? '需要采购写权限' : now !== 'active' ? '供应商当前不可合作，不能邀请报价' : false },
       { label: '暂停合作', icon: Pause, onClick: () => onStatus('paused'), reason: adminReason, hidden: s.status !== 'active' },
       { label: '停用', icon: Ban, onClick: () => onStatus('blocked'), reason: adminReason, hidden: s.status === 'blocked' },
       { label: now === 'active' ? '取消计划' : '恢复合作', icon: Play, onClick: () => onStatus('active'), primary: true, reason: adminReason, hidden: s.status === 'active' },
