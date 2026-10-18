@@ -45,6 +45,7 @@ const FORMAT_LABEL: Record<Format, string> = { openai: 'OpenAI 兼容 · Chat Co
 const REASONING = [{ value: '', label: '模型默认' }, { value: 'low', label: '低' }, { value: 'medium', label: '中' }, { value: 'high', label: '高' }, { value: 'xhigh', label: '超高' }, { value: 'max', label: '最高（max）' }];
 const TOOL_LABEL: Record<string, string> = { current_time: '读取本机时间', bambook_query: '查询业务记录', bambook_get: '读取业务详情', bambook_expand: '展开关联记录' };
 const RISK_LABEL: Record<string, string> = { write: '修改业务数据', external: '对外发送', local_write: '写入本机文件', draft: '生成草稿', read: '读取' };
+const HOST_DOWN = new Set(['HOST_RESTARTED', 'HOST_RESTARTING', 'HOST_FAILED']);
 const time = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 // ── 设置：模型配置表单 ─────────────────────────────────────────────
@@ -227,7 +228,8 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
   React.useEffect(() => {
     if (!bridge || !accountKey) return;
     let cancelled = false;
-    setReady(false); setError(''); setActiveId(null); setMessages([]); setLive(null);
+    // 切换账号 / 工作区时由下方 scope 副作用清空对话；host 重启只重新初始化，保留当前打开的对话。
+    setReady(false); setError(''); setLive(null);
     (async () => {
       try {
         const status = await call<HostStatus>(bridge, 'host.status');
@@ -239,7 +241,13 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
         if (cancelled) return;
         setProviders(rows); setSessions(list); setChatgpt(gpt); setProviderId(id => rows.some(r => r.id === id) ? id : rows[0]?.id ?? '');
         setBoundAccount(accountScope); setReady(true);
-      } catch (e) { if (!cancelled) setError(e instanceof Error ? e.message : '工作助手未就绪'); }
+        const reopen = activeRef.current;
+        if (reopen && list.some(m => m.id === reopen)) await loadSession(reopen).catch(() => undefined);
+        else if (reopen) { setActiveId(null); activeRef.current = null; setMessages([]); }
+      } catch (e) {
+        // host 重启 / 停止已有上方横幅说明，不再重复报错。
+        if (!cancelled && !(e instanceof AssistantCallError && HOST_DOWN.has(e.code))) setError(e instanceof Error ? e.message : '工作助手未就绪');
+      }
     })();
     return () => { cancelled = true; };
   }, [bridge, accountKey, accountScope, session.user?.displayName, hostEpoch]);

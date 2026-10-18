@@ -148,6 +148,10 @@ export class AssistantSupervisor {
   }
 
   private call(method: string, params: unknown): Promise<unknown> {
+    // 退避等待中或已停止自动重启时，请求不能顺手把进程拉起来，否则崩溃退避与次数上限都会失效。
+    if (!this.child && (this.restartTimer || this.status.state === 'failed')) {
+      return Promise.reject(new AssistantRequestError('HOST_RESTARTING', '工作助手正在重启，请稍后重试'));
+    }
     this.start();
     const child = this.child;
     if (!child) return Promise.reject(new AssistantRequestError('HOST_UNAVAILABLE', '工作助手未运行'));
