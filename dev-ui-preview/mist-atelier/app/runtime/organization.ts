@@ -40,6 +40,11 @@ export const EMPLOYMENT_EVENTS: Array<{ value: string; label: string; from: stri
 export const eventLabel = (type: string) => type === 'Onboard' ? '入职 / 返聘' : EMPLOYMENT_EVENTS.find(e => e.value === type)?.label ?? type;
 export const ACTIVE_EMPLOYMENT = ['Probation', 'Regular', 'Suspended'];
 
+export type ApprovalBusinessLine = 'fabric' | 'garment';
+export type SupplierAuthorityKind = 'purchase' | 'processing';
+export type ApprovalCandidate = { id: string; displayName: string; email: string; status?: string; isOwner?: boolean };
+export type OrderApprovalAssignment = { businessLine: ApprovalBusinessLine; userId: string; user?: { id: string; displayName: string; email: string } };
+
 export class OrganizationRequestError extends Error { constructor(message: string, public status: number, public code?: string) { super(message); } }
 
 async function call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -50,8 +55,10 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   });
   const data: any = await response.json().catch(() => null);
   if (!response.ok || data?.ok === false) {
-    const code = typeof data?.error === 'string' ? data.error : data?.error?.code;
-    const message = data?.message || data?.error?.message || (response.status === 403 ? '当前账号没有这项操作的权限' : response.status === 401 ? '登录已失效，请重新登录' : '请求未完成，请重试');
+    // 供应商合同接口以 { error: 中文说明, code } 返回；其余接口以 { error: 代码, message } 返回。
+    const supplierShape = typeof data?.error === 'string' && typeof data?.code === 'string';
+    const code = supplierShape ? data.code : typeof data?.error === 'string' ? data.error : data?.error?.code;
+    const message = data?.message || data?.error?.message || (supplierShape ? data.error : '') || (response.status === 403 ? '当前账号没有这项操作的权限' : response.status === 401 ? '登录已失效，请重新登录' : '请求未完成，请重试');
     throw new OrganizationRequestError(message, response.status, code);
   }
   return data as T;
@@ -75,6 +82,11 @@ export const organizationApi = {
   disable: (userId: string) => call<{ ok: true }>('/admin/users/' + id(userId) + '/disable-account', { method: 'POST', body: {} }),
   resetMfa: (userId: string) => call<{ ok: boolean }>('/admin/users/' + id(userId) + '/reset-mfa', { method: 'POST', body: {} }),
   resetPassword: (userId: string) => call<{ temporaryPassword?: string }>('/admin/users/' + id(userId) + '/reset-password', { method: 'POST', body: {} }),
+  // 审批资格：订单主审批负责人（users:admin）与供应商承诺审批人（老板/管理员 + dictionary:write）。
+  orderApprovalAuthorities: () => call<{ assignments: OrderApprovalAssignment[]; users: ApprovalCandidate[] }>('/admin/order-approval-authorities'),
+  setOrderApprovalAuthorities: (businessLine: ApprovalBusinessLine, userIds: string[]) => call<{ assignments: OrderApprovalAssignment[] }>('/admin/order-approval-authorities/' + id(businessLine), { method: 'PUT', body: { userIds } }),
+  supplierApprovalAuthority: (kind: SupplierAuthorityKind, family: ApprovalBusinessLine) => call<{ item: { key: string; version: number; userIds: string[] } }>('/v1/procurement/contracts/approval-authority/' + id(kind) + '/' + id(family)),
+  setSupplierApprovalAuthority: (kind: SupplierAuthorityKind, family: ApprovalBusinessLine, body: { requestKey: string; userIds: string[]; expectedConfigVersion: number; reason: string }) => call<unknown>('/v1/procurement/contracts/approval-authority/' + id(kind) + '/' + id(family), { method: 'PUT', body }),
   auditLogs: (query: { limit?: number; offset?: number; action?: string; targetType?: string }) => {
     const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
     return call<{ logs: AuditLogRow[]; total: number }>('/admin/audit-logs' + (q.size ? '?' + q : ''));

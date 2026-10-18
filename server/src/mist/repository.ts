@@ -35,6 +35,7 @@ export type MistContract = {
 export type MistWorkspaceRow = { id: string; ownerId: string; slug: string; name: string; revision: number; state: MistState; createdAt: Date; updatedAt: Date };
 export type MistCommandRequest = { requestId: string; expectedRevision: number; command: MistCommand };
 export type MistUploadRequest = { requestId: string; expectedRevision: number; claimId?: string };
+const MIST_UPLOAD_SCOPES = ['products:write', 'orders:write', 'procurement:write', 'shipments:write', 'customs:write', 'invoices:write', 'vouchers:write', 'qc:fabric_chain:write', 'qc:garment_chain:write', 'relations:write', 'aftersales:write'] as const;
 function canonical(value: any, depth = 0): string {
   if (depth > 32) fail('INVALID_INPUT', '请求嵌套层级过深', 400);
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
@@ -122,6 +123,11 @@ const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
 export class MistRepository {
   constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>) {}
   private context(actor: TokenPayload): MistContext { return { id: randomUUID, now: this.now().toISOString(), actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
+  /** 普通附件上传：只落私有文件、不改业务记录；持有任一业务写入权限即可（后勤的 CI/PL、财务的水单、质检的报告都要先上传再关联）。关联到哪条记录仍由各自业务命令按权限校验。 */
+  private async uploadPermission(db: any, prior: TokenPayload) {
+    const actor = await this.authorize(db, prior);
+    return MIST_UPLOAD_SCOPES.find(scope => hasScope(actor, scope as any)) ?? MIST_UPLOAD_SCOPES[0];
+  }
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
   }
@@ -231,7 +237,8 @@ export class MistRepository {
   async create(prior: TokenPayload, input: { name: string; slug?: string; seed?: 'demo' | 'empty' }, defaultOnly = false) {
     const name = identifier(input.name, '工作区名称'), slug = defaultOnly ? 'default' : identifier(input.slug || randomUUID(), '工作区标识');
     if (input.seed !== undefined && !['demo', 'empty'].includes(input.seed)) fail('INVALID_INPUT', '工作区初始方式无效', 400);
-    const seed = input.seed ?? 'demo', requestId = `create:${slug}`;
+    // 正式账号首次进入的默认工作空间一律空白，示例数据只在本机演示模式或显式新建演示空间时出现。
+    const seed = defaultOnly && !localMode(prior) ? 'empty' : input.seed ?? 'demo', requestId = `create:${slug}`;
     const inputHash = createHash('sha256').update(canonical({ type: 'workspace.create', actorId: prior.userId, name, seed })).digest('hex');
     const create = () => this.transact(async db => {
       const actor = await this.authorize(db, prior);
@@ -270,6 +277,13 @@ export class MistRepository {
           this.contract.normalizeMistState?.(active.state, this.context(actor));
           return this.view(active, actor);
         }
+        // 公司成员首次登录：已被授权进入公司工作空间时直接进入该空间，不另建同名的个人空白空间（否则会落在空空间里找不到业务）。
+        const shared: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: { OR: [{ state: { path: ['memberIds'], array_contains: [actor.userId] } }] }, orderBy: { updatedAt: 'desc' } });
+        const joined = shared.find(row => !archived(row) && isMember(row, actor));
+        if (joined) {
+          this.contract.normalizeMistState?.(joined.state, this.context(actor));
+          return this.view(joined, actor);
+        }
       }
       const state = this.contract.createMistState(this.context(actor), seed), workspaceId = randomUUID();
       state.settings.workspaceName = name;
@@ -302,12 +316,12 @@ export class MistRepository {
   private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput) {
     requestIdentifier(input.requestId); revision(input.expectedRevision);
     const hash = createHash('sha256').update(canonical({ actorId: prior.userId, expectedRevision: input.expectedRevision, ...hashPayload })).digest('hex');
-    const permissionFor = () => upload&&input.claimId!==undefined?'aftersales:write':this.contract.mistCommandPermission(input.command ?? { type: 'files.add', payload: {} });
+    const permissionFor = async (db: any) => upload&&input.claimId!==undefined?'aftersales:write':!input.command&&upload?await this.uploadPermission(db, prior):this.contract.mistCommandPermission(input.command ?? { type: 'files.add', payload: {} });
     // 每次尝试都是一笔全新事务：重新读取最新状态并重新核验账号、成员、权限与业务门禁；不复用旧整份状态。
     for (let attempt = 1; ; attempt++) {
       let stored: MistStoredFile | undefined;
       try { return await this.writeTransact(workspaceId, async db => {
-        const permission = permissionFor();
+        const permission = await permissionFor(db);
         const { actor, row } = await this.own(db, prior, workspaceId, permission, true);
         await this.authorizeCompoundCommand(db, prior, input.command);
         if (!isOwner(row, actor) && permission === null && !MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) fail('FORBIDDEN', '工作空间设置只能由所有者修改', 403);
@@ -403,7 +417,7 @@ export class MistRepository {
         // A competing copy of this same request may have committed while this
         // serializable transaction rolled back. Resolve its durable receipt.
         const replay = await this.transact(async db => {
-          const { row, actor } = await this.own(db, prior, workspaceId, permissionFor());
+          const { row, actor } = await this.own(db, prior, workspaceId, await permissionFor(db));
           await this.authorizeCompoundCommand(db, prior, input.command);
           const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
           if (!receipt) return undefined;

@@ -5,7 +5,8 @@
  *   - 复用项目根已有的 playwright（^1.60.0），不引入新依赖
  *   - 单例 Browser，进程退出时自动关
  *   - 输入 html，输出 PDF Buffer + 元数据
- *   - channel='chrome' 复用系统已装 Google Chrome，不需额外下载 Chromium
+ *   - channel='chrome' 复用系统已装 Google Chrome，不需额外下载 Chromium；
+ *     也可用 BAMBOOK_PDF_BROWSER_PATH 指定浏览器可执行文件
  */
 
 import crypto from 'crypto';
@@ -24,10 +25,11 @@ async function getBrowser(): Promise<any> {
     } catch (err) {
       throw new Error(`Playwright not available: ${err instanceof Error ? err.message : err}`);
     }
-    const browser = await chromium.launch({
-      channel: 'chrome',
-      headless: true,
-    });
+    // 默认用本机 Google Chrome；未装 Chrome 的机器可用 BAMBOOK_PDF_BROWSER_PATH 指向已安装的 Chromium / Chrome 可执行文件。
+    const executablePath = process.env.BAMBOOK_PDF_BROWSER_PATH?.trim();
+    const browser = await chromium.launch(executablePath
+      ? { executablePath, headless: true }
+      : { channel: 'chrome', headless: true });
     process.once('beforeExit', () => browser.close().catch(() => {}));
     return browser;
   })();
