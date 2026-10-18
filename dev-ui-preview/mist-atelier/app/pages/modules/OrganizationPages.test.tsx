@@ -261,3 +261,49 @@ describe('人事管理', () => {
     expect(button('新建部门')).toBeUndefined();
   });
 });
+
+describe('管理后台 · 审批资格', () => {
+  const users = [{ id: 'mgr', displayName: '销售主管', email: 'm@x.test' }, { id: 'gm', displayName: '成衣主管', email: 'g@x.test' }];
+  const supplierRoutes = (version: number, userIds: string[]) => { for (const kind of ['purchase', 'processing']) for (const family of ['fabric', 'garment']) bridge.routes[`GET /api/v1/procurement/contracts/approval-authority/${kind}/${family}`] = () => ({ ok: true, item: { key: `k.${kind}.${family}`, version, userIds } }); };
+  const pick = async (group: string, name: string) => { const box = [...document.querySelector(`[aria-label="${group}"]`)!.querySelectorAll('label.mist-check')].find(l => l.textContent?.includes(name))!.querySelector('input')!; await act(async () => box.click()); };
+  const edit = async (label: string) => { const b = document.querySelector(`button[aria-label="调整${label}审批人"]`) as HTMLButtonElement; expect(b, label).toBeTruthy(); await act(async () => b.click()); };
+  it('flags every missing authority and saves the chosen fabric order approvers', async () => {
+    bridge.routes['GET /api/admin/order-approval-authorities'] = () => ({ ok: true, assignments: [], users });
+    bridge.routes['PUT /api/admin/order-approval-authorities/fabric'] = () => ({ ok: true, assignments: [] });
+    supplierRoutes(0, []);
+    await render(AdminPanelPage, 'admin-panel', 'approvals');
+    expect(document.body.textContent).toContain('尚有 6 项审批资格未配置');
+    await edit('面料订单');
+    await pick('面料订单审批人', '销售主管');
+    await click('保存');
+    expect(bridge.calls.find(c => c.method === 'PUT' && c.url === '/api/admin/order-approval-authorities/fabric')?.body).toEqual({ userIds: ['mgr'] });
+  });
+  it('requires a reason and sends the read config version for supplier commitment approvers', async () => {
+    bridge.routes['GET /api/admin/order-approval-authorities'] = () => ({ ok: true, assignments: [{ businessLine: 'fabric', userId: 'mgr' }, { businessLine: 'garment', userId: 'gm' }], users });
+    bridge.routes['PUT /api/v1/procurement/contracts/approval-authority/purchase/fabric'] = () => ({ ok: true });
+    supplierRoutes(3, []);
+    await render(AdminPanelPage, 'admin-panel', 'approvals');
+    expect(document.body.textContent).toContain('尚有 4 项审批资格未配置');
+    expect(document.body.textContent).toContain('销售主管');
+    await edit('面料采购合同');
+    await pick('面料采购合同审批人', '销售主管');
+    await click('保存');
+    expect(document.body.textContent).toContain('请填写配置理由');
+    expect(bridge.calls.some(c => c.method === 'PUT')).toBe(false);
+    const reason = document.querySelector('textarea')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(reason, '上线首日指定面料采购审批人'); reason.dispatchEvent(new Event('input', { bubbles: true })); });
+    await click('保存');
+    const body = bridge.calls.find(c => c.method === 'PUT')?.body;
+    expect(body).toMatchObject({ userIds: ['mgr'], expectedConfigVersion: 3, reason: '上线首日指定面料采购审批人' });
+    expect(body.requestKey).toMatch(/^supplier-authority:/);
+  });
+  it('keeps supplier approvers read-only for an account manager without owner/admin dictionary rights', async () => {
+    bridge.roles = ['manager']; bridge.perms = ['users:admin'];
+    bridge.routes['GET /api/admin/order-approval-authorities'] = () => ({ ok: true, assignments: [], users });
+    supplierRoutes(1, ['mgr']);
+    await render(AdminPanelPage, 'admin-panel', 'approvals');
+    expect(document.body.textContent).toContain('供应商承诺审批人仅老板或管理员可修改');
+    expect((document.querySelector('button[aria-label="调整面料采购合同审批人"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((document.querySelector('button[aria-label="调整面料订单审批人"]') as HTMLButtonElement).disabled).toBe(false);
+  });
+});

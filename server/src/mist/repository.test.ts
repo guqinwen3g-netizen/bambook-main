@@ -22,9 +22,9 @@ describe('Mist transactional workspace', () => {
     expect(resumed.id).toBe(result.workspace.id);expect(resumed.state.money.cents).toBe(0);
     expect(db.workspaces.size).toBe(2);expect([...db.workspaces.values()].some(row=>row.slug==='default')).toBe(false);
   });
-  it('retains the requested initial seed when a first default lookup has no existing workspace',async()=>{
+  it('creates a blank first default workspace for organizational accounts even when demo is requested',async()=>{
     const first=await repo.create(testActor(),{name:'First default',seed:'demo'},true);
-    expect(first.state.money.cents).toBe(100);expect(db.workspaces.size).toBe(1);
+    expect(first.state.money.cents).toBe(0);expect(db.workspaces.size).toBe(1);
     expect([...db.workspaces.values()][0].slug).toBe('default');
   });
   it('replays lifecycle receipts once and refuses another owner or a stale revision',async()=>{const first=await repo.create(testActor(),{name:'One'});const command={requestId:'archive-once',expectedRevision:0};const result=await repo.changeArchive(testActor(),first.id,command,'archive');const replay=await repo.changeArchive(testActor(),first.id,command,'archive');expect(replay.replayed).toBe(true);expect(replay.receipt).toEqual(result.receipt);expect(db.workspaces.size).toBe(2);await expect(repo.changeArchive(testActor('other'),first.id,{requestId:'foreign-restore',expectedRevision:1},'restore')).rejects.toMatchObject({status:404});await expect(repo.changeArchive(testActor(),first.id,{requestId:'stale-restore',expectedRevision:0},'restore')).rejects.toMatchObject({code:'REVISION_CONFLICT'});expect(await repo.receipt(testActor(),first.id,command.requestId)).toEqual(result.receipt);});
@@ -76,6 +76,13 @@ describe('Mist transactional workspace', () => {
   it('can retrieve the creation receipt for the full supported slug length', async () => {
     const slug = 's'.repeat(120), created = await repo.create(testActor(), { name: 'Long key', slug });
     expect((await repo.receipt(testActor(), created.id, 'create:' + slug)).result.workspaceId).toBe(created.id);
+  });
+  it('opens the company workspace an organizational member was granted instead of creating a personal blank one', async () => {
+    const company = await repo.create(testActor(), { name: 'Company', seed: 'empty' });
+    const row = db.workspaces.get(company.id)!; row.state.memberIds = ['other']; row.state.members = [{ userId: 'other', name: 'other', addedBy: 'owner', addedByName: 'owner', addedAt: '2026-10-18T08:00:00Z' }];
+    const landed = await repo.create(testActor('other'), { name: 'Mist 工作区', seed: 'demo' }, true);
+    expect(landed.id).toBe(company.id);
+    expect((await repo.list(testActor('other'))).map(item => item.id)).toEqual([company.id]);
   });
   it('creates one default per owner and isolates read/write/receipt access', async () => {
     const actor = testActor(), a = await repo.create(actor, { name: 'One' }, true), again = await repo.create(actor, { name: 'One' }, true);
@@ -138,6 +145,14 @@ describe('Mist transactional workspace', () => {
     db.failReceipt = true;
     await expect(repo.upload(testActor(), a.id, { requestId: 'broken', expectedRevision: 1 }, { bytes, name: 'second.pdf', mimeType: 'application/pdf' })).rejects.toThrow();
     expect(await readdir(path.join(root, a.id))).toHaveLength(1);
+  });
+  it('lets any business writer upload a plain attachment, but not an account without business write scopes', async () => {
+    const a = await repo.create(testActor(), { name: 'One', seed: 'empty' }); const bytes = Buffer.from('%PDF-ci'), clerk = { ...testActor(), roles: [] };
+    auth.users.set('owner', { active: true, permissions: ['shipments:write'] });
+    const result = await repo.upload(clerk, a.id, { requestId: 'ci', expectedRevision: 0 }, { bytes, name: 'ci.pdf', mimeType: 'application/pdf' });
+    expect(result.workspace.state.files).toHaveLength(1);
+    auth.users.set('owner', { active: true, permissions: [] });
+    await expect(repo.upload(clerk, a.id, { requestId: 'none', expectedRevision: 1 }, { bytes, name: 'x.pdf', mimeType: 'application/pdf' })).rejects.toMatchObject({ status: 403 });
   });
   it('accepts actual attachments above the old 20MiB limit up to the new 50MiB contract', async () => {
     expect(MIST_FILE_MAX_BYTES).toBe(50 * 1024 * 1024);
