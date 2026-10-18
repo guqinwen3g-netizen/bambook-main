@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { createAuthService } from '../../auth/service';
 import { createAuthorizationSnapshotGuard } from '../../auth/authorizationSnapshotGuard';
 import { createQuotationRouter } from '../quotationRoute';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 const clone = <T>(value: T): T => structuredClone(value);
 function fixture() {
@@ -26,7 +27,7 @@ function fixture() {
     teamMember: ['sales', 'peer', 'leader'].map(userId => ({ id: 'TM_' + userId, userId, teamId: 'T', leftAt: null })),
     teamDataGrant: [], quotation: [quote('Q_OWN', 'OWN', 'sales'), quote('Q_TEAM', 'TEAM', 'peer'), quote('Q_OTHER', 'OTHER', 'outsider'), quote('Q_LEGACY', null, 'outsider')],
     quotationLine: [], quotationVersion: [], approvalRequest: [], auditLog: [], entityReference: [], entityLink: [],
-    customerTier: [], moqThresholdConfig: [], systemConfig: [], productAsset: [], order: [], tradeDocument: [], agentJob: [],
+    customerTier: [], moqThresholdConfig: [], systemConfig: [demoExporterProfileRow()], productAsset: [], order: [], tradeDocument: [], agentJob: [],
   };
   for (const q of tables.quotation) {
     const line = { id: q.id + '_L', quotationId: q.id, lineNumber: 1, productAssetId: 'P', productType: 'Fabric',

@@ -15,6 +15,7 @@ import { renderQuotationBody } from '../docTemplates/quotation';
 import { renderOrderConfirmationBody } from '../docTemplates/orderConfirmation';
 import { renderContractBody } from '../docTemplates/contract';
 import { renderServerDocument } from '../docTemplates/registry';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 const EXPORTER = {
   nameEn: 'BAMBOOK TRADING CO., LTD.',
@@ -98,7 +99,14 @@ describe('三模板签名区盖章', () => {
 describe('registry.renderServerDocument 印章解析', () => {
   const makePrisma = (seal: any) => ({
     seal: { findFirst: vi.fn().mockResolvedValue(seal) },
+    systemConfig: { findUnique: vi.fn().mockResolvedValue(demoExporterProfileRow()) },
   }) as unknown as PrismaClient;
+
+  it('出口方档案未配置 → 拒绝渲染（409，提示先在管理后台填写；不使用兜底抬头）', async () => {
+    const prisma = { seal: { findFirst: vi.fn() }, systemConfig: { findUnique: vi.fn().mockResolvedValue(null) } } as unknown as PrismaClient;
+    await expect(renderServerDocument(prisma, 'QUOT', QUOT_DATA, {}, { id: 'TD_1', type: 'Quotation', sourceRef: 'QT_1' }))
+      .rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('管理后台 › 出口方档案') });
+  });
 
   it('ctx.signer 有值 → 按签署人解析章并盖入', async () => {
     const prisma = makePrisma({ id: 'SEAL_1', name: '公司公章', imageDataUrl: PNG });
@@ -121,6 +129,7 @@ describe('registry.renderServerDocument 印章解析', () => {
   it('章库异常 → fail-open（仍出单据，只是无章）', async () => {
     const prisma = {
       seal: { findFirst: vi.fn().mockRejectedValue(new Error('db down')) },
+      systemConfig: { findUnique: vi.fn().mockResolvedValue(demoExporterProfileRow()) },
     } as unknown as PrismaClient;
     const html = await renderServerDocument(
       prisma, 'QUOT', QUOT_DATA, {},

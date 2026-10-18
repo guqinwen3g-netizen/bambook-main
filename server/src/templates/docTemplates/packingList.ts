@@ -13,7 +13,7 @@ import { assertPackingListEnvelope, type PackingListEnvelope } from './packingLi
 import { businessNowDate } from '../../shared/businessClock';
 
 
-/** 出口方档案（与 DEFAULT_EXPORTER_PROFILE 同构） */
+/** 出口方档案（与 ExporterProfileValue 同构） */
 export interface DocExporterProfile {
   nameEn: string;
   addressEn: string;

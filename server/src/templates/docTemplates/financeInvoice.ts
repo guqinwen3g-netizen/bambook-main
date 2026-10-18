@@ -15,7 +15,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { DOC_PRINT_BASE_STYLES, esc, money, buildServerDocument } from '../docPrintBase';
 import { getSystemConfigService } from '../../config/systemConfigService';
-import { DEFAULT_EXPORTER_PROFILE, EXPORTER_PROFILE_CONFIG_KEY } from '../../config/systemConfigRoute';
+import { EMPTY_EXPORTER_PROFILE, EXPORTER_PROFILE_CONFIG_KEY, readConfiguredExporterProfile } from '../../config/systemConfigRoute';
 import { amountInWords, formatDocumentDecimal, renderCommercialInvoiceBody, renderOtherTradeDocumentBody } from './customsDocs';
 import type { TokenPayload } from '../../auth/service';
 import { readCiInvoiceSource, readAuthorizedCiDocument, readHistoricalCiDocument, type CiInvoiceSource } from '../../customs/ciInvoiceSource';
@@ -43,12 +43,7 @@ export interface InvoiceDoc {
 /** Read the current configured exporter once; business CIs store this value in
  * their immutable issued snapshot so later profile edits cannot rewrite a CI. */
 export async function currentExporterProfileSnapshot(prisma: PrismaClient): Promise<InvoiceDoc['exporter']> {
-  let exporter: InvoiceDoc['exporter'] = { ...DEFAULT_EXPORTER_PROFILE };
-  try {
-    const found = await getSystemConfigService(prisma).get(EXPORTER_PROFILE_CONFIG_KEY);
-    if (found?.value && typeof found.value === 'object') exporter = { ...DEFAULT_EXPORTER_PROFILE, ...(found.value as object) } as InvoiceDoc['exporter'];
-  } catch { /* A current default may be used for preview; issued business CIs persist their snapshot. */ }
-  return exporter;
+  return await readConfiguredExporterProfile(prisma) as InvoiceDoc['exporter'];
 }
 
 /** Render a CI from the exact business DocumentVersion snapshot, without
@@ -335,14 +330,8 @@ export async function loadInvoiceDoc(prisma: PrismaClient, id: string): Promise<
   const invoice = await prisma.invoice.findUnique({ where: { id } });
   if (!invoice || invoice.deletedAt) return null;
   const allocs = await (prisma as any).invoiceOrderAllocation.findMany({ where: { invoiceId: invoice.id, deletedAt: null }, orderBy: { createdAt: 'asc' } }) || [];
-  // 出口商档案：SystemConfig 真源（30s TTL 缓存）→ 默认值兜底；读取失败不阻断单据渲染
-  let exporter: InvoiceDoc['exporter'] = { ...DEFAULT_EXPORTER_PROFILE };
-  try {
-    const found = await getSystemConfigService(prisma).get(EXPORTER_PROFILE_CONFIG_KEY);
-    if (found?.value && typeof found.value === 'object') {
-      exporter = { ...DEFAULT_EXPORTER_PROFILE, ...(found.value as object) } as InvoiceDoc['exporter'];
-    }
-  } catch { /* 配置读取失败走默认档案 */ }
+  // 出口商档案：SystemConfig 真源（30s TTL 缓存）；未配置/读取失败拒绝渲染（不使用兜底抬头）
+  const exporter = await readConfiguredExporterProfile(prisma) as InvoiceDoc['exporter'];
   // 交易对手档案（买方/供应商名称与联系地址）
   let relation: any = null;
   if (invoice.customerRelationId) {
@@ -413,10 +402,7 @@ export async function renderFinanceInvoiceDocument(prisma: PrismaClient, invoice
 }
 
 async function ciInvoiceDoc(prisma: PrismaClient, source: CiInvoiceSource, historical = false): Promise<InvoiceDoc> {
-  let exporter: InvoiceDoc['exporter'] = { ...DEFAULT_EXPORTER_PROFILE };
-  try { const found = await getSystemConfigService(prisma).get(EXPORTER_PROFILE_CONFIG_KEY);
-    if (found?.value && typeof found.value === 'object') exporter = { ...exporter, ...(found.value as object) } as InvoiceDoc['exporter'];
-  } catch { /* Existing exporter profile fallback, never financial facts. */ }
+  const exporter = await readConfiguredExporterProfile(prisma) as InvoiceDoc['exporter'];
   const relation = historical ? { name: source.invoice.customerName ?? source.orders.map(order => order.customer).find(Boolean) ?? '' }
     : source.invoice.customerRelationId ? await prisma.relation.findUnique({ where: { id: source.invoice.customerRelationId } }) : null;
   const ordersById = new Map<string, any>(), linesByOrder = new Map<string, any[]>(), grouped = new Map<string, any>();
@@ -474,10 +460,10 @@ export async function renderHistoricalCiInvoiceDocument(prisma: PrismaClient, do
     doc.ciSource = { draft: false, historical: true, cancelled: history.currentInvoice?.status === 'Cancelled' };
     html = invoicePdfHtml(doc, { screen: true });
   } else {
-    let exporter: InvoiceDoc['exporter'] = { ...DEFAULT_EXPORTER_PROFILE };
+    let exporter: InvoiceDoc['exporter'] = { ...EMPTY_EXPORTER_PROFILE };
     try { const found = await getSystemConfigService(prisma).get(EXPORTER_PROFILE_CONFIG_KEY);
       if (found?.value && typeof found.value === 'object') exporter = { ...exporter, ...(found.value as object) } as InvoiceDoc['exporter'];
-    } catch { /* Legacy presentation fallback only. */ }
+    } catch { /* Historical read-only copy: blank seller rather than any invented default. */ }
     const label = '<div class="doc-notes"><b>HISTORICAL COPY / 历史版本</b><br>Document: ' + esc(history.document.documentNumber) + ' · Version ' + esc(history.version.version) + '<br>'
       + (history.currentInvoice ? '只读原归档版本，不替代当前原票或重新正式出单。' + (history.currentInvoice.status === 'Cancelled' ? '原财务票已取消。' : '')
         : '原财务来源未核验，仅供历史阅读，不能作为正式商业发票。') + '</div>';

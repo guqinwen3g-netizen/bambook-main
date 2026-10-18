@@ -108,9 +108,9 @@ describe('relations route', () => {
   it('expands an organization into profile contacts and related people', async () => {
     const organization = {
       id: 'panda001',
-      name: 'Jiangsu Panda Clothing Co., Ltd.',
-      chineseName: '江苏庞大纺织服饰有限公司',
-      englishName: 'Jiangsu Panda Clothing Co., Ltd.',
+      name: 'Demo Export Co., Ltd.',
+      chineseName: '示例纺织服饰有限公司',
+      englishName: 'Demo Export Co., Ltd.',
       category: 'Supplier',
       type: 'Supplier',
       isOrganization: true,

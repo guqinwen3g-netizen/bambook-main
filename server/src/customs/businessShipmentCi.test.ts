@@ -7,6 +7,7 @@ vi.mock('../shipping/shipmentDocumentSource', async importOriginal => ({
 }));
 vi.mock('./tradeDocumentLifecycleService', () => ({ generateTradeDocumentNumber: mocked.number }));
 import { buildBusinessShipmentCiSnapshot, validateBusinessCiSelection, writeBusinessShipmentCi } from './businessShipmentCi';
+import { demoExporterProfileRow } from '../config/__tests__/exporterProfileFixture';
 
 function source(): ShipmentDocumentSource {
   return { shipment: { id: 'S1' }, orders: [{ id: 'O1', status: 'Confirmed', finalContractNumber: 'SC1', currency: 'USD',
@@ -97,7 +98,8 @@ describe('business CI transactional producer', () => {
       tradeDocument: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockImplementation(({ data }) => data),
         findUnique: vi.fn(), update: vi.fn().mockImplementation(({ where, data }) => ({ id: where.id, ...data })), count: vi.fn().mockResolvedValue(0) },
       documentVersion: { create: vi.fn().mockImplementation(({ data }) => data), findFirst: vi.fn() },
-      invoice: { findFirst: vi.fn().mockResolvedValue(null) } };
+      invoice: { findFirst: vi.fn().mockResolvedValue(null) },
+      systemConfig: { findUnique: vi.fn().mockResolvedValue(demoExporterProfileRow()) } };
     db = { $transaction: vi.fn().mockImplementation(fn => fn(tx)) };
   });
   it('creates independent draft without reading finance contents', async () => {

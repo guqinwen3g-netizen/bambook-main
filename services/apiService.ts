@@ -604,8 +604,10 @@ export interface CompanyExporterProfileResponse {
   key: string;
   value: CompanyExporterProfileValue;
   version: number;
-  /** true = 服务端未配置，返回代码默认值（未落库） */
+  /** true = 服务端未配置（返回空档案，未落库） */
   isDefault: boolean;
+  /** false = 未填写公司英文名，单据生成会被服务端拒绝 */
+  configured?: boolean;
   updatedAt?: number;
   updatedBy?: string | null;
 }

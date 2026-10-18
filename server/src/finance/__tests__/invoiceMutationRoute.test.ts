@@ -6,6 +6,7 @@ import { createFinanceRouter } from '../route';
 import { createInvoice } from '../invoiceMutationService';
 import { authHeader } from '../../__tests__/authTestHelper';
 import { createAuthService } from '../../auth/service';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 // Explicit in-memory current DB authority; real permission/source helpers run.
 // The original legacy-owner credential now has a corresponding active account,
@@ -52,7 +53,7 @@ function makeApp(opts: { invoice?: any; syncFail?: boolean; auditFail?: boolean;
   //     但没有任何用例**带 invoiceLines 入参** ⇒ `lines.length` 恒为 0 ⇒ 那支从不进入。
   const invoiceLineCreateMany = vi.fn(async ({ data }: any) => { persisted.lines.push(...data); return { count: data.length }; });
   // CI 级模板数据源 mock：出口商档案（SystemConfig 未配置 → 默认档案）/ 交易对手 / 订单 / 订单行明细 / 出运单
-  const systemConfigFindUnique = vi.fn().mockResolvedValue(null);
+  const systemConfigFindUnique = vi.fn().mockResolvedValue(demoExporterProfileRow());
   const relationFindUnique = vi.fn().mockResolvedValue(null);
   const orderLinesFindMany = vi.fn().mockResolvedValue([
     { orderId: 'O1', lineNumber: 1, itemNo: 'ART-001', description: 'Navy Wool Twill', quantity: new Prisma.Decimal('100'), unit: 'M', unitPrice: new Prisma.Decimal('0.5'), netValue: new Prisma.Decimal('50') },
@@ -162,8 +163,8 @@ describe('invoiceMutationService route POST /finance', () => {
     // doc-* 基座结构标记（2026-08-21 统一裁决：与合同/装箱单同一版式基因，无旧 letterhead 类）
     expect(res.text).toContain('doc-header');
     expect(res.text).toContain('doc-party-grid');
-    // 卖方 = 出口商档案默认值（SystemConfig 未配置 → DEFAULT_EXPORTER_PROFILE）
-    expect(res.text).toContain('JIANGSU PANDA CLOTHING CO.,LTD.');
+    // 卖方 = 已配置的出口商档案（测试用模拟档案）
+    expect(res.text).toContain('DEMO EXPORT CO.,LTD.');
     // 运输与条款组（订单 deliveryTerms/paymentTerms + 原产国）
     expect(res.text).toContain('Shipment &amp; Terms');
     expect(res.text).toContain('FOB SHANGHAI');
@@ -179,7 +180,7 @@ describe('invoiceMutationService route POST /finance', () => {
     expect(res.text).toContain('SAY TOTAL US DOLLARS ONE HUNDRED ONLY');
     // 收款银行块（应收发票展示受益人银行）
     expect(res.text).toContain('Beneficiary Bank');
-    expect(res.text).toContain('BKCHCNBJ95L');
+    expect(res.text).toContain('DEMOCNXX001');
     // 签字 + 盖章区 + 页脚（E&OE）——doc-* 基座双签章三段式（sig-label/sig-line/sig-name）
     expect(res.text).toContain('(签章)');
     expect(res.text).toContain('Authorized Signature / Date');

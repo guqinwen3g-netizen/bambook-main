@@ -1721,7 +1721,7 @@ interface ShippingNoticeOptions {
     itemRemarks?: string;
 }
 
-const DEFAULT_SUPPLIER = process.env.BAMBOOK_COMPANY_NAME_EN || 'JIANGSU PANDA CLOTHING CO.,LTD.';
+const DEFAULT_SUPPLIER = process.env.BAMBOOK_COMPANY_NAME_EN || '';
 const DEFAULT_DEPARTURE_PORT = 'SHANGHAI';
 const DEFAULT_SHIPPING_METHOD = 'SEA';
 const DEFAULT_BL_REQUIREMENT = '电放或正本提单按客户通知';

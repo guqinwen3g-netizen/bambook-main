@@ -10,7 +10,7 @@ import { generateTradeDocumentNumber } from './tradeDocumentLifecycleService';
 import { currentDocumentActor, authorizedDocumentOrders, shipmentDocumentSourceInTx, lockShipmentDocumentSourcesInTx,
   documentSourceFingerprint as hash, documentSourceJson as json } from '../shipping/shipmentDocumentSource';
 import { buildMergedPackingListEnvelope, assertMergedPackingListEnvelope, type MergedPackingListSnapshot } from '../templates/docTemplates/mergedPackingListSource';
-import { DEFAULT_EXPORTER_PROFILE, EXPORTER_PROFILE_CONFIG_ID } from '../config/systemConfigRoute';
+import { EXPORTER_PROFILE_CONFIG_ID, EXPORTER_PROFILE_MISSING_MESSAGE } from '../config/systemConfigRoute';
 const prefix='merged-pl:v1:',action='MERGED_PACKING_LIST_VERSION',operation='save_merged_packing_list_version';
 const scopes=['customs:read','shipments:read'] as const;
 const bad=(message='合并装箱单来源、版本或原命令无法核验。'): never=>{throw businessError('CONFLICT',message);};
@@ -51,7 +51,7 @@ const identity=(d:any)=>({id:d.id,type:d.type,domain:d.domain,status:d.status,so
  orderId:d.orderId,documentNumber:d.documentNumber,issueDate:d.issueDate,consignee:d.consignee,deletedAt:d.deletedAt});
 async function profile(tx:any):Promise<MergedPackingListSnapshot['exporter']>{
  const row=await tx.systemConfig.findUnique({where:{id:EXPORTER_PROFILE_CONFIG_ID}});
- if(!row)return{nameEn:DEFAULT_EXPORTER_PROFILE.nameEn,addressEn:DEFAULT_EXPORTER_PROFILE.addressEn,source:'default',configVersion:null};
+ if(!row)bad(EXPORTER_PROFILE_MISSING_MESSAGE);
  if(row.encrypted||row.valueType!=='json'||!Number.isSafeInteger(row.version)||row.version<1)bad('当前出具方档案无法核验。');
  let value=row.value;if(typeof value==='string'){try{value=JSON.parse(value);}catch{bad('当前出具方档案无法核验。');}}
  if(!value||typeof value.nameEn!=='string'||!value.nameEn.trim()||typeof value.addressEn!=='string')bad('当前出具方档案无法核验。');

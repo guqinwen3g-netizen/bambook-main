@@ -12,7 +12,7 @@ import { generateTradeDocumentNumber } from './tradeDocumentLifecycleService';
 import { randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { businessError, readBusinessErrorMint } from '../shared/errorCodes';
-import { DEFAULT_EXPORTER_PROFILE, EXPORTER_PROFILE_CONFIG_ID } from '../config/systemConfigRoute';
+import { EXPORTER_PROFILE_CONFIG_ID, EXPORTER_PROFILE_MISSING_MESSAGE } from '../config/systemConfigRoute';
 import { currentDocumentActor, authorizedDocumentOrders, documentSourceFingerprint as hash, documentSourceJson as json,
   shipmentDocumentSourceInTx, lockShipmentDocumentSourcesInTx } from '../shipping/shipmentDocumentSource';
 import { assertPackingListEnvelope, buildPackingListEnvelope, type PackingListEnvelope, type PackingListSnapshot } from '../templates/docTemplates/packingListSource';
@@ -52,9 +52,9 @@ function assertDocument(document: any, draft = false): void {
 }
 async function exporter(tx: any): Promise<PackingListSnapshot['exporter']> {
   // Bypass the display TTL cache: a dependency failure is unknown, not a
-  // silently invented default. Absence uses the existing explicit default.
+  // silently invented default. Absence refuses: no fallback seller header.
   const row = await tx.systemConfig.findUnique({ where: { id: EXPORTER_PROFILE_CONFIG_ID } });
-  if (!row) return { nameEn: DEFAULT_EXPORTER_PROFILE.nameEn, addressEn: DEFAULT_EXPORTER_PROFILE.addressEn, source: 'default', configVersion: null };
+  if (!row) conflict(EXPORTER_PROFILE_MISSING_MESSAGE);
   if (row.encrypted || row.valueType !== 'json' || !Number.isSafeInteger(row.version) || row.version < 1) conflict('当前出具方档案无法核验。');
   let value = row.value;
   if (typeof value === 'string') { try { value = JSON.parse(value); } catch { conflict('当前出具方档案无法核验。'); } }

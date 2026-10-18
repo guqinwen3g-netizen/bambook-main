@@ -3,6 +3,7 @@ import { renderServerDocument } from '../registry';
 import type { ApprovalSignDocumentSnapshot } from '../../../approvals/approvalSignDocumentSnapshotService';
 import { assembleQuotationDocData } from '../quotation';
 import { QUOTATION_TEMPLATE_VERSION } from '../quotation';
+import { demoExporterProfileRow } from '../../../config/__tests__/exporterProfileFixture';
 
 const data = (customer: string) => ({ order: { id: 'o1', poNumber: 'PO-1', customer, status: 'Confirmed',
   dueDate: null, currency: 'USD', orderAmount: 12, deliveryTerms: 'FOB', paymentTerms: '30 days',
@@ -17,7 +18,7 @@ describe('approved document snapshot rendering', () => {
     const quotation = assembleQuotationDocData({ id: 'q1', quotationNumber: 'QT-1', status: 'Approved', currency: 'USD',
       totalAmount: '12', issueDate: '2026-10-05', customerName: 'Reviewed customer', lines: [] });
     const earlier = { ...quotation, qt: { ...quotation.qt, customerName: 'Earlier customer', totalAmount: 99 } };
-    const prisma: any = { systemConfig: { findUnique: vi.fn().mockResolvedValue(null) } };
+    const prisma: any = { systemConfig: { findUnique: vi.fn().mockResolvedValue(demoExporterProfileRow()) } };
     const html = await renderServerDocument(prisma, 'QUOT', earlier, {},
       { id: 'q1', type: 'Quotation', sourceRef: 'q1', signer: { quotationData: quotation } });
     expect(html).toContain('Reviewed customer');
