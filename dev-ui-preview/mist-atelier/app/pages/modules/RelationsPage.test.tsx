@@ -58,12 +58,23 @@ describe('关系智库', () => {
     expect(button('关联供应商身份')).toBeUndefined();
     expect(button('打开供应商')).toBeTruthy(); expect(button('打开客户业务')).toBeTruthy();
   });
-  it('普通客户可关联供应商身份；在手业务交接未接入并说明原因', async () => {
+  it('普通客户可关联供应商身份；主管可交接在手业务（默认勾选在手订单与商机，选新负责人并写原因）', async () => {
+    bridge.current.workspace = { ownerId: 'demo-sales' }; (state as any).members = [{ userId: 'demo-new', name: '林舟' }];
     await mount(named('Cedar').id);
     expect(button('关联供应商身份')!.disabled).toBe(false);
     expect(host.querySelector('[data-relation-detail]')!.textContent).toMatch(/联系人 · 3.*Emma Clarke/);
-    expect(button('在手业务交接')!.disabled).toBe(true);
-    expect(host.querySelector('[data-relation-detail]')!.textContent).toContain('离职 / 调岗时逐项转给新负责人，尚未接入');
+    await click('在手业务交接');
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.textContent).toContain('客户负责人现为 顾言');
+    const owner = dialog.querySelector('select') as HTMLSelectElement;
+    expect([...owner.options].map(o => o.value)).toEqual(['', 'demo-new']);
+    expect([...dialog.querySelectorAll('input[type="checkbox"]')].map(c => (c as HTMLInputElement).checked)).toEqual([true, true, true]);
+    await act(async () => { owner.value = 'demo-new'; owner.dispatchEvent(new Event('change', { bubbles: true })); });
+    const reason = dialog.querySelector('textarea') as HTMLTextAreaElement;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(reason, '顾言调岗'); reason.dispatchEvent(new Event('input', { bubbles: true })); });
+    await click('确认交接');
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'handover.customer', payload: expect.objectContaining({ customerId: named('Cedar').customerId, toUserId: 'demo-new', reason: '顾言调岗', orderIds: state.orders.filter(o => o.customerId === named('Cedar').customerId && o.state !== '履约完成').map(o => o.id), opportunityIds: [] }) }));
+    bridge.current.run.mockClear();
     await click('冻结往来');
     expect(document.body.textContent).toMatch(/已有在手业务 \d+ 项不受影响/);
     expect(bridge.current.run).not.toHaveBeenCalled();
