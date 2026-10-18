@@ -225,7 +225,7 @@ export function FxRevaluationCard() {
       {view && view.blockers.length > 0 && <Banner tone="warn" title="暂不能登记">{view.blockers.join('；')}</Banner>}
       {view && view.currencies.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 16 }}>{view.currencies.map(c => <span key={c.currency} className="mist-col" style={{ gap: 2 }}><b>{c.currency} · {c.bookRate} → {c.closingRate || '缺月末汇率'}</b><small className="mist-muted">未实现 {cny(c.unrealized)} · 结汇 {cny(c.realized)} · 合计 {cny(c.total)}</small></span>)}</div>}
       {view && <RevalLinesTable lines={view.lines} label={`${month} 期末调汇预览`} />}
-      <span className="mist-note">余额按月末截止：银行按流水日期，应收按开票日期、核销按到账日期计入；外币应付暂不纳入（供应商结算为人民币）。须按月连续登记。</span>
+      <span className="mist-note">余额按月末截止：银行按流水日期，应收按开票日期、核销按到账日期计入；外币应付按发票日期、付款按付款日计入，合同预付款不重估。须按月连续登记。</span>
     </div>
     <DataTable ariaLabel="已登记期末调汇" rows={history} rowKey={r => r.id} loading={loading} onRowClick={r => setDetail(r)} columns={[
       { key: 'code', header: '记录', width: 'minmax(140px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span className="mist-num">{r.code} · {r.month}</span><small className="mist-muted">{r.actor} · {r.createdAt.slice(0, 10)}{r.note ? ' · ' + r.note : ''}{r.voided ? ` · 作废：${r.voided.reason}` : ''}</small></div> },
