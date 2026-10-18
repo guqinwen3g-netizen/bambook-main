@@ -14,7 +14,7 @@ export type MistMemberLog = MistWorkspaceMemberLog;
 export type MistWorkspaceAccess = SharedAccess;
 type Section = { key: string; label: string; permissions: PermissionScope[]; paths: string[][]; entityTypes: string[]; views: string[] };
 export const MIST_READ_SECTIONS: Section[] = [
-  { key: 'receivables', label: '应收票据', permissions: ['invoices:read'], paths: [['invoices'], ['platform', 'invoiceDrafts']], entityTypes: ['invoice'], views: ['invoices'] },
+  { key: 'receivables', label: '应收票据', permissions: ['invoices:read'], paths: [['invoices'], ['platform', 'invoiceDrafts'], ['customerStatements']], entityTypes: ['invoice'], views: ['invoices'] },
   { key: 'receipts', label: '收款与核销', permissions: ['invoices:read', 'vouchers:read'], paths: [['receipts'], ['allocations']], entityTypes: ['finance', 'receipt'], views: ['receipts', 'payment-vouchers'] },
   { key: 'payments', label: '付款记录', permissions: ['vouchers:read'], paths: [['payments']], entityTypes: ['payment'], views: [] },
   { key: 'payables', label: '供应商票据与应付', permissions: ['invoices:read', 'vouchers:read'], paths: [['payables']], entityTypes: ['payable'], views: ['payables'] },

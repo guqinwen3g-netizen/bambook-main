@@ -67,3 +67,17 @@ it('shows the finance confirmation and rejection facts on the receivable',()=>{
   expect(host.textContent).toContain('财务驳回');expect(host.textContent).toContain('金额与合同不符');expect(host.textContent).toContain('CI 已退回后勤更正');
   expect((getByRole(host,'button',{name:'收款与核销'}) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it('generates a customer statement for a customer with open receivables and lists archived statements',async()=>{
+  const s=store.value.state;s.customers=[{id:'customer',name:'客户',code:'C-1'}];s.settings.companyProfile={legalName:'公司'};
+  s.files.push({id:'soa-file',name:'客户对账单-SOA-2026-0001-C-1.pdf',mimeType:'application/pdf',size:1,storageKey:'w/soa-file',createdAt:'2026-10-14T00:00:00Z'});
+  s.customerStatements=[{id:'st',customerId:'customer',statementNo:'SOA-2026-0001',seq:1,asOf:'2026-10-13',totals:[{currency:'USD',net:'70.00'}],fileId:'soa-file',fileName:'x.pdf',sha256:'',bytes:1,templateVersion:1,snapshotFingerprint:'',snapshot:{} as any,generatedAt:'2026-10-13T02:00:00Z',generatedBy:'财务',generatedById:'f'}];
+  render();
+  const list=getByRole(host,'list',{name:'已生成的客户对账单'});expect(list.textContent).toContain('SOA-2026-0001');expect(list.textContent).toContain('净欠 70.00 USD');
+  await click('生成对账单');expect(store.value.run).toHaveBeenCalledWith({type:'finance.statement.generate',payload:{customerId:'customer'}});
+  await click('下载');expect(store.value.downloadFile).toHaveBeenCalledWith(expect.objectContaining({id:'soa-file'}));
+});
+it('disables statement generation without invoice write permission',()=>{
+  store.canWrite=false;store.value.state.customers=[{id:'customer',name:'客户',code:'C-1'}];store.value.state.settings.companyProfile={legalName:'公司'};render();
+  const button=getAllByRole(host,'button').find(b=>b.textContent==='生成对账单') as HTMLButtonElement;expect(button.disabled).toBe(true);expect(button.title).toContain('应收写权限');
+});

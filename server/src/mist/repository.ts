@@ -17,6 +17,7 @@ import { prepareMistBusinessNumbers } from './businessNumbers';
 import { buildIssueArchive, bindIssueArchive, prepareCreditDocumentSnapshot, assertCreditIssuePayload, assertIssuedCreditArchive, type PreparedCreditIssueArchive } from './creditPrint';
 import { buildQuotationDocument, bindQuotationDocument, nextQuotationDocumentSeq, prepareQuotationDocumentSnapshot } from './quotationPrint';
 import { bindDevelopmentNotice, buildDevelopmentNotice, prepareDevelopmentNoticeSnapshot } from './developmentNoticePrint';
+import { bindCustomerStatement, buildCustomerStatement, prepareCustomerStatementSnapshot } from './customerStatementPrint';
 import type { PdfRenderResult } from '../templates/pdf';
 import { canonicalCreditDocument, creditDocumentFingerprint, creditSourceFingerprint, type MistBusinessNumberNeed, type MistCreditPrintSnapshot } from '../shared/mistCreditDocuments';
 /** 演示工作区里指派给演示成员（demo-*）的审批无人能处理，不阻止移入回收站。 */
@@ -354,6 +355,12 @@ export class MistRepository {
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           (context as typeof context & { developmentNotice?: unknown }).developmentNotice = bindDevelopmentNotice(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
         }
+        if (input.command?.type === 'finance.statement.generate') {
+          const snapshot = prepareCustomerStatementSnapshot(row.state, input.command.payload || {}, context);
+          const prepared = await buildCustomerStatement(snapshot, { renderPdf: this.quotationPdfRenderer });
+          stored = await this.files.write(workspaceId, prepared.file, context.now);
+          (context as typeof context & { customerStatement?: unknown }).customerStatement = bindCustomerStatement(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
+        }
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
         numbers.assertConsumed();
@@ -418,7 +425,7 @@ export class MistRepository {
   private async concurrentChanges(db: any, workspaceId: string, current: number, expected: number, type: string | undefined): Promise<string[][]> {
     const refuse = (message: string): never => fail('REVISION_CONFLICT', message, 409);
     if (expected > current) refuse('工作区版本无效，请刷新后重试');
-    if (!type || NON_REBASABLE_COMMAND.test(type) || type === 'development.notice.generate') refuse('工作区已被他人更新，此操作需基于最新内容重新确认，请刷新后重试');
+    if (!type || NON_REBASABLE_COMMAND.test(type) || type === 'development.notice.generate' || type === 'finance.statement.generate') refuse('工作区已被他人更新，此操作需基于最新内容重新确认，请刷新后重试');
     if (current - expected > MIST_MAX_REBASE_GAP) refuse('工作区已有较多更新，无法自动合并，请刷新后重试');
     const keys: string[][] = [], wanted = Array.from({ length: current - expected }, (_, i) => revisionMarker(expected + 1 + i));
     const found = new Map<string, any>((await db.mistCommandReceipt.findMany({ where: { workspaceId, requestId: { in: wanted } } })).map((row: any) => [row.requestId, row]));

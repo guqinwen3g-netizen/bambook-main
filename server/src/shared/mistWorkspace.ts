@@ -20,6 +20,7 @@ import {lineQuantityFromBreakdown,type OrderLineBreakdown} from './mistOrderBrea
 import {isLineClosed} from './mistOrderClosure';
 import {createOrderGovernance,applyOrderGovernanceCommand,orderGovernancePermission,getOrderGovernanceReviews,assertOrderApproved,assertOrderWritable,assertOrderNotTerminated,type OrderGovernanceFields,type OrderGovernanceCommand,type OrderGovernanceInput} from './mistOrderGovernance';
 import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
+import {applyCustomerStatementCommand,customerStatementCommandPermission,type CustomerStatementCommand,type CustomerStatementRecord} from './mistCustomerStatement';
 import {applyFxRateCommand,fxCommandPermission,type FxPeriodRate,type FxRateCommand,type FxRevaluation} from './mistFxRates';
 import {createExportRebateState,applyExportRebateCommand,exportRebateCommandPermission,rebateReceiptUsedMinor,type ExportRebateState,type ExportRebateCommand} from './mistExportRebate';
 import {createPayablesState,applyPayablesCommand,payablesCommandPermission,getPayableReviews,type PayablesState,type PayablesCommand} from './mistPayables';
@@ -243,6 +244,8 @@ export type MistState = {
   /** 月末汇率（报表暂估用），见 mistFxRates。 */
   fxPeriodRates?: FxPeriodRate[];
   fxRevaluations?: FxRevaluation[];
+  /** 客户对账单归档记录（只追加），见 mistCustomerStatement。 */
+  customerStatements?: CustomerStatementRecord[];
   customers: MistCustomer[]; contacts: MistContact[]; files: MistFile[];
   events: MistEvent[]; tasks: MistTask[]; notifications: MistNotification[]; calendar: MistCalendarEvent[];
   settings: MistSettings; fulfillment:FulfillmentState; market:MarketState; platform:PlatformState; email:EmailState; crm:CrmState; reviewerIds?:string[];
@@ -252,7 +255,7 @@ export type MistState = {
   memberGroups?:MistMemberGroupAssignment[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand
+export type MistCommand = FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -690,6 +693,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('payable.'))return payablesCommandPermission(command as PayablesCommand);
   if(command.type.startsWith('rebate.'))return exportRebateCommandPermission(command as ExportRebateCommand);
   if(command.type.startsWith('fxrate.'))return fxCommandPermission(command as FxRateCommand);
+  if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
   if(command.type.startsWith('fulfillment.'))return fulfillmentCommandPermission(command as FulfillmentCommand);
   if(command.type.startsWith('market.'))return marketCommandPermission(command as MarketCommand);
   if(command.type.startsWith('platform.'))return platformCommandPermission(command as PlatformCommand);
@@ -730,6 +734,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('funding.')){const result=applyOrderFundingCommand(state,command as OrderFundingCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('payable.')){const result=applyPayablesCommand(state,command as PayablesCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('fxrate.')){const result=applyFxRateCommand(state,command as FxRateCommand,context);return {state,result};}
+  if(command.type==='finance.statement.generate'){const result=applyCustomerStatementCommand(state,command as CustomerStatementCommand,context);return {state,result};}
   if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('fulfillment.')){const result=applyFulfillmentCommand(state,command as FulfillmentCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type==='market.lead.convertToCrm'){const result=convertLeadToCrm(state,command.payload as Extract<MarketCommand,{type:'market.lead.convertToCrm'}>['payload'],context);recalculate(state);return {state,result};}

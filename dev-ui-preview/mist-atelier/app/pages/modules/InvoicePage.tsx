@@ -13,6 +13,7 @@ import { financeCurrencyTotals } from '../FinanceWorkspace';
 import { downloadModuleCsv, ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { ActionBar, DetailBlock, todayIso } from './pageKit';
 import { useRouteDraft, useRouteScope } from './useRouteDraft';
+import { CustomerStatementCard } from './CustomerStatements';
 
 type Age = 'unknown' | 'not-due' | '1-30' | '31-60' | '61-90' | '90+';
 type Status = 'all' | 'pending' | 'open' | 'overdue' | 'settled' | 'void' | 'draft';
@@ -132,6 +133,7 @@ export function InvoicePage() {
         <Toolbar><SearchField value={query} onChange={setQuery} placeholder="搜索票据、对方、来源订单或币种" /><Select aria-label="票据币种" value={currency} onChange={e => setCurrency(e.target.value)} options={[{ value: 'all', label: '全部币种' }, ...currencies.map(c => ({ value: c, label: c }))]} /><Select aria-label="票据账龄" value={age} onChange={e => setAge(e.target.value)} options={[{ value: 'all', label: '全部账龄' }, ...Object.entries(ageLabels).map(([value, label]) => ({ value, label }))]} /></Toolbar>
         <Segmented<Status> value={status} onChange={setStatus} options={[{ value: 'all', label: '全部' }, { value: 'pending', label: '待财务确认' }, { value: 'open', label: '未结' }, { value: 'overdue', label: '逾期' }, { value: 'settled', label: '已结清' }, { value: 'void', label: '已作废' }, { value: 'draft', label: '历史草稿' }]} />
         <Card><DataTable ariaLabel="应收票据台账" rows={shown} columns={columns} rowKey={r => r.id} loading={w.loading} onRowClick={r => pick(r.id)} empty={<EmptyState title={rows.length ? '没有符合条件的票据' : '暂无应收票据'} description={rows.length ? '调整筛选或清除条件查看原台账。' : '从实际业务或后勤的已签发 CI 进入，不由财务补造票据。'} action={rows.length ? <Button onClick={() => { setQuery(''); setCurrency('all'); setAge('all'); setStatus('all'); if (route.customerId) go('invoices'); }}>清除筛选</Button> : <Button onClick={() => go('document-center')}>查看来源单据</Button>} />} footer={<span>{shown.length} / {rows.length} 笔 · 金额按原币，历史草稿不计应收</span>} /></Card>
+        <CustomerStatementCard customerId={route.customerId} />
       </div>}
     </>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
