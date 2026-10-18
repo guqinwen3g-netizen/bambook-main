@@ -1,4 +1,5 @@
 /** 供应商管理：类型 / 合作状态筛选，档案含产能工艺、认证有效期、评级历史、在手业务与交付表现；暂停 / 停用按生效日阻止新增业务。 */
+import { BaseDataImportButton } from './BaseDataImport';
 import React from 'react';
 import { Award, Ban, Building2, Download, FileBadge, Pause, Pencil, Play, Plus, Scale, SearchX, UserPlus } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
@@ -143,6 +144,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   return <MistPage>
     <PageHeader eyebrow="客户与市场 · 供应商" title="供应商管理" description="认证有效期、评级与交付表现集中查看；暂停或停用按生效日阻止新增业务，在手业务继续执行。"
       actions={<>
+        {can && <BaseDataImportButton kind="supplier" />}
         <Button icon={Download} onClick={() => downloadModuleCsv('供应商.csv', ['编码', '名称', '类型', '地址', '工艺与能力', '月产能', '产能单位', '交付周期天', '评级', '认证', '在手单', '准交', '状态'], rows.map(s => { const p = perf.get(s.id); return [s.code, s.name, s.type, s.address, s.capabilities, s.capacity, s.capacityUnit, s.leadDays, supplierGrade(s)?.grade || '', (s.certificates || []).map(c => `${c.name}(${c.validUntil})`).join('；'), p?.open.length || 0, p?.completed.length ? `${p.onTime}/${p.completed.length}` : '', STATUS_LABEL[statusNow(s)]]; }))}>导出</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>新增供应商</Button>}
       </>} />
