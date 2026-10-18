@@ -72,6 +72,10 @@ it('offers cancellation for an approved order and blocks it after departure, poi
   expect(dialog.textContent).toContain('不能整单取消，请改用条目结案');
   expect(dialog.textContent).toContain('SH-9');
   expect((getByRole(dialog, 'button', { name: '提交取消审批' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => getByRole(dialog, 'button', { name: '返回' }).click());
+  (store.state!.orderLines[0] as unknown as { closure: unknown }).closure = { status: 'closed' };
+  render();
+  expect(queryByRole(host, 'button', { name: '申请取消订单' })).toBeNull();
 });
 
 it('locks the order while cancellation is pending', () => {

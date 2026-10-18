@@ -4,6 +4,7 @@ import { Ban, XCircle } from 'lucide-react';
 import { Banner, Button, Dialog, Field, KeyValue, TextArea } from '../../../../components/mist';
 import type { MistCommand, MistOrder, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { ORDER_CANCEL_ALTERNATIVE, orderCancelBlockers, type OrderGovernanceFields } from '../../../../server/src/shared/mistOrderGovernance';
+import { isLineClosed } from '../../../../server/src/shared/mistOrderClosure';
 import { OrderChangeImpactList } from './OrderChangeImpactList';
 
 type Go = (view: string, id?: string, target?: Record<string, string | undefined>) => void;
@@ -25,11 +26,18 @@ export function OrderTerminationBanner({ order }: { order: Governed }) {
   return null;
 }
 
+/** 所有条目已出足（离港 ≥ 订单数量）或已结案：订单已履约完成，取消无意义，不再提供入口。 */
+export function orderFulfilled(state: MistState, order: Pick<MistOrder, 'id'>) {
+  const lines = state.orderLines.filter(line => line.orderId === order.id);
+  const departed = (state.fulfillment?.shipments || []).filter(s => s.state === 'departed');
+  return lines.length > 0 && lines.every(line => isLineClosed(line) || departed.reduce((sum, s) => sum + s.lines.filter(item => item.lineId === line.id).reduce((n, item) => n + Math.round(item.quantity * 10000), 0), 0) >= Math.round(line.qty * 10000));
+}
+
 export function OrderTerminationButton({ state, order, busy, run, go }: { state: MistState; order: Governed; busy: boolean; run: (command: MistCommand) => Promise<unknown>; go: Go }) {
   const g = order.governance, [open, setOpen] = React.useState(false), [reason, setReason] = React.useState(''), [failure, setFailure] = React.useState(''), [working, setWorking] = React.useState(false);
   if (!g || g.status === 'void' || g.status === 'cancelled' || g.cancellation?.status === 'pending') return null;
   const mode: 'void' | 'cancel' | null = g.status === 'draft' || g.status === 'rejected' ? 'void' : g.status === 'approved' ? 'cancel' : null;
-  if (!mode) return null;
+  if (!mode || (mode === 'cancel' && orderFulfilled(state, order))) return null;
   const blockers = mode === 'cancel' ? orderCancelBlockers(state, order) : [], changePending = g.changeDraft?.status === 'pending';
   const submit = async () => {
     if (working) return; setFailure('');
