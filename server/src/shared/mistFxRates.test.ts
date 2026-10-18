@@ -28,7 +28,7 @@ describe('月末汇率与报表折算口径', () => {
     expect(fxPeriodRateFor(f.state, 'USD', '2026-10')?.rate).toBe('7.1190');
   });
 
-  it('结汇加权均价只计未冲回结汇；实际口径的非订单收入外币按月末暂估；定价预计取订单最新定价快照，仅美元；人民币恒为 1；缺汇率不猜', () => {
+  it('结汇加权均价只计未冲回结汇；实际口径的非订单收入外币按月末暂估；报价预计不取定价试算；人民币恒为 1；缺汇率不猜', () => {
     const f = setup(), s = f.state;
     s.fxRecords = [
       { id: 'a', code: 'FX-1', kind: 'settlement', date: '2026-10-01', bankName: '', currency: 'USD', amount: 10000, localCurrency: 'CNY', localAmount: 71000, rate: '7.1', ref: '', note: '' },
@@ -41,7 +41,7 @@ describe('月末汇率与报表折算口径', () => {
     expect(fxSettledAverage(s, 'USD', '2026-10-05')?.rate).toBe(7.1);
     const opts = { month: '2026-10', asOf: '2026-10-17', orderId: 'o1' };
     expect(fxRateFor(s, 'USD', 'actual', opts)).toBeUndefined();
-    expect(fxRateFor(s, 'USD', 'quote', opts)).toMatchObject({ rate: 7.2, estimated: true });
+    expect(fxRateFor(s, 'USD', 'quote', opts)).toBeUndefined();
     expect(fxRateFor(s, 'EUR', 'quote', opts)).toBeUndefined();
     expect(fxRateFor(s, 'EUR', 'actual', opts)).toBeUndefined();
     expect(fxRateFor(s, 'USD', 'period', opts)).toBeUndefined();
