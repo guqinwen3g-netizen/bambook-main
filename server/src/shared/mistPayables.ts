@@ -34,6 +34,8 @@ export type SupplierBill = {
   currency: string; amount: number; taxAmount: number; taxRate: string; lines: SupplierBillLine[];
   terms: string[]; due: string; dueBasis: string; fileIds: string[]; note: string;
   state: 'open' | 'void'; registeredAt: string; registeredBy: string; voided?: { at: string; actor: string; reason: string };
+  /** 期初未结应付：系统启用前已收票、仍未付清的供应商票据（无来源合同，amount 为启用时未付余额）。 */
+  opening?: { originalAmount: number };
 };
 export type SupplierPayment = {
   id: string; paymentId: string; code: string; supplierId: string; supplier: string; date: string;
@@ -474,6 +476,7 @@ function files(root: Root, value: unknown) {
 }
 /** 金额展示：千分位、两位小数（审批材料、提示与流水统一）。 */
 const fx = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+export const nextPayableCode = (prefix: string, existing: Array<{ code: string }>, now: string) => nextCode(prefix, existing, now);
 const nextCode = (prefix: string, existing: Array<{ code: string }>, now: string) => {
   const head = prefix + '-' + now.slice(0, 4) + '-'; let n = existing.filter(r => r.code.startsWith(head)).length + 1;
   while (existing.some(r => r.code === head + String(n).padStart(4, '0'))) n++;

@@ -1,5 +1,6 @@
 /** 应付待办：供应商票据 → 应付余额 → 付款申请（主管审批）→ 实际付款与多票分配。只用已登记事实，不用合同金额猜应付。
  *  预付款：财务按合同登记预付计划 → 申请 → 主管审批 → 实付；预付挂在合同上等结算抵扣。登记错误由财务冲回，原记录保留。 */
+import { BaseDataImportButton } from './modules/BaseDataImport';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import React from 'react';
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, EmptyState, Facts, Field, FormGrid, Mono, ObjectCell, Pill, Segmented, Select, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
@@ -219,6 +220,7 @@ export function FinancePayables() {
       { label: '登记索赔扣款', onClick: () => { setFailure(''); setDeductId(bill.id); }, reason: !canAllocate ? '需要核销权限（财务）' : bill.held ? '待关联结算后才能扣款' : !state || !deductibleRecoveries(state, bill.supplierId, bill.currency).length ? '这家供应商没有工厂已同意从货款中扣的追偿' : availableMinor(bill) <= 0 ? '本票没有可扣的未付余额' : undefined, hidden: bill.status === 'void' || (!!state && !deductibleRecoveries(state, bill.supplierId).length) },
       { label: '作废票据', onClick: () => askReason('void', bill.id), reason: !canBill ? '需要票据登记权限' : bill.paid > 0 ? '已有付款分配，请先冲回分配或付款再作废' : bill.deducted > 0 ? '已有索赔扣款，请先冲回扣款再作废' : undefined, hidden: bill.status === 'void' },
     ]} />
+    {bill.opening ? <DetailBlock title="期初登记"><span className="mist-note">系统启用前已收票、仍未付清的供应商票据；原价税合计 {bill.opening.originalAmount} {bill.currency}，本系统按启用时未付余额 {bill.amount} {bill.currency} 计应付。没有来源合同。</span></DetailBlock> : null}
     <DetailBlock title="来源合同">{bill.lines.map(l => <div className="mist-row mist-module-actions" key={l.purchaseId}><Mono>{l.purchaseCode}</Mono><span className="mist-note">{KIND[l.kind]}{l.settlementCode ? ' · 结算 ' + l.settlementCode : ''}</span>{l.awaitingSettlement && !l.settlementId && <Pill tone="warn">待关联结算</Pill>}<span className="mist-spacer" /><span className="mist-num">{apMoney(l.amount, bill.currency)}</span>{l.settlementId && <Button size="sm" onClick={() => { setView('settlements'); open(l.settlementId!); }}>查看结算</Button>}<Button size="sm" onClick={() => go('procurement', l.purchaseId)}>查看合同</Button></div>)}
       <span className="mist-note">合同付款条件：{bill.terms.join('；') || '未填写'}</span></DetailBlock>
     <DetailBlock title="付款分配">{allocations.filter(a => a.billId === bill.id).map(a => { const p = payments.find(x => x.id === a.supplierPaymentId); return <div className="mist-row mist-module-actions" key={a.id}><Mono>{p?.code || '付款记录未找到'}</Mono><span className="mist-note">{p?.date}</span><span className="mist-spacer" /><span className="mist-num">{apMoney(a.amount, a.currency)}</span>{allocationReversal(a.id) && <Pill tone="neutral">已冲回</Pill>}{p && <Button size="sm" onClick={() => { setView('payments'); open(p.id); }}>查看付款</Button>}</div>; })}
@@ -281,6 +283,7 @@ export function FinancePayables() {
     <Card>
       <CardHeader title="供应商应付（按原币）" sub="收到供应商发票登记后形成应付；所有付款先申请、经主管审批后再登记实付" tools={<div className="mist-row" style={{ flexWrap: 'wrap' }}>
         <Button disabled={busy || !canBill} title={!canBill ? '需要票据登记权限' : undefined} onClick={() => startBill()}>登记供应商票据</Button>
+        {canBill && <BaseDataImportButton kind="openingPayable" label="导入期初应付" disabled={busy} />}
         <Button disabled={busy || !canBill} title={!canBill ? '需要票据登记权限' : undefined} onClick={() => { setFailure(''); setPlanDraft({ stage: 'prepayment', purchaseId: '', amount: '', trigger: '', basis: '', due: '', note: '' }); }}>登记付款计划</Button>
         <Button disabled={busy || !canSettle} title={!canSettle ? '需要采购经办权限（业务员按实际收货提交）' : undefined} onClick={() => { setFailure(''); setSettleOpen(true); }}>提交结算</Button>
         <Button disabled={busy || !canRequest} title={!canRequest ? '需要付款申请权限' : undefined} onClick={() => startRequest()}>申请票据付款</Button></div>} />

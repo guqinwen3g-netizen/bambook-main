@@ -5,12 +5,12 @@
  */
 import type { MistMemberDirectoryEntry } from './mistAccounts';
 
-export type MistImportKind = 'customer' | 'supplier' | 'product' | 'openingReceivable';
+export type MistImportKind = 'customer' | 'supplier' | 'product' | 'openingReceivable' | 'openingPayable';
 export type MistImportRow = Record<string, string>;
 export type MistImportField = { key: string; label: string; required?: boolean; hint?: string; example: string };
 
 export const MIST_IMPORT_MAX_ROWS = 1000;
-export const MIST_IMPORT_KIND_LABEL: Record<MistImportKind, string> = { customer: '客户', supplier: '供应商', product: '产品档案', openingReceivable: '期初应收' };
+export const MIST_IMPORT_KIND_LABEL: Record<MistImportKind, string> = { customer: '客户', supplier: '供应商', product: '产品档案', openingReceivable: '期初应收', openingPayable: '期初应付' };
 
 const contactFields: MistImportField[] = [
   { key: 'contactName', label: '联系人', example: 'Anna Berg' },
@@ -74,6 +74,17 @@ export const MIST_IMPORT_FIELDS: Record<MistImportKind, MistImportField[]> = {
     { key: 'originalAmount', label: '票面金额', hint: '留空同未收余额', example: '48000' },
     { key: 'amount', label: '未收余额', required: true, hint: '截至启用日仍未收回的金额', example: '33600' },
     { key: 'note', label: '备注', example: '定金已收 30%' },
+  ],
+  openingPayable: [
+    { key: 'supplier', label: '供应商', required: true, hint: '填已建档的供应商编码或名称', example: 'SUP-001' },
+    { key: 'invoiceNo', label: '供应商发票号', required: true, hint: '同一供应商不可重复', example: '33012026-00881' },
+    { key: 'invoiceDate', label: '发票日期', required: true, hint: 'YYYY-MM-DD，不晚于今天', example: '2026-09-05' },
+    { key: 'due', label: '到期日', required: true, hint: 'YYYY-MM-DD，不早于发票日期', example: '2026-10-05' },
+    { key: 'currency', label: '币种', required: true, hint: '三位字母', example: 'CNY' },
+    { key: 'originalAmount', label: '价税合计', hint: '留空同未付余额', example: '113000' },
+    { key: 'taxAmount', label: '税额', hint: '专票税额，留空为 0', example: '13000' },
+    { key: 'amount', label: '未付余额', required: true, hint: '截至启用日仍未付的金额', example: '60000' },
+    { key: 'note', label: '备注', example: '已付 53000' },
   ],
 };
 
@@ -155,7 +166,7 @@ export function mistImportRowCommand(kind: MistImportKind, row: MistImportRow, c
 
 export function mistImportPermission(kind: unknown): string {
   if (kind === 'customer') return 'relations:write';
-  if (kind === 'openingReceivable') return 'invoices:write';
+  if (kind === 'openingReceivable' || kind === 'openingPayable') return 'invoices:write';
   if (kind === 'supplier') return 'suppliers:write';
   if (kind === 'product') return 'products:write';
   throw new Error('导入类型无效');
