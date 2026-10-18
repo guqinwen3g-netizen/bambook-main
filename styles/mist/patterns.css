@@ -606,7 +606,7 @@
 .mist-season-row:not(:last-child) { border-bottom: 1px solid var(--mist-line); }
 .mist-season-row:hover { background: var(--mist-fill); }
 .mist-season-row[aria-pressed="true"] { background: var(--mist-accent-tint); }
-.mist-season-row:focus-visible { outline: 2px solid var(--mist-focus); outline-offset: 1px; }
+.mist-season-row:focus-visible { outline: 2px solid var(--mist-accent); outline-offset: 1px; }
 .mist-season-label { display: flex; flex-direction: column; gap: 2px; padding-left: 6px; }
 .mist-season-track { position: relative; height: 18px; background: var(--mist-fill); border-radius: var(--mist-r-pill); }
 .mist-season-bar { position: absolute; top: 3px; bottom: 3px; border-radius: var(--mist-r-pill); background: var(--mist-accent); opacity: .75; }
@@ -703,3 +703,38 @@
   /* 窄屏顶栏只留「上一级 › 当前」，更早的层级由上一级返回。 */
   .mist-crumbs > :not(b, .mist-crumb-sep, :has(+ .mist-crumb-sep + b)), .mist-crumbs > .mist-crumb-sep:not(:has(+ b)) { display: none; }
 }
+
+/* ───────────── 头像自定义（AvatarStudio） ───────────── */
+.mist-sr-only { position: absolute; inline-size: 1px; block-size: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.mist-avatar-setting { display: flex; align-items: center; gap: 16px; padding: 12px 0; }
+.mist-avatar-setting p { margin: 2px 0 0; }
+.mist-avatar-explorer { display: flex; flex-direction: column; align-items: center; }
+.mist-avatar-stage { --avatar-size: 188px; position: relative; width: 100%; height: calc(var(--avatar-size) + 128px); display: grid; place-items: center; isolation: isolate; }
+.mist-avatar-compass { position: relative; width: var(--avatar-size); height: var(--avatar-size); border-radius: 50%; display: grid; place-items: center; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; background: var(--mist-fill); transition: transform var(--mist-dur) var(--mist-ease); }
+.mist-avatar-compass:active { cursor: grabbing; }
+.mist-avatar-compass[data-held] { transform: scale(.97); }
+.mist-avatar-compass:focus-visible { outline: 2px solid var(--mist-accent); outline-offset: 6px; }
+.mist-avatar-compass[aria-disabled="true"] { pointer-events: none; opacity: .5; }
+.mist-avatar-live { width: 100%; height: 100%; border-radius: 50%; overflow: hidden; pointer-events: none; }
+.mist-avatar-direction { position: absolute; z-index: 1; transform: translate(-50%, -50%); background: none; border: 0; padding: 4px; font: var(--mist-fw-light) 17px/1.4 var(--mist-font); color: var(--mist-ink-3); cursor: pointer; white-space: nowrap; }
+.mist-avatar-direction span { display: inline-block; }
+.mist-avatar-direction:hover, .mist-avatar-direction[aria-pressed="true"] { color: var(--mist-accent); }
+.mist-avatar-guide-pointer { position: absolute; left: 50%; top: 50%; z-index: 3; color: var(--mist-accent); pointer-events: none; }
+.mist-avatar-guide-pointer svg { fill: var(--mist-card); }
+.mist-avatar-explore-foot { min-height: 96px; display: flex; align-items: center; justify-content: center; }
+.mist-avatar-guide { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.mist-avatar-guide > span { font: var(--mist-fw-light) 14px/1.5 var(--mist-font); color: var(--mist-ink-2); }
+.mist-avatar-guide > span[data-welcome] { font-size: 21px; letter-spacing: -.02em; color: var(--mist-accent); }
+.mist-avatar-guide-progress { display: flex; gap: 5px; }
+.mist-avatar-guide-progress i { width: 4px; height: 4px; border-radius: 4px; background: var(--mist-ink-4); opacity: .4; transition: width .3s, opacity .3s; }
+.mist-avatar-guide-progress i[data-active] { width: 14px; opacity: .9; background: var(--mist-accent); }
+.mist-avatar-link { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border: 0; background: none; color: var(--mist-accent); font: var(--mist-fw-regular) 12px/1.5 var(--mist-font); cursor: pointer; white-space: nowrap; }
+.mist-avatar-link[data-size="lg"] { font-size: 16px; }
+.mist-avatar-link:disabled { opacity: .45; cursor: default; }
+.mist-avatar-link:focus-visible, .mist-avatar-direction:focus-visible { outline: 2px solid var(--mist-accent); outline-offset: 4px; border-radius: 6px; }
+.mist-avatar-crop { position: relative; margin: 8px auto; border-radius: 50%; overflow: hidden; background: var(--mist-fill); touch-action: none; cursor: grab; }
+.mist-avatar-crop img { position: absolute; left: 50%; top: 50%; max-width: none; user-select: none; pointer-events: none; }
+.mist-avatar-crop-tools { justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+.mist-avatar-crop-tools input[type="range"] { width: 160px; accent-color: var(--mist-accent); }
+@media (max-width: 640px) { .mist-avatar-stage { --avatar-size: 148px; } .mist-avatar-direction { font-size: 15px; } }
+@media (prefers-reduced-motion: reduce) { .mist-avatar-compass, .mist-avatar-guide-progress i { transition: none; } .mist-avatar-compass[data-held] { transform: none; } }

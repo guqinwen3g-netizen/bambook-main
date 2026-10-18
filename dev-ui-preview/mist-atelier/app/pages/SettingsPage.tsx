@@ -10,6 +10,7 @@ import { WorkspaceMembers } from './WorkspaceMembers';
 import { ChangePasswordRow, LogoutAllRow } from './ChangePassword';
 import { TwoFactorRow } from './TwoFactor';
 import { CompanyProfileSection } from './CompanyProfileSection';
+import { AvatarSettingRow } from './AvatarStudio';
 
 type TextKey = 'workspaceName' | 'profileName' | 'profileEmail' | 'locale';
 type TextValues = Pick<MistSettings, TextKey>;
@@ -106,7 +107,7 @@ export function SettingsPage() {
           {sec === 'workspace' && <WorkspaceMembers busy={busy} />}
           {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
           <div hidden={sec !== 'company'}><CompanyProfileSection member={member} /></div>
-          {sec === 'account' && <FormSection title="账号" description="工作区显示资料，不改变登录账号、邮箱或密码。"><FormGrid><Field label="姓名"><TextInput aria-label="显示姓名" value={values.profileName} disabled={settingsLocked} onChange={event => edit('profileName', event.target.value)} onBlur={() => saveField('profileName')} /></Field><Field label="邮箱"><TextInput aria-label="显示邮箱" type="email" value={values.profileEmail} disabled={settingsLocked} onChange={event => edit('profileEmail', event.target.value)} onBlur={() => saveField('profileEmail')} /></Field>
+          {sec === 'account' && <FormSection title="账号" description="工作区显示资料，不改变登录账号、邮箱或密码。">{!session.localMode && <AvatarSettingRow />}<FormGrid><Field label="姓名"><TextInput aria-label="显示姓名" value={values.profileName} disabled={settingsLocked} onChange={event => edit('profileName', event.target.value)} onBlur={() => saveField('profileName')} /></Field><Field label="邮箱"><TextInput aria-label="显示邮箱" type="email" value={values.profileEmail} disabled={settingsLocked} onChange={event => edit('profileEmail', event.target.value)} onBlur={() => saveField('profileEmail')} /></Field>
             <Field label="语言偏好" hint="保存偏好，不改变当前页面文案"><Select aria-label="工作区语言" disabled={settingsLocked} value={values.locale} onChange={event => { edit('locale', event.target.value); void save({ locale: event.target.value }); }} options={[{ value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }]} /></Field></FormGrid></FormSection>}
           {sec === 'security' && <FormSection title="安全">
             {!session.localMode && <><ChangePasswordRow /><TwoFactorRow /><LogoutAllRow /></>}

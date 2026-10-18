@@ -112,7 +112,7 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   }
   const definition = definitions[family as keyof typeof definitions];
   // v6 uses the unmodified DiceBear component distribution. Legacy avatars retain their appearance.
-  const variants = /^c\d{1,3}_v6_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components);
+  const variants = /^c\d{1,3}_v6_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components as Parameters<typeof avatarVariantPreferences>[2]);
   const shapeSeed = seed.replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
   const svg = new Avatar(style, { seed: shapeSeed, size: 256, animationVariant: animated ? 'slow' : 'none', ...variants }).toString();
   // This rule lives inside the SVG so it also applies when rendered as an img.

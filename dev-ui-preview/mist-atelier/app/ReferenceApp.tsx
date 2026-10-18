@@ -2,7 +2,7 @@ import React from 'react';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, LogOut, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
 
 import {
-  AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, Field, KeyValue, TextInput, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
+  AssistantDrawer, Avatar, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, Field, KeyValue, TextInput, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
   type ChatMessage, type CommandItem, type Crumb, type NavSection, type ThemeMode,
 } from '../../../components/mist';
 import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
@@ -25,6 +25,7 @@ import { FinancePage } from './pages/FinancePage';
 import { CustomerPage } from './pages/CustomerPage';
 import { ProductionPage } from './pages/ProductionPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { AvatarStudio } from './pages/AvatarStudio';
 import { StatesPage } from './pages/StatesPage';
 import { DesignSystemPage } from './pages/DesignSystemPage';
 import { LoginPage } from './pages/LoginPage';
@@ -137,7 +138,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const [route, setRoute] = React.useState<Route>(readMistRoute);
   const [collapsed, setCollapsed] = React.useState(false);
   const [palette, setPalette] = React.useState(false), [query, setQuery] = React.useState('');
-  const [ai, setAI] = React.useState(false), [account, setAccount] = React.useState(false);
+  const [ai, setAI] = React.useState(false), [account, setAccount] = React.useState(false), [avatarStudio, setAvatarStudio] = React.useState(false);
   const [notifications, setNotifications] = React.useState(false), [spaces, setSpaces] = React.useState(false), [spaceName, setSpaceName] = React.useState('');
   const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
   const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
@@ -320,11 +321,13 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       <Drawer open={account} onClose={() => setAccount(false)} title={session.localMode?'本地工作区':'账号'} sub={name}
         footer={session.localMode?<Button loading={session.refreshing} onClick={()=>void session.refresh()}>重新进入本地工作区</Button>:<Button icon={LogOut} loading={session.signingOut} onClick={() => { void session.logout().catch(failure => toast(failure instanceof Error ? failure.message : '退出失败', 'bad')); }}>退出登录</Button>}>
         {session.localMode&&<><p className="mist-note">选择本地工作身份；权限和名称由本机服务提供。</p><div className="mist-row" data-wrap>{session.localProfiles?.map(profile=><Button key={profile.id} aria-pressed={profile.id===user.id} disabled={session.signingIn} variant={profile.id===user.id?'primary':'secondary'} onClick={()=>void session.selectLocalProfile?.(profile.id).catch(failure=>toast(failure instanceof Error?failure.message:'身份切换未完成','bad'))}>{profile.title?`${profile.name} · ${profile.title}`:profile.name}</Button>)}</div></>}
+        {!session.localMode&&<div className="mist-avatar-setting"><Avatar name={name} src={user.avatarUrl} size="lg" /><span className="mist-spacer" /><Button size="sm" onClick={()=>setAvatarStudio(true)}>编辑头像</Button></div>}
         <Button onClick={()=>{setAccount(false);setSpaces(true);}}>切换工作空间</Button>
         {workspace.workspace&&<Button onClick={()=>{setAccount(false);go('workspace-settings');}}>工作空间设置与授权</Button>}
         <KeyValue items={[{ label: '当前工作身份', value: user.displayName || user.email }, { label: '工作区显示名', value: workspaceProfileName || '未设置' }, { label: '工作邮箱', value: user.email }, { label: '职责', value: roles || '未设置' }, { label: '部门', value: user.department || '未设置' }]} />
         {account&&<MistVersionInfo demoSeed={state?.settings.demoSeed} />}
       </Drawer>
+      {!session.localMode&&<AvatarStudio open={avatarStudio} onClose={()=>setAvatarStudio(false)} />}
     </MistDensityContext.Provider></MistReviewProvider></Nav.Provider>
   );
 }

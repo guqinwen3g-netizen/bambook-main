@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ChevronLeft, ChevronRight, Loader2, Sparkles } from 'lucide-react'; // mist-allow: Button 的 loading 态是唯一允许的 spinner
 import { cx, toneAttr, type Size, type Tone } from './types';
 import { AssistantEyes } from './AssistantEyes';
+import { parseAvatarIdentity } from '../../lib/avatarIdentity';
 
 /* ───────────── 长文本 ───────────── */
 /** 取 ReactNode 中的纯文本（用于截断时的 title 完整文本）。 */
@@ -115,11 +116,32 @@ export function Tabs<V extends string>({ options, value, onChange }: { options: 
 }
 
 /* ───────────── Avatar ───────────── */
-export function Avatar({ name, src, tone, size }: { name: string; src?: string; tone?: Tone; size?: 'xs' | 'sm' | 'md' }) {
+const presetAvatarCache = new Map<string, string>();
+/** 预设头像（dicebear:v1:…）按需加载生成器，转为可直接显示的 SVG 地址；普通图片地址原样返回。 */
+export function useAvatarSource(src?: string | null): string | undefined {
+  const identity = src ? parseAvatarIdentity(src) : null;
+  const [resolved, setResolved] = React.useState<{ src: string; url: string } | null>(null);
+  React.useEffect(() => {
+    if (!src || !identity || presetAvatarCache.has(src)) return;
+    let live = true;
+    import('../../lib/avatarPresets').then(({ generateAvatar }) => {
+      const url = generateAvatar(identity.family, identity.seed, identity.animated);
+      presetAvatarCache.set(src, url);
+      if (presetAvatarCache.size > 64) presetAvatarCache.delete(presetAvatarCache.keys().next().value!);
+      if (live) setResolved({ src, url });
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!src) return undefined;
+  if (!identity) return src;
+  return presetAvatarCache.get(src) ?? (resolved?.src === src ? resolved.url : undefined);
+}
+export function Avatar({ name, src, tone, size }: { name: string; src?: string | null; tone?: Tone; size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' }) {
   const [failedSrc,setFailedSrc]=React.useState<string>();
+  const shown = useAvatarSource(src);
   return (
     <span className="mist-avatar" data-tone={toneAttr(tone)} data-size={size && size !== 'md' ? size : undefined} title={name}>
-      {src && failedSrc!==src ? <img onError={()=>setFailedSrc(src)} src={src} alt="" /> : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
+      {shown && failedSrc!==shown ? <img onError={()=>setFailedSrc(shown)} src={shown} alt="" /> : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
     </span>
   );
 }

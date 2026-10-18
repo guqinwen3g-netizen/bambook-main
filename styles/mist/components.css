@@ -114,6 +114,8 @@
 .mist-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .mist-avatar[data-size="sm"] { width: 26px; height: 26px; font-size: 10.5px; }
 .mist-avatar[data-size="xs"] { width: 22px; height: 22px; font-size: 10px; }
+.mist-avatar[data-size="lg"] { width: 56px; height: 56px; font-size: 20px; }
+.mist-avatar[data-size="xl"] { width: 88px; height: 88px; font-size: 30px; font-weight: var(--mist-fw-light); }
 .mist-avatar[data-tone="ok"] { background: var(--mist-ok-tint); color: var(--mist-ok-ink); }
 .mist-avatar[data-tone="warn"] { background: var(--mist-warn-tint); color: var(--mist-warn-ink); }
 .mist-avatar[data-tone="ai"] { background: var(--mist-ai-tint); color: var(--mist-ai-ink); }
