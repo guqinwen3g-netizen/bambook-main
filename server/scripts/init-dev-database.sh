@@ -27,7 +27,7 @@ if [ "$has_ledger" != t ]; then
 fi
 "$prisma" migrate deploy
 
-npm run seed:base
+BAMBOOK_SEED_DEMO_ACCOUNTS=1 npm run seed:base
 SEED_OWNER_ALLOW_NONEMPTY=1 npx tsx scripts/seed-empty-owner.ts
 npm run seed:dev-roles
 install -m 600 /dev/null "$ACCOUNTS_FILE.tmp"

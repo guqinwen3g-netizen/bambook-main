@@ -24,6 +24,8 @@
  *   DATABASE_URL              — 显式覆盖 DB 连接；否则按 .env.local → .env 顺序加载
  *   BAMBOOK_SEED_SUPER_ADMIN  — =1 时创建默认 SuperAdmin 账号（admin@bambook.local）
  *   BAMBOOK_INITIAL_ADMIN_PASSWORD — 初始口令；未设置时随机生成 32 位十六进制并打印一次（弱口令治理）
+ *   BAMBOOK_SEED_DEMO_ACCOUNTS — =1 时才 upsert 9 个 usr_demo_* 演示账号（固定弱口令，仅开发/验收库）；
+ *                               正式环境不设置，重跑本脚本（如运维面板「同步权限」）不会再建或重新启用演示账号。
  */
 import path from 'path';
 import crypto from 'crypto';
@@ -310,6 +312,10 @@ const DEMO_ACCOUNTS: Array<{
 const DEMO_ACCOUNT_PASSWORD = 'Bambook@2026';
 
 async function seedDemoAccounts() {
+  if (process.env.BAMBOOK_SEED_DEMO_ACCOUNTS !== '1') {
+    console.log('[5.25/6] 演示账号：未设置 BAMBOOK_SEED_DEMO_ACCOUNTS=1，跳过（正式环境不得创建固定口令账号）');
+    return;
+  }
   const passwordHash = await bcrypt.hash(DEMO_ACCOUNT_PASSWORD, 12);
   for (const acc of DEMO_ACCOUNTS) {
     await prisma.$transaction(async (tx) => {
