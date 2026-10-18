@@ -5,7 +5,6 @@
 - [协作与接续规则](AGENTS.md)
 - [上线推进：方向、待办与进度（权威）](docs/GO-LIVE.md)
 - [文档导航](docs/README.md)
-- [工作停点与进度记录](docs/mist-atelier/LIVE-PROGRESS.md)
 
 <details>
 <summary>项目范围、当前工作与接力记录</summary>
@@ -16,7 +15,7 @@ Bambook 是公司内部业务系统，覆盖开发与寻样、报价、订单、
 
 ## 做到哪里
 
-主线已包含当前 Mist 页面与业务接线、报价核算 / 历史对照 / AI 审阅、风险管理、售后索赔公司端调整、供应商票据 / 预付 / 结算 / 付款、跨岗位协作、审批与放行、我的工作待办与通知中心，以及工作助手 P0 骨架和开发服务器部署流程。智能邮箱已纳入范围并完成前端首轮，真实收发尚未接通。各模块仍有业务接线、真实集成和验收缺口，不能把“已合入”理解为全站完成或正式部署。
+主线已包含当前 Mist 页面与业务接线、报价核算 / 历史对照 / AI 审阅、风险管理、售后索赔公司端调整、供应商票据 / 预付 / 结算 / 付款、跨岗位协作、审批与放行、我的工作待办与通知中心，以及工作助手 P0 骨架和开发服务器部署流程。2026-10-17 起又补齐了并发写入、财务（期末调汇、信用证、对账单、退税等）、询价比价、业务交接、报关、主管视角、批量导入、头像等，逐项见 [docs/GO-LIVE.md](docs/GO-LIVE.md)“进度记录”。智能邮箱已接通 IMAP/SMTP；对外真实收发需正式环境，先问用户。正式环境未发布，不能把“已合入”理解为全公司验收完成。
 
 ## 当前工作
 
@@ -24,7 +23,7 @@ Bambook 是公司内部业务系统，覆盖开发与寻样、报价、订单、
 
 > **新 Agent 接手入口**：先读 [AGENTS.md](AGENTS.md)（单线接力规则），再读 [docs/GO-LIVE.md](docs/GO-LIVE.md)（方向与停点）。[交接文档](docs/HANDOFF.md) 与 Notion 旧页面只作历史参考。
 
-以下为已有工作的状态记录；开始或接续任务时须核对最新分支 / PR：
+以下编号列表是 **2026-10-17 前多 Agent 阶段的历史快照**，其中“未做 / 未接通”的说法可能已被后续 PR 补上，一律以 GO-LIVE.md 为准：
 
 1. 审批与放行页面 `approvals` + 付款申请审批：已合入（[PR #27](https://github.com/guqinwen3g-netizen/bambook-main/pull/27)）。生产与出运放行、受控例外尚无服务端规则，页面明示未接入。
 2. 我的工作待办来源补齐 + 通知中心 `notifications`：已合入（[PR #29](https://github.com/guqinwen3g-netizen/bambook-main/pull/29)）。主管按团队视角未做（缺团队组织数据）。
@@ -37,7 +36,7 @@ Bambook 是公司内部业务系统，覆盖开发与寻样、报价、订单、
 
 AI 分为“工作助手”（桌面端本机、个人凭据，方案见 `docs/mist-atelier/work-assistant-plan.md`，P0 骨架已合入 `electron/assistant/`，P1 见 PR #25）与“平台 AI”（统一平台连接）两层。报价成本 AI 审阅已合入（PR #22）：AI 只审阅本行授权依据、价格由公式重算、人工采纳只改策略草稿。平台 AI 可由管理员连接 ChatGPT 订阅作测试平台模型（GPT-6-Luna），生产期改用企业 API。
 
-当前停点与历史见 [进度记录](docs/mist-atelier/LIVE-PROGRESS.md)。开始或接续任务时核对 GitHub 实际分支 / PR，不能只凭这份摘要判断最新状态。
+当前停点只看 [docs/GO-LIVE.md](docs/GO-LIVE.md)；[LIVE-PROGRESS](docs/mist-atelier/LIVE-PROGRESS.md) 只是 10-17 前的历史流水。开始工作时核对 GitHub 实际分支 / PR。
 
 ## 接下来往哪里走
 
