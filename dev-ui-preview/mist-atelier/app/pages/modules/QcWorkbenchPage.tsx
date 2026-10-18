@@ -8,6 +8,7 @@ import { fulfillmentSampleRoleLabel, fulfillmentSourceLabel } from '../../../../
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
+import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
@@ -83,7 +84,7 @@ function taskSubject(state: MistState, task: FulfillmentQcTask) {
 }
 
 export function QcWorkbenchPage() {
-  const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor();
+  const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor();
   const [domain, setDomain] = React.useState<Domain>('garment'), [kind, setKind] = React.useState<Kind>('sample');
   const [query, setQuery] = React.useState(''), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [owner, setOwner] = React.useState<Owner>('all'), [mode, setMode] = React.useState<'groups' | 'board'>('groups');
   const [selected, setSelected] = useRouteDraft(route.id || ''), [reportTaskId, setReportTaskId] = useRouteDraft(''), [failure, setFailure] = useRouteDraft('');
@@ -137,6 +138,8 @@ export function QcWorkbenchPage() {
     },
   });
   const confirmSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: '记录需求方样品确认', submitLabel: '记录确认', fields: [field('result', '需求方决定', 'select', true, [emptyOption, { value: 'approved', label: '确认采用' }, { value: 'rejected', label: '不采用' }]), field('note', '需求方确认依据', 'textarea')], initialValues: { result: '', note: '' }, submit: values => run({ type: 'fulfillment.qc.confirm', payload: { id: task.id, result: text(values, 'result') as 'approved' | 'rejected', note: text(values, 'note') } }) });
+  const transferSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `转交 ${task.code}`, submitLabel: '转交', description: '接收人须有本板块QC权限，转交后由其认领现场检查并提交报告。', fields: [field('assigneeId', '接收QC', 'select', true, [emptyOption, ...memberSelectOptions(workspaceMembers(workspace, state, session.user)).filter(option => option.value !== task.assigneeId)]), field('reason', '转交原因', 'textarea')], initialValues: { assigneeId: '', reason: '' }, submit: values => run({ type: 'fulfillment.qc.transfer', payload: { id: task.id, domain: task.domain, assigneeId: text(values, 'assigneeId'), reason: text(values, 'reason') } }) });
+  const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `改期 ${task.code}`, submitLabel: '改期', description: `原预计检查日：${task.due || '未排期'}。新日期不早于今天，原因记入处理记录。`, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => run({ type: 'fulfillment.qc.reschedule', payload: { id: task.id, domain: task.domain, due: text(values, 'due'), reason: text(values, 'reason') } }) });
   const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) });
 
   const metrics = { fabric: qcDomainMetrics(all, 'fabric'), garment: qcDomainMetrics(all, 'garment') };
@@ -181,6 +184,8 @@ export function QcWorkbenchPage() {
         onReport={() => setReportTaskId(current.id)}
         onConfirm={() => setDialog(confirmSpec(current))}
         onContinue={() => setDialog(continueSpec(current))}
+        onTransfer={() => setDialog(transferSpec(current))}
+        onReschedule={() => setDialog(rescheduleSpec(current))}
         onBack={sourceSample ? () => go('samples', sourceSample.id, sourceSample.role === 'shipping' && sourceSample.shipmentId ? { section: 'shipment:' + sourceSample.shipmentId, productionId: sourceSample.source.kind === 'orderLine' ? sourceSample.source.productionId : undefined } : {}) : undefined}
         backLabel={sourceSample?.role === 'shipping' ? '返回本票船样' : '返回实物样品'} />
     : <EmptyState icon={ClipboardCheck} title="任务详情" description={loading ? '正在读取QC任务' : '从左侧选择一条任务，查看来源、现场与报告'} compact />;
@@ -220,9 +225,9 @@ export function QcWorkbenchPage() {
   </MistPage>;
 }
 
-function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, onReport, onConfirm, onContinue, onBack, backLabel }: {
+function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, onReport, onConfirm, onContinue, onTransfer, onReschedule, onBack, backLabel }: {
   task: FulfillmentQcTask; state: MistState; me: string; canQc: boolean; canBusiness: boolean; locked: boolean;
-  onClaim: () => void; onReport: () => void; onConfirm: () => void; onContinue: () => void; onBack?: () => void; backLabel: string;
+  onClaim: () => void; onReport: () => void; onConfirm: () => void; onContinue: () => void; onTransfer: () => void; onReschedule: () => void; onBack?: () => void; backLabel: string;
 }) {
   const reports = state.fulfillment.qcReports.filter(report => report.taskId === task.id).slice().reverse();
   const gate = qcGate(task), mine = !!task.assigneeId && task.assigneeId === me;
@@ -233,6 +238,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
   const claimReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.assigneeId && !mine ? `已由 ${task.assignee} 认领` : false;
   const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : !task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false;
+  const handoverReason = (verb: string) => !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.state === 'reported' ? `已出结论，不能${verb}；需复验请追加报告` : task.assigneeId && !mine ? `仅当前QC（${task.assignee}）可${verb}` : false;
   const confirmable = task.kind === 'sample' && task.source.kind === 'orderLine' && task.state === 'reported';
   const continuable = task.state === 'awaiting_business' || (task.kind === 'sample' && task.businessConfirmation?.result === 'approved' && !task.businessContinued);
   return <DetailBody data-qc-detail={task.id} heading={<div>
@@ -266,8 +272,8 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
       <ActionBar busy={locked} actions={[
         { label: '认领任务', icon: UserRoundCheck, onClick: onClaim, reason: claimReason, hidden: mine, primary: task.state === 'pending' },
         { label: '提交 / 追加复验报告', icon: ClipboardCheck, onClick: onReport, reason: reportReason, primary: mine && task.state !== 'reported' },
-        { label: '转交', icon: Repeat2, onClick: () => undefined, reason: '转交（接收人与原因）尚未接入服务端，暂由当前QC继续处理', hidden: !canQc },
-        { label: '改期', icon: CalendarClock, onClick: () => undefined, reason: '改期（新日期与原因）尚未接入服务端', hidden: !canQc },
+        { label: '转交', icon: Repeat2, onClick: onTransfer, reason: handoverReason('转交'), hidden: !canQc },
+        { label: '改期', icon: CalendarClock, onClick: onReschedule, reason: handoverReason('改期'), hidden: !canQc },
       ]} />
     </DetailBlock>
     {(confirmable || continuable) && <DetailBlock title="业务接续">

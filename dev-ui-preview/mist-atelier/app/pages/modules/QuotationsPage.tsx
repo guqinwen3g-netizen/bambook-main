@@ -282,7 +282,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
         {moq.state !== 'none' && moq.state !== 'met' && <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }} data-quote-moq={moq.state}>{moq.state === 'below' && <Pill tone="warn">低于 MOQ</Pill>}<small className="mist-muted">{moq.text}</small></div>}
         <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-num">{l.qty} {l.unit} × {l.price} = {q.currency} {l.amount}</span><span className="mist-spacer" />{lineBelowMarginFloor(l) && <span data-margin-floor-breach><Pill tone="warn">{`低于最低毛利率 ${l.marginFloor!.minMarginPercent}%（V${l.marginFloor!.version}）`}</Pill></span>}{m === null ? <span className="mist-muted">成本待核</span> : <span className={m < 0 ? 'mist-tone-bad mist-num' : 'mist-num mist-muted'}>毛利 {m}%</span>}</div>
       </div>; })}</div>
-      <span className="mist-note">毛利参考 = (单价 − 成本) / 单价，仅按已记录条目成本，不是实际订单利润。专业核算从准确条目进入；历史行业基准、汇率换算与 AI 尚未接入。</span>
+      <span className="mist-note">毛利参考 = (单价 − 成本) / 单价，仅按已记录条目成本，不是实际订单利润。专业核算从准确条目进入，可对照历史成交、报价底价线与 AI 审阅。</span>
     </DetailBlock>
     {!!q.costingSnapshots?.length&&<DetailBlock title="核算历史"><span className="mist-note">{q.costingSnapshots.length} 份不可覆盖快照；编辑草稿重建条目后，旧快照仅历史，不自动绑定新行。当前行从条目核算查看。</span><Button onClick={()=>onOpen('quotations',q.id,{section:'cost-history'})}>查看全部核算历史</Button></DetailBlock>}
     {versions.length > 1 && <DetailBlock title="版本">

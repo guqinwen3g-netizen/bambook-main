@@ -3,6 +3,7 @@ import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
 import {developmentDomain} from './mistDevelopmentDomain';
 import { MistCommandError, lineAmount, mistMoneyMinor, assertMistOrderApproved, assertMistOrderDeposit, assertMistOrderOpen, isActiveMistInvoice, isRecognizedMistInvoice } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
+import { resolveMember } from './mistAccounts';
 import type { MistState, MistContext, MistCommandResult, MistQc, MistTarget, MistProduction } from './mistWorkspace';
 import type { MistReviewTask } from './mistReview';
 import { supplierBusinessDay, supplierUnavailableReason } from './mistSupplierStatus';
@@ -33,7 +34,12 @@ export type FulfillmentProductionFact = {
     release?: { at: string; actor: string; note: string };
     completion?: { id: string; quantity: number; sizeQuantities: FulfillmentSizeQuantity[]; date: string; at: string; actor: string; evidence: string; fileIds: string[] };
     customerAcceptance?: { at: string; actor: string; note: string; completionId: string };
+    /** 异常暂停：暂停期间不得推进进度、完工、出运或加工收货；QC 可继续检查。 */
+    hold?: FulfillmentProductionHold;
+    holdLog?: (FulfillmentProductionHold & { resumedAt: string; resumedBy: string; resumeNote: string })[];
 };
+export const PRODUCTION_HOLD_CATEGORIES = { quality: '质量问题', material: '缺料 / 物料问题', customer: '客户要求暂停', factory: '工厂产能 / 停工', other: '其他' } as const;
+export type FulfillmentProductionHold = { at: string; actor: string; category: keyof typeof PRODUCTION_HOLD_CATEGORIES; reason: string };
 export type FulfillmentSample = {
     id: string;
     code: string;
@@ -407,6 +413,14 @@ export type FulfillmentCommand = {
         domain: 'garment' | 'fabric';
     };
 } | {
+    /** 转交：当前QC（或未认领任务的任一QC）指定接收人，须填原因。 */
+    type: 'fulfillment.qc.transfer';
+    payload: { id: string; domain: 'garment' | 'fabric'; assigneeId: string; reason: string };
+} | {
+    /** 改期：预计检查日改到新日期（不早于今天），须填原因。 */
+    type: 'fulfillment.qc.reschedule';
+    payload: { id: string; domain: 'garment' | 'fabric'; due: string; reason: string };
+} | {
     type: 'fulfillment.qc.report';
     payload: {
         id: string;
@@ -484,6 +498,12 @@ export type FulfillmentCommand = {
     payload: { productionId: string; quantity: number; sizeQuantities: FulfillmentSizeQuantity[]; date: string; evidence: string; fileIds: string[] };
 } | {
     type: 'fulfillment.production.acceptCompletion';
+    payload: { productionId: string; note: string };
+} | {
+    type: 'fulfillment.production.hold';
+    payload: { productionId: string; category: FulfillmentProductionHold['category']; reason: string };
+} | {
+    type: 'fulfillment.production.resume';
     payload: { productionId: string; note: string };
 } | {
     type: 'fulfillment.inventory.move';
@@ -590,7 +610,7 @@ export function fulfillmentCommandPermission(command: FulfillmentCommand): strin
     if(command.type.startsWith('fulfillment.claimInventory.'))return claimInventoryPermission(command as ClaimInventoryCommand);
     if (command.type.startsWith('fulfillment.samples.'))
         return 'products:write';
-    if (command.type === 'fulfillment.qc.claim' || command.type === 'fulfillment.qc.report')
+    if (command.type === 'fulfillment.qc.claim' || command.type === 'fulfillment.qc.report' || command.type === 'fulfillment.qc.transfer' || command.type === 'fulfillment.qc.reschedule')
         return `qc:${command.payload.domain}_chain:write`;
     if (command.type === 'fulfillment.qc.request')
         return command.payload.source.kind === 'version' ? 'products:write' : 'orders:write';
@@ -790,6 +810,8 @@ function requireProductionRelease(root: MistState, branch: MistProduction, recor
     assertMistOrderDeposit(root, branch.orderId);
     const fact = fulfillmentProductionFact(root, branch.id);
     if (!fact?.release) fail('当前生产分支尚未由业务明确放行', 'PRECONDITION');
+    const hold = fact?.hold;
+    if (!recordingInspection && hold) fail(`生产分支已异常暂停（${PRODUCTION_HOLD_CATEGORIES[hold.category]}：${hold.reason}），恢复生产后再继续`, 'PRECONDITION');
     requireSampleRole(root, branch, get(root.orders, branch.orderId, '订单').type === 'garment' ? 'pp' : 'pioneer');
     if (branch.sourcePurchaseId) {
         const purchase = get(root.fulfillment.purchases, branch.sourcePurchaseId, '来源合同');
@@ -973,6 +995,40 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             audit(root, ctx, 'qc', t.id, 'QC认领任务');
             return { id: t.id };
         }
+        case 'fulfillment.qc.transfer':
+        case 'fulfillment.qc.reschedule': {
+            const t = get(f.qcTasks, p.id, 'QC任务');
+            if (t.domain !== p.domain)
+                fail('QC业务域不一致');
+            if (!ctx.actorId)
+                fail('需要真实账号');
+            if (t.state === 'reported')
+                fail('任务已出结论，不能再转交或改期；需复验请追加报告');
+            if (t.assigneeId && t.assigneeId !== ctx.actorId)
+                fail(`只有当前QC（${t.assignee}）可以${command.type === 'fulfillment.qc.transfer' ? '转交' : '改期'}`, 'CONFLICT');
+            const reason = text(p.reason, command.type === 'fulfillment.qc.transfer' ? '转交原因' : '改期原因', true, 500);
+            if (command.type === 'fulfillment.qc.transfer') {
+                const to = resolveMember(ctx, p.assigneeId, '接收QC');
+                if (to.id === t.assigneeId)
+                    fail('接收人与当前QC相同');
+                const from = t.assignee || '待认领';
+                t.assignee = to.name;
+                t.assigneeId = to.id;
+                if (t.state === 'pending')
+                    t.state = 'working';
+                audit(root, ctx, 'qc', t.id, `QC转交：${from}→${to.name}（${reason}）`, { view: 'qc-workbench', id: t.id });
+            } else {
+                const due = day(p.due, '新检查日');
+                if (due < platformBusinessDate(ctx.now))
+                    fail('新检查日不能早于今天');
+                if (due === t.due)
+                    fail('新检查日与原日期相同');
+                const from = t.due || '未排期';
+                t.due = due;
+                audit(root, ctx, 'qc', t.id, `QC改期：${from}→${due}（${reason}）`, { view: 'qc-workbench', id: t.id });
+            }
+            return { id: t.id };
+        }
         case 'fulfillment.qc.report': {
             const t = get(f.qcTasks, p.id, 'QC任务');
             if (t.domain !== p.domain)
@@ -1084,6 +1140,28 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             fact.release = { at: ctx.now, actor: ctx.actorName, note: text(p.note, '开产放行依据') };
             branch.risk = '';
             audit(root, ctx, 'production', branch.id, '业务确认开产放行', { view: 'production-board', id: branch.id, productionId: branch.id });
+            return { id: branch.id };
+        }
+        case 'fulfillment.production.hold': {
+            const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
+            if (!fact.release) fail('生产分支尚未放行开产，无需暂停');
+            if (fact.completion || branch.col === 'done') fail('已登记最终完工，不能暂停');
+            if (fact.hold) fail('生产分支已在暂停中');
+            if (!Object.prototype.hasOwnProperty.call(PRODUCTION_HOLD_CATEGORIES, p.category)) fail('请选择暂停类别');
+            const reason = text(p.reason, '暂停原因', true, 500);
+            fact.hold = { at: ctx.now, actor: ctx.actorName, category: p.category, reason };
+            branch.risk = `异常暂停（${PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}）：${reason}`;
+            audit(root, ctx, 'production', branch.id, `生产异常暂停：${PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}（${reason}）`, { view: 'production-board', id: branch.id, productionId: branch.id });
+            return { id: branch.id };
+        }
+        case 'fulfillment.production.resume': {
+            const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
+            if (!fact.hold) fail('生产分支未暂停');
+            const note = text(p.note, '恢复依据', true, 500);
+            (fact.holdLog ||= []).push({ ...fact.hold!, resumedAt: ctx.now, resumedBy: ctx.actorName, resumeNote: note });
+            delete fact.hold;
+            if (branch.risk?.startsWith('异常暂停')) branch.risk = '';
+            audit(root, ctx, 'production', branch.id, `恢复生产（${note}）`, { view: 'production-board', id: branch.id, productionId: branch.id });
             return { id: branch.id };
         }
         case 'fulfillment.production.complete': {

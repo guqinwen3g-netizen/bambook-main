@@ -62,8 +62,26 @@ it('keeps QC actions visible with concrete reasons when another QC owns the task
   expect((getByRole(detail,'button',{name:'提交 / 追加复验报告'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('仅当前QC（QC乙）可提交');
   expect((getByRole(detail,'button',{name:'转交'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(detail.textContent).toContain('尚未接入服务端');
+  expect(detail.textContent).toContain('仅当前QC（QC乙）可转交');
   expect(detail.textContent).toContain('QC乙 检查中');
+});
+
+it('lets the current QC transfer to a named member and reschedule with reasons',async()=>{
+  store.state!.members=[{userId:'qc-b',name:'QC乙'} as any];
+  store.state!.fulfillment.qcTasks.push(task('mine',{state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
+  render('mine');
+  const detail=host.querySelector('[data-qc-detail="mine"]') as HTMLElement;
+  await click(getByRole(detail,'button',{name:'转交'}));
+  let dialog=getByRole(document.body,'dialog');
+  choose(getByRole(dialog,'combobox',{name:/接收QC/}) as HTMLSelectElement,'qc-b');
+  typeInto(getByRole(dialog,'textbox',{name:/转交原因/}) as HTMLTextAreaElement,'出差');
+  await click(getByRole(dialog,'button',{name:'转交'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.transfer',payload:{id:'mine',domain:'garment',assigneeId:'qc-b',reason:'出差'}});
+  await click(getByRole(host.querySelector('[data-qc-detail="mine"]') as HTMLElement,'button',{name:'改期'}));
+  dialog=getByRole(document.body,'dialog');
+  typeInto(getByRole(dialog,'textbox',{name:/改期原因/}) as HTMLTextAreaElement,'工厂延期');
+  await click(getByRole(dialog,'button',{name:'改期'}));
+  expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.qc.reschedule',payload:expect.objectContaining({id:'mine',reason:'工厂延期'})}));
 });
 
 it('validates garment size checks and confirms the consequence before appending a report',async()=>{

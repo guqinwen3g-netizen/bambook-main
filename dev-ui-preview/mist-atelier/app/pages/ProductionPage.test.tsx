@@ -48,7 +48,7 @@ describe('Mist production gates, delay and pause',()=>{
   const gate=document.querySelector('[data-release-gate]')!;expect(gate.textContent).toContain('主单已批准');expect(gate.textContent).toContain('生产尺码已登记');expect(gate.textContent).toContain('本分支还没有登记产前样');
   const release=getByRole(document.body,'button',{name:'核对并放行开产'});expect(release.hasAttribute('disabled')).toBe(true);expect(release.getAttribute('title')).toContain('产前样已确认');
   expect(host.querySelector('.mist-sumbar')!.textContent).toContain('待业务放行1');
-  expect(getByRole(document.body,'button',{name:'异常暂停 / 恢复'}).hasAttribute('disabled')).toBe(true);
+  expect(queryByRole(document.body,'button',{name:'异常暂停'})).toBeNull();
  });
  it('records a delay with new date, reason and customer notice into the branch risk',async()=>{
   await mount({view:'production-board',productionId:'production-b'});await click('登记延期');
@@ -57,5 +57,13 @@ describe('Mist production gates, delay and pause',()=>{
   await click('保存延期');
   expect(bridge.run).toHaveBeenCalledWith({type:'production.update',payload:{id:'production-b',pct:0,due,risk:`延期 ${lastDue} → ${due}：面料复染（尚未告知客户）`}});
   expect(bridge.state!.productions.find(job=>job.id==='production-b')).toMatchObject({due,risk:`延期 ${lastDue} → ${due}：面料复染（尚未告知客户）`});
+ });
+ it('pauses a released branch with a category and reason, then resumes it with evidence',async()=>{
+  const fill=async(value:string)=>{const area=document.querySelector('[role="dialog"] textarea') as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,value);area.dispatchEvent(new Event('input',{bubbles:true}));});};
+  await mount({view:'production-board',productionId:'production-b'});await click('异常暂停');await fill('面料色差待复染');await click('确认暂停');
+  expect(bridge.run).toHaveBeenCalledWith({type:'fulfillment.production.hold',payload:{productionId:'production-b',category:'quality',reason:'面料色差待复染'}});
+  act(()=>root!.unmount());host.remove();await mount({view:'production-board',productionId:'production-b'});expect(document.body.textContent).toContain('生产已异常暂停');expect(queryByRole(document.body,'button',{name:'异常暂停'})).toBeNull();
+  await click('恢复生产');await fill('复染合格');await act(async()=>getByRole(getByRole(document.body,'dialog'),'button',{name:'恢复生产'}).click());
+  expect(bridge.run).toHaveBeenLastCalledWith({type:'fulfillment.production.resume',payload:{productionId:'production-b',note:'复染合格'}});
  });
 });

@@ -42,7 +42,7 @@ describe('风险管理与合规', () => {
     await mount();
     const summary = host.querySelector('[data-risk-summary]')!.textContent!;
     expect(summary).toContain('未登记预警'); expect(summary).toContain('待审批申请');
-    expect(host.textContent).toContain('汇率风险尚未接入汇率数据源');
+    expect(host.textContent).toContain('外币应收与采购在此按原币显示');
     const cert = risk('Open'); expect(row(cert.title)!.textContent).toContain('沈禾');
     const free = riskSignals(state, '2026-10-14').find(s => !state.platform!.risks.some(r => r.signalKey === s.key))!;
     expect(free).toBeTruthy();
