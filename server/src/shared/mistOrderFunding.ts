@@ -31,7 +31,7 @@ export function assertOrderFundingIntegrity(root:Root){
   let development=0;
   for(const allocation of root.allocations.filter(a=>a.receiptId===receipt.id)){
    const invoice=root.invoices.find(i=>i.id===allocation.invoiceId);
-   if(invoice&&(invoice as {devId?:string}).devId){if(invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistMoneyMinor(allocation.amount);continue;}
+   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {opening?:unknown}).opening)){if(invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistMoneyMinor(allocation.amount);continue;}
    const order=root.orders.find(o=>o.id===invoice?.orderId);
    if(!invoice||!order||invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');
    orderBucket(order.customerId,order.id).allocated+=mistMoneyMinor(allocation.amount);

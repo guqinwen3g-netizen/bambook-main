@@ -5,6 +5,7 @@
  * 不跨币种折算合计。服务端按冻结快照渲染 PDF 归档（SOA-YYYY-NNNN，按年连续），只追加不改写；不记录发送状态。
  * 收款账户按币种取未销户的公司银行账户，缺省回落到公司档案的开户行与账号。
  */
+import { mistInvoiceCustomerId } from './mistOpeningBalance';
 import { MistCommandError, isRecognizedMistInvoice, type MistCompanyProfile, type MistContext, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
@@ -49,7 +50,7 @@ export function statementAge(due: string, asOf: string): { days: number | null; 
   const days = Math.max(0, Math.round((Date.parse(asOf + 'T00:00:00Z') - Date.parse(due + 'T00:00:00Z')) / 86400000));
   return { days, bucket: days === 0 ? 'not-due' : days <= 30 ? '1-30' : days <= 60 ? '31-60' : days <= 90 ? '61-90' : '90+' };
 }
-function invoiceOwner(root: MistState, inv: { devId?: string; orderId: string }) { return inv.devId ? root.devs.find(d => d.id === inv.devId)?.customerId : root.orders.find(o => o.id === inv.orderId)?.customerId; }
+function invoiceOwner(root: MistState, inv: { devId?: string; orderId: string; customerId?: string }) { return mistInvoiceCustomerId(root, inv); }
 
 /** 截至对账日的对账单内容（不含编号、生成人与时间）。 */
 export function customerStatementContent(root: MistState, customerId: string, asOf: string): StatementContent {

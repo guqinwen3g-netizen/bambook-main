@@ -1,4 +1,5 @@
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
+import {applyOpeningCommand,openingCommandPermission,type OpeningCommand} from './mistOpeningBalance';
 import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricRequirements,fabricRequirementError,validFabricSample,type DevelopmentDomain,type DevelopmentInitiator,type DevelopmentRequestType,type FabricDevelopmentRequirements} from './mistDevelopmentDomain';
 import { relationHoldReason } from './mistRelationHold';
 import {demoAccountRef,ownerChangeText,resolveMember,setMemberGroups,type MistMemberDirectoryEntry,type MistMemberGroupAssignment} from './mistAccounts';
@@ -203,6 +204,8 @@ export type MistInvoice = { id: string; code: string; orderId: string; order: st
   issuedAt?: string; voidedAt?: string; voidReason?: string; voidedBy?: string; voidedById?: string; voidSourceDocumentId?: string;
   /** BB-DEV-9：开发费用应收票据回链来源开发案（这类票据没有订单，orderId 为空）。 */
   devId?: string;
+  /** 期初未结应收：没有系统内订单，直接归属客户（见 mistOpeningBalance）。 */
+  customerId?: string; opening?: { originalAmount: number; note: string; registeredAt: string; registeredBy: string; registeredById?: string };
   /** CI 签发形成的应收须经财务确认：pending 待确认、confirmed 已确认、rejected 已驳回（同时作废、CI 退回草稿）。 */
   financeStatus?: MistReceivableFinanceStatus; sourceDocumentId?: string;
   financeConfirmedAt?: string; financeConfirmedBy?: string; financeConfirmedById?: string;
@@ -267,7 +270,7 @@ export type MistState = {
   memberGroups?:MistMemberGroupAssignment[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | OrderCostCommand
+export type MistCommand = FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -706,6 +709,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('payable.'))return payablesCommandPermission(command as PayablesCommand);
   if(command.type.startsWith('rebate.'))return exportRebateCommandPermission(command as ExportRebateCommand);
   if(command.type.startsWith('fxrate.'))return fxCommandPermission(command as FxRateCommand);
+  if(command.type.startsWith('opening.'))return openingCommandPermission(command as OpeningCommand);
   if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
   if(command.type.startsWith('lc.'))return lcCommandPermission(command as LcCommand);
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.'))return rfqCommandPermission(command as RfqCommand);
@@ -752,6 +756,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('funding.')){const result=applyOrderFundingCommand(state,command as OrderFundingCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('payable.')){const result=applyPayablesCommand(state,command as PayablesCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('fxrate.')){const result=applyFxRateCommand(state,command as FxRateCommand,context);return {state,result};}
+  if(command.type.startsWith('opening.')){const result=applyOpeningCommand(state,command as OpeningCommand,context);recalculate(state);return {state,result};}
   if(command.type==='finance.statement.generate'){const result=applyCustomerStatementCommand(state,command as CustomerStatementCommand,context);return {state,result};}
   if(command.type.startsWith('lc.')){const result=applyLcCommand(state,command as LcCommand,context);return {state,result};}
   if(command.type.startsWith('handover.')){const result=applyHandoverCommand(state,command as HandoverCommand,context);normalizeMistState(state,context);recalculate(state);return {state,result};}
@@ -1336,7 +1341,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
 /** Read-time additive defaults preserve existing records; the next command persists them. */
 export function normalizeMistState(state:MistState,context:MistContext):void {
   const eventLabels:Record<string,string>={
-    'market.import':'批量导入基础资料','market.supplier.save':'保存供应商档案','market.supplier.status':'更新供应商合作状态',
+    'market.import':'批量导入基础资料','opening.receivable.import':'导入期初应收','opening.receivable.void':'作废期初应收','market.supplier.save':'保存供应商档案','market.supplier.status':'更新供应商合作状态',
     'market.relation.save':'保存关系档案','market.contact.save':'保存联系人',
     'market.product.save':'保存数字档案','market.product.fromVersion':'从确认版本建立数字档案',
     'market.quotation.feedback.add':'追加报价客户反馈','market.quotation.costing.save':'保存报价条目专业核算','market.quotation.save':'保存报价草稿','market.quotation.submit':'提交报价审批',

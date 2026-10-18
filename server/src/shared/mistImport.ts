@@ -5,12 +5,12 @@
  */
 import type { MistMemberDirectoryEntry } from './mistAccounts';
 
-export type MistImportKind = 'customer' | 'supplier' | 'product';
+export type MistImportKind = 'customer' | 'supplier' | 'product' | 'openingReceivable';
 export type MistImportRow = Record<string, string>;
 export type MistImportField = { key: string; label: string; required?: boolean; hint?: string; example: string };
 
 export const MIST_IMPORT_MAX_ROWS = 1000;
-export const MIST_IMPORT_KIND_LABEL: Record<MistImportKind, string> = { customer: '客户', supplier: '供应商', product: '产品档案' };
+export const MIST_IMPORT_KIND_LABEL: Record<MistImportKind, string> = { customer: '客户', supplier: '供应商', product: '产品档案', openingReceivable: '期初应收' };
 
 const contactFields: MistImportField[] = [
   { key: 'contactName', label: '联系人', example: 'Anna Berg' },
@@ -65,6 +65,16 @@ export const MIST_IMPORT_FIELDS: Record<MistImportKind, MistImportField[]> = {
     { key: 'refPrice', label: '参考售价', example: '3.20' },
     { key: 'note', label: '备注', example: '' },
   ],
+  openingReceivable: [
+    { key: 'customer', label: '客户', required: true, hint: '填已建档的客户编码或名称', example: 'CUS-2026-0001' },
+    { key: 'reference', label: '原发票号', required: true, hint: '客户认得的原始发票/CI 号，不可重复', example: 'CI-2026-0815' },
+    { key: 'issuedAt', label: '开票日期', required: true, hint: 'YYYY-MM-DD，不晚于今天', example: '2026-08-15' },
+    { key: 'due', label: '到期日', required: true, hint: 'YYYY-MM-DD，不早于开票日期', example: '2026-10-14' },
+    { key: 'currency', label: '币种', required: true, hint: '三位字母', example: 'USD' },
+    { key: 'originalAmount', label: '票面金额', hint: '留空同未收余额', example: '48000' },
+    { key: 'amount', label: '未收余额', required: true, hint: '截至启用日仍未收回的金额', example: '33600' },
+    { key: 'note', label: '备注', example: '定金已收 30%' },
+  ],
 };
 
 /** 表头（中文名或字段键）→ 字段键；忽略首尾空格、星号与全角括号说明。 */
@@ -77,14 +87,14 @@ type Command = { type: string; payload: any };
 type Ctx = { members?: MistMemberDirectoryEntry[]; actorId?: string };
 type Market = { suppliers: Array<{ id: string; code: string; name: string }> };
 
-const text = (row: MistImportRow, key: string) => String(row[key] ?? '').trim();
+export const text = (row: MistImportRow, key: string) => String(row[key] ?? '').trim();
 function num(value: string, label: string, integer = false): number {
   if (!value) return 0;
   const v = value.replace(/,/g, '');
   if (!/^\d+(\.\d+)?$/.test(v) || (integer && !/^\d+$/.test(v))) throw new Error(`${label}须为${integer ? '非负整数' : '非负数字'}`);
   return Number(v);
 }
-function date(value: string, label: string): string {
+export function mistImportDate(value: string, label: string): string {
   if (!value) return '';
   const v = value.replace(/[./]/g, '-').replace(/-(\d)(?=-|$)/g, '-0$1');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new Error(`${label}须为 YYYY-MM-DD`);
@@ -114,7 +124,7 @@ export function mistImportRowCommand(kind: MistImportKind, row: MistImportRow, c
     return { command: { type: 'market.customer.create', payload: { input: {
       code: text(row, 'code'), name: text(row, 'name'), country: text(row, 'country'), city: text(row, 'city'), industry: text(row, 'industry'),
       ownerId: owner(ctx, text(row, 'owner')), grade: text(row, 'grade'), currency: text(row, 'currency').toUpperCase(), terms: text(row, 'terms'),
-      incoterm: text(row, 'incoterm').toUpperCase(), categories: text(row, 'categories'), since: date(text(row, 'since'), '合作起始日'), creditLimit: num(text(row, 'creditLimit'), '信用额度'),
+      incoterm: text(row, 'incoterm').toUpperCase(), categories: text(row, 'categories'), since: mistImportDate(text(row, 'since'), '合作起始日'), creditLimit: num(text(row, 'creditLimit'), '信用额度'),
     } } }, contact: contact('customer', row) };
   }
   if (kind === 'supplier') {
@@ -145,17 +155,15 @@ export function mistImportRowCommand(kind: MistImportKind, row: MistImportRow, c
 
 export function mistImportPermission(kind: unknown): string {
   if (kind === 'customer') return 'relations:write';
+  if (kind === 'openingReceivable') return 'invoices:write';
   if (kind === 'supplier') return 'suppliers:write';
   if (kind === 'product') return 'products:write';
   throw new Error('导入类型无效');
 }
 
-/**
- * 逐行执行；任何一行不通过则抛出汇总错误（调用方的事务不提交，整批不生效）。
- * run 执行单条市场命令并返回其结果。
- */
-export function mistImportRun(kind: MistImportKind, rows: unknown, ctx: Ctx, market: Market, run: (command: Command) => { id?: string; customerId?: string }, fail: (message: string) => never) {
-  if (!['customer', 'supplier', 'product'].includes(kind)) fail('导入类型无效');
+/** 逐行执行 handle；任何一行不通过则抛出汇总错误（调用方的事务不提交，整批不生效）。 */
+export function mistImportEach(kind: MistImportKind, rows: unknown, handle: (row: MistImportRow) => void, fail: (message: string) => never) {
+  if (!MIST_IMPORT_FIELDS[kind]) fail('导入类型无效');
   if (!Array.isArray(rows) || !rows.length) fail('导入文件没有数据行');
   if ((rows as unknown[]).length > MIST_IMPORT_MAX_ROWS) fail(`一次最多导入 ${MIST_IMPORT_MAX_ROWS} 行，请分批`);
   const problems: string[] = [];
@@ -168,10 +176,7 @@ export function mistImportRun(kind: MistImportKind, rows: unknown, ctx: Ctx, mar
       const row = Object.fromEntries(Object.entries(raw as Record<string, unknown>).map(([k, v]) => [k, typeof v === 'string' ? v : v == null ? '' : String(v)]));
       const missing = MIST_IMPORT_FIELDS[kind].filter(f => f.required && !text(row, f.key)).map(f => f.label);
       if (missing.length) throw new Error(missing.join('、') + '未填写');
-      const { command, contact: person } = mistImportRowCommand(kind, row, ctx, market);
-      const result = run(command);
-      const parentId = kind === 'customer' ? result.customerId : result.id;
-      if (person && parentId) run({ type: 'market.contact.save', payload: { ...person, parentId } });
+      handle(row);
       imported++;
     } catch (error) {
       problems.push(`第 ${line} 行：${error instanceof Error ? error.message : String(error)}`);
@@ -179,4 +184,15 @@ export function mistImportRun(kind: MistImportKind, rows: unknown, ctx: Ctx, mar
   });
   if (problems.length) fail(`导入未执行，共 ${problems.length} 行不通过（行号按表格计，第 1 行为表头）：\n${problems.slice(0, 30).join('\n')}${problems.length > 30 ? `\n……另有 ${problems.length - 30} 行` : ''}`);
   return { imported };
+}
+
+/** 客户 / 供应商 / 产品：每行按单条市场保存命令执行。run 执行单条市场命令并返回其结果。 */
+export function mistImportRun(kind: MistImportKind, rows: unknown, ctx: Ctx, market: Market, run: (command: Command) => { id?: string; customerId?: string }, fail: (message: string) => never) {
+  if (!['customer', 'supplier', 'product'].includes(kind)) fail('导入类型无效');
+  return mistImportEach(kind, rows, row => {
+    const { command, contact: person } = mistImportRowCommand(kind, row, ctx, market);
+    const result = run(command);
+    const parentId = kind === 'customer' ? result.customerId : result.id;
+    if (person && parentId) run({ type: 'market.contact.save', payload: { ...person, parentId } });
+  }, fail);
 }
