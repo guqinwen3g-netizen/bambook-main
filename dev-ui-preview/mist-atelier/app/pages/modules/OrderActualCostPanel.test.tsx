@@ -50,3 +50,17 @@ it('hides registering and voiding for read-only viewers',()=>{
   render(false);
   expect(queryByRole(host,'button',{name:'登记费用'})).toBeNull();
 });
+it('turns an expense into a payable bill and then only shows the bill code',async()=>{
+  const supplier=state.market.suppliers[0];
+  state=applyMistCommand(state,{type:'cost.expense.register',payload:{category:'freight',vendor:supplier.name,ref:'FW-1',date:'2026-10-15',currency:'USD',amount:800,scope:'shipment',shipmentId:state.fulfillment.shipments[0].id,basis:'volume'}} as MistCommand,ctx).state;
+  render();
+  await click(getByRole(host,'button',{name:'转应付 FY-2026-0001'}));
+  const dialog=getByRole(document.body,'dialog',{name:'转应付 FY-2026-0001'});
+  expect((getByRole(dialog,'combobox',{name:'收款供应商'}) as HTMLSelectElement).value).toBe(supplier.id);
+  type(dialog.querySelector('input[aria-label="付款到期日"]')!,'2026-11-15');
+  await click(getByRole(dialog,'button',{name:'转应付'}));
+  expect(run).toHaveBeenCalledWith({type:'cost.expense.payable',payload:{id:state.orderCosts!.expenses[0].id,supplierId:supplier.id,invoiceNo:'FW-1',due:'2026-11-15',taxAmount:''}});
+  state=applyMistCommand(state,run.mock.calls[0][0],ctx).state;act(()=>root.unmount());root=createRoot(host);render();
+  expect(queryByRole(host,'button',{name:'转应付 FY-2026-0001'})).toBeNull();expect(queryByRole(host,'button',{name:'作废 FY-2026-0001'})).toBeNull();
+  expect(getByRole(host,'table',{name:'费用台账'}).textContent).toMatch(/AP-/);
+});

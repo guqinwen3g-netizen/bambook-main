@@ -4,7 +4,7 @@ import { Plus, Receipt, TrendingUp, Truck, Wallet } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, Pill, Select, StatCard, StatGrid, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { FX_BASIS_LABEL, type FxBasis } from '../../../../../server/src/shared/mistFxRates';
-import { ALLOCATION_BASES, EXPENSE_CATEGORIES, activeExpenses, orderActualCost, orderExpenses, type AllocationBasis, type ExpenseCategory, type OrderActualCost, type OrderCostLine, type OrderExpense } from '../../../../../server/src/shared/mistOrderCost';
+import { ALLOCATION_BASES, EXPENSE_CATEGORIES, activeExpenses, expensePayableBill, orderActualCost, orderExpenses, type AllocationBasis, type ExpenseCategory, type OrderActualCost, type OrderCostLine, type OrderExpense } from '../../../../../server/src/shared/mistOrderCost';
 import { downloadModuleCsv } from './ModuleWorkbench';
 
 const money = (v: number) => v.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -17,7 +17,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run }: { sta
   const toast = useToast();
   const [basisChoice, setBasis] = React.useState<FxBasis | null>(null), [month, setMonth] = React.useState(asOf.slice(0, 7));
   const basis: FxBasis = basisChoice ?? ((state.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : 'period');
-  const [open, setOpen] = React.useState<string | null>(null), [register, setRegister] = React.useState(false), [voiding, setVoiding] = React.useState<OrderExpense | null>(null), [reason, setReason] = React.useState(''), [showVoided, setShowVoided] = React.useState(false);
+  const [open, setOpen] = React.useState<string | null>(null), [register, setRegister] = React.useState(false), [voiding, setVoiding] = React.useState<OrderExpense | null>(null), [reason, setReason] = React.useState(''), [showVoided, setShowVoided] = React.useState(false), [paying, setPaying] = React.useState<OrderExpense | null>(null), [payForm, setPayForm] = React.useState({ supplierId: '', invoiceNo: '', due: '', taxAmount: '' });
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
   const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf)).sort((a, b) => ({ ok: 0, norate: 1 }[a.status] - { ok: 0, norate: 1 }[b.status]) || (a.rateIn ?? 0) - (b.rateIn ?? 0) || a.code.localeCompare(b.code));
   const ok = rows.filter(r => r.status === 'ok'), total = (pick: (r: OrderActualCost) => number | null) => Math.round(ok.reduce((n, r) => n + (pick(r) ?? 0) * 100, 0)) / 100;
@@ -40,10 +40,12 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run }: { sta
     { key: 'vendor', header: '收款方 / 单据', render: e => [e.vendor, e.ref].filter(Boolean).join(' · ') || '—' },
     { key: 'amount', header: '金额', align: 'right', render: e => `${e.currency} ${money(e.amount)}` },
     { key: 'scope', header: '分摊', render: e => <div className="mist-col" style={{ gap: 2 }}><span>{e.scope === 'shipment' ? `出运 ${e.shipmentCode}` : '指定订单'} · {ALLOCATION_BASES[e.basis]}</span><small className="mist-muted">{e.shares.map(s => `${s.orderCode} ${money(s.amount)}`).join('；')}</small></div> },
-    { key: 'state', header: '', render: e => e.voided ? <Pill tone="neutral">已作废</Pill> : canWrite ? <Button size="sm" variant="quiet" disabled={busy} aria-label={`作废 ${e.code}`} onClick={() => { setReason(''); setVoiding(e); }}>作废</Button> : null },
+    { key: 'payable', header: '应付', render: e => { const bill = expensePayableBill(state, e); return bill ? <Pill tone="ok">{bill.code}</Pill> : e.voided ? null : canWrite ? <Button size="sm" variant="quiet" disabled={busy} aria-label={`转应付 ${e.code}`} onClick={() => { setPayForm({ supplierId: (state.market?.suppliers || []).find(x => x.name === e.vendor)?.id || '', invoiceNo: e.ref, due: '', taxAmount: '' }); setPaying(e); }}>转应付</Button> : <span className="mist-note">未转</span>; } },
+    { key: 'state', header: '', render: e => e.voided ? <Pill tone="neutral">已作废</Pill> : canWrite && !expensePayableBill(state, e) ? <Button size="sm" variant="quiet" disabled={busy} aria-label={`作废 ${e.code}`} onClick={() => { setReason(''); setVoiding(e); }}>作废</Button> : null },
   ];
   const exportCsv = () => downloadModuleCsv(`订单核算-${FX_BASIS_LABEL[basis]}-${asOf}.csv`, ['订单', '客户', '收入CNY', '采购CNY', '费用CNY', '退税CNY', '毛利不含退税', '毛利含退税', '毛利率%', '状态'],
     rows.map(r => [r.code, r.customer, r.revenueCny ?? '', r.purchaseCny ?? '', r.expenseCny ?? '', r.rebate.used, r.marginEx ?? '', r.marginIn ?? '', r.rateIn === null ? '' : (r.rateIn * 100).toFixed(1), r.status === 'norate' ? '缺汇率' : r.estimated ? '含暂估' : '已决算']));
+  const doPayable = async () => { if (!paying) return; await run({ type: 'cost.expense.payable', payload: { id: paying.id, supplierId: payForm.supplierId, invoiceNo: payForm.invoiceNo, due: payForm.due, taxAmount: payForm.taxAmount } } as MistCommand); setPaying(null); toast('已转入应付待办，可按票申请付款'); };
   const doVoid = async () => { if (!voiding) return; await run({ type: 'cost.expense.void', payload: { id: voiding.id, reason } } as MistCommand); setVoiding(null); toast('费用已作废'); };
   return <div data-order-actual-cost>
     <Toolbar right={<span className="mist-row">{canWrite && <Button icon={Plus} variant="primary" disabled={busy} onClick={() => setRegister(true)}>登记费用</Button>}<Button onClick={exportCsv}>导出核算</Button></span>}>
@@ -76,6 +78,14 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run }: { sta
     {register && <RegisterExpense state={state} asOf={asOf} busy={busy} run={run} onClose={() => setRegister(false)} onDone={() => { setRegister(false); toast('费用已登记并分摊'); }} />}
     <Dialog open={!!voiding} onClose={() => setVoiding(null)} tone="bad" title={`作废 ${voiding?.code ?? ''}`} description="作废后不再计入订单成本，原记录保留。" footer={<><Button onClick={() => setVoiding(null)}>取消</Button><Button variant="danger" disabled={busy || !reason.trim()} onClick={() => void doVoid().catch(() => undefined)}>作废</Button></>}>
       <Field label="作废原因"><TextInput aria-label="作废原因" value={reason} onChange={e => setReason(e.target.value)} /></Field>
+    </Dialog>
+    <Dialog open={!!paying} onClose={() => setPaying(null)} title={`转应付 ${paying?.code ?? ''}`} description={paying ? `${EXPENSE_CATEGORIES[paying.category]} · ${paying.amount} ${paying.currency}。生成应付票据后在「财务管理 › 应付待办」按票申请付款；成本仍按费用台账计，不重复计入。` : undefined} footer={<><Button onClick={() => setPaying(null)}>取消</Button><Button variant="primary" disabled={busy || !payForm.supplierId || !payForm.invoiceNo.trim() || !payForm.due} onClick={() => void doPayable().catch(() => undefined)}>转应付</Button></>}>
+      <FormGrid>
+        <Field label="收款供应商" required hint="货代、报关行等须先在供应商管理建档"><Select aria-label="收款供应商" value={payForm.supplierId} onChange={e => setPayForm({ ...payForm, supplierId: e.target.value })} options={[{ value: '', label: '选择供应商' }, ...(state.market?.suppliers || []).map(x => ({ value: x.id, label: `${x.code} · ${x.name}` }))]} /></Field>
+        <Field label="发票号" required><TextInput aria-label="发票号" value={payForm.invoiceNo} onChange={e => setPayForm({ ...payForm, invoiceNo: e.target.value })} /></Field>
+        <Field label="付款到期日" required><TextInput aria-label="付款到期日" type="date" value={payForm.due} onChange={e => setPayForm({ ...payForm, due: e.target.value })} /></Field>
+        <Field label="税额"><TextInput aria-label="税额" type="number" step="0.01" value={payForm.taxAmount} onChange={e => setPayForm({ ...payForm, taxAmount: e.target.value })} /></Field>
+      </FormGrid>
     </Dialog>
   </div>;
 }

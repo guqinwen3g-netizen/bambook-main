@@ -36,6 +36,8 @@ export type SupplierBill = {
   state: 'open' | 'void'; registeredAt: string; registeredBy: string; voided?: { at: string; actor: string; reason: string };
   /** 期初未结应付：系统启用前已收票、仍未付清的供应商票据（无来源合同，amount 为启用时未付余额）。 */
   opening?: { originalAmount: number };
+  /** 由费用台账转入（货代、报关等费用）；无来源合同。 */
+  expenseId?: string;
 };
 export type SupplierPayment = {
   id: string; paymentId: string; code: string; supplierId: string; supplier: string; date: string;

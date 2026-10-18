@@ -318,3 +318,17 @@ it('历史付款补登：计划详情按凭证补登，不走审批，记为历�
   expect(store.value.state.payables.requests).toHaveLength(0);
   expect(host.textContent).toContain('历史补登（系统上线前已付，未走申请）');
 });
+
+it('票据登记可上传发票附件，详情可下载', async () => {
+  store.value.uploadFile = vi.fn(async (file: File) => { const f = { id: 'file-vat', name: file.name, mimeType: file.type, size: 1, storageKey: 'k', createdAt: ctx.now }; store.value.state.files.push(f); return f; });
+  store.value.downloadFile = vi.fn();
+  render(); await click(/待登记来源/); await click('登记票据', getByRole(host, 'table', { name: '待登记来源合同' }));
+  const dialog = getByRole(document.body, 'dialog', { name: '登记供应商票据' });
+  input(po.code + ' 本票金额', '33480'); input('供应商发票号', 'VAT-HS-02'); input('税额', '3851.68'); input('到期日', day);
+  const file = dialog.querySelector('input[type="file"]') as HTMLInputElement; const pdf = new File(['x'], '增值税发票.pdf', { type: 'application/pdf' }); Object.defineProperty(file, 'files', { value: [pdf] });
+  await act(async () => { file.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(dialog.textContent).toContain('增值税发票.pdf');
+  await click('登记应付', dialog);
+  expect(store.value.state.payables.bills[0].fileIds).toEqual(['file-vat']);
+  expect(host.textContent).toContain('发票附件'); expect(host.textContent).toContain('增值税发票.pdf');
+});
