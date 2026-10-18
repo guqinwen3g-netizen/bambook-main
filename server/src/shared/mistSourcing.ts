@@ -3,9 +3,14 @@
  * 重新报价保留原报价为历史。比价按单价折人民币（月末汇率；缺汇率时只在询价币种内比较），同时列出交期是否满足、MOQ 是否超出、供应商最新评级。
  * 定标：选择有效报价；若不是最低价、有效报价不足两家（单一来源）、承诺交期晚于需求交期或 MOQ 超出需求数量，必须写明定标理由。
  * 定标后按中标报价生成采购草稿（数量、单价、币种、交期、付款条件、报价附件），仍需按采购审批流程提交批准后才能对外发出。
+ *
+ * 在手合同转给其他供应商（sourcing.purchase.transfer）：仅限已批准、尚未收货的合同整单转移（已有收货须按实收结算后对剩余数量另行建单）。
+ * 原合同按“未执行即取消”办理（有票据、结算或在途付款申请须先处理；已付预付由原供应商退回），其生产分支随之关闭；
+ * 同时按新供应商的单价、币种、交期生成采购草稿，重新走审批、线下发出与供应商确认。两张单互相留痕。
  */
 import { MistCommandError, assertMistOrderOpen, type MistContext, type MistState } from './mistWorkspace';
 import { applyFulfillmentCommand, type FulfillmentPurchase } from './mistFulfillment';
+import { applyPayablesCommand, purchasePrepaymentAvailableMinor } from './mistPayables';
 import { supplierBusinessDay, supplierUnavailableReason } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
 import { fxRateFor } from './mistFxRates';
@@ -26,7 +31,8 @@ export type RfqCommand =
   | { type: 'rfq.invite'; payload: { id: string; supplierIds: string[] } }
   | { type: 'rfq.quote'; payload: { id: string; supplierId: string; declined?: boolean; declineReason?: string; price?: string | number; currency?: string; moq?: string | number; promisedDue?: string; terms?: string; validUntil?: string; note?: string; fileIds?: string[] } }
   | { type: 'rfq.award'; payload: { id: string; quoteId: string; reason?: string } }
-  | { type: 'rfq.cancel'; payload: { id: string; reason: string } };
+  | { type: 'rfq.cancel'; payload: { id: string; reason: string } }
+  | { type: 'sourcing.purchase.transfer'; payload: { purchaseId: string; supplierId: string; price: string | number; currency: string; due: string; terms?: string; reason: string } };
 type Root = MistState & { rfqs?: MistRfq[] };
 export const RFQ_STATE_LABEL: Record<MistRfq['state'], string> = { open: '询价中', awarded: '已定标', cancelled: '已取消' };
 
@@ -38,6 +44,12 @@ const currencyOf = (v: unknown) => { const c = text(v, '币种', true, 3).toUppe
 
 export const readRfqs = (root: Pick<Root, 'rfqs'>) => root.rfqs || [];
 export const rfqCommandPermission = (_c: RfqCommand) => 'procurement:write';
+/** 整单转移的前置条件；返回空字符串表示可以转移。 */
+export function purchaseTransferBlocker(root: MistState, po: FulfillmentPurchase): string {
+  if (po.state !== 'approved') return po.state === 'cancelled' ? `${po.code} 已取消` : `${po.code} 尚未批准；草稿或退回的单据直接改供应商后重新提交即可`;
+  if ((root.fulfillment?.receipts || []).some(r => r.purchaseId === po.id)) return `${po.code} 已有收货，不能整单转移；请按实收结算，剩余数量另行询价建单`;
+  return '';
+}
 const find = (root: Root, id: unknown) => readRfqs(root).find(r => r.id === id) || fail('询价单不存在', 'NOT_FOUND');
 const open = (r: MistRfq) => { if (r.state !== 'open') fail(`询价单${RFQ_STATE_LABEL[r.state]}，不能再操作`, 'PRECONDITION'); };
 function supplierOk(root: Root, id: string, today: string) {
@@ -149,6 +161,23 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       r.state = 'cancelled'; r.cancelled = { reason: text(p.reason, '取消原因', true, 2000), at: c.now, actor: c.actorName };
       event(root, c, r, `取消询价：${r.cancelled.reason}`);
       return { id: r.id };
+    }
+    case 'sourcing.purchase.transfer': {
+      const po = (root.fulfillment?.purchases || []).find(x => x.id === p.purchaseId) || fail('采购合同不存在', 'NOT_FOUND');
+      const blocker = purchaseTransferBlocker(root, po);
+      if (blocker) fail(blocker, 'PRECONDITION');
+      const target = supplierOk(root, text(p.supplierId, '新供应商'), today);
+      if (target.id === po.supplierId) fail('新供应商须与原供应商不同');
+      const reason = text(p.reason, '转移原因', true, 1000), due = day(p.due, '新供应商交期');
+      const prepaid = purchasePrepaymentAvailableMinor(root, po.id);
+      applyPayablesCommand(root, { type: 'payable.purchase.cancel', payload: { purchaseId: po.id, reason: `转给 ${target.name}：${reason}`, ...(prepaid > 0 ? { prepayment: 'refund' as const } : {}) } }, c);
+      const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: po.orderId, lineId: po.lineId, kind: po.kind, supplierId: target.id, supplier: target.name, description: po.description, quantity: po.quantity, unit: po.unit, price: positive(p.price, '新单价'), currency: currencyOf(p.currency), due, terms: text(p.terms, '付款条件', false, 200) || po.terms, destination: po.destination,
+        note: `由 ${po.code}（${po.supplier}）转入：${reason}`, fileIds: [] } }, c) as { id: string };
+      const next = root.fulfillment.purchases.find(x => x.id === saved.id)!;
+      next.transferredFrom = { purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, reason };
+      po.transferredTo = { purchaseId: next.id, purchaseCode: next.code, supplierId: target.id, supplier: target.name, reason, at: c.now, actor: c.actorName };
+      root.events.unshift({ id: c.id(), entityType: 'procurement', entityId: next.id, at: c.now, actor: c.actorName, text: `由 ${po.code}（${po.supplier}）转入 ${target.name}，待提交审批：${reason}`, fileIds: [] });
+      return { id: next.id, purchaseId: next.id };
     }
   }
   return fail('未知询价操作');

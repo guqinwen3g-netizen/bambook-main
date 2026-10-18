@@ -40,7 +40,7 @@ export function ProductionPage() {
   const [selectedId, setSelectedId] = React.useState<string | null>(route.productionId ?? null);
   const [draft, setDraft] = React.useState({ pct: 0, risk: '', note: '', startDate: '', due: '' });
   const [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState('');
-  const items = state?.productions ?? [], selected = items.find(item => item.id === selectedId);
+  const items = (state?.productions ?? []).filter(item => !item.closed), selected = items.find(item => item.id === selectedId);
   const fact=state?.fulfillment.productionFacts?.find(item=>item.productionId===selectedId);
   const selectedDomain=state?.orders.find(order=>order.id===selected?.orderId)?.type;
   const productionUnit=(item:MistProduction)=>state?.orderLines.find(line=>line.id===item.lineId&&line.orderId===item.orderId)?.unit||'单位未记录';

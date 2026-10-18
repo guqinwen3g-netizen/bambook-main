@@ -22,7 +22,7 @@ function fail(message:string,code='VALIDATION'):never{throw new MistCommandError
 
 /** 条目当前的履约事实（与订单是否在变更无关）。 */
 export function orderLineFacts(root:MistState,lineId:string){
- const f=root.fulfillment,jobs=root.productions.filter(job=>job.lineId===lineId);
+ const f=root.fulfillment,jobs=root.productions.filter(job=>job.lineId===lineId&&!job.closed);
  const facts=jobs.map(job=>({job,completion:(f?.productionFacts||[]).find(fact=>fact.productionId===job.id)?.completion}));
  const completed=sum(facts.map(x=>x.completion?.quantity||0));
  const sizeMap=new Map<string,number>();for(const x of facts)for(const s of x.completion?.sizeQuantities||[])sizeMap.set(s.size,r4((sizeMap.get(s.size)||0)+s.quantity));

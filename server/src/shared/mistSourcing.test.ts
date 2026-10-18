@@ -3,11 +3,12 @@ import {applyMistCommand,createMistState,mistCommandPermission,type MistContext,
 import {readRfqs,rfqAwardFlags,rfqComparison} from './mistSourcing';
 
 function fixture(){
-  let id=0;const ctx={id:()=>`rfq-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'demo-sales',actorName:'顾言'} as MistContext;
+  let id=0;const ctx={id:()=>`rfq-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'demo-sales',actorName:'顾言',authority:{supplier:{'supplierCommitment.approvers.processing.garment':{version:1,userIds:['leader']}}}} as unknown as MistContext;
   let state=createMistState(ctx,'demo');
   const run=(command:MistCommand)=>{const result=applyMistCommand(state,command,ctx);state=result.state;return result.result as {id:string;purchaseId?:string;quoteId?:string};};
   const sup=(name:string)=>state.market.suppliers.find(s=>s.name===name)!.id;
-  return {run,sup,get state(){return state as MistState;},get rfq(){return readRfqs(state)[0];}};
+  const as=<T,>(actorId:string,fn:()=>T)=>{const prev=ctx.actorId;ctx.actorId=actorId;try{return fn();}finally{ctx.actorId=prev;}};
+  return {run,sup,as,get state(){return state as MistState;},get rfq(){return readRfqs(state)[0];}};
 }
 const input=(f:ReturnType<typeof fixture>,patch:Record<string,unknown>={})=>({orderId:'SO-G-2026-018',lineId:'SO-G-2026-018-line-0',kind:'processing',description:'双面羊毛大衣 CMT 加工',quantity:'1200',unit:'件',currency:'CNY',due:'2026-11-20',destination:'嘉兴成品仓',deadline:'2026-10-22',supplierIds:[f.sup('江南成衣'),f.sup('远山服装')],...patch});
 const quote=(id:string,supplierId:string,patch:Record<string,unknown>={})=>({type:'rfq.quote',payload:{id,supplierId,price:'88',currency:'CNY',moq:'500',promisedDue:'2026-11-15',terms:'月结 30 天',validUntil:'2026-10-31',...patch}}) as MistCommand;
@@ -68,5 +69,30 @@ describe('供应商询价比价',()=>{
     expect(()=>g.run({type:'rfq.cancel',payload:{id:r2,reason:''}} as MistCommand)).toThrow('取消原因');
     g.run({type:'rfq.cancel',payload:{id:r2,reason:'客户取消该款'}} as MistCommand);
     expect(g.rfq.state).toBe('cancelled');
+  });
+  it('在手合同转给其他供应商：已批准未收货整单转移，原合同取消、生产分支关闭，新供应商草稿重新审批',()=>{
+    const f=fixture();const po=()=>f.state.fulfillment.purchases.find(p=>p.code==='PO-2026-00003')!;
+    const transfer=(patch:Record<string,unknown>={})=>({type:'sourcing.purchase.transfer',payload:{purchaseId:po().id,supplierId:f.sup('江南成衣'),price:'88',currency:'CNY',due:'2026-11-18',reason:'远山服装产能被抽调，无法保交期',...patch}}) as MistCommand;
+    expect(()=>f.run(transfer())).toThrow('尚未批准');
+    f.run({type:'fulfillment.procurement.submit',payload:{id:po().id}} as MistCommand);
+    f.as('leader',()=>f.run({type:'fulfillment.procurement.decide',payload:{id:po().id,decision:'approved',note:'同意'}} as MistCommand));
+    const branch=f.state.productions.find(j=>j.sourcePurchaseId===po().id)!;expect(branch.closed).toBeUndefined();
+    expect(()=>f.run(transfer({supplierId:po().supplierId}))).toThrow('须与原供应商不同');
+    expect(()=>f.run(transfer({supplierId:f.sup('恒彩印花')}))).toThrow('已暂停合作');
+    expect(()=>f.run(transfer({reason:' '}))).toThrow('转移原因');
+    const received=f.state.fulfillment.purchases.find(p=>p.code==='PO-2026-00001')!;
+    expect(()=>f.run(transfer({purchaseId:received.id}))).toThrow('已有收货，不能整单转移');
+    const {id}=f.run(transfer());
+    const next=f.state.fulfillment.purchases.find(p=>p.id===id)!, old=po();
+    expect(old).toMatchObject({state:'cancelled',transferredTo:{purchaseId:id,purchaseCode:next.code,supplier:'江南成衣'}});
+    expect(old.cancellation!.reason).toBe('转给 江南成衣：远山服装产能被抽调，无法保交期');
+    expect(next).toMatchObject({state:'draft',supplier:'江南成衣',price:88,currency:'CNY',due:'2026-11-18',quantity:old.quantity,lineId:old.lineId,kind:'processing',terms:old.terms,transferredFrom:{purchaseCode:'PO-2026-00003',supplier:'远山服装'}});
+    expect(f.state.productions.find(j=>j.id===branch.id)!.closed!.reason).toContain('PO-2026-00003 取消');
+    expect(()=>f.run({type:'fulfillment.production.plan',payload:{productionId:branch.id,lines:[]}} as MistCommand)).toThrow('已随合同取消关闭');
+    f.run({type:'fulfillment.procurement.submit',payload:{id}} as MistCommand);
+    f.as('leader',()=>f.run({type:'fulfillment.procurement.decide',payload:{id,decision:'approved',note:'同意转单'}} as MistCommand));
+    expect(f.state.productions.filter(j=>j.lineId===old.lineId&&!j.closed).map(j=>j.factory)).toEqual(['江南成衣']);
+    expect(()=>f.run(transfer())).toThrow('已取消');
+    expect(f.state.events.some(e=>e.entityId===id&&e.text.includes('由 PO-2026-00003（远山服装）转入 江南成衣'))).toBe(true);
   });
 });

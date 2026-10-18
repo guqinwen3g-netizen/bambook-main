@@ -135,7 +135,7 @@ export function OrderDetailPage() {
   React.useEffect(()=>{setLineEditorId(null);},[scope,lineId]);
   React.useEffect(()=>{operation.current=false;setWorking(false);setDocumentOpen(false);setEditOpen(false);setHandoffOpen(false);setNote('');setFailure('');},[scope]);
   const selectedLine = lines.find(line => line.id === lineId);
-  const productions = (state?.productions ?? []).filter(item => item.orderId === order?.id);
+  const productions = (state?.productions ?? []).filter(item => item.orderId === order?.id && !item.closed);
   const invoices = (state?.invoices ?? []).filter(item => item.orderId === order?.id);
   const sameCurrencyReceipts=(state?.receipts??[]).filter(receipt=>receipt.currency===order?.currency),receiptIds=new Set(sameCurrencyReceipts.map(receipt=>receipt.id));
   const sameCurrencyInvoices=invoices.filter(invoice=>invoice.currency===order?.currency);
