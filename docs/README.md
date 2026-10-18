@@ -34,7 +34,7 @@
 | 前端如何继续接业务 / 当前范围 | [Mist 推进手册](mist-atelier/05-migration-playbook.md) + [前端基础契约](design-system/foundation-contract.md) | 3001/3131/默认构建共用 Mist 源码；真实数据、权限、操作与回程经适配器接入，明确未接通范围 |
 | 这个模块的设计细节 | `docs/design/04-模块设计/<域>/<模块>/模块概述.md` | 每域一篇入口，实现状态注记基本可信 |
 | 为什么这样设计 | `docs/design/10-评审与决策/2026-08-16-设计评审决策记录.md` | DR 决策台账，只追加不重写 |
-| 如何开工与接力 | [项目首页](../README.md) + [当前工作规则](../AGENTS.md) + [进度停点](mist-atelier/LIVE-PROGRESS.md) | 以接力为主；完成的小批次及时经 PR 合入，详细证据留在 PR |
+| 如何开工与接力 | [当前工作规则](../AGENTS.md) + [上线推进](GO-LIVE.md) | 单线接力：自测、自合入 main，并更新 GO-LIVE“进度记录”；LIVE-PROGRESS / HANDOFF 只作历史 |
 | Agent 能力边界 | `docs/design/04-模块设计/07-AI助手/Agent能力分层L0-L6.md` + `写操作工具集.md` + `审批与human-in-the-loop.md` | L0-L6 分层 + ProcessDraft 三阶段幂等闭环 |
 | 部署背景在哪里 | [部署拓扑记录](design/08-集成与边界/OPSPanel与MacMini部署拓扑.md) | 作为背景参考；实际部署方式与当前环境需另行核实，不能据旧说明直接执行 |
 | 开发后端怎样从 GitHub 交付 | [腾讯云开发交付通道](deployment/bambook-development.md) | 专用 SSH 账号、主线手动触发；通道检查与应用上线分开 |
@@ -44,7 +44,7 @@
 
 ## 二、动态状态住址（防止状态类信息腐化）
 
-- **当前项目现状 / 当前工作 / 后续方向** → [项目首页](../README.md)；**当前 HEAD / 分支 / 工作区变化** → 现场查询 Git；**验证证据** → 对应 PR；**接力停点与历史** → [进度记录](mist-atelier/LIVE-PROGRESS.md)。根 `AGENTS.md` 保留现行工作规则，不堆动态流水。
+- **当前项目现状 / 当前工作 / 后续方向** → [项目首页](../README.md)；**当前 HEAD / 分支 / 工作区变化** → 现场查询 Git；**验证证据** → 对应 PR；**接力停点、待办与进度** → [GO-LIVE](GO-LIVE.md)（10-17 前历史见 [LIVE-PROGRESS](mist-atelier/LIVE-PROGRESS.md)）。根 `AGENTS.md` 保留现行工作规则，不堆动态流水。
 - **缺口优先级与剩余项** → `docs/design/10-评审与决策/2026-08-25-中度与严重缺失功能开发优先级规划.md` 的未消费部分
 - **待拍板决策** → DR 台账追加；REQ2-11 双抬头分账待决点 D-1~D-5
 - **W-0 开工前置包（2026-08-27）** → 三件工件已生成（见下），W-A 收官与 W-B 开工的判定依据
