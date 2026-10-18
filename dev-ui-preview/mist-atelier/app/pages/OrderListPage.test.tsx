@@ -20,7 +20,10 @@ import { ProductionPage, productionWindow } from './ProductionPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root;
 const go = vi.fn(), openAI = vi.fn();
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
 function fixture(): MistState {
   const date = today();
   return {
@@ -55,7 +58,7 @@ beforeEach(() => {
   store.run.mockResolvedValue({ requestId: 'r1', revision: 2, result: {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 it('order detail renders only its own lines and does not invent a fallback order', () => {
   render(<OrderDetailPage />, { view: 'orders/detail', id: 'order-a' });
@@ -110,6 +113,10 @@ it('production edits persist a typed command and keep the entered value when sav
   expect((getByLabelText(host, '生产进度（%）') as HTMLInputElement).value).toBe('75'); expect(host.textContent).toContain('进度未保存');
 });
 it('dragging a production card waits for persistence and re-renders the acknowledged column', async () => {
+  // Shanghai is already Monday while UTC is still Sunday; use the board's local calendar.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-19T05:00:00+08:00'));
+  store.state = fixture();
   const pending = deferred<unknown>(); store.run.mockReturnValue(pending.promise);
   render(<ProductionPage />, { view: 'production-board' });
   const card = host.querySelector<HTMLElement>('.mist-kb-card')!, destination = host.querySelector<HTMLElement>('.mist-kb-col')!;
