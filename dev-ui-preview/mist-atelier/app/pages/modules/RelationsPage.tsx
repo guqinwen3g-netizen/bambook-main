@@ -12,6 +12,8 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 import { quotationStage } from './QuotationsPage';
 import { supplierPerformance } from './SuppliersPage';
+import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
+import { customerHandoverScope, customerHandovers } from '../../../../../server/src/shared/mistHandover';
 
 type Identity = 'all' | 'customer' | 'supplier' | 'agent' | 'partner' | 'other';
 type FlagFilter = 'all' | 'hold' | 'dual' | 'noContact';
@@ -44,7 +46,8 @@ export function relationContacts(state: MistState | null, r: MarketRelation): Ma
 export type RelationWorkbenchProps = { attachments: (r: MarketRelation, locked: boolean) => React.ReactNode; history: (id: string) => React.ReactNode };
 
 export function RelationWorkbench({ attachments, history }: RelationWorkbenchProps) {
-  const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const members = workspaceMembers(workspace, state, session.user);
   const [identity, setIdentity] = React.useState<Identity>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [statusFilter, setStatusFilter] = React.useState<StatusFilter>('active'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
@@ -60,7 +63,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   const count = (v: Identity) => searched.filter(r => v === 'all' || relationIdentities(r).includes(v)).length;
   const rows = searched.filter(r => identity === 'all' || relationIdentities(r).includes(identity)).sort((a, b) => Number(!!b.hold) - Number(!!a.hold) || a.name.localeCompare(b.name, 'zh'));
   const selected = rows.find(r => r.id === picked) || (picked ? all.find(r => r.id === picked) : undefined);
-  const can = session.hasPermission('relations:write');
+  const can = session.hasPermission('relations:write'), canHandover = session.hasPermission('relations:admin');
   const locked = saving || !!pending;
   const pick = (r: MarketRelation) => { setPicked(r.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, r.id, target); };
   const linked = (r?: MarketRelation) => !!r && (!!r.customerId || !!r.supplierId);
@@ -94,6 +97,20 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     fields: [{ key: 'name', label: '联系人姓名', required: true }, { key: 'role', label: '岗位' }, { key: 'email', label: '邮箱' }, { key: 'phone', label: '电话' }, { key: 'primary', label: '主联系人', type: 'checkbox' }],
     submit: v => run({ type: 'market.contact.save', payload: { kind, parentId, id: c?.id, name: String(v.name ?? ''), role: String(v.role ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), primary: !!v.primary } }),
   });
+  const handoverSpec = (r: MarketRelation): ModuleEditorSpec | null => {
+    const c = state?.customers.find(x => x.id === r.customerId); if (!state || !c) return null;
+    const scope = customerHandoverScope(state, c.id), lockedOrders = scope.orders.filter(o => scope.locked(o)), movable = scope.orders.filter(o => !scope.locked(o));
+    return { title: `交接 ${c.name} 的在手业务`, submitLabel: '确认交接',
+      description: `客户负责人现为 ${c.owner || '未指定'}。交接后客户与勾选的订单、商机改由新负责人负责，原负责人在这些对象上未完成的待办一并改派，并给新负责人生成“接手客户”待办；报价跟随客户负责人。未勾选的订单保留原负责人。${lockedOrders.length ? `审批中的订单 ${lockedOrders.map(o => o.code).join('、')} 须审批完成后再交接。` : ''}`,
+      initialValues: { toUserId: '', reason: '', ...Object.fromEntries(movable.map(o => ['order:' + o.id, true])), ...Object.fromEntries(scope.opportunities.map(o => ['opp:' + o.id, true])) },
+      fields: [
+        { key: 'toUserId', label: '新负责人', type: 'select', required: true, options: [{ value: '', label: '选择成员' }, ...memberSelectOptions(members).filter(o => o.value !== c.ownerId)] },
+        ...movable.map(o => ({ key: 'order:' + o.id, label: `订单 ${o.code} · ${o.state} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
+        ...scope.opportunities.map(o => ({ key: 'opp:' + o.id, label: `商机 ${o.title} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
+        { key: 'reason', label: '交接原因', type: 'textarea', required: true, hint: '例如离职、调岗、休假代管、客户重新分配' },
+      ],
+      submit: v => run({ type: 'handover.customer', payload: { customerId: c.id, toUserId: String(v.toUserId ?? ''), reason: String(v.reason ?? ''), orderIds: movable.filter(o => v['order:' + o.id]).map(o => o.id), opportunityIds: scope.opportunities.filter(o => v['opp:' + o.id]).map(o => o.id) } } as any) };
+  };
   const identityPills = (r: MarketRelation) => <>{r.customerId && <Pill tone="accent">客户</Pill>}{r.supplierId && <Pill tone="ok">供应商</Pill>}{!r.customerId && !r.supplierId && <Pill>{CATEGORY_LABEL[r.category]}</Pill>}</>;
   const columns: Column<MarketRelation>[] = [
     { key: 'name', header: '组织', width: 'minmax(180px,1.4fr)', render: r => <ObjectCell name={r.name} meta={r.aliases.length ? r.aliases.join(' · ') : [customer(r)?.code, supplier(r)?.code].filter(Boolean).join(' · ') || '—'} /> },
@@ -107,7 +124,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     ? <EmptyState icon={SearchX} title="没有符合条件的组织" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setIdentity('all'); setFlagFilter('all'); setStatusFilter('active'); }}>清除筛选</Button>} />
     : <EmptyState icon={Users} title="还没有关系档案" description="新建客户或供应商时会自动生成；货代、报关行等其它组织可在这里登记。" action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>建立关系档案</Button> : undefined} />;
   const detail = selected && state
-    ? <RelationDetail r={selected} state={state} can={can} locked={locked} business={business.get(selected.id)!} identityPills={identityPills(selected)} linkableCount={linkable.length}
+    ? <RelationDetail r={selected} state={state} can={can} canHandover={canHandover} onHandover={() => { const spec = handoverSpec(selected); if (spec) setDialog(spec); }} locked={locked} business={business.get(selected.id)!} identityPills={identityPills(selected)} linkableCount={linkable.length}
         onEdit={() => setDialog(profileSpec(selected))} onHold={f => setDialog(holdSpec(selected, f))} onLink={() => setDialog(linkSpec(selected))}
         onContact={(kind, parentId, owner, c) => setDialog(contactSpec(kind, parentId, owner, c))} onArchive={() => void run({ type: 'market.relation.status', payload: { id: selected.id, status: selected.status === 'active' ? 'archived' : 'active' } })}
         onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can)} history={history(selected.id)} />
@@ -146,8 +163,8 @@ function ContactRows({ contacts, edit }: { contacts: MarketRelation['contacts'];
   </div>)}</div> : <span className="mist-muted">未登记联系人。</span>;
 }
 
-function RelationDetail({ r, state, can, locked, business, identityPills, linkableCount, onEdit, onHold, onLink, onContact, onArchive, onOpen, attachments, history }: {
-  r: MarketRelation; state: MistState; can: boolean; locked: boolean; business: ReturnType<typeof relationBusiness>; identityPills: React.ReactNode; linkableCount: number;
+function RelationDetail({ r, state, can, canHandover, onHandover, locked, business, identityPills, linkableCount, onEdit, onHold, onLink, onContact, onArchive, onOpen, attachments, history }: {
+  r: MarketRelation; state: MistState; can: boolean; canHandover: boolean; onHandover: () => void; locked: boolean; business: ReturnType<typeof relationBusiness>; identityPills: React.ReactNode; linkableCount: number;
   onEdit: () => void; onHold: (frozen: boolean) => void; onLink: () => void; onContact: (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]) => void;
   onArchive: () => void; onOpen: (view: string, id?: string, extra?: Record<string, string | undefined>) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
@@ -166,7 +183,7 @@ function RelationDetail({ r, state, can, locked, business, identityPills, linkab
       { label: '关联供应商身份', icon: Link2, onClick: onLink, reason: writeReason || (!linkableCount ? '没有可关联的供应商' : false), hidden: !customer || !!supplier },
       { label: '打开客户业务', icon: Users, onClick: () => onOpen('crm', r.customerId, { customerId: r.customerId }), hidden: !customer },
       { label: '打开供应商', icon: Building2, onClick: () => onOpen('suppliers', r.supplierId), hidden: !supplier },
-      { label: '在手业务交接', icon: Undo2, onClick: () => undefined, reason: '离职 / 调岗时逐项转给新负责人，尚未接入', hidden: !customer },
+      { label: '在手业务交接', icon: Undo2, onClick: onHandover, reason: !canHandover ? '客户交接须由主管（客户评级与调整权限）办理' : false, hidden: !customer },
       { label: r.status === 'active' ? '归档' : '恢复', icon: r.status === 'active' ? Archive : ArchiveRestore, onClick: onArchive, reason: archiveReason },
     ]} />
     <Facts items={[
@@ -191,6 +208,9 @@ function RelationDetail({ r, state, can, locked, business, identityPills, linkab
     </DetailBlock>
     {dual && <DetailBlock title={`供应商联系人 · ${supplier!.contacts.length}`} aside={can && state ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact('supplier', supplier!.id, '供应商侧')}>添加</Button> : undefined}>
       <ContactRows contacts={supplier!.contacts} edit={can ? c => onContact('supplier', supplier!.id, supplier!.name, c) : undefined} />
+    </DetailBlock>}
+    {customer && !!customerHandovers(customer).length && <DetailBlock title="交接记录">
+      <Timeline events={[...customerHandovers(customer)].reverse().map(h => ({ who: `${h.from || '未指定'} → ${h.to}`, when: `${shortWhen(h.at)} · ${h.actor}`, text: `${h.reason}${h.orders.length ? ` · 订单 ${h.orders.join('、')}` : ''}${h.opportunities.length ? ` · 商机 ${h.opportunities.length} 个` : ''}${h.tasks ? ` · 改派待办 ${h.tasks} 条` : ''}` }))} />
     </DetailBlock>}
     {!!r.holdHistory?.length && <DetailBlock title="冻结记录">
       <Timeline events={[...r.holdHistory].reverse().map(h => ({ who: h.action === 'freeze' ? '冻结' : '解冻', when: `${shortWhen(h.at)} · ${h.actor}`, text: h.reason }))} />
