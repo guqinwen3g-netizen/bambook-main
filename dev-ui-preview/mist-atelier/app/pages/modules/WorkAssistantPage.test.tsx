@@ -112,6 +112,50 @@ it('shows host failures with a manual restart, reconnects the delegation after r
   expect(host.textContent).toContain('ChatGPT用量已达上限');
 });
 
+it('keeps the open conversation after the host restarts so the next message continues it', async () => {
+  const meta = { id: 's1', title: '查订单', providerId: 'p-1', workspaceId: 'w-1', createdAt: '2026-10-18T01:00:00Z', updatedAt: '2026-10-18T01:00:00Z', messageCount: 2 };
+  install((method, params) => method === 'sessions.list' ? [meta] : method === 'sessions.get' ? { meta, messages: [{ role: 'user', content: '查订单' }, { role: 'assistant', content: '找到 3 张订单' }] } : method === 'run.start' ? { runId: 'r3', sessionId: 's1' } : base(method, params));
+  await mount();
+  await act(async () => (host.querySelector('.mist-wa-open') as HTMLButtonElement).click());
+  await settle();
+  expect(host.textContent).toContain('找到 3 张订单');
+  await act(async () => emit({ type: 'host_status', status: { state: 'restarting', reason: '进程退出（9）' } }));
+  expect(host.textContent).toContain('工作助手正在重启');
+  await act(async () => emit({ type: 'host_status', status: { state: 'running' } }));
+  await settle();
+  expect(host.textContent).toContain('找到 3 张订单');
+  expect(host.querySelector('.mist-wa-item[data-active]')).toBeTruthy();
+  await type('接着看第一张');
+  await act(async () => button('发送')!.click());
+  expect(calls.filter(c => c[0] === 'run.start').at(-1)?.[1]).toMatchObject({ sessionId: 's1', text: '接着看第一张' });
+});
+
+it('does not repeat a host restart as a separate error while the restart banner is shown', async () => {
+  let down = false;
+  install((method, params) => { if (down && method === 'account.select') throw Object.assign(new Error('工作助手正在重启，请稍后重试'), { code: 'HOST_RESTARTING' }); return base(method, params); });
+  await mount();
+  down = true;
+  await act(async () => emit({ type: 'host_status', status: { state: 'restarting', reason: '进程退出（9）' } }));
+  await act(async () => emit({ type: 'host_status', status: { state: 'running' } }));
+  await settle();
+  expect(host.textContent).not.toContain('请稍后重试');
+});
+
+it('drops the open conversation after a restart when the host no longer has it', async () => {
+  const meta = { id: 's1', title: '旧对话', providerId: 'p-1', workspaceId: 'w-1', createdAt: '2026-10-18T01:00:00Z', updatedAt: '2026-10-18T01:00:00Z', messageCount: 1 };
+  let gone = false;
+  install((method, params) => method === 'sessions.list' ? (gone ? [] : [meta]) : method === 'sessions.get' ? { meta, messages: [{ role: 'user', content: '旧内容' }] } : base(method, params));
+  await mount();
+  await act(async () => (host.querySelector('.mist-wa-open') as HTMLButtonElement).click());
+  await settle();
+  expect(host.textContent).toContain('旧内容');
+  gone = true;
+  await act(async () => emit({ type: 'host_status', status: { state: 'running' } }));
+  await settle();
+  expect(host.textContent).not.toContain('旧内容');
+  expect(host.textContent).toContain('告诉助手要做什么');
+});
+
 it('renews before expiry on its own and dedupes reconnect requests from the host', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   const soon = new Date(Date.now() + 10 * 60_000 + 45_000).toISOString();
