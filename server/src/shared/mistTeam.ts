@@ -145,3 +145,72 @@ export function applyTeamCommand(root: MistState, command: TeamCommand, c: MistC
   root.events.unshift({ id: c.id(), entityType: t.entityType, entityId: t.entityId, actor: c.actorName, at: c.now, text: `督办 ${member.name}：${title}（${due} 前）${note ? '。' + note : ''}`, fileIds: [] });
   return { id };
 }
+
+/* ---------------- 主管周报（按周一至周日，Asia/Shanghai 业务日） ---------------- */
+export type TeamMoney = Array<{ currency: string; amount: number }>;
+export type TeamWeekRow = {
+  id: string; name: string; former: boolean;
+  newOrders: number; newOrderAmount: TeamMoney; shipments: number; shippedQty: number; collected: TeamMoney;
+  newDevs: number; followUps: number; won: number; lost: number; tasksDone: number;
+  nudgesIn: number; nudgesDone: number; nudgesOpenLate: number;
+  /** 当前快照（不是历史值）：过交期订单、逾期应收。 */
+  lateOrders: number; overdueReceivable: TeamMoney;
+};
+export type TeamWeekReport = { weekStart: string; weekEnd: string; asOf: string; rows: TeamWeekRow[]; totals: Omit<TeamWeekRow, 'id' | 'name' | 'former'> };
+
+/** 某日所在周的周一。 */
+export function weekStartOf(day: string) { const n = dayNo(day), dow = (new Date(n * 86400000).getUTCDay() + 6) % 7; return new Date((n - dow) * 86400000).toISOString().slice(0, 10); }
+export const addBusinessDays = (day: string, n: number) => new Date((dayNo(day) + n) * 86400000).toISOString().slice(0, 10);
+const bizDay = (at: string | undefined) => !at ? '' : /^\d{4}-\d{2}-\d{2}$/.test(at) ? at : platformBusinessDate(at);
+
+export function teamWeekRow(state: MistState, member: { id: string; name: string }, weekStart: string, today: string, former = false): TeamWeekRow {
+  const weekEnd = addBusinessDays(weekStart, 6), inWeek = (at: string | undefined) => { const d = bizDay(at); return !!d && d >= weekStart && d <= weekEnd; };
+  const id = member.id, owned = state.orders.filter(o => o.ownerId === id), ownedIds = new Set(owned.map(o => o.id));
+  const fresh = owned.filter(o => inWeek(o.createdAt) && !isOrderTerminated(o));
+  const shipments = (state.fulfillment?.shipments || []).filter(s => s.state === 'departed' && inWeek(s.departedAt) && s.lines.some(l => ownedIds.has(l.orderId)));
+  const invoices = new Map(state.invoices.filter(i => ownedIds.has(i.orderId)).map(i => [i.id, i]));
+  const collected = state.allocations.filter(a => invoices.has(a.invoiceId)).map(a => ({ a, date: state.receipts.find(r => r.id === a.receiptId)?.date || a.createdAt })).filter(x => inWeek(x.date)).map(x => ({ currency: x.a.currency, amount: x.a.amount }));
+  const customers = new Set(state.customers.filter(c => c.ownerId === id).map(c => c.id));
+  const opps = (state.crm?.opportunities || []).filter(o => o.ownerId === id);
+  const tasks = (state.tasks as TeamTask[]).filter(t => (t.assigneeIds || []).includes(id));
+  const snapshot = teamRow(state, member, today, { former });
+  return {
+    id, name: member.name, former,
+    newOrders: fresh.length, newOrderAmount: sumBy(fresh.map(o => ({ currency: o.currency, amount: o.amount }))),
+    shipments: shipments.length, shippedQty: shipments.reduce((n, s) => n + s.lines.filter(l => ownedIds.has(l.orderId)).reduce((m, l) => m + (Number(l.quantity) || 0), 0), 0),
+    collected: sumBy(collected), newDevs: (state.devs || []).filter(d => d.ownerId === id && inWeek(d.createdAt)).length,
+    followUps: (state.crm?.followUps || []).filter(f => customers.has(f.customerId) && inWeek(f.at)).length,
+    won: opps.filter(o => o.history?.some(h => h.to === 'won' && inWeek(h.at))).length, lost: opps.filter(o => o.history?.some(h => h.to === 'lost' && inWeek(h.at))).length,
+    tasksDone: tasks.filter(t => t.done && inWeek(t.doneAt)).length,
+    nudgesIn: tasks.filter(t => t.nudge && inWeek(t.nudge.at)).length, nudgesDone: tasks.filter(t => t.nudge && t.done && inWeek(t.doneAt)).length,
+    nudgesOpenLate: tasks.filter(t => t.nudge && !t.done && t.due && t.due < today).length,
+    lateOrders: snapshot.orders.filter(o => o.status === 'overdue').length, overdueReceivable: snapshot.overdueReceivable,
+  };
+}
+
+/** 团队周报：范围与团队一览一致；本周未结束时统计到今天。 */
+export function teamWeeklyReport(state: MistState, directory: TeamMember[], viewer: { id: string; owner: boolean }, weekStart: string, today: string, group: MistBusinessGroup | 'all' = 'all'): TeamWeekReport {
+  const people = teamOverview(state, directory, viewer, today, group).map(r => ({ id: r.id, name: r.name, former: r.former }));
+  const rows = people.map(p => teamWeekRow(state, p, weekStart, today, p.former));
+  const n = (k: keyof TeamWeekRow) => rows.reduce((s, r) => s + (r[k] as number), 0);
+  const m = (k: 'newOrderAmount' | 'collected' | 'overdueReceivable') => sumBy(rows.flatMap(r => r[k]));
+  const weekEnd = addBusinessDays(weekStart, 6);
+  return {
+    weekStart, weekEnd, asOf: weekEnd < today ? weekEnd : today, rows,
+    totals: { newOrders: n('newOrders'), newOrderAmount: m('newOrderAmount'), shipments: n('shipments'), shippedQty: n('shippedQty'), collected: m('collected'), newDevs: n('newDevs'), followUps: n('followUps'), won: n('won'), lost: n('lost'), tasksDone: n('tasksDone'), nudgesIn: n('nudgesIn'), nudgesDone: n('nudgesDone'), nudgesOpenLate: n('nudgesOpenLate'), lateOrders: n('lateOrders'), overdueReceivable: m('overdueReceivable') },
+  };
+}
+
+const moneyText = (rows: TeamMoney) => rows.length ? rows.map(r => `${r.currency} ${r.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`).join(' / ') : '0';
+/** 周报文字版：可复制到邮件或聊天，由主管自行发送。 */
+export function teamWeeklyText(report: TeamWeekReport, title = '团队周报') {
+  const t = report.totals;
+  const lines = [
+    `${title}（${report.weekStart} 至 ${report.weekEnd}${report.asOf < report.weekEnd ? `，统计到 ${report.asOf}` : ''}）`,
+    `本周：新接订单 ${t.newOrders} 单（${moneyText(t.newOrderAmount)}）；出运 ${t.shipments} 票 ${t.shippedQty} 件/米；回款 ${moneyText(t.collected)}；新开发案 ${t.newDevs} 个；客户跟进 ${t.followUps} 次；商机赢单 ${t.won}、流失 ${t.lost}；完成待办 ${t.tasksDone} 条；督办 ${t.nudgesIn} 条、完成 ${t.nudgesDone} 条。`,
+    `当前：过交期订单 ${t.lateOrders} 单；逾期应收 ${moneyText(t.overdueReceivable)}；逾期未完成督办 ${t.nudgesOpenLate} 条。`,
+    '',
+    ...report.rows.map(r => `· ${r.name}${r.former ? '（已不在本空间）' : ''}：新单 ${r.newOrders}（${moneyText(r.newOrderAmount)}），出运 ${r.shipments} 票，回款 ${moneyText(r.collected)}，跟进 ${r.followUps} 次，完成待办 ${r.tasksDone}；当前过交期 ${r.lateOrders} 单、逾期应收 ${moneyText(r.overdueReceivable)}${r.nudgesOpenLate ? `、逾期督办 ${r.nudgesOpenLate} 条` : ''}。`),
+  ];
+  return lines.join('\n');
+}

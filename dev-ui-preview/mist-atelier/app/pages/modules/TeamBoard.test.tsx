@@ -52,3 +52,17 @@ it('scopes a group supervisor to members of the same business group',()=>{
   expect(table.textContent).toContain('顾言');expect(table.textContent).not.toContain('沈禾');
   expect(host.textContent).toContain('与你同业务组（成衣）的成员');
 });
+
+it('switches to the weekly report, pages back a week and copies the text summary for the supervisor to send',async()=>{
+  const writeText=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true});
+  render();
+  await click(getByRole(getByRole(host,'group',{name:'团队视图'}),'button',{name:/周报/}));
+  const weekly=host.querySelector('[data-team-weekly]') as HTMLElement;const start=weekly.getAttribute('data-team-weekly')!;
+  expect(getByRole(host,'table',{name:'团队周报'}).textContent).toContain('顾言');
+  expect((getByRole(host,'button',{name:'下一周'}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(host,'button',{name:'上一周'}));
+  expect(host.querySelector('[data-team-weekly]')!.getAttribute('data-team-weekly')).not.toBe(start);
+  await click(getByRole(host,'button',{name:'复制周报文字'}));
+  expect(writeText).toHaveBeenCalledWith(expect.stringContaining('团队周报（'));
+  expect(writeText.mock.calls[0][0]).toContain('· 顾言');
+});
