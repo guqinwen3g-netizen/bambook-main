@@ -33,7 +33,7 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'marketing', label: '营销', permissions: ['marketing:read'], paths: [['market', 'campaigns'], ['market', 'leads'], ['market', 'lookbooks']], entityTypes: ['campaign', 'lead', 'lookbook'], views: ['marketing'] },
   { key: 'claims', label: '售后案件与贷项', permissions: ['aftersales:read'], paths: [['platform', 'claims'], ['platform', 'credits'], ['platform', 'creditApplications'], ['platform', 'claimGoods']], entityTypes: ['claim', 'credit'], views: ['claims'] },
   { key: 'bom', label: '成本核算', permissions: ['bom:read'], paths: [['platform', 'boms']], entityTypes: ['bom'], views: ['bom'] },
-  { key: 'pricing', label: '定价记录', permissions: ['pricing:read'], paths: [['platform', 'pricing']], entityTypes: ['pricing'], views: ['pricing'] },
+  { key: 'pricing', label: '定价记录', permissions: ['pricing:read'], paths: [['platform', 'pricing'], ['platform', 'pricingParams']], entityTypes: ['pricing'], views: ['pricing'] },
   { key: 'risks', label: '风险台账', permissions: ['risk:read'], paths: [['platform', 'risks']], entityTypes: ['risk'], views: ['risks'] },
   { key: 'employees', label: '员工档案', permissions: ['hr:read'], paths: [['platform', 'employees']], entityTypes: ['employee'], views: ['hr'] },
   { key: 'assistant', label: '助手草稿', permissions: ['ai:chat'], paths: [['platform', 'assistantDrafts']], entityTypes: ['assistant'], views: ['ai-assistant'] },

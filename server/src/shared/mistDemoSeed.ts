@@ -10,8 +10,9 @@ import { emptyFabricRequirements } from './mistDevelopmentDomain';
 import { demoFileRecord, type DemoFileTemplate } from './mistDemoFiles';
 import { riskSignals } from './mistRisk';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
+import { platformBusinessDate } from './mistPlatform';
 
-export const DEMO_SEED_VERSION = 19;
+export const DEMO_SEED_VERSION = 20;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -210,6 +211,10 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   // 再前一个月的月末汇率作为上月记账汇率（月初汇率），财务即可预览并登记上月期末调汇。
   const prevMonth2 = (() => { const d = new Date(context.now); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 2); return d.toISOString().slice(0, 7); })();
   for (const [month, cur, rate] of [[prevMonth2, 'USD', '7.1320'], [prevMonth2, 'EUR', '8.3150'], [prevMonth, 'USD', '7.1180'], [prevMonth, 'EUR', '8.2915']] as const) run('fx month-end ' + month + cur, { type: 'fxrate.period.save', payload: { month, currency: cur, rate, source: `中国人民银行 ${month} 月末中间价（演示）` } }, finance);
+  // 定价标准参数（管理层设置，带版本与生效日）：试算保存时冻结适用版本，低于标准加成须写偏离理由。
+  const paramsDay = platformBusinessDate(context.now);
+  run('pricing params garment', { type: 'platform.pricingParams.set', payload: { family: 'garment', profitMargin: 20, commissionRate: 5, effectiveFrom: paramsDay, reason: '软件演示：年度定价会议确定成衣标准加成 20%、欧洲代理佣金 5%' } }, reviewer);
+  run('pricing params fabric', { type: 'platform.pricingParams.set', payload: { family: 'fabric', profitMargin: 15, commissionRate: 0, effectiveFrom: paramsDay, reason: '软件演示：面料直供客户无代理，标准加成 15%' } }, reviewer);
   const pricingGarment = state.orders.find(o => o.code === 'SO-G-2026-017'), pricingFabric = state.orders.find(o => o.type === 'fabric');
   if (pricingGarment) run('pricing garment reference', { type: 'platform.pricing.save', payload: { orderId: pricingGarment.id, purchaseCostCny: 280, refundRate: 13, exchangeRate: 7.2, profitMargin: 20, commissionRate: 5, basis: '软件演示试算：羊毛西装套装 CNY/套；280 为演示工厂参考，退税13%、CNY/USD 7.2 仅为演示参数，不是实际成本或生效市场汇率。' } });
   if (pricingFabric) run('pricing fabric reference', { type: 'platform.pricing.save', payload: { orderId: pricingFabric.id, purchaseCostCny: 48, refundRate: 13, exchangeRate: 7.2, profitMargin: 20, commissionRate: 0, basis: '软件演示试算：毛呢面料 CNY/米；按演示规格与计价单位核对，参数仅供软件演示，不自动改报价或合同。' } });
