@@ -78,6 +78,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       statuses: write
       actions: read
       pull-requests: write
@@ -96,6 +97,11 @@ jobs:
           if jq -e 'any(.[]; .result == "failure")' <<<"$verify_JSON" >/dev/null; then state=failure
           elif jq -e 'any(.[]; .result == "cancelled")' <<<"$verify_JSON" >/dev/null; then state=error
           else state=success; fi
+          # Cancelled because a newer commit replaced this one (concurrency): not a failure, publish nothing.
+          if [ "$state" = error ]; then
+            if [ -n "$PR" ]; then tip=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha); else tip=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha); fi
+            if [ "$tip" != "$SHA" ]; then echo "superseded by $tip; no status published for $SHA"; exit 0; fi
+          fi
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$state" -f context="$CONTEXT" \
             -f target_url="$RUN_URL" -f description="${summary:0:140}" >/dev/null
           echo "status $CONTEXT=$state ($summary) on $SHA"

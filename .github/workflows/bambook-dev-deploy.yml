@@ -130,12 +130,17 @@ jobs:
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           stage="$RUNNER_TEMP/bundle"
           rm -rf "$stage" && mkdir -p "$stage/web"
-          git archive --format=tar HEAD .nvmrc server scripts/deploy/bambook-dev-release.sh | tar -x -C "$stage"
+          # The upload to the server crosses a slow international link (~20 KB/s observed): ship only what the runtime needs
+          # (no tests, acceptance suites, knowledge-base tooling or docs). 9 MB -> about 4 MB compressed for server/.
+          git archive --format=tar HEAD .nvmrc server scripts/deploy/bambook-dev-release.sh \
+            ':(exclude)server/acceptance-tests' ':(exclude)server/knowledge_api' ':(exclude)server/knowledge-base-*' \
+            ':(exclude)server/scaffold-output' ':(exclude)server/docs' ':(exclude)server/ops-panel' \
+            ':(glob,exclude)server/src/**/__tests__/**' ':(glob,exclude)server/src/**/*.test.ts' | tar -x -C "$stage"
           # Legacy map datasets in public/ are not used by the Mist renderer; keep the bundle small.
           tar -c -C dist --exclude=./data --exclude=./geo --exclude=./glyphs --exclude='./*.geojson' --exclude='./earth_*' . | tar -x -C "$stage/web"
           test -f "$stage/web/index.html"
           test -z "$(find "$stage" -type l -print -quit)"
-          tar -c -C "$stage" --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner .nvmrc server scripts web | gzip -n > "$RUNNER_TEMP/backend.tar.gz"
+          tar -c -C "$stage" --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner .nvmrc server scripts web | gzip -9 -n > "$RUNNER_TEMP/backend.tar.gz"
           ssh_options=(-i "$RUNNER_TEMP/bambook-ssh/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/bambook-ssh/known_hosts" -o ConnectTimeout=15)
           ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "receive $RELEASE_SHA" < "$RUNNER_TEMP/backend.tar.gz"
           timeout 2280 ssh "${ssh_options[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "activate $RELEASE_SHA"
@@ -149,6 +154,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       statuses: write
       actions: read
       pull-requests: write
@@ -167,6 +173,11 @@ jobs:
           if jq -e 'any(.[]; .result == "failure")' <<<"$NEEDS_JSON" >/dev/null; then state=failure
           elif jq -e 'any(.[]; .result == "cancelled")' <<<"$NEEDS_JSON" >/dev/null; then state=error
           else state=success; fi
+          # Cancelled because a newer commit replaced this one (concurrency): not a failure, publish nothing.
+          if [ "$state" = error ]; then
+            if [ -n "$PR" ]; then tip=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha); else tip=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha); fi
+            if [ "$tip" != "$SHA" ]; then echo "superseded by $tip; no status published for $SHA"; exit 0; fi
+          fi
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$state" -f context="$CONTEXT" \
             -f target_url="$RUN_URL" -f description="${summary:0:140}" >/dev/null
           echo "status $CONTEXT=$state ($summary) on $SHA"

@@ -50,7 +50,7 @@
 
 ## 交付与激活
 
-正常路径：PR 合入 main → GitHub Actions `Bambook development delivery` 手动运行。`check` 只测通道；`deploy` 要求同一提交 `verify` 已通过，在 CI 构建前端，打包 `.nvmrc`、`server`、`scripts/deploy/bambook-dev-release.sh`、`web/`（确定性：固定排序与时间戳），经受限 SSH 发送。普通 push 不部署。私钥只在仓库 secret `BAMBOOK_DEV_SSH_KEY`，主机公钥在 `BAMBOOK_DEV_KNOWN_HOSTS`。
+正常路径：含代码改动的 PR 合入 main → `Mist verification` 通过后自动运行 `Bambook development delivery`（也可手动运行；只改文档的推送不部署）。`check` 只测通道；`deploy` 要求同一提交 `verify` 已通过，在 CI 构建前端，打包 `.nvmrc`、`server`（去掉测试、验收用例、知识库工具和文档，只留运行所需）、`scripts/deploy/bambook-dev-release.sh`、`web/`（确定性：固定排序与时间戳），经受限 SSH 发送。上传走 GitHub 到国内服务器的跨境链路，实测约 20KB/s，是部署耗时的大头，包要尽量小。私钥只在仓库 secret `BAMBOOK_DEV_SSH_KEY`，主机公钥在 `BAMBOOK_DEV_KNOWN_HOSTS`。
 
 受限 SSH 强制经过接收程序，只接受 `check`、`receive <提交>`、`activate <提交>`；拒绝越界路径、链接、设备文件、重复路径、超限包，`scripts/` 下只允许发布脚本本身（其他运维脚本放 `server/scripts/` 才会随包交付）。
 
