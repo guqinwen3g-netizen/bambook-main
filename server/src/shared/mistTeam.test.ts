@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistCommand, type MistContext, type MistState } from './mistWorkspace';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
-import { teamMembers, teamOverview, teamRow, teamWeeklyReport, teamWeeklyText, weekStartOf, type TeamTask } from './mistTeam';
+import { pendingWeeklyArchive, teamReports, teamMembers, teamOverview, teamRow, teamWeeklyReport, teamWeeklyText, weekStartOf, type TeamTask } from './mistTeam';
 
 const today = '2026-10-18';
 function fixture() {
@@ -84,5 +84,24 @@ describe('主管团队视角', () => {
     // 取消完成后完成时间清除
     const undone = applyMistCommand(s, { type: 'task.complete', payload: { id, done: false } } as MistCommand, { id: () => 'y', now: '2026-10-18T04:00:00Z', actorName: '顾言', actorId: 'demo-sales' } as unknown as MistContext).state;
     expect(undone.tasks.find(t => t.id === id)!.doneAt).toBeUndefined();
+  });
+  it('周报存档：只存已结束、周一开头的周；同一人同一周只存一次；存后“我的工作”提醒消失', () => {
+    expect(mistCommandPermission({ type: 'team.weekly.archive', payload: {} } as unknown as MistCommand)).toBe('relations:admin');
+    const f = fixture();
+    const arc = (weekStart: string, c: Partial<MistContext> = {}) => { const r = applyMistCommand(f.state, { type: 'team.weekly.archive', payload: { weekStart } } as MistCommand, { id: () => 'wr-1', now: '2026-10-19T01:00:00Z', actorName: '周敏', actorId: 'demo-reviewer', members: MIST_DEMO_ACCOUNTS, ...c } as unknown as MistContext); return r; };
+    expect(pendingWeeklyArchive(f.state, 'demo-reviewer', '2026-10-19')).toBe('2026-10-12');
+    expect(pendingWeeklyArchive(f.state, 'demo-reviewer', '2026-10-18')).toBe('2026-10-05');
+    expect(() => arc('2026-10-13')).toThrow('周一');
+    expect(() => arc('2026-10-19')).toThrow('还没结束');
+    expect(() => arc('2026-10-12', { members: undefined })).toThrow('成员');
+    const r = arc('2026-10-12');
+    const saved = teamReports(r.state);
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ weekStart: '2026-10-12', weekEnd: '2026-10-18', generatedBy: '周敏', generatedById: 'demo-reviewer', scope: '面料、成衣业务组' });
+    expect(saved[0].text).toContain('团队周报 · 面料、成衣业务组');
+    expect(saved[0].report.rows.some(x => x.id === 'demo-sales')).toBe(true);
+    expect(pendingWeeklyArchive(r.state, 'demo-reviewer', '2026-10-19')).toBeNull();
+    expect(pendingWeeklyArchive(r.state, 'demo-buyer', '2026-10-19')).toBe('2026-10-12');
+    expect(() => applyMistCommand(r.state, { type: 'team.weekly.archive', payload: { weekStart: '2026-10-12' } } as MistCommand, { id: () => 'wr-2', now: '2026-10-19T02:00:00Z', actorName: '周敏', actorId: 'demo-reviewer', members: MIST_DEMO_ACCOUNTS } as unknown as MistContext)).toThrow('已于');
   });
 });

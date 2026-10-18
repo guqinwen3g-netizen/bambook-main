@@ -86,3 +86,17 @@ describe('my work queue sources', () => {
     expect([...mistEmailFollowUpTaskIds(state)]).toEqual(['t1', 't2']);
   });
 });
+
+describe('weekly team report reminder', () => {
+  it('appears from Monday for supervisors until they archive last week', () => {
+    const state = base();
+    const opts = { canRead: all, can: (p: string) => p === 'relations:admin', me: 'boss', today: '2026-10-19' };
+    const item = mistWorkQueue(state, opts).find(i => i.source === 'report')!;
+    expect(item).toMatchObject({ id: 'report:2026-10-12', sourceLabel: '周报', title: '生成上周团队周报（10-12 至 10-18）', target: { view: 'dashboard', section: 'team-weekly' }, module: 'dashboard' });
+    expect(mistWorkQueue(state, { ...opts, can: () => false }).some(i => i.source === 'report')).toBe(false);
+    expect(mistWorkQueue(state, { ...opts, canRead: (v: string) => v !== 'dashboard' }).some(i => i.source === 'report')).toBe(false);
+    (state as any).teamReports = [{ id: 'r', weekStart: '2026-10-12', generatedById: 'boss' }];
+    expect(mistWorkQueue(state, opts).some(i => i.source === 'report')).toBe(false);
+    expect(mistWorkQueue(state, { ...opts, me: 'other' }).some(i => i.source === 'report')).toBe(true);
+  });
+});

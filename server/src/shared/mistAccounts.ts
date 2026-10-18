@@ -12,7 +12,7 @@ export const MIST_BUSINESS_GROUPS: readonly MistBusinessGroup[] = ['fabric', 'ga
 export const MIST_BUSINESS_GROUP_LABEL: Record<MistBusinessGroup, string> = { fabric: '面料', garment: '成衣' };
 export type MistAccountRef = { id: string; name: string };
 /** 服务端构建的成员目录：所有者 + 被授权成员；active=false 表示账号已停用或已删除。 */
-export type MistMemberDirectoryEntry = { id: string; name: string; active: boolean; groups: MistBusinessGroup[] };
+export type MistMemberDirectoryEntry = { id: string; name: string; active: boolean; groups: MistBusinessGroup[]; /** 工作区所有者（目录由服务端构建）。 */ owner?: boolean };
 /** 工作区成员的业务组（所有者在成员管理设置）；name 为设置时的显示名快照。 */
 export type MistMemberGroupAssignment = { userId: string; name: string; groups: MistBusinessGroup[]; updatedAt: string; updatedBy: string };
 
@@ -28,7 +28,7 @@ export function buildMemberDirectory(input: { ownerId: string; state: Pick<MistS
   const listed = new Map((input.state.members || []).map(m => [m.userId, m.name]));
   return ids.map(id => {
     const account = input.accounts.get(id);
-    return { id, name: account?.name || listed.get(id) || id, active: !!account?.active, groups: memberGroups(input.state, id) };
+    return { id, name: account?.name || listed.get(id) || id, active: !!account?.active, groups: memberGroups(input.state, id), ...(id === input.ownerId ? { owner: true } : {}) };
   });
 }
 /**
@@ -96,4 +96,4 @@ export function demoAccountRef(name: string): MistAccountRef {
   return { id: row.id, name: row.name };
 }
 /** 需要成员目录的命令（会写入负责人 / 经手人 / 业务组）。仓储层只为这些命令查询账号状态。 */
-export const MIST_MEMBER_DIRECTORY_COMMANDS: readonly string[] = ['customer.update', 'market.customer.update', 'market.customer.create', 'order.create', 'order.update', 'order.governance.saveDraft', 'fabric.create', 'crm.opportunity.save', 'market.supplier.save', 'market.quotation.convert', 'market.lead.convertToCrm', 'development.submit', 'member.groups.set', 'handover.customer', 'handover.account', 'team.nudge'];
+export const MIST_MEMBER_DIRECTORY_COMMANDS: readonly string[] = ['customer.update', 'market.customer.update', 'market.customer.create', 'order.create', 'order.update', 'order.governance.saveDraft', 'fabric.create', 'crm.opportunity.save', 'market.supplier.save', 'market.quotation.convert', 'market.lead.convertToCrm', 'development.submit', 'member.groups.set', 'handover.customer', 'handover.account', 'team.nudge', 'team.weekly.archive'];

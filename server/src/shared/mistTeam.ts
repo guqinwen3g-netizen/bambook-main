@@ -16,7 +16,8 @@ export const TEAM_DORMANT_DAYS = 60;
 export const TEAM_SOON_DAYS = 7;
 export type TeamNudge = { byId: string; by: string; at: string; note: string };
 export type TeamTask = MistTask & { nudge?: TeamNudge };
-export type TeamCommand = { type: 'team.nudge'; payload: { assigneeId: string; title: string; due: string; note?: string; target: MistTarget } };
+export type TeamCommand = { type: 'team.nudge'; payload: { assigneeId: string; title: string; due: string; note?: string; target: MistTarget } }
+  | { type: 'team.weekly.archive'; payload: { weekStart: string } };
 export const teamCommandPermission = (_c: TeamCommand) => 'relations:admin';
 
 export type TeamMember = { id: string; name: string; groups: MistBusinessGroup[]; owner?: boolean };
@@ -125,8 +126,9 @@ export function nudgeTarget(state: MistState, target: unknown): { target: MistTa
 }
 
 export function applyTeamCommand(root: MistState, command: TeamCommand, c: MistContext): { id: string } {
+  if (command.type === 'team.weekly.archive') return archiveWeekly(root, command.payload, c);
   if (command.type !== 'team.nudge') fail('未知操作');
-  const p = (command.payload || {}) as TeamCommand['payload'];
+  const p = (command.payload || {}) as Extract<TeamCommand, { type: 'team.nudge' }>['payload'];
   const member = resolveMember(c, p.assigneeId, '督办对象');
   if (member.id === c.actorId) fail('不能督办自己');
   const title = typeof p.title === 'string' ? p.title.trim().replace(/\s+/g, ' ') : '';
@@ -213,4 +215,34 @@ export function teamWeeklyText(report: TeamWeekReport, title = '团队周报') {
     ...report.rows.map(r => `· ${r.name}${r.former ? '（已不在本空间）' : ''}：新单 ${r.newOrders}（${moneyText(r.newOrderAmount)}），出运 ${r.shipments} 票，回款 ${moneyText(r.collected)}，跟进 ${r.followUps} 次，完成待办 ${r.tasksDone}；当前过交期 ${r.lateOrders} 单、逾期应收 ${moneyText(r.overdueReceivable)}${r.nudgesOpenLate ? `、逾期督办 ${r.nudgesOpenLate} 条` : ''}。`),
   ];
   return lines.join('\n');
+}
+
+/* ---------------- 周报存档：每周一起提醒主管生成上周周报，服务端按此刻数据冻结一份 ---------------- */
+export type TeamWeeklyArchive = { id: string; weekStart: string; weekEnd: string; generatedAt: string; generatedById: string; generatedBy: string; scope: string; report: TeamWeekReport; text: string };
+export const teamReports = (root: MistState) => (root as MistState & { teamReports?: TeamWeeklyArchive[] }).teamReports || [];
+export const myTeamReport = (root: MistState, viewerId: string, weekStart: string) => teamReports(root).find(r => r.generatedById === viewerId && r.weekStart === weekStart);
+/** 已结束、尚未由本人存档的最近一周（每周一起出现在“我的工作”）。 */
+export function pendingWeeklyArchive(root: MistState, viewerId: string, today: string): string | null {
+  const last = addBusinessDays(weekStartOf(today), -7);
+  return viewerId && !myTeamReport(root, viewerId, last) ? last : null;
+}
+function archiveWeekly(root: MistState, p: { weekStart?: unknown }, c: MistContext): { id: string } {
+  const weekStart = typeof p?.weekStart === 'string' ? p.weekStart : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart) || weekStartOf(weekStart) !== weekStart) fail('周报须从周一开始');
+  const today = platformBusinessDate(c.now), weekEnd = addBusinessDays(weekStart, 6);
+  if (weekEnd >= today) fail('这一周还没结束，结束后才能存档');
+  if (!c.actorId) fail('无法确认生成人', 'PRECONDITION');
+  if (!c.members) fail('无法核对团队成员，请刷新后重试', 'PRECONDITION');
+  const old = myTeamReport(root, c.actorId!, weekStart);
+  if (old) fail(`${weekStart} 这周的周报已于 ${old.generatedAt.slice(0, 10)} 存档`, 'CONFLICT');
+  const directory = c.members!.filter(m => m.active).map(m => ({ id: m.id, name: m.name, groups: m.groups, owner: m.owner }));
+  const me = c.members!.find(m => m.id === c.actorId);
+  const viewer = { id: c.actorId!, owner: !!me?.owner };
+  const report = teamWeeklyReport(root, directory, viewer, weekStart, today);
+  const scope = viewer.owner || !me?.groups.length ? '全部成员' : `${me.groups.map(g => g === 'garment' ? '成衣' : '面料').join('、')}业务组`;
+  const id = c.id();
+  const row: TeamWeeklyArchive = { id, weekStart, weekEnd, generatedAt: c.now, generatedById: c.actorId!, generatedBy: c.actorName, scope, report, text: teamWeeklyText(report, `团队周报 · ${scope}`) };
+  const all = root as MistState & { teamReports?: TeamWeeklyArchive[] };
+  all.teamReports = [...teamReports(root), row].slice(-520);
+  return { id };
 }

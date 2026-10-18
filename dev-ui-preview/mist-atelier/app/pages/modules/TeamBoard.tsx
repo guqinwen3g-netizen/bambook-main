@@ -1,10 +1,10 @@
 /** 全景看板 · 团队：业务主管看下属名下在手的事，并对具体订单 / 客户 / 开发案 / 发票督办。 */
 import React from 'react';
-import { AlertTriangle, BellRing, ChevronLeft, ChevronRight, ClipboardList, Copy, Download, Package, Receipt, Ship, Users, Wallet } from 'lucide-react';
+import { AlertTriangle, Archive, BellRing, ChevronLeft, ChevronRight, ClipboardList, Copy, Download, Package, Receipt, Ship, Users, Wallet } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, Drawer, EmptyState, Pill, Segmented, StatCard, StatGrid, TextLink, useToast, type Column, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistState, MistTarget } from '../../../../../server/src/shared/mistWorkspace';
 import { MIST_BUSINESS_GROUP_LABEL, type MistBusinessGroup } from '../../../../../server/src/shared/mistAccounts';
-import { TEAM_DORMANT_DAYS, addBusinessDays, teamOverview, teamWeeklyReport, teamWeeklyText, weekStartOf, type TeamAttention, type TeamMoney, type TeamRow, type TeamWeekRow } from '../../../../../server/src/shared/mistTeam';
+import { TEAM_DORMANT_DAYS, addBusinessDays, myTeamReport, teamOverview, teamWeeklyReport, teamWeeklyText, weekStartOf, type TeamAttention, type TeamMoney, type TeamRow, type TeamWeekRow } from '../../../../../server/src/shared/mistTeam';
 import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 import type { MistMemberOption } from '../../runtime/members';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
@@ -32,12 +32,14 @@ export function nudgeSpec(row: TeamRow, n: Nudge, today: string, run: (c: MistCo
   };
 }
 
-export function TeamBoard({ state, members, viewer, can, busy, run, go }: {
+export function TeamBoard({ state, members, viewer, can, busy, run, go, initialMode = 'now', initialWeek }: {
   state: MistState; members: MistMemberOption[]; viewer: { id: string; owner: boolean }; can: boolean; busy: boolean;
+  /** 从“我的工作”周报提醒进入时直接打开周报并定位到上周。 */
+  initialMode?: 'now' | 'week'; initialWeek?: string;
   run: (c: MistCommand) => Promise<unknown>; go: (view: string, id?: string, extra?: Record<string, unknown>) => void;
 }) {
   const today = platformBusinessDate(new Date());
-  const [group, setGroup] = React.useState<Group>('all'), [mode, setMode] = React.useState<'now' | 'week'>('now'), [open, setOpen] = React.useState<string | null>(null), [dialog, setDialog] = React.useState<ModuleEditorSpec | null>(null);
+  const [group, setGroup] = React.useState<Group>('all'), [mode, setMode] = React.useState<'now' | 'week'>(initialMode), [open, setOpen] = React.useState<string | null>(null), [dialog, setDialog] = React.useState<ModuleEditorSpec | null>(null);
   const rows = teamOverview(state, members, viewer, today, group);
   const row = rows.find(r => r.id === open);
   const total = (f: (r: TeamRow) => number) => rows.reduce((n, r) => n + f(r), 0);
@@ -66,7 +68,7 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go }: {
       <span className="mist-row"><Segmented<'now' | 'week'> ariaLabel="团队视图" value={mode} onChange={setMode} options={[{ value: 'now', label: '在手' }, { value: 'week', label: '周报' }]} />
       <Segmented<Group> ariaLabel="业务组" value={group} onChange={setGroup} options={[{ value: 'all', label: '全部' }, { value: 'garment', label: '成衣组' }, { value: 'fabric', label: '面料组' }]} /></span>
     </div>
-    {mode === 'week' ? <TeamWeekly state={state} members={members} viewer={viewer} group={group} today={today} /> : <>
+    {mode === 'week' ? <TeamWeekly state={state} members={members} viewer={viewer} group={group} today={today} initialWeek={initialWeek} canArchive={can} busy={busy} run={run} /> : <>
     <StatGrid>
       <StatCard icon={Users} label="需介入 / 需关注" value={`${rows.filter(r => r.attention === 'bad').length} / ${rows.filter(r => r.attention === 'warn').length}`} unit="人" foot={`共 ${rows.length} 人`} />
       <StatCard icon={Package} label="过交期订单" value={total(r => r.orders.filter(o => o.status === 'overdue').length)} unit="单" foot={`7 天内到期 ${total(r => r.orders.filter(o => o.status === 'soon').length)} 单`} />
@@ -127,11 +129,20 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go }: {
 
 const moneyCell = (rows: TeamMoney) => rows.length ? sums(rows) : '—';
 /** 周报：周一至周日的流量（新单、出运、回款、跟进、督办）+ 当前快照；可复制文字版或导出 CSV，由主管自行发送。 */
-export function TeamWeekly({ state, members, viewer, group, today }: { state: MistState; members: MistMemberOption[]; viewer: { id: string; owner: boolean }; group: Group; today: string }) {
+export function TeamWeekly({ state, members, viewer, group, today, initialWeek, canArchive = false, busy = false, run }: {
+  state: MistState; members: MistMemberOption[]; viewer: { id: string; owner: boolean }; group: Group; today: string;
+  initialWeek?: string; canArchive?: boolean; busy?: boolean; run?: (c: MistCommand) => Promise<unknown>;
+}) {
   const toast = useToast(), current = weekStartOf(today);
-  const [week, setWeek] = React.useState(current);
-  const report = teamWeeklyReport(state, members, viewer, week, today, group), t = report.totals;
-  const copy = async () => { try { await navigator.clipboard.writeText(teamWeeklyText(report)); toast('周报文字已复制'); } catch { toast('复制失败，请改用导出', 'bad'); } };
+  const [week, setWeek] = React.useState(initialWeek && weekStartOf(initialWeek) === initialWeek && initialWeek <= current ? initialWeek : current);
+  /** 已结束的周：本人存档过就显示存档版本（数据冻结在生成那一刻），否则显示实时计算并可存档。 */
+  const archived = myTeamReport(state, viewer.id, week);
+  const live = teamWeeklyReport(state, members, viewer, week, today, group);
+  const report = archived ? archived.report : live, t = report.totals;
+  const text = archived ? archived.text : teamWeeklyText(report);
+  const ended = week < current;
+  const copy = async () => { try { await navigator.clipboard.writeText(text); toast('周报文字已复制'); } catch { toast('复制失败，请改用导出', 'bad'); } };
+  const archive = async () => { if (!run) return; const r = await run({ type: 'team.weekly.archive', payload: { weekStart: week } } as MistCommand); if (r !== undefined) toast('周报已生成并存档'); };
   const exportCsv = () => downloadModuleCsv(`团队周报-${report.weekStart}.csv`, ['成员', '新接订单', '新单金额', '出运票数', '出运数量', '回款', '新开发案', '客户跟进', '赢单', '流失', '完成待办', '收到督办', '完成督办', '逾期督办', '当前过交期订单', '当前逾期应收'],
     report.rows.map(r => [r.name + (r.former ? '（已不在本空间）' : ''), r.newOrders, sums(r.newOrderAmount), r.shipments, r.shippedQty, sums(r.collected), r.newDevs, r.followUps, r.won, r.lost, r.tasksDone, r.nudgesIn, r.nudgesDone, r.nudgesOpenLate, r.lateOrders, sums(r.overdueReceivable)]));
   const columns: Column<TeamWeekRow>[] = [
@@ -149,8 +160,10 @@ export function TeamWeekly({ state, members, viewer, group, today }: { state: Mi
   return <div data-team-weekly={report.weekStart}>
     <div className="mist-section mist-row" style={{ justifyContent: 'space-between' }}>
       <span className="mist-row"><Button size="sm" icon={ChevronLeft} aria-label="上一周" onClick={() => setWeek(addBusinessDays(week, -7))} /><b>{report.weekStart} 至 {report.weekEnd}</b>{week === current && <Pill tone="accent">本周 · 统计到 {today}</Pill>}<Button size="sm" icon={ChevronRight} aria-label="下一周" disabled={week >= current} onClick={() => setWeek(addBusinessDays(week, 7))} /></span>
-      <span className="mist-row"><Button size="sm" icon={Copy} onClick={() => void copy()}>复制周报文字</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>导出 CSV</Button></span>
+      <span className="mist-row">{ended && !archived && canArchive && run && <Button size="sm" variant="primary" icon={Archive} disabled={busy} onClick={() => void archive()}>生成并存档</Button>}<Button size="sm" icon={Copy} onClick={() => void copy()}>复制周报文字</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>导出 CSV</Button></span>
     </div>
+    {archived ? <Banner tone="ok" title={`已存档 · ${archived.scope}`}>由 {archived.generatedBy} 于 {archived.generatedAt.slice(0, 16).replace('T', ' ')} 生成；以下是生成那一刻的数据，之后的补录不会改变它。</Banner>
+      : ended && canArchive && run ? <Banner tone="warn" title="这一周已结束，尚未存档">点“生成并存档”把此刻的数据冻结成正式周报，之后可随时回看、复制或导出。</Banner> : null}
     <StatGrid>
       <StatCard icon={Package} label="新接订单" value={t.newOrders} unit="单" foot={sums(t.newOrderAmount) || '本周没有新单'} />
       <StatCard icon={Ship} label="出运" value={t.shipments} unit="票" foot={`合计 ${t.shippedQty} 件/米`} />
@@ -158,7 +171,7 @@ export function TeamWeekly({ state, members, viewer, group, today }: { state: Mi
       <StatCard icon={BellRing} label="督办 完成 / 发出" value={`${t.nudgesDone} / ${t.nudgesIn}`} unit="条" foot={`逾期未完成 ${t.nudgesOpenLate} 条`} />
     </StatGrid>
     <section className="mist-section"><Card>
-      <CardHeader title="成员本周" sub="新单按建单日、出运按离港日、回款按到账日（已核销到该成员订单的发票）；“当前”两列是此刻的状态，不是当周历史值。" />
+      <CardHeader title="成员本周" sub={`新单按建单日、出运按离港日、回款按到账日（已核销到该成员订单的发票）；${archived ? '“当前”两列是存档时的状态。' : '“当前”两列是此刻的状态，不是当周历史值。'}`} />
       <DataTable ariaLabel="团队周报" rows={report.rows} rowKey={r => r.id} columns={columns} empty={<EmptyState icon={Users} title="范围内没有成员" compact />} />
     </Card></section>
     <span className="mist-note">本系统只生成周报内容；复制或导出后由你自行发送。</span>
