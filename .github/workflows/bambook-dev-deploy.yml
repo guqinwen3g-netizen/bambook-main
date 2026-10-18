@@ -4,7 +4,8 @@ on:
     paths:
       - .github/workflows/bambook-dev-deploy.yml
       - scripts/deploy/**
-  # Automatic delivery: every successful `Mist verification` run for a push to main deploys that exact revision.
+  # Automatic delivery: every successful `Mist verification` run for a push to main deploys that exact revision
+  # (documentation-only pushes do not run verification, so they are never delivered).
   workflow_run:
     workflows: [Mist verification]
     types: [completed]
@@ -68,10 +69,20 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_SHA/check-runs" \
             --jq '.check_runs | any(.name == "verify" and .status == "completed" and .conclusion == "success")' | grep -qx true
           # Never roll back: a delayed run for an older revision must not replace a newer main.
+          # Exception: if everything main gained since this revision is documentation only (docs/**, top-level *.md;
+          # such pushes skip verification and delivery), this revision is still the newest application code.
           main_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)
           if [ "$main_sha" != "$RELEASE_SHA" ]; then
-            echo "::error::$RELEASE_SHA is no longer the tip of main ($main_sha); refusing to deploy a stale revision"
-            exit 1
+            cmp=$(gh api "repos/$GITHUB_REPOSITORY/compare/$RELEASE_SHA...$main_sha")
+            status=$(jq -r .status <<<"$cmp")
+            total=$(jq -r '.files | length' <<<"$cmp")
+            non_doc=$(jq -r '[.files[] | (.filename, (.previous_filename // empty))
+              | select((startswith("docs/") and length > 5) or (test("^[^/]+\\.md$")) | not)] | length' <<<"$cmp")
+            if [ "$status" != ahead ] || [ "$total" -eq 0 ] || [ "$total" -ge 300 ] || [ "$non_doc" -ne 0 ]; then
+              echo "::error::$RELEASE_SHA is no longer the tip of main ($main_sha); refusing to deploy a stale revision"
+              exit 1
+            fi
+            echo "main ($main_sha) is ahead of $RELEASE_SHA by documentation only; deploying $RELEASE_SHA"
           fi
       - name: Configure dedicated SSH identity and pinned host key
         env:
