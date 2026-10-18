@@ -96,4 +96,4 @@ export function demoAccountRef(name: string): MistAccountRef {
   return { id: row.id, name: row.name };
 }
 /** 需要成员目录的命令（会写入负责人 / 经手人 / 业务组）。仓储层只为这些命令查询账号状态。 */
-export const MIST_MEMBER_DIRECTORY_COMMANDS: readonly string[] = ['customer.update', 'market.customer.update', 'market.customer.create', 'order.create', 'order.update', 'order.governance.saveDraft', 'fabric.create', 'crm.opportunity.save', 'market.supplier.save', 'market.quotation.convert', 'market.lead.convertToCrm', 'development.submit', 'member.groups.set', 'handover.customer', 'handover.account'];
+export const MIST_MEMBER_DIRECTORY_COMMANDS: readonly string[] = ['customer.update', 'market.customer.update', 'market.customer.create', 'order.create', 'order.update', 'order.governance.saveDraft', 'fabric.create', 'crm.opportunity.save', 'market.supplier.save', 'market.quotation.convert', 'market.lead.convertToCrm', 'development.submit', 'member.groups.set', 'handover.customer', 'handover.account', 'team.nudge'];
