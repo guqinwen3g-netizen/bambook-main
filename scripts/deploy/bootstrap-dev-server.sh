@@ -188,14 +188,16 @@ fi
 install -d -m 0700 "$etc/proxy"
 [[ -f "$etc/proxy/nodes.txt" ]] || install -m 0600 /dev/null "$etc/proxy/nodes.txt"
 
-# Daily compressed database backup, 7 days retained.
+# Daily compressed database + attachment backup, 7 days retained.
 install -d -m 0700 -o postgres -g postgres /var/backups/bambook-dev
 cat > /etc/cron.daily/bambook-dev-backup <<'CRON'
 #!/bin/sh
 set -e
 cd /var/backups/bambook-dev
 sudo -u postgres pg_dump -Fc panda_hub_dev > "panda_hub_dev-$(date +%Y%m%d).dump"
-find . -name 'panda_hub_dev-*.dump' -mtime +7 -delete
+# 附件随数据库一起备份（数据库在前，附件在后：备份期间新上传的附件只会多出、不会缺）。
+if [ -d /srv/bambook-dev/shared/mist-files ]; then tar -czf "mist-files-$(date +%Y%m%d).tar.gz" -C /srv/bambook-dev/shared/mist-files .; fi
+find . \( -name 'panda_hub_dev-*.dump' -o -name 'mist-files-*.tar.gz' \) -mtime +7 -delete
 CRON
 chmod 0755 /etc/cron.daily/bambook-dev-backup
 
