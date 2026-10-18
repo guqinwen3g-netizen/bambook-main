@@ -8,6 +8,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { downloadModuleCsv } from './ModuleWorkbench';
+import { OrderActualCostPanel } from './OrderActualCostPanel';
 import { FX_BASIS_LABEL, fxRateFor, type FxBasis, type FxResolved } from '../../../../../server/src/shared/mistFxRates';
 import { orderRebate } from '../../../../../server/src/shared/mistExportRebate';
 
@@ -110,12 +111,12 @@ export function buildOrderProgress(state: MistState, asOf: string): OrderProgres
 }
 const PROGRESS_STATUS = { overdue: { label: '已逾期', tone: 'bad' }, soon: { label: '7 天内到期', tone: 'warn' }, ontrack: { label: '正常', tone: 'ok' }, nodue: { label: '未填交期', tone: 'neutral' } } as const;
 
-type ReportTab = 'sales' | 'margin' | 'aging' | 'orders';
+type ReportTab = 'sales' | 'margin' | 'actual' | 'aging' | 'orders';
 export function PlatformReportsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), state = workspace.state;
   // 毛利涉及采购成本，只给报表管理者（业务主管、财务、老板）看；本地工作区为单人使用。
   const canSeeMargin = !!session.localMode || session.hasPermission('reports:admin');
-  const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || (route.section === 'margin' && canSeeMargin) ? route.section : 'sales';
+  const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || ((route.section === 'margin' || route.section === 'actual') && canSeeMargin) ? route.section : 'sales';
   const asOf = platformBusinessDate(new Date());
   const [from, setFrom] = React.useState(''), [to, setTo] = React.useState(''), [currency, setCurrency] = React.useState(''), [progressFilter, setProgressFilter] = React.useState('');
   // 默认口径：有实际结汇用实际结汇，否则有月末汇率用月末暂估，都没有则原币。
@@ -187,9 +188,9 @@ export function PlatformReportsPage() {
   };
 
   return <MistPage>
-    <PageHeader title="报表中心" description="基于当前工作空间的订单、采购与发票实时统计；销售额与账龄按币种分别统计；订单毛利可按所选汇率口径折算人民币，暂估另行标识。" actions={<Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>导出当前报表</Button>} />
+    <PageHeader title="报表中心" description="基于当前工作空间的订单、采购与发票实时统计；销售额与账龄按币种分别统计；订单毛利可按所选汇率口径折算人民币，暂估另行标识。" actions={<Button icon={Download} disabled={!state || tab === 'actual' || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>导出当前报表</Button>} />
     {workspace.error && <Banner tone="bad" title="读取失败">{workspace.error}</Banner>}
-    <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }] : []), { value: 'aging', label: '应收账龄' }, { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
+    <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
     <section className="mist-section">{tab === 'sales' ? <>
       <Toolbar><Field label="订单创建起日"><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label="订单创建止日"><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}</Toolbar>
       {invalid && <Banner tone="bad" title="起始日期不能晚于结束日期" />}
@@ -216,7 +217,7 @@ export function PlatformReportsPage() {
         <section className="mist-section"><Card><DataTable ariaLabel="订单毛利（人民币）" rows={cny} rowKey={r => r.id} loading={workspace.loading} columns={cnyColumns} empty={<EmptyState title="当前范围没有已生效订单" description="草稿、待审批或被退回的订单不计入毛利。" />} /></Card></section>
         <p className="mist-note">{FX_BASIS_LABEL[view]}：{view === 'actual' ? '按已登记、未冲回的结汇记录（原币 → 人民币）加权平均，截至今天。' : view === 'period' ? `取不晚于 ${fxMonth} 的最新一期月末汇率（财务在“账户与余额”登记）。` : '取订单最新一次定价试算的 CNY / USD 汇率，仅美元订单。'}缺少所选口径汇率的订单不出毛利。不含退税毛利 = 收入 × 汇率 − 已批准采购合同（通常含税价）；含退税毛利再加本单分摊的出口退税（已核准按核准额，未核准按应退额；未申报不计）。未计运费、报关、佣金与索赔扣款。</p>
       </>}
-    </> : tab === 'aging' ? <>
+    </> : tab === 'actual' ? (state ? <OrderActualCostPanel state={state} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} /> : <EmptyState title="正在读取数据" compact />) : tab === 'aging' ? <>
       <Toolbar right={<span className="mist-note">截至 {asOf}</span>}>{currencyFilter}</Toolbar>
       <StatGrid>{AGING_BUCKETS.map(b => <StatCard key={b.key} icon={Clock} label={b.label} value={totals(aging, r => r[b.key])} />)}</StatGrid>
       <section className="mist-section"><Card><DataTable ariaLabel="应收账龄" rows={aging} rowKey={r => r.id} loading={workspace.loading} columns={agingColumns} empty={<EmptyState title="没有未收应收" description="有效发票均已收清。" />} /></Card></section>
