@@ -190,4 +190,16 @@ describe('finance reversals keep the original fact and recompute balances',()=>{
   expect(mistCommandPermission({type:'finance.allocation.reverse',payload:{allocationId:'a',reason:'r'}})).toBe('invoices:reconcile');
   expect(mistCommandPermission({type:'finance.payment.reverse',payload:{paymentId:'p',reason:'r'}})).toBe('vouchers:write');
  });
+  it('keeps an order in material preparation until its contract-created production branch is released or progresses',()=>{
+    const ctx=context(),s=createMistState(ctx),order=s.orders.find(o=>o.code==='SO-G-2026-018')!;
+    s.fulfillment.shipments=s.fulfillment.shipments.filter(x=>!x.lines.some(l=>l.orderId===order.id));
+    s.productions=s.productions.filter(p=>p.orderId!==order.id);
+    s.productions.push({...s.productions[0],id:'contract-job',orderId:order.id,sourcePurchaseId:'po-x',col:'cut',pct:0,closed:false} as any);
+    s.fulfillment.productionFacts=(s.fulfillment.productionFacts||[]).filter(f=>f.productionId!=='contract-job');
+    let result=applyMistCommand(s,{type:'settings.update',payload:{density:'compact'}},ctx).state;
+    expect(result.orders.find(o=>o.id===order.id)?.state).toBe('备料中');
+    result.fulfillment.productionFacts.push({productionId:'contract-job',sizes:[],revision:1,release:{at:ctx.now,actor:'x',note:'放行'}} as any);
+    result=applyMistCommand(result,{type:'settings.update',payload:{density:'default'}},ctx).state;
+    expect(result.orders.find(o=>o.id===order.id)?.state).toBe('生产中');
+  });
 });
