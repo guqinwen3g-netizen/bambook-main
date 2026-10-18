@@ -122,16 +122,52 @@ it('explains why a departed shipment\'s record is locked and keeps users without
   expect(queryByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记海关放行'})).toBeNull();
 });
 
-it('lists LC-paid orders and rebate evidence without inventing LC terms or refund amounts',async()=>{
+it('keeps a letter of credit ledger with terms, presentations and bank results, and flags approved LC orders without a registered credit',async()=>{
   const st=store.state!,f=st.fulfillment;
-  (st.orders[0] as any).governance={status:'approved',rounds:[],effectiveVersion:1,contract:{kind:'external',poNumber:'PO',confirmationFileIds:[],internalPurpose:'',receiver:'',paymentMethod:'LC',depositPercent:null,paymentNote:'L/C at sight',incoterm:'FOB',deliveryPlace:'上海'}};
+  const gov=(note:string)=>({status:'approved',rounds:[],effectiveVersion:1,contract:{kind:'external',poNumber:'PO',confirmationFileIds:[],internalPurpose:'',receiver:'',paymentMethod:'LC',depositPercent:null,paymentNote:note,incoterm:'FOB',deliveryPlace:'上海'}});
+  (st.orders[0] as any).governance=gov('L/C at sight');
+  st.orders.push({id:'o2',code:'SO-2',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',due:'2026-12-01',governance:gov('L/C 60 days')} as any);
+  f.shipments.push(shipment('s',{state:'departed'}),shipment('t'));
+  (st as any).letterOfCredits=[{id:'lc1',code:'LC-2026-0001',lcNo:'LCA2026001',customerId:'c',customer:'Cedar',orderIds:['o'],issuingBank:'Barclays London',advisingBank:'中国银行上海分行',confirmed:false,availableBy:'sight',usanceDays:0,currency:'USD',amount:100,tolerancePct:5,issueDate:'2026-09-01',latestShipmentDate:'2099-01-31',expiryDate:'2099-02-21',expiryPlace:'中国',presentationDays:21,partialShipment:true,transhipment:false,documentsRequired:'商业发票一式三份',note:'',fileIds:[],
+    amendments:[{no:1,date:'2026-09-20',changes:[{field:'expiryDate',label:'有效期',from:'2099-01-21',to:'2099-02-21'}],note:'展期',at:'2026-09-20T01:00:00Z',actor:'单证'}],
+    presentations:[{id:'p1',no:1,shipmentId:'s',shipmentCode:'S',shipmentDate:'2026-10-10',presentedAt:'2026-10-12',deadline:'2026-10-31',amount:60,documents:'发票',autoDiscrepancies:[],discrepancies:'',result:'pending',history:[],createdAt:'2026-10-12T01:00:00Z',actor:'单证'}],createdAt:'2026-09-02T01:00:00Z',actor:'单证'}];
+  render();
+  await click(getByRole(host,'tab',{name:/信用证/}));
+  expect(host.textContent).toContain('1 张已审批的信用证付款订单尚未登记来证');
+  const ledger=getByRole(host,'table',{name:'信用证台账'});
+  expect(ledger.textContent).toContain('LCA2026001');expect(ledger.textContent).toContain('可用 45.00 USD');expect(ledger.textContent).toContain('有效');
+  const orders=getByRole(host,'table',{name:'信用证付款订单'});
+  expect(orders.textContent).toContain('SO-2');expect(orders.textContent).toContain('未登记来证');expect(orders.textContent).toContain('L/C 60 days');
+  await click(getByRole(ledger,'row',{name:/LCA2026001/}));
+  const detail=host.querySelector('[data-lc-detail="lc1"]') as HTMLElement;
+  expect(detail.textContent).toContain('有效期：2099-01-21 → 2099-02-21');expect(detail.textContent).toContain('装运后 21 天内');
+  expect((getByRole(detail,'button',{name:'注销信用证'}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(detail,'button',{name:'登记第 1 次交单审单结果'}));
+  let dialog=getByRole(document.body,'dialog');
+  await click(getByRole(dialog,'button',{name:'登记结果'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'lc.presentation.result',payload:expect.objectContaining({id:'lc1',presentationId:'p1',result:'complying'})});
+  await click(getByRole(dialog,'button',{name:'取消'}));
+  await click(getByRole(detail,'button',{name:'登记交单'}));
+  dialog=getByRole(document.body,'dialog');
+  expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).toContain('T');expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).not.toContain('S ·');
+  await click(getByRole(dialog,'button',{name:'取消'}));
+  await click(getByRole(host,'button',{name:'登记信用证'}));
+  dialog=getByRole(document.body,'dialog');
+  typeInto(dialog.querySelector('input[aria-label="信用证号"]') as HTMLInputElement,'lcb-2');
+  typeInto(dialog.querySelector('input[aria-label="开证行"]') as HTMLInputElement,'HSBC');
+  typeInto(dialog.querySelector('input[aria-label="信用证金额"]') as HTMLInputElement,'500');
+  typeInto(dialog.querySelector('input[aria-label="最晚装运日"]') as HTMLInputElement,'2099-01-10');
+  typeInto(dialog.querySelector('input[aria-label="有效期"]') as HTMLInputElement,'2099-01-31');
+  await click(getByRole(dialog,'checkbox',{name:/SO-2/}));
+  await click(getByRole(dialog,'button',{name:'登记信用证'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'lc.save',payload:{input:expect.objectContaining({lcNo:'lcb-2',issuingBank:'HSBC',orderIds:['o2'],currency:'USD',amount:'500',availableBy:'sight',latestShipmentDate:'2099-01-10',expiryDate:'2099-01-31',presentationDays:'21'})}});
+});
+
+it('lists rebate evidence without inventing refund amounts',async()=>{
+  const st=store.state!,f=st.fulfillment;
   f.shipments.push(shipment('s',{state:'departed'}));f.customs.push(customs('s','cleared'));f.documents.push(ci('s','inv'));
   st.invoices.push({id:'inv',code:'CI-s',orderId:'o',order:'SO-1',customer:'Cedar',due:'2026-11-01',amount:100,open:0,currency:'USD'});
   render();
-  await click(getByRole(host,'tab',{name:/信用证/}));
-  expect(host.textContent).toContain('信用证台账尚未接入');
-  const lc=getByRole(host,'table',{name:'信用证付款订单'});
-  expect(lc.textContent).toContain('SO-1');expect(lc.textContent).toContain('L/C at sight');expect(lc.textContent).toContain('S');
   await click(getByRole(host,'tab',{name:/退税/}));
   const rebate=getByRole(host,'table',{name:'退税资料核对'});
   expect(rebate.textContent).toContain('已全部收汇');expect(rebate.textContent).toContain('未登记');expect(rebate.textContent).toContain('缺退税率');expect(rebate.textContent).toContain('2 / 3');

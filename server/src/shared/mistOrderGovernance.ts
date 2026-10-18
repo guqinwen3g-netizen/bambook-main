@@ -67,7 +67,7 @@ function validateSubmission(root:MistState,s:OrderGovernanceSnapshot){
  if(s.contract.kind==='external'){if(!s.customerId||!root.customers.some(c=>c.id===s.customerId))fail('请选择实际客户');if(!s.contract.poNumber)fail('请填写PO或合同号');if(!s.contract.confirmationFileIds.length)fail('外部订单须上传客户书面确认依据');if(!s.contract.incoterm||!s.contract.deliveryPlace)fail('请记录合同贸易术语和指定地点');}
  else if(!s.contract.internalPurpose||!s.contract.receiver)fail('内部订单须记录用途、接收团队和负责人');
  if(!s.contract.paymentNote)fail('请记录实际付款条款');
- if(s.contract.paymentMethod==='LC')fail('信用证条款与原件核验尚未接入，本次不能将其标为已核验','PRECONDITION');
+ // 信用证付款：客户通常在订单确认后开证，来证由单证员在信用证台账登记与审核，不阻断订单审批。
 }
 function reviewers(context:MistContext,type:MistOrder['type']){const authority=context.authority as (MistContext['authority']&{orderReviewerIds?:Record<'garment'|'fabric',string[]>})|undefined;return [...new Set((authority?.orderReviewerIds?.[type]||[]).filter(id=>typeof id==='string'&&id.trim()))];}
 function applySnapshot(root:MistState,order:GovernedOrder,s:OrderGovernanceSnapshot){

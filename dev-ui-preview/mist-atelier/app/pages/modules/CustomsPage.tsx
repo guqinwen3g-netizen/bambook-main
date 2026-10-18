@@ -1,8 +1,8 @@
-/** 外贸与报关：后勤单证按出运登记外部申报与放行事实（本系统不代替海关 / 单一窗口申报）；退税由财务按退税率版本配单申报、登记核准与到账勾稽；信用证只核对已登记事实，未接入的部分明确写出。 */
+/** 外贸与报关：后勤单证按出运登记外部申报与放行事实（本系统不代替海关 / 单一窗口申报）；退税由财务按退税率版本配单申报、登记核准与到账勾稽；信用证由单证员按来证登记条款、修改书、交单与银行审单结果。 */
 import React from 'react';
-import { Download, FileText, Landmark, Pencil, Plus, Receipt, SearchX, Stamp } from 'lucide-react';
+import { Download, FileText, Pencil, Plus, Receipt, SearchX, Stamp } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Toolbar, type Column, type Tone } from '../../../../../components/mist';
-import type { MistCommand, MistInvoice, MistOrder, MistState } from '../../../../../server/src/shared/mistWorkspace';
+import type { MistCommand, MistInvoice, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { isRecognizedMistInvoice } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms, FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -15,6 +15,8 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { REBATE_TONE, RebateClaimBlock, RebateRatesCard, rebateSummary } from './RebatePanel';
 import { REBATE_STATE_LABEL } from '../../../../../server/src/shared/mistExportRebate';
+import { LetterOfCreditLedger, lcOrderDomain } from './LetterOfCredits';
+import { readLetterOfCredits } from '../../../../../server/src/shared/mistLetterOfCredit';
 import { MODE_LABEL, packedFor, packingMatched, shipmentStage, STAGE_LABEL, STAGE_TONE } from './ShipmentsPage';
 
 type Tab = 'declarations' | 'lc' | 'rebate';
@@ -69,7 +71,7 @@ export function CustomsPage() {
   const hasContext = !!route.section, invalidContext = hasContext && !!state && !contextShipment;
   const records = (f?.customs || []).filter(c => !hasContext || c.shipmentId === route.section);
   const routed = records.find(c => c.id === route.id);
-  const lcAll = (state?.orders || []).filter(o => o.governance?.contract.paymentMethod === 'LC');
+  const lcAll = state ? readLetterOfCredits(state).map(lc => ({ type: lcOrderDomain(state, lc) })) : [];
   const domainOf = (c: FulfillmentCustoms): Domain => shipmentOf(c)?.domain || 'garment';
   const domain: Domain = domainChoice || (routed ? domainOf(routed) : undefined) || contextShipment?.domain || (records.some(c => domainOf(c) === 'garment') || !records.some(c => domainOf(c) === 'fabric') ? 'garment' : 'fabric');
   const tab: Tab = hasContext ? 'declarations' : tabChoice === 'lc' || !routed ? tabChoice : routed.status === 'draft' ? 'declarations' : tabChoice;
@@ -82,8 +84,7 @@ export function CustomsPage() {
   const declarationRows = searched.filter(c => statusFilter === 'all' || c.status === statusFilter)
     .sort((a, b) => Number(flagsOf(b).some(x => x.key === 'awaiting')) - Number(flagsOf(a).some(x => x.key === 'awaiting')) || Number(flagsOf(b).length > 0) - Number(flagsOf(a).length > 0) || statusOrder[a.status] - statusOrder[b.status] || (shipmentOf(a)?.plannedDate || '9').localeCompare(shipmentOf(b)?.plannedDate || '9'));
   const rebateRows = !state ? [] : inDomain.filter(c => c.status !== 'draft' && matches(c)).sort((a, b) => rebateEvidence(state, a).ready - rebateEvidence(state, b).ready || (b.clearedAt || b.declaredAt).localeCompare(a.clearedAt || a.declaredAt));
-  const lcRows = lcAll.filter(o => o.type === domain && (!needle || `${o.code} ${o.customer} ${o.governance?.contract.paymentNote || ''}`.toLowerCase().includes(needle)));
-  const shipmentsInDomain = (f?.shipments || []).filter(s => hasContext ? s.id === route.section : s.domain === domain);
+    const shipmentsInDomain = (f?.shipments || []).filter(s => hasContext ? s.id === route.section : s.domain === domain);
   const pendingShipments = shipmentsInDomain.filter(s => isOpenShipment(s) && !f!.customs.some(c => c.shipmentId === s.id)).sort((a, b) => (a.plannedDate || '9').localeCompare(b.plannedDate || '9'));
   const rows = tab === 'rebate' ? rebateRows : declarationRows;
   const selected = tab === 'lc' ? undefined : rows.find(c => c.id === picked) || (picked ? records.find(c => c.id === picked) : undefined);
@@ -125,13 +126,6 @@ export function CustomsPage() {
     { key: 'claim', header: '退税申报', width: 'minmax(130px,1.1fr)', render: c => { const v = rebateEvidence(state!, c).vat; return v.claim ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={REBATE_TONE[v.claim.state]}>{REBATE_STATE_LABEL[v.claim.state]}</Pill><small className="mist-muted">应退 {fmt(v.claim.expected, 2)} CNY</small></div> : v.rate && v.candidates.length ? <div className="mist-col" style={{ gap: 2 }}><span className="mist-muted">未申报</span><small className="mist-muted">预计 {fmt(v.preview, 2)} CNY</small></div> : <span className="mist-muted">{v.rate ? '未申报' : '缺退税率'}</span>; } },
     { key: 'ready', header: '资料', width: '90px', align: 'right', hideOnMobile: true, render: c => `${rebateEvidence(state!, c).ready} / 3` },
   ];
-  const lcColumns: Column<MistOrder>[] = [
-    { key: 'order', header: '订单', width: 'minmax(150px,1.2fr)', render: o => <div className="mist-col" style={{ gap: 2 }}><Mono>{o.code}</Mono><small className="mist-muted">{o.customer}</small></div> },
-    { key: 'note', header: '合同付款约定', width: 'minmax(160px,1.6fr)', hideOnMobile: true, render: o => o.governance?.contract.paymentNote || <span className="mist-muted">合同未写明信用证条款</span> },
-    { key: 'due', header: '订单交期', width: '110px', hideOnMobile: true, render: o => o.due || '未定' },
-    { key: 'shipments', header: '出运', width: 'minmax(160px,1.4fr)', render: o => { const list = (f?.shipments || []).filter(s => s.state !== 'cancelled' && s.lines.some(line => line.orderId === o.id)); return list.length ? <div className="mist-col" style={{ gap: 4, alignItems: 'flex-start' }}>{list.map(s => <span key={s.id} className="mist-row" style={{ gap: 6 }}><Mono>{s.code}</Mono><Pill tone={STAGE_TONE[shipmentStage(state!, s)]}>{STAGE_LABEL[shipmentStage(state!, s)]}</Pill></span>)}</div> : <span className="mist-muted">尚未发起出运</span>; } },
-    { key: 'next', header: '下次计划出运', width: '120px', render: o => { const next = (f?.shipments || []).filter(s => isOpenShipment(s) && s.plannedDate && s.lines.some(line => line.orderId === o.id)).map(s => s.plannedDate).sort()[0]; return next ? <span className={next < day ? 'mist-tone-bad' : undefined}>{next}</span> : <span className="mist-muted">—</span>; } },
-  ];
 
   const eligible = eligibleShipments();
   const createButton = can ? <Button variant="primary" icon={Plus} disabled={invalidContext || !eligible.length} title={eligible.length ? undefined : '没有尚无报关记录的进行中出运'} onClick={() => setDialog(createSpec())}>建立报关记录</Button> : undefined;
@@ -153,19 +147,19 @@ export function CustomsPage() {
 
   return <MistPage width="wide">
     <PageHeader eyebrow="订单履约 · 出口" title="外贸与报关"
-      description={invalidContext ? '指定出运不存在，请返回货运管理重新进入。' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer} · 仅显示本票报关。` : '后勤单证按出运登记外部申报与放行事实；本系统不代替海关或单一窗口申报。退税由财务按退税率版本配单申报、登记核准与到账；信用证只核对已登记事实。'}
+      description={invalidContext ? '指定出运不存在，请返回货运管理重新进入。' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer} · 仅显示本票报关。` : '后勤单证按出运登记外部申报与放行事实；本系统不代替海关或单一窗口申报。退税由财务按退税率版本配单申报、登记核准与到账；信用证按来证登记条款与交单。'}
       actions={<>
         {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>返回出运</Button>}
         {hasContext && <Button onClick={() => go('customs')}>查看全部报关</Button>}
         {tab !== 'lc' && <Button icon={Download} disabled={!rows.length} onClick={exportRows}>导出</Button>}
         {tab === 'declarations' && createButton}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有报关单证权限，可以查看报关记录、信用证订单与退税资料。</Banner></div>}
+    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有报关单证权限，可以查看报关记录、信用证台账与退税资料。</Banner></div>}
     {error && <div className="mist-section"><Banner tone="bad" title="报关数据未读取" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={changeTab} options={[{ value: 'declarations', label: '报关', count: inDomain.length }, { value: 'lc', label: '信用证', count: lcAll.filter(o => o.type === domain).length }, { value: 'rebate', label: '退税', count: inDomain.filter(c => c.status !== 'draft').length }]} /></div>}
     {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'garment').length : records.filter(c => domainOf(c) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'fabric').length : records.filter(c => domainOf(c) === 'fabric').length}` }]} /></div>}
     <Toolbar>
-      <SearchField value={query} onChange={setQuery} placeholder={tab === 'lc' ? '搜索订单号、客户或付款约定' : '搜索报关单号、记录号、出运号、客户、HS 编码或报关行'} />
+      <SearchField value={query} onChange={setQuery} placeholder={tab === 'lc' ? '搜索信用证号、客户或开证行' : '搜索报关单号、记录号、出运号、客户、HS 编码或报关行'} />
       {tab === 'declarations' && <Dropdown<FlagFilter> label="筛选" value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'attention', label: '需要关注' }, { value: 'awaiting', label: '离港等待放行' }, { value: 'packing', label: '装箱未完成或不符' }]} />}
     </Toolbar>
     {tab === 'declarations' && <>
@@ -190,9 +184,7 @@ export function CustomsPage() {
     {tab === 'rebate' && state && <div className="mist-section"><RebateRatesCard state={state} canWrite={canRebate} locked={locked} open={setDialog} run={run} /></div>}
     {tab === 'lc'
       ? <>
-        <div className="mist-section"><Banner tone="neutral" title="信用证台账尚未接入">服务端还没有信用证号、开证行、金额、最晚装运日、有效期、交单期与不符点记录，本页不做倒计时提醒。下面列出合同约定以信用证付款的订单及其出运，便于按原件人工核对；信用证原件请保存在订单合同附件中。</Banner></div>
-        <Card><DataTable ariaLabel="信用证付款订单" loading={loading} rows={lcRows} rowKey={o => o.id} density="comfy" onRowClick={o => go('orders/detail', o.id, { customerId: o.customerId, section: o.type })} columns={lcColumns}
-          empty={needle && lcAll.some(o => o.type === domain) ? <EmptyState icon={SearchX} title="没有符合条件的订单" description="换个关键词试试。" action={<Button onClick={() => setQuery('')}>清除搜索</Button>} /> : <EmptyState icon={Landmark} title={`没有约定信用证付款的${domain === 'fabric' ? '面料' : '成衣'}订单`} description="订单合同的付款方式选择“信用证”后，会在这里列出订单与相关出运。" />} /></Card>
+        <LetterOfCreditLedger state={state || undefined} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} onOrder={o => go('orders/detail', o.id, { customerId: o.customerId, section: o.type })} onShipment={id => go('shipments', id)} />
       </>
       : <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.declarationNo || selected.code} · ${shipmentOf(selected)?.customer || ''}` : '报关详情'} drawerSub={selected ? `${shipmentOf(selected)?.code || ''} · ${CUSTOMS_LABEL[selected.status]}` : undefined}
           list={<Card><DataTable ariaLabel={tab === 'rebate' ? '退税资料核对' : '报关列表'} loading={loading} rows={rows} rowKey={c => c.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={tab === 'rebate' ? rebateColumns : declarationColumns} empty={empty} /></Card>}
