@@ -196,6 +196,29 @@ it('lets finance match VAT special invoices to a departed declaration and file t
   expect((getByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记退税申报'}) as HTMLButtonElement).disabled).toBe(true);
 });
 
+it('computes the rebate per declaration item HS once items exist, and blocks filing until every item has a rate',async()=>{
+  const st=store.state!,f=st.fulfillment;
+  f.shipments.push(shipment('s',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));
+  const item=(no:number,hsCode:string,key:string)=>({no,classificationId:'c'+no,lineKeys:[key],styles:[],hsCode,declaredName:'x',elements:'',quantity:1,unit:'件',legalQty:1,legalUnit:'件',secondQty:null,secondUnit:'',unitPrice:1,amount:1,currency:'USD',origin:'CN',destination:'US'});
+  f.customs.push(customs('s','cleared',{hsCode:'6202.1300',items:[item(1,'6203.3100','l1:p'),item(2,'6204.6200','l2:p')]} as any));
+  f.purchases.push({id:'po1',code:'PC-1',orderId:'o',lineId:'l1'} as any,{id:'po2',code:'PC-2',orderId:'o',lineId:'l2'} as any);
+  st.payables!.bills.push({id:'b1',code:'AP-1',supplierId:'sup',supplier:'嘉兴制衣',invoiceNo:'0451001',invoiceDate:'2026-10-10',currency:'CNY',amount:113000,taxAmount:13000,taxRate:'13%',lines:[{purchaseId:'po1',purchaseCode:'PC-1',amount:56500},{purchaseId:'po2',purchaseCode:'PC-2',amount:56500}],terms:[],due:'2026-11-10',dueBasis:'',fileIds:[],note:'',state:'open',registeredAt:'2026-10-10T00:00:00Z',registeredBy:'财务'} as any);
+  (st as any).exportRebate={rates:[{id:'rt',code:'RR-1',hsCode:'6203.31',rate:'13',effectiveFrom:'2020-03-20',basis:'公告',createdAt:'2026-10-01T00:00:00Z',actor:'财务'}],claims:[]};
+  render();
+  await click(getByRole(host,'tab',{name:/退税/}));
+  await click(Array.from(getByRole(host,'table',{name:'退税资料核对'}).querySelectorAll('[role="row"]')).find(r=>r.textContent?.includes('D-s')) as HTMLElement);
+  let detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
+  expect(detail.textContent).toContain('按商品项');
+  expect((getByRole(detail,'button',{name:'登记退税申报'}) as HTMLButtonElement).disabled).toBe(true);
+  (st as any).exportRebate.rates.push({id:'rt9',code:'RR-2',hsCode:'6204.62',rate:'9',effectiveFrom:'2020-03-20',basis:'公告',createdAt:'2026-10-01T00:00:00Z',actor:'财务'});
+  render();
+  detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
+  const table=getByRole(detail,'table',{name:'CUS-S 可配专票'});
+  expect(table.textContent).toContain('第 1 项 13%');expect(table.textContent).toContain('第 2 项 9%');
+  // 计税 50000 × 13% + 50000 × 9% = 11000
+  expect(table.textContent).toContain('11,000.00 CNY');
+  expect((getByRole(detail,'button',{name:'登记退税申报'}) as HTMLButtonElement).disabled).toBe(false);
+});
 it('lists missing classifications instead of guessing, and creates a style classification from the 商品归类 tab',async()=>{
   const f=store.state!.fulfillment;f.shipments.push(shipment('s'));f.packing.push(pack('s',10));f.customs.push(customs('s','draft'));
   render('cus-s');

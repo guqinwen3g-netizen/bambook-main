@@ -6,6 +6,8 @@
  *   版本不改写，登错的版本在未被申报使用前作废并写原因。
  * - 申报（配单）：海关已放行且出运已离港的报关单，由财务勾选本票订单对应的供应商增值税专用发票（人民币、税额大于零、未作废、
  *   未被其他有效申报占用）。应退税额 = Σ 发票计税金额（价税合计 − 税额）× 适用退税率，按分取整。首版一张发票整票配一张报关单。
+ * - 按商品项计算（2026-10-18）：报关单已生成商品项时，专票每行经“采购合同 → 订单条目 → 商品项”取该项 HS 的退税率逐项计算，
+ *   票内计税金额按行金额比例拆分；不在本报关单商品项中的行不计退税；未生成商品项时按表头 HS。
  * - 审核：登记税务机关审核通过（核准）金额；与应退税额不同须写原因（如审核调减）。
  * - 到账：退税款先按银行水单导入到账流水，再在申报上勾稽到账（人民币，可分次）；勾稽占用该笔流水余额，冲回则释放。
  *   到账合计达到核准额（未核准时为应退税额）自动结清；少收时可写原因结清差额。
@@ -19,11 +21,17 @@ import type { SupplierBill } from './mistPayables';
 import { MistCommandError, mistMoneyMinor, type MistContext, type MistState } from './mistWorkspace';
 
 export type RebateRate = { id: string; code: string; hsCode: string; rate: string; effectiveFrom: string; basis: string; createdAt: string; actor: string; voided?: { at: string; actor: string; reason: string } };
-export type RebateClaimLine = { billId: string; billCode: string; invoiceNo: string; supplier: string; invoiceDate: string; taxable: number; rebate: number };
+/** 按商品项计算时，专票每一行（对应一份采购合同）落到的报关商品项与适用退税率。 */
+export type RebateLinePart = { purchaseId: string; purchaseCode: string; itemNo: number; hsCode: string; rateId: string; rate: string; taxable: number; rebate: number };
+export type RebateClaimLine = { billId: string; billCode: string; invoiceNo: string; supplier: string; invoiceDate: string; taxable: number; rebate: number;
+  /** 按商品项计算的明细；excluded 为票内不在本报关单商品项中的计税金额（不计退税）。 */
+  parts?: RebateLinePart[]; excluded?: number };
 export type RebateClaimReceipt = { id: string; receiptId: string; receiptCode: string; amount: number; date: string; at: string; actor: string; reversed?: { at: string; actor: string; reason: string } };
 export type RebateClaim = {
   id: string; code: string; customsId: string; customsCode: string; declarationNo: string; shipmentId: string; shipmentCode: string; orderIds: string[];
   hsCode: string; exportDate: string; rateId: string; rate: string; lines: RebateClaimLine[]; taxable: number; expected: number;
+  /** 按报关商品项逐项适用退税率（报关单已生成商品项时）；rateIds 为用到的全部退税率版本。 */
+  byItems?: boolean; rateIds?: string[];
   filedAt: string; batchRef: string; fileIds: string[]; note: string; state: 'filed' | 'approved' | 'received' | 'withdrawn';
   approved?: { date: string; amount: number; ref: string; reason: string; at: string; actor: string };
   receipts: RebateClaimReceipt[]; settled?: { at: string; actor: string; reason: string };
@@ -93,6 +101,50 @@ export function rebateCandidateBills(root: Root, customs: FulfillmentCustoms): S
   return (root.payables?.bills || []).filter(b => b.state === 'open' && b.currency === 'CNY' && mistMoneyMinor(b.taxAmount) > 0 && !used.has(b.id)
     && b.lines.some(l => orders.has(purchases.find(p => p.id === l.purchaseId)?.orderId || '')));
 }
+/** 最大余数法分配（分），合计等于 total。 */
+function splitByWeight(total: number, weights: number[]) {
+  const sum = weights.reduce((n, w) => n + w, 0); if (!(sum > 0)) return weights.map(() => 0);
+  const raw = weights.map(w => total * w / sum), out = raw.map(Math.floor); let rest = total - out.reduce((n, v) => n + v, 0);
+  for (const { i } of raw.map((v, i) => ({ i, f: v - Math.floor(v) })).sort((a, b) => b.f - a.f || a.i - b.i)) { if (rest <= 0) break; out[i]++; rest--; }
+  return out;
+}
+export type RebateBillPlan = { bill: SupplierBill; taxable: number; rebate: number; excluded: number; parts: RebateLinePart[]; blockers: string[] };
+export type RebatePlan = { mode: 'items' | 'header'; rate?: RebateRate; rates: RebateRate[]; bills: RebateBillPlan[]; blockers: string[]; taxable: number; rebate: number };
+/**
+ * 应退税额计算方案（金额为分）。
+ * - 报关单已生成商品项：专票每一行按“采购合同 → 订单条目 → 含该条目的商品项”找到报关 HS，按出口日期取该 HS 的退税率逐项计算；
+ *   票内计税金额（价税合计 − 税额）按各行金额比例拆到行；不在本报关单商品项中的行不计退税（excluded）。外贸企业“进货凭证与出口商品逐项关联”的做法。
+ * - 尚未生成商品项：沿用表头 HS 一个退税率整票计算。
+ */
+export function rebatePlan(root: Root, customs: FulfillmentCustoms, exportDate: string, bills: SupplierBill[]): RebatePlan {
+  const items = customs.items || [];
+  if (!items.length) {
+    const rate = exportDate ? rebateRateFor(root, customs.hsCode, exportDate) : undefined;
+    const rows = bills.map(bill => { const taxable = rebateBillTaxableMinor(bill); return { bill, taxable, rebate: rate ? rebateFor(taxable, rate.rate) : 0, excluded: 0, parts: [], blockers: [] }; });
+    const blockers = !exportDate ? [] : !rate ? [`没有适用于 HS ${customs.hsCode}（出口日期 ${exportDate}）的退税率，请先登记退税率版本`] : rebateRateBasisPoints(rate.rate) <= 0 ? [`HS ${customs.hsCode} 适用退税率为 0，不能申报退税`] : [];
+    return { mode: 'header', rate, rates: rate ? [rate] : [], bills: rows, blockers, taxable: rows.reduce((n, r) => n + r.taxable, 0), rebate: rows.reduce((n, r) => n + r.rebate, 0) };
+  }
+  const purchases = root.fulfillment?.purchases || [], rates = new Map<string, RebateRate>(), blockers = new Set<string>();
+  const rows = bills.map(bill => {
+    const shares = splitByWeight(rebateBillTaxableMinor(bill), bill.lines.map(l => Math.max(0, mistMoneyMinor(l.amount))));
+    const parts: RebateLinePart[] = [], own: string[] = []; let excluded = 0;
+    bill.lines.forEach((line, i) => {
+      const purchase = purchases.find(p => p.id === line.purchaseId);
+      const item = purchase ? items.find(it => it.lineKeys.some(k => k.split(':')[0] === purchase.lineId)) : undefined;
+      if (!item) { excluded += shares[i]; return; }
+      const rate = exportDate ? rebateRateFor(root, item.hsCode, exportDate) : undefined;
+      if (!rate) { if (exportDate) own.push(`商品项 ${item.no}（HS ${item.hsCode}）没有适用于出口日期 ${exportDate} 的退税率，请先登记退税率版本`); return; }
+      rates.set(rate.id, rate);
+      parts.push({ purchaseId: line.purchaseId, purchaseCode: line.purchaseCode, itemNo: item.no, hsCode: item.hsCode, rateId: rate.id, rate: rate.rate, taxable: shares[i] / 100, rebate: rebateFor(shares[i], rate.rate) / 100 });
+    });
+    if (!parts.length && !own.length) own.push(`${bill.invoiceNo} 的货物不在本报关单的商品项中`);
+    own.forEach(b => blockers.add(b));
+    return { bill, taxable: parts.reduce((n, p) => n + mistMoneyMinor(p.taxable), 0), rebate: parts.reduce((n, p) => n + mistMoneyMinor(p.rebate), 0), excluded, parts, blockers: own };
+  });
+  const rebate = rows.reduce((n, r) => n + r.rebate, 0);
+  if (exportDate && rows.length && !blockers.size && rebate <= 0) blockers.add('按商品项适用的退税率均为 0，不能申报退税');
+  return { mode: 'items', rates: [...rates.values()], bills: rows, blockers: [...blockers], taxable: rows.reduce((n, r) => n + r.taxable, 0), rebate };
+}
 const liveReceipts = (claim: RebateClaim) => claim.receipts.filter(r => !r.reversed);
 /** 申报金额汇总：核准前以应退税额为基准。 */
 export function rebateClaimTotals(claim: RebateClaim) {
@@ -112,6 +164,7 @@ export function orderRebate(root: Root, orderId: string) {
     let share = 0;
     for (const line of claim.lines) {
       const bill = bills.find(b => b.id === line.billId), billTotal = bill ? mistMoneyMinor(bill.amount) : 0; if (!bill || !billTotal) continue;
+      if (line.parts) { share += line.parts.filter(x => purchases.find(p => p.id === x.purchaseId)?.orderId === orderId).reduce((n, x) => n + mistMoneyMinor(x.rebate), 0); continue; }
       const mine = bill.lines.filter(l => purchases.find(p => p.id === l.purchaseId)?.orderId === orderId).reduce((n, l) => n + mistMoneyMinor(l.amount), 0);
       share += mistMoneyMinor(line.rebate) * mine / billTotal;
     }
@@ -157,7 +210,7 @@ export function applyExportRebateCommand(root: Root, command: ExportRebateComman
     case 'rebate.rate.void': {
       const key = text(p.id, '退税率版本'), rate = s.rates.find(r => r.id === key) || fail('退税率版本不存在', 'NOT_FOUND');
       if (rate.voided) fail('该版本已作废', 'PRECONDITION');
-      const used = liveRebateClaims(root).find(cl => cl.rateId === rate.id); if (used) fail(`${used.code} 已按该版本申报，不能作废；如申报有误请先撤回申报`, 'PRECONDITION');
+      const used = liveRebateClaims(root).find(cl => cl.rateId === rate.id || (cl.rateIds || []).includes(rate.id)); if (used) fail(`${used.code} 已按该版本申报，不能作废；如申报有误请先撤回申报`, 'PRECONDITION');
       rate.voided = { at: c.now, actor: c.actorName, reason: text(p.reason, '作废原因', true, 500) };
       event(root, c, rate.id, `作废退税率 HS ${rate.hsCode} · ${rate.rate}%：${rate.voided.reason}`);
       return { id: rate.id };
@@ -168,27 +221,31 @@ export function applyExportRebateCommand(root: Root, command: ExportRebateComman
       const shipment = root.fulfillment.shipments.find(x => x.id === customs.shipmentId);
       const exportDate = rebateExportDate(root, customs); if (!exportDate) fail('出运尚未登记实际离港，取得出口日期后才能申报退税', 'PRECONDITION');
       const existing = rebateClaimForCustoms(root, customs.id); if (existing) fail(`报关单已在 ${existing.code} 中申报`, 'CONFLICT');
-      const rate = rebateRateFor(root, customs.hsCode, exportDate) || fail(`没有适用于 HS ${customs.hsCode}（出口日期 ${exportDate}）的退税率，请先登记退税率版本`, 'PRECONDITION');
-      if (rebateRateBasisPoints(rate.rate) <= 0) fail(`HS ${customs.hsCode} 适用退税率为 0，不能申报退税`, 'PRECONDITION');
+      const byItems = !!customs.items?.length;
+      if (!byItems) { const head = rebatePlan(root, customs, exportDate, []); if (head.blockers.length) fail(head.blockers[0], 'PRECONDITION'); }
       const filedAt = day(p.filedAt, '申报日'); if (filedAt > today) fail('申报日不能在未来'); if (filedAt < exportDate) fail('申报日不能早于出口日期');
       if (!Array.isArray(p.billIds) || !p.billIds.length || p.billIds.length > 50) fail('请至少勾选一张增值税专用发票');
       const candidates = rebateCandidateBills(root, customs), seen = new Set<string>();
-      const lines: RebateClaimLine[] = (p.billIds as unknown[]).map(raw => {
+      const selected: SupplierBill[] = (p.billIds as unknown[]).map(raw => {
         const id = text(raw, '增值税发票'); if (seen.has(id)) fail('同一张发票重复勾选'); seen.add(id);
         const bill = candidates.find(b => b.id === id);
         if (!bill) {
           const any = (root.payables?.bills || []).find(b => b.id === id);
           fail(!any ? '发票不存在' : any.state !== 'open' ? `${any.invoiceNo} 已作废` : any.currency !== 'CNY' ? `${any.invoiceNo} 不是人民币发票` : mistMoneyMinor(any.taxAmount) <= 0 ? `${any.invoiceNo} 税额为零，不是可退税的增值税专用发票` : liveRebateClaims(root).some(cl => cl.lines.some(l => l.billId === id)) ? `${any.invoiceNo} 已被其他退税申报占用` : `${any.invoiceNo} 不属于本票出运的订单采购`, 'PRECONDITION');
         }
-        const taxable = rebateBillTaxableMinor(bill);
-        return { billId: bill.id, billCode: bill.code, invoiceNo: bill.invoiceNo, supplier: bill.supplier, invoiceDate: bill.invoiceDate, taxable: major(taxable), rebate: major(rebateFor(taxable, rate.rate)) };
+        return bill;
       });
+      const plan = rebatePlan(root, customs, exportDate, selected);
+      if (plan.blockers.length) fail(plan.blockers[0], 'PRECONDITION');
+      const rate = plan.rates[0]!;
+      const lines: RebateClaimLine[] = plan.bills.map(r => ({ billId: r.bill.id, billCode: r.bill.code, invoiceNo: r.bill.invoiceNo, supplier: r.bill.supplier, invoiceDate: r.bill.invoiceDate, taxable: major(r.taxable), rebate: major(r.rebate),
+        ...(byItems ? { parts: r.parts, ...(r.excluded ? { excluded: major(r.excluded) } : {}) } : {}) }));
       const taxable = lines.reduce((n, l) => n + mistMoneyMinor(l.taxable), 0), expected = lines.reduce((n, l) => n + mistMoneyMinor(l.rebate), 0);
       const batchRef = text(p.batchRef, '申报批次号 / 受理回执号', true, 120);
       const id = c.id(), code = nextCode('RB', s.claims, c.now);
       s.claims.push({ id, code, customsId: customs.id, customsCode: customs.code, declarationNo: customs.declarationNo, shipmentId: customs.shipmentId, shipmentCode: shipment?.code || '', orderIds: shipmentOrderIds(root, customs.shipmentId),
-        hsCode: customs.hsCode, exportDate, rateId: rate.id, rate: rate.rate, lines, taxable: major(taxable), expected: major(expected), filedAt, batchRef, fileIds: files(root, p.fileIds), note: text(p.note, '备注', false, 1000), state: 'filed', receipts: [], createdAt: c.now, actor: c.actorName });
-      event(root, c, id, `登记退税申报 ${code}：报关单 ${customs.declarationNo} · ${lines.length} 张专票 · 应退 ${major(expected).toFixed(2)} CNY（${rate.rate}%）`);
+        hsCode: byItems ? [...new Set(plan.bills.flatMap(r => r.parts.map(x => x.hsCode)))].join('、') : customs.hsCode, exportDate, rateId: rate.id, rate: byItems ? [...new Set(plan.rates.map(r => r.rate))].sort((a, b) => Number(a) - Number(b)).join('/') : rate.rate, ...(byItems ? { byItems: true, rateIds: plan.rates.map(r => r.id) } : {}), lines, taxable: major(taxable), expected: major(expected), filedAt, batchRef, fileIds: files(root, p.fileIds), note: text(p.note, '备注', false, 1000), state: 'filed', receipts: [], createdAt: c.now, actor: c.actorName });
+      event(root, c, id, `登记退税申报 ${code}：报关单 ${customs.declarationNo} · ${lines.length} 张专票 · 应退 ${major(expected).toFixed(2)} CNY（${byItems ? `按 ${plan.rates.length} 个退税率逐项计算` : rate.rate + '%'}）`);
       return { id };
     }
     case 'rebate.claim.approve': {
