@@ -12,6 +12,24 @@
   "theme_color": "#7FA3B3",
   "icons": [
     {
+      "src": "brand/bambook-v3-app-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "brand/bambook-v3-app-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "brand/bambook-v3-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
       "src": "brand/bambook-v3-app.svg",
       "sizes": "any",
       "type": "image/svg+xml",

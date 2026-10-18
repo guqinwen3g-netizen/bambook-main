@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { mistVersionPlugin } from '../../../scripts/mist-version';
+import { mobileIconsPlugin } from '../../../scripts/mobile-icons';
 
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appRoot, '../../..');
@@ -14,7 +15,7 @@ const repoRoot = path.resolve(appRoot, '../../..');
 export default defineConfig({
   root: appRoot,
   publicDir: path.join(repoRoot, 'public'),
-  plugins: [react(), mistVersionPlugin(repoRoot)],
+  plugins: [react(), mistVersionPlugin(repoRoot), mobileIconsPlugin(repoRoot)],
   resolve: { alias: { '@': repoRoot } },
   cacheDir: '/tmp/bambook-mist-vite-cache',
   server: {
