@@ -11,7 +11,7 @@ vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: { 
 vi.mock('../../../../../services/apiService', () => ({ apiService: { getAuthHeaders: () => ({ Authorization: 'Bearer t' }), getCompanyExporterProfile: vi.fn(async () => ({ value: { nameEn: 'X' }, version: 1 })), updateCompanyExporterProfile: vi.fn() } }));
 
 const departments = [{ id: 'root', name: '公司', parentId: null }, { id: 'd1', name: '面料业务部', parentId: 'root', businessAttributes: ['fabric_business'] }];
-const roles = [{ id: 'role-super-admin', name: '老板', description: null, isSystem: true, permissions: ['*'] }, { id: 'role-sales', name: '业务员', description: null, isSystem: true, permissions: ['order:read'] }];
+const roles: Array<{ id: string; name: string; description: string | null; isSystem: boolean; permissions: string[] }> = [{ id: 'role-super-admin', name: '老板', description: null, isSystem: true, permissions: ['*'] }, { id: 'role-sales', name: '业务员', description: null, isSystem: true, permissions: ['order:read'] }];
 let root: Root | undefined, host: HTMLDivElement; const go = vi.fn();
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -90,6 +90,52 @@ describe('管理后台 · 账号', () => {
     expect(bridge.calls.some(c => c.method === 'PATCH')).toBe(false);
     await click('确认调整');
     expect(bridge.calls.find(c => c.method === 'PATCH')?.body).toEqual({ addPermissions: ['reports:read'], removePermissions: ['order:read'] });
+  });
+  it('lets the owner create a role for an actual post from a template role, then rename and delete it', async () => {
+    bridge.routes['GET /api/admin/permissions'] = () => ({ ok: true, permissions: [{ id: 'p1', scope: 'order:read', description: null }, { id: 'p2', scope: 'reports:read', description: null }, { id: 'p0', scope: '*', description: null }] });
+    bridge.routes['POST /api/admin/roles'] = body => { roles.push({ id: 'role-custom-1', name: body.name, description: body.description, isSystem: false, permissions: body.permissions }); return { ok: true, role: roles.at(-1) }; };
+    bridge.routes['PATCH /api/admin/roles/role-custom-1'] = body => { Object.assign(roles.find(r => r.id === 'role-custom-1')!, body); return { ok: true }; };
+    bridge.routes['DELETE /api/admin/roles/role-custom-1'] = () => { roles.splice(roles.findIndex(r => r.id === 'role-custom-1'), 1); return { ok: true }; };
+    try {
+      await render(AdminPanelPage, 'admin-panel', 'roles');
+      await click('新建角色');
+      await click('创建角色（0 项权限）');
+      expect(document.body.textContent).toContain('请填写角色名称');
+      expect(bridge.calls.some(c => c.method === 'POST')).toBe(false);
+      await type(document.querySelector('input[aria-label="角色名称"]') as HTMLInputElement, '跟单员');
+      await type(document.querySelector('select[aria-label="参照角色"]') as HTMLSelectElement, 'role-sales');
+      expect([...document.querySelectorAll('select[aria-label="参照角色"] option')].map(o => o.textContent)).not.toContain('老板');
+      expect([...document.querySelectorAll('label.mist-check')].some(l => l.textContent?.includes('（*）'))).toBe(false);
+      const reports = [...document.querySelectorAll('label.mist-check')].find(l => l.textContent?.includes('reports:read'))!.querySelector('input')!;
+      await act(async () => reports.click());
+      await click('创建角色（2 项权限）');
+      expect(bridge.calls.find(c => c.method === 'POST')?.body).toEqual({ name: '跟单员', description: '', permissions: ['order:read', 'reports:read'] });
+      expect(document.body.textContent).toContain('自定义');
+
+      await click('编辑');
+      await type(document.querySelector('input[aria-label="角色名称"]') as HTMLInputElement, '资深跟单');
+      await click('保存');
+      expect(bridge.calls.find(c => c.method === 'PATCH')?.body).toEqual({ name: '资深跟单', description: '' });
+      expect(document.body.textContent).toContain('资深跟单');
+
+      await click('删除');
+      expect(document.body.textContent).toContain('删除角色「资深跟单」？');
+      await click('删除角色');
+      expect(bridge.calls.some(c => c.method === 'DELETE' && c.url === '/api/admin/roles/role-custom-1')).toBe(true);
+      expect(document.body.textContent).not.toContain('资深跟单');
+    } finally { const i = roles.findIndex(r => r.id === 'role-custom-1'); if (i >= 0) roles.splice(i, 1); }
+  });
+  it('blocks deleting a custom role that accounts still hold and offers no rename or delete for system roles', async () => {
+    roles.push({ id: 'role-custom-2', name: '单证员', description: null, isSystem: false, permissions: ['order:read'] });
+    bridge.routes['GET /api/admin/users'] = () => ({ ok: true, departments, users: [{ id: 'u9', displayName: '陈晓', email: 'c@x.test', status: 'active', roles: ['单证员'], roleIds: ['role-custom-2'], departmentId: null, department: null, lastLoginAt: null, createdAt: '2026-10-01T00:00:00Z' }] });
+    try {
+      await render(AdminPanelPage, 'admin-panel', 'roles');
+      expect([...document.querySelectorAll('button')].filter(b => b.textContent?.trim() === '删除')).toHaveLength(1);
+      await click('删除');
+      expect(document.body.textContent).toContain('还有 1 个账号使用此角色');
+      expect(document.body.textContent).toContain('陈晓（已启用）');
+      expect(button('删除角色')!.disabled).toBe(true);
+    } finally { roles.splice(roles.findIndex(r => r.id === 'role-custom-2'), 1); }
   });
   it('keeps role permissions read-only for administrators who are not the owner', async () => {
     bridge.roles = ['admin'];

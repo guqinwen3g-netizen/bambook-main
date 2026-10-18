@@ -81,7 +81,7 @@ export function writeMistRoute(route: Route) {
 function useSections(): NavSection[] {
   const session = useMistSession();
   return React.useMemo(() => {
-    const modules = getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin'), canAccessView: session.canAccessView });
+    const modules = getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), canAccessView: session.canAccessView });
     const real = groupPrimaryNavigationModules(modules).map(g => ({
       id: g.group, label: g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
       items: g.modules.map(m => ({ id: String(m.view), label: m.productLabel.replace('（开发中）', ''), icon: m.icon })),
