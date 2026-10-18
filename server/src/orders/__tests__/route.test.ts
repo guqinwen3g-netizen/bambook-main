@@ -8,11 +8,13 @@ import { createOrdersRouter, OrdersRouterOptions } from '../route';
 import { parseOrderPdf } from '../../import/parseOrderPdf';
 import { ParsedOrder } from '../../import/types';
 
-const DIR = '/Users/qinwengu/WorkBuddy/Claw/BusinessDocu/00-Entities/Peerless/面料/BULK PO';
+import { TEST_PROFILE, syntheticPoPdf } from '../../import/__tests__/helpers/syntheticPdf';
+
+// 合成 PO（虚构客户识别档案），公开仓库不携带真实客户单据。
 const FIXTURES = [
-  'PO#-4500159423-0001.pdf',
-  'PO#-4500158987-0001.pdf',
-];
+  ['4500900001', 4],
+  ['4500900005', 2],
+] as const;
 
 const prisma = new PrismaClient();
 
@@ -41,9 +43,9 @@ function makeApp(opts?: Partial<OrdersRouterOptions>) {
 
 async function loadParsed(): Promise<ParsedOrder[]> {
   const out: ParsedOrder[] = [];
-  for (const f of FIXTURES) {
-    const r = await parseOrderPdf(fs.readFileSync(`${DIR}/${f}`));
-    if (!r.order) throw new Error(`fixture ${f} did not parse`);
+  for (const [po, n] of FIXTURES) {
+    const r = await parseOrderPdf(syntheticPoPdf(po, n), [TEST_PROFILE]);
+    if (!r.order) throw new Error(`fixture ${po} did not parse`);
     out.push(r.order);
   }
   return out;
@@ -51,7 +53,7 @@ async function loadParsed(): Promise<ParsedOrder[]> {
 
 // Test fixtures only — do NOT broad-delete by source, since real migrated
 // rows (po_database.db → Postgres) also use source='pdf-import'.
-const FIXTURE_PO_NUMBERS = ['4500159423', '4500158987'];
+const FIXTURE_PO_NUMBERS = ['4500900001', '4500900005'];
 const TEST_PO_NUMBERS = [...FIXTURE_PO_NUMBERS, 'MANUAL-UI-ONLY'];
 
 async function wipe() {
@@ -104,7 +106,7 @@ describe('POST /api/v1/orders/import', () => {
     expect(res.body.created).toBe(2);
     expect(res.body.updated).toBe(0);
     expect(res.body.orders).toHaveLength(2);
-    const sample = res.body.orders.find((o: any) => o.poNumber === '4500159423');
+    const sample = res.body.orders.find((o: any) => o.poNumber === '4500900001');
     expect(sample).toBeTruthy();
     expect(sample.lines.length).toBe(4);
     expect(sample.customerCode).toBe('peerless');
@@ -163,7 +165,7 @@ describe('POST /api/v1/orders/import', () => {
     await request(makeApp()).post('/api/v1/orders/import').set(auth()).send({ orders });
 
     const res = await request(makeApp())
-      .put('/api/v1/orders/PO-4500159423')
+      .put('/api/v1/orders/PO-4500900001')
       .set(auth())
       .send({
         customer: 'Peerless Clothing',
@@ -225,7 +227,7 @@ describe('GET /api/v1/orders', () => {
     expect(Array.isArray(res.body.orders)).toBe(true);
     expect(res.body.orders.length).toBeGreaterThanOrEqual(2);
 
-    const sample = res.body.orders.find((o: any) => o.poNumber === '4500159423');
+    const sample = res.body.orders.find((o: any) => o.poNumber === '4500900001');
     expect(sample).toBeTruthy();
     expect(Array.isArray(sample.lines)).toBe(true);
     expect(sample.lines.length).toBe(4);
@@ -239,13 +241,13 @@ describe('GET /api/v1/orders', () => {
     await request(makeApp()).post('/api/v1/orders/import').set(auth()).send({ orders });
     // Soft-delete one PO directly in DB.
     await prisma.order.update({
-      where: { poNumber: '4500159423' },
+      where: { poNumber: '4500900001' },
       data: { deletedAt: BigInt(Date.now()) },
     });
 
     const res = await request(makeApp()).get('/api/v1/orders');
     expect(res.status).toBe(200);
     const ids = res.body.orders.map((o: any) => o.poNumber);
-    expect(ids).not.toContain('4500159423');
+    expect(ids).not.toContain('4500900001');
   });
 });

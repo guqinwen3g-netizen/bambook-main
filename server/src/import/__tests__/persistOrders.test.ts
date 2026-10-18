@@ -1,26 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import * as fs from 'fs';
 import { PrismaClient } from '@prisma/client';
 import { parseOrderPdf } from '../parseOrderPdf';
 import { persistOrders } from '../persistOrders';
 import { ParsedOrder } from '../types';
 
-const DIR = '/Users/qinwengu/WorkBuddy/Claw/BusinessDocu/00-Entities/Peerless/面料/BULK PO';
+import { TEST_PROFILE, syntheticPoPdf } from './helpers/syntheticPdf';
+
+// 合成 PO（虚构客户识别档案），公开仓库不携带真实客户单据。
 const FIXTURES = [
-  'PO#-4500159423-0001.pdf',
-  'PO#-4500159154-0001.pdf',
-  'PO#-4500159120-0001.pdf',
-  'PO#-4500159027-0001.pdf',
-  'PO#-4500158987-0001.pdf',
+  ['4500900001', 4],
+  ['4500900002', 3],
+  ['4500900003', 1],
+  ['4500900004', 3],
+  ['4500900005', 2],
 ] as const;
 
 const prisma = new PrismaClient();
 
 async function loadFixtures(): Promise<ParsedOrder[]> {
   const orders: ParsedOrder[] = [];
-  for (const f of FIXTURES) {
-    const r = await parseOrderPdf(fs.readFileSync(`${DIR}/${f}`));
-    if (!r.order) throw new Error(`fixture ${f} did not parse: ${r.error}`);
+  for (const [po, n] of FIXTURES) {
+    const r = await parseOrderPdf(syntheticPoPdf(po, n), [TEST_PROFILE]);
+    if (!r.order) throw new Error(`fixture ${po} did not parse: ${r.error}`);
     orders.push(r.order);
   }
   return orders;
@@ -28,13 +29,7 @@ async function loadFixtures(): Promise<ParsedOrder[]> {
 
 // Only wipe the 5 fixtures, not every pdf-import row — real migrated data
 // (po_database.db → Postgres) shares the same source string.
-const FIXTURE_PO_NUMBERS = [
-  '4500159423',
-  '4500159154',
-  '4500159120',
-  '4500159027',
-  '4500158987',
-];
+const FIXTURE_PO_NUMBERS = FIXTURES.map(([po]) => po);
 
 async function wipeImported() {
   await prisma.orderLine.deleteMany({
@@ -79,14 +74,14 @@ describe('persistOrders — Peerless 5 fixtures end-to-end', () => {
     expect(orderRows).toHaveLength(5);
 
     const byPo = new Map(orderRows.map((o) => [o.poNumber, o]));
-    expect(byPo.get('4500159423')?.lines.length).toBe(4);
-    expect(byPo.get('4500159154')?.lines.length).toBe(3);
-    expect(byPo.get('4500159120')?.lines.length).toBe(1);
-    expect(byPo.get('4500159027')?.lines.length).toBe(3);
-    expect(byPo.get('4500158987')?.lines.length).toBe(2);
+    expect(byPo.get('4500900001')?.lines.length).toBe(4);
+    expect(byPo.get('4500900002')?.lines.length).toBe(3);
+    expect(byPo.get('4500900003')?.lines.length).toBe(1);
+    expect(byPo.get('4500900004')?.lines.length).toBe(3);
+    expect(byPo.get('4500900005')?.lines.length).toBe(2);
 
     // Header fields propagated.
-    const sample = byPo.get('4500159423')!;
+    const sample = byPo.get('4500900001')!;
     expect(sample.customerCode).toBe('peerless');
     expect(sample.customer).toBe('Peerless');
     // 业务要求：订单主交期显示 Exmill（出厂日期），不是 delivery date。
@@ -95,7 +90,7 @@ describe('persistOrders — Peerless 5 fixtures end-to-end', () => {
     // totalActual is stored as Decimal(18,4) — convert to Number for comparison.
     expect(Number(sample.totalActual)).toBeGreaterThan(0);
     expect(sample.source).toBe('pdf-import');
-    expect(sample.id).toBe('PO-4500159423');
+    expect(sample.id).toBe('PO-4500900001');
   });
 
   it('re-importing the same PDFs is idempotent (no duplicates, lines refreshed)', async () => {
@@ -124,7 +119,7 @@ describe('persistOrders — Peerless 5 fixtures end-to-end', () => {
     await persistOrders(prisma, parsed);
 
     // Take the 4-line PO and pretend the next import has only 1 line.
-    const target = parsed.find((p) => p.poNumber === '4500159423')!;
+    const target = parsed.find((p) => p.poNumber === '4500900001')!;
     const trimmed: ParsedOrder = { ...target, lines: target.lines.slice(0, 1) };
 
     const r = await persistOrders(prisma, [trimmed]);
@@ -132,7 +127,7 @@ describe('persistOrders — Peerless 5 fixtures end-to-end', () => {
     expect(r[0].linesSaved).toBe(1);
 
     const after = await prisma.orderLine.count({
-      where: { orderId: 'PO-4500159423' },
+      where: { orderId: 'PO-4500900001' },
     });
     expect(after).toBe(1);
   });
