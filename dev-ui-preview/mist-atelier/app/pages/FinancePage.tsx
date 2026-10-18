@@ -14,6 +14,7 @@ import { useRouteDraft, useRouteScope } from './modules/useRouteDraft';
 import { FinanceAccounts, FinanceEntrances, FinancePayables, FinanceRecords, financeArea, type FinanceArea } from './FinanceWorkspace';
 import type { OrderFundingAssignment,OrderFundingCommand } from '../../../../server/src/shared/mistOrderFunding';
 import { orderDepositCoverage } from '../../../../server/src/shared/mistOrderFunding';
+import { mistPayerMatchesInvoice } from '../../../../server/src/shared/mistOpeningBalance';
 import { downloadMistCsv, mistDate } from './OrderListPage';
 import { FinanceDevBilling } from './FinanceDevBilling';
 
@@ -104,12 +105,12 @@ export function FinancePage() {
   React.useEffect(()=>setPayerBasis(''),[receipt?.id,pick,scope]);
   const candidates = receipt ? invoices.filter(invoice => isActiveMistInvoice(invoice) && invoice.currency === receipt.currency && invoice.open > 0).sort((a, b) => a.id === receipt.suggest ? -1 : b.id === receipt.suggest ? 1 : 0) : [];
   const invoice = candidates.find(item => item.id === pick), previewInvoice = invoices.find(item => item.id === invoiceId);
-  const needsPayerBasis=!!receipt&&!!invoice&&receipt.payer.trim().toLocaleLowerCase()!==invoice.customer.trim().toLocaleLowerCase();
+  const needsPayerBasis=!!receipt&&!!invoice&&!!state&&!mistPayerMatchesInvoice(state,invoice,receipt.payer);
   const maximumAllocation=receipt&&invoice?Math.min(receipt.remaining,invoice.open):0;
   React.useEffect(()=>setAllocationInput(maximumAllocation>0?String(maximumAllocation):''),[receipt?.id,invoice?.id,scope]);
   const allocationAmount=financeAllocationAmount(allocationInput,maximumAllocation);
   const pendingReceipts = receipts.filter(item => item.remaining > 0);
-  const suggestions = pendingReceipts.filter(item => item.state === 'suggested' && (item.confidence ?? 0) >= 80 && invoices.some(invoice => isActiveMistInvoice(invoice) && invoice.id === item.suggest && invoice.currency === item.currency && invoice.open > 0&&invoice.customer.trim().toLocaleLowerCase()===item.payer.trim().toLocaleLowerCase()));
+  const suggestions = pendingReceipts.filter(item => item.state === 'suggested' && (item.confidence ?? 0) >= 80 && invoices.some(invoice => isActiveMistInvoice(invoice) && invoice.id === item.suggest && invoice.currency === item.currency && invoice.open > 0&&!!state&&mistPayerMatchesInvoice(state,invoice,item.payer)));
   const execute = async (command: MistCommand|OrderFundingCommand, success: (result:Record<string,unknown>) => void) => {
     const permission=mistCommandPermission(command);if(permission&&!session.hasPermission(permission as any)){setFailure('没有办理此项财务动作的权限。');return;}
     if (busy||operation.current) return; const bound=scope;operation.current=true;setWorking(true);setFailure('');

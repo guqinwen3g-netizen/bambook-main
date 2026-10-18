@@ -27,6 +27,16 @@ export function mistInvoiceCustomerId(root: Pick<MistState, 'orders' | 'devs'>, 
   if (invoice.devId) return root.devs.find(d => d.id === invoice.devId)?.customerId || undefined;
   return root.orders.find(o => o.id === invoice.orderId)?.customerId;
 }
+/** 应收所属客户的当前档案名；已开出的票据保留开票时客户名（单据不随改名改写），台账与提醒按当前档案显示。 */
+export function mistInvoiceCustomerName(root: Pick<MistState, 'orders' | 'devs' | 'customers'>, invoice: Pick<MistInvoice, 'orderId' | 'customer'> & { devId?: string; customerId?: string }): string {
+  const id = mistInvoiceCustomerId(root, invoice);
+  return (id && root.customers.find(c => c.id === id)?.name) || invoice.customer;
+}
+/** 付款方是否与应收客户同名：开票时客户名或当前档案名任一相同即视为同名。 */
+export function mistPayerMatchesInvoice(root: Pick<MistState, 'orders' | 'devs' | 'customers'>, invoice: Pick<MistInvoice, 'orderId' | 'customer'> & { devId?: string; customerId?: string }, payer: string): boolean {
+  const norm = (v: string) => v.trim().toLocaleLowerCase();
+  return [invoice.customer, mistInvoiceCustomerName(root, invoice)].some(name => !!name && norm(name) === norm(payer));
+}
 export const isOpeningInvoice = (invoice: { opening?: unknown }) => !!invoice.opening;
 
 function amountOf(value: string, label: string): number {

@@ -1,5 +1,5 @@
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
-import {applyOpeningCommand,openingCommandPermission,type OpeningCommand} from './mistOpeningBalance';
+import {applyOpeningCommand,mistPayerMatchesInvoice,openingCommandPermission,type OpeningCommand} from './mistOpeningBalance';
 import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricRequirements,fabricRequirementError,validFabricSample,type DevelopmentDomain,type DevelopmentInitiator,type DevelopmentRequestType,type FabricDevelopmentRequirements} from './mistDevelopmentDomain';
 import { relationHoldReason } from './mistRelationHold';
 import {demoAccountRef,ownerChangeText,resolveMember,setMemberGroups,type MistMemberDirectoryEntry,type MistMemberGroupAssignment} from './mistAccounts';
@@ -1146,7 +1146,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         if(!isActiveMistInvoice(i))throw new MistCommandError('PRECONDITION','已作废发票不能核销');
         if(isPendingFinanceMistInvoice(i))throw new MistCommandError('PRECONDITION','应收待财务确认，确认前不能登记收款核销');
         if(i.currency!==r.currency)throw new MistCommandError('VALIDATION','到账和发票币种不同');
-        const samePayer=r.payer.trim().toLocaleLowerCase()===i.customer.trim().toLocaleLowerCase();
+        const samePayer=mistPayerMatchesInvoice(state,i,r.payer);
         if(command.type==='finance.acceptSuggestions'&&!samePayer)continue;
         const payerBasis=samePayer?(pair.payerBasis?text(pair.payerBasis,'付款方关系依据',true,2000):''):text(pair.payerBasis,'付款方关系依据',true,2000);
         const amount=pair.amount===undefined?major(Math.min(mistMoneyMinor(r.remaining),mistMoneyMinor(i.open))):positive(pair.amount,'核销金额');
