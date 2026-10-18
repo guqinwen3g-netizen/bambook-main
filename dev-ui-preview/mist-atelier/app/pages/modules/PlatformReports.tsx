@@ -139,7 +139,11 @@ export function PlatformReportsPage() {
   const aging = state ? buildReceivableAging(state, asOf).filter(r => !currency || r.currency === currency) : [];
   const progress = state ? buildOrderProgress(state, asOf) : [];
   const shownProgress = progress.filter(r => !progressFilter || r.status === progressFilter);
-  const totals = (rows: Array<{ currency: string }>, pick: (r: any) => number) => [...new Set(rows.map(r => r.currency))].map(c => `${c} ${money(rows.filter(r => r.currency === c).reduce((s, r) => s + minor(pick(r)), 0) / 100)}`).join(' · ') || '—';
+  // 多币种合计每个币种一行，避免大字号下金额从中间折断。
+  const totals = (rows: Array<{ currency: string }>, pick: (r: any) => number): React.ReactNode => {
+    const lines = [...new Set(rows.map(r => r.currency))].map(c => `${c} ${money(rows.filter(r => r.currency === c).reduce((s, r) => s + minor(pick(r)), 0) / 100)}`);
+    return lines.length > 1 ? <span className="mist-stat-lines">{lines.map(l => <span key={l}>{l}</span>)}</span> : lines[0] ?? '—';
+  };
   const currencyFilter = <Field label="币种"><Select aria-label="币种" value={currency} onChange={e => setCurrency(e.target.value)} options={[{ value: '', label: '全部币种（分别统计）' }, ...currencies.map(c => ({ value: c, label: c }))]} /></Field>;
 
   const salesColumns: Column<CustomerSalesRow>[] = [

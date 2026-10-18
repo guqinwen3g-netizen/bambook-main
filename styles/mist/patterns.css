@@ -107,6 +107,7 @@
 .mist-stat-delta { margin-left: auto; font-size: var(--mist-text-xs); }
 .mist-stat-delta[data-dir="up"] { color: var(--mist-ok-ink); } .mist-stat-delta[data-dir="down"] { color: var(--mist-accent-ink); } .mist-stat-delta[data-dir="bad"] { color: var(--mist-bad-ink); }
 .mist-stat-v { font-size: var(--mist-text-stat); font-weight: var(--mist-fw-light); letter-spacing: -.02em; line-height: 1; display: flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
+.mist-stat-lines { display: flex; flex-direction: column; gap: 6px; font-size: min(var(--mist-text-2xl), 1em); white-space: nowrap; }
 .mist-stat-v small { font-size: var(--mist-text-sm); font-weight: var(--mist-fw-regular); color: var(--mist-ink-3); letter-spacing: 0; }
 .mist-stat-foot { display: flex; align-items: center; justify-content: space-between; font-size: var(--mist-text-xs); color: var(--mist-ink-3); gap: 10px; }
 .mist-spark { height: 28px; width: 96px; flex: none; }

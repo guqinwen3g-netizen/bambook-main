@@ -283,9 +283,14 @@ export function AdminRoles() {
   </>;
 }
 
-const AUDIT_ACTIONS: Record<string, string> = { register: '提交注册', create_user: '新建账号', reactivate_user: '重新启用账号', update_user: '修改账号', update_profile: '修改个人资料', reset_password: '重置密码', disable_account: '停用账号', approve_register: '通过注册', reject_register: '拒绝注册', update_roles: '调整角色', update_role_permissions: '调整角色权限', create_role: '新建角色', update_role: '编辑角色', delete_role: '删除角色', reset_mfa: '重置两步验证', enable_mfa: '开启两步验证', disable_mfa: '关闭两步验证', login_mfa_recovery: '用恢复码登录', logout_all_sessions: '退出所有设备', erase_personal_data: '清除个人数据', create_department: '新建部门', edit_department: '修改部门', retire_department: '裁撤部门', create_team: '新建小组', update_team: '修改小组', delete_team: '解散小组', add_team_member: '加入小组', remove_team_member: '移出小组', upsert_employee: '保存员工档案', delete_employee: '删除员工档案' };
+const AUDIT_ACTIONS: Record<string, string> = { login: '登录', register: '提交注册', create_user: '新建账号', reactivate_user: '重新启用账号', update_user: '修改账号', update_profile: '修改个人资料', reset_password: '重置密码', disable_account: '停用账号', approve_register: '通过注册', reject_register: '拒绝注册', update_roles: '调整角色', update_role_permissions: '调整角色权限', create_role: '新建角色', update_role: '编辑角色', delete_role: '删除角色', reset_mfa: '重置两步验证', enable_mfa: '开启两步验证', disable_mfa: '关闭两步验证', login_mfa_recovery: '用恢复码登录', logout_all_sessions: '退出所有设备', erase_personal_data: '清除个人数据', create_department: '新建部门', edit_department: '修改部门', retire_department: '裁撤部门', create_team: '新建小组', update_team: '修改小组', delete_team: '解散小组', add_team_member: '加入小组', remove_team_member: '移出小组', upsert_employee: '保存员工档案', delete_employee: '删除员工档案' };
+const AUDIT_TARGETS: Record<string, string> = { UserAccount: '账号', Department: '部门', Team: '小组', TeamMember: '小组成员', EmployeeProfile: '员工档案', Role: '角色' };
 export function AdminAuditLog() {
   const session = useMistSession();
+  // 操作人与账号对象显示姓名；读不到账号表时退回原编号。
+  const [names, setNames] = React.useState<Record<string, string>>({});
+  React.useEffect(() => { let live = true; organizationApi.listAccounts().then(r => { if (live) setNames(Object.fromEntries((r.users ?? []).map(u => [u.id, u.displayName]))); }).catch(() => undefined); return () => { live = false; }; }, [session.sessionKey]);
+  const person = (id: string | null | undefined) => id ? (names[id] ? <span title={id}>{names[id]}</span> : <Mono>{id}</Mono>) : '—';
   const [rows, setRows] = React.useState<AuditLogRow[]>([]), [total, setTotal] = React.useState(0), [page, setPage] = React.useState(0), [targetType, setTargetType] = React.useState('');
   const [loading, setLoading] = React.useState(true), [error, setError] = React.useState('');
   const size = 50, serial = React.useRef(0);
@@ -299,14 +304,14 @@ export function AdminAuditLog() {
   return <>
     {error && <Banner tone="bad" title="审计日志读取失败" actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>重试</Button>}>{error}</Banner>}
     <Toolbar right={<span className="mist-note">共 {total} 条 · 第 {page + 1} / {Math.max(1, Math.ceil(total / size))} 页</span>}>
-      <Field label="对象"><Select aria-label="审计对象" value={targetType} onChange={e => { setPage(0); setTargetType(e.target.value); }} options={[{ value: '', label: '全部对象' }, { value: 'UserAccount', label: '账号' }, { value: 'Department', label: '部门' }, { value: 'Team', label: '小组' }, { value: 'TeamMember', label: '小组成员' }, { value: 'EmployeeProfile', label: '员工档案' }, { value: 'Role', label: '角色' }]} /></Field>
+      <Field label="对象"><Select aria-label="审计对象" value={targetType} onChange={e => { setPage(0); setTargetType(e.target.value); }} options={[{ value: '', label: '全部对象' }, ...Object.entries(AUDIT_TARGETS).map(([value, label]) => ({ value, label }))]} /></Field>
       <Button disabled={loading || page === 0} onClick={() => setPage(page - 1)}>上一页</Button><Button disabled={loading || (page + 1) * size >= total} onClick={() => setPage(page + 1)}>下一页</Button>
     </Toolbar>
     <Card><DataTable ariaLabel="审计日志" rows={rows} rowKey={r => r.id} loading={loading} columns={[
       { key: 'at', header: '时间', width: '170px', render: r => when(r.createdAt) },
-      { key: 'actor', header: '操作人', width: 'minmax(140px,1fr)', render: r => <Mono>{r.actorId}</Mono> },
+      { key: 'actor', header: '操作人', width: 'minmax(140px,1fr)', render: r => person(r.actorId) },
       { key: 'action', header: '动作', width: 'minmax(120px,1fr)', render: r => AUDIT_ACTIONS[r.action] ?? r.action },
-      { key: 'target', header: '对象', width: 'minmax(180px,2fr)', render: r => <>{r.targetType} <Mono>{r.targetId ?? ''}</Mono></> },
+      { key: 'target', header: '对象', width: 'minmax(180px,2fr)', render: r => <>{AUDIT_TARGETS[r.targetType] ?? r.targetType} {r.targetType === 'UserAccount' ? person(r.targetId) : <Mono>{r.targetId ?? ''}</Mono>}</> },
     ]} empty={<EmptyState title="没有审计记录" description="调整对象筛选后再看。" />} /></Card>
   </>;
 }

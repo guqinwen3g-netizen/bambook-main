@@ -64,6 +64,18 @@ describe('管理后台 · 账号', () => {
     expect(bridge.calls.find(c => c.url === '/api/admin/users/u1/approve')?.body).toEqual({ roles: ['role-sales'], departmentId: 'd1' });
     expect(bridge.changeMember).toHaveBeenCalledWith('add', 'u1');
   });
+  it('shows audit operators and account targets by name with Chinese action and object labels', async () => {
+    bridge.routes['GET /api/admin/audit-logs?limit=50&offset=0'] = () => ({ ok: true, total: 2, logs: [{ id: 'a1', actorId: 'u1', action: 'login', targetType: 'UserAccount', targetId: 'u1', createdAt: '2026-10-18T02:00:00Z' }, { id: 'a2', actorId: 'ghost', action: 'create_role', targetType: 'Role', targetId: 'role-x', createdAt: '2026-10-18T03:00:00Z' }] });
+    await render(AdminPanelPage, 'admin-panel', 'audit');
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    const table = document.querySelector('[aria-label="审计日志"]')!.textContent!;
+    expect(table).toContain('张三');
+    expect(table).toContain('登录');
+    expect(table).toContain('账号');
+    expect(table).not.toContain('UserAccount');
+    expect(table).toContain('ghost');
+    expect(table).toContain('新建角色');
+  });
   it('locks the 老板 role for administrators who are not the owner and offers no workspace grant', async () => {
     bridge.roles = ['admin'];
     await render(AdminPanelPage, 'admin-panel');
