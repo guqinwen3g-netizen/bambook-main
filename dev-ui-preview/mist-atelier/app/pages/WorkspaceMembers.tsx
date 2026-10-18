@@ -6,6 +6,7 @@ import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, type MistBusinessGroup
 import { accountOwnedObjects, workspaceMembers } from '../runtime/members';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
+import { MemberHandover } from './MemberHandover';
 
 const when = (at: string) => new Date(at).toLocaleString();
 export function WorkspaceMembers({ busy: outerBusy }: { busy: boolean }) {
@@ -67,5 +68,6 @@ export function WorkspaceMembers({ busy: outerBusy }: { busy: boolean }) {
   <FormSection title="业务组" description="供应商的面料 / 成衣经手人只能从对应业务组的成员中选择。业务组由所有者设置，不改变岗位权限。">
     {!owner && <p className="mist-note">业务组只能由所有者设置。</p>}
     {directory.map(m => <SettingRow key={m.id} title={m.owner ? `${m.name}（所有者）` : m.name} description={ownedSummary(m.id)} control={groupControl(m.id)} />)}
-  </FormSection></>;
+  </FormSection>
+  {owner && <MemberHandover state={state} directory={directory} busy={outerBusy || busy} />}</>;
 }

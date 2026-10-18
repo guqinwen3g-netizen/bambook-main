@@ -44,3 +44,49 @@ describe('客户在手业务交接',()=>{
     expect(()=>f.run({customerId:'customer-0',toUserId:'demo-new',reason:'再交接',orderIds:[o.id]})).toThrow('审批中，审批完成后再交接');
   });
 });
+
+describe('成员按账号整体交接',()=>{
+  function accountFixture(groups:string[]=['garment','fabric']){
+    let id=0;const ctx={id:()=>`ah-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'owner',actorName:'所有者',members:[{id:'demo-sales',name:'顾言',active:true,groups:['garment']},{id:'demo-new',name:'林舟',active:true,groups},{id:'gone',name:'已离职',active:false,groups:[]}]} as unknown as MistContext;
+    let state=createMistState(ctx,'demo');
+    const run=(payload:Record<string,unknown>)=>{const r=applyMistCommand(state,{type:'handover.account',payload} as MistCommand,ctx);state=r.state;return r.result as {id:string};};
+    return {run,get state(){return state as MistState;}};
+  }
+  it('只由所有者办理；须指定在用成员并写原因',()=>{
+    expect(mistCommandPermission({type:'handover.account',payload:{}} as MistCommand)).toBeNull();
+    const f=accountFixture();
+    expect(()=>f.run({fromUserId:'demo-buyer',toUserId:'gone',reason:'离职'})).toThrow('账号已停用');
+    expect(()=>f.run({fromUserId:'demo-new',toUserId:'demo-new',reason:'离职'})).toThrow('不能与原负责人相同');
+    expect(()=>f.run({fromUserId:'demo-buyer',toUserId:'demo-new',reason:''})).toThrow('交接原因');
+    expect(()=>f.run({fromUserId:'nobody-owns',toUserId:'demo-new',reason:'离职'})).toThrow('无需交接');
+  });
+  it('把原账号名下客户、订单、开发、寻样、商机、供应商经手与未完成待办一次交给新负责人，并留记录与接手待办',async()=>{
+    const {accountOwnedObjects}=await import('./mistAccounts');
+    const {accountHandovers,accountOwners}=await import('./mistHandover');
+    const f=accountFixture();
+    for(const o of f.state.orders)if(o.ownerId==='demo-buyer'&&o.governance)o.governance.status='approved' as any;
+    const before=accountOwnedObjects(f.state,'demo-buyer'),tasks=f.state.tasks.filter(t=>!t.done&&t.assigneeIds.includes('demo-buyer')).map(t=>t.id);
+    expect(before.length).toBeGreaterThan(0);
+    expect(accountOwners(f.state).find(a=>a.id==='demo-buyer')).toMatchObject({name:'沈禾',count:before.length});
+    f.run({fromUserId:'demo-buyer',toUserId:'demo-new',reason:'沈禾离职，全部业务由林舟接手'});
+    const s=f.state;
+    expect(accountOwnedObjects(s,'demo-buyer')).toEqual([]);
+    expect(accountOwnedObjects(s,'demo-new').length).toBeGreaterThanOrEqual(before.length);
+    for(const id of tasks)expect(s.tasks.find(t=>t.id===id)!.assigneeIds).toContain('demo-new');
+    expect(s.tasks.some(t=>!t.done&&t.assigneeIds.includes('demo-buyer'))).toBe(false);
+    const record=accountHandovers(s)[0];
+    expect(record).toMatchObject({fromId:'demo-buyer',from:'沈禾',toId:'demo-new',to:'林舟',tasks:tasks.length});
+    expect(record.objects).toHaveLength(before.length);
+    expect(s.tasks[0]).toMatchObject({kind:'account-handover',assigneeIds:['demo-new'],due:'2026-10-21'});
+    expect(s.events.some(e=>e.entityType==='workspace'&&e.text.startsWith('成员交接：沈禾→林舟'))).toBe(true);
+  });
+  it('审批中的订单与新负责人不在对应业务组的供应商经手会阻止交接，且不改动任何数据',()=>{
+    const f=accountFixture([]);
+    const s0=structuredClone(f.state);
+    const supplier=f.state.market.suppliers.find(x=>Object.values(x.handlers||{}).some(h=>h?.id==='demo-buyer'));
+    const pending=f.state.orders.find(o=>o.ownerId==='demo-buyer'&&o.governance?.status==='pending');
+    expect(supplier||pending).toBeTruthy();
+    expect(()=>f.run({fromUserId:'demo-buyer',toUserId:'demo-new',reason:'离职'})).toThrow(supplier?'业务组':'审批中');
+    expect(f.state).toEqual(s0);
+  });
+});
