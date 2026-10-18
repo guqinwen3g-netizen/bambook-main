@@ -665,7 +665,8 @@ export function createMistState(context: MistContext, seed: 'demo'|'empty' = 'de
   }
   state.productions=Seed.PRODS.map(source=>{const order=state.orders.find(o=>o.code===source.order)!, line=state.orderLines.find(l=>l.orderId===order.id&&l.name===source.name)||state.orderLines.find(l=>l.orderId===order.id)!;return {...source,code:source.id,orderId:order.id,lineId:line.id,col:source.col as MistProduction['col'],img:source.img as MistImage,due:iso(source.due,context)};});
   state.receipts=Seed.RECEIPTS.map(row=>({...row,code:row.id,state:row.state as MistReceipt['state'],date:iso(row.date,context),remaining:row.amount}));
-  state.invoices=Seed.INVOICES.map(row=>({...row,code:row.id,orderId:state.orders.find(o=>o.code===row.order)!.id,due:iso(row.due,context)}));
+  // 演示应收按出运后 30 天账期：开票日 = 到期日 − 30 天（不晚于今天）。
+  state.invoices=Seed.INVOICES.map(row=>{const due=iso(row.due,context),issued=new Date(Date.parse(due+'T00:00:00Z')-30*86400000).toISOString().slice(0,10),today=context.now.slice(0,10);return {...row,code:row.id,orderId:state.orders.find(o=>o.code===row.order)!.id,due,issuedAt:issued<today?issued:today};});
   for(const receipt of state.receipts) if(receipt.state==='matched'&&receipt.suggest){
     const invoice=state.invoices.find(row=>row.code===receipt.suggest);
     if(invoice) state.allocations.push({id:context.id(),receiptId:receipt.id,invoiceId:invoice.id,amount:receipt.amount,currency:receipt.currency,createdAt:context.now,actor:'财务'});

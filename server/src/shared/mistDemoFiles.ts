@@ -5,7 +5,7 @@
 import type { MistFile, MistState } from './mistWorkspace';
 
 export const DEMO_FILE_PREFIX = 'demo-seed/';
-export type DemoFileTemplate = 'customer-po' | 'commercial-invoice' | 'packing-list' | 'customs-release' | 'supplier-contract' | 'vat-invoice';
+export type DemoFileTemplate = 'customer-po' | 'commercial-invoice' | 'packing-list' | 'customs-release' | 'supplier-contract' | 'vat-invoice' | 'letter-of-credit';
 
 export function demoFileRecord(id: string, template: DemoFileTemplate, ref: string, name: string, createdAt: string): MistFile {
   return { id, name, mimeType: 'application/pdf', size: 0, storageKey: `${DEMO_FILE_PREFIX}${template}/${encodeURIComponent(ref)}`, createdAt };
@@ -23,7 +23,7 @@ export function renderDemoFile(state: MistState, file: MistFile): Uint8Array {
   const purchase = state.fulfillment?.purchases.find(p => p.id === ref);
   const shipment = state.fulfillment?.shipments.find(s => s.id === ref);
   const body: string[] = [];
-  const title = { 'customer-po': 'PURCHASE ORDER', 'commercial-invoice': 'COMMERCIAL INVOICE', 'packing-list': 'PACKING LIST', 'customs-release': 'CUSTOMS RELEASE NOTICE', 'supplier-contract': 'SUPPLY CONTRACT', 'vat-invoice': 'VAT SPECIAL INVOICE (FAPIAO)' }[template] || 'DOCUMENT';
+  const title = { 'customer-po': 'PURCHASE ORDER', 'commercial-invoice': 'COMMERCIAL INVOICE', 'packing-list': 'PACKING LIST', 'customs-release': 'CUSTOMS RELEASE NOTICE', 'supplier-contract': 'SUPPLY CONTRACT', 'vat-invoice': 'VAT SPECIAL INVOICE (FAPIAO)', 'letter-of-credit': 'DOCUMENTARY CREDIT (MT700 ADVICE)' }[template] || 'DOCUMENT';
   if (template === 'customer-po' && order) {
     body.push(`Buyer: ${ascii(customer?.name || order.customer)}`, `Seller: Bambook Apparel Co., Ltd.`, `Order: ${order.code}    Season: ${ascii(order.season)}    Currency: ${order.currency}`, `Delivery: ${order.due}    Terms: ${ascii(customer?.incoterm || 'FOB Shanghai')}    Payment: ${ascii(customer?.terms || 'T/T')}`, '');
     body.push('Style                         Qty        Unit price');
@@ -42,6 +42,12 @@ export function renderDemoFile(state: MistState, file: MistFile): Uint8Array {
     const bill = state.payables?.bills.find(b => b.lines.some(l => l.purchaseId === purchase.id));
     body.push(`Seller: ${ascii(purchase.supplier)}`, `Buyer: Bambook Apparel Co., Ltd.`, `Invoice No.: ${ascii(bill?.invoiceNo || '')}    Date: ${bill?.invoiceDate || ''}`, `Contract: ${purchase.code}    Order: ${state.orders.find(o => o.id === purchase.orderId)?.code || ''}`, `Goods: ${purchase.quantity} ${unit(purchase.unit)}`,
       `Amount incl. VAT: ${purchase.currency} ${(bill?.amount ?? 0).toFixed(2)}    VAT ${ascii(bill?.taxRate || '')}: ${purchase.currency} ${(bill?.taxAmount ?? 0).toFixed(2)}`, '', 'Purpose: export VAT refund (confirmed in e-tax system).');
+  } else if (template === 'letter-of-credit' && state.letterOfCredits?.some(l => l.lcNo === ref)) {
+    const lc = state.letterOfCredits!.find(l => l.lcNo === ref)!;
+    body.push(`:20: Documentary credit number: ${ascii(lc.lcNo)}`, `:31C: Date of issue: ${lc.issueDate}`, `:31D: Date and place of expiry: ${lc.expiryDate} CHINA`, `:52A: Issuing bank: ${ascii(lc.issuingBank)}`, `:50: Applicant: ${ascii(lc.customer)}`, `:59: Beneficiary: Bambook Apparel Co., Ltd.`,
+      `:32B: Amount: ${lc.currency} ${lc.amount.toFixed(2)}    :39A: Tolerance: ${lc.tolerancePct}/${lc.tolerancePct}`, `:41D: Available with any bank by negotiation    :42C: Drafts at ${lc.availableBy === 'sight' ? 'SIGHT' : `${lc.usanceDays} DAYS AFTER B/L DATE`}`,
+      `:43P: Partial shipments: ${lc.partialShipment ? 'ALLOWED' : 'NOT ALLOWED'}    :43T: Transhipment: ${lc.transhipment ? 'ALLOWED' : 'NOT ALLOWED'}`, `:44C: Latest date of shipment: ${lc.latestShipmentDate}`,
+      `:45A: Goods: garments as per order ${state.orders.filter(o => lc.orderIds.includes(o.id)).map(o => o.code).join(', ')}`, ':46A: Documents required: commercial invoice, full set clean on board B/L, packing list, certificate of origin', `:48: Period for presentation: ${lc.presentationDays} days after shipment date, within validity`, ':49: Confirmation instructions: WITHOUT', '', `Advised by: ${ascii(lc.advisingBank)}`, 'Subject to UCP 600.');
   } else body.push('The referenced record is no longer in this workspace.');
   body.push('', '', 'Sample document generated for the Bambook demo workspace. Not a real commercial document.');
   return pdf(title, body);

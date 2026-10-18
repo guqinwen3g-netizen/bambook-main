@@ -11,7 +11,7 @@ import { demoFileRecord, type DemoFileTemplate } from './mistDemoFiles';
 import { riskSignals } from './mistRisk';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 
-export const DEMO_SEED_VERSION = 17;
+export const DEMO_SEED_VERSION = 18;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -47,7 +47,9 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   /* ───────── 订单主单审批：演示订单按真实流程提交并批准，之后才能进入采购与履约 ───────── */
   const approveOrder = (orderId: string, po: string, depositPercent: number) => {
     const o = state.orders.find(x => x.id === orderId); if (!o || o.governance?.status === 'approved') return;
-    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认（演示）.pdf`)], internalPurpose: '', receiver: '', paymentMethod: 'TT', depositPercent, paymentNote: `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
+    // SO-G-2026-009 演示信用证付款（即期 L/C，不收定金），其余按 T/T 定金 + 见提单副本付余款。
+    const lc = o.code === 'SO-G-2026-009';
+    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认（演示）.pdf`)], internalPurpose: '', receiver: '', paymentMethod: lc ? 'LC' : 'TT', depositPercent: lc ? 0 : depositPercent, paymentNote: lc ? '100% 即期信用证（L/C at sight），提单日后 21 天内交单' : `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
     run('order submit ' + o.code, { type: 'order.governance.submit', payload: { orderId } }, sales);
     run('order approve ' + o.code, { type: 'order.governance.decide', payload: { id: orderId, decision: 'approved', note: '价格、交期与付款条件已核对' } }, reviewer);
   };
@@ -353,6 +355,14 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       if (esc) run('risk 018 decide', { type: 'platform.risk.decide', payload: { id: late, escalationId: esc.id, decision: 'approved', note: '同意加班，费用记入本单成本，交期不再顺延。' } } as MistCommand, reviewer);
       run('risk 018 close', { type: 'platform.risk.transition', payload: { id: late, state: 'Resolved', resolution: '客户书面同意首批 60% 按期、余量顺延 2 天；工厂排期已确认。' } } as MistCommand, sales);
     }
+  }
+
+  /* ───────── 信用证：SO-G-2026-009 即期信用证已到证，受益人接受一次展期修改 ───────── */
+  const order009 = state.orders.find(o => o.code === 'SO-G-2026-009');
+  if (order009?.governance?.contract.paymentMethod === 'LC') {
+    const lcId = id(run('lc 009', { type: 'lc.save', payload: { input: { lcNo: 'NDEASESS26L0913', orderIds: [order009.id], issuingBank: 'Nordea Bank Abp, Stockholm', advisingBank: '中国银行上海市分行', confirmed: false, availableBy: 'sight', currency: order009.currency, amount: order009.amount, tolerancePct: 5, issueDate: day(-24), latestShipmentDate: day(12), expiryDate: day(27), expiryPlace: '中国', presentationDays: 15, partialShipment: true, transhipment: false,
+      documentsRequired: '1. 签署的商业发票一式三份；\n2. 全套清洁已装船海运提单，凭指示，空白背书，注明运费到付；\n3. 装箱单一式三份；\n4. 中国贸促会出具的一般原产地证明书。', note: '受益人：本公司；通知行已核押', fileIds: [demoFile('letter-of-credit', 'NDEASESS26L0913', 'L/C NDEASESS26L0913 通知行通知书（演示）.pdf')] } } }, warehouse));
+    if (lcId) run('lc 009 amend', { type: 'lc.amend', payload: { id: lcId, date: day(-6), changes: { latestShipmentDate: day(20), expiryDate: day(35) }, note: '工厂排期顺延，客户同意展期，受益人已接受修改书' } }, warehouse);
   }
 
   return { state, failures };

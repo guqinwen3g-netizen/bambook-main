@@ -25,7 +25,7 @@ describe('信用证台账',()=>{
     expect(()=>f.run(save({availableBy:'usance'}))).toThrow('远期天数');
     expect(()=>f.run(save({amount:'0'}))).toThrow('大于零');
     const {id}=f.run(save());
-    expect(f.lc).toMatchObject({id,code:'LC-2026-0001',lcNo:'LC26NW0412',customerId:'customer-1',currency:'USD',amount:50000,tolerancePct:5,presentationDays:21,partialShipment:true,transhipment:false});
+    expect(f.lc).toMatchObject({id,code:'LC-2026-0002',lcNo:'LC26NW0412',customerId:'customer-1',currency:'USD',amount:50000,tolerancePct:5,presentationDays:21,partialShipment:true,transhipment:false});
     expect(lcAvailableMinor(f.lc)).toBe(5250000);
     expect(lcStatus(f.lc,'2026-10-18')).toBe('active');
     expect(lcAlerts(f.lc,'2026-10-18')).toEqual(['距最晚装运日 7 天']);
