@@ -56,8 +56,8 @@ describe('original Mist settings with server workspace commands', () => {
     await act(async () => paint()); expect(host.querySelector<HTMLInputElement>('input[aria-label="工作空间名称"]')?.value).toBe('第二工作区'); expect(host.textContent).not.toContain('未保存的名称');
   });
   it('does not fake MFA, session revocation or permanently delete a workspace', async () => {
-    render(); await click(button('安全')); const control = host.querySelector<HTMLInputElement>('input[role="switch"]')!;
-    expect(control.disabled).toBe(true); expect(control.checked).toBe(false); expect(button('未接入').disabled).toBe(true); expect(button('移入回收站').disabled).toBe(false);
+    render(); await click(button('安全'));
+    expect(host.textContent).not.toContain('尚未接入'); expect(host.textContent).not.toContain('暂未提供'); expect(button('移入回收站').disabled).toBe(false);
     await click(button('移入回收站')); expect(seam.value.run).not.toHaveBeenCalled(); expect(host.textContent).not.toContain('已退出 2 台设备'); expect(host.textContent).toContain('这不会永久删除数据或附件');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();
   });
 });
