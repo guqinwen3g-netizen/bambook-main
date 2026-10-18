@@ -95,7 +95,7 @@ export async function persistOrders(
     const skippedLineFields: Record<string, string[]> = {};
 
     await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw(PrismaSql.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`legacy-order:fabric:${parsed.customerId}:${parsed.poNumber}`}, 0))`);
+      await tx.$queryRaw(PrismaSql.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`legacy-order:fabric:${parsed.customerId}:${parsed.poNumber}`}, 0))::text`);
       // Re-read provenance only after the actual parent lock; a queued import
       // must honor manual edits committed while it waited for this lock.
       await tx.$queryRaw(PrismaSql.sql`SELECT "id" FROM "Order" WHERE "poNumber"=${parsed.poNumber} FOR UPDATE`);

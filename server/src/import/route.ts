@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { parseOrderPdf } from './parseOrderPdf';
+import { CustomerDetectionProfile } from './detectCustomer';
 
 export interface ImportRouterOptions {
   /** When false, all requests pass through (local-friendly). */
@@ -11,6 +12,11 @@ export interface ImportRouterOptions {
   maxFileBytes?: number;
   /** Max files per request. Default 20. */
   maxFiles?: number;
+  /**
+   * 从客户档案读取客户识别条件。未提供时识别不出任何客户（返回 detection-only 结果）。
+   * 每个请求读取一次，档案改了不用重启。
+   */
+  loadDetectionProfiles?: () => Promise<CustomerDetectionProfile[]>;
 }
 
 /**
@@ -61,10 +67,20 @@ export function createImportRouter(opts: ImportRouterOptions): Router {
       });
     }
 
+    let profiles: CustomerDetectionProfile[] = [];
+    try {
+      profiles = (await opts.loadDetectionProfiles?.()) ?? [];
+    } catch (e: any) {
+      return res.status(500).json({
+        error: 'DETECTION_PROFILES_UNAVAILABLE',
+        message: `读取客户识别条件失败：${String(e?.message ?? e)}`,
+      });
+    }
+
     const results = await Promise.all(
       files.map(async (f) => {
         try {
-          const r = await parseOrderPdf(f.buffer);
+          const r = await parseOrderPdf(f.buffer, profiles);
           return {
             filename: f.originalname,
             pages: r.pages,
