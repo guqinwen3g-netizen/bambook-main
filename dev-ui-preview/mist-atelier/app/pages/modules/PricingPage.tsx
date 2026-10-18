@@ -65,7 +65,7 @@ export function PricingPage(){
  const startCopy=(r:PlatformPricing)=>{copyRef.current={record:r,key:workspaceKey};copy(r);};
  React.useEffect(()=>{if(tabOf(route.section)==='calculator'&&!route.id&&copyRef.current){const copied=copyRef.current;copyRef.current=null;if(copied.key===workspaceKey&&canWrite&&orders.some(o=>o.id===copied.record.orderId))setInput(draftOf(copied.record));}},[route.section,route.id]);
  const cols:Column<PlatformPricing>[]=[{key:'order',header:'订单 / 客户',render:r=>{const o=orders.find(o=>o.id===r.orderId);return <ObjectCell name={<Mono>{o?.code||'来源订单未找到'}</Mono>} meta={o?.customer||'未找到来源客户'}/>;}},{key:'price',header:'建议单价 USD',align:'right',render:r=>money(r.finalUnitPrice)},{key:'standard',header:'标准参数',hideOnMobile:true,render:r=>r.params?`V${r.params.version}${r.deviationReason?' · 低于标准':''}`:'未设置'},{key:'basis',header:'参数依据',hideOnMobile:true,render:r=>r.basis},{key:'date',header:'记录日期',render:r=>r.createdAt.slice(0,10)}];
- return <MistPage><PageHeader eyebrow="财务与成本 · 定价" title="定价与利润" description="净美元成本 ×（1 + 成本加成率 + 佣金率）；试算、历史快照与实际成本事实分开。" actions={<Button icon={Download} onClick={exportRows}>导出记录</Button>}/>
+ return <MistPage><PageHeader eyebrow="财务与成本 · 定价" title="定价与利润" description="净美元成本 ×（1 + 成本加成率 + 佣金率）；订单级定价试算，所填汇率与退税率不作为报价汇率或应退依据（报价汇率在报价单上填写）。" actions={<Button icon={Download} onClick={exportRows}>导出记录</Button>}/>
   {w.error&&<Banner tone="bad" title="读取失败" actions={<Button onClick={()=>void w.refresh()}>重试</Button>}>{w.error}</Banner>}
   {w.pending&&!w.saving&&<Banner tone="warn" title="上次提交结果待核对" actions={<Button disabled={busy||w.loading} onClick={()=>void recover()}>核对原请求</Button>}>保留输入并核对原请求，不重新创建记录。</Banner>}
   {!canWrite&&<Banner title="定价只读">可查看授权范围内的参数快照和成本来源，不能保存定价记录或复用参数写入新记录。</Banner>}

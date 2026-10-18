@@ -55,6 +55,11 @@ describe('报表中心', () => {
     expect(period.fx?.label).toContain('2026-09 月末 7.1180');
     expect(Math.round((period.marginIn! - period.marginEx!) * 100) / 100).toBe(25000);
     expect(period.marginEx).toBe(Math.round((297888.3 - period.costCny!) * 100) / 100);
+    // 报价预计：订单未关联填了报价汇率的报价 → 缺汇率；关联后取报价版本上的汇率
+    expect(pick('quote')).toMatchObject({ status: 'norate', missing: ['USD'] });
+    const order = s.orders.find(o => o.code === 'SO-G-2026-017')!;
+    s.market.quotations.push({ id: 'q-fx', code: 'QT-FX-1', currency: 'USD', fxRate: '7.20' } as any);
+    s.orderLines.filter(l => l.orderId === order.id).forEach(l => Object.assign(l, { sourceQuotationId: 'q-fx' }));
     expect(pick('quote')).toMatchObject({ status: 'ok', estimated: true, revenueCny: 301320 });
     // 尚无结汇对应到账：实际口径整单按月末汇率暂估
     expect(pick('actual')).toMatchObject({ status: 'ok', estimated: true, revenueCny: 297888.3 });

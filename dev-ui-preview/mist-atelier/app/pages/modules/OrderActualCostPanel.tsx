@@ -50,7 +50,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run }: { sta
   return <div data-order-actual-cost>
     <Toolbar right={<span className="mist-row">{canWrite && <Button icon={Plus} variant="primary" disabled={busy} onClick={() => setRegister(true)}>登记费用</Button>}<Button onClick={exportCsv}>导出核算</Button></span>}>
       <Field label="折算口径"><Select aria-label="核算折算口径" value={basis} onChange={e => setBasis(e.target.value as FxBasis)} options={(['actual', 'period', 'quote'] as FxBasis[]).map(b => ({ value: b, label: `人民币 · ${FX_BASIS_LABEL[b]}` }))} /></Field>
-      {basis === 'period' && <Field label="暂估月份"><TextInput type="month" aria-label="核算暂估月份" value={month} onChange={e => setMonth(e.target.value)} /></Field>}
+      {basis !== 'quote' && <Field label="暂估月份"><TextInput type="month" aria-label="核算暂估月份" value={month} onChange={e => setMonth(e.target.value)} /></Field>}
     </Toolbar>
     <StatGrid>
       <StatCard icon={Wallet} label={`收入 CNY · ${ok.length} 单`} value={money(t.revenue)} />

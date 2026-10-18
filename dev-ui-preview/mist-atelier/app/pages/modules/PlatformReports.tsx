@@ -1,4 +1,4 @@
-/** 报表中心：客户销售额、订单毛利、应收账龄、订单进度与逾期。销售额与账龄按币种分别统计、不折算；订单毛利可按所选口径（实际结汇 / 月末暂估 / 定价预计）折算人民币，并列不含 / 含出口退税。 */
+/** 报表中心：客户销售额、订单毛利、应收账龄、订单进度与逾期。销售额与账龄按币种分别统计、不折算；订单毛利可按所选口径（实际结汇 / 月末暂估 / 报价预计）折算人民币，并列不含 / 含出口退税。 */
 import React from 'react';
 import { Clock, Download, Package, Receipt, TrendingUp } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Field, MistPage, PageHeader, Pill, Select, StatCard, StatGrid, Tabs, TextInput, Toolbar, type Column } from '../../../../../components/mist';
@@ -206,7 +206,7 @@ export function PlatformReportsPage() {
       <p className="mist-note">按订单业务日期（北京时间）统计；已开票、已收、未收只计这些订单下的有效发票，作废发票不计。</p>
     </> : tab === 'margin' ? <>
       <Toolbar><Field label="订单创建起日"><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label="订单创建止日"><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}
-        <Field label="折算口径"><Select aria-label="折算口径" value={view} onChange={e => setView(e.target.value as MarginView)} options={[{ value: 'actual', label: '人民币 · 实际结汇加权' }, { value: 'period', label: '人民币 · 月末暂估' }, { value: 'quote', label: '人民币 · 定价预计' }, { value: 'none', label: '原币（不折算）' }]} /></Field>
+        <Field label="折算口径"><Select aria-label="折算口径" value={view} onChange={e => setView(e.target.value as MarginView)} options={[{ value: 'actual', label: '人民币 · 实际结汇' }, { value: 'period', label: '人民币 · 月末暂估' }, { value: 'quote', label: '人民币 · 报价预计' }, { value: 'none', label: '原币（不折算）' }]} /></Field>
         {(view === 'period' || view === 'actual') && <Field label="暂估月份"><TextInput type="month" aria-label="暂估月份" value={fxMonth} onChange={e => setFxMonth(e.target.value)} /></Field>}</Toolbar>
       {invalid && <Banner tone="bad" title="起始日期不能晚于结束日期" />}
       {view === 'none' ? <>
@@ -220,10 +220,10 @@ export function PlatformReportsPage() {
           <StatCard icon={Receipt} label="出口退税（核准 / 应退）" value={money(cnyTotals.rebate)} />
           <StatCard icon={TrendingUp} label="毛利 · 含退税" value={`${money(cnyTotals.inc)}（${percent(cnyTotals.revenue ? cnyTotals.inc / cnyTotals.revenue : null)}）`} />
         </StatGrid>
-        {cnyTotals.estimated > 0 && <Banner tone="warn" title={`${cnyTotals.estimated} 单${view === 'actual' ? '含暂估部分' : '按暂估 / 预计汇率折算'}`}>{view === 'actual' ? '已收未结汇（外币留存）与未收部分按所选月份的月末汇率暂估；结汇并分配到对应到账后转为实际汇率。' : view === 'period' ? '月末暂估汇率仅用于管理报表，结汇后以实际结汇口径为准。' : '定价预计汇率来自订单定价试算快照，仅反映报价时的预期。'}</Banner>}
+        {cnyTotals.estimated > 0 && <Banner tone="warn" title={`${cnyTotals.estimated} 单${view === 'actual' ? '含暂估部分' : '按暂估 / 预计汇率折算'}`}>{view === 'actual' ? '已收未结汇（外币留存）与未收部分按所选月份的月末汇率暂估；结汇并分配到对应到账后转为实际汇率。' : view === 'period' ? '月末暂估汇率仅用于管理报表，结汇后以实际结汇口径为准。' : '报价预计汇率取订单来源报价版本上的报价汇率，仅反映报价时的预期。'}</Banner>}
         {view === 'actual' && unallocated.length > 0 && <Banner tone="accent" title={`有结汇未对应到账：${unallocated.map(u => `${u.currency} ${money(u.amount)}（${u.count} 笔）`).join('、')}`}>未对应到账的结汇不计入任何订单。请在“账户与余额 → 锁汇 / 结汇”为该结汇补登对应到账。</Banner>}
         <section className="mist-section"><Card><DataTable ariaLabel="订单毛利（人民币）" rows={cny} rowKey={r => r.id} loading={workspace.loading} columns={cnyColumns} empty={<EmptyState title="当前范围没有已生效订单" description="草稿、待审批或被退回的订单不计入毛利。" />} /></Card></section>
-        <p className="mist-note">{FX_BASIS_LABEL[view]}：{view === 'actual' ? `订单收入中已收且已结汇的部分（本单发票的核销到账 → 结汇时分配到该到账的金额）按各笔结汇的实际成交汇率；已收未结汇与未收部分、外币采购按不晚于 ${fxMonth} 的最新月末汇率暂估。` : view === 'period' ? `取不晚于 ${fxMonth} 的最新一期月末汇率（财务在“账户与余额”登记）。` : '取订单最新一次定价试算的 CNY / USD 汇率，仅美元订单。'}缺少所选口径汇率的订单不出毛利。不含退税毛利 = 收入 × 汇率 − 已批准采购合同（通常含税价）；含退税毛利再加本单分摊的出口退税（已核准按核准额，未核准按应退额；未申报不计）。未计运费、报关、佣金与索赔扣款。</p>
+        <p className="mist-note">{FX_BASIS_LABEL[view]}：{view === 'actual' ? `订单收入中已收且已结汇的部分（本单发票的核销到账 → 结汇时分配到该到账的金额）按各笔结汇的实际成交汇率；已收未结汇与未收部分、外币采购按不晚于 ${fxMonth} 的最新月末汇率暂估。` : view === 'period' ? `取不晚于 ${fxMonth} 的最新一期月末汇率（财务在“账户与余额”登记）。` : '取订单来源报价版本上冻结的报价汇率（多个报价版本按条目金额加权）；报价未填报价汇率的订单标“缺汇率”。'}缺少所选口径汇率的订单不出毛利。不含退税毛利 = 收入 × 汇率 − 已批准采购合同（通常含税价）；含退税毛利再加本单分摊的出口退税（已核准按核准额，未核准按应退额；未申报不计）。未计运费、报关、佣金与索赔扣款。</p>
       </>}
     </> : tab === 'actual' ? (state ? <OrderActualCostPanel state={state} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} /> : <EmptyState title="正在读取数据" compact />) : tab === 'aging' ? <>
       <Toolbar right={<span className="mist-note">截至 {asOf}</span>}>{currencyFilter}</Toolbar>

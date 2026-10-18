@@ -269,6 +269,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       { label: '有效期', value: <span className={flags.some(f => f.key === 'overdue') ? 'mist-tone-bad' : undefined}>{q.validUntil}</span> },
       { label: '贸易术语', value: q.deliveryTerms },
       { label: '付款条件', value: q.paymentTerms },
+      ...(q.currency !== 'CNY' ? [{ label: '报价汇率', value: q.fxRate ? `1 ${q.currency} = ${q.fxRate} CNY` : '未填' }] : []),
       { label: '季节', value: q.season || '未填' },
       { label: '条目', value: `${q.lines.length} 项` },
     ]} />

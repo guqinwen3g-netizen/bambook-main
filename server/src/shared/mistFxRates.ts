@@ -6,7 +6,7 @@
  *   非订单币种（如外币采购）按月末汇率暂估。只有实际发生的结汇才算实际。
  * - 月末暂估：财务每月登记一次各币种月末汇率（通常取中国人民银行月末中间价或开户行月末牌价），依据必填；
  *   报表取不晚于所选月份的最新一期。登错的在作废后重登，不改写原记录。
- * - 定价预计：订单最新一次定价试算快照中的汇率（CNY / USD，仅美元订单）。
+ * - 报价预计：订单来源报价版本上冻结的报价汇率（见 fxQuoteRateFor）；订单定价试算只作试算。
  * 缺少所选口径的汇率时不猜、不换口径，报表标“缺汇率”。
  */
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
@@ -39,7 +39,7 @@ export type FxRevalCurrency = { currency: string; bookRate: string; closingRate:
 export type FxRevaluation = { id: string; code: string; month: string; monthEnd: string; lines: FxRevalLine[]; currencies: FxRevalCurrency[]; unrealized: number; realized: number; total: number; note: string; createdAt: string; actor: string; voided?: { at: string; actor: string; reason: string } };
 export type FxRevalPreview = { month: string; monthEnd: string; lines: FxRevalLine[]; currencies: FxRevalCurrency[]; unrealized: number; realized: number; total: number; missing: string[]; blockers: string[] };
 export type FxBasis = 'actual' | 'period' | 'quote';
-export const FX_BASIS_LABEL: Record<FxBasis, string> = { actual: '实际结汇', period: '月末暂估', quote: '定价预计' };
+export const FX_BASIS_LABEL: Record<FxBasis, string> = { actual: '实际结汇', period: '月末暂估', quote: '报价预计' };
 
 type Root = MistState & { fxPeriodRates?: FxPeriodRate[]; fxRevaluations?: FxRevaluation[] };
 function fail(message: string, code = 'VALIDATION'): never { throw new MistCommandError(code, message); }
@@ -106,9 +106,21 @@ export function fxRateFor(root: Root, currency: string, basis: FxBasis, opts: { 
   // 实际口径下，订单收入另按 fxOrderActual 逐笔取结汇汇率；其他外币金额（外币采购、费用）没有对应结汇，按月末汇率暂估。
   if (basis === 'actual') { const p = fxPeriodRateFor(root, currency, opts.month); return p && { rate: Number(p.rate), label: `${p.month} 月末 ${p.rate}（暂估）`, estimated: true }; }
   if (basis === 'period') { const p = fxPeriodRateFor(root, currency, opts.month); return p && { rate: Number(p.rate), label: `${p.month} 月末 ${p.rate}`, estimated: true }; }
-  if (currency !== 'USD' || !opts.orderId) return undefined;
-  const snap = (root.platform?.pricing || []).filter(r => r.orderId === opts.orderId && r.exchangeRate > 0).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  return snap && { rate: snap.exchangeRate, label: `定价试算 ${snap.exchangeRate}`, estimated: true };
+  return opts.orderId ? fxQuoteRateFor(root, opts.orderId, currency) : undefined;
+}
+/**
+ * 报价预计汇率（§17.6 Q2 定案 A）：取订单来源报价版本上冻结的报价汇率。订单条目来自多个报价版本时按条目金额加权；
+ * 只认与订单同币种、填了报价汇率的报价；订单定价试算（PlatformPricing）只作试算，不作为报价汇率。
+ */
+export function fxQuoteRateFor(root: Root, orderId: string, currency: string): FxResolved | undefined {
+  const quotes = root.market?.quotations || [], lines = (root.orderLines || []).filter(l => l.orderId === orderId) as Array<{ sourceQuotationId?: string; amountExact?: string; qty: number; price: number }>;
+  const weights = new Map<string, number>();
+  for (const l of lines) if (l.sourceQuotationId) weights.set(l.sourceQuotationId, (weights.get(l.sourceQuotationId) || 0) + Math.abs(Number(l.amountExact ?? l.qty * l.price)) || 0);
+  if (!weights.size) for (const q of quotes) if (q.convertedOrderId === orderId) weights.set(q.id, 1);
+  const used = [...weights.entries()].map(([id, w]) => ({ q: quotes.find(q => q.id === id), w })).filter(x => x.q && x.q.currency === currency && x.q.fxRate);
+  if (!used.length || used.length < weights.size) return undefined;
+  const total = used.reduce((n, x) => n + x.w, 0), rate = total ? used.reduce((n, x) => n + Number(x.q!.fxRate) * x.w, 0) / total : Number(used[0].q!.fxRate);
+  return { rate, label: used.length === 1 ? `报价 ${used[0].q!.code} 汇率 ${used[0].q!.fxRate}` : `${used.length} 个报价版本加权 ${rate.toFixed(4)}`, estimated: true };
 }
 
 export const readFxRevaluations = (root: Pick<Root, 'fxRevaluations'>) => root.fxRevaluations || [];
