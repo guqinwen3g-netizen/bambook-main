@@ -11,6 +11,7 @@ import { isOrderTerminated } from './mistOrderGovernance';
 import { MistCommandError, isActiveMistInvoice, type MistContext, type MistState, type MistTarget, type MistTask } from './mistWorkspace';
 import { accountOwnedObjects, resolveMember, type MistBusinessGroup } from './mistAccounts';
 import { platformBusinessDate } from './mistPlatform';
+import { mistInvoiceCustomerName } from './mistOpeningBalance';
 
 export const TEAM_DORMANT_DAYS = 60;
 export const TEAM_SOON_DAYS = 7;
@@ -70,7 +71,7 @@ export function teamRow(state: MistState, member: { id: string; name: string; gr
   const ownedOrders = new Set(state.orders.filter(o => o.ownerId === id).map(o => o.id));
   const ownedCustomers = new Set(state.customers.filter(c => c.ownerId === id).map(c => c.id));
   const receivables = state.invoices.filter(i => (ownedOrders.has(i.orderId) || !!i.opening && !!i.customerId && ownedCustomers.has(i.customerId)) && isActiveMistInvoice(i) && i.open > 0 && i.due && i.due < today)
-    .map(i => ({ id: i.id, code: i.code, customer: i.customer, due: i.due, open: i.open, currency: i.currency, days: daysBetween(i.due, today) })).sort((a, b) => b.days - a.days);
+    .map(i => ({ id: i.id, code: i.code, customer: mistInvoiceCustomerName(state, i), due: i.due, open: i.open, currency: i.currency, days: daysBetween(i.due, today) })).sort((a, b) => b.days - a.days);
   const followUps = state.crm?.followUps || [];
   const busy = new Set(orders.map(o => state.orders.find(x => x.id === o.id)?.customerId));
   const dormant = customers.filter(c => !busy.has(c.id)).map(c => ({ c, lastAt: followUps.filter(f => f.customerId === c.id).map(f => f.at).sort().at(-1) || null }))

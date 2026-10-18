@@ -35,6 +35,7 @@ import { useMistSession } from "../../runtime/auth";
 import { useNav } from "../../nav";
 import { useRouteDraft, useRouteScope } from "./useRouteDraft";
 import { downloadModuleCsv } from "./ModuleWorkbench";
+import { DraftFiles } from "./fulfillmentKit";
 const origins = {
   customer: "客户明确说明",
   business: "业务判断（非客户原话）",
@@ -493,23 +494,23 @@ export function QuotationFeedbackPage() {
                     true,
                     "记录客户表述及实际凭据位置，不将分析当原话。",
                   )}
-                  <Field label="反馈凭据附件">
-                    <Select
-                      aria-label="反馈凭据附件"
+                  <div
+                    className="mist-field"
+                    data-full
+                    role="group"
+                    aria-label="反馈凭据附件"
+                  >
+                    <span className="mist-field-label">反馈凭据附件</span>
+                    <DraftFiles
+                      ids={input.fileIds}
                       disabled={disabled}
-                      value={input.fileIds[0] || ""}
-                      options={[
-                        { value: "", label: "未选附件，人工登记依据" },
-                        ...(w.state?.files || []).map((f) => ({
-                          value: f.id,
-                          label: f.name,
-                        })),
-                      ]}
-                      onChange={(e) =>
-                        patch("fileIds", e.target.value ? [e.target.value] : [])
-                      }
+                      hint="上传客户反馈的原始凭据"
+                      onChange={(ids) => patch("fileIds", ids)}
                     />
-                  </Field>
+                    <span className="mist-field-hint">
+                      上传客户回复邮件、聊天截图等；不传时按人工登记依据保存。
+                    </span>
+                  </div>
                   {correctionId &&
                     text("correctionReason", "更正原因", true, true)}
                 </FormGrid>

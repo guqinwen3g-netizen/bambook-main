@@ -3,7 +3,7 @@ import { applyMistCommand, createMistState, mistCommandPermission, type MistComm
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { customerStatementContent } from './mistCustomerStatement';
 import { teamRow } from './mistTeam';
-import { mistInvoiceCustomerId } from './mistOpeningBalance';
+import { mistInvoiceCustomerId, mistInvoiceCustomerName, mistPayerMatchesInvoice } from './mistOpeningBalance';
 import { billOpenMinor } from './mistPayables';
 
 function fixture() {
@@ -16,6 +16,18 @@ function fixture() {
 const row = (over: Record<string, string> = {}) => ({ customer: 'C-NW', reference: 'CI-2026-0815', issuedAt: '2026-08-15', due: '2026-09-14', currency: 'usd', originalAmount: '48,000', amount: '33600', note: '定金已收', ...over });
 
 describe('期初未结应收', () => {
+  it('客户改名后票据保留开票名，台账显示新名，付款方按新旧名都视为同名', () => {
+    const f = fixture();
+    f.run({ type: 'opening.receivable.import', payload: { rows: [row()] } });
+    const customer = f.state.customers.find(c => c.code === 'C-NW')!;
+    f.run({ type: 'market.customer.update', payload: { id: customer.id, patch: { name: 'Nordic Wear Group AB' } } });
+    const invoice = f.state.invoices[0];
+    expect(invoice.customer).toBe('Nordic Wear AB');
+    expect(mistInvoiceCustomerName(f.state, invoice)).toBe('Nordic Wear Group AB');
+    expect(mistPayerMatchesInvoice(f.state, invoice, ' nordic wear group ab ')).toBe(true);
+    expect(mistPayerMatchesInvoice(f.state, invoice, 'Nordic Wear AB')).toBe(true);
+    expect(mistPayerMatchesInvoice(f.state, invoice, '其他公司')).toBe(false);
+  });
   it('权限为开票权；市场导入不接受期初类型', () => {
     expect(mistCommandPermission({ type: 'opening.receivable.import', payload: { rows: [] } } as unknown as MistCommand)).toBe('invoices:write');
     expect(mistCommandPermission({ type: 'opening.receivable.void', payload: { invoiceId: 'x', reason: 'y' } } as unknown as MistCommand)).toBe('invoices:write');

@@ -11,6 +11,7 @@ import { downloadModuleCsv } from './ModuleWorkbench';
 import { OrderActualCostPanel } from './OrderActualCostPanel';
 import { FX_BASIS_LABEL, fxRateFor, type FxBasis, type FxResolved } from '../../../../../server/src/shared/mistFxRates';
 import { orderRebate } from '../../../../../server/src/shared/mistExportRebate';
+import { mistInvoiceCustomerId, mistInvoiceCustomerName } from '../../../../../server/src/shared/mistOpeningBalance';
 
 const money = (n: number) => new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const minor = (n: number) => mistMoneyMinor(n);
@@ -93,7 +94,7 @@ export function buildReceivableAging(state: MistState, asOf: string): AgingRow[]
   const map = new Map<string, { customer: string; currency: string; invoices: number } & Record<Bucket | 'total', number>>();
   for (const i of state.invoices) {
     if (!isActiveMistInvoice(i) || !(i.open > 0)) continue;
-    const key = i.customer + '|' + i.currency, row = map.get(key) ?? { customer: i.customer, currency: i.currency, invoices: 0, total: 0, current: 0, d30: 0, d60: 0, d90: 0, over: 0 };
+    const name = mistInvoiceCustomerName(state, i), key = (mistInvoiceCustomerId(state, i) || name) + '|' + i.currency, row = map.get(key) ?? { customer: name, currency: i.currency, invoices: 0, total: 0, current: 0, d30: 0, d60: 0, d90: 0, over: 0 };
     const value = minor(i.open); row.invoices++; row.total += value; row[agingBucket(i.due, asOf)] += value; map.set(key, row);
   }
   return [...map.entries()].map(([id, r]) => ({ id, customer: r.customer, currency: r.currency, invoices: r.invoices, total: r.total / 100, current: r.current / 100, d30: r.d30 / 100, d60: r.d60 / 100, d90: r.d90 / 100, over: r.over / 100 }))

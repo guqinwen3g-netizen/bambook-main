@@ -40,6 +40,7 @@ import {
   FrozenHistoryEvidence,
 } from "./QuotationCostEvidence";
 import { QuotationCostAdvisor } from "./QuotationCostAdvisor";
+import { DraftFiles } from "./fulfillmentKit";
 import { useMistWorkspace } from "../../runtime/workspace";
 import { useMistSession } from "../../runtime/auth";
 import { useNav } from "../../nav";
@@ -679,29 +680,22 @@ export function QuotationCostingPage() {
                         onChange={(e) => patch("basis", e.target.value)}
                       />
                     </Field>
-                    <Field
-                      label="来源凭据附件"
-                      hint="选择本空间已上传凭据；不选时仅保存人工登记依据。"
+                    <div
+                      className="mist-field"
+                      data-full
+                      role="group"
+                      aria-label="来源凭据附件"
                     >
-                      <Select
-                        aria-label="来源凭据附件"
+                      <span className="mist-field-label">来源凭据附件</span>
+                      <DraftFiles
+                        ids={input.fileIds}
                         disabled={disabled}
-                        value={input.fileIds[0] || ""}
-                        options={[
-                          { value: "", label: "未选择附件" },
-                          ...(w.state?.files || []).map((f) => ({
-                            value: f.id,
-                            label: f.name,
-                          })),
-                        ]}
-                        onChange={(e) =>
-                          patch(
-                            "fileIds",
-                            e.target.value ? [e.target.value] : [],
-                          )
-                        }
+                        onChange={(ids) => patch("fileIds", ids)}
                       />
-                    </Field>
+                      <span className="mist-field-hint">
+                        上传供应商报价单、邮件截图等；不传时仅保存人工登记依据。
+                      </span>
+                    </div>
                   </FormGrid>
                 </FormSection>
                 <CardHeader

@@ -10,6 +10,7 @@
  */
 import { MistCommandError, isActiveMistInvoice, type MistContext, type MistState } from './mistWorkspace';
 import { supplierStatusOn } from './mistSupplierStatus';
+import { mistInvoiceCustomerName } from './mistOpeningBalance';
 import type { MistReviewTask } from './mistReview';
 
 export type RiskType = 'credit' | 'fx' | 'compliance' | 'quality' | 'delivery' | 'other';
@@ -106,7 +107,7 @@ export function riskSignals(state: MistState | null, day: string): RiskSignal[] 
   for (const i of state.invoices) {
     if (!isActiveMistInvoice(i) || !(i.open > 0) || !i.due || i.due >= day) continue;
     const late = days(i.due, day);
-    out.push({ key: 'invoice-overdue:' + i.id, type: 'credit', level: late > 30 ? 'critical' : 'warning', title: `${i.customer} 应收逾期 ${late} 天`, basis: `${i.code} 到期 ${i.due}，未收 ${i.currency} ${i.open.toFixed(2)}（原币，未换算）。`, source: { kind: 'invoice', id: i.id, label: i.code + ' · ' + i.customer }, orderId: i.orderId, since: i.due });
+    out.push({ key: 'invoice-overdue:' + i.id, type: 'credit', level: late > 30 ? 'critical' : 'warning', title: `${mistInvoiceCustomerName(state, i)} 应收逾期 ${late} 天`, basis: `${i.code} 到期 ${i.due}，未收 ${i.currency} ${i.open.toFixed(2)}（原币，未换算）。`, source: { kind: 'invoice', id: i.id, label: i.code + ' · ' + i.customer }, orderId: i.orderId, since: i.due });
   }
   for (const r of state.market?.relations || []) {
     if (!r.hold || r.status === 'archived') continue;
