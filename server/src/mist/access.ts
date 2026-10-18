@@ -42,7 +42,7 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'qc', label: '质检工作台', permissions: ['qc:read'], paths: [['fulfillment', 'qcTasks'], ['fulfillment', 'qcReports']], entityTypes: ['qc'], views: ['qc-workbench'] },
   { key: 'inventory', label: '库存', permissions: ['inventory:read'], paths: [['fulfillment', 'warehouses'], ['fulfillment', 'returnReceipts'], ['fulfillment', 'receivedRecords'], ['fulfillment', 'stock'], ['fulfillment', 'stockMovements']], entityTypes: ['inventory', 'stock'], views: ['inventory'] },
   { key: 'shipments', label: '出运与装箱', permissions: ['shipments:read'], paths: [['fulfillment', 'shipments'], ['fulfillment', 'packing'], ['fulfillment', 'shippingTerms']], entityTypes: ['shipment', 'packing'], views: ['shipments', 'shipping', 'packing'] },
-  { key: 'customs', label: '报关与单证', permissions: ['customs:read'], paths: [['fulfillment', 'customs'], ['fulfillment', 'documents'], ['letterOfCredits']], entityTypes: ['customs', 'document'], views: ['customs', 'documents'] },
+  { key: 'customs', label: '报关与单证', permissions: ['customs:read'], paths: [['fulfillment', 'customs'], ['fulfillment', 'customsClassifications'], ['fulfillment', 'documents'], ['letterOfCredits']], entityTypes: ['customs', 'document'], views: ['customs', 'documents'] },
   { key: 'orders', label: '订单', permissions: ['orders:read'], paths: [['orders'], ['orderLines']], entityTypes: ['order'], views: ['orders/detail', 'orders/list', 'orders/new'] },
   { key: 'production', label: '生产', permissions: ['production:read'], paths: [['productions'], ['fulfillment', 'productionFacts']], entityTypes: ['production'], views: ['production-board'] },
 ];
