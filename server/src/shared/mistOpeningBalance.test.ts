@@ -4,6 +4,7 @@ import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { customerStatementContent } from './mistCustomerStatement';
 import { teamRow } from './mistTeam';
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
+import { billOpenMinor } from './mistPayables';
 
 function fixture() {
   let i = 0; const ctx = { id: () => `ob-${++i}`, now: '2026-10-18T02:00:00Z', actorName: '周敏', actorId: 'demo-reviewer', members: MIST_DEMO_ACCOUNTS } as unknown as MistContext;
@@ -70,5 +71,23 @@ describe('期初未结应收', () => {
     // 作废的登记保留原号留痕，重登须换号
     expect(() => f.run({ type: 'opening.receivable.import', payload: { rows: [row()] } })).toThrow('重登请加后缀');
     expect(f.run({ type: 'opening.receivable.import', payload: { rows: [row({ reference: 'CI-2026-0815-R' })] } }).imported).toBe(1);
+  });
+  it('期初应付：按供应商编码登记未付余额，可按票据付款与作废', () => {
+    const f = fixture();
+    f.run({ type: 'market.import', payload: { kind: 'supplier', rows: [{ code: 'SUP-001', name: '江南成衣厂', type: '成衣', capabilities: '外套', capacity: '1000', capacityUnit: '件/月', leadDays: '30' }] } });
+    const ap = (over: Record<string, string> = {}) => ({ supplier: 'sup-001', invoiceNo: '3301-881', invoiceDate: '2026-09-05', due: '2026-10-05', currency: 'cny', originalAmount: '113,000', taxAmount: '13000', amount: '60000', note: '已付 53000', ...over });
+    expect(f.run({ type: 'opening.payable.import', payload: { rows: [ap(), ap({ supplier: '江南成衣厂', invoiceNo: '3301-882', originalAmount: '', taxAmount: '', amount: '500' })] } }).imported).toBe(2);
+    const [bill, small] = (f.state as any).payables.bills;
+    expect(bill).toMatchObject({ code: 'AP-2026-0001', supplier: '江南成衣厂', invoiceNo: '3301-881', currency: 'CNY', amount: 60000, taxAmount: 13000, lines: [], state: 'open', opening: { originalAmount: 113000 } });
+    expect(small).toMatchObject({ code: 'AP-2026-0002', amount: 500, taxAmount: 0, opening: { originalAmount: 500 } });
+    expect(billOpenMinor(f.state as any, bill)).toBe(6000000);
+    let message = '';
+    try { f.run({ type: 'opening.payable.import', payload: { rows: [ap(), ap({ invoiceNo: 'X1', supplier: '无此厂' }), ap({ invoiceNo: 'X2', taxAmount: '200000' }), ap({ invoiceNo: 'X3', invoiceDate: '2026-12-01', due: '2026-12-31' })] } }); } catch (e) { message = (e as Error).message; }
+    expect(message).toContain('第 2 行：该供应商的发票号 3301-881 已登记过');
+    expect(message).toContain('第 3 行：供应商“无此厂”未建档');
+    expect(message).toContain('第 4 行：税额不能大于价税合计');
+    expect(message).toContain('第 5 行：发票日期不能晚于今天');
+    f.run({ type: 'payable.bill.void', payload: { id: small.id, reason: '录错' } });
+    expect((f.state as any).payables.bills[1].state).toBe('void');
   });
 });

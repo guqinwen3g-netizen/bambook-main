@@ -6,16 +6,18 @@
 import { MistCommandError, mistMoneyMinor, type MistContext, type MistInvoice, type MistState } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { mistImportDate, mistImportEach, text, type MistImportRow } from './mistImport';
+import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
 
 export type MistOpeningInfo = { originalAmount: number; note: string; registeredAt: string; registeredBy: string; registeredById?: string };
 export type OpeningCommand =
   | { type: 'opening.receivable.import'; payload: { rows: MistImportRow[] } }
-  | { type: 'opening.receivable.void'; payload: { invoiceId: string; reason: string } };
+  | { type: 'opening.receivable.void'; payload: { invoiceId: string; reason: string } }
+  | { type: 'opening.payable.import'; payload: { rows: MistImportRow[] } };
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
 
 export function openingCommandPermission(command: OpeningCommand): string {
-  if (command.type === 'opening.receivable.import' || command.type === 'opening.receivable.void') return 'invoices:write';
+  if (command.type === 'opening.receivable.import' || command.type === 'opening.receivable.void' || command.type === 'opening.payable.import') return 'invoices:write';
   return fail('未知期初操作');
 }
 
@@ -79,6 +81,35 @@ export function applyOpeningCommand(state: MistState, command: OpeningCommand, c
     Object.assign(invoice, { voidedAt: context.now, voidReason: reason, voidedBy: context.actorName, ...(context.actorId ? { voidedById: context.actorId } : {}), open: 0 });
     state.events.unshift({ id: context.id(), entityType: 'invoice', entityId: invoice.id, actor: context.actorName, at: context.now, text: `作废期初应收 ${invoice.code}：${reason}`, fileIds: [] });
     return { id: invoice.id };
+  }
+  if (command.type === 'opening.payable.import') {
+    const root = state as MistState & { payables?: ReturnType<typeof createPayablesState>; market?: { suppliers: Array<{ id: string; code: string; name: string }> } };
+    root.payables = root.payables || createPayablesState();
+    const bills = root.payables.bills, suppliers = root.market?.suppliers || [], created: string[] = [];
+    const result = mistImportEach('openingPayable', command.payload?.rows, (row: MistImportRow) => {
+      const key = text(row, 'supplier'), lower = key.toLowerCase();
+      const byName = suppliers.filter(s => s.name === key), supplier = suppliers.find(s => s.code.toLowerCase() === lower) || (byName.length === 1 ? byName[0] : undefined);
+      if (!supplier) throw new Error(byName.length > 1 ? `供应商“${key}”有重名，请改填供应商编码` : `供应商“${key}”未建档，请先导入供应商`);
+      const invoiceNo = text(row, 'invoiceNo');
+      if (invoiceNo.length > 80) throw new Error('供应商发票号过长');
+      if (bills.some(b => b.state === 'open' && b.supplierId === supplier.id && b.invoiceNo.trim().toLowerCase() === invoiceNo.toLowerCase())) throw new Error(`该供应商的发票号 ${invoiceNo} 已登记过`);
+      const invoiceDate = mistImportDate(text(row, 'invoiceDate'), '发票日期'), due = mistImportDate(text(row, 'due'), '到期日');
+      if (invoiceDate > today) throw new Error('发票日期不能晚于今天（期初只登记已收到的发票）');
+      if (due < invoiceDate) throw new Error('到期日不能早于发票日期');
+      const currency = text(row, 'currency').toUpperCase();
+      if (!/^[A-Z]{3}$/.test(currency)) throw new Error('币种须为三位字母');
+      const amount = amountOf(text(row, 'amount'), '未付余额');
+      if (amount <= 0) throw new Error('未付余额须大于 0；已付清的发票不必登记');
+      const originalAmount = text(row, 'originalAmount') ? amountOf(text(row, 'originalAmount'), '价税合计') : amount;
+      if (mistMoneyMinor(originalAmount) < mistMoneyMinor(amount)) throw new Error('未付余额不能大于价税合计');
+      const taxAmount = text(row, 'taxAmount') ? amountOf(text(row, 'taxAmount'), '税额') : 0;
+      if (mistMoneyMinor(taxAmount) > mistMoneyMinor(originalAmount)) throw new Error('税额不能大于价税合计');
+      const id = context.id(), note = text(row, 'note').slice(0, 500);
+      const bill: SupplierBill = { id, code: nextPayableCode('AP', bills, context.now), supplierId: supplier.id, supplier: supplier.name, invoiceNo, invoiceDate, currency, amount, taxAmount, taxRate: '', lines: [], terms: [], due, dueBasis: '期初登记（启用前已收票）', fileIds: [], note: `期初未结应付${note ? '：' + note : ''}`, state: 'open', registeredAt: context.now, registeredBy: context.actorName, opening: { originalAmount } };
+      bills.push(bill); created.push(id);
+      state.events.unshift({ id: context.id(), entityType: 'payable', entityId: id, actor: context.actorName, at: context.now, text: `登记期初应付 ${invoiceNo}（${supplier.name}）· 未付 ${amount} ${currency}`, fileIds: [] });
+    }, message => fail(message));
+    return { ...result, ids: created };
   }
   return fail('未知期初操作');
 }

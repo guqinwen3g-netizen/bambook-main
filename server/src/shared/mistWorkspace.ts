@@ -1341,7 +1341,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
 /** Read-time additive defaults preserve existing records; the next command persists them. */
 export function normalizeMistState(state:MistState,context:MistContext):void {
   const eventLabels:Record<string,string>={
-    'market.import':'批量导入基础资料','opening.receivable.import':'导入期初应收','opening.receivable.void':'作废期初应收','market.supplier.save':'保存供应商档案','market.supplier.status':'更新供应商合作状态',
+    'market.import':'批量导入基础资料','opening.receivable.import':'导入期初应收','opening.receivable.void':'作废期初应收','opening.payable.import':'导入期初应付','market.supplier.save':'保存供应商档案','market.supplier.status':'更新供应商合作状态',
     'market.relation.save':'保存关系档案','market.contact.save':'保存联系人',
     'market.product.save':'保存数字档案','market.product.fromVersion':'从确认版本建立数字档案',
     'market.quotation.feedback.add':'追加报价客户反馈','market.quotation.costing.save':'保存报价条目专业核算','market.quotation.save':'保存报价草稿','market.quotation.submit':'提交报价审批',
