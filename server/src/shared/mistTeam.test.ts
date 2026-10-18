@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistCommand, type MistContext, type MistState } from './mistWorkspace';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
-import { teamMembers, teamOverview, teamRow, type TeamTask } from './mistTeam';
+import { teamMembers, teamOverview, teamRow, teamWeeklyReport, teamWeeklyText, weekStartOf, type TeamTask } from './mistTeam';
 
 const today = '2026-10-18';
 function fixture() {
@@ -57,5 +57,32 @@ describe('主管团队视角', () => {
     expect(teamRow(f.state, { id: 'demo-sales', name: '顾言' }, today).nudges.map(n => n.id)).toEqual([id]);
     const done = applyMistCommand(f.state, { type: 'task.complete', payload: { id, done: true } } as MistCommand, { id: () => 'z', now: '2026-10-18T03:00:00Z', actorName: '顾言', actorId: 'demo-sales' } as unknown as MistContext).state;
     expect(teamRow(done, { id: 'demo-sales', name: '顾言' }, today).nudges).toEqual([]);
+  });
+  it('周报：按周一至周日统计新单、出运、回款（到账日）、跟进与督办完成；当前快照单列；可生成文字版', () => {
+    expect(weekStartOf('2026-10-18')).toBe('2026-10-12'); expect(weekStartOf('2026-10-12')).toBe('2026-10-12'); expect(weekStartOf('2026-10-11')).toBe('2026-10-05');
+    const f = fixture(), order = f.state.orders.find(o => o.code === 'SO-G-2026-018')!;
+    const { id } = f.run({ assigneeId: 'demo-sales', title: '和工厂核对交期', due: '2026-10-20', target: { view: 'orders/detail', id: order.id } });
+    const s = applyMistCommand(f.state, { type: 'task.complete', payload: { id, done: true } } as MistCommand, { id: () => 'z', now: '2026-10-18T03:00:00Z', actorName: '顾言', actorId: 'demo-sales' } as unknown as MistContext).state;
+    expect(s.tasks.find(t => t.id === id)).toMatchObject({ done: true, doneAt: '2026-10-18T03:00:00Z', doneBy: '顾言' });
+    order.createdAt = '2026-10-13T02:00:00Z';
+    const inv = s.invoices.find(i => i.orderId === order.id)!;
+    s.receipts.push({ id: 'rc-w', code: 'RC-W', date: '2026-10-14', payer: 'x', amount: 100, remaining: 0, currency: inv.currency, ref: '', state: 'matched' });
+    s.allocations.push({ id: 'al-w', receiptId: 'rc-w', invoiceId: inv.id, amount: 100, currency: inv.currency, createdAt: '2026-10-19T02:00:00Z', actor: '财务' });
+    const dir = MIST_DEMO_ACCOUNTS.map(a => ({ ...a }));
+    const week = teamWeeklyReport(s, dir, { id: 'demo-reviewer', owner: true }, '2026-10-12', today);
+    const sales = week.rows.find(r => r.id === 'demo-sales')!;
+    expect(sales.newOrders).toBeGreaterThanOrEqual(1);
+    expect(sales.collected.find(c => c.currency === inv.currency)!.amount).toBeGreaterThanOrEqual(100);
+    expect(sales).toMatchObject({ nudgesIn: 1, nudgesDone: 1, nudgesOpenLate: 0 });
+    expect(week.asOf).toBe(today);
+    const prev = teamWeeklyReport(s, dir, { id: 'demo-reviewer', owner: true }, '2026-10-05', today);
+    expect(prev.rows.find(r => r.id === 'demo-sales')).toMatchObject({ nudgesIn: 0, nudgesDone: 0 });
+    expect(prev.asOf).toBe('2026-10-11');
+    const text = teamWeeklyText(week);
+    expect(text).toContain('团队周报（2026-10-12 至 2026-10-18）');
+    expect(text).toContain('· 顾言');
+    // 取消完成后完成时间清除
+    const undone = applyMistCommand(s, { type: 'task.complete', payload: { id, done: false } } as MistCommand, { id: () => 'y', now: '2026-10-18T04:00:00Z', actorName: '顾言', actorId: 'demo-sales' } as unknown as MistContext).state;
+    expect(undone.tasks.find(t => t.id === id)!.doneAt).toBeUndefined();
   });
 });

@@ -227,7 +227,7 @@ export type MistTarget = { view: string; id?: string; versionId?: string; custom
  * 工作事项必须写明由谁处理：assigneeIds 为指定账号；permission 为「持有该权限的任何人」（岗位事项，如财务开票、后勤接手）。
  * 两者都为空的事项不进入任何人的「我的工作」和侧栏数字。
  */
-export type MistTask = { id: string; title: string; due: string; done: boolean; kind: string; target: MistTarget; assigneeIds: string[]; permission?: string };
+export type MistTask = { id: string; title: string; due: string; done: boolean; kind: string; target: MistTarget; assigneeIds: string[]; permission?: string; /** 勾选完成的时间与人（周报统计用；旧事项无此字段）。 */ doneAt?: string; doneBy?: string };
 /** 后勤岗位标识（logistics:handle）：只决定出运交接、待物流接手等事项归谁，不授予任何操作；与清关等操作权限分开调整。 */
 export const MIST_LOGISTICS_DUTY = 'logistics:handle';
 /** 订单负责人账号（变更、取消、客诉后续由订单负责人跟进）。 */
@@ -1311,7 +1311,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       state.notifications.forEach(n => { if (!visible || visible.has(n.id)) n.readAt = context.now; });
       result={};break;
     }
-    case 'task.complete': {find(state.tasks,p.id,'事项').done=!!p.done;result={id:p.id};break;}
+    case 'task.complete': {const task=find(state.tasks,p.id,'事项');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
     case 'calendar.save': {
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
