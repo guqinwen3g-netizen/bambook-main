@@ -6,7 +6,7 @@ import { createMistState, applyMistCommand, type MistCommand } from '../../../..
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { Nav } from '../nav';
 // 业务员身份：可读写业务，但不持有专业 QC、财务、后勤岗位权限（这些岗位的派生待办不进入业务员的「我的工作」）。
-const salesPermission = vi.hoisted(() => (...permissions: string[]) => !permissions.some(p => ['qc:inspect', 'invoices:reconcile', 'invoices:write', 'customs:clear'].includes(p)));
+const salesPermission = vi.hoisted(() => (...permissions: string[]) => !permissions.some(p => ['qc:inspect', 'invoices:reconcile', 'invoices:write', 'customs:clear', 'relations:admin'].includes(p)));
 const seam = vi.hoisted(() => ({ value: null as any, session: { sessionKey: 'one', user: { id: 'owner', displayName: '当前员工' }, hasPermission: salesPermission,canAccessView:(_view:string):boolean=>true } }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => seam.value }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => seam.session; return { useMistSession, useOptionalMistSession: useMistSession }; });

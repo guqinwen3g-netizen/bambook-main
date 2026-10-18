@@ -1,16 +1,17 @@
 import { isPendingFinanceMistInvoice, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
+import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
 import { shipmentStage } from '../pages/modules/ShipmentsPage';
 import { financeReceiptDisplay } from '../pages/FinancePage';
 
 type CanRead = (view: string) => boolean;
-export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'task';
+export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'task';
 /**
  * 等我处理的一条事项。module 是它计入的侧栏模块（与模块页「待我处理」同一归属）；
  * 其他工作空间的审批归到 approvals，只进「我的工作」合计。
  */
 export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; target: MistTarget; module: string };
-export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', qc: 'QC', shipping: '出运', finance: '财务', task: '工作事项' };
+export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', task: '工作事项' };
 export type MistWorkOptions = {
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
   /** 当前账号是否持有某项权限；不传时岗位事项（按权限分派）一律不算我的。 */
@@ -83,6 +84,10 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       push({ id: 'finance:' + request.id, source: 'finance', title: `${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id } });
     }
   }
+  // 每周一起：主管把上周团队周报生成并存档（服务端冻结此刻数据）；存档后自动消失。
+  const weekly = canRead('dashboard') && can('relations:admin') ? pendingWeeklyArchive(state, me, today) : null;
+  if (weekly) push({ id: 'report:' + weekly, source: 'report', title: `生成上周团队周报（${weekly.slice(5)} 至 ${addBusinessDays(weekly, 6).slice(5)}）`, meta: '冻结上周数据存档，可复制或导出后自行发送', when: '本周', urgent: false, at: addBusinessDays(weekly, 7),
+    target: { view: 'dashboard', section: 'team-weekly' } as MistTarget });
   return items;
 }
 

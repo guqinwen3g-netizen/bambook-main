@@ -16,7 +16,7 @@ describe('mistNavCounts', () => {
   });
   it('hides sources the account cannot read and returns nothing when there is no work', () => {
     const state = { ...base, fulfillment: { qcTasks: [{ id: 'q1', code: 'QC-1', kind: 'sample', domain: 'garment', state: 'reported', factory: 'F', createdAt: '2026-10-01' }], shipments: [] } };
-    expect(mistNavCounts(state, { canRead: view => view !== 'qc-workbench', can: () => true, me: 'u1', today: '2026-10-17' })).toEqual({});
+    expect(mistNavCounts(state, { canRead: view => view !== 'qc-workbench', can: p => p !== 'relations:admin', me: 'u1', today: '2026-10-17' })).toEqual({});
     expect(mistNavCounts(null, { canRead: () => true, me: 'u1', today: '2026-10-17' })).toEqual({});
   });
 });

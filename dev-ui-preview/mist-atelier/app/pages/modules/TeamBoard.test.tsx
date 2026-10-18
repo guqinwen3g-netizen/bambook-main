@@ -9,6 +9,8 @@ import {MIST_DEMO_ACCOUNTS} from '../../../../../server/src/shared/mistAccounts'
 const store=vi.hoisted(()=>({state:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 import {TeamBoard} from './TeamBoard';
+import {addBusinessDays,teamWeeklyReport,weekStartOf} from '../../../../../server/src/shared/mistTeam';
+import {platformBusinessDate} from '../../../../../server/src/shared/mistPlatform';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root,state:MistState;const run=vi.fn(),go=vi.fn();
 const members=MIST_DEMO_ACCOUNTS.map(a=>({id:a.id,name:a.name,groups:a.groups,owner:a.id==='demo-reviewer'}));
@@ -65,4 +67,27 @@ it('switches to the weekly report, pages back a week and copies the text summary
   await click(getByRole(host,'button',{name:'复制周报文字'}));
   expect(writeText).toHaveBeenCalledWith(expect.stringContaining('团队周报（'));
   expect(writeText.mock.calls[0][0]).toContain('· 顾言');
+});
+
+it('opens last week from the work reminder, archives it on the server, then shows the frozen archived version',async()=>{
+  const writeText=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{value:{writeText},configurable:true});
+  const today=platformBusinessDate(new Date()),last=addBusinessDays(weekStartOf(today),-7);
+  const show=()=>act(()=>root.render(<MistRoot><ToastProvider><TeamBoard state={state} members={members} viewer={{id:'demo-reviewer',owner:true}} can busy={false} run={run} go={go} initialMode="week" initialWeek={last}/></ToastProvider></MistRoot>));
+  show();
+  expect(host.querySelector('[data-team-weekly]')!.getAttribute('data-team-weekly')).toBe(last);
+  expect(host.textContent).toContain('尚未存档');
+  await click(getByRole(host,'button',{name:'生成并存档'}));
+  expect(run).toHaveBeenCalledWith({type:'team.weekly.archive',payload:{weekStart:last}});
+  const live=teamWeeklyReport(state,members,{id:'demo-reviewer',owner:true},last,today);
+  (state as any).teamReports=[{id:'wr',weekStart:last,weekEnd:addBusinessDays(last,6),generatedAt:'2026-10-19T01:30:00Z',generatedById:'demo-reviewer',generatedBy:'周敏',scope:'全部成员',report:live,text:'存档文字'}];
+  show();
+  expect(host.textContent).toContain('已存档 · 全部成员');
+  expect(queryByRole(host,'button',{name:'生成并存档'})).toBeNull();
+  await click(getByRole(host,'button',{name:'复制周报文字'}));
+  expect(writeText).toHaveBeenCalledWith('存档文字');
+});
+it('does not offer archiving to viewers without supervisor permission',()=>{
+  const today=platformBusinessDate(new Date()),last=addBusinessDays(weekStartOf(today),-7);
+  act(()=>root.render(<MistRoot><ToastProvider><TeamBoard state={state} members={members} viewer={{id:'demo-sales',owner:false}} can={false} busy={false} run={run} go={go} initialMode="week" initialWeek={last}/></ToastProvider></MistRoot>));
+  expect(queryByRole(host,'button',{name:'生成并存档'})).toBeNull();
 });
