@@ -46,7 +46,7 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
     if (approved.length === purchases.length && arrived.length === purchases.length) return { ...base, state: 'done', caption: `${purchases.length} 张已到齐` };
     return { ...base, state: 'now', caption: `${approved.length} / ${purchases.length} 已批 · ${arrived.length} 到齐`, target: { view: 'procurement', id: (purchases.find(purchase => purchase.state !== 'approved' || purchase.received < purchase.quantity) || purchases[0]).id } };
   })();
-  const jobs = state.productions.filter(job => job.lineId === line.id);
+  const jobs = state.productions.filter(job => job.lineId === line.id && !job.closed);
   const cut: LineStage = (() => {
     const base = { key: 'cut' as const, label: '开裁' };
     if (!jobs.length) return { ...base, state: 'todo', caption: '未开立生产' };

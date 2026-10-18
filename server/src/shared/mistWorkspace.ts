@@ -127,7 +127,10 @@ export type MistOrder = {
   ownerId: string;
   checklist: MistChecklistItem[]; handoffAt: string | null; createdAt: string; updatedAt: string;
 };
-export type MistProduction = { sourcePurchaseId?:string; id: string; code: string; orderId: string; lineId: string; order: string; name: string; factory: string; qty: number; due: string; pct: number; img: MistImage; col: 'cut' | 'sew' | 'finish' | 'qc' | 'done'; risk?: string; startDate?: string };
+export type MistProduction = { sourcePurchaseId?:string; id: string; code: string; orderId: string; lineId: string; order: string; name: string; factory: string; qty: number; due: string; pct: number; img: MistImage; col: 'cut' | 'sew' | 'finish' | 'qc' | 'done'; risk?: string; startDate?: string;
+  /** 来源合同取消（含转给其他供应商）后关闭；保留历史样品/QC 记录，不再计入生产、出运与订单状态。 */
+  closed?: { at: string; actor: string; reason: string } };
+export const openProductions = (state: Pick<MistState,'productions'>) => state.productions.filter(job => !job.closed);
 export type MistPayment = { id: string; code: string; date: string; payee: string; amount: number; currency: string; ref: string;
   /** finance：财务在付款凭证页登记；旧凭证无此字段。reversalOf：本凭证是对该凭证的反向冲回记录（金额为负）。 */
   origin?: 'finance'; reversalOf?: string;
@@ -614,7 +617,7 @@ function recalculate(state: MistState) {
     const rows=state.orderLines.filter(line=>line.orderId===order.id);
     order.lines=rows.length; order.qty=rows.reduce((s,row)=>s+row.qty,0);
     order.amount=moneySum(rows.map(row=>lineAmount(row.qty,row.price)));
-    const jobs=state.productions.filter(job=>job.orderId===order.id), quantity=jobs.reduce((s,p)=>s+p.qty,0);
+    const jobs=state.productions.filter(job=>job.orderId===order.id&&!job.closed), quantity=jobs.reduce((s,p)=>s+p.qty,0);
     if(quantity) order.progress=Math.round(jobs.reduce((s,p)=>s+p.qty*p.pct,0)/quantity);
     const shipments=(state.fulfillment?.shipments||[]).filter(s=>s.lines.some(line=>line.orderId===order.id)&&s.state!=='cancelled');
     const departed=shipments.filter(s=>s.state==='departed');
@@ -702,7 +705,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('fxrate.'))return fxCommandPermission(command as FxRateCommand);
   if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
   if(command.type.startsWith('lc.'))return lcCommandPermission(command as LcCommand);
-  if(command.type.startsWith('rfq.'))return rfqCommandPermission(command as RfqCommand);
+  if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.'))return rfqCommandPermission(command as RfqCommand);
   if(command.type.startsWith('fulfillment.'))return fulfillmentCommandPermission(command as FulfillmentCommand);
   if(command.type.startsWith('market.'))return marketCommandPermission(command as MarketCommand);
   if(command.type.startsWith('platform.'))return platformCommandPermission(command as PlatformCommand);
@@ -745,7 +748,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('fxrate.')){const result=applyFxRateCommand(state,command as FxRateCommand,context);return {state,result};}
   if(command.type==='finance.statement.generate'){const result=applyCustomerStatementCommand(state,command as CustomerStatementCommand,context);return {state,result};}
   if(command.type.startsWith('lc.')){const result=applyLcCommand(state,command as LcCommand,context);return {state,result};}
-  if(command.type.startsWith('rfq.')){const result=applyRfqCommand(state,command as RfqCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
+  if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.')){const result=applyRfqCommand(state,command as RfqCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('fulfillment.')){const result=applyFulfillmentCommand(state,command as FulfillmentCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type==='market.lead.convertToCrm'){const result=convertLeadToCrm(state,command.payload as Extract<MarketCommand,{type:'market.lead.convertToCrm'}>['payload'],context);recalculate(state);return {state,result};}
@@ -1075,7 +1078,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       result={orderId:o.id};break;
     }
     case 'production.move': {
-      const job=find(state.productions,p.id,'生产单'),from=COLS.indexOf(job.col),to=COLS.indexOf(p.col);
+      const job=find(state.productions,p.id,'生产单'),from=COLS.indexOf(job.col),to=COLS.indexOf(p.col);if(job.closed)throw new MistCommandError('PRECONDITION',`生产单 ${job.code} 已随合同取消关闭`);
       if(to<0||to>from+1)throw new MistCommandError('PRECONDITION','请按相邻工序推进');
       assertProductionTransition(state,job,p.col,job.pct);
       if(p.col==='done'&&job.pct<100)throw new MistCommandError('PRECONDITION','完成进度达到100%并完成尾期QC后才能待出运');
@@ -1083,7 +1086,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       event(state,context,'production',job.id,'更新工序为 '+p.col,{view:'production-board',id:job.id,productionId:job.id});result={id:job.id,orderId:job.orderId};break;
     }
     case 'production.update': {
-      const job=find(state.productions,p.id,'生产单'),pct=positive(p.pct,'进度',true);if(pct>100)throw new MistCommandError('VALIDATION','进度不得超过100%');
+      const job=find(state.productions,p.id,'生产单'),pct=positive(p.pct,'进度',true);if(job.closed)throw new MistCommandError('PRECONDITION',`生产单 ${job.code} 已随合同取消关闭`);if(pct>100)throw new MistCommandError('VALIDATION','进度不得超过100%');
       assertProductionTransition(state,job,job.col,pct);
       job.pct=pct;if(p.risk!==undefined)job.risk=text(p.risk,'风险说明',false);
       if(p.due!==undefined)job.due=date(p.due);if(p.startDate!==undefined&&p.startDate)job.startDate=date(p.startDate);

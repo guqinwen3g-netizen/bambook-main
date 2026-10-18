@@ -120,11 +120,12 @@ export function riskSignals(state: MistState | null, day: string): RiskSignal[] 
     }
     const now = supplierStatusOn(s, day);
     if (now !== 'active') {
-      const open = (state.fulfillment?.purchases || []).filter(p => p.supplierId === s.id && p.state !== 'rejected' && p.received < p.quantity).length;
+      const open = (state.fulfillment?.purchases || []).filter(p => p.supplierId === s.id && p.state !== 'rejected' && p.state !== 'cancelled' && p.received < p.quantity).length;
       if (open) out.push({ key: `supplier-${now}:${s.id}`, type: 'compliance', level: now === 'blocked' ? 'critical' : 'warning', title: `${s.name} 已${now === 'blocked' ? '停用' : '暂停'}，仍有 ${open} 张在途采购`, basis: `${s.blockReason || '未填原因'}${s.statusFrom ? `（${s.statusFrom} 起）` : ''}。在途采购需逐张确认继续或转厂。`, source: { kind: 'supplier', id: s.id, label: s.name }, orderId: '', since: s.statusFrom || day });
     }
   }
   for (const p of state.productions) {
+    if (p.closed) continue;
     const order = state.orders.find(o => o.id === p.orderId), label = p.code + ' · ' + (order?.code || p.order);
     if (p.risk?.startsWith('QC 不通过')) { out.push({ key: 'qc-nok:' + p.id, type: 'quality', level: 'critical', title: `${p.name} QC 不通过`, basis: p.risk, source: { kind: 'production', id: p.id, label }, orderId: p.orderId, since: day }); continue; }
     if (p.col === 'done') continue;

@@ -158,6 +158,37 @@ it('cancels an approved contract without receipts, blocks it once goods arrived,
   expect(queryByRole(detail,'button',{name:'取消合同'})).toBeNull();
 });
 
+it('transfers an approved contract without receipts to another active supplier and links both contracts',async()=>{
+  const base={type:'辅料',country:'CN',address:'',capabilities:'辅料',capacity:100,capacityUnit:'个',leadDays:7,blockReason:'',contacts:[],fileIds:[],note:'',createdAt:'',updatedAt:''};
+  store.state!.market.suppliers=[{...base,id:'s',code:'S',name:'青禾辅料',status:'active'},{...base,id:'n',code:'N',name:'宝泰辅料',status:'active'},{...base,id:'x',code:'X',name:'已停用',status:'blocked',statusFrom:'2026-10-01',blockReason:'质量'}] as any;
+  store.state!.fulfillment.purchases.push(purchase('open',approved()),purchase('moved',{state:'cancelled',cancellation:{at:'2026-10-12T02:00:00Z',actor:'经办人',reason:'转给 宝泰辅料：产能不足',prepaid:0},transferredTo:{purchaseId:'new',purchaseCode:'NEW',supplierId:'n',supplier:'宝泰辅料',reason:'产能不足',at:'2026-10-12T02:00:00Z',actor:'经办人'}} as any),purchase('new',{supplierId:'n',supplier:'宝泰辅料',transferredFrom:{purchaseId:'moved',purchaseCode:'MOVED',supplierId:'s',supplier:'青禾辅料',reason:'产能不足'}} as any));
+  store.run.mockResolvedValue({result:{id:'new'}});
+  render('open');
+  let detail=host.querySelector('[data-purchase-detail="open"]') as HTMLElement;
+  await click(getByRole(detail,'button',{name:'转给其他供应商'}));
+  const dialog=getByRole(document.body,'dialog');
+  expect(dialog.textContent).toContain('须重新提交审批');
+  const supplier=getByRole(dialog,'combobox',{name:'新供应商'}) as HTMLSelectElement;
+  expect([...supplier.options].map(o=>o.value)).toEqual(['','n']);
+  act(()=>{supplier.value='n';supplier.dispatchEvent(new Event('change',{bubbles:true}));});
+  typeInto(getByRole(dialog,'spinbutton',{name:/新单价/}) as HTMLInputElement,'0.32');
+  typeInto(getByRole(dialog,'textbox',{name:'转移原因与原供应商确认依据'}) as HTMLTextAreaElement,'青禾产能不足，邮件同意取消');
+  await click(getByRole(dialog,'button',{name:'确认转移'}));
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'sourcing.purchase.transfer',payload:expect.objectContaining({purchaseId:'open',supplierId:'n',price:0.32,currency:'CNY',due:'2026-10-30',terms:'月结30天',reason:'青禾产能不足，邮件同意取消'})}));
+  expect(go).toHaveBeenCalledWith('procurement','new');
+  act(()=>root.unmount());host.remove();host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  render('moved');
+  detail=host.querySelector('[data-purchase-detail="moved"]') as HTMLElement;
+  expect(detail.textContent).toContain('已转给 宝泰辅料（NEW）');
+  expect(queryByRole(detail,'button',{name:'转给其他供应商'})).toBeNull();
+  act(()=>root.unmount());host.remove();host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  render('new');
+  detail=host.querySelector('[data-purchase-detail="new"]') as HTMLElement;
+  expect(detail.textContent).toContain('由 MOVED（青禾辅料）转入');
+  await click(getByRole(detail,'button',{name:'查看原合同'}));
+  expect(go).toHaveBeenCalledWith('procurement','moved');
+});
+
 it('compares RFQ quotes in CNY, requires a reason to award a non-lowest quote, and preselects the supplier the user came from',async()=>{
   const st=store.state!,base={type:'成衣加工',country:'CN',address:'',capabilities:'',capacity:100,capacityUnit:'件',leadDays:7,blockReason:'',contacts:[],fileIds:[],note:'',createdAt:'',updatedAt:'',status:'active' as const};
   st.market.suppliers=[{...base,id:'a',code:'A',name:'江南成衣',ratings:[{id:'r',grade:'A',period:'2026 Q3',note:'',at:'',actor:''}]},{...base,id:'b',code:'B',name:'远山服装'},{...base,id:'c',code:'C',name:'恒彩印花',status:'paused',statusFrom:'2026-10-01'}] as any;

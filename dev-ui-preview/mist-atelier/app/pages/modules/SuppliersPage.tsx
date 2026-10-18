@@ -34,7 +34,7 @@ export function supplierPerformance(state: MistState | null, supplierId: string)
   const receiptsOf = (p: FulfillmentPurchase) => (state?.fulfillment.receipts || []).filter(r => r.purchaseId === p.id);
   const arrived = (p: FulfillmentPurchase) => receiptsOf(p).reduce((n, r) => n + r.quantity + r.rejected, 0);
   const promised = (p: FulfillmentPurchase) => p.supplierConfirmation?.confirmedDue || p.due;
-  const open = purchases.filter(p => p.state !== 'rejected' && arrived(p) < p.quantity);
+  const open = purchases.filter(p => p.state !== 'rejected' && p.state !== 'cancelled' && arrived(p) < p.quantity);
   const completed = purchases.filter(p => p.state === 'approved' && arrived(p) >= p.quantity).map(p => { const last = receiptsOf(p).map(r => r.date).sort().pop() || ''; return { purchase: p, last, promised: promised(p), onTime: !!last && last <= promised(p) }; });
   const receipts = purchases.flatMap(receiptsOf);
   return { purchases, open, completed, onTime: completed.filter(c => c.onTime).length, receipts: receipts.length, clean: receipts.filter(r => r.rejected === 0).length, arrived, promised };
@@ -111,7 +111,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   });
   const statusSpec = (s: MarketSupplier, next: MarketSupplier['status']): ModuleEditorSpec => {
     const open = perf.get(s.id)?.open || [];
-    const handover = open.length ? `在手业务 ${open.length} 单（${open.map(p => p.code).join('、')}）不受影响，将继续执行；如需转给其他供应商，须在采购单上走变更（转移尚未接入）。` : '当前没有在手业务。';
+    const handover = open.length ? `在手业务 ${open.length} 单（${open.map(p => p.code).join('、')}）不受影响，将继续执行；如需转给其他供应商，打开该采购单使用“转给其他供应商”（仅限已批准、尚未收货的合同；已有收货的按实收结算后，剩余数量另行询价建单）。` : '当前没有在手业务。';
     return next === 'active'
       ? { title: `恢复与 ${s.name} 的合作`, submitLabel: '恢复合作', initialValues: { reason: '' }, fields: [{ key: 'reason', label: '恢复原因', type: 'textarea', required: true, hint: '例如整改复核通过' }], submit: v => run({ type: 'market.supplier.status', payload: { id: s.id, status: 'active', reason: String(v.reason ?? '') } }) }
       : { title: `${next === 'paused' ? '暂停' : '停用'}供应商 ${s.name}`, submitLabel: next === 'paused' ? '暂停合作' : '停用', description: `生效后不能再为该供应商新建采购单或建档引用。${handover}`,

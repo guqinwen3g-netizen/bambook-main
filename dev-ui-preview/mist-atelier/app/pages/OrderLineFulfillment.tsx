@@ -19,7 +19,7 @@ export function OrderLineFulfillment({ state, order, line, go, onCloseLine }: { 
   const tolerance = lineToleranceStatus(state, order, line), closure = tolerance.closure;
   React.useEffect(() => setOpenKey(current?.key), [line.id, current?.key]);
   const open = stages.find(stage => stage.key === openKey) || current;
-  const factories = [...new Set(state.productions.filter(job => job.lineId === line.id).map(job => job.factory))];
+  const factories = [...new Set(state.productions.filter(job => job.lineId === line.id && !job.closed).map(job => job.factory))];
   const spec = (line as MistOrderLine & { specification?: string }).specification;
   const contract = order.governance?.contract, unit = line.unit, q = formatOrderQuantity;
   const sourceTarget = (stage: LineStage) => stage.target && (() => go(stage.target!.view, stage.target!.view === 'production-board' ? undefined : stage.target!.id, { orderLineId: line.id, ...(stage.target!.view === 'production-board' ? { productionId: stage.target!.id } : {}) }));

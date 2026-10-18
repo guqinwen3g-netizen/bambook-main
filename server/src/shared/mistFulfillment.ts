@@ -135,6 +135,9 @@ export type FulfillmentPurchase = {
     state: 'draft' | 'pending' | 'approved' | 'rejected' | 'cancelled';
     /** 已批准合同未执行即取消（无收货、无结算、无票据）；已付预付须选择退款或转抵。取消后不恢复，需要时重新建单。 */
     cancellation?: { at: string; actor: string; reason: string; prepaid: number; prepayment?: 'refund' | 'transfer'; targetPurchaseId?: string; targetPurchaseCode?: string };
+    /** 整单转给其他供应商（原合同取消、新供应商草稿重新审批）。 */
+    transferredTo?: { purchaseId: string; purchaseCode: string; supplierId: string; supplier: string; reason: string; at: string; actor: string };
+    transferredFrom?: { purchaseId: string; purchaseCode: string; supplierId: string; supplier: string; reason: string };
     requesterId: string;
     createdBy: string;
     createdAt: string;
@@ -616,6 +619,11 @@ const day = (v: unknown, label = '日期', required = true): string => { const s
 const instant = (v: unknown, ctx: MistContext, label = '实际时间'): string => { const s = text(v, label), n = Date.parse(s); return Number.isFinite(n) && n <= Date.parse(ctx.now) + 1000 ? new Date(n).toISOString() : fail(`${label}必须是已发生的实际时间`); };
 function files(root: MistState, value: unknown): string[] { if (!Array.isArray(value) || value.length > 100)
     fail('附件格式无效'); return [...new Set((value as unknown[]).map(id => get(root.files, text(id, '附件'), '附件').id))]; }
+function liveBranch(root: MistState, id: string | undefined) {
+    const branch = get(root.productions, id as string, '生产分支');
+    if (branch.closed) fail(`生产分支 ${branch.code} 已随合同取消关闭：${branch.closed.reason}`, 'PRECONDITION');
+    return branch;
+}
 function source(root: MistState, s: FulfillmentSource, manual = true): FulfillmentSource {
     if (!s || typeof s !== 'object')
         fail('请选择准确来源');
@@ -635,6 +643,8 @@ function source(root: MistState, s: FulfillmentSource, manual = true): Fulfillme
             const prod = get(root.productions, s.productionId, '生产分支');
             if (prod.orderId !== order.id || prod.lineId !== line.id)
                 fail('生产分支与条目不一致');
+            if (prod.closed)
+                fail(`生产分支 ${prod.code} 已随合同取消关闭：${prod.closed.reason}`, 'PRECONDITION');
         }
         return { kind: 'orderLine', orderId: order.id, lineId: line.id, ...(s.productionId ? { productionId: s.productionId } : {}) };
     }
@@ -958,7 +968,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('QC业务域不一致');
             if (!ctx.actorId || t.assigneeId !== ctx.actorId)
                 fail('请先由当前QC认领任务');
-            if (t.kind === 'production' && t.source.kind === 'orderLine') requireProductionRelease(root, get(root.productions, t.source.productionId!, '生产分支'), true);
+            if (t.kind === 'production' && t.source.kind === 'orderLine') requireProductionRelease(root, liveBranch(root, t.source.productionId!), true);
             if (!['pass', 'conditional', 'reject'].includes(p.result))
                 fail('请选择专业结论');
             const reviewedAt = instant(p.reviewedAt, ctx, '实际检查时间'), opinion = text(p.opinion, '专业意见'), report = text(p.report, '报告编号');
@@ -1002,7 +1012,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             t.reportIds.push(id);
             t.state = p.result === 'reject' ? 'blocked' : t.kind === 'production' && (needsResume || p.result === 'conditional') ? 'awaiting_business' : 'reported';
             if (t.source.kind === 'orderLine' && t.source.productionId) {
-                const job = get(root.productions, t.source.productionId, '生产分支');
+                const job = liveBranch(root, t.source.productionId);
                 if (p.result === 'reject')
                     job.risk = `QC 不通过：${opinion}`;
             }
@@ -1033,7 +1043,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             t.state = 'reported';
             t.businessContinued = { reportId: latest.id, actor: ctx.actorName, at: ctx.now, note };
             if (t.source.kind === 'orderLine' && t.source.productionId) {
-                const job = get(root.productions, t.source.productionId, '生产分支');
+                const job = liveBranch(root, t.source.productionId);
                 if (job.risk?.startsWith('QC 不通过：'))
                     job.risk = '';
             }
@@ -1041,7 +1051,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             return { id: t.id };
         }
         case 'fulfillment.production.plan': {
-            const branch = get(root.productions, p.productionId, '生产分支'), fact = productionFact(root, branch.id);
+            const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
             assertMistOrderOpen(root, branch.orderId);
             if (fact.release || fact.completion) fail('已放行生产不得改写计划尺码');
             fact.sizes = normalizeSizes(p.sizes, branch.qty, get(root.orders, branch.orderId, '订单').type === 'garment');
@@ -1050,7 +1060,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             return { id: branch.id };
         }
         case 'fulfillment.production.release': {
-            const branch = get(root.productions, p.productionId, '生产分支'), fact = productionFact(root, branch.id);
+            const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
             if (fact.release) fail('生产分支已放行');
             assertMistOrderApproved(root, branch.orderId); assertMistOrderDeposit(root, branch.orderId);
             const order = get(root.orders, branch.orderId, '订单');
@@ -1066,7 +1076,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             return { id: branch.id };
         }
         case 'fulfillment.production.complete': {
-            const branch = get(root.productions, p.productionId, '生产分支'), fact = productionFact(root, branch.id);
+            const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
             requireProductionRelease(root, branch);
             if (fact.completion) fail('最终完工事实已登记，不得覆盖');
             const quantity = qty(p.quantity, '最终完工数量'), date = day(p.date, '实际完工日');
@@ -1085,7 +1095,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             return { id: branch.id, completionId: fact.completion!.id };
         }
         case 'fulfillment.production.acceptCompletion': {
-            const branch = get(root.productions, p.productionId, '生产分支'), fact = productionFact(root, branch.id);
+            const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
             if (!fact.completion || fact.completion.quantity === branch.qty) fail('当前没有需客户接受的完工数量差异');
             if (fact.customerAcceptance) fail('客户接受事实已登记');
             fact.customerAcceptance = { at: ctx.now, actor: ctx.actorName, note: text(p.note, '客户明确接受数量差异的依据'), completionId: fact.completion!.id };
@@ -1184,7 +1194,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 // Fabric has one full-item factory branch, not garment-style capacity splitting.
                 // Raw-material purchases are independent costs and must not count as production branches.
                 if (order.type === 'fabric') {
-                    if (root.productions.some(job => job.orderId === order.id && job.lineId === line.id)) fail('面料条目仅允许一个工厂履约分支，请返回已有分支继续处理');
+                    if (root.productions.some(job => job.orderId === order.id && job.lineId === line.id && !job.closed)) fail('面料条目仅允许一个工厂履约分支，请返回已有分支继续处理');
                     if (purchase.unit !== line.unit) fail('面料履约单位须与订单条目一致，不能按相同数字自动换算');
                     if (purchase.quantity !== line.qty) fail('面料单工厂分支须覆盖完整订单条目数量；分次交付在原单登记');
                 }
@@ -1328,7 +1338,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             for (const lineId of new Set(lines.map(l => l.lineId))) {
                 const sourceLine = get(root.orderLines, lineId, '来源条目'), terms = f.shippingTerms.find(t => t.orderId === sourceLine.orderId)!;
                 const total = sum(lines.filter(l => l.lineId === lineId).map(l => l.quantity)), reserved = sum(f.shipments.filter(s => s.id !== old?.id && s.state !== 'cancelled').flatMap(s => s.lines.filter(l => l.lineId === lineId).map(l => l.quantity)));
-                const branches = root.productions.filter(branch => branch.lineId === lineId);
+                const branches = root.productions.filter(branch => branch.lineId === lineId && !branch.closed);
                 assertShipmentWithinTolerance(sourceLine, (root.orders.find(o => o.id === sourceLine.orderId) as any)?.governance?.contract, sum([total, reserved]));
                 if (!terms.partialAllowed) {
                     const finalTotal = sum(branches.map(branch => physicalCapacity(root, { orderId: branch.orderId, lineId, productionId: branch.id, quantity: 0, factoryConfirmedAt: '' })));

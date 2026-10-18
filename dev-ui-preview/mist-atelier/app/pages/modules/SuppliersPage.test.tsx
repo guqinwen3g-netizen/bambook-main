@@ -57,13 +57,13 @@ describe('供应商管理', () => {
     expect(button('恢复合作')).toBeTruthy(); expect(button('暂停合作')).toBeUndefined();
     expect(button('询价比价')!.disabled).toBe(true); expect(detail.textContent).toContain('供应商当前不可合作，不能邀请报价');
   });
-  it('暂停前列出在手业务，说明继续执行与转移未接入', async () => {
+  it('暂停前列出在手业务，说明继续执行与如何转给其他供应商', async () => {
     await mount(named('华盛毛纺').id);
     const lining = state.fulfillment.purchases.find(p => p.description.includes('里布'))!;
     expect(host.querySelector('[data-supplier-detail]')!.textContent).toContain(lining.code);
     await click('暂停合作');
     expect(document.body.textContent).toContain(`在手业务 1 单（${lining.code}）不受影响`);
-    expect(document.body.textContent).toContain('转移尚未接入');
+    expect(document.body.textContent).toContain('转给其他供应商”（仅限已批准、尚未收货的合同');
     expect(bridge.current.run).not.toHaveBeenCalled();
   });
 });

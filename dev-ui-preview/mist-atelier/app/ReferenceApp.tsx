@@ -205,7 +205,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const overview = (): ChatMessage => {
     if (!state) return {role:'assistant',content:'工作空间尚未读取，请稍后再试。'};
     const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
-    const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>p.col!=='done'&&p.due<platformBusinessDate(new Date()));
+    const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(new Date()));
     return {role:'assistant',content:<div><p>当前工作空间有 {visibleDevs.length} 个可见开发案、{visibleOrders.length} 张订单；{visibleTasks.filter(t=>!t.done).length} 项待办未完成，{late.length} 项生产已过交期。</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}<p>以上为本地记录查询，未执行修改。发送问题时，仅提供你选中的来源及已授权模块的数量概况。</p></div>,sources:['当前工作空间 · 版本 '+workspace.workspace?.revision],actions:<><Button disabled={!session.hasPermission('ai:chat')} onClick={()=>go('assistant')}>进入完整助手</Button>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{aiUseRouteSource?'取消引用：':'引用当前来源：'}{currentAiSource.label}</Button>:<span className="mist-note">当前页面没有可引用的订单、发票或风险记录。</span>}</>};
   };
   const send = async (question:string,retrySources?:string[]) => {

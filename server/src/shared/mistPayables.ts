@@ -953,6 +953,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         } else disposition = { prepayment: 'refund' };
       }
       po.state = 'cancelled'; po.cancellation = { at: c.now, actor: c.actorName, reason, prepaid: major(prepaid), ...disposition };
+      for (const branch of root.productions.filter(x => x.sourcePurchaseId === po.id && !x.closed)) { branch.closed = { at: c.now, actor: c.actorName, reason: `合同 ${po.code} 取消：${reason}` }; branch.risk = '合同已取消，生产分支关闭'; }
       for (const plan of s.plans.filter(x => x.purchaseId === po.id && x.state === 'active')) { plan.state = 'cancelled'; plan.cancelled = { at: c.now, actor: c.actorName, reason: '合同取消：' + reason }; }
       const tail = prepaid <= 0 ? '' : disposition.prepayment === 'refund' ? `；已付预付 ${fx(major(prepaid))} ${po.currency} 待工厂退回，到账后由财务登记` : `；已付预付 ${fx(major(prepaid))} ${po.currency} 待财务转抵到 ${disposition.targetPurchaseCode}`;
       root.events.unshift({ id: c.id(), entityType: 'procurement', entityId: po.id, at: c.now, actor: c.actorName, text: `合同取消：${reason}${tail}`, fileIds: [] });

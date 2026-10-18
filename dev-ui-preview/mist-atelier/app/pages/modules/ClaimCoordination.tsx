@@ -25,7 +25,7 @@ type Props = {
 
 /** 默认工厂：订单生产分支上登记的工厂，名称在供应商档案中唯一时才预选。 */
 export function claimDefaultSupplierId(state: MistState, claim: PlatformClaim) {
-  const suppliers = state.market?.suppliers ?? [], names = [...new Set(state.productions.filter(p => p.orderId === claim.orderId).map(p => p.factory))];
+  const suppliers = state.market?.suppliers ?? [], names = [...new Set(state.productions.filter(p => p.orderId === claim.orderId && !p.closed).map(p => p.factory))];
   const matches = suppliers.filter(row => names.includes(row.name));
   return matches.length === 1 ? matches[0].id : '';
 }
