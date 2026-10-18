@@ -107,7 +107,8 @@
 .mist-stat-delta { margin-left: auto; font-size: var(--mist-text-xs); }
 .mist-stat-delta[data-dir="up"] { color: var(--mist-ok-ink); } .mist-stat-delta[data-dir="down"] { color: var(--mist-accent-ink); } .mist-stat-delta[data-dir="bad"] { color: var(--mist-bad-ink); }
 .mist-stat-v { font-size: var(--mist-text-stat); font-weight: var(--mist-fw-light); letter-spacing: -.02em; line-height: 1; display: flex; align-items: baseline; gap: 8px; font-variant-numeric: tabular-nums; }
-.mist-stat-lines { display: flex; flex-direction: column; gap: 6px; font-size: min(var(--mist-text-2xl), 1em); white-space: nowrap; }
+/* 多币种逐行：金额不折行，窄卡片里按卡片宽度缩小字号（.mist-stat 是 inline-size 容器）。 */
+.mist-stat-lines { display: flex; flex-direction: column; gap: 6px; font-size: min(var(--mist-text-2xl), 1em, 11cqi); white-space: nowrap; min-width: 0; max-width: 100%; }
 .mist-stat-v small { font-size: var(--mist-text-sm); font-weight: var(--mist-fw-regular); color: var(--mist-ink-3); letter-spacing: 0; }
 .mist-stat-foot { display: flex; align-items: center; justify-content: space-between; font-size: var(--mist-text-xs); color: var(--mist-ink-3); gap: 10px; }
 .mist-spark { height: 28px; width: 96px; flex: none; }
@@ -690,6 +691,7 @@
 .mist-idrow-ttl { flex: 1 1 240px; }
 .mist-idrow-ttl .mist-h1 { overflow-wrap: anywhere; }
 .mist-idrow-people { flex-wrap: wrap; min-width: 0; max-width: 100%; row-gap: 12px; }
+.mist-idrow-people > * { min-width: 0; max-width: 100%; }
 .mist-tl { grid-template-columns: 26px minmax(0, 1fr); }
 .mist-tl > div { min-width: 0; overflow-wrap: anywhere; }
 .mist-legend > div { flex-wrap: wrap; min-width: 0; }
