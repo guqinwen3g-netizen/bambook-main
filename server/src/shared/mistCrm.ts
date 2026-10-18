@@ -1,24 +1,32 @@
 /** 客户关系切片：跟进记录与商机。只记录业务员实际登记的事实；商机金额按原币种保存，不跨币种汇总。 */
-import { MistCommandError, type MistContext, type MistState } from './mistWorkspace';
+import { MistCommandError, isRecognizedMistInvoice, type MistContext, type MistState } from './mistWorkspace';
+import { platformBusinessDate } from './mistPlatform';
 import { ownerChangeText, resolveMember } from './mistAccounts';
 
 export type CrmFollowUpMethod = 'call' | 'email' | 'meeting' | 'visit' | 'im' | 'other';
-export type CrmLinkKind = 'development' | 'quotation' | 'order' | 'opportunity';
+export type CrmLinkKind = 'development' | 'quotation' | 'order' | 'opportunity' | 'invoice';
+/**
+ * 催收（2026-10-18）：业务员对回款负责，催收登记为关联应收票据的客户跟进。level 1 到期提醒、2 逾期催收、3 最后通知；
+ * 客户承诺付款时记承诺日与金额（不超过当时未收），承诺日已过而此后实际核销不足承诺金额即为“承诺未兑现”。
+ */
+export type CrmCollectionLevel = 1 | 2 | 3;
+export const CRM_COLLECTION_LEVEL_LABEL: Record<CrmCollectionLevel, string> = { 1: '到期提醒', 2: '逾期催收', 3: '最后通知' };
+export type CrmCollection = { level: CrmCollectionLevel; promisedDate: string; promisedAmount: string; currency: string; openAtLog: number };
 export type CrmLink = { kind: CrmLinkKind; id: string };
-export type CrmFollowUp = { id: string; customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; nextTaskId: string; link: CrmLink | null; actor: string; createdAt: string };
+export type CrmFollowUp = { id: string; customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; nextTaskId: string; link: CrmLink | null; actor: string; createdAt: string; collection?: CrmCollection };
 export type CrmStage = 'intent' | 'sampling' | 'quoting' | 'won' | 'lost';
 export type CrmOpportunity = { id: string; customerId: string; title: string; domain: 'garment' | 'fabric'; stage: CrmStage; amount: string; currency: string; expectedDate: string; /** 负责人显示名快照；ownerId 为负责人账号。 */ owner: string; ownerId: string; note: string; lossReason: string; devIds: string[]; quotationIds: string[]; orderIds: string[]; history: Array<{ at: string; actor: string; from: CrmStage | null; to: CrmStage; note: string }>; createdAt: string; updatedAt: string };
 export type CrmState = { followUps: CrmFollowUp[]; opportunities: CrmOpportunity[] };
 export type CrmOpportunityInput = { customerId: string; title: string; domain: 'garment' | 'fabric'; amount: string; currency: string; expectedDate: string; ownerId: string; note: string; devIds: string[]; quotationIds: string[]; orderIds: string[] };
 export type CrmCommand =
-  | { type: 'crm.followUp.save'; payload: { customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; link: CrmLink | null } }
+  | { type: 'crm.followUp.save'; payload: { customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; link: CrmLink | null; collection?: { level: CrmCollectionLevel; promisedDate?: string; promisedAmount?: string } } }
   | { type: 'crm.opportunity.save'; payload: { id?: string; input: CrmOpportunityInput } }
   | { type: 'crm.opportunity.stage'; payload: { id: string; stage: CrmStage; note: string } };
 
 export const CRM_METHOD_LABEL: Record<CrmFollowUpMethod, string> = { call: '电话', email: '邮件', meeting: '会议', visit: '拜访', im: '即时通讯', other: '其他' };
 export const CRM_STAGE_LABEL: Record<CrmStage, string> = { intent: '意向', sampling: '打样', quoting: '报价', won: '已下单', lost: '已流失' };
 export const CRM_STAGES: CrmStage[] = ['intent', 'sampling', 'quoting', 'won', 'lost'];
-export const CRM_LINK_LABEL: Record<CrmLinkKind, string> = { development: '开发案', quotation: '报价', order: '订单', opportunity: '商机' };
+export const CRM_LINK_LABEL: Record<CrmLinkKind, string> = { development: '开发案', quotation: '报价', order: '订单', opportunity: '商机', invoice: '应收票据' };
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : 422); };
 const text = (value: unknown, label: string, required = false, max = 2000) => { const v = typeof value === 'string' ? value.trim() : ''; if (required && !v) fail(`请填写${label}`); if (v.length > max) fail(`${label}过长`); return v; };
 const day = (value: unknown, label: string, required = false) => { const v = text(value, label, required, 10); if (v && (!/^\d{4}-\d{2}-\d{2}$/.test(v) || new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) !== v)) fail(`${label}格式无效`); return v; };
@@ -30,11 +38,29 @@ export function crmCommandPermission(_command: CrmCommand) { return 'relations:w
 export function crmLinkTarget(root: MistState, customerId: string, link: CrmLink): { label: string; view: string; id: string } | null {
   if (link.kind === 'development') { const row = root.devs.find(item => item.id === link.id && item.customerId === customerId); return row ? { label: `${row.code} · ${row.name}`, view: 'development/detail', id: row.id } : null; }
   if (link.kind === 'quotation') { const row = root.market.quotations.find(item => item.id === link.id && item.customerId === customerId); return row ? { label: row.code, view: 'quotations', id: row.id } : null; }
+  if (link.kind === 'invoice') {
+    const inv = root.invoices.find(item => item.id === link.id && isRecognizedMistInvoice(item));
+    const owner = inv && (inv.devId ? root.devs.find(d => d.id === inv.devId)?.customerId : root.orders.find(o => o.id === inv.orderId)?.customerId);
+    return inv && owner === customerId ? { label: `${inv.code} · ${inv.currency} ${inv.amount.toFixed(2)}`, view: 'invoices', id: inv.id } : null;
+  }
   if (link.kind === 'order') { const row = root.orders.find(item => item.id === link.id && item.customerId === customerId); return row ? { label: row.code, view: 'orders/detail', id: row.id } : null; }
   const row = root.crm.opportunities.find(item => item.id === link.id && item.customerId === customerId); return row ? { label: row.title, view: 'crm', id: customerId } : null;
 }
 function customer(root: MistState, id: unknown) { return root.customers.find(row => row.id === id) || fail('客户不存在', 'NOT_FOUND'); }
-function ids(root: MistState, customerId: string, kind: Exclude<CrmLinkKind, 'opportunity'>, value: unknown) {
+/** 应收票据的催收概况：次数、最近一次、最近一次承诺及是否兑现（承诺之后登记的核销合计 ≥ 承诺金额）。 */
+export function invoiceCollectionStatus(root: MistState, invoiceId: string, today: string) {
+  const rows = (root.crm?.followUps || []).filter(f => f.link?.kind === 'invoice' && f.link.id === invoiceId && f.collection).sort((a, b) => b.at.localeCompare(a.at));
+  const promised = rows.find(f => f.collection!.promisedDate);
+  let promise: { date: string; amount: string; currency: string; paidSince: number; state: 'pending' | 'kept' | 'broken' } | undefined;
+  if (promised) {
+    const c = promised.collection!, paid = (root.allocations || []).filter(a => a.invoiceId === invoiceId && a.createdAt >= promised.createdAt).reduce((n, a) => n + Math.round(a.amount * 100), 0);
+    const inv = root.invoices.find(i => i.id === invoiceId);
+    const kept = paid >= Math.round(Number(c.promisedAmount) * 100) || (!!inv && inv.open <= 0);
+    promise = { date: c.promisedDate, amount: c.promisedAmount, currency: c.currency, paidSince: paid / 100, state: kept ? 'kept' : c.promisedDate < today ? 'broken' : 'pending' };
+  }
+  return { count: rows.length, last: rows[0], level: rows[0]?.collection?.level, promise };
+}
+function ids(root: MistState, customerId: string, kind: Exclude<CrmLinkKind, 'opportunity' | 'invoice'>, value: unknown) {
   if (value !== undefined && !Array.isArray(value)) fail('关联对象格式无效');
   const list = [...new Set(((value as unknown[]) || []).map(String))];
   for (const id of list) if (!crmLinkTarget(root, customerId, { kind, id })) fail(`关联的${CRM_LINK_LABEL[kind]}不属于该客户`, 'NOT_FOUND');
@@ -54,10 +80,27 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       if (nextDate && nextDate < context.now.slice(0, 10)) fail('下次跟进日不能早于今天');
       let link: CrmLink | null = null;
       if (p.link) { if (!Object.keys(CRM_LINK_LABEL).includes(p.link.kind)) fail('关联对象类型无效'); link = { kind: p.link.kind, id: text(p.link.id, '关联对象', true, 200) }; if (!crmLinkTarget(root, c.id, link)) fail('关联对象不属于该客户', 'NOT_FOUND'); }
+      let collection: CrmCollection | undefined;
+      if (p.collection !== undefined && p.collection !== null) {
+        if (link?.kind !== 'invoice') fail('催收须关联应收票据');
+        const inv = root.invoices.find(i => i.id === link!.id)!;
+        if (!(inv.open > 0)) fail('该应收已结清，无需催收', 'PRECONDITION');
+        const level = p.collection.level; if (level !== 1 && level !== 2 && level !== 3) fail('催收级别无效');
+        const today = platformBusinessDate(context.now), promisedDate = day(p.collection.promisedDate, '承诺付款日'), promisedAmount = text(p.collection.promisedAmount, '承诺金额', false, 20);
+        if (promisedDate && promisedDate < today) fail('承诺付款日不能早于今天');
+        if (!!promisedDate !== !!promisedAmount) fail('客户承诺付款须同时填写承诺付款日与承诺金额');
+        if (promisedAmount && (!/^\d{1,12}(\.\d{1,2})?$/.test(promisedAmount) || !(Number(promisedAmount) > 0))) fail('承诺金额须为大于零、最多两位小数的金额');
+        if (promisedAmount && Math.round(Number(promisedAmount) * 100) > Math.round(inv.open * 100)) fail(`承诺金额不能超过当前未收 ${inv.open.toFixed(2)} ${inv.currency}`);
+        collection = { level, promisedDate, promisedAmount, currency: inv.currency, openAtLog: inv.open };
+      }
       const id = context.id(); let nextTaskId = '';
-      if (nextDate) { nextTaskId = context.id(); root.tasks.unshift({ id: nextTaskId, title: `跟进客户：${c.name}`, due: nextDate, done: false, kind: 'crm-follow-up', target: { view: 'crm', id: c.id, customerId: c.id }, assigneeIds: context.actorId ? [context.actorId] : [] }); }
-      root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, createdAt: context.now });
-      log(root, context, c.id, `记录${CRM_METHOD_LABEL[p.method]}跟进${nextDate ? `，下次跟进 ${nextDate}` : ''}`); return { id };
+      const inv = link?.kind === 'invoice' ? root.invoices.find(i => i.id === link!.id) : undefined;
+      if (nextDate) { nextTaskId = context.id(); root.tasks.unshift({ id: nextTaskId, title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, due: nextDate, done: false, kind: 'crm-follow-up', target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id }, assigneeIds: context.actorId ? [context.actorId] : [] }); }
+      root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, createdAt: context.now, ...(collection ? { collection } : {}) });
+      const what = collection && inv ? `${CRM_COLLECTION_LEVEL_LABEL[collection.level]} ${inv.code}${collection.promisedDate ? `，客户承诺 ${collection.promisedDate} 付 ${collection.promisedAmount} ${collection.currency}` : ''}` : '';
+      log(root, context, c.id, `记录${CRM_METHOD_LABEL[p.method]}${what ? '催收：' + what : '跟进'}${nextDate ? `，下次跟进 ${nextDate}` : ''}`);
+      if (collection && inv) root.events.unshift({ id: context.id(), entityType: 'invoice', entityId: inv.id, actor: context.actorName, at: context.now, text: `${CRM_METHOD_LABEL[p.method]}${what}`, fileIds: [] });
+      return { id };
     }
     case 'crm.opportunity.save': {
       const input = command.payload.input || ({} as CrmOpportunityInput), old = command.payload.id ? root.crm.opportunities.find(row => row.id === command.payload.id) || fail('商机不存在', 'NOT_FOUND') : undefined;

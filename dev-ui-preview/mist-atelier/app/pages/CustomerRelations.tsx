@@ -3,7 +3,7 @@ import React from 'react';
 import { ArrowRight, CalendarClock, FilePlus2, Flag, Mail, MessageSquarePlus, Pencil, Plus, Receipt, Target, XCircle } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, Drawer, EmptyState, Facts, Pill, StageProgress, SummaryBar, Timeline, type Tone } from '../../../../components/mist';
 import type { MistCustomer, MistState } from '../../../../server/src/shared/mistWorkspace';
-import { CRM_LINK_LABEL, CRM_METHOD_LABEL, CRM_STAGE_LABEL, crmLinkTarget, type CrmFollowUp, type CrmLink, type CrmOpportunity, type CrmStage } from '../../../../server/src/shared/mistCrm';
+import { CRM_COLLECTION_LEVEL_LABEL, CRM_LINK_LABEL, CRM_METHOD_LABEL, CRM_STAGE_LABEL, crmLinkTarget, type CrmFollowUp, type CrmLink, type CrmOpportunity, type CrmStage } from '../../../../server/src/shared/mistCrm';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './modules/ModuleWorkbench';
 import { emptyOption, field, localNow, text } from './modules/fulfillmentKit';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -50,7 +50,7 @@ export function FollowUpPanel({ customer, state, can, compact }: { customer: Mis
   const target = (row: CrmFollowUp) => row.link ? crmLinkTarget(state, customer.id, row.link) : null;
   return <Card>
     <CardHeader title="跟进记录" sub={nextOpen ? `下次跟进 ${nextOpen.due}` : rows.length ? '没有待跟进安排' : undefined} tools={can ? <Button size="sm" icon={MessageSquarePlus} onClick={() => setDialog(spec())}>记录跟进</Button> : undefined} />
-    {shown.length ? <Timeline events={shown.map(row => { const t = target(row); return { who: `${row.actor} · ${CRM_METHOD_LABEL[row.method]}`, when: when(row.at), text: <span className="mist-col" style={{ gap: 4 }}><span style={{ whiteSpace: 'pre-wrap' }}>{row.content}</span>{(t || row.nextDate) && <span className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{t && row.link && <Pill tone="accent">{CRM_LINK_LABEL[row.link.kind]} · {t.label}</Pill>}{row.nextDate && <Pill tone={state.tasks.find(task => task.id === row.nextTaskId)?.done ? 'ok' : 'warn'}><CalendarClock size={12} /> 下次 {row.nextDate}</Pill>}</span>}</span> }; })} />
+    {shown.length ? <Timeline events={shown.map(row => { const t = target(row); return { who: `${row.actor} · ${CRM_METHOD_LABEL[row.method]}`, when: when(row.at), text: <span className="mist-col" style={{ gap: 4 }}><span style={{ whiteSpace: 'pre-wrap' }}>{row.content}</span>{(t || row.nextDate) && <span className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{t && row.link && <Pill tone="accent">{CRM_LINK_LABEL[row.link.kind]} · {t.label}</Pill>}{row.collection && <Pill tone={row.collection.level === 3 ? 'bad' : 'warn'}>{CRM_COLLECTION_LEVEL_LABEL[row.collection.level]}{row.collection.promisedDate ? ` · 承诺 ${row.collection.promisedDate} 付 ${row.collection.promisedAmount} ${row.collection.currency}` : ''}</Pill>}{row.nextDate && <Pill tone={state.tasks.find(task => task.id === row.nextTaskId)?.done ? 'ok' : 'warn'}><CalendarClock size={12} /> 下次 {row.nextDate}</Pill>}</span>}</span> }; })} />
       : <EmptyState compact icon={MessageSquarePlus} title="还没有跟进记录" description="记录电话、邮件、会议或拜访的实际沟通内容。" />}
     {compact && rows.length > shown.length && <div style={{ padding: '0 20px 16px' }}><Button variant="quiet" size="sm" onClick={() => go('crm', customer.id, { customerId: customer.id, section: 'followups' })}>查看全部 {rows.length} 条</Button></div>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
