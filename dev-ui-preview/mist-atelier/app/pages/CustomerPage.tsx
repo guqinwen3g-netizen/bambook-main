@@ -1,4 +1,5 @@
 /** T7 客户档案：原 Mist 构图，所有 Tab 读取同一客户的关联实体。 */
+import { BaseDataImportButton } from './modules/BaseDataImport';
 import React from 'react';
 import { BadgeDollarSign, CalendarClock, ClipboardList, Download, Ellipsis, Layers, Mail, Plus, Sparkles, TrendingUp, Wallet } from 'lucide-react';
 import { Avatar, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, IconButton, IdentityHeader, KeyValue, MistPage, Mono, ObjectCell, PageHeader, Pill, Select, StageProgress, StatCard, StatGrid, Tabs, TextInput, Thumb, Timeline, useToast } from '../../../../components/mist';
@@ -60,7 +61,7 @@ export function CustomerPage() {
       setCreating(false);go('crm',id,{customerId:id});
     },
   };
-  const customerActions=<><Select aria-label="选择客户" value={customer?.id||''} disabled={loading||creating} onChange={event=>{if(event.target.value)go('crm',event.target.value,{customerId:event.target.value});}} options={[{value:'',label:'选择客户'},...(state?.customers||[]).map(c=>({value:c.id,label:c.name+' · '+c.code}))]}/>{canCreate&&<Button icon={Plus} disabled={loading} onClick={()=>setCreating(true)}>新建客户</Button>}</>;
+  const customerActions=<><Select aria-label="选择客户" value={customer?.id||''} disabled={loading||creating} onChange={event=>{if(event.target.value)go('crm',event.target.value,{customerId:event.target.value});}} options={[{value:'',label:'选择客户'},...(state?.customers||[]).map(c=>({value:c.id,label:c.name+' · '+c.code}))]}/>{canCreate&&<BaseDataImportButton kind="customer" disabled={loading}/>}{canCreate&&<Button icon={Plus} disabled={loading} onClick={()=>setCreating(true)}>新建客户</Button>}</>;
   if(creating)return <ModuleEditorPage spec={createSpec} onClose={()=>setCreating(false)}/>;
   const emailValid = (email?:string):email is string => !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const customerEmail = contacts.find(item=>emailValid(item.email))?.email;

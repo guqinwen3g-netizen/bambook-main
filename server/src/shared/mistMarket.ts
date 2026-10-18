@@ -1,4 +1,5 @@
 import {freezeQuotationHistoryEvidence,type QuoteHistoryReference} from './mistQuotationHistoryEvidence';
+import {mistImportPermission,mistImportRun,type MistImportKind,type MistImportRow} from './mistImport';
 import {quotationFeedbackTarget,validateQuoteFeedback,type QuoteFeedbackInput,type QuoteFeedbackRecord} from './mistQuotationFeedback';
 import {activeQuoteCostSnapshots,calculateQuoteCosting,quotationCostingTarget,quoteCostModelVersion,quoteCostDecimal,type QuoteCostInput,type QuoteCostSnapshot} from './mistQuotationCosting';
 import {developmentDomain} from './mistDevelopmentDomain';
@@ -44,6 +45,7 @@ type Input<T extends RecordBase> = Omit<T,keyof RecordBase|'status'> & {fileIds?
 export type MarketCommand =
  | {type:'market.customer.update';payload:{id:string;patch:Partial<Omit<MistCustomer,'id'|'code'|'owner'>>}}
  | {type:'market.contact.delete';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id:string}}
+ | {type:'market.import';payload:{kind:MistImportKind;rows:MistImportRow[]}}
  | {type:'market.customer.create';payload:{input:Omit<MistCustomer,'id'|'code'|'owner'>&{code?:string}}}
  | {type:'market.attachment.set';payload:{kind:'product'|'supplier'|'relation'|'season'|'trend'|'show'|'campaign'|'lead'|'showLead'|'quotation'|'lookbook';id:string;fileIds:string[]}}
  | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']}
@@ -85,6 +87,7 @@ export type MarketCommand =
 
 export function createMarketState(_context:MistContext,_rootState:Partial<MistState>):MarketState { return {products:[],suppliers:[],relations:[],seasons:[],trends:[],shows:[],campaigns:[],leads:[],quotations:[],lookbooks:[]}; }
 export function marketCommandPermission(command:MarketCommand):string|null {
+ if(command.type==='market.import'){try{return mistImportPermission(command.payload?.kind);}catch{throw new MistCommandError('VALIDATION','导入类型无效');}}
  if(command.type.startsWith('market.customer.')||command.type==='market.lead.convertToCrm')return 'relations:write';
  if(command.type==='market.contact.delete')return command.payload?.kind==='supplier'?'suppliers:write':'relations:write';
  if(command.type==='market.attachment.set'){const scopes:Record<string,string>={product:'products',supplier:'suppliers',relation:'relations',season:'seasons',trend:'seasons',show:'seasons',campaign:'marketing',lead:'marketing',showLead:'seasons',quotation:'quotations',lookbook:'marketing'};const scope=scopes[command.payload.kind];if(!scope)throw new MistCommandError('VALIDATION','附件对象类型无效');return scope+':write';}
@@ -256,6 +259,10 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    if(i.kind==='supplier'){const relation=m.relations.find(r=>r.supplierId===parent.id&&!r.customerId);if(relation)relation.contacts=parent.contacts.map(c=>({...c}));}
    else {const relation=parent as MarketRelation;if(relation.supplierId&&!relation.customerId)find(m.suppliers,relation.supplierId,'供应商').contacts=parent.contacts.map(c=>({...c}));if(relation.customerId)root.contacts=root.contacts.filter(c=>c.id!==i.id||c.customerId!==relation.customerId);}
    const linked=parent as MarketRelation;history(root,ctx,linked.customerId?'customer':'relation',linked.customerId||linked.supplierId||parent.id,'删除联系人 '+removed.name);return{id:parent.id,contactId:i.id};
+  }
+  case 'market.import': {
+   const {kind,rows}=command.payload;
+   return mistImportRun(kind,rows,ctx,m,next=>execute(root,next as MarketCommand,ctx) as {id?:string;customerId?:string},fail);
   }
   case 'market.customer.create': {
    const input=command.payload.input;
