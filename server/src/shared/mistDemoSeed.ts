@@ -12,7 +12,7 @@ import { riskSignals } from './mistRisk';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { platformBusinessDate } from './mistPlatform';
 
-export const DEMO_SEED_VERSION = 20;
+export const DEMO_SEED_VERSION = 21;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -312,6 +312,8 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       sampleQc('PO-L-0411', 'shipping', 'pass', ship);
       run('pack 017', { type: 'fulfillment.shipments.pack', payload: { id: ship, lines: Array.from({ length: 5 }, (_, i) => ({ lineId: job017.lineId, productionId: job017.id, carton: `${i * 20 + 1}-${i * 20 + 20}`, quantity: 100, netWeight: 96, grossWeight: 108, volume: 1.15, note: '' })) } }, warehouse);
       run('customs 017', { type: 'fulfillment.customs.save', payload: { shipmentId: ship, declarationNo: '2200 2026 1004 9126 51', broker: '上海东航报关有限公司', hsCode: '6203.31', origin: '中国', tradeMode: '一般贸易', declaredAt: day(-5), clearedAt: day(-4), evidence: '海关放行通知', fileIds: [demoFile('customs-release', ship, '报关放行通知 SO-G-2026-017（演示）.pdf')], note: '', status: 'cleared' } }, warehouse);
+      // 商品归类按款号建档一次，之后每票出运自动带出商品编号、申报品名与申报要素。
+      run('customs classify coat', { type: 'fulfillment.customs.classify.save', payload: { family: 'garment', hsCode: '6203310000', declaredName: '男式羊毛西服上衣', brandType: '3', preference: '0', elements: ['机织', '西服上衣', '男式', '100%羊毛', 'Northwind'], styles: ['CC-AW27-COAT-014'] } }, warehouse);
       for (const [type, title] of [['CI', '商业发票'], ['PL', '装箱单']] as const) {
         const doc = id(run('document ' + type, { type: 'fulfillment.documents.save', payload: { shipmentId: ship, orderId: type === 'CI' ? order017.id : '', type, number: `${type}-2026-0417`, title: `${title} · SO-G-2026-017 第一批`, dueDate: type === 'CI' ? day(26) : '', content: type === 'CI' ? '500 件修身羊毛西装套装 · FOB 上海 · USD' : '100 箱 · 净重 480 kg · 毛重 540 kg · 5.75 m³', fileIds: [demoFile(type === 'CI' ? 'commercial-invoice' : 'packing-list', ship, `${type}-2026-0417 ${title}（演示）.pdf`)] } }, warehouse));
         const issued = doc ? run('document issue ' + type, { type: 'fulfillment.documents.issue', payload: { id: doc } }, warehouse) : null;

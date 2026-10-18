@@ -13,13 +13,15 @@ import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
+import { CustomsClassificationLedger, CustomsItemsBlock } from './CustomsDeclarationPanel';
+import { readCustomsClassifications } from '../../../../../server/src/shared/mistCustomsDeclaration';
 import { REBATE_TONE, RebateClaimBlock, RebateRatesCard, rebateSummary } from './RebatePanel';
 import { REBATE_STATE_LABEL } from '../../../../../server/src/shared/mistExportRebate';
 import { LetterOfCreditLedger, lcOrderDomain } from './LetterOfCredits';
 import { readLetterOfCredits } from '../../../../../server/src/shared/mistLetterOfCredit';
 import { MODE_LABEL, packedFor, packingMatched, shipmentStage, STAGE_LABEL, STAGE_TONE } from './ShipmentsPage';
 
-type Tab = 'declarations' | 'lc' | 'rebate';
+type Tab = 'declarations' | 'lc' | 'rebate' | 'hs';
 type Domain = FulfillmentShipment['domain'];
 type CustomsStatus = FulfillmentCustoms['status'];
 type StatusFilter = 'all' | CustomsStatus;
@@ -72,9 +74,10 @@ export function CustomsPage() {
   const records = (f?.customs || []).filter(c => !hasContext || c.shipmentId === route.section);
   const routed = records.find(c => c.id === route.id);
   const lcAll = state ? readLetterOfCredits(state).map(lc => ({ type: lcOrderDomain(state, lc) })) : [];
+  const hsAll = state ? readCustomsClassifications(state).filter(c => !c.voided) : [];
   const domainOf = (c: FulfillmentCustoms): Domain => shipmentOf(c)?.domain || 'garment';
   const domain: Domain = domainChoice || (routed ? domainOf(routed) : undefined) || contextShipment?.domain || (records.some(c => domainOf(c) === 'garment') || !records.some(c => domainOf(c) === 'fabric') ? 'garment' : 'fabric');
-  const tab: Tab = hasContext ? 'declarations' : tabChoice === 'lc' || !routed ? tabChoice : routed.status === 'draft' ? 'declarations' : tabChoice;
+  const tab: Tab = hasContext ? 'declarations' : tabChoice === 'lc' || tabChoice === 'hs' || !routed ? tabChoice : routed.status === 'draft' ? 'declarations' : tabChoice;
   const inDomain = hasContext ? records : records.filter(c => domainOf(c) === domain);
   const needle = query.trim().toLowerCase();
   const matches = (c: FulfillmentCustoms) => { const s = shipmentOf(c); return !needle || `${c.code} ${c.declarationNo} ${c.broker} ${c.hsCode} ${c.tradeMode} ${s?.code || ''} ${s?.customer || ''} ${s?.portOfDischarge || ''}`.toLowerCase().includes(needle); };
@@ -140,7 +143,7 @@ export function CustomsPage() {
         onBill={id => go('payment-vouchers', id, { section: 'payables' })} onReceipt={id => go('payment-vouchers', id)}
         onEdit={() => setDialog(editSpec(selected))} onDeclare={() => setDialog(declareSpec(selected, selected.status === 'submitted'))} onRelease={() => { if (canClear) setDialog(releaseSpec(selected)); }}
         onAttach={ids => run({ type: 'fulfillment.customs.save', payload: payload(selected, { fileIds: ids }) })}
-        onShipment={() => go('shipments', selected.shipmentId)} onDocuments={() => go('document-center', undefined, { section: selected.shipmentId })} onInvoice={id => go('invoices', id)} />
+        onClassify={() => changeTab('hs')} onShipment={() => go('shipments', selected.shipmentId)} onDocuments={() => go('document-center', undefined, { section: selected.shipmentId })} onInvoice={id => go('invoices', id)} />
     : <EmptyState icon={Stamp} title="报关详情" description={loading ? '正在读取报关记录' : tab === 'rebate' ? '从列表选择一张报关单，查看放行、收汇与退税资料' : '从列表选择一条报关记录，查看申报、放行与装箱核对'} compact />;
   const pendingShown = allPending ? pendingShipments : pendingShipments.slice(0, 3);
   const exportRows = () => exportRecords('报关台账', ['记录', '报关单号', '出运', '客户', 'HS编码', '报关行', '原产地', '成交方式', '状态', '申报日', '放行日'], rows.map(c => [c.code, c.declarationNo, shipmentOf(c)?.code || '', shipmentOf(c)?.customer || '', c.hsCode, c.broker, c.origin, c.tradeMode, CUSTOMS_LABEL[c.status], c.declaredAt, c.clearedAt]));
@@ -151,13 +154,13 @@ export function CustomsPage() {
       actions={<>
         {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>返回出运</Button>}
         {hasContext && <Button onClick={() => go('customs')}>查看全部报关</Button>}
-        {tab !== 'lc' && <Button icon={Download} disabled={!rows.length} onClick={exportRows}>导出</Button>}
+        {tab !== 'lc' && tab !== 'hs' && <Button icon={Download} disabled={!rows.length} onClick={exportRows}>导出</Button>}
         {tab === 'declarations' && createButton}
       </>} />
     {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有报关单证权限，可以查看报关记录、信用证台账与退税资料。</Banner></div>}
     {error && <div className="mist-section"><Banner tone="bad" title="报关数据未读取" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
-    {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={changeTab} options={[{ value: 'declarations', label: '报关', count: inDomain.length }, { value: 'lc', label: '信用证', count: lcAll.filter(o => o.type === domain).length }, { value: 'rebate', label: '退税', count: inDomain.filter(c => c.status !== 'draft').length }]} /></div>}
-    {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'garment').length : records.filter(c => domainOf(c) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'fabric').length : records.filter(c => domainOf(c) === 'fabric').length}` }]} /></div>}
+    {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={changeTab} options={[{ value: 'declarations', label: '报关', count: inDomain.length }, { value: 'lc', label: '信用证', count: lcAll.filter(o => o.type === domain).length }, { value: 'rebate', label: '退税', count: inDomain.filter(c => c.status !== 'draft').length }, { value: 'hs', label: '商品归类', count: hsAll.filter(c => c.family === domain).length }]} /></div>}
+    {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'garment').length : tab === 'hs' ? hsAll.filter(c => c.family === 'garment').length : records.filter(c => domainOf(c) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'fabric').length : tab === 'hs' ? hsAll.filter(c => c.family === 'fabric').length : records.filter(c => domainOf(c) === 'fabric').length}` }]} /></div>}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={tab === 'lc' ? '搜索信用证号、客户或开证行' : '搜索报关单号、记录号、出运号、客户、HS 编码或报关行'} />
       {tab === 'declarations' && <Dropdown<FlagFilter> label="筛选" value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'attention', label: '需要关注' }, { value: 'awaiting', label: '离港等待放行' }, { value: 'packing', label: '装箱未完成或不符' }]} />}
@@ -186,6 +189,7 @@ export function CustomsPage() {
       ? <>
         <LetterOfCreditLedger state={state || undefined} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} onOrder={o => go('orders/detail', o.id, { customerId: o.customerId, section: o.type })} onShipment={id => go('shipments', id)} />
       </>
+      : tab === 'hs' ? (state ? <CustomsClassificationLedger state={state} domain={domain} needle={needle} can={can} locked={locked} open={setDialog} run={run} /> : null)
       : <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.declarationNo || selected.code} · ${shipmentOf(selected)?.customer || ''}` : '报关详情'} drawerSub={selected ? `${shipmentOf(selected)?.code || ''} · ${CUSTOMS_LABEL[selected.status]}` : undefined}
           list={<Card><DataTable ariaLabel={tab === 'rebate' ? '退税资料核对' : '报关列表'} loading={loading} rows={rows} rowKey={c => c.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={tab === 'rebate' ? rebateColumns : declarationColumns} empty={empty} /></Card>}
           detail={detail} />}
@@ -193,10 +197,10 @@ export function CustomsPage() {
   </MistPage>;
 }
 
-function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onShipment, onDocuments, onInvoice }: {
+function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onClassify, onShipment, onDocuments, onInvoice }: {
   record: FulfillmentCustoms; state: MistState; can: boolean; canClear: boolean; canInvoices: boolean; canRebate: boolean; canReconcile: boolean; locked: boolean;
   open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onBill: (id: string) => void; onReceipt: (id: string) => void;
-  onEdit: () => void; onDeclare: () => void; onRelease: () => void; onAttach: (ids: string[]) => Promise<unknown>; onShipment: () => void; onDocuments: () => void; onInvoice: (id: string) => void;
+  onEdit: () => void; onDeclare: () => void; onRelease: () => void; onAttach: (ids: string[]) => Promise<unknown>; onClassify: () => void; onShipment: () => void; onDocuments: () => void; onInvoice: (id: string) => void;
 }) {
   const f = state.fulfillment, s = f.shipments.find(row => row.id === c.shipmentId), flags = customsFlags(state, c);
   const packingRows = f.packing.filter(row => row.shipmentId === c.shipmentId), documents = f.documents.filter(row => row.shipmentId === c.shipmentId);
@@ -238,7 +242,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
     ]} />
     {c.evidence && <p className="mist-sub">放行依据：{c.evidence}</p>}
     {c.note && <p className="mist-sub">备注：{c.note}</p>}
-    <span className="mist-note">申报品名、申报要素与申报金额尚未接入：服务端目前只记录 HS 编码、原产地与贸易方式，请把报关单原件作为附件保存。</span>
+    <CustomsItemsBlock record={c} state={state} can={can} locked={locked} run={run} onClassify={onClassify} />
     <DetailBlock title="与装箱实货核对">
       {s ? <DataTable ariaLabel={`${c.code} 装箱核对`} rows={s.lines} rowKey={line => line.lineId + ':' + (line.productionId || '')} columns={[
         { key: 'source', header: '准确条目', render: line => <SourceLink source={{ kind: 'orderLine', orderId: line.orderId, lineId: line.lineId, productionId: line.productionId }} /> },

@@ -8,6 +8,7 @@ import type { MistReviewTask } from './mistReview';
 import { supplierBusinessDay, supplierUnavailableReason } from './mistSupplierStatus';
 import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
 import { assertOrderLineOpen, assertShipmentWithinTolerance } from './mistOrderClosure';
+import {applyCustomsDeclarationCommand,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
 import {applyClaimInventoryCommand,claimInventoryPermission,type ClaimInventoryCommand,type ClaimInventoryWarehouse,type ClaimReturnReceipt,type ClaimReceivedRecord} from './mistClaimInventory';
 export type FulfillmentSource = {
     kind: 'version';
@@ -294,6 +295,13 @@ export type FulfillmentCustoms = {
     evidence: string;
     fileIds: string[];
     note: string;
+    /** 按出运明细与商品归类生成的申报商品项（快照）及装箱合计。 */
+    items?: CustomsDeclarationItem[];
+    itemsAt?: string;
+    itemsBy?: string;
+    packages?: number;
+    netWeight?: number;
+    grossWeight?: number;
 };
 export type FulfillmentDocument = {
     id: string;
@@ -340,6 +348,8 @@ export type FulfillmentState = {
     shipments: FulfillmentShipment[];
     packing: FulfillmentPacking[];
     customs: FulfillmentCustoms[];
+    /** 商品归类库（款号 → HS、申报品名、申报要素、法定单位）。 */
+    customsClassifications: CustomsClassification[];
     documents: FulfillmentDocument[];
 };
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
@@ -573,8 +583,8 @@ export type FulfillmentCommand = {
         id: string;
         reason: string;
     };
-} | ClaimInventoryCommand;
-export function createFulfillmentState(_context: MistContext, _rootState: unknown): FulfillmentState { return { warehouses:[],returnReceipts:[],receivedRecords:[],productionFacts: [], shippingTerms: [], samples: [], sampleMovements: [], qcTasks: [], qcReports: [], purchases: [], receipts: [], stock: [], stockMovements: [], shipments: [], packing: [], customs: [], documents: [] }; }
+} | ClaimInventoryCommand | CustomsDeclarationCommand;
+export function createFulfillmentState(_context: MistContext, _rootState: unknown): FulfillmentState { return { warehouses:[],returnReceipts:[],receivedRecords:[],productionFacts: [], shippingTerms: [], samples: [], sampleMovements: [], qcTasks: [], qcReports: [], purchases: [], receipts: [], stock: [], stockMovements: [], shipments: [], packing: [], customs: [], customsClassifications: [], documents: [] }; }
 export const FULFILLMENT_CUSTOMS_CLEAR_SCOPE = 'customs:clear';
 export function fulfillmentCommandPermission(command: FulfillmentCommand): string | null {
     if(command.type.startsWith('fulfillment.claimInventory.'))return claimInventoryPermission(command as ClaimInventoryCommand);
@@ -840,6 +850,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     f.productionFacts ||= [];
     fulfillmentCommandPermission(command);
     if(command.type.startsWith('fulfillment.claimInventory.'))return applyClaimInventoryCommand(root,command as ClaimInventoryCommand,ctx);
+    if((CUSTOMS_DECLARATION_COMMANDS as readonly string[]).includes(command.type))return applyCustomsDeclarationCommand(root,command as CustomsDeclarationCommand,ctx);
     const p: any = command.payload;
     switch (command.type) {
         case 'fulfillment.samples.create': {

@@ -195,3 +195,28 @@ it('lets finance match VAT special invoices to a departed declaration and file t
   session.denied.add('invoices:write');render();
   expect((getByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记退税申报'}) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it('lists missing classifications instead of guessing, and creates a style classification from the 商品归类 tab',async()=>{
+  const f=store.state!.fulfillment;f.shipments.push(shipment('s'));f.packing.push(pack('s',10));f.customs.push(customs('s','draft'));
+  render('cus-s');
+  const detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
+  expect(detail.textContent).toContain('款号 COAT-1 · 大衣 尚未建立商品归类');
+  expect((getByRole(detail,'button',{name:'生成申报商品项'}) as HTMLButtonElement).disabled).toBe(true);
+  await click(getByRole(detail,'button',{name:'维护商品归类'}));
+  expect(getByRole(host,'tab',{name:/商品归类/}).getAttribute('aria-selected')).toBe('true');
+  await click(getByRole(host,'button',{name:'新建归类'}));
+  const dialog=getByRole(document.body,'dialog');
+  for(const [name,value] of [['商品编号（10 位）','6202.9300.00'],['申报品名','女式化纤制大衣'],['适用款号','COAT-1'],['织造方法','机织'],['种类','大衣'],['类别','女式'],['成分含量','100%涤纶']]) typeInto(getByRole(dialog,'textbox',{name}) as HTMLInputElement,value);
+  await click(getByRole(dialog,'button',{name:'建立归类'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.classify.save',payload:expect.objectContaining({family:'garment',hsCode:'6202.9300.00',declaredName:'女式化纤制大衣',styles:['COAT-1'],brandType:'0',preference:'0',elements:['机织','大衣','女式','100%涤纶','无品牌'],secondUnit:'千克'})});
+});
+
+it('generates declaration items on the server once every shipped style is classified',async()=>{
+  const st=store.state!,f=st.fulfillment;f.shipments.push(shipment('s',{state:'ready'}));f.packing.push(pack('s',10));f.customs.push(customs('s','draft'));
+  f.customsClassifications=[{id:'hs1',code:'HSC-0001',family:'garment',hsCode:'6202930000',declaredName:'女式化纤制大衣',brandType:'0',preference:'0',elements:['机织','大衣','女式','100%涤纶','无品牌'],legalUnit:'件',secondUnit:'千克',styles:['COAT-1'],note:'',createdAt:'2026-10-12T08:00:00Z',actor:'后勤'}];
+  render('cus-s');
+  const detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
+  expect(detail.textContent).not.toContain('尚未建立商品归类');
+  await click(getByRole(detail,'button',{name:'生成申报商品项'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.items',payload:{id:'cus-s'}});
+});
