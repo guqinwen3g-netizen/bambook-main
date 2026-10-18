@@ -14,6 +14,7 @@
     "migrate:wallpapers:system-assets": "tsx scripts/migrate-wallpapers-to-system-assets.ts",
     "migrate:wallpapers:system-assets:dry": "tsx scripts/migrate-wallpapers-to-system-assets.ts --dry-run",
     "backup:postgres": "bash scripts/backup-postgres.sh",
+    "backup:mist": "node scripts/mist-backup.mjs",
     "db:use": "bash scripts/db-use.sh",
     "db:status": "bash scripts/db-use.sh",
     "db:empty": "bash scripts/db-use.sh empty",
