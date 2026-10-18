@@ -29,7 +29,8 @@
     "test:watch": "vitest",
     "test:mist": "vitest run src/mist src/shared/mist*.test.ts",
     "test:access": "vitest run src/auth src/admin src/hr",
-    "typecheck:mist": "tsc -p tsconfig.mist.json"
+    "typecheck:mist": "tsc -p tsconfig.mist.json",
+    "typecheck:full": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@prisma/client": "^5.10.2",

@@ -41,9 +41,8 @@ fi
 printf '%s\n' "$deps_stamp" > .deps-stamp
 step 'prisma generate'
 npm exec -- prisma generate
-# Full server type check: CI only checks the Mist entry graph, so this is the only whole-API check.
-step 'tsc --noEmit'
-npm exec -- tsc --noEmit -p tsconfig.json
+# The whole-API type check runs in CI (`verify:mist` → server `typecheck:full`); delivery requires that
+# verification to have passed, so the small server does not repeat the ~1.9 GB / multi-minute tsc run.
 step 'build done'
 # The service runs with a read-only release tree; paths the API writes relative to server/ live in shared/ across releases.
 for dir in logs storage data; do
