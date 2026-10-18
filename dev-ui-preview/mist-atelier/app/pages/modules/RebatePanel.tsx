@@ -4,7 +4,7 @@ import { Ban, BadgeCheck, Landmark, Plus, Receipt, RotateCcw, Undo2 } from 'luci
 import { Card, CardHeader, DataTable, EmptyState, Facts, Mono, Pill, TextLink, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms } from '../../../../../server/src/shared/mistFulfillment';
-import { REBATE_STATE_LABEL, rebateBillTaxableMinor, rebateCandidateBills, rebateClaimForCustoms, rebateClaimTotals, rebateExportDate, rebateFor, rebateRateFor, readRebate, type RebateClaim, type RebateRate } from '../../../../../server/src/shared/mistExportRebate';
+import { REBATE_STATE_LABEL, rebateBillTaxableMinor, rebateCandidateBills, rebateClaimForCustoms, rebateClaimTotals, rebateExportDate, rebatePlan, rebateRateFor, readRebate, type RebateClaim, type RebateRate } from '../../../../../server/src/shared/mistExportRebate';
 import { fmt } from '../../data';
 import type { ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, field, number, text, today } from './fulfillmentKit';
@@ -17,9 +17,11 @@ export const REBATE_TONE: Record<RebateClaim['state'], Tone> = { filed: 'accent'
 /** 列表用的一行摘要：已申报显示状态与应退额；未申报显示可配专票数。 */
 export function rebateSummary(state: MistState, c: FulfillmentCustoms) {
   const claim = rebateClaimForCustoms(state, c.id), candidates = rebateCandidateBills(state, c), exportDate = rebateExportDate(state, c);
-  const rate = exportDate ? rebateRateFor(state, c.hsCode, exportDate) : undefined;
-  const preview = rate ? candidates.reduce((n, b) => n + rebateFor(rebateBillTaxableMinor(b), rate.rate), 0) / 100 : 0;
-  return { claim, candidates, exportDate, rate, preview, vatReady: !!claim || candidates.length > 0 };
+  // 已生成商品项时按每项 HS 逐项适用退税率，否则按表头 HS。
+  const plan = exportDate ? rebatePlan(state, c, exportDate, candidates) : undefined, byItems = !!c.items?.length;
+  const rate = byItems ? undefined : exportDate ? rebateRateFor(state, c.hsCode, exportDate) : undefined;
+  const preview = plan && !plan.blockers.length ? plan.rebate / 100 : 0;
+  return { claim, candidates, exportDate, rate, plan, byItems, preview, vatReady: !!claim || candidates.length > 0 };
 }
 
 export function RebateRatesCard({ state, canWrite, locked, open, run }: { state: MistState; canWrite: boolean; locked: boolean; open: (spec: ModuleEditorSpec) => void; run: Run }) {
@@ -48,26 +50,30 @@ export function RebateRatesCard({ state, canWrite, locked, open, run }: { state:
 export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, locked, open, run, onBill, onReceipt }: {
   state: MistState; customs: FulfillmentCustoms; canWrite: boolean; canReconcile: boolean; locked: boolean; open: (spec: ModuleEditorSpec) => void; run: Run; onBill?: (id: string) => void; onReceipt?: (id: string) => void;
 }) {
-  const { claim, candidates, exportDate, rate, preview } = rebateSummary(state, c);
+  const { claim, candidates, exportDate, rate, plan, byItems, preview } = rebateSummary(state, c);
+  const billPlan = (id: string) => plan?.bills.find(r => r.bill.id === id);
+  const rateText = byItems ? (plan?.rates.length ? `按商品项：${[...new Set(plan.rates.map(r => r.rate + '%'))].join(' / ')}` : '按商品项（待登记）') : rate ? `${rate.rate}% · ${rate.effectiveFrom} 起` : '未登记';
   if (!claim) {
-    const reason = !canWrite ? '需要财务开票权限' : c.status !== 'cleared' ? '报关单尚未海关放行' : !exportDate ? '出运尚未登记实际离港（出口日期）' : !rate ? `没有适用于 HS ${c.hsCode} 的退税率，请先登记退税率版本` : Number(rate.rate) <= 0 ? '适用退税率为 0' : !candidates.length ? '没有可配单的增值税专用发票（本票订单的人民币专票，财务在应付登记）' : false;
+    const reason = !canWrite ? '需要财务开票权限' : c.status !== 'cleared' ? '报关单尚未海关放行' : !exportDate ? '出运尚未登记实际离港（出口日期）' : !candidates.length ? '没有可配单的增值税专用发票（本票订单的人民币专票，财务在应付登记）' : plan?.blockers.length ? plan.blockers[0] : false;
     const fileSpec: ModuleEditorSpec = { title: `登记退税申报 · 报关单 ${c.declarationNo}`, submitLabel: '登记申报',
-      description: `出口日期 ${exportDate} · HS ${c.hsCode} 适用 ${rate?.rate}%（${rate?.basis}）。勾选本次配单的增值税专用发票；应退税额 = 计税金额 × 退税率。在电子税务局申报后再登记。`,
-      fields: [...candidates.map(b => ({ ...field('bill:' + b.id, `${b.invoiceNo} · ${b.supplier} · 计税 ${cny(rebateBillTaxableMinor(b) / 100)} → 退 ${cny(rebateFor(rebateBillTaxableMinor(b), rate?.rate || '0') / 100)}`, 'checkbox', false) })),
+      description: byItems ? `出口日期 ${exportDate} · 按报关商品项逐项适用退税率（专票行 → 采购合同 → 订单条目 → 商品项 HS）；不在本报关单商品项中的行不计退税。勾选本次配单的增值税专用发票，在电子税务局申报后再登记。`
+        : `出口日期 ${exportDate} · HS ${c.hsCode} 适用 ${rate?.rate}%（${rate?.basis}）。勾选本次配单的增值税专用发票；应退税额 = 计税金额 × 退税率。在电子税务局申报后再登记。`,
+      fields: [...candidates.map(b => { const r = billPlan(b.id); return { ...field('bill:' + b.id, `${b.invoiceNo} · ${b.supplier} · 计税 ${cny((r?.taxable ?? rebateBillTaxableMinor(b)) / 100)} → 退 ${cny((r?.rebate ?? 0) / 100)}${r?.excluded ? `（${cny(r.excluded / 100)} 不在商品项中不计）` : ''}`, 'checkbox', false) }; }),
         field('filedAt', '申报日', 'date'), field('batchRef', '申报批次号 / 受理回执号'), field('note', '备注', 'textarea', false)],
       initialValues: { ...Object.fromEntries(candidates.map(b => ['bill:' + b.id, true])), filedAt: today(), batchRef: '', note: '' },
       submit: v => run({ type: 'rebate.claim.file', payload: { customsId: c.id, billIds: candidates.filter(b => v['bill:' + b.id] === true).map(b => b.id), filedAt: text(v, 'filedAt'), batchRef: text(v, 'batchRef'), note: text(v, 'note') } }) };
     return <DetailBlock title="退税申报" aside={<span className="mist-muted">未申报</span>}>
       <Facts items={[
         { label: '出口日期', value: exportDate || '未离港' },
-        { label: '适用退税率', value: rate ? `${rate.rate}% · ${rate.effectiveFrom} 起` : '未登记' },
+        { label: '适用退税率', value: rateText },
         { label: '可配专票', value: `${candidates.length} 张` },
-        { label: '预计应退', value: rate && candidates.length ? cny(preview) : '—' },
+        { label: '预计应退', value: plan && !plan.blockers.length && candidates.length ? cny(preview) : '—' },
       ]} />
       {candidates.length > 0 && <DataTable ariaLabel={`${c.code} 可配专票`} rows={candidates} rowKey={b => b.id} columns={[
         { key: 'no', header: '发票号', render: b => onBill ? <TextLink onClick={() => onBill(b.id)}>{b.invoiceNo}</TextLink> : <Mono>{b.invoiceNo}</Mono> },
         { key: 'supplier', header: '供应商', hideOnMobile: true, render: b => b.supplier },
         { key: 'taxable', header: '计税金额', align: 'right', render: b => cny(rebateBillTaxableMinor(b) / 100) },
+        ...(byItems ? [{ key: 'items', header: '商品项 · 退税率', render: (b: typeof candidates[number]) => billPlan(b.id)?.parts.map(x => `第 ${x.itemNo} 项 ${x.rate}%`).join('；') || '—' }, { key: 'rebate', header: '预计应退', align: 'right' as const, render: (b: typeof candidates[number]) => cny((billPlan(b.id)?.rebate ?? 0) / 100) }] : []),
       ]} />}
       <ActionBar busy={locked} actions={[{ label: '登记退税申报', icon: Receipt, primary: true, onClick: () => open(fileSpec), reason: reason }] as ReasonedAction[]} />
     </DetailBlock>;
@@ -92,7 +98,7 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
     <Facts items={[
       { label: '申报', value: `${claim.code} · ${claim.batchRef}` },
       { label: '申报日 / 出口日期', value: `${claim.filedAt} / ${claim.exportDate}` },
-      { label: '退税率', value: `${claim.rate}%（HS ${claim.hsCode}）` },
+      { label: '退税率', value: claim.byItems ? `按商品项 ${claim.rate}%（HS ${claim.hsCode}）` : `${claim.rate}%（HS ${claim.hsCode}）` },
       { label: '计税金额', value: cny(claim.taxable) },
       { label: '应退税额', value: cny(claim.expected) },
       { label: '核准退税额', value: claim.approved ? `${cny(claim.approved.amount)} · ${claim.approved.ref}` : '待税务审核' },
@@ -106,6 +112,7 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
       { key: 'supplier', header: '供应商', hideOnMobile: true, render: l => l.supplier },
       { key: 'taxable', header: '计税金额', align: 'right', render: l => cny(l.taxable) },
       { key: 'rebate', header: '应退', align: 'right', render: l => cny(l.rebate) },
+      ...(claim.byItems ? [{ key: 'parts', header: '商品项明细', render: (l: typeof claim.lines[number]) => <span className="mist-sub">{(l.parts || []).map(x => `第 ${x.itemNo} 项 ${x.hsCode} · ${x.rate}% · 计税 ${fmt(x.taxable, 2)} → ${fmt(x.rebate, 2)}`).join('；')}{l.excluded ? `；不在商品项 ${fmt(l.excluded, 2)} 不计` : ''}</span> }] : []),
     ]} />
     {claim.receipts.length > 0 && <DataTable ariaLabel={`${claim.code} 到账勾稽`} rows={claim.receipts} rowKey={r => r.id} columns={[
       { key: 'receipt', header: '到账流水', render: r => onReceipt ? <TextLink onClick={() => onReceipt(r.receiptId)}>{r.receiptCode}</TextLink> : <Mono>{r.receiptCode}</Mono> },

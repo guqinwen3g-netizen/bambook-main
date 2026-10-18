@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistCommand, type MistContext, type MistState } from './mistWorkspace';
-import { orderRebate, rebateCandidateBills, rebateClaimTotals, rebateRateFor, readRebate } from './mistExportRebate';
+import { orderRebate, rebatePlan, rebateCandidateBills, rebateClaimTotals, rebateRateFor, readRebate } from './mistExportRebate';
 import type { SupplierBill } from './mistPayables';
 
 function setup() {
@@ -104,5 +104,38 @@ describe('出口退税', () => {
     const state = f.state as MistState; const customs = state.fulfillment.customs.find(c => c.id === f.customs.id)!;
     customs.status = 'submitted';
     expect(() => f.run({ type: 'rebate.claim.file', payload: { customsId: customs.id, billIds: ['b1'], filedAt: '2026-10-16', batchRef: 'SB' } })).toThrow('尚未海关放行');
+  });
+  it('报关单已生成商品项：专票每行经采购 → 订单条目 → 商品项取各自 HS 的退税率逐项计算；不在商品项的行不计', () => {
+    const f = setup();
+    f.run({ type: 'rebate.rate.save', payload: { hsCode: '6203.31', rate: '13', effectiveFrom: '2020-03-20', basis: '公告' } });
+    const state = f.state as MistState, customs = state.fulfillment.customs.find(c => c.id === f.customs.id)!;
+    const line = state.orderLines.find(l => l.orderId === f.order.id)!;
+    const other = state.orderLines.find(l => l.orderId !== f.order.id)!;
+    const po2 = { ...state.fulfillment.purchases.find(p => p.id === 'po-017')!, id: 'po-lining', code: 'PC-LINING', lineId: line.id + '-x' };
+    const po3 = { ...po2, id: 'po-other', code: 'PC-OTHER', lineId: other.id, orderId: other.orderId };
+    state.fulfillment.purchases.push(po2, po3);
+    const item = (no: number, hsCode: string, key: string) => ({ no, classificationId: 'c' + no, lineKeys: [key], styles: [], hsCode, declaredName: 'x', elements: '', quantity: 1, unit: '件', legalQty: 1, legalUnit: '件', secondQty: null, secondUnit: '', unitPrice: 1, amount: 1, currency: 'USD', origin: 'CN', destination: 'US' });
+    customs.items = [item(1, '6203.3100', `${line.id}:`), item(2, '6204.6200', `${line.id}-x:p1`)] as never;
+    const bill = state.payables!.bills.find(b => b.id === 'b1')!;
+    // 价税合计 113000（税 13000）：三行 56500 / 33900 / 22600 → 计税 50000 / 30000 / 20000
+    bill.lines = [{ purchaseId: 'po-017', purchaseCode: 'PC-017', kind: 'finished', amount: 56500 }, { purchaseId: 'po-lining', purchaseCode: 'PC-LINING', kind: 'finished', amount: 33900 }, { purchaseId: 'po-other', purchaseCode: 'PC-OTHER', kind: 'finished', amount: 22600 }];
+    const exportDate = '2026-10-13';
+    let plan = rebatePlan(state, customs, exportDate, [bill]);
+    expect(plan.mode).toBe('items');
+    expect(plan.blockers[0]).toContain('商品项 2（HS 6204.6200）没有适用');
+    expect(() => f.run({ type: 'rebate.claim.file', payload: { customsId: customs.id, billIds: ['b1'], filedAt: '2026-10-16', batchRef: 'SB-I' } })).toThrow('商品项 2');
+    const r9 = f.run({ type: 'rebate.rate.save', payload: { hsCode: '6204.62', rate: '9', effectiveFrom: '2020-03-20', basis: '公告' } }).id;
+    plan = rebatePlan(f.state, f.state.fulfillment.customs.find(c => c.id === customs.id)!, exportDate, [f.state.payables!.bills.find(b => b.id === 'b1')!]);
+    expect(plan.blockers).toEqual([]);
+    expect([plan.taxable, plan.rebate]).toEqual([8000000, 650000 + 270000]);
+    expect(plan.bills[0].excluded).toBe(2000000);
+    const id = f.run({ type: 'rebate.claim.file', payload: { customsId: customs.id, billIds: ['b1'], filedAt: '2026-10-16', batchRef: 'SB-I' } }).id;
+    const claim = readRebate(f.state).claims.find(c => c.id === id)!;
+    expect(claim).toMatchObject({ byItems: true, rate: '9/13', taxable: 80000, expected: 9200, hsCode: '6203.3100、6204.6200' });
+    expect(claim.lines[0].parts!.map(p => [p.itemNo, p.rate, p.taxable, p.rebate])).toEqual([[1, '13', 50000, 6500], [2, '9', 30000, 2700]]);
+    expect(claim.lines[0].excluded).toBe(20000);
+    expect(orderRebate(f.state, f.order.id).expected).toBe(9200);
+    expect(orderRebate(f.state, other.orderId).expected).toBe(0);
+    expect(() => f.run({ type: 'rebate.rate.void', payload: { id: r9, reason: 'x' } })).toThrow('已按该版本申报');
   });
 });
