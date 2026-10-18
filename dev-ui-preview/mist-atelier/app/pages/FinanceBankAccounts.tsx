@@ -4,7 +4,7 @@ import { Banner, Button, Card, CardHeader, DataTable, Dialog, EmptyState, Field,
 import { FX_REVAL_KIND_LABEL, fxPrevMonth, fxRevaluationPreview, readFxPeriodRates, readFxRevaluations, type FxPeriodRate, type FxRevalLine, type FxRevaluation } from '../../../../server/src/shared/mistFxRates';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './modules/ModuleWorkbench';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
-import { mistCommandPermission, mistFxLockUsage, mistFxRate, type MistBankAccount, type MistCommand, type MistFxRecord, type MistPayment, type MistReceipt, type MistState } from '../../../../server/src/shared/mistWorkspace';
+import { mistCommandPermission, mistFxLockUsage, mistFxRate, mistReceiptSettledMinor, type MistBankAccount, type MistCommand, type MistFxRecord, type MistPayment, type MistReceipt, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
@@ -98,7 +98,7 @@ const amountOk = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) 
 /** 锁汇：登记银行远期合同；结汇：按银行水单登记卖出原币与入账本币，汇率由实际金额得出。 */
 export function FxDialog({ state, draft, onClose }: { state: MistState; draft: FxDraft; onClose: () => void }) {
   const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
-  const [form, setForm] = React.useState(draft), [local, setLocal] = React.useState('');
+  const [form, setForm] = React.useState(draft), [local, setLocal] = React.useState(''), [links, setLinks] = React.useState<Links>({});
   const set = (key: keyof FxDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [key]: e.target.value });
   const accounts = state.bankAccounts || [], from = accounts.find(a => a.id === form.fromAccountId), to = accounts.find(a => a.id === form.toAccountId);
   const locks = (state.fxRecords || []).filter(r => r.kind === 'lock' && !r.reversed && (!from || r.currency === from.currency) && (!to || r.localCurrency === to.currency)).map(r => ({ r, left: mistFxLockUsage(state, r.id).remaining })).filter(x => x.left > 0);
@@ -109,8 +109,10 @@ export function FxDialog({ state, draft, onClose }: { state: MistState; draft: F
     if (settle) {
       if (!from || !to) return setLocal('请选择卖出账户和入账账户。');
       if (!amountOk(form.localAmount)) return setLocal('入账本币金额请按银行水单填写。');
+      const { rows, error } = linkRows(links); if (error) return setLocal(error);
+      if (linkTotalMinor(rows) > Math.round(Number(form.amount) * 100)) return setLocal('对应到账的分配合计不能超过卖出原币金额。');
       setLocal('');
-      void execute({ type: 'finance.fx.settle', payload: { date: form.date, fromAccountId: from.id, toAccountId: to.id, amount: Number(form.amount), localAmount: Number(form.localAmount), ref: form.ref, note: form.note, ...(form.lockId ? { lockId: form.lockId } : {}) } }, () => { toast('结汇已登记，两个账户余额已更新'); onClose(); });
+      void execute({ type: 'finance.fx.settle', payload: { date: form.date, fromAccountId: from.id, toAccountId: to.id, amount: Number(form.amount), localAmount: Number(form.localAmount), ref: form.ref, note: form.note, ...(form.lockId ? { lockId: form.lockId } : {}), ...(rows.length ? { receipts: rows } : {}) } }, () => { toast('结汇已登记，两个账户余额已更新'); onClose(); });
       return;
     }
     if (!form.bankName.trim()) return setLocal('请填写锁汇银行。');
@@ -144,6 +146,50 @@ export function FxDialog({ state, draft, onClose }: { state: MistState; draft: F
         </>}
         <Field label="备注" full><TextInput aria-label="备注" value={form.note} onChange={set('note')} /></Field>
       </FormGrid>
+      {settle && <ReceiptLinksField state={state} accountId={form.fromAccountId} date={form.date} value={links} onChange={setLinks} />}
+    </div>
+  </Dialog>;
+}
+
+/** 结汇未分配到到账的原币金额（按分）。 */
+export const fxUnallocatedMinor = (r: MistFxRecord) => Math.round(r.amount * 100) - (r.receipts || []).reduce((n, l) => n + Math.round(l.amount * 100), 0);
+type Links = Record<string, string>;
+/** 选择本次结汇对应的到账：只列归属卖出账户、不晚于结汇日、仍有未结汇余额的到账。 */
+function ReceiptLinksField({ state, accountId, date, value, onChange }: { state: MistState; accountId: string; date: string; value: Links; onChange: (next: Links) => void }) {
+  const rows = (state.receipts || []).filter(r => r.accountId === accountId && r.date <= date).map(r => ({ r, left: Math.round(r.amount * 100) - mistReceiptSettledMinor(state, r.id) })).filter(x => x.left > 0).sort((a, b) => a.r.date.localeCompare(b.r.date) || a.r.code.localeCompare(b.r.code));
+  if (!accountId) return null;
+  if (!rows.length) return <p className="mist-note">卖出账户在结汇日前没有未结汇的到账；本次结汇将记为“未对应到账”，报表不计入任何订单。</p>;
+  return <div className="mist-col" style={{ gap: 6 }}>
+    <b>对应到账（用于订单实际结汇汇率）</b>
+    {rows.map(({ r, left }) => <div key={r.id} className="mist-row" style={{ justifyContent: 'space-between' }}>
+      <span><span className="mist-mono">{r.code}</span> {r.payer} · {r.date} · 未结汇 {bankMoney(left / 100, r.currency)}</span>
+      <span className="mist-row"><Button size="sm" variant="quiet" onClick={() => onChange({ ...value, [r.id]: (left / 100).toFixed(2) })}>全额</Button><TextInput aria-label={`${r.code} 分配金额`} type="number" step="0.01" style={{ width: 120 }} value={value[r.id] || ''} onChange={e => onChange({ ...value, [r.id]: e.target.value })} /></span>
+    </div>)}
+  </div>;
+}
+/** 已填写的分配行；金额格式不对返回错误文字。 */
+function linkRows(value: Links): { rows: Array<{ receiptId: string; amount: number }>; error?: string } {
+  const rows: Array<{ receiptId: string; amount: number }> = [];
+  for (const [receiptId, v] of Object.entries(value)) { if (!v.trim()) continue; if (!amountOk(v)) return { rows, error: '分配金额请填正数，最多两位小数。' }; rows.push({ receiptId, amount: Number(v) }); }
+  return { rows };
+}
+const linkTotalMinor = (rows: Array<{ amount: number }>) => rows.reduce((n, r) => n + Math.round(r.amount * 100), 0);
+
+/** 为已登记的结汇补登对应到账（只追加，合计不超过卖出金额）。 */
+export function FxAllocateDialog({ state, record, onClose }: { state: MistState; record: MistFxRecord; onClose: () => void }) {
+  const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
+  const [links, setLinks] = React.useState<Links>({}), [local, setLocal] = React.useState(''), left = fxUnallocatedMinor(record);
+  const submit = () => {
+    const { rows, error } = linkRows(links); if (error) return setLocal(error);
+    if (!rows.length) return setLocal('请至少填写一笔到账的分配金额。');
+    if (linkTotalMinor(rows) > left) return setLocal(`分配合计不能超过未对应金额 ${bankMoney(left / 100, record.currency)}。`);
+    setLocal(''); void execute({ type: 'finance.fx.allocate', payload: { id: record.id, receipts: rows } }, () => { toast(record.code + ' 已补登对应到账'); onClose(); });
+  };
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title="补登对应到账" description={`${record.code} · ${record.date} · 卖出 ${bankMoney(record.amount, record.currency)} @${record.rate}；未对应到账 ${bankMoney(left / 100, record.currency)}。`}
+    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>保存</Button></>}>
+    <div className="mist-col">
+      {(local || failure) && <Banner tone="bad" title="还不能保存">{local || failure}</Banner>}
+      <ReceiptLinksField state={state} accountId={record.fromAccountId || ''} date={record.date} value={links} onChange={setLinks} />
     </div>
   </Dialog>;
 }
@@ -177,7 +223,7 @@ export function FxPeriodRatesCard() {
   const voidSpec = (r: FxPeriodRate): ModuleEditorSpec => ({ title: `作废 ${r.month} ${r.currency} 月末汇率`, submitLabel: '作废', description: '作废后保留记录，可重新登记正确汇率。', fields: [{ key: 'reason', label: '作废原因', type: 'textarea', required: true }], initialValues: { reason: '' },
     submit: v => run({ type: 'fxrate.period.void', payload: { id: r.id, reason: String(v.reason || '') } }) });
   return <Card>
-    <CardHeader title={`月末汇率 · ${rows.filter(r => !r.voided).length}`} sub="报表“月末暂估”口径用；结汇实际汇率另按结汇记录加权。" tools={canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(add)}>登记月末汇率</Button> : undefined} />
+    <CardHeader title={`月末汇率 · ${rows.filter(r => !r.voided).length}`} sub="报表“月末暂估”口径用，也用于实际口径下未结汇部分的暂估；实际汇率按结汇对应到账逐笔取。" tools={canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(add)}>登记月末汇率</Button> : undefined} />
     <DataTable ariaLabel="月末汇率" rows={rows} rowKey={r => r.id} loading={loading} columns={[
       { key: 'month', header: '月份', width: '100px', render: r => r.month },
       { key: 'currency', header: '币种', width: '72px', render: r => r.currency },

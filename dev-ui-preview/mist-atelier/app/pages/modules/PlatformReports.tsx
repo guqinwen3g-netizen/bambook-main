@@ -9,7 +9,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { downloadModuleCsv } from './ModuleWorkbench';
 import { OrderActualCostPanel } from './OrderActualCostPanel';
-import { FX_BASIS_LABEL, fxRateFor, type FxBasis, type FxResolved } from '../../../../../server/src/shared/mistFxRates';
+import { FX_BASIS_LABEL, fxOrderActual, fxRateFor, fxUnallocatedSettlements, type FxBasis, type FxResolved } from '../../../../../server/src/shared/mistFxRates';
 import { orderRebate } from '../../../../../server/src/shared/mistExportRebate';
 import { mistInvoiceCustomerId, mistInvoiceCustomerName } from '../../../../../server/src/shared/mistOpeningBalance';
 
@@ -69,11 +69,16 @@ export function buildOrderMarginCny(state: MistState, basis: FxBasis, month: str
   return state.orders.filter(o => (!o.governance || o.governance.status === 'approved') && (!currency || o.currency === currency)).filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to); }).map(o => {
     const mine = purchases.filter(p => p.orderId === o.id && !p.cancellation), approved = mine.filter(p => p.state === 'approved');
     const rates = new Map<string, FxResolved | undefined>(), rateOf = (c: string) => { if (!rates.has(c)) rates.set(c, fxRateFor(state, c, basis, { month, asOf, orderId: o.id })); return rates.get(c); };
+    // 实际结汇口径：订单收入按结汇分配到账逐笔取实际汇率，其余按月末暂估（fxOrderActual）。
+    const actual = basis === 'actual' && o.currency !== 'CNY' ? fxOrderActual(state, o, month, asOf) : undefined;
+    if (basis === 'actual' && o.currency !== 'CNY') rates.set(o.currency, actual);
     const fx = rateOf(o.currency); let cost = 0;
-    for (const p of approved) { const r = rateOf(p.currency); if (r) cost += Math.round(Math.max(0, Math.round(p.quantity * p.price * 100)) * r.rate); }
+    // 外币采购没有对应结汇：实际口径下按月末汇率暂估（与订单收入的实际汇率分开取）。
+    const costRate = (c: string) => basis === 'actual' && c === o.currency && c !== 'CNY' ? (rates.has(c + '（采购）') ? rates.get(c + '（采购）') : (rates.set(c + '（采购）', fxRateFor(state, c, basis, { month, asOf })), rates.get(c + '（采购）'))) : rateOf(c);
+    for (const p of approved) { const r = costRate(p.currency); if (r) cost += Math.round(Math.max(0, Math.round(p.quantity * p.price * 100)) * r.rate); }
     const missing = [...rates.entries()].filter(([, r]) => !r).map(([c]) => c), revenue = minor(o.amount);
     const status: OrderMarginCnyRow['status'] = missing.length ? 'norate' : approved.length ? 'ok' : 'nocost';
-    const revenueCny = fx ? Math.round(revenue * fx.rate) : null, rebate = orderRebate(state, o.id), rebateMinor = minor(rebate.approved);
+    const revenueCny = actual ? actual.cnyMinor : fx ? Math.round(revenue * fx.rate) : null, rebate = orderRebate(state, o.id), rebateMinor = minor(rebate.approved);
     const marginEx = status === 'ok' && revenueCny !== null ? revenueCny - cost : null, marginIn = marginEx === null ? null : marginEx + rebateMinor;
     return { id: o.id, code: o.code, customer: o.customer, currency: o.currency, revenue: revenue / 100, fx, revenueCny: revenueCny === null ? null : revenueCny / 100, costCny: status === 'norate' ? null : cost / 100,
       marginEx: marginEx === null ? null : marginEx / 100, rateEx: marginEx === null || !revenueCny ? null : marginEx / revenueCny, rebate, marginIn: marginIn === null ? null : marginIn / 100, rateIn: marginIn === null || !revenueCny ? null : marginIn / revenueCny,
@@ -127,6 +132,7 @@ export function PlatformReportsPage() {
   const sales = state && !invalid ? buildCustomerSales(state, from, to, currency) : [];
   const margin = state && !invalid && tab === 'margin' && view === 'none' ? buildOrderMargin(state, from, to, currency) : [];
   const cny = state && !invalid && tab === 'margin' && view !== 'none' ? buildOrderMarginCny(state, view, fxMonth, asOf, from, to, currency) : [];
+  const unallocated = state && tab === 'margin' && view === 'actual' ? fxUnallocatedSettlements(state, asOf) : [];
   const cnyOk = cny.filter(r => r.status === 'ok'), sum = (pick: (r: OrderMarginCnyRow) => number | null) => cnyOk.reduce((t, r) => t + minor(pick(r) ?? 0), 0) / 100;
   const cnyTotals = { revenue: sum(r => r.revenueCny), ex: sum(r => r.marginEx), rebate: sum(r => r.rebate.approved), inc: sum(r => r.marginIn), estimated: cnyOk.filter(r => r.estimated).length };
   const marginTotals = [...new Set(margin.map(r => r.currency))].map(c => { const rows = margin.filter(r => r.currency === c && r.status === 'ok'), rev = rows.reduce((t, r) => t + minor(r.revenue), 0), m = rows.reduce((t, r) => t + minor(r.margin ?? 0), 0); return { currency: c, revenue: rev / 100, margin: m / 100, rate: rev ? m / rev : null, orders: rows.length }; });
@@ -201,7 +207,7 @@ export function PlatformReportsPage() {
     </> : tab === 'margin' ? <>
       <Toolbar><Field label="订单创建起日"><TextInput type="date" value={from} onChange={e => setFrom(e.target.value)} /></Field><Field label="订单创建止日"><TextInput type="date" value={to} onChange={e => setTo(e.target.value)} /></Field>{currencyFilter}
         <Field label="折算口径"><Select aria-label="折算口径" value={view} onChange={e => setView(e.target.value as MarginView)} options={[{ value: 'actual', label: '人民币 · 实际结汇加权' }, { value: 'period', label: '人民币 · 月末暂估' }, { value: 'quote', label: '人民币 · 定价预计' }, { value: 'none', label: '原币（不折算）' }]} /></Field>
-        {view === 'period' && <Field label="暂估月份"><TextInput type="month" aria-label="暂估月份" value={fxMonth} onChange={e => setFxMonth(e.target.value)} /></Field>}</Toolbar>
+        {(view === 'period' || view === 'actual') && <Field label="暂估月份"><TextInput type="month" aria-label="暂估月份" value={fxMonth} onChange={e => setFxMonth(e.target.value)} /></Field>}</Toolbar>
       {invalid && <Banner tone="bad" title="起始日期不能晚于结束日期" />}
       {view === 'none' ? <>
         <StatGrid>{marginTotals.length ? marginTotals.map(t => <StatCard key={t.currency} icon={TrendingUp} label={`${t.currency} 毛利 · ${t.orders} 单`} value={`${money(t.margin)}（${percent(t.rate)}）`} />) : <StatCard icon={TrendingUp} label="毛利" value="—" />}</StatGrid>
@@ -214,9 +220,10 @@ export function PlatformReportsPage() {
           <StatCard icon={Receipt} label="出口退税（核准 / 应退）" value={money(cnyTotals.rebate)} />
           <StatCard icon={TrendingUp} label="毛利 · 含退税" value={`${money(cnyTotals.inc)}（${percent(cnyTotals.revenue ? cnyTotals.inc / cnyTotals.revenue : null)}）`} />
         </StatGrid>
-        {cnyTotals.estimated > 0 && <Banner tone="warn" title={`${cnyTotals.estimated} 单按暂估 / 预计汇率折算`}>{view === 'period' ? '月末暂估汇率仅用于管理报表，结汇后以实际结汇口径为准。' : '定价预计汇率来自订单定价试算快照，仅反映报价时的预期。'}</Banner>}
+        {cnyTotals.estimated > 0 && <Banner tone="warn" title={`${cnyTotals.estimated} 单${view === 'actual' ? '含暂估部分' : '按暂估 / 预计汇率折算'}`}>{view === 'actual' ? '已收未结汇（外币留存）与未收部分按所选月份的月末汇率暂估；结汇并分配到对应到账后转为实际汇率。' : view === 'period' ? '月末暂估汇率仅用于管理报表，结汇后以实际结汇口径为准。' : '定价预计汇率来自订单定价试算快照，仅反映报价时的预期。'}</Banner>}
+        {view === 'actual' && unallocated.length > 0 && <Banner tone="accent" title={`有结汇未对应到账：${unallocated.map(u => `${u.currency} ${money(u.amount)}（${u.count} 笔）`).join('、')}`}>未对应到账的结汇不计入任何订单。请在“账户与余额 → 锁汇 / 结汇”为该结汇补登对应到账。</Banner>}
         <section className="mist-section"><Card><DataTable ariaLabel="订单毛利（人民币）" rows={cny} rowKey={r => r.id} loading={workspace.loading} columns={cnyColumns} empty={<EmptyState title="当前范围没有已生效订单" description="草稿、待审批或被退回的订单不计入毛利。" />} /></Card></section>
-        <p className="mist-note">{FX_BASIS_LABEL[view]}：{view === 'actual' ? '按已登记、未冲回的结汇记录（原币 → 人民币）加权平均，截至今天。' : view === 'period' ? `取不晚于 ${fxMonth} 的最新一期月末汇率（财务在“账户与余额”登记）。` : '取订单最新一次定价试算的 CNY / USD 汇率，仅美元订单。'}缺少所选口径汇率的订单不出毛利。不含退税毛利 = 收入 × 汇率 − 已批准采购合同（通常含税价）；含退税毛利再加本单分摊的出口退税（已核准按核准额，未核准按应退额；未申报不计）。未计运费、报关、佣金与索赔扣款。</p>
+        <p className="mist-note">{FX_BASIS_LABEL[view]}：{view === 'actual' ? `订单收入中已收且已结汇的部分（本单发票的核销到账 → 结汇时分配到该到账的金额）按各笔结汇的实际成交汇率；已收未结汇与未收部分、外币采购按不晚于 ${fxMonth} 的最新月末汇率暂估。` : view === 'period' ? `取不晚于 ${fxMonth} 的最新一期月末汇率（财务在“账户与余额”登记）。` : '取订单最新一次定价试算的 CNY / USD 汇率，仅美元订单。'}缺少所选口径汇率的订单不出毛利。不含退税毛利 = 收入 × 汇率 − 已批准采购合同（通常含税价）；含退税毛利再加本单分摊的出口退税（已核准按核准额，未核准按应退额；未申报不计）。未计运费、报关、佣金与索赔扣款。</p>
       </>}
     </> : tab === 'actual' ? (state ? <OrderActualCostPanel state={state} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} /> : <EmptyState title="正在读取数据" compact />) : tab === 'aging' ? <>
       <Toolbar right={<span className="mist-note">截至 {asOf}</span>}>{currencyFilter}</Toolbar>

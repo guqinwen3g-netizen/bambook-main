@@ -2,7 +2,8 @@
  * 月末汇率（报表暂估用）与报表折算汇率（2026-10-17 按行业通行做法确定首版）。
  *
  * 外贸公司收入为外币、成本与退税为人民币，管理口径的毛利按人民币看。折算汇率分三种口径，报表上始终写明口径并标识暂估：
- * - 实际结汇：按已登记、未冲回的结汇记录（原币 → 人民币）加权平均，汇率 = Σ 入账本币 ÷ Σ 卖出原币；只有实际发生的结汇。
+ * - 实际结汇：订单收入按“核销到本单的到账 → 结汇分配到该到账”逐笔取实际成交汇率，已收未结汇与未收部分按月末汇率暂估（见 fxOrderActual）；
+ *   非订单币种（如外币采购）按月末汇率暂估。只有实际发生的结汇才算实际。
  * - 月末暂估：财务每月登记一次各币种月末汇率（通常取中国人民银行月末中间价或开户行月末牌价），依据必填；
  *   报表取不晚于所选月份的最新一期。登错的在作废后重登，不改写原记录。
  * - 定价预计：订单最新一次定价试算快照中的汇率（CNY / USD，仅美元订单）。
@@ -38,7 +39,7 @@ export type FxRevalCurrency = { currency: string; bookRate: string; closingRate:
 export type FxRevaluation = { id: string; code: string; month: string; monthEnd: string; lines: FxRevalLine[]; currencies: FxRevalCurrency[]; unrealized: number; realized: number; total: number; note: string; createdAt: string; actor: string; voided?: { at: string; actor: string; reason: string } };
 export type FxRevalPreview = { month: string; monthEnd: string; lines: FxRevalLine[]; currencies: FxRevalCurrency[]; unrealized: number; realized: number; total: number; missing: string[]; blockers: string[] };
 export type FxBasis = 'actual' | 'period' | 'quote';
-export const FX_BASIS_LABEL: Record<FxBasis, string> = { actual: '实际结汇加权', period: '月末暂估', quote: '定价预计' };
+export const FX_BASIS_LABEL: Record<FxBasis, string> = { actual: '实际结汇', period: '月末暂估', quote: '定价预计' };
 
 type Root = MistState & { fxPeriodRates?: FxPeriodRate[]; fxRevaluations?: FxRevaluation[] };
 function fail(message: string, code = 'VALIDATION'): never { throw new MistCommandError(code, message); }
@@ -62,10 +63,48 @@ export function fxSettledAverage(root: Pick<MistState, 'fxRecords'>, currency: s
   return amount > 0 ? { rate: local / amount, count: rows.length, amount: amount / 100 } : undefined;
 }
 export type FxResolved = { rate: number; label: string; estimated: boolean };
+export type FxOrderActual = FxResolved & { cnyMinor: number; settledMinor: number; settledCnyMinor: number; estimatedMinor: number; settledRate?: string; period?: { month: string; rate: string } };
+/**
+ * 订单收入的实际结汇口径（2026-10-18 定案，§17.6 Q3/Q4）：
+ * - 已收且已结汇：本单发票的现金核销 → 对应到账 → 结汇登记时分配到该到账的金额，按各笔结汇的实际成交汇率折算；
+ *   同一笔到账部分结汇时，核销到本单的金额按该到账的已结汇比例拆分。
+ * - 已收未结汇（外币留存）与未收部分：按所选月份的月末汇率暂估，并标“暂估”；缺月末汇率则不出数。
+ * 未分配到到账的结汇不计入任何订单，在报表单列。
+ */
+export function fxOrderActual(root: Root, order: { id: string; currency: string; amount: number }, month: string, asOf: string): FxOrderActual | undefined {
+  const minor = (v: number) => Math.round(Number(v) * 100), revenue = minor(order.amount);
+  const receipts = new Map((root.receipts || []).map(r => [r.id, r]));
+  const settlements = (root.fxRecords || []).filter(r => r.kind === 'settlement' && !r.reversed && r.localCurrency === 'CNY' && r.date <= asOf);
+  const invoices = new Set((root.invoices || []).filter(i => i.orderId === order.id && i.currency === order.currency && isRecognizedMistInvoice(i)).map(i => i.id));
+  let settled = 0, settledCny = 0;
+  for (const a of root.allocations || []) {
+    const r = receipts.get(a.receiptId); if (!invoices.has(a.invoiceId) || !r || r.date > asOf) continue;
+    const am = minor(a.amount);
+    let sf = 0, sc = 0; for (const s of settlements) for (const l of s.receipts || []) if (l.receiptId === r.id) { const x = minor(l.amount); sf += x; sc += x * minor(s.localAmount) / minor(s.amount); }
+    const total = minor(r.amount); if (!sf || !total) continue;
+    const part = Math.round(am * Math.min(1, sf / total)); settled += part; settledCny += Math.round(part * sc / sf);
+  }
+  const est = Math.max(0, revenue - settled), period = est ? fxPeriodRateFor(root, order.currency, month) : undefined;
+  if (est && !period) return undefined;
+  const estCny = period ? fxCnyMinor(est, period.rate) : 0, cny = settledCny + estCny, money = (n: number) => (n / 100).toFixed(2);
+  const label = [settled ? `结汇 ${money(settled)} @${(settledCny / settled).toFixed(4)}` : '', est ? `暂估 ${money(est)} @${period!.rate}（${period!.month} 月末）` : ''].filter(Boolean).join('；') || '无收入';
+  return { rate: revenue ? cny / revenue : 0, label, estimated: est > 0, cnyMinor: cny, settledMinor: settled, settledCnyMinor: settledCny, estimatedMinor: est, ...(settled ? { settledRate: (settledCny / settled).toFixed(4) } : {}), ...(period ? { period: { month: period.month, rate: period.rate } } : {}) };
+}
+/** 未分配到到账的结汇余额（原币，按币种）：结汇卖出金额 − 已分配到账金额。 */
+export function fxUnallocatedSettlements(root: Pick<MistState, 'fxRecords'>, asOf: string) {
+  const map = new Map<string, { currency: string; count: number; amount: number }>();
+  for (const s of root.fxRecords || []) {
+    if (s.kind !== 'settlement' || s.reversed || s.localCurrency !== 'CNY' || s.date > asOf) continue;
+    const left = Math.round(s.amount * 100) - (s.receipts || []).reduce((n, l) => n + Math.round(l.amount * 100), 0); if (left <= 0) continue;
+    const row = map.get(s.currency) ?? { currency: s.currency, count: 0, amount: 0 }; row.count++; row.amount += left; map.set(s.currency, row);
+  }
+  return [...map.values()].map(r => ({ ...r, amount: r.amount / 100 })).sort((a, b) => a.currency.localeCompare(b.currency));
+}
 /** 按口径取折算到人民币的汇率；人民币恒为 1。 */
 export function fxRateFor(root: Root, currency: string, basis: FxBasis, opts: { month: string; asOf: string; orderId?: string }): FxResolved | undefined {
   if (currency === 'CNY') return { rate: 1, label: '人民币', estimated: false };
-  if (basis === 'actual') { const a = fxSettledAverage(root, currency, opts.asOf); return a && { rate: a.rate, label: `${a.count} 笔结汇加权 ${a.rate.toFixed(4)}`, estimated: false }; }
+  // 实际口径下，订单收入另按 fxOrderActual 逐笔取结汇汇率；其他外币金额（外币采购、费用）没有对应结汇，按月末汇率暂估。
+  if (basis === 'actual') { const p = fxPeriodRateFor(root, currency, opts.month); return p && { rate: Number(p.rate), label: `${p.month} 月末 ${p.rate}（暂估）`, estimated: true }; }
   if (basis === 'period') { const p = fxPeriodRateFor(root, currency, opts.month); return p && { rate: Number(p.rate), label: `${p.month} 月末 ${p.rate}`, estimated: true }; }
   if (currency !== 'USD' || !opts.orderId) return undefined;
   const snap = (root.platform?.pricing || []).filter(r => r.orderId === opts.orderId && r.exchangeRate > 0).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];

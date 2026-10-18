@@ -56,7 +56,10 @@ describe('报表中心', () => {
     expect(Math.round((period.marginIn! - period.marginEx!) * 100) / 100).toBe(25000);
     expect(period.marginEx).toBe(Math.round((297888.3 - period.costCny!) * 100) / 100);
     expect(pick('quote')).toMatchObject({ status: 'ok', estimated: true, revenueCny: 301320 });
-    expect(pick('actual')).toMatchObject({ status: 'norate', marginEx: null, marginIn: null, missing: ['USD'] });
+    // 尚无结汇对应到账：实际口径整单按月末汇率暂估
+    expect(pick('actual')).toMatchObject({ status: 'ok', estimated: true, revenueCny: 297888.3 });
+    expect(pick('actual').fx?.label).toContain('暂估 41850.00 @7.1180');
+    expect(buildOrderMarginCny(s, 'actual', '2026-07', '2026-10-17').find(r => r.code === 'SO-G-2026-017')).toMatchObject({ status: 'norate', marginEx: null, missing: ['USD'] });
     const eur = buildOrderMarginCny(s, 'quote', '2026-10', '2026-10-17').find(r => r.currency === 'EUR')!;
     expect(eur.status).toBe('norate');
   });

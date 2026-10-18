@@ -4,7 +4,7 @@ import { ArrowDownLeft, ArrowUpRight, Landmark, ReceiptText } from 'lucide-react
 import { Banner, Button, Card, DataTable, EmptyState, Facts, Mono, ObjectCell, Pill, SearchField, Segmented, StatCard, StatGrid, Tabs, Toolbar, type Column } from '../../../../components/mist';
 import type { MistState, MistReceipt, MistPayment } from '../../../../server/src/shared/mistWorkspace';
 import { isActiveMistInvoice, mistBankAccountBalances, mistFxLockUsage, type MistFxRecord } from '../../../../server/src/shared/mistWorkspace';
-import { AccountAssignDialog, BankAccountDialog, FxDialog, FxPeriodRatesCard, FxReverseDialog, FxRevaluationCard, AccountStatusCell, accountLabel, editAccountDraft, newAccountDraft, newFxDraft, useBankAccountCommand } from './FinanceBankAccounts';
+import { AccountAssignDialog, BankAccountDialog, FxAllocateDialog, FxDialog, fxUnallocatedMinor, FxPeriodRatesCard, FxReverseDialog, FxRevaluationCard, AccountStatusCell, accountLabel, editAccountDraft, newAccountDraft, newFxDraft, useBankAccountCommand } from './FinanceBankAccounts';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
 import { ActionBar, DetailBlock, DetailBody, ListDetail } from './modules/pageKit';
@@ -98,7 +98,7 @@ export function financeCustomerReceivables(state: MistState | null) {
 export function FinanceAccounts() {
   const { state, loading } = useMistWorkspace(), { go } = useNav(); const customers = financeCustomerReceivables(state);
   const { canWrite } = useBankAccountCommand(), [editing, setEditing] = React.useState<ReturnType<typeof newAccountDraft> | null>(null);
-  const [fx, setFx] = React.useState<ReturnType<typeof newFxDraft> | null>(null), [reversing, setReversing] = React.useState<MistFxRecord | null>(null);
+  const [fx, setFx] = React.useState<ReturnType<typeof newFxDraft> | null>(null), [reversing, setReversing] = React.useState<MistFxRecord | null>(null), [linking, setLinking] = React.useState<MistFxRecord | null>(null);
   const fxRows = [...(state?.fxRecords || [])].sort((a, b) => b.date.localeCompare(a.date) || b.code.localeCompare(a.code)), accountCode = (id?: string) => (state?.bankAccounts || []).find(a => a.id === id)?.code || '';
   const currencies = new Set((state?.bankAccounts || []).map(a => a.currency)), canSettle = currencies.size >= 2;
   const bank = state ? mistBankAccountBalances(state) : { accounts: [], unassigned: { receipts: 0, payments: 0 } }, unassigned = bank.unassigned.receipts + bank.unassigned.payments;
@@ -123,11 +123,12 @@ export function FinanceAccounts() {
       { key: 'rate', header: '汇率', width: '100px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num" title={r.kind === 'lock' ? '锁定汇率' : '由水单金额得出'}>{r.rate}</span> },
       { key: 'local', header: '本币', width: '150px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{money(r.localAmount, r.localCurrency)}</span> },
       { key: 'bank', header: '银行 / 账户', width: 'minmax(120px,1fr)', hideOnMobile: true, render: r => r.kind === 'lock' ? r.bankName : `${accountCode(r.fromAccountId)} → ${accountCode(r.toAccountId)}${r.lockId ? ' · 交割 ' + ((state?.fxRecords || []).find(x => x.id === r.lockId)?.code || '') : ''}` },
-      { key: 'state', header: '状态', width: '150px', render: r => r.reversed ? <Pill tone="neutral">已冲回</Pill> : r.kind === 'lock' ? (() => { const u = mistFxLockUsage(state!, r.id); return <Pill tone={u.remaining > 0 ? 'accent' : 'ok'}>{u.remaining > 0 ? `剩余 ${money(u.remaining, r.currency)}` : '已全部交割'}</Pill>; })() : <Pill tone="ok">已入账</Pill> },
-      { key: 'act', header: '操作', width: '150px', render: r => r.reversed ? <span className="mist-note">{r.reversed.reason}</span> : <span className="mist-row">{r.kind === 'lock' && mistFxLockUsage(state!, r.id).remaining > 0 && canWrite && canSettle && <Button size="sm" onClick={() => setFx(newFxDraft('settlement', state, r.id))}>交割</Button>}{canWrite && <Button size="sm" onClick={() => setReversing(r)}>冲回</Button>}</span> },
+      { key: 'state', header: '状态', width: '150px', render: r => r.reversed ? <Pill tone="neutral">已冲回</Pill> : r.kind === 'lock' ? (() => { const u = mistFxLockUsage(state!, r.id); return <Pill tone={u.remaining > 0 ? 'accent' : 'ok'}>{u.remaining > 0 ? `剩余 ${money(u.remaining, r.currency)}` : '已全部交割'}</Pill>; })() : fxUnallocatedMinor(r) > 0 ? <Pill tone="warn">未对应到账 {money(fxUnallocatedMinor(r) / 100, r.currency)}</Pill> : <Pill tone="ok">已入账 · 已对应到账</Pill> },
+      { key: 'act', header: '操作', width: '150px', render: r => r.reversed ? <span className="mist-note">{r.reversed.reason}</span> : <span className="mist-row">{r.kind === 'lock' && mistFxLockUsage(state!, r.id).remaining > 0 && canWrite && canSettle && <Button size="sm" onClick={() => setFx(newFxDraft('settlement', state, r.id))}>交割</Button>}{r.kind === 'settlement' && fxUnallocatedMinor(r) > 0 && canWrite && <Button size="sm" onClick={() => setLinking(r)}>对应到账</Button>}{canWrite && <Button size="sm" onClick={() => setReversing(r)}>冲回</Button>}</span> },
     ]} empty={<EmptyState title="暂无锁汇或结汇记录" description="锁汇登记银行远期合同；结汇按银行水单登记，入账后计入账户余额。" />} /></Card>
     {fx && state && <FxDialog state={state} draft={fx} onClose={() => setFx(null)} />}
     {reversing && <FxReverseDialog record={reversing} onClose={() => setReversing(null)} />}
+    {linking && state && <FxAllocateDialog state={state} record={linking} onClose={() => setLinking(null)} />}
     <FxPeriodRatesCard />
     <FxRevaluationCard />
     <Card><DataTable ariaLabel="客户应收余额（原币）" rows={customers} rowKey={r => r.id} loading={loading} onRowClick={r => { if (r.customerId) go('payment-vouchers', undefined, { section: 'open', customerId: r.customerId }); }} columns={[
