@@ -24,6 +24,7 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'exportRebate', label: '出口退税', permissions: ['invoices:read'], paths: [['exportRebate']], entityTypes: ['rebate'], views: [] },
   { key: 'funding', label: '订单资金归属', permissions: ['finance:read', 'invoices:read', 'vouchers:read'], paths: [['orderFunding']], entityTypes: ['orderFunding'], views: ['funding'] },
   { key: 'relations', label: '客户与联系人', permissions: ['relations:read'], paths: [['customers'], ['contacts'], ['market', 'relations']], entityTypes: ['customer', 'relation'], views: ['customers', 'relations'] },
+  { key: 'memberHandovers', label: '成员交接记录', permissions: ['relations:read'], paths: [['memberHandovers']], entityTypes: [], views: [] },
   { key: 'crm', label: '客户跟进', permissions: ['crm:read'], paths: [['crm']], entityTypes: ['crm'], views: ['crm'] },
   { key: 'email', label: '邮件', permissions: ['emails:read'], paths: [['email']], entityTypes: ['email'], views: ['emails'] },
   { key: 'quotations', label: '报价', permissions: ['quotations:read'], paths: [['market', 'quotations']], entityTypes: ['quotation'], views: ['quotations'] },

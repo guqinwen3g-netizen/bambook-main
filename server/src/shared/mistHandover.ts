@@ -7,11 +7,17 @@
  * 报价没有单独的负责人字段，跟随客户负责人；未勾选的订单保留原负责人。
  */
 import { MistCommandError, type MistContext, type MistCustomer, type MistState } from './mistWorkspace';
-import { resolveMember } from './mistAccounts';
+import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, accountOwnedObjects, resolveMember, type MistOwnedObject } from './mistAccounts';
 
 export type MistCustomerHandover = { id: string; at: string; actor: string; fromId: string; from: string; toId: string; to: string; reason: string; orders: string[]; opportunities: string[]; tasks: number };
-export type HandoverCommand = { type: 'handover.customer'; payload: { customerId: string; toUserId: string; reason: string; orderIds?: string[]; opportunityIds?: string[] } };
-export const handoverCommandPermission = (_c: HandoverCommand) => 'relations:admin';
+/** 成员离职 / 调岗：按账号把名下全部负责对象一次交给新负责人（所有者在成员管理办理）。 */
+export type MistAccountHandover = { id: string; at: string; actor: string; fromId: string; from: string; toId: string; to: string; reason: string; counts: Partial<Record<MistOwnedObject['kind'], number>>; objects: string[]; tasks: number };
+export type HandoverCommand =
+  | { type: 'handover.customer'; payload: { customerId: string; toUserId: string; reason: string; orderIds?: string[]; opportunityIds?: string[] } }
+  | { type: 'handover.account'; payload: { fromUserId: string; toUserId: string; reason: string } };
+/** 客户交接由主管办理；按账号整体交接涉及全部业务对象，权限 null 由仓储层限定为工作区所有者（与成员授权一致）。 */
+export const handoverCommandPermission = (c: HandoverCommand) => c.type === 'handover.account' ? null : 'relations:admin';
+export const MIST_OWNED_KIND_LABEL: Record<MistOwnedObject['kind'], string> = { customer: '客户', order: '订单', development: '开发案', fabric: '面料寻样', opportunity: '商机', supplier: '供应商经手' };
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : 422); };
 const ids = (v: unknown) => [...new Set((Array.isArray(v) ? v : []).map(String))];
@@ -25,9 +31,66 @@ export function customerHandoverScope(root: MistState, customerId: string) {
   return { orders, opportunities, locked };
 }
 
+/** 账号名下的负责人显示名（取已有记录快照）。 */
+function snapshotName(root: MistState, id: string) {
+  return [...root.customers, ...root.orders, ...(root.devs || []), ...(root.fabrics || []), ...(root.crm?.opportunities || [])].find(r => r.ownerId === id)?.owner
+    || (root.market?.suppliers || []).flatMap(s => MIST_BUSINESS_GROUPS.map(g => s.handlers?.[g])).find(h => h?.id === id)?.name || id;
+}
+/** 业务记录中出现过的全部负责人账号（含已撤销授权的前成员），用于选择“原负责人”。 */
+export function accountOwners(root: MistState): Array<{ id: string; name: string; count: number }> {
+  const ids = new Set<string>();
+  for (const r of [...root.customers, ...root.orders, ...(root.devs || []), ...(root.fabrics || []), ...(root.crm?.opportunities || [])]) if (r.ownerId) ids.add(r.ownerId);
+  for (const s of root.market?.suppliers || []) for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id) ids.add(s.handlers[g]!.id);
+  return [...ids].map(id => ({ id, name: snapshotName(root, id), count: accountOwnedObjects(root, id).length }));
+}
+/** 整体交接的阻断项：审批中的订单内容锁定；供应商经手人须属于对应业务组。 */
+export function accountHandoverBlockers(root: MistState, fromId: string, to?: { id: string; name: string; groups: string[] }) {
+  const out: string[] = [];
+  for (const o of root.orders) if (o.ownerId === fromId && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
+  if (to) for (const s of root.market?.suppliers || []) for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id === fromId && !to.groups.includes(g)) out.push(`供应商 ${s.code} · ${s.name} 的${MIST_BUSINESS_GROUP_LABEL[g]}经手：${to.name} 不属于${MIST_BUSINESS_GROUP_LABEL[g]}业务组，请先设置业务组`);
+  return out;
+}
+export const accountHandovers = (root: MistState) => (root as MistState & { memberHandovers?: MistAccountHandover[] }).memberHandovers || [];
+
+function applyAccountHandover(root: MistState, p: Extract<HandoverCommand, { type: 'handover.account' }>['payload'], c: MistContext): { id: string } {
+  const fromId = typeof p?.fromUserId === 'string' ? p.fromUserId.trim() : '';
+  if (!fromId) fail('请选择原负责人');
+  const to = resolveMember(c, p.toUserId, '新负责人');
+  if (to.id === fromId) fail('新负责人不能与原负责人相同');
+  const reason = typeof p.reason === 'string' ? p.reason.trim() : '';
+  if (!reason) fail('请填写交接原因');
+  if (reason.length > 1000) fail('交接原因过长');
+  const owned = accountOwnedObjects(root, fromId);
+  const pendingTasks = root.tasks.filter(t => !t.done && t.assigneeIds.includes(fromId));
+  if (!owned.length && !pendingTasks.length) fail('该账号名下没有负责对象或未完成待办，无需交接');
+  const entry = c.members?.find(m => m.id === to.id);
+  const blockers = accountHandoverBlockers(root, fromId, { id: to.id, name: to.name, groups: entry?.groups || [] });
+  if (blockers.length) fail(blockers.join('；'), 'PRECONDITION');
+  const from = snapshotName(root, fromId);
+  const note = `成员交接 · 负责人：${from}→${to.name}：${reason}`;
+  const event = (entityType: string, entityId: string) => root.events.unshift({ id: c.id(), entityType, entityId, actor: c.actorName, at: c.now, text: note, fileIds: [] });
+  for (const r of root.customers) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; event('customer', r.id); }
+  for (const r of root.orders) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; event('order', r.id); }
+  for (const r of root.devs || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; event('development', r.id); }
+  for (const r of root.fabrics || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; event('fabric', r.id); }
+  for (const r of root.crm?.opportunities || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; }
+  for (const s of root.market?.suppliers || []) { let changed = false; for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id === fromId) { s.handlers[g] = { id: to.id, name: to.name }; changed = true; } if (changed) event('supplier', s.id); }
+  for (const t of pendingTasks) t.assigneeIds = [...new Set(t.assigneeIds.map(id => id === fromId ? to.id : id))];
+  const counts: MistAccountHandover['counts'] = {};
+  for (const o of owned) counts[o.kind] = (counts[o.kind] || 0) + 1;
+  const record: MistAccountHandover = { id: c.id(), at: c.now, actor: c.actorName, fromId, from, toId: to.id, to: to.name, reason, counts, objects: owned.map(o => `${o.role} ${o.label}`), tasks: pendingTasks.length };
+  ((root as MistState & { memberHandovers?: MistAccountHandover[] }).memberHandovers ||= []).push(record);
+  const summary = Object.entries(counts).map(([k, n]) => `${MIST_OWNED_KIND_LABEL[k as MistOwnedObject['kind']]} ${n}`).join('、') || '无负责对象';
+  root.events.unshift({ id: c.id(), entityType: 'workspace', entityId: fromId, actor: c.actorName, at: c.now, text: `成员交接：${from}→${to.name}；${summary}；改派待办 ${pendingTasks.length} 条。原因：${reason}`, fileIds: [] });
+  const due = new Date(Date.parse(c.now) + 3 * 86400000).toISOString().slice(0, 10);
+  root.tasks.unshift({ id: c.id(), title: `接手 ${from} 的业务（${summary}）：核对在手订单、报价、未收款与供应商`, due, done: false, kind: 'account-handover', target: { view: 'relations' }, assigneeIds: [to.id] });
+  return { id: record.id };
+}
+
 export function applyHandoverCommand(root: MistState, command: HandoverCommand, c: MistContext): { id: string } {
+  if (command.type === 'handover.account') return applyAccountHandover(root, command.payload, c);
   if (command.type !== 'handover.customer') return fail('未知交接操作');
-  const p = command.payload || ({} as HandoverCommand['payload']);
+  const p = command.payload || ({} as Extract<HandoverCommand, { type: 'handover.customer' }>['payload']);
   const customer = root.customers.find(x => x.id === p.customerId) || fail('客户不存在', 'NOT_FOUND');
   const to = resolveMember(c, p.toUserId, '新负责人');
   const reason = typeof p.reason === 'string' ? p.reason.trim() : '';

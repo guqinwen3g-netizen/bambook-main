@@ -85,3 +85,37 @@ describe('授权访问沿用 Mist 设置组件', () => {
     act(() => paint(true)); expect(host.textContent).toBe('');
   });
 });
+describe('成员整体交接', () => {
+  const ownerRow = (id: string, name: string) => ({ ownerId: id, owner: name });
+  function seed() {
+    const s = seam.workspace.state;
+    s.members = [{ userId: 'manager', name: '业务主管', addedBy: 'owner', addedByName: '所有者', addedAt: '2026-10-14T00:00:00Z' }];
+    s.customers = [{ id: 'c1', code: 'C1', name: '客户甲', ...ownerRow('left', '离职业务员') }];
+    s.orders = [{ id: 'o1', code: 'SO-1', customer: '客户甲', ...ownerRow('left', '离职业务员') }, { id: 'o2', code: 'SO-2', customer: '客户甲', governance: { status: 'pending' }, ...ownerRow('manager', '业务主管') }];
+    s.tasks = [{ id: 't1', title: '跟进', due: '', done: false, kind: 'x', target: { view: 'orders' }, assigneeIds: ['left'] }];
+    seam.workspace.run = vi.fn().mockResolvedValue({ result: { id: 'h1' } });
+  }
+  const pick = async (label: string, value: string) => { const el = host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!; await act(async () => { el.value = value; el.dispatchEvent(new Event('change', { bubbles: true })); }); };
+  const type = async (label: string, value: string) => { const el = host.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${label}"]`)!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); }); };
+  it('列出前成员名下业务，预览后整体交给在用成员', async () => {
+    seed(); act(() => paint());
+    const from = host.querySelector<HTMLSelectElement>('select[aria-label="交接原负责人"]')!;
+    expect([...from.options].map(o => o.textContent)).toContain('离职业务员（2 项，已不在本空间）');
+    await pick('交接原负责人', 'left'); await pick('交接新负责人', 'manager');
+    expect(host.querySelector('[data-handover-preview]')?.textContent).toContain('客户 1、订单 1；未完成待办 1 条');
+    expect(button('整体交接').disabled).toBe(true);
+    await type('成员交接原因', '离职，业务由主管接手');
+    await act(async () => button('整体交接').click());
+    expect(seam.workspace.run).toHaveBeenCalledWith({ type: 'handover.account', payload: { fromUserId: 'left', toUserId: 'manager', reason: '离职，业务由主管接手' } });
+  });
+  it('审批中的订单列为阻断项，不能提交', async () => {
+    seed(); act(() => paint());
+    await pick('交接原负责人', 'manager'); await pick('交接新负责人', 'owner'); await type('成员交接原因', '调岗');
+    expect(host.textContent).toContain('订单 SO-2 审批中，审批完成后再交接');
+    expect(button('整体交接').disabled).toBe(true);
+  });
+  it('被授权成员看不到交接区块', () => {
+    seam.workspace.workspace.access.canManageMembers = false; act(() => paint());
+    expect(host.querySelector('[data-member-handover]')).toBeNull();
+  });
+});
