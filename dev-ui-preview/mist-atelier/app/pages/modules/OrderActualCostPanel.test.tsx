@@ -1,0 +1,52 @@
+// @vitest-environment jsdom
+import React,{act} from 'react';
+import {createRoot,type Root} from 'react-dom/client';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {getByRole,queryByRole} from '@testing-library/dom';
+import {MistRoot,ToastProvider} from '../../../../../components/mist';
+import {applyMistCommand,createMistState,type MistCommand,type MistState} from '../../../../../server/src/shared/mistWorkspace';
+import {OrderActualCostPanel} from './OrderActualCostPanel';
+(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+let host:HTMLElement,root:Root,state:MistState;const run=vi.fn();
+const ctx={id:(()=>{let i=0;return()=>'c'+(++i);})(),now:'2026-10-18T02:00:00Z',actorName:'财务',actorId:'demo-reviewer'} as any;
+function render(canWrite=true){act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite={canWrite} busy={false} run={run}/></ToastProvider></MistRoot>));}
+async function click(node:Element){await act(async()=>(node as HTMLElement).click());}
+function type(node:Element,value:string){act(()=>{const set=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node),'value')!.set!;set.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}));});}
+beforeEach(()=>{state=createMistState(ctx,'demo');(state as any).fxPeriodRates=[{id:'fx',currency:'USD',month:'2026-10',rate:'7.100000'},{id:'fx2',currency:'EUR',month:'2026-10',rate:'7.800000'}];run.mockReset();run.mockResolvedValue({result:{id:'x'}});host=document.createElement('div');document.body.appendChild(host);root=createRoot(host);});
+afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it('lists every effective order with actual revenue, purchase, expenses and margin, and opens the line detail',async()=>{
+  state=applyMistCommand(state,{type:'cost.expense.register',payload:{category:'freight',date:'2026-10-15',currency:'USD',amount:800,scope:'shipment',shipmentId:state.fulfillment.shipments[0].id,basis:'volume'}} as MistCommand,ctx).state;
+  render();
+  const table=getByRole(host,'table',{name:'订单实际核算'});
+  expect(table.textContent).toContain('SO-G-2026-017');
+  expect(getByRole(host,'table',{name:'费用台账'}).textContent).toContain('FY-2026-0001');
+  const row=[...table.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('SO-G-2026-017'))!;
+  await click(row);
+  const detail=document.querySelector('[data-order-cost-detail]') as HTMLElement;
+  expect(getByRole(detail,'table',{name:'分摊费用'}).textContent).toContain('海运/空运费');
+  expect(getByRole(detail,'table',{name:'采购成本'}).textContent).toContain('PO-2026-00005');
+});
+it('registers an expense split across picked orders and voids one with a reason',async()=>{
+  state=applyMistCommand(state,{type:'cost.expense.register',payload:{category:'bank',date:'2026-10-15',currency:'CNY',amount:30,scope:'orders',orderIds:[state.orders[1].id],basis:'equal'}} as MistCommand,ctx).state;
+  render();
+  await click(getByRole(host,'button',{name:'登记费用'}));
+  const dialog=getByRole(document.body,'dialog',{name:'登记费用'});
+  type(getByRole(dialog,'combobox',{name:'分摊范围'}),'orders');
+  type(getByRole(dialog,'combobox',{name:'费用类别'}),'commission');
+  type(getByRole(dialog,'textbox',{name:'费用金额'}),'500');
+  const group=getByRole(dialog,'group',{name:'选择订单'});
+  const boxes=group.querySelectorAll('input[type="checkbox"]');
+  await click(boxes[1]);await click(boxes[2]);
+  await click(getByRole(dialog,'button',{name:'登记并分摊'}));
+  expect(run).toHaveBeenCalledWith({type:'cost.expense.register',payload:expect.objectContaining({category:'commission',scope:'orders',basis:'value',amount:'500',orderIds:[state.orders[1].id,state.orders[2].id]})});
+  await click(getByRole(host,'button',{name:'作废 FY-2026-0001'}));
+  const v=getByRole(document.body,'dialog',{name:/作废 FY-2026-0001/});
+  type(getByRole(v,'textbox',{name:'作废原因'}),'重复登记');
+  await click(getByRole(v,'button',{name:'作废'}));
+  expect(run).toHaveBeenLastCalledWith({type:'cost.expense.void',payload:{id:expect.any(String),reason:'重复登记'}});
+});
+it('hides registering and voiding for read-only viewers',()=>{
+  render(false);
+  expect(queryByRole(host,'button',{name:'登记费用'})).toBeNull();
+});
