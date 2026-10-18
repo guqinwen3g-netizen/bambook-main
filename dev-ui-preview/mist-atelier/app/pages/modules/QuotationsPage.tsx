@@ -18,6 +18,9 @@ import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 
+/** 报价金额是十进制字符串；只在显示时加千分位，导出与计算仍用原值。 */
+const quoteMoney = (value: string) => { const n = Number(value); return value && Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value; };
+
 export type QuoteDomain = 'garment' | 'fabric';
 export type QuoteStage = 'draft' | 'pending' | 'sent' | 'accepted' | 'closed' | 'converted';
 type StageFilter = 'all' | QuoteStage;
@@ -158,7 +161,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const columns: Column<MarketQuotation>[] = [
     { key: 'code', header: '报价 / 客户', width: 'minmax(150px,1.1fr)', render: q => <ObjectCell name={<><Mono>{q.code.replace(/-V\d+$/, '')}</Mono> <Pill tone={q.revision ? 'accent' : 'neutral'}>{version(q)}</Pill></>} meta={customerName(q.customerId)} /> },
     { key: 'lines', header: '条目', width: 'minmax(110px,1fr)', hideOnMobile: true, render: q => <span className="mist-col" style={{ gap: 2 }}><span>{q.lines[0]?.name || '—'}</span><small className="mist-muted">{q.lines.length > 1 ? `等 ${q.lines.length} 项` : q.lines[0] ? `${q.lines[0].qty} ${q.lines[0].unit}` : ''}</small></span> },
-    { key: 'total', header: '金额 / 术语', width: '118px', align: 'right', render: q => <span className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{q.currency} {q.total}</span><small className="mist-muted">{q.deliveryTerms}</small></span> },
+    { key: 'total', header: '金额 / 术语', width: '118px', align: 'right', render: q => <span className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{q.currency} {quoteMoney(q.total)}</span><small className="mist-muted">{q.deliveryTerms}</small></span> },
     { key: 'valid', header: '有效期', width: '96px', render: q => { const f = quotationFlags(all, q, day).find(x => x.key === 'overdue' || x.key === 'expiring'); return <span className="mist-col" style={{ gap: 2 }}><span className="mist-num">{q.validUntil}</span>{f && <small className={f.tone === 'bad' ? 'mist-tone-bad' : 'mist-tone-warn'}>{f.label}</small>}</span>; } },
     { key: 'stage', header: '状态', width: '92px', render: q => { const s = quotationStage(q), superseded = all.some(x => x.previousId === q.id); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STAGE_TONE[s]}>{quotationStageLabel(q)}</Pill>{superseded && <small className="mist-muted">已出新版本</small>}</span>; } },
   ];
@@ -193,7 +196,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
       { value: 'converted', label: '已转单', count: stageCount('converted'), color: 'var(--mist-ok)' },
       { value: 'closed', label: '未接受 / 已失效', count: stageCount('closed'), color: 'var(--mist-ink-3)' },
     ]} />
-    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${customerName(selected.customerId)}` : '报价单详情'} drawerSub={selected ? `${selected.currency} ${selected.total}` : undefined}
+    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${customerName(selected.customerId)}` : '报价单详情'} drawerSub={selected ? `${selected.currency} ${quoteMoney(selected.total)}` : undefined}
       list={<Card><DataTable ariaLabel={`${domain === 'fabric' ? '面料' : '成衣'}报价列表`} loading={loading} rows={rows} rowKey={q => q.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
@@ -265,7 +268,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       { label: '导出条目', icon: Download, onClick: onExport },
     ]} />
     <Facts items={[
-      { label: '金额', value: <span className="mist-num">{q.currency} {q.total}</span> },
+      { label: '金额', value: <span className="mist-num">{q.currency} {quoteMoney(q.total)}</span> },
       { label: '有效期', value: <span className={flags.some(f => f.key === 'overdue') ? 'mist-tone-bad' : undefined}>{q.validUntil}</span> },
       { label: '贸易术语', value: q.deliveryTerms },
       { label: '付款条件', value: q.paymentTerms },
@@ -288,7 +291,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
     {!!q.costingSnapshots?.length&&<DetailBlock title="核算历史"><span className="mist-note">{q.costingSnapshots.length} 份不可覆盖快照；编辑草稿重建条目后，旧快照仅历史，不自动绑定新行。当前行从条目核算查看。</span><Button onClick={()=>onOpen('quotations',q.id,{section:'cost-history'})}>查看全部核算历史</Button></DetailBlock>}
     {versions.length > 1 && <DetailBlock title="版本">
       <div className="mist-col" style={{ gap: 6 }} data-quotation-versions>{versions.map(v => <Button key={v.id} variant={v.id === q.id ? 'secondary' : 'quiet'} aria-current={v.id === q.id || undefined} onClick={() => onOpen('quotations', v.id)}>
-        <span className="mist-row" data-wrap style={{ gap: 8, rowGap: 4, width: '100%' }}><Pill tone={v.id === q.id ? 'accent' : 'neutral'}>{version(v)}</Pill><span className="mist-num">{v.currency} {v.total}</span><span className="mist-muted">至 {v.validUntil.slice(5)}</span><span className="mist-spacer" /><span>{quotationStageLabel(v)}</span></span>
+        <span className="mist-row" data-wrap style={{ gap: 8, rowGap: 4, width: '100%' }}><Pill tone={v.id === q.id ? 'accent' : 'neutral'}>{version(v)}</Pill><span className="mist-num">{v.currency} {quoteMoney(v.total)}</span><span className="mist-muted">至 {v.validUntil.slice(5)}</span><span className="mist-spacer" /><span>{quotationStageLabel(v)}</span></span>
       </Button>)}</div>
     </DetailBlock>}
     <DetailBlock title="客户反馈记录"><span className="mist-note">{q.feedback?.length||0} 条结构化反馈；区分客户原话、业务判断和未知原因。还价不改本版单价，接受 / 未接受仍从主线确认。</span><Button onClick={()=>onOpen('quotations',q.id,{section:'feedback'})}>查看客户反馈</Button></DetailBlock>
