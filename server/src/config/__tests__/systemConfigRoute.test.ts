@@ -1,6 +1,6 @@
 /**
  * systemConfigRoute HTTP 契约验收（公司档案与配置.md §1A，2026-08-18 裁决）
- *   - GET  /api/v1/config/company.exporterProfile         全登录可读；无配置 → 200 默认值 + isDefault:true（不落库）
+ *   - GET  /api/v1/config/company.exporterProfile         全登录可读；无配置 → 200 空档案 + isDefault:true + configured:false（不落库）
  *   - PUT  /api/v1/config/company.exporterProfile         仅 owner/admin（SUPER_ADMIN/ADMIN legacy）
  *                                                       银行四字段变更且 reason 空 → 400 REASON_REQUIRED
  *                                                       nameEn 缺失/非 string → 400 VALIDATION_FAILED
@@ -14,13 +14,25 @@ import { describe, expect, it, vi, beforeAll } from 'vitest';
 import jwt from 'jsonwebtoken';
 import {
   createSystemConfigRouter,
-  DEFAULT_EXPORTER_PROFILE,
+  EMPTY_EXPORTER_PROFILE,
+  readConfiguredExporterProfile,
   EXPORTER_PROFILE_CONFIG_ID,
   EXPORTER_PROFILE_CONFIG_KEY,
 } from '../systemConfigRoute';
 import { createSystemConfigService } from '../systemConfigService';
 import { logger } from '../../lib/logger';
 import { seedSystemConfigs} from '../../../scripts/seed-systemconfig';
+
+/** 测试用模拟出口方档案（虚构值，非真实公司/银行信息） */
+const DEMO_PROFILE = {
+  nameEn: 'DEMO EXPORT CO.,LTD.',
+  addressEn: 'ROOM 101 DEMO TOWER,\nDEMO CITY, 000000 PR\nCHINA',
+  beneficiary: 'DEMO EXPORT CO.,LTD.',
+  bankName: 'DEMO BANK SAMPLE SUB-BRANCH',
+  swiftCode: 'DEMOCNXX001',
+  bankAddress: '1 DEMO ROAD, DEMO CITY, P.R.CHINA.',
+  usdAccountNumber: '000000000001',
+};
 
 const SECRET = process.env.JWT_SECRET || 'change-me-in-production-at-least-32-chars';
 const adminToken = jwt.sign({ userId: 'u_admin', roles: ['admin'], permissions: [], departmentIds: [] }, SECRET);
@@ -38,7 +50,7 @@ function makeConfigRow(overrides: any = {}) {
     group: 'company',
     label: '出口方档案（单据抬头/收款账户）',
     valueType: 'json',
-    value: JSON.stringify(DEFAULT_EXPORTER_PROFILE),
+    value: JSON.stringify(DEMO_PROFILE),
     encrypted: false,
     version: 2,
     description: null,
@@ -92,25 +104,27 @@ function makeApp(opts: { configRow?: any } = {}) {
 }
 
 describe('GET /company.exporterProfile（全登录可读）', () => {
-  it('无配置 → 200 默认值 + isDefault:true（不落库）', async () => {
+  it('无配置 → 200 空档案 + isDefault:true + configured:false（不落库、无兜底抬头）', async () => {
     const { app, prisma } = makeApp({ configRow: null });
     const res = await request(app).get(`/api/v1/config/${EXPORTER_PROFILE_CONFIG_KEY}`).set('Authorization', `Bearer ${viewerToken}`);
     expect(res.status).toBe(200);
     expect(res.body.isDefault).toBe(true);
     expect(res.body.version).toBe(0);
-    expect(res.body.value).toEqual(DEFAULT_EXPORTER_PROFILE);
+    expect(res.body.configured).toBe(false);
+    expect(res.body.value).toEqual(EMPTY_EXPORTER_PROFILE);
     expect(prisma.systemConfig.upsert).not.toHaveBeenCalled();
   });
 
   it('有配置 → 200 库值 + isDefault:false + version', async () => {
-    const stored = { ...DEFAULT_EXPORTER_PROFILE, nameEn: 'CUSTOM CO.,LTD.' };
+    const stored = { ...DEMO_PROFILE, nameEn: 'CUSTOM CO.,LTD.' };
     const { app } = makeApp({ configRow: makeConfigRow({ value: JSON.stringify(stored), version: 5 }) });
     const res = await request(app).get(`/api/v1/config/${EXPORTER_PROFILE_CONFIG_KEY}`).set('Authorization', `Bearer ${salesToken}`);
     expect(res.status).toBe(200);
     expect(res.body.isDefault).toBe(false);
     expect(res.body.version).toBe(5);
     expect(res.body.value.nameEn).toBe('CUSTOM CO.,LTD.');
-    expect(res.body.value.swiftCode).toBe(DEFAULT_EXPORTER_PROFILE.swiftCode);
+    expect(res.body.configured).toBe(true);
+    expect(res.body.value.swiftCode).toBe(DEMO_PROFILE.swiftCode);
   });
 
   it('未登录 → 401 UNAUTHORIZED', async () => {
@@ -122,7 +136,7 @@ describe('GET /company.exporterProfile（全登录可读）', () => {
 });
 
 describe('PUT /company.exporterProfile（RBAC：仅 SUPER_ADMIN/ADMIN）', () => {
-  const validBody = { value: { ...DEFAULT_EXPORTER_PROFILE, nameEn: 'RENAMED CO.,LTD.' } };
+  const validBody = { value: { ...DEMO_PROFILE, nameEn: 'RENAMED CO.,LTD.' } };
 
   it('未登录 → 401 UNAUTHORIZED', async () => {
     const { app } = makeApp();
@@ -148,7 +162,7 @@ describe('PUT /company.exporterProfile（RBAC：仅 SUPER_ADMIN/ADMIN）', () =>
     const res = await request(app)
       .put(`/api/v1/config/${EXPORTER_PROFILE_CONFIG_KEY}`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ value: { ...DEFAULT_EXPORTER_PROFILE, bankName: 'BANK OF CHINA SUZHOU BRANCH' }, reason: '更新收款银行' });
+      .send({ value: { ...DEMO_PROFILE, bankName: 'BANK OF CHINA SUZHOU BRANCH' }, reason: '更新收款银行' });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.version).toBe(3); // 既有 version=2 → +1
@@ -178,7 +192,7 @@ describe('PUT /company.exporterProfile（RBAC：仅 SUPER_ADMIN/ADMIN）', () =>
     const res = await request(app)
       .put(`/api/v1/config/${EXPORTER_PROFILE_CONFIG_KEY}`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ value: { ...DEFAULT_EXPORTER_PROFILE, swiftCode: 'BKCHCNBJ999' } });
+      .send({ value: { ...DEMO_PROFILE, swiftCode: 'DEMOCNXX999' } });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('REASON_REQUIRED');
     expect(prisma.systemConfig.upsert).not.toHaveBeenCalled();
@@ -189,9 +203,9 @@ describe('PUT /company.exporterProfile（RBAC：仅 SUPER_ADMIN/ADMIN）', () =>
     const res = await request(app)
       .put(`/api/v1/config/${EXPORTER_PROFILE_CONFIG_KEY}`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ value: { ...DEFAULT_EXPORTER_PROFILE, usdAccountNumber: '467668199999' }, reason: '更换美元账户' });
+      .send({ value: { ...DEMO_PROFILE, usdAccountNumber: '000000009999' }, reason: '更换美元账户' });
     expect(res.status).toBe(200);
-    expect(res.body.value.usdAccountNumber).toBe('467668199999');
+    expect(res.body.value.usdAccountNumber).toBe('000000009999');
   });
 
   it('仅 nameEn 变更（无 reason）→ 200', async () => {
@@ -276,7 +290,7 @@ describe('seed 幂等（seed-systemconfig.ts）', () => {
     expect(result.skipped).toBeGreaterThan(0);
   });
 
-  it('缺失 → 写入与前端 EXPORTER_PROFILE 同款默认值（group=company / valueType=json / version=1）', async () => {
+  it('缺失 → 其余配置照常写入，但不写出口方档案（真实抬头/银行信息只由管理后台填写）', async () => {
     const creates: any[] = [];
     const db: any = {
       systemConfig: {
@@ -285,14 +299,8 @@ describe('seed 幂等（seed-systemconfig.ts）', () => {
       },
     };
     await seedSystemConfigs(db);
-    const entry = creates.find((c) => c.key === EXPORTER_PROFILE_CONFIG_KEY);
-    expect(entry).toBeTruthy();
-    expect(entry.id).toBe(EXPORTER_PROFILE_CONFIG_ID);
-    expect(entry.group).toBe('company');
-    expect(entry.valueType).toBe('json');
-    expect(entry.version).toBe(1);
-    expect(entry.encrypted).toBe(false);
-    expect(entry.value).toEqual(DEFAULT_EXPORTER_PROFILE);
+    expect(creates.length).toBeGreaterThan(0);
+    expect(creates.find((c) => c.key === EXPORTER_PROFILE_CONFIG_KEY)).toBeUndefined();
   });
 });
 
@@ -330,7 +338,7 @@ describe('B42·A1 · 三个 500 出口：原文不外发、但必须留在日志
     prisma.systemConfig.upsert.mockRejectedValue(new Error(RAW));
     const res = await request(app).put(`/api/v1/config/${key}`)
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ value: { ...DEFAULT_EXPORTER_PROFILE, nameEn: 'B42 A1 RENAMED' } });
+      .send({ value: { ...DEMO_PROFILE, nameEn: 'B42 A1 RENAMED' } });
     expect(res.status).toBe(500);
     expect(res.body.error).toBe('CONFIG_UPDATE_FAILED');
     expect(res.text, '响应体不得带出异常原文').not.toContain(SECRET_MARK);
@@ -350,5 +358,22 @@ describe('B42·A1 · 三个 500 出口：原文不外发、但必须留在日志
     expect(res.body.message.length).toBeGreaterThan(0);
     expect(JSON.stringify(spy.mock.calls), '原文必须落在日志侧').toContain(SECRET_MARK);
     spy.mockRestore();
+  });
+});
+
+describe('readConfiguredExporterProfile（单据生成链路，无兜底抬头）', () => {
+  const client = (row: any) => ({ systemConfig: { findUnique: vi.fn(async () => row) } }) as any;
+  it('未配置 / nameEn 为空 / 读取失败 → 409 CONFLICT，提示先在管理后台填写', async () => {
+    for (const db of [client(null), client(makeConfigRow({ value: JSON.stringify({ ...DEMO_PROFILE, nameEn: '  ' }) })),
+      { systemConfig: { findUnique: vi.fn(async () => { throw new Error('db down'); }) } } as any]) {
+      await expect(readConfiguredExporterProfile(db)).rejects.toMatchObject({
+        code: 'CONFLICT', statusCode: 409, message: expect.stringContaining('管理后台 › 出口方档案'),
+      });
+    }
+  });
+  it('已配置（JSON 字符串或对象）→ 返回库值并补齐空字段', async () => {
+    await expect(readConfiguredExporterProfile(client(makeConfigRow()))).resolves.toEqual(DEMO_PROFILE);
+    await expect(readConfiguredExporterProfile(client(makeConfigRow({ value: { nameEn: 'ONLY NAME' } }))))
+      .resolves.toEqual({ ...EMPTY_EXPORTER_PROFILE, nameEn: 'ONLY NAME' });
   });
 });

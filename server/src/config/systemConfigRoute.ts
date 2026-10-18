@@ -10,7 +10,7 @@
  *      （versionFrom/To + actorId + reason）；银行四字段任一变更时 reason 必填
  *
  * 端点（挂载点：/api/v1/config，与 automationRoute 同一 sdkAuth 注册点）：
- *   GET  /company.exporterProfile         — 登录即可读；配置不存在时返回默认值（200 + isDefault:true），不落库
+ *   GET  /company.exporterProfile         — 登录即可读；配置不存在时返回空档案（200 + isDefault:true + configured:false），不落库
  *   PUT  /company.exporterProfile         — 仅 owner/admin；body: { value: {...}, reason?: string }
  *   GET  /company.exporterProfile/history — 仅 owner/admin；SystemConfigHistory 倒序列表
  *
@@ -26,6 +26,7 @@ import { requireAuth } from '../auth/middleware';
 import { createCurrentWriteActor } from '../auth/currentWriteActor';
 import { requirePermission } from '../auth/permissionGuard';
 import { logger } from '../lib/logger';
+import { businessError } from '../shared/errorCodes';
 import {
   createSystemConfigService,
   getSystemConfigService,
@@ -56,19 +57,44 @@ export interface ExporterProfileValue {
 }
 
 /**
- * 默认出口方档案。
- * ⚠️ 真源：前端 components/tools/exportDocs/exporterProfile.ts 的 EXPORTER_PROFILE 常量。
- *    本副本是服务端兜底值（GET 无配置时返回 + seed 初始写入），修改任一侧必须同步另一侧。
+ * 空出口方档案（未配置态）。
+ * 公开仓库不得携带真实公司抬头/银行信息：真实值只在部署后由管理后台 · 出口方档案写入数据库。
+ * 未配置时 GET 返回本空档案 + configured:false；单据生成链路一律拒绝（EXPORTER_PROFILE_MISSING_MESSAGE）。
  */
-export const DEFAULT_EXPORTER_PROFILE: ExporterProfileValue = {
-  nameEn: 'JIANGSU PANDA CLOTHING CO.,LTD.',
-  addressEn: 'ROOM A1028 WUYUE PLAZA,\nZHANGJIAGANG CITY, 215600 PR\nCHINA',
-  beneficiary: 'JIANGSU PANDA CLOTHING CO.,LTD.',
-  bankName: 'BANK OF CHINA ZHANGJIAGANG SUB-BRANCH',
-  swiftCode: 'BKCHCNBJ95L',
-  bankAddress: '111 MIDDLE RENMIN ROAD, ZHANGJIAGANG CITY, SUZHOU, JIANGSU PROV., P.R.CHINA.',
-  usdAccountNumber: '467668133096',
+export const EMPTY_EXPORTER_PROFILE: ExporterProfileValue = {
+  nameEn: '',
+  addressEn: '',
+  beneficiary: '',
+  bankName: '',
+  swiftCode: '',
+  bankAddress: '',
+  usdAccountNumber: '',
 };
+
+export const EXPORTER_PROFILE_MISSING_MESSAGE = '出口方档案未配置或无法读取：请先在 管理后台 › 出口方档案 填写公司英文名与地址，再生成单据。';
+
+/** 已配置 = 公司英文名（单据抬头）非空 */
+export function isExporterProfileConfigured(value: unknown): boolean {
+  const nameEn = (value as { nameEn?: unknown } | null | undefined)?.nameEn;
+  return typeof nameEn === 'string' && nameEn.trim() !== '';
+}
+
+/**
+ * 单据生成链路读取当前出口方档案；未配置/读取失败一律拒绝，不使用任何兜底抬头。
+ * 直接读调用方传入的 client（含事务 tx），不走进程级 TTL 缓存单例，保证读到的是当前库值。
+ */
+export async function readConfiguredExporterProfile(prisma: PrismaClient, _options?: { fresh?: boolean }): Promise<ExporterProfileValue> {
+  let stored: unknown = null;
+  try {
+    const row = await (prisma as any).systemConfig.findUnique({ where: { id: EXPORTER_PROFILE_CONFIG_ID } });
+    let value = row && row.encrypted !== true ? row.value : null;
+    if (typeof value === 'string') { try { value = JSON.parse(value); } catch { value = null; } }
+    if (value && typeof value === 'object' && !Array.isArray(value)) stored = value;
+  } catch { stored = null; }
+  const value = { ...EMPTY_EXPORTER_PROFILE, ...((stored as object) || {}) } as ExporterProfileValue;
+  if (!isExporterProfileConfigured(value)) throw businessError('CONFLICT', EXPORTER_PROFILE_MISSING_MESSAGE);
+  return value;
+}
 
 /** 银行字段：任一变更时 reason 必填（§1A 审计裁决） */
 const BANK_FIELDS = ['bankName', 'swiftCode', 'bankAddress', 'usdAccountNumber'] as const;
@@ -102,23 +128,25 @@ export function createSystemConfigRouter(options: SystemConfigRouterOptions): Ro
       try {
         const found = await svc.get(EXPORTER_PROFILE_CONFIG_KEY);
         if (!found) {
-          // 未配置：返回默认值 + isDefault 标记，不落库（由 seed 负责首次写入）
+          // 未配置：返回空档案 + configured:false，不落库（真实值由管理后台写入）
           return res.json({
             ok: true,
             key: EXPORTER_PROFILE_CONFIG_KEY,
-            value: { ...DEFAULT_EXPORTER_PROFILE },
+            value: { ...EMPTY_EXPORTER_PROFILE },
             version: 0,
             isDefault: true,
+            configured: false,
           });
         }
-        // 与前端 getExporterProfile() 同语义：合并默认值兜底新增字段
-        const value = { ...DEFAULT_EXPORTER_PROFILE, ...((found.value as object) || {}) };
+        // 合并空档案补齐新增字段（不引入任何兜底抬头）
+        const value = { ...EMPTY_EXPORTER_PROFILE, ...((found.value as object) || {}) };
         res.json({
           ok: true,
           key: EXPORTER_PROFILE_CONFIG_KEY,
           value,
           version: found.row.version,
           isDefault: false,
+          configured: isExporterProfileConfigured(value),
           updatedAt: toEpochMs(found.row.updatedAt),
           updatedBy: found.row.updatedBy ?? null,
         });
@@ -159,8 +187,8 @@ export function createSystemConfigRouter(options: SystemConfigRouterOptions): Ro
         // 当前生效值（skipCache：银行变更判定是审计关键路径，必须读最新库值）
         const existing = await svc.get(EXPORTER_PROFILE_CONFIG_KEY, { skipCache: true });
         const current: ExporterProfileValue = existing
-          ? { ...DEFAULT_EXPORTER_PROFILE, ...((existing.value as object) || {}) }
-          : { ...DEFAULT_EXPORTER_PROFILE };
+          ? { ...EMPTY_EXPORTER_PROFILE, ...((existing.value as object) || {}) }
+          : { ...EMPTY_EXPORTER_PROFILE };
 
         // 合并语义：nameEn 必填全覆盖，其余字段仅在显式提供时更新
         const next: ExporterProfileValue = { ...current, nameEn: value.nameEn };

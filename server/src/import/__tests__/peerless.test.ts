@@ -1,105 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
-import { extractPdfText } from '../extractText';
 import { parsePeerless } from '../parsers/peerless';
 import { ACTUAL_PRICE_LINE, TOTAL_NET_LINE, peerlessHeaderLines } from './helpers/syntheticPdf';
 
-const DIR = '/Users/qinwengu/WorkBuddy/Claw/BusinessDocu/00-Entities/Peerless/面料/BULK PO';
-
-async function load(file: string) {
-  const buf = fs.readFileSync(`${DIR}/${file}`);
-  const { text } = await extractPdfText(buf);
-  return parsePeerless(text);
-}
-
-describe('parsePeerless — header', () => {
-  it('PO 4500159423', async () => {
-    const o = await load('PO#-4500159423-0001.pdf');
-    expect(o.poNumber).toBe('4500159423');
-    expect(o.season).toBe('F26-INSTOCK');
-    expect(o.poDate).toBe('2026/03/31');
-    expect(o.contactPerson).toBe('Sonya Catalano');
-    expect(o.contactPhone).toBe('514-593-9300 EXT:1510');
-    expect(o.currency).toBe('USD');
-    expect(o.deliveryTerms).toMatch(/FOB.*CHINA/);
-    expect(o.paymentTerms).toMatch(/To be confirmed/i);
-  });
-
-  it.each([
-    ['PO#-4500159154-0001.pdf', '4500159154', '2026/03/03'],
-    ['PO#-4500159120-0001.pdf', '4500159120', '2026/02/25'],
-    ['PO#-4500159027-0001.pdf', '4500159027', '2026/02/17'],
-    ['PO#-4500158987-0001.pdf', '4500158987', '2026/02/11'],
-  ] as const)('%s header', async (file, po, date) => {
-    const o = await load(file);
-    expect(o.poNumber).toBe(po);
-    expect(o.poDate).toBe(date);
-    expect(o.season).toBe('F26-INSTOCK');
-    expect(o.currency).toBe('USD');
-  });
-});
-
-describe('parsePeerless — line items', () => {
-  it('PO 4500159423 has 4 lines and the first line matches the PDF', async () => {
-    const o = await load('PO#-4500159423-0001.pdf');
-    expect(o.lines).toHaveLength(4);
-
-    const l1 = o.lines[0];
-    expect(l1.itemNo).toBe('00010');
-    expect(l1.materialCode).toBe('144749');
-    expect(l1.millQuality).toBe('RD7302_PCHR');
-    expect(l1.description).toBe('CHARCOAL SOLID');
-    expect(l1.width).toBe('147 CM');
-    expect(l1.exMillDate).toBe('2026/07/01');
-    expect(l1.deliveryDate).toBe('2026/08/15');
-    expect(l1.quantity).toBeCloseTo(3600, 6);
-    expect(l1.unit).toBe('Meter');
-    expect(l1.unitPrice).toBeCloseTo(8.1, 6);
-    expect(l1.netValue).toBeCloseTo(29160, 6);
-    expect(l1.via).toBe('SEA');
-    expect(l1.cloth).toBe('70% Wool/25% Polyester/5% Spandex');
-    expect(l1.weight).toBe('186GSM');
-    expect(l1.category).toBe('SUITS SEPARATES');
-  });
-
-  it.each([
-    ['PO#-4500159154-0001.pdf', 3],
-    ['PO#-4500159120-0001.pdf', 1],
-    ['PO#-4500159027-0001.pdf', 3],
-    ['PO#-4500158987-0001.pdf', 2],
-  ] as const)('%s line count', async (file, expectedCount) => {
-    const o = await load(file);
-    expect(o.lines).toHaveLength(expectedCount);
-  });
-});
-
-describe('parsePeerless — ship-to & totals', () => {
-  it.each([
-    ['PO#-4500159423-0001.pdf', 103680],
-    ['PO#-4500159154-0001.pdf', 93150],
-    ['PO#-4500159120-0001.pdf', 40500],
-    ['PO#-4500159027-0001.pdf', 125550],
-    ['PO#-4500158987-0001.pdf', 42930],
-  ] as const)('%s totals', async (file, expected) => {
-    const o = await load(file);
-    expect(o.totalNet).toBeCloseTo(expected, 2);
-    expect(o.totalActual).toBeCloseTo(expected, 2);
-  });
-
-  it.each([
-    'PO#-4500159423-0001.pdf',
-    'PO#-4500159154-0001.pdf',
-    'PO#-4500159120-0001.pdf',
-    'PO#-4500159027-0001.pdf',
-    'PO#-4500158987-0001.pdf',
-  ])('%s ship-to is Panda Clothing in CHINA', async (file) => {
-    const o = await load(file);
-    expect(o.shipTo.contactName).toBe('Richard Gu');
-    expect(o.shipTo.company).toMatch(/Jiangsu Panda Clothing/);
-    expect(o.shipTo.country).toBe('CHINA');
-    expect(o.shipTo.addressLines.length).toBeGreaterThan(0);
-  });
-});
+// 依赖开发者本机真实客户 PO 文件的用例已移除（公开仓库不携带真实客户单据/联系人信息）；
+// 解析行为由下方合成文本用例覆盖。
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S4 处置 · 任务 1（P1）：必填金额行缺失 ⇒ 抛错，**不得静默写 0**
@@ -108,8 +12,7 @@ describe('parsePeerless — ship-to & totals', () => {
 // `persistOrders.ts` 的 `parsed.totalActual ?? 0` / `?? null` 一路落库
 // （`??` 只挡 null/undefined，挡不住 0）⇒ 生成一份"看起来成功、成交金额为 0"的订单。
 //
-// 注：真 PO 的 5 份 fixture 全部命中这两行，所以"缺行"场景**必须合成文本**，
-// 无法从真 PDF 里造出来 —— 这正是这条静默兜底此前从未被覆盖的原因。
+// 注："缺行"场景必须合成文本覆盖。
 // ─────────────────────────────────────────────────────────────────────────────
 describe('parsePeerless — 必填金额行缺失 ⇒ 抛错（S4 任务 1）', () => {
   const HEADER = peerlessHeaderLines().join('\n');
@@ -150,7 +53,7 @@ describe('parsePeerless — 必填金额行缺失 ⇒ 抛错（S4 任务 1）', 
     expect(msg).toContain('请核对 PDF 或让供应商重新出具');
     // 正则原文/元字符不得上屏（B33/B36/B37 族）
     expect(msg).not.toMatch(/\\s|\\d|\[A-Z\]|\(\[|\.\*|\?/);
-    // 同文件 :96/:98 那两处英文技术串的写法，新抛的不许照抄
+    // 英文技术串写法不许照抄
     expect(msg).not.toMatch(/Peerless:.*not found/i);
     expect(msg).not.toMatch(/Actual price\s+\[/);
   });

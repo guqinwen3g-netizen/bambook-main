@@ -5,6 +5,7 @@ import { buildApprovalReviewDetail, readApprovalReviewDetail } from '../approval
 import { buildQuotationSnapshot, canonicalQuotationJson } from '../../quotations/quotationApprovalSnapshot';
 import { buildApprovalSignDocumentSnapshot } from '../approvalSignDocumentSnapshotService';
 import { ACTION_TOTAL_APPROVE, buildQuotationApprovalSnapshot } from '../../quotations/quotationApprovalSnapshot';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 const sha = 'a'.repeat(64);
 function paymentApproval(overrides: Record<string, any> = {}) {
@@ -40,7 +41,7 @@ describe('approval review detail projection', () => {
       lines: [{ id: 'QL-SIGN-1', lineNumber: 1, fabricCode: 'FAB-9', description: 'Cotton twill', quantity: '3.000',
         unit: 'M', unitPrice: '41.1500', amount: '123.4500', notes: null, imageUrl: null }] };
     const prisma: any = { quotation: { findUnique: vi.fn(async () => quotation) },
-      systemConfig: { findUnique: vi.fn(async () => null) }, auditLog: { findMany: vi.fn(async () => []) } };
+      systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) }, auditLog: { findMany: vi.fn(async () => []) } };
     const documentSnapshot = await buildApprovalSignDocumentSnapshot(prisma, { kind: 'Quotation', quotationId: quotation.id });
     const approval = { id: 'APR-QT-SIGN-1', requesterId: 'seller-1', reviewerId: 'manager-1', status: 'pending',
       actionType: ACTION_TOTAL_APPROVE, targetType: 'Quotation', targetId: quotation.id,
@@ -68,7 +69,7 @@ describe('approval review detail projection', () => {
       payload: { quotationId: 'QT-OLD', quotationNumber: 'QT-OLD', contentFingerprint: sha,
         quotationSnapshot: { schemaVersion: 2, quotationId: 'QT-OLD', currency: 'USD', totalAmount: '1', lines: [{ id: 'L-1' }] } } };
     const prisma: any = { quotation: { findUnique: vi.fn(async () => { throw new Error('db unavailable'); }) },
-      systemConfig: { findUnique: vi.fn(async () => null) }, auditLog: { findMany: vi.fn(async () => []) } };
+      systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) }, auditLog: { findMany: vi.fn(async () => []) } };
     const detail = await readApprovalReviewDetail(prisma, approval as any, { canReadCurrentSource: true });
     expect(detail.currentSource.status).toBe('unavailable');
     expect(detail.currentSource.label).toContain('不能用冻结快照代替');
@@ -164,7 +165,7 @@ describe('approval review detail projection', () => {
         findMany: vi.fn(async () => [{ id: 'SHIP-1', status: 'Loading' }]) },
       shipmentOrderAllocation: { findFirst: vi.fn(async () => ({ id: 'SOA-1' })),
         findMany: vi.fn(async () => [{ shipmentId: 'SHIP-1', plannedQty: '9000', actualQty: '9000' }]) },
-      systemConfig: { findUnique: vi.fn(async () => null) }, auditLog: { findMany: vi.fn(async () => []) } };
+      systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) }, auditLog: { findMany: vi.fn(async () => []) } };
     const detail = await readApprovalReviewDetail(prisma, approval as any, { canReadCurrentSource: true });
     expect(detail.canApprove).toBe(true);
     expect(detail.currentSource.fields).toContainEqual({ key: 'shipmentNumber', label: '关联运单', value: 'S-1' });

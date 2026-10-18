@@ -46,14 +46,14 @@ export const DEFAULT_SAMPLE_INVOICE_TEMPLATE: SampleInvoiceTemplateConfig = {
   stampScale: 2,
   stampOffsetX: 0,
   stampOffsetY: 0,
-  companyName: 'Jiangsu Panda Clothing Co.,Ltd.',
-  companyAddress: 'ROOM A1028 WUYUE PLAZA,\nZHANGJIAGANG CITY,215600 PR\nCHINA',
+  companyName: 'Demo Export Co.,Ltd.',
+  companyAddress: 'ROOM 101 DEMO TOWER,\nDEMO CITY,000000 PR\nCHINA',
   paymentTerms: 'AS PER AGREEMENT',
-  bankName: 'BANK OF CHINA ZHANGJIAGANG SUB-BRANCH',
-  swiftCode: 'BKCHCNBJ95L',
-  bankAddress: '111 MIDDLE RENMIN ROAD, ZHANGJIAGANG CITY, SUZHOU, JIANGSU PROV., P.R.CHINA.',
-  beneficiary: 'JIANGSU PANDA CLOTHING CO.,LTD.',
-  usdAccountNumber: '467668133096',
+  bankName: 'DEMO BANK SAMPLE SUB-BRANCH',
+  swiftCode: 'DEMOCNXX001',
+  bankAddress: '1 DEMO ROAD, DEMO CITY, P.R.CHINA.',
+  beneficiary: 'DEMO EXPORT CO.,LTD.',
+  usdAccountNumber: '000000000001',
 };
 
 export const createEmptyFabricInvoiceItem = (): FabricSampleInvoiceItem => ({

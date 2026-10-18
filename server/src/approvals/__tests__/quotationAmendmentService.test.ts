@@ -3,6 +3,7 @@ import { buildQuotationApprovalSignDocumentSnapshot } from '../approvalSignDocum
 import { buildQuotationApprovalSnapshot, ACTION_LINE_APPROVE, ACTION_TOTAL_APPROVE } from '../../quotations/quotationApprovalSnapshot';
 import { approvalReviewContentVersion } from '../approvalReviewContent';
 import { createQuotationApprovalAmendmentService } from '../quotationAmendmentService';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 const mocks = vi.hoisted(() => ({ evaluatePrice: vi.fn(), validateMoq: vi.fn(), findMoq: vi.fn(),
   actualMoqLines: vi.fn(), snapshotVersion: vi.fn() }));
@@ -42,7 +43,7 @@ function fixture(overrides: { actionType?: string; sourceQuote?: any; status?: s
     quotationVersion: { create: vi.fn(async (args: any) => { state.writes.push(['version.create', args]); return args.data; }) },
     auditLog: { create: vi.fn(async (args: any) => { state.writes.push(['audit.create', args]); return args.data; }),
       findFirst: vi.fn(async () => null) },
-    systemConfig: { findUnique: vi.fn(async () => null) },
+    systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) },
     $transaction: vi.fn(async (fn: any) => fn(tx)),
   };
   const service = createQuotationApprovalAmendmentService({ prisma: tx });

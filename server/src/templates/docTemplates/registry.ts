@@ -19,7 +19,7 @@ import { PrismaClient } from '@prisma/client';
 import type { TokenPayload } from '../../auth/service';
 import { businessError } from '../../shared/errorCodes';
 import { getSystemConfigService } from '../../config/systemConfigService';
-import { DEFAULT_EXPORTER_PROFILE, EXPORTER_PROFILE_CONFIG_KEY } from '../../config/systemConfigRoute';
+import { readConfiguredExporterProfile } from '../../config/systemConfigRoute';
 import { buildServerDocument, esc, type DocSeal } from '../docPrintBase';
 import { createSealService } from '../../seal/sealService';
 import { logger } from '../../lib/logger';
@@ -182,17 +182,11 @@ export const SERVER_DOC_TEMPLATES: Record<string, ServerDocTemplate> = {
 };
 
 /**
- * 读取出口方档案（SystemConfig 真源，30s TTL 缓存 → DEFAULT_EXPORTER_PROFILE 兜底）。
- * 与 finance/route.ts loadInvoiceDoc 同语义；读取失败不阻断渲染（走默认档案）。
+ * 读取出口方档案（SystemConfig 真源，30s TTL 缓存）。
+ * 未配置或读取失败一律拒绝渲染（CONFLICT + 请先填写出口方档案），不使用任何兜底抬头。
  */
 export async function loadExporterProfile(prisma: PrismaClient, options?: { fresh?: boolean }): Promise<DocExporterProfile> {
-  try {
-    const found = await getSystemConfigService(prisma).get(EXPORTER_PROFILE_CONFIG_KEY, { skipCache: options?.fresh === true });
-    if (found?.value && typeof found.value === 'object') {
-      return { ...DEFAULT_EXPORTER_PROFILE, ...(found.value as object) } as DocExporterProfile;
-    }
-  } catch { /* 配置读取失败走默认档案 */ }
-  return { ...DEFAULT_EXPORTER_PROFILE };
+  return await readConfiguredExporterProfile(prisma, options) as unknown as DocExporterProfile;
 }
 
 /**

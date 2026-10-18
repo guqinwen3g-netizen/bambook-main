@@ -4,6 +4,7 @@ import { buildApprovalSignDocumentSnapshot } from '../../approvals/approvalSignD
 import { approvalReviewContentVersion } from '../../approvals/approvalReviewContent';
 import { approvalReviewPreviewDigest } from '../../approvals/approvalReviewDetailService';
 import { resolveDocumentSigner } from '../documentSigner';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 async function fixture() {
   const order: any = { id: 'o1', poNumber: 'PO-1', customer: 'Original customer', status: 'Confirmed',
@@ -13,7 +14,7 @@ async function fixture() {
   let approval: any;
   let audit: any;
   const prisma: any = { order: { findUnique: vi.fn(async () => order) },
-    systemConfig: { findUnique: vi.fn(async () => null), findMany: vi.fn(async () => []) },
+    systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()), findMany: vi.fn(async () => []) },
     auditLog: { findMany: vi.fn(async () => audit ? [audit] : []) },
     approvalRequest: { findFirst: vi.fn(async () => approval) },
     userRole: { findFirst: vi.fn(async () => ({ roleId: 'role-admin' })) } };

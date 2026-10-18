@@ -17,6 +17,7 @@ import {
   resolveDocumentSignerByDoc,
   SIGN_TARGET_BY_DOC_TYPE,
 } from '../documentSigner';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 const makePrisma = async (approval: any, role: any = null, targetId = 'QT_1') => {
   const quotation: any = { id: targetId, quotationNumber: 'QT-1', status: 'Draft', version: 1, currency: 'USD', totalAmount: '10',
@@ -28,7 +29,7 @@ const makePrisma = async (approval: any, role: any = null, targetId = 'QT_1') =>
   let audit: any = null;
   const prisma: any = { approvalRequest: { findFirst: vi.fn(async () => row) },
     quotation: { findUnique: vi.fn(async () => quotation) },
-    systemConfig: { findUnique: vi.fn(async () => null) },
+    systemConfig: { findUnique: vi.fn(async () => demoExporterProfileRow()) },
     auditLog: { findMany: vi.fn(async () => audit ? [audit] : []) },
     userRole: { findFirst: vi.fn(async () => role) } };
   if (approval) {

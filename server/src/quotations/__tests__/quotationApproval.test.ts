@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createQuotationApprovalService, ACTION_LINE_APPROVE, ACTION_TOTAL_APPROVE } from '../quotationApproval';
 import { buildQuotationApprovalSnapshot } from '../quotationApprovalSnapshot';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 function makeApprovalService(opts: {
   lines?: any[];
@@ -34,7 +35,7 @@ function makeApprovalService(opts: {
       findMany:vi.fn().mockImplementation(async({where}:any)=>rows.filter((row:any)=>!where.status || row.status===where.status)),
       updateMany:vi.fn().mockResolvedValue({count:1}) },
     auditLog:{create:vi.fn(),findMany:vi.fn().mockImplementation(async()=>rows.map(row=>({actorId:row.reviewerId,action:row.status==='approved'?'approve_business_request':'reject_business_request',detail:{source:'api:approvals',decisionActorAuthority:{userId:row.reviewerId,roles:[],roleIds:[],authorizationLoaded:true},approvalDecisionFact:{schemaVersion:1,status:row.status,actionType:row.actionType,targetType:row.targetType,targetId:row.targetId,contentFingerprint:row.payload.contentFingerprint,decisionActorId:row.reviewerId,decidedAt:row.decidedAt.toISOString()}}})))},
-    systemConfig: { findUnique: vi.fn().mockResolvedValue(null) },
+    systemConfig: { findUnique: vi.fn().mockResolvedValue(demoExporterProfileRow()) },
   } as any;
   prisma.$queryRawUnsafe = vi.fn().mockResolvedValue([{ id: current.id }]);
   prisma.$transaction=vi.fn(async(fn:any)=>fn(prisma));

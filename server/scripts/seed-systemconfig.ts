@@ -1,5 +1,5 @@
 /**
- * seed-systemconfig.ts — Phase 0-08 初始化 7 类 37 项系统配置（幂等重跑）
+ * seed-systemconfig.ts — Phase 0-08 初始化 7 类 36 项系统配置（幂等重跑）
  *
  * 运行：
  *   cd server && npx ts-node scripts/seed-systemconfig.ts
@@ -10,7 +10,6 @@
  */
 import { PrismaClient } from '@prisma/client';
 import type { ConfigGroup, ValueType } from '../src/config/systemConfigService';
-import { DEFAULT_EXPORTER_PROFILE } from '../src/config/systemConfigRoute';
 
 const prisma = new PrismaClient();
 
@@ -26,12 +25,12 @@ interface SeedItem {
 }
 
 const SEEDS: SeedItem[] = [
-  // ─────────── company（9项）───────────
+  // ─────────── company（9项，出口方档案除外）───────────
   { key: 'company.nameZh',            group: 'company',  valueType: 'string', label: '公司中文名',
-    value: '江苏熊猫服饰有限公司',
-    description: '展示在销售单据、发票、对账单抬头' },
+    value: '',
+    description: '部署后在管理后台填写；展示在销售单据、发票、对账单抬头' },
   { key: 'company.nameEn',            group: 'company',  valueType: 'string', label: '公司英文名',
-    value: process.env.BAMBOOK_COMPANY_NAME_EN || 'JIANGSU PANDA CLOTHING CO.,LTD.',
+    value: process.env.BAMBOOK_COMPANY_NAME_EN || '',
     description: '外贸单据 / 商业发票 / 装箱单抬头英文名称' },
   { key: 'company.addressZh',         group: 'company',  valueType: 'string', label: '中文注册地址', value: '江苏省南京市（请在 OPS Panel 修改为实际地址）' },
   { key: 'company.addressEn',         group: 'company',  valueType: 'string', label: '英文注册地址', value: 'Nanjing, Jiangsu, P.R.China (edit in OPS Panel)' },
@@ -41,16 +40,12 @@ const SEEDS: SeedItem[] = [
   { key: 'company.businessLicenseNo', group: 'company',  valueType: 'string', label: '营业执照号', value: '',
     description: '历史字段，新版多证合一后等同 taxId，可留空' },
   { key: 'company.phone',             group: 'company',  valueType: 'string', label: '联系电话', value: '+86 25 0000-0000' },
-  { key: 'company.email',             group: 'company',  valueType: 'string', label: '业务邮箱', value: 'sales@jiangsupanda.com' },
+  { key: 'company.email',             group: 'company',  valueType: 'string', label: '业务邮箱', value: '' },
   { key: 'company.logoUrl',           group: 'company',  valueType: 'string', label: 'Logo 图片 URL',
     value: '',
     meta: { placeholder: 'https://.../logo.png 或 /assets/logo.png' } },
-  // W7 设置域：exporterProfile 服务端化（§1A 裁决：唯一真源 = SystemConfig global::company.exporterProfile）
-  // 默认值真源 = 前端 components/tools/exportDocs/exporterProfile.ts 的 EXPORTER_PROFILE 常量
-  // （服务端副本见 server/src/config/systemConfigRoute.ts DEFAULT_EXPORTER_PROFILE，两侧修改必须同步）
-  { key: 'company.exporterProfile',   group: 'company',  valueType: 'json',   label: '出口方档案（单据抬头/收款账户）',
-    value: DEFAULT_EXPORTER_PROFILE,
-    description: 'CI/PL/Contract 等外贸单据卖方抬头与收款银行信息；写入口唯一 = PUT /api/v1/config/company.exporterProfile（仅 SUPER_ADMIN/ADMIN）' },
+  // company.exporterProfile 不在种子内：公开仓库不携带真实抬头/银行信息，部署后由管理员在
+  // 管理后台 › 出口方档案 填写（PUT /api/v1/config/company.exporterProfile）；未填写前单据生成一律拒绝。
 
   // ─────────── finance（7项）───────────
   { key: 'finance.defaultCurrency',   group: 'finance',  valueType: 'string', label: '默认记账币种',
@@ -79,7 +74,7 @@ const SEEDS: SeedItem[] = [
   { key: 'tax.invoiceWarnThresholdCny', group: 'tax',    valueType: 'number', label: '单张开票金额预警阈值（人民币）',
     value: 1_000_000, meta: { min: 0, step: 10_000 } },
   { key: 'tax.invoiceTitleDefault',   group: 'tax',      valueType: 'string', label: '发票抬头默认值（公司中文全名）',
-    value: '江苏熊猫服饰有限公司' },
+    value: '' },
   { key: 'tax.taxOfficeLocation',     group: 'tax',      valueType: 'string', label: '主管税务机关名称',
     value: '（请在 OPS Panel 修改实际主管税务机关）' },
 

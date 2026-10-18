@@ -56,17 +56,17 @@ export interface PdasSampleInvoiceDocument {
 export const DEFAULT_PDAS_COMPANY: PdasSampleInvoiceCompany = {
   // 抬头口径与全单据统一：真源 = components/tools/exportDocs/exporterProfile.ts EXPORTER_PROFILE.nameEn
   // （CI/PL、面料样品发票均为全大写；核对脚本 npm run check:exporter-profile 守护）
-  name: 'JIANGSU PANDA CLOTHING CO.,LTD.',
-  address: 'ROOM A1028 WUYUE PLAZA',
-  // 与真源 addressEn 第二行对齐（真源为 'ZHANGJIAGANG CITY, 215600 PR'）
-  city: 'ZHANGJIAGANG CITY, 215600 PR',
+  name: 'DEMO EXPORT CO.,LTD.',
+  address: 'ROOM 101 DEMO TOWER',
+  // 与真源 addressEn 第二行对齐（真源为 'DEMO CITY, 000000 PR'）
+  city: 'DEMO CITY, 000000 PR',
   country: 'CHINA',
 };
 
 export const DEFAULT_PDAS_BANK: PdasSampleInvoiceBank = {
-  name: 'BANK OF CHINA ZHANGJIAGANG SUB-BRANCH',
-  swift: 'BKCHCNBJ95L',
-  account: '467668133096',
+  name: 'DEMO BANK SAMPLE SUB-BRANCH',
+  swift: 'DEMOCNXX001',
+  account: '000000000001',
   currency: 'USD',
 };
 

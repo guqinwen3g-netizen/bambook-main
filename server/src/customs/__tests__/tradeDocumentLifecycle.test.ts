@@ -23,6 +23,7 @@ import {
   upsertDomainTradeDocument,
   TRADE_DOC_NUMBER_PREFIX,
 } from '../tradeDocumentLifecycleService';
+import { demoExporterProfileRow } from '../../config/__tests__/exporterProfileFixture';
 
 // ── Mock 声明（vi.hoisted：vi.mock 工厂提升后在 import 阶段即可安全引用）──
 const { assembleMock, pdfMock, invoiceHtmlMock, fsMock } = vi.hoisted(() => ({
@@ -97,6 +98,7 @@ function makePrisma(overrides: Record<string, any> = {}) {
       create: vi.fn().mockImplementation(async ({ data }: any) => ({ ...data })),
     },
     auditLog: { create: vi.fn().mockResolvedValue({}), findFirst: vi.fn().mockResolvedValue(null) },
+    systemConfig: { findUnique: vi.fn().mockResolvedValue(demoExporterProfileRow()) },
   };
   const prisma: any = {
     ...tx,

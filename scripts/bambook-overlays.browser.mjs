@@ -33,7 +33,7 @@ function App(){const[theme,T]=React.useState('light'),[dialog,D]=React.useState(
 window.__theme=t=>{T(t);document.documentElement.dataset.theme=t;document.documentElement.classList.toggle('dark',t==='dark');};
 return h('main',{className:'bambook-os-root',style:{minHeight:'100vh',padding:40,background:'var(--bg-page)',color:'var(--text-primary)'}},
 h('div',{style:{display:'flex',gap:20,alignItems:'center'}},h('h1',null,'Bambook 浮层验收'),h('button',{onClick:()=>D('default')},'普通弹窗'),h('button',{onClick:()=>D('editorial')},'编辑式弹窗'),h('button',{onClick:()=>S(true)},'抽屉')),
-h('p',null,'订单 PO-2026-108　江苏熊猫进出口有限公司　USD 24,600.00'),
+h('p',null,'订单 PO-2026-108　示例进出口有限公司　USD 24,600.00'),
 h('div',{className:'bds-card',id:'stationary-glass',style:{padding:24,marginTop:32}},'常驻玻璃表面保持原材质'),
 h(NotificationCenter,{isDarkMode:theme==='dark'},h(NotificationCenterTrigger,{variant:'header'})),
 h(AnimatePresence,null,dialog&&h(BdsDialog,{key:'main',title:'产品与交易约定',variant:dialog,onCancel:()=>D(''),onConfirm:()=>D('')},h('p',null,'面料编号 FAB-2026-021，交期 2026-11-03。'),h(CustomSelect,{ariaLabel:'交付方式',surface:'form',appearance:'line',value,onChange:V,options:[{value:'one',label:'工厂直送'},{value:'two',label:'仓库交付'}]}),h('button',{onClick:()=>N(true)},'打开确认'))),

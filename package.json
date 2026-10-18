@@ -22,7 +22,6 @@
     "build": "vite build",
     "build:desktop": "VITE_UI_MODE=desktop vite build",
     "scan:html-injection": "node scripts/scan-unescaped-interpolation.mjs",
-    "check:exporter-profile": "node scripts/check-exporter-profile-consistency.mjs",
     "check:bundle-secret": "node scripts/check-bundle-secret-leak.mjs",
     "check:migration": "node scripts/check-migration.mjs",
     "preview": "vite preview",
