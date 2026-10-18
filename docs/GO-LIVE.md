@@ -42,7 +42,8 @@
 2. 改动前按 AGENTS.md 读必要源码与 Mist 前端规范（`.qoder/skills/bambook-ui/SKILL.md`）。
 3. 完成后跑完整本地测试：`npm test`（前端）、`cd server && npm run test:mist`（服务端）、`npx tsc -p tsconfig.mist.json --noEmit` 与 `npx tsc -p server/tsconfig.json --noEmit`（类型），`npm run mist:check`（Mist 规范）。约 5–8 分钟，输出落到文件只看摘要。
 4. 推送 → 开 PR 到 main → 以 merge commit 合入（不 squash、不强推）。
-5. 在本文件“进度记录”追加一行（PR 号、做了什么、测试数），并更新“下一步”。
+5. 只改文档时：PR 只做空白检查，合入 main 后不跑检查、不部署，可不跑本地全量测试（跑 `npm run mist:check` 即可）。
+6. 在本文件“进度记录”追加一行（PR 号、做了什么、测试数），并更新“下一步”。
 
 基线（2026-10-18，代码截至 PR #155）：前端 1165 项、服务端 974 passed / 11 skipped，类型检查通过。`electron/brandAssets.test.ts` 有一条既有失败（引用不存在的临时路径），不在 `npm test` 范围内，可不管。
 
@@ -106,3 +107,4 @@
 | #155 | 头像自定义（移植 legacy DiceBear 头像探索器、照片裁剪、恢复姓名首字；Avatar 全站支持预设头像） |
 | #156 | Notion 文档迁入仓库（本文件），AGENTS / README / PR 模板改为单线接力规则 |
 | #157 | 文档口径收尾：README / 文档导航 / AGENT_BRIEF / AGENTS 检查点统一指向本文件，LIVE-PROGRESS、HANDOFF 明确为历史 |
+| #158 | CI 提效：只改文档的推送到 main 不再跑完整检查、不重复部署；部署防回滚允许“后面只多了文档提交” |
