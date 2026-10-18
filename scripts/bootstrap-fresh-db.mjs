@@ -103,7 +103,7 @@ async function main() {
 
   // ---- 4) 可选：接着铺走查数据集（v3.162 已证这条路跑得通）----
   if (ok && has('seed')) {
-    execFileSync('npm', ['run', 'seed:base'], { cwd: join(R, 'server'), encoding: 'utf8', env: { ...process.env, DATABASE_URL: targetUrl }, stdio: ['ignore', 'pipe', 'pipe'] });
+    execFileSync('npm', ['run', 'seed:base'], { cwd: join(R, 'server'), encoding: 'utf8', env: { ...process.env, DATABASE_URL: targetUrl, BAMBOOK_SEED_DEMO_ACCOUNTS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     step('seed:base 完成');
     execFileSync('npx', ['tsx', 'scripts/seed-company-sim.ts'], { cwd: join(R, 'server'), encoding: 'utf8', env: { ...process.env, DATABASE_URL: targetUrl }, stdio: ['ignore', 'pipe', 'pipe'] });
     step('seed-company-sim 完成');

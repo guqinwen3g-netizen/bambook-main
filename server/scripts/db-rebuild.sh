@@ -122,7 +122,7 @@ cd "$SERVER_ROOT"
 export PGPASSWORD="$PASS"
 echo ""
 echo "   › 基础数据（RBAC / 字典 / 系统配置 / 发号器 / 权限 / MOQ）"
-npm run --silent seed:base > /dev/null 2>&1 && echo "     基础数据完成" || { echo "     ✗ 基础数据失败"; exit 1; }
+BAMBOOK_SEED_DEMO_ACCOUNTS=1 npm run --silent seed:base > /dev/null 2>&1 && echo "     基础数据完成" || { echo "     ✗ 基础数据失败"; exit 1; }
 
 if [[ "$TARGET" == "empty" ]]; then
   # 空白公司：业务数据保持为零（模拟甲方第一次上手），但必须保留「恰好一个」bootstrap 管理员，

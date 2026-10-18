@@ -77,7 +77,7 @@ sudo -u bambook-deploy env SSH_ORIGINAL_COMMAND="activate $revision" /usr/bin/py
 首次部署后以 root 执行 `sudo bash /srv/bambook-dev/current/server/scripts/init-dev-database.sh`（仅接受本机 `panda_hub_dev`，幂等）：
 
 1. 空库按 `schema.prisma` 建表（`db push`），并把全部迁移标记为已应用作为基线——迁移历史无法从空库重放（早期迁移依赖库外已有表）。之后 schema 变更照常 `migrate deploy`。正式库禁止 `db push` 的原则不变。
-2. `seed:base` → 补建 `owner@bambook.local`（`SEED_OWNER_ALLOW_NONEMPTY=1`，因 `seed:base` 已建演示账号）→ `seed:dev-roles`（17 个模拟员工、5 个业务组、5 个模拟客户，不造订单 / 报价 / 财务数据）。
+2. `BAMBOOK_SEED_DEMO_ACCOUNTS=1 seed:base`（演示账号只在带此变量时创建，正式环境不得设置）→ 补建 `owner@bambook.local`（`SEED_OWNER_ALLOW_NONEMPTY=1`，因已建演示账号）→ `seed:dev-roles`（17 个模拟员工、5 个业务组、5 个模拟客户，不造订单 / 报价 / 财务数据）。
 3. 给 owner 与面料主管、面料一组组长 / 组员、财务、面料 QC、物流设置随机密码，只写入 root 0600 `/srv/bambook-dev/shared/test-accounts.txt`。重复执行会重新生成这些密码。
 
 另有用户指定的简单管理员 `admin@bambook.local`（超级管理员，密码由用户指定，不入库），为手工创建，重建开发库后需重建。登录框为邮箱类型，须输入完整邮箱。
