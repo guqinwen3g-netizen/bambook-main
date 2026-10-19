@@ -582,12 +582,12 @@ export class MistRepository {
     const meta = validateFileInput(file);
     return this.executeInternal(prior, workspaceId, {...input,claimId}, { upload: meta,...(claimId===undefined?{}:{claimId}) }, file);
   }
-  async download(prior: TokenPayload, workspaceId: string, fileId: string) {
+  async download(prior: TokenPayload, workspaceId: string, fileId: string, preview?: 'thumb' | 'display') {
     const result = await this.transact(async db => {
       const { row, actor } = await this.own(db, prior, workspaceId);
       const file = Array.isArray(row.state.files) ? row.state.files.find((item: MistStoredFile) => item.id === fileId) : null;
       if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), row.ownerId)) fail('FILE_NOT_FOUND', '附件不存在或不属于此工作区', 404);
-      const bytes = await this.files.read(workspaceId, file);
+      const bytes = preview ? await this.files.readPreview(workspaceId, file, preview) : await this.files.read(workspaceId, file);
       await this.authorize(db, prior);
       return { file, bytes };
     });

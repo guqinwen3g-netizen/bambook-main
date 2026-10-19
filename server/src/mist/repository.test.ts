@@ -3,6 +3,7 @@ import { mkdtemp, readdir, rm, symlink, mkdir, writeFile } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { MistPrivateFiles, MIST_FILE_MAX_BYTES } from './files';
 import { MistRepository } from './repository';
 import { MemoryMistDatabase, requestReceiptCount, testActor, testAuthority, testContract } from './__tests__/support';
@@ -160,6 +161,14 @@ describe('Mist transactional workspace', () => {
     const bytes = Buffer.alloc(21 * 1024 * 1024, 9);
     const file = await files.write(workspaceId, { bytes, name: 'large.dat', mimeType: 'application/octet-stream' }, new Date().toISOString());
     expect(file.size).toBe(bytes.length); expect((await files.read(workspaceId, file)).equals(bytes)).toBe(true);
+  });
+  it('persists both image derivatives beside the original and removes all three together', async () => {
+    const files = new MistPrivateFiles(root), workspaceId = randomUUID();
+    const bytes = await sharp({ create: { width: 1200, height: 800, channels: 3, background: '#778899' } }).png().toBuffer();
+    const file = await files.write(workspaceId, { bytes, name: 'fabric.png', mimeType: 'image/png' }, new Date().toISOString());
+    expect(await readdir(path.join(root, workspaceId))).toEqual(expect.arrayContaining([file.id, `${file.id}.preview-thumb.webp`, `${file.id}.preview-display.webp`]));
+    expect((await files.readPreview(workspaceId, file, 'display')).length).toBeLessThan(bytes.length);
+    await files.remove(workspaceId, file); expect(await readdir(path.join(root, workspaceId))).toEqual([]);
   });
   it('blocks oversized bytes, traversal storage keys and symlink escape', async () => {
     const files = new MistPrivateFiles(root), id = randomUUID();

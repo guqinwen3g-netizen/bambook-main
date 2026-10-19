@@ -2,7 +2,7 @@ import sharp from 'sharp';
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it,vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createMistRouter } from './route';
@@ -104,6 +104,7 @@ it('serves bounded authenticated image previews and keeps the original download 
  const bytes=await sharp({create:{width:1800,height:1200,channels:3,background:'#778899'}}).png().toBuffer();
  const uploaded=await request(app).post(`/api/mist/workspaces/${workspace.id}/files`).set('x-test-user','owner').field('requestId','image-preview').field('expectedRevision','0').attach('file',bytes,{filename:'swatch.png',contentType:'image/png'}).expect(201);
  const file=uploaded.body.workspace.state.files[0],url=`/api/mist/workspaces/${workspace.id}/files/${file.id}`;
+ const stored=await readdir(path.join(root,workspace.id));expect(stored).toEqual(expect.arrayContaining([file.id,`${file.id}.preview-thumb.webp`,`${file.id}.preview-display.webp`]));
  const preview=await request(app).get(url+'?preview=thumb').set('x-test-user','owner').expect(200).expect('Content-Type',/image\/webp/);
  expect((await sharp(preview.body).metadata()).width).toBeLessThanOrEqual(160);
  await request(app).get(url+'?preview=thumb').expect(401);

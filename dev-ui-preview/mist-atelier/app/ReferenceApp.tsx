@@ -16,6 +16,7 @@ import { Nav, useNav, type Route, type RouteTarget } from './nav';
 import { MistSessionProvider, useMistSession } from './runtime/auth';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
+import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
 import { MistVersionInfo } from './runtime/version';
 import { useOrganizationContext } from './runtime/organizationContext';
 import { HomePage } from './pages/HomePage';
@@ -156,6 +157,19 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
   const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
   const aiScope=session.sessionKey+':'+(workspace.workspace?.id??'');
+  React.useEffect(() => {
+    const workspaceId = workspace.workspace?.id;
+    if (!workspaceId || !state?.market?.products?.length || workspace.loading) return;
+    const scope = `${session.sessionKey}:${session.user?.id || ''}:${workspaceId}`;
+    const files = new Map(state.files.map(file => [file.id, file]));
+    const paths = state.market.products.flatMap(product => (product.fileIds ?? []).flatMap(id => {
+      const file = files.get(id); if (!file?.mimeType.startsWith('image/')) return [];
+      const base = workspace.fileUrl(file); return [`${base}?preview=thumb`, `${base}?preview=display`];
+    }));
+    const timer = window.setTimeout(() => { void prefetchPrivateImages(scope, paths); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [session.sessionKey, session.user?.id, workspace.workspace?.id, workspace.loading, workspace.workspace?.revision]);
+  React.useEffect(() => () => clearPrivateImages(), [session.sessionKey, workspace.workspace?.id]);
   const aiCurrent=React.useRef(aiScope);aiCurrent.current=aiScope;
   const aiMounted=React.useRef(true),aiController=React.useRef<AbortController|null>(null),aiRun=React.useRef<symbol|null>(null);
   const aiHistory=React.useRef<Array<{role:'user'|'assistant';content:string}>>([]);
