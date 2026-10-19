@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import type { PrismaClient, Prisma } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { createAuthService } from '../auth/service';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
 
 const CONFIG_ID = 'platform::company-defaults';
@@ -42,6 +43,25 @@ export function platformSettingsRouter(db: PrismaClient, authorize: (req: Reques
       const staff = await db.userAccount.findMany({ where: { platformRole: 'platform_admin', deletedAt: null, companyMembers: { none: {} }, roles: { none: {} } }, orderBy: { createdAt: 'asc' }, select: { id: true, displayName: true, email: true, status: true, lastLoginAt: true } });
       res.json({ ok: true, staff });
     } catch (e) { next(e); }
+  });
+  router.post('/staff', async (req, res, next) => {
+    try {
+      const actor = await authorize(req, res); if (!actor) return;
+      const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+      const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254 || !displayName || displayName.length > 120) { res.status(400).json({ ok: false, message: '请填写姓名和有效的工作邮箱。' }); return; }
+      const initialPassword = randomBytes(24).toString('base64url');
+      const passwordHash = await createAuthService().hashPassword(initialPassword);
+      const staff = await db.$transaction(async tx => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(190019, 2)`;
+        if (await tx.userAccount.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } })) return null;
+        const row = await tx.userAccount.create({ data: { id: 'platform_' + randomUUID(), displayName, email, passwordHash, platformRole: 'platform_admin', status: 'active', metadata: { forceChangePassword: true } }, select: { id: true, displayName: true, email: true, status: true, lastLoginAt: true } });
+        await tx.auditLog.create({ data: { id: randomUUID(), actorId: actor.userId, action: 'platform.staff.create', targetType: 'UserAccount', targetId: row.id, detail: { displayName, email } } });
+        return row;
+      });
+      if (!staff) { res.status(409).json({ ok: false, message: '该邮箱已有账号。请使用独立的平台工作邮箱，不能将公司账号转换为平台人员。' }); return; }
+      res.status(201).json({ ok: true, staff, initialPassword });
+    } catch (e) { if ((e as { code?: string }).code === 'P2002') { res.status(409).json({ ok: false, message: '该邮箱已有账号。' }); return; } next(e); }
   });
   router.patch('/staff/:id', async (req, res, next) => {
     try {

@@ -299,7 +299,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
           account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => setAccount(true) }}
           onSearch={() => setPalette(true)}
           assistant={platformOnly ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
-        topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
+        topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
           sync={platformOnly ? { state: 'ok', text: '平台运营' } : { state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? '需要核对同步状态' : live ? '已保存 · 公司' : '设计组件展示' }}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
           extra={platformOnly ? undefined : <MistReviewButton/>} notifications={platformOnly ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={platformOnly ? undefined : ()=>openAI()} />}

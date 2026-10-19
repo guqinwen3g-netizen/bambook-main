@@ -20,6 +20,7 @@ describe.skipIf(!url)('platform lifecycle on PostgreSQL',()=>{
  it('rejects malformed and non-platform credentials',async()=>{const t=createAuthService().signToken({userId:guest,roles:['owner'],permissions:['*'],departmentIds:[]});expect((await request(app).get('/api/platform/companies').set('Authorization','Bearer '+t)).status).toBe(403);});
  it('protects platform settings, personnel and logs from company accounts',async()=>{
   const t=createAuthService().signToken({userId:guest,roles:['owner'],permissions:['*'],departmentIds:[]});
+  expect((await request(app).post('/api/platform/staff').set('Authorization','Bearer '+t).send({displayName:'No',email:'no@example.invalid'})).status).toBe(403);
   for(const path of ['/settings','/staff','/audit'])expect((await request(app).get('/api/platform'+path).set('Authorization','Bearer '+t)).status).toBe(403);
   expect((await request(app).patch('/api/platform/settings').set('Authorization','Bearer '+t).send({plan:'no',seatLimit:null,version:0})).status).toBe(403);
  });
@@ -47,6 +48,14 @@ describe.skipIf(!url)('platform lifecycle on PostgreSQL',()=>{
  it('paginates platform-only operation records without credential fields',async()=>{
   const list=await call('get','/audit');expect(list.status).toBe(200);expect(list.body.logs.every((r:any)=>r.action.startsWith('platform.'))).toBe(true);expect(list.body.logs.length).toBeLessThanOrEqual(30);
   expect(JSON.stringify(list.body)).not.toMatch(/passwordHash|initialPassword/);expect((await call('get','/audit?page=-1')).status).toBe(400);
+ });
+
+ it('creates only a new independent platform identity with a one-time password and forced change',async()=>{
+  expect((await call('post','/staff').send({displayName:'Existing company person',email:mail})).status).toBe(409);
+  expect((await call('post','/staff').send({displayName:'',email:'bad'})).status).toBe(400);
+  const result=await call('post','/staff').send({displayName:'运营同事',email:'operator-'+key+'@example.invalid'});expect(result.status).toBe(201);
+  const id=result.body.staff.id;
+  try{expect(result.body.initialPassword.length).toBeGreaterThanOrEqual(24);expect(await db.userAccount.findUnique({where:{id}})).toMatchObject({platformRole:'platform_admin',metadata:{forceChangePassword:true}});expect(await db.companyMember.count({where:{userId:id}})).toBe(0);expect(await db.userRole.count({where:{userId:id}})).toBe(0);const list=await call('get','/staff');expect(JSON.stringify(list.body)).not.toContain(result.body.initialPassword);const audit=await db.auditLog.findFirst({where:{action:'platform.staff.create',targetId:id}});expect(JSON.stringify(audit)).not.toContain(result.body.initialPassword);}finally{await db.userAccount.delete({where:{id}});}
  });
 
 });

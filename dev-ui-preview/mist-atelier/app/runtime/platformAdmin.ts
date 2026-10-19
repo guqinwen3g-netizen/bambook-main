@@ -12,6 +12,7 @@ export type PlatformAudit = { id:string; action:string; targetId:string|null; cr
 export const platformAdminApi={
  settings:(signal?:AbortSignal)=>call<{defaults:PlatformDefaults}>('/settings','GET',undefined,signal),
  saveSettings:(defaults:PlatformDefaults)=>call<{defaults:PlatformDefaults}>('/settings','PATCH',defaults),
+ createStaff:(draft:{displayName:string;email:string})=>call<{staff:PlatformStaff;initialPassword:string}>('/staff','POST',draft),
  staff:(signal?:AbortSignal)=>call<{staff:PlatformStaff[]}>('/staff','GET',undefined,signal),
  updateStaff:(id:string,status:string)=>call('/staff/'+encodeURIComponent(id),'PATCH',{status}),
  audit:(page:number,signal?:AbortSignal)=>call<{logs:PlatformAudit[];total:number;page:number}>('/audit?page='+page,'GET',undefined,signal),
