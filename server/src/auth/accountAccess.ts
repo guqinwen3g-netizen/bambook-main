@@ -49,7 +49,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
   });
   if(!entry)return{status:'unavailable',message:'该账号当前不能接收邀请。'};
   if('cooldown'in entry)return{status:'cooldown',message:'发送过于频繁，请稍后再试（每分钟一次、每小时最多五次）。'};
-  const url=new URL(base);url.searchParams.set('view',entry.setup?'account-access':entry.platform?'platform-admin':'login');
+  const url=new URL(base);url.searchParams.set('view',entry.setup?'account-access':'login');
   if(entry.setup){url.searchParams.set('kind',kind);url.searchParams.set('email',entry.email);url.hash=token;}
   const label=entry.platform?'Sylway Cloud 平台':companyName||'Bambook 公司';
   let status:Delivery['status']='sent';
@@ -103,7 +103,7 @@ export function accountAccessRouter(db:PrismaClient,options:AccountAccessOptions
   if(!service.available())return res.status(503).json({ok:false,message:'找回邮件服务暂不可用，请联系平台管理员。'});
   const user=await db.userAccount.findFirst({where:{email:{equals:address,mode:'insensitive'}},include:accountInclude});
   if(eligible(user,'recovery'))await service.deliver(user!.id,'recovery');
-  return res.json({ok:true,message:'申请已处理。如该邮箱属于可用的平台账号，请检查找回邮件。请检查收件箱及垃圾邮件；未收到时可联系其他平台管理员。'});
+  return res.json({ok:true,message:'申请已处理。如该账号支持邮箱找回，请检查收件箱及垃圾邮件。公司账号请联系本公司管理员重置。'});
  }catch(e){next(e);}});
  router.post('/complete',async(req,res,next)=>{try{
   const b=req.body??{};

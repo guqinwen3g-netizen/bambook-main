@@ -10,8 +10,7 @@ import { useMistSession } from '../runtime/auth';
 import { mapAuthErrorMessage } from '../../../../services/authService';
 
 export function LoginPage() {
-  const { go, route } = useNav();
-  const platformLogin = route?.view === 'platform-admin' || route?.section === 'platform';
+  const { go } = useNav();
   const toast = useToast();
   const session = useMistSession();
   const [email, setEmail] = React.useState('');
@@ -39,7 +38,6 @@ export function LoginPage() {
         ...(mfaToken ? { mfa: { mfaToken, code } } : {}),
         ...(companyId ? { companyId } : {}),
       });
-      if (platformLogin && user.platformRole !== 'platform_admin') { await session.logout(); if (mounted.current) setErr('这是公司账号，请使用公司登录入口。'); return; }
       if (mounted.current) { setPw(''); setCode(''); setMfaToken(null); setCompanies([]); go(user.platformRole === 'platform_admin' && !user.roleIds?.length ? 'platform-admin' : 'cockpit'); toast(`欢迎回来，${user.displayName || user.email}`); }
     } catch (failure: any) {
       if (!mounted.current) return;
@@ -102,12 +100,11 @@ export function LoginPage() {
             <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{cooldown > 0 ? `请稍候 ${cooldown}s` : '验证并登录'}</Button>
             <div className="mist-row"><TextLink onClick={backToPassword} disabled={busy}>返回重新输入密码</TextLink></div>
           </>) : (<>
-          <div><h2 className="mist-h1" style={{ fontSize: 28 }}>{platformLogin?'平台人员登录':'登录'}</h2><p className="mist-sub" style={{ marginTop: 6 }}>{platformLogin?'仅供 Bambook / Sylway Cloud 平台工作人员使用':'使用工作邮箱登录你的公司'}</p></div>
+          <div><h2 className="mist-h1" style={{ fontSize: 28 }}>登录</h2></div>
           <Field label="工作邮箱"><TextInput icon={Mail} type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} required /></Field>
           <Field label="密码" error={errorNode}><TextInput icon={KeyRound} type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder="输入密码" disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
-          <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label="保持登录" /><span className="mist-spacer" /><TextLink disabled={!platformLogin||busy} title={platformLogin?'通过平台工作邮箱找回':'请联系公司管理员重置'} onClick={()=>go('platform-recovery')}>忘记密码？</TextLink></div>
+          <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label="保持登录" /><span className="mist-spacer" /><TextLink disabled={busy} title="查看密码找回方式" onClick={()=>go('platform-recovery')}>忘记密码？</TextLink></div>
           <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{cooldown > 0 ? `请稍候 ${cooldown}s` : '登录'}</Button>
-          <p className="mist-muted" style={{ fontSize: 12, textAlign: 'center' }} role="status" aria-live="polite">{platformLogin?'请使用独立的平台人员账号':'使用已开通的账号登录公司'}</p>{platformLogin&&<TextLink onClick={()=>go('login')}>公司账号登录</TextLink>}
           </>)}
         </form>
       </div>
