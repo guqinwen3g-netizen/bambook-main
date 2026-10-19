@@ -1,6 +1,7 @@
 import React from 'react';
 import { Building2, Plus, RefreshCw, ShieldCheck, Users } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, TextInput, Toolbar } from '../../../../components/mist';
+import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { platformAdminApi, type PlatformCompany, type PlatformMember } from '../runtime/platformAdmin';
 const statuses=[{value:'active',label:'运行中'},{value:'suspended',label:'已暂停'},{value:'closed',label:'已关闭'}];
@@ -8,6 +9,7 @@ const statusLabel=(value:string)=>statuses.find(s=>s.value===value)?.label??valu
 const message=(e:unknown)=>e instanceof Error?e.message:'操作未完成，请重试。';
 const blank={name:'',slug:'',ownerName:'',ownerEmail:'',ownerPassword:''};
 export function SaasAdminPage(){
+ const nav=useNav();
  const session=useMistSession(),allowed=session.user?.platformRole==='platform_admin';
  const [companies,setCompanies]=React.useState<PlatformCompany[]>([]),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
  const [query,setQuery]=React.useState(''),[filter,setFilter]=React.useState('all'),[selected,setSelected]=React.useState<string|null>(null);
@@ -31,7 +33,7 @@ export function SaasAdminPage(){
  async function persist(){if(!company)return;const id=company.id;await mutate(async()=>{await platformAdminApi.update(id,{status:edit.status,plan:edit.plan.trim(),seatLimit:edit.seats===''?null:Number(edit.seats)});setConfirmation(null);await reload();});}
  const visible=companies.filter(c=>(filter==='all'||c.status===filter)&&`${c.name} ${c.slug} ${c.legalName??''}`.toLowerCase().includes(query.toLowerCase()));
  if(!allowed)return <MistPage><EmptyState icon={ShieldCheck} title="需要平台管理员身份" description="公司管理员负责本公司的业务；平台管理员负责公司开户与服务管理。"/></MistPage>;
- return <MistPage width="wide"><PageHeader eyebrow="平台运营" title="平台管理" description="管理公司开户、服务状态与成员归属。各公司的业务数据独立。" actions={<Button variant="primary" icon={Plus} onClick={()=>{setFormError('');setDraft(blank);setCreating(true);}}>开通公司</Button>}/>
+ return <MistPage width="wide"><PageHeader eyebrow="平台运营" title="平台管理" description="管理公司开户、服务状态与成员归属。各公司的业务数据独立。" actions={<><Button onClick={()=>nav?.go('system-settings')}>平台设置</Button><Button variant="primary" icon={Plus} onClick={()=>{setFormError('');setDraft(blank);setCreating(true);}}>开通公司</Button></>}/>
   <StatGrid><StatCard icon={Building2} label="公司" value={companies.length}/><StatCard icon={ShieldCheck} label="运行中" value={companies.filter(c=>c.status==='active').length}/><StatCard icon={Users} label="有效成员归属" value={companies.reduce((n,c)=>n+c.members,0)}/></StatGrid>
   <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={()=>void reload()}>刷新</Button>}><TextInput aria-label="搜索公司" placeholder="搜索公司名称或标识" value={query} onChange={e=>setQuery(e.target.value)}/><Select aria-label="公司状态" value={filter} onChange={e=>setFilter(e.target.value)} options={[{value:'all',label:'全部状态'},...statuses]}/></Toolbar>
   {error&&<Banner tone="bad" title="读取公司失败">{error}</Banner>}

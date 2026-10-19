@@ -28,7 +28,7 @@ describe('original Mist settings with server workspace commands', () => {
   it('does not expose workspace archive or switching actions in company settings',async()=>{render();await click(button('安全'));expect(host.textContent).not.toContain('回收站');expect(host.textContent).not.toContain('恢复工作空间');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(seam.value.refreshArchived).not.toHaveBeenCalled();});
 
   it('preserves section navigation and saves the actual three-way theme and density', async () => {
-    render(); expect(host.querySelector('.mist-wizard')).toBeTruthy(); expect(host.querySelectorAll('.mist-vsteps button')).toHaveLength(6);
+    render(); expect(host.querySelector('.mist-wizard')).toBeTruthy(); expect(host.querySelectorAll('.mist-vsteps button')).toHaveLength(8); await click(button('外观'));
     const dark = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(item => item.textContent?.startsWith('深色'))!; await click(dark);
     expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { theme: 'dark' } }); expect(seam.value.state.settings.theme).toBe('dark');
     const density = host.querySelector<HTMLSelectElement>('select[aria-label="列表密度"]')!;
@@ -112,3 +112,10 @@ describe('company profile maintenance in system settings',()=>{
   await click(button('返回报价'));expect(seam.nav.go).toHaveBeenCalledWith('quotations','quote-1');
  });
 });
+
+it('organizes company management links without exposing platform management',async()=>{
+ seam.session={...seam.session,hasPermission:(p:string)=>['users:admin','hr:read'].includes(p)} as any;seam.nav={go:vi.fn()};render();
+ expect(host.textContent).toContain('公司管理总览');await click(button('进入公司后台'));expect(seam.nav.go).toHaveBeenCalledWith('admin-panel');
+ await click(button('管理组织架构'));expect(seam.nav.go).toHaveBeenCalledWith('hr');expect(host.textContent).not.toContain('平台设置');
+});
+it('shows newly saved company settings in the settings history',async()=>{render();await click(button('外观'));const dark=[...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(item=>item.textContent?.startsWith('深色'))!;await click(dark);await click(button('设置记录'));expect(host.textContent).toContain('更新主题');expect(host.textContent).toContain('认证姓名');});

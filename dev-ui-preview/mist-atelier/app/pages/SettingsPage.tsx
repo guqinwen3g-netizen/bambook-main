@@ -1,7 +1,7 @@
 /** T10 设置：保留 Mist 分区导航、设置卡与吸底操作栏。 */
 import React from 'react';
-import { Bell, Building2, Landmark, Laptop, Moon, Palette, Shield, Sun, User, RefreshCw } from 'lucide-react';
-import { Banner, Button, Card, ChoiceCards, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
+import { Bell, Building2, Landmark, Laptop, Moon, Palette, Shield, Sun, User, RefreshCw, LayoutDashboard, History } from 'lucide-react';
+import { Banner, Button, Card, DataTable, EmptyState, ChoiceCards, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -18,7 +18,7 @@ type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyPr
 export function SettingsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), toast = useToast(), nav = useNav();
   const { state, loading, saving, pending } = workspace;
-  const [sec, setSec] = React.useState(() => ['appearance', 'notify', 'workspace', 'company', 'account', 'security'].includes(String(nav?.route?.section)) ? String(nav!.route.section) : 'appearance'), [error, setError] = React.useState('');
+  const [sec, setSec] = React.useState(() => ['overview', 'activity', 'appearance', 'notify', 'workspace', 'company', 'account', 'security'].includes(String(nav?.route?.section)) ? String(nav!.route.section) : 'overview'), [error, setError] = React.useState('');
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
   const [draft, setDraft] = React.useState<{ scope: string; values: TextValues } | null>(null);
   const dirty = React.useRef<Partial<Record<TextKey, boolean>>>({}), working = React.useRef(false);
@@ -72,16 +72,28 @@ export function SettingsPage() {
   const notify = (key: keyof MistSettings['notifications'], value: boolean) => settings && void save({ notifications: { ...settings.notifications, [key]: value } });
   return (
     <MistPage>
-      <PageHeader eyebrow="平台 · 设置" title="系统设置" description="外观、通知、公司成员与公司资料。选择项即时保存，文字离开输入框后保存；公司资料点击保存。" />
+      <PageHeader eyebrow="公司管理" title="公司设置" description="公司资料、人员组织、业务默认项、通知和账号安全。选择项即时保存，文字离开输入框后保存；公司资料点击保存。" />
       {(error || workspace.error) && <Banner tone="bad" title={error || workspace.error} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>重新读取</Button>} />}
       {pending && !saving && <Banner tone="warn" title="上一次操作结果待核对" actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(failure=>setError(failure instanceof Error?failure.message:'原请求核对失败'))}>核对原请求</Button>} />}
       <div className="mist-wizard">
         <VerticalSteps mode="page" current={sec} onSelect={setSec} steps={[
+          { id: 'overview', label: '管理总览', icon: LayoutDashboard }, ...(!member ? [{ id: 'activity', label: '设置记录', icon: History }] : []),
           { id: 'appearance', label: '外观', icon: Palette }, { id: 'notify', label: '通知', icon: Bell },
           { id: 'workspace', label: '公司成员', icon: Building2 }, { id: 'company', label: '公司资料', icon: Landmark }, { id: 'account', label: '账号', icon: User }, { id: 'security', label: '安全', icon: Shield }]} />
         <Card>
           {!settings || !values ? <FormSection title="正在读取设置"><Skeleton height={120} /></FormSection> : <>
           {member && sec !== 'workspace' && sec !== 'security' && sec !== 'company' && <Banner tone="neutral" title="公司设置由管理人员维护">这些设置作用于整个公司，当前账号只能查看，不能修改。</Banner>}
+          {sec === 'overview' && <FormSection title="公司管理总览" description="公司共用一套经营资料；部门组织人员，小组划定协作范围，岗位决定操作权限。">
+            <SettingRow title="公司资料与单据抬头" description="公司名称、地址、联系方式、出口信息及收款银行，用于公司单据。" control={<Button onClick={()=>setSec('company')}>维护公司资料</Button>}/>
+            <SettingRow title="成员与业务范围" description="查看公司成员，维护成员的业务组与可见范围。" control={<Button onClick={()=>setSec('workspace')}>管理公司成员</Button>}/>
+            {(session.hasPermission?.('users:admin') || session.hasRole?.('owner','admin')) && <SettingRow title="人员账号与岗位权限" description="维护本公司登录账号、岗位与权限；平台账号由 Sylway Cloud 管理。" control={<Button onClick={()=>nav?.go('admin-panel')}>进入公司后台</Button>}/>}
+            {(session.hasPermission?.('hr:read') || session.hasPermission?.('hr:write')) && <SettingRow title="部门、小组与员工档案" description="管理公司 → 部门 → 小组，安排人员归属并维护员工档案。" control={<Button onClick={()=>nav?.go('hr')}>管理组织架构</Button>}/>}
+            <SettingRow title="业务默认项" description="维护公司显示名称和新建资料的默认币种，客户及来源单据币种优先。" control={<Button onClick={()=>setSec('workspace')}>查看业务设置</Button>}/>
+            <SettingRow title="当前账号安全" description="修改登录密码、配置两步验证、退出其他设备。" control={<Button onClick={()=>setSec('security')}>查看账号安全</Button>}/>
+          </FormSection>}
+          {sec === 'activity' && !member && <FormSection title="公司设置变更记录" description="从本次版本起记录设置变更的操作人和时间，不记录银行账号等字段原值。">
+            <DataTable ariaLabel="公司设置变更记录" rows={state.events.filter(item=>item.entityType==='settings').slice(0,100)} rowKey={item=>item.id} columns={[{key:'time',header:'时间',render:item=>new Date(item.at).toLocaleString('zh-CN')},{key:'actor',header:'操作人',render:item=>item.actor},{key:'text',header:'变更内容',render:item=>item.text}]} empty={<EmptyState title="暂无设置变更记录" description="之后保存的公司设置将记录在这里。" compact/>}/>
+          </FormSection>}
           {sec === 'appearance' && <FormSection title="外观" description="浅色 = 雾蓝 Light Mist，深色 = 深夜 Deep Night。">
             <ChoiceCards<MistSettings['theme']> ariaLabel="主题" disabled={settingsLocked} value={settings.theme} onChange={value => void save({ theme: value })} options={[{ value: 'light', title: '浅色', description: '雾蓝渐变', icon: Sun }, { value: 'dark', title: '深色', description: '深夜蓝渐变', icon: Moon }, { value: 'system', title: '跟随系统', description: '自动切换', icon: Laptop }]} />
             <div style={{ marginTop: 18 }}>
@@ -110,7 +122,7 @@ export function SettingsPage() {
             <SettingRow title="退出所有设备" description="本地身份由本机服务提供，设备会话管理不适用" control={<Button size="sm" disabled>不适用</Button>} /></>}
           </FormSection>}
           </>}
-          {sec !== 'company' && <div className="mist-sticky-foot"><span className="mist-note">{saving ? '正在保存…' : '选择项即时保存，文字离开输入框后保存'}</span><span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>完成</Button></div>}
+          {!['company','overview','activity'].includes(sec) && <div className="mist-sticky-foot"><span className="mist-note">{saving ? '正在保存…' : '选择项即时保存，文字离开输入框后保存'}</span><span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>完成</Button></div>}
         </Card>
       </div>
     </MistPage>

@@ -1333,6 +1333,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'contact.delete': {const c=find(state.contacts,p.id,'联系人');state.contacts=state.contacts.filter(x=>x.id!==c.id);event(state,context,'customer',c.customerId,'删除联系人 '+c.name);result={id:c.id};break;}
     case 'settings.update': {
+      const beforeSettings=JSON.stringify(state.settings);
       const patch=p;
       if(patch.companyProfile!==undefined){
         const input=patch.companyProfile;if(!input||typeof input!=='object'||Array.isArray(input))throw new MistCommandError('VALIDATION','公司资料格式无效');
@@ -1349,6 +1350,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(patch.theme!==undefined)state.settings.theme=patch.theme;if(patch.density!==undefined)state.settings.density=patch.density;
       if(patch.reducedMotion!==undefined)state.settings.reducedMotion=!!patch.reducedMotion;
       if(patch.notifications)for(const key of ['qc','shipping','suggestions','digest'] as const)if(patch.notifications[key]!==undefined)state.settings.notifications[key]=!!patch.notifications[key];
+      if(beforeSettings!==JSON.stringify(state.settings)){
+        const names:Record<string,string>={companyProfile:'公司资料',workspaceName:'公司显示名称',profileName:'显示姓名',profileEmail:'显示邮箱',locale:'语言偏好',theme:'主题',density:'列表密度',reducedMotion:'动效',notifications:'通知偏好'};
+        const changed=Object.keys(patch).filter(key=>names[key]).map(key=>names[key]);
+        if(changed.length)event(state,context,'settings','company','更新'+changed.join('、'));
+      }
       result={};break;
     }
     case 'notification.read': {find(state.notifications,p.id,'通知').readAt=context.now;result={id:p.id};break;}

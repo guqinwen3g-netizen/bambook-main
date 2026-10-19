@@ -5,6 +5,7 @@ import { createAuthService } from '../auth/service';
 import { pickRequestToken } from '../auth/middleware';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
 import { createCompany } from './companyProvisioning';
+import { platformSettingsRouter, readCompanyDefaults } from './settings';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 
@@ -65,6 +66,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       },
     }).catch(() => undefined);
   }
+
+  router.use(platformSettingsRouter(options.prisma, requirePlatformAdmin));
 
   router.get('/companies', async (req: Request, res: Response) => {
     const admin = await requirePlatformAdmin(req, res);
@@ -142,13 +145,14 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
           const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active' } });
           ownerUserId = account.id;
         }
+        const defaults = await readCompanyDefaults(tx);
         const created = await createCompany(tx, {
           slug,
           name,
           legalName: typeof body.legalName === 'string' ? body.legalName.trim() : null,
           englishName: typeof body.englishName === 'string' ? body.englishName.trim() : null,
-          plan: typeof body.plan === 'string' ? body.plan : 'standard',
-          seatLimit: Number.isInteger(body.seatLimit) ? body.seatLimit : null,
+          plan: typeof body.plan === 'string' && body.plan.trim() ? body.plan.trim() : defaults.plan,
+          seatLimit: body.seatLimit === undefined ? defaults.seatLimit : body.seatLimit,
           ownerUserId,
           ownerJobTitle: typeof body.ownerJobTitle === 'string' ? body.ownerJobTitle.trim() : '总经理',
         });
