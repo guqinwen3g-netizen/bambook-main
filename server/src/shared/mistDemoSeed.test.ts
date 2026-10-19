@@ -52,7 +52,7 @@ describe('演示工作区数据', () => {
       const text = Buffer.from(renderDemoFile(state, file)).toString('latin1');
       expect(text.startsWith('%PDF-1.4')).toBe(true);
       expect(text.trimEnd().endsWith('%%EOF')).toBe(true);
-      expect(text).toContain('Claridge Peak Textile');
+      expect(text).toContain('Mistweave Textile');
       expect(text).not.toMatch(/demo workspace|not a real commercial document/i);
       expect(text).not.toContain('no longer in this workspace');
       expect(/^[\x09\x0a\x0d\x20-\x7e]*$/.test(text)).toBe(true);

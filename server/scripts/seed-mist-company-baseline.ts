@@ -34,15 +34,15 @@ if(!sourcePrefix)throw new Error('请提供 --source-prefix，脚本不会猜测
 if(apply&&!backupConfirmed)throw new Error('--apply 前须提供 --backup-confirmed=<本次服务器备份标识>');
 
 const ACCOUNT_SPECS:Array<{key:MistCompanyRosterKey;suffix:string;id:string;name:string;email:string;employeeNo:string}>=[
- {key:'owner',suffix:'owner',id:'claridge-peak-owner',name:'周敏',email:'zhou.min@claridgepeak-textile.com',employeeNo:'CP2026001'},
- {key:'fabricManager',suffix:'fabric-manager',id:'claridge-peak-fabric-manager',name:'俞宁',email:'yu.ning@claridgepeak-textile.com',employeeNo:'CP2026002'},
- {key:'garmentManager',suffix:'garment-manager',id:'claridge-peak-garment-manager',name:'陆衡',email:'lu.heng@claridgepeak-textile.com',employeeNo:'CP2026003'},
- {key:'fabricSales',suffix:'fabric-sales',id:'claridge-peak-fabric-sales',name:'沈禾',email:'shen.he@claridgepeak-textile.com',employeeNo:'CP2026004'},
- {key:'garmentSales',suffix:'garment-sales',id:'claridge-peak-garment-sales',name:'顾言',email:'gu.yan@claridgepeak-textile.com',employeeNo:'CP2026005'},
- {key:'finance',suffix:'finance',id:'claridge-peak-finance',name:'林舒',email:'lin.shu@claridgepeak-textile.com',employeeNo:'CP2026006'},
- {key:'fabricQc',suffix:'fabric-qc',id:'claridge-peak-fabric-qc',name:'唐岚',email:'tang.lan@claridgepeak-textile.com',employeeNo:'CP2026007'},
- {key:'garmentQc',suffix:'garment-qc',id:'claridge-peak-garment-qc',name:'许言',email:'xu.yan@claridgepeak-textile.com',employeeNo:'CP2026008'},
- {key:'logistics',suffix:'logistics',id:'claridge-peak-logistics',name:'陈晓',email:'chen.xiao@claridgepeak-textile.com',employeeNo:'CP2026009'},
+ {key:'owner',suffix:'owner',id:'claridge-peak-owner',name:'沈霁',email:'shen.ji@mistweave-textile.com',employeeNo:'CP2026001'},
+ {key:'fabricManager',suffix:'fabric-manager',id:'claridge-peak-fabric-manager',name:'俞宁',email:'yu.ning@mistweave-textile.com',employeeNo:'CP2026002'},
+ {key:'garmentManager',suffix:'garment-manager',id:'claridge-peak-garment-manager',name:'陆衡',email:'lu.heng@mistweave-textile.com',employeeNo:'CP2026003'},
+ {key:'fabricSales',suffix:'fabric-sales',id:'claridge-peak-fabric-sales',name:'沈禾',email:'shen.he@mistweave-textile.com',employeeNo:'CP2026004'},
+ {key:'garmentSales',suffix:'garment-sales',id:'claridge-peak-garment-sales',name:'林澈',email:'lin.che@mistweave-textile.com',employeeNo:'CP2026005'},
+ {key:'finance',suffix:'finance',id:'claridge-peak-finance',name:'林舒',email:'lin.shu@mistweave-textile.com',employeeNo:'CP2026006'},
+ {key:'fabricQc',suffix:'fabric-qc',id:'claridge-peak-fabric-qc',name:'唐岚',email:'tang.lan@mistweave-textile.com',employeeNo:'CP2026007'},
+ {key:'garmentQc',suffix:'garment-qc',id:'claridge-peak-garment-qc',name:'许言',email:'xu.yan@mistweave-textile.com',employeeNo:'CP2026008'},
+ {key:'logistics',suffix:'logistics',id:'claridge-peak-logistics',name:'陈晓',email:'chen.xiao@mistweave-textile.com',employeeNo:'CP2026009'},
 ];
 
 const prisma=new PrismaClient();
@@ -80,7 +80,7 @@ async function main(){
    for(const spec of ACCOUNT_SPECS){const source=sourceById.get(sourcePrefix+spec.suffix)!;
     await tx.userAccount.upsert({where:{id:spec.id},create:{id:spec.id,displayName:spec.name,email:spec.email,passwordHash:source.passwordHash,status:'active',primaryDeptId:source.primaryDeptId,metadata:{companyBaseline:MIST_COMPANY_DATASET,roleKey:spec.key}},update:{displayName:spec.name,email:spec.email,passwordHash:source.passwordHash,status:'active',primaryDeptId:source.primaryDeptId,deletedAt:null,metadata:{companyBaseline:MIST_COMPANY_DATASET,roleKey:spec.key}}});
     await tx.userRole.deleteMany({where:{userId:spec.id}});if(source.roles.length)await tx.userRole.createMany({data:source.roles.map(role=>({id:randomUUID(),userId:spec.id,roleId:role.roleId,departmentId:role.departmentId})),skipDuplicates:true});
-    if(source.employeeProfile){const profile=source.employeeProfile;await tx.employeeProfile.upsert({where:{userId:spec.id},create:{id:randomUUID(),userId:spec.id,employeeNo:spec.employeeNo,positionId:profile.positionId,hireDate:profile.hireDate,regularDate:profile.regularDate,contractType:profile.contractType,contractEnd:profile.contractEnd,employmentStatus:'Regular',phone:profile.phone,emergencyContact:profile.emergencyContact,workLocation:profile.workLocation,notes:'澄岳贸易经营基线人员档案'},update:{employeeNo:spec.employeeNo,positionId:profile.positionId,hireDate:profile.hireDate,regularDate:profile.regularDate,contractType:profile.contractType,contractEnd:profile.contractEnd,employmentStatus:'Regular',phone:profile.phone,emergencyContact:profile.emergencyContact,workLocation:profile.workLocation,notes:'澄岳贸易经营基线人员档案',deletedAt:null}});}
+    if(source.employeeProfile){const profile=source.employeeProfile;await tx.employeeProfile.upsert({where:{userId:spec.id},create:{id:randomUUID(),userId:spec.id,employeeNo:spec.employeeNo,positionId:profile.positionId,hireDate:profile.hireDate,regularDate:profile.regularDate,contractType:profile.contractType,contractEnd:profile.contractEnd,employmentStatus:'Regular',phone:profile.phone,emergencyContact:profile.emergencyContact,workLocation:profile.workLocation,notes:'雾织贸易经营基线人员档案'},update:{employeeNo:spec.employeeNo,positionId:profile.positionId,hireDate:profile.hireDate,regularDate:profile.regularDate,contractType:profile.contractType,contractEnd:profile.contractEnd,employmentStatus:'Regular',phone:profile.phone,emergencyContact:profile.emergencyContact,workLocation:profile.workLocation,notes:'雾织贸易经营基线人员档案',deletedAt:null}});}
    }
    // The company owner also performs the configured general-leader duty for claims.
    if(!await tx.userRole.findFirst({where:{userId:roster.owner.id,roleId:'role-admin'}}))await tx.userRole.create({data:{id:randomUUID(),userId:roster.owner.id,roleId:'role-admin',departmentId:sourceById.get(sourcePrefix+'owner')!.primaryDeptId}});

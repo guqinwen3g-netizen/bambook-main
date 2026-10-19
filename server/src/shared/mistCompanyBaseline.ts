@@ -1,3 +1,4 @@
+import {MIST_COMPANY_IDENTITY,mistCompanyDisplayName,renameMistCompanyIdentity} from './mistCompanyIdentity';
 import {applyMistCommand,createMistState,getMistReviewTasks,type MistCommand,type MistContext,type MistState} from './mistWorkspace';
 import {seedCompanyHistory} from './mistCompanyHistory';
 import {demoFileRecord} from './mistDemoFiles';
@@ -6,18 +7,18 @@ import type {MistAccountRef,MistMemberDirectoryEntry} from './mistAccounts';
 export const MIST_COMPANY_BASELINE_VERSION=4;
 export const MIST_COMPANY_BASELINE_AS_OF='2026-10-19T04:00:00.000Z';
 export const MIST_COMPANY_DATASET='claridge-peak-continuous-operations';
-export const MIST_COMPANY_WORKSPACE_NAME='澄岳贸易 · 经营工作台';
+export const MIST_COMPANY_WORKSPACE_NAME=MIST_COMPANY_IDENTITY.workspace;
 
 export type MistCompanyRosterKey='owner'|'fabricManager'|'garmentManager'|'fabricSales'|'garmentSales'|'finance'|'fabricQc'|'garmentQc'|'logistics';
 export type MistCompanyRoster=Record<MistCompanyRosterKey,MistAccountRef>;
 export type MistCompanyBaselineFailure={step:string;message:string};
 
 export const MIST_COMPANY_PROFILE={
- legalName:'澄岳纺织服装贸易（上海）有限公司',
- englishName:'Claridge Peak Textile & Apparel Trading (Shanghai) Co., Ltd.',
+ legalName:MIST_COMPANY_IDENTITY.legalName,
+ englishName:MIST_COMPANY_IDENTITY.englishName,
  address:'上海市虹口区东大名路 1089 号北外滩商务中心 12 层',
  englishAddress:'12F, North Bund Business Center, 1089 Dongdaming Road, Hongkou, Shanghai 200080, China',
- phone:'+86 21 6168 7720',email:'operations@claridgepeak-textile.com',taxId:'91310109MA7K4T9R6X',customsCode:'3122260C8M',
+ phone:'+86 21 6168 7720',email:'operations@mistweave-textile.com',taxId:'91310109MA7K4T9R6X',customsCode:'3122260C8M',
  bankName:'浦东商业银行上海外滩支行',bankAccount:'3100668890201175426',swift:'PDSBCNSH',defaultCurrency:'CNY',
 } as const;
 
@@ -37,13 +38,13 @@ function memberDirectory(roster:MistCompanyRoster):MistMemberDirectoryEntry[]{re
 function replaceBusinessText(value:string){return value
  .replace(/软件演示/g,'公司经营').replace(/模拟/g,'经营').replace(/演示/g,'业务').replace(/示例/g,'参考')
  .replace(/\bDEMO(?=[-_\s]|$)/gi,'OPS').replace(/\bTEST(?=[-_\s]|$)/gi,'QA')
- .replace(/example\.(?:test|invalid)/gi,'claridgepeak-textile.com').replace(/\bsimulation\b/gi,'operations');}
+ .replace(/example\.(?:test|invalid)/gi,'mistweave-textile.com').replace(/\bsimulation\b/gi,'operations');}
 
 /** 账号 ID 及冻结审批快照都必须切到本次公司花名册；storageKey 保留兼容前缀，落盘后会改成私有路径。 */
 function rewriteSeed(value:unknown,roster:MistCompanyRoster,key=''):unknown{
  if(typeof value==='string'){
   let text=value;for(const[oldId,role]of Object.entries(DEMO_ACCOUNT_MAP))text=text.split(oldId).join(roster[role].id);
-  return key==='storageKey'?text:replaceBusinessText(text);
+  return key==='storageKey'?text:mistCompanyDisplayName(replaceBusinessText(text));
  }
  if(Array.isArray(value)){value.forEach((item,index)=>{value[index]=rewriteSeed(item,roster,key);});return value;}
  if(value&&typeof value==='object')for(const[name,child]of Object.entries(value as Record<string,unknown>))(value as Record<string,unknown>)[name]=rewriteSeed(child,roster,name);
@@ -78,12 +79,12 @@ export function createMistCompanyBaseline(base:MistContext,roster:MistCompanyRos
  const at=(offset:number,hour=9)=>{const value=new Date(Date.parse(base.now)+offset*DAY);value.setUTCHours(hour,0,0,0);return value.toISOString();};
 
  delete state.settings.demoSeed;state.settings.companyBaseline={version:MIST_COMPANY_BASELINE_VERSION,seededAt:base.now,dataset:MIST_COMPANY_DATASET};
- state.settings.workspaceName=MIST_COMPANY_WORKSPACE_NAME;state.settings.profileName=roster.owner.name;state.settings.profileEmail='zhou.min@claridgepeak-textile.com';
+ state.settings.workspaceName=MIST_COMPANY_WORKSPACE_NAME;state.settings.profileName=roster.owner.name;state.settings.profileEmail='shen.ji@mistweave-textile.com';
  state.memberIds=memberDirectory(roster).filter(row=>!row.owner).map(row=>row.id);
  state.members=memberDirectory(roster).filter(row=>!row.owner).map(row=>({userId:row.id,name:row.name,addedBy:roster.owner.id,addedByName:roster.owner.name,addedAt:base.now}));
  state.memberGroups=memberDirectory(roster).filter(row=>row.groups.length).map(row=>({userId:row.id,name:row.name,groups:row.groups,updatedAt:base.now,updatedBy:roster.owner.name}));
  state.reviewerIds=[roster.owner.id];
- run('company profile',{type:'settings.update',payload:{workspaceName:MIST_COMPANY_WORKSPACE_NAME,profileName:roster.owner.name,profileEmail:'zhou.min@claridgepeak-textile.com',companyProfile:{...MIST_COMPANY_PROFILE}}},owner);
+ run('company profile',{type:'settings.update',payload:{workspaceName:MIST_COMPANY_WORKSPACE_NAME,profileName:roster.owner.name,profileEmail:'shen.ji@mistweave-textile.com',companyProfile:{...MIST_COMPANY_PROFILE}}},owner);
 
  const accountIds:Record<string,string>={};
  for(const row of [
@@ -95,10 +96,10 @@ export function createMistCompanyBaseline(base:MistContext,roster:MistCompanyRos
  for(const payment of state.payments){const accountId=accountIds[payment.currency.toLowerCase()];if(accountId)run('assign payment '+payment.code,{type:'finance.account.assign',payload:{kind:'payment',id:payment.id,accountId,reason:'按付款凭证币种归入公司结算户'}},finance);}
 
  const employees=[
-  [roster.owner.name,'管理层','总经理','zhou.min@claridgepeak-textile.com','2018-03-12'],[roster.fabricManager.name,'面料事业部','面料部经理','yu.ning@claridgepeak-textile.com','2019-05-06'],[roster.garmentManager.name,'成衣事业部','成衣部经理','lu.heng@claridgepeak-textile.com','2019-08-19'],
-  [roster.fabricSales.name,'面料事业部','面料业务','shen.he@claridgepeak-textile.com','2021-02-22'],[roster.garmentSales.name,'成衣事业部','成衣业务','gu.yan@claridgepeak-textile.com','2020-07-13'],[roster.finance.name,'财务部','财务主管','lin.shu@claridgepeak-textile.com','2020-11-02'],
-  [roster.fabricQc.name,'品质部','面料 QC','tang.lan@claridgepeak-textile.com','2022-04-18'],[roster.garmentQc.name,'品质部','成衣 QC','xu.yan@claridgepeak-textile.com','2021-09-01'],[roster.logistics.name,'物流单证部','物流单证','chen.xiao@claridgepeak-textile.com','2022-01-10'],
-  ['江澈','采购部','成衣采购','jiang.che@claridgepeak-textile.com','2023-03-06'],['温岚','采购部','面辅料采购','wen.lan@claridgepeak-textile.com','2023-06-12'],['韩舟','物流单证部','报关单证','han.zhou@claridgepeak-textile.com','2024-02-19'],['苏芮','行政人事部','人事行政','su.rui@claridgepeak-textile.com','2024-07-08'],
+  [roster.owner.name,'管理层','总经理','shen.ji@mistweave-textile.com','2018-03-12'],[roster.fabricManager.name,'面料事业部','面料部经理','yu.ning@mistweave-textile.com','2019-05-06'],[roster.garmentManager.name,'成衣事业部','成衣部经理','lu.heng@mistweave-textile.com','2019-08-19'],
+  [roster.fabricSales.name,'面料事业部','面料业务','shen.he@mistweave-textile.com','2021-02-22'],[roster.garmentSales.name,'成衣事业部','成衣业务','lin.che@mistweave-textile.com','2020-07-13'],[roster.finance.name,'财务部','财务主管','lin.shu@mistweave-textile.com','2020-11-02'],
+  [roster.fabricQc.name,'品质部','面料 QC','tang.lan@mistweave-textile.com','2022-04-18'],[roster.garmentQc.name,'品质部','成衣 QC','xu.yan@mistweave-textile.com','2021-09-01'],[roster.logistics.name,'物流单证部','物流单证','chen.xiao@mistweave-textile.com','2022-01-10'],
+  ['江澈','采购部','成衣采购','jiang.che@mistweave-textile.com','2023-03-06'],['温岚','采购部','面辅料采购','wen.lan@mistweave-textile.com','2023-06-12'],['韩舟','物流单证部','报关单证','han.zhou@mistweave-textile.com','2024-02-19'],['苏芮','行政人事部','人事行政','su.rui@mistweave-textile.com','2024-07-08'],
  ];
  for(const employee of employees)run('employee '+employee[0],{type:'platform.employee.save',payload:{name:employee[0],department:employee[1],position:employee[2],contact:employee[3],startDate:employee[4],note:'年度人员名册核对',active:true}},owner);
 
@@ -182,13 +183,13 @@ export function createMistCompanyBaseline(base:MistContext,roster:MistCompanyRos
 
  state=rewriteSeed(state,roster) as MistState;
  // Business correspondence is retained as archive material, without claiming a live mailbox connection.
- for(const account of state.email.accounts){account.example=false;account.connection='not_connected';account.credentialSet=false;account.lastSyncAt=null;account.failedFolders=[];account.ownerId=roster.garmentSales.id;account.ownerName=roster.garmentSales.name;account.memberIds=account.kind==='shared'?[roster.owner.id,roster.fabricSales.id,roster.finance.id,roster.logistics.id]:[];account.memberNames=(account.memberIds||[]).map(id=>Object.values(roster).find(person=>person.id===id)!.name);account.address=account.kind==='shared'?'orders@claridgepeak-textile.com':'gu.yan@claridgepeak-textile.com';account.displayName=account.kind==='shared'?'订单往来档案':'客户往来档案';account.aliases=[];account.signature=roster.garmentSales.name+'\n'+MIST_COMPANY_PROFILE.englishName;}
+ for(const account of state.email.accounts){account.example=false;account.connection='not_connected';account.credentialSet=false;account.lastSyncAt=null;account.failedFolders=[];account.ownerId=roster.garmentSales.id;account.ownerName=roster.garmentSales.name;account.memberIds=account.kind==='shared'?[roster.owner.id,roster.fabricSales.id,roster.finance.id,roster.logistics.id]:[];account.memberNames=(account.memberIds||[]).map(id=>Object.values(roster).find(person=>person.id===id)!.name);account.address=account.kind==='shared'?'orders@mistweave-textile.com':'lin.che@mistweave-textile.com';account.displayName=account.kind==='shared'?'订单往来档案':'客户往来档案';account.aliases=[];account.signature=roster.garmentSales.name+'\n'+MIST_COMPANY_PROFILE.englishName;}
  for(const message of state.email.messages){message.example=false;message.folder='archive';message.body=message.body.replace(/（参考邮件）|（参考）/g,'');message.attachments=[];}
  const poMail=state.email.messages[0],poOrder=poMail?.links.find(link=>link.kind==='order');
  if(poMail&&poOrder){const order=state.orders.find(row=>row.id===poOrder.id),file=state.files.find(row=>order?.governance?.contract.confirmationFileIds.includes(row.id));if(order&&file){poMail.subject='采购确认：'+order.code;poMail.body=`Hi ${roster.garmentSales.name},\n\nPlease proceed with order ${order.code} as per the attached purchase order.\n${state.orderLines.filter(row=>row.orderId===order.id).map(row=>`${row.style}: ${row.qty} ${row.unit} at ${order.currency} ${row.price.toFixed(2)}`).join('\n')}\nDelivery: ${order.due}\n\nBest regards,\nEmma`;poMail.extracted=[];poMail.attachments=[{id:base.id(),fileId:file.id,name:file.name,size:file.size,contentType:file.mimeType}];}}
  state.reviewerIds=[...new Set(getMistReviewTasks(state).flatMap(task=>task.reviewerIds))];
  if(failures.length)onFailures?.(failures);
- return state;
+ return renameMistCompanyIdentity(state);
 }
 
 export function mistCompanyBaselineMetrics(state:MistState){return{

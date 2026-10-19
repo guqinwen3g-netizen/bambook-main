@@ -23,7 +23,7 @@ export function renderDemoFile(state: MistState, file: MistFile): Uint8Array {
   const purchase = state.fulfillment?.purchases.find(p => p.id === ref);
   const shipment = state.fulfillment?.shipments.find(s => s.id === ref);
   const body: string[] = [];
-  const company = ascii(state.settings.companyProfile?.englishName || state.settings.companyProfile?.legalName || 'Claridge Peak Textile & Apparel Trading (Shanghai) Co., Ltd.');
+  const company = ascii(state.settings.companyProfile?.englishName || state.settings.companyProfile?.legalName || 'Mistweave Textile & Apparel Trading (Shanghai) Co., Ltd.');
   const title = { 'customer-po': 'PURCHASE ORDER', 'commercial-invoice': 'COMMERCIAL INVOICE', 'packing-list': 'PACKING LIST', 'customs-release': 'CUSTOMS RELEASE NOTICE', 'supplier-contract': 'SUPPLY CONTRACT', 'vat-invoice': 'VAT SPECIAL INVOICE (FAPIAO)', 'letter-of-credit': 'DOCUMENTARY CREDIT (MT700 ADVICE)' }[template] || 'DOCUMENT';
   if (template === 'customer-po' && order) {
     body.push(`Buyer: ${ascii(customer?.name || order.customer)}`, `Seller: ${company}`, `Order: ${order.code}    Season: ${ascii(order.season)}    Currency: ${order.currency}`, `Delivery: ${order.due}    Terms: ${ascii(customer?.incoterm || 'FOB Shanghai')}    Payment: ${ascii(customer?.terms || 'T/T')}`, '');
