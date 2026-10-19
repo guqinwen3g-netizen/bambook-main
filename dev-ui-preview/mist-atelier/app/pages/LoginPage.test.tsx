@@ -10,7 +10,7 @@ import { LoginPage } from './LoginPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined, host: HTMLElement | undefined;
 const go = vi.fn();
-function render() { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(() => root!.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'login' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><LoginPage /></Nav.Provider></ToastProvider></MistRoot>)); return host; }
+function render(view = 'login') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(() => root!.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><LoginPage /></Nav.Provider></ToastProvider></MistRoot>)); return host; }
 function input(type: string, value: string) { const element = host!.querySelector<HTMLInputElement>(`input[type="${type}"]`)!; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function submit() { await act(async () => { host!.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }); }
 beforeEach(() => { vi.clearAllMocks(); seam.session.signingIn = false; seam.session.status = 'anonymous'; seam.session.error = ''; });
@@ -24,7 +24,7 @@ describe('original Mist login with real-session binding', () => {
     expect(host.querySelectorAll('.mist-auth-form .mist-field')).toHaveLength(2);
     expect(host.querySelector<HTMLInputElement>('input[type="email"]')?.value).toBe('');
     const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '忘记密码？')!;
-    expect(reset.disabled).toBe(true); expect(reset.title).toContain('暂未接入');
+    expect(reset.disabled).toBe(true); expect(reset.title).toContain('请联系公司管理员');
     act(() => reset.click()); expect(host.textContent).not.toContain('已发送重置邮件');
     expect(host.textContent).not.toContain('任意密码'); expect(go).not.toHaveBeenCalled();
   });
@@ -74,3 +74,5 @@ describe('original Mist login with real-session binding', () => {
     expect(host.querySelector('input[type="password"]')).not.toBeNull(); expect(host.querySelector('[role="alert"]')?.textContent).toContain('验证已过期');
   });
 });
+
+it('opens platform recovery from the platform login entry',()=>{const host=render('platform-admin');const reset=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='忘记密码？')!;expect(reset.disabled).toBe(false);act(()=>reset.click());expect(go).toHaveBeenCalledWith('platform-recovery');});

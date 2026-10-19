@@ -1,0 +1,3 @@
+import{expect,it}from'vitest';import{isTokenRevoked}from'../sessionRevocation';import{buildAuthTokenPayload}from'../tokenHelpers';
+it('revokes old credentials even within the same issued-at second',()=>{const now=Math.floor(Date.now()/1000),metadata={credentialVersion:'new',sessionsRevokedAt:new Date(now*1000).toISOString()};expect(isTokenRevoked(metadata,now)).toBe(true);expect(isTokenRevoked(metadata,now,'old')).toBe(true);expect(isTokenRevoked(metadata,now,'new')).toBe(false);});
+it('includes the current credential generation in newly issued sessions',()=>{expect(buildAuthTokenPayload({id:'u',metadata:{credentialVersion:'version-2'},roles:[]})).toMatchObject({credentialVersion:'version-2'});});

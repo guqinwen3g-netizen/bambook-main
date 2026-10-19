@@ -8,7 +8,9 @@ export function sessionRevokedBeforeSec(metadata: unknown): number {
   const ms = typeof at === 'string' ? Date.parse(at) : NaN;
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : 0;
 }
-export function isTokenRevoked(metadata: unknown, iat: unknown): boolean {
+export function isTokenRevoked(metadata: unknown, iat: unknown, credentialVersion?: unknown): boolean {
+  const version=(metadata as any)?.credentialVersion;
+  if(typeof version==='string' && version!==credentialVersion)return true;
   const before = sessionRevokedBeforeSec(metadata);
   return before > 0 && typeof iat === 'number' && iat < before;
 }

@@ -1,3 +1,4 @@
+import { createAccountAccessService, invitationSummary, type AccountAccessOptions } from '../auth/accountAccess';
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -9,7 +10,7 @@ import { platformSettingsRouter, readCompanyDefaults } from './settings';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 
-type PlatformRouterOptions = {
+type PlatformRouterOptions = AccountAccessOptions & {
   prisma: PrismaClient;
 };
 
@@ -23,6 +24,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function createPlatformRouter(options: PlatformRouterOptions) {
   const router = Router();
   const auth = createAuthService();
+  const access = createAccountAccessService(options.prisma, options);
   router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
 
   async function requirePlatformAdmin(req: Request, res: Response): Promise<{ userId: string } | null> {
@@ -67,7 +69,16 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     }).catch(() => undefined);
   }
 
-  router.use(platformSettingsRouter(options.prisma, requirePlatformAdmin));
+  router.use(platformSettingsRouter(options.prisma, requirePlatformAdmin, options));
+
+  router.post('/companies/:id/invitations/:userId', async (req, res, next) => {
+    try { const admin=await requirePlatformAdmin(req,res);if(!admin)return;
+      if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.id))return res.status(404).json({ok:false,message:'公司不存在。'});
+      const member=await options.prisma.companyMember.findFirst({where:{companyId:req.params.id,userId:req.params.userId,status:'active',company:{status:'active'}},include:{company:true}});
+      if(!member)return res.status(404).json({ok:false,message:'有效公司成员不存在。'});
+      return res.json({ok:true,invitation:await access.deliver(member.userId,'invite',admin.userId,member.company.name)});
+    }catch(e){next(e);}
+  });
 
   router.get('/companies', async (req: Request, res: Response) => {
     const admin = await requirePlatformAdmin(req, res);
@@ -106,7 +117,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
     const ownerEmail = typeof body.ownerEmail === 'string' ? body.ownerEmail.trim().toLowerCase() : '';
     const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
-    const ownerPassword = typeof body.ownerPassword === 'string' ? body.ownerPassword : '';
+
 
     if (!name) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写公司名称。' });
     if (!SLUG_PATTERN.test(slug)) {
@@ -114,9 +125,6 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     }
     if (!EMAIL_PATTERN.test(ownerEmail)) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写有效的所有者邮箱。' });
-    }
-    if (ownerPassword && ownerPassword.length < 8) {
-      return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: '初始密码至少 8 位。' });
     }
 
     if (body.seatLimit != null && (!Number.isInteger(body.seatLimit) || body.seatLimit < 1)) return res.status(400).json({ ok: false, error: 'INVALID_SEAT_LIMIT', message: '席位上限须为正整数。' });
@@ -126,7 +134,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       return res.status(409).json({ ok: false, error: 'COMPANY_EXISTS', message: '该公司标识已被占用。' });
     }
 
-    let generatedPassword: string | null = null;
+
     try {
       const owner = await options.prisma.userAccount.findFirst({
         where: { email: { equals: ownerEmail, mode: 'insensitive' }, deletedAt: null },
@@ -137,12 +145,12 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       if (owner && owner.status !== 'active') {
         return res.status(409).json({ ok: false, error: 'OWNER_ACCOUNT_INACTIVE', message: '该邮箱对应的账号未启用，请先在账号管理里处理。' });
       }
-      const password = ownerPassword || randomBytes(18).toString('base64url');
+      const password = randomBytes(32).toString('base64url');
       const passwordHash = ownerUserId ? null : await auth.hashPassword(password);
-      if (!ownerUserId && !ownerPassword) generatedPassword = password;
+
       const result = await options.prisma.$transaction(async (tx) => {
         if (!ownerUserId) {
-          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active' } });
+          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active', metadata: { forceChangePassword: true } } });
           ownerUserId = account.id;
         }
         const defaults = await readCompanyDefaults(tx);
@@ -171,6 +179,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       if (ownerUserId) invalidateAccountStatusCache(ownerUserId);
       await audit(admin.userId, 'platform.company.create', result.company.id, { slug, name, ownerEmail });
 
+      const invitation = await access.deliver(ownerUserId!, 'invite', admin.userId, result.company.name);
       return res.status(201).json({
         ok: true,
         company: {
@@ -181,7 +190,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
         },
         owner: { id: ownerUserId, email: ownerEmail },
         roles: result.roles,
-        ...(generatedPassword ? { initialPassword: generatedPassword } : {}),
+        invitation,
       });
     } catch (error: any) {
       if (error?.code === 'P2002') return res.status(409).json({ ok: false, error: 'COMPANY_EXISTS', message: '公司标识或账号已被并发创建，请刷新后重试。' });
@@ -233,7 +242,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     try {
       const rows = await options.prisma.companyMember.findMany({
         where: { companyId: req.params.id },
-        include: { user: { select: { id: true, displayName: true, email: true, status: true } } },
+        include: { user: { select: { id: true, displayName: true, email: true, status: true, metadata:true } } },
         orderBy: { createdAt: 'asc' },
       });
       return res.json({
@@ -246,6 +255,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
           memberStatus: row.status,
           jobTitle: row.jobTitle,
           joinedAt: row.joinedAt,
+          invitation: invitationSummary(row.user.metadata),
         })),
       });
     } catch (error) {

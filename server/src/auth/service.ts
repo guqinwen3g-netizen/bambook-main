@@ -13,6 +13,7 @@ export type TokenPayload = {
   globalBusinessScope?: boolean;
   grantedPermissions?: string[];
   userId: string;
+  credentialVersion?: string;
   platformOnly?: boolean;
   /** 当前会话所属公司（租户）。null/缺省表示尚未归属公司的历史会话。 */
   companyId?: string | null;
