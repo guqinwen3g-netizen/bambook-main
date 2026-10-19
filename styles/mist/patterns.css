@@ -388,6 +388,7 @@
 .mist-form-section-h { margin-bottom: 16px; }
 .mist-form-section-h p { color: var(--mist-ink-3); font-size: var(--mist-text-sm); margin-top: 4px; }
 .mist-sticky-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; background: color-mix(in srgb, var(--mist-card) 88%, transparent); backdrop-filter: blur(16px); border-radius: 0 0 var(--mist-r-card) var(--mist-r-card); border-top: 1px solid var(--mist-line); }
+.mist-sticky-foot[data-static] { position: static; }
 .mist-setting-row { display: flex; align-items: center; gap: 20px; padding: 16px 0; }
 .mist-setting-row + .mist-setting-row { border-top: 1px solid var(--mist-line); }
 .mist-setting-row > div:first-child { flex: 1; min-width: 0; }

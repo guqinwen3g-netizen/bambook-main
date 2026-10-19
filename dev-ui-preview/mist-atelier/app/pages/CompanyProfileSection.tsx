@@ -87,7 +87,7 @@ export function CompanyProfileSection({ member }: { member: boolean }) {
   return <div data-company-profile ref={host}>
     <FormSection title="公司资料" description="报价单、CI / PL 的抬头、地址与收款信息取自这里。保存后新生成的单据使用当前资料，已生成的单据保持原样。">
       {notices && <div className="mist-col" style={{ gap: 12, marginBottom: 16 }}>
-      {member && <Banner tone="neutral" title="公司资料由空间所有者维护">{empty ? '当前空间尚未填写公司资料，生成报价单需要中文公司抬头，请联系空间所有者补全。' : '你是被授权成员，可以查看，不能修改。'}</Banner>}
+      {member && <Banner tone="neutral" title="公司资料由公司管理人员维护">{empty ? '当前公司尚未填写资料，生成报价单需要中文公司抬头，请联系公司管理人员补全。' : '你是被授权成员，可以查看，不能修改。'}</Banner>}
       {!member && empty && <Banner tone="neutral" title="尚未填写公司资料">至少填写公司中文抬头后才能生成报价单；其余字段按需补全。印章图样不在此维护。</Banner>}
       {!member && !empty && !stored?.legalName?.trim() && <Banner tone="warn" title="缺少公司中文抬头">报价单需要中文抬头，补全后才能生成。</Banner>}
       {problem && !problem.key && <Banner tone="bad" title="公司资料未保存" actions={<Button size="sm" icon={RefreshCw} disabled={locked} onClick={() => { setProblem(null); void workspace.refresh(); }}>重新读取</Button>}>{problem.message}。已填写的内容仍保留，可修改后重新保存。</Banner>}
@@ -97,7 +97,7 @@ export function CompanyProfileSection({ member }: { member: boolean }) {
     <FormSection title="出口与收款" description="税号、海关编码与收款银行，用于对外单据。">
       <FormGrid>{EXPORT_FIELDS.map(field)}</FormGrid>
     </FormSection>
-    <div className="mist-sticky-foot">
+    <div className="mist-sticky-foot" data-static>
       <span className="mist-note">{busy ? '正在保存…' : saved ? '已保存，新生成的单据将使用当前资料' : member ? '只读' : '填写后点击保存'}</span><span className="mist-spacer" />
       {returnId && <Button icon={ArrowLeft} disabled={busy} onClick={() => nav?.go('quotations', returnId)}>返回报价</Button>}
       {!member && <Button variant="primary" icon={Save} disabled={locked} loading={busy} onClick={() => void save()}>保存公司资料</Button>}

@@ -25,10 +25,8 @@ beforeEach(() => {
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; });
 describe('original Mist settings with server workspace commands', () => {
-  it('requires confirmation before moving the current owner workspace to the recycle bin',async()=>{render();await click(button('安全'));await click(button('移入回收站'));expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(host.textContent).toContain('这不会永久删除数据或附件');await click(button('取消'));expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();await click(button('移入回收站'));await click(button('确认移入回收站'));expect(seam.value.archiveWorkspace).toHaveBeenCalledTimes(1);expect(seam.value.run).not.toHaveBeenCalled();});
-  it('keeps the archive dialog and source data when pending approvals prevent archival',async()=>{seam.value.archiveWorkspace.mockRejectedValue(new Error('请先处理待审批事项'));render();await click(button('安全'));await click(button('移入回收站'));await click(button('确认移入回收站'));expect(host.textContent).toContain('请先处理待审批事项');expect(button('确认移入回收站')).toBeTruthy();expect(seam.value.workspace.id).toBe('workspace-one');});
-  it('shows the owner recycle bin and restores the exact selected workspace',async()=>{seam.value.archivedWorkspaces=[{id:'archived-a',name:'已归档的原空间',revision:3,archivedAt:'2026-10-13T00:00:00Z'}];render();await click(button('安全'));expect(seam.value.refreshArchived).toHaveBeenCalled();expect(host.textContent).toContain('已归档的原空间');await click(button('恢复'));expect(seam.value.restoreWorkspace).not.toHaveBeenCalled();await click(button('确认恢复'));expect(seam.value.restoreWorkspace).toHaveBeenCalledWith('archived-a');});
-  it('does not offer archive authority for a workspace owned by another account',async()=>{seam.value.workspace.ownerId='other-owner';render();await click(button('安全'));expect(button('移入回收站').disabled).toBe(true);});
+  it('does not expose workspace archive or switching actions in company settings',async()=>{render();await click(button('安全'));expect(host.textContent).not.toContain('回收站');expect(host.textContent).not.toContain('恢复工作空间');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(seam.value.refreshArchived).not.toHaveBeenCalled();});
+
   it('preserves section navigation and saves the actual three-way theme and density', async () => {
     render(); expect(host.querySelector('.mist-wizard')).toBeTruthy(); expect(host.querySelectorAll('.mist-vsteps button')).toHaveLength(6);
     const dark = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(item => item.textContent?.startsWith('深色'))!; await click(dark);
@@ -49,27 +47,23 @@ describe('original Mist settings with server workspace commands', () => {
     expect(host.textContent).toContain('不改变登录账号、邮箱或密码');
   });
   it('retains typed edits after failed persistence and resets them on workspace replacement', async () => {
-    seam.value.run.mockRejectedValue(new Error('保存失败，请重试')); render(); await click(button('工作空间'));
-    const field = input('工作空间名称', '未保存的名称'); await blur(field);
-    expect(host.querySelector<HTMLInputElement>('input[aria-label="工作空间名称"]')?.value).toBe('未保存的名称'); expect(host.textContent).toContain('保存失败，请重试');
+    seam.value.run.mockRejectedValue(new Error('保存失败，请重试')); render(); await click(button('公司成员'));
+    const field = input('公司显示名称', '未保存的名称'); await blur(field);
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="公司显示名称"]')?.value).toBe('未保存的名称'); expect(host.textContent).toContain('保存失败，请重试');
     const state = createMistState(ctx(), 'empty'); state.settings.workspaceName = '第二工作区'; seam.value = { ...seam.value, state, workspace: { id: 'workspace-two', name: '第二工作区' } };
-    await act(async () => paint()); expect(host.querySelector<HTMLInputElement>('input[aria-label="工作空间名称"]')?.value).toBe('第二工作区'); expect(host.textContent).not.toContain('未保存的名称');
+    await act(async () => paint()); expect(host.querySelector<HTMLInputElement>('input[aria-label="公司显示名称"]')?.value).toBe('第二工作区'); expect(host.textContent).not.toContain('未保存的名称');
   });
-  it('does not fake MFA, session revocation or permanently delete a workspace', async () => {
-    render(); await click(button('安全'));
-    expect(host.textContent).not.toContain('尚未接入'); expect(host.textContent).not.toContain('暂未提供'); expect(button('移入回收站').disabled).toBe(false);
-    await click(button('移入回收站')); expect(seam.value.run).not.toHaveBeenCalled(); expect(host.textContent).not.toContain('已退出 2 台设备'); expect(host.textContent).toContain('这不会永久删除数据或附件');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();
-  });
+  it('does not offer company deletion from security settings', async () => {render();await click(button('安全'));expect(host.textContent).not.toContain('移入回收站');expect(host.textContent).not.toContain('删除公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();});
 });
 
 describe('workspace default currency and local-only settings',()=>{
  it('saves the currency through the complete company profile without erasing business details',async()=>{
   seam.value.state.settings.companyProfile={legalName:'公司甲',englishName:'Company A',address:'上海',englishAddress:'Shanghai',phone:'123',email:'office@example.com',taxId:'TAX',customsCode:'CUSTOMS',bankName:'银行',bankAccount:'ACCOUNT',swift:'SWIFT',defaultCurrency:'USD'};
-  render();await click(button('工作空间'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.disabled).toBe(false);await act(async()=>{select.value='EUR';select.dispatchEvent(new Event('change',{bubbles:true}));});
+  render();await click(button('公司成员'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.disabled).toBe(false);await act(async()=>{select.value='EUR';select.dispatchEvent(new Event('change',{bubbles:true}));});
   expect(seam.value.run).toHaveBeenCalledWith({type:'settings.update',payload:{companyProfile:{defaultCurrency:'EUR'}}});expect(seam.value.state.settings.companyProfile).toMatchObject({legalName:'公司甲',taxId:'TAX',swift:'SWIFT'});expect(seam.value.state.settings.companyProfile.bankAccount).toBe('ACCOUNT');expect(seam.value.state.settings.companyProfile.defaultCurrency).toBe('EUR');
  });
  it('starts with USD when the optional company profile has no currency and preserves failure feedback',async()=>{
-  seam.value.run.mockRejectedValueOnce(new Error('币种保存失败'));render();await click(button('工作空间'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.value).toBe('USD');await act(async()=>{select.value='CNY';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(host.textContent).toContain('币种保存失败');expect(seam.value.state.settings.companyProfile).toBeUndefined();
+  seam.value.run.mockRejectedValueOnce(new Error('币种保存失败'));render();await click(button('公司成员'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.value).toBe('USD');await act(async()=>{select.value='CNY';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(host.textContent).toContain('币种保存失败');expect(seam.value.state.settings.companyProfile).toBeUndefined();
  });
  it('labels MFA and device session controls inapplicable for local identities while keeping them disabled',async()=>{
   seam.session={...seam.session,localMode:true} as any;render();await click(button('安全'));expect(host.textContent).toContain('两步验证不适用');expect(host.textContent).toContain('设备会话管理不适用');expect(button('不适用').disabled).toBe(true);expect(host.querySelector<HTMLInputElement>('input[role="switch"]')?.disabled).toBe(true);
@@ -103,7 +97,7 @@ describe('company profile maintenance in system settings',()=>{
   await click(button('保存公司资料'));expect(seam.value.state.settings.companyProfile).toEqual({...full,bankName:'新的示例银行'});
  });
  it('explains owner maintenance to members and offers no save action',async()=>{
-  seam.value.workspace={...seam.value.workspace,access:{role:'member'}};await open();expect(host.textContent).toContain('公司资料由空间所有者维护');expect(host.textContent).toContain('请联系空间所有者补全');
+  seam.value.workspace={...seam.value.workspace,access:{role:'member'}};await open();expect(host.textContent).toContain('公司资料由公司管理人员维护');expect(host.textContent).toContain('请联系公司管理人员补全');
   expect(host.querySelector<HTMLInputElement>('input[aria-label="公司中文抬头"]')!.disabled).toBe(true);expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='保存公司资料')).toBe(false);
  });
  it('drops an unsaved draft when the account or workspace changes',async()=>{
