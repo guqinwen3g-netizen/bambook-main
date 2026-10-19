@@ -57,9 +57,9 @@ GitHub 的 deployment / ops 工作流均已停用。仓库只负责源码、PR �
 
 ## 产品图去背景模型
 
-产品图透明派生使用 BiRefNet 官方通用 Swin-Tiny ONNX 权重（MIT），来源固定为官方 GitHub Release `v1/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx`。模型文件 224,005,088 bytes，SHA-256 为 `5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333`；模型只保存在本机和服务器私有模型目录，不进入公开仓库或部署包。
+产品图透明派生使用 IS-Net general-use Q8 ONNX 权重（上游 DIS / IS-Net 为 Apache-2.0；量化权重沿用同许可），文件 44,436,071 bytes，SHA-256 为 `feed6f32a5e707ca7e939576b2d891b23fb9eb4114749657a5efc64e8651e43a`。模型只保存在本机和服务器私有模型目录，不进入公开仓库或部署包。BiRefNet 通用 Swin-Tiny 的边缘质量已验收，但在当前 4GB 共享主机上超出服务资源边界，只保留为未来独立推理主机候选，不在当前服务启用。
 
-服务器私有环境用 `BAMBOOK_BACKGROUND_REMOVAL_MODEL` 指向模型绝对路径，并用 `BAMBOOK_BACKGROUND_REMOVAL_MODEL_SHA256` 固定摘要。加载失败、摘要不符、输出前景范围异常或推理失败时必须回退普通预览，不能阻断原图上传，也不能用颜色阈值强行生成破损边缘。推理只在服务器本地进行，原图不发送外部模型服务；上传时串行处理以限制 4GB 主机内存，透明派生生成后与附件一同保存和清理。
+主 API 的 `backend.env` 只配置 `BAMBOOK_IMAGE_CUTOUT_QUEUE`、`BAMBOOK_BACKGROUND_REMOVAL_MODEL_TYPE=isnet` 与版本；模型路径和摘要放在仅 worker 读取的 `cutout.env`。systemd path unit 监听队列并按需启动 oneshot worker，`MemoryMax=768M`、`MemorySwapMax=512M`、低 CPU 权重、串行处理，完成后退出释放内存。加载失败、摘要不符、输出前景范围异常或推理失败时保留普通预览，不能阻断原图上传，也不能用颜色阈值强行生成破损边缘。推理只在服务器本地进行，原图不发送外部模型服务；透明派生生成后与附件一同保存和清理。
 
 ## 大文件上传与当前隧道配置
 

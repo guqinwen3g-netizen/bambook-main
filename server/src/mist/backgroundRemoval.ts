@@ -6,7 +6,6 @@ import sharp from 'sharp';
 type Ort=typeof import('onnxruntime-node');
 type Session=import('onnxruntime-node').InferenceSession;
 const SIZE=1024,MEAN=[.485,.456,.406],STD=[.229,.224,.225];
-export const IMAGE_CUTOUT_VERSION='birefnet-general-swin-tiny-232-v1';
 let sessionPromise:Promise<Session|undefined>|undefined,inferenceTail=Promise.resolve(),warned=false;
 const results=new Map<string,Promise<Buffer|undefined>>();
 
@@ -21,6 +20,8 @@ async function session(){
  })().catch(error=>{if(!warned){warned=true;console.error('[image-cutout] model unavailable:',error instanceof Error?error.message:String(error));}return undefined;});
  return sessionPromise;
 }
+function modelType(){return process.env.BAMBOOK_BACKGROUND_REMOVAL_MODEL_TYPE==='isnet'?'isnet':'birefnet';}
+export function imageCutoutVersion(){const value=process.env.BAMBOOK_BACKGROUND_REMOVAL_MODEL_VERSION?.trim();return value&&/^[a-z0-9][a-z0-9._-]{0,79}$/i.test(value)?value:'unconfigured-v1';}
 function serial<T>(run:()=>Promise<T>):Promise<T>{const next=inferenceTail.then(run,run);inferenceTail=next.then(()=>undefined,()=>undefined);return next;}
 
 export async function applyAlphaMatte(bytes:Buffer,mask:Uint8Array,maskWidth:number,maskHeight:number):Promise<Buffer|undefined>{
@@ -36,13 +37,14 @@ async function infer(bytes:Buffer):Promise<Buffer|undefined>{
  return serial(async()=>{
   const input=await sharp(bytes,{limitInputPixels:40_000_000,animated:false}).rotate().resize(SIZE,SIZE,{fit:'fill'}).removeAlpha().raw().toBuffer();
   const data=new Float32Array(3*SIZE*SIZE),pixels=SIZE*SIZE;
-  for(let p=0;p<pixels;p++)for(let c=0;c<3;c++)data[c*pixels+p]=(input[p*3+c]/255-MEAN[c])/STD[c];
-  const ort:Ort=await import('onnxruntime-node'),outputs=await active.run({input_image:new ort.Tensor('float32',data,[1,3,SIZE,SIZE])}),tensor=outputs.output_image??Object.values(outputs)[0];
+  const kind=modelType();for(let p=0;p<pixels;p++)for(let c=0;c<3;c++)data[c*pixels+p]=kind==='isnet'?(input[p*3+c]-128)/256:(input[p*3+c]/255-MEAN[c])/STD[c];
+  const ort:Ort=await import('onnxruntime-node'),outputs=await active.run({[kind==='isnet'?'input':'input_image']:new ort.Tensor('float32',data,[1,3,SIZE,SIZE])}),tensor=outputs[kind==='isnet'?'output':'output_image']??Object.values(outputs)[0];
   if(!tensor||tensor.data.length!==pixels)throw new Error('背景移除模型输出无效');
-  const mask=new Uint8Array(pixels);for(let i=0;i<pixels;i++){const value=Number(tensor.data[i]);mask[i]=Math.round(255/(1+Math.exp(-Math.max(-30,Math.min(30,value)))));}
+  const values=tensor.data as Float32Array,mask=new Uint8Array(pixels);let min=Infinity,max=-Infinity;if(kind==='isnet')for(let i=0;i<pixels;i++){min=Math.min(min,values[i]);max=Math.max(max,values[i]);}
+  for(let i=0;i<pixels;i++){const value=Number(values[i]),alpha=kind==='isnet'?(value-min)/Math.max(1e-8,max-min):1/(1+Math.exp(-Math.max(-30,Math.min(30,value))));mask[i]=Math.round(255*Math.max(0,Math.min(1,alpha)));}
   return applyAlphaMatte(bytes,mask,SIZE,SIZE);
  });
 }
 export function automaticCutout(bytes:Buffer):Promise<Buffer|undefined>{
- const key=createHash('sha256').update(bytes).digest('hex');let value=results.get(key);if(!value){value=infer(bytes).catch(error=>{console.error('[image-cutout] inference failed:',error instanceof Error?error.message:String(error));return undefined;});results.set(key,value);while(results.size>8)results.delete(results.keys().next().value!);}return value;
+ const key=imageCutoutVersion()+':'+createHash('sha256').update(bytes).digest('hex');let value=results.get(key);if(!value){value=infer(bytes).catch(error=>{console.error('[image-cutout] inference failed:',error instanceof Error?error.message:String(error));return undefined;});results.set(key,value);while(results.size>8)results.delete(results.keys().next().value!);}return value;
 }

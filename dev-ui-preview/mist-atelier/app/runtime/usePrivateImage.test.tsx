@@ -55,3 +55,12 @@ it('prefetches detail previews once and lets a later detail view render without 
  await act(async()=>root.render(<Detail/>));expect(host.querySelector('img')?.src).toContain('blob:prefetched');expect(fetcher).toHaveBeenCalledTimes(1);
  await act(async()=>root.unmount());
 });
+
+it('shows the original fallback while AI cutout is pending, then replaces it after the worker finishes',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;vi.useFakeTimers();
+ const fetcher=vi.fn().mockResolvedValueOnce({ok:true,headers:{get:()=> 'pending'},blob:async()=>new Blob(['original'])}).mockResolvedValueOnce({ok:true,headers:{get:()=> 'ready'},blob:async()=>new Blob(['cutout'])});vi.stubGlobal('fetch',fetcher);
+ URL.createObjectURL=vi.fn().mockReturnValueOnce('blob:original').mockReturnValueOnce('blob:cutout');URL.revokeObjectURL=vi.fn();login.sessionKey='worker';
+ const host=document.createElement('div'),root=createRoot(host);function Image(){const src=usePrivateImage('/private/cutout','workspace-a');return src?<img src={src}/>:null;}
+ try{await act(async()=>root.render(<Image/>));expect(host.querySelector('img')?.src).toContain('blob:original');await act(async()=>{await vi.advanceTimersByTimeAsync(3000);});expect(fetcher).toHaveBeenCalledTimes(2);expect(host.querySelector('img')?.src).toContain('blob:cutout');}
+ finally{await act(async()=>root.unmount());vi.useRealTimers();}
+});
