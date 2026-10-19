@@ -13,8 +13,8 @@ export function AccountAccessPage(){
   if(!requestMode&&(!token.current||password!==confirm)){setError(!token.current?'链接不完整，请从邀请邮件重新打开。':'两次输入的密码不一致。');return;}
   setBusy(true);try{if(requestMode){const result=await accountAccessApi.requestRecovery(email.trim());if(mounted.current)setMessage(result.message);}else{const result=await accountAccessApi.complete({email:email.trim(),kind,token:token.current,password,mfaCode:mfa});if(mounted.current){setDone(true);setPlatform(result.platform);setPassword('');setConfirm('');setMfa('');token.current='';history.replaceState(history.state,'',location.pathname+location.search);}}}catch(e){if(mounted.current)setError(e instanceof Error?e.message:'操作未完成，请重试。');}finally{if(mounted.current)setBusy(false);}}
  const title=requestMode?'找回平台账号':kind==='invite'?'设置登录密码':'重设平台密码';
- return <div className="mist-auth"><div className="mist-auth-brand"><MistMark className="mist-hero-ring"/><div className="mist-brand" style={{padding:0}}><MistMark/><MistWordmark/></div><div style={{marginTop:'auto',maxWidth:440}}><h1 className="mist-display">安全进入<br/>你的工作台。</h1><p className="mist-sub">Bambook 竹衍 · 账号服务</p></div></div><div className="mist-auth-panel"><form className="mist-auth-form" onSubmit={submit}>
- <h2 className="mist-h1">{done?'密码已设置':title}</h2>
+ return <div className="mist-auth"><div className="mist-auth-brand"><MistMark className="mist-hero-ring"/><div className="mist-brand" style={{padding:0}}><MistMark/><MistWordmark/></div><div className="mist-auth-brand-copy"><h1 className="mist-h1">安全进入<br/>你的工作台。</h1><p>Bambook 竹衍 · 账号服务</p></div></div><div className="mist-auth-panel"><form className="mist-auth-form" onSubmit={submit}>
+ <h2 className="mist-h1" style={{fontSize:28}}>{done?'密码已设置':title}</h2>
  {done?<><p>请使用刚设置的密码登录。已开启的两步验证继续有效。</p><Button variant="primary" onClick={()=>nav.go('login',undefined,{section:platform?'platform':'company'})}>前往登录</Button></>:<>
  <p className="mist-sub">{requestMode?'输入独立的平台工作邮箱，通过邮件链接找回。':kind==='invite'?'完成密码设置后即可登录。邀请链接 48 小时内有效，仅能使用一次。':'链接 30 分钟内有效。修改后原有设备会话将失效。'}</p>
  {error&&<Banner tone="bad" title={error}/>} {message&&<Banner tone="ok" title={message}/>}
