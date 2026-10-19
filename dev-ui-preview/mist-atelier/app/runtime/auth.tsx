@@ -9,7 +9,7 @@ import type { View } from '../../../../types';
 import { getViewPermissionDefinition } from '../../../../lib/modulePermissions';
 
 export type MistSessionStatus = 'loading' | 'authenticated' | 'anonymous';
-export type MistLoginOptions = { remember?: boolean; mfa?: MfaLoginStep };
+export type MistLoginOptions = { remember?: boolean; mfa?: MfaLoginStep; companyId?: string };
 export interface MistSession {
   status: MistSessionStatus;
   user: AuthUser | null;
@@ -142,7 +142,7 @@ function ProductionMistSessionProvider({ children }: { children: React.ReactNode
     const sequence = ++commandSequence.current;
     setError(''); setSigningIn(true); setSigningOut(false);
     try {
-      const user = await authLogin(identifier.trim(), password, options.mfa);
+      const user = await authLogin(identifier.trim(), password, options.mfa, options.companyId);
       if (!user || typeof user.id !== 'string' || !user.id.trim()) throw new Error('登录响应未包含有效账号，请重新登录');
       if (!mounted.current || sequence !== commandSequence.current) throw new Error('登录操作已被新的会话操作替代');
       // The existing service writes both stores. Unchecked keeps the same token

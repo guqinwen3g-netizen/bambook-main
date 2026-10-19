@@ -298,7 +298,7 @@ export async function register(input: RegisterInput): Promise<{ message: string;
 /** 两步验证第二步：密码已通过后服务器给的短期凭据 + 验证器动态码或恢复码。 */
 export interface MfaLoginStep { mfaToken: string; code: string }
 
-export async function login(identifier: string, password: string, mfa?: MfaLoginStep): Promise<AuthUser> {
+export async function login(identifier: string, password: string, mfa?: MfaLoginStep, companyId?: string): Promise<AuthUser> {
   const epoch = ++authMutationEpoch;
   const base = getAuthApiBase();
   const initialToken = getStoredAuthToken();
@@ -311,7 +311,9 @@ export async function login(identifier: string, password: string, mfa?: MfaLogin
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify(mfa ? { mfaToken: mfa.mfaToken, code: mfa.code.trim() } : { email: identifier, identifier, password }),
+      body: JSON.stringify(mfa
+        ? { mfaToken: mfa.mfaToken, code: mfa.code.trim() }
+        : { email: identifier, identifier, password, ...(companyId ? { companyId } : {}) }),
     }, { fallbackToOmitCredentials: true });
     data = await readJsonResponse(res);
   } catch (error) {
@@ -324,6 +326,13 @@ export async function login(identifier: string, password: string, mfa?: MfaLogin
     err.code = data.error;
     // 429 防爆破限流：透传后端算好的冷却时长，供登录页做倒计时
     if (typeof data.retryAfterMs === 'number') err.retryAfterMs = data.retryAfterMs;
+    throw err;
+  }
+  if (data.needsCompany && Array.isArray(data.companies)) {
+    // 同一账号属于多家公司：不写任何会话，交由登录页选择后再登录一次。
+    const err: any = new Error('请选择要进入的公司');
+    err.code = 'COMPANY_SELECTION_REQUIRED';
+    err.companies = data.companies;
     throw err;
   }
   if (data.mfaRequired && typeof data.mfaToken === 'string') {

@@ -8,7 +8,7 @@ import { createModuleAuthGuard } from '../auth/moduleGuard';
 import { buildAuditLogQuery } from '../audit/entityQuery';
 import { AgentRole } from '../agent/types';
 import { EmailService, buildApprovalApprovedEmail, createEmailService } from '../auth/email';
-import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
+import { SYSTEM_ROLE_IDS, systemRoleCode } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 import { safeRouteError } from '../shared/routeError';
 import { createApprovalDecisionService, type OnApprovalDecided } from '../approvals/approvalDecisionService';
@@ -86,10 +86,13 @@ async function resolveRoleByNameOrId(prisma: PrismaClient, nameOrId: string) {
  * 且 DR-007 审批人解析与 userRole 部门作用域 RBAC 均依赖部门可达。
  * 部门填错会导致审批人兜底与部门隔离静默失效，因此在所有写路径 fail-closed。
  */
-async function departmentExists(prisma: PrismaClient, departmentId: string | null | undefined): Promise<boolean> {
+async function departmentExists(prisma: PrismaClient, departmentId: string | null | undefined, companyId?: string | null): Promise<boolean> {
   if (!departmentId) return true; // 未分配是合法状态
   const dept = await prisma.department.findUnique({ where: { id: departmentId } });
-  return Boolean(dept?.parentId && dept.status === 'active');
+  if (!dept?.parentId || dept.status !== 'active') return false; // 公司根部门不能作为任职部门
+  // 有公司上下文时，部门必须属于该公司。
+  if (companyId && (dept as { companyId?: string | null }).companyId !== companyId) return false;
+  return true;
 }
 
 // ── SuperAdmin 防线（安全修复：admin 不得经角色写端点自我提权）──
@@ -114,7 +117,8 @@ function isSystemRole(role: { id: string; isSystem?: boolean | null }): boolean 
   return SYSTEM_ROLE_ID_SET.has(role.id) || role.isSystem === true;
 }
 function systemRank(id: string): number {
-  const index = SYSTEM_RANK.indexOf(id as (typeof SYSTEM_RANK)[number]);
+  // 公司角色 id 带 `@<companyId>` 后缀，按角色码排序。
+  const index = SYSTEM_RANK.indexOf(systemRoleCode(id) as (typeof SYSTEM_RANK)[number]);
   return index < 0 ? SYSTEM_RANK.length : index;
 }
 /** 自定义角色名称 1–40 字、说明至多 200 字。 */
@@ -166,16 +170,34 @@ export function createAdminRouter(options: AdminRouterOptions) {
     return false;
   }
 
-  /** 角色名唯一（去首尾空格、忽略大小写）；“老板”等保留名不可占用。返回冲突角色名。 */
-  async function roleNameConflict(name: string, exceptId?: string): Promise<string | null> {
+  /** 取本公司角色；别家公司的角色一律当作不存在（404），不暴露其存在。 */
+  async function roleInCompany(req: Request, roleId: string) {
+    const companyId = actorCompanyId(req);
+    const role = await options.prisma.role.findUnique({ where: { id: roleId } });
+    if (!role) return null;
+    if (companyId && role.companyId !== companyId) return null;
+    return role;
+  }
+
+  /** 角色名在本公司内唯一（去首尾空格、忽略大小写）；“老板”等保留名不可占用。返回冲突角色名。 */
+  async function roleNameConflict(name: string, exceptId?: string, companyId?: string | null): Promise<string | null> {
     const key = name.toLowerCase();
     if (SUPER_ADMIN_ROLE_NAMES.has(name)) return name;
-    const roles = await options.prisma.role.findMany({ select: { id: true, name: true } });
+    const roles = await options.prisma.role.findMany({
+      where: companyId ? { companyId } : {},
+      select: { id: true, name: true },
+    });
     return roles.find(r => r.id !== exceptId && r.name.trim().toLowerCase() === key)?.name ?? null;
   }
 
   const requireAuth = options.requireAuth ?? true;
   const apiKeys = options.apiKeys ?? new Set<string>();
+
+  /** 当前会话所属公司；历史令牌没有公司上下文时返回 null（保持原有全局行为）。 */
+  function actorCompanyId(req: Request): string | null {
+    const actor = (req as any).actor;
+    return typeof actor?.companyId === 'string' && actor.companyId ? actor.companyId : null;
+  }
 
   // 统一认证守卫：JWT（走 jwt.verify 验签）优先，API-Key 次之
   router.use(createModuleAuthGuard({ requireAuth, apiKeys }));
@@ -185,6 +207,31 @@ export function createAdminRouter(options: AdminRouterOptions) {
   if (requireAuth) {
     router.use(requirePermission('users:admin'));
   }
+
+  /**
+   * 公司边界：/users/:id 下的所有操作只允许本公司成员。
+   * - 尚未归属任何公司的账号（如自助注册待审批）照常放行，审批流程需要；
+   * - 已属于别家公司的账号一律按不存在处理（404），不暴露其存在。
+   */
+  router.use('/users/:id', async (req: Request, res: Response, next) => {
+    try {
+      const companyId = actorCompanyId(req);
+      if (!companyId) return next();
+      const companyMember = (options.prisma as { companyMember?: { findMany?: unknown } }).companyMember;
+      if (typeof companyMember?.findMany !== 'function') return next();
+      const links = await options.prisma.companyMember.findMany({
+        where: { userId: req.params.id, status: 'active' },
+        select: { companyId: true },
+      });
+      if (!links.length) return next();
+      if (!links.some((link) => link.companyId === companyId)) {
+        return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '账号不存在。' });
+      }
+      return next();
+    } catch {
+      return res.status(503).json({ ok: false, error: 'COMPANY_CHECK_FAILED', message: '暂时无法核对该账号所属公司，请稍后重试。' });
+    }
+  });
 
   // Explicit main-order approval authorities; never infer fabric/garment scope
   // from the shared sales-manager role or the generic department-head fallback.
@@ -205,7 +252,12 @@ export function createAdminRouter(options: AdminRouterOptions) {
   // ---- Users ----
   router.get('/users', withRouteErrorGuard(async (req: Request, res: Response) => {
     const { status } = req.query as { status?: string };
-    const where: any = status ? { status } : { OR: [{ deletedAt: null }, { status: 'disabled' }] };
+    const companyId = actorCompanyId(req);
+    const baseWhere: any = status ? { status } : { OR: [{ deletedAt: null }, { status: 'disabled' }] };
+    // 公司管理员只看本公司成员；没有公司上下文的历史会话保持原行为。
+    const where: any = companyId
+      ? { AND: [baseWhere, { companyMembers: { some: { companyId, status: 'active' } } }] }
+      : baseWhere;
     const usersRaw = await options.prisma.userAccount.findMany({
       where,
       include: { roles: { include: { role: true } }, primaryDepartment: true },
@@ -219,7 +271,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     // 前端用户表单的部门字段用下拉选择，杜绝手填原始 ID。
     // parentId 一并下发：前端下拉按树序展开 + 层级缩进渲染（根/支线可辨）。
     const departments = await options.prisma.department.findMany({
-      where: { status: 'active' },
+      where: { status: 'active', ...(companyId ? { companyId } : {}) },
       orderBy: { name: 'asc' },
       select: { id: true, name: true, parentId: true },
     });
@@ -250,7 +302,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (password.length < 6) {
       return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: 'Password must be at least 6 characters.' });
     }
-    if (!(await departmentExists(options.prisma, departmentId))) {
+    const companyId = actorCompanyId(req);
+    if (!(await departmentExists(options.prisma, departmentId, companyId))) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${departmentId}` });
     }
     const existing = await options.prisma.userAccount.findFirst({ where: { email } });
@@ -263,6 +316,10 @@ export function createAdminRouter(options: AdminRouterOptions) {
         const role = await resolveRoleByNameOrId(options.prisma, roleNameOrId);
         if (!role) {
           return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: `角色不存在：${roleNameOrId}` });
+        }
+        // 公司管理员只能授予本公司角色，避免把别家公司的角色或全局模板挂到本公司成员上。
+        if (companyId && (role as any).companyId !== companyId) {
+          return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '只能授予本公司角色。' });
         }
         if (isSuperAdminRole(role) && !actorIsOwner(req)) {
           return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'SuperAdmin 角色仅 SuperAdmin(owner) 可授予。' });
@@ -299,6 +356,14 @@ export function createAdminRouter(options: AdminRouterOptions) {
       });
       await tx.userRole.deleteMany({ where: { userId: created.id } });
       for (const role of resolvedRoles) await tx.userRole.create({ data: { id: `ur_${created.id}_${role.id}`, userId: created.id, roleId: role.id, departmentId: departmentId || null } });
+      // 公司管理员新建的账号直接成为本公司成员。
+      if (companyId) {
+        await tx.companyMember.upsert({
+          where: { companyId_userId: { companyId, userId: created.id } },
+          update: { status: 'active' },
+          create: { id: crypto.randomUUID(), companyId, userId: created.id, status: 'active', joinedAt: new Date() },
+        });
+      }
       return created;
     });
     const actor = (req as any).actor;
@@ -656,8 +721,13 @@ export function createAdminRouter(options: AdminRouterOptions) {
   }));
 
   // ---- Roles ----
-  router.get('/roles', withRouteErrorGuard(async (_req: Request, res: Response) => {
-    const roles = await options.prisma.role.findMany({ include: { permissions: { include: { permission: true } } } });
+  router.get('/roles', withRouteErrorGuard(async (req: Request, res: Response) => {
+    const companyId = actorCompanyId(req);
+    // 公司管理员只看到本公司角色；历史会话（无公司）保持原行为。
+    const roles = await options.prisma.role.findMany({
+      where: companyId ? { companyId } : {},
+      include: { permissions: { include: { permission: true } } },
+    });
     const rows = roles.map(r => ({
       id: r.id, name: r.name, description: r.description, isSystem: isSystemRole(r),
       permissions: r.permissions.map(p => p.permission.scope).sort(),
@@ -677,7 +747,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const scopes = [...new Set((requested as string[]).map(scope => scope.trim()))];
     if (!scopes.length) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请至少选择一项权限。' });
     if (scopes.includes('*')) return res.status(400).json({ ok: false, error: 'INVALID_PERMISSION', message: '全部权限只属于“老板”角色，自定义角色须逐项组合权限。' });
-    const conflict = await roleNameConflict(input.name);
+    const conflict = await roleNameConflict(input.name, undefined, actorCompanyId(req));
     if (conflict) return res.status(409).json({ ok: false, error: 'DUPLICATE_ROLE_NAME', message: `已有同名角色「${conflict}」，请换一个名称。` });
     const permissions = await options.prisma.permission.findMany({ where: { scope: { in: scopes } } });
     const unknown = scopes.filter(scope => !permissions.some(p => p.scope === scope));
@@ -685,7 +755,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const id = `role-custom-${crypto.randomBytes(6).toString('hex')}`;
     const actor = (req as any).actor;
     await options.prisma.$transaction(async tx => {
-      await tx.role.create({ data: { id, name: input.name, description: input.description, isSystem: false } });
+      await tx.role.create({ data: { id, companyId: actorCompanyId(req), name: input.name, description: input.description, isSystem: false } });
       for (const perm of permissions) await tx.rolePermission.create({ data: { id: `rp_${id}_${perm.id}`, roleId: id, permissionId: perm.id } });
       await tx.auditLog.create({ data: { id: auditId(), actorId: actor?.userId || 'system', action: 'create_role', targetType: 'Role', targetId: id, detail: { name: input.name, description: input.description, permissions: permissions.map(p => p.scope).sort() }, ip: req.ip } });
     });
@@ -694,12 +764,12 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
   router.patch('/roles/:id', withRouteErrorGuard(async (req: Request, res: Response) => {
     if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义角色仅老板可新建、修改或删除。' });
-    const role = await options.prisma.role.findUnique({ where: { id: req.params.id } });
+    const role = await roleInCompany(req, req.params.id);
     if (!role) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '角色不存在。' });
     if (isSystemRole(role)) return res.status(409).json({ ok: false, error: 'SYSTEM_ROLE', message: '系统角色不能改名或删除，只能调整权限。' });
     const input = parseRoleText(req.body);
     if (!input.ok) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: input.message });
-    const conflict = await roleNameConflict(input.name, role.id);
+    const conflict = await roleNameConflict(input.name, role.id, actorCompanyId(req));
     if (conflict) return res.status(409).json({ ok: false, error: 'DUPLICATE_ROLE_NAME', message: `已有同名角色「${conflict}」，请换一个名称。` });
     const actor = (req as any).actor;
     await options.prisma.$transaction(async tx => {
@@ -711,7 +781,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
   router.delete('/roles/:id', withRouteErrorGuard(async (req: Request, res: Response) => {
     if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义角色仅老板可新建、修改或删除。' });
-    const role = await options.prisma.role.findUnique({ where: { id: req.params.id } });
+    const role = await roleInCompany(req, req.params.id);
     if (!role) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '角色不存在。' });
     if (isSystemRole(role)) return res.status(409).json({ ok: false, error: 'SYSTEM_ROLE', message: '系统角色不能改名或删除，只能调整权限。' });
     // 仍有在用 / 待审批账号持有该角色时不得删除：先在“账号”中改派角色，避免账号静默失去权限。
@@ -899,7 +969,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
   router.patch('/roles/:id/permissions', withRouteErrorGuard(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { addPermissions, removePermissions } = req.body || {};
-    const role = await options.prisma.role.findUnique({ where: { id } });
+    const role = await roleInCompany(req, id);
     if (!role) {
       return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '角色不存在。' });
     }

@@ -818,6 +818,17 @@ export const DEFAULT_ROLE_PERMISSION_MATRIX: Record<SystemRoleId, RolePermission
 // 7. 前端/守卫辅助工具函数（纯函数，不依赖DB，fallback判断用）
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * 多租户下每家公司各有一套系统角色，id 形如 `role-sales@<companyId>`。
+ * 权限矩阵按角色码（code）编排，查询前统一剥离公司后缀。
+ * 自定义角色没有 @ 后缀，原样返回（其权限来自数据库，不查矩阵）。
+ */
+export function systemRoleCode(roleId: string | null | undefined): string {
+  if (!roleId) return '';
+  const at = roleId.indexOf('@');
+  return at > 0 ? roleId.slice(0, at) : roleId;
+}
+
 /** 判断一个系统角色是否拥有某scope（先看DB拉取的用户权限集，没有或为空时fallback到默认矩阵） */
 export function hasPermission(
   roleId: string | string[] | null | undefined,
@@ -831,8 +842,9 @@ export function hasPermission(
   // 角色数组（多角色用户）
   const roles = Array.isArray(roleId) ? roleId : roleId ? [roleId] : [];
   for (const r of roles) {
-    if (r === SYSTEM_ROLE_IDS.SUPER_ADMIN) return true;
-    const matrix = DEFAULT_ROLE_PERMISSION_MATRIX[r as SystemRoleId];
+    const code = systemRoleCode(r);
+    if (code === SYSTEM_ROLE_IDS.SUPER_ADMIN) return true;
+    const matrix = DEFAULT_ROLE_PERMISSION_MATRIX[code as SystemRoleId];
     if (matrix && matrix[scope] === true) return true;
   }
   return false;
@@ -853,9 +865,10 @@ export function getDataScopeRule(
   roleId: string | null | undefined,
   moduleOrView?: string,
 ): DataScopeRule {
-  if (!roleId) return { kind: 'self' }; // 无角色=仅自己
-  if (roleId === SYSTEM_ROLE_IDS.SUPER_ADMIN) return { kind: 'all' };
-  const roleRules = DEFAULT_DATA_SCOPE_BY_ROLE[roleId as SystemRoleId];
+  const code = systemRoleCode(roleId);
+  if (!code) return { kind: 'self' }; // 无角色=仅自己
+  if (code === SYSTEM_ROLE_IDS.SUPER_ADMIN) return { kind: 'all' };
+  const roleRules = DEFAULT_DATA_SCOPE_BY_ROLE[code as SystemRoleId];
   if (!roleRules) return { kind: 'self' };
   if (moduleOrView && moduleOrView in roleRules) {
     return (roleRules as Record<string, DataScopeRule>)[moduleOrView];

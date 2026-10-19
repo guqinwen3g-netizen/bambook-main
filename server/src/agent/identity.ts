@@ -3,6 +3,7 @@ import {
   SYSTEM_ROLE_IDS,
   DEFAULT_ROLE_PERMISSION_MATRIX,
   getDefaultScopeListForRole,
+  systemRoleCode,
   type SystemRoleId,
 } from '../_shared/rolePermissionMatrix';
 import { P0B_TOOL_DEFINITIONS } from './toolRegistry';
@@ -113,12 +114,13 @@ const MATRIX_TO_TOOL_DOMAIN_ALIASES: Record<string, string[]> = {
 function deriveToolScopesFromRoleIds(roleIds: string[]): string[] {
   const domains = new Set<string>(['read', 'memory']);
   for (const roleId of roleIds) {
-    if (roleId === SYSTEM_ROLE_IDS.SUPER_ADMIN) {
+    const code = systemRoleCode(roleId);
+    if (code === SYSTEM_ROLE_IDS.SUPER_ADMIN) {
       for (const domain of allRegisteredToolDomains()) domains.add(domain);
       continue;
     }
-    if (!(roleId in DEFAULT_ROLE_PERMISSION_MATRIX)) continue;
-    for (const scope of getDefaultScopeListForRole(roleId as SystemRoleId)) {
+    if (!(code in DEFAULT_ROLE_PERMISSION_MATRIX)) continue;
+    for (const scope of getDefaultScopeListForRole(code as SystemRoleId)) {
       const prefix = scope.split(':')[0];
       domains.add(prefix);
       for (const alias of MATRIX_TO_TOOL_DOMAIN_ALIASES[prefix] ?? []) domains.add(alias);

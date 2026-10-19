@@ -1,9 +1,11 @@
 import { departmentBusinessAttributes } from '../hr/departmentBusinessAttributes';
+import { SYSTEM_ROLE_IDS, systemRoleCode } from '../_shared/rolePermissionMatrix';
 
 /** Department eligibility constrains an existing action grant; it never creates one. */
 export function departmentAuthorization(user: any, roleIds: string[], grantedPermissions: string[]) {
   const businessAttributes = departmentBusinessAttributes(user.primaryDepartment);
-  const globalBusinessScope = roleIds.includes('role-super-admin');
+  // 公司角色 id 带 `@<companyId>` 后缀，按角色码判断是否为老板。
+  const globalBusinessScope = roleIds.some(id => systemRoleCode(id) === SYSTEM_ROLE_IDS.SUPER_ADMIN);
   const has = (...attributes: string[]) => globalBusinessScope || attributes.some(attribute => businessAttributes.includes(attribute as any));
   const permissions = grantedPermissions.filter(scope => {
     if (globalBusinessScope) return true;

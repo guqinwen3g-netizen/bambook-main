@@ -54,6 +54,24 @@ export function createAuthRouter(options: AuthRouterOptions) {
           maxFailures: (options.loginRateLimit && options.loginRateLimit.maxFailures) || envMaxFailures || undefined,
         });
 
+  /**
+   * 读取账号所属的启用中公司。测试替身或未迁移库可能没有 CompanyMember 模型，
+   * 此时返回空列表（保持历史单租户行为），不因缺模型直接 500。
+   */
+  async function loadCompanyMemberships(userId: string) {
+    const prisma: any = options.prisma;
+    if (typeof prisma?.companyMember?.findMany !== 'function') return [];
+    return prisma.companyMember.findMany({
+      where: { userId, status: 'active' },
+      include: { company: true },
+      orderBy: { createdAt: 'asc' },
+    }) as Promise<Array<{
+      companyId: string;
+      jobTitle: string | null;
+      company: { id: string; name: string; slug: string; status: string };
+    }>>;
+  }
+
   router.post('/login', async (req: Request, res: Response) => {
     const { email, identifier, password } = req.body || {};
     const loginIdentifier = normalizeLoginIdentifier(identifier || email);
@@ -121,13 +139,37 @@ export function createAuthRouter(options: AuthRouterOptions) {
     if (mfaOf(user.metadata).enabled) {
       return res.json({ ok: true, mfaRequired: true, mfaToken: auth.signPurposeToken('mfa-login', user.id, 300) });
     }
-    return issueSession(req, res, user);
+
+    // 多租户：确定本次会话进入哪家公司。一个账号可属于多家公司，
+    // 多家时先返回公司列表让用户选择；未归属任何公司时保持历史行为（companyId 为空）。
+    const companyMemberships = await loadCompanyMemberships(user.id);
+    const activeCompanies = companyMemberships.filter((m) => m.company.status === 'active');
+    const requestedCompanyId = typeof req.body?.companyId === 'string' ? req.body.companyId.trim() : '';
+    if (requestedCompanyId && !activeCompanies.some((m) => m.companyId === requestedCompanyId)) {
+      return res.status(403).json({ ok: false, error: 'COMPANY_ACCESS_DENIED', message: '当前账号不属于该公司。' });
+    }
+    if (!requestedCompanyId && activeCompanies.length > 1) {
+      return res.json({
+        ok: true,
+        needsCompany: true,
+        companies: activeCompanies.map((m) => ({
+          id: m.company.id,
+          name: m.company.name,
+          slug: m.company.slug,
+          jobTitle: m.jobTitle,
+        })),
+      });
+    }
+    const entryCompany = requestedCompanyId
+      ? activeCompanies.find((m) => m.companyId === requestedCompanyId)!.company
+      : activeCompanies[0]?.company ?? null;
+    return issueSession(req, res, user, {}, entryCompany ? { id: entryCompany.id, name: entryCompany.name, slug: entryCompany.slug } : null);
   });
 
-  async function issueSession(req: Request, res: Response, user: any, extra: Record<string, unknown> = {}) {
+  async function issueSession(req: Request, res: Response, user: any, extra: Record<string, unknown> = {}, company: { id: string; name: string; slug: string } | null = null) {
     let tokenPayload;
     try {
-      tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user);
+      tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, company?.id ?? null);
     } catch (error) {
       logger.error('[auth] current authorization load failed', { userId: user.id, error: (error as Error).message });
       return res.status(500).json({ ok: false, error: 'AUTHORIZATION_LOAD_FAILED', message: '账号权限暂时无法加载，请稍后重试。' });
@@ -157,6 +199,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       ok: true,
       user: serializeAuthUser(user, roles, permissions, departmentIds, { newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded }),
       token,
+      ...(company ? { company } : {}),
       ...extra,
     });
   }
@@ -411,16 +454,79 @@ export function createAuthRouter(options: AuthRouterOptions) {
         res.clearCookie(COOKIE_NAME, { path: '/' });
         return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Account disabled.' });
       }
-      const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user);
+      const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, payload.companyId ?? null);
       const { roles, permissions, departmentIds, roleIds: newRoleIds } = tokenPayload;
+      let company: { id: string; name: string; slug: string } | null = null;
+      if (payload.companyId) {
+        const row = await options.prisma.company.findUnique({
+          where: { id: payload.companyId },
+          select: { id: true, name: true, slug: true, status: true },
+        });
+        if (!row || row.status !== 'active') {
+          res.clearCookie(COOKIE_NAME, { path: '/' });
+          return res.status(401).json({ ok: false, error: 'COMPANY_UNAVAILABLE', message: '所属公司已停用，请重新登录。' });
+        }
+        company = { id: row.id, name: row.name, slug: row.slug };
+      }
       return res.json({
         ok: true,
         user: serializeAuthUser(user, roles, permissions, departmentIds, { newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }),
+        ...(company ? { company } : {}),
       });
     } catch {
       res.clearCookie(COOKIE_NAME, { path: '/' });
       return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' });
     }
+  });
+
+  // 当前账号可进入的公司列表（登录后切换公司用）。
+  router.get('/companies', async (req: Request, res: Response) => {
+    const token = pickRequestToken(req);
+    if (!token) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Not logged in.' });
+    let prior: ReturnType<typeof auth.verifyToken>;
+    try { prior = auth.verifyToken(token); } catch { return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' }); }
+    const rows = await loadCompanyMemberships(prior.userId);
+    return res.json({
+      ok: true,
+      currentCompanyId: prior.companyId ?? null,
+      companies: rows.filter((m) => m.company.status === 'active').map((m) => ({
+        id: m.company.id, name: m.company.name, slug: m.company.slug, jobTitle: m.jobTitle,
+      })),
+    });
+  });
+
+  // 切换当前公司：换发携带公司上下文的令牌，权限按该公司重新计算。
+  router.post('/switch-company', async (req: Request, res: Response) => {
+    const token = pickRequestToken(req);
+    if (!token) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Not logged in.' });
+    const companyId = typeof req.body?.companyId === 'string' ? req.body.companyId.trim() : '';
+    if (!companyId) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请选择公司。' });
+    let prior: ReturnType<typeof auth.verifyToken>;
+    try { prior = auth.verifyToken(token); } catch { return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' }); }
+    const prisma: any = options.prisma;
+    const membership = typeof prisma?.companyMember?.findFirst === 'function'
+      ? await prisma.companyMember.findFirst({
+        where: { userId: prior.userId, companyId, status: 'active' },
+        include: { company: true },
+      })
+      : null;
+    if (!membership || membership.company.status !== 'active') {
+      return res.status(403).json({ ok: false, error: 'COMPANY_ACCESS_DENIED', message: '当前账号不属于该公司。' });
+    }
+    const user = await loadUserWithRoles(options.prisma, prior.userId);
+    if (!user || user.status !== 'active' || user.deletedAt != null) {
+      return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Account disabled.' });
+    }
+    const current = await buildLoadedAuthTokenPayload(options.prisma, user, companyId);
+    if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
+    const next = auth.signToken(current);
+    res.cookie(COOKIE_NAME, next, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: COOKIE_MAX_AGE, path: '/' });
+    return res.json({
+      ok: true,
+      token: next,
+      user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { newRoleIds: current.roleIds, authorizationLoaded: true }),
+      company: { id: membership.company.id, name: membership.company.name, slug: membership.company.slug },
+    });
   });
 
   router.post('/logout', (_req: Request, res: Response) => {
@@ -511,7 +617,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       }
       // Re-authentication boundary: never re-sign stale role/grant claims from
       // the old JWT, even if every current role permission has been revoked.
-      const current = await buildLoadedAuthTokenPayload(options.prisma, user);
+      const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null);
       if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
       const refreshed = auth.signToken(current);
       res.cookie(COOKIE_NAME, refreshed, {
@@ -565,7 +671,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       try {
         const loaded = await loadUserWithRoles(options.prisma, payload.userId);
         if (loaded) {
-          const current = await buildLoadedAuthTokenPayload(options.prisma, loaded);
+          const current = await buildLoadedAuthTokenPayload(options.prisma, loaded, payload.companyId ?? null);
           if (payload.permissionCeiling !== undefined) current.permissionCeiling = [...payload.permissionCeiling];
           token = auth.signToken(current);
           res.cookie(COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: COOKIE_MAX_AGE, path: '/' });

@@ -2,6 +2,7 @@ import { departmentAuthorization } from './departmentAuthorization';
 import { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../agent/types';
 import { ROLE_ID_TO_LEGACY_AGENT_ROLE, legacyAgentRoleForId, loadEffectivePermissionScopes } from './permissionService';
+import { currentCompanyId } from './requestCompanyContext';
 import type { TokenPayload } from './service';
 
 /**
@@ -11,18 +12,21 @@ import type { TokenPayload } from './service';
  */
 
 export function userRolesToLegacyAgentRoles(
-  userRoles: Array<{ roleId: string; role?: { name?: string | null; isSystem?: boolean | null } }>,
+  userRoles: Array<{ roleId: string; role?: { name?: string | null; isSystem?: boolean | null; code?: string | null } }>,
 ): { legacy: AgentRole[]; newRoleIds: string[] } {
   const legacy = new Set<AgentRole>();
   const newRoleIds: string[] = [];
   for (const ur of userRoles) {
     if (!ur.roleId) continue;
     newRoleIds.push(ur.roleId);
-    const mapped = legacyAgentRoleForId(ur.roleId);
+    // 多租户下每家公司的系统角色各有自己的 id，按角色码（code）识别角色类型；
+    // 历史全局角色没有 code，回退用 id 判断。
+    const roleKey = ur.role?.code || ur.roleId;
+    const mapped = legacyAgentRoleForId(roleKey);
     if (mapped) {
       // 'owner' 同时包含 owner + admin（owner 级权限应该同时拥有 admin 范围的检查）
       legacy.add(mapped);
-      if (mapped === 'owner' && ROLE_ID_TO_LEGACY_AGENT_ROLE[ur.roleId]) legacy.add('admin');
+      if (mapped === 'owner' && ROLE_ID_TO_LEGACY_AGENT_ROLE[roleKey]) legacy.add('admin');
       if (mapped === 'finance') legacy.add('finance');
     }
   }
@@ -77,14 +81,20 @@ export async function loadUserWithRoles(prisma: PrismaClient, userId: string) {
 }
 
 /** Compatibility projection only; it cannot certify a current DB grant load. */
-export function buildAuthTokenPayload(user: any): TokenPayload {
+export function buildAuthTokenPayload(user: any, companyId?: string | null): TokenPayload {
+  // 指定公司时只取该公司的角色；公司维度为空即无权限（fail closed），
+  // 避免跨公司串用角色。未指定公司（历史会话 / 未迁移数据）保持原行为。
+  const scopedRoles = companyId
+    ? (user.roles || []).filter((ur: any) => (ur.role?.companyId ?? null) === companyId)
+    : (user.roles || []);
   const { legacy: roles, newRoleIds } = userRolesToLegacyAgentRoles(
-    (user.roles || []).map((ur: any) => ({ roleId: ur.roleId, role: ur.role })),
+    scopedRoles.map((ur: any) => ({ roleId: ur.roleId, role: ur.role })),
   );
-  const permissions = collectPermissionScopes(user.roles || []);
-  const departmentIds = (user.roles || []).map((ur: any) => ur.departmentId).filter(Boolean) as string[];
+  const permissions = collectPermissionScopes(scopedRoles);
+  const departmentIds = scopedRoles.map((ur: any) => ur.departmentId).filter(Boolean) as string[];
   return {
     userId: user.id,
+    ...(companyId ? { companyId } : {}),
     displayName: user.displayName,
     roles,
     roleIds: newRoleIds,
@@ -98,12 +108,14 @@ export function buildAuthTokenPayload(user: any): TokenPayload {
  * DB query with roles -> role -> permissions -> permission included. Only after
  * the additional personal-grant query succeeds do we stamp a loaded snapshot.
  */
-export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: any): Promise<TokenPayload> {
+export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: any, companyId?: string | null): Promise<TokenPayload> {
   if (user.status !== 'active' || user.deletedAt != null) throw new Error('AUTHORIZATION_ACCOUNT_INACTIVE');
   if (!Array.isArray(user.roles) || user.roles.some((ur: any) => !Array.isArray(ur.role?.permissions))) {
     throw new Error('AUTHORIZATION_ROLE_TREE_NOT_LOADED');
   }
-  const payload = buildAuthTokenPayload(user);
+  // 未显式指定公司时沿用请求级会话公司，避免各处重载把别家公司的角色也算进来。
+  const scopedCompany = companyId !== undefined ? companyId : currentCompanyId();
+  const payload = buildAuthTokenPayload(user, scopedCompany);
   const permissions = await loadEffectivePermissionScopes(prisma, user.id, payload.permissions);
   return { ...payload, ...departmentAuthorization(user, payload.roleIds || [], permissions), authorizationLoaded: true };
 }
