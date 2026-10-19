@@ -2,6 +2,7 @@
  * T12 登录模板 —— 对应：Login.tsx / Register.tsx。左侧品牌（雾蓝 shell + 标志），右侧画布表单。
  */
 import React from 'react';
+import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
 import { ArrowRight, KeyRound, Mail, ShieldCheck } from 'lucide-react';
 import { Button, Checkbox, Field, MistMark, MistWordmark, TextInput, TextLink, useToast } from '../../../../components/mist';
 import { useNav } from '../nav';
@@ -78,9 +79,9 @@ export function LoginPage() {
       <div className="mist-auth-brand">
         <MistMark className="mist-hero-ring" />
         <div className="mist-brand" style={{ padding: 0 }}><MistMark /><MistWordmark /></div>
-        <div style={{ marginTop: 'auto', maxWidth: 440 }}>
-          <h1 className="mist-h1" style={{ fontSize: 44, color: 'var(--mist-on-media)' }}>从开发到收款，<br />每一步都看得清。</h1>
-          <p style={{ marginTop: 14, color: 'rgba(255,255,255,.84)', fontSize: 15 }}>Bambook 竹衍 · 成衣外贸企业工作台</p>
+        <div style={{ marginTop: 'auto', maxWidth: 520 }}>
+          <h1 className="mist-h1" style={{ fontSize: 44, color: 'var(--mist-on-media)' }}>{BAMBOOK_BRAND.headline[0]}<br />{BAMBOOK_BRAND.headline[1]}</h1>
+          <p style={{ marginTop: 14, color: 'rgba(255,255,255,.84)', fontSize: 15 }}>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p>
         </div>
       </div>
       <div className="mist-auth-panel">

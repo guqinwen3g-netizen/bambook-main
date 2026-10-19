@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
-import { createEmailService, type EmailService } from './email';
+import { buildAccountAccessEmail, createEmailService, type EmailService } from './email';
 import { createAuthService } from './service';
 import { invalidateAccountStatusCache } from './accountStatusGuard';
 import { createLoginRateLimiter } from './loginRateLimiter';
@@ -53,7 +53,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
   if(entry.setup){url.searchParams.set('kind',kind);url.searchParams.set('email',entry.email);url.hash=token;}
   const label=entry.platform?'Sylway Cloud 平台':companyName||'Bambook 公司';
   let status:Delivery['status']='sent';
-  try{await email.send({to:entry.email,subject:kind==='recovery'?'Bambook 平台账号找回':`${label}账号邀请`,text:entry.setup?`你收到了 ${label} 的账号邀请或找回邮件。\n请打开以下链接${kind==='recovery'?'重设':'设置'}你的登录密码：\n${url}\n链接${kind==='invite'?'48 小时':'30 分钟'}内有效，仅可使用一次。若已开启两步验证，找回时仍需验证。请勿转发此邮件。`:`你已被邀请加入 ${label}。请使用现有账号登录：\n${url}\n你的密码和已有公司权限未改变。`});}
+  try{await email.send(buildAccountAccessEmail({to:entry.email,label,kind,setup:entry.setup,url:url.href}));}
   catch{status='unconfirmed';}
   await db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 84))`;

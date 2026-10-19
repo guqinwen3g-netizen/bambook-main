@@ -1,3 +1,4 @@
+import { accountEmailHtml } from './accountEmail';
 import nodemailer, { Transporter } from 'nodemailer';
 import { logger } from '../lib/logger';
 
@@ -164,55 +165,30 @@ export function buildApprovalApprovedEmail(params: {
   department?: string | null;
 }): EmailMessage {
   const name = (params.displayName || '').trim() || '同事';
-  const rolesLabel = (params.roles || []).filter(Boolean).join('、') || '基础访问';
-  const deptLabel = params.department?.trim() || '未分配';
-  const text = [
-    `您好 ${name}：`,
-    '',
-    '您在 Bambook Neural 提交的注册申请已通过审核，现在可以使用同一邮箱登录系统。',
-    '',
-    `分配角色：${rolesLabel}`,
-    `所属部门：${deptLabel}`,
-    '',
-    '如需调整角色或部门，请联系您的管理员。',
-    '',
-    '— Bambook Neural 团队',
-  ].join('\n');
-  const html = `<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px 24px;color:#1f2937">
-    <div style="text-align:center;margin-bottom:24px">
-      <div style="font-size:14px;letter-spacing:2px;color:#4A90E2;font-weight:500">BAMBOOK NEURAL</div>
-      <div style="font-size:11px;color:#94a3b8;margin-top:4px">Enterprise Agent OS</div>
-    </div>
-    <p style="font-size:14px;line-height:1.7">您好 <strong>${name}</strong>，</p>
-    <p style="font-size:14px;line-height:1.7">您在 Bambook Neural 提交的注册申请<strong style="color:#10b981">已通过审核</strong>，现在可以使用同一邮箱登录系统。</p>
-    <div style="margin:20px 0;padding:16px 20px;background:#f1f5f9;border-radius:12px">
-      <div style="font-size:12px;color:#64748b">分配角色</div>
-      <div style="font-size:14px;color:#0f172a;font-weight:500;margin-top:2px">${rolesLabel}</div>
-      <div style="font-size:12px;color:#64748b;margin-top:10px">所属部门</div>
-      <div style="font-size:14px;color:#0f172a;font-weight:500;margin-top:2px">${deptLabel}</div>
-    </div>
-    <p style="font-size:12px;color:#64748b;line-height:1.7">如需调整角色或部门，请联系您的管理员。</p>
-    <p style="font-size:12px;color:#94a3b8;line-height:1.7;margin-top:24px">— Bambook Neural 团队</p>
-  </div>`;
-  return { to: '', subject: 'Bambook 注册审核已通过', text, html };
+  const roles = (params.roles || []).filter(Boolean).join('、') || '基础访问';
+  const department = params.department?.trim() || '未分配';
+  const paragraphs = [`你好，${name}。`, '你的注册申请已通过审核，现在可以使用同一邮箱登录 Bambook。'];
+  const note = '如需调整角色或部门，请联系公司管理员。';
+  return {
+    to: '', subject: 'Bambook 注册审核已通过',
+    text: [...paragraphs, `分配角色：${roles}`, `所属部门：${department}`, note].join('\n\n'),
+    html: accountEmailHtml({ title: '注册审核已通过', preheader: '你的 Bambook 账号已获批准。', paragraphs, details: [['分配角色', roles], ['所属部门', department]], note }),
+  };
 }
 
 export function buildVerificationEmail(code: string, purpose: 'register' | 'reset_password' = 'register'): EmailMessage {
-  const purposeLabel = purpose === 'register' ? '注册' : '重置密码';
-  return {
-    to: '',
-    subject: `Bambook ${purposeLabel}验证码：${code}`,
-    text: `您正在进行 Bambook ${purposeLabel}操作。\n\n验证码：${code}\n\n该验证码 10 分钟内有效，请勿泄露给他人。\n\n如果不是您本人操作，请忽略此邮件。`,
-    html: `<div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#1f2937">
-      <div style="text-align:center;margin-bottom:24px">
-        <div style="font-size:14px;letter-spacing:2px;color:#4A90E2;font-weight:500">BAMBOOK NEURAL</div>
-        <div style="font-size:11px;color:#94a3b8;margin-top:4px">Enterprise Agent OS</div>
-      </div>
-      <p style="font-size:14px;line-height:1.6">您正在进行 Bambook <strong>${purposeLabel}</strong>操作，验证码如下：</p>
-      <div style="margin:24px 0;padding:18px 24px;background:#f1f5f9;border-radius:12px;text-align:center">
-        <span style="font-size:28px;letter-spacing:8px;font-weight:600;color:#0f172a;font-family:Menlo,Consolas,monospace">${code}</span>
-      </div>
-      <p style="font-size:12px;color:#64748b;line-height:1.6">该验证码 <strong>10 分钟</strong>内有效，请勿泄露给他人。<br/>如非您本人操作，请忽略此邮件。</p>
-    </div>`,
-  };
+  const label = purpose === 'register' ? '验证注册邮箱' : '重置登录密码';
+  const paragraphs = [`你正在进行 Bambook ${purpose === 'register' ? '注册' : '密码重置'}，请在页面中输入以下验证码。`];
+  const note = '验证码 10 分钟内有效。请勿向他人提供验证码；如果不是你本人操作，请忽略此邮件。';
+  return { to: '', subject: `Bambook ${label}`, text: [...paragraphs, `验证码：${code}`, note].join('\n\n'), html: accountEmailHtml({ title: label, preheader: '你的验证码 10 分钟内有效，请勿转发。', paragraphs, code, note }) };
+}
+
+export function buildAccountAccessEmail(params: { to: string; label: string; kind: 'invite' | 'recovery'; setup: boolean; url: string }): EmailMessage {
+  const { label, kind, setup, url } = params;
+  const recovery = kind === 'recovery';
+  const title = recovery ? '重设平台账号密码' : `加入${label}`;
+  const action = recovery ? '重设登录密码' : setup ? '设置密码并加入' : '登录 Bambook';
+  const paragraphs = recovery ? ['我们收到了你的平台账号密码重设申请。请点击下方按钮，设置新的登录密码。'] : [`你已受邀加入${label}。`, setup ? '请先设置你的登录密码，再使用受邀邮箱登录。' : '请使用现有账号登录。你的密码和已有公司权限保持不变。'];
+  const note = setup ? `链接${recovery ? '30 分钟' : '48 小时'}内有效，仅可使用一次。${recovery ? '修改密码后，原有设备会话将失效；已开启的两步验证继续有效。' : ''}请勿转发邮件。如果不是你本人申请或预期收到的邀请，请忽略此邮件。` : '如果这不是你预期收到的邀请，请联系公司管理员。';
+  return { to: params.to, subject: recovery ? 'Bambook 平台账号找回' : `${label}账号邀请`, text: [...paragraphs, `${action}：`, url, note].join('\n\n'), html: accountEmailHtml({ title, preheader: setup ? `${label} · ${recovery ? '30 分钟' : '48 小时'}内完成密码设置。` : `${label}邀请你使用现有账号加入。`, paragraphs, action: { label: action, url }, note }) };
 }
