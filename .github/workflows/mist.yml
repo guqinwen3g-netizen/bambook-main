@@ -1,16 +1,7 @@
 name: Mist verification
 
+# Local direct delivery is the default. GitHub is a source mirror; CI is manual fallback only.
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
-    # A push to main that only touches documentation (docs/**, top-level *.md) does not run at all:
-    # nothing to verify and nothing new to deploy (delivery is triggered by this workflow's success).
-    # GitHub runs the workflow anyway if any path in the push falls outside these patterns.
-    paths-ignore:
-      - 'docs/**'
-      - '*.md'
   workflow_dispatch:
 
 permissions:
@@ -21,9 +12,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Pull requests that only touch documentation (docs/**, top-level *.md; see scripts/ci/classify-doc-changes.sh)
-  # skip the full build and only get a whitespace check. Docs-only pushes to main are filtered out by paths-ignore above;
-  # any other push to main and manual runs always run the full verification (delivery depends on it).
+  # Explicit manual verification for diagnostics or the emergency GitHub delivery path.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5

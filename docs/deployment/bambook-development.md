@@ -50,17 +50,17 @@
 
 ## 交付与激活
 
-正常路径：含代码改动的 PR 合入 main → `Mist verification` 通过后自动运行 `Bambook development delivery`（也可手动运行；只改文档的推送不部署）。`check` 只测通道；`deploy` 要求同一提交 `verify` 已通过，在 CI 构建前端，打包 `.nvmrc`、`server`（去掉测试、验收用例、知识库工具和文档，只留运行所需）、`scripts/deploy/bambook-dev-release.sh`、`web/`（确定性：固定排序与时间戳），经受限 SSH 发送。上传走 GitHub 到国内服务器的跨境链路，实测约 20KB/s，是部署耗时的大头，包要尽量小。私钥只在仓库 secret `BAMBOOK_DEV_SSH_KEY`，主机公钥在 `BAMBOOK_DEV_KNOWN_HOSTS`。
+正常路径（2026-10-19 用户更新）：本机完整验证 → 提交并推送 GitHub → 本机运行 `npm run dev:deploy` 直传开发服务器。GitHub 自动验证和自动部署均已取消，仅保留手动应急入口。直推配置、缓存与回执说明见[开发服务器访问](../ops/dev-server-access.md#本机直接部署默认)。运行源码只从已提交的干净版本提取，图片、运行数据和密钥不随包上传。
 
 受限 SSH 强制经过接收程序，只接受 `check`、`receive <提交>`、`activate <提交>`；拒绝越界路径、链接、设备文件、重复路径、超限包，`scripts/` 下只允许发布脚本本身（其他运维脚本放 `server/scripts/` 才会随包交付）。
 
-发布脚本 `bambook-dev-release.sh`：核对 Node 主版本 → 依赖（`server/package-lock.json` 与 Node 版本都与当前版本相同时，从当前版本整份复制 `node_modules`，否则 `npm ci`；复制失败也退回 `npm ci`）→ `prisma generate` →（服务端全量类型检查已移到 CI 的 `verify:mist`，服务器不再重复跑）→ 链接 shared 目录 → 读入 `backend.env` 并校验（回环监听、PDML 关闭、密钥齐全）→ 切换 `current` → 重启两个服务 → 两个健康检查都通过才算激活，否则回切旧版本。不自动迁移或重置数据库。日志里每步带 `[release +N s]` 耗时。
+发布脚本 `bambook-dev-release.sh`：核对 Node 主版本 → 依赖（`server/package-lock.json` 与 Node 版本都与当前版本相同时，从当前版本整份复制 `node_modules`，否则 `npm ci`；复制失败也退回 `npm ci`）→ `prisma generate` →（服务端全量类型检查由发布本机运行 `verify:mist` 完成，服务器不再重复跑）→ 链接 shared 目录 → 读入 `backend.env` 并校验（回环监听、PDML 关闭、密钥齐全）→ 切换 `current` → 重启两个服务 → 两个健康检查都通过才算激活，否则回切旧版本。不自动迁移或重置数据库。日志里每步带 `[release +N s]` 耗时。
 
 时间预算（由内到外，改动时一起改）：发布脚本 ≤ 2100 秒（接收程序 `ACTIVATE_TIMEOUT`）< 交付作业里 ssh 的 `timeout 2280` < 交付作业 `timeout-minutes: 50`。超时后接收程序结束整个进程组（含 npm / prisma / tsc 子进程）；发布脚本在切换 `current` 前写 `/srv/bambook-dev/.activation.json`，若在切换后、健康检查完成前被中断，接收程序据此切回旧版本并重启服务，下次激活前也会先处理遗留标记。回切的只是应用版本，数据库不随之回滚（发布本身不改库结构）。
 
 ### 备用：管理员手工交付
 
-GitHub Actions 不可用、或分支未合入时使用（本次上线即用此方式）。在服务器组装与 CI 相同范围的包，再走同一接收程序：
+直推通道需修复时的维护备用方案，不作为日常发布方式。在服务器组装与 CI 相同范围的包，再走同一接收程序：
 
 ```sh
 revision=<已推送的完整 40 位提交>
