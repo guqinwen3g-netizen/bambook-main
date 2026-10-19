@@ -6,6 +6,12 @@ import { freshMistAuthority, type FreshAuthority } from './authority';
 import { fail } from './errors';
 import { mistApprovalAuthority } from './context';
 import type { MistReviewTask } from '../shared/mistReview';
+const REVIEW_COMMAND_BY_KIND = {
+  procurement:'fulfillment.procurement.decide',quotation:'market.quotation.decide',
+  claim:'platform.claim.decide',order:'order.governance.decide',
+  payment:'payable.request.decide',risk:'platform.risk.decide',
+} as const satisfies Record<MistReviewTask['kind'],MistCommand['type']>;
+const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions } from '../shared/mistPayables';
@@ -342,7 +348,12 @@ export class MistRepository {
           if (type === 'calendar.save' && !canReadTarget(actor, payload.target)) fail('FORBIDDEN', '无权关联该业务来源', 403);
           if (type === 'notification.readAll') context.visibleNotificationIds = visible.notifications.map(item => item.id);
         }
-        if(input.command) context.authority = await mistApprovalAuthority(db,actor,input.command.type);
+        if(input.command) {
+          const kind=REVIEW_KIND_BY_COMMAND.get(input.command.type),payload=input.command.payload as {id?:unknown;escalationId?:unknown}|undefined;
+          const review=kind?this.reviews(row.state).find(task=>task.kind===kind&&(kind==='risk'?task.entityId===payload?.escalationId&&task.target.id===payload?.id:task.entityId===payload?.id)):undefined;
+          const subject=review?await this.reviewSubject(db,actor,review.requesterId):actor;
+          context.authority = await mistApprovalAuthority(db,subject,input.command.type);
+        }
         if(input.command && MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type)) context.members = await this.memberDirectory(db,row,actor);
         const plan = input.command ? this.contract.getRequiredBusinessNumberPlan?.(row.state, input.command) ?? [] : [];
         const numbers = await prepareMistBusinessNumbers(db, row.state, plan, context.now);
@@ -462,6 +473,16 @@ export class MistRepository {
     }
   }
   private reviews(state:MistState):MistReviewTask[]{return this.contract.getMistReviewTasks?.(state)||[];}
+  /** Both command and review entry points rebuild routing from the current requester, while the actor remains the decision maker. */
+  private async reviewSubject(db:any,actor:TokenPayload,requesterId:string):Promise<TokenPayload>{
+    if((actor as any).mistLocal===true && process.env.MIST_LOCAL_WORKSPACE==='1' && process.env.NODE_ENV!=='production'){
+      if(!MIST_LOCAL_PROFILES.some(p=>p.id===requesterId))fail('REQUESTER_UNAVAILABLE','本地申请身份无效',409);
+      const requester=mistLocalPublicUser(requesterId);return {...requester,userId:requester.id,mistLocal:true} as unknown as TokenPayload;
+    }
+    const requester=await loadUserWithRoles(db,requesterId);
+    if(!requester||requester.status!=='active'||requester.deletedAt)fail('REQUESTER_UNAVAILABLE','申请账号当前不可核验，请联系管理员',409);
+    return buildLoadedAuthTokenPayload(db,requester);
+  }
   async listReviews(prior:TokenPayload){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);
     const rows=await db.mistWorkspace.findMany({where:{OR:[{ownerId:actor.userId},{state:{path:['reviewerIds'],array_contains:[actor.userId]}}]},orderBy:{updatedAt:'desc'},take:200});
@@ -497,12 +518,8 @@ export class MistRepository {
       if(!task||!task.reviewerIds.includes(actor.userId))fail('NOT_FOUND','该审批不属于当前账号',404);
       await this.authorize(db,prior,task.requiredPermission);
       if(task.status!=='pending')fail('REVIEW_RESOLVED','审批已处理，请刷新记录',409);
-      let subject:TokenPayload;
-      if((actor as any).mistLocal===true && process.env.MIST_LOCAL_WORKSPACE==='1' && process.env.NODE_ENV!=='production'){
-        if(!MIST_LOCAL_PROFILES.some(p=>p.id===task.requesterId))fail('REQUESTER_UNAVAILABLE','本地申请身份无效',409);
-        const requester=mistLocalPublicUser(task.requesterId);subject={...requester,userId:requester.id,mistLocal:true} as unknown as TokenPayload;
-      }else{const requester=await loadUserWithRoles(db,task.requesterId);if(!requester||requester.status!=='active'||requester.deletedAt)fail('REQUESTER_UNAVAILABLE','申请账号当前不可核验，请联系管理员',409);subject=await buildLoadedAuthTokenPayload(db,requester);}
-      const type=task.kind==='procurement'?'fulfillment.procurement.decide':task.kind==='quotation'?'market.quotation.decide':task.kind==='order'?'order.governance.decide':task.kind==='payment'?'payable.request.decide':task.kind==='risk'?'platform.risk.decide':'platform.claim.decide';
+      const subject=await this.reviewSubject(db,actor,task.requesterId);
+      const type=REVIEW_COMMAND_BY_KIND[task.kind];
       // 风险申请：审批结果回到原风险记录（target.id），并精确对应本次申请（entityId）。
       const command={type,payload:task.kind==='risk'?{id:task.target.id,escalationId:task.entityId,decision:input.decision,note:input.note}:{id:task.entityId,decision:input.decision,note:input.note}} as MistCommand;
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
