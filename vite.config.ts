@@ -122,6 +122,9 @@ export default defineConfig(({ mode }) => {
       // CDN cache) and was not worth the breakage. Removed.
     },
     test: {
+      // Keep the full suite reliable on interactive developer machines. The
+      // CPU-count default spawned nine forks here and timed out under load.
+      maxWorkers: 2,
       setupFiles: ['./test/browserSetup.ts'],
       // 默认 node 环境：套件以源码契约测试（readFileSync + import.meta.url 定位）为主，
       // jsdom 会把 import.meta.url 改写为 http:// 导致 fs 读取全部失败。
