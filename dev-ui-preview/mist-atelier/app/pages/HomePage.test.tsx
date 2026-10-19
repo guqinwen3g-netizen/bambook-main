@@ -118,6 +118,7 @@ it('lists derived work from QC returns and rejected payment requests and opens t
   state.tasks=[];
   render();const rows=[...host.querySelectorAll<HTMLElement>('.mist-task')];expect(rows.map(row=>row.textContent).join('|')).toContain('QC-BACK');expect(rows.map(row=>row.textContent).join('|')).toContain('PR-BACK · 付款申请被退回');
   expect(host.querySelector('.mist-hero')?.textContent).toContain('QC-BACK');
+  expect(host.querySelector('.mist-hero h2')?.textContent?.match(/QC-BACK/g)).toHaveLength(1);
   expect(host.querySelector('.mist-page-head')?.textContent).toContain('件来自审批、QC、出运或财务');
   await click(rows.find(row=>row.textContent?.includes('PR-BACK'))!);expect(go).toHaveBeenLastCalledWith('payment-vouchers','pr-back',{view:'payment-vouchers',id:'pr-back'});
   await click(rows.find(row=>row.textContent?.includes('QC-BACK'))!);expect(go).toHaveBeenLastCalledWith('qc-workbench','qc-back',{view:'qc-workbench',id:'qc-back'});
