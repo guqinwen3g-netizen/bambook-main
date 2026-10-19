@@ -17,7 +17,7 @@ export const EMPLOYMENT_STATUS: Record<string, string> = { Probation: '试用期
 export const CONTRACT_TYPES = [{ value: 'FixedTerm', label: '固定期限' }, { value: 'OpenEnded', label: '无固定期限' }, { value: 'PartTime', label: '非全日制' }, { value: 'Intern', label: '实习' }];
 
 export interface OrgDepartment { id: string; name: string; parentId: string | null; status?: string; businessAttributes?: BusinessAttribute[] }
-export interface AdminAccount { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null; createdAt: string; metadata?: Record<string, unknown> | null; mfaEnabled?: boolean }
+export interface AdminAccount { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null; createdAt: string; metadata?: Record<string, unknown> | null }
 export interface AdminRole { id: string; name: string; description: string | null; isSystem: boolean; permissions: string[] }
 export interface AuditLogRow { id: string; actorId: string; action: string; targetType: string; targetId: string | null; createdAt: string; ip?: string | null }
 export interface OrgPerson { id: string; displayName: string; email: string; status: string; roles: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null }
@@ -80,7 +80,6 @@ export const organizationApi = {
   approve: (userId: string, roles: string[], departmentId: string) => call<{ emailStatus?: string }>('/admin/users/' + id(userId) + '/approve', { method: 'POST', body: { roles, departmentId } }),
   reject: (userId: string, reason: string) => call<{ ok: true }>('/admin/users/' + id(userId) + '/reject', { method: 'POST', body: { reason } }),
   disable: (userId: string) => call<{ ok: true }>('/admin/users/' + id(userId) + '/disable-account', { method: 'POST', body: {} }),
-  resetMfa: (userId: string) => call<{ ok: boolean }>('/admin/users/' + id(userId) + '/reset-mfa', { method: 'POST', body: {} }),
   resetPassword: (userId: string) => call<{ temporaryPassword?: string }>('/admin/users/' + id(userId) + '/reset-password', { method: 'POST', body: {} }),
   // 审批资格：订单主审批负责人（users:admin）与供应商承诺审批人（老板/管理员 + dictionary:write）。
   orderApprovalAuthorities: () => call<{ assignments: OrderApprovalAssignment[]; users: ApprovalCandidate[] }>('/admin/order-approval-authorities'),

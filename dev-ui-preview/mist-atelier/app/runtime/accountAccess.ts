@@ -5,4 +5,4 @@ async function request(path:string,body:unknown){
  let value:any;try{value=await response.json();}catch{throw new Error('账号服务暂不可用，请稍后重试。');}
  if(!response.ok||value.ok===false)throw new Error(value.message||'操作未完成，请重试。');return value;
 }
-export const accountAccessApi={requestRecovery:(email:string)=>request('request',{email}),complete:(input:{email:string;kind:'invite'|'recovery';token:string;password:string;mfaCode:string})=>request('complete',input)};
+export const accountAccessApi={requestRecovery:(email:string)=>request('request',{email}),complete:(input:{email:string;kind:'invite'|'recovery';token:string;password:string})=>request('complete',input)};

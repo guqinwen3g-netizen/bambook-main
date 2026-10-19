@@ -5,7 +5,6 @@ import { buildAccountAccessEmail, createEmailService, type EmailService } from '
 import { createAuthService } from './service';
 import { invalidateAccountStatusCache } from './accountStatusGuard';
 import { createLoginRateLimiter } from './loginRateLimiter';
-import { hashRecoveryCode, mfaOf, openSecret, verifyTotp } from './totp';
 
 type Kind = 'invite' | 'recovery';
 export type Delivery = { status: 'sent' | 'unconfirmed' | 'unavailable' | 'cooldown'; message: string };
@@ -64,7 +63,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
   });
   return{status,message:status==='sent'?'邮件已提交发送，请收件人检查收件箱及垃圾邮件。':'邮件发送结果未确认。账号已保留，请稍后重发；重发后旧链接失效。'};
  }
- async function complete(input:{email:string;kind:Kind;token:string;password:string;mfaCode?:string}) {
+ async function complete(input:{email:string;kind:Kind;token:string;password:string}) {
   if(!/^[A-Za-z0-9_-]{43}$/.test(input.token))return{ok:false,message:'链接无效或已过期，请重新申请。'};
   if(input.password.length<12||Buffer.byteLength(input.password,'utf8')>72||!/[A-Za-z]/.test(input.password)||!/[0-9]/.test(input.password))return{ok:false,message:'密码须包含字母和数字，至少 12 个字符且不超过 72 字节。'};
   const emailAddress=input.email.trim().toLowerCase(), passwordHash=await auth.hashPassword(input.password);
@@ -76,15 +75,8 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
    if(!eligible(user,input.kind)||!record||record.id!==`access:${input.kind}:${found.id}`||record.consumedAt||record.expiresAt.getTime()<=Date.now()||record.attempts>=5||record.codeHash!==hash(input.token))return{ok:false,message:'链接无效或已过期，请重新申请。'};
    const metadata=meta(user!.metadata);
    if(input.kind==='invite'&&!metadata.forceChangePassword || Date.parse(metadata.passwordChangedAt||'')>record.issuedAt.getTime())return{ok:false,message:'链接已失效，请重新申请。'};
-   const mfa=mfaOf(metadata);let nextMfa=mfa;
-   if(mfa.enabled){
-    const counter=mfa.secret?verifyTotp(openSecret(mfa.secret),input.mfaCode,Date.now(),mfa.lastCounter??-1):null;
-    const code=(input.mfaCode||'').trim().toLowerCase().replace(/^([0-9a-f]{5})-?([0-9a-f]{5})$/,'$1-$2'),recoveryHash=hashRecoveryCode(code);
-    if(counter===null&&!(mfa.recovery||[]).includes(recoveryHash)){await tx.userVerificationCode.update({where:{id:record.id},data:{attempts:{increment:1}}});return{ok:false,message:'请输入有效的两步验证码或恢复码。'};}
-    nextMfa=counter!==null?{...mfa,lastCounter:counter}:{...mfa,recovery:(mfa.recovery||[]).filter(v=>v!==recoveryHash)};
-   }
    const at=new Date().toISOString();
-   await tx.userAccount.update({where:{id:found.id},data:{passwordHash,metadata:{...metadata,forceChangePassword:false,credentialVersion:randomUUID(),passwordChangedAt:at,sessionsRevokedAt:at,...(mfa.enabled?{mfa:nextMfa}:{}),...(input.kind==='invite'?{accountInvitation:{status:'accepted',at}}:{})}}});
+   await tx.userAccount.update({where:{id:found.id},data:{passwordHash,metadata:{...metadata,forceChangePassword:false,credentialVersion:randomUUID(),passwordChangedAt:at,sessionsRevokedAt:at,...(input.kind==='invite'?{accountInvitation:{status:'accepted',at}}:{})}}});
    await tx.userVerificationCode.deleteMany({where:{email:emailAddress,purpose:{in:[purpose('invite'),purpose('recovery')]}}});
    await tx.auditLog.create({data:{id:randomUUID(),actorId:found.id,action:input.kind==='invite'?'account.invitation.accept':'platform.recovery.complete',targetType:'UserAccount',targetId:found.id}});
    return{ok:true,userId:found.id,platform:!!user!.platformRole};
@@ -109,7 +101,7 @@ export function accountAccessRouter(db:PrismaClient,options:AccountAccessOptions
   const b=req.body??{};
   if(!['invite','recovery'].includes(b.kind)||typeof b.email!=='string'||b.email.length>254||typeof b.token!=='string'||typeof b.password!=='string')return res.status(400).json({ok:false,message:'链接内容不完整，请从邮件重新打开。'});
   if(traffic.recordFailure(req.ip||'unknown').blocked||limiter.recordFailure('complete:'+req.ip+':'+b.email.trim().toLowerCase()).blocked)return res.status(429).json({ok:false,message:'请求过于频繁，请稍后再试。'});
-  const result=await service.complete({email:b.email,kind:b.kind,token:b.token,password:b.password,mfaCode:typeof b.mfaCode==='string'?b.mfaCode:undefined});
+  const result=await service.complete({email:b.email,kind:b.kind,token:b.token,password:b.password});
   return res.status(result.ok?200:400).json(result.ok?{ok:true,platform:'platform'in result&&result.platform}:result);
  }catch(e){next(e);}});
  return router;

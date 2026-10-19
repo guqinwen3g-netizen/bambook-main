@@ -15,7 +15,7 @@ describe('branded account emails', () => {
   it('keeps the recovery and existing-account instructions distinct', () => {
     const common = { to: 'user@example.com', label: 'Sylway Cloud 平台', url: 'https://example.com/' };
     const recovery = buildAccountAccessEmail({ ...common, kind: 'recovery', setup: true });
-    expect(recovery.html).toContain('30 分钟'); expect(recovery.text).toContain('两步验证继续有效');
+    expect(recovery.html).toContain('30 分钟'); expect(recovery.text).toContain('原有设备会话将失效'); expect(recovery.text).not.toContain('两步验证');
     const existing = buildAccountAccessEmail({ ...common, kind: 'invite', setup: false });
     expect(existing.html).toContain('现有账号登录'); expect(existing.html).not.toContain('设置密码并加入'); expect(existing.text).not.toContain('小时');
   });

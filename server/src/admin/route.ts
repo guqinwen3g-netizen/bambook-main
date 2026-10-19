@@ -287,7 +287,6 @@ export function createAdminRouter(options: AdminRouterOptions) {
       departmentId: companyId ? u.roles[0]?.departmentId ?? null : u.primaryDeptId,
       department: companyId ? (u.roles[0] as any)?.department?.name ?? null : u.primaryDepartment?.name || null,
       metadata: publicAccountMetadata(u.metadata),
-      mfaEnabled: (u.metadata as any)?.mfa?.enabled === true,
       lastLoginAt: u.lastLoginAt,
       lastLoginIp: u.lastLoginIp,
       createdAt: u.createdAt,
@@ -438,19 +437,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     });
   }));
 
-  // 两步验证重置：用户丢失验证器且恢复码用尽时由管理员关闭，之后本人可重新绑定。
-  router.post('/users/:id/reset-mfa', withRouteErrorGuard(async (req: Request, res: Response) => {
-    const { id } = req.params;
-    if (await rejectIfSuperAdminTarget(req, res, id)) return;
-    const target = await options.prisma.userAccount.findUnique({ where: { id }, select: { metadata: true } });
-    if (!target) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '用户不存在。' });
-    const metadata = (target.metadata as any) || {};
-    await options.prisma.userAccount.update({ where: { id }, data: { metadata: { ...metadata, mfa: { enabled: false, resetAt: new Date().toISOString() } } } });
-    const actor = (req as any).actor;
-    await options.prisma.auditLog.create({
-      data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: actor?.userId || 'system', action: 'reset_mfa', targetType: 'UserAccount', targetId: id, ip: req.ip },
-    });
-    res.json({ ok: true });
+  router.post('/users/:id/reset-mfa', withRouteErrorGuard(async (_req, res) => {
+    res.status(410).json({ ok: false, error: 'AUTH_METHOD_RETIRED', message: '此验证方式已停用。' });
   }));
 
   const disableUserAccount = withRouteErrorGuard(async (req: Request, res: Response) => {

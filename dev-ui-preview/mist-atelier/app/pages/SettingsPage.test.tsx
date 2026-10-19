@@ -66,7 +66,7 @@ describe('workspace default currency and local-only settings',()=>{
   seam.value.run.mockRejectedValueOnce(new Error('币种保存失败'));render();await click(button('公司成员'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.value).toBe('USD');await act(async()=>{select.value='CNY';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(host.textContent).toContain('币种保存失败');expect(seam.value.state.settings.companyProfile).toBeUndefined();
  });
  it('labels MFA and device session controls inapplicable for local identities while keeping them disabled',async()=>{
-  seam.session={...seam.session,localMode:true} as any;render();await click(button('安全'));expect(host.textContent).toContain('两步验证不适用');expect(host.textContent).toContain('设备会话管理不适用');expect(button('不适用').disabled).toBe(true);expect(host.querySelector<HTMLInputElement>('input[role="switch"]')?.disabled).toBe(true);
+  seam.session={...seam.session,localMode:true} as any;render();await click(button('安全'));expect(host.textContent).not.toContain('两步验证');expect(host.textContent).toContain('设备会话管理不适用');expect(button('不适用').disabled).toBe(true);
  });
 });
 
