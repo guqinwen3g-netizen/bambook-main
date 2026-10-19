@@ -50,6 +50,8 @@ function memberIdsOf(state: any): string[] {
 }
 
 async function main() {
+  const databaseName = new URL(process.env.DATABASE_URL || '').pathname.slice(1);
+  if (!/(^|_)(dev|test|local|acceptance)(_|$)/i.test(databaseName)) throw new Error('Company migration is restricted to development/test databases.');
   const workspaces = await prisma.mistWorkspace.findMany({
     where: { companyId: null },
     orderBy: { createdAt: 'asc' },
@@ -87,9 +89,9 @@ async function main() {
     });
 
     let rolesCreated = 0;
-    for (const code of SYSTEM_ROLE_CODES) {
-      const template = await tx.role.findFirst({ where: { id: code, companyId: null } });
-      if (!template) continue;
+    const roleTemplates = await tx.role.findMany({ where: { companyId: null } });
+    for (const template of roleTemplates) {
+      const code = template.id;
       const scopedId = `${code}@${company.id}`;
       await tx.role.upsert({
         where: { id: scopedId },
@@ -100,7 +102,7 @@ async function main() {
           code,
           name: template.name,
           description: template.description,
-          isSystem: true,
+          isSystem: template.isSystem,
         },
       });
       const permissions = await tx.rolePermission.findMany({ where: { roleId: code } });
@@ -139,6 +141,8 @@ async function main() {
         rolesMoved += 1;
       }
     }
+
+    await tx.userPermissionOverrides.updateMany({ where: { userId: { in: candidateUserIds }, companyId: null }, data: { companyId: company.id } });
 
     for (const w of workspaces) {
       await tx.mistWorkspace.update({ where: { id: w.id }, data: { companyId: company.id } });

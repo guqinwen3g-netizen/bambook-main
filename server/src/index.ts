@@ -1,3 +1,4 @@
+import { tenantSurfaceGuard } from './auth/tenantSurfaceGuard';
 // Load env BEFORE Prisma is initialized.
 // Local dev overrides come from .env.local (gitignored); .env is the fallback (e.g. cloud creds).
 import dotenv from 'dotenv';
@@ -406,6 +407,7 @@ app.use((req, _res, next) => {
 });
 
 app.use('/api', createAuthorizationSnapshotGuard({ prisma, apiKeys: SDK_CONFIG.apiKeys, apiKeyActors: AGENT_API_KEY_ACTORS }));
+app.use('/api', tenantSurfaceGuard);
 // 请求耗时日志：5xx→error / 慢请求→warn / 其余→debug（Phase 1 · 任务 1.2）
 app.use(createRequestTimingMiddleware());
 app.use((req, res, next) => {

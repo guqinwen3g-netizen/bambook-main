@@ -1,3 +1,4 @@
+import { currentCompanyId } from './requestCompanyContext';
 import { departmentAuthorization } from './departmentAuthorization';
 /**
  * permissionService.ts — Phase 0-02 权限服务层（不含 Express 中间件，纯函数+Prisma 查询）
@@ -120,11 +121,12 @@ export async function loadEffectivePermissionScopes(
   prisma: Pick<PrismaClient, 'userPermissionOverrides'>,
   userId: string,
   roleScopes: Iterable<string>,
+  companyId = currentCompanyId(),
 ): Promise<string[]> {
   const scopes = new Set(Array.from(roleScopes).filter(Boolean));
   const overrides = await prisma.userPermissionOverrides.findMany({
     where: {
-      userId, isActive: true, deletedAt: null,
+      userId, isActive: true, deletedAt: null, ...(companyId ? { companyId } : {}),
       OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
     },
     select: { scope: true },
@@ -195,6 +197,7 @@ export function createPermissionService(opts: PermissionServiceOptions) {
         primaryDepartment: true,
         status: true,
         roles: {
+          ...(currentCompanyId() ? { where: { role: { companyId: currentCompanyId() } } } : {}),
           select: {
             departmentId: true,
             role: {

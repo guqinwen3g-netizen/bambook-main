@@ -58,7 +58,7 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
   //   - 个人连接（ai:chat）：仅供后续本机工作助手使用，不参与平台 AI。
   const subscriptions = () => options.subscriptions ?? codexSubscriptions();
   const aiActor = (req: Request) => { const a = actor(req); if (!a?.userId || !hasScope(a, 'ai:chat')) fail('FORBIDDEN', '当前账号无助手使用权限', 403); return a; };
-  const platformAdmin = (req: Request) => { const a = actor(req); if (!a?.userId || !(a.roles ?? []).some(role => role === 'owner' || role === (SYSTEM_ROLE_IDS.SUPER_ADMIN as unknown))) fail('FORBIDDEN', '仅管理员可配置平台模型', 403); return a; };
+  const platformAdmin = async (req: Request) => { const a = actor(req); if (options.prisma) { const current = a?.userId ? await options.prisma.userAccount.findUnique({ where: { id: a.userId }, select: { platformRole: true, status: true, deletedAt: true } }) : null; if (!current || current.status !== 'active' || current.deletedAt || current.platformRole !== 'platform_admin') fail('FORBIDDEN', '仅平台管理员可配置平台模型', 403); } else if (!a?.userId || !(a.roles ?? []).some(role => role === 'owner' || role === (SYSTEM_ROLE_IDS.SUPER_ADMIN as unknown))) fail('FORBIDDEN', '仅管理员可配置平台模型', 403); return a; };
   const subscriptionCall = (handler: (req: Request, res: Response) => Promise<void> | void) => run(async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
     try { await handler(req, res); } catch (error) {
@@ -67,10 +67,10 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
     }
   });
   const platformView = () => ({ chatgpt: subscriptions().status(PLATFORM_SUBJECT), profiles: platformProfileList() });
-  router.get('/ai/platform-model', subscriptionCall((req, res) => { platformAdmin(req); res.json(platformView()); }));
-  router.post('/ai/platform-model/chatgpt/login', subscriptionCall(async (req, res) => { platformAdmin(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(PLATFORM_SUBJECT) }); }));
-  router.get('/ai/platform-model/chatgpt/login/:loginId', subscriptionCall((req, res) => { platformAdmin(req); res.json({ login: subscriptions().getLogin(PLATFORM_SUBJECT, req.params.loginId), ...platformView() }); }));
-  router.post('/ai/platform-model/chatgpt/disconnect', subscriptionCall((req, res) => { platformAdmin(req); exactBody(req.body ?? {}, []); subscriptions().disconnect(PLATFORM_SUBJECT); res.json(platformView()); }));
+  router.get('/ai/platform-model', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json(platformView()); }));
+  router.post('/ai/platform-model/chatgpt/login', subscriptionCall(async (req, res) => { await platformAdmin(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(PLATFORM_SUBJECT) }); }));
+  router.get('/ai/platform-model/chatgpt/login/:loginId', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json({ login: subscriptions().getLogin(PLATFORM_SUBJECT, req.params.loginId), ...platformView() }); }));
+  router.post('/ai/platform-model/chatgpt/disconnect', subscriptionCall(async (req, res) => { await platformAdmin(req); exactBody(req.body ?? {}, []); subscriptions().disconnect(PLATFORM_SUBJECT); res.json(platformView()); }));
   router.get('/ai/subscriptions', subscriptionCall((req, res) => { res.json({ chatgpt: subscriptions().status(personalSubject(aiActor(req).userId)) }); }));
   router.post('/ai/subscriptions/chatgpt/login', subscriptionCall(async (req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(personalSubject(a.userId)) }); }));
   router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall((req, res) => { const a = aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
@@ -99,7 +99,7 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
   router.get('/reviews/:workspaceId/receipts/:requestId', run(async (req,res)=>{res.json({receipt:await repository.reviewReceipt(actor(req),req.params.workspaceId,req.params.requestId)});}));
   router.get('/reviews/:workspaceId/:reviewId/files/:fileId',run(async(req,res)=>{const {file,bytes}=await repository.reviewFile(actor(req),req.params.workspaceId,req.params.reviewId,req.params.fileId);res.setHeader('Cache-Control','private, no-store');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);res.type('application/octet-stream').send(Buffer.from(bytes));}));
   router.post('/reviews/:workspaceId/:reviewId', run(async (req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','decision','note']);res.json(await repository.decideReview(actor(req),req.params.workspaceId,req.params.reviewId,body as any));}));
-  router.get('/workspaces/default', run(async (req, res) => { res.json({ workspace: await repository.create(actor(req), { name: 'Mist 工作区', seed: 'demo' }, true) }); }));
+  router.get('/workspaces/default', run(async (req, res) => { res.json({ workspace: await repository.create(actor(req), { name: '公司业务', seed: actor(req)?.companyId ? 'empty' : 'demo' }, true) }); }));
   router.get('/workspaces', run(async (req, res) => {
     const workspaces = await repository.list(actor(req));
     res.json({ workspaces: isAgentActor(actor(req)) ? workspaces.map((w: { id: string; name: string; revision: number }) => ({ id: w.id, name: w.name, revision: w.revision })) : workspaces });

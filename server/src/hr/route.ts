@@ -1,3 +1,4 @@
+import { companyHrClient } from './companyClient';
 import { Router, Request, Response } from 'express';
 import { createOrganizationDepartment, updateOrganizationDepartment, retireOrganizationDepartment, OrganizationError } from './organizationService';
 import { addExistingTeamMember, listTeamMemberCandidates } from './teamMembershipService';
@@ -31,7 +32,7 @@ function deletionStamp(): bigint {
 
 export function createHRRouter(options: HRRouterOptions) {
   const router = Router();
-  const { prisma } = options;
+  const prisma = companyHrClient(options.prisma);
   const teamShareSvc = createTeamShareService(prisma);
 
   const isAssignableDepartment = async (id: unknown) => {

@@ -1,3 +1,5 @@
+import { CompanyAccessError } from './companyAccess';
+import { runWithCompanyContext } from './requestCompanyContext';
 import type { PrismaClient } from '@prisma/client';
 import type { Request, Response, NextFunction } from 'express';
 import type { TokenPayload } from './service';
@@ -18,6 +20,7 @@ export function createAuthorizationSnapshotGuard(options: {
   apiKeyActors?: ReadonlyMap<string, TokenPayload>;
 }) {
   return async (req: Request, res: Response, next: NextFunction) => {
+    if (/^\/auth\/(login(?:\/mfa)?|logout|companies|switch-company|send-code|register)\/?$/.test(req.path)) return next();
     const jwt = extractActorFromRequest(req);
     const key = req.headers['x-bambook-api-key'] || req.headers['x-api-key'] || req.query.apiKey;
     const bound = !jwt && typeof key === 'string' && options.apiKeys?.has(key)
@@ -30,15 +33,16 @@ export function createAuthorizationSnapshotGuard(options: {
         if (jwt) res.clearCookie('bambook_token', { path: '/' });
         return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '账号已失效，请重新登录。' });
       }
-      const current = await buildLoadedAuthTokenPayload(options.prisma, user);
+      const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null);
       // Refresh account grants without expanding the verified credential's
       // upper bound. The prior actor came from a signed JWT or configured key
       // binding; request body fields never participate in this decision.
       if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
       (req as Request & { actor?: TokenPayload }).actor = current;
       (req as Request & { authSource?: string }).authSource = jwt ? 'user-session' : 'api-key';
-      return next();
+      return runWithCompanyContext(current.companyId ?? null, () => next());
     } catch (error) {
+      if (error instanceof CompanyAccessError) return res.status(error.status).json({ error: error.code, message: error.message });
       logger.warn('[authorization] current permission load failed', {
         userId: prior.userId, error: (error as Error).message,
       });

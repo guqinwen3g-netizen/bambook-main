@@ -3,7 +3,9 @@ import { SYSTEM_ROLE_IDS, systemRoleCode } from '../_shared/rolePermissionMatrix
 
 /** Department eligibility constrains an existing action grant; it never creates one. */
 export function departmentAuthorization(user: any, roleIds: string[], grantedPermissions: string[]) {
-  const businessAttributes = departmentBusinessAttributes(user.primaryDepartment);
+  const companyId = roleIds.find(id => id.includes('@'))?.split('@')[1];
+  const department = !companyId ? user.primaryDepartment : user.roles?.find((r: any) => roleIds.includes(r.roleId) && r.department?.companyId === companyId)?.department ?? (user.primaryDepartment?.companyId === companyId ? user.primaryDepartment : null);
+  const businessAttributes = departmentBusinessAttributes(department);
   // 公司角色 id 带 `@<companyId>` 后缀，按角色码判断是否为老板。
   const globalBusinessScope = roleIds.some(id => systemRoleCode(id) === SYSTEM_ROLE_IDS.SUPER_ADMIN);
   const has = (...attributes: string[]) => globalBusinessScope || attributes.some(attribute => businessAttributes.includes(attribute as any));

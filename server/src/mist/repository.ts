@@ -145,7 +145,7 @@ export class MistRepository {
     const row = await db.mistWorkspace.findFirst({ where: { id } });
     // 公司边界：会话属于某家公司时，只能进入该公司的空间。
     // 即使某账号在另一家公司空间里被列为成员，当前会话也不能跨公司读取。
-    if (row && row.companyId && actor.companyId && row.companyId !== actor.companyId) fail('NOT_FOUND', '工作区不存在或当前账号无权访问', 404);
+    if (row && row.companyId !== (actor.companyId ?? null) && (row.companyId || actor.companyId)) fail('NOT_FOUND', '工作区不存在或当前账号无权访问', 404);
     if (!row || !(isOwner(row, actor) || (!ownerOnly && isMember(row, actor)))) fail('NOT_FOUND', '工作区不存在或当前账号无权访问', 404);
     if(archived(row)&&!allowArchived)fail('NOT_FOUND','工作区已移入回收站，请先恢复',404);
     this.contract.normalizeMistState?.(row.state,this.context(actor));
@@ -233,7 +233,7 @@ export class MistRepository {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) fail('INVALID_INPUT', '工作区编号无效', 400);
     return this.transact(async db => {
       const actor = await this.authorize(db, prior), row: MistWorkspaceRow | null = await db.mistWorkspace.findFirst({ where: { id } });
-      if (row && row.companyId && actor.companyId && row.companyId !== actor.companyId) fail('NOT_FOUND', '工作区不存在或当前账号无权访问', 404);
+      if (row && row.companyId !== (actor.companyId ?? null) && (row.companyId || actor.companyId)) fail('NOT_FOUND', '工作区不存在或当前账号无权访问', 404);
       if (!row || !(isOwner(row, actor) || isMember(row, actor)) || archived(row)) fail('NOT_FOUND', '工作区不存在或当前账号无权访问', 404);
       return { id: row!.id, revision: row!.revision };
     });
@@ -494,7 +494,7 @@ export class MistRepository {
   });}
   async reviewFile(prior:TokenPayload,workspaceId:string,reviewId:string,fileId:string){return this.transact(async db=>{
     const actor=await this.authorize(db,prior),row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});
-    if(row&&row.companyId&&actor.companyId&&row.companyId!==actor.companyId)fail('NOT_FOUND','审批不存在',404);
+    if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批不存在',404);
     if(!row||archived(row))fail('NOT_FOUND','审批不存在',404);
     const task=this.reviews(row.state).find(t=>t.id===reviewId);
     if(!task||(row.ownerId!==actor.userId&&(!task.reviewerIds.includes(actor.userId)||!hasScope(actor,task.requiredPermission as any))))fail('NOT_FOUND','该审批不属于当前账号',404);
@@ -516,7 +516,7 @@ export class MistRepository {
     return this.writeTransact(workspaceId,async db=>{
       const actor=await this.authorize(db,prior);
       await db.$queryRawUnsafe('SELECT "id" FROM "MistWorkspace" WHERE "id" = $1::uuid FOR UPDATE',workspaceId);
-      const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&row.companyId&&actor.companyId&&row.companyId!==actor.companyId)fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);
+      const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);
       const previous=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:input.requestId}}});
       if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','原请求编号用于另一项决定',409);return {receipt:{requestId:previous.requestId,...previous.result},replayed:true};}
       const task=this.reviews(row.state).find(t=>t.id===reviewId);

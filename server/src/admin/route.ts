@@ -223,10 +223,11 @@ export function createAdminRouter(options: AdminRouterOptions) {
         where: { userId: req.params.id, status: 'active' },
         select: { companyId: true },
       });
-      if (!links.length) return next();
+      if (!links.length) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '账号不存在。' });
       if (!links.some((link) => link.companyId === companyId)) {
         return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '账号不存在。' });
       }
+      if (links.length > 1 && req.method !== 'GET' && !req.path.endsWith('/roles') && !req.path.endsWith('/disable-account')) return res.status(403).json({ ok: false, error: 'PLATFORM_ACCOUNT_REQUIRED', message: '跨公司账号的身份资料由本人或平台管理员维护。' });
       return next();
     } catch {
       return res.status(503).json({ ok: false, error: 'COMPANY_CHECK_FAILED', message: '暂时无法核对该账号所属公司，请稍后重试。' });
@@ -260,7 +261,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       : baseWhere;
     const usersRaw = await options.prisma.userAccount.findMany({
       where,
-      include: { roles: { include: { role: true } }, primaryDepartment: true },
+      include: { roles: { ...(companyId ? { where: { role: { companyId } } } : {}), include: { role: true, department: true } }, primaryDepartment: true },
       orderBy: { createdAt: 'desc' },
     });
     const users = usersRaw.filter(u => {
@@ -283,8 +284,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
       status: u.status,
       roles: u.roles.map(ur => ur.role.name),
       roleIds: u.roles.map(ur => ur.roleId),
-      departmentId: u.primaryDeptId,
-      department: u.primaryDepartment?.name || null,
+      departmentId: companyId ? u.roles[0]?.departmentId ?? null : u.primaryDeptId,
+      department: companyId ? (u.roles[0] as any)?.department?.name ?? null : u.primaryDepartment?.name || null,
       metadata: publicAccountMetadata(u.metadata),
       mfaEnabled: (u.metadata as any)?.mfa?.enabled === true,
       lastLoginAt: u.lastLoginAt,
@@ -313,7 +314,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const requestedRoles = [...new Set<string>(Array.isArray(roles) ? roles : (typeof roles === 'string' && roles ? [roles] : []))];
     const resolvedRoles: Array<{ id: string }> = [];
     for (const roleNameOrId of requestedRoles) {
-        const role = await resolveRoleByNameOrId(options.prisma, roleNameOrId);
+        const role = actorCompanyId(req) ? await roleInCompany(req, roleNameOrId) : await resolveRoleByNameOrId(options.prisma, roleNameOrId);
         if (!role) {
           return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: `角色不存在：${roleNameOrId}` });
         }
@@ -452,6 +453,12 @@ export function createAdminRouter(options: AdminRouterOptions) {
   }));
 
   const disableUserAccount = withRouteErrorGuard(async (req: Request, res: Response) => {
+    const companyId = actorCompanyId(req);
+    if (companyId) {
+      if (req.params.id === (req as any).actor?.userId) return res.status(400).json({ ok: false, error: 'SELF_DISABLE', message: '不能停用自己。' });
+      await options.prisma.companyMember.updateMany({ where: { companyId, userId: req.params.id }, data: { status: 'suspended' } });
+      return res.json({ ok: true });
+    }
     if (await rejectIfSuperAdminTarget(req, res, req.params.id)) return;
     const { id } = req.params;
     const actor = (req as any).actor;
@@ -557,7 +564,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     }
     const resolvedApproveRoles: Array<{ id: string }> = [];
     for (const roleNameOrId of finalRoles) {
-      const role = await resolveRoleByNameOrId(options.prisma, roleNameOrId);
+      const role = actorCompanyId(req) ? await roleInCompany(req, roleNameOrId) : await resolveRoleByNameOrId(options.prisma, roleNameOrId);
       if (!role) {
         return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: `角色不存在：${roleNameOrId}` });
       }
@@ -578,7 +585,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       },
     });
 
-    await tx.userRole.deleteMany({ where: { userId: id } });
+    await tx.userRole.deleteMany({ where: { userId: id, ...(actorCompanyId(req) ? { role: { companyId: actorCompanyId(req) } } : {}) } });
     for (const role of resolvedApproveRoles) {
       await tx.userRole.create({
         data: {
@@ -677,6 +684,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
   router.patch('/users/:id/roles', withRouteErrorGuard(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { roles, departmentId } = req.body || {};
+    if (!(await departmentExists(options.prisma, departmentId, actorCompanyId(req)))) return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: '请选择本公司部门。' });
     // 存在性前置：对不存在用户返 200 会静默吞掉前端/调用方的 ID 错误（与 disable/approve/reject 同标准 404）
     const target = await options.prisma.userAccount.findUnique({ where: { id } });
     if (!target) {
@@ -691,7 +699,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
         const resolved: Array<{ id: string; name: string }> = [];
         if (Array.isArray(roles)) {
           for (const roleNameOrId of roles) {
-            const role = await resolveRoleByNameOrId(options.prisma, roleNameOrId);
+            const role = actorCompanyId(req) ? await roleInCompany(req, roleNameOrId) : await resolveRoleByNameOrId(options.prisma, roleNameOrId);
             if (!role) {
               throw new RoleWriteRejectedError(`角色不存在：${roleNameOrId}`, 400, 'INVALID_ROLE');
             }
@@ -701,7 +709,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
             resolved.push(role);
           }
         }
-        await tx.userRole.deleteMany({ where: { userId: id } });
+        await tx.userRole.deleteMany({ where: { userId: id, ...(actorCompanyId(req) ? { role: { companyId: actorCompanyId(req) } } : {}) } });
         for (const role of resolved) {
           await tx.userRole.create({ data: { id: `ur_${id}_${role.id}_${Date.now()}`, userId: id, roleId: role.id, departmentId: departmentId || null } });
         }

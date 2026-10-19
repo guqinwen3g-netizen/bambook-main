@@ -19,7 +19,7 @@ const MAX_TOKEN = 4096;
 export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new Set(MIST_READ_SECTIONS.flatMap(s => s.permissions).filter(p => p.endsWith(':read')))].sort());
 
 export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string };
-export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; sid: string; ceil: string[]; iat: number; exp: number };
+export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number };
 export type AgentDelegationIssue = { token: string; sessionId: string; expiresAt: string; ceiling: string[] };
 
 export function isAgentActor(actor: unknown): actor is AgentActor {
@@ -59,7 +59,7 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     const prior = actor.permissionCeiling;
     const ceil = WORK_ASSISTANT_CEILING.filter(scope => prior === undefined || prior.includes('*') || prior.includes(scope));
     const iat = now();
-    const payload: AgentDelegationPayload = { v: 1, kind: 'mist-agent', sub: actor.userId, sid: randomUUID(), ceil, iat, exp: iat + ttl };
+    const payload: AgentDelegationPayload = { v: 1, kind: 'mist-agent', sub: actor.userId, ...(actor.companyId ? { companyId: actor.companyId } : {}), sid: randomUUID(), ceil, iat, exp: iat + ttl };
     const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
     return { token: `${data}.${signature(data)}`, sessionId: payload.sid, expiresAt: new Date(payload.exp).toISOString(), ceiling: [...ceil] };
   }
@@ -73,6 +73,7 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     let payload: AgentDelegationPayload;
     try { payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')); } catch { deny('工作助手委托格式无效'); }
     if (!payload! || typeof payload! !== 'object' || Array.isArray(payload!) || payload!.v !== 1 || payload!.kind !== 'mist-agent'
+      || (payload!.companyId !== undefined && typeof payload!.companyId !== 'string')
       || typeof payload!.sub !== 'string' || !payload!.sub || payload!.sub.length > 300 || typeof payload!.sid !== 'string' || !payload!.sid
       || !Array.isArray(payload!.ceil) || payload!.ceil.some(scope => typeof scope !== 'string' || !WORK_ASSISTANT_CEILING.includes(scope))
       || !Number.isSafeInteger(payload!.exp) || !Number.isSafeInteger(payload!.iat) || payload!.exp <= payload!.iat
@@ -86,7 +87,7 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     const payload = verify(token);
     const base = await options.resolve(payload.sub);
     if (!base?.userId || base.userId !== payload.sub) deny('工作助手委托对应的账号无效');
-    return { ...base, permissionCeiling: [...payload.ceil], actorKind: 'agent', agentSessionId: payload.sid };
+    return { ...base, ...(payload.companyId ? { companyId: payload.companyId } : {}), permissionCeiling: [...payload.ceil], actorKind: 'agent', agentSessionId: payload.sid };
   }
 
   return { issue, verify, authenticate };
