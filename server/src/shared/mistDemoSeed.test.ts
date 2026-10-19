@@ -32,8 +32,8 @@ describe('演示工作区数据', () => {
     expect(state.letterOfCredits![0]).toMatchObject({ lcNo: 'NDEASESS26L0913', amendments: [{ no: 1 }] });
     for (const i of state.invoices.filter(i => i.code.startsWith('INV-G-'))) expect(i.issuedAt && i.issuedAt < i.due! && i.issuedAt <= '2026-10-18', i.code).toBeTruthy();
     expect(new Set(state.payments.map(p => p.currency)).size).toBeGreaterThan(1);
-    expect(state.platform.pricing.every(p => p.basis.includes('软件演示试算'))).toBe(true);
-    expect(state.payments.every(p => p.ref.includes('软件演示付款记录'))).toBe(true);
+    expect(state.platform.pricing.every(p => p.basis.includes('参考成本') || p.basis.includes('预算参数'))).toBe(true);
+    expect(state.payments.every(p => p.ref.startsWith('PAY-'))).toBe(true);
     expect(new Set(state.orders.map(o => o.state)).size).toBeGreaterThan(2);
     expect(m.quotations.some(q => q.status === 'Accepted') && m.quotations.some(q => q.status === 'Draft')).toBe(true);
     expect(f.shipments[0].state).toBe('departed');
@@ -45,14 +45,15 @@ describe('演示工作区数据', () => {
     expect(['Escalated', 'Open', 'Resolved'].every(st => state.platform.risks.some(r => r.state === st && r.source))).toBe(true);
     expect(m.suppliers.some(x => x.status === 'paused') && m.suppliers.some(x => x.certificates?.some(c => c.validUntil < '2026-10-14')) && m.suppliers.filter(x => x.ratings?.length).length).toBeTruthy();
   });
-  it('示例附件生成为可下载的英文 PDF，并标明演示用途', () => {
+  it('种子附件生成为可下载的英文 PDF，并使用工作区公司抬头', () => {
     const { state } = demo(), files = state.files.filter(isDemoFile);
     expect(files.length).toBeGreaterThanOrEqual(5);
     for (const file of files) {
       const text = Buffer.from(renderDemoFile(state, file)).toString('latin1');
       expect(text.startsWith('%PDF-1.4')).toBe(true);
       expect(text.trimEnd().endsWith('%%EOF')).toBe(true);
-      expect(text).toContain('Bambook demo workspace');
+      expect(text).toContain('Claridge Peak Textile');
+      expect(text).not.toMatch(/demo workspace|not a real commercial document/i);
       expect(text).not.toContain('no longer in this workspace');
       expect(/^[\x09\x0a\x0d\x20-\x7e]*$/.test(text)).toBe(true);
     }

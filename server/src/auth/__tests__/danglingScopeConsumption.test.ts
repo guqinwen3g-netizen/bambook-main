@@ -118,7 +118,6 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'orders:approve:change_qty', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'orders:approve:change_price', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'orders:approve:cancel', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
-  { scope: 'quotations:approve', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'shipments:approve', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'knowledge:approve', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'invoices:approve:writeoff', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
@@ -380,7 +379,6 @@ describe('★ 专项：审批权限码 = UI 能力标签（口径 B1）', () => 
     'orders:approve:change_qty',
     'orders:approve:change_price',
     'orders:approve:cancel',
-    'quotations:approve',
     'shipments:approve',
     'knowledge:approve',
     'invoices:approve:writeoff',
@@ -389,9 +387,9 @@ describe('★ 专项：审批权限码 = UI 能力标签（口径 B1）', () => 
     'vouchers:approve:pay_new_supplier',
   ];
 
-  it('清单为 11 个（防漏列/误删）—— ⚠️ 不含 aftersales:approve（它由 A 组模块按其专项单独钉）；procurement:approve / finance:payment_request:approve 已由 Mist 平台命令门禁消费，见下方专项', () => {
-    expect(UI_LABEL_APPROVE_CODES).toHaveLength(11);
-    expect(new Set(UI_LABEL_APPROVE_CODES).size).toBe(11);
+  it('清单为 10 个（防漏列/误删）—— ⚠️ 不含 aftersales:approve（它由 A 组模块按其专项单独钉）；procurement:approve / finance:payment_request:approve 已由 Mist 平台命令门禁消费，见下方专项', () => {
+    expect(UI_LABEL_APPROVE_CODES).toHaveLength(10);
+    expect(new Set(UI_LABEL_APPROVE_CODES).size).toBe(10);
   });
 
   it.each(UI_LABEL_APPROVE_CODES)('%s 在册且 reason=ui-label-only', (scope) => {
@@ -430,6 +428,7 @@ describe('★ 专项：审批权限码 = UI 能力标签（口径 B1）', () => 
  */
 describe('★ 专项：Mist 平台命令门禁消费的码', () => {
   const GATES: ReadonlyArray<[string, string, string]> = [
+    ['quotations:approve', 'shared/mistMarket.ts', "return 'quotations:approve';"],
     ['procurement:approve', 'shared/mistFulfillment.ts', "return 'procurement:approve';"],
     ['finance:payment_request:approve', 'shared/mistPayables.ts', "approve: 'finance:payment_request:approve'"],
     ['bom:admin', 'shared/mistPlatform.ts', "command.type==='platform.bom.transition'?'bom:admin':'bom:write'"],

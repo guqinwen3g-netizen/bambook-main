@@ -26,6 +26,7 @@
     "seed:base": "tsx scripts/seed-rbac.ts && tsx scripts/seed-datadict.ts && tsx scripts/seed-systemconfig.ts && tsx scripts/seed-sequence.ts && tsx scripts/seed-permission-scopes.ts && tsx scripts/seed-moq-thresholds.ts",
     "seed:dev-roles": "tsx scripts/seed-dev-role-play.ts",
     "seed:company": "tsx scripts/seed-company-sim.ts",
+    "seed:mist-company": "tsx scripts/seed-mist-company-baseline.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:mist": "vitest run src/mist src/shared/mist*.test.ts",
