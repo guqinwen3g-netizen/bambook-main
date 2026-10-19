@@ -38,6 +38,8 @@
 
 日常共享模拟演练：`npm run dev:mist:shared`，本地只启动 Mist 前端（3001），登录、业务 API、附件都连接开发测试服务器，共用一份模拟库。使用开发测试账号登录；服务不可用时直接报错，不会另起本地库。与完整本地模式择一启动，避免争用 3001。破坏性回归仍使用隔离本地库，不能指向共享库执行清空或重置。连接与备份边界见[开发环境说明](../deployment/bambook-development.md#本地前端共享开发模拟库)。
 
+终端网络需要代理时，把现有 `HTTPS_PROXY` / `NO_PROXY` 配置传给共享启动进程；启动检查与两类 API 使用同一连接配置。本地独立模式仍直连本机服务。
+
 ```bash
 # 参考应用（热更新，端口 3130）
 npx vite --config dev-ui-preview/mist-atelier/app/vite.config.ts
