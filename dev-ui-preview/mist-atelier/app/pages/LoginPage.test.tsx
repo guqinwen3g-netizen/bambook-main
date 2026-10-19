@@ -24,9 +24,9 @@ describe('original Mist login with real-session binding', () => {
     expect(host.querySelectorAll('.mist-auth-form .mist-field')).toHaveLength(2);
     expect(host.querySelector<HTMLInputElement>('input[type="email"]')?.value).toBe('');
     const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '忘记密码？')!;
-    expect(reset.disabled).toBe(true); expect(reset.title).toContain('请联系公司管理员');
+    expect(reset.disabled).toBe(false); expect(reset.title).toContain('找回');
     act(() => reset.click()); expect(host.textContent).not.toContain('已发送重置邮件');
-    expect(host.textContent).not.toContain('任意密码'); expect(go).not.toHaveBeenCalled();
+    expect(host.textContent).not.toContain('任意密码'); expect(go).toHaveBeenCalledWith('platform-recovery');
   });
   it('navigates only after real login resolves and forwards the keep-login choice', async () => {
     let resolve!: (value: unknown) => void;
@@ -75,4 +75,21 @@ describe('original Mist login with real-session binding', () => {
   });
 });
 
-it('opens platform recovery from the platform login entry',()=>{const host=render('platform-admin');const reset=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='忘记密码？')!;expect(reset.disabled).toBe(false);act(()=>reset.click());expect(go).toHaveBeenCalledWith('platform-recovery');});
+it('opens recovery from the same login form even on a legacy platform link',()=>{const host=render('platform-admin');const reset=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='忘记密码？')!;expect(reset.disabled).toBe(false);act(()=>reset.click());expect(go).toHaveBeenCalledWith('platform-recovery');});
+
+it.each(['login', 'platform-admin'])('uses the same form at %s and sends company accounts to their workbench', async (view) => {
+  seam.session.login.mockResolvedValue({ id: 'employee', displayName: '同事', roleIds: ['sales'], platformRole: null });
+  const host = render(view); expect(host.querySelector('h2')?.textContent).toBe('登录'); expect(host.textContent).not.toContain('公司账号登录');
+  input('email', 'employee@example.com'); input('password', 'password'); await submit(); expect(go).toHaveBeenCalledWith('cockpit');
+});
+it('recognizes platform identity only from the successful login response', async () => {
+  seam.session.login.mockResolvedValue({ id: 'operator', displayName: '平台人员', roleIds: [], platformRole: 'platform_admin' });
+  render(); input('email', 'operator@example.com'); input('password', 'password'); await submit(); expect(go).toHaveBeenCalledWith('platform-admin');
+});
+it('asks for company selection only after account authentication requires it', async () => {
+  seam.session.login.mockRejectedValueOnce(Object.assign(new Error('选择公司'), { code: 'COMPANY_SELECTION_REQUIRED', companies: [{ id: 'company-b', name: '另一家公司', slug: 'company-b' }] }));
+  seam.session.login.mockResolvedValueOnce({ id: 'employee', roleIds: ['sales'] });
+  render(); expect(host!.textContent).not.toContain('另一家公司'); input('email', 'employee@example.com'); input('password', 'password'); await submit();
+  expect(go).not.toHaveBeenCalled(); const button = [...host!.querySelectorAll('button')].find(value => value.textContent === '另一家公司')!;
+  await act(async () => button.click()); expect(seam.session.login).toHaveBeenLastCalledWith('employee@example.com', 'password', { remember: true, companyId: 'company-b' }); expect(go).toHaveBeenCalledWith('cockpit');
+});
