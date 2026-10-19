@@ -257,7 +257,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
   if (session.status === 'loading') return null;
-  if (session.status === 'anonymous' && session.localMode) return <MistPage width="narrow"><Card><CardHeader title="工作区连接待核对" sub="本地工作身份由本机服务提供，无需输入旧账号密码。"/><div className="mist-card-body"><p>{session.error||'暂时无法读取本地工作身份，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>重新进入本地工作区</Button></div></Card></MistPage>;
+  if (session.status === 'anonymous' && (session.localMode || session.connectionModeUnverified)) return <MistPage width="narrow"><Card><CardHeader title="工作区连接待核对" sub={session.localMode?'本地工作身份由本机服务提供，无需输入旧账号密码。':'暂时无法确认当前工作区，请重新连接后继续。'}/><div className="mist-card-body"><p>{session.error||'暂时无法读取工作区会话，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>{session.localMode?'重新进入本地工作区':'重新连接工作区'}</Button></div></Card></MistPage>;
   if (session.status === 'anonymous' || route.view === 'login') {
     const loginGo = (view: string, id?: string) => {
       if (view === 'cockpit' && route.view !== 'login') go(route.view, route.id, route); else go(view, id);
