@@ -19,6 +19,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 PRIVATE = Path(os.environ.get('CODEX_HOME', Path.home() / '.codex')) / 'private' / 'bambook-dev-direct'
 PUBLIC = 'https://bambook-dev.sylway.cloud'
+PUBLIC_HEADERS = {'Cache-Control': 'no-cache', 'User-Agent': 'Bambook-Development-Delivery/1.0'}
 VERIFY = ['npm', 'run', 'verify:mist']
 CHECKS = [[sys.executable, 'scripts/deploy/test_direct_dev.py'],
           [sys.executable, 'scripts/deploy/test_bambook_dev_receiver.py'], VERIFY]
@@ -163,7 +164,7 @@ def package(revision, tree):
 def public_version(revision):
     for attempt in range(12):
         try:
-            request = urllib.request.Request(PUBLIC + '/mist-version.json?release=' + revision, headers={'Cache-Control': 'no-cache'})
+            request = urllib.request.Request(PUBLIC + '/mist-version.json?release=' + revision, headers=PUBLIC_HEADERS)
             with urllib.request.urlopen(request, timeout=10) as response:
                 value = json.load(response)
             commit = value.get('commit', '')
@@ -178,13 +179,13 @@ def public_version(revision):
 def already_live(revision):
     """Do not reinstall a running release after an uncertain SSH response."""
     try:
-        request = urllib.request.Request(PUBLIC + '/mist-version.json?release=' + revision, headers={'Cache-Control': 'no-cache'})
+        request = urllib.request.Request(PUBLIC + '/mist-version.json?release=' + revision, headers=PUBLIC_HEADERS)
         with urllib.request.urlopen(request, timeout=5) as response:
             version = json.load(response)
         commit = version.get('commit', '')
         if not isinstance(commit, str) or not re.fullmatch(r'[0-9a-f]{7,40}', commit) or not revision.startswith(commit) or version.get('localChanges') != 0:
             return False
-        with urllib.request.urlopen(PUBLIC + '/api/health', timeout=5) as response:
+        with urllib.request.urlopen(urllib.request.Request(PUBLIC + '/api/health', headers=PUBLIC_HEADERS), timeout=5) as response:
             health = json.load(response)
         return health.get('status') == 'ok' and health.get('database') == 'ok' and health.get('mode') != 'local'
     except (OSError, ValueError):
