@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {startMistDevelopment} from './mist-dev.mjs';
+import {startMistDevelopment,startMistSharedDevelopment,mistDevelopmentProxy,MIST_SHARED_DEVELOPMENT_ORIGIN} from './mist-dev.mjs';
 
 function setup(states,frontendError){
   const calls=[];
@@ -29,4 +29,17 @@ test('frontend port conflict closes owned API but leaves a reused API untouched'
   await assert.rejects(startMistDevelopment(own.options),/3001/);assert.deepEqual(own.calls,['api-start','ui-start','api-stop']);
   const reused=setup(['local'],new Error('Port 3001 is already in use'));
   await assert.rejects(startMistDevelopment(reused.options),/3001/);assert.deepEqual(reused.calls,['ui-start']);
+});
+test('shared preview uses the same development origin for authentication, business data and attachments',()=>{
+  const shared=mistDevelopmentProxy(true),local=mistDevelopmentProxy(false);
+  assert.deepEqual(Object.keys(shared),['/api/mist','/api']);
+  for(const p of Object.values(shared)){assert.equal(p.target,MIST_SHARED_DEVELOPMENT_ORIGIN);assert.equal(p.changeOrigin,true);}
+  for(const p of Object.values(local))assert.equal(p.target,'http://127.0.0.1:8082');
+});
+test('shared preview verifies the authenticated development API and only owns its frontend',async()=>{
+  const calls=[];const running=await startMistSharedDevelopment({probe:async()=>{calls.push('shared-probe');return true;},startFrontend:async()=>{calls.push('ui-start');return{close:async()=>calls.push('ui-stop')};}});
+  await running.close();await running.close();assert.equal(running.shared,true);assert.deepEqual(calls,['shared-probe','ui-start','ui-stop']);
+});
+test('unavailable shared API never starts the frontend or silently falls back to a local database',async()=>{
+  let opened=false;await assert.rejects(startMistSharedDevelopment({probe:async()=>false,startFrontend:async()=>{opened=true;}}),/共享开发服务不可用/);assert.equal(opened,false);
 });
