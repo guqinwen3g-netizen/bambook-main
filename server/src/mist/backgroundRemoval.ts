@@ -2,10 +2,11 @@ import {createHash} from 'node:crypto';
 import {createReadStream} from 'node:fs';
 import {stat} from 'node:fs/promises';
 import sharp from 'sharp';
+import {refineAlphaMatte} from './alphaRefine';
 
 type Ort=typeof import('onnxruntime-node');
 type Session=import('onnxruntime-node').InferenceSession;
-const SIZE=1024,MEAN=[.485,.456,.406],STD=[.229,.224,.225];
+const SIZE=1024,WORK_MAX=1600,MATTE_REFINEMENT='matte2',MEAN=[.485,.456,.406],STD=[.229,.224,.225];
 let sessionPromise:Promise<Session|undefined>|undefined,inferenceTail=Promise.resolve(),warned=false;
 const results=new Map<string,Promise<Buffer|undefined>>();
 
@@ -21,16 +22,17 @@ async function session(){
  return sessionPromise;
 }
 function modelType(){return process.env.BAMBOOK_BACKGROUND_REMOVAL_MODEL_TYPE==='isnet'?'isnet':'birefnet';}
-export function imageCutoutVersion(){const value=process.env.BAMBOOK_BACKGROUND_REMOVAL_MODEL_VERSION?.trim();return value&&/^[a-z0-9][a-z0-9._-]{0,79}$/i.test(value)?value:'unconfigured-v1';}
+export function imageCutoutVersion(){const value=process.env.BAMBOOK_BACKGROUND_REMOVAL_MODEL_VERSION?.trim();return (value&&/^[a-z0-9][a-z0-9._-]{0,79}$/i.test(value)?value:'unconfigured-v1')+'.'+MATTE_REFINEMENT;}
 function serial<T>(run:()=>Promise<T>):Promise<T>{const next=inferenceTail.then(run,run);inferenceTail=next.then(()=>undefined,()=>undefined);return next;}
 
 export async function applyAlphaMatte(bytes:Buffer,mask:Uint8Array,maskWidth:number,maskHeight:number):Promise<Buffer|undefined>{
- const original=await sharp(bytes,{limitInputPixels:40_000_000,animated:false}).rotate().ensureAlpha().raw().toBuffer({resolveWithObject:true});
- const resized=await sharp(Buffer.from(mask),{raw:{width:maskWidth,height:maskHeight,channels:1}}).resize(original.info.width,original.info.height,{fit:'fill',kernel:'lanczos3'}).blur(.35).raw().toBuffer({resolveWithObject:true});
- const output=Buffer.from(original.data),count=original.info.width*original.info.height;let foreground=0;
- for(let p=0;p<count;p++){const alpha=Math.round(output[p*4+3]*resized.data[p*resized.info.channels]/255);output[p*4+3]=alpha;if(alpha>10)foreground++;}
+ // 透明派生只用于 ≤960 的预览，精修在 ≤1600 的工作分辨率进行以守住 worker 内存上限。
+ const original=await sharp(bytes,{limitInputPixels:40_000_000,animated:false}).rotate().resize(WORK_MAX,WORK_MAX,{fit:'inside',withoutEnlargement:true}).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+ const {width,height}=original.info,resized=await sharp(Buffer.from(mask),{raw:{width:maskWidth,height:maskHeight,channels:1}}).resize(width,height,{fit:'fill',kernel:'lanczos3'}).blur(.35).extractChannel(0).raw().toBuffer();
+ const refined=refineAlphaMatte(original.data,resized,width,height),count=width*height;let foreground=0;
+ for(let p=0;p<count;p++)if(refined.data[p*4+3]>10)foreground++;
  const coverage=foreground/count;if(coverage<.01||coverage>.98)return undefined;
- return sharp(output,{raw:{width:original.info.width,height:original.info.height,channels:4}}).png().toBuffer();
+ return sharp(refined.data,{raw:{width,height,channels:4}}).png().toBuffer();
 }
 async function infer(bytes:Buffer):Promise<Buffer|undefined>{
  const active=await session();if(!active)return undefined;
