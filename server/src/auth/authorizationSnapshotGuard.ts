@@ -33,7 +33,8 @@ export function createAuthorizationSnapshotGuard(options: {
         if (jwt) res.clearCookie('bambook_token', { path: '/' });
         return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '账号已失效，请重新登录。' });
       }
-      const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null);
+      const platformRequest = /^\/platform(?:\/|$)/.test(req.path) && (user as any).platformRole === 'platform_admin';
+      const current = await buildLoadedAuthTokenPayload(options.prisma, user, platformRequest ? null : prior.companyId ?? null);
       // Refresh account grants without expanding the verified credential's
       // upper bound. The prior actor came from a signed JWT or configured key
       // binding; request body fields never participate in this decision.

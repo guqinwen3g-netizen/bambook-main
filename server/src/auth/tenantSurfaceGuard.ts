@@ -4,6 +4,7 @@ import type { TokenPayload } from './service';
 /** Old normalized-table modules have no tenant ownership: never expose them to company sessions. */
 export function tenantSurfaceGuard(req: Request, res: Response, next: NextFunction) {
   const actor = (req as Request & { actor?: TokenPayload }).actor;
+  if (actor?.platformOnly && !/^\/(auth|platform)(\/|$)/.test(req.path) && req.path !== '/health') return res.status(403).json({ ok: false, error: 'COMPANY_SELECTION_REQUIRED', message: '请先选择公司再进入业务。' });
   if (!actor?.companyId) return next();
   const route = req.path;
   if (/^\/(auth|platform|mist)(\/|$)/.test(route) || route === '/health') return next();
