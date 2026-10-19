@@ -1,3 +1,4 @@
+import { SaasAdminPage } from './pages/SaasAdminPage';
 import React from 'react';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, LogOut, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
 
@@ -50,6 +51,7 @@ import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, dev
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
 
 const PAGES: Record<string, React.FC> = {
+  'platform-admin': SaasAdminPage,
   ...FULFILLMENT_PAGES,...MARKET_PAGES,...PLATFORM_PAGES,
   emails: EmailsPage, cockpit: HomePage, development: DevListPage, 'development/detail': DevDetailPage, 'development/new': DevCreatePage,
   orders: OrderListPage, 'orders/detail': OrderDetailPage, 'orders/new': OrderCreatePage, calendar: CalendarPage, 'payment-vouchers': FinancePage, crm: CustomerPage,
@@ -57,9 +59,9 @@ const PAGES: Record<string, React.FC> = {
   // 设计系统、空/加载/错误样张只在开发构建可达，正式构建不出现在侧栏，也不能经地址打开。
   ...(import.meta.env.DEV ? { states: StatesPage, 'design-system': DesignSystemPage } : {}),
 };
-const LIVE_VIEWS = new Set(['emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
+const LIVE_VIEWS = new Set(['platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
-const LABELS: Record<string, string> = { 'design-system': '设计系统', states: '空 / 加载 / 错误', 'system-settings': '系统设置', settings: '系统设置', 'company-settings': '公司设置', 'workspace-settings': '公司设置', approvals: '审批与放行', search: '搜索结果', notifications: '通知中心' };
+const LABELS: Record<string, string> = { 'platform-admin': '平台管理', 'design-system': '设计系统', states: '空 / 加载 / 错误', 'system-settings': '系统设置', settings: '系统设置', 'company-settings': '公司设置', 'workspace-settings': '公司设置', approvals: '审批与放行', search: '搜索结果', notifications: '通知中心' };
 const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '平台' };
 
 export function readMistRoute(): Route {
@@ -82,13 +84,15 @@ export function writeMistRoute(route: Route) {
 function useSections(): NavSection[] {
   const session = useMistSession();
   return React.useMemo(() => {
-    const modules = getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), canAccessView: session.canAccessView });
+    const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
+    const modules = platformOnly ? [] : getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), canAccessView: session.canAccessView });
     const real = groupPrimaryNavigationModules(modules).map(g => ({
-      id: g.group, label: g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
-      items: g.modules.map(m => ({ id: String(m.view), label: m.productLabel.replace('（开发中）', ''), icon: m.icon })),
+      id: g.group, label: g.label === '平台' ? '公司管理' : g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
+      items: g.modules.map(m => ({ id: String(m.view), label: String(m.view) === 'admin-panel' ? '公司后台' : m.productLabel.replace('（开发中）', ''), icon: m.icon })),
     }));
     const dev = import.meta.env.DEV;
     const items = [
+      ...(session.user?.platformRole === 'platform_admin' ? [{ id: 'platform-admin', label: '平台管理', icon: ShieldCheck }] : []),
       ...(dev ? [{ id: 'design-system', label: '设计系统', icon: Component }, { id: 'states', label: '空 / 加载 / 错误', icon: SquareDashed }] : []),
       ...(dev && !session.localMode ? [{ id: 'login', label: '登录页', icon: KeyRound }] : []),
       ...(session.canAccessView(View.SystemSettings) ? [{ id: 'system-settings', label: '系统设置', icon: Settings2 }] : []),
@@ -120,6 +124,8 @@ function ModuleWorkBar({ view }: { view: string }) {
 }
 const developmentCreateLabel = (section?: string) => DEVELOPMENT_LIST_TABS.find(tab => tab.value === (section === 'fabric' ? 'fabric' : 'garment'))!.create;
 function crumbsFor(route: Route, go: (view: string, id?: string) => void, objectLabel?: string, versionLabel?: string): Crumb[] {
+  if (route.view === 'admin-panel') return [{ label: '公司管理', hideOnMobile: true }, { label: '公司后台' }];
+  if (route.view === 'platform-admin') return [{ label: '平台运营', hideOnMobile: true }, { label: '平台管理' }];
   const base = route.view.split('/')[0], mod = getModuleByView(base as View);
   const label = mod?.productLabel ?? LABELS[base] ?? base;
   const crumbs: Crumb[] = [{ label: mod ? GROUPS[mod.nav.group] : base === 'company-settings' || base === 'workspace-settings' || base === 'approvals' || base === 'notifications' || base === 'search' ? '我的事务' : '设计系统', hideOnMobile: true }];
@@ -133,6 +139,7 @@ function crumbsFor(route: Route, go: (view: string, id?: string) => void, object
 function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: ThemeMode) => void }) {
   const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace();
   const {state} = workspace;
+  const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
   const organization = useOrganizationContext();
   const [organizationOpen, setOrganizationOpen] = React.useState(false);
   const visibleNotifications=visibleMistNotifications(state,view=>session.canAccessView(view as View));
@@ -270,7 +277,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理当前空间；不能为此授予系统设置/后台管理权限。
-  const permitted = (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
+  const permitted = route.view === 'platform-admin' ? session.user?.platformRole === 'platform_admin' : (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
   const Page = session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
     : session.localMode && route.view === 'mes' ? LocalMesPage
     : PAGES[route.view] ?? null;
@@ -280,20 +287,20 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const user = session.user!;
   const workspaceProfileName = state?.settings.profileName?.trim() || '';
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
-  const roles = user.roleLabels?.map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
+  const roles = platformOnly ? '平台管理员' : user.roleLabels?.map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
   return (
     <Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={state?.settings.density||'default'}>
       <MistAppShell collapsed={collapsed} scrollKey={route.view + (route.id ?? '')}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
-          workspace={{ symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, onClick:()=>{setOrganizationOpen(true);organization.retry();} }}
+          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, onClick:()=>{setOrganizationOpen(true);organization.retry();} }}
           account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => setAccount(true) }}
           onSearch={() => setPalette(true)}
-          assistant={{ title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
+          assistant={platformOnly ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
-          sync={{ state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? '需要核对同步状态' : live ? '已保存 · 公司' : '设计组件展示' }}
+          sync={platformOnly ? { state: 'ok', text: '平台运营' } : { state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? '需要核对同步状态' : live ? '已保存 · 公司' : '设计组件展示' }}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
-          extra={<MistReviewButton/>} notifications={{ unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={()=>openAI()} />}
+          extra={platformOnly ? undefined : <MistReviewButton/>} notifications={platformOnly ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={platformOnly ? undefined : ()=>openAI()} />}
       >
         {workspace.pendingCreate && !workspace.saving && <Banner tone="warn" title="历史数据创建结果需要核对" actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>核对创建结果</Button>}>{workspace.pendingCreate.name}：将查询并继续同一次创建。</Banner>}
         {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && <Banner tone="warn" title="上次操作的结果需要核对" actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>核对原请求</Button>}>核对前会保留原请求，避免重复保存。{workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':''}</Banner>}

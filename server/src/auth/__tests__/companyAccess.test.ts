@@ -12,6 +12,7 @@ describe('live company boundary', () => {
   it('rejects old unscoped tokens after migration', async () => { await expect(validateCompanySession(db({ companyId: 'a' }), user, null)).rejects.toMatchObject({ code: 'COMPANY_SELECTION_REQUIRED' }); });
   it('denies unassigned accounts on a SaaS database', async () => { await expect(validateCompanySession(db(null), user, null)).rejects.toMatchObject({ code: 'COMPANY_ACCESS_DENIED' }); });
   it('allows a platform-only identity without company grants', async () => { await expect(validateCompanySession(db(null), { ...user, platformRole: 'platform_admin' }, null)).resolves.toBeUndefined(); });
+  it('rejects mixed platform and company identity', async () => { await expect(validateCompanySession(db({companyId:'a'}), {...user,platformRole:'platform_admin'}, null)).rejects.toMatchObject({code:'PLATFORM_IDENTITY_ONLY'}); });
   it('retains tenant context through the real global authorization guard', async () => {
     const prisma = db({ company: { status: 'active' } });
     prisma.userAccount = { findFirst: vi.fn(async () => user) };

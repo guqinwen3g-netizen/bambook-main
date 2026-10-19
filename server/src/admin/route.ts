@@ -103,7 +103,7 @@ async function departmentExists(prisma: PrismaClient, departmentId: string | nul
 // 不得削弱本防线，故新名与旧名一并保留。
 const SUPER_ADMIN_ROLE_NAMES = new Set(['老板', '超级管理员', 'SuperAdmin', 'super-admin']);
 function isSuperAdminRole(role: { id: string; name: string }): boolean {
-  return role.id === SYSTEM_ROLE_IDS.SUPER_ADMIN || SUPER_ADMIN_ROLE_NAMES.has(role.name);
+  return systemRoleCode(role.id) === SYSTEM_ROLE_IDS.SUPER_ADMIN || SUPER_ADMIN_ROLE_NAMES.has(role.name);
 }
 function actorIsOwner(req: Request): boolean {
   const roles: unknown[] = (req as any).actor?.roles ?? [];
@@ -308,6 +308,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${departmentId}` });
     }
     const existing = await options.prisma.userAccount.findFirst({ where: { email } });
+    if (existing?.platformRole) return res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '平台人员不能作为公司账号使用。' });
     if (existing && existing.status !== 'disabled' && existing.deletedAt === null) {
       return res.status(409).json({ ok: false, error: 'DUPLICATE', message: 'Email already in use.' });
     }

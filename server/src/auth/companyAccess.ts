@@ -9,6 +9,10 @@ export async function validateCompanySession(db: PrismaClient, user: any, compan
   const client = db as any;
   // Older isolated adapters have no tenant model. PostgreSQL always has it.
   if (typeof client.companyMember?.findFirst !== 'function') return;
+  if (user.platformRole === 'platform_admin') {
+    if (companyId || user.roles?.length || await client.companyMember.findFirst({ where: { userId: user.id } })) throw new CompanyAccessError('PLATFORM_IDENTITY_ONLY', '平台人员须使用独立平台账号，不能兼任客户公司成员。');
+    return;
+  }
   if (companyId) {
     const membership = await client.companyMember.findFirst({ where: { userId: user.id, companyId, status: 'active' }, include: { company: true } });
     if (!membership || membership.company?.status !== 'active') throw new CompanyAccessError('COMPANY_ACCESS_DENIED', '公司已停用或你已不属于该公司，请重新登录。');

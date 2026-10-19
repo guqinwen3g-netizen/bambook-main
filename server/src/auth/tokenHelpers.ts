@@ -131,6 +131,7 @@ export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: an
   await validateCompanySession(prisma, user, scopedCompany);
   const payload = buildAuthTokenPayload(!scopedCompany && user.platformRole === 'platform_admin' ? { ...user, roles: [] } : user, scopedCompany);
   user = companyScopedUser(user, scopedCompany);
-  const permissions = await loadEffectivePermissionScopes(prisma, user.id, payload.permissions, scopedCompany);
-  return { ...payload, ...departmentAuthorization(user, payload.roleIds || [], permissions), authorizationLoaded: true };
+  const platformOnly = !scopedCompany && user.platformRole === 'platform_admin';
+  const permissions = platformOnly ? [] : await loadEffectivePermissionScopes(prisma, user.id, payload.permissions, scopedCompany);
+  return { ...payload, ...(platformOnly ? { platformOnly: true } : {}), ...departmentAuthorization(user, payload.roleIds || [], permissions), authorizationLoaded: true };
 }

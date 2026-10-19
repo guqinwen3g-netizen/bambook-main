@@ -311,7 +311,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     mounted.current = true; scopeEpoch.current++; readEpoch.current++; readController.current?.abort();
     snapshot.current = null; latest.current.clear(); wanted.current = undefined; navigating.current = false; mutation.current = null;
     setCurrent(null); setWorkspaces([]); setArchivedWorkspaces([]); setError(''); setSaving(false); publishPending(null); publishCreate(null);
-    if (authority.status === 'authenticated' && authority.userId) {
+    if (authority.status === 'authenticated' && authority.userId && !(session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length)) {
       let restored: Pending | null = null;
       let selected: string | undefined;
       let recoveryError = '';

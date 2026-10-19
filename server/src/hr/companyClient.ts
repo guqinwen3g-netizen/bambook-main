@@ -18,7 +18,7 @@ export function companyHrClient(client: PrismaClient): PrismaClient {
           department: { companyId }, role: { companyId }, userAccount: member,
           userRole: { role: { companyId } }, team: { department: { companyId } },
           teamMember: { team: { department: { companyId } } }, jobPosition: { department: { companyId } },
-          employeeProfile: { user: member },
+          employeeProfile: { AND: [{ user: member }, { OR: [{ position: { department: { companyId } } }, { positionId: null, user: { companyMembers: { none: { companyId: { not: companyId }, status: 'active' } } } }] }] },
         };
         const scope = scopes[String(key)];
         if (!scope) {
@@ -30,6 +30,7 @@ export function companyHrClient(client: PrismaClient): PrismaClient {
           const data = operation === 'upsert' ? args.create : args.data;
           for (const row of Array.isArray(data) ? data : [data]) {
             if (!row) continue;
+            if (key === 'employeeProfile' && row.userId && !row.positionId && await db.companyMember.count({ where: { userId: row.userId, companyId: { not: companyId }, status: 'active' } })) throw new CompanyAccessError('COMPANY_POSITION_REQUIRED', '跨公司账号的员工档案必须指定本公司岗位。');
             if (key === 'department' && ['create', 'createMany', 'upsert'].includes(String(operation))) row.companyId = companyId;
             if (row.companyId && row.companyId !== companyId) throw new CompanyAccessError('NOT_FOUND', '记录不存在。', 404);
             for (const [field, modelName, where] of [
