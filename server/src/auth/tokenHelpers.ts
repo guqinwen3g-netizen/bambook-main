@@ -1,3 +1,4 @@
+import { validateCompanySession } from './companyAccess';
 import { departmentAuthorization } from './departmentAuthorization';
 import { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../agent/types';
@@ -45,6 +46,8 @@ export function collectPermissionScopes(roles: Array<{ role?: { permissions?: Ar
 }
 
 export function serializeAuthUser(user: any, roles: AgentRole[], permissions: string[], departmentIds: string[], extra?: { newRoleIds?: string[]; authorizationLoaded?: true; permissionCeiling?: string[] }) {
+  const assignedCompany = (user.roles || []).find((r: any) => extra?.newRoleIds?.includes(r.roleId))?.role?.companyId;
+  user = companyScopedUser(user, assignedCompany);
   // Display metadata comes only from this user's current loaded role tree.
   const roleLabels = Array.from(new Set(extra?.newRoleIds || [])).flatMap(id => {
     const assigned = (user.roles || []).find((entry: any) => entry.roleId === id);
@@ -56,6 +59,7 @@ export function serializeAuthUser(user: any, roles: AgentRole[], permissions: st
     displayName: user.displayName,
     email: user.email,
     avatarUrl: (user as any).avatarUrl || null,
+    platformRole: user.platformRole ?? null,
     roles,
     roleIds: extra?.newRoleIds || [],
     roleLabels,
@@ -74,10 +78,19 @@ export async function loadUserWithRoles(prisma: PrismaClient, userId: string) {
   return prisma.userAccount.findFirst({
     where: { id: userId, deletedAt: null },
     include: {
-      roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
+      roles: { include: { department: true, role: { include: { permissions: { include: { permission: true } } } } } },
       primaryDepartment: true,
     },
   });
+}
+
+/** Project department metadata from the same company as the loaded role grant. */
+export function companyScopedUser(user: any, companyId?: string | null) {
+  if (!companyId) return user;
+  const roles = (user.roles || []).filter((r: any) => r.role?.companyId === companyId);
+  const department = roles.find((r: any) => r.department?.companyId === companyId)?.department
+    ?? (user.primaryDepartment?.companyId === companyId ? user.primaryDepartment : null);
+  return { ...user, roles, primaryDepartment: department, primaryDeptId: department?.id ?? null };
 }
 
 /** Compatibility projection only; it cannot certify a current DB grant load. */
@@ -115,7 +128,9 @@ export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: an
   }
   // 未显式指定公司时沿用请求级会话公司，避免各处重载把别家公司的角色也算进来。
   const scopedCompany = companyId !== undefined ? companyId : currentCompanyId();
-  const payload = buildAuthTokenPayload(user, scopedCompany);
-  const permissions = await loadEffectivePermissionScopes(prisma, user.id, payload.permissions);
+  await validateCompanySession(prisma, user, scopedCompany);
+  const payload = buildAuthTokenPayload(!scopedCompany && user.platformRole === 'platform_admin' ? { ...user, roles: [] } : user, scopedCompany);
+  user = companyScopedUser(user, scopedCompany);
+  const permissions = await loadEffectivePermissionScopes(prisma, user.id, payload.permissions, scopedCompany);
   return { ...payload, ...departmentAuthorization(user, payload.roleIds || [], permissions), authorizationLoaded: true };
 }

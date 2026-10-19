@@ -105,7 +105,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
               { email: { equals: normalizedEmail, mode: 'insensitive' } },
             ],
       },
-      include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true },
+      include: { roles: { include: { department: true, role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true },
     });
 
     if (!user || !user.passwordHash) {
@@ -204,7 +204,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     });
   }
 
-  const USER_WITH_ROLES = { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true } as const;
+  const USER_WITH_ROLES = { roles: { include: { department: true, role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true } as const;
   const auditId = () => `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const saveMfa = (user: any, mfa: MfaState) => {
     const metadata = (user.metadata && typeof user.metadata === 'object' && !Array.isArray(user.metadata)) ? user.metadata : {};
@@ -448,7 +448,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       const payload = auth.verifyToken(token);
       const user = await options.prisma.userAccount.findUnique({
         where: { id: payload.userId },
-        include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true },
+        include: { roles: { include: { department: true, role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true },
       });
       if (!user || user.status !== 'active' || user.deletedAt != null) {
         res.clearCookie(COOKIE_NAME, { path: '/' });
@@ -589,7 +589,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       const user = await options.prisma.userAccount.update({
         where: { id: payload.userId },
         data,
-        include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true },
+        include: { roles: { include: { department: true, role: { include: { permissions: { include: { permission: true } } } } } }, primaryDepartment: true },
       });
       const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user);
       const { roles, permissions, departmentIds, roleIds: newRoleIds } = tokenPayload;

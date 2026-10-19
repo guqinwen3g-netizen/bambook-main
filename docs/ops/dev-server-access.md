@@ -64,3 +64,11 @@ sudo cat /srv/bambook-dev/shared/test-accounts.txt   # 7 个测试账号（仅�
 ## 撤销 / 轮换
 
 在运维通道执行：删除对应 `authorized_keys` 行（或 `sudo userdel -r bambook-ops`、`sudo rm /etc/sudoers.d/90-bambook-ops`），再在 GitHub 仓库 Settings → Secrets and variables → Actions 中更新或删除对应 secret。用户的腾讯云控制台始终可以独立登录和重置，不依赖这些钥匙。
+
+## SaaS 迁移与隔离（2026-10-19）
+
+公司是租户边界，岗位不能跨公司累加；旧无公司令牌在账号归属公司后须重新登录。公司停用、成员退出即时撤销访问。全局认证刷新、Mist 仓储和工作助手委托均保留公司上下文，组织及个人补充权限按公司读取。公司管理员不能管理平台级连接或修改别家公司角色。未租户化的旧规范化业务接口对公司会话返回 `TENANT_ROUTE_UNAVAILABLE`，日常业务使用 Mist 接口；不能据此宣称旧接口已支持 SaaS。
+
+迁移顺序：备份并校验 → 新增表/列及应用数据库账号授权 → 部署兼容代码 → `migrate-company-tenancy.ts --dry-run` → 执行迁移 → 对比工作区业务状态指纹及岗位登录。迁移包含系统及自定义角色、组织、成员和个人补充授权，重复执行不重复建数据。迁移后不要回退到不认识公司角色的旧代码。
+
+跨公司 HTTP 回归位于 `server/src/auth/__tests__/companyIsolation.pg.test.ts`，使用 `MIST_PG_CONFLICT_TEST_URL` 指向独立验收 PostgreSQL 库；覆盖共用账号、伪造范围、读写、附件、审批、成员撤销、平台边界和组织权限。不得指向共享开发业务库运行该测试。

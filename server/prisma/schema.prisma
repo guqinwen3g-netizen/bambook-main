@@ -8518,6 +8518,9 @@ model OrderInternalTransfer {
 /// 设计真源：HR模块概述.md §10.6 / 薪酬与工资条.md §10
 /// SuperAdmin 可通过此表给指定人员追加敏感 scope（如 hr:salary:read）
 model UserPermissionOverrides {
+  companyId String? @db.Uuid
+
+  @@index([companyId])
   id     String @id // 格式：UPO__${shortId}
   userId String // 被授权用户 userId
   scope  String // 权限 scope（如 'hr:salary:read' / 'sensitive:salary' / 'settings:moq:write'）
