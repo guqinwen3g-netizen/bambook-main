@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /**
  * 风险管理与合规：预警只从真实记录推出、回到原记录处置；登记后单一负责人推进 接手 → 处置方案 → 审批申请 → 关闭回读。
  * 风险分级权限：持风险写权限者不限来源；业务员只处理本人负责的客户 / 订单上的风险（服务端同口径核验），可直接关闭提示 / 警告；
@@ -39,7 +40,7 @@ export function openRiskSource(go: Go, kind: RiskSourceKind, id: string) {
 
 export function RisksPage() {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
-  const day = platformBusinessDate(new Date());
+  const day = platformBusinessDate(businessNow());
   const risks = state?.platform?.risks || [];
   const signals = React.useMemo(() => riskSignals(state, day), [state, day]);
   const openByKey = new Map(risks.filter(r => r.signalKey && r.state !== 'Resolved').map(r => [r.signalKey!, r]));

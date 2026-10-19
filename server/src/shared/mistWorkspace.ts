@@ -1,3 +1,4 @@
+import type {MistBusinessClock} from './mistBusinessClock';
 import{stableJson}from'./stableJson';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import {applyOpeningCommand,mistPayerMatchesInvoice,openingCommandPermission,type OpeningCommand} from './mistOpeningBalance';
@@ -37,7 +38,7 @@ export type MistTone = 'neutral' | 'accent' | 'ok' | 'warn' | 'bad' | 'ai';
 export type MistImage = 'coat' | 'blazer' | 'suit' | 'clay';
 export type MistBusinessNumberPrefix = 'CLM' | 'RT' | 'PV';
 export type MistContext = {
-  id: () => string; now: string; actorName: string; actorId?: string;
+  id: () => string; now: string; actorName: string; actorId?: string; auditNow?: string;
   /** 服务端从实时读投影生成，不能由命令 payload 扩大；不重构共享通知的数据模型。 */
   visibleNotificationIds?: string[];
   /** 服务端按本次执行账号的实时有效权限生成；领域处理内二次校验用，缺省视为无权（失败关闭）。 */
@@ -246,7 +247,7 @@ export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: stri
 export type MistNotification = { id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
 export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget };
 export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAccount:string;swift:string;defaultCurrency:string};
-export type MistSettings = { companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示工作区：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
+export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示工作区：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
 export type MistState = {
   orderFunding?:OrderFundingState;
   payables?:PayablesState;
@@ -330,7 +331,7 @@ export type MistCommand = FulfillmentCommand | MarketCommand | PlatformCommand |
   | { type: 'member.groups.set'; payload: { userId: string; groups: Array<'fabric' | 'garment'> } }
   | { type: 'contact.save'; payload: { id?: string; customerId: string; name: string; role: string; email: string; phone: string } }
   | { type: 'contact.delete'; payload: { id: string } }
-  | { type: 'settings.update'; payload: Partial<Omit<MistSettings,'companyProfile'>> & { companyProfile?: Partial<MistCompanyProfile> } }
+  | { type: 'settings.update'; payload: Partial<Omit<MistSettings,'companyProfile'|'businessClock'>> & { companyProfile?: Partial<MistCompanyProfile> } }
   | { type: 'notification.read'; payload: { id: string } }
   | { type: 'notification.readAll'; payload: Record<string, never> }
   | { type: 'task.complete'; payload: { id: string; done: boolean } }
@@ -485,7 +486,7 @@ function files(state: MistState, ids: string[]) {
   return unique;
 }
 function event(state: MistState, context: MistContext, entityType: string, entityId: string, message: string, target?: MistTarget, category:NonNullable<MistNotification['category']>='general') {
-  state.events.unshift({id:context.id(),entityType,entityId,actor:context.actorName,at:context.now,text:message,fileIds:[]});
+  state.events.unshift({id:context.id(),entityType,entityId,actor:context.actorName,at:context.auditNow ?? context.now,text:message,fileIds:[]});
   if (target) state.notifications.unshift({id:context.id(),title:message,detail:context.actorName,at:context.now,readAt:null,target,category});
 }
 /** BB-DEV-4：按当前工厂任务冻结通知单快照（仓储层渲染 PDF 前调用，命令内再次核对）。payload 只能是 devId + versionId。 */
@@ -1333,6 +1334,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'contact.delete': {const c=find(state.contacts,p.id,'联系人');state.contacts=state.contacts.filter(x=>x.id!==c.id);event(state,context,'customer',c.customerId,'删除联系人 '+c.name);result={id:c.id};break;}
     case 'settings.update': {
+      if(Object.prototype.hasOwnProperty.call(p,'businessClock'))throw new MistCommandError('VALIDATION','业务时钟不能由公司设置修改');
       const beforeSettings=JSON.stringify(state.settings);
       const patch=p;
       if(patch.companyProfile!==undefined){

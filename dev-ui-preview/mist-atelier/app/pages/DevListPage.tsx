@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** T2: original list/preview and board compositions, using the shared Mist workspace. */
 import React from 'react';
 import {developmentDomain,developmentInitiator,developmentInitiatorLabel} from '../../../../server/src/shared/mistDevelopmentDomain';
@@ -20,13 +21,13 @@ export function developmentCsv(rows:CsvDev[]):string {
 }
 function downloadDevelopmentCsv(rows:CsvDev[],label='开发案'){const url=URL.createObjectURL(new Blob([developmentCsv(rows)],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`Bambook-${label}案.csv`;document.body.append(link);link.click();link.remove();URL.revokeObjectURL(url);}
 const shortDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/.test(value)?value.slice(5).replace('-','/'):value||'未定';
-export function developmentDueDays(value:string,now=new Date()):number|null {
+export function developmentDueDays(value:string,now=businessNow()):number|null {
   const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(value);if(!match)return null;
   const [year,month,day]=match.slice(1).map(Number),date=new Date(Date.UTC(year,month-1,day));
   if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return null;
   return Math.round((date.getTime()-Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()))/86_400_000);
 }
-export function developmentDueText(value:string,now=new Date()) {const days=developmentDueDays(value,now);return days===null?'日期待确认':days===0?'今天':days>0?`${days} 天后`:`${-days} 天前`;}
+export function developmentDueText(value:string,now=businessNow()) {const days=developmentDueDays(value,now);return days===null?'日期待确认':days===0?'今天':days>0?`${days} 天后`:`${-days} 天前`;}
 const late=(value:string)=>{const days=developmentDueDays(value);return days!==null&&days<0;};
 /** 三个页签的数量与各自未筛选列表一致：开发案按保存的业务线计数（草稿单独以「草稿 N」显示），寻样按寻样任务计数。 */
 export function developmentTabCounts(devs:ReadonlyArray<Pick<MistDev,'values'>>,drafts:ReadonlyArray<{values:MistDev['values']}>,fabrics:ReadonlyArray<unknown>):Record<DevelopmentListTab,number>&{drafts:Record<'garment'|'fabric',number>} {

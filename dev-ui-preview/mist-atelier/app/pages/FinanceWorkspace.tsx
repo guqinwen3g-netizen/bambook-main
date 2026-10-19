@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** Four finance entrances. Only existing workspace facts are projected; unavailable accounting capabilities stay explicit. */
 import React from 'react';
 import { ArrowDownLeft, ArrowUpRight, Landmark, ReceiptText } from 'lucide-react';
@@ -26,7 +27,7 @@ const totalsText = (totals: ReturnType<typeof financeCurrencyTotals>) => totals.
 export function FinanceEntrances({ state, area, onChange }: { state: MistState | null; area: FinanceArea; onChange: (area: FinanceArea) => void }) {
   const open = financeCurrencyTotals((state?.invoices || []).filter(i => isActiveMistInvoice(i) && i.open > 0).map(i => ({ currency: i.currency, amount: i.open })));
   const unallocated = financeCurrencyTotals((state?.receipts || []).filter(r => r.remaining > 0).map(r => ({ currency: r.currency, amount: r.remaining })));
-  const payable = financeCurrencyTotals(state ? supplierPayableSummary(state, platformBusinessDate(new Date())).filter(r => r.open > 0).map(r => ({ currency: r.currency, amount: r.open })) : []);
+  const payable = financeCurrencyTotals(state ? supplierPayableSummary(state, platformBusinessDate(businessNow())).filter(r => r.open > 0).map(r => ({ currency: r.currency, amount: r.open })) : []);
   const bank = state ? mistBankAccountBalances(state) : null, balances = financeCurrencyTotals((bank?.accounts || []).map(a => ({ currency: a.account.currency, amount: a.balance })));
   const unassigned = bank ? bank.unassigned.receipts + bank.unassigned.payments : 0;
   const amount = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

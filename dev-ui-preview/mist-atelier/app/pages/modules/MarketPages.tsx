@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 import {QuotationHistoryPage} from './QuotationHistoryPage';
 import { BaseDataImportButton } from './BaseDataImport';
 import {QuotationFeedbackPage} from './QuotationFeedbackPage';
@@ -53,7 +54,16 @@ function Attachments({kind,row,locked=false}:{kind:AttachmentKind;row:{id:string
   {!locked&&<UploadZone title={op.busy?'附件处理中':'选择实际文件上传'} onFiles={files=>void op.execute(async()=>{const next=[...ids];for(const file of files){const uploaded=await w.uploadFile(file);next.push(uploaded.id);setStaged(current=>[...new Set([...current,uploaded.id])]);}await save(next);})}/>}
  </CardBody></Card>;
 }
-function ProductImage({row}:{row:MarketProduct}){const {file,src}=useProductImage(row);return src&&file?<ObjectStage src={src} alt={row.name} caption={file.name}/>:null;}
+function ProductImage({row}:{row:MarketProduct}) {
+ const [selected,setSelected]=React.useState<string>();
+ React.useEffect(()=>setSelected(undefined),[row.id]);
+ const {file,src,images,failed,retry}=useProductImage(row,'display',selected);
+ if(!images.length)return null;
+ return <section aria-label="产品图片" className="mist-col">
+  {src&&file?<ObjectStage src={src} alt={row.name} caption={file.name}/>:failed?<Banner tone="bad" title="图片未能加载"><Button onClick={retry}>重试</Button></Banner>:<p className="mist-note" role="status">正在读取图片…</p>}
+  {images.length>1&&<div className="mist-product-gallery" role="group" aria-label="选择产品图片">{images.map((image,index)=><Button key={image.id} size="sm" aria-pressed={image.id===file?.id} onClick={()=>setSelected(image.id)}>{index+1} · {image.name}</Button>)}</div>}
+ </section>;
+}
 
 function ProductLinks({kind,row,canWrite}:{kind:'trend'|'campaign'|'lookbook';row:MarketTrend|MarketCampaign|MarketLookbook;canWrite:boolean}){
  const w=useMarket(),op=useOperation(),[open,setOpen]=useRouteDraft(false),[selected,setSelected]=useRouteDraft<string[]>(()=>[...row.productIds]);
@@ -70,7 +80,7 @@ function approvalHistory(q:MarketQuotation){return q.approvalHistory?.length?<Ca
 
 function productInput(row:MarketProduct){const {id,createdAt,updatedAt,status,...input}=row;return input;}
 function productSupplierOptions(suppliers:MarketSupplier[],currentId?:string){
- const day=supplierBusinessDay(new Date());
+ const day=supplierBusinessDay(businessNow());
  return suppliers.filter(s=>s.id===currentId||supplierStatusOn(s,day)==='active').map(s=>{
   const reason=supplierUnavailableReason(s,day);
   return {value:s.id,label:reason?`${s.name} · 原供应商（${reason}）`:s.name};
@@ -89,7 +99,7 @@ function leadInput(w:ReturnType<typeof useMarket>,source:'campaign'|'show',paren
 function LeadList({source,parentId,onBack}:{source:'campaign'|'show';parentId:string;onBack:()=>void}){
  const w=useMarket(),[editor,setEditor]=useRouteDraft<ModuleEditorSpec|null>(null),[dialog,setDialog]=useRouteDraft<ModuleEditorSpec|null>(null);
  const can=w.session.hasPermission(source==='show'?'seasons:write':'marketing:write'),canCrm=w.session.hasPermission('relations:write');
- const day=marketBusinessDate(new Date()),rows=w.market.leads.filter(l=>l.source===source&&l.parentId===parentId).sort((a,b)=>Number(leadOverdue(b,day))-Number(leadOverdue(a,day))||a.followUpDate.localeCompare(b.followUpDate));
+ const day=marketBusinessDate(businessNow()),rows=w.market.leads.filter(l=>l.source===source&&l.parentId===parentId).sort((a,b)=>Number(leadOverdue(b,day))-Number(leadOverdue(a,day))||a.followUpDate.localeCompare(b.followUpDate));
  const parent=source==='campaign'?w.market.campaigns.find(x=>x.id===parentId):w.market.shows.find(x=>x.id===parentId);
  const convert=(r:MarketLead):ModuleEditorSpec=>{
   const same=w.state?.customers.find(c=>c.name.trim().toLowerCase()===r.company.trim().toLowerCase());

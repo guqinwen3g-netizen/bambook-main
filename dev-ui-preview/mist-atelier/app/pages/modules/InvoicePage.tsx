@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** Finance reads existing receivables; CI creation belongs to the source business, never this ledger. */
 import { BaseDataImportButton } from './BaseDataImport';
 import { AccessHiddenNotice } from '../AccessHiddenNotice';
@@ -48,7 +49,7 @@ export function invoiceFinancialFacts(state: MistState | null, row: InvoiceLedge
   return { allocations, credits, cash, credit, unexplained: row.draft || row.state === 'void' ? 0 : (Math.round(row.amount * 100) - Math.round(cash * 100) - Math.round(credit * 100) - Math.round(row.open * 100)) / 100 };
 }
 const PROMISE_LABEL = { pending: '待兑现', kept: '已兑现', broken: '承诺未兑现' } as const;
-const localNow = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
+const localNow = () => { const d = businessNow(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
 export function invoiceCustomerId(state: MistState | null, row: Pick<MistInvoice, 'orderId' | 'devId' | 'customerId'>) { return row.customerId ? row.customerId : row.devId ? state?.devs.find(d => d.id === row.devId)?.customerId : state?.orders.find(o => o.id === row.orderId)?.customerId; }
 /** 催收摘要（列表用）：已催次数与最近承诺。 */
 export function collectionSummary(state: MistState | null, row: InvoiceLedgerRow, today: string) {
@@ -72,7 +73,7 @@ export function InvoicePage() {
   const shown = rows.filter(r => { const a = invoiceAge(r.due, today), source = invoiceSource(w.state, r), order = w.state?.orders.find(o => o.id === r.orderId); return (!route.customerId || order?.customerId === route.customerId) && (currency === 'all' || r.currency === currency) && (status === 'all' || status === 'overdue' ? status !== 'overdue' || r.state === 'open' && (a.days || 0) > 0 : r.state === status) && (age === 'all' || r.state === 'open' && a.group === age) && (!query.trim() || `${r.code} ${r.order} ${r.customer} ${r.currency} ${source.document?.number || ''}`.toLowerCase().includes(query.trim().toLowerCase())); }).sort((a, b) => Number(a.state !== 'pending') - Number(b.state !== 'pending') || Number(a.state !== 'open') - Number(b.state !== 'open') || (a.due || '9999').localeCompare(b.due || '9999') || a.code.localeCompare(b.code));
   const current = rows.find(r => r.id === selected), missing = !!selected && !current && !w.loading;
   const pendingRows = rows.filter(r => r.state === 'pending'), open = rows.filter(r => r.state === 'open'), overdue = open.filter(r => (invoiceAge(r.due, today).days || 0) > 0), totals = financeCurrencyTotals(open.map(r => ({ currency: r.currency, amount: r.open }))), overdueTotals = financeCurrencyTotals(overdue.map(r => ({ currency: r.currency, amount: r.open })));
-  const payableOpen = w.state ? supplierPayableSummary(w.state, platformBusinessDate(new Date())).filter(r => r.open > 0) : [];
+  const payableOpen = w.state ? supplierPayableSummary(w.state, platformBusinessDate(businessNow())).filter(r => r.open > 0) : [];
   const payableTotals = financeCurrencyTotals(payableOpen.map(r => ({ currency: r.currency, amount: r.open })));
   const totalsText = (values: typeof totals) => values.map(t => money(t.amount, t.currency)).join(' · ') || '暂无未结金额';
   const listContext={...(route.section?{section:route.section}:{}),...(route.customerId?{customerId:route.customerId}:{})};

@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** T8 生产看板：沿用原 Mist 卡片和布局，拖动保存到共享工作空间。 */
 import React from 'react';
 import { AlertTriangle, CalendarRange, Factory } from 'lucide-react';
@@ -15,7 +16,7 @@ import { breakdownSizeTotals, type OrderLineBreakdown } from '../../../../server
 
 export function parseProductionSizes(value:string):FulfillmentSizeQuantity[] { if(!value.trim())return []; return value.split(/\n+/).map(line=>{ const match=line.trim().match(/^(.+?)[:：]\s*(\d+(?:\.\d{1,4})?)$/);if(!match)throw new Error('尺码数量请逐行填写，例如 M:10');return {size:match[1].trim(),quantity:Number(match[2])}; }); }
 export type ProductionRange = 'week' | 'month' | 'all';
-export function productionWindow(range: ProductionRange, now = new Date(), items: Pick<MistProduction,'startDate'|'due'>[] = []): {start:Date;end:Date} {
+export function productionWindow(range: ProductionRange, now = businessNow(), items: Pick<MistProduction,'startDate'|'due'>[] = []): {start:Date;end:Date} {
   if (range === 'all') {
     const dates = items.flatMap(item => [item.startDate ? mistDate(item.startDate) : null, mistDate(item.due)]).filter((date):date is Date=>!!date);
     if (dates.length) {
@@ -48,7 +49,7 @@ export function ProductionPage() {
   const sizesText=(sizes:FulfillmentSizeQuantity[])=>sizes.map(size=>`${size.size}:${size.quantity}`).join('\n');
   const openPlan=()=>selected&&setOperation({title:'登记生产分支尺码',fields:[{key:'sizes',label:'实际生产尺码与计划数量（每行 尺码:数量）',type:'textarea',required:true}],initialValues:{sizes:sizesText(fact?.sizes?.length?fact.sizes:breakdownSizeTotals((state?.orderLines.find(line=>line.id===selected.lineId) as {breakdown?:OrderLineBreakdown}|undefined)?.breakdown))},submit:values=>run({type:'fulfillment.production.plan',payload:{productionId:selected.id,sizes:parseProductionSizes(String(values.sizes||''))}})});
   const openRelease=()=>selected&&setOperation({title:selectedDomain==='fabric'?'业务确认继续大货':'业务确认开产放行',fields:[{key:'note',label:state?.orders.find(order=>order.id===selected.orderId)?.type==='fabric'?'合同、先锋样与继续大货核对依据':'合同、产前样与开产核对依据',type:'textarea',required:true}],initialValues:{note:''},submit:values=>run({type:'fulfillment.production.release',payload:{productionId:selected.id,note:String(values.note||'')}})});
-  const openComplete=()=>selected&&setOperation({title:'登记最终实际完工',fields:[{key:'quantity',label:'最终实际完工数量',type:'number',required:true,min:0,step:'0.0001'},...(selectedDomain==='garment'?[{key:'sizes',label:'各实际尺码数量（每行 尺码:数量）',type:'textarea' as const,required:true}]:[]),{key:'date',label:'实际完工日',type:'date',required:true},{key:'evidence',label:'最终点数及完工依据',type:'textarea',required:true}],initialValues:{quantity:'',sizes:'',date:new Date().toISOString().slice(0,10),evidence:''},submit:values=>run({type:'fulfillment.production.complete',payload:{productionId:selected.id,quantity:Number(values.quantity),sizeQuantities:parseProductionSizes(String(values.sizes||'')),date:String(values.date||''),evidence:String(values.evidence||''),fileIds:[]}})});
+  const openComplete=()=>selected&&setOperation({title:'登记最终实际完工',fields:[{key:'quantity',label:'最终实际完工数量',type:'number',required:true,min:0,step:'0.0001'},...(selectedDomain==='garment'?[{key:'sizes',label:'各实际尺码数量（每行 尺码:数量）',type:'textarea' as const,required:true}]:[]),{key:'date',label:'实际完工日',type:'date',required:true},{key:'evidence',label:'最终点数及完工依据',type:'textarea',required:true}],initialValues:{quantity:'',sizes:'',date:businessNow().toISOString().slice(0,10),evidence:''},submit:values=>run({type:'fulfillment.production.complete',payload:{productionId:selected.id,quantity:Number(values.quantity),sizeQuantities:parseProductionSizes(String(values.sizes||'')),date:String(values.date||''),evidence:String(values.evidence||''),fileIds:[]}})});
   const openAccept=()=>selected&&setOperation({title:'登记客户接受数量差异',fields:[{key:'note',label:'客户明确接受最终数量的依据',type:'textarea',required:true}],initialValues:{note:''},submit:values=>run({type:'fulfillment.production.acceptCompletion',payload:{productionId:selected.id,note:String(values.note||'')}})});
   const gate=state&&selected?productionReleaseGate(state,selected):[],gateBlocked=gate.find(item=>!item.ok),nok=state&&selected?productionNok(state,selected):undefined;
   const openHold=()=>selected&&setOperation({title:'异常暂停生产',description:`${selected.code} · 暂停期间不能推进进度、登记完工、出运或加工收货；QC 仍可检查。`,fields:[{key:'category',label:'暂停类别',type:'select',required:true,options:Object.entries(PRODUCTION_HOLD_CATEGORIES).map(([value,label])=>({value,label}))},{key:'reason',label:'暂停原因',type:'textarea',required:true}],initialValues:{category:'quality',reason:''},submitLabel:'确认暂停',submit:values=>run({type:'fulfillment.production.hold',payload:{productionId:selected.id,category:String(values.category) as keyof typeof PRODUCTION_HOLD_CATEGORIES,reason:String(values.reason||'').trim()}})});
@@ -60,7 +61,7 @@ export function ProductionPage() {
   React.useEffect(() => { setSelectedId(route.productionId ?? null); if(route.productionId){setRange('all');setOrderId('all');setQ('');} }, [route.productionId]);
   React.useEffect(() => { if (selected) setDraft({ pct: selected.pct, risk: selected.risk ?? '', note: '', startDate: selected.startDate ?? '', due: selected.due }); setFailure(''); }, [selected?.id]);
   const matching = items.filter(item => !(orderId !== 'all' && item.orderId !== orderId || q && !`${item.name} ${item.code} ${item.factory} ${item.order}`.toLowerCase().includes(q.toLowerCase())));
-  const window = productionWindow(range,new Date(),matching);
+  const window = productionWindow(range,businessNow(),matching);
   const shown = matching.filter(item => {
     if(range==='all')return true;
     const due = mistDate(item.due), start = item.startDate ? mistDate(item.startDate) : null;

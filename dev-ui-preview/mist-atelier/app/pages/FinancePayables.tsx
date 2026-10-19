@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** 应付待办：供应商票据 → 应付余额 → 付款申请（主管审批）→ 实际付款与多票分配。只用已登记事实，不用合同金额猜应付。
  *  预付款：财务按合同登记预付计划 → 申请 → 主管审批 → 实付；预付挂在合同上等结算抵扣。登记错误由财务冲回，原记录保留。 */
 import { BaseDataImportButton } from './modules/BaseDataImport';
@@ -23,7 +24,7 @@ const STATUS: Record<PayableBillView['status'], { tone: Tone; label: string }> =
 const KIND = { material: '采购', finished: '成品采购', processing: '委外加工' } as const;
 export const apMoney = (amount: number, currency: string) => `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 const cents = (value: string) => { const n = Number(value); return value.trim() && Number.isFinite(n) ? Math.round(n * 100) : NaN; };
-const today = () => platformBusinessDate(new Date());
+const today = () => platformBusinessDate(businessNow());
 const fmtDay = (at?: string) => at ? platformBusinessDate(at) : '';
 
 /** 供应商下拉：来自已批准合同或已登记票据，按供应商标识去重。 */

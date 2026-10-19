@@ -1,3 +1,4 @@
+import {businessNow} from './runtime/businessClock';
 import { AccountAccessPage } from './pages/AccountAccessPage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { SaasAdminPage } from './pages/SaasAdminPage';
@@ -105,7 +106,7 @@ function useSections(): NavSection[] {
 /** 侧栏数字、模块页「待我处理」、首页合计共用同一口径（见 runtime/workQueue）。 */
 function useMyWorkOptions(): MistWorkOptions {
   const session = useMistSession(), { workspace } = useMistWorkspace(), reviews = useOptionalMistReviews();
-  return { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today: platformBusinessDate(new Date()), workspaceId: workspace?.id };
+  return { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today: platformBusinessDate(businessNow()), workspaceId: workspace?.id };
 }
 function CountedSidebar({ sections, ...rest }: React.ComponentProps<typeof MistSidebarPresentation>) {
   const { state } = useMistWorkspace(), counts = mistNavCounts(state, useMyWorkOptions());
@@ -114,7 +115,7 @@ function CountedSidebar({ sections, ...rest }: React.ComponentProps<typeof MistS
 }
 /** 模块首页顶部：本模块等我处理的事项（条数与侧栏数字一致），展开后可直接打开原业务。 */
 function ModuleWorkBar({ view }: { view: string }) {
-  const { state } = useMistWorkspace(), { go } = useNav(), [open, setOpen] = React.useState(false), today = platformBusinessDate(new Date());
+  const { state } = useMistWorkspace(), { go } = useNav(), [open, setOpen] = React.useState(false), today = platformBusinessDate(businessNow());
   const module = mistWorkModule(view), items = mistMyWork(state, useMyWorkOptions()).filter(item => item.module === module);
   React.useEffect(() => setOpen(false), [module]);
   if (!items.length || module === 'cockpit') return null;
@@ -145,7 +146,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const organization = useOrganizationContext();
   const [organizationOpen, setOrganizationOpen] = React.useState(false);
   const visibleNotifications=visibleMistNotifications(state,view=>session.canAccessView(view as View));
-  const dailyDigest=mistDailyDigest(state,platformBusinessDate(new Date()),view=>session.canAccessView(view as View));
+  const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
   const [collapsed, setCollapsed] = React.useState(false);
@@ -218,7 +219,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const overview = (): ChatMessage => {
     if (!state) return {role:'assistant',content:'公司数据尚未读取，请稍后再试。'};
     const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
-    const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(new Date()));
+    const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(businessNow()));
     return {role:'assistant',content:<div><p>当前公司有 {visibleDevs.length} 个可见开发案、{visibleOrders.length} 张订单；{visibleTasks.filter(t=>!t.done).length} 项待办未完成，{late.length} 项生产已过交期。</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}<p>以上为本地记录查询，未执行修改。发送问题时，仅提供你选中的来源及已授权模块的数量概况。</p></div>,sources:['当前公司 · 版本 '+workspace.workspace?.revision],actions:<><Button disabled={!session.hasPermission('ai:chat')} onClick={()=>go('assistant')}>进入完整助手</Button>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{aiUseRouteSource?'取消引用：':'引用当前来源：'}{currentAiSource.label}</Button>:<span className="mist-note">当前页面没有可引用的订单、发票或风险记录。</span>}</>};
   };
   const send = async (question:string,retrySources?:string[]) => {

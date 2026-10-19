@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 客户对账单：按客户生成截至今天的未结项对账单（服务端渲染归档，SOA 编号只追加），下载 / 打开原件。不记录发送状态。 */
 import React from 'react';
 import { Download, ExternalLink, FileText } from 'lucide-react';
@@ -16,7 +17,7 @@ export function statementCustomers(state: MistState | null, today: string) {
 
 export function CustomerStatementCard({ customerId }: { customerId?: string }) {
   const w = useMistWorkspace(), session = useMistSession(), toast = useToast(), state = w.state;
-  const today = platformBusinessDate(new Date()), customers = statementCustomers(state, today);
+  const today = platformBusinessDate(businessNow()), customers = statementCustomers(state, today);
   const [picked, setPicked] = React.useState(customerId || ''), [busy, setBusy] = React.useState(false);
   React.useEffect(() => { if (customerId) setPicked(customerId); }, [customerId]);
   const target = customerId || (picked && customers.some(c => c.id === picked) ? picked : customers[0]?.id || '');

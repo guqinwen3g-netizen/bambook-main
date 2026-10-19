@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 售后索赔协同：通知相关人员 → 质检核实（工厂参与）→ 客户处置（原审批）→ 两笔账（客户 / 工厂追偿）→ 两边都落实才结束。 */
 import React from 'react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Facts, Pill, type Tone } from '../../../../../components/mist';
@@ -86,7 +87,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   const settle = (r: ClaimRecovery) => openEditor({
     title: '登记工厂补偿实际落实', description: deducted(r) > 0 ? `已在应付中从货款扣 ${money(deducted(r), r.currency)}；这里只登记其他方式（工厂付款、补货等）落实的部分，合计不超过工厂同意金额。` : undefined,
     fields: [f('amount', (deducted(r) > 0 ? '其他方式落实金额（' : '实际落实金额（') + r.currency + '）', 'number', { min: 0.01, step: '0.01' }), f('date', '落实日期', 'date'), f('reference', '实际扣款 / 收款凭据', 'text')],
-    initialValues: { amount: r.agreed === undefined ? '' : Math.max(0, Math.round((r.agreed - deducted(r)) * 100) / 100), date: new Date().toISOString().slice(0, 10), reference: '' }, submitLabel: '确认已落实',
+    initialValues: { amount: r.agreed === undefined ? '' : Math.max(0, Math.round((r.agreed - deducted(r)) * 100) / 100), date: businessNow().toISOString().slice(0, 10), reference: '' }, submitLabel: '确认已落实',
     submit: v => command({ type: 'platform.claim.recovery.settle', payload: { id: r.id, amount: n(v, 'amount'), date: s(v, 'date'), reference: s(v, 'reference') } }),
   });
   const waive = (r: ClaimRecovery) => openEditor({

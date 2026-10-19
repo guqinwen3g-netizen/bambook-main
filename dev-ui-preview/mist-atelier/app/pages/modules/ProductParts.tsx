@@ -3,7 +3,7 @@ import { FlaskConical, Plus, ShoppingCart, Trash2, FileText } from 'lucide-react
 import { Banner, Button, CardHeader, DataTable, Dialog, EmptyState, Field, KeyValue, Mono, Pill, Select, TextInput, type Column } from '../../../../../components/mist';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
-import { usePrivateImage } from '../../runtime/usePrivateImage';
+import { usePrivateImageResource } from '../../runtime/usePrivateImage';
 import { useNav } from '../../nav';
 import { PRODUCT_SPEC_FIELDS, type MarketProduct, type MarketQuotation, type MarketState } from '../../../../../server/src/shared/mistMarket';
 
@@ -32,15 +32,16 @@ export function productReferences(product: MarketProduct, market: MarketState, o
 }
 
 /** Preview resolution can run while the provider is switching identities; never fetch a stale URL or throw from render. */
-export function useProductImage(product: MarketProduct) {
+export function useProductImage(product: MarketProduct, mode: 'thumb' | 'display' = 'thumb', selectedId?: string) {
   const w = useMistWorkspace();
-  const file = w.state?.files.find(f => product.fileIds.includes(f.id) && f.mimeType.startsWith('image/'));
+  const images = (product.fileIds ?? []).map(id => w.state?.files?.find(f => f.id === id && f.mimeType.startsWith('image/'))).filter((f): f is NonNullable<typeof f> => !!f);
+  const file = images.find(f => f.id === selectedId) ?? images[0];
   let path: string | undefined;
   if (file && !w.loading) {
-    try { path = w.fileUrl(file); } catch { /* A changing workspace cannot expose its prior attachment. */ }
+    try { path = w.fileUrl(file) + '?preview=' + mode; } catch { /* A changing workspace cannot expose its prior attachment. */ }
   }
-  const src = usePrivateImage(path);
-  return { file, src };
+  const image = usePrivateImageResource(path);
+  return { file, ...image, images };
 }
 /** 列表缩略图：只使用已上传的图片附件，没有图片时显示类别字样。 */
 export function ProductThumb({ product }: { product: MarketProduct }) {

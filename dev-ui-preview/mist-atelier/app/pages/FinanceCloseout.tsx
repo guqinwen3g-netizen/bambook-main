@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** 应付收尾：发票先于结算到达的暂挂票据关联结算、索赔工厂扣款抵应付、短交最终结算后剩余预付的退款 / 转抵。
  *  都是财务对已登记事实的处理；错误由冲回更正，原记录保留。 */
 import React from 'react';
@@ -74,7 +75,7 @@ export function DeductionDialog({ bill, state, busy, allowed, failure, onClose, 
 
 /** 剩余预付处理：退款（供应商退回到账）或转抵到同一供应商的其他合同。 */
 export function PrepaymentMoveDialog({ kind, purchaseId, state, busy, allowed, failure, onClose, execute, onDone }: Common & { kind: 'refund' | 'transfer'; purchaseId: string }) {
-  const po = state.fulfillment.purchases.find(p => p.id === purchaseId), r = purchasePrepaymentReadback(state, purchaseId), targets = prepaymentTransferTargets(state, purchaseId), day = platformBusinessDate(new Date());
+  const po = state.fulfillment.purchases.find(p => p.id === purchaseId), r = purchasePrepaymentReadback(state, purchaseId), targets = prepaymentTransferTargets(state, purchaseId), day = platformBusinessDate(businessNow());
   const [amount, setAmount] = React.useState(String(r.available)), [date, setDate] = React.useState(day), [reference, setReference] = React.useState(''), [target, setTarget] = React.useState((targets.find(t => t.id === po?.cancellation?.targetPurchaseId) || targets[0])?.id || ''), [reason, setReason] = React.useState(''), [local, setLocal] = React.useState('');
   if (!po) return null;
   const submit = () => {

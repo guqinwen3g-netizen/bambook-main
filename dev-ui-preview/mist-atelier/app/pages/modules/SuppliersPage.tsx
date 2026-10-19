@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 供应商管理：类型 / 合作状态筛选，档案含产能工艺、认证有效期、评级历史、在手业务与交付表现；暂停 / 停用按生效日阻止新增业务。 */
 import { BaseDataImportButton } from './BaseDataImport';
 import React from 'react';
@@ -66,7 +67,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   React.useEffect(() => { if (route.id) setPicked(route.id); }, [route.id]);
-  const day = marketBusinessDate(new Date());
+  const day = marketBusinessDate(businessNow());
   const all = state?.market.suppliers || [];
   const statusNow = (s: MarketSupplier) => supplierStatusOn(s, day);
   const needle = query.trim().toLowerCase();

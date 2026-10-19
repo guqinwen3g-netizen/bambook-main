@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 季节性与趋势：季节时间线（SS / AW + 年份，里程碑与今日），本季实时业务；趋势标签关联面料档案与（由报价推出的）客户；展会线索一键转 CRM 客户或商机。 */
 import React from 'react';
 import { CalendarRange, Download, Flag, Pencil, Plus, RefreshCw, Sparkles, Tent, UserCheck, UserPlus, UserX } from 'lucide-react';
@@ -67,7 +68,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const [picked, setPicked] = React.useState<string | null>(legacyShow || route.id || null), [drawer, setDrawer] = React.useState(!!(legacyShow || route.id));
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   React.useEffect(() => { if (route.id) setPicked(route.id); }, [route.id]);
-  const day = marketBusinessDate(new Date());
+  const day = marketBusinessDate(businessNow());
   const m = state?.market, seasons = m?.seasons || [], trends = m?.trends || [], shows = m?.shows || [], leads = m?.leads || [];
   const can = session.hasPermission('seasons:write'), canCrm = session.hasPermission('relations:write'), locked = saving || !!pending;
   const seasonName = (id: string) => { const s = seasons.find(x => x.id === id); return s ? s.code : '未关联季节'; };

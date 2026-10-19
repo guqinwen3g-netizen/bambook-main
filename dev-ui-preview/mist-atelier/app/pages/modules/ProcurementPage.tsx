@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 采购管理：面料 / 成衣业务组下分“采购订单”“委外加工单”两个入口；阶段流水线 + 单据详情轨迹，所有对外动作都登记真实依据。 */
 import React from 'react';
 import { CheckCircle2, Download, FileSignature, PackageCheck, Pencil, Plus, SearchX, Send, ShoppingCart, Undo2, Workflow } from 'lucide-react';
@@ -54,7 +55,7 @@ export function ProcurementPage() {
   const [rfqTab, setRfqTab] = React.useState(!!route.section?.startsWith('rfq'));
   const presetSupplierId = route.section?.startsWith('rfq:') ? route.section.slice(4) : undefined;
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDomainChoice(null); setEntryChoice(null); } }, [route.id]);
-  const day = supplierBusinessDay(new Date());
+  const day = supplierBusinessDay(businessNow());
   const expectedOrderId = route.section?.startsWith('order:') ? route.section.slice(6) : undefined;
   const incomingLine = state?.orderLines.find(line => line.id === route.orderLineId);
   const incomingOrder = state?.orders.find(order => order.id === incomingLine?.orderId);
