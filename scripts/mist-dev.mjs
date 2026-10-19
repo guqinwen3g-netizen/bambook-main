@@ -1,5 +1,6 @@
 import path from 'node:path';
 import net from 'node:net';
+import https from 'node:https';
 import {fileURLToPath} from 'node:url';
 import {createMistDevRunner} from '../server/scripts/mist-dev.mjs';
 import {MIST_SHARED_DEVELOPMENT_ORIGIN,mistDevelopmentProxy} from './mist-dev-target.mjs';
@@ -14,9 +15,14 @@ async function startFrontend(shared=false){
   try{await server.listen();return server;}catch(error){await server.close();throw error;}
 }
 async function probeSharedApi(){
-  const response=await fetch(MIST_SHARED_DEVELOPMENT_ORIGIN+'/api/mist/workspaces',{signal:AbortSignal.timeout(15000),redirect:'error'});
-  const body=await response.json();
-  return response.status===401&&body.error==='UNAUTHORIZED';
+  const agent=mistDevelopmentProxy(true)['/api'].agent;
+  try{return await new Promise((resolve,reject)=>{
+    const request=https.get(MIST_SHARED_DEVELOPMENT_ORIGIN+'/api/mist/workspaces',{agent},response=>{
+      let body='';response.setEncoding('utf8');response.on('data',chunk=>{body+=chunk;if(body.length>16384)request.destroy(new Error('共享开发服务响应无效。'));});
+      response.on('end',()=>{try{resolve(response.statusCode===401&&JSON.parse(body).error==='UNAUTHORIZED');}catch{resolve(false);}});
+      response.on('error',reject);
+    });request.setTimeout(15000,()=>request.destroy(new Error('共享开发服务连接超时。')));request.on('error',reject);
+  });}finally{agent?.destroy();}
 }
 /** Daily preview shares the development API, database and files. It never starts a local backend or falls back to a second database. */
 export async function startMistSharedDevelopment({probe=probeSharedApi,startFrontend:open=()=>startFrontend(true)}={}){

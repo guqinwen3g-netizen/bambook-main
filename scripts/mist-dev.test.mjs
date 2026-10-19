@@ -43,3 +43,14 @@ test('shared preview verifies the authenticated development API and only owns it
 test('unavailable shared API never starts the frontend or silently falls back to a local database',async()=>{
   let opened=false;await assert.rejects(startMistSharedDevelopment({probe:async()=>false,startFrontend:async()=>{opened=true;}}),/共享开发服务不可用/);assert.equal(opened,false);
 });
+test('shared authentication and business proxies use one configured HTTPS tunnel while local development stays direct',()=>{
+  const env={HTTPS_PROXY:'http://127.0.0.1:3128'},shared=mistDevelopmentProxy(true,env),local=mistDevelopmentProxy(false,env);
+  assert(shared['/api'].agent);assert.equal(shared['/api'].agent,shared['/api/mist'].agent);assert.equal(shared['/api'].agent.proxy.hostname,'127.0.0.1');
+  assert.equal(local['/api'].agent,undefined);shared['/api'].agent.destroy();
+});
+test('shared development honors NO_PROXY for its fixed backend and keeps proxy configuration server-side',()=>{
+  for(const NO_PROXY of ['bambook-dev.sylway.cloud:443','.sylway.cloud','*.sylway.cloud','*'])assert.equal(mistDevelopmentProxy(true,{HTTPS_PROXY:'http://127.0.0.1:3128',NO_PROXY})['/api'].agent,undefined);
+  const differentPort=mistDevelopmentProxy(true,{HTTPS_PROXY:'http://127.0.0.1:3128',NO_PROXY:'bambook-dev.sylway.cloud:444'});assert(differentPort['/api'].agent);differentPort['/api'].agent.destroy();
+  assert.throws(()=>mistDevelopmentProxy(true,{HTTPS_PROXY:'invalid proxy'}),/代理配置无效/);
+  assert.throws(()=>mistDevelopmentProxy(true,{HTTPS_PROXY:'socks5://127.0.0.1:1080'}),/代理配置无效/);
+});
