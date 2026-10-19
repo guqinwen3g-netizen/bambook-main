@@ -6,6 +6,7 @@ import sharp from 'sharp';
 type Ort=typeof import('onnxruntime-node');
 type Session=import('onnxruntime-node').InferenceSession;
 const SIZE=1024,MEAN=[.485,.456,.406],STD=[.229,.224,.225];
+export const IMAGE_CUTOUT_VERSION='birefnet-general-swin-tiny-232-v1';
 let sessionPromise:Promise<Session|undefined>|undefined,inferenceTail=Promise.resolve(),warned=false;
 const results=new Map<string,Promise<Buffer|undefined>>();
 

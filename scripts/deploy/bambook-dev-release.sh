@@ -36,7 +36,10 @@ if [[ -n "$active" && "$active" != "$release" && -d "$active/server/node_modules
 fi
 if [[ $reused == 0 ]]; then
   step 'npm ci'
-  npm ci --include=dev --no-audit --no-fund
+  # CPU inference is intentional on this host. onnxruntime-node otherwise tries
+  # to fetch optional CUDA/TensorRT providers during install, adding an external
+  # network dependency and failing behind redirecting package feeds.
+  ONNXRUNTIME_NODE_INSTALL=skip npm ci --include=dev --no-audit --no-fund
 fi
 printf '%s\n' "$deps_stamp" > .deps-stamp
 step 'prisma generate'
