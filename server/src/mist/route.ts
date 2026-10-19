@@ -1,4 +1,3 @@
-import {imagePreview} from './imagePreview';
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
 import multer from 'multer';
 import path from 'node:path';
@@ -159,12 +158,12 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
     res.status(201).json(await repository.upload(actor(req), req.params.id, { requestId: body.requestId, expectedRevision: Number(body.expectedRevision),...(Object.prototype.hasOwnProperty.call(body,'claimId')?{claimId:body.claimId}:{}) }, { bytes: req.file!.buffer, name: req.file!.originalname, multipartFilename: true, mimeType: req.file!.mimetype }));
   }));
   router.get('/workspaces/:id/files/:fileId', run(async (req, res) => {
-    const { file, bytes } = await repository.download(actor(req), req.params.id, req.params.fileId);
+    const preview = req.query.preview === undefined ? undefined : req.query.preview;
+    if (preview !== undefined && preview !== 'thumb' && preview !== 'display') fail('INVALID_INPUT', '图片预览尺寸无效', 400);
+    const { file, bytes } = await repository.download(actor(req), req.params.id, req.params.fileId, preview);
     res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
-    if (req.query.preview !== undefined) {
-      if (req.query.preview !== 'thumb' && req.query.preview !== 'display') fail('INVALID_INPUT', '图片预览尺寸无效', 400);
-      const preview = await imagePreview(Buffer.from(bytes), file.mimeType, req.query.preview);
-      res.type('image/webp').send(preview);
+    if (preview) {
+      res.type('image/webp').send(Buffer.from(bytes));
       return;
     }
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);

@@ -2,14 +2,14 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import { usePrivateImage } from './usePrivateImage';
+import { clearPrivateImages, prefetchPrivateImages, usePrivateImage } from './usePrivateImage';
 
 const login = vi.hoisted(() => ({ sessionKey: 'one', user: { id: 'one' } }));
 vi.mock('./auth', () => ({ useMistSession: () => login }));
 vi.mock('../../../../services/apiService', () => ({ apiService: { getAuthHeaders: () => ({ Authorization: 'Bearer private' }) } }));
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); login.sessionKey = 'one'; login.user.id = 'one'; });
+afterEach(() => { clearPrivateImages(); vi.unstubAllGlobals(); vi.restoreAllMocks(); login.sessionKey = 'one'; login.user.id = 'one'; });
 
-it('authenticates images, hides previous-account content and disposes stale or unmounted blobs', async () => {
+it('authenticates images, hides previous-account content and retains only the current session after unmount', async () => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   let finish!: (response: Response) => void;
   const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, blob: async () => new Blob(['first']) })
@@ -27,8 +27,8 @@ it('authenticates images, hides previous-account content and disposes stale or u
   expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:private');
   await act(async () => root.unmount());
   await act(async () => finish({ ok: true, blob: async () => new Blob(['late']) } as Response));
-  expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
-  expect(fetcher.mock.calls[1][1].signal.aborted).toBe(true);
+  expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1][1].signal.aborted).toBe(false);
 });
 
 it('shares one authenticated image request across thumbnails and reuses it after reopening',async()=>{
@@ -41,5 +41,17 @@ it('shares one authenticated image request across thumbnails and reuses it after
  await act(async()=>root.render(<><Image/><Image/></>));expect(fetcher).toHaveBeenCalledTimes(1);expect(host.querySelectorAll('img')).toHaveLength(2);
  await act(async()=>root.render(null));await act(async()=>root.render(<Image/>));expect(fetcher).toHaveBeenCalledTimes(1);
  login.sessionKey='after-shared';await act(async()=>root.render(<Image/>));expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:shared');expect(fetcher).toHaveBeenCalledTimes(2);
+ await act(async()=>root.unmount());
+});
+
+it('prefetches detail previews once and lets a later detail view render without another request',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const fetcher=vi.fn().mockResolvedValue({ok:true,blob:async()=>new Blob(['prefetched'])});vi.stubGlobal('fetch',fetcher);
+ URL.createObjectURL=vi.fn(()=> 'blob:prefetched');URL.revokeObjectURL=vi.fn();login.sessionKey='prefetch';
+ const scope='prefetch:one:workspace-a',path='/private/product?preview=display';
+ await prefetchPrivateImages(scope,[path,path],2);expect(fetcher).toHaveBeenCalledTimes(1);
+ const host=document.createElement('div'),root=createRoot(host);
+ function Detail(){const src=usePrivateImage(path,'workspace-a');return src?<img src={src}/>:null;}
+ await act(async()=>root.render(<Detail/>));expect(host.querySelector('img')?.src).toContain('blob:prefetched');expect(fetcher).toHaveBeenCalledTimes(1);
  await act(async()=>root.unmount());
 });

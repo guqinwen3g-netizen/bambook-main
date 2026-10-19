@@ -40,7 +40,7 @@ export function useProductImage(product: MarketProduct, mode: 'thumb' | 'display
   if (file && !w.loading) {
     try { path = w.fileUrl(file) + '?preview=' + mode; } catch { /* A changing workspace cannot expose its prior attachment. */ }
   }
-  const image = usePrivateImageResource(path);
+  const image = usePrivateImageResource(path, w.workspace?.id ?? '');
   return { file, ...image, images };
 }
 /** 列表缩略图：只使用已上传的图片附件，没有图片时显示类别字样。 */

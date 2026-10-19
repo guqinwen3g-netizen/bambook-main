@@ -2,6 +2,7 @@ import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fail } from './errors';
+import { imagePreview } from './imagePreview';
 export const MIST_FILE_MAX_BYTES = 50 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export type MistFileInput = { bytes: Buffer; name: string; mimeType: string; multipartFilename?: boolean };
@@ -39,7 +40,16 @@ export class MistPrivateFiles {
     const handle = await fs.open(target.file, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { await handle.writeFile(input.bytes); } catch (error) { await handle.close(); await fs.unlink(target.file).catch(() => undefined); throw error; }
     await handle.close();
+    if (meta.mimeType.startsWith('image/')) await Promise.allSettled((['thumb', 'display'] as const).map(mode => this.writePreview(target.file, input.bytes, meta.mimeType, mode)));
     return { id, name: input.multipartFilename ? multipartDisplayName(meta.name) : meta.name, mimeType: meta.mimeType, size: meta.size, storageKey: `${workspaceId}/${id}`, createdAt: now };
+  }
+  private previewPath(file: string, mode: 'thumb' | 'display') { return `${file}.preview-${mode}.webp`; }
+  private async writePreview(file: string, bytes: Buffer, mimeType: string, mode: 'thumb' | 'display') {
+    const preview = await imagePreview(bytes, mimeType, mode), destination = this.previewPath(file, mode), temporary = `${destination}.${randomUUID()}.tmp`;
+    const handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    try { await handle.writeFile(preview); await handle.close(); await fs.rename(temporary, destination); }
+    catch (error) { await handle.close().catch(() => undefined); await fs.unlink(temporary).catch(() => undefined); throw error; }
+    return preview;
   }
   async read(workspaceId: string, file: MistStoredFile): Promise<Buffer> {
     if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于当前工作区', 404);
@@ -57,8 +67,24 @@ export class MistPrivateFiles {
       return await handle!.readFile();
     } finally { await handle!.close(); }
   }
+  async readPreview(workspaceId: string, file: MistStoredFile, mode: 'thumb' | 'display'): Promise<Buffer> {
+    if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于当前工作区', 404);
+    const target = this.checked(workspaceId, file.id), derivative = this.previewPath(target.file, mode);
+    try {
+      const handle = await fs.open(derivative, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try { const stat = await handle.stat(); if (stat.isFile() && stat.size > 0) return await handle.readFile(); }
+      finally { await handle.close(); }
+    } catch (error: any) { if (error?.code !== 'ENOENT') throw error; }
+    const original = await this.read(workspaceId, file);
+    try { return await this.writePreview(target.file, original, file.mimeType, mode); }
+    catch (error: any) {
+      if (error?.code === 'EEXIST') return fs.readFile(derivative);
+      throw error;
+    }
+  }
   async remove(workspaceId: string, file: MistStoredFile) {
     if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于当前工作区', 404);
-    await fs.unlink(this.checked(workspaceId, file.id).file).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    const target = this.checked(workspaceId, file.id).file;
+    await Promise.all([target, this.previewPath(target, 'thumb'), this.previewPath(target, 'display')].map(filePath => fs.unlink(filePath).catch(error => { if (error.code !== 'ENOENT') throw error; })));
   }
 }
