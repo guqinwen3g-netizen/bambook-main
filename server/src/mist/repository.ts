@@ -486,7 +486,7 @@ export class MistRepository {
     }
     const requester=await loadUserWithRoles(db,requesterId);
     if(!requester||requester.status!=='active'||requester.deletedAt)fail('REQUESTER_UNAVAILABLE','申请账号当前不可核验，请联系管理员',409);
-    return buildLoadedAuthTokenPayload(db,requester);
+    return buildLoadedAuthTokenPayload(db,requester,actor.companyId ?? null);
   }
   async listReviews(prior:TokenPayload){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);

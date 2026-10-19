@@ -25,7 +25,7 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
     for(const domain of ['garment','fabric'] as const){
       let configured:string[];try{configured=await service.resolveEligibleReviewerIds(db,domain);}catch(error:any){if(error?.code==='ORDER_APPROVAL_AUTHORITY_MISSING')continue;throw error;}
-      for(const id of configured){const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)continue;const fresh=await buildLoadedAuthTokenPayload(db,user);if(hasScope({...fresh,roles:[]},'orders:write'))authority.orderReviewerIds[domain].push(id);}
+      for(const id of configured){const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)continue;const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null);if(hasScope({...fresh,roles:[]},'orders:write'))authority.orderReviewerIds[domain].push(id);}
     }
   }
   if(kind.startsWith('fulfillment.procurement.')){
@@ -37,7 +37,7 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       const userIds:string[]=[];
       for(const id of [...new Set(value.userIds.filter((id:any)=>typeof id==='string'))].slice(0,100) as string[]){
         const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)continue;
-        const fresh=await buildLoadedAuthTokenPayload(db,user);if(hasScope(fresh,'procurement:approve' as any) && (fresh.globalBusinessScope || fresh.departmentIds.some(id=>actor.departmentIds.includes(id)) || fresh.userId===actor.userId))userIds.push(id);
+        const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null);if(hasScope(fresh,'procurement:approve' as any) && (fresh.globalBusinessScope || fresh.departmentIds.some(id=>actor.departmentIds.includes(id)) || fresh.userId===actor.userId))userIds.push(id);
       }
       authority.supplier[key]={version:row.version,userIds};
     }
@@ -45,9 +45,9 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
   const routing=createApprovalRoutingService({prisma:db});
   if(kind.startsWith('platform.claim.')){try{authority.claimReviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   // 付款申请由申请人所在部门主管审批；主管必须当前仍持有付款申请审批权，不能自审。
-  if(kind.startsWith('payable.request.')){authority.paymentReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user),'finance:payment_request:approve' as any))authority.paymentReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
+  if(kind.startsWith('payable.request.')){authority.paymentReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null),'finance:payment_request:approve' as any))authority.paymentReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   // 风险关闭/豁免/带风险放行申请：由申请人所在部门主管审批；主管须当前在职、仍持有风险处理权，且不能是申请人本人。
-  if(kind.startsWith('platform.risk.')){authority.riskReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user),'risk:write' as any))authority.riskReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
+  if(kind.startsWith('platform.risk.')){authority.riskReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null),'risk:write' as any))authority.riskReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   if(kind.startsWith('market.quotation.')){try{authority.businessReviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   return authority;
 }

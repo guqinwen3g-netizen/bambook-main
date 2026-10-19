@@ -17,7 +17,7 @@
 
 ## 服务器与后端访问
 
-开发服务器（腾讯云 bambook-dev）部署默认走本机直传（`scripts/deploy/direct-dev.py`），使用本机私有目录中的专用受限密钥和固定主机指纹；密钥、部署包、验证回执不入库。仓库运维通道仅保留维护/恢复用途，无需重复授权：见 [开发服务器访问](docs/ops/dev-server-access.md)。正式环境（Mac mini、`jiangsupanda.com`）与真实资金不在此通道范围，仍须单独授权。
+开发服务器（腾讯云 bambook-dev）部署默认走本机直传（`scripts/deploy/direct-dev.py`），使用本机私有目录中的专用受限密钥和固定主机指纹；密钥、部署包、验证回执不入库。GitHub 运维/部署工作流已停用，维护和数据更新使用本机专用运维密钥直连，不再通过仓库执行：见 [开发服务器访问](docs/ops/dev-server-access.md)。正式环境（Mac mini、`jiangsupanda.com`）与真实资金不在此通道范围，仍须单独授权。
 
 ## 开发与设计讨论（长期必读）
 
