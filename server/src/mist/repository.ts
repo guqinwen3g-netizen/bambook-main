@@ -405,7 +405,7 @@ export class MistRepository {
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
         numbers.assertConsumed();
-        const previousEvents=new Set((row.state.events??[]).map(event=>event.id));
+        const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
         for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
         if(upload&&input.claimId!==undefined)applied.result={...applied.result,claimId:input.claimId};
         if(this.contract.getMistReviewTasks)(applied.state as any).reviewerIds=[...new Set(this.contract.getMistReviewTasks(applied.state).flatMap(t=>t.reviewerIds))];
@@ -545,7 +545,7 @@ export class MistRepository {
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
       const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
-      const previousEvents=new Set((row.state.events??[]).map(event=>event.id));
+      const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
       for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
       (applied.state as any).reviewerIds=[...new Set(this.reviews(applied.state).flatMap(t=>t.reviewerIds))];
       canonical(applied.state);canonical(applied.result);
