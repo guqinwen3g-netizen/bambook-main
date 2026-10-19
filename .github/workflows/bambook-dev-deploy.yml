@@ -1,50 +1,34 @@
 name: Bambook development delivery
+# Explicit emergency fallback only; normal deployment runs from the local checkout.
 on:
-  pull_request:
-    paths:
-      - .github/workflows/bambook-dev-deploy.yml
-      - scripts/deploy/**
-  # Automatic delivery: every successful `Mist verification` run for a push to main deploys that exact revision
-  # (documentation-only pushes do not run verification, so they are never delivered).
-  workflow_run:
-    workflows: [Mist verification]
-    types: [completed]
-    branches: [main]
   workflow_dispatch:
     inputs:
       mode:
-        description: Check the channel, or deploy the verified main revision
+        description: Check the fallback channel, or deploy verified main manually
         required: true
         default: check
         type: choice
         options: [check, deploy]
+
 permissions:
   contents: read
   checks: read
 concurrency:
-  # Serialize real deliveries only; PR checks get their own per-ref group so they never queue behind a delivery.
-  group: ${{ github.event_name != 'pull_request' && 'bambook-development-delivery' || format('bambook-dev-check-{0}', github.ref) }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: bambook-development-delivery
+  cancel-in-progress: false
 jobs:
   validate:
-    # workflow_run: only verified pushes to main (not PR runs, not failures).
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - run: python3 scripts/deploy/test_bambook_dev_receiver.py
       - run: bash -n scripts/deploy/bambook-dev-release.sh && bash -n scripts/deploy/bootstrap-dev-server.sh && bash -n server/scripts/init-dev-database.sh
   delivery:
     needs: validate
-    if: >-
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
-      github.event_name == 'workflow_run'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Time budget, innermost first: release script <= 2100 s (receiver ACTIVATE_TIMEOUT, then the receiver
     # stops the whole process group and restores the previous release) < 2280 s ssh `timeout` below
@@ -53,8 +37,8 @@ jobs:
     env:
       DEPLOY_HOST: 124.222.56.61
       DEPLOY_USER: bambook-deploy
-      MODE: ${{ github.event_name == 'workflow_run' && 'deploy' || inputs.mode }}
-      RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      MODE: ${{ inputs.mode }}
+      RELEASE_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

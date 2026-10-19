@@ -4,7 +4,8 @@
 
 ## 原则
 
-- 钥匙只存在 GitHub 仓库 Actions secrets 中，agent 不持有、不读取、不转发私钥；不需要用户为每个新 agent 重新授权或登录。
+- 2026-10-19 用户定案：开发发布由本机直接上传，GitHub 只保存源码版本，不再自动验证或部署。专用受限密钥、主机指纹、构建包和回执只存本机私有目录；不读取或转发私钥。
+- 仓库运维通道保留为维护和恢复手段；日常发布不经过 Actions。
 - 任何 agent 只要能向本仓库推送（GitHub 连接的 contents 写权限），就能通过下面的运维通道在开发服务器上执行命令。
 - 不在仓库、日志、PR 或聊天中写入密码、私钥、令牌。通道会对输出做基础脱敏，但请不要主动打印密钥文件。
 
@@ -46,14 +47,19 @@ sudo cat /srv/bambook-dev/shared/test-accounts.txt   # 7 个测试账号（仅�
 
 服务：`bambook-dev`（主 API）、`bambook-dev-mist`（Mist 工作空间 API）；前面是 nginx。以 `systemctl list-units 'bambook*'` 与 `ss -ltnp` 为准。
 
-## 部署
+## 本机直接部署（默认）
 
-见 `Bambook development delivery` 工作流（PR #26、#33）：
+入口为 `scripts/deploy/direct-dev.py`，使用当前已提交且干净的源码，不依赖 GitHub runner、云端检查状态或 GitHub 到服务器的网络。
 
-- **自动**：main 推送触发的 `Mist verification` 成功后，经 `workflow_run` 部署该提交；PR 上的验证或验证失败不部署；只部署 main 最新的代码提交，不回滚到旧提交。只改 `docs/**` 或根目录 `*.md` 的推送不跑验证、不部署，服务器保持上一版代码；若部署期间 main 只多了文档提交，仍照常部署。手动部署时若 main 顶端是文档提交，先手动运行一次 `Mist verification` 再部署。
-- **手动**：Actions → Run workflow（branch `main`），`check` 只测通道，`deploy` 部署当前 main。
+- `npm run dev:deploy:check`：检查直连和受限发布身份。
+- `npm run dev:deploy:verify`：本机完整验证，将成功回执留在私有目录。
+- `npm run dev:deploy`：匹配同一源码树及 Node 版本的本机验证回执可复用，否则先完整验证；随后重新构建同源前端、只打包已提交的运行源码和前端产物，直接上传并激活。
 
-两种方式都要求该提交 `verify` 已通过，结果写成提交状态 `ci/bambook-dev-delivery`。部署后经运维通道核对 `readlink -f /srv/bambook-dev/current`、服务 active 与健康接口。
+本机配置默认在 `$CODEX_HOME/private/bambook-dev-direct/config.json`（未设置 CODEX_HOME 时用 `~/.codex`）。包含开发主机、受限用户、私钥路径和固定主机指纹文件路径；私钥必须仅当前用户可读。此配置、密钥、验证日志、部署包和回执均不入库。程序只允许开发主机与 `bambook-deploy`，SSH 强制校验主机指纹，服务器密钥只能执行 check / receive / activate，不能开启任意 shell、转发或修改数据库。
+
+部署包保留在同一私有目录的 releases 下。重试同一版本复用原包并核对摘要；不能用不同内容覆盖已接收的相同提交。服务器仍先准备依赖再切换版本，验证两套 API 的数据库健康，失败恢复上一版。客户端再读取公开 `mist-version.json`，确认版本和已提交状态后才报告部署成功。
+
+每次提交仍正常推送 GitHub。`.github/workflows/mist.yml` 和 `bambook-dev-deploy.yml` 仅保留显式手动触发，供故障诊断或应急；没有 push / pull_request / workflow_run 自动发布链。正式环境不适用本命令。
 
 ## 撤销 / 轮换
 
