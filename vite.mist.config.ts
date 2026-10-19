@@ -1,5 +1,6 @@
 import { defineConfig, mergeConfig } from 'vite';
 import referenceConfig from './dev-ui-preview/mist-atelier/app/vite.config';
+import { mistDevelopmentProxy } from './scripts/mist-dev-target.mjs';
 
 // Both Mist ports run the same approved frontend source. Business adapters attach here.
 export default defineConfig(
@@ -9,6 +10,7 @@ export default defineConfig(
       port: 3001,
       host: '127.0.0.1',
       strictPort: true,
+      proxy: mistDevelopmentProxy(),
     },
     preview: { port: 4174, host: '127.0.0.1', strictPort: true },
   }),

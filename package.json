@@ -10,6 +10,7 @@
     "dev": "npm run dev:mist",
     "dev:web": "vite",
     "dev:mist": "node scripts/mist-dev.mjs",
+    "dev:mist:shared": "node scripts/mist-dev.mjs --shared",
     "dev:mist:ui": "vite --config vite.mist.config.ts",
     "mist:ref": "vite --config dev-ui-preview/mist-atelier/app/vite.config.ts --port 3131 --strictPort",
     "mist:ref:build": "node dev-ui-preview/mist-atelier/app/build-single.mjs",
