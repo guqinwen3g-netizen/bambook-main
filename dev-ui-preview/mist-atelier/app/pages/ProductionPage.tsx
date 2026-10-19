@@ -93,7 +93,7 @@ export function ProductionPage() {
       { key: 'progress', header: '进度', width: '100px', render: item => `${item.pct}%` },
     ]} /></Card> : <Kanban columns={PROD_COLUMNS.map(column => ({ ...column, items: shown.filter(item => item.col === column.id) }))} itemKey={item => item.id}
       onMove={busy ? undefined : (id, col) => { void move(id, col); }} onOpen={item => setSelectedId(item.id)} renderCard={item => <>
-        <div className="mist-row"><Thumb src={IMG[item.img]} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta"><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
+        <div className="mist-row"><Thumb src={IMG[item.img]} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
         <Meter segments={[{ value: item.pct, tone: item.pct === 100 ? 'ok' : 'accent' }]} caption={`${item.pct}% · ${fmt(item.qty)} ${productionUnit(item)}`} />
         <div className="mist-kb-card-foot"><Factory className="mist-icon" data-size="xs" />{item.factory}<span className="mist-spacer" />{state&&productionNok(state,item) ? <Pill tone="bad">QC NOK</Pill> : item.risk ? <Pill tone="warn">{item.risk.length>14?item.risk.slice(0,14)+'…':item.risk}</Pill> : !state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release) ? <Pill tone="neutral">待放行</Pill> : <span>{item.due}</span>}</div>
       </>} />}
