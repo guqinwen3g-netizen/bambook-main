@@ -95,11 +95,11 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
  return{deliver,complete,available:()=>{try{publicBase(options.publicUrl);return email.isReal;}catch{return false;}}};
 }
 export function accountAccessRouter(db:PrismaClient,options:AccountAccessOptions={}) {
- const router=Router(),service=createAccountAccessService(db,options),limiter=createLoginRateLimiter({maxFailures:8,windowMs:15*60000});
+ const router=Router(),service=createAccountAccessService(db,options),limiter=createLoginRateLimiter({maxFailures:8,windowMs:15*60000}),traffic=createLoginRateLimiter({maxFailures:60,windowMs:15*60000});
  router.post('/request',async(req,res,next)=>{try{
   const address=typeof req.body?.email==='string'?req.body.email.trim().toLowerCase():'';
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)||address.length>254)return res.status(400).json({ok:false,message:'请填写有效的工作邮箱。'});
-  if(limiter.recordFailure(req.ip||'unknown').blocked)return res.status(429).json({ok:false,message:'请求过于频繁，请稍后再试。'});
+  if(traffic.recordFailure(req.ip||'unknown').blocked||limiter.recordFailure('request:'+req.ip+':'+address).blocked)return res.status(429).json({ok:false,message:'请求过于频繁，请稍后再试。'});
   if(!service.available())return res.status(503).json({ok:false,message:'找回邮件服务暂不可用，请联系平台管理员。'});
   const user=await db.userAccount.findFirst({where:{email:{equals:address,mode:'insensitive'}},include:accountInclude});
   if(eligible(user,'recovery'))await service.deliver(user!.id,'recovery');
@@ -108,7 +108,7 @@ export function accountAccessRouter(db:PrismaClient,options:AccountAccessOptions
  router.post('/complete',async(req,res,next)=>{try{
   const b=req.body??{};
   if(!['invite','recovery'].includes(b.kind)||typeof b.email!=='string'||b.email.length>254||typeof b.token!=='string'||typeof b.password!=='string')return res.status(400).json({ok:false,message:'链接内容不完整，请从邮件重新打开。'});
-  if(limiter.recordFailure('complete:'+req.ip).blocked)return res.status(429).json({ok:false,message:'请求过于频繁，请稍后再试。'});
+  if(traffic.recordFailure(req.ip||'unknown').blocked||limiter.recordFailure('complete:'+req.ip+':'+b.email.trim().toLowerCase()).blocked)return res.status(429).json({ok:false,message:'请求过于频繁，请稍后再试。'});
   const result=await service.complete({email:b.email,kind:b.kind,token:b.token,password:b.password,mfaCode:typeof b.mfaCode==='string'?b.mfaCode:undefined});
   return res.status(result.ok?200:400).json(result.ok?{ok:true,platform:'platform'in result&&result.platform}:result);
  }catch(e){next(e);}});

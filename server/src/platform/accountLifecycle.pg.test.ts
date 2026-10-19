@@ -30,4 +30,6 @@ describe.skipIf(!url)('account lifecycle via HTTP, PostgreSQL and loopback SMTP'
 
  it('invites an existing company owner without resetting their password or granting platform rights',async()=>{await allow(ownerId);const before=await db.userAccount.findUniqueOrThrow({where:{id:ownerId}});const r=await api('post','/platform/companies',operatorToken).send({name:'溪云服饰',slug:'second-'+key,ownerName:'林初',ownerEmail:ownerMail});expect(r.status).toBe(201);companies.push(r.body.company.id);expect(r.body.owner.id).toBe(ownerId);expect(r.body.invitation.status).toBe('sent');expect((await smtp.link()).hash).toBe('');expect((await db.userAccount.findUniqueOrThrow({where:{id:ownerId}})).passwordHash).toBe(before.passwordHash);expect(await db.companyMember.count({where:{userId:ownerId}})).toBe(2);expect((await db.userAccount.findUniqueOrThrow({where:{id:ownerId}})).platformRole).toBeNull();});
 
+ it('allows different people behind one IP while limiting repeated recovery for one email',async()=>{for(let i=0;i<9;i++)expect((await api('post','/auth/account-access/request').send({email:`missing-${i}-${key}@example.invalid`})).status).toBe(200);for(let i=0;i<7;i++)expect((await api('post','/auth/account-access/request').send({email:`missing-0-${key}@example.invalid`})).status).toBe(i===6?429:200);});
+
 });
