@@ -1,3 +1,4 @@
+import { isTokenRevoked } from './sessionRevocation';
 import { CompanyAccessError } from './companyAccess';
 import { runWithCompanyContext } from './requestCompanyContext';
 import type { PrismaClient } from '@prisma/client';
@@ -20,7 +21,7 @@ export function createAuthorizationSnapshotGuard(options: {
   apiKeyActors?: ReadonlyMap<string, TokenPayload>;
 }) {
   return async (req: Request, res: Response, next: NextFunction) => {
-    if (/^\/auth\/(login(?:\/mfa)?|logout|companies|switch-company|send-code|register)\/?$/.test(req.path)) return next();
+    if (/^\/auth\/(login(?:\/mfa)?|logout|companies|switch-company|send-code|register|account-access\/(?:request|complete))\/?$/.test(req.path)) return next();
     const jwt = extractActorFromRequest(req);
     const key = req.headers['x-bambook-api-key'] || req.headers['x-api-key'] || req.query.apiKey;
     const bound = !jwt && typeof key === 'string' && options.apiKeys?.has(key)
@@ -33,6 +34,7 @@ export function createAuthorizationSnapshotGuard(options: {
         if (jwt) res.clearCookie('bambook_token', { path: '/' });
         return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '账号已失效，请重新登录。' });
       }
+      if(jwt && isTokenRevoked(user.metadata,(jwt as any).iat,jwt.credentialVersion))return res.status(401).json({error:'SESSION_REVOKED',message:'密码已更新，请重新登录。'});
       const platformRequest = /^\/platform(?:\/|$)/.test(req.path) && (user as any).platformRole === 'platform_admin';
       const current = await buildLoadedAuthTokenPayload(options.prisma, user, platformRequest ? null : prior.companyId ?? null);
       // Refresh account grants without expanding the verified credential's

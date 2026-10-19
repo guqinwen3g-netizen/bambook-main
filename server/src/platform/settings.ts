@@ -1,3 +1,4 @@
+import { createAccountAccessService, invitationSummary, type AccountAccessOptions } from '../auth/accountAccess';
 import { Router, type Request, type Response } from 'express';
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { createAuthService } from '../auth/service';
@@ -12,8 +13,9 @@ export async function readCompanyDefaults(db: Pick<Prisma.TransactionClient, 'sy
   return { plan: value?.plan || COMPANY_DEFAULTS.plan, seatLimit: value?.seatLimit ?? null, version: row?.version ?? 0 };
 }
 /** All routes share the same live platform-identity guard as company provisioning. */
-export function platformSettingsRouter(db: PrismaClient, authorize: (req: Request, res: Response) => Promise<{ userId: string } | null>) {
+export function platformSettingsRouter(db: PrismaClient, authorize: (req: Request, res: Response) => Promise<{ userId: string } | null>, options:AccountAccessOptions={}) {
   const router = Router();
+  const access=createAccountAccessService(db,options);
   router.get('/settings', async (req, res, next) => {
     try { if (!await authorize(req, res)) return; res.json({ ok: true, defaults: await readCompanyDefaults(db) }); } catch (e) { next(e); }
   });
@@ -40,8 +42,8 @@ export function platformSettingsRouter(db: PrismaClient, authorize: (req: Reques
   router.get('/staff', async (req, res, next) => {
     try {
       if (!await authorize(req, res)) return;
-      const staff = await db.userAccount.findMany({ where: { platformRole: 'platform_admin', deletedAt: null, companyMembers: { none: {} }, roles: { none: {} } }, orderBy: { createdAt: 'asc' }, select: { id: true, displayName: true, email: true, status: true, lastLoginAt: true } });
-      res.json({ ok: true, staff });
+      const staff = await db.userAccount.findMany({ where: { platformRole: 'platform_admin', deletedAt: null, companyMembers: { none: {} }, roles: { none: {} } }, orderBy: { createdAt: 'asc' }, select: { id: true, displayName: true, email: true, status: true, lastLoginAt: true, metadata:true } });
+      res.json({ ok: true, staff:staff.map(({metadata,...row})=>({...row,invitation:invitationSummary(metadata)})) });
     } catch (e) { next(e); }
   });
   router.post('/staff', async (req, res, next) => {
@@ -60,8 +62,16 @@ export function platformSettingsRouter(db: PrismaClient, authorize: (req: Reques
         return row;
       });
       if (!staff) { res.status(409).json({ ok: false, message: '该邮箱已有账号。请使用独立的平台工作邮箱，不能将公司账号转换为平台人员。' }); return; }
-      res.status(201).json({ ok: true, staff, initialPassword });
+      const invitation=await access.deliver(staff.id,'invite',actor.userId);
+      res.status(201).json({ ok: true, staff, invitation });
     } catch (e) { if ((e as { code?: string }).code === 'P2002') { res.status(409).json({ ok: false, message: '该邮箱已有账号。' }); return; } next(e); }
+  });
+  router.post('/staff/:id/invitation', async(req,res,next)=>{
+    try{const actor=await authorize(req,res);if(!actor)return;
+      const target=await db.userAccount.findFirst({where:{id:req.params.id,platformRole:'platform_admin',deletedAt:null,companyMembers:{none:{}},roles:{none:{}}}});
+      if(!target)return res.status(404).json({ok:false,message:'平台人员不存在。'});
+      return res.json({ok:true,invitation:await access.deliver(target.id,'invite',actor.userId)});
+    }catch(e){next(e);}
   });
   router.patch('/staff/:id', async (req, res, next) => {
     try {

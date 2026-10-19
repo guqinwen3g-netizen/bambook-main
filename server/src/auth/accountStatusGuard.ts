@@ -23,7 +23,7 @@ import { logger } from '../lib/logger';
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_ENTRIES = 5_000;
 
-type CacheEntry = { blocked: boolean; revokedBeforeSec: number; mustChangePassword: boolean; checkedAt: number };
+type CacheEntry = { credentialVersion?:string; blocked: boolean; revokedBeforeSec: number; mustChangePassword: boolean; checkedAt: number };
 type AccountGate = Omit<CacheEntry, 'checkedAt'>;
 const OPEN: AccountGate = { blocked: false, revokedBeforeSec: 0, mustChangePassword: false };
 
@@ -50,6 +50,7 @@ async function accountGate(prisma: PrismaClient, userId: string): Promise<Accoun
     });
     // fail-open：用户不存在（遗留 token / 测试造数）→ 放行，交由下游 scope 校验
     if (user) gate = {
+      credentialVersion: (user as any).metadata?.credentialVersion,
       blocked: user.status === 'disabled' || user.deletedAt != null,
       revokedBeforeSec: sessionRevokedBeforeSec((user as any).metadata),
       mustChangePassword: (user as any).metadata?.forceChangePassword === true,
@@ -71,6 +72,7 @@ async function accountGate(prisma: PrismaClient, userId: string): Promise<Accoun
 export function createAccountStatusGuard(prisma: PrismaClient) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
+      if (/^\/(?:bambook\/)?api\/auth\/account-access\/(?:request|complete)\/?$/.test(req.originalUrl.split('?')[0])) return next();
       const actor = extractActorFromRequest(req);
       if (!actor?.userId) return next();
       const gate = await accountGate(prisma, actor.userId);
@@ -78,6 +80,7 @@ export function createAccountStatusGuard(prisma: PrismaClient) {
         res.clearCookie('bambook_token');
         return res.status(401).json({ error: 'ACCOUNT_DISABLED', message: '账号已被停用，访问已终止。' });
       }
+      if (typeof gate.credentialVersion==='string' && gate.credentialVersion!==actor.credentialVersion) {res.clearCookie('bambook_token');return res.status(401).json({error:'SESSION_REVOKED',message:'密码已更新，请重新登录。'});}
       if (gate.revokedBeforeSec > 0) {
         const token = pickRequestToken(req), iat = token ? (jwt.decode(token) as any)?.iat : undefined;
         if (typeof iat === 'number' && iat < gate.revokedBeforeSec) {

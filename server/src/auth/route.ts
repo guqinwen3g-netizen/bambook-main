@@ -1,3 +1,4 @@
+import { accountAccessRouter } from './accountAccess';
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { createAuthService } from './service';
@@ -43,6 +44,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
   const auth = createAuthService();
   const email = options.email || createEmailService();
   const verification = options.verification || createVerificationStore();
+  router.use('/account-access', accountAccessRouter(options.prisma, { email }));
 
   const envWindowMs = Number(process.env.BAMBOOK_LOGIN_RATE_LIMIT_WINDOW_MS);
   const envMaxFailures = Number(process.env.BAMBOOK_LOGIN_RATE_LIMIT_MAX_FAILURES);
@@ -137,7 +139,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
 
     // 已开启两步验证：密码正确后只发 5 分钟有效的第二步凭据（不含 userId，不能当会话令牌用）。
     if (mfaOf(user.metadata).enabled) {
-      return res.json({ ok: true, mfaRequired: true, mfaToken: auth.signPurposeToken('mfa-login', user.id, 300) });
+      return res.json({ ok: true, mfaRequired: true, mfaToken: auth.signPurposeToken('mfa-login', JSON.stringify([user.id,(user.metadata as any)?.credentialVersion||null]), 300) });
     }
 
     // 多租户：确定本次会话进入哪家公司。一个账号可属于多家公司，
@@ -225,7 +227,9 @@ export function createAuthRouter(options: AuthRouterOptions) {
 
   router.post('/login/mfa', async (req: Request, res: Response) => {
     const { mfaToken, code } = req.body || {};
-    const userId = typeof mfaToken === 'string' ? auth.verifyPurposeToken(mfaToken, 'mfa-login') : null;
+    const subject = typeof mfaToken === 'string' ? auth.verifyPurposeToken(mfaToken, 'mfa-login') : null;
+    let userId:string|null=subject, credentialVersion:string|null=null;
+    if(subject?.startsWith('[')){try{const parsed=JSON.parse(subject);userId=typeof parsed[0]==='string'?parsed[0]:null;credentialVersion=parsed[1]??null;}catch{userId=null;}}
     if (!userId) return res.status(401).json({ ok: false, error: 'MFA_EXPIRED', message: '验证已过期，请重新输入密码登录。' });
     const key = `mfa|${userId}`;
     if (loginRateLimiter) {
@@ -234,6 +238,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     }
     const user = await options.prisma.userAccount.findFirst({ where: { id: userId, deletedAt: null }, include: USER_WITH_ROLES });
     if (!user || user.status !== 'active') return res.status(403).json({ ok: false, error: 'INACTIVE', message: '账号当前不可用。' });
+    if(((user.metadata as any)?.credentialVersion||null)!==credentialVersion)return res.status(401).json({ok:false,error:'MFA_EXPIRED',message:'密码已更新，请重新输入密码登录。'});
     let result: ReturnType<typeof checkSecondFactor> = null;
     try { result = checkSecondFactor(mfaOf(user.metadata), code); } catch (err) { logger.error('[auth] mfa secret unreadable', { userId, error: (err as Error).message }); }
     if (!result) {

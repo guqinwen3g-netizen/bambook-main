@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';import{createRoot,type Root}from'react-dom/client';import{afterEach,beforeEach,expect,it,vi}from'vitest';
-const m=vi.hoisted(()=>({session:{sessionKey:'one',user:{id:'operator',platformRole:'platform_admin'} as any},api:{settings:vi.fn(),saveSettings:vi.fn(),staff:vi.fn(),updateStaff:vi.fn(),createStaff:vi.fn(),audit:vi.fn()},go:vi.fn()}));
+const m=vi.hoisted(()=>({session:{sessionKey:'one',user:{id:'operator',platformRole:'platform_admin'} as any},api:{settings:vi.fn(),saveSettings:vi.fn(),staff:vi.fn(),updateStaff:vi.fn(),createStaff:vi.fn(),resendStaff:vi.fn(),audit:vi.fn()},go:vi.fn()}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>m.session}));vi.mock('../runtime/platformAdmin',()=>({platformAdminApi:m.api}));vi.mock('../nav',()=>({useNav:()=>({go:m.go})}));
 vi.mock('./ChangePassword',()=>({ChangePasswordRow:()=>null,LogoutAllRow:()=>null}));vi.mock('./TwoFactor',()=>({TwoFactorRow:()=>null}));
 import{PlatformSettingsPage}from'./PlatformSettingsPage';
@@ -15,7 +15,7 @@ it('retains the draft when a conflict is returned',async()=>{m.api.saveSettings.
 it('requires confirmation before disabling another staff account',async()=>{m.api.staff.mockResolvedValue({staff:[{id:'other',displayName:'运营人员',email:'ops@example.invalid',status:'active',lastLoginAt:null}]});await render();await act(async()=>button('平台人员').click());await act(async()=>button('停用').click());expect(m.api.updateStaff).not.toHaveBeenCalled();await act(async()=>button('取消').click());expect(m.api.updateStaff).not.toHaveBeenCalled();});
 it('does not render old identity results',async()=>{let resolve!:(r:any)=>void;m.api.settings.mockReturnValue(new Promise(r=>resolve=r));await render();m.session={sessionKey:'two',user:{id:'company',platformRole:null}};await render();await act(async()=>resolve({defaults:{plan:'private-plan',seatLimit:1,version:1}}));expect(host.textContent).not.toContain('private-plan');});
 
-it('creates an independent staff account and clears one-time credentials when dismissed',async()=>{
- m.api.createStaff.mockResolvedValue({staff:{id:'new',email:'ops@example.invalid'},initialPassword:'one-time-only'});await render();await act(async()=>button('平台人员').click());await act(async()=>button('新增平台人员').click());
- await act(async()=>{fill('平台人员姓名','运营同事');fill('平台人员邮箱','ops@example.invalid');});await act(async()=>button('创建平台账号').click());expect(m.api.createStaff).toHaveBeenCalledWith({displayName:'运营同事',email:'ops@example.invalid'});expect(document.body.textContent).toContain('one-time-only');await act(async()=>button('已保存，关闭').click());expect(document.body.textContent).not.toContain('one-time-only');
+it('creates an independent staff account and shows invitation delivery',async()=>{
+ m.api.createStaff.mockResolvedValue({staff:{id:'new',email:'ops@example.invalid'},invitation:{status:'sent',message:'邀请邮件已提交发送'}});await render();await act(async()=>button('平台人员').click());await act(async()=>button('新增平台人员').click());
+ await act(async()=>{fill('平台人员姓名','运营同事');fill('平台人员邮箱','ops@example.invalid');});await act(async()=>button('创建平台账号').click());expect(m.api.createStaff).toHaveBeenCalledWith({displayName:'运营同事',email:'ops@example.invalid'});expect(document.body.textContent).toContain('邀请邮件已提交发送');await act(async()=>button('关闭').click());expect(document.body.textContent).not.toContain('邀请邮件已提交发送');
 });

@@ -99,6 +99,9 @@ function createSmtpService(cfg: SmtpOptions): EmailService {
         host: cfg.host,
         port: cfg.port,
         secure: cfg.secure,
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 20000,
         auth: { user: cfg.user, pass: cfg.pass },
       });
     }

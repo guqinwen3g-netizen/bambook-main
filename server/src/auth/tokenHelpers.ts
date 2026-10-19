@@ -107,6 +107,7 @@ export function buildAuthTokenPayload(user: any, companyId?: string | null): Tok
   const departmentIds = scopedRoles.map((ur: any) => ur.departmentId).filter(Boolean) as string[];
   return {
     userId: user.id,
+    ...(typeof user.metadata?.credentialVersion === 'string' ? {credentialVersion:user.metadata.credentialVersion} : {}),
     ...(companyId ? { companyId } : {}),
     displayName: user.displayName,
     roles,
