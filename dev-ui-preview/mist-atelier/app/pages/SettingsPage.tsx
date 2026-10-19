@@ -8,7 +8,6 @@ import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
 import { WorkspaceMembers } from './WorkspaceMembers';
 import { ChangePasswordRow, LogoutAllRow } from './ChangePassword';
-import { TwoFactorRow } from './TwoFactor';
 import { CompanyProfileSection } from './CompanyProfileSection';
 import { AvatarSettingRow } from './AvatarStudio';
 
@@ -89,7 +88,7 @@ export function SettingsPage() {
             {(session.hasPermission?.('users:admin') || session.hasRole?.('owner','admin')) && <SettingRow title="人员账号与岗位权限" description="维护本公司登录账号、岗位与权限；平台账号由 Sylway Cloud 管理。" control={<Button onClick={()=>nav?.go('admin-panel')}>进入公司后台</Button>}/>}
             {(session.hasPermission?.('hr:read') || session.hasPermission?.('hr:write')) && <SettingRow title="部门、小组与员工档案" description="管理公司 → 部门 → 小组，安排人员归属并维护员工档案。" control={<Button onClick={()=>nav?.go('hr')}>管理组织架构</Button>}/>}
             <SettingRow title="业务默认项" description="维护公司显示名称和新建资料的默认币种，客户及来源单据币种优先。" control={<Button onClick={()=>setSec('workspace')}>查看业务设置</Button>}/>
-            <SettingRow title="当前账号安全" description="修改登录密码、配置两步验证、退出其他设备。" control={<Button onClick={()=>setSec('security')}>查看账号安全</Button>}/>
+            <SettingRow title="当前账号安全" description="修改登录密码、退出其他设备。" control={<Button onClick={()=>setSec('security')}>查看账号安全</Button>}/>
           </FormSection>}
           {sec === 'activity' && !member && <FormSection title="公司设置变更记录" description="从本次版本起记录设置变更的操作人和时间，不记录银行账号等字段原值。">
             <DataTable ariaLabel="公司设置变更记录" rows={state.events.filter(item=>item.entityType==='settings').slice(0,100)} rowKey={item=>item.id} columns={[{key:'time',header:'时间',render:item=>new Date(item.at).toLocaleString('zh-CN')},{key:'actor',header:'操作人',render:item=>item.actor},{key:'text',header:'变更内容',render:item=>item.text}]} empty={<EmptyState title="暂无设置变更记录" description="之后保存的公司设置将记录在这里。" compact/>}/>
@@ -117,8 +116,8 @@ export function SettingsPage() {
           {sec === 'account' && <FormSection title="账号" description="公司内显示资料，不改变登录账号、邮箱或密码。">{!session.localMode && <AvatarSettingRow />}<FormGrid><Field label="姓名"><TextInput aria-label="显示姓名" value={values.profileName} disabled={settingsLocked} onChange={event => edit('profileName', event.target.value)} onBlur={() => saveField('profileName')} /></Field><Field label="邮箱"><TextInput aria-label="显示邮箱" type="email" value={values.profileEmail} disabled={settingsLocked} onChange={event => edit('profileEmail', event.target.value)} onBlur={() => saveField('profileEmail')} /></Field>
             <Field label="语言偏好" hint="保存偏好，不改变当前页面文案"><Select aria-label="显示语言" disabled={settingsLocked} value={values.locale} onChange={event => { edit('locale', event.target.value); void save({ locale: event.target.value }); }} options={[{ value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }]} /></Field></FormGrid></FormSection>}
           {sec === 'security' && <FormSection title="安全">
-            {!session.localMode && <><ChangePasswordRow /><TwoFactorRow /><LogoutAllRow /></>}
-            {session.localMode && <><SettingRow title="两步验证" description="本地工作身份不使用密码，两步验证不适用" control={<Switch ariaLabel="两步验证" checked={false} disabled onChange={() => undefined} />} />
+            {!session.localMode && <><ChangePasswordRow /><LogoutAllRow /></>}
+            {session.localMode && <>
             <SettingRow title="退出所有设备" description="本地身份由本机服务提供，设备会话管理不适用" control={<Button size="sm" disabled>不适用</Button>} /></>}
           </FormSection>}
           </>}

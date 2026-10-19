@@ -2,7 +2,7 @@
 import React,{act} from 'react';import{createRoot,type Root}from'react-dom/client';import{afterEach,beforeEach,expect,it,vi}from'vitest';
 const m=vi.hoisted(()=>({session:{sessionKey:'one',user:{id:'operator',platformRole:'platform_admin'} as any},api:{settings:vi.fn(),saveSettings:vi.fn(),staff:vi.fn(),updateStaff:vi.fn(),createStaff:vi.fn(),resendStaff:vi.fn(),audit:vi.fn()},go:vi.fn()}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>m.session}));vi.mock('../runtime/platformAdmin',()=>({platformAdminApi:m.api}));vi.mock('../nav',()=>({useNav:()=>({go:m.go})}));
-vi.mock('./ChangePassword',()=>({ChangePasswordRow:()=>null,LogoutAllRow:()=>null}));vi.mock('./TwoFactor',()=>({TwoFactorRow:()=>null}));
+vi.mock('./ChangePassword',()=>({ChangePasswordRow:()=>null,LogoutAllRow:()=>null}));
 import{PlatformSettingsPage}from'./PlatformSettingsPage';
 let root:Root,host:HTMLDivElement;const button=(s:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===s)!;
 const fill=(label:string,value:string)=>{const el=document.querySelector(`[aria-label="${label}"]`) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(el,value);el.dispatchEvent(new Event('input',{bubbles:true}));};
