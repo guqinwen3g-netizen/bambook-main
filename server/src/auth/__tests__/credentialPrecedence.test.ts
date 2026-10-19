@@ -50,9 +50,9 @@ describe('落点普查 · 不许留第二份顺序', () => {
     expect(routeSrc.match(/req\.cookies\?\.\[COOKIE_NAME\] \|\| bearer/g)?.length ?? 0).toBe(0);
   });
 
-  it('原三处、refresh、退出所有设备、两步验证会话、公司列表与切换公司都调用同一份实现', () => {
-    // 6 → 8：多租户新增 GET /companies 与 POST /switch-company，两者同样只走 pickRequestToken。
-    expect(routeSrc.match(/pickRequestToken\(req\)/g)?.length ?? 0).toBe(8);
+  it('原三处、refresh、退出所有设备、公司列表与切换公司都调用同一份实现', () => {
+    // 两步验证接口退役后保留 7 处；公司列表与切换公司仍只走 pickRequestToken。
+    expect(routeSrc.match(/pickRequestToken\(req\)/g)?.length ?? 0).toBe(7);
   });
 
   it('中间件自己也住在这份实现里（规则不再散在两个文件）', () => {
