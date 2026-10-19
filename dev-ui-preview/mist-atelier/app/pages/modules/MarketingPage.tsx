@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** Marketing workbench: existing workspace commands, reasoned transitions and source-preserving CRM handoff. */
 import React from 'react';
 import { Download, Pencil, Plus, RefreshCw, Users } from 'lucide-react';
@@ -38,7 +39,7 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
   const [drawer, setDrawer] = React.useState(!!route.id);
   React.useEffect(() => setDrawer(!!route.id), [route.id]);
   const campaigns = w.state?.market.campaigns || [], leads = w.state?.market.leads || [];
-  const current = campaigns.find(c => c.id === route.id), day = marketBusinessDate(new Date()), can = session.hasPermission('marketing:write'), busy = w.saving || !!w.pending;
+  const current = campaigns.find(c => c.id === route.id), day = marketBusinessDate(businessNow()), can = session.hasPermission('marketing:write'), busy = w.saving || !!w.pending;
   const shown = campaigns.filter(c => {
     const r = campaignReminder(c, leads, day);
     return (stage === 'all' || c.status === stage) && (reminder === 'all' || (reminder === 'overdue' ? r.overdue > 0 : reminder === 'ended' ? r.ended : r.overBudget)) &&

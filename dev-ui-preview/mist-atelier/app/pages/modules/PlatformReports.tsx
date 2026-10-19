@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 报表中心：客户销售额、订单毛利、应收账龄、订单进度与逾期。销售额与账龄按币种分别统计、不折算；订单毛利可按所选口径（实际结汇 / 月末暂估 / 报价预计）折算人民币，并列不含 / 含出口退税。 */
 import React from 'react';
 import { Clock, Download, Package, Receipt, TrendingUp } from 'lucide-react';
@@ -123,7 +124,7 @@ export function PlatformReportsPage() {
   // 毛利涉及采购成本，只给报表管理者（业务主管、财务、老板）看；本地工作区为单人使用。
   const canSeeMargin = !!session.localMode || session.hasPermission('reports:admin');
   const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || ((route.section === 'margin' || route.section === 'actual') && canSeeMargin) ? route.section : 'sales';
-  const asOf = platformBusinessDate(new Date());
+  const asOf = platformBusinessDate(businessNow());
   const [from, setFrom] = React.useState(''), [to, setTo] = React.useState(''), [currency, setCurrency] = React.useState(''), [progressFilter, setProgressFilter] = React.useState('');
   // 默认口径：有实际结汇用实际结汇，否则有月末汇率用月末暂估，都没有则原币。
   const [viewChoice, setView] = React.useState<MarginView | null>(null), view: MarginView = viewChoice ?? ((state?.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : (state?.fxPeriodRates || []).some(r => !r.voided) ? 'period' : 'none'), [fxMonth, setFxMonth] = React.useState(asOf.slice(0, 7));

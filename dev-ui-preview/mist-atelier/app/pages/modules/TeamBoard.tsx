@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 全景看板 · 团队：业务主管看下属名下在手的事，并对具体订单 / 客户 / 开发案 / 发票督办。 */
 import React from 'react';
 import { AlertTriangle, Archive, BellRing, ChevronLeft, ChevronRight, ClipboardList, Copy, Download, Package, Receipt, Ship, Users, Wallet } from 'lucide-react';
@@ -38,7 +39,7 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
   initialMode?: 'now' | 'week'; initialWeek?: string;
   run: (c: MistCommand) => Promise<unknown>; go: (view: string, id?: string, extra?: Record<string, unknown>) => void;
 }) {
-  const today = platformBusinessDate(new Date());
+  const today = platformBusinessDate(businessNow());
   const [group, setGroup] = React.useState<Group>('all'), [mode, setMode] = React.useState<'now' | 'week'>(initialMode), [open, setOpen] = React.useState<string | null>(null), [dialog, setDialog] = React.useState<ModuleEditorSpec | null>(null);
   const rows = teamOverview(state, members, viewer, today, group);
   const row = rows.find(r => r.id === open);

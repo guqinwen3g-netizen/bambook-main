@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 人事管理：公司组织架构（部门 / 小组 / 岗位）、人员名册、员工档案与在职变动。范围按 2026-10-15 决定：不含考勤、请假、薪资、绩效、培训。 */
 import React from 'react';
 import { Briefcase, Building2, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
@@ -17,7 +18,7 @@ type EventForm = { kind: 'event'; userId: string; fromStatus: string; type: stri
 type Form = DeptForm | TeamForm | ProfileForm | PositionForm | EventForm;
 type Confirm = { kind: 'retire'; department: OrgDepartment; target: string } | { kind: 'dissolve'; team: OrgTeam } | { kind: 'remove'; team: OrgTeam; person: OrgPerson | { id: string; displayName: string } } | { kind: 'deletePosition'; position: OrgPosition } | null;
 
-const today = () => new Date().toLocaleDateString('sv-SE');
+const today = () => businessNow().toLocaleDateString('sv-SE');
 const STATUS_TONE: Record<string, 'ok' | 'warn' | 'neutral' | 'bad'> = { Probation: 'warn', Regular: 'ok', Suspended: 'bad', Resigned: 'neutral', Terminated: 'neutral' };
 
 function AttributePills({ values }: { values?: string[] }) {

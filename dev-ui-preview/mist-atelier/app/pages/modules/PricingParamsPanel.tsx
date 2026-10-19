@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 定价参数版本：按板块设置标准成本加成率与佣金率（带版本与生效日），仅管理层可改；定价试算保存时冻结适用版本。 */
 import React from 'react';
 import { Banner, Button, Card, CardHeader, DataTable, Field, FormGrid, Mono, Select, TextArea, TextInput, useToast, type Column } from '../../../../../components/mist';
@@ -18,7 +19,7 @@ export function pricingParamsDraftProblem(input: { profitMargin: string; commiss
 export function PricingParamsPanel() {
   const w = useMistWorkspace(), session = useMistSession(), toast = useToast();
   const rows: PricingParamVersion[] = w.state?.platform.pricingParams || [];
-  const today = platformBusinessDate(new Date());
+  const today = platformBusinessDate(businessNow());
   const canAdmin = session.hasPermission('pricing:admin');
   const [input, setInput] = React.useState({ family: 'garment' as PricingParamFamily, profitMargin: '', commissionRate: '0', effectiveFrom: today, reason: '' });
   const [busy, setBusy] = React.useState(false), [error, setError] = React.useState('');

@@ -1,3 +1,4 @@
+import {imagePreview} from './imagePreview';
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
 import multer from 'multer';
 import path from 'node:path';
@@ -101,7 +102,7 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
   router.post('/reviews/:workspaceId/:reviewId', run(async (req,res)=>{const body=exactBody(req.body,['requestId','expectedRevision','decision','note']);res.json(await repository.decideReview(actor(req),req.params.workspaceId,req.params.reviewId,body as any));}));
   router.get('/workspaces/default', run(async (req, res) => { res.json({ workspace: await repository.create(actor(req), { name: '公司业务', seed: actor(req)?.companyId ? 'empty' : 'demo' }, true) }); }));
   router.get('/workspaces', run(async (req, res) => {
-    const workspaces = await repository.list(actor(req));
+    const workspaces = req.query.summary === '1' ? await repository.listSummaries(actor(req)) : await repository.list(actor(req));
     res.json({ workspaces: isAgentActor(actor(req)) ? workspaces.map((w: { id: string; name: string; revision: number }) => ({ id: w.id, name: w.name, revision: w.revision })) : workspaces });
   }));
   router.get('/workspaces/archived',run(async(req,res)=>{res.json({workspaces:await repository.listArchived(actor(req))});}));
@@ -160,6 +161,12 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
   router.get('/workspaces/:id/files/:fileId', run(async (req, res) => {
     const { file, bytes } = await repository.download(actor(req), req.params.id, req.params.fileId);
     res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (req.query.preview !== undefined) {
+      if (req.query.preview !== 'thumb' && req.query.preview !== 'display') fail('INVALID_INPUT', '图片预览尺寸无效', 400);
+      const preview = await imagePreview(Buffer.from(bytes), file.mimeType, req.query.preview);
+      res.type('image/webp').send(preview);
+      return;
+    }
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
     res.type('application/octet-stream').send(Buffer.from(bytes));
   }));

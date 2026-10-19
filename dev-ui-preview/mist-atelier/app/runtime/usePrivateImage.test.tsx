@@ -30,3 +30,16 @@ it('authenticates images, hides previous-account content and disposes stale or u
   expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls[1][1].signal.aborted).toBe(true);
 });
+
+it('shares one authenticated image request across thumbnails and reuses it after reopening',async()=>{
+ (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+ const fetcher=vi.fn().mockResolvedValue({ok:true,blob:async()=>new Blob(['image'])});vi.stubGlobal('fetch',fetcher);
+ URL.createObjectURL=vi.fn(()=>'blob:shared');URL.revokeObjectURL=vi.fn();
+ login.sessionKey='shared';
+ const host=document.createElement('div'),root=createRoot(host);
+ function Image(){const src=usePrivateImage('/private/shared');return src?<img src={src}/>:null;}
+ await act(async()=>root.render(<><Image/><Image/></>));expect(fetcher).toHaveBeenCalledTimes(1);expect(host.querySelectorAll('img')).toHaveLength(2);
+ await act(async()=>root.render(null));await act(async()=>root.render(<Image/>));expect(fetcher).toHaveBeenCalledTimes(1);
+ login.sessionKey='after-shared';await act(async()=>root.render(<Image/>));expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:shared');expect(fetcher).toHaveBeenCalledTimes(2);
+ await act(async()=>root.unmount());
+});

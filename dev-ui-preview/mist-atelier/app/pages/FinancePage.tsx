@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** T6 收款核销：保留原 Mist 双栏，对账结果由共享工作空间保存。 */
 import { AccessHiddenNotice } from './AccessHiddenNotice';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
@@ -80,7 +81,7 @@ export function FinancePage() {
   const [paymentOpen, setPaymentOpen] = useRouteDraft(false);
   const [reversal,setReversal]=useRouteDraft<{kind:'allocation'|'payment';id:string;title:string}|null>(null);
   const [reversalReason,setReversalReason]=useRouteDraft('');
-  const [payment, setPayment] = useRouteDraft({ date: new Date().toISOString().slice(0, 10), payee: '', amount: '', currency: 'USD', ref: '', accountId: '' });
+  const [payment, setPayment] = useRouteDraft({ date: businessNow().toISOString().slice(0, 10), payee: '', amount: '', currency: 'USD', ref: '', accountId: '' });
   const fileInput = React.useRef<HTMLInputElement>(null);
   const [fundingDialog,setFundingDialog]=useRouteDraft<{receiptId:string;id?:string;release?:boolean}|null>(null);
   const [funding,setFunding]=useRouteDraft({customerId:'',orderId:'',amount:'',note:''});
@@ -89,14 +90,14 @@ export function FinancePage() {
   const sourceOrder=state?.orders.find(order=>order.id===sourceOrderId),deposit=sourceOrder&&state?orderDepositCoverage(state,sourceOrder.id):null;
   const receipts = state?.receipts ?? [], invoices = state?.invoices ?? [], allocations = state?.allocations ?? [], payments = state?.payments ?? [];
   const unclaimedCount=receipts.filter(item=>financeReceiptDisplay(item,fundingRows,allocations).unclaimed).length;
-  const today=financeDay(new Date());
+  const today=financeDay(businessNow());
   const overdueScope=route.section?.startsWith('overdue'),orderType=overdueScope?route.section?.split(':')[1]:undefined;
   const hasInvoiceFilter=route.section==='open'||overdueScope||!!route.customerId;
   const visibleInvoices=invoices.filter(invoice=>{
     const order=state?.orders.find(order=>order.id===invoice.orderId);
     return (!route.customerId||order?.customerId===route.customerId)&&(!hasInvoiceFilter||isActiveMistInvoice(invoice)&&invoice.open>0)&&(!overdueScope||invoice.due<today)&&(!orderType||order?.type===orderType);
   });
-  React.useEffect(()=>{operation.current=false;fileSequence.current++;routed.current='';setWorking(false);setFailure('');setImportRows([]);setPaymentOpen(false);setInvoiceId(null);setSel('');setPick(undefined);setPayment({date:financeDay(new Date()),payee:'',amount:'',currency:'USD',ref:'',accountId:''});setImportAccount('');},[scope]);
+  React.useEffect(()=>{operation.current=false;fileSequence.current++;routed.current='';setWorking(false);setFailure('');setImportRows([]);setPaymentOpen(false);setInvoiceId(null);setSel('');setPick(undefined);setPayment({date:financeDay(businessNow()),payee:'',amount:'',currency:'USD',ref:'',accountId:''});setImportAccount('');},[scope]);
   React.useEffect(()=>{const key=scope+':'+(route.id||'')+':'+(route.section||'');if(routed.current===key)return;if(route.id&&invoices.some(invoice=>invoice.id===route.id)){setInvoiceId(route.id);setTab('inv');routed.current=key;}else if(route.id&&receipts.some(receipt=>receipt.id===route.id)){setSel(route.id);setTab('recv');routed.current=key;}else if(sourceOrderId){setTab('recv');routed.current=key;}else if(hasInvoiceFilter){setTab('inv');routed.current=key;}},[route.id,route.section,scope,invoices,receipts,hasInvoiceFilter]);
   const unknownTarget=!!state&&!!route.id&&!loading&&!receipts.some(item=>item.id===route.id)&&!invoices.some(item=>item.id===route.id)&&!(area==='records'&&payments.some(item=>item.id===route.id))&&!(area==='payables'&&[...(state.payables?.bills??[]),...(state.payables?.payments??[]),...(state.payables?.requests??[]),...(state.payables?.plans??[]),...(state.payables?.settlements??[])].some(item=>item.id===route.id));
   const receipt = unknownTarget?undefined:receipts.find(item => item.id === sel) ?? receipts.find(item=>item.remaining>0) ?? receipts[0];
@@ -132,7 +133,7 @@ export function FinancePage() {
   const openReceipt=(id:string)=>{setArea('receivables');setTab('recv');setSel(id);go('payment-vouchers',id);};
   const currencies=[...new Set([...receipts.map(row=>row.currency),...invoices.map(row=>row.currency)])];
   const displayCurrency=previewInvoice?.currency||receipt?.currency||(currencies.includes('USD')?'USD':currencies[0])||'USD';
-  const now=new Date(),monthAllocations=allocations.filter(item=>{const date=mistDate(item.createdAt);return date&&date.getFullYear()===now.getFullYear()&&date.getMonth()===now.getMonth();});
+  const now=businessNow(),monthAllocations=allocations.filter(item=>{const date=mistDate(item.createdAt);return date&&date.getFullYear()===now.getFullYear()&&date.getMonth()===now.getMonth();});
   const overdueInvoices=invoices.filter(item=>isActiveMistInvoice(item)&&item.open>0&&item.due<today);
   const pendingAmount=cashTotal(pendingReceipts.filter(item=>item.currency===displayCurrency).map(item=>item.remaining));
   const otherPending=currencies.filter(currency=>currency!==displayCurrency).map(currency=>`${fmt(cashTotal(pendingReceipts.filter(item=>item.currency===currency).map(item=>item.remaining)),2)} ${currency}`).join(' · ');

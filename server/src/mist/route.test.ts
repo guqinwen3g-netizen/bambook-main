@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import express from 'express';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it,vi } from 'vitest';
@@ -96,4 +97,32 @@ it('keeps a legacy Latin-1 multipart filename when its bytes are not UTF-8',asyn
   const body=Buffer.concat([Buffer.from(fields,'latin1'),bytes,Buffer.from(`\r\n--${boundary}--\r\n`)]);
   const saved=await request(app).post(`/api/mist/workspaces/${workspace.id}/files`).set('x-test-user','owner').set('Content-Type',`multipart/form-data; boundary=${boundary}`).send(body).expect(201);
   expect(saved.body.workspace.state.files[0].name).toBe('café.pdf');
+});
+
+it('serves bounded authenticated image previews and keeps the original download unchanged', async () => {
+ const workspace=(await request(app).get('/api/mist/workspaces/default').set('x-test-user','owner')).body.workspace;
+ const bytes=await sharp({create:{width:1800,height:1200,channels:3,background:'#778899'}}).png().toBuffer();
+ const uploaded=await request(app).post(`/api/mist/workspaces/${workspace.id}/files`).set('x-test-user','owner').field('requestId','image-preview').field('expectedRevision','0').attach('file',bytes,{filename:'swatch.png',contentType:'image/png'}).expect(201);
+ const file=uploaded.body.workspace.state.files[0],url=`/api/mist/workspaces/${workspace.id}/files/${file.id}`;
+ const preview=await request(app).get(url+'?preview=thumb').set('x-test-user','owner').expect(200).expect('Content-Type',/image\/webp/);
+ expect((await sharp(preview.body).metadata()).width).toBeLessThanOrEqual(160);
+ await request(app).get(url+'?preview=thumb').expect(401);
+ await request(app).get(url+'?preview=thumb').set('x-test-user','other').expect(404);
+ await request(app).get(url+'?preview=huge').set('x-test-user','owner').expect(400);
+ expect((await request(app).get(url).set('x-test-user','owner')).body).toEqual(bytes);
+});
+it('returns only authorized workspace identities for navigation summaries',async()=>{
+ const workspace=(await request(app).get('/api/mist/workspaces/default').set('x-test-user','owner')).body.workspace;
+ const result=await request(app).get('/api/mist/workspaces?summary=1').set('x-test-user','owner').expect(200);
+ expect(result.body.workspaces).toHaveLength(1);expect(result.body.workspaces[0]).toMatchObject({id:workspace.id,access:{role:'owner'}});
+ expect(result.body.workspaces[0]).not.toHaveProperty('state');
+ expect((await request(app).get('/api/mist/workspaces?summary=1').set('x-test-user','other')).body.workspaces).toEqual([]);
+});
+
+it('does not let customer settings commands set the internal business clock',async()=>{
+ const workspace=(await request(app).get('/api/mist/workspaces/default').set('x-test-user','owner')).body.workspace;
+ const response=await request(app).post(`/api/mist/workspaces/${workspace.id}/commands`).set('x-test-user','owner').send({requestId:'forged-clock',expectedRevision:0,command:{type:'settings.update',payload:{businessClock:{mode:'fixed',at:'2026-10-08T00:18:00.000Z',timezone:'Asia/Shanghai'}}}});
+ expect(response.status).toBeGreaterThanOrEqual(400);
+ const after=(await request(app).get(`/api/mist/workspaces/${workspace.id}`).set('x-test-user','owner')).body.workspace;
+ expect(after.state.settings.businessClock).toBeUndefined();
 });

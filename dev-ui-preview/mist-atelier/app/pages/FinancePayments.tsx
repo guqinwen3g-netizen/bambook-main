@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** 付款收尾：发票未到时按已确认结算先付（已付未收票）、系统上线前历史付款补登到计划、审批规则前的旧付款对应计划。
  *  都走已有权限；先付款须经主管审批，补登与对应只登记已经发生的事实，错误由冲回或取消对应更正。 */
 import React from 'react';
@@ -47,7 +48,7 @@ export function AdvanceRequestDialog({ state, settlement: st, busy, allowed, fai
 
 /** 历史补登：系统上线前已付的款，按凭证补到计划这一期；不走审批，记录操作人。 */
 export function BackfillDialog({ state, plan, busy, allowed, failure, onClose, execute, onDone }: Common & { plan: PrepaymentPlanView }) {
-  const day = platformBusinessDate(new Date()), bills = plan.stage === 'prepayment' ? [] : backfillBillOptions(state, plan.id);
+  const day = platformBusinessDate(businessNow()), bills = plan.stage === 'prepayment' ? [] : backfillBillOptions(state, plan.id);
   const [amount, setAmount] = React.useState(String(plan.available)), [date, setDate] = React.useState(''), [reference, setReference] = React.useState(''), [billId, setBillId] = React.useState(bills[0]?.bill.id || ''), [note, setNote] = React.useState(''), [local, setLocal] = React.useState('');
   const submit = () => {
     const value = cents(amount);

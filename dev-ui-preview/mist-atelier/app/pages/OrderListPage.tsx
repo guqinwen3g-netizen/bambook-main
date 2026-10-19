@@ -1,3 +1,5 @@
+import {businessNow} from '../runtime/businessClock';
+import {OrderProductThumb} from './OrderProductThumb';
 /**
  * T3 宽表列表模板 —— 对应真实模块：订单管理（OrderManager）及所有纯记录列表。
  * 结构：页头 → 汇总统计卡（可选）→ Tabs → 工具栏 → 全宽数据表（可排序）
@@ -5,7 +7,7 @@
 import React from 'react';
 import { ChevronRight, ClipboardList, Download, Plus, SearchX, Ship, Wallet, AlertTriangle } from 'lucide-react';
 import { Avatar, Banner, Button, Card, DataTable, Dropdown, EmptyState, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, SearchField, StatCard, StatGrid, Tabs, TextLink, Thumb, Toolbar, useToast, type Column } from '../../../../components/mist';
-import { IMG, fmt } from '../data';
+import { fmt } from '../data';
 import type { MistOrder } from '../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
@@ -33,7 +35,7 @@ export function downloadMistCsv(filename: string, headings: string[], rows: Arra
 }
 
 export function mistDate(value: string): Date | null {
-  const normalized = /^\d{2}\/\d{2}$/.test(value) ? `${new Date().getFullYear()}-${value.replace('/', '-')}` : value;
+  const normalized = /^\d{2}\/\d{2}$/.test(value) ? `${businessNow().getFullYear()}-${value.replace('/', '-')}` : value;
   const date = new Date(normalized.includes('T') ? normalized : `${normalized}T12:00:00`);
   return Number.isFinite(date.getTime()) ? date : null;
 }
@@ -61,11 +63,11 @@ export function OrderListPage() {
   const partialShipped = family.filter(order => order.state === '部分出运').length;
   const unitTotals = new Map<string, number>();
   for (const line of state?.orderLines ?? []) if (active.some(order => order.id === line.orderId)) unitTotals.set(line.unit, (unitTotals.get(line.unit) ?? 0) + line.qty);
-  const dayStart=new Date();dayStart.setHours(0,0,0,0);
+  const dayStart=businessNow();dayStart.setHours(0,0,0,0);
   const overdue = (state?.invoices ?? []).filter(invoice => family.some(order => order.id === invoice.orderId) && invoice.open > 0 && (mistDate(invoice.due)?.getTime() ?? Infinity) < dayStart.getTime());
   const quantityLabel=(order:MistOrder)=>{const totals=new Map<string,number>();for(const line of state?.orderLines||[])if(line.orderId===order.id)totals.set(line.unit,(totals.get(line.unit)||0)+line.qty);return [...totals].map(([unit,total])=>`${fmt(total)} ${unit}`).join(' · ')||'未记录数量';};
   const cols: Column<MistOrder>[] = [
-    { key: 'id', header: '订单', width: 'minmax(220px,2fr)', sortValue: order => order.code, render: order => <ObjectCell thumb={<Thumb src={IMG[order.img]} size="sm" />} name={<Mono>{order.code}</Mono>} meta={`${order.customer} · ${order.season}`} /> },
+    { key: 'id', header: '订单', width: 'minmax(220px,2fr)', sortValue: order => order.code, render: order => <ObjectCell thumb={<OrderProductThumb orderId={order.id} category={order.type}/>} name={<Mono>{order.code}</Mono>} meta={`${order.customer} · ${order.season}`} /> },
     { key: 'qty', header: '数量', width: '90px', align: 'right', hideOnMobile: true, sortValue: order => order.qty, render: order => <><span className="mist-num">{quantityLabel(order)}</span><span className="mist-cell-sub">{order.lines} 个条目</span></> },
     { key: 'amt', header: '金额', width: '130px', align: 'right', sortValue: order => order.amount, render: order => <><b className="mist-cell-strong mist-num">{fmt(order.amount, 2)}</b><span className="mist-cell-sub">{order.currency}</span></> },
     { key: 'prog', header: '条目阶段', width: 'minmax(190px,1.6fr)', hideOnMobile: true, render: order => { if (!state) return null; const flags = orderLineFlags(state, order), shown = flags.tracks.slice(0, 2); const notes = [flags.business && `待业务动作 ${flags.business}`, flags.nok && `QC NOK ${flags.nok}`, flags.toShip && `待出运 ${flags.toShip}`].filter(Boolean) as string[];

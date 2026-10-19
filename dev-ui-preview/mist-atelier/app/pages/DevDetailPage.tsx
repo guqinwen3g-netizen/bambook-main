@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 /** T4: the original three-column Mist detail; every action targets an exact saved version. */
 import React from 'react';
 import {developmentCharged,developmentDomain,developmentInitiator,developmentInitiatorLabel,validFabricSample} from '../../../../server/src/shared/mistDevelopmentDomain';
@@ -21,7 +22,7 @@ import { DevCompareCard, readCompareIds, writeCompareIds } from './DevCompare';
 import { versionSource } from '../../../../server/src/shared/mistDevelopmentCompare';
 import { confirmationNeedsForms, developmentVersionSamples, sampleRef } from '../../../../server/src/shared/mistDevelopmentSamples';
 
-export function localConfirmationTime(date=new Date()){return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);}
+export function localConfirmationTime(date=businessNow()){return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);}
 export function confirmationFormError(values:{confirmer:string;organization:string;confirmedAt:string;basis:string;originalText:string}){
   if(!values.confirmer.trim())return '请填写实际确认人';
   if(!values.confirmedAt||Number.isNaN(new Date(values.confirmedAt).getTime()))return '请填写有效的确认时间';

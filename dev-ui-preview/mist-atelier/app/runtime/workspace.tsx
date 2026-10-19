@@ -1,3 +1,4 @@
+import {bindBusinessClock} from './businessClock';
 import React from 'react';
 import { apiService } from '../../../../services/apiService';
 import { useMistSession } from './auth';
@@ -267,6 +268,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     assertIdentity(bound);
     const previous = latest.current.get(value.id);
     const next = previous && previous.revision > value.revision ? previous : previous ? shareStructure(previous, value) : value;
+    bindBusinessClock(next.state.settings.businessClock);
     latest.current.set(next.id, next); snapshot.current = next; setCurrent({ key: bound.key, value: next });
   }, [assertIdentity]);
   const rememberSelection = React.useCallback((id: string, bound: Authority) => {
@@ -282,7 +284,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const load = React.useCallback(async (bound: Authority, id?: string, navigation = false, fallbackMissingSelection = false) => {
     const userId = assertIdentity(bound), generation = ++readEpoch.current;
     readController.current?.abort(); const controller = new AbortController(); readController.current = controller;
-    if (navigation) { scopeEpoch.current++; wanted.current = id; navigating.current = true; snapshot.current = null; setCurrent(null); }
+    if (navigation) { bindBusinessClock(undefined); scopeEpoch.current++; wanted.current = id; navigating.current = true; snapshot.current = null; setCurrent(null); }
     setLoading(true); setError('');
     const isCurrent = () => mounted.current && live.current.key === bound.key && live.current.userId === userId && generation === readEpoch.current;
     try {
@@ -295,7 +297,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       }
       if (!isCurrent()) return;
       const value = envelope(data.workspace, userId, targetId); wanted.current = value.id; put(value, bound); rememberSelection(value.id, bound);
-      const list = await request(BASE, { signal: controller.signal });
+      const list = await request(BASE + '?summary=1', { signal: controller.signal });
       if (isCurrent()) setWorkspaces(Array.isArray(list.workspaces) ? list.workspaces.filter((item: unknown) => object(item) && nonempty(item.id) && nonempty(item.name)).map((item: any) => ({ id: item.id, name: item.name, shared: item.access?.role === 'member' || nonempty(item.ownerId) && item.ownerId !== userId })) : []);
     } catch (failure) { if (isCurrent() && !controller.signal.aborted) {
       if (failure instanceof RequestError && [401,403,404].includes(failure.status)) {
@@ -308,6 +310,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   }, [assertIdentity, put, rememberSelection, forgetSelection]);
   React.useEffect(() => {
     activeScope.current = authority;
+    bindBusinessClock(undefined);
     mounted.current = true; scopeEpoch.current++; readEpoch.current++; readController.current?.abort();
     snapshot.current = null; latest.current.clear(); wanted.current = undefined; navigating.current = false; mutation.current = null;
     setCurrent(null); setWorkspaces([]); setArchivedWorkspaces([]); setError(''); setSaving(false); publishPending(null); publishCreate(null);

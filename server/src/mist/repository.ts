@@ -1,3 +1,4 @@
+import {mistBusinessInstant} from '../shared/mistBusinessClock';
 import { EMAIL_SERVER_COMMAND } from '../shared/mistEmail';
 import { createHash, randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
@@ -128,7 +129,7 @@ const localMode=(actor:TokenPayload)=>(actor as any).mistLocal===true&&process.e
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
 export class MistRepository {
   constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>) {}
-  private context(actor: TokenPayload): MistContext { return { id: randomUUID, now: this.now().toISOString(), actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
+  private context(actor: TokenPayload, state?: MistState): MistContext { const auditNow=this.now().toISOString();return { id: randomUUID, now: mistBusinessInstant(state,auditNow), auditNow, actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
   /** 普通附件上传：只落私有文件、不改业务记录；持有任一业务写入权限即可（后勤的 CI/PL、财务的水单、质检的报告都要先上传再关联）。关联到哪条记录仍由各自业务命令按权限校验。 */
   private async uploadPermission(db: any, prior: TokenPayload) {
     const actor = await this.authorize(db, prior);
@@ -180,6 +181,16 @@ export class MistRepository {
     return { ...publicWorkspace({ ...row, state: projected.state }), access };
   }
   async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows = await db.mistWorkspace.findMany({ where: { ...(actor.companyId ? { companyId: actor.companyId } : {}), OR: [{ ownerId: actor.userId }, { state: { path: ['memberIds'], array_contains: [actor.userId] } }] }, orderBy: { updatedAt: 'desc' } }); return rows.filter((row:MistWorkspaceRow)=>!archived(row)&&(isOwner(row,actor)||isMember(row,actor))).map((row:MistWorkspaceRow)=>{this.contract.normalizeMistState?.(row.state,this.context(actor));return this.view(row,actor);}); }); }
+  /** Navigation needs identities only, never the full business snapshots of every company workspace. */
+  async listSummaries(prior: TokenPayload) { return this.transact(async db => {
+    const actor = await this.authorize(db, prior);
+    const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({where: {
+      ...(actor.companyId ? {companyId: actor.companyId} : {}),
+      OR: [{ownerId: actor.userId}, {state: {path: ['memberIds'], array_contains: [actor.userId]}}]
+    }, orderBy: {updatedAt: 'desc'}});
+    return rows.filter(row => !archived(row) && (isOwner(row, actor) || isMember(row, actor)))
+      .map(row => ({id: row.id, name: row.name, ownerId: row.ownerId, revision: row.revision, access: {role: isOwner(row, actor) ? 'owner' : 'member'}}));
+  }); }
   async listArchived(prior:TokenPayload){return this.transact(async db=>{const actor=await this.authorize(db,prior);const rows: MistWorkspaceRow[]=await db.mistWorkspace.findMany({where:{ownerId:actor.userId,...(actor.companyId?{companyId:actor.companyId}:{})},orderBy:{updatedAt:'desc'}});return rows.filter(archived).map(row=>({id:row.id,name:row.name,revision:row.revision,archivedAt:row.state.workspaceArchive!.at}));});}
   private async activeWorkspace(db:any,actor:TokenPayload,preferredId?:string){const rows:MistWorkspaceRow[]=await db.mistWorkspace.findMany({where:{ownerId:actor.userId,...(actor.companyId?{companyId:actor.companyId}:{})},orderBy:{updatedAt:'desc'}});const active=rows.filter(row=>!archived(row));const existing=active.find(row=>row.id===preferredId)??active[0];if(existing){this.contract.normalizeMistState?.(existing.state,this.context(actor));return existing;}const context=this.context(actor),state=this.contract.createMistState(context,'empty');state.settings.workspaceName='新的工作空间';return db.mistWorkspace.create({data:{id:randomUUID(),ownerId:actor.userId,companyId:actor.companyId??null,slug:'continuation-'+randomUUID(),name:state.settings.workspaceName,revision:0,state}});}
   async changeArchive(prior:TokenPayload,workspaceId:string,input:{requestId:string;expectedRevision:number},action:'archive'|'restore'){
@@ -344,7 +355,7 @@ export class MistRepository {
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
-        const context = this.context(actor);
+        const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
           const visible = projectState(row.state, actor, this.emptyState(actor), row.ownerId).state;
           const { type, payload } = input.command;
@@ -394,6 +405,8 @@ export class MistRepository {
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
         numbers.assertConsumed();
+        const previousEvents=new Set((row.state.events??[]).map(event=>event.id));
+        for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
         if(upload&&input.claimId!==undefined)applied.result={...applied.result,claimId:input.claimId};
         if(this.contract.getMistReviewTasks)(applied.state as any).reviewerIds=[...new Set(this.contract.getMistReviewTasks(applied.state).flatMap(t=>t.reviewerIds))];
         canonical(applied.state); canonical(applied.result);
@@ -530,8 +543,10 @@ export class MistRepository {
       const command={type,payload:task.kind==='risk'?{id:task.target.id,escalationId:task.entityId,decision:input.decision,note:input.note}:{id:task.entityId,decision:input.decision,note:input.note}} as MistCommand;
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
-      const context=this.context(actor);context.authority=await mistApprovalAuthority(db,subject,type);
+      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
+      const previousEvents=new Set((row.state.events??[]).map(event=>event.id));
+      for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
       (applied.state as any).reviewerIds=[...new Set(this.reviews(applied.state).flatMap(t=>t.reviewerIds))];
       canonical(applied.state);canonical(applied.result);
       const changeKeys=mistChangeKeys(row.state,applied.state);

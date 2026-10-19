@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 import React from "react";
 import { ArrowLeft, Download } from "lucide-react";
 import {
@@ -231,7 +232,7 @@ export function QuotationFeedbackPage() {
   const current = () => scope.isCurrent() && activeKey.current === key;
   const validate = () => {
     if (!q) throw Error("准确报价不存在");
-    return validateQuoteFeedback(input, q, marketBusinessDate(new Date()));
+    return validateQuoteFeedback(input, q, marketBusinessDate(businessNow()));
   };
   const save = async () => {
     if (disabled || lock.current || !q || !scope.isCurrent()) return;
@@ -360,7 +361,7 @@ export function QuotationFeedbackPage() {
                 : "",
           },
           q,
-          marketBusinessDate(new Date()),
+          marketBusinessDate(businessNow()),
         );
       } else validate();
       setFailure("");

@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** Existing Track B command, immutable calculation records, and evidence-only order costs. */
 import React from 'react';
 import {Calculator, Download, ArrowLeft} from 'lucide-react';
@@ -42,7 +43,7 @@ export function PricingPage(){
  React.useEffect(()=>{setTab(route.id?'snapshots':tabOf(route.section));setSelected(route.id||'');},[route.id,route.section]);
  const orders=w.state?.orders||[],rows=w.state?.platform.pricing||[],shown=rows.filter(r=>(orderFilter==='all'||r.orderId===orderFilter)&&(!route.customerId||orders.find(o=>o.id===r.orderId)?.customerId===route.customerId)&&(!query.trim()||`${r.id} ${orders.find(o=>o.id===r.orderId)?.code||''} ${orders.find(o=>o.id===r.orderId)?.customer||''} ${r.basis} ${r.createdAt}`.toLowerCase().includes(query.trim().toLowerCase()))),current=rows.find(r=>r.id===selected),order=orders.find(o=>o.id===input.orderId);
  const disabled=busy||w.loading||w.saving||!!w.pending,canWrite=session.hasPermission('pricing:write');
- const today=platformBusinessDate(new Date()),paramRows=w.state?.platform.pricingParams||[],standard=order?applicablePricingParams(paramRows,order.type,today):undefined,monthFx=w.state?fxPeriodRateFor(w.state,'USD',today.slice(0,7)):undefined;
+ const today=platformBusinessDate(businessNow()),paramRows=w.state?.platform.pricingParams||[],standard=order?applicablePricingParams(paramRows,order.type,today):undefined,monthFx=w.state?fxPeriodRateFor(w.state,'USD',today.slice(0,7)):undefined;
  const below=!!standard&&/^\d+(?:\.\d{1,4})?$/.test(input.profitMargin.trim())&&markupBelowStandard(Number(input.profitMargin),standard);
  const chooseOrder=(orderId:string)=>{const next=orders.find(o=>o.id===orderId),std=next?applicablePricingParams(paramRows,next.type,today):undefined;setInput(!input.profitMargin.trim()&&std?{...input,orderId,profitMargin:String(std.profitMargin),commissionRate:String(std.commissionRate)}:{...input,orderId});};
  let result:ReturnType<typeof calculatePlatformPricing>|null=null,previewProblem='';

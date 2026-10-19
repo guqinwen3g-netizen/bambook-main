@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** 报价管理：成衣 / 面料两个板块分开；阶段流水线 + 报价单详情（版本链、审批、发送与客户反馈、转订单）。所有对外事实都登记真实依据。 */
 import React from 'react';
 import { Ban, Building2, CheckCircle2, CopyPlus, Download, FileText, Printer, Pencil, Plus, SearchX, Send, ShoppingBag, ThumbsDown, ThumbsUp, TimerOff, Undo2 } from 'lucide-react';
@@ -77,7 +78,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDomainChoice(null); } }, [route.id]);
-  const day = marketBusinessDate(new Date());
+  const day = marketBusinessDate(businessNow());
   const all = state?.market.quotations || [];
   const customerName = (id: string) => state?.customers.find(c => c.id === id)?.name || '未知客户';
   const routed = all.find(q => q.id === route.id);

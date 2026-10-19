@@ -1,3 +1,4 @@
+import {businessNow} from '../runtime/businessClock';
 import React from 'react';
 import { ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 import {
@@ -27,7 +28,8 @@ export function calendarFormError(form: {title:string;date:string;time:string}) 
 export function CalendarPage() {
   const {go,route}=useNav();const {state,workspace,loading,error,run,refresh,pending,recover,saving}=useMistWorkspace();const session=useMistSession();const toast=useToast();
   const scopeKey=`${session.sessionKey}:${workspace?.id||''}`;
-  const [selected,setSelected]=React.useState(()=>dayKey(new Date()));
+  const [selected,setSelected]=React.useState(()=>dayKey(businessNow()));
+  React.useEffect(()=>{if(!route.section)setSelected(dayKey(businessNow()));},[scopeKey,state?.settings.businessClock?.at,route.section]);
   const [editing,setEditing]=React.useState<string|null|undefined>(undefined);
   const [form,setForm]=React.useState({title:'',date:selected,time:'09:00',note:'',targetKey:''});
   const [originalTarget,setOriginalTarget]=React.useState<MistTarget|undefined>();
@@ -38,7 +40,7 @@ export function CalendarPage() {
   const activeEditing=formScope===scopeKey?editing:undefined;
   const visibleFailure=formScope===scopeKey?failure:'';
   React.useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
-  React.useEffect(()=>{setEditing(undefined);setForm({title:'',date:dayKey(new Date()),time:'09:00',note:'',targetKey:''});setOriginalTarget(undefined);setFailure('');setBusy(false);setFormScope(scopeKey);},[scopeKey]);
+  React.useEffect(()=>{setEditing(undefined);setForm({title:'',date:dayKey(businessNow()),time:'09:00',note:'',targetKey:''});setOriginalTarget(undefined);setFailure('');setBusy(false);setFormScope(scopeKey);},[scopeKey]);
   const events=(state?.calendar||[]).filter(event=>event.date===selected).slice().sort((a,b)=>a.time.localeCompare(b.time)||a.title.localeCompare(b.title));
   const week=calendarWeek(selected).map(day=>({...day,dots:(state?.calendar||[]).filter(event=>event.date===day.key).length}));
   React.useEffect(()=>{if(route.section&&!calendarFormError({title:'日期',date:route.section,time:'09:00'}))setSelected(route.section);},[route.section]);
@@ -70,7 +72,7 @@ export function CalendarPage() {
     <PageHeader eyebrow="我的事务 · 日历" title="日历" description="查看本周安排，记录日程并返回关联业务。" actions={<Button variant={activeEditing===undefined?'primary':'quiet'} icon={Plus} disabled={!state||loading||saving||!!pending||busy||activeEditing!==undefined} onClick={()=>open()}>新建日程</Button>} />
     <Toolbar right={<Button icon={RefreshCw} loading={loading} disabled={busy||saving} onClick={()=>void retry()}>刷新</Button>}>
       <Button icon={ChevronLeft} aria-label="上一周" onClick={()=>setSelected(date=>shiftDay(date,-7))}>上一周</Button>
-      <Button onClick={()=>setSelected(dayKey(new Date()))}>今天</Button>
+      <Button onClick={()=>setSelected(dayKey(businessNow()))}>今天</Button>
       <Button iconRight={ChevronRight} aria-label="下一周" onClick={()=>setSelected(date=>shiftDay(date,7))}>下一周</Button>
     </Toolbar>
     {(visibleFailure||error)&&<div className="mist-section"><Banner tone="bad" title="日程操作未完成" actions={<Button onClick={()=>void retry()}>重试读取</Button>}>{visibleFailure||error}</Banner></div>}

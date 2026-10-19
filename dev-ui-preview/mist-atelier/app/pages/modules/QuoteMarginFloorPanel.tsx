@@ -1,3 +1,4 @@
+import {businessNow} from '../../runtime/businessClock';
 /** BB-QUO-3 定价参数 · 报价底价线：按板块设置最低毛利率（带版本与生效日），仅管理层可改；报价保存时冻结适用版本。 */
 import React from 'react';
 import { Banner, Button, Card, CardHeader, DataTable, Field, FormGrid, Mono, Select, TextArea, TextInput, useToast, type Column } from '../../../../../components/mist';
@@ -17,7 +18,7 @@ export function marginFloorDraftProblem(input: { minMarginPercent: string; effec
 export function QuoteMarginFloorPanel() {
   const w = useMistWorkspace(), session = useMistSession(), toast = useToast();
   const floors: QuoteMarginFloor[] = ((w.state as (typeof w.state & { market?: MarketState }) | null)?.market?.marginFloors) || [];
-  const today = marketBusinessDate(new Date());
+  const today = marketBusinessDate(businessNow());
   const canAdmin = session.hasPermission('pricing:admin');
   const [input, setInput] = React.useState({ family: 'garment' as MarginFloorFamily, minMarginPercent: '', effectiveFrom: today, reason: '' });
   const [busy, setBusy] = React.useState(false), [error, setError] = React.useState('');

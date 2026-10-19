@@ -1,9 +1,10 @@
+import {OrderProductThumb} from './OrderProductThumb';
 /** T5 单据详情：沿用原 Mist 结构，全部内容属于当前订单。 */
 import React from 'react';
 import { BadgeCheck, Factory, FileText, Handshake, Package, Pencil, Send, Ship, Wallet } from 'lucide-react';
 import { BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dialog, Donut, Drawer, EmptyState, Field, FlowSteps, FormGrid, KeyValue, Meter, MistPage, Mono, ObjectCell, PageHeader, Pill, Select, SummaryBar, TextArea, TextInput, Thumb, UploadZone, useToast } from '../../../../components/mist';
 import type { MistOrder, MistOrderLine } from '../../../../server/src/shared/mistWorkspace';
-import { IMG, fmt } from '../data';
+import { fmt } from '../data';
 import { useNav } from '../nav';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useOptionalMistSession } from '../runtime/auth';
@@ -157,7 +158,7 @@ export function OrderDetailPage() {
     try { await run(command);if(alive.current&&activeScope.current===bound)onSuccess?.(); } catch (problem) { if(alive.current&&activeScope.current===bound)setFailure(problem instanceof Error ? problem.message : '保存失败，请重试'); } finally { if(alive.current&&activeScope.current===bound){operation.current=false;setWorking(false);} }
   };
   const columns = [
-    { key: 'n', header: '款式', width: 'minmax(170px,1.6fr)', render: (line: MistOrderLine) => <ObjectCell thumb={<Thumb src={IMG[line.img]} />} name={line.name} meta={<><Mono>{line.style}</Mono> · <span data-line-breakdown={line.id}>{breakdownShort((line as MistOrderLine&{breakdown?:OrderLineBreakdown}).breakdown)}</span></>} /> },
+    { key: 'n', header: '款式', width: 'minmax(170px,1.6fr)', render: (line: MistOrderLine) => <ObjectCell thumb={<OrderProductThumb line={line} category={order?.type ?? 'garment'}/>} name={line.name} meta={<><Mono>{line.style}</Mono> · <span data-line-breakdown={line.id}>{breakdownShort((line as MistOrderLine&{breakdown?:OrderLineBreakdown}).breakdown)}</span></>} /> },
     { key: 'q', header: '数量', width: '80px', align: 'right' as const, hideOnMobile: true, render: (line: MistOrderLine) => <span className="mist-num">{formatOrderQuantity(line.qty)} {line.unit}</span> },
     { key: 'p', header: `单价 ${order?.currency ?? ''}`, width: '76px', align: 'right' as const, hideOnMobile: true, render: (line: MistOrderLine) => <span className="mist-num">{amountLabel(lineAmounts.get(line.id) == null ? null : line.price)}</span> },
     { key: 'g', header: '生产进度', width: 'minmax(110px,1.2fr)', hideOnMobile: true, render: (line: MistOrderLine) => {const progress=lineProgress(line);return <Meter segments={[{ value: progress.qc, tone: 'ok' as const }, { value: Math.max(0, progress.made - progress.qc) }]} caption={`${progress.made}% · 已 QC ${progress.qc}%`} />;} },
