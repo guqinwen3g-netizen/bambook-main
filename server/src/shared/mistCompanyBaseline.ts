@@ -2,6 +2,7 @@ import {MIST_COMPANY_IDENTITY,mistCompanyDisplayName,renameMistCompanyIdentity} 
 import {applyMistCommand,createMistState,getMistReviewTasks,type MistCommand,type MistContext,type MistState} from './mistWorkspace';
 import {seedCompanyHistory} from './mistCompanyHistory';
 import {demoFileRecord} from './mistDemoFiles';
+import {completeCompanyProduct} from './mistCompanyCatalog';
 import type {MistAccountRef,MistMemberDirectoryEntry} from './mistAccounts';
 
 export const MIST_COMPANY_BASELINE_VERSION=4;
@@ -189,6 +190,7 @@ export function createMistCompanyBaseline(base:MistContext,roster:MistCompanyRos
  if(poMail&&poOrder){const order=state.orders.find(row=>row.id===poOrder.id),file=state.files.find(row=>order?.governance?.contract.confirmationFileIds.includes(row.id));if(order&&file){poMail.subject='采购确认：'+order.code;poMail.body=`Hi ${roster.garmentSales.name},\n\nPlease proceed with order ${order.code} as per the attached purchase order.\n${state.orderLines.filter(row=>row.orderId===order.id).map(row=>`${row.style}: ${row.qty} ${row.unit} at ${order.currency} ${row.price.toFixed(2)}`).join('\n')}\nDelivery: ${order.due}\n\nBest regards,\nEmma`;poMail.extracted=[];poMail.attachments=[{id:base.id(),fileId:file.id,name:file.name,size:file.size,contentType:file.mimeType}];}}
  state.reviewerIds=[...new Set(getMistReviewTasks(state).flatMap(task=>task.reviewerIds))];
  if(failures.length)onFailures?.(failures);
+ state.market.products=state.market.products.map(completeCompanyProduct);
  return renameMistCompanyIdentity(state);
 }
 
