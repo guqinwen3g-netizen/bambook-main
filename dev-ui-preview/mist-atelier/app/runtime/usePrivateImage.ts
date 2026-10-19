@@ -2,7 +2,7 @@ import React from 'react';
 import { apiService } from '../../../../services/apiService';
 import { useMistSession } from './auth';
 
-type Entry = { promise: Promise<string>; controller: AbortController; url?: string; users: number; bytes: number; usedAt: number };
+type Entry = { promise: Promise<string>; controller: AbortController; url?: string; users: number; bytes: number; usedAt: number; pending?: boolean };
 const images = new Map<string, Entry>();
 let currentScope = '', cachedBytes = 0;
 const MAX_CACHE_BYTES = 48 * 1024 * 1024;
@@ -32,7 +32,7 @@ function acquire(scope: string, path: string) {
     entry = { controller, users: 0, bytes: 0, usedAt: Date.now(), promise: Promise.resolve('') };
     const created = entry;
     entry.promise = fetch(path, { headers: apiService.getAuthHeaders(), credentials: 'include', signal: controller.signal })
-      .then(response => { if (!response.ok) throw new Error('图片读取失败'); return response.blob(); })
+      .then(async response => { if (!response.ok) throw new Error('图片读取失败');created.pending=response.headers?.get?.('X-Bambook-Cutout')==='pending';return response.blob(); })
       .then(blob => {
         if (controller.signal.aborted) throw new Error('图片读取已取消');
         created.bytes = blob.size; cachedBytes += blob.size; created.usedAt = Date.now();
@@ -69,12 +69,12 @@ export function usePrivateImageResourceForScope(path:string|undefined,scope:stri
   React.useEffect(() => {
     if (!path) return;
     setFailure(undefined);
-    let active = true;
+    let active = true,retryTimer:ReturnType<typeof setTimeout>|undefined;
     const acquired = acquire(scope, path); acquired.entry.users++;
-    void acquired.entry.promise.then(url => { if (active) setImage({ key, url }); }).catch(() => {
+    void acquired.entry.promise.then(url => { if(active){setImage({key,url});if(acquired.entry.pending)retryTimer=setTimeout(()=>{remove(acquired.key,acquired.entry);setAttempt(value=>value+1);},3000);}}).catch(() => {
       remove(acquired.key, acquired.entry); if (active) { setImage(undefined); setFailure(key); }
     });
-    return () => { active = false; acquired.entry.users--; acquired.entry.usedAt = Date.now(); trim(); };
+    return () => { active = false;if(retryTimer)clearTimeout(retryTimer); acquired.entry.users--; acquired.entry.usedAt = Date.now(); trim(); };
   }, [key, path, scope, attempt]);
   return { src: image?.key === key ? image.url : undefined, failed: failure === key, retry: () => setAttempt(value => value + 1) };
 }

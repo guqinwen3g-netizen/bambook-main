@@ -588,9 +588,9 @@ export class MistRepository {
       const { row, actor } = await this.own(db, prior, workspaceId);
       const file = Array.isArray(row.state.files) ? row.state.files.find((item: MistStoredFile) => item.id === fileId) : null;
       if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), row.ownerId)) fail('FILE_NOT_FOUND', '附件不存在或不属于此工作区', 404);
-      const bytes = preview ? await this.files.readPreview(workspaceId, file, preview) : await this.files.read(workspaceId, file);
+      const previewReady=preview?await this.files.previewReady(workspaceId,file,preview):undefined,bytes = preview ? await this.files.readPreview(workspaceId, file, preview) : await this.files.read(workspaceId, file);
       await this.authorize(db, prior);
-      return { file, bytes };
+      return { file, bytes,previewReady };
     });
     return result;
   }

@@ -31,7 +31,7 @@ node --version
 # Directories: releases are owned by the delivery account; persistent runtime data lives in shared/.
 install -d -m 0755 -o "$deploy_user" -g "$deploy_user" "$root" "$root/releases" "$root/shared"
 install -d -m 0700 -o "$deploy_user" -g "$deploy_user" "$root/shared/mist-files" "$root/shared/ai-subscriptions" "$root/shared/logs" \
-  "$root/shared/uploads" "$root/shared/private-files" "$root/shared/storage" "$root/shared/data" "$root/shared/output"
+  "$root/shared/uploads" "$root/shared/private-files" "$root/shared/storage" "$root/shared/data" "$root/shared/output" "$root/shared/cutout-queue"
 install -d -m 0750 -o root -g "$deploy_user" "$etc"
 
 # Dedicated development database and role. The password is generated once and only written to backend.env.
@@ -70,6 +70,9 @@ ensure_env BAMBOOK_PRIVATE_FILES_DIR "$root/shared/private-files"
 ensure_env SYSTEM_CONFIG_ENCRYPTION_KEY "$(openssl rand -hex 32)"
 ensure_env BAMBOOK_COOKIE_SECRET "$(openssl rand -hex 32)"
 ensure_env BAMBOOK_CODEX_SUBSCRIPTION 1
+ensure_env BAMBOOK_IMAGE_CUTOUT_QUEUE "$root/shared/cutout-queue"
+ensure_env BAMBOOK_BACKGROUND_REMOVAL_MODEL_TYPE isnet
+ensure_env BAMBOOK_BACKGROUND_REMOVAL_MODEL_VERSION isnet-general-use-q8-v1
 # Development host never syncs with the production PDML system.
 ensure_env PDML_SYNC_DISABLED true
 chown root:"$deploy_user" "$etc/backend.env"; chmod 0640 "$etc/backend.env"
@@ -126,8 +129,42 @@ MemoryMax=768M
 [Install]
 WantedBy=multi-user.target
 UNIT
+cat > /etc/systemd/system/bambook-dev-cutout.service <<UNIT
+[Unit]
+Description=Bambook product image cutout worker
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=$deploy_user
+Group=$deploy_user
+WorkingDirectory=$root/current/server
+EnvironmentFile=$etc/backend.env
+EnvironmentFile=-$etc/cutout.env
+ExecStart=/usr/bin/node node_modules/tsx/dist/cli.mjs scripts/image-cutout-worker.ts
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=$root/shared
+MemoryMax=768M
+MemorySwapMax=512M
+CPUWeight=20
+Nice=10
+UNIT
+cat > /etc/systemd/system/bambook-dev-cutout.path <<UNIT
+[Unit]
+Description=Watch Bambook product image cutout queue
+
+[Path]
+PathExistsGlob=$root/shared/cutout-queue/*.json
+Unit=bambook-dev-cutout.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT
 systemctl daemon-reload
-systemctl enable bambook-dev.service bambook-dev-mist.service >/dev/null
+systemctl enable bambook-dev.service bambook-dev-mist.service bambook-dev-cutout.path >/dev/null
 cat > /etc/sudoers.d/bambook-deploy <<SUDO
 $deploy_user ALL=(root) NOPASSWD: /usr/bin/systemctl restart bambook-dev.service, /usr/bin/systemctl stop bambook-dev.service, /usr/bin/systemctl restart bambook-dev-mist.service, /usr/bin/systemctl stop bambook-dev-mist.service
 SUDO
