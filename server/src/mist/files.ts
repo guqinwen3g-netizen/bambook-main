@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fail } from './errors';
 import { imagePreview, type ImagePreviewMode } from './imagePreview';
+import {IMAGE_CUTOUT_VERSION} from './backgroundRemoval';
 export const MIST_FILE_MAX_BYTES = 50 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export type MistFileInput = { bytes: Buffer; name: string; mimeType: string; multipartFilename?: boolean };
@@ -43,7 +44,7 @@ export class MistPrivateFiles {
     if (meta.mimeType.startsWith('image/')) await Promise.allSettled((['thumb', 'display', 'cutout-thumb', 'cutout-display'] as const).map(mode => this.writePreview(target.file, input.bytes, meta.mimeType, mode)));
     return { id, name: input.multipartFilename ? multipartDisplayName(meta.name) : meta.name, mimeType: meta.mimeType, size: meta.size, storageKey: `${workspaceId}/${id}`, createdAt: now };
   }
-  private previewPath(file: string, mode: ImagePreviewMode) { return `${file}.preview-${mode}.webp`; }
+  private previewPath(file: string, mode: ImagePreviewMode) { return `${file}.preview-${mode}${mode.startsWith('cutout-')?'.'+IMAGE_CUTOUT_VERSION:''}.webp`; }
   private async writePreview(file: string, bytes: Buffer, mimeType: string, mode: ImagePreviewMode) {
     const preview = await imagePreview(bytes, mimeType, mode), destination = this.previewPath(file, mode), temporary = `${destination}.${randomUUID()}.tmp`;
     const handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);

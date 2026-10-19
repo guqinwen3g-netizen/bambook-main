@@ -166,7 +166,7 @@ describe('Mist transactional workspace', () => {
     const files = new MistPrivateFiles(root), workspaceId = randomUUID();
     const bytes = await sharp({ create: { width: 1200, height: 800, channels: 3, background: '#778899' } }).png().toBuffer();
     const file = await files.write(workspaceId, { bytes, name: 'fabric.png', mimeType: 'image/png' }, new Date().toISOString());
-    expect(await readdir(path.join(root, workspaceId))).toEqual(expect.arrayContaining([file.id, `${file.id}.preview-thumb.webp`, `${file.id}.preview-display.webp`,`${file.id}.preview-cutout-thumb.webp`,`${file.id}.preview-cutout-display.webp`]));
+    expect(await readdir(path.join(root, workspaceId))).toEqual(expect.arrayContaining([file.id, `${file.id}.preview-thumb.webp`, `${file.id}.preview-display.webp`,`${file.id}.preview-cutout-thumb.birefnet-general-swin-tiny-232-v1.webp`,`${file.id}.preview-cutout-display.birefnet-general-swin-tiny-232-v1.webp`]));
     expect((await files.readPreview(workspaceId, file, 'display')).length).toBeLessThan(bytes.length);
     await files.remove(workspaceId, file); expect(await readdir(path.join(root, workspaceId))).toEqual([]);
   });
