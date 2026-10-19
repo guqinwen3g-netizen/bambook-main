@@ -32,7 +32,7 @@ export function productReferences(product: MarketProduct, market: MarketState, o
 }
 
 /** Preview resolution can run while the provider is switching identities; never fetch a stale URL or throw from render. */
-export function useProductImage(product: MarketProduct, mode: 'thumb' | 'display' = 'thumb', selectedId?: string) {
+export function useProductImage(product: MarketProduct, mode: 'cutout-thumb' | 'cutout-display' = 'cutout-thumb', selectedId?: string) {
   const w = useMistWorkspace();
   const images = (product.fileIds ?? []).map(id => w.state?.files?.find(f => f.id === id && f.mimeType.startsWith('image/'))).filter((f): f is NonNullable<typeof f> => !!f);
   const file = images.find(f => f.id === selectedId) ?? images[0];

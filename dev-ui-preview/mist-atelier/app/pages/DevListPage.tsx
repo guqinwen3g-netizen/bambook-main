@@ -2,10 +2,9 @@ import {businessNow} from '../runtime/businessClock';
 /** T2: original list/preview and board compositions, using the shared Mist workspace. */
 import React from 'react';
 import {developmentDomain,developmentInitiator,developmentInitiatorLabel} from '../../../../server/src/shared/mistDevelopmentDomain';
-import { apiService } from '../../../../services/apiService';
 import { ArrowRight, ChevronRight, Columns3, Download, Layers, List, Plus, SearchX } from 'lucide-react';
 import { Avatar, Banner, Button, Card, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MistPage, Mono, ObjectCell, ObjectStage, PageHeader, Pagination, Pill, Pipeline, SearchField, Segmented, StageProgress, Tabs, TextArea, Select, TextInput, TextLink, Thumb, Toolbar, UploadZone, useToast, type Column } from '../../../../components/mist';
-import type { MistDev, MistFabric } from '../../../../server/src/shared/mistWorkspace';
+import type { MistDev, MistFabric, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { IMG, STAGES, STAGE_COLORS } from '../data';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useOptionalMistSession } from '../runtime/auth';
@@ -13,6 +12,7 @@ import { defaultMemberId, memberSelectOptions, workspaceMembers } from '../runti
 import { useNav } from '../nav';
 import { useCompactLayout } from './modules/pageKit';
 import { DEVELOPMENT_LIST_TABS, SOURCING_CREATE_ID, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from '../developmentEntry';
+import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
 
 type CsvDev = Pick<MistDev,'id'|'name'|'style'|'customer'|'owner'|'due'|'stage'|'state'|'ver'|'factory'> & {code?:string};
 export function developmentCsv(rows:CsvDev[]):string {
@@ -21,6 +21,8 @@ export function developmentCsv(rows:CsvDev[]):string {
 }
 function downloadDevelopmentCsv(rows:CsvDev[],label='开发案'){const url=URL.createObjectURL(new Blob([developmentCsv(rows)],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`Bambook-${label}案.csv`;document.body.append(link);link.click();link.remove();URL.revokeObjectURL(url);}
 const shortDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/.test(value)?value.slice(5).replace('-','/'):value||'未定';
+function developmentImageFile(state:MistState|null|undefined,dev:MistDev|undefined){if(!state||!dev)return undefined;const version=(state.versions??[]).find(item=>item.id===dev.currentVersionId),files=state.files??[];return firstWorkspaceImage(files,version?.fileIds)||firstWorkspaceImage(files,dev.fileIds);}
+function DevelopmentThumb({state,dev,size}:{state:MistState|null|undefined;dev:MistDev;size?:'sm'}){const file=developmentImageFile(state,dev),image=useWorkspaceImage(file,'cutout-thumb');return <Thumb {...(image.src?{src:image.src}:developmentDomain(dev.values)==='fabric'?{icon:Layers}:{src:IMG[dev.img]})} size={size}/>;}
 export function developmentDueDays(value:string,now=businessNow()):number|null {
   const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(value);if(!match)return null;
   const [year,month,day]=match.slice(1).map(Number),date=new Date(Date.UTC(year,month-1,day));
@@ -42,7 +44,7 @@ export function DevListPage(){
 }
 type StageFilter=number|'draft';
 function DevListTabPage({tab}:{tab:DevelopmentListTab}){
-  const {go,route}=useNav();const {state,loading,error,run,uploadFile,downloadFile,fileUrl,pending,recover,saving,workspace}=useMistWorkspace();const toast=useToast();const session = useOptionalMistSession();const members=workspaceMembers(workspace,state,session?.user);
+  const {go,route}=useNav();const {state,loading,error,run,uploadFile,downloadFile,pending,recover,saving,workspace}=useMistWorkspace();const toast=useToast();const session = useOptionalMistSession();const members=workspaceMembers(workspace,state,session?.user);
   const [q,setQ]=React.useState(''),[stage,setStage]=React.useState<StageFilter>(-1),[owner,setOwner]=React.useState('all'),[customer,setCustomer]=React.useState('all'),[initiator,setInitiator]=React.useState('all'),[category,setCategory]=React.useState('all'),[mode,setMode]=React.useState<'list'|'board'>('list'),[selected,setSelected]=React.useState<string|null>(null),[page,setPage]=React.useState(1),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState('');
   const domain=tab==='sourcing'?null:tab,tabConfig=DEVELOPMENT_LIST_TABS.find(item=>item.value===tab)!;
   const [fabricOpen,setFabricOpen]=React.useState(false),[fabricId,setFabricId]=React.useState<string|null>(null),[fabricForm,setFabricForm]=React.useState({name:'',request:'',ownerId:'',ownerName:'',due:'',answer:'',note:'',fileIds:[] as string[]});
@@ -63,9 +65,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
   const create=()=>{const target=developmentCreateTarget(tab);go(target.view,target.id,target.target);};
   const chooseStage=(value:StageFilter)=>{setStage(value);setSelected(null);if(value==='draft'){setOwner('all');setMode('list');}};
   const clearFilters=()=>{setStage(-1);setQ('');setOwner('all');setCustomer('all');setInitiator('all');setCategory('all');};
-  const mediaFile=sel?.fileIds.map(id=>state?.files.find(file=>file.id===id)).find(file=>file?.mimeType.startsWith('image/'));
-  const mediaUrl=mediaFile?fileUrl(mediaFile):'', [picture,setPicture]=React.useState<string>(),[pictureError,setPictureError]=React.useState(false),[pictureRetry,setPictureRetry]=React.useState(0);
-  React.useEffect(()=>{let active=true,objectUrl='';const controller=new AbortController();setPicture(undefined);setPictureError(false);if(mediaUrl)void fetch(mediaUrl,{headers:apiService.getAuthHeaders(),credentials:'include',signal:controller.signal}).then(response=>{if(!response.ok)throw Error('图片读取失败');return response.blob();}).then(blob=>{if(active){objectUrl=URL.createObjectURL(blob);setPicture(objectUrl);}}).catch(()=>{if(active)setPictureError(true);});return()=>{active=false;controller.abort();if(objectUrl)URL.revokeObjectURL(objectUrl);};},[mediaUrl,pictureRetry]);
+  const mediaFile=developmentImageFile(state,sel),image=useWorkspaceImage(mediaFile,'cutout-display'),picture=image.src,pictureError=image.failed;
   const open=(dev:MistDev)=>go('development/detail',dev.id,{versionId:dev.currentVersionId||undefined});
   // ≤1180px 不显示预览栏：点按一行直接打开开发案（触屏没有双击）。
   const compact=useCompactLayout();
@@ -87,7 +87,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
   const recoverWrite=async()=>{if(!pending||busyRef.current)return;const original=pending;busyRef.current=true;setBusy(true);try{const receipt=await recover();if(!receipt||!live.current)return;if(original.kind==='upload'){const id=receipt.result.fileId||receipt.result.id;if(id)setFabricForm(form=>({...form,fileIds:[...new Set([...form.fileIds,id])]}));}else closeFabric();setFailure('');toast('原操作结果已核对');}catch(cause){if(live.current)setFailure(String(cause));}finally{busyRef.current=false;if(live.current)setBusy(false);}};
   const recovery=pending?<Button loading={busy||saving} onClick={()=>void recoverWrite()}>核对原操作结果</Button>:null;
   const columns:Column<MistDev>[]=[
-    {key:'obj',header:'开发对象',width:'minmax(200px,2.2fr)',render:dev=><ObjectCell thumb={<Thumb {...(developmentDomain(dev.values)==='fabric'?{icon:Layers}:{src:IMG[dev.img]})} />} name={dev.name} meta={<><Mono>{dev.style}</Mono> · {dev.code} · {developmentInitiatorLabel(dev.values)}</>} />,sortValue:dev=>dev.name},
+    {key:'obj',header:'开发对象',width:'minmax(200px,2.2fr)',render:dev=><ObjectCell thumb={<DevelopmentThumb state={state} dev={dev}/>} name={dev.name} meta={<><Mono>{dev.style}</Mono> · {dev.code} · {developmentInitiatorLabel(dev.values)}</>} />,sortValue:dev=>dev.name},
     {key:'owner',header:'负责人',width:'44px',hideOnMobile:true,render:dev=><Avatar name={dev.owner} size="sm" />},
     {key:'stage',header:'阶段',width:'112px',hideOnMobile:true,render:dev=><><StageProgress total={5} current={dev.stage} label={STAGES[dev.stage]} /><span className="mist-cell-sub" style={{marginTop:7}}>{STAGES[dev.stage]} · {dev.ver}</span></>,sortValue:dev=>dev.stage},
     {key:'due',header:'目标日期',width:'76px',hideOnMobile:true,render:dev=><div className={late(dev.due)?'mist-cell-late':undefined}><b className="mist-cell-strong">{shortDate(dev.due)}</b><span className="mist-cell-sub">{developmentDueText(dev.due)}</span></div>,sortValue:dev=>dev.due},
@@ -111,7 +111,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
       {key:'o',header:'发起人',width:'60px',hideOnMobile:true,render:fabric=><Avatar name={fabric.owner} size="sm" />},
       {key:'d',header:'目标日期',width:'80px',hideOnMobile:true,render:fabric=><b className="mist-cell-strong">{shortDate(fabric.due)}</b>},
       {key:'s',header:'状态',width:'120px',render:fabric=><Pill tone={fabric.tone}>{fabric.state}</Pill>},
-    ]} empty={<EmptyState icon={SearchX} title={fabrics.length?'没有符合条件的寻样任务':'暂无面料寻样'} description={fabrics.length?'试试清除筛选或换个关键词':'在现有面料档案和供应商范围内发起寻样。'} />} footer={<span>{fabricRows.length} 个寻样任务 · {state?.settings.workspaceName||''}</span>} /></Card>:mode==='board'?<Kanban columns={STAGES.map((label,index)=>({id:String(index),title:label,color:STAGE_COLORS[index],items:filtered.filter(dev=>dev.stage===index)}))} itemKey={dev=>dev.id} onMove={busy?undefined:(id,column)=>void move(id,column)} onOpen={open} renderCard={dev=><><div className="mist-row"><Thumb {...(developmentDomain(dev.values)==='fabric'?{icon:Layers}:{src:IMG[dev.img]})} size="sm" /><div style={{minWidth:0}}><b>{dev.name}</b><div className="mist-obj-meta"><Mono>{dev.code}</Mono></div></div></div><div className="mist-kb-card-foot"><Pill tone={dev.tone}>{dev.state}</Pill><span className="mist-spacer" /><Avatar name={dev.owner} size="xs" />{shortDate(dev.due)}</div></>} />:<>
+    ]} empty={<EmptyState icon={SearchX} title={fabrics.length?'没有符合条件的寻样任务':'暂无面料寻样'} description={fabrics.length?'试试清除筛选或换个关键词':'在现有面料档案和供应商范围内发起寻样。'} />} footer={<span>{fabricRows.length} 个寻样任务 · {state?.settings.workspaceName||''}</span>} /></Card>:mode==='board'?<Kanban columns={STAGES.map((label,index)=>({id:String(index),title:label,color:STAGE_COLORS[index],items:filtered.filter(dev=>dev.stage===index)}))} itemKey={dev=>dev.id} onMove={busy?undefined:(id,column)=>void move(id,column)} onOpen={open} renderCard={dev=><><div className="mist-row"><DevelopmentThumb state={state} dev={dev} size="sm"/><div style={{minWidth:0}}><b>{dev.name}</b><div className="mist-obj-meta"><Mono>{dev.code}</Mono></div></div></div><div className="mist-kb-card-foot"><Pill tone={dev.tone}>{dev.state}</Pill><span className="mist-spacer" /><Avatar name={dev.owner} size="xs" />{shortDate(dev.due)}</div></>} />:<>
       <Pipeline<StageFilter> value={stage} onChange={chooseStage} items={[{value:-1,label:'全部',count:scoped.length,color:'var(--mist-ink-2)'},...STAGES.map((label,index)=>({value:index,label,count:scoped.filter(dev=>dev.stage===index).length,color:STAGE_COLORS[index]})),{value:'draft',label:'草稿',count:draftRows.length,color:'var(--mist-ink-3)'}]} />
       {drafting?<Card><DataTable ariaLabel={tabConfig.label+'草稿'} loading={loading} rows={draftRows} rowKey={draft=>draft.id} onRowClick={draft=>go('development/new',draft.id,{section:developmentDomain(draft.values)})} columns={[
         {key:'name',header:'开发草稿',width:'minmax(200px,2fr)',render:draft=><ObjectCell thumb={<Thumb icon={Layers} />} name={draft.values.name||'未命名草稿'} meta={draft.values.style||(domain==='fabric'?'面料开发草稿':'待补客户款号')} />},
@@ -119,7 +119,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
         {key:'updated',header:'保存时间',render:draft=>new Date(draft.updatedAt).toLocaleString()},
       ]} empty={<EmptyState title={domainDrafts.length?'没有符合条件的草稿':'暂无'+tabConfig.label+'草稿'} description={domainDrafts.length?'试试清除筛选或换个关键词':'在'+tabConfig.create+'中保存草稿后，可在这里继续填写。'} />} footer={<span>{draftRows.length} 份草稿 · {state?.settings.workspaceName||''}</span>} /></Card>:<>
       <div className="mist-split"><Card><DataTable ariaLabel={tabConfig.label+'案'} loading={loading} columns={columns} rows={rows} rowKey={dev=>dev.id} selectedKey={sel?.id} density="comfy" onRowClick={dev=>compact?open(dev):setSelected(dev.id)} onRowDoubleClick={open} empty={<EmptyState icon={SearchX} title="没有符合条件的开发案" description="试试清除筛选或换个关键词" action={<TextLink onClick={clearFilters}>清除筛选</TextLink>} />} footer={<><span>{filtered.length} 个{tabConfig.label}案 · {state?.settings.workspaceName||''}</span><TextLink icon={Download} disabled={!filtered.length} onClick={()=>downloadDevelopmentCsv(filtered,tabConfig.label)}>导出</TextLink><Pagination page={currentPage} pages={pages} onChange={setPage} /></>} /></Card>
-        <Card as="aside" className="mist-preview">{sel?<>{(mediaFile&&!picture)||developmentDomain(sel.values)==='fabric'&&!picture?<div className="mist-stage"><EmptyState icon={Layers} title={!mediaFile?'尚未上传实物图片':pictureError?'图片读取失败':'正在读取图片'} description={mediaFile?.name||'打开开发案查看准确版本与返样记录'} action={pictureError?<TextLink onClick={()=>setPictureRetry(value=>value+1)}>重试</TextLink>:undefined} /></div>:<ObjectStage src={picture||IMG[sel.img]} alt={sel.name} topLeft={<Pill tone={sel.tone}>{sel.state}</Pill>} topRight={sel.ver} />}<div className="mist-preview-b"><div><span className="mist-mono mist-muted" style={{fontSize:12}}>{sel.style}</span><div className="mist-h2" style={{fontSize:19,marginTop:4}}>{sel.name}</div><p className="mist-sub" style={{fontSize:13,marginTop:8}}>{sel.goal}</p></div><Facts items={[{label:'负责人',value:sel.owner},{label:'目标日期',value:shortDate(sel.due)},{label:'工厂',value:sel.factory},{label:'参与工厂',value:`${sel.fac} 家`}]} /><Button variant="primary" block iconRight={ArrowRight} onClick={()=>open(sel)}>打开开发案</Button></div></>:<EmptyState icon={Layers} title="开发案预览" description="从列表选择开发对象" />}</Card>
+        <Card as="aside" className="mist-preview">{sel?<>{(mediaFile&&!picture)||developmentDomain(sel.values)==='fabric'&&!picture?<div className="mist-stage"><EmptyState icon={Layers} title={!mediaFile?'尚未上传实物图片':pictureError?'图片读取失败':'正在读取图片'} description={mediaFile?.name||'打开开发案查看准确版本与返样记录'} action={pictureError?<TextLink onClick={image.retry}>重试</TextLink>:undefined} /></div>:<ObjectStage src={picture||IMG[sel.img]} alt={sel.name} topLeft={<Pill tone={sel.tone}>{sel.state}</Pill>} topRight={sel.ver} />}<div className="mist-preview-b"><div><span className="mist-mono mist-muted" style={{fontSize:12}}>{sel.style}</span><div className="mist-h2" style={{fontSize:19,marginTop:4}}>{sel.name}</div><p className="mist-sub" style={{fontSize:13,marginTop:8}}>{sel.goal}</p></div><Facts items={[{label:'负责人',value:sel.owner},{label:'目标日期',value:shortDate(sel.due)},{label:'工厂',value:sel.factory},{label:'参与工厂',value:`${sel.fac} 家`}]} /><Button variant="primary" block iconRight={ArrowRight} onClick={()=>open(sel)}>打开开发案</Button></div></>:<EmptyState icon={Layers} title="开发案预览" description="从列表选择开发对象" />}</Card>
       </div>
       </>}
     </>}

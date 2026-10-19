@@ -57,7 +57,7 @@ function Attachments({kind,row,locked=false}:{kind:AttachmentKind;row:{id:string
 function ProductImage({row}:{row:MarketProduct}) {
  const [selected,setSelected]=React.useState<string>();
  React.useEffect(()=>setSelected(undefined),[row.id]);
- const {file,src,images,failed,retry}=useProductImage(row,'display',selected);
+ const {file,src,images,failed,retry}=useProductImage(row,'cutout-display',selected);
  if(!images.length)return null;
  return <section aria-label="产品图片" className="mist-col">
   {src&&file?<ObjectStage src={src} alt={row.name} caption={file.name}/>:failed?<Banner tone="bad" title="图片未能加载"><Button onClick={retry}>重试</Button></Banner>:<p className="mist-note" role="status">正在读取图片…</p>}

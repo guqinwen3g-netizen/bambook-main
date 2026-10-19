@@ -61,9 +61,7 @@ export function clearPrivateImages() {
   currentScope = '';
 }
 
-export function usePrivateImageResource(path: string | undefined, scopeHint = '') {
-  const session = useMistSession();
-  const scope = `${session.sessionKey}:${session.user?.id || ''}:${scopeHint}`;
+export function usePrivateImageResourceForScope(path:string|undefined,scope:string){
   const key = `${scope}:${path || ''}`;
   const [image, setImage] = React.useState<{ key: string; url: string }>();
   const [failure, setFailure] = React.useState<string>();
@@ -79,6 +77,10 @@ export function usePrivateImageResource(path: string | undefined, scopeHint = ''
     return () => { active = false; acquired.entry.users--; acquired.entry.usedAt = Date.now(); trim(); };
   }, [key, path, scope, attempt]);
   return { src: image?.key === key ? image.url : undefined, failed: failure === key, retry: () => setAttempt(value => value + 1) };
+}
+export function usePrivateImageResource(path: string | undefined, scopeHint = '') {
+  const session = useMistSession();
+  return usePrivateImageResourceForScope(path,`${session.sessionKey}:${session.user?.id || ''}:${scopeHint}`);
 }
 
 export function usePrivateImage(path: string | undefined, scopeHint = ''): string | undefined { return usePrivateImageResource(path, scopeHint).src; }

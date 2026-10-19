@@ -20,6 +20,7 @@ import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { MistPrivateFiles, validateFileInput, type MistFileInput, type MistStoredFile } from './files';
+import type { ImagePreviewMode } from './imagePreview';
 import { prepareMistBusinessNumbers } from './businessNumbers';
 import { buildIssueArchive, bindIssueArchive, prepareCreditDocumentSnapshot, assertCreditIssuePayload, assertIssuedCreditArchive, type PreparedCreditIssueArchive } from './creditPrint';
 import { buildQuotationDocument, bindQuotationDocument, nextQuotationDocumentSeq, prepareQuotationDocumentSnapshot } from './quotationPrint';
@@ -582,7 +583,7 @@ export class MistRepository {
     const meta = validateFileInput(file);
     return this.executeInternal(prior, workspaceId, {...input,claimId}, { upload: meta,...(claimId===undefined?{}:{claimId}) }, file);
   }
-  async download(prior: TokenPayload, workspaceId: string, fileId: string, preview?: 'thumb' | 'display') {
+  async download(prior: TokenPayload, workspaceId: string, fileId: string, preview?: ImagePreviewMode) {
     const result = await this.transact(async db => {
       const { row, actor } = await this.own(db, prior, workspaceId);
       const file = Array.isArray(row.state.files) ? row.state.files.find((item: MistStoredFile) => item.id === fileId) : null;
