@@ -49,6 +49,7 @@
     "mailparser": "^3.9.1",
     "multer": "^2.0.0",
     "nodemailer": "^7.0.12",
+    "onnxruntime-node": "^1.30.0",
     "pdf-parse": "^2.4.5",
     "pinyin-pro": "^3.29.5",
     "resend": "^6.12.3",

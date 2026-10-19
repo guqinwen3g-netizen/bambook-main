@@ -55,6 +55,12 @@ GitHub 的 deployment / ops 工作流均已停用。仓库只负责源码、PR �
 
 更新 `/etc/bambook-dev/backend.env` 时须保留原 uid/gid 和权限（开发基线为 `root:bambook-deploy`、`0640`）。原子替换临时文件必须在 rename 前设置相同元数据；不可改成仅 root 可读，否则受限发布程序会在激活前拒绝。修改后以服务账号检查可读性，不输出文件内容；回执和配置备份仍只留私有目录。
 
+## 产品图去背景模型
+
+产品图透明派生使用 BiRefNet 官方通用 Swin-Tiny ONNX 权重（MIT），来源固定为官方 GitHub Release `v1/BiRefNet-general-bb_swin_v1_tiny-epoch_232.onnx`。模型文件 224,005,088 bytes，SHA-256 为 `5600024376f572a557870a5eb0afb1e5961636bef4e1e22132025467d0f03333`；模型只保存在本机和服务器私有模型目录，不进入公开仓库或部署包。
+
+服务器私有环境用 `BAMBOOK_BACKGROUND_REMOVAL_MODEL` 指向模型绝对路径，并用 `BAMBOOK_BACKGROUND_REMOVAL_MODEL_SHA256` 固定摘要。加载失败、摘要不符、输出前景范围异常或推理失败时必须回退普通预览，不能阻断原图上传，也不能用颜色阈值强行生成破损边缘。推理只在服务器本地进行，原图不发送外部模型服务；上传时串行处理以限制 4GB 主机内存，透明派生生成后与附件一同保存和清理。
+
 ## 大文件上传与当前隧道配置
 
 2026-10-19 实测：应用本机上传正常，外部入口的 QUIC 隧道在传输中途断开，Nginx 只收到部分请求体。保留私有配置备份后，将当前隧道的 `protocol` 固定为 `http2`；原 2.5MB 请求在服务器公网入口和本机分别复测为 201，返回同一回执而未新增副本。TLS、认证和私有附件权限保持。相关官方参数见 [Cloudflare Tunnel run parameters](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/)。
