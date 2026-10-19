@@ -79,6 +79,17 @@ class DirectDeliveryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Commit or isolate'):
                 direct.clean_revision()
 
+    def test_public_requests_identify_delivery_client(self):
+        sha = 'a' * 40
+        values = [{'commit': 'a' * 7, 'localChanges': 0}, {'status': 'ok', 'database': 'ok', 'mode': 'server'}]
+        with mock.patch.object(direct.urllib.request, 'urlopen', side_effect=[io.BytesIO(json.dumps(v).encode()) for v in values]) as request:
+            self.assertTrue(direct.already_live(sha))
+            for call in request.call_args_list:
+                self.assertEqual(call.args[0].get_header('User-agent'), 'Bambook-Development-Delivery/1.0')
+        with mock.patch.object(direct.urllib.request, 'urlopen', return_value=io.BytesIO(json.dumps(values[0]).encode())) as request:
+            direct.public_version(sha)
+            self.assertEqual(request.call_args.args[0].get_header('User-agent'), 'Bambook-Development-Delivery/1.0')
+
     def test_public_confirmation_requires_exact_revision_and_clean_build(self):
         sha = 'a' * 40
         for value in [{'commit': '', 'localChanges': 0}, {'commit': 'b' * 7, 'localChanges': 0}, {'commit': 'a' * 7, 'localChanges': 1}]:
