@@ -171,3 +171,6 @@ server/private/
 
 # Mist 溢出扫描输出（npm run mist:overflow）
 /mist-overflow/
+
+# Local assistant memory and runtime state
+.workbuddy/

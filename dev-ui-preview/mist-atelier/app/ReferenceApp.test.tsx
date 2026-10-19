@@ -121,6 +121,7 @@ beforeEach(async () => {
     const url = new URL(String(source), location.href), body = typeof init.body === 'string' ? JSON.parse(init.body) : undefined;
     requests.push({ path: url.pathname, method: init.method ?? 'GET', body, authorization: new Headers(init.headers).get('Authorization') ?? undefined });
     const special = override?.(url, init); if (special) return special;
+    if(url.pathname==='/api/hr/teams/mine')return json({ok:true,teams:[]});
     if(url.pathname==='/api/mist/session')return json({message:'Not found'},404);
     if (url.pathname.endsWith('/auth/logout')) return json({ ok: true });
     if (url.pathname.endsWith('/auth/login')) { const signedIn = actor && actor.id === body.identifier ? actor : user(body.identifier); actor = signedIn; return json({ user: signedIn, token: `token-${signedIn.id}` }); }
@@ -152,29 +153,29 @@ describe('one Mist entry with real authentication and workspace state', () => {
     await click(getByRole(host!,'button',{name:'打开准确版本'}));
     input(getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement,'属于原身份的草稿');
     await click(host!.querySelector<HTMLButtonElement>('.mist-me')!);
-    const drawer=getByRole(host!,'dialog',{name:'本地工作区'});
+    const drawer=getByRole(host!,'dialog',{name:'本地身份'});
     expect(queryByRole(drawer,'button',{name:'退出登录'})).toBeNull();
     await click(getByRole(drawer,'button',{name:'本地审批人'}));
     await waitFor(()=>expect(new URLSearchParams(location.search).get('view')).toBe('cockpit'));
-    expect(queryByRole(host!,'dialog',{name:'本地工作区'})).toBeNull();
+    expect(queryByRole(host!,'dialog',{name:'本地身份'})).toBeNull();
     expect(queryByRole(host!,'textbox',{name:'本批次草稿'})).toBeNull();
     const switchRequest=requests.find(r=>r.path==='/api/mist/session'&&r.method==='POST');
     expect(switchRequest?.body).toEqual({profileId:'local-reviewer'});
     await click(host!.querySelector<HTMLButtonElement>('.mist-me')!);
-    expect(getByRole(host!, 'dialog', { name: '本地工作区' }).textContent).toContain('本地审批人');
+    expect(getByRole(host!, 'dialog', { name: '本地身份' }).textContent).toContain('本地审批人');
   });
 
   it('shows a neutral reconnect action without claiming local identity when session discovery fails', async () => {
     override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'工作区暂不可达'},503)):null;
     await mount();await waitFor(()=>expect(host!.textContent).toContain('工作区暂不可达'));
     expect(queryByRole(host!,'form',{name:'登录'})).toBeNull();
-    expect(queryByRole(host!,'button',{name:'重新连接工作区'})).not.toBeNull();expect(host!.textContent).not.toContain('本地工作身份');
+    expect(queryByRole(host!,'button',{name:'重新连接公司'})).not.toBeNull();expect(host!.textContent).not.toContain('本地工作身份');
     expect(requests.some(r=>r.path.includes('/auth/'))).toBe(false);
   });
   it('returns to the company login after retrying discovery without loading anonymous business data',async()=>{
     override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'连接中断'},503)):null;
-    await mount();await waitFor(()=>expect(queryByRole(host!,'button',{name:'重新连接工作区'})).not.toBeNull());
-    override=undefined;await click(getByRole(host!,'button',{name:'重新连接工作区'}));
+    await mount();await waitFor(()=>expect(queryByRole(host!,'button',{name:'重新连接公司'})).not.toBeNull());
+    override=undefined;await click(getByRole(host!,'button',{name:'重新连接公司'}));
     await waitFor(()=>expect(queryByRole(host!,'form',{name:'登录'})).not.toBeNull());expect(host!.textContent).not.toContain('本地工作身份');expect(probes.home).not.toHaveBeenCalled();
   });
 
@@ -206,8 +207,15 @@ describe('one Mist entry with real authentication and workspace state', () => {
     history.replaceState(null, '', '/?intro=0&view=workspace-settings');
     await mount(); await waitFor(() => expect(probes.settings).toHaveBeenCalled());
     expect(actor?.permissions).not.toContain('settings:system:read');
-    expect(host!.textContent).toContain('工作空间设置');
+    expect(host!.textContent).toContain('公司设置');
     expect(host!.textContent).not.toContain('没有查看权限');
+  });
+  it('shows department context and opens company details separately without workspace switching', async () => {
+    await signIn();await mount();await waitFor(() => expect(probes.home).toHaveBeenCalled());
+    await waitFor(()=>expect(host!.textContent).toContain('当前部门'));expect(host!.textContent).not.toContain('切换工作空间');
+    const entry=[...host!.querySelectorAll('button')].find(button=>button.textContent?.includes('当前部门'))!;await click(entry);expect(host!.textContent).toContain('我的组织');await click(getByRole(host!,'button',{name:'查看公司资料'}));
+    expect(new URLSearchParams(location.search).get('view')).toBe('company-settings');expect(new URLSearchParams(location.search).get('section')).toBe('company');expect(probes.settings).toHaveBeenCalled();expect(host!.textContent).not.toContain('没有查看权限');
+    expect(host!.textContent).not.toContain('创建空白工作空间');expect(host!.textContent).not.toContain('创建演示工作空间');
   });
   it('switches a member appearance locally without writing owner-managed settings', async () => {
     await signIn(); const ctx = currentContext();
@@ -242,7 +250,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
     await signIn('limited', []); requests = []; history.replaceState(null, '', `/?intro=0&theme=light&view=${view}&id=dev-a&versionId=version-a`);
     await mount(); await waitFor(() => expect(host!.textContent).toContain('没有查看权限'));
     expect(probes.detail).not.toHaveBeenCalled(); expect(probes.order).not.toHaveBeenCalled(); expect(probes.settings).not.toHaveBeenCalled();
-    expect(requests.every(request => (request.path.endsWith('/auth/me') || request.path === '/api/mist/reviews' || request.path === '/api/mist/session') || request.path === '/api/mist/reviews')).toBe(true);
+    expect(requests.every(request => (request.path.endsWith('/auth/me') || request.path === '/api/mist/reviews' || request.path === '/api/mist/session' || (request.path === '/api/hr/teams/mine' && request.method === 'GET')))).toBe(true);
   });
 
   it('preserves exact version, batch, customer, order-line and production history and resets route-local drafts', async () => {
@@ -265,7 +273,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
     expect(currentRoute()).toMatchObject({ view: 'orders/detail', id: 'order-staff-a' });
     await openSearch(); input(searchInput(), 'C-staff-a'); await click(getByRole(getByRole(host!, 'dialog', { name: '搜索' }), 'button', { name: /客户-staff-a/ }));
     expect(currentRoute()).toMatchObject({ view: 'crm', id: 'customer-staff-a', customerId: 'customer-staff-a' });
-    expect(requests.every(request => (request.path.includes('/auth/') || request.path === '/api/mist/reviews' || request.path === '/api/mist/session'))).toBe(true);
+    expect(requests.every(request => (request.path.includes('/auth/') || request.path === '/api/mist/reviews' || request.path === '/api/mist/session' || (request.path === '/api/hr/teams/mine' && request.method === 'GET')))).toBe(true);
   });
 
   it('does not disclose records from unreadable modules in global search', async () => {

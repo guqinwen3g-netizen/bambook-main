@@ -14,7 +14,7 @@
 | `SidebarPresentationProps` | — | `type SidebarPresentationProps = { sections: NavSection[]; activeId: string; onNavigate: (id: string) => void; collapsed: boolean; onToggleCollapsed: () => void; workspace?: { symbol: string; name: string; caption?: string; onClick?: () => void }; account: { name: string; caption?: string; avatarUrl?: string; onClick?: () => void }; onSearch?: () => void; assistant?: { title: string; text: React.ReactNode; onClick: () => void }; };` |
 | `MistSidebarPresentation` | 侧栏（纯展示，无数据依赖）。生产环境用 MistSidebar（已接好模块注册表与权限）。 | `({ sections, activeId, onNavigate, collapsed, onToggleCollapsed, workspace, account, onSearch, assistant }: SidebarPresentationProps)` |
 | `Crumb` | — | `type Crumb = { label: React.ReactNode; onClick?: () => void; mono?: boolean; hideOnMobile?: boolean };` |
-| `MistTopbar` | — | `({ crumbs, scrolled, sync, theme, onToggleTheme, onSearch, notifications, onAsk, extra }: { crumbs: Crumb[]; scrolled?: boolean; sync?: { state?: 'ok' \| 'syncing' \| 'offline'; text: string }; theme?: ThemeMode; onToggleTheme?: () => void; onSearch?: () => void; notifications?: { unread: boolean; onClick: () => void }; onAsk?: () => void; extra?: React.ReactNode; })` |
+| `MistTopbar` | — | `({ crumbs, scrolled, sync, theme, onToggleTheme, onSearch, notifications, onAsk, extra, onBack, backLabel = '返回' }: { crumbs: Crumb[]; scrolled?: boolean; sync?: { state?: 'ok' \| 'syncing' \| 'offline'; text: string }; theme?: ThemeMode; onToggleTheme?: () => void; onSearch?: () => void; notifications?: { unread: boolean; onClick: () => void }; onAsk?: () => void; extra?: React.ReactNode; onBack?: () => void; backLabel?: string; })` |
 | `MistAppShell` | 整站外壳：侧栏 + 圆角画布（顶栏 + 滚动区）。 children 放 <MistPage>。scrollKey 变化时滚动回顶部（切换页面时传 view id）。 | `({ sidebar, topbar, collapsed, children, scrollKey }: { sidebar: React.ReactNode; topbar: (scrolled: boolean) => React.ReactNode; collapsed?: boolean; children: React.ReactNode; scrollKey?: string })` |
 | `MistPage` | 页面容器：最大宽 1240，入场动画。width='narrow' 用于表单/设置，'wide' 用于看板。 | `({ children, width }: { children: React.ReactNode; width?: 'narrow' \| 'wide' })` |
 | `PageHeader` | 页头：eyebrow（所属分组）+ 标题 + 一句话说明 + 右侧操作（最多 1 个 primary）。 | `({ eyebrow, title, description, actions, variant }: { eyebrow?: React.ReactNode; title: React.ReactNode; description?: React.ReactNode; actions?: React.ReactNode; variant?: 'greeting' })` |
@@ -36,6 +36,8 @@
 
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
+| `plainText` | 取 ReactNode 中的纯文本（用于截断时的 title 完整文本）。 | `(node: React.ReactNode): string` |
+| `revealTruncatedTitle` | 文字被省略号截断时，悬停补上 title 显示完整文本（data-full-text 提供原文）。 | `(e: React.PointerEvent<HTMLElement>)` |
 | `IconProps` | — | `type IconProps = { icon: LucideIcon; size?: Exclude<Size, 'md'> \| 'md'; className?: string; label?: string };` |
 | `Icon` | 统一图标：lucide 线性图标，描边 1.5。size: xs 13 / sm 15 / md 18(默认) / lg 22 | `({ icon: I, size = 'md', className, label }: IconProps)` |
 | `ButtonVariant` | — | `type ButtonVariant = 'primary' \| 'secondary' \| 'quiet' \| 'danger' \| 'ai' \| 'white' \| 'glass';` |
@@ -52,7 +54,8 @@
 | `Option` | — | `type Option<V extends string> = { value: V; label?: React.ReactNode; icon?: LucideIcon; ariaLabel?: string; count?: number };` |
 | `Segmented` | 分段器：2–4 个互斥视图（今天/本周、列表/看板）。 | `({ options, value, onChange, ariaLabel }: { options: Option<V>[]; value: V; onChange: (v: V) => void; ariaLabel?: string })` |
 | `Tabs` | 页面级 Tabs（下划线指示）。用于同一模块内的子视图切换。 | `({ options, value, onChange }: { options: Option<V>[]; value: V; onChange: (v: V) => void })` |
-| `Avatar` | — | `({ name, src, tone, size }: { name: string; src?: string; tone?: Tone; size?: 'xs' \| 'sm' \| 'md' })` |
+| `useAvatarSource` | 预设头像（dicebear:v1:…）按需加载生成器，转为可直接显示的 SVG 地址；普通图片地址原样返回。 | `(src?: string \| null): string \| undefined` |
+| `Avatar` | — | `({ name, src, tone, size }: { name: string; src?: string \| null; tone?: Tone; size?: 'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' })` |
 | `AvatarStack` | — | `({ people, size = 'sm', max = 4 }: { people: Array<{ name: string; tone?: Tone; src?: string }>; size?: 'xs' \| 'sm'; max?: number })` |
 | `CardProps` | — | `type CardProps = React.HTMLAttributes<HTMLElement> & { as?: 'article' \| 'section' \| 'div' \| 'aside' \| 'nav'; tone?: 'ai' \| 'accent'; clip?: boolean; interactive?: boolean };` |
 | `Card` | 卡片：纯白/深底面，无描边无阴影。interactive = 整卡可点（悬停变 card-2）。 | `({ as = 'article', tone, clip, interactive, className, children, ...rest }: CardProps)` |
@@ -98,6 +101,7 @@
 | `Column` | — | `type Column<T> = { key: string; header: React.ReactNode; width?: string; align?: 'left' \| 'right'; render: (row: T, index: number) => React.ReactNode; sortValue?: (row: T) => string \| number; hideOnMobile?: boolean; };` |
 | `DataTableProps` | — | `type DataTableProps<T> = { columns: Column<T>[]; rows: T[]; rowKey: (row: T) => string; selectedKey?: string \| null; onRowClick?: (row: T) => void; onRowDoubleClick?: (row: T) => void; density?: 'compact' \| 'default' \| 'comfy'; empty?: React.ReactNode; footer?: React.ReactNode; loading?: boolean; minWidth?: number; ariaLabel?: string; };` |
 | `DataTable` | 通用数据表（div grid 实现，行可整行点击）。 - 选中行 = 强调色浅底 + 左侧 3px 指示条（不是描边）。 - 行之间唯一 1px 分隔线。 | `({ columns, rows, rowKey, selectedKey, onRowClick, onRowDoubleClick, density: explicitDensity, empty, footer, loading, minWidth, ariaLabel }: DataTableProps<T>)` |
+| `fitTrack` | 列宽 → grid 轨道。fr 列允许收缩但保留可读的最小宽度（放不下时由 DataTable 降级为隐藏次要列/堆叠，而不是撑宽页面）。 | `(width?: string)` |
 | `Sparkline` | — | `({ points, width = 96, height = 28, tone = 'accent' }: { points: number[]; width?: number; height?: number; tone?: 'accent' \| 'ok' \| 'warn' \| 'bad' })` |
 | `StatCardProps` | — | `type StatCardProps = { icon: LucideIcon; label: React.ReactNode; value: React.ReactNode; unit?: React.ReactNode; delta?: { text: string; dir: 'up' \| 'down' \| 'bad' }; foot?: React.ReactNode; spark?: number[]; onClick?: () => void };` |
 | `StatCard` | 统计卡：大数字用 light 字重。整卡可点 → 跳到对应列表。 | `({ icon, label, value, unit, delta, foot, spark, onClick }: StatCardProps)` |
@@ -119,7 +123,7 @@
 | `WeekStrip` | 周条 | `({ days, value, onChange }: { days: Array<{ key: string; weekday: string; day: number; dots: number }>; value: string; onChange: (k: string) => void })` |
 | `Agenda` | 日程列表。tone: 默认强调色 / ai 紫藤 / mute 灰 / warn 黄 | `({ events }: { events: Array<{ time: string; title: React.ReactNode; meta?: React.ReactNode; tone?: 'ai' \| 'mute' \| 'warn' }> })` |
 | `IdentityHeader` | 详情页身份行：缩略图 + 元信息 + 大标题 + 右侧关键人/日期/状态。 | `({ thumb, meta, title, facts, actions }: { thumb?: React.ReactNode; meta?: React.ReactNode[]; title: React.ReactNode; facts?: Array<{ label: React.ReactNode; value: React.ReactNode }>; actions?: React.ReactNode })` |
-| `Stepper` | 阶段步进条（横向）：done 浅色勾、now 实心强调色、todo 灰、blocked 红。 | `({ steps, onSelect }: { steps: Array<{ label: string; state: StepState; caption?: string }>; onSelect?: (index: number) => void })` |
+| `Stepper` | 阶段步进条（横向）：done 浅色勾、now 实心强调色、todo 灰、blocked 红。 | `({ steps, onSelect, ariaLabel = '阶段' }: { steps: Array<{ label: string; state: StepState; caption?: string }>; onSelect?: (index: number) => void; ariaLabel?: string })` |
 | `VerticalSteps` | 竖向步骤（创建向导、设置分区导航）。 | `({ steps, current, onSelect, mode = 'step' }: { steps: Array<{ id: string; label: string; done?: boolean; icon?: LucideIcon }>; current: string; onSelect: (id: string) => void; mode?: 'step' \| 'page' })` |
 | `FlowSteps` | 流程节点（订单履约 / 出运 / 审批链）。 | `({ nodes }: { nodes: Array<{ label: string; caption?: string; icon: LucideIcon; state: StepState }> })` |
 | `TimelineEvent` | — | `type TimelineEvent = { who: string; tone?: Tone; avatar?: string; when: string; text: React.ReactNode; attachment?: { icon: LucideIcon; name: string } };` |
@@ -177,4 +181,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 124 个导出声明（94 个组件/函数/值，30 个类型）。重导出别名不重复计数。
+共 128 个导出声明（98 个组件/函数/值，30 个类型）。重导出别名不重复计数。
