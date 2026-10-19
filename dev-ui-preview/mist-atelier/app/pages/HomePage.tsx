@@ -13,6 +13,7 @@ import { visibleMistNotifications } from '../runtime/notificationPreferences';
 import { useOptionalMistReviews } from '../runtime/reviews';
 import { mistWorkQueue, mistMyTasks, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
 import type { View } from '../../../../types';
+import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
 
 function dateKey(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`; }
 function weekDays(date: string) {
@@ -51,6 +52,8 @@ export function HomePage() {
   const focus = tasks.at(0) ?? queue.at(0);
   const dev = state?.devs.find(item => item.id === focus?.target.id);
   const version = dev ? state?.versions.find(item => item.devId===dev.id&&item.id === (focus?.target.versionId || dev.currentVersionId)) : undefined;
+  const focusImageFile=state&&dev?(firstWorkspaceImage(state.files,version?.fileIds)||firstWorkspaceImage(state.files,dev.fileIds)):undefined;
+  const focusImage=useWorkspaceImage(focusImageFile,'cutout-display');
   const report = state?.versions.find(item => item.id === reportVersion);
   const openTarget = (target: MistTarget) => { if (!busy) go(target.view, target.id, target); };
   const run = async (work: () => Promise<unknown>, success?: string) => {
@@ -100,7 +103,7 @@ export function HomePage() {
         <StatCard icon={Wallet} label="应收待核销" value={hiddenStats.invoices ? '已隐藏' : state ? money(mainCurrency?.[1] ?? 0) : '—'} unit={hiddenStats.invoices ? undefined : mainCurrency?.[0] ?? ''} foot={hiddenStats.invoices ? '无查看权限，不代表应收为零' : currencies.length > 1 ? currencies.filter(([currency]) => currency !== mainCurrency?.[0]).map(([currency, value]) => `${currency} ${money(value)}`).join(' · ') : (state ? `${state.invoices.filter(item => item.open > 0).length} 张未结发票` : '等待公司业务数据')} onClick={hiddenStats.invoices ? undefined : () => setStatView('invoices')} />
       </StatGrid>
       <section className="mist-grid">
-        <HeroFocus className="mist-col-8" meta={focus ? dev ? [<span className="mist-mono">{dev.code}</span>,dev.customer] : [('sourceLabel' in focus ? focus.sourceLabel : '工作事项')] : []} media={dev ? { src: IMG[dev.img], alt: dev.name } : undefined}
+        <HeroFocus className="mist-col-8" meta={focus ? dev ? [<span className="mist-mono">{dev.code}</span>,dev.customer] : [('sourceLabel' in focus ? focus.sourceLabel : '工作事项')] : []} media={dev ? { src: focusImage.src||IMG[dev.img], alt: dev.name } : undefined}
           title={loading ? '正在读取当前焦点' : focus ? dev ? <>{dev.name}<br />{version ? `${version.label} · ${dev.state}` : dev.state}</> : focus.title : '当前没有待处理事项'} description={dev?.goal ?? (focus ? '打开原事项，继续完成下一步工作。' : '可以查看工作动态，或创建新的开发案。')}
           steps={dev ? STAGES.map((label, index) => ({ label, state: index < dev.stage ? 'done' : index === dev.stage ? 'now' : 'todo' })) : undefined}
           actions={<><Button variant="white" disabled={busy || !focus} iconRight={ArrowRight} onClick={() => focus && openTarget(focus.target)}>打开事项</Button><Button variant="glass" disabled={busy || !version?.qc} icon={FileText} onClick={() => setReportVersion(version?.id ?? null)}>QC 报告</Button></>} />

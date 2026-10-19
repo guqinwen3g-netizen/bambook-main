@@ -21,6 +21,7 @@ import { DevBillingCard } from './DevBilling';
 import { DevCompareCard, readCompareIds, writeCompareIds } from './DevCompare';
 import { versionSource } from '../../../../server/src/shared/mistDevelopmentCompare';
 import { confirmationNeedsForms, developmentVersionSamples, sampleRef } from '../../../../server/src/shared/mistDevelopmentSamples';
+import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
 
 export function localConfirmationTime(date=businessNow()){return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);}
 export function confirmationFormError(values:{confirmer:string;organization:string;confirmedAt:string;basis:string;originalText:string}){
@@ -110,9 +111,8 @@ export function DevDetailPage(){
     }catch(cause){if(live.current&&scope.current===originalScope)setFailure(cause instanceof Error?cause.message:'操作失败，原内容已保留');}finally{busyRef.current=false;if(live.current)setBusy(false);}
   };
   const uploadReport=async(files:File[])=>{if(busyRef.current||pending)return;if(files.length!==1){setFailure('每次请选择一份 QC 报告');return;}const originalScope=scope.current;reportUploadScope.current=originalScope;busyRef.current=true;setBusy(true);try{const file=await uploadFile(files[0]);if(live.current&&scope.current===originalScope)setQc(previous=>({...previous,report:file.id}));reportUploadScope.current=null;}catch(cause){if(live.current&&scope.current===originalScope)setFailure(String(cause));}finally{busyRef.current=false;if(live.current)setBusy(false);}};
-  const mediaFile=(version?.fileIds||[]).map(id=>state?.files.find(file=>file.id===id)).find(file=>file?.mimeType.startsWith('image/'));
-  const mediaUrl=mediaFile?fileUrl(mediaFile):'', [picture,setPicture]=React.useState<string>(),[pictureError,setPictureError]=React.useState(false),[pictureRetry,setPictureRetry]=React.useState(0);
-  React.useEffect(()=>{let active=true,objectUrl='';const controller=new AbortController();setPicture(undefined);setPictureError(false);if(mediaUrl)void fetch(mediaUrl,{headers:apiService.getAuthHeaders(),credentials:'include',signal:controller.signal}).then(response=>{if(!response.ok)throw Error('图片读取失败');return response.blob();}).then(blob=>{if(active){objectUrl=URL.createObjectURL(blob);setPicture(objectUrl);}}).catch(()=>{if(active)setPictureError(true);});return()=>{active=false;controller.abort();if(objectUrl)URL.revokeObjectURL(objectUrl);};},[mediaUrl,pictureRetry]);
+  const mediaFile=state?(firstWorkspaceImage(state.files,version?.fileIds)||firstWorkspaceImage(state.files,dev?.fileIds)):undefined;
+  const image=useWorkspaceImage(mediaFile,'cutout-display'),picture=image.src,pictureError=image.failed;
   const recoverWrite=async()=>{
     if(!pending||busyRef.current)return;
     const original=pending,originalScope=scope.current;busyRef.current=true;setBusy(true);
@@ -213,7 +213,7 @@ export function DevDetailPage(){
     <div className="mist-detail">
       <div>
         <Card clip id="mist-dev-version">
-          {(mediaFile&&!picture)||fabricDomain&&!picture?<div className="mist-stage" data-size="lg"><EmptyState icon={Layers} title={!mediaFile?'尚未上传本版实物图片':pictureError?'图片读取失败':'正在读取图片'} description={mediaFile?.name||'返样事实与图片分别保存，不用示例图冒充实物。'} action={pictureError?<TextLink onClick={()=>setPictureRetry(value=>value+1)}>重试</TextLink>:undefined} /></div>:<ObjectStage size="lg" src={picture||IMG[currentImage]} alt={dev.name} caption={version?`${version.returnedAt?'返样实物':'计划版本'} · ${version.label}`:'开发计划'} />}
+          {(mediaFile&&!picture)||fabricDomain&&!picture?<div className="mist-stage" data-size="lg"><EmptyState icon={Layers} title={!mediaFile?'尚未上传本版实物图片':pictureError?'图片读取失败':'正在读取图片'} description={mediaFile?.name||'返样事实与图片分别保存，不用示例图冒充实物。'} action={pictureError?<TextLink onClick={image.retry}>重试</TextLink>:undefined} /></div>:<ObjectStage size="lg" src={picture||IMG[currentImage]} alt={dev.name} caption={version?`${version.returnedAt?'返样实物':'计划版本'} · ${version.label}`:'开发计划'} />}
           <div className="mist-vers" role="group" aria-label="版本">{versions.map(item=><button key={item.id} type="button" aria-pressed={version?.id===item.id} disabled={busy} onClick={()=>chooseVersion(item.id)}>{item.label}{(flag=>flag&&<> <Pill tone={flag.tone}>{flag.label}</Pill></>)(versionQcFlag(item))}</button>)}</div>
           {state&&version&&(source=><div className="mist-row" data-selection={version.label} style={{padding:'10px 22px 0',gap:8,flexWrap:'wrap',fontSize:12.5}}><span className="mist-muted">正在查看</span><span>{source.roundLabel} · {source.factory} · <Mono>{version.label}</Mono></span><span className="mist-spacer" /><TextLink onClick={()=>locateInTimeline(version.label)}>在时间线中定位</TextLink></div>)(versionSource(state,dev,version))}
           <KeyValue items={[{label:'工厂',value:version?.factory||'待安排'},{label:'样品',value:version?`${version.sample||'未登记'} · ${version.sampleQuantity} ${fabricDomain?version.sampleUnit||dev.values.sampleUnit||'单位待登记':(!version.returnedAt&&version.task?.sampleUnit)||'件'}`:'未建立版本'},...(fabricDomain?[{label:'实物形态',value:version?.sampleForm||dev.values.sampleForm||'待登记'}]:[{label:'尺码',value:version?.size||dev.values.sizeBase}]),{label:'面料',value:version?.fabric||dev.fabric}]} />

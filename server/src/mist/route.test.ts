@@ -104,9 +104,10 @@ it('serves bounded authenticated image previews and keeps the original download 
  const bytes=await sharp({create:{width:1800,height:1200,channels:3,background:'#778899'}}).png().toBuffer();
  const uploaded=await request(app).post(`/api/mist/workspaces/${workspace.id}/files`).set('x-test-user','owner').field('requestId','image-preview').field('expectedRevision','0').attach('file',bytes,{filename:'swatch.png',contentType:'image/png'}).expect(201);
  const file=uploaded.body.workspace.state.files[0],url=`/api/mist/workspaces/${workspace.id}/files/${file.id}`;
- const stored=await readdir(path.join(root,workspace.id));expect(stored).toEqual(expect.arrayContaining([file.id,`${file.id}.preview-thumb.webp`,`${file.id}.preview-display.webp`]));
+ const stored=await readdir(path.join(root,workspace.id));expect(stored).toEqual(expect.arrayContaining([file.id,`${file.id}.preview-thumb.webp`,`${file.id}.preview-display.webp`,`${file.id}.preview-cutout-thumb.webp`,`${file.id}.preview-cutout-display.webp`]));
  const preview=await request(app).get(url+'?preview=thumb').set('x-test-user','owner').expect(200).expect('Content-Type',/image\/webp/);
  expect((await sharp(preview.body).metadata()).width).toBeLessThanOrEqual(160);
+ await request(app).get(url+'?preview=cutout-display').set('x-test-user','owner').expect(200).expect('Content-Type',/image\/webp/);
  await request(app).get(url+'?preview=thumb').expect(401);
  await request(app).get(url+'?preview=thumb').set('x-test-user','other').expect(404);
  await request(app).get(url+'?preview=huge').set('x-test-user','owner').expect(400);

@@ -48,8 +48,8 @@ it('switches between actual product images and appends multiple uploads without 
  URL.createObjectURL=vi.fn(()=>'blob:gallery');URL.revokeObjectURL=vi.fn();
  try{
   await mount('products',p.id,undefined,'full');
-  expect(fetcher).toHaveBeenCalledWith('/private/photo-a?preview=display',expect.anything());
-  await click('2 · 细节.png');expect(fetcher).toHaveBeenCalledWith('/private/photo-b?preview=display',expect.anything());
+  expect(fetcher).toHaveBeenCalledWith('/private/photo-a?preview=cutout-display',expect.anything());
+  await click('2 · 细节.png');expect(fetcher).toHaveBeenCalledWith('/private/photo-b?preview=cutout-display',expect.anything());
   bridge.current.uploadFile.mockResolvedValueOnce({id:'new-a'}).mockResolvedValueOnce({id:'new-b'});
   const input=host.querySelector<HTMLInputElement>('input[type=file]')!;expect(input.multiple).toBe(true);
   Object.defineProperty(input,'files',{configurable:true,value:[new File(['a'],'new-a.png',{type:'image/png'}),new File(['b'],'new-b.png',{type:'image/png'})]});

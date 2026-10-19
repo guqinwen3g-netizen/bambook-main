@@ -40,6 +40,15 @@ describe('original Mist Home workspace functionality', () => {
     expect(host.querySelectorAll('.mist-task')).toHaveLength(1); expect(host.querySelectorAll('.mist-spark')).toHaveLength(0);
     const receivables = host.querySelectorAll('.mist-stat')[3]; expect(receivables.textContent).toContain('USD'); expect(receivables.textContent).toContain('EUR');
   });
+  it('uses the uploaded version cutout in the current focus instead of the bundled demo square',async()=>{
+    const task=seam.value.state.tasks[0],version=seam.value.state.versions.find((item:any)=>item.id===task.target.versionId);
+    const file={id:'focus-photo',name:'返样.png',mimeType:'image/png',size:5,storageKey:'workspace-one/focus-photo',createdAt:'2026-10-08T00:00:00Z'};
+    seam.value.state.files.push(file);version.fileIds=[file.id];seam.value.fileUrl=vi.fn(()=>'/private/focus-photo');
+    const originalCreate=URL.createObjectURL,originalRevoke=URL.revokeObjectURL;URL.createObjectURL=vi.fn(()=> 'blob:focus-cutout');URL.revokeObjectURL=vi.fn();
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue({ok:true,blob:async()=>new Blob(['photo'])}));
+    try{render();await act(async()=>{await Promise.resolve();});expect(fetch).toHaveBeenCalledWith('/private/focus-photo?preview=cutout-display',expect.anything());expect(host.querySelector<HTMLImageElement>('.mist-hero-media')?.src).toContain('blob:focus-cutout');}
+    finally{vi.unstubAllGlobals();URL.createObjectURL=originalCreate;URL.revokeObjectURL=originalRevoke;}
+  });
   it('opens the exact task version and exposes actual QC data', async () => {
     render(); const task = seam.value.state.tasks[0]; await click(host.querySelector<HTMLElement>('.mist-task')!);
     expect(go).toHaveBeenCalledWith('development/detail', task.target.id, task.target);

@@ -162,10 +162,13 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     if (!workspaceId || !state?.market?.products?.length || workspace.loading) return;
     const scope = `${session.sessionKey}:${session.user?.id || ''}:${workspaceId}`;
     const files = new Map(state.files.map(file => [file.id, file]));
-    const paths = state.market.products.flatMap(product => (product.fileIds ?? []).flatMap(id => {
+    const productPaths = state.market.products.flatMap(product => (product.fileIds ?? []).flatMap(id => {
       const file = files.get(id); if (!file?.mimeType.startsWith('image/')) return [];
-      const base = workspace.fileUrl(file); return [`${base}?preview=thumb`, `${base}?preview=display`];
+      const base = workspace.fileUrl(file); return [`${base}?preview=cutout-thumb`, `${base}?preview=cutout-display`];
     }));
+    const developmentIds=[...state.devs.flatMap(dev=>dev.fileIds??[]),...state.versions.flatMap(version=>version.fileIds??[])];
+    const developmentPaths=[...new Set(developmentIds)].flatMap(id=>{const file=files.get(id);return file?.mimeType.startsWith('image/')?[`${workspace.fileUrl(file)}?preview=cutout-display`]:[];});
+    const paths=[...productPaths,...developmentPaths];
     const timer = window.setTimeout(() => { void prefetchPrivateImages(scope, paths); }, 0);
     return () => window.clearTimeout(timer);
   }, [session.sessionKey, session.user?.id, workspace.workspace?.id, workspace.loading, workspace.workspace?.revision]);
