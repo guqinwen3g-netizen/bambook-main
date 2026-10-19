@@ -31,11 +31,20 @@ export function productReferences(product: MarketProduct, market: MarketState, o
   return refs.sort((a, b) => b.date.localeCompare(a.date));
 }
 
-/** 列表缩略图：只使用已上传的图片附件，没有图片时显示类别字样。 */
-export function ProductThumb({ product }: { product: MarketProduct }) {
+/** Preview resolution can run while the provider is switching identities; never fetch a stale URL or throw from render. */
+export function useProductImage(product: MarketProduct) {
   const w = useMistWorkspace();
   const file = w.state?.files.find(f => product.fileIds.includes(f.id) && f.mimeType.startsWith('image/'));
-  const src = usePrivateImage(file ? w.fileUrl(file) : undefined);
+  let path: string | undefined;
+  if (file && !w.loading) {
+    try { path = w.fileUrl(file); } catch { /* A changing workspace cannot expose its prior attachment. */ }
+  }
+  const src = usePrivateImage(path);
+  return { file, src };
+}
+/** 列表缩略图：只使用已上传的图片附件，没有图片时显示类别字样。 */
+export function ProductThumb({ product }: { product: MarketProduct }) {
+  const { src } = useProductImage(product);
   return <span className="mist-product-thumb" data-category={product.category}>{src ? <img src={src} alt="" /> : PRODUCT_CATEGORY_LABEL[product.category].slice(0, 1)}</span>;
 }
 

@@ -20,8 +20,7 @@ import { QuotationWorkbench } from './QuotationsPage';
 import { SeasonWorkbench } from './SeasonsPage';
 import { CampaignWorkbench, leadOverdue } from './MarketingPage';
 import { ActionBar, DetailBlock } from './pageKit';
-import { PRODUCT_CATEGORY_LABEL, ProductProfile, ProductThumb, productPriceText, productSpecSummary } from './ProductParts';
-import { usePrivateImage } from '../../runtime/usePrivateImage';
+import { PRODUCT_CATEGORY_LABEL, ProductProfile, ProductThumb, useProductImage, productPriceText, productSpecSummary } from './ProductParts';
 import { downloadModuleCsv, ModuleWorkbench, ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
 
 const labels:Record<string,string>={active:'使用中',archived:'已归档',blocked:'已停用',garment:'成衣',fabric:'面料',trimming:'辅料',Customer:'客户',Supplier:'供应商',Agent:'代理商',Partner:'合作伙伴',Government:'政府机构',Internal:'内部',Other:'其他',Draft:'草稿',Sent:'已线下交付',Accepted:'客户已接受',Rejected:'客户未接受',Expired:'已过期',Planning:'计划中',Active:'进行中',Closed:'已关闭',Planned:'计划中',Ongoing:'展会中',Completed:'已完成',Cancelled:'已取消',Paused:'已暂停',New:'新线索',Contacted:'已联系',Qualified:'已确认需求',Following:'跟进中',Converted:'已转化',Lost:'已流失',Prepared:'资料已准备',pending:'待审批',approved:'审批通过',rejected:'审批退回'};
@@ -54,7 +53,7 @@ function Attachments({kind,row,locked=false}:{kind:AttachmentKind;row:{id:string
   {!locked&&<UploadZone title={op.busy?'附件处理中':'选择实际文件上传'} onFiles={files=>void op.execute(async()=>{const next=[...ids];for(const file of files){const uploaded=await w.uploadFile(file);next.push(uploaded.id);setStaged(current=>[...new Set([...current,uploaded.id])]);}await save(next);})}/>}
  </CardBody></Card>;
 }
-function ProductImage({row}:{row:MarketProduct}){const w=useMarket();const file=w.state?.files.find(f=>row.fileIds.includes(f.id)&&f.mimeType.startsWith('image/'));const src=usePrivateImage(file?w.fileUrl(file):undefined);return src&&file?<ObjectStage src={src} alt={row.name} caption={file.name}/>:null;}
+function ProductImage({row}:{row:MarketProduct}){const {file,src}=useProductImage(row);return src&&file?<ObjectStage src={src} alt={row.name} caption={file.name}/>:null;}
 
 function ProductLinks({kind,row,canWrite}:{kind:'trend'|'campaign'|'lookbook';row:MarketTrend|MarketCampaign|MarketLookbook;canWrite:boolean}){
  const w=useMarket(),op=useOperation(),[open,setOpen]=useRouteDraft(false),[selected,setSelected]=useRouteDraft<string[]>(()=>[...row.productIds]);
