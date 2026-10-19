@@ -1,6 +1,8 @@
 import {describe,expect,it} from 'vitest';
 import {createMistCompanyBaseline,mistCompanyBaselineMetrics,mistCompanyVisibleTextIssues,MIST_COMPANY_BASELINE_VERSION,MIST_COMPANY_DATASET,MIST_COMPANY_PROFILE,MIST_COMPANY_WORKSPACE_NAME,type MistCompanyRoster} from './mistCompanyBaseline';
 import {renderDemoFile} from './mistDemoFiles';
+import { completeCompanyProduct } from './mistCompanyCatalog';
+import { PRODUCT_SPEC_FIELDS } from './mistMarket';
 
 const roster:MistCompanyRoster={
  owner:{id:'company-owner',name:'沈霁'},fabricManager:{id:'company-fabric-manager',name:'俞宁'},garmentManager:{id:'company-garment-manager',name:'陆衡'},fabricSales:{id:'company-fabric-sales',name:'沈禾'},garmentSales:{id:'company-garment-sales',name:'林澈'},finance:{id:'company-finance',name:'林舒'},fabricQc:{id:'company-fabric-qc',name:'唐岚'},garmentQc:{id:'company-garment-qc',name:'许言'},logistics:{id:'company-logistics',name:'陈晓'},
@@ -8,6 +10,16 @@ const roster:MistCompanyRoster={
 function company(){let seq=0,failures:unknown[]=[];const state=createMistCompanyBaseline({id:()=>`company-${++seq}`,now:'2026-10-19T04:00:00.000Z',actorId:roster.owner.id,actorName:roster.owner.name},roster,rows=>{failures=rows;});return{state,failures};}
 
 describe('持续经营公司基线',()=>{
+ it('fills catalog omissions without overwriting edited specifications or business identity',()=>{
+  const {state}=company();
+  for(const product of state.market.products){
+   expect(product.specification).not.toBe('');expect(product.color).not.toBe('');
+   for(const field of PRODUCT_SPEC_FIELDS[product.category])expect(product.specs?.[field.key],product.sku+' '+field.key).toBeTruthy();
+   expect(completeCompanyProduct(product)).toEqual(product);
+  }
+  const original={...state.market.products[0],specification:'客户签认规格',cost:'123.45',fileIds:['private-photo']};
+  expect(completeCompanyProduct(original)).toMatchObject(original);
+ });
  it('历史出运的数量、应收核销、供应商结算和结汇逐单守恒',()=>{
   const {state,failures}=company();expect(failures).toEqual([]);
   const historical=state.orders.filter(order=>order.governance?.contract.poNumber.startsWith('CP-2026'));

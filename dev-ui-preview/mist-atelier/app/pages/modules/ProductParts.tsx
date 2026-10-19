@@ -3,6 +3,7 @@ import { FlaskConical, Plus, ShoppingCart, Trash2, FileText } from 'lucide-react
 import { Banner, Button, CardHeader, DataTable, Dialog, EmptyState, Field, KeyValue, Mono, Pill, Select, TextInput, type Column } from '../../../../../components/mist';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
+import { usePrivateImage } from '../../runtime/usePrivateImage';
 import { useNav } from '../../nav';
 import { PRODUCT_SPEC_FIELDS, type MarketProduct, type MarketQuotation, type MarketState } from '../../../../../server/src/shared/mistMarket';
 
@@ -34,7 +35,8 @@ export function productReferences(product: MarketProduct, market: MarketState, o
 export function ProductThumb({ product }: { product: MarketProduct }) {
   const w = useMistWorkspace();
   const file = w.state?.files.find(f => product.fileIds.includes(f.id) && f.mimeType.startsWith('image/'));
-  return <span className="mist-product-thumb" data-category={product.category}>{file ? <img src={w.fileUrl(file)} alt="" /> : PRODUCT_CATEGORY_LABEL[product.category].slice(0, 1)}</span>;
+  const src = usePrivateImage(file ? w.fileUrl(file) : undefined);
+  return <span className="mist-product-thumb" data-category={product.category}>{src ? <img src={src} alt="" /> : PRODUCT_CATEGORY_LABEL[product.category].slice(0, 1)}</span>;
 }
 
 function productSaveInput(row: MarketProduct) { const { id, createdAt, updatedAt, status, ...input } = row; return input; }
