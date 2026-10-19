@@ -1,3 +1,4 @@
+import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { SaasAdminPage } from './pages/SaasAdminPage';
 import React from 'react';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, LogOut, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
@@ -95,7 +96,7 @@ function useSections(): NavSection[] {
       ...(session.user?.platformRole === 'platform_admin' ? [{ id: 'platform-admin', label: '平台管理', icon: ShieldCheck }] : []),
       ...(dev ? [{ id: 'design-system', label: '设计系统', icon: Component }, { id: 'states', label: '空 / 加载 / 错误', icon: SquareDashed }] : []),
       ...(dev && !session.localMode ? [{ id: 'login', label: '登录页', icon: KeyRound }] : []),
-      ...(session.canAccessView(View.SystemSettings) ? [{ id: 'system-settings', label: '系统设置', icon: Settings2 }] : []),
+      ...((platformOnly || session.canAccessView(View.SystemSettings)) ? [{ id: 'system-settings', label: platformOnly ? '平台设置' : '公司设置', icon: Settings2 }] : []),
     ];
     return items.length ? [...real, { id: 'handoff', label: dev ? '设计系统' : '系统', items }] : real;
   }, [session.sessionKey, session.status, session.hasRole, session.canAccessView]);
@@ -277,8 +278,9 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理当前空间；不能为此授予系统设置/后台管理权限。
-  const permitted = route.view === 'platform-admin' ? session.user?.platformRole === 'platform_admin' : (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
-  const Page = session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
+  const permitted = platformOnly && ['system-settings','settings'].includes(route.view) ? true : route.view === 'platform-admin' ? session.user?.platformRole === 'platform_admin' : (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
+  const Page = platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
+    : session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
     : session.localMode && route.view === 'mes' ? LocalMesPage
     : PAGES[route.view] ?? null;
   // 二级页（详情 / 新建）：应用内有上一页时按历史返回，直接打开链接时回到所属模块。

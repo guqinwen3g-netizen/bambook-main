@@ -17,3 +17,9 @@ it.each([[{email:'not-an-email'},/公司邮箱格式无效.*name@example.com/],[
  expect(()=>save(base,input)).toThrow(MistCommandError);expect(()=>save(base,input)).toThrow(message);expect(base).toEqual(before);
 });
 it('stays an owner-only workspace setting rather than a scoped business permission',()=>{expect(mistCommandPermission({type:'settings.update',payload:{companyProfile:full}} as never)).toBeNull();});
+
+it('records setting changes without storing confidential field values or unchanged saves',()=>{
+ const state=createMistState(ctx,'empty');const next=save(state,full);const log=next.events.find(e=>e.entityType==='settings');
+ expect(log).toMatchObject({actor:'验证员',text:'更新公司资料'});expect(JSON.stringify(log)).not.toContain(full.bankAccount);
+ expect(save(next,full).events.filter(e=>e.entityType==='settings')).toHaveLength(1);
+});

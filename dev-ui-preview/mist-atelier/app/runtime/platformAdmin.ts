@@ -6,7 +6,15 @@ async function call<T>(path:string, method='GET', body?:unknown, signal?:AbortSi
  const response=await fetch('/api/platform'+path,{method,signal,credentials:'include',cache:'no-store',headers:{...apiService.getAuthHeaders(),...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const data=await response.json();if(!response.ok||data?.ok===false)throw new Error(data?.message||'操作未完成，请重试。');return data;
 }
+export type PlatformDefaults = { plan:string; seatLimit:number|null; version:number };
+export type PlatformStaff = { id:string; displayName:string; email:string|null; status:string; lastLoginAt:string|null };
+export type PlatformAudit = { id:string; action:string; targetId:string|null; createdAt:string; actor:{displayName:string;email:string|null} };
 export const platformAdminApi={
+ settings:(signal?:AbortSignal)=>call<{defaults:PlatformDefaults}>('/settings','GET',undefined,signal),
+ saveSettings:(defaults:PlatformDefaults)=>call<{defaults:PlatformDefaults}>('/settings','PATCH',defaults),
+ staff:(signal?:AbortSignal)=>call<{staff:PlatformStaff[]}>('/staff','GET',undefined,signal),
+ updateStaff:(id:string,status:string)=>call('/staff/'+encodeURIComponent(id),'PATCH',{status}),
+ audit:(page:number,signal?:AbortSignal)=>call<{logs:PlatformAudit[];total:number;page:number}>('/audit?page='+page,'GET',undefined,signal),
  list:(signal?:AbortSignal)=>call<{companies:PlatformCompany[]}>('/companies','GET',undefined,signal),
  create:(draft:CompanyDraft)=>call<{company:PlatformCompany;owner:{email:string};initialPassword?:string}>('/companies','POST',draft),
  update:(id:string,draft:{status:string;plan:string;seatLimit:number|null})=>call('/companies/'+encodeURIComponent(id),'PATCH',draft),
