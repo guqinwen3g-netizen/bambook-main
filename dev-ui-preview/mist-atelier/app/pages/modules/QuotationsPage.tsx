@@ -91,7 +91,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const rows = searched.filter(q => stageFilter === 'all' || quotationStage(q) === stageFilter)
     .sort((a, b) => order.indexOf(quotationStage(a)) - order.indexOf(quotationStage(b)) || a.validUntil.localeCompare(b.validUntil) || a.code.localeCompare(b.code));
   const selected = rows.find(q => q.id === picked) || (picked ? domainRows.find(q => q.id === picked) : undefined);
-  const can = session.hasPermission('quotations:write'), canOrder = session.hasPermission('orders:write'), canApprove = session.hasPermission('approvals:write'), me = session.user?.id || '';
+  const can = session.hasPermission('quotations:write'), canOrder = session.hasPermission('orders:write'), canApprove = session.hasPermission('quotations:approve'), me = session.user?.id || '';
   const locked = saving || !!pending;
   const pick = (q: MarketQuotation) => { setPicked(q.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, q.id, target); };
   const changeDomain = (value: QuoteDomain) => { setDomainChoice(value); setStageFilter('all'); setPicked(null); };

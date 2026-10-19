@@ -50,7 +50,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const o = state.orders.find(x => x.id === orderId); if (!o || o.governance?.status === 'approved') return;
     // SO-G-2026-009 演示信用证付款（即期 L/C，不收定金），其余按 T/T 定金 + 见提单副本付余款。
     const lc = o.code === 'SO-G-2026-009';
-    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认（演示）.pdf`)], internalPurpose: '', receiver: '', paymentMethod: lc ? 'LC' : 'TT', depositPercent: lc ? 0 : depositPercent, paymentNote: lc ? '100% 即期信用证（L/C at sight），提单日后 21 天内交单' : `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
+    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认.pdf`)], internalPurpose: '', receiver: '', paymentMethod: lc ? 'LC' : 'TT', depositPercent: lc ? 0 : depositPercent, paymentNote: lc ? '100% 即期信用证（L/C at sight），提单日后 21 天内交单' : `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
     run('order submit ' + o.code, { type: 'order.governance.submit', payload: { orderId } }, sales);
     run('order approve ' + o.code, { type: 'order.governance.decide', payload: { id: orderId, decision: 'approved', note: '价格、交期与付款条件已核对' } }, reviewer);
   };
@@ -103,7 +103,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   if (fabricDevId) {
     run('fabric sample returned', { type: 'development.recordSample', payload: { devId: fabricDevId, versionId: fabricVersionId, sample: 'HS-2701-L1', quantity: 3, form: '米样', unit: '米', location: '面料架 B-2', color: '燕麦色', returnedAt: at(-6) } });
     run('fabric QC', { type: 'development.recordQc', payload: { devId: fabricDevId, versionId: fabricVersionId, domain: 'fabric', qc: { result: 'pass', reviewer: '许言', reviewedAt: at(-4, 10), report: 'QC-F-2026-0031', opinion: '克重、门幅在公差内；起球 4 级，达到目标。', fabricMeasurements: [{ property: '克重', actual: 418, unit: 'g/m²' }, { property: '门幅', actual: 148, unit: 'cm' }] } } }, inspector);
-    run('fabric customer confirmation', { type: 'development.confirm', payload: { devId: fabricDevId, versionId: fabricVersionId, result: 'approved', confirmer: 'Emma Clarke', organization: c0.name, confirmedAt: at(-3), basis: '软件演示确认记录', originalText: '软件演示：已确认本版米样，可按此面料版本报价下单。' } });
+    run('fabric customer confirmation', { type: 'development.confirm', payload: { devId: fabricDevId, versionId: fabricVersionId, result: 'approved', confirmer: 'Emma Clarke', organization: c0.name, confirmedAt: at(-3), basis: '客户邮件确认记录', originalText: '已确认本版米样，可按此面料版本报价下单。' } });
   }
 
   /* ───────── 数字档案 ───────── */
@@ -181,13 +181,13 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     if (lukas) run('show lead 2 convert', { type: 'market.lead.convertToCrm', payload: { id: lukas, opportunity: { title: 'Berg 外套塔丝隆 SS27', domain: 'fabric', amount: '9500.00', currency: 'USD', expectedDate: day(45) } } });
     run('show lead 3', { type: 'market.showLead.save', payload: { input: { name: 'Anna Rossi', company: 'Studio Rossi Milano', email: 'anna@studiorossi.it', phone: '', demand: '精纺西装面料色卡', source: 'show', parentId: show, customerId: '', followUpDate: day(-6), estimatedValue: '4000.00', actualValue: '', currency: 'EUR', fileIds: [], note: '' } } });
   }
-  const demoBook = coatProduct ? id(run('lookbook', { type: 'market.lookbook.save', payload: { input: { name: 'Cedar & Crown AW27 大衣画册', customerId: c0.id, productIds: [coatProduct], fileIds: [], note: '示例资料，不代表已发送客户' } } })) : '';
+  const demoBook = coatProduct ? id(run('lookbook', { type: 'market.lookbook.save', payload: { input: { name: 'Cedar & Crown AW27 大衣画册', customerId: c0.id, productIds: [coatProduct], fileIds: [], note: '内部选品资料，待业务确认后发送客户' } } })) : '';
   if (demoBook) run('lookbook prepared', { type: 'market.lookbook.status', payload: { id: demoBook, status: 'Prepared' } });
   if (campaign) {
     const kenji = state.market.leads.find(l => l.source === 'campaign' && l.parentId === campaign && l.name === 'Kenji Mori');
     if (kenji) run('campaign lead convert', { type: 'market.lead.convertToCrm', payload: { id: kenji.id, opportunity: { title: 'Atelier Mori 精纺面料打样', domain: 'fabric', amount: '8000.00', currency: 'USD', expectedDate: day(35) } } });
-    run('campaign overdue lead', { type: 'market.lead.save', payload: { input: { name: 'Emma Lind', company: 'Nordform Studio', email: 'emma@example.test', phone: '', demand: '羊毛混纺大衣 200 件试单', source: 'campaign', parentId: campaign, customerId: '', followUpDate: day(-3), estimatedValue: '14000.00', actualValue: '0', currency: 'USD', fileIds: [], note: '明确的软件演示线索' } } });
-    const paused = id(run('campaign paused demo', { type: 'market.campaign.save', payload: { input: { name: 'SS27 功能面料推广（暂停）', type: '面料资料推广', seasonId: ss27, showId: '', startDate: day(-8), endDate: day(20), target: '功能外套客户', budget: '2000.00', actualCost: '2300.00', currency: 'EUR', owner: '沈禾', productIds: [nylon].filter(Boolean), fileIds: [], note: '示例：费用超预算，暂停核对' } } }));
+    run('campaign overdue lead', { type: 'market.lead.save', payload: { input: { name: 'Emma Lind', company: 'Nordform Studio', email: 'emma.lind@nordform-studio.se', phone: '+46 8 410 239 18', demand: '羊毛混纺大衣 200 件试单', source: 'campaign', parentId: campaign, customerId: '', followUpDate: day(-3), estimatedValue: '14000.00', actualValue: '0', currency: 'USD', fileIds: [], note: '推广邮件回复后待跟进的明确线索' } } });
+    const paused = id(run('campaign paused demo', { type: 'market.campaign.save', payload: { input: { name: 'SS27 功能面料推广（暂停）', type: '面料资料推广', seasonId: ss27, showId: '', startDate: day(-8), endDate: day(20), target: '功能外套客户', budget: '2000.00', actualCost: '2300.00', currency: 'EUR', owner: '沈禾', productIds: [nylon].filter(Boolean), fileIds: [], note: '费用超预算，暂停核对投放渠道与后续预算' } } }));
     if (paused) { run('campaign start demo', { type: 'market.campaign.status', payload: { id: paused, status: 'Active' } }); run('campaign pause demo', { type: 'market.campaign.status', payload: { id: paused, status: 'Paused' } }); }
   }
 
@@ -210,16 +210,16 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   const prevMonth = (() => { const d = new Date(context.now); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
   // 再前一个月的月末汇率作为上月记账汇率（月初汇率），财务即可预览并登记上月期末调汇。
   const prevMonth2 = (() => { const d = new Date(context.now); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 2); return d.toISOString().slice(0, 7); })();
-  for (const [month, cur, rate] of [[prevMonth2, 'USD', '7.1320'], [prevMonth2, 'EUR', '8.3150'], [prevMonth, 'USD', '7.1180'], [prevMonth, 'EUR', '8.2915']] as const) run('fx month-end ' + month + cur, { type: 'fxrate.period.save', payload: { month, currency: cur, rate, source: `中国人民银行 ${month} 月末中间价（演示）` } }, finance);
+  for (const [month, cur, rate] of [[prevMonth2, 'USD', '7.1320'], [prevMonth2, 'EUR', '8.3150'], [prevMonth, 'USD', '7.1180'], [prevMonth, 'EUR', '8.2915']] as const) run('fx month-end ' + month + cur, { type: 'fxrate.period.save', payload: { month, currency: cur, rate, source: `中国人民银行 ${month} 月末中间价归档` } }, finance);
   // 定价标准参数（管理层设置，带版本与生效日）：试算保存时冻结适用版本，低于标准加成须写偏离理由。
   const paramsDay = platformBusinessDate(context.now);
-  run('pricing params garment', { type: 'platform.pricingParams.set', payload: { family: 'garment', profitMargin: 20, commissionRate: 5, effectiveFrom: paramsDay, reason: '软件演示：年度定价会议确定成衣标准加成 20%、欧洲代理佣金 5%' } }, reviewer);
-  run('pricing params fabric', { type: 'platform.pricingParams.set', payload: { family: 'fabric', profitMargin: 15, commissionRate: 0, effectiveFrom: paramsDay, reason: '软件演示：面料直供客户无代理，标准加成 15%' } }, reviewer);
+  run('pricing params garment', { type: 'platform.pricingParams.set', payload: { family: 'garment', profitMargin: 20, commissionRate: 5, effectiveFrom: paramsDay, reason: '年度定价会议确定成衣标准加成 20%、欧洲代理佣金 5%' } }, reviewer);
+  run('pricing params fabric', { type: 'platform.pricingParams.set', payload: { family: 'fabric', profitMargin: 15, commissionRate: 0, effectiveFrom: paramsDay, reason: '面料直供客户无代理，标准加成 15%' } }, reviewer);
   const pricingGarment = state.orders.find(o => o.code === 'SO-G-2026-017'), pricingFabric = state.orders.find(o => o.type === 'fabric');
-  if (pricingGarment) run('pricing garment reference', { type: 'platform.pricing.save', payload: { orderId: pricingGarment.id, purchaseCostCny: 280, refundRate: 13, exchangeRate: 7.2, profitMargin: 20, commissionRate: 5, basis: '软件演示试算：羊毛西装套装 CNY/套；280 为演示工厂参考，退税13%、CNY/USD 7.2 仅为演示参数，不是实际成本或生效市场汇率。' } });
-  if (pricingFabric) run('pricing fabric reference', { type: 'platform.pricing.save', payload: { orderId: pricingFabric.id, purchaseCostCny: 48, refundRate: 13, exchangeRate: 7.2, profitMargin: 20, commissionRate: 0, basis: '软件演示试算：毛呢面料 CNY/米；按演示规格与计价单位核对，参数仅供软件演示，不自动改报价或合同。' } });
-  run('demo payment CNY', { type: 'finance.payment.save', payload: { date: day(-6), payee: '华盛毛纺', amount: 12600, currency: 'CNY', ref: 'DEMO-PAY-CNY-01 · 软件演示付款记录，未关联应付或银行账户' } }, finance);
-  run('demo payment USD', { type: 'finance.payment.save', payload: { date: day(-3), payee: '演示物流服务商', amount: 850, currency: 'USD', ref: 'DEMO-PAY-USD-01 · 软件演示付款记录，未关联应付或银行账户' } }, finance);
+  if (pricingGarment) run('pricing garment reference', { type: 'platform.pricing.save', payload: { orderId: pricingGarment.id, purchaseCostCny: 280, refundRate: 13, exchangeRate: 7.2, profitMargin: 20, commissionRate: 5, basis: '羊毛西装套装 CNY/套；280 为工厂阶段参考成本，退税 13%、CNY/USD 7.2 取立项日预算汇率，报价确认前复核。' } });
+  if (pricingFabric) run('pricing fabric reference', { type: 'platform.pricing.save', payload: { orderId: pricingFabric.id, purchaseCostCny: 48, refundRate: 13, exchangeRate: 7.2, profitMargin: 20, commissionRate: 0, basis: '毛呢面料 CNY/米；按当前规格与计价单位核对，预算参数不自动改写已确认报价或合同。' } });
+  run('demo payment CNY', { type: 'finance.payment.save', payload: { date: day(-6), payee: '华盛毛纺', amount: 12600, currency: 'CNY', ref: 'PAY-CNY-20261013-01 · 预付款凭证待应付匹配' } }, finance);
+  run('demo payment USD', { type: 'finance.payment.save', payload: { date: day(-3), payee: '中远海运物流（上海）', amount: 850, currency: 'USD', ref: 'PAY-USD-20261016-01 · 海运订舱预付款' } }, finance);
   const orderByCode = (code: string) => state.orders.find(o => o.code === code);
   const deposits: Array<[string, string, number, string]> = [['SO-G-2026-017', 'NORTHWIND ATELIER AB', 12555, 'DEPOSIT SO-G-2026-017 PO-017'], ['SO-G-2026-015', 'CEDAR & CROWN LTD', 35520, 'DEPOSIT SO-G-2026-015']];
   if (fabricOrderCode()) { const fo = orderByCode(fabricOrderCode()); if (fo) deposits.push([fo.code, 'CEDAR & CROWN LTD', Math.round(fo.amount * 30) / 100, 'DEPOSIT ' + fo.code]); }
@@ -241,7 +241,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     if (!pid) return;
     run(label + ' submit', { type: 'fulfillment.procurement.submit', payload: { id: pid } }, buyer);
     run(label + ' approve', { type: 'fulfillment.procurement.decide', payload: { id: pid, decision: 'approved', note: '单价与报价核算一致，同意下单' } }, reviewer);
-    run(label + ' send', { type: 'fulfillment.procurement.send', payload: { id: pid, at: at(confirmedOffset - 1, 8), evidence: '邮件发送批准版采购合同 PDF', fileIds: [demoFile('supplier-contract', pid, `${state.fulfillment.purchases.find(p => p.id === pid)?.code || label} 采购合同（演示）.pdf`)] } }, buyer);
+      run(label + ' send', { type: 'fulfillment.procurement.send', payload: { id: pid, at: at(confirmedOffset - 1, 8), evidence: '邮件发送批准版采购合同 PDF', fileIds: [demoFile('supplier-contract', pid, `${state.fulfillment.purchases.find(p => p.id === pid)?.code || label} 采购合同.pdf`)] } }, buyer);
     const due = state.fulfillment.purchases.find(p => p.id === pid)?.due || day(20);
     run(label + ' confirm', { type: 'fulfillment.procurement.confirm', payload: { id: pid, at: at(confirmedOffset, 10), evidence: '供应商盖章回签', confirmedDue: due, fileIds: [] } }, buyer);
   };
@@ -311,11 +311,11 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     if (ship) {
       sampleQc('PO-L-0411', 'shipping', 'pass', ship);
       run('pack 017', { type: 'fulfillment.shipments.pack', payload: { id: ship, lines: Array.from({ length: 5 }, (_, i) => ({ lineId: job017.lineId, productionId: job017.id, carton: `${i * 20 + 1}-${i * 20 + 20}`, quantity: 100, netWeight: 96, grossWeight: 108, volume: 1.15, note: '' })) } }, warehouse);
-      run('customs 017', { type: 'fulfillment.customs.save', payload: { shipmentId: ship, declarationNo: '2200 2026 1004 9126 51', broker: '上海东航报关有限公司', hsCode: '6203.31', origin: '中国', tradeMode: '一般贸易', declaredAt: day(-5), clearedAt: day(-4), evidence: '海关放行通知', fileIds: [demoFile('customs-release', ship, '报关放行通知 SO-G-2026-017（演示）.pdf')], note: '', status: 'cleared' } }, warehouse);
+      run('customs 017', { type: 'fulfillment.customs.save', payload: { shipmentId: ship, declarationNo: '2200 2026 1004 9126 51', broker: '上海东航报关有限公司', hsCode: '6203.31', origin: '中国', tradeMode: '一般贸易', declaredAt: day(-5), clearedAt: day(-4), evidence: '海关放行通知', fileIds: [demoFile('customs-release', ship, '报关放行通知 SO-G-2026-017.pdf')], note: '', status: 'cleared' } }, warehouse);
       // 商品归类按款号建档一次，之后每票出运自动带出商品编号、申报品名与申报要素。
       run('customs classify coat', { type: 'fulfillment.customs.classify.save', payload: { family: 'garment', hsCode: '6203310000', declaredName: '男式羊毛西服上衣', brandType: '3', preference: '0', elements: ['机织', '西服上衣', '男式', '100%羊毛', 'Northwind'], styles: ['CC-AW27-COAT-014'] } }, warehouse);
       for (const [type, title] of [['CI', '商业发票'], ['PL', '装箱单']] as const) {
-        const doc = id(run('document ' + type, { type: 'fulfillment.documents.save', payload: { shipmentId: ship, orderId: type === 'CI' ? order017.id : '', type, number: `${type}-2026-0417`, title: `${title} · SO-G-2026-017 第一批`, dueDate: type === 'CI' ? day(26) : '', content: type === 'CI' ? '500 件修身羊毛西装套装 · FOB 上海 · USD' : '100 箱 · 净重 480 kg · 毛重 540 kg · 5.75 m³', fileIds: [demoFile(type === 'CI' ? 'commercial-invoice' : 'packing-list', ship, `${type}-2026-0417 ${title}（演示）.pdf`)] } }, warehouse));
+        const doc = id(run('document ' + type, { type: 'fulfillment.documents.save', payload: { shipmentId: ship, orderId: type === 'CI' ? order017.id : '', type, number: `${type}-2026-0417`, title: `${title} · SO-G-2026-017 第一批`, dueDate: type === 'CI' ? day(26) : '', content: type === 'CI' ? '500 件修身羊毛西装套装 · FOB 上海 · USD' : '100 箱 · 净重 480 kg · 毛重 540 kg · 5.75 m³', fileIds: [demoFile(type === 'CI' ? 'commercial-invoice' : 'packing-list', ship, `${type}-2026-0417 ${title}.pdf`)] } }, warehouse));
         const issued = doc ? run('document issue ' + type, { type: 'fulfillment.documents.issue', payload: { id: doc } }, warehouse) : null;
         // CI 应收先待财务确认；演示中由财务确认后才计入应收余额。
         if (type === 'CI' && typeof issued?.invoiceId === 'string') run('receivable confirm CI', { type: 'finance.receivable.confirm', payload: { invoiceId: issued.invoiceId } }, finance);
@@ -327,8 +327,8 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       const unit017 = state.orderLines.find(l => l.id === job017.lineId)?.unit || '套';
       const finishedPo = id(run('purchase finished 017', { type: 'fulfillment.procurement.save', payload: { orderId: order017.id, lineId: job017.lineId, kind: 'finished', supplierId: jiangnan, supplier: '', description: '修身羊毛西装套装成品（含面辅料、加工、包装）· 第一批 500 件', quantity: 500, unit: unit017, price: 452, currency: 'CNY', due: day(-8), terms: '出运后 30 天付清，凭增值税专用发票', destination: '上海洋山', note: '含税价，税率 13%', fileIds: [] } }, buyer));
       approveAndConfirm(finishedPo, 'purchase finished 017', -30);
-      if (finishedPo) run('bill vat 017', { type: 'payable.bill.register', payload: { supplierId: jiangnan, invoiceNo: '33002641 04517712', invoiceDate: day(-3), currency: 'CNY', amount: 226000, taxAmount: 26000, taxRate: '13%', lines: [{ purchaseId: finishedPo, amount: 226000 }], due: day(26), dueBasis: '合同：出运后 30 天付清', fileIds: [demoFile('vat-invoice', finishedPo, '增值税专用发票 江南成衣 SO-G-2026-017（演示）.pdf')], note: '数电专票，已勾选确认用途（出口退税）' } }, finance);
-      run('rebate rate 6203.31', { type: 'rebate.rate.save', payload: { hsCode: '6203.31', rate: '13', effectiveFrom: '2019-04-01', basis: '财政部 税务总局 海关总署公告 2019 年第 39 号（演示）' } }, finance);
+      if (finishedPo) run('bill vat 017', { type: 'payable.bill.register', payload: { supplierId: jiangnan, invoiceNo: '33002641 04517712', invoiceDate: day(-3), currency: 'CNY', amount: 226000, taxAmount: 26000, taxRate: '13%', lines: [{ purchaseId: finishedPo, amount: 226000 }], due: day(26), dueBasis: '合同：出运后 30 天付清', fileIds: [demoFile('vat-invoice', finishedPo, '增值税专用发票 江南成衣 SO-G-2026-017.pdf')], note: '数电专票，已勾选确认用途（出口退税）' } }, finance);
+      run('rebate rate 6203.31', { type: 'rebate.rate.save', payload: { hsCode: '6203.31', rate: '13', effectiveFrom: '2019-04-01', basis: '财政部 税务总局 海关总署公告 2019 年第 39 号' } }, finance);
     }
   }
   const order018 = state.orders.find(o => o.code === 'SO-G-2026-018');
@@ -379,7 +379,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   const order009 = state.orders.find(o => o.code === 'SO-G-2026-009');
   if (order009?.governance?.contract.paymentMethod === 'LC') {
     const lcId = id(run('lc 009', { type: 'lc.save', payload: { input: { lcNo: 'NDEASESS26L0913', orderIds: [order009.id], issuingBank: 'Nordea Bank Abp, Stockholm', advisingBank: '中国银行上海市分行', confirmed: false, availableBy: 'sight', currency: order009.currency, amount: order009.amount, tolerancePct: 5, issueDate: day(-24), latestShipmentDate: day(12), expiryDate: day(27), expiryPlace: '中国', presentationDays: 15, partialShipment: true, transhipment: false,
-      documentsRequired: '1. 签署的商业发票一式三份；\n2. 全套清洁已装船海运提单，凭指示，空白背书，注明运费到付；\n3. 装箱单一式三份；\n4. 中国贸促会出具的一般原产地证明书。', note: '受益人：本公司；通知行已核押', fileIds: [demoFile('letter-of-credit', 'NDEASESS26L0913', 'L/C NDEASESS26L0913 通知行通知书（演示）.pdf')] } } }, warehouse));
+      documentsRequired: '1. 签署的商业发票一式三份；\n2. 全套清洁已装船海运提单，凭指示，空白背书，注明运费到付；\n3. 装箱单一式三份；\n4. 中国贸促会出具的一般原产地证明书。', note: '受益人：本公司；通知行已核押', fileIds: [demoFile('letter-of-credit', 'NDEASESS26L0913', 'L/C NDEASESS26L0913 通知行通知书.pdf')] } } }, warehouse));
     if (lcId) run('lc 009 amend', { type: 'lc.amend', payload: { id: lcId, date: day(-6), changes: { latestShipmentDate: day(20), expiryDate: day(35) }, note: '工厂排期顺延，客户同意展期，受益人已接受修改书' } }, warehouse);
   }
 

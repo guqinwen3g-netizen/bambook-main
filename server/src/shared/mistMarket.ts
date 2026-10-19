@@ -91,7 +91,7 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  if(command.type.startsWith('market.customer.')||command.type==='market.lead.convertToCrm')return 'relations:write';
  if(command.type==='market.contact.delete')return command.payload?.kind==='supplier'?'suppliers:write':'relations:write';
  if(command.type==='market.attachment.set'){const scopes:Record<string,string>={product:'products',supplier:'suppliers',relation:'relations',season:'seasons',trend:'seasons',show:'seasons',campaign:'marketing',lead:'marketing',showLead:'seasons',quotation:'quotations',lookbook:'marketing'};const scope=scopes[command.payload.kind];if(!scope)throw new MistCommandError('VALIDATION','附件对象类型无效');return scope+':write';}
- if(command.type==='market.quotation.decide')return 'approvals:write';
+ if(command.type==='market.quotation.decide')return 'quotations:approve';
  if(command.type==='market.quotation.convert'||command.type==='market.quotation.skipLines')return 'orders:write';
  if(command.type==='market.marginFloor.set')return 'pricing:admin';
  if(command.type.startsWith('market.quotation.'))return 'quotations:write';
@@ -107,7 +107,7 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  throw new MistCommandError('VALIDATION','未知市场操作');
 }
 export function getMarketReviews(rootState:MistState):MistReviewTask[] {
- return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,requiredPermission:'approvals:write',target:{view:'quotations',id:q.id},details:approval.details,fileIds:approval.fileIds})));
+ return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},details:approval.details,fileIds:approval.fileIds})));
 }
 export function applyMarketCommand(rootState:MistState,command:MarketCommand,context:MistContext):MistCommandResult { return execute(rootState,command,context); }
 

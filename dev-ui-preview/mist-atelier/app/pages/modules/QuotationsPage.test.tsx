@@ -7,13 +7,13 @@ import { quotationDomain, quotationFlags, quotationStage } from './QuotationsPag
 import { Nav } from '../../nav';
 import { createMistState, type MistContext, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 
-const bridge = vi.hoisted(() => ({ current: null as any }));
+const bridge = vi.hoisted(() => ({ current: null as any, actorId: 'demo-sales', permissions: null as string[] | null }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => bridge.current }));
-vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'demo-sales', displayName: '顾言' }, hasPermission: () => true, hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: bridge.actorId, displayName: '顾言' }, hasPermission: (scope: string) => bridge.permissions === null || bridge.permissions.includes(scope), hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host: HTMLDivElement, root: Root | undefined, state: MistState; const go = vi.fn();
 const code = (c: string) => state.market.quotations.find(q => q.code === c)!;
 beforeEach(() => {
-  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();bridge.actorId='demo-sales';bridge.permissions=null;
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-14T04:00:00Z'));
   let n = 0; const ctx: MistContext = { id: () => `q-test-${++n}`, actorName: '演示', now: '2026-10-14T02:00:00.000Z' };
   state = createMistState(ctx, 'demo');
@@ -25,6 +25,11 @@ const button = (label: string) => [...document.body.querySelectorAll('button')].
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
 
 describe('报价管理', () => {
+  it('指定主管使用岗位报价审批权限可以办理当前待审报价', async () => {
+    bridge.actorId='demo-reviewer';bridge.permissions=['quotations:read','quotations:approve'];
+    await mount(code('QT-2026-0003-V2').id);
+    expect(button('批准')?.disabled).toBe(false);
+  });
   it('演示数据按成衣 / 面料分板块，阶段与提醒由真实记录推出', () => {
     const fabric = state.market.quotations.filter(q => quotationDomain(state, q) === 'fabric').map(q => q.code).sort();
     expect(fabric).toEqual(['QT-2026-0001', 'QT-2026-0002', 'QT-2026-0004']);
