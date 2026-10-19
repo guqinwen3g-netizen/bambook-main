@@ -8,7 +8,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { ACCOUNT_STATUS, departmentOptions, organizationApi, type AdminAccount, type AdminRole, type AuditLogRow, type OrgDepartment } from '../../runtime/organization';
 
 const SUPER_ADMIN = new Set(['role-super-admin', '老板', '超级管理员', 'SuperAdmin', 'super-admin']);
-const isSuperAdmin = (role: AdminRole) => SUPER_ADMIN.has(role.id) || SUPER_ADMIN.has(role.name);
+const isSuperAdmin = (role: AdminRole) => SUPER_ADMIN.has(role.id.split('@')[0]) || SUPER_ADMIN.has(role.name);
 const when = (at: string | null | undefined) => at ? new Date(at).toLocaleString('zh-CN', { hour12: false }) : '—';
 const message = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
 

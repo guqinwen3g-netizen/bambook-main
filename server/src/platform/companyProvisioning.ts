@@ -70,6 +70,7 @@ export type CreateCompanyInput = {
  * 不创建工作空间——老板首次登录时按现有逻辑自动建立空白公司空间。
  */
 export async function createCompany(tx: Prisma.TransactionClient, input: CreateCompanyInput) {
+  if (input.ownerUserId && (await tx.userAccount.findUnique({ where: { id: input.ownerUserId }, select: { platformRole: true } }))?.platformRole) throw new Error('平台人员账号不能成为公司负责人。');
   const company = await tx.company.create({
     data: {
       id: randomUUID(),

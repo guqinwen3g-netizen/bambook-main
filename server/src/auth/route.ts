@@ -517,6 +517,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     if (!user || user.status !== 'active' || user.deletedAt != null) {
       return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Account disabled.' });
     }
+    if ((user as any).platformRole) return res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '平台人员不能切换进入客户公司业务。' });
     const current = await buildLoadedAuthTokenPayload(options.prisma, user, companyId);
     if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
     const next = auth.signToken(current);

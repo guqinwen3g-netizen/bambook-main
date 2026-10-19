@@ -39,6 +39,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  if (!has('revoke') && (await prisma.companyMember.count({ where: { userId: user.id } }) > 0 || await prisma.userRole.count({ where: { userId: user.id } }) > 0)) throw new Error('公司账号不能授予平台权限，请使用独立的平台人员账号。');
   const nextRole = has('revoke') ? null : 'platform_admin';
   await prisma.userAccount.update({ where: { id: user.id }, data: { platformRole: nextRole } });
   console.log(`${has('revoke') ? '已撤销' : '已授予'}平台管理员：${user.displayName} <${user.email}>（${user.id}）`);

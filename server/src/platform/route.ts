@@ -40,12 +40,13 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     if (!payload || typeof payload.userId !== 'string' || !payload.userId) { res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '请使用有效的平台账号。' }); return null; }
     const user = await options.prisma.userAccount.findUnique({
       where: { id: payload.userId },
-      select: { id: true, platformRole: true, status: true, deletedAt: true },
+      select: { id: true, platformRole: true, status: true, deletedAt: true, companyMembers: { select: { id: true }, take: 1 }, roles: { select: { id: true }, take: 1 } },
     });
     if (!user || user.status !== 'active' || user.deletedAt != null) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '账号不可用。' });
       return null;
     }
+    if (user.companyMembers?.length || user.roles?.length) { res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '客户公司账号不能作为平台人员账号使用。' }); return null; }
     if (user.platformRole !== 'platform_admin') {
       res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '需要平台管理员身份。' });
       return null;
@@ -126,8 +127,9 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     try {
       const owner = await options.prisma.userAccount.findFirst({
         where: { email: { equals: ownerEmail, mode: 'insensitive' }, deletedAt: null },
-        select: { id: true, status: true },
+        select: { id: true, status: true, platformRole: true },
       });
+      if (owner?.platformRole) return res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '平台人员不能成为客户公司的负责人。' });
       let ownerUserId = owner?.id ?? null;
       if (owner && owner.status !== 'active') {
         return res.status(409).json({ ok: false, error: 'OWNER_ACCOUNT_INACTIVE', message: '该邮箱对应的账号未启用，请先在账号管理里处理。' });
@@ -261,11 +263,12 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       if (!company) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '公司不存在。' });
       const user = await options.prisma.userAccount.findFirst({
         where: { email: { equals: email, mode: 'insensitive' }, deletedAt: null },
-        select: { id: true, displayName: true, status: true },
+        select: { id: true, displayName: true, status: true, platformRole: true },
       });
       if (!user) {
         return res.status(404).json({ ok: false, error: 'ACCOUNT_NOT_FOUND', message: '该邮箱还没有账号，请先创建账号。' });
       }
+      if (user.platformRole) return res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '平台人员不能加入客户公司。' });
       if (user.status !== 'active') {
         return res.status(409).json({ ok: false, error: 'ACCOUNT_INACTIVE', message: '该账号未启用。' });
       }
