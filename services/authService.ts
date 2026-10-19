@@ -5,6 +5,7 @@ import { getViewPermission, isAuthenticatedPublicView, isDevOnlyView } from '../
 export type AgentRole = 'owner' | 'admin' | 'manager' | 'merchandiser' | 'finance' | 'sales' | 'viewer' | 'agent_operator';
 
 export interface AuthUser {
+  platformRole?: string | null;
   businessAttributes?: string[];
   globalBusinessScope?: boolean;
   id: string;

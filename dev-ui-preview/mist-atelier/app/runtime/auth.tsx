@@ -45,7 +45,7 @@ function storedToken() {
 function identityOf(state: AuthState) {
   const user = state.isAuthenticated ? state.user : null;
   return JSON.stringify([
-    getAuthApiBase(), storedToken(), state.isAuthenticated, user?.id,
+    getAuthApiBase(), storedToken(), state.isAuthenticated, user?.id, user?.platformRole,
     [...(user?.roles ?? [])].sort(), [...(user?.roleIds ?? [])].sort(),
     [...(user?.permissions ?? [])].sort(), user?.permissionCeiling === undefined ? null : [...user.permissionCeiling].sort(),
     [...(user?.departmentIds ?? [])].sort(), user?.globalBusinessScope, [...(user?.businessAttributes ?? [])].sort(),

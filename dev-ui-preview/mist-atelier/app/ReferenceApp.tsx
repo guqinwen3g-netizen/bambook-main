@@ -1,3 +1,4 @@
+import { SaasAdminPage } from './pages/SaasAdminPage';
 import React from 'react';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, LogOut, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
 
@@ -50,6 +51,7 @@ import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, dev
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
 
 const PAGES: Record<string, React.FC> = {
+  'platform-admin': SaasAdminPage,
   ...FULFILLMENT_PAGES,...MARKET_PAGES,...PLATFORM_PAGES,
   emails: EmailsPage, cockpit: HomePage, development: DevListPage, 'development/detail': DevDetailPage, 'development/new': DevCreatePage,
   orders: OrderListPage, 'orders/detail': OrderDetailPage, 'orders/new': OrderCreatePage, calendar: CalendarPage, 'payment-vouchers': FinancePage, crm: CustomerPage,
@@ -57,9 +59,9 @@ const PAGES: Record<string, React.FC> = {
   // 设计系统、空/加载/错误样张只在开发构建可达，正式构建不出现在侧栏，也不能经地址打开。
   ...(import.meta.env.DEV ? { states: StatesPage, 'design-system': DesignSystemPage } : {}),
 };
-const LIVE_VIEWS = new Set(['emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
+const LIVE_VIEWS = new Set(['platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
-const LABELS: Record<string, string> = { 'design-system': '设计系统', states: '空 / 加载 / 错误', 'system-settings': '系统设置', settings: '系统设置', 'company-settings': '公司设置', 'workspace-settings': '公司设置', approvals: '审批与放行', search: '搜索结果', notifications: '通知中心' };
+const LABELS: Record<string, string> = { 'platform-admin': '平台管理', 'design-system': '设计系统', states: '空 / 加载 / 错误', 'system-settings': '系统设置', settings: '系统设置', 'company-settings': '公司设置', 'workspace-settings': '公司设置', approvals: '审批与放行', search: '搜索结果', notifications: '通知中心' };
 const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '平台' };
 
 export function readMistRoute(): Route {
@@ -89,6 +91,7 @@ function useSections(): NavSection[] {
     }));
     const dev = import.meta.env.DEV;
     const items = [
+      ...(session.user?.platformRole === 'platform_admin' ? [{ id: 'platform-admin', label: '平台管理', icon: ShieldCheck }] : []),
       ...(dev ? [{ id: 'design-system', label: '设计系统', icon: Component }, { id: 'states', label: '空 / 加载 / 错误', icon: SquareDashed }] : []),
       ...(dev && !session.localMode ? [{ id: 'login', label: '登录页', icon: KeyRound }] : []),
       ...(session.canAccessView(View.SystemSettings) ? [{ id: 'system-settings', label: '系统设置', icon: Settings2 }] : []),
@@ -120,6 +123,7 @@ function ModuleWorkBar({ view }: { view: string }) {
 }
 const developmentCreateLabel = (section?: string) => DEVELOPMENT_LIST_TABS.find(tab => tab.value === (section === 'fabric' ? 'fabric' : 'garment'))!.create;
 function crumbsFor(route: Route, go: (view: string, id?: string) => void, objectLabel?: string, versionLabel?: string): Crumb[] {
+  if (route.view === 'platform-admin') return [{ label: '平台运营', hideOnMobile: true }, { label: '平台管理' }];
   const base = route.view.split('/')[0], mod = getModuleByView(base as View);
   const label = mod?.productLabel ?? LABELS[base] ?? base;
   const crumbs: Crumb[] = [{ label: mod ? GROUPS[mod.nav.group] : base === 'company-settings' || base === 'workspace-settings' || base === 'approvals' || base === 'notifications' || base === 'search' ? '我的事务' : '设计系统', hideOnMobile: true }];
@@ -270,7 +274,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理当前空间；不能为此授予系统设置/后台管理权限。
-  const permitted = (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
+  const permitted = route.view === 'platform-admin' ? session.user?.platformRole === 'platform_admin' : (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
   const Page = session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
     : session.localMode && route.view === 'mes' ? LocalMesPage
     : PAGES[route.view] ?? null;

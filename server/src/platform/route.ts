@@ -22,6 +22,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function createPlatformRouter(options: PlatformRouterOptions) {
   const router = Router();
   const auth = createAuthService();
+  router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
 
   async function requirePlatformAdmin(req: Request, res: Response): Promise<{ userId: string } | null> {
     const token = pickRequestToken(req);
@@ -36,6 +37,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '登录已失效，请重新登录。' });
       return null;
     }
+    if (!payload || typeof payload.userId !== 'string' || !payload.userId) { res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '请使用有效的平台账号。' }); return null; }
     const user = await options.prisma.userAccount.findUnique({
       where: { id: payload.userId },
       select: { id: true, platformRole: true, status: true, deletedAt: true },
@@ -69,7 +71,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     try {
       const rows = await options.prisma.company.findMany({
         orderBy: { createdAt: 'desc' },
-        include: { _count: { select: { members: true, workspaces: true } } },
+        include: { _count: { select: { members: { where: { status: 'active', user: { status: 'active', deletedAt: null } } }, workspaces: true } } },
       });
       return res.json({
         ok: true,
@@ -113,6 +115,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: '初始密码至少 8 位。' });
     }
 
+    if (body.seatLimit != null && (!Number.isInteger(body.seatLimit) || body.seatLimit < 1)) return res.status(400).json({ ok: false, error: 'INVALID_SEAT_LIMIT', message: '席位上限须为正整数。' });
+
     const existingCompany = await options.prisma.company.findUnique({ where: { slug }, select: { id: true } });
     if (existingCompany) {
       return res.status(409).json({ ok: false, error: 'COMPANY_EXISTS', message: '该公司标识已被占用。' });
@@ -128,23 +132,14 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       if (owner && owner.status !== 'active') {
         return res.status(409).json({ ok: false, error: 'OWNER_ACCOUNT_INACTIVE', message: '该邮箱对应的账号未启用，请先在账号管理里处理。' });
       }
-      if (!ownerUserId) {
-        const password = ownerPassword || randomBytes(9).toString('base64url');
-        if (!ownerPassword) generatedPassword = password;
-        const created = await options.prisma.userAccount.create({
-          data: {
-            id: `usr_${randomUUID()}`,
-            displayName: ownerName || ownerEmail.split('@')[0],
-            email: ownerEmail,
-            passwordHash: await auth.hashPassword(password),
-            status: 'active',
-          },
-          select: { id: true },
-        });
-        ownerUserId = created.id;
-      }
-
+      const password = ownerPassword || randomBytes(18).toString('base64url');
+      const passwordHash = ownerUserId ? null : await auth.hashPassword(password);
+      if (!ownerUserId && !ownerPassword) generatedPassword = password;
       const result = await options.prisma.$transaction(async (tx) => {
+        if (!ownerUserId) {
+          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active' } });
+          ownerUserId = account.id;
+        }
         const created = await createCompany(tx, {
           slug,
           name,
@@ -167,7 +162,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
         return created;
       });
 
-      invalidateAccountStatusCache(ownerUserId);
+      if (ownerUserId) invalidateAccountStatusCache(ownerUserId);
       await audit(admin.userId, 'platform.company.create', result.company.id, { slug, name, ownerEmail });
 
       return res.status(201).json({
@@ -182,7 +177,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
         roles: result.roles,
         ...(generatedPassword ? { initialPassword: generatedPassword } : {}),
       });
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.code === 'P2002') return res.status(409).json({ ok: false, error: 'COMPANY_EXISTS', message: '公司标识或账号已被并发创建，请刷新后重试。' });
       logger.error('[platform] create company failed', { slug, error: (error as Error).message });
       return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR', message: '创建公司失败。' });
     }
@@ -201,17 +197,25 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       data.status = body.status;
     }
     if (typeof body.plan === 'string') data.plan = body.plan;
-    if (body.seatLimit === null || Number.isInteger(body.seatLimit)) data.seatLimit = body.seatLimit;
+    if (body.seatLimit !== undefined) {
+      if (body.seatLimit !== null && (!Number.isInteger(body.seatLimit) || body.seatLimit < 1)) return res.status(400).json({ ok: false, error: 'INVALID_SEAT_LIMIT', message: '席位上限须为正整数。' });
+      data.seatLimit = body.seatLimit;
+    }
     if (typeof body.name === 'string' && body.name.trim()) data.name = body.name.trim();
     if (!Object.keys(data).length) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '没有要修改的内容。' });
     }
     try {
-      const updated = await options.prisma.company.update({ where: { id }, data });
+      const updated = await options.prisma.$transaction(async tx => {
+        await tx.$queryRawUnsafe('SELECT "id" FROM "Company" WHERE "id"=$1::uuid FOR UPDATE', id);
+        if (typeof data.seatLimit === 'number' && data.seatLimit < await tx.companyMember.count({ where: { companyId: id, status: 'active', user: { status: 'active', deletedAt: null } } })) throw Object.assign(new Error('席位上限不能少于当前有效成员数。'), { code: 'SEAT_LIMIT_BELOW_USAGE' });
+        return tx.company.update({ where: { id }, data });
+      });
       await audit(admin.userId, 'platform.company.update', id, data);
       return res.json({ ok: true, company: { id: updated.id, name: updated.name, status: updated.status, plan: updated.plan, seatLimit: updated.seatLimit } });
     } catch (error: any) {
       if (error?.code === 'P2025') return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '公司不存在。' });
+      if (error?.code === 'SEAT_LIMIT_BELOW_USAGE') return res.status(409).json({ ok: false, error: error.code, message: error.message });
       logger.error('[platform] update company failed', { id, error: (error as Error).message });
       return res.status(500).json({ ok: false, error: 'INTERNAL_ERROR', message: '更新公司失败。' });
     }
@@ -265,11 +269,16 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       if (user.status !== 'active') {
         return res.status(409).json({ ok: false, error: 'ACCOUNT_INACTIVE', message: '该账号未启用。' });
       }
-      await options.prisma.companyMember.upsert({
-        where: { companyId_userId: { companyId, userId: user.id } },
-        update: { status: 'active' },
-        create: { id: randomUUID(), companyId, userId: user.id, status: 'active', joinedAt: new Date(), invitedBy: admin.userId },
+      const joined = await options.prisma.$transaction(async tx => {
+        await tx.$queryRawUnsafe('SELECT "id" FROM "Company" WHERE "id"=$1::uuid FOR UPDATE', companyId);
+        const current = await tx.company.findUniqueOrThrow({ where: { id: companyId } });
+        if (current.status !== 'active') return 'inactive';
+        const membership = await tx.companyMember.findUnique({ where: { companyId_userId: { companyId, userId: user.id } } });
+        if (membership?.status !== 'active' && current.seatLimit !== null && await tx.companyMember.count({ where: { companyId, status: 'active', user: { status: 'active', deletedAt: null } } }) >= current.seatLimit) return 'full';
+        await tx.companyMember.upsert({ where: { companyId_userId: { companyId, userId: user.id } }, update: { status: 'active' }, create: { id: randomUUID(), companyId, userId: user.id, status: 'active', joinedAt: new Date(), invitedBy: admin.userId } });
+        return 'joined';
       });
+      if (joined !== 'joined') return res.status(409).json({ ok: false, error: joined === 'full' ? 'SEAT_LIMIT_REACHED' : 'COMPANY_UNAVAILABLE', message: joined === 'full' ? '公司席位已用完，请先增加席位。' : '公司未启用，不能添加成员。' });
       await audit(admin.userId, 'platform.company.member.add', companyId, { userId: user.id, email });
       return res.json({ ok: true, member: { userId: user.id, displayName: user.displayName, email } });
     } catch (error) {
@@ -282,10 +291,14 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     const admin = await requirePlatformAdmin(req, res);
     if (!admin) return;
     try {
-      await options.prisma.companyMember.update({
-        where: { companyId_userId: { companyId: req.params.id, userId: req.params.userId } },
-        data: { status: 'left' },
+      const { id: companyId, userId } = req.params;
+      const removed = await options.prisma.$transaction(async tx => {
+        await tx.$queryRawUnsafe('SELECT "id" FROM "Company" WHERE "id"=$1::uuid FOR UPDATE', companyId);
+        const ownerRole = await tx.userRole.findFirst({ where: { userId, role: { companyId, code: SYSTEM_ROLE_IDS.SUPER_ADMIN } } });
+        if (ownerRole && await tx.companyMember.count({ where: { companyId, status: 'active', userId: { not: userId }, user: { status: 'active', deletedAt: null, roles: { some: { role: { companyId, code: SYSTEM_ROLE_IDS.SUPER_ADMIN } } } } } }) === 0) return false;
+        await tx.companyMember.update({ where: { companyId_userId: { companyId, userId } }, data: { status: 'left' } }); return true;
       });
+      if (!removed) return res.status(409).json({ ok: false, error: 'LAST_OWNER', message: '不能移除公司的最后一位负责人，请先安排接替人。' });
       await audit(admin.userId, 'platform.company.member.remove', req.params.id, { userId: req.params.userId });
       return res.json({ ok: true });
     } catch (error: any) {

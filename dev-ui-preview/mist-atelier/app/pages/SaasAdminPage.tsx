@@ -1,0 +1,59 @@
+import React from 'react';
+import { Building2, Plus, RefreshCw, ShieldCheck, Users } from 'lucide-react';
+import { Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, TextInput, Toolbar } from '../../../../components/mist';
+import { useMistSession } from '../runtime/auth';
+import { platformAdminApi, type PlatformCompany, type PlatformMember } from '../runtime/platformAdmin';
+const statuses=[{value:'active',label:'运行中'},{value:'suspended',label:'已暂停'},{value:'closed',label:'已关闭'}];
+const statusLabel=(value:string)=>statuses.find(s=>s.value===value)?.label??value;
+const message=(e:unknown)=>e instanceof Error?e.message:'操作未完成，请重试。';
+const blank={name:'',slug:'',ownerName:'',ownerEmail:'',ownerPassword:''};
+export function SaasAdminPage(){
+ const session=useMistSession(),allowed=session.user?.platformRole==='platform_admin';
+ const [companies,setCompanies]=React.useState<PlatformCompany[]>([]),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
+ const [query,setQuery]=React.useState(''),[filter,setFilter]=React.useState('all'),[selected,setSelected]=React.useState<string|null>(null);
+ const [members,setMembers]=React.useState<PlatformMember[]>([]),[membersLoading,setMembersLoading]=React.useState(false),[memberEmail,setMemberEmail]=React.useState('');
+ const [creating,setCreating]=React.useState(false),[draft,setDraft]=React.useState(blank),[busy,setBusy]=React.useState(false),[formError,setFormError]=React.useState('');
+ const [edit,setEdit]=React.useState({status:'active',plan:'standard',seats:''});
+ const [confirmation,setConfirmation]=React.useState<{kind:'status'|'member';member?:PlatformMember}|null>(null),[credentials,setCredentials]=React.useState<{email:string;password:string}|null>(null);
+ const identity=React.useRef(session.sessionKey);identity.current=session.sessionKey;
+ const company=companies.find(c=>c.id===selected);
+ const reload=React.useCallback(async(signal?:AbortSignal)=>{if(!allowed)return;const key=session.sessionKey;setLoading(true);setError('');try{const result=await platformAdminApi.list(signal);if(!signal?.aborted&&identity.current===key)setCompanies(result.companies);}catch(e){if(!signal?.aborted&&identity.current===key)setError(message(e));}finally{if(!signal?.aborted&&identity.current===key)setLoading(false);}},[allowed,session.sessionKey]);
+ React.useEffect(()=>{setSelected(null);setCompanies([]);setCredentials(null);setCreating(false);const controller=new AbortController();void reload(controller.signal);return()=>controller.abort();},[reload]);
+ React.useEffect(()=>{if(!company)return;setEdit({status:company.status,plan:company.plan,seats:company.seatLimit===null?'':String(company.seatLimit)});setFormError('');},[selected]);
+ const selectedRef=React.useRef(selected);selectedRef.current=selected;
+ const reloadMembers=React.useCallback(async(signal?:AbortSignal)=>{if(!selected)return;const key=session.sessionKey;setMembersLoading(true);try{const result=await platformAdminApi.members(selected,signal);if(!signal?.aborted&&identity.current===key)setMembers(selectedRef.current===selected?result.members:[]);}catch(e){if(!signal?.aborted&&identity.current===key)setFormError(message(e));}finally{if(!signal?.aborted&&identity.current===key)setMembersLoading(false);}},[selected,session.sessionKey]);
+ React.useEffect(()=>{setMembers([]);setMemberEmail('');const controller=new AbortController();void reloadMembers(controller.signal);return()=>controller.abort();},[reloadMembers]);
+ async function mutate(work:()=>Promise<void>){const key=session.sessionKey;setBusy(true);setFormError('');try{await work();}catch(e){if(identity.current===key)setFormError(message(e));}finally{if(identity.current===key)setBusy(false);}}
+ async function create(){if(!draft.name.trim()||!draft.ownerName.trim()||!/^\S+@\S+\.\S+$/.test(draft.ownerEmail)||! /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/.test(draft.slug)){setFormError('请填写公司名称、3–50 位公司标识、负责人姓名和有效邮箱。');return;}
+  await mutate(async()=>{const key=session.sessionKey;const result=await platformAdminApi.create({...draft,ownerPassword:draft.ownerPassword||undefined});if(identity.current!==key)return;setCreating(false);setDraft(blank);await reload();setSelected(result.company.id);if(result.initialPassword)setCredentials({email:result.owner.email,password:result.initialPassword});});
+ }
+ async function save(){if(edit.seats!==''&&(!/^\d+$/.test(edit.seats)||Number(edit.seats)<1)){setFormError('席位上限须为正整数，留空表示不限。');return;}if(!edit.plan.trim()){setFormError('请填写服务方案。');return;}if(company&&edit.status!==company.status&&edit.status!=='active'){setConfirmation({kind:'status'});return;}await persist();}
+ async function persist(){if(!company)return;const id=company.id;await mutate(async()=>{await platformAdminApi.update(id,{status:edit.status,plan:edit.plan.trim(),seatLimit:edit.seats===''?null:Number(edit.seats)});setConfirmation(null);await reload();});}
+ const visible=companies.filter(c=>(filter==='all'||c.status===filter)&&`${c.name} ${c.slug} ${c.legalName??''}`.toLowerCase().includes(query.toLowerCase()));
+ if(!allowed)return <MistPage><EmptyState icon={ShieldCheck} title="需要平台管理员身份" description="公司管理员负责本公司的业务；平台管理员负责公司开户与服务管理。"/></MistPage>;
+ return <MistPage width="wide"><PageHeader eyebrow="平台运营" title="平台管理" description="管理公司开户、服务状态与成员归属。各公司的业务数据独立。" actions={<Button variant="primary" icon={Plus} onClick={()=>{setFormError('');setDraft(blank);setCreating(true);}}>开通公司</Button>}/>
+  <StatGrid><StatCard icon={Building2} label="公司" value={companies.length}/><StatCard icon={ShieldCheck} label="运行中" value={companies.filter(c=>c.status==='active').length}/><StatCard icon={Users} label="有效成员归属" value={companies.reduce((n,c)=>n+c.members,0)}/></StatGrid>
+  <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={()=>void reload()}>刷新</Button>}><TextInput aria-label="搜索公司" placeholder="搜索公司名称或标识" value={query} onChange={e=>setQuery(e.target.value)}/><Select aria-label="公司状态" value={filter} onChange={e=>setFilter(e.target.value)} options={[{value:'all',label:'全部状态'},...statuses]}/></Toolbar>
+  {error&&<Banner tone="bad" title="读取公司失败">{error}</Banner>}
+  <Card><DataTable ariaLabel="公司列表" rows={visible} rowKey={c=>c.id} loading={loading} selectedKey={selected} onRowClick={c=>setSelected(c.id)} columns={[{key:'name',header:'公司',render:c=><><b>{c.name}</b><div className="mist-caption"><Mono>{c.slug}</Mono></div></>},{key:'status',header:'状态',render:c=><Pill tone={c.status==='active'?'ok':c.status==='suspended'?'warn':'neutral'}>{statusLabel(c.status)}</Pill>},{key:'plan',header:'服务方案',render:c=>c.plan==='standard'?'标准服务':c.plan},{key:'members',header:'成员 / 席位',render:c=>`${c.members} / ${c.seatLimit??'不限'}`},{key:'action',header:'',render:c=><Button size="sm" onClick={()=>setSelected(c.id)} aria-label={'管理'+c.name}>管理</Button>}]} empty={<EmptyState title={query||filter!=='all'?'没有匹配的公司':'尚未开通公司'} description={query||filter!=='all'?'调整搜索条件后重试。':'开通公司后，在这里管理成员归属与服务状态。'}/>}/></Card>
+  <Drawer open={!!company} onClose={()=>{if(!busy)setSelected(null);}} title={company?.name??'公司管理'} sub={company?.slug} size="lg">
+   {company&&<div className="mist-col">{formError&&<Banner tone="bad" title="操作未完成">{formError}</Banner>}
+    <KeyValue items={[{label:'法定名称',value:company.legalName||'尚未填写'},{label:'开通日期',value:new Date(company.createdAt).toLocaleDateString('zh-CN')}]}/>
+    <Card><CardHeader title="服务设置"/><div className="mist-card-body"><FormGrid cols={2}><Field label="状态"><Select aria-label="服务状态" value={edit.status} onChange={e=>setEdit({...edit,status:e.target.value})} options={statuses}/></Field><Field label="服务方案"><TextInput value={edit.plan} onChange={e=>setEdit({...edit,plan:e.target.value})}/></Field><Field label="席位上限" hint="留空表示不限；按有效公司成员计数。"><TextInput type="number" min={1} value={edit.seats} onChange={e=>setEdit({...edit,seats:e.target.value})}/></Field></FormGrid><Button loading={busy} onClick={()=>void save()}>保存服务设置</Button></div></Card>
+    <Card><CardHeader title="公司成员" sub="加入已有账号后，由公司管理员安排岗位和业务权限。" tools={<Button size="sm" icon={RefreshCw} loading={membersLoading} onClick={()=>void reloadMembers()}>刷新成员</Button>}/><div className="mist-card-body"><FormGrid cols={2}><TextInput aria-label="添加成员邮箱" placeholder="已有账号邮箱" value={memberEmail} onChange={e=>setMemberEmail(e.target.value)}/><Button disabled={!memberEmail.trim()} loading={busy} onClick={()=>void mutate(async()=>{await platformAdminApi.addMember(company.id,memberEmail.trim());setMemberEmail('');await reloadMembers();await reload();})}>加入公司</Button></FormGrid></div>
+     <DataTable ariaLabel="公司成员" rows={members} rowKey={m=>m.userId} loading={membersLoading} columns={[{key:'name',header:'成员',render:m=><>{m.displayName}<div className="mist-caption">{m.email}</div></>},{key:'state',header:'归属状态',render:m=><Pill tone={m.memberStatus==='active'?'ok':'neutral'}>{m.accountStatus&&m.accountStatus!=='active'?'账号停用':m.memberStatus==='active'?'在公司':m.memberStatus==='left'?'已退出':'已暂停'}</Pill>},{key:'action',header:'',render:m=>m.memberStatus==='active'?<Button size="sm" variant="quiet" disabled={busy} onClick={()=>setConfirmation({kind:'member',member:m})} aria-label={'移出'+m.displayName}>移出公司</Button>:<Button size="sm" disabled={busy} onClick={()=>void mutate(async()=>{await platformAdminApi.addMember(company.id,m.email);await reloadMembers();await reload();})}>恢复归属</Button>}]} empty={<EmptyState title="暂无成员" compact/>}/>
+    </Card></div>}
+  </Drawer>
+  <Dialog open={creating} onClose={()=>{if(!busy)setCreating(false);}} title="开通公司" description="建立独立公司，并为负责人配置公司管理员权限。不会发送邮件。" footer={<><Button disabled={busy} onClick={()=>setCreating(false)}>取消</Button><Button variant="primary" loading={busy} onClick={()=>void create()}>确认开通</Button></>}>
+   {formError&&<Banner tone="bad" title="未开通">{formError}</Banner>}<FormGrid cols={2}>
+    <Field label="公司名称" required><TextInput aria-label="公司名称" value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})}/></Field>
+    <Field label="公司标识" required hint="3–50 位小写字母、数字或连字符。"><TextInput aria-label="公司标识" value={draft.slug} onChange={e=>setDraft({...draft,slug:e.target.value})}/></Field>
+    <Field label="负责人姓名" required><TextInput aria-label="负责人姓名" value={draft.ownerName} onChange={e=>setDraft({...draft,ownerName:e.target.value})}/></Field>
+    <Field label="负责人邮箱" required><TextInput aria-label="负责人邮箱" type="email" value={draft.ownerEmail} onChange={e=>setDraft({...draft,ownerEmail:e.target.value})}/></Field>
+    <Field label="初始密码" hint="新账号可留空，由系统生成；已有账号保留原密码。"><TextInput aria-label="初始密码" type="password" autoComplete="new-password" value={draft.ownerPassword} onChange={e=>setDraft({...draft,ownerPassword:e.target.value})}/></Field>
+   </FormGrid>
+  </Dialog>
+  <Dialog open={!!confirmation} onClose={()=>{if(!busy)setConfirmation(null);}} title={confirmation?.kind==='member'?'移出公司':'更改公司状态'} tone="warn" description={confirmation?.kind==='member'?`确认将 ${confirmation.member?.displayName} 移出 ${company?.name}？其现有公司访问将立即失效。`:`确认将 ${company?.name} 设为${statusLabel(edit.status)}？该公司的现有访问将立即失效。`} footer={<><Button disabled={busy} onClick={()=>setConfirmation(null)}>取消</Button><Button variant="danger" loading={busy} onClick={()=>{if(confirmation?.kind==='status')void persist();else if(company&&confirmation?.member)void mutate(async()=>{await platformAdminApi.removeMember(company.id,confirmation.member!.userId);setConfirmation(null);await reloadMembers();await reload();});}}>确认</Button></>}/>
+  <Dialog open={!!credentials} onClose={()=>setCredentials(null)} title="公司已开通" description="请妥善保存新账号的初始密码，关闭后此处不再显示。" footer={<Button onClick={()=>setCredentials(null)}>已保存，关闭</Button>}><KeyValue items={[{label:'账号',value:credentials?.email??''},{label:'初始密码',value:<Mono>{credentials?.password??''}</Mono>}]}/></Dialog>
+ </MistPage>;
+}
