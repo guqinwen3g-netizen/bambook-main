@@ -164,12 +164,18 @@ describe('one Mist entry with real authentication and workspace state', () => {
     expect(getByRole(host!, 'dialog', { name: '本地工作区' }).textContent).toContain('本地审批人');
   });
 
-  it('shows a reconnect action rather than an old password form when local session discovery fails', async () => {
-    override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'本地工作区暂不可达'},503)):null;
-    await mount();await waitFor(()=>expect(host!.textContent).toContain('本地工作区暂不可达'));
+  it('shows a neutral reconnect action without claiming local identity when session discovery fails', async () => {
+    override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'工作区暂不可达'},503)):null;
+    await mount();await waitFor(()=>expect(host!.textContent).toContain('工作区暂不可达'));
     expect(queryByRole(host!,'form',{name:'登录'})).toBeNull();
-    expect(queryByRole(host!,'button',{name:'重新进入本地工作区'})).not.toBeNull();
+    expect(queryByRole(host!,'button',{name:'重新连接工作区'})).not.toBeNull();expect(host!.textContent).not.toContain('本地工作身份');
     expect(requests.some(r=>r.path.includes('/auth/'))).toBe(false);
+  });
+  it('returns to the company login after retrying discovery without loading anonymous business data',async()=>{
+    override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'连接中断'},503)):null;
+    await mount();await waitFor(()=>expect(queryByRole(host!,'button',{name:'重新连接工作区'})).not.toBeNull());
+    override=undefined;await click(getByRole(host!,'button',{name:'重新连接工作区'}));
+    await waitFor(()=>expect(queryByRole(host!,'form',{name:'登录'})).not.toBeNull());expect(host!.textContent).not.toContain('本地工作身份');expect(probes.home).not.toHaveBeenCalled();
   });
 
   it('keeps StrictMode boot behind real /me verification without loading a business page anonymously', async () => {

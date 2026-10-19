@@ -32,6 +32,14 @@ beforeEach(async () => {
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; host = undefined; vi.unstubAllGlobals(); });
 describe('Mist session adapter with production auth service', () => {
+  it('retries an unverified discovery into company authentication only after a confirmed server response',async()=>{
+    override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'Service unavailable'},503)):null;
+    await mount();await waitFor(()=>expect(session.status).toBe('anonymous'));
+    expect(session.localMode).toBe(false);expect(session.connectionModeUnverified).toBe(true);expect(session.user).toBeNull();expect(requests.every(r=>r.path==='/api/mist/session'&&r.method==='GET')).toBe(true);
+    override=undefined;await act(async()=>session.refresh());await waitFor(()=>expect(session.connectionModeUnverified).not.toBe(true));
+    expect(session.localMode).not.toBe(true);expect(session.status).toBe('anonymous');expect(requests.some(r=>r.path==='/api/auth/me')).toBe(true);
+    await act(async()=>session.login('reconnected-staff','password'));await waitFor(()=>expect(session.user?.id).toBe('reconnected-staff'));expect(session.localMode).not.toBe(true);
+  });
   it('initializes only through real /me and never automatically logs into a development identity', async () => {
     const response = deferred<Response>(); override = url => url.pathname.endsWith('/auth/me') ? response.promise : null;
     await mount(); expect(session.status).toBe('loading'); expect(session.user).toBeNull(); expect(session.canAccessView(View.Orders)).toBe(false);

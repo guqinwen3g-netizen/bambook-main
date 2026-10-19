@@ -28,6 +28,8 @@ export interface MistSession {
   hasRole: (...roles: AgentRole[]) => boolean;
   /** Present only for the explicit server-provided local workspace mode. */
   localMode?: boolean;
+  /** Discovery failed before the server could confirm a local or company session. No identity is authorized. */
+  connectionModeUnverified?: boolean;
   localProfiles?: Array<{id:string;name:string;title?:string}>;
   selectLocalProfile?: (profileId:string) => Promise<void>;
 }
@@ -253,7 +255,7 @@ export function MistSessionProvider({children}:{children:React.ReactNode}) {
   return !!policy.required&&permits(policy.required);
  },[data,status,permits]);
  if(mode==='remote')return <ProductionMistSessionProvider>{children}</ProductionMistSessionProvider>;
- const value:MistSession={status,user:status==='authenticated'?data!.user:null,sessionKey:`${instanceId}:local:${revision}`,error,refreshing,signingIn:switching,signingOut:false,login,logout:refresh,refresh,clearError:()=>setError(''),canAccessView,hasPermission:permits,hasRole,localMode:mode==='local'||mode==='error',localProfiles:data?.profiles||[],selectLocalProfile};
+ const value:MistSession={status,user:status==='authenticated'?data!.user:null,sessionKey:`${instanceId}:local:${revision}`,error,refreshing,signingIn:switching,signingOut:false,login,logout:refresh,refresh,clearError:()=>setError(''),canAccessView,hasPermission:permits,hasRole,localMode:mode==='local',connectionModeUnverified:mode==='error',localProfiles:data?.profiles||[],selectLocalProfile};
  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
