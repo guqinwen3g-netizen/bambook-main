@@ -25,22 +25,24 @@ export function LoginPage() {
   // 两步验证第二步：密码通过后服务器给的 5 分钟凭据；有值时显示动态码表单。
   const [mfaToken, setMfaToken] = React.useState<string | null>(null);
   const [code, setCode] = React.useState('');
-  const backToPassword = () => { setMfaToken(null); setCode(''); setErr(''); session.clearError(); };
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (submitting.current || busy || cooldown > 0 || session.status === 'loading') return;
-    if (mfaToken) {
-      if (!code.trim()) { setErr('请输入验证器上的 6 位动态码或恢复码'); return; }
-    } else {
-      if (!email.trim()) { setErr('请输入工作邮箱'); return; }
-      if (!pw) { setErr('请输入密码'); return; }
-    }
+  // 同一账号属于多家公司时，先让用户选择本次进入哪一家。
+  const [companies, setCompanies] = React.useState<Array<{ id: string; name: string; slug: string; jobTitle?: string | null }>>([]);
+  const backToPassword = () => { setMfaToken(null); setCode(''); setCompanies([]); setErr(''); session.clearError(); };
+  const doLogin = async (companyId?: string) => {
+    if (submitting.current || busy) return;
     submitting.current = true; setErr(''); session.clearError();
     try {
-      const user = await session.login(email.trim(), pw, mfaToken ? { remember, mfa: { mfaToken, code } } : { remember });
-      if (mounted.current) { setPw(''); setCode(''); setMfaToken(null); go('cockpit'); toast(`欢迎回来，${user.displayName || user.email}`); }
+      const user = await session.login(email.trim(), pw, {
+        remember,
+        ...(mfaToken ? { mfa: { mfaToken, code } } : {}),
+        ...(companyId ? { companyId } : {}),
+      });
+      if (mounted.current) { setPw(''); setCode(''); setMfaToken(null); setCompanies([]); go('cockpit'); toast(`欢迎回来，${user.displayName || user.email}`); }
     } catch (failure: any) {
       if (!mounted.current) return;
+      if (failure?.code === 'COMPANY_SELECTION_REQUIRED' && Array.isArray(failure.companies)) {
+        setCompanies(failure.companies); setErr(''); return;
+      }
       setPw('');
       if (failure?.code === 'MFA_REQUIRED' && typeof failure.mfaToken === 'string') { setMfaToken(failure.mfaToken); setCode(''); setErr(''); return; }
       if (failure?.code === 'MFA_EXPIRED') { setMfaToken(null); setCode(''); }
@@ -56,6 +58,17 @@ export function LoginPage() {
       }
     } finally { submitting.current = false; }
   };
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (submitting.current || busy || cooldown > 0 || session.status === 'loading') return;
+    if (mfaToken) {
+      if (!code.trim()) { setErr('请输入验证器上的 6 位动态码或恢复码'); return; }
+    } else {
+      if (!email.trim()) { setErr('请输入工作邮箱'); return; }
+      if (!pw) { setErr('请输入密码'); return; }
+    }
+    await doLogin();
+  };
   const shownError = err || session.error;
   const errorNode = shownError ? <span id="mist-login-error" role="alert">{shownError}</span> : undefined;
   return (
@@ -70,7 +83,17 @@ export function LoginPage() {
       </div>
       <div className="mist-auth-panel">
         <form className="mist-auth-form" aria-label="登录" onSubmit={submit}>
-          {mfaToken ? (<>
+          {companies.length > 0 ? (<>
+            <div><h2 className="mist-h1" style={{ fontSize: 28 }}>选择公司</h2><p className="mist-sub" style={{ marginTop: 6 }}>这个账号属于多家公司，选择这次要进入的一家。</p></div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {companies.map(company => (
+                <Button key={company.id} size="lg" block onClick={() => void doLogin(company.id)} disabled={busy} iconRight={busy ? undefined : ArrowRight}>
+                  {company.name}
+                </Button>
+              ))}
+            </div>
+            <div className="mist-row"><TextLink onClick={backToPassword} disabled={busy}>返回重新登录</TextLink></div>
+          </>) : mfaToken ? (<>
             <div><h2 className="mist-h1" style={{ fontSize: 28 }}>两步验证</h2><p className="mist-sub" style={{ marginTop: 6 }}>打开手机上的验证器应用，输入 Bambook 当前显示的 6 位动态码。手机不在身边时可输入一个恢复码。</p></div>
             <Field label="动态码或恢复码" error={errorNode}><TextInput icon={ShieldCheck} autoComplete="one-time-code" inputMode="text" autoFocus value={code} onChange={e => setCode(e.target.value)} placeholder="6 位数字或 xxxxx-xxxxx" disabled={busy} aria-invalid={!!shownError} aria-describedby={shownError ? 'mist-login-error' : undefined} /></Field>
             <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{cooldown > 0 ? `请稍候 ${cooldown}s` : '验证并登录'}</Button>

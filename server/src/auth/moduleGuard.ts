@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { getDefaultAgentApiKeyActors } from './agentPrincipal';
 import { extractActorFromRequest } from './middleware';
+import { runWithCompanyContext } from './requestCompanyContext';
 import type { TokenPayload } from './service';
 
 export interface ModuleAuthGuardOptions {
@@ -32,6 +33,9 @@ export interface ModuleAuthGuardOptions {
  */
 export function createModuleAuthGuard(opts: ModuleAuthGuardOptions) {
   return (req: Request, res: Response, next: NextFunction) => {
+    // 把会话所属公司写进请求上下文：后续任何权限重载都只按这家公司计算。
+    const proceed = (companyId: string | null | undefined) =>
+      runWithCompanyContext(companyId ?? null, () => next());
     if (!opts.requireAuth) {
       // Even in dev mode, a real JWT principal always wins over a synthesized dev actor
       // (prevents spoofed body roles from overriding an authenticated session).
@@ -39,18 +43,18 @@ export function createModuleAuthGuard(opts: ModuleAuthGuardOptions) {
       if (actor) {
         (req as any).actor = actor;
         (req as any).authSource = 'user-session';
-        return next();
+        return proceed(actor.companyId);
       }
       if (opts.devActorFactory) {
         (req as any).actor = opts.devActorFactory(req);
         (req as any).authSource = 'dev';
-        return next();
+        return proceed((req as any).actor?.companyId);
       }
       // 无 actor 也要打上 dev 标记：否则下游 requirePermission 会因拿不到 actor 返回 401，
       // 出现「dev 模式 guard 放行、scope 守卫却拒绝」的自相矛盾（且写操作走
       // requireJwtForWrite 在 dev 是放行的，读反而更严）。dev 即不鉴权，全链路一致。
       (req as any).authSource = 'dev';
-      return next();
+      return proceed(null);
     }
 
     // Priority 1: JWT (cookie or Bearer)
@@ -58,7 +62,7 @@ export function createModuleAuthGuard(opts: ModuleAuthGuardOptions) {
     if (actor) {
       (req as any).actor = actor;
       (req as any).authSource = 'user-session';
-      return next();
+      return proceed(actor.companyId);
     }
 
     // Priority 2: API key (accept both canonical and legacy header names)
@@ -98,10 +102,10 @@ export function createModuleAuthGuard(opts: ModuleAuthGuardOptions) {
         && hydrated?.authorizationLoaded === true && hydrated.userId === apiKeyActor.userId
         ? hydrated : apiKeyActor;
       (req as any).authSource = 'api-key';
-      return next();
+      return proceed((req as any).actor?.companyId);
     }
 
-    next();
+    proceed((req as any).actor?.companyId ?? null);
   };
 }
 

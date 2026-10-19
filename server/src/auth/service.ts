@@ -13,6 +13,8 @@ export type TokenPayload = {
   globalBusinessScope?: boolean;
   grantedPermissions?: string[];
   userId: string;
+  /** 当前会话所属公司（租户）。null/缺省表示尚未归属公司的历史会话。 */
+  companyId?: string | null;
   displayName?: string;
   roles: AgentRole[];
   /** 新 RBAC 系统角色 ID 列表（role-sales 等），可选，旧 token 不包含 */

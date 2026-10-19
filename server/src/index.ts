@@ -125,6 +125,7 @@ import { createDevPanelRouter } from './devPanel/route';
 import { DEV_COMPANIES } from './devPanel/companies';
 import { dbUrlFor, getActiveDb, isDualMode } from './devPanel/activeDb';
 import { createAdminRouter } from './admin/route';
+import { createPlatformRouter } from './platform/route';
 import { createApprovalRouter } from './approvals/approvalRoute';
 import { createApprovalKernelRouter } from './approvals/approvalKernelRoute';
 import type { OnApprovalDecided } from './approvals/approvalDecisionService';
@@ -741,6 +742,8 @@ const onApprovalDecided: OnApprovalDecided = async (approval) => {
 };
 app.use('/api/admin', createAdminRouter({ prisma, email: emailService,
     requireAuth: SDK_CONFIG.requireAuth, apiKeys: SDK_CONFIG.apiKeys, onDecided: onApprovalDecided }));
+// 平台后台：跨公司运营入口，仅 platformRole='platform_admin' 可访问。
+app.use('/api/platform', createPlatformRouter({ prisma }));
 app.use('/api/v1/approvals', createApprovalRouter({
     prisma, requireAuth: SDK_CONFIG.requireAuth, onDecided: onApprovalDecided,
 }));

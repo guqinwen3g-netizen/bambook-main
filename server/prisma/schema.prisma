@@ -1276,6 +1276,8 @@ model UserAccount {
   avatarUrl     String?
   passwordHash  String    @default("")
   status        String    @default("active")
+  /// 平台级身份：platform_admin 可跨公司管理；null 为普通公司账号。
+  platformRole  String?
   primaryDeptId String?
   metadata      Json?
   lastLoginAt   DateTime?
@@ -1312,6 +1314,7 @@ model UserAccount {
   fabricUseAuthorizationRequests FabricUseAuthorizationRequest[] @relation("FabricUseAuthorizationRequestRecorder")
   fabricUseAuthorizationVersions FabricUseAuthorizationVersion[] @relation("FabricUseAuthorizationVersionRecorder")
   fabricUseAuthorizationUses FabricUseAuthorizationUse[] @relation("FabricUseAuthorizationUseRecorder")
+  companyMembers CompanyMember[]
 
   @@index([status])
   @@index([primaryDeptId])
@@ -1319,6 +1322,8 @@ model UserAccount {
 
 model Department {
   id       String  @id
+  /// 所属公司。null 仅用于迁移前的历史行。
+  companyId String? @db.Uuid
   name     String
   parentId String?
   status   String  @default("active")
@@ -1332,6 +1337,7 @@ model Department {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  company      Company?       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   parent       Department?    @relation("DepartmentTree", fields: [parentId], references: [id])
   children     Department[]   @relation("DepartmentTree")
   users        UserAccount[]
@@ -1342,6 +1348,7 @@ model Department {
   jobPositions JobPosition[]
   teams        Team[]
 
+  @@index([companyId])
   @@index([parentId])
   @@index([status])
   @@index([headId])
@@ -1349,12 +1356,17 @@ model Department {
 
 model Role {
   id          String   @id
+  /// 所属公司。null 仅用于迁移前的历史行；多租户下每个公司各有一套角色。
+  companyId   String?  @db.Uuid
+  /// 系统角色码（role-super-admin 等），自定义角色为 null。按码判断角色类型，不再依赖 id。
+  code        String?
   name        String
   description String?
   isSystem    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  company      Company?             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   users        UserRole[]
   permissions  RolePermission[]
   toolPerms    AgentToolPermission[]
@@ -1362,6 +1374,8 @@ model Role {
   documentAcls KnowledgeAcl[]
 
   @@index([isSystem])
+  @@index([companyId])
+  @@index([code])
 }
 
 model UserRole {
@@ -9746,15 +9760,19 @@ model OrderSampleCommandCancellation {
 model MistWorkspace {
   id String @id @default(uuid()) @db.Uuid
   ownerId String
+  /// 所属公司。null 表示尚未归属公司的历史空间（迁移前）。
+  companyId String? @db.Uuid
   slug String
   name String
   revision Int @default(0)
   state Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   receipts MistCommandReceipt[]
   @@unique([ownerId, slug])
   @@index([ownerId, updatedAt])
+  @@index([companyId])
 }
 
 /// Durable idempotency result, committed with the corresponding workspace state.
@@ -9770,4 +9788,50 @@ model MistCommandReceipt {
   workspace MistWorkspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   @@unique([workspaceId, requestId])
   @@index([actorId, createdAt])
+}
+
+/// 公司（租户）。一台服务器上的一个客户企业；角色、部门、工作空间与成员都归属于它。
+model Company {
+  id          String   @id @default(uuid()) @db.Uuid
+  slug        String   @unique
+  name        String
+  legalName   String?
+  englishName String?
+  /// active | suspended | closed
+  status      String   @default("active")
+  plan        String   @default("standard")
+  seatLimit   Int?
+  trialEndsAt DateTime?
+  settings    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     CompanyMember[]
+  roles       Role[]
+  departments Department[]
+  workspaces  MistWorkspace[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// 账号与公司的归属关系。账号是平台级的（一个邮箱一个账号），可属于多家公司。
+model CompanyMember {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @db.Uuid
+  userId    String
+  /// active | suspended | left
+  status    String   @default("active")
+  jobTitle  String?
+  invitedBy String?
+  joinedAt  DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([userId])
+  @@index([companyId, status])
 }

@@ -34,6 +34,7 @@ import {
   type SensitiveFieldScope,
   hasPermission as fallbackHasPermission,
   getDataScopeRule,
+  systemRoleCode,
 } from '../_shared/rolePermissionMatrix';
 
 // v2.1（DR-042 §5.1）：department 行级规则保留原部门维解析的模块白名单。
@@ -66,8 +67,10 @@ const LEGACY_AGENT_ROLE_IDS = new Set<AgentRole>([
 
 /** Role identity is canonical; an arbitrary custom Role.name cannot create leadership authority. */
 export function legacyAgentRoleForId(roleId: string): AgentRole | undefined {
-  const mapped = Object.prototype.hasOwnProperty.call(ROLE_ID_TO_LEGACY_AGENT_ROLE, roleId)
-    ? ROLE_ID_TO_LEGACY_AGENT_ROLE[roleId] : undefined;
+  // 公司角色 id 带 `@<companyId>` 后缀，按角色码识别身份。
+  const code = systemRoleCode(roleId);
+  const mapped = Object.prototype.hasOwnProperty.call(ROLE_ID_TO_LEGACY_AGENT_ROLE, code)
+    ? ROLE_ID_TO_LEGACY_AGENT_ROLE[code] : undefined;
   return mapped
     ?? (LEGACY_AGENT_ROLE_IDS.has(roleId as AgentRole) ? roleId as AgentRole : undefined);
 }
@@ -330,7 +333,7 @@ export function createPermissionService(opts: PermissionServiceOptions) {
     const roleIdsFromLegacy = current.roleIds.flatMap(roleId => LEGACY_TO_ROLE_ID[roleId] || [roleId]);
     // 以最高权限角色的 rule 为准（SuperAdmin=all 优先）— 取第一个非 self 的角色
     let rule: DataScopeRule = { kind: 'self' };
-    if (roleIdsFromLegacy.includes(SYSTEM_ROLE_IDS.SUPER_ADMIN)) {
+    if (roleIdsFromLegacy.some((rid) => systemRoleCode(rid) === SYSTEM_ROLE_IDS.SUPER_ADMIN)) {
       rule = { kind: 'all' };
     } else {
       for (const rid of roleIdsFromLegacy) {
