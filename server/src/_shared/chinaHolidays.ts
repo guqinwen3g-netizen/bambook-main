@@ -21,12 +21,14 @@
 import { localDateKey } from '../shared/localDate';
 
 /**
- * 'YYYY-MM-DD' → Date（**本地时区正午**，避开 DST 边界；与前端 `fromDateKey` 同口径）。
- * ⚠️ 不要用 `new Date('2026-01-01')` —— 那是按 UTC 解析，在 UTC+8 会把星期几算错一天。
+ * 'YYYY-MM-DD' → Date（**北京时间正午**，即 UTC 04:00；不依赖运行机器时区）。
+ * 北京时间无夏令时，故 UTC 04:00 的 UTC 日历日即业务日，可用 UTC 方法取星期几。
+ * ⚠️ 不要用 `new Date('2026-01-01')` —— 那是按 UTC 0 点解析，在 UTC+8 会把星期几算错一天。
+ * ⚠️ 也不要用本地时区构造（`new Date(y, m, d)`）—— 服务器时区不是 UTC+8 时，日期会错位。
  */
 function parseLocalDateKey(dateKey: string): Date {
   const [y, m, d] = dateKey.split('-').map(Number);
-  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1, 12, 0, 0, 0);
+  return new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1, 4, 0, 0, 0));
 }
 
 /** 法定节假日段：连休区间（含端点）+ 节日名 */
@@ -97,13 +99,13 @@ export type ChinaDayType = 'holiday' | 'workday' | 'weekend' | 'adjusted-workday
  * 日类型判定（优先级：法定假 > 调休班 > 周末 > 工作日）。
  * 无该年数据时退化为纯周末判定（跨年未配置时仍可用 —— 与前端同语义）。
  *
- * ⚠️ 用 `fromLocalDateKey` 取本地星期几，**不用 `new Date('YYYY-MM-DD')`**
+ * ⚠️ 按北京时间取星期几（见 `parseLocalDateKey`），**不用 `new Date('YYYY-MM-DD')`**
  *   （后者按 UTC 解析，在 UTC+8 会把星期几算错一天）。
  */
 export function resolveDayTypeKey(dateKey: string): ChinaDayType {
   if (getHolidayInfo(dateKey)) return 'holiday';
   if (isAdjustedWorkday(dateKey)) return 'adjusted-workday';
-  const weekday = parseLocalDateKey(dateKey).getDay(); // 0=周日 6=周六
+  const weekday = parseLocalDateKey(dateKey).getUTCDay(); // 0=周日 6=周六（北京时间）
   return weekday === 0 || weekday === 6 ? 'weekend' : 'workday';
 }
 
@@ -126,7 +128,7 @@ export function listWorkdaysInclusive(startKey: string, endKey: string): string[
     const key = localDateKey(cursor);
     if (key > endKey) break;
     if (isWorkday(key)) out.push(key);
-    cursor.setDate(cursor.getDate() + 1);
+    cursor.setTime(cursor.getTime() + 24 * 60 * 60 * 1000); // 北京时间无夏令时，按 24h 前进
   }
   return out;
 }
