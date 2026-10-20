@@ -17,7 +17,7 @@ const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('
 async function choose(value: string) { await act(async () => { select().value = value; select().dispatchEvent(new Event('change', { bubbles: true })); }); }
 function deferred() { let resolve!: () => void, reject!: (error: Error) => void; const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 beforeEach(() => {
-  seam.session = { sessionKey: 'session-owner', user: { id: 'owner', displayName: '空间所有者' }, localMode: true, localProfiles: [{ id: 'owner', name: '空间所有者' }, { id: 'finance', name: '财务' }, { id: 'manager', name: '业务主管' }] };
+  seam.session = { sessionKey: 'session-owner', user: { id: 'owner', displayName: '公司所有者' }, localMode: true, localProfiles: [{ id: 'owner', name: '公司所有者' }, { id: 'finance', name: '财务' }, { id: 'manager', name: '业务主管' }] };
   seam.workspace = { state: createMistState({ id: () => 'record', now: '2026-10-14T00:00:00Z', actorName: '测试' }, 'empty'), workspace: { id: 'space-one', ownerId: 'owner', access: { role: 'owner', canManageMembers: true, hidden: [] } }, pending: null, changeMember: vi.fn().mockResolvedValue(undefined) };
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -100,7 +100,7 @@ describe('成员整体交接', () => {
   it('列出前成员名下业务，预览后整体交给在用成员', async () => {
     seed(); act(() => paint());
     const from = host.querySelector<HTMLSelectElement>('select[aria-label="交接原负责人"]')!;
-    expect([...from.options].map(o => o.textContent)).toContain('离职业务员（2 项，已不在本空间）');
+    expect([...from.options].map(o => o.textContent)).toContain('离职业务员（2 项，已不在本公司）');
     await pick('交接原负责人', 'left'); await pick('交接新负责人', 'manager');
     expect(host.querySelector('[data-handover-preview]')?.textContent).toContain('客户 1、订单 1；未完成待办 1 条');
     expect(button('整体交接').disabled).toBe(true);

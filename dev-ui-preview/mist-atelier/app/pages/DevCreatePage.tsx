@@ -82,7 +82,7 @@ export function DevCreatePage(){
     const draftCustomer=draft?(state.customers.find(c=>c.id===draft.values.customer)||state.customers.filter(c=>c.name===draft.values.customer).length===1&&state.customers.find(c=>c.name===draft.values.customer)):undefined;
     const sourceCustomer=route.customerId?state.customers.find(c=>c.id===route.customerId):state.customers[0];
     setF(draft?{...fromValues(draft.values),customer:draftCustomer?draftCustomer.id:''}:emptyForm(sourceCustomer?.id,route.section==='fabric'?'fabric':'garment'));
-    if(route.customerId&&!sourceCustomer)setMessage('指定客户不存在，请在当前工作区重新选择客户。');else if(draft&&!draftCustomer&&developmentInitiator(draft.values)==='customer')setMessage('草稿客户无法唯一匹配，请重新选择准确客户。');setFileIds(draft?.fileIds||[]);setDraftId(draft?.id);setStep('basic');setDone({});setDirty(false);
+    if(route.customerId&&!sourceCustomer)setMessage('指定客户不存在，请在本公司重新选择客户。');else if(draft&&!draftCustomer&&developmentInitiator(draft.values)==='customer')setMessage('草稿客户无法唯一匹配，请重新选择准确客户。');setFileIds(draft?.fileIds||[]);setDraftId(draft?.id);setStep('basic');setDone({});setDirty(false);
   },[state,route.id,route.customerId,route.section]);
   const set=<K extends keyof DevelopmentFormValues>(key:K,value:DevelopmentFormValues[K])=>{setF(previous=>({...previous,[key]:value}));setDirty(true);setMessage('');};
   const fabricDomain=developmentDomain(f)==='fabric',domain=developmentDomain(f);

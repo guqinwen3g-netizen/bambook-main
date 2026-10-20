@@ -81,7 +81,7 @@ export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,descriptio
   const act=async(action:ModuleRowAction<T>,row:T)=>{if(locked||actionLock.current)return;const origin=routeContext,rowId=getKey(row);actionLock.current=true;setActing(true);setFailure('');try{await action.run(row);}catch(problem){if(active.current&&currentContext.current===origin&&currentSelection.current===rowId)setFailure(problem instanceof Error?problem.message:'操作未完成');}finally{actionLock.current=false;if(active.current)setActing(false);}};
   const editSpec=current?edit?.(current):undefined;
   const controls=current&&(editSpec||rowActions.length)?<div className="mist-row mist-module-actions">{editSpec&&<Button icon={Edit3} disabled={locked} onClick={()=>setEditor(editSpec)}>编辑</Button>}{rowActions.map(a=><Button key={a.label} disabled={locked||a.disabled?.(current)} onClick={()=>void act(a,current)}>{a.label}</Button>)}</div>:null;
-  const recordDetail=current?detail?.(current):<EmptyState title={workspace.loading?'正在读取记录':selectionKey?'未找到这条记录':'选择一条记录'} description={workspace.loading?'正在读取当前工作空间的业务记录。':selectionKey?'当前工作空间中没有这个对象，请返回列表选择。':'选中后查看详情与可执行操作。'} compact />;
+  const recordDetail=current?detail?.(current):<EmptyState title={workspace.loading?'正在读取记录':selectionKey?'未找到这条记录':'选择一条记录'} description={workspace.loading?'正在读取本公司的业务记录。':selectionKey?'本公司中没有这个对象，请返回列表选择。':'选中后查看详情与可执行操作。'} compact />;
   const body=<div className="mist-col" data-module-detail>{controls}{recordDetail}</div>;
   const previewSummary=preview&&current&&summary?summary(current):null;
   // Compact layouts hide the preview column, so a selected record opens as its full page instead.

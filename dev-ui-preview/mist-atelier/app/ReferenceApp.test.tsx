@@ -77,7 +77,7 @@ function fixture(id: string): MistState {
     versions: [], drafts: [], fabrics: [], orderLines: [], productions: [], receipts: [], invoices: [], allocations: [], payments: [], contacts: [], files: [], events: [], tasks: [], notifications: [], calendar: [],
     orders: [{ id: `order-${id}`, code: `SO-${id}`, type: 'garment', customerId: `customer-${id}`, customer: values.customer, season: 'AW27', lines: 1, qty: 1, amount: 10, currency: 'USD', due: values.due, progress: 10, state: '生产中', tone: 'accent', owner: id, img: 'coat', checklist: [], handoffAt: null, createdAt: '2026-10-13', updatedAt: '2026-10-13' }],
     customers: [{ id: `customer-${id}`, name: values.customer, code: `C-${id}`, country: '中国', city: '上海', industry: '服装', owner: id, grade: 'A', currency: 'USD', terms: 'T/T', incoterm: 'FOB', categories: '成衣', creditLimit: 1000, since: '2026-01-01' }],
-    settings: { theme: 'light', density: 'default', reducedMotion: false, notifications: { qc: true, shipping: true, suggestions: true, digest: false }, workspaceName: `工作区-${id}`, profileName: id, profileEmail: `${id}@example.com`, locale: 'zh-CN' },
+    settings: { theme: 'light', density: 'default', reducedMotion: false, notifications: { qc: true, shipping: true, suggestions: true, digest: false }, workspaceName: `公司-${id}`, profileName: id, profileEmail: `${id}@example.com`, locale: 'zh-CN' },
   };
 }
 function context(id: string): MistWorkspaceContext {
@@ -166,8 +166,8 @@ describe('one Mist entry with real authentication and workspace state', () => {
   });
 
   it('shows a neutral reconnect action without claiming local identity when session discovery fails', async () => {
-    override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'工作区暂不可达'},503)):null;
-    await mount();await waitFor(()=>expect(host!.textContent).toContain('工作区暂不可达'));
+    override=url=>url.pathname==='/api/mist/session'?Promise.resolve(json({message:'公司暂不可达'},503)):null;
+    await mount();await waitFor(()=>expect(host!.textContent).toContain('公司暂不可达'));
     expect(queryByRole(host!,'form',{name:'登录'})).toBeNull();
     expect(queryByRole(host!,'button',{name:'重新连接公司'})).not.toBeNull();expect(host!.textContent).not.toContain('本地工作身份');
     expect(requests.some(r=>r.path.includes('/auth/'))).toBe(false);
@@ -212,10 +212,10 @@ describe('one Mist entry with real authentication and workspace state', () => {
   });
   it('shows department context and opens company details separately without workspace switching', async () => {
     await signIn();await mount();await waitFor(() => expect(probes.home).toHaveBeenCalled());
-    await waitFor(()=>expect(host!.textContent).toContain('当前部门'));expect(host!.textContent).not.toContain('切换工作空间');
+    await waitFor(()=>expect(host!.textContent).toContain('当前部门'));expect(host!.textContent).not.toContain('切换公司');
     const entry=[...host!.querySelectorAll('button')].find(button=>button.textContent?.includes('当前部门'))!;await click(entry);expect(host!.textContent).toContain('我的组织');await click(getByRole(host!,'button',{name:'查看公司资料'}));
     expect(new URLSearchParams(location.search).get('view')).toBe('company-settings');expect(new URLSearchParams(location.search).get('section')).toBe('company');expect(probes.settings).toHaveBeenCalled();expect(host!.textContent).not.toContain('没有查看权限');
-    expect(host!.textContent).not.toContain('创建空白工作空间');expect(host!.textContent).not.toContain('创建演示工作空间');
+    expect(host!.textContent).not.toContain('创建空白公司');expect(host!.textContent).not.toContain('创建演示公司');
   });
   it('switches a member appearance locally without writing owner-managed settings', async () => {
     await signIn(); const ctx = currentContext();
@@ -440,9 +440,9 @@ it('shows the signed-in member identity instead of the shared workspace owner ni
   await signIn('finance-member');
   const shared=currentContext('finance-member');
   shared.workspace!.ownerId='another-owner';
-  shared.state!.settings.profileName='空间所有者昵称';
+  shared.state!.settings.profileName='公司所有者昵称';
   await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());
-  expect(queryByRole(host!,'button',{name:/空间所有者昵称/})).toBeNull();
+  expect(queryByRole(host!,'button',{name:/公司所有者昵称/})).toBeNull();
   expect(getByRole(host!,'button',{name:/finance-member.*业务员/})).toBeTruthy();
 });
 

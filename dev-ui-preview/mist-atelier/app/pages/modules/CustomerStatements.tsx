@@ -22,7 +22,7 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
   React.useEffect(() => { if (customerId) setPicked(customerId); }, [customerId]);
   const target = customerId || (picked && customers.some(c => c.id === picked) ? picked : customers[0]?.id || '');
   const canWrite = session.hasPermission('invoices:write' as never);
-  const blocker = !state ? '工作区未加载' : !canWrite ? '生成对账单需要应收写权限（财务）' : !target ? '没有未结应收或待核销到账的客户' : customerStatementBlocker(state, target, today);
+  const blocker = !state ? '公司未加载' : !canWrite ? '生成对账单需要应收写权限（财务）' : !target ? '没有未结应收或待核销到账的客户' : customerStatementBlocker(state, target, today);
   const records = readCustomerStatements(state || {}).filter(r => !customerId || r.customerId === customerId).sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)).slice(0, 8);
   const nameOf = (id: string) => state?.customers.find(c => c.id === id)?.name || id;
   const fileOf = (id: string) => state?.files.find(f => f.id === id);

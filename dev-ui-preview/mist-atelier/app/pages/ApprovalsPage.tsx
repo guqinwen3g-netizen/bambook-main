@@ -25,7 +25,7 @@ export const TRANSFER_UNAVAILABLE = '审批人由审批配置决定，暂不支�
 const rowKey = (r: Pick<Row, 'workspaceId' | 'id'>) => r.workspaceId + '|' + r.id;
 const day = (at: string) => { try { return platformBusinessDate(at); } catch { return at.slice(0, 10); } };
 
-/** 按页签筛选：待我审批 = 我能决定的待审；我发起的 = 我提交的（含当前空间里仅本人可见的）；已处理 = 已批准 / 已退回；空间内其他 = 我是所有者但不由我审批的待审。 */
+/** 按页签筛选：待我审批 = 我能决定的待审；我发起的 = 我提交的（含本公司里仅本人可见的）；已处理 = 已批准 / 已退回；空间内其他 = 我是所有者但不由我审批的待审。 */
 export function approvalRows(rows: Row[], tab: ApprovalTab, me: string) {
   if (tab === 'mine') return rows.filter(r => r.status === 'pending' && r.canDecide);
   if (tab === 'sent') return rows.filter(r => r.requesterId === me);
@@ -39,7 +39,7 @@ export function ApprovalsPage() {
   const tab: ApprovalTab = (['mine', 'sent', 'done', 'others'] as const).find(t => t === route.section) ?? 'mine';
   const [kind, setKind] = React.useState<'all' | Kind>('all'), [query, setQuery] = React.useState(''), [drawer, setDrawer] = React.useState(false);
   const [note, setNote] = React.useState(''), [local, setLocal] = React.useState('');
-  /** 服务端只返回我是所有者或审批人的空间；我在当前空间提交、但不是审批人的事项从当前空间状态补齐（只读）。 */
+  /** 服务端只返回我是所有者或审批人的空间；我在本公司提交、但不是审批人的事项从本公司状态补齐（只读）。 */
   const all = React.useMemo<Row[]>(() => {
     const server: Row[] = reviews.rows;
     if (!state || !current) return server;
@@ -57,7 +57,7 @@ export function ApprovalsPage() {
   React.useEffect(() => { setNote(''); setLocal(''); }, [route.id]);
   React.useEffect(() => { if (kind !== 'all' && !kinds.includes(kind)) setKind('all'); }, [tab, kinds.join(',')]);
   const open = (r: Row) => { setDrawer(true); go('approvals', rowKey(r), { section: tab }); };
-  const requester = (r: Row) => r.requesterId === me ? '我' : state?.members?.find(m => m.userId === r.requesterId)?.name ?? (current && r.workspaceId === current.id && current.ownerId === r.requesterId ? '空间所有者' : '其他成员');
+  const requester = (r: Row) => r.requesterId === me ? '我' : state?.members?.find(m => m.userId === r.requesterId)?.name ?? (current && r.workspaceId === current.id && current.ownerId === r.requesterId ? '公司所有者' : '其他成员');
   const decide = async (decision: 'approved' | 'rejected') => {
     if (!selected) return;
     if (!note.trim()) { setLocal(decision === 'rejected' ? '退回必须写明理由，申请人会看到这条意见。' : '请填写批准依据，例如核对了哪些单据。'); return; }
@@ -73,7 +73,7 @@ export function ApprovalsPage() {
   ];
   const targetBase = selected?.target.view.split('/')[0] ?? '';
   const sameSpace = !!selected && selected.workspaceId === current?.id;
-  const openReason = !selected ? '' : !sameSpace ? `该审批属于工作空间“${selected.workspaceName}”，请先切换到该空间再打开原业务` : !session.canAccessView(targetBase as View) ? '当前账号没有原业务的查看权限' : undefined;
+  const openReason = !selected ? '' : !sameSpace ? `该审批属于公司“${selected.workspaceName}”，请先切换到该公司再打开原业务` : !session.canAccessView(targetBase as View) ? '当前账号没有原业务的查看权限' : undefined;
   const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '你是发起人，不能审批本人提交的事项' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent ? '上一次审批结果待核对，请先核对原请求' : undefined;
   const detail = selected ? <DetailBody data-approval={selected.id} heading={<h2 className="mist-h2">{selected.title}</h2>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{STATUS[selected.status].label}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill><span className="mist-note">{selected.workspaceName}</span></div>
@@ -97,10 +97,10 @@ export function ApprovalsPage() {
     <Banner tone="neutral" title="开产与出运按硬性条件放行">订单已批准、定金到账、产前样/船样 QC 通过、出口清关完成后，由业务/后勤在原业务页放行，不需要另行审批；信用冻结客户的出运须先在风险管理申请「带风险放行」，批准后在这里出现。未满足条件先行开裁等受控例外暂不支持。</Banner>
     <Tabs<ApprovalTab> value={tab} onChange={next => { setDrawer(false); go('approvals', undefined, { section: next }); }} options={[
       { value: 'mine', label: '待我审批', count: counts.mine }, { value: 'sent', label: '我发起的', count: counts.sent }, { value: 'done', label: '已处理', count: counts.done },
-      ...(counts.others ? [{ value: 'others' as const, label: '空间内其他待审', count: counts.others }] : []),
+      ...(counts.others ? [{ value: 'others' as const, label: '公司内其他待审', count: counts.others }] : []),
     ]} />
     <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Kind> ariaLabel="审批类型" value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(k => ({ value: k, label: APPROVAL_KIND_LABEL[k] }))]} /> : undefined}>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索单号、供应商、客户或空间" />
+      <SearchField value={query} onChange={setQuery} placeholder="搜索单号、供应商、客户或公司" />
     </Toolbar>
     <ListDetail drawerOpen={drawer && !!selected} drawerTitle={selected?.title || '审批详情'} onDrawerClose={() => setDrawer(false)} detail={detail}
       list={<Card><DataTable ariaLabel="审批事项" rows={shown} columns={columns} loading={!reviews.loaded && !reviews.error} rowKey={rowKey} selectedKey={selected ? rowKey(selected) : undefined} onRowClick={open}

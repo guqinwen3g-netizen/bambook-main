@@ -1,4 +1,4 @@
-/** 设置 · 工作空间：成员离职 / 调岗时按账号整体交接名下业务（所有者办理）。 */
+/** 设置 · 公司：成员离职 / 调岗时按账号整体交接名下业务（所有者办理）。 */
 import React from 'react';
 import { Banner, Button, Field, FormSection, Select, TextArea } from '../../../../components/mist';
 import { accountOwnedObjects } from '../../../../server/src/shared/mistAccounts';
@@ -32,7 +32,7 @@ export function MemberHandover({ state, directory, busy: outerBusy }: { state: M
     {error && <Banner tone="bad" title="交接未完成">{error}</Banner>}
     {done && <Banner tone="ok" title="交接完成">{done}</Banner>}
     <div className="mist-row" data-member-handover>
-      <Field label="原负责人" hint="含已撤销授权的前成员"><Select aria-label="交接原负责人" value={fromId} disabled={busy} placeholder={fromOptions.length ? '选择账号' : '没有需要交接的账号'} options={fromOptions.map(o => ({ value: o.id, label: `${o.name}（${o.count} 项${member(o.id) ? '' : '，已不在本空间'}）` }))} onChange={e => { setFromId(e.target.value); setDone(''); }} /></Field>
+      <Field label="原负责人" hint="含已撤销授权的前成员"><Select aria-label="交接原负责人" value={fromId} disabled={busy} placeholder={fromOptions.length ? '选择账号' : '没有需要交接的账号'} options={fromOptions.map(o => ({ value: o.id, label: `${o.name}（${o.count} 项${member(o.id) ? '' : '，已不在本公司'}）` }))} onChange={e => { setFromId(e.target.value); setDone(''); }} /></Field>
       <Field label="新负责人" hint="须为在用成员"><Select aria-label="交接新负责人" value={toId} disabled={busy} placeholder="选择成员" options={directory.filter(m => m.id !== fromId).map(m => ({ value: m.id, label: m.name }))} onChange={e => setToId(e.target.value)} /></Field>
     </div>
     {fromId && <div className="mist-col" data-handover-preview>

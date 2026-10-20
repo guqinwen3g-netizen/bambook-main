@@ -127,7 +127,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
       {failure&&<Banner tone="bad" title="寻样操作未完成">{failure}</Banner>}
       <FormGrid>
         <Field label="面料需求" required><TextInput readOnly={!!fabricId} value={fabricForm.name} onChange={event=>setFabricForm(form=>({...form,name:event.target.value}))} /></Field>
-        <Field label="负责人" required hint={fabricId?undefined:'按账号选择本空间成员'}>{fabricId?<TextInput readOnly value={fabricForm.ownerName} />:<Select aria-label="负责人" value={fabricForm.ownerId} placeholder="选择负责人" onChange={event=>setFabricForm(form=>({...form,ownerId:event.target.value}))} options={memberSelectOptions(members)} />}</Field>
+        <Field label="负责人" required hint={fabricId?undefined:'按账号选择本公司成员'}>{fabricId?<TextInput readOnly value={fabricForm.ownerName} />:<Select aria-label="负责人" value={fabricForm.ownerId} placeholder="选择负责人" onChange={event=>setFabricForm(form=>({...form,ownerId:event.target.value}))} options={memberSelectOptions(members)} />}</Field>
         <Field label="目标日期"><TextInput readOnly={!!fabricId} type="date" value={fabricForm.due} onChange={event=>setFabricForm(form=>({...form,due:event.target.value}))} /></Field>
         <Field label="具体要求" full required><TextArea readOnly={!!fabricId} value={fabricForm.request} onChange={event=>setFabricForm(form=>({...form,request:event.target.value}))} /></Field>
         {fabricId&&<><Field label="寻样答复" full><TextArea readOnly={selectedFabric?.confirmed} value={fabricForm.answer} onChange={event=>setFabricForm(form=>({...form,answer:event.target.value}))} /></Field><Field label="确认或补充说明" full><TextArea readOnly={selectedFabric?.confirmed} value={fabricForm.note} onChange={event=>setFabricForm(form=>({...form,note:event.target.value}))} /></Field></>}

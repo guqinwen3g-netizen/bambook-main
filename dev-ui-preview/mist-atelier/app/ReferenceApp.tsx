@@ -311,7 +311,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   }
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
-  // 空间设置只处理当前空间；不能为此授予系统设置/后台管理权限。
+  // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
   const permitted = platformOnly && ['system-settings','settings'].includes(route.view) ? true : route.view === 'platform-admin' ? session.user?.platformRole === 'platform_admin' : (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
   const Page = platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : session.localMode && route.view === 'admin-panel' ? LocalAdminPanel

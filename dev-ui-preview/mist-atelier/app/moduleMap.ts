@@ -58,7 +58,7 @@ export const MODULE_MAP: ModuleMapEntry[] = [
   { id: 'emails', view: 'emails', label: '智能邮箱', group: '我的事务', entry: 'components/EmailManager.tsx', lines: 2326, template: 'list-preview', wave: 5, notes: '右侧预览=邮件正文；AI 摘要用 Banner tone=ai' },
   { id: 'dashboard', view: 'dashboard', label: '全景看板', group: '我的事务', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'special', wave: 5, notes: '使用 Mist 统计卡与订单履约聚合，不恢复旧可视化页面' },
   { id: 'reports', view: 'reports', label: '报表中心', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'analytics', wave: 5 },
-  { id: 'data-center', view: 'data-center', label: '数据中心', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'analytics', wave: 5, notes: '当前工作空间的数据关联质量、记录汇总与来源入口' },
+  { id: 'data-center', view: 'data-center', label: '数据中心', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'analytics', wave: 5, notes: '本公司的数据关联质量、记录汇总与来源入口' },
   { id: 'assistant', view: 'assistant', label: 'AI 助手', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'assistant', wave: 5 },
   { id: 'hr', view: 'hr', label: '人事管理', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'list-table', detail: 'profile', wave: 5, notes: '7 个子视图用 Tabs；组织架构保留树形，外层 Card' },
   { id: 'business-tools', view: 'business-tools', label: '业务工具', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'workbench', wave: 5, notes: '工具入口用 CardButton 网格' },

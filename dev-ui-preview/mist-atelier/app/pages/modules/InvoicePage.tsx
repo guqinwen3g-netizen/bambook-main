@@ -113,7 +113,7 @@ export function InvoicePage() {
     {w.error && <Banner tone="bad" title="票据读取未完成" actions={<Button onClick={() => void w.refresh()}>重试</Button>}>{w.error}</Banner>}
     <AccessHiddenNotice keys={['receivables','receipts','payments']} />
     {!MIST_FINANCE_WRITE_PERMISSIONS.some(scope=>session.hasPermission(scope as any)) && <Banner title="财务结果只读">当前账号可查看授权范围内的票据与核销来源；资金登记和核销由财务处理。</Banner>}
-    {missing && <Banner tone="warn" title="未找到指定票据" actions={<Button onClick={back}>返回台账</Button>}>当前空间中没有这个票据或历史草稿，未自动打开其他来源。</Banner>}
+    {missing && <Banner tone="warn" title="未找到指定票据" actions={<Button onClick={back}>返回台账</Button>}>本公司中没有这个票据或历史草稿，未自动打开其他来源。</Banner>}
     {current && facts ? <div className="mist-col" data-module-detail>
       <Card><div className="mist-card-body mist-col"><Pill tone={current.state === 'void' ? 'bad' : current.state === 'settled' ? 'ok' : current.state === 'pending' ? 'accent' : 'neutral'}>{labels[current.state]}</Pill>
         {current.state === 'pending' && <Banner tone="warn" title="待财务确认">后勤签发 CI 后形成的应收尚未经财务确认：不计入应收余额、账龄、报表与催收，也不能登记收款核销。{canConfirm ? '' : '确认或驳回由财务处理。'}</Banner>}

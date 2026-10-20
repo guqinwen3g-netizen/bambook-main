@@ -252,7 +252,7 @@ describe('人事管理', () => {
   it('explains that local workspaces have no company organization and calls nothing', async () => {
     bridge.localMode = true;
     await render(PLATFORM_PAGES.hr, 'hr');
-    expect(document.body.textContent).toContain('本地工作区没有公司组织架构');
+    expect(document.body.textContent).toContain('本机演示模式没有组织架构');
     expect(bridge.calls).toHaveLength(0);
   });
   it('is read-only without hr:write', async () => {

@@ -49,7 +49,7 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
   const reset = () => { setQuery(''); setStage('all'); setReminder('all'); };
   const transition = (c: MarketCampaign, next: MarketCampaign['status']) => {
     if (!can || busy || !CAMPAIGN_NEXT[c.status].includes(next)) return;
-    setDialog({ title: `${transitionLabel[next]} · ${c.name}`, submitLabel: '确认', description: next === 'Completed' || next === 'Cancelled' ? '这是活动记录的终态，不能直接恢复。线索与客户业务仍保留；本操作不发送邮件或代表外部推广已执行。' : '只更新当前工作空间的活动状态，不发送邮件或启动外部推广。',
+    setDialog({ title: `${transitionLabel[next]} · ${c.name}`, submitLabel: '确认', description: next === 'Completed' || next === 'Cancelled' ? '这是活动记录的终态，不能直接恢复。线索与客户业务仍保留；本操作不发送邮件或代表外部推广已执行。' : '只更新本公司的活动状态，不发送邮件或启动外部推广。',
       initialValues: {}, fields: [], submit: () => w.run({ type: 'market.campaign.status', payload: { id: c.id, status: next } }) });
   };
   const columns: Column<MarketCampaign>[] = [

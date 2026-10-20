@@ -53,7 +53,7 @@ it('opens a record with its lines and resolves the source order only when it exi
   await click(getByRole(detail,'button',{name:'SO-OLD'}));expect(go).toHaveBeenCalledWith('orders/detail','o1');
   await render('b');
   detail=host.querySelector('[data-mes-detail="b"]') as HTMLElement;
-  expect(detail.textContent).toContain('当前工作空间无对应订单');
+  expect(detail.textContent).toContain('本公司无对应订单');
 });
 
 it('reports a failed history read without inventing records',async()=>{

@@ -137,7 +137,7 @@ describe('currency defaults respect entered and source values',()=>{
 
 it('keeps product pages usable while an image belongs to a loading or retired workspace context',async()=>{
  const p=bridge.current.state.market.products[0];p.fileIds=['private-photo'];bridge.current.state.files.push({id:'private-photo',name:'产品图.png',mimeType:'image/png',size:10,storageKey:'w/private-photo',createdAt:'2026-10-19'});
- bridge.current.loading=true;bridge.current.fileUrl=vi.fn(()=>{throw new Error('工作区已切换');});
+ bridge.current.loading=true;bridge.current.fileUrl=vi.fn(()=>{throw new Error('公司已切换');});
  await mount('products',p.id,undefined,'full');expect(bridge.current.fileUrl).not.toHaveBeenCalled();expect(host.textContent).toContain(p.name);
  bridge.current.loading=false;const Page=MARKET_PAGES.products;
  await act(async()=>root!.render(<Nav.Provider value={{route:{view:'products',id:p.id,detail:'full'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));

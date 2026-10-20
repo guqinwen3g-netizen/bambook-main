@@ -176,7 +176,7 @@ it('searches attachment names, including omitted attachments, and hides supersed
   act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'超大.zip');search.dispatchEvent(new Event('input',{bubbles:true}));});
   expect(host.textContent).toContain('询价单');
   act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'不存在的附件');search.dispatchEvent(new Event('input',{bubbles:true}));});
-  expect(host.querySelector('table')?.textContent||'').not.toContain('询价单');
+  expect(host.querySelector('[role="listbox"]')?.textContent||'').not.toContain('询价单');
   act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'');search.dispatchEvent(new Event('input',{bubbles:true}));});
   await click([...document.querySelectorAll('button')].find(b=>b.textContent?.includes('待发送'))!);
   expect(host.textContent).toContain('结果不确定的邮件');expect(host.textContent).not.toContain('被拒的邮件');
