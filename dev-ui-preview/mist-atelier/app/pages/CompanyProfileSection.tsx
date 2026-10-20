@@ -50,9 +50,9 @@ export function CompanyProfileSection({ member }: { member: boolean }) {
   const [draft, setDraft] = React.useState(() => ({ scope, values: readCompanyProfile(stored) }));
   const [problem, setProblem] = React.useState<{ key?: CompanyProfileKey; message: string } | null>(null), [busy, setBusy] = React.useState(false), [saved, setSaved] = React.useState(false);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-  // 切换账号或空间：丢弃草稿与错误，绝不把上一空间的资料带入。
+  // 切换账号或公司：丢弃草稿与错误，绝不把上一家公司的资料带入。
   React.useEffect(() => { dirty.current.clear(); working.current = false; setBusy(false); setProblem(null); setSaved(false); setDraft({ scope, values: readCompanyProfile(workspace.state?.settings.companyProfile) }); }, [scope]);
-  // 读回服务端最新值；只保留本空间内正在编辑的字段。
+  // 读回服务端最新值；只保留本公司内正在编辑的字段。
   React.useEffect(() => { setDraft(previous => { const values = readCompanyProfile(stored); if (previous.scope === scope) for (const key of dirty.current) values[key] = previous.values[key]; return { scope, values }; }); }, [stored, scope]);
   const values = draft.scope === scope ? draft.values : readCompanyProfile(stored);
   const locked = member || !workspace.state || workspace.loading || workspace.saving || !!workspace.pending || !!workspace.pendingCreate || busy;

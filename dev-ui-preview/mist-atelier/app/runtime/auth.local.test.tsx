@@ -6,7 +6,7 @@ import * as auth from '../../../../services/authService';
 import {View} from '../../../../types';
 import {MistSessionProvider,useMistSession,type MistSession} from './auth';
 const profiles=[{id:'local-operator',name:'本地业务员'},{id:'local-reviewer',name:'本地审批人'}];
-const local=(id='local-operator',permissions=['*'])=>({mode:'local',user:{id,displayName:id==='local-operator'?'本地业务员':'本地审批人',email:'',roles:['sales'],permissions,departmentIds:['local'],department:'本地工作区'},profiles});
+const local=(id='local-operator',permissions=['*'])=>({mode:'local',user:{id,displayName:id==='local-operator'?'本地业务员':'本地审批人',email:'',roles:['sales'],permissions,departmentIds:['local'],department:'本机演示公司'},profiles});
 const json=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json'}});
 function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve};}
 let session:MistSession,root:Root|undefined,host:HTMLDivElement;let request:ReturnType<typeof vi.fn>,currentProfile:string;

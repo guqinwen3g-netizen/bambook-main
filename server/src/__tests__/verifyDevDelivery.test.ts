@@ -19,7 +19,7 @@ describe('开发环境交付核验', () => {
     const server = await stub({ '/api/health': [200, { status: 'ok', database: 'ok', build: '170eb43' }] });
     const mist = await stub({ '/api/health': [200, { status: 'ok', service: 'mist-workspace', database: 'ok' }] });
     const checks = await verifyDelivery({ frontend, server, mist, expected: MAIN });
-    expect(checks.map(c => [c.name, c.ok])).toEqual([['前端首页可访问', true], ['前端版本与 main 一致', true], ['服务端健康且版本与 main 一致', true], ['Mist 工作空间服务健康', true]]);
+    expect(checks.map(c => [c.name, c.ok])).toEqual([['前端首页可访问', true], ['前端版本与 main 一致', true], ['服务端健康且版本与 main 一致', true], ['Mist 公司服务健康', true]]);
   });
   it('版本落后、有未提交改动、数据库不可用或服务不可达时逐项失败', async () => {
     const frontend = await stub({ '/': [200, {}], '/mist-version.json': [200, { commit: '90239ad', branch: 'main', localChanges: 3 }] });

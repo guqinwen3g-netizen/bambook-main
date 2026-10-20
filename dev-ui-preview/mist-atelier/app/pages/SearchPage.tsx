@@ -1,4 +1,4 @@
-/** 统一搜索结果页：与 ⌘K 共用记录源，只搜当前工作空间，且只列当前账号能进入的页面中的记录。 */
+/** 统一搜索结果页：与 ⌘K 共用记录源，只搜本公司，且只列当前账号能进入的页面中的记录。 */
 import React from 'react';
 import { Search } from 'lucide-react';
 import { Banner, Button, Card, EmptyState, MistPage, PageHeader, Tabs, TextInput, Toolbar } from '../../../../components/mist';
@@ -21,11 +21,11 @@ export function SearchPage() {
   const submit = (e?: React.FormEvent) => { e?.preventDefault(); go('search', undefined, { section: draft.trim() || undefined }); };
   const open = (hit: MistSearchHit) => go(hit.view, hit.id, hit.target);
   return <MistPage>
-    <PageHeader title="搜索结果" description={workspace.workspace ? `在「${workspace.workspace.name}」中搜索；只列出你有权进入的页面中的记录。` : '只搜索当前工作空间。'} />
+    <PageHeader title="搜索结果" description={workspace.workspace ? `在「${workspace.workspace.name}」中搜索；只列出你有权进入的页面中的记录。` : '只搜索本公司。'} />
     <form onSubmit={submit}><Toolbar right={<Button type="submit" variant="primary" icon={Search}>搜索</Button>}>
       <TextInput aria-label="搜索关键词" icon={Search} placeholder="名称、编号、客户、供应商… 多个词用空格分开" value={draft} onChange={e => setDraft(e.target.value)} />
     </Toolbar></form>
-    {!state ? <Banner tone="neutral" title="还没有打开工作空间">进入一个工作空间后再搜索。</Banner>
+    {!state ? <Banner tone="neutral" title="还没有打开公司">进入一个公司后再搜索。</Banner>
       : !query.trim() ? <EmptyState icon={Search} title="输入关键词开始搜索" description="也可以随时按 ⌘K 快速搜索。" />
       : !hits.length ? <EmptyState icon={Search} title={`没有找到「${query}」`} description="换个关键词或编号；看不到的页面中的记录不会出现在这里。" />
       : <>

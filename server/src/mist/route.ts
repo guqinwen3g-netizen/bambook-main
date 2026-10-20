@@ -31,7 +31,7 @@ function exactBody(body: unknown, allowed: string[]) {
 }
 function publicError(res: Response, error: any) {
   const known = error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500);
-  res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '工作区操作未完成，请查询原请求回执或稍后重试' } });
+  res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '公司操作未完成，请查询原请求回执或稍后重试' } });
 }
 export function createMistRouter(options: { prisma?: any; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
@@ -123,7 +123,7 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
     exactBody(body.command, ['type', 'payload']);
     res.json(await repository.execute(actor(req), req.params.id, body as any));
   }));
-  // 智能邮箱真实收发：凭据只写入服务端，响应只含工作区投影与操作结果。
+  // 智能邮箱真实收发：凭据只写入服务端，响应只含公司投影与操作结果。
   const mail = options.mail ?? new MistMailService(repository, new MistMailCredentials(options.mailCredentialsRoot ?? process.env.MIST_MAIL_CREDENTIAL_DIR ?? path.resolve(__dirname, '../../private/mist-mail-credentials')), options.mailTransport);
   const mailCall = (handler: (req: Request) => Promise<any>) => run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-store'); const result = await handler(req); res.json({ workspace: result.workspace, receipt: result.receipt, ...(result.sync ? { sync: result.sync } : {}), ...(result.send ? { send: result.send } : {}) }); });
   router.put('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.bindCredential(actor(req), req.params.id, req.params.accountId, exactBody(req.body, ['password']).password)));
@@ -155,7 +155,7 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
   }, run(async (req, res) => {
     const body = exactBody(req.body, ['requestId', 'expectedRevision', 'claimId']);
     if (!req.file) fail('FILE_REQUIRED', '请选择实际文件', 400);
-    if (typeof body.expectedRevision !== 'string' || !/^\d+$/.test(body.expectedRevision)) fail('INVALID_INPUT', '工作区版本无效', 400);
+    if (typeof body.expectedRevision !== 'string' || !/^\d+$/.test(body.expectedRevision)) fail('INVALID_INPUT', '公司版本无效', 400);
     res.status(201).json(await repository.upload(actor(req), req.params.id, { requestId: body.requestId, expectedRevision: Number(body.expectedRevision),...(Object.prototype.hasOwnProperty.call(body,'claimId')?{claimId:body.claimId}:{}) }, { bytes: req.file!.buffer, name: req.file!.originalname, multipartFilename: true, mimeType: req.file!.mimetype }));
   }));
   router.get('/workspaces/:id/files/:fileId', run(async (req, res) => {

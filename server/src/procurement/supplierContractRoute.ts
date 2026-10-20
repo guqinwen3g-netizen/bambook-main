@@ -18,7 +18,7 @@ export function createSupplierContractRouter(options: { prisma: PrismaClient; re
   onDataChange?: (event: { entity: string; action: string; ids?: string[] }) => void }): Router {
   const router = Router(), service = createSupplierCommitmentService(options.prisma), fulfillment = createSupplierFulfillmentService(options.prisma);
   const write = requireJwtForWrite(options), writeScope = requirePermission('procurement:write'), readScope = requirePermission('procurement:read');
-  const actorOf = (req: Request) => extractActorFromRequest(req) ?? supplierFail('UNAUTHORIZED', '请使用真实账号登录供应商工作区。', 401);
+  const actorOf = (req: Request) => extractActorFromRequest(req) ?? supplierFail('UNAUTHORIZED', '请使用真实账号登录供应商公司。', 401);
   const kindOf = (req: Request): SupplierContractKind => req.params.kind === 'purchase' || req.params.kind === 'processing' ? req.params.kind : supplierFail('INVALID_CONTRACT_KIND', '请选择采购或加工合同。');
   const familyOf = (req: Request): 'fabric' | 'garment' => req.params.family === 'fabric' || req.params.family === 'garment' ? req.params.family : supplierFail('INVALID_INPUT', '请选择准确业务域。');
   const run = (work: (req: Request, res: Response) => Promise<unknown>): RequestHandler => async (req, res) => {

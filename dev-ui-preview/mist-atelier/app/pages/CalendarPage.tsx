@@ -83,7 +83,7 @@ export function CalendarPage() {
       {loading?<div className="mist-card-body"><Skeleton height={56} /><Skeleton height={56} /></div>:events.length?<Agenda events={events.map(event=>({time:event.time,title:<TextLink disabled={activeEditing!==undefined||saving||!!pending} onClick={()=>open(event)}>{event.title}</TextLink>,meta:<><span>{event.note}</span>{event.target&&<TextLink iconRight={ArrowUpRight} onClick={()=>link(event.target!)}>打开关联业务</TextLink>}</>}))} />:<EmptyState icon={CalendarDays} title="当天暂无日程" description="可以添加会议、跟进或工作安排。" action={<Button disabled={!state||loading||saving||!!pending||activeEditing!==undefined} onClick={()=>open()}>添加日程</Button>} />}
     </Card>
     {activeEditing!==undefined&&<Card as="section" id="mist-calendar-editor" className="mist-section" aria-label={editing?'编辑日程':'新建日程'} data-calendar-editor>
-      <CardHeader title={editing?'编辑日程':'新建日程'} sub="日程保存到当前工作空间。" />
+      <CardHeader title={editing?'编辑日程':'新建日程'} sub="日程保存到本公司。" />
       <form onSubmit={event=>{event.preventDefault();void save();}}><CardBody>
       {visibleFailure&&<Banner tone="bad" title="日程未保存">{visibleFailure}</Banner>}
       <fieldset disabled={busy||saving||!!pending} style={{border:0,padding:0,margin:0}}><FormGrid>

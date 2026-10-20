@@ -668,7 +668,7 @@ export function createMesRouter(options: MesRouterOptions): Router {
     ['post', '/outsourcing/:id/transition'], ['post', '/outsourcing/:id/receive'],
   ] as const) router[method](url, (req: Request, res: Response) => {
     if (!authenticate(req, res)) return;
-    res.status(409).json({ code: 'NATIVE_SUPPLIER_COMMAND_REQUIRED', error: '加工合同请从采购与加工工作区独立审批并逐行登记实际接料/回交；业务收货不代表专业 QC 合格。' });
+    res.status(409).json({ code: 'NATIVE_SUPPLIER_COMMAND_REQUIRED', error: '加工合同请从采购与加工公司独立审批并逐行登记实际接料/回交；业务收货不代表专业 QC 合格。' });
   });
 
   // ════════════════════════════════════════

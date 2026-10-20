@@ -1,4 +1,4 @@
-/** 负责人 / 经手人选择：只列本空间的所有者与被授权成员，按账号 ID 选择（同名账号以编号区分）。服务端仍逐项校验。 */
+/** 负责人 / 经手人选择：只列本公司的所有者与被授权成员，按账号 ID 选择（同名账号以编号区分）。服务端仍逐项校验。 */
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import { MIST_BUSINESS_GROUP_LABEL, accountOwnedObjects, type MistBusinessGroup } from '../../../../server/src/shared/mistAccounts';
 
@@ -30,7 +30,7 @@ export function memberSelectOptions(members: MistMemberOption[], options: { grou
   const current = options.current;
   if (current?.id && !rows.some(r => r.value === current.id)) {
     const member = members.find(m => m.id === current.id);
-    rows.unshift({ value: current.id, label: `${current.name || member?.name || current.id}（${member && options.group ? '不在' + MIST_BUSINESS_GROUP_LABEL[options.group] + '组' : '已不在本空间成员中'}）` });
+    rows.unshift({ value: current.id, label: `${current.name || member?.name || current.id}（${member && options.group ? '不在' + MIST_BUSINESS_GROUP_LABEL[options.group] + '组' : '已不在本公司成员中'}）` });
   }
   return rows;
 }

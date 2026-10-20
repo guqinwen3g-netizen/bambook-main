@@ -1,7 +1,7 @@
 /**
  * 主管团队视角（2026-10-18）。业务主管（relations:admin）一屏看到下属名下在手的事，卡在哪里一眼就清楚：
  * - 团队范围：所有者或未设业务组的主管看全部成员；否则看与自己同业务组（成衣 / 面料）的成员，含本人；
- *   已不在本空间、名下仍有业务的前成员单独列出，提示办理交接。
+ *   已不在本公司、名下仍有业务的前成员单独列出，提示办理交接。
  * - 每人一行：客户、在手订单（逾期 / 7 天内到期）、在途开发与寻样、进行中商机、未完成与逾期待办、逾期应收（按币种）、
  *   审批中订单、久未跟进客户、未完成督办；按需要关注程度排序。统计只基于当前账号可读的数据。
  * - 督办（team.nudge）：主管针对某个订单 / 客户 / 开发案 / 发票给成员派一条带期限的“督办”待办，进入对方“我的工作”；
@@ -80,7 +80,7 @@ export function teamRow(state: MistState, member: { id: string; name: string; gr
   const late = orders.filter(o => o.status === 'overdue'), soon = orders.filter(o => o.status === 'soon');
   const lateTasks = allTasks.filter(t => t.overdue), longAr = receivables.filter(r => r.days > 30);
   const reasons: string[] = [];
-  if (flags.former && (accountOwnedObjects(state, id).length || allTasks.length)) reasons.push('已不在本空间，名下业务待交接');
+  if (flags.former && (accountOwnedObjects(state, id).length || allTasks.length)) reasons.push('已不在本公司，名下业务待交接');
   if (late.length) reasons.push(`${late.length} 个订单已过交期`);
   if (longAr.length) reasons.push(`${longAr.length} 张发票逾期超过 30 天`);
   if (lateTasks.length) reasons.push(`${lateTasks.length} 条待办已逾期`);
@@ -215,7 +215,7 @@ export function teamWeeklyText(report: TeamWeekReport, title = '团队周报') {
     `本周：新接订单 ${t.newOrders} 单（${moneyText(t.newOrderAmount)}）；出运 ${t.shipments} 票 ${t.shippedQty} 件/米；回款 ${moneyText(t.collected)}；新开发案 ${t.newDevs} 个；客户跟进 ${t.followUps} 次；商机赢单 ${t.won}、流失 ${t.lost}；完成待办 ${t.tasksDone} 条；督办 ${t.nudgesIn} 条、完成 ${t.nudgesDone} 条。`,
     `当前：过交期订单 ${t.lateOrders} 单；逾期应收 ${moneyText(t.overdueReceivable)}；逾期未完成督办 ${t.nudgesOpenLate} 条。`,
     '',
-    ...report.rows.map(r => `· ${r.name}${r.former ? '（已不在本空间）' : ''}：新单 ${r.newOrders}（${moneyText(r.newOrderAmount)}），出运 ${r.shipments} 票，回款 ${moneyText(r.collected)}，跟进 ${r.followUps} 次，完成待办 ${r.tasksDone}；当前过交期 ${r.lateOrders} 单、逾期应收 ${moneyText(r.overdueReceivable)}${r.nudgesOpenLate ? `、逾期督办 ${r.nudgesOpenLate} 条` : ''}。`),
+    ...report.rows.map(r => `· ${r.name}${r.former ? '（已不在本公司）' : ''}：新单 ${r.newOrders}（${moneyText(r.newOrderAmount)}），出运 ${r.shipments} 票，回款 ${moneyText(r.collected)}，跟进 ${r.followUps} 次，完成待办 ${r.tasksDone}；当前过交期 ${r.lateOrders} 单、逾期应收 ${moneyText(r.overdueReceivable)}${r.nudgesOpenLate ? `、逾期督办 ${r.nudgesOpenLate} 条` : ''}。`),
   ];
   return lines.join('\n');
 }

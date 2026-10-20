@@ -6,7 +6,7 @@ import { isDemoFile, renderDemoFile } from './mistDemoFiles';
 const context = (): MistContext => { let n = 0; return { id: () => `demo-${++n}`, now: '2026-10-14T02:00:00.000Z', actorName: '演示' }; };
 const demo = () => { let failures: unknown[] = []; const state = createMistState(context(), 'demo', f => { failures = f; }); return { state, failures }; };
 
-describe('演示工作区数据', () => {
+describe('演示公司数据', () => {
   it('所有示例数据都经由真实业务命令生成，没有失败步骤并记录种子版本', () => {
     const { state, failures } = demo();
     expect(failures).toEqual([]);
@@ -45,7 +45,7 @@ describe('演示工作区数据', () => {
     expect(['Escalated', 'Open', 'Resolved'].every(st => state.platform.risks.some(r => r.state === st && r.source))).toBe(true);
     expect(m.suppliers.some(x => x.status === 'paused') && m.suppliers.some(x => x.certificates?.some(c => c.validUntil < '2026-10-14')) && m.suppliers.filter(x => x.ratings?.length).length).toBeTruthy();
   });
-  it('种子附件生成为可下载的英文 PDF，并使用工作区公司抬头', () => {
+  it('种子附件生成为可下载的英文 PDF，并使用公司抬头', () => {
     const { state } = demo(), files = state.files.filter(isDemoFile);
     expect(files.length).toBeGreaterThanOrEqual(5);
     for (const file of files) {
@@ -64,7 +64,7 @@ describe('演示工作区数据', () => {
     expect(text('commercial-invoice')).toContain('To: Gothenburg');
     expect(text('supplier-contract')).toMatch(/Supplier: \w/);
   });
-  it('空白工作区不带任何示例数据', () => {
+  it('空白公司不带任何示例数据', () => {
     const state = createMistState(context(), 'empty');
     expect(state.settings.demoSeed).toBeUndefined();
     expect(state.orders).toEqual([]); expect(state.market.products).toEqual([]); expect(state.fulfillment.samples).toEqual([]); expect(state.files).toEqual([]);

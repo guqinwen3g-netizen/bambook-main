@@ -28,7 +28,7 @@ function fixture(): MistState {
   const date = today();
   return {
     ...newModuleFixture({actorName:'测试',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty'),schemaVersion: 1, devs: [], versions: [], drafts: [], fabrics: [], files: [], calendar: [], tasks: [], notifications: [], events: [], allocations: [], payments: [],
-    settings: { theme: 'light', density: 'default', reducedMotion: false, notifications: { qc: true, shipping: true, suggestions: true, digest: false }, workspaceName: '工作空间', profileName: '负责人', profileEmail: 'lead@example.com', locale: 'zh-CN' },
+    settings: { theme: 'light', density: 'default', reducedMotion: false, notifications: { qc: true, shipping: true, suggestions: true, digest: false }, workspaceName: '公司', profileName: '负责人', profileEmail: 'lead@example.com', locale: 'zh-CN' },
     customers: [{ id: 'customer-a', code: 'C-A', name: '客户甲', country: '中国', city: '上海', industry: '服装', owner: '负责人', grade: 'A', currency: 'USD', terms: 'T/T', incoterm: 'FOB', categories: '成衣', creditLimit: 10000, since: '2023-01-01' }],
     contacts: [{ id: 'contact-a', customerId: 'customer-a', name: '联系人甲', role: '采购', email: 'first@example.com', phone: '12345', tone: 'accent' }],
     orders: [{ id: 'order-a', code: 'SO-A', type: 'garment', customerId: 'customer-a', customer: '客户甲', season: 'AW27', lines: 1, qty: 10, amount: 100, currency: 'USD', due: date, progress: 40, state: '生产中', tone: 'accent', owner: '负责人', img: 'coat', checklist: [{ id: 'check-a', label: '装箱单草稿', done: false, note: '' }], handoffAt: null, createdAt: date, updatedAt: date }],

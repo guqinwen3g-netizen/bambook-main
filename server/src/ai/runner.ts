@@ -496,7 +496,7 @@ export async function buildAttachmentContextFromAttachments(
     if (!data) continue;
 
     if (mimeType.includes('pdf') || /\.pdf$/i.test(name)) {
-      options.emit?.('step', { message: `正在读取工作区 PDF：${name}` });
+      options.emit?.('step', { message: `正在读取公司 PDF：${name}` });
       const pdfContext = await buildPdfAttachmentContext({
         name,
         data,
@@ -514,7 +514,7 @@ export async function buildAttachmentContextFromAttachments(
     }
 
     if (mimeType.startsWith('text/') || /\.(txt|md|csv|json)$/i.test(name)) {
-      options.emit?.('step', { message: `正在读取工作区文件：${name}` });
+      options.emit?.('step', { message: `正在读取公司文件：${name}` });
       hits.push({
         title: name,
         category: 'WorkspaceFile',
@@ -526,7 +526,7 @@ export async function buildAttachmentContextFromAttachments(
     }
 
     if (mimeType.startsWith('image/')) {
-      options.emit?.('step', { message: `正在读取工作区图片：${name}` });
+      options.emit?.('step', { message: `正在读取公司图片：${name}` });
       const analysis = await analyzeWorkspaceImageAttachment({
         name,
         mimeType,
@@ -691,7 +691,7 @@ export async function analyzeWorkspaceImageAttachment(input: {
           {
             role: 'system',
             content: [
-              '你是 Bambook Agent 工作区的视觉/OCR读取器。',
+              '你是 Bambook Agent 公司的视觉/OCR读取器。',
               '读取图片、技术图、面料照片、表格和截图里的可见信息。',
               '只输出你能确认的内容；不确定时明确写“不确定”。',
             ].join(''),
@@ -872,7 +872,7 @@ function cleanPdfExtractedText(value: string) {
 function limitAttachmentText(value: string) {
   const text = value.replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
   return text.length > MAX_ATTACHMENT_CONTEXT_CHARS
-    ? `${text.slice(0, MAX_ATTACHMENT_CONTEXT_CHARS)}\n\n[工作区文件内容过长，已截断]`
+    ? `${text.slice(0, MAX_ATTACHMENT_CONTEXT_CHARS)}\n\n[公司文件内容过长，已截断]`
     : text;
 }
 

@@ -53,7 +53,7 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
   const goTo = (t: MistTarget) => { const { view, id, ...extra } = t; go(view, id, extra); };
   const scopeNote = viewer.owner || !(members.find(m => m.id === viewer.id)?.groups.length) ? '全部成员' : `与你同业务组（${members.find(m => m.id === viewer.id)!.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join('、')}）的成员`;
   const columns: Column<TeamRow>[] = [
-    { key: 'name', header: '成员', width: 'minmax(140px,1.2fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><b>{r.name}{r.self ? '（本人）' : ''}</b><small className="mist-muted">{r.former ? '已不在本空间' : r.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join(' · ') || '未设业务组'}</small></div> },
+    { key: 'name', header: '成员', width: 'minmax(140px,1.2fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><b>{r.name}{r.self ? '（本人）' : ''}</b><small className="mist-muted">{r.former ? '已不在本公司' : r.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join(' · ') || '未设业务组'}</small></div> },
     { key: 'attention', header: '状态', width: 'minmax(160px,1.6fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Pill tone={ATTENTION[r.attention].tone}>{ATTENTION[r.attention].label}</Pill>{r.reasons[0] && <small className="mist-muted">{r.reasons[0]}{r.reasons.length > 1 ? ` 等 ${r.reasons.length} 项` : ''}</small>}</div> },
     { key: 'customers', header: '客户', width: '64px', align: 'right', render: r => r.customers },
     { key: 'orders', header: '在手订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.orders.length} 单</span><small className="mist-muted">{[r.orders.filter(o => o.status === 'overdue').length && `逾期 ${r.orders.filter(o => o.status === 'overdue').length}`, r.orders.filter(o => o.status === 'soon').length && `临近 ${r.orders.filter(o => o.status === 'soon').length}`].filter(Boolean).join(' · ') || sums(r.openAmount) || '—'}</small></div> },
@@ -79,11 +79,11 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
     <section className="mist-section"><Card>
       <CardHeader title="团队在手" sub="点成员查看明细；需要推进的，对具体订单、客户、开发案或发票督办。" />
       <DataTable ariaLabel="团队在手" rows={rows} rowKey={r => r.id} selectedKey={open || undefined} onRowClick={r => setOpen(r.id)} columns={columns}
-        empty={<EmptyState icon={Users} title="范围内没有成员" description="所有者可在 设置 · 工作空间 授权成员并设置业务组。" compact />} />
+        empty={<EmptyState icon={Users} title="范围内没有成员" description="所有者可在 设置 · 公司 授权成员并设置业务组。" compact />} />
     </Card></section>
     <Drawer open={!!row} onClose={() => setOpen(null)} size="lg" title={row ? `${row.name}${row.self ? '（本人）' : ''}` : '成员'} sub={row ? `${ATTENTION[row.attention].label} · 客户 ${row.customers} · 在手订单 ${row.orders.length}` : undefined}>
       {row && <div className="mist-col" data-team-member={row.id}>
-        {row.former && <Banner tone="bad" icon={AlertTriangle} title="该账号已不在本空间" actions={viewer.owner ? <Button size="sm" onClick={() => go('settings', undefined, { section: 'workspace' })}>去办理成员交接</Button> : undefined}>名下客户、订单与待办没有人跟进。{viewer.owner ? '' : '请工作区所有者在 设置 · 工作空间 办理成员交接。'}</Banner>}
+        {row.former && <Banner tone="bad" icon={AlertTriangle} title="该账号已不在本公司" actions={viewer.owner ? <Button size="sm" onClick={() => go('settings', undefined, { section: 'workspace' })}>去办理成员交接</Button> : undefined}>名下客户、订单与待办没有人跟进。{viewer.owner ? '' : '请公司所有者在 设置 · 公司 办理成员交接。'}</Banner>}
         {row.reasons.length > 0 && !row.former && <Banner tone={row.attention === 'bad' ? 'bad' : 'warn'} title="需要关注">{row.reasons.join('；')}</Banner>}
         {!can && !row.former && !row.self && <span className="mist-note">督办需要客户管理主管权限。</span>}
         <DetailBlock title={`在手订单 · ${row.orders.length}`} aside={row.openAmount.length ? <span className="mist-muted">{sums(row.openAmount)}</span> : undefined}>
@@ -145,9 +145,9 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
   const copy = async () => { try { await navigator.clipboard.writeText(text); toast('周报文字已复制'); } catch { toast('复制失败，请改用导出', 'bad'); } };
   const archive = async () => { if (!run) return; const r = await run({ type: 'team.weekly.archive', payload: { weekStart: week } } as MistCommand); if (r !== undefined) toast('周报已生成并存档'); };
   const exportCsv = () => downloadModuleCsv(`团队周报-${report.weekStart}.csv`, ['成员', '新接订单', '新单金额', '出运票数', '出运数量', '回款', '新开发案', '客户跟进', '赢单', '流失', '完成待办', '收到督办', '完成督办', '逾期督办', '当前过交期订单', '当前逾期应收'],
-    report.rows.map(r => [r.name + (r.former ? '（已不在本空间）' : ''), r.newOrders, sums(r.newOrderAmount), r.shipments, r.shippedQty, sums(r.collected), r.newDevs, r.followUps, r.won, r.lost, r.tasksDone, r.nudgesIn, r.nudgesDone, r.nudgesOpenLate, r.lateOrders, sums(r.overdueReceivable)]));
+    report.rows.map(r => [r.name + (r.former ? '（已不在本公司）' : ''), r.newOrders, sums(r.newOrderAmount), r.shipments, r.shippedQty, sums(r.collected), r.newDevs, r.followUps, r.won, r.lost, r.tasksDone, r.nudgesIn, r.nudgesDone, r.nudgesOpenLate, r.lateOrders, sums(r.overdueReceivable)]));
   const columns: Column<TeamWeekRow>[] = [
-    { key: 'name', header: '成员', width: 'minmax(110px,1fr)', render: r => <b>{r.name}{r.former ? '（已不在本空间）' : ''}</b> },
+    { key: 'name', header: '成员', width: 'minmax(110px,1fr)', render: r => <b>{r.name}{r.former ? '（已不在本公司）' : ''}</b> },
     { key: 'orders', header: '新接订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.newOrders} 单</span>{r.newOrderAmount.length > 0 && <small className="mist-muted">{sums(r.newOrderAmount)}</small>}</div> },
     { key: 'ship', header: '出运', width: '96px', align: 'right', render: r => r.shipments ? `${r.shipments} 票 · ${r.shippedQty}` : '—' },
     { key: 'collected', header: '回款', width: 'minmax(110px,1fr)', align: 'right', render: r => moneyCell(r.collected) },

@@ -27,7 +27,7 @@ async function setup(){
  return{sales,manager,qc,id,get ws(){return ws;},set ws(v:any){ws=v;}};
 }
 describe('包 A：负责人与供应商稳定引用（服务端）',()=>{
- it('业务组只由所有者设置；经手人须为本空间在册成员且属于对应业务组，否则拒绝且数据不变',async()=>{
+ it('业务组只由所有者设置；经手人须为本公司在册成员且属于对应业务组，否则拒绝且数据不变',async()=>{
   const f=await setup();let ws=f.ws;
   // 成员不能改业务组
   await command(f.manager,f.id,ws.revision,'member.groups.set',{userId:'local-manager',groups:['garment']}).expect(403);
@@ -41,9 +41,9 @@ describe('包 A：负责人与供应商稳定引用（服务端）',()=>{
    const now=(await f.sales.get(W+f.id).expect(200)).body.workspace;expect(now.revision).toBe(ws.revision);
    expect(now.state.market.suppliers.find((s:any)=>s.id===supplier.id)).toEqual(supplier);
   };
-  await reject({garment:'local-qc'},/本工作区的成员/); // 不是本空间成员
+  await reject({garment:'local-qc'},/本公司的成员/); // 不是本公司成员
   await reject({fabric:'local-manager'},/不属于面料业务组/); // 在册但不在该组
-  await reject({garment:'业务主管（测试审批人）'},/本工作区的成员/); // 按姓名而不是账号
+  await reject({garment:'业务主管（测试审批人）'},/本公司的成员/); // 按姓名而不是账号
   ws=(await command(f.sales,f.id,ws.revision,'market.supplier.save',{id:supplier.id,input:supplierInput(supplier,{handlerIds:{garment:'local-manager'}})}).expect(200)).body.workspace;
   const saved=ws.state.market.suppliers.find((s:any)=>s.id===supplier.id);
   expect(saved.handlers.garment).toEqual({id:'local-manager',name:'业务主管（测试审批人）'});
@@ -54,7 +54,7 @@ describe('包 A：负责人与供应商稳定引用（服务端）',()=>{
   expect(ws.state.memberGroups.some((g:any)=>g.userId==='local-manager')).toBe(false);
   const other=ws.state.market.suppliers[1];
   const res=await command(f.sales,f.id,ws.revision,'market.supplier.save',{id:other.id,input:supplierInput(other,{handlerIds:{garment:'local-manager'}})}).expect(422);
-  expect(JSON.stringify(res.body)).toMatch(/本工作区的成员/);
+  expect(JSON.stringify(res.body)).toMatch(/本公司的成员/);
  });
  it('业务员可维护档案 / 认证 / 联系人，但评级与暂停 / 拉黑 / 恢复需要主管权限且必须写原因',async()=>{
   const f=await setup();let ws=f.ws;

@@ -36,7 +36,7 @@ export async function runQuoteCostAdvisor(
     !hasScope(actor, "ai:chat") ||
     !hasScope(actor, "quotations:read")
   )
-    fail("无权审阅本空间报价", 403, "FORBIDDEN");
+    fail("无权审阅本公司报价", 403, "FORBIDDEN");
   const b = args.body as QuoteCostAdvisorRequest;
   if (
     !b ||
@@ -60,7 +60,7 @@ export async function runQuoteCostAdvisor(
   )
     fail("请明确授权发送本次报价依据，且使用有效请求");
   if (b.expectedRevision !== workspace.revision)
-    fail("工作区已变化，请刷新后重新审阅", 409, "CONFLICT");
+    fail("公司已变化，请刷新后重新审阅", 409, "CONFLICT");
   const quote = workspace.state.market.quotations.find(
       (q) => q.id === b.quotationId,
     ),

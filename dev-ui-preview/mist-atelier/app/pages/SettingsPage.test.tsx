@@ -20,12 +20,12 @@ function input(label: string, value: string) { const field = host.querySelector<
 async function blur(field: HTMLInputElement) { await act(async () => field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))); }
 beforeEach(() => {
   vi.clearAllMocks(); sequence = 0; seam.nav = null; seam.session = { sessionKey: 'one', user: { id: 'owner', displayName: '认证姓名' } };
-  seam.value = { state: createMistState(ctx(), 'empty'), workspace: { id: 'workspace-one', name: '第一工作区',ownerId:'owner' }, loading: false, saving: false, pending: null, error: '', refresh: vi.fn(), recover: vi.fn(),archivedWorkspaces:[],refreshArchived:vi.fn().mockResolvedValue(undefined),archiveWorkspace:vi.fn().mockResolvedValue(undefined),restoreWorkspace:vi.fn().mockResolvedValue(undefined),
+  seam.value = { state: createMistState(ctx(), 'empty'), workspace: { id: 'workspace-one', name: '第一公司',ownerId:'owner' }, loading: false, saving: false, pending: null, error: '', refresh: vi.fn(), recover: vi.fn(),archivedWorkspaces:[],refreshArchived:vi.fn().mockResolvedValue(undefined),archiveWorkspace:vi.fn().mockResolvedValue(undefined),restoreWorkspace:vi.fn().mockResolvedValue(undefined),
     run: vi.fn(async (command: MistCommand) => { seam.value.state = applyMistCommand(seam.value.state, command, ctx()).state; paint(); return { requestId: 'request', revision: 1, result: {} }; }) };
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; });
 describe('original Mist settings with server workspace commands', () => {
-  it('does not expose workspace archive or switching actions in company settings',async()=>{render();await click(button('安全'));expect(host.textContent).not.toContain('回收站');expect(host.textContent).not.toContain('恢复工作空间');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(seam.value.refreshArchived).not.toHaveBeenCalled();});
+  it('does not expose workspace archive or switching actions in company settings',async()=>{render();await click(button('安全'));expect(host.textContent).not.toContain('回收站');expect(host.textContent).not.toContain('恢复公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(seam.value.refreshArchived).not.toHaveBeenCalled();});
 
   it('preserves section navigation and saves the actual three-way theme and density', async () => {
     render(); expect(host.querySelector('.mist-wizard')).toBeTruthy(); expect(host.querySelectorAll('.mist-vsteps button')).toHaveLength(8); await click(button('外观'));
@@ -41,17 +41,17 @@ describe('original Mist settings with server workspace commands', () => {
     expect(host.textContent).toContain('不发送邮件');
   });
   it('saves display profile on blur without mutating the authentication identity', async () => {
-    render(); await click(button('账号')); const field = input('显示姓名', '工作区显示名'); await blur(field);
-    expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { profileName: '工作区显示名' } });
-    expect(seam.value.state.settings.profileName).toBe('工作区显示名'); expect(seam.session.user.displayName).toBe('认证姓名');
+    render(); await click(button('账号')); const field = input('显示姓名', '公司显示名'); await blur(field);
+    expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { profileName: '公司显示名' } });
+    expect(seam.value.state.settings.profileName).toBe('公司显示名'); expect(seam.session.user.displayName).toBe('认证姓名');
     expect(host.textContent).toContain('不改变登录账号、邮箱或密码');
   });
   it('retains typed edits after failed persistence and resets them on workspace replacement', async () => {
     seam.value.run.mockRejectedValue(new Error('保存失败，请重试')); render(); await click(button('公司成员'));
     const field = input('公司显示名称', '未保存的名称'); await blur(field);
     expect(host.querySelector<HTMLInputElement>('input[aria-label="公司显示名称"]')?.value).toBe('未保存的名称'); expect(host.textContent).toContain('保存失败，请重试');
-    const state = createMistState(ctx(), 'empty'); state.settings.workspaceName = '第二工作区'; seam.value = { ...seam.value, state, workspace: { id: 'workspace-two', name: '第二工作区' } };
-    await act(async () => paint()); expect(host.querySelector<HTMLInputElement>('input[aria-label="公司显示名称"]')?.value).toBe('第二工作区'); expect(host.textContent).not.toContain('未保存的名称');
+    const state = createMistState(ctx(), 'empty'); state.settings.workspaceName = '第二公司'; seam.value = { ...seam.value, state, workspace: { id: 'workspace-two', name: '第二公司' } };
+    await act(async () => paint()); expect(host.querySelector<HTMLInputElement>('input[aria-label="公司显示名称"]')?.value).toBe('第二公司'); expect(host.textContent).not.toContain('未保存的名称');
   });
   it('does not offer company deletion from security settings', async () => {render();await click(button('安全'));expect(host.textContent).not.toContain('移入回收站');expect(host.textContent).not.toContain('删除公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();});
 });
@@ -102,7 +102,7 @@ describe('company profile maintenance in system settings',()=>{
  });
  it('drops an unsaved draft when the account or workspace changes',async()=>{
   seam.value.state.settings.companyProfile={...full};await open();input('公司中文抬头','未保存的抬头');
-  const state=createMistState(ctx(),'empty');state.settings.companyProfile={...full,legalName:'第二空间公司'};seam.value={...seam.value,state,workspace:{id:'workspace-two',name:'第二工作区'}};await act(async()=>paint());
+  const state=createMistState(ctx(),'empty');state.settings.companyProfile={...full,legalName:'第二空间公司'};seam.value={...seam.value,state,workspace:{id:'workspace-two',name:'第二公司'}};await act(async()=>paint());
   expect(value('公司中文抬头')).toBe('第二空间公司');expect(host.textContent).not.toContain('未保存的抬头');
   seam.session={sessionKey:'two',user:{id:'other',displayName:'另一账号'}};seam.value={...seam.value,state:createMistState(ctx(),'empty')};await act(async()=>paint());expect(value('公司中文抬头')).toBe('');
  });

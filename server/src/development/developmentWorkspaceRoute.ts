@@ -11,7 +11,7 @@ export function createDevelopmentWorkspaceRouter(options: { prisma: any; apiKeys
   const router = Router(), auth = { requireAuth: true, apiKeys: options.apiKeys ?? new Set<string>() }, service = createDevelopmentWorkspaceService(options);
   async function send(res: Response, work: () => Promise<unknown>) {
     try { res.json(exactJsonValue({ ok: true, data: await work() })); }
-    catch (error) { const safe = safeRouteError(error, { fallbackCode: 'INTERNAL_ERROR', fallbackMessage: '当前开发工作区暂时无法核验，请保留原请求后重新核对。' }); res.status(safe.status).json({ ok: false, error: { code: safe.code, message: safe.message } }); }
+    catch (error) { const safe = safeRouteError(error, { fallbackCode: 'INTERNAL_ERROR', fallbackMessage: '当前开发公司暂时无法核验，请保留原请求后重新核对。' }); res.status(safe.status).json({ ok: false, error: { code: safe.code, message: safe.message } }); }
   }
   router.get('/:caseId/business-workspace', createModuleAuthGuard(auth), (req, res) => send(res, () => {
     if (Object.keys(req.query).some(key => key !== 'sampleVersionId') || req.query.sampleVersionId !== undefined && typeof req.query.sampleVersionId !== 'string')

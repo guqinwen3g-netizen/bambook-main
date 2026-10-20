@@ -35,7 +35,7 @@ export function parseSource(s: MistState, value: string): Exclude<FulfillmentSou
     const p = s.productions.find(p => p.id === id);
     if (p)
         return { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId, productionId: p.id };
-} throw new Error('请重新选择当前工作区的准确来源'); }
+} throw new Error('请重新选择本公司的准确来源'); }
 export function sourceValue(source: FulfillmentSource) { return source.kind === 'version' ? 'version:' + source.versionId : source.kind === 'orderLine' ? source.productionId ? 'production:' + source.productionId : 'line:' + source.lineId : 'manual'; }
 export function SourceLink({ source }: {
     source: FulfillmentSource;

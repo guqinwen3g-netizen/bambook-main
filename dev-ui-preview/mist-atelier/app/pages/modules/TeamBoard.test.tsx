@@ -38,7 +38,7 @@ it('lists every member with what they hold, and nudges a member on a specific or
 it('flags former accounts that still hold business, and hides nudging without supervisor permission or for oneself',async()=>{
   state.customers[0].ownerId='gone';state.customers[0].owner='离职同事';
   render(false);
-  expect(rowOf('离职同事').textContent).toContain('已不在本空间');
+  expect(rowOf('离职同事').textContent).toContain('已不在本公司');
   await click(rowOf('离职同事'));
   expect(document.querySelector('[data-team-member="gone"]')!.textContent).toContain('去办理成员交接');
   await click(rowOf('顾言'));

@@ -11,7 +11,7 @@ function fixture(){
 const opp=(customerId:string,patch={})=>({customerId,title:'春夏大衣补单',domain:'garment' as const,amount:'48000.00',currency:'usd',expectedDate:'2026-12-01',ownerId:'sales',note:'',devIds:[],quotationIds:[],orderIds:[],...patch});
 
 describe('客户关系：跟进与商机',()=>{
-  it('空白空间为空切片，命令需要关系写权限',()=>{
+  it('空白公司为空切片，命令需要关系写权限',()=>{
     expect(createMistState({id:()=>'x',now:'2026-10-14T02:00:00Z',actorName:'a'} as MistContext,'empty').crm).toEqual({followUps:[],opportunities:[]});
     expect(mistCommandPermission({type:'crm.opportunity.stage',payload:{id:'x',stage:'won',note:''}})).toBe('relations:write');
   });

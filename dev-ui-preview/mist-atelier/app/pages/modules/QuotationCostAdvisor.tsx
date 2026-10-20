@@ -335,7 +335,7 @@ export function QuotationCostAdvisor(p: {
                   ))}
                   政策版本 {result.policyVersion}
                   。这是一份临时审阅，不是服务端持久化 AI
-                  审计记录；更改输入或工作区后必须重新请求。
+                  审计记录；更改输入或公司后必须重新请求。
                 </Banner>
                 {result.advice.strategy && (
                   <Banner

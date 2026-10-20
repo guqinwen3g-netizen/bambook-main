@@ -15,7 +15,7 @@ import type { BusinessWorkspaceScope, BusinessWorkspaceEvidence } from '../share
 const reason = (code: string, message: string) => ({ code, message });
 function assertScope(scope: BusinessWorkspaceScope, caseId: string) {
   if (!['development_case', 'development_version'].includes(scope.kind) || !('caseId' in scope) || scope.caseId !== caseId)
-    throw businessError('INVALID_INPUT', '工作区不属于当前准确开发案。');
+    throw businessError('INVALID_INPUT', '公司不属于当前准确开发案。');
 }
 async function knownGate(work: () => Promise<unknown>): Promise<Array<{ code: string; message: string }>> {
   try { await work(); return []; }

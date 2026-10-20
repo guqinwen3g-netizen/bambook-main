@@ -100,7 +100,7 @@ function MesDetail({ row: r, orderCode, onOrder }: { row: OutsourcingOrder; orde
     {r.notes && <p className="mist-sub">备注：{r.notes}</p>}
     <DetailBlock title="来源回查">
       <Facts items={[
-        { label: '来源订单', value: !r.orderId ? '历史未关联' : code ? <Button size="sm" onClick={() => onOrder(r.orderId!)}>{code}</Button> : <span className="mist-muted">原系统订单 {r.orderId.slice(0, 8)} · 当前工作空间无对应订单</span> },
+        { label: '来源订单', value: !r.orderId ? '历史未关联' : code ? <Button size="sm" onClick={() => onOrder(r.orderId!)}>{code}</Button> : <span className="mist-muted">原系统订单 {r.orderId.slice(0, 8)} · 本公司无对应订单</span> },
         { label: '加工方', value: r.supplierId ? <span className="mist-muted">原系统供应商 {r.supplierId.slice(0, 8)} · 尚未映射到供应商管理</span> : '历史未关联' },
         { label: 'BOM', value: r.bomId ? <span className="mist-muted">原系统 BOM {r.bomId.slice(0, 8)}</span> : '未关联' },
       ]} />

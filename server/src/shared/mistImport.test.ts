@@ -45,7 +45,7 @@ describe('基础资料批量导入', () => {
     expect(message).toContain('共 4 行不通过');
     expect(message).toContain('第 3 行：客户名称未填写');
     expect(message).toContain('第 4 行：客户编码已存在');
-    expect(message).toContain('第 5 行：客户经理“不存在的人”不是本工作区成员');
+    expect(message).toContain('第 5 行：客户经理“不存在的人”不是本公司成员');
     expect(message).toContain('第 6 行：填写了联系方式但缺少联系人姓名');
     expect(f.state.customers).toHaveLength(0);
   });

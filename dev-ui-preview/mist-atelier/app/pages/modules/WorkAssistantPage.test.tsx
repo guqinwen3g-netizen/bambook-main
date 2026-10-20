@@ -8,7 +8,7 @@ import { Nav } from '../../nav';
 const ctx = vi.hoisted(() => ({
   user: { id: 'u-1', displayName: '业务员甲' } as { id: string; displayName: string } | null,
   sessionKey: 's', canChat: true,
-  workspace: { id: 'w-1', name: '甲工作区' } as { id: string; name: string } | null,
+  workspace: { id: 'w-1', name: '甲公司' } as { id: string; name: string } | null,
 }));
 vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ sessionKey: ctx.sessionKey, user: ctx.user, hasPermission: (p: string) => p === 'ai:chat' && ctx.canChat }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ workspace: ctx.workspace }) }));
@@ -36,7 +36,7 @@ const clears = () => calls.filter(c => c[0] === 'session.delegation' && c[1].cle
 
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; calls.length = 0; go.mockReset();
-  ctx.user = { id: 'u-1', displayName: '业务员甲' }; ctx.sessionKey = 's'; ctx.canChat = true; ctx.workspace = { id: 'w-1', name: '甲工作区' };
+  ctx.user = { id: 'u-1', displayName: '业务员甲' }; ctx.sessionKey = 's'; ctx.canChat = true; ctx.workspace = { id: 'w-1', name: '甲公司' };
   fetchMock = vi.fn(async () => grant()); vi.stubGlobal('fetch', fetchMock);
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); delete (window as any).bambookAssistant; vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -71,7 +71,7 @@ it('issues a delegation with the personal session and hands only the short token
   expect(init).toMatchObject({ method: 'POST', credentials: 'include', cache: 'no-store', headers: expect.objectContaining({ Authorization: 'Bearer personal' }) });
   expect(binds()).toEqual([expect.objectContaining({ accountKey: `${location.origin}|u-1`, token: 'dlg-1', workspaceId: 'w-1', apiBase: location.origin })]);
   expect(JSON.stringify(binds())).not.toContain('personal');
-  expect(host.textContent).toContain('业务读取已连接 · 甲工作区');
+  expect(host.textContent).toContain('业务读取已连接 · 甲公司');
   expect(host.textContent).toContain('可读：订单、客户');
 });
 
@@ -169,7 +169,7 @@ it('renews before expiry on its own and dedupes reconnect requests from the host
   for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(binds().map(b => b.token)).toEqual(['dlg-1', 'dlg-1']);
   expect(delegationPosts()).toHaveLength(2);
-  // 同一时刻多次 delegation_needed 只发起一次签发；其他工作区的事件忽略。
+  // 同一时刻多次 delegation_needed 只发起一次签发；其他公司的事件忽略。
   const gate = deferred<Response>();
   fetchMock.mockImplementationOnce(() => gate.promise);
   await act(async () => { emit({ type: 'delegation_needed', workspaceId: 'w-1', reason: 'expired' }); emit({ type: 'delegation_needed', workspaceId: 'w-1', reason: 'rejected' }); emit({ type: 'delegation_needed', workspaceId: 'w-other', reason: 'missing' }); await vi.advanceTimersByTimeAsync(0); });
@@ -202,7 +202,7 @@ it('drops a late delegation for the previous workspace and clears host authoriza
   await mount();
   expect(host.textContent).toContain('甲空间对话');
   expect(host.textContent).not.toContain('乙空间对话');
-  ctx.workspace = { id: 'w-2', name: '乙工作区' };
+  ctx.workspace = { id: 'w-2', name: '乙公司' };
   const clearsBefore = clears().length;
   await rerender();
   expect(clears().length).toBeGreaterThan(clearsBefore);
@@ -222,7 +222,7 @@ it('releases sending when the context switches mid-send and ignores the late res
   await mount();
   await type('查订单');
   await act(async () => button('发送')!.click());
-  ctx.workspace = { id: 'w-2', name: '乙工作区' };
+  ctx.workspace = { id: 'w-2', name: '乙公司' };
   await rerender();
   await act(async () => { start.resolve({ runId: 'old', sessionId: 'old-s' }); });
   await settle();

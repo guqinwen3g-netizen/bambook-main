@@ -10,7 +10,7 @@ describe('mistNavCounts', () => {
       fulfillment: { qcTasks: [{ id: 'q1', code: 'QC-1', kind: 'sample', domain: 'garment', state: 'reported', factory: 'F', createdAt: '2026-10-01' }], shipments: [] },
       // 存量记录（订单、开发案总数）不计入侧栏数字。
       orders: [{ id: 'o1' }, { id: 'o2' }], devs: [{ id: 'd1' }, { id: 'd2' }] };
-    const reviews = [{ id: 'r1', workspaceId: 'w1', workspaceName: '甲', title: '本空间', status: 'pending', canDecide: true, submittedAt: '2026-10-16T00:00:00Z', target: { view: 'orders/detail', id: 'o1' } }, { id: 'r2', workspaceId: 'w2', workspaceName: '乙', title: '其他空间', status: 'pending', canDecide: true, submittedAt: '2026-10-16T00:00:00Z', target: { view: 'orders/detail', id: 'o9' } }] as any;
+    const reviews = [{ id: 'r1', workspaceId: 'w1', workspaceName: '甲', title: '本公司', status: 'pending', canDecide: true, submittedAt: '2026-10-16T00:00:00Z', target: { view: 'orders/detail', id: 'o1' } }, { id: 'r2', workspaceId: 'w2', workspaceName: '乙', title: '其他公司', status: 'pending', canDecide: true, submittedAt: '2026-10-16T00:00:00Z', target: { view: 'orders/detail', id: 'o9' } }] as any;
     const counts = mistNavCounts(state, { canRead: () => true, can: p => p === 'orders:write' || p === 'invoices:write', me: 'u1', today: '2026-10-17', reviews, workspaceId: 'w1' });
     expect(counts).toEqual({ cockpit: 6, development: 1, orders: 2, 'qc-workbench': 1, 'payment-vouchers': 1, approvals: 1 });
   });

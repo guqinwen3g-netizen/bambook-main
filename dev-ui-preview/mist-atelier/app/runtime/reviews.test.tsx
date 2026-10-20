@@ -10,7 +10,7 @@ import {Nav,type Route} from '../nav';
 
 const bridge=vi.hoisted(()=>({session:{sessionKey:'session-a',status:'authenticated',user:{id:'actor-a'},canAccessView:(_:string)=>true} as any,workspaceId:'workspace-a',status:'pending',version:0,listeners:new Set<()=>void>(),refresh:vi.fn(),extra:null as any}));
 vi.mock('./auth',()=>({useMistSession:()=>bridge.session}));
-vi.mock('./workspace',async()=>{const React=await import('react');const {createMistState}=await import('../../../../server/src/shared/mistWorkspace');const base=createMistState({actorName:'测试',actorId:'actor-a',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty');return{useMistWorkspace:()=>{React.useSyncExternalStore(listener=>{bridge.listeners.add(listener);return()=>{bridge.listeners.delete(listener);};},()=>bridge.version);return{workspace:{id:bridge.workspaceId,name:'当前工作区',revision:1,ownerId:'owner-x'},state:{...base,...(bridge.extra||{}),orderStatus:bridge.status},refresh:bridge.refresh};}};});
+vi.mock('./workspace',async()=>{const React=await import('react');const {createMistState}=await import('../../../../server/src/shared/mistWorkspace');const base=createMistState({actorName:'测试',actorId:'actor-a',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty');return{useMistWorkspace:()=>{React.useSyncExternalStore(listener=>{bridge.listeners.add(listener);return()=>{bridge.listeners.delete(listener);};},()=>bridge.version);return{workspace:{id:bridge.workspaceId,name:'本公司',revision:1,ownerId:'owner-x'},state:{...base,...(bridge.extra||{}),orderStatus:bridge.status},refresh:bridge.refresh};}};});
 vi.mock('../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'Content-Type':'application/json','X-Test-Actor':bridge.session.user.id})}}));
 import {useMistWorkspace} from './workspace';
 import {MistReviewButton,MistReviewProvider} from './reviews';
@@ -21,7 +21,7 @@ let intercept:((url:string,init:RequestInit)=>Promise<any>|undefined)|undefined;
 const key='bambook.mist.review-pending:actor-a';
 const intent={workspaceId:'workspace-a',reviewId:'order:round-one',requestId:'original-request',expectedRevision:1,decision:'approved',note:'核对合同'};
 const response=(data:any,status=200)=>({ok:status<400,status,json:async()=>data});
-function row(patch:any={}){return{id:'order:round-one',kind:'order',entityId:'order-one',title:'SO-ONE 主单审批',requesterId:'actor-b',reviewerIds:['actor-a'],status:serverStatus,submittedAt:'2026-10-13',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-one'},details:[{label:'金额',value:'48 USD'}],workspaceId:'workspace-a',workspaceName:'当前工作区',revision:1,canDecide:serverStatus==='pending',...patch};}
+function row(patch:any={}){return{id:'order:round-one',kind:'order',entityId:'order-one',title:'SO-ONE 主单审批',requesterId:'actor-b',reviewerIds:['actor-a'],status:serverStatus,submittedAt:'2026-10-13',requiredPermission:'orders:write',target:{view:'orders/detail',id:'order-one'},details:[{label:'金额',value:'48 USD'}],workspaceId:'workspace-a',workspaceName:'本公司',revision:1,canDecide:serverStatus==='pending',...patch};}
 function publish(){bridge.version++;bridge.listeners.forEach(listener=>listener());}
 function Probe(){const workspace=useMistWorkspace();return <p data-testid="business-state">{workspace.workspace?.id}:{(workspace.state as any).orderStatus}</p>;}
 let route:Route={view:'approvals'};const go=vi.fn();
@@ -82,8 +82,8 @@ it('retains request recovery protection when a response has a mismatched receipt
  expect((getByRole(document.body,'button',{name:'批准'}) as HTMLButtonElement).disabled).toBe(true);
 });
 it('reports a workspace refresh failure without claiming the saved approval must be posted again',async()=>{
- bridge.refresh=vi.fn(async()=>{throw new Error('当前工作区读取暂不可用');});await render();await prepareDecision();await click('批准');
- expect(localStorage.getItem(key)).toBeNull();expect(document.body.textContent).toContain('审批已保存');expect(document.body.textContent).toContain('当前工作区读取暂不可用');expect(queryByText(document.body,'有审批结果待核对')).toBeNull();
+ bridge.refresh=vi.fn(async()=>{throw new Error('本公司读取暂不可用');});await render();await prepareDecision();await click('批准');
+ expect(localStorage.getItem(key)).toBeNull();expect(document.body.textContent).toContain('审批已保存');expect(document.body.textContent).toContain('本公司读取暂不可用');expect(queryByText(document.body,'有审批结果待核对')).toBeNull();
 });
 
 it('requires a written reason before returning and never posts an empty decision',async()=>{
@@ -98,10 +98,10 @@ it('keeps transfer visible but disabled with the concrete reason',async()=>{
  expect(document.body.textContent).toContain(TRANSFER_UNAVAILABLE);
 });
 it('shows the submitted snapshot and blocks opening another workspace business record',async()=>{
- rows=[row({workspaceId:'workspace-z',workspaceName:'另一空间'})];await render();await openRow();
+ rows=[row({workspaceId:'workspace-z',workspaceName:'另一家公司'})];await render();await openRow();
  expect(document.body.textContent).toContain('48 USD');
  expect((getByRole(document.body,'button',{name:'打开原业务'}) as HTMLButtonElement).disabled).toBe(true);
- expect(document.body.textContent).toContain('请先切换到该空间');
+ expect(document.body.textContent).toContain('请先切换到该公司');
 });
 it('opens the exact business record when the review belongs to the current workspace',async()=>{
  await render();await openRow();await click('打开原业务');

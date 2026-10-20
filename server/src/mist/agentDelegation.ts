@@ -28,7 +28,7 @@ export function isAgentActor(actor: unknown): actor is AgentActor {
 
 function deny(message: string, status = 401, code = 'AGENT_DELEGATION_INVALID'): never { throw new MistApiError(code, message, status); }
 
-/** 委托身份可调用的接口：只读，且只限工作区列表与工作助手读取接口。 */
+/** 委托身份可调用的接口：只读，且只限公司列表与工作助手读取接口。 */
 const AGENT_ALLOWED_ROUTES: Array<[string, RegExp]> = [
   ['GET', /^\/workspaces\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/agent\/(query|objects\/[^/]+\/[^/]+(\/related)?)\/?$/],

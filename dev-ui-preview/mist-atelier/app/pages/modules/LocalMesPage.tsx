@@ -1,4 +1,4 @@
-/** 本地历史加工记录：只汇总本工作空间已批准的加工合同及其实际交付（只读）；办理在采购管理，跟单在生产进度。 */
+/** 本地历史加工记录：只汇总本公司已批准的加工合同及其实际交付（只读）；办理在采购管理，跟单在生产进度。 */
 import React from 'react';
 import { Download, Factory, History, SearchX } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Toolbar, type Column, type Tone } from '../../../../../components/mist';
@@ -48,7 +48,7 @@ export function LocalMesPage() {
   const detail = selected && state ? <LocalMesDetail purchase={selected} state={state} orderCode={orderCode} go={go} />
     : <EmptyState icon={History} title="加工记录详情" description={loading ? '正在读取加工记录' : '从列表选择一份加工合同，查看实际交付与来源'} compact />;
   return <MistPage width="wide">
-    <PageHeader eyebrow="平台 · 加工履行" title="历史加工记录" description="只读汇总本工作空间已批准的加工合同及实际交付；新的委外加工从“采购管理”发起，生产跟踪在“生产进度”。"
+    <PageHeader eyebrow="平台 · 加工履行" title="历史加工记录" description="只读汇总本公司已批准的加工合同及实际交付；新的委外加工从“采购管理”发起，生产跟踪在“生产进度”。"
       actions={<>
         <Button icon={Download} disabled={!rows.length} onClick={() => downloadModuleCsv('加工履行记录.csv', ['合同', '订单', '加工方', '加工内容', '合同数量', '单位', '已交付', '交期', '状态'], rows.map(p => [p.code, orderCode(p.orderId), p.supplier, p.description, p.quantity, p.unit, p.received, p.due, STAGE[stageOf(p)].label]))}>导出</Button>
         <Button icon={Factory} variant="primary" onClick={() => go('production-board')}>前往生产进度</Button>

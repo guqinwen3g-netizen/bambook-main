@@ -14,7 +14,7 @@ export type ChatMessage =
  * 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。
  * html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。
  */
-export function AssistantDrawer({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于当前工作空间的业务数据回答', icon = AssistantEyes }: {
+export function AssistantDrawer({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于本公司的业务数据回答', icon = AssistantEyes }: {
   open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon;
 }) {
   const [draft, setDraft] = React.useState('');

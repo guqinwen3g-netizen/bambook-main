@@ -42,9 +42,9 @@ describe('Mist repository with the real shared business commands', () => {
     expect(requestReceiptCount(db)).toBe(2); // One creation receipt and one reconciliation receipt.
   });
   it('keeps the switcher name and settings name consistent through a typed rename', async () => {
-    const input = { name: '第一工作区', seed: 'empty' as const, slug: 'rename-after-create' };
+    const input = { name: '第一公司', seed: 'empty' as const, slug: 'rename-after-create' };
     const workspace = await repo.create(testActor(), input);
-    expect(workspace.state.settings.workspaceName).toBe('第一工作区');
+    expect(workspace.state.settings.workspaceName).toBe('第一公司');
     const changed = await repo.execute(testActor(), workspace.id, { requestId: 'rename', expectedRevision: 0, command: { type: 'settings.update', payload: { workspaceName: '新名称' } } });
     expect(changed.workspace.name).toBe('新名称'); expect(changed.workspace.state.settings.workspaceName).toBe('新名称');
     const replay = await repo.create(testActor(), input);

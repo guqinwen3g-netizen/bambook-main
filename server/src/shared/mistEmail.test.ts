@@ -9,8 +9,8 @@ function fixture(seed:'demo'|'empty'='demo'){
   return {ctx,run,get state(){return state;}};
 }
 
-describe('智能邮箱工作空间切片',()=>{
-  it('空白空间没有任何邮箱或邮件，示例空间全部标注示例',()=>{
+describe('智能邮箱公司切片',()=>{
+  it('空白公司没有任何邮箱或邮件，演示公司全部标注示例',()=>{
     expect(fixture('empty').state.email).toEqual({accounts:[],messages:[],drafts:[],sends:[]});
     const f=fixture();
     expect(f.state.email.accounts.length).toBe(2);
@@ -32,7 +32,7 @@ describe('智能邮箱工作空间切片',()=>{
   });
   it('关联必须指向真实对象；抽取资料只生成复核任务且之后不能移除关联',()=>{
     const f=fixture();const customer=f.state.customers[0];
-    expect(()=>f.run({type:'email.link',payload:{id:'mail-ex-3',link:{kind:'customer',id:'missing'}}})).toThrow('不在当前工作空间');
+    expect(()=>f.run({type:'email.link',payload:{id:'mail-ex-3',link:{kind:'customer',id:'missing'}}})).toThrow('不在本公司');
     expect(()=>f.run({type:'email.submitExtraction',payload:{id:'mail-ex-3',link:{kind:'customer',id:customer.id}}})).toThrow('请先确认关联');
     f.run({type:'email.link',payload:{id:'mail-ex-3',link:{kind:'customer',id:customer.id}}});
     const before=JSON.stringify(f.state.customers);

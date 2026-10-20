@@ -5,7 +5,7 @@ import { loadMistVersion, type MistVersion } from './versionData';
 export type { MistVersion } from './versionData';
 const time = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '未知' : d.toLocaleString('zh-CN', { hour12: false }); };
 
-/** 账号面板：开发时实时读取 Git；构建版本随应用打包，数据空间来自工作空间设置。 */
+/** 账号面板：开发时实时读取 Git；构建版本随应用打包，数据类型来自公司设置。 */
 export function MistVersionInfo({ demoSeed }: { demoSeed?: { version: number; seededAt: string } }) {
   const [version, setVersion] = React.useState<MistVersion | null>(null), [failed, setFailed] = React.useState(false), [loading, setLoading] = React.useState(false);
   const load = React.useCallback(() => {
@@ -22,9 +22,9 @@ export function MistVersionInfo({ demoSeed }: { demoSeed?: { version: number; se
       { label: '提交时间', value: version?.committedAt ? time(version.committedAt) : '—' },
       { label: '服务启动 / 构建时间', value: version?.startedAt ? time(version.startedAt) : '—' },
       { label: '本地未提交改动', value: version ? (version.localChanges ? `${version.localChanges} 个文件` : '无') : '—' },
-      { label: '数据空间', value: demoSeed ? `演示工作空间 · 示例数据第 ${demoSeed.version} 版（${time(demoSeed.seededAt)} 生成）` : '普通工作空间（无示例数据）' },
+      { label: '数据类型', value: demoSeed ? `演示公司 · 示例数据第 ${demoSeed.version} 版（${time(demoSeed.seededAt)} 生成）` : '正式公司（无示例数据）' },
     ]} />
-    <p className="mist-note">代码版本可与 GitHub 分支的最新提交核对；数据空间单独标识，旧版示例数据需新建演示工作空间才会更新。</p>
+    <p className="mist-note">代码版本可与 GitHub 分支的最新提交核对；数据类型单独标识，旧版示例数据需新建演示公司才会更新。</p>
     <Button variant="quiet" loading={loading} onClick={load}>重新读取版本</Button>
   </>;
 }

@@ -29,7 +29,7 @@ export async function buildQuotationDocument(snapshot: QuoteDocumentSnapshot, se
 }
 
 export function bindQuotationDocument(prepared: PreparedQuotationDocument, file: MistStoredFile, context: { id: () => string; workspaceId: string; requestId: string }): QuoteDocumentArtifact {
-  if (file.mimeType !== 'application/pdf' || file.size !== prepared.bytes || file.name !== prepared.file.name || file.storageKey !== context.workspaceId + '/' + file.id || !context.requestId) return fail('报价单未按当前工作区安全归档');
+  if (file.mimeType !== 'application/pdf' || file.size !== prepared.bytes || file.name !== prepared.file.name || file.storageKey !== context.workspaceId + '/' + file.id || !context.requestId) return fail('报价单未按本公司安全归档');
   if (createHash('sha256').update(Buffer.from(prepared.file.bytes)).digest('hex') !== prepared.sha256) return fail('待归档报价单字节已变化');
   const s = prepared.snapshot;
   return { requestId: context.requestId, file: structuredClone(file), record: { id: context.id(), quotationId: s.quotationId, revision: s.revision, draft: s.draft, fileId: file.id, fileName: file.name, sha256: prepared.sha256, bytes: prepared.bytes, templateVersion: s.templateVersion, snapshotFingerprint: prepared.snapshotFingerprint, snapshot: structuredClone(s), generatedAt: s.generatedAt, generatedBy: s.generatedBy, generatedById: s.generatedById } };

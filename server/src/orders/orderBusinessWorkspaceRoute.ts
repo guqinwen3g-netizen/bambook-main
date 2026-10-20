@@ -11,7 +11,7 @@ export function createOrderBusinessWorkspaceRouter(options: { prisma: any; apiKe
   const router = Router(), auth = { requireAuth: true, apiKeys: options.apiKeys ?? new Set<string>() }, service = createOrderBusinessWorkspaceService(options);
   async function send(res: Response, work: () => Promise<unknown>) {
     try { res.json(exactJsonValue({ ok: true, data: await work() })); }
-    catch (error) { const safe = safeRouteError(error, { fallbackCode: 'INTERNAL_ERROR', fallbackMessage: '当前订单工作区暂时无法核验，请保留原请求后重新核对。' }); res.status(safe.status).json({ ok: false, error: { code: safe.code, message: safe.message } }); }
+    catch (error) { const safe = safeRouteError(error, { fallbackCode: 'INTERNAL_ERROR', fallbackMessage: '当前订单公司暂时无法核验，请保留原请求后重新核对。' }); res.status(safe.status).json({ ok: false, error: { code: safe.code, message: safe.message } }); }
   }
   router.get('/:orderId/business-workspace', createModuleAuthGuard(auth), (req, res) => send(res, () => {
     if (Object.keys(req.query).some(key => !['orderLineId', 'productionBatchId', 'productionBatchRevision'].includes(key))

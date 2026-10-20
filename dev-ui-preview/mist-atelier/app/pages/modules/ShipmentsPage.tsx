@@ -48,7 +48,7 @@ function ShipmentEditor({ shipment, onClose }: {
         ? <section key={line.id} data-over-ship={line.id}><Banner tone="bad" title={OVER_SHIP_REQUIRED}>{line.style} · {line.name}：累计出运 {check.cumulative} {line.unit}（本票 {Math.round((check.cumulative - reserved) * 10000) / 10000}，其他出运 {reserved}），{check.approved > check.max ? `已批准上限 ${check.limit}` : `溢装上限 ${check.max}`}，超出 {check.excess} {line.unit}。</Banner>{waiting ? <p className="mist-note">超量出运申请审批中（拟出 {waiting.quantity} {line.unit}），批准后才能保存。</p> : <><Field label="超量原因" required><TextArea aria-label={`超量原因 ${line.style}`} value={overReason[line.id] || ''} onChange={e => setOverReason(r => ({ ...r, [line.id]: e.target.value }))}/></Field><Button disabled={blocked || !(overReason[line.id] || '').trim()} onClick={() => { const item = toleranceChecks.find(t => t.line.id === line.id); if (item) void requestOverShip(item); }}>发起超量出运申请</Button></>}</section>
         : <Banner key={line.id} tone="warn" title={SHORT_SHIP_HINT}><span data-short-ship={line.id}>{line.style} · {line.name}：累计出运 {check.cumulative} {line.unit}，低于短装下限 {check.min}；可继续保存，尾数请在订单条目处理。</span></Banner>);
     const validate = () => {
-        if (!state) throw new Error('工作区尚未读取');
+        if (!state) throw new Error('公司尚未读取');
         if (invalidSource) throw new Error('指定订单不存在或客户不匹配，不能创建其他订单的出运');
         if (!terms) throw new Error('请先为来源订单核对合同收货条款');
         const values = lines.map(row => {

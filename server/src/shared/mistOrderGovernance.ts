@@ -47,7 +47,7 @@ export function createOrderGovernance(_context:MistContext,input?:Partial<OrderG
 export function orderGovernancePermission(command:OrderGovernanceCommand){if(!['order.governance.saveDraft','order.governance.submit','order.governance.decide','order.governance.discardChange','order.governance.closeLine','order.governance.requestOverShip','order.governance.void','order.governance.requestCancel'].includes(command.type))fail('未知订单治理操作');return 'orders:write';}
 function getOrder(root:MistState,id:string):GovernedOrder{return root.orders.find(o=>o.id===id)||fail('订单不存在','NOT_FOUND');}
 function governance(order:GovernedOrder):OrderGovernanceFields{return order.governance||fail('订单合同与审批资料尚未初始化','PRECONDITION');}
-function idsExist(root:MistState,input:OrderGovernanceInput){input.confirmationFileIds.forEach(id=>{if(!root.files.some(f=>f.id===id))fail('合同确认附件不属于当前工作区');});}
+function idsExist(root:MistState,input:OrderGovernanceInput){input.confirmationFileIds.forEach(id=>{if(!root.files.some(f=>f.id===id))fail('合同确认附件不属于本公司');});}
 function snapshotLine(line:MistOrderLine):OrderGovernanceLine{const r=line as MistOrderLine&OrderGovernanceLine;return{id:r.id,name:r.name,style:r.style,img:r.img,qty:r.qty,unit:r.unit,price:r.price,...(r.sourceProductId?{sourceProductId:r.sourceProductId}:{}),...(r.sourceDevId?{sourceDevId:r.sourceDevId}:{}),...(r.sourceVersionId?{sourceVersionId:r.sourceVersionId}:{}),...(r.breakdown?{breakdown:structuredClone(r.breakdown)}:{})};}
 function validateLines(root:MistState,order:GovernedOrder,lines:OrderGovernanceLine[]){
  if(!Array.isArray(lines)||!lines.length||lines.length>200)fail('至少需要一个订单条目');const seen=new Set<string>();

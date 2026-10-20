@@ -21,10 +21,10 @@ describe('成员目录与账号解析',()=>{
  it('非成员 / 已停用 / 不在业务组 / 未提供目录一律拒绝；成功时返回账号与当前显示名',()=>{
   const c={members};
   expect(resolveMember(c,'u-shen','经手人','fabric')).toEqual({id:'u-shen',name:'沈禾'});
-  expect(()=>resolveMember(c,'u-outsider','负责人')).toThrow(/本工作区的成员/);
+  expect(()=>resolveMember(c,'u-outsider','负责人')).toThrow(/本公司的成员/);
   expect(()=>resolveMember(c,'u-left','负责人')).toThrow(/已停用/);
   expect(()=>resolveMember(c,'u-gu','面料经手人','fabric')).toThrow(/不属于面料业务组/);
-  expect(()=>resolveMember(c,'顾言','负责人')).toThrow(/本工作区的成员/);
+  expect(()=>resolveMember(c,'顾言','负责人')).toThrow(/本公司的成员/);
   expect(()=>resolveMember({},'u-gu','负责人')).toThrow(/无法核对/);
   // 未带目录时只接受执行人本人（不限业务组以外的场景）；指定他人或按业务组指定仍拒绝
   expect(resolveMember({actorId:'u-gu',actorName:'顾言'},'u-gu','负责人')).toEqual({id:'u-gu',name:'顾言'});

@@ -221,14 +221,14 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
     if (!bridge) return;
     const found = await call<{ meta: SessionMeta; messages: Message[] }>(bridge, 'sessions.get', { id });
     if (currentScope.current !== scope || activeRef.current !== id) return;
-    if (found.meta.workspaceId && found.meta.workspaceId !== workspaceId) throw new Error('该对话属于其他工作区，请回到原工作区查看');
+    if (found.meta.workspaceId && found.meta.workspaceId !== workspaceId) throw new Error('该对话属于其他公司，请回到原公司查看');
     setMessages(found.messages);
   }, [bridge, scope, workspaceId]);
 
   React.useEffect(() => {
     if (!bridge || !accountKey) return;
     let cancelled = false;
-    // 切换账号 / 工作区时由下方 scope 副作用清空对话；host 重启只重新初始化，保留当前打开的对话。
+    // 切换账号 / 公司时由下方 scope 副作用清空对话；host 重启只重新初始化，保留当前打开的对话。
     setReady(false); setError(''); setLive(null);
     (async () => {
       try {
@@ -338,7 +338,7 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
     {error && <Banner tone="bad" title="未完成">{error}</Banner>}
     {!canChat ? <Banner tone="warn" title="无工作助手使用权限">当前账号没有 ai:chat 权限；不会签发委托，也不能向模型发送任务。</Banner> :
       <Banner tone={delegation.phase === 'connected' ? 'ai' : 'warn'} title={delegation.phase === 'connected' ? '业务读取已连接 · ' + (w.workspace?.name ?? '') : delegation.phase === 'connecting' ? '正在连接业务读取' : '业务读取未连接'} actions={<Button size="sm" disabled={!accountReady || !workspaceId || delegation.phase === 'connecting'} onClick={() => void delegation.renew()}>重新连接</Button>}>
-        {delegation.phase === 'connected' ? <>可读：{delegation.readable.length ? delegation.readable.map(t => t.label).join('、') : '当前账号暂无首批可读对象'}。仅限当前工作区，权限由服务端每次复核；{delegation.expiresAt ? time(delegation.expiresAt) + ' 到期，提前自动续签。' : ''}</> : delegation.error || (!workspaceId ? '请先选择可访问的工作区。' : '由本人会话签发短期只读委托，业务写入、邮件与文档能力尚未开放。')}
+        {delegation.phase === 'connected' ? <>可读：{delegation.readable.length ? delegation.readable.map(t => t.label).join('、') : '当前账号暂无首批可读对象'}。仅限本公司，权限由服务端每次复核；{delegation.expiresAt ? time(delegation.expiresAt) + ' 到期，提前自动续签。' : ''}</> : delegation.error || (!workspaceId ? '请先选择可访问的公司。' : '由本人会话签发短期只读委托，业务写入、邮件与文档能力尚未开放。')}
       </Banner>}
     {accountReady && !providers.length ? <Card><div className="mist-card-body"><EmptyState title="先连接你的模型" description="工作助手只用你本人的模型：ChatGPT 账号登录，或你自己的 OpenAI 兼容 API。凭据只保存在这台电脑。" action={<div className="mist-row"><Button variant="primary" icon={LogIn} onClick={() => setSettings({ open: true, format: 'chatgpt-subscription' })}>用 ChatGPT 登录</Button><Button icon={KeyRound} onClick={() => setSettings({ open: true, format: 'openai' })}>添加 API 配置</Button></div>} /></div></Card> :
     <section className="mist-wa">

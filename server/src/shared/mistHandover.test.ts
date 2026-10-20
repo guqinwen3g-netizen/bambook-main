@@ -16,7 +16,7 @@ describe('客户在手业务交接',()=>{
     expect(mistCommandPermission({type:'handover.customer',payload:{}} as MistCommand)).toBe('relations:admin');
     const base={customerId:'customer-1',toUserId:'demo-new',reason:'沈禾调岗至面料组，Northwind 由林舟接手'};
     expect(()=>f.run({...base,toUserId:'gone'})).toThrow('账号已停用');
-    expect(()=>f.run({...base,toUserId:'nobody'})).toThrow('须为本工作区的成员账号');
+    expect(()=>f.run({...base,toUserId:'nobody'})).toThrow('须为本公司的成员账号');
     expect(()=>f.run({...base,reason:' '})).toThrow('交接原因');
     expect(()=>f.run({...base,orderIds:[order(f.state,'SO-G-2026-018').id]})).toThrow('不属于该客户');
     const opp=f.state.crm.opportunities.find(o=>o.customerId==='customer-1')!;

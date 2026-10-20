@@ -81,7 +81,7 @@ describe('Mist transactional workspace', () => {
   it('opens the company workspace an organizational member was granted instead of creating a personal blank one', async () => {
     const company = await repo.create(testActor(), { name: 'Company', seed: 'empty' });
     const row = db.workspaces.get(company.id)!; row.state.memberIds = ['other']; row.state.members = [{ userId: 'other', name: 'other', addedBy: 'owner', addedByName: 'owner', addedAt: '2026-10-18T08:00:00Z' }];
-    const landed = await repo.create(testActor('other'), { name: 'Mist 工作区', seed: 'demo' }, true);
+    const landed = await repo.create(testActor('other'), { name: 'Mist 公司', seed: 'demo' }, true);
     expect(landed.id).toBe(company.id);
     expect((await repo.list(testActor('other'))).map(item => item.id)).toEqual([company.id]);
   });

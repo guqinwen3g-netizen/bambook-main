@@ -7,19 +7,19 @@ import { useNav } from '../../nav';
 
 const COMPACT_QUERY = '(max-width: 1180px)';
 /** The sticky preview column is hidden by Mist CSS at ≤1180px; detail then opens in a drawer. */
-export function useCompactLayout() {
-  const query = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(COMPACT_QUERY).matches;
+export function useCompactLayout(mediaQuery = COMPACT_QUERY) {
+  const query = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(mediaQuery).matches;
   const [compact, setCompact] = React.useState(query);
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const media = window.matchMedia(COMPACT_QUERY), update = () => setCompact(media.matches);
+    const media = window.matchMedia(mediaQuery), update = () => setCompact(media.matches);
     update(); media.addEventListener?.('change', update);
     return () => media.removeEventListener?.('change', update);
   }, []);
   return compact;
 }
 
-const DetailSurface = React.createContext<'card' | 'drawer'>('card');
+export const DetailSurface = React.createContext<'card' | 'drawer'>('card');
 /** Where a detail renders: the sticky preview card or the compact drawer (which already shows the title). */
 export const useDetailSurface = () => React.useContext(DetailSurface);
 /** Detail body: card padding in the preview column, plain column inside the drawer. */

@@ -1,5 +1,5 @@
 /** 通知中心（菜单外，从顶栏通知抽屉进入）：未读 / 全部、按类型筛选、全部已读、直达对象；订阅设置跳到设置 · 通知。
- *  通知来自当前工作空间的业务记录；按当前账号可查看的模块和已开启的通知类别显示，不发送邮件或外部消息。 */
+ *  通知来自本公司的业务记录；按当前账号可查看的模块和已开启的通知类别显示，不发送邮件或外部消息。 */
 import React from 'react';
 import { ArrowUpRight, CheckCheck, Settings2 } from 'lucide-react';
 import { Banner, Button, Card, DataTable, EmptyState, MistPage, ObjectCell, PageHeader, Pill, SearchField, Segmented, Tabs, Toolbar, useToast, type Column, type Tone } from '../../../../components/mist';
@@ -49,7 +49,7 @@ export function NotificationsPage() {
     { key: 'open', header: '', width: '96px', render: n => <Button size="sm" variant="quiet" iconRight={ArrowUpRight} disabled={busy || !canOpen(n)} title={canOpen(n) ? undefined : '当前账号没有该对象的查看权限'} onClick={event => { event.stopPropagation(); open(n); }}>{canOpen(n) ? '打开' : '无权限'}</Button> },
   ];
   return <MistPage>
-    <PageHeader eyebrow="我的事务 · 通知" title="通知中心" description="当前工作空间的业务提醒。打开一条会标为已读并直达对应对象；不发送邮件或外部消息。"
+    <PageHeader eyebrow="我的事务 · 通知" title="通知中心" description="本公司的业务提醒。打开一条会标为已读并直达对应对象；不发送邮件或外部消息。"
       actions={<><Button icon={Settings2} onClick={() => go('settings', undefined, { section: 'notify' })}>通知订阅</Button>
         <Button variant="primary" icon={CheckCheck} disabled={busy || !unread} loading={workspace.saving} onClick={readAll}>全部标为已读</Button></>} />
     {error && <Banner tone="bad" title={error} actions={<Button size="sm" onClick={() => setError('')}>知道了</Button>} />}

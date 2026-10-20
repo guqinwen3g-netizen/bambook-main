@@ -70,7 +70,7 @@ export class MistMailService {
   private async imap(account: EmailAccount, secret: MistMailSecret) { return this.transport.imap(account.transport!, secret, this.insecure(account.transport!.imapHost)); }
   private write(prior: TokenPayload, workspaceId: string, type: string, payload: Record<string, unknown>) { return this.repository.executeMail(prior, workspaceId, { type, payload }); }
 
-  /** 绑定凭据：先真实登录收信与发信服务器，成功才写入服务端凭据目录；密码不回传、不落工作空间。 */
+  /** 绑定凭据：先真实登录收信与发信服务器，成功才写入服务端凭据目录；密码不回传、不落公司。 */
   async bindCredential(prior: TokenPayload, workspaceId: string, accountId: string, password: unknown) {
     if (typeof password !== 'string' || !password || password.length > 1024) fail('INVALID_INPUT', '请填写邮箱密码或授权码', 400);
     const { account } = await this.account(prior, workspaceId, accountId);

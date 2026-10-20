@@ -129,7 +129,7 @@ export type MistOrder = {
   id: string; code: string; type: 'garment' | 'fabric'; customerId: string; customer: string;
   season: string; lines: number; qty: number; amount: number; currency: string; due: string;
   progress: number; state: string; tone: MistTone; owner: string; img: MistImage;
-  /** 负责人账号（owner 为显示名快照）：按账号选择，服务端校验为本工作区有效成员。 */
+  /** 负责人账号（owner 为显示名快照）：按账号选择，服务端校验为本公司有效成员。 */
   ownerId: string;
   checklist: MistChecklistItem[]; handoffAt: string | null; createdAt: string; updatedAt: string;
 };
@@ -247,7 +247,7 @@ export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: stri
 export type MistNotification = { id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
 export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget };
 export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAccount:string;swift:string;defaultCurrency:string};
-export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示工作区：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
+export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示公司：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
 export type MistState = {
   orderFunding?:OrderFundingState;
   payables?:PayablesState;
@@ -272,7 +272,7 @@ export type MistState = {
   customers: MistCustomer[]; contacts: MistContact[]; files: MistFile[];
   events: MistEvent[]; tasks: MistTask[]; notifications: MistNotification[]; calendar: MistCalendarEvent[];
   settings: MistSettings; fulfillment:FulfillmentState; market:MarketState; platform:PlatformState; email:EmailState; crm:CrmState; reviewerIds?:string[];
-  /** 所有者明确授权进入本空间的账号（只管进入，不授予业务权限）与授权历史。 */
+  /** 所有者明确授权进入本公司的账号（只管进入，不授予业务权限）与授权历史。 */
   memberIds?:string[]; members?:MistWorkspaceMember[]; memberLog?:MistWorkspaceMemberLog[];
   /** 成员业务组（面料/成衣，可多选），所有者在成员管理设置。 */
   memberGroups?:MistMemberGroupAssignment[];
@@ -758,7 +758,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type==='finance.reconcile'||command.type==='finance.acceptSuggestions'||command.type==='finance.allocation.reverse')return MIST_FINANCE_SCOPES.reconcile;
   if(command.type.startsWith('finance.'))throw new MistCommandError('VALIDATION','未知财务操作');
   if(command.type.startsWith('customer.')||command.type.startsWith('contact.'))return 'relations:write';
-  // member.groups.set：权限 null 由仓储层限定为工作区所有者（与成员授权一致）。
+  // member.groups.set：权限 null 由仓储层限定为公司所有者（与成员授权一致）。
   if(['settings.update','notification.read','notification.readAll','task.complete','calendar.save','member.groups.set'].includes(command.type))return null;
   throw new MistCommandError('VALIDATION','未知操作');
 }
@@ -775,7 +775,7 @@ export function applyMistCommand(original: MistState, command: MistCommand, cont
   return applyMistCommandUnbound(original, command, context);
 }
 function applyMistCommandUnbound(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
-  if(!original||original.schemaVersion!==1)throw new MistCommandError('INVALID_STATE','工作区数据版本无效',500);
+  if(!original||original.schemaVersion!==1)throw new MistCommandError('INVALID_STATE','公司数据版本无效',500);
   if(!command||typeof command.type!=='string'||!command.payload||typeof command.payload!=='object')throw new MistCommandError('VALIDATION','操作格式无效');
   mistCommandPermission(command);
   const state: MistState=JSON.parse(JSON.stringify(original));

@@ -15,7 +15,7 @@ const run = (s: MistState, command: any, c: MistContext) => applyMistCommand(s, 
 function demo() { const c = ctx(); return { c, state: createMistState(c, 'demo'), day: platformBusinessDate(c.now) }; }
 
 describe('风险预警只从真实记录推出', () => {
-  it('演示空间：逾期应收、往来冻结、认证过期都能识别，且不改来源记录', () => {
+  it('演示公司：逾期应收、往来冻结、认证过期都能识别，且不改来源记录', () => {
     const { state, day } = demo(); const before = JSON.stringify(state);
     const s = riskSignals(state, day);
     expect(s.some(x => x.type === 'credit' && x.source.kind === 'relation')).toBe(true);
@@ -238,7 +238,7 @@ describe('来源负责人按稳定账号判断，不按显示姓名', () => {
     expect(() => run(s, { type: 'market.customer.update', payload: { id: cu.id, patch: { owner: '业务乙' } as any } }, boss)).toThrow(/按账号选择/);
     // 非成员 / 已停用账号：服务端拒绝，数据不变。
     const before = JSON.stringify(s);
-    expect(() => run(s, { type: 'market.customer.update', payload: { id: cu.id, patch: { ownerId: 'id-外人' } } }, boss)).toThrow(/须为本工作区的成员账号/);
+    expect(() => run(s, { type: 'market.customer.update', payload: { id: cu.id, patch: { ownerId: 'id-外人' } } }, boss)).toThrow(/须为本公司的成员账号/);
     expect(() => run(s, { type: 'market.customer.update', payload: { id: cu.id, patch: { ownerId: 'id-离职' } } }, boss)).toThrow(/已停用/);
     expect(JSON.stringify(s)).toBe(before);
     // 改派给业务乙：写入账号与显示名快照，并留下“负责人：A→B”。

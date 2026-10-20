@@ -92,7 +92,7 @@ export function QuotationHistoryPage() {
       <MistPage>
         <PageHeader title="历史报价条件对照" />
         <Banner title="没有报价读取权限">
-          不展示本空间历史，不扩大授权范围。
+          不展示本公司历史，不扩大授权范围。
         </Banner>
       </MistPage>
     );
@@ -341,7 +341,7 @@ export function QuotationHistoryPage() {
         }
       />
       <Banner title="人工证据对照，不是推荐报价">
-        只读取当前授权工作空间；列表客户名称沿当前档案显示，不冒充历史冻结名称。默认同客户、同来源标识、同币种同单位；标识相同不代表规格与商业条件相同。草稿及审批中记录不作为已对客历史，本次整份报价不列入候选。不自动取均价、换算、复制价格或推算客户承受区间；税费、MOQ、品质、交期及其他费用仍需从原始依据人工核对。
+        只读取当前授权公司；列表客户名称沿当前档案显示，不冒充历史冻结名称。默认同客户、同来源标识、同币种同单位；标识相同不代表规格与商业条件相同。草稿及审批中记录不作为已对客历史，本次整份报价不列入候选。不自动取均价、换算、复制价格或推算客户承受区间；税费、MOQ、品质、交期及其他费用仍需从原始依据人工核对。
       </Banner>
       {w.error && (
         <Banner
@@ -394,7 +394,7 @@ export function QuotationHistoryPage() {
           onChange={(e) => select("customer", e.target.value)}
           options={[
             { value: "same", label: "同客户" },
-            { value: "all", label: "本空间全部客户" },
+            { value: "all", label: "本公司全部客户" },
           ]}
         />
         <Select

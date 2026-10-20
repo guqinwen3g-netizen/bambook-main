@@ -23,7 +23,7 @@ export async function buildCustomerStatement(snapshot: StatementSnapshot, option
 }
 
 export function bindCustomerStatement(prepared: PreparedCustomerStatement, file: MistStoredFile, context: { id: () => string; workspaceId: string; requestId: string }): CustomerStatementArtifact {
-  if (file.mimeType !== 'application/pdf' || file.size !== prepared.bytes || file.name !== prepared.file.name || file.storageKey !== context.workspaceId + '/' + file.id || !context.requestId) return fail('对账单未按当前工作区安全归档');
+  if (file.mimeType !== 'application/pdf' || file.size !== prepared.bytes || file.name !== prepared.file.name || file.storageKey !== context.workspaceId + '/' + file.id || !context.requestId) return fail('对账单未按本公司安全归档');
   if (createHash('sha256').update(Buffer.from(prepared.file.bytes)).digest('hex') !== prepared.sha256) return fail('待归档对账单字节已变化');
   const s = prepared.snapshot;
   return { requestId: context.requestId, file: structuredClone(file), record: { id: context.id(), customerId: s.customer.id, statementNo: s.statementNo, seq: s.seq, asOf: s.asOf, totals: s.sections.map(sec => ({ currency: sec.currency, net: sec.net })), fileId: file.id, fileName: file.name, sha256: prepared.sha256, bytes: prepared.bytes, templateVersion: s.templateVersion, snapshotFingerprint: prepared.snapshotFingerprint, snapshot: structuredClone(s), generatedAt: s.generatedAt, generatedBy: s.generatedBy, generatedById: s.generatedById } };

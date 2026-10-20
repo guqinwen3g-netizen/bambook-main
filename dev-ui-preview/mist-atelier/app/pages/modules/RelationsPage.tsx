@@ -192,7 +192,7 @@ function RelationDetail({ r, state, can, canHandover, onHandover, locked, busine
       ...(customer ? [{ label: '客户负责人', value: customer.owner || '未指定' }, { label: '信用额度', value: customer.creditLimit ? <span className="mist-num">{customer.currency} {customer.creditLimit.toLocaleString('en-US')}</span> : '未设定' },
         { label: '未收发票', value: business.receivable.length ? <span className="mist-num">{business.receivable.map(([c, v]) => `${c} ${v.toLocaleString('en-US', { minimumFractionDigits: 2 })}`).join(' · ')}</span> : '无' }, { label: '结算条件', value: [customer.terms, customer.incoterm].filter(Boolean).join(' · ') || '未填' }] : []),
       ...(supplier ? [{ label: '供应商类型', value: supplier.type }, { label: '交付周期', value: `${supplier.leadDays} 天` }] : []),
-      { label: '查看范围', value: '工作空间成员按角色权限查看' },
+      { label: '查看范围', value: '公司成员按角色权限查看' },
     ]} />
     {r.note && <p className="mist-sub">{r.note}</p>}
     <DetailBlock title={`在手业务 · ${business.total}`}>

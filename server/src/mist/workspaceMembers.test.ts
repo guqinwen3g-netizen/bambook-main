@@ -18,7 +18,7 @@ async function agent(app:any,profileId:string){const client=request.agent(app);a
 let n=0;
 const command=(client:any,id:string,revision:number,type:string,payload:unknown)=>client.post(W+id+'/commands').send({requestId:'req-'+(++n),expectedRevision:revision,command:{type,payload}});
 const member=(client:any,id:string,revision:number,action:'add'|'remove',account:string)=>client.post(W+id+'/members').send({requestId:'member-'+(++n),expectedRevision:revision,action,account});
-describe('工作空间成员与岗位权限（服务端）',()=>{
+describe('公司成员与岗位权限（服务端）',()=>{
  it('业务经办、审批人、财务各用自己的岗位权限办理同一笔合同；未授权账号进不来',async()=>{
   const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local});
   const sales=await agent(app,'local-sales'),manager=await agent(app,'local-manager'),finance=await agent(app,'local-finance'),qc=await agent(app,'local-qc');
@@ -46,7 +46,7 @@ describe('工作空间成员与岗位权限（服务端）',()=>{
   expect(ws.state.fulfillment.purchases.find((p:any)=>p.id===draft.id).reviewerIds).toEqual(['local-reviewer','local-manager']);
   // 财务不在审批名单：审批入口看不到也处理不了
   expect((await finance.get('/api/mist/reviews').expect(200)).body.reviews.some((t:any)=>t.workspaceId===id)).toBe(false);
-  // 审批人只通过审批入口看到被指派的这一项，打不开工作空间其他数据
+  // 审批人只通过审批入口看到被指派的这一项，打不开公司其他数据
   const reviews=(await manager.get('/api/mist/reviews').expect(200)).body.reviews.filter((t:any)=>t.workspaceId===id);
   expect(reviews).toHaveLength(1);expect(reviews[0]).toMatchObject({canDecide:true,kind:'procurement',entityId:draft.id});expect(reviews[0].state).toBeUndefined();
   await manager.get(W+id).expect(404);

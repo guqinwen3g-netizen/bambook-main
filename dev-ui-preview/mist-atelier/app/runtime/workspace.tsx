@@ -31,9 +31,9 @@ export interface MistWorkspaceContext {
   refreshArchived?:()=>Promise<void>;
   archiveWorkspace?:()=>Promise<void>;
   restoreWorkspace?:(id:string)=>Promise<void>;
-  /** 所有者授权/撤销其他账号进入当前空间；对方能看到什么仍由其自身岗位权限决定（服务端裁剪）。 */
+  /** 所有者授权/撤销其他账号进入本公司；对方能看到什么仍由其自身岗位权限决定（服务端裁剪）。 */
   changeMember?:(action:'add'|'remove',account:string)=>Promise<void>;
-  /** 智能邮箱真实收发：绑定/断开凭据、同步、发送、重发与核对；凭据只提交到服务端，不进入工作空间状态。 */
+  /** 智能邮箱真实收发：绑定/断开凭据、同步、发送、重发与核对；凭据只提交到服务端，不进入公司状态。 */
   mail?:(action:MistMailAction)=>Promise<MistMailResult>;
   /** 待人工核对的发送意图：本人核对已发送 / 待发送后关闭本机记录；不会发送任何邮件。 */
   closeMailReview?:()=>Promise<void>;
@@ -71,7 +71,7 @@ function uploadTarget(options:unknown):string|undefined{
   if(!object(options)||Object.keys(options).length!==1||!claimIdentifier(options.claimId))throw new RequestError('请选择当前案件的有效上传目标');
   return options.claimId;
 }
-/** 所有者，或服务端确认的被授权成员，才能使用该工作区快照。 */
+/** 所有者，或服务端确认的被授权成员，才能使用该公司快照。 */
 export function workspaceAccessibleBy(value: MistWorkspaceEnvelope, userId?: string | null) { return !!userId && (value.ownerId === userId || value.access?.role === 'member' && Array.isArray(value.state?.memberIds) && value.state.memberIds.includes(userId)); }
 class RequestError extends Error { constructor(message: string, public status = 0, public code?: string) { super(message); } }
 function envelope(value: unknown, actorId: string, workspaceId?: string): MistWorkspaceEnvelope {
@@ -79,11 +79,11 @@ function envelope(value: unknown, actorId: string, workspaceId?: string): MistWo
   const arrays: Array<keyof MistState> = ['devs', 'versions', 'drafts', 'fabrics', 'orders', 'orderLines', 'productions', 'receipts', 'invoices', 'allocations', 'payments', 'customers', 'contacts', 'files', 'events', 'tasks', 'notifications', 'calendar'];
   if (!candidate || !nonempty(candidate.id) || workspaceId && candidate.id !== workspaceId || !workspaceAccessibleBy(candidate, actorId)
     || !Number.isSafeInteger(candidate.revision) || candidate.revision < 0 || candidate.state?.schemaVersion !== 1
-    || arrays.some(key => !Array.isArray(candidate.state[key])) || !object(candidate.state.settings) || !!candidate.state.workspaceArchive) throw new RequestError('工作区响应不完整或身份、来源不一致');
+    || arrays.some(key => !Array.isArray(candidate.state[key])) || !object(candidate.state.settings) || !!candidate.state.workspaceArchive) throw new RequestError('公司响应不完整或身份、来源不一致');
   return candidate;
 }
 /**
- * 结构共享：新读到的工作区里没有变化的记录沿用旧对象，只有真正变了的记录换新引用。
+ * 结构共享：新读到的公司里没有变化的记录沿用旧对象，只有真正变了的记录换新引用。
  * 后台同步他人修改时，正在编辑的表单、展开状态等依赖记录引用的页面不会因无关更新被重置。
  */
 /** 后台同步版本号的间隔。 */
@@ -114,15 +114,15 @@ function receipt(value: unknown, intent: Pending): MistRunReceipt {
   return candidate;
 }
 function validateReceiptState(value: MistWorkspaceEnvelope, acknowledged: MistRunReceipt, intent: Pending) {
-  if (value.revision < acknowledged.revision) throw new RequestError('工作区快照早于操作回执，请核对原请求');
+  if (value.revision < acknowledged.revision) throw new RequestError('公司快照早于操作回执，请核对原请求');
   if (intent.kind === 'member' && (acknowledged.result.workspaceId !== intent.workspaceId || acknowledged.result.action !== intent.action || !nonempty(acknowledged.result.userId))) throw new RequestError('授权回执与原操作不一致，请核对原请求');
   if (intent.kind === 'upload') {
     const fileId = acknowledged.result.fileId || acknowledged.result.id;
     const file = value.state.files.find(item => item.id === fileId);
-    if (acknowledged.result.claimId!==intent.claimId || !nonempty(fileId) || !file || file.size !== intent.file?.size || file.name !== intent.file?.name || file.storageKey !== `${intent.workspaceId}/${file.id}`) throw new RequestError('上传回执没有对应当前工作区及原案件目标的原附件');
+    if (acknowledged.result.claimId!==intent.claimId || !nonempty(fileId) || !file || file.size !== intent.file?.size || file.name !== intent.file?.name || file.storageKey !== `${intent.workspaceId}/${file.id}`) throw new RequestError('上传回执没有对应本公司及原案件目标的原附件');
   }
 }
-/** 发送回执须指向当前空间中由同一 requestKey 登记的发送记录，才算原意图已有结果。 */
+/** 发送回执须指向本公司中由同一 requestKey 登记的发送记录，才算原意图已有结果。 */
 /** 本机发送结案登记：每个发送意图（原 requestKey）核实后记下它认领的回执（send.id）。只存编号，不含正文与凭据。 */
 type MailClaim = { workspaceId: string; requestKey: string; sendId: string; accountId: string; closedAt: string; alias?: boolean };
 const MAIL_CLAIMS = 'bambook.mist.mail-receipts:';
@@ -145,14 +145,14 @@ function writeMailClaim(userId: string, claim: MailClaim) {
 }
 const mailAddresses = (value: unknown) => [...new Set((String(value ?? '').match(/[^\s<>,;，；"']+@[^\s<>,;，；"']+/g) || []).map(item => item.toLowerCase()))].sort().join(',');
 const mailSubject = (value: unknown) => String(value ?? '').trim() || '（无主题）';
-/** 回执核对：回执必须指向当前空间里同一发送人、同一发件账号、同一 requestKey（或服务端确认的别名）、主题 / 收件人 / 正文一致、且未被其他意图认领的发送记录；任何一项不符都停在待人工核对。 */
+/** 回执核对：回执必须指向本公司里同一发送人、同一发件账号、同一 requestKey（或服务端确认的别名）、主题 / 收件人 / 正文一致、且未被其他意图认领的发送记录；任何一项不符都停在待人工核对。 */
 function mailSendAcknowledged(data: any, value: MistWorkspaceEnvelope, intent: Pending, userId: string) {
   const id = data?.send?.id, sends = (value.state as any).email?.sends, input = intent.mail!.input;
   const stop = (reason: string) => { throw new RequestError('发送回执与原请求不符：' + reason + '；不算已发送，也不会重发，已停在待人工核对', 409, MAIL_REVIEW); };
   if (!nonempty(id) || !Array.isArray(sends)) stop('服务器没有返回可核对的发送记录');
   const row = sends.find((item: any) => item?.id === id);
-  if (!row) stop('回执对应的发送记录不在当前空间');
-  // 服务端确认的关联：回执写明 recoveredFor = 本次 requestKey，且当前空间的原记录已持久登记该别名。
+  if (!row) stop('回执对应的发送记录不在本公司');
+  // 服务端确认的关联：回执写明 recoveredFor = 本次 requestKey，且本公司的原记录已持久登记该别名。
   const alias = row.requestKey !== intent.requestId && data?.send?.recoveredFor === intent.requestId && Array.isArray(row.aliasKeys) && row.aliasKeys.includes(intent.requestId);
   const owner = readMailClaims(userId).find(item => item.workspaceId === intent.workspaceId && item.sendId === id && item.requestKey !== intent.requestId);
   if (owner && !alias) stop('该回执已被其他发送意图认领');
@@ -185,10 +185,10 @@ function readPending(raw: string, actorId: string): Pending {
 function readPendingCreate(raw: string, actorId: string): MistPendingCreate {
   const value = JSON.parse(raw) as MistPendingCreate;
   if (!object(value) || value.actorId !== actorId || !nonempty(value.slug) || value.slug.length > 100 || value.slug !== value.slug.trim()
-    || !nonempty(value.name) || value.name.length > 120 || value.name !== value.name.trim() || !['demo', 'empty'].includes(value.seed)) throw new RequestError('本机工作区创建记录格式无效，请核对创建历史');
+    || !nonempty(value.name) || value.name.length > 120 || value.name !== value.name.trim() || !['demo', 'empty'].includes(value.seed)) throw new RequestError('本机公司创建记录格式无效，请核对创建历史');
   return value;
 }
-function createNotice(intent: MistPendingCreate) { return `工作区“${intent.name}”的创建结果待核对，请用相同名称和初始方式重试原创建请求`; }
+function createNotice(intent: MistPendingCreate) { return `公司“${intent.name}”的创建结果待核对，请用相同名称和初始方式重试原创建请求`; }
 async function request(path: string, init: RequestInit = {}): Promise<any> {
   const headers = { ...apiService.getAuthHeaders(), ...(init.headers as Record<string, string> | undefined) };
   if (init.body instanceof FormData) delete headers['Content-Type'];
@@ -233,7 +233,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   }, []);
   const assertSource = React.useCallback((bound: Authority, epoch: number, workspaceId?: string) => {
     assertIdentity(bound);
-    if (navigating.current || epoch !== scopeEpoch.current || !workspaceId || snapshot.current?.id !== workspaceId) throw new RequestError('工作区已切换，请在当前工作区重新操作');
+    if (navigating.current || epoch !== scopeEpoch.current || !workspaceId || snapshot.current?.id !== workspaceId) throw new RequestError('公司已切换，请在本公司重新操作');
   }, [assertIdentity]);
   const publishPending = React.useCallback((value: Pending | null) => { pendingRef.current = value; setPending(value); }, []);
   const publishCreate = React.useCallback((value: MistPendingCreate | null) => { pendingCreateRef.current = value; setPendingCreate(value); }, []);
@@ -246,7 +246,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const clearCreate = React.useCallback((bound: Authority) => {
     assertIdentity(bound); publishCreate(null);
     try { localStorage.removeItem('bambook.mist.pending-create:' + bound.userId); }
-    catch { setError('工作区已创建，但本机恢复记录暂未清理；原创建请求可安全重试。'); }
+    catch { setError('公司已创建，但本机恢复记录暂未清理；原创建请求可安全重试。'); }
   }, [assertIdentity, publishCreate]);
   const persist = React.useCallback((value: Pending, bound: Authority) => {
     const userId = assertIdentity(bound);
@@ -274,12 +274,12 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const rememberSelection = React.useCallback((id: string, bound: Authority) => {
     const userId = assertIdentity(bound);
     try { localStorage.setItem('bambook.mist.selected-workspace:' + userId, id); }
-    catch { setError('当前工作区已打开，但选择未能保存在本机；刷新后可能需要重新选择。'); }
+    catch { setError('本公司已打开，但选择未能保存在本机；刷新后可能需要重新选择。'); }
   }, [assertIdentity]);
   const forgetSelection = React.useCallback((bound: Authority) => {
     const userId = assertIdentity(bound);
     try { localStorage.removeItem('bambook.mist.selected-workspace:' + userId); }
-    catch { setError('原工作区已不存在，但本机选择记录暂未清理。'); }
+    catch { setError('原公司已不存在，但本机选择记录暂未清理。'); }
   }, [assertIdentity]);
   const load = React.useCallback(async (bound: Authority, id?: string, navigation = false, fallbackMissingSelection = false) => {
     const userId = assertIdentity(bound), generation = ++readEpoch.current;
@@ -304,7 +304,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
         snapshot.current = null; setCurrent(null);
         if (id) { latest.current.delete(id); setWorkspaces(previous => previous.filter(item => item.id !== id)); }
       }
-      setError(failure instanceof Error ? failure.message : '工作区读取失败');
+      setError(failure instanceof Error ? failure.message : '公司读取失败');
     } }
     finally { if (isCurrent()) { navigating.current = false; setLoading(false); const waiting = pendingCreateRef.current; if (waiting) setError(previous => previous || createNotice(waiting)); } }
   }, [assertIdentity, put, rememberSelection, forgetSelection]);
@@ -326,7 +326,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
         const raw = localStorage.getItem('bambook.mist.selected-workspace:' + authority.userId);
         if (raw && nonempty(raw) && raw === raw.trim() && raw.length <= 120) selected = raw;
         else if (raw) forgetSelection(authority);
-      } catch { recoveryError = '本机工作区选择不可读，请重新选择工作区'; }
+      } catch { recoveryError = '本机公司选择不可读，请重新选择公司'; }
       // An unresolved command must reopen its exact workspace before recovery.
       const lifecycle=restored&&(restored.kind==='archive'||restored.kind==='restore');
       const initialId = lifecycle?selected:restored?.workspaceId ?? selected;
@@ -405,7 +405,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   }, [persist, assertIdentity, put, clearPending, load]);
   const refresh = React.useCallback(async () => {
     assertIdentity(authority);
-    if (boundEpoch !== scopeEpoch.current || navigating.current) throw new RequestError('工作区正在切换，请稍候');
+    if (boundEpoch !== scopeEpoch.current || navigating.current) throw new RequestError('公司正在切换，请稍候');
     await load(authority, boundWorkspaceId ?? wanted.current);
   }, [authority.key, authority.userId, authority.status, boundEpoch, boundWorkspaceId, assertIdentity, load]);
   const readArchived=React.useCallback(async(bound:Authority)=>{
@@ -415,19 +415,19 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   },[assertIdentity]);
   const adoptLifecycle=React.useCallback(async(data:any,intent:Pending,bound:Authority)=>{
     assertIdentity(bound);const acknowledged=receipt(data.receipt,intent);
-    if(acknowledged.result.workspaceId!==intent.workspaceId||acknowledged.result.action!==intent.kind)throw new RequestError('工作区操作回执来源不一致');
+    if(acknowledged.result.workspaceId!==intent.workspaceId||acknowledged.result.action!==intent.kind)throw new RequestError('公司操作回执来源不一致');
     const value=envelope(data.workspace,bound.userId!);scopeEpoch.current++;wanted.current=value.id;put(value,bound);rememberSelection(value.id,bound);clearPending(bound);
     await load(bound,value.id);try{await readArchived(bound);}catch(failure){if(live.current.key===bound.key)setError(failure instanceof Error?failure.message:'回收站读取失败');}return acknowledged;
   },[assertIdentity,put,rememberSelection,clearPending,load,readArchived]);
   const performLifecycle=React.useCallback(async(intent:Pending,bound:Authority)=>{
     const restoring=pendingRef.current?.requestId===intent.requestId;persist(intent,bound);setError('');
     try{const data=await request(BASE+'/'+encodeURIComponent(intent.workspaceId)+'/'+intent.kind,{method:'POST',body:JSON.stringify({requestId:intent.requestId,expectedRevision:intent.expectedRevision})});return await adoptLifecycle(data,intent,bound);}
-    catch(failure){if(mounted.current&&live.current.key===bound.key){const known=!restoring&&failure instanceof RequestError&&failure.status>=400&&failure.status<500&&![408,429].includes(failure.status)&&failure.code!=='REQUEST_CONFLICT';if(known)clearPending(bound);setError((failure instanceof Error?failure.message:'工作区操作失败')+(known?'':'；请核对原请求'));}throw failure;}
+    catch(failure){if(mounted.current&&live.current.key===bound.key){const known=!restoring&&failure instanceof RequestError&&failure.status>=400&&failure.status<500&&![408,429].includes(failure.status)&&failure.code!=='REQUEST_CONFLICT';if(known)clearPending(bound);setError((failure instanceof Error?failure.message:'公司操作失败')+(known?'':'；请核对原请求'));}throw failure;}
   },[persist,adoptLifecycle,clearPending]);
   const refreshArchived=React.useCallback(async()=>{try{await readArchived(authority);}catch(failure){if(live.current.key===authority.key)setError(failure instanceof Error?failure.message:'回收站读取失败');throw failure;}},[authority.key,authority.userId,authority.status,readArchived]);
   const changeMember=React.useCallback(async(action:'add'|'remove',account:string)=>{
     assertSource(authority,boundEpoch,boundWorkspaceId);if(pendingRef.current||pendingCreateRef.current||navigating.current)throw new RequestError('请先核对未完成操作');
-    const row=snapshot.current;if(!row||row.access?.canManageMembers!==true)throw new RequestError('只有工作空间所有者可以授权其他账号');
+    const row=snapshot.current;if(!row||row.access?.canManageMembers!==true)throw new RequestError('只有公司所有者可以授权其他账号');
     if(!['add','remove'].includes(action)||!nonempty(account)||account.trim().length>200)throw new RequestError('请选择授权操作和有效账号');
     const token=lock();
     try{const intent:Pending={workspaceId:row.id,requestId:crypto.randomUUID(),expectedRevision:row.revision,actorId:authority.userId,kind:'member',action,account:account.trim()};
@@ -498,7 +498,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   }, [authority.key, authority.userId, authority.status, boundEpoch, boundWorkspaceId, assertSource, lock, perform, unlock]);
   const fileUrl = React.useCallback((file: MistFile) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);
-    if (!snapshot.current?.state.files.some(item => item.id === file.id)) throw new RequestError('附件不属于当前工作区');
+    if (!snapshot.current?.state.files.some(item => item.id === file.id)) throw new RequestError('附件不属于本公司');
     return BASE + '/' + encodeURIComponent(boundWorkspaceId!) + '/files/' + encodeURIComponent(file.id);
   }, [authority.key, authority.userId, authority.status, boundEpoch, boundWorkspaceId, assertSource]);
   const downloadFile = React.useCallback(async (file: MistFile) => {
@@ -543,7 +543,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       }catch(failure){if(live.current.key===authority.key)setError(failure instanceof Error?failure.message:'原请求仍待核对');throw failure;}finally{unlock(token,authority);}
     }
     assertSource(authority, boundEpoch, boundWorkspaceId);
-    if (intent.workspaceId !== boundWorkspaceId || intent.actorId && intent.actorId !== authority.userId) throw new RequestError('待核对请求属于其他账号或工作区');
+    if (intent.workspaceId !== boundWorkspaceId || intent.actorId && intent.actorId !== authority.userId) throw new RequestError('待核对请求属于其他账号或公司');
     if (intent.kind === 'mail-send') {
       // 已转待人工核对：不再自动核对、不再重放，避免把不相符的回执当成已发或触发重发。
       if (intent.mail!.review) throw new RequestError('这封邮件待人工核对：' + intent.mail!.review + '。系统不会把它算作已发送，也不会自动重发；请在已发送 / 待发送中核对后关闭本记录', 409, MAIL_MANUAL);
@@ -551,7 +551,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       try {
         const claimed = readMailClaims(authority.userId!).find(item => item.workspaceId === intent.workspaceId && item.requestKey === intent.requestId);
         if (claimed) {
-          // 本机已结案（例如结案后、清理待核对记录前刷新或重启）：只读取当前空间核对原回执，不再提交发送。
+          // 本机已结案（例如结案后、清理待核对记录前刷新或重启）：只读取本公司核对原回执，不再提交发送。
           const next = await request(BASE + '/' + encodeURIComponent(intent.workspaceId)); assertSource(authority, boundEpoch, boundWorkspaceId);
           const value = envelope(next.workspace, authority.userId!, intent.workspaceId), row = ((value.state as any).email?.sends || []).find((item: any) => item?.id === claimed.sendId);
           mailSendAcknowledged({ send: { id: claimed.sendId, ...(claimed.alias ? { recoveredFor: intent.requestId } : {}) } }, value, intent, authority.userId!);
@@ -607,14 +607,14 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const switchWorkspace = React.useCallback(async (id: string) => {
     assertIdentity(authority);
     if (mutation.current || pendingRef.current || pendingCreateRef.current) throw new RequestError('请先核对未完成操作');
-    if (!nonempty(id)) throw new RequestError('请选择有效工作区');
+    if (!nonempty(id)) throw new RequestError('请选择有效公司');
     await load(authority, id, true);
   }, [authority.key, authority.userId, authority.status, assertIdentity, load]);
   const createWorkspace = React.useCallback(async (name: string, seed: 'demo' | 'empty' = 'empty') => {
     assertIdentity(authority);
-    if (pendingRef.current || navigating.current || boundEpoch !== scopeEpoch.current) throw new RequestError('请先核对当前操作或在当前工作区重试');
+    if (pendingRef.current || navigating.current || boundEpoch !== scopeEpoch.current) throw new RequestError('请先核对当前操作或在本公司重试');
     const normalizedName = name.trim();
-    if (!normalizedName || normalizedName.length > 120 || !['demo', 'empty'].includes(seed)) throw new RequestError('请输入有效工作区名称和初始方式');
+    if (!normalizedName || normalizedName.length > 120 || !['demo', 'empty'].includes(seed)) throw new RequestError('请输入有效公司名称和初始方式');
     const previous = pendingCreateRef.current;
     if (previous && (previous.name !== normalizedName || previous.seed !== seed)) throw new RequestError(createNotice(previous));
     const intent: MistPendingCreate = previous ?? { actorId: authority.userId!, slug: crypto.randomUUID(), name: normalizedName, seed };
@@ -626,7 +626,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       const value = envelope(data.workspace, authority.userId!);
       const requestId = 'create:' + intent.slug;
       const acknowledgement = await request(BASE + '/' + encodeURIComponent(value.id) + '/receipts/' + encodeURIComponent(requestId)); assertIdentity(authority);
-      if (acknowledgement.receipt?.requestId !== requestId || acknowledgement.receipt.revision !== 0 || acknowledgement.receipt.result?.workspaceId !== value.id) throw new RequestError('创建回执与原请求或工作区不一致');
+      if (acknowledgement.receipt?.requestId !== requestId || acknowledgement.receipt.revision !== 0 || acknowledgement.receipt.result?.workspaceId !== value.id) throw new RequestError('创建回执与原请求或公司不一致');
       scopeEpoch.current++; wanted.current = value.id; put(value, authority); rememberSelection(value.id, authority);
       await load(authority, value.id); assertIdentity(authority); clearCreate(authority);
       setError(currentError => currentError === createNotice(intent) ? '' : currentError);
@@ -634,14 +634,14 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       if (mounted.current && live.current.key === authority.key && live.current.userId === authority.userId && live.current.status === 'authenticated') {
         const known = !previous && (!submitted || !responded && failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && ![408, 429].includes(failure.status) && failure.code !== 'REQUEST_CONFLICT');
         if (known && pendingCreateRef.current?.slug === intent.slug) clearCreate(authority);
-        setError((failure instanceof Error ? failure.message : '创建工作区失败') + (known ? '' : '；' + createNotice(intent)));
+        setError((failure instanceof Error ? failure.message : '创建公司失败') + (known ? '' : '；' + createNotice(intent)));
       }
       throw failure;
     } finally { unlock(token, authority); }
   }, [authority.key, authority.userId, authority.status, boundEpoch, assertIdentity, lock, load, put, rememberSelection, persistCreate, clearCreate, unlock]);
   const changeArchive=React.useCallback(async(kind:'archive'|'restore',id?:string)=>{
     assertIdentity(authority);if(pendingRef.current||pendingCreateRef.current||navigating.current)throw new RequestError('请先核对未完成操作');
-    if(kind==='archive')assertSource(authority,boundEpoch,boundWorkspaceId);const row=kind==='archive'?snapshot.current:archivedWorkspaces.find(row=>row.id===id);if(!row)throw new RequestError('工作区不存在，请刷新回收站');
+    if(kind==='archive')assertSource(authority,boundEpoch,boundWorkspaceId);const row=kind==='archive'?snapshot.current:archivedWorkspaces.find(row=>row.id===id);if(!row)throw new RequestError('公司不存在，请刷新回收站');
     const token=lock();try{await performLifecycle({workspaceId:row.id,expectedRevision:row.revision,requestId:crypto.randomUUID(),actorId:authority.userId,kind},authority);}finally{unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,archivedWorkspaces,assertIdentity,assertSource,lock,performLifecycle,unlock]);
   return <Context.Provider value={{ state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, run, uploadFile, downloadFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}>{children}</Context.Provider>;

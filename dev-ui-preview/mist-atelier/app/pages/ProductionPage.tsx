@@ -1,5 +1,5 @@
 import {businessNow} from '../runtime/businessClock';
-/** T8 生产看板：沿用原 Mist 卡片和布局，拖动保存到共享工作空间。 */
+/** T8 生产看板：沿用原 Mist 卡片和布局，拖动保存到公司共享数据。 */
 import React from 'react';
 import { AlertTriangle, CalendarRange, Factory } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Drawer, Dropdown, EmptyState, Field, FormGrid, Kanban, KeyValue, Meter, MistPage, Mono, ObjectCell, PageHeader, Pill, SearchField, Segmented, SummaryBar, TextArea, TextInput, Thumb, Toolbar, useToast } from '../../../../components/mist';

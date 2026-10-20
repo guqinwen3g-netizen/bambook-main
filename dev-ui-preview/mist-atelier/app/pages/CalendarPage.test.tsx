@@ -51,7 +51,7 @@ describe('Mist calendar',()=>{
     await mount();await click('下一周');expect(host.textContent).toContain('当天暂无日程');expect(host.textContent).not.toContain('已保存的评审');await click('今天');expect(host.textContent).toContain('已保存的评审');
   });
   it('offers a real reload after a read error',async()=>{
-    bridge.current.state=null;bridge.current.error='当前工作空间读取失败';await mount();expect(host.textContent).toContain('当前工作空间读取失败');await click('重试读取');expect(bridge.current.refresh).toHaveBeenCalledTimes(1);
+    bridge.current.state=null;bridge.current.error='本公司读取失败';await mount();expect(host.textContent).toContain('本公司读取失败');await click('重试读取');expect(bridge.current.refresh).toHaveBeenCalledTimes(1);
   });
   it('shows Mist loading skeletons without presenting example events',async()=>{
     bridge.current.state=null;bridge.current.loading=true;await mount();expect(host.querySelectorAll('.mist-skel').length).toBeGreaterThan(0);expect(host.textContent).not.toContain('已保存的评审');

@@ -8,7 +8,7 @@ import type { BusinessWorkspaceScope, BusinessWorkspaceContext, BusinessWorkspac
 
 const ACTION = 'continue_business_workspace', SOURCE = 'route:business-workspace:continue';
 const record = (value: unknown): Record<string, unknown> => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw businessError('INVALID_INPUT', '请提交准确业务工作区。');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw businessError('INVALID_INPUT', '请提交准确业务公司。');
   return value as Record<string, unknown>;
 };
 const text = (value: unknown, label: string) => {
@@ -26,7 +26,7 @@ export function parseWorkspaceScope(value: unknown): BusinessWorkspaceScope {
   const fields: Record<string, string[]> = { development_case: ['caseId'], development_version: ['caseId', 'sampleVersionId'],
     order_main: ['orderId'], order_line: ['orderId', 'orderLineId'], production_branch: ['orderId', 'orderLineId', 'productionBatchId', 'productionBatchRevision'] };
   if (typeof kind !== 'string' || !fields[kind] || Object.keys(input).sort().join(',') !== ['kind', ...fields[kind]].sort().join(','))
-    throw businessError('INVALID_INPUT', '工作区必须绑定准确开发案、版本、订单行或生产分支。');
+    throw businessError('INVALID_INPUT', '公司必须绑定准确开发案、版本、订单行或生产分支。');
   for (const field of fields[kind]) {
     if (field === 'productionBatchRevision') {
       if (!Number.isSafeInteger(input[field]) || Number(input[field]) < 1) throw businessError('INVALID_INPUT', '生产分支修订号无效。');
@@ -38,7 +38,7 @@ export function parseWorkspaceContinueCommand(value: unknown): BusinessWorkspace
   const input = record(value);
   if (Object.keys(input).sort().join(',') !== 'expectedContextFingerprint,requestKey,scope,targetNodeId'
     || typeof input.expectedContextFingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(input.expectedContextFingerprint))
-    throw businessError('INVALID_INPUT', '请读取当前准确工作区后明确继续。');
+    throw businessError('INVALID_INPUT', '请读取当前准确公司后明确继续。');
   return { scope: parseWorkspaceScope(input.scope), targetNodeId: text(input.targetNodeId, '目标步骤'),
     expectedContextFingerprint: input.expectedContextFingerprint, requestKey: text(input.requestKey, '原请求键') };
 }
@@ -107,7 +107,7 @@ export async function continueBusinessWorkspace(params: { prisma: any; prior: To
     const before = await params.adapter.context(tx, command.scope, actor);
     const node = before.nodes.find(node => node.id === command.targetNodeId);
     if (before.contextFingerprint !== command.expectedContextFingerprint || !node?.canContinue)
-      throw businessError('CONFLICT', '当前来源或步骤条件已变化，请核对当前准确工作区。');
+      throw businessError('CONFLICT', '当前来源或步骤条件已变化，请核对当前准确公司。');
     const commandAck: BusinessWorkspaceCommandAck = { schemaVersion: 1, requestKey: command.requestKey, scope: command.scope, targetNodeId: command.targetNodeId,
       auditId, contextFingerprint: before.contextFingerprint, scopeFingerprint: before.scopeFingerprint, actorId: actor.userId, commandFingerprint };
     await tx.auditLog.create({ data: { id: auditId, actorId: actor.userId, action: ACTION, targetType: 'BusinessWorkspace', targetId: workspaceTargetId(command.scope),

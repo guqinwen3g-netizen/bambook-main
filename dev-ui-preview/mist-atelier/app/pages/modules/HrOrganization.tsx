@@ -141,7 +141,7 @@ export function HrOrganizationPage() {
 
   const tab = route.section === 'people' ? 'people' : route.section === 'positions' ? 'positions' : 'org';
   const header = <PageHeader title="人事管理" description="公司组织架构、岗位、人员名册、员工档案与在职变动。账号与角色在“管理后台”办理；考勤、请假、薪资等不在本模块。" actions={!session.localMode && canRead ? <Button icon={RefreshCw} loading={loading} onClick={() => void load()}>重新读取</Button> : undefined} />;
-  if (session.localMode) return <MistPage>{header}<Banner tone="neutral" title="本地工作区没有公司组织架构">部门、小组与员工档案保存在公司服务器账号体系中；连接公司服务器登录后在此维护。</Banner></MistPage>;
+  if (session.localMode) return <MistPage>{header}<Banner tone="neutral" title="本机演示模式没有组织架构">部门、小组与员工档案保存在公司服务器账号体系中；连接公司服务器登录后在此维护。</Banner></MistPage>;
   if (!canRead) return <MistPage>{header}<Banner tone="neutral" title="当前账号没有人事查看权限">如需查看组织架构或员工档案，请联系老板或管理员分配人事相关角色。</Banner></MistPage>;
 
   const deptColumns: Column<OrgDepartment>[] = [

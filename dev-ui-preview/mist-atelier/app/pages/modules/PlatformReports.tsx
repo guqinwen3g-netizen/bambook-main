@@ -121,7 +121,7 @@ const PROGRESS_STATUS = { overdue: { label: '已逾期', tone: 'bad' }, soon: { 
 type ReportTab = 'sales' | 'margin' | 'actual' | 'aging' | 'orders';
 export function PlatformReportsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), state = workspace.state;
-  // 毛利涉及采购成本，只给报表管理者（业务主管、财务、老板）看；本地工作区为单人使用。
+  // 毛利涉及采购成本，只给报表管理者（业务主管、财务、老板）看；本机演示公司为单人使用。
   const canSeeMargin = !!session.localMode || session.hasPermission('reports:admin');
   const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || ((route.section === 'margin' || route.section === 'actual') && canSeeMargin) ? route.section : 'sales';
   const asOf = platformBusinessDate(businessNow());
@@ -200,7 +200,7 @@ export function PlatformReportsPage() {
   };
 
   return <MistPage>
-    <PageHeader title="报表中心" description="基于当前工作空间的订单、采购与发票实时统计；销售额与账龄按币种分别统计；订单毛利可按所选汇率口径折算人民币，暂估另行标识。" actions={<Button icon={Download} disabled={!state || tab === 'actual' || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>导出当前报表</Button>} />
+    <PageHeader title="报表中心" description="基于本公司的订单、采购与发票实时统计；销售额与账龄按币种分别统计；订单毛利可按所选汇率口径折算人民币，暂估另行标识。" actions={<Button icon={Download} disabled={!state || tab === 'actual' || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>导出当前报表</Button>} />
     {workspace.error && <Banner tone="bad" title="读取失败">{workspace.error}</Banner>}
     <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
     <section className="mist-section">{tab === 'sales' ? <>

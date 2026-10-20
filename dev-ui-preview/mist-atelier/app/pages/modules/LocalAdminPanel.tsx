@@ -30,7 +30,7 @@ function readDraft(settings?: LocalSettings): DraftValues {
 }
 
 export function validateLocalCompanyDraft(values: DraftValues): string {
-  if (!values.workspaceName.trim() || values.workspaceName.trim().length > 120) return '工作空间名称须为1至120字';
+  if (!values.workspaceName.trim() || values.workspaceName.trim().length > 120) return '公司名称须为1至120字';
   if (!values.profileName.trim() || values.profileName.trim().length > 120) return '显示姓名须为1至120字';
   const profileKeys = Object.keys(EMPTY_COMPANY) as Array<keyof LocalCompanyProfile>;
   if (profileKeys.some(key => values[key].trim()) && !values.legalName.trim() && !values.englishName.trim()) return '请填写中文或英文公司抬头';
@@ -99,7 +99,7 @@ export function LocalAdminPanel() {
       await workspace.run({ type: 'settings.update', payload });
       if (!mounted.current || currentScope.current !== boundScope) return;
       dirty.current.clear(); setDraft({ scope: boundScope, values: normalized });
-      toast('本地公司与空间资料已保存');
+      toast('本地公司资料已保存');
     } catch (failure) {
       if (mounted.current && currentScope.current === boundScope) setError(failure instanceof Error ? failure.message : '本地资料保存失败');
     } finally {
@@ -112,18 +112,18 @@ export function LocalAdminPanel() {
     catch(failure){if(mounted.current&&currentScope.current===boundScope)setError(failure instanceof Error?failure.message:'原请求核对失败');}
   };
 
-  if (!localMode) return <MistPage><PageHeader title="管理后台" /><Card><EmptyState title="此资料页仅用于本地工作空间" description="当前会话使用服务器账号，请打开对应的服务器管理设置。" /></Card></MistPage>;
+  if (!localMode) return <MistPage><PageHeader title="管理后台" /><Card><EmptyState title="此资料页仅用于本机演示公司" description="当前会话使用服务器账号，请打开对应的服务器管理设置。" /></Card></MistPage>;
 
   const fields = section === 'company' ? COMPANY_FIELDS : EXPORT_FIELDS;
   return <MistPage>
-    <PageHeader eyebrow="平台 · 本地工作空间" title="管理后台" description="维护当前本地空间的公司抬头、出口方和收款资料。" actions={<Pill tone="neutral">本地开发模式</Pill>} />
+    <PageHeader eyebrow="平台 · 本机演示公司" title="管理后台" description="维护本机演示的公司抬头、出口方和收款资料。" actions={<Pill tone="neutral">本地开发模式</Pill>} />
     {(error || workspace.error) && <Banner tone="bad" title="资料尚未保存" actions={workspace.error ? <Button icon={RefreshCw} disabled={busy} onClick={() => void workspace.refresh()}>重新读取</Button> : undefined}>{error || workspace.error}</Banner>}
     {workspace.pending && <Banner tone="warn" title="上一次保存结果待核对" actions={<Button disabled={busy || workspace.saving} onClick={() => void recover()}>核对原请求</Button>}>输入已保留，核对完成后再继续保存。</Banner>}
     <div className="mist-wizard">
       <VerticalSteps mode="page" current={section} onSelect={setSection} steps={[
         { id: 'company', label: '公司抬头', icon: Building2 },
         { id: 'export', label: '出口与收款', icon: Landmark },
-        { id: 'workspace', label: '当前空间', icon: FolderOpen },
+        { id: 'workspace', label: '本公司', icon: FolderOpen },
         { id: 'local', label: '本地使用', icon: Laptop },
         ...(session.hasRole?.('owner') ? [{ id: 'ai', label: '平台 AI 模型', icon: Sparkles }] : []),
       ]} />
@@ -134,26 +134,26 @@ export function LocalAdminPanel() {
               <TextInput aria-label={field.label} type={field.type ?? 'text'} value={values[field.key]} disabled={blocked} onChange={event => edit(field.key, event.target.value)} />
             </Field>)}</FormGrid>
           </FormSection>}
-          {section === 'workspace' && <FormSection title="当前工作空间" description="这些显示资料只属于当前空间，不会修改登录账号或其他空间。">
+          {section === 'workspace' && <FormSection title="本公司" description="这些显示资料只属于本公司，不会修改登录账号或其他公司。">
             <FormGrid>
-              <Field label="工作空间名称" required><TextInput aria-label="工作空间名称" value={values.workspaceName} disabled={blocked} onChange={event => edit('workspaceName', event.target.value)} /></Field>
+              <Field label="公司名称" required><TextInput aria-label="公司名称" value={values.workspaceName} disabled={blocked} onChange={event => edit('workspaceName', event.target.value)} /></Field>
               <Field label="显示姓名" required><TextInput aria-label="显示姓名" value={values.profileName} disabled={blocked} onChange={event => edit('profileName', event.target.value)} /></Field>
               <Field label="显示邮箱"><TextInput aria-label="显示邮箱" type="email" value={values.profileEmail} disabled={blocked} onChange={event => edit('profileEmail', event.target.value)} /></Field>
               <Field label="当前设备时区"><TextInput value={Intl.DateTimeFormat().resolvedOptions().timeZone} readOnly /></Field>
             </FormGrid>
           </FormSection>}
           {section === 'local' && <FormSection title="本地开发模式" description="用于在当前设备上录入与验证完整业务。">
-            <Banner tone="neutral" title="资料保存在当前设备">本地身份与公司资料独立于原服务器账号。业务记录保存到当前本地工作空间，切换设备不会自动带走这些资料。</Banner>
+            <Banner tone="neutral" title="资料保存在当前设备">本地身份与公司资料独立于原服务器账号。业务记录保存到本机演示公司，切换设备不会自动带走这些资料。</Banner>
             <KeyValue items={[
               { label: '当前身份', value: session.user?.displayName || '本地用户' },
-              { label: '当前空间', value: workspace.workspace?.name || values.workspaceName },
+              { label: '本公司', value: workspace.workspace?.name || values.workspaceName },
               { label: '公司抬头', value: values.legalName || values.englishName || '尚未填写' },
               { label: '外部办理', value: '报关、银行付款等外部事实仍按实际凭证登记。' },
             ]} />
           </FormSection>}
         </>}
         {section === 'ai' && <AiSubscriptionPanel mode="platform" bare sessionKey={session.sessionKey} />}
-        {section !== 'ai' && <div className="mist-sticky-foot"><span className="mist-note">{busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于当前本地工作空间'}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>保存资料</Button></div>}
+        {section !== 'ai' && <div className="mist-sticky-foot"><span className="mist-note">{busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司'}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>保存资料</Button></div>}
       </Card>
     </div>
   </MistPage>;

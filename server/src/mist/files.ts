@@ -32,7 +32,7 @@ export class MistPrivateFiles {
     return { root, file, directory: path.dirname(file) };
   }
   async write(workspaceId: string, input: MistFileInput, now: string): Promise<MistStoredFile> { return this.writeWithId(workspaceId, randomUUID(), input, now); }
-  /** 以既定附件 ID 写入（演示工作区创建时使用）；ID 必须是 UUID 且尚不存在。 */
+  /** 以既定附件 ID 写入（演示公司创建时使用）；ID 必须是 UUID 且尚不存在。 */
   async writeWithId(workspaceId: string, id: string, input: MistFileInput, now: string): Promise<MistStoredFile> {
     const meta = validateFileInput(input), target = this.checked(workspaceId, id);
     await fs.mkdir(target.directory, { recursive: true, mode: 0o700 });
@@ -64,7 +64,7 @@ export class MistPrivateFiles {
     catch(error:any){if(error?.code!=='EEXIST')throw error;}
   }
   async read(workspaceId: string, file: MistStoredFile): Promise<Buffer> {
-    if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于当前工作区', 404);
+    if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于本公司', 404);
     const target = this.checked(workspaceId, file.id);
     let handle;
     try {
@@ -80,7 +80,7 @@ export class MistPrivateFiles {
     } finally { await handle!.close(); }
   }
   async readPreview(workspaceId: string, file: MistStoredFile, mode: ImagePreviewMode): Promise<Buffer> {
-    if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于当前工作区', 404);
+    if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于本公司', 404);
     const target = this.checked(workspaceId, file.id), derivative = this.previewPath(target.file, mode);
     try {
       const handle = await fs.open(derivative, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -102,7 +102,7 @@ export class MistPrivateFiles {
     for(const [mode,base] of [['cutout-thumb','thumb'],['cutout-display','display']] as const){const preview=await imagePreview(cutout,'image/png',base);await this.writePreviewBytes(target,mode,preview);}
   }
   async remove(workspaceId: string, file: MistStoredFile) {
-    if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于当前工作区', 404);
+    if (file.storageKey !== `${workspaceId}/${file.id}`) fail('INVALID_FILE_PATH', '附件不属于本公司', 404);
     const target = this.checked(workspaceId, file.id).file;
     await Promise.all([target,...(['thumb','display','cutout-thumb','cutout-display'] as const).map(mode=>this.previewPath(target,mode))].map(filePath => fs.unlink(filePath).catch(error => { if (error.code !== 'ENOENT') throw error; })));
     if(this.cutoutQueue)await fs.unlink(path.join(this.cutoutQueue,`${workspaceId}.${file.id}.json`)).catch(error=>{if(error.code!=='ENOENT')throw error;});

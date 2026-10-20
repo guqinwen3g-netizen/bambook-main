@@ -124,7 +124,7 @@ export function AdminAccounts() {
         <KeyValue items={[{ label: '状态', value: ACCOUNT_STATUS[current.status]?.label ?? current.status }, { label: '任职部门', value: current.department ?? '未分配' }, { label: '角色', value: current.roleIds.map(roleName).join('、') || '无角色' }, { label: '账号编号', value: current.id, mono: true }, { label: '创建时间', value: when(current.createdAt) }, { label: '最近登录', value: when(current.lastLoginAt) }]} />
         {envelope && current.status === 'active' && <div className="mist-section">{envelope.ownerId === current.id ? <Banner tone="neutral" title={`「${envelope.name}」的所有者`} /> : memberIds.has(current.id)
           ? <Banner tone="ok" title={`已授权进入「${envelope.name}」`}>能办理哪些业务仍按其角色与任职部门决定。</Banner>
-          : <Banner tone="warn" title={`尚未授权进入「${envelope.name}」`} actions={canGrant ? <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); if (await grant(current.id, current.displayName)) toast('已授权进入当前工作空间'); setBusy(false); }}>授权进入</Button> : undefined}>{canGrant ? '授权只让对方进入这个空间，不增加任何业务权限。' : '请空间所有者在“工作空间设置 · 授权访问”中授权。'}</Banner>}</div>}
+          : <Banner tone="warn" title={`尚未授权进入「${envelope.name}」`} actions={canGrant ? <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); if (await grant(current.id, current.displayName)) toast('已授权进入本公司'); setBusy(false); }}>授权进入</Button> : undefined}>{canGrant ? '授权只让对方进入这家公司，不增加任何业务权限。' : '请公司所有者在“公司设置 · 授权访问”中授权。'}</Banner>}</div>}
         <p className="mist-note">小组归属在“人事管理”维护；停用账号保留历史单据和审计，不删除数据。</p>
       </>}
     </Drawer>
@@ -138,7 +138,7 @@ export function AdminAccounts() {
           {form.mode === 'create' && <Field label="初始密码" required hint="至少 8 位；对方登录后可在“设置 · 安全”中修改。"><TextInput type="password" autoComplete="new-password" value={form.password} disabled={busy} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
           <Field label="任职部门" required hint="决定业务属性；小组须在同一部门。"><Select aria-label="任职部门" value={form.departmentId} disabled={busy} placeholder="选择部门" onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departments} /></Field>
           <Field label="角色" required full hint="角色决定能做哪些动作；与部门业务属性同时满足才可办理。"><RolePicker roles={data.roles} value={form.roles} owner={owner} disabled={busy} onChange={roles => setForm({ ...form, roles })} /></Field>
-          {form.mode !== 'edit' && envelope && <Field label="工作空间" full>{canGrant ? <Checkbox checked={form.grant} disabled={busy} onChange={grant => setForm({ ...form, grant })} label={`同时授权进入「${envelope.name}」`} /> : <span className="mist-note">你不是「{envelope.name}」的所有者；账号生效后请所有者授权。</span>}</Field>}
+          {form.mode !== 'edit' && envelope && <Field label="公司" full>{canGrant ? <Checkbox checked={form.grant} disabled={busy} onChange={grant => setForm({ ...form, grant })} label={`同时授权进入「${envelope.name}」`} /> : <span className="mist-note">你不是「{envelope.name}」的所有者；账号生效后请所有者授权。</span>}</Field>}
         </FormGrid>
       </>}
     </Drawer>

@@ -1,5 +1,5 @@
 import {businessNow} from '../runtime/businessClock';
-/** T6 收款核销：保留原 Mist 双栏，对账结果由共享工作空间保存。 */
+/** T6 收款核销：保留原 Mist 双栏，对账结果由公司共享数据保存。 */
 import { AccessHiddenNotice } from './AccessHiddenNotice';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import React from 'react';
@@ -159,7 +159,7 @@ export function FinancePage() {
     <input ref={fileInput} hidden type="file" accept=".csv,text/csv" aria-label="银行流水文件" disabled={!canVoucher||busy} onChange={async event => { const input=event.target,file=input.files?.[0];if(!file||busy||!canVoucher)return;const bound=scope,sequence=++fileSequence.current;setWorking(true);setFailure('');try{const rows=parseMistReceiptCsv(await fileText(file));if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent()){setImportRows(rows);setFileName(file.name);}}catch(problem){if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent())setFailure(problem instanceof Error?problem.message:'文件读取失败');}finally{input.value='';if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence)setWorking(false);} }} />
     {(failure || error) && <Banner tone="bad" title="操作尚未完成" actions={error ? <Button onClick={() => void refresh()}>重试</Button> : undefined}>{failure || error}</Banner>}
     {sourceOrder&&deposit&&<Banner title={'来源订单 '+sourceOrder.code} actions={<Button onClick={()=>go('orders/detail',sourceOrder.id)}>返回来源订单</Button>}>{deposit.required===null?'合同付款方式或定金比例尚未明确，不能判定定金已满足。':deposit.status==='not_required'?'当前合同付款方式不适用T/T定金门槛。':`合同定金要求 ${fmt(deposit.required,2)} ${sourceOrder.currency} · 已核实归属 ${fmt(deposit.received,2)} ${sourceOrder.currency}`}</Banner>}
-    {unknownTarget&&<Banner tone="warn" title="未找到目标票据或流水" actions={<Button onClick={()=>go('payment-vouchers')}>返回财务台账</Button>}>请从当前工作空间重新选择，未自动切换到其他流水。</Banner>}
+    {unknownTarget&&<Banner tone="warn" title="未找到目标票据或流水" actions={<Button onClick={()=>go('payment-vouchers')}>返回财务台账</Button>}>请从本公司重新选择，未自动切换到其他流水。</Banner>}
     {pending&&!saving&&<Banner tone="warn" title="上一次操作结果待核对" actions={<Button disabled={working||saving} onClick={()=>void resolvePending()}>核对原操作结果</Button>}>核对原请求后再继续操作。</Banner>}
     {hasInvoiceFilter&&tab==='inv'&&<Banner title={overdueScope?'当前仅显示对应范围的逾期未结发票':'当前仅显示对应范围的未结发票'} actions={<Button onClick={()=>go('payment-vouchers')}>查看全部发票</Button>}/>}
     {area==='receivables'?<>
