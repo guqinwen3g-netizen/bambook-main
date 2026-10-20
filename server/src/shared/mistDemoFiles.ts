@@ -1,5 +1,5 @@
 /**
- * 版本化种子工作区的附件模板。附件内容由当前工作区数据实时生成为可下载的 PDF（英文，单页）。
+ * 版本化种子公司的附件模板。附件内容由本公司数据实时生成为可下载的 PDF（英文，单页）。
  * 只有 storageKey 以 DEMO_FILE_PREFIX 开头的记录会被服务端写入存储；前缀仅是内部兼容键，不进入正文。
  */
 import type { MistFile, MistState } from './mistWorkspace';
@@ -13,7 +13,7 @@ export function demoFileRecord(id: string, template: DemoFileTemplate, ref: stri
 
 export function isDemoFile(file: MistFile) { return file.storageKey.startsWith(DEMO_FILE_PREFIX); }
 
-/** 按模板从工作区数据生成 PDF 字节。找不到引用对象时仍生成说明页，不抛错。 */
+/** 按模板从公司数据生成 PDF 字节。找不到引用对象时仍生成说明页，不抛错。 */
 export function renderDemoFile(state: MistState, file: MistFile): Uint8Array {
   const [template, rawRef] = file.storageKey.slice(DEMO_FILE_PREFIX.length).split('/') as [DemoFileTemplate, string];
   const ref = decodeURIComponent(rawRef || '');

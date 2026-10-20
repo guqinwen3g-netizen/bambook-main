@@ -78,7 +78,7 @@ export function createProcurementRouter(options: ProcurementRouterOptions): Rout
     const legacyWrite = req.method !== 'GET' && req.method !== 'HEAD' && (req.path === '/'
       || /^\/[^/]+$/.test(req.path) && !['/demands', '/inquiries', '/material-returns'].includes(req.path)
       || /^\/[^/]+\/(send|confirm|cancel|close|receipts|generate-document|service-deliveries)$/.test(req.path) && !req.path.startsWith('/inquiries/'));
-    if (legacyWrite) { res.status(409).json({ ok: false, code: 'NATIVE_SUPPLIER_COMMAND_REQUIRED', error: '采购与加工须使用独立合同工作区的准确版本审批和实际交接命令；历史单据保留只读。' }); return; }
+    if (legacyWrite) { res.status(409).json({ ok: false, code: 'NATIVE_SUPPLIER_COMMAND_REQUIRED', error: '采购与加工须使用独立合同公司的准确版本审批和实际交接命令；历史单据保留只读。' }); return; }
     next();
   });
 

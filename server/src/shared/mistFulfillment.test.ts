@@ -88,7 +88,7 @@ it('retains issued CI face value and explicit void history through later workspa
  const original=structuredClone(f.root.invoices.find(invoice=>invoice.id===invoiceId)!);
  f.run({type:'fulfillment.documents.void',payload:{id:documentId,reason:'更正原件并保留旧票历史'}});
  expect(f.root.invoices.find(invoice=>invoice.id===invoiceId)).toMatchObject({id:original.id,code:original.code,amount:original.amount,open:0,currency:original.currency,voidedAt:f.ctx.now,voidReason:'更正原件并保留旧票历史',voidedBy:f.ctx.actorName,voidedById:f.ctx.actorId,voidSourceDocumentId:documentId});
- const recalculated=applyMistCommand(f.root,{type:'files.add',payload:{file:{id:'void-recalc-proof',name:'触发正常工作空间重算.txt',mimeType:'text/plain',size:1,storageKey:'test/void-recalc-proof',createdAt:f.ctx.now}}},f.ctx).state;
+ const recalculated=applyMistCommand(f.root,{type:'files.add',payload:{file:{id:'void-recalc-proof',name:'触发正常公司重算.txt',mimeType:'text/plain',size:1,storageKey:'test/void-recalc-proof',createdAt:f.ctx.now}}},f.ctx).state;
  expect(recalculated.invoices.find(invoice=>invoice.id===invoiceId)).toMatchObject({amount:original.amount,open:0});
  expect(recalculated.fulfillment.documents.find(record=>record.id===documentId)).toMatchObject({status:'void',fileIds:['official-file']});
 });

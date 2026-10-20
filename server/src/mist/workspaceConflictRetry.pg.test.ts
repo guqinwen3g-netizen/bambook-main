@@ -10,7 +10,7 @@ import { testActor, testAuthority, testContract } from './__tests__/support';
 /**
  * 真实 PostgreSQL 并发回归：只在显式提供独立测试库时运行，避免误连共享或生产库。
  *   MIST_PG_CONFLICT_TEST_URL=postgresql://... npx vitest run src/mist/workspaceConflictRetry.pg.test.ts
- * 库结构需与 prisma/schema.prisma 一致；用例只清理自己创建的工作区与回执。
+ * 库结构需与 prisma/schema.prisma 一致；用例只清理自己创建的公司与回执。
  */
 const url = process.env.MIST_PG_CONFLICT_TEST_URL;
 describe.skipIf(!url)('真实 PostgreSQL：多人同时保存自动重试', () => {

@@ -67,7 +67,7 @@ export type CreateCompanyInput = {
 
 /**
  * 创建一家公司并完成最小初始化：公司记录、系统角色、默认部门、老板成员关系。
- * 不创建工作空间——老板首次登录时按现有逻辑自动建立空白公司空间。
+ * 不创建公司——老板首次登录时按现有逻辑自动建立空白公司。
  */
 export async function createCompany(tx: Prisma.TransactionClient, input: CreateCompanyInput) {
   if (input.ownerUserId && (await tx.userAccount.findUnique({ where: { id: input.ownerUserId }, select: { platformRole: true } }))?.platformRole) throw new Error('平台人员账号不能成为公司负责人。');

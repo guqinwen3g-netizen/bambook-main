@@ -10,7 +10,7 @@ export const supplierFail = (code: string, message: string, status = 400): never
 /** Historic reads remain available; generic agent/production approval cannot
  * substitute for an exact native supplier commitment or professional QC. */
 export function legacySupplierMutation<Args extends unknown[], Result>(_historical: (...args: Args) => Promise<Result>): (...args: Args) => Promise<Result> {
-  return async (..._args) => supplierFail('NATIVE_SUPPLIER_COMMAND_REQUIRED', '采购与加工须使用独立合同工作区的准确版本审批和实际交接命令；历史单据保留只读。', 409);
+  return async (..._args) => supplierFail('NATIVE_SUPPLIER_COMMAND_REQUIRED', '采购与加工须使用独立合同公司的准确版本审批和实际交接命令；历史单据保留只读。', 409);
 }
 export type SupplierLocation = { kind: 'supplier' | 'warehouse' | 'external'; relationId?: string; warehouseId?: string; name?: string; address: string };
 export type SupplierContractLine = {

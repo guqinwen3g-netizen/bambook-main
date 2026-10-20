@@ -219,7 +219,7 @@ export async function listSamples(prisma: PrismaClient, query: {
   offset?: unknown;
 }): Promise<Result<{ samples: any[]; total: number; scope?: 'fabric' | 'garment' | 'review'; sourceCaseId?: string }>> {
   const scope = query.scope;
-  if (scope !== undefined && !['fabric','garment','review'].includes(scope as string)) return fail('INVALID_INPUT', '样品工作区须为 fabric、garment 或 review。', 400);
+  if (scope !== undefined && !['fabric','garment','review'].includes(scope as string)) return fail('INVALID_INPUT', '样品公司须为 fabric、garment 或 review。', 400);
   const sourceCaseId = query.sourceCaseId;
   if (sourceCaseId !== undefined && (typeof sourceCaseId !== 'string' || !sourceCaseId.trim() || sourceCaseId.trim() !== sourceCaseId)) {
     return fail('INVALID_INPUT', 'sourceCaseId 须为非空的开发案 ID。', 400);

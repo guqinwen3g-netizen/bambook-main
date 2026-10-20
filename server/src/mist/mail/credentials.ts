@@ -2,7 +2,7 @@ import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
 
-/** 邮箱登录凭据：只写入服务端私有目录（目录 0700、文件 0600），不进入工作空间状态、接口响应、仓库或日志。 */
+/** 邮箱登录凭据：只写入服务端私有目录（目录 0700、文件 0600），不进入公司状态、接口响应、仓库或日志。 */
 export type MistMailSecret = { username: string; password: string };
 const ID = /^[A-Za-z0-9-]{1,120}$/;
 

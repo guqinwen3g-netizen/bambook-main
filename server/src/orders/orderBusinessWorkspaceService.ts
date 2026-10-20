@@ -18,10 +18,10 @@ const reason = (code: string, message: string) => ({ code, message });
 type OrderWorkspaceScope = Extract<BusinessWorkspaceScope, { kind: 'order_main' | 'order_line' | 'production_branch' }>;
 function assertScope(scope: BusinessWorkspaceScope, orderId: string): asserts scope is OrderWorkspaceScope {
   if (!['order_main', 'order_line', 'production_branch'].includes(scope.kind) || !('orderId' in scope) || scope.orderId !== orderId)
-    throw businessError('INVALID_INPUT', '工作区不属于当前准确订单。');
+    throw businessError('INVALID_INPUT', '公司不属于当前准确订单。');
 }
 async function currentReadActor(db: any, prior: TokenPayload | null | undefined) {
-  if (!prior?.userId) throw businessError('UNAUTHORIZED', '请登录后读取准确订单工作区。');
+  if (!prior?.userId) throw businessError('UNAUTHORIZED', '请登录后读取准确订单公司。');
   const user = await loadUserWithRoles(db, prior.userId);
   if (!user || user.status !== 'active' || user.deletedAt != null) throw businessError('ACCOUNT_DISABLED', '当前账号不可用。');
   const actor = await buildLoadedAuthTokenPayload(db, user);

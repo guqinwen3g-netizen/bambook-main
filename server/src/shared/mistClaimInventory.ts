@@ -18,10 +18,10 @@ const units=(value:number)=>Math.round(value*10000);
 const total=(values:number[])=>values.reduce((sum,value)=>sum+units(value),0)/10000;
 const same=(a:unknown,b:unknown)=>JSON.stringify(a&&typeof a==='object'?Object.entries(a).sort(([x],[y])=>x.localeCompare(y)):a)===JSON.stringify(b&&typeof b==='object'?Object.entries(b).sort(([x],[y])=>x.localeCompare(y)):b);
 function day(value:unknown,label:string){const result=text(value,label,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(result)||!Number.isFinite(Date.parse(result+'T00:00:00Z'))||new Date(result+'T00:00:00Z').toISOString().slice(0,10)!==result)fail(label+'须为有效日期');return result;}
-function files(root:MistState,ids:unknown){if(!Array.isArray(ids)||ids.length>100)fail('凭据附件格式无效');return [...new Set((ids as unknown[]).map(id=>{const value=text(id,'附件编号',200);if(!root.files.some(file=>file.id===value))fail('凭据附件不属于当前工作区');return value;}))];}
+function files(root:MistState,ids:unknown){if(!Array.isArray(ids)||ids.length>100)fail('凭据附件格式无效');return [...new Set((ids as unknown[]).map(id=>{const value=text(id,'附件编号',200);if(!root.files.some(file=>file.id===value))fail('凭据附件不属于本公司');return value;}))];}
 function actor(context:MistContext){return {actorId:text(context.actorId,'实际登录账号',200),actor:text(context.actorName,'实际经手业务员',200)};}
 function data(root:MistState){const f=root.fulfillment;f.warehouses||=[];f.returnReceipts||=[];f.receivedRecords||=[];return f;}
-function warehouse(root:MistState,id:string){const row=data(root).warehouses.find(item=>item.id===id);if(!row||!row.active)fail('请选择当前工作区真实启用的仓库','PRECONDITION');return row!;}
+function warehouse(root:MistState,id:string){const row=data(root).warehouses.find(item=>item.id===id);if(!row||!row.active)fail('请选择本公司真实启用的仓库','PRECONDITION');return row!;}
 function active(root:MistState,goodsId:string){const scope=getExecutedClaimGoodsSource(root,goodsId);if(['Closed','Cancelled'].includes(scope.claim.state))fail('案件已结束，不能再办理实物收货或处置','PRECONDITION');return scope;}
 function receiptFor(root:MistState,goodsId:string){const {goods,source}=getExecutedClaimGoodsSource(root,goodsId),f=data(root),receipt=f.returnReceipts.find(row=>row.id===goods.returnReceiptId);if(!receipt||receipt.claimId!==source.claimId||!receipt.goodsIds.includes(goodsId)||new Set(receipt.goodsIds).size!==receipt.goodsIds.length||!f.warehouses.some(row=>row.id===receipt.warehouseId))fail('退回履行缺少准确正式退货单或仓库，请核对来源','INVALID_STATE');return receipt!;}
 export function claimInventoryPermission(_command:ClaimInventoryCommand){return 'inventory:write';}

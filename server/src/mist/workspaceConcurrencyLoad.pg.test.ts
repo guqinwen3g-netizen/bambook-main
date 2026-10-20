@@ -17,7 +17,7 @@ const mock = (type: 'notes.add' | 'money.add', payload: Record<string, unknown>)
  * 真实 PostgreSQL 负载并发实测（与 workspaceConflictRetry.pg.test.ts 同一开关，只在显式提供独立测试库时运行）：
  *   MIST_PG_CONFLICT_TEST_URL=postgresql://... MIST_PG_LOAD_REPORT=/tmp/mist-pg-load.json \
  *     npx vitest run src/mist/workspaceConcurrencyLoad.pg.test.ts
- * 只用模拟账号（load-user-*）与模拟命令（notes.add / money.add）；用例只清理自己创建的工作区与回执。
+ * 只用模拟账号（load-user-*）与模拟命令（notes.add / money.add）；用例只清理自己创建的公司与回执。
  * 延迟、重试次数与失败数全部按本次运行实测记录，写入 MIST_PG_LOAD_REPORT（未设置时只打印）。
  */
 const url = process.env.MIST_PG_CONFLICT_TEST_URL;

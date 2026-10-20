@@ -2,7 +2,7 @@
  * 账号引用与业务组（供应商/关系 包 A）。
  *
  * 负责人、经手人一律保存“账号 ID + 当时显示名”：ID 用于判断与查询，显示名只是快照，同名账号也按 ID 区分。
- * 是否为本工作区有效成员、属于哪个业务组，由服务端按本次执行时的成员目录（context.members）判断，
+ * 是否为本公司有效成员、属于哪个业务组，由服务端按本次执行时的成员目录（context.members）判断，
  * 命令 payload 只能提交账号 ID，不能提交或改写显示名。目录缺失时一律拒绝（失败关闭）。
  */
 import { MistCommandError, type MistContext, type MistState } from './mistWorkspace';
@@ -12,8 +12,8 @@ export const MIST_BUSINESS_GROUPS: readonly MistBusinessGroup[] = ['fabric', 'ga
 export const MIST_BUSINESS_GROUP_LABEL: Record<MistBusinessGroup, string> = { fabric: '面料', garment: '成衣' };
 export type MistAccountRef = { id: string; name: string };
 /** 服务端构建的成员目录：所有者 + 被授权成员；active=false 表示账号已停用或已删除。 */
-export type MistMemberDirectoryEntry = { id: string; name: string; active: boolean; groups: MistBusinessGroup[]; /** 工作区所有者（目录由服务端构建）。 */ owner?: boolean };
-/** 工作区成员的业务组（所有者在成员管理设置）；name 为设置时的显示名快照。 */
+export type MistMemberDirectoryEntry = { id: string; name: string; active: boolean; groups: MistBusinessGroup[]; /** 公司所有者（目录由服务端构建）。 */ owner?: boolean };
+/** 公司成员的业务组（所有者在成员管理设置）；name 为设置时的显示名快照。 */
 export type MistMemberGroupAssignment = { userId: string; name: string; groups: MistBusinessGroup[]; updatedAt: string; updatedBy: string };
 
 const fail = (message: string, code = 'VALIDATION', status = 422): never => { throw new MistCommandError(code, message, status); };
@@ -40,9 +40,9 @@ export function resolveMember(context: Pick<MistContext, 'members'> & Partial<Pi
   const id = (value as string).trim();
   // 未带成员目录时只接受执行人本人（已由仓储层核验登录与成员身份）且不限业务组；指定他人一律无法核对、拒绝。
   if (!context.members && !group && context.actorId && id === context.actorId) return { id, name: context.actorName || id };
-  if (!context.members) fail(`无法核对${label}是否为本工作区成员，请刷新后重试`, 'PRECONDITION');
+  if (!context.members) fail(`无法核对${label}是否为本公司成员，请刷新后重试`, 'PRECONDITION');
   const entry = context.members!.find(row => row.id === id);
-  if (!entry) fail(`${label}须为本工作区的成员账号`);
+  if (!entry) fail(`${label}须为本公司的成员账号`);
   if (!entry!.active) fail(`${label}（${entry!.name}）的账号已停用，不能指定`);
   if (group && !entry!.groups.includes(group)) fail(`${label}（${entry!.name}）不属于${MIST_BUSINESS_GROUP_LABEL[group]}业务组`);
   return { id: entry!.id, name: entry!.name };
@@ -72,7 +72,7 @@ export function setMemberGroups(state: MistState, payload: { userId?: unknown; g
   if (!Array.isArray(payload.groups) || payload.groups.length > MIST_BUSINESS_GROUPS.length || payload.groups.some(g => !isBusinessGroup(g))) fail('业务组只能选择面料、成衣');
   if (!context.members) fail('无法核对成员，请刷新后重试', 'PRECONDITION');
   const entry = context.members!.find(row => row.id === payload.userId);
-  if (!entry) fail('该账号不是本工作区成员');
+  if (!entry) fail('该账号不是本公司成员');
   const groups = MIST_BUSINESS_GROUPS.filter(g => (payload.groups as unknown[]).includes(g));
   const before = memberGroups(state, entry!.id);
   if (before.length === groups.length && before.every(g => groups.includes(g))) return { userId: entry!.id, groups };
@@ -82,7 +82,7 @@ export function setMemberGroups(state: MistState, payload: { userId?: unknown; g
   state.events.unshift({ id: context.id(), entityType: 'workspace', entityId: entry!.id, actor: context.actorName, at: context.now, text: `业务组（${entry!.name}）：${label(before)}→${label(groups)}`, fileIds: [] });
   return { userId: entry!.id, groups };
 }
-/** 演示工作区的示例人物（只用于生成示例数据；不是可登录账号，也不会写入成员授权）。 */
+/** 演示公司的示例人物（只用于生成示例数据；不是可登录账号，也不会写入成员授权）。 */
 export const MIST_DEMO_ACCOUNTS: MistMemberDirectoryEntry[] = [
   { id: 'demo-sales', name: '顾言', active: true, groups: ['garment'] },
   { id: 'demo-buyer', name: '沈禾', active: true, groups: ['fabric', 'garment'] },

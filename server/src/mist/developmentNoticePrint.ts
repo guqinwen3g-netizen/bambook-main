@@ -24,7 +24,7 @@ export async function buildDevelopmentNotice(snapshot: DevNoticeSnapshot, option
 }
 
 export function bindDevelopmentNotice(prepared: PreparedDevelopmentNotice, file: MistStoredFile, context: { id: () => string; workspaceId: string; requestId: string }): DevNoticeArtifact {
-  if (file.mimeType !== 'application/pdf' || file.size !== prepared.bytes || file.name !== prepared.file.name || file.storageKey !== context.workspaceId + '/' + file.id || !context.requestId) return fail('通知单未按当前工作区安全归档');
+  if (file.mimeType !== 'application/pdf' || file.size !== prepared.bytes || file.name !== prepared.file.name || file.storageKey !== context.workspaceId + '/' + file.id || !context.requestId) return fail('通知单未按本公司安全归档');
   if (createHash('sha256').update(Buffer.from(prepared.file.bytes)).digest('hex') !== prepared.sha256) return fail('待归档通知单字节已变化');
   const s = prepared.snapshot;
   return { requestId: context.requestId, file: structuredClone(file), record: { id: context.id(), versionId: s.versionId, seq: s.seq, noticeNo: s.noticeNo, fileId: file.id, fileName: file.name, sha256: prepared.sha256, bytes: prepared.bytes, templateVersion: s.templateVersion, contentFingerprint: prepared.contentFingerprint, snapshotFingerprint: prepared.snapshotFingerprint, snapshot: structuredClone(s), generatedAt: s.generatedAt, generatedBy: s.generatedBy, generatedById: s.generatedById } };

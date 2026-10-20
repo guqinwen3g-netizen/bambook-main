@@ -792,7 +792,7 @@ export function createSampleRoomService(prisma: PrismaClient) {
     lowStock?: unknown; scope?: unknown; limit?: unknown; offset?: unknown;
   } = {}, actor?: TokenPayload): Promise<SampleRoomResult<any>> {
     const scope = filter.scope;
-    if (scope !== undefined && !['fabric', 'garment', 'review'].includes(scope as string)) return fail('INVALID_INPUT', '样品间业务工作区须为 fabric、garment 或 review');
+    if (scope !== undefined && !['fabric', 'garment', 'review'].includes(scope as string)) return fail('INVALID_INPUT', '样品间业务公司须为 fabric、garment 或 review');
     const pageNumber = (v: unknown, fallback: number): number | null => {
       if (v === undefined) return fallback;
       if (typeof v !== 'number' && (typeof v !== 'string' || !/^\d+$/.test(v))) return null;

@@ -1,7 +1,7 @@
 /**
- * 智能邮箱工作空间切片：邮箱账号（非秘密设置）、已同步邮件、标记/关联/跟进、草稿与发送记录。
+ * 智能邮箱公司切片：邮箱账号（非秘密设置）、已同步邮件、标记/关联/跟进、草稿与发送记录。
  * - 收信与发信由服务端邮件服务通过 IMAP / SMTP 真实执行，并经 email.server.* 命令写回；客户端不能直接提交这些命令。
- * - 账号凭据只存在服务端凭据目录，不进入工作空间状态、前端或日志。
+ * - 账号凭据只存在服务端凭据目录，不进入公司状态、前端或日志。
  * - 示例邮箱（example）始终标注示例，不能发信，也不冒充真实收件。
  */
 import { MistCommandError, type MistContext, type MistState } from './mistWorkspace';
@@ -101,7 +101,7 @@ const LINK_KINDS: EmailLinkKind[] = ['customer', 'development', 'order', 'invoic
 export const EMAIL_LINK_LABEL: Record<EmailLinkKind, string> = { customer: '客户', development: '开发案', order: '订单', invoice: '发票' };
 
 export function createEmailState(_context: MistContext, _root: unknown): EmailState { return { accounts: [], messages: [], drafts: [], sends: [] }; }
-/** 示例与旧账号没有 ownerId，沿用工作空间成员可见；真实账号只给本人与授权成员。 */
+/** 示例与旧账号没有 ownerId，沿用公司成员可见；真实账号只给本人与授权成员。 */
 export function emailAccountAccessible(account: Pick<EmailAccount, 'ownerId' | 'memberIds'>, actorId?: string) {
   if (!account.ownerId || actorId === undefined) return true;
   return account.ownerId === actorId || (account.memberIds || []).includes(actorId);
@@ -143,7 +143,7 @@ const imapSourceKey = (address: string, t: EmailTransport | undefined) => t ? [a
 /** 个人邮箱由本人以邮件编辑权限接入；共享邮箱涉及他人可见范围，需要邮件账户管理权限（emails:admin）。 */
 export function emailCommandPermission(command: EmailCommand) { return command.type === 'email.account.save' && (command.payload as { input?: { kind?: string } })?.input?.kind === 'shared' ? 'emails:admin' : 'emails:write'; }
 
-/** 关联目标必须是当前工作空间里真实存在的对象。 */
+/** 关联目标必须是本公司里真实存在的对象。 */
 export function emailLinkTarget(root: MistState, link: EmailLink): { label: string; view: string; id: string } | null {
   if (link.kind === 'customer') { const row = root.customers.find(item => item.id === link.id); return row ? { label: row.name, view: 'crm', id: row.id } : null; }
   if (link.kind === 'development') { const row = root.devs.find(item => item.id === link.id); return row ? { label: `${row.code} · ${row.name}`, view: 'development/detail', id: row.id } : null; }
@@ -152,7 +152,7 @@ export function emailLinkTarget(root: MistState, link: EmailLink): { label: stri
 }
 function link(root: MistState, value: EmailLink): EmailLink {
   if (!value || !LINK_KINDS.includes(value.kind)) fail('关联对象类型无效');
-  const id = text(value.id, '关联对象', true, 200); if (!emailLinkTarget(root, { kind: value.kind, id })) fail('关联对象不在当前工作空间', 'NOT_FOUND');
+  const id = text(value.id, '关联对象', true, 200); if (!emailLinkTarget(root, { kind: value.kind, id })) fail('关联对象不在本公司', 'NOT_FOUND');
   return { kind: value.kind, id };
 }
 const sameLink = (a: EmailLink, b: EmailLink) => a.kind === b.kind && a.id === b.id;
@@ -192,7 +192,7 @@ function draftOf(root: MistState, input: EmailDraftInput, context: MistContext) 
   const from = text(input.from, '发件身份', true, 200); if (from !== owner.address && !owner.aliases.includes(from)) fail('发件身份不在该邮箱允许的别名中');
   const blocked = privateMailFileIds(root, context.actorId);
   const draft = { accountId: owner.id, from, to: addressList(text(input.to, '收件人', false, 2000), '收件人'), cc: addressList(text(input.cc, '抄送', false, 2000), '抄送'), bcc: addressList(text(input.bcc, '密送', false, 2000), '密送'), subject: text(input.subject, '主题', false, 300), body: text(input.body, '正文', false, 20000), template: text(input.template, '模板', false, 40), links: (input.links || []).map(item => link(root, item)), fileIds: [...new Set((input.fileIds || []).map(String))], ...(input.replyToId ? { replyToId: message(root, String(input.replyToId), context).id } : {}) };
-  for (const fileId of draft.fileIds) if (!root.files.some(file => file.id === fileId) || blocked.has(fileId)) fail('附件不在当前工作空间', 'NOT_FOUND');
+  for (const fileId of draft.fileIds) if (!root.files.some(file => file.id === fileId) || blocked.has(fileId)) fail('附件不在本公司', 'NOT_FOUND');
   return { owner, draft };
 }
 const addressRows = (value: string): EmailAddress[] => value.split(/,\s*/).filter(Boolean).map(address => ({ name: '', address }));
@@ -384,12 +384,12 @@ function saveAccount(root: MistState, payload: { id?: string; input: EmailAccoun
   const roster = Array.isArray((root as any).members) ? (root as any).members as Array<{ userId: string; name: string }> : [];
   const allowed = new Set([...(Array.isArray((root as any).memberIds) ? (root as any).memberIds : []), ...roster.map(item => item.userId)]);
   const memberIds = kind === 'personal' ? [] : [...new Set((Array.isArray(input.memberIds) ? input.memberIds : []).map(String))].filter(id => id !== context.actorId);
-  for (const id of memberIds) if (!allowed.has(id)) fail('共享成员必须是本工作空间的成员', 'NOT_FOUND');
+  for (const id of memberIds) if (!allowed.has(id)) fail('共享成员必须是本公司的成员', 'NOT_FOUND');
   const memberNames = memberIds.map(id => roster.find(item => item.userId === id)?.name || id);
   const existing = payload?.id ? root.email.accounts.find(row => row.id === payload.id) : undefined;
   if (payload?.id && (!existing || !emailAccountAccessible(existing, context.actorId))) fail('邮箱不存在或当前账号无权使用', 'NOT_FOUND');
   if (existing && (existing.example || existing.ownerId !== context.actorId)) fail(existing.example ? '示例邮箱不能改为真实邮箱，请新建账号' : '只有接入该邮箱的本人可以修改账号设置', 'FORBIDDEN');
-  if (root.email.accounts.some(row => row.id !== existing?.id && !row.example && row.address === address)) fail('该邮箱已在本工作空间接入', 'CONFLICT');
+  if (root.email.accounts.some(row => row.id !== existing?.id && !row.example && row.address === address)) fail('该邮箱已在本公司接入', 'CONFLICT');
   if (existing) {
     // 先比较再写入：收信来源（地址/收信服务器/端口/加密/用户名）变化 → 新代际并清空游标；仅发信设置变化 → 只需重新校验凭据，保留收信游标与历史。
     const before = existing.transport, sourceChanged = imapSourceKey(existing.address, before) !== imapSourceKey(address, transport);
@@ -528,7 +528,7 @@ function beginSend(root: MistState, payload: Extract<EmailCommand, { type: 'emai
   return { id, status: 'sending' as EmailSendStatus, existing: false };
 }
 
-/** 示例空间的合成邮件：全部标注示例、使用 example.invalid 地址，不代表真实收信。 */
+/** 演示公司的合成邮件：全部标注示例、使用 example.invalid 地址，不代表真实收信。 */
 export function seedEmailExamples(root: MistState, context: MistContext) {
   const day = (offset: number, time: string) => { const date = new Date(context.now); date.setUTCDate(date.getUTCDate() - offset); return date.toISOString().slice(0, 10) + 'T' + time + ':00Z'; };
   const me = context.actorName || '顾言';

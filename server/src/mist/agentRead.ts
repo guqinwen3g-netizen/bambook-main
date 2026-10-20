@@ -1,6 +1,6 @@
 /**
  * 工作助手业务读取（bambook_query / bambook_get / bambook_expand）。
- * 只在“按当前执行者权限裁剪后的工作区状态”上运行：仓储先按账号权限 ∩ 委托上限投影，这里再按对象类型的读权限复核一次。
+ * 只在“按当前执行者权限裁剪后的公司状态”上运行：仓储先按账号权限 ∩ 委托上限投影，这里再按对象类型的读权限复核一次。
  * 结果只含业务字段摘要与站内链接；大字段（图片数据、长文本、嵌套明细）截短，不返回附件内容。
  */
 import type { TokenPayload } from '../auth/service';
@@ -36,7 +36,7 @@ const TEXT_LIMIT = 300;
 const GET_LIMIT = 16_000;
 export const QUERY_LIMIT_MAX = 20;
 export const RELATED_LIMIT = 30;
-const QUERY_RESULT_MAX = 20_000; // 留出工作区等字段的空间，低于本机 Harness 的 24k 单工具上限。
+const QUERY_RESULT_MAX = 20_000; // 留出公司等字段的空间，低于本机 Harness 的 24k 单工具上限。
 
 function deny(code: string, message: string, status = 400): never { throw new MistApiError(code, message, status); }
 

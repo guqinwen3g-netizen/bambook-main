@@ -79,7 +79,7 @@ async function setup() {
 const realMessages = (ws: any, accountId: string) => ws.state.email.messages.filter((m: any) => m.accountId === accountId);
 
 describe('智能邮箱真实收发（服务端）', () => {
-  it('凭据只在登录校验成功后写入服务端私有文件，绝不回传或进入工作空间', async () => {
+  it('凭据只在登录校验成功后写入服务端私有文件，绝不回传或进入公司', async () => {
     const t = await setup(), id = await t.account('sales@sylway.cloud');
     const wrong = await t.bind(id, 'wrong-password', t.owner, 422);
     expect(wrong.body.error.code).toBe('MAIL_AUTH_FAILED');
@@ -93,7 +93,7 @@ describe('智能邮箱真实收发（服务端）', () => {
     ws = await t.latest();
     const store = await fs.readFile(path.join(directory, 'store.json'), 'utf8');
     for (const text of [JSON.stringify(ok.body), JSON.stringify(ws), store]) expect(text).not.toContain(SECRET);
-    // 共享邮箱接入需要邮件账户管理权限；成员只能是本空间成员（按用户 ID）。
+    // 共享邮箱接入需要邮件账户管理权限；成员只能是本公司成员（按用户 ID）。
     await t.command('email.account.save', { input: { address: 'orders@sylway.cloud', displayName: 'orders', kind: 'shared', memberIds: ['someone-else'], aliases: [], signature: '', transport: { ...transport(), username: 'orders@sylway.cloud' } } }, t.owner, 404);
   });
 
@@ -156,7 +156,7 @@ describe('智能邮箱真实收发（服务端）', () => {
     const synced = (await t.sync(personal)).body.workspace, mail = realMessages(synced, personal)[0];
     await t.command('email.followUp', { id: mail.id, owner: '本地操作员', due: '2026-10-20', note: '' });
     await request(t.app).get('/api/mist/session');
-    // 授权 local-sales 进入工作空间
+    // 授权 local-sales 进入公司
     await t.latest();
     await t.owner.post(W + t.ws.id + '/members').send({ requestId: 'mail-member-' + (++n), expectedRevision: t.ws.revision, action: 'add', account: 'local-sales' }).expect(200);
     const shared = await t.account('finance@sylway.cloud', 'shared', ['local-sales']); await t.bind(shared);
