@@ -94,7 +94,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const selected = rows.find(q => q.id === picked) || (picked ? domainRows.find(q => q.id === picked) : undefined);
   const can = session.hasPermission('quotations:write'), canOrder = session.hasPermission('orders:write'), canApprove = session.hasPermission('quotations:approve'), me = session.user?.id || '';
   const locked = saving || !!pending;
-  const pick = (q: MarketQuotation) => { setPicked(q.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, q.id, target); };
+  const pick = (q: MarketQuotation) => { setPicked(q.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, q.id, target, { keepScroll: true }); };
   const changeDomain = (value: QuoteDomain) => { setDomainChoice(value); setStageFilter('all'); setPicked(null); };
   const act = async (work: () => Promise<unknown>) => { setFailure(''); try { await work(); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
   const evidenceSpec = (q: MarketQuotation, next: MarketQuotation['status']): ModuleEditorSpec => ({

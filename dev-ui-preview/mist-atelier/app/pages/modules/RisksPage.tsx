@@ -67,7 +67,7 @@ export function RisksPage() {
   const ownOrders = (state?.orders || []).filter(o => canAll || (canOrders && !!meId && o.ownerId === meId));
   const switchTab = (t: Tab) => { setTab(t); setPicked(null); setDrawer(false); go('risks', undefined, { section: t }); };
   const openRisk = (id: string) => { setTab('ledger'); if (risks.find(r => r.id === id)?.state === 'Resolved') setLedgerFilter('all'); setPicked(id); setDrawer(true); go('risks', id, { section: 'ledger' }); };
-  const pick = (id: string) => { setPicked(id); setDrawer(true); go('risks', id, { section: tab }); };
+  const pick = (id: string) => { setPicked(id); setDrawer(true); go('risks', id, { section: tab }, { keepScroll: true }); };
 
   const unregistered = signals.filter(s => !openByKey.has(s.key));
   const open = risks.filter(r => r.state !== 'Resolved'), escalated = risks.filter(r => pendingEscalation(r));

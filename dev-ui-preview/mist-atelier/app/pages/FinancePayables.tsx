@@ -75,7 +75,7 @@ export function FinancePayables() {
   const suppliers = payableSupplierOptions(state), requests = state ? paymentRequests(state) : [], plans = state ? prepaymentPlans(state) : [], settlements = state ? supplierSettlements(state) : [];
   const shownBills = bills.filter(b => filter === 'all' || (filter === 'open' ? b.open > 0 : b.overdue));
   const bill = bills.find(b => b.id === selected), payment = payments.find(p => p.id === selected), request = requests.find(r => r.id === selected), plan = plans.find(p => p.id === selected), settlement = settlements.find(x => x.id === selected);
-  const open = (id: string) => { setSelected(id); setDrawer(true); go('payment-vouchers', id, { section: 'payables' }); };
+  const open = (id: string) => { setSelected(id); setDrawer(true); go('payment-vouchers', id, { section: 'payables' }, { keepScroll: true }); };
 
   const execute = async (command: PayablesCommand, done: (result: Record<string, unknown>) => void) => {
     if (payablesCommandPermissions(command).some(permission => !session.hasPermission(permission as any))) { setFailure('没有办理此项财务动作的权限。'); return; }

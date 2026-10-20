@@ -74,7 +74,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const seasonName = (id: string) => { const s = seasons.find(x => x.id === id); return s ? s.code : '未关联季节'; };
   const seasonOptions = [{ value: '', label: '未关联季节' }, ...seasons.map(s => ({ value: s.id, label: `${s.code} · ${s.name}` }))];
   const switchTab = (t: Tab) => { setPicked(null); setDrawer(false); go('seasons', undefined, { section: t }); };
-  const pick = (id: string) => { setPicked(id); setDrawer(true); go('seasons', id, { section: tab }); };
+  const pick = (id: string) => { setPicked(id); setDrawer(true); go('seasons', id, { section: tab }, { keepScroll: true }); };
   const seasonSpec = (s?: MarketSeason): ModuleEditorSpec => ({
     title: s ? `编辑 ${s.code}` : '新建季节', submitLabel: '保存',
     initialValues: s ? { code: s.code, name: s.name, startDate: s.startDate, endDate: s.endDate, status: s.status, milestones: s.milestones.map(x => `${x.label} | ${x.date}`).join('\n'), note: s.note } : { code: '', name: '', startDate: '', endDate: '', status: 'Planning', milestones: '', note: '' },

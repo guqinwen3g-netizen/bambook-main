@@ -45,7 +45,7 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
     return (stage === 'all' || c.status === stage) && (reminder === 'all' || (reminder === 'overdue' ? r.overdue > 0 : reminder === 'ended' ? r.ended : r.overBudget)) &&
       (!query.trim() || `${c.name} ${c.code} ${c.target} ${c.owner}`.toLowerCase().includes(query.trim().toLowerCase()));
   }).sort((a, b) => campaignReminder(b, leads, day).overdue - campaignReminder(a, leads, day).overdue || a.endDate.localeCompare(b.endDate));
-  const pick = (c: MarketCampaign) => { setDrawer(true); go('marketing', c.id, { section: 'campaigns' }); };
+  const pick = (c: MarketCampaign) => { setDrawer(true); go('marketing', c.id, { section: 'campaigns' }, { keepScroll: true }); };
   const reset = () => { setQuery(''); setStage('all'); setReminder('all'); };
   const transition = (c: MarketCampaign, next: MarketCampaign['status']) => {
     if (!can || busy || !CAMPAIGN_NEXT[c.status].includes(next)) return;

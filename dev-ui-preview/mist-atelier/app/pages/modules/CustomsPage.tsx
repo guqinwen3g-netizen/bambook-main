@@ -92,7 +92,7 @@ export function CustomsPage() {
   const rows = tab === 'rebate' ? rebateRows : declarationRows;
   const selected = tab === 'lc' ? undefined : rows.find(c => c.id === picked) || (picked ? records.find(c => c.id === picked) : undefined);
 
-  const pick = (c: FulfillmentCustoms) => { setPicked(c.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, c.id, target); };
+  const pick = (c: FulfillmentCustoms) => { setPicked(c.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, c.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStatusFilter('all'); setPicked(null); };
   const changeTab = (value: Tab) => { setTab(value); setPicked(null); setDrawer(false); };
   const eligibleShipments = () => (f?.shipments || []).filter(s => isOpenShipment(s) && !f!.customs.some(c => c.shipmentId === s.id) && (!hasContext || s.id === route.section));

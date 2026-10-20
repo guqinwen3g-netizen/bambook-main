@@ -42,7 +42,7 @@ it('从待登记来源登记供应商票据：形成应付，合同还没收到�
   expect(store.value.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'payable.bill.register', payload: expect.objectContaining({ supplierId: po.supplierId, currency: 'CNY', amount: 33480, taxAmount: 3851.68, lines: [{ purchaseId: po.id, amount: 33480 }] }) }));
   expect(store.value.state.payables.bills[0]).toMatchObject({ invoiceNo: 'VAT-HS-01', amount: 33480 });
   expect(getByRole(host, 'table', { name: '供应商应付汇总' }).textContent).toContain('33,480.00 CNY');
-  expect(go).toHaveBeenLastCalledWith('payment-vouchers', store.value.state.payables.bills[0].id, { section: 'payables' });
+  expect(go).toHaveBeenLastCalledWith('payment-vouchers', store.value.state.payables.bills[0].id, { section: 'payables' }, { keepScroll: true });
 });
 
 it('有付款的票据不能作废，按钮写明原因；没有付款的作废要写原因', async () => {

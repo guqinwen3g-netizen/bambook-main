@@ -79,7 +79,7 @@ export function ProcurementPage() {
   const locked = saving || !!pending;
   if (editor.spec) return editor.view;
 
-  const pick = (purchase: FulfillmentPurchase) => { setPicked(purchase.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, purchase.id, target); };
+  const pick = (purchase: FulfillmentPurchase) => { setPicked(purchase.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, purchase.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setEntryChoice(null); setStageFilter('all'); setPicked(null); };
   const changeEntry = (value: Entry) => { setEntryChoice(value); setStageFilter('all'); setPicked(null); };
   const act = async (work: () => Promise<unknown>) => { setFailure(''); try { await work(); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };

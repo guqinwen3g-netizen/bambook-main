@@ -84,6 +84,12 @@ describe('ModuleWorkbench Mist quick preview and full detail',()=>{
     await click('返回业务台账');
     const {detail,...source}=target;expect(bridge.go).toHaveBeenLastCalledWith('test-ledger',undefined,source);
   });
+  it('selects a previewed row in place without asking the shell to scroll back to the top',async()=>{
+    bridge.route={view:'test-ledger',section:'source'};await mount(undefined,undefined,undefined,true);
+    const row=[...host.querySelectorAll<HTMLElement>('[role="row"][tabindex]')].find(element=>element.textContent?.includes('记录乙'))!;await act(async()=>row.click());
+    expect(bridge.go).toHaveBeenLastCalledWith('test-ledger','row-b',{section:'source'},{keepScroll:true});
+    expect(host.querySelector('aside.mist-preview')).not.toBeNull();
+  });
   it('preserves the list query through quick preview, full detail and the return path',async()=>{
     await mount(undefined,undefined,undefined,true);await fill('搜索业务台账','乙');
     bridge.route={view:'test-ledger',id:'row-b'};await act(async()=>root!.render(tree(undefined,undefined,undefined,true)));

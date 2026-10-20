@@ -112,7 +112,7 @@ export function QcWorkbenchPage() {
   if (reportTask) return <QcReportEditor task={reportTask} onClose={() => setReportTaskId('')} />;
   if (editor.spec) return editor.view;
 
-  const pick = (task: FulfillmentQcTask) => { setSelected(task.id); setDrawer(true); go('qc-workbench', task.id, { section: task.kind }); };
+  const pick = (task: FulfillmentQcTask) => { setSelected(task.id); setDrawer(true); go('qc-workbench', task.id, { section: task.kind }, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomain(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: kind }); };
   const changeKind = (value: Kind) => { setKind(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: value }); };
   const act = async (command: FulfillmentCommand) => { setFailure(''); setBusy(true); try { await run(command); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };

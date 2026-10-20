@@ -65,7 +65,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   const selected = rows.find(r => r.id === picked) || (picked ? all.find(r => r.id === picked) : undefined);
   const can = session.hasPermission('relations:write'), canHandover = session.hasPermission('relations:admin');
   const locked = saving || !!pending;
-  const pick = (r: MarketRelation) => { setPicked(r.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, r.id, target); };
+  const pick = (r: MarketRelation) => { setPicked(r.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, r.id, target, { keepScroll: true }); };
   const linked = (r?: MarketRelation) => !!r && (!!r.customerId || !!r.supplierId);
   const profileSpec = (r?: MarketRelation): ModuleEditorSpec => ({
     title: r ? `编辑 ${r.name}` : '建立关系档案', submitLabel: '保存',

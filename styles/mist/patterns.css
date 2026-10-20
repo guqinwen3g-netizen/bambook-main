@@ -228,6 +228,15 @@
   .mist-split[data-list-detail] > .mist-preview { max-height: calc(100dvh - 112px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 }
 
+/* 列表 + 快速预览（T2）：预览只放识别与决策所需的摘要，超出视口时在面板内滚动，完整内容走完整详情页。 */
+@media (min-width: 1181px) {
+  .mist-split[data-preview-summary] > .mist-preview { max-height: calc(100dvh - 112px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+}
+.mist-preview-code { font-size: 12px; }
+.mist-preview-head { gap: 4px; }
+.mist-preview-title { font-size: 19px; overflow-wrap: anywhere; }
+.mist-preview-desc { font-size: 13px; margin-top: 4px; }
+
 /* ════ 详情页 ════ */
 .mist-idrow { display: flex; align-items: center; gap: 18px; padding: 16px 0 22px; }
 .mist-idrow-ttl { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
