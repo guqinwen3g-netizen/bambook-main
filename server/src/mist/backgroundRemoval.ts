@@ -40,7 +40,7 @@ async function infer(bytes:Buffer):Promise<Buffer|undefined>{
   const input=await sharp(bytes,{limitInputPixels:40_000_000,animated:false}).rotate().resize(SIZE,SIZE,{fit:'fill'}).removeAlpha().raw().toBuffer();
   const data=new Float32Array(3*SIZE*SIZE),pixels=SIZE*SIZE;
   const kind=modelType();for(let p=0;p<pixels;p++)for(let c=0;c<3;c++)data[c*pixels+p]=kind==='isnet'?(input[p*3+c]-128)/256:(input[p*3+c]/255-MEAN[c])/STD[c];
-  const ort:Ort=await import('onnxruntime-node'),outputs=await active.run({[kind==='isnet'?'input':'input_image']:new ort.Tensor('float32',data,[1,3,SIZE,SIZE])}),tensor=outputs[kind==='isnet'?'output':'output_image']??Object.values(outputs)[0];
+  const ort:Ort=await import('onnxruntime-node'),inputName=active.inputNames.includes(kind==='isnet'?'input':'input_image')?(kind==='isnet'?'input':'input_image'):active.inputNames[0],outputs=await active.run({[inputName]:new ort.Tensor('float32',data,[1,3,SIZE,SIZE])}),tensor=outputs[kind==='isnet'?'output':'output_image']??outputs[active.outputNames[0]];
   if(!tensor||tensor.data.length!==pixels)throw new Error('背景移除模型输出无效');
   const values=tensor.data as Float32Array,mask=new Uint8Array(pixels);let min=Infinity,max=-Infinity;if(kind==='isnet')for(let i=0;i<pixels;i++){min=Math.min(min,values[i]);max=Math.max(max,values[i]);}
   for(let i=0;i<pixels;i++){const value=Number(values[i]),alpha=kind==='isnet'?(value-min)/Math.max(1e-8,max-min):1/(1+Math.exp(-Math.max(-30,Math.min(30,value))));mask[i]=Math.round(255*Math.max(0,Math.min(1,alpha)));}
