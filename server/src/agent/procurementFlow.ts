@@ -45,7 +45,7 @@ export interface ProcurementFlowCommitted {
 
 export function buildProcurementFlowError(code: ProcurementFlowErrorCode, message: string): ProcurementFlowError {
   const userActionMap: Record<ProcurementFlowErrorCode, string> = {
-    NATIVE_SUPPLIER_COMMAND_REQUIRED: '请进入采购与加工工作区，以准确来源创建独立合同并走供应商承诺审批；通用工具审批不能代批供应商承诺',
+    NATIVE_SUPPLIER_COMMAND_REQUIRED: '请进入采购与加工公司，以准确来源创建独立合同并走供应商承诺审批；通用工具审批不能代批供应商承诺',
     APPROVAL_ID_MISSING: '审批恢复执行必须携带 approvalId，请重新发起审批流程',
     APPROVAL_NOT_FOUND: '审批记录不存在或未通过，请重新审批',
     APPROVAL_MODIFIED_UNSUPPORTED: '审批内容被修改，不支持直接 commit，请重新生成 draft 并重新审批',

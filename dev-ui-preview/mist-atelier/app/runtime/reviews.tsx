@@ -1,4 +1,4 @@
-/** 审批队列：跨工作空间读取服务端派生的审批事项（仅提交快照），决定按原请求编号幂等保存并可核对。
+/** 审批队列：跨公司读取服务端派生的审批事项（仅提交快照），决定按原请求编号幂等保存并可核对。
  *  顶栏按钮和“审批与放行”页面共用同一份队列与恢复记录，避免两处各自轮询、各自决定。 */
 import React from 'react';
 import { ClipboardCheck } from 'lucide-react';
@@ -56,7 +56,7 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
   const refreshCurrentWorkspace = async (workspaceId: string) => {
     if (identity !== ref.current || currentWorkspace.current.workspace?.id !== workspaceId) return;
     try { await currentWorkspace.current.refresh(); }
-    catch (e) { if (identity === ref.current && currentWorkspace.current.workspace?.id === workspaceId) setError('审批已保存，但当前工作区刷新失败：' + (e instanceof Error ? e.message : '请重新读取工作区')); }
+    catch (e) { if (identity === ref.current && currentWorkspace.current.workspace?.id === workspaceId) setError('审批已保存，但本公司刷新失败：' + (e instanceof Error ? e.message : '请重新读取公司')); }
   };
   const execute = async (next: MistReviewIntent) => {
     if (locked.current || identity !== ref.current) return false; locked.current = true; setBusy(true); setError('');

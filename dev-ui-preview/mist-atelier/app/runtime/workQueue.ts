@@ -8,7 +8,7 @@ type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'task';
 /**
  * 等我处理的一条事项。module 是它计入的侧栏模块（与模块页「待我处理」同一归属）；
- * 其他工作空间的审批归到 approvals，只进「我的工作」合计。
+ * 其他公司的审批归到 approvals，只进「我的工作」合计。
  */
 export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; target: MistTarget; module: string };
 export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', task: '工作事项' };
@@ -16,7 +16,7 @@ export type MistWorkOptions = {
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
   /** 当前账号是否持有某项权限；不传时岗位事项（按权限分派）一律不算我的。 */
   can?: (permission: string) => boolean;
-  /** 当前工作空间；只有本空间的审批按业务模块归类。 */
+  /** 本公司；只有本公司的审批按业务模块归类。 */
   workspaceId?: string;
 };
 const FINANCE_RETURN_DAYS = 30;
@@ -35,7 +35,7 @@ export function mistMyTasks(state: MistState | null | undefined, options: Pick<M
 }
 
 /**
- * 由业务记录派生、等我处理的事项（不写入工作空间，原记录状态变化后自动消失）：
+ * 由业务记录派生、等我处理的事项（不写入公司，原记录状态变化后自动消失）：
  * 待我审批；QC 待认领/处理中（QC 岗）与结果待业务确认（业务岗）；出运待物流接手、资料已回待发单、已出运待寄单；
  * 未认领收款、待确认发票（财务岗）；我提交后被退回的付款申请。
  */
@@ -98,13 +98,13 @@ export function mistMyWork(state: MistState | null | undefined, options: MistWor
     when: !task.due ? '未定期限' : task.due < today ? '已逾期' : task.due === today ? '今天' : task.due.slice(5), urgent: !!task.due && task.due <= today, at: task.due, target: task.target, module: mistWorkModule(task.target?.view) }))];
 }
 
-/** 由邮件生成的跟进事项（任务本身已保存在工作空间）。 */
+/** 由邮件生成的跟进事项（任务本身已保存在公司）。 */
 export function mistEmailFollowUpTaskIds(state: MistState | null | undefined) {
   return new Set((state?.email?.messages ?? []).flatMap(message => message.followUpTaskIds ?? []));
 }
 
 /**
- * 侧栏数字 = 各模块等我处理的条数（与模块页「待我处理」一致）；「我的工作」= 全部合计（含其他工作空间的审批）。
+ * 侧栏数字 = 各模块等我处理的条数（与模块页「待我处理」一致）；「我的工作」= 全部合计（含其他公司的审批）。
  * 存量、总数不计入；没有待办不显示。
  */
 export function mistNavCounts(state: MistState | null | undefined, options: MistWorkOptions): Record<string, number> {

@@ -194,7 +194,7 @@ function localEnvelope(value:unknown):LocalEnvelope {
   ||!data.user.departmentIds.every(id=>typeof id==='string')
   ||data.user.permissionCeiling!==undefined&&!strings(data.user.permissionCeiling)
   ||!Array.isArray(data.profiles)||!data.profiles.length||data.profiles.some(p=>!p||typeof p.id!=='string'||!p.id.trim()||typeof p.name!=='string'||!p.name.trim())
-  ||new Set(data.profiles.map(p=>p.id)).size!==data.profiles.length||!data.profiles.some(p=>p.id===data.user.id))throw new Error('本地会话响应不完整，请重新连接工作区');
+  ||new Set(data.profiles.map(p=>p.id)).size!==data.profiles.length||!data.profiles.some(p=>p.id===data.user.id))throw new Error('本地会话响应不完整，请重新连接公司');
  return data;
 }
 function localIdentity(data:LocalEnvelope){return JSON.stringify([data.user.id,data.user.displayName,data.user.email,[...data.user.permissions].sort(),data.user.permissionCeiling&&[...data.user.permissionCeiling].sort(),[...data.user.roles].sort(),data.user.departmentIds,[...data.profiles].sort((a,b)=>a.id.localeCompare(b.id))]);}
@@ -222,14 +222,14 @@ export function MistSessionProvider({children}:{children:React.ReactNode}) {
    if(!mounted.current||sequence!==generation.current)throw new Error('会话操作已被新的请求替代');
    if(discovery&&response.status===404){setMode('remote');setStatus('anonymous');return;}
    const body=await response.json().catch(()=>null);
-   if(!response.ok)throw new Error(body?.error?.message||body?.message||'工作区会话无法核验，请重新连接');
+   if(!response.ok)throw new Error(body?.error?.message||body?.message||'公司会话无法核验，请重新连接');
    const next=localEnvelope(body);
    if(profileId!==undefined&&next.user.id!==profileId)throw new Error('返回的工作身份与选择不一致，请重新核对');
    if(!mounted.current||sequence!==generation.current)throw new Error('会话操作已被新的请求替代');
    const nextSignature=localIdentity(next);if(signature.current!==nextSignature){signature.current=nextSignature;setRevision(v=>v+1);}
    current.current=next;setData(next);setMode('local');setStatus('authenticated');setError('');return next.user;
   }catch(failure){
-   if(mounted.current&&sequence===generation.current){current.current=null;setData(null);signature.current='';setRevision(v=>v+1);setMode(modeRef.current==='local'?'local':'error');setStatus('anonymous');setError(failure instanceof Error&&failure.name!=='AbortError'?failure.message:'工作区连接超时，请重试');}
+   if(mounted.current&&sequence===generation.current){current.current=null;setData(null);signature.current='';setRevision(v=>v+1);setMode(modeRef.current==='local'?'local':'error');setStatus('anonymous');setError(failure instanceof Error&&failure.name!=='AbortError'?failure.message:'公司连接超时，请重试');}
    throw failure;
   }finally{window.clearTimeout(timeout);if(mounted.current&&sequence===generation.current){switchLock.current=false;setSwitching(false);setRefreshing(false);}}
  },[]);

@@ -129,7 +129,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
         ...choices.map(c => ({ key: 'line:' + c.line.id, label: `转入：${c.line.name} · ${c.line.qty} ${c.line.unit} × ${c.line.price}`, type: 'checkbox' as const, readonly: !!c.blocked, hint: c.blocked || (c.family ? (c.family === 'fabric' ? '面料条目' : '成衣条目') : undefined) })),
         { key: 'type', label: '订单类型', type: 'select', required: true, options: [{ value: 'garment', label: '成衣订单' }, { value: 'fabric', label: '面料订单' }] },
         { key: 'due', label: '本次订单交期', type: 'date', required: true },
-        { key: 'ownerId', label: '业务负责人', type: 'select', required: true, options: memberSelectOptions(members), hint: '按账号选择本空间成员' },
+        { key: 'ownerId', label: '业务负责人', type: 'select', required: true, options: memberSelectOptions(members), hint: '按账号选择本公司成员' },
       ],
       submit: async v => { const lineIds = checkedLines(v); if (!lineIds.length) throw new Error('请至少勾选一个条目'); const r = await run({ type: 'market.quotation.convert', payload: { id: q.id, type: v.type as QuoteDomain, due: String(v.due ?? ''), ownerId: String(v.ownerId ?? ''), lineIds } }); go('orders/detail', String((r.result as { orderId?: string }).orderId)); },
     };
@@ -310,7 +310,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       <Timeline events={[...(q.approvalHistory || []), ...(q.approval ? [q.approval] : [])].reverse().map(a => ({ who: a.status === 'pending' ? '等待审批' : a.status === 'approved' ? '已批准' : '已退回', when: new Date(a.decidedAt || a.submittedAt).toLocaleString(), text: <>{a.note || (a.status === 'pending' ? '已提交，待指定审批人决定' : '—')}<br /><span className="mist-note">{a.details.filter(d => d.label === '金额' || d.label === '有效期').map(d => d.label + ' ' + d.value).join(' · ')}</span></> }))} />
     </DetailBlock>}
     <DetailBlock title="报价单文件">
-      {missingIssuer && <div className="mist-col" style={{ gap: 8 }} data-quote-company-missing><Banner tone="warn" title="缺少公司抬头，暂不能生成报价单">{canMaintainCompany ? '在系统设置 → 公司资料中填写公司中文抬头并保存，回到本报价后即可生成；已生成的报价单不受影响。' : '公司资料由空间所有者维护，请联系所有者在系统设置 → 公司资料中补全。'}</Banner>{canMaintainCompany && <div className="mist-row"><Button size="sm" icon={Building2} onClick={() => onOpen('settings', q.id, { section: 'company' })}>去维护公司资料</Button></div>}</div>}
+      {missingIssuer && <div className="mist-col" style={{ gap: 8 }} data-quote-company-missing><Banner tone="warn" title="缺少公司抬头，暂不能生成报价单">{canMaintainCompany ? '在系统设置 → 公司资料中填写公司中文抬头并保存，回到本报价后即可生成；已生成的报价单不受影响。' : '公司资料由公司所有者维护，请联系所有者在系统设置 → 公司资料中补全。'}</Banner>{canMaintainCompany && <div className="mist-row"><Button size="sm" icon={Building2} onClick={() => onOpen('settings', q.id, { section: 'company' })}>去维护公司资料</Button></div>}</div>}
       <div className="mist-col" style={{ gap: 0 }} data-quote-documents role="list" aria-label={`${q.code} 报价单文件`}>{documents.length ? documents.map(d => <div key={d.id} role="listitem" className="mist-row" style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }} data-quote-document={d.draft ? 'draft' : 'formal'}>
         <Pill tone={d.draft ? 'warn' : 'ok'}>{d.draft ? '草稿水印版' : '正式版'}</Pill><Pill tone="accent">{'V' + d.revision}</Pill>
         <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span style={{ overflowWrap: 'anywhere' }}>{d.fileName}</span><small className="mist-muted">{d.generatedBy} · {shortWhen(d.generatedAt)}</small></span>

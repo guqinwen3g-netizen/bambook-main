@@ -30,7 +30,7 @@ function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: unkn
 function state(): MistState {
   return {
     ...newModuleFixture({actorName:'测试',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty'),schemaVersion: 1, devs: [], versions: [], drafts: [], fabrics: [], orders: [], orderLines: [], productions: [], receipts: [], invoices: [], allocations: [], payments: [], customers: [], contacts: [], files: [], events: [], tasks: [], notifications: [], calendar: [],
-    settings: { theme: 'light', density: 'default', reducedMotion: false, notifications: { qc: true, shipping: true, suggestions: true, digest: false }, workspaceName: '工作区', profileName: '初始姓名', profileEmail: '', locale: 'zh-CN' },
+    settings: { theme: 'light', density: 'default', reducedMotion: false, notifications: { qc: true, shipping: true, suggestions: true, digest: false }, workspaceName: '公司', profileName: '初始姓名', profileEmail: '', locale: 'zh-CN' },
   };
 }
 function workspace(id: string, ownerId = 'actor-a'): MistWorkspaceEnvelope { return { id, ownerId, name: id, revision: 0, state: state() }; }
@@ -135,7 +135,7 @@ it('opens the authorized shared workspace, refuses member management, and clears
   await mount();
   expect(api.workspace?.id).toBe(D);
   expect(api.workspaces.find(item => item.id === D)?.shared).toBe(true);
-  await expect(api.changeMember!('add', 'actor-c')).rejects.toThrow('只有工作空间所有者');
+  await expect(api.changeMember!('add', 'actor-c')).rejects.toThrow('只有公司所有者');
   expect(posts()).toHaveLength(0);
   shared.state.memberIds = [];
   await act(async () => api.refresh());
@@ -233,9 +233,9 @@ it('rejects callbacks retained before a switch, including while the next workspa
   await mount(); const retired = api.run, delayed = deferred<ResponseData>();
   intercept = request => request.url === BASE + '/' + B ? delayed.promise : undefined;
   let switching!: Promise<void>; await act(async () => { switching = api.switchWorkspace(B); });
-  await expect(retired(command('旧页'))).rejects.toThrow('工作区');
+  await expect(retired(command('旧页'))).rejects.toThrow('公司');
   await resolve(delayed, response({ workspace: stores.get(B) })); await switching;
-  await expect(retired(command('旧页'))).rejects.toThrow('工作区');
+  await expect(retired(command('旧页'))).rejects.toThrow('公司');
   await act(async () => { await api.run(command('当前页')); });
   expect(posts()).toHaveLength(1); expect(posts()[0].url).toBe(BASE + '/' + B + '/commands');
 });
@@ -441,7 +441,7 @@ it('verifies upload bytes before retry and keeps the original request id for ide
   expect((posts()[1].init.body as FormData).get('requestId')).toBe(pending.requestId); expect(saved.storageKey).toBe(A + '/' + saved.id);
   expect(api.pending).toBeNull(); expect(api.fileUrl(saved)).toBe(BASE + '/' + A + '/files/' + saved.id);
   const retiredUrl = api.fileUrl; await act(async () => { await api.switchWorkspace(B); });
-  expect(() => retiredUrl(saved)).toThrow('工作区'); expect(() => api.fileUrl(saved)).toThrow('不属于');
+  expect(() => retiredUrl(saved)).toThrow('公司'); expect(() => api.fileUrl(saved)).toThrow('不属于');
 });
 
 it('freezes the claim upload target in pending recovery and refuses changing cases or using general upload for the same file',async()=>{
@@ -546,10 +546,10 @@ it('does not treat a legacy upload with no content digest as proof of identical 
 it('durably records creation before posting and switches only after its matching creation receipt', async () => {
   strict = true; await mount(); let storedBeforeRequest: any;
   intercept = request => { if (request.url === BASE && request.method === 'POST') storedBeforeRequest = JSON.parse(localStorage.getItem('bambook.mist.pending-create:actor-a')!); return undefined; };
-  await act(async () => { await api.createWorkspace('新工作区', 'empty'); });
-  expect(storedBeforeRequest).toMatchObject({ actorId: 'actor-a', name: '新工作区', seed: 'empty' });
+  await act(async () => { await api.createWorkspace('新公司', 'empty'); });
+  expect(storedBeforeRequest).toMatchObject({ actorId: 'actor-a', name: '新公司', seed: 'empty' });
   expect(JSON.parse(posts()[0].init.body as string).slug).toBe(storedBeforeRequest.slug);
-  expect(api.workspace?.name).toBe('新工作区'); expect(api.workspace?.id).toBe('created-0'); expect(api.pendingCreate).toBeNull(); expect(api.error).toBe('');
+  expect(api.workspace?.name).toBe('新公司'); expect(api.workspace?.id).toBe('created-0'); expect(api.pendingCreate).toBeNull(); expect(api.error).toBe('');
   expect(localStorage.getItem('bambook.mist.pending-create:actor-a')).toBeNull();
 });
 
@@ -588,7 +588,7 @@ it('locks simultaneous create attempts before rerender and keeps writes out of t
 
 it('does not publish or clear a creation belonging to a retired account', async () => {
   await mount(); const retired = api.createWorkspace, waiting = deferred<ResponseData>(); intercept = request => request.url === BASE && request.method === 'POST' ? waiting.promise : undefined;
-  let pending!: Promise<void | Error>; await act(async () => { pending = capture(retired('账号甲的工作区')); });
+  let pending!: Promise<void | Error>; await act(async () => { pending = capture(retired('账号甲的公司')); });
   auth.session = { sessionKey: 'session-b', user: { id: 'actor-b' }, status: 'authenticated' }; await render(); await waitFor(() => api.workspace?.id === D);
   await expect(retired('旧回调')).rejects.toThrow('会话'); await resolve(waiting, create(posts()[0])); expect(await pending).toBeInstanceOf(Error);
   expect(api.workspace?.id).toBe(D); expect(api.pendingCreate).toBeNull(); expect(localStorage.getItem('bambook.mist.pending-create:actor-a')).not.toBeNull();
@@ -619,7 +619,7 @@ it('does not clear an earlier uncertain creation when retry permission is later 
 
 it('retires creation callbacks after a workspace switch and after unmount', async () => {
   await mount(); const retired = api.createWorkspace; await act(async () => { await api.switchWorkspace(B); });
-  await expect(retired('旧页面创建')).rejects.toThrow('当前工作区');
+  await expect(retired('旧页面创建')).rejects.toThrow('本公司');
   const unmounted = api.createWorkspace; act(() => root.unmount()); root = createRoot(host);
   await expect(unmounted('卸载后创建')).rejects.toThrow('会话'); expect(posts()).toHaveLength(0);
 });

@@ -50,7 +50,7 @@ export function useAssistantDelegation(input: { bridge: AssistantBridge | null; 
           if (!isCurrent()) return;
           const bound = await request({ accountKey, token: d.token, expiresAt: d.expiresAt, workspaceId, apiBase: location.origin });
           if (!isCurrent()) return;
-          if (!bound?.connected || bound.workspaceId !== workspaceId) throw new Error('业务授权的工作区不一致，请重新连接');
+          if (!bound?.connected || bound.workspaceId !== workspaceId) throw new Error('业务授权的公司不一致，请重新连接');
           setView({ scope, phase: 'connected', readable: body.readable.map((r: Readable) => ({ type: r.type, label: r.label.slice(0, 40) })), expiresAt: d.expiresAt, error: '' });
           timer = setTimeout(() => { void connect(); }, Math.max(30_000, Date.parse(d.expiresAt) - Date.now() - RENEW_BEFORE_MS));
         } catch (error) {

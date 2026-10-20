@@ -4,8 +4,8 @@ import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import { emailVisibleScope } from '../shared/mistEmail';
 import type { MistState, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
 /**
- * 工作空间访问与读投影。
- * - 成员资格只决定"能不能进这个空间"，看到哪些业务数据仍由账号自身现有岗位的读权限决定；
+ * 公司访问与读投影。
+ * - 成员资格只决定"能不能进这家公司"，看到哪些业务数据仍由账号自身现有岗位的读权限决定；
  * - 所有者同样按自身读权限投影（全权限账号看到完整数据）。
  * 不新增任何权限点，只引用岗位矩阵里已有的读权限。
  */
@@ -66,7 +66,7 @@ function targetVisibility(hidden: Section[]) {
 export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {
   return targetVisibility(hiddenSections(actor))(target);
 }
-/** 按账号自身读权限裁剪状态；被隐藏的数据结构用空工作空间的同名结构替换，保证页面结构完整。 */
+/** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
 export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string): { state: MistState; hidden: Section[] } {
   const hidden = hiddenSections(actor), next: MistState = { ...state };
   if (hidden.length) {
@@ -110,7 +110,7 @@ function referencedFiles(state: MistState): Set<string> {
   walk({ ...state, files: [] });
   return found;
 }
-/** 已引用附件须有可见来源；尚未引用的附件只给上传人/空间所有者。 */
+/** 已引用附件须有可见来源；尚未引用的附件只给上传人/公司所有者。 */
 function visibleFiles(full: MistState, projected: MistState, actorId: string, ownerId?: string) {
   const visible = referencedFiles(projected), referenced = referencedFiles(full);
   return (full.files || []).filter(file => visible.has(file.id) || !referenced.has(file.id) && (actorId === ownerId || file.uploadedBy === actorId));
