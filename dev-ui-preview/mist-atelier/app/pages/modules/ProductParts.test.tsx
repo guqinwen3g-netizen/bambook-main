@@ -39,7 +39,7 @@ describe('数字档案 product archive',()=>{
  it('opens a quotation draft seeded with the exact product, its currency and reference price',async()=>{bridge.current.state.customers[0].currency='GBP';const p=product('FAB-01');await mount('quotations',undefined,'product:'+p.id);const val=(l:string)=>(host.querySelector(`[aria-label="${l}"]`) as HTMLInputElement).value;expect(val('币种')).toBe('EUR');
   for(const [l,v] of [['有效期','2026-12-01'],['贸易术语','FOB'],['付款条件','T/T']]){await fill(host.querySelector(`[aria-label="${l}"]`) as HTMLInputElement,v);}await click('下一步');expect(val('条目1来源')).toBe('p:'+p.id);expect(val('条目1单价')).toBe('2.35');expect(val('条目1单位')).toBe('米');expect(val('条目1款号')).toBe('FAB-01');});
 });
-it('switches between actual product images and appends multiple uploads without losing existing files',async()=>{
+it('cuts out only the primary product image, lets supplementary images be promoted and appends multiple uploads',async()=>{
  const p=product('FAB-01');p.fileIds=['photo-a','photo-b','spec'];
  bridge.current.state.files=[{id:'photo-a',name:'正面.png',mimeType:'image/png'},{id:'photo-b',name:'细节.png',mimeType:'image/png'},{id:'spec',name:'规格.pdf',mimeType:'application/pdf'}];
  bridge.current.fileUrl=(file:{id:string})=>'/private/'+file.id;
@@ -49,7 +49,9 @@ it('switches between actual product images and appends multiple uploads without 
  try{
   await mount('products',p.id,undefined,'full');
   expect(fetcher).toHaveBeenCalledWith('/private/photo-a?preview=cutout-display',expect.anything());
-  await click('2 · 细节.png');expect(fetcher).toHaveBeenCalledWith('/private/photo-b?preview=cutout-display',expect.anything());
+  await click('补充图 1 · 细节.png');expect(fetcher).toHaveBeenCalledWith('/private/photo-b?preview=display',expect.anything());expect(fetcher).not.toHaveBeenCalledWith('/private/photo-b?preview=cutout-display',expect.anything());
+  expect(host.textContent).toContain('主图 · 自动抠图');expect(host.textContent).toContain('补充图');
+  await click('设为主图');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.attachment.set',payload:{kind:'product',id:p.id,fileIds:['photo-b','photo-a','spec']}}));bridge.current.run.mockClear();
   bridge.current.uploadFile.mockResolvedValueOnce({id:'new-a'}).mockResolvedValueOnce({id:'new-b'});
   const input=host.querySelector<HTMLInputElement>('input[type=file]')!;expect(input.multiple).toBe(true);
   Object.defineProperty(input,'files',{configurable:true,value:[new File(['a'],'new-a.png',{type:'image/png'}),new File(['b'],'new-b.png',{type:'image/png'})]});

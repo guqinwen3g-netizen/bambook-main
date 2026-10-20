@@ -161,10 +161,10 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
   router.get('/workspaces/:id/files/:fileId', run(async (req, res) => {
     const preview = req.query.preview === undefined ? undefined : req.query.preview;
     if (preview !== undefined && !['thumb','display','cutout-thumb','cutout-display'].includes(String(preview))) fail('INVALID_INPUT', '图片预览尺寸无效', 400);
-    const { file, bytes,previewReady } = await repository.download(actor(req), req.params.id, req.params.fileId, preview as ImagePreviewMode | undefined);
+    const { file, bytes,cutout } = await repository.download(actor(req), req.params.id, req.params.fileId, preview as ImagePreviewMode | undefined);
     res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
     if (preview) {
-      if(String(preview).startsWith('cutout-'))res.setHeader('X-Bambook-Cutout',previewReady?'ready':'pending');
+      if(cutout)res.setHeader('X-Bambook-Cutout',cutout);
       res.type('image/webp').send(Buffer.from(bytes));
       return;
     }

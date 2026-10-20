@@ -3,6 +3,7 @@ import { AccountAccessPage } from './pages/AccountAccessPage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { SaasAdminPage } from './pages/SaasAdminPage';
 import React from 'react';
+import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, LogOut, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
 
 import {
@@ -162,12 +163,13 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     if (!workspaceId || !state?.market?.products?.length || workspace.loading) return;
     const scope = `${session.sessionKey}:${session.user?.id || ''}:${workspaceId}`;
     const files = new Map(state.files.map(file => [file.id, file]));
-    const productPaths = state.market.products.flatMap(product => (product.fileIds ?? []).flatMap(id => {
-      const file = files.get(id); if (!file?.mimeType.startsWith('image/')) return [];
+    // 只预取主图的抠图派生；补充图在用户切换到它时才按普通预览读取。
+    const productPaths = state.market.products.flatMap(product => {
+      const id = primaryImageId(files, product.fileIds), file = id ? files.get(id) : undefined; if (!file) return [];
       const base = workspace.fileUrl(file); return [`${base}?preview=cutout-thumb`, `${base}?preview=cutout-display`];
-    }));
-    const developmentIds=[...state.devs.flatMap(dev=>dev.fileIds??[]),...state.versions.flatMap(version=>version.fileIds??[])];
-    const developmentPaths=[...new Set(developmentIds)].flatMap(id=>{const file=files.get(id);return file?.mimeType.startsWith('image/')?[`${workspace.fileUrl(file)}?preview=cutout-display`]:[];});
+    });
+    const developmentIds=[...state.devs,...state.versions].flatMap(owner=>{const id=primaryImageId(files,owner.fileIds);return id?[id]:[];});
+    const developmentPaths=[...new Set(developmentIds)].flatMap(id=>{const file=files.get(id);return file?[`${workspace.fileUrl(file)}?preview=cutout-display`]:[];});
     const paths=[...productPaths,...developmentPaths];
     const timer = window.setTimeout(() => { void prefetchPrivateImages(scope, paths); }, 0);
     return () => window.clearTimeout(timer);

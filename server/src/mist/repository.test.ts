@@ -162,12 +162,13 @@ describe('Mist transactional workspace', () => {
     const file = await files.write(workspaceId, { bytes, name: 'large.dat', mimeType: 'application/octet-stream' }, new Date().toISOString());
     expect(file.size).toBe(bytes.length); expect((await files.read(workspaceId, file)).equals(bytes)).toBe(true);
   });
-  it('persists normal previews, queues the AI cutout and removes every derivative and pending job with the original', async () => {
+  it('persists normal previews, queues the AI cutout only on request and removes every derivative and pending job with the original', async () => {
     const queue=path.join(root,'cutout-queue'),files = new MistPrivateFiles(root,queue), workspaceId = randomUUID();
     const bytes = await sharp({ create: { width: 1200, height: 800, channels: 3, background: '#778899' } }).png().toBuffer();
     const file = await files.write(workspaceId, { bytes, name: 'fabric.png', mimeType: 'image/png' }, new Date().toISOString());
     expect(await readdir(path.join(root, workspaceId))).toEqual(expect.arrayContaining([file.id, `${file.id}.preview-thumb.webp`, `${file.id}.preview-display.webp`]));
-    expect(await readdir(queue)).toEqual([`${workspaceId}.${file.id}.json`]);expect((await files.readPreview(workspaceId,file,'cutout-display')).length).toBeLessThan(bytes.length);
+    await expect(readdir(queue)).rejects.toMatchObject({code:'ENOENT'});expect((await files.readPreview(workspaceId,file,'cutout-display')).length).toBeLessThan(bytes.length);
+    expect(await readdir(queue)).toEqual([`${workspaceId}.${file.id}.json`]);
     await files.remove(workspaceId, file); expect(await readdir(path.join(root, workspaceId))).toEqual([]);expect(await readdir(queue)).toEqual([]);
   });
   it('blocks oversized bytes, traversal storage keys and symlink escape', async () => {

@@ -42,7 +42,8 @@ export class MistPrivateFiles {
     try { await handle.writeFile(input.bytes); } catch (error) { await handle.close(); await fs.unlink(target.file).catch(() => undefined); throw error; }
     await handle.close();
     const stored={ id, name: input.multipartFilename ? multipartDisplayName(meta.name) : meta.name, mimeType: meta.mimeType, size: meta.size, storageKey: `${workspaceId}/${id}`, createdAt: now };
-    if (meta.mimeType.startsWith('image/')) {await Promise.allSettled((['thumb', 'display'] as const).map(mode => this.writePreview(target.file, input.bytes, meta.mimeType, mode)));await this.enqueueCutout(workspaceId,stored);}
+    if (meta.mimeType.startsWith('image/')) {await Promise.allSettled((['thumb', 'display'] as const).map(mode => this.writePreview(target.file, input.bytes, meta.mimeType, mode)));}
+    // 上传时不抠图：只有被用作主图的图片在首次请求抠图预览时才进入队列（见 shared/mistPrimaryImage）。
     return stored;
   }
   private previewPath(file: string, mode: ImagePreviewMode) { return `${file}.preview-${mode}${mode.startsWith('cutout-')?'.'+imageCutoutVersion():''}.webp`; }

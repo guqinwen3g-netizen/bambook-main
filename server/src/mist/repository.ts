@@ -19,6 +19,7 @@ import { payablesCommandPermissions } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
+import { primaryImageIds } from '../shared/mistPrimaryImage';
 import { MistPrivateFiles, validateFileInput, type MistFileInput, type MistStoredFile } from './files';
 import type { ImagePreviewMode } from './imagePreview';
 import { prepareMistBusinessNumbers } from './businessNumbers';
@@ -588,9 +589,12 @@ export class MistRepository {
       const { row, actor } = await this.own(db, prior, workspaceId);
       const file = Array.isArray(row.state.files) ? row.state.files.find((item: MistStoredFile) => item.id === fileId) : null;
       if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), row.ownerId)) fail('FILE_NOT_FOUND', '附件不存在或不属于此工作区', 404);
-      const previewReady=preview?await this.files.previewReady(workspaceId,file,preview):undefined,bytes = preview ? await this.files.readPreview(workspaceId, file, preview) : await this.files.read(workspaceId, file);
+      // 只有主图提供抠图；补充图请求抠图尺寸时退回同尺寸普通预览，且不进入抠图队列。
+      const cutoutRequested=!!preview?.startsWith('cutout-'),cutoutAllowed=cutoutRequested&&primaryImageIds(row.state).has(file.id),mode:ImagePreviewMode|undefined=cutoutRequested&&!cutoutAllowed?(preview==='cutout-thumb'?'thumb':'display'):preview;
+      const previewReady=mode?await this.files.previewReady(workspaceId,file,mode):undefined,bytes = mode ? await this.files.readPreview(workspaceId, file, mode) : await this.files.read(workspaceId, file);
+      const cutout:'ready'|'pending'|'none'|undefined=cutoutRequested?(cutoutAllowed?(previewReady?'ready':'pending'):'none'):undefined;
       await this.authorize(db, prior);
-      return { file, bytes,previewReady };
+      return { file, bytes,previewReady,cutout };
     });
     return result;
   }

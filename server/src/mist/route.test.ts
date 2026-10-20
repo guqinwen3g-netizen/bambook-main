@@ -107,7 +107,14 @@ it('serves bounded authenticated image previews and keeps the original download 
  const stored=await readdir(path.join(root,workspace.id));expect(stored).toEqual(expect.arrayContaining([file.id,`${file.id}.preview-thumb.webp`,`${file.id}.preview-display.webp`]));
  const preview=await request(app).get(url+'?preview=thumb').set('x-test-user','owner').expect(200).expect('Content-Type',/image\/webp/);
  expect((await sharp(preview.body).metadata()).width).toBeLessThanOrEqual(160);
- await request(app).get(url+'?preview=cutout-display').set('x-test-user','owner').expect(200).expect('Content-Type',/image\/webp/).expect('X-Bambook-Cutout','pending');
+ // 未作为主图的图片不抠图：退回普通预览且不进入队列。
+ await request(app).get(url+'?preview=cutout-display').set('x-test-user','owner').expect(200).expect('Content-Type',/image\/webp/).expect('X-Bambook-Cutout','none');
+ const second=await request(app).post(`/api/mist/workspaces/${workspace.id}/files`).set('x-test-user','owner').field('requestId','image-detail').field('expectedRevision',String(uploaded.body.workspace.revision)).attach('file',bytes,{filename:'detail.png',contentType:'image/png'}).expect(201);
+ const detail=second.body.workspace.state.files.find((item:{name:string})=>item.name==='detail.png');
+ await request(app).post(`/api/mist/workspaces/${workspace.id}/commands`).set('x-test-user','owner').send({requestId:'product-images',expectedRevision:second.body.workspace.revision,command:{type:'products.setImages',payload:{fileIds:[file.id,detail.id]}}}).expect(200);
+ // 第一张为主图：请求抠图时进入队列（pending）；第二张补充图仍是普通预览。
+ await request(app).get(url+'?preview=cutout-display').set('x-test-user','owner').expect(200).expect('X-Bambook-Cutout','pending');
+ await request(app).get(`/api/mist/workspaces/${workspace.id}/files/${detail.id}?preview=cutout-display`).set('x-test-user','owner').expect(200).expect('X-Bambook-Cutout','none');
  await request(app).get(url+'?preview=thumb').expect(401);
  await request(app).get(url+'?preview=thumb').set('x-test-user','other').expect(404);
  await request(app).get(url+'?preview=huge').set('x-test-user','owner').expect(400);

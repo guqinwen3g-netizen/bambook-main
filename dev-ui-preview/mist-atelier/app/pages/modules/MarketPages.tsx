@@ -18,6 +18,8 @@ import { supplierBusinessDay, supplierStatusOn, supplierUnavailableReason } from
 import { SupplierWorkbench } from './SuppliersPage';
 import { RelationWorkbench } from './RelationsPage';
 import { QuotationWorkbench } from './QuotationsPage';
+import { ImageRoleTag, PRIMARY_IMAGE_HINT, imageRole, imageUploadTitle } from './PrimaryImage';
+import { withPrimaryImage } from '../../../../../server/src/shared/mistPrimaryImage';
 import { SeasonWorkbench } from './SeasonsPage';
 import { CampaignWorkbench, leadOverdue } from './MarketingPage';
 import { ActionBar, DetailBlock } from './pageKit';
@@ -50,8 +52,9 @@ function Attachments({kind,row,locked=false}:{kind:AttachmentKind;row:{id:string
  const save=async(next:string[])=>{await w.command({type:'market.attachment.set',payload:{kind,id:row.id,fileIds:next}});setStaged([]);};
  return <Card><CardHeader title="附件与凭据"/><CardBody>
   {op.error&&<Banner tone="bad" title="附件未保存">{op.error}{staged.length>0&&<Button disabled={op.busy} onClick={()=>void op.execute(()=>save(ids))}>重试关联已上传附件</Button>}</Banner>}
-  {ids.map(id=>{const f=w.state?.files.find(f=>f.id===id);return f?<div className="mist-row" key={id}><FileText size={16}/><span>{f.name}{staged.includes(id)&&' · 待关联'}</span><span className="mist-spacer"/><TextLink onClick={()=>void op.execute(()=>w.downloadFile(f))}>下载</TextLink>{!locked&&<TextLink onClick={()=>void op.execute(()=>save(ids.filter(x=>x!==id)))}>移除</TextLink>}</div>:<p key={id}>附件暂不可用</p>;})}
-  {!locked&&<UploadZone title={op.busy?'附件处理中':'选择实际文件上传'} onFiles={files=>void op.execute(async()=>{const next=[...ids];for(const file of files){const uploaded=await w.uploadFile(file);next.push(uploaded.id);setStaged(current=>[...new Set([...current,uploaded.id])]);}await save(next);})}/>}
+  {kind==='product'&&<p className="mist-note">{PRIMARY_IMAGE_HINT}</p>}
+  {ids.map(id=>{const f=w.state?.files.find(f=>f.id===id),role=kind==='product'?imageRole(w.state?.files,ids,id):undefined;return f?<div className="mist-row" key={id}><FileText size={16}/><span>{f.name}{staged.includes(id)&&' · 待关联'}</span>{kind==='product'&&<ImageRoleTag files={w.state?.files} ids={ids} id={id}/>}<span className="mist-spacer"/>{!locked&&role==='supplement'&&<TextLink onClick={()=>void op.execute(()=>save(withPrimaryImage(ids,id)))}>设为主图</TextLink>}<TextLink onClick={()=>void op.execute(()=>w.downloadFile(f))}>下载</TextLink>{!locked&&<TextLink onClick={()=>void op.execute(()=>save(ids.filter(x=>x!==id)))}>移除</TextLink>}</div>:<p key={id}>附件暂不可用</p>;})}
+  {!locked&&<UploadZone title={op.busy?'附件处理中':kind==='product'?imageUploadTitle(w.state?.files,ids):'选择实际文件上传'} onFiles={files=>void op.execute(async()=>{const next=[...ids];for(const file of files){const uploaded=await w.uploadFile(file);next.push(uploaded.id);setStaged(current=>[...new Set([...current,uploaded.id])]);}await save(next);})}/>}
  </CardBody></Card>;
 }
 function ProductImage({row}:{row:MarketProduct}) {
@@ -61,7 +64,7 @@ function ProductImage({row}:{row:MarketProduct}) {
  if(!images.length)return null;
  return <section aria-label="产品图片" className="mist-col">
   {src&&file?<ObjectStage src={src} alt={row.name} caption={file.name}/>:failed?<Banner tone="bad" title="图片未能加载"><Button onClick={retry}>重试</Button></Banner>:<p className="mist-note" role="status">正在读取图片…</p>}
-  {images.length>1&&<div className="mist-product-gallery" role="group" aria-label="选择产品图片">{images.map((image,index)=><Button key={image.id} size="sm" aria-pressed={image.id===file?.id} onClick={()=>setSelected(image.id)}>{index+1} · {image.name}</Button>)}</div>}
+  {images.length>1&&<div className="mist-product-gallery" role="group" aria-label="选择产品图片">{images.map((image,index)=><Button key={image.id} size="sm" aria-pressed={image.id===file?.id} onClick={()=>setSelected(image.id)}>{index===0?'主图':`补充图 ${index}`} · {image.name}</Button>)}</div>}
  </section>;
 }
 
