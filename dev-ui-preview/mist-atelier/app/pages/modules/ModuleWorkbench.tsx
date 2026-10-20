@@ -1,10 +1,10 @@
 /** Shared T2/T3 lists and T4 editors. Domain pages own fields, transitions and authority. */
 import React from 'react';
 import { ArrowLeft, ArrowRight, Download, Edit3, Plus } from 'lucide-react';
-import { BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
+import { BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useNav } from '../../nav';
-import { useCompactLayout } from './pageKit';
+import { PreviewSummary, useCompactLayout, type PreviewSummaryData } from './pageKit';
 export type ModuleValue = string | number | boolean;
 export type ModuleValues = Record<string, ModuleValue>;
 export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'datetime-local'|'select'|'textarea'|'checkbox';options?:Array<{value:string;label:string}>;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string};
@@ -61,7 +61,7 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
 export type ModuleRowAction<T>={label:string;run:(row:T)=>Promise<unknown>|void;disabled?:(row:T)=>boolean};
 /** T2 quick preview: only what is needed to recognise the record and decide whether to open it.
  * Long sections (tables, attachments, history) belong to the full detail page, never to the 340px column. */
-export type ModulePreviewSummary={stage?:React.ReactNode;code?:React.ReactNode;title:React.ReactNode;status?:React.ReactNode;description?:React.ReactNode;facts?:Array<{label:React.ReactNode;value:React.ReactNode}>;extra?:React.ReactNode};
+export type ModulePreviewSummary=PreviewSummaryData;
 export type ModuleWorkbenchProps<T extends {id:string}>={title:string;eyebrow?:string;description?:string;rows:T[];columns:Column<NoInfer<T>>[];searchText?:(row:NoInfer<T>)=>string;rowKey?:(row:NoInfer<T>)=>string;exportRows?:(filtered:NoInfer<T>[])=>void;create?:ModuleEditorSpec;edit?:(row:NoInfer<T>)=>ModuleEditorSpec|undefined;detail?:(row:NoInfer<T>)=>React.ReactNode;detailSurface?:'card'|'sections';rowActions?:ModuleRowAction<NoInfer<T>>[];toolbar?:React.ReactNode;preview?:boolean;summary?:(row:NoInfer<T>)=>ModulePreviewSummary;openLabel?:string};
 export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,description,rows,columns,searchText,rowKey,exportRows,create,edit,detail,detailSurface='card',rowActions=[],toolbar,preview,summary,openLabel='打开完整详情'}:ModuleWorkbenchProps<T>){
   const workspace=useMistWorkspace(),toast=useToast(),{route,go}=useNav(),compact=useCompactLayout();
@@ -104,10 +104,7 @@ export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,descriptio
     {workspace.error&&<Banner tone="bad" title={workspace.error} actions={<Button onClick={()=>void workspace.refresh()}>重新读取</Button>} />}
     <Toolbar right={toolbar}><SearchField value={query} onChange={v=>{setQuery(v);setPage(1);}} placeholder={'搜索'+title} /></Toolbar>
     <section className={preview?'mist-split':'mist-grid'} data-preview-summary={preview?'':undefined}><Card className={preview?undefined:'mist-col-12'}><DataTable loading={workspace.loading} rows={filtered.slice((visiblePage-1)*size,visiblePage*size)} columns={columns} rowKey={getKey} selectedKey={selectionKey} onRowClick={r=>{setSelected(getKey(r));const {view,id,detail:detailMode,...target}=route;if(preview&&!compact)go(view,getKey(r),target,{keepScroll:true});else go(view,getKey(r),target);}} ariaLabel={title} empty={<EmptyState title={query?'没有匹配的记录':'还没有'+title+(title.endsWith('记录')?'':'记录')} description={query?'调整搜索条件后再试。':create?'创建第一条记录后即可在这里查看和继续处理。':'完成相关来源业务后，记录会显示在这里。'} action={!query&&create?<Button onClick={()=>setEditor(create)}>新建</Button>:undefined} />} footer={<div className="mist-row"><span className="mist-note">{filtered.length} 条记录</span><span className="mist-spacer"/><Pagination page={visiblePage} pages={pages} onChange={setPage}/></div>} /></Card>
-      {preview&&!compact&&<Card as="aside" className="mist-preview" aria-label="记录预览">{current&&previewSummary?<>{previewSummary.stage}<div className="mist-preview-b" data-module-detail>
-        <div className="mist-col mist-preview-head">{(previewSummary.code||previewSummary.status)&&<div className="mist-row">{previewSummary.code&&<span className="mist-mono mist-muted mist-preview-code">{previewSummary.code}</span>}<span className="mist-spacer"/>{previewSummary.status}</div>}<div className="mist-h2 mist-preview-title">{previewSummary.title}</div>{previewSummary.description&&<p className="mist-sub mist-preview-desc">{previewSummary.description}</p>}</div>
-        {!!previewSummary.facts?.length&&<Facts items={previewSummary.facts}/>}{previewSummary.extra}{controls}
-        <Button variant="primary" block iconRight={ArrowRight} onClick={openFullDetail}>{openLabel}</Button></div></>
+      {preview&&!compact&&<Card as="aside" className="mist-preview" aria-label="记录预览">{current&&previewSummary?<PreviewSummary data={previewSummary} actions={controls} openLabel={openLabel} onOpen={openFullDetail} data-module-detail=""/>
       :<div className="mist-preview-b">{body}{current&&<Button variant="primary" block iconRight={ArrowRight} onClick={openFullDetail}>{openLabel}</Button>}</div>}</Card>}</section>
     <ModuleEditorDialog spec={editor} onClose={()=>setEditor(null)} />
   </MistPage>;

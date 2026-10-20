@@ -219,10 +219,10 @@
 .mist-preview-b { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 14px; }
 /* 列表 + 详情：选中对象后详情加宽（约 56%），列表按 data-col 逐列收起次要列；详情超出视口时在面板内滚动。 */
 @media (min-width: 1181px) {
-  .mist-split[data-list-detail]:has(> .mist-preview > .mist-preview-b) { grid-template-columns: minmax(0, 44fr) minmax(0, 56fr); }
+  .mist-split[data-list-detail]:not([data-preview-summary]):has(> .mist-preview > .mist-preview-b) { grid-template-columns: minmax(0, 44fr) minmax(0, 56fr); }
 }
 @media (min-width: 1181px) and (max-width: 1320px) {
-  .mist-split[data-list-detail]:has(> .mist-preview > .mist-preview-b) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .mist-split[data-list-detail]:not([data-preview-summary]):has(> .mist-preview > .mist-preview-b) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 @media (min-width: 1181px) {
   .mist-split[data-list-detail] > .mist-preview { max-height: calc(100dvh - 112px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }

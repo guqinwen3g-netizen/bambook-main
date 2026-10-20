@@ -21,7 +21,7 @@ beforeEach(() => {
   bridge.current = { state, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
-async function mount(id?: string, section?: string) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.seasons; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'seasons', id, section }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function mount(id?: string, section?: string, detail?: 'full') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.seasons; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'seasons', id, section, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string, scope: ParentNode = document.body) => [...scope.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(b: HTMLButtonElement | undefined) { expect(b).toBeTruthy(); await act(async () => b!.click()); }
 
@@ -40,17 +40,20 @@ describe('季节性与趋势', () => {
     expect(tl.querySelectorAll('.mist-season-row').length).toBe(state.market.seasons.length);
     expect(tl.querySelector('.mist-season-today')).toBeTruthy();
     expect(tl.querySelector('.mist-season-bar[data-status="Closed"]')).toBeTruthy();
+    expect(host.querySelector('aside.mist-preview')!.textContent).toContain('打开季节详情');
+    await act(async () => root!.unmount()); host.remove(); await mount(season('AW27').id, undefined, 'full');
+    expect(host.querySelector('[data-season-timeline]')).toBeNull();
     const d = host.querySelector(`[data-season-detail="${season('AW27').id}"]`)!;
     expect(d.textContent).toContain('首样评审'); expect(d.textContent).toContain('订货会'); expect(d.textContent).toContain('21 天后');
     expect(d.querySelector('[data-season-business]')).toBeTruthy();
     await click(button('打开', d)); expect(go).toHaveBeenCalledWith('orders/detail', expect.any(String), undefined);
   });
   it('已结束季节显示回顾操作，趋势详情列出面料档案与客户', async () => {
-    await mount(season('AW26').id);
+    await mount(season('AW26').id, undefined, 'full');
     expect(host.querySelector(`[data-season-detail="${season('AW26').id}"]`)!.textContent).toContain('已结束');
     await act(async () => root!.unmount()); host.remove();
     const trend = state.market.trends.find(t => t.name === '软糯双面呢回归')!;
-    await mount(trend.id, 'trends');
+    await mount(trend.id, 'trends', 'full');
     const d = host.querySelector(`[data-trend-detail="${trend.id}"]`)!;
     expect(d.textContent).toContain('Première Vision 面料趋势区');
     expect(d.querySelector('[data-trend-customers]')).toBeTruthy();
@@ -58,7 +61,7 @@ describe('季节性与趋势', () => {
   });
   it('展会线索：逾期提醒、已转客户直达商机、转入 CRM 走真实命令', async () => {
     const pv = show('Première Vision');
-    await mount(pv.id, 'shows');
+    await mount(pv.id, 'shows', 'full');
     const d = host.querySelector(`[data-show-detail="${pv.id}"]`)!;
     expect(d.textContent).toContain('条线索跟进逾期'); expect(d.textContent).toMatch(/逾期 6 天/);
     expect(button('客户业务 · 商机', d)).toBeTruthy();
@@ -73,6 +76,6 @@ describe('季节性与趋势', () => {
   it('旧的展会线索深链落到展会页签', async () => {
     const pv = show('Première Vision');
     await mount(undefined, `show-leads:${pv.id}`);
-    expect(host.querySelector(`[data-show-detail="${pv.id}"]`)).toBeTruthy();
+    expect(host.querySelector('aside.mist-preview')!.textContent).toContain(pv.name);
   });
 });

@@ -20,7 +20,7 @@ beforeEach(() => {
   bridge.current = { state, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
-async function mount(id?: string) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.suppliers; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'suppliers', id }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function mount(id?: string, detail?: 'full') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.suppliers; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'suppliers', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
 
@@ -40,8 +40,17 @@ describe('供应商管理', () => {
     expect(list.textContent).toContain('已过期 5 天'); expect(list.textContent).toContain('20 天后到期');
     expect(list.textContent).toContain('100%');
   });
+  it('列表预览只给摘要，打开供应商档案进入完整详情并可返回原列表', async () => {
+    const id = named('江南成衣').id; await mount(id);
+    const preview = host.querySelector('aside.mist-preview')!;
+    expect(preview.textContent).toContain('江南成衣'); expect(preview.querySelector('[data-supplier-detail]')).toBeNull(); expect(preview.textContent).not.toContain('评级历史');
+    await click('打开供应商档案'); expect(go).toHaveBeenLastCalledWith('suppliers', id, { detail: 'full' });
+    root!.unmount(); host.remove(); await mount(id, 'full');
+    expect(host.querySelector('[data-list-detail-page] [data-supplier-detail]')).not.toBeNull(); expect(host.querySelector('[role="row"]')).toBeNull();
+    await click('返回供应商管理'); expect(go).toHaveBeenLastCalledWith('suppliers', id, {}, { keepScroll: true });
+  });
   it('认证过期的供应商：详情提示、认证有效期、评级历史；询价比价带供应商进入采购询价', async () => {
-    await mount(named('江南成衣').id);
+    await mount(named('江南成衣').id, 'full');
     const detail = host.querySelector('[data-supplier-detail]')!;
     expect(detail.textContent).toContain('有认证已过期');
     expect(host.querySelector('[data-supplier-certs]')!.textContent).toMatch(/BSCI.*已过期 5 天.*ISO 9001/);
@@ -50,7 +59,7 @@ describe('供应商管理', () => {
     expect(go).toHaveBeenLastCalledWith('procurement', undefined, { section: 'rfq:' + named('江南成衣').id });
   });
   it('已暂停的供应商显示原因与生效日，只能恢复合作', async () => {
-    await mount(named('恒彩印花').id);
+    await mount(named('恒彩印花').id, 'full');
     const detail = host.querySelector('[data-supplier-detail]')!;
     expect(detail.textContent).toContain('已暂停 · 2026-10-14 起');
     expect(detail.textContent).toContain('色牢度两批不达标');
@@ -58,7 +67,7 @@ describe('供应商管理', () => {
     expect(button('询价比价')!.disabled).toBe(true); expect(detail.textContent).toContain('供应商当前不可合作，不能邀请报价');
   });
   it('暂停前列出在手业务，说明继续执行与如何转给其他供应商', async () => {
-    await mount(named('华盛毛纺').id);
+    await mount(named('华盛毛纺').id, 'full');
     const lining = state.fulfillment.purchases.find(p => p.description.includes('里布'))!;
     expect(host.querySelector('[data-supplier-detail]')!.textContent).toContain(lining.code);
     await click('暂停合作');

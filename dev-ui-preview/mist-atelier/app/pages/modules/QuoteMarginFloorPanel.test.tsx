@@ -53,7 +53,7 @@ describe('BB-QUO-3 定价参数 · 报价底价线', () => {
     const q = state.market.quotations.find(x => x.code === 'QT-2026-0004')!; q.approval = null; q.requiresApproval = false;
     q.lines = q.lines.map((l, i) => i === 0 ? { ...l, price: '100.00', cost: '88.00', costBasis: 'product', marginFloor: { id: 'f', family: 'fabric', version: 1, minMarginPercent: '15', effectiveFrom: '2026-10-01' } } : { ...l, price: '10.00', cost: '1.00', costBasis: 'product' });
     host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.quotations;
-    await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'quotations', id: q.id }, go: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>));
+    await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'quotations', id: q.id, detail: 'full' }, go: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>));
     expect(host.querySelector('[data-margin-floor-breach]')?.textContent).toBe('低于最低毛利率 15%（V1）');
     expect(host.textContent).toContain('须先审批');
   });

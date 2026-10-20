@@ -72,7 +72,7 @@ export function QuotationHistoryPage() {
   const name = (id: string) =>
     w.state?.customers.find((x) => x.id === id)?.name || "客户身份不可见";
   const back = () => {
-    if (scope.isCurrent()) go("quotations", q?.id || route.id);
+    if (scope.isCurrent()) go("quotations", q?.id || route.id, { detail: "full" });
   };
   const select = (key: keyof HistoryFilter, value: string) => {
     setPicked("");
@@ -239,7 +239,7 @@ export function QuotationHistoryPage() {
             )}
           </Banner>
           <div className="mist-row mist-module-actions">
-            <Button onClick={() => go("quotations", quote.id)}>
+            <Button onClick={() => go("quotations", quote.id, { detail: "full" })}>
               查看准确报价
             </Button>
             <Button

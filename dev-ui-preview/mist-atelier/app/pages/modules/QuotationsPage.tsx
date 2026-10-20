@@ -17,7 +17,7 @@ import { defaultMemberId, memberSelectOptions, workspaceMembers } from '../../ru
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 
 /** 报价金额是十进制字符串；只在显示时加千分位，导出与计算仍用原值。 */
 const quoteMoney = (value: string) => { const n = Number(value); return value && Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value; };
@@ -77,6 +77,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const [domainChoice, setDomainChoice] = React.useState<QuoteDomain | null>(null), [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
+  const full = useListDetailRoute();
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDomainChoice(null); } }, [route.id]);
   const day = marketBusinessDate(businessNow());
   const all = state?.market.quotations || [];
@@ -175,6 +176,14 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
         onDecide={d => setDialog(decideSpec(selected, d))} onStatus={s => setDialog(evidenceSpec(selected, s))} onConvert={() => setDialog(convertSpec(selected))} onSkip={() => setDialog(skipSpec(selected))} onDocument={draft => generateDocument(selected, draft)} onDownloadDocument={downloadDocument} onPrintDocument={printDocument}
         onExport={() => exportQuote(selected)} onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can || selected.status !== 'Draft' || selected.approval?.status === 'pending')} history={history(selected.id)} />
     : <EmptyState icon={FileText} title="报价单详情" description="从左侧列表选择一份报价，查看条目、版本、审批与客户反馈。" compact />;
+  const summary = selected ? (() => {
+    const stage = quotationStage(selected), flags = quotationFlags(all, selected, day);
+    return <PreviewSummary openLabel="打开报价单" onOpen={() => full.open(selected.id)} data={{ code: <>{selected.code} · {version(selected)}</>, status: <Pill tone={STAGE_TONE[stage]}>{quotationStageLabel(selected)}</Pill>, title: customerName(selected.customerId),
+      description: selected.season ? `季节 ${selected.season}` : undefined,
+      facts: [{ label: '金额', value: <span className="mist-num">{selected.currency} {quoteMoney(selected.total)}</span> }, { label: '条目', value: `${selected.lines.length} 行` }, { label: '贸易术语', value: selected.deliveryTerms || '未填' }, { label: '付款条件', value: selected.paymentTerms || '未填' }, { label: '有效期至', value: selected.validUntil || '未填' }],
+      extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(f => <Pill key={f.key} tone={f.tone}>{f.label}</Pill>)}</div> : undefined }} />;
+  })() : null;
+  if (full.active && selected && state) return <ListDetailPage backLabel="报价管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title="报价操作未完成">{failure || error}</Banner></div>}{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow="订单履约 · 报价" title="报价管理" description="按客户接受的版本转订单；改价或续期另出新版本，旧版本保留。"
       actions={<>
@@ -199,7 +208,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${customerName(selected.customerId)}` : '报价单详情'} drawerSub={selected ? `${selected.currency} ${quoteMoney(selected.total)}` : undefined}
       list={<Card><DataTable ariaLabel={`${domain === 'fabric' ? '面料' : '成衣'}报价列表`} loading={loading} rows={rows} rowKey={q => q.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
-      detail={detail} />
+      detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }

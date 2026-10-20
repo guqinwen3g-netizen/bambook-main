@@ -14,7 +14,7 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:sess
 import {ShipmentsPage,shipmentStage} from './ShipmentsPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'shipments',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ShipmentsPage/></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'shipments',id,...(id?{detail:'full' as const}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ShipmentsPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'经办人',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
@@ -65,7 +65,7 @@ it('shows why documents cannot be marked ready and hides request edits once logi
   expect(getByRole(detail,'table',{name:'S 来源范围'}).textContent).toContain('10 / 10 件');
 });
 
-it('gates departure on customer dispatch and export clearance, then records ATD in a dialog over the list',async()=>{
+it('gates departure on customer dispatch and export clearance, then records ATD in a dialog over the full detail page',async()=>{
   const f=store.state!.fulfillment;f.shipments.push(shipment('s',{state:'ready',booking:'BK',documentsSentAt:'2026-10-12T08:00:00Z'}));f.customs.push(customs('s','submitted'));
   render('s');
   let detail=host.querySelector('[data-shipment-detail="s"]') as HTMLElement;
@@ -74,7 +74,7 @@ it('gates departure on customer dispatch and export clearance, then records ATD 
   f.customs[0].status='cleared';store.state={...store.state!};render('s');
   detail=host.querySelector('[data-shipment-detail="s"]') as HTMLElement;
   await click(getByRole(detail,'button',{name:'登记实际离港'}));
-  const dialog=getByRole(document.body,'dialog');expect(getByRole(host,'table',{name:'出运列表'})).toBeTruthy();
+  const dialog=getByRole(document.body,'dialog');expect(host.querySelector('[data-list-detail-page]')).toBeTruthy();
   typeInto(getByRole(dialog,'textbox',{name:'实际离港 / 起飞依据'}) as HTMLTextAreaElement,'船公司离港通知');
   await click(getByRole(dialog,'button',{name:'登记离港'}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.depart',payload:expect.objectContaining({id:'s',evidence:'船公司离港通知'})}));

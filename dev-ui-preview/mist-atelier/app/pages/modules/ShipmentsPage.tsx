@@ -13,7 +13,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute, type ReasonedAction } from './pageKit';
 
 function ShipmentEditor({ shipment, onClose }: {
     shipment?: FulfillmentShipment;
@@ -150,6 +150,7 @@ export function ShipmentsPage() {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
   const [editing, setEditing] = useRouteDraft<FulfillmentShipment | 'new' | null>(null), [packing, setPacking] = useRouteDraft<FulfillmentShipment | null>(null);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
+  const full = useListDetailRoute();
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   React.useEffect(() => { if (route.id) { setPicked(route.id); setDrawer(true); setDomainChoice(null); } }, [route.id]);
@@ -205,6 +206,15 @@ export function ShipmentsPage() {
         onSamples={() => go('samples', undefined, { section: 'shipment:' + selected.id, customerId: selected.customerId })} />
     : <EmptyState icon={Ship} title="出运详情" description={loading ? '正在读取出运' : '从列表选择一票出运，查看来源范围、装箱、单证与离港轨迹'} compact />;
 
+  const summary = selected && state ? (() => {
+    const stage = shipmentStage(state, selected), flags = shipmentFlags(state, selected, day), orders = new Set(selected.lines.map(line => line.orderId)).size;
+    return <PreviewSummary openLabel="打开出运详情" onOpen={() => full.open(selected.id)} data={{ code: selected.code, status: <Pill tone={STAGE_TONE[stage]}>{STAGE_LABEL[stage]}</Pill>, title: selected.customer,
+      description: `${MODE_LABEL[selected.mode]} · ${selected.portOfLoading} → ${selected.portOfDischarge}`,
+      facts: [{ label: '收货方', value: selected.consignee || '未填' }, { label: '贸易术语', value: selected.incoterm || '未填' }, { label: '计划出运', value: selected.plannedDate || '未定' }, { label: '订舱号', value: selected.booking || '未订舱' }, { label: '来源', value: `${orders} 个订单 · ${selected.lines.length} 行` }],
+      extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{flag.label}</Pill>)}</div> : undefined }} />;
+  })() : null;
+  if (full.active && selected && state) return <ListDetailPage backLabel="货运管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title="出运操作未完成">{failure || error}</Banner></div>}{detail}</ListDetailPage>;
+
   return <MistPage width="wide">
     <PageHeader eyebrow="订单履约 · 出运" title="货运管理"
       description={invalidSource ? '指定订单不存在或客户不匹配，请重新选择准确来源，不能创建其他订单的出运。' : sourceOrder ? `${sourceOrder.code} · ${sourceOrder.customer} · 仅显示当前订单相关出运。` : '业务员按完工分支发起出运；后勤核实装箱、订舱与单证后交回业务对客发送，再登记实际离港。'}
@@ -233,7 +243,7 @@ export function ShipmentsPage() {
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.customer}` : '出运详情'} drawerSub={selected ? `${MODE_LABEL[selected.mode]} · ${selected.portOfLoading} → ${selected.portOfDischarge}` : undefined}
       list={<Card><DataTable ariaLabel="出运列表" loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
-      detail={detail} />
+      detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }
