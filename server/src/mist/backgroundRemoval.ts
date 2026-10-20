@@ -17,7 +17,8 @@ async function session(){
   const path=process.env.BAMBOOK_BACKGROUND_REMOVAL_MODEL?.trim();if(!path)return undefined;
   const info=await stat(path);if(!info.isFile()||info.size<1024*1024)throw new Error('背景移除模型文件无效');
   const expected=process.env.BAMBOOK_BACKGROUND_REMOVAL_MODEL_SHA256?.trim().toLowerCase();if(expected&&await sha256(path)!==expected)throw new Error('背景移除模型摘要不匹配');
-  const ort:Ort=await import('onnxruntime-node');return ort.InferenceSession.create(path,{executionProviders:['cpu']});
+  const ort:Ort=await import('onnxruntime-node');// 关闭 CPU 内存池与内存模式缓存：否则每张图都会让常驻内存再涨 ~600MB，worker 处理第二张就会被 OOM 杀掉；关闭后稳定在 ~600MB 且不变慢。
+  return ort.InferenceSession.create(path,{executionProviders:['cpu'],enableCpuMemArena:false,enableMemPattern:false});
  })().catch(error=>{if(!warned){warned=true;console.error('[image-cutout] model unavailable:',error instanceof Error?error.message:String(error));}return undefined;});
  return sessionPromise;
 }
