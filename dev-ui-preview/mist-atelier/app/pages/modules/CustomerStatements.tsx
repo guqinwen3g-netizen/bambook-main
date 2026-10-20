@@ -9,6 +9,7 @@ import { customerHasStatementItems, customerStatementBlocker, readCustomerStatem
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { apiService } from '../../../../../services/apiService';
+import { PreviewButton } from '../../runtime/files';
 
 /** 截至今天可出对账单的客户（有未结应收或同名待核销到账）。 */
 export function statementCustomers(state: MistState | null, today: string) {
@@ -50,6 +51,7 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
         <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span>{nameOf(r.customerId)}</span><small className="mist-muted">截至 {r.asOf} · {r.generatedBy} · {r.generatedAt.replace('T', ' ').slice(0, 16)}</small></span>
         {r.totals.map(t => <Pill key={t.currency} tone="neutral">净欠 {Number(t.net).toLocaleString('en-US', { minimumFractionDigits: 2 })} {t.currency}</Pill>)}
         <span className="mist-spacer" />
+        <PreviewButton file={fileOf(r.fileId)} disabled={busy} />
         <Button size="sm" variant="quiet" icon={Download} disabled={busy} onClick={() => download(r.fileId)}>下载</Button>
         <Button size="sm" variant="quiet" icon={ExternalLink} disabled={busy} onClick={() => open(r.fileId)}>打开</Button>
       </div>) : <span className="mist-note">尚未生成。生成后按当时台账冻结内容并归档原件；台账变动后重新生成新编号，旧份保留。</span>}

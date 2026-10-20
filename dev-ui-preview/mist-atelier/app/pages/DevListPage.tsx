@@ -13,6 +13,7 @@ import { useNav } from '../nav';
 import { useCompactLayout } from './modules/pageKit';
 import { DEVELOPMENT_LIST_TABS, SOURCING_CREATE_ID, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from '../developmentEntry';
 import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
+import { FileName } from '../runtime/files';
 
 type CsvDev = Pick<MistDev,'id'|'name'|'style'|'customer'|'owner'|'due'|'stage'|'state'|'ver'|'factory'> & {code?:string};
 export function developmentCsv(rows:CsvDev[]):string {
@@ -133,7 +134,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
         {fabricId&&<><Field label="寻样答复" full><TextArea readOnly={selectedFabric?.confirmed} value={fabricForm.answer} onChange={event=>setFabricForm(form=>({...form,answer:event.target.value}))} /></Field><Field label="确认或补充说明" full><TextArea readOnly={selectedFabric?.confirmed} value={fabricForm.note} onChange={event=>setFabricForm(form=>({...form,note:event.target.value}))} /></Field></>}
       </FormGrid>
       {fabricId&&!selectedFabric?.confirmed&&<UploadZone hint="上传候选面料资料" onFiles={files=>void uploadAnswer(files)} />}
-      {fabricForm.fileIds.map(id=>{const file=state?.files.find(item=>item.id===id);return file?<div className="mist-row mist-section" key={id}><span>{file.name}</span><TextLink onClick={()=>void downloadFile(file).catch(cause=>setFailure(String(cause)))}>下载</TextLink>{!selectedFabric?.confirmed&&<TextLink onClick={()=>setFabricForm(form=>({...form,fileIds:form.fileIds.filter(item=>item!==id)}))}>移除</TextLink>}</div>:null;})}
+      {fabricForm.fileIds.map(id=>{const file=state?.files.find(item=>item.id===id);return file?<div className="mist-row mist-section" key={id}><FileName file={file} files={fabricForm.fileIds.map(x=>state?.files.find(item=>item.id===x))}/><TextLink onClick={()=>void downloadFile(file).catch(cause=>setFailure(String(cause)))}>下载</TextLink>{!selectedFabric?.confirmed&&<TextLink onClick={()=>setFabricForm(form=>({...form,fileIds:form.fileIds.filter(item=>item!==id)}))}>移除</TextLink>}</div>:null;})}
     </Dialog>
   </MistPage>;
 }

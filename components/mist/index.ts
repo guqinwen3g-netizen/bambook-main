@@ -15,3 +15,4 @@ export * from './ai';
 export * from './shell';
 
 export * from './AssistantEyes';
+export * from './filePreview';

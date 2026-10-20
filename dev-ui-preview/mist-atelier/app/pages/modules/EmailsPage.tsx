@@ -9,6 +9,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { Events } from './fulfillmentKit';
 import { ActionBar, DetailBlock, DetailBody, DetailSurface, shortWhen, todayIso, useCompactLayout, type ReasonedAction } from './pageKit';
+import { FileName } from '../../runtime/files';
 
 export type MailFolder = 'inbox' | 'drafts' | 'outbox' | 'sent' | 'archive' | 'trash';
 export type MailView = 'unread' | 'starred' | 'important' | 'followup' | 'unlinked';
@@ -444,7 +445,7 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
     <div className="mist-mail-body">{m.body}</div>
     {m.attachments.length > 0 && <DetailBlock title={`附件（${m.attachments.length}）`}>
       {m.attachments.map(file => { const stored = !!file.fileId && state.files.some(row => row.id === file.fileId);
-        return <div key={file.id} className="mist-row mist-mail-attachment"><Paperclip size={14} /><span className="mist-mail-ellipsis">{file.name}</span><small className="mist-muted">{sizeText(file.size)}</small><span className="mist-spacer" />
+        return <div key={file.id} className="mist-row mist-mail-attachment"><Paperclip size={14} />{stored ? <FileName file={state.files.find(row => row.id === file.fileId)!} files={m.attachments.map(a => a.fileId ? state.files.find(row => row.id === a.fileId) : undefined)} label={file.name} /> : <span className="mist-mail-ellipsis">{file.name}</span>}<small className="mist-muted">{sizeText(file.size)}</small><span className="mist-spacer" />
           <Button size="sm" icon={Download} disabled={!stored} title={stored ? undefined : m.example ? '示例附件没有文件内容' : file.omitted || '附件内容未保存，请重新同步'} onClick={() => stored && onDownload(file.fileId!)}>下载</Button></div>; })}
       {m.example ? <span className="mist-note">示例附件无文件，不能下载。</span> : m.attachments.filter(file => file.omitted).map(file => <span key={file.id} className="mist-note">{file.name}：{file.omitted}</span>)}
     </DetailBlock>}
@@ -497,7 +498,7 @@ function DraftDetail({ draft: d, state, can, locked, onEdit, onDelete, onSend }:
     <div className="mist-mail-body">{d.body || '正文为空'}</div>
     {(d.links.length > 0 || d.fileIds.length > 0) && <DetailBlock title="关联与附件">
       {d.links.map(row => <span key={linkKey(row)} className="mist-sub">{EMAIL_LINK_LABEL[row.kind]} · {emailLinkTarget(state, row)?.label || '对象已不可用'}</span>)}
-      {d.fileIds.map(id => <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />{state.files.find(file => file.id === id)?.name || '文件不可用'}</span>)}
+      {d.fileIds.map(id => { const f = state.files.find(file => file.id === id); return f ? <FileName key={id} file={f} files={d.fileIds.map(x => state.files.find(file => file.id === x))} /> : <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />文件不可用</span>; })}
     </DetailBlock>}
   </DetailBody>;
 }
@@ -528,7 +529,7 @@ function SendDetail({ send: row, state, can, me, locked, onRetry, onVerify, onCo
     <Facts items={[{ label: '发件身份', value: row.from }, { label: '发起人', value: `${row.createdBy} · ${when(row.createdAt)}` }]} />
     <DetailBlock title={`收件人结果（${recipients.length}）`}>{recipients.map(item => <div key={item.address} className="mist-row" data-recipient={item.address} style={{ flexWrap: 'wrap' }}><Pill tone={RECIPIENT_STATUS[item.status].tone}>{RECIPIENT_STATUS[item.status].label}</Pill><span className="mist-sub">{item.address}</span><small className="mist-muted">{ROLE_LABEL[item.role]}</small>{item.reply && <small className="mist-muted" style={{ flexBasis: '100%', overflowWrap: 'anywhere' }}>{item.reply}</small>}</div>)}</DetailBlock>
     <div className="mist-mail-body">{row.body || '正文为空'}</div>
-    {row.fileIds.length > 0 && <DetailBlock title={`附件（${row.fileIds.length}）`}>{row.fileIds.map(id => <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />{state.files.find(file => file.id === id)?.name || '文件不可用'}</span>)}</DetailBlock>}
+    {row.fileIds.length > 0 && <DetailBlock title={`附件（${row.fileIds.length}）`}>{row.fileIds.map(id => { const f = state.files.find(file => file.id === id); return f ? <FileName key={id} file={f} files={row.fileIds.map(x => state.files.find(file => file.id === x))} /> : <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />文件不可用</span>; })}</DetailBlock>}
     <DetailBlock title="投递记录">{row.attempts.map((attempt, index) => <div key={index} className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={attempt.outcome === 'accepted' || attempt.outcome === 'verified' ? 'ok' : attempt.outcome === 'failed' ? 'bad' : attempt.outcome === 'unknown' || attempt.outcome === 'not_found' || attempt.outcome === 'partial' || attempt.outcome === 'copy_found' ? 'warn' : 'neutral'}>{ATTEMPT_LABEL[attempt.outcome]}</Pill><span className="mist-sub">{attempt.message}</span><span className="mist-spacer" /><small className="mist-muted">{attempt.actor} · {when(attempt.at)}</small></div>)}</DetailBlock>
   </DetailBody>;
 }
