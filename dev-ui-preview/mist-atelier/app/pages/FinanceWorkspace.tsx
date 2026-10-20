@@ -8,7 +8,7 @@ import { isActiveMistInvoice, mistBankAccountBalances, mistFxLockUsage, type Mis
 import { AccountAssignDialog, BankAccountDialog, FxAllocateDialog, FxDialog, fxUnallocatedMinor, FxPeriodRatesCard, FxReverseDialog, FxRevaluationCard, AccountStatusCell, accountLabel, editAccountDraft, newAccountDraft, newFxDraft, useBankAccountCommand } from './FinanceBankAccounts';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
-import { ActionBar, DetailBlock, DetailBody, ListDetail } from './modules/pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute } from './modules/pageKit';
 import { downloadMistCsv } from './OrderListPage';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { supplierPayableSummary } from '../../../../server/src/shared/mistPayables';
@@ -55,7 +55,7 @@ export function financeRecords(state: MistState | null): FinanceRecord[] {
 export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void }) {
   const { state, loading } = useMistWorkspace(), { route, go } = useNav();
   const [query, setQuery] = React.useState(''), [direction, setDirection] = React.useState<'all' | 'receipt' | 'payment'>('all'), [currency, setCurrency] = React.useState('all');
-  const [selected, setSelected] = React.useState(route.id || ''), [drawer, setDrawer] = React.useState(!!route.id);
+  const [selected, setSelected] = React.useState(route.id || ''), [drawer, setDrawer] = React.useState(!!route.id), full = useListDetailRoute();
   React.useEffect(() => { setSelected(route.id || ''); setDrawer(!!route.id); }, [route.id]);
   const rows = financeRecords(state), currencies = [...new Set(rows.map(r => r.currency))].sort();
   const shown = rows.filter(r => (direction === 'all' || r.direction === direction) && (currency === 'all' || r.currency === currency) && (!query.trim() || `${r.code} ${r.party} ${r.ref} ${r.date}`.toLowerCase().includes(query.trim().toLowerCase())));
@@ -81,12 +81,22 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     </DetailBlock>}
     {!current.receipt && (supplierPayment ? <Banner title="供应商付款">已在应付待办登记，分配到票据的明细在那里查看；付出账户在上方“公司银行账户”归属。</Banner> : <Banner title="只读付款事实">本记录没有应付分配，不能据此推导供应商未付余额。</Banner>)}
   </DetailBody> : <EmptyState compact title={route.id ? '未找到交易记录' : '交易详情'} description="选择一笔记录查看原币金额、核销来源及归属账户。" />;
+  const assignDialog = assigning && state && current && currentRow && <AccountAssignDialog state={state} kind={current.direction} row={currentRow} onClose={() => setAssigning(false)} />;
+  if (full.active && current) return <ListDetailPage backLabel="收付款记录" onBack={full.back} after={assignDialog}>{detail}</ListDetailPage>;
+  const summary = current ? <PreviewSummary openLabel="打开交易详情" onOpen={() => full.open(current.id)} data={{
+    code: current.code, status: <Pill tone={current.direction === 'receipt' ? 'accent' : 'neutral'}>{current.direction === 'receipt' ? '实际收款' : '付款记录'}</Pill>,
+    title: money(current.amount, current.currency), description: current.party,
+    facts: [
+      { label: '交易日期', value: current.date }, { label: '银行参考 / 附言', value: current.ref || '未填写' },
+      { label: '归属账户', value: account ? `${account.code} · ${account.name}` : <Pill tone="warn">未归属</Pill> },
+      ...(current.receipt ? [{ label: '未分配', value: money(current.receipt.remaining, current.currency) }] : [{ label: '应付分配', value: supplierPayment ? '已在应付待办登记' : '未关联供应商' }]),
+    ] }} /> : null;
   return <div className="mist-col">
     <Toolbar><SearchField value={query} onChange={setQuery} placeholder="搜索流水号、对方、附言或日期" /><Button onClick={() => downloadMistCsv('收付款记录.csv', ['流水', '方向', '日期', '对方', '金额', '币种', '附言'], shown.map(r => [r.code, r.direction === 'receipt' ? '收款' : '付款', r.date, r.party, r.amount, r.currency, r.ref]))}>导出当前记录</Button></Toolbar>
     <Segmented<'all' | 'receipt' | 'payment'> value={direction} onChange={setDirection} options={[{ value: 'all', label: `全部 · ${rows.length}` }, { value: 'receipt', label: `收款 · ${rows.filter(r => r.direction === 'receipt').length}` }, { value: 'payment', label: `付款 · ${rows.filter(r => r.direction === 'payment').length}` }]} />
     <Segmented value={currency} onChange={setCurrency} options={[{ value: 'all', label: '全部币种' }, ...currencies.map(c => ({ value: c, label: c }))]} />
-    {assigning && state && current && currentRow && <AccountAssignDialog state={state} kind={current.direction} row={currentRow} onClose={() => setAssigning(false)} />}
-    <ListDetail drawerOpen={drawer && !!current} drawerTitle={current?.code || '交易详情'} onDrawerClose={() => setDrawer(false)} detail={detail} list={<Card><DataTable ariaLabel="收付款记录" rows={shown} columns={columns} loading={loading} selectedKey={selected} rowKey={r => r.id} onRowClick={r => { setSelected(r.id); setDrawer(true); go('payment-vouchers', r.id, { section: 'records' }, { keepScroll: true }); }} empty={<EmptyState title={rows.length ? '没有符合条件的收付款记录' : '还没有收付款记录'} action={rows.length ? <Button onClick={() => { setQuery(''); setDirection('all'); setCurrency('all'); }}>清除筛选</Button> : undefined} />} /></Card>} />
+    {assignDialog}
+    <ListDetail drawerOpen={drawer && !!current} drawerTitle={current?.code || '交易详情'} onDrawerClose={() => setDrawer(false)} detail={detail} summary={summary} list={<Card><DataTable ariaLabel="收付款记录" rows={shown} columns={columns} loading={loading} selectedKey={selected} rowKey={r => r.id} onRowClick={r => { setSelected(r.id); setDrawer(true); go('payment-vouchers', r.id, { section: 'records' }, { keepScroll: true }); }} empty={<EmptyState title={rows.length ? '没有符合条件的收付款记录' : '还没有收付款记录'} action={rows.length ? <Button onClick={() => { setQuery(''); setDirection('all'); setCurrency('all'); }}>清除筛选</Button> : undefined} />} /></Card>} />
   </div>;
 }
 

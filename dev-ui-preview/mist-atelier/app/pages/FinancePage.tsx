@@ -150,6 +150,7 @@ export function FinancePage() {
     else downloadMistCsv('核销明细.csv', ['流水', '发票', '核销金额', '币种', '时间', '操作人'], allocations.map(item => [receipts.find(receipt => receipt.id === item.receiptId)?.code ?? item.receiptId, invoices.find(invoice => invoice.id === item.invoiceId)?.code ?? item.invoiceId, item.amount, item.currency, item.createdAt, item.actor]));
     toast('已导出当前台账');
   };
+  if(area==='records'&&route.detail==='full'&&route.id)return <FinanceRecords onReceipt={openReceipt}/>;
   return <MistPage>
     <PageHeader eyebrow="财务与成本 · 财务" title="财务管理" description="票据、收付款与资金归属分别记录；不以财务状态替代业务履约。"
       actions={<>{(area==='receivables'||area==='records')&&<>{area==='records'&&<Button icon={Upload} disabled={busy||!canVoucher} onClick={()=>fileInput.current?.click()}>导入流水</Button>}<Button icon={Upload} disabled={busy||!canVoucher} onClick={() => tab === 'pay'||area==='records' ? setPaymentOpen(true) : fileInput.current?.click()}>{tab === 'pay'||area==='records' ? '登记付款' : '导入流水'}</Button>{area==='receivables'&&<Button icon={Download} onClick={exportRows}>导出</Button>}</>}<Button disabled={busy} onClick={()=>void refresh()}>刷新</Button></>} />

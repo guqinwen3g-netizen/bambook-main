@@ -20,7 +20,7 @@ beforeEach(() => {
   bridge.current = { state, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
-async function mount(id?: string) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function mount(id?: string, mode: 'full' | 'list' = id ? 'full' : 'list') { const detail = mode === 'full' ? mode : undefined; host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.relations; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'relations', id, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
 
@@ -33,6 +33,15 @@ describe('关系智库', () => {
     const lune = state.market.relations.find(r => r.hold)!;
     expect(lune.hold!.reason).toContain('尾款逾期');
     expect(relationBusiness(state, lune).total).toBeGreaterThan(0);
+  });
+  it('列表预览只显示摘要，打开组织档案进入独立详情页，返回关系智库', async () => {
+    const id = named('博远').id; await mount(id, 'list');
+    const preview = host.querySelector('aside.mist-preview')!;
+    expect(preview.textContent).toContain('博远'); expect(preview.querySelector('[data-relation-detail]')).toBeNull();
+    await click('打开组织档案'); expect(go).toHaveBeenLastCalledWith('relations', id, { detail: 'full' });
+    await act(async () => root!.unmount()); host.remove(); await mount(id, 'full');
+    expect(host.querySelector('[data-list-detail-page] [data-relation-detail]')).not.toBeNull(); expect(host.querySelector('[role="row"]')).toBeNull();
+    await click('返回关系智库'); expect(go).toHaveBeenLastCalledWith('relations', id, {}, { keepScroll: true });
   });
   it('列表把冻结的组织排在最前，按身份计数（双重身份两边都计）', async () => {
     await mount();

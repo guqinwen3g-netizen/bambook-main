@@ -14,7 +14,7 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:sess
 import {QcWorkbenchPage} from './QcWorkbenchPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'qc-workbench',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><QcWorkbenchPage/></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string,mode:'full'|'list'=id?'full':'list'){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'qc-workbench',id,detail},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><QcWorkbenchPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
@@ -53,6 +53,18 @@ it('groups tasks by factory and inspection site with open count, earliest date a
   expect(within(first).getByRole('button',{name:/展开 华美制衣/}).getAttribute('aria-expanded')).toBe('false');
 });
 
+it('shows a summary preview in the list and the complete task on its own page',()=>{
+  store.state!.fulfillment.qcTasks.push(task('q1'));
+  render('q1','list');
+  const preview=host.querySelector('aside.mist-preview') as HTMLElement;
+  expect(preview.textContent).toContain('Q1');expect(preview.querySelector('[data-qc-detail]')).toBeNull();
+  act(()=>(getByRole(preview,'button',{name:'打开QC任务'}) as HTMLButtonElement).click());
+  expect(go).toHaveBeenLastCalledWith('qc-workbench','q1',{detail:'full'});
+  render('q1');
+  expect(host.querySelector('[data-list-detail-page] [data-qc-detail="q1"]')).not.toBeNull();expect(host.querySelector('[role="row"]')).toBeNull();
+  act(()=>(getByRole(host,'button',{name:/返回QC 工作台/}) as HTMLButtonElement).click());
+  expect(go).toHaveBeenLastCalledWith('qc-workbench','q1',{},{keepScroll:true});
+});
 it('keeps QC actions visible with concrete reasons when another QC owns the task',()=>{
   store.state!.fulfillment.qcTasks.push(task('owned',{state:'working',assignee:'QC乙',assigneeId:'qc-b'}));
   render('owned');
@@ -114,7 +126,7 @@ it('opens business resume over the workbench and explains it to QC-only accounts
   render('resume');
   await click(getByRole(host,'button',{name:'确认继续生产'}));
   const dialog=getByRole(document.body,'dialog');
-  expect(host.querySelector('[data-qc-groups]')).not.toBeNull();
+  expect(host.querySelector('[data-list-detail-page]')).not.toBeNull();
   typeInto(getByRole(dialog,'textbox',{name:'业务处理与恢复依据'}) as HTMLTextAreaElement,'整改已复核');
   await click(getByRole(dialog,'button',{name:'确认继续生产'}));
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.continue',payload:{id:'resume',note:'整改已复核'}});
@@ -122,6 +134,7 @@ it('opens business resume over the workbench and explains it to QC-only accounts
   render('resume');
   expect((getByRole(host,'button',{name:'确认继续生产'}) as HTMLButtonElement).disabled).toBe(true);
   expect(host.textContent).toContain('确认继续生产：由业务员确认恢复');
+  render('resume','list');
   expect((getByRole(host,'button',{name:'从来源发起QC'}) as HTMLButtonElement).disabled).toBe(true);
   expect(queryByRole(document.body,'dialog')).toBeNull();
 });

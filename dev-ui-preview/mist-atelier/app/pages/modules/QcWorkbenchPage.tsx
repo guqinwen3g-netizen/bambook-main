@@ -12,7 +12,7 @@ import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 
 type Domain = FulfillmentQcTask['domain'];
 type Kind = FulfillmentQcTask['kind'];
@@ -89,6 +89,7 @@ export function QcWorkbenchPage() {
   const [query, setQuery] = React.useState(''), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [owner, setOwner] = React.useState<Owner>('all'), [mode, setMode] = React.useState<'groups' | 'board'>('groups');
   const [selected, setSelected] = useRouteDraft(route.id || ''), [reportTaskId, setReportTaskId] = useRouteDraft(''), [failure, setFailure] = useRouteDraft('');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [drawer, setDrawer] = React.useState(!!route.id), [collapsed, setCollapsed] = React.useState<string[]>([]), [busy, setBusy] = React.useState(false);
+  const full = useListDetailRoute();
   const all = state?.fulfillment.qcTasks || [], day = today();
   React.useEffect(() => {
     const task = all.find(t => t.id === route.id);
@@ -190,6 +191,20 @@ export function QcWorkbenchPage() {
         backLabel={sourceSample?.role === 'shipping' ? '返回本票船样' : '返回实物样品'} />
     : <EmptyState icon={ClipboardCheck} title="任务详情" description={loading ? '正在读取QC任务' : '从左侧选择一条任务，查看来源、现场与报告'} compact />;
 
+  const summary = current && state ? (() => { const gate = qcGate(current);
+    return <PreviewSummary openLabel="打开QC任务" onOpen={() => full.open(current.id)} data={{
+      code: current.code, status: <Pill tone={QC_STATE_TONE[current.state]}>{QC_STATE_LABEL[current.state]}</Pill>,
+      title: fulfillmentSourceLabel(state, current.source), description: taskSubject(state, current),
+      facts: [
+        { label: '类型', value: `${DOMAIN_LABEL[current.domain]} · ${KIND_LABEL[current.kind]}` },
+        { label: '现场', value: `${current.factory} · ${current.location}` },
+        { label: '预计检查', value: current.due ? (isOverdue(current, day) ? <span style={{ color: 'var(--mist-bad)' }}>{current.due} · 已过期</span> : current.due) : '未排期' },
+        { label: 'QC', value: current.assignee || '未认领' }, { label: '发起人', value: current.requestedBy },
+        { label: '报告', value: current.reportIds.length ? `${current.reportIds.length} 份` : '未回传' },
+      ],
+      extra: <Banner tone={gate.tone} title={gate.title} />,
+    }} />; })() : null;
+  if (full.active && current && state) return <ListDetailPage backLabel="QC 工作台" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
     <PageHeader eyebrow="订单履约 · 专业检验" title="QC 工作台" description="先选专业板块，再处理准确样品与生产分支。报告回到业务来源，由业务员继续主线。"
       actions={<>
@@ -220,7 +235,7 @@ export function QcWorkbenchPage() {
       { value: 'awaiting_business', label: '待业务恢复', count: stateCount('awaiting_business'), color: 'var(--mist-warn)' },
       { value: 'reported', label: '报告已回传', count: stateCount('reported'), color: 'var(--mist-ok)' },
     ]} />
-    <ListDetail list={list} detail={detail} drawerOpen={drawer && !!current} onDrawerClose={() => setDrawer(false)} drawerTitle={current ? `${current.code} · ${KIND_LABEL[current.kind]}` : 'QC任务'} drawerSub={current ? `${current.factory} · ${current.location}` : undefined} />
+    <ListDetail list={list} detail={detail} summary={summary} drawerOpen={drawer && !!current} onDrawerClose={() => setDrawer(false)} drawerTitle={current ? `${current.code} · ${KIND_LABEL[current.kind]}` : 'QC任务'} drawerSub={current ? `${current.factory} · ${current.location}` : undefined} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }

@@ -14,7 +14,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
 
@@ -50,6 +50,7 @@ export function ProcurementPage() {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), { go, route } = useNav();
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [entryChoice, setEntryChoice] = React.useState<Entry | null>(null);
   const [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
+  const full = useListDetailRoute();
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
   const [rfqTab, setRfqTab] = React.useState(!!route.section?.startsWith('rfq'));
@@ -161,6 +162,19 @@ export function ProcurementPage() {
         onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }} />
     : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title="单据详情" description={loading ? '正在读取采购' : '从列表选择一张单据，查看审批、供应商确认与交付轨迹'} compact />;
 
+  const summary = selected && state ? (() => { const p = selected, stage = purchaseStage(p), flags = purchaseFlags(p, day).filter(flag => flag.key !== 'returned');
+    return <PreviewSummary openLabel={`打开${ENTRY_LABEL[entryOf(p)]}`} onOpen={() => full.open(p.id)} data={{
+      code: p.code, status: <Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage]}</Pill>,
+      title: p.description, description: `${KIND_LABEL[p.kind]} · ${lineLabel(p)}`,
+      facts: [
+        { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` },
+        { label: '单价', value: `${p.price} ${p.currency}` }, { label: '要求交期', value: p.due || '未填' },
+        { label: entryOf(p) === 'processing' ? '累计回交' : '累计交付', value: `${p.received} / ${p.quantity} ${p.unit}` }, { label: '付款条件', value: p.terms || '未填' },
+      ],
+      extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{flag.label}</Pill>)}</div> : undefined,
+    }} />; })() : null;
+  const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有采购写权限，可以查看单据与轨迹；新建、发出与交付登记由对应业务组经办人操作。</Banner></div> : null;
+  if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
     <PageHeader eyebrow="订单履约 · 采购与委外" title="采购管理" description={sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style} · ${sourceLine.name} · 只显示本条目的采购与委外。` : '从准确订单条目形成供应承诺：批准后线下发出、登记供应商确认，再逐次登记真实交付与回交。')}
       actions={<>
@@ -169,7 +183,7 @@ export function ProcurementPage() {
         <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>导出</Button>
         {!rfqTab && createButton}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有采购写权限，可以查看单据与轨迹；新建、发出与交付登记由对应业务组经办人操作。</Banner></div>}
+    {readOnlyBanner}
     {(error || failure) && <div className="mist-section"><Banner tone="bad" title="采购操作未完成" actions={error ? <Button onClick={() => void refresh()}>重试</Button> : undefined}>{failure || error}</Banner></div>}
     <div className="mist-section"><Segmented<Domain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${inScope.filter(p => p.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${inScope.filter(p => p.domain === 'fabric').length}` }]} /></div>
     <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open').length : 0 }]} />
@@ -192,7 +206,7 @@ export function ProcurementPage() {
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '单据详情'} drawerSub={selected?.supplier}
       list={<Card><DataTable ariaLabel={`${ENTRY_LABEL[entry]}列表`} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
-      detail={detail} />
+      detail={detail} summary={summary} />
     </>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
