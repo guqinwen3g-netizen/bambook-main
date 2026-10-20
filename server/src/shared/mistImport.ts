@@ -1,5 +1,5 @@
 /**
- * 基础资料批量导入：上线时把现有客户、供应商、产品档案一次录入全新工作区。
+ * 基础资料批量导入：上线时把现有客户、供应商、产品档案一次录入全新公司。
  * 每一行按对应的单条保存命令执行（同样的校验、编码查重、负责人按账号核对）；
  * 整批要么全部导入，要么一行都不导入，并逐行列出不通过的原因。
  */
@@ -119,7 +119,7 @@ function owner(ctx: Ctx, value: string): string {
   const named = members.filter(m => m.name === value);
   if (named.length === 1) return named[0].id;
   if (named.length > 1) throw new Error(`客户经理“${value}”有重名成员，请改填账号`);
-  throw new Error(`客户经理“${value}”不是本工作区成员`);
+  throw new Error(`客户经理“${value}”不是本公司成员`);
 }
 const CATEGORY: Record<string, 'garment' | 'fabric' | 'trimming'> = { 成衣: 'garment', 服装: 'garment', garment: 'garment', 面料: 'fabric', fabric: 'fabric', 辅料: 'trimming', trimming: 'trimming', trim: 'trimming' };
 

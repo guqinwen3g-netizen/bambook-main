@@ -23,7 +23,7 @@ export const PRODUCT_SPEC_FIELDS:Record<MarketProduct['category'],Array<{key:str
  trimming:[{key:'trimType',label:'辅料类型'},{key:'size',label:'规格尺寸'},{key:'moq',label:'起订量'}],
 };
 function productSpecs(category:MarketProduct['category'],value:unknown):Record<string,string>{if(value!==undefined&&(typeof value!=='object'||value===null||Array.isArray(value)))fail('规格格式无效');const out:Record<string,string>={};for(const f of PRODUCT_SPEC_FIELDS[category]){const v=(value as Record<string,unknown>|undefined)?.[f.key];if(v===undefined||v==='')continue;if(typeof v!=='string'||v.length>200)fail(f.label+'格式无效');if(v.trim())out[f.key]=v.trim();}if((category==='fabric')&&out.weight&&!/^\d{1,4}(\.\d{1,2})?$/.test(out.weight))fail('克重须为数字（g/m²）');if(category==='fabric'&&out.width&&!/^\d{1,4}(\.\d{1,2})?$/.test(out.width))fail('门幅须为数字（cm）');return out;}
-export type MarketSupplier = RecordBase & { code:string; name:string; type:string; country:string; address:string; capabilities:string; capacity:number; capacityUnit:string; leadDays:number; status:'active'|'paused'|'blocked'; blockReason:string; statusFrom?:string; statusHistory?:SupplierStatusChange[]; certificates?:SupplierCertificate[]; ratings?:SupplierRating[]; /** 包 A / P5：每个业务组一名经手人（账号 ID + 显示名快照），须为本空间有效成员且属于该组。 */ handlers?:Partial<Record<MistBusinessGroup,MistAccountRef>>; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
+export type MarketSupplier = RecordBase & { code:string; name:string; type:string; country:string; address:string; capabilities:string; capacity:number; capacityUnit:string; leadDays:number; status:'active'|'paused'|'blocked'; blockReason:string; statusFrom?:string; statusHistory?:SupplierStatusChange[]; certificates?:SupplierCertificate[]; ratings?:SupplierRating[]; /** 包 A / P5：每个业务组一名经手人（账号 ID + 显示名快照），须为本公司有效成员且属于该组。 */ handlers?:Partial<Record<MistBusinessGroup,MistAccountRef>>; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
 export type RelationHoldChange={action:'freeze'|'release';reason:string;at:string;actor:string};
 export const SUPPLIER_TYPES=['织造','染整','印花','成衣加工','辅料','面料贸易'] as const;
 export const SUPPLIER_GRADES=['A','B','C','D'] as const;
@@ -238,7 +238,7 @@ function customerRelation(root:MistState,m:MarketState,customerId:string,ctx:Mis
  return relation;
 }
 function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistCommandResult {
- marketCommandPermission(command);const m=(root as MistState&{market:MarketState}).market;if(!m)fail('市场工作区未初始化','INVALID_STATE');
+ marketCommandPermission(command);const m=(root as MistState&{market:MarketState}).market;if(!m)fail('市场公司未初始化','INVALID_STATE');
  let result:MistCommandResult={};const eventsBefore=root.events.length;
  if(command.type==='market.showLead.save'){if(command.payload.input.source!=='show')fail('展会线索的来源类型无效');return execute(root,{type:'market.lead.save',payload:command.payload},ctx);}
  if(command.type==='market.showLead.transition'){if(find(m.leads,command.payload.id,'线索').source!=='show')fail('此线索不属于展会');return execute(root,{type:'market.lead.transition',payload:command.payload},ctx);}

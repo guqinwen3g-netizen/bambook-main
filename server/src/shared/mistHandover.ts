@@ -15,7 +15,7 @@ export type MistAccountHandover = { id: string; at: string; actor: string; fromI
 export type HandoverCommand =
   | { type: 'handover.customer'; payload: { customerId: string; toUserId: string; reason: string; orderIds?: string[]; opportunityIds?: string[] } }
   | { type: 'handover.account'; payload: { fromUserId: string; toUserId: string; reason: string } };
-/** 客户交接由主管办理；按账号整体交接涉及全部业务对象，权限 null 由仓储层限定为工作区所有者（与成员授权一致）。 */
+/** 客户交接由主管办理；按账号整体交接涉及全部业务对象，权限 null 由仓储层限定为公司所有者（与成员授权一致）。 */
 export const handoverCommandPermission = (c: HandoverCommand) => c.type === 'handover.account' ? null : 'relations:admin';
 export const MIST_OWNED_KIND_LABEL: Record<MistOwnedObject['kind'], string> = { customer: '客户', order: '订单', development: '开发案', fabric: '面料寻样', opportunity: '商机', supplier: '供应商经手' };
 

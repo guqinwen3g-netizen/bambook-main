@@ -14,7 +14,7 @@ export function primaryImageId(files:readonly ImageFile[]|ReadonlyMap<string,Ima
 }
 /** 把指定图片设为主图：移到第一张图片之前，其余附件保持原有顺序。 */
 export function withPrimaryImage(ids:readonly string[],id:string):string[]{return ids.includes(id)?[id,...ids.filter(value=>value!==id)]:[...ids];}
-/** 工作区内所有主图编号；只有这些图片允许生成抠图派生。 */
+/** 公司内所有主图编号；只有这些图片允许生成抠图派生。 */
 export function primaryImageIds(state:ImageOwnerState):Set<string>{
  const files=new Map((state.files??[]).map(file=>[file.id,file] as const)),primary=new Set<string>();
  for(const owner of [...(state.market?.products??[]),...(state.devs??[]),...(state.versions??[])]){const id=primaryImageId(files,owner.fileIds);if(id)primary.add(id);}

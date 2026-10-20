@@ -92,7 +92,7 @@ export function freezeQuotationHistoryEvidence(
     quote.approval?.status === "pending" ||
     !["Sent", "Accepted", "Rejected", "Expired"].includes(quote.status)
   )
-    throw Error("历史依据须为本空间另一份已对客报价的准确条目");
+    throw Error("历史依据须为本公司另一份已对客报价的准确条目");
   if (
     !target.currency ||
     target.currency !== quote.currency ||
