@@ -72,7 +72,7 @@ export function DocumentCenterPage() {
     .sort((a, b) => order[a.status] - order[b.status] || (shipmentOf(a)?.code || '').localeCompare(shipmentOf(b)?.code || '') || a.type.localeCompare(b.type) || b.version - a.version);
   const selected = rows.find(d => d.id === picked) || (picked ? docs.find(d => d.id === picked) : undefined);
 
-  const pick = (d: FulfillmentDocument) => { setPicked(d.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, d.id, target); };
+  const pick = (d: FulfillmentDocument) => { setPicked(d.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, d.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStatusFilter('active'); setPicked(null); };
   const shipments = (f?.shipments || []).filter(s => s.state !== 'cancelled' && (!hasContext || s.id === route.section));
   const docSpec = (d?: FulfillmentDocument, base?: FulfillmentDocument): ModuleEditorSpec => {

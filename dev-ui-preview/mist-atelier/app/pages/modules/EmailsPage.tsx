@@ -138,7 +138,7 @@ export function EmailsPage() {
   const selected = rows.find(row => row.id === picked) || find(picked);
   const exec: Exec = async (command, done) => { setFailure(''); try { const receipt = await run(command); if (done) toast(done); return receipt; } catch (problem) { setFailure(problemText(problem, '操作未保存，请重试')); return null; } };
   const pick = (row: Row) => {
-    setPicked(row.id); setDrawer(true); go('emails', row.id);
+    setPicked(row.id); setDrawer(true); go('emails', row.id, undefined, { keepScroll: true });
     if (row.kind === 'message' && !row.message.read && can && !locked) void exec({ type: 'email.flag', payload: { id: row.id, flag: 'read', value: true } });
   };
   const changeScope = (next: MailScope) => { setScope(next); setPicked(null); setDrawer(false); setCategory('all'); };

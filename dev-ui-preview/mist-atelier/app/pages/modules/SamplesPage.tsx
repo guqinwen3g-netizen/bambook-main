@@ -100,7 +100,7 @@ export function SamplesPage() {
   const overdueLoans = state ? allRows.flatMap(row => row.samples.flatMap(sample => sampleFacts(state, sample, day).overdue.map(loan => ({ loan, sample })))) : [];
 
   const synchronize = async () => { if (syncing || locked) return; setSyncing(true); setSyncError(''); try { await run({ type: 'fulfillment.samples.sync', payload: {} }); } catch (problem) { setSyncError(problem instanceof Error ? problem.message : '来源实物同步失败'); } finally { setSyncing(false); } };
-  const pick = (row: LedgerRow) => { setPicked(row.primary.id); setDrawer(true); const { view, id: _id, detail: _detail, ...target } = route; go(view, row.primary.id, target); };
+  const pick = (row: LedgerRow) => { setPicked(row.primary.id); setDrawer(true); const { view, id: _id, detail: _detail, ...target } = route; go(view, row.primary.id, target, { keepScroll: true }); };
   const changeShelf = (next: Shelf) => { setShelf(next); setForm('all'); setStatusFilter('all'); setPicked(null); };
 
   const sampleSources = hasShipmentContext ? [emptyOption, ...shipmentProductions.map(branch => ({ value: 'production:' + branch.id, label: `${branch.order} · ${branch.code} · ${branch.factory}` }))]

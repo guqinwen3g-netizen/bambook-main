@@ -37,7 +37,7 @@ export function MesHistoryPage() {
   const years = [...new Set(rows.map(r => (r.orderDate || '').slice(0, 4)).filter(Boolean))].sort().reverse();
   const shown = rows.filter(r => (year === 'all' || (r.orderDate || '').startsWith(year)) && (!needle || `${r.orderNumber} ${r.description || ''} ${r.notes || ''} ${r.orderId || ''} ${r.supplierId || ''}`.toLowerCase().includes(needle)));
   const selected = shown.find(r => r.id === picked) || rows.find(r => r.id === picked);
-  const pick = (r: OutsourcingOrder) => { setPicked(r.id); setDrawer(true); go('mes', r.id); };
+  const pick = (r: OutsourcingOrder) => { setPicked(r.id); setDrawer(true); go('mes', r.id, undefined, { keepScroll: true }); };
   const serverFilter = (apply: () => void) => { apply(); setOffset(0); setPicked(null); };
   const columns: Column<OutsourcingOrder>[] = [
     { key: 'code', header: '历史单号', width: 'minmax(160px,1.5fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Mono>{r.orderNumber}</Mono><small className="mist-muted">{r.description || '无描述'}</small></div> },

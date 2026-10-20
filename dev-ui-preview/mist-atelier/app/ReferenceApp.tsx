@@ -13,7 +13,7 @@ import {
 import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
 import { View } from '../../../types';
 import { MODULE_MAP } from './moduleMap';
-import { Nav, useNav, type Route, type RouteTarget } from './nav';
+import { Nav, useNav, type GoOptions, type Route, type RouteTarget } from './nav';
 import { MistSessionProvider, useMistSession } from './runtime/auth';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
@@ -79,12 +79,21 @@ export function readMistRoute(): Route {
     view, id, ...Object.fromEntries(ROUTE_KEYS.slice(2).map(key => [key, qs.get(key) || undefined])),
   };
 }
-export function writeMistRoute(route: Route) {
+export function writeMistRoute(route: Route, options: GoOptions = {}) {
   const url = new URL(location.href);
   for (const key of ROUTE_KEYS) {
     if (route[key]) url.searchParams.set(key, route[key]!); else url.searchParams.delete(key);
   }
-  history.pushState({ ...history.state, mistRoute: route, mistDepth: (Number(history.state?.mistDepth) || 0) + 1 }, '', url);
+  history.pushState({ ...history.state, mistRoute: route, mistListState: isListState(route, options), mistDepth: (Number(history.state?.mistDepth) || 0) + 1 }, '', url);
+}
+/** A list position: the list itself or a row picked for its in-page preview (not a full page). */
+export function isListState(route: Route, options: GoOptions = {}) { return !route.detail && (!route.id || !!options.keepScroll); }
+/** Scroll resets on page changes, but not while switching the previewed row inside the same list (or going back/forward between such rows). */
+export function nextScrollKey(previous: { key: string; route: Route; list: boolean }, route: Route, list: boolean) {
+  const keep = list && previous.list && previous.route.view === route.view && (previous.route.section ?? '') === (route.section ?? '');
+  return keep ? previous.key : scrollKeyOf(route, list);
+}
+function scrollKeyOf(route: Route, list: boolean) { return route.view + (route.id ?? '') + (list ? '#list' : '');
 }
 function useSections(): NavSection[] {
   const session = useMistSession();
@@ -151,6 +160,8 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
+  const scrollPosition = React.useRef<{ key: string; route: Route; list: boolean }>(null as never);
+  if (!scrollPosition.current) { const list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(route); scrollPosition.current = { key: scrollKeyOf(route, list), route, list }; }
   const [collapsed, setCollapsed] = React.useState(false);
   const [palette, setPalette] = React.useState(false), [query, setQuery] = React.useState('');
   const [ai, setAI] = React.useState(false), [account, setAccount] = React.useState(false), [avatarStudio, setAvatarStudio] = React.useState(false);
@@ -185,13 +196,14 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
   const lastDevelopmentTab = React.useRef<DevelopmentListTab>('garment');
   if (route.view === 'development') lastDevelopmentTab.current = developmentListTab(route.section);
-  const go = React.useCallback((view: string, id?: string, target: RouteTarget = {}) => {
-    const next = { view, id, ...target };
-    setRoute(next); writeMistRoute(next); setPalette(false); setAI(false); setNotifications(false);
+  const go = React.useCallback((view: string, id?: string, target: RouteTarget = {}, options: GoOptions = {}) => {
+    const next = { view, id, ...target }, list = isListState(next, options);
+    scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list };
+    setRoute(next); writeMistRoute(next, options); setPalette(false); setAI(false); setNotifications(false);
     if (view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
   }, [toast]);
   React.useEffect(() => {
-    const back = () => { const next = readMistRoute(); setRoute(next); setPalette(false); setAI(false); if (next.view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh')); };
+    const back = () => { const next = readMistRoute(), list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(next); scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list }; setRoute(next); setPalette(false); setAI(false); if (next.view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh')); };
     window.addEventListener('popstate', back); return () => window.removeEventListener('popstate', back);
   }, []);
   React.useEffect(() => { setPalette(false); setAI(false); setAccount(false); setNotifications(false); setOrganizationOpen(false); setMsgs([]); }, [session.sessionKey, workspace.workspace?.id]);
@@ -314,7 +326,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const roles = platformOnly ? '平台管理员' : user.roleLabels?.map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
   return (
     <Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={state?.settings.density||'default'}>
-      <MistAppShell collapsed={collapsed} scrollKey={route.view + (route.id ?? '')}
+      <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
           workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, onClick:()=>{setOrganizationOpen(true);organization.retry();} }}

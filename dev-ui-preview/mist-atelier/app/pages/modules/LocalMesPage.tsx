@@ -32,7 +32,7 @@ export function LocalMesPage() {
   const order: Record<Stage, number> = { variance: 0, open: 1, done: 2 };
   const rows = searched.filter(p => stage === 'all' || stageOf(p) === stage).sort((a, b) => order[stageOf(a)] - order[stageOf(b)] || (b.due || '').localeCompare(a.due || ''));
   const selected = rows.find(p => p.id === picked) || (picked ? all.find(p => p.id === picked) : undefined);
-  const pick = (p: FulfillmentPurchase) => { setPicked(p.id); setDrawer(true); go('mes', p.id); };
+  const pick = (p: FulfillmentPurchase) => { setPicked(p.id); setDrawer(true); go('mes', p.id, undefined, { keepScroll: true }); };
   const overdue = (p: FulfillmentPurchase) => stageOf(p) === 'open' && !!p.due && p.due < day;
   const columns: Column<FulfillmentPurchase>[] = [
     { key: 'code', header: '加工合同', width: 'minmax(128px,1.2fr)', render: p => <div className="mist-col" style={{ gap: 2 }}><Mono>{p.code}</Mono><small className="mist-muted">{orderCode(p.orderId) || '来源订单不可用'}</small></div> },

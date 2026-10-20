@@ -81,7 +81,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   // P6：档案 / 认证 / 联系人需 suppliers:write（业务员即有）；评级与暂停 / 停用 / 恢复需 suppliers:admin。服务端同样校验。
   const can = session.hasPermission('suppliers:write'), canAdmin = session.hasPermission('suppliers:admin'), canContacts = can;
   const locked = saving || !!pending;
-  const pick = (s: MarketSupplier) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target); };
+  const pick = (s: MarketSupplier) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target, { keepScroll: true }); };
   const typeOptions = (current = '') => [...SUPPLIER_TYPES, ...(current && !(SUPPLIER_TYPES as readonly string[]).includes(current) ? [current] : [])].map(t => ({ value: t, label: t }));
   const profileSpec = (s?: MarketSupplier): ModuleEditorSpec => ({
     title: s ? `编辑供应商 ${s.name}` : '新增供应商', submitLabel: '保存',

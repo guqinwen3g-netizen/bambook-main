@@ -175,7 +175,7 @@ export function ShipmentsPage() {
   if (packing) return <PackingEditor shipment={packing} onClose={() => setPacking(null)} />;
   if (editor.spec) return editor.view;
 
-  const pick = (s: FulfillmentShipment) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target); };
+  const pick = (s: FulfillmentShipment) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStageFilter('all'); setPicked(null); };
   const act = async (work: () => Promise<unknown>) => { setFailure(''); try { await work(); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
   const termsSpec = (): ModuleEditorSpec => ({ title: '核对来源合同收货与分批条款', fields: [field('orderId', '来源订单', 'select', true, [emptyOption, ...(state?.orders || []).filter(o => !hasOrderContext || o.id === sourceOrder?.id).map(o => ({ value: o.id, label: o.code }))]), field('consignee', '合同收货方'), field('partialAllowed', '合同允许分批', 'checkbox', false), field('mode', '约定运输方式', 'select', true, [{ value: 'sea', label: '海运' }, { value: 'air', label: '空运' }]), field('confirmedAt', '条款核实日', 'date'), field('evidence', '合同 / 信用证依据', 'textarea')], initialValues: { orderId: sourceOrder?.id || '', consignee: '', partialAllowed: false, mode: 'sea', confirmedAt: today(), evidence: '' }, submit: v => run({ type: 'fulfillment.shipments.sourceTerms', payload: { orderId: text(v, 'orderId'), consignee: text(v, 'consignee'), partialAllowed: !!v.partialAllowed, mode: text(v, 'mode') as 'sea' | 'air', confirmedAt: text(v, 'confirmedAt'), evidence: text(v, 'evidence') } }) });

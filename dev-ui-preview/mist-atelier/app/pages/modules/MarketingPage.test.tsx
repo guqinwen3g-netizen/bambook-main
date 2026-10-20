@@ -17,9 +17,9 @@ beforeEach(() => {
   bridge.current = { state, loading: false, saving: false, error: '', pending: null, run: vi.fn(async () => ({ result: { id: 'saved' } })), refresh: vi.fn(), uploadFile: vi.fn(), downloadFile: vi.fn() };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
-async function mount(id?: string, section?: string) {
+async function mount(id?: string, section?: string, detail?: 'full') {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = MARKET_PAGES.marketing;
-  await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'marketing', id, section }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>));
+  await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'marketing', id, section, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>));
 }
 const button = (label: string, scope: ParentNode = document.body) => [...scope.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(label: string, scope: ParentNode = document.body) { const b = button(label, scope); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
@@ -78,7 +78,7 @@ describe('营销推广工作台', () => {
   });
   it('画册预览 Prepared 使用冻结快照，PDF/发送明确未接入', async () => {
     const b = state.market.lookbooks[0]; b.status = 'Prepared'; b.snapshots = [{ id: b.productIds[0], sku: 'FROZEN-SKU', name: '冻结产品名称', specification: '冻结规格' }];
-    await mount(b.id, 'lookbooks'); expect(host.textContent).toContain('冻结产品名称'); expect(host.textContent).toContain('冻结规格');
+    await mount(b.id, 'lookbooks', 'full'); expect(host.textContent).toContain('冻结产品名称'); expect(host.textContent).toContain('冻结规格');
     expect(button('导出画册 PDF')!.disabled).toBe(true); expect(button('发送画册')!.disabled).toBe(true);
     expect(host.textContent).toContain('CSV'); expect(bridge.current.run).not.toHaveBeenCalled();
   });
