@@ -66,6 +66,7 @@ export const testContract: MistContract = {
       state.money.cents += cents; return { state, result: { cents: state.money.cents } };
     }
     if (command.type === 'notes.add') { const id = randomUUID(); state.notes.push({ id, text: command.payload.text }); return { state, result: { id } }; }
+    if (command.type === 'products.setImages') { state.market = { products: [{ id: 'p1', fileIds: command.payload.fileIds }] }; return { state, result: { id: 'p1' } }; }
     if (command.type === 'files.add') { state.files.push(command.payload.file); return { state, result: { id: command.payload.file.id } }; }
     throw new MistApiError('VALIDATION', '未知命令');
   },

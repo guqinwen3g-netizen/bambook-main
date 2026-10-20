@@ -32,13 +32,16 @@ export function productReferences(product: MarketProduct, market: MarketState, o
 }
 
 /** Preview resolution can run while the provider is switching identities; never fetch a stale URL or throw from render. */
+/** Preview: the first image is the product's primary (cut-out) image; later images are supplementary. */
 export function useProductImage(product: MarketProduct, mode: 'cutout-thumb' | 'cutout-display' = 'cutout-thumb', selectedId?: string) {
   const w = useMistWorkspace();
   const images = (product.fileIds ?? []).map(id => w.state?.files?.find(f => f.id === id && f.mimeType.startsWith('image/'))).filter((f): f is NonNullable<typeof f> => !!f);
   const file = images.find(f => f.id === selectedId) ?? images[0];
   let path: string | undefined;
+  // 只有第一张图（主图）请求抠图；背面、细节等补充图使用同尺寸普通预览。
+  const effective = file && file.id !== images[0]?.id ? (mode === 'cutout-thumb' ? 'thumb' : 'display') : mode;
   if (file && !w.loading) {
-    try { path = w.fileUrl(file) + '?preview=' + mode; } catch { /* A changing workspace cannot expose its prior attachment. */ }
+    try { path = w.fileUrl(file) + '?preview=' + effective; } catch { /* A changing workspace cannot expose its prior attachment. */ }
   }
   const image = usePrivateImageResource(path, w.workspace?.id ?? '');
   return { file, ...image, images };

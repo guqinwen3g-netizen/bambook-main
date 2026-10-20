@@ -5,6 +5,8 @@ import { Banner, Button, Card, CardHeader, Checkbox, Dialog, Field, FormGrid, Mo
 import type { MistDev, MistRound, MistState, MistVersion } from '../../../../server/src/shared/mistWorkspace';
 import { caseFactoryLetters, defaultFactoryTask, developmentClosure, developmentRoundBlocker, duplicateRoundFactories, developmentRoundViews, factoryLetterAt, factoryTaskError, factoryTaskSync, factoryTaskSyncBlocker, nextRoundNumber, roundVersionLabel, type FactoryTaskInput } from '../../../../server/src/shared/mistDevelopmentRounds';
 import { developmentDomain } from '../../../../server/src/shared/mistDevelopmentDomain';
+import { withPrimaryImage } from '../../../../server/src/shared/mistPrimaryImage';
+import { ImageRoleTag, PRIMARY_IMAGE_HINT, imageRole, imageUploadTitle } from './modules/PrimaryImage';
 import { versionTimelineStatus } from '../../../../server/src/shared/mistDevelopmentCompare';
 
 export type NewRoundInput = { factories: string[]; requirements: string; fileIds: string[]; referenceVersionIds: string[]; targetDate: string; resampleFromVersionId?: string; factoryTasks?: FactoryTaskInput[] };
@@ -133,8 +135,9 @@ export function NewRoundDialog({ open, state, dev, busy, failure, factoryOptions
       <Field label="本轮共同要求" required full hint="建轮时复制进各工厂任务；之后修改共同要求不会自动覆盖，需逐厂同步"><TextArea value={form.requirements} onChange={event => setForm(previous => ({ ...previous, requirements: event.target.value }))} /></Field>
       <Field label="本轮目标日期" required hint="各工厂要求日期默认取此日期"><TextInput type="date" value={form.targetDate} onChange={event => setForm(previous => ({ ...previous, targetDate: event.target.value }))} /></Field>
       <div className="mist-field" data-full="true" role="group" aria-label="共同要求附件"><span className="mist-field-label">共同要求附件</span>
-        {form.fileIds.map(id => <div key={id} className="mist-row"><FileText className="mist-icon" /><span>{state.files.find(file => file.id === id)?.name || id}</span><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={busy} onClick={() => setForm(previous => ({ ...previous, fileIds: previous.fileIds.filter(item => item !== id) }))}>移除</Button></div>)}
-        <UploadZone hint="可附参考图、工艺单等" onFiles={files => { if (!busy) void onUpload(files).then(ids => setForm(previous => ({ ...previous, fileIds: [...new Set([...previous.fileIds, ...ids])] }))); }} /></div>
+        <p className="mist-note">{PRIMARY_IMAGE_HINT}</p>
+        {form.fileIds.map(id => <div key={id} className="mist-row"><FileText className="mist-icon" /><span>{state.files.find(file => file.id === id)?.name || id}</span><ImageRoleTag files={state.files} ids={form.fileIds} id={id} /><span className="mist-spacer" />{imageRole(state.files, form.fileIds, id) === 'supplement' && <Button size="sm" variant="quiet" disabled={busy} onClick={() => setForm(previous => ({ ...previous, fileIds: withPrimaryImage(previous.fileIds, id) }))}>设为主图</Button>}<Button size="sm" variant="quiet" disabled={busy} onClick={() => setForm(previous => ({ ...previous, fileIds: previous.fileIds.filter(item => item !== id) }))}>移除</Button></div>)}
+        <UploadZone title={imageUploadTitle(state.files, form.fileIds)} hint="可附参考图、工艺单等" onFiles={files => { if (!busy) void onUpload(files).then(ids => setForm(previous => ({ ...previous, fileIds: [...new Set([...previous.fileIds, ...ids])] }))); }} /></div>
     </FormGrid>}
     {step === 3 && <>
       <p className="mist-note" style={{ whiteSpace: 'pre-wrap' }}>共同要求：{form.requirements}</p>
