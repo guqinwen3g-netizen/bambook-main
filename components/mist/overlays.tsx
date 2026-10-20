@@ -25,7 +25,7 @@ function ownedMenu(node: HTMLElement, target: Node | null) {
 }
 
 /** 顶层浮层独占 Esc/焦点，关闭后回到触发器；允许自身的 portal 菜单。 */
-function useModalFocus(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>) {
+export function useModalFocus(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement | null>) {
   const target = useMistPortalTarget();
   const cb = React.useRef(onClose);
   cb.current = onClose;
@@ -59,7 +59,7 @@ function useModalFocus(open: boolean, onClose: () => void, ref: React.RefObject<
   }, [open, ref, target]);
 }
 /** 浮层统一挂到 .mist-root 内（保证 token 生效），没有则挂 body。 */
-function Portal({ children }: { children: React.ReactNode }) {
+export function Portal({ children }: { children: React.ReactNode }) {
   const target = useMistPortalTarget();
   return createPortal(children, target ?? document.body);
 }

@@ -18,6 +18,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { FileName, PreviewButton } from '../../runtime/files';
 
 /** 报价金额是十进制字符串；只在显示时加千分位，导出与计算仍用原值。 */
 const quoteMoney = (value: string) => { const n = Number(value); return value && Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value; };
@@ -313,8 +314,9 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       {missingIssuer && <div className="mist-col" style={{ gap: 8 }} data-quote-company-missing><Banner tone="warn" title="缺少公司抬头，暂不能生成报价单">{canMaintainCompany ? '在系统设置 → 公司资料中填写公司中文抬头并保存，回到本报价后即可生成；已生成的报价单不受影响。' : '公司资料由公司所有者维护，请联系所有者在系统设置 → 公司资料中补全。'}</Banner>{canMaintainCompany && <div className="mist-row"><Button size="sm" icon={Building2} onClick={() => onOpen('settings', q.id, { section: 'company' })}>去维护公司资料</Button></div>}</div>}
       <div className="mist-col" style={{ gap: 0 }} data-quote-documents role="list" aria-label={`${q.code} 报价单文件`}>{documents.length ? documents.map(d => <div key={d.id} role="listitem" className="mist-row" style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }} data-quote-document={d.draft ? 'draft' : 'formal'}>
         <Pill tone={d.draft ? 'warn' : 'ok'}>{d.draft ? '草稿水印版' : '正式版'}</Pill><Pill tone="accent">{'V' + d.revision}</Pill>
-        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span style={{ overflowWrap: 'anywhere' }}>{d.fileName}</span><small className="mist-muted">{d.generatedBy} · {shortWhen(d.generatedAt)}</small></span>
+        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}>{state.files.find(f => f.id === d.fileId) ? <FileName file={state.files.find(f => f.id === d.fileId)!} label={d.fileName} /> : <span style={{ overflowWrap: 'anywhere' }}>{d.fileName}</span>}<small className="mist-muted">{d.generatedBy} · {shortWhen(d.generatedAt)}</small></span>
         <span className="mist-spacer" />
+        <PreviewButton size="md" file={state.files.find(f => f.id === d.fileId)} />
         <Button variant="quiet" icon={Download} onClick={() => onDownloadDocument(d.fileId)}>下载</Button>
         <Button variant="quiet" icon={Printer} onClick={() => onPrintDocument(d.fileId)}>打印</Button>
       </div>) : <span className="mist-muted">尚未生成报价单。</span>}</div>

@@ -12,10 +12,12 @@ import { useMistSession } from '../runtime/auth';
 import { defaultMemberId, memberSelectOptions, workspaceMembers } from '../runtime/members';
 import { ModuleEditorPage, type ModuleEditorSpec } from './modules/ModuleWorkbench';
 import { CustomerMailPanel, FollowUpPanel, OpportunityPanel } from './CustomerRelations';
+import { useFilePreview } from '../runtime/files';
 
 export function CustomerPage() {
   const { go, route, openAI } = useNav(), toast = useToast(), session = useMistSession();
   const { state, loading, error, run, refresh, downloadFile, workspace } = useMistWorkspace();
+  const filePreview = useFilePreview();
   const members = workspaceMembers(workspace, state, session.user);
   const requestedId = route.id ?? route.customerId;
   const customer = requestedId ? state?.customers.find(item => item.id === requestedId) : state?.customers[0];
@@ -104,9 +106,9 @@ export function CustomerPage() {
         {state?.crm && tab === 'followups' && <FollowUpPanel customer={customer} state={state} can={canCreate} />}
         {state && tab === 'mail' && <CustomerMailPanel customer={customer} state={state} />}
         {tab === 'contacts' && <Card><CardHeader title="联系人" tools={<IconButton icon={Plus} label="添加联系人" onClick={() => { setContact({ name: '', role: '', email: '', phone: '' }); setFailure(''); }} />} />{contactList}</Card>}
-        {tab === 'files' && <Card><CardHeader title="客户关联文件" /><DataTable density={state?.settings.density} rows={files} rowKey={file => file.id} onRowClick={file => { void downloadFile(file).catch(problem => setFailure(problem instanceof Error ? problem.message : '下载失败')); }} empty={<EmptyState compact title="还没有关联文件" description="开发案及沟通记录的附件会汇总到这里。" />} columns={[
-          { key: 'name', header: '文件', render: file => file.name }, { key: 'size', header: '大小', render: file => `${Math.ceil(file.size / 1024)} KB` }, { key: 'download', header: '下载', render: () => <Download className="mist-icon" /> },
-        ]} /></Card>}
+        {tab === 'files' && <Card><CardHeader title="客户关联文件" /><DataTable density={state?.settings.density} rows={files} rowKey={file => file.id} onRowClick={file => filePreview.open(file, files)} empty={<EmptyState compact title="还没有关联文件" description="开发案及沟通记录的附件会汇总到这里。" />} columns={[
+          { key: 'name', header: '文件', render: file => <span className="mist-file"><span>{file.name}</span></span> }, { key: 'size', header: '大小', render: file => `${Math.ceil(file.size / 1024)} KB` }, { key: 'download', header: '下载', render: file => <IconButton icon={Download} size="sm" label={`下载 ${file.name}`} onClick={event => { event.stopPropagation(); void downloadFile(file).catch(problem => setFailure(problem instanceof Error ? problem.message : '下载失败')); }} /> },
+        ]} />{filePreview.node}</Card>}
       </div>
       <div className="mist-detail-rail">
         <Card><CardHeader title="档案" /><KeyValue items={[{ label: '结算币种', value: customer.currency }, { label: '付款条款', value: customer.terms }, { label: '贸易术语', value: customer.incoterm }, { label: '主要品类', value: customer.categories }, { label: '信用额度', value: `${fmt(customer.creditLimit, 2)} ${customer.currency}` }]} /></Card>

@@ -30,6 +30,7 @@ import { AdminAccounts, AdminAuditLog, AdminRoles } from './AdminAccounts';
 import { AdminApprovalAuthorities } from './AdminApprovalAuthorities';
 import { AiSubscriptionPanel } from './AiSubscriptionPanel';
 import { WorkAssistantPage } from './WorkAssistantPage';
+import { FileName } from '../../runtime/files';
 export { RisksPage };
 const money=(n:number,digits=2)=>new Intl.NumberFormat('zh-CN',{minimumFractionDigits:digits,maximumFractionDigits:digits}).format(n);
 const label={Draft:'草稿',Issued:'已签发',Voided:'已作废',Confirmed:'已确认',Archived:'已归档',Open:'待处理',Acknowledged:'已确认',Resolved:'已解决',Registered:'已登记',Processing:'处理中',Closed:'已关闭',Cancelled:'已撤销',pending:'待审批',approved:'已批准',rejected:'已退回',Executed:'已执行',AwaitingReturn:'待退回',PartiallyReceived:'部分收货',Received:'已收货',Scrapped:'已报废',Repairing:'返修中',Ready:'待发运',Dispatched:'已发出'};
@@ -38,7 +39,7 @@ const f=(key:string,label:string,type:ModuleField['type']='text',extra:Partial<M
 const num=(v:ModuleValues,k:string)=>Number(v[k]); const str=(v:ModuleValues,k:string)=>String(v[k]??'');
 function usePlatform(){const workspace=useMistWorkspace(),session=useMistSession(),nav=useNav(),scope=useRouteScope();return {...workspace,session,...nav,go:((...args:Parameters<typeof nav.go>)=>{if(scope.isCurrent())nav.go(...args);}),platform:workspace.state?.platform as PlatformState|undefined,isCurrent:scope.isCurrent,command:(c:PlatformCommand)=>scope.isCurrent()?workspace.run(c):Promise.reject(new Error('页面目标已变更，请重新打开操作'))};}
 function SourceOrder({id}:{id:string}){const {state,go}=usePlatform();const row=state?.orders.find(o=>o.id===id);return <Button variant="quiet" onClick={()=>go('orders/detail',id)}>{row?.code||'来源订单'}<ArrowRight size={14}/></Button>;}
-function SourceFiles({ids}:{ids:string[]}){const {state,downloadFile}=usePlatform();const [error,setError]=useRouteDraft('');return <>{error&&<Banner tone="bad" title="附件读取失败">{error}</Banner>}{ids.map(id=>{const file=state?.files.find(f=>f.id===id);return file?<Button key={id} variant="quiet" onClick={()=>void downloadFile(file).catch(e=>setError(e.message))}>{file.name}</Button>:<span key={id}>附件已不可见</span>;})}</>;}
+function SourceFiles({ids}:{ids:string[]}){const {state,downloadFile}=usePlatform();const [error,setError]=useRouteDraft('');return <>{error&&<Banner tone="bad" title="附件读取失败">{error}</Banner>}{ids.map(id=>{const file=state?.files.find(f=>f.id===id);return file?<div className="mist-file-row" key={id}><FileName file={file} files={ids.map(x=>state?.files.find(f=>f.id===x))}/><Button variant="quiet" size="sm" onClick={()=>void downloadFile(file).catch(e=>setError(e.message))}>下载</Button></div>:<span key={id}>附件已不可见</span>;})}</>;}
 function ClaimFactFiles({claim}:{claim:PlatformClaim}){
  const w=usePlatform(),toast=useToast(),key='bambook.mist.claim-files:'+w.session.user?.id+':'+w.workspace?.id+':'+claim.id,pageScope=JSON.stringify(w.route);
  const [staged,setStaged]=React.useState<string[]>([]),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false);
