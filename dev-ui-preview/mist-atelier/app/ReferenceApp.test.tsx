@@ -420,7 +420,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
     await waitFor(()=>expect([...host!.querySelectorAll<HTMLElement>('[role="row"][tabindex]')].some(item=>item.textContent?.includes('甲工厂'))).toBe(false));
     const row=[...host!.querySelectorAll<HTMLElement>('[role="row"][tabindex]')].find(item=>item.textContent?.includes('乙工厂'))!;await click(row);
     expect(new URLSearchParams(location.search).get('id')).toBe('supplier-b');
-    await waitFor(()=>expect(host!.querySelector('[data-supplier-detail="supplier-b"]')).not.toBeNull());
+    await waitFor(()=>expect(host!.querySelector('[aria-label="记录预览"]')?.textContent).toContain('乙工厂'));
     expect(host!.querySelector<HTMLInputElement>('input[placeholder^="搜索名称"]')!.value).toBe('乙工厂');
   });
 

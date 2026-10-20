@@ -15,7 +15,7 @@ import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL } from '../../../../../
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'blocked';
 type FlagFilter = 'all' | 'certExpiring' | 'certExpired' | 'noCert' | 'unrated' | 'scheduled';
@@ -66,6 +66,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [typeFilter, setTypeFilter] = React.useState('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
+  const full = useListDetailRoute();
   React.useEffect(() => { if (route.id) setPicked(route.id); }, [route.id]);
   const day = marketBusinessDate(businessNow());
   const all = state?.market.suppliers || [];
@@ -142,6 +143,21 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
         onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title="供应商档案" description="从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。" compact />;
+  const summary = selected ? (() => {
+    const now = statusNow(selected), g = supplierGrade(selected), p = perf.get(selected.id), certs = selected.certificates || [], contact = selected.contacts.find(c => c.primary) || selected.contacts[0];
+    const alerts = supplierFlags(selected, day).filter(f => f.key === 'certExpired' || f.key === 'certExpiring' || f.key === 'scheduled');
+    return <PreviewSummary openLabel="打开供应商档案" onOpen={() => full.open(selected.id)} data={{
+      code: selected.code, status: <Pill tone={STATUS_TONE[now]}>{STATUS_LABEL[now]}</Pill>, title: selected.name,
+      description: [selected.type, selected.country].filter(Boolean).join(' · '),
+      facts: [
+        { label: '评级', value: g ? g.grade : '未评级' }, { label: '认证', value: certs.length ? `${certs.length} 项` : '未登记' },
+        { label: '在手采购', value: `${p?.open.length || 0} 单` }, { label: '准交率', value: p?.completed.length ? rate(p.onTime, p.completed.length) : '暂无完成单' },
+        { label: '通常交付周期', value: `${selected.leadDays} 天` }, { label: '主联系人', value: contact ? contact.name : '未登记' },
+      ],
+      extra: alerts.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{alerts.map(f => <Pill key={f.key} tone={f.tone}>{f.label}</Pill>)}</div> : undefined,
+    }} />;
+  })() : null;
+  if (full.active && selected && state) return <ListDetailPage backLabel="供应商管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow="客户与市场 · 供应商" title="供应商管理" description="认证有效期、评级与交付表现集中查看；暂停或停用按生效日阻止新增业务，在手业务继续执行。"
       actions={<>
@@ -164,7 +180,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.name}` : '供应商档案'} drawerSub={selected?.type}
       list={<Card><DataTable ariaLabel="供应商列表" loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
-      detail={detail} />
+      detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }

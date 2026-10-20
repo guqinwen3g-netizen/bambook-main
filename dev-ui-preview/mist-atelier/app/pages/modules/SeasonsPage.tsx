@@ -10,7 +10,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { quotationStage } from './QuotationsPage';
 
 type Tab = 'seasons' | 'trends' | 'shows';
@@ -67,6 +67,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const tab: Tab = legacyShow || route.section === 'shows' ? 'shows' : route.section === 'trends' ? 'trends' : 'seasons';
   const [picked, setPicked] = React.useState<string | null>(legacyShow || route.id || null), [drawer, setDrawer] = React.useState(!!(legacyShow || route.id));
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
+  const full = useListDetailRoute();
   React.useEffect(() => { if (route.id) setPicked(route.id); }, [route.id]);
   const day = marketBusinessDate(businessNow());
   const m = state?.market, seasons = m?.seasons || [], trends = m?.trends || [], shows = m?.shows || [], leads = m?.leads || [];
@@ -153,6 +154,15 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const exportRows = () => tab === 'seasons' ? downloadModuleCsv('季节.csv', ['编码', '名称', '开始', '结束', '状态', '订单', '开发', '数字档案', '订单金额（原币）'], seasonRows.map(s => { const b = seasonBusiness(state, s); return [s.code, s.name, s.startDate, s.endDate, SEASON_STATUS[s.status].label, b.orders.length, b.devs.length, b.products.length, b.amounts.map(([c, v]) => `${c} ${v}`).join(' / ')]; }))
     : tab === 'trends' ? downloadModuleCsv('趋势.csv', ['趋势', '类别', '季节', '来源', '关联档案', '关联客户'], trendRows.map(t => [t.name, TREND_TYPE[t.type], seasonName(t.seasonId), t.source, t.productIds.map(id => m?.products.find(p => p.id === id)?.sku).join('、'), trendCustomers(state, t).map(c => c.name).join('、')]))
     : downloadModuleCsv('展会线索.csv', ['展会', '联系人', '公司', '邮箱', '需求', '下次跟进', '预计金额', '币种', '状态'], showRows.flatMap(x => showLeads(x).map(l => [x.name, l.name, l.company, l.email, l.demand, l.followUpDate, l.estimatedValue, l.currency, LEAD_STATUS[l.status].label])));
+  const summary = selSeason ? (() => {
+    const b = seasonBusiness(state, selSeason), next = [...selSeason.milestones].sort((a, b) => a.date.localeCompare(b.date)).find(x => x.date >= day);
+    return <PreviewSummary openLabel="打开季节详情" onOpen={() => full.open(selSeason.id)} data={{ code: selSeason.code, status: <Pill tone={SEASON_STATUS[selSeason.status].tone}>{SEASON_STATUS[selSeason.status].label}</Pill>, title: selSeason.name, description: `${selSeason.startDate} — ${selSeason.endDate}`,
+      facts: [{ label: '订单', value: `${b.orders.length} 单` }, { label: '开发', value: `${b.devs.length} 个` }, { label: '里程碑', value: `${selSeason.milestones.length} 个` }, { label: '下一个里程碑', value: next ? `${next.label} · ${next.date.slice(5)}` : '无' }] }} />;
+  })() : selTrend ? <PreviewSummary openLabel="打开趋势详情" onOpen={() => full.open(selTrend.id)} data={{ code: seasonName(selTrend.seasonId), status: <Pill>{TREND_TYPE[selTrend.type]}</Pill>, title: selTrend.name, description: selTrend.source,
+      facts: [{ label: '关联面料档案', value: `${selTrend.productIds.length} 个` }, { label: '关联客户', value: `${trendCustomers(state, selTrend).length} 个` }] }} />
+    : selShow ? (() => { const ls = showLeads(selShow); return <PreviewSummary openLabel="打开展会与线索" onOpen={() => full.open(selShow.id)} data={{ code: seasonName(selShow.seasonId), status: <Pill tone={SHOW_STATUS[selShow.status].tone}>{SHOW_STATUS[selShow.status].label}</Pill>, title: selShow.name, description: `${selShow.location}${selShow.booth ? ' · ' + selShow.booth : ''}`,
+      facts: [{ label: '日期', value: `${selShow.startDate} — ${selShow.endDate}` }, { label: '费用', value: `${selShow.currency} ${selShow.cost}` }, { label: '线索', value: `${ls.length} 条` }, { label: '已转入 CRM', value: `${ls.filter(l => l.status === 'Converted').length} 条` }] }} />; })() : null;
+  if (full.active && detail) return <ListDetailPage backLabel="季节性与趋势" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   const createLabel = tab === 'seasons' ? '新建季节' : tab === 'trends' ? '记录趋势' : '新建展会';
   return <MistPage>
     <PageHeader eyebrow="客户与市场 · 季节与趋势" title="季节性与趋势" description="订单、开发与报价按季节编码归季；趋势有来源依据并关联面料档案；展会线索可一键转入 CRM。"
@@ -165,7 +175,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
       list={<Card>{tab === 'seasons' ? <DataTable ariaLabel="季节列表" loading={loading} rows={seasonRows} rowKey={s => s.id} selectedKey={selSeason?.id} density="comfy" onRowClick={s => pick(s.id)} columns={seasonCols} empty={<EmptyState icon={CalendarRange} title="还没有季节" description="按 SS / AW + 年份建立季节，订单、开发与报价会按编码自动归季。" />} />
         : tab === 'trends' ? <DataTable ariaLabel="趋势列表" loading={loading} rows={trendRows} rowKey={t => t.id} selectedKey={selTrend?.id} density="comfy" onRowClick={t => pick(t.id)} columns={trendCols} empty={<EmptyState icon={Sparkles} title="还没有趋势记录" description="记录趋势时写明来源依据，并关联面料档案。" />} />
         : <DataTable ariaLabel="展会列表" loading={loading} rows={showRows} rowKey={x => x.id} selectedKey={selShow?.id} density="comfy" onRowClick={x => pick(x.id)} columns={showCols} empty={<EmptyState icon={Tent} title="还没有展会" description="登记参展计划与费用，展会线索在展会详情中录入。" />} />}</Card>}
-      detail={detail || placeholder} />
+      detail={detail || placeholder} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }

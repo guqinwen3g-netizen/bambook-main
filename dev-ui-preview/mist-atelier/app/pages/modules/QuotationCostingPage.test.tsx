@@ -142,6 +142,7 @@ afterEach(() => {
 it("enters exact line from quote detail and returns to exact quote", async () => {
   const line = q().lines[0];
   route.section = undefined;
+  route.detail = "full";
   render();
   await click("条目核算");
   expect(go).toHaveBeenLastCalledWith("quotations", q().id, {
@@ -149,7 +150,7 @@ it("enters exact line from quote detail and returns to exact quote", async () =>
   });
   expect(host.textContent).toContain("报价条目核算");
   await click("返回报价");
-  expect(go).toHaveBeenLastCalledWith("quotations", q().id);
+  expect(go).toHaveBeenLastCalledWith("quotations", q().id, { detail: "full" });
 });
 it("freezes sources without silently applying selling price, then exports only exact line snapshots", async () => {
   const original = structuredClone(q()),
@@ -373,6 +374,7 @@ it("retains a read-only history route after ordinary quote editing recreates lin
   );
   bridge.w.state = changed.state;
   route.section = undefined;
+  route.detail = "full";
   render();
   await click("查看全部核算历史");
   expect(go).toHaveBeenLastCalledWith("quotations", quote.id, {

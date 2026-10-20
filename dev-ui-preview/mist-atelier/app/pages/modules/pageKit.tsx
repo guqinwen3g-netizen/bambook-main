@@ -1,8 +1,9 @@
 import {businessNow} from '../../runtime/businessClock';
 /** Business page kit: Mist compositions shared by module pages (list + detail, reasoned actions). */
 import React from 'react';
-import type { LucideIcon } from 'lucide-react';
-import { Button, Card, Drawer } from '../../../../../components/mist';
+import { ArrowRight, type LucideIcon } from 'lucide-react';
+import { BackLink, Button, Card, Drawer, Facts, MistPage } from '../../../../../components/mist';
+import { useNav } from '../../nav';
 
 const COMPACT_QUERY = '(max-width: 1180px)';
 /** The sticky preview column is hidden by Mist CSS at ≤1180px; detail then opens in a drawer. */
@@ -27,16 +28,44 @@ export function DetailBody({ heading, children, ...rest }: { heading?: React.Rea
   return <div className={surface === 'drawer' ? 'mist-col' : 'mist-preview-b'} {...rest}>{surface === "card" && heading}{children}</div>;
 }
 
-/** T2 list + sticky detail card. On compact layouts the same detail opens in a drawer after an explicit pick. */
-export function ListDetail({ list, detail, drawerTitle, drawerSub, drawerOpen, onDrawerClose }: {
-  list: React.ReactNode; detail: React.ReactNode; drawerTitle: React.ReactNode; drawerSub?: React.ReactNode; drawerOpen: boolean; onDrawerClose: () => void;
+/** T2 list + sticky detail card. On compact layouts the same detail opens in a drawer after an explicit pick.
+ * With `summary` (null while nothing is picked) the desktop column is the narrow T2 quick preview and the
+ * complete detail moves to its own page (see useListDetailRoute / ListDetailPage); the compact drawer keeps the complete detail. */
+export function ListDetail({ list, detail, summary, drawerTitle, drawerSub, drawerOpen, onDrawerClose }: {
+  list: React.ReactNode; detail: React.ReactNode; summary?: React.ReactNode | null; drawerTitle: React.ReactNode; drawerSub?: React.ReactNode; drawerOpen: boolean; onDrawerClose: () => void;
 }) {
-  const compact = useCompactLayout();
-  return <div className="mist-split" data-list-detail="">
+  const compact = useCompactLayout(), summaryMode = summary !== undefined;
+  return <div className="mist-split" data-list-detail="" data-preview-summary={summaryMode ? '' : undefined}>
     {list}
-    {!compact && <Card as="aside" className="mist-preview">{detail}</Card>}
+    {!compact && <Card as="aside" className="mist-preview" aria-label={summaryMode ? '记录预览' : undefined}>{summaryMode ? summary ?? detail : detail}</Card>}
     {compact && <Drawer open={drawerOpen} onClose={onDrawerClose} title={drawerTitle} sub={drawerSub} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
   </div>;
+}
+
+/** T2 quick-preview content: recognise the record and decide whether to open it. Tables, attachments and history stay on the full page. */
+export type PreviewSummaryData = { stage?: React.ReactNode; code?: React.ReactNode; status?: React.ReactNode; title: React.ReactNode; description?: React.ReactNode; facts?: Array<{ label: React.ReactNode; value: React.ReactNode }>; extra?: React.ReactNode };
+export function PreviewSummary({ data, actions, openLabel, onOpen, ...rest }: { data: PreviewSummaryData; actions?: React.ReactNode; openLabel: string; onOpen: () => void } & Omit<React.HTMLAttributes<HTMLDivElement>, 'title'>) {
+  return <>{data.stage}<div className="mist-preview-b" data-preview-body="" {...rest}>
+    <div className="mist-col mist-preview-head">
+      {(data.code || data.status) && <div className="mist-row">{data.code && <span className="mist-mono mist-muted mist-preview-code">{data.code}</span>}<span className="mist-spacer" />{data.status}</div>}
+      <div className="mist-h2 mist-preview-title">{data.title}</div>
+      {data.description && <p className="mist-sub mist-preview-desc">{data.description}</p>}
+    </div>
+    {!!data.facts?.length && <Facts items={data.facts} />}
+    {data.extra}{actions}
+    <Button variant="primary" block iconRight={ArrowRight} onClick={onOpen}>{openLabel}</Button>
+  </div></>;
+}
+/** Full-page mode of a list + detail screen (`detail=full` on the route); returning keeps the record picked in the list. */
+export function useListDetailRoute() {
+  const { route, go } = useNav();
+  const active = route.detail === 'full' && !!route.id;
+  const open = (id: string) => { const { view, id: _id, detail: _detail, ...target } = route; go(view, id, { ...target, detail: 'full' }); };
+  const back = () => { const { view, id, detail: _detail, ...target } = route; go(view, id, target, { keepScroll: true }); };
+  return { active, open, back };
+}
+export function ListDetailPage({ backLabel, onBack, children, after }: { backLabel: string; onBack: () => void; children: React.ReactNode; after?: React.ReactNode }) {
+  return <MistPage><BackLink onClick={onBack}>返回{backLabel}</BackLink><Card className="mist-section" data-list-detail-page="">{children}</Card>{after}</MistPage>;
 }
 
 export type ReasonedAction = { label: string; icon?: LucideIcon; onClick: () => void; primary?: boolean; reason?: string | false; hidden?: boolean };

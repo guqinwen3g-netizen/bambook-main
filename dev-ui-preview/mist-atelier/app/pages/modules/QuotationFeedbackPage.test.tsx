@@ -137,6 +137,7 @@ afterEach(() => {
 });
 it("opens feedback from exact quote and never backfills legacy response evidence", async () => {
   route.section = undefined;
+  route.detail = "full";
   render();
   await click("查看客户反馈");
   expect(go).toHaveBeenLastCalledWith("quotations", q().id, {

@@ -227,7 +227,7 @@ export function QuotationFeedbackPage() {
     setInput((x) => ({ ...x, [field]: value }));
     setFailure("");
   };
-  const back = () => go("quotations", route.id),
+  const back = () => go("quotations", route.id, { detail: "full" }),
     history = () => go("quotations", route.id, { section: "feedback" });
   const current = () => scope.isCurrent() && activeKey.current === key;
   const validate = () => {

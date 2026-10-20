@@ -16,7 +16,7 @@ vi.mock('../../../../../services/apiService',()=>({apiService:api}));
 import {FULFILLMENT_PAGES,QcWorkbenchPage,ProcurementPage,MesHistoryPage,ShipmentsPage,SamplesPage,InventoryPage} from './FulfillmentPages';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(page:React.ReactNode,view='samples',id?:string,target:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view,id,...target},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}>{page}</Nav.Provider></ToastProvider></MistRoot>));}
+function render(page:React.ReactNode,view='samples',id?:string,target:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view,id,...(view==='shipments'&&id?{detail:'full' as const}:{}),...target},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}>{page}</Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 beforeEach(()=>{store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'专业QC'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});store.refresh.mockReset();store.uploadFile.mockReset();exportFile.mockReset();go.mockReset();api.listOutsourcingOrders.mockReset();api.listOutsourcingOrders.mockResolvedValue({items:[],total:0});host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.restoreAllMocks();});

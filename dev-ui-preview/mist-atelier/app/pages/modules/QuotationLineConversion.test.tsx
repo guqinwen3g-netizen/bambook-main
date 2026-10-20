@@ -22,7 +22,7 @@ beforeEach(() => {
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; document.body.innerHTML = ''; vi.useRealTimers(); });
 const Page = MARKET_PAGES.quotations;
-const render = async () => { await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'quotations', id: 'qt-q5' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); };
+const render = async () => { await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'quotations', id: 'qt-q5', detail: 'full' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); };
 async function mount() { host = document.createElement('div'); document.body.append(host); root = createRoot(host); await render(); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const click = async (node: HTMLElement) => { await act(async () => { node.click(); }); };

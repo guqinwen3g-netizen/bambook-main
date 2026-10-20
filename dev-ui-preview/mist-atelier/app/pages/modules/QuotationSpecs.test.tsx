@@ -44,7 +44,7 @@ describe('BB-QUO-2 quotation line specs and MOQ',()=>{
   const base={productId:'spec-d',sourceDevId:'',sourceVersionId:'',style:'SPEC-D',specification:'',unit:'米',price:'2.00',cost:'1.00',amount:'1000.00',qty:'500'};
   s.market.quotations.push({id:'qd',code:'QT-SPEC-1',customerId:s.customers[0].id,currency:'USD',season:'',validUntil:'2026-12-31',deliveryTerms:'FOB',paymentTerms:'TT',status:'Draft',lines:[{...base,id:'l1',name:'新条目',specs:{weight:'120',moqQty:'1000',moqUnit:'米'}},{...base,id:'l2',name:'历史条目'}],total:'2000.00',deliveryEvidence:'',responseEvidence:'',approval:null,convertedOrderId:null,fileIds:[],createdAt:'2026-10-01T00:00:00.000Z',updatedAt:'2026-10-01T00:00:00.000Z'});
   host=document.createElement('div');document.body.append(host);root=createRoot(host);const Page=MARKET_PAGES.quotations;
-  await act(async()=>root!.render(<Nav.Provider value={{route:{view:'quotations',id:'qd'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));
+  await act(async()=>root!.render(<Nav.Provider value={{route:{view:'quotations',id:'qd',detail:'full'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));
   const specs=[...host.querySelectorAll('[data-quote-specs]')].map(x=>x.textContent);
   expect(specs[0]).toBe('成分 未填写 · 克重 120 g/m² · 门幅 未填写 · 每色 MOQ 1000 米');expect(specs[1]).toContain('每色 MOQ 未填写');
   expect(host.querySelectorAll('[data-quote-moq="below"]').length).toBe(1);expect(host.textContent).toContain('低于 MOQ');

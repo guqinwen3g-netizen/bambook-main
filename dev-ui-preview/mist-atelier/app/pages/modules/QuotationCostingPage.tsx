@@ -352,7 +352,7 @@ export function QuotationCostingPage() {
   } catch (e) {
     problem = e instanceof Error ? e.message : "待补齐核算输入";
   }
-  const back = () => go("quotations", q?.id || route.id);
+  const back = () => go("quotations", q?.id || route.id, { detail: "full" });
   const begin = () => {
     if (!q || !line || disabled) return;
     setInput(

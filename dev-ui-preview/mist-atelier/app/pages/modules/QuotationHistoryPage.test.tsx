@@ -349,13 +349,13 @@ it("provides exact source returns and accurate current return", async () => {
   render();
   await pick();
   await click("查看准确报价");
-  expect(go).toHaveBeenLastCalledWith("quotations", "current");
+  expect(go).toHaveBeenLastCalledWith("quotations", "current", { detail: "full" });
   await click("查看反馈及更正历史");
   expect(go).toHaveBeenLastCalledWith("quotations", "current", {
     section: "feedback",
   });
   await click("返回本次报价");
-  expect(go).toHaveBeenLastCalledWith("quotations", "current");
+  expect(go).toHaveBeenLastCalledWith("quotations", "current", { detail: "full" });
 });
 it("reports missing exact target without a fallback or unauthorized disclosure", () => {
   route.section = "compare:missing";
@@ -399,7 +399,7 @@ it("refresh losing selected history never falls back; changing workspace clears 
   expect(host.textContent).toContain("选择一条历史进行对照");
 });
 it("mainline exposes an exact per-line history entry without removing costing or feedback", async () => {
-  route = { view: "quotations", id: "current" };
+  route = { view: "quotations", id: "current", detail: "full" };
   render();
   await click("历史条件对照");
   expect(go).toHaveBeenCalledWith("quotations", "current", {

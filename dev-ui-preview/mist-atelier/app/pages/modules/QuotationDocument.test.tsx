@@ -23,7 +23,7 @@ const setup = (over: Record<string, unknown> = {}, profile = true) => {
 beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-14T04:00:00Z')); });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; document.body.innerHTML = ''; vi.useRealTimers(); });
 const Page = MARKET_PAGES.quotations;
-async function mount() { host = document.createElement('div'); document.body.append(host); root = createRoot(host); await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'quotations', id: 'qt-q6' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function mount() { host = document.createElement('div'); document.body.append(host); root = createRoot(host); await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'quotations', id: 'qt-q6', detail: 'full' }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
 const button = (label: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 const click = async (node: HTMLElement) => { await act(async () => { node.click(); }); };
 const reasons = () => document.body.querySelector('[data-action-reasons]')?.textContent || '';
