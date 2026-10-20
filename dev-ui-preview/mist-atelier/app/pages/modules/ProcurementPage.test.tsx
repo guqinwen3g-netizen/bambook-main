@@ -14,7 +14,7 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:sess
 import {ProcurementPage} from './ProcurementPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string,mode:'full'|'list'=id?'full':'list'){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id,detail},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function purchase(id:string,patch:Partial<FulfillmentPurchase>={}):FulfillmentPurchase{return {id,code:id.toUpperCase(),orderId:'o',lineId:'l',kind:'material',domain:'garment',supplierId:'s',supplier:'青禾辅料',description:'主唛与洗标',quantity:100,unit:'个',price:0.3,currency:'CNY',due:'2026-10-30',terms:'月结30天',destination:'江南成衣',note:'',fileIds:[],state:'draft',requesterId:'buyer',createdBy:'经办人',createdAt:'2026-10-01T08:00:00Z',reviewerIds:['boss'],configVersions:{},received:0,...patch};}
@@ -90,12 +90,24 @@ it('explains why delivery cannot be recorded before the supplier confirms and op
   expect(queryByRole(detail,'button',{name:'登记合同线下发出'})).toBeNull();
   await click(getByRole(detail,'button',{name:'登记供应商确认'}));
   const dialog=getByRole(document.body,'dialog');
-  expect(getByRole(host,'table',{name:'采购订单列表'})).toBeTruthy();
+  expect(host.querySelector('[data-list-detail-page]')).not.toBeNull();
   typeInto(getByRole(dialog,'textbox',{name:'供应商确认依据'}) as HTMLTextAreaElement,'盖章回签件');
   await click(getByRole(dialog,'button',{name:'登记确认'}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.confirm',payload:expect.objectContaining({id:'sent',confirmedDue:'2026-10-30',evidence:'盖章回签件'})}));
 });
 
+it('shows a summary preview in the list and the complete purchase on its own page',()=>{
+  store.state!.fulfillment.purchases.push(purchase('p1'));
+  render('p1','list');
+  const preview=host.querySelector('aside.mist-preview') as HTMLElement;
+  expect(preview.textContent).toContain('P1');expect(preview.querySelector('[data-purchase-detail]')).toBeNull();
+  act(()=>(getByRole(preview,'button',{name:/^打开/}) as HTMLButtonElement).click());
+  expect(go).toHaveBeenLastCalledWith('procurement','p1',{detail:'full'});
+  render('p1');
+  expect(host.querySelector('[data-list-detail-page] [data-purchase-detail="p1"]')).not.toBeNull();expect(host.querySelector('[role="row"]')).toBeNull();
+  act(()=>(getByRole(host,'button',{name:/返回采购管理/}) as HTMLButtonElement).click());
+  expect(go).toHaveBeenLastCalledWith('procurement','p1',{},{keepScroll:true});
+});
 it('shows approval reasons, returned notes and processing-only track steps',()=>{
   store.state!.fulfillment.purchases.push(purchase('wait',{state:'pending',submittedAt:'2026-10-02T08:00:00Z',kind:'processing'}),purchase('back',{state:'rejected',decision:{actorId:'boss',actor:'审批人',at:'2026-10-03T08:00:00Z',decision:'rejected',note:'单价高于报价'}}));
   render('wait');
@@ -119,6 +131,9 @@ it('keeps the ledger readable without write permission',()=>{
   expect(queryByRole(host,'button',{name:'新建采购订单'})).toBeNull();
   expect((getByRole(host,'button',{name:'提交审批'}) as HTMLButtonElement).disabled).toBe(true);
   expect(host.textContent).toContain('提交审批：需要采购写权限');
+  render('ro','list');
+  expect(queryByRole(host,'button',{name:'新建采购订单'})).toBeNull();
+  expect(host.textContent).toContain('只读查看');
 });
 
 it('records rejected goods returned to the supplier per receipt and shows replace / no-replace in the track',async()=>{

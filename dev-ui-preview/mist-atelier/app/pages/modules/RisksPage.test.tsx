@@ -19,7 +19,9 @@ beforeEach(() => {
   bridge.current = { state, run: vi.fn(async () => ({ result: { id: 'saved' } })), error: '', refresh: vi.fn(), loading: false, saving: false, pending: null, upload: vi.fn() };
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); });
-async function mount(id?: string, section?: string) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = PLATFORM_PAGES.risks; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'risks', id, section }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+async function mount(id?: string, section?: string, mode: 'full' | 'list' = id ? 'full' : 'list') { const detail = mode === 'full' ? mode : undefined; host = document.createElement('div'); document.body.append(host); root = createRoot(host); const Page = PLATFORM_PAGES.risks; await act(async () => root!.render(<Nav.Provider value={{ route: { view: 'risks', id, section, detail }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><Page /></Nav.Provider>)); }
+/** 读列表页（预览模式）上的内容后回到完整详情页。 */
+async function inList<T>(id: string | undefined, section: string | undefined, read: () => T) { await act(async () => root!.unmount()); host.remove(); await mount(id, section, 'list'); const value = read(); await act(async () => root!.unmount()); host.remove(); await mount(id, section); return value; }
 const button = (label: string, scope: ParentNode = document.body) => [...scope.querySelectorAll('button')].find(b => b.textContent?.trim() === label) as HTMLButtonElement | undefined;
 async function click(b: HTMLButtonElement | undefined) { expect(b).toBeTruthy(); await act(async () => b!.click()); }
 async function type(label: string, value: string) { const c = document.body.querySelector(`[role="dialog"] [aria-label="${label}"]`) as HTMLTextAreaElement; expect(c, label).toBeTruthy(); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(c, value); c.dispatchEvent(new Event('input', { bubbles: true })); }); }
@@ -46,7 +48,7 @@ describe('风险管理与合规', () => {
     const cert = risk('Open'); expect(row(cert.title)!.textContent).toContain('沈禾');
     const free = riskSignals(state, '2026-10-14').find(s => !state.platform!.risks.some(r => r.signalKey === s.key))!;
     expect(free).toBeTruthy();
-    await act(async () => row(free.title)!.click());
+    await act(async () => row(free.title)!.click()); expect(host.querySelector('aside.mist-preview')!.textContent).toContain(free.title); await click(button('打开预警详情')); expect(go).toHaveBeenLastCalledWith('risks', free.key, { section: undefined, detail: 'full' }); await act(async () => root!.unmount()); host.remove(); await mount(free.key, 'signals');
     const d = host.querySelector(`[data-signal-detail="${free.key}"]`)!;
     expect(d.textContent).toContain(free.basis);
     await click(button('打开原记录', d)); expect(go).toHaveBeenCalled();
@@ -54,6 +56,15 @@ describe('风险管理与合规', () => {
     const dialog = document.body.querySelector('[role="dialog"]')!; expect((dialog.querySelector('[aria-label="风险标题"]') as HTMLInputElement).value).toBe(free.title);
     await click(button('登记', dialog as HTMLElement));
     expect(bridge.current.run).toHaveBeenCalledWith({ type: 'platform.risk.save', payload: expect.objectContaining({ signalKey: free.key, type: free.type, source: { kind: free.source.kind, id: free.source.id }, owner: '沈禾' }) });
+  });
+  it('台账预览只显示摘要，打开风险详情进入独立详情页，返回风险台账', async () => {
+    const r = risk('Open'); await mount(r.id, 'ledger', 'list');
+    const preview = host.querySelector('aside.mist-preview')!;
+    expect(preview.textContent).toContain(r.title); expect(preview.querySelector('[data-risk-detail]')).toBeNull();
+    await click(button('打开风险详情')); expect(go).toHaveBeenLastCalledWith('risks', r.id, { section: 'ledger', detail: 'full' });
+    await act(async () => root!.unmount()); host.remove(); await mount(r.id, 'ledger');
+    expect(host.querySelector(`[data-list-detail-page] [data-risk-detail="${r.id}"]`)).not.toBeNull(); expect(host.querySelector('[role="row"]')).toBeNull();
+    await click(button('返回风险台账')); expect(go).toHaveBeenLastCalledWith('risks', r.id, { section: 'ledger' }, { keepScroll: true });
   });
   it('统一审批中的申请：显示申请事项与部门主管，风险页不直接答复，可去审批中心', async () => {
     const r = risk('Escalated'); await mount(r.id);
@@ -113,12 +124,12 @@ describe('风险管理与合规', () => {
     await mount(mine.id);
     expect(host.textContent).toContain('按负责人处理');
     expect(button('接手', detail(mine.id))!.disabled).toBe(false);
-    expect(button('手工登记')!.disabled).toBe(false);
+    expect(await inList(mine.id, undefined, () => button('手工登记')!.disabled)).toBe(false);
     await act(async () => root!.unmount()); host.remove();
     // 同显示名（沈禾）但负责人绑定的是另一个账号：不能处理，也不能把该订单当作本人订单登记。
     state.orders[0].ownerId = 'demo-buyer-2'; state.orders.slice(1).forEach(o => { delete o.ownerId; }); await mount(mine.id);
     expect(button('接手', detail(mine.id))!.disabled).toBe(true); expect(detail(mine.id).textContent).toContain('只有来源负责人（沈禾）本人');
-    expect(button('手工登记')!.disabled).toBe(true);
+    expect(await inList(mine.id, undefined, () => button('手工登记')!.disabled)).toBe(true);
     await act(async () => root!.unmount()); host.remove();
     // 旧资料：负责人只有姓名、未绑定账号，即使与我同名也不按姓名认定。
     delete state.orders[0].ownerId; await mount(mine.id);
@@ -132,7 +143,7 @@ describe('风险管理与合规', () => {
   it('无处理权限：只读，动作可见但禁用并写明原因', async () => {
     bridge.perms = ['risk:read']; const r = risk('Open'); await mount(r.id);
     expect(button('接手', detail(r.id))!.disabled).toBe(true);
-    expect(button('手工登记')).toBeUndefined(); expect(host.textContent).toContain('只读查看');
+    expect(await inList(r.id, undefined, () => button('手工登记'))).toBeUndefined(); expect(host.textContent).toContain('只读查看');
   });
 });
 
@@ -156,7 +167,7 @@ describe('风险审批与操作记录的日期口径', () => {
     // 上海 2026-10-31 23:30 关闭的仍属 10 月，不计入。
     orderRisk({ id: 'risk-oct', state: 'Resolved', resolution: '已追回', closedAt: '2026-10-31T15:30:00.000Z', closedBy: '周敏' });
     await mount(r.id, 'ledger');
-    expect(summaryValue('本月关闭')).toBe('1');
+    expect(await inList(r.id, 'ledger', () => summaryValue('本月关闭'))).toBe('1');
     const text = detail(r.id).textContent!;
     expect(text).toContain('周敏 · 11/01'); expect(text).not.toContain('10/31');
     expect(state.platform!.risks.find(x => x.id === r.id)!.closedAt).toBe(at); // 原始时间戳不改
@@ -165,7 +176,7 @@ describe('风险审批与操作记录的日期口径', () => {
     vi.setSystemTime(new Date('2026-11-30T08:00:00Z')); // 上海 11-30 16:00
     const r = orderRisk({ id: 'risk-dec', state: 'Resolved', resolution: '已追回', closedAt: '2026-11-30T16:30:00.000Z', closedBy: '周敏' });
     await mount(r.id, 'ledger');
-    expect(summaryValue('本月关闭')).toBe('0');
+    expect(await inList(r.id, 'ledger', () => summaryValue('本月关闭'))).toBe('0');
     expect(detail(r.id).textContent).toContain('周敏 · 12/01');
   });
 });

@@ -64,8 +64,8 @@ export function useListDetailRoute() {
   const back = () => { const { view, id, detail: _detail, ...target } = route; go(view, id, target, { keepScroll: true }); };
   return { active, open, back };
 }
-export function ListDetailPage({ backLabel, onBack, children, after }: { backLabel: string; onBack: () => void; children: React.ReactNode; after?: React.ReactNode }) {
-  return <MistPage><BackLink onClick={onBack}>返回{backLabel}</BackLink><Card className="mist-section" data-list-detail-page="">{children}</Card>{after}</MistPage>;
+export function ListDetailPage({ backLabel, onBack, children, before, after }: { backLabel: string; onBack: () => void; children: React.ReactNode; before?: React.ReactNode; after?: React.ReactNode }) {
+  return <MistPage><BackLink onClick={onBack}>返回{backLabel}</BackLink>{before}<Card className="mist-section" data-list-detail-page="">{children}</Card>{after}</MistPage>;
 }
 
 export type ReasonedAction = { label: string; icon?: LucideIcon; onClick: () => void; primary?: boolean; reason?: string | false; hidden?: boolean };

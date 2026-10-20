@@ -22,7 +22,7 @@ function approveOrder(orderId:string){
  apply({type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'已核对书面PO与全部条目'}},{...context,actorId:'leader',actorName:'授权负责人'});
 }
 async function mount(Page:React.FC,view='pricing',id?:string){host=document.createElement('div');document.body.appendChild(host);root=createRoot(host);await reroute(Page,view,id);}
-async function reroute(Page:React.FC,view:string,id?:string,section?:string){await act(async()=>root!.render(<Nav.Provider value={{route:{view,id,section},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));}
+async function reroute(Page:React.FC,view:string,id?:string,section?:string){await act(async()=>root!.render(<Nav.Provider value={{route:{view,id,section,detail:view==='risks'&&id?'full' as const:undefined},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>));}
 async function click(text:string){const button=[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
 async function input(control:HTMLInputElement|HTMLTextAreaElement,value:string){await act(async()=>{Object.getOwnPropertyDescriptor(control.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(control,value);control.dispatchEvent(new Event('input',{bubbles:true}));control.dispatchEvent(new Event('change',{bubbles:true}));});}
 describe('Mist platform pages',()=>{

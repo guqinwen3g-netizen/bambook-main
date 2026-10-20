@@ -9,7 +9,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { quotationStage } from './QuotationsPage';
 import { supplierPerformance } from './SuppliersPage';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
@@ -51,6 +51,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   const [identity, setIdentity] = React.useState<Identity>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [statusFilter, setStatusFilter] = React.useState<StatusFilter>('active'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
+  const full = useListDetailRoute();
   React.useEffect(() => { if (route.id) setPicked(route.id); }, [route.id]);
   const all = state?.market.relations || [];
   const customer = (r: MarketRelation) => state?.customers.find(c => c.id === r.customerId);
@@ -129,6 +130,22 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
         onContact={(kind, parentId, owner, c) => setDialog(contactSpec(kind, parentId, owner, c))} onArchive={() => void run({ type: 'market.relation.status', payload: { id: selected.id, status: selected.status === 'active' ? 'archived' : 'active' } })}
         onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title="组织档案" description="从左侧列表选择一个组织，查看身份、联系人、信用与在手业务。" compact />;
+  const summary = selected ? (() => {
+    const b = business.get(selected.id), contacts = relationContacts(state, selected), main = contacts.find(c => c.primary) || contacts[0];
+    return <PreviewSummary openLabel="打开组织档案" onOpen={() => full.open(selected.id)} data={{
+      code: [customer(selected)?.code, supplier(selected)?.code].filter(Boolean).join(' · ') || undefined,
+      status: selected.hold ? <Pill tone="bad">已冻结</Pill> : selected.status === 'archived' ? <Pill>已归档</Pill> : <Pill tone="ok">正常</Pill>,
+      title: selected.name, description: [selected.aliases.length ? '别名 ' + selected.aliases.join('、') : '', selected.country].filter(Boolean).join(' · ') || undefined,
+      facts: [
+        { label: '身份', value: <span className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>{identityPills(selected)}</span> },
+        { label: '主联系人', value: main ? main.name + (main.role ? ' · ' + main.role : '') : '未登记' },
+        { label: '在手业务', value: b?.total ? `${b.total} 项` : '无' },
+        ...(b?.receivable.length ? [{ label: '未收款', value: b.receivable.map(([c, v]) => `${c} ${v.toLocaleString()}`).join('；') }] : []),
+      ],
+      extra: selected.hold ? <Banner tone="bad" title="往来已冻结">{selected.hold.reason || '报价、订单、采购处不能新增业务。'}</Banner> : undefined,
+    }} />;
+  })() : null;
+  if (full.active && selected && state) return <ListDetailPage backLabel="关系智库" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow="客户与市场 · 组织关系" title="关系智库" description="同一组织只有一份档案：客户、供应商身份与联系人、别名、在手业务集中查看；冻结往来会在报价、订单、采购处生效。"
       actions={<>
@@ -152,7 +169,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.name || '组织档案'} drawerSub={selected ? relationIdentities(selected).length > 1 ? '客户 + 供应商' : CATEGORY_LABEL[selected.category] : undefined}
       list={<Card><DataTable ariaLabel="关系档案列表" loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
-      detail={detail} />
+      detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }

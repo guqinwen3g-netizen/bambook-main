@@ -15,7 +15,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, businessDay, businessWhen, shortWhen } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute, businessDay, businessWhen, shortWhen } from './pageKit';
 
 type Tab = 'signals' | 'ledger';
 type LedgerFilter = 'open' | 'escalated' | 'closed' | 'all';
@@ -50,6 +50,7 @@ export function RisksPage() {
   React.useEffect(() => { setTab(routeTab()); }, [route.section, route.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const [ledgerFilter, setLedgerFilter] = React.useState<LedgerFilter>(() => risks.find(r => r.id === route.id)?.state === 'Resolved' ? 'all' : 'open'), [typeFilter, setTypeFilter] = React.useState<TypeFilter>('all');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
+  const full = useListDetailRoute();
   React.useEffect(() => { if (route.id) setPicked(route.id); }, [route.id]);
   const canAll = session.hasPermission('risk:write'), canOrders = session.hasPermission('orders:write'), canCustomers = session.hasPermission('relations:write');
   const me = session.user?.displayName || '', meId = session.user?.id || '';
@@ -125,11 +126,29 @@ export function RisksPage() {
     ? downloadModuleCsv('风险预警.csv', ['预警', '类型', '等级', '来源', '依据', '登记状态'], signalRows.map(s => [s.title, RISK_TYPE_LABEL[s.type], LEVEL[s.level].label, `${SOURCE_LABEL[s.source.kind]} ${s.source.label}`, s.basis, openByKey.get(s.key) ? RISK_STATE_LABEL[openByKey.get(s.key)!.state] : '未登记']))
     : downloadModuleCsv('风险台账.csv', ['风险', '类型', '等级', '来源', '负责人', '状态', '依据', '处置方案', '计划完成日', '审批申请', '关闭依据', '登记时间', '关闭时间'], ledgerRows.map(r => { const src = riskSource(state, r); return [r.title, RISK_TYPE_LABEL[riskType(r)], LEVEL[r.level].label, src ? `${SOURCE_LABEL[src.kind]} ${src.label}` : '', r.owner, RISK_STATE_LABEL[r.state], r.basis, r.plan || '', r.planDue || '', (r.escalations || []).map(e => `${RISK_ACTION_LABEL[e.action || 'authorize']}:${e.decidedBy || e.approver}:${DECISION_LABEL[e.decision]}`).join('; '), r.resolution, r.createdAt, r.closedAt || '']; }));
 
+  const summary = selSignal ? <PreviewSummary openLabel="打开预警详情" onOpen={() => full.open(selSignal.key)} data={{
+      status: <Pill tone={LEVEL[selSignal.level].tone}>{LEVEL[selSignal.level].label}</Pill>, title: selSignal.title, description: selSignal.basis,
+      facts: [
+        { label: '类型', value: RISK_TYPE_LABEL[selSignal.type] }, { label: '来源', value: `${SOURCE_LABEL[selSignal.source.kind]} · ${selSignal.source.label}` },
+        { label: '登记状态', value: openByKey.get(selSignal.key) ? `${RISK_STATE_LABEL[openByKey.get(selSignal.key)!.state]} · ${openByKey.get(selSignal.key)!.owner}` : '未登记' },
+      ] }} />
+    : selRisk ? (() => { const src = riskSource(state, selRisk), lv = riskEffectiveLevel(state, selRisk, day), e = pendingEscalation(selRisk), late = selRisk.state !== 'Resolved' && selRisk.planDue && selRisk.planDue < day;
+      return <PreviewSummary openLabel="打开风险详情" onOpen={() => full.open(selRisk.id)} data={{
+        status: <Pill tone={selRisk.state === 'Resolved' ? 'ok' : LEVEL[lv].tone}>{RISK_STATE_LABEL[selRisk.state]}</Pill>, title: selRisk.title, description: selRisk.basis,
+        facts: [
+          { label: '等级', value: LEVEL[lv].label }, { label: '类型', value: RISK_TYPE_LABEL[riskType(selRisk)] }, { label: '负责人', value: selRisk.owner || '未指定' },
+          { label: '来源', value: src ? `${SOURCE_LABEL[src.kind]} · ${src.label}` : '来源未记录' },
+          { label: '计划完成', value: selRisk.planDue ? (late ? <span style={{ color: 'var(--mist-bad)' }}>{selRisk.planDue} · 已逾期</span> : selRisk.planDue) : '未制定方案' },
+          ...(e ? [{ label: '审批中', value: RISK_ACTION_LABEL[e.action || 'authorize'] }] : []),
+        ] }} />; })()
+    : null;
+  const roleBanner = !can ? <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有风险处理权限，可查看预警与台账，不能登记或推进。</Banner></div>
+    : !canAll ? <div className="mist-section"><Banner tone="neutral" title="按负责人处理">你可以登记和推进本人负责的客户 / 订单上的风险，并直接关闭提示、警告级风险；严重风险的关闭、豁免与带风险放行需提交部门主管审批。</Banner></div> : null;
+  if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow="财务与成本 · 风险" title="风险管理与合规" description="预警来自逾期应收、往来冻结、供应商认证与状态、QC 与生产交期；登记后由一位负责人推进到关闭。"
       actions={<><Button icon={Download} onClick={exportRows}>导出</Button>{(canAll || canOrders) && <Button variant="primary" icon={Plus} disabled={locked || !ownOrders.length} title={ownOrders.length ? undefined : canAll ? '还没有订单' : '没有负责人绑定为你账号的订单'} onClick={() => setDialog(registerSpec())}>手工登记</Button>}</>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有风险处理权限，可查看预警与台账，不能登记或推进。</Banner></div>}
-    {can && !canAll && <div className="mist-section"><Banner tone="neutral" title="按负责人处理">你可以登记和推进本人负责的客户 / 订单上的风险，并直接关闭提示、警告级风险；严重风险的关闭、豁免与带风险放行需提交部门主管审批。</Banner></div>}
+    {roleBanner}
     {error && <div className="mist-section"><Banner tone="bad" title="数据未加载" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
     <div className="mist-section" data-risk-summary><SummaryBar items={[
       { label: '未登记预警', value: unregistered.length, hint: unregistered.filter(s => s.level === 'critical').length ? `其中严重 ${unregistered.filter(s => s.level === 'critical').length}` : undefined, hintTone: 'bad' },
@@ -147,7 +166,7 @@ export function RisksPage() {
       list={<Card>{tab === 'signals'
         ? <DataTable ariaLabel="风险预警" loading={loading} rows={signalRows} rowKey={s => s.key} selectedKey={selSignal?.key} density="comfy" onRowClick={s => pick(s.key)} columns={signalCols} empty={<EmptyState icon={ShieldCheck} title="当前没有预警" description="逾期应收、往来冻结、认证到期、供应商暂停、QC 不通过与生产逾期会自动出现在这里。" />} />
         : <DataTable ariaLabel="风险台账" loading={loading} rows={ledgerRows} rowKey={r => r.id} selectedKey={selRisk?.id} density="comfy" onRowClick={r => pick(r.id)} columns={ledgerCols} empty={<EmptyState icon={ShieldCheck} title={risks.length ? '没有符合筛选的风险' : '还没有登记风险'} description={risks.length ? '换一个状态或类型筛选。' : '从预警登记，或手工登记订单风险。'} />} />}</Card>}
-      detail={detail || placeholder} />
+      detail={detail || placeholder} summary={summary ?? placeholder} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }
