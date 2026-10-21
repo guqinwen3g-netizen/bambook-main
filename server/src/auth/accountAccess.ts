@@ -65,17 +65,17 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
   return{status,message:status==='sent'?'邮件已提交发送，请收件人检查收件箱及垃圾邮件。':'邮件发送结果未确认。账号已保留，请稍后重发；重发后旧链接失效。'};
  }
  async function complete(input:{email:string;kind:Kind;token:string;password:string}) {
-  if(!/^[A-Za-z0-9_-]{43}$/.test(input.token))return{ok:false,message:'链接无效或已过期，请重新申请。'};
+  if(!/^[A-Za-z0-9_-]{43}$/.test(input.token))return{ok:false,code:'ACCESS_LINK_INVALID',message:'链接已失效，请重新申请。'};
   const weak=passwordProblem(input.password);if(weak)return{ok:false,message:weak};
   const emailAddress=input.email.trim().toLowerCase(), passwordHash=await auth.hashPassword(input.password);
   const result=await db.$transaction(async tx=>{
-   const found=await tx.userAccount.findFirst({where:{email:{equals:emailAddress,mode:'insensitive'}}});if(!found)return{ok:false,message:'链接无效或已过期，请重新申请。'};
+   const found=await tx.userAccount.findFirst({where:{email:{equals:emailAddress,mode:'insensitive'}}});if(!found)return{ok:false,code:'ACCESS_LINK_INVALID',message:'链接已失效，请重新申请。'};
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${found.id}, 84))`;
    const user=await tx.userAccount.findUnique({where:{id:found.id},include:accountInclude});
    const record=await tx.userVerificationCode.findUnique({where:{email_purpose:{email:emailAddress,purpose:purpose(input.kind)}}});
-   if(!eligible(user)||!record||record.id!==`access:${input.kind}:${found.id}`||record.consumedAt||record.expiresAt.getTime()<=Date.now()||record.attempts>=5||record.codeHash!==hash(input.token))return{ok:false,message:'链接无效或已过期，请重新申请。'};
+   if(!eligible(user)||!record||record.id!==`access:${input.kind}:${found.id}`||record.consumedAt||record.expiresAt.getTime()<=Date.now()||record.attempts>=5||record.codeHash!==hash(input.token))return{ok:false,code:'ACCESS_LINK_INVALID',message:'链接已失效，请重新申请。'};
    const metadata=meta(user!.metadata);
-   if(input.kind==='invite'&&!metadata.forceChangePassword || Date.parse(metadata.passwordChangedAt||'')>record.issuedAt.getTime())return{ok:false,message:'链接已失效，请重新申请。'};
+   if(input.kind==='invite'&&!metadata.forceChangePassword || Date.parse(metadata.passwordChangedAt||'')>record.issuedAt.getTime())return{ok:false,code:'ACCESS_LINK_INVALID',message:'链接已失效，请重新申请。'};
    const at=new Date().toISOString();
    await tx.userAccount.update({where:{id:found.id},data:{passwordHash,metadata:{...metadata,forceChangePassword:false,credentialVersion:randomUUID(),passwordChangedAt:at,sessionsRevokedAt:at,...(input.kind==='invite'?{accountInvitation:{status:'accepted',at}}:{})}}});
    await tx.userVerificationCode.deleteMany({where:{email:emailAddress,purpose:{in:[purpose('invite'),purpose('recovery')]}}});
@@ -92,11 +92,12 @@ export function accountAccessRouter(db:PrismaClient,options:AccountAccessOptions
  router.post('/request',async(req,res,next)=>{try{
   const address=typeof req.body?.email==='string'?req.body.email.trim().toLowerCase():'';
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)||address.length>254)return res.status(400).json({ok:false,message:'请填写有效的工作邮箱。'});
-  if(traffic.recordFailure(req.ip||'unknown').blocked||limiter.recordFailure('request:'+req.ip+':'+address).blocked)return res.status(429).json({ok:false,message:'请求过于频繁，请稍后再试。'});
-  if(!service.available())return res.status(503).json({ok:false,message:'找回邮件服务暂不可用，请稍后重试或联系管理员。'});
+  const trafficLimit=traffic.recordFailure(req.ip||'unknown'),addressLimit=trafficLimit.blocked?{blocked:false as const}:limiter.recordFailure('request:'+req.ip+':'+address);
+  if(trafficLimit.blocked||addressLimit.blocked){const retryAfterSeconds=Math.ceil(Math.max(trafficLimit.blocked?trafficLimit.retryAfterMs:0,addressLimit.blocked?addressLimit.retryAfterMs:0)/1000);return res.set('Retry-After',String(retryAfterSeconds)).status(429).json({ok:false,code:'RATE_LIMITED',retryAfterSeconds,message:'操作频繁，请稍后重试。'});}
+  if(!service.available())return res.status(503).json({ok:false,message:'邮件服务暂不可用，请稍后重试。'});
   const user=await db.userAccount.findFirst({where:{email:{equals:address,mode:'insensitive'}},include:accountInclude});
   if(eligible(user))await service.deliver(user!.id,'recovery');
-  return res.json({ok:true,message:'如果该邮箱关联可用账号，重设链接将发送至邮箱。请检查收件箱及垃圾邮件。'});
+  return res.json({ok:true,retryAfterSeconds:60,message:'申请已提交，请查收邮件。'});
  }catch(e){next(e);}});
  router.post('/complete',async(req,res,next)=>{try{
   const b=req.body??{};

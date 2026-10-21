@@ -10,7 +10,7 @@ export function pageDocumentTitle(view: string, context: TitleContext = {}): str
   let label: string | undefined;
   if (view === 'register') label = '账户开通';
   else if (view === 'platform-recovery') label = '找回密码';
-  else if (view === 'account-access') label = context.invitation ? '设置登录密码' : '重设密码';
+  else if (view === 'account-access') label = context.invitation ? '设置登录密码' : '重置密码';
   else if (context.loading) return BAMBOOK_BRAND.name;
   else if (context.anonymous || view === 'login') label = '登录';
   else if (context.mustChangePassword) label = '修改密码';
