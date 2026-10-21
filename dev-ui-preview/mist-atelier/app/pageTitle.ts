@@ -12,7 +12,7 @@ export function pageDocumentTitle(view: string, context: TitleContext = {}): str
   else if (view === 'platform-recovery') label = '找回密码';
   else if (view === 'account-access') label = context.invitation ? '设置登录密码' : '重设密码';
   else if (context.loading) return BAMBOOK_BRAND.name;
-  else if (context.anonymous || view === 'login') return BAMBOOK_BRAND.name;
+  else if (context.anonymous || view === 'login') label = '登录';
   else if (context.mustChangePassword) label = '修改密码';
   else if (['system-settings', 'settings'].includes(view)) label = context.platformOnly ? '平台设置' : '公司设置';
   else {
