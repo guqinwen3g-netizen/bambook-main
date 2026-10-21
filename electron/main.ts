@@ -771,7 +771,7 @@ function createWindow(): void {
         height: 900,
         minWidth: BAMBOOK_OS_WINDOW_MIN_WIDTH,
         minHeight: BAMBOOK_OS_WINDOW_MIN_HEIGHT,
-        title: isUiLabElectron ? BAMBOOK_UI_LAB_TITLE : 'Bambook 竹衍 | Enterprise Agent OS',
+        title: isUiLabElectron ? BAMBOOK_UI_LAB_TITLE : BAMBOOK_APP_TITLE,
         backgroundColor: '#ffffff',
         show: false,
         ...(iconExists ? { icon: iconPath } : {}),

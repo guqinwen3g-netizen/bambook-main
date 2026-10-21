@@ -14,6 +14,7 @@ import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationMod
 import { View } from '../../../types';
 import { MODULE_MAP } from './moduleMap';
 import { Nav, useNav, type GoOptions, type Route, type RouteTarget } from './nav';
+import { PAGE_LABELS as LABELS, pageDocumentTitle } from './pageTitle';
 import { MistSessionProvider, useMistSession } from './runtime/auth';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
@@ -67,7 +68,6 @@ const PAGES: Record<string, React.FC> = {
 };
 const LIVE_VIEWS = new Set(['platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
-const LABELS: Record<string, string> = { 'platform-admin': '平台管理', 'design-system': '设计系统', states: '空 / 加载 / 错误', 'system-settings': '系统设置', settings: '系统设置', 'company-settings': '公司设置', 'workspace-settings': '公司设置', approvals: '审批与放行', search: '搜索结果', notifications: '通知中心' };
 const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '平台' };
 
 export function readMistRoute(): Route {
@@ -164,6 +164,8 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
+  const documentTitle = pageDocumentTitle(route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
+  React.useEffect(() => { document.title = documentTitle; }, [documentTitle]);
   const scrollPosition = React.useRef<{ key: string; route: Route; list: boolean }>(null as never);
   if (!scrollPosition.current) { const list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(route); scrollPosition.current = { key: scrollKeyOf(route, list), route, list }; }
   const [collapsed, setCollapsed] = React.useState(false);

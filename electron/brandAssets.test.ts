@@ -3,6 +3,7 @@ import {describe,it,expect} from 'vitest';
 import path from 'node:path';
 import {readFileSync} from 'node:fs';
 import {resolveBambookIconPath} from './brandAssets';
+import {BAMBOOK_BRAND} from '../server/src/shared/brand';
 
 describe('V3 installed and development identity',()=>{
   it('resolves source assets in dev and explicitly bundled resources in an install',()=>{
@@ -16,6 +17,8 @@ describe('V3 installed and development identity',()=>{
     expect(source).toContain('iconExists ? { icon: iconPath }');
     expect(source).not.toContain('app.dock?.setIcon(BAMBOOK_UI_LAB_ICON_PATH)');
     const config=JSON.parse(readFileSync('package.json','utf8')).build;
+    expect(config.productName).toBe(BAMBOOK_BRAND.name);
+    expect(config.artifactName).toBe('${productName}-${version}-${arch}.${ext}');
     expect(config.mac.icon).toBe('build/bambook-v3.icns');
     expect(config.win.icon).toBe('build/bambook-v3.ico');
     expect(config.linux.icon).toBe('build/bambook-v3.png');
@@ -43,6 +46,7 @@ describe('V3 installed and development identity',()=>{
     expect(size('bambook-v3-apple-touch-180.png')).toBe(180);expect(size('bambook-v3-app-192.png')).toBe(192);expect(size('bambook-v3-app-512.png')).toBe(512);expect(size('bambook-v3-maskable-512.png')).toBe(512);
     const manifest=JSON.parse(readFileSync('public/manifest.webmanifest','utf8'));
     const title=readFileSync('index.html','utf8').match(/<title>([^<]+)<\/title>/)?.[1];
+    expect(title).toBe(BAMBOOK_BRAND.name);
     expect(manifest.name).toBe(title);expect(manifest.short_name).toBe(title);
     expect(manifest.icons).toEqual(expect.arrayContaining([expect.objectContaining({src:'brand/bambook-v3-app-512.png',type:'image/png'}),expect.objectContaining({src:'brand/bambook-v3-maskable-512.png',purpose:'maskable'})]));
     for(const html of ['index.html','dev-ui-preview/mist-atelier/app/index.html']) expect(readFileSync(html,'utf8')).toContain('rel="apple-touch-icon" sizes="180x180" href="/brand/bambook-v3-apple-touch-180.png"');

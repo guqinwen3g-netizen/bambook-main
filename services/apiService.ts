@@ -779,7 +779,7 @@ export const apiService = {
       isCloudConnected: false,
       isRootActive: false,
       syncInterval: 15,
-      agentName: '竹衍 (Bambook)',
+      agentName: 'Bambook',
       agentRole: 'Panda Clothing 数字智慧核心，精通全球供应链演化与逻辑推演。',
       // Visuals
       themeMode: 'system',

@@ -1,5 +1,6 @@
 import React from 'react';
 import { BAMBOOK_MARK_INNER } from './markSvg';
+import { BAMBOOK_BRAND } from '../../server/src/shared/brand';
 
 /** Bambook 六叶标志。颜色跟随 currentColor（浅色主题白色、深色主题品牌青）。 */
 export function MistMark({ className = 'mist-brand-mark', title }: { className?: string; title?: string }) {
@@ -11,7 +12,7 @@ export function MistMark({ className = 'mist-brand-mark', title }: { className?:
   );
 }
 
-/** 标志 + 文字「Bambook 竹衍」 */
+/** 与网页、桌面和账号邮件共用产品名称。 */
 export function MistWordmark() {
-  return <span className="mist-brand-word">Bambook<small>竹衍</small></span>;
+  return <span className="mist-brand-word">{BAMBOOK_BRAND.name}</span>;
 }
