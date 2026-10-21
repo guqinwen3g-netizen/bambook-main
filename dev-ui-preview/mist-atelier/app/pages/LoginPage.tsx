@@ -4,7 +4,7 @@
 import React from 'react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
 import { ArrowRight, KeyRound, Mail } from 'lucide-react';
-import { Button, Checkbox, Field, MistMark, MistWordmark, TextInput, TextLink, useToast } from '../../../../components/mist';
+import { Button, Checkbox, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink, useToast } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { mapAuthErrorMessage } from '../../../../services/authService';
@@ -86,7 +86,7 @@ export function LoginPage() {
           </>) : (<>
           <div><h2 className="mist-h1" style={{ fontSize: 28 }}>登录</h2></div>
           <Field label="工作邮箱"><TextInput icon={Mail} type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} required /></Field>
-          <Field label="密码" error={errorNode}><TextInput icon={KeyRound} type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder="输入密码" disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
+          <Field label="密码" error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder="输入密码" disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
           <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label="保持登录" /><span className="mist-spacer" /><TextLink disabled={busy} title="查看密码找回方式" onClick={()=>go('platform-recovery')}>忘记密码？</TextLink></div>
           <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{cooldown > 0 ? `请稍候 ${cooldown}s` : '登录'}</Button>
           </>)}

@@ -75,7 +75,7 @@
 | ☐ | 智能邮箱 | `emails` | `components/EmailManager.tsx` | 2326 | T2 列表 + 预览 | — | — | 右侧预览=邮件正文；AI 摘要用 Banner tone=ai |
 | ☐ | 全景看板 | `dashboard` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | 特殊可视化 | — | — | 使用 Mist 统计卡与订单履约聚合，不恢复旧可视化页面 |
 | ☐ | 报表中心 | `reports` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T11 分析报表 | — | — |  |
-| ☐ | 数据中心 | `data-center` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T11 分析报表 | — | — | 当前工作空间的数据关联质量、记录汇总与来源入口 |
+| ☐ | 数据中心 | `data-center` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T11 分析报表 | — | — | 本公司的数据关联质量、记录汇总与来源入口 |
 | ☐ | AI 助手 | `assistant` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T13 助手 | — | — |  |
 | ☐ | 人事管理 | `hr` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T3 宽表列表 | T7 档案详情 | — | 7 个子视图用 Tabs；组织架构保留树形，外层 Card |
 | ☐ | 业务工具 | `business-tools` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T1 工作台 | — | — | 工具入口用 CardButton 网格 |

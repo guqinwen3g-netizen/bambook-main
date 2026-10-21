@@ -1,6 +1,6 @@
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Check, ChevronDown, Search, UploadCloud } from 'lucide-react';
+import { Check, ChevronDown, Eye, EyeOff, Search, UploadCloud } from 'lucide-react';
 import { Icon } from './primitives';
 import { cx } from './types';
 
@@ -25,6 +25,12 @@ type InputBase = { icon?: LucideIcon; suffix?: React.ReactNode; disabled?: boole
 /** 单行输入。外层是填充底（无描边），聚焦变强调色浅底。 */
 export const TextInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & InputBase>(function TextInput({ icon, suffix, className, disabled, ...rest }, ref) {
   return <span className={cx('mist-input', className)} data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<input ref={ref} disabled={disabled} {...rest} />{suffix && <span className="mist-input-suffix">{suffix}</span>}</span>;
+});
+/** 密码输入：右侧眼睛按钮切换明文显示。按下按钮不夺走输入焦点，光标位置保持不变。 */
+export const PasswordInput = React.forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & Omit<InputBase, 'suffix'>>(function PasswordInput({ icon, className, disabled, ...rest }, ref) {
+  const [shown, setShown] = React.useState(false);
+  return <span className={cx('mist-input', className)} data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<input ref={ref} type={shown ? 'text' : 'password'} disabled={disabled} {...rest} />
+    <button type="button" className="mist-input-reveal" aria-label={shown ? '隐藏密码' : '显示密码'} title={shown ? '隐藏密码' : '显示密码'} aria-pressed={shown} disabled={disabled} onMouseDown={e => e.preventDefault()} onClick={() => setShown(v => !v)}><Icon icon={shown ? EyeOff : Eye} size="sm" /></button></span>;
 });
 export const TextArea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & InputBase>(function TextArea({ icon, className, disabled, rows = 3, ...rest }, ref) {
   return <span className={cx('mist-input', className)} data-multiline data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<textarea ref={ref} rows={rows} disabled={disabled} {...rest} /></span>;
