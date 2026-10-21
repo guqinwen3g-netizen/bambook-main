@@ -15,10 +15,10 @@ const hash = (value:string) => createHash('sha256').update(value).digest('hex');
 const meta = (value:unknown):any => value && typeof value==='object' && !Array.isArray(value) ? value : {};
 export const invitationSummary = (value:unknown) => {const record=meta(value).accountInvitation;return record?{status:record.status,at:record.at}:null;};
 const accountInclude = { companyMembers: { include: { company:true } }, roles:true } as const;
-function eligible(user:any, kind:Kind) {
+function eligible(user:any) {
  if(!user || user.status!=='active' || user.deletedAt!=null)return false;
  const platform=user.platformRole==='platform_admin' && user.companyMembers.length===0 && user.roles.length===0;
- return kind==='recovery'?platform:platform || !user.platformRole && user.companyMembers.some((m:any)=>m.status==='active'&&m.company.status==='active');
+ return platform || !user.platformRole && user.companyMembers.some((m:any)=>m.status==='active'&&m.company.status==='active');
 }
 function publicBase(configured?:string) {
  const url=new URL(configured||process.env.BAMBOOK_PUBLIC_URL||'');
@@ -36,7 +36,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
   const entry=await db.$transaction(async tx=>{
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${userId}, 84))`;
    const user=await tx.userAccount.findUnique({where:{id:userId},include:accountInclude});
-   if(!eligible(user,kind)||!user!.email)return null;
+   if(!eligible(user)||!user!.email)return null;
    const metadata=meta(user!.metadata),window=metadata.accountMailWindow??{};
    const within=Number.isFinite(window.startedAt)&&now.getTime()-window.startedAt<3600000;
    if(now.getTime()-(window.lastAt||0)<60000||within&&(window.count||0)>=5)return{cooldown:true} as const;
@@ -44,7 +44,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
    const setup=kind==='recovery'||metadata.forceChangePassword===true;
    if(setup)await tx.userVerificationCode.upsert({where:{email_purpose:{email:user!.email!.toLowerCase(),purpose:purpose(kind)}},create:{id:`access:${kind}:${userId}`,email:user!.email!.toLowerCase(),purpose:purpose(kind),codeHash:tokenHash,expiresAt:new Date(now.getTime()+(kind==='invite'?48*3600000:30*60000))},update:{id:`access:${kind}:${userId}`,codeHash:tokenHash,issuedAt:now,expiresAt:new Date(now.getTime()+(kind==='invite'?48*3600000:30*60000)),attempts:0,consumedAt:null}});
    await tx.userAccount.update({where:{id:userId},data:{metadata:{...metadata,accountMailWindow:{startedAt:within?window.startedAt:now.getTime(),lastAt:now.getTime(),count:within?(window.count||0)+1:1},...(kind==='invite'?{accountInvitation:{status:'sending',at:now.toISOString(),requestId:tokenHash}}:{})}}});
-   await tx.auditLog.create({data:{id:randomUUID(),actorId:actorId||userId,action:kind==='invite'?'platform.invitation.request':'platform.recovery.request',targetType:'UserAccount',targetId:userId}});
+   await tx.auditLog.create({data:{id:randomUUID(),actorId:actorId||userId,action:kind==='invite'?'platform.invitation.request':`${user!.platformRole?'platform':'account'}.recovery.request`,targetType:'UserAccount',targetId:userId}});
    return{email:user!.email!,platform:!!user!.platformRole,setup};
   });
   if(!entry)return{status:'unavailable',message:'该账号当前不能接收邀请。'};
@@ -60,7 +60,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
    const user=await tx.userAccount.findUnique({where:{id:userId}});if(!user)return;
    const metadata=meta(user.metadata);
    if(kind==='invite'&&metadata.accountInvitation?.requestId===tokenHash&&metadata.accountInvitation?.status==='sending')await tx.userAccount.update({where:{id:userId},data:{metadata:{...metadata,accountInvitation:{status,at:new Date().toISOString()}}}});
-   await tx.auditLog.create({data:{id:randomUUID(),actorId:actorId||userId,action:kind==='invite'?`platform.invitation.${status}`:`platform.recovery.${status}`,targetType:'UserAccount',targetId:userId}});
+   await tx.auditLog.create({data:{id:randomUUID(),actorId:actorId||userId,action:kind==='invite'?`platform.invitation.${status}`:`${entry.platform?'platform':'account'}.recovery.${status}`,targetType:'UserAccount',targetId:userId}});
   });
   return{status,message:status==='sent'?'邮件已提交发送，请收件人检查收件箱及垃圾邮件。':'邮件发送结果未确认。账号已保留，请稍后重发；重发后旧链接失效。'};
  }
@@ -73,13 +73,13 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${found.id}, 84))`;
    const user=await tx.userAccount.findUnique({where:{id:found.id},include:accountInclude});
    const record=await tx.userVerificationCode.findUnique({where:{email_purpose:{email:emailAddress,purpose:purpose(input.kind)}}});
-   if(!eligible(user,input.kind)||!record||record.id!==`access:${input.kind}:${found.id}`||record.consumedAt||record.expiresAt.getTime()<=Date.now()||record.attempts>=5||record.codeHash!==hash(input.token))return{ok:false,message:'链接无效或已过期，请重新申请。'};
+   if(!eligible(user)||!record||record.id!==`access:${input.kind}:${found.id}`||record.consumedAt||record.expiresAt.getTime()<=Date.now()||record.attempts>=5||record.codeHash!==hash(input.token))return{ok:false,message:'链接无效或已过期，请重新申请。'};
    const metadata=meta(user!.metadata);
    if(input.kind==='invite'&&!metadata.forceChangePassword || Date.parse(metadata.passwordChangedAt||'')>record.issuedAt.getTime())return{ok:false,message:'链接已失效，请重新申请。'};
    const at=new Date().toISOString();
    await tx.userAccount.update({where:{id:found.id},data:{passwordHash,metadata:{...metadata,forceChangePassword:false,credentialVersion:randomUUID(),passwordChangedAt:at,sessionsRevokedAt:at,...(input.kind==='invite'?{accountInvitation:{status:'accepted',at}}:{})}}});
    await tx.userVerificationCode.deleteMany({where:{email:emailAddress,purpose:{in:[purpose('invite'),purpose('recovery')]}}});
-   await tx.auditLog.create({data:{id:randomUUID(),actorId:found.id,action:input.kind==='invite'?'account.invitation.accept':'platform.recovery.complete',targetType:'UserAccount',targetId:found.id}});
+   await tx.auditLog.create({data:{id:randomUUID(),actorId:found.id,action:input.kind==='invite'?'account.invitation.accept':`${user!.platformRole?'platform':'account'}.recovery.complete`,targetType:'UserAccount',targetId:found.id}});
    return{ok:true,userId:found.id,platform:!!user!.platformRole};
   });
   if(result.ok&&'userId'in result)invalidateAccountStatusCache(result.userId!);
@@ -93,10 +93,10 @@ export function accountAccessRouter(db:PrismaClient,options:AccountAccessOptions
   const address=typeof req.body?.email==='string'?req.body.email.trim().toLowerCase():'';
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)||address.length>254)return res.status(400).json({ok:false,message:'请填写有效的工作邮箱。'});
   if(traffic.recordFailure(req.ip||'unknown').blocked||limiter.recordFailure('request:'+req.ip+':'+address).blocked)return res.status(429).json({ok:false,message:'请求过于频繁，请稍后再试。'});
-  if(!service.available())return res.status(503).json({ok:false,message:'找回邮件服务暂不可用，请联系平台管理员。'});
+  if(!service.available())return res.status(503).json({ok:false,message:'找回邮件服务暂不可用，请稍后重试或联系管理员。'});
   const user=await db.userAccount.findFirst({where:{email:{equals:address,mode:'insensitive'}},include:accountInclude});
-  if(eligible(user,'recovery'))await service.deliver(user!.id,'recovery');
-  return res.json({ok:true,message:'申请已处理。如该账号支持邮箱找回，请检查收件箱及垃圾邮件。公司账号请联系本公司管理员重置。'});
+  if(eligible(user))await service.deliver(user!.id,'recovery');
+  return res.json({ok:true,message:'如果该邮箱关联可用账号，重设链接将发送至邮箱。请检查收件箱及垃圾邮件。'});
  }catch(e){next(e);}});
  router.post('/complete',async(req,res,next)=>{try{
   const b=req.body??{};
