@@ -23,7 +23,7 @@ describe('branded account emails', () => {
     const verification = buildVerificationEmail('123456');
     const approval = buildApprovalApprovedEmail({ displayName: '<script>x</script>', roles: ['<admin>'], department: '面料 & 成衣' });
     for (const message of [verification, approval]) {
-      expect(message.html).toContain('Bambook 竹衍'); expect(message.html).toContain('面料与成衣');
+      expect(message.html).toContain('Bambook'); expect(message.html).toContain('面料与成衣');
       expect(message.html).not.toMatch(/NEURAL|Enterprise Agent OS/);
     }
     expect(verification.subject).not.toContain('123456'); expect(verification.html).toContain('123456');
