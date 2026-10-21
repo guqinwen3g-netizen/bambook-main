@@ -19,7 +19,6 @@ describe('original Mist login with real-session binding', () => {
   it('retains the reference brand/form composition and never pretends password reset succeeded', () => {
     const host = render();
     expect([...host.querySelector('.mist-auth')!.children].map(element => element.className)).toEqual(['mist-auth-brand', 'mist-auth-panel']);
-    expect(host.querySelector('.mist-auth-brand h1')?.getAttribute('style')).toContain('font-size: 44px');
     expect(host.querySelector('.mist-auth-brand')?.textContent).toContain('从开发到大货，');
     expect(host.querySelectorAll('.mist-auth-form .mist-field')).toHaveLength(2);
     expect(host.querySelector<HTMLInputElement>('input[type="email"]')?.value).toBe('');

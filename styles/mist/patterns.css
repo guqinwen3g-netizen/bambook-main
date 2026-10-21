@@ -405,14 +405,14 @@
 .mist-setting-row small { color: var(--mist-ink-3); font-size: var(--mist-text-xs); }
 
 /* ════ 认证 ════ */
-.mist-auth { min-height: 100vh; height: 100dvh; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(400px, .9fr); background: var(--mist-shell); padding: var(--mist-canvas-inset); gap: var(--mist-canvas-inset); }
-.mist-auth-brand { position: relative; color: #fff; padding: 48px; display: flex; flex-direction: column; overflow: hidden; }
+.mist-auth { min-height: 100vh; height: 100dvh; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(440px, 1fr); background: var(--mist-shell); padding: var(--mist-canvas-inset); gap: var(--mist-canvas-inset); }
+.mist-auth-brand { position: relative; min-width: 0; color: #fff; padding: clamp(24px, 4vw, 48px); display: flex; flex-direction: column; overflow: hidden; }
 .mist-auth-brand .mist-hero-ring { width: 620px; height: 620px; right: -160px; top: auto; bottom: -200px; }
-.mist-auth-panel { background: var(--mist-canvas); border-radius: var(--mist-r-canvas); display: grid; place-items: center; padding: 40px; }
-.mist-auth-form { width: min(380px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.mist-auth-panel { min-width: 0; background: var(--mist-canvas); border-radius: var(--mist-r-canvas); display: grid; place-items: center; padding: clamp(24px, 4vw, 48px); }
+.mist-auth-form { min-width: 0; width: min(440px, 100%); display: flex; flex-direction: column; gap: 16px; }
 /* 登录模板原内联几何，供真实登录页复用。 */
 .mist-auth-brand-copy { margin-top: auto; max-width: 520px; }
-.mist-auth-brand-copy h1 { font-size: 44px; color: var(--mist-on-media); }
+.mist-auth-brand-copy h1 { font-size: clamp(28px, 3vw, 44px); color: var(--mist-on-media); }
 .mist-auth-brand-copy p { margin-top: 14px; font-size: 15px; color: var(--mist-on-media-2); }
 .mist-module-host { min-width: 0; min-height: 100%; }
 /* 真实待办在原 TaskList 几何内保留可读操作。 */
@@ -461,9 +461,13 @@
   .mist-detail[data-layout="main-rail"] { grid-template-columns: 1fr; }
   .mist-wizard { grid-template-columns: 1fr; } .mist-vsteps { position: static; flex-direction: row; overflow-x: auto; }
   .mist-vsteps > button { flex-shrink: 0; white-space: nowrap; }
-  .mist-auth { grid-template-columns: 1fr; } .mist-auth-brand { display: none; }
 }
 @media (max-width: 760px) {
+  /* 表单宽度延续桌面；品牌收成页首，不在平板断点突然消失。 */
+  .mist-auth { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(min-content, 1fr); }
+  .mist-auth-brand { padding: 12px 16px; }
+  .mist-auth-brand .mist-hero-ring, .mist-auth-brand-copy { display: none; }
+  .mist-auth-form { width: min(380px, 100%); }
   /* 手机：全幅应用外壳。顶栏吸顶（菜单 / 返回 / 当前位置 / 操作），侧栏收为全屏导航抽屉。 */
   .mist-app, .mist-app[data-collapsed] { display: block; height: auto; min-height: 100dvh; overflow: visible; background: var(--mist-canvas); }
   .mist-side { display: none; }

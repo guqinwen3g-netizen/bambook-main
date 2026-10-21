@@ -42,6 +42,8 @@ describe('V3 installed and development identity',()=>{
     const icons=readMobileIcons('.');const size=(f:string)=>{const b=icons[f];expect(b.subarray(1,4).toString()).toBe('PNG');return b.readUInt32BE(16);};
     expect(size('bambook-v3-apple-touch-180.png')).toBe(180);expect(size('bambook-v3-app-192.png')).toBe(192);expect(size('bambook-v3-app-512.png')).toBe(512);expect(size('bambook-v3-maskable-512.png')).toBe(512);
     const manifest=JSON.parse(readFileSync('public/manifest.webmanifest','utf8'));
+    const title=readFileSync('index.html','utf8').match(/<title>([^<]+)<\/title>/)?.[1];
+    expect(manifest.name).toBe(title);expect(manifest.short_name).toBe(title);
     expect(manifest.icons).toEqual(expect.arrayContaining([expect.objectContaining({src:'brand/bambook-v3-app-512.png',type:'image/png'}),expect.objectContaining({src:'brand/bambook-v3-maskable-512.png',purpose:'maskable'})]));
     for(const html of ['index.html','dev-ui-preview/mist-atelier/app/index.html']) expect(readFileSync(html,'utf8')).toContain('rel="apple-touch-icon" sizes="180x180" href="/brand/bambook-v3-apple-touch-180.png"');
   });

@@ -67,9 +67,9 @@ export function LoginPage() {
       <div className="mist-auth-brand">
         <MistMark className="mist-hero-ring" />
         <div className="mist-brand" style={{ padding: 0 }}><MistMark /><MistWordmark /></div>
-        <div style={{ marginTop: 'auto', maxWidth: 520 }}>
-          <h1 className="mist-h1" style={{ fontSize: 44, color: 'var(--mist-on-media)' }}>{BAMBOOK_BRAND.headline[0]}<br />{BAMBOOK_BRAND.headline[1]}</h1>
-          <p style={{ marginTop: 14, color: 'rgba(255,255,255,.84)', fontSize: 15 }}>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p>
+        <div className="mist-auth-brand-copy">
+          <h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br />{BAMBOOK_BRAND.headline[1]}</h1>
+          <p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p>
         </div>
       </div>
       <div className="mist-auth-panel">

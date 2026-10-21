@@ -319,7 +319,7 @@ export type CompanyBusiness = 'fabric' | 'garment' | 'both';
 export type CompanySize = '1-20' | '21-100' | '100+';
 export type CompanySearchResult = { id: string; name: string; business: CompanyBusiness | null };
 
-/** 注册时按名称搜索在用公司（至少 2 个字）。 */
+/** 注册时按完整名称精确核对在用公司（2–60 字）。 */
 export async function searchRegistrationCompanies(q: string, signal?: AbortSignal): Promise<CompanySearchResult[]> {
   const res = await fetch(`${getAuthApiBase()}/auth/register/companies?q=${encodeURIComponent(q)}`, { credentials: 'omit', signal });
   const data = await readJsonResponse(res);
