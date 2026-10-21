@@ -9,7 +9,7 @@
 - **开工**：读本文件 → GO-LIVE.md → 按任务需要查 [文档导航](docs/README.md)；从最新 main 开始（工作分支历来用 `golive`）。若最近的本地全量验证失败，先修再做新工作；GitHub 验证已改为手动备用。不重复通读历史交接。
 - **自主推进**：按 GO-LIVE.md 的优先级持续做下去，**不要让用户选方向**，不做额外附加功能；业务规则按行业最专业的做法自行判断，首版先上线、特殊需求留第二版。只有正式环境、真实数据 / 真实资金、对外发送（真实客户 / 供应商邮件等）必须先问用户。
 - **数据**：全新系统，不兼容旧数据；开发 / 测试只用模拟数据，需要时直接改种子与演示数据。
-- **每完成一小块**：跑完整本地测试（`npm test`、`cd server && npm run test:mist`、`npx tsc -p tsconfig.mist.json --noEmit`、`npx tsc -p server/tsconfig.json --noEmit`、`npm run mist:check`）→ 推送 → 开 PR 到 main → 以 **merge commit** 合入（不 squash、不强推、不删他人分支）→ 在 GO-LIVE.md“进度记录”追加一行并更新“下一步”。不等待、不轮询 CI。用户 2026-10-19 定案：GitHub 仅作版本库，每次提交及时推送，不走 GitHub 自动部署。**用户 2026-10-20 更新：本机只做开发与本地验证并推送 GitHub，停止从本机直连服务器部署（不运行 `npm run dev:deploy`），部署由用户另行处理**，详见 GO-LIVE.md。
+- **每完成一小块**：跑完整本地测试（`npm test`、`cd server && npm run test:mist`、`npx tsc -p tsconfig.mist.json --noEmit`、`npx tsc -p server/tsconfig.json --noEmit`、`npm run mist:check`）→ 推送 → 开 PR 到 main → 以 **merge commit** 合入（不 squash、不强推、不删他人分支）→ 在 GO-LIVE.md“进度记录”追加一行并更新“下一步”。不等待、不轮询 CI。用户 2026-10-19 定案：GitHub 仅作版本库，每次提交及时推送，不走 GitHub 自动部署。2026-10-21 网络恢复后，**开发环境发布恢复默认运行 `npm run dev:deploy`**（本机验证并直传）；2026-10-20 暂停直传的定案已失效，详见 GO-LIVE.md。
 - **验证**：服务端约束、权限 / 异常分支要有测试；页面或交互改动尽量在浏览器实际看一眼，做不到就在 PR 里写明未目视检查。单测和构建不能冒充真实业务验收，未验证部分如实说明。
 - **状态分开说**：代码已推送、PR 已合入、开发环境已部署、人工业务验收通过、正式环境已发布是不同事实，不统称“完成”。
 - **中途停下**（额度、阻塞）：把未合入的成果推到分支，在 GO-LIVE.md“下一步”写清分支、做到哪里、剩余问题。
@@ -17,7 +17,7 @@
 
 ## 服务器与后端访问
 
-开发服务器（腾讯云 bambook-dev）原部署走本机直传（`scripts/deploy/direct-dev.py`，使用本机私有目录中的专用受限密钥和固定主机指纹；密钥、部署包、验证回执不入库）。**2026-10-20 起本机不再做直传部署，部署由用户另行处理**，以下直传说明仅作技术资料。GitHub 运维/部署工作流已停用，维护和数据更新使用本机专用运维密钥直连，不再通过仓库执行：见 [开发服务器访问](docs/ops/dev-server-access.md)。正式环境（Mac mini、`jiangsupanda.com`）与真实资金不在此通道范围，仍须单独授权。
+开发服务器（腾讯云 bambook-dev）部署默认走本机直传（`scripts/deploy/direct-dev.py`），使用本机私有目录中的专用受限密钥和固定主机指纹；密钥、部署包、验证回执不入库（2026-10-20 曾因网络慢暂停，2026-10-21 已恢复）。GitHub 运维/部署工作流已停用，维护和数据更新使用本机专用运维密钥直连，不再通过仓库执行：见 [开发服务器访问](docs/ops/dev-server-access.md)。正式环境（Mac mini、`jiangsupanda.com`）与真实资金不在此通道范围，仍须单独授权。
 
 ## 开发与设计讨论（长期必读）
 
