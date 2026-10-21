@@ -1,10 +1,11 @@
 /**
  * 注册：创建公司（公司信息 → 管理员账号 → 验证邮箱，完成后直接进入）或
- * 加入公司（全称核对公司 → 你的账号 → 验证邮箱，管理员同意后可登录）。
+ * 加入公司（受限名称核对 → 申请人信息 → 邮箱验证，管理员审核后可登录）。
  */
 import React from 'react';
 import { ArrowLeft, ArrowRight, Building2, Check, Hash, KeyRound, Mail, Search, User, UserPlus } from 'lucide-react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
+import { matchingCompany } from '../../../../server/src/shared/companyLookup';
 import { Banner, Button, CardButton, CodeInput, Field, Icon, MistMark, MistWordmark, PasswordInput, Segmented, TextInput, TextLink } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
@@ -21,7 +22,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const errorText = (e: unknown, fallback: string) => e instanceof Error && e.message ? e.message : fallback;
 
-/** 输入停顿后自动精确核对；只显示当前查询的已完成响应，忽略过期请求。 */
+/** 输入停顿后自动核对；只显示符合统一前缀门槛的当前响应，忽略过期请求。 */
 function useCompanySearch(query: string, enabled: boolean, attempt = 0): { results: CompanySearchResult[]; loading: boolean; error: string; checked: boolean } {
   const q = query.trim(), eligible = enabled && q.length >= 2 && q.length <= 60;
   const [state, setState] = React.useState<{ query: string; results: CompanySearchResult[]; loading: boolean; error: string; checked: boolean }>({ query: '', results: [], loading: false, error: '', checked: false });
@@ -31,7 +32,7 @@ function useCompanySearch(query: string, enabled: boolean, attempt = 0): { resul
     setState(previous => ({ query: q, results: previous.query === q ? previous.results : [], loading: true, error: '', checked: false }));
     const timer = window.setTimeout(() => {
       searchRegistrationCompanies(q, controller.signal)
-        .then(rows => { if (!controller.signal.aborted) setState({ query: q, results: rows.filter(row => sameName(row.name, q)), loading: false, error: '', checked: true }); })
+        .then(rows => { if (!controller.signal.aborted) setState({ query: q, results: matchingCompany(q, rows), loading: false, error: '', checked: true }); })
         .catch(e => { if (!controller.signal.aborted) setState({ query: q, results: [], loading: false, error: errorText(e, '暂时无法核对公司'), checked: true }); });
     }, 250);
     return () => { controller.abort(); window.clearTimeout(timer); };
@@ -90,7 +91,7 @@ export function RegisterPage() {
     if (step === 'find') {
       if (useCode && !companyCode.trim()) return setError('请填写公司代码');
       if (!useCode && !selected) {
-        if (query.trim().length < 2) return setError('请填写公司全称');
+        if (query.trim().length < 2) return setError('请填写公司名称');
         if (search.error) setLookupAttempt(value => value + 1);
         return;
       }
@@ -167,15 +168,15 @@ export function RegisterPage() {
     {alert}
     {useCode ? <>
       <Field label="公司代码"><TextInput icon={Hash} value={companyCode} maxLength={50} autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={e => setCompanyCode(e.target.value)} /></Field>
-      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(false); setError(''); }}>使用公司全称</TextLink></p>
+      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(false); setError(''); }}>使用公司名称</TextLink></p>
     </> : <>
-      <Field label="公司全称"><TextInput icon={Search} placeholder="填写完整公司名称" value={query} maxLength={60} autoFocus onChange={e => { setQuery(e.target.value); setSelected(null); setError(''); }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
+      <Field label="公司名称"><TextInput icon={Search} placeholder="输入公司名称" value={query} maxLength={60} autoFocus onChange={e => { setQuery(e.target.value); setSelected(null); setError(''); }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
       <div className="mist-register-results" role="listbox" aria-label="匹配的公司" aria-busy={search.loading}>
         {search.results.map(c => <button key={c.id} type="button" role="option" aria-selected={selected?.id === c.id} className="mist-register-result" data-on={selected?.id === c.id || undefined} onClick={() => { setSelected(c); setError(''); }}>
           <Icon icon={Building2} size="sm" /><span>{c.name}</span>{businessLabel(c.business) && <small>{businessLabel(c.business)}</small>}{selected?.id === c.id && <Icon icon={Check} size="sm" />}
         </button>)}
         {search.loading && !search.results.length && <p className="mist-register-empty" role="status">核对中…</p>}
-        {search.checked && !search.results.length && <p className="mist-register-empty" role="status">{search.error || '未找到完全匹配的公司，请核对全称或使用公司代码。'}{search.error && <> <TextLink onClick={() => setLookupAttempt(value => value + 1)}>重试</TextLink></>}</p>}
+        {search.checked && !search.results.length && <p className="mist-register-empty" role="status">{search.error || '暂未确认公司，请继续补充名称或使用公司代码。'}{search.error && <> <TextLink onClick={() => setLookupAttempt(value => value + 1)}>重试</TextLink></>}</p>}
       </div>
       <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(true); setError(''); }}>使用公司代码</TextLink></p>
     </>}
