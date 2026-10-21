@@ -65,6 +65,8 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 平台管理员在页面上维护的 OpenAI 兼容 API 服务与调用顺序，保存在服务器私有文件 `platform-api-providers.json`，与平台 ChatGPT 套餐凭据同一目录（`BAMBOOK_AI_SUBSCRIPTION_DIR`，未设置时为 `server/private/ai-subscriptions`）；目录 0700、文件 0600，含 API Key，不入库、不回传浏览器。该目录须在发布间持久保留并纳入私有备份；若未设置环境变量，请先设到发布目录之外，否则新版本激活后配置会丢失。调用顺序：页面设定的 ChatGPT 套餐与 API 服务在前，`ARK_*` / `BAMBOOK_LLM_BACKUP*` 等环境变量提供方始终在最后兜底。增删改与排序写入平台操作记录（不含 Key）。
 
+服务器直连不到 `chatgpt.com` / `api.openai.com`。平台 ChatGPT 套餐（登录、令牌刷新、模型调用）及 OpenAI API 服务经出站代理访问：服务器本机 `sing-box.service` 提供 mixed 入站 `127.0.0.1:7890`，`backend.env` 设 `BAMBOOK_AI_HTTPS_PROXY=http://127.0.0.1:7890`。代码只对 `*.openai.com`、`*.chatgpt.com` 走代理（`server/src/ai/outboundProxy.ts`），国内模型接口仍直连；未设置该变量时行为不变。Node 内置 fetch 不读取 `HTTPS_PROXY`，不要用它代替。
+
 ## 产品图去背景模型
 
 产品图透明派生使用 IS-Net general-use Q8 ONNX 权重（上游 DIS / IS-Net 为 Apache-2.0；量化权重沿用同许可），文件 44,436,071 bytes，SHA-256 为 `feed6f32a5e707ca7e939576b2d891b23fb9eb4114749657a5efc64e8651e43a`。模型只保存在本机和服务器私有模型目录，不进入公开仓库或部署包。BiRefNet 通用 Swin-Tiny 的边缘质量已验收，但在当前 4GB 共享主机上超出服务资源边界，只保留为未来独立推理主机候选，不在当前服务启用。

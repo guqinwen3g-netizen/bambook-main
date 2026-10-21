@@ -38,6 +38,7 @@ export type LlmCompletionInput = {
 import { codexSubscriptions, PLATFORM_SUBJECT, type CodexSubscriptionService } from './codexSubscription';
 import { platformReasoning, type PlatformAiProfile } from './platformModel';
 import { platformProviders, type PlatformApiProvider, type PlatformProviderStore } from './platformProviders';
+import { aiFetch } from './outboundProxy';
 
 const DEFAULT_LLM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const DEFAULT_LLM_MODEL = 'ark-code-latest';
@@ -181,7 +182,7 @@ async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompl
     // system prompt 里已经明确要求 JSON 输出格式，所以这里不再设置 response_format。
     // 保留这个分支作为未来切换支持 JSON mode 的模型时的入口。
   }
-  const res = await fetch(`${provider.baseUrl}/chat/completions`, {
+  const res = await aiFetch(`${provider.baseUrl}/chat/completions`, {
     method: 'POST',
     signal: input.signal,
     headers: {
@@ -208,7 +209,7 @@ async function streamChatCompletion(params: {
   temperature: number; signal: AbortSignal;
   onDelta: (chunk: string) => void;
 }): Promise<string> {
-  const res = await fetch(`${params.baseUrl}/chat/completions`, {
+  const res = await aiFetch(`${params.baseUrl}/chat/completions`, {
     method: 'POST', signal: params.signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${params.apiKey}` },
     body: JSON.stringify({ model: params.model, temperature: params.temperature, stream: true, messages: params.messages }),

@@ -13,6 +13,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { LlmCompletionInput } from './llmProviders';
+import { aiFetch } from './outboundProxy';
 
 export const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const ISSUER = 'https://auth.openai.com';
@@ -164,7 +165,7 @@ export class CodexSubscriptionService {
 
   constructor(options: CodexSubscriptionOptions = {}) {
     this.dir = options.dir ?? (process.env.BAMBOOK_AI_SUBSCRIPTION_DIR?.trim() || path.resolve(__dirname, '../../private/ai-subscriptions'));
-    this.fetchImpl = options.fetch ?? ((...args) => fetch(...args));
+    this.fetchImpl = options.fetch ?? ((...args) => aiFetch(...args));
     this.now = options.now ?? Date.now;
     this.schedule = options.schedule ?? ((fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; });
     this.enabled = options.enabled ?? process.env.BAMBOOK_CODEX_SUBSCRIPTION === '1';
