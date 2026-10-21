@@ -10,6 +10,7 @@ import { COMPANY_FIELDS, EMPTY_COMPANY, EXPORT_FIELDS } from '../CompanyProfileS
 import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { AiSubscriptionPanel } from './AiSubscriptionPanel';
+import { PlatformAiProvidersPanel } from './PlatformAiProviders';
 
 /** 与系统设置共用同一份 Mist 公司资料字段定义。 */
 export type LocalCompanyProfile = MistCompanyProfile;
@@ -152,7 +153,7 @@ export function LocalAdminPanel() {
             ]} />
           </FormSection>}
         </>}
-        {section === 'ai' && <AiSubscriptionPanel mode="platform" bare sessionKey={session.sessionKey} />}
+        {section === 'ai' && <PlatformAiProvidersPanel sessionKey={session.sessionKey} />}
         {section !== 'ai' && <div className="mist-sticky-foot"><span className="mist-note">{busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司'}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>保存资料</Button></div>}
       </Card>
     </div>

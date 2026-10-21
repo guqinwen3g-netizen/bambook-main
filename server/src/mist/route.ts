@@ -1,6 +1,7 @@
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
 import multer from 'multer';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { requireAuth } from '../auth/middleware';
 import type { TokenPayload } from '../auth/service';
 import { MistRepository, type MistContract } from './repository';
@@ -12,6 +13,8 @@ import {runQuoteCostAdvisor} from './quoteCostAdvisor';
 import { hasScope } from '../auth/permissionService';
 import { codexSubscriptions, CodexSubscriptionError, PLATFORM_SUBJECT, personalSubject, type CodexSubscriptionService } from '../ai/codexSubscription';
 import { platformProfileList } from '../ai/platformModel';
+import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
+import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
@@ -33,7 +36,7 @@ function publicError(res: Response, error: any) {
   const known = error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500);
   res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '公司操作未完成，请查询原请求回执或稍后重试' } });
 }
-export function createMistRouter(options: { prisma?: any; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
+export function createMistRouter(options: { prisma?: any; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
   const router = Router();
   const authenticate = options.authenticate ?? requireAuth;
@@ -67,11 +70,62 @@ export function createMistRouter(options: { prisma?: any; filesRoot?: string; re
       throw error;
     }
   });
-  const platformView = () => ({ chatgpt: subscriptions().status(PLATFORM_SUBJECT), profiles: platformProfileList() });
+  // 平台 API 提供方（平台管理员）：Key 只写不读，响应与审计只含名称、主机与模型。
+  const providerStore = () => options.platformProviders ?? platformProviders();
+  const hostOf = (url: string) => { try { return new URL(url).host; } catch { return ''; } };
+  const envView = () => resolveEnvProviderChain().map(p => ({ id: 'env:' + p.id, host: hostOf(p.baseUrl), model: p.model }));
+  const platformView = () => ({ chatgpt: subscriptions().status(PLATFORM_SUBJECT), profiles: platformProfileList(), api: providerStore().list(), env: envView() });
+  const providerAudit = async (req: Request, action: string, targetId: string, detail: Record<string, unknown>) => {
+    if (!options.prisma) return;
+    await options.prisma.auditLog.create({ data: { id: randomUUID(), actorId: actor(req).userId, action, targetType: 'PlatformAiProvider', targetId, detail } });
+  };
+  const brief = (p: { name: string; baseUrl: string; model: string; enabled: boolean }) => ({ name: p.name, host: hostOf(p.baseUrl), model: p.model, enabled: p.enabled });
   router.get('/ai/platform-model', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json(platformView()); }));
   router.post('/ai/platform-model/chatgpt/login', subscriptionCall(async (req, res) => { await platformAdmin(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(PLATFORM_SUBJECT) }); }));
   router.get('/ai/platform-model/chatgpt/login/:loginId', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json({ login: subscriptions().getLogin(PLATFORM_SUBJECT, req.params.loginId), ...platformView() }); }));
   router.post('/ai/platform-model/chatgpt/disconnect', subscriptionCall(async (req, res) => { await platformAdmin(req); exactBody(req.body ?? {}, []); subscriptions().disconnect(PLATFORM_SUBJECT); res.json(platformView()); }));
+  router.post('/ai/platform-model/providers', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    const created = providerStore().create(req.body ?? {});
+    await providerAudit(req, 'platform.ai.provider.create', created.id, brief(created));
+    res.status(201).json({ provider: created, ...platformView() });
+  }));
+  router.patch('/ai/platform-model/providers/:id', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    const keyChanged = typeof req.body?.apiKey === 'string' && req.body.apiKey !== '';
+    const { before, after } = providerStore().update(req.params.id, req.body ?? {});
+    await providerAudit(req, 'platform.ai.provider.update', after.id, { before: brief(before), after: brief(after), keyChanged });
+    res.json({ provider: after, ...platformView() });
+  }));
+  router.delete('/ai/platform-model/providers/:id', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    const removed = providerStore().remove(req.params.id);
+    await providerAudit(req, 'platform.ai.provider.delete', removed.id, brief(removed));
+    res.json(platformView());
+  }));
+  router.put('/ai/platform-model/order', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    const { before, after } = providerStore().reorder(req.body ?? {});
+    await providerAudit(req, 'platform.ai.provider.order', 'order', { before, after });
+    res.json(platformView());
+  }));
+  router.post('/ai/platform-model/providers/:id/test', subscriptionCall(async (req, res) => {
+    await platformAdmin(req);
+    exactBody(req.body ?? {}, []);
+    const provider = providerStore().get(req.params.id);
+    const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 20000), started = Date.now();
+    timer.unref?.();
+    try {
+      await testLlmProvider({ id: 'test', baseUrl: provider.baseUrl, apiKey: provider.apiKey, model: provider.model }, controller.signal);
+      res.json({ ok: true, latencyMs: Date.now() - started });
+    } catch (error: any) {
+      const cause = typeof error?.cause?.code === 'string' ? error.cause.code : '';
+      const message = controller.signal.aborted ? '连接超时（20 秒内无响应）'
+        : error?.message === 'fetch failed' || cause ? `无法连接到接口地址${cause ? '（' + cause + '）' : ''}，请检查地址是否正确，以及服务器能否访问该地址`
+        : String(error?.message || error).split(provider.apiKey).join('••••').slice(0, 300);
+      res.json({ ok: false, error: message || '连接失败' });
+    } finally { clearTimeout(timer); }
+  }));
   router.get('/ai/subscriptions', subscriptionCall((req, res) => { res.json({ chatgpt: subscriptions().status(personalSubject(aiActor(req).userId)) }); }));
   router.post('/ai/subscriptions/chatgpt/login', subscriptionCall(async (req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(personalSubject(a.userId)) }); }));
   router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall((req, res) => { const a = aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
