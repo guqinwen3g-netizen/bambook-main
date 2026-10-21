@@ -94,7 +94,7 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
       </div></div>
     </> : <div className="mist-card-body">
       {login && login.state !== 'connected' && <Banner tone="warn" title={login.state === 'expired' ? '验证码已过期' : '授权未完成'}>{login.message ?? '请重新发起连接'}</Banner>}
-      <p className="mist-note">{mode === 'platform' ? '测试期所有同事的平台 AI 都会使用此账号的订阅额度，业务资料会发送给 OpenAI。生产期由企业 API 统一调用。' : '工作助手只使用你本人的订阅额度；请勿共享个人账号。'}</p>
+      <p className="mist-note">{mode === 'platform' ? '测试期所有公司的平台 AI 都会使用此账号的订阅额度，业务资料会发送给 OpenAI。生产期由企业 API 统一调用。' : '工作助手只使用你本人的订阅额度；请勿共享个人账号。'}</p>
       <div className="mist-row">
         <Button variant="ai" icon={login ? RefreshCw : Link2} disabled={busy} loading={busy} onClick={() => void start()}>{login ? '重新连接' : mode === 'platform' ? '连接 ChatGPT 账号作为平台模型' : '连接我的 ChatGPT 账号'}</Button>
       </div>
