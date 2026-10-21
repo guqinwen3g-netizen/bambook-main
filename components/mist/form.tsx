@@ -32,6 +32,28 @@ export const PasswordInput = React.forwardRef<HTMLInputElement, Omit<React.Input
   return <span className={cx('mist-input', className)} data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<input ref={ref} type={shown ? 'text' : 'password'} disabled={disabled} {...rest} />
     <button type="button" className="mist-input-reveal" aria-label={shown ? '隐藏密码' : '显示密码'} title={shown ? '隐藏密码' : '显示密码'} aria-pressed={shown} disabled={disabled} onMouseDown={e => e.preventDefault()} onClick={() => setShown(v => !v)}><Icon icon={shown ? EyeOff : Eye} size="sm" /></button></span>;
 });
+/** 分格验证码：逐位输入自动跳格，可整段粘贴，退格回到上一格；填满时触发 onComplete。 */
+export function CodeInput({ length = 6, value, onChange, onComplete, disabled, autoFocus, ariaLabel = '验证码' }: { length?: number; value: string; onChange: (value: string) => void; onComplete?: (value: string) => void; disabled?: boolean; autoFocus?: boolean; ariaLabel?: string }) {
+  const refs = React.useRef<Array<HTMLInputElement | null>>([]);
+  React.useEffect(() => { if (autoFocus) refs.current[Math.min(value.length, length - 1)]?.focus(); }, [autoFocus]);
+  const update = (next: string) => {
+    const clean = next.replace(/\D/g, '').slice(0, length);
+    onChange(clean);
+    refs.current[Math.min(clean.length, length - 1)]?.focus();
+    if (clean.length === length) onComplete?.(clean);
+  };
+  const key = (index: number, event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Backspace') { event.preventDefault(); update(value.slice(0, value[index] ? index : Math.max(0, index - 1))); }
+    else if (event.key === 'ArrowLeft' && index > 0) { event.preventDefault(); refs.current[index - 1]?.focus(); }
+    else if (event.key === 'ArrowRight' && index < length - 1) { event.preventDefault(); refs.current[index + 1]?.focus(); }
+  };
+  return <div className="mist-code" role="group" aria-label={ariaLabel}>
+    {Array.from({ length }, (_, index) => <input key={index} ref={element => { refs.current[index] = element; }} value={value[index] ?? ''} inputMode="numeric" autoComplete={index === 0 ? 'one-time-code' : 'off'} aria-label={`${ariaLabel}第 ${index + 1} 位`} disabled={disabled}
+      onChange={event => { const typed = event.target.value.replace(/\D/g, ''); if (typed) update(value.slice(0, Math.min(index, value.length)) + typed); }}
+      onPaste={event => { event.preventDefault(); update(value.slice(0, Math.min(index, value.length)) + event.clipboardData.getData('text')); }}
+      onKeyDown={event => key(index, event)} onFocus={event => event.target.select()} />)}
+  </div>;
+}
 export const TextArea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & InputBase>(function TextArea({ icon, className, disabled, rows = 3, ...rest }, ref) {
   return <span className={cx('mist-input', className)} data-multiline data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<textarea ref={ref} rows={rows} disabled={disabled} {...rest} /></span>;
 });

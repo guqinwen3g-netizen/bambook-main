@@ -11,16 +11,16 @@ function fixture() {
 }
 describe('account creation and approval atomicity',()=>{
  it.each(['/users','/users/pending/approve'])('invalid role never activates or creates an account at %s',async path=>{
-  const f=fixture();const response=await request(f.app).post(`/admin${path}`).set('Authorization',`Bearer ${token}`).send({ displayName:'New',email:'new@example.com',password:'safe-test-only',roles:['missing-role'],departmentId:'dept' });
+  const f=fixture();const response=await request(f.app).post(`/admin${path}`).set('Authorization',`Bearer ${token}`).send({ displayName:'New',email:'new@example.com',password:'safe-test-only1',roles:['missing-role'],departmentId:'dept' });
   expect(response.status).toBe(400); expect(f.prisma.$transaction).not.toHaveBeenCalled(); expect(f.tx.userAccount.update).not.toHaveBeenCalled(); expect(f.tx.userAccount.create).not.toHaveBeenCalled();
  });
  it('valid creation persists identity and explicit role in the same transaction',async()=>{
   const f=fixture();f.prisma.role.findUnique.mockResolvedValue({id:'role-sales'});
-  const response=await request(f.app).post('/admin/users').set('Authorization',`Bearer ${token}`).send({ displayName:'New',email:'new@example.com',password:'safe-test-only',roles:['role-sales'],departmentId:'dept' });
+  const response=await request(f.app).post('/admin/users').set('Authorization',`Bearer ${token}`).send({ displayName:'New',email:'new@example.com',password:'safe-test-only1',roles:['role-sales'],departmentId:'dept' });
   expect(response.status).toBe(200);expect(f.prisma.$transaction).toHaveBeenCalledOnce();expect(f.tx.userAccount.create).toHaveBeenCalledOnce();expect(f.tx.userRole.create).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({ userId:'new',roleId:'role-sales' })}));
  });
  it('company root cannot be assigned as employment department',async()=>{
   const f=fixture();f.prisma.department.findUnique.mockResolvedValue({id:'company',parentId:null,status:'active'});
-  expect((await request(f.app).post('/admin/users').set('Authorization',`Bearer ${token}`).send({displayName:'New',email:'new@example.com',password:'safe-test-only',departmentId:'company'})).status).toBe(400);
+  expect((await request(f.app).post('/admin/users').set('Authorization',`Bearer ${token}`).send({displayName:'New',email:'new@example.com',password:'safe-test-only1',departmentId:'company'})).status).toBe(400);
  });
 });

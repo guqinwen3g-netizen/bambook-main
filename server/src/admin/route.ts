@@ -13,6 +13,7 @@ import { logger } from '../lib/logger';
 import { safeRouteError } from '../shared/routeError';
 import { createApprovalDecisionService, type OnApprovalDecided } from '../approvals/approvalDecisionService';
 import { createOrderMainApprovalService, OrderMainApprovalError } from '../orders/orderMainApprovalService';
+import { passwordProblem } from '../auth/passwordPolicy';
 
 type AdminRouterOptions = {
   prisma: PrismaClient;
@@ -220,7 +221,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       const companyMember = (options.prisma as { companyMember?: { findMany?: unknown } }).companyMember;
       if (typeof companyMember?.findMany !== 'function') return next();
       const links = await options.prisma.companyMember.findMany({
-        where: { userId: req.params.id, status: 'active' },
+        where: { userId: req.params.id, status: { in: ['active', 'pending'] } },
         select: { companyId: true },
       });
       if (!links.length) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '账号不存在。' });
@@ -257,7 +258,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const baseWhere: any = status ? { status } : { OR: [{ deletedAt: null }, { status: 'disabled' }] };
     // 公司管理员只看本公司成员；没有公司上下文的历史会话保持原行为。
     const where: any = companyId
-      ? { AND: [baseWhere, { companyMembers: { some: { companyId, status: 'active' } } }] }
+      ? { AND: [baseWhere, { companyMembers: { some: { companyId, status: { in: ['active', 'pending'] } } } }] }
       : baseWhere;
     const usersRaw = await options.prisma.userAccount.findMany({
       where,
@@ -299,9 +300,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (!displayName || !email || !password) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: 'displayName, email, password are required.' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: 'Password must be at least 6 characters.' });
-    }
+    const weak = passwordProblem(password);
+    if (weak) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weak });
     const companyId = actorCompanyId(req);
     if (!(await departmentExists(options.prisma, departmentId, companyId))) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${departmentId}` });
@@ -404,9 +404,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     // 禁止回退到 'bambook2026' 之类的固定弱口令。
     const generated = !newPassword;
     const finalPassword = generated ? crypto.randomBytes(8).toString('hex') : String(newPassword);
-    if (finalPassword.length < 6) {
-      return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: 'New password must be at least 6 characters.' });
-    }
+    const weak = generated ? null : passwordProblem(finalPassword);
+    if (weak) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weak });
     const passwordHash = await auth.hashPassword(finalPassword);
     const target = await options.prisma.userAccount.findUnique({ where: { id }, select: { metadata: true } });
     if (!target) {
@@ -548,7 +547,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       : (requestedRole ? [requestedRole] : ['role-sales']);
 
     const finalDeptId = departmentId || target.primaryDeptId || null;
-    if (!(await departmentExists(options.prisma, finalDeptId))) {
+    if (!(await departmentExists(options.prisma, finalDeptId, actorCompanyId(req)))) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${finalDeptId}` });
     }
     const resolvedApproveRoles: Array<{ id: string }> = [];
@@ -565,7 +564,18 @@ export function createAdminRouter(options: AdminRouterOptions) {
     await options.prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "UserAccount" WHERE id = ${id} FOR UPDATE`;
       const current = await tx.userAccount.findUnique({ where: { id } });
-      if (current?.status !== 'pending') throw Object.assign(new Error('该用户不在待审批状态。'), { status: 409, code: 'INVALID_STATUS' });
+      if (current?.status !== 'pending') throw Object.assign(new Error('该用户不在待审批状态。'), { status: 409, statusCode: 409, code: 'INVALID_STATUS' });
+      // 凭公司代码自助申请加入：同一事务内启用成员关系，并核对公司席位。
+      const approvingCompanyId = actorCompanyId(req);
+      if (approvingCompanyId) {
+        const member = await tx.companyMember.findUnique({ where: { companyId_userId: { companyId: approvingCompanyId, userId: id } } });
+        if (member?.status === 'pending') {
+          const company = await tx.company.findUnique({ where: { id: approvingCompanyId }, select: { seatLimit: true } });
+          if (company?.seatLimit != null && await tx.companyMember.count({ where: { companyId: approvingCompanyId, status: 'active' } }) >= company.seatLimit)
+            throw Object.assign(new Error('公司席位已满，请先停用不再使用的账号，或联系平台调整席位。'), { status: 409, statusCode: 409, code: 'SEAT_LIMIT_REACHED' });
+          await tx.companyMember.update({ where: { id: member.id }, data: { status: 'active', joinedAt: new Date(), invitedBy: (req as any).actor?.userId ?? null } });
+        }
+      }
     await tx.userAccount.update({
       where: { id },
       data: {
@@ -653,6 +663,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
         },
       },
     });
+    const rejectingCompanyId = actorCompanyId(req);
+    if (rejectingCompanyId) await options.prisma.companyMember.updateMany({ where: { companyId: rejectingCompanyId, userId: id, status: 'pending' }, data: { status: 'left' } });
 
     const actor = (req as any).actor;
     await options.prisma.auditLog.create({

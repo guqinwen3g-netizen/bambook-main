@@ -405,7 +405,7 @@
 .mist-setting-row small { color: var(--mist-ink-3); font-size: var(--mist-text-xs); }
 
 /* ════ 认证 ════ */
-.mist-auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(400px, .9fr); background: var(--mist-shell); padding: var(--mist-canvas-inset); gap: var(--mist-canvas-inset); }
+.mist-auth { min-height: 100vh; height: 100dvh; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(400px, .9fr); background: var(--mist-shell); padding: var(--mist-canvas-inset); gap: var(--mist-canvas-inset); }
 .mist-auth-brand { position: relative; color: #fff; padding: 48px; display: flex; flex-direction: column; overflow: hidden; }
 .mist-auth-brand .mist-hero-ring { width: 620px; height: 620px; right: -160px; top: auto; bottom: -200px; }
 .mist-auth-panel { background: var(--mist-canvas); border-radius: var(--mist-r-canvas); display: grid; place-items: center; padding: 40px; }
@@ -907,3 +907,32 @@
   .mist-ai-chain-t { flex-basis: calc(100% - 40px); }
   .mist-ai-chain-acts { margin-left: 36px; }
 }
+
+/* ───────────── 注册（登录页「立即注册」） ───────────── */
+.mist-auth-title { font-size: 28px; }
+.mist-auth-switch { margin: 0; text-align: center; font-size: var(--mist-text-sm); color: var(--mist-ink-2); }
+.mist-register-option { display: flex; align-items: center; gap: 14px; padding: 18px 16px; text-align: left; width: 100%; }
+.mist-register-option > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mist-register-option b { font-weight: var(--mist-fw-medium); font-size: var(--mist-text-lg); color: var(--mist-ink); }
+.mist-register-option > span > span { font-size: var(--mist-text-sm); color: var(--mist-ink-2); }
+.mist-register-option > .mist-icon:first-child { color: var(--mist-accent); }
+.mist-register-progress { display: flex; gap: 6px; }
+.mist-register-progress i { flex: 1; height: 3px; border-radius: 2px; background: var(--mist-fill-2); transition: background var(--mist-dur); }
+.mist-register-progress i[data-on] { background: var(--mist-accent); }
+.mist-register-results { display: flex; flex-direction: column; gap: 4px; min-height: 8px; }
+.mist-register-result { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 12px; border-radius: var(--mist-r-md); background: none; text-align: left; font-size: var(--mist-text-md); color: var(--mist-ink); cursor: pointer; }
+.mist-register-result:hover { background: var(--mist-fill); }
+.mist-register-result[data-on] { background: var(--mist-accent-tint); }
+.mist-register-result[data-static] { cursor: default; }
+.mist-register-result > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mist-register-result > small { font-size: var(--mist-text-xs); color: var(--mist-ink-2); }
+.mist-register-result > .mist-icon { color: var(--mist-ink-3); }
+.mist-register-result[data-on] > .mist-icon:last-child { color: var(--mist-accent); }
+.mist-register-empty { margin: 4px 12px; font-size: var(--mist-text-sm); color: var(--mist-ink-2); }
+.mist-register-note { padding: 10px 12px; border-radius: var(--mist-r-md); background: var(--mist-warn-tint); color: var(--mist-warn-ink); font-size: var(--mist-text-sm); }
+.mist-register-checks { display: flex; gap: 14px; margin-top: -6px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
+.mist-register-checks > span { display: inline-flex; align-items: center; gap: 4px; transition: color var(--mist-dur); }
+.mist-register-checks > span[data-ok] { color: var(--mist-ok-ink); }
+.mist-register-resend { margin: 0; font-size: var(--mist-text-sm); color: var(--mist-ink-2); }
+.mist-auth-form .mist-seg { width: 100%; }
+.mist-auth-form .mist-seg > button { flex: 1; justify-content: center; }

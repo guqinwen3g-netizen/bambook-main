@@ -195,6 +195,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('check', 'verify', 'deploy'))
     parser.add_argument('--config', type=Path, default=PRIVATE / 'config.json')
+    # 小改动快速发布：跳过本机完整验证；服务器健康检查、失败回滚与公开版本核对照常执行。
+    parser.add_argument('--quick', action='store_true')
     args = parser.parse_args()
     revision, tree, node = clean_revision()
     if args.action == 'verify':
@@ -208,7 +210,10 @@ def main():
     if already_live(revision):
         print('Requested revision is already live; public frontend and API health confirmed.')
         return
-    verify(tree, node)
+    if args.quick:
+        print('Quick delivery: skipping full local verification.', flush=True)
+    else:
+        verify(tree, node)
     bundle = package(revision, tree)
     log_path = bundle.parent / 'delivery.log'
     with log_path.open('a') as log:

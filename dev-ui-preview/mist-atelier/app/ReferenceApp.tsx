@@ -41,6 +41,7 @@ import { FULFILLMENT_PAGES } from './pages/modules/FulfillmentPages';
 import { MARKET_PAGES } from './pages/modules/MarketPages';
 import { PLATFORM_PAGES } from './pages/modules/PlatformPages';
 import { LocalAdminPanel } from './pages/modules/LocalAdminPanel';
+import { RegisterPage } from './pages/RegisterPage';
 import { LocalMesPage } from './pages/modules/LocalMesPage';
 import { EmailsPage } from './pages/modules/EmailsPage';
 import { MistReviewButton, MistReviewProvider, useOptionalMistReviews } from './runtime/reviews';
@@ -304,6 +305,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
   if (['account-access','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
+  if (route.view === 'register') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
   if (session.status === 'loading') return null;
   if (session.status === 'anonymous' && (session.localMode || session.connectionModeUnverified)) return <MistPage width="narrow"><Card><CardHeader title="公司连接待核对" sub={session.localMode?'本地工作身份由本机服务提供，无需输入旧账号密码。':'暂时无法确认当前公司，请重新连接后继续。'}/><div className="mist-card-body"><p>{session.error||'暂时无法读取公司会话，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>{session.localMode?'重新进入本地身份':'重新连接公司'}</Button></div></Card></MistPage>;
   if (session.status === 'anonymous' || route.view === 'login') {

@@ -29,6 +29,7 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 - `npm run dev:deploy:check`：检查直连和受限发布身份。
 - `npm run dev:deploy:verify`：本机完整验证，将成功回执留在私有目录。
+- `npm run dev:deploy:quick`：小改动用，跳过本机完整验证，其余步骤（同源构建、直传、服务器健康检查与回滚、公开版本核对）不变。
 - `npm run dev:deploy`：匹配同一源码树及 Node 版本的本机验证回执可复用，否则先完整验证；随后重新构建同源前端、只打包已提交的运行源码和前端产物，直接上传并激活。
 
 本机配置默认在 `$CODEX_HOME/private/bambook-dev-direct/config.json`（未设置 CODEX_HOME 时用 `~/.codex`）。包含开发主机、受限用户、私钥路径和固定主机指纹文件路径；私钥必须仅当前用户可读。此配置、密钥、验证日志、部署包和回执均不入库。程序只允许开发主机与 `bambook-deploy`，SSH 强制校验主机指纹，服务器密钥只能执行 check / receive / activate，不能开启任意 shell、转发或修改数据库。
