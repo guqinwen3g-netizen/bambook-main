@@ -923,7 +923,7 @@
 .mist-register-progress { display: flex; gap: 6px; }
 .mist-register-progress i { flex: 1; height: 3px; border-radius: 2px; background: var(--mist-fill-2); transition: background var(--mist-dur); }
 .mist-register-progress i[data-on] { background: var(--mist-accent); }
-.mist-register-results { display: flex; flex-direction: column; gap: 4px; min-height: 8px; }
+.mist-register-results { display: flex; flex-direction: column; gap: 4px; min-height: 68px; }
 .mist-register-result { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 12px; border-radius: var(--mist-r-md); background: none; text-align: left; font-size: var(--mist-text-md); color: var(--mist-ink); cursor: pointer; }
 .mist-register-result:hover { background: var(--mist-fill); }
 .mist-register-result[data-on] { background: var(--mist-accent-tint); }
