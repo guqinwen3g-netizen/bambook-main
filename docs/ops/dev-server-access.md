@@ -21,7 +21,9 @@
 
 GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 Actions Secrets 已撤销；仓库无 Deploy key。仓库负责源码、PR、接力文档和后续 Release；不能再通过修改 ops-channel 文件执行服务器操作。历史脚本和配置记录不构成使用该通道的授权。未来低频自动部署需另行设计，本轮不恢复 Actions 凭据或配置定时触发。
 
-## 本机直接部署（默认）
+## 本机直接部署（2026-10-20 起暂停，仅作技术资料）
+
+> 用户 2026-10-20 定案：本机只做开发与本地验证并推送 GitHub，停止从本机直连服务器部署，部署由用户另行处理（见 GO-LIVE.md）。本机到服务器上传实测约 7 KB/s，6.7 MB 发布包会中断。未经用户新指令不要运行 `npm run dev:deploy`；本机验证 `dev:deploy:verify` 不受影响。以下说明保留供日后参考。
 
 入口为 `scripts/deploy/direct-dev.py`，使用当前已提交且干净的源码，不依赖 GitHub runner、云端检查状态或 GitHub 到服务器的网络。
 
