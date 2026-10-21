@@ -5,7 +5,7 @@
 import React from 'react';
 import { ArrowLeft, ArrowRight, Building2, Check, Hash, KeyRound, Mail, Search, User, UserPlus } from 'lucide-react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
-import { Banner, Button, CardButton, CodeInput, Field, Icon, MistMark, MistWordmark, PasswordInput, Segmented, TextInput, TextLink, useToast } from '../../../../components/mist';
+import { Banner, Button, CardButton, CodeInput, Field, Icon, MistMark, MistWordmark, PasswordInput, Segmented, TextInput, TextLink } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { passwordChecks, passwordOk } from '../runtime/passwordRule';
@@ -44,7 +44,6 @@ function useCompanySearch(query: string, enabled: boolean, attempt = 0) {
 export function RegisterPage() {
   const { go } = useNav();
   const session = useMistSession();
-  const toast = useToast();
   const [mode, setMode] = React.useState<Mode>('choose'), [step, setStep] = React.useState<Step>('company');
   const [companyName, setCompanyName] = React.useState(''), [business, setBusiness] = React.useState<CompanyBusiness | ''>(''), [size, setSize] = React.useState<CompanySize | ''>('');
   const [companyLookup, setCompanyLookup] = React.useState(''), [lookupQuery, setLookupQuery] = React.useState(''), [lookupAttempt, setLookupAttempt] = React.useState(0);
@@ -117,8 +116,8 @@ export function RegisterPage() {
       if (mode === 'company') {
         const result = await registerCompany({ ...account, companyName: companyName.trim(), business: business || undefined, size: size || undefined });
         try {
-          const user = await session.login(result.email, password, { remember: true });
-          if (mounted.current) { toast(`欢迎，${user.displayName || result.email}`); go('cockpit'); }
+          await session.login(result.email, password, { remember: true });
+          if (mounted.current) go('cockpit');
         } catch { if (mounted.current) setCreated({ email: result.email }); }
       } else {
         const result = await registerJoinCompany(useCode || !selected ? { ...account, companyCode: companyCode.trim() } : { ...account, companyId: selected.id });
@@ -130,26 +129,26 @@ export function RegisterPage() {
   };
 
   const progress = flow.length ? <div className="mist-register-progress" aria-label={`第 ${flow.indexOf(step) + 1} 步，共 ${flow.length} 步`}>{flow.map((s, i) => <i key={s} data-on={i <= flow.indexOf(step) || undefined} />)}</div> : null;
-  const login = <p className="mist-auth-switch">已有账号？<TextLink disabled={busy} onClick={() => go('login')}>登录</TextLink></p>;
+  const login = <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('login')}>返回登录</TextLink></p>;
   const backLink = <TextLink disabled={busy} onClick={back}><Icon icon={ArrowLeft} size="xs" /> 返回</TextLink>;
   const primary = (label: string) => <Button type="submit" variant="primary" size="lg" block loading={busy} iconRight={busy ? undefined : ArrowRight}>{label}</Button>;
   const alert = error ? <Banner tone="bad" title={error} /> : null;
 
   let body: React.ReactNode;
   if (joined) body = <>
-    <h2 className="mist-h1 mist-auth-title">申请已发送</h2>
-    <p className="mist-sub">「{joined.company}」的管理员同意后，即可用 {joined.email} 登录。</p>
+    <h2 className="mist-h1 mist-auth-title">申请已提交</h2>
+    <p className="mist-sub">待「{joined.company}」管理员审核通过后，可使用 {joined.email} 登录。</p>
     <Button variant="primary" size="lg" block onClick={() => go('login', joined.email)}>返回登录</Button>
   </>;
   else if (created) body = <>
-    <h2 className="mist-h1 mist-auth-title">公司已创建</h2>
-    <p className="mist-sub">用 {created.email} 登录即可开始使用。</p>
+    <h2 className="mist-h1 mist-auth-title">公司账户已开通</h2>
+    <p className="mist-sub">登录邮箱：{created.email}</p>
     <Button variant="primary" size="lg" block iconRight={ArrowRight} onClick={() => go('login', created.email)}>登录</Button>
   </>;
   else if (mode === 'choose') body = <>
-    <h2 className="mist-h1 mist-auth-title">注册</h2>
-    <CardButton className="mist-register-option" onClick={() => open('company')}><Icon icon={Building2} /><span><b>创建公司</b><span>首次使用竹衍</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
-    <CardButton className="mist-register-option" onClick={() => open('join')}><Icon icon={UserPlus} /><span><b>加入公司</b><span>公司已在使用竹衍</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
+    <h2 className="mist-h1 mist-auth-title">账户开通</h2>
+    <CardButton className="mist-register-option" onClick={() => open('company')}><Icon icon={Building2} /><span><b>开通公司账户</b><span>负责人或授权管理员办理</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
+    <CardButton className="mist-register-option" onClick={() => open('join')}><Icon icon={UserPlus} /><span><b>申请加入公司</b><span>员工申请，需公司管理员审核</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
     {login}
   </>;
   else if (step === 'company') body = <>
@@ -157,14 +156,14 @@ export function RegisterPage() {
     <h2 className="mist-h1 mist-auth-title">公司信息</h2>
     {alert}
     <Field label="公司名称"><TextInput icon={Building2} value={companyName} maxLength={60} autoFocus onChange={e => { setCompanyName(e.target.value); setCompanyLookup(''); }} onBlur={() => setCompanyLookup(companyName.trim())} /></Field>
-    {existing && <div className="mist-register-note">「{existing.name}」已在使用竹衍 · <TextLink onClick={() => { setSelected(existing); setQuery(existing.name); setUseCode(false); open('join', 'account'); }}>申请加入</TextLink></div>}
+    {existing && <div className="mist-register-note">「{existing.name}」已开通公司账户 · <TextLink onClick={() => { setSelected(existing); setQuery(existing.name); setUseCode(false); open('join', 'account'); }}>申请加入</TextLink></div>}
     <Field label="主营业务"><Segmented<CompanyBusiness> ariaLabel="主营业务" options={BUSINESS} value={business as CompanyBusiness} onChange={v => { setBusiness(v); setError(''); }} /></Field>
     <Field label="公司规模（选填）"><Segmented<CompanySize> ariaLabel="公司规模" options={SIZE} value={size as CompanySize} onChange={v => setSize(v === size ? '' : v)} /></Field>
     {primary('下一步')}
   </>;
   else if (step === 'find') body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">核对你的公司</h2>
+    <h2 className="mist-h1 mist-auth-title">核对公司</h2>
     {alert}
     {useCode ? <>
       <Field label="公司代码"><TextInput icon={Hash} value={companyCode} maxLength={50} autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={e => setCompanyCode(e.target.value)} /></Field>
@@ -177,13 +176,13 @@ export function RegisterPage() {
         </button>)}
         {lookupQuery && !search.loading && !search.results.length && <p className="mist-register-empty">{search.error || '未找到完全匹配的公司，请核对全称或使用公司代码。'}</p>}
       </div>
-      <p className="mist-auth-switch">找不到？用<TextLink onClick={() => { setUseCode(true); setError(''); }}>公司代码</TextLink>加入</p>
+      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(true); setError(''); }}>使用公司代码</TextLink></p>
     </>}
     {primary(useCode || selected ? '下一步' : search.loading ? '核对中…' : '核对公司')}
   </>;
   else if (step === 'account') body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">{mode === 'company' ? '管理员账号' : '你的账号'}</h2>
+    <h2 className="mist-h1 mist-auth-title">{mode === 'company' ? '管理员账号' : '申请人信息'}</h2>
     {mode === 'join' && <div className="mist-register-result" data-on data-static><Icon icon={Building2} size="sm" /><span>{selected && !useCode ? selected.name : `公司代码 ${companyCode.trim()}`}</span><TextLink onClick={() => setStep('find')}>更换</TextLink></div>}
     {alert}
     <Field label="姓名"><TextInput icon={User} value={displayName} maxLength={40} autoComplete="name" autoFocus onChange={e => setDisplayName(e.target.value)} /></Field>
@@ -194,12 +193,12 @@ export function RegisterPage() {
   </>;
   else body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">验证邮箱</h2>
+    <h2 className="mist-h1 mist-auth-title">邮箱验证</h2>
     <p className="mist-sub">验证码已发送至 {sentTo}</p>
     {alert}
     <CodeInput value={code} onChange={v => { setCode(v); setError(''); }} onComplete={v => void finish(v)} disabled={busy} autoFocus />
     <p className="mist-register-resend">{cooldown > 0 ? `${cooldown} 秒后可重新发送` : <TextLink disabled={busy} onClick={() => void sendCode()}>重新发送</TextLink>} · <TextLink disabled={busy} onClick={() => setStep('account')}>修改邮箱</TextLink></p>
-    {primary(mode === 'company' ? '完成注册' : '提交申请')}
+    {primary(mode === 'company' ? '开通公司账户' : '提交申请')}
   </>;
 
   return (
@@ -210,7 +209,7 @@ export function RegisterPage() {
         <div className="mist-auth-brand-copy"><h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br />{BAMBOOK_BRAND.headline[1]}</h1><p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p></div>
       </div>
       <div className="mist-auth-panel">
-        <form className="mist-auth-form" aria-label="注册" onSubmit={next} noValidate>{body}</form>
+        <form className="mist-auth-form" aria-label="账户开通" onSubmit={next} noValidate>{body}</form>
       </div>
     </div>
   );

@@ -221,6 +221,8 @@
 .mist-field[data-error] .mist-input { background: var(--mist-bad-tint); }
 .mist-input > .mist-icon { color: var(--mist-ink-3); }
 .mist-input input, .mist-input textarea, .mist-input select { border: 0; outline: 0; background: none; flex: 1; font-size: var(--mist-text-md); min-width: 0; resize: none; color: var(--mist-ink); padding: 0; height: 40px; appearance: none; }
+.mist-input input[type="password"] { letter-spacing: .2em; }
+.mist-input input[type="password"]::placeholder { letter-spacing: normal; }
 .mist-input textarea { height: auto; min-height: 64px; padding: 10px 0; line-height: 1.5; }
 .mist-input[data-multiline] { align-items: flex-start; }
 .mist-input[data-multiline] > .mist-icon { margin-top: 12px; }
