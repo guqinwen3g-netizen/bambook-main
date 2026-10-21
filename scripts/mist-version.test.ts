@@ -63,6 +63,8 @@ describe('shared Mist version metadata', () => {
   });
 
   it('counts untracked source changes while ignored runtime data contributes no count or names', () => {
+    // git builds without a template directory do not create .git/info on init.
+    mkdirSync(path.join(checkout, '.git/info'), { recursive: true });
     writeFileSync(path.join(checkout, '.git/info/exclude'), 'logs/\nprivate/\ncache/\n');
     for (const directory of ['logs', 'private', 'cache']) {
       mkdirSync(path.join(checkout, directory)); writeFileSync(path.join(checkout, directory, 'runtime-secret.txt'), 'private fixture');
