@@ -186,9 +186,9 @@ export function buildVerificationEmail(code: string, purpose: 'register' | 'rese
 export function buildAccountAccessEmail(params: { to: string; label: string; kind: 'invite' | 'recovery'; setup: boolean; url: string }): EmailMessage {
   const { label, kind, setup, url } = params;
   const recovery = kind === 'recovery';
-  const title = recovery ? '重设登录密码' : `加入${label}`;
-  const action = recovery ? '重设登录密码' : setup ? '设置密码并加入' : '登录 Bambook';
-  const paragraphs = recovery ? ['我们收到了你的账号密码重设申请。请点击下方按钮，设置新的登录密码。'] : [`你已受邀加入${label}。`, setup ? '请先设置你的登录密码，再使用受邀邮箱登录。' : '请使用现有账号登录。你的密码和已有公司权限保持不变。'];
+  const title = recovery ? '重置登录密码' : `加入${label}`;
+  const action = recovery ? '重置登录密码' : setup ? '设置密码并加入' : '登录 Bambook';
+  const paragraphs = recovery ? ['我们收到了你的账号密码重置申请。请点击下方按钮，设置新的登录密码。'] : [`你已受邀加入${label}。`, setup ? '请先设置你的登录密码，再使用受邀邮箱登录。' : '请使用现有账号登录。你的密码和已有公司权限保持不变。'];
   const note = setup ? `链接${recovery ? '30 分钟' : '48 小时'}内有效，仅可使用一次。${recovery ? '修改密码后，原有设备会话将失效。' : ''}请勿转发邮件。如果不是你本人申请或预期收到的邀请，请忽略此邮件。` : '如果这不是你预期收到的邀请，请联系公司管理员。';
-  return { to: params.to, subject: recovery ? 'Bambook 密码重设' : `${label}账号邀请`, text: [...paragraphs, `${action}：`, url, note].join('\n\n'), html: accountEmailHtml({ title, preheader: recovery ? '请在 30 分钟内设置新的登录密码。' : setup ? `${label} · 48 小时内完成密码设置。` : `${label}邀请你使用现有账号加入。`, paragraphs, action: { label: action, url }, note }) };
+  return { to: params.to, subject: recovery ? 'Bambook 密码重置' : `${label}账号邀请`, text: [...paragraphs, `${action}：`, url, note].join('\n\n'), html: accountEmailHtml({ title, preheader: recovery ? '请在 30 分钟内设置新的登录密码。' : setup ? `${label} · 48 小时内完成密码设置。` : `${label}邀请你使用现有账号加入。`, paragraphs, action: { label: action, url }, note }) };
 }

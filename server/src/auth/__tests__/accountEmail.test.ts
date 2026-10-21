@@ -21,8 +21,8 @@ describe('branded account emails', () => {
   });
   it('uses employee-compatible recovery wording without platform-only restrictions', () => {
     const message = buildAccountAccessEmail({ to:'staff@example.test', label:'Bambook 公司', kind:'recovery', setup:true, url:'https://example.test/' });
-    expect(message.subject).toBe('Bambook 密码重设');
-    expect(message.html).toContain('重设登录密码');
+    expect(message.subject).toBe('Bambook 密码重置');
+    expect(message.html).toContain('重置登录密码');
     expect(message.text).not.toContain('平台');
     expect(message.html).not.toMatch(/平台账号|平台工作账号|公司账号请联系/);
   });

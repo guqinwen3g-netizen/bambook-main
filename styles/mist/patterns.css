@@ -410,6 +410,7 @@
 .mist-auth-brand .mist-hero-ring { width: 620px; height: 620px; right: -160px; top: auto; bottom: -200px; }
 .mist-auth-panel { min-width: 0; background: var(--mist-canvas); border-radius: var(--mist-r-canvas); display: grid; place-items: center; padding: clamp(24px, 4vw, 48px); }
 .mist-auth-form { min-width: 0; width: min(440px, 100%); display: flex; flex-direction: column; gap: 16px; }
+.mist-auth-form button[type="submit"] { font-variant-numeric: tabular-nums; }
 /* 登录模板原内联几何，供真实登录页复用。 */
 .mist-auth-brand-copy { margin-top: auto; max-width: 520px; }
 .mist-auth-brand-copy h1 { font-size: clamp(28px, 3vw, 44px); color: var(--mist-on-media); }

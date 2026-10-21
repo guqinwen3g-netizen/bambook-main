@@ -1,29 +1,60 @@
 import React from 'react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
-import { Banner, Button, Field, MistMark, MistWordmark, TextInput, TextLink } from '../../../../components/mist';
+import { Banner, Button, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { accountAccessApi } from '../runtime/accountAccess';
 import { PASSWORD_HINT, passwordOk } from '../runtime/passwordRule';
-/** Email links never log users in or consume credentials on GET; only explicit form submission changes the password. */
+import { useRecoveryCooldown } from '../runtime/recoveryCooldown';
+
+/** GET never consumes a link. A request acknowledgement is not proof of email delivery. */
 export function AccountAccessPage(){
  const nav=useNav(),query=new URLSearchParams(location.search),requestMode=nav.route.view==='platform-recovery';
  const kind=query.get('kind')==='invite'?'invite':'recovery';
  const [email,setEmail]=React.useState(query.get('email')||''),[password,setPassword]=React.useState(''),[confirm,setConfirm]=React.useState('');
- const token=React.useRef(location.hash.slice(1)),[busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[message,setMessage]=React.useState(''),[done,setDone]=React.useState(false);
+ const token=React.useRef(location.hash.slice(1)),inFlight=React.useRef(false),heading=React.useRef<HTMLHeadingElement>(null);
+ const [busy,setBusy]=React.useState(false),[error,setError]=React.useState(''),[notice,setNotice]=React.useState(''),[accepted,setAccepted]=React.useState(false),[done,setDone]=React.useState(false);
+ const [linkInvalid,setLinkInvalid]=React.useState(!requestMode&&!token.current),[attempted,setAttempted]=React.useState(false);
+ const {remaining,start}=useRecoveryCooldown(requestMode);
  const mounted=React.useRef(true);React.useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
- async function submit(e:React.FormEvent){e.preventDefault();if(busy)return;setError('');setMessage('');
-  if(!requestMode&&(!token.current||password!==confirm||!passwordOk(password))){setError(!token.current?'链接不完整，请重新打开邮件中的链接。':password!==confirm?'两次输入的密码不一致。':'密码须包含字母和数字，至少 8 位。');return;}
-  setBusy(true);try{if(requestMode){const result=await accountAccessApi.requestRecovery(email.trim());if(mounted.current)setMessage(result.message);}else{await accountAccessApi.complete({email:email.trim(),kind,token:token.current,password});if(mounted.current){setDone(true);setPassword('');setConfirm('');token.current='';history.replaceState(history.state,'',location.pathname+location.search);}}}catch(e){if(mounted.current)setError(e instanceof Error?e.message:'操作未完成，请重试。');}finally{if(mounted.current)setBusy(false);}}
- const title=requestMode?'找回密码':kind==='invite'?'设置登录密码':'重设密码';
- return <div className="mist-auth"><div className="mist-auth-brand"><MistMark className="mist-hero-ring"/><div className="mist-brand" style={{padding:0}}><MistMark/><MistWordmark/></div><div className="mist-auth-brand-copy"><h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br/>{BAMBOOK_BRAND.headline[1]}</h1><p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p></div></div><div className="mist-auth-panel"><form className="mist-auth-form" onSubmit={submit}>
- <h2 className="mist-h1" style={{fontSize:28}}>{done?'密码已设置':title}</h2>
- {done?<><p>请使用刚设置的密码登录。</p><Button variant="primary" onClick={()=>nav.go('login')}>前往登录</Button></>:<>
- <p className="mist-sub">{requestMode?'填写账号使用的工作邮箱，接收密码重设链接。':kind==='invite'?'完成密码设置后即可登录。邀请链接 48 小时内有效，仅能使用一次。':'链接 30 分钟内有效。修改后原有设备会话将失效。'}</p>
- {error&&<Banner tone="bad" title={error}/>} {message&&<Banner tone="ok" title={message}/>}
- <Field label="工作邮箱"><TextInput aria-label="工作邮箱" type="email" autoComplete="username" required disabled={busy||!requestMode} value={email} onChange={e=>setEmail(e.target.value)}/></Field>
- {!requestMode&&<><Field label="新密码" hint={PASSWORD_HINT}><TextInput aria-label="新密码" type="password" autoComplete="new-password" required minLength={8} maxLength={72} disabled={busy} value={password} onChange={e=>setPassword(e.target.value)}/></Field><Field label="确认新密码"><TextInput aria-label="确认新密码" type="password" autoComplete="new-password" required disabled={busy} value={confirm} onChange={e=>setConfirm(e.target.value)}/></Field></>}
- <Button type="submit" variant="primary" block loading={busy} disabled={busy}>{requestMode?'发送重设链接':'设置密码'}</Button>
- <TextLink disabled={busy} onClick={()=>nav.go('login')}>返回登录</TextLink>
- </>}
+ React.useEffect(()=>{if(done||linkInvalid)heading.current?.focus();},[done,linkInvalid]);
+ const mismatch=attempted&&password!==confirm,weak=attempted&&!passwordOk(password);
+ async function submit(e:React.FormEvent){
+  e.preventDefault();if(inFlight.current||requestMode&&remaining>0)return;
+  setError('');
+  if(!requestMode){setAttempted(true);if(!token.current){setLinkInvalid(true);return;}if(password!==confirm||!passwordOk(password))return;}
+  inFlight.current=true;setBusy(true);
+  try{
+   if(requestMode){
+    const result=await accountAccessApi.requestRecovery(email.trim());
+    if(mounted.current){start(result.retryAfterSeconds??60);setNotice('申请已提交，请查收邮件。');setAccepted(true);}
+   }else{
+    await accountAccessApi.complete({email:email.trim(),kind,token:token.current,password});
+    if(mounted.current){setDone(true);setPassword('');setConfirm('');token.current='';history.replaceState(history.state,'',location.pathname+location.search);}
+   }
+  }catch(e){if(mounted.current){
+   const issue=e as {code?:string;retryAfterSeconds?:number};
+   if(requestMode&&issue?.retryAfterSeconds)start(issue.retryAfterSeconds);
+   if(issue?.code==='ACCESS_LINK_INVALID')setLinkInvalid(true);
+   else setError(e instanceof Error?e.message:'操作未完成，请重试。');
+  }}finally{inFlight.current=false;if(mounted.current)setBusy(false);}
+ }
+ const title=done?(kind==='invite'?'登录密码已设置':'密码已更新'):linkInvalid?'链接已失效':requestMode?'找回密码':kind==='invite'?'设置登录密码':'设置新密码';
+ const waitTime=String(Math.floor(remaining/60)).padStart(2,'0')+':'+String(remaining%60).padStart(2,'0');
+ const returnToLogin=()=>nav.go('login');
+ return <div className="mist-auth"><div className="mist-auth-brand"><MistMark className="mist-hero-ring"/><div className="mist-brand" style={{padding:0}}><MistMark/><MistWordmark/></div><div className="mist-auth-brand-copy"><h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br/>{BAMBOOK_BRAND.headline[1]}</h1><p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p></div></div><div className="mist-auth-panel"><form className="mist-auth-form" aria-label={title} onSubmit={submit} aria-busy={busy}>
+  <h2 ref={heading} tabIndex={-1} className="mist-h1 mist-auth-title">{title}</h2>
+  {done?<Button variant="primary" onClick={returnToLogin}>返回登录</Button>
+   :linkInvalid?<><p className="mist-sub">{kind==='invite'?'请联系管理员重新发送邀请。':'请重新申请重置邮件。'}</p>{kind==='recovery'&&<Button variant="primary" onClick={()=>nav.go('platform-recovery')}>重新申请</Button>}<TextLink onClick={returnToLogin}>返回登录</TextLink></>
+   :<>
+    {error&&<Banner tone="bad" title={error}/>}
+    <Field label="工作邮箱"><TextInput aria-label="工作邮箱" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={busy||!requestMode} value={email} onChange={e=>{setEmail(e.target.value);setNotice('');setAccepted(false);}}/></Field>
+    {!requestMode&&<>
+     <Field label="新密码" hint={<span id="account-new-password-help">{PASSWORD_HINT}</span>} error={weak?<span id="account-new-password-help" role="alert">{new TextEncoder().encode(password).length>72?'密码过长，请缩短后重试。':PASSWORD_HINT}</span>:undefined}><PasswordInput aria-label="新密码" aria-describedby="account-new-password-help" aria-invalid={weak||undefined} autoComplete="new-password" required minLength={8} maxLength={72} disabled={busy} value={password} onChange={e=>setPassword(e.target.value)}/></Field>
+     <Field label="确认新密码" error={mismatch?<span id="account-confirm-password-error" role="alert">两次输入的密码不一致。</span>:undefined}><PasswordInput aria-label="确认新密码" aria-describedby={mismatch?'account-confirm-password-error':undefined} aria-invalid={mismatch||undefined} autoComplete="new-password" required disabled={busy} value={confirm} onChange={e=>setConfirm(e.target.value)}/></Field>
+    </>}
+    <Button type="submit" variant="primary" block loading={busy} disabled={busy||requestMode&&remaining>0}>{busy?'正在提交…':requestMode?(remaining>0?`重新发送（${waitTime}）`:accepted?'重新发送':'发送重置链接'):kind==='invite'?'设置登录密码':'更新密码'}</Button>
+    {notice&&<p role="status" className="mist-sub">{notice}</p>}
+    <TextLink disabled={busy} onClick={returnToLogin}>返回登录</TextLink>
+   </>}
  </form></div></div>;
 }

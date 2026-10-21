@@ -81,7 +81,7 @@ describe('company employee password recovery',()=>{
   ['suspended company',{companyMembers:[member('active','suspended')]}],
  ])('rechecks %s after issuing the link',async(_name,change)=>{
   const service=createAccountAccessService(db,options());await service.deliver(user.id,'recovery');const input=completeInput();Object.assign(user,change);
-  expect(await service.complete(input)).toMatchObject({ok:false});expect(user.passwordHash).toBe('old');
+  expect(await service.complete(input)).toMatchObject({ok:false,code:'ACCESS_LINK_INVALID'});expect(user.passwordHash).toBe('old');
  });
 
  it.each(['expired','wrong token','wrong user binding','consumed','attempt limit','password changed'])('rejects a link that is %s',async(reason)=>{
@@ -92,7 +92,7 @@ describe('company employee password recovery',()=>{
   if(reason==='consumed')record.consumedAt=new Date();
   if(reason==='attempt limit')record.attempts=5;
   if(reason==='password changed')user.metadata.passwordChangedAt=new Date(record.issuedAt.getTime()+1000).toISOString();
-  expect(await service.complete(input)).toMatchObject({ok:false});expect(user.passwordHash).toBe('old');
+  expect(await service.complete(input)).toMatchObject({ok:false,code:'ACCESS_LINK_INVALID'});expect(user.passwordHash).toBe('old');
  });
 
  it('invalidates earlier links on resend and both purposes on completion',async()=>{
@@ -110,7 +110,23 @@ describe('company employee password recovery',()=>{
   user.status='disabled';const disabled=await request(endpoint).post('/access/request').send({email:user.email});
   const unknown=await request(endpoint).post('/access/request').send({email:'unknown@example.test'});
   expect(active.status).toBe(200);expect(disabled.body).toEqual(active.body);expect(unknown.body).toEqual(active.body);
-  expect(active.body).toEqual({ok:true,message:'如果该邮箱关联可用账号，重设链接将发送至邮箱。请检查收件箱及垃圾邮件。'});
+  expect(active.body).toEqual({ok:true,retryAfterSeconds:60,message:'申请已提交，请查收邮件。'});
   expect(messages).toHaveLength(1);
  });
+ it('returns a public Retry-After interval when the recovery request limit is reached',async()=>{
+  const endpoint=app();user.status='disabled';
+  for(let i=0;i<7;i++)expect((await request(endpoint).post('/access/request').send({email:user.email})).status).toBe(200);
+  const limited=await request(endpoint).post('/access/request').send({email:user.email});
+  expect(limited.status).toBe(429);expect(limited.body).toMatchObject({ok:false,code:'RATE_LIMITED'});
+  expect(Number(limited.headers['retry-after'])).toBe(limited.body.retryAfterSeconds);expect(limited.body.retryAfterSeconds).toBeGreaterThan(0);expect(limited.body.retryAfterSeconds).toBeLessThanOrEqual(900);
+  expect(messages).toHaveLength(0);
+ });
+ it('limits changing addresses from the same IP before looking up any further accounts',async()=>{
+  const endpoint=app();
+  for(let i=0;i<59;i++)expect((await request(endpoint).post('/access/request').send({email:`missing-${i}@example.invalid`})).status).toBe(200);
+  const limited=await request(endpoint).post('/access/request').send({email:'another@example.invalid'});
+  expect(limited.status).toBe(429);expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+  expect(db.userAccount.findFirst).toHaveBeenCalledTimes(59);expect(messages).toHaveLength(0);
+ });
+
 });
