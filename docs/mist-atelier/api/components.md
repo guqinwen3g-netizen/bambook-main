@@ -83,6 +83,7 @@
 | `FieldProps` | — | `type FieldProps = { label: React.ReactNode; required?: boolean; hint?: React.ReactNode; error?: React.ReactNode; full?: boolean; children: React.ReactNode; htmlFor?: string };` |
 | `Field` | 字段外框：标签 + 控件 + 提示/错误。error 存在时整个输入底变红色 tint。 | `({ label, required, hint, error, full, children, htmlFor }: FieldProps)` |
 | `TextInput` | 单行输入。外层是填充底（无描边），聚焦变强调色浅底。 | `forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & InputBase>` |
+| `PasswordInput` | 密码输入：右侧眼睛按钮切换明文显示。按下按钮不夺走输入焦点，光标位置保持不变。 | `forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & Omit<InputBase, 'suffix'>>` |
 | `TextArea` | — | `forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & InputBase>` |
 | `Select` | 原生下拉（保证可访问性与移动端体验）。options 可为字符串或 {value,label}。 | `({ icon, options, placeholder, disabled, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & InputBase & { options: Array<string \| { value: string; label: string }>; placeholder?: string })` |
 | `SearchField` | — | `({ value, onChange, placeholder = '搜索', autoFocus, style }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; style?: React.CSSProperties })` |
@@ -144,6 +145,8 @@
 
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
+| `useModalFocus` | 顶层浮层独占 Esc/焦点，关闭后回到触发器；允许自身的 portal 菜单。 | `(open: boolean, onClose: () => void, ref: React.RefObject<HTMLElement \| null>)` |
+| `Portal` | 浮层统一挂到 .mist-root 内（保证 token 生效），没有则挂 body。 | `({ children }: { children: React.ReactNode })` |
 | `DialogProps` | — | `type DialogProps = { open: boolean; onClose: () => void; title: React.ReactNode; description?: React.ReactNode; icon?: LucideIcon; tone?: 'accent' \| 'bad' \| 'warn' \| 'ok'; children?: React.ReactNode; footer?: React.ReactNode; width?: number };` |
 | `Dialog` | 居中弹窗：只用于需要打断的确认（删除、提交不可撤回操作）。普通编辑用 Drawer 或页内表单。 | `({ open, onClose, title, description, icon, tone = 'accent', children, footer, width }: DialogProps)` |
 | `DrawerProps` | — | `type DrawerProps = { open: boolean; onClose: () => void; title: React.ReactNode; sub?: React.ReactNode; leading?: React.ReactNode; tone?: 'ai'; size?: 'md' \| 'lg'; children: React.ReactNode; footer?: React.ReactNode; bodyless?: boolean };` |
@@ -160,7 +163,7 @@
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
 | `ChatMessage` | — | `type ChatMessage = \| { role: 'user'; text: string } \| { role: 'assistant'; html?: string; content?: React.ReactNode; sources?: string[]; actions?: React.ReactNode } \| { role: 'typing' };` |
-| `AssistantDrawer` | 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。 html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。 | `({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于当前工作空间的业务数据回答', icon = AssistantEyes }: { open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; })` |
+| `AssistantDrawer` | 小竹抽屉。只负责展示；消息状态与发送逻辑由调用方管理（接真实 Agent 接口）。 html 字段仅用于可信的内部模板；来自模型的文本请用 content（React 节点）渲染。 | `({ open, onClose, messages, onSend, suggestions = [], title = '小竹', sub = '基于本公司的业务数据回答', icon = AssistantEyes }: { open: boolean; onClose: () => void; messages: ChatMessage[]; onSend: (text: string) => void; suggestions?: string[]; title?: string; sub?: string; icon?: LucideIcon; })` |
 
 ## 品牌 · `components/mist/MistMark.tsx`
 
@@ -181,4 +184,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 128 个导出声明（98 个组件/函数/值，30 个类型）。重导出别名不重复计数。
+共 131 个导出声明（101 个组件/函数/值，30 个类型）。重导出别名不重复计数。

@@ -209,6 +209,11 @@
 .mist-input { min-height: 42px; border-radius: var(--mist-r-md); background: var(--mist-fill); display: flex; align-items: center; gap: 8px; padding: 0 12px; font-size: var(--mist-text-md); color: var(--mist-ink); transition: background var(--mist-dur); }
 .mist-input:hover { background: var(--mist-fill-2); }
 .mist-input:focus-within { background: var(--mist-accent-tint); }
+/* 键盘焦点环画在整个输入外框上，而不是内部的 input / textarea / select（全局 :focus-visible 会只框住内层）。 */
+.mist-root .mist-input > :is(input, textarea, select):focus-visible { outline: none; }
+.mist-input:has(> :is(input, textarea, select):focus-visible) { outline: 2px solid var(--mist-accent); outline-offset: 2px; }
+.mist-input-reveal { flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin-right: -6px; border-radius: var(--mist-r-sm); background: none; color: var(--mist-ink-3); cursor: pointer; }
+.mist-input-reveal:hover { color: var(--mist-ink); background: var(--mist-fill-2); }
 .mist-field[data-error] .mist-input { background: var(--mist-bad-tint); }
 .mist-input > .mist-icon { color: var(--mist-ink-3); }
 .mist-input input, .mist-input textarea, .mist-input select { border: 0; outline: 0; background: none; flex: 1; font-size: var(--mist-text-md); min-width: 0; resize: none; color: var(--mist-ink); padding: 0; height: 40px; appearance: none; }
