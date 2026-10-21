@@ -102,7 +102,7 @@ function useSections(): NavSection[] {
     const modules = platformOnly ? [] : getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), canAccessView: session.canAccessView });
     const real = groupPrimaryNavigationModules(modules).map(g => ({
       id: g.group, label: g.label === '平台' ? '公司管理' : g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
-      items: g.modules.map(m => ({ id: String(m.view), label: String(m.view) === 'admin-panel' ? '公司后台' : m.productLabel.replace('（开发中）', ''), icon: m.icon })),
+      items: g.modules.map(m => ({ id: String(m.view), label: String(m.view) === 'admin-panel' ? '公司后台' : productName(m), icon: m.icon })),
     }));
     const dev = import.meta.env.DEV;
     const items = [
@@ -137,11 +137,14 @@ function ModuleWorkBar({ view }: { view: string }) {
     </Drawer></>;
 }
 const developmentCreateLabel = (section?: string) => DEVELOPMENT_LIST_TABS.find(tab => tab.value === (section === 'fabric' ? 'fabric' : 'garment'))!.create;
+/** 模块的正式产品名：注册表里的「（开发中）」内部标记不进入界面。 */
+const productName = (m: { productLabel: string }) => m.productLabel.replace('（开发中）', '');
+
 function crumbsFor(route: Route, go: (view: string, id?: string) => void, objectLabel?: string, versionLabel?: string): Crumb[] {
   if (route.view === 'admin-panel') return [{ label: '公司管理', hideOnMobile: true }, { label: '公司后台' }];
   if (route.view === 'platform-admin') return [{ label: '平台运营', hideOnMobile: true }, { label: '平台管理' }];
   const base = route.view.split('/')[0], mod = getModuleByView(base as View);
-  const label = mod?.productLabel ?? LABELS[base] ?? base;
+  const label = (mod && productName(mod)) ?? LABELS[base] ?? base;
   const crumbs: Crumb[] = [{ label: mod ? GROUPS[mod.nav.group] : base === 'company-settings' || base === 'workspace-settings' || base === 'approvals' || base === 'notifications' || base === 'search' ? '我的事务' : '设计系统', hideOnMobile: true }];
   if (route.view.includes('/')) {
     crumbs.push({ label, onClick: () => go(base) });
@@ -318,7 +321,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     : session.localMode && route.view === 'mes' ? LocalMesPage
     : PAGES[route.view] ?? null;
   // 二级页（详情 / 新建）：应用内有上一页时按历史返回，直接打开链接时回到所属模块。
-  const backTarget = route.view.includes('/') ? { view: base, label: module?.productLabel ?? LABELS[base] ?? '' } : null;
+  const backTarget = route.view.includes('/') ? { view: base, label: (module && productName(module)) ?? LABELS[base] ?? '' } : null;
   const goBack = () => { if ((Number(history.state?.mistDepth) || 0) > 0) history.back(); else if (backTarget) go(backTarget.view); };
   const user = session.user!;
   const workspaceProfileName = state?.settings.profileName?.trim() || '';
