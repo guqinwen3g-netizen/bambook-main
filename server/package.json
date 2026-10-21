@@ -54,6 +54,7 @@
     "pinyin-pro": "^3.29.5",
     "resend": "^6.12.3",
     "sharp": "^0.35.5",
+    "undici": "^7.19.1",
     "winston-daily-rotate-file": "^5.0.0",
     "xlsx": "^0.18.5"
   },
