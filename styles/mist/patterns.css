@@ -858,3 +858,34 @@
 .mist-mail-cfiles { padding-top: 4px; }
 @media (max-width: 1180px) { .mist-mail-composer { grid-column: 1 / -1; } }
 @media (max-width: 640px) { .mist-mail-cpair { flex-direction: column; } .mist-mail-composer-head, .mist-mail-composer-body, .mist-mail-composer-foot { padding-left: 16px; padding-right: 16px; } }
+
+/* ───────────── T13 小竹整页：对话流 + 底部吸附输入（复用 ai.tsx 的 mist-msg / mist-composer） ───────────── */
+.mist-chat { display: flex; flex-direction: column; min-height: calc(100dvh - 260px); }
+.mist-chat-thread { flex: 1; padding: 8px 0 24px; }
+.mist-chat-text { margin: 0; white-space: pre-wrap; }
+.mist-chat-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 56px 16px 24px; color: var(--mist-ink-2); font-size: var(--mist-text-sm); }
+.mist-chat-empty > b { font-size: var(--mist-text-lg); font-weight: var(--mist-fw-medium); color: var(--mist-ink); }
+.mist-chat-empty .mist-sugg { justify-content: center; max-width: 560px; padding: 10px 0 0; }
+.mist-chat-dock { position: sticky; bottom: 0; z-index: 1; display: flex; flex-direction: column; gap: 8px; padding: 12px 0 16px; background: var(--mist-canvas); }
+.mist-chat-dock .mist-composer { margin: 0; align-items: flex-end; padding: 6px 6px 6px 6px; }
+.mist-chat-dock .mist-composer textarea { height: auto; min-height: 36px; max-height: 200px; field-sizing: content; padding: 7px 4px 0; }
+.mist-chat-dock .mist-composer textarea:disabled { color: var(--mist-ink-3); }
+.mist-chat-dock .mist-send:disabled { opacity: .4; cursor: default; }
+.mist-chat-hint { margin: 0; padding: 0 8px; font-size: var(--mist-text-2xs); color: var(--mist-ink-3); }
+.mist-chat-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.mist-chat-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 2px 2px 10px; border-radius: var(--mist-r-sm); background: var(--mist-ai-tint); color: var(--mist-ai-ink); font-size: var(--mist-text-xs); }
+.mist-chat-chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mist-msg[data-role="assistant"] .mist-msg-acts { flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.mist-chat-picks { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.mist-chat-pick { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 12px; border-radius: var(--mist-r-sm); background: var(--mist-fill); }
+.mist-chat-pick[data-on] { background: var(--mist-ai-tint); }
+.mist-chat-pick-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mist-chat-pick-t b { font-weight: var(--mist-fw-medium); font-size: var(--mist-text-sm); overflow-wrap: anywhere; }
+.mist-chat-pick-t span { font-size: var(--mist-text-xs); color: var(--mist-ink-2); }
+.mist-chat-draft { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--mist-r-sm); background: var(--mist-fill); }
+.mist-chat-draft b { font-weight: var(--mist-fw-medium); }
+@media (max-width: 640px) {
+  .mist-chat { min-height: calc(100dvh - 220px); }
+  .mist-chat-pick { flex-wrap: wrap; }
+  .mist-chat-pick-t { flex-basis: 100%; }
+}
