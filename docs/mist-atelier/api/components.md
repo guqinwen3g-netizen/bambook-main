@@ -84,6 +84,7 @@
 | `Field` | 字段外框：标签 + 控件 + 提示/错误。error 存在时整个输入底变红色 tint。 | `({ label, required, hint, error, full, children, htmlFor }: FieldProps)` |
 | `TextInput` | 单行输入。外层是填充底（无描边），聚焦变强调色浅底。 | `forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & InputBase>` |
 | `PasswordInput` | 密码输入：右侧眼睛按钮切换明文显示。按下按钮不夺走输入焦点，光标位置保持不变。 | `forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & Omit<InputBase, 'suffix'>>` |
+| `CodeInput` | 分格验证码：逐位输入自动跳格，可整段粘贴，退格回到上一格；填满时触发 onComplete。 | `({ length = 6, value, onChange, onComplete, disabled, autoFocus, ariaLabel = '验证码' }: { length?: number; value: string; onChange: (value: string) => void; onComplete?: (value: string) => void; disabled?: boolean; autoFocus?: boolean; ariaLabel?: string })` |
 | `TextArea` | — | `forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & InputBase>` |
 | `Select` | 原生下拉（保证可访问性与移动端体验）。options 可为字符串或 {value,label}。 | `({ icon, options, placeholder, disabled, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & InputBase & { options: Array<string \| { value: string; label: string }>; placeholder?: string })` |
 | `SearchField` | — | `({ value, onChange, placeholder = '搜索', autoFocus, style }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; style?: React.CSSProperties })` |
@@ -184,4 +185,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 131 个导出声明（101 个组件/函数/值，30 个类型）。重导出别名不重复计数。
+共 132 个导出声明（102 个组件/函数/值，30 个类型）。重导出别名不重复计数。

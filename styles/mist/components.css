@@ -214,6 +214,10 @@
 .mist-input:has(> :is(input, textarea, select):focus-visible) { outline: 2px solid var(--mist-accent); outline-offset: 2px; }
 .mist-input-reveal { flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin-right: -6px; border-radius: var(--mist-r-sm); background: none; color: var(--mist-ink-3); cursor: pointer; }
 .mist-input-reveal:hover { color: var(--mist-ink); background: var(--mist-fill-2); }
+.mist-code { display: flex; gap: 8px; }
+.mist-code input { flex: 1; min-width: 0; height: 52px; border: 0; border-radius: var(--mist-r-md); background: var(--mist-fill); color: var(--mist-ink); text-align: center; font-size: 22px; font-variant-numeric: tabular-nums; caret-color: var(--mist-accent); transition: background var(--mist-dur); }
+.mist-code input:focus { background: var(--mist-accent-tint); }
+.mist-code input:disabled { opacity: .55; }
 .mist-field[data-error] .mist-input { background: var(--mist-bad-tint); }
 .mist-input > .mist-icon { color: var(--mist-ink-3); }
 .mist-input input, .mist-input textarea, .mist-input select { border: 0; outline: 0; background: none; flex: 1; font-size: var(--mist-text-md); min-width: 0; resize: none; color: var(--mist-ink); padding: 0; height: 40px; appearance: none; }

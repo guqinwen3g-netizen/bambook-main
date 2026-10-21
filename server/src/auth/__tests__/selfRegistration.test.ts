@@ -25,7 +25,7 @@ beforeEach(() => {
   provisioning.createCompany.mockImplementation(async (_tx: any, input: any) => ({ company: { id: 'co-new', slug: input.slug, name: input.name }, roles: 7 }));
   prisma = {
     userAccount: { findFirst: vi.fn(async () => null), create: vi.fn(async ({ data }: any) => data) },
-    company: { findUnique: vi.fn(async () => null) },
+    company: { findUnique: vi.fn(async () => null), findMany: vi.fn(async () => []), update: vi.fn(async ({ data }: any) => data) },
     companyMember: { create: vi.fn(async ({ data }: any) => data) },
     userRole: { create: vi.fn(async ({ data }: any) => data) },
     auditLog: { create: vi.fn(async () => ({})) },
@@ -119,5 +119,53 @@ describe('helpers', () => {
   it('uses the same password rule as account invitations', () => {
     expect(passwordProblem(STRONG)).toBeNull();
     expect(passwordProblem('a'.repeat(80) + '1')).toContain('72');
+  });
+});
+
+describe('company search and the redesigned flow', () => {
+  it('returns only names and main business for active companies, at most six', async () => {
+    prisma.company.findMany.mockResolvedValue([{ id: 'co-1', name: '雾织贸易', settings: { registration: { business: 'both' } } }, { id: 'co-2', name: '雾织纺织', settings: null }]);
+    const res = await request(app()).get('/auth/register/companies').query({ q: ' 雾织 ' });
+    expect(res.body).toEqual({ ok: true, companies: [{ id: 'co-1', name: '雾织贸易', business: 'both' }, { id: 'co-2', name: '雾织纺织', business: null }] });
+    expect(prisma.company.findMany.mock.calls[0][0]).toMatchObject({ where: { status: 'active', name: { contains: '雾织', mode: 'insensitive' } }, take: 6 });
+  });
+
+  it('does not search with fewer than two characters', async () => {
+    const res = await request(app()).get('/auth/register/companies').query({ q: '雾' });
+    expect(res.body.companies).toEqual([]);
+    expect(prisma.company.findMany).not.toHaveBeenCalled();
+  });
+
+  it('limits how often one address can search', async () => {
+    const server = app();
+    for (let i = 0; i < 30; i++) expect((await request(server).get('/auth/register/companies').query({ q: '雾织' })).status).toBe(200);
+    const blocked = await request(server).get('/auth/register/companies').query({ q: '雾织' });
+    expect(blocked.status).toBe(429);
+  });
+
+  it('joins the company picked from search by its id', async () => {
+    prisma.company.findUnique.mockResolvedValue({ id: '0e9f6b1c-1d2e-4f3a-8b4c-5d6e7f809a1b', name: '雾织贸易', status: 'active' });
+    const res = await request(app()).post('/auth/register/join').send({ companyId: '0e9f6b1c-1d2e-4f3a-8b4c-5d6e7f809a1b', displayName: '林澈', email: 'staff@example.test', password: STRONG, code: '123456' });
+    expect(res.status).toBe(201);
+    expect(prisma.company.findUnique.mock.calls[0][0].where).toEqual({ id: '0e9f6b1c-1d2e-4f3a-8b4c-5d6e7f809a1b' });
+    expect(prisma.companyMember.create.mock.calls[0][0].data.status).toBe('pending');
+  });
+
+  it('rejects a malformed company id without looking it up', async () => {
+    const res = await request(app()).post('/auth/register/join').send({ companyId: 'not-a-uuid', displayName: '林澈', email: 'staff@example.test', password: STRONG, code: '123456' });
+    expect(res.status).toBe(400);
+    expect(prisma.company.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('saves main business and size with the new company', async () => {
+    const res = await request(app()).post('/auth/register/company').send({ ...company, business: 'both', size: '21-100' });
+    expect(res.status).toBe(201);
+    expect(prisma.company.update.mock.calls[0][0]).toEqual({ where: { id: 'co-new' }, data: { settings: { registration: { business: 'both', size: '21-100' } } } });
+  });
+
+  it.each([[{ business: 'shoes' }, '主营业务'], [{ size: 'huge' }, '公司规模']])('rejects unknown company details %#', async (extra, message) => {
+    const res = await request(app()).post('/auth/register/company').send({ ...company, ...extra });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain(message);
   });
 });
