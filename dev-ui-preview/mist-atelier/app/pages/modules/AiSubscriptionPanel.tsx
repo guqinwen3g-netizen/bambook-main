@@ -79,7 +79,7 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
   const pending = login?.state === 'pending';
   const Wrap = bare ? React.Fragment : Card;
   return <Wrap>
-    <CardHeader title={mode === 'platform' ? '平台 AI 模型' : '我的 ChatGPT 订阅'} sub={mode === 'platform' ? '报价审阅、自动汇总、财务对账、业务问答等平台 AI 共用此连接。测试期连接管理员的 ChatGPT 订阅，生产期改用企业 API；登录在 OpenAI 页面完成，凭据只保存在服务器。' : '供工作助手使用你自己的 ChatGPT 账号；登录在 OpenAI 页面完成，凭据只保存在服务器。'} tools={status.connected ? <Pill tone="ok">已连接</Pill> : <Pill>未连接</Pill>} />
+    <CardHeader title={mode === 'platform' ? 'ChatGPT 套餐连接' : '我的 ChatGPT 订阅'} sub={mode === 'platform' ? '用管理员的 ChatGPT 套餐作为平台模型之一，在上方调用顺序中排位。登录在 OpenAI 页面完成，凭据只保存在服务器。' : '供工作助手使用你自己的 ChatGPT 账号；登录在 OpenAI 页面完成，凭据只保存在服务器。'} tools={status.connected ? <Pill tone="ok">已连接</Pill> : <Pill>未连接</Pill>} />
     {error && <div className="mist-card-body"><Banner tone="bad" title="订阅连接未完成">{error}</Banner></div>}
     {status.connected ? <>
       <KeyValue items={[{ label: '账号', value: status.email ?? '—' }, { label: '套餐', value: planLabel(status.plan) }, { label: '模型', value: status.model, mono: true }, ...(mode === 'personal' ? [{ label: '推理强度', value: status.reasoning ? REASONING[status.reasoning] ?? status.reasoning : '—' }] : []), { label: '连接时间', value: time(status.connectedAt) }, ...profiles.map(p => ({ label: p.label, value: '推理 ' + (REASONING[p.reasoning] ?? p.reasoning) }))]} />

@@ -889,3 +889,21 @@
   .mist-chat-pick { flex-wrap: wrap; }
   .mist-chat-pick-t { flex-basis: 100%; }
 }
+
+/* ───────────── 平台 AI 调用链（平台设置 › 平台 AI 模型） ───────────── */
+.mist-ai-chain { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mist-ai-chain-row { display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: var(--mist-r-sm); background: var(--mist-fill); }
+.mist-ai-chain-row[data-off] .mist-ai-chain-t { opacity: .55; }
+.mist-ai-chain-row[data-env] { background: var(--mist-sunken); }
+.mist-ai-chain-n { flex: none; min-width: 24px; text-align: center; font-size: var(--mist-text-xs); color: var(--mist-ink-3); font-variant-numeric: tabular-nums; }
+.mist-ai-chain-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mist-ai-chain-t b { font-weight: var(--mist-fw-medium); font-size: var(--mist-text-sm); }
+.mist-ai-chain-t > span { font-size: var(--mist-text-xs); color: var(--mist-ink-2); overflow-wrap: anywhere; }
+.mist-ai-chain-t > .mist-ai-chain-test { color: var(--mist-bad-ink); }
+.mist-ai-chain-t > .mist-ai-chain-test[data-ok] { color: var(--mist-ok-ink); }
+.mist-ai-chain-acts { display: flex; align-items: center; gap: 2px; flex: none; }
+@media (max-width: 640px) {
+  .mist-ai-chain-row { flex-wrap: wrap; }
+  .mist-ai-chain-t { flex-basis: calc(100% - 40px); }
+  .mist-ai-chain-acts { margin-left: 36px; }
+}

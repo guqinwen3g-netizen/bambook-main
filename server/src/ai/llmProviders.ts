@@ -14,6 +14,8 @@
  *   4. 全链失败抛语义化错误 LLM_ALL_PROVIDERS_FAILED（附逐 provider 失败摘要），
  *      上层可观测、可排查。
  *   5. 每次 complete 动态 resolve 链（与改造前读 env 行为一致，支持运行时调整配置）。
+ *   6. 平台管理员在「平台设置 › 平台 AI 模型」维护的 API 提供方与平台 ChatGPT 套餐按其设定顺序在前，
+ *      env 提供方始终排在最后兜底（见 platformProviders.ts）。
  */
 
 export type LlmProviderConfig = {
@@ -35,6 +37,7 @@ export type LlmCompletionInput = {
 
 import { codexSubscriptions, PLATFORM_SUBJECT, type CodexSubscriptionService } from './codexSubscription';
 import { platformReasoning, type PlatformAiProfile } from './platformModel';
+import { platformProviders, type PlatformApiProvider, type PlatformProviderStore } from './platformProviders';
 
 const DEFAULT_LLM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/coding/v3';
 const DEFAULT_LLM_MODEL = 'ark-code-latest';
@@ -65,11 +68,21 @@ function resolveBackupProvider(envPrefix: 'BAMBOOK_LLM_BACKUP' | 'BAMBOOK_LLM_BA
   };
 }
 
+const platformConfig = (p: PlatformApiProvider): LlmProviderConfig => ({ id: 'platform:' + p.id, baseUrl: p.baseUrl, apiKey: p.apiKey, model: p.model });
+
 /**
- * 解析有序 provider 链：主 provider（ARK 语义）→ backup → backup2。
- * 主 provider 未配置任何 key 且无备用时返回空数组（调用方据此报"未配置"）。
+ * 全部可用 API provider（不含 ChatGPT 套餐）：平台管理员维护的启用项按设定顺序 → env 兜底。
+ * 为空时调用方据此报"未配置"。
  */
-export function resolveLlmProviderChain(): LlmProviderConfig[] {
+export function resolveLlmProviderChain(store: Pick<PlatformProviderStore, 'chain'> = platformProviders()): LlmProviderConfig[] {
+  return [...store.chain().flatMap(step => step.kind === 'api' ? [platformConfig(step.provider)] : []), ...resolveEnvProviderChain()];
+}
+
+/**
+ * 解析 env 声明的有序 provider 链：主 provider（ARK 语义）→ backup → backup2。
+ * 主 provider 未配置任何 key 且无备用时返回空数组。
+ */
+export function resolveEnvProviderChain(): LlmProviderConfig[] {
   const chain: LlmProviderConfig[] = [];
   const primaryApiKey = resolvePrimaryApiKey();
   if (primaryApiKey) {
@@ -95,35 +108,45 @@ export type LlmCompleterOptions = {
   /** 平台 AI 功能档位；平台 ChatGPT 订阅已连接时按档位推理强度优先使用。 */
   platformProfile?: PlatformAiProfile;
   subscriptions?: Pick<CodexSubscriptionService, 'isConnected' | 'complete'>;
+  platformProviders?: Pick<PlatformProviderStore, 'chain'>;
 };
 
 export function createLlmCompleter(options: LlmCompleterOptions = {}) {
   return async function complete(input: LlmCompletionInput): Promise<string> {
-    const providers = resolveLlmProviderChain();
-    const failures: Array<{ providerId: string; error: string }> = [];
     const subscriptions = options.subscriptions ?? codexSubscriptions();
-    if (options.platformProfile && subscriptions.isConnected(PLATFORM_SUBJECT)) {
+    const steps = [
+      ...(options.platformProviders ?? platformProviders()).chain().map(step => step.kind === 'subscription' ? step : { kind: 'api' as const, provider: platformConfig(step.provider) }),
+      ...resolveEnvProviderChain().map(provider => ({ kind: 'api' as const, provider })),
+    ];
+    const failures: Array<{ providerId: string; error: string }> = [];
+    for (const step of steps) {
+      if (step.kind === 'subscription') {
+        // 平台 ChatGPT 套餐只用于平台 AI 功能档位，且须已连接
+        if (!options.platformProfile || !subscriptions.isConnected(PLATFORM_SUBJECT)) continue;
+        try {
+          return await subscriptions.complete(PLATFORM_SUBJECT, input, { reasoning: platformReasoning(options.platformProfile) });
+        } catch (err: any) {
+          if (err?.name === 'AbortError') throw err;
+          // 平台订阅失败（限额/授权失效）时转下一项；只记录脱敏后的错误文字
+          failures.push({ providerId: 'chatgpt-subscription', error: `${typeof err?.code === 'string' ? err.code + ': ' : ''}${String(err?.message || err)}` });
+        }
+        continue;
+      }
       try {
-        return await subscriptions.complete(PLATFORM_SUBJECT, input, { reasoning: platformReasoning(options.platformProfile) });
+        return await completeWithProvider(step.provider, input);
       } catch (err: any) {
         if (err?.name === 'AbortError') throw err;
-        // 平台订阅失败（限额/授权失效）时再尝试企业 API；只记录脱敏后的错误文字
-        failures.push({ providerId: 'chatgpt-subscription', error: `${typeof err?.code === 'string' ? err.code + ': ' : ''}${String(err?.message || err)}` });
+        failures.push({ providerId: step.provider.id, error: String(err?.message || err) });
       }
     }
-    if (providers.length === 0 && failures.length === 0) {
-      throw new Error('Model API key is not configured on Mac mini');
-    }
-    for (const provider of providers) {
-      try {
-        return await completeWithProvider(provider, input);
-      } catch (err: any) {
-        if (err?.name === 'AbortError') throw err;
-        failures.push({ providerId: provider.id, error: String(err?.message || err) });
-      }
-    }
+    if (failures.length === 0) throw new Error('Model API key is not configured on Mac mini');
     throw new Error(`LLM_ALL_PROVIDERS_FAILED: ${JSON.stringify(failures)}`);
   };
+}
+
+/** 平台设置「测试连接」：用极短请求验证地址、Key 与模型；错误文字由调用方脱敏后返回。 */
+export function testLlmProvider(provider: LlmProviderConfig, signal: AbortSignal): Promise<string> {
+  return completeWithProvider(provider, { systemPrompt: 'Reply with the single word OK.', messages: [{ role: 'user', content: 'ping' }], temperature: 0, signal });
 }
 
 async function completeWithProvider(provider: LlmProviderConfig, input: LlmCompletionInput): Promise<string> {
