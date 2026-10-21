@@ -1,9 +1,9 @@
 /**
- * 登录页「立即注册」的两条自助路径（2026-10-21 用户定案）：
+ * 登录页「账户开通」的两条自助路径（2026-10-21 用户定案）：
  *
  * - POST /register/company：创建公司，同时创建该公司的管理员账号（超级管理员、在用）。
  *   公司按平台「开户默认设置」取方案与席位，写平台操作记录 platform.company.self_register，平台人员可见、可停用。
- * - GET /register/companies?q=：仅按完整公司名称精确核对（2–60 字、按 IP 限频），不提供模糊搜索或公司目录。
+ * - GET /register/companies?q=：名称前缀达到长度 / 覆盖门槛且唯一时返回单个公司；全称唯一匹配优先，按 IP 限频。
  * - POST /register/join：选择精确匹配的公司（companyId）或填写公司代码申请加入。账号与公司成员关系均为 pending，
  *   由该公司管理员在「公司后台 › 账号」审批（指定部门与岗位）后才能登录。
  *
@@ -20,6 +20,7 @@ import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 import type { VerificationStore } from './verification';
 import { passwordProblem } from './passwordPolicy';
+import { matchingCompany, validCompanyLookupQuery } from '../shared/companyLookup';
 export { passwordProblem };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -75,12 +76,14 @@ export function selfRegistrationRouter(options: Options) {
 
   router.get('/register/companies', async (req: Request, res: Response) => {
     const q = text(req.query.q);
-    if (q.length < 2 || q.length > 60) return res.json({ ok: true, companies: [] });
+    if (!validCompanyLookupQuery(q)) return res.json({ ok: true, companies: [] });
     if (!searchAllowed(req.ip || 'unknown')) return fail(res, 429, 'TOO_MANY_REQUESTS', '搜索太频繁，请稍后再试。');
     try {
-      const rows = await options.prisma.company.findMany({ where: { status: 'active', name: { equals: q, mode: 'insensitive' } }, select: { id: true, name: true, settings: true }, orderBy: { name: 'asc' }, take: 6 });
-      // 响应再做字面比较，数据库大小写匹配中的模式字符不能变成公司目录。
-      const matches = rows.filter(row => row.name.toLowerCase() === q.toLowerCase());
+      const select = { id: true, name: true, settings: true } as const;
+      const exact = await options.prisma.company.findMany({ where: { status: 'active', name: { equals: q, mode: 'insensitive' } }, select, take: 2 });
+      // Read a second prefix candidate solely to detect ambiguity; never expose a candidate list.
+      const rows = exact.length ? exact : await options.prisma.company.findMany({ where: { status: 'active', name: { startsWith: q, mode: 'insensitive' } }, select, take: 2 });
+      const matches = matchingCompany(q, rows);
       return res.json({ ok: true, companies: matches.map(row => ({ id: row.id, name: row.name, business: businessOf(row.settings) })) });
     } catch (error) {
       logger.error('[register/companies] failed', { error: error instanceof Error ? error.message : String(error) });
