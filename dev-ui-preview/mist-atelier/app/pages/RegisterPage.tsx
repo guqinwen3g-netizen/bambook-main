@@ -21,24 +21,24 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const errorText = (e: unknown, fallback: string) => e instanceof Error && e.message ? e.message : fallback;
 
-/** 只核对已提交或完成输入的全称；编辑期间清空，忽略过期请求。 */
-function useCompanySearch(query: string, enabled: boolean, attempt = 0) {
-  const [results, setResults] = React.useState<CompanySearchResult[]>([]), [loading, setLoading] = React.useState(false), [error, setError] = React.useState('');
+/** 输入停顿后自动精确核对；只显示当前查询的已完成响应，忽略过期请求。 */
+function useCompanySearch(query: string, enabled: boolean, attempt = 0): { results: CompanySearchResult[]; loading: boolean; error: string; checked: boolean } {
+  const q = query.trim(), eligible = enabled && q.length >= 2 && q.length <= 60;
+  const [state, setState] = React.useState<{ query: string; results: CompanySearchResult[]; loading: boolean; error: string; checked: boolean }>({ query: '', results: [], loading: false, error: '', checked: false });
   React.useEffect(() => {
-    const q = query.trim();
-    setResults([]); setError('');
-    if (!enabled || q.length < 2 || q.length > 60) { setLoading(false); return; }
+    if (!eligible) return;
     const controller = new AbortController();
-    setLoading(true);
+    setState(previous => ({ query: q, results: previous.query === q ? previous.results : [], loading: true, error: '', checked: false }));
     const timer = window.setTimeout(() => {
       searchRegistrationCompanies(q, controller.signal)
-        .then(rows => { if (!controller.signal.aborted) { setResults(rows.filter(row => sameName(row.name, q))); setError(''); } })
-        .catch(e => { if (!controller.signal.aborted) { setResults([]); setError(errorText(e, '暂时无法核对公司')); } })
-        .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        .then(rows => { if (!controller.signal.aborted) setState({ query: q, results: rows.filter(row => sameName(row.name, q)), loading: false, error: '', checked: true }); })
+        .catch(e => { if (!controller.signal.aborted) setState({ query: q, results: [], loading: false, error: errorText(e, '暂时无法核对公司'), checked: true }); });
     }, 250);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [query, enabled, attempt]);
-  return { results, loading, error };
+  }, [q, eligible, attempt]);
+  if (!eligible) return { results: [], loading: false, error: '', checked: false };
+  if (state.query !== q) return { results: [], loading: true, error: '', checked: false };
+  return state;
 }
 
 export function RegisterPage() {
@@ -46,7 +46,7 @@ export function RegisterPage() {
   const session = useMistSession();
   const [mode, setMode] = React.useState<Mode>('choose'), [step, setStep] = React.useState<Step>('company');
   const [companyName, setCompanyName] = React.useState(''), [business, setBusiness] = React.useState<CompanyBusiness | ''>(''), [size, setSize] = React.useState<CompanySize | ''>('');
-  const [companyLookup, setCompanyLookup] = React.useState(''), [lookupQuery, setLookupQuery] = React.useState(''), [lookupAttempt, setLookupAttempt] = React.useState(0);
+  const [composing, setComposing] = React.useState(false), [lookupAttempt, setLookupAttempt] = React.useState(0);
   const [query, setQuery] = React.useState(''), [selected, setSelected] = React.useState<CompanySearchResult | null>(null), [useCode, setUseCode] = React.useState(false), [companyCode, setCompanyCode] = React.useState('');
   const [displayName, setDisplayName] = React.useState(''), [email, setEmail] = React.useState(''), [password, setPassword] = React.useState(''), [code, setCode] = React.useState('');
   const [sentTo, setSentTo] = React.useState(''), [cooldown, setCooldown] = React.useState(0);
@@ -54,9 +54,9 @@ export function RegisterPage() {
   const timer = React.useRef<number | undefined>(undefined), mounted = React.useRef(true);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; window.clearInterval(timer.current); }; }, []);
 
-  const duplicate = useCompanySearch(companyLookup, mode === 'company' && step === 'company' && companyLookup === companyName.trim());
+  const duplicate = useCompanySearch(companyName, mode === 'company' && step === 'company' && !composing);
   const existing = duplicate.results.find(c => sameName(c.name, companyName.trim()));
-  const search = useCompanySearch(lookupQuery, mode === 'join' && step === 'find' && !useCode && lookupQuery === query.trim(), lookupAttempt);
+  const search = useCompanySearch(query, mode === 'join' && step === 'find' && !useCode && !composing, lookupAttempt);
 
   const flow = mode === 'choose' ? [] : FLOW[mode];
   const open = (next: 'company' | 'join', first?: Step) => { setMode(next); setStep(first ?? FLOW[next][0]); setError(''); };
@@ -91,8 +91,8 @@ export function RegisterPage() {
       if (useCode && !companyCode.trim()) return setError('请填写公司代码');
       if (!useCode && !selected) {
         if (query.trim().length < 2) return setError('请填写公司全称');
-        if (search.loading) return;
-        setLookupQuery(query.trim()); setLookupAttempt(value => value + 1); return;
+        if (search.error) setLookupAttempt(value => value + 1);
+        return;
       }
       return setStep('account');
     }
@@ -131,7 +131,7 @@ export function RegisterPage() {
   const progress = flow.length ? <div className="mist-register-progress" aria-label={`第 ${flow.indexOf(step) + 1} 步，共 ${flow.length} 步`}>{flow.map((s, i) => <i key={s} data-on={i <= flow.indexOf(step) || undefined} />)}</div> : null;
   const login = <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('login')}>返回登录</TextLink></p>;
   const backLink = <TextLink disabled={busy} onClick={back}><Icon icon={ArrowLeft} size="xs" /> 返回</TextLink>;
-  const primary = (label: string) => <Button type="submit" variant="primary" size="lg" block loading={busy} iconRight={busy ? undefined : ArrowRight}>{label}</Button>;
+  const primary = (label: string, disabled = false) => <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || disabled} iconRight={busy ? undefined : ArrowRight}>{label}</Button>;
   const alert = error ? <Banner tone="bad" title={error} /> : null;
 
   let body: React.ReactNode;
@@ -155,7 +155,7 @@ export function RegisterPage() {
     {backLink}{progress}
     <h2 className="mist-h1 mist-auth-title">公司信息</h2>
     {alert}
-    <Field label="公司名称"><TextInput icon={Building2} value={companyName} maxLength={60} autoFocus onChange={e => { setCompanyName(e.target.value); setCompanyLookup(''); }} onBlur={() => setCompanyLookup(companyName.trim())} /></Field>
+    <Field label="公司名称"><TextInput icon={Building2} value={companyName} maxLength={60} autoFocus onChange={e => setCompanyName(e.target.value)} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
     {existing && <div className="mist-register-note">「{existing.name}」已开通公司账户 · <TextLink onClick={() => { setSelected(existing); setQuery(existing.name); setUseCode(false); open('join', 'account'); }}>申请加入</TextLink></div>}
     <Field label="主营业务"><Segmented<CompanyBusiness> ariaLabel="主营业务" options={BUSINESS} value={business as CompanyBusiness} onChange={v => { setBusiness(v); setError(''); }} /></Field>
     <Field label="公司规模（选填）"><Segmented<CompanySize> ariaLabel="公司规模" options={SIZE} value={size as CompanySize} onChange={v => setSize(v === size ? '' : v)} /></Field>
@@ -169,16 +169,17 @@ export function RegisterPage() {
       <Field label="公司代码"><TextInput icon={Hash} value={companyCode} maxLength={50} autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={e => setCompanyCode(e.target.value)} /></Field>
       <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(false); setError(''); }}>使用公司全称</TextLink></p>
     </> : <>
-      <Field label="公司全称"><TextInput icon={Search} placeholder="填写完整公司名称" value={query} maxLength={60} autoFocus onChange={e => { setQuery(e.target.value); setLookupQuery(''); setSelected(null); setError(''); }} /></Field>
+      <Field label="公司全称"><TextInput icon={Search} placeholder="填写完整公司名称" value={query} maxLength={60} autoFocus onChange={e => { setQuery(e.target.value); setSelected(null); setError(''); }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
       <div className="mist-register-results" role="listbox" aria-label="匹配的公司" aria-busy={search.loading}>
         {search.results.map(c => <button key={c.id} type="button" role="option" aria-selected={selected?.id === c.id} className="mist-register-result" data-on={selected?.id === c.id || undefined} onClick={() => { setSelected(c); setError(''); }}>
           <Icon icon={Building2} size="sm" /><span>{c.name}</span>{businessLabel(c.business) && <small>{businessLabel(c.business)}</small>}{selected?.id === c.id && <Icon icon={Check} size="sm" />}
         </button>)}
-        {lookupQuery && !search.loading && !search.results.length && <p className="mist-register-empty">{search.error || '未找到完全匹配的公司，请核对全称或使用公司代码。'}</p>}
+        {search.loading && !search.results.length && <p className="mist-register-empty" role="status">核对中…</p>}
+        {search.checked && !search.results.length && <p className="mist-register-empty" role="status">{search.error || '未找到完全匹配的公司，请核对全称或使用公司代码。'}{search.error && <> <TextLink onClick={() => setLookupAttempt(value => value + 1)}>重试</TextLink></>}</p>}
       </div>
       <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(true); setError(''); }}>使用公司代码</TextLink></p>
     </>}
-    {primary(useCode || selected ? '下一步' : search.loading ? '核对中…' : '核对公司')}
+    {primary('下一步', !useCode && !selected)}
   </>;
   else if (step === 'account') body = <>
     {backLink}{progress}
