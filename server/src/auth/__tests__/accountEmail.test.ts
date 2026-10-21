@@ -19,6 +19,13 @@ describe('branded account emails', () => {
     const existing = buildAccountAccessEmail({ ...common, kind: 'invite', setup: false });
     expect(existing.html).toContain('现有账号登录'); expect(existing.html).not.toContain('设置密码并加入'); expect(existing.text).not.toContain('小时');
   });
+  it('uses employee-compatible recovery wording without platform-only restrictions', () => {
+    const message = buildAccountAccessEmail({ to:'staff@example.test', label:'Bambook 公司', kind:'recovery', setup:true, url:'https://example.test/' });
+    expect(message.subject).toBe('Bambook 密码重设');
+    expect(message.html).toContain('重设登录密码');
+    expect(message.text).not.toContain('平台');
+    expect(message.html).not.toMatch(/平台账号|平台工作账号|公司账号请联系/);
+  });
   it('uses the same brand for codes and approval, without legacy names or leaked codes in subjects', () => {
     const verification = buildVerificationEmail('123456');
     const approval = buildApprovalApprovedEmail({ displayName: '<script>x</script>', roles: ['<admin>'], department: '面料 & 成衣' });
