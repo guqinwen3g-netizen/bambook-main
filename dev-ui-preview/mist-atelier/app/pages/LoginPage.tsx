@@ -4,14 +4,13 @@
 import React from 'react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
 import { ArrowRight, KeyRound, Mail } from 'lucide-react';
-import { Button, Checkbox, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink, useToast } from '../../../../components/mist';
+import { Button, Checkbox, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { mapAuthErrorMessage } from '../../../../services/authService';
 
 export function LoginPage() {
   const { go, route } = useNav();
-  const toast = useToast();
   const session = useMistSession();
   // 注册完成后带回邮箱（route.id），免得重新输入。
   const [email, setEmail] = React.useState(() => typeof route?.id === 'string' && route.id.includes('@') ? route.id : '');
@@ -35,7 +34,7 @@ export function LoginPage() {
         remember,
         ...(companyId ? { companyId } : {}),
       });
-      if (mounted.current) { setPw(''); setCompanies([]); go(user.platformRole === 'platform_admin' && !user.roleIds?.length ? 'platform-admin' : 'cockpit'); toast(`欢迎回来，${user.displayName || user.email}`); }
+      if (mounted.current) { setPw(''); setCompanies([]); go(user.platformRole === 'platform_admin' && !user.roleIds?.length ? 'platform-admin' : 'cockpit'); }
     } catch (failure: any) {
       if (!mounted.current) return;
       if (failure?.code === 'COMPANY_SELECTION_REQUIRED' && Array.isArray(failure.companies)) {
@@ -75,7 +74,7 @@ export function LoginPage() {
       <div className="mist-auth-panel">
         <form className="mist-auth-form" aria-label="登录" onSubmit={submit}>
           {companies.length > 0 ? (<>
-            <div><h2 className="mist-h1" style={{ fontSize: 28 }}>选择公司</h2><p className="mist-sub" style={{ marginTop: 6 }}>这个账号属于多家公司，选择这次要进入的一家。</p></div>
+            <div><h2 className="mist-h1" style={{ fontSize: 28 }}>选择公司</h2><p className="mist-sub" style={{ marginTop: 6 }}>请选择本次登录的公司。</p></div>
             <div style={{ display: 'grid', gap: 8 }}>
               {companies.map(company => (
                 <Button key={company.id} size="lg" block onClick={() => void doLogin(company.id)} disabled={busy} iconRight={busy ? undefined : ArrowRight}>
@@ -88,9 +87,9 @@ export function LoginPage() {
           <div><h2 className="mist-h1" style={{ fontSize: 28 }}>登录</h2></div>
           <Field label="工作邮箱"><TextInput icon={Mail} type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} required /></Field>
           <Field label="密码" error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder="输入密码" disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
-          <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label="保持登录" /><span className="mist-spacer" /><TextLink disabled={busy} title="查看密码找回方式" onClick={()=>go('platform-recovery')}>忘记密码？</TextLink></div>
+          <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label="保持登录" /><span className="mist-spacer" /><TextLink disabled={busy} title="找回密码" onClick={()=>go('platform-recovery')}>找回密码</TextLink></div>
           <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{cooldown > 0 ? `请稍候 ${cooldown}s` : '登录'}</Button>
-          <p className="mist-auth-switch">还没有账号？<TextLink disabled={busy} onClick={() => go('register')}>立即注册</TextLink></p>
+          <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('register')}>账户开通</TextLink></p>
           </>)}
         </form>
       </div>

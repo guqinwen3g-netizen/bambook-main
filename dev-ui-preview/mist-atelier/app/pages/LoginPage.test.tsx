@@ -22,7 +22,7 @@ describe('original Mist login with real-session binding', () => {
     expect(host.querySelector('.mist-auth-brand')?.textContent).toContain('从开发到大货，');
     expect(host.querySelectorAll('.mist-auth-form .mist-field')).toHaveLength(2);
     expect(host.querySelector<HTMLInputElement>('input[type="email"]')?.value).toBe('');
-    const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '忘记密码？')!;
+    const reset = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '找回密码')!;
     expect(reset.disabled).toBe(false); expect(reset.title).toContain('找回');
     act(() => reset.click()); expect(host.textContent).not.toContain('已发送重置邮件');
     expect(host.textContent).not.toContain('任意密码'); expect(go).toHaveBeenCalledWith('platform-recovery');
@@ -35,7 +35,7 @@ describe('original Mist login with real-session binding', () => {
     await submit(); await submit();
     expect(seam.session.login).toHaveBeenCalledTimes(1); expect(seam.session.login).toHaveBeenCalledWith('real@example.com', 'password', { remember: false }); expect(go).not.toHaveBeenCalled();
     await act(async () => resolve({ id: 'real', displayName: '真实用户', email: 'real@example.com' }));
-    expect(go).toHaveBeenCalledWith('cockpit'); expect(host.textContent).toContain('欢迎回来，真实用户');
+    expect(go).toHaveBeenCalledWith('cockpit');
     expect(host.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
   });
   it('maps network errors, clears the password and stays on the login page', async () => {
@@ -53,7 +53,7 @@ describe('original Mist login with real-session binding', () => {
 
 });
 
-it('opens recovery from the same login form even on a legacy platform link',()=>{const host=render('platform-admin');const reset=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='忘记密码？')!;expect(reset.disabled).toBe(false);act(()=>reset.click());expect(go).toHaveBeenCalledWith('platform-recovery');});
+it('opens recovery from the same login form even on a legacy platform link',()=>{const host=render('platform-admin');const reset=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='找回密码')!;expect(reset.disabled).toBe(false);act(()=>reset.click());expect(go).toHaveBeenCalledWith('platform-recovery');});
 
 it.each(['login', 'platform-admin'])('uses the same form at %s and sends company accounts to their workbench', async (view) => {
   seam.session.login.mockResolvedValue({ id: 'employee', displayName: '同事', roleIds: ['sales'], platformRole: null });

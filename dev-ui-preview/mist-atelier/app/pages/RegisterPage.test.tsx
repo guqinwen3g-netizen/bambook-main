@@ -37,16 +37,16 @@ beforeEach(async () => {
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host.remove(); vi.useRealTimers(); });
 
 it('starts with two short choices and a way back to login', async () => {
-  expect(button('创建公司首次使用竹衍')).toBeTruthy();
-  expect(button('加入公司公司已在使用竹衍')).toBeTruthy();
-  await click('登录');
+  expect(button('开通公司账户负责人或授权管理员办理')).toBeTruthy();
+  expect(button('申请加入公司员工申请，需公司管理员审核')).toBeTruthy();
+  await click('返回登录');
   expect(go).toHaveBeenCalledWith('login');
 });
 
 it('creates a company step by step and signs the new administrator in', async () => {
   api.registerCompany.mockResolvedValue({ company: { name: '雾织贸易', code: 'wuzhimaoyi' }, email: 'owner@example.test' });
   session.login.mockResolvedValue({ displayName: '沈霁' });
-  await click('创建公司首次使用竹衍');
+  await click('开通公司账户负责人或授权管理员办理');
   await submit();
   expect(host.textContent).toContain('请填写公司名称');
   await type(field('公司名称'), '雾织贸易');
@@ -69,22 +69,22 @@ it('creates a company step by step and signs the new administrator in', async ()
 
 it('points to the existing company when the name is already in use', async () => {
   api.searchRegistrationCompanies.mockResolvedValue([{ id: 'co-1', name: '雾织贸易', business: 'both' }]);
-  await click('创建公司首次使用竹衍');
+  await click('开通公司账户负责人或授权管理员办理');
   await type(field('公司名称'), ' 雾织贸易 ');
   await settle();
   expect(api.searchRegistrationCompanies).not.toHaveBeenCalled();
   await act(async () => field('公司名称').dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
   await settle();
-  expect(host.textContent).toContain('「雾织贸易」已在使用竹衍');
+  expect(host.textContent).toContain('「雾织贸易」已开通公司账户');
   await click('申请加入');
-  expect(host.textContent).toContain('你的账号');
+  expect(host.textContent).toContain('申请人信息');
   expect(host.textContent).toContain('雾织贸易');
 });
 
 it('finds a company by name and submits a join request for it', async () => {
   api.searchRegistrationCompanies.mockResolvedValue([{ id: 'co-1', name: '雾织贸易', business: 'both' }, { id: 'co-2', name: '雾织纺织', business: null }]);
   api.registerJoinCompany.mockResolvedValue({ company: { name: '雾织贸易' }, email: 'owner@example.test' });
-  await click('加入公司公司已在使用竹衍');
+  await click('申请加入公司员工申请，需公司管理员审核');
   await submit();
   expect(host.textContent).toContain('请填写公司全称');
   await type(field('公司全称'), '雾织贸易');
@@ -101,17 +101,17 @@ it('finds a company by name and submits a join request for it', async () => {
   await submit();
   await enterCode('123456');
   expect(api.registerJoinCompany).toHaveBeenCalledWith({ companyId: 'co-1', displayName: '沈霁', email: 'owner@example.test', password: STRONG, code: '123456' });
-  expect(host.textContent).toContain('申请已发送');
-  expect(host.textContent).toContain('「雾织贸易」的管理员同意后');
+  expect(host.textContent).toContain('申请已提交');
+  expect(host.textContent).toContain('待「雾织贸易」管理员审核通过后');
 });
 
 it('shows a clear empty result and offers the company code instead', async () => {
-  await click('加入公司公司已在使用竹衍');
+  await click('申请加入公司员工申请，需公司管理员审核');
   await type(field('公司全称'), '不存在公司');
   await submit();
   await settle();
   expect(host.textContent).toContain('未找到完全匹配的公司');
-  await click('公司代码');
+  await click('使用公司代码');
   await type(field('公司代码'), 'wuzhimaoyi');
   await submit();
   expect(host.textContent).toContain('公司代码 wuzhimaoyi');
@@ -119,7 +119,7 @@ it('shows a clear empty result and offers the company code instead', async () =>
 
 it('clears a checked company as soon as the name is edited and requires a new explicit check', async () => {
   api.searchRegistrationCompanies.mockResolvedValue([{ id: 'co-1', name: '雾织贸易', business: null }]);
-  await click('加入公司公司已在使用竹衍');
+  await click('申请加入公司员工申请，需公司管理员审核');
   await type(field('公司全称'), '雾织贸易');
   await submit(); await settle();
   await act(async () => (host.querySelector('[role="option"]') as HTMLButtonElement).click());
@@ -133,7 +133,7 @@ it('clears a checked company as soon as the name is edited and requires a new ex
 
 it('can retry a failed exact-name check without changing the company name', async () => {
   api.searchRegistrationCompanies.mockRejectedValueOnce(new Error('连接失败')).mockResolvedValueOnce([{ id: 'co-1', name: '雾织贸易', business: null }]);
-  await click('加入公司公司已在使用竹衍');
+  await click('申请加入公司员工申请，需公司管理员审核');
   await type(field('公司全称'), '雾织贸易');
   await submit(); await settle();
   expect(host.textContent).toContain('连接失败');
@@ -143,7 +143,7 @@ it('can retry a failed exact-name check without changing the company name', asyn
 });
 
 it('keeps the account step until the password meets every rule', async () => {
-  await click('创建公司首次使用竹衍');
+  await click('开通公司账户负责人或授权管理员办理');
   await type(field('公司名称'), '雾织贸易');
   await click('面料');
   await submit();
@@ -156,7 +156,7 @@ it('keeps the account step until the password meets every rule', async () => {
 
 it('keeps the code step on a server error and counts down before resending', async () => {
   api.registerCompany.mockRejectedValue(new Error('验证码错误或已过期'));
-  await click('创建公司首次使用竹衍');
+  await click('开通公司账户负责人或授权管理员办理');
   await type(field('公司名称'), '雾织贸易');
   await click('面料');
   await submit();
@@ -165,7 +165,7 @@ it('keeps the code step on a server error and counts down before resending', asy
   expect(host.textContent).toContain('60 秒后可重新发送');
   await enterCode('000000');
   expect(host.textContent).toContain('验证码错误或已过期');
-  expect(host.textContent).toContain('验证邮箱');
+  expect(host.textContent).toContain('邮箱验证');
   await settle(2000);
   expect(host.textContent).toContain('58 秒后可重新发送');
 });
