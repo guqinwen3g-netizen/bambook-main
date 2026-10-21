@@ -7,8 +7,8 @@ describe('application page titles', () => {
     expect(pageDocumentTitle(view)).toBe(`Bambook · ${label}`);
   });
   it('describes the login page rather than the protected URL when anonymous', () => {
-    expect(pageDocumentTitle(View.Orders, { anonymous: true })).toBe('Bambook');
-    expect(pageDocumentTitle('login')).toBe('Bambook');
+    expect(pageDocumentTitle(View.Orders, { anonymous: true })).toBe('Bambook · 登录');
+    expect(pageDocumentTitle('login')).toBe('Bambook · 登录');
     expect(pageDocumentTitle('register', { anonymous: true })).toBe('Bambook · 账户开通');
     expect(pageDocumentTitle('account-access', { anonymous: true, invitation: true })).toBe('Bambook · 设置登录密码');
   });
