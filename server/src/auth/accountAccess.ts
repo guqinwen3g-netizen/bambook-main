@@ -5,6 +5,7 @@ import { buildAccountAccessEmail, createEmailService, type EmailService } from '
 import { createAuthService } from './service';
 import { invalidateAccountStatusCache } from './accountStatusGuard';
 import { createLoginRateLimiter } from './loginRateLimiter';
+import { passwordProblem } from './passwordPolicy';
 
 type Kind = 'invite' | 'recovery';
 export type Delivery = { status: 'sent' | 'unconfirmed' | 'unavailable' | 'cooldown'; message: string };
@@ -65,7 +66,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
  }
  async function complete(input:{email:string;kind:Kind;token:string;password:string}) {
   if(!/^[A-Za-z0-9_-]{43}$/.test(input.token))return{ok:false,message:'链接无效或已过期，请重新申请。'};
-  if(input.password.length<12||Buffer.byteLength(input.password,'utf8')>72||!/[A-Za-z]/.test(input.password)||!/[0-9]/.test(input.password))return{ok:false,message:'密码须包含字母和数字，至少 12 个字符且不超过 72 字节。'};
+  const weak=passwordProblem(input.password);if(weak)return{ok:false,message:weak};
   const emailAddress=input.email.trim().toLowerCase(), passwordHash=await auth.hashPassword(input.password);
   const result=await db.$transaction(async tx=>{
    const found=await tx.userAccount.findFirst({where:{email:{equals:emailAddress,mode:'insensitive'}}});if(!found)return{ok:false,message:'链接无效或已过期，请重新申请。'};

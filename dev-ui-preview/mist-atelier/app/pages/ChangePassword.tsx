@@ -4,13 +4,14 @@ import { KeyRound, LogOut, MonitorSmartphone } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Dialog, Field, FormGrid, MistPage, SettingRow, TextInput, useToast } from '../../../../components/mist';
 import { changePassword, logoutAllSessions } from '../../../../services/authService';
 import { useMistSession } from '../runtime/auth';
+import { passwordOk } from '../runtime/passwordRule';
 
 const MIN = 8;
 function explain(error: unknown) {
   const text = error instanceof Error ? error.message : '';
   if (/incorrect|INVALID_CREDENTIALS/i.test(text)) return '当前密码不正确';
   if (/Not logged in|expired|UNAUTHORIZED/i.test(text)) return '登录已失效，请重新登录后再修改';
-  if (/at least|WEAK_PASSWORD/i.test(text)) return `新密码至少 ${MIN} 位`;
+  if (/at least|WEAK_PASSWORD|至少 8 个字符/i.test(text)) return `新密码须包含字母和数字，至少 ${MIN} 位`;
   return text && !/HTTP|failed/i.test(text) ? text : '密码未修改，请重试';
 }
 
@@ -21,7 +22,7 @@ function usePasswordForm(onDone: () => void | Promise<void>, currentLabel = '当
   const submit = async () => {
     if (busy) return;
     if (!current) return setError('请填写' + currentLabel);
-    if (next.length < MIN) return setError(`新密码至少 ${MIN} 位`);
+    if (!passwordOk(next)) return setError(`新密码须包含字母和数字，至少 ${MIN} 位`);
     if (next === current) return setError('新密码不能与' + currentLabel + '相同');
     if (next !== confirm) return setError('两次输入的新密码不一致');
     setBusy(true); setError('');

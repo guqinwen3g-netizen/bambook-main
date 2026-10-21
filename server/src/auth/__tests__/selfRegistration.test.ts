@@ -61,7 +61,7 @@ describe('self-service company registration', () => {
     [{ ...company, companyName: '雾' }, '公司名称'],
     [{ ...company, displayName: '' }, '姓名'],
     [{ ...company, email: 'not-an-email' }, '邮箱格式'],
-    [{ ...company, password: 'short1' }, '至少 12 个字符'],
+    [{ ...company, password: 'short1' }, '至少 8 个字符'],
     [{ ...company, password: 'onlyletterspassword' }, '字母和数字'],
     [{ ...company, code: '' }, '验证码'],
   ])('rejects invalid input %#', async (body, message) => {

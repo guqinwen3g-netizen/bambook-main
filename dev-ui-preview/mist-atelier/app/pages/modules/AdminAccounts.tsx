@@ -6,6 +6,7 @@ import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, 
 import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { ACCOUNT_STATUS, departmentOptions, organizationApi, type AdminAccount, type AdminRole, type AuditLogRow, type OrgDepartment } from '../../runtime/organization';
+import { passwordOk } from '../../runtime/passwordRule';
 
 const SUPER_ADMIN = new Set(['role-super-admin', '老板', '超级管理员', 'SuperAdmin', 'super-admin']);
 const isSuperAdmin = (role: AdminRole) => SUPER_ADMIN.has(role.id.split('@')[0]) || SUPER_ADMIN.has(role.name);
@@ -65,7 +66,7 @@ export function AdminAccounts() {
     const f = form;
     if (f.mode !== 'edit' && !f.departmentId) return setFormError('请选择任职部门（不能直接归属公司）');
     if (f.mode !== 'edit' && !f.roles.length) return setFormError('请至少选择一个角色');
-    if (f.mode === 'create' && (!f.displayName.trim() || !f.email.trim() || f.password.length < 8)) return setFormError('请填写姓名、邮箱和至少 8 位初始密码');
+    if (f.mode === 'create' && (!f.displayName.trim() || !f.email.trim() || !passwordOk(f.password))) return setFormError('请填写姓名、邮箱，初始密码须包含字母和数字且至少 8 位');
     setBusy(true); setFormError('');
     try {
       let userId = f.account?.id ?? '';

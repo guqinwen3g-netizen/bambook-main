@@ -115,7 +115,7 @@ it('keeps the account step until the password meets every rule', async () => {
   await click('面料');
   await submit();
   await type(field('姓名'), '沈霁'); await type(field('联系邮箱'), 'owner@example.test'); await type(field('设置密码'), 'onlyletters');
-  expect(host.querySelectorAll('.mist-register-checks [data-ok]')).toHaveLength(1);
+  expect(host.querySelectorAll('.mist-register-checks [data-ok]')).toHaveLength(2);
   await submit();
   expect(host.textContent).toContain('密码未满足要求');
   expect(api.sendVerificationCode).not.toHaveBeenCalled();

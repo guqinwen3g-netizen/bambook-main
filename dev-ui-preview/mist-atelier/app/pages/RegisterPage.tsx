@@ -8,6 +8,7 @@ import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
 import { Banner, Button, CardButton, CodeInput, Field, Icon, MistMark, MistWordmark, PasswordInput, Segmented, TextInput, TextLink, useToast } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
+import { passwordChecks, passwordOk } from '../runtime/passwordRule';
 import { registerCompany, registerJoinCompany, searchRegistrationCompanies, sendVerificationCode, type CompanyBusiness, type CompanySearchResult, type CompanySize } from '../../../../services/authService';
 
 type Mode = 'choose' | 'company' | 'join';
@@ -19,11 +20,6 @@ const businessLabel = (value: CompanyBusiness | null) => BUSINESS.find(b => b.va
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const sameName = (a: string, b: string) => a.replace(/\s+/g, '').toLowerCase() === b.replace(/\s+/g, '').toLowerCase();
 const errorText = (e: unknown, fallback: string) => e instanceof Error && e.message ? e.message : fallback;
-const passwordChecks = (value: string) => [
-  { label: '12 位以上', ok: value.length >= 12 && new TextEncoder().encode(value).length <= 72 },
-  { label: '含字母', ok: /[A-Za-z]/.test(value) },
-  { label: '含数字', ok: /[0-9]/.test(value) },
-];
 
 /** 输入停顿后搜索公司；空查询或不足 2 字时清空。 */
 function useCompanySearch(query: string, enabled: boolean) {
@@ -97,7 +93,7 @@ export function RegisterPage() {
     if (step === 'account') {
       if (!displayName.trim()) return setError('请填写姓名');
       if (!EMAIL.test(email.trim())) return setError('邮箱格式不正确');
-      if (passwordChecks(password).some(c => !c.ok)) return setError('密码未满足要求');
+      if (!passwordOk(password)) return setError('密码未满足要求');
       if (sentTo === email.trim() && cooldown > 0) return setStep('verify');
       if (await sendCode()) setStep('verify');
       return;

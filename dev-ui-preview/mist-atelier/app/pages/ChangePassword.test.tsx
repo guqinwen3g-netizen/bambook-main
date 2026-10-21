@@ -25,7 +25,7 @@ it('validates locally, then sends current and new password once', async () => {
   expect(document.body.textContent).toContain('两次输入的新密码不一致'); expect(change).not.toHaveBeenCalled();
   await fill(['old-pass-1', 'short', 'short']);
   await act(async () => button('确认修改').click());
-  expect(document.body.textContent).toContain('新密码至少 8 位');
+  expect(document.body.textContent).toContain('至少 8 位');
   change.mockResolvedValueOnce(undefined);
   await fill(['old-pass-1', 'new-pass-22', 'new-pass-22']);
   await act(async () => button('确认修改').click());
@@ -46,9 +46,9 @@ it('forces a password change after an admin reset and reloads the session once c
   await act(async () => button('修改并继续').click());
   expect(document.body.textContent).toContain('新密码不能与临时密码相同'); expect(change).not.toHaveBeenCalled();
   change.mockResolvedValueOnce(undefined);
-  await fill(['temp-pass-1', 'my-new-pass', 'my-new-pass']);
+  await fill(['temp-pass-1', 'my-new-pass1', 'my-new-pass1']);
   await act(async () => button('修改并继续').click());
-  expect(change).toHaveBeenCalledWith('temp-pass-1', 'my-new-pass');
+  expect(change).toHaveBeenCalledWith('temp-pass-1', 'my-new-pass1');
   expect(session.refresh).toHaveBeenCalledTimes(1);
   await act(async () => button('退出登录').click());
   expect(session.logout).toHaveBeenCalled();

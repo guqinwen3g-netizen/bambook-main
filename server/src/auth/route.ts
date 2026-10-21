@@ -1,5 +1,6 @@
 import { accountAccessRouter } from './accountAccess';
 import { selfRegistrationRouter } from './selfRegistration';
+import { passwordProblem } from './passwordPolicy';
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { createAuthService } from './service';
@@ -284,9 +285,8 @@ export function createAuthRouter(options: AuthRouterOptions) {
     if (!email || !password || !displayName) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '邮箱、密码与姓名为必填项。' });
     }
-    if (typeof password !== 'string' || password.length < 6) {
-      return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: '密码至少 6 位。' });
-    }
+    const weak = passwordProblem(password);
+    if (weak) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weak });
     const normalizedEmail = normalizeEmail(email);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return res.status(400).json({ ok: false, error: 'INVALID_EMAIL', message: '邮箱格式不正确。' });
@@ -557,9 +557,8 @@ export function createAuthRouter(options: AuthRouterOptions) {
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: 'Current and new password are required.' });
     }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: 'New password must be at least 6 characters.' });
-    }
+    const weakNew = passwordProblem(newPassword);
+    if (weakNew) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weakNew });
     let payload: ReturnType<typeof auth.verifyToken>;
     try { payload = auth.verifyToken(token); } catch { return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' }); }
     try {

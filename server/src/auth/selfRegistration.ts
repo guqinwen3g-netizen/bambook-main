@@ -7,7 +7,7 @@
  * - POST /register/join：选择搜索到的公司（companyId）或填写公司代码申请加入。账号与公司成员关系均为 pending，
  *   由该公司管理员在「公司后台 › 账号」审批（指定部门与岗位）后才能登录。
  *
- * 两条路径都要求邮箱验证码（与 /send-code 的 register 用途一致）及与邀请设密相同的密码规则。
+ * 两条路径都要求邮箱验证码（与 /send-code 的 register 用途一致）及全站密码规则（passwordPolicy.ts）。
  * 公司代码即 Company.slug，由公司名生成（中文取拼音），在公司资料里展示给管理员分享。
  */
 import { Router, type Request, type Response } from 'express';
@@ -19,6 +19,8 @@ import { readCompanyDefaults } from '../platform/settings';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 import type { VerificationStore } from './verification';
+import { passwordProblem } from './passwordPolicy';
+export { passwordProblem };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,12 +39,6 @@ type Options = {
 const fail = (res: Response, status: number, error: string, message: string) => res.status(status).json({ ok: false, error, message });
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 
-/** 与邀请设密一致：至少 12 个字符、含字母和数字、不超过 72 字节。 */
-export function passwordProblem(password: unknown): string | null {
-  if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password))
-    return '密码须包含字母和数字，至少 12 个字符且不超过 72 字节。';
-  return null;
-}
 
 /** 公司名 → 公司代码基础：中文取全拼，保留字母数字，最长 24 位；过短时用 company。 */
 export function companyCodeBase(name: string): string {

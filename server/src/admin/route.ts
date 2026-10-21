@@ -13,6 +13,7 @@ import { logger } from '../lib/logger';
 import { safeRouteError } from '../shared/routeError';
 import { createApprovalDecisionService, type OnApprovalDecided } from '../approvals/approvalDecisionService';
 import { createOrderMainApprovalService, OrderMainApprovalError } from '../orders/orderMainApprovalService';
+import { passwordProblem } from '../auth/passwordPolicy';
 
 type AdminRouterOptions = {
   prisma: PrismaClient;
@@ -299,9 +300,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (!displayName || !email || !password) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: 'displayName, email, password are required.' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: 'Password must be at least 6 characters.' });
-    }
+    const weak = passwordProblem(password);
+    if (weak) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weak });
     const companyId = actorCompanyId(req);
     if (!(await departmentExists(options.prisma, departmentId, companyId))) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${departmentId}` });
@@ -404,9 +404,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     // 禁止回退到 'bambook2026' 之类的固定弱口令。
     const generated = !newPassword;
     const finalPassword = generated ? crypto.randomBytes(8).toString('hex') : String(newPassword);
-    if (finalPassword.length < 6) {
-      return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: 'New password must be at least 6 characters.' });
-    }
+    const weak = generated ? null : passwordProblem(finalPassword);
+    if (weak) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weak });
     const passwordHash = await auth.hashPassword(finalPassword);
     const target = await options.prisma.userAccount.findUnique({ where: { id }, select: { metadata: true } });
     if (!target) {
