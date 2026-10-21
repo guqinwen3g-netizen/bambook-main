@@ -296,6 +296,36 @@ export async function register(input: RegisterInput): Promise<{ message: string;
   return { message: data.message, userId: data.user?.id };
 }
 
+export type SelfRegistrationAccount = { displayName: string; email: string; password: string; code: string };
+
+async function postRegistration(path: string, body: Record<string, unknown>) {
+  const res = await fetch(`${getAuthApiBase()}/auth/register/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'omit',
+    body: JSON.stringify(body),
+  });
+  const data = await readJsonResponse(res);
+  if (!res.ok) {
+    const err: any = new Error(data.message || data.error || `Register failed (HTTP ${res.status})`);
+    err.code = data.error;
+    throw err;
+  }
+  return data;
+}
+
+/** 创建公司并同时注册该公司的管理员账号；成功后可直接登录。 */
+export async function registerCompany(input: SelfRegistrationAccount & { companyName: string }): Promise<{ company: { name: string; code: string }; email: string }> {
+  const data = await postRegistration('company', input);
+  return { company: data.company, email: data.email };
+}
+
+/** 凭公司代码申请加入已有公司；公司管理员审批后才能登录。 */
+export async function registerJoinCompany(input: SelfRegistrationAccount & { companyCode: string }): Promise<{ company: { name: string }; email: string }> {
+  const data = await postRegistration('join', input);
+  return { company: data.company, email: data.email };
+}
+
 export async function login(identifier: string, password: string, companyId?: string): Promise<AuthUser> {
   const epoch = ++authMutationEpoch;
   const base = getAuthApiBase();

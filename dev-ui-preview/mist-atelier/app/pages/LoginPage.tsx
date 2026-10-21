@@ -10,10 +10,11 @@ import { useMistSession } from '../runtime/auth';
 import { mapAuthErrorMessage } from '../../../../services/authService';
 
 export function LoginPage() {
-  const { go } = useNav();
+  const { go, route } = useNav();
   const toast = useToast();
   const session = useMistSession();
-  const [email, setEmail] = React.useState('');
+  // 注册完成后带回邮箱（route.id），免得重新输入。
+  const [email, setEmail] = React.useState(() => typeof route?.id === 'string' && route.id.includes('@') ? route.id : '');
   const [pw, setPw] = React.useState('');
   const [remember, setRemember] = React.useState(true);
   const busy = session.signingIn;
@@ -89,6 +90,7 @@ export function LoginPage() {
           <Field label="密码" error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder="输入密码" disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
           <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label="保持登录" /><span className="mist-spacer" /><TextLink disabled={busy} title="查看密码找回方式" onClick={()=>go('platform-recovery')}>忘记密码？</TextLink></div>
           <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{cooldown > 0 ? `请稍候 ${cooldown}s` : '登录'}</Button>
+          <p className="mist-auth-switch">还没有账号？<TextLink disabled={busy} onClick={() => go('register')}>立即注册</TextLink></p>
           </>)}
         </form>
       </div>

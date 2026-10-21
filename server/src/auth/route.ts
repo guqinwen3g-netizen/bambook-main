@@ -1,4 +1,5 @@
 import { accountAccessRouter } from './accountAccess';
+import { selfRegistrationRouter } from './selfRegistration';
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { createAuthService } from './service';
@@ -44,6 +45,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
   const email = options.email || createEmailService();
   const verification = options.verification || createVerificationStore();
   router.use('/account-access', accountAccessRouter(options.prisma, { email }));
+  router.use(selfRegistrationRouter({ prisma: options.prisma, verification, hashPassword: password => auth.hashPassword(password), requireEmailVerification: options.requireEmailVerification !== false }));
 
   const envWindowMs = Number(process.env.BAMBOOK_LOGIN_RATE_LIMIT_WINDOW_MS);
   const envMaxFailures = Number(process.env.BAMBOOK_LOGIN_RATE_LIMIT_MAX_FAILURES);

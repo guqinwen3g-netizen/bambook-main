@@ -1,11 +1,32 @@
 /** 公司资料：系统设置中的唯一维护入口，写入 settings.companyProfile；报价单、CI/PL 生成时读取当前值并冻结快照。 */
 import React from 'react';
-import { ArrowLeft, RefreshCw, Save } from 'lucide-react';
-import { Banner, Button, Field, FormGrid, FormSection, TextInput, useToast } from '../../../../components/mist';
+import { ArrowLeft, Copy, RefreshCw, Save } from 'lucide-react';
+import { Banner, Button, Field, FormGrid, FormSection, Mono, TextInput, useToast } from '../../../../components/mist';
+import { apiService } from '../../../../services/apiService';
+import { getAuthApiBase } from '../../../../services/authService';
 import type { MistCompanyProfile } from '../../../../server/src/shared/mistWorkspace';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
+
+/** 公司代码：同事在登录页「立即注册 › 加入公司」时填写；读不到（如本地模式）时不显示。 */
+function CompanyJoinCode() {
+  const session = useMistSession(), toast = useToast();
+  const [code, setCode] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let live = true; setCode(null);
+    void fetch(`${getAuthApiBase()}/auth/companies`, { headers: apiService.getAuthHeaders(), credentials: 'include' })
+      .then(res => res.ok ? res.json() : null)
+      .then(body => { if (!live || !body) return; const current = (body.companies ?? []).find((c: { id: string }) => c.id === body.currentCompanyId); setCode(typeof current?.slug === 'string' ? current.slug : null); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [session.sessionKey]);
+  if (!code) return null;
+  const copy = async () => { try { await navigator.clipboard.writeText(code); toast('公司代码已复制'); } catch { toast('请手动复制公司代码'); } };
+  return <FormSection title="同事注册" description="同事在登录页选择「立即注册 › 加入公司」时填写这个代码；提交后由公司管理员在「公司后台 › 账号」审核。">
+    <div className="mist-row"><span className="mist-note">公司代码</span><Mono>{code}</Mono><Button size="sm" variant="quiet" icon={Copy} onClick={() => void copy()}>复制</Button></div>
+  </FormSection>;
+}
 
 export type CompanyProfileKey = keyof MistCompanyProfile;
 export type CompanyProfileField = { key: CompanyProfileKey; label: string; type?: React.HTMLInputTypeAttribute; hint?: string };
@@ -85,6 +106,7 @@ export function CompanyProfileSection({ member }: { member: boolean }) {
   </Field>;
   const notices = member || empty || !stored?.legalName?.trim() || (problem && !problem.key);
   return <div data-company-profile ref={host}>
+    <CompanyJoinCode />
     <FormSection title="公司资料" description="报价单、CI / PL 的抬头、地址与收款信息取自这里。保存后新生成的单据使用当前资料，已生成的单据保持原样。">
       {notices && <div className="mist-col" style={{ gap: 12, marginBottom: 16 }}>
       {member && <Banner tone="neutral" title="公司资料由公司管理人员维护">{empty ? '当前公司尚未填写资料，生成报价单需要中文公司抬头，请联系公司管理人员补全。' : '你是被授权成员，可以查看，不能修改。'}</Banner>}
