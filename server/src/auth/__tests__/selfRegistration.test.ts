@@ -123,15 +123,30 @@ describe('helpers', () => {
 });
 
 describe('company search and the redesigned flow', () => {
-  it('returns only names and main business for active companies, at most six', async () => {
-    prisma.company.findMany.mockResolvedValue([{ id: 'co-1', name: '雾织贸易', settings: { registration: { business: 'both' } } }, { id: 'co-2', name: '雾织纺织', settings: null }]);
-    const res = await request(app()).get('/auth/register/companies').query({ q: ' 雾织 ' });
-    expect(res.body).toEqual({ ok: true, companies: [{ id: 'co-1', name: '雾织贸易', business: 'both' }, { id: 'co-2', name: '雾织纺织', business: null }] });
-    expect(prisma.company.findMany.mock.calls[0][0]).toMatchObject({ where: { status: 'active', name: { contains: '雾织', mode: 'insensitive' } }, take: 6 });
+  it('returns only the complete name match, never companies sharing a prefix or a closed company', async () => {
+    const rows = [{ id: 'co-1', name: '雾织贸易', status: 'active', settings: { registration: { business: 'both' } } }, { id: 'co-2', name: '雾织纺织', status: 'active', settings: null }, { id: 'co-3', name: '雾织贸易', status: 'closed', settings: null }];
+    prisma.company.findMany.mockImplementation(async ({ where }: any) => rows.filter(row => row.status === where.status && (where.name.equals !== undefined ? row.name.toLowerCase() === where.name.equals.toLowerCase() : row.name.includes(where.name.contains))));
+    const server = app();
+    for (const q of ['雾织', '贸易', '雾织%', '雾织 贸易']) expect((await request(server).get('/auth/register/companies').query({ q })).body.companies).toEqual([]);
+    const res = await request(server).get('/auth/register/companies').query({ q: ' 雾织贸易 ' });
+    expect(res.body).toEqual({ ok: true, companies: [{ id: 'co-1', name: '雾织贸易', business: 'both' }] });
+    expect(prisma.company.findMany.mock.calls.at(-1)[0]).toMatchObject({ where: { status: 'active', name: { equals: '雾织贸易', mode: 'insensitive' } }, take: 6 });
   });
 
   it('does not search with fewer than two characters', async () => {
     const res = await request(app()).get('/auth/register/companies').query({ q: '雾' });
+    expect(res.body.companies).toEqual([]);
+    expect(prisma.company.findMany).not.toHaveBeenCalled();
+  });
+
+  it('never exposes pattern matches returned by case-insensitive database lookup', async () => {
+    prisma.company.findMany.mockResolvedValue([{ id: 'co-1', name: 'Mist Textile', settings: null }, { id: 'co-2', name: 'Mist_%', settings: null }]);
+    const res = await request(app()).get('/auth/register/companies').query({ q: 'MIST_%' });
+    expect(res.body.companies).toEqual([{ id: 'co-2', name: 'Mist_%', business: null }]);
+  });
+
+  it('does not truncate an overlong query into another company name', async () => {
+    const res = await request(app()).get('/auth/register/companies').query({ q: '司'.repeat(61) });
     expect(res.body.companies).toEqual([]);
     expect(prisma.company.findMany).not.toHaveBeenCalled();
   });

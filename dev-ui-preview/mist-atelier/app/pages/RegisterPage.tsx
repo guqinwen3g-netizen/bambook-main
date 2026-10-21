@@ -1,6 +1,6 @@
 /**
  * 注册：创建公司（公司信息 → 管理员账号 → 验证邮箱，完成后直接进入）或
- * 加入公司（搜索选择公司 → 你的账号 → 验证邮箱，管理员同意后可登录）。
+ * 加入公司（全称核对公司 → 你的账号 → 验证邮箱，管理员同意后可登录）。
  */
 import React from 'react';
 import { ArrowLeft, ArrowRight, Building2, Check, Hash, KeyRound, Mail, Search, User, UserPlus } from 'lucide-react';
@@ -18,25 +18,26 @@ const BUSINESS: Array<{ value: CompanyBusiness; label: string }> = [{ value: 'fa
 const SIZE: Array<{ value: CompanySize; label: string }> = [{ value: '1-20', label: '1–20 人' }, { value: '21-100', label: '21–100 人' }, { value: '100+', label: '100 人以上' }];
 const businessLabel = (value: CompanyBusiness | null) => BUSINESS.find(b => b.value === value)?.label;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const sameName = (a: string, b: string) => a.replace(/\s+/g, '').toLowerCase() === b.replace(/\s+/g, '').toLowerCase();
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 const errorText = (e: unknown, fallback: string) => e instanceof Error && e.message ? e.message : fallback;
 
-/** 输入停顿后搜索公司；空查询或不足 2 字时清空。 */
-function useCompanySearch(query: string, enabled: boolean) {
+/** 只核对已提交或完成输入的全称；编辑期间清空，忽略过期请求。 */
+function useCompanySearch(query: string, enabled: boolean, attempt = 0) {
   const [results, setResults] = React.useState<CompanySearchResult[]>([]), [loading, setLoading] = React.useState(false), [error, setError] = React.useState('');
   React.useEffect(() => {
     const q = query.trim();
-    if (!enabled || q.length < 2) { setResults([]); setLoading(false); setError(''); return; }
+    setResults([]); setError('');
+    if (!enabled || q.length < 2 || q.length > 60) { setLoading(false); return; }
     const controller = new AbortController();
     setLoading(true);
     const timer = window.setTimeout(() => {
       searchRegistrationCompanies(q, controller.signal)
-        .then(rows => { setResults(rows); setError(''); })
-        .catch(e => { if (!controller.signal.aborted) { setResults([]); setError(errorText(e, '暂时无法搜索公司')); } })
+        .then(rows => { if (!controller.signal.aborted) { setResults(rows.filter(row => sameName(row.name, q))); setError(''); } })
+        .catch(e => { if (!controller.signal.aborted) { setResults([]); setError(errorText(e, '暂时无法核对公司')); } })
         .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     }, 250);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [query, enabled]);
+  }, [query, enabled, attempt]);
   return { results, loading, error };
 }
 
@@ -46,6 +47,7 @@ export function RegisterPage() {
   const toast = useToast();
   const [mode, setMode] = React.useState<Mode>('choose'), [step, setStep] = React.useState<Step>('company');
   const [companyName, setCompanyName] = React.useState(''), [business, setBusiness] = React.useState<CompanyBusiness | ''>(''), [size, setSize] = React.useState<CompanySize | ''>('');
+  const [companyLookup, setCompanyLookup] = React.useState(''), [lookupQuery, setLookupQuery] = React.useState(''), [lookupAttempt, setLookupAttempt] = React.useState(0);
   const [query, setQuery] = React.useState(''), [selected, setSelected] = React.useState<CompanySearchResult | null>(null), [useCode, setUseCode] = React.useState(false), [companyCode, setCompanyCode] = React.useState('');
   const [displayName, setDisplayName] = React.useState(''), [email, setEmail] = React.useState(''), [password, setPassword] = React.useState(''), [code, setCode] = React.useState('');
   const [sentTo, setSentTo] = React.useState(''), [cooldown, setCooldown] = React.useState(0);
@@ -53,9 +55,9 @@ export function RegisterPage() {
   const timer = React.useRef<number | undefined>(undefined), mounted = React.useRef(true);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; window.clearInterval(timer.current); }; }, []);
 
-  const duplicate = useCompanySearch(companyName, mode === 'company' && step === 'company');
+  const duplicate = useCompanySearch(companyLookup, mode === 'company' && step === 'company' && companyLookup === companyName.trim());
   const existing = duplicate.results.find(c => sameName(c.name, companyName.trim()));
-  const search = useCompanySearch(query, mode === 'join' && step === 'find' && !useCode);
+  const search = useCompanySearch(lookupQuery, mode === 'join' && step === 'find' && !useCode && lookupQuery === query.trim(), lookupAttempt);
 
   const flow = mode === 'choose' ? [] : FLOW[mode];
   const open = (next: 'company' | 'join', first?: Step) => { setMode(next); setStep(first ?? FLOW[next][0]); setError(''); };
@@ -87,7 +89,12 @@ export function RegisterPage() {
       return setStep('account');
     }
     if (step === 'find') {
-      if (useCode ? !companyCode.trim() : !selected) return setError(useCode ? '请填写公司代码' : '请选择你的公司');
+      if (useCode && !companyCode.trim()) return setError('请填写公司代码');
+      if (!useCode && !selected) {
+        if (query.trim().length < 2) return setError('请填写公司全称');
+        if (search.loading) return;
+        setLookupQuery(query.trim()); setLookupAttempt(value => value + 1); return;
+      }
       return setStep('account');
     }
     if (step === 'account') {
@@ -149,7 +156,7 @@ export function RegisterPage() {
     {backLink}{progress}
     <h2 className="mist-h1 mist-auth-title">公司信息</h2>
     {alert}
-    <Field label="公司名称"><TextInput icon={Building2} value={companyName} maxLength={60} autoFocus onChange={e => setCompanyName(e.target.value)} /></Field>
+    <Field label="公司名称"><TextInput icon={Building2} value={companyName} maxLength={60} autoFocus onChange={e => { setCompanyName(e.target.value); setCompanyLookup(''); }} onBlur={() => setCompanyLookup(companyName.trim())} /></Field>
     {existing && <div className="mist-register-note">「{existing.name}」已在使用竹衍 · <TextLink onClick={() => { setSelected(existing); setQuery(existing.name); setUseCode(false); open('join', 'account'); }}>申请加入</TextLink></div>}
     <Field label="主营业务"><Segmented<CompanyBusiness> ariaLabel="主营业务" options={BUSINESS} value={business as CompanyBusiness} onChange={v => { setBusiness(v); setError(''); }} /></Field>
     <Field label="公司规模（选填）"><Segmented<CompanySize> ariaLabel="公司规模" options={SIZE} value={size as CompanySize} onChange={v => setSize(v === size ? '' : v)} /></Field>
@@ -157,22 +164,22 @@ export function RegisterPage() {
   </>;
   else if (step === 'find') body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">找到你的公司</h2>
+    <h2 className="mist-h1 mist-auth-title">核对你的公司</h2>
     {alert}
     {useCode ? <>
       <Field label="公司代码"><TextInput icon={Hash} value={companyCode} maxLength={50} autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={e => setCompanyCode(e.target.value)} /></Field>
-      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(false); setError(''); }}>按名称搜索</TextLink></p>
+      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(false); setError(''); }}>使用公司全称</TextLink></p>
     </> : <>
-      <TextInput icon={Search} aria-label="公司名称" placeholder="公司名称" value={query} autoFocus onChange={e => { setQuery(e.target.value); if (selected && !sameName(selected.name, e.target.value)) setSelected(null); }} />
-      <div className="mist-register-results" role="listbox" aria-label="搜索结果">
+      <Field label="公司全称"><TextInput icon={Search} placeholder="填写完整公司名称" value={query} maxLength={60} autoFocus onChange={e => { setQuery(e.target.value); setLookupQuery(''); setSelected(null); setError(''); }} /></Field>
+      <div className="mist-register-results" role="listbox" aria-label="匹配的公司" aria-busy={search.loading}>
         {search.results.map(c => <button key={c.id} type="button" role="option" aria-selected={selected?.id === c.id} className="mist-register-result" data-on={selected?.id === c.id || undefined} onClick={() => { setSelected(c); setError(''); }}>
           <Icon icon={Building2} size="sm" /><span>{c.name}</span>{businessLabel(c.business) && <small>{businessLabel(c.business)}</small>}{selected?.id === c.id && <Icon icon={Check} size="sm" />}
         </button>)}
-        {query.trim().length >= 2 && !search.loading && !search.results.length && <p className="mist-register-empty">{search.error || `没有找到「${query.trim()}」`}</p>}
+        {lookupQuery && !search.loading && !search.results.length && <p className="mist-register-empty">{search.error || '未找到完全匹配的公司，请核对全称或使用公司代码。'}</p>}
       </div>
       <p className="mist-auth-switch">找不到？用<TextLink onClick={() => { setUseCode(true); setError(''); }}>公司代码</TextLink>加入</p>
     </>}
-    {primary('下一步')}
+    {primary(useCode || selected ? '下一步' : search.loading ? '核对中…' : '核对公司')}
   </>;
   else if (step === 'account') body = <>
     {backLink}{progress}

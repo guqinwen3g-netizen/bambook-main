@@ -3,8 +3,8 @@
  *
  * - POST /register/company：创建公司，同时创建该公司的管理员账号（超级管理员、在用）。
  *   公司按平台「开户默认设置」取方案与席位，写平台操作记录 platform.company.self_register，平台人员可见、可停用。
- * - GET /register/companies?q=：按公司名称搜索在用公司（≥2 字、最多 6 条、按 IP 限频），只返回名称与主营业务。
- * - POST /register/join：选择搜索到的公司（companyId）或填写公司代码申请加入。账号与公司成员关系均为 pending，
+ * - GET /register/companies?q=：仅按完整公司名称精确核对（2–60 字、按 IP 限频），不提供模糊搜索或公司目录。
+ * - POST /register/join：选择精确匹配的公司（companyId）或填写公司代码申请加入。账号与公司成员关系均为 pending，
  *   由该公司管理员在「公司后台 › 账号」审批（指定部门与岗位）后才能登录。
  *
  * 两条路径都要求邮箱验证码（与 /send-code 的 register 用途一致）及全站密码规则（passwordPolicy.ts）。
@@ -74,12 +74,14 @@ export function selfRegistrationRouter(options: Options) {
   };
 
   router.get('/register/companies', async (req: Request, res: Response) => {
-    const q = text(req.query.q).slice(0, 40);
-    if (q.length < 2) return res.json({ ok: true, companies: [] });
+    const q = text(req.query.q);
+    if (q.length < 2 || q.length > 60) return res.json({ ok: true, companies: [] });
     if (!searchAllowed(req.ip || 'unknown')) return fail(res, 429, 'TOO_MANY_REQUESTS', '搜索太频繁，请稍后再试。');
     try {
-      const rows = await options.prisma.company.findMany({ where: { status: 'active', name: { contains: q, mode: 'insensitive' } }, select: { id: true, name: true, settings: true }, orderBy: { name: 'asc' }, take: 6 });
-      return res.json({ ok: true, companies: rows.map(row => ({ id: row.id, name: row.name, business: businessOf(row.settings) })) });
+      const rows = await options.prisma.company.findMany({ where: { status: 'active', name: { equals: q, mode: 'insensitive' } }, select: { id: true, name: true, settings: true }, orderBy: { name: 'asc' }, take: 6 });
+      // 响应再做字面比较，数据库大小写匹配中的模式字符不能变成公司目录。
+      const matches = rows.filter(row => row.name.toLowerCase() === q.toLowerCase());
+      return res.json({ ok: true, companies: matches.map(row => ({ id: row.id, name: row.name, business: businessOf(row.settings) })) });
     } catch (error) {
       logger.error('[register/companies] failed', { error: error instanceof Error ? error.message : String(error) });
       return fail(res, 500, 'SEARCH_FAILED', '暂时无法搜索公司，请稍后重试。');

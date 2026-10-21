@@ -70,7 +70,10 @@ it('creates a company step by step and signs the new administrator in', async ()
 it('points to the existing company when the name is already in use', async () => {
   api.searchRegistrationCompanies.mockResolvedValue([{ id: 'co-1', name: '雾织贸易', business: 'both' }]);
   await click('创建公司首次使用竹衍');
-  await type(field('公司名称'), '雾织 贸易');
+  await type(field('公司名称'), ' 雾织贸易 ');
+  await settle();
+  expect(api.searchRegistrationCompanies).not.toHaveBeenCalled();
+  await act(async () => field('公司名称').dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
   await settle();
   expect(host.textContent).toContain('「雾织贸易」已在使用竹衍');
   await click('申请加入');
@@ -83,10 +86,14 @@ it('finds a company by name and submits a join request for it', async () => {
   api.registerJoinCompany.mockResolvedValue({ company: { name: '雾织贸易' }, email: 'owner@example.test' });
   await click('加入公司公司已在使用竹衍');
   await submit();
-  expect(host.textContent).toContain('请选择你的公司');
-  await type(host.querySelector('input[aria-label="公司名称"]') as HTMLInputElement, '雾织');
+  expect(host.textContent).toContain('请填写公司全称');
+  await type(field('公司全称'), '雾织贸易');
   await settle();
-  expect(api.searchRegistrationCompanies.mock.calls.at(-1)?.[0]).toBe('雾织');
+  expect(api.searchRegistrationCompanies).not.toHaveBeenCalled();
+  await submit();
+  await settle();
+  expect(api.searchRegistrationCompanies.mock.calls.at(-1)?.[0]).toBe('雾织贸易');
+  expect(host.textContent).not.toContain('雾织纺织');
   await act(async () => (host.querySelector('[role="option"]') as HTMLButtonElement).click());
   await submit();
   expect(field('工作邮箱')).toBeTruthy();
@@ -100,13 +107,39 @@ it('finds a company by name and submits a join request for it', async () => {
 
 it('shows a clear empty result and offers the company code instead', async () => {
   await click('加入公司公司已在使用竹衍');
-  await type(host.querySelector('input[aria-label="公司名称"]') as HTMLInputElement, '不存在公司');
+  await type(field('公司全称'), '不存在公司');
+  await submit();
   await settle();
-  expect(host.textContent).toContain('没有找到「不存在公司」');
+  expect(host.textContent).toContain('未找到完全匹配的公司');
   await click('公司代码');
   await type(field('公司代码'), 'wuzhimaoyi');
   await submit();
   expect(host.textContent).toContain('公司代码 wuzhimaoyi');
+});
+
+it('clears a checked company as soon as the name is edited and requires a new explicit check', async () => {
+  api.searchRegistrationCompanies.mockResolvedValue([{ id: 'co-1', name: '雾织贸易', business: null }]);
+  await click('加入公司公司已在使用竹衍');
+  await type(field('公司全称'), '雾织贸易');
+  await submit(); await settle();
+  await act(async () => (host.querySelector('[role="option"]') as HTMLButtonElement).click());
+  await type(field('公司全称'), '雾织'); await settle();
+  expect(host.querySelector('[role="option"]')).toBeNull();
+  expect(api.searchRegistrationCompanies).toHaveBeenCalledTimes(1);
+  expect(button('核对公司')).toBeTruthy();
+  await submit(); await settle();
+  expect(host.querySelector('[role="option"]')).toBeNull();
+});
+
+it('can retry a failed exact-name check without changing the company name', async () => {
+  api.searchRegistrationCompanies.mockRejectedValueOnce(new Error('连接失败')).mockResolvedValueOnce([{ id: 'co-1', name: '雾织贸易', business: null }]);
+  await click('加入公司公司已在使用竹衍');
+  await type(field('公司全称'), '雾织贸易');
+  await submit(); await settle();
+  expect(host.textContent).toContain('连接失败');
+  await submit(); await settle();
+  expect(host.querySelector('[role="option"]')?.textContent).toContain('雾织贸易');
+  expect(api.searchRegistrationCompanies).toHaveBeenCalledTimes(2);
 });
 
 it('keeps the account step until the password meets every rule', async () => {
