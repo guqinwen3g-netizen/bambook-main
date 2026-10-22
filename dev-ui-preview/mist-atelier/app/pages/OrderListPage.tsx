@@ -15,6 +15,7 @@ import type {OrderGovernanceFields} from '../../../../server/src/shared/mistOrde
 import { useMistSession } from '../runtime/auth';
 import { OrderSourceDialog } from './OrderSourceDialog';
 import { currentLineStage, orderLineFlags } from './orderLineTrack';
+import { useDevice } from '../runtime/devicePreferences';
 const approvalOf=(order:MistOrder)=>(order as MistOrder&{governance?:OrderGovernanceFields}).governance?.status;
 /** BB-ORD-7：已作废 / 已取消订单默认不在列表与统计中，可按主单审批筛选查看。 */
 export const isTerminatedOrder=(order:MistOrder)=>['void','cancelled'].includes(approvalOf(order)||'');
@@ -40,6 +41,7 @@ export function mistDate(value: string): Date | null {
   return Number.isFinite(date.getTime()) ? date : null;
 }
 export function OrderListPage() {
+  const density = useDevice('density');
   const { go, route } = useNav();
   const toast = useToast();
   const { state, loading, error, refresh } = useMistWorkspace();
@@ -90,7 +92,7 @@ export function OrderListPage() {
     </StatGrid>
     <Tabs<'garment' | 'fabric'> value={tab} onChange={value=>{setTab(value);setStatus('all');}} options={[{ value: 'garment', label: '成衣订单', count: allOrders.filter(order => order.type === 'garment'&&(!customerId||order.customerId===customerId)).length }, { value: 'fabric', label: '面料订单', count: allOrders.filter(order => order.type === 'fabric'&&(!customerId||order.customerId===customerId)).length }]} />
     <Toolbar><SearchField value={q} onChange={setQ} placeholder="订单号、客户或季节" /><Dropdown label="主单审批" value={approvalFilter} onChange={setApprovalFilter} options={[{value:'all',label:'全部（不含作废 / 取消）'},{value:'draft',label:'草稿'},{value:'pending',label:'待审批'},{value:'approved',label:'已批准'},{value:'rejected',label:'已退回'},{value:'void',label:'已作废'},{value:'cancelled',label:'已取消'}]}/><Dropdown label="状态" value={status} onChange={setStatus} options={[{ value: 'all', label: '全部' }, ...[...new Set(family.map(order => order.state))].map(value => ({ value, label: value }))]} />{customerId && <TextLink onClick={() => go('orders')}>清除客户筛选</TextLink>}</Toolbar>
-    <Card><DataTable density={state?.settings.density} ariaLabel="订单" columns={cols} rows={rows.slice((currentPage - 1) * 20, currentPage * 20)} rowKey={order => order.id} loading={loading} onRowClick={order => go('orders/detail', order.id,{customerId,section:tab})}
+    <Card><DataTable density={density} ariaLabel="订单" columns={cols} rows={rows.slice((currentPage - 1) * 20, currentPage * 20)} rowKey={order => order.id} loading={loading} onRowClick={order => go('orders/detail', order.id,{customerId,section:tab})}
       empty={<EmptyState icon={SearchX} title={q || status !== 'all' ? '没有匹配的订单' : `还没有${tab === 'garment' ? '成衣' : '面料'}订单`} action={q || status !== 'all' ? <TextLink onClick={() => { setQ(''); setStatus('all'); }}>清除筛选</TextLink> : <Button icon={Plus} onClick={() => setCreateOpen(true)}>新建订单</Button>} />}
       footer={<><span>{rows.length} 个订单</span><Pagination page={currentPage} pages={pages} onChange={setPage} /></>} /></Card>
   </MistPage>;

@@ -13,8 +13,10 @@ import { defaultMemberId, memberSelectOptions, workspaceMembers } from '../runti
 import { ModuleEditorPage, type ModuleEditorSpec } from './modules/ModuleWorkbench';
 import { CustomerMailPanel, FollowUpPanel, OpportunityPanel } from './CustomerRelations';
 import { useFilePreview } from '../runtime/files';
+import { useDevice } from '../runtime/devicePreferences';
 
 export function CustomerPage() {
+  const density = useDevice('density');
   const { go, route, openAI } = useNav(), toast = useToast(), session = useMistSession();
   const { state, loading, error, run, refresh, downloadFile, workspace } = useMistWorkspace();
   const filePreview = useFilePreview();
@@ -90,14 +92,14 @@ export function CustomerPage() {
       <div>
         {tab === 'overview' && <Banner tone="ai" icon={Sparkles} title="小竹洞察" actions={<Button size="sm" variant="ai" onClick={() => openAI(`仅根据以下已读取事实概括客户 ${customer.name}（${customer.code}）：${active.length} 个在途订单，${devs.length} 个开发案，待收 ${fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} ${customer.currency}。说明缺失信息，不要推断未提供的对客沟通或承诺。`)}>展开</Button>}>{customer.name} 当前有 {active.length} 个在途订单、{devs.length} 个开发案；待收 {fmt(currencyInvoices.reduce((sum, invoice) => sum + invoice.open, 0), 2)} {customer.currency}。</Banner>}
         {(tab === 'overview' || tab === 'orders') && <Card><CardHeader title="订单" tools={<Button variant="quiet" size="sm" onClick={() => go('orders', undefined, { customerId: customer.id })}>全部订单</Button>} />
-          <DataTable density={state?.settings.density} ariaLabel="客户订单" rows={orders} rowKey={order => order.id} onRowClick={order => go('orders/detail', order.id, { customerId: customer.id })} empty={<EmptyState compact title="还没有订单" action={<Button onClick={() => go('orders/new', undefined, { customerId: customer.id })}>新建订单</Button>} />} columns={[
+          <DataTable density={density} ariaLabel="客户订单" rows={orders} rowKey={order => order.id} onRowClick={order => go('orders/detail', order.id, { customerId: customer.id })} empty={<EmptyState compact title="还没有订单" action={<Button onClick={() => go('orders/new', undefined, { customerId: customer.id })}>新建订单</Button>} />} columns={[
             { key: 'id', header: '订单', width: 'minmax(180px,1.6fr)', render: order => <ObjectCell thumb={<Thumb src={IMG[order.img]} size="sm" />} name={<Mono>{order.code}</Mono>} meta={order.season} /> },
             { key: 'a', header: '金额', width: '120px', align: 'right', render: order => <b className="mist-cell-strong mist-num">{fmt(order.amount, 2)} <span className="mist-muted">{order.currency}</span></b> },
             { key: 'd', header: '交期', width: '88px', hideOnMobile: true, render: order => <span className="mist-num">{order.due}</span> },
             { key: 's', header: '状态', width: '120px', render: order => <Pill tone={order.tone}>{order.state}</Pill> },
           ]} /></Card>}
         {(tab === 'overview' || tab === 'dev') && <Card><CardHeader title="进行中的开发" sub={`${devs.length} 个开发案`} tools={<Button variant="quiet" size="sm" onClick={() => go('development', undefined, { customerId: customer.id })}>开发与寻样</Button>} />
-          <DataTable density={state?.settings.density} ariaLabel="客户开发案" rows={devs} rowKey={dev => dev.id} onRowClick={dev => go('development/detail', dev.id, { customerId: customer.id, versionId: dev.currentVersionId ?? undefined })} empty={<EmptyState compact title="还没有开发案" />} columns={[
+          <DataTable density={density} ariaLabel="客户开发案" rows={devs} rowKey={dev => dev.id} onRowClick={dev => go('development/detail', dev.id, { customerId: customer.id, versionId: dev.currentVersionId ?? undefined })} empty={<EmptyState compact title="还没有开发案" />} columns={[
             { key: 'n', header: '开发对象', width: 'minmax(200px,2fr)', render: dev => <ObjectCell thumb={<Thumb src={IMG[dev.img]} size="sm" />} name={dev.name} meta={<Mono>{dev.code}</Mono>} /> },
             { key: 'st', header: '阶段', width: '120px', hideOnMobile: true, render: dev => <><StageProgress total={5} current={dev.stage} /><span className="mist-cell-sub" style={{ marginTop: 6 }}>{STAGES[dev.stage]}</span></> },
             { key: 's', header: '状态', width: '118px', render: dev => <Pill tone={dev.tone}>{dev.state}</Pill> },
@@ -106,7 +108,7 @@ export function CustomerPage() {
         {state?.crm && tab === 'followups' && <FollowUpPanel customer={customer} state={state} can={canCreate} />}
         {state && tab === 'mail' && <CustomerMailPanel customer={customer} state={state} />}
         {tab === 'contacts' && <Card><CardHeader title="联系人" tools={<IconButton icon={Plus} label="添加联系人" onClick={() => { setContact({ name: '', role: '', email: '', phone: '' }); setFailure(''); }} />} />{contactList}</Card>}
-        {tab === 'files' && <Card><CardHeader title="客户关联文件" /><DataTable density={state?.settings.density} rows={files} rowKey={file => file.id} onRowClick={file => filePreview.open(file, files)} empty={<EmptyState compact title="还没有关联文件" description="开发案及沟通记录的附件会汇总到这里。" />} columns={[
+        {tab === 'files' && <Card><CardHeader title="客户关联文件" /><DataTable density={density} rows={files} rowKey={file => file.id} onRowClick={file => filePreview.open(file, files)} empty={<EmptyState compact title="还没有关联文件" description="开发案及沟通记录的附件会汇总到这里。" />} columns={[
           { key: 'name', header: '文件', render: file => <span className="mist-file"><span>{file.name}</span></span> }, { key: 'size', header: '大小', render: file => `${Math.ceil(file.size / 1024)} KB` }, { key: 'download', header: '下载', render: file => <IconButton icon={Download} size="sm" label={`下载 ${file.name}`} onClick={event => { event.stopPropagation(); void downloadFile(file).catch(problem => setFailure(problem instanceof Error ? problem.message : '下载失败')); }} /> },
         ]} />{filePreview.node}</Card>}
       </div>
