@@ -13,5 +13,7 @@ export default defineConfig(
       proxy: mistDevelopmentProxy(),
     },
     preview: { port: 4174, host: '127.0.0.1', strictPort: true },
+    // 依赖预扫描跳过构建产物（out/ 是旧 Electron 打包结果），避免启动时报不存在的依赖。
+    optimizeDeps: { entries: ['**/*.html', '!**/node_modules/**', '!out/**', '!dist/**', '!dist-*/**'] },
   }),
 );
