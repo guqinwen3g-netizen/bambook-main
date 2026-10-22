@@ -52,7 +52,8 @@
 .mist-me > .mist-icon { margin-left: auto; color: var(--mist-side-ink-3); }
 @media (min-width: 761px) {
 .mist-app[data-collapsed] :is(.mist-brand-word, .mist-ws > div, .mist-ws > .mist-icon, .mist-side-search > span, .mist-side-search .mist-kbd, .mist-nav-head, .mist-nav-item > span, .mist-side-ai, .mist-me > div, .mist-me > .mist-icon, .mist-side-toggle) { display: none; }
-.mist-app[data-collapsed] .mist-brand { justify-content: center; cursor: pointer; padding: 4px 0; }
+/* 收起时标志保持展开时的位置（左内边距不变，正好落在 76px 窄栏中央），只转动不平移。 */
+.mist-app[data-collapsed] .mist-brand { cursor: pointer; }
 /* 收起 / 展开时标志转动（沿用旧版侧栏：收起转到 -60°，680ms）；手机抽屉不转。 */
 .mist-side .mist-brand-mark { transition: transform 680ms cubic-bezier(.45, 0, .2, 1); }
 .mist-app[data-collapsed] .mist-side .mist-brand-mark { transform: rotate(-60deg); }
