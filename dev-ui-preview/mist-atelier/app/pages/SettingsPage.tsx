@@ -10,6 +10,7 @@ import { WorkspaceMembers } from './WorkspaceMembers';
 import { ChangePasswordRow, LogoutAllRow } from './ChangePassword';
 import { CompanyProfileSection } from './CompanyProfileSection';
 import { AvatarSettingRow } from './AvatarStudio';
+import { onThemePreference, readThemePreference, writeThemePreference, type ThemePreference } from '../runtime/themePreference';
 
 type TextKey = 'workspaceName' | 'profileName' | 'profileEmail' | 'locale';
 type TextValues = Pick<MistSettings, TextKey>;
@@ -17,6 +18,8 @@ type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyPr
 export function SettingsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), toast = useToast(), nav = useNav();
   const { state, loading, saving, pending } = workspace;
+  const [themePreference, setThemePreference] = React.useState<ThemePreference>(readThemePreference);
+  React.useEffect(() => onThemePreference(setThemePreference), []);
   const [sec, setSec] = React.useState(() => ['overview', 'activity', 'appearance', 'notify', 'workspace', 'company', 'account', 'security'].includes(String(nav?.route?.section)) ? String(nav!.route.section) : 'overview'), [error, setError] = React.useState('');
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
   const [draft, setDraft] = React.useState<{ scope: string; values: TextValues } | null>(null);
@@ -94,7 +97,7 @@ export function SettingsPage() {
             <DataTable ariaLabel="公司设置变更记录" rows={state.events.filter(item=>item.entityType==='settings').slice(0,100)} rowKey={item=>item.id} columns={[{key:'time',header:'时间',render:item=>new Date(item.at).toLocaleString('zh-CN')},{key:'actor',header:'操作人',render:item=>item.actor},{key:'text',header:'变更内容',render:item=>item.text}]} empty={<EmptyState title="暂无设置变更记录" description="之后保存的公司设置将记录在这里。" compact/>}/>
           </FormSection>}
           {sec === 'appearance' && <FormSection title="外观" description="浅色 = 雾蓝 Light Mist，深色 = 深夜 Deep Night。">
-            <ChoiceCards<MistSettings['theme']> ariaLabel="主题" disabled={settingsLocked} value={settings.theme} onChange={value => void save({ theme: value })} options={[{ value: 'light', title: '浅色', description: '雾蓝渐变', icon: Sun }, { value: 'dark', title: '深色', description: '深夜蓝渐变', icon: Moon }, { value: 'system', title: '跟随系统', description: '自动切换', icon: Laptop }]} />
+            <ChoiceCards<ThemePreference> ariaLabel="主题" value={themePreference} onChange={value => { setThemePreference(value); writeThemePreference(value); }} options={[{ value: 'light', title: '浅色', description: '雾蓝渐变', icon: Sun }, { value: 'dark', title: '深色', description: '深夜蓝渐变', icon: Moon }, { value: 'system', title: '跟随系统', description: '自动切换', icon: Laptop }]} />
             <div style={{ marginTop: 18 }}>
               <SettingRow title="列表密度" description="影响公司数据表的行高" control={<Select aria-label="列表密度" disabled={settingsLocked} value={settings.density} onChange={event => void save({ density: event.target.value as MistSettings['density'] })} options={[{ value: 'compact', label: '紧凑' }, { value: 'default', label: '标准' }, { value: 'comfy', label: '宽松' }]} />} />
               <SettingRow title="减少动效" description="保存减少动效偏好" control={<Switch ariaLabel="减少动效" checked={settings.reducedMotion} disabled={settingsLocked} onChange={value => void save({ reducedMotion: value })} />} />
