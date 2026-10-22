@@ -16,6 +16,7 @@ import { MODULE_MAP } from './moduleMap';
 import { Nav, useNav, type GoOptions, type Route, type RouteTarget } from './nav';
 import { PAGE_LABELS as LABELS, pageDocumentTitle } from './pageTitle';
 import { MistSessionProvider, useMistSession } from './runtime/auth';
+import { onThemePreference, readThemePreference, resolveTheme, writeThemePreference } from './runtime/themePreference';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
 import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
@@ -226,21 +227,24 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     if(id){if(previous.id&&previous.id!==id)go('cockpit');previousSpace.current={session:session.sessionKey,id};}
   },[session.sessionKey,workspace.workspace?.id,go]);
   React.useEffect(() => {
-    if (!state) return;
     const media = matchMedia('(prefers-color-scheme: dark)');
-    const sync = () => setTheme(state.settings.theme === 'system' ? media.matches ? 'dark' : 'light' : state.settings.theme);
+    const sync = () => setTheme(resolveTheme(readThemePreference()));
     sync(); media.addEventListener?.('change', sync);
+    const off = onThemePreference(sync);
+    return () => { media.removeEventListener?.('change', sync); off(); };
+  }, [setTheme]);
+  React.useEffect(() => {
+    if (!state) return;
     const root = document.querySelector<HTMLElement>('.mist-root');
     for (const key of ['--mist-dur-fast','--mist-dur','--mist-dur-slow']) {
       if (state.settings.reducedMotion) root?.style.setProperty(key, '0s'); else root?.style.removeProperty(key);
     }
-    return () => media.removeEventListener?.('change', sync);
-  }, [state?.settings.theme, state?.settings.reducedMotion, setTheme]);
+  }, [state?.settings.reducedMotion]);
   const report = (failure: unknown) => toast(failure instanceof Error ? failure.message : '操作未完成', 'bad');
   const toggleTheme = () => {
     const next = theme === 'dark' ? 'light' : 'dark';
-    if (state && workspace.workspace?.access?.role !== 'member') void workspace.run({type:'settings.update',payload:{theme:next}}).catch(report);
-    else setTheme(next);
+    setTheme(next);
+    writeThemePreference(next);
   };
   const routeBase=route.view.split('/')[0];
   const currentAiSource=route.id&&routeBase==='orders'&&canOrders&&session.hasPermission('orders:read')

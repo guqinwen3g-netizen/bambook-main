@@ -239,12 +239,14 @@ describe('one Mist entry with real authentication and workspace state', () => {
     expect(host!.querySelector('.mist-root')?.getAttribute('data-theme')).toBe('dark');
     expect(ctx.run).not.toHaveBeenCalled(); expect(ctx.state!.settings.theme).toBe('light');
   });
-  it('still persists an owner theme through the existing workspace command', async () => {
+  it('switches the theme instantly as a personal preference without writing company settings', async () => {
     await signIn(); const ctx = currentContext();
     ctx.workspace!.access = { role: 'owner', canManageMembers: true, hidden: [] };
     await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
     await click(getByRole(host!, 'button', { name: '切换深色' }));
-    expect(ctx.run).toHaveBeenCalledExactlyOnceWith({ type: 'settings.update', payload: { theme: 'dark' } });
+    expect(ctx.run).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'settings.update' }));
+    expect(localStorage.getItem('bambook.theme-preference')).toBe('dark');
+    expect(getByRole(host!, 'button', { name: '切换浅色' })).toBeTruthy();
   });
   it.each(['development/detail', 'orders/detail', 'system-settings'])('does not mount an unauthorized direct link to %s', async view => {
     await signIn('limited', []); requests = []; history.replaceState(null, '', `/?intro=0&theme=light&view=${view}&id=dev-a&versionId=version-a`);

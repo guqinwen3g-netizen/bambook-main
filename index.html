@@ -16,9 +16,11 @@
     // Paint the startup surface before module loading; freeze it through the entrance.
     (() => {
       let saved;
-      try { saved = localStorage.getItem('bambook.mist.boot-theme'); } catch {}
+      let preference;
+      try { saved = localStorage.getItem('bambook.mist.boot-theme'); preference = localStorage.getItem('bambook.theme-preference'); } catch {}
       const requested = new URLSearchParams(location.search).get('theme');
-      const theme = requested === 'dark' || requested === 'light' ? requested : saved === 'dark' || saved === 'light' ? saved : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      const system = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      const theme = requested === 'dark' || requested === 'light' ? requested : preference === 'dark' || preference === 'light' ? preference : preference === 'system' ? system : saved === 'dark' || saved === 'light' ? saved : system;
       document.documentElement.dataset.mistBootTheme = theme;
       document.documentElement.style.colorScheme = theme;
       if (new URLSearchParams(location.search).get('intro') === '0') document.documentElement.dataset.mistSkipIntro = 'true';
