@@ -30,10 +30,11 @@ describe('original Mist settings with server workspace commands', () => {
   it('preserves section navigation and saves the actual three-way theme and density', async () => {
     render(); expect(host.querySelector('.mist-wizard')).toBeTruthy(); expect(host.querySelectorAll('.mist-vsteps button')).toHaveLength(8); await click(button('外观'));
     const dark = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(item => item.textContent?.startsWith('深色'))!; await click(dark);
-    expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ theme: expect.anything() }) })); expect(localStorage.getItem('bambook.theme-preference')).toBe('dark'); expect(dark.getAttribute('aria-checked')).toBe('true');
+    expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ theme: expect.anything() }) })); expect(localStorage.getItem('bambook.device.theme')).toBe('"dark"'); expect(dark.getAttribute('aria-checked')).toBe('true');
     const density = host.querySelector<HTMLSelectElement>('select[aria-label="列表密度"]')!;
     await act(async () => { density.value = 'compact'; density.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect(seam.value.state.settings.density).toBe('compact');
+    expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ density: expect.anything() }) }));
+    expect(localStorage.getItem('bambook.device.density')).toBe('"compact"');
   });
   it('persists notification switches with the shared field names', async () => {
     render(); await click(button('通知')); const controls = host.querySelectorAll<HTMLInputElement>('input[role="switch"]');
@@ -118,4 +119,6 @@ it('organizes company management links without exposing platform management',asy
  expect(host.textContent).toContain('公司管理总览');await click(button('进入公司后台'));expect(seam.nav.go).toHaveBeenCalledWith('admin-panel');
  await click(button('管理组织架构'));expect(seam.nav.go).toHaveBeenCalledWith('hr');expect(host.textContent).not.toContain('平台设置');
 });
-it('shows newly saved company settings in the settings history',async()=>{render();await click(button('外观'));const density=host.querySelector<HTMLSelectElement>('select[aria-label="列表密度"]')!;await act(async()=>{density.value='compact';density.dispatchEvent(new Event('change',{bubbles:true}));});await click(button('设置记录'));expect(host.textContent).toContain('更新');expect(host.textContent).toContain('认证姓名');});
+it('keeps device display choices out of the company settings history',async()=>{render();await click(button('外观'));const density=host.querySelector<HTMLSelectElement>('select[aria-label="列表密度"]')!;await act(async()=>{density.value='compact';density.dispatchEvent(new Event('change',{bubbles:true}));});expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'settings.update' }));expect(localStorage.getItem('bambook.device.density')).toBe('"compact"');await click(button('设置记录'));expect(host.textContent).not.toContain('更新列表密度');
+    expect(host.textContent).not.toContain('列表密度');
+});

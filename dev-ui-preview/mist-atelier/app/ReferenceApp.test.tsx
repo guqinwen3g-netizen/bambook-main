@@ -245,7 +245,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
     await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
     await click(getByRole(host!, 'button', { name: '切换深色' }));
     expect(ctx.run).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'settings.update' }));
-    expect(localStorage.getItem('bambook.theme-preference')).toBe('dark');
+    expect(localStorage.getItem('bambook.device.theme')).toBe('"dark"');
     expect(getByRole(host!, 'button', { name: '切换浅色' })).toBeTruthy();
   });
   it.each(['development/detail', 'orders/detail', 'system-settings'])('does not mount an unauthorized direct link to %s', async view => {

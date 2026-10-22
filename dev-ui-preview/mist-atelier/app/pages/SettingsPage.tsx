@@ -11,6 +11,7 @@ import { ChangePasswordRow, LogoutAllRow } from './ChangePassword';
 import { CompanyProfileSection } from './CompanyProfileSection';
 import { AvatarSettingRow } from './AvatarStudio';
 import { onThemePreference, readThemePreference, writeThemePreference, type ThemePreference } from '../runtime/themePreference';
+import { readDevice, useDevice, writeDevice, type DeviceValues } from '../runtime/devicePreferences';
 
 type TextKey = 'workspaceName' | 'profileName' | 'profileEmail' | 'locale';
 type TextValues = Pick<MistSettings, TextKey>;
@@ -19,6 +20,7 @@ export function SettingsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), toast = useToast(), nav = useNav();
   const { state, loading, saving, pending } = workspace;
   const [themePreference, setThemePreference] = React.useState<ThemePreference>(readThemePreference);
+  const density = useDevice('density'), reducedMotion = useDevice('reducedMotion'), locale = useDevice('locale');
   React.useEffect(() => onThemePreference(setThemePreference), []);
   const [sec, setSec] = React.useState(() => ['overview', 'activity', 'appearance', 'notify', 'workspace', 'company', 'account', 'security'].includes(String(nav?.route?.section)) ? String(nav!.route.section) : 'overview'), [error, setError] = React.useState('');
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
@@ -99,8 +101,8 @@ export function SettingsPage() {
           {sec === 'appearance' && <FormSection title="外观" description="浅色 = 雾蓝 Light Mist，深色 = 深夜 Deep Night。">
             <ChoiceCards<ThemePreference> ariaLabel="主题" value={themePreference} onChange={value => { setThemePreference(value); writeThemePreference(value); }} options={[{ value: 'light', title: '浅色', description: '雾蓝渐变', icon: Sun }, { value: 'dark', title: '深色', description: '深夜蓝渐变', icon: Moon }, { value: 'system', title: '跟随系统', description: '自动切换', icon: Laptop }]} />
             <div style={{ marginTop: 18 }}>
-              <SettingRow title="列表密度" description="影响公司数据表的行高" control={<Select aria-label="列表密度" disabled={settingsLocked} value={settings.density} onChange={event => void save({ density: event.target.value as MistSettings['density'] })} options={[{ value: 'compact', label: '紧凑' }, { value: 'default', label: '标准' }, { value: 'comfy', label: '宽松' }]} />} />
-              <SettingRow title="减少动效" description="保存减少动效偏好" control={<Switch ariaLabel="减少动效" checked={settings.reducedMotion} disabled={settingsLocked} onChange={value => void save({ reducedMotion: value })} />} />
+              <SettingRow title="列表密度" description="只在这台设备生效，影响数据表的行高" control={<Select aria-label="列表密度" value={density} onChange={event => writeDevice('density', event.target.value as DeviceValues['density'])} options={[{ value: 'compact', label: '紧凑' }, { value: 'default', label: '标准' }, { value: 'comfy', label: '宽松' }]} />} />
+              <SettingRow title="减少动效" description="只在这台设备生效" control={<Switch ariaLabel="减少动效" checked={reducedMotion} onChange={value => writeDevice('reducedMotion', value)} />} />
             </div>
           </FormSection>}
           {sec === 'notify' && <FormSection title="通知" description="保存公司通知偏好。">
@@ -117,7 +119,7 @@ export function SettingsPage() {
           {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
           <div hidden={sec !== 'company'}><CompanyProfileSection member={member} /></div>
           {sec === 'account' && <FormSection title="账号" description="公司内显示资料，不改变登录账号、邮箱或密码。">{!session.localMode && <AvatarSettingRow />}<FormGrid><Field label="姓名"><TextInput aria-label="显示姓名" value={values.profileName} disabled={settingsLocked} onChange={event => edit('profileName', event.target.value)} onBlur={() => saveField('profileName')} /></Field><Field label="邮箱"><TextInput aria-label="显示邮箱" type="email" value={values.profileEmail} disabled={settingsLocked} onChange={event => edit('profileEmail', event.target.value)} onBlur={() => saveField('profileEmail')} /></Field>
-            <Field label="语言偏好" hint="保存偏好，不改变当前页面文案"><Select aria-label="显示语言" disabled={settingsLocked} value={values.locale} onChange={event => { edit('locale', event.target.value); void save({ locale: event.target.value }); }} options={[{ value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }]} /></Field></FormGrid></FormSection>}
+            <Field label="语言偏好" hint="只在这台设备生效，不改变当前页面文案"><Select aria-label="显示语言" value={locale} onChange={event => writeDevice('locale', event.target.value as DeviceValues['locale'])} options={[{ value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }]} /></Field></FormGrid></FormSection>}
           {sec === 'security' && <FormSection title="安全">
             {!session.localMode && <><ChangePasswordRow /><LogoutAllRow /></>}
             {session.localMode && <>

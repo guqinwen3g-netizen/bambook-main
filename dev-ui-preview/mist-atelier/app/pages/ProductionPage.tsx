@@ -13,6 +13,7 @@ import { PRODUCTION_HOLD_CATEGORIES, type FulfillmentSizeQuantity } from '../../
 import { mistDate } from './OrderListPage';
 import { productionNok, productionReleaseGate } from './productionGate';
 import { breakdownSizeTotals, type OrderLineBreakdown } from '../../../../server/src/shared/mistOrderBreakdown';
+import { useDevice } from '../runtime/devicePreferences';
 
 export function parseProductionSizes(value:string):FulfillmentSizeQuantity[] { if(!value.trim())return []; return value.split(/\n+/).map(line=>{ const match=line.trim().match(/^(.+?)[:：]\s*(\d+(?:\.\d{1,4})?)$/);if(!match)throw new Error('尺码数量请逐行填写，例如 M:10');return {size:match[1].trim(),quantity:Number(match[2])}; }); }
 export type ProductionRange = 'week' | 'month' | 'all';
@@ -33,6 +34,7 @@ export function productionWindow(range: ProductionRange, now = businessNow(), it
   return { start, end };
 }
 export function ProductionPage() {
+  const density = useDevice('density');
   const { go, route } = useNav(), toast = useToast(), session = useMistSession();
   const [operation,setOperation]=React.useState<ModuleEditorSpec|null>(null);
   const { state, loading, error, run, refresh } = useMistWorkspace();
@@ -86,7 +88,7 @@ export function ProductionPage() {
     {(failure || error) && <Banner tone="bad" title="生产记录未保存" actions={error ? <Button onClick={() => void refresh()}>重试</Button> : undefined}>{failure || error}</Banner>}
     {risks.length > 0 && <div className="mist-section"><Banner tone="warn" icon={AlertTriangle} title={`${risks.length} 个生产单有交期风险`} actions={<Button size="sm" onClick={() => { setSelectedId(risks[0].id); }}>查看生产单</Button>}>{risks.map(item => `${item.code}：${item.risk}`).join('；')}</Banner></div>}
     <Toolbar><SearchField value={q} onChange={setQ} placeholder="款式、生产单或工厂" /><Dropdown label="订单" value={orderId} onChange={setOrderId} options={[{ value: 'all', label: '全部' }, ...(state?.orders ?? []).map(order => ({ value: order.id, label: order.code }))]} /></Toolbar>
-    {!shown.length && !loading ? <Card><EmptyState title={q || orderId !== 'all' ? '没有匹配的生产单' : range==='all'?'暂无生产单':`本${range === 'week' ? '周' : '月'}没有计划中的生产单`} action={range!=='all'||q||orderId!=='all'?<Button onClick={() => { setQ(''); setOrderId('all'); setRange('all'); }}>查看全部生产单</Button>:undefined} /></Card> : gantt ? <Card><CardHeader title="生产计划" sub={`${window.start.toLocaleDateString('zh-CN')} — ${new Date(window.end.getTime() - 1).toLocaleDateString('zh-CN')}`} /><DataTable density={state?.settings.density} ariaLabel="生产甘特图" rows={shown} loading={loading} rowKey={item => item.id} onRowClick={item => setSelectedId(item.id)} columns={[
+    {!shown.length && !loading ? <Card><EmptyState title={q || orderId !== 'all' ? '没有匹配的生产单' : range==='all'?'暂无生产单':`本${range === 'week' ? '周' : '月'}没有计划中的生产单`} action={range!=='all'||q||orderId!=='all'?<Button onClick={() => { setQ(''); setOrderId('all'); setRange('all'); }}>查看全部生产单</Button>:undefined} /></Card> : gantt ? <Card><CardHeader title="生产计划" sub={`${window.start.toLocaleDateString('zh-CN')} — ${new Date(window.end.getTime() - 1).toLocaleDateString('zh-CN')}`} /><DataTable density={density} ariaLabel="生产甘特图" rows={shown} loading={loading} rowKey={item => item.id} onRowClick={item => setSelectedId(item.id)} columns={[
       { key: 'object', header: '生产单', width: 'minmax(180px,1fr)', render: item => <ObjectCell name={item.name} meta={<Mono>{item.code}</Mono>} /> },
       { key: 'factory', header: '工厂', width: '120px', render: item => item.factory },
       { key: 'schedule', header: '计划时间', width: 'minmax(220px,2fr)', render: item => <><svg width="100%" height="28" viewBox="0 0 100 12" role="img" aria-label={item.startDate ? `${item.startDate} 至 ${item.due}` : `交期 ${item.due}，未记录开始日`}>
