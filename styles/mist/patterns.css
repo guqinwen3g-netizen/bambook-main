@@ -10,9 +10,8 @@
 .mist-app { -webkit-tap-highlight-color: transparent; touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .mist-side { display: flex; flex-direction: column; padding: 22px 14px 16px; color: var(--mist-side-ink); min-height: 0; overflow: hidden; }
 .mist-brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 0; height: 40px; }
-.mist-brand-mark { width: 30px; height: 30px; color: #fff; flex: none; animation: mist-float 8s ease-in-out infinite; }
+.mist-brand-mark { width: 30px; height: 30px; color: #fff; flex: none; }
 .mist-root[data-theme="dark"] .mist-brand-mark, :is(.dark,[data-theme="dark"]) .mist-root:not([data-theme="light"]) .mist-brand-mark { color: var(--mist-brand-cyan); }
-@keyframes mist-float { 0%, 100% { transform: rotate(0); } 50% { transform: rotate(30deg); } }
 .mist-brand-word { font-size: 17px; font-weight: var(--mist-fw-regular); white-space: nowrap; }
 .mist-brand-word small { font-size: 13px; margin-left: 4px; opacity: .9; }
 .mist-side-toggle { margin-left: auto; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; color: var(--mist-side-ink-2); }
