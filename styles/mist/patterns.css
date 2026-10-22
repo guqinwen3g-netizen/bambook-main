@@ -29,9 +29,9 @@
 .mist-nav-group { margin-bottom: 4px; }
 .mist-nav-head { width: 100%; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; font-size: var(--mist-text-2xs); letter-spacing: .06em; color: var(--mist-side-ink-3); border-radius: 8px; white-space: nowrap; }
 .mist-nav-head:hover { color: var(--mist-side-ink-2); }
-.mist-nav-head .mist-icon { margin-left: auto; transition: transform .3s; }
+.mist-nav-head .mist-icon { margin-left: auto; transition: transform var(--mist-dur-slow) var(--mist-ease); }
 .mist-nav-group[data-closed] .mist-nav-head .mist-icon { transform: rotate(-90deg); }
-.mist-nav-items { display: grid; grid-template-rows: 1fr; transition: grid-template-rows .35s var(--mist-ease); }
+.mist-nav-items { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--mist-dur-slow) var(--mist-ease); }
 .mist-nav-group[data-closed] .mist-nav-items { grid-template-rows: 0fr; }
 .mist-nav-items > div { overflow: hidden; }
 .mist-nav-item { position: relative; width: 100%; display: flex; align-items: center; gap: 11px; height: 38px; padding: 0 10px; border-radius: var(--mist-r-md); color: var(--mist-side-ink-2); font-size: 13.5px; white-space: nowrap; transition: background .2s, color .2s; }
@@ -51,14 +51,24 @@
 .mist-me small { font-size: var(--mist-text-2xs); color: var(--mist-side-ink-3); }
 .mist-me > .mist-icon { margin-left: auto; color: var(--mist-side-ink-3); }
 @media (min-width: 761px) {
-.mist-app[data-collapsed] :is(.mist-brand-word, .mist-ws > div, .mist-ws > .mist-icon, .mist-side-search > span, .mist-side-search .mist-kbd, .mist-nav-head, .mist-nav-item > span, .mist-side-ai, .mist-me > div, .mist-me > .mist-icon, .mist-side-toggle) { display: none; }
+/* 收起 / 展开：文字淡出淡入、分组标题与助手卡平滑收高、图标随内边距滑到窄栏中央（38px），宽度过渡期间不出现跳变。 */
+.mist-side :is(.mist-brand-word, .mist-ws > div, .mist-ws > .mist-icon, .mist-side-search > span, .mist-side-search .mist-kbd, .mist-nav-item > span, .mist-side-ai, .mist-me > div, .mist-me > .mist-icon, .mist-side-toggle) { transition: opacity .22s var(--mist-ease) .14s, visibility 0s; }
+.mist-app[data-collapsed] :is(.mist-brand-word, .mist-ws > div, .mist-ws > .mist-icon, .mist-side-search > span, .mist-side-search .mist-kbd, .mist-nav-item > span, .mist-side-ai, .mist-me > div, .mist-me > .mist-icon, .mist-side-toggle) { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .12s ease, visibility 0s .12s; }
+.mist-side :is(.mist-ws, .mist-me) { overflow: hidden; }
+.mist-side :is(.mist-ws > div, .mist-ws b, .mist-ws small, .mist-side-search > span, .mist-me > div, .mist-me b, .mist-me small) { white-space: nowrap; min-width: 0; }
+.mist-side :is(.mist-ws, .mist-side-search, .mist-nav-item) { transition: padding var(--mist-dur-slow) var(--mist-ease), background var(--mist-dur), color var(--mist-dur); }
+.mist-side .mist-nav-head { overflow: hidden; transition: height var(--mist-dur-slow) var(--mist-ease), opacity .2s var(--mist-ease); }
+.mist-app[data-collapsed] .mist-nav-head { height: 0; opacity: 0; pointer-events: none; }
+.mist-side .mist-side-ai { max-height: 240px; overflow: hidden; transition: max-height var(--mist-dur-slow) var(--mist-ease), padding var(--mist-dur-slow) var(--mist-ease), margin var(--mist-dur-slow) var(--mist-ease), opacity .22s var(--mist-ease) .14s, visibility 0s; }
+.mist-app[data-collapsed] .mist-side-ai { max-height: 0; padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; }
 /* 收起时标志保持展开时的位置（左内边距不变，正好落在 76px 窄栏中央），只转动不平移。 */
 .mist-app[data-collapsed] .mist-brand { cursor: pointer; }
 /* 收起 / 展开时标志转动（沿用旧版侧栏：收起转到 -60°），与侧栏宽度同一时长与缓动；手机抽屉不转。 */
 .mist-side .mist-brand-mark { transition: transform var(--mist-dur-slow) var(--mist-ease); transform-origin: 50% 50%; will-change: transform; }
 .mist-app[data-collapsed] .mist-side .mist-brand-mark { transform: rotate(-60deg); }
-.mist-app[data-collapsed] .mist-ws { justify-content: center; padding: 9px 0; }
-.mist-app[data-collapsed] :is(.mist-nav-item, .mist-side-search) { justify-content: center; padding: 0; }
+.mist-app[data-collapsed] .mist-ws { padding-left: 5px; padding-right: 0; }
+.mist-app[data-collapsed] .mist-nav-item { padding-left: 13px; padding-right: 0; }
+.mist-app[data-collapsed] .mist-side-search { padding-left: 11px; padding-right: 0; }
 .mist-app[data-collapsed] .mist-nav-group[data-closed] .mist-nav-items { grid-template-rows: 1fr; }
 }
 
