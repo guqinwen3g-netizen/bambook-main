@@ -19,6 +19,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
+import { parsePurchaseContent, purchaseChoices, purchaseContent } from './purchaseContent';
 
 type Domain = FulfillmentPurchase['domain'];
 type Entry = 'purchase' | 'processing';
@@ -27,7 +28,6 @@ type StageFilter = 'all' | Stage;
 type FlagFilter = 'all' | 'overdue' | 'variance' | 'returned';
 
 const ENTRY_LABEL: Record<Entry, string> = { purchase: '采购订单', processing: '委外加工单' };
-const KIND_LABEL: Record<FulfillmentPurchase['kind'], string> = { material: '材料', finished: '成品', processing: '加工服务' };
 const STAGE_LABEL: Record<Stage, string> = { draft: '需求草稿', pending: '待审批', supplier: '待供应商确认', fulfilling: '供应履约中', done: '已完成' };
 const STAGE_TONE: Record<Stage, Tone> = { draft: 'neutral', pending: 'warn', supplier: 'accent', fulfilling: 'accent', done: 'ok' };
 const entryOf = (purchase: FulfillmentPurchase): Entry => purchase.kind === 'processing' ? 'processing' : 'purchase';
@@ -96,15 +96,17 @@ export function ProcurementPage() {
       { id: 'commercial', label: '数量与费用', fields: ['quantity', 'unit', 'price', 'currency'] },
       { id: 'delivery', label: '交付约定', fields: ['due', 'terms', 'destination', 'note'] },
     ],
-    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false)), hint: sourceHint }, field('kind', '采购类型', 'select', true, [{ value: 'material', label: '材料' }, { value: 'finished', label: '成品' }, { value: 'processing', label: '加工服务' }]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), field('unit', '计量单位'), field('price', '含税 / 约定单价', 'number'), field('currency', '币种'), field('due', '交期', 'date'), field('terms', '付款条件'), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
-    initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p?.kind || (entry === 'processing' ? 'processing' : 'material'), supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', price: p?.price || 0, currency: p?.currency || sourceOrder?.currency || 'USD', due: p?.due || today(), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
+    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain)))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), field('unit', '计量单位'), field('price', '含税 / 约定单价', 'number'), field('currency', '币种'), field('due', '交期', 'date'), field('terms', '付款条件'), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
+    initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', price: p?.price || 0, currency: p?.currency || sourceOrder?.currency || 'USD', due: p?.due || today(), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
     submit: async values => {
       if (!state) return;
       const source = parseSource(state, text(values, 'source'));
       if (source.kind !== 'orderLine') throw new Error('采购必须关联订单条目');
       const supplier = state.market.suppliers.find(s => s.id === text(values, 'supplierId'));
       if (!supplier) throw new Error('请选择当前供应商');
-      const saved = await run({ type: 'fulfillment.procurement.save', payload: { ...(p ? { id: p.id } : {}), orderId: source.orderId, lineId: source.lineId, kind: text(values, 'kind') as FulfillmentPurchase['kind'], supplierId: supplier.id, supplier: supplier.name, description: text(values, 'description'), quantity: number(values, 'quantity'), unit: text(values, 'unit'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), destination: text(values, 'destination'), note: text(values, 'note'), fileIds: p?.fileIds || [] } });
+      const choice = text(values, 'kind');
+      const { kind, materialKind } = parsePurchaseContent(choice, domain);
+      const saved = await run({ type: 'fulfillment.procurement.save', payload: { ...(p ? { id: p.id } : {}), orderId: source.orderId, lineId: source.lineId, kind, ...(kind === 'material' ? { materialKind } : {}), supplierId: supplier.id, supplier: supplier.name, description: text(values, 'description'), quantity: number(values, 'quantity'), unit: text(values, 'unit'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), destination: text(values, 'destination'), note: text(values, 'note'), fileIds: p?.fileIds || [] } });
       const id = String(saved?.result?.id || p?.id || '');
       if (id) { setPicked(id); setEntryChoice(text(values, 'kind') === 'processing' ? 'processing' : 'purchase'); }
     },
@@ -148,7 +150,7 @@ export function ProcurementPage() {
   const stageCount = (value: StageFilter) => value === 'all' ? searched.length : searched.filter(p => purchaseStage(p) === value).length;
   const lineLabel = (p: FulfillmentPurchase) => state ? fulfillmentSourceLabel(state, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) : '';
   const columns: Column<FulfillmentPurchase>[] = [
-    { key: 'code', header: ENTRY_LABEL[entry], width: 'minmax(200px,2.2fr)', render: p => <div className="mist-col" style={{ gap: 2 }}><span><Mono>{p.code}</Mono> · {state ? purchaseName(state, p) : p.description}</span><small className="mist-muted">{KIND_LABEL[p.kind]} · {lineLabel(p)}</small></div> },
+    { key: 'code', header: ENTRY_LABEL[entry], width: 'minmax(200px,2.2fr)', render: p => <div className="mist-col" style={{ gap: 2 }}><span><Mono>{p.code}</Mono> · {state ? purchaseName(state, p) : p.description}</span><small className="mist-muted">{uiText(purchaseContent(p))} · {lineLabel(p)}</small></div> },
     { key: 'supplier', header: '供应商', width: 'minmax(120px,1fr)', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span>{p.supplier}</span></div> },
     { key: 'due', header: '要求 / 承诺交期', width: '128px', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span className={purchaseFlags(p, day).some(flag => flag.key === 'overdue') ? 'mist-tone-bad' : undefined}>{p.due || '未填'}</span><small className="mist-muted">{uiText(p.supplierConfirmation ? `承诺 ${shortWhen(p.supplierConfirmation.confirmedDue)}` : '供应商未确认')}</small></div> },
     { key: 'received', header: entry === 'processing' ? '累计回交' : '累计交付', width: '136px', align: 'right', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{p.received} / {p.quantity} {uiText(p.unit)}</span>{purchaseFlags(p, day).filter(flag => flag.key === 'variance').map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> },
@@ -174,7 +176,7 @@ export function ProcurementPage() {
   const summary = selected && state ? (() => { const p = selected, stage = purchaseStage(p), flags = purchaseFlags(p, day).filter(flag => flag.key !== 'returned');
     return <PreviewSummary openLabel={`打开${ENTRY_LABEL[entryOf(p)]}`} onOpen={() => full.open(p.id)} data={{
       code: p.code, status: <Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill>,
-      title: purchaseName(state, p), description: `${KIND_LABEL[p.kind]} · ${lineLabel(p)}`,
+      title: purchaseName(state, p), description: `${uiText(purchaseContent(p))} · ${lineLabel(p)}`,
       facts: [
         { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` },
         { label: '单价', value: `${p.price} ${p.currency}` }, { label: '要求交期', value: p.due || '未填' },
@@ -265,7 +267,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       <span className="mist-mono mist-muted">{p.code}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{purchaseName(state, p)}</div>
     </div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill><Pill>{KIND_LABEL[p.kind]}</Pill><Pill>{uiText(p.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>{flags.filter(flag => flag.key !== 'returned').map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill><Pill>{uiText(purchaseContent(p))}</Pill><Pill>{uiText(p.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>{flags.filter(flag => flag.key !== 'returned').map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
     <Banner tone={next.tone} title={uiText(next.title)} actions={p.transferredTo ? <Button variant="quiet" onClick={() => onOpenPurchase(p.transferredTo!.purchaseId)}>{uiText("查看 ")}{p.transferredTo.purchaseCode}</Button> : undefined}>{next.text}</Banner>
     <ActionBar busy={locked} actions={[
       { label: '编辑草稿', icon: Pencil, onClick: onEdit, reason: writeReason, hidden: stage !== 'draft' },
@@ -321,7 +323,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
 export function downloadApprovedPurchase(root: MistState, p: FulfillmentPurchase) {
   if (p.state !== 'approved' || !p.decision) throw new Error('当前采购尚未批准');
   const escape = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-  const values = [['单据编号', p.code], ['供应商', p.supplier], ['来源订单', fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId })], ['内容 / 规格', p.description], ['数量', `${p.quantity} ${p.unit}`], ['单价', `${p.price} ${p.currency}`], ['约定交期', p.due], ['付款条件', p.terms], ['交付地点', p.destination], ['批准人', p.decision.actor], ['批准时间', p.decision.at], ['批准意见', p.decision.note], ['备注', p.note]];
+  const values = [['单据编号', p.code], ['供应商', p.supplier], ['来源订单', fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId })], ['采购内容', purchaseContent(p)], ['内容 / 规格', p.description], ['数量', `${p.quantity} ${p.unit}`], ['单价', `${p.price} ${p.currency}`], ['约定交期', p.due], ['付款条件', p.terms], ['交付地点', p.destination], ['批准人', p.decision.actor], ['批准时间', p.decision.at], ['批准意见', p.decision.note], ['备注', p.note]];
   const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>' + escape(p.code) + '</title><body><h1>' + (p.kind === 'processing' ? '委托加工确认单' : '采购单') + '</h1><dl>' + values.map(([label, value]) => '<dt>' + escape(label) + '</dt><dd>' + escape(value) + '</dd>').join('') + '</dl></body></html>';
   const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' })), a = document.createElement('a');
   a.href = url; a.download = p.code + '.html'; a.click();

@@ -50,7 +50,7 @@ it('cuts out only the primary product image, lets supplementary images be promot
   await mount('products',p.id,undefined,'full');
   expect(fetcher).toHaveBeenCalledWith('/private/photo-a?preview=cutout-display',expect.anything());
   await click('补充图 1 · 细节.png');expect(fetcher).toHaveBeenCalledWith('/private/photo-b?preview=display',expect.anything());expect(fetcher).not.toHaveBeenCalledWith('/private/photo-b?preview=cutout-display',expect.anything());
-  expect(host.textContent).toContain('主图 · 自动抠图');expect(host.textContent).toContain('补充图');
+  expect(host.textContent).toContain('主图');expect(host.textContent).toContain('补充图');
   await click('设为主图');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.attachment.set',payload:{kind:'product',id:p.id,fileIds:['photo-b','photo-a','spec']}}));bridge.current.run.mockClear();
   bridge.current.uploadFile.mockResolvedValueOnce({id:'new-a'}).mockResolvedValueOnce({id:'new-b'});
   const input=host.querySelector<HTMLInputElement>('input[type=file]')!;expect(input.multiple).toBe(true);

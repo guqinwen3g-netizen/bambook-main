@@ -7,7 +7,7 @@ function setup() {
   let n = 0; const ctx: MistContext = { id: () => `rb-${++n}`, now: '2026-10-17T04:00:00Z', actorName: '林舒', actorId: 'demo-finance' };
   let state = createMistState(ctx, 'demo');
   // 演示数据自带一张专票与退税率；本组用例从空白退税资料开始核对计算。
-  state.exportRebate = { rates: [], claims: [] }; state.payables!.bills = state.payables!.bills.filter(b => !b.lines.some(l => state.fulfillment.purchases.find(p => p.id === l.purchaseId)?.kind === 'finished'));
+  state.exportRebate = { rates: [], claims: [] }; state.payables!.bills = [];
   const order = state.orders.find(o => o.code === 'SO-G-2026-017')!, line = state.orderLines.find(l => l.orderId === order.id)!;
   const customs = state.fulfillment.customs.find(c => state.fulfillment.shipments.find(s => s.id === c.shipmentId)?.state === 'departed')!;
   const po = { ...state.fulfillment.purchases[0], id: 'po-017', code: 'PC-017', orderId: order.id, lineId: line.id, kind: 'finished' as const, state: 'approved' as const };

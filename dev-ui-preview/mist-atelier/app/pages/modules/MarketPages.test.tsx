@@ -51,6 +51,14 @@ describe('Market explicit detail sections',()=>{
  });
 });
 describe('Mist market screens',()=>{
+ it('shows unverified product cost without presenting a zero cost estimate',async()=>{
+  const product=bridge.current.state.market.products[0];product.cost='0';
+  await mount('products',product.id,undefined,'full');
+  expect(host.textContent).toContain('参考成本');expect(host.textContent).toContain('待核实');
+  expect(host.textContent).not.toContain('USD 0');expect(host.textContent).not.toContain('第一张图片是主图');
+  expect(bridge.current.run).not.toHaveBeenCalled();
+ });
+
  it('shows merged relation processing history under its original entity ids without including unrelated records',async()=>{
   const target=sectionFixture('relation'),state=bridge.current.state;
   state.market.relations[0].mergedRelationIds=['old-supplier-relation'];

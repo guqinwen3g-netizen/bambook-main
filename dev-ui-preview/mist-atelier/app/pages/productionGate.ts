@@ -2,11 +2,12 @@
 import { assertMistOrderApproved, assertMistOrderDeposit, type MistProduction, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
 import { uiText } from '../../../../services/interfaceLanguage';
+import { garmentMaterialBlocker, type InternalFabricContext } from '../../../../server/src/shared/mistInternalFabric';
 
 export type GateItem = { key: string; label: string; ok: boolean; detail: string; target?: { view: string; id?: string } };
 const message = (check: () => void) => { try { check(); return ''; } catch (problem) { return problem instanceof Error ? problem.message : '未通过'; } };
 
-export function productionReleaseGate(state: MistState, branch: MistProduction): GateItem[] {
+export function productionReleaseGate(state: MistState, branch: MistProduction, context: InternalFabricContext = { actorName: '' }): GateItem[] {
   const f = state.fulfillment, order = state.orders.find(row => row.id === branch.orderId), fabric = order?.type === 'fabric';
   const fact = f?.productionFacts?.find(row => row.productionId === branch.id);
   const approval = message(() => assertMistOrderApproved(state, branch.orderId));
@@ -15,6 +16,10 @@ export function productionReleaseGate(state: MistState, branch: MistProduction):
     { key: 'approval', label: '主单已批准', ok: !approval, detail: approval || '已批准', target: { view: 'orders/detail', id: branch.orderId } },
     { key: 'deposit', label: '定金已覆盖', ok: !approval && !deposit, detail: deposit || '已覆盖或无需定金', target: { view: 'payment-vouchers' } },
   ];
+  if (!fabric) {
+    const material = garmentMaterialBlocker(state, branch.orderId, branch.lineId, context);
+    items.push({ key: 'material', label: '用料已落实', ok: !material, detail: material || '已落实', target: { view: 'orders/detail', id: branch.orderId } });
+  }
   if (!fabric) items.push({ key: 'sizes', label: '生产尺码已登记', ok: !!fact?.sizes.length, detail: fact?.sizes.length ? fact.sizes.map(size => `${size.size}:${size.quantity}`).join(' · ') : '请先登记准确生产尺码与数量' });
   if (branch.sourcePurchaseId) {
     const purchase = f?.purchases.find(row => row.id === branch.sourcePurchaseId), ok = !!purchase && purchase.state === 'approved' && !!purchase.offlineSend && !!purchase.supplierConfirmation;

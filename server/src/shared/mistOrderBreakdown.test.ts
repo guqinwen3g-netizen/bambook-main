@@ -12,7 +12,7 @@ function fixture(){
  state.files.push({id:'f',name:'po.pdf',mimeType:'application/pdf',size:1,storageKey:'w/f',createdAt:c.now});
  const contract:OrderGovernanceInput={kind:'external',poNumber:'PO-1',confirmationFileIds:['f'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'30%定金',incoterm:'FOB',deliveryPlace:'上海'};
  const run=(command:MistCommand,actor=c)=>{const out=applyMistCommand(state,command,actor);state=out.state;return out.result;};
- const create=(type:'garment'|'fabric',line:Record<string,unknown>)=>run({type:'order.create',payload:{type,customerId:'A',season:'AW27',currency:'USD',due:'2026-12-01',ownerId:'sales',governance:contract,lines:[{name:type==='fabric'?'双面呢':'大衣',style:'C1',img:'coat',unit:type==='fabric'?'米':'件',price:10,...line}]}} as MistCommand);
+ const create=(type:'garment'|'fabric',line:Record<string,unknown>)=>run({type:'order.create',payload:{type,customerId:'A',season:'AW27',currency:'USD',due:'2026-12-01',ownerId:'sales',governance:contract,lines:[{...(type==='garment'?{fulfillmentMode:'cmt',cmtIncludedItems:[]}:{}),name:type==='fabric'?'双面呢':'大衣',style:'C1',img:'coat',unit:type==='fabric'?'米':'件',price:10,...line}]}} as MistCommand);
  return {get state():MistState{return state;},c,contract,run,create};
 }
 const lineOf=(f:ReturnType<typeof fixture>,orderId:string)=>f.state.orderLines.find(l=>l.orderId===orderId) as unknown as {id:string;qty:number;breakdown?:OrderLineBreakdown};
@@ -51,7 +51,7 @@ describe('BB-ORD-3 colour × size and fabric spec breakdown',()=>{
  });
  it('saveDraft recomputes quantity, rejects forged totals, and the approval page shows the breakdown',()=>{
   const f=fixture(),id=f.create('garment',{qty:10}).orderId!,line=lineOf(f,id);
-  const base={id:line.id,name:'大衣',style:'C1',img:'coat' as const,unit:'件',price:10};
+  const base={fulfillmentMode:line.fulfillmentMode,cmtIncludedItems:line.cmtIncludedItems,id:line.id,name:'大衣',style:'C1',img:'coat' as const,unit:'件',price:10};
   const save=(extra:Record<string,unknown>,reason?:string)=>f.run({type:'order.governance.saveDraft',payload:{orderId:id,input:f.contract,lines:[{...base,...extra}],...(reason?{reason}:{})}} as MistCommand);
   expect(()=>save({qty:1,breakdown:garment([['藏青',[1,1,1,1]]])})).toThrow(/不一致/);
   save({qty:100,breakdown:garment([['藏青',[10,20,30,40]]])});

@@ -16,6 +16,12 @@ function fixture(stoneConfirmed=false){
  return {state,branch};
 }
 describe('fabric production gate',()=>{
+ it('shows a missing garment material plan with a return to the exact order',()=>{
+  const {state,branch}=fixture();state.orders[0].type='garment';
+  const gate=productionReleaseGate(state,branch).find(item=>item.key==='material');
+  expect(gate).toMatchObject({ok:false,target:{view:'orders/detail',id:'o'}});
+  expect(gate?.detail).toContain('履约模式');
+ });
  it('shows each ordered colour and leaves an unconfirmed colour blocked',()=>{
   const {state,branch}=fixture();const rows=productionReleaseGate(state,branch).filter(item=>item.key.startsWith('sample'));
   expect(rows).toHaveLength(2);

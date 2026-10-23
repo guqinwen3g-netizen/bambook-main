@@ -1,8 +1,9 @@
 import {applyMistCommand,type MistCommand,type MistContext,type MistState} from './mistWorkspace';
 import {demoFileRecord,type DemoFileTemplate} from './mistDemoFiles';
+import {seedInternalFabricPlan} from './mistDemoInternalFabric';
 
 /** Completed seasonal business, with chronology and evidence generated from each exact source. */
-export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext;finance:MistContext;qc:MistContext;logistics:MistContext;reviewer:MistContext},input:{month:number;family:'fabric'|'garment';customerId:string;productId:string}):MistState{
+export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext;fabric:MistContext;finance:MistContext;qc:MistContext;logistics:MistContext;reviewer:MistContext},input:{month:number;family:'fabric'|'garment';customerId:string;productId:string}):MistState{
  let state=initial;
  const year=contexts.sales.now.slice(0,4),month=String(input.month).padStart(2,'0');
  const date=(day:number)=>`${year}-${month}-${String(day).padStart(2,'0')}`;
@@ -17,10 +18,11 @@ export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext
  const orderId=run({type:'market.quotation.convert',payload:{id:quotationId,type:family,due:date(25),ownerId:contexts.sales.actorId!}},'sales',3).orderId!;
  const order=state.orders.find(o=>o.id===orderId)!,line=state.orderLines.find(l=>l.orderId===orderId)!;
  const po=proof('customer-po',orderId,order.code+' 客户采购确认.pdf',3);
- run({type:'order.governance.saveDraft',payload:{orderId,input:{kind:'external',poNumber:`CP-${year}${month}-${family==='fabric'?'F':'G'}`,confirmationFileIds:[po],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'30% 定金，70% 见提单副本',incoterm:'FOB',deliveryPlace:'上海'}}},'sales',3);
+ run({type:'order.governance.saveDraft',payload:{orderId,...(family==='garment'?{lines:[{...line,fulfillmentMode:'full_package' as const,cmtIncludedItems:[]}]}:{}),input:{kind:'external',poNumber:`CP-${year}${month}-${family==='fabric'?'F':'G'}`,confirmationFileIds:[po],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'30% 定金，70% 见提单副本',incoterm:'FOB',deliveryPlace:'上海'}}},'sales',3);
  run({type:'order.governance.submit',payload:{orderId}},'sales',3);
  run({type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'季度补单商务条款核对通过'}},'reviewer',4);
- const purchaseId=run({type:'fulfillment.procurement.save',payload:{orderId,lineId:line.id,kind:'finished',supplierId:supplier.id,supplier:supplier.name,description:product.name+' · 含材料及加工',quantity:qty,unit,price:Number((Number(product.cost)*7).toFixed(2)),currency:'CNY',due:date(18),terms:'验收后月结，价税合计',destination:supplier.name,note:'本批沿用确认样',fileIds:[]}},'sales',4).id!;
+ if(family==='garment')state=seedInternalFabricPlan(state,{fabric:{...contexts.fabric,now:date(4)+'T08:00:00.000Z'},garment:{...contexts.sales,now:date(4)+'T08:00:00.000Z'},reviewer:{...contexts.reviewer,now:date(4)+'T08:00:00.000Z'}},orderId,[{lineId:line.id,name:product.specs?.mainFabric||product.composition||'成衣面料',style:product.sku+'-FAB',metres:qty*3}]).state;
+ const purchaseId=run({type:'fulfillment.procurement.save',payload:{orderId,lineId:line.id,kind:family==='garment'?'processing':'finished',supplierId:supplier.id,supplier:supplier.name,description:product.name+(family==='garment'?' · 成衣加工':' · 成品面料'),quantity:qty,unit,price:Number((Number(product.cost)*7).toFixed(2)),currency:'CNY',due:date(18),terms:'验收后月结，价税合计',destination:supplier.name,note:'本批沿用确认样',fileIds:[]}},'sales',4).id!;
  run({type:'fulfillment.procurement.submit',payload:{id:purchaseId}},'sales',4);
  run({type:'fulfillment.procurement.decide',payload:{id:purchaseId,decision:'approved',note:'核对工厂产能与交付窗口'}},'reviewer',5);
  const contractFile=proof('supplier-contract',purchaseId,`${order.code} 供货合同.pdf`,5);

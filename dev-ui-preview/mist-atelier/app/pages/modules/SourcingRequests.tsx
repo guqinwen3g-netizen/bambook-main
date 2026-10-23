@@ -9,10 +9,11 @@ import { RFQ_STATE_LABEL, readRfqs, rfqAwardFlags, rfqComparison, rfqCurrentQuot
 import { supplierStatusOn, supplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
 import type { ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, field, parseSource, sourceOptions, text, today } from './fulfillmentKit';
+import { parsePurchaseContent, purchaseChoices, purchaseContent } from './purchaseContent';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 
 const STATE_TONE: Record<MistRfq['state'], Tone> = { open: 'accent', awarded: 'ok', cancelled: 'neutral' };
-const KIND_OPTIONS = [{ value: 'material', label: '材料' }, { value: 'finished', label: '成品' }, { value: 'processing', label: '加工服务' }];
+
 const num = (v: Record<string, unknown>, key: string) => String(v[key] ?? '').trim();
 const price = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
@@ -30,20 +31,20 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
   const preset = presetSupplierId ? state?.market.suppliers.find(s => s.id === presetSupplierId) : undefined;
 
   const createSpec = (): ModuleEditorSpec => ({
-    title: '发起询价', submitLabel: '发起询价', description: '按订单条目向至少两家可合作供应商询价；报价截止日不晚于需求交期。询价不形成对外采购承诺。',
+    title: '发起询价', submitLabel: '发起询价',
     sections: [
       { id: 'need', label: '需求', fields: ['source', 'kind', 'description', 'quantity', 'unit', 'currency', 'due', 'destination', 'deadline', 'note'] },
-      { id: 'suppliers', label: '邀请供应商', description: '暂停或停用的供应商不在列表中。', fields: available.map(s => `s:${s.id}`) },
+      { id: 'suppliers', label: '邀请供应商', fields: available.map(s => `s:${s.id}`) },
     ],
-    fields: [field('source', '来源条目', 'select', true, sourceOptions(state || null, false)), field('kind', '采购类型', 'select', true, KIND_OPTIONS), field('description', '询价内容'), field('quantity', '需求数量', 'number'), field('unit', '单位'), { ...field('currency', '比价币种'), hint: '供应商可按其他币种报价，比价时按月末汇率折人民币。' },
+    fields: [field('source', '来源条目', 'select', true, sourceOptions(state || null, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain)))), field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('description', '询价内容'), field('quantity', '需求数量', 'number'), field('unit', '单位'), { ...field('currency', '比价币种'), hint: '供应商可按其他币种报价，比价时按月末汇率折人民币。' },
       field('due', '需求交期', 'date'), field('destination', '交付地点'), field('deadline', '报价截止日', 'date'), field('note', '技术要求 / 备注', 'textarea', false),
       ...available.map(s => field(`s:${s.id}`, `${s.name} · ${s.type}`, 'checkbox', false))],
-    initialValues: { source: '', kind: domain === 'garment' ? 'processing' : 'material', description: '', quantity: '', unit: domain === 'garment' ? '件' : '米', currency: 'CNY', due: '', destination: '', deadline: today(), note: '', ...Object.fromEntries(available.map(s => [`s:${s.id}`, s.id === preset?.id])) },
+    initialValues: { source: '', kind: domain === 'garment' ? 'processing' : '', description: '', quantity: '', unit: domain === 'garment' ? '件' : '米', currency: 'CNY', due: '', destination: '', deadline: today(), note: '', ...Object.fromEntries(available.map(s => [`s:${s.id}`, s.id === preset?.id])) },
     submit: async v => {
       if (!state) return;
       const source = parseSource(state, text(v, 'source'));
       if (source.kind !== 'orderLine') throw new Error('询价必须关联订单条目');
-      const saved = await run({ type: 'rfq.save', payload: { input: { orderId: source.orderId, lineId: source.lineId, kind: text(v, 'kind') as FulfillmentPurchase['kind'], description: text(v, 'description'), quantity: num(v, 'quantity'), unit: text(v, 'unit'), currency: text(v, 'currency'), due: text(v, 'due'), destination: text(v, 'destination'), deadline: text(v, 'deadline'), note: text(v, 'note'), supplierIds: available.filter(s => v[`s:${s.id}`] === true).map(s => s.id) } } }) as { result?: { id?: string } } | undefined;
+      const saved = await run({ type: 'rfq.save', payload: { input: { orderId: source.orderId, lineId: source.lineId, ...parsePurchaseContent(text(v, 'kind'), domain), description: text(v, 'description'), quantity: num(v, 'quantity'), unit: text(v, 'unit'), currency: text(v, 'currency'), due: text(v, 'due'), destination: text(v, 'destination'), deadline: text(v, 'deadline'), note: text(v, 'note'), supplierIds: available.filter(s => v[`s:${s.id}`] === true).map(s => s.id) } } }) as { result?: { id?: string } } | undefined;
       if (saved?.result?.id) setPicked(saved.result.id);
     } });
   const invited = (r: MistRfq) => r.supplierIds.map(id => ({ value: id, label: state?.market.suppliers.find(s => s.id === id)?.name || id }));
@@ -102,7 +103,7 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
     ] as ReasonedAction[]} />}
     <Facts items={[
       { label: '来源条目', value: label },
-      { label: '需求', value: `${r.quantity} ${r.unit} · ${KIND_OPTIONS.find(k => k.value === r.kind)?.label}` },
+      { label: '需求', value: `${r.quantity} ${r.unit} · ${purchaseContent(r)}` },
       { label: '需求交期', value: r.due },
       { label: '交付地点', value: r.destination },
       { label: '报价截止', value: r.deadline },

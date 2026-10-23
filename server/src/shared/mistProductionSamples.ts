@@ -1,3 +1,5 @@
+import {garmentMaterialFingerprint} from './mistInternalFabric';
+import {MistCommandError} from './mistWorkspace';
 /** Exact physical sample evidence for a production branch. */
 import type { MistProduction, MistState } from './mistWorkspace';
 import type { FulfillmentSampleRole } from './mistFulfillment';
@@ -15,9 +17,12 @@ const normalized = (value: string) => value.normalize('NFC').trim().replace(/\s+
 
 export function productionSampleRequirements(state: MistState, branch: MistProduction, role: FulfillmentSampleRole, shipmentId?: string): ProductionSampleRequirement[] {
   const f = state.fulfillment;
+  let materialPlan='';
+  if(role==='pp'){try{materialPlan=garmentMaterialFingerprint(state,branch.orderId,branch.lineId);}catch(error){if(!(error instanceof MistCommandError))throw error;materialPlan='missing-material-plan';}}
   const samples = f.samples.filter(sample => sample.role === role && sample.source.kind === 'orderLine'
     && sample.source.orderId === branch.orderId && sample.source.lineId === branch.lineId && sample.source.productionId === branch.id
-    && (role !== 'shipping' || sample.shipmentId === shipmentId));
+    && (role !== 'shipping' || sample.shipmentId === shipmentId)
+    && (!materialPlan || sample.materialPlan === materialPlan));
   const review = (sample: typeof samples[number], key: string, label: string): ProductionSampleRequirement => {
     const task = f.qcTasks.find(task => task.sampleId === sample.id && task.kind === 'sample'
       && task.source.kind === 'orderLine' && task.source.productionId === branch.id);

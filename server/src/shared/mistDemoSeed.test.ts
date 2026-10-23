@@ -11,6 +11,19 @@ describe('演示公司数据', () => {
     const { state, failures } = demo();
     expect(failures).toEqual([]);
     expect(state.settings.demoSeed).toEqual({ version: DEMO_SEED_VERSION, seededAt: '2026-10-14T02:00:00.000Z' });
+    const fullPackage = state.orderLines.filter(line => line.fulfillmentMode === 'full_package');
+    expect(fullPackage.length).toBeGreaterThan(0);
+    for (const line of fullPackage) {
+      const allocations = state.internalFabricAllocations!.filter(row => row.lineId === line.id && row.status === 'active');
+      expect(allocations).toHaveLength(1);
+      const supply = state.orders.find(order => order.id === allocations[0].fabricOrderId)!;
+      expect(supply.type).toBe('fabric');
+      expect(supply.governance).toMatchObject({ status: 'approved', contract: { kind: 'internal', internalSupply: { group: 'garment' } } });
+      expect(state.orderLines.find(source => source.id === allocations[0].fabricLineId)?.orderId).toBe(supply.id);
+    }
+    const materials = state.fulfillment.purchases.filter(purchase => purchase.kind === 'material');
+    expect(materials.filter(purchase => purchase.materialKind === 'fabric').every(purchase => purchase.domain === 'fabric')).toBe(true);
+    expect(materials.filter(purchase => purchase.domain === 'garment').every(purchase => purchase.materialKind === 'trims' || purchase.materialKind === 'packaging')).toBe(true);
   });
   it('后勤已实际接手出运的订单，「核对出运交接」自动办结；经办人按岗位', () => {
     const { state } = demo(), f = state.fulfillment;

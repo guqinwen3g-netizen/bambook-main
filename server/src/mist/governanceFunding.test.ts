@@ -28,7 +28,7 @@ describe('real order governance and funding repository transaction',()=>{
   const customerId=customer.receipt.result.customerId as string;
   const upload=await repo.upload(testActor(),workspace.id,{requestId:'actual-po-file',expectedRevision:revision},{bytes:Buffer.from('Customer written purchase order'),name:'po.txt',mimeType:'text/plain'});revision=upload.workspace.revision;
   const terms:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:[upload.workspace.state.files[0].id],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'T/T 30% deposit',incoterm:'FOB',deliveryPlace:'上海'};
-  const created=await run({type:'order.create',payload:{type:'garment',customerId,season:'AW26',currency:'USD',due:'2026-12-01',ownerId:'owner',governance:terms,lines:[{name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10}]}});
+  const created=await run({type:'order.create',payload:{type:'garment',customerId,season:'AW26',currency:'USD',due:'2026-12-01',ownerId:'owner',governance:terms,lines:[{fulfillmentMode:'cmt',cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10}]}});
   const orderId=created.receipt.result.orderId as string;
   const decide=async(requestId:string)=>{
    const review=(await repo.listReviews(testActor('reviewer'))).find((row:{entityId:string;status:string})=>row.entityId===orderId&&row.status==='pending')!;
@@ -39,7 +39,7 @@ describe('real order governance and funding repository transaction',()=>{
   const receiptId=receipt.workspace.state.receipts[0].id;
   const assignment=await run({type:'funding.assign',payload:{receiptId,customerId,orderId,amount:80,note:'客户确认原合同归属'}});
   const line=assignment.workspace.state.orderLines[0];
-  await run({type:'order.governance.saveDraft',payload:{orderId,input:terms,reason:'修订PO已核对',...(mode==='amount'?{lines:[{id:line.id,name:line.name,style:line.style,img:line.img,qty:line.qty,unit:line.unit,price:5}]}:{orderPatch:{currency:'EUR'}})}});
+  await run({type:'order.governance.saveDraft',payload:{orderId,input:terms,reason:'修订PO已核对',...(mode==='amount'?{lines:[{fulfillmentMode:line.fulfillmentMode,cmtIncludedItems:line.cmtIncludedItems,id:line.id,name:line.name,style:line.style,img:line.img,qty:line.qty,unit:line.unit,price:5}]}:{orderPatch:{currency:'EUR'}})}});
   await run({type:'order.governance.submit',payload:{orderId}});
   const before=await repo.get(testActor(),workspace.id),receiptsBefore=db.receipts.size;
   await expect(decide('refuse-invalid-change')).rejects.toMatchObject({code:mode==='amount'?'PRECONDITION':'VALIDATION'});
