@@ -35,7 +35,7 @@ it('parses actual size entries without inventing a default size',()=>{expect(par
 
 it('shows fabric quantities in their source unit and never asks for garment size planning',async()=>{
  bridge.state!.orders[0].type='fabric';for(const line of bridge.state!.orderLines)line.unit='码';for(const sample of bridge.state!.fulfillment.samples)sample.role='pioneer';const snapshot=(bridge.state!.orders[0] as {governance?:{approvedSnapshot?:{type:string;lines:Array<{unit:string}>}}}).governance?.approvedSnapshot;if(snapshot){snapshot.type='fabric';for(const line of snapshot.lines)line.unit='码';}const branch=bridge.state!.productions[1];bridge.state!.fulfillment.productionFacts.find(fact=>fact.productionId===branch.id)!.release=undefined;
- await mount({view:'production-board',productionId:branch.id});await range('全部');expect(getByRole(host,'button',{name:/未来分支乙/}).textContent).toContain('20 码');expect(queryByRole(document.body,'button',{name:'登记生产尺码'})).toBeNull();expect(document.body.textContent).not.toContain('计划尺码');await click('核对先锋样并继续大货');expect(getByRole(document.body,'dialog',{name:'业务确认继续大货'})).toBeTruthy();expect(getByRole(document.body,'textbox',{name:/合同、先锋样与继续大货核对依据/})).toBeTruthy();
+ await mount({view:'production-board',productionId:branch.id});await range('全部');expect(getByRole(host,'button',{name:/未来分支乙/}).textContent).toContain('20 码');expect(queryByRole(document.body,'button',{name:'登记生产尺码'})).toBeNull();expect(document.body.textContent).not.toContain('计划尺码');await click('放行量产');expect(getByRole(document.body,'dialog',{name:'放行量产'})).toBeTruthy();expect(getByRole(document.body,'textbox',{name:'放行依据'})).toBeTruthy();
 });
 it('records fabric final quantity without a garment size matrix',async()=>{
  bridge.state!.orders[0].type='fabric';bridge.state!.orderLines[1].unit='米';await mount({view:'production-board',productionId:'production-b'});await click('登记最终完工数量');expect(getByRole(document.body,'dialog',{name:'登记最终实际完工'})).toBeTruthy();expect(queryByRole(document.body,'textbox',{name:/各实际尺码数量/})).toBeNull();expect(getByRole(document.body,'spinbutton',{name:/最终实际完工数量/})).toBeTruthy();
@@ -45,8 +45,8 @@ describe('Mist production gates, delay and pause',()=>{
  it('mirrors the server release gate and keeps release disabled until the exact pre-production sample is confirmed',async()=>{
   const f=bridge.state!.fulfillment;f.productionFacts.find(fact=>fact.productionId==='production-b')!.release=undefined;f.samples=f.samples.filter(sample=>sample.source.kind!=='orderLine'||sample.source.productionId!=='production-b');
   await mount({view:'production-board',productionId:'production-b'});
-  const gate=document.querySelector('[data-release-gate]')!;expect(gate.textContent).toContain('主单已批准');expect(gate.textContent).toContain('生产尺码已登记');expect(gate.textContent).toContain('本分支还没有登记产前样');
-  const release=getByRole(document.body,'button',{name:'核对并放行开产'});expect(release.hasAttribute('disabled')).toBe(true);expect(release.getAttribute('title')).toContain('产前样已确认');
+  const gate=document.querySelector('[data-release-gate]')!;expect(gate.textContent).toContain('主单已批准');expect(gate.textContent).toContain('生产尺码');expect(gate.textContent).toContain('未登记');
+  const release=getByRole(document.body,'button',{name:'放行开产'});expect(release.hasAttribute('disabled')).toBe(true);expect(release.getAttribute('title')).toContain('产前样');
   expect(host.querySelector('.mist-sumbar')!.textContent).toContain('待业务放行1');
   expect(queryByRole(document.body,'button',{name:'异常暂停'})).toBeNull();
  });
@@ -97,4 +97,19 @@ it('keeps fractional metres visible on production cards',async()=>{
   bridge.state!.orders[0].type='fabric';bridge.state!.orderLines[0].unit='米';bridge.state!.productions[0].qty=1359.6;
   await mount();await range('全部');
   const card=getByRole(host,'button',{name:/PROD-A/});expect(card.textContent).toContain('1,359.6 米');expect(card.textContent).not.toContain('1,360 米');
+});
+
+it('shows each current PP standard and the actual pending customer step',async()=>{
+  const state=bridge.state!,baseSample=state.fulfillment.samples[0],baseTask=state.fulfillment.qcTasks[0],baseReport=state.fulfillment.qcReports[0];
+  delete state.fulfillment.productionFacts.find(f=>f.productionId==='production-a')!.release;
+  for(const size of ['S','L']){
+    const sampleId='pp-'+size,taskId='qc-'+size,reportId='report-'+size;
+    state.fulfillment.samples.push({...baseSample,id:sampleId,code:sampleId,size});
+    const task={...baseTask,id:taskId,code:taskId,sampleId,reportIds:[reportId],businessContinued:{...baseTask.businessContinued!,reportId}};
+    if(size==='L'){delete task.businessConfirmation;delete (task as any).businessContinued;}
+    state.fulfillment.qcTasks.push(task);state.fulfillment.qcReports.push({...baseReport,id:reportId,taskId,report:reportId});
+  }
+  await mount({view:'production-board',productionId:'production-a'});
+  const gate=document.querySelector('[data-release-gate]')!;expect(gate.textContent).toContain('产前样 · L');expect(gate.textContent).toContain('待客户确认');expect(gate.textContent).not.toContain('尚未完成准确实物');
+  expect((getByRole(document.body,'button',{name:'放行开产'}) as HTMLButtonElement).disabled).toBe(true);
 });

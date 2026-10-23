@@ -845,7 +845,7 @@ function requireSampleRole(root: MistState, branch: MistProduction, role: Fulfil
     const requirements = productionSampleRequirements(root, branch, role, shipmentId);
     if(role==='pp'){const materialPlan=garmentMaterialFingerprint(root,branch.orderId,branch.lineId),samples=root.fulfillment.samples.filter(sample=>sample.role==='pp'&&sample.source.kind==='orderLine'&&sample.source.productionId===branch.id);if(materialPlan&&samples.length&&!samples.some(sample=>sample.materialPlan===materialPlan))fail('用料计划已变化，请重新登记产前样');}
     const pending = requirements.find(row => !row.ok);
-    if (pending) fail(`${fulfillmentSampleRoleLabel(role)}${pending.label ? `（${pending.label}）` : ''}尚未完成准确实物QC、需求方确认及业务继续`, 'PRECONDITION');
+    if (pending) fail(`${fulfillmentSampleRoleLabel(role)}${pending.label ? `（${pending.label}）` : ''}：${pending.reason}`, 'PRECONDITION');
     if(role==='pp'){const materialPlan=garmentMaterialFingerprint(root,branch.orderId,branch.lineId);if(materialPlan&&requirements.some(row=>get(root.fulfillment.samples,row.evidence!.sampleId,'产前样').materialPlan!==materialPlan))fail('用料计划已变化，请重新登记产前样');}
     return [...new Map(requirements.map(row => [row.evidence!.sampleId, row.evidence!])).values()];
 }
