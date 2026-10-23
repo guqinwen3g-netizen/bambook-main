@@ -15,6 +15,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
+import { ShipmentDepartureDialog } from './ShipmentDepartureDialog';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute, type ReasonedAction } from './pageKit';
 
 function ShipmentEditor({ shipment, onClose }: {
@@ -152,6 +153,7 @@ export function ShipmentsPage() {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
   const [editing, setEditing] = useRouteDraft<FulfillmentShipment | 'new' | null>(null), [packing, setPacking] = useRouteDraft<FulfillmentShipment | null>(null);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
+  const [departure, setDeparture] = useRouteDraft<FulfillmentShipment | null>(null);
   const full = useListDetailRoute();
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
@@ -183,7 +185,7 @@ export function ShipmentsPage() {
   const act = async (work: () => Promise<unknown>) => { setFailure(''); try { await work(); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
   const termsSpec = (): ModuleEditorSpec => ({ title: '核对来源合同收货与分批条款', fields: [field('orderId', '来源订单', 'select', true, [emptyOption, ...(state?.orders || []).filter(o => !hasOrderContext || o.id === sourceOrder?.id).map(o => ({ value: o.id, label: o.code }))]), field('consignee', '合同收货方'), field('partialAllowed', '合同允许分批', 'checkbox', false), field('mode', '约定运输方式', 'select', true, [{ value: 'sea', label: '海运' }, { value: 'air', label: '空运' }]), field('confirmedAt', '条款核实日', 'date'), field('evidence', '合同 / 信用证依据', 'textarea')], initialValues: { orderId: sourceOrder?.id || '', consignee: '', partialAllowed: false, mode: 'sea', confirmedAt: today(), evidence: '' }, submit: v => run({ type: 'fulfillment.shipments.sourceTerms', payload: { orderId: text(v, 'orderId'), consignee: text(v, 'consignee'), partialAllowed: !!v.partialAllowed, mode: text(v, 'mode') as 'sea' | 'air', confirmedAt: text(v, 'confirmedAt'), evidence: text(v, 'evidence') } }) });
   const transportSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '更新运输安排', fields: [field('booking', '订舱号', 'text', false), field('plannedDate', '计划出运日', 'date', false), { ...field('note', '运输安排说明', 'textarea', false), hint: s.booking ? '更换已登记的订舱号时须写明原因。' : undefined }], initialValues: { booking: s.booking, plannedDate: s.plannedDate, note: s.note }, submit: v => run({ type: 'fulfillment.shipments.updateTransport', payload: { id: s.id, booking: text(v, 'booking'), plannedDate: text(v, 'plannedDate'), note: text(v, 'note') } }) });
-  const departSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: s.mode === 'air' ? '登记实际起飞' : '登记实际离港', submitLabel: '登记离港', fields: [field('at', s.mode === 'air' ? '实际起飞时间（ATD）' : '实际离港时间（ATD）', 'datetime-local'), { ...field('evidence', '实际离港 / 起飞依据', 'textarea'), hint: '以船公司 / 航司或货代的实际离港信息为准；Draft B/L 不能作为离港证明。' }], initialValues: { at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.shipments.depart', payload: { id: s.id, at: new Date(text(v, 'at')).toISOString(), evidence: text(v, 'evidence'), fileIds: [] } }) });
+
   const sentSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '登记已向客户发送 CI / PL', submitLabel: '登记发送', fields: [{ ...field('at', '向客户发送时间', 'datetime-local'), hint: '发送的是当前有效签发版本；作废或重签后需重新登记。' }], initialValues: { at: localNow() }, submit: v => run({ type: 'fulfillment.shipments.sent', payload: { id: s.id, at: new Date(text(v, 'at')).toISOString() } }) });
   const cancelSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '取消本次出运请求', submitLabel: '确认取消', fields: [field('reason', '取消原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.shipments.cancel', payload: { id: s.id, reason: text(v, 'reason') } }) });
   const stageCount = (value: StageFilter) => !state ? 0 : value === 'all' ? searched.filter(s => shipmentStage(state, s) !== 'cancelled').length : searched.filter(s => shipmentStage(state, s) === value).length;
@@ -203,7 +205,7 @@ export function ShipmentsPage() {
     ? <ShipmentDetail shipment={selected} state={state} day={day} me={me} business={business} logistics={logistics} locked={locked}
         onEdit={() => setEditing(selected)} onPack={() => setPacking(selected)} onTransport={() => setDialog(transportSpec(selected))}
         onReady={() => void act(() => run({ type: 'fulfillment.shipments.ready', payload: { id: selected.id } }))}
-        onSent={() => setDialog(sentSpec(selected))} onDepart={() => setDialog(departSpec(selected))} onCancel={() => setDialog(cancelSpec(selected))}
+        onSent={() => setDialog(sentSpec(selected))} onDepart={() => setDeparture(selected)} onCancel={() => setDialog(cancelSpec(selected))}
         onCustoms={() => go('customs', undefined, { section: selected.id })} onDocuments={() => go('document-center', undefined, { section: selected.id })}
         onSamples={() => go('samples', undefined, { section: 'shipment:' + selected.id, customerId: selected.customerId })} />
     : <EmptyState icon={Ship} title={uiText("出运详情")} description={uiText(loading ? '正在读取出运' : '从列表选择一票出运，查看来源范围、装箱、单证与离港轨迹')} compact />;
@@ -215,7 +217,7 @@ export function ShipmentsPage() {
       facts: [{ label: '收货方', value: selected.consignee || '未填' }, { label: '贸易术语', value: selected.incoterm || '未填' }, { label: '计划出运', value: selected.plannedDate || '未定' }, { label: '订舱号', value: selected.booking || '未订舱' }, { label: '来源', value: `${orders} 个订单 · ${selected.lines.length} 行` }],
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined }} />;
   })() : null;
-  if (full.active && selected && state) return <ListDetailPage backLabel="货运管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title={uiText("出运操作未完成")}>{failure || error}</Banner></div>}{detail}</ListDetailPage>;
+  if (full.active && selected && state) return <ListDetailPage backLabel="货运管理" onBack={full.back} after={<><ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />{departure && <ShipmentDepartureDialog key={departure.id} shipment={departure} onClose={() => setDeparture(null)} />}</>}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title={uiText("出运操作未完成")}>{failure || error}</Banner></div>}{detail}</ListDetailPage>;
 
   return <MistPage width="wide">
     <PageHeader description={uiText(invalidSource ? '订单来源不匹配' : sourceOrder ? `${sourceOrder.code} · ${sourceOrder.customer}` : undefined)} eyebrow={uiText("订单履约 · 出运")} title={uiText("货运管理")}
@@ -246,6 +248,7 @@ export function ShipmentsPage() {
       list={<Card><DataTable ariaLabel={uiText("出运列表")} loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
+    {departure && <ShipmentDepartureDialog key={departure.id} shipment={departure} onClose={() => setDeparture(null)} />}
   </MistPage>;
 }
 
