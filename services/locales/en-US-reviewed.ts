@@ -1,5 +1,10 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '保存草稿': 'Save draft',
+  '哪些订单交期临近，需要优先跟进？': 'Which orders need attention before delivery?',
+  '总结引用订单的当前进展和风险': 'Summarize progress and risks for the selected orders',
+  '列出未收款发票，按金额从高到低': 'List unpaid invoices by amount',
+  '起草一段给客户的出运进度说明': 'Draft a shipment update for the customer',
   '将本行报价依据及选中历史发送给 AI 审阅': 'Send this line’s quote evidence and selected history for AI review',
   '负责人': 'Owner', '目标日期': 'Target date', '当前状态': 'Status', '开发目标': 'Development target',
   '需求与计划': 'Requirements & planning', '工厂与实物': 'Factory & sample', '需求方确认': 'Requester confirmation',
