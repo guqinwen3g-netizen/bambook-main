@@ -9,6 +9,6 @@ export function LanguageSetting() {
   const locale = useDevice('locale');
   return <SettingRow title={uiText('界面语言')} control={
     <Select aria-label={uiText('界面语言')} value={locale} onChange={event => writeDevice('locale', event.target.value as DeviceValues['locale'])}
-      options={[{ value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }]} />
+      options={[{ value: 'system', label: uiText('本机语言') }, { value: 'zh-CN', label: '中文' }, { value: 'en-US', label: 'English' }]} />
   } />;
 }

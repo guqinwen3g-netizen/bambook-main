@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '本机语言': 'Device language',
   '保存草稿': 'Save draft',
   '哪些订单交期临近，需要优先跟进？': 'Which orders need attention before delivery?',
   '总结引用订单的当前进展和风险': 'Summarize progress and risks for the selected orders',

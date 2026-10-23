@@ -3,7 +3,17 @@ import { readDevice, useDevice } from './devicePreferences';
 import english from './locales/en-US.json';
 import { reviewedEnglish } from './locales/en-US-reviewed';
 
-export const interfaceLocale = () => readDevice('locale');
+export type InterfaceLocale = 'zh-CN' | 'en-US';
+function systemLocale(): InterfaceLocale {
+  if (typeof navigator === 'undefined') return 'zh-CN';
+  const language = navigator.languages?.[0] || navigator.language;
+  return /^zh(?:[-_]|$)/i.test(language) ? 'zh-CN' : 'en-US';
+}
+/** Resolve the local preference before formatting dates or sending it to AI. */
+export function interfaceLocale(): InterfaceLocale {
+  const preference = readDevice('locale');
+  return preference === 'system' ? systemLocale() : preference;
+}
 const catalogue: Record<string, string> = { ...english, ...reviewedEnglish };
 const patterns = Object.entries(catalogue).filter(([key]) => /\{\d+\}/.test(key))
   .sort(([a], [b]) => b.replace(/\{\d+\}/g, '').length - a.replace(/\{\d+\}/g, '').length)
@@ -46,7 +56,14 @@ export function ui(strings: TemplateStringsArray, ...values: unknown[]): string 
 }
 
 export function useInterfaceLanguage() {
-  const locale = useDevice('locale');
+  const preference = useDevice('locale');
+  const [deviceLocale, setDeviceLocale] = React.useState(systemLocale);
+  React.useEffect(() => {
+    const update = () => setDeviceLocale(systemLocale());
+    window.addEventListener('languagechange', update);
+    return () => window.removeEventListener('languagechange', update);
+  }, []);
+  const locale = preference === 'system' ? deviceLocale : preference;
   React.useEffect(() => { document.documentElement.lang = locale; }, [locale]);
   return locale;
 }

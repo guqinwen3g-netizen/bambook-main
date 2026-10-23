@@ -1,11 +1,11 @@
 /** 设备偏好：只存本机浏览器，不写公司设置，点击即生效。 */
 import React from 'react';
 export type DeviceKey = 'theme' | 'density' | 'reducedMotion' | 'locale';
-export type DeviceValues = { theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; locale: 'zh-CN' | 'en-US' };
+export type DeviceValues = { theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; locale: 'system' | 'zh-CN' | 'en-US' };
 const DEFAULTS: DeviceValues = { theme: 'system', density: 'default', reducedMotion: false, locale: 'zh-CN' };
 const PREFIX = 'bambook.device.', EVENT = 'bambook-device-preference';
 const transient: Partial<DeviceValues> = {};
-const valid = (key: DeviceKey, value: unknown) => key === 'locale' ? ['zh-CN', 'en-US'].includes(String(value)) : key === 'theme' ? ['light', 'dark', 'system'].includes(String(value)) : key === 'density' ? ['compact', 'default', 'comfy'].includes(String(value)) : typeof value === 'boolean';
+const valid = (key: DeviceKey, value: unknown) => key === 'locale' ? ['system', 'zh-CN', 'en-US'].includes(String(value)) : key === 'theme' ? ['light', 'dark', 'system'].includes(String(value)) : key === 'density' ? ['compact', 'default', 'comfy'].includes(String(value)) : typeof value === 'boolean';
 
 export function readDevice<K extends DeviceKey>(key: K): DeviceValues[K] {
   if (transient[key] !== undefined) return transient[key] as DeviceValues[K];
