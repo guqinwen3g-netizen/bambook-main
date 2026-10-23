@@ -62,14 +62,14 @@ export function DevSampleFormsCard({ state, dev, version, disabled, run }: Props
   };
   const off = disabled || busy;
   return <Card id="mist-dev-physical">
-    <CardHeader title={uiText("本版实物与寄样")} sub={uiText(fabric ? '各形态分别记余额，均在样品仓库同一来源档案' : '本版在样品仓库的实物')} />
+    <CardHeader title={uiText("本版实物与寄样")} />
     {samples.length ? <DataTable ariaLabel={uiText("本版实物")} rows={samples} rowKey={sample => sample.id} density="compact" columns={[
       { key: 'form', header: '形态', render: sample => sample.form },
       { key: 'code', header: '样品编号', render: sample => <Mono>{sample.code}</Mono> },
       { key: 'balance', header: '可用 / 入库', align: 'right', render: sample => `${sample.available} / ${sample.quantity} ${sample.unit}` },
       { key: 'location', header: '位置', render: sample => sample.location || '—' },
-    ]} /> : <EmptyState compact title={uiText("本版尚无入库实物")} description={uiText("登记返样后自动同步到样品仓库")} />}
-    {!!dispatches.length && <div className="mist-section"><CardHeader title={uiText("寄样记录")} sub={uiText("每条对应样品仓库一条寄出流水")} />
+    ]} /> : <EmptyState compact title={uiText("本版尚无入库实物")} />}
+    {!!dispatches.length && <div className="mist-section"><CardHeader title={uiText("寄样记录")} />
       <DataTable ariaLabel={uiText("寄样记录")} rows={dispatches.slice().reverse()} rowKey={row => row.id} density="compact" columns={[
         { key: 'sample', header: '实物', render: row => <>{row.form} <Mono>{row.sampleCode}</Mono></> },
         { key: 'quantity', header: '数量', align: 'right', render: row => `${row.quantity} ${row.unit}` },
@@ -78,11 +78,11 @@ export function DevSampleFormsCard({ state, dev, version, disabled, run }: Props
         { key: 'fee', header: '寄样费', render: row => row.fee ? `${row.fee.amount} ${row.fee.currency}` : <TextLink disabled={off} onClick={() => { setFailure(''); setFee({ row, amount: '', currency: 'CNY' }); setDialog('fee'); }}>{uiText("补登费用")}</TextLink> },
       ]} /></div>}
     <CardFooter>
-      <span className="mist-note">{dispatchBlocker || formBlocker || '寄样保存即出库，无需仓库二次确认'}</span><span className="mist-spacer" />
+      {(dispatchBlocker || formBlocker) && <span className="mist-note">{dispatchBlocker || formBlocker}</span>}<span className="mist-spacer" />
       {fabric && <Button size="sm" icon={PackagePlus} disabled={off || !!formBlocker} title={uiText(formBlocker || undefined)} onClick={() => { setForm(emptyForm()); setFailure(''); setDialog('form'); }}>{uiText("追加形态")}</Button>}
       <Button size="sm" icon={Send} disabled={off || !!dispatchBlocker} title={uiText(dispatchBlocker || undefined)} onClick={() => { setDispatch({ ...emptyDispatch(), sampleId: samples.find(sample => sample.available > 0)?.id || '' }); setFailure(''); setDialog('dispatch'); }}>{uiText("寄样")}</Button>
     </CardFooter>
-    <Dialog open={dialog === 'form'} onClose={() => !busy && setDialog(null)} title={ui`为 ${version.label} 追加实物形态`} description={uiText("新形态作为同一版本实物入库，不改写已有实物、QC 或确认记录。")} footer={<><Button variant="quiet" disabled={busy} onClick={() => setDialog(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={!!formError} onClick={() => void submit('form')}>{uiText("保存形态")}</Button></>}>
+    <Dialog open={dialog === 'form'} onClose={() => !busy && setDialog(null)} title={ui`为 ${version.label} 追加实物形态`} footer={<><Button variant="quiet" disabled={busy} onClick={() => setDialog(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={!!formError} onClick={() => void submit('form')}>{uiText("保存形态")}</Button></>}>
       {failure && dialog === 'form' && <Banner tone="bad" title={uiText("形态尚未保存")}>{failure}</Banner>}
       <FormGrid>
         <Field label={uiText("实物形态")} required><Select value={FORMS.includes(form.form) ? form.form : ''} options={FORMS} onChange={event => { const value = event.target.value; setForm(previous => ({ ...previous, form: value, unit: value === '米样' ? '米' : '份' })); }} /></Field>
@@ -91,7 +91,7 @@ export function DevSampleFormsCard({ state, dev, version, disabled, run }: Props
         <Field label={uiText("颜色")}><TextInput value={form.color} placeholder={uiText(version.sampleColor || dev.values.color || '')} onChange={event => setForm(previous => ({ ...previous, color: event.target.value }))} /></Field>
       </FormGrid>
     </Dialog>
-    <Dialog open={dialog === 'dispatch'} onClose={() => !busy && setDialog(null)} title={ui`从 ${version.label} 寄样`} description={uiText("保存后样品仓库自动生成寄出流水并扣减余额，流水回链本开发案。")} footer={<><Button variant="quiet" disabled={busy} onClick={() => setDialog(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={!!dispatchError} onClick={() => void submit('dispatch')}>{uiText("确认寄出")}</Button></>}>
+    <Dialog open={dialog === 'dispatch'} onClose={() => !busy && setDialog(null)} title={ui`从 ${version.label} 寄样`} description={uiText("确认后扣减库存")} footer={<><Button variant="quiet" disabled={busy} onClick={() => setDialog(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={!!dispatchError} onClick={() => void submit('dispatch')}>{uiText("确认寄出")}</Button></>}>
       {failure && dialog === 'dispatch' && <Banner tone="bad" title={uiText("尚未寄出")}>{failure}</Banner>}
       <FormGrid>
         <Field label={uiText("寄出实物")} required full><Select value={dispatch.sampleId} placeholder={uiText("选择本版实物")} options={samples.map(sample => ({ value: sample.id, label: `${sample.form} · ${sample.code} · 可用 ${sample.available} ${sample.unit}` }))} onChange={event => { const value = event.target.value; setDispatch(previous => ({ ...previous, sampleId: value, sourceLocation: '__choose__' })); }} /></Field>

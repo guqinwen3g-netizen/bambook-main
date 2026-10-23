@@ -15,7 +15,7 @@ export function DevNoticeCard({ state, dev, version, busy, onGenerate, onDownloa
   const title = developmentNoticeTitle(developmentDomain(dev.values)), notices = developmentNotices(version);
   const blocker = developmentNoticeBlocker(state, dev, version), outdated = developmentNoticeOutdated(state, dev, version);
   return <Card id="mist-dev-notice">
-    <CardHeader title={uiText(title)} sub={ui`${version.label} · ${version.factory} · 每轮每厂一份，不记录发送状态`} tools={<Button size="sm" icon={notices.length ? RefreshCw : FileText} disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={onGenerate}>{uiText(notices.length ? '重新生成' : '生成通知单')}</Button>} />
+    <CardHeader title={uiText(title)} sub={ui`${version.label} · ${version.factory}`} tools={<Button size="sm" icon={notices.length ? RefreshCw : FileText} disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={onGenerate}>{uiText(notices.length ? '重新生成' : '生成通知单')}</Button>} />
     {(blocker || outdated) && <div className="mist-row" style={{ padding: '0 22px 8px', gap: 8, flexWrap: 'wrap' }}>
       {outdated && <Pill tone="warn">{uiText("工厂任务已更新，可重新生成")}</Pill>}{blocker && <span className="mist-note">{blocker}</span>}</div>}
     <div role="list" aria-label={uiText(`${version.label} ${title}`)} style={{ padding: '0 22px 14px' }}>
