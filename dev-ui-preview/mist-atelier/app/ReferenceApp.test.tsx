@@ -153,7 +153,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
     await click(getByRole(host!,'button',{name:'打开准确版本'}));
     input(getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement,'属于原身份的草稿');
     await click(host!.querySelector<HTMLButtonElement>('.mist-me')!);
-    const drawer=getByRole(host!,'dialog',{name:'本地身份'});
+    const drawer=host!;expect(getByRole(host!,'heading',{name:'我的账号'})).toBeTruthy();
     expect(queryByRole(drawer,'button',{name:'退出登录'})).toBeNull();
     await click(getByRole(drawer,'button',{name:'本地审批人'}));
     await waitFor(()=>expect(new URLSearchParams(location.search).get('view')).toBe('cockpit'));
@@ -162,7 +162,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
     const switchRequest=requests.find(r=>r.path==='/api/mist/session'&&r.method==='POST');
     expect(switchRequest?.body).toEqual({profileId:'local-reviewer'});
     await click(host!.querySelector<HTMLButtonElement>('.mist-me')!);
-    expect(getByRole(host!, 'dialog', { name: '本地身份' }).textContent).toContain('本地审批人');
+    expect(getByRole(host!, 'heading', { name: '我的账号' })).toBeTruthy();expect(host!.textContent).toContain('本地审批人');
   });
 
   it('shows a neutral reconnect action without claiming local identity when session discovery fails', async () => {
@@ -202,18 +202,20 @@ describe('one Mist entry with real authentication and workspace state', () => {
     expect(probes.home).not.toHaveBeenCalled();
   });
 
-  it('opens authenticated workspace settings without granting system administration permission', async () => {
-    await signIn('staff-a', ['products:read']);
-    history.replaceState(null, '', '/?intro=0&view=workspace-settings');
-    await mount(); await waitFor(() => expect(probes.settings).toHaveBeenCalled());
-    expect(actor?.permissions).not.toContain('settings:system:read');
-    expect(host!.textContent).toContain('公司设置');
-    expect(host!.textContent).not.toContain('没有查看权限');
+  it.each(['workspace-settings','company-settings','system-settings','settings'])('denies %s without company settings permission', async view => {
+    await signIn('staff-a', ['products:read']); history.replaceState(null,'','/?intro=0&view='+view);
+    await mount(); await waitFor(()=>expect(host!.textContent).toContain('没有查看权限'));
+    expect(probes.settings).not.toHaveBeenCalled(); expect(queryByRole(host!,'button',{name:'公司设置'})).toBeNull();
   });
-  it('shows department context and opens company details separately without workspace switching', async () => {
-    await signIn();await mount();await waitFor(() => expect(probes.home).toHaveBeenCalled());
+  it('keeps organization facts visible but hides company administration from staff',async()=>{
+    await signIn('staff-a',['products:read']);await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());
+    await click(host!.querySelector<HTMLButtonElement>('.mist-ws')!);
+    expect(queryByRole(host!,'button',{name:'公司设置'})).toBeNull();expect(host!.querySelector('#mist-organization')).toBeTruthy();
+  });
+  it('shows department context and opens authorized company settings without workspace switching', async () => {
+    await signIn('staff-a',['products:read','settings:system:read']);await mount();await waitFor(() => expect(probes.home).toHaveBeenCalled());
     await waitFor(()=>expect(host!.textContent).toContain('当前部门'));expect(host!.textContent).not.toContain('切换公司');
-    const entry=[...host!.querySelectorAll('button')].find(button=>button.textContent?.includes('当前部门'))!;await click(entry);expect(host!.textContent).toContain('我的组织');await click(getByRole(host!,'button',{name:'查看公司资料'}));
+    const entry=[...host!.querySelectorAll('button')].find(button=>button.textContent?.includes('当前部门'))!;await click(entry);expect(entry.getAttribute('aria-expanded')).toBe('true');expect(host!.querySelector('#mist-organization')?.getAttribute('hidden')).toBeNull();expect(queryByRole(host!,'dialog')).toBeNull();await click(getByRole(host!.querySelector('#mist-organization')!,'button',{name:'公司设置'}));
     expect(new URLSearchParams(location.search).get('view')).toBe('company-settings');expect(new URLSearchParams(location.search).get('section')).toBe('company');expect(probes.settings).toHaveBeenCalled();expect(host!.textContent).not.toContain('没有查看权限');
     expect(host!.textContent).not.toContain('创建空白公司');expect(host!.textContent).not.toContain('创建演示公司');
   });
@@ -344,11 +346,12 @@ describe('one Mist entry with real authentication and workspace state', () => {
   it('clears account-local panels, messages and page drafts on logout and shows real login', async () => {
     await signIn(); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
     await click(getByRole(host!, 'button', { name: '打开准确版本' })); input(getByRole(host!, 'textbox', { name: '本批次草稿' }) as HTMLInputElement, '私有未提交输入');
-    await click(host!.querySelector<HTMLButtonElement>('.mist-me')!); expect(getByRole(host!, 'dialog', { name: '账号' }).textContent).toContain('staff-a');
-    await click(getByRole(getByRole(host!, 'dialog', { name: '账号' }), 'button', { name: '退出登录' }));
+    await click(host!.querySelector<HTMLButtonElement>('.mist-me')!); expect(getByRole(host!, 'heading', { name: '我的账号' })).toBeTruthy(); expect(new URLSearchParams(location.search).get('view')).toBe('account');
+    await click(getByRole(host!, 'button', { name: /安全/ }));
+    await click(getByRole(host!, 'button', { name: '退出登录' }));
     await waitFor(() => expect(queryByRole(host!, 'form', { name: '登录' })).not.toBeNull()); expect(queryByRole(host!, 'dialog')).toBeNull(); expect(host!.textContent).not.toContain('私有未提交输入');
-    await signIn('staff-b'); await waitFor(() => expect(queryByRole(host!, 'textbox', { name: '本批次草稿' })).not.toBeNull());
-    expect((getByRole(host!, 'textbox', { name: '本批次草稿' }) as HTMLInputElement).value).toBe('');
+    await signIn('staff-b'); await waitFor(() => expect(queryByRole(host!, 'heading', { name: '我的账号' })).not.toBeNull());
+    expect(host!.textContent).not.toContain('私有未提交输入');
     expect(requests.filter(request => request.path.endsWith('/auth/logout'))).toHaveLength(1);
   });
   it('lists 智能邮箱 after 日历 in 我的事务 for mailbox readers only; the route still refuses others', async () => {

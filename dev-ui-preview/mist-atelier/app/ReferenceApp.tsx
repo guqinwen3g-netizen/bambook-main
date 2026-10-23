@@ -1,4 +1,3 @@
-import { LanguageSetting } from '../../../components/mist/LanguageSetting';
 import { interfaceLocale } from '../../../services/interfaceLanguage';
 import { uiText, ui, useInterfaceLanguage, localizedPageTitle } from '../../../services/interfaceLanguage';
 import {businessNow} from './runtime/businessClock';
@@ -7,10 +6,10 @@ import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { SaasAdminPage } from './pages/SaasAdminPage';
 import React from 'react';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
-import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, LogOut, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
+import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
 
 import {
-  AssistantDrawer, Avatar, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, Field, KeyValue, TextInput, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
+  AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
   type ChatMessage, type CommandItem, type Crumb, type NavSection, type ThemeMode,
 } from '../../../components/mist';
 import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
@@ -24,7 +23,6 @@ import { useDevice } from './runtime/devicePreferences';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
 import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
-import { MistVersionInfo } from './runtime/version';
 import { useOrganizationContext } from './runtime/organizationContext';
 import { HomePage } from './pages/HomePage';
 import { DevListPage } from './pages/DevListPage';
@@ -38,7 +36,8 @@ import { FinancePage } from './pages/FinancePage';
 import { CustomerPage } from './pages/CustomerPage';
 import { ProductionPage } from './pages/ProductionPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { AvatarStudio } from './pages/AvatarStudio';
+import { AccountPage } from './pages/AccountPage';
+import { canOpenMistView, personalSettingsSection } from './routeAccess';
 import { StatesPage } from './pages/StatesPage';
 import { DesignSystemPage } from './pages/DesignSystemPage';
 import { LoginPage } from './pages/LoginPage';
@@ -63,7 +62,7 @@ import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, dev
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
 
 const PAGES: Record<string, React.FC> = {
-  'platform-admin': SaasAdminPage,
+  'platform-admin': SaasAdminPage, account: AccountPage, 'account-settings': AccountPage,
   ...FULFILLMENT_PAGES,...MARKET_PAGES,...PLATFORM_PAGES,
   emails: EmailsPage, cockpit: HomePage, development: DevListPage, 'development/detail': DevDetailPage, 'development/new': DevCreatePage,
   orders: OrderListPage, 'orders/detail': OrderDetailPage, 'orders/new': OrderCreatePage, calendar: CalendarPage, 'payment-vouchers': FinancePage, crm: CustomerPage,
@@ -71,7 +70,7 @@ const PAGES: Record<string, React.FC> = {
   // 设计系统、空/加载/错误样张只在开发构建可达，正式构建不出现在侧栏，也不能经地址打开。
   ...(import.meta.env.DEV ? { states: StatesPage, 'design-system': DesignSystemPage } : {}),
 };
-const LIVE_VIEWS = new Set(['platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
+const LIVE_VIEWS = new Set(['account','platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
 const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '平台' };
 
@@ -151,7 +150,7 @@ function crumbsFor(route: Route, go: (view: string, id?: string) => void, object
   if (route.view === 'platform-admin') return [{ label: '平台运营', hideOnMobile: true }, { label: '平台管理' }];
   const base = route.view.split('/')[0], mod = getModuleByView(base as View);
   const label = (mod && productName(mod)) ?? LABELS[base] ?? base;
-  const crumbs: Crumb[] = [{ label: mod ? GROUPS[mod.nav.group] : base === 'company-settings' || base === 'workspace-settings' || base === 'approvals' || base === 'notifications' || base === 'search' ? '我的事务' : '设计系统', hideOnMobile: true }];
+  const crumbs: Crumb[] = [{ label: mod ? GROUPS[mod.nav.group] : base === 'account' || base === 'company-settings' || base === 'workspace-settings' || base === 'approvals' || base === 'notifications' || base === 'search' ? '我的事务' : '设计系统', hideOnMobile: true }];
   if (route.view.includes('/')) {
     crumbs.push({ label, onClick: () => go(base) });
     crumbs.push(route.view.endsWith('/new') ? { label: base === 'orders' ? '新建订单' : route.id ? '继续开发草稿' : developmentCreateLabel(route.section) } : { label: objectLabel || route.id || '未指定对象', mono: true });
@@ -170,13 +169,14 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
-  const documentTitle = pageDocumentTitle(route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
+  const personalSection = personalSettingsSection(route);
+  const documentTitle = pageDocumentTitle(personalSection ? 'account' : route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
   React.useEffect(() => { document.title = localizedPageTitle(documentTitle); }, [documentTitle, locale]);
   const scrollPosition = React.useRef<{ key: string; route: Route; list: boolean }>(null as never);
   if (!scrollPosition.current) { const list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(route); scrollPosition.current = { key: scrollKeyOf(route, list), route, list }; }
   const [collapsed, setCollapsed] = React.useState(false);
   const [palette, setPalette] = React.useState(false), [query, setQuery] = React.useState('');
-  const [ai, setAI] = React.useState(false), [account, setAccount] = React.useState(false), [avatarStudio, setAvatarStudio] = React.useState(false);
+  const [ai, setAI] = React.useState(false);
   const [notifications, setNotifications] = React.useState(false);
   const [msgs, setMsgs] = React.useState<ChatMessage[]>([]);
   const [aiBusy,setAiBusy]=React.useState(false),[aiUseRouteSource,setAiUseRouteSource]=React.useState(false);
@@ -214,11 +214,12 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     setRoute(next); writeMistRoute(next, options); setPalette(false); setAI(false); setNotifications(false);
     if (view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh'));
   }, [toast]);
+  React.useEffect(() => { if (personalSection && session.status === 'authenticated') go('account', undefined, { section: personalSection }); }, [personalSection, session.status, go]);
   React.useEffect(() => {
     const back = () => { const next = readMistRoute(), list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(next); scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list }; setRoute(next); setPalette(false); setAI(false); if (next.view === 'cockpit') window.dispatchEvent(new CustomEvent('bambook:mist-workbench-refresh')); };
     window.addEventListener('popstate', back); return () => window.removeEventListener('popstate', back);
   }, []);
-  React.useEffect(() => { setPalette(false); setAI(false); setAccount(false); setNotifications(false); setOrganizationOpen(false); setMsgs([]); }, [session.sessionKey, workspace.workspace?.id]);
+  React.useEffect(() => { setPalette(false); setAI(false); setNotifications(false); setOrganizationOpen(false); setMsgs([]); }, [session.sessionKey, workspace.workspace?.id]);
   const previousLocalActor = React.useRef<string|undefined>(undefined);
   React.useEffect(() => {
     if (!session.localMode || session.status !== 'authenticated') return;
@@ -329,8 +330,8 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
-  const permitted = platformOnly && ['system-settings','settings'].includes(route.view) ? true : route.view === 'platform-admin' ? session.user?.platformRole === 'platform_admin' : (route.view === 'company-settings' || route.view === 'workspace-settings') ? !!workspace.workspace : !module || session.canAccessView(base as View), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
-  const Page = platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
+  const permitted = !!personalSection || canOpenMistView(route.view, { canAccessView: session.canAccessView, platformOperator: session.user?.platformRole === 'platform_admin' }, import.meta.env.DEV) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
+  const Page = personalSection ? AccountPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
     : session.localMode && route.view === 'mes' ? LocalMesPage
     : PAGES[route.view] ?? null;
@@ -340,18 +341,18 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const user = session.user!;
   const workspaceProfileName = state?.settings.profileName?.trim() || '';
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
-  const roles = platformOnly ? '平台管理员' : user.roleLabels?.map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
+  const roles = platformOnly ? '平台管理员' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
   return (
     <Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
       <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
-          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, onClick:()=>{setOrganizationOpen(true);organization.retry();} }}
-          account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => setAccount(true) }}
+          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, expanded: organizationOpen, onClick:()=>{if(collapsed || matchMedia('(min-width: 761px) and (max-width: 1180px)').matches){go('account');return;}setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();}, disclosure: <><dl><div><dt>{uiText('公司')}</dt><dd>{state?.settings.companyProfile?.legalName||'—'}</dd></div><div><dt>{uiText('部门')}</dt><dd>{user.department||'—'}</dd></div><div><dt>{uiText('小组')}</dt><dd>{uiText(organization.loading?'正在读取':organization.error?'读取失败':organization.teams.map(team=>team.name).join('、')||'未加入小组')}</dd></div></dl>{organization.error&&<button type="button" onClick={organization.retry}>{uiText('重新读取')}</button>}{session.canAccessView(View.SystemSettings)&&<button type="button" onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'company'});}}>{uiText('公司设置')}</button>}</> }}
+          account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
           onSearch={() => setPalette(true)}
           assistant={platformOnly ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
-          sync={platformOnly ? { state: 'ok', text: '平台运营' } : { state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? '需要核对同步状态' : live ? '已保存 · 公司' : '设计组件展示' }}
+          sync={base === 'account' ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : { state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? '需要核对同步状态' : live ? '已保存 · 公司' : '设计组件展示' }}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
           extra={platformOnly ? undefined : <MistReviewButton/>} notifications={platformOnly ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={platformOnly ? undefined : ()=>openAI()} />}
       >
@@ -369,21 +370,6 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
         {state?.settings.notifications.digest&&<Card><CardHeader title={uiText("今日工作摘要")} sub={uiText("按当前记录生成 · 不发送邮件")}/><div className="mist-card-body">{dailyDigest.length?dailyDigest.map(item=><p key={item.id}><Button variant="quiet" onClick={()=>go(item.target.view,item.target.id,item.target)}>{uiText(item.label)} · {item.detail}</Button></p>):<p>{uiText("今天没有待处理事项。")}</p>}</div></Card>}
         {visibleNotifications.length?visibleNotifications.slice().reverse().map(n=><Card key={n.id}><CardHeader title={uiText(n.title)} sub={uiText(new Date(n.at).toLocaleString())} tools={<Button variant="quiet" onClick={()=>{void (n.readAt?Promise.resolve():workspace.run({type:'notification.read',payload:{id:n.id}})).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{uiText(n.readAt?'查看':'阅读')}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title={uiText("暂无通知")} />}
       </Drawer>
-      <Drawer open={organizationOpen} onClose={()=>setOrganizationOpen(false)} title={uiText("我的组织")} sub={uiText("公司 · 部门 · 小组")}>
-        <KeyValue items={[{label:'公司',value:state?.settings.companyProfile?.legalName||'公司资料未填写'},{label:'部门',value:user.department||'未设置'},{label:'小组',value:organization.loading?'正在读取':organization.teams.length?organization.teams.map(team=>team.name).join('、'):organization.error?'读取未完成':'未加入小组'}]} />
-        {organization.error&&<Banner tone="warn" title={uiText("小组归属读取未完成")} actions={<Button onClick={organization.retry}>{uiText("重新读取")}</Button>}>{uiText("当前先显示部门，不会推测你所属的小组。")}</Banner>}
-        <Button onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'company'});}}>{uiText("查看公司资料")}</Button>
-      </Drawer>
-      <Drawer open={account} onClose={() => setAccount(false)} title={uiText(session.localMode?'本地身份':'账号')} sub={name}
-        footer={session.localMode?<Button loading={session.refreshing} onClick={()=>void session.refresh()}>{uiText("重新进入本地身份")}</Button>:<Button icon={LogOut} loading={session.signingOut} onClick={() => { void session.logout().catch(failure => toast(failure instanceof Error ? failure.message : '退出失败', 'bad')); }}>{uiText("退出登录")}</Button>}>
-        {session.localMode&&<><p className="mist-note">{uiText("选择本地工作身份；权限和名称由本机服务提供。")}</p><div className="mist-row" data-wrap>{session.localProfiles?.map(profile=><Button key={profile.id} aria-pressed={profile.id===user.id} disabled={session.signingIn} variant={profile.id===user.id?'primary':'secondary'} onClick={()=>void session.selectLocalProfile?.(profile.id).catch(failure=>toast(failure instanceof Error?failure.message:'身份切换未完成','bad'))}>{uiText(profile.title?`${profile.name} · ${profile.title}`:profile.name)}</Button>)}</div></>}
-        {!session.localMode&&<div className="mist-avatar-setting"><Avatar name={name} src={user.avatarUrl} size="lg" /><span className="mist-spacer" /><Button size="sm" onClick={()=>{setAccount(false);setAvatarStudio(true);}}>{uiText("编辑头像")}</Button></div>}
-        {workspace.workspace&&<Button onClick={()=>{setAccount(false);go('company-settings',undefined,{section:'workspace'});}}>{uiText("公司成员与权限")}</Button>}
-        <KeyValue items={[{ label: '当前工作身份', value: user.displayName || user.email }, { label: '公司内显示名', value: workspaceProfileName || '未设置' }, { label: '工作邮箱', value: user.email }, { label: '职责', value: roles || '未设置' }, { label: '部门', value: user.department || '未设置' }]} />
-        <LanguageSetting />
-        {account&&<MistVersionInfo demoSeed={state?.settings.demoSeed} />}
-      </Drawer>
-      {!session.localMode&&<AvatarStudio open={avatarStudio} onClose={()=>setAvatarStudio(false)} />}
     </MistDensityContext.Provider></MistReviewProvider></Nav.Provider>
   );
 }

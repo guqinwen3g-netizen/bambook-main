@@ -26,28 +26,25 @@ beforeEach(() => {
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; });
 describe('original Mist settings with server workspace commands', () => {
-  it('does not expose workspace archive or switching actions in company settings',async()=>{render();await click(button('安全'));expect(host.textContent).not.toContain('回收站');expect(host.textContent).not.toContain('恢复公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(seam.value.refreshArchived).not.toHaveBeenCalled();});
+  it('does not expose workspace archive or switching actions in company settings',async()=>{render();expect(host.textContent).not.toContain('回收站');expect(host.textContent).not.toContain('恢复公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(seam.value.refreshArchived).not.toHaveBeenCalled();});
 
-  it('preserves section navigation and saves the actual three-way theme and density', async () => {
-    render(); expect(host.querySelector('.mist-wizard')).toBeTruthy(); expect(host.querySelectorAll('.mist-vsteps button')).toHaveLength(8); await click(button('外观与语言'));
-    expect(host.textContent).not.toContain('只在这台设备生效'); expect(host.textContent).not.toContain('雾蓝渐变');
-    const dark = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(item => item.textContent?.startsWith('深色'))!; await click(dark);
-    expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ theme: expect.anything() }) })); expect(localStorage.getItem('bambook.device.theme')).toBe('"dark"'); expect(dark.getAttribute('aria-checked')).toBe('true');
-    const density = host.querySelector<HTMLSelectElement>('select[aria-label="列表密度"]')!;
-    await act(async () => { density.value = 'compact'; density.dispatchEvent(new Event('change', { bubbles: true })); });
-    expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ density: expect.anything() }) }));
-    expect(localStorage.getItem('bambook.device.density')).toBe('"compact"');
+  it('keeps only company sections and no personal appearance or security controls', () => {
+    render(); expect(host.querySelector('.mist-wizard')).toBeTruthy();
+    const labels=[...host.querySelectorAll('.mist-vsteps button')].map(item=>item.textContent);
+    expect(labels).toEqual(['管理总览','设置记录','通知','公司成员','公司资料']);
+    expect(host.querySelector('[aria-label="界面语言"]')).toBeNull();
+    expect(host.textContent).not.toContain('查看账号安全');
   });
   it('persists notification switches with the shared field names', async () => {
     render(); await click(button('通知')); const controls = host.querySelectorAll<HTMLInputElement>('input[role="switch"]');
     await click(controls[1]); expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { notifications: { qc: true, shipping: false, suggestions: true, digest: false } } });
     expect(host.textContent).not.toContain('不发送邮件');
   });
-  it('saves display profile on blur without mutating the authentication identity', async () => {
-    render(); await click(button('账号')); const field = input('显示姓名', '公司显示名'); await blur(field);
-    expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { profileName: '公司显示名' } });
-    expect(seam.value.state.settings.profileName).toBe('公司显示名'); expect(seam.session.user.displayName).toBe('认证姓名');
-    expect(host.textContent).not.toContain('不改变登录账号、邮箱或密码');
+  it.each(['account','appearance','security'])('redirects the old %s link to personal settings without writing company data', section => {
+    seam.nav={route:{section},go:vi.fn()}; render();
+    expect(seam.value.run).not.toHaveBeenCalled();
+    expect(seam.nav.go).toHaveBeenCalledWith('account',undefined,{section:section==='account'?'profile':section});
+    expect(host.querySelector('input[aria-label="显示姓名"]')).toBeNull();
   });
   it('retains typed edits after failed persistence and resets them on workspace replacement', async () => {
     seam.value.run.mockRejectedValue(new Error('保存失败，请重试')); render(); await click(button('公司成员'));
@@ -56,21 +53,10 @@ describe('original Mist settings with server workspace commands', () => {
     const state = createMistState(ctx(), 'empty'); state.settings.workspaceName = '第二公司'; seam.value = { ...seam.value, state, workspace: { id: 'workspace-two', name: '第二公司' } };
     await act(async () => paint()); expect(host.querySelector<HTMLInputElement>('input[aria-label="公司显示名称"]')?.value).toBe('第二公司'); expect(host.textContent).not.toContain('未保存的名称');
   });
-  it('does not offer company deletion from security settings', async () => {render();await click(button('安全'));expect(host.textContent).not.toContain('移入回收站');expect(host.textContent).not.toContain('删除公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();});
+  it('does not offer company deletion from security settings', async () => {render();expect(host.textContent).not.toContain('移入回收站');expect(host.textContent).not.toContain('删除公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();});
 });
 
 describe('workspace default currency and local-only settings',()=>{
- it('lets members change language without changing the company or showing a company save action',async()=>{
-  localStorage.removeItem('bambook.device.locale');
-  seam.value.workspace.access={role:'member'};render();await click(button('外观与语言'));
-  expect(host.textContent).not.toContain('当前账号只能查看');
-  const select=host.querySelector<HTMLSelectElement>('select[aria-label="界面语言"]')!;
-  expect(select.disabled).toBe(false);
-  await act(async()=>{select.value='en-US';select.dispatchEvent(new Event('change',{bubbles:true}));});
-  expect(localStorage.getItem('bambook.device.locale')).toBe('"en-US"');
-  expect(seam.value.run).not.toHaveBeenCalled();expect([...host.querySelectorAll('.mist-sticky-foot')].filter(node=>!node.closest('[hidden]'))).toHaveLength(0);
-  await act(async()=>{select.value='zh-CN';select.dispatchEvent(new Event('change',{bubbles:true}));});
- });
  it('saves the currency through the complete company profile without erasing business details',async()=>{
   seam.value.state.settings.companyProfile={legalName:'公司甲',englishName:'Company A',address:'上海',englishAddress:'Shanghai',phone:'123',email:'office@example.com',taxId:'TAX',customsCode:'CUSTOMS',bankName:'银行',bankAccount:'ACCOUNT',swift:'SWIFT',defaultCurrency:'USD'};
   render();await click(button('公司成员'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.disabled).toBe(false);await act(async()=>{select.value='EUR';select.dispatchEvent(new Event('change',{bubbles:true}));});
@@ -79,8 +65,8 @@ describe('workspace default currency and local-only settings',()=>{
  it('starts with USD when the optional company profile has no currency and preserves failure feedback',async()=>{
   seam.value.run.mockRejectedValueOnce(new Error('币种保存失败'));render();await click(button('公司成员'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.value).toBe('USD');await act(async()=>{select.value='CNY';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(host.textContent).toContain('币种保存失败');expect(seam.value.state.settings.companyProfile).toBeUndefined();
  });
- it('labels MFA and device session controls inapplicable for local identities while keeping them disabled',async()=>{
-  seam.session={...seam.session,localMode:true} as any;render();await click(button('安全'));expect(host.textContent).not.toContain('两步验证');expect(host.textContent).not.toContain('设备会话管理不适用');expect(button('不适用').disabled).toBe(true);
+ it('keeps local identity controls out of company settings',async()=>{
+  seam.session={...seam.session,localMode:true} as any;render();expect(host.textContent).not.toContain('两步验证');expect(host.textContent).not.toContain('设备会话管理不适用');expect(host.textContent).not.toContain('退出所有设备');
  });
 });
 
@@ -132,6 +118,4 @@ it('organizes company management links without exposing platform management',asy
  expect(host.textContent).toContain('公司管理总览');await click(button('进入公司后台'));expect(seam.nav.go).toHaveBeenCalledWith('admin-panel');
  await click(button('管理组织架构'));expect(seam.nav.go).toHaveBeenCalledWith('hr');expect(host.textContent).not.toContain('平台设置');
 });
-it('keeps device display choices out of the company settings history',async()=>{render();await click(button('外观与语言'));const density=host.querySelector<HTMLSelectElement>('select[aria-label="列表密度"]')!;await act(async()=>{density.value='compact';density.dispatchEvent(new Event('change',{bubbles:true}));});expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'settings.update' }));expect(localStorage.getItem('bambook.device.density')).toBe('"compact"');await click(button('设置记录'));expect(host.textContent).not.toContain('更新列表密度');
-    expect(host.textContent).not.toContain('列表密度');
-});
+it('keeps device display choices out of the company settings history',async()=>{render();await click(button('设置记录'));expect(host.textContent).not.toContain('更新列表密度');expect(host.textContent).not.toContain('外观与语言');expect(host.textContent).not.toContain('列表密度');expect(seam.value.run).not.toHaveBeenCalled();});

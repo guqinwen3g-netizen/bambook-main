@@ -51,7 +51,7 @@ export type SidebarPresentationProps = {
   onNavigate: (id: string) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  workspace?: { symbol: string; name: string; caption?: string; onClick?: () => void };
+  workspace?: { symbol: string; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode };
   account: { name: string; caption?: string; avatarUrl?: string; onClick?: () => void };
   onSearch?: () => void;
   assistant?: { title: string; text: React.ReactNode; onClick: () => void };
@@ -60,7 +60,9 @@ export type SidebarPresentationProps = {
 export function MistSidebarPresentation({ sections, activeId, onNavigate, collapsed, onToggleCollapsed, workspace, account, onSearch, assistant }: SidebarPresentationProps) {
   const [closed, setClosed] = React.useState<Record<string, boolean>>(() => Object.fromEntries(sections.map(s => [s.id, !!s.defaultClosed && !s.items.some(i => i.id === activeId)])));
   const menu = React.useContext(MobileNavCtx), open = !!menu?.open;
+  const organizationButton = React.useRef<HTMLButtonElement>(null);
   const close = () => menu?.setOpen(false);
+  React.useEffect(() => { close(); }, [activeId]);
   // 手机导航抽屉：任何一次跳转后都收起；Esc 关闭。
   const within = <A extends unknown[]>(fn?: (...args: A) => void) => fn && ((...args: A) => { close(); fn(...args); });
   React.useEffect(() => {
@@ -76,7 +78,10 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
         <button type="button" className="mist-side-toggle" aria-label={uiText("收起导航")} onClick={onToggleCollapsed}><Icon icon={PanelLeft} size="sm" /></button>
         <button type="button" className="mist-side-close" aria-label={uiText("关闭菜单")} onClick={close}><Icon icon={X} size="sm" /></button>
       </div>
-      {workspace && <button type="button" className="mist-ws" onClick={within(workspace.onClick)}><span className="mist-ws-sym">{workspace.symbol}</span><div><b>{workspace.name}</b>{workspace.caption && <small>{uiText(workspace.caption)}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>}
+      {workspace && <>
+        <button ref={organizationButton} type="button" className="mist-ws" aria-expanded={workspace.disclosure ? !!workspace.expanded : undefined} aria-controls={workspace.disclosure ? 'mist-organization' : undefined} onClick={workspace.disclosure ? workspace.onClick : within(workspace.onClick)}><span className="mist-ws-sym">{workspace.symbol}</span><div><b>{workspace.name}</b>{workspace.caption && <small>{uiText(workspace.caption)}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>
+        {workspace.disclosure && <div id="mist-organization" className="mist-organization" hidden={!workspace.expanded} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); workspace.onClick?.(); organizationButton.current?.focus(); } }}>{workspace.disclosure}</div>}
+      </>}
       {onSearch && <button type="button" className="mist-side-search" onClick={within(onSearch)} title={uiText("搜索或跳转")}><Icon icon={Search} size="sm" /><span>{uiText("搜索或跳转")}</span><Kbd>⌘K</Kbd></button>}
       <nav className="mist-nav" aria-label={uiText("主导航")}>
         {sections.map(s => (
@@ -93,7 +98,7 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
         ))}
       </nav>
       {assistant && <button type="button" className="mist-side-ai" onClick={within(assistant.onClick)}><div className="mist-side-ai-t"><AIBadge />{uiText(assistant.title)}</div><p>{uiText(assistant.text)}</p></button>}
-      <button type="button" className="mist-me" onClick={within(account.onClick)}><Avatar name={account.name} src={account.avatarUrl} /><div><b>{account.name}</b>{account.caption && <small>{uiText(account.caption)}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>
+      <button type="button" className="mist-me" aria-current={activeId === 'account' ? 'page' : undefined} onClick={within(account.onClick)}><Avatar name={account.name} src={account.avatarUrl} /><div><b>{account.name}</b>{account.caption && <small>{uiText(account.caption)}</small>}</div><Icon icon={ChevronRight} size="sm" /></button>
     </aside>
   );
 }

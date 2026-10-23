@@ -77,6 +77,15 @@ it('keeps QC actions visible with concrete reasons when another QC owns the task
   expect(detail.textContent).toContain('仅当前QC（QC乙）可转交');
   expect(detail.textContent).toContain('QC乙 检查中');
 });
+it('lets a read-only viewer inspect a task without claiming or reporting it',()=>{
+  session.denied=new Set(['qc:fabric_chain:write','qc:garment_chain:write']);
+  store.state!.fulfillment.qcTasks.push(task('readonly'));
+  render('readonly');
+  expect(host.textContent).toContain('READONLY');
+  expect((getByRole(host,'button',{name:'认领任务'}) as HTMLButtonElement).disabled).toBe(true);
+  expect((getByRole(host,'button',{name:'提交 / 追加复验报告'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(store.run).not.toHaveBeenCalled();
+});
 
 it('lets the current QC transfer to a named member and reschedule with reasons',async()=>{
   store.state!.members=[{userId:'qc-b',name:'QC乙'} as any];

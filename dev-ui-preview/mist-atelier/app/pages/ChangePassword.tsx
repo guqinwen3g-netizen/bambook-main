@@ -58,7 +58,7 @@ export function ChangePasswordRow() {
   const [open, setOpen] = React.useState(false);
   const { busy, error, reset, submit, fields } = usePasswordForm(async () => { toast('登录密码已修改，其他设备已退出登录'); setOpen(false); if (session.user?.mustChangePassword) await session.refresh(); });
   return <>
-    <SettingRow title={uiText("登录密码")} description={uiText("修改当前账号的登录密码；管理员重置给你的临时密码请尽快在这里改掉。")} control={<Button size="sm" icon={KeyRound} onClick={() => { reset(); setOpen(true); }}>{uiText("修改密码")}</Button>} />
+    <SettingRow title={uiText("登录密码")} control={<Button size="sm" icon={KeyRound} onClick={() => { reset(); setOpen(true); }}>{uiText("修改密码")}</Button>} />
     <Dialog open={open} onClose={() => !busy && setOpen(false)} title={uiText("修改登录密码")} description={uiText("需要先验证当前密码；修改后其他设备上的登录会自动退出，当前设备保持登录。")}
       footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>{uiText("确认修改")}</Button><Button disabled={busy} onClick={() => setOpen(false)}>{uiText("取消")}</Button></div>}>
       {error && <Banner tone="bad" title={uiText("未修改")}>{uiText(error)}</Banner>}
@@ -79,8 +79,8 @@ export function LogoutAllRow() {
     finally { setBusy(false); }
   };
   return <>
-    <SettingRow title={uiText("退出所有设备")} description={uiText("电脑、手机等所有已登录的会话立即失效，包括当前这台；之后需要重新登录。")} control={<Button size="sm" icon={MonitorSmartphone} onClick={() => { setError(''); setOpen(true); }}>{uiText("退出所有设备")}</Button>} />
-    <Dialog open={open} onClose={() => !busy && setOpen(false)} tone="bad" title={uiText("退出所有设备")} description={uiText("确认后所有设备上的登录立即失效，当前设备也会回到登录页。如怀疑密码外泄，请重新登录后立即修改密码。")}
+    <SettingRow title={uiText("退出所有设备")} control={<Button size="sm" icon={MonitorSmartphone} onClick={() => { setError(''); setOpen(true); }}>{uiText("退出所有设备")}</Button>} />
+    <Dialog open={open} onClose={() => !busy && setOpen(false)} tone="bad" title={uiText("退出所有设备")} description={uiText("确认后所有设备都会退出登录，包括当前设备。")}
       footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>{uiText("确认退出")}</Button><Button disabled={busy} onClick={() => setOpen(false)}>{uiText("取消")}</Button></div>}>
       {error && <Banner tone="bad" title={uiText("未完成")}>{uiText(error)}</Banner>}
     </Dialog>

@@ -312,7 +312,7 @@ export const VIEW_TO_MAIN_SCOPES: Record<View, ViewPermissionScopes> = {
   [View.BusinessTools]: { read: 'tools:execute' },
   [View.Development]:   { read: 'products:read', write: 'products:write' },
   [View.Samples]:       { read: 'products:read', write: 'products:write' }, // 样品管理域（DR-052）：样品源自开发/订单域，读写真源对齐 products
-  [View.Inventory]:     { read: 'orders:read' },
+  [View.Inventory]:     { read: 'inventory:read', write: 'inventory:write' },
   [View.DocumentCenter]:{ read: 'customs:read', write: 'customs:write' },
   [View.MES]:           { read: 'production:read' }, // MES搁置，但权限先定义
   [View.Settings]:      { read: 'settings:account' },

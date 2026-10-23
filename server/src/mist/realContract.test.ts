@@ -11,6 +11,20 @@ let root: string, db: MemoryMistDatabase, repo: MistRepository;
 beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), 'mist-real-contract-')); db = new MemoryMistDatabase(); repo = new MistRepository(db, contract, new MistPrivateFiles(root), testAuthority().authorize, () => new Date('2026-10-13T04:00:00Z')); });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 describe('Mist repository with the real shared business commands', () => {
+  it('does not let a QC reader claim tasks, and hides QC data after read access is removed', async () => {
+    const authority = testAuthority();
+    const readerActor = { ...testActor(), roles: ['viewer' as const], authorizationLoaded: true };
+    authority.users.get('owner')!.permissions = ['products:write', 'qc:read'];
+    repo = new MistRepository(db, contract, new MistPrivateFiles(root), authority.authorize);
+    const workspace = await repo.create(readerActor, { name: 'QC read boundary', seed: 'demo' });
+    const before = structuredClone(db.workspaces.get(workspace.id));
+    await expect(repo.execute(readerActor, workspace.id, { requestId: 'readonly-qc-claim', expectedRevision: 0, command: { type: 'fulfillment.qc.claim', payload: { id: 'qc-task', domain: 'garment' } } })).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    expect(db.workspaces.get(workspace.id)).toEqual(before);
+    authority.users.get('owner')!.permissions = ['products:write'];
+    const denied = await repo.get(readerActor, workspace.id);
+    expect(denied.state.fulfillment.qcTasks).toEqual([]);
+    expect(denied.state.fulfillment.qcReports).toEqual([]);
+  });
   it('creates demo workspaces with downloadable sample PDFs stored privately, and empty workspaces without them', async () => {
     const workspace = await repo.create(testActor(), { name: 'Demo', seed: 'demo' });
     const demoFiles = workspace.state.files.filter(file => file.mimeType === 'application/pdf' && file.storageKey === `${workspace.id}/${file.id}`);

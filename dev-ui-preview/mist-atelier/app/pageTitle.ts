@@ -2,7 +2,7 @@ import { BAMBOOK_BRAND } from '../../../server/src/shared/brand';
 import { getModuleByView } from '../../../components/moduleRegistry';
 import type { View } from '../../../types';
 
-export const PAGE_LABELS: Record<string, string> = { 'platform-admin': '平台管理', 'design-system': '设计系统', states: '空 / 加载 / 错误', 'system-settings': '系统设置', settings: '系统设置', 'company-settings': '公司设置', 'workspace-settings': '公司设置', approvals: '审批与放行', search: '搜索结果', notifications: '通知中心' };
+export const PAGE_LABELS: Record<string, string> = { account: '我的账号', 'platform-admin': '平台管理', 'design-system': '设计系统', states: '空 / 加载 / 错误', 'system-settings': '系统设置', settings: '系统设置', 'company-settings': '公司设置', 'workspace-settings': '公司设置', approvals: '审批与放行', search: '搜索结果', notifications: '通知中心' };
 type TitleContext = { anonymous?: boolean; loading?: boolean; platformOnly?: boolean; mustChangePassword?: boolean; invitation?: boolean };
 
 /** Titles describe the rendered page, never an unauthenticated URL's requested business route. */

@@ -9,6 +9,17 @@ const actor = (permissions: string[], userId = 'member'): TokenPayload => ({ use
 const file = (id: string, uploadedBy?: string): MistFile => ({ id, name: id + '.pdf', mimeType: 'application/pdf', size: 10, storageKey: 'space/' + id, createdAt: context.now, uploadedBy });
 
 describe('按已有业务查看权限投影，不因成员资格扩大权限', () => {
+  it('keeps QC reading independent from writing and withholds QC records when read permission is absent', () => {
+    const state = empty();
+    state.fulfillment.qcTasks = [{ id: 'quality-task' }] as any;
+    state.fulfillment.qcReports = [{ id: 'quality-report' }] as any;
+    const reader = projectState(state, actor(['qc:read']), empty).state;
+    expect(reader.fulfillment.qcTasks).toHaveLength(1);
+    expect(reader.fulfillment.qcReports).toHaveLength(1);
+    const denied = projectState(state, actor(['qc:write']), empty).state;
+    expect(denied.fulfillment.qcTasks).toEqual([]);
+    expect(denied.fulfillment.qcReports).toEqual([]);
+  });
   it('所有业务集合都有明确读规则，未来增加集合不能静默开放给成员', () => {
     const state = empty(), paths = new Set(MIST_READ_SECTIONS.flatMap(section => section.paths.map(path => path.join('.'))));
     const shared = new Set(['schemaVersion', 'workspaceArchive', 'settings', 'files', 'events', 'tasks', 'notifications', 'calendar', 'reviewerIds', 'memberIds', 'members', 'memberLog']);
