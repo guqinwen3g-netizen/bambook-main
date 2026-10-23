@@ -22,7 +22,7 @@ beforeEach(() => {
   sequence = 0;go.mockClear();store.run.mockReset();
   const empty = createMistState(context, 'empty');
   empty.customers.push({ id: 'customer-a', code: 'C-A', name: '客户甲', country: '', city: '', industry: '', owner: '业务员甲', grade: 'A', currency: 'USD', terms: '', incoterm: '', categories: '', creditLimit: 0, since: '2026-01-01' });
-  const result = applyMistCommand(empty, { type: 'order.create', payload: { type: 'garment', customerId: 'customer-a', season: 'AW28', currency: 'USD', due: '2026-10-30', ownerId:'sales', lines: [{ name: '精确金额条目', style: 'ROUND-01', img: 'coat', qty: 1.005, unit: '件', price: 1 }] } }, context);
+  const result = applyMistCommand(empty, { type: 'order.create', payload: { type: 'garment', customerId: 'customer-a', season: 'AW28', currency: 'USD', due: '2026-10-30', ownerId:'sales', lines: [{ name: '精确金额条目', style: 'ROUND-01', img: 'coat', fulfillmentMode:'cmt', cmtIncludedItems:[], qty: 1.005, unit: '件', price: 1 }] } }, context);
   store.state = result.state; orderId = result.result.orderId!;
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -150,7 +150,7 @@ it('opens shipment preparation from the exact handed-off order without changing 
 function lineEditorFixture(status:'draft'|'pending'|'rejected'|'approved',quantity=10,price=11){
   const actor={...context,actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader'],fabric:['leader']}}};
   let state=store.state!;state.files.push({id:'line-po',name:'line-po.pdf',mimeType:'application/pdf',size:4,storageKey:'fixture/line-po',createdAt:context.now});
-  state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:{kind:'external',poNumber:'PRICE-CORRECTION',confirmationFileIds:['line-po'],internalPurpose:'',receiver:'',paymentMethod:'OA',depositPercent:null,paymentNote:'OA，发票日起30天',incoterm:'FOB',deliveryPlace:'上海'},lines:[{id:state.orderLines[0].id,name:'精确金额条目',style:'ROUND-01',img:'coat',qty:quantity,unit:'件',price}]}},actor).state;
+  state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:{kind:'external',poNumber:'PRICE-CORRECTION',confirmationFileIds:['line-po'],internalPurpose:'',receiver:'',paymentMethod:'OA',depositPercent:null,paymentNote:'OA，发票日起30天',incoterm:'FOB',deliveryPlace:'上海'},lines:[{id:state.orderLines[0].id,name:'精确金额条目',style:'ROUND-01',img:'coat',fulfillmentMode:'cmt',cmtIncludedItems:[],qty:quantity,unit:'件',price}]}},actor).state;
   if(status!=='draft')state=applyMistCommand(state,{type:'order.governance.submit',payload:{orderId}},actor).state;
   if(status==='approved'||status==='rejected')state=applyMistCommand(state,{type:'order.governance.decide',payload:{id:orderId,decision:status,note:status==='rejected'?'单价应为12 USD，请修正':'核对原合同'}},{...actor,actorId:'leader'}).state;
   store.state=state;store.run.mockImplementation(async(command:Parameters<typeof applyMistCommand>[1])=>{const result=applyMistCommand(store.state!,command,actor);store.state=result.state;render();return{requestId:'line-editor',revision:1,result:result.result};});
@@ -234,7 +234,7 @@ it.each(['contract-first','header-first'] as const)('merges price, amended contr
 it('saves a proposed due date restored to the live date without losing the amended contract or lines',async()=>{
   const actor=lineEditorFixture('approved',4,12),state=store.state!,order=state.orders[0],line=state.orderLines[0];
   state.files.push({id:'restore-po',name:'restore-po.pdf',mimeType:'application/pdf',size:4,storageKey:'fixture/restore-po',createdAt:context.now});
-  store.state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:{...order.governance!.contract,poNumber:'RESTORED-DUE-PO',confirmationFileIds:['restore-po']},lines:[{id:line.id,name:line.name,style:line.style,img:line.img,qty:4,unit:'件',price:15}],orderPatch:{due:'2026-11-03'},reason:'修订单价与交期'}},actor).state;
+  store.state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:{...order.governance!.contract,poNumber:'RESTORED-DUE-PO',confirmationFileIds:['restore-po']},lines:[{id:line.id,name:line.name,style:line.style,img:line.img,fulfillmentMode:line.fulfillmentMode,cmtIncludedItems:line.cmtIncludedItems,qty:4,unit:'件',price:15}],orderPatch:{due:'2026-11-03'},reason:'修订单价与交期'}},actor).state;
   render();await act(async()=>getByRole(host,'button',{name:/^编辑$/}).click());
   expect((getByLabelText(document.body,'交期') as HTMLInputElement).value).toBe('2026-11-03');
   await lineInput('交期','2026-10-30');await lineInput('实质变更原因','保留修订单价与合同，交期恢复原约定');await act(async()=>getByRole(document.body,'button',{name:/^保存$/}).click());
@@ -292,7 +292,7 @@ it('keeps all amendment entry points locked while a proposal is pending',async()
 it('shows actual price, total, contract, attachment and due differences before and during pending approval',async()=>{
   const actor=lineEditorFixture('approved',4,12),state=store.state!,order=state.orders[0],line=state.orderLines[0];
   state.files.push({id:'compare-po',name:'PO-v2.pdf',mimeType:'application/pdf',size:4,storageKey:'fixture/compare-po',createdAt:context.now});
-  store.state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:{...order.governance!.contract,poNumber:'PO-V2',confirmationFileIds:['compare-po'],paymentNote:'OA，修订合同发票日起30天'},lines:[{id:line.id,name:line.name,style:line.style,img:line.img,qty:4,unit:'件',price:15}],orderPatch:{due:'2026-11-25'},reason:'修订价格与合同交期'}},actor).state;
+  store.state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:{...order.governance!.contract,poNumber:'PO-V2',confirmationFileIds:['compare-po'],paymentNote:'OA，修订合同发票日起30天'},lines:[{id:line.id,name:line.name,style:line.style,img:line.img,fulfillmentMode:line.fulfillmentMode,cmtIncludedItems:line.cmtIncludedItems,qty:4,unit:'件',price:15}],orderPatch:{due:'2026-11-25'},reason:'修订价格与合同交期'}},actor).state;
   render();const table=getByRole(host,'table',{name:'订单变更前后差异'});
   const price=within(table).getByRole('row',{name:/ROUND-01 · 单价/});expect(price.textContent).toContain('12.00 USD');expect(price.textContent).toContain('15.00 USD');
   const total=within(table).getByRole('row',{name:/订单总额/});expect(total.textContent).toContain('48.00 USD');expect(total.textContent).toContain('60.00 USD');
@@ -306,7 +306,7 @@ it('shows actual price, total, contract, attachment and due differences before a
 
 it('shows a quantity-only difference without labelling unchanged unit price or contract as changed',()=>{
   const actor=lineEditorFixture('approved',4,12),state=store.state!,order=state.orders[0],line=state.orderLines[0];
-  store.state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:order.governance!.contract,lines:[{id:line.id,name:line.name,style:line.style,img:line.img,qty:5,unit:'件',price:12}],reason:'客户增加一件'}},actor).state;
+  store.state=applyMistCommand(state,{type:'order.governance.saveDraft',payload:{orderId,input:order.governance!.contract,lines:[{id:line.id,name:line.name,style:line.style,img:line.img,fulfillmentMode:line.fulfillmentMode,cmtIncludedItems:line.cmtIncludedItems,qty:5,unit:'件',price:12}],reason:'客户增加一件'}},actor).state;
   render();const table=getByRole(host,'table',{name:'订单变更前后差异'}),quantity=within(table).getByRole('row',{name:/ROUND-01 · 数量/});
   expect(quantity.textContent).toContain('4 件');expect(quantity.textContent).toContain('5 件');expect(table.textContent).not.toContain('ROUND-01 · 单价');expect(table.textContent).not.toContain('PO / 合同号');expect(table.textContent).not.toContain('交期');
 });
@@ -380,4 +380,16 @@ it('BB-ORD-6 shows the approved over-ship allowance and its approval record unde
   expect(document.body.querySelector('[data-line-overship-approved]')!.textContent).toMatch(/累计可出 1,?050 件（超出溢装上限 20）/);
   const record=getByRole(document.body,'list',{name:'超量出运审批记录'});
   expect(record.textContent).toContain('已批准：累计可出 1050（溢装上限 1030，超出 20），客户要求多发补损；审批意见：同意');expect(record.textContent).toContain('业务员 → 经理');
+});
+
+
+it('keeps the approved mode effective while reviewing the proposed CMT scope',async()=>{
+  lineEditorFixture('approved',4,12);render();await openLineEditor();
+  const mode=getByRole(document.body,'combobox',{name:'履约模式'}) as HTMLSelectElement;
+  await act(async()=>{mode.value='trims_cmt';mode.dispatchEvent(new Event('change',{bubbles:true}));});
+  await act(async()=>getByRole(document.body,'checkbox',{name:'包装'}).click());
+  await lineInput('变更原因','由客户供辅料调整为我司承担辅料');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  expect(store.state!.orderLines[0]).toMatchObject({fulfillmentMode:'cmt',cmtIncludedItems:[]});
+  expect(store.state!.orders[0].governance?.changeDraft?.lines[0]).toMatchObject({fulfillmentMode:'trims_cmt',cmtIncludedItems:['packaging']});
+  const changes=getByRole(host,'table',{name:'订单变更前后差异'});expect(within(changes).getByRole('row',{name:/履约模式/}).textContent).toContain('辅料 + CMT');expect(within(changes).getByRole('row',{name:/CMT 包含/}).textContent).toContain('包装');
 });

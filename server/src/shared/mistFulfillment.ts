@@ -1,3 +1,4 @@
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
@@ -58,6 +59,8 @@ export type FulfillmentSample = {
     color: string;
     source: FulfillmentSource;
     sourceSampleCode?: string;
+    /** Approved full-package material plan when this PP was physically recorded. */
+    materialPlan?: string;
     role?: FulfillmentSampleRole;
     shipmentId?: string;
     qualityRevision?: number;
@@ -130,6 +133,7 @@ export type FulfillmentPurchase = {
     orderId: string;
     lineId: string;
     kind: 'material' | 'finished' | 'processing';
+    materialKind?: MistMaterialKind;
     domain: 'garment' | 'fabric';
     supplierId: string;
     supplier: string;
@@ -173,7 +177,7 @@ export type FulfillmentPurchaseRevision = {
     requesterId: string;
     reviewerIds: string[];
     configVersions: Record<string, number>;
-    snapshot: Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
+    snapshot: Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
     decision?: FulfillmentPurchase['decision'];
 };
 export type FulfillmentReceipt = {
@@ -364,7 +368,7 @@ export type FulfillmentState = {
     customsClassifications: CustomsClassification[];
     documents: FulfillmentDocument[];
 };
-type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
+type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
 type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId'>;
 type ShipmentInput = Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
 export type FulfillmentCommand = {
@@ -757,8 +761,8 @@ export function stockIssueRemaining(root: MistState, id: string) {
     return issue ? sum([issue.quantity, -sum(root.fulfillment.stockMovements.filter(movement => movement.kind === 'return' && movement.issueId === id).map(movement => movement.quantity))]) : 0;
 }
 function purchaseSnapshot(purchase: FulfillmentPurchase): FulfillmentPurchaseRevision['snapshot'] {
-    const { orderId, lineId, kind, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
-    return { orderId, lineId, kind, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds: [...fileIds] };
+    const { orderId, lineId, kind, materialKind, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
+    return { orderId, lineId, kind, ...(materialKind?{materialKind}:{}), supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds: [...fileIds] };
 }
 function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
     const f = root.fulfillment, s = source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
@@ -767,6 +771,7 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
     if (unit !== '米' && !Number.isInteger(quantity)) fail('非米样数量须为整数');
     if (s.kind === 'orderLine') {
         if (!s.productionId) fail('订单样品必须关联准确生产分支');
+        assertGarmentMaterial(root, s.orderId, s.lineId, ctx);
         const order = get(root.orders, s.orderId, '订单'), expected = order.type === 'garment' ? 'pp' : 'pioneer';
         if (![expected, 'shipping'].includes(input.role || '')) fail('请选择当前订单的产前/先锋样或船样角色');
         if (category !== (order.type === 'garment' ? '成衣' : '面料')) fail('实物类别与订单业务域不一致');
@@ -777,7 +782,7 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
         } else if (input.shipmentId) fail('产前/先锋样不绑定出运批次');
     } else if (input.role || input.shipmentId) fail('订单样品角色仅用于准确订单生产分支');
     const id = ctx.id();
-    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: text(input.size, '尺码', false), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
+    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: text(input.size, '尺码', false), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
     f.sampleMovements.push({ id: ctx.id(), sampleId: id, kind: 'receive', quantity, person: ctx.actorName, location: input.location, note: input.note, at: ctx.now, actor: ctx.actorName });
     return id;
 }
@@ -815,8 +820,10 @@ function scopeRevision(root: MistState, task: FulfillmentQcTask): number {
 }
 function requireSampleRole(root: MistState, branch: MistProduction, role: FulfillmentSampleRole, shipmentId?: string) {
     const requirements = productionSampleRequirements(root, branch, role, shipmentId);
+    if(role==='pp'){const materialPlan=garmentMaterialFingerprint(root,branch.orderId,branch.lineId),samples=root.fulfillment.samples.filter(sample=>sample.role==='pp'&&sample.source.kind==='orderLine'&&sample.source.productionId===branch.id);if(materialPlan&&samples.length&&!samples.some(sample=>sample.materialPlan===materialPlan))fail('用料计划已变化，请重新登记产前样');}
     const pending = requirements.find(row => !row.ok);
     if (pending) fail(`${fulfillmentSampleRoleLabel(role)}${pending.label ? `（${pending.label}）` : ''}尚未完成准确实物QC、需求方确认及业务继续`, 'PRECONDITION');
+    if(role==='pp'){const materialPlan=garmentMaterialFingerprint(root,branch.orderId,branch.lineId);if(materialPlan&&requirements.some(row=>get(root.fulfillment.samples,row.evidence!.sampleId,'产前样').materialPlan!==materialPlan))fail('用料计划已变化，请重新登记产前样');}
     return [...new Map(requirements.map(row => [row.evidence!.sampleId, row.evidence!])).values()];
 }
 function requireProductionQc(root: MistState, branch: MistProduction) {
@@ -836,7 +843,8 @@ function requireProductionQc(root: MistState, branch: MistProduction) {
         }
     }
 }
-function requireProductionRelease(root: MistState, branch: MistProduction, recordingInspection = false) {
+function requireProductionRelease(root: MistState, branch: MistProduction, context: InternalFabricContext, recordingInspection = false) {
+    assertGarmentMaterial(root, branch.orderId, branch.lineId, context);
     assertMistOrderApproved(root, branch.orderId);
     assertMistOrderDeposit(root, branch.orderId);
     const fact = fulfillmentProductionFact(root, branch.id);
@@ -851,9 +859,9 @@ function requireProductionRelease(root: MistState, branch: MistProduction, recor
     if (!recordingInspection && root.fulfillment.qcTasks.some(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && ['blocked', 'awaiting_business'].includes(task.state))) fail('当前生产分支因质量问题暂停，须复验及业务恢复', 'PRECONDITION');
 }
 /** Shared core commands call this before mutating a production board position/progress. */
-export function assertProductionTransition(root: MistState, production: MistProduction, target: MistProduction['col'], pct: number) {
+export function assertProductionTransition(root: MistState, production: MistProduction, target: MistProduction['col'], pct: number, context: InternalFabricContext = {actorName:''}) {
     const cols = ['cut', 'sew', 'finish', 'qc', 'done'];
-    if (pct > production.pct || cols.indexOf(target) > cols.indexOf(production.col) || target === 'done') requireProductionRelease(root, production);
+    if (pct > production.pct || cols.indexOf(target) > cols.indexOf(production.col) || target === 'done') requireProductionRelease(root, production, context);
     if (target === 'done') { physicalCapacity(root, { orderId: production.orderId, lineId: production.lineId, productionId: production.id, quantity: 0, factoryConfirmedAt: '' }); requireProductionQc(root, production); }
 }
 function requireEditableShipment(s: FulfillmentShipment) { if (s.state === 'departed' || s.state === 'cancelled')
@@ -879,13 +887,13 @@ function assertCurrentShipmentTolerance(root: MistState, shipment: FulfillmentSh
         assertShipmentWithinTolerance(line, order.governance?.contract, cumulative);
     }
 }
-function sourceQuality(root: MistState, line: ShipmentLine) {
+function sourceQuality(root: MistState, line: ShipmentLine, context: InternalFabricContext) {
     physicalCapacity(root, line);
     const production = root.productions.filter(p => p.lineId === line.lineId && p.id === line.productionId);
     if (!production.length)
         fail('当前条目尚无可核对的实际生产分支及生产QC报告', 'PRECONDITION');
     for (const branch of production) {
-        requireProductionRelease(root, branch);
+        requireProductionRelease(root, branch, context);
         requireProductionQc(root, branch);
     }
 }
@@ -905,6 +913,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     if(command.type.startsWith('fulfillment.claimInventory.'))return applyClaimInventoryCommand(root,command as ClaimInventoryCommand,ctx);
     if((CUSTOMS_DECLARATION_COMMANDS as readonly string[]).includes(command.type))return applyCustomsDeclarationCommand(root,command as CustomsDeclarationCommand,ctx);
     const p: any = command.payload;
+    if (['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm','fulfillment.procurement.receive'].includes(command.type) || command.type === 'fulfillment.procurement.decide' && p.decision === 'approved') {
+        const purchase = get(f.purchases, p.id, '采购'), order = get(root.orders, purchase.orderId, '订单'), line = get(root.orderLines, purchase.lineId, '订单条目');
+        assertGarmentProcurement(order, line, purchase.kind, purchase.materialKind);
+        if (order.governance?.contract.internalSupply && ['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm'].includes(command.type)) normalizeInternalSupply(order.governance.contract, order, ctx);
+    }
     switch (command.type) {
         case 'fulfillment.samples.create': {
             const s = source(root, p.source);
@@ -1069,7 +1082,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('QC业务域不一致');
             if (!ctx.actorId || t.assigneeId !== ctx.actorId)
                 fail('请先由当前QC认领任务');
-            if (t.kind === 'production' && t.source.kind === 'orderLine') requireProductionRelease(root, liveBranch(root, t.source.productionId!), true);
+            if (t.kind === 'production' && t.source.kind === 'orderLine') requireProductionRelease(root, liveBranch(root, t.source.productionId!), ctx, true);
             if (!['pass', 'conditional', 'reject'].includes(p.result))
                 fail('请选择专业结论');
             const reviewedAt = instant(p.reviewedAt, ctx, '实际检查时间'), opinion = text(p.opinion, '专业意见'), report = text(p.report, '报告编号');
@@ -1163,6 +1176,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.production.release': {
             const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
             if (fact.release) fail('生产分支已放行');
+            assertGarmentMaterial(root, branch.orderId, branch.lineId, ctx);
             assertMistOrderApproved(root, branch.orderId); assertMistOrderDeposit(root, branch.orderId);
             const order = get(root.orders, branch.orderId, '订单');
             if (order.type === 'garment' && !fact.sizes.length) fail('请先登记准确生产尺码与数量');
@@ -1192,6 +1206,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.production.resume': {
             const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
             if (!fact.hold) fail('生产分支未暂停');
+            assertGarmentMaterial(root, branch.orderId, branch.lineId, ctx);
             const note = text(p.note, '恢复依据', true, 500);
             (fact.holdLog ||= []).push({ ...fact.hold!, resumedAt: ctx.now, resumedBy: ctx.actorName, resumeNote: note });
             delete fact.hold;
@@ -1201,7 +1216,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.production.complete': {
             const branch = liveBranch(root, p.productionId), fact = productionFact(root, branch.id);
-            requireProductionRelease(root, branch);
+            requireProductionRelease(root, branch, ctx);
             if (fact.completion) fail('最终完工事实已登记，不得覆盖');
             const quantity = qty(p.quantity, '最终完工数量'), date = day(p.date, '实际完工日');
             if (date > ctx.now.slice(0, 10)) fail('完工日期不得在未来');
@@ -1248,6 +1263,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const s = source(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }), order = get(root.orders, p.orderId, '订单');
             assertMistOrderOpen(root, order.id);
             const existing = p.id ? get(f.purchases, p.id, '采购') : undefined;
+            const materialKind = assertGarmentProcurement(order, get(root.orderLines, p.lineId, '订单条目'), p.kind, p.materialKind);
+            if (order.governance?.contract.internalSupply) normalizeInternalSupply(order.governance.contract, order, ctx);
             if (existing && !['draft', 'rejected'].includes(existing.state))
                 fail('已提交采购须退回后修订');
             if (!['material', 'finished', 'processing'].includes(p.kind))
@@ -1265,9 +1282,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const id = existing?.id || ctx.id();
             const currency = text(p.currency, '币种').toUpperCase();
             if (!/^[A-Z]{3}$/.test(currency)) fail('采购币种须为三位英文字母');
-            const record: FulfillmentPurchase = { id, code: existing?.code || code('PO', f.purchases, ctx), orderId: order.id, lineId: s.kind === 'orderLine' ? s.lineId : '', kind: p.kind, domain: order.type, supplierId, supplier, description: text(p.description, '采购内容'), quantity, unit: text(p.unit, '单位'), price, currency, due: day(p.due, '交期'), terms: text(p.terms, '付款条件'), destination: text(p.destination, '交付地点'), note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'draft', requesterId: ctx.actorId || '', createdBy: existing?.createdBy || ctx.actorName, createdAt: existing?.createdAt || ctx.now, reviewerIds: [], configVersions: {}, received: existing?.received || 0 };
+            const record: FulfillmentPurchase = { id, code: existing?.code || code('PO', f.purchases, ctx), orderId: order.id, lineId: s.kind === 'orderLine' ? s.lineId : '', kind: p.kind, ...(materialKind?{materialKind}:{}), domain: order.type, supplierId, supplier, description: text(p.description, '采购内容'), quantity, unit: text(p.unit, '单位'), price, currency, due: day(p.due, '交期'), terms: text(p.terms, '付款条件'), destination: text(p.destination, '交付地点'), note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'draft', requesterId: ctx.actorId || '', createdBy: existing?.createdBy || ctx.actorName, createdAt: existing?.createdAt || ctx.now, reviewerIds: [], configVersions: {}, received: existing?.received || 0 };
             if (existing) {
                 Object.assign(existing, record);
+                if (!materialKind) delete existing.materialKind;
                 delete existing.submittedAt;
                 delete existing.decision;
             }
@@ -1339,7 +1357,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!purchase.offlineSend || !purchase.supplierConfirmation) fail('请先登记批准合同线下发出和供应商确认');
             const production = root.productions.find(job => job.sourcePurchaseId === purchase.id);
             if (production && fulfillmentProductionFact(root, production.id)?.completion) fail('最终完工事实已冻结，请勿继续追加交付');
-            if (production && purchase.kind === 'processing') requireProductionRelease(root, production);
+            if (production && purchase.kind === 'processing') requireProductionRelease(root, production, ctx);
             const quantity = qty(p.quantity, '实收数量', true), rejected = qty(p.rejected, '拒收数量', true), location = text(p.location, '实际收货地点'), date = day(p.date, '收货日期'), evidence = text(p.evidence, '交接依据'), fileIds = files(root, p.fileIds);
             if (sum([quantity, rejected]) <= 0) fail('实收与拒收数量至少有一项大于零');
             if (date > ctx.now.slice(0, 10))
@@ -1545,7 +1563,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             requireEditableShipment(s);
             for (const line of s.lines) {
                 assertMistOrderApproved(root, line.orderId);
-                sourceQuality(root, line);
+                sourceQuality(root, line, ctx);
                 requireSampleRole(root, get(root.productions, line.productionId!, '准确生产分支'), 'shipping', s.id);
                 checkPhysicalReservation(root, line, s.id);
                 if (sum(f.packing.filter(a => a.shipmentId === s.id && a.lineId === line.lineId && a.productionId === line.productionId).map(a => a.quantity)) !== line.quantity)
@@ -1574,7 +1592,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('需完成单据准备并由业务登记对客发送');
             if (!f.customs.some(c => c.shipmentId === s.id && c.status === 'cleared'))
                 fail('出口清关尚未完成');
-            s.lines.forEach(l => { assertMistOrderApproved(root, l.orderId); assertMistOrderDeposit(root, l.orderId); assertOrderShipmentPaymentCovered(root, l.orderId); sourceQuality(root, l); requireSampleRole(root, get(root.productions, l.productionId!, '准确生产分支'), 'shipping', s.id); checkPhysicalReservation(root, l, s.id); });
+            s.lines.forEach(l => { assertMistOrderApproved(root, l.orderId); assertMistOrderDeposit(root, l.orderId); assertOrderShipmentPaymentCovered(root, l.orderId); sourceQuality(root, l, ctx); requireSampleRole(root, get(root.productions, l.productionId!, '准确生产分支'), 'shipping', s.id); checkPhysicalReservation(root, l, s.id); });
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);
             const at = instant(p.at, ctx, '实际离港/起飞时间');

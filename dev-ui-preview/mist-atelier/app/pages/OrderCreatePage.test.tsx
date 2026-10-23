@@ -83,3 +83,26 @@ it('creates only a governed draft and preserves uploaded customer contract evide
   await next();await next();await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());
   expect(store.state!.orders[0].governance).toMatchObject({status:'draft',contract:{kind:'external',poNumber:'PO-2026-10',confirmationFileIds:['customer-po'],paymentMethod:'TT',depositPercent:30,incoterm:'FOB',deliveryPlace:'上海'}});expect(store.state!.orders[0].state).toBe('订单草稿');
 });
+
+
+it('submits the chosen garment mode and the explicit CMT scope from real controls',async()=>{
+  await enterLine('10','20');const mode=getByRole(host,'combobox',{name:'履约模式'}) as HTMLSelectElement;
+  expect(mode.value).toBe('');await act(async()=>{mode.value='full_package';mode.dispatchEvent(new Event('change',{bubbles:true}));});
+  await act(async()=>getByRole(host,'checkbox',{name:'包装'}).click());
+  await next();input('交期','2026-10-30');await next();await next();
+  expect(host.textContent).toContain('全包 · CMT 包含：包装');await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());
+  expect(store.run.mock.calls[0][0].payload.lines[0]).toMatchObject({fulfillmentMode:'full_package',cmtIncludedItems:['packaging']});
+  expect(store.state!.orderLines[0]).toMatchObject({fulfillmentMode:'full_package',cmtIncludedItems:['packaging']});
+});
+
+it('selects the receiving garment member by account ID for an internal fabric order',async()=>{
+  store.state!.members=[{userId:'garment-owner',name:'成衣负责人',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now},{userId:'fabric-other',name:'面料成员',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now}];
+  store.state!.memberGroups=[{userId:'garment-owner',name:'成衣负责人',groups:['garment'],updatedAt:context.now,updatedBy:'sales'},{userId:'fabric-other',name:'面料成员',groups:['fabric'],updatedAt:context.now,updatedBy:'sales'}];
+  const select=async(name:string,value:string)=>{const node=getByRole(host,'combobox',{name}) as HTMLSelectElement;await act(async()=>{node.value=value;node.dispatchEvent(new Event('change',{bubbles:true}));});};
+  await select('订单类型','fabric');await select('订单用途','internal');await act(async()=>getByRole(host,'checkbox',{name:'供给成衣组'}).click());
+  const receiver=getByRole(host,'combobox',{name:'成衣接收负责人'});expect(receiver.textContent).toContain('成衣负责人');expect(receiver.textContent).not.toContain('面料成员');
+  await select('成衣接收负责人','garment-owner');input('内部用途','成衣用料');await enterLine('100','20');await next();input('交期','2026-10-30');await next();await next();
+  store.run.mockResolvedValue({result:{orderId:'internal-fabric'}});await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());
+  expect(store.run.mock.calls[0][0].payload.governance).toMatchObject({kind:'internal',internalSupply:{group:'garment',receiverId:'garment-owner'}});
+  expect(store.run.mock.calls[0][0].payload.lines[0]).not.toHaveProperty('fulfillmentMode');
+});

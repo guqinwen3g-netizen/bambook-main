@@ -22,6 +22,27 @@ const approved=(patch:Partial<FulfillmentPurchase>={})=>({state:'approved' as co
 beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
+it('offers garment supplies and processing without a fabric purchase shortcut',async()=>{
+  store.state!.orders.push({id:'fabric-order',code:'SO-F',type:'fabric',currency:'CNY'} as any);
+  store.state!.orderLines.push({id:'fabric-line',orderId:'fabric-order',name:'斜纹',style:'FB',qty:100,unit:'米',price:10} as any);
+  render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
+  const content=getByRole(host,'combobox',{name:'采购内容'}) as HTMLSelectElement;
+  expect([...content.options].map(option=>option.value)).toEqual(['','material:trims','material:packaging','processing']);
+  const source=getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement;
+  expect([...source.options].map(option=>option.value)).toEqual(['','line:l']);
+  expect(content.value).toBe('');
+});
+
+it('preserves the material category when editing and sends it with the purchase kind',async()=>{
+  store.state!.market.suppliers=[{id:'s',name:'青禾辅料',status:'active'} as any];
+  store.state!.fulfillment.purchases.push(purchase('trims',{materialKind:'trims'}));
+  render('trims');await click(getByRole(host,'button',{name:'编辑草稿'}));
+  expect((getByRole(host,'combobox',{name:'采购内容'}) as HTMLSelectElement).value).toBe('material:trims');
+  for(let i=0;i<3;i++)await click(getByRole(host,'button',{name:'下一步'}));
+  await click(getByRole(host,'button',{name:'保存草稿'}));
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.save',payload:expect.objectContaining({id:'trims',kind:'material',materialKind:'trims',orderId:'o',lineId:'l'})}));
+});
+
 it('keeps future supplier suspensions selectable and excludes suppliers unavailable on the Shanghai business day',async()=>{
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-13T16:30:00Z'));
   const base={type:'面料贸易',country:'CN',address:'',capabilities:'面料',capacity:100,capacityUnit:'米',leadDays:7,blockReason:'待核实',contacts:[],fileIds:[],note:'',createdAt:'',updatedAt:''};

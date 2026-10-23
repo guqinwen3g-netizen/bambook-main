@@ -7,7 +7,7 @@ import type { MistDev, MistRound, MistState, MistVersion } from '../../../../ser
 import { caseFactoryLetters, defaultFactoryTask, developmentClosure, developmentRoundBlocker, duplicateRoundFactories, developmentRoundViews, factoryLetterAt, factoryTaskError, factoryTaskSync, factoryTaskSyncBlocker, nextRoundNumber, nextPhysicalVersionNumber, roundVersionLabel, type FactoryTaskInput } from '../../../../server/src/shared/mistDevelopmentRounds';
 import { developmentDomain } from '../../../../server/src/shared/mistDevelopmentDomain';
 import { withPrimaryImage } from '../../../../server/src/shared/mistPrimaryImage';
-import { ImageRoleTag, PRIMARY_IMAGE_HINT, imageRole, imageUploadTitle } from './modules/PrimaryImage';
+import { ImageRoleTag, imageRole, imageUploadTitle } from './modules/PrimaryImage';
 import { versionTimelineStatus } from '../../../../server/src/shared/mistDevelopmentCompare';
 import { FileName } from '../runtime/files';
 
@@ -137,7 +137,6 @@ export function NewRoundDialog({ open, state, dev, busy, failure, factoryOptions
       <Field label={uiText("本轮共同要求")} required full hint={uiText("建轮时复制进各工厂任务；之后修改共同要求不会自动覆盖，需逐厂同步")}><TextArea value={form.requirements} onChange={event => setForm(previous => ({ ...previous, requirements: event.target.value }))} /></Field>
       <Field label={uiText("本轮目标日期")} required hint={uiText("各工厂要求日期默认取此日期")}><TextInput type="date" value={form.targetDate} onChange={event => setForm(previous => ({ ...previous, targetDate: event.target.value }))} /></Field>
       <div className="mist-field" data-full="true" role="group" aria-label={uiText("共同要求附件")}><span className="mist-field-label">{uiText("共同要求附件")}</span>
-        <p className="mist-note">{PRIMARY_IMAGE_HINT}</p>
         {form.fileIds.map(id => <div key={id} className="mist-row">{state.files.find(file => file.id === id) ? <FileName file={state.files.find(file => file.id === id)!} files={form.fileIds.map(x => state.files.find(file => file.id === x))} /> : <span>{id}</span>}<ImageRoleTag files={state.files} ids={form.fileIds} id={id} /><span className="mist-spacer" />{imageRole(state.files, form.fileIds, id) === 'supplement' && <Button size="sm" variant="quiet" disabled={busy} onClick={() => setForm(previous => ({ ...previous, fileIds: withPrimaryImage(previous.fileIds, id) }))}>{uiText("设为主图")}</Button>}<Button size="sm" variant="quiet" disabled={busy} onClick={() => setForm(previous => ({ ...previous, fileIds: previous.fileIds.filter(item => item !== id) }))}>{uiText("移除")}</Button></div>)}
         <UploadZone title={uiText(imageUploadTitle(state.files, form.fileIds))} hint={uiText("可附参考图、工艺单等")} onFiles={files => { if (!busy) void onUpload(files).then(ids => setForm(previous => ({ ...previous, fileIds: [...new Set([...previous.fileIds, ...ids])] }))); }} /></div>
     </FormGrid>}

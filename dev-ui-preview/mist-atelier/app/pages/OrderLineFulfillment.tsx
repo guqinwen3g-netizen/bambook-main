@@ -9,6 +9,7 @@ import type { MistOrder, MistOrderLine, MistState } from '../../../../server/src
 import type { OrderGovernanceFields } from '../../../../server/src/shared/mistOrderGovernance';
 import { formatOrderQuantity } from './orderAmounts';
 import { currentLineStage, lineShipping, lineStages, lineTrackLabel, type LineStage } from './orderLineTrack';
+import { garmentFulfillmentLabel, cmtIncludedLabel } from './GarmentFulfillmentFields';
 import { DetailBlock } from './modules/pageKit';
 
 const SHIP_STATE: Record<string, string> = { preparing: '准备中', ready: '待出运', departed: '已离港' };
@@ -31,7 +32,8 @@ export function OrderLineFulfillment({ state, order, line, go, onCloseLine }: { 
       { label: 'PO / 合同号', value: contract?.kind === 'internal' ? contract.internalPurpose || '内部用途待填' : contract?.poNumber || '待补充' },
       { label: '规格 / 分色分码', value: <><span>{spec || `${line.style} · ${line.name}`}</span><span className="mist-cell-sub" data-line-breakdown-summary>{breakdownSummary((line as MistOrderLine & { breakdown?: OrderLineBreakdown }).breakdown, unit)}</span></> },
       { label: '订单数量', value: `${q(line.qty)} ${unit}` },
-      { label: '履约模式', value: lineTrackLabel(order) },
+      { label: '履约模式', value: order.type==='garment'?garmentFulfillmentLabel(line):lineTrackLabel(order) },
+      ...(order.type==='garment'?[{label:'CMT 包含',value:cmtIncludedLabel(line)}]:[]),
       { label: '工厂分支', value: factories.length ? factories.join('、') : '尚未开立生产' },
     ]} />
     <div className="mist-col" style={{ gap: 8 }}>

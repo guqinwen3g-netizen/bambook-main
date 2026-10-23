@@ -1,4 +1,5 @@
 import {sampleConfirmationBlocker} from './mistSampleSending';
+import {seedInternalFabricPlan} from './mistDemoInternalFabric';
 /**
  * 演示公司的模块示例数据。
  *
@@ -13,7 +14,7 @@ import { riskSignals } from './mistRisk';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { platformBusinessDate } from './mistPlatform';
 
-export const DEMO_SEED_VERSION = 21;
+export const DEMO_SEED_VERSION = 22;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -51,7 +52,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const o = state.orders.find(x => x.id === orderId); if (!o || o.governance?.status === 'approved') return;
     // SO-G-2026-009 演示信用证付款（即期 L/C，不收定金），其余按 T/T 定金 + 见提单副本付余款。
     const lc = o.code === 'SO-G-2026-009';
-    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认.pdf`)], internalPurpose: '', receiver: '', paymentMethod: lc ? 'LC' : 'TT', depositPercent: lc ? 0 : depositPercent, preShipmentPercent: lc ? 0 : depositPercent, paymentNote: lc ? '100% 即期信用证（L/C at sight），提单日后 21 天内交单' : `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
+    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, ...(o.type === 'garment' ? { lines: state.orderLines.filter(line => line.orderId === orderId).map(line => ({ ...line, fulfillmentMode: ['SO-G-2026-015', 'SO-G-2026-017'].includes(o.code) ? 'full_package' as const : 'cmt' as const, cmtIncludedItems: [] })) } : {}), input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认.pdf`)], internalPurpose: '', receiver: '', paymentMethod: lc ? 'LC' : 'TT', depositPercent: lc ? 0 : depositPercent, preShipmentPercent: lc ? 0 : depositPercent, paymentNote: lc ? '100% 即期信用证（L/C at sight），提单日后 21 天内交单' : `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
     run('order submit ' + o.code, { type: 'order.governance.submit', payload: { orderId } }, sales);
     run('order approve ' + o.code, { type: 'order.governance.decide', payload: { id: orderId, decision: 'approved', note: '价格、交期与付款条件已核对' } }, reviewer);
   };
@@ -233,9 +234,23 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
 
   /* ───────── 采购：面料 / 辅料已批准并入库，加工单草稿 ───────── */
   const order015 = state.orders.find(o => o.code === 'SO-G-2026-015'), lines015 = state.orderLines.filter(l => l.orderId === order015?.id);
-  const purchase = (step: string, input: { lineIndex: number; kind: 'material' | 'processing' | 'finished'; supplierId: string; description: string; quantity: number; unit: string; price: number; currency: string; due: number; terms: string; destination: string; note?: string }) => {
+  let supplyOrderId = '', supplyLineIds: string[] = [];
+  if (order015) {
+    try {
+      const supply = seedInternalFabricPlan(state, { fabric: buyer, garment: sales, reviewer }, order015.id, lines015.map((line, index) => ({ lineId: line.id, name: index === 0 ? '燕麦色双面呢' : index === 2 ? '铜氨丝混纺里布' : '炭灰细格呢', style: `${line.style}-FAB`, metres: index === 0 ? 2400 : index === 2 ? 1100 : line.qty * 3 })));
+      state = supply.state; supplyOrderId = supply.fabricOrderId; supplyLineIds = supply.fabricLineIds;
+    } catch (error) { failures.push({ step: 'internal fabric plan', message: error instanceof Error ? error.message : String(error) }); }
+  }
+  const completedGarmentOrder = state.orders.find(order => order.code === 'SO-G-2026-017');
+  if (completedGarmentOrder) {
+    try {
+      state = seedInternalFabricPlan(state, { fabric: buyer, garment: sales, reviewer }, completedGarmentOrder.id, state.orderLines.filter(line => line.orderId === completedGarmentOrder.id).map(line => ({ lineId: line.id, name: '精纺羊毛西装面料', style: `${line.style}-FAB`, metres: line.qty * 3.5 }))).state;
+    } catch (error) { failures.push({ step: 'completed garment fabric plan', message: error instanceof Error ? error.message : String(error) }); }
+  }
+  const purchase = (step: string, input: { lineIndex: number; kind: 'material' | 'processing' | 'finished'; materialKind?: 'fabric' | 'trims'; supplierId: string; description: string; quantity: number; unit: string; price: number; currency: string; due: number; terms: string; destination: string; note?: string }) => {
     const line = lines15(input.lineIndex); if (!order015 || !line || !input.supplierId) return '';
-    return id(run(step, { type: 'fulfillment.procurement.save', payload: { orderId: order015.id, lineId: line.id, kind: input.kind, supplierId: input.supplierId, supplier: '', description: input.description, quantity: input.quantity, unit: input.unit, price: input.price, currency: input.currency, due: day(input.due), terms: input.terms, destination: input.destination, note: input.note || '', fileIds: [] } }, buyer));
+    const isFabric = input.materialKind === 'fabric';
+    return id(run(step, { type: 'fulfillment.procurement.save', payload: { orderId: isFabric ? supplyOrderId : order015.id, lineId: isFabric ? supplyLineIds[input.lineIndex] : line.id, kind: input.kind, ...(input.materialKind ? { materialKind: input.materialKind } : {}), supplierId: input.supplierId, supplier: '', description: input.description, quantity: input.quantity, unit: input.unit, price: input.price, currency: input.currency, due: day(input.due), terms: input.terms, destination: input.destination, note: input.note || '', fileIds: [] } }, buyer));
   };
   function lines15(index: number) { return lines015[index]; }
   const approveAndConfirm = (pid: string, label: string, confirmedOffset: number) => {
@@ -246,14 +261,14 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const due = state.fulfillment.purchases.find(p => p.id === pid)?.due || day(20);
     run(label + ' confirm', { type: 'fulfillment.procurement.confirm', payload: { id: pid, at: at(confirmedOffset, 10), evidence: '供应商盖章回签', confirmedDue: due, fileIds: [] } }, buyer);
   };
-  const fabricPo = purchase('purchase fabric', { lineIndex: 0, kind: 'material', supplierId: huasheng, description: '燕麦色双面呢 420 g/m² · 148 cm（大衣大身）', quantity: 2400, unit: '米', price: 46.5, currency: 'CNY', due: -2, terms: '30% 预付，余款到货验收后 30 天', destination: '嘉兴面辅料仓' });
+  const fabricPo = purchase('purchase fabric', { lineIndex: 0, kind: 'material', materialKind: 'fabric', supplierId: huasheng, description: '燕麦色双面呢 420 g/m² · 148 cm（大衣大身）', quantity: 2400, unit: '米', price: 46.5, currency: 'CNY', due: -2, terms: '30% 预付，余款到货验收后 30 天', destination: '嘉兴面辅料仓' });
   approveAndConfirm(fabricPo, 'purchase fabric', -12);
   if (fabricPo) run('purchase fabric receive', { type: 'fulfillment.procurement.receive', payload: { id: fabricPo, quantity: 2380, rejected: 20, destination: 'warehouse', location: '嘉兴面辅料仓 A-03', date: day(-3), evidence: '到货 2,400 米，色差 20 米退回', fileIds: [] } }, warehouse);
-  const buttonPo = purchase('purchase buttons', { lineIndex: 0, kind: 'material', supplierId: baotai, description: '牛角纹树脂扣 24L 深棕（每件 8 粒 + 2% 损耗）', quantity: 6600, unit: '粒', price: 0.08, currency: 'CNY', due: -1, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
+  const buttonPo = purchase('purchase buttons', { lineIndex: 0, kind: 'material', materialKind: 'trims', supplierId: baotai, description: '牛角纹树脂扣 24L 深棕（每件 8 粒 + 2% 损耗）', quantity: 6600, unit: '粒', price: 0.08, currency: 'CNY', due: -1, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
   approveAndConfirm(buttonPo, 'purchase buttons', -8);
   if (buttonPo) run('purchase buttons receive', { type: 'fulfillment.procurement.receive', payload: { id: buttonPo, quantity: 6600, rejected: 0, destination: 'warehouse', location: '嘉兴面辅料仓 C-11', date: day(-2), evidence: '到货点数无误', fileIds: [] } }, warehouse);
   purchase('purchase processing draft', { lineIndex: 1, kind: 'processing', supplierId: yuanshan, description: '炭灰细格 Blazer 成衣缝制加工（含锁眼钉扣、整烫）', quantity: 800, unit: '件', price: 85, currency: 'CNY', due: 40, terms: '月结 30 天，按实际回交数结算', destination: '远山服装', note: '待确认工价后提交审批' });
-  const liningPo = purchase('purchase lining', { lineIndex: 2, kind: 'material', supplierId: huasheng, description: '雾蓝西装里布 · 铜氨丝混纺', quantity: 1100, unit: '米', price: 18.8, currency: 'CNY', due: 10, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
+  const liningPo = purchase('purchase lining', { lineIndex: 2, kind: 'material', materialKind: 'fabric', supplierId: huasheng, description: '雾蓝西装里布 · 铜氨丝混纺', quantity: 1100, unit: '米', price: 18.8, currency: 'CNY', due: 10, terms: '月结 30 天', destination: '嘉兴面辅料仓' });
   void liningPo;
 
   /* ───────── 库存：从面料批次领用给工厂 ───────── */
@@ -331,7 +346,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
       run('depart 017', { type: 'fulfillment.shipments.depart', payload: { id: ship, at: at(-4, 6), evidence: '船公司装船通知 · 提单 MSKU77412093', fileIds: [] } }, warehouse);
       /* 出口退税：向江南成衣采购成品（工厂开 13% 增值税专票）→ 财务登记专票与退税率；退税申报留给财务在报关页演示配单。 */
       const unit017 = state.orderLines.find(l => l.id === job017.lineId)?.unit || '套';
-      const finishedPo = id(run('purchase finished 017', { type: 'fulfillment.procurement.save', payload: { orderId: order017.id, lineId: job017.lineId, kind: 'finished', supplierId: jiangnan, supplier: '', description: '修身羊毛西装套装成品（含面辅料、加工、包装）· 第一批 500 件', quantity: 500, unit: unit017, price: 452, currency: 'CNY', due: day(-8), terms: '出运后 30 天付清，凭增值税专用发票', destination: '上海洋山', note: '含税价，税率 13%', fileIds: [] } }, buyer));
+      const finishedPo = id(run('purchase finished 017', { type: 'fulfillment.procurement.save', payload: { orderId: order017.id, lineId: job017.lineId, kind: 'processing', supplierId: jiangnan, supplier: '', description: '修身羊毛西装套装加工 · 第一批 500 件', quantity: 500, unit: unit017, price: 452, currency: 'CNY', due: day(-8), terms: '出运后 30 天付清，凭增值税专用发票', destination: '上海洋山', note: '含税价，税率 13%', fileIds: [] } }, buyer));
       approveAndConfirm(finishedPo, 'purchase finished 017', -30);
       if (finishedPo) run('bill vat 017', { type: 'payable.bill.register', payload: { invoiceType:'vat-special',supplierId: jiangnan, invoiceNo: '33002641 04517712', invoiceDate: day(-3), currency: 'CNY', amount: 226000, taxAmount: 26000, taxRate: '13%', lines: [{ purchaseId: finishedPo, amount: 226000 }], due: day(26), dueBasis: '合同：出运后 30 天付清', fileIds: [demoFile('vat-invoice', finishedPo, '增值税专用发票 江南成衣 SO-G-2026-017.pdf')], note: '数电专票，已勾选确认用途（出口退税）' } }, finance);
       run('rebate rate 6203.31', { type: 'rebate.rate.save', payload: { hsCode: '6203.31', rate: '13', effectiveFrom: '2019-04-01', basis: '财政部 税务总局 海关总署公告 2019 年第 39 号' } }, finance);

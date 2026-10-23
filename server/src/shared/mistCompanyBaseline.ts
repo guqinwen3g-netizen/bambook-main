@@ -5,7 +5,7 @@ import {demoFileRecord} from './mistDemoFiles';
 import {completeCompanyProduct} from './mistCompanyCatalog';
 import type {MistAccountRef,MistMemberDirectoryEntry} from './mistAccounts';
 
-export const MIST_COMPANY_BASELINE_VERSION=4;
+export const MIST_COMPANY_BASELINE_VERSION=5;
 export const MIST_COMPANY_BASELINE_AS_OF='2026-10-19T04:00:00.000Z';
 export const MIST_COMPANY_DATASET='claridge-peak-continuous-operations';
 export const MIST_COMPANY_WORKSPACE_NAME=MIST_COMPANY_IDENTITY.workspace;
@@ -176,7 +176,7 @@ export function createMistCompanyBaseline(base:MistContext,roster:MistCompanyRos
 
  for(const [month,family] of [[2,'fabric'],[3,'garment'],[5,'fabric'],[6,'garment'],[8,'fabric'],[9,'garment']] as const){
   const productId=productIds[family==='fabric'?0:6],customerId=customerIds[0];
-  try{state=seedCompanyHistory(state,{sales:family==='fabric'?fabric:garment,finance,qc:family==='fabric'?fabricQc:garmentQc,logistics:contextFor(base,roster,'logistics',number),reviewer:owner},{month,family,productId,customerId});}catch(error){failures.push({step:'historical '+month+' '+family,message:error instanceof Error?error.message:String(error)});}
+  try{state=seedCompanyHistory(state,{sales:family==='fabric'?fabric:garment,fabric,finance,qc:family==='fabric'?fabricQc:garmentQc,logistics:contextFor(base,roster,'logistics',number),reviewer:owner},{month,family,productId,customerId});}catch(error){failures.push({step:'historical '+month+' '+family,message:error instanceof Error?error.message:String(error)});}
  }
 
  const claimInvoices=state.invoices.filter(row=>row.open>0).slice(0,3);

@@ -17,6 +17,7 @@ import { PRODUCTION_HOLD_CATEGORIES, type FulfillmentSizeQuantity } from '../../
 import { mistDate } from './OrderListPage';
 import { productionNok, productionReleaseGate } from './productionGate';
 import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
+import { workspaceMembers } from '../runtime/members';
 import { ProductionSampleNotes } from './ProductionSampleNotes';
 import { breakdownSizeTotals, type OrderLineBreakdown } from '../../../../server/src/shared/mistOrderBreakdown';
 import { useDevice } from '../runtime/devicePreferences';
@@ -43,7 +44,7 @@ export function ProductionPage() {
   const density = useDevice('density');
   const { go, route } = useNav(), toast = useToast(), session = useMistSession();
   const [operation,setOperation]=React.useState<ModuleEditorSpec|null>(null);
-  const { state, loading, error, run, refresh } = useMistWorkspace();
+  const { state, workspace, loading, error, run, refresh } = useMistWorkspace();
   const [q, setQ] = React.useState(''), [orderId, setOrderId] = React.useState('all');
   const [range, setRange] = React.useState<ProductionRange>('week'), [gantt, setGantt] = React.useState(false);
   const [selectedId, setSelectedId] = React.useState<string | null>(route.productionId ?? null);
@@ -60,7 +61,8 @@ export function ProductionPage() {
   const openRelease=()=>selected&&setOperation({title:selectedDomain==='fabric'?'业务确认继续大货':'业务确认开产放行',fields:[{key:'note',label:state?.orders.find(order=>order.id===selected.orderId)?.type==='fabric'?'合同、先锋样与继续大货核对依据':'合同、产前样与开产核对依据',type:'textarea',required:true}],initialValues:{note:''},submit:values=>run({type:'fulfillment.production.release',payload:{productionId:selected.id,note:String(values.note||'')}})});
   const openComplete=()=>selected&&setOperation({title:'登记最终实际完工',fields:[{key:'quantity',label:'最终实际完工数量',type:'number',required:true,min:0,step:'0.0001'},...(selectedDomain==='garment'?[{key:'sizes',label:'各实际尺码数量（每行 尺码:数量）',type:'textarea' as const,required:true}]:[]),{key:'date',label:'实际完工日',type:'date',required:true},{key:'evidence',label:'最终点数及完工依据',type:'textarea',required:true}],initialValues:{quantity:'',sizes:'',date:businessNow().toISOString().slice(0,10),evidence:''},submit:values=>run({type:'fulfillment.production.complete',payload:{productionId:selected.id,quantity:Number(values.quantity),sizeQuantities:parseProductionSizes(String(values.sizes||'')),date:String(values.date||''),evidence:String(values.evidence||''),fileIds:[]}})});
   const openAccept=()=>selected&&setOperation({title:'登记客户接受数量差异',fields:[{key:'note',label:'客户明确接受最终数量的依据',type:'textarea',required:true}],initialValues:{note:''},submit:values=>run({type:'fulfillment.production.acceptCompletion',payload:{productionId:selected.id,note:String(values.note||'')}})});
-  const gate=state&&selected?productionReleaseGate(state,selected):[],gateBlocked=gate.find(item=>!item.ok),nok=state&&selected?productionNok(state,selected):undefined;
+  const gateMembers=workspaceMembers(workspace,state,session.user);
+  const gate=state&&selected?productionReleaseGate(state,selected,{actorId:session.user?.id,actorName:session.user?.displayName||'',members:gateMembers.map(member=>({...member,active:true}))}):[],gateBlocked=gate.find(item=>!item.ok),nok=state&&selected?productionNok(state,selected):undefined;
   const openHold=()=>selected&&setOperation({title:'异常暂停生产',description:`${selected.code} · 暂停期间不能推进进度、登记完工、出运或加工收货；QC 仍可检查。`,fields:[{key:'category',label:'暂停类别',type:'select',required:true,options:Object.entries(PRODUCTION_HOLD_CATEGORIES).map(([value,label])=>({value,label}))},{key:'reason',label:'暂停原因',type:'textarea',required:true}],initialValues:{category:'quality',reason:''},submitLabel:'确认暂停',submit:values=>run({type:'fulfillment.production.hold',payload:{productionId:selected.id,category:String(values.category) as keyof typeof PRODUCTION_HOLD_CATEGORIES,reason:String(values.reason||'').trim()}})});
   const openResume=()=>selected&&setOperation({title:'恢复生产',description:fact?.hold?`暂停于 ${fact.hold.at.slice(0,10)} · ${PRODUCTION_HOLD_CATEGORIES[fact.hold.category]}：${fact.hold.reason}`:undefined,fields:[{key:'note',label:'恢复依据',type:'textarea',required:true}],initialValues:{note:''},submitLabel:'恢复生产',submit:values=>run({type:'fulfillment.production.resume',payload:{productionId:selected.id,note:String(values.note||'').trim()}})});
   const openDelay=()=>selected&&setOperation({title:'登记延期',description:`${selected.code} · 原交期 ${selected.due}。延期说明写入本分支风险，看板与订单可见。`,fields:[{key:'due',label:'新交期',type:'date',required:true},{key:'reason',label:'延期原因',type:'textarea',required:true},{key:'informed',label:'是否已告知客户',type:'select',required:true,options:[{value:'yes',label:'已告知客户'},{value:'no',label:'尚未告知客户'}]}],initialValues:{due:'',reason:'',informed:'no'},submitLabel:'保存延期',submit:values=>{const due=String(values.due||''),reason=String(values.reason||'').trim();if(!due||!reason)throw new Error('请填写新交期与延期原因');if(due<=selected.due)throw new Error('新交期须晚于原交期 '+selected.due);return run({type:'production.update',payload:{id:selected.id,pct:selected.pct,due,risk:`延期 ${selected.due} → ${due}：${reason}（${values.informed==='yes'?'已告知客户':'尚未告知客户'}）`}});}});
