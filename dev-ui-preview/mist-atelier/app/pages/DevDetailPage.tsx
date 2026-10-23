@@ -4,10 +4,10 @@ import {businessNow} from '../runtime/businessClock';
 import React from 'react';
 import {developmentCharged,developmentDomain,developmentInitiator,developmentInitiatorLabel,validFabricSample} from '../../../../server/src/shared/mistDevelopmentDomain';
 import { apiService } from '../../../../services/apiService';
-import { Archive, ArrowRight, Building2, CircleCheck, ClipboardList, Clock, Download, Ellipsis, FileCheck, FileText, History, Layers, PackageCheck, Paperclip, Pencil, Plus, ShieldCheck, Trash2, Users, X } from 'lucide-react';
+import { Archive, ArrowRight, Building2, CircleCheck, ClipboardList, Clock, Download, Ellipsis, FileCheck, FileText, History, Layers, Shirt, PackageCheck, Paperclip, Pencil, Plus, ShieldCheck, Trash2, Users, X } from 'lucide-react';
 import { Avatar, BackLink, Banner, Button, Card, CardFooter, CardHeader, Checkbox, ChoiceCards, Dialog, EmptyState, Field, FormGrid, IconButton, IdentityHeader, KeyValue, MeasurementTable, MistPage, Mono, ObjectStage, Pill, RelatedList, Select, Stepper, SummaryNumbers, TextArea, TextInput, TextLink, Thumb, Timeline, UploadZone, useToast, type StepState } from '../../../../components/mist';
 import type { MistConfirmation, MistDev, MistQc, MistRound, MistVersion } from '../../../../server/src/shared/mistWorkspace';
-import { IMG, STAGES } from '../data';
+import { STAGES } from '../data';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMyDisplayName } from '../runtime/me';
 import { useNav } from '../nav';
@@ -183,8 +183,8 @@ export function DevDetailPage(){
   const editFactories=edit.factories.split(/[、,，\n]/).map(value=>value.trim()).filter(Boolean);
   const factoryOptions=developmentFactoryOptions(state,editFactories,dev?developmentDomain(dev.values):'garment');
   const recovery=pending?<Button loading={busy||saving} onClick={()=>void recoverWrite()}>{uiText("核对原操作结果")}</Button>:null;
-  if(!dev)return <MistPage><BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink><Card><EmptyState icon={Layers} title={uiText(loading?'正在读取开发案':'未找到开发案')} description={uiText(error||'请从开发列表选择一个已保存的开发案。')} /></Card></MistPage>;
-  const currentImage=version?.img||dev.img,files=(version?.fileIds||dev.fileIds).map(id=>state?.files.find(file=>file.id===id)).filter(file=>!!file),last=version?.confirmations.at(-1),steps=developmentStepStates(dev,version),history=(state?.events||[]).filter(event=>event.entityId===dev.id||event.entityId===version?.id).slice().sort((a,b)=>b.at.localeCompare(a.at));
+  if(!dev)return <MistPage><BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink><Card><EmptyState icon={fabricDomain?Layers:Shirt} title={uiText(loading?'正在读取开发案':'未找到开发案')} description={uiText(error||'请从开发列表选择一个已保存的开发案。')} /></Card></MistPage>;
+  const files=(version?.fileIds||dev.fileIds).map(id=>state?.files.find(file=>file.id===id)).filter(file=>!!file),last=version?.confirmations.at(-1),steps=developmentStepStates(dev,version),history=(state?.events||[]).filter(event=>event.entityId===dev.id||event.entityId===version?.id).slice().sort((a,b)=>b.at.localeCompare(a.at));
   const openEdit=()=>{setEdit({goal:dev.goal,due:dev.due,factories:dev.values.factories.join('、')});setDialog('edit');};
   const currentFormError=confirmationFormError(form)||(needsForms&&!confirmSampleIds.length?'请选择本次确认针对的形态':null);
   const sameForms=JSON.stringify([...(last?.samples||[]).map(sample=>sample.sampleId)].sort())===JSON.stringify([...confirmSampleIds].sort());
@@ -208,7 +208,7 @@ export function DevDetailPage(){
   const setMeasurement=(key:string,patch:Partial<MeasurementDraft>)=>setQc(previous=>({...previous,measurements:previous.measurements.map(row=>row.key===key?{...row,...patch}:row)}));
   return <MistPage>
     <BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
-    <IdentityHeader thumb={<Thumb src={fabricDomain?picture:picture||IMG[currentImage]} icon={fabricDomain?Layers:undefined} size="lg" />} meta={[developmentInitiator(dev.values)==='internal'?developmentInitiatorLabel(dev.values):dev.customer,<Mono key="code">{dev.code}</Mono>,<Mono key="style">{dev.style}</Mono>]} title={uiText(dev.name)} facts={[{label:'负责人',value:<><Avatar name={dev.owner} size="xs" />{dev.owner}</>},{label:'目标日期',value:dev.due},{label:'发起方',value:developmentInitiatorLabel(dev.values)},{label:'费用',value:developmentCharged(dev.values)?'收费':'不收费'},{label:'状态',value:<Pill tone={dev.tone}>{dev.state}</Pill>}]} actions={<IconButton icon={Ellipsis} label={uiText("更多")} onClick={()=>setDialog('actions')} />} />
+    <IdentityHeader thumb={<Thumb src={picture} icon={fabricDomain?Layers:Shirt} size="lg" />} meta={[developmentInitiator(dev.values)==='internal'?developmentInitiatorLabel(dev.values):dev.customer,<Mono key="code">{dev.code}</Mono>,<Mono key="style">{dev.style}</Mono>]} title={uiText(dev.name)} facts={[{label:'负责人',value:<><Avatar name={dev.owner} size="xs" />{dev.owner}</>},{label:'目标日期',value:dev.due},{label:'发起方',value:developmentInitiatorLabel(dev.values)},{label:'费用',value:developmentCharged(dev.values)?'收费':'不收费'},{label:'状态',value:<Pill tone={dev.tone}>{dev.state}</Pill>}]} actions={<IconButton icon={Ellipsis} label={uiText("更多")} onClick={()=>setDialog('actions')} />} />
     <Stepper steps={STAGES.map((label,index)=>({label,state:steps[index]}))} onSelect={index=>document.getElementById(['mist-dev-goal','mist-dev-sample','mist-dev-qc','mist-dev-confirmation','mist-dev-archive'][index])?.scrollIntoView({behavior:'smooth',block:'start'})} />
     {(failure||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("操作未完成")}>{failure||error}</Banner></div>}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("已保留原请求，核对前请勿重复提交。")}</Banner></div>}
@@ -216,7 +216,7 @@ export function DevDetailPage(){
     <div className="mist-detail">
       <div>
         <Card clip id="mist-dev-version">
-          {(mediaFile&&!picture)||fabricDomain&&!picture?<div className="mist-stage" data-size="lg"><EmptyState icon={Layers} title={uiText(!mediaFile?'尚未上传本版实物图片':pictureError?'图片读取失败':'正在读取图片')} description={mediaFile?.name} action={pictureError?<TextLink onClick={image.retry}>{uiText("重试")}</TextLink>:undefined} /></div>:<ObjectStage size="lg" src={picture||IMG[currentImage]} alt={uiText(dev.name)} caption={uiText(version?`${version.returnedAt?'返样实物':'计划版本'} · ${version.label}`:'开发计划')} />}
+          {!picture?<div className="mist-stage" data-size="lg"><EmptyState icon={Layers} title={uiText(!mediaFile?'暂无图片':pictureError?'图片读取失败':'正在读取图片')} description={mediaFile?.name} action={pictureError?<TextLink onClick={image.retry}>{uiText("重试")}</TextLink>:undefined} /></div>:<ObjectStage size="lg" src={picture} alt={uiText(dev.name)} caption={uiText(version?`${version.returnedAt?'返样实物':'计划版本'} · ${version.label}`:'开发计划')} />}
           <div className="mist-vers" role="group" aria-label={uiText("版本")}>{versions.map(item=><button key={item.id} type="button" aria-pressed={version?.id===item.id} disabled={busy} onClick={()=>chooseVersion(item.id)}>{uiText(item.label)}{(flag=>flag&&<> <Pill tone={flag.tone}>{uiText(flag.label)}</Pill></>)(versionQcFlag(item))}</button>)}</div>
           {state&&version&&(source=><div className="mist-row" data-selection={version.label} style={{padding:'10px 22px 0',gap:8,flexWrap:'wrap',fontSize:12.5}}><span className="mist-muted">{uiText("正在查看")}</span><span>{source.roundLabel} · {source.factory} · <Mono>{uiText(version.label)}</Mono></span><span className="mist-spacer" /><TextLink onClick={()=>locateInTimeline(version.label)}>{uiText("在时间线中定位")}</TextLink></div>)(versionSource(state,dev,version))}
           <KeyValue items={[{label:'工厂',value:version?.factory||'待安排'},{label:'样品',value:version?`${version.sample||'未登记'} · ${version.sampleQuantity} ${fabricDomain?version.sampleUnit||dev.values.sampleUnit||'单位待登记':(!version.returnedAt&&version.task?.sampleUnit)||'件'}`:'未建立版本'},...(fabricDomain?[{label:'实物形态',value:version?.sampleForm||dev.values.sampleForm||'待登记'}]:[{label:'尺码',value:version?.size||dev.values.sizeBase}]),{label:'面料',value:version?.fabric||dev.fabric}]} />

@@ -160,4 +160,6 @@ export const reviewedEnglish: Record<string, string> = {
   '发票类型无效':'Invalid invoice type','票种核对需要真实操作账号':'Sign in to verify invoice type','已作废票据不能核对票种':'Voided invoices cannot be reclassified',
   '增值税专票须按人民币登记':'Record Chinese VAT special invoices in CNY','{0} 未核对为增值税专用发票':'{0} has not been verified as a VAT special invoice','{0} 缺少专票原件':'{0} is missing its VAT invoice original',
   '票据已用于退税申报 {0}，请先处理原申报':'This invoice is used in refund claim {0}; resolve that claim first',
+  '带入要求':'Copy requirements',
+  'PDF、图片、Excel · ≤50MB':'PDF, images, Excel · up to 50 MB',
 };

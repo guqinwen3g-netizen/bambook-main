@@ -137,7 +137,7 @@ describe('development tab return',()=>{
 describe('fabric exact version detail',()=>{
  const useFabric=()=>{bridge.current.state.devs=[{...record,img:'clay',values:{...record.values,domain:'fabric',category:'斜纹',sizeBase:'',sampleForm:'米样',sampleUnit:'米'}}];bridge.current.state.versions[0]={...bridge.current.state.versions[0],qc:null,returnedAt:null,sample:'',size:''};};
  it('records an actual decimal metre sample and shows no garment size or stock photo',async()=>{
-  useFabric();await mount();expect(host.textContent).not.toContain('尺码');expect(host.textContent).toContain('尚未上传本版实物图片');expect(host.querySelector('.mist-thumb img')).toBeNull();await click('登记返样');await fill('实物编号','QA-FABRIC-REAL');await fill('数量 / 长度','1.25');await fill('实际位置','样品架A');await click('保存返样');
+  useFabric();await mount();expect(host.textContent).not.toContain('尺码');expect(host.textContent).toContain('暂无图片');expect(host.querySelector('.mist-thumb img')).toBeNull();await click('登记返样');await fill('实物编号','QA-FABRIC-REAL');await fill('数量 / 长度','1.25');await fill('实际位置','样品架A');await click('保存返样');
   expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'development.recordSample',payload:expect.objectContaining({devId:'dev-a',versionId:'va',quantity:1.25,form:'米样',unit:'米',location:'样品架A'})}));
  });
  it('records independent fabric measurements using fabric permission and no garment tolerance',async()=>{
@@ -297,4 +297,9 @@ describe('development cost and customer billing UI',()=>{
  it('withdraws an old pending cost request without issuing its amount',async()=>{setup(true,{makingFees:[],request:{id:'old',state:'pending',invoiceIds:[],totals:[{currency:'CNY',amount:1020}]}});await mount();await click('撤回原申请');await fill('撤回原因','按客户约定重新核对');await click('确认撤回');expect(bridge.current.run).toHaveBeenCalledWith({type:'development.billing.withdraw',payload:{devId:'dev-a',reason:'按客户约定重新核对'}});});
  it('hides billing mutations from read-only users',async()=>{setup(true);billingAccess.write=false;await mount();expect(host.textContent).not.toContain('添加收费项');expect(host.textContent).not.toContain('开具发票');await click('本案支出');expect(host.textContent).not.toContain('添加额外费用');expect(host.textContent).not.toContain('登记制作费');});
 
+});
+
+it('does not turn a placeholder garment key into a photograph when no image was uploaded',async()=>{
+ bridge.current.state.devs[0]={...record,values:{...record.values,domain:'garment'}};
+ await mount();expect(host.querySelector('#mist-dev-version img')).toBeNull();expect(host.textContent).toContain('暂无图片');
 });
