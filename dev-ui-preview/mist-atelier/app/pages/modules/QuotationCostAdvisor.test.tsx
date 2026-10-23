@@ -112,11 +112,12 @@ it("requires explicit consent, omits attachments, and adopts only human strategy
   const call = fetcher.mock.calls.find((x: any) => !x[0].endsWith("/status"));
   expect(JSON.parse(call[1].body)).toMatchObject({
     consent: true,
-    locale: "zh-CN",
     input: { fileIds: [] },
     expectedRevision: 3,
   });
   expect(call[1].headers["X-Test-Auth"]).toBe("verified");
+  expect(call[1].headers["X-Bambook-Locale"]).toBe("zh-CN");
+  expect(JSON.parse(call[1].body)).not.toHaveProperty("locale");
   expect(host.textContent).toContain("13.33");
   expect(p.onAdopt).not.toHaveBeenCalled();
   await click("采纳至人工策略草稿");

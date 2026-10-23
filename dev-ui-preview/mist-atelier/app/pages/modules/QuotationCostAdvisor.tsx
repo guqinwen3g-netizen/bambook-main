@@ -144,9 +144,8 @@ export function QuotationCostAdvisor(p: {
         {
           method: "POST",
           signal: c.signal,
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "X-Bambook-Locale": interfaceLocale() },
           body: JSON.stringify({
-            locale: interfaceLocale(),
             quotationId: p.quotationId,
             lineId: p.lineId,
             expectedTarget: p.expectedTarget,
