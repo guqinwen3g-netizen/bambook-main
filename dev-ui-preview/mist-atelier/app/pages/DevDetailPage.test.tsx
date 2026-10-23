@@ -8,9 +8,9 @@ import { Nav } from '../nav';
 import { getByRole } from '@testing-library/dom';
 
 const bridge=vi.hoisted(()=>({current:null as any}));
-const billingAccess=vi.hoisted(()=>({write:true}));
+const billingAccess=vi.hoisted(()=>({write:true,qcWrite:true}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
-vi.mock('../runtime/auth',()=>({useMistSession:()=>({hasPermission:(permission:string)=>permission!=='products:write'||billingAccess.write}),useOptionalMistSession:()=>({user:{id:'test-sales',displayName:'业务员'},hasPermission:(permission:string)=>permission!=='products:write'||billingAccess.write})}));
+vi.mock('../runtime/auth',()=>({useMistSession:()=>({hasPermission:(permission:string)=>permission.startsWith('qc:')?billingAccess.qcWrite:permission!=='products:write'||billingAccess.write}),useOptionalMistSession:()=>({user:{id:'test-sales',displayName:'业务员'},hasPermission:(permission:string)=>permission.startsWith('qc:')?billingAccess.qcWrite:permission!=='products:write'||billingAccess.write})}));
 
 describe('version confirmation form',()=>{
   const values={confirmer:'Emma Clarke',organization:'Cedar & Crown',confirmedAt:'2026-10-13T15:10',basis:'电话确认记录',originalText:'Approved'};
@@ -28,7 +28,7 @@ describe('version confirmation form',()=>{
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const record: MistDev={id:'dev-a',code:'DEV-A',name:'公司实际开发',style:'STYLE-A',owner:'业务员',customer:'客户',customerId:'customer-a',due:'2026-10-30',dueRel:'待交付',stage:4,state:'已确认',tone:'ok',ver:'R1-A-1',fac:2,img:'coat',factory:'工厂 A',sample:'SP-A',fabric:'羊毛',goal:'真实开发要求',currentVersionId:'va',versionIds:['va','vb'],values:{name:'实际开发',style:'STYLE-A',sizeBase:'M',factories:['工厂 A','工厂 B']} as any,fileIds:[],createdAt:'2026-10-13T00:00:00Z',updatedAt:'2026-10-13T00:00:00Z'};
 const version=(id:string,label:string,reviewer:string):MistVersion=>({id,devId:'dev-a',label,factory:`工厂 ${id}`,factoryId:`sup-${id.slice(1)}`,sample:`SP-${id}`,sampleQuantity:2,size:'M',fabric:'羊毛',img:'coat',fileIds:[],returnedAt:'2026-10-12T00:00:00Z',qc:{result:'pass',reviewer,reviewedAt:'2026-10-12T01:00:00Z',report:`QC-${id}`,opinion:`${id}的意见`},confirmations:[],archivedAt:null,note:''});
-beforeEach(()=>{billingAccess.write=true;(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.current={state:{devs:[record],versions:[version('va','R1-A-1','评审 A'),version('vb','R2-B-1','评审 B')],files:[],events:[],orders:[],settings:{profileName:'业务员'}},loading:false,error:'',run:vi.fn(async()=>({requestId:'confirmed',revision:2,result:{devId:'dev-a'}})),uploadFile:vi.fn(),downloadFile:vi.fn()};});
+beforeEach(()=>{billingAccess.write=true;billingAccess.qcWrite=true;(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.current={state:{devs:[record],versions:[version('va','R1-A-1','评审 A'),version('vb','R2-B-1','评审 B')],files:[],events:[],orders:[],settings:{profileName:'业务员'}},loading:false,error:'',run:vi.fn(async()=>({requestId:'confirmed',revision:2,result:{devId:'dev-a'}})),uploadFile:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 async function mount(versionId='va',customerId?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'development/detail',id:'dev-a',versionId,customerId},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><DevDetailPage/></Nav.Provider>));}
 async function click(text:string){const button=[...document.querySelectorAll('button')].find(item=>item.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
@@ -302,4 +302,14 @@ describe('development cost and customer billing UI',()=>{
 it('does not turn a placeholder garment key into a photograph when no image was uploaded',async()=>{
  bridge.current.state.devs[0]={...record,values:{...record.values,domain:'garment'}};
  await mount();expect(host.querySelector('#mist-dev-version img')).toBeNull();expect(host.textContent).toContain('暂无图片');
+});
+
+it('keeps the development report read-only for a business account without the matching QC permission',async()=>{
+ billingAccess.qcWrite=false;bridge.current.state.devs[0]={...record,values:{...record.values,domain:'garment'}};bridge.current.state.versions[0].qc=null;
+ await mount();const button=getByRole(host,'button',{name:'录入报告'}) as HTMLButtonElement;expect(button.disabled).toBe(true);await act(async()=>button.click());expect(bridge.current.run).not.toHaveBeenCalled();
+});
+
+it('keeps customer confirmation inactive while QC is pending or rejected',()=>{
+ const pending={...version('va','R1-A','QC'),qc:null};expect(developmentStepStates(record,pending).slice(2)).toEqual(['now','todo','todo']);
+ const rejected={...pending,qc:{...version('va','R1-A','QC').qc!,result:'reject' as const}};expect(developmentStepStates(record,rejected).slice(2)).toEqual(['blocked','todo','todo']);
 });

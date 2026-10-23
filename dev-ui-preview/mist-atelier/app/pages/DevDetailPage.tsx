@@ -1,3 +1,4 @@
+import {useOptionalMistSession} from '../runtime/auth';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** T4: the original three-column Mist detail; every action targets an exact saved version. */
@@ -34,7 +35,7 @@ export function confirmationFormError(values:{confirmer:string;organization:stri
 }
 export function developmentStepStates(dev:MistDev,version:MistVersion|undefined):StepState[]{
   const confirmation=version?.confirmations.at(-1);
-  return [dev.values.name&&(developmentDomain(dev.values)==='fabric'||dev.values.style)?'done':'now',version?.returnedAt?'done':version?'now':'todo',version?.qc?(version.qc.result==='reject'?'blocked':'done'):version?.returnedAt?'now':'todo',confirmation?(confirmation.result==='approved'?'done':'blocked'):version?.returnedAt?'now':'todo',version?.archivedAt?'done':confirmation?.result==='approved'&&version?.qc&&version.qc.result!=='reject'?'now':'todo'];
+  return [dev.values.name&&(developmentDomain(dev.values)==='fabric'||dev.values.style)?'done':'now',version?.returnedAt?'done':version?'now':'todo',version?.qc?(version.qc.result==='reject'?'blocked':'done'):version?.returnedAt?'now':'todo',confirmation?(confirmation.result==='approved'?'done':'blocked'):version?.qc&&version.qc.result!=='reject'&&!version.qcDecision?'now':'todo',version?.archivedAt?'done':confirmation?.result==='approved'&&version?.qc&&version.qc.result!=='reject'?'now':'todo'];
 }
 const resultLabel={approved:'认可',needs_adjustment:'需修改',rejected:'不采用'};
 const qcLabel={pass:'通过',conditional:'有保留通过',reject:'不通过'};
@@ -58,6 +59,7 @@ export function qcMeasurementFacts(form:QcForm):Pick<MistQc,'measurements'|'appe
 }
 
 export function DevDetailPage(){
+  const qcSession=useOptionalMistSession();
   const {go,route}=useNav();const {state,loading,error,run,uploadFile,downloadFile,fileUrl,pending,recover,saving}=useMistWorkspace();const myName=useMyDisplayName(useMistWorkspace().workspace,state);const toast=useToast();
   const dev=state?.devs.find(item=>item.id===route.id),versions=state&&dev?devVersions(state,dev):[]; // 按开发案版本顺序，小版本紧跟所属大版本
   const fabricDomain=!!dev&&developmentDomain(dev.values)==='fabric';
@@ -204,7 +206,8 @@ export function DevDetailPage(){
     :version.qc?.result==='conditional'?<Banner tone="warn" title={uiText("需关注 · QC 有保留通过")}>{version.qc.opinion||'请查看 QC 报告'}</Banner>
     :!version.qc?<Banner tone="neutral" title={uiText(version.qcHistory?.length?'整改中 · 待复检':'QC 待评审')}>{uiText("QC 通过或有保留通过后才能记录需求方确认。")}</Banner>:null;
   const qcReviewedAt=version?.qc?localConfirmationTime(new Date(version.qc.reviewedAt)):'';
-  const openQc=()=>{setQc(qcForm(version?.qc,myName));setFailure('');setDialog('qc');};
+  const canRecordQc=qcSession?.hasPermission(fabricDomain?'qc:fabric_chain:write':'qc:garment_chain:write')===true;
+  const openQc=()=>{if(!canRecordQc)return;setQc(qcForm(version?.qc,myName));setFailure('');setDialog('qc');};
   const setMeasurement=(key:string,patch:Partial<MeasurementDraft>)=>setQc(previous=>({...previous,measurements:previous.measurements.map(row=>row.key===key?{...row,...patch}:row)}));
   return <MistPage>
     <BackLink onClick={backToSource}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
@@ -244,7 +247,7 @@ export function DevDetailPage(){
           </FormGrid></div>
           <CardFooter><span className="mist-note"><ShieldCheck className="mist-icon" data-size="xs" />{myName}{uiText("登记")}</span><span className="mist-spacer" /><Button variant="quiet" disabled={!version||busy} onClick={()=>void act('draft')}>{uiText("存为草稿")}</Button><Button variant="primary" iconRight={ArrowRight} disabled={!version||busy||!qcAllowsConfirm||!!currentFormError||!!sameConfirmation} onClick={()=>setDialog('confirm')}>{uiText(sameConfirmation?'本版已记录':'保存确认')}</Button></CardFooter>
         </Card>
-        <Card id="mist-dev-qc"><CardHeader title={uiText("QC 评审")} tools={<><span className="mist-muted" style={{fontSize:12.5}}>{uiText(version?.qc?`${version.qc.reviewer} · ${qcReviewedAt.slice(5,10).replace('-','/')} ${qcReviewedAt.slice(11)}`:'待评审')}</span><Button size="sm" disabled={!version||busy||qcFailed||!!version?.qcDecision||!!version?.confirmations.length||!!qcBlocker} title={uiText(qcBlocker)} onClick={openQc}>{uiText(version?.qc?'更新报告':version?.qcHistory?.length?'提交复检':'录入报告')}</Button></>}>{version?.qc&&<Pill tone={version.qc.result==='reject'?'bad':version.qc.result==='conditional'?'warn':'ok'}>{qcLabel[version.qc.result]}</Pill>}</CardHeader>
+        <Card id="mist-dev-qc"><CardHeader title={uiText("QC 评审")} tools={<><span className="mist-muted" style={{fontSize:12.5}}>{uiText(version?.qc?`${version.qc.reviewer} · ${qcReviewedAt.slice(5,10).replace('-','/')} ${qcReviewedAt.slice(11)}`:'待评审')}</span><Button size="sm" disabled={!canRecordQc||!version||busy||qcFailed||!!version?.qcDecision||!!version?.confirmations.length||!!qcBlocker} title={uiText(!canRecordQc?"需要对应业务线QC权限":qcBlocker)} onClick={openQc}>{uiText(version?.qc?'更新报告':version?.qcHistory?.length?'提交复检':'录入报告')}</Button></>}>{version?.qc&&<Pill tone={version.qc.result==='reject'?'bad':version.qc.result==='conditional'?'warn':'ok'}>{qcLabel[version.qc.result]}</Pill>}</CardHeader>
           {!fabricDomain&&<><SummaryNumbers items={[{label:'测量点',value:measurements.length},{label:'公差内',value:measureStats.within},{label:'需关注',value:measureStats.attention,tone:'warn'},{label:'外观缺陷',value:version?.qc?.appearanceDefects??'—'}]} />
           <MeasurementTable rows={measurements} /></>}
           {fabricDomain&&<KeyValue items={(version?.qc?.fabricMeasurements||[]).map(row=>({label:row.property,value:`${row.actual} ${row.unit}`}))}/>}
