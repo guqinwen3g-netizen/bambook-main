@@ -142,8 +142,9 @@ describe('出口退税', () => {
 });
 
 it('does not treat a taxed ordinary invoice or an unclassified bill as a VAT special invoice',()=>{
- const f=setup(),bill=f.state.payables!.bills.find(b=>b.id==='b1')!;
+ const f=setup();
  f.run({type:'rebate.rate.save',payload:{hsCode:'6203.31',rate:'13',effectiveFrom:'2020-03-20',basis:'文库'}});
+ const bill=f.state.payables!.bills.find(b=>b.id==='b1')!;
  const file=()=>f.run({type:'rebate.claim.file',payload:{customsId:f.customs.id,billIds:[bill.id],filedAt:'2026-10-16',batchRef:'NEGATIVE'}});
  bill.invoiceType='vat-general';expect(rebateCandidateBills(f.state,f.customs).some(b=>b.id===bill.id)).toBe(false);expect(file).toThrow('未核对为增值税专用发票');
  delete bill.invoiceType;expect(rebateCandidateBills(f.state,f.customs).some(b=>b.id===bill.id)).toBe(false);expect(file).toThrow('未核对为增值税专用发票');
