@@ -79,6 +79,9 @@ export function SamplesPage() {
   const shipmentProductions = (state?.productions || []).filter(branch => sourceShipment?.lines.some(line => line.productionId === branch.id && line.orderId === branch.orderId && line.lineId === branch.lineId));
   const uniqueProduction = shipmentProductions.length === 1 ? shipmentProductions[0] : undefined;
   const sourceProduction = route.productionId ? shipmentProductions.find(branch => branch.id === route.productionId) : uniqueProduction;
+  const contextProduction = hasShipmentContext ? sourceProduction : state?.productions.find(branch => branch.id === route.productionId);
+  const contextDomain = sourceShipment?.domain || state?.orders.find(order => order.id === contextProduction?.orderId)?.type;
+  const contextShelf: Shelf | undefined = contextDomain === 'fabric' || contextDomain === 'garment' ? contextDomain : undefined;
   const invalidShipment = hasShipmentContext && !!state && (!sourceShipment || !shipmentProductions.length);
   const sourceHint = invalidShipment ? '本票出运或准确生产来源已不可用，请重新选择出运。' : hasShipmentContext && route.productionId && !sourceProduction ? '指定工厂分支不属于本票，请明确选择本票实际来源。' : hasShipmentContext && shipmentProductions.length > 1 ? '本票含多个生产分支，请明确选择本次船样实际来源。' : undefined;
   const inShipment = (sample: FulfillmentSample) => !hasShipmentContext || !!sourceShipment && sample.role === 'shipping' && sample.shipmentId === sourceShipment.id && sample.source.kind === 'orderLine'
@@ -88,7 +91,8 @@ export function SamplesPage() {
   const routedRow = allRows.find(row => row.samples.some(sample => sample.id === picked) || row.id === picked);
   const counts: Record<Shelf, number> = { fabric: 0, garment: 0, other: 0 }; for (const row of allRows) counts[row.shelf]++;
   const [shelfChoice, setShelf] = React.useState<Shelf | null>(null);
-  const shelf: Shelf = shelfChoice || routedRow?.shelf || (counts.fabric || !counts.garment ? (counts.fabric || counts.other === 0 ? 'fabric' : 'other') : 'garment');
+  React.useEffect(() => { setShelf(null); }, [route.productionId, route.section]);
+  const shelf: Shelf = shelfChoice || routedRow?.shelf || contextShelf || (counts.fabric || !counts.garment ? (counts.fabric || counts.other === 0 ? 'fabric' : 'other') : 'garment');
   const shelfRows = allRows.filter(row => row.shelf === shelf);
   const forms = [...new Set(shelfRows.flatMap(row => row.samples.map(sample => sample.form)))];
   const statusOf = (row: LedgerRow) => state ? rowStatus(state, row, day) : { key: 'all' as StatusFilter, label: '', tone: 'neutral' as const };
@@ -110,7 +114,7 @@ export function SamplesPage() {
     : [{ value: 'manual', label: '手工 / 无系统来源' }, ...sourceOptions(state, true).filter(option => option.value && !option.value.startsWith('line:'))];
   const roleOptions = hasShipmentContext ? [{ value: 'shipping', label: '船样' }] : [emptyOption, { value: 'pp', label: '成衣产前样' }, { value: 'pioneer', label: '面料先锋样' }, { value: 'shipping', label: '船样' }];
   const shipmentOptions = hasShipmentContext ? (sourceShipment ? [{ value: sourceShipment.id, label: sourceShipment.code }] : [emptyOption]) : [emptyOption, ...(state?.fulfillment.shipments || []).filter(shipment => shipment.state !== 'cancelled').map(shipment => ({ value: shipment.id, label: shipment.code }))];
-  const defaultCategory = sourceShipment ? (sourceShipment.domain === 'fabric' ? '面料' : '成衣') : shelf === 'garment' ? '成衣' : shelf === 'other' ? '其他' : '面料';
+  const defaultCategory = contextShelf ? (contextShelf === 'fabric' ? '面料' : '成衣') : shelf === 'garment' ? '成衣' : shelf === 'other' ? '其他' : '面料';
   const createSpec: ModuleEditorSpec = {
     title: '新建样品', description: '登记实际收到的实物。有系统来源时选准确版本或生产分支；没有来源时写明手工来源。',
     sections: [
