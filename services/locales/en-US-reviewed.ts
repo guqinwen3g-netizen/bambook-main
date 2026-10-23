@@ -162,4 +162,7 @@ export const reviewedEnglish: Record<string, string> = {
   '票据已用于退税申报 {0}，请先处理原申报':'This invoice is used in refund claim {0}; resolve that claim first',
   '带入要求':'Copy requirements',
   'PDF、图片、Excel · ≤50MB':'PDF, images, Excel · up to 50 MB',
+  '附件包 (zip)':'Attachments (ZIP)','本通知单没有附件':'This notice has no attachments','附件包下载失败':'Attachment bundle download failed','当前不能读取附件原件':'Original attachments cannot be read right now',
+  '页面已切换，请重新下载':'The page changed; start the download again','附件超过200MB，请分别下载':'Attachments exceed 200 MB; download them separately','附件大小待核对':'Check attachment sizes',
+  '附件不可用或无权读取：{0}':'Attachment unavailable or access denied: {0}','附件原件大小不符：{0}':'Original attachment size does not match: {0}','需要对应业务线QC权限':'QC permission for this business line is required',
 };
