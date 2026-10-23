@@ -5,6 +5,7 @@ import { ArrowLeftRight, Download, Layers, Package, Pencil, Plus, RefreshCw, Sea
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, Pipeline, SearchField, Tabs, TextLink, Thumb, Timeline, Toolbar, type Column } from '../../../../../components/mist';
 import type { FulfillmentSample, SampleMovement } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentSourceLabel, fulfillmentPositions, fulfillmentSampleRoleLabel, sampleLoanRemaining } from '../../../../../server/src/shared/mistFulfillment';
+import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
@@ -164,7 +165,7 @@ export function SamplesPage() {
       initialValues: { factory: source.kind === 'orderLine' ? state.productions.find(branch => branch.id === source.productionId)?.factory || '' : state.versions.find(version => version.id === source.versionId)?.factory || '', location: sample.location, contact: '', due: today() },
       submitLabel: '发起送检',
       submit: async values => {
-        const domain = source.kind === 'orderLine' ? state.orders.find(order => order.id === source.orderId)?.type : state.devs.find(dev => dev.id === source.devId)?.values.category.includes('面料') ? 'fabric' : 'garment';
+        const domain = source.kind === 'orderLine' ? state.orders.find(order => order.id === source.orderId)?.type : developmentDomain(state.devs.find(dev => dev.id === source.devId)!.values);
         const saved = await run({ type: 'fulfillment.qc.request', payload: { source, sampleId: sample.id, domain: domain || 'garment', kind: 'sample', factory: text(values, 'factory'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } });
         go('qc-workbench', String(saved.result.id || ''), qcTarget);
       } });
