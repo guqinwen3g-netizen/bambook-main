@@ -90,4 +90,14 @@ describe('按已有业务查看权限投影，不因成员资格扩大权限', (
     const subject = { ...actor(['*']), permissionCeiling: ['orders:read'] } as TokenPayload;
     expect(projectState(state, subject, empty, 'owner').state.invoices).toEqual([]);
   });
+
+  it('keeps a development invoice original readable through either authorised source, without opening it to unrelated roles', () => {
+    const state = empty();
+    state.files = [file('development-original', 'issuer')];
+    state.devs = [{ id: 'dev', billing: { makingFees: [], invoices: [{ invoiceId: 'di', fileIds: ['development-original'] }] } }] as any;
+    state.invoices = [{ id: 'di', devId: 'dev', fileIds: ['development-original'] }] as any;
+    expect(canReadFile(state, actor(['invoices:read']), 'development-original', empty, 'owner')).toBe(true);
+    expect(canReadFile(state, actor(['products:read']), 'development-original', empty, 'owner')).toBe(true);
+    expect(canReadFile(state, actor(['orders:read']), 'development-original', empty, 'owner')).toBe(false);
+  });
 });

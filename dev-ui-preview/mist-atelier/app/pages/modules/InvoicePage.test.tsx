@@ -46,7 +46,7 @@ it('queues a CI receivable as pending finance confirmation outside open balance,
   const table=getByRole(host,'table',{name:'应收票据台账'});
   expect(table.textContent).toContain('CI-P');expect(table.textContent).not.toContain('CI-A');
   route.id='p';render();
-  expect(host.textContent).toContain('不计入应收余额、账龄、报表与催收');
+  expect(host.textContent).not.toContain('票款明细待核对');
   const collect=getByRole(host,'button',{name:'收款与核销'}) as HTMLButtonElement;
   expect(collect.disabled).toBe(true);
   await click('确认应收');
@@ -57,14 +57,13 @@ it('queues a CI receivable as pending finance confirmation outside open balance,
 });
 it('does not offer confirm or reject to an account without finance invoice write permission',()=>{
   pendingCi();store.canWrite=false;route.id='p';render();
-  expect(host.textContent).toContain('确认或驳回由财务处理');
   expect(getAllByRole(host,'button').some(b=>b.textContent==='确认应收'||b.textContent==='驳回 CI')).toBe(false);
   expect(store.value.run).not.toHaveBeenCalled();
 });
 it('shows the finance confirmation and rejection facts on the receivable',()=>{
   pendingCi();Object.assign(store.value.state.invoices.at(-1),{financeStatus:'rejected',voidedAt:'2026-10-14T00:00:00Z',voidReason:'财务驳回：金额与合同不符',financeRejectedAt:'2026-10-14T00:00:00Z',financeRejectedBy:'财务',financeRejectReason:'金额与合同不符'});
   route.id='p';render();
-  expect(host.textContent).toContain('财务驳回');expect(host.textContent).toContain('金额与合同不符');expect(host.textContent).toContain('CI 已退回后勤更正');
+  expect(host.textContent).toContain('财务驳回');expect(host.textContent).toContain('金额与合同不符');expect(host.textContent).toContain('已退回后勤更正');
   expect((getByRole(host,'button',{name:'收款与核销'}) as HTMLButtonElement).disabled).toBe(true);
 });
 

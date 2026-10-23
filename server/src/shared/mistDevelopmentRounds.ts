@@ -75,12 +75,11 @@ export function developmentRoundViews(state: MistState, dev: MistDev): Developme
   return [...views.values()].sort((a, b) => a.number - b.number);
 }
 
-/** 开发案级结束状态：手工取消 / 归档，或不收费开发案任一版本获需求方认可即结案（收费开发案的最终结案以财务销账为准）。 */
+/** 开发案级结束状态：手工取消 / 归档，或不收费开发案任一版本获需求方认可即结案。 */
 export function developmentClosure(state: MistState, dev: MistDev): { kind: 'closed' | 'archived' | 'cancelled'; label: string } | null {
   if (dev.closure?.kind === 'cancelled') return { kind: 'cancelled', label: '已取消' };
   if (dev.closure?.kind === 'archived') return { kind: 'archived', label: '已归档' };
   if (dev.closure?.kind === 'closed') return { kind: 'closed', label: '已结案' };
-  if (developmentCharged(dev.values) && dev.billing?.settledAt) return { kind: 'closed', label: '已最终结案' };
   if (!developmentCharged(dev.values) && state.versions.some(version => version.devId === dev.id && version.confirmations.at(-1)?.result === 'approved')) return { kind: 'closed', label: '已结案' };
   return null;
 }

@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DevDetailPage, confirmationFormError, developmentStepStates, localConfirmationTime } from './DevDetailPage';
 import { applyMistCommand, createMistState, type MistDev, type MistVersion } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
+import { getByRole } from '@testing-library/dom';
 
 const bridge=vi.hoisted(()=>({current:null as any}));
+const billingAccess=vi.hoisted(()=>({write:true}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
+vi.mock('../runtime/auth',()=>({useMistSession:()=>({hasPermission:(permission:string)=>permission!=='products:write'||billingAccess.write}),useOptionalMistSession:()=>({user:{id:'test-sales',displayName:'业务员'},hasPermission:(permission:string)=>permission!=='products:write'||billingAccess.write})}));
 
 describe('version confirmation form',()=>{
   const values={confirmer:'Emma Clarke',organization:'Cedar & Crown',confirmedAt:'2026-10-13T15:10',basis:'电话确认记录',originalText:'Approved'};
@@ -25,7 +28,7 @@ describe('version confirmation form',()=>{
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const record: MistDev={id:'dev-a',code:'DEV-A',name:'公司实际开发',style:'STYLE-A',owner:'业务员',customer:'客户',customerId:'customer-a',due:'2026-10-30',dueRel:'待交付',stage:4,state:'已确认',tone:'ok',ver:'R1-A-1',fac:2,img:'coat',factory:'工厂 A',sample:'SP-A',fabric:'羊毛',goal:'真实开发要求',currentVersionId:'va',versionIds:['va','vb'],values:{name:'实际开发',style:'STYLE-A',sizeBase:'M',factories:['工厂 A','工厂 B']} as any,fileIds:[],createdAt:'2026-10-13T00:00:00Z',updatedAt:'2026-10-13T00:00:00Z'};
 const version=(id:string,label:string,reviewer:string):MistVersion=>({id,devId:'dev-a',label,factory:`工厂 ${id}`,factoryId:`sup-${id.slice(1)}`,sample:`SP-${id}`,sampleQuantity:2,size:'M',fabric:'羊毛',img:'coat',fileIds:[],returnedAt:'2026-10-12T00:00:00Z',qc:{result:'pass',reviewer,reviewedAt:'2026-10-12T01:00:00Z',report:`QC-${id}`,opinion:`${id}的意见`},confirmations:[],archivedAt:null,note:''});
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.current={state:{devs:[record],versions:[version('va','R1-A-1','评审 A'),version('vb','R2-B-1','评审 B')],files:[],events:[],orders:[],settings:{profileName:'业务员'}},loading:false,error:'',run:vi.fn(async()=>({requestId:'confirmed',revision:2,result:{devId:'dev-a'}})),uploadFile:vi.fn(),downloadFile:vi.fn()};});
+beforeEach(()=>{billingAccess.write=true;(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.current={state:{devs:[record],versions:[version('va','R1-A-1','评审 A'),version('vb','R2-B-1','评审 B')],files:[],events:[],orders:[],settings:{profileName:'业务员'}},loading:false,error:'',run:vi.fn(async()=>({requestId:'confirmed',revision:2,result:{devId:'dev-a'}})),uploadFile:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 async function mount(versionId='va',customerId?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'development/detail',id:'dev-a',versionId,customerId},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><DevDetailPage/></Nav.Provider>));}
 async function click(text:string){const button=[...document.querySelectorAll('button')].find(item=>item.textContent?.trim()===text);expect(button,text).toBeTruthy();await act(async()=>button!.click());}
@@ -273,31 +276,25 @@ describe('BB-DEV-6/8 fabric physical forms and dispatch on the version detail',(
   expect(bridge.current.run).toHaveBeenCalledWith({type:'development.sample.dispatchFee',payload:{devId:'dev-a',versionId:'va',dispatchId:'d-1',fee:{amount:28.5,currency:'CNY'}}});
  });
 });
-describe('BB-DEV-9 development fees and billing',()=>{
- const metre={id:'s-m',code:'SMP-0002',name:'测试',category:'面料',form:'米样',unit:'米',quantity:5,available:5,location:'架B',size:'',color:'',source:{kind:'version',devId:'dev-a',versionId:'va'},fileIds:[],note:'',createdAt:'2026-10-12T00:00:00Z'};
- const useCharged=(charged:boolean,billing?:object)=>{const st=bridge.current.state;st.devs=[{...record,values:{...record.values,charged},...(billing?{billing}:{})}];st.fulfillment={samples:[metre],sampleMovements:[],qcTasks:[]};st.invoices=[];};
- const button=(text:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===text);
- it('records a making fee per physical sample and blocks billing until fees are complete',async()=>{
-  useCharged(true);await mount();
-  expect(host.textContent).toContain('开发费用');expect(host.textContent).toContain('费用尚未补齐');
-  expect(button('发起开票')!.disabled).toBe(true);
-  await click('登记制作费');await fill('制作费总额','120');await fill('币种','eur');await click('登记');
+describe('development cost and customer billing UI',()=>{
+ const sample={id:'s-m',code:'SMP-0002',name:'测试',category:'面料',form:'米样',unit:'米',quantity:5,available:5,location:'架B',size:'',color:'',source:{kind:'version',devId:'dev-a',versionId:'va'},fileIds:[],note:'',createdAt:'2026-10-12T00:00:00Z'};
+ const setup=(charged:boolean,billing:object={makingFees:[]})=>{const st=bridge.current.state;st.devs=[{...record,values:{...record.values,charged},billing}];st.fulfillment={samples:[sample],sampleMovements:[],qcTasks:[]};st.invoices=[];};
+ it('records company costs without turning them into customer charges',async()=>{
+  setup(true);await mount();expect((getByRole(host,'button',{name:'开具发票'}) as HTMLButtonElement).disabled).toBe(true);
+  await click('本案支出');await click('登记制作费');await fill('金额','120');await fill('币种','EUR');await click('保存');
   expect(bridge.current.run).toHaveBeenCalledWith({type:'development.fee.recordMaking',payload:{devId:'dev-a',sampleId:'s-m',amount:120,currency:'EUR'}});
  });
- it('sends one billing request once fees are complete and links issued invoices back',async()=>{
-  useCharged(true,{makingFees:[{sampleId:'s-m',versionId:'va',sampleCode:'SMP-0002',form:'米样',amount:120,currency:'EUR',recordedAt:'',recordedBy:''}]});await mount();
-  expect(host.textContent).toContain('120.00 EUR');
-  await click('发起开票');
-  expect(bridge.current.run).toHaveBeenCalledWith({type:'development.billing.request',payload:{devId:'dev-a'}});
-  await act(async()=>root!.unmount());host.remove();
-  useCharged(true,{makingFees:[],request:{id:'rq',requestedAt:'2026-10-16T00:00:00Z',requestedBy:'业务员',billTo:'客户',lines:[],totals:[{currency:'EUR',amount:120}],state:'invoiced',invoiceIds:['di'],invoicedBy:'财务'}});
-  bridge.current.state.invoices=[{id:'di',code:'DI-2026-0001',orderId:'',order:'DEV-A',customer:'客户',due:'2026-11-15',amount:120,open:0,currency:'EUR',devId:'dev-a'}];
-  await mount();
-  expect(host.textContent).toContain('已销账');expect(button('发起开票')).toBeUndefined();
-  await click('DI-2026-0001');expect(go).toHaveBeenCalledWith('payment-vouchers','di');
+ it('requires explicit customer charges and a formal file before business issuance',async()=>{
+  setup(true,{makingFees:[],charges:[{id:'charge',versionIds:['va'],description:'客户约定开发费',amount:300,currency:'USD',evidence:'客户约定',at:'',actor:'业务'}]});await mount();
+  await act(async()=>getByRole(host,'checkbox',{name:'客户约定开发费'}).click());await click('开具发票');
+  expect((getByRole(document.body,'button',{name:'确认开票'}) as HTMLButtonElement).disabled).toBe(true);
+  const uploaded={id:'pdf',name:'invoice.pdf',mimeType:'application/pdf',size:5,storageKey:'invoice',createdAt:''};bridge.current.uploadFile.mockImplementation(async()=>{bridge.current.state.files.push(uploaded);return uploaded;});
+  const input=document.querySelector('input[type="file"]')!;
+  await act(async()=>{Object.defineProperty(input,'files',{value:[new File(['pdf'],'invoice.pdf',{type:'application/pdf'})]});input.dispatchEvent(new Event('change',{bubbles:true}));});
+  await click('确认开票');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'development.billing.issue',payload:expect.objectContaining({devId:'dev-a',chargeIds:['charge'],fileIds:['pdf']})}));
  });
- it('shows no billing entry for non-charged developments',async()=>{
-  useCharged(false);await mount();
-  expect(host.textContent).toContain('不收费开发');expect(button('发起开票')).toBeUndefined();expect(button('登记制作费')).toBeUndefined();
- });
+ it('allows costs but has no customer-charge entry for free development',async()=>{setup(false);await mount();expect(host.textContent).toContain('不向客户收费');expect(host.textContent).not.toContain('添加收费项');await click('本案支出');expect(getByRole(host,'button',{name:'添加额外费用'})).toBeTruthy();});
+ it('withdraws an old pending cost request without issuing its amount',async()=>{setup(true,{makingFees:[],request:{id:'old',state:'pending',invoiceIds:[],totals:[{currency:'CNY',amount:1020}]}});await mount();await click('撤回原申请');await fill('撤回原因','按客户约定重新核对');await click('确认撤回');expect(bridge.current.run).toHaveBeenCalledWith({type:'development.billing.withdraw',payload:{devId:'dev-a',reason:'按客户约定重新核对'}});});
+ it('hides billing mutations from read-only users',async()=>{setup(true);billingAccess.write=false;await mount();expect(host.textContent).not.toContain('添加收费项');expect(host.textContent).not.toContain('开具发票');await click('本案支出');expect(host.textContent).not.toContain('添加额外费用');expect(host.textContent).not.toContain('登记制作费');});
+
 });

@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from 'react';
 import { Archive, Building2, Download, FileText, FilePlus2, Pencil, Plus, Receipt, SearchX, Stamp, XCircle } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Toolbar, type Column, type Tone } from '../../../../../components/mist';
-import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
+import { isPendingFinanceMistInvoice, isRecognizedMistInvoice, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentDocument, FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
@@ -42,7 +42,7 @@ function voidBlocker(root: MistState, d: FulfillmentDocument) {
   const s = root.fulfillment.shipments.find(row => row.id === d.shipmentId);
   if (!s || s.state === 'departed' || s.state === 'cancelled') return '出运已离港或已取消，单据保留为历史';
   const inv = d.invoiceId ? root.invoices.find(row => row.id === d.invoiceId) : undefined;
-  if (inv && (inv.open !== inv.amount || root.allocations.some(a => a.invoiceId === inv.id))) return 'CI 已有收款，请先走财务更正';
+  if (inv && ((isRecognizedMistInvoice(inv) && inv.open !== inv.amount) || root.allocations.some(a => a.invoiceId === inv.id))) return 'CI 已有收款，请先走财务更正';
   return '';
 }
 
@@ -197,7 +197,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
     {d.externalIssue && <p className="mist-sub">{uiText("原件来源：")}{d.externalIssue.evidence}</p>}
     <DetailBlock title={uiText("单据正文 / 制单说明")}><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
     {d.type === 'CI' && <DetailBlock title={uiText("财务应收")} aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink> : undefined}>
-      {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due }]} />
+      {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : isPendingFinanceMistInvoice(invoice) ? '待财务确认' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due }]} />
         : <span className="mist-note">{uiText(d.status === 'draft' ? '签发后按本票该订单条目数量 × 合同单价生成应收。' : '未找到对应应收。')}</span>}
     </DetailBlock>}
     <DetailBlock title={ui`版本（${versions.length}）`}>
