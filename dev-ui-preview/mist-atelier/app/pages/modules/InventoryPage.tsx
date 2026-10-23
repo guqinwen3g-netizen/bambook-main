@@ -1,3 +1,4 @@
+import { stockName } from '../businessNames';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 库存与仓储：面料 / 成衣业务组各自的实物台账；按单位分开汇总，详情为“事实 → 可做的动作 → 流水”。 */
 import React from 'react';
@@ -96,7 +97,7 @@ export function InventoryPage() {
   const stateCount = (value: StateFilter) => !state ? 0 : value === 'all' ? searched.length : searched.filter(stock => stockState(state, stock) === value).length;
   const metrics = (value: Domain) => { const list = !state ? [] : scoped.filter(stock => domainOf(state, stock) === value); return { count: list.length, available: byUnit(list, stock => stock.available), isolated: byUnit(list, stock => stock.locked || 0), out: byUnit(list, stock => state ? stockOutstanding(state, stock) : 0) }; };
   const columns: Column<FulfillmentStock>[] = [
-    { key: 'name', header: '物料 / 产品 · 来源批次', width: 'minmax(170px,1.6fr)', render: stock => <div className="mist-col" style={{ gap: 2 }}><span>{stock.name}</span><small className="mist-muted">{uiText(isReturn(stock) ? `${returnCode(stock) || '退货单不可用'} · ${stock.batchNumber}` : `${purchaseOf(stock)?.code || '来源采购不可用'}${stock.batchNumber ? ` · ${stock.batchNumber}` : ''}`)}</small></div> },
+    { key: 'name', header: '物料 / 产品 · 来源批次', width: 'minmax(170px,1.6fr)', render: stock => <div className="mist-col" style={{ gap: 2 }}><span>{state ? stockName(state, stock) : stock.name}</span><small className="mist-muted">{uiText(isReturn(stock) ? `${returnCode(stock) || '退货单不可用'} · ${stock.batchNumber}` : `${purchaseOf(stock)?.code || '来源采购不可用'}${stock.batchNumber ? ` · ${stock.batchNumber}` : ''}`)}</small></div> },
     { key: 'source', header: '订单条目', width: 'minmax(120px,1fr)', hideOnMobile: true, render: stock => <SourceLink source={{ kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }} /> },
     { key: 'location', header: '位置 / 货权', width: 'minmax(120px,1fr)', hideOnMobile: true, render: stock => { const positions = fulfillmentPositions(stock); return <div className="mist-col" style={{ gap: 2 }}><span>{uiText(stock.warehouseId ? `${warehouseName(stock.warehouseId)} · ` : '')}{uiText(positions.length > 1 ? `${positions.length} 个位置` : stock.location || '位置未记录')}</span><small className="mist-muted">{stock.owner}</small></div>; } },
     { key: 'quantity', header: '数量', width: '188px', align: 'right', render: stock => { const out = state ? stockOutstanding(state, stock) : 0; return <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{uiText(isReturn(stock) ? `可用 ${stock.available} / 现存 ${stock.onHand} / 隔离 ${stock.locked} ${stock.unit}` : `可用 ${stock.available} / 累计入库 ${stock.quantity} ${stock.unit}`)}</span>{out > 0 && <small className="mist-muted">{uiText("已出库 ")}{out} {uiText(stock.unit)}</small>}</div>; } },
@@ -111,10 +112,10 @@ export function InventoryPage() {
     ? <StockDetail stock={selected} state={state} can={can} locked={locked}
         onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))}
         onPurchase={id => go('procurement', id)} onClaim={(id, section) => section ? go('claims', id, { section }) : go('claims', id)} canClaims={session.canAccessView(View.Claims)} />
-    : <EmptyState icon={Boxes} title={uiText("库存详情")} description={uiText(loading ? '正在读取库存' : '从列表选择一个批次，查看来源、位置余额与出入库流水')} compact />;
+    : <EmptyState icon={Boxes} title={uiText(loading ? '正在读取库存' : '未选择批次')} compact />;
 
   return <Nav.Provider value={{ ...nav, route: { ...route, id: receipt || invalidSource ? undefined : route.id } }}><MistPage width="wide">
-    <PageHeader description={uiText(hasClaim ? invalidSource ? '来源案件或退货单不匹配，请重新选择。' : `${claim?.code || ''} · 真实退货批次先入库并隔离；各批按批准去向处置。` : route.section ? `${f?.purchases.find(purchase => purchase.id === route.section)?.code || '来源采购'} · 只显示本采购交付入库的批次。` : '库存只来自真实采购交付与批准退回；保留原单位、货权与每一次实际出入库。')} eyebrow={uiText("订单履约 · 库存")} title={uiText("库存与仓储")}
+    <PageHeader description={uiText(hasClaim ? invalidSource ? '退货来源不匹配' : claim?.code : route.section ? f?.purchases.find(purchase => purchase.id === route.section)?.code : undefined)} eyebrow={uiText("订单履约 · 库存")} title={uiText("库存与仓储")}
       actions={<>{back}<Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button><Button icon={Warehouse} onClick={() => setCatalog(true)}>{uiText("仓库目录")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(warehouseSpec())}>{uiText("登记真实仓库")}</Button>}</>} />
     {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有库存写权限，可以查看批次、位置与流水；出入库由实际经手的业务组成员登记。")}</Banner></div>}
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("库存读取未完成")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
@@ -137,7 +138,7 @@ export function InventoryPage() {
         </span>
       </CardButton>; })}
     </div>}
-    <Toolbar right={<span className="mist-note">{uiText("预留、在途与盘点尚未接入")}</span>}>
+    <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索名称、批号、位置、采购单或退货单")} />
       <Select aria-label={uiText("仓库筛选")} value={warehouseFilter} onChange={event => setWarehouseFilter(event.target.value)} options={[{ value: '', label: '全部仓库' }, ...(f?.warehouses || []).map(row => ({ value: row.id, label: row.code + ' · ' + row.name + (row.active ? '' : '（停用）') }))]} />
       <Dropdown<SourceFilter> label={uiText("来源")} value={sourceFilter} onChange={setSourceFilter} options={[{ value: 'all', label: '全部' }, { value: 'purchase', label: '采购交付入库' }, { value: 'claimReturn', label: '批准退货入库' }]} />
@@ -148,7 +149,7 @@ export function InventoryPage() {
       { value: 'isolated', label: '隔离待处置', count: stateCount('isolated'), color: 'var(--mist-warn)' },
       { value: 'cleared', label: '已全部出库', count: stateCount('cleared'), color: 'var(--mist-ink-3)' },
     ]} />
-    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.name || '库存详情'} drawerSub={selected ? `${selected.available} ${selected.unit} 可用` : undefined}
+    <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected && state ? stockName(state, selected) : '库存详情'} drawerSub={selected ? `${selected.available} ${selected.unit} 可用` : undefined}
       list={<Card><DataTable ariaLabel={uiText("库存批次列表")} loading={loading} rows={rows} rowKey={stock => stock.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
@@ -169,14 +170,14 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
   const writeReason = can ? false : '需要库存写权限';
   const claimOpen = !!sourceClaim && !['Closed', 'Cancelled'].includes(sourceClaim.state);
   const next: { tone: Tone; title: string; text: string } = returned
-    ? record && !record.disposal ? { tone: 'warn', title: '退回隔离库存', text: '本批不能通用领出或移位；先按批准去向办理。返修与补发没有真实放行事实时不能假标发出。' } : { tone: 'ok', title: '已按批准去向处置', text: record?.disposal ? `${record.disposal.actor} · ${shortWhen(record.disposal.at)} · ${record.disposal.basis}` : '本批没有待处置数量。' }
-    : current === 'available' ? { tone: 'accent', title: `可用 ${stock.available} ${stock.unit}`, text: '发工厂供料或随货出运时登记出库；未用完退回须对应原出库，位置变化登记移位。' }
-    : out > 0 ? { tone: 'neutral', title: `已全部出库 · ${out} ${stock.unit}`, text: '本批没有可用数量；工厂退回余料时按原出库登记退回。' }
-    : { tone: 'neutral', title: '已出清', text: '本批已全部出库并处置完毕，仅保留流水供追溯。' };
+    ? record && !record.disposal ? { tone: 'warn', title: '退回隔离库存', text: '待按批准去向处置' } : { tone: 'ok', title: '已按批准去向处置', text: record?.disposal ? `${record.disposal.actor} · ${shortWhen(record.disposal.at)} · ${record.disposal.basis}` : '本批没有待处置数量。' }
+    : current === 'available' ? { tone: 'accent', title: `可用 ${stock.available} ${stock.unit}`, text: '' }
+    : out > 0 ? { tone: 'neutral', title: `已全部出库 · ${out} ${stock.unit}`, text: '' }
+    : { tone: 'neutral', title: '已出清', text: '' };
   const returnedReason = '退回隔离库存须按批准去向处置，不能通用领出或移位';
   return <DetailBody data-stock-detail={stock.id} heading={<div>
       <span className="mist-mono mist-muted">{uiText(returned ? returnCode(state, stock) || '退货单不可用' : purchase?.code || '来源采购不可用')}{uiText(stock.batchNumber ? ` · ${stock.batchNumber}` : '')}</span>
-      <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{stock.name}</div>
+      <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{stockName(state, stock)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[current]}>{STATE_LABEL[current]}</Pill><Pill>{uiText(returned ? '批准退货入库' : '采购交付入库')}</Pill>{domain && <Pill>{uiText(domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}{out > 0 && <Pill>{uiText("已出库 ")}{out} {uiText(stock.unit)}</Pill>}</div>
     <Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>
@@ -186,7 +187,6 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
       { label: '登记移位', icon: ArrowRightLeft, onClick: () => onMove('move'), reason: writeReason || (stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
       { label: '登记本批报废', icon: Trash2, onClick: onScrap, primary: true, reason: writeReason || (!claimOpen ? '来源案件已结束' : false), hidden: !returned || !record || !!record.disposal || goods?.destination !== 'Scrap' || !can },
     ]} />
-    {!returned && <span className="mist-note" data-unsupported-actions>{uiText("预留给订单条目、盘点差异与依据 QC 结论的质量冻结：服务端尚未提供，暂不能在此登记。")}</span>}
     {returned
       ? <KeyValue items={[{ label: '来源订单', value: <SourceLink source={{ kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }} /> }, { label: '正式退货单', value: returnCode(state, stock) || '不可用' }, { label: '来源案件', value: sourceClaim?.code || '不可用' }, { label: '来源CI', value: state.invoices.find(invoice => invoice.id === stock.invoiceId)?.code || '来源发票不可用' }, { label: '来源出运', value: f.shipments.find(shipment => shipment.id === record?.source.shipmentId)?.code || '来源出运不可用' }, { label: '真实批号', value: stock.batchNumber }, { label: '累计入库', value: `${stock.quantity} ${stock.unit}` }, { label: '物理现存', value: `${stock.onHand} ${stock.unit}` }, { label: '隔离数量', value: `${stock.locked} ${stock.unit}` }, { label: '可用数量', value: `${stock.available} ${stock.unit}` }, { label: '仓库', value: warehouse ? `${warehouse.code} · ${warehouse.name}` : '仓库不可用' }, { label: '位置', value: stock.location }, { label: '货权', value: stock.owner }, { label: '货权确认日期', value: stock.ownershipDate }, { label: '货权确认依据', value: stock.ownershipEvidence }, { label: '计量单位', value: stock.unit }]} />
       : <Facts items={[

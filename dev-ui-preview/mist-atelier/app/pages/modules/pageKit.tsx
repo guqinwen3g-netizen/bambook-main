@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** Business page kit: Mist compositions shared by module pages (list + detail, reasoned actions). */
 import React from 'react';
-import { ArrowRight, type LucideIcon } from 'lucide-react';
+import { ArrowRight, ChevronDown, ChevronUp, type LucideIcon } from 'lucide-react';
 import { BackLink, Button, Card, Drawer, Facts, MistPage } from '../../../../../components/mist';
 import { useNav } from '../../nav';
 
@@ -108,3 +108,10 @@ export const businessDay = (value: string) => {
 /** 完整时刻，按业务时区显示（操作记录等）。 */
 export const businessWhen = (value: string) => { const at = new Date(value); return Number.isFinite(at.getTime()) ? at.toLocaleString(interfaceLocale(), { timeZone: BUSINESS_TZ }) : '—'; };
 export const shortWhen = (value: string) => { const day = businessDay(value); return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5).replace('-', '/') : '—'; };
+
+/** Detailed specifications and history are available without dominating the current task. */
+export function RecordDisclosure({title, children}: {title: string; children: React.ReactNode}) {
+  const [open, setOpen] = React.useState(false);
+  const id = React.useId();
+  return <div className="mist-col"><div className="mist-row"><Button variant="quiet" icon={open ? ChevronUp : ChevronDown} aria-expanded={open} aria-controls={id} onClick={() => setOpen(value => !value)}>{uiText(title)}</Button></div>{open && <div id={id}>{children}</div>}</div>;
+}

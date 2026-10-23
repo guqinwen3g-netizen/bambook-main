@@ -193,8 +193,8 @@ describe('BB-DEV-10 version links and product conversion',()=>{
   it('converts a conditionally passed version without customer confirmation, using the version factory as supplier',async()=>{
     const st=bridge.current.state;st.market={suppliers:[{id:'sup-b',name:'工厂 vb'}],products:[],quotations:[]};const v=st.versions.find((row:any)=>row.id==='vb');v.qc={...v.qc,result:'conditional',opinion:'袖口需关注'};
     await mount('vb');expect(button('转为产品档案')!.disabled).toBe(false);await click('转为产品档案');expect(document.body.textContent).toContain('袖口需关注');
-    await fill('公司产品编码','GA-R2B');await click('建立产品档案');
-    expect(bridge.current.run).toHaveBeenCalledWith({type:'market.product.fromVersion',payload:{devId:'dev-a',versionId:'vb',sku:'GA-R2B',supplierId:'sup-b'}});
+    await fill('公司产品编码','GA-R2B');expect(button('建立产品档案')!.disabled).toBe(true);await fill('产品名称','双面呢大衣');await click('建立产品档案');
+    expect(bridge.current.run).toHaveBeenCalledWith({type:'market.product.fromVersion',payload:{devId:'dev-a',versionId:'vb',sku:'GA-R2B',name:'双面呢大衣',supplierId:'sup-b'}});
   });
   it('blocks conversion without a passing QC and shows the reason',async()=>{
     const v=bridge.current.state.versions.find((row:any)=>row.id==='va');v.qc={...v.qc,result:'reject'};await mount('va');

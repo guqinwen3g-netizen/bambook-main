@@ -49,7 +49,7 @@ export function qcDomainMetrics(tasks: FulfillmentQcTask[], domain: Domain) {
 function qcGate(task: FulfillmentQcTask): { tone: Tone; title: string; text: string } {
   switch (task.state) {
     case 'pending': return { tone: 'warn', title: '等待QC认领', text: `${DOMAIN_LABEL[task.domain]}认领后安排现场检查；报告回传前，来源的下一步保持锁定。` };
-    case 'working': return { tone: 'accent', title: `${task.assignee || 'QC'} 检查中`, text: '提交报告后结论回到来源；测量偏差不会自动决定结论。' };
+    case 'working': return { tone: 'accent', title: `${task.assignee || 'QC'} 检查中`, text: '待提交报告' };
     case 'blocked': return { tone: 'bad', title: '质量阻断', text: task.kind === 'production' ? '最新报告不通过，生产分支已标记风险。整改后由当前QC追加复验报告。' : '最新报告不通过。整改或重新打样后，由当前QC追加复验报告。' };
     case 'awaiting_business': return { tone: 'warn', title: '复验已回传 · 待业务恢复', text: '业务员核对整改与复验结论后，确认继续生产。' };
     case 'reported':
@@ -370,7 +370,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     <div className="mist-detail" data-layout="main-rail">
       <div>
         <Card>
-          <CardHeader title={uiText("结论与报告")} sub={uiText("结论由实际检查人选择，测量偏差不会自动决定结论。")} />
+          <CardHeader title={uiText("结论与报告")} />
           <CardBody><FormGrid>
             <Field label={uiText("本次结论")} required><Select aria-label={uiText("本次结论")} value={result} onChange={e => setResult(e.target.value as MistQc['result'])} options={resultOptions} /></Field>
             <Field label={uiText("报告编号")} required><TextInput aria-label={uiText("报告编号")} value={report} onChange={e => setReport(e.target.value)} /></Field>
@@ -379,7 +379,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
           </FormGrid></CardBody>
         </Card>
         {task.kind === 'production' && sizeChecks.length > 0 && <Card>
-          <CardHeader title={uiText("本次实际尺码检查")} sub={uiText(garmentProduction ? '逐次追加检查事实；未检尺码选“本次未检”。最终放行要求覆盖全部实际生产尺码。' : '按实际检查的规格记录。')} />
+          <CardHeader title={uiText("本次实际尺码检查")} />
           <CardBody><div className="mist-col">{sizeChecks.map((check, index) => <FormGrid key={check.size}>
             <Field label={ui`尺码 ${check.size} · 本次结论`}><Select aria-label={ui`尺码 ${check.size} · 本次结论`} value={check.result} onChange={event => updateSize(index, { result: event.target.value })} options={[{ value: '', label: '本次未检' }, { value: 'pass', label: '通过' }, { value: 'reject', label: '不通过' }]} /></Field>
             <Field label={uiText("实际检查件数")}><TextInput aria-label={ui`尺码 ${check.size} · 实际检查件数`} type="number" min={0} value={check.inspected} disabled={!check.result} onChange={event => updateSize(index, { inspected: Number(event.target.value) })} /></Field>
@@ -413,7 +413,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
         <Card>
           <CardHeader title={uiText("填写要点")} />
           <CardBody><div className="mist-col">
-            <span className="mist-note">{uiText("· 结论由你判断，系统不会根据偏差自动给结论。")}</span>
+
             {task.kind === 'production' && <span className="mist-note">{uiText("· 任一尺码不通过时，总结论必须为不通过（NOK）。")}</span>}
             <span className="mist-note">{uiText("· 复验请在本任务追加报告，历史报告保留不可改写。")}</span>
             <span className="mist-note">{uiText("· 报告只解锁来源的下一步，业务推进由业务员完成。")}</span>

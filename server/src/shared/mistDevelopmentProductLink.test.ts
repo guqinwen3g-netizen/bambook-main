@@ -24,9 +24,9 @@ describe('BB-DEV-10 product archive from an exact version',()=>{
     expect(()=>f.run({type:'market.product.fromVersion',payload:{devId,versionId:b.id,sku:'GA-R2B'}})).toThrow(/QC 通过或有保留通过/);
     f.run({type:'development.recordQc',payload:{devId,versionId:b.id,qc:{result:'conditional',reviewer:'QC',reviewedAt:f.ctx.now,report:'QC-R2B',opinion:'袖口需关注',measurements:[]}}});
     expect(b.confirmations).toHaveLength(0);
-    const product=f.run({type:'market.product.fromVersion',payload:{devId,versionId:b.id,sku:'GA-R2B'}});
+    const product=f.run({type:'market.product.fromVersion',payload:{devId,versionId:b.id,sku:'GA-R2B',name:'双面呢大衣'}});
     const saved=f.state.market.products.find(p=>p.id===product.id)!;
-    expect(saved).toMatchObject({sku:'GA-R2B',sourceDevId:devId,sourceVersionId:b.id});
+    expect(saved).toMatchObject({sku:'GA-R2B',name:'双面呢大衣',sourceDevId:devId,sourceVersionId:b.id});
     expect(f.state.market.products.filter(p=>p.sourceVersionId===b.id)).toHaveLength(1);
     expect(f.run({type:'market.product.fromVersion',payload:{devId,versionId:b.id,sku:'GA-OTHER'}}).id).toBe(product.id);
   });

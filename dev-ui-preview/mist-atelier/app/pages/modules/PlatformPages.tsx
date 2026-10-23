@@ -109,7 +109,7 @@ type DashboardTab='overview'|'team';
 /** 业务全景；业务主管（客户管理主管权限）与所有者多一个“团队”页签，看下属名下在手的事并督办。 */
 export function DashboardPage(){const w=usePlatform();const owner=w.workspace?.access?.role!=='member',canTeam=owner||w.session.hasPermission('relations:admin');const weekly=w.route.section==='team-weekly',tab:DashboardTab=canTeam&&(w.route.section==='team'||weekly)?'team':'overview';
   const members=workspaceMembers(w.workspace,w.state,w.session.user),viewer={id:w.session.user?.id??'',owner};
-  return <MistPage><PageHeader description={uiText(tab==='team'?'团队成员名下在手的订单、待办、逾期与久未跟进客户。点成员看明细，对具体对象督办。':'本公司的订单履行、应收与风险概况。点击进入来源模块继续处理。')} title={uiText("业务全景")}/><ErrorNotice/>
+  return <MistPage><PageHeader  title={uiText("业务全景")}/><ErrorNotice/>
     {canTeam&&<div className="mist-section"><Tabs<DashboardTab> value={tab} onChange={next=>w.go('dashboard',undefined,{section:next})} options={[{value:'overview',label:'业务全景'},{value:'team',label:'团队'}]}/></div>}
     {tab==='team'?(w.state?<TeamBoard state={w.state} members={members} viewer={viewer} can={w.session.hasPermission('relations:admin')} busy={w.loading||w.saving||!!w.pending} run={c=>w.isCurrent()?w.run(c):Promise.resolve(undefined)} go={(view,id,extra)=>w.go(view as any,id,extra as any)} key={weekly?'weekly':'team'} initialMode={weekly?'week':'now'} initialWeek={weekly?addBusinessDays(weekStartOf(today()),-7):undefined}/>:<EmptyState title={uiText("正在读取团队数据")} compact/>):<DashboardOverview/>}
   </MistPage>;}
@@ -123,7 +123,7 @@ type AdminTab='accounts'|'roles'|'approvals'|'audit'|'profile';
 export function AdminPanelPage(){const session=useMistSession(),{route,go}=useNav();const manager=session.hasRole('owner','admin')||session.hasPermission('users:admin');const scoped=session.user?.roleIds?.some(id=>id.includes('@'))??false;
   const options:{value:AdminTab;label:string}[]=scoped?[...(manager?[{value:'accounts' as const,label:'账号'},{value:'roles' as const,label:'角色权限'}]:[]),{value:'profile',label:'公司资料'}]:[...(manager?[{value:'accounts' as const,label:'账号'},{value:'roles' as const,label:'角色权限'},{value:'approvals' as const,label:'审批资格'},{value:'audit' as const,label:'审计日志'}]:[]),{value:'profile',label:'出口方档案'}];
   const tab=options.find(o=>o.value===route.section)?.value??options[0].value;
-  return <MistPage><PageHeader description={uiText(scoped?"管理本公司的基本资料、人员账号和岗位权限。":"公司账号、角色、审批资格、注册审批、审计日志与服务器配置。账号只在这里新建或经注册审批产生。")} title={uiText(scoped?"公司后台":"管理后台")}/>
+  return <MistPage><PageHeader  title={uiText(scoped?"公司后台":"管理后台")}/>
     {!manager&&<Banner tone="neutral" title={uiText("账号管理仅限老板与管理员")}>{uiText("当前账号可以查看出口方档案；账号、角色与审计由老板或管理员办理。")}</Banner>}
     <Tabs<AdminTab> value={tab} options={options} onChange={next=>go('admin-panel',undefined,{section:next})}/>
     <section className="mist-section">{tab==='accounts'?<AdminAccounts/>:tab==='roles'?<AdminRoles/>:tab==='approvals'?<AdminApprovalAuthorities/>:tab==='audit'?<AdminAuditLog/>:scoped?<Card><CardHeader title={uiText("公司基本资料")} sub={uiText("公司名称、地址、联系方式及收款资料统一在公司设置维护。")}/><div className="mist-card-body"><Button onClick={()=>go('company-settings',undefined,{section:'company'})}>{uiText("编辑本公司资料")}</Button></div></Card>:<ExporterProfilePanel/>}</section></MistPage>;}

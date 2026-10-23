@@ -74,7 +74,8 @@ it('derives stages only from recorded facts and puts exceptions first',()=>{
   expect(pipeline('需求草稿').textContent).toBe('需求草稿1');
   expect(pipeline('待审批').textContent).toBe('待审批1');
   expect(pipeline('待供应商确认').textContent).toBe('待供应商确认2');
-  expect(pipeline('已完成').textContent).toBe('已完成1');
+  expect(pipeline('已完成').textContent).toBe('已完成0');
+  expect(pipeline('供应履约中').textContent).toBe('供应履约中1');
   const rows=getAllByRole(getByRole(host,'table',{name:'采购订单列表'}),'row').slice(1).map(row=>row.textContent?.match(/[A-E]-[A-Z]+/)?.[0]);
   expect(rows.slice(0,2).sort()).toEqual(['D-LATE','E-OVER']);
   expect(getByRole(host,'row',{name:/E-OVER/}).textContent).toContain('超收 20 个');
@@ -164,8 +165,7 @@ it('cancels an approved contract without receipts, blocks it once goods arrived,
   act(()=>root.unmount());host.remove();host=document.createElement('div');document.body.append(host);root=createRoot(host);
   render('got');
   detail=host.querySelector('[data-purchase-detail="got"]') as HTMLElement;
-  expect((getByRole(detail,'button',{name:'取消合同'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(detail.textContent).toContain('已有收货记录，不能直接取消');
+  expect(queryByRole(detail,'button',{name:'取消合同'})).toBeNull();
   act(()=>root.unmount());host.remove();host=document.createElement('div');document.body.append(host);root=createRoot(host);
   render('gone');
   detail=host.querySelector('[data-purchase-detail="gone"]') as HTMLElement;
@@ -252,4 +252,17 @@ it('hides receipt rejection for read-only users and blocks settled receipts',()=
   expect(queryByRole(host,'button',{name:'转为拒收'})).toBeNull();
   session.denied.clear();store.state!.payables!.settlements!.push({id:'settled',purchaseId:'post',receiptIds:['r-post'],state:'confirmed',quantity:110,amount:33,submittedAt:'2026-10-12T02:00:00Z'} as any);render('post');
   const button=getByRole(host,'button',{name:'转为拒收'}) as HTMLButtonElement;expect(button.disabled).toBe(true);expect(button.title).toContain('结算');
+});
+
+it('uses the source product name and keeps full contract wording available on request',async()=>{
+  store.state!.orderLines[0].style='FAB-1';
+  store.state!.market.products.push({id:'product',sku:'FAB-1',name:'羊毛混纺斜纹'} as any);
+  store.state!.fulfillment.purchases.push(purchase('brief',approved({kind:'finished',description:'羊毛70%，再生涤纶30%，300g，幅宽148cm，按确认样生产',note:'深藏青、浅石色各1500米'})));
+  render('brief');
+  const detail=host.querySelector('[data-purchase-detail="brief"]') as HTMLElement;
+  expect(detail.querySelector('.mist-h2')?.textContent).toBe('羊毛混纺斜纹');
+  expect(detail.textContent).not.toContain('羊毛70%');
+  await click(getByRole(detail,'button',{name:'规格与约定'}));
+  expect(detail.textContent).toContain('羊毛70%，再生涤纶30%，300g，幅宽148cm，按确认样生产');
+  expect(store.state!.fulfillment.purchases[0].description).toContain('羊毛70%');
 });

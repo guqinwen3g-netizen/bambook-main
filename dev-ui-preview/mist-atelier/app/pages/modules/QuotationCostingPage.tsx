@@ -510,7 +510,7 @@ export function QuotationCostingPage() {
   return (
     <MistPage>
       <Button icon={ArrowLeft} onClick={back}>{uiText("返回报价")}</Button>
-      <PageHeader description={ui`${line.name} · ${line.qty} ${line.unit} · ${q.currency}；成本、建议价与人工拟报价分开。`}
+      <PageHeader description={ui`${line.name} · ${line.qty} ${line.unit} · ${q.currency}`}
         title={uiText("报价条目核算")}
         eyebrow={<Mono>{uiText(q.code + " · " + line.style)}</Mono>}
         actions={

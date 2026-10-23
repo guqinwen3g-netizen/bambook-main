@@ -50,7 +50,7 @@ it('shows original inbound and current physical/isolated balances, scraps the ex
 });
 
 it.each(['unknown-rt','foreign-stock'])('does not fall back from an invalid exact incoming return identity %s',id=>{
- physicalFixture();store.state!.fulfillment.stock.push({id:'foreign-stock',sourceKind:'claimReturn',claimId:'another-case',name:'不可回落库存',orderId:'other',lineId:'other-line',quantity:1,available:0,onHand:1,locked:1,unit:'件',location:'另一区',owner:'公司',createdAt:context.now});route.id=id;render();expect(host.textContent).toContain('来源案件或退货单不匹配');expect(host.textContent).not.toContain('不可回落库存');expect(queryByRole(host,'combobox',{name:'准确退回履行条目'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+ physicalFixture();store.state!.fulfillment.stock.push({id:'foreign-stock',sourceKind:'claimReturn',claimId:'another-case',name:'不可回落库存',orderId:'other',lineId:'other-line',quantity:1,available:0,onHand:1,locked:1,unit:'件',location:'另一区',owner:'公司',createdAt:context.now});route.id=id;render();expect(host.textContent).toContain('退货来源不匹配');expect(host.textContent).not.toContain('不可回落库存');expect(queryByRole(host,'combobox',{name:'准确退回履行条目'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });
 
 it('keeps inventory read-only without inventory authority while preserving source return navigation',()=>{physicalFixture();permissions.inventory=false;render();expect(queryByRole(host,'button',{name:'登记真实仓库'})).toBeNull();expect(queryByRole(host,'button',{name:'登记本批真实收货'})).toBeNull();expect(getByRole(host,'button',{name:'返回来源案件'})).toBeTruthy();expect(store.run).not.toHaveBeenCalled();});
