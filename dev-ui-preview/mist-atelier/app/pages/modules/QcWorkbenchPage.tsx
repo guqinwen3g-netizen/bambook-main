@@ -15,6 +15,7 @@ import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { ProductionSampleNotes } from '../ProductionSampleNotes';
 
 type Domain = FulfillmentQcTask['domain'];
 type Kind = FulfillmentQcTask['kind'];
@@ -327,6 +328,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const [result, setResult] = React.useState<MistQc['result'] | ''>(''), [report, setReport] = React.useState(''), [opinion, setOpinion] = React.useState(''), [at, setAt] = React.useState(localNow());
   const [measurements, setMeasurements] = React.useState<Measurement[]>([]), [ids, setIds] = React.useState<string[]>([]), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [confirming, setConfirming] = React.useState(false);
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
+  const sampleConcerns = task.kind === 'production' ? fact?.release?.sampleChecks?.filter(sample => sample.result === 'conditional') || [] : [];
   const garmentProduction = task.kind === 'production' && task.domain === 'garment';
   const [sizeChecks, setSizeChecks] = React.useState<SizeCheck[]>((fact?.completion?.sizeQuantities || fact?.sizes || []).map(size => ({ size: size.size, inspected: 0, result: '', evidence: '' })));
   const blocked = busy || saving || !!pending;
@@ -364,6 +366,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     <BackLink onClick={onClose}>{uiText("返回QC工作台")}</BackLink>
     <PageHeader description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} />
     {failure && <div className="mist-section"><Banner tone="bad" title={uiText("报告未保存")}>{failure}</Banner></div>}
+    {sampleConcerns.length > 0 && <div className="mist-section"><ProductionSampleNotes checks={sampleConcerns} /></div>}
     <div className="mist-detail" data-layout="main-rail">
       <div>
         <Card>

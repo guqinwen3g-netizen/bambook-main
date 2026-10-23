@@ -95,4 +95,10 @@ export const reviewedEnglish: Record<string, string> = {
   '暂无记录': 'No records yet', '暂无数据': 'No data yet', '正在加载…': 'Loading…', '操作未完成': 'Action could not be completed',
   '正在保存…': 'Saving…', '已保存': 'Saved', '无权限': 'Access denied', '没有查看权限': 'You do not have access',
   '当前账号无法访问此业务。': 'This account does not have access to this area.', '姓名/邮箱或密码不正确。': 'The name, email or password is incorrect.',
+  '样品关注项': 'Sample quality notes',
+  '查看关注项': 'View quality notes', '收起': 'Collapse',
+  '先锋样 · {0}已确认': 'Pioneer sample · {0} confirmed',
+  '{0} 已完成 QC、需求方确认及业务继续': '{0} has passed QC, been accepted, and cleared by sales',
+  '{0} 尚未完成准确实物 QC、需求方确认及业务继续': '{0} still needs QC, acceptance, and sales clearance',
+  '本分支还没有登记先锋样（{0}）': 'No pioneer sample for {0} has been registered for this branch',
 };
