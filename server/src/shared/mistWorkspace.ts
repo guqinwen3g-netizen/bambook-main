@@ -14,7 +14,7 @@ import {seedDemoModules,DEMO_SEED_VERSION} from './mistDemoSeed';
 import {createEmailState,applyEmailCommand,emailCommandPermission,seedEmailExamples,type EmailState,type EmailCommand} from './mistEmail';
 import {createPlatformState,applyPlatformCommand,platformCommandPermission,getPlatformReviews,platformCreditAppliedMinor,getRequiredBusinessNumberPlan as platformBusinessNumberPlan,platformBusinessDate,type PlatformState,type PlatformCommand} from './mistPlatform';
 import type {MistCreditDocumentIssue} from './mistCreditDocuments';
-import {developmentNoticeBlocker,developmentNoticeContent,developmentNoticeFingerprint,developmentNoticeNo,type DevNoticeArtifact,type DevNoticeRecord,type DevNoticeSnapshot} from './mistDevelopmentNotice';
+import {DEV_NOTICE_TEMPLATE_VERSION,developmentNoticeBlocker,developmentNoticeContent,developmentNoticeFingerprint,developmentNoticeNo,type DevNoticeArtifact,type DevNoticeRecord,type DevNoticeSnapshot} from './mistDevelopmentNotice';
 import type {MistReviewTask} from './mistReview';
 import {DEVELOPMENT_BILLING_LOCK,billingRequestBlocker,billingTotals,developmentBillTo,developmentBillingSettled,developmentBillingStage,developmentFeeSummary,developmentSamplesOf,makingFeeBlocker,type MistDevBilling} from './mistDevelopmentBilling';
 import {confirmationNeedsForms,developmentVersionSamples,sampleDispatchBlocker,sampleFormBlocker,sampleRef,type MistSampleDispatch,type MistSampleFee,type MistSampleRef} from './mistDevelopmentSamples';
@@ -496,7 +496,7 @@ export function prepareDevelopmentNoticeSnapshot(state: MistState, payload: unkn
   const blocked=developmentNoticeBlocker(state,dev,version);if(blocked)throw new MistCommandError('PRECONDITION',blocked);
   if(!context.actorId)throw new MistCommandError('VALIDATION','缺少真实生成人');
   const content=developmentNoticeContent(state,dev,version), seq=(version.notices?.length||0)+1;
-  return {...content,noticeNo:developmentNoticeNo(content,seq),seq,templateVersion:1,generatedAt:context.now,generatedBy:context.actorName,generatedById:context.actorId};
+  return {...content,noticeNo:developmentNoticeNo(content,seq),seq,templateVersion:DEV_NOTICE_TEMPLATE_VERSION,generatedAt:context.now,generatedBy:context.actorName,generatedById:context.actorId};
 }
 function sampleFee(value: unknown): MistSampleFee {
   const fee=value as MistSampleFee;

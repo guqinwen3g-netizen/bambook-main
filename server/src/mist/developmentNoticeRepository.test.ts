@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import * as contract from '../shared/mistWorkspace';
-import {developmentNoticeOutdated,developmentNotices,developmentNoticeTime} from '../shared/mistDevelopmentNotice';
+import {DEV_NOTICE_TEMPLATE_VERSION,developmentNoticeOutdated,developmentNotices,developmentNoticeTime} from '../shared/mistDevelopmentNotice';
 import {renderDevelopmentNoticeHtml} from '../templates/developmentNotice';
 import {MistRepository,type MistCommandRequest} from './repository';
 import {MistPrivateFiles} from './files';
@@ -58,6 +58,7 @@ describe('BB-DEV-4 试样通知单',()=>{
   const na=version('R2-A').notices![0],nb=version('R2-B').notices![0];
   expect(na.snapshot).toMatchObject({factory:'A厂',extraRequirements:'A 厂另改青果领',sampleQuantity:2,sampleUnit:'件',dueDate:'2026-11-05',noticeNo:`${dev().code}-R2-A-N01`});
   expect(nb.snapshot).toMatchObject({factory:'B厂',extraRequirements:'B 厂袖口加襻',sampleForm:'半成品',dueDate:'2026-11-08'});
+  expect(na.templateVersion).toBe(DEV_NOTICE_TEMPLATE_VERSION);expect(na.snapshot.templateVersion).toBe(DEV_NOTICE_TEMPLATE_VERSION);
   const fa=state().files.find(f=>f.id===na.fileId)!;expect(fa).toMatchObject({mimeType:'application/pdf',name:`服装开发通知单-${na.noticeNo}.pdf`});
   expect((await files.read(workspaceId,fa)).subarray(0,8).toString()).toBe('%PDF-1.4');expect(await names()).toHaveLength(2);
  });
