@@ -57,6 +57,42 @@ describe('device-local interface language', () => {
     act(() => { localStorage.setItem('bambook.device.locale', '"en-US"'); window.dispatchEvent(new StorageEvent('storage', { key: 'bambook.device.locale', newValue: '"en-US"' })); });
     expect(host.querySelector('h1')?.textContent).toBe('Orders');
   });
+  it('offers device language first and resolves it without saving a company preference', () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-GB']);
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    mount();
+    expect([...host.querySelectorAll('option')].map(option => option.value)).toEqual(['system', 'zh-CN', 'en-US']);
+    choose('system');
+    expect(readDevice('locale')).toBe('system');
+    expect(interfaceLocale()).toBe('en-US');
+    expect(document.documentElement.lang).toBe('en-US');
+    expect(host.querySelector('h1')?.textContent).toBe('Orders');
+    expect(localStorage.getItem('bambook.device.locale')).toBe('"system"');
+    expect(fetch).not.toHaveBeenCalled();
+    act(() => root.unmount()); host.remove(); mount();
+    expect(host.querySelector('h1')?.textContent).toBe('Orders');
+  });
+  it('follows device language changes while preserving an explicit choice', () => {
+    const languages = vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-GB']);
+    mount(); choose('system');
+    languages.mockReturnValue(['zh-TW', 'en-US']);
+    act(() => window.dispatchEvent(new Event('languagechange')));
+    expect(interfaceLocale()).toBe('zh-CN');
+    expect(document.documentElement.lang).toBe('zh-CN');
+    expect(host.querySelector('h1')?.textContent).toBe('订单管理');
+    choose('en-US');
+    act(() => window.dispatchEvent(new Event('languagechange')));
+    expect(host.querySelector('h1')?.textContent).toBe('Orders');
+    expect(interfaceLocale()).toBe('en-US');
+  });
+  it('uses English for unsupported device languages and the browser language when the list is empty', () => {
+    const languages = vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['fr-FR']);
+    writeDevice('locale', 'system');
+    expect(interfaceLocale()).toBe('en-US');
+    languages.mockReturnValue([]);
+    vi.spyOn(navigator, 'language', 'get').mockReturnValue('zh-CN');
+    expect(interfaceLocale()).toBe('zh-CN');
+  });
   it('keeps a session preference when browser storage is unavailable', () => {
     mount(); const setter = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('disabled'); });
     choose('en-US'); expect(host.querySelector('h1')?.textContent).toBe('Orders');
