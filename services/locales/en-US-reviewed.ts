@@ -123,4 +123,5 @@ export const reviewedEnglish: Record<string, string> = {
   '出运记录不存在': 'Shipment not found',
   '放行记录': 'Release record',
   '完工状态': 'Completion status', '完工记录': 'Completion record', '差异确认记录': 'Variance acceptance record',
+  '离港凭据': 'Departure evidence', '上传离港通知或承运人凭据': 'Upload the departure notice or carrier confirmation', '离港记录未保存': 'Departure was not saved',
 };

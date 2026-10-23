@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
+import {fireEvent,getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
@@ -112,4 +112,25 @@ it('BB-ORD-6 warns before saving a shipment above the over-ship cap and offers a
   await click(getByRole(host,'button',{name:'下一步'}));expect(host.textContent).toContain('请先发起超量出运申请并等待批准');
   s.fulfillment.shipments[0].lines[0].quantity=900;typeInto(qty,'20');
   expect(host.querySelector('[data-over-ship]')).toBeNull();expect(host.querySelector('[data-short-ship="l"]')!.textContent).toContain('低于短装下限 970');expect(host.textContent).toContain('本条目预计短装');
+});
+
+it('keeps an uploaded departure original through a failed save and submits its file id on retry',async()=>{
+  const f=store.state!.fulfillment;
+  f.shipments.push(shipment('s',{state:'ready',booking:'BK',documentsSentAt:'2026-10-12T08:00:00Z'}));f.customs.push(customs('s','cleared'));
+  render('s');await click(getByRole(host,'button',{name:'登记实际离港'}));
+  const dialog=getByRole(document.body,'dialog');
+  typeInto(getByRole(dialog,'textbox',{name:'实际离港 / 起飞依据'}) as HTMLTextAreaElement,'承运人开航确认');
+  let completeUpload!:(file:any)=>void;store.uploadFile.mockReset();store.uploadFile.mockImplementation(()=>new Promise(resolve=>{completeUpload=resolve;}));
+  const input=dialog.querySelector('input[type="file"]') as HTMLInputElement;
+  await act(async()=>fireEvent.change(input,{target:{files:[new File(['proof'],'departure.pdf',{type:'application/pdf'})]}}));
+  expect((getByRole(dialog,'button',{name:'登记离港'}) as HTMLButtonElement).disabled).toBe(true);
+  const file={id:'departure-proof',name:'departure.pdf',mimeType:'application/pdf',storageKey:'proof',size:5,createdAt:'2026-10-13T00:00:00Z'};
+  store.state!.files.push(file);await act(async()=>completeUpload(file));
+  store.run.mockRejectedValueOnce(new Error('保存失败，请重试'));
+  await click(getByRole(dialog,'button',{name:'登记离港'}));
+  expect(dialog.textContent).toContain('保存失败，请重试');expect(dialog.textContent).toContain('departure.pdf');
+  expect((getByRole(dialog,'textbox',{name:'实际离港 / 起飞依据'}) as HTMLTextAreaElement).value).toBe('承运人开航确认');
+  await click(getByRole(dialog,'button',{name:'登记离港'}));
+  expect(store.uploadFile).toHaveBeenCalledTimes(1);
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.shipments.depart',payload:expect.objectContaining({id:'s',evidence:'承运人开航确认',fileIds:['departure-proof']})});
 });
