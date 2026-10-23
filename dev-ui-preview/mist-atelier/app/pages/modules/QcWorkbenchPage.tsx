@@ -252,7 +252,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
   const production = task.source.kind === 'orderLine' ? state.productions.find(item => item.id === (task.source as { productionId?: string }).productionId) : undefined;
   const line = task.source.kind === 'orderLine' ? state.orderLines.find(item => item.id === (task.source as { lineId: string }).lineId) : undefined;
   const fact = production ? state.fulfillment.productionFacts?.find(item => item.productionId === production.id) : undefined;
-  const sizes = fact?.completion?.sizeQuantities || fact?.sizes || [];
+  const sizes = fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [];
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
   const claimReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.assigneeId && !mine ? `已由 ${task.assignee} 认领` : false;
   const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : !task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false;
@@ -329,7 +329,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
   const sampleConcerns = task.kind === 'production' ? fact?.release?.sampleChecks?.filter(sample => sample.result === 'conditional') || [] : [];
   const garmentProduction = task.kind === 'production' && task.domain === 'garment';
-  const [sizeChecks, setSizeChecks] = React.useState<SizeCheck[]>((fact?.completion?.sizeQuantities || fact?.sizes || []).map(size => ({ size: size.size, inspected: 0, result: '', evidence: '' })));
+  const [sizeChecks, setSizeChecks] = React.useState<SizeCheck[]>((fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || []).map(size => ({ size: size.size, inspected: 0, result: '', evidence: '' })));
   const blocked = busy || saving || !!pending;
   const previous = state?.fulfillment.qcReports.filter(item => item.taskId === task.id) || [];
   const resultOptions = task.kind === 'production'

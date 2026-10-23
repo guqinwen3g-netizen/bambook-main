@@ -4,6 +4,7 @@ import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
+import { productionQuantityBasis } from './mistProductionQuantity';
 import { productionSampleRequirements, type ProductionSampleEvidence } from './mistProductionSamples';
 import {developmentDomain} from './mistDevelopmentDomain';
 import { MistCommandError, lineAmount, mistMoneyMinor, assertMistOrderApproved, assertMistOrderDeposit, assertMistOrderOpen, isActiveMistInvoice, isRecognizedMistInvoice } from './mistWorkspace';
@@ -37,7 +38,7 @@ export type FulfillmentProductionFact = {
     sizes: FulfillmentSizeQuantity[];
     revision: number;
     release?: { at: string; actor: string; note: string; sampleChecks?: ProductionSampleEvidence[] };
-    completion?: { id: string; quantity: number; sizeQuantities: FulfillmentSizeQuantity[]; date: string; at: string; actor: string; evidence: string; fileIds: string[] };
+    completion?: { quantityBasis?: {scope:'total'|'size';note:string;version:number}; id: string; quantity: number; sizeQuantities: FulfillmentSizeQuantity[]; date: string; at: string; actor: string; evidence: string; fileIds: string[] };
     customerAcceptance?: { at: string; actor: string; note: string; completionId: string };
     /** 异常暂停：暂停期间不得推进进度、完工、出运或加工收货；QC 可继续检查。 */
     hold?: FulfillmentProductionHold;
@@ -852,7 +853,7 @@ function requireSampleRole(root: MistState, branch: MistProduction, role: Fulfil
 function requireProductionQc(root: MistState, branch: MistProduction) {
     const tasks = root.fulfillment.qcTasks.filter(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id);
     if (!tasks.length) fail('当前生产分支尚无专业生产QC报告', 'PRECONDITION');
-    const fact = fulfillmentProductionFact(root, branch.id), sizes = fact?.completion?.sizeQuantities || fact?.sizes || [];
+    const fact = fulfillmentProductionFact(root, branch.id), sizes = fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [];
     for (const task of tasks) {
         const latest = root.fulfillment.qcReports.find(report => report.id === task.reportIds.at(-1));
         if (!latest || latest.result === 'reject' || task.state !== 'reported' || latest.scopeRevision !== scopeRevision(root, task)) fail('当前生产分支仍有未解除的质量门禁', 'PRECONDITION');
@@ -1150,7 +1151,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             delete t.businessContinued;
             let sizeChecks: NonNullable<FulfillmentQcReport['sizeChecks']> = [];
             if (t.kind === 'production' && t.source.kind === 'orderLine') {
-                const fact = productionFact(root, t.source.productionId!), sizes = fact.completion?.sizeQuantities || fact.sizes;
+                const fact = productionFact(root, t.source.productionId!), sizes = fact.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact.sizes;
                 if (t.domain === 'garment' && !sizes.length) fail('生产QC须先有准确生产尺码');
                 if (t.domain === 'garment' && (!Array.isArray(p.sizeChecks) || !p.sizeChecks.length)) fail('请记录本次实际检查尺码');
                 sizeChecks = (p.sizeChecks || []).map((check: any) => {
@@ -1263,13 +1264,17 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (fact.completion) fail('最终完工事实已登记，不得覆盖');
             const quantity = qty(p.quantity, '最终完工数量'), date = day(p.date, '实际完工日');
             if (date > ctx.now.slice(0, 10)) fail('完工日期不得在未来');
-            const sizeQuantities = normalizeSizes(p.sizeQuantities, quantity, get(root.orders, branch.orderId, '订单').type === 'garment');
+            const basis=productionQuantityBasis(root,branch.orderId)??fail('请先核对并批准订单数量口径','PRECONDITION');
+            if(get(root.orders,branch.orderId,'订单').type==='garment'&&!Number.isSafeInteger(quantity))fail('成衣完工件数须为正整数');
+            const sizeQuantities = normalizeSizes(p.sizeQuantities, quantity, basis.scope==='size');
+            if(get(root.orders,branch.orderId,'订单').type==='garment'&&sizeQuantities.some(size=>!Number.isSafeInteger(size.quantity)))fail('成衣尺码件数须为正整数');
+            if(basis.scope==='size'&&(sizeQuantities.length!==fact.sizes.length||fact.sizes.some(size=>!sizeQuantities.some(actual=>actual.size===size.size))))fail('请逐码登记实际完工数量');
             if (sizeQuantities.some((size: FulfillmentSizeQuantity) => !fact.sizes.some(planned => planned.size === size.size))) fail('完工尺码不属于已确认生产尺码');
             if (branch.sourcePurchaseId) {
                 const purchase = get(f.purchases, branch.sourcePurchaseId, '来源合同'), line = get(root.orderLines, branch.lineId, '订单条目');
                 if (purchase.unit !== line.unit || quantity > purchase.received) fail('完工量不得超过同单位实际回交数量，系统不自动换算');
             }
-            fact.completion = { id: ctx.id(), quantity, sizeQuantities, date, at: ctx.now, actor: ctx.actorName, evidence: text(p.evidence, '最终完工依据'), fileIds: files(root, p.fileIds) };
+            fact.completion = { quantityBasis:basis!,id: ctx.id(), quantity, sizeQuantities, date, at: ctx.now, actor: ctx.actorName, evidence: text(p.evidence, '最终完工依据'), fileIds: files(root, p.fileIds) };
             fact.revision++;
             for (const task of f.qcTasks) if (task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && task.state === 'reported') task.state = 'working';
             branch.pct = 100; branch.col = 'qc';

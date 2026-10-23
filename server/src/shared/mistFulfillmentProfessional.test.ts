@@ -1,5 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {applyMistCommand,createMistState,type MistCommand,type MistContext} from './mistWorkspace';
+import {createOrderGovernance} from './mistOrderGovernance';
 import {assertProductionTransition,type FulfillmentSampleRole} from './mistFulfillment';
 
 function fixture(depositPercent=0){
@@ -9,7 +10,7 @@ function fixture(depositPercent=0){
  state.customers.push({id:'customer',name:'本地验收客户',code:'C',country:'CN',city:'',industry:'',owner:'sales',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});
  state.market.suppliers.push({id:'supplier',code:'S',name:'本地验收工厂',type:'工厂',country:'CN',address:'现场',capabilities:'加工',capacity:10,capacityUnit:'件',leadDays:5,status:'active',blockReason:'',contacts:[],fileIds:[],note:'',createdAt:context.now,updatedAt:context.now});
  state.files.push({id:'contract',name:'local-evidence.pdf',mimeType:'application/pdf',size:10,storageKey:'local/contract',createdAt:context.now});
- const orderId=run({type:'order.create',payload:{type:'garment',customerId:'customer',season:'AW',currency:'USD',due:'2026-11-01',ownerId:'sales',governance:{kind:'external',poNumber:'LOCAL-PO',confirmationFileIds:['contract'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent,paymentNote:'本地验收约定',incoterm:'FOB',deliveryPlace:'上海'},lines:[{fulfillmentMode:'cmt',cmtIncludedItems:[],name:'本地验收上衣',style:'LOCAL',qty:10,unit:'件',price:10,img:'coat'}]}}).id!;
+ const orderId=run({type:'order.create',payload:{type:'garment',customerId:'customer',season:'AW',currency:'USD',due:'2026-11-01',ownerId:'sales',governance:{kind:'external',poNumber:'LOCAL-PO',confirmationFileIds:['contract'],internalPurpose:'',receiver:'',quantityBasis:'total',quantityBasisNote:'客户按条目总量核验',paymentMethod:'TT',depositPercent,paymentNote:'本地验收约定',incoterm:'FOB',deliveryPlace:'上海'},lines:[{fulfillmentMode:'cmt',cmtIncludedItems:[],name:'本地验收上衣',style:'LOCAL',qty:10,unit:'件',price:10,img:'coat'}]}}).id!;
  function approveOrder(){run({type:'order.governance.submit',payload:{orderId}});run({type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'本地验收正式主单'}},{...context,actorId:'reviewer'});}
  function purchase(){const id=run({type:'fulfillment.procurement.save',payload:{orderId,lineId:state.orderLines[0].id,kind:'processing',supplierId:'supplier',supplier:'忽略客户端名称',description:'本地验收加工',quantity:10,unit:'件',price:2,currency:'USD',due:'2026-10-30',terms:'本地验收付款约定',destination:'工厂',note:'',fileIds:[]}}).id!;run({type:'fulfillment.procurement.submit',payload:{id}});run({type:'fulfillment.procurement.decide',payload:{id,decision:'approved',note:'已核对'}},{...context,actorId:'reviewer'});return id;}
  function confirmContract(id:string){run({type:'fulfillment.procurement.send',payload:{id,at:context.now,evidence:'本地验收线下发出记录',fileIds:[]}});run({type:'fulfillment.procurement.confirm',payload:{id,at:context.now,confirmedDue:'2026-10-30',evidence:'本地验收工厂反馈记录',fileIds:[]}});}
@@ -32,4 +33,28 @@ describe('professional Mist fulfillment gates',()=>{
  it('requires a physical shipping sample for this exact shipment batch, distinct from PP',()=>{const f=fixture(),{productionId,purchaseId}=f.released();f.receiveAndComplete(productionId,purchaseId);const task=f.productionTask(productionId);f.report(task,'pass');const shipmentId=f.shipment(productionId);expect(()=>f.run({type:'fulfillment.shipments.ready',payload:{id:shipmentId}})).toThrow('船样');const shipTask=f.sample(productionId,'shipping','M',shipmentId);expect(f.state.fulfillment.qcTasks.find(t=>t.id===shipTask)?.sampleId).toBeTruthy();expect(()=>f.run({type:'fulfillment.shipments.ready',payload:{id:shipmentId}})).toThrow('装箱数量');});
  it('allows accepted short production as the full final batch without inventing a tolerance',()=>{const f=fixture(),{productionId,purchaseId}=f.released();f.receiveAndComplete(productionId,purchaseId,9);expect(()=>f.shipment(productionId,9)).toThrow('客户明确接受');f.run({type:'fulfillment.production.acceptCompletion',payload:{productionId,note:'本地验收客户书面接受9件'}});expect(f.shipment(productionId,9)).toBeTruthy();expect(f.state.orderLines[0].qty).toBe(10);});
  it('archives externally issued BL originals without claiming to issue them',()=>{const f=fixture(),{productionId,purchaseId}=f.released();f.receiveAndComplete(productionId,purchaseId);const shipmentId=f.shipment(productionId);f.state.fulfillment.shipments[0].state='departed';const id=f.run({type:'fulfillment.documents.save',payload:{shipmentId,orderId:'',type:'BL',number:'EXTERNAL-BL',title:'本地验收外部提单',dueDate:'',content:'收到承运人原件',fileIds:['contract']}}).id!;expect(()=>f.run({type:'fulfillment.documents.issue',payload:{id}})).toThrow('只能归档');f.run({type:'fulfillment.documents.archiveExternal',payload:{id,issuer:'本地验收承运人',at:f.context.now,evidence:'收到外部签发原件'}});expect(f.state.fulfillment.documents.find(d=>d.id===id)?.externalIssue?.issuer).toBe('本地验收承运人');expect(f.state.invoices).toHaveLength(0);});
+});
+
+
+describe('approved production quantity basis',()=>{
+ const receive=(f:ReturnType<typeof fixture>,purchaseId:string)=>f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:10,rejected:0,destination:'supplier',location:'仓库',date:'2026-10-13',evidence:'实际回货10件',fileIds:[]}});
+ const complete=(f:ReturnType<typeof fixture>,productionId:string,sizeQuantities:Array<{size:string;quantity:number}>=[])=>f.run({type:'fulfillment.production.complete',payload:{productionId,quantity:10,sizeQuantities,date:'2026-10-13',evidence:'工厂最终点数10件',fileIds:[]}});
+ it('records total-only actual quantity without copying planned sizes and retains every planned size in final QC coverage',()=>{
+  const f=fixture(),{productionId,purchaseId}=f.released();receive(f,purchaseId);complete(f,productionId);
+  expect(f.state.fulfillment.productionFacts[0].completion).toMatchObject({quantity:10,sizeQuantities:[],quantityBasis:{scope:'total',note:'客户按条目总量核验'}});
+  const task=f.productionTask(productionId);f.report(task,'pass',['M']);expect(()=>assertProductionTransition(f.state,f.state.productions[0],'done',100)).toThrow('尺码 L');f.report(task,'pass',['L']);expect(()=>assertProductionTransition(f.state,f.state.productions[0],'done',100)).not.toThrow();
+ });
+ it('blocks unknown quantity basis instead of guessing from the size plan or submitted matrix',()=>{
+  const f=fixture(),{productionId,purchaseId}=f.released();receive(f,purchaseId);const g=f.state.orders[0].governance!;for(const c of [g.contract,g.approvedSnapshot!.contract]){delete c.quantityBasis;delete c.quantityBasisNote;}
+  expect(()=>complete(f,productionId,[{size:'M',quantity:4},{size:'L',quantity:6}])).toThrow('核对并批准订单数量口径');expect(f.state.fulfillment.productionFacts[0].completion).toBeUndefined();
+ });
+ it('requires every actual size only for an explicitly approved size basis and freezes that basis',()=>{
+  const f=fixture(),{productionId,purchaseId}=f.released();receive(f,purchaseId);const g=f.state.orders[0].governance!;for(const c of [g.contract,g.approvedSnapshot!.contract]){c.quantityBasis='size';c.quantityBasisNote='客户PO要求逐码足量';}
+  expect(()=>complete(f,productionId)).toThrow('尺码');expect(()=>complete(f,productionId,[{size:'M',quantity:10}])).toThrow('逐码');
+  complete(f,productionId,[{size:'M',quantity:4},{size:'L',quantity:6}]);expect(f.state.fulfillment.productionFacts[0].completion?.quantityBasis).toMatchObject({scope:'size',note:'客户PO要求逐码足量'});
+ });
+});
+
+it('rejects unrecognised quantity scope and missing evidence in the approval input',()=>{
+ const c=fixture().context;expect(()=>createOrderGovernance(c,{quantityBasis:'size'})).toThrow('数量依据');expect(()=>createOrderGovernance(c,{quantityBasis:'invalid' as 'total',quantityBasisNote:'来源'})).toThrow('数量口径');
 });
