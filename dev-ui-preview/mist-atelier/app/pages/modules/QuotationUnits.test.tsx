@@ -29,7 +29,7 @@ describe('BB-QUO-1 quotation editor units',()=>{
   await toLines();expect(el('条目1单位').tagName).toBe('INPUT');expect(el('条目1单位').value).toBe('');
   await fill('条目1来源','v:'+fabricVersion().id);
   expect(el('条目1单位').tagName).toBe('SELECT');expect(el('条目1单位').value).toBe('');expect(options('条目1单位')).toEqual(['','米','码','公斤']);
-  expect(host.textContent).toContain('面料按 米 / 码 / 公斤 计价，不换算');
+  expect(host.textContent).not.toContain('计价，不换算');
   await fill('条目1款号','F-STYLE-1');await fill('条目1单价','3.20');await click('下一步');
   expect(host.textContent).toContain('第 1 个条目计价单位：请从 米 / 码 / 公斤 中选择');expect(host.textContent).toContain('第 2 / 3 步');
   await fill('条目1单位','码');await click('下一步');await click('保存报价草稿');

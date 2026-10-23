@@ -209,4 +209,7 @@ export const reviewedEnglish: Record<string, string> = {
   '审批中不能调整面料分配': 'Fabric allocations are locked during approval',
   '内部面料行须使用米数单位': 'Internal fabric lines must use metres',
   '请选择内部面料供给行': 'Select an internal fabric supply line',
+  '汇率（CNY / {0}）': 'Rate (CNY / {0})',
+  '分项核算': 'Itemized costing',
+  '核算记录': 'Costing record', '历史报价参考': 'Historical quote reference', '保存核算': 'Save costing',
 };

@@ -51,6 +51,31 @@ describe('Market explicit detail sections',()=>{
  });
 });
 describe('Mist market screens',()=>{
+ it('carries the exact development customer into a product quotation and saves that customer',async()=>{
+  const state=bridge.current.state,product=state.market.products[0];
+  state.customers.push({...state.customers[0],id:'c2',name:'来源客户'});
+  state.devs.push({id:'source-dev',customerId:'c2'} as any);product.sourceDevId='source-dev';product.season='AW27';
+  await mount('quotations',undefined,'product:'+product.id);
+  expect((host.querySelector('[aria-label="客户"]') as HTMLSelectElement).value).toBe('c2');
+  expect((host.querySelector('[aria-label="季节"]') as HTMLInputElement).value).toBe('AW27');
+  await fill('有效期','2026-12-01');await fill('贸易术语','FOB 上海');await fill('付款条件','T/T');
+  await click('下一步');await click('下一步');await click('保存报价草稿');
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.quotation.save',payload:expect.objectContaining({input:expect.objectContaining({customerId:'c2',lines:[expect.objectContaining({productId:product.id})]})})}));
+ });
+ it.each([false,true])('uses only an unambiguous customer-code reference for a product without a development (%s)',async unique=>{
+  const state=bridge.current.state,product=state.market.products[0];
+  state.customers.push({...state.customers[0],id:'c2',name:'第二客户'});
+  product.customerCodes=unique?[{customerId:'c2',code:'CUSTOMER-2'}]:[{customerId:'c1',code:'CUSTOMER-1'},{customerId:'c2',code:'CUSTOMER-2'}];
+  await mount('quotations',undefined,'product:'+product.id);
+  expect((host.querySelector('[aria-label="客户"]') as HTMLSelectElement).value).toBe(unique?'c2':'');
+  expect(bridge.current.run).not.toHaveBeenCalled();
+ });
+ it('leaves an unverified zero product cost blank in the quotation',async()=>{
+  const product=bridge.current.state.market.products[0];product.cost='0';
+  await mount('quotations',undefined,'product:'+product.id);
+  await fill('客户','c1');await fill('有效期','2026-12-01');await fill('贸易术语','FOB 上海');await fill('付款条件','T/T');await click('下一步');
+  expect((host.querySelector('[aria-label="条目1成本"]') as HTMLInputElement).value).toBe('');
+ });
  it('shows unverified product cost without presenting a zero cost estimate',async()=>{
   const product=bridge.current.state.market.products[0];product.cost='0';
   await mount('products',product.id,undefined,'full');
@@ -133,7 +158,7 @@ describe('market route changes without remounting the module',()=>{
 describe('currency defaults respect entered and source values',()=>{
  it('uses the customer currency ahead of the workspace and leaves an edited currency intact',async()=>{
   bridge.current.state.settings.companyProfile={defaultCurrency:'CNY'};bridge.current.state.customers[0].currency='EUR';bridge.current.state.customers.push({...bridge.current.state.customers[0],id:'c2',name:'英国客户',currency:'GBP'});
-  await mount('quotations');await click('新建报价');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('EUR');await fill('客户','c2');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('GBP');await fill('币种','JPY');await fill('客户','c1');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('JPY');
+  await mount('quotations');await click('新建报价');expect((host.querySelector('[aria-label="客户"]') as HTMLSelectElement).value).toBe('');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('CNY');await fill('客户','c1');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('EUR');await fill('客户','c2');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('GBP');await fill('币种','JPY');await fill('客户','c1');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('JPY');
  });
  it('does not overwrite an existing quote currency when a different workspace default is configured',async()=>{
   const s=bridge.current.state;s.settings.companyProfile={defaultCurrency:'CNY'};s.customers[0].currency='EUR';s.market.quotations=[{id:'q',code:'Q-USD',customerId:'c1',currency:'USD',season:'AW26',validUntil:'2026-12-01',deliveryTerms:'FOB',paymentTerms:'T/T',status:'Draft',lines:[],total:'0.00',deliveryEvidence:'',responseEvidence:'',approval:null,convertedOrderId:null,fileIds:[],note:'',createdAt:'',updatedAt:''}];await mount('quotations','q');await click('编辑草稿');expect((host.querySelector('[aria-label="币种"]') as HTMLInputElement).value).toBe('USD');

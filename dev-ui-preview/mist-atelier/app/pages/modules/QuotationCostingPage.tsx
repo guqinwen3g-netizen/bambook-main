@@ -47,6 +47,7 @@ import { useMistSession } from "../../runtime/auth";
 import { useNav } from "../../nav";
 import { useRouteDraft, useRouteScope } from "./useRouteDraft";
 import { downloadModuleCsv } from "./ModuleWorkbench";
+import { shortWhen } from "./pageKit";
 const kinds: Record<QuoteCostComponent["kind"], string> = {
   yarn: "纱线 / 原料",
   weaving: "织造",
@@ -85,7 +86,7 @@ function AllocationSummary({
   return (
     <Banner title={uiText("本报价行整笔费用分摊")}>{uiText("整笔合计 ")}{allocation.total} {currency}{uiText(" ÷ 本行报价数量")}{uiText(" ")}
       {allocation.quantity} {uiText(unit)}{uiText(" ＝ 单位分摊 ")}{allocation.unitCost} {currency}/
-      {uiText(unit)}{uiText("。 整笔金额按四位精度逐项计算，先合计再除以本行数量；分项单位展示可能有尾差，以合计分摊为准。仅为本次报价参考，不是实际费用归属，不跨条目或订单分摊。")}</Banner>
+      {uiText(unit)}</Banner>
   );
 }
 function componentEvidence(
@@ -125,13 +126,11 @@ function componentEvidence(
 function Snapshot({ r }: { r: QuoteCostSnapshot }) {
   const { go } = useNav();
   return (
-    <Card>
-      <CardHeader title={uiText("已冻结条目核算")} sub={uiText(r.createdAt + " · " + r.actor)} />
+    <Card data-cost-snapshot={r.id}>
+      <CardHeader title={uiText("核算记录")} sub={shortWhen(r.createdAt) + " · " + r.actor} />
       <div className="mist-card-body mist-col">
-        <Mono>{r.id}</Mono>
         <Facts
           items={[
-            { label: "模型版本", value: r.modelVersion },
             {
               label: "原报价条目",
               value: r.target.line.style + " · " + r.target.line.name,
@@ -151,7 +150,7 @@ function Snapshot({ r }: { r: QuoteCostSnapshot }) {
               value: r.result.cost + " " + r.input.currency,
             },
             {
-              label: "建议报价（两位精度）",
+              label: "建议报价",
               value: r.result.suggestedQuotePrice + " " + r.input.currency,
             },
             {
@@ -204,7 +203,7 @@ function Snapshot({ r }: { r: QuoteCostSnapshot }) {
                 r.input.strategyBasis,
             },
             {
-              label: "供应商冻结身份",
+              label: "供应商",
               value: r.supplier
                 ? r.supplier.code + " · " + r.supplier.name
                 : "拆解路径，无成品报价基数",
@@ -214,7 +213,7 @@ function Snapshot({ r }: { r: QuoteCostSnapshot }) {
               value: r.target.deliveryTerms + " / " + r.target.paymentTerms,
             },
             {
-              label: "凭据附件快照",
+              label: "凭据附件",
               value:
                 r.files.map((f) => f.name).join("；") ||
                 "没有选取附件，依据为人工登记",
@@ -263,7 +262,6 @@ function Snapshot({ r }: { r: QuoteCostSnapshot }) {
             ]}
           />
         )}
-        <Banner title={uiText("内部参考，不是实际利润或已对客报价")}>{uiText("四位成本结果与两位报价门禁口径分别保留；不能将建议价当客户接受价。历史来源后来改名或改价，不会改写这份快照。")}</Banner>
       </div>
     </Card>
   );
@@ -501,6 +499,7 @@ export function QuotationCostingPage() {
     <Field label={uiText(label)} required={required} hint={uiText(hint)}>
       <TextInput
         aria-label={uiText(label)}
+        type={field === 'sourceDate' || field === 'sourceValidUntil' ? 'date' : 'text'}
         value={String(input[field])}
         disabled={disabled}
         onChange={(e) => patch(field, e.target.value)}
@@ -553,7 +552,6 @@ export function QuotationCostingPage() {
       {(!can || frozen) && (
         <Banner title={uiText(can ? "本版本只读" : "没有报价写权限")}>{uiText("审批中、已发送或已转单的报价不能改核算；需要改价时从报价主线建立适用新版本。")}</Banner>
       )}
-      <Banner title={uiText("专业计算 · 人工依据与可选 AI 审阅")}>{uiText("当前只支持与报价行相同币种、相同计价单位；不自动取市场原料价或换算米 / 码 / 公斤。供应商成品价与专业拆解二选一，附加费用必须确认未包含。历史成交只作参考证据列出，不自动套用；AI 仅在第二步显式授权后审阅。")}</Banner>
       {editing && can && !frozen ? (
         <div className="mist-wizard">
           <VerticalSteps
@@ -589,11 +587,11 @@ export function QuotationCostingPage() {
                         options={[
                           {
                             value: "supplier",
-                            label: "供应商成品报价＋未包含费用",
+                            label: "供应商报价",
                           },
                           {
                             value: "breakdown",
-                            label: "专业逐项拆解（无成品报价基数）",
+                            label: "分项核算",
                           },
                         ]}
                       />
@@ -601,18 +599,8 @@ export function QuotationCostingPage() {
                     {inputField("currency", "成本币种")}
                     {inputField("unit", "成本计价单位")}
                     {inputField("sourceSpecification", "适用规格")}
-                    {inputField(
-                      "sourceDate",
-                      "来源日期",
-                      true,
-                      "YYYY-MM-DD，记录这次依据日期，不自动填市场日期。",
-                    )}
-                    {inputField(
-                      "sourceValidUntil",
-                      "来源有效期",
-                      false,
-                      "可留空；不等同客户报价有效期。",
-                    )}
+                    {inputField("sourceDate", "来源日期")}
+                    {inputField("sourceValidUntil", "来源有效期", false)}
                     {input.mode === "supplier" && (
                       <>
                         <Field label={uiText("来源供应商")} required>
@@ -663,7 +651,6 @@ export function QuotationCostingPage() {
                         disabled={disabled}
                         onChange={(ids) => patch("fileIds", ids)}
                       />
-                      <span className="mist-field-hint">{uiText("上传供应商报价单、邮件截图等；不传时仅保存人工登记依据。")}</span>
                     </div>
                   </FormGrid>
                 </FormSection>
@@ -671,9 +658,8 @@ export function QuotationCostingPage() {
                   title={
                     uiText(input.mode === "supplier"
                       ? "未包含的额外费用"
-                      : "报价成本拆解与整笔费用")
+                      : "成本明细")
                   }
-                  sub={uiText("每项明确按计价单位计入，或作为仅属于本行的整笔费用分摊；写清计费量、单位、单价及依据。")}
                   tools={
                     <Button
                       disabled={disabled || input.components.length >= 100}
@@ -817,7 +803,6 @@ export function QuotationCostingPage() {
             ) : step === 1 ? (
               <FormSection
                 title={uiText("本次交易的人工报价策略")}
-                description={uiText("客户与交易因人因次而异，不预设大小客户利润率。")}
               >
                 <FormGrid>
                   <Field label={uiText("利润计算方式")}>
@@ -838,23 +823,12 @@ export function QuotationCostingPage() {
                       onChange={(e) => patch("method", e.target.value)}
                     />
                   </Field>
-                  {inputField(
-                    "targetPercent",
-                    "目标百分比",
-                    true,
-                    "明确填写，不自动设置公司底线或客户分类加成。",
-                  )}
-                  {inputField(
-                    "proposedPrice",
-                    "人工拟报价",
-                    true,
-                    "报价单价两位小数；可与建议报价不同，须人工核对。",
-                  )}
+                  {inputField("targetPercent", "目标百分比")}
+                  {inputField("proposedPrice", "人工拟报价")}
                   <Field
                     label={uiText("本次报价策略依据")}
                     full
                     required
-                    hint={uiText("本次数量、客户反馈、付款 / 服务风险、业务目标及可比依据；不得把客户体量当固定定价规则。")}
                   >
                     <TextArea
                       aria-label={uiText("本次报价策略依据")}
@@ -903,18 +877,11 @@ export function QuotationCostingPage() {
                   <Facts
                     items={[
                       {
-                        label: "单位参考成本（四位）",
+                        label: "单位参考成本",
                         value: calculation?.result.cost + " " + input.currency,
                       },
                       {
-                        label: "建议报价（四位）",
-                        value:
-                          calculation?.result.suggestedPrice +
-                          " " +
-                          input.currency,
-                      },
-                      {
-                        label: "建议报价（报价精度）",
+                        label: "建议报价",
                         value:
                           calculation?.result.suggestedQuotePrice +
                           " " +
@@ -995,7 +962,7 @@ export function QuotationCostingPage() {
                     disabled={disabled}
                     onChange={setApplyPrice}
                   />
-                  <Banner tone="warn" title={uiText("保存核算后成本仍待负责人审批")}>{uiText("保存会追加不可覆盖快照、更新本行成本待核口径，并使既有审批失效保留历史。只有勾选才改本行售价及报价总额，不改其他行或订单，不发送给客户。")}</Banner>
+                  <Banner tone="warn" title={uiText("待业务审批")} />
                 </div>
               </>
             )}
@@ -1053,7 +1020,7 @@ export function QuotationCostingPage() {
                   disabled={disabled || !calculation}
                   loading={busy}
                   onClick={() => void save()}
-                >{uiText("保存核算快照")}</Button>
+                >{uiText("保存核算")}</Button>
               )}
             </div>
           </Card>
@@ -1067,7 +1034,6 @@ export function QuotationCostingPage() {
       ) : (
         <EmptyState
           title={uiText("本条目尚无专业核算快照")}
-          description={uiText("旧报价成本仍按原门禁处理；不替旧记录补造供应商依据。")}
         />
       )}
       {lineSnapshots.length > 0 && (

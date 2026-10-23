@@ -9,7 +9,7 @@ import { developmentDomain } from '../../../../../server/src/shared/mistDevelopm
 import { marketBusinessDate, quotationConversionBlockerText, quotationConversionBlockers, quotationNeedsApproval, quoteLineFamily, quotationVersions, type MarketQuotation } from '../../../../../server/src/shared/mistMarket';
 import { quoteMoqStatus, quoteSpecItems } from '../../../../../server/src/shared/mistQuotationSpecs';
 import { lineBelowMarginFloor } from '../../../../../server/src/shared/mistQuotationMarginFloor';
-import { quotationConversionComplete, quotationConversionProgress, quotationConversionStarted, quotationConvertedOrders, quotationPendingLines, quoteLineConversionStatus, quoteLineConversionText } from '../../../../../server/src/shared/mistQuotationLineConversion';
+import { quotationConversionComplete, quotationConversionStarted, quotationConvertedOrders, quotationPendingLines, quoteLineConversionStatus, quoteLineConversionText } from '../../../../../server/src/shared/mistQuotationLineConversion';
 import { quotationDocumentBlocker, quotationDocuments, quotationFormalDocumentBlocker } from '../../../../../server/src/shared/mistQuotationDocument';
 import { apiService } from '../../../../../services/apiService';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -61,7 +61,7 @@ export function quotationFlags(all: MarketQuotation[], q: MarketQuotation, day: 
   if (next) flags.push({ key: 'superseded', label: `已有新版本 ${next.code}`, tone: 'neutral' });
   return flags;
 }
-const margin = (price: string, cost: string) => { const p = Number(price), c = Number(cost); return cost && p > 0 && Number.isFinite(c) ? Math.round((p - c) / p * 1000) / 10 : null; };
+const margin = (price: string, cost: string) => { const p = Number(price), c = Number(cost); return cost && p > 0 && c > 0 && Number.isFinite(c) ? Math.round((p - c) / p * 1000) / 10 : null; };
 const version = (q: MarketQuotation) => 'V' + (q.revision || 1);
 export const quotationStageLabel = (q: MarketQuotation) => { const s = quotationStage(q); return s === 'closed' ? (q.status === 'Expired' ? '已失效' : '客户未接受') : QUOTE_STAGE_LABEL[s]; };
 
@@ -226,7 +226,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
   const writeReason = !can ? '没有报价写权限' : false;
   const sendReason = writeReason || (q.approval?.status === 'pending' ? '审批中，等待业务负责人决定' : needsApproval && !approved ? '低于成本、低于最低毛利率或成本待核，须先取得业务审批' : expired ? '已过有效期，请修改有效期后再发送' : false);
   const reviewer = q.approval?.status === 'pending' && q.approval.reviewerId === me;
-  const pending = quotationPendingLines(q), started = quotationConversionStarted(q), progress = quotationConversionProgress(q), orders = quotationConvertedOrders(q, state.orders);
+  const pending = quotationPendingLines(q), started = quotationConversionStarted(q), orders = quotationConvertedOrders(q, state.orders);
   const blockers = stage === 'accepted' ? quotationConversionBlockers(state, { lines: pending }) : [];
   const allBlocked = blockers.length > 0 && blockers.length >= pending.length;
   const convertReason = !canOrder ? '没有订单写权限' : allBlocked ? `${quotationConversionBlockerText(blockers[0])}${blockers.length > 1 ? `，另有 ${blockers.length - 1} 个条目同样未认可` : ''}` : false;
@@ -237,15 +237,15 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
   const formalDocReason = docBase || quotationFormalDocumentBlocker(q, needsApproval) || false;
   const documents = quotationDocuments(q);
   const reviseReason = writeReason || (next ? `已有新版本 ${next.code}，请在最新版本上修改` : q.convertedOrderId ? '已转订单的报价不再出新版本' : false);
-  const banner: { tone: Tone; title: string; text: string } =
-    stage === 'pending' ? { tone: 'warn', title: '待业务审批', text: `${shortWhen(q.approval!.submittedAt)} 提交；审批通过前不能发送给客户。` }
-    : stage === 'draft' ? (q.approval?.status === 'rejected' ? { tone: 'bad', title: '审批已退回', text: `意见：${q.approval.note || '—'}。修订草稿后可重新提交。` }
-      : needsApproval && !approved ? { tone: 'warn', title: '草稿 · 须先审批', text: '有条目低于成本、低于最低毛利率或成本待核实，提交业务审批并通过后才能发送。' }
-      : { tone: 'neutral', title: approved ? '草稿 · 审批已通过' : '草稿', text: '核对条目与条款后发送给客户，再在此登记发送方式与对象。' })
-    : stage === 'sent' ? { tone: expired ? 'bad' : 'accent', title: expired ? '已过有效期 · 待处理' : '已发送 · 等待客户反馈', text: expired ? '客户仍有意向时请新建版本续期；否则标记为已失效。' : `有效期至 ${q.validUntil}。客户回复后登记接受或未接受。` }
-    : stage === 'accepted' ? (started ? { tone: 'accent', title: `部分已转订单 · ${pending.length} 个条目待处理`, text: `${progress.text}。未转条目可再转另一张订单，或标记不再转并写明原因。` } : { tone: 'ok', title: '客户已接受 · 待转订单', text: '勾选本次转单的条目，核对交期与负责人后转为订单草稿，条目单位与单价原样带入。' })
-    : stage === 'converted' ? { tone: 'ok', title: '已转订单', text: `全部条目已处理（${progress.text}），报价不再修改。` }
-    : { tone: 'neutral', title: q.status === 'Expired' ? '已失效' : '客户未接受', text: next ? `已基于此报价出新版本 ${next.code}。` : '客户如重新询价，可基于此报价新建版本。' };
+  const banner: { tone: Tone; title: string; text?: string } =
+    stage === 'pending' ? { tone: 'warn', title: '待业务审批' }
+    : stage === 'draft' ? (q.approval?.status === 'rejected' ? { tone: 'bad', title: '审批已退回', text: q.approval.note }
+      : needsApproval && !approved ? { tone: 'warn', title: '草稿 · 须先审批' }
+      : { tone: 'neutral', title: approved ? '草稿 · 审批已通过' : '草稿' })
+    : stage === 'sent' ? { tone: expired ? 'bad' : 'accent', title: expired ? '已过有效期 · 待处理' : '已发送 · 等待客户反馈' }
+    : stage === 'accepted' ? { tone: started ? 'accent' : 'ok', title: started ? `部分已转订单 · ${pending.length} 个条目待处理` : '客户已接受 · 待转订单' }
+    : stage === 'converted' ? { tone: 'ok', title: '已转订单' }
+    : { tone: 'neutral', title: q.status === 'Expired' ? '已失效' : '客户未接受' };
   const track = [
     { label: '保存草稿', done: true, note: shortWhen(q.createdAt) },
     { label: '业务审批', done: approved || (!needsApproval && stage !== 'draft' && stage !== 'pending'), note: q.approval ? `${q.approval.status === 'approved' ? '已批准' : q.approval.status === 'rejected' ? '已退回' : '审批中'} · ${shortWhen(q.approval.decidedAt || q.approval.submittedAt)}` : needsApproval ? '须审批' : '无需审批', noteTone: q.approval?.status === 'rejected' ? 'bad' as const : undefined },
@@ -298,15 +298,14 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
         {moq.state !== 'none' && moq.state !== 'met' && <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }} data-quote-moq={moq.state}>{moq.state === 'below' && <Pill tone="warn">{uiText("低于 MOQ")}</Pill>}<small className="mist-muted">{moq.text}</small></div>}
         <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-num">{l.qty} {uiText(l.unit)} × {l.price} = {q.currency} {l.amount}</span><span className="mist-spacer" />{lineBelowMarginFloor(l) && <span data-margin-floor-breach><Pill tone="warn">{ui`低于最低毛利率 ${l.marginFloor!.minMarginPercent}%（V${l.marginFloor!.version}）`}</Pill></span>}{m === null ? <span className="mist-muted">{uiText("成本待核")}</span> : <span className={m < 0 ? 'mist-tone-bad mist-num' : 'mist-num mist-muted'}>{uiText("毛利 ")}{m}%</span>}</div>
       </div>; })}</div>
-      <span className="mist-note">{uiText("毛利参考 = (单价 − 成本) / 单价，仅按已记录条目成本，不是实际订单利润。专业核算从准确条目进入，可对照历史成交、报价底价线与 AI 审阅。")}</span>
     </DetailBlock>
-    {!!q.costingSnapshots?.length&&<DetailBlock title={uiText("核算历史")}><span className="mist-note">{q.costingSnapshots.length}{uiText(" 份不可覆盖快照；编辑草稿重建条目后，旧快照仅历史，不自动绑定新行。当前行从条目核算查看。")}</span><Button onClick={()=>onOpen('quotations',q.id,{section:'cost-history'})}>{uiText("查看全部核算历史")}</Button></DetailBlock>}
+    {!!q.costingSnapshots?.length&&<DetailBlock title={uiText("核算历史")}><span>{q.costingSnapshots.length} {uiText("份")}</span><Button onClick={()=>onOpen('quotations',q.id,{section:'cost-history'})}>{uiText("查看全部核算历史")}</Button></DetailBlock>}
     {versions.length > 1 && <DetailBlock title={uiText("版本")}>
       <div className="mist-col" style={{ gap: 6 }} data-quotation-versions>{versions.map(v => <Button key={v.id} variant={v.id === q.id ? 'secondary' : 'quiet'} aria-current={v.id === q.id || undefined} onClick={() => onOpen('quotations', v.id)}>
         <span className="mist-row" data-wrap style={{ gap: 8, rowGap: 4, width: '100%' }}><Pill tone={v.id === q.id ? 'accent' : 'neutral'}>{version(v)}</Pill><span className="mist-num">{v.currency} {quoteMoney(v.total)}</span><span className="mist-muted">{uiText("至 ")}{v.validUntil.slice(5)}</span><span className="mist-spacer" /><span>{quotationStageLabel(v)}</span></span>
       </Button>)}</div>
     </DetailBlock>}
-    <DetailBlock title={uiText("客户反馈记录")}><span className="mist-note">{q.feedback?.length||0}{uiText(" 条结构化反馈；区分客户原话、业务判断和未知原因。还价不改本版单价，接受 / 未接受仍从主线确认。")}</span><Button onClick={()=>onOpen('quotations',q.id,{section:'feedback'})}>{uiText("查看客户反馈")}</Button></DetailBlock>
+    <DetailBlock title={uiText("客户反馈记录")}><span>{q.feedback?.length||0} {uiText("条")}</span><Button onClick={()=>onOpen('quotations',q.id,{section:'feedback'})}>{uiText("查看客户反馈")}</Button></DetailBlock>
     <DetailBlock title={uiText("进度")}><Checklist items={track} /></DetailBlock>
     {!!(q.approvalHistory?.length || q.approval) && <DetailBlock title={uiText("审批记录")}>
       <Timeline events={[...(q.approvalHistory || []), ...(q.approval ? [q.approval] : [])].reverse().map(a => ({ who: a.status === 'pending' ? '等待审批' : a.status === 'approved' ? '已批准' : '已退回', when: new Date(a.decidedAt || a.submittedAt).toLocaleString(), text: <>{a.note || (a.status === 'pending' ? '已提交，待指定审批人决定' : '—')}<br /><span className="mist-note">{a.details.filter(d => d.label === '金额' || d.label === '有效期').map(d => d.label + ' ' + d.value).join(' · ')}</span></> }))} />
@@ -321,7 +320,6 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
         <Button variant="quiet" icon={Download} onClick={() => onDownloadDocument(d.fileId)}>{uiText("下载")}</Button>
         <Button variant="quiet" icon={Printer} onClick={() => onPrintDocument(d.fileId)}>{uiText("打印")}</Button>
       </div>) : <span className="mist-muted">{uiText("尚未生成报价单。")}</span>}</div>
-      <span className="mist-note">{uiText("每次生成都保存一份不可覆盖的 PDF（时间、生成人、报价版本）；修改报价后请重新生成。")}{uiText(formalDocReason && formalDocReason !== docBase ? `正式版：${formalDocReason}。` : '')}</span>
     </DetailBlock>
     <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
     <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>

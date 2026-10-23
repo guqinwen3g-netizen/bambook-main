@@ -4,6 +4,7 @@ import React from "react";
 import {
   Banner,
   Button,
+  CardHeader,
   Checkbox,
   Field,
   KeyValue,
@@ -186,7 +187,7 @@ export function QuotationHistoryEvidencePicker({
         ));
   return (
     <div className="mist-col">
-      <Banner title={uiText("可选：人工选取历史报价依据")}>{uiText("只列本公司另一份已对客报价的同币种、同单位条目，可包含其他客户或产品；不代表专业可比。先看条件对照，再写明规格、数量、税费、MOQ、交期等差异与处理。不选择不影响原有核算。")}</Banner>
+      <CardHeader title={uiText("历史报价参考")} />
       <Field label={uiText("本次历史依据")}>
         <Select
           aria-label={uiText("本次历史依据")}
