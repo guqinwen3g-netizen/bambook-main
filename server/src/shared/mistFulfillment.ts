@@ -187,6 +187,8 @@ export type FulfillmentReceipt = {
     createdAt: string;
     /** 拒收货物的退换登记：replace=供应商补发（后续另行收货），noReplace=退回不补（短交，按实收结算）。 */
     returns?: FulfillmentReceiptReturn[];
+    /** Keep original acceptance quantities and evidence when goods fail a later receiving check. */
+    postReceiptRejections?: { id: string; quantity: number; previousQuantity: number; previousRejected: number; location: string; evidence: string; actor: string; at: string; stockMovementId: string }[];
 };
 export type FulfillmentReceiptReturn = { id: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string; actor: string; at: string; reversed?: { at: string; actor: string; reason: string } };
 /** 某次收货中已登记退换（未冲回）的拒收数量。 */
@@ -224,7 +226,7 @@ export type FulfillmentStock = {
 export type FulfillmentStockMovement = {
     id: string;
     stockId: string;
-    kind: 'receive' | 'issue' | 'return' | 'move' | 'lock' | 'unlock' | 'scrap';
+    kind: 'receive' | 'issue' | 'return' | 'move' | 'lock' | 'unlock' | 'scrap' | 'reject';
     quantity: number;
     location: string;
     person: string;
@@ -477,6 +479,9 @@ export type FulfillmentCommand = {
         fileIds: string[];
     };
 } | {
+    type: 'fulfillment.procurement.rejectReceived';
+    payload: { receiptId: string; quantity: number; location: string; evidence: string; sourceLocation?: string };
+} | {
     type: 'fulfillment.procurement.return';
     payload: { receiptId: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string };
 } | {
@@ -695,6 +700,20 @@ type PositionedStock = { location: string; available: number; positions?: Fulfil
 /** Old records have one known location; new partial returns keep separate real balances. */
 export function fulfillmentPositions(row: PositionedStock): FulfillmentPosition[] {
     return (row.positions ?? [{ location: row.location, available: row.available }]).filter(position => position.available > 0).map(position => ({ ...position }));
+}
+export function receiptRejectionBlocker(root: MistState, receipt: FulfillmentReceipt): string | null {
+    const purchase = root.fulfillment.purchases.find(row => row.id === receipt.purchaseId);
+    if (purchase?.state !== 'approved') return '仅已批准采购可登记拒收';
+    if (receipt.destination !== 'warehouse') return '仅入库货物支持收货后拒收';
+    if (receipt.quantity <= 0) return '本次收货没有可转拒收的数量';
+    if (root.payables?.settlements?.some(row => row.purchaseId === purchase.id && ['pending', 'confirmed'].includes(row.state) && (row.final || row.receiptIds.includes(receipt.id)))) return '请先撤回或冲回对应结算';
+    if (root.payables?.bills.some(row => row.state === 'open' && row.lines.some(line => line.purchaseId === purchase.id))) return '请先核对并冲回对应供应商票据';
+    const branch = root.productions.find(row => row.sourcePurchaseId === purchase.id);
+    if (branch && fulfillmentProductionFact(root, branch.id)?.completion) return '最终完工事实已冻结，不能更改收货';
+    const stocks = root.fulfillment.stock.filter(row => row.receiptId === receipt.id && row.purchaseId === purchase.id);
+    if (stocks.length !== 1) return '请先核对本次收货对应的库存批次';
+    if (stocks[0].available <= 0) return '本次收货已无可用库存';
+    return null;
 }
 function mutablePositions(row: PositionedStock) {
     if (!row.positions) row.positions = [{ location: row.location, available: row.available }];
@@ -1339,6 +1358,35 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 f.stockMovements.push({ id: ctx.id(), stockId, kind: 'receive', quantity, location, person: purchase.supplier, note: evidence, at: ctx.now, actor: ctx.actorName });
             }
             audit(root, ctx, 'procurement', purchase.id, `登记真实交付 ${quantity} ${purchase.unit}${purchase.received !== purchase.quantity ? ' · 数量差异待处理' : ''}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
+            return { id, purchaseId: purchase.id };
+        }
+        case 'fulfillment.procurement.rejectReceived': {
+            const receipt = get(f.receipts, p.receiptId, '收货记录');
+            const blocker = receiptRejectionBlocker(root, receipt);
+            if (blocker) fail(blocker, 'PRECONDITION');
+            const purchase = get(f.purchases, receipt.purchaseId, '采购');
+            const quantity = qty(p.quantity, '转拒收数量'), location = text(p.location, '拒收货物位置'), evidence = text(p.evidence, '拒收依据');
+            if (quantity > receipt.quantity) fail('转拒收数量超过本次合格实收数量');
+            const stock = f.stock.find(row => row.receiptId === receipt.id && row.purchaseId === purchase.id)!;
+            if (quantity > stock.available) fail('本次收货的可用库存不足');
+            const sourceLocation = removeAtPosition(stock, quantity, p.sourceLocation);
+            if (stock.onHand !== undefined) stock.onHand = sum([stock.onHand, -quantity]);
+            const id = ctx.id(), stockMovementId = ctx.id();
+            // Rejected goods leave available inventory, but are not ordinary issues that can be returned into stock.
+            f.stockMovements.push({ id: stockMovementId, stockId: stock.id, kind: 'reject', quantity, sourceLocation, location, person: purchase.supplier, note: evidence, at: ctx.now, actor: ctx.actorName });
+            (receipt.postReceiptRejections ||= []).push({ id, quantity, previousQuantity: receipt.quantity, previousRejected: receipt.rejected, location, evidence, actor: ctx.actorName, at: ctx.now, stockMovementId });
+            receipt.quantity = sum([receipt.quantity, -quantity]);
+            receipt.rejected = sum([receipt.rejected, quantity]);
+            purchase.received = sum([purchase.received, -quantity]);
+            const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
+            if (branch) {
+                productionFact(root, branch.id).revision++;
+                branch.pct = Math.min(100, Math.round(purchase.received / purchase.quantity * 100));
+                branch.col = 'qc';
+                branch.risk = `合格实收 ${purchase.received} ${purchase.unit}，待对应生产QC`;
+                for (const task of f.qcTasks) if (task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && task.state === 'reported') task.state = 'working';
+            }
+            audit(root, ctx, 'procurement', purchase.id, `收货后转为拒收 ${quantity} ${purchase.unit} · ${evidence}`, { view: 'procurement', id: purchase.id });
             return { id, purchaseId: purchase.id };
         }
         case 'fulfillment.procurement.return': {

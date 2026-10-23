@@ -141,10 +141,10 @@ it('records rejected goods returned to the supplier per receipt and shows replac
   store.state!.fulfillment.receipts.push({id:'r1',purchaseId:'recv',quantity:90,rejected:10,destination:'warehouse',location:'上海仓',date:'2026-10-12',evidence:'收货单',fileIds:[],actor:'仓库',createdAt:'2026-10-12T02:00:00Z',returns:[{id:'ret-1',quantity:4,disposition:'noReplace',date:'2026-10-12',evidence:'退货单',actor:'经办人',at:'2026-10-12T03:00:00Z'}]});
   render('recv');
   const detail=host.querySelector('[data-purchase-detail="recv"]') as HTMLElement;
-  expect(detail.textContent).toContain('已拒收 10 个 · 不再补发 4（短交） · 6 待登记退换');
+  expect(detail.textContent).toContain('已拒收 10 个 · 不再补发 4 · 6 待登记退换');
   await click(getByRole(detail,'button',{name:'登记退货 / 换货'}));
   const dialog=getByRole(document.body,'dialog');
-  expect(dialog.textContent).toContain('尚可登记 6 个');
+  expect((getByRole(dialog,'spinbutton',{name:'退回数量（个）'}) as HTMLInputElement).value).toBe('6');
   typeInto(getByRole(dialog,'textbox',{name:'退货单 / 供应商确认依据'}) as HTMLTextAreaElement,'退货单 RT-9');
   await click(getByRole(dialog,'button',{name:'登记退换'}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.return',payload:expect.objectContaining({receiptId:'r1',quantity:6,disposition:'replace',evidence:'退货单 RT-9'})}));
@@ -231,4 +231,25 @@ it('compares RFQ quotes in CNY, requires a reason to award a non-lowest quote, a
   expect((getByRole(dialog,'checkbox',{name:/江南成衣/}) as HTMLInputElement).checked).toBe(true);
   expect((getByRole(dialog,'checkbox',{name:/远山服装/}) as HTMLInputElement).checked).toBe(false);
   expect(queryByRole(dialog,'checkbox',{name:/恒彩印花/})).toBeNull();
+});
+
+function postReceiptFixture(){
+  store.state!.fulfillment.purchases.push(purchase('post',approved({received:110})));
+  store.state!.fulfillment.receipts.push({id:'r-post',purchaseId:'post',quantity:110,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-12',evidence:'原收货单',fileIds:[],actor:'仓库',createdAt:'2026-10-12T02:00:00Z'});
+  store.state!.fulfillment.stock.push({id:'stock-post',receiptId:'r-post',purchaseId:'post',quantity:110,available:110,location:'上海仓'} as any);
+}
+it('submits a post-receipt rejection for the exact receipt and defaults to its over-delivery',async()=>{
+  postReceiptFixture();render('post');await click(getByRole(host,'button',{name:'转为拒收'}));
+  const dialog=getByRole(document.body,'dialog');
+  expect((getByRole(dialog,'spinbutton',{name:'转拒收数量（个）'}) as HTMLInputElement).value).toBe('10');
+  typeInto(getByRole(dialog,'textbox',{name:'拒收货物位置'}) as HTMLInputElement,'拒收区');
+  typeInto(getByRole(dialog,'textbox',{name:'拒收依据'}) as HTMLTextAreaElement,'多交货物不予接受');
+  await click(getByRole(dialog,'button',{name:'确认拒收'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.procurement.rejectReceived',payload:{receiptId:'r-post',quantity:10,location:'拒收区',evidence:'多交货物不予接受'}});
+});
+it('hides receipt rejection for read-only users and blocks settled receipts',()=>{
+  postReceiptFixture();session.denied.add('procurement:write');render('post');
+  expect(queryByRole(host,'button',{name:'转为拒收'})).toBeNull();
+  session.denied.clear();store.state!.payables!.settlements!.push({id:'settled',purchaseId:'post',receiptIds:['r-post'],state:'confirmed',quantity:110,amount:33,submittedAt:'2026-10-12T02:00:00Z'} as any);render('post');
+  const button=getByRole(host,'button',{name:'转为拒收'}) as HTMLButtonElement;expect(button.disabled).toBe(true);expect(button.title).toContain('结算');
 });

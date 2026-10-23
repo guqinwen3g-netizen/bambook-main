@@ -70,3 +70,61 @@ describe('fabric pioneer colour coverage',()=>{
   expect(t.f.state.fulfillment.productionFacts[0].release?.sampleChecks?.map(row=>row.sampleId)).toEqual([sample]);
  });
 });
+
+describe('post-receipt rejection',()=>{
+ function received(){
+  const f=fixture(),purchaseId=f.pending(100.5,'码','factory-a','finished');f.approve(purchaseId);
+  f.run({type:'fulfillment.procurement.send',payload:{id:purchaseId,at:f.context.now,evidence:'测试发出',fileIds:[]}});
+  f.run({type:'fulfillment.procurement.confirm',payload:{id:purchaseId,at:f.context.now,confirmedDue:'2026-10-30',evidence:'测试回签',fileIds:[]}});
+  const receiptId=f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:110.5,rejected:0,destination:'warehouse',location:'仓库A',date:'2026-10-13',evidence:'测试点数记录',fileIds:[]}}).id!;
+  const reject=(quantity=10)=>f.run({type:'fulfillment.procurement.rejectReceived',payload:{receiptId,quantity,location:'拒收隔离区',evidence:'超量部分不予接受'}});
+  return{f,purchaseId,receiptId,reject};
+ }
+ it('reclassifies only available, unsettled goods and preserves the original receipt facts',()=>{
+  const t=received();t.reject();const receipt=t.f.state.fulfillment.receipts.find(r=>r.id===t.receiptId)!;
+  expect(receipt).toMatchObject({quantity:100.5,rejected:10,evidence:'测试点数记录'});
+  expect(receipt.postReceiptRejections).toEqual([expect.objectContaining({quantity:10,previousQuantity:110.5,previousRejected:0,evidence:'超量部分不予接受'})]);
+  expect(t.f.state.fulfillment.stock[0]).toMatchObject({quantity:110.5,available:100.5});
+  expect(t.f.state.fulfillment.stockMovements.at(-1)).toMatchObject({kind:'reject',quantity:10,location:'拒收隔离区'});
+  expect(t.f.state.fulfillment.purchases[0].received).toBe(100.5);
+  t.f.run({type:'fulfillment.procurement.return',payload:{receiptId:t.receiptId,quantity:10,disposition:'noReplace',date:'2026-10-13',evidence:'退回多交货物'}});
+  t.f.run({type:'payable.settlement.submit',payload:{purchaseId:t.purchaseId,receiptIds:[t.receiptId],final:true,note:'按合格实收结算',fileIds:[]}} as MistCommand);
+  expect(t.f.state.payables?.settlements[0]).toMatchObject({quantity:100.5,rejected:10,amount:100.5});
+ });
+ it('blocks changing a receipt already used in settlement',()=>{
+  const t=received();t.f.state.payables!.settlements.push({id:'s',state:'pending',purchaseId:t.purchaseId,receiptIds:[t.receiptId]} as any);
+  const before=JSON.stringify(t.f.state);expect(t.reject).toThrow(/结算/);expect(JSON.stringify(t.f.state)).toBe(before);
+ });
+ it('cannot reject goods already issued from stock',()=>{
+  const t=received(),stock=t.f.state.fulfillment.stock[0];
+  t.f.run({type:'fulfillment.inventory.move',payload:{id:stock.id,kind:'issue',quantity:105,location:'外部仓',person:'领用人',note:'已发出'}});
+  const before=JSON.stringify(t.f.state);expect(t.reject).toThrow(/可用/);expect(JSON.stringify(t.f.state)).toBe(before);
+ });
+ it.each([0,-1,111])('rejects invalid quantity %s atomically',quantity=>{
+  const t=received(),before=JSON.stringify(t.f.state);expect(()=>t.reject(quantity)).toThrow();expect(JSON.stringify(t.f.state)).toBe(before);
+ });
+ it('requires a specific stock position and preserves remaining balances',()=>{
+  const t=received(),stock=t.f.state.fulfillment.stock[0];stock.positions=[{location:'A',available:5},{location:'B',available:105.5}];
+  const before=JSON.stringify(t.f.state);expect(t.reject).toThrow(/位置/);expect(JSON.stringify(t.f.state)).toBe(before);
+  t.f.run({type:'fulfillment.procurement.rejectReceived',payload:{receiptId:t.receiptId,quantity:10,sourceLocation:'B',location:'拒收区',evidence:'后验检查'}});
+  expect(t.f.state.fulfillment.stock[0].positions).toEqual([{location:'A',available:5},{location:'B',available:95.5}]);
+ });
+ it('does not allow rejected goods to be returned through a normal inventory issue',()=>{
+  const t=received();t.reject();const movement=t.f.state.fulfillment.stockMovements.at(-1)!;
+  const before=JSON.stringify(t.f.state);
+  expect(()=>t.f.run({type:'fulfillment.inventory.move',payload:{id:movement.stockId,kind:'return',issueId:movement.id,quantity:10,location:'仓库A',person:'人员',note:'尝试恢复'}})).toThrow(/原批次出库/);
+  expect(JSON.stringify(t.f.state)).toBe(before);
+ });
+ it('blocks changes after final completion and when a supplier bill is open',()=>{
+  const t=received(),fact=t.f.state.fulfillment.productionFacts[0];fact.completion={id:'done'} as any;
+  expect(t.reject).toThrow(/完工/);delete fact.completion;
+  t.f.state.payables!.bills.push({id:'bill',state:'open',lines:[{purchaseId:t.purchaseId}]} as any);
+  expect(t.reject).toThrow(/票据/);
+ });
+ it('invalidates earlier production inspection without releasing a quality hold',()=>{
+  const t=received(),branch=t.f.state.productions[0],revision=t.f.state.fulfillment.productionFacts[0].revision;
+  t.f.state.fulfillment.qcTasks.push({id:'qc',kind:'production',source:{kind:'orderLine',orderId:t.f.orderId,lineId:branch.lineId,productionId:branch.id},state:'reported'} as any);
+  t.reject();expect(t.f.state.fulfillment.productionFacts[0].revision).toBe(revision+1);expect(t.f.state.fulfillment.qcTasks[0].state).toBe('working');
+  t.f.state.fulfillment.qcTasks[0].state='blocked';t.reject(1);expect(t.f.state.fulfillment.qcTasks[0].state).toBe('blocked');
+ });
+});
