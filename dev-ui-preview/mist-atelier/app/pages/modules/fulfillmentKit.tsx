@@ -79,7 +79,7 @@ export function DraftFiles({ ids, onChange, onBusyChange, disabled, hint = '上�
 export function Events({ entity, id }: {
     entity: string;
     id: string;
-}) { const { state } = useMistWorkspace(); return <Timeline events={(state?.events || []).filter(e => e.entityType === entity && e.entityId === id).map(e => ({ who: e.actor, when: new Date(e.at).toLocaleString(), text: e.text }))}/>; }
+}) { const { state } = useMistWorkspace(); return <Timeline events={(state?.events || []).filter(e => e.entityType === entity && e.entityId === id).map(e => ({ who: e.actor, when: new Date(e.at).toLocaleString(), text: e.text.replace(/^登记外部报关事实：(draft|submitted|cleared)$/,(_,status:'draft'|'submitted'|'cleared')=>({draft:'报关资料已保存',submitted:'已登记申报',cleared:'已登记放行'}[status]||status)) }))}/>; }
 export function PositionSummary({ row }: { row: FulfillmentSample | FulfillmentStock }) {
     const positions = fulfillmentPositions(row);
     if (positions.length < 2) return null;

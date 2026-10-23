@@ -80,3 +80,8 @@ it('disables statement generation without invoice write permission',()=>{
   store.canWrite=false;store.value.state.customers=[{id:'customer',name:'客户',code:'C-1'}];store.value.state.settings.companyProfile={legalName:'公司'};render();
   const button=getAllByRole(host,'button').find(b=>b.textContent==='生成对账单') as HTMLButtonElement;expect(button.disabled).toBe(true);expect(button.title).toContain('应收写权限');
 });
+
+
+it('hands collection to the exact invoice reconciliation context rather than a preview',async()=>{
+ route.id='a';render();await click('收款与核销');expect(go).toHaveBeenCalledWith('payment-vouchers',undefined,{section:'invoice:a'});expect(store.value.run).not.toHaveBeenCalled();
+});

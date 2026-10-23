@@ -1,3 +1,4 @@
+import type {InternalFabricCostBasis} from '../../../../../server/src/shared/mistInternalFabric';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 订单核算：费用台账（按出运 / 按订单分摊）+ 每单实际成本与毛利（人民币管理口径）。 */
@@ -15,13 +16,14 @@ const pct = (r: number | null) => r === null ? '—' : (r * 100).toFixed(1) + '%
 const SHIPMENT_BASES: AllocationBasis[] = ['volume', 'weight', 'value', 'quantity', 'equal', 'manual'];
 const ORDER_BASES: AllocationBasis[] = ['value', 'quantity', 'equal', 'manual'];
 
-export function OrderActualCostPanel({ state, asOf, canWrite, busy, run }: { state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown> }) {
+export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,materialCostBasis }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown> }) {
   const toast = useToast();
   const [basisChoice, setBasis] = React.useState<FxBasis | null>(null), [month, setMonth] = React.useState(asOf.slice(0, 7));
   const basis: FxBasis = basisChoice ?? ((state.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : 'period');
   const [open, setOpen] = React.useState<string | null>(null), [register, setRegister] = React.useState(false), [voiding, setVoiding] = React.useState<OrderExpense | null>(null), [reason, setReason] = React.useState(''), [showVoided, setShowVoided] = React.useState(false), [paying, setPaying] = React.useState<OrderExpense | null>(null), [payForm, setPayForm] = React.useState({ supplierId: '', invoiceNo: '', due: '', taxAmount: '' });
+  if(materialCostBasis===null)return <Banner tone="warn" title={uiText('内部供料成本依据未读取')}/>;
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
-  const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf)).sort((a, b) => ({ ok: 0, norate: 1 }[a.status] - { ok: 0, norate: 1 }[b.status]) || (a.rateIn ?? 0) - (b.rateIn ?? 0) || a.code.localeCompare(b.code));
+  const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf,materialCostBasis)).sort((a, b) => ({ ok: 0, norate: 1 }[a.status] - { ok: 0, norate: 1 }[b.status]) || (a.rateIn ?? 0) - (b.rateIn ?? 0) || a.code.localeCompare(b.code));
   const ok = rows.filter(r => r.status === 'ok'), total = (pick: (r: OrderActualCost) => number | null) => Math.round(ok.reduce((n, r) => n + (pick(r) ?? 0) * 100, 0)) / 100;
   const t = { revenue: total(r => r.revenueCny), purchase: total(r => r.purchaseCny), expense: total(r => r.expenseCny), margin: total(r => r.marginIn) };
   const expenses = showVoided ? orderExpenses(state) : activeExpenses(state);

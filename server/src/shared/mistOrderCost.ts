@@ -18,7 +18,7 @@ import { platformBusinessDate } from './mistPlatform';
 import { fxOrderActual, fxRateFor, type FxBasis, type FxResolved } from './mistFxRates';
 import { orderRebate } from './mistExportRebate';
 import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
-import { internalFabricCostShare } from './mistInternalFabric';
+import { internalFabricCostShare,type InternalFabricCostBasis } from './mistInternalFabric';
 
 export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', other: '其他' } as const;
 export type ExpenseCategory = keyof typeof EXPENSE_CATEGORIES;
@@ -166,7 +166,7 @@ export type OrderActualCost = {
   estimated: boolean; missing: string[]; status: 'ok' | 'norate';
 };
 /** 单个订单的实际核算；金额单位为元，人民币按 basis 口径折算。 */
-export function orderActualCost(root: MistState, orderId: string, basis: FxBasis, month: string, asOf: string): OrderActualCost {
+export function orderActualCost(root: MistState, orderId: string, basis: FxBasis, month: string, asOf: string,materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null): OrderActualCost {
   const order = root.orders.find(o => o.id === orderId); if (!order) return fail('订单不存在或不可见', 'NOT_FOUND');
   const o = order!, internal = o.governance?.contract.kind === 'internal', rates = new Map<string, FxResolved | undefined>();
   const rateOf = (cur: string) => { if (cur === 'CNY') return { rate: 1, label: '人民币', estimated: false } as FxResolved; if (!rates.has(cur)) rates.set(cur, fxRateFor(root, cur, basis, { month, asOf, orderId })); return rates.get(cur); };
@@ -197,7 +197,7 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
     const settlements = root.payables?.settlements?.filter(s => s.purchaseId === p.id && s.state === 'confirmed') || [];
     const finalInternal = root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply && settlements.some(s => s.final);
     const contract = finalInternal ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
-    const unbilled = Math.max(0, contract - billed), share = (minor: number) => internalFabricCostShare(root, p.id, orderId, minor), suffix = p.orderId === orderId ? '' : ' 内部面料';
+    const unbilled = Math.max(0, contract - billed), share = (minor: number) => internalFabricCostShare(root, p.id, orderId, minor,materialCostBasis), suffix = p.orderId === orderId ? '' : ' 内部面料';
     if (share(billed)) purchases.push(line('pur:' + p.id, `${p.code} ${p.supplier}${suffix} 已到票`, p.currency, share(billed)));
     if (share(deducted)) purchases.push(line('ded:' + p.id, `${p.code}${suffix} 供应商索赔扣款`, p.currency, -share(deducted)));
     if (share(unbilled)) purchases.push(line('est:' + p.id, `${p.code} ${p.supplier}${suffix} 未到票（按合同暂估）`, p.currency, share(unbilled), { estimated: true }));

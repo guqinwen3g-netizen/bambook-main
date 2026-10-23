@@ -8,7 +8,7 @@ import type { FulfillmentCustoms } from '../../../../../server/src/shared/mistFu
 import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, customsItemsStale, defaultLegalUnits, draftCustomsDeclaration, generatedItem, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
 import type { ModuleEditorSpec, ModuleValues } from './ModuleWorkbench';
 import { field, number, text } from './fulfillmentKit';
-import { ActionBar, DetailBlock, type ReasonedAction } from './pageKit';
+import { ActionBar, DetailBlock, businessWhen,type ReasonedAction } from './pageKit';
 
 const hsText = (hs: string) => hs.length === 10 ? `${hs.slice(0, 4)}.${hs.slice(4, 6)}.${hs.slice(6)}` : hs;
 const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -89,7 +89,7 @@ export function CustomsItemsBlock({ record: c, state, can, locked, run, open, on
     { key: 'price', header: '单价 / 总价', width: '140px', align: 'right', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.unitPrice}</span><b>{i.currency} {money(i.amount)}</b></div> },
     ...(editable ? [{ key: 'act', header: '', width: '84px', align: 'right' as const, render: (i: CustomsDeclarationItem) => <Button size="sm" icon={Pencil} disabled={locked} aria-label={ui`调整商品项 ${i.no}`} onClick={() => open(adjustItemSpec(c, i, run))}>{uiText("调整")}</Button> }] : []),
   ];
-  return <DetailBlock title={uiText("申报商品项")} aside={items.length ? <span className="mist-muted">{c.itemsBy} · {c.itemsAt?.slice(0, 16).replace('T', ' ')}</span> : undefined}>
+  return <DetailBlock title={uiText("申报商品项")} aside={items.length ? <span className="mist-muted">{c.itemsBy} · {c.itemsAt?businessWhen(c.itemsAt):'—'}</span> : undefined}>
     {items.length > 0 ? <>
       {stale && c.status !== 'cleared' && <Banner tone="warn" title={uiText("出运或装箱已变化")}>{uiText("已生成的商品项与当前出运明细、装箱或归类不一致，请重新生成后再交报关行。")}</Banner>}
       {items.some(i => i.adjusted) && <span className="mist-note">{uiText("重新生成时，自动值没变的字段保留手工调整；归类、出运或装箱改动导致自动值变化的字段以新值为准。")}</span>}

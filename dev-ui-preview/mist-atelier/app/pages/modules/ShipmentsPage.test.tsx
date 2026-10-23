@@ -61,7 +61,7 @@ it('shows why documents cannot be marked ready and hides request edits once logi
   expect((getByRole(detail,'button',{name:'分配装箱'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('分配装箱：已有有效 CI 或装箱单');
   expect(queryByRole(detail,'button',{name:'编辑出运请求'})).toBeNull();
-  expect(detail.textContent).toContain('退回业务确认差异：服务端尚未提供差异退回');
+  expect(queryByRole(detail,'button',{name:'退回业务确认差异'})).toBeNull();
   expect(getByRole(detail,'table',{name:'S 来源范围'}).textContent).toContain('10 / 10 件');
 });
 
@@ -143,3 +143,6 @@ it('shows an unpaid contractual balance and prevents opening departure until the
  state.orderFunding.assignments.push({id:'fund',receiptId:'r',customerId:'c',orderId:'o',amount:100,currency:'USD',state:'active',note:'合同收款',createdAt:'',updatedAt:'',actor:'财务',history:[]});store.state={...state};render('s');
  expect((getByRole(host,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(false);
 });
+
+
+it('keeps departure evidence out of the status banner and makes the original record available on demand',async()=>{const evidence='Carrier reference and complete departure evidence retained';store.state!.fulfillment.shipments.push(shipment('short-status',{state:'departed',departedAt:'2026-10-13T08:00:00Z',departureEvidence:evidence}));render('short-status');const detail=host.querySelector('[data-shipment-detail="short-status"]') as HTMLElement;expect(detail.textContent).toContain('已离港');expect(detail.textContent).not.toContain(evidence);await click(getByRole(detail,'button',{name:'离港依据'}));expect(detail.textContent).toContain(evidence);});

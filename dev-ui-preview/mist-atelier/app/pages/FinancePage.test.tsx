@@ -120,3 +120,16 @@ it('confirms an already-issued development invoice without creating it for the b
  expect(store.value.run).toHaveBeenLastCalledWith({type:'finance.receivable.confirm',payload:{invoiceId:'dev-invoice'}});
  expect(store.value.state.invoices.find((row:any)=>row.id==='dev-invoice')).toMatchObject({financeStatus:'confirmed',open:120});
 });
+
+
+it('shows pending commercial CI balances as unconfirmed and links to the invoice without inventing collection',async()=>{
+ const state=store.value.state,invoice=state.invoices[0];Object.assign(invoice,{financeStatus:'pending',open:0});route.id=invoice.id;const before=JSON.stringify(state);render();const dialog=getByRole(document.body,'dialog',{name:invoice.code});expect(getByText(dialog,'待财务确认')).toBeTruthy();expect(()=>getByText(dialog,'0.00 EUR',{exact:true})).toThrow();await click('查看发票');expect(go).toHaveBeenCalledWith('invoices',invoice.id);expect(JSON.stringify(state)).toBe(before);expect(store.value.run).not.toHaveBeenCalled();
+});
+
+
+it('enters exact invoice reconciliation instead of a preview and allocates only its linked deposit',async()=>{
+ const state=store.value.state,invoice=state.invoices[0],receipt=state.receipts[0];receipt.payer=invoice.customer;state.customers=[{id:'customer',name:invoice.customer}];state.receipts.push({...receipt,id:'other-receipt',code:'OTHER-BANK',payer:'Other Customer',ref:'unrelated-bank'});state.invoices.push({...invoice,id:'other-invoice',code:'OTHER'});state.orderFunding.assignments=[{id:'deposit',receiptId:receipt.id,orderId:invoice.orderId,customerId:'customer',amount:30,currency:receipt.currency,state:'active',note:'Deposit',history:[]}];route.id=undefined;route.section='invoice:'+invoice.id;render();expect(()=>getByRole(document.body,'dialog',{name:invoice.code})).toThrow();expect(getAllByText(host,invoice.code,{exact:true}).length).toBeGreaterThan(0);expect(getByRole(host,'radio',{name:new RegExp('^'+invoice.code)}).getAttribute('aria-checked')).toBe('true');await click('确认核销');expect(store.value.state.allocations[0]).toMatchObject({invoiceId:invoice.id,receiptId:receipt.id,amount:50});expect(state.invoices.find((row:any)=>row.id==='other-invoice').open).toBe(100);expect(host.textContent).toContain('请选择一笔到账流水');
+});
+it('does not fall back to another invoice when an incoming reconciliation source is missing',()=>{
+ Object.assign(store.value.state.receipts[0],{state:'suggested',confidence:99,suggest:store.value.state.invoices[0].id,payer:store.value.state.invoices[0].customer});route.section='invoice:missing';render();expect(host.textContent).toContain('来源发票不可用');expect(()=>getByRole(host,'button',{name:'全部采纳'})).toThrow();expect(store.value.run).not.toHaveBeenCalled();
+});

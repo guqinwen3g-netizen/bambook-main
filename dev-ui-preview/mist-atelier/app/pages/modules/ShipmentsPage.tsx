@@ -3,7 +3,7 @@ import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 货运管理：业务发起出运 → 后勤核实装箱、订舱与单证 → 资料回业务对客发送 → 实际离港；按面料 / 成衣业务组分开。 */
 import React from 'react';
-import { Anchor, Boxes, CheckCircle2, Download, FileText, Pencil, Plane, Plus, ScrollText, SearchX, Send, Ship, Undo2, X } from 'lucide-react';
+import { Anchor, Boxes, CheckCircle2, Download, FileText, Pencil, Plane, Plus, ScrollText, SearchX, Send, Ship, X } from 'lucide-react';
 import { BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, TextArea, TextInput, TextLink, Timeline, Toolbar, VerticalSteps, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
@@ -17,7 +17,7 @@ import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ShipmentDepartureDialog } from './ShipmentDepartureDialog';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute, type ReasonedAction } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen,businessWhen,RecordDisclosure, useListDetailRoute, type ReasonedAction } from './pageKit';
 
 function ShipmentEditor({ shipment, onClose }: {
     shipment?: FulfillmentShipment;
@@ -265,7 +265,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   const blocker = readyBlocker(state, s), matched = packingMatched(state, s);
   const cartons = new Set(packingRows.map(row => row.carton)).size, net = round(packingRows.reduce((sum, row) => sum + row.netWeight, 0)), gross = round(packingRows.reduce((sum, row) => sum + row.grossWeight, 0)), volume = round(packingRows.reduce((sum, row) => sum + row.volume, 0));
   const next: { tone: Tone; title: string; text: string } = stage === 'cancelled' ? { tone: 'neutral', title: '已取消', text: s.cancelReason || '未记录原因' }
-    : stage === 'departed' ? { tone: 'ok', title: s.mode === 'air' ? '已起飞' : '已离港', text: `ATD ${s.departedAt ? new Date(s.departedAt).toLocaleString() : ''} · ${s.departureEvidence || ''}` }
+    : stage === 'departed' ? { tone: 'ok', title: s.mode === 'air' ? '已起飞' : '已离港', text: `ATD ${s.departedAt ? businessWhen(s.departedAt) : ''}` }
     : stage === 'intake' ? { tone: 'warn', title: '等待后勤接手', text: '后勤核实来源与数量后逐箱装箱、订舱，并在单据中心签发 CI / PL。' }
     : stage === 'logistics' ? { tone: 'accent', title: '后勤处理中', text: blocker ? `完成单证准备前：${blocker}。` : '装箱与 CI / PL 已齐，可以完成单证准备并交回业务。' }
     : stage === 'business' ? { tone: 'warn', title: '资料已回业务', text: '业务员把当前有效 CI / PL 发给客户后登记发送；之后后勤才能登记实际离港。' }
@@ -300,7 +300,6 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
         { label: '更新运输安排', icon: Anchor, onClick: onTransport, reason: logisticsReason, hidden: closed },
         { label: '完成单证准备', icon: CheckCircle2, onClick: onReady, primary: stage === 'logistics' && !blocker, reason: logisticsReason || blocker || false, hidden: s.state !== 'preparing' },
         { label: s.mode === 'air' ? '登记实际起飞' : '登记实际离港', icon: s.mode === 'air' ? Plane : Ship, onClick: onDepart, primary: stage === 'departure', reason: departReason, hidden: s.state !== 'ready' },
-        { label: '退回业务确认差异', icon: Undo2, onClick: () => undefined, reason: '服务端尚未提供差异退回，请线下联系发起业务员', hidden: s.state !== 'preparing' },
       ] as ReasonedAction[] : []),
       ...(business ? [
         { label: '编辑出运请求', icon: Pencil, onClick: onEdit, reason: businessReason, hidden: s.state !== 'preparing' || !!editReason },
@@ -318,7 +317,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
     ]} />
     {s.note && <p className="mist-sub">{uiText("后勤要求：")}{s.note}</p>}
     <DetailBlock title={uiText("阶段轨迹")}><Checklist items={track} /></DetailBlock>
-    <DetailBlock title={uiText("来源范围（只读）")}>
+    <DetailBlock title={uiText("来源范围")}>
       <DataTable ariaLabel={ui`${s.code} 来源范围`} rows={s.lines} rowKey={line => line.lineId + ':' + (line.productionId || '')} columns={[
         { key: 'source', header: '准确条目', render: line => <SourceLink source={{ kind: 'orderLine', orderId: line.orderId, lineId: line.lineId, productionId: line.productionId }} /> },
         { key: 'plan', header: '计划 / 已装箱', align: 'right', render: line => { const packed = packedFor(state, s, line); return <span className={packingRows.length && packed !== line.quantity ? 'mist-tone-bad' : undefined}>{line.quantity} / {packed} {unit(line.lineId)}</span>; } },
@@ -336,7 +335,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
     </DetailBlock>
     <div className="mist-row mist-module-actions"><Button onClick={onSamples}>{uiText("处理本票船样")}</Button></div>
     {!!s.documentDispatches?.length && <DetailBlock title={uiText("对客发送记录")}><Timeline events={s.documentDispatches.map(dispatch => ({ who: dispatch.actor, when: new Date(dispatch.at).toLocaleString(), text: '已登记发送：' + dispatch.documentIds.map(id => f.documents.find(row => row.id === id)?.number || '历史单据').join('、') }))} /></DetailBlock>}
-    <DetailBlock title={uiText("附件")}><RecordFiles key={s.id} ids={s.fileIds} />{!s.fileIds.length && <span className="mist-note">{uiText("离港凭据随“登记实际离港”归档")}</span>}</DetailBlock>
-    <DetailBlock title={uiText("处理记录")}><Events entity="shipment" id={s.id} /></DetailBlock>
+    {s.departureEvidence&&<RecordDisclosure title="离港依据">{s.departureEvidence}</RecordDisclosure>}<DetailBlock title={uiText("附件")}><RecordFiles key={s.id} ids={s.fileIds} />{!s.fileIds.length && <span className="mist-note">{uiText("离港凭据随“登记实际离港”归档")}</span>}</DetailBlock>
+    <RecordDisclosure title="处理记录"><Events entity="shipment" id={s.id} /></RecordDisclosure>
   </DetailBody>;
 }
