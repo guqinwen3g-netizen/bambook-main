@@ -14,7 +14,7 @@ vi.mock('./workspace',async()=>{const React=await import('react');const {createM
 vi.mock('../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'Content-Type':'application/json','X-Test-Actor':bridge.session.user.id})}}));
 import {useMistWorkspace} from './workspace';
 import {MistReviewButton,MistReviewProvider} from './reviews';
-import {ApprovalsPage,approvalRows,TRANSFER_UNAVAILABLE} from '../pages/ApprovalsPage';
+import {ApprovalsPage,approvalRows} from '../pages/ApprovalsPage';
 
 let host:HTMLDivElement,root:Root,serverStatus:'pending'|'approved'|'rejected',postCount:number,rows:any[]|undefined;
 let intercept:((url:string,init:RequestInit)=>Promise<any>|undefined)|undefined;
@@ -92,10 +92,10 @@ it('requires a written reason before returning and never posts an empty decision
  await typeNote('单价与合同不符');await click('退回');
  expect(postCount).toBe(1);expect(serverStatus).toBe('rejected');
 });
-it('keeps transfer visible but disabled with the concrete reason',async()=>{
+it('keeps unimplemented transfer and permission codes out of the business view',async()=>{
  await render();await openRow();
- expect((getByRole(document.body,'button',{name:'转交'}) as HTMLButtonElement).disabled).toBe(true);
- expect(document.body.textContent).toContain(TRANSFER_UNAVAILABLE);
+ expect(queryByRole(document.body,'button',{name:'转交'})).toBeNull();
+ expect(document.body.textContent).not.toContain('所需权限');
 });
 it('shows the submitted snapshot and blocks opening another workspace business record',async()=>{
  rows=[row({workspaceId:'workspace-z',workspaceName:'另一家公司'})];await render();await openRow();

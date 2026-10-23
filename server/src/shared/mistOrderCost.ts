@@ -167,15 +167,15 @@ export type OrderActualCost = {
 /** 单个订单的实际核算；金额单位为元，人民币按 basis 口径折算。 */
 export function orderActualCost(root: MistState, orderId: string, basis: FxBasis, month: string, asOf: string): OrderActualCost {
   const order = root.orders.find(o => o.id === orderId); if (!order) return fail('订单不存在或不可见', 'NOT_FOUND');
-  const o = order!, rates = new Map<string, FxResolved | undefined>();
+  const o = order!, internal = o.governance?.contract.kind === 'internal', rates = new Map<string, FxResolved | undefined>();
   const rateOf = (cur: string) => { if (cur === 'CNY') return { rate: 1, label: '人民币', estimated: false } as FxResolved; if (!rates.has(cur)) rates.set(cur, fxRateFor(root, cur, basis, { month, asOf, orderId })); return rates.get(cur); };
   const line = (key: string, label: string, currency: string, minor: number, extra: Partial<OrderCostLine> = {}): OrderCostLine => { const r = rateOf(currency); return { key, label, currency, amount: major(minor), cny: r ? major(Math.round(minor * r.rate)) : null, ...extra }; };
   // 收入：已确认销售发票；未开票部分按合同暂估
-  const invoices = root.invoices.filter(i => i.orderId === orderId && isRecognizedMistInvoice(i));
+  const invoices = internal ? [] : root.invoices.filter(i => i.orderId === orderId && isRecognizedMistInvoice(i));
   const revenue: OrderCostLine[] = invoices.map(i => line('inv:' + i.id, `发票 ${i.code}`, i.currency, mistMoneyMinor(i.amount)));
   const invoicedSame = invoices.filter(i => i.currency === o.currency).reduce((n, i) => n + mistMoneyMinor(i.amount), 0), rest = mistMoneyMinor(o.amount) - invoicedSame;
-  if (rest > 0) revenue.push(line('rev:rest', invoices.length ? '未开票部分（按合同暂估）' : '合同金额（尚未开票，暂估）', o.currency, rest, { estimated: true }));
-  if (basis === 'actual' && o.currency !== 'CNY') {
+  if (!internal && rest > 0) revenue.push(line('rev:rest', invoices.length ? '未开票部分（按合同暂估）' : '合同金额（尚未开票，暂估）', o.currency, rest, { estimated: true }));
+  if (!internal && basis === 'actual' && o.currency !== 'CNY') {
     // 实际结汇口径：本币种收入整体按“已收已结汇 → 实际汇率、其余 → 月末暂估”折算（fxOrderActual），其他币种发票仍逐张按月末暂估。
     const same = revenue.filter(r => r.currency === o.currency), total = same.reduce((n, r) => n + mistMoneyMinor(r.amount), 0), act = fxOrderActual(root, { id: o.id, currency: o.currency, amount: major(total) }, month, asOf);
     revenue.splice(0, revenue.length, ...revenue.filter(r => r.currency !== o.currency));

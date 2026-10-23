@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, type MistCommand, type MistContext, type MistOrderLine } from './mistWorkspace';
-import { createOrderGovernance, type OrderGovernanceInput } from './mistOrderGovernance';
+import { createOrderGovernance, getOrderGovernanceReviews, type OrderGovernanceInput } from './mistOrderGovernance';
 import { assertGarmentMaterial, garmentMaterialBlocker, internalFabricCandidates, internalFabricRemaining, normalizeGarmentFulfillment, normalizeInternalMetres, type GarmentFulfillmentMode } from './mistInternalFabric';
 
 function fixture(sourceQty = 100.3) {
@@ -53,6 +53,16 @@ function fixture(sourceQty = 100.3) {
 }
 
 describe('current Mist internal fabric contract', () => {
+  it('uses inventory handover rather than export shipments or CI for internal supply',()=>{
+    const f=fixture(),before=structuredClone(f.state);
+    expect(()=>f.run({type:'fulfillment.shipments.save',payload:{consignee:'Production',mode:'sea',portOfLoading:'Warehouse',portOfDischarge:'Factory',incoterm:'Internal',plannedDate:'2026-10-24',booking:'',lines:[{...f.source,quantity:1,factoryConfirmedAt:'2026-10-24'}],note:'',fileIds:[]}})).toThrow('内部订单请登记库存交接');
+    expect(f.state).toEqual(before);
+    f.state.fulfillment.shipments.push({id:'retained-shipment',state:'preparing',lines:[{...f.source,quantity:1}]} as never);
+    expect(()=>f.run({type:'fulfillment.documents.save',payload:{shipmentId:'retained-shipment',orderId:f.source.orderId,type:'CI',number:'CI-INTERNAL',title:'CI',dueDate:'2026-11-24',content:'Internal',fileIds:['po']}})).toThrow('内部订单不生成销售发票');
+    f.state.fulfillment.documents.push({id:'retained-ci',shipmentId:'retained-shipment',orderId:f.source.orderId,type:'CI',status:'draft',fileIds:['po']} as never);
+    expect(()=>f.run({type:'fulfillment.documents.issue',payload:{id:'retained-ci'}})).toThrow('内部订单不生成销售发票');
+    expect(f.state.invoices).toEqual([]);
+  });
   it('keeps unknown garment modes unknown and blocks submitting them', () => {
     const f = fixture(), target = f.create('garment', undefined); // Default argument is explicit full package; remove through a draft edit.
     const order = f.state.orders.find(row => row.id === target.orderId)!;
@@ -64,6 +74,10 @@ describe('current Mist internal fabric contract', () => {
   it('freezes mode and explicit included items in approval snapshots', () => {
     const f = fixture(); expect(f.state.orders.find(row => row.id === f.target.orderId)!.governance!.approvedSnapshot!.lines[0]).toMatchObject({ fulfillmentMode: 'full_package', cmtIncludedItems: [] });
     expect(f.state.orders.find(row => row.id === f.source.orderId)!.governance!.contract.receiver).toBe('成衣 / 成衣业务');
+    const reviews=getOrderGovernanceReviews(f.state),target=reviews.find(row=>row.entityId===f.target.orderId)!,source=reviews.find(row=>row.entityId===f.source.orderId)!;
+    expect(target.details.find(row=>row.label==='G1 · 衬衫')?.value).toContain('全包');
+    expect(target.details.find(row=>row.label==='G1 · 衬衫')?.value).toContain('CMT 包含：无');
+    expect(source.details.some(row=>row.label==='付款'||row.label==='出运前累计收款')).toBe(false);
   });
   it('requires fresh fabric creator and owner, and a fresh garment receiver', () => {
     const f = fixture(), before = JSON.stringify(f.state);

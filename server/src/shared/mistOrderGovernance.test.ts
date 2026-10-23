@@ -4,18 +4,32 @@ import {createOrderGovernance,applyOrderGovernanceCommand,assertOrderApproved,ge
 import {assertOrderFundingIntegrity,orderFundingCoveredAmount} from './mistOrderFunding';
 function fixture(){let n=0;const c:MistContext={id:()=>`gov-${++n}`,now:'2026-10-13T08:00:00Z',actorName:'业务员',actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader','sales'],fabric:['fabric-leader']}}};const state=createMistState(c,'empty');state.customers.push({id:'customer',name:'客户',code:'C',country:'CN',city:'',industry:'',owner:'业务员',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''});state.files.push({id:'contract-file',name:'confirmed.pdf',mimeType:'application/pdf',size:10,storageKey:'workspace/contract-file',createdAt:c.now});const contract:OrderGovernanceInput={kind:'external',poNumber:'PO-001',confirmationFileIds:['contract-file'],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'30%定金，余款按合同',incoterm:'FOB',deliveryPlace:'上海'};const order={id:'order',code:'SO-1',type:'garment' as const,customerId:'customer',customer:'客户',season:'AW26',lines:1,qty:10,amount:100,currency:'USD',due:'2026-12-01',progress:0,state:'订单草稿',tone:'neutral' as const,owner:'业务员',img:'coat' as const,checklist:[],handoffAt:null,createdAt:c.now,updatedAt:c.now,governance:createOrderGovernance(c,contract)};state.orders.push(order);state.orderLines.push({id:'line',orderId:order.id,fulfillmentMode:'cmt' as const,cmtIncludedItems:[],name:'外套',style:'A',img:'coat',qty:10,unit:'件',price:10,made:0,qc:0});const run=(command:OrderGovernanceCommand,actor=c)=>applyOrderGovernanceCommand(state,command,actor);return{state,c,contract,order,run};}
 describe('formal order governance',()=>{
+ it.each(['invoice','funding'] as const)('does not turn an external order with %s into an internal budget',fact=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'Approved'}},{...f.c,actorId:'leader'});
+  if(fact==='invoice')f.state.invoices.push({id:'issued',orderId:'order',amount:100,currency:'USD'} as never);
+  else f.state.orderFunding={assignments:[{id:'assignment',orderId:'order',state:'active',amount:30} as never]};
+  expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,kind:'internal',internalPurpose:'Internal supply',receiver:'Production team'},reason:'Change purpose'}})).toThrow('已有销售发票或资金归属');
+  expect(f.order.governance.approvedSnapshot!.contract.kind).toBe('external');
+ });
+ it('rechecks external money arriving after an internal-purpose change was submitted',()=>{
+  const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'Approved'}},{...f.c,actorId:'leader'});
+  f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,kind:'internal',internalPurpose:'Internal use',receiver:'Production team'},reason:'Change purpose'}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});
+  f.state.invoices.push({id:'arrived-invoice',orderId:'order',amount:100,currency:'USD'} as never);const before=structuredClone(f.state);
+  expect(()=>applyMistCommand(f.state,{type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'Review'}},{...f.c,actorId:'leader'})).toThrow('已有销售发票或资金归属');
+  expect(f.state).toEqual(before);expect(f.order.governance.approvedSnapshot!.contract.kind).toBe('external');
+ });
  it('summarizes the submitted internal purpose and receiver rather than retained external customer and PO fields',()=>{
   const f=fixture();f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,internalPurpose:'旧内部用途',receiver:'旧内部团队'}}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'核对原外部合同'}},{...f.c,actorId:'leader'});
   const original=structuredClone(f.order.governance.approvedSnapshot),internal={...f.contract,kind:'internal' as const,internalPurpose:'展厅试穿',receiver:'样品团队 / 负责人乙'};
   f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:internal,reason:'改为内部展厅试穿'}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});
   const reviews=getOrderGovernanceReviews(f.state),oldDetails=Object.fromEntries(reviews[0].details.map(item=>[item.label,item.value])),newDetails=Object.fromEntries(reviews[1].details.map(item=>[item.label,item.value]));
-  expect(oldDetails).toMatchObject({'订单用途':'外部客户订单','客户/接收方':'客户','合同':'PO-001'});
-  expect(newDetails).toMatchObject({'订单用途':'内部用途订单','客户/接收方':'样品团队 / 负责人乙','合同':'展厅试穿'});
+  expect(oldDetails).toMatchObject({'订单用途':'外部客户订单','客户':'客户','合同':'PO-001'});
+  expect(newDetails).toMatchObject({'订单用途':'内部用途订单','接收负责人':'样品团队 / 负责人乙','内部用途':'展厅试穿'});
   expect(f.order.customerId).toBe('customer');expect(f.order.customer).toBe('客户');expect(f.order.governance.approvedSnapshot).toEqual(original);
   f.run({type:'order.governance.decide',payload:{id:'order',decision:'rejected',note:'请更正接收团队'}},{...f.c,actorId:'leader'});
   f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...internal,internalPurpose:'修订试穿用途',receiver:'修订团队 / 负责人丙'},reason:'更正内部交接资料'}});f.run({type:'order.governance.submit',payload:{orderId:'order'}});
   const resubmitted=getOrderGovernanceReviews(f.state),retained=Object.fromEntries(resubmitted[1].details.map(item=>[item.label,item.value])),current=Object.fromEntries(resubmitted[2].details.map(item=>[item.label,item.value]));
-  expect(retained).toMatchObject({'客户/接收方':'样品团队 / 负责人乙','合同':'展厅试穿'});expect(current).toMatchObject({'客户/接收方':'修订团队 / 负责人丙','合同':'修订试穿用途'});
+  expect(retained).toMatchObject({'接收负责人':'样品团队 / 负责人乙','内部用途':'展厅试穿'});expect(current).toMatchObject({'接收负责人':'修订团队 / 负责人丙','内部用途':'修订试穿用途'});
   expect(resubmitted.map(review=>review.status)).toEqual(['approved','rejected','pending']);
  });
  it('approves after a storage round-trip that reorders object keys (PostgreSQL jsonb)',()=>{const f=fixture();f.run({type:'order.governance.submit',payload:{orderId:'order'}});

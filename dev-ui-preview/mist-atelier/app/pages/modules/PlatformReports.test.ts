@@ -8,6 +8,11 @@ const invoice = (id: string, orderId: string, o: Record<string, unknown> = {}) =
 const state = (orders: any[], invoices: any[] = []) => ({ orders, invoices } as any);
 
 describe('报表中心', () => {
+  it('excludes internal budgets from customer sales and sales-order margins',()=>{
+    const s={...state([order('external'),order('internal',{amount:500,governance:{status:'approved',contract:{kind:'internal'}}})]),fulfillment:{purchases:[]},payables:{bills:[]}};
+    expect(buildCustomerSales(s).map(row=>[row.orders,row.amount])).toEqual([[1,100]]);
+    expect(buildOrderMargin(s).map(row=>row.id)).toEqual(['external']);
+  });
   it('sums customer sales per currency, excludes void invoices and uses the Shanghai business day', () => {
     const s = state([order('1'), order('2', { currency: 'CNY', amount: 50 }), order('3', { createdAt: '2026-09-30T17:00:00Z' }), order('4', { customer: 'B', customerId: 'c-B', amount: 300 })],
       [invoice('i1', '1', { open: 40 }), invoice('i2', '1', { voidedAt: '2026-10-02T00:00:00Z', open: 100 }), invoice('i3', '2', { currency: 'CNY', amount: 50, open: 50 })]);

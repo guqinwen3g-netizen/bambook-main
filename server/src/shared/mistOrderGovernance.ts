@@ -1,7 +1,7 @@
-import {normalizeGarmentFulfillment,normalizeInternalSupply,assertInternalFabricOrderChange,type InternalSupply} from './mistInternalFabric';
+import {normalizeGarmentFulfillment,normalizeInternalSupply,assertInternalFabricOrderChange,GARMENT_FULFILLMENT_LABELS,CMT_INCLUDED_ITEM_LABELS,type InternalSupply} from './mistInternalFabric';
 /** Formal order approval and proposed commercial changes, independent of the Mist view layer. */
 import{stableJson}from'./stableJson';
-import {MistCommandError,mistOrderOwnerIds,lineAmount,mistMoneyMinor,type MistContext,type MistState,type MistOrder,type MistOrderLine,type MistCommandResult} from './mistWorkspace';
+import {MistCommandError,mistOrderOwnerIds,lineAmount,mistMoneyMinor,isActiveMistInvoice,type MistContext,type MistState,type MistOrder,type MistOrderLine,type MistCommandResult} from './mistWorkspace';
 import type {MistReviewTask} from './mistReview';
 import {ownerChangeText,resolveMember} from './mistAccounts';
 import {assertOrderLineSource,normalizeOrderLineSource} from './mistOrderSource';
@@ -69,13 +69,18 @@ function checkLineSources(root:MistState,order:GovernedOrder,lines:OrderGovernan
 function snapshot(root:MistState,order:GovernedOrder,proposal?:OrderGovernanceProposal):OrderGovernanceSnapshot{return{orderId:order.id,code:order.code,type:order.type,customerId:order.customerId,customer:order.customer,season:proposal?.orderPatch.season??order.season,currency:proposal?.orderPatch.currency??order.currency,due:proposal?.orderPatch.due??order.due,contract:structuredClone(proposal?.contract||governance(order).contract),lines:structuredClone(proposal?.lines||root.orderLines.filter(l=>l.orderId===order.id).map(snapshotLine))};}
 /** The customer id is contractual identity; its display name remains frozen only for historical presentation. */
 function sameCommercialSnapshot(a:OrderGovernanceSnapshot,b:OrderGovernanceSnapshot){return stableJson({...a,customer:undefined})===stableJson({...b,customer:undefined});}
+function assertOrderPurposeChangeAllowed(root:MistState,order:GovernedOrder,contract:OrderGovernanceInput){
+ const previous=order.governance?.approvedSnapshot?.contract.kind||order.governance?.contract.kind;
+ if(!previous||previous===contract.kind)return;
+ if(root.invoices.some(invoice=>invoice.orderId===order.id&&isActiveMistInvoice(invoice))||(root.orderFunding?.assignments||[]).some(row=>row.orderId===order.id&&row.state==='active'))fail('已有销售发票或资金归属，不能更改订单用途');
+}
 function validateSubmission(root:MistState,s:OrderGovernanceSnapshot,context:MistContext){
  if(s.type==='garment')s.lines.forEach(line=>normalizeGarmentFulfillment(line));
- const order=getOrder(root,s.orderId);normalizeInternalSupply(s.contract,order,context,false);assertInternalFabricOrderChange(root,order,s.lines,s.contract);
+ const order=getOrder(root,s.orderId);assertOrderPurposeChangeAllowed(root,order,s.contract);normalizeInternalSupply(s.contract,order,context,false);assertInternalFabricOrderChange(root,order,s.lines,s.contract);
  idsExist(root,s.contract);if(!s.lines.length)fail('至少需要一个条目');date(s.due);currency(s.currency);
  if(s.contract.kind==='external'){if(!s.customerId||!root.customers.some(c=>c.id===s.customerId))fail('请选择实际客户');if(!s.contract.poNumber)fail('请填写PO或合同号');if(!s.contract.confirmationFileIds.length)fail('外部订单须上传客户书面确认依据');if(!s.contract.incoterm||!s.contract.deliveryPlace)fail('请记录合同贸易术语和指定地点');}
  else if(!s.contract.internalPurpose||!s.contract.receiver)fail('内部订单须记录用途、接收团队和负责人');
- if(!s.contract.paymentNote)fail('请记录实际付款条款');
+ if(!s.contract.paymentNote)fail(s.contract.kind==='internal'?'请记录内部交接约定':'请记录实际付款条款');
  // 信用证付款：客户通常在订单确认后开证，来证由单证员在信用证台账登记与审核，不阻断订单审批。
 }
 function reviewers(context:MistContext,type:MistOrder['type']){const authority=context.authority as (MistContext['authority']&{orderReviewerIds?:Record<'garment'|'fabric',string[]>})|undefined;return [...new Set((authority?.orderReviewerIds?.[type]||[]).filter(id=>typeof id==='string'&&id.trim()))];}
@@ -85,7 +90,33 @@ function applySnapshot(root:MistState,order:GovernedOrder,s:OrderGovernanceSnaps
 }
 function event(root:MistState,c:MistContext,order:GovernedOrder,message:string){root.events.unshift({id:c.id(),entityType:'order',entityId:order.id,actor:c.actorName,at:c.now,text:message,fileIds:[]});}
 export function assertOrderApproved(root:MistState,orderId:string){const order=getOrder(root,orderId);assertOrderNotTerminated(order);if(order.governance?.status!=='approved'||!order.governance.approvedSnapshot)fail('订单主单尚未批准，不能进入采购或履约','PRECONDITION');if(!sameCommercialSnapshot(snapshot(root,order),order.governance.approvedSnapshot))fail('订单生效内容与批准快照不一致，不能进入履约','PRECONDITION');return order;}
-export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{return [...root.orders.flatMap(source=>{const order=source as GovernedOrder;return(order.governance?.rounds||[]).map(round=>({id:'order:'+round.id,kind:'order' as const,entityId:order.id,title:order.code+(round.kind==='change'?' 订单变更审批':' 订单主单审批'),requesterId:round.requesterId,reviewerIds:round.reviewerIds,status:round.status,submittedAt:round.submittedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},fileIds:round.snapshot.contract.confirmationFileIds,details:[{label:'订单用途',value:round.snapshot.contract.kind==='internal'?'内部用途订单':'外部客户订单'},{label:'客户/接收方',value:round.snapshot.contract.kind==='internal'?round.snapshot.contract.receiver:round.snapshot.customer},{label:'合同',value:round.snapshot.contract.kind==='internal'?round.snapshot.contract.internalPurpose:round.snapshot.contract.poNumber},{label:'付款',value:round.snapshot.contract.paymentMethod+' · '+round.snapshot.contract.paymentNote},{label:'出运前累计收款',value:round.snapshot.contract.preShipmentPercent==null?'待核对':round.snapshot.contract.preShipmentPercent+'%'},{label:'交期',value:round.snapshot.due},{label:'贸易条件',value:round.snapshot.contract.incoterm+' '+round.snapshot.contract.deliveryPlace},{label:'溢短装',value:toleranceText(round.snapshot.contract)},...(round.reason?[{label:'变更原因',value:round.reason}]:[]),...(round.kind==='change'&&round.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,round.snapshot.lines)):[]),...round.snapshot.lines.map(l=>({label:l.style+' · '+l.name,value:`${l.qty} ${l.unit} × ${l.price} ${round.snapshot.currency}`+(l.breakdown?`；${breakdownSummary(l.breakdown,l.unit)}`:'')}))]}));}),...closureReviews(root),...overShipReviews(root),...cancelReviews(root)];}
+function reviewLine(snapshot:OrderGovernanceSnapshot,line:OrderGovernanceLine):string{
+ const parts=[`${line.qty} ${line.unit} × ${line.price} ${snapshot.currency}`];
+ if(line.breakdown)parts.push(breakdownSummary(line.breakdown,line.unit));
+ if(snapshot.type==='garment'){
+  parts.push(line.fulfillmentMode?GARMENT_FULFILLMENT_LABELS[line.fulfillmentMode]:'履约模式未记录');
+  parts.push('CMT 包含：'+(line.cmtIncludedItems===undefined?'未记录':line.cmtIncludedItems.length?line.cmtIncludedItems.map(item=>CMT_INCLUDED_ITEM_LABELS[item]).join('、'):'无'));
+ }
+ return parts.join('；');
+}
+export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
+ const tasks=root.orders.flatMap(source=>{
+  const order=source as GovernedOrder;
+  return(order.governance?.rounds||[]).map(round=>{
+   const snapshot=round.snapshot,contract=snapshot.contract,internal=contract.kind==='internal';
+   return{id:'order:'+round.id,kind:'order' as const,entityId:order.id,title:order.code+(round.kind==='change'?' 订单变更审批':' 订单主单审批'),requesterId:round.requesterId,reviewerIds:round.reviewerIds,status:round.status,submittedAt:round.submittedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},fileIds:contract.confirmationFileIds,details:[
+    {label:'订单用途',value:internal?'内部用途订单':'外部客户订单'},
+    {label:internal?'接收负责人':'客户',value:internal?contract.receiver:snapshot.customer},
+    {label:internal?'内部用途':'合同',value:internal?contract.internalPurpose:contract.poNumber},
+    ...(internal?[{label:'交接约定',value:contract.paymentNote}]:[{label:'付款',value:contract.paymentMethod+' · '+contract.paymentNote},{label:'出运前累计收款',value:contract.preShipmentPercent==null?'待核对':contract.preShipmentPercent+'%'}]),
+    {label:'交期',value:snapshot.due},{label:internal?'交付地点':'贸易条件',value:contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:toleranceText(contract)},
+    ...(round.reason?[{label:'变更原因',value:round.reason}]:[]),...(round.kind==='change'&&round.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,snapshot.lines)):[]),
+    ...snapshot.lines.map(line=>({label:line.style+' · '+line.name,value:reviewLine(snapshot,line)})),
+   ]};
+  });
+ });
+ return[...tasks,...closureReviews(root),...overShipReviews(root),...cancelReviews(root)];
+}
 export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernanceCommand,context:MistContext):MistCommandResult{
  if(command.type==='order.governance.decide'&&command.payload.id.includes(CLOSE_MARK))return decideClosure(root,command.payload,context);
  if(command.type==='order.governance.closeLine')return closeLine(root,command.payload,context);
@@ -96,7 +127,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
  if(command.type==='order.governance.requestCancel')return requestCancel(root,command.payload,context);
  const id=command.type==='order.governance.decide'?command.payload.id:command.payload.orderId,order=getOrder(root,id);if(!order.governance&&command.type==='order.governance.saveDraft')order.governance=createOrderGovernance(context);const g=governance(order);orderGovernancePermission(command);if(command.type!=='order.governance.decide')assertOrderWritable(order);
  if(command.type==='order.governance.saveDraft'){
-  if(g.status==='pending'||g.changeDraft?.status==='pending')fail('审批中订单内容已锁定');const p=command.payload,contract=normalizeInternalSupply(normalize(p.input),{type:order.type,ownerId:p.orderPatch?.ownerId??order.ownerId},context);idsExist(root,contract);
+  if(g.status==='pending'||g.changeDraft?.status==='pending')fail('审批中订单内容已锁定');const p=command.payload,contract=normalizeInternalSupply(normalize(p.input),{type:order.type,ownerId:p.orderPatch?.ownerId??order.ownerId},context);assertOrderPurposeChangeAllowed(root,order,contract);idsExist(root,contract);
   const orderPatch={season:p.orderPatch?.season===undefined?order.season:text(p.orderPatch.season,'季节'),currency:p.orderPatch?.currency===undefined?order.currency:currency(p.orderPatch.currency),due:p.orderPatch?.due===undefined?order.due:date(p.orderPatch.due)};
   const lines=checkLineSources(root,order,validateLines(root,order,p.lines||root.orderLines.filter(l=>l.orderId===id).map(snapshotLine)),contract.kind==='internal');
   assertInternalFabricOrderChange(root,order,lines,contract);

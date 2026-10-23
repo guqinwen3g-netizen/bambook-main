@@ -888,6 +888,7 @@ function assertCurrentShipmentTolerance(root: MistState, shipment: FulfillmentSh
     }
 }
 function sourceQuality(root: MistState, line: ShipmentLine, context: InternalFabricContext) {
+    if(get(root.orders,line.orderId,'订单').governance?.contract.kind==='internal')fail('内部订单请登记库存交接');
     physicalCapacity(root, line);
     const production = root.productions.filter(p => p.lineId === line.lineId && p.id === line.productionId);
     if (!production.length)
@@ -1490,6 +1491,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.shipments.save': {
             if (!Array.isArray(p.lines) || !p.lines.length)
                 fail('请选准确订单条目');
+            if(p.lines.some((line:ShipmentLine)=>get(root.orders,line.orderId,'订单').governance?.contract.kind==='internal'))fail('内部订单请登记库存交接');
             const old = p.id ? get(f.shipments, p.id, '出运') : undefined;
             if (old)
                 requireEditableShipment(old);
@@ -1660,6 +1662,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('单据订单不属于出运');
             if (p.type === 'CI' && !p.orderId)
                 fail('CI须绑定一份准确订单');
+            if(p.type==='CI'&&get(root.orders,p.orderId,'订单').governance?.contract.kind==='internal')fail('内部订单不生成销售发票');
             const old = p.id ? get(f.documents, p.id, '单据') : undefined;
             if (old && (old.shipmentId !== s.id || old.type !== p.type || old.orderId !== p.orderId))
                 fail('单据来源/类型不可更换');
@@ -1679,6 +1682,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!['CI', 'PL'].includes(d.type)) fail('外部机构单据只能归档签发原件，不能由本系统签发');
             if (d.status !== 'draft')
                 fail('仅草稿可签发');
+            if(d.type==='CI'&&get(root.orders,d.orderId,'订单').governance?.contract.kind==='internal')fail('内部订单不生成销售发票');
             const s = get(f.shipments, d.shipmentId, '出运');
             requireEditableShipment(s);
             if (!d.fileIds.length)
