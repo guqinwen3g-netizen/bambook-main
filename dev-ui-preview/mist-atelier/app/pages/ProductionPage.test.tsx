@@ -67,3 +67,10 @@ describe('Mist production gates, delay and pause',()=>{
   expect(bridge.run).toHaveBeenLastCalledWith({type:'fulfillment.production.resume',payload:{productionId:'production-b',note:'复染合格'}});
  });
 });
+
+it('retains frozen conditional sample findings after production is released',async()=>{
+ const fact=bridge.state!.fulfillment.productionFacts.find(row=>row.productionId==='production-b')!;
+ fact.release!.sampleChecks=[{sampleId:'stone',sampleCode:'SMP-STONE',color:'Stone',form:'米样',reportId:'r',reportNumber:'PP-STONE',result:'conditional',opinion:'卷边须在首批大货复核'}];
+ await mount({view:'production-board',productionId:'production-b'});
+ expect(document.body.textContent).toContain('样品关注项');expect(document.body.textContent).toContain('SMP-STONE');expect(document.body.textContent).not.toContain('卷边须在首批大货复核');await click('查看关注项');expect(document.body.textContent).toContain('卷边须在首批大货复核');
+});

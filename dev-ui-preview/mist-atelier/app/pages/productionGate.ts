@@ -1,5 +1,7 @@
 /** 生产分支开产门禁：与服务端放行规则逐项对应，只读核对，最终以服务端为准。 */
 import { assertMistOrderApproved, assertMistOrderDeposit, type MistProduction, type MistState } from '../../../../server/src/shared/mistWorkspace';
+import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
+import { uiText } from '../../../../services/interfaceLanguage';
 
 export type GateItem = { key: string; label: string; ok: boolean; detail: string; target?: { view: string; id?: string } };
 const message = (check: () => void) => { try { check(); return ''; } catch (problem) { return problem instanceof Error ? problem.message : '未通过'; } };
@@ -19,10 +21,12 @@ export function productionReleaseGate(state: MistState, branch: MistProduction):
     items.push({ key: 'contract', label: '来源加工合同已确认', ok, detail: ok ? `${purchase!.code} 已批准、发出并回签` : '来源合同须批准、线下发出并取得供应商确认', target: purchase ? { view: 'procurement', id: purchase.id } : undefined });
   }
   const role = fabric ? 'pioneer' : 'pp', roleLabel = fabric ? '先锋样' : '产前样';
-  const samples = (f?.samples || []).filter(sample => sample.role === role && sample.source.kind === 'orderLine' && sample.source.orderId === branch.orderId && sample.source.lineId === branch.lineId && sample.source.productionId === branch.id);
-  const approved = samples.find(sample => (f?.qcTasks || []).some(task => { const latest = f.qcReports.find(report => report.id === task.reportIds.at(-1)); return task.sampleId === sample.id && task.kind === 'sample' && task.state === 'reported' && !!latest && latest.result !== 'reject' && latest.scopeRevision === (sample.qualityRevision || 1) && task.businessConfirmation?.result === 'approved' && task.businessContinued?.reportId === latest.id; }));
-  const pending = samples.length ? (f?.qcTasks || []).find(task => task.kind === 'sample' && samples.some(sample => sample.id === task.sampleId)) : undefined;
-  items.push({ key: 'sample', label: `${roleLabel}已确认`, ok: !!approved, detail: approved ? `${approved.code} 已通过 QC、需求方确认并由业务继续` : samples.length ? `${roleLabel}尚未完成准确实物 QC、需求方确认及业务继续` : `本分支还没有登记${roleLabel}`, target: pending ? { view: 'qc-workbench', id: pending.id } : { view: 'samples' } });
+  for (const row of productionSampleRequirements(state, branch, role)) {
+    const condition = row.evidence?.result === 'conditional' ? ` · ${uiText('有保留通过')}` : '';
+    items.push({ key: row.key, label: uiText(`${roleLabel}${row.label ? ` · ${row.label}` : ''}已确认`), ok: row.ok,
+      detail: row.ok ? uiText(`${row.sampleCode} 已完成 QC、需求方确认及业务继续`) + condition : row.sampleId ? uiText(`${row.sampleCode} 尚未完成准确实物 QC、需求方确认及业务继续`) : uiText(`本分支还没有登记${roleLabel}${row.label ? `（${row.label}）` : ''}`),
+      target: row.taskId ? { view: 'qc-workbench', id: row.taskId } : { view: 'samples' } });
+  }
   return items;
 }
 

@@ -1,5 +1,6 @@
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
+import { productionSampleRequirements, type ProductionSampleEvidence } from './mistProductionSamples';
 import {developmentDomain} from './mistDevelopmentDomain';
 import { MistCommandError, lineAmount, mistMoneyMinor, assertMistOrderApproved, assertMistOrderDeposit, assertMistOrderOpen, isActiveMistInvoice, isRecognizedMistInvoice } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
@@ -31,7 +32,7 @@ export type FulfillmentProductionFact = {
     productionId: string;
     sizes: FulfillmentSizeQuantity[];
     revision: number;
-    release?: { at: string; actor: string; note: string };
+    release?: { at: string; actor: string; note: string; sampleChecks?: ProductionSampleEvidence[] };
     completion?: { id: string; quantity: number; sizeQuantities: FulfillmentSizeQuantity[]; date: string; at: string; actor: string; evidence: string; fileIds: string[] };
     customerAcceptance?: { at: string; actor: string; note: string; completionId: string };
     /** 异常暂停：暂停期间不得推进进度、完工、出运或加工收货；QC 可继续检查。 */
@@ -790,12 +791,10 @@ function scopeRevision(root: MistState, task: FulfillmentQcTask): number {
     return task.source.kind === 'orderLine' && task.source.productionId ? fulfillmentProductionFact(root, task.source.productionId)?.revision || 1 : 1;
 }
 function requireSampleRole(root: MistState, branch: MistProduction, role: FulfillmentSampleRole, shipmentId?: string) {
-    const samples = root.fulfillment.samples.filter(sample => sample.role === role && sample.source.kind === 'orderLine' && sample.source.orderId === branch.orderId && sample.source.lineId === branch.lineId && sample.source.productionId === branch.id && (role !== 'shipping' || sample.shipmentId === shipmentId));
-    const approved = samples.filter(sample => root.fulfillment.qcTasks.some(task => {
-        const latest = root.fulfillment.qcReports.find(report => report.id === task.reportIds.at(-1));
-        return task.sampleId === sample.id && task.kind === 'sample' && task.state === 'reported' && latest && latest.result !== 'reject' && latest.scopeRevision === (sample.qualityRevision || 1) && task.businessConfirmation?.result === 'approved' && task.businessContinued?.reportId === latest.id;
-    }));
-    if (!approved.length) fail(`${fulfillmentSampleRoleLabel(role)}尚未完成准确实物QC、需求方确认及业务继续`, 'PRECONDITION');
+    const requirements = productionSampleRequirements(root, branch, role, shipmentId);
+    const pending = requirements.find(row => !row.ok);
+    if (pending) fail(`${fulfillmentSampleRoleLabel(role)}${pending.label ? `（${pending.label}）` : ''}尚未完成准确实物QC、需求方确认及业务继续`, 'PRECONDITION');
+    return [...new Map(requirements.map(row => [row.evidence!.sampleId, row.evidence!])).values()];
 }
 function requireProductionQc(root: MistState, branch: MistProduction) {
     const tasks = root.fulfillment.qcTasks.filter(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id);
@@ -1145,9 +1144,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 const purchase = get(f.purchases, branch.sourcePurchaseId, '来源合同');
                 if (purchase.state !== 'approved' || !purchase.offlineSend || !purchase.supplierConfirmation) fail('来源合同须批准、线下发出并取得供应商确认');
             }
-            requireSampleRole(root, branch, order.type === 'garment' ? 'pp' : 'pioneer');
-            fact.release = { at: ctx.now, actor: ctx.actorName, note: text(p.note, '开产放行依据') };
-            branch.risk = '';
+            const sampleChecks = requireSampleRole(root, branch, order.type === 'garment' ? 'pp' : 'pioneer');
+            fact.release = { at: ctx.now, actor: ctx.actorName, note: text(p.note, '开产放行依据'), sampleChecks };
+            const conditional = sampleChecks.filter(sample => sample.result === 'conditional');
+            branch.risk = conditional.length ? `样品有保留通过：${conditional.map(sample => sample.sampleCode).join('、')}` : '';
             audit(root, ctx, 'production', branch.id, '业务确认开产放行', { view: 'production-board', id: branch.id, productionId: branch.id });
             return { id: branch.id };
         }

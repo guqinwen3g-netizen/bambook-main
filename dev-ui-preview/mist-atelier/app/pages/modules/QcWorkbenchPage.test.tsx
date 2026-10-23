@@ -175,3 +175,12 @@ it('opens business resume over the workbench and explains it to QC-only accounts
   expect((getByRole(host,'button',{name:'从来源发起QC'}) as HTMLButtonElement).disabled).toBe(true);
   expect(queryByRole(document.body,'dialog')).toBeNull();
 });
+
+it('shows frozen pioneer conditions when the inspector opens a production report',async()=>{
+ const sampleChecks=[{sampleId:'stone',sampleCode:'SMP-STONE',color:'Stone',form:'米样',reportId:'sample-report',reportNumber:'PP-STONE',result:'conditional' as const,opinion:'卷边须在首批大货复核'}];
+ store.state!.fulfillment.productionFacts.push({productionId:'p',sizes:[],revision:1,release:{at:'2026-10-08',actor:'业务员',note:'已核对',sampleChecks}});
+ store.state!.fulfillment.qcTasks.push(task('production-check',{domain:'fabric',kind:'production',state:'working',assigneeId:'qc-a',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'}}));
+ render('production-check');
+ await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+ expect(host.textContent).toContain('样品关注项');expect(host.textContent).toContain('SMP-STONE');expect(host.textContent).not.toContain('卷边须在首批大货复核');await click(getByRole(host,'button',{name:'查看关注项'}));expect(host.textContent).toContain('卷边须在首批大货复核');
+});
