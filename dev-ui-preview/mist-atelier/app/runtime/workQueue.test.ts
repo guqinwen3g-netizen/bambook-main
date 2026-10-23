@@ -6,7 +6,7 @@ let n = 0;
 const ctx = () => ({ id: () => `id-${++n}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
 const all = () => true;
 const base = () => { const state = createMistState(ctx(), 'empty'); state.fulfillment.qcTasks = []; state.fulfillment.shipments = []; return state; };
-const qc = (patch: any) => ({ id: 'qc-1', code: 'QC-1', source: { kind: 'version', versionId: 'v', devId: 'd' }, domain: 'garment', kind: 'sample', factory: '实际工厂', location: '', contact: '', due: '2026-10-20', requestedBy: '业务员甲', assignee: '', state: 'reported', reportIds: ['r'], createdAt: '2026-10-01', ...patch });
+const qc = (patch: any) => ({ id: 'qc-1', code: 'QC-1', source: { kind: 'orderLine', orderId: 'o', lineId: 'l' }, domain: 'garment', kind: 'sample', factory: '实际工厂', location: '', contact: '', due: '2026-10-20', requestedBy: '业务员甲', assignee: '', state: 'reported', reportIds: ['r'], createdAt: '2026-10-01', ...patch });
 const request = (patch: any) => ({ id: 'pr-1', code: 'PR-1', purpose: 'prepayment', supplierId: 's1', supplier: '实际供应商', currency: 'CNY', amount: 100, planId: 'plan-1', lines: [], reason: '', fileIds: [], requesterId: 'me', requester: '我', submittedAt: '2026-10-10T00:00:00Z', reviewerIds: ['boss'], snapshot: [], state: 'rejected', decision: { actorId: 'boss', actor: '财务主管', at: '2026-10-12T00:00:00Z', decision: 'rejected', note: '缺少合同' }, paymentHistory: [], ...patch });
 
 describe('my work queue sources', () => {
@@ -98,5 +98,53 @@ describe('weekly team report reminder', () => {
     (state as any).teamReports = [{ id: 'r', weekStart: '2026-10-12', generatedById: 'boss' }];
     expect(mistWorkQueue(state, opts).some(i => i.source === 'report')).toBe(false);
     expect(mistWorkQueue(state, { ...opts, me: 'other' }).some(i => i.source === 'report')).toBe(true);
+  });
+});
+
+
+describe('development QC return follows the exact version decision', () => {
+  const options = { canRead: all, can: (permission: string) => permission === 'orders:write', me: 'sales', today: '2026-10-15' };
+  function scenario() {
+    const state = base();
+    state.versions = [{ id: 'v', devId: 'd', confirmations: [] }, { id: 'other-v', devId: 'd', confirmations: [] }] as any;
+    state.fulfillment.samples = [{ id: 'sample-a', source: { kind: 'version', devId: 'd', versionId: 'v' } }] as any;
+    state.fulfillment.qcTasks = [qc({ source: { kind: 'version', devId: 'd', versionId: 'v' }, sampleId: 'sample-a' })] as any;
+    return state;
+  }
+  it.each(['approved', 'needs_adjustment', 'rejected'])('removes a reviewed sample after the requester records %s', result => {
+    const state = scenario();
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
+    state.versions[0].confirmations = [{ result }] as any;
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  it('routes the business handoff to the exact development version, retaining QC access for inspectors', () => {
+    const state = scenario();
+    expect(mistWorkQueue(state, options)[0].target).toEqual({ view: 'development/detail', id: 'd', versionId: 'v' });
+    expect(mistWorkQueue(state, { ...options, canRead: view => view !== 'development' })).toEqual([]);
+    state.fulfillment.qcTasks[0].state = 'pending';
+    const inspector = { ...options, can: (permission: string) => permission === 'qc:inspect' || permission === 'qc:garment_chain:write' };
+    expect(mistWorkQueue(state, inspector)[0].target).toEqual({ view: 'qc-workbench', id: 'qc-1' });
+  });
+  it('does not consume a decision on another version or inherit the parent decision for a minor version', () => {
+    const state = scenario();
+    state.versions[1].confirmations = [{ result: 'approved' }] as any;
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
+    state.versions[0].minor = { parentVersionId: 'other-v' } as any;
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
+  });
+  it('keeps other sample forms and a whole-version task open until their own scopes have decisions', () => {
+    const state = scenario();
+    state.fulfillment.samples.push({ id: 'sample-b', source: { kind: 'version', devId: 'd', versionId: 'v' } } as any);
+    state.fulfillment.qcTasks.push(qc({ id: 'sample-b-task', sampleId: 'sample-b', source: { kind: 'version', devId: 'd', versionId: 'v' } }), qc({ id: 'version-task', source: { kind: 'version', devId: 'd', versionId: 'v' } }));
+    state.versions[0].confirmations = [{ result: 'approved', samples: [{ sampleId: 'sample-a' }] }] as any;
+    expect(mistWorkQueue(state, options).map(item => item.id)).toEqual(['qc:sample-b-task', 'qc:version-task']);
+    state.versions[0].confirmations.push({ result: 'needs_adjustment', samples: [{ sampleId: 'sample-b' }] } as any);
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  it('does not treat an unscoped old decision as approval for newly added sample forms', () => {
+    const state = scenario();
+    state.versions[0].confirmations = [{ result: 'approved' }] as any;
+    state.fulfillment.samples.push({ id: 'sample-b', source: { kind: 'version', devId: 'd', versionId: 'v' } } as any);
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
   });
 });
