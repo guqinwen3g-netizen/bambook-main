@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /**
  * 平台 AI 调用链（平台设置 › 平台 AI 模型）：对所有公司生效，仅平台管理员可改。
  * ChatGPT 套餐与 API 服务按同一顺序调用，前一项失败自动换下一项；服务器环境配置始终在最后兜底。
@@ -84,26 +85,26 @@ export function PlatformAiProvidersPanel({ sessionKey }: { sessionKey: string })
   };
 
   if (!view) return <div className="mist-card-body">{error
-    ? <Banner tone="warn" title="平台 AI 配置暂不可读" actions={<Button size="sm" onClick={() => void read()}>重新读取</Button>}>{error}</Banner>
-    : <p className="mist-note">正在读取平台 AI 配置…</p>}</div>;
+    ? <Banner tone="warn" title={uiText("平台 AI 配置暂不可读")} actions={<Button size="sm" onClick={() => void read()}>{uiText("重新读取")}</Button>}>{uiText(error)}</Banner>
+    : <p className="mist-note">{uiText("正在读取平台 AI 配置…")}</p>}</div>;
 
   const providers = new Map(view.api.providers.map(p => [p.id, p]));
   const order = view.api.order;
   const valid = !!draft && !!draft.name.trim() && !!draft.baseUrl.trim() && !!draft.model.trim() && (!!draft.id || !!draft.apiKey.trim());
   const preset = draft ? PRESETS.find(p => p.value && p.value === draft.baseUrl)?.value ?? '' : '';
   return <>
-    <CardHeader title="平台 AI 模型" sub="所有公司的平台 AI（小竹问答、报价审阅、自动汇总、财务对账）按下列顺序调用，前一项不可用时自动换下一项。" />
+    <CardHeader title={uiText("平台 AI 模型")} sub={uiText("所有公司的平台 AI（小竹问答、报价审阅、自动汇总、财务对账）按下列顺序调用，前一项不可用时自动换下一项。")} />
     <div className="mist-card-body">
-      {error && !draft && !removing && <Banner tone="bad" title="平台 AI 配置未保存">{error}</Banner>}
-      <ol className="mist-ai-chain" aria-label="平台 AI 调用顺序">
+      {error && !draft && !removing && <Banner tone="bad" title={uiText("平台 AI 配置未保存")}>{uiText(error)}</Banner>}
+      <ol className="mist-ai-chain" aria-label={uiText("平台 AI 调用顺序")}>
         {order.map((id, i) => {
-          const arrows = <><IconButton size="sm" icon={ArrowUp} label="上移" disabled={busy || i === 0} onClick={() => move(id, -1)} /><IconButton size="sm" icon={ArrowDown} label="下移" disabled={busy || i === order.length - 1} onClick={() => move(id, 1)} /></>;
+          const arrows = <><IconButton size="sm" icon={ArrowUp} label={uiText("上移")} disabled={busy || i === 0} onClick={() => move(id, -1)} /><IconButton size="sm" icon={ArrowDown} label={uiText("下移")} disabled={busy || i === order.length - 1} onClick={() => move(id, 1)} /></>;
           if (id === SLOT) {
             const c = view.chatgpt;
             return <li key={id} className="mist-ai-chain-row">
-              <span className="mist-ai-chain-n">{i + 1}</span>
-              <div className="mist-ai-chain-t"><b>ChatGPT 套餐</b><span>{c?.connected ? [c.email, c.model].filter(Boolean).join(' · ') : c?.enabled === false ? '服务器未启用订阅连接，调用时跳过' : '尚未连接，调用时跳过；可在下方连接'}</span></div>
-              <Pill tone={c?.connected ? 'ok' : 'neutral'}>{c?.connected ? '已连接' : '未连接'}</Pill>
+              <span className="mist-ai-chain-n">{uiText(i + 1)}</span>
+              <div className="mist-ai-chain-t"><b>{uiText("ChatGPT 套餐")}</b><span>{uiText(c?.connected ? [c.email, c.model].filter(Boolean).join(' · ') : c?.enabled === false ? '服务器未启用订阅连接，调用时跳过' : '尚未连接，调用时跳过；可在下方连接')}</span></div>
+              <Pill tone={c?.connected ? 'ok' : 'neutral'}>{uiText(c?.connected ? '已连接' : '未连接')}</Pill>
               <div className="mist-ai-chain-acts">{arrows}</div>
             </li>;
           }
@@ -111,44 +112,44 @@ export function PlatformAiProvidersPanel({ sessionKey }: { sessionKey: string })
           if (!p) return null;
           const t = tests[id];
           return <li key={id} className="mist-ai-chain-row" data-off={!p.enabled || undefined}>
-            <span className="mist-ai-chain-n">{i + 1}</span>
+            <span className="mist-ai-chain-n">{uiText(i + 1)}</span>
             <div className="mist-ai-chain-t"><b>{p.name}</b><span>{hostOf(p.baseUrl)} · {p.model} · Key {p.keyHint}</span>{t && t !== 'running' && <span className="mist-ai-chain-test" data-ok={t.ok || undefined} role="status">{t.text}</span>}</div>
-            <Switch ariaLabel={(p.enabled ? '停用 ' : '启用 ') + p.name} checked={p.enabled} disabled={busy} onChange={enabled => void mutate(`${BASE}/providers/${p.id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) })} />
+            <Switch ariaLabel={uiText((p.enabled ? '停用 ' : '启用 ') + p.name)} checked={p.enabled} disabled={busy} onChange={enabled => void mutate(`${BASE}/providers/${p.id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) })} />
             <div className="mist-ai-chain-acts">
-              <Button size="sm" variant="quiet" icon={Zap} loading={t === 'running'} disabled={busy || t === 'running'} onClick={() => void test(p.id)}>测试</Button>
-              <IconButton size="sm" icon={Pencil} label={'编辑 ' + p.name} disabled={busy} onClick={() => { setError(''); setDraft({ id: p.id, keyHint: p.keyHint, name: p.name, baseUrl: p.baseUrl, model: p.model, apiKey: '' }); }} />
-              <IconButton size="sm" icon={Trash2} label={'删除 ' + p.name} disabled={busy} onClick={() => { setError(''); setRemoving(p); }} />
+              <Button size="sm" variant="quiet" icon={Zap} loading={t === 'running'} disabled={busy || t === 'running'} onClick={() => void test(p.id)}>{uiText("测试")}</Button>
+              <IconButton size="sm" icon={Pencil} label={uiText('编辑 ' + p.name)} disabled={busy} onClick={() => { setError(''); setDraft({ id: p.id, keyHint: p.keyHint, name: p.name, baseUrl: p.baseUrl, model: p.model, apiKey: '' }); }} />
+              <IconButton size="sm" icon={Trash2} label={uiText('删除 ' + p.name)} disabled={busy} onClick={() => { setError(''); setRemoving(p); }} />
               {arrows}
             </div>
           </li>;
         })}
         {view.env.map(e => <li key={e.id} className="mist-ai-chain-row" data-env>
-          <span className="mist-ai-chain-n">兜底</span>
-          <div className="mist-ai-chain-t"><b>服务器环境配置</b><span>{e.host} · {e.model} · 由服务器部署配置，此处只读</span></div>
+          <span className="mist-ai-chain-n">{uiText("兜底")}</span>
+          <div className="mist-ai-chain-t"><b>{uiText("服务器环境配置")}</b><span>{e.host} · {e.model}{uiText(" · 由服务器部署配置，此处只读")}</span></div>
         </li>)}
       </ol>
       {view.supportsApi ? <div className="mist-row">
-        <Button variant="ai" icon={Plus} disabled={busy || view.api.providers.length >= MAX} onClick={() => { setError(''); setDraft({ name: '', baseUrl: '', model: '', apiKey: '' }); }}>添加 API 服务</Button>
-        <span className="mist-note">支持 OpenAI 兼容接口：OpenAI、火山方舟、DeepSeek、智谱、通义千问或自建服务。</span>
-      </div> : <Banner tone="neutral" title="当前服务器版本尚不支持 API 服务">服务器更新后即可在此添加 OpenAI 兼容的 API 服务；ChatGPT 套餐可先在下方连接。</Banner>}
+        <Button variant="ai" icon={Plus} disabled={busy || view.api.providers.length >= MAX} onClick={() => { setError(''); setDraft({ name: '', baseUrl: '', model: '', apiKey: '' }); }}>{uiText("添加 API 服务")}</Button>
+        <span className="mist-note">{uiText("支持 OpenAI 兼容接口：OpenAI、火山方舟、DeepSeek、智谱、通义千问或自建服务。")}</span>
+      </div> : <Banner tone="neutral" title={uiText("当前服务器版本尚不支持 API 服务")}>{uiText("服务器更新后即可在此添加 OpenAI 兼容的 API 服务；ChatGPT 套餐可先在下方连接。")}</Banner>}
     </div>
     <AiSubscriptionPanel mode="platform" bare sessionKey={sessionKey} onChange={() => void read()} />
-    <Drawer open={!!draft} onClose={() => { if (!busy) setDraft(null); }} title={draft?.id ? '编辑 API 服务' : '添加 API 服务'} sub="Key 只保存在服务器，保存后不再显示。"
-      footer={<><Button disabled={busy} onClick={() => setDraft(null)}>取消</Button><Button variant="primary" loading={busy} disabled={!valid || busy} onClick={() => void save()}>保存</Button></>}>
+    <Drawer open={!!draft} onClose={() => { if (!busy) setDraft(null); }} title={uiText(draft?.id ? '编辑 API 服务' : '添加 API 服务')} sub={uiText("Key 只保存在服务器，保存后不再显示。")}
+      footer={<><Button disabled={busy} onClick={() => setDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={!valid || busy} onClick={() => void save()}>{uiText("保存")}</Button></>}>
       {draft && <>
-        {error && <Banner tone="bad" title="未能保存">{error}</Banner>}
+        {error && <Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
         <FormGrid cols={1}>
-          {!draft.id && <Field label="服务商"><Select aria-label="服务商" value={preset} options={PRESETS} onChange={e => { const value = e.target.value, label = PRESETS.find(p => p.value === value)?.label ?? ''; setDraft(d => d && ({ ...d, baseUrl: value || d.baseUrl, name: d.name || (value ? label : '') })); }} /></Field>}
-          <Field label="名称"><TextInput aria-label="名称" value={draft.name} maxLength={60} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, name: e.target.value }))} /></Field>
-          <Field label="接口地址" hint="OpenAI 兼容接口的 Base URL，例如 https://api.openai.com/v1"><TextInput aria-label="接口地址" value={draft.baseUrl} maxLength={300} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, baseUrl: e.target.value }))} /></Field>
-          <Field label="模型标识" hint="填写服务商的模型 ID，例如 deepseek-chat、doubao-1.5-pro-32k"><TextInput aria-label="模型标识" value={draft.model} maxLength={120} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, model: e.target.value }))} /></Field>
-          <Field label="API Key" hint={draft.id ? `留空则保留当前 Key（${draft.keyHint}）` : '仅保存在服务器私有目录，任何页面都不会再显示'}><TextInput aria-label="API Key" type="password" autoComplete="off" value={draft.apiKey} maxLength={512} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, apiKey: e.target.value }))} /></Field>
+          {!draft.id && <Field label={uiText("服务商")}><Select aria-label={uiText("服务商")} value={preset} options={PRESETS} onChange={e => { const value = e.target.value, label = PRESETS.find(p => p.value === value)?.label ?? ''; setDraft(d => d && ({ ...d, baseUrl: value || d.baseUrl, name: d.name || (value ? label : '') })); }} /></Field>}
+          <Field label={uiText("名称")}><TextInput aria-label={uiText("名称")} value={draft.name} maxLength={60} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, name: e.target.value }))} /></Field>
+          <Field label={uiText("接口地址")} hint={uiText("OpenAI 兼容接口的 Base URL，例如 https://api.openai.com/v1")}><TextInput aria-label={uiText("接口地址")} value={draft.baseUrl} maxLength={300} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, baseUrl: e.target.value }))} /></Field>
+          <Field label={uiText("模型标识")} hint={uiText("填写服务商的模型 ID，例如 deepseek-chat、doubao-1.5-pro-32k")}><TextInput aria-label={uiText("模型标识")} value={draft.model} maxLength={120} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, model: e.target.value }))} /></Field>
+          <Field label="API Key" hint={uiText(draft.id ? `留空则保留当前 Key（${draft.keyHint}）` : '仅保存在服务器私有目录，任何页面都不会再显示')}><TextInput aria-label="API Key" type="password" autoComplete="off" value={draft.apiKey} maxLength={512} disabled={busy} onChange={e => setDraft(d => d && ({ ...d, apiKey: e.target.value }))} /></Field>
         </FormGrid>
       </>}
     </Drawer>
-    <Dialog open={!!removing} tone="bad" onClose={() => { if (!busy) setRemoving(null); }} title={removing ? `删除「${removing.name}」？` : ''} description="删除后平台 AI 不再调用此服务，服务器上保存的 Key 一并删除。"
-      footer={<><Button disabled={busy} onClick={() => setRemoving(null)}>取消</Button><Button variant="danger" loading={busy} onClick={() => void remove()}>删除</Button></>}>
-      {error && removing && <Banner tone="bad" title="未能删除">{error}</Banner>}
+    <Dialog open={!!removing} tone="bad" onClose={() => { if (!busy) setRemoving(null); }} title={uiText(removing ? `删除「${removing.name}」？` : '')} description={uiText("删除后平台 AI 不再调用此服务，服务器上保存的 Key 一并删除。")}
+      footer={<><Button disabled={busy} onClick={() => setRemoving(null)}>{uiText("取消")}</Button><Button variant="danger" loading={busy} onClick={() => void remove()}>{uiText("删除")}</Button></>}>
+      {error && removing && <Banner tone="bad" title={uiText("未能删除")}>{uiText(error)}</Banner>}
     </Dialog>
   </>;
 }

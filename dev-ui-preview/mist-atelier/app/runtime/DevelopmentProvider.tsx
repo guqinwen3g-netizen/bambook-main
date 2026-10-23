@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { useMistSession } from './auth';
 import { createDevelopmentRuntime, type DevelopmentPage, type DevelopmentQuery } from './development';
@@ -56,7 +57,7 @@ export function DevelopmentProvider({ children }: { children: React.ReactNode })
     runtime, page, query, loading: enabled && (!runtime || busy), error: runtime ? error : '',
     setQuery, refresh, ensureList,
   };
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+  return <Context.Provider value={value}>{uiText(children)}</Context.Provider>;
 }
 
 export function useDevelopment(): DevelopmentData {

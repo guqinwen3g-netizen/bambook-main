@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 样品仓库：面料按档案汇总形态余额，成衣按每件实物；详情卡承接借出、寄出、归还、移位与送检。 */
 import React from 'react';
 import { ArrowLeftRight, Download, Layers, Package, Pencil, Plus, RefreshCw, SearchX, Send, Shirt, Undo2 } from 'lucide-react';
@@ -171,47 +172,47 @@ export function SamplesPage() {
 
   if (editor.spec) return editor.view;
 
-  const balanceLines = (row: LedgerRow) => row.samples.map(sample => <span key={sample.id} className="mist-cell-sub">{sample.form} · <b className="mist-num">{sample.available}</b> {sample.unit} 可用</span>);
+  const balanceLines = (row: LedgerRow) => row.samples.map(sample => <span key={sample.id} className="mist-cell-sub">{sample.form} · <b className="mist-num">{sample.available}</b> {uiText(sample.unit)}{uiText(" 可用")}</span>);
   const fabricColumns: Column<LedgerRow>[] = [
-    { key: 'archive', header: '面料档案', width: 'minmax(190px,1.6fr)', render: row => <ObjectCell thumb={<Thumb icon={Layers} />} name={row.name} meta={<><Mono>{row.primary.code}</Mono>{row.samples.length > 1 ? ` · ${row.samples.length} 种形态` : ''}</>} />, sortValue: row => row.name },
+    { key: 'archive', header: '面料档案', width: 'minmax(190px,1.6fr)', render: row => <ObjectCell thumb={<Thumb icon={Layers} />} name={row.name} meta={<><Mono>{row.primary.code}</Mono>{uiText(row.samples.length > 1 ? ` · ${row.samples.length} 种形态` : '')}</>} />, sortValue: row => row.name },
     { key: 'balance', header: '形态与余额', width: 'minmax(150px,1.2fr)', render: row => <div className="mist-col">{balanceLines(row)}</div> },
     { key: 'source', header: '来源', width: 'minmax(140px,1fr)', hideOnMobile: true, render: row => state ? <span className="mist-cell-sub">{fulfillmentSourceLabel(state, row.primary.source)}</span> : null },
     { key: 'location', header: '位置', width: '110px', hideOnMobile: true, render: row => locationSummary(row) },
-    { key: 'status', header: '状态', width: '96px', render: row => { const status = statusOf(row); return <Pill tone={status.tone}>{status.label}</Pill>; } },
+    { key: 'status', header: '状态', width: '96px', render: row => { const status = statusOf(row); return <Pill tone={status.tone}>{uiText(status.label)}</Pill>; } },
   ];
   const pieceColumns: Column<LedgerRow>[] = [
     { key: 'piece', header: shelf === 'garment' ? '实物' : '样品', width: 'minmax(190px,1.6fr)', render: row => <ObjectCell thumb={<Thumb icon={shelf === 'garment' ? Shirt : Package} />} name={row.name} meta={<><Mono>{row.primary.code}</Mono> · {row.primary.form}</>} />, sortValue: row => row.name },
     { key: 'spec', header: '规格', width: '120px', hideOnMobile: true, render: row => [row.primary.size, row.primary.color].filter(Boolean).join(' · ') || '未记录' },
     { key: 'source', header: '来源', width: 'minmax(140px,1fr)', hideOnMobile: true, render: row => state ? <span className="mist-cell-sub">{fulfillmentSourceLabel(state, row.primary.source)}</span> : null },
     { key: 'location', header: '位置', width: '110px', hideOnMobile: true, render: row => row.primary.available > 0 ? locationSummary(row) : '—' },
-    { key: 'status', header: '状态', width: '96px', render: row => { const status = statusOf(row); return <Pill tone={status.tone}>{status.label}</Pill>; } },
+    { key: 'status', header: '状态', width: '96px', render: row => { const status = statusOf(row); return <Pill tone={status.tone}>{uiText(status.label)}</Pill>; } },
   ];
   const statusCounts = (key: StatusFilter) => shelfRows.filter(row => key === 'all' || statusOf(row).key === key || (key === 'lent' && statusOf(row).key === 'overdue')).length;
 
   const detail = selected && state ? <SampleDetail row={selected} state={state} day={day} can={can} locked={locked}
     onMove={movement} onEdit={sample => editor.open(editSpec(sample))} onQc={openSampleQc}
     onAttach={(sample, ids) => run({ type: 'fulfillment.samples.edit', payload: { id: sample.id, location: sample.location, note: sample.note, fileIds: ids } })} />
-    : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title="样品详情" description={loading ? '正在读取样品' : '从列表选择一条样品记录'} compact />;
+    : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText("样品详情")} description={uiText(loading ? '正在读取样品' : '从列表选择一条样品记录')} compact />;
 
   return <MistPage>
-    <PageHeader eyebrow="订单履约 · 实体样品" title="样品仓库" description={sourceHint || (sourceShipment ? `${sourceShipment.code} · 只处理本票船样，绑定实际工厂分支与送审实物。` : '全公司样品统一台账。面料按档案看各形态余额，成衣逐件管理。')}
+    <PageHeader eyebrow={uiText("订单履约 · 实体样品")} title={uiText("样品仓库")} description={uiText(sourceHint || (sourceShipment ? `${sourceShipment.code} · 只处理本票船样，绑定实际工厂分支与送审实物。` : '全公司样品统一台账。面料按档案看各形态余额，成衣逐件管理。'))}
       actions={<>
-        {sourceShipment && <Button onClick={() => go('shipments', sourceShipment.id, shipmentReturnTarget(state, sourceShipment))}>返回本票出运</Button>}
-        {hasShipmentContext && <Button onClick={() => go('samples')}>查看全部样品</Button>}
-        {can && !hasShipmentContext && <Button icon={RefreshCw} loading={syncing} disabled={syncing || locked} onClick={() => void synchronize()}>同步已返样版本</Button>}
-        <Button icon={Download} disabled={!filtered.length} onClick={() => exportRecords('样品仓库', ['编号', '名称', '来源', '形态', '总量', '可用', '单位', '位置'], filtered.flatMap(row => row.samples).map(sample => [sample.code, sample.name, state ? fulfillmentSourceLabel(state, sample.source) : '', sample.form, sample.quantity, sample.available, sample.unit, fulfillmentPositions(sample).map(position => `${position.location || '位置未记录'} ${position.available}${sample.unit}`).join('；')]))}>导出</Button>
-        {can && !invalidShipment && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(createSpec)}>新建样品</Button>}
+        {sourceShipment && <Button onClick={() => go('shipments', sourceShipment.id, shipmentReturnTarget(state, sourceShipment))}>{uiText("返回本票出运")}</Button>}
+        {hasShipmentContext && <Button onClick={() => go('samples')}>{uiText("查看全部样品")}</Button>}
+        {can && !hasShipmentContext && <Button icon={RefreshCw} loading={syncing} disabled={syncing || locked} onClick={() => void synchronize()}>{uiText("同步已返样版本")}</Button>}
+        <Button icon={Download} disabled={!filtered.length} onClick={() => exportRecords('样品仓库', ['编号', '名称', '来源', '形态', '总量', '可用', '单位', '位置'], filtered.flatMap(row => row.samples).map(sample => [sample.code, sample.name, state ? fulfillmentSourceLabel(state, sample.source) : '', sample.form, sample.quantity, sample.available, sample.unit, fulfillmentPositions(sample).map(position => `${position.location || '位置未记录'} ${position.available}${sample.unit}`).join('；')]))}>{uiText("导出")}</Button>
+        {can && !invalidShipment && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有样品写权限，可以查询台账与流转记录；登记和流转由对应业务员操作。</Banner></div>}
-    {syncError && <div className="mist-section"><Banner tone="bad" title="来源实物同步失败">{syncError}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title="读取失败">{error}</Banner></div>}
-    {overdueLoans.length > 0 && <div className="mist-section"><Banner tone="warn" title={`${overdueLoans.length} 笔借出已超过预计归还日`} actions={<Button onClick={() => { const first = overdueLoans[0]; changeShelf(shelfOf(first.sample)); setStatusFilter('overdue'); }}>只看逾期</Button>}>
-      {overdueLoans.slice(0, 3).map(({ loan, sample }) => `${sample.name} · ${loan.person} · 应还 ${loan.expectedReturn}`).join('；')}{overdueLoans.length > 3 ? ' …' : ''}</Banner></div>}
+    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有样品写权限，可以查询台账与流转记录；登记和流转由对应业务员操作。")}</Banner></div>}
+    {syncError && <div className="mist-section"><Banner tone="bad" title={uiText("来源实物同步失败")}>{syncError}</Banner></div>}
+    {error && <div className="mist-section"><Banner tone="bad" title={uiText("读取失败")}>{uiText(error)}</Banner></div>}
+    {overdueLoans.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${overdueLoans.length} 笔借出已超过预计归还日`} actions={<Button onClick={() => { const first = overdueLoans[0]; changeShelf(shelfOf(first.sample)); setStatusFilter('overdue'); }}>{uiText("只看逾期")}</Button>}>
+      {overdueLoans.slice(0, 3).map(({ loan, sample }) => `${sample.name} · ${loan.person} · 应还 ${loan.expectedReturn}`).join('；')}{uiText(overdueLoans.length > 3 ? ' …' : '')}</Banner></div>}
     <Tabs value={shelf} onChange={value => changeShelf(value as Shelf)} options={[{ value: 'fabric', label: '面料', count: counts.fabric }, { value: 'garment', label: '成衣', count: counts.garment }, { value: 'other', label: '其他类别', count: counts.other }]} />
     <Toolbar>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索档案号、名称、来源或位置" />
-      <Dropdown label="形态" value={form} onChange={setForm} options={[{ value: 'all', label: '全部形态' }, ...forms.map(value => ({ value, label: value }))]} />
-      <Dropdown label="来源" value={origin} onChange={setOrigin} options={[{ value: 'all', label: '全部来源' }, { value: 'version', label: '开发版本' }, { value: 'orderLine', label: '订单条目' }, { value: 'manual', label: '手工登记' }]} />
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索档案号、名称、来源或位置")} />
+      <Dropdown label={uiText("形态")} value={form} onChange={setForm} options={[{ value: 'all', label: '全部形态' }, ...forms.map(value => ({ value, label: value }))]} />
+      <Dropdown label={uiText("来源")} value={origin} onChange={setOrigin} options={[{ value: 'all', label: '全部来源' }, { value: 'version', label: '开发版本' }, { value: 'orderLine', label: '订单条目' }, { value: 'manual', label: '手工登记' }]} />
     </Toolbar>
     <Pipeline value={statusFilter} onChange={value => setStatusFilter(value as StatusFilter)} items={[
       { value: 'all', label: '全部', count: statusCounts('all'), color: 'var(--mist-ink-2)' },
@@ -221,10 +222,10 @@ export function SamplesPage() {
       { value: 'empty', label: '已寄出 / 无可用', count: statusCounts('empty'), color: 'var(--mist-ink-3)' },
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.name || '样品详情'} drawerSub={selected?.primary.code}
-      list={<Card><DataTable ariaLabel="样品台账" loading={loading} rows={visible} rowKey={row => row.id} selectedKey={selected?.id} density="comfy" onRowClick={pick}
+      list={<Card><DataTable ariaLabel={uiText("样品台账")} loading={loading} rows={visible} rowKey={row => row.id} selectedKey={selected?.id} density="comfy" onRowClick={pick}
         columns={shelf === 'fabric' ? fabricColumns : pieceColumns}
-        empty={shelfRows.length ? <EmptyState icon={SearchX} title="没有符合条件的样品" description="换个关键词或清除筛选。" action={<TextLink onClick={() => { setQuery(''); setForm('all'); setOrigin('all'); setStatusFilter('all'); }}>清除筛选</TextLink>} />
-          : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={hasShipmentContext ? '本票还没有船样' : '还没有样品档案'} description={can ? '收到实物后在这里登记；开发返样可用“同步已返样版本”自动建档。' : '业务员登记样品后会显示在这里。'} action={can && !invalidShipment ? <Button icon={Plus} onClick={() => editor.open(createSpec)}>新建样品</Button> : undefined} />}
+        empty={shelfRows.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的样品")} description={uiText("换个关键词或清除筛选。")} action={<TextLink onClick={() => { setQuery(''); setForm('all'); setOrigin('all'); setStatusFilter('all'); }}>{uiText("清除筛选")}</TextLink>} />
+          : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText(hasShipmentContext ? '本票还没有船样' : '还没有样品档案')} description={uiText(can ? '收到实物后在这里登记；开发返样可用“同步已返样版本”自动建档。' : '业务员登记样品后会显示在这里。')} action={can && !invalidShipment ? <Button icon={Plus} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button> : undefined} />}
         footer={pages > 1 ? <Pagination page={currentPage} pages={pages} onChange={setPage} /> : undefined} /></Card>}
       detail={detail} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
@@ -250,18 +251,18 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
       <span className="mist-mono mist-muted">{row.samples.map(sample => sample.code).join(' · ')}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{row.name}</div>
     </div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill>{primary.category}</Pill><Pill tone={status.tone}>{status.label}</Pill>{primary.role && <Pill tone="accent">{fulfillmentSampleRoleLabel(primary.role)}</Pill>}</div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill>{primary.category}</Pill><Pill tone={status.tone}>{uiText(status.label)}</Pill>{primary.role && <Pill tone="accent">{fulfillmentSampleRoleLabel(primary.role)}</Pill>}</div>
     <Facts items={[
       { label: '来源', value: <SourceLink source={primary.source} /> },
       { label: row.shelf === 'fabric' ? '形态数' : '规格', value: row.shelf === 'fabric' ? `${row.samples.length} 种` : [primary.size, primary.color].filter(Boolean).join(' · ') || '未记录' },
       ...(shipment ? [{ label: '出运批次', value: <Mono>{shipment.code}</Mono> }] : []),
       { label: '登记', value: shortWhen(primary.createdAt) },
     ]} />
-    <DetailBlock title={row.shelf === 'fabric' ? '形态与余额' : '数量与位置'}>
+    <DetailBlock title={uiText(row.shelf === 'fabric' ? '形态与余额' : '数量与位置')}>
       {row.samples.map(sample => { const facts = sampleFacts(state, sample, day); return <div key={sample.id} className="mist-col" data-sample-form={sample.id}>
-        <div className="mist-row"><b>{sample.form}</b><span className="mist-spacer" /><span className="mist-num">{sample.available} / {sample.quantity} {sample.unit}</span></div>
-        <span className="mist-note">可用 {sample.available} {sample.unit} · 借出未还 {facts.lent} {sample.unit} · {sample.available > 0 ? (fulfillmentPositions(sample).length > 1 ? '多个位置' : sample.location || '位置未记录') : '无在库位置'}</span>
-        {facts.overdue.map(loan => <span key={loan.id} className="mist-note"><Icon icon={Undo2} size="xs" />{loan.person} 应于 {loan.expectedReturn} 归还，已逾期</span>)}
+        <div className="mist-row"><b>{sample.form}</b><span className="mist-spacer" /><span className="mist-num">{sample.available} / {sample.quantity} {uiText(sample.unit)}</span></div>
+        <span className="mist-note">{uiText("可用 ")}{sample.available} {uiText(sample.unit)}{uiText(" · 借出未还 ")}{facts.lent} {uiText(sample.unit)} · {uiText(sample.available > 0 ? (fulfillmentPositions(sample).length > 1 ? '多个位置' : sample.location || '位置未记录') : '无在库位置')}</span>
+        {facts.overdue.map(loan => <span key={loan.id} className="mist-note"><Icon icon={Undo2} size="xs" />{loan.person}{uiText(" 应于 ")}{loan.expectedReturn}{uiText(" 归还，已逾期")}</span>)}
         <PositionSummary row={sample} />
         <ActionBar busy={locked} actions={[
           { label: '借出', icon: ArrowLeftRight, onClick: () => onMove(sample, 'lend'), reason: why(sample, 'lend') },
@@ -272,17 +273,17 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
       </div>; })}
     </DetailBlock>
     <div className="mist-row mist-module-actions">
-      {can && <Button icon={Pencil} disabled={locked} onClick={() => onEdit(primary)}>编辑资料</Button>}
-      {primary.source.kind !== 'manual' && <Button onClick={() => onQc(primary)}>查看 / 发起本样品QC</Button>}
+      {can && <Button icon={Pencil} disabled={locked} onClick={() => onEdit(primary)}>{uiText("编辑资料")}</Button>}
+      {primary.source.kind !== 'manual' && <Button onClick={() => onQc(primary)}>{uiText("查看 / 发起本样品QC")}</Button>}
     </div>
     {primary.note && <p className="mist-sub">{primary.note}</p>}
-    <DetailBlock title="实物照片与附件">
+    <DetailBlock title={uiText("实物照片与附件")}>
       <RecordFiles key={primary.id} ids={primary.fileIds} onAttach={can ? ids => onAttach(primary, ids) : undefined} />
       {row.samples.slice(1).filter(sample => sample.fileIds.length).map(sample => <RecordFiles key={sample.id} ids={sample.fileIds} />)}
     </DetailBlock>
-    <DetailBlock title="流转记录">
-      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}`, link = movement.development; return ({ who: movement.actor, when: new Date(movement.at).toLocaleString(), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>查看开发案 {state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
-        : <span className="mist-note">还没有流转记录</span>}
+    <DetailBlock title={uiText("流转记录")}>
+      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}`, link = movement.development; return ({ who: movement.actor, when: new Date(movement.at).toLocaleString(), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
+        : <span className="mist-note">{uiText("还没有流转记录")}</span>}
     </DetailBlock>
   </DetailBody>;
 }

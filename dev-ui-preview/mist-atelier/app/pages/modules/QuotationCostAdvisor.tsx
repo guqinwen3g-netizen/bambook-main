@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** AI reviews evidence; adoption edits only the manual strategy draft, never a business command. */
 import { stableJson } from "../../../../../server/src/shared/stableJson";
 import React from "react";
@@ -218,47 +219,37 @@ export function QuotationCostAdvisor(p: {
   };
   return (
     <FormSection
-      title="AI 成本与报价审阅"
-      description="可选：公式算价格，AI 检查依据和本次策略，人工决定。"
+      title={uiText("AI 成本与报价审阅")}
+      description={uiText("可选：公式算价格，AI 检查依据和本次策略，人工决定。")}
     >
       <div className="mist-col">
         {!p.permitted ? (
-          <Banner title="没有报价 AI 审阅权限">
-            需要助手及报价读取权限；人工核算仍可继续。
-          </Banner>
+          <Banner title={uiText("没有报价 AI 审阅权限")}>{uiText("需要助手及报价读取权限；人工核算仍可继续。")}</Banner>
         ) : statusError ? (
           <Banner
             tone="bad"
-            title="模型状态未读取"
+            title={uiText("模型状态未读取")}
             actions={
-              <Button onClick={() => setReload((x) => x + 1)}>重试状态</Button>
+              <Button onClick={() => setReload((x) => x + 1)}>{uiText("重试状态")}</Button>
             }
           >
             {statusError}
           </Banner>
         ) : configured === null ? (
-          <Banner title="正在读取模型状态">不会自动发送报价资料。</Banner>
+          <Banner title={uiText("正在读取模型状态")}>{uiText("不会自动发送报价资料。")}</Banner>
         ) : !configured ? (
-          <Banner title="服务器尚未配置模型">
-            管理员配置 OpenAI
-            兼容接口后可使用；不影响人工核算，不用模拟建议代替真实模型。
-          </Banner>
+          <Banner title={uiText("服务器尚未配置模型")}>{uiText("管理员配置 OpenAI 兼容接口后可使用；不影响人工核算，不用模拟建议代替真实模型。")}</Banner>
         ) : (
           <>
-            <Banner tone="ai" title="只审阅本次授权资料">
-              将发送本行规格、数量、商业条件、人工成本拆解及明确选取的历史 /
-              反馈给平台配置模型（测试期为管理员连接的 ChatGPT 订阅，生产期为企业 API；可能使用备用模型）。不发送联系人、整份客户档案或附件正文；附件名称亦不读取。不要在依据文字中填写不应外发的敏感信息。不是行业行情、客户接受概率或已审批报价。
-            </Banner>
+            <Banner tone="ai" title={uiText("只审阅本次授权资料")}>{uiText("将发送本行规格、数量、商业条件、人工成本拆解及明确选取的历史 / 反馈给平台配置模型（测试期为管理员连接的 ChatGPT 订阅，生产期为企业 API；可能使用备用模型）。不发送联系人、整份客户档案或附件正文；附件名称亦不读取。不要在依据文字中填写不应外发的敏感信息。不是行业行情、客户接受概率或已审批报价。")}</Banner>
             <Checkbox
-              label="我授权将本次报价依据发送给已配置模型审阅"
+              label={uiText("我授权将本次报价依据发送给已配置模型审阅")}
               checked={consent}
               disabled={p.disabled || busy}
               onChange={setConsent}
             />
             {!valid && (
-              <Banner title="先补齐成本来源">
-                返回第一步补齐人工依据，再请求 AI；无需先填写利润目标。
-              </Banner>
+              <Banner title={uiText("先补齐成本来源")}>{uiText("返回第一步补齐人工依据，再请求 AI；无需先填写利润目标。")}</Banner>
             )}
             <div className="mist-row">
               <Button
@@ -266,9 +257,7 @@ export function QuotationCostAdvisor(p: {
                 loading={busy}
                 disabled={p.disabled || busy || !consent || !valid}
                 onClick={() => void ask()}
-              >
-                请求 AI 审阅
-              </Button>
+              >{uiText("请求 AI 审阅")}</Button>
               {busy && (
                 <Button
                   onClick={() => {
@@ -278,19 +267,17 @@ export function QuotationCostAdvisor(p: {
                     setBusy(false);
                     setError("审阅已取消，未修改报价");
                   }}
-                >
-                  取消审阅
-                </Button>
+                >{uiText("取消审阅")}</Button>
               )}
             </div>
             {error && (
-              <Banner tone="bad" title="AI 审阅未完成">
-                {error}
+              <Banner tone="bad" title={uiText("AI 审阅未完成")}>
+                {uiText(error)}
               </Banner>
             )}
             {result && (
               <>
-                <Banner tone="ai" title="待人工核对的建议">
+                <Banner tone="ai" title={uiText("待人工核对的建议")}>
                   {result.advice.summary}
                 </Banner>
                 <Facts
@@ -309,16 +296,14 @@ export function QuotationCostAdvisor(p: {
                     },
                   ]}
                 />
-                <Banner title="风险与待补资料">
+                <Banner title={uiText("风险与待补资料")}>
                   {result.advice.risks.map((r, i) => (
-                    <React.Fragment key={"r" + i}>
-                      风险：{r}
+                    <React.Fragment key={"r" + i}>{uiText("风险：")}{r}
                       <br />
                     </React.Fragment>
                   ))}
                   {result.advice.questions.map((r, i) => (
-                    <React.Fragment key={"q" + i}>
-                      待补：{r}
+                    <React.Fragment key={"q" + i}>{uiText("待补：")}{r}
                       <br />
                     </React.Fragment>
                   ))}
@@ -326,20 +311,16 @@ export function QuotationCostAdvisor(p: {
                     !result.advice.questions.length &&
                     "模型未列出缺口，不等于核实完整。"}
                 </Banner>
-                <Banner title="本次实际资料范围">
+                <Banner title={uiText("本次实际资料范围")}>
                   {result.sources.map((s) => (
                     <React.Fragment key={s.id}>
-                      {s.label} · {s.id}
+                      {uiText(s.label)} · {s.id}
                       <br />
                     </React.Fragment>
-                  ))}
-                  政策版本 {result.policyVersion}
-                  。这是一份临时审阅，不是服务端持久化 AI
-                  审计记录；更改输入或公司后必须重新请求。
-                </Banner>
+                  ))}{uiText("政策版本 ")}{result.policyVersion}{uiText("。这是一份临时审阅，不是服务端持久化 AI 审计记录；更改输入或公司后必须重新请求。")}</Banner>
                 {result.advice.strategy && (
                   <Banner
-                    title="人工决定是否采纳策略"
+                    title={uiText("人工决定是否采纳策略")}
                     actions={
                       <Button
                         disabled={p.disabled || busy}
@@ -356,18 +337,14 @@ export function QuotationCostAdvisor(p: {
                               result.advice.evidenceIds.join("、"),
                           );
                         }}
-                      >
-                        采纳至人工策略草稿
-                      </Button>
+                      >{uiText("采纳至人工策略草稿")}</Button>
                     }
                   >
-                    {result.advice.strategy.method === "margin"
+                    {uiText(result.advice.strategy.method === "margin"
                       ? "销售毛利目标"
-                      : "成本加成率"}{" "}
-                    {result.advice.strategy.targetPercent}% ·{" "}
-                    {result.advice.strategy.reason}
-                    。只改本次草稿策略，不改人工拟报价；最终核对、保存快照和业务审批仍独立执行。
-                  </Banner>
+                      : "成本加成率")}{uiText(" ")}
+                    {result.advice.strategy.targetPercent}% ·{uiText(" ")}
+                    {result.advice.strategy.reason}{uiText("。只改本次草稿策略，不改人工拟报价；最终核对、保存快照和业务审批仍独立执行。")}</Banner>
                 )}
               </>
             )}

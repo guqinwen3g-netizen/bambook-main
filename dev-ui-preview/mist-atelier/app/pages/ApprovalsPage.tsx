@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 审批与放行（菜单外，从我的工作和顶栏进入）：待我审批 / 我发起的 / 已处理。
  *  只展示服务端派生的提交快照；批准、退回都写回原业务命令（采购、报价偏差、订单、付款申请、索赔方案、风险处置），不另设审批引擎。 */
 import React from 'react';
@@ -47,7 +49,7 @@ export function ApprovalsPage() {
     const mine = getMistReviewTasks(state).filter(t => t.requesterId === me && !seen.has(current.id + '|' + t.id))
       .map(t => ({ ...t, workspaceId: current.id, workspaceName: current.name, revision: current.revision, canDecide: false, local: true }));
     return [...server, ...mine].sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
-  }, [reviews.rows, state, current?.id, current?.revision, current?.name, me]);
+  }, [reviews.rows, state, current?.id, current?.revision, current?.name, me, interfaceLocale()]);
   const counts = { mine: approvalRows(all, 'mine', me).length, sent: approvalRows(all, 'sent', me).length, done: approvalRows(all, 'done', me).length, others: approvalRows(all, 'others', me).length };
   const inTab = approvalRows(all, tab, me);
   const kinds = [...new Set(inTab.map(r => r.kind))];
@@ -69,41 +71,41 @@ export function ApprovalsPage() {
     { key: 'title', header: '事项', width: 'minmax(220px,2fr)', render: r => <ObjectCell name={r.title} meta={APPROVAL_KIND_LABEL[r.kind] + ' · ' + r.workspaceName} /> },
     { key: 'requester', header: '发起人', width: '110px', hideOnMobile: true, render: r => requester(r) },
     { key: 'at', header: '提交', width: '110px', hideOnMobile: true, render: r => <span className="mist-num">{day(r.submittedAt)}</span> },
-    { key: 'status', header: '状态', width: '96px', render: r => <Pill tone={STATUS[r.status].tone}>{STATUS[r.status].label}</Pill> },
+    { key: 'status', header: '状态', width: '96px', render: r => <Pill tone={STATUS[r.status].tone}>{uiText(STATUS[r.status].label)}</Pill> },
   ];
   const targetBase = selected?.target.view.split('/')[0] ?? '';
   const sameSpace = !!selected && selected.workspaceId === current?.id;
   const openReason = !selected ? '' : !sameSpace ? `该审批属于公司“${selected.workspaceName}”，请先切换到该公司再打开原业务` : !session.canAccessView(targetBase as View) ? '当前账号没有原业务的查看权限' : undefined;
   const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '你是发起人，不能审批本人提交的事项' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent ? '上一次审批结果待核对，请先核对原请求' : undefined;
   const detail = selected ? <DetailBody data-approval={selected.id} heading={<h2 className="mist-h2">{selected.title}</h2>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{STATUS[selected.status].label}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill><span className="mist-note">{selected.workspaceName}</span></div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{uiText(STATUS[selected.status].label)}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill><span className="mist-note">{selected.workspaceName}</span></div>
     <Facts items={[{ label: '发起人', value: requester(selected) }, { label: '提交时间', value: day(selected.submittedAt) }, { label: '审批人', value: selected.reviewerIds.includes(me) ? (selected.reviewerIds.length > 1 ? `我及另外 ${selected.reviewerIds.length - 1} 人（任一人决定）` : '我') : `${selected.reviewerIds.length} 人` }, { label: '所需权限', value: <span className="mist-mono">{selected.requiredPermission}</span> }]} />
-    <DetailBlock title="提交时的快照">{selected.details.length ? <KeyValue items={selected.details} /> : <span className="mist-note">提交时没有附带快照字段。</span>}
-      <span className="mist-note">以上是提交那一刻的内容；原业务之后若有修改，服务端会拒绝按旧版本作出的决定，需要刷新后重新核对。</span></DetailBlock>
-    {!!selected.files?.length && <DetailBlock title="随附依据">{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
-    {selected.status === 'pending' && !decideReason && <Field label="审批意见" required hint="批准写明核对依据；退回写明理由，申请人会看到。"><TextArea aria-label="审批意见" rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
-    {local && <Banner tone="bad" title="还不能保存决定">{local}</Banner>}
+    <DetailBlock title={uiText("提交时的快照")}>{selected.details.length ? <KeyValue items={selected.details} /> : <span className="mist-note">{uiText("提交时没有附带快照字段。")}</span>}
+      <span className="mist-note">{uiText("以上是提交那一刻的内容；原业务之后若有修改，服务端会拒绝按旧版本作出的决定，需要刷新后重新核对。")}</span></DetailBlock>
+    {!!selected.files?.length && <DetailBlock title={uiText("随附依据")}>{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
+    {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required hint={uiText("批准写明核对依据；退回写明理由，申请人会看到。")}><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
+    {local && <Banner tone="bad" title={uiText("还不能保存决定")}>{local}</Banner>}
     <ActionBar busy={reviews.busy} actions={[
       { label: '批准', icon: Check, primary: true, onClick: () => void decide('approved'), reason: decideReason, hidden: selected.status !== 'pending' },
       { label: '退回', icon: CornerUpLeft, onClick: () => void decide('rejected'), reason: decideReason, hidden: selected.status !== 'pending' },
       { label: '转交', icon: Forward, onClick: () => undefined, reason: TRANSFER_UNAVAILABLE, hidden: selected.status !== 'pending' },
       { label: '打开原业务', icon: ArrowUpRight, onClick: () => go(selected.target.view, selected.target.id), reason: openReason },
     ]} />
-  </DetailBody> : <EmptyState title="选择一项审批" description="左侧列表按当前账号的授权显示；选中后核对提交快照再决定。" />;
+  </DetailBody> : <EmptyState title={uiText("选择一项审批")} description={uiText("左侧列表按当前账号的授权显示；选中后核对提交快照再决定。")} />;
   return <MistPage>
-    <PageHeader eyebrow="我的事务 · 审批与放行" title="审批与放行" description="订单、报价偏差、采购、付款申请、索赔方案与风险处置的审批集中在这里；决定写回原业务，原业务页同步更新。" actions={<Button icon={RefreshCw} disabled={reviews.busy} onClick={() => void reviews.refresh()}>刷新</Button>} />
-    {reviews.error && <Banner tone="bad" title={reviews.error} actions={<Button size="sm" onClick={reviews.clearError}>知道了</Button>} />}
-    {reviews.intent && <Banner tone="warn" title="有审批结果待核对" actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>核对原请求</Button>}>上次保存审批决定时没有收到明确结果。核对会查询同一请求编号，不会重复决定。</Banner>}
-    <Banner tone="neutral" title="开产与出运按硬性条件放行">订单已批准、定金到账、产前样/船样 QC 通过、出口清关完成后，由业务/后勤在原业务页放行，不需要另行审批；信用冻结客户的出运须先在风险管理申请「带风险放行」，批准后在这里出现。未满足条件先行开裁等受控例外暂不支持。</Banner>
+    <PageHeader eyebrow={uiText("我的事务 · 审批与放行")} title={uiText("审批与放行")} description={uiText("订单、报价偏差、采购、付款申请、索赔方案与风险处置的审批集中在这里；决定写回原业务，原业务页同步更新。")} actions={<Button icon={RefreshCw} disabled={reviews.busy} onClick={() => void reviews.refresh()}>{uiText("刷新")}</Button>} />
+    {reviews.error && <Banner tone="bad" title={uiText(reviews.error)} actions={<Button size="sm" onClick={reviews.clearError}>{uiText("知道了")}</Button>} />}
+    {reviews.intent && <Banner tone="warn" title={uiText("有审批结果待核对")} actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>{uiText("核对原请求")}</Button>}>{uiText("上次保存审批决定时没有收到明确结果。核对会查询同一请求编号，不会重复决定。")}</Banner>}
+    <Banner tone="neutral" title={uiText("开产与出运按硬性条件放行")}>{uiText("订单已批准、定金到账、产前样/船样 QC 通过、出口清关完成后，由业务/后勤在原业务页放行，不需要另行审批；信用冻结客户的出运须先在风险管理申请「带风险放行」，批准后在这里出现。未满足条件先行开裁等受控例外暂不支持。")}</Banner>
     <Tabs<ApprovalTab> value={tab} onChange={next => { setDrawer(false); go('approvals', undefined, { section: next }); }} options={[
       { value: 'mine', label: '待我审批', count: counts.mine }, { value: 'sent', label: '我发起的', count: counts.sent }, { value: 'done', label: '已处理', count: counts.done },
       ...(counts.others ? [{ value: 'others' as const, label: '公司内其他待审', count: counts.others }] : []),
     ]} />
-    <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Kind> ariaLabel="审批类型" value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(k => ({ value: k, label: APPROVAL_KIND_LABEL[k] }))]} /> : undefined}>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索单号、供应商、客户或公司" />
+    <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Kind> ariaLabel={uiText("审批类型")} value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(k => ({ value: k, label: APPROVAL_KIND_LABEL[k] }))]} /> : undefined}>
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索单号、供应商、客户或公司")} />
     </Toolbar>
     <ListDetail drawerOpen={drawer && !!selected} drawerTitle={selected?.title || '审批详情'} onDrawerClose={() => setDrawer(false)} detail={detail}
-      list={<Card><DataTable ariaLabel="审批事项" rows={shown} columns={columns} loading={!reviews.loaded && !reviews.error} rowKey={rowKey} selectedKey={selected ? rowKey(selected) : undefined} onRowClick={open}
-        empty={<EmptyState title={inTab.length ? '没有符合条件的审批' : tab === 'mine' ? '没有待你审批的事项' : tab === 'sent' ? '你还没有发起审批' : tab === 'done' ? '暂无已处理的审批' : '没有其他待审事项'} description="审批按当前账号与实际授权显示。" action={inTab.length ? <Button onClick={() => { setQuery(''); setKind('all'); }}>清除筛选</Button> : undefined} />} /></Card>} />
+      list={<Card><DataTable ariaLabel={uiText("审批事项")} rows={shown} columns={columns} loading={!reviews.loaded && !reviews.error} rowKey={rowKey} selectedKey={selected ? rowKey(selected) : undefined} onRowClick={open}
+        empty={<EmptyState title={uiText(inTab.length ? '没有符合条件的审批' : tab === 'mine' ? '没有待你审批的事项' : tab === 'sent' ? '你还没有发起审批' : tab === 'done' ? '暂无已处理的审批' : '没有其他待审事项')} description={uiText("审批按当前账号与实际授权显示。")} action={inTab.length ? <Button onClick={() => { setQuery(''); setKind('all'); }}>{uiText("清除筛选")}</Button> : undefined} />} /></Card>} />
   </MistPage>;
 }

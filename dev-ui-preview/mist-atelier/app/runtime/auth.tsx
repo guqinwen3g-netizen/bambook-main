@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import {
   canAccessView as authCanAccessView, checkAuth, getAuthApiBase, getAuthState,
@@ -181,7 +182,7 @@ function ProductionMistSessionProvider({ children }: { children: React.ReactNode
   const hasPermission = React.useCallback((...permissions: string[]) => publicStatus.current === 'authenticated' && authHasPermission(...permissions), []);
   const hasRole = React.useCallback((...roles: AgentRole[]) => publicStatus.current === 'authenticated' && authHasRole(...roles), []);
   const value: MistSession = { status, user: status === 'authenticated' ? auth.user : null, sessionKey: `${instanceId}:${revision}`, error, refreshing, signingIn, signingOut, login, logout, refresh, clearError, canAccessView, hasPermission, hasRole };
-  return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={value}>{uiText(children)}</SessionContext.Provider>;
 }
 
 type LocalEnvelope = {mode:'local';user:AuthUser;profiles:Array<{id:string;name:string}>};
@@ -254,9 +255,9 @@ export function MistSessionProvider({children}:{children:React.ReactNode}) {
   if(policy.policy==='role')return !!policy.roles?.some(role=>data?.user.roles.includes(role as AgentRole));
   return !!policy.required&&permits(policy.required);
  },[data,status,permits]);
- if(mode==='remote')return <ProductionMistSessionProvider>{children}</ProductionMistSessionProvider>;
+ if(mode==='remote')return <ProductionMistSessionProvider>{uiText(children)}</ProductionMistSessionProvider>;
  const value:MistSession={status,user:status==='authenticated'?data!.user:null,sessionKey:`${instanceId}:local:${revision}`,error,refreshing,signingIn:switching,signingOut:false,login,logout:refresh,refresh,clearError:()=>setError(''),canAccessView,hasPermission:permits,hasRole,localMode:mode==='local',connectionModeUnverified:mode==='error',localProfiles:data?.profiles||[],selectLocalProfile};
- return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+ return <SessionContext.Provider value={value}>{uiText(children)}</SessionContext.Provider>;
 }
 
 /** 可选会话：在没有会话上下文的嵌入 / 测试场景返回 null（仅用于展示与默认值，不用于权限判断）。 */

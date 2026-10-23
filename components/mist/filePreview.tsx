@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ChevronLeft, ChevronRight, Download, File as FileIcon, FileQuestion, FileSpreadsheet, FileText, FileVideo, Image as ImageIcon, Maximize, Minus, Music, Plus, RotateCw, X } from 'lucide-react';
@@ -109,36 +110,36 @@ export function FilePreview({ files, index, onIndex, onClose, load, onDownload }
     <div ref={ref} tabIndex={-1} className="mist-dialog mist-viewer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} data-file-preview={file.id} data-preview-kind={info.kind}>
       <div className="mist-viewer-h">
         <Tile icon={KIND_ICON[info.kind]} size="sm" />
-        <div className="mist-viewer-title"><div id={`${id}-title`} className="mist-h2" title={file.name}>{file.name}</div><span className="mist-muted">{sub}</span></div>
+        <div className="mist-viewer-title"><div id={`${id}-title`} className="mist-h2" title={uiText(file.name)}>{file.name}</div><span className="mist-muted">{uiText(sub)}</span></div>
         <div className="mist-viewer-tools">
-          {zoomable && blob && <div className="mist-viewer-group" role="group" aria-label="缩放">
-            <IconButton icon={Minus} label="缩小" size="sm" onClick={() => setZoom(z => stepZoom(z, -1, fitScale))} />
-            <button type="button" className="mist-viewer-zoom" onClick={() => setZoom(z => z === 'fit' ? 1 : 'fit')} title={zoom === 'fit' ? '切换到 100%' : '适应窗口'}>{zoom === 'fit' ? '适应' : pct(currentScale)}</button>
-            <IconButton icon={Plus} label="放大" size="sm" onClick={() => setZoom(z => stepZoom(z, 1, fitScale))} />
-            {info.kind === 'image' ? <IconButton icon={RotateCw} label="旋转" size="sm" onClick={() => setRotate(r => (r + 90) % 360)} /> : <IconButton icon={Maximize} label="适应宽度" size="sm" onClick={() => setZoom('fit')} />}
+          {zoomable && blob && <div className="mist-viewer-group" role="group" aria-label={uiText("缩放")}>
+            <IconButton icon={Minus} label={uiText("缩小")} size="sm" onClick={() => setZoom(z => stepZoom(z, -1, fitScale))} />
+            <button type="button" className="mist-viewer-zoom" onClick={() => setZoom(z => z === 'fit' ? 1 : 'fit')} title={uiText(zoom === 'fit' ? '切换到 100%' : '适应窗口')}>{uiText(zoom === 'fit' ? '适应' : pct(currentScale))}</button>
+            <IconButton icon={Plus} label={uiText("放大")} size="sm" onClick={() => setZoom(z => stepZoom(z, 1, fitScale))} />
+            {info.kind === 'image' ? <IconButton icon={RotateCw} label={uiText("旋转")} size="sm" onClick={() => setRotate(r => (r + 90) % 360)} /> : <IconButton icon={Maximize} label={uiText("适应宽度")} size="sm" onClick={() => setZoom('fit')} />}
           </div>}
-          {many && <div className="mist-viewer-group" role="group" aria-label="切换附件">
-            <IconButton icon={ChevronLeft} label="上一个附件" size="sm" onClick={() => go(-1)} />
-            <span className="mist-viewer-count">{index + 1} / {files.length}</span>
-            <IconButton icon={ChevronRight} label="下一个附件" size="sm" onClick={() => go(1)} />
+          {many && <div className="mist-viewer-group" role="group" aria-label={uiText("切换附件")}>
+            <IconButton icon={ChevronLeft} label={uiText("上一个附件")} size="sm" onClick={() => go(-1)} />
+            <span className="mist-viewer-count">{uiText(index + 1)} / {files.length}</span>
+            <IconButton icon={ChevronRight} label={uiText("下一个附件")} size="sm" onClick={() => go(1)} />
           </div>}
-          {onDownload && <Button icon={Download} size="sm" onClick={() => void download()}>下载</Button>}
+          {onDownload && <Button icon={Download} size="sm" onClick={() => void download()}>{uiText("下载")}</Button>}
         </div>
-        <span className="mist-viewer-close"><IconButton icon={X} label="关闭" size="sm" onClick={onClose} /></span>
+        <span className="mist-viewer-close"><IconButton icon={X} label={uiText("关闭")} size="sm" onClick={onClose} /></span>
       </div>
-      {downloadError && <div className="mist-viewer-note"><Banner tone="bad" title="下载失败">{downloadError}</Banner></div>}
+      {downloadError && <div className="mist-viewer-note"><Banner tone="bad" title={uiText("下载失败")}>{downloadError}</Banner></div>}
       <div className="mist-viewer-stage" data-kind={info.kind}>
         {info.kind === 'unsupported' ? <Unsupported reason={info.reason} onDownload={onDownload ? download : undefined} />
-          : error ? <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title="预览未能打开" description={error} action={onDownload ? <Button icon={Download} onClick={() => void download()}>下载原件</Button> : undefined} /></div>
+          : error ? <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("预览未能打开")} description={uiText(error)} action={onDownload ? <Button icon={Download} onClick={() => void download()}>{uiText("下载原件")}</Button> : undefined} /></div>
           : !blob ? <Loading />
           : <Renderer key={file.id} kind={info.kind} blob={blob} name={file.name} zoom={zoom} rotate={rotate} onFitScale={setFitScale} onPages={setPages} onFail={setError} />}
       </div>
     </div></Portal>;
 }
 
-function Loading() { return <div className="mist-viewer-center" aria-busy="true"><div className="mist-col" style={{ gap: 10, width: 'min(420px, 80%)' }}><Skeleton height={14} width="60%" /><Skeleton height={12} /><Skeleton height={12} width="85%" /><span className="mist-muted">正在加载预览…</span></div></div>; }
+function Loading() { return <div className="mist-viewer-center" aria-busy="true"><div className="mist-col" style={{ gap: 10, width: 'min(420px, 80%)' }}><Skeleton height={14} width="60%" /><Skeleton height={12} /><Skeleton height={12} width="85%" /><span className="mist-muted">{uiText("正在加载预览…")}</span></div></div>; }
 function Unsupported({ reason, onDownload }: { reason?: string; onDownload?: () => void }) {
-  return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title="此格式暂不支持在线预览" description={reason} action={onDownload ? <Button icon={Download} onClick={onDownload}>下载原件</Button> : undefined} /></div>;
+  return <div className="mist-viewer-center"><EmptyState icon={FileQuestion} title={uiText("此格式暂不支持在线预览")} description={uiText(reason)} action={onDownload ? <Button icon={Download} onClick={onDownload}>{uiText("下载原件")}</Button> : undefined} /></div>;
 }
 
 type RendererProps = { kind: PreviewKind; blob: Blob; name: string; zoom: Zoom; rotate: number; onFitScale: (v: number) => void; onPages: (n: number) => void; onFail: (msg: string) => void };
@@ -174,7 +175,7 @@ function ImageView({ blob, name, zoom, rotate, onFitScale, onFail }: RendererPro
   const frameW = natural ? (turned ? h : w) : undefined, frameH = natural ? (turned ? w : h) : undefined;
   return <div ref={box} className="mist-viewer-scroll mist-viewer-image">
     <div className="mist-viewer-frame" style={{ width: frameW, height: frameH }}>
-      <img src={url} alt={name} draggable={false} onLoad={e => setNatural({ w: e.currentTarget.naturalWidth || 1, h: e.currentTarget.naturalHeight || 1 })} onError={() => onFail('图片无法显示，文件可能已损坏')}
+      <img src={url} alt={uiText(name)} draggable={false} onLoad={e => setNatural({ w: e.currentTarget.naturalWidth || 1, h: e.currentTarget.naturalHeight || 1 })} onError={() => onFail('图片无法显示，文件可能已损坏')}
         style={natural ? { width: w, height: h, transform: `rotate(${rotate}deg)` } : { maxWidth: '100%' }} />
     </div>
   </div>;
@@ -235,7 +236,7 @@ function PdfPage({ doc, n, scale, base, root }: { doc: PdfDoc; n: number; scale:
     })();
     return () => { live = false; task?.cancel(); };
   }, [visible, scale, doc, n, base.w, base.h]);
-  return <div ref={wrap} className="mist-viewer-page" style={{ width: size.w, height: size.h }} aria-label={`第 ${n} 页`}><canvas ref={canvas} style={{ width: size.w, height: size.h }} /></div>;
+  return <div ref={wrap} className="mist-viewer-page" style={{ width: size.w, height: size.h }} aria-label={ui`第 ${n} 页`}><canvas ref={canvas} style={{ width: size.w, height: size.h }} /></div>;
 }
 
 function DocxView({ blob, onFail }: RendererProps) {
@@ -285,12 +286,12 @@ function SheetView({ blob, name, onFail }: RendererProps) {
   if (!book) return <Loading />;
   const rows = book.rows[sheet] || [], cols = rows.reduce((m, r) => Math.max(m, r.length), 0);
   return <div className="mist-viewer-sheet">
-    {book.names.length > 1 && <div className="mist-viewer-tabs" role="tablist" aria-label="工作表">{book.names.map(n => <button key={n} type="button" role="tab" aria-selected={n === sheet} className="mist-viewer-tab" onClick={() => setSheet(n)}>{n}</button>)}</div>}
-    {book.truncated[sheet] && <p className="mist-note">仅显示前 {MAX_ROWS} 行、{MAX_COLS} 列，完整内容请下载原件。</p>}
-    <div className="mist-viewer-scroll">{rows.length ? <table className="mist-viewer-table" aria-label={sheet}>
+    {book.names.length > 1 && <div className="mist-viewer-tabs" role="tablist" aria-label={uiText("工作表")}>{book.names.map(n => <button key={n} type="button" role="tab" aria-selected={n === sheet} className="mist-viewer-tab" onClick={() => setSheet(n)}>{n}</button>)}</div>}
+    {book.truncated[sheet] && <p className="mist-note">{uiText("仅显示前 ")}{MAX_ROWS}{uiText(" 行、")}{MAX_COLS}{uiText(" 列，完整内容请下载原件。")}</p>}
+    <div className="mist-viewer-scroll">{rows.length ? <table className="mist-viewer-table" aria-label={uiText(sheet)}>
       <thead><tr><th aria-hidden="true" />{Array.from({ length: cols }, (_, i) => <th key={i} scope="col">{colName(i)}</th>)}</tr></thead>
-      <tbody>{rows.map((r, i) => <tr key={i}><th scope="row">{i + 1}</th>{Array.from({ length: cols }, (_, j) => <td key={j}>{r[j] ?? ''}</td>)}</tr>)}</tbody>
-    </table> : <div className="mist-viewer-center"><EmptyState compact title="这个工作表是空的" /></div>}</div>
+      <tbody>{rows.map((r, i) => <tr key={i}><th scope="row">{uiText(i + 1)}</th>{Array.from({ length: cols }, (_, j) => <td key={j}>{r[j] ?? ''}</td>)}</tr>)}</tbody>
+    </table> : <div className="mist-viewer-center"><EmptyState compact title={uiText("这个工作表是空的")} /></div>}</div>
   </div>;
 }
 
@@ -299,11 +300,11 @@ function TextView({ blob }: RendererProps) {
   const [text, setText] = React.useState<string | null>(null);
   React.useEffect(() => { let live = true; void blob.slice(0, MAX_TEXT).text().then(t => { if (live) setText(t); }); return () => { live = false; }; }, [blob]);
   if (text === null) return <Loading />;
-  return <div className="mist-viewer-scroll">{blob.size > MAX_TEXT && <p className="mist-note">仅显示前 2 MB，完整内容请下载原件。</p>}<pre className="mist-viewer-text">{text}</pre></div>;
+  return <div className="mist-viewer-scroll">{blob.size > MAX_TEXT && <p className="mist-note">{uiText("仅显示前 2 MB，完整内容请下载原件。")}</p>}<pre className="mist-viewer-text">{text}</pre></div>;
 }
 function MediaView({ blob, kind, name, onFail }: RendererProps) {
   const url = useObjectUrl(blob);
   return <div className="mist-viewer-center">{kind === 'video'
-    ? <video className="mist-viewer-video" src={url} controls playsInline onError={() => onFail('视频无法播放，可能是浏览器不支持的编码，请下载后查看')} aria-label={name} />
-    : <audio src={url} controls onError={() => onFail('音频无法播放，请下载后查看')} aria-label={name} />}</div>;
+    ? <video className="mist-viewer-video" src={url} controls playsInline onError={() => onFail('视频无法播放，可能是浏览器不支持的编码，请下载后查看')} aria-label={uiText(name)} />
+    : <audio src={url} controls onError={() => onFail('音频无法播放，请下载后查看')} aria-label={uiText(name)} />}</div>;
 }

@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from 'react';
 import { FlaskConical, Plus, ShoppingCart, Trash2, FileText } from 'lucide-react';
 import { Banner, Button, CardHeader, DataTable, Dialog, EmptyState, Field, KeyValue, Mono, Pill, Select, TextInput, type Column } from '../../../../../components/mist';
@@ -15,7 +16,7 @@ export function productSpecSummary(p: MarketProduct): string {
   return parts.join(' · ') || p.specification || '规格未登记';
 }
 /** 参考价按产品自身币种与计价单位展示，从不跨行合计。 */
-export function productPriceText(p: MarketProduct): string { return p.refPrice ? `${p.currency} ${p.refPrice} / ${p.unit}` : `参考价未登记 · ${p.unit}`; }
+export function productPriceText(p: MarketProduct): string { return p.refPrice ? `${p.currency} ${p.refPrice} / ${uiText(p.unit)}` : ui`参考价未登记 · ${uiText(p.unit)}`; }
 
 type Reference = { key: string; kind: '报价' | '订单'; code: string; date: string; status: string; basis: string; open: () => void };
 const QUOTE_STATUS: Record<MarketQuotation['status'], string> = { Draft: '草稿', Sent: '已线下交付', Accepted: '客户已接受', Rejected: '客户未接受', Expired: '已过期' };
@@ -49,7 +50,7 @@ export function useProductImage(product: MarketProduct, mode: 'cutout-thumb' | '
 /** 列表缩略图：只使用已上传的图片附件，没有图片时显示类别字样。 */
 export function ProductThumb({ product }: { product: MarketProduct }) {
   const { src } = useProductImage(product);
-  return <span className="mist-product-thumb" data-category={product.category}>{src ? <img src={src} alt="" /> : PRODUCT_CATEGORY_LABEL[product.category].slice(0, 1)}</span>;
+  return <span className="mist-product-thumb" data-category={product.category}>{src ? <img src={src} alt="" /> : uiText(PRODUCT_CATEGORY_LABEL[product.category]).slice(0, 1)}</span>;
 }
 
 function productSaveInput(row: MarketProduct) { const { id, createdAt, updatedAt, status, ...input } = row; return input; }
@@ -73,32 +74,32 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
     { key: 'date', header: '日期', width: '96px', render: r => r.date },
   ];
   return <div className="mist-col mist-product-profile">
-    <section className="mist-product-section" aria-label="规格参数">
-      <CardHeader title={`${PRODUCT_CATEGORY_LABEL[product.category]}规格`} />
+    <section className="mist-product-section" aria-label={uiText("规格参数")}>
+      <CardHeader title={ui`${uiText(PRODUCT_CATEGORY_LABEL[product.category])}规格`} />
       <KeyValue items={[...specFields.map(f => ({ label: f.label, value: product.specs?.[f.key] ? `${product.specs[f.key]}${f.unit ? ' ' + f.unit : ''}` : '未登记' })), { label: '计价单位 / 参考价', value: productPriceText(product) }]} />
-      {product.category === 'fabric' && product.unit === '件' && <Banner tone="warn" title="面料计价单位为“件”">请核对是否应按米、码或公斤计价。</Banner>}
+      {product.category === 'fabric' && product.unit === '件' && <Banner tone="warn" title={uiText("面料计价单位为“件”")}>{uiText("请核对是否应按米、码或公斤计价。")}</Banner>}
     </section>
-    <section className="mist-product-section" aria-label="客户编码表">
-      <CardHeader title="客户编码表" tools={canWrite ? <Button size="sm" onClick={() => setEditing(true)}>编辑</Button> : undefined} />
-      {product.customerCodes?.length ? <KeyValue items={product.customerCodes.map(c => ({ label: w.state?.customers.find(x => x.id === c.customerId)?.name || '客户已不存在', value: c.code, mono: true }))} /> : <EmptyState compact title="未登记客户编码" description="客户使用自有编码下单时，在这里登记对照。" />}
+    <section className="mist-product-section" aria-label={uiText("客户编码表")}>
+      <CardHeader title={uiText("客户编码表")} tools={canWrite ? <Button size="sm" onClick={() => setEditing(true)}>{uiText("编辑")}</Button> : undefined} />
+      {product.customerCodes?.length ? <KeyValue items={product.customerCodes.map(c => ({ label: w.state?.customers.find(x => x.id === c.customerId)?.name || '客户已不存在', value: c.code, mono: true }))} /> : <EmptyState compact title={uiText("未登记客户编码")} description={uiText("客户使用自有编码下单时，在这里登记对照。")} />}
     </section>
-    <section className="mist-product-section" aria-label="来源链">
-      <CardHeader title="来源链" />
+    <section className="mist-product-section" aria-label={uiText("来源链")}>
+      <CardHeader title={uiText("来源链")} />
       {product.sourceVersionId ? <ol className="mist-product-chain">
-        <li><span>开发案</span><strong>{dev ? <Mono>{dev.code}</Mono> : '开发案已不存在'}</strong>{dev && <small>{dev.name}</small>}</li>
-        <li><span>准确版本</span><strong>{version ? version.label : '版本已不存在'}</strong>{version && <small>{version.factory}</small>}</li>
-        <li><span>QC 结论</span><strong>{version?.qc ? ({ pass: '通过', conditional: '有保留通过 · 需关注', reject: '不通过' } as const)[version.qc.result] : '无记录'}</strong>{version?.qc && <small>{version.qc.reviewer} · {version.qc.report}</small>}{version?.qc?.result === 'conditional' && <small>QC 意见：{version.qc.opinion || '见 QC 报告'}</small>}</li>
-        <li><span>数字档案</span><strong><Mono>{product.sku}</Mono></strong><small>{product.createdAt.slice(0, 10)} 建档</small></li>
-      </ol> : <EmptyState compact title="手工建档" description="此档案未关联开发版本，规格以档案登记为准。" />}
+        <li><span>{uiText("开发案")}</span><strong>{dev ? <Mono>{dev.code}</Mono> : '开发案已不存在'}</strong>{dev && <small>{dev.name}</small>}</li>
+        <li><span>{uiText("准确版本")}</span><strong>{uiText(version ? version.label : '版本已不存在')}</strong>{version && <small>{version.factory}</small>}</li>
+        <li><span>{uiText("QC 结论")}</span><strong>{uiText(version?.qc ? ({ pass: '通过', conditional: '有保留通过 · 需关注', reject: '不通过' } as const)[version.qc.result] : '无记录')}</strong>{version?.qc && <small>{version.qc.reviewer} · {version.qc.report}</small>}{version?.qc?.result === 'conditional' && <small>{uiText("QC 意见：")}{version.qc.opinion || '见 QC 报告'}</small>}</li>
+        <li><span>{uiText("数字档案")}</span><strong><Mono>{product.sku}</Mono></strong><small>{product.createdAt.slice(0, 10)}{uiText(" 建档")}</small></li>
+      </ol> : <EmptyState compact title={uiText("手工建档")} description={uiText("此档案未关联开发版本，规格以档案登记为准。")} />}
     </section>
-    <section className="mist-product-section" aria-label="引用记录">
-      <CardHeader title="引用记录" sub={refs.length ? `${refs.length} 条` : undefined} />
-      {refs.length ? <DataTable ariaLabel="产品引用记录" rows={refs} rowKey={r => r.key} columns={refColumns} onRowClick={r => r.open()} density="compact" /> : <EmptyState compact title="暂无报价或订单引用" />}
+    <section className="mist-product-section" aria-label={uiText("引用记录")}>
+      <CardHeader title={uiText("引用记录")} sub={uiText(refs.length ? `${refs.length} 条` : undefined)} />
+      {refs.length ? <DataTable ariaLabel={uiText("产品引用记录")} rows={refs} rowKey={r => r.key} columns={refColumns} onRowClick={r => r.open()} density="compact" /> : <EmptyState compact title={uiText("暂无报价或订单引用")} />}
     </section>
     <div className="mist-row mist-product-actions">
-      <Button icon={FlaskConical} disabled={archived || !canDevelop || product.category === 'trimming'} title={product.category === 'trimming' ? '辅料开发尚未接入' : !canDevelop ? '需要开发编辑权限' : archived ? '归档产品须先恢复' : '新建同类开发案；规格请在开发表单中核对填写'} onClick={() => go('development/new', undefined, { section: product.category === 'fabric' ? 'fabric' : 'garment', ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>再次开发</Button>
-      <Button icon={ShoppingCart} disabled={archived || !canOrder || product.category === 'trimming'} title={product.category === 'trimming' ? '辅料订单尚未接入' : !canOrder ? '需要订单编辑权限' : archived ? '归档产品须先恢复' : '以本档案为来源创建订单'} onClick={() => go('orders/new', 'product:' + product.id, { section: product.category, ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>复购下单</Button>
-      <Button icon={FileText} disabled={archived || !canQuote} title={!canQuote ? '需要报价编辑权限' : archived ? '归档产品须先恢复' : '新建报价并带入本档案'} onClick={() => go('quotations', undefined, { section: 'product:' + product.id })}>加入报价</Button>
+      <Button icon={FlaskConical} disabled={archived || !canDevelop || product.category === 'trimming'} title={uiText(product.category === 'trimming' ? '辅料开发尚未接入' : !canDevelop ? '需要开发编辑权限' : archived ? '归档产品须先恢复' : '新建同类开发案；规格请在开发表单中核对填写')} onClick={() => go('development/new', undefined, { section: product.category === 'fabric' ? 'fabric' : 'garment', ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>{uiText("再次开发")}</Button>
+      <Button icon={ShoppingCart} disabled={archived || !canOrder || product.category === 'trimming'} title={uiText(product.category === 'trimming' ? '辅料订单尚未接入' : !canOrder ? '需要订单编辑权限' : archived ? '归档产品须先恢复' : '以本档案为来源创建订单')} onClick={() => go('orders/new', 'product:' + product.id, { section: product.category, ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>{uiText("复购下单")}</Button>
+      <Button icon={FileText} disabled={archived || !canQuote} title={uiText(!canQuote ? '需要报价编辑权限' : archived ? '归档产品须先恢复' : '新建报价并带入本档案')} onClick={() => go('quotations', undefined, { section: 'product:' + product.id })}>{uiText("加入报价")}</Button>
     </div>
     {editing && <CustomerCodeDialog product={product} onClose={() => setEditing(false)} />}
   </div>;
@@ -117,16 +118,16 @@ function CustomerCodeDialog({ product, onClose }: { product: MarketProduct; onCl
     catch (e) { setError(e instanceof Error ? e.message : '保存未完成'); }
     finally { setBusy(false); }
   };
-  return <Dialog open onClose={onClose} title="客户编码表" description={`${product.sku} · ${product.name}`} footer={<><Button onClick={onClose}>取消</Button><Button variant="primary" disabled={busy} onClick={save}>{busy ? '保存中…' : '保存'}</Button></>}>
+  return <Dialog open onClose={onClose} title={uiText("客户编码表")} description={uiText(`${product.sku} · ${product.name}`)} footer={<><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={busy} onClick={save}>{uiText(busy ? '保存中…' : '保存')}</Button></>}>
     <div className="mist-col">
       {rows.map((r, i) => <div key={r.customerId} className="mist-row mist-product-code-row">
-        <Field label={i === 0 ? '客户' : ''}><Select aria-label="客户" value={r.customerId} onChange={e => setRows(old => old.map((x, j) => j === i ? { ...x, customerId: e.target.value } : x))} options={customers.filter(c => c.id === r.customerId || !rows.some(x => x.customerId === c.id)).map(c => ({ value: c.id, label: c.name }))} /></Field>
-        <Field label={i === 0 ? '客户编码' : ''}><TextInput aria-label="客户编码" value={r.code} maxLength={80} onChange={e => setRows(old => old.map((x, j) => j === i ? { ...x, code: e.target.value } : x))} /></Field>
-        <Button icon={Trash2} aria-label="删除客户编码" onClick={() => setRows(old => old.filter((_, j) => j !== i))} />
+        <Field label={uiText(i === 0 ? '客户' : '')}><Select aria-label={uiText("客户")} value={r.customerId} onChange={e => setRows(old => old.map((x, j) => j === i ? { ...x, customerId: e.target.value } : x))} options={customers.filter(c => c.id === r.customerId || !rows.some(x => x.customerId === c.id)).map(c => ({ value: c.id, label: c.name }))} /></Field>
+        <Field label={uiText(i === 0 ? '客户编码' : '')}><TextInput aria-label={uiText("客户编码")} value={r.code} maxLength={80} onChange={e => setRows(old => old.map((x, j) => j === i ? { ...x, code: e.target.value } : x))} /></Field>
+        <Button icon={Trash2} aria-label={uiText("删除客户编码")} onClick={() => setRows(old => old.filter((_, j) => j !== i))} />
       </div>)}
-      {!rows.length && <EmptyState compact title="尚未登记" />}
-      <Button icon={Plus} disabled={!free.length} title={free.length ? undefined : '所有客户均已登记'} onClick={() => setRows(old => [...old, { customerId: free[0].id, code: '' }])}>添加客户编码</Button>
-      {error && <Banner tone="bad" title="未保存">{error}</Banner>}
+      {!rows.length && <EmptyState compact title={uiText("尚未登记")} />}
+      <Button icon={Plus} disabled={!free.length} title={uiText(free.length ? undefined : '所有客户均已登记')} onClick={() => setRows(old => [...old, { customerId: free[0].id, code: '' }])}>{uiText("添加客户编码")}</Button>
+      {error && <Banner tone="bad" title={uiText("未保存")}>{uiText(error)}</Banner>}
     </div>
   </Dialog>;
 }

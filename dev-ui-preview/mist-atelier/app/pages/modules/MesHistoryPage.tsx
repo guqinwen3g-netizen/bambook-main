@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 历史加工记录：只读保留原系统委外加工单，可按工艺 / 状态 / 年份检索并回查来源；新的生产跟踪在“生产进度”，委外从“采购管理”发起。 */
 import React from 'react';
 import { Download, Factory, History, RefreshCw, SearchX } from 'lucide-react';
@@ -42,34 +43,34 @@ export function MesHistoryPage() {
   const columns: Column<OutsourcingOrder>[] = [
     { key: 'code', header: '历史单号', width: 'minmax(160px,1.5fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Mono>{r.orderNumber}</Mono><small className="mist-muted">{r.description || '无描述'}</small></div> },
     { key: 'process', header: '工艺', width: '80px', hideOnMobile: true, render: r => MES_PROCESS[r.processType] || r.processType },
-    { key: 'qty', header: '数量', width: 'minmax(110px,1fr)', align: 'right', render: r => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{fmt(r.quantity)} {r.unit}</span>{(r.qualityAcceptedQty != null || r.qualityRejectedQty != null) && <small className="mist-muted">合格 {r.qualityAcceptedQty ?? '—'} · 不合格 {r.qualityRejectedQty ?? '—'}</small>}</div> },
+    { key: 'qty', header: '数量', width: 'minmax(110px,1fr)', align: 'right', render: r => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{fmt(r.quantity)} {uiText(r.unit)}</span>{(r.qualityAcceptedQty != null || r.qualityRejectedQty != null) && <small className="mist-muted">{uiText("合格 ")}{r.qualityAcceptedQty ?? '—'}{uiText(" · 不合格 ")}{r.qualityRejectedQty ?? '—'}</small>}</div> },
     { key: 'amount', header: '金额', width: '120px', align: 'right', hideOnMobile: true, render: r => `${r.currency} ${fmt(r.totalAmount, 2)}` },
-    { key: 'date', header: '下单 / 交付', width: '128px', hideOnMobile: true, render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.orderDate?.slice(0, 10) || '—'}</span><small className={late(r) ? 'mist-tone-bad' : 'mist-muted'}>{r.actualDeliveryDate ? `实交 ${r.actualDeliveryDate.slice(0, 10)}${late(r) ? ' · 晚于计划' : ''}` : r.plannedDeliveryDate ? `计划 ${r.plannedDeliveryDate.slice(0, 10)}` : '未记录交期'}</small></div> },
-    { key: 'status', header: '原系统状态', width: '104px', render: r => <Pill tone={statusOf(r).tone}>{statusOf(r).label}</Pill> },
+    { key: 'date', header: '下单 / 交付', width: '128px', hideOnMobile: true, render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.orderDate?.slice(0, 10) || '—'}</span><small className={late(r) ? 'mist-tone-bad' : 'mist-muted'}>{uiText(r.actualDeliveryDate ? `实交 ${r.actualDeliveryDate.slice(0, 10)}${late(r) ? ' · 晚于计划' : ''}` : r.plannedDeliveryDate ? `计划 ${r.plannedDeliveryDate.slice(0, 10)}` : '未记录交期')}</small></div> },
+    { key: 'status', header: '原系统状态', width: '104px', render: r => <Pill tone={statusOf(r).tone}>{uiText(statusOf(r).label)}</Pill> },
   ];
   const filtered = status !== 'all' || process !== 'all' || year !== 'all' || !!needle;
-  const empty = error ? <EmptyState icon={History} title="历史记录暂不可读" description="未使用演示记录替代；稍后重新读取。" action={<Button icon={RefreshCw} onClick={() => setRetry(v => v + 1)}>重新读取</Button>} />
-    : filtered ? <EmptyState icon={SearchX} title="没有符合条件的历史记录" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setYear('all'); serverFilter(() => { setStatus('all'); setProcess('all'); }); }}>清除筛选</Button>} />
-    : <EmptyState icon={History} title="没有可见历史加工记录" description="原系统没有留下委外加工单，或你的账号无权查看。" />;
+  const empty = error ? <EmptyState icon={History} title={uiText("历史记录暂不可读")} description={uiText("未使用演示记录替代；稍后重新读取。")} action={<Button icon={RefreshCw} onClick={() => setRetry(v => v + 1)}>{uiText("重新读取")}</Button>} />
+    : filtered ? <EmptyState icon={SearchX} title={uiText("没有符合条件的历史记录")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setYear('all'); serverFilter(() => { setStatus('all'); setProcess('all'); }); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={History} title={uiText("没有可见历史加工记录")} description={uiText("原系统没有留下委外加工单，或你的账号无权查看。")} />;
   const detail = selected ? <MesDetail row={selected} orderCode={id => state?.orders.find(o => o.id === id)?.code} onOrder={id => go('orders/detail', id)} />
-    : <EmptyState icon={History} title="加工记录详情" description={loading ? '正在读取历史记录' : '从列表选择一张历史单据，查看数量、交付、验收与来源'} compact />;
+    : <EmptyState icon={History} title={uiText("加工记录详情")} description={uiText(loading ? '正在读取历史记录' : '从列表选择一张历史单据，查看数量、交付、验收与来源')} compact />;
   return <MistPage width="wide">
-    <PageHeader eyebrow="平台 · 历史" title="历史加工记录" description="只读保留原系统委外加工单据，不能新建或修改；新的生产跟踪在“生产进度”，委外加工从“采购管理”发起。"
+    <PageHeader eyebrow={uiText("平台 · 历史")} title={uiText("历史加工记录")} description={uiText("只读保留原系统委外加工单据，不能新建或修改；新的生产跟踪在“生产进度”，委外加工从“采购管理”发起。")}
       actions={<>
-        <Button icon={Download} disabled={!shown.length} onClick={() => exportRecords('历史加工记录', ['历史单号', '工艺', '描述', '数量', '单位', '币种', '金额', '下单日', '计划交付', '实际交付', '合格', '不合格', '状态'], shown.map(r => [r.orderNumber, MES_PROCESS[r.processType] || r.processType, r.description || '', r.quantity, r.unit, r.currency, r.totalAmount, r.orderDate || '', r.plannedDeliveryDate || '', r.actualDeliveryDate || '', r.qualityAcceptedQty ?? '', r.qualityRejectedQty ?? '', statusOf(r).label]))}>导出本批</Button>
-        <Button icon={RefreshCw} onClick={() => setRetry(v => v + 1)}>重新读取</Button>
-        <Button icon={Factory} variant="primary" onClick={() => go('production-board')}>前往生产进度</Button>
+        <Button icon={Download} disabled={!shown.length} onClick={() => exportRecords('历史加工记录', ['历史单号', '工艺', '描述', '数量', '单位', '币种', '金额', '下单日', '计划交付', '实际交付', '合格', '不合格', '状态'], shown.map(r => [r.orderNumber, MES_PROCESS[r.processType] || r.processType, r.description || '', r.quantity, r.unit, r.currency, r.totalAmount, r.orderDate || '', r.plannedDeliveryDate || '', r.actualDeliveryDate || '', r.qualityAcceptedQty ?? '', r.qualityRejectedQty ?? '', statusOf(r).label]))}>{uiText("导出本批")}</Button>
+        <Button icon={RefreshCw} onClick={() => setRetry(v => v + 1)}>{uiText("重新读取")}</Button>
+        <Button icon={Factory} variant="primary" onClick={() => go('production-board')}>{uiText("前往生产进度")}</Button>
       </>} />
-    {error && <div className="mist-section"><Banner tone="bad" title="原生历史接口读取失败">{error}。未使用演示记录替代。</Banner></div>}
+    {error && <div className="mist-section"><Banner tone="bad" title={uiText("原生历史接口读取失败")}>{uiText(error)}{uiText("。未使用演示记录替代。")}</Banner></div>}
     <Toolbar>
-      <SearchField value={query} onChange={setQuery} placeholder="在本批中搜索单号、描述、备注或原系统编号" />
-      <Dropdown<ProcessFilter> label="工艺" value={process} onChange={v => serverFilter(() => setProcess(v))} options={[{ value: 'all', label: '全部工艺' }, ...(Object.keys(MES_PROCESS) as OutsourcingProcessType[]).map(value => ({ value, label: MES_PROCESS[value] }))]} />
-      <Dropdown<StatusFilter> label="状态" value={status} onChange={v => serverFilter(() => setStatus(v))} options={[{ value: 'all', label: '全部状态' }, ...(Object.keys(MES_STATUS) as OutsourcingStatus[]).map(value => ({ value, label: MES_STATUS[value].label }))]} />
-      {years.length > 1 && <Dropdown label="年份" value={year} onChange={setYear} options={[{ value: 'all', label: '全部年份' }, ...years.map(value => ({ value, label: `${value} 年` }))]} />}
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("在本批中搜索单号、描述、备注或原系统编号")} />
+      <Dropdown<ProcessFilter> label={uiText("工艺")} value={process} onChange={v => serverFilter(() => setProcess(v))} options={[{ value: 'all', label: '全部工艺' }, ...(Object.keys(MES_PROCESS) as OutsourcingProcessType[]).map(value => ({ value, label: MES_PROCESS[value] }))]} />
+      <Dropdown<StatusFilter> label={uiText("状态")} value={status} onChange={v => serverFilter(() => setStatus(v))} options={[{ value: 'all', label: '全部状态' }, ...(Object.keys(MES_STATUS) as OutsourcingStatus[]).map(value => ({ value, label: MES_STATUS[value].label }))]} />
+      {years.length > 1 && <Dropdown label={uiText("年份")} value={year} onChange={setYear} options={[{ value: 'all', label: '全部年份' }, ...years.map(value => ({ value, label: `${value} 年` }))]} />}
     </Toolbar>
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.orderNumber || '加工记录详情'} drawerSub={selected ? `${MES_PROCESS[selected.processType] || selected.processType} · ${statusOf(selected).label}` : undefined}
-      list={<Card><DataTable ariaLabel="历史加工记录" loading={loading} rows={shown} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty}
-        footer={<div className="mist-row" style={{ flexWrap: 'wrap' }}><span className="mist-muted">共 {total} 条{total > PAGE ? ` · 第 ${offset + 1}–${offset + rows.length} 条` : ''}{shown.length !== rows.length ? ` · 本批显示 ${shown.length} 条` : ''}</span><span className="mist-spacer" /><Button size="sm" disabled={!offset || loading} onClick={() => setOffset(o => Math.max(0, o - PAGE))}>上一批</Button><Button size="sm" disabled={offset + rows.length >= total || loading} onClick={() => setOffset(o => o + PAGE)}>下一批</Button></div>} /></Card>}
+      list={<Card><DataTable ariaLabel={uiText("历史加工记录")} loading={loading} rows={shown} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty}
+        footer={<div className="mist-row" style={{ flexWrap: 'wrap' }}><span className="mist-muted">{uiText("共 ")}{total}{uiText(" 条")}{uiText(total > PAGE ? ` · 第 ${offset + 1}–${offset + rows.length} 条` : '')}{uiText(shown.length !== rows.length ? ` · 本批显示 ${shown.length} 条` : '')}</span><span className="mist-spacer" /><Button size="sm" disabled={!offset || loading} onClick={() => setOffset(o => Math.max(0, o - PAGE))}>{uiText("上一批")}</Button><Button size="sm" disabled={offset + rows.length >= total || loading} onClick={() => setOffset(o => o + PAGE)}>{uiText("下一批")}</Button></div>} /></Card>}
       detail={detail} />
   </MistPage>;
 }
@@ -83,11 +84,11 @@ function MesDetail({ row: r, orderCode, onOrder }: { row: OutsourcingOrder; orde
   }, [r]);
   const lines = full?.lines || [], st = statusOf(r), code = r.orderId ? orderCode(r.orderId) : undefined;
   return <DetailBody data-mes-detail={r.id} heading={<div>
-      <span className="mist-mono mist-muted">{MES_PROCESS[r.processType] || r.processType} · 只读历史</span>
+      <span className="mist-mono mist-muted">{MES_PROCESS[r.processType] || r.processType}{uiText(" · 只读历史")}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{r.orderNumber}</div>
     </div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={st.tone}>{st.label}</Pill>{late(r) && <Pill tone="bad">晚于计划交付</Pill>}</div>
-    <Banner tone="neutral" title="只读历史">原系统单据不能在这里修改；需要继续的加工请在采购管理新建委外加工单，并从生产进度跟踪。</Banner>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill>{late(r) && <Pill tone="bad">{uiText("晚于计划交付")}</Pill>}</div>
+    <Banner tone="neutral" title={uiText("只读历史")}>{uiText("原系统单据不能在这里修改；需要继续的加工请在采购管理新建委外加工单，并从生产进度跟踪。")}</Banner>
     <Facts items={[
       { label: '数量', value: `${fmt(r.quantity)} ${r.unit}` },
       { label: '单价 / 金额', value: `${r.currency} ${fmt(r.unitPrice, 2)} / ${fmt(r.totalAmount, 2)}` },
@@ -96,24 +97,24 @@ function MesDetail({ row: r, orderCode, onOrder }: { row: OutsourcingOrder; orde
       { label: '实际交付', value: r.actualDeliveryDate ? <span className={late(r) ? 'mist-tone-bad' : undefined}>{r.actualDeliveryDate.slice(0, 10)}</span> : '未记录' },
       { label: '验收', value: r.qualityAcceptedQty != null || r.qualityRejectedQty != null ? `合格 ${r.qualityAcceptedQty ?? '—'} · 不合格 ${r.qualityRejectedQty ?? '—'} ${r.unit}` : '未记录' },
     ]} />
-    {r.description && <p className="mist-sub">描述：{r.description}</p>}
-    {r.notes && <p className="mist-sub">备注：{r.notes}</p>}
-    <DetailBlock title="来源回查">
+    {r.description && <p className="mist-sub">{uiText("描述：")}{r.description}</p>}
+    {r.notes && <p className="mist-sub">{uiText("备注：")}{r.notes}</p>}
+    <DetailBlock title={uiText("来源回查")}>
       <Facts items={[
-        { label: '来源订单', value: !r.orderId ? '历史未关联' : code ? <Button size="sm" onClick={() => onOrder(r.orderId!)}>{code}</Button> : <span className="mist-muted">原系统订单 {r.orderId.slice(0, 8)} · 本公司无对应订单</span> },
-        { label: '加工方', value: r.supplierId ? <span className="mist-muted">原系统供应商 {r.supplierId.slice(0, 8)} · 尚未映射到供应商管理</span> : '历史未关联' },
-        { label: 'BOM', value: r.bomId ? <span className="mist-muted">原系统 BOM {r.bomId.slice(0, 8)}</span> : '未关联' },
+        { label: '来源订单', value: !r.orderId ? '历史未关联' : code ? <Button size="sm" onClick={() => onOrder(r.orderId!)}>{code}</Button> : <span className="mist-muted">{uiText("原系统订单 ")}{r.orderId.slice(0, 8)}{uiText(" · 本公司无对应订单")}</span> },
+        { label: '加工方', value: r.supplierId ? <span className="mist-muted">{uiText("原系统供应商 ")}{r.supplierId.slice(0, 8)}{uiText(" · 尚未映射到供应商管理")}</span> : '历史未关联' },
+        { label: 'BOM', value: r.bomId ? <span className="mist-muted">{uiText("原系统 BOM ")}{r.bomId.slice(0, 8)}</span> : '未关联' },
       ]} />
     </DetailBlock>
-    <DetailBlock title="加工明细">
-      {failed ? <span className="mist-note">明细读取失败，未使用演示数据替代。</span>
-        : !full ? <span className="mist-note">正在读取明细…</span>
-        : lines.length ? <DataTable ariaLabel={`${r.orderNumber} 加工明细`} rows={lines} rowKey={l => l.id} columns={[
+    <DetailBlock title={uiText("加工明细")}>
+      {failed ? <span className="mist-note">{uiText("明细读取失败，未使用演示数据替代。")}</span>
+        : !full ? <span className="mist-note">{uiText("正在读取明细…")}</span>
+        : lines.length ? <DataTable ariaLabel={ui`${r.orderNumber} 加工明细`} rows={lines} rowKey={l => l.id} columns={[
           { key: 'process', header: '工艺', render: l => MES_PROCESS[l.processType] || l.processType },
           { key: 'desc', header: '内容', render: l => <div className="mist-col" style={{ gap: 2 }}><span>{l.description}</span>{l.materialCode && <small className="mist-muted">{l.materialCode}</small>}</div> },
           { key: 'qty', header: '数量', align: 'right', render: l => `${fmt(l.quantity)} ${l.unit}` },
           { key: 'amount', header: '金额', align: 'right', hideOnMobile: true, render: l => `${r.currency} ${fmt(l.amount, 2)}` },
-        ]} /> : <span className="mist-note">原系统未记录分项明细。</span>}
+        ]} /> : <span className="mist-note">{uiText("原系统未记录分项明细。")}</span>}
     </DetailBlock>
   </DetailBody>;
 }

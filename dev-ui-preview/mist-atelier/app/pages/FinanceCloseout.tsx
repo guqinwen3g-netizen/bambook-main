@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** 应付收尾：发票先于结算到达的暂挂票据关联结算、索赔工厂扣款抵应付、短交最终结算后剩余预付的退款 / 转抵。
  *  都是财务对已登记事实的处理；错误由冲回更正，原记录保留。 */
@@ -26,15 +27,15 @@ export function BillLinkDialog({ bill, state, busy, allowed, failure, onClose, e
     setLocal(''); execute({ type: 'payable.bill.link', payload: { id: bill.id, links: chosen.map(l => ({ purchaseId: l.purchaseId, settlementId: links[l.purchaseId] })) } }, onDone);
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title="关联结算" description={`${bill.code} · 发票 ${bill.invoiceNo}。结算经财务确认后关联，关联后按结算计入预付抵扣并可申请付款。`}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !allowed} onClick={submit}>确认关联</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText("关联结算")} description={ui`${bill.code} · 发票 ${bill.invoiceNo}。结算经财务确认后关联，关联后按结算计入预付抵扣并可申请付款。`}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !allowed} onClick={submit}>{uiText("确认关联")}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能关联">{message}</Banner>}
-      <FieldGroup label="待关联的合同行" required hint="一行对应一笔结算；票额跨多笔结算时，请作废后按结算分行重新登记">
+      {message && <Banner tone="bad" title={uiText("还不能关联")}>{message}</Banner>}
+      <FieldGroup label={uiText("待关联的合同行")} required hint={uiText("一行对应一笔结算；票额跨多笔结算时，请作废后按结算分行重新登记")}>
         <div className="mist-col">{rows.map(l => { const options = invoiceableSettlements(state, l.purchaseId); return <div className="mist-row mist-module-actions" key={l.purchaseId} data-link-line={l.purchaseId}>
-          <Mono>{l.purchaseCode}</Mono><span className="mist-note">本票 {money(l.amount, bill.currency)}</span><span className="mist-spacer" />
-          {options.length ? <Select aria-label={l.purchaseCode + ' 关联结算'} value={links[l.purchaseId] || ''} options={[{ value: '', label: '暂不关联' }, ...options.map(o => ({ value: o.settlement.id, label: `${o.settlement.code} · 未开票 ${money(o.left, o.settlement.currency)}${o.left < l.amount ? ' · 不足' : ''}` }))]} onChange={e => setLinks({ ...links, [l.purchaseId]: e.target.value })} />
-            : <span className="mist-note">还没有已确认、未开票的结算</span>}
+          <Mono>{l.purchaseCode}</Mono><span className="mist-note">{uiText("本票 ")}{money(l.amount, bill.currency)}</span><span className="mist-spacer" />
+          {options.length ? <Select aria-label={uiText(l.purchaseCode + ' 关联结算')} value={links[l.purchaseId] || ''} options={[{ value: '', label: '暂不关联' }, ...options.map(o => ({ value: o.settlement.id, label: `${o.settlement.code} · 未开票 ${money(o.left, o.settlement.currency)}${o.left < l.amount ? ' · 不足' : ''}` }))]} onChange={e => setLinks({ ...links, [l.purchaseId]: e.target.value })} />
+            : <span className="mist-note">{uiText("还没有已确认、未开票的结算")}</span>}
         </div>; })}</div>
       </FieldGroup>
     </div>
@@ -58,17 +59,17 @@ export function DeductionDialog({ bill, state, busy, allowed, failure, onClose, 
     setLocal(''); execute({ type: 'payable.deduction.register', payload: { recoveryId: row.recovery.id, billId: bill.id, amount: value / 100, reference, note } }, onDone);
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title="登记索赔扣款" description={`${bill.code} · ${bill.supplier} · 可扣 ${money(room / 100, bill.currency)}（未付扣除待付申请）。扣满工厂同意金额后，索赔里的追偿自动记为已落实。`}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !allowed} onClick={submit}>登记扣款</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText("登记索赔扣款")} description={ui`${bill.code} · ${bill.supplier} · 可扣 ${money(room / 100, bill.currency)}（未付扣除待付申请）。扣满工厂同意金额后，索赔里的追偿自动记为已落实。`}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !allowed} onClick={submit}>{uiText("登记扣款")}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能登记">{message}</Banner>}
-      <Field label="工厂追偿" required><Select aria-label="工厂追偿" value={pick} options={[{ value: '', label: '请选择' }, ...options.map(o => ({ value: o.recovery.id, label: `${o.claimCode} · 同意 ${money(o.recovery.agreed || 0, o.recovery.currency)} · 还可扣 ${money(o.left, o.recovery.currency)}${o.recovery.method === 'mixed' ? ' · 组合方式' : ''}` }))]} onChange={e => setPick(e.target.value)} /></Field>
-      {row && row.deducted > 0 && <span className="mist-note">该追偿已在应付中扣 {money(row.deducted, row.recovery.currency)}。</span>}
+      {message && <Banner tone="bad" title={uiText("还不能登记")}>{message}</Banner>}
+      <Field label={uiText("工厂追偿")} required><Select aria-label={uiText("工厂追偿")} value={pick} options={[{ value: '', label: '请选择' }, ...options.map(o => ({ value: o.recovery.id, label: `${o.claimCode} · 同意 ${money(o.recovery.agreed || 0, o.recovery.currency)} · 还可扣 ${money(o.left, o.recovery.currency)}${o.recovery.method === 'mixed' ? ' · 组合方式' : ''}` }))]} onChange={e => setPick(e.target.value)} /></Field>
+      {row && row.deducted > 0 && <span className="mist-note">{uiText("该追偿已在应付中扣 ")}{money(row.deducted, row.recovery.currency)}。</span>}
       <FormGrid>
-        <Field label="扣款金额" required><TextInput aria-label="扣款金额" type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
-        <Field label="扣款依据" required hint="扣款通知 / 对账单编号"><TextInput aria-label="扣款依据" value={reference} onChange={e => setReference(e.target.value)} /></Field>
+        <Field label={uiText("扣款金额")} required><TextInput aria-label={uiText("扣款金额")} type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
+        <Field label={uiText("扣款依据")} required hint={uiText("扣款通知 / 对账单编号")}><TextInput aria-label={uiText("扣款依据")} value={reference} onChange={e => setReference(e.target.value)} /></Field>
       </FormGrid>
-      <Field label="备注"><TextArea aria-label="扣款备注" rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
+      <Field label={uiText("备注")}><TextArea aria-label={uiText("扣款备注")} rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
     </div>
   </Dialog>;
 }
@@ -91,18 +92,18 @@ export function PrepaymentMoveDialog({ kind, purchaseId, state, busy, allowed, f
     setLocal(''); execute({ type: 'payable.prepayment.transfer', payload: { purchaseId, targetPurchaseId: target, amount: value / 100, reason } }, onDone);
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={620} title={kind === 'refund' ? '登记剩余预付退款' : '剩余预付转抵到其他合同'} description={`${po.code} · ${po.supplier} · 剩余预付 ${money(r.available, po.currency)}。${kind === 'refund' ? '供应商退回的钱到账后登记，记一笔收款（负数付款）。' : '转入同一供应商、同币种、未最终结算的合同，在该合同结算时抵扣。'}`}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !allowed || (kind === 'transfer' && !targets.length)} onClick={submit}>{kind === 'refund' ? '登记退款' : '确认转抵'}</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={620} title={uiText(kind === 'refund' ? '登记剩余预付退款' : '剩余预付转抵到其他合同')} description={ui`${po.code} · ${po.supplier} · 剩余预付 ${money(r.available, po.currency)}。${kind === 'refund' ? '供应商退回的钱到账后登记，记一笔收款（负数付款）。' : '转入同一供应商、同币种、未最终结算的合同，在该合同结算时抵扣。'}`}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !allowed || (kind === 'transfer' && !targets.length)} onClick={submit}>{uiText(kind === 'refund' ? '登记退款' : '确认转抵')}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能保存">{message}</Banner>}
-      {kind === 'transfer' && (targets.length ? <Field label="转入合同" required><Select aria-label="转入合同" value={target} options={targets.map(t => ({ value: t.id, label: `${t.code} · ${t.description} · ${t.quantity} ${t.unit}` }))} onChange={e => setTarget(e.target.value)} /></Field>
-        : <Banner tone="warn" title="没有可转入的合同">这家供应商没有其他已批准、同币种、未最终结算的合同；可改为登记退款。</Banner>)}
+      {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
+      {kind === 'transfer' && (targets.length ? <Field label={uiText("转入合同")} required><Select aria-label={uiText("转入合同")} value={target} options={targets.map(t => ({ value: t.id, label: `${t.code} · ${t.description} · ${t.quantity} ${t.unit}` }))} onChange={e => setTarget(e.target.value)} /></Field>
+        : <Banner tone="warn" title={uiText("没有可转入的合同")}>{uiText("这家供应商没有其他已批准、同币种、未最终结算的合同；可改为登记退款。")}</Banner>)}
       <FormGrid>
-        <Field label={kind === 'refund' ? '退款金额' : '转抵金额'} required><TextInput aria-label={kind === 'refund' ? '退款金额' : '转抵金额'} type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
-        {kind === 'refund' && <Field label="到账日期" required><TextInput aria-label="到账日期" type="date" max={day} value={date} onChange={e => setDate(e.target.value)} /></Field>}
+        <Field label={uiText(kind === 'refund' ? '退款金额' : '转抵金额')} required><TextInput aria-label={uiText(kind === 'refund' ? '退款金额' : '转抵金额')} type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
+        {kind === 'refund' && <Field label={uiText("到账日期")} required><TextInput aria-label={uiText("到账日期")} type="date" max={day} value={date} onChange={e => setDate(e.target.value)} /></Field>}
       </FormGrid>
-      {kind === 'refund' && <Field label="银行流水号 / 参考号" required><TextInput aria-label="退款流水号" value={reference} onChange={e => setReference(e.target.value)} /></Field>}
-      <Field label={kind === 'refund' ? '退款说明' : '转抵依据'} required><TextArea aria-label={kind === 'refund' ? '退款说明' : '转抵依据'} rows={2} value={reason} onChange={e => setReason(e.target.value)} /></Field>
+      {kind === 'refund' && <Field label={uiText("银行流水号 / 参考号")} required><TextInput aria-label={uiText("退款流水号")} value={reference} onChange={e => setReference(e.target.value)} /></Field>}
+      <Field label={uiText(kind === 'refund' ? '退款说明' : '转抵依据')} required><TextArea aria-label={uiText(kind === 'refund' ? '退款说明' : '转抵依据')} rows={2} value={reason} onChange={e => setReason(e.target.value)} /></Field>
     </div>
   </Dialog>;
 }
@@ -112,24 +113,24 @@ export function PrepaymentResidual({ state, purchaseId, busy, canRefund, canMove
   const r = purchasePrepaymentReadback(state, purchaseId), po = state.fulfillment.purchases.find(p => p.id === purchaseId), cur = po?.currency || '';
   if (!po || (r.paid <= 0 && r.transferredIn <= 0 && !r.moves.length)) return null;
   const closed = r.residualAfterFinal > 0 || r.moves.some(m => m.purchaseId === purchaseId);
-  return <DetailBlock title="合同预付去向">
+  return <DetailBlock title={uiText("合同预付去向")}>
     <Facts items={[{ label: '已付预付', value: money(r.paid, cur) }, ...(r.transferredIn ? [{ label: '其他合同转入', value: money(r.transferredIn, cur) }] : []), { label: '结算已抵扣', value: money(r.applied, cur) }, ...(r.refunded ? [{ label: '供应商已退回', value: money(r.refunded, cur) }] : []), ...(r.transferredOut ? [{ label: '已转抵到其他合同', value: money(r.transferredOut, cur) }] : []), { label: '剩余预付', value: money(r.available, cur) }]} />
-    {r.cancelled && <Banner tone={r.available > 0 ? 'warn' : 'neutral'} title="合同已取消">{r.cancelled.actor} · {fmtDay(r.cancelled.at)} · {r.cancelled.reason}。{r.cancelled.prepayment === 'refund' ? `业务员选择让工厂退款：${r.available > 0 ? `待退回 ${money(r.available, cur)}，到账后登记退款。` : '已全部退回。'}` : r.cancelled.prepayment === 'transfer' ? `业务员选择转抵到 ${r.cancelled.targetPurchaseCode}${r.available > 0 ? `，请财务办理转抵 ${money(r.available, cur)}。` : '，已处理完毕。'}` : '取消时没有已付预付。'}</Banner>}
-    {r.residualAfterFinal > 0 && !r.cancelled && <Banner tone="warn" title="最终结算后仍有剩余预付">短交或结算金额小于预付时出现。请与供应商确认：退回到账后登记退款，或转抵到这家供应商的其他合同。</Banner>}
+    {r.cancelled && <Banner tone={r.available > 0 ? 'warn' : 'neutral'} title={uiText("合同已取消")}>{r.cancelled.actor} · {fmtDay(r.cancelled.at)} · {r.cancelled.reason}。{uiText(r.cancelled.prepayment === 'refund' ? `业务员选择让工厂退款：${r.available > 0 ? `待退回 ${money(r.available, cur)}，到账后登记退款。` : '已全部退回。'}` : r.cancelled.prepayment === 'transfer' ? `业务员选择转抵到 ${r.cancelled.targetPurchaseCode}${r.available > 0 ? `，请财务办理转抵 ${money(r.available, cur)}。` : '，已处理完毕。'}` : '取消时没有已付预付。')}</Banner>}
+    {r.residualAfterFinal > 0 && !r.cancelled && <Banner tone="warn" title={uiText("最终结算后仍有剩余预付")}>{uiText("短交或结算金额小于预付时出现。请与供应商确认：退回到账后登记退款，或转抵到这家供应商的其他合同。")}</Banner>}
     {r.moves.map(m => { const out = m.purchaseId === purchaseId; return <div className="mist-row mist-module-actions" key={m.id} data-prepayment-move={m.id}><Mono>{m.code}</Mono>
-      <span className="mist-note">{m.kind === 'refund' ? `退款 · ${m.date} · ${m.reference}` : out ? `转抵到 ${m.targetPurchaseCode}` : `由 ${m.purchaseCode} 转入`} · {m.actor} · {fmtDay(m.at)}</span><span className="mist-spacer" />
-      <span className="mist-num">{out ? '−' : '+'}{money(m.amount, m.currency)}</span>
-      {m.reversed ? <Pill tone="neutral">已冲回</Pill> : out && <Button size="sm" disabled={busy || !canMove} title={!canMove ? '需要核销权限（财务）' : undefined} onClick={() => onReverse(m)}>冲回</Button>}</div>; })}
+      <span className="mist-note">{uiText(m.kind === 'refund' ? `退款 · ${m.date} · ${m.reference}` : out ? `转抵到 ${m.targetPurchaseCode}` : `由 ${m.purchaseCode} 转入`)} · {m.actor} · {fmtDay(m.at)}</span><span className="mist-spacer" />
+      <span className="mist-num">{uiText(out ? '−' : '+')}{money(m.amount, m.currency)}</span>
+      {m.reversed ? <Pill tone="neutral">{uiText("已冲回")}</Pill> : out && <Button size="sm" disabled={busy || !canMove} title={uiText(!canMove ? '需要核销权限（财务）' : undefined)} onClick={() => onReverse(m)}>{uiText("冲回")}</Button>}</div>; })}
     {closed && r.available > 0 && <div className="mist-row" style={{ flexWrap: 'wrap' }}>
-      <Button size="sm" disabled={busy || !canRefund} title={!canRefund ? '需要付款登记和核销权限' : undefined} onClick={onRefund}>登记退款</Button>
-      <Button size="sm" disabled={busy || !canMove} title={!canMove ? '需要核销权限（财务）' : undefined} onClick={onTransfer}>转抵到其他合同</Button></div>}
+      <Button size="sm" disabled={busy || !canRefund} title={uiText(!canRefund ? '需要付款登记和核销权限' : undefined)} onClick={onRefund}>{uiText("登记退款")}</Button>
+      <Button size="sm" disabled={busy || !canMove} title={uiText(!canMove ? '需要核销权限（财务）' : undefined)} onClick={onTransfer}>{uiText("转抵到其他合同")}</Button></div>}
   </DetailBlock>;
 }
 
 /** 票据上的索赔扣款明细。 */
 export function DeductionList({ rows, busy, canReverse, onReverse, onClaim }: { rows: SupplierDeduction[]; busy: boolean; canReverse: boolean; onReverse: (d: SupplierDeduction) => void; onClaim: (claimId: string) => void }) {
   if (!rows.length) return null;
-  return <DetailBlock title="索赔扣款">{rows.map(d => <div className="mist-row mist-module-actions" key={d.id} data-deduction={d.id}><Mono>{d.code}</Mono><span className="mist-note">{d.claimCode} · {d.reference} · {d.actor} · {fmtDay(d.at)}</span><span className="mist-spacer" /><span className="mist-num">{money(d.amount, d.currency)}</span>
-    {d.reversed ? <Pill tone="neutral">已冲回</Pill> : <Button size="sm" disabled={busy || !canReverse} title={!canReverse ? '需要核销权限（财务）' : undefined} onClick={() => onReverse(d)}>冲回扣款</Button>}
-    <Button size="sm" onClick={() => onClaim(d.claimId)}>查看案件</Button></div>)}</DetailBlock>;
+  return <DetailBlock title={uiText("索赔扣款")}>{rows.map(d => <div className="mist-row mist-module-actions" key={d.id} data-deduction={d.id}><Mono>{d.code}</Mono><span className="mist-note">{d.claimCode} · {d.reference} · {d.actor} · {fmtDay(d.at)}</span><span className="mist-spacer" /><span className="mist-num">{money(d.amount, d.currency)}</span>
+    {d.reversed ? <Pill tone="neutral">{uiText("已冲回")}</Pill> : <Button size="sm" disabled={busy || !canReverse} title={uiText(!canReverse ? '需要核销权限（财务）' : undefined)} onClick={() => onReverse(d)}>{uiText("冲回扣款")}</Button>}
+    <Button size="sm" onClick={() => onClaim(d.claimId)}>{uiText("查看案件")}</Button></div>)}</DetailBlock>;
 }

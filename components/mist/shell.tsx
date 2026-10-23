@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowLeft, Bell, ChevronDown, ChevronRight, Menu, Moon, PanelLeft, Search, Sun, X } from 'lucide-react';
@@ -17,7 +18,7 @@ export function MistRoot({ theme, children, className, style }: { theme?: ThemeM
   const [el, setEl] = React.useState<HTMLDivElement | null>(null);
   return (
     <div ref={setEl} className={cx('mist-root', className)} data-theme={theme} style={style}>
-      <PortalCtx.Provider value={el}>{children}</PortalCtx.Provider>
+      <PortalCtx.Provider value={el}>{uiText(children)}</PortalCtx.Provider>
     </div>
   );
 }
@@ -72,27 +73,27 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
     <aside className="mist-side" id="mist-side" data-menu-open={open || undefined}>
       <div className="mist-brand" {...(collapsed ? { role: 'button', tabIndex: 0, 'aria-label': '展开导航', onClick: onToggleCollapsed, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter') onToggleCollapsed(); } } : {})}>
         <MistMark /><MistWordmark />
-        <button type="button" className="mist-side-toggle" aria-label="收起导航" onClick={onToggleCollapsed}><Icon icon={PanelLeft} size="sm" /></button>
-        <button type="button" className="mist-side-close" aria-label="关闭菜单" onClick={close}><Icon icon={X} size="sm" /></button>
+        <button type="button" className="mist-side-toggle" aria-label={uiText("收起导航")} onClick={onToggleCollapsed}><Icon icon={PanelLeft} size="sm" /></button>
+        <button type="button" className="mist-side-close" aria-label={uiText("关闭菜单")} onClick={close}><Icon icon={X} size="sm" /></button>
       </div>
-      {workspace && <button type="button" className="mist-ws" onClick={within(workspace.onClick)}><span className="mist-ws-sym">{workspace.symbol}</span><div><b>{workspace.name}</b>{workspace.caption && <small>{workspace.caption}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>}
-      {onSearch && <button type="button" className="mist-side-search" onClick={within(onSearch)} title="搜索或跳转"><Icon icon={Search} size="sm" /><span>搜索或跳转</span><Kbd>⌘K</Kbd></button>}
-      <nav className="mist-nav" aria-label="主导航">
+      {workspace && <button type="button" className="mist-ws" onClick={within(workspace.onClick)}><span className="mist-ws-sym">{workspace.symbol}</span><div><b>{workspace.name}</b>{workspace.caption && <small>{uiText(workspace.caption)}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>}
+      {onSearch && <button type="button" className="mist-side-search" onClick={within(onSearch)} title={uiText("搜索或跳转")}><Icon icon={Search} size="sm" /><span>{uiText("搜索或跳转")}</span><Kbd>⌘K</Kbd></button>}
+      <nav className="mist-nav" aria-label={uiText("主导航")}>
         {sections.map(s => (
           <div key={s.id} className="mist-nav-group" data-closed={closed[s.id] || undefined}>
-            <button type="button" className="mist-nav-head" aria-expanded={!closed[s.id]} onClick={() => setClosed(c => ({ ...c, [s.id]: !c[s.id] }))}>{s.label}<Icon icon={ChevronDown} size="xs" /></button>
+            <button type="button" className="mist-nav-head" aria-expanded={!closed[s.id]} onClick={() => setClosed(c => ({ ...c, [s.id]: !c[s.id] }))}>{uiText(s.label)}<Icon icon={ChevronDown} size="xs" /></button>
             <div className="mist-nav-items"><div>
               {s.items.map(it => (
-                <button key={it.id} type="button" className="mist-nav-item" aria-current={it.id === activeId ? 'page' : undefined} title={it.label} onClick={() => { close(); onNavigate(it.id); }}>
-                  <Icon icon={it.icon} /><span>{it.label}</span>{it.count ? <span className="mist-nav-count">{it.count}</span> : null}
+                <button key={it.id} type="button" className="mist-nav-item" aria-current={it.id === activeId ? 'page' : undefined} title={uiText(it.label)} onClick={() => { close(); onNavigate(it.id); }}>
+                  <Icon icon={it.icon} /><span>{uiText(it.label)}</span>{it.count ? <span className="mist-nav-count">{it.count}</span> : null}
                 </button>
               ))}
             </div></div>
           </div>
         ))}
       </nav>
-      {assistant && <button type="button" className="mist-side-ai" onClick={within(assistant.onClick)}><div className="mist-side-ai-t"><AIBadge />{assistant.title}</div><p>{assistant.text}</p></button>}
-      <button type="button" className="mist-me" onClick={within(account.onClick)}><Avatar name={account.name} src={account.avatarUrl} /><div><b>{account.name}</b>{account.caption && <small>{account.caption}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>
+      {assistant && <button type="button" className="mist-side-ai" onClick={within(assistant.onClick)}><div className="mist-side-ai-t"><AIBadge />{uiText(assistant.title)}</div><p>{uiText(assistant.text)}</p></button>}
+      <button type="button" className="mist-me" onClick={within(account.onClick)}><Avatar name={account.name} src={account.avatarUrl} /><div><b>{account.name}</b>{account.caption && <small>{uiText(account.caption)}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>
     </aside>
   );
 }
@@ -108,25 +109,25 @@ export function MistTopbar({ crumbs, scrolled, sync, theme, onToggleTheme, onSea
   const menu = React.useContext(MobileNavCtx);
   return (
     <header className="mist-topbar" data-scrolled={scrolled || undefined} data-has-back={onBack ? true : undefined}>
-      {menu && <button type="button" className="mist-top-menu" aria-label="打开菜单" title="菜单" aria-controls="mist-side" aria-expanded={menu.open} onClick={() => menu.setOpen(true)}><MistMark className="mist-top-menu-mark" /><Icon icon={Menu} size="xs" /></button>}
-      {onBack && <button type="button" className="mist-top-back" aria-label={backLabel} title={backLabel} onClick={onBack}><Icon icon={ArrowLeft} /></button>}
+      {menu && <button type="button" className="mist-top-menu" aria-label={uiText("打开菜单")} title={uiText("菜单")} aria-controls="mist-side" aria-expanded={menu.open} onClick={() => menu.setOpen(true)}><MistMark className="mist-top-menu-mark" /><Icon icon={Menu} size="xs" /></button>}
+      {onBack && <button type="button" className="mist-top-back" aria-label={uiText(backLabel)} title={uiText(backLabel)} onClick={onBack}><Icon icon={ArrowLeft} /></button>}
       <div className="mist-crumbs">
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;
-          const content = c.mono ? <span className="mist-mono">{c.label}</span> : c.label;
+          const content = c.mono ? <span className="mist-mono">{uiText(c.label)}</span> : uiText(c.label);
           return <React.Fragment key={i}>
             {i > 0 && <span className="mist-crumb-sep" data-hide-sm={crumbs[i - 1].hideOnMobile || undefined}><Icon icon={ChevronRight} size="xs" /></span>}
-            {last ? <b data-hide-sm={c.hideOnMobile || undefined} title={plainText(c.label) || undefined}>{content}</b> : c.onClick ? <button type="button" onClick={c.onClick} data-hide-sm={c.hideOnMobile || undefined} title={plainText(c.label) || undefined}>{content}</button> : <span data-hide-sm={c.hideOnMobile || undefined} title={plainText(c.label) || undefined}>{content}</span>}
+            {last ? <b data-hide-sm={c.hideOnMobile || undefined} title={uiText(plainText(c.label) || undefined)}>{content}</b> : c.onClick ? <button type="button" onClick={c.onClick} data-hide-sm={c.hideOnMobile || undefined} title={uiText(plainText(c.label) || undefined)}>{content}</button> : <span data-hide-sm={c.hideOnMobile || undefined} title={uiText(plainText(c.label) || undefined)}>{content}</span>}
           </React.Fragment>;
         })}
       </div>
       <div className="mist-top-actions">
-        {sync && <span className="mist-sync" data-state={sync.state && sync.state !== 'ok' ? sync.state : undefined}><i />{sync.text}</span>}
+        {sync && <span className="mist-sync" data-state={sync.state && sync.state !== 'ok' ? sync.state : undefined}><i />{uiText(sync.text)}</span>}
         {extra}
-        {onSearch && <IconButton icon={Search} label="搜索" onClick={onSearch} />}
-        {notifications && <IconButton icon={Bell} label="通知" dot={notifications.unread} onClick={notifications.onClick} />}
-        {onToggleTheme && <IconButton icon={theme === 'dark' ? Sun : Moon} label={theme === 'dark' ? '切换浅色' : '切换深色'} onClick={onToggleTheme} />}
-        {onAsk && <button type="button" className="mist-ask" aria-label="问小竹" onClick={onAsk}><AIBadge /><span>问小竹</span></button>}
+        {onSearch && <IconButton icon={Search} label={uiText("搜索")} onClick={onSearch} />}
+        {notifications && <IconButton icon={Bell} label={uiText("通知")} dot={notifications.unread} onClick={notifications.onClick} />}
+        {onToggleTheme && <IconButton icon={theme === 'dark' ? Sun : Moon} label={uiText(theme === 'dark' ? '切换浅色' : '切换深色')} onClick={onToggleTheme} />}
+        {onAsk && <button type="button" className="mist-ask" aria-label={uiText("问小竹")} onClick={onAsk}><AIBadge /><span>{uiText("问小竹")}</span></button>}
       </div>
     </header>
   );
@@ -168,7 +169,7 @@ export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey }
         {sidebar}
         <main className="mist-canvas">
           {topbar(scrolled)}
-          <div className="mist-scroll" ref={ref} onScroll={e => setScrolled((e.target as HTMLDivElement).scrollTop > 4)}>{children}</div>
+          <div className="mist-scroll" ref={ref} onScroll={e => setScrolled((e.target as HTMLDivElement).scrollTop > 4)}>{uiText(children)}</div>
         </main>
       </div>
     </MobileNavCtx.Provider>
@@ -177,23 +178,23 @@ export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey }
 
 /** 页面容器：最大宽 1240，入场动画。width='narrow' 用于表单/设置，'wide' 用于看板。 */
 export function MistPage({ children, width }: { children: React.ReactNode; width?: 'narrow' | 'wide' }) {
-  return <div className="mist-page" data-width={width}>{children}</div>;
+  return <div className="mist-page" data-width={width}>{uiText(children)}</div>;
 }
 
 /** 页头：eyebrow（所属分组）+ 标题 + 一句话说明 + 右侧操作（最多 1 个 primary）。 */
 export function PageHeader({ eyebrow, title, description, actions, variant }: { eyebrow?: React.ReactNode; title: React.ReactNode; description?: React.ReactNode; actions?: React.ReactNode; variant?: 'greeting' }) {
   return (
     <section className="mist-page-head" data-variant={variant}>
-      <div className="mist-page-head-lead">{eyebrow && <span className="mist-eyebrow">{eyebrow}</span>}<h1 className="mist-h1">{title}</h1>{description && <p className="mist-sub">{description}</p>}</div>
+      <div className="mist-page-head-lead">{eyebrow && <span className="mist-eyebrow">{eyebrow}</span>}<h1 className="mist-h1">{uiText(title)}</h1>{description && <p className="mist-sub">{uiText(description)}</p>}</div>
       {actions && <div className="mist-page-head-acts">{actions}</div>}
     </section>
   );
 }
 export function BackLink({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
-  return <button type="button" className="mist-back" onClick={onClick}><Icon icon={ArrowLeft} size="sm" />{children}</button>;
+  return <button type="button" className="mist-back" onClick={onClick}><Icon icon={ArrowLeft} size="sm" />{uiText(children)}</button>;
 }
 export function Toolbar({ children, right }: { children?: React.ReactNode; right?: React.ReactNode }) {
-  return <div className="mist-toolbar">{children}{right && <div className="mist-toolbar-right">{right}</div>}</div>;
+  return <div className="mist-toolbar">{uiText(children)}{right && <div className="mist-toolbar-right">{right}</div>}</div>;
 }
 
 /** 启动画面（应用首次加载）。 */

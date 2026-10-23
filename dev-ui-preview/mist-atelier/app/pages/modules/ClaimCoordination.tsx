@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 售后索赔协同：通知相关人员 → 质检核实（工厂参与）→ 客户处置（原审批）→ 两笔账（客户 / 工厂追偿）→ 两边都落实才结束。 */
 import React from 'react';
@@ -13,7 +15,7 @@ const RESULT_TONE: Record<ClaimVerifyResult, Tone> = { confirmed: 'bad', partial
 const f = (key: string, label: string, type: ModuleField['type'] = 'text', extra: Partial<ModuleField> = {}): ModuleField => ({ key, label, type, required: true, ...extra });
 const s = (v: ModuleValues, k: string) => String(v[k] ?? '').trim();
 const n = (v: ModuleValues, k: string) => Number(v[k]);
-const money = (value: number | null, currency: string) => value === null ? '币种不同，不自动换算' : new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) + ' ' + currency;
+const money = (value: number | null, currency: string) => value === null ? '币种不同，不自动换算' : new Intl.NumberFormat(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) + ' ' + currency;
 const when = (iso: string) => iso.slice(0, 16).replace('T', ' ');
 
 type Props = {
@@ -96,18 +98,18 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   });
 
   return <>
-    {check?.safety && <Banner tone="bad" title="涉及安全隐患">不能只谈折扣；需负责人单独评估停售或召回。</Banner>}
-    {open && !check && claim.dispositions.length > 0 && <Banner tone="warn" title="质检尚未核实">紧急情况可以先采取保护措施，但责任和金额要等事实核实后再定。</Banner>}
-    {open && ledger.customerSettled && ledger.recoveryOpen && <Banner tone="warn" title="客户这边已解决，但还在等工厂补偿">工厂补偿落实或经负责人批准放弃后，案件才能关闭。</Banner>}
+    {check?.safety && <Banner tone="bad" title={uiText("涉及安全隐患")}>{uiText("不能只谈折扣；需负责人单独评估停售或召回。")}</Banner>}
+    {open && !check && claim.dispositions.length > 0 && <Banner tone="warn" title={uiText("质检尚未核实")}>{uiText("紧急情况可以先采取保护措施，但责任和金额要等事实核实后再定。")}</Banner>}
+    {open && ledger.customerSettled && ledger.recoveryOpen && <Banner tone="warn" title={uiText("客户这边已解决，但还在等工厂补偿")}>{uiText("工厂补偿落实或经负责人批准放弃后，案件才能关闭。")}</Banner>}
     <Card>
-      <CardHeader title="处理进度" sub="业务员协调，质检给结论，负责人批准对外承诺，跟单落实工厂，财务处理款项" tools={<div className="mist-row">
-        {can.write && open && <Button disabled={busy} onClick={notify}>{notice ? '再次通知' : '通知相关人员'}</Button>}
-        {can.qc && open && <Button disabled={busy} onClick={verify}>{check ? '更新质检核实' : '记录质检核实'}</Button>}
+      <CardHeader title={uiText("处理进度")} sub={uiText("业务员协调，质检给结论，负责人批准对外承诺，跟单落实工厂，财务处理款项")} tools={<div className="mist-row">
+        {can.write && open && <Button disabled={busy} onClick={notify}>{uiText(notice ? '再次通知' : '通知相关人员')}</Button>}
+        {can.qc && open && <Button disabled={busy} onClick={verify}>{uiText(check ? '更新质检核实' : '记录质检核实')}</Button>}
       </div>} />
       <div className="mist-card-body"><Checklist items={steps} /></div>
     </Card>
     {(notice || check) && <Card>
-      <CardHeader title="通知与核实" />
+      <CardHeader title={uiText("通知与核实")} />
       <div className="mist-card-body">
         <Facts cols={3} items={[
           ...(notice ? [{ label: '相关工厂', value: notice.supplierName }, { label: '通知方式', value: notice.factoryChannel + ' · ' + notice.by }, { label: '备注', value: notice.note ?? notice.internalNote ?? '—' }] : []),
@@ -121,7 +123,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
       </div>
     </Card>}
     <Card>
-      <CardHeader title="两笔账" sub="我们答应客户什么 · 工厂答应我们什么 · 公司自己承担多少" tools={can.write && open ? <Button disabled={busy} onClick={openRecovery}>向工厂追偿</Button> : undefined} />
+      <CardHeader title={uiText("两笔账")} sub={uiText("我们答应客户什么 · 工厂答应我们什么 · 公司自己承担多少")} tools={can.write && open ? <Button disabled={busy} onClick={openRecovery}>{uiText("向工厂追偿")}</Button> : undefined} />
       <div className="mist-card-body">
         <Facts cols={3} items={[
           { label: '对客户（已批准）', value: money(ledger.customer, ledger.currency) + (ledger.customerPending ? ' · 另有 ' + money(ledger.customerPending, ledger.currency) + ' 待批' : '') },
@@ -133,15 +135,15 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
           { key: 'requested', header: '提出', align: 'right', render: r => money(r.requested, r.currency) },
           { key: 'agreed', header: '工厂同意', align: 'right', render: r => r.agreed === undefined ? '—' : money(r.agreed, r.currency) + (r.method ? ' · ' + CLAIM_METHOD_LABEL[r.method] : '') },
           { key: 'state', header: '状态', render: r => <Pill tone={RECOVERY_TONE[r.state]}>{CLAIM_RECOVERY_LABEL[r.state]}</Pill> },
-          { key: 'note', header: '依据 / 凭据', render: r => <span className="mist-col"><span>{r.settledRef || r.waiveReason || r.agreedNote || r.basis}</span>{(r.method === 'deduction' || r.method === 'mixed' || deducted(r) > 0) && r.state === 'Agreed' && <span className="mist-note">已从货款扣 {money(deducted(r), r.currency)} / 同意 {money(r.agreed ?? 0, r.currency)}{supplierDeductions(state).some(d => d.recoveryId === r.id && !d.reversed) ? ' · ' + supplierDeductions(state).filter(d => d.recoveryId === r.id && !d.reversed).map(d => d.code + ' ' + d.billCode).join('、') : ''}</span>}</span> },
+          { key: 'note', header: '依据 / 凭据', render: r => <span className="mist-col"><span>{r.settledRef || r.waiveReason || r.agreedNote || r.basis}</span>{(r.method === 'deduction' || r.method === 'mixed' || deducted(r) > 0) && r.state === 'Agreed' && <span className="mist-note">{uiText("已从货款扣 ")}{money(deducted(r), r.currency)}{uiText(" / 同意 ")}{money(r.agreed ?? 0, r.currency)}{uiText(supplierDeductions(state).some(d => d.recoveryId === r.id && !d.reversed) ? ' · ' + supplierDeductions(state).filter(d => d.recoveryId === r.id && !d.reversed).map(d => d.code + ' ' + d.billCode).join('、') : '')}</span>}</span> },
           { key: 'actions', header: '操作', render: r => <div className="mist-row">
-            {can.write && open && r.state === 'Negotiating' && <Button variant="quiet" disabled={busy} onClick={() => agree(r)}>记录工厂同意</Button>}
-            {can.finance && open && r.state === 'Agreed' && r.method !== 'deduction' && <Button variant="quiet" disabled={busy} onClick={() => settle(r)}>登记实际落实</Button>}
-            {open && r.state === 'Agreed' && r.method === 'deduction' && <span className="mist-note">由财务在应付里按工厂票据扣款，扣满自动落实</span>}
-            {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && onPayables && deductRoom(r) && <Button variant="quiet" disabled={busy} onClick={onPayables}>去应付扣款</Button>}
-            {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && !deductRoom(r) && <span className="mist-note">这家工厂暂无可扣的未付票据（货款可能已付清），可改为工厂直接付款</span>}
-            {can.write && open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && (r.agreed ?? 0) - deducted(r) > 0 && <Button variant="quiet" disabled={busy} onClick={() => switchToPayment(r)}>改为工厂付款</Button>}
-            {can.approve && open && ['Negotiating', 'Agreed'].includes(r.state) && r.createdById !== actorId && <Button variant="quiet" disabled={busy} onClick={() => waive(r)}>批准放弃</Button>}
+            {can.write && open && r.state === 'Negotiating' && <Button variant="quiet" disabled={busy} onClick={() => agree(r)}>{uiText("记录工厂同意")}</Button>}
+            {can.finance && open && r.state === 'Agreed' && r.method !== 'deduction' && <Button variant="quiet" disabled={busy} onClick={() => settle(r)}>{uiText("登记实际落实")}</Button>}
+            {open && r.state === 'Agreed' && r.method === 'deduction' && <span className="mist-note">{uiText("由财务在应付里按工厂票据扣款，扣满自动落实")}</span>}
+            {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && onPayables && deductRoom(r) && <Button variant="quiet" disabled={busy} onClick={onPayables}>{uiText("去应付扣款")}</Button>}
+            {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && !deductRoom(r) && <span className="mist-note">{uiText("这家工厂暂无可扣的未付票据（货款可能已付清），可改为工厂直接付款")}</span>}
+            {can.write && open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && (r.agreed ?? 0) - deducted(r) > 0 && <Button variant="quiet" disabled={busy} onClick={() => switchToPayment(r)}>{uiText("改为工厂付款")}</Button>}
+            {can.approve && open && ['Negotiating', 'Agreed'].includes(r.state) && r.createdById !== actorId && <Button variant="quiet" disabled={busy} onClick={() => waive(r)}>{uiText("批准放弃")}</Button>}
           </div> },
         ]} />}
       </div>

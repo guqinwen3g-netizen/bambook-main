@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
 import { Banner, Button, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink } from '../../../../components/mist';
@@ -41,20 +42,20 @@ export function AccountAccessPage(){
  const title=done?(kind==='invite'?'登录密码已设置':'密码已更新'):linkInvalid?'链接已失效':requestMode?'找回密码':kind==='invite'?'设置登录密码':'设置新密码';
  const waitTime=String(Math.floor(remaining/60)).padStart(2,'0')+':'+String(remaining%60).padStart(2,'0');
  const returnToLogin=()=>nav.go('login');
- return <div className="mist-auth"><div className="mist-auth-brand"><MistMark className="mist-hero-ring"/><div className="mist-brand" style={{padding:0}}><MistMark/><MistWordmark/></div><div className="mist-auth-brand-copy"><h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br/>{BAMBOOK_BRAND.headline[1]}</h1><p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p></div></div><div className="mist-auth-panel"><form className="mist-auth-form" aria-label={title} onSubmit={submit} aria-busy={busy}>
-  <h2 ref={heading} tabIndex={-1} className="mist-h1 mist-auth-title">{title}</h2>
-  {done?<Button variant="primary" onClick={returnToLogin}>返回登录</Button>
-   :linkInvalid?<><p className="mist-sub">{kind==='invite'?'请联系管理员重新发送邀请。':'请重新申请重置邮件。'}</p>{kind==='recovery'&&<Button variant="primary" onClick={()=>nav.go('platform-recovery')}>重新申请</Button>}<TextLink onClick={returnToLogin}>返回登录</TextLink></>
+ return <div className="mist-auth"><div className="mist-auth-brand"><MistMark className="mist-hero-ring"/><div className="mist-brand" style={{padding:0}}><MistMark/><MistWordmark/></div><div className="mist-auth-brand-copy"><h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br/>{BAMBOOK_BRAND.headline[1]}</h1><p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p></div></div><div className="mist-auth-panel"><form className="mist-auth-form" aria-label={uiText(title)} onSubmit={submit} aria-busy={busy}>
+  <h2 ref={heading} tabIndex={-1} className="mist-h1 mist-auth-title">{uiText(title)}</h2>
+  {done?<Button variant="primary" onClick={returnToLogin}>{uiText("返回登录")}</Button>
+   :linkInvalid?<><p className="mist-sub">{uiText(kind==='invite'?'请联系管理员重新发送邀请。':'请重新申请重置邮件。')}</p>{kind==='recovery'&&<Button variant="primary" onClick={()=>nav.go('platform-recovery')}>{uiText("重新申请")}</Button>}<TextLink onClick={returnToLogin}>{uiText("返回登录")}</TextLink></>
    :<>
-    {error&&<Banner tone="bad" title={error}/>}
-    <Field label="工作邮箱"><TextInput aria-label="工作邮箱" type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={busy||!requestMode} value={email} onChange={e=>{setEmail(e.target.value);setNotice('');setAccepted(false);}}/></Field>
+    {error&&<Banner tone="bad" title={uiText(error)}/>}
+    <Field label={uiText("工作邮箱")}><TextInput aria-label={uiText("工作邮箱")} type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={busy||!requestMode} value={email} onChange={e=>{setEmail(e.target.value);setNotice('');setAccepted(false);}}/></Field>
     {!requestMode&&<>
-     <Field label="新密码" hint={<span id="account-new-password-help">{PASSWORD_HINT}</span>} error={weak?<span id="account-new-password-help" role="alert">{new TextEncoder().encode(password).length>72?'密码过长，请缩短后重试。':PASSWORD_HINT}</span>:undefined}><PasswordInput aria-label="新密码" aria-describedby="account-new-password-help" aria-invalid={weak||undefined} autoComplete="new-password" required minLength={8} maxLength={72} disabled={busy} value={password} onChange={e=>setPassword(e.target.value)}/></Field>
-     <Field label="确认新密码" error={mismatch?<span id="account-confirm-password-error" role="alert">两次输入的密码不一致。</span>:undefined}><PasswordInput aria-label="确认新密码" aria-describedby={mismatch?'account-confirm-password-error':undefined} aria-invalid={mismatch||undefined} autoComplete="new-password" required disabled={busy} value={confirm} onChange={e=>setConfirm(e.target.value)}/></Field>
+     <Field label={uiText("新密码")} hint={<span id="account-new-password-help">{PASSWORD_HINT}</span>} error={weak?<span id="account-new-password-help" role="alert">{uiText(new TextEncoder().encode(password).length>72?'密码过长，请缩短后重试。':PASSWORD_HINT)}</span>:undefined}><PasswordInput aria-label={uiText("新密码")} aria-describedby="account-new-password-help" aria-invalid={weak||undefined} autoComplete="new-password" required minLength={8} maxLength={72} disabled={busy} value={password} onChange={e=>setPassword(e.target.value)}/></Field>
+     <Field label={uiText("确认新密码")} error={mismatch?<span id="account-confirm-password-error" role="alert">{uiText("两次输入的密码不一致。")}</span>:undefined}><PasswordInput aria-label={uiText("确认新密码")} aria-describedby={mismatch?'account-confirm-password-error':undefined} aria-invalid={mismatch||undefined} autoComplete="new-password" required disabled={busy} value={confirm} onChange={e=>setConfirm(e.target.value)}/></Field>
     </>}
-    <Button type="submit" variant="primary" block loading={busy} disabled={busy||requestMode&&remaining>0}>{busy?'正在提交…':requestMode?(remaining>0?`重新发送（${waitTime}）`:accepted?'重新发送':'发送重置链接'):kind==='invite'?'设置登录密码':'更新密码'}</Button>
-    {notice&&<p role="status" className="mist-sub">{notice}</p>}
-    <TextLink disabled={busy} onClick={returnToLogin}>返回登录</TextLink>
+    <Button type="submit" variant="primary" block loading={busy} disabled={busy||requestMode&&remaining>0}>{uiText(busy?'正在提交…':requestMode?(remaining>0?`重新发送（${waitTime}）`:accepted?'重新发送':'发送重置链接'):kind==='invite'?'设置登录密码':'更新密码')}</Button>
+    {notice&&<p role="status" className="mist-sub">{uiText(notice)}</p>}
+    <TextLink disabled={busy} onClick={returnToLogin}>{uiText("返回登录")}</TextLink>
    </>}
  </form></div></div>;
 }

@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 关系智库：统一组织主体（同一公司可同时是客户和供应商），联系人、别名、信用与在手业务；往来冻结 / 解冻留痕并在报价、订单、采购处生效。 */
 import React from 'react';
 import { Archive, ArchiveRestore, Building2, Download, Link2, Lock, Pencil, Plus, SearchX, Undo2, Unlock, UserPlus, Users } from 'lucide-react';
@@ -56,7 +58,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   const all = state?.market.relations || [];
   const customer = (r: MarketRelation) => state?.customers.find(c => c.id === r.customerId);
   const supplier = (r: MarketRelation) => state?.market.suppliers.find(s => s.id === r.supplierId);
-  const business = React.useMemo(() => new Map(all.map(r => [r.id, relationBusiness(state, r)])), [state, all]);
+  const business = React.useMemo(() => new Map(all.map(r => [r.id, relationBusiness(state, r)])), [state, all, interfaceLocale()]);
   const needle = query.trim().toLowerCase();
   const flagged = (r: MarketRelation, f: FlagFilter) => f === 'all' || (f === 'hold' ? !!r.hold : f === 'dual' ? !!(r.customerId && r.supplierId) : !relationContacts(state, r).length && !(supplier(r)?.contacts.length));
   const searched = all.filter(r => (statusFilter === 'any' || r.status === statusFilter) && flagged(r, flagFilter)
@@ -112,29 +114,29 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
       ],
       submit: v => run({ type: 'handover.customer', payload: { customerId: c.id, toUserId: String(v.toUserId ?? ''), reason: String(v.reason ?? ''), orderIds: movable.filter(o => v['order:' + o.id]).map(o => o.id), opportunityIds: scope.opportunities.filter(o => v['opp:' + o.id]).map(o => o.id) } } as any) };
   };
-  const identityPills = (r: MarketRelation) => <>{r.customerId && <Pill tone="accent">客户</Pill>}{r.supplierId && <Pill tone="ok">供应商</Pill>}{!r.customerId && !r.supplierId && <Pill>{CATEGORY_LABEL[r.category]}</Pill>}</>;
+  const identityPills = (r: MarketRelation) => <>{r.customerId && <Pill tone="accent">{uiText("客户")}</Pill>}{r.supplierId && <Pill tone="ok">{uiText("供应商")}</Pill>}{!r.customerId && !r.supplierId && <Pill>{CATEGORY_LABEL[r.category]}</Pill>}</>;
   const columns: Column<MarketRelation>[] = [
     { key: 'name', header: '组织', width: 'minmax(180px,1.4fr)', render: r => <ObjectCell name={r.name} meta={r.aliases.length ? r.aliases.join(' · ') : [customer(r)?.code, supplier(r)?.code].filter(Boolean).join(' · ') || '—'} /> },
     { key: 'identity', header: '身份', width: '120px', render: r => <span className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>{identityPills(r)}</span> },
     { key: 'country', header: '地区', width: '80px', hideOnMobile: true, render: r => r.country || '—' },
-    { key: 'contacts', header: '联系人', width: '72px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{relationContacts(state, r).length + (r.customerId && r.supplierId ? supplier(r)?.contacts.length || 0 : 0)}</span> },
+    { key: 'contacts', header: '联系人', width: '72px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{uiText(relationContacts(state, r).length + (r.customerId && r.supplierId ? supplier(r)?.contacts.length || 0 : 0))}</span> },
     { key: 'business', header: '在手', width: '64px', align: 'right', render: r => <span className="mist-num">{business.get(r.id)?.total || 0}</span> },
-    { key: 'status', header: '状态', width: '88px', render: r => r.hold ? <Pill tone="bad">已冻结</Pill> : r.status === 'archived' ? <Pill>已归档</Pill> : <Pill tone="ok">正常</Pill> },
+    { key: 'status', header: '状态', width: '88px', render: r => r.hold ? <Pill tone="bad">{uiText("已冻结")}</Pill> : r.status === 'archived' ? <Pill>{uiText("已归档")}</Pill> : <Pill tone="ok">{uiText("正常")}</Pill> },
   ];
   const empty = all.length
-    ? <EmptyState icon={SearchX} title="没有符合条件的组织" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setIdentity('all'); setFlagFilter('all'); setStatusFilter('active'); }}>清除筛选</Button>} />
-    : <EmptyState icon={Users} title="还没有关系档案" description="新建客户或供应商时会自动生成；货代、报关行等其它组织可在这里登记。" action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>建立关系档案</Button> : undefined} />;
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的组织")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setIdentity('all'); setFlagFilter('all'); setStatusFilter('active'); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={Users} title={uiText("还没有关系档案")} description={uiText("新建客户或供应商时会自动生成；货代、报关行等其它组织可在这里登记。")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button> : undefined} />;
   const detail = selected && state
     ? <RelationDetail r={selected} state={state} can={can} canHandover={canHandover} onHandover={() => { const spec = handoverSpec(selected); if (spec) setDialog(spec); }} locked={locked} business={business.get(selected.id)!} identityPills={identityPills(selected)} linkableCount={linkable.length}
         onEdit={() => setDialog(profileSpec(selected))} onHold={f => setDialog(holdSpec(selected, f))} onLink={() => setDialog(linkSpec(selected))}
         onContact={(kind, parentId, owner, c) => setDialog(contactSpec(kind, parentId, owner, c))} onArchive={() => void run({ type: 'market.relation.status', payload: { id: selected.id, status: selected.status === 'active' ? 'archived' : 'active' } })}
         onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can)} history={history(selected.id)} />
-    : <EmptyState icon={Building2} title="组织档案" description="从左侧列表选择一个组织，查看身份、联系人、信用与在手业务。" compact />;
+    : <EmptyState icon={Building2} title={uiText("组织档案")} description={uiText("从左侧列表选择一个组织，查看身份、联系人、信用与在手业务。")} compact />;
   const summary = selected ? (() => {
     const b = business.get(selected.id), contacts = relationContacts(state, selected), main = contacts.find(c => c.primary) || contacts[0];
     return <PreviewSummary openLabel="打开组织档案" onOpen={() => full.open(selected.id)} data={{
       code: [customer(selected)?.code, supplier(selected)?.code].filter(Boolean).join(' · ') || undefined,
-      status: selected.hold ? <Pill tone="bad">已冻结</Pill> : selected.status === 'archived' ? <Pill>已归档</Pill> : <Pill tone="ok">正常</Pill>,
+      status: selected.hold ? <Pill tone="bad">{uiText("已冻结")}</Pill> : selected.status === 'archived' ? <Pill>{uiText("已归档")}</Pill> : <Pill tone="ok">{uiText("正常")}</Pill>,
       title: selected.name, description: [selected.aliases.length ? '别名 ' + selected.aliases.join('、') : '', selected.country].filter(Boolean).join(' · ') || undefined,
       facts: [
         { label: '身份', value: <span className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>{identityPills(selected)}</span> },
@@ -142,22 +144,22 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
         { label: '在手业务', value: b?.total ? `${b.total} 项` : '无' },
         ...(b?.receivable.length ? [{ label: '未收款', value: b.receivable.map(([c, v]) => `${c} ${v.toLocaleString()}`).join('；') }] : []),
       ],
-      extra: selected.hold ? <Banner tone="bad" title="往来已冻结">{selected.hold.reason || '报价、订单、采购处不能新增业务。'}</Banner> : undefined,
+      extra: selected.hold ? <Banner tone="bad" title={uiText("往来已冻结")}>{selected.hold.reason || '报价、订单、采购处不能新增业务。'}</Banner> : undefined,
     }} />;
   })() : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="关系智库" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
-    <PageHeader eyebrow="客户与市场 · 组织关系" title="关系智库" description="同一组织只有一份档案：客户、供应商身份与联系人、别名、在手业务集中查看；冻结往来会在报价、订单、采购处生效。"
+    <PageHeader eyebrow={uiText("客户与市场 · 组织关系")} title={uiText("关系智库")} description={uiText("同一组织只有一份档案：客户、供应商身份与联系人、别名、在手业务集中查看；冻结往来会在报价、订单、采购处生效。")}
       actions={<>
-        <Button icon={Download} onClick={() => downloadModuleCsv('关系智库.csv', ['组织', '身份', '别名', '地区', '地址', '联系人', '在手业务', '状态', '冻结原因'], rows.map(r => [r.name, relationIdentities(r).map(i => ({ customer: '客户', supplier: '供应商', agent: '代理', partner: '合作伙伴', other: '其他' })[i]).join(' + '), r.aliases.join('、'), r.country, r.address, relationContacts(state, r).map(c => c.name).join('、'), business.get(r.id)?.total || 0, r.hold ? '已冻结' : r.status === 'archived' ? '已归档' : '正常', r.hold?.reason || '']))}>导出</Button>
-        {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>建立关系档案</Button>}
+        <Button icon={Download} onClick={() => downloadModuleCsv('关系智库.csv', ['组织', '身份', '别名', '地区', '地址', '联系人', '在手业务', '状态', '冻结原因'], rows.map(r => [r.name, relationIdentities(r).map(i => ({ customer: '客户', supplier: '供应商', agent: '代理', partner: '合作伙伴', other: '其他' })[i]).join(' + '), r.aliases.join('、'), r.country, r.address, relationContacts(state, r).map(c => c.name).join('、'), business.get(r.id)?.total || 0, r.hold ? '已冻结' : r.status === 'archived' ? '已归档' : '正常', r.hold?.reason || '']))}>{uiText("导出")}</Button>
+        {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有关系档案写权限，可以查看组织、联系人与在手业务。</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title="关系数据未加载" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
+    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有关系档案写权限，可以查看组织、联系人与在手业务。")}</Banner></div>}
+    {error && <div className="mist-section"><Banner tone="bad" title={uiText("关系数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     <Toolbar>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索组织、别名、编码、地址或联系人" />
-      <Dropdown<FlagFilter> label="提醒" value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'hold', label: '已冻结' }, { value: 'dual', label: '既是客户也是供应商' }, { value: 'noContact', label: '没有联系人' }]} />
-      <Dropdown<StatusFilter> label="档案" value={statusFilter} onChange={setStatusFilter} options={[{ value: 'active', label: '使用中' }, { value: 'archived', label: '已归档' }, { value: 'any', label: '全部' }]} />
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索组织、别名、编码、地址或联系人")} />
+      <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'hold', label: '已冻结' }, { value: 'dual', label: '既是客户也是供应商' }, { value: 'noContact', label: '没有联系人' }]} />
+      <Dropdown<StatusFilter> label={uiText("档案")} value={statusFilter} onChange={setStatusFilter} options={[{ value: 'active', label: '使用中' }, { value: 'archived', label: '已归档' }, { value: 'any', label: '全部' }]} />
     </Toolbar>
     <Pipeline<Identity> value={identity} onChange={setIdentity} items={[
       { value: 'all', label: '全部', count: count('all'), color: 'var(--mist-ink-2)' },
@@ -168,7 +170,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
       { value: 'other', label: '其他', count: count('other'), color: 'var(--mist-ink-3)' },
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected?.name || '组织档案'} drawerSub={selected ? relationIdentities(selected).length > 1 ? '客户 + 供应商' : CATEGORY_LABEL[selected.category] : undefined}
-      list={<Card><DataTable ariaLabel="关系档案列表" loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
+      list={<Card><DataTable ariaLabel={uiText("关系档案列表")} loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
@@ -176,8 +178,8 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
 
 function ContactRows({ contacts, edit }: { contacts: MarketRelation['contacts']; edit?: (c: MarketRelation['contacts'][number]) => void }) {
   return contacts.length ? <div className="mist-col" style={{ gap: 0 }}>{contacts.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}>
-    <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{c.role ? ' · ' + c.role : ''}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>主联系人</Pill>}{edit && <Button variant="quiet" onClick={() => edit(c)}>编辑</Button>}
-  </div>)}</div> : <span className="mist-muted">未登记联系人。</span>;
+    <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{uiText(c.role ? ' · ' + c.role : '')}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>{uiText("主联系人")}</Pill>}{edit && <Button variant="quiet" onClick={() => edit(c)}>{uiText("编辑")}</Button>}
+  </div>)}</div> : <span className="mist-muted">{uiText("未登记联系人。")}</span>;
 }
 
 function RelationDetail({ r, state, can, canHandover, onHandover, locked, business, identityPills, linkableCount, onEdit, onHold, onLink, onContact, onArchive, onOpen, attachments, history }: {
@@ -190,9 +192,9 @@ function RelationDetail({ r, state, can, canHandover, onHandover, locked, busine
   const writeReason = !can ? '没有关系档案写权限' : false;
   const archiveReason = writeReason || (r.status === 'active' && business.total ? `还有在手业务 ${business.total} 项，完成或交接后再归档` : false);
   return <DetailBody data-relation-detail={r.id} heading={<div><span className="mist-muted">{[customer?.code, supplier?.code].filter(Boolean).join(' · ') || CATEGORY_LABEL[r.category]}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{r.name}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}>{identityPills}{r.hold && <Pill tone="bad">已冻结</Pill>}{r.status === 'archived' && <Pill>已归档</Pill>}</div>
-    {r.hold && <Banner tone="bad" title={`往来已冻结 · ${shortWhen(r.hold.at)} ${r.hold.actor}`}>{r.hold.reason}。{[customer && '不能新建报价、发送报价、转订单或新建订单', supplier && '不能新建采购单'].filter(Boolean).join('；')}；在手业务继续执行。</Banner>}
-    {dual && !r.hold && <Banner tone="neutral" title="既是客户也是供应商">客户与供应商的联系人、业务分别维护；冻结往来对两种身份同时生效。</Banner>}
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}>{identityPills}{r.hold && <Pill tone="bad">{uiText("已冻结")}</Pill>}{r.status === 'archived' && <Pill>{uiText("已归档")}</Pill>}</div>
+    {r.hold && <Banner tone="bad" title={ui`往来已冻结 · ${shortWhen(r.hold.at)} ${r.hold.actor}`}>{r.hold.reason}。{[customer && '不能新建报价、发送报价、转订单或新建订单', supplier && '不能新建采购单'].filter(Boolean).join('；')}{uiText("；在手业务继续执行。")}</Banner>}
+    {dual && !r.hold && <Banner tone="neutral" title={uiText("既是客户也是供应商")}>{uiText("客户与供应商的联系人、业务分别维护；冻结往来对两种身份同时生效。")}</Banner>}
     <ActionBar busy={locked} actions={[
       { label: '编辑档案', icon: Pencil, onClick: onEdit, reason: writeReason },
       { label: '冻结往来', icon: Lock, onClick: () => onHold(true), reason: writeReason, hidden: !!r.hold },
@@ -212,27 +214,27 @@ function RelationDetail({ r, state, can, canHandover, onHandover, locked, busine
       { label: '查看范围', value: '公司成员按角色权限查看' },
     ]} />
     {r.note && <p className="mist-sub">{r.note}</p>}
-    <DetailBlock title={`在手业务 · ${business.total}`}>
-      {business.total ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label="在手业务" data-relation-business>
-        {business.orders.map(o => <div key={o.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill tone="accent">订单</Pill><Mono>{o.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted">{o.state} · 交期 {o.due}</span><Button variant="quiet" onClick={() => onOpen('orders/detail', o.id)}>打开</Button></div>)}
-        {business.quotations.map(q => <div key={q.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill>报价</Pill><Mono>{q.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted mist-num">{q.currency} {q.total} · 至 {q.validUntil}</span><Button variant="quiet" onClick={() => onOpen('quotations', q.id)}>打开</Button></div>)}
-        {business.opportunities.map(o => <div key={o.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill>商机</Pill><span style={{ flex: '1 1 8em', minWidth: 0 }}>{o.title}<small className="mist-cell-sub">{o.owner || '未指定负责人'} · 预计 {o.expectedDate || '—'}</small></span><Button variant="quiet" onClick={() => onOpen('crm', r.customerId, { customerId: r.customerId })}>打开</Button></div>)}
-        {business.purchases.map(p => <div key={p.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill tone="ok">采购</Pill><Mono>{p.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted">{p.description}</span><Button variant="quiet" onClick={() => onOpen('procurement', p.id)}>打开</Button></div>)}
-      </div> : <span className="mist-muted">没有在手业务。</span>}
+    <DetailBlock title={ui`在手业务 · ${business.total}`}>
+      {business.total ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("在手业务")} data-relation-business>
+        {business.orders.map(o => <div key={o.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill tone="accent">{uiText("订单")}</Pill><Mono>{o.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted">{o.state}{uiText(" · 交期 ")}{o.due}</span><Button variant="quiet" onClick={() => onOpen('orders/detail', o.id)}>{uiText("打开")}</Button></div>)}
+        {business.quotations.map(q => <div key={q.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill>{uiText("报价")}</Pill><Mono>{q.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted mist-num">{q.currency} {q.total}{uiText(" · 至 ")}{q.validUntil}</span><Button variant="quiet" onClick={() => onOpen('quotations', q.id)}>{uiText("打开")}</Button></div>)}
+        {business.opportunities.map(o => <div key={o.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill>{uiText("商机")}</Pill><span style={{ flex: '1 1 8em', minWidth: 0 }}>{o.title}<small className="mist-cell-sub">{o.owner || '未指定负责人'}{uiText(" · 预计 ")}{o.expectedDate || '—'}</small></span><Button variant="quiet" onClick={() => onOpen('crm', r.customerId, { customerId: r.customerId })}>{uiText("打开")}</Button></div>)}
+        {business.purchases.map(p => <div key={p.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill tone="ok">{uiText("采购")}</Pill><Mono>{p.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted">{p.description}</span><Button variant="quiet" onClick={() => onOpen('procurement', p.id)}>{uiText("打开")}</Button></div>)}
+      </div> : <span className="mist-muted">{uiText("没有在手业务。")}</span>}
     </DetailBlock>
-    <DetailBlock title={dual ? `客户联系人 · ${contacts.length}` : `联系人 · ${contacts.length}`} aside={can ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact('relation', r.id, dual ? '客户侧' : r.name)}>添加</Button> : undefined}>
+    <DetailBlock title={uiText(dual ? `客户联系人 · ${contacts.length}` : `联系人 · ${contacts.length}`)} aside={can ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact('relation', r.id, dual ? '客户侧' : r.name)}>{uiText("添加")}</Button> : undefined}>
       <ContactRows contacts={contacts} edit={can ? c => onContact('relation', r.id, r.name, c) : undefined} />
     </DetailBlock>
-    {dual && <DetailBlock title={`供应商联系人 · ${supplier!.contacts.length}`} aside={can && state ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact('supplier', supplier!.id, '供应商侧')}>添加</Button> : undefined}>
+    {dual && <DetailBlock title={ui`供应商联系人 · ${supplier!.contacts.length}`} aside={can && state ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact('supplier', supplier!.id, '供应商侧')}>{uiText("添加")}</Button> : undefined}>
       <ContactRows contacts={supplier!.contacts} edit={can ? c => onContact('supplier', supplier!.id, supplier!.name, c) : undefined} />
     </DetailBlock>}
-    {customer && !!customerHandovers(customer).length && <DetailBlock title="交接记录">
+    {customer && !!customerHandovers(customer).length && <DetailBlock title={uiText("交接记录")}>
       <Timeline events={[...customerHandovers(customer)].reverse().map(h => ({ who: `${h.from || '未指定'} → ${h.to}`, when: `${shortWhen(h.at)} · ${h.actor}`, text: `${h.reason}${h.orders.length ? ` · 订单 ${h.orders.join('、')}` : ''}${h.opportunities.length ? ` · 商机 ${h.opportunities.length} 个` : ''}${h.tasks ? ` · 改派待办 ${h.tasks} 条` : ''}` }))} />
     </DetailBlock>}
-    {!!r.holdHistory?.length && <DetailBlock title="冻结记录">
+    {!!r.holdHistory?.length && <DetailBlock title={uiText("冻结记录")}>
       <Timeline events={[...r.holdHistory].reverse().map(h => ({ who: h.action === 'freeze' ? '冻结' : '解冻', when: `${shortWhen(h.at)} · ${h.actor}`, text: h.reason }))} />
     </DetailBlock>}
-    <DetailBlock title="附件">{attachments}</DetailBlock>
-    <DetailBlock title="处理记录">{history}</DetailBlock>
+    <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
+    <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;
 }

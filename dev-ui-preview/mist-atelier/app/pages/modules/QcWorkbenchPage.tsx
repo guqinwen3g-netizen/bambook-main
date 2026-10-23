@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, FlaskConical, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
@@ -150,8 +151,8 @@ export function QcWorkbenchPage() {
   const clearFilters = () => { setQuery(''); setStateFilter('all'); setOwner('all'); };
   const sourceSample = current ? state?.fulfillment.samples.find(sample => sample.id === current.sampleId) : undefined;
   const empty = scoped.length
-    ? <EmptyState icon={SearchX} title="没有符合条件的QC任务" description="换个关键词或清除筛选。" action={<Button onClick={clearFilters}>清除筛选</Button>} />
-    : <EmptyState icon={ClipboardCheck} title={loading ? '正在读取QC任务' : `还没有${DOMAIN_LABEL[domain]}的${KIND_LABEL[kind]}任务`} description={kind === 'sample' ? '业务员在已返样的开发版本或订单样品实物上发起送检后，任务会出现在这里。' : '业务员在准确生产分支发起生产检验后，任务会出现在这里。'} action={canRequest ? <Button icon={Plus} onClick={request}>从来源发起QC</Button> : undefined} />;
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的QC任务")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={clearFilters}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={ClipboardCheck} title={uiText(loading ? '正在读取QC任务' : `还没有${DOMAIN_LABEL[domain]}的${KIND_LABEL[kind]}任务`)} description={uiText(kind === 'sample' ? '业务员在已返样的开发版本或订单样品实物上发起送检后，任务会出现在这里。' : '业务员在准确生产分支发起生产检验后，任务会出现在这里。')} action={canRequest ? <Button icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : undefined} />;
 
   const list = mode === 'board'
     ? (rows.length ? <Kanban columns={[
@@ -159,18 +160,18 @@ export function QcWorkbenchPage() {
         { id: 'working', title: '处理中', color: 'var(--mist-accent)', items: rows.filter(t => t.state === 'working') },
         { id: 'blocked', title: '质量问题', color: 'var(--mist-bad)', items: rows.filter(isNok) },
         { id: 'reported', title: '报告已回传', color: 'var(--mist-ok)', items: rows.filter(t => t.state === 'reported') },
-      ]} itemKey={t => t.id} onOpen={pick} renderCard={t => <><Mono>{t.code}</Mono><div>{state ? fulfillmentSourceLabel(state, t.source) : t.code}</div><div>{t.factory} · {t.location}</div><div className="mist-kb-card-foot"><Pill tone={QC_STATE_TONE[t.state]}>{QC_STATE_LABEL[t.state]}</Pill><span className="mist-spacer" />{t.due}</div></>} /> : <Card>{empty}</Card>)
+      ]} itemKey={t => t.id} onOpen={pick} renderCard={t => <><Mono>{t.code}</Mono><div>{uiText(state ? fulfillmentSourceLabel(state, t.source) : t.code)}</div><div>{t.factory} · {t.location}</div><div className="mist-kb-card-foot"><Pill tone={QC_STATE_TONE[t.state]}>{QC_STATE_LABEL[t.state]}</Pill><span className="mist-spacer" />{t.due}</div></>} /> : <Card>{empty}</Card>)
     : <div className="mist-col" data-qc-groups>
         {!groups.length && <Card>{empty}</Card>}
         {groups.map(group => { const open = !collapsed.includes(group.key); return <Card key={group.key} data-qc-group={group.key}>
-          <CardHeader title={`${group.factory} · ${group.location}`} sub={[group.open ? `${group.open} 条待办` : '全部已回传', group.earliest ? `最早 ${shortWhen(group.earliest)}` : '', group.contacts.length ? `联系人 ${group.contacts.join('、')}` : '现场联系人未记录'].filter(Boolean).join(' · ')}
+          <CardHeader title={uiText(`${group.factory} · ${group.location}`)} sub={uiText([group.open ? `${group.open} 条待办` : '全部已回传', group.earliest ? `最早 ${shortWhen(group.earliest)}` : '', group.contacts.length ? `联系人 ${group.contacts.join('、')}` : '现场联系人未记录'].filter(Boolean).join(' · '))}
             leading={<Tile icon={domain === 'fabric' ? Layers : Shirt} tone={group.open ? 'accent' : undefined} />}
-            tools={<Button size="sm" variant="quiet" icon={open ? ChevronDown : ChevronRight} aria-expanded={open} aria-label={`${open ? '收起' : '展开'} ${group.factory} · ${group.location}`} onClick={() => toggleGroup(group.key)}>{group.tasks.length} 条</Button>} />
+            tools={<Button size="sm" variant="quiet" icon={open ? ChevronDown : ChevronRight} aria-expanded={open} aria-label={uiText(`${open ? '收起' : '展开'} ${group.factory} · ${group.location}`)} onClick={() => toggleGroup(group.key)}>{group.tasks.length}{uiText(" 条")}</Button>} />
           {open && <div className="mist-tasks">{group.tasks.map(task => <button key={task.id} type="button" className="mist-task" data-workbench-item aria-pressed={task.id === current?.id} onClick={() => pick(task)}>
-            <span className="mist-task-when" data-urgent={isOverdue(task, day) || undefined}>{task.due ? shortWhen(task.due) : '未排期'}</span>
+            <span className="mist-task-when" data-urgent={isOverdue(task, day) || undefined}>{uiText(task.due ? shortWhen(task.due) : '未排期')}</span>
             <div style={{ minWidth: 0 }}>
-              <div className="mist-task-t"><Mono>{task.code}</Mono> · {state ? fulfillmentSourceLabel(state, task.source) : ''}</div>
-              <div className="mist-task-d">{state ? taskSubject(state, task) : ''} · 发起 {task.requestedBy}{isOverdue(task, day) ? ' · 已过预计检查日' : ''}</div>
+              <div className="mist-task-t"><Mono>{task.code}</Mono> · {uiText(state ? fulfillmentSourceLabel(state, task.source) : '')}</div>
+              <div className="mist-task-d">{uiText(state ? taskSubject(state, task) : '')}{uiText(" · 发起 ")}{task.requestedBy}{uiText(isOverdue(task, day) ? ' · 已过预计检查日' : '')}</div>
             </div>
             <Pill tone={QC_STATE_TONE[task.state]}>{QC_STATE_LABEL[task.state]}</Pill>
             <span className="mist-note">{task.assignee || '未认领'}</span>
@@ -189,7 +190,7 @@ export function QcWorkbenchPage() {
         onReschedule={() => setDialog(rescheduleSpec(current))}
         onBack={sourceSample ? () => go('samples', sourceSample.id, sourceSample.role === 'shipping' && sourceSample.shipmentId ? { section: 'shipment:' + sourceSample.shipmentId, productionId: sourceSample.source.kind === 'orderLine' ? sourceSample.source.productionId : undefined } : {}) : undefined}
         backLabel={sourceSample?.role === 'shipping' ? '返回本票船样' : '返回实物样品'} />
-    : <EmptyState icon={ClipboardCheck} title="任务详情" description={loading ? '正在读取QC任务' : '从左侧选择一条任务，查看来源、现场与报告'} compact />;
+    : <EmptyState icon={ClipboardCheck} title={uiText("任务详情")} description={uiText(loading ? '正在读取QC任务' : '从左侧选择一条任务，查看来源、现场与报告')} compact />;
 
   const summary = current && state ? (() => { const gate = qcGate(current);
     return <PreviewSummary openLabel="打开QC任务" onOpen={() => full.open(current.id)} data={{
@@ -198,34 +199,34 @@ export function QcWorkbenchPage() {
       facts: [
         { label: '类型', value: `${DOMAIN_LABEL[current.domain]} · ${KIND_LABEL[current.kind]}` },
         { label: '现场', value: `${current.factory} · ${current.location}` },
-        { label: '预计检查', value: current.due ? (isOverdue(current, day) ? <span style={{ color: 'var(--mist-bad)' }}>{current.due} · 已过期</span> : current.due) : '未排期' },
+        { label: '预计检查', value: current.due ? (isOverdue(current, day) ? <span style={{ color: 'var(--mist-bad)' }}>{current.due}{uiText(" · 已过期")}</span> : current.due) : '未排期' },
         { label: 'QC', value: current.assignee || '未认领' }, { label: '发起人', value: current.requestedBy },
         { label: '报告', value: current.reportIds.length ? `${current.reportIds.length} 份` : '未回传' },
       ],
-      extra: <Banner tone={gate.tone} title={gate.title} />,
+      extra: <Banner tone={gate.tone} title={uiText(gate.title)} />,
     }} />; })() : null;
   if (full.active && current && state) return <ListDetailPage backLabel="QC 工作台" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
-    <PageHeader eyebrow="订单履约 · 专业检验" title="QC 工作台" description="先选专业板块，再处理准确样品与生产分支。报告回到业务来源，由业务员继续主线。"
+    <PageHeader eyebrow={uiText("订单履约 · 专业检验")} title={uiText("QC 工作台")} description={uiText("先选专业板块，再处理准确样品与生产分支。报告回到业务来源，由业务员继续主线。")}
       actions={<>
-        <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>刷新</Button>
-        <Button variant="primary" icon={Plus} disabled={!canRequest} title={canRequest ? undefined : '送检由业务员在准确来源发起'} onClick={request}>从来源发起QC</Button>
+        <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>{uiText("刷新")}</Button>
+        <Button variant="primary" icon={Plus} disabled={!canRequest} title={uiText(canRequest ? undefined : '送检由业务员在准确来源发起')} onClick={request}>{uiText("从来源发起QC")}</Button>
       </>} />
-    {(error || failure) && <div className="mist-section"><Banner tone="bad" title="QC操作未完成" actions={error ? <Button onClick={() => void refresh()}>重试</Button> : undefined}>{failure || error}</Banner></div>}
-    <div className="mist-domains" role="tablist" aria-label="QC 专业板块">
+    {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("QC操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
+    <div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")}>
       {(['fabric', 'garment'] as const).map(value => { const m = metrics[value]; return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" onClick={() => changeDomain(value)}>
-        <span className="mist-domain-h"><Tile icon={value === 'fabric' ? Layers : Shirt} tone={domain === value ? 'accent' : undefined} /><b>{DOMAIN_LABEL[value]}</b><span className="mist-spacer" /><span className="mist-note">{canQc(value) ? '可处理' : '只读'} · 共 {m.total} 条</span></span>
+        <span className="mist-domain-h"><Tile icon={value === 'fabric' ? Layers : Shirt} tone={domain === value ? 'accent' : undefined} /><b>{DOMAIN_LABEL[value]}</b><span className="mist-spacer" /><span className="mist-note">{uiText(canQc(value) ? '可处理' : '只读')}{uiText(" · 共 ")}{m.total}{uiText(" 条")}</span></span>
         <span className="mist-domain-nums">
-          <span><small>待处理样品</small><b>{m.samples}</b></span>
-          <span><small>未结生产检验</small><b>{m.branches}</b></span>
-          <span><small>NOK 待恢复</small><b className={m.nok ? 'mist-tone-bad' : undefined}>{m.nok}</b></span>
+          <span><small>{uiText("待处理样品")}</small><b>{m.samples}</b></span>
+          <span><small>{uiText("未结生产检验")}</small><b>{m.branches}</b></span>
+          <span><small>{uiText("NOK 待恢复")}</small><b className={m.nok ? 'mist-tone-bad' : undefined}>{m.nok}</b></span>
         </span>
       </CardButton>; })}
     </div>
     <Tabs<Kind> value={kind} onChange={changeKind} options={[{ value: 'sample', label: '样品评审', count: all.filter(t => t.domain === domain && t.kind === 'sample').length }, { value: 'production', label: '生产检验', count: all.filter(t => t.domain === domain && t.kind === 'production').length }]} />
-    <Toolbar right={<Segmented ariaLabel="视图" value={mode} onChange={value => setMode(value as 'groups' | 'board')} options={[{ value: 'groups', icon: List, ariaLabel: '按工厂分组' }, { value: 'board', icon: Columns3, ariaLabel: '看板视图' }]} />}>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索任务号、来源、工厂或检查地点" />
-      <Dropdown<Owner> label="负责人" value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部负责人' }, { value: 'mine', label: '我认领的' }, { value: 'unclaimed', label: '待认领' }]} />
+    <Toolbar right={<Segmented ariaLabel={uiText("视图")} value={mode} onChange={value => setMode(value as 'groups' | 'board')} options={[{ value: 'groups', icon: List, ariaLabel: '按工厂分组' }, { value: 'board', icon: Columns3, ariaLabel: '看板视图' }]} />}>
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索任务号、来源、工厂或检查地点")} />
+      <Dropdown<Owner> label={uiText("负责人")} value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部负责人' }, { value: 'mine', label: '我认领的' }, { value: 'unclaimed', label: '待认领' }]} />
     </Toolbar>
     <Pipeline<StateFilter> value={stateFilter} onChange={setStateFilter} items={[
       { value: 'all', label: '全部', count: stateCount('all'), color: 'var(--mist-ink-2)' },
@@ -261,8 +262,8 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{fulfillmentSourceLabel(state, task.source)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={QC_STATE_TONE[task.state]}>{QC_STATE_LABEL[task.state]}</Pill><Pill>{DOMAIN_LABEL[task.domain]}</Pill><Pill tone="accent">{KIND_LABEL[task.kind]}</Pill></div>
-    <Banner tone={gate.tone} title={gate.title}>{gate.text}</Banner>
-    <DetailBlock title="来源与送审实物">
+    <Banner tone={gate.tone} title={uiText(gate.title)}>{gate.text}</Banner>
+    <DetailBlock title={uiText("来源与送审实物")}>
       <Facts items={[
         { label: '准确来源', value: <SourceLink source={task.source} /> },
         { label: task.kind === 'production' ? '生产分支' : '准确实物', value: sample ? `${sample.code} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'}` : production ? `${production.code} · ${production.qty} ${line?.unit || ''}`.trim() : task.source.kind === 'version' ? '开发版本返样' : '订单条目' },
@@ -271,19 +272,19 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         ...(task.kind === 'production' && sizes.length ? [{ label: '生产尺码', value: sizes.map(size => `${size.size} ${size.quantity}`).join(' · ') }] : []),
         { label: task.kind === 'production' ? '业务恢复记录' : '样品业务继续', value: task.businessContinued ? task.businessContinued.note : '尚未记录' },
       ]} />
-      {task.businessConfirmation && <span className="mist-note">需求方{task.businessConfirmation.result === 'approved' ? '确认采用' : '不采用'} · {task.businessConfirmation.actor} · {shortWhen(task.businessConfirmation.at)} · {task.businessConfirmation.note}</span>}
+      {task.businessConfirmation && <span className="mist-note">{uiText("需求方")}{uiText(task.businessConfirmation.result === 'approved' ? '确认采用' : '不采用')} · {task.businessConfirmation.actor} · {shortWhen(task.businessConfirmation.at)} · {task.businessConfirmation.note}</span>}
       {onBack && <Button block onClick={onBack}>{backLabel}</Button>}
     </DetailBlock>
-    <DetailBlock title="现场信息">
+    <DetailBlock title={uiText("现场信息")}>
       <Facts items={[
         { label: '工厂', value: task.factory || '未记录' },
         { label: '检查地点', value: task.location || '未记录' },
         { label: '现场联系人', value: task.contact || '未记录' },
-        { label: '预计检查日', value: <span className={isOverdue(task, today()) ? 'mist-tone-bad' : undefined}>{task.due || '未排期'}{isOverdue(task, today()) ? ' · 已过期' : ''}</span> },
+        { label: '预计检查日', value: <span className={isOverdue(task, today()) ? 'mist-tone-bad' : undefined}>{task.due || '未排期'}{uiText(isOverdue(task, today()) ? ' · 已过期' : '')}</span> },
         { label: '当前QC', value: task.assignee || '待认领' },
       ]} />
     </DetailBlock>
-    <DetailBlock title="QC 操作">
+    <DetailBlock title={uiText("QC 操作")}>
       <ActionBar busy={locked} actions={[
         { label: '认领任务', icon: UserRoundCheck, onClick: onClaim, reason: claimReason, hidden: mine, primary: task.state === 'pending' },
         { label: '提交 / 追加复验报告', icon: ClipboardCheck, onClick: onReport, reason: reportReason, primary: mine && task.state !== 'reported' },
@@ -291,27 +292,27 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         { label: '改期', icon: CalendarClock, onClick: onReschedule, reason: handoverReason('改期'), hidden: !canQc },
       ]} />
     </DetailBlock>
-    {(confirmable || continuable) && <DetailBlock title="业务接续">
+    {(confirmable || continuable) && <DetailBlock title={uiText("业务接续")}>
       <ActionBar busy={locked} actions={[
         { label: '记录需求方确认', onClick: onConfirm, reason: canBusiness ? false : '由业务员记录需求方决定', hidden: !confirmable },
         { label: task.kind === 'production' ? '确认继续生产' : '业务确认继续', onClick: onContinue, reason: canBusiness ? false : '由业务员确认恢复', hidden: !continuable, primary: true },
       ]} />
     </DetailBlock>}
-    <DetailBlock title={task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`}>
-      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">还没有报告。认领后到现场检查，提交报告即回到来源。</span>}
+    <DetailBlock title={uiText(task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`)}>
+      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("还没有报告。认领后到现场检查，提交报告即回到来源。")}</span>}
     </DetailBlock>
-    <DetailBlock title="第三方测试">
-      <span className="mist-note"><Icon icon={FlaskConical} size="xs" />送检机构、项目与预计出报告日的登记尚未接入服务端；外部报告可先作为附件随QC报告上传，由QC判读。</span>
+    <DetailBlock title={uiText("第三方测试")}>
+      <span className="mist-note"><Icon icon={FlaskConical} size="xs" />{uiText("送检机构、项目与预计出报告日的登记尚未接入服务端；外部报告可先作为附件随QC报告上传，由QC判读。")}</span>
     </DetailBlock>
-    <DetailBlock title="处理记录"><Events entity="qc" id={task.id} /></DetailBlock>
+    <DetailBlock title={uiText("处理记录")}><Events entity="qc" id={task.id} /></DetailBlock>
   </DetailBody>;
 }
 
 function QcReportCard({ report, production, latest }: { report: FulfillmentQcReport; production: boolean; latest: boolean }) {
   return <div className="mist-col" data-qc-report={report.id}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">复验</span>}{latest && <span className="mist-note">当前</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {new Date(report.reviewedAt).toLocaleString()}</span></div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {new Date(report.reviewedAt).toLocaleString()}</span></div>
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
-    {production && <DataTable ariaLabel={`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title="未记录本次实际尺码检查" compact />} />}
+    {production && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
     {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} />}
     <RecordFiles key={report.id} ids={report.fileIds} />
   </div>;
@@ -359,69 +360,69 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     : result === 'conditional' ? (task.kind === 'production' ? '任务转为待业务恢复，由业务员确认后继续生产。' : '结论回到来源，由业务员结合需求方意见决定。')
     : (task.kind === 'production' && (task.state === 'blocked' || task.state === 'awaiting_business') ? '复验通过后转为待业务恢复，由业务员确认继续生产。' : '结论回到来源，解锁来源的下一步。');
   return <MistPage>
-    <BackLink onClick={onClose}>返回QC工作台</BackLink>
-    <PageHeader eyebrow={`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`} title="提交专业QC报告" description={`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`} />
-    {failure && <div className="mist-section"><Banner tone="bad" title="报告未保存">{failure}</Banner></div>}
+    <BackLink onClick={onClose}>{uiText("返回QC工作台")}</BackLink>
+    <PageHeader eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} />
+    {failure && <div className="mist-section"><Banner tone="bad" title={uiText("报告未保存")}>{failure}</Banner></div>}
     <div className="mist-detail" data-layout="main-rail">
       <div>
         <Card>
-          <CardHeader title="结论与报告" sub="结论由实际检查人选择，测量偏差不会自动决定结论。" />
+          <CardHeader title={uiText("结论与报告")} sub={uiText("结论由实际检查人选择，测量偏差不会自动决定结论。")} />
           <CardBody><FormGrid>
-            <Field label="本次结论" required><Select aria-label="本次结论" value={result} onChange={e => setResult(e.target.value as MistQc['result'])} options={resultOptions} /></Field>
-            <Field label="报告编号" required><TextInput aria-label="报告编号" value={report} onChange={e => setReport(e.target.value)} /></Field>
-            <Field label="实际检查时间" required><TextInput aria-label="实际检查时间" type="datetime-local" value={at} onChange={e => setAt(e.target.value)} /></Field>
-            <Field label="专业意见与影响范围" full required><TextArea aria-label="专业意见与影响范围" value={opinion} onChange={e => setOpinion(e.target.value)} /></Field>
+            <Field label={uiText("本次结论")} required><Select aria-label={uiText("本次结论")} value={result} onChange={e => setResult(e.target.value as MistQc['result'])} options={resultOptions} /></Field>
+            <Field label={uiText("报告编号")} required><TextInput aria-label={uiText("报告编号")} value={report} onChange={e => setReport(e.target.value)} /></Field>
+            <Field label={uiText("实际检查时间")} required><TextInput aria-label={uiText("实际检查时间")} type="datetime-local" value={at} onChange={e => setAt(e.target.value)} /></Field>
+            <Field label={uiText("专业意见与影响范围")} full required><TextArea aria-label={uiText("专业意见与影响范围")} value={opinion} onChange={e => setOpinion(e.target.value)} /></Field>
           </FormGrid></CardBody>
         </Card>
         {task.kind === 'production' && sizeChecks.length > 0 && <Card>
-          <CardHeader title="本次实际尺码检查" sub={garmentProduction ? '逐次追加检查事实；未检尺码选“本次未检”。最终放行要求覆盖全部实际生产尺码。' : '按实际检查的规格记录。'} />
+          <CardHeader title={uiText("本次实际尺码检查")} sub={uiText(garmentProduction ? '逐次追加检查事实；未检尺码选“本次未检”。最终放行要求覆盖全部实际生产尺码。' : '按实际检查的规格记录。')} />
           <CardBody><div className="mist-col">{sizeChecks.map((check, index) => <FormGrid key={check.size}>
-            <Field label={`尺码 ${check.size} · 本次结论`}><Select aria-label={`尺码 ${check.size} · 本次结论`} value={check.result} onChange={event => updateSize(index, { result: event.target.value })} options={[{ value: '', label: '本次未检' }, { value: 'pass', label: '通过' }, { value: 'reject', label: '不通过' }]} /></Field>
-            <Field label="实际检查件数"><TextInput aria-label={`尺码 ${check.size} · 实际检查件数`} type="number" min={0} value={check.inspected} disabled={!check.result} onChange={event => updateSize(index, { inspected: Number(event.target.value) })} /></Field>
-            <Field label="尺码检查依据" full><TextInput aria-label={`尺码 ${check.size} · 检查依据`} value={check.evidence} disabled={!check.result} onChange={event => updateSize(index, { evidence: event.target.value })} /></Field>
+            <Field label={ui`尺码 ${check.size} · 本次结论`}><Select aria-label={ui`尺码 ${check.size} · 本次结论`} value={check.result} onChange={event => updateSize(index, { result: event.target.value })} options={[{ value: '', label: '本次未检' }, { value: 'pass', label: '通过' }, { value: 'reject', label: '不通过' }]} /></Field>
+            <Field label={uiText("实际检查件数")}><TextInput aria-label={ui`尺码 ${check.size} · 实际检查件数`} type="number" min={0} value={check.inspected} disabled={!check.result} onChange={event => updateSize(index, { inspected: Number(event.target.value) })} /></Field>
+            <Field label={uiText("尺码检查依据")} full><TextInput aria-label={ui`尺码 ${check.size} · 检查依据`} value={check.evidence} disabled={!check.result} onChange={event => updateSize(index, { evidence: event.target.value })} /></Field>
           </FormGrid>)}</div></CardBody>
         </Card>}
         <Card>
-          <CardHeader title="测量记录" sub="可选。标准、实测与容差只作记录。" tools={<Button size="sm" icon={Plus} onClick={() => setMeasurements(rows => [...rows, { point: '', standard: 0, actual: 0, tolerance: 0 }])}>增加测量点</Button>} />
+          <CardHeader title={uiText("测量记录")} sub={uiText("可选。标准、实测与容差只作记录。")} tools={<Button size="sm" icon={Plus} onClick={() => setMeasurements(rows => [...rows, { point: '', standard: 0, actual: 0, tolerance: 0 }])}>{uiText("增加测量点")}</Button>} />
           <CardBody>{measurements.length ? <div className="mist-col">{measurements.map((item, i) => <FormGrid key={i}>
-            {(['point', 'standard', 'actual', 'tolerance'] as const).map((key, j) => <Field key={key} label={['测量点', '标准', '实测', '容差'][j]}><TextInput aria-label={`${['测量点', '标准', '实测', '容差'][j]} ${i + 1}`} type={key === 'point' ? 'text' : 'number'} step="0.0001" value={item[key]} onChange={e => setMeasurements(rows => rows.map((row, n) => n === i ? { ...row, [key]: key === 'point' ? e.target.value : Number(e.target.value) } : row))} /></Field>)}
-            <Button size="sm" variant="quiet" onClick={() => setMeasurements(rows => rows.filter((_, n) => n !== i))}>移除本点</Button>
-          </FormGrid>)}</div> : <span className="mist-note">还没有测量点</span>}</CardBody>
+            {(['point', 'standard', 'actual', 'tolerance'] as const).map((key, j) => <Field key={key} label={uiText(['测量点', '标准', '实测', '容差'][j])}><TextInput aria-label={uiText(`${['测量点', '标准', '实测', '容差'][j]} ${i + 1}`)} type={key === 'point' ? 'text' : 'number'} step="0.0001" value={item[key]} onChange={e => setMeasurements(rows => rows.map((row, n) => n === i ? { ...row, [key]: key === 'point' ? e.target.value : Number(e.target.value) } : row))} /></Field>)}
+            <Button size="sm" variant="quiet" onClick={() => setMeasurements(rows => rows.filter((_, n) => n !== i))}>{uiText("移除本点")}</Button>
+          </FormGrid>)}</div> : <span className="mist-note">{uiText("还没有测量点")}</span>}</CardBody>
         </Card>
         <Card>
-          <CardHeader title="现场照片与完整报告" sub="外部实验室报告也在这里上传，由QC判读后写入结论。" />
+          <CardHeader title={uiText("现场照片与完整报告")} sub={uiText("外部实验室报告也在这里上传，由QC判读后写入结论。")} />
           <CardBody>
-            <UploadZone hint="上传现场照片或完整报告" onFiles={files => { if (blocked) return; setBusy(true); void (async () => { try { for (const file of files) { const added = await uploadFile(file); setIds(old => [...old, added.id]); } } catch (e) { setFailure(String(e)); } finally { setBusy(false); } })(); }} />
+            <UploadZone hint={uiText("上传现场照片或完整报告")} onFiles={files => { if (blocked) return; setBusy(true); void (async () => { try { for (const file of files) { const added = await uploadFile(file); setIds(old => [...old, added.id]); } } catch (e) { setFailure(String(e)); } finally { setBusy(false); } })(); }} />
             <RecordFiles ids={ids} />
           </CardBody>
-          <div className="mist-sticky-foot"><span className="mist-note">实际检查人由当前登录账号记录</span><span className="mist-spacer" /><Button onClick={onClose}>取消</Button><Button variant="primary" disabled={blocked} onClick={review}>提交报告</Button></div>
+          <div className="mist-sticky-foot"><span className="mist-note">{uiText("实际检查人由当前登录账号记录")}</span><span className="mist-spacer" /><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={blocked} onClick={review}>{uiText("提交报告")}</Button></div>
         </Card>
       </div>
       <div>
         <Card>
-          <CardHeader title="本次检查" sub={`${task.factory} · ${task.location}`} />
+          <CardHeader title={uiText("本次检查")} sub={uiText(`${task.factory} · ${task.location}`)} />
           <CardBody><div className="mist-col">
             <Facts cols={2} items={[{ label: '任务', value: <Mono>{task.code}</Mono> }, { label: '预计检查日', value: task.due || '未排期' }, { label: '现场联系人', value: task.contact || '未记录' }, { label: '已有报告', value: `${previous.length} 份` }]} />
-            <span className="mist-note">来源：{state ? fulfillmentSourceLabel(state, task.source) : ''}</span>
+            <span className="mist-note">{uiText("来源：")}{uiText(state ? fulfillmentSourceLabel(state, task.source) : '')}</span>
           </div></CardBody>
         </Card>
         <Card>
-          <CardHeader title="填写要点" />
+          <CardHeader title={uiText("填写要点")} />
           <CardBody><div className="mist-col">
-            <span className="mist-note">· 结论由你判断，系统不会根据偏差自动给结论。</span>
-            {task.kind === 'production' && <span className="mist-note">· 任一尺码不通过时，总结论必须为不通过（NOK）。</span>}
-            <span className="mist-note">· 复验请在本任务追加报告，历史报告保留不可改写。</span>
-            <span className="mist-note">· 报告只解锁来源的下一步，业务推进由业务员完成。</span>
+            <span className="mist-note">{uiText("· 结论由你判断，系统不会根据偏差自动给结论。")}</span>
+            {task.kind === 'production' && <span className="mist-note">{uiText("· 任一尺码不通过时，总结论必须为不通过（NOK）。")}</span>}
+            <span className="mist-note">{uiText("· 复验请在本任务追加报告，历史报告保留不可改写。")}</span>
+            <span className="mist-note">{uiText("· 报告只解锁来源的下一步，业务推进由业务员完成。")}</span>
           </div></CardBody>
         </Card>
       </div>
     </div>
-    <Dialog open={confirming} title="确认提交QC报告" tone={result === 'reject' ? 'bad' : 'accent'} onClose={() => { if (!busy) setConfirming(false); }}
-      footer={<><Button disabled={busy} onClick={() => setConfirming(false)}>返回修改</Button><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>确认提交</Button></>}>
+    <Dialog open={confirming} title={uiText("确认提交QC报告")} tone={result === 'reject' ? 'bad' : 'accent'} onClose={() => { if (!busy) setConfirming(false); }}
+      footer={<><Button disabled={busy} onClick={() => setConfirming(false)}>{uiText("返回修改")}</Button><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("确认提交")}</Button></>}>
       <div className="mist-col">
         <Facts cols={2} items={[{ label: '结论', value: result ? RESULT_LABEL[result] : '' }, { label: '报告编号', value: report }, { label: '检查时间', value: at.replace('T', ' ') }, { label: '本次检查尺码', value: sizeChecks.filter(check => check.result).map(check => `${check.size} ${check.inspected}件`).join(' · ') || '—' }]} />
         <span className="mist-note">{consequence}</span>
-        <span className="mist-note">提交后报告不可改写，如需更正请追加复验报告。</span>
+        <span className="mist-note">{uiText("提交后报告不可改写，如需更正请追加复验报告。")}</span>
       </div>
     </Dialog>
   </MistPage>;

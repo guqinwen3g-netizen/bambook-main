@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /**
  * 工作助手（本机 Agent）页面：会话列表 + 对话 + 本人模型设置。
  * 只在 Bambook 桌面端可用；模型调用、凭据与会话都在本机 assistant-host 里，页面只拿结果与事件。
@@ -46,7 +48,7 @@ const REASONING = [{ value: '', label: '模型默认' }, { value: 'low', label: 
 const TOOL_LABEL: Record<string, string> = { current_time: '读取本机时间', bambook_query: '查询业务记录', bambook_get: '读取业务详情', bambook_expand: '展开关联记录' };
 const RISK_LABEL: Record<string, string> = { write: '修改业务数据', external: '对外发送', local_write: '写入本机文件', draft: '生成草稿', read: '读取' };
 const HOST_DOWN = new Set(['HOST_RESTARTED', 'HOST_RESTARTING', 'HOST_FAILED']);
-const time = (iso: string) => new Date(iso).toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+const time = (iso: string) => new Date(iso).toLocaleString(interfaceLocale(), { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 // ── 设置：模型配置表单 ─────────────────────────────────────────────
 
@@ -84,37 +86,37 @@ function ProviderForm({ bridge, draft, setDraft, onSaved, onCancel, chatgpt, onC
     try { setModels(await call<string[]>(bridge, 'providers.models', { id: saved.id })); } catch (e) { setError(e instanceof Error ? e.message : '读取模型失败'); } finally { setBusy(false); }
   };
   return <>
-    {error && <Banner tone="bad" title="配置未保存">{error}</Banner>}
+    {error && <Banner tone="bad" title={uiText("配置未保存")}>{uiText(error)}</Banner>}
     <FormGrid>
-      <Field label="接入方式" full><Select aria-label="接入方式" value={draft.format} disabled={!!draft.id} options={(Object.keys(FORMAT_LABEL) as Format[]).map(f => ({ value: f, label: FORMAT_LABEL[f] }))} onChange={e => setDraft({ ...emptyDraft(e.target.value as Format) })} /></Field>
-      <Field label="名称" required><TextInput aria-label="名称" value={draft.name} maxLength={60} onChange={e => set({ name: e.target.value })} /></Field>
-      <Field label="模型" required hint={models.length ? `可用 ${models.length} 个模型` : undefined}>{models.length ? <Select aria-label="模型" value={draft.model} options={[...new Set([draft.model, ...models].filter(Boolean))].map(m => ({ value: m, label: m }))} onChange={e => set({ model: e.target.value })} /> : <TextInput aria-label="模型" value={draft.model} onChange={e => set({ model: e.target.value })} />}</Field>
+      <Field label={uiText("接入方式")} full><Select aria-label={uiText("接入方式")} value={draft.format} disabled={!!draft.id} options={(Object.keys(FORMAT_LABEL) as Format[]).map(f => ({ value: f, label: FORMAT_LABEL[f] }))} onChange={e => setDraft({ ...emptyDraft(e.target.value as Format) })} /></Field>
+      <Field label={uiText("名称")} required><TextInput aria-label={uiText("名称")} value={draft.name} maxLength={60} onChange={e => set({ name: e.target.value })} /></Field>
+      <Field label={uiText("模型")} required hint={uiText(models.length ? `可用 ${models.length} 个模型` : undefined)}>{models.length ? <Select aria-label={uiText("模型")} value={draft.model} options={[...new Set([draft.model, ...models].filter(Boolean))].map(m => ({ value: m, label: m }))} onChange={e => set({ model: e.target.value })} /> : <TextInput aria-label={uiText("模型")} value={draft.model} onChange={e => set({ model: e.target.value })} />}</Field>
       {!subscription && <>
-        <Field label="接口地址" required full hint="例如 https://api.openai.com/v1；本机地址可用 http。"><TextInput aria-label="接口地址" value={draft.base_url} onChange={e => set({ base_url: e.target.value })} /></Field>
-        <Field label={draft.hasKey ? 'API Key（已保存，留空不修改）' : 'API Key'} required={!draft.hasKey} full hint="只保存在本机，用系统钥匙串加密；不会上传到 Bambook 服务器。"><TextInput aria-label="API Key" type="password" autoComplete="off" value={draft.apiKey} onChange={e => set({ apiKey: e.target.value, clearApiKey: false })} /></Field>
+        <Field label={uiText("接口地址")} required full hint={uiText("例如 https://api.openai.com/v1；本机地址可用 http。")}><TextInput aria-label={uiText("接口地址")} value={draft.base_url} onChange={e => set({ base_url: e.target.value })} /></Field>
+        <Field label={uiText(draft.hasKey ? 'API Key（已保存，留空不修改）' : 'API Key')} required={!draft.hasKey} full hint={uiText("只保存在本机，用系统钥匙串加密；不会上传到 Bambook 服务器。")}><TextInput aria-label="API Key" type="password" autoComplete="off" value={draft.apiKey} onChange={e => set({ apiKey: e.target.value, clearApiKey: false })} /></Field>
       </>}
-      <Field label="推理档位"><Select aria-label="推理档位" value={draft.reasoning} options={REASONING} onChange={e => set({ reasoning: e.target.value })} /></Field>
-      <Field label="上下文窗口（token）"><TextInput aria-label="上下文窗口" inputMode="numeric" placeholder={subscription ? '272000' : '128000'} value={draft.context_window} onChange={e => set({ context_window: e.target.value })} /></Field>
-      <Field label="最大输出（token）"><TextInput aria-label="最大输出" inputMode="numeric" placeholder="8192" value={draft.max_tokens} onChange={e => set({ max_tokens: e.target.value })} /></Field>
+      <Field label={uiText("推理档位")}><Select aria-label={uiText("推理档位")} value={draft.reasoning} options={REASONING} onChange={e => set({ reasoning: e.target.value })} /></Field>
+      <Field label={uiText("上下文窗口（token）")}><TextInput aria-label={uiText("上下文窗口")} inputMode="numeric" placeholder={uiText(subscription ? '272000' : '128000')} value={draft.context_window} onChange={e => set({ context_window: e.target.value })} /></Field>
+      <Field label={uiText("最大输出（token）")}><TextInput aria-label={uiText("最大输出")} inputMode="numeric" placeholder="8192" value={draft.max_tokens} onChange={e => set({ max_tokens: e.target.value })} /></Field>
     </FormGrid>
     {!subscription && <details className="mist-wa-advanced" open={!!(draft.temperature || draft.top_p || draft.request_url || draft.headers || draft.body || draft.skip_ssl_verify)}>
-      <summary>高级选项（代理网关、采样参数）</summary>
+      <summary>{uiText("高级选项（代理网关、采样参数）")}</summary>
       <FormGrid>
-        <Field label="temperature"><TextInput aria-label="temperature" inputMode="decimal" placeholder="模型默认" value={draft.temperature} onChange={e => set({ temperature: e.target.value })} /></Field>
-        <Field label="top_p"><TextInput aria-label="top_p" inputMode="decimal" placeholder="模型默认" value={draft.top_p} onChange={e => set({ top_p: e.target.value })} /></Field>
-        <Field label="完整请求地址（可选）" full hint="代理网关要求固定路径时填写，会覆盖接口地址拼接的路径。"><TextInput aria-label="完整请求地址" value={draft.request_url} onChange={e => set({ request_url: e.target.value })} /></Field>
-        <Field label="自定义请求头（JSON，可选）" full><TextArea aria-label="自定义请求头" rows={3} value={draft.headers} onChange={e => set({ headers: e.target.value })} /></Field>
-        <Field label="自定义请求体（JSON，可选）" full><TextArea aria-label="自定义请求体" rows={3} value={draft.body} onChange={e => set({ body: e.target.value })} /></Field>
-        <Field label="证书校验" full><Checkbox checked={draft.skip_ssl_verify} onChange={v => set({ skip_ssl_verify: v })} label="跳过 SSL 证书校验（仅限可信的内网网关）" /></Field>
+        <Field label="temperature"><TextInput aria-label="temperature" inputMode="decimal" placeholder={uiText("模型默认")} value={draft.temperature} onChange={e => set({ temperature: e.target.value })} /></Field>
+        <Field label="top_p"><TextInput aria-label="top_p" inputMode="decimal" placeholder={uiText("模型默认")} value={draft.top_p} onChange={e => set({ top_p: e.target.value })} /></Field>
+        <Field label={uiText("完整请求地址（可选）")} full hint={uiText("代理网关要求固定路径时填写，会覆盖接口地址拼接的路径。")}><TextInput aria-label={uiText("完整请求地址")} value={draft.request_url} onChange={e => set({ request_url: e.target.value })} /></Field>
+        <Field label={uiText("自定义请求头（JSON，可选）")} full><TextArea aria-label={uiText("自定义请求头")} rows={3} value={draft.headers} onChange={e => set({ headers: e.target.value })} /></Field>
+        <Field label={uiText("自定义请求体（JSON，可选）")} full><TextArea aria-label={uiText("自定义请求体")} rows={3} value={draft.body} onChange={e => set({ body: e.target.value })} /></Field>
+        <Field label={uiText("证书校验")} full><Checkbox checked={draft.skip_ssl_verify} onChange={v => set({ skip_ssl_verify: v })} label={uiText("跳过 SSL 证书校验（仅限可信的内网网关）")} /></Field>
       </FormGrid>
     </details>}
-    {draft.skip_ssl_verify && <Banner tone="warn" title="已关闭证书校验">请求可能被中间人截获，只在公司内网的可信网关上使用。</Banner>}
+    {draft.skip_ssl_verify && <Banner tone="warn" title={uiText("已关闭证书校验")}>{uiText("请求可能被中间人截获，只在公司内网的可信网关上使用。")}</Banner>}
     {subscription && <ChatgptLogin bridge={bridge} status={chatgpt} onChange={onChatgptChange} />}
     <div className="mist-row">
-      <Button variant="primary" loading={busy} disabled={busy || !draft.name.trim() || !draft.model.trim()} onClick={async () => { const rows = await save(); if (rows) onSaved(rows); }}>保存配置</Button>
-      <Button disabled={busy || !draft.name.trim() || (!subscription && !draft.hasKey && !draft.apiKey) || (subscription && !chatgpt?.connected)} onClick={() => void fetchModels()}>获取可用模型</Button>
-      {draft.hasKey && !draft.apiKey && <Button variant="quiet" disabled={busy} onClick={() => set({ clearApiKey: true, hasKey: false })}>清除已保存的 Key</Button>}
-      <Button variant="quiet" disabled={busy} onClick={onCancel}>返回列表</Button>
+      <Button variant="primary" loading={busy} disabled={busy || !draft.name.trim() || !draft.model.trim()} onClick={async () => { const rows = await save(); if (rows) onSaved(rows); }}>{uiText("保存配置")}</Button>
+      <Button disabled={busy || !draft.name.trim() || (!subscription && !draft.hasKey && !draft.apiKey) || (subscription && !chatgpt?.connected)} onClick={() => void fetchModels()}>{uiText("获取可用模型")}</Button>
+      {draft.hasKey && !draft.apiKey && <Button variant="quiet" disabled={busy} onClick={() => set({ clearApiKey: true, hasKey: false })}>{uiText("清除已保存的 Key")}</Button>}
+      <Button variant="quiet" disabled={busy} onClick={onCancel}>{uiText("返回列表")}</Button>
     </div>
   </>;
 }
@@ -131,13 +133,13 @@ function ChatgptLogin({ bridge, status, onChange }: { bridge: AssistantBridge; s
   const start = async () => { setBusy(true); setError(''); try { const view = await call<LoginView>(bridge, 'chatgpt.login.start'); setLogin(view); window.open(view.verificationUrl, '_blank', 'noopener'); } catch (e) { setError(e instanceof Error ? e.message : '发起登录失败'); } finally { setBusy(false); } };
   const logout = async () => { setBusy(true); setError(''); try { await call(bridge, 'chatgpt.logout'); setLogin(null); onChange(); } catch (e) { setError(e instanceof Error ? e.message : '退出失败'); } finally { setBusy(false); } };
   return <Card>
-    <CardHeader title="ChatGPT 账号" sub="用你本人的 ChatGPT 订阅；令牌只保存在这台电脑。" tools={status?.connected ? <Pill tone="ok">已登录</Pill> : <Pill tone="neutral">未登录</Pill>} />
+    <CardHeader title={uiText("ChatGPT 账号")} sub={uiText("用你本人的 ChatGPT 订阅；令牌只保存在这台电脑。")} tools={status?.connected ? <Pill tone="ok">{uiText("已登录")}</Pill> : <Pill tone="neutral">{uiText("未登录")}</Pill>} />
     <div className="mist-card-body">
-      {error && <Banner tone="bad" title="登录未完成">{error}</Banner>}
+      {error && <Banner tone="bad" title={uiText("登录未完成")}>{uiText(error)}</Banner>}
       {status?.connected && <KeyValue items={[{ label: '账号', value: status.email ?? '—' }, { label: '订阅', value: status.plan ?? '—' }, { label: '登录时间', value: status.connectedAt ? time(status.connectedAt) : '—' }]} />}
-      {login?.state === 'pending' && <Banner tone="ai" title="在浏览器中完成登录" actions={<Button icon={ExternalLink} onClick={() => window.open(login.verificationUrl, '_blank', 'noopener')}>打开登录页</Button>}>输入验证码 <Mono>{login.userCode}</Mono>，完成后这里会自动更新。验证码 15 分钟内有效。</Banner>}
-      {login && login.state !== 'pending' && login.state !== 'connected' && <Banner tone="warn" title="登录没有完成">{login.message ?? '请重新登录'}</Banner>}
-      <div className="mist-row">{status?.connected ? <Button disabled={busy} onClick={() => void logout()}>退出 ChatGPT</Button> : <Button variant="primary" icon={LogIn} loading={busy} disabled={busy || login?.state === 'pending'} onClick={() => void start()}>用 ChatGPT 登录</Button>}</div>
+      {login?.state === 'pending' && <Banner tone="ai" title={uiText("在浏览器中完成登录")} actions={<Button icon={ExternalLink} onClick={() => window.open(login.verificationUrl, '_blank', 'noopener')}>{uiText("打开登录页")}</Button>}>{uiText("输入验证码 ")}<Mono>{login.userCode}</Mono>{uiText("，完成后这里会自动更新。验证码 15 分钟内有效。")}</Banner>}
+      {login && login.state !== 'pending' && login.state !== 'connected' && <Banner tone="warn" title={uiText("登录没有完成")}>{login.message ?? '请重新登录'}</Banner>}
+      <div className="mist-row">{status?.connected ? <Button disabled={busy} onClick={() => void logout()}>{uiText("退出 ChatGPT")}</Button> : <Button variant="primary" icon={LogIn} loading={busy} disabled={busy || login?.state === 'pending'} onClick={() => void start()}>{uiText("用 ChatGPT 登录")}</Button>}</div>
     </div>
   </Card>;
 }
@@ -146,11 +148,11 @@ function SettingsDialog({ open, onClose, bridge, providers, setProviders, chatgp
   const [draft, setDraft] = React.useState<Draft | null>(null), [error, setError] = React.useState('');
   React.useEffect(() => { if (open) setDraft(initialFormat ? emptyDraft(initialFormat) : null); }, [open, initialFormat]);
   const remove = async (p: Provider) => { setError(''); try { setProviders(await call<Provider[]>(bridge, 'providers.delete', { id: p.id })); } catch (e) { setError(e instanceof Error ? e.message : '删除失败'); } };
-  return <Dialog open={open} onClose={onClose} width={720} title={draft ? (draft.id ? '编辑模型配置' : '添加模型配置') : '我的模型'} description="工作助手只使用你本人的模型连接，凭据保存在这台电脑。">
+  return <Dialog open={open} onClose={onClose} width={720} title={uiText(draft ? (draft.id ? '编辑模型配置' : '添加模型配置') : '我的模型')} description={uiText("工作助手只使用你本人的模型连接，凭据保存在这台电脑。")}>
     {draft ? <ProviderForm bridge={bridge} draft={draft} setDraft={setDraft} chatgpt={chatgpt} onChatgptChange={refreshChatgpt} onCancel={() => setDraft(null)} onSaved={rows => { setProviders(rows); setDraft(null); }} /> : <>
-      {error && <Banner tone="bad" title="操作未完成">{error}</Banner>}
-      {providers.length ? providers.map(p => <Card key={p.id}><CardHeader title={p.name} sub={FORMAT_LABEL[p.format] + ' · ' + p.model} tools={<div className="mist-row"><Pill tone={p.format === 'chatgpt-subscription' ? (chatgpt?.connected ? 'ok' : 'warn') : p.has_api_key ? 'ok' : 'warn'}>{p.format === 'chatgpt-subscription' ? (chatgpt?.connected ? '已登录' : '未登录') : p.has_api_key ? 'Key 已保存' : '缺少 Key'}</Pill><Button size="sm" onClick={() => setDraft(toDraft(p))}>编辑</Button><Button size="sm" variant="quiet" icon={Trash2} aria-label={'删除 ' + p.name} onClick={() => void remove(p)} /></div>} /></Card>) : <EmptyState title="还没有模型配置" description="用你的 ChatGPT 账号登录，或填写你自己的 API。" compact />}
-      <div className="mist-row"><Button icon={LogIn} onClick={() => setDraft(emptyDraft('chatgpt-subscription'))}>用 ChatGPT 登录</Button><Button icon={KeyRound} onClick={() => setDraft(emptyDraft('openai'))}>添加 API 配置</Button></div>
+      {error && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(error)}</Banner>}
+      {providers.length ? providers.map(p => <Card key={p.id}><CardHeader title={uiText(p.name)} sub={uiText(FORMAT_LABEL[p.format] + ' · ' + p.model)} tools={<div className="mist-row"><Pill tone={p.format === 'chatgpt-subscription' ? (chatgpt?.connected ? 'ok' : 'warn') : p.has_api_key ? 'ok' : 'warn'}>{uiText(p.format === 'chatgpt-subscription' ? (chatgpt?.connected ? '已登录' : '未登录') : p.has_api_key ? 'Key 已保存' : '缺少 Key')}</Pill><Button size="sm" onClick={() => setDraft(toDraft(p))}>{uiText("编辑")}</Button><Button size="sm" variant="quiet" icon={Trash2} aria-label={uiText('删除 ' + p.name)} onClick={() => void remove(p)} /></div>} /></Card>) : <EmptyState title={uiText("还没有模型配置")} description={uiText("用你的 ChatGPT 账号登录，或填写你自己的 API。")} compact />}
+      <div className="mist-row"><Button icon={LogIn} onClick={() => setDraft(emptyDraft('chatgpt-subscription'))}>{uiText("用 ChatGPT 登录")}</Button><Button icon={KeyRound} onClick={() => setDraft(emptyDraft('openai'))}>{uiText("添加 API 配置")}</Button></div>
     </>}
   </Dialog>;
 }
@@ -176,7 +178,7 @@ function BusinessText({ text, onOpen }: { text: string; onOpen: (view: string, i
     const at = match.index!, target = parseBusinessLink(match[2]);
     if (!target) continue;
     pieces.push(text.slice(from, at));
-    pieces.push(<TextLink key={at} title="打开业务原记录" onClick={() => onOpen(target.view, target.id)}>{match[1]}</TextLink>);
+    pieces.push(<TextLink key={at} title={uiText("打开业务原记录")} onClick={() => onOpen(target.view, target.id)}>{match[1]}</TextLink>);
     from = at + match[0].length;
   }
   pieces.push(text.slice(from));
@@ -195,7 +197,7 @@ function MessageView({ message, onOpen }: { message: Message; onOpen: (view: str
 export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
   const session = useMistSession(), w = useMistWorkspace(), nav = useNav();
   const workspaceId = w.workspace?.id, canChat = session.hasPermission('ai:chat');
-  const bridge = React.useMemo(getAssistantBridge, []);
+  const bridge = React.useMemo(getAssistantBridge, [interfaceLocale()]);
   const [host, setHost] = React.useState<HostStatus | null>(null);
   const [ready, setReady] = React.useState(false), [boundAccount, setBoundAccount] = React.useState(''), [hostEpoch, setHostEpoch] = React.useState(0), [error, setError] = React.useState('');
   const [providers, setProviders] = React.useState<Provider[]>([]), [providerId, setProviderId] = React.useState('');
@@ -327,45 +329,45 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
     } catch (e) { if (currentScope.current === bound) setError(e instanceof Error ? e.message : '删除失败'); }
   };
 
-  const header = <PageHeader title="工作助手" description="在你的电脑上按指令干活，使用你本人的模型连接。对外发送、确认、删除等操作会先请你确认。" actions={bridge ? <Button icon={Settings2} disabled={!accountReady} onClick={() => setSettings({ open: true, format: null })}>我的模型</Button> : undefined} />;
-  if (!bridge) return <MistPage>{header}{tabs}<Banner tone="warn" title="需在 Bambook 桌面端使用">工作助手运行在你的电脑上，邮件、附件和模型凭据都留在本机，浏览器里无法使用。请在 Bambook 桌面端打开此页。</Banner></MistPage>;
+  const header = <PageHeader title={uiText("工作助手")} description={uiText("在你的电脑上按指令干活，使用你本人的模型连接。对外发送、确认、删除等操作会先请你确认。")} actions={bridge ? <Button icon={Settings2} disabled={!accountReady} onClick={() => setSettings({ open: true, format: null })}>{uiText("我的模型")}</Button> : undefined} />;
+  if (!bridge) return <MistPage>{uiText(header)}{tabs}<Banner tone="warn" title={uiText("需在 Bambook 桌面端使用")}>{uiText("工作助手运行在你的电脑上，邮件、附件和模型凭据都留在本机，浏览器里无法使用。请在 Bambook 桌面端打开此页。")}</Banner></MistPage>;
   const provider = providers.find(p => p.id === providerId);
   const providerReady = provider ? (provider.format === 'chatgpt-subscription' ? !!chatgpt?.connected : provider.has_api_key) : false;
   return <MistPage>
-    {header}{tabs}
-    {host?.state === 'failed' && <Banner tone="bad" title="工作助手已停止" actions={<Button icon={RefreshCw} onClick={() => void call<HostStatus>(bridge, 'host.restart').then(setHost).catch(e => setError(e.message))}>重新启动</Button>}>多次异常退出（{host.reason ?? '未知原因'}），已停止自动重启。</Banner>}
-    {host?.state === 'restarting' && <Banner tone="warn" title="工作助手正在重启">{host.reason ?? ''}。进行中的任务已停止，对话已保存。</Banner>}
-    {error && <Banner tone="bad" title="未完成">{error}</Banner>}
-    {!canChat ? <Banner tone="warn" title="无工作助手使用权限">当前账号没有 ai:chat 权限；不会签发委托，也不能向模型发送任务。</Banner> :
-      <Banner tone={delegation.phase === 'connected' ? 'ai' : 'warn'} title={delegation.phase === 'connected' ? '业务读取已连接 · ' + (w.workspace?.name ?? '') : delegation.phase === 'connecting' ? '正在连接业务读取' : '业务读取未连接'} actions={<Button size="sm" disabled={!accountReady || !workspaceId || delegation.phase === 'connecting'} onClick={() => void delegation.renew()}>重新连接</Button>}>
-        {delegation.phase === 'connected' ? <>可读：{delegation.readable.length ? delegation.readable.map(t => t.label).join('、') : '当前账号暂无首批可读对象'}。仅限本公司，权限由服务端每次复核；{delegation.expiresAt ? time(delegation.expiresAt) + ' 到期，提前自动续签。' : ''}</> : delegation.error || (!workspaceId ? '请先选择可访问的公司。' : '由本人会话签发短期只读委托，业务写入、邮件与文档能力尚未开放。')}
+    {uiText(header)}{tabs}
+    {host?.state === 'failed' && <Banner tone="bad" title={uiText("工作助手已停止")} actions={<Button icon={RefreshCw} onClick={() => void call<HostStatus>(bridge, 'host.restart').then(setHost).catch(e => setError(e.message))}>{uiText("重新启动")}</Button>}>{uiText("多次异常退出（")}{host.reason ?? '未知原因'}{uiText("），已停止自动重启。")}</Banner>}
+    {host?.state === 'restarting' && <Banner tone="warn" title={uiText("工作助手正在重启")}>{host.reason ?? ''}{uiText("。进行中的任务已停止，对话已保存。")}</Banner>}
+    {error && <Banner tone="bad" title={uiText("未完成")}>{uiText(error)}</Banner>}
+    {!canChat ? <Banner tone="warn" title={uiText("无工作助手使用权限")}>{uiText("当前账号没有 ai:chat 权限；不会签发委托，也不能向模型发送任务。")}</Banner> :
+      <Banner tone={delegation.phase === 'connected' ? 'ai' : 'warn'} title={uiText(delegation.phase === 'connected' ? '业务读取已连接 · ' + (w.workspace?.name ?? '') : delegation.phase === 'connecting' ? '正在连接业务读取' : '业务读取未连接')} actions={<Button size="sm" disabled={!accountReady || !workspaceId || delegation.phase === 'connecting'} onClick={() => void delegation.renew()}>{uiText("重新连接")}</Button>}>
+        {delegation.phase === 'connected' ? <>{uiText("可读：")}{uiText(delegation.readable.length ? delegation.readable.map(t => t.label).join('、') : '当前账号暂无首批可读对象')}{uiText("。仅限本公司，权限由服务端每次复核；")}{uiText(delegation.expiresAt ? time(delegation.expiresAt) + ' 到期，提前自动续签。' : '')}</> : delegation.error || (!workspaceId ? '请先选择可访问的公司。' : '由本人会话签发短期只读委托，业务写入、邮件与文档能力尚未开放。')}
       </Banner>}
-    {accountReady && !providers.length ? <Card><div className="mist-card-body"><EmptyState title="先连接你的模型" description="工作助手只用你本人的模型：ChatGPT 账号登录，或你自己的 OpenAI 兼容 API。凭据只保存在这台电脑。" action={<div className="mist-row"><Button variant="primary" icon={LogIn} onClick={() => setSettings({ open: true, format: 'chatgpt-subscription' })}>用 ChatGPT 登录</Button><Button icon={KeyRound} onClick={() => setSettings({ open: true, format: 'openai' })}>添加 API 配置</Button></div>} /></div></Card> :
+    {accountReady && !providers.length ? <Card><div className="mist-card-body"><EmptyState title={uiText("先连接你的模型")} description={uiText("工作助手只用你本人的模型：ChatGPT 账号登录，或你自己的 OpenAI 兼容 API。凭据只保存在这台电脑。")} action={<div className="mist-row"><Button variant="primary" icon={LogIn} onClick={() => setSettings({ open: true, format: 'chatgpt-subscription' })}>{uiText("用 ChatGPT 登录")}</Button><Button icon={KeyRound} onClick={() => setSettings({ open: true, format: 'openai' })}>{uiText("添加 API 配置")}</Button></div>} /></div></Card> :
     <section className="mist-wa">
       <Card className="mist-wa-rail">
-        <CardHeader title="对话" tools={<Button size="sm" icon={MessageSquarePlus} disabled={!!live} onClick={() => open(null)}>新对话</Button>} />
+        <CardHeader title={uiText("对话")} tools={<Button size="sm" icon={MessageSquarePlus} disabled={!!live} onClick={() => open(null)}>{uiText("新对话")}</Button>} />
         <div className="mist-wa-list">{visibleSessions.map(s => <div key={s.id} className="mist-wa-item" data-active={s.id === activeId || undefined}>
           <button type="button" className="mist-wa-open" disabled={!!live && s.id !== activeId} onClick={() => open(s.id)}><span>{s.title}</span><span className="mist-note">{time(s.updatedAt)}</span></button>
-          <Button size="sm" variant="quiet" icon={Trash2} aria-label={'删除对话 ' + s.title} disabled={!!live && live.sessionId === s.id} onClick={() => void removeSession(s.id)} />
-        </div>)}{!visibleSessions.length && <p className="mist-note">还没有对话</p>}</div>
+          <Button size="sm" variant="quiet" icon={Trash2} aria-label={uiText('删除对话 ' + s.title)} disabled={!!live && live.sessionId === s.id} onClick={() => void removeSession(s.id)} />
+        </div>)}{!visibleSessions.length && <p className="mist-note">{uiText("还没有对话")}</p>}</div>
       </Card>
       <Card className="mist-wa-main">
         <div className="mist-wa-thread" aria-live="polite">
-          {messages.map((m, i) => <MessageView key={i} message={m} onOpen={openBusiness} />)}
+          {messages.map((m, i) => <MessageView key={i} message={uiText(m)} onOpen={openBusiness} />)}
           {live && <div className="mist-wa-msg" data-role="assistant">
-            {live.tools.map(t => <span key={t.id} className="mist-note">· {TOOL_LABEL[t.name] ?? t.name}{t.state === 'running' ? ' …' : t.state === 'ok' ? ' · 完成' : ' · ' + (t.summary ?? '未完成')}</span>)}
-            {live.text ? <BusinessText text={live.text} onOpen={openBusiness} /> : !live.confirms.length && <p className="mist-note">正在处理…</p>}
+            {live.tools.map(t => <span key={t.id} className="mist-note">· {TOOL_LABEL[t.name] ?? t.name}{uiText(t.state === 'running' ? ' …' : t.state === 'ok' ? ' · 完成' : ' · ' + (t.summary ?? '未完成'))}</span>)}
+            {live.text ? <BusinessText text={live.text} onOpen={openBusiness} /> : !live.confirms.length && <p className="mist-note">{uiText("正在处理…")}</p>}
           </div>}
-          {live?.confirms.map(c => <Banner key={c.token} tone="warn" title={'需要你确认：' + (RISK_LABEL[c.risk] ?? c.tool)} actions={<><Button variant="primary" onClick={() => void resolve(c, true)}>确认执行</Button><Button onClick={() => void resolve(c, false)}>不执行</Button></>}>{c.summary}</Banner>)}
-          {!messages.length && !live && <EmptyState title="告诉助手要做什么" description="例如：查找某个订单，展开关联开发单，并附上原记录编号供我核对。业务写入、邮箱和文档能力尚未开放。" compact />}
+          {live?.confirms.map(c => <Banner key={c.token} tone="warn" title={uiText('需要你确认：' + (RISK_LABEL[c.risk] ?? c.tool))} actions={<><Button variant="primary" onClick={() => void resolve(c, true)}>{uiText("确认执行")}</Button><Button onClick={() => void resolve(c, false)}>{uiText("不执行")}</Button></>}>{c.summary}</Banner>)}
+          {!messages.length && !live && <EmptyState title={uiText("告诉助手要做什么")} description={uiText("例如：查找某个订单，展开关联开发单，并附上原记录编号供我核对。业务写入、邮箱和文档能力尚未开放。")} compact />}
         </div>
         <div className="mist-wa-composer">
-          <TextArea aria-label="给工作助手的指令" rows={3} maxLength={20000} value={input} disabled={!accountReady || !canChat} placeholder="输入指令，Ctrl+Enter 发送" onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); } }} />
+          <TextArea aria-label={uiText("给工作助手的指令")} rows={3} maxLength={20000} value={input} disabled={!accountReady || !canChat} placeholder={uiText("输入指令，Ctrl+Enter 发送")} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); } }} />
           <div className="mist-row">
-            <Select aria-label="使用的模型" value={providerId} options={providers.map(p => ({ value: p.id, label: p.name + ' · ' + p.model }))} onChange={e => setProviderId(e.target.value)} />
-            {!providerReady && provider && <span className="mist-note">{provider.format === 'chatgpt-subscription' ? 'ChatGPT 未登录' : '缺少 API Key'}</span>}
+            <Select aria-label={uiText("使用的模型")} value={providerId} options={providers.map(p => ({ value: p.id, label: p.name + ' · ' + p.model }))} onChange={e => setProviderId(e.target.value)} />
+            {!providerReady && provider && <span className="mist-note">{uiText(provider.format === 'chatgpt-subscription' ? 'ChatGPT 未登录' : '缺少 API Key')}</span>}
             <span className="mist-wa-spacer" />
-            {live ? <Button icon={Square} onClick={() => void call(bridge, 'run.cancel', { runId: live.runId }).catch(e => setError(e.message))}>停止</Button> : <Button variant="ai" loading={sending} disabled={!accountReady || !canChat || delegation.phase !== 'connected' || !input.trim() || !providerReady || sending} onClick={() => void send()}>发送</Button>}
+            {live ? <Button icon={Square} onClick={() => void call(bridge, 'run.cancel', { runId: live.runId }).catch(e => setError(e.message))}>{uiText("停止")}</Button> : <Button variant="ai" loading={sending} disabled={!accountReady || !canChat || delegation.phase !== 'connected' || !input.trim() || !providerReady || sending} onClick={() => void send()}>{uiText("发送")}</Button>}
           </div>
         </div>
       </Card>

@@ -1,4 +1,5 @@
 import {createMistState as newModuleFixture} from '../../../../server/src/shared/mistWorkspace';
+import { createOrderGovernance } from '../../../../server/src/shared/mistOrderGovernance';
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -58,7 +59,23 @@ beforeEach(() => {
   store.run.mockResolvedValue({ requestId: 'r1', revision: 2, result: {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); localStorage.removeItem('bambook.device.locale'); vi.restoreAllMocks(); vi.useRealTimers(); });
+
+it('renders English labels and filters by the original business status without rewriting records', async () => {
+  store.state!.orders[0].state = '履约完成';
+  store.state!.orders[0].governance = { ...createOrderGovernance({ now: new Date().toISOString(), actorName: 'Tester', id: () => 'test' }), status: 'approved' };
+  const before = structuredClone(store.state);
+  localStorage.setItem('bambook.device.locale', '"en-US"');
+  render(<OrderListPage />);
+  expect(host.textContent).toContain('Fulfilled');
+  expect(host.textContent).toContain('客户甲');
+  expect(host.textContent).toContain('10 pcs');
+  await click(getByRole(host, 'button', { name: /Status.*All/ }));
+  await click(getByRole(host, 'menuitemradio', { name: 'Fulfilled' }));
+  expect(host.textContent).toContain('SO-A');
+  expect(store.state).toEqual(before);
+  expect(store.run).not.toHaveBeenCalled();
+});
 
 it('order detail renders only its own lines and does not invent a fallback order', () => {
   render(<OrderDetailPage />, { view: 'orders/detail', id: 'order-a' });

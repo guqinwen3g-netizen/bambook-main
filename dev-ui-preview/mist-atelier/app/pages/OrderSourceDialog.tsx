@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 新建订单入口：手工新建、从报价转单、从开发版本转单、从产品档案复购。都进入同一份订单草稿。 */
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
@@ -81,35 +82,35 @@ export function OrderSourceDialog({ open, onClose, type, customerId, canWrite }:
     else go('orders/new', 'product:' + picked, { customerId, section: type });
   };
   const row = (id: string, title: React.ReactNode, sub: string, meta: string) => <button key={id} type="button" role="radio" aria-checked={picked === id} className="mist-choice" style={ROW} data-selected={picked === id || undefined} onClick={() => { setPicked(id); setFailure(''); if (kind === 'quotation') { const quote = quotes.find(x => x.id === id); const lines = quote ? convertibleQuoteLines(state, quote, type) : []; const blocked = quote && state ? quotationConversionBlockers(state, { lines }) : []; setLineIds(lines.filter(line => !blocked.some(b => b.lineId === line.id)).map(line => line.id)); } }}>
-    <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start', textAlign: 'left' }}><b>{title}</b><small className="mist-muted">{sub}</small></span><span className="mist-spacer" /><small className="mist-muted">{meta}</small></button>;
+    <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start', textAlign: 'left' }}><b>{uiText(title)}</b><small className="mist-muted">{uiText(sub)}</small></span><span className="mist-spacer" /><small className="mist-muted">{meta}</small></button>;
   const list = kind === 'quotation' ? quotes.filter(quote => match(`${quote.code} ${customerName(quote.customerId)} ${quote.season}`)).map(quote => row(quote.id, <Mono>{quote.code}</Mono>, `${customerName(quote.customerId)} · ${quote.season || '未填季节'} · ${convertibleQuoteLines(state, quote, type).length === quote.lines.length ? `${quote.lines.length} 个条目` : `${convertibleQuoteLines(state, quote, type).length}/${quote.lines.length} 个条目可转`}`, `${quote.total} ${quote.currency}`))
-    : kind === 'version' ? versions.filter(({ version, dev }) => match(`${dev!.code} ${dev!.name} ${dev!.style} ${version.label}`)).map(({ version, dev }) => row(version.id, <><Mono>{dev!.code}</Mono> · {version.label}</>, `${dev!.name} · ${dev!.style} · ${version.factory || '工厂未填'}`, dev!.customer || '未关联客户'))
+    : kind === 'version' ? versions.filter(({ version, dev }) => match(`${dev!.code} ${dev!.name} ${dev!.style} ${version.label}`)).map(({ version, dev }) => row(version.id, <><Mono>{dev!.code}</Mono> · {uiText(version.label)}</>, `${dev!.name} · ${dev!.style} · ${version.factory || '工厂未填'}`, dev!.customer || '未关联客户'))
     : kind === 'product' ? products.filter(product => match(`${product.sku} ${product.name} ${product.specification}`)).map(product => row(product.id, <Mono>{product.sku}</Mono>, `${product.name} · ${product.specification || '规格未填'}`, product.unit || '单位未填'))
     : [];
   const title = kind ? options.find(option => option.kind === kind)!.title : `新建${domainLabel}订单`;
-  const footer = !kind ? <Button onClick={onClose}>取消</Button>
-    : <><Button variant="quiet" icon={ArrowLeft} disabled={busy} onClick={() => { setKind(null); setFailure(''); }}>换一种来源</Button><span className="mist-spacer" />
-      {kind === 'quotation' ? <Button variant="primary" loading={busy} disabled={!canWrite || busy || !!w.pending || !!blockReason || (!!pickedQuote && !chosen.length)} title={!canWrite ? '当前账号没有订单写权限' : blockReason || (pickedQuote && !chosen.length ? '请至少勾选一个条目' : undefined)} onClick={() => void convert()}>转为订单草稿</Button>
-        : <Button variant="primary" disabled={!canWrite} onClick={continueDraft}>带入订单草稿</Button>}</>;
-  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={title} description={kind ? undefined : '选择订单来源；无论哪种来源，都先生成订单草稿，补齐合同依据后提交主单审批。'} width={720} footer={footer}>
-    {!canWrite && <Banner tone="warn" title="只读">当前账号没有订单写权限，可以查看来源但不能建立订单。</Banner>}
-    {failure && <Banner tone="bad" title="尚未建立订单">{failure}</Banner>}
-    {blockers.length > 0 && <Banner tone="warn" title={allBlocked ? '暂不能转订单' : '部分条目暂不能转'}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}请先在开发模块记录需求方认可。</span></Banner>}
-    {!kind && <div className="mist-col" role="group" aria-label="订单来源" style={{ gap: 8 }}>{options.map(option => {
+  const footer = !kind ? <Button onClick={onClose}>{uiText("取消")}</Button>
+    : <><Button variant="quiet" icon={ArrowLeft} disabled={busy} onClick={() => { setKind(null); setFailure(''); }}>{uiText("换一种来源")}</Button><span className="mist-spacer" />
+      {kind === 'quotation' ? <Button variant="primary" loading={busy} disabled={!canWrite || busy || !!w.pending || !!blockReason || (!!pickedQuote && !chosen.length)} title={uiText(!canWrite ? '当前账号没有订单写权限' : blockReason || (pickedQuote && !chosen.length ? '请至少勾选一个条目' : undefined))} onClick={() => void convert()}>{uiText("转为订单草稿")}</Button>
+        : <Button variant="primary" disabled={!canWrite} onClick={continueDraft}>{uiText("带入订单草稿")}</Button>}</>;
+  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} title={uiText(title)} description={uiText(kind ? undefined : '选择订单来源；无论哪种来源，都先生成订单草稿，补齐合同依据后提交主单审批。')} width={720} footer={footer}>
+    {!canWrite && <Banner tone="warn" title={uiText("只读")}>{uiText("当前账号没有订单写权限，可以查看来源但不能建立订单。")}</Banner>}
+    {failure && <Banner tone="bad" title={uiText("尚未建立订单")}>{failure}</Banner>}
+    {blockers.length > 0 && <Banner tone="warn" title={uiText(allBlocked ? '暂不能转订单' : '部分条目暂不能转')}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}{uiText("请先在开发模块记录需求方认可。")}</span></Banner>}
+    {!kind && <div className="mist-col" role="group" aria-label={uiText("订单来源")} style={{ gap: 8 }}>{options.map(option => {
       const empty = option.count === 0;
-      return <button key={option.kind} type="button" className="mist-choice" style={ROW} disabled={!canWrite || empty} title={empty ? '没有可用的来源记录' : undefined} onClick={() => choose(option.kind)}>
-        <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start', textAlign: 'left' }}><b>{option.title}</b><small className="mist-muted">{option.detail}</small></span><span className="mist-spacer" />{option.count !== undefined && <small className="mist-muted">{empty ? '暂无可用' : `${option.count} 项可用`}</small>}</button>;
+      return <button key={option.kind} type="button" className="mist-choice" style={ROW} disabled={!canWrite || empty} title={uiText(empty ? '没有可用的来源记录' : undefined)} onClick={() => choose(option.kind)}>
+        <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start', textAlign: 'left' }}><b>{option.title}</b><small className="mist-muted">{option.detail}</small></span><span className="mist-spacer" />{option.count !== undefined && <small className="mist-muted">{uiText(empty ? '暂无可用' : `${option.count} 项可用`)}</small>}</button>;
     })}</div>}
     {kind && <div className="mist-col" style={{ gap: 12 }}>
-      <SearchField value={q} onChange={setQ} placeholder={kind === 'quotation' ? '报价号、客户或季节' : kind === 'version' ? '开发案号、款名或版本' : '产品码、品名或规格'} />
-      <div className="mist-col" role="radiogroup" aria-label="来源记录" style={{ gap: 6, maxHeight: 320, overflow: 'auto' }}>{list.length ? list : <EmptyState compact title="没有匹配的来源记录" />}</div>
-      {pickedQuote && <div className="mist-col" role="group" aria-label="本次转单条目" style={{ gap: 6 }} data-convert-lines>
-        <small className="mist-muted">勾选本次转单的条目；未勾选的条目之后可再转另一张订单，或在报价详情标记不再转。</small>
-        {pickedLines.map(line => { const blocked = blockers.find(b => b.lineId === line.id); return <Checkbox key={line.id} checked={chosen.includes(line.id)} disabled={!!blocked || busy} onChange={on => setLineIds(ids => on ? [...ids, line.id] : ids.filter(id => id !== line.id))} label={<span>{line.name} · <span className="mist-num">{line.qty} {line.unit} × {line.price}</span>{blocked && <small className="mist-tone-warn"> · 未获认可，暂不能转</small>}</span>} />; })}
+      <SearchField value={q} onChange={setQ} placeholder={uiText(kind === 'quotation' ? '报价号、客户或季节' : kind === 'version' ? '开发案号、款名或版本' : '产品码、品名或规格')} />
+      <div className="mist-col" role="radiogroup" aria-label={uiText("来源记录")} style={{ gap: 6, maxHeight: 320, overflow: 'auto' }}>{list.length ? list : <EmptyState compact title={uiText("没有匹配的来源记录")} />}</div>
+      {pickedQuote && <div className="mist-col" role="group" aria-label={uiText("本次转单条目")} style={{ gap: 6 }} data-convert-lines>
+        <small className="mist-muted">{uiText("勾选本次转单的条目；未勾选的条目之后可再转另一张订单，或在报价详情标记不再转。")}</small>
+        {pickedLines.map(line => { const blocked = blockers.find(b => b.lineId === line.id); return <Checkbox key={line.id} checked={chosen.includes(line.id)} disabled={!!blocked || busy} onChange={on => setLineIds(ids => on ? [...ids, line.id] : ids.filter(id => id !== line.id))} label={<span>{line.name} · <span className="mist-num">{line.qty} {uiText(line.unit)} × {line.price}</span>{blocked && <small className="mist-tone-warn">{uiText(" · 未获认可，暂不能转")}</small>}</span>} />; })}
       </div>}
-      {kind === 'quotation' ? <FormGrid><Field label="订单交期" required><TextInput aria-label="订单交期" type="date" value={due} onChange={event => setDue(event.target.value)} /></Field><Field label="负责人" required><Select aria-label="负责人" value={owner} placeholder="选择负责人" onChange={event => setOwner(event.target.value)} options={memberSelectOptions(members)} /></Field></FormGrid>
-        : <p className="mist-note">将带入品名、款号 / 品号与单位；数量、销售单价、交期在草稿中填写，来源会随条目一起保存。</p>}
-      {kind === 'quotation' && <p className="mist-note">报价的条目、数量、单价与币种原样承接；转单后订单为草稿，仍需上传客户 PO / 书面确认并提交主单审批。</p>}
+      {kind === 'quotation' ? <FormGrid><Field label={uiText("订单交期")} required><TextInput aria-label={uiText("订单交期")} type="date" value={due} onChange={event => setDue(event.target.value)} /></Field><Field label={uiText("负责人")} required><Select aria-label={uiText("负责人")} value={owner} placeholder={uiText("选择负责人")} onChange={event => setOwner(event.target.value)} options={memberSelectOptions(members)} /></Field></FormGrid>
+        : <p className="mist-note">{uiText("将带入品名、款号 / 品号与单位；数量、销售单价、交期在草稿中填写，来源会随条目一起保存。")}</p>}
+      {kind === 'quotation' && <p className="mist-note">{uiText("报价的条目、数量、单价与币种原样承接；转单后订单为草稿，仍需上传客户 PO / 书面确认并提交主单审批。")}</p>}
     </div>}
   </Dialog>;
 }

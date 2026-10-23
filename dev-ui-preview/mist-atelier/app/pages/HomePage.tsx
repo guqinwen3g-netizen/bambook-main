@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** T1 工作台：保留 Mist 的问候、统计、焦点、简报、任务与日程构图。 */
 import React from 'react';
@@ -20,7 +22,7 @@ function weekDays(date: string) {
   const start = new Date(`${date}T12:00:00`); start.setDate(start.getDate() - (start.getDay() + 6) % 7);
   return Array.from({ length: 7 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return { key: dateKey(day), weekday: ['一', '二', '三', '四', '五', '六', '日'][index], day: day.getDate() }; });
 }
-const money = (value: number) => value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const money = (value: number) => value.toLocaleString(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function HomePage() {
   const { go, openAI } = useNav(), toast = useToast(), session = useMistSession(), workspace = useMistWorkspace(), myName = useMyDisplayName(workspace.workspace, workspace.state);
@@ -87,46 +89,46 @@ export function HomePage() {
   if (!brief.length) brief.push({ strong: '暂无工作动态', text: '创建开发案或推进工作后，这里会显示对应记录。', onClick: () => go('development/new') });
   const beginTask = () => { const task = tasks[0] ?? allTasks[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
   const chosenTask = state?.tasks.find(task => task.id === selectedTask);
-  const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+  const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString(interfaceLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
   return (
     <MistPage>
-      <PageHeader variant="greeting" eyebrow={`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`} title={<>{greeting}，<em>{myName || '同事'}</em></>}
-        description={!state ? (loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : `${hidden.size ? '当前可见' : '当前有'} ${allTasks.length + queue.length} 件事等你推进，其中 ${allTasks.filter(task => task.due === today).length} 件今天到期${queue.length ? `，${queue.length} 件来自审批、QC、出运或财务` : ''}。`}
-        actions={<><Segmented<'today' | 'week'> ariaLabel="时间范围" value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
-          <Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>新建</Button></>} />
-      {(error || workspace.error) && <Banner tone="bad" title={error || workspace.error} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>重新读取</Button>} />}
-      {pending && !saving && <Banner tone="warn" title="上一次操作结果待核对" actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(problem=>setError(problem instanceof Error?problem.message:'原请求核对失败'))}>核对原请求</Button>}>核对完成前，暂停提交新的操作。</Banner>}
+      <PageHeader variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
+        description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : ui`${uiText(hidden.size ? '当前可见' : '当前有')} ${allTasks.length + queue.length} 件事等你推进，其中 ${allTasks.filter(task => task.due === today).length} 件今天到期${queue.length ? ui`，${queue.length} 件来自审批、QC、出运或财务` : ''}。`}
+        actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
+          <Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建")}</Button></>} />
+      {(error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
+      {pending && !saving && <Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(problem=>setError(problem instanceof Error?problem.message:'原请求核对失败'))}>{uiText("核对原请求")}</Button>}>{uiText("核对完成前，暂停提交新的操作。")}</Banner>}
       <StatGrid>
-        <StatCard icon={Layers} label="在途开发案" value={hiddenStats.development ? '已隐藏' : state ? activeDevs.length : '—'} unit={hiddenStats.development ? undefined : '个'} foot={hiddenStats.development ? '无查看权限，不代表没有开发案' : '当前可见的进行中开发'} onClick={hiddenStats.development ? undefined : () => setStatView('development')} />
-        <StatCard icon={BadgeCheck} label="待 QC 评审" value={hiddenStats.qc ? '已隐藏' : state ? qcTasks.length+qcVersions.length : '—'} unit={hiddenStats.qc ? undefined : '项'} foot={hiddenStats.qc ? '部分来源不可见，不能统计完整数量' : '待专业评审的任务与返样'} onClick={hiddenStats.qc ? undefined : () => setStatView('qc')} />
-        <StatCard icon={Ship} label="本周出运" value={hiddenStats.shipping ? '已隐藏' : state ? weekShipments.length : '—'} unit={hiddenStats.shipping ? undefined : '票'} foot={hiddenStats.shipping ? '无查看权限，不代表没有出运' : '按实际出运请求与记录'} onClick={hiddenStats.shipping ? undefined : () => setStatView('shipping')} />
-        <StatCard icon={Wallet} label="应收待核销" value={hiddenStats.invoices ? '已隐藏' : state ? money(mainCurrency?.[1] ?? 0) : '—'} unit={hiddenStats.invoices ? undefined : mainCurrency?.[0] ?? ''} foot={hiddenStats.invoices ? '无查看权限，不代表应收为零' : currencies.length > 1 ? currencies.filter(([currency]) => currency !== mainCurrency?.[0]).map(([currency, value]) => `${currency} ${money(value)}`).join(' · ') : (state ? `${state.invoices.filter(item => item.open > 0).length} 张未结发票` : '等待公司业务数据')} onClick={hiddenStats.invoices ? undefined : () => setStatView('invoices')} />
+        <StatCard icon={Layers} label={uiText("在途开发案")} value={hiddenStats.development ? '已隐藏' : state ? activeDevs.length : '—'} unit={uiText(hiddenStats.development ? undefined : '个')} foot={hiddenStats.development ? '无查看权限，不代表没有开发案' : '当前可见的进行中开发'} onClick={hiddenStats.development ? undefined : () => setStatView('development')} />
+        <StatCard icon={BadgeCheck} label={uiText("待 QC 评审")} value={hiddenStats.qc ? '已隐藏' : state ? qcTasks.length+qcVersions.length : '—'} unit={uiText(hiddenStats.qc ? undefined : '项')} foot={hiddenStats.qc ? '部分来源不可见，不能统计完整数量' : '待专业评审的任务与返样'} onClick={hiddenStats.qc ? undefined : () => setStatView('qc')} />
+        <StatCard icon={Ship} label={uiText("本周出运")} value={hiddenStats.shipping ? '已隐藏' : state ? weekShipments.length : '—'} unit={uiText(hiddenStats.shipping ? undefined : '票')} foot={hiddenStats.shipping ? '无查看权限，不代表没有出运' : '按实际出运请求与记录'} onClick={hiddenStats.shipping ? undefined : () => setStatView('shipping')} />
+        <StatCard icon={Wallet} label={uiText("应收待核销")} value={hiddenStats.invoices ? '已隐藏' : state ? money(mainCurrency?.[1] ?? 0) : '—'} unit={uiText(hiddenStats.invoices ? undefined : mainCurrency?.[0] ?? '')} foot={hiddenStats.invoices ? '无查看权限，不代表应收为零' : currencies.length > 1 ? currencies.filter(([currency]) => currency !== mainCurrency?.[0]).map(([currency, value]) => `${currency} ${money(value)}`).join(' · ') : (state ? `${state.invoices.filter(item => item.open > 0).length} 张未结发票` : '等待公司业务数据')} onClick={hiddenStats.invoices ? undefined : () => setStatView('invoices')} />
       </StatGrid>
       <section className="mist-grid">
         <HeroFocus className="mist-col-8" meta={focus ? dev ? [<span className="mist-mono">{dev.code}</span>,dev.customer] : [('sourceLabel' in focus ? focus.sourceLabel : '工作事项')] : []} media={dev ? { src: focusImage.src||IMG[dev.img], alt: dev.name } : undefined}
-          title={loading ? '正在读取当前焦点' : focus ? dev ? <>{dev.name}<br />{version ? `${version.label} · ${dev.state}` : dev.state}</> : focus.title : '当前没有待处理事项'} description={dev?.goal ?? (focus ? '打开原事项，继续完成下一步工作。' : '可以查看工作动态，或创建新的开发案。')}
+          title={loading ? '正在读取当前焦点' : focus ? dev ? <>{dev.name}<br />{uiText(version ? `${version.label} · ${dev.state}` : dev.state)}</> : focus.title : '当前没有待处理事项'} description={uiText(dev?.goal ?? (focus ? '打开原事项，继续完成下一步工作。' : '可以查看工作动态，或创建新的开发案。'))}
           steps={dev ? STAGES.map((label, index) => ({ label, state: index < dev.stage ? 'done' : index === dev.stage ? 'now' : 'todo' })) : undefined}
-          actions={<><Button variant="white" disabled={busy || !focus} iconRight={ArrowRight} onClick={() => focus && openTarget(focus.target)}>打开事项</Button><Button variant="glass" disabled={busy || !version?.qc} icon={FileText} onClick={() => setReportVersion(version?.id ?? null)}>QC 报告</Button></>} />
-        <AIBrief className="mist-col-4" icon={Sparkles} sub="公司业务通知与记录 · 事实摘要" onAsk={() => openAI('请根据当前可见业务记录，整理下一步行动建议。')} items={state?.settings.notifications.suggestions===false?[{strong:'主动建议已关闭',text:'仍可手动打开小竹。',onClick:()=>openAI('请根据当前可见业务记录，整理下一步行动建议。')}]:brief} />
+          actions={<><Button variant="white" disabled={busy || !focus} iconRight={ArrowRight} onClick={() => focus && openTarget(focus.target)}>{uiText("打开事项")}</Button><Button variant="glass" disabled={busy || !version?.qc} icon={FileText} onClick={() => setReportVersion(version?.id ?? null)}>{uiText("QC 报告")}</Button></>} />
+        <AIBrief className="mist-col-4" icon={Sparkles} sub={uiText("公司业务通知与记录 · 事实摘要")} onAsk={() => openAI('请根据当前可见业务记录，整理下一步行动建议。')} items={state?.settings.notifications.suggestions===false?[{strong:'主动建议已关闭',text:'仍可手动打开小竹。',onClick:()=>openAI('请根据当前可见业务记录，整理下一步行动建议。')}]:brief} />
         <Card className="mist-col-8">
-          <CardHeader title="接着完成" tools={<><Dropdown<'due' | 'title'> label="排序" value={sort} onChange={setSort} options={[{ value: 'due', label: '按期限' }, { value: 'title', label: '按名称' }]} />{reviews && <Button variant="quiet" size="sm" icon={BadgeCheck} onClick={() => go('approvals')}>{waitingReviews ? `待我审批 ${waitingReviews}` : '审批与放行'}</Button>}<Button variant="quiet" size="sm" icon={SlidersHorizontal} disabled={busy || !state?.tasks.length} onClick={beginTask}>管理任务</Button></>}><span className="mist-muted" style={{ fontSize: 13 }}>{taskRows.length} 项</span></CardHeader>
-          {loading ? <CardBody><Skeleton height={72} /><Skeleton height={72} /></CardBody> : taskRows.length ? <TaskList items={taskRows} onOpen={item => { const target = queue.find(entry => entry.id === item.id)?.target ?? tasks.find(task => task.id === item.id)?.target; if (target) openTarget(target); }} /> : <EmptyState compact title="这个时间范围没有待办" description="可以切换本周，或查看其他业务事项。" />}
+          <CardHeader title={uiText("接着完成")} tools={<><Dropdown<'due' | 'title'> label={uiText("排序")} value={sort} onChange={setSort} options={[{ value: 'due', label: '按期限' }, { value: 'title', label: '按名称' }]} />{reviews && <Button variant="quiet" size="sm" icon={BadgeCheck} onClick={() => go('approvals')}>{uiText(waitingReviews ? `待我审批 ${waitingReviews}` : '审批与放行')}</Button>}<Button variant="quiet" size="sm" icon={SlidersHorizontal} disabled={busy || !state?.tasks.length} onClick={beginTask}>{uiText("管理任务")}</Button></>}><span className="mist-muted" style={{ fontSize: 13 }}>{taskRows.length}{uiText(" 项")}</span></CardHeader>
+          {loading ? <CardBody><Skeleton height={72} /><Skeleton height={72} /></CardBody> : taskRows.length ? <TaskList items={taskRows} onOpen={item => { const target = queue.find(entry => entry.id === item.id)?.target ?? tasks.find(task => task.id === item.id)?.target; if (target) openTarget(target); }} /> : <EmptyState compact title={uiText("这个时间范围没有待办")} description={uiText("可以切换本周，或查看其他业务事项。")} />}
         </Card>
         <Card className="mist-col-4">
-          <CardHeader title={day===today?'今日安排':`${day.slice(5)} 安排`} tools={<TextLink iconRight={ArrowUpRight} onClick={() => go('calendar',undefined,{section:day})}>日历</TextLink>} />
+          <CardHeader title={uiText(day===today?'今日安排':`${day.slice(5)} 安排`)} tools={<TextLink iconRight={ArrowUpRight} onClick={() => go('calendar',undefined,{section:day})}>{uiText("日历")}</TextLink>} />
           <WeekStrip days={days.map(value => ({ ...value, dots: state?.calendar.filter(event => event.date === value.key).length ?? 0 }))} value={day} onChange={setDay} />
           <Agenda events={(state?.calendar.filter(event => event.date === day).slice().sort((a, b) => a.time.localeCompare(b.time)) ?? []).map(event => ({ time: event.time, title: event.target ? <TextLink onClick={() => openTarget(event.target!)}>{event.title}</TextLink> : event.title, meta: event.note }))} />
-          {!loading && !state?.calendar.some(event => event.date === day) && <EmptyState compact title="这一天没有安排" action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>添加日程</TextLink>} />}
+          {!loading && !state?.calendar.some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
         </Card>
       </section>
-      <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title="任务状态" footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>关闭</Button><Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>保存状态</Button></>}>
-        <FormGrid cols={1}><Field label="事项"><Select aria-label="选择事项" value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={(chosenTask && !allTasks.includes(chosenTask) ? [chosenTask, ...allTasks] : allTasks).map(task => ({ value: task.id, label: task.title }))} /></Field><Switch label="已完成" checked={taskDone} disabled={busy} onChange={setTaskDone} /></FormGrid>
+      <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button><Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button></>}>
+        <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={(chosenTask && !allTasks.includes(chosenTask) ? [chosenTask, ...allTasks] : allTasks).map(task => ({ value: task.id, label: task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy} onChange={setTaskDone} /></FormGrid>
       </Dialog>
-      <Dialog open={!!reportVersion} onClose={() => setReportVersion(null)} title={report?.qc?.report || 'QC 评审'}>
-        {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: report.qc.reviewedAt }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title="此版本没有可读取的评审记录" />}
+      <Dialog open={!!reportVersion} onClose={() => setReportVersion(null)} title={uiText(report?.qc?.report || 'QC 评审')}>
+        {report?.qc ? <KeyValue items={[{ label: '版本', value: report.label }, { label: '评审人', value: report.qc.reviewer }, { label: '结论', value: ({ pass: '通过', conditional: '有保留通过', reject: '不通过' })[report.qc.result] }, { label: '评审时间', value: report.qc.reviewedAt }, { label: '意见', value: report.qc.opinion }]} /> : <EmptyState compact title={uiText("此版本没有可读取的评审记录")} />}
       </Dialog>
-      <Dialog open={!!statView && !hiddenStats[statView]} onClose={()=>setStatView(null)} title={statView?statTitles[statView]:'统计明细'}>
-        {statRows.length?statRows.map(row=><Button key={row.id} block onClick={()=>{setStatView(null);openTarget(row.target);}}>{row.label} · {row.detail}</Button>):<EmptyState compact title="当前范围没有记录"/>}
+      <Dialog open={!!statView && !hiddenStats[statView]} onClose={()=>setStatView(null)} title={uiText(statView?statTitles[statView]:'统计明细')}>
+        {statRows.length?statRows.map(row=><Button key={row.id} block onClick={()=>{setStatView(null);openTarget(row.target);}}>{uiText(row.label)} · {row.detail}</Button>):<EmptyState compact title={uiText("当前范围没有记录")}/>}
       </Dialog>
     </MistPage>
   );

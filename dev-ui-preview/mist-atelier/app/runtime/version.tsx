@@ -1,9 +1,11 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { Button, KeyValue } from '../../../../components/mist';
 import { loadMistVersion, type MistVersion } from './versionData';
 
 export type { MistVersion } from './versionData';
-const time = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '未知' : d.toLocaleString('zh-CN', { hour12: false }); };
+const time = (iso: string) => { const d = new Date(iso); return Number.isNaN(d.getTime()) ? '未知' : d.toLocaleString(interfaceLocale(), { hour12: false }); };
 
 /** 账号面板：开发时实时读取 Git；构建版本随应用打包，数据类型来自公司设置。 */
 export function MistVersionInfo({ demoSeed }: { demoSeed?: { version: number; seededAt: string } }) {
@@ -24,7 +26,7 @@ export function MistVersionInfo({ demoSeed }: { demoSeed?: { version: number; se
       { label: '本地未提交改动', value: version ? (version.localChanges ? `${version.localChanges} 个文件` : '无') : '—' },
       { label: '数据类型', value: demoSeed ? `演示公司 · 示例数据第 ${demoSeed.version} 版（${time(demoSeed.seededAt)} 生成）` : '正式公司（无示例数据）' },
     ]} />
-    <p className="mist-note">代码版本可与 GitHub 分支的最新提交核对；数据类型单独标识，旧版示例数据需新建演示公司才会更新。</p>
-    <Button variant="quiet" loading={loading} onClick={load}>重新读取版本</Button>
+    <p className="mist-note">{uiText("代码版本可与 GitHub 分支的最新提交核对；数据类型单独标识，旧版示例数据需新建演示公司才会更新。")}</p>
+    <Button variant="quiet" loading={loading} onClick={load}>{uiText("重新读取版本")}</Button>
   </>;
 }

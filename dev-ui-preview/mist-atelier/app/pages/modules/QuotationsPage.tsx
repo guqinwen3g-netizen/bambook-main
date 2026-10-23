@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 报价管理：成衣 / 面料两个板块分开；阶段流水线 + 报价单详情（版本链、审批、发送与客户反馈、转订单）。所有对外事实都登记真实依据。 */
 import React from 'react';
@@ -163,40 +164,40 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const exportQuote = (q: MarketQuotation) => downloadModuleCsv(`${q.code}.csv`, ['产品', '款号 / 编码', '规格', '数量', '单位', '单价', '金额', '币种'], q.lines.map(l => [l.name, l.style, l.specification, l.qty, l.unit, l.price, l.amount, q.currency]));
   const columns: Column<MarketQuotation>[] = [
     { key: 'code', header: '报价 / 客户', width: 'minmax(150px,1.1fr)', render: q => <ObjectCell name={<><Mono>{q.code.replace(/-V\d+$/, '')}</Mono> <Pill tone={q.revision ? 'accent' : 'neutral'}>{version(q)}</Pill></>} meta={customerName(q.customerId)} /> },
-    { key: 'lines', header: '条目', width: 'minmax(110px,1fr)', hideOnMobile: true, render: q => <span className="mist-col" style={{ gap: 2 }}><span>{q.lines[0]?.name || '—'}</span><small className="mist-muted">{q.lines.length > 1 ? `等 ${q.lines.length} 项` : q.lines[0] ? `${q.lines[0].qty} ${q.lines[0].unit}` : ''}</small></span> },
+    { key: 'lines', header: '条目', width: 'minmax(110px,1fr)', hideOnMobile: true, render: q => <span className="mist-col" style={{ gap: 2 }}><span>{q.lines[0]?.name || '—'}</span><small className="mist-muted">{uiText(q.lines.length > 1 ? `等 ${q.lines.length} 项` : q.lines[0] ? `${q.lines[0].qty} ${q.lines[0].unit}` : '')}</small></span> },
     { key: 'total', header: '金额 / 术语', width: '118px', align: 'right', render: q => <span className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{q.currency} {quoteMoney(q.total)}</span><small className="mist-muted">{q.deliveryTerms}</small></span> },
-    { key: 'valid', header: '有效期', width: '96px', render: q => { const f = quotationFlags(all, q, day).find(x => x.key === 'overdue' || x.key === 'expiring'); return <span className="mist-col" style={{ gap: 2 }}><span className="mist-num">{q.validUntil}</span>{f && <small className={f.tone === 'bad' ? 'mist-tone-bad' : 'mist-tone-warn'}>{f.label}</small>}</span>; } },
-    { key: 'stage', header: '状态', width: '92px', render: q => { const s = quotationStage(q), superseded = all.some(x => x.previousId === q.id); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STAGE_TONE[s]}>{quotationStageLabel(q)}</Pill>{superseded && <small className="mist-muted">已出新版本</small>}</span>; } },
+    { key: 'valid', header: '有效期', width: '96px', render: q => { const f = quotationFlags(all, q, day).find(x => x.key === 'overdue' || x.key === 'expiring'); return <span className="mist-col" style={{ gap: 2 }}><span className="mist-num">{q.validUntil}</span>{f && <small className={f.tone === 'bad' ? 'mist-tone-bad' : 'mist-tone-warn'}>{uiText(f.label)}</small>}</span>; } },
+    { key: 'stage', header: '状态', width: '92px', render: q => { const s = quotationStage(q), superseded = all.some(x => x.previousId === q.id); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STAGE_TONE[s]}>{quotationStageLabel(q)}</Pill>{superseded && <small className="mist-muted">{uiText("已出新版本")}</small>}</span>; } },
   ];
   const empty = domainRows.length
-    ? <EmptyState icon={SearchX} title="没有符合条件的报价" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>清除筛选</Button>} />
-    : <EmptyState icon={FileText} title={`还没有${domain === 'fabric' ? '面料' : '成衣'}报价`} description={domain === 'fabric' ? '面料报价按 米 / 码 / 公斤 计价，从数字档案的面料或面料开发版本选择条目。' : '成衣报价按 件 / 套 计价，从数字档案或准确开发版本选择条目。'} action={can ? <Button icon={Plus} onClick={onCreate}>新建报价</Button> : undefined} />;
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的报价")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={FileText} title={ui`还没有${domain === 'fabric' ? '面料' : '成衣'}报价`} description={uiText(domain === 'fabric' ? '面料报价按 米 / 码 / 公斤 计价，从数字档案的面料或面料开发版本选择条目。' : '成衣报价按 件 / 套 计价，从数字档案或准确开发版本选择条目。')} action={can ? <Button icon={Plus} onClick={onCreate}>{uiText("新建报价")}</Button> : undefined} />;
   const detail = selected && state
     ? <QuotationDetail q={selected} state={state} canMaintainCompany={activeWorkspace?.access?.role !== 'member'} all={all} day={day} me={me} can={can} canOrder={canOrder} canApprove={canApprove} locked={locked} customer={customerName(selected.customerId)}
         onEdit={() => onEdit(selected)} onRevise={() => onRevise(selected)} onSubmit={() => void act(() => run({ type: 'market.quotation.submit', payload: { id: selected.id } }))}
         onDecide={d => setDialog(decideSpec(selected, d))} onStatus={s => setDialog(evidenceSpec(selected, s))} onConvert={() => setDialog(convertSpec(selected))} onSkip={() => setDialog(skipSpec(selected))} onDocument={draft => generateDocument(selected, draft)} onDownloadDocument={downloadDocument} onPrintDocument={printDocument}
         onExport={() => exportQuote(selected)} onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can || selected.status !== 'Draft' || selected.approval?.status === 'pending')} history={history(selected.id)} />
-    : <EmptyState icon={FileText} title="报价单详情" description="从左侧列表选择一份报价，查看条目、版本、审批与客户反馈。" compact />;
+    : <EmptyState icon={FileText} title={uiText("报价单详情")} description={uiText("从左侧列表选择一份报价，查看条目、版本、审批与客户反馈。")} compact />;
   const summary = selected ? (() => {
     const stage = quotationStage(selected), flags = quotationFlags(all, selected, day);
     return <PreviewSummary openLabel="打开报价单" onOpen={() => full.open(selected.id)} data={{ code: <>{selected.code} · {version(selected)}</>, status: <Pill tone={STAGE_TONE[stage]}>{quotationStageLabel(selected)}</Pill>, title: customerName(selected.customerId),
       description: selected.season ? `季节 ${selected.season}` : undefined,
       facts: [{ label: '金额', value: <span className="mist-num">{selected.currency} {quoteMoney(selected.total)}</span> }, { label: '条目', value: `${selected.lines.length} 行` }, { label: '贸易术语', value: selected.deliveryTerms || '未填' }, { label: '付款条件', value: selected.paymentTerms || '未填' }, { label: '有效期至', value: selected.validUntil || '未填' }],
-      extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(f => <Pill key={f.key} tone={f.tone}>{f.label}</Pill>)}</div> : undefined }} />;
+      extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}</div> : undefined }} />;
   })() : null;
-  if (full.active && selected && state) return <ListDetailPage backLabel="报价管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title="报价操作未完成">{failure || error}</Banner></div>}{detail}</ListDetailPage>;
+  if (full.active && selected && state) return <ListDetailPage backLabel="报价管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title={uiText("报价操作未完成")}>{failure || error}</Banner></div>}{detail}</ListDetailPage>;
   return <MistPage>
-    <PageHeader eyebrow="订单履约 · 报价" title="报价管理" description="按客户接受的版本转订单；改价或续期另出新版本，旧版本保留。"
+    <PageHeader eyebrow={uiText("订单履约 · 报价")} title={uiText("报价管理")} description={uiText("按客户接受的版本转订单；改价或续期另出新版本，旧版本保留。")}
       actions={<>
-        <Button icon={Download} onClick={() => downloadModuleCsv('报价台账.csv', ['报价号', '版本', '客户', '板块', '币种', '金额', '贸易术语', '付款条件', '有效期', '状态'], rows.map(q => [q.code, version(q), customerName(q.customerId), domainOf(q) === 'fabric' ? '面料' : '成衣', q.currency, q.total, q.deliveryTerms, q.paymentTerms, q.validUntil, quotationStageLabel(q)]))}>导出</Button>
-        {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={onCreate}>新建报价</Button>}
+        <Button icon={Download} onClick={() => downloadModuleCsv('报价台账.csv', ['报价号', '版本', '客户', '板块', '币种', '金额', '贸易术语', '付款条件', '有效期', '状态'], rows.map(q => [q.code, version(q), customerName(q.customerId), domainOf(q) === 'fabric' ? '面料' : '成衣', q.currency, q.total, q.deliveryTerms, q.paymentTerms, q.validUntil, quotationStageLabel(q)]))}>{uiText("导出")}</Button>
+        {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={onCreate}>{uiText("新建报价")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有报价写权限，可以查看报价单、版本与审批记录。</Banner></div>}
-    {(error || failure) && <div className="mist-section"><Banner tone="bad" title="报价操作未完成" actions={error ? <Button onClick={() => void refresh()}>重试</Button> : undefined}>{failure || error}</Banner></div>}
-    <div className="mist-section"><Segmented<QuoteDomain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${all.filter(q => domainOf(q) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${all.filter(q => domainOf(q) === 'fabric').length}` }]} /></div>
+    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有报价写权限，可以查看报价单、版本与审批记录。")}</Banner></div>}
+    {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("报价操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
+    <div className="mist-section"><Segmented<QuoteDomain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${all.filter(q => domainOf(q) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${all.filter(q => domainOf(q) === 'fabric').length}` }]} /></div>
     <Toolbar>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索报价号、客户、款号或季节" />
-      <Dropdown<FlagFilter> label="提醒" value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'expiring', label: `${NEAR_DAYS} 天内到期` }, { value: 'overdue', label: '已过有效期' }, { value: 'belowCost', label: '低于成本或成本待核' }, { value: 'superseded', label: '已有新版本' }]} />
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索报价号、客户、款号或季节")} />
+      <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'expiring', label: `${NEAR_DAYS} 天内到期` }, { value: 'overdue', label: '已过有效期' }, { value: 'belowCost', label: '低于成本或成本待核' }, { value: 'superseded', label: '已有新版本' }]} />
     </Toolbar>
     <Pipeline<StageFilter> value={stageFilter} onChange={setStageFilter} items={[
       { value: 'all', label: '全部', count: stageCount('all'), color: 'var(--mist-ink-2)' },
@@ -208,7 +209,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
       { value: 'closed', label: '未接受 / 已失效', count: stageCount('closed'), color: 'var(--mist-ink-3)' },
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${customerName(selected.customerId)}` : '报价单详情'} drawerSub={selected ? `${selected.currency} ${quoteMoney(selected.total)}` : undefined}
-      list={<Card><DataTable ariaLabel={`${domain === 'fabric' ? '面料' : '成衣'}报价列表`} loading={loading} rows={rows} rowKey={q => q.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
+      list={<Card><DataTable ariaLabel={ui`${domain === 'fabric' ? '面料' : '成衣'}报价列表`} loading={loading} rows={rows} rowKey={q => q.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
@@ -256,11 +257,11 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
     <div className="mist-row" style={{ flexWrap: 'wrap' }}>
       <Pill tone={STAGE_TONE[stage]}>{quotationStageLabel(q)}</Pill>
       <Pill tone="accent">{version(q)}</Pill>
-      <Pill>{quotationDomain(state, q) === 'fabric' ? '面料业务' : '成衣业务'}</Pill>
-      {flags.filter(f => f.key !== 'returned' && f.key !== 'superseded').map(f => <Pill key={f.key} tone={f.tone}>{f.label}</Pill>)}
+      <Pill>{uiText(quotationDomain(state, q) === 'fabric' ? '面料业务' : '成衣业务')}</Pill>
+      {flags.filter(f => f.key !== 'returned' && f.key !== 'superseded').map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}
     </div>
-    <Banner tone={banner.tone} title={banner.title}>{banner.text}</Banner>
-    {blockers.length > 0 && <Banner tone="warn" title={allBlocked ? '开发版本未获需求方认可 · 暂不能转订单' : '部分条目的开发版本未获需求方认可 · 这些条目暂不能转'}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}请先在开发模块记录需求方认可后再转单；产品档案条目不受此限制。</span></Banner>}
+    <Banner tone={banner.tone} title={uiText(banner.title)}>{banner.text}</Banner>
+    {blockers.length > 0 && <Banner tone="warn" title={uiText(allBlocked ? '开发版本未获需求方认可 · 暂不能转订单' : '部分条目的开发版本未获需求方认可 · 这些条目暂不能转')}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}{uiText("请先在开发模块记录需求方认可后再转单；产品档案条目不受此限制。")}</span></Banner>}
     <ActionBar busy={locked} actions={[
       { label: '编辑草稿', icon: Pencil, onClick: onEdit, reason: writeReason, hidden: stage !== 'draft' },
       { label: '提交业务审批', icon: Send, onClick: onSubmit, primary: needsApproval && !approved, reason: writeReason, hidden: stage !== 'draft' || approved },
@@ -288,41 +289,41 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       { label: '条目', value: `${q.lines.length} 项` },
     ]} />
     {q.note && <p className="mist-sub">{q.note}</p>}
-    <DetailBlock title="报价条目">
-      <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={`${q.code} 报价条目`}>{q.lines.map(l => { const m = margin(l.price, l.cost), family = state.market ? quoteLineFamily(state, state.market, l) : undefined, specItems = quoteSpecItems(family, l.specs), moq = quoteMoqStatus(family, l); return <div key={l.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
-        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><strong>{l.name}</strong><span className="mist-spacer" /><Button variant="quiet" onClick={() => l.productId ? onOpen('products', l.productId) : onOpen('development/detail', l.sourceDevId, { versionId: l.sourceVersionId })}>{l.productId ? '档案' : '开发版本'}</Button><Button onClick={()=>onOpen('quotations',q.id,{section:'costing:'+l.id})}>条目核算</Button><Button onClick={()=>onOpen('quotations',q.id,{section:'compare:'+l.id})}>历史条件对照</Button></div>
-        <small className="mist-muted"><Mono>{l.style}</Mono>{l.specification ? ' · ' + l.specification : ''}</small>
-        {specItems.length > 0 && <small className="mist-muted" data-quote-specs>{specItems.map((it, k) => <span key={it.label}>{k ? ' · ' : ''}{it.label} <span className={it.missing ? 'mist-tone-warn' : undefined}>{it.value}</span></span>)}</small>}
-        {(q.status === 'Accepted' || q.convertedOrderId) && (() => { const c = quoteLineConversionStatus(q, l, state.orders); return <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }} data-line-conversion={c.state}><Pill tone={c.state === 'converted' ? 'ok' : c.state === 'skipped' ? 'neutral' : 'accent'}>{c.state === 'converted' ? '已转' : c.state === 'skipped' ? '不再转' : '未转'}</Pill><small className="mist-muted">{c.state === 'converted' ? `订单 ${c.orderCode || '不可用'}${c.legacy ? ' · 历史整单转单' : ''}` : c.state === 'skipped' ? `${quoteLineConversionText(c).slice(4)} · ${c.by} ${shortWhen(c.at)}` : '尚未转单'}</small>{c.state === 'converted' && <Button variant="quiet" onClick={() => onOpen('orders/detail', c.orderId)}>打开订单</Button>}</div>; })()}
-        {moq.state !== 'none' && moq.state !== 'met' && <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }} data-quote-moq={moq.state}>{moq.state === 'below' && <Pill tone="warn">低于 MOQ</Pill>}<small className="mist-muted">{moq.text}</small></div>}
-        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-num">{l.qty} {l.unit} × {l.price} = {q.currency} {l.amount}</span><span className="mist-spacer" />{lineBelowMarginFloor(l) && <span data-margin-floor-breach><Pill tone="warn">{`低于最低毛利率 ${l.marginFloor!.minMarginPercent}%（V${l.marginFloor!.version}）`}</Pill></span>}{m === null ? <span className="mist-muted">成本待核</span> : <span className={m < 0 ? 'mist-tone-bad mist-num' : 'mist-num mist-muted'}>毛利 {m}%</span>}</div>
+    <DetailBlock title={uiText("报价条目")}>
+      <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={ui`${q.code} 报价条目`}>{q.lines.map(l => { const m = margin(l.price, l.cost), family = state.market ? quoteLineFamily(state, state.market, l) : undefined, specItems = quoteSpecItems(family, l.specs), moq = quoteMoqStatus(family, l); return <div key={l.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
+        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><strong>{l.name}</strong><span className="mist-spacer" /><Button variant="quiet" onClick={() => l.productId ? onOpen('products', l.productId) : onOpen('development/detail', l.sourceDevId, { versionId: l.sourceVersionId })}>{uiText(l.productId ? '档案' : '开发版本')}</Button><Button onClick={()=>onOpen('quotations',q.id,{section:'costing:'+l.id})}>{uiText("条目核算")}</Button><Button onClick={()=>onOpen('quotations',q.id,{section:'compare:'+l.id})}>{uiText("历史条件对照")}</Button></div>
+        <small className="mist-muted"><Mono>{l.style}</Mono>{uiText(l.specification ? ' · ' + l.specification : '')}</small>
+        {specItems.length > 0 && <small className="mist-muted" data-quote-specs>{specItems.map((it, k) => <span key={it.label}>{uiText(k ? ' · ' : '')}{uiText(it.label)} <span className={it.missing ? 'mist-tone-warn' : undefined}>{it.value}</span></span>)}</small>}
+        {(q.status === 'Accepted' || q.convertedOrderId) && (() => { const c = quoteLineConversionStatus(q, l, state.orders); return <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }} data-line-conversion={c.state}><Pill tone={c.state === 'converted' ? 'ok' : c.state === 'skipped' ? 'neutral' : 'accent'}>{uiText(c.state === 'converted' ? '已转' : c.state === 'skipped' ? '不再转' : '未转')}</Pill><small className="mist-muted">{uiText(c.state === 'converted' ? `订单 ${c.orderCode || '不可用'}${c.legacy ? ' · 历史整单转单' : ''}` : c.state === 'skipped' ? `${quoteLineConversionText(c).slice(4)} · ${c.by} ${shortWhen(c.at)}` : '尚未转单')}</small>{c.state === 'converted' && <Button variant="quiet" onClick={() => onOpen('orders/detail', c.orderId)}>{uiText("打开订单")}</Button>}</div>; })()}
+        {moq.state !== 'none' && moq.state !== 'met' && <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }} data-quote-moq={moq.state}>{moq.state === 'below' && <Pill tone="warn">{uiText("低于 MOQ")}</Pill>}<small className="mist-muted">{moq.text}</small></div>}
+        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-num">{l.qty} {uiText(l.unit)} × {l.price} = {q.currency} {l.amount}</span><span className="mist-spacer" />{lineBelowMarginFloor(l) && <span data-margin-floor-breach><Pill tone="warn">{ui`低于最低毛利率 ${l.marginFloor!.minMarginPercent}%（V${l.marginFloor!.version}）`}</Pill></span>}{m === null ? <span className="mist-muted">{uiText("成本待核")}</span> : <span className={m < 0 ? 'mist-tone-bad mist-num' : 'mist-num mist-muted'}>{uiText("毛利 ")}{m}%</span>}</div>
       </div>; })}</div>
-      <span className="mist-note">毛利参考 = (单价 − 成本) / 单价，仅按已记录条目成本，不是实际订单利润。专业核算从准确条目进入，可对照历史成交、报价底价线与 AI 审阅。</span>
+      <span className="mist-note">{uiText("毛利参考 = (单价 − 成本) / 单价，仅按已记录条目成本，不是实际订单利润。专业核算从准确条目进入，可对照历史成交、报价底价线与 AI 审阅。")}</span>
     </DetailBlock>
-    {!!q.costingSnapshots?.length&&<DetailBlock title="核算历史"><span className="mist-note">{q.costingSnapshots.length} 份不可覆盖快照；编辑草稿重建条目后，旧快照仅历史，不自动绑定新行。当前行从条目核算查看。</span><Button onClick={()=>onOpen('quotations',q.id,{section:'cost-history'})}>查看全部核算历史</Button></DetailBlock>}
-    {versions.length > 1 && <DetailBlock title="版本">
+    {!!q.costingSnapshots?.length&&<DetailBlock title={uiText("核算历史")}><span className="mist-note">{q.costingSnapshots.length}{uiText(" 份不可覆盖快照；编辑草稿重建条目后，旧快照仅历史，不自动绑定新行。当前行从条目核算查看。")}</span><Button onClick={()=>onOpen('quotations',q.id,{section:'cost-history'})}>{uiText("查看全部核算历史")}</Button></DetailBlock>}
+    {versions.length > 1 && <DetailBlock title={uiText("版本")}>
       <div className="mist-col" style={{ gap: 6 }} data-quotation-versions>{versions.map(v => <Button key={v.id} variant={v.id === q.id ? 'secondary' : 'quiet'} aria-current={v.id === q.id || undefined} onClick={() => onOpen('quotations', v.id)}>
-        <span className="mist-row" data-wrap style={{ gap: 8, rowGap: 4, width: '100%' }}><Pill tone={v.id === q.id ? 'accent' : 'neutral'}>{version(v)}</Pill><span className="mist-num">{v.currency} {quoteMoney(v.total)}</span><span className="mist-muted">至 {v.validUntil.slice(5)}</span><span className="mist-spacer" /><span>{quotationStageLabel(v)}</span></span>
+        <span className="mist-row" data-wrap style={{ gap: 8, rowGap: 4, width: '100%' }}><Pill tone={v.id === q.id ? 'accent' : 'neutral'}>{version(v)}</Pill><span className="mist-num">{v.currency} {quoteMoney(v.total)}</span><span className="mist-muted">{uiText("至 ")}{v.validUntil.slice(5)}</span><span className="mist-spacer" /><span>{quotationStageLabel(v)}</span></span>
       </Button>)}</div>
     </DetailBlock>}
-    <DetailBlock title="客户反馈记录"><span className="mist-note">{q.feedback?.length||0} 条结构化反馈；区分客户原话、业务判断和未知原因。还价不改本版单价，接受 / 未接受仍从主线确认。</span><Button onClick={()=>onOpen('quotations',q.id,{section:'feedback'})}>查看客户反馈</Button></DetailBlock>
-    <DetailBlock title="进度"><Checklist items={track} /></DetailBlock>
-    {!!(q.approvalHistory?.length || q.approval) && <DetailBlock title="审批记录">
+    <DetailBlock title={uiText("客户反馈记录")}><span className="mist-note">{q.feedback?.length||0}{uiText(" 条结构化反馈；区分客户原话、业务判断和未知原因。还价不改本版单价，接受 / 未接受仍从主线确认。")}</span><Button onClick={()=>onOpen('quotations',q.id,{section:'feedback'})}>{uiText("查看客户反馈")}</Button></DetailBlock>
+    <DetailBlock title={uiText("进度")}><Checklist items={track} /></DetailBlock>
+    {!!(q.approvalHistory?.length || q.approval) && <DetailBlock title={uiText("审批记录")}>
       <Timeline events={[...(q.approvalHistory || []), ...(q.approval ? [q.approval] : [])].reverse().map(a => ({ who: a.status === 'pending' ? '等待审批' : a.status === 'approved' ? '已批准' : '已退回', when: new Date(a.decidedAt || a.submittedAt).toLocaleString(), text: <>{a.note || (a.status === 'pending' ? '已提交，待指定审批人决定' : '—')}<br /><span className="mist-note">{a.details.filter(d => d.label === '金额' || d.label === '有效期').map(d => d.label + ' ' + d.value).join(' · ')}</span></> }))} />
     </DetailBlock>}
-    <DetailBlock title="报价单文件">
-      {missingIssuer && <div className="mist-col" style={{ gap: 8 }} data-quote-company-missing><Banner tone="warn" title="缺少公司抬头，暂不能生成报价单">{canMaintainCompany ? '在系统设置 → 公司资料中填写公司中文抬头并保存，回到本报价后即可生成；已生成的报价单不受影响。' : '公司资料由公司所有者维护，请联系所有者在系统设置 → 公司资料中补全。'}</Banner>{canMaintainCompany && <div className="mist-row"><Button size="sm" icon={Building2} onClick={() => onOpen('settings', q.id, { section: 'company' })}>去维护公司资料</Button></div>}</div>}
-      <div className="mist-col" style={{ gap: 0 }} data-quote-documents role="list" aria-label={`${q.code} 报价单文件`}>{documents.length ? documents.map(d => <div key={d.id} role="listitem" className="mist-row" style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }} data-quote-document={d.draft ? 'draft' : 'formal'}>
-        <Pill tone={d.draft ? 'warn' : 'ok'}>{d.draft ? '草稿水印版' : '正式版'}</Pill><Pill tone="accent">{'V' + d.revision}</Pill>
-        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}>{state.files.find(f => f.id === d.fileId) ? <FileName file={state.files.find(f => f.id === d.fileId)!} label={d.fileName} /> : <span style={{ overflowWrap: 'anywhere' }}>{d.fileName}</span>}<small className="mist-muted">{d.generatedBy} · {shortWhen(d.generatedAt)}</small></span>
+    <DetailBlock title={uiText("报价单文件")}>
+      {missingIssuer && <div className="mist-col" style={{ gap: 8 }} data-quote-company-missing><Banner tone="warn" title={uiText("缺少公司抬头，暂不能生成报价单")}>{uiText(canMaintainCompany ? '在系统设置 → 公司资料中填写公司中文抬头并保存，回到本报价后即可生成；已生成的报价单不受影响。' : '公司资料由公司所有者维护，请联系所有者在系统设置 → 公司资料中补全。')}</Banner>{canMaintainCompany && <div className="mist-row"><Button size="sm" icon={Building2} onClick={() => onOpen('settings', q.id, { section: 'company' })}>{uiText("去维护公司资料")}</Button></div>}</div>}
+      <div className="mist-col" style={{ gap: 0 }} data-quote-documents role="list" aria-label={ui`${q.code} 报价单文件`}>{documents.length ? documents.map(d => <div key={d.id} role="listitem" className="mist-row" style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }} data-quote-document={d.draft ? 'draft' : 'formal'}>
+        <Pill tone={d.draft ? 'warn' : 'ok'}>{uiText(d.draft ? '草稿水印版' : '正式版')}</Pill><Pill tone="accent">{uiText('V' + d.revision)}</Pill>
+        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}>{state.files.find(f => f.id === d.fileId) ? <FileName file={state.files.find(f => f.id === d.fileId)!} label={uiText(d.fileName)} /> : <span style={{ overflowWrap: 'anywhere' }}>{d.fileName}</span>}<small className="mist-muted">{d.generatedBy} · {shortWhen(d.generatedAt)}</small></span>
         <span className="mist-spacer" />
         <PreviewButton size="md" file={state.files.find(f => f.id === d.fileId)} />
-        <Button variant="quiet" icon={Download} onClick={() => onDownloadDocument(d.fileId)}>下载</Button>
-        <Button variant="quiet" icon={Printer} onClick={() => onPrintDocument(d.fileId)}>打印</Button>
-      </div>) : <span className="mist-muted">尚未生成报价单。</span>}</div>
-      <span className="mist-note">每次生成都保存一份不可覆盖的 PDF（时间、生成人、报价版本）；修改报价后请重新生成。{formalDocReason && formalDocReason !== docBase ? `正式版：${formalDocReason}。` : ''}</span>
+        <Button variant="quiet" icon={Download} onClick={() => onDownloadDocument(d.fileId)}>{uiText("下载")}</Button>
+        <Button variant="quiet" icon={Printer} onClick={() => onPrintDocument(d.fileId)}>{uiText("打印")}</Button>
+      </div>) : <span className="mist-muted">{uiText("尚未生成报价单。")}</span>}</div>
+      <span className="mist-note">{uiText("每次生成都保存一份不可覆盖的 PDF（时间、生成人、报价版本）；修改报价后请重新生成。")}{uiText(formalDocReason && formalDocReason !== docBase ? `正式版：${formalDocReason}。` : '')}</span>
     </DetailBlock>
-    <DetailBlock title="附件">{attachments}</DetailBlock>
-    <DetailBlock title="处理记录">{history}</DetailBlock>
+    <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
+    <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;
 }

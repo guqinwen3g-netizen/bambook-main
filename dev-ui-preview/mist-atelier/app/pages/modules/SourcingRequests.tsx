@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 采购管理 · 询价比价：按订单条目向多家供应商询价，逐家登记报价或谢绝，按折人民币单价比价并定标；定标生成采购草稿，仍走采购审批。 */
 import React from 'react';
 import { Award, Ban, MessageSquareQuote, Plus, Scale, SearchX, UserPlus, XCircle } from 'lucide-react';
@@ -63,20 +64,20 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
 
   const columns: Column<MistRfq>[] = [
     { key: 'code', header: '询价单', width: 'minmax(200px,2fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span><Mono>{r.code}</Mono> · {r.description}</span><small className="mist-muted">{label(r)}</small></div> },
-    { key: 'quotes', header: '报价', width: '120px', hideOnMobile: true, render: r => { const q = rfqCurrentQuotes(r); return <div className="mist-col" style={{ gap: 2 }}><span>{q.filter(x => !x.declined).length} / {r.supplierIds.length} 家</span><small className={r.state === 'open' && r.deadline < day ? 'mist-tone-bad' : 'mist-muted'}>截止 {r.deadline}</small></div>; } },
-    { key: 'best', header: '最低报价', width: 'minmax(130px,1.2fr)', hideOnMobile: true, render: r => { const best = state ? rfqComparison(state, r, day).rows.find(x => x.lowest) : undefined; return best ? <div className="mist-col" style={{ gap: 2 }}><span>{price(best.quote.price)} {best.quote.currency}</span><small className="mist-muted">{best.quote.supplier}</small></div> : <span className="mist-muted">暂无有效报价</span>; } },
+    { key: 'quotes', header: '报价', width: '120px', hideOnMobile: true, render: r => { const q = rfqCurrentQuotes(r); return <div className="mist-col" style={{ gap: 2 }}><span>{q.filter(x => !x.declined).length} / {r.supplierIds.length}{uiText(" 家")}</span><small className={r.state === 'open' && r.deadline < day ? 'mist-tone-bad' : 'mist-muted'}>{uiText("截止 ")}{r.deadline}</small></div>; } },
+    { key: 'best', header: '最低报价', width: 'minmax(130px,1.2fr)', hideOnMobile: true, render: r => { const best = state ? rfqComparison(state, r, day).rows.find(x => x.lowest) : undefined; return best ? <div className="mist-col" style={{ gap: 2 }}><span>{price(best.quote.price)} {best.quote.currency}</span><small className="mist-muted">{best.quote.supplier}</small></div> : <span className="mist-muted">{uiText("暂无有效报价")}</span>; } },
     { key: 'state', header: '状态', width: '110px', render: r => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATE_TONE[r.state]}>{RFQ_STATE_LABEL[r.state]}</Pill>{r.award && <small className="mist-muted">{r.award.supplier}</small>}</div> },
   ];
-  const detail = selected && state ? <RfqDetail rfq={selected} state={state} day={day} can={can} locked={locked} label={label(selected)} onPurchase={onPurchase} onSupplier={onSupplier}
+  const detail = selected && state ? <RfqDetail rfq={selected} state={state} day={day} can={can} locked={locked} label={uiText(label(selected))} onPurchase={onPurchase} onSupplier={onSupplier}
       onQuote={() => open(quoteSpec(selected))} onDecline={() => open(declineSpec(selected))} onInvite={() => open(inviteSpec(selected))} onAward={row => open(awardSpec(selected, row))} onCancel={() => open(cancelSpec(selected))} canInvite={available.some(s => !selected.supplierIds.includes(s.id))} />
-    : <EmptyState icon={Scale} title="询价详情" description="从列表选择一张询价单，查看比价与定标" compact />;
+    : <EmptyState icon={Scale} title={uiText("询价详情")} description={uiText("从列表选择一张询价单，查看比价与定标")} compact />;
   return <>
-    {preset && <div className="mist-section"><Banner tone="neutral" title={`从供应商 ${preset.name} 进入`}>{supplierUnavailableReason(preset, day) ? `${preset.name} 当前不可合作（${supplierUnavailableReason(preset, day)}），不能邀请报价。` : `发起询价时已默认勾选 ${preset.name}，至少再邀请一家供应商比价。`}</Banner></div>}
+    {preset && <div className="mist-section"><Banner tone="neutral" title={ui`从供应商 ${preset.name} 进入`}>{uiText(supplierUnavailableReason(preset, day) ? `${preset.name} 当前不可合作（${supplierUnavailableReason(preset, day)}），不能邀请报价。` : `发起询价时已默认勾选 ${preset.name}，至少再邀请一家供应商比价。`)}</Banner></div>}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '询价详情'} drawerSub={selected ? RFQ_STATE_LABEL[selected.state] : undefined}
       list={<Card>
-        <CardHeader title={`询价比价 · ${all.length}`} sub="多家报价按折人民币单价比价；定标生成采购草稿后走审批。" tools={can ? <Button variant="primary" icon={Plus} disabled={locked} onClick={() => open(createSpec())}>发起询价</Button> : undefined} />
-        <DataTable ariaLabel="询价单列表" loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={r => { setPicked(r.id); setDrawer(true); }} columns={columns}
-          empty={needle && all.length ? <EmptyState icon={SearchX} title="没有符合条件的询价单" description="换个关键词试试。" /> : <EmptyState icon={Scale} title={`还没有${domain === 'fabric' ? '面料' : '成衣'}询价`} description="需要比价的采购或委外加工，先按订单条目向多家供应商询价，再按报价定标。" />} />
+        <CardHeader title={ui`询价比价 · ${all.length}`} sub={uiText("多家报价按折人民币单价比价；定标生成采购草稿后走审批。")} tools={can ? <Button variant="primary" icon={Plus} disabled={locked} onClick={() => open(createSpec())}>{uiText("发起询价")}</Button> : undefined} />
+        <DataTable ariaLabel={uiText("询价单列表")} loading={loading} rows={rows} rowKey={r => r.id} selectedKey={selected?.id} density="comfy" onRowClick={r => { setPicked(r.id); setDrawer(true); }} columns={columns}
+          empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的询价单")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Scale} title={ui`还没有${domain === 'fabric' ? '面料' : '成衣'}询价`} description={uiText("需要比价的采购或委外加工，先按订单条目向多家供应商询价，再按报价定标。")} />} />
       </Card>}
       detail={detail} />
   </>;
@@ -90,9 +91,9 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
   const pendingSuppliers = r.supplierIds.filter(id => !rfqCurrentQuotes(r).some(q => q.supplierId === id)).map(id => state.market.suppliers.find(s => s.id === id)?.name || id);
   const closedReason = isOpen ? false : `询价单${RFQ_STATE_LABEL[r.state]}`;
   return <DetailBody data-rfq-detail={r.id} heading={<div><span className="mist-mono mist-muted">{r.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{r.description}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{RFQ_STATE_LABEL[r.state]}</Pill>{isOpen && r.deadline < day && <Pill tone="warn">已过报价截止日</Pill>}</div>
-    {r.award && <Banner tone="ok" title={`已定标 ${r.award.supplier}`}>生成采购草稿 <TextLink onClick={() => onPurchase(r.award!.purchaseId)}>{r.award.purchaseCode}</TextLink>{r.award.flags.length ? `；${r.award.flags.join('；')}；理由：${r.award.reason}` : ''}。</Banner>}
-    {r.cancelled && <Banner tone="neutral" title="询价已取消">{r.cancelled.reason}</Banner>}
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{RFQ_STATE_LABEL[r.state]}</Pill>{isOpen && r.deadline < day && <Pill tone="warn">{uiText("已过报价截止日")}</Pill>}</div>
+    {r.award && <Banner tone="ok" title={ui`已定标 ${r.award.supplier}`}>{uiText("生成采购草稿 ")}<TextLink onClick={() => onPurchase(r.award!.purchaseId)}>{r.award.purchaseCode}</TextLink>{uiText(r.award.flags.length ? `；${r.award.flags.join('；')}；理由：${r.award.reason}` : '')}。</Banner>}
+    {r.cancelled && <Banner tone="neutral" title={uiText("询价已取消")}>{r.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
       { label: '登记报价', icon: MessageSquareQuote, onClick: onQuote, primary: true, reason: closedReason },
       { label: '登记谢绝', icon: XCircle, onClick: onDecline, reason: closedReason },
@@ -107,18 +108,18 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
       { label: '报价截止', value: r.deadline },
       { label: '比价口径', value: cmp.basis === 'cny' ? '单价折人民币（月末汇率）' : `仅比较 ${r.currency} 报价（缺月末汇率）` },
     ]} />
-    {r.note && <p className="mist-sub">技术要求：{r.note}</p>}
-    <DetailBlock title={`比价 · ${cmp.rows.length}`}>
-      {cmp.rows.length ? <DataTable ariaLabel={`${r.code} 比价`} rows={cmp.rows} rowKey={x => x.quote.id} columns={[
-        { key: 'supplier', header: '供应商', render: x => <div className="mist-col" style={{ gap: 2 }}><TextLink onClick={() => onSupplier(x.quote.supplierId)}>{x.quote.supplier}</TextLink><small className="mist-muted">评级 {x.grade}</small></div> },
-        { key: 'price', header: '单价', align: 'right', render: x => x.quote.declined ? <span className="mist-muted">谢绝：{x.quote.declineReason}</span> : <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{price(x.quote.price)} {x.quote.currency}</span><small className="mist-muted">{x.cnyUnit !== null && x.quote.currency !== 'CNY' ? `≈ ${price(x.cnyUnit)} CNY` : x.comparable ? '' : '缺汇率，未比价'}</small></div> },
-        { key: 'terms', header: '交期 / 条件', render: x => x.quote.declined ? null : <div className="mist-col" style={{ gap: 2 }}><span className={x.late ? 'mist-tone-bad' : undefined}>{x.quote.promisedDue}{x.late ? '（晚于需求）' : ''}</span><small className={x.moqOver ? 'mist-tone-bad' : 'mist-muted'}>MOQ {x.quote.moq || '无'} · {x.quote.terms}</small><small className={x.valid ? 'mist-muted' : 'mist-tone-bad'}>有效至 {x.quote.validUntil}</small></div> },
-        { key: 'rank', header: '排名', render: x => x.lowest ? <Pill tone="ok">最低价</Pill> : x.rank ? `第 ${x.rank}` : <span className="mist-muted">—</span> },
-        ...(can && isOpen ? [{ key: 'act', header: '', align: 'right' as const, render: (x: RfqComparisonRow) => x.valid ? <Button size="sm" icon={Award} disabled={locked} aria-label={`定标 ${x.quote.supplier}`} onClick={() => onAward(x)}>定标</Button> : null }] : []),
-      ]} /> : <span className="mist-note">还没有报价。</span>}
-      {isOpen && pendingSuppliers.length > 0 && <span className="mist-note">待报价：{pendingSuppliers.join('、')}</span>}
+    {r.note && <p className="mist-sub">{uiText("技术要求：")}{r.note}</p>}
+    <DetailBlock title={ui`比价 · ${cmp.rows.length}`}>
+      {cmp.rows.length ? <DataTable ariaLabel={ui`${r.code} 比价`} rows={cmp.rows} rowKey={x => x.quote.id} columns={[
+        { key: 'supplier', header: '供应商', render: x => <div className="mist-col" style={{ gap: 2 }}><TextLink onClick={() => onSupplier(x.quote.supplierId)}>{x.quote.supplier}</TextLink><small className="mist-muted">{uiText("评级 ")}{x.grade}</small></div> },
+        { key: 'price', header: '单价', align: 'right', render: x => x.quote.declined ? <span className="mist-muted">{uiText("谢绝：")}{x.quote.declineReason}</span> : <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{price(x.quote.price)} {x.quote.currency}</span><small className="mist-muted">{uiText(x.cnyUnit !== null && x.quote.currency !== 'CNY' ? `≈ ${price(x.cnyUnit)} CNY` : x.comparable ? '' : '缺汇率，未比价')}</small></div> },
+        { key: 'terms', header: '交期 / 条件', render: x => x.quote.declined ? null : <div className="mist-col" style={{ gap: 2 }}><span className={x.late ? 'mist-tone-bad' : undefined}>{x.quote.promisedDue}{uiText(x.late ? '（晚于需求）' : '')}</span><small className={x.moqOver ? 'mist-tone-bad' : 'mist-muted'}>MOQ {x.quote.moq || '无'} · {x.quote.terms}</small><small className={x.valid ? 'mist-muted' : 'mist-tone-bad'}>{uiText("有效至 ")}{x.quote.validUntil}</small></div> },
+        { key: 'rank', header: '排名', render: x => x.lowest ? <Pill tone="ok">{uiText("最低价")}</Pill> : x.rank ? `第 ${x.rank}` : <span className="mist-muted">—</span> },
+        ...(can && isOpen ? [{ key: 'act', header: '', align: 'right' as const, render: (x: RfqComparisonRow) => x.valid ? <Button size="sm" icon={Award} disabled={locked} aria-label={ui`定标 ${x.quote.supplier}`} onClick={() => onAward(x)}>{uiText("定标")}</Button> : null }] : []),
+      ]} /> : <span className="mist-note">{uiText("还没有报价。")}</span>}
+      {isOpen && pendingSuppliers.length > 0 && <span className="mist-note">{uiText("待报价：")}{pendingSuppliers.join('、')}</span>}
     </DetailBlock>
-    {history.length > 0 && <DetailBlock title={`历史报价 · ${history.length}`}><div className="mist-col">{history.map(q => <small key={q.id} className="mist-muted">{q.supplier} · {q.declined ? `谢绝：${q.declineReason}` : `${price(q.price)} ${q.currency} · 交期 ${q.promisedDue}`} · {shortWhen(q.at)}，{shortWhen(q.supersededAt!)} 更新</small>)}</div></DetailBlock>}
-    <DetailBlock title="记录"><Events entity="procurement" id={r.id} /></DetailBlock>
+    {history.length > 0 && <DetailBlock title={ui`历史报价 · ${history.length}`}><div className="mist-col">{history.map(q => <small key={q.id} className="mist-muted">{q.supplier} · {uiText(q.declined ? `谢绝：${q.declineReason}` : `${price(q.price)} ${q.currency} · 交期 ${q.promisedDue}`)} · {shortWhen(q.at)}，{shortWhen(q.supersededAt!)}{uiText(" 更新")}</small>)}</div></DetailBlock>}
+    <DetailBlock title={uiText("记录")}><Events entity="procurement" id={r.id} /></DetailBlock>
   </DetailBody>;
 }

@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 供应商管理：类型 / 合作状态筛选，档案含产能工艺、认证有效期、评级历史、在手业务与交付表现；暂停 / 停用按生效日阻止新增业务。 */
 import { BaseDataImportButton } from './BaseDataImport';
@@ -76,7 +78,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const searched = all.filter(s => (!needle || `${s.code} ${s.name} ${s.type} ${s.capabilities} ${s.address} ${s.contacts.map(c => c.name).join(' ')}`.toLowerCase().includes(needle))
     && (typeFilter === 'all' || s.type === typeFilter) && (flagFilter === 'all' || supplierFlags(s, day).some(f => f.key === flagFilter)));
   const statusCount = (v: StatusFilter) => searched.filter(s => v === 'all' || statusNow(s) === v).length;
-  const perf = React.useMemo(() => new Map(all.map(s => [s.id, supplierPerformance(state, s.id)])), [state, all]);
+  const perf = React.useMemo(() => new Map(all.map(s => [s.id, supplierPerformance(state, s.id)])), [state, all, interfaceLocale()]);
   const rows = searched.filter(s => statusFilter === 'all' || statusNow(s) === statusFilter).sort((a, b) => ['active', 'paused', 'blocked'].indexOf(statusNow(a)) - ['active', 'paused', 'blocked'].indexOf(statusNow(b)) || a.code.localeCompare(b.code));
   const selected = rows.find(s => s.id === picked) || (picked ? all.find(s => s.id === picked) : undefined);
   // P6：档案 / 认证 / 联系人需 suppliers:write（业务员即有）；评级与暂停 / 停用 / 恢复需 suppliers:admin。服务端同样校验。
@@ -129,20 +131,20 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const columns: Column<MarketSupplier>[] = [
     { key: 'name', header: '供应商', width: 'minmax(170px,1.3fr)', render: s => <ObjectCell name={s.name} meta={<><Mono>{s.code}</Mono> · {s.type}</>} /> },
     { key: 'grade', header: '评级', width: '64px', render: s => { const g = supplierGrade(s); return g ? <Pill tone={GRADE_TONE[g.grade]}>{g.grade}</Pill> : <span className="mist-muted">—</span>; } },
-    { key: 'certs', header: '认证', width: 'minmax(120px,1fr)', hideOnMobile: true, render: s => { const certs = s.certificates || [], worst = certs.map(c => certificateState(c, day)).sort((a, b) => ['expired', 'expiring', 'valid'].indexOf(a.key) - ['expired', 'expiring', 'valid'].indexOf(b.key))[0]; return certs.length ? <span className="mist-col" style={{ gap: 2 }}><span>{certs.map(c => c.name.split(' ')[0]).join(' · ')}</span>{worst && worst.key !== 'valid' && <small className={worst.tone === 'bad' ? 'mist-tone-bad' : 'mist-tone-warn'}>{worst.label}</small>}</span> : <span className="mist-muted">未登记</span>; } },
+    { key: 'certs', header: '认证', width: 'minmax(120px,1fr)', hideOnMobile: true, render: s => { const certs = s.certificates || [], worst = certs.map(c => certificateState(c, day)).sort((a, b) => ['expired', 'expiring', 'valid'].indexOf(a.key) - ['expired', 'expiring', 'valid'].indexOf(b.key))[0]; return certs.length ? <span className="mist-col" style={{ gap: 2 }}><span>{certs.map(c => c.name.split(' ')[0]).join(' · ')}</span>{worst && worst.key !== 'valid' && <small className={worst.tone === 'bad' ? 'mist-tone-bad' : 'mist-tone-warn'}>{uiText(worst.label)}</small>}</span> : <span className="mist-muted">{uiText("未登记")}</span>; } },
     { key: 'open', header: '在手', width: '64px', align: 'right', render: s => <span className="mist-num">{perf.get(s.id)?.open.length || 0}</span> },
-    { key: 'ontime', header: '准交率', width: '80px', align: 'right', hideOnMobile: true, render: s => { const p = perf.get(s.id); return p?.completed.length ? <span className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num">{rate(p.onTime, p.completed.length)}</span><small className="mist-muted">{p.onTime}/{p.completed.length} 单</small></span> : <span className="mist-muted">—</span>; } },
-    { key: 'status', header: '状态', width: '92px', render: s => { const now = statusNow(s), scheduled = supplierFlags(s, day).find(f => f.key === 'scheduled'); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[now]}>{STATUS_LABEL[now]}</Pill>{scheduled && <small className="mist-tone-warn">{scheduled.label}</small>}</span>; } },
+    { key: 'ontime', header: '准交率', width: '80px', align: 'right', hideOnMobile: true, render: s => { const p = perf.get(s.id); return p?.completed.length ? <span className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num">{rate(p.onTime, p.completed.length)}</span><small className="mist-muted">{p.onTime}/{p.completed.length}{uiText(" 单")}</small></span> : <span className="mist-muted">—</span>; } },
+    { key: 'status', header: '状态', width: '92px', render: s => { const now = statusNow(s), scheduled = supplierFlags(s, day).find(f => f.key === 'scheduled'); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[now]}>{STATUS_LABEL[now]}</Pill>{scheduled && <small className="mist-tone-warn">{uiText(scheduled.label)}</small>}</span>; } },
   ];
   const empty = all.length
-    ? <EmptyState icon={SearchX} title="没有符合条件的供应商" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setTypeFilter('all'); setFlagFilter('all'); }}>清除筛选</Button>} />
-    : <EmptyState icon={Building2} title="还没有供应商" description="登记织造、染整、印花、成衣加工、辅料等供应商后，采购单才能选择供应商。" action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>新增供应商</Button> : undefined} />;
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的供应商")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setTypeFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={Building2} title={uiText("还没有供应商")} description={uiText("登记织造、染整、印花、成衣加工、辅料等供应商后，采购单才能选择供应商。")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button> : undefined} />;
   const detail = selected && state
     ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
         onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
-    : <EmptyState icon={Building2} title="供应商档案" description="从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。" compact />;
+    : <EmptyState icon={Building2} title={uiText("供应商档案")} description={uiText("从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。")} compact />;
   const summary = selected ? (() => {
     const now = statusNow(selected), g = supplierGrade(selected), p = perf.get(selected.id), certs = selected.certificates || [], contact = selected.contacts.find(c => c.primary) || selected.contacts[0];
     const alerts = supplierFlags(selected, day).filter(f => f.key === 'certExpired' || f.key === 'certExpiring' || f.key === 'scheduled');
@@ -154,23 +156,23 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
         { label: '在手采购', value: `${p?.open.length || 0} 单` }, { label: '准交率', value: p?.completed.length ? rate(p.onTime, p.completed.length) : '暂无完成单' },
         { label: '通常交付周期', value: `${selected.leadDays} 天` }, { label: '主联系人', value: contact ? contact.name : '未登记' },
       ],
-      extra: alerts.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{alerts.map(f => <Pill key={f.key} tone={f.tone}>{f.label}</Pill>)}</div> : undefined,
+      extra: alerts.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{alerts.map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}</div> : undefined,
     }} />;
   })() : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="供应商管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
-    <PageHeader eyebrow="客户与市场 · 供应商" title="供应商管理" description="认证有效期、评级与交付表现集中查看；暂停或停用按生效日阻止新增业务，在手业务继续执行。"
+    <PageHeader eyebrow={uiText("客户与市场 · 供应商")} title={uiText("供应商管理")} description={uiText("认证有效期、评级与交付表现集中查看；暂停或停用按生效日阻止新增业务，在手业务继续执行。")}
       actions={<>
         {can && <BaseDataImportButton kind="supplier" />}
-        <Button icon={Download} onClick={() => downloadModuleCsv('供应商.csv', ['编码', '名称', '类型', '地址', '工艺与能力', '月产能', '产能单位', '交付周期天', '评级', '认证', '在手单', '准交', '状态'], rows.map(s => { const p = perf.get(s.id); return [s.code, s.name, s.type, s.address, s.capabilities, s.capacity, s.capacityUnit, s.leadDays, supplierGrade(s)?.grade || '', (s.certificates || []).map(c => `${c.name}(${c.validUntil})`).join('；'), p?.open.length || 0, p?.completed.length ? `${p.onTime}/${p.completed.length}` : '', STATUS_LABEL[statusNow(s)]]; }))}>导出</Button>
-        {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>新增供应商</Button>}
+        <Button icon={Download} onClick={() => downloadModuleCsv('供应商.csv', ['编码', '名称', '类型', '地址', '工艺与能力', '月产能', '产能单位', '交付周期天', '评级', '认证', '在手单', '准交', '状态'], rows.map(s => { const p = perf.get(s.id); return [s.code, s.name, s.type, s.address, s.capabilities, s.capacity, s.capacityUnit, s.leadDays, supplierGrade(s)?.grade || '', (s.certificates || []).map(c => `${c.name}(${c.validUntil})`).join('；'), p?.open.length || 0, p?.completed.length ? `${p.onTime}/${p.completed.length}` : '', STATUS_LABEL[statusNow(s)]]; }))}>{uiText("导出")}</Button>
+        {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有供应商写权限，可以查看档案、认证与交付表现。</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title="供应商数据未加载" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
+    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有供应商写权限，可以查看档案、认证与交付表现。")}</Banner></div>}
+    {error && <div className="mist-section"><Banner tone="bad" title={uiText("供应商数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     <Toolbar>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索名称、编码、工艺、地址或联系人" />
-      <Dropdown label="类型" value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部' }, ...[...SUPPLIER_TYPES, ...legacyTypes].map(t => ({ value: t, label: `${t} · ${all.filter(s => s.type === t).length}` }))]} />
-      <Dropdown<FlagFilter> label="提醒" value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'certExpired', label: '认证已过期' }, { value: 'certExpiring', label: `认证 ${CERT_NEAR_DAYS} 天内到期` }, { value: 'noCert', label: '未登记认证' }, { value: 'unrated', label: '未评级' }, { value: 'scheduled', label: '即将暂停 / 停用' }]} />
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索名称、编码、工艺、地址或联系人")} />
+      <Dropdown label={uiText("类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部' }, ...[...SUPPLIER_TYPES, ...legacyTypes].map(t => ({ value: t, label: `${t} · ${all.filter(s => s.type === t).length}` }))]} />
+      <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'certExpired', label: '认证已过期' }, { value: 'certExpiring', label: `认证 ${CERT_NEAR_DAYS} 天内到期` }, { value: 'noCert', label: '未登记认证' }, { value: 'unrated', label: '未评级' }, { value: 'scheduled', label: '即将暂停 / 停用' }]} />
     </Toolbar>
     <Pipeline<StatusFilter> value={statusFilter} onChange={setStatusFilter} items={[
       { value: 'all', label: '全部', count: statusCount('all'), color: 'var(--mist-ink-2)' },
@@ -179,7 +181,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
       { value: 'blocked', label: '已停用', count: statusCount('blocked'), color: 'var(--mist-bad)' },
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.name}` : '供应商档案'} drawerSub={selected?.type}
-      list={<Card><DataTable ariaLabel="供应商列表" loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
+      list={<Card><DataTable ariaLabel={uiText("供应商列表")} loading={loading} rows={rows} rowKey={s => s.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
@@ -202,10 +204,10 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
     <div className="mist-row" style={{ flexWrap: 'wrap' }}>
       <Pill tone={STATUS_TONE[now]}>{STATUS_LABEL[now]}</Pill>
       <Pill>{s.type}</Pill>
-      {grade ? <Pill tone={GRADE_TONE[grade.grade]}>评级 {grade.grade}</Pill> : <Pill>未评级</Pill>}
-      {flags.filter(f => f.key === 'certExpired' || f.key === 'certExpiring').map(f => <Pill key={f.key} tone={f.tone}>{f.label}</Pill>)}
+      {grade ? <Pill tone={GRADE_TONE[grade.grade]}>{uiText("评级 ")}{grade.grade}</Pill> : <Pill>{uiText("未评级")}</Pill>}
+      {flags.filter(f => f.key === 'certExpired' || f.key === 'certExpiring').map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}
     </div>
-    {banner && <Banner tone={banner.tone} title={banner.title}>{banner.text}</Banner>}
+    {banner && <Banner tone={banner.tone} title={uiText(banner.title)}>{banner.text}</Banner>}
     <ActionBar busy={locked} actions={[
       { label: '编辑档案', icon: Pencil, onClick: onEdit, reason: writeReason },
       { label: '评级', icon: Award, onClick: onRate, reason: adminReason },
@@ -224,39 +226,39 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
       { label: '主联系人', value: primary ? `${primary.name}${primary.role ? ' · ' + primary.role : ''}` : '未登记' },
       ...MIST_BUSINESS_GROUPS.map(g => ({ label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, value: s.handlers?.[g]?.name || '未指定' })),
     ]} />
-    <DetailBlock title="产能与工艺"><p className="mist-sub" style={{ margin: 0 }}>{s.capabilities}</p>{s.note && <span className="mist-note">{s.note}</span>}</DetailBlock>
-    <DetailBlock title={`认证 · ${certs.length}`} aside={can ? <Button variant="quiet" icon={Plus} disabled={locked} onClick={() => onCert()}>登记</Button> : undefined}>
-      {certs.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={`${s.name} 认证`} data-supplier-certs>{[...certs].sort((a, b) => a.validUntil.localeCompare(b.validUntil)).map(c => { const st = certificateState(c, day); return <div key={c.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
-        <div className="mist-row" style={{ gap: 8 }}><strong>{c.name}</strong><span className="mist-spacer" /><Pill tone={st.tone}>{st.label}</Pill></div>
-        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{[c.number && <Mono key="n">{c.number}</Mono>, c.issuer].filter(Boolean).reduce<React.ReactNode[]>((acc, x, i) => i ? [...acc, ' · ', x] : [x], [])}{!c.number && !c.issuer && '未填证书编号'} · 至 {c.validUntil}</small><span className="mist-spacer" />
-          {can && <><Button variant="quiet" disabled={locked} onClick={() => onCert(c)}>更新</Button><Button variant="quiet" disabled={locked} onClick={() => onDeleteCert(c)}>删除</Button></>}</div>
-      </div>; })}</div> : <span className="mist-muted">未登记认证。客户要求 OEKO-TEX、GOTS、BSCI 等认证时，请先登记证书与有效期。</span>}
+    <DetailBlock title={uiText("产能与工艺")}><p className="mist-sub" style={{ margin: 0 }}>{s.capabilities}</p>{s.note && <span className="mist-note">{s.note}</span>}</DetailBlock>
+    <DetailBlock title={ui`认证 · ${certs.length}`} aside={can ? <Button variant="quiet" icon={Plus} disabled={locked} onClick={() => onCert()}>{uiText("登记")}</Button> : undefined}>
+      {certs.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={ui`${s.name} 认证`} data-supplier-certs>{[...certs].sort((a, b) => a.validUntil.localeCompare(b.validUntil)).map(c => { const st = certificateState(c, day); return <div key={c.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
+        <div className="mist-row" style={{ gap: 8 }}><strong>{c.name}</strong><span className="mist-spacer" /><Pill tone={st.tone}>{uiText(st.label)}</Pill></div>
+        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{[c.number && <Mono key="n">{c.number}</Mono>, c.issuer].filter(Boolean).reduce<React.ReactNode[]>((acc, x, i) => i ? [...acc, ' · ', x] : [x], [])}{!c.number && !c.issuer && '未填证书编号'}{uiText(" · 至 ")}{c.validUntil}</small><span className="mist-spacer" />
+          {can && <><Button variant="quiet" disabled={locked} onClick={() => onCert(c)}>{uiText("更新")}</Button><Button variant="quiet" disabled={locked} onClick={() => onDeleteCert(c)}>{uiText("删除")}</Button></>}</div>
+      </div>; })}</div> : <span className="mist-muted">{uiText("未登记认证。客户要求 OEKO-TEX、GOTS、BSCI 等认证时，请先登记证书与有效期。")}</span>}
     </DetailBlock>
-    <DetailBlock title={`在手业务 · ${perf.open.length}`}>
-      {perf.open.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label="在手采购单">{perf.open.map(p => <div key={p.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
-        <Mono>{p.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{p.description}<small className="mist-cell-sub">{perf.arrived(p)} / {p.quantity} {p.unit} 已到 · 交期 {perf.promised(p)}</small></span><Pill tone={p.state === 'pending' ? 'warn' : p.state === 'draft' ? 'neutral' : 'accent'}>{purchaseStage(p)}</Pill><Button variant="quiet" onClick={() => onOpen('procurement', p.id)}>打开</Button>
-      </div>)}</div> : <span className="mist-muted">没有进行中的采购单。</span>}
+    <DetailBlock title={ui`在手业务 · ${perf.open.length}`}>
+      {perf.open.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("在手采购单")}>{perf.open.map(p => <div key={p.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
+        <Mono>{p.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{p.description}<small className="mist-cell-sub">{perf.arrived(p)} / {p.quantity} {uiText(p.unit)}{uiText(" 已到 · 交期 ")}{perf.promised(p)}</small></span><Pill tone={p.state === 'pending' ? 'warn' : p.state === 'draft' ? 'neutral' : 'accent'}>{purchaseStage(p)}</Pill><Button variant="quiet" onClick={() => onOpen('procurement', p.id)}>{uiText("打开")}</Button>
+      </div>)}</div> : <span className="mist-muted">{uiText("没有进行中的采购单。")}</span>}
     </DetailBlock>
-    {!!perf.completed.length && <DetailBlock title="交付记录">
-      <div className="mist-col" style={{ gap: 0 }} role="list" aria-label="已完成采购单">{perf.completed.map(c => <div key={c.purchase.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
-        <Mono>{c.purchase.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{c.purchase.description}<small className="mist-cell-sub">到货 {c.last} · 承诺 {c.promised}</small></span><Pill tone={c.onTime ? 'ok' : 'bad'}>{c.onTime ? '准时' : '延迟'}</Pill>
+    {!!perf.completed.length && <DetailBlock title={uiText("交付记录")}>
+      <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("已完成采购单")}>{perf.completed.map(c => <div key={c.purchase.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
+        <Mono>{c.purchase.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{c.purchase.description}<small className="mist-cell-sub">{uiText("到货 ")}{c.last}{uiText(" · 承诺 ")}{c.promised}</small></span><Pill tone={c.onTime ? 'ok' : 'bad'}>{uiText(c.onTime ? '准时' : '延迟')}</Pill>
       </div>)}</div>
     </DetailBlock>}
-    <DetailBlock title={`联系人 · ${s.contacts.length}`} aside={canContacts ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact()}>添加</Button> : undefined}>
+    <DetailBlock title={ui`联系人 · ${s.contacts.length}`} aside={canContacts ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact()}>{uiText("添加")}</Button> : undefined}>
       {s.contacts.length ? <div className="mist-col" style={{ gap: 0 }}>{s.contacts.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}>
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{c.role ? ' · ' + c.role : ''}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>主联系人</Pill>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContact(c)}>编辑</Button>}
-      </div>)}</div> : <span className="mist-muted">未登记联系人。</span>}
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{uiText(c.role ? ' · ' + c.role : '')}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>{uiText("主联系人")}</Pill>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContact(c)}>{uiText("编辑")}</Button>}
+      </div>)}</div> : <span className="mist-muted">{uiText("未登记联系人。")}</span>}
     </DetailBlock>
-    {!!products.length && <DetailBlock title={`引用档案 · ${products.length}`}>
-      <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{products.map(p => <Button key={p.id} variant="quiet" onClick={() => onOpen('products', p.id)}><Mono>{p.sku}</Mono> {p.name}{p.supplierCode ? ` · ${p.supplierCode}` : ''}</Button>)}</div>
+    {!!products.length && <DetailBlock title={ui`引用档案 · ${products.length}`}>
+      <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{products.map(p => <Button key={p.id} variant="quiet" onClick={() => onOpen('products', p.id)}><Mono>{p.sku}</Mono> {p.name}{uiText(p.supplierCode ? ` · ${p.supplierCode}` : '')}</Button>)}</div>
     </DetailBlock>}
-    <DetailBlock title="评级历史">
-      {s.ratings?.length ? <Timeline events={[...s.ratings].reverse().map(r => ({ who: `${r.grade} · ${r.period}`, when: `${shortWhen(r.at)} · ${r.actor}`, text: r.note }))} /> : <span className="mist-muted">尚未评级。</span>}
+    <DetailBlock title={uiText("评级历史")}>
+      {s.ratings?.length ? <Timeline events={[...s.ratings].reverse().map(r => ({ who: `${r.grade} · ${r.period}`, when: `${shortWhen(r.at)} · ${r.actor}`, text: r.note }))} /> : <span className="mist-muted">{uiText("尚未评级。")}</span>}
     </DetailBlock>
-    {!!s.statusHistory?.length && <DetailBlock title="合作状态记录">
+    {!!s.statusHistory?.length && <DetailBlock title={uiText("合作状态记录")}>
       <Timeline events={[...s.statusHistory].reverse().map(h => ({ who: `${STATUS_LABEL[h.status]} · ${h.effectiveDate} 生效`, when: `${shortWhen(h.at)} · ${h.actor}`, text: h.reason || '—' }))} />
     </DetailBlock>}
-    <DetailBlock title="附件">{attachments}</DetailBlock>
-    <DetailBlock title="处理记录">{history}</DetailBlock>
+    <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
+    <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;
 }

@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 出口退税：退税率版本、专票配单申报、税务核准、到账勾稽（财务办理）；只登记已发生事实，不代替电子税务局申报。 */
 import React from 'react';
 import { Ban, BadgeCheck, Landmark, Plus, Receipt, RotateCcw, Undo2 } from 'lucide-react';
@@ -34,15 +35,15 @@ export function RebateRatesCard({ state, canWrite, locked, open, run }: { state:
   const voidSpec = (r: RebateRate): ModuleEditorSpec => ({ title: `作废 HS ${r.hsCode} · ${r.rate}%`, submitLabel: '作废', description: '只能作废尚未被申报使用的版本；作废后保留记录。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'rebate.rate.void', payload: { id: r.id, reason: text(v, 'reason') } }) });
   return <Card>
-    <CardHeader title={`退税率版本 · ${rates.filter(r => !r.voided).length}`} sub="按 HS 编码与生效日适用；登记有误的版本在使用前作废。"
-      tools={canWrite ? <TextLink icon={Plus} onClick={() => { if (!locked) open(add); }}>登记退税率</TextLink> : undefined} />
-    <DataTable ariaLabel="退税率版本" rows={rates} rowKey={r => r.id} empty={<EmptyState icon={Landmark} title="还没有退税率" description="财务登记报关 HS 编码的退税率后，系统按出口日期计算应退税额。" compact />} columns={[
+    <CardHeader title={ui`退税率版本 · ${rates.filter(r => !r.voided).length}`} sub={uiText("按 HS 编码与生效日适用；登记有误的版本在使用前作废。")}
+      tools={canWrite ? <TextLink icon={Plus} onClick={() => { if (!locked) open(add); }}>{uiText("登记退税率")}</TextLink> : undefined} />
+    <DataTable ariaLabel={uiText("退税率版本")} rows={rates} rowKey={r => r.id} empty={<EmptyState icon={Landmark} title={uiText("还没有退税率")} description={uiText("财务登记报关 HS 编码的退税率后，系统按出口日期计算应退税额。")} compact />} columns={[
       { key: 'hs', header: 'HS 编码', width: '120px', render: r => <Mono>{r.hsCode}</Mono> },
       { key: 'rate', header: '退税率', width: '80px', align: 'right', render: r => `${r.rate}%` },
       { key: 'from', header: '生效日', width: '110px', render: r => r.effectiveFrom },
-      { key: 'basis', header: '依据', width: 'minmax(160px,2fr)', hideOnMobile: true, render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.basis}</span>{r.voided && <small className="mist-muted">作废：{r.voided.reason}</small>}</div> },
-      { key: 'state', header: '状态', width: '96px', render: r => r.voided ? <Pill>已作废</Pill> : used.has(r.id) ? <Pill tone="ok">已使用</Pill> : <Pill tone="accent">有效</Pill> },
-      ...(canWrite ? [{ key: 'act', header: '', width: '80px', align: 'right' as const, render: (r: RebateRate) => !r.voided && !used.has(r.id) ? <TextLink icon={Ban} onClick={() => { if (!locked) open(voidSpec(r)); }}>作废</TextLink> : null }] : []),
+      { key: 'basis', header: '依据', width: 'minmax(160px,2fr)', hideOnMobile: true, render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.basis}</span>{r.voided && <small className="mist-muted">{uiText("作废：")}{r.voided.reason}</small>}</div> },
+      { key: 'state', header: '状态', width: '96px', render: r => r.voided ? <Pill>{uiText("已作废")}</Pill> : used.has(r.id) ? <Pill tone="ok">{uiText("已使用")}</Pill> : <Pill tone="accent">{uiText("有效")}</Pill> },
+      ...(canWrite ? [{ key: 'act', header: '', width: '80px', align: 'right' as const, render: (r: RebateRate) => !r.voided && !used.has(r.id) ? <TextLink icon={Ban} onClick={() => { if (!locked) open(voidSpec(r)); }}>{uiText("作废")}</TextLink> : null }] : []),
     ]} />
   </Card>;
 }
@@ -62,14 +63,14 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
         field('filedAt', '申报日', 'date'), field('batchRef', '申报批次号 / 受理回执号'), field('note', '备注', 'textarea', false)],
       initialValues: { ...Object.fromEntries(candidates.map(b => ['bill:' + b.id, true])), filedAt: today(), batchRef: '', note: '' },
       submit: v => run({ type: 'rebate.claim.file', payload: { customsId: c.id, billIds: candidates.filter(b => v['bill:' + b.id] === true).map(b => b.id), filedAt: text(v, 'filedAt'), batchRef: text(v, 'batchRef'), note: text(v, 'note') } }) };
-    return <DetailBlock title="退税申报" aside={<span className="mist-muted">未申报</span>}>
+    return <DetailBlock title={uiText("退税申报")} aside={<span className="mist-muted">{uiText("未申报")}</span>}>
       <Facts items={[
         { label: '出口日期', value: exportDate || '未离港' },
         { label: '适用退税率', value: rateText },
         { label: '可配专票', value: `${candidates.length} 张` },
         { label: '预计应退', value: plan && !plan.blockers.length && candidates.length ? cny(preview) : '—' },
       ]} />
-      {candidates.length > 0 && <DataTable ariaLabel={`${c.code} 可配专票`} rows={candidates} rowKey={b => b.id} columns={[
+      {candidates.length > 0 && <DataTable ariaLabel={ui`${c.code} 可配专票`} rows={candidates} rowKey={b => b.id} columns={[
         { key: 'no', header: '发票号', render: b => onBill ? <TextLink onClick={() => onBill(b.id)}>{b.invoiceNo}</TextLink> : <Mono>{b.invoiceNo}</Mono> },
         { key: 'supplier', header: '供应商', hideOnMobile: true, render: b => b.supplier },
         { key: 'taxable', header: '计税金额', align: 'right', render: b => cny(rebateBillTaxableMinor(b) / 100) },
@@ -94,7 +95,7 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
   const reverseSpec = (entryId: string, code: string): ModuleEditorSpec => ({ title: `冲回到账勾稽 · ${code}`, submitLabel: '冲回', description: '冲回后释放流水余额，原记录保留。', fields: [field('reason', '冲回原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'rebate.claim.reverseReceipt', payload: { id: claim.id, entryId, reason: text(v, 'reason') } }) });
   const done = claim.state === 'received';
-  return <DetailBlock title="退税申报" aside={<Pill tone={REBATE_TONE[claim.state]}>{REBATE_STATE_LABEL[claim.state]}</Pill>}>
+  return <DetailBlock title={uiText("退税申报")} aside={<Pill tone={REBATE_TONE[claim.state]}>{REBATE_STATE_LABEL[claim.state]}</Pill>}>
     <Facts items={[
       { label: '申报', value: `${claim.code} · ${claim.batchRef}` },
       { label: '申报日 / 出口日期', value: `${claim.filedAt} / ${claim.exportDate}` },
@@ -105,26 +106,26 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
       { label: '已到账', value: cny(totals.received) },
       { label: '待到账', value: done ? '已结清' : cny(totals.open) },
     ]} />
-    {claim.approved?.reason && <p className="mist-sub">核准差异：{claim.approved.reason}</p>}
-    {claim.settled && <p className="mist-sub">少收结清：{claim.settled.reason}（较应退 {cny(totals.difference)}）</p>}
-    <DataTable ariaLabel={`${claim.code} 配单专票`} rows={claim.lines} rowKey={l => l.billId} columns={[
+    {claim.approved?.reason && <p className="mist-sub">{uiText("核准差异：")}{claim.approved.reason}</p>}
+    {claim.settled && <p className="mist-sub">{uiText("少收结清：")}{claim.settled.reason}{uiText("（较应退 ")}{cny(totals.difference)}）</p>}
+    <DataTable ariaLabel={ui`${claim.code} 配单专票`} rows={claim.lines} rowKey={l => l.billId} columns={[
       { key: 'no', header: '专票', render: l => onBill ? <TextLink onClick={() => onBill(l.billId)}>{l.invoiceNo}</TextLink> : <Mono>{l.invoiceNo}</Mono> },
       { key: 'supplier', header: '供应商', hideOnMobile: true, render: l => l.supplier },
       { key: 'taxable', header: '计税金额', align: 'right', render: l => cny(l.taxable) },
       { key: 'rebate', header: '应退', align: 'right', render: l => cny(l.rebate) },
-      ...(claim.byItems ? [{ key: 'parts', header: '商品项明细', render: (l: typeof claim.lines[number]) => <span className="mist-sub">{(l.parts || []).map(x => `第 ${x.itemNo} 项 ${x.hsCode} · ${x.rate}% · 计税 ${fmt(x.taxable, 2)} → ${fmt(x.rebate, 2)}`).join('；')}{l.excluded ? `；不在商品项 ${fmt(l.excluded, 2)} 不计` : ''}</span> }] : []),
+      ...(claim.byItems ? [{ key: 'parts', header: '商品项明细', render: (l: typeof claim.lines[number]) => <span className="mist-sub">{(l.parts || []).map(x => `第 ${x.itemNo} 项 ${x.hsCode} · ${x.rate}% · 计税 ${fmt(x.taxable, 2)} → ${fmt(x.rebate, 2)}`).join('；')}{uiText(l.excluded ? `；不在商品项 ${fmt(l.excluded, 2)} 不计` : '')}</span> }] : []),
     ]} />
-    {claim.receipts.length > 0 && <DataTable ariaLabel={`${claim.code} 到账勾稽`} rows={claim.receipts} rowKey={r => r.id} columns={[
+    {claim.receipts.length > 0 && <DataTable ariaLabel={ui`${claim.code} 到账勾稽`} rows={claim.receipts} rowKey={r => r.id} columns={[
       { key: 'receipt', header: '到账流水', render: r => onReceipt ? <TextLink onClick={() => onReceipt(r.receiptId)}>{r.receiptCode}</TextLink> : <Mono>{r.receiptCode}</Mono> },
       { key: 'date', header: '到账日', render: r => r.date },
-      { key: 'amount', header: '金额', align: 'right', render: r => r.reversed ? <span className="mist-muted"><s>{cny(r.amount)}</s> 已冲回</span> : cny(r.amount) },
-      ...(canReconcile ? [{ key: 'act', header: '', width: '72px', align: 'right' as const, render: (r: RebateClaim['receipts'][number]) => !r.reversed ? <TextLink icon={RotateCcw} onClick={() => { if (!locked) open(reverseSpec(r.id, r.receiptCode)); }}>冲回</TextLink> : null }] : []),
+      { key: 'amount', header: '金额', align: 'right', render: r => r.reversed ? <span className="mist-muted"><s>{cny(r.amount)}</s>{uiText(" 已冲回")}</span> : cny(r.amount) },
+      ...(canReconcile ? [{ key: 'act', header: '', width: '72px', align: 'right' as const, render: (r: RebateClaim['receipts'][number]) => !r.reversed ? <TextLink icon={RotateCcw} onClick={() => { if (!locked) open(reverseSpec(r.id, r.receiptCode)); }}>{uiText("冲回")}</TextLink> : null }] : []),
     ]} />}
     {claim.state !== 'withdrawn' && <ActionBar busy={locked} actions={[
       { label: '登记税务核准', icon: BadgeCheck, primary: claim.state === 'filed', onClick: () => open(approveSpec), reason: !canWrite ? '需要财务开票权限' : false, hidden: claim.state !== 'filed' },
       { label: '勾稽到账', icon: Landmark, primary: claim.state === 'approved', onClick: () => open(receiveSpec), reason: !canReconcile ? '需要财务核销权限' : !receipts.length ? '没有未分配的人民币到账流水，请先导入退税到账水单' : false, hidden: done },
       { label: '撤回申报', icon: Undo2, onClick: () => open(withdrawSpec), reason: !canWrite ? '需要财务开票权限' : live.length ? '已有到账勾稽，请先冲回' : false, hidden: done },
     ] as ReasonedAction[]} />}
-    {claim.withdrawn && <span className="mist-note">已撤回：{claim.withdrawn.reason}</span>}
+    {claim.withdrawn && <span className="mist-note">{uiText("已撤回：")}{claim.withdrawn.reason}</span>}
   </DetailBlock>;
 }

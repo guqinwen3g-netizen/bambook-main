@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 条目履约：固定身份信息 → 阶段轨迹（当前步唯一展开）→ 分批与尾数。只读推导，动作回到各自模块。 */
 import React from 'react';
 import { Banner, Button, Facts, Mono, Pill } from '../../../../components/mist';
@@ -34,31 +35,31 @@ export function OrderLineFulfillment({ state, order, line, go, onCloseLine }: { 
       { label: '工厂分支', value: factories.length ? factories.join('、') : '尚未开立生产' },
     ]} />
     <div className="mist-col" style={{ gap: 8 }}>
-      {closure && <Banner tone={closure.status === 'closed' ? 'ok' : closure.status === 'pending' ? 'warn' : 'bad'} title={closure.status === 'closed' ? '条目已结案' : closure.status === 'pending' ? '结案待审批' : '结案申请已退回'}><span data-line-closure={closure.status}>{closureLabel(closure)}</span>{closure.status !== 'rejected' && <span className="mist-note"> · 不能再建出运或改数量；{CLOSE_SETTLEMENT_HINT}</span>}</Banner>}
-      <div className="mist-row"><b className="mist-h3">阶段轨迹</b><span className="mist-spacer" />{current ? <Pill tone={current.state === 'blocked' ? 'bad' : 'accent'}>当前：{current.label}</Pill> : <Pill tone="ok">已完成出运</Pill>}</div>
-      <nav className="mist-line-track" aria-label="条目阶段" style={{ ['--mist-steps' as string]: stages.length }}>
-        {stages.map(stage => <button key={stage.key} type="button" data-state={stage.state === 'todo' ? undefined : stage.state === 'now' && stage.key !== current?.key ? 'partial' : stage.state} aria-current={stage.key === current?.key ? 'step' : undefined} aria-pressed={stage.key === open?.key} onClick={() => setOpenKey(stage.key)}><b>{stage.label}</b><small>{stage.caption || STATE_LABEL[stage.state]}</small></button>)}
+      {closure && <Banner tone={closure.status === 'closed' ? 'ok' : closure.status === 'pending' ? 'warn' : 'bad'} title={uiText(closure.status === 'closed' ? '条目已结案' : closure.status === 'pending' ? '结案待审批' : '结案申请已退回')}><span data-line-closure={closure.status}>{closureLabel(closure)}</span>{closure.status !== 'rejected' && <span className="mist-note">{uiText(" · 不能再建出运或改数量；")}{CLOSE_SETTLEMENT_HINT}</span>}</Banner>}
+      <div className="mist-row"><b className="mist-h3">{uiText("阶段轨迹")}</b><span className="mist-spacer" />{current ? <Pill tone={current.state === 'blocked' ? 'bad' : 'accent'}>{uiText("当前：")}{uiText(current.label)}</Pill> : <Pill tone="ok">{uiText("已完成出运")}</Pill>}</div>
+      <nav className="mist-line-track" aria-label={uiText("条目阶段")} style={{ ['--mist-steps' as string]: stages.length }}>
+        {stages.map(stage => <button key={stage.key} type="button" data-state={stage.state === 'todo' ? undefined : stage.state === 'now' && stage.key !== current?.key ? 'partial' : stage.state} aria-current={stage.key === current?.key ? 'step' : undefined} aria-pressed={stage.key === open?.key} onClick={() => setOpenKey(stage.key)}><b>{uiText(stage.label)}</b><small>{stage.caption || STATE_LABEL[stage.state]}</small></button>)}
       </nav>
       {open && <div className="mist-col" style={{ gap: 6 }} data-stage-open={open.key}>
-        {open.state === 'blocked' ? <Banner tone="bad" title={`${open.label}受阻`} actions={sourceTarget(open) && <Button onClick={sourceTarget(open)!}>去处理</Button>}>{open.reason}</Banner>
-          : <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-note">{open.label} · {STATE_LABEL[open.state]}{open.caption ? ` · ${open.caption}` : ''}{open.key !== current?.key && open.state === 'todo' ? '（前序阶段完成后解锁）' : ''}</span><span className="mist-spacer" />{sourceTarget(open) && <Button variant="quiet" onClick={sourceTarget(open)!}>查看来源记录</Button>}</div>}
+        {open.state === 'blocked' ? <Banner tone="bad" title={ui`${open.label}受阻`} actions={sourceTarget(open) && <Button onClick={sourceTarget(open)!}>{uiText("去处理")}</Button>}>{open.reason}</Banner>
+          : <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><span className="mist-note">{uiText(open.label)} · {STATE_LABEL[open.state]}{uiText(open.caption ? ` · ${open.caption}` : '')}{uiText(open.key !== current?.key && open.state === 'todo' ? '（前序阶段完成后解锁）' : '')}</span><span className="mist-spacer" />{sourceTarget(open) && <Button variant="quiet" onClick={sourceTarget(open)!}>{uiText("查看来源记录")}</Button>}</div>}
       </div>}
     </div>
-    <DetailBlock title="分批与尾数">
+    <DetailBlock title={uiText("分批与尾数")}>
       <Facts cols={2} items={[
         { label: '订单数量', value: `${q(shipping.ordered)} ${unit}` },
         { label: '已排出运', value: `${q(shipping.planned)} ${unit}` },
         { label: '已离港', value: `${q(shipping.departed)} ${unit}` },
         { label: '短溢装', value: <span className={shipping.variance < 0 && shipping.departed ? 'mist-tone-warn' : undefined}>{variance}</span> },
         { label: '溢短装条款', value: <span data-line-tolerance>{tolerance.text}</span> },
-        { label: '允许范围', value: <span data-line-range>{q(tolerance.min)} – {q(tolerance.max)} {unit}</span> },
+        { label: '允许范围', value: <span data-line-range>{q(tolerance.min)} – {q(tolerance.max)} {uiText(unit)}</span> },
         { label: '剩余待出', value: `${q(tolerance.remaining)} ${unit}` },
-        { label: '范围判断（含已排未离港）', value: <span data-line-verdict={tolerance.verdict} className={tolerance.verdict === 'within' ? undefined : 'mist-tone-warn'}>{!tolerance.planned ? '尚未排出运' : tolerance.verdict === 'within' ? '在允许范围内' : tolerance.verdict === 'over' ? `超出溢装上限 ${q(tolerance.planned - tolerance.max)} ${unit}` : `低于短装下限 ${q(tolerance.min - tolerance.planned)} ${unit}`}</span> },
-        { label: '已批准超量额度', value: <span data-line-overship-approved>{approvedOverShip(line) > tolerance.max ? `累计可出 ${q(approvedOverShip(line))} ${unit}（超出溢装上限 ${q(approvedOverShip(line) - tolerance.max)}）` : '无'}</span> },
+        { label: '范围判断（含已排未离港）', value: <span data-line-verdict={tolerance.verdict} className={tolerance.verdict === 'within' ? undefined : 'mist-tone-warn'}>{uiText(!tolerance.planned ? '尚未排出运' : tolerance.verdict === 'within' ? '在允许范围内' : tolerance.verdict === 'over' ? `超出溢装上限 ${q(tolerance.planned - tolerance.max)} ${unit}` : `低于短装下限 ${q(tolerance.min - tolerance.planned)} ${unit}`)}</span> },
+        { label: '已批准超量额度', value: <span data-line-overship-approved>{uiText(approvedOverShip(line) > tolerance.max ? `累计可出 ${q(approvedOverShip(line))} ${unit}（超出溢装上限 ${q(approvedOverShip(line) - tolerance.max)}）` : '无')}</span> },
       ]} />
-      {((line as ClosableLine).overShips || []).length > 0 && <div className="mist-col" style={{ gap: 4 }} role="list" aria-label="超量出运审批记录">{((line as ClosableLine).overShips || []).map(r => <div key={r.id} role="listitem" data-overship-request={r.status} className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><Pill tone={r.status === 'approved' ? 'ok' : r.status === 'pending' ? 'warn' : 'bad'}>超量出运</Pill><span className="mist-muted">{overShipLabel(r)}</span><span className="mist-spacer" /><span className="mist-note">{r.requesterName}{r.decidedName ? ` → ${r.decidedName}` : ''}</span></div>)}</div>}
-      {shipping.shipments.length > 0 && <div className="mist-col" style={{ gap: 4 }}>{shipping.shipments.map(row => <div key={row.id} className="mist-row" style={{ gap: 8 }}><Mono>{row.code}</Mono><span className="mist-muted">{SHIP_STATE[row.state] || row.state} · {row.plannedDate || '计划日未定'}</span><span className="mist-spacer" /><span className="mist-num">{q(row.quantity)} {unit}</span></div>)}</div>}
-      <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><Button disabled={!onCloseLine || order.governance?.status !== 'approved' || closure?.status === 'closed' || closure?.status === 'pending' || tolerance.open.length > 0} title={tolerance.open.length ? `还有未离港出运：${tolerance.open.map(s => s.code).join('、')}` : undefined} onClick={() => setClosing(true)}>按实际完工结案</Button><span className="mist-note">以已离港 {q(tolerance.departed)} {unit} 结案，须写原因；超出允许范围需订单审批人批准。{CLOSE_SETTLEMENT_HINT}。</span></div>
+      {((line as ClosableLine).overShips || []).length > 0 && <div className="mist-col" style={{ gap: 4 }} role="list" aria-label={uiText("超量出运审批记录")}>{((line as ClosableLine).overShips || []).map(r => <div key={r.id} role="listitem" data-overship-request={r.status} className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><Pill tone={r.status === 'approved' ? 'ok' : r.status === 'pending' ? 'warn' : 'bad'}>{uiText("超量出运")}</Pill><span className="mist-muted">{overShipLabel(r)}</span><span className="mist-spacer" /><span className="mist-note">{r.requesterName}{uiText(r.decidedName ? ` → ${r.decidedName}` : '')}</span></div>)}</div>}
+      {shipping.shipments.length > 0 && <div className="mist-col" style={{ gap: 4 }}>{shipping.shipments.map(row => <div key={row.id} className="mist-row" style={{ gap: 8 }}><Mono>{row.code}</Mono><span className="mist-muted">{SHIP_STATE[row.state] || row.state} · {row.plannedDate || '计划日未定'}</span><span className="mist-spacer" /><span className="mist-num">{q(row.quantity)} {uiText(unit)}</span></div>)}</div>}
+      <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><Button disabled={!onCloseLine || order.governance?.status !== 'approved' || closure?.status === 'closed' || closure?.status === 'pending' || tolerance.open.length > 0} title={uiText(tolerance.open.length ? `还有未离港出运：${tolerance.open.map(s => s.code).join('、')}` : undefined)} onClick={() => setClosing(true)}>{uiText("按实际完工结案")}</Button><span className="mist-note">{uiText("以已离港 ")}{q(tolerance.departed)} {uiText(unit)}{uiText(" 结案，须写原因；超出允许范围需订单审批人批准。")}{CLOSE_SETTLEMENT_HINT}。</span></div>
       {onCloseLine && <LineCloseDialog open={closing} line={line} status={tolerance} onClose={() => setClosing(false)} onSubmit={onCloseLine} />}
     </DetailBlock>
   </div>;

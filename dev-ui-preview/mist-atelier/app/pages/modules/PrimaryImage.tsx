@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import { Pill } from '../../../../../components/mist';
 import { primaryImageId } from '../../../../../server/src/shared/mistPrimaryImage';
 
@@ -11,7 +12,7 @@ export function imageRole(files:readonly ImageFile[]|undefined,ids:readonly stri
 /** 附件行上的图片角色标签：主图（自动抠图）/ 补充图；非图片附件不显示。 */
 export function ImageRoleTag({files,ids,id}:{files:readonly ImageFile[]|undefined;ids:readonly string[];id:string}){
  const role=imageRole(files,ids,id);
- return role==='primary'?<Pill tone="accent">主图 · 自动抠图</Pill>:role==='supplement'?<Pill plain>补充图</Pill>:null;
+ return role==='primary'?<Pill tone="accent">{uiText("主图 · 自动抠图")}</Pill>:role==='supplement'?<Pill plain>{uiText("补充图")}</Pill>:null;
 }
 /** 上传区标题：还没有图片时提示先传主图，之后提示补充图。 */
 export function imageUploadTitle(files:readonly ImageFile[]|undefined,ids:readonly string[]){return primaryImageId(files??[],ids)?'继续上传补充图或其他资料':'先上传主图（正面展示图）';}

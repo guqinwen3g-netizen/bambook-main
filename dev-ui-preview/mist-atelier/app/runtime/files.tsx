@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { Download, Eye } from 'lucide-react';
 import { Button, FilePreview, Icon, TextLink, previewIcon, formatFileSize, type PreviewFile } from '../../../../components/mist';
@@ -28,7 +29,7 @@ export function useFilePreview() {
 /** 附件名称：点击打开预览。files 为同组附件（用于在预览中切换）。 */
 export function FileName({ file, files, showSize, label }: { file: MistFile; files?: Array<MistFile | undefined | null>; showSize?: boolean; label?: React.ReactNode }) {
   const preview = useFilePreview();
-  return <><button type="button" className="mist-file" data-file-name={file.id} title={`预览 ${file.name}`} onClick={() => preview.open(file, files)}>
+  return <><button type="button" className="mist-file" data-file-name={file.id} title={ui`预览 ${file.name}`} onClick={() => preview.open(file, files)}>
     <Icon icon={previewIcon(file)} size="sm" /><span>{label ?? file.name}</span>{showSize && file.size ? <small className="mist-muted">{formatFileSize(file.size)}</small> : null}
   </button>{preview.node}</>;
 }
@@ -37,18 +38,18 @@ export function FileName({ file, files, showSize, label }: { file: MistFile; fil
 export function FileRow({ file, files, onError, children, showSize }: { file: MistFile; files?: Array<MistFile | undefined | null>; onError?: (message: string) => void; children?: React.ReactNode; showSize?: boolean }) {
   const { downloadFile } = useMistWorkspace();
   return <div className="mist-file-row" data-file-row={file.id}><FileName file={file} files={files} showSize={showSize} />
-    <TextLink icon={Download} onClick={() => void Promise.resolve(downloadFile(file)).catch(e => onError?.(e instanceof Error ? e.message : String(e)))}>下载</TextLink>{children}</div>;
+    <TextLink icon={Download} onClick={() => void Promise.resolve(downloadFile(file)).catch(e => onError?.(e instanceof Error ? e.message : String(e)))}>{uiText("下载")}</TextLink>{uiText(children)}</div>;
 }
 
 /** 已有下载按钮旁补一个「预览」动作（用于生成的单据原件等）。 */
 export function PreviewLink({ file, files, label = '预览' }: { file: MistFile | undefined | null; files?: Array<MistFile | undefined | null>; label?: string }) {
   const preview = useFilePreview();
   if (!file) return null;
-  return <><TextLink icon={Eye} onClick={() => preview.open(file, files)}>{label}</TextLink>{preview.node}</>;
+  return <><TextLink icon={Eye} onClick={() => preview.open(file, files)}>{uiText(label)}</TextLink>{preview.node}</>;
 }
 
 /** 与「下载 / 打印」按钮并列的「预览」按钮。 */
 export function PreviewButton({ file, files, size = 'sm', disabled }: { file: MistFile | undefined | null; files?: Array<MistFile | undefined | null>; size?: 'sm' | 'md'; disabled?: boolean }) {
   const preview = useFilePreview();
-  return <><Button size={size} variant="quiet" icon={Eye} disabled={disabled || !file} title={file ? undefined : '文件不可用或无权读取'} onClick={() => file && preview.open(file, files)}>预览</Button>{preview.node}</>;
+  return <><Button size={size} variant="quiet" icon={Eye} disabled={disabled || !file} title={uiText(file ? undefined : '文件不可用或无权读取')} onClick={() => file && preview.open(file, files)}>{uiText("预览")}</Button>{preview.node}</>;
 }

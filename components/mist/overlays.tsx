@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
@@ -74,8 +75,8 @@ export function Dialog({ open, onClose, title, description, icon, tone = 'accent
   if (!open) return null;
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <div ref={ref} id={id} tabIndex={-1} className="mist-dialog" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={description ? `${id}-description` : undefined} style={width ? { width: `min(${width}px, 92vw)` } : undefined}>
-      <div className="mist-dialog-h">{icon && <Tile icon={icon} tone={tone} />}<div style={{ flex: 1 }}><div id={`${id}-title`} className="mist-h2">{title}</div>{description && <p id={`${id}-description`}>{description}</p>}</div><IconButton icon={X} label="关闭" size="sm" onClick={onClose} /></div>
-      {children && <div className="mist-dialog-body">{children}</div>}
+      <div className="mist-dialog-h">{icon && <Tile icon={icon} tone={tone} />}<div style={{ flex: 1 }}><div id={`${id}-title`} className="mist-h2">{uiText(title)}</div>{description && <p id={`${id}-description`}>{uiText(description)}</p>}</div><IconButton icon={X} label={uiText("关闭")} size="sm" onClick={onClose} /></div>
+      {children && <div className="mist-dialog-body">{uiText(children)}</div>}
       {footer && <div className="mist-dialog-foot">{footer}</div>}
     </div></Portal>;
 }
@@ -90,8 +91,8 @@ export function Drawer({ open, onClose, title, sub, leading, tone, size, childre
   if (!open) return null;
   return <Portal><div className="mist-scrim" onClick={onClose} />
     <aside ref={ref} id={id} tabIndex={-1} className="mist-drawer" role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={sub ? `${id}-description` : undefined} data-size={size === 'lg' ? 'lg' : undefined}>
-      <div className="mist-drawer-h" data-tone={tone}>{leading}<div><b id={`${id}-title`}>{title}</b>{sub && <small id={`${id}-description`}>{sub}</small>}</div><IconButton icon={X} label="关闭" onClick={onClose} /></div>
-      {bodyless ? children : <div className="mist-drawer-body">{children}</div>}
+      <div className="mist-drawer-h" data-tone={tone}>{leading}<div><b id={`${id}-title`}>{uiText(title)}</b>{sub && <small id={`${id}-description`}>{uiText(sub)}</small>}</div><IconButton icon={X} label={uiText("关闭")} onClick={onClose} /></div>
+      {bodyless ? children : <div className="mist-drawer-body">{uiText(children)}</div>}
       {footer && <div className="mist-drawer-foot">{footer}</div>}
     </aside></Portal>;
 }
@@ -109,25 +110,25 @@ export function CommandPalette({ open, onClose, items, query, onQueryChange, pla
   const [active, setActive] = React.useState(0);
   useModalFocus(open, onClose, ref);
   React.useEffect(() => { if (open) { setQ(''); setActive(0); } }, [open]);
-  const filtered = React.useMemo(() => { const s = q.trim().toLowerCase(); return items.filter(x => !s || `${x.label} ${x.hint ?? ''} ${x.keywords ?? ''}`.toLowerCase().includes(s)); }, [q, items]);
+  const filtered = React.useMemo(() => { const s = q.trim().toLowerCase(); return items.filter(x => !s || `${x.label} ${uiText(x.label)} ${x.hint ?? ''} ${uiText(x.hint ?? '')} ${x.keywords ?? ''}`.toLowerCase().includes(s)); }, [q, items]);
   const groups = [...new Set(filtered.map(x => x.group))];
   const flat = groups.flatMap(g => filtered.filter(x => x.group === g).slice(0, 6));
   if (!open) return null;
   const exec = (it?: CommandItem) => { if (!it) return; onClose(); it.run(); };
   return <Portal><div className="mist-scrim" onClick={onClose} />
-    <div ref={ref} id={id} tabIndex={-1} className="mist-palette" role="dialog" aria-modal="true" aria-label="搜索">
-      <div className="mist-palette-q"><Icon icon={Search} /><input autoFocus value={q} placeholder={placeholder} aria-label={placeholder}
+    <div ref={ref} id={id} tabIndex={-1} className="mist-palette" role="dialog" aria-modal="true" aria-label={uiText("搜索")}>
+      <div className="mist-palette-q"><Icon icon={Search} /><input autoFocus value={q} placeholder={uiText(placeholder)} aria-label={uiText(placeholder)}
         onChange={e => { setQ(e.target.value); setActive(0); }}
         onKeyDown={e => { if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(flat.length - 1, a + 1)); } else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(0, a - 1)); } else if (e.key === 'Enter') exec(flat[active]); }} /><Kbd>ESC</Kbd></div>
       <div className="mist-palette-list">
         {flat.length ? groups.map(g => <div key={g} className="mist-palette-grp"><small>{g}</small>
           {filtered.filter(x => x.group === g).slice(0, 6).map(it => { const idx = flat.indexOf(it); return (
             <button key={it.id} type="button" className="mist-palette-it" data-active={idx === active || undefined} onMouseEnter={() => setActive(idx)} onClick={() => exec(it)}>
-              <span className="mist-tile">{it.image ? <img src={it.image} alt="" /> : it.icon && <Icon icon={it.icon} size="sm" />}</span>{it.label}{it.hint && <small className={it.hintMono ? 'mist-mono' : undefined}>{it.hint}</small>}
+              <span className="mist-tile">{it.image ? <img src={it.image} alt="" /> : it.icon && <Icon icon={it.icon} size="sm" />}</span>{uiText(it.label)}{it.hint && <small className={it.hintMono ? 'mist-mono' : undefined}>{uiText(it.hint)}</small>}
             </button>); })}
-        </div>) : <EmptyState icon={Search} title={`没有找到「${q}」`} description="换个关键词，或输入编号试试" compact />}
+        </div>) : <EmptyState icon={Search} title={ui`没有找到「${q}」`} description={uiText("换个关键词，或输入编号试试")} compact />}
       </div>
-      <div className="mist-palette-ft"><span>↑↓ 选择</span><span>↵ 打开</span><span>⌘K 随时唤起</span></div>
+      <div className="mist-palette-ft"><span>{uiText("↑↓ 选择")}</span><span>{uiText("↵ 打开")}</span><span>{uiText("⌘K 随时唤起")}</span></div>
     </div></Portal>;
 }
 
@@ -169,7 +170,7 @@ export function Dropdown<V extends string>({ label, value, options, onChange }: 
   return (
     <div className="mist-menu-wrap">
       <button ref={trigger} id={`${id}-trigger`} type="button" className="mist-chip" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
-        onClick={() => open ? close() : show()} onKeyDown={e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); show(); } }}>{label}<b>{current?.label}</b><Icon icon={ChevronDown} size="xs" /></button>
+        onClick={() => open ? close() : show()} onKeyDown={e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); show(); } }}>{uiText(label)}<b>{uiText(current?.label)}</b><Icon icon={ChevronDown} size="xs" /></button>
       {open && <Portal><div ref={menu} id={id} className="mist-menu" role="menu" aria-labelledby={`${id}-trigger`} style={position}
         data-mist-owner={trigger.current?.closest('[role="dialog"]')?.id || undefined}
         onKeyDown={e => {
@@ -189,7 +190,7 @@ export function Dropdown<V extends string>({ label, value, options, onChange }: 
           }
         }}>
         {options.map((o, index) => <button key={o.value} type="button" role="menuitemradio" tabIndex={index === active ? 0 : -1} aria-checked={o.value === value}
-          onFocus={() => setActive(index)} onClick={() => { onChange(o.value); close(); }}>{o.label}</button>)}
+          onFocus={() => setActive(index)} onClick={() => { onChange(o.value); close(); }}>{uiText(o.label)}</button>)}
       </div></Portal>}
     </div>
   );
@@ -207,7 +208,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     window.clearTimeout(timer.current); setT({ id: Date.now(), text, tone });
     timer.current = window.setTimeout(() => setT(null), 2600);
   }, []);
-  return <ToastCtx.Provider value={show}>{children}{t && <Portal><div key={t.id} className="mist-toast" role="status" data-tone={t.tone === 'bad' ? 'bad' : undefined}><Icon icon={t.tone === 'bad' ? AlertCircle : CircleCheck} size="sm" />{t.text}</div></Portal>}</ToastCtx.Provider>;
+  return <ToastCtx.Provider value={show}>{uiText(children)}{t && <Portal><div key={t.id} className="mist-toast" role="status" data-tone={t.tone === 'bad' ? 'bad' : undefined}><Icon icon={t.tone === 'bad' ? AlertCircle : CircleCheck} size="sm" />{t.text}</div></Portal>}</ToastCtx.Provider>;
 }
 export const useToast = () => React.useContext(ToastCtx);
 
@@ -215,5 +216,5 @@ export const useToast = () => React.useContext(ToastCtx);
 export function ToastScope({ children, prefix }: { children: React.ReactNode; prefix?: string }) {
   const show = React.useContext(ToastCtx);
   const scoped = React.useCallback((text: string, tone?: 'ok' | 'bad') => show(prefix ? `${prefix}：${text}` : text, tone), [show, prefix]);
-  return <ToastCtx.Provider value={scoped}>{children}</ToastCtx.Provider>;
+  return <ToastCtx.Provider value={scoped}>{uiText(children)}</ToastCtx.Provider>;
 }

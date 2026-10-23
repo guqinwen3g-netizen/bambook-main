@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import { isPendingFinanceMistInvoice, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
@@ -41,7 +42,7 @@ export function mistMyTasks(state: MistState | null | undefined, options: Pick<M
  */
 export function mistWorkQueue(state: MistState | null | undefined, options: MistWorkOptions): MistWorkItem[] {
   const { canRead, me, reviews = [], today, workspaceId } = options, can = options.can ?? (() => false), items: MistWorkItem[] = [];
-  const push = (item: Omit<MistWorkItem, 'sourceLabel' | 'module'> & { module?: string }) => items.push({ ...item, sourceLabel: MIST_WORK_SOURCE_LABEL[item.source], module: item.module ?? mistWorkModule(item.target.view) });
+  const push = (item: Omit<MistWorkItem, 'sourceLabel' | 'module'> & { module?: string }) => items.push({ ...item, sourceLabel: uiText(MIST_WORK_SOURCE_LABEL[item.source]), when: uiText(item.when), module: item.module ?? mistWorkModule(item.target.view) });
   for (const review of reviews.filter(row => row.status === 'pending' && row.canDecide)) {
     const local = !!workspaceId && review.workspaceId === workspaceId, module = mistWorkModule(review.target?.view);
     push({ id: `review:${review.workspaceId}|${review.id}`, source: 'review', title: review.title, meta: [review.workspaceName, review.submittedAt.slice(0, 10)].filter(Boolean).join(' · '), when: '待审批', urgent: true, at: review.submittedAt,
@@ -56,37 +57,37 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     const productionBack = business && task.kind === 'production' && (task.state === 'awaiting_business' || task.state === 'blocked');
     if (!open && !working && !sampleBack && !productionBack) continue;
     const what = open ? '待认领' : working ? '检验中' : task.kind === 'sample' ? '样品评审结果待确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
-    push({ id: 'qc:' + task.id, source: 'qc', title: `${task.code} · ${what}`, meta: [task.factory, task.requestedBy && '发起人 ' + task.requestedBy].filter(Boolean).join(' · '),
+    push({ id: 'qc:' + task.id, source: 'qc', title: `${task.code} · ${uiText(what)}`, meta: [task.factory, task.requestedBy && uiText('发起人') + ' ' + task.requestedBy].filter(Boolean).join(' · '),
       when: task.state === 'blocked' ? '已阻断' : open ? '待认领' : working ? '处理中' : '待确认', urgent: task.state === 'blocked' || (!!task.due && task.due <= today), at: task.due || task.createdAt, target: { view: 'qc-workbench', id: task.id } });
   }
   if (canRead('shipments')) for (const shipment of state.fulfillment.shipments) {
     const stage = shipmentStage(state, shipment);
     const intake = stage === 'intake' && can(MIST_LOGISTICS_DUTY), business = stage === 'business' && can('orders:write'), unsent = stage === 'departed' && !shipment.documentsSentAt && can('orders:write');
     if (!intake && !business && !unsent) continue;
-    push({ id: 'shipping:' + shipment.id, source: 'shipping', title: `${shipment.code} · ${intake ? '待物流接手' : business ? '资料已回，待发送 CI/PL' : '已出运，单据待寄送'}`, meta: [shipment.customer, (unsent ? shipment.departedAt : shipment.plannedDate)?.slice(0, 10)].filter(Boolean).join(' · '),
+    push({ id: 'shipping:' + shipment.id, source: 'shipping', title: `${shipment.code} · ${uiText(intake ? '待物流接手' : business ? '资料已回，待发送 CI/PL' : '已出运，单据待寄送')}`, meta: [shipment.customer, (unsent ? shipment.departedAt : shipment.plannedDate)?.slice(0, 10)].filter(Boolean).join(' · '),
       when: intake ? '待接手' : business ? '待发单' : '待交单', urgent: !unsent && !!shipment.plannedDate && shipment.plannedDate <= today, at: (unsent ? shipment.departedAt : shipment.plannedDate) || '', target: { view: 'shipments', id: shipment.id } });
   }
   if (canRead('payment-vouchers')) {
     if (can('invoices:reconcile')) for (const receipt of state.receipts ?? []) {
       const display = financeReceiptDisplay(receipt, state.orderFunding?.assignments ?? [], state.allocations ?? []);
       if (receipt.remaining <= 0 || (display.label !== '未认领' && display.label !== '匹配建议')) continue;
-      push({ id: 'receipt:' + receipt.id, source: 'finance', title: `${receipt.payer || '到账'} · ${display.label === '未认领' ? '到账未认领' : '匹配建议待确认'}`, meta: [`${receipt.currency} ${receipt.remaining.toLocaleString('en-US')}`, receipt.date].filter(Boolean).join(' · '),
+      push({ id: 'receipt:' + receipt.id, source: 'finance', title: `${receipt.payer || '到账'} · ${uiText(display.label === '未认领' ? '到账未认领' : '匹配建议待确认')}`, meta: [`${receipt.currency} ${receipt.remaining.toLocaleString('en-US')}`, receipt.date].filter(Boolean).join(' · '),
         when: display.label, urgent: display.label === '未认领', at: receipt.date || '', target: { view: 'payment-vouchers', id: receipt.id } });
     }
     if (can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))
-      push({ id: 'invoice:' + invoice.id, source: 'finance', title: `${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
+      push({ id: 'invoice:' + invoice.id, source: 'finance', title: ui`${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
         target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
     const requests = state.payables?.requests ?? [], since = new Date(Date.parse(today + 'T00:00:00Z') - FINANCE_RETURN_DAYS * 86400000).toISOString().slice(0, 10);
     for (const request of requests.filter(item => item.state === 'rejected' && item.requesterId === me && (item.decision?.at ?? '').slice(0, 10) >= since)) {
       const resubmitted = requests.some(other => other.id !== request.id && other.submittedAt > request.submittedAt && other.state !== 'cancelled' && other.supplierId === request.supplierId && other.purpose === request.purpose
         && (other.purchaseId ?? other.settlementId ?? other.planId ?? '') === (request.purchaseId ?? request.settlementId ?? request.planId ?? ''));
       if (resubmitted) continue;
-      push({ id: 'finance:' + request.id, source: 'finance', title: `${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id } });
+      push({ id: 'finance:' + request.id, source: 'finance', title: ui`${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id } });
     }
   }
   // 每周一起：主管把上周团队周报生成并存档（服务端冻结此刻数据）；存档后自动消失。
   const weekly = canRead('dashboard') && can('relations:admin') ? pendingWeeklyArchive(state, me, today) : null;
-  if (weekly) push({ id: 'report:' + weekly, source: 'report', title: `生成上周团队周报（${weekly.slice(5)} 至 ${addBusinessDays(weekly, 6).slice(5)}）`, meta: '冻结上周数据存档，可复制或导出后自行发送', when: '本周', urgent: false, at: addBusinessDays(weekly, 7),
+  if (weekly) push({ id: 'report:' + weekly, source: 'report', title: ui`生成上周团队周报（${weekly.slice(5)} 至 ${addBusinessDays(weekly, 6).slice(5)}）`, meta: uiText('冻结上周数据存档，可复制或导出后自行发送'), when: '本周', urgent: false, at: addBusinessDays(weekly, 7),
     target: { view: 'dashboard', section: 'team-weekly' } as MistTarget });
   return items;
 }

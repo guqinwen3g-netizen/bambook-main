@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 供应商结算：业务员按实际收货提交 → 财务复核确认并决定预付抵扣 → 发票到后关联结算登记票据。
  *  拒收不计结算；争议 / 未确认扣款单列，不自动抵减。抵扣建议按结算数量比例，最后一次结算扫尾；调整须写原因。 */
 import React from 'react';
@@ -16,10 +17,10 @@ export const SETTLEMENT_STATE: Record<SettlementView['state'], { tone: Tone; lab
 export function settlementColumns(): Column<SettlementView>[] {
   return [
     { key: 'code', header: '结算 / 合同', width: 'minmax(170px,1.4fr)', render: r => <ObjectCell name={<Mono>{r.code}</Mono>} meta={r.purchaseCode + ' · ' + r.supplier + (r.final ? ' · 最终结算' : '')} /> },
-    { key: 'qty', header: '实收结算', width: '120px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{r.quantity} {r.unit}</span> },
+    { key: 'qty', header: '实收结算', width: '120px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{r.quantity} {uiText(r.unit)}</span> },
     { key: 'amount', header: '结算金额', width: '140px', align: 'right', render: r => <span className="mist-num">{money(r.amount, r.currency)}</span> },
-    { key: 'pre', header: '预付抵扣', width: '140px', align: 'right', hideOnMobile: true, render: r => r.state === 'confirmed' ? <span className="mist-num">{money(r.confirmation?.prepaymentApplied || 0, r.currency)}</span> : r.state === 'pending' && r.suggested > 0 ? <span className="mist-note">建议 {money(r.suggested, r.currency)}</span> : '—' },
-    { key: 'state', header: '状态', width: '104px', render: r => <Pill tone={SETTLEMENT_STATE[r.state].tone}>{SETTLEMENT_STATE[r.state].label}</Pill> },
+    { key: 'pre', header: '预付抵扣', width: '140px', align: 'right', hideOnMobile: true, render: r => r.state === 'confirmed' ? <span className="mist-num">{money(r.confirmation?.prepaymentApplied || 0, r.currency)}</span> : r.state === 'pending' && r.suggested > 0 ? <span className="mist-note">{uiText("建议 ")}{money(r.suggested, r.currency)}</span> : '—' },
+    { key: 'state', header: '状态', width: '104px', render: r => <Pill tone={SETTLEMENT_STATE[r.state].tone}>{uiText(SETTLEMENT_STATE[r.state].label)}</Pill> },
   ];
 }
 
@@ -31,7 +32,7 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
   const receipts = state.fulfillment.receipts.filter(r => st.receiptIds.includes(r.id));
   const own = st.submitterId === me;
   return <DetailBody data-settlement={st.id} heading={<h2 className="mist-h2">{st.code}</h2>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={SETTLEMENT_STATE[st.state].tone}>{SETTLEMENT_STATE[st.state].label}</Pill>{st.final && <Pill tone="accent">最终结算</Pill>}<span className="mist-note">{st.submittedBy} · 提交于 {fmtDay(st.submittedAt)}</span></div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={SETTLEMENT_STATE[st.state].tone}>{uiText(SETTLEMENT_STATE[st.state].label)}</Pill>{st.final && <Pill tone="accent">{uiText("最终结算")}</Pill>}<span className="mist-note">{st.submittedBy}{uiText(" · 提交于 ")}{fmtDay(st.submittedAt)}</span></div>
     <Facts items={[
       { label: '来源合同', value: <Mono>{st.purchaseCode}</Mono> }, { label: '供应商', value: st.supplier },
       { label: '实收结算数量', value: `${st.quantity} ${st.unit} × ${st.price} ${st.currency}` }, { label: '结算金额', value: money(st.amount, st.currency) },
@@ -40,11 +41,11 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
       ...(st.state === 'pending' ? [{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + ` · 合同剩余可抵扣 ${money(st.available, st.currency)}` }] : []),
       ...(st.note ? [{ label: '结算说明', value: st.note }] : []),
     ]} />
-    {st.state === 'pending' && <Banner tone="warn" title="等待财务复核">财务核对收货记录、数量和单价后确认；确认后才算已确认结算，并按比例抵扣预付。</Banner>}
-    {st.confirmation && <Banner tone="ok" title="财务已确认">{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : ''}{st.confirmation.note ? `。${st.confirmation.note}` : ''}</Banner>}
-    {st.returned && <Banner tone="bad" title="财务已退回">{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}）。收货记录已释放，可修正后重新提交。</Banner>}
-    {st.cancelled && <Banner title="已撤回">{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
-    {st.reversed && <Banner title="已冲回">{st.reversed.reason}（{st.reversed.actor} · {fmtDay(st.reversed.at)}）。原记录保留；收货记录和预付抵扣已释放。</Banner>}
+    {st.state === 'pending' && <Banner tone="warn" title={uiText("等待财务复核")}>{uiText("财务核对收货记录、数量和单价后确认；确认后才算已确认结算，并按比例抵扣预付。")}</Banner>}
+    {st.confirmation && <Banner tone="ok" title={uiText("财务已确认")}>{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{uiText(st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : '')}{uiText(st.confirmation.note ? `。${st.confirmation.note}` : '')}</Banner>}
+    {st.returned && <Banner tone="bad" title={uiText("财务已退回")}>{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}{uiText("）。收货记录已释放，可修正后重新提交。")}</Banner>}
+    {st.cancelled && <Banner title={uiText("已撤回")}>{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
+    {st.reversed && <Banner title={uiText("已冲回")}>{st.reversed.reason}（{st.reversed.actor} · {fmtDay(st.reversed.at)}{uiText("）。原记录保留；收货记录和预付抵扣已释放。")}</Banner>}
     <ActionBar busy={busy} actions={[
       { label: '确认结算', onClick: onConfirm, reason: !canConfirm ? '需要核销权限（财务）' : own ? '不能复核本人提交的结算' : undefined, hidden: st.state !== 'pending' },
       { label: '退回结算', onClick: () => onReason('return-settlement'), reason: !canConfirm ? '需要核销权限（财务）' : own ? '不能复核本人提交的结算' : undefined, hidden: st.state !== 'pending' },
@@ -53,18 +54,18 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
       { label: '冲回结算', onClick: () => onReason('reverse-settlement'), reason: !canConfirm ? '需要核销权限（财务）' : st.invoiced > 0 ? '已关联票据，请先作废关联票据' : settlementHasLiveAdvance(state, st.id) ? '有不等票付款申请或付款，请先撤回申请、冲回付款' : moved ? '剩余预付已退款或转抵，请先冲回这些记录' : undefined, hidden: st.state !== 'confirmed' },
       { label: '查看合同', onClick: onPurchase },
     ]} />
-    <DetailBlock title="对应收货记录">{receipts.map(r => <div className="mist-row mist-module-actions" key={r.id}><span>{r.date}</span><span className="mist-note">{r.location} · {r.evidence}</span><span className="mist-spacer" /><span className="mist-num">实收 {r.quantity}{r.rejected ? ` · 拒收 ${r.rejected}` : ''} {st.unit}</span></div>)}
-      {!receipts.length && <span className="mist-note">收货记录未找到。</span>}</DetailBlock>
-    <DetailBlock title="争议 / 未确认扣款（单列，不抵减）">{st.disputes.map((d, i) => <div className="mist-row mist-module-actions" key={i}><span>{d.description}</span><span className="mist-spacer" /><span className="mist-num">{money(d.amount, st.currency)}</span></div>)}
-      {!st.disputes.length && <span className="mist-note">没有登记争议或扣款。</span>}</DetailBlock>
-    {children}
+    <DetailBlock title={uiText("对应收货记录")}>{receipts.map(r => <div className="mist-row mist-module-actions" key={r.id}><span>{r.date}</span><span className="mist-note">{r.location} · {r.evidence}</span><span className="mist-spacer" /><span className="mist-num">{uiText("实收 ")}{r.quantity}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(st.unit)}</span></div>)}
+      {!receipts.length && <span className="mist-note">{uiText("收货记录未找到。")}</span>}</DetailBlock>
+    <DetailBlock title={uiText("争议 / 未确认扣款（单列，不抵减）")}>{st.disputes.map((d, i) => <div className="mist-row mist-module-actions" key={i}><span>{d.description}</span><span className="mist-spacer" /><span className="mist-num">{money(d.amount, st.currency)}</span></div>)}
+      {!st.disputes.length && <span className="mist-note">{uiText("没有登记争议或扣款。")}</span>}</DetailBlock>
+    {uiText(children)}
   </DetailBody>;
 }
 
 type SubmitDraft = { purchaseId: string; receipts: Record<string, boolean>; final: boolean; disputes: Array<{ description: string; amount: string }>; note: string };
 /** 多个控件的分组：不能用 <label>（会把整组文字当成第一个控件的名称，点说明文字也会误触按钮）。 */
 export function FieldGroup({ label, required, hint, children }: { label: string; required?: boolean; hint?: React.ReactNode; children: React.ReactNode }) {
-  return <div className="mist-field" role="group" aria-label={label}><span className="mist-field-label">{label}{required && <em>*</em>}</span>{children}{hint && <span className="mist-field-hint">{hint}</span>}</div>;
+  return <div className="mist-field" role="group" aria-label={uiText(label)}><span className="mist-field-label">{uiText(label)}{required && <em>*</em>}</span>{uiText(children)}{hint && <span className="mist-field-hint">{uiText(hint)}</span>}</div>;
 }
 
 export function SettlementSubmitDialog({ open, state, busy, canSettle, failure, onClose, execute, onDone }: {
@@ -90,27 +91,27 @@ export function SettlementSubmitDialog({ open, state, busy, canSettle, failure, 
     execute({ type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: chosen.map(r => r.receipt.id), final: draft.final, disputes: disputes.map(d => ({ description: d.description, amount: cents(d.amount) / 100 })), note: draft.note } }, r => onDone(String(r.id)));
   };
   const message = local || failure;
-  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} width={760} title="提交结算" description="按实际收货记录提交，财务复核确认后成为已确认结算。拒收不计；争议和未确认扣款单列，不抵减结算金额。"
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canSettle} onClick={submit}>提交复核</Button></>}>
+  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} width={760} title={uiText("提交结算")} description={uiText("按实际收货记录提交，财务复核确认后成为已确认结算。拒收不计；争议和未确认扣款单列，不抵减结算金额。")}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canSettle} onClick={submit}>{uiText("提交复核")}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能提交">{message}</Banner>}
-      <Field label="来源合同" required><Select aria-label="结算合同" value={draft.purchaseId} options={[{ value: '', label: '请选择已批准合同' }, ...purchases.map(p => ({ value: p.id, label: `${p.code} · ${p.supplier} · ${p.quantity} ${p.unit} · ${money(purchaseContractMinor(p) / 100, p.currency)}` }))]} onChange={e => setDraft({ ...draft, purchaseId: e.target.value, receipts: {} })} /></Field>
-      {po && <FieldGroup label="实际收货记录" required hint={`本次实收 ${qty} ${po.unit} · 结算金额 ${money(amount / 100, po.currency)}`}>
+      {message && <Banner tone="bad" title={uiText("还不能提交")}>{message}</Banner>}
+      <Field label={uiText("来源合同")} required><Select aria-label={uiText("结算合同")} value={draft.purchaseId} options={[{ value: '', label: '请选择已批准合同' }, ...purchases.map(p => ({ value: p.id, label: `${p.code} · ${p.supplier} · ${p.quantity} ${p.unit} · ${money(purchaseContractMinor(p) / 100, p.currency)}` }))]} onChange={e => setDraft({ ...draft, purchaseId: e.target.value, receipts: {} })} /></Field>
+      {po && <FieldGroup label={uiText("实际收货记录")} required hint={ui`本次实收 ${qty} ${po.unit} · 结算金额 ${money(amount / 100, po.currency)}`}>
         <div className="mist-col">{rows.map(({ receipt: r, settled }) => <div className="mist-row mist-module-actions" key={r.id} data-settle-receipt={r.id}>
-          <Checkbox checked={!!draft.receipts[r.id] && !settled} disabled={settled || r.quantity <= 0} onChange={v => setDraft({ ...draft, receipts: { ...draft.receipts, [r.id]: v } })} label={<span>{r.date} · {r.location} · 实收 {r.quantity}{r.rejected ? ` · 拒收 ${r.rejected}` : ''} {po.unit}{settled ? ' · 已在结算中' : r.quantity <= 0 ? ' · 无实收' : ''}</span>} /></div>)}
-          {!rows.length && <span className="mist-note">这张合同还没有实际收货记录；先在采购详情登记收货。</span>}</div>
+          <Checkbox checked={!!draft.receipts[r.id] && !settled} disabled={settled || r.quantity <= 0} onChange={v => setDraft({ ...draft, receipts: { ...draft.receipts, [r.id]: v } })} label={<span>{r.date} · {r.location}{uiText(" · 实收 ")}{r.quantity}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(po.unit)}{uiText(settled ? ' · 已在结算中' : r.quantity <= 0 ? ' · 无实收' : '')}</span>} /></div>)}
+          {!rows.length && <span className="mist-note">{uiText("这张合同还没有实际收货记录；先在采购详情登记收货。")}</span>}</div>
       </FieldGroup>}
-      {po && (() => { const all = state ? state.fulfillment.receipts.filter(r => r.purchaseId === po.id) : [], noReplace = all.reduce((n, r) => n + receiptReturnedQuantity(r, 'noReplace'), 0), open = all.reduce((n, r) => n + r.rejected - receiptReturnedQuantity(r), 0); return noReplace > 0 || open > 0 ? <Banner tone={open > 0 ? 'warn' : undefined} title="拒收与退换">{noReplace > 0 ? `供应商已确认不再补发 ${Math.round(noReplace * 10000) / 10000} ${po.unit}；如本合同不再交货，可勾选最终结算。` : ''}{open > 0 ? `还有 ${Math.round(open * 10000) / 10000} ${po.unit} 拒收未登记退换，请先在采购详情登记供应商补发或不再补发。` : ''}</Banner> : null; })()}
-      {po && <Checkbox checked={draft.final} onChange={v => setDraft({ ...draft, final: v })} label="这是本合同最终结算（短交关闭或已全部交付）；将抵扣剩余全部预付" />}
-      {po && prepay && prepay.paid > 0 && <Banner title="预付抵扣建议（由财务确认）">合同已付预付 {money(prepay.paid, po.currency)}，已抵扣 {money(prepay.applied, po.currency)}。本次建议抵扣 {money(suggested / 100, po.currency)}{draft.final || qty === 0 ? '' : `（预付 × ${qty} ÷ ${po.quantity}）`}。</Banner>}
-      <FieldGroup label="争议 / 未确认扣款" hint="例如色差、短码待供应商确认的扣款；单列记录，不抵减结算金额">
+      {po && (() => { const all = state ? state.fulfillment.receipts.filter(r => r.purchaseId === po.id) : [], noReplace = all.reduce((n, r) => n + receiptReturnedQuantity(r, 'noReplace'), 0), open = all.reduce((n, r) => n + r.rejected - receiptReturnedQuantity(r), 0); return noReplace > 0 || open > 0 ? <Banner tone={open > 0 ? 'warn' : undefined} title={uiText("拒收与退换")}>{uiText(noReplace > 0 ? `供应商已确认不再补发 ${Math.round(noReplace * 10000) / 10000} ${po.unit}；如本合同不再交货，可勾选最终结算。` : '')}{uiText(open > 0 ? `还有 ${Math.round(open * 10000) / 10000} ${po.unit} 拒收未登记退换，请先在采购详情登记供应商补发或不再补发。` : '')}</Banner> : null; })()}
+      {po && <Checkbox checked={draft.final} onChange={v => setDraft({ ...draft, final: v })} label={uiText("这是本合同最终结算（短交关闭或已全部交付）；将抵扣剩余全部预付")} />}
+      {po && prepay && prepay.paid > 0 && <Banner title={uiText("预付抵扣建议（由财务确认）")}>{uiText("合同已付预付 ")}{money(prepay.paid, po.currency)}{uiText("，已抵扣 ")}{money(prepay.applied, po.currency)}{uiText("。本次建议抵扣 ")}{money(suggested / 100, po.currency)}{uiText(draft.final || qty === 0 ? '' : `（预付 × ${qty} ÷ ${po.quantity}）`)}。</Banner>}
+      <FieldGroup label={uiText("争议 / 未确认扣款")} hint={uiText("例如色差、短码待供应商确认的扣款；单列记录，不抵减结算金额")}>
         <div className="mist-col">{draft.disputes.map((d, i) => <FormGrid key={i}>
-          <TextInput aria-label={`争议说明 ${i + 1}`} value={d.description} onChange={e => setDraft({ ...draft, disputes: draft.disputes.map((x, j) => j === i ? { ...x, description: e.target.value } : x) })} />
-          <TextInput aria-label={`争议金额 ${i + 1}`} type="number" min="0.01" step="0.01" value={d.amount} onChange={e => setDraft({ ...draft, disputes: draft.disputes.map((x, j) => j === i ? { ...x, amount: e.target.value } : x) })} />
+          <TextInput aria-label={ui`争议说明 ${i + 1}`} value={d.description} onChange={e => setDraft({ ...draft, disputes: draft.disputes.map((x, j) => j === i ? { ...x, description: e.target.value } : x) })} />
+          <TextInput aria-label={ui`争议金额 ${i + 1}`} type="number" min="0.01" step="0.01" value={d.amount} onChange={e => setDraft({ ...draft, disputes: draft.disputes.map((x, j) => j === i ? { ...x, amount: e.target.value } : x) })} />
         </FormGrid>)}
-          <div className="mist-row"><Button size="sm" disabled={draft.disputes.length >= 20} onClick={() => setDraft({ ...draft, disputes: [...draft.disputes, { description: '', amount: '' }] })}>添加争议 / 扣款</Button></div></div>
+          <div className="mist-row"><Button size="sm" disabled={draft.disputes.length >= 20} onClick={() => setDraft({ ...draft, disputes: [...draft.disputes, { description: '', amount: '' }] })}>{uiText("添加争议 / 扣款")}</Button></div></div>
       </FieldGroup>
-      <Field label="结算说明"><TextArea aria-label="结算说明" rows={2} value={draft.note} onChange={e => setDraft({ ...draft, note: e.target.value })} /></Field>
+      <Field label={uiText("结算说明")}><TextArea aria-label={uiText("结算说明")} rows={2} value={draft.note} onChange={e => setDraft({ ...draft, note: e.target.value })} /></Field>
     </div>
   </Dialog>;
 }
@@ -131,14 +132,14 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
     setLocal(''); execute({ type: 'payable.settlement.confirm', payload: { id: st.id, prepaymentApplied: value / 100, adjustReason: changed ? adjust : undefined, note } }, onDone);
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title="确认结算" description={`${st.code} · ${st.purchaseCode} · 实收 ${st.quantity} ${st.unit} · ${money(st.amount, st.currency)}。核对收货记录、数量与单价后确认。`}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canConfirm} onClick={submit}>确认结算</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText("确认结算")} description={ui`${st.code} · ${st.purchaseCode} · 实收 ${st.quantity} ${st.unit} · ${money(st.amount, st.currency)}。核对收货记录、数量与单价后确认。`}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canConfirm} onClick={submit}>{uiText("确认结算")}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能确认">{message}</Banner>}
+      {message && <Banner tone="bad" title={uiText("还不能确认")}>{message}</Banner>}
       <Facts items={[{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + (st.final ? '（最终结算：抵扣剩余全部预付）' : '（按结算数量比例）') }, { label: '合同剩余可抵扣', value: money(st.available, st.currency) }, ...(st.disputes.length ? [{ label: '争议 / 扣款（不抵减）', value: st.disputes.map(d => `${d.description} ${money(d.amount, st.currency)}`).join('；') }] : [])]} />
-      <Field label="本次预付抵扣" required><TextInput aria-label="本次预付抵扣" type="number" min="0" step="0.01" value={applied} onChange={e => setApplied(e.target.value)} /></Field>
-      {changed && <Field label="调整原因" required hint="抵扣额与建议不同时必须写明，例如合同约定首批不抵扣"><TextInput aria-label="调整原因" value={adjust} onChange={e => setAdjust(e.target.value)} /></Field>}
-      <Field label="复核意见"><TextArea aria-label="复核意见" rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
+      <Field label={uiText("本次预付抵扣")} required><TextInput aria-label={uiText("本次预付抵扣")} type="number" min="0" step="0.01" value={applied} onChange={e => setApplied(e.target.value)} /></Field>
+      {changed && <Field label={uiText("调整原因")} required hint={uiText("抵扣额与建议不同时必须写明，例如合同约定首批不抵扣")}><TextInput aria-label={uiText("调整原因")} value={adjust} onChange={e => setAdjust(e.target.value)} /></Field>}
+      <Field label={uiText("复核意见")}><TextArea aria-label={uiText("复核意见")} rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
     </div>
   </Dialog>;
 }

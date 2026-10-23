@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /**
  * ChatGPT 订阅连接卡片：设备码登录在用户自己的浏览器完成，令牌只保存在服务器。
  * platform：管理员为平台 AI（报价审阅、汇总、对账、业务问答）连接共用模型；
@@ -18,7 +20,7 @@ async function call(path: string, init: RequestInit = {}) {
   if (!body) throw new Error('订阅连接没有返回可核对的结果');
   return body;
 }
-const time = (iso: string | null) => iso ? new Date(iso).toLocaleString('zh-CN', { hour12: false }) : '—';
+const time = (iso: string | null) => iso ? new Date(iso).toLocaleString(interfaceLocale(), { hour12: false }) : '—';
 const PLANS: Record<string, string> = { free: 'Free', go: 'Go', plus: 'Plus', pro: 'Pro', prolite: 'Pro Lite', promax: 'Pro Max', team: 'Team', business: 'Business', enterprise: 'Enterprise', edu: 'Edu' };
 const planLabel = (plan: string | null) => plan ? PLANS[plan] ?? plan : '已登录';
 const REASONING: Record<string, string> = { low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高（max）' };
@@ -56,11 +58,11 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
   }, [login?.loginId, login?.state, toast, BASE]);
   if (!status?.enabled) {
     const title = mode === 'platform' ? '平台订阅连接暂不可用' : '个人订阅连接暂不可用';
-    if (error) return <Banner tone="warn" title={title}>{error}</Banner>;
+    if (error) return <Banner tone="warn" title={uiText(title)}>{uiText(error)}</Banner>;
     // 读取中与服务器未启用都要有交代，不能留一整页空白。
     const body = <div className="mist-card-body">{status
-      ? <Banner title="服务器未启用 ChatGPT 订阅连接">{mode === 'platform' ? '平台 AI 使用服务器配置的企业 API。测试期如需使用 ChatGPT 订阅，请由管理员在服务器启用后再连接。' : '服务器尚未开放个人订阅连接。'}</Banner>
-      : <p className="mist-note">正在读取订阅连接…</p>}</div>;
+      ? <Banner title={uiText("服务器未启用 ChatGPT 订阅连接")}>{uiText(mode === 'platform' ? '平台 AI 使用服务器配置的企业 API。测试期如需使用 ChatGPT 订阅，请由管理员在服务器启用后再连接。' : '服务器尚未开放个人订阅连接。')}</Banner>
+      : <p className="mist-note">{uiText("正在读取订阅连接…")}</p>}</div>;
     return bare ? body : <Card>{body}</Card>;
   }
   const start = async () => {
@@ -79,24 +81,24 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
   const pending = login?.state === 'pending';
   const Wrap = bare ? React.Fragment : Card;
   return <Wrap>
-    <CardHeader title={mode === 'platform' ? 'ChatGPT 套餐连接' : '我的 ChatGPT 订阅'} sub={mode === 'platform' ? '用管理员的 ChatGPT 套餐作为平台模型之一，在上方调用顺序中排位。登录在 OpenAI 页面完成，凭据只保存在服务器。' : '供工作助手使用你自己的 ChatGPT 账号；登录在 OpenAI 页面完成，凭据只保存在服务器。'} tools={status.connected ? <Pill tone="ok">已连接</Pill> : <Pill>未连接</Pill>} />
-    {error && <div className="mist-card-body"><Banner tone="bad" title="订阅连接未完成">{error}</Banner></div>}
+    <CardHeader title={uiText(mode === 'platform' ? 'ChatGPT 套餐连接' : '我的 ChatGPT 订阅')} sub={uiText(mode === 'platform' ? '用管理员的 ChatGPT 套餐作为平台模型之一，在上方调用顺序中排位。登录在 OpenAI 页面完成，凭据只保存在服务器。' : '供工作助手使用你自己的 ChatGPT 账号；登录在 OpenAI 页面完成，凭据只保存在服务器。')} tools={status.connected ? <Pill tone="ok">{uiText("已连接")}</Pill> : <Pill>{uiText("未连接")}</Pill>} />
+    {error && <div className="mist-card-body"><Banner tone="bad" title={uiText("订阅连接未完成")}>{uiText(error)}</Banner></div>}
     {status.connected ? <>
       <KeyValue items={[{ label: '账号', value: status.email ?? '—' }, { label: '套餐', value: planLabel(status.plan) }, { label: '模型', value: status.model, mono: true }, ...(mode === 'personal' ? [{ label: '推理强度', value: status.reasoning ? REASONING[status.reasoning] ?? status.reasoning : '—' }] : []), { label: '连接时间', value: time(status.connectedAt) }, ...profiles.map(p => ({ label: p.label, value: '推理 ' + (REASONING[p.reasoning] ?? p.reasoning) }))]} />
-      <div className="mist-card-body"><div className="mist-row"><Button icon={Unlink} disabled={busy} loading={busy} onClick={() => void disconnect()}>断开连接</Button></div></div>
+      <div className="mist-card-body"><div className="mist-row"><Button icon={Unlink} disabled={busy} loading={busy} onClick={() => void disconnect()}>{uiText("断开连接")}</Button></div></div>
     </> : pending && login ? <>
-      <div className="mist-card-body"><Banner tone="ai" title="在 OpenAI 页面输入验证码">打开验证页并登录你的 ChatGPT 账号，输入下方验证码后此处会自动更新。若提示未开启设备码登录，请在 ChatGPT 设置的安全选项中允许 Codex 设备码授权。</Banner></div>
+      <div className="mist-card-body"><Banner tone="ai" title={uiText("在 OpenAI 页面输入验证码")}>{uiText("打开验证页并登录你的 ChatGPT 账号，输入下方验证码后此处会自动更新。若提示未开启设备码登录，请在 ChatGPT 设置的安全选项中允许 Codex 设备码授权。")}</Banner></div>
       <KeyValue items={[{ label: '验证码', value: login.userCode, mono: true }, { label: '验证页', value: login.verificationUrl, mono: true }, { label: '有效期至', value: time(login.expiresAt) }]} />
       <div className="mist-card-body"><div className="mist-row">
-        <Button variant="primary" icon={ExternalLink} onClick={() => window.open(login.verificationUrl, '_blank', 'noopener,noreferrer')}>打开验证页</Button>
-        <Button onClick={() => void copy()}>复制验证码</Button>
-        <span className="mist-note">等待授权…</span>
+        <Button variant="primary" icon={ExternalLink} onClick={() => window.open(login.verificationUrl, '_blank', 'noopener,noreferrer')}>{uiText("打开验证页")}</Button>
+        <Button onClick={() => void copy()}>{uiText("复制验证码")}</Button>
+        <span className="mist-note">{uiText("等待授权…")}</span>
       </div></div>
     </> : <div className="mist-card-body">
-      {login && login.state !== 'connected' && <Banner tone="warn" title={login.state === 'expired' ? '验证码已过期' : '授权未完成'}>{login.message ?? '请重新发起连接'}</Banner>}
-      <p className="mist-note">{mode === 'platform' ? '测试期所有公司的平台 AI 都会使用此账号的订阅额度，业务资料会发送给 OpenAI。生产期由企业 API 统一调用。' : '工作助手只使用你本人的订阅额度；请勿共享个人账号。'}</p>
+      {login && login.state !== 'connected' && <Banner tone="warn" title={uiText(login.state === 'expired' ? '验证码已过期' : '授权未完成')}>{login.message ?? '请重新发起连接'}</Banner>}
+      <p className="mist-note">{uiText(mode === 'platform' ? '测试期所有公司的平台 AI 都会使用此账号的订阅额度，业务资料会发送给 OpenAI。生产期由企业 API 统一调用。' : '工作助手只使用你本人的订阅额度；请勿共享个人账号。')}</p>
       <div className="mist-row">
-        <Button variant="ai" icon={login ? RefreshCw : Link2} disabled={busy} loading={busy} onClick={() => void start()}>{login ? '重新连接' : mode === 'platform' ? '连接 ChatGPT 账号作为平台模型' : '连接我的 ChatGPT 账号'}</Button>
+        <Button variant="ai" icon={login ? RefreshCw : Link2} disabled={busy} loading={busy} onClick={() => void start()}>{uiText(login ? '重新连接' : mode === 'platform' ? '连接 ChatGPT 账号作为平台模型' : '连接我的 ChatGPT 账号')}</Button>
       </div>
     </div>}
   </Wrap>;
