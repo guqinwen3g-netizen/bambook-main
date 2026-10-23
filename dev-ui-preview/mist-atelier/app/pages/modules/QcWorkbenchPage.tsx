@@ -300,7 +300,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
       ]} />
     </DetailBlock>}
     <DetailBlock title={uiText(task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`)}>
-      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("还没有报告。认领后到现场检查，提交报告即回到来源。")}</span>}
+      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("还没有报告。认领后到现场检查，提交报告即回到来源。")}</span>}
     </DetailBlock>
     <DetailBlock title={uiText("第三方测试")}>
       <span className="mist-note"><Icon icon={FlaskConical} size="xs" />{uiText("送检机构、项目与预计出报告日的登记尚未接入服务端；外部报告可先作为附件随QC报告上传，由QC判读。")}</span>
@@ -309,12 +309,12 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
   </DetailBody>;
 }
 
-function QcReportCard({ report, production, latest }: { report: FulfillmentQcReport; production: boolean; latest: boolean }) {
+function QcReportCard({ report, domain, production, latest }: { report: FulfillmentQcReport; domain: Domain; production: boolean; latest: boolean }) {
   return <div className="mist-col" data-qc-report={report.id}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {new Date(report.reviewedAt).toLocaleString()}</span></div>
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
     {production && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
-    {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} />}
+    {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} unit={domain === 'fabric' ? '' : 'cm'} />}
     <RecordFiles key={report.id} ids={report.fileIds} />
   </div>;
 }
