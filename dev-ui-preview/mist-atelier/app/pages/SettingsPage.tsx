@@ -130,7 +130,7 @@ export function SettingsPage() {
             <SettingRow title={uiText("退出所有设备")} control={<Button size="sm" disabled>{uiText("不适用")}</Button>} /></>}
           </FormSection>}
           </>}
-          {!['company','overview','activity','appearance'].includes(sec) && <div className="mist-sticky-foot"><span className="mist-note">{uiText(saving ? '正在保存…' : '选择项即时保存，文字离开输入框后保存')}</span><span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></div>}
+          {!['company','overview','activity','appearance'].includes(sec) && <div className="mist-sticky-foot">{saving && <span className="mist-note">{uiText('正在保存…')}</span>}<span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></div>}
         </Card>
       </div>
     </MistPage>
