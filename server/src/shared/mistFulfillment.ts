@@ -1,4 +1,4 @@
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -116,6 +116,7 @@ export type FulfillmentQcTask = {
 };
 export type FulfillmentQcReport = {
     id: string;
+    location?: string;
     taskId: string;
     result: MistQc['result'];
     report: string;
@@ -184,6 +185,7 @@ export type FulfillmentPurchaseRevision = {
 };
 export type FulfillmentReceipt = {
     id: string;
+    materialDelivery?: MaterialDeliveryLink;
     purchaseId: string;
     quantity: number;
     rejected: number;
@@ -234,6 +236,7 @@ export type FulfillmentStock = {
 };
 export type FulfillmentStockMovement = {
     id: string;
+    materialDelivery?: MaterialDeliveryLink;
     stockId: string;
     kind: 'receive' | 'issue' | 'return' | 'move' | 'lock' | 'unlock' | 'scrap' | 'reject';
     quantity: number;
@@ -437,6 +440,7 @@ export type FulfillmentCommand = {
     type: 'fulfillment.qc.report';
     payload: {
         id: string;
+        location?: string;
         domain: 'garment' | 'fabric';
         result: MistQc['result'];
         report: string;
@@ -483,6 +487,7 @@ export type FulfillmentCommand = {
     type: 'fulfillment.procurement.receive';
     payload: {
         id: string;
+        targetProductionId?: string;
         quantity: number;
         rejected: number;
         destination: 'warehouse' | 'supplier';
@@ -528,6 +533,7 @@ export type FulfillmentCommand = {
     type: 'fulfillment.inventory.move';
     payload: {
         id: string;
+        targetProductionId?: string;
         kind: 'issue' | 'return' | 'move';
         quantity: number;
         location: string;
@@ -536,6 +542,15 @@ export type FulfillmentCommand = {
         issueId?: string;
         sourceLocation?: string;
     };
+} | {
+    type: 'fulfillment.materials.confirm';
+    payload: { kind: 'issue' | 'direct'; id: string; evidence: string };
+} | {
+    type: 'fulfillment.materials.issue';
+    payload: { id: string; targetProductionId: string; quantity: number; location: string; person: string; note: string; sourceLocation?: string };
+} | {
+    type: 'fulfillment.materials.deliver';
+    payload: { id: string; targetProductionId: string; quantity: number; rejected: number; location: string; date: string; evidence: string; fileIds: string[] };
 } | {
     type: 'fulfillment.shipments.sourceTerms';
     payload: FulfillmentShippingTerms;
@@ -626,6 +641,9 @@ export type FulfillmentCommand = {
 export function createFulfillmentState(_context: MistContext, _rootState: unknown): FulfillmentState { return { warehouses:[],returnReceipts:[],receivedRecords:[],productionFacts: [], shippingTerms: [], samples: [], sampleMovements: [], qcTasks: [], qcReports: [], purchases: [], receipts: [], stock: [], stockMovements: [], shipments: [], packing: [], customs: [], customsClassifications: [], documents: [] }; }
 export const FULFILLMENT_CUSTOMS_CLEAR_SCOPE = 'customs:clear';
 export function fulfillmentCommandPermission(command: FulfillmentCommand): string | null {
+    if (command.type === 'fulfillment.materials.confirm') return 'orders:write';
+    if (command.type === 'fulfillment.materials.issue') return 'inventory:write';
+    if (command.type === 'fulfillment.materials.deliver') return 'procurement:write';
     if(command.type.startsWith('fulfillment.claimInventory.'))return claimInventoryPermission(command as ClaimInventoryCommand);
     if (command.type.startsWith('fulfillment.samples.'))
         return 'products:write';
@@ -848,6 +866,13 @@ function requireProductionQc(root: MistState, branch: MistProduction) {
         }
     }
 }
+function materialQualityProof(root: MistState, purchase: FulfillmentPurchase, delivery: MaterialDeliveryLink) {
+    if (!root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
+    const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
+    if (!branch) fail('来源面料缺少准确生产分支');
+    requireProductionQc(root, branch!);
+    delivery.sourceQcReportIds = root.fulfillment.qcTasks.filter(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch!.id).map(task => task.reportIds.at(-1)!);
+}
 function requireProductionRelease(root: MistState, branch: MistProduction, context: InternalFabricContext, recordingInspection = false) {
     assertGarmentMaterial(root, branch.orderId, branch.lineId, context);
     assertMistOrderApproved(root, branch.orderId);
@@ -925,6 +950,17 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         if (order.governance?.contract.internalSupply && ['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm'].includes(command.type)) normalizeInternalSupply(order.governance.contract, order, ctx);
     }
     switch (command.type) {
+        // Distinct commands fail closed against an older server instead of silently discarding the new linkage fields.
+        case 'fulfillment.materials.issue': {
+            const stock = get(f.stock, p.id, '库存批次');
+            if (!stock.purchaseId || !materialDeliveryRequired(root, stock.purchaseId)) fail('请选择待交接的公司物料');
+            return applyFulfillmentCommand(root, { type: 'fulfillment.inventory.move', payload: { ...p, kind: 'issue' } }, ctx);
+        }
+        case 'fulfillment.materials.deliver': {
+            if (!materialDeliveryRequired(root, p.id)) fail('请选择待交接的公司物料');
+            return applyFulfillmentCommand(root, { type: 'fulfillment.procurement.receive', payload: { ...p, destination: 'supplier' } }, ctx);
+        }
+        case 'fulfillment.materials.confirm': return confirmMaterialDelivery(root, p, ctx);
         case 'fulfillment.samples.create': {
             const s = source(root, p.source);
             if (s.kind === 'version') {
@@ -1128,7 +1164,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (new Set(sizeChecks.map(check => check.size)).size !== sizeChecks.length) fail('本次尺码检查不得重复');
                 if (sizeChecks.some(check => check.result === 'reject') && p.result !== 'reject') fail('存在尺码不通过时，总结论必须不通过');
             }
-            f.qcReports.push({ id, taskId: t.id, result: p.result, report, opinion, measurements, fileIds, reviewer: ctx.actorName, reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks, ...(previous ? { previousReportId: previous } : {}) });
+            const location = text(p.location === undefined ? t.location : p.location, '实际检查地点');
+            f.qcReports.push({ id, taskId: t.id, location, result: p.result, report, opinion, measurements, fileIds, reviewer: ctx.actorName, reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks, ...(previous ? { previousReportId: previous } : {}) });
             t.reportIds.push(id);
             t.state = p.result === 'reject' ? 'blocked' : t.kind === 'production' && (needsResume || p.result === 'conditional') ? 'awaiting_business' : 'reported';
             if (t.source.kind === 'orderLine' && t.source.productionId) {
@@ -1382,8 +1419,13 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('收货路径无效');
             if (purchase.kind === 'processing' && p.destination === 'warehouse')
                 fail('加工服务交付不能作为物料入库');
+            let materialDelivery: MaterialDeliveryLink | undefined;
+            if (quantity > 0 && p.destination === 'supplier' && materialDeliveryRequired(root, purchase.id)) {
+                materialDelivery = prepareMaterialDelivery(root, purchase.id, p.targetProductionId, quantity, ctx);
+                materialQualityProof(root, purchase, materialDelivery);
+            } else if (p.targetProductionId !== undefined) fail('仅直送加工方时指定接收加工单');
             const id = ctx.id();
-            f.receipts.push({ id, purchaseId: purchase.id, quantity, rejected, destination: p.destination, location, date, evidence, fileIds, actor: ctx.actorName, createdAt: ctx.now });
+            f.receipts.push({ id, purchaseId: purchase.id, quantity, rejected, destination: p.destination, location, date, evidence, fileIds, actor: ctx.actorName, createdAt: ctx.now, ...(materialDelivery ? { materialDelivery } : {}) });
             purchase.received = sum([purchase.received, quantity]);
             const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
             if (branch && quantity > 0) {
@@ -1462,6 +1504,14 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('库存操作无效');
             let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
             const location = text(p.location, '实际地点'), person = text(p.person, '接收/交付方'), note = text(p.note, '交接依据');
+            const sourcePurchaseId = stock.purchaseId || '';
+            const linkedMaterial = !!root.orders.find(order => order.id === stock.orderId)?.governance?.contract.internalSupply || materialDeliveryRequired(root, sourcePurchaseId);
+            let materialDelivery: MaterialDeliveryLink | undefined;
+            if (linkedMaterial) assertMaterialSender(root, sourcePurchaseId, ctx);
+            if (p.kind === 'issue' && linkedMaterial) {
+                materialDelivery = prepareMaterialDelivery(root, sourcePurchaseId, p.targetProductionId, quantity, ctx);
+                materialQualityProof(root, get(f.purchases, sourcePurchaseId, '来源采购'), materialDelivery);
+            } else if (p.targetProductionId !== undefined) fail('仅发料出库时指定接收加工单');
             let issue: FulfillmentStockMovement | undefined;
             if (p.kind === 'return') {
                 issue = get(f.stockMovements, p.issueId, '原出库');
@@ -1482,7 +1532,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (p.kind === 'move') addAtPosition(stock, quantity, location);
             }
             const id = ctx.id();
-            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}) });
+            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
             audit(root, ctx, 'inventory', stock.id, '登记实际库存交接');
             return { id };
         }

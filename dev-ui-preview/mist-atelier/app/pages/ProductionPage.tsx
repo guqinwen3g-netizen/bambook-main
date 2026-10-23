@@ -8,7 +8,7 @@ import React from 'react';
 import { AlertTriangle, CalendarRange, Factory } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Drawer, Dropdown, EmptyState, Field, FormGrid, Kanban, KeyValue, Meter, MistPage, Mono, ObjectCell, PageHeader, Pill, SearchField, Segmented, SummaryBar, TextArea, TextInput, Thumb, Toolbar, useToast } from '../../../../components/mist';
 import type { MistProduction } from '../../../../server/src/shared/mistWorkspace';
-import { IMG, PROD_COLUMNS, fmt } from '../data';
+import { IMG, PROD_COLUMNS } from '../data';
 import { useNav } from '../nav';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
@@ -93,7 +93,7 @@ export function ProductionPage() {
   return <MistPage width="wide">
     <PageHeader eyebrow={uiText("订单履约 · 生产")} title={uiText("生产进度")}
       actions={<><Segmented<ProductionRange> ariaLabel={uiText("范围")} value={range} onChange={setRange} options={[{ value: 'week', label: '本周' }, { value: 'month', label: '本月' },{ value:'all',label:'全部' }]} /><Button icon={CalendarRange} onClick={() => setGantt(value => !value)}>{uiText(gantt ? '看板' : '甘特图')}</Button></>} />
-    <SummaryBar items={[{label:'在手分支',value:items.filter(item=>item.col!=='done').length,unit:'个',hint:[...units].map(([unit,qty])=>`${fmt(qty)} ${unit}`).join(' · ')||'暂无在手数量'},{label:'待业务放行',value:unreleased,unit:'个'},{label:'QC NOK',value:nokCount,unit:'个',hintTone:nokCount?'bad':undefined},{label:'交期风险 / 延期',value:items.filter(item=>item.risk).length,unit:'个'},{label:'待出运',value:items.filter(item=>item.col==='done').length,unit:'个'}]}/>
+    <SummaryBar items={[{label:'在手分支',value:items.filter(item=>item.col!=='done').length,unit:'个',hint:[...units].map(([unit,qty])=>`${qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${unit}`).join(' · ')||'暂无在手数量'},{label:'待业务放行',value:unreleased,unit:'个'},{label:'QC NOK',value:nokCount,unit:'个',hintTone:nokCount?'bad':undefined},{label:'交期风险 / 延期',value:items.filter(item=>item.risk).length,unit:'个'},{label:'待出运',value:items.filter(item=>item.col==='done').length,unit:'个'}]}/>
     {(failure || error) && <Banner tone="bad" title={uiText("生产记录未保存")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}
     {risks.length > 0 && <div className="mist-section"><Banner tone="warn" icon={AlertTriangle} title={ui`${risks.length} 个生产单有交期风险`} actions={<Button size="sm" onClick={() => { setSelectedId(risks[0].id); }}>{uiText("查看生产单")}</Button>}>{risks.map(item => `${item.code}：${item.risk}`).join('；')}</Banner></div>}
     <Toolbar><SearchField value={q} onChange={setQ} placeholder={uiText("款式、生产单或工厂")} /><Dropdown label={uiText("订单")} value={orderId} onChange={setOrderId} options={[{ value: 'all', label: '全部' }, ...(state?.orders ?? []).map(order => ({ value: order.id, label: order.code }))]} /></Toolbar>
@@ -106,7 +106,7 @@ export function ProductionPage() {
     ]} /></Card> : <Kanban columns={PROD_COLUMNS.map(column => ({ ...column, items: shown.filter(item => item.col === column.id) }))} itemKey={item => item.id}
       onMove={busy ? undefined : (id, col) => { void move(id, col); }} onOpen={item => setSelectedId(item.id)} renderCard={item => <>
         <div className="mist-row"><Thumb src={IMG[item.img]} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={uiText(`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`)}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
-        <Meter segments={[{ value: item.pct, tone: item.pct === 100 ? 'ok' : 'accent' }]} caption={uiText(`${item.pct}% · ${fmt(item.qty)} ${productionUnit(item)}`)} />
+        <Meter segments={[{ value: item.pct, tone: item.pct === 100 ? 'ok' : 'accent' }]} caption={uiText(`${item.pct}% · ${item.qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${productionUnit(item)}`)} />
         <div className="mist-kb-card-foot"><Factory className="mist-icon" data-size="xs" />{item.factory}<span className="mist-spacer" />{state&&productionNok(state,item) ? <Pill tone="bad">QC NOK</Pill> : item.risk ? <Pill tone="warn">{uiText(item.risk.length>14?item.risk.slice(0,14)+'…':item.risk)}</Pill> : !state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release) ? <Pill tone="neutral">{uiText("待放行")}</Pill> : <span>{item.due}</span>}</div>
       </>} />}
     <Drawer open={!!selected} onClose={() => { if (!busy) setSelectedId(null); }} title={uiText(selected?.code ?? '生产单')} sub={uiText(selected?.name)} size="lg"

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import {materialDeliveryFixture} from '../../../../../server/src/mist/__tests__/materialDelivery';
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
@@ -148,13 +149,13 @@ it('shows approval reasons, returned notes and processing-only track steps',()=>
   let detail=host.querySelector('[data-purchase-detail="wait"]') as HTMLElement;
   expect((getByRole(detail,'button',{name:'批准承诺'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('你不在本单提交时的审批名单中');
-  expect(detail.textContent).toContain('原料交接');
+  expect(detail.textContent).toContain('物料接收');
   render('back');
   detail=host.querySelector('[data-purchase-detail="back"]') as HTMLElement;
   expect(detail.textContent).toContain('审批人：单价高于报价');
   expect((getByRole(detail,'button',{name:'提交审批'}) as HTMLButtonElement).disabled).toBe(true);
   expect((getByRole(detail,'button',{name:'编辑草稿'}) as HTMLButtonElement).disabled).toBe(false);
-  expect(detail.textContent).not.toContain('原料交接');
+  expect(detail.textContent).not.toContain('物料接收');
 });
 
 it('keeps the ledger readable without write permission',()=>{
@@ -298,4 +299,15 @@ it('uses the source product name and keeps full contract wording available on re
   await click(getByRole(detail,'button',{name:'规格与约定'}));
   expect(detail.textContent).toContain('羊毛70%，再生涤纶30%，300g，幅宽148cm，按确认样生产');
   expect(store.state!.fulfillment.purchases[0].description).toContain('羊毛70%');
+});
+
+it.each(['warehouse','supplier'] as const)('records the processing target only on direct supplier receipts: %s',async destination=>{
+  const f=materialDeliveryFixture(100.3,false);store.state=f.state;session.id='owner';render(f.purchaseId);
+  await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));
+  const dialog=getByRole(document.body,'dialog',{name:'登记收料'}),path=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
+  act(()=>{path.value=destination;path.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect((getByRole(dialog,'combobox',{name:'直送加工单'}) as HTMLSelectElement).value).toBe(f.productionId);
+  typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'Delivery note');
+  await click(getByRole(dialog,'button',{name:'登记本次交付',exact:true}));
+  const command=store.run.mock.calls.at(-1)![0],payload=command.payload;expect(command.type).toBe(destination==='supplier'?'fulfillment.materials.deliver':'fulfillment.procurement.receive');expect(payload.destination).toBe(destination==='warehouse'?'warehouse':undefined);expect(payload.targetProductionId).toBe(destination==='supplier'?f.productionId:undefined);
 });

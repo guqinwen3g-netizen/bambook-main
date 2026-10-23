@@ -39,12 +39,12 @@ function fixture(sourceQty = 100.3) {
     return { id, productionId };
   };
   const pp = (productionId: string, actor = context) => run({ type: 'fulfillment.samples.create', payload: { name: '衬衫产前样', category: '成衣', form: '产前样', unit: '件', quantity: 1, location: '样品室', size: 'M', color: '蓝', source: { kind: 'orderLine', ...target, productionId }, role: 'pp', fileIds: [], note: '' } }, actor).id!;
-  const approvePp = (productionId: string) => {
+  const approvePp = (productionId: string, location = '样品室') => {
     const sampleId=pp(productionId), source={kind:'orderLine' as const,...target,productionId};
     const id=run({type:'fulfillment.qc.request',payload:{source,sampleId,domain:'garment',kind:'sample',factory:'factory',location:'样品室',contact:'',due:'2026-10-24'}}).id!;
     const inspector={...context,actorId:'qc',actorName:'成衣QC'};
     run({type:'fulfillment.qc.claim',payload:{id,domain:'garment'}},inspector);
-    run({type:'fulfillment.qc.report',payload:{id,domain:'garment',result:'pass',report:'PP-REPORT',opinion:'尺寸与工艺通过',measurements:[],fileIds:[],reviewedAt:context.now}},inspector);
+    run({type:'fulfillment.qc.report',payload:{id,domain:'garment',result:'pass',report:'PP-REPORT',location,opinion:'尺寸与工艺通过',measurements:[],fileIds:[],reviewedAt:context.now}},inspector);
     run({type:'fulfillment.qc.confirm',payload:{id,result:'approved',note:'客户确认通过'}});
     run({type:'fulfillment.qc.continue',payload:{id,note:'业务确认继续'}});
     return sampleId;
@@ -188,4 +188,10 @@ describe('current Mist internal fabric contract', () => {
     const purchase = f.state.fulfillment.purchases.find(row => row.id === transferred.purchaseId)!;
     expect(purchase.materialKind).toBe('packaging'); expect(purchase.state).toBe('draft');
   });
+});
+
+it('freezes the actual QC location without changing the planned inspection site',()=>{
+  const f=fixture();f.allocate();const branch=f.production();f.approvePp(branch.productionId,'检验台 B');
+  const report=f.state.fulfillment.qcReports.find(r=>r.report==='PP-REPORT')!;
+  expect(report.location).toBe('检验台 B');expect(f.state.fulfillment.qcTasks.find(t=>t.id===report.taskId)!.location).toBe('样品室');
 });

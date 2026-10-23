@@ -1,4 +1,4 @@
-import {applyInternalFabricCommand,internalFabricCommandPermission,normalizeGarmentFulfillment,normalizeInternalSupply,type GarmentFulfillmentFields,type MistInternalFabricAllocation,type InternalFabricCommand} from './mistInternalFabric';
+import {applyInternalFabricCommand,internalFabricCommandPermission,normalizeGarmentFulfillment,normalizeInternalSupply,internalFabricDeliveryState,type GarmentFulfillmentFields,type MistInternalFabricAllocation,type InternalFabricCommand} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,type SampleSendPurpose} from './mistSampleSending';
 import type {MistBusinessClock} from './mistBusinessClock';
 import{stableJson}from'./stableJson';
@@ -663,6 +663,8 @@ function recalculate(state: MistState) {
     if(order.governance&&order.governance.status!=='approved'){
       // BB-ORD-7：已作废 / 已取消为终止状态
       const gs=order.governance.status;order.state=gs==='pending'?'待主单审批':gs==='rejected'?'主单已退回':gs==='void'?'已作废':gs==='cancelled'?'已取消':'订单草稿';order.tone=gs==='pending'?'warn':gs==='rejected'||gs==='cancelled'?'bad':'neutral';
+    }else if(order.governance?.contract.internalSupply&&internalFabricDeliveryState(state,order.id)){
+      order.state=internalFabricDeliveryState(state,order.id)!;order.tone=order.state==='已交接'?'ok':'accent';
     }else if(departed.length){
       const complete=rows.every(line=>isLineClosed(line)||departed.reduce((sum,s)=>sum+s.lines.filter(item=>item.lineId===line.id).reduce((n,item)=>n+Math.round(item.quantity*10000),0),0)>=Math.round(line.qty*10000));
       const unpaid=state.invoices.some(invoice=>invoice.orderId===order.id&&invoice.open>0);
@@ -670,8 +672,8 @@ function recalculate(state: MistState) {
       order.state=complete?(unpaid?'待收尾款':'履约完成'):'部分出运';order.tone=complete?(unpaid?'warn':'ok'):'accent';
     }else if(shipments.length){order.state='出运准备中';order.tone='accent';}
     // 加工合同批准即建生产分支；放行开产或已有进度前订单仍是"备料中"，不显示"生产中"。
-    else if(jobs.some(job=>job.sourcePurchaseId&&((state.fulfillment&&fulfillmentProductionFact(state,job.id)?.release)||job.pct>0||job.col!=='cut'))){
-      order.state=jobs.every(job=>job.col==='done')?'待出运':jobs.some(job=>job.col==='qc')?'待终期 QC':'生产中';order.tone='accent';
+    else if(jobs.some(job=>job.sourcePurchaseId&&((state.fulfillment&&fulfillmentProductionFact(state,job.id)?.release)||job.pct>0))){
+      order.state=jobs.every(job=>job.col==='done')?(order.governance?.contract.internalSupply?'待交接':'待出运'):jobs.some(job=>job.col==='qc')?'待终期 QC':'生产中';order.tone='accent';
     }else if(jobs.some(job=>job.sourcePurchaseId)||(state.fulfillment?.purchases||[]).some(p=>p.orderId===order.id&&p.state==='approved')){order.state='备料中';order.tone='neutral';}
     if(order.governance?.status==='approved'&&order.governance.cancellation?.status==='pending'){order.state='取消审批中';order.tone='warn';}
   }
@@ -1442,7 +1444,7 @@ export function normalizeMistState(state:MistState,context:MistContext):void {
     'market.product.save':'保存数字档案','market.product.fromVersion':'从确认版本建立数字档案',
     'market.quotation.feedback.add':'追加报价客户反馈','market.quotation.costing.save':'保存报价条目专业核算','market.quotation.save':'保存报价草稿','market.quotation.submit':'提交报价审批',
     'market.quotation.decide':'记录报价审批决定','market.quotation.send':'记录报价交付',
-    'market.quotation.respond':'记录客户报价答复','market.quotation.convert':'报价转为订单','market.quotation.skipLines':'报价条目标记不再转','market.quotation.document':'生成报价单','fulfillment.procurement.document':'生成合同文件',
+    'market.quotation.respond':'记录客户报价答复','market.quotation.convert':'报价转为订单','market.quotation.skipLines':'报价条目标记不再转','market.quotation.document':'生成报价单','fulfillment.procurement.document':'生成合同文件','fulfillment.materials.confirm':'确认物料接收','fulfillment.materials.issue':'登记发料','fulfillment.materials.deliver':'登记直送',
     'market.season.save':'保存季节规划','market.season.review':'记录季节回顾',
     'market.trend.save':'保存趋势资料','market.show.save':'保存展会资料',
     'market.campaign.save':'保存营销活动','market.lead.save':'保存线索',

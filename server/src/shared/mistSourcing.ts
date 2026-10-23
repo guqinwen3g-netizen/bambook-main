@@ -1,3 +1,4 @@
+import { hasMaterialAtFactory } from './mistInternalFabric';
 import {assertGarmentProcurement,type MistMaterialKind} from './mistInternalFabric';
 /**
  * 供应商询价比价（RFQ，2026-10-18）。采购按订单条目发起询价，邀请至少两家可合作供应商；逐家登记报价（单价、币种、MOQ、承诺交期、付款条件、报价有效期）或谢绝。
@@ -47,6 +48,7 @@ export const readRfqs = (root: Pick<Root, 'rfqs'>) => root.rfqs || [];
 export const rfqCommandPermission = (_c: RfqCommand) => 'procurement:write';
 /** 整单转移的前置条件；返回空字符串表示可以转移。 */
 export function purchaseTransferBlocker(root: MistState, po: FulfillmentPurchase): string {
+  if (hasMaterialAtFactory(root, po.id)) return '已有物料交给该加工分支，请先按原交接退回';
   if (po.state !== 'approved') return po.state === 'cancelled' ? `${po.code} 已取消` : `${po.code} 尚未批准；草稿或退回的单据直接改供应商后重新提交即可`;
   if ((root.fulfillment?.receipts || []).some(r => r.purchaseId === po.id)) return `${po.code} 已有收货，不能整单转移；请按实收结算，剩余数量另行询价建单`;
   return '';

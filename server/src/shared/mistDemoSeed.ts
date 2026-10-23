@@ -274,8 +274,8 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   /* ───────── 库存：从面料批次领用给工厂 ───────── */
   const fabricLot = state.fulfillment.stock.find(s => s.purchaseId === fabricPo);
   if (fabricLot) {
-    run('stock issue', { type: 'fulfillment.inventory.move', payload: { id: fabricLot.id, kind: 'issue', quantity: 1200, location: '江南成衣 裁床', person: '王建国', note: '第一批裁剪领用' } }, warehouse);
-    run('stock move', { type: 'fulfillment.inventory.move', payload: { id: fabricLot.id, kind: 'move', quantity: 300, location: '嘉兴面辅料仓 A-05', person: '陈晓', note: '整理库位', sourceLocation: '嘉兴面辅料仓 A-03' } }, warehouse);
+    // The processing contract is still a draft; keep material in stock until an approved destination and QC proof exist.
+    run('stock move', { type: 'fulfillment.inventory.move', payload: { id: fabricLot.id, kind: 'move', quantity: 0, location: '嘉兴面辅料仓 A-05', person: '陈晓', note: '整理库位', sourceLocation: '嘉兴面辅料仓 A-03' } }, warehouse);
   }
 
   /* ───────── 样品：借出、寄客户 ───────── */

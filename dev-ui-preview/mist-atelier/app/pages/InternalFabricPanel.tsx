@@ -1,7 +1,8 @@
+import { MaterialDeliveryPanel } from './MaterialDeliveryPanel';
 import React from 'react';
 import { Banner, Button, CardHeader, Dialog, EmptyState, Facts, Field, FormGrid, Mono, Select, TextInput, useToast } from '../../../../components/mist';
 import type { MistOrder, MistOrderLine } from '../../../../server/src/shared/mistWorkspace';
-import { garmentMaterialBlocker, internalFabricCandidates, internalFabricRemaining, normalizeInternalMetres, type InternalFabricCandidate } from '../../../../server/src/shared/mistInternalFabric';
+import { garmentMaterialBlocker, materialDeliveryRows, internalFabricCandidates, internalFabricRemaining, normalizeInternalMetres, type InternalFabricCandidate } from '../../../../server/src/shared/mistInternalFabric';
 import { uiText } from '../../../../services/interfaceLanguage';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useOptionalMistSession } from '../runtime/auth';
@@ -39,6 +40,8 @@ export function InternalFabricPanel({ order, line, go }: Props) {
   }
   if (state && isSource) try { remaining = internalFabricRemaining(state, line.id); } catch (error) { sourceError = error instanceof Error ? error.message : '余量暂不可用'; }
   if (!state || (!isGarment && !isSource)) return null;
+  const deliveries = materialDeliveryRows(state).filter(row => isSource ? state.fulfillment.purchases.find(p => p.id === row.purchaseId)?.lineId === line.id : row.delivery.lineId === line.id);
+  const physicallyCommitted = deliveries.some(row => row.outstanding !== '0');
   const selected = candidates.find(row => row.fabricLineId === fabricLineId), sourceOrder = state.orders.find(row => row.id === activeAllocation?.fabricOrderId), sourceLine = state.orderLines.find(row => row.id === activeAllocation?.fabricLineId);
   const startEdit = () => { setFailure(''); setFabricLineId(activeAllocation?.fabricLineId || ''); setMetres(activeAllocation?.metres || ''); setEditing(true); };
   const apply = async (cancel: boolean) => {
@@ -65,7 +68,7 @@ export function InternalFabricPanel({ order, line, go }: Props) {
     </> : <>
       {activeAllocation && <><Facts cols={2} items={[{ label: '面料订单', value: sourceOrder ? <Mono>{sourceOrder.code}</Mono> : '来源不可用' }, { label: '面料条目', value: sourceLine ? `${sourceLine.style} · ${sourceLine.name}` : '来源不可用' }, { label: '本单分配', value: `${activeAllocation.metres} 米` }, { label: '来源剩余', value: (() => { try { return `${internalFabricRemaining(state, activeAllocation.fabricLineId)} 米`; } catch { return '待核对'; } })() }]} /><Button variant="quiet" onClick={() => go('orders/detail', activeAllocation.fabricOrderId, { orderLineId: activeAllocation.fabricLineId, section: 'fabric' })}>{uiText('查看面料来源')}</Button></>}
       {materialBlocker && <Banner tone="warn" title={uiText('用料待落实')}>{materialBlocker}</Banner>}
-      {canWrite && !editing && <div className="mist-row" style={{ gap: 8 }}><Button disabled={blocked || !!candidateError} onClick={startEdit}>{uiText(activeAllocation ? '调整分配' : '分配面料')}</Button>{activeAllocation && <Button variant="quiet" disabled={blocked} onClick={() => { setFailure(''); setCancelling(true); }}>{uiText('取消分配')}</Button>}</div>}
+      {canWrite && !editing && <div className="mist-row" style={{ gap: 8 }}><Button disabled={blocked || physicallyCommitted || !!candidateError} title={physicallyCommitted ? uiText('已发料，须先退回') : undefined} onClick={startEdit}>{uiText(activeAllocation ? '调整分配' : '分配面料')}</Button>{activeAllocation && <Button variant="quiet" disabled={blocked || physicallyCommitted} title={physicallyCommitted ? uiText('已发料，须先退回') : undefined} onClick={() => { setFailure(''); setCancelling(true); }}>{uiText('取消分配')}</Button>}</div>}
       {editing && <>
         {candidates.length ? <FormGrid><Field label={uiText('内部面料')} required><Select aria-label={uiText('内部面料')} value={fabricLineId} disabled={blocked} placeholder={uiText('选择内部面料')} options={candidates.map(row => ({ value: row.fabricLineId, label: `${row.orderCode} · ${row.lineName}` }))} onChange={event => setFabricLineId(event.target.value)} /></Field><Field label={uiText('分配米数')} required><TextInput aria-label={uiText('分配米数')} type="number" min="0.0001" step="0.0001" value={metres} disabled={blocked} onChange={event => setMetres(event.target.value)} /></Field></FormGrid> : <EmptyState compact title={uiText('暂无可用内部面料')} />}
         {selected && <Facts cols={2} items={[{ label: '面料数量', value: `${selected.quantity} 米` }, { label: '可分配', value: `${selected.remaining} 米` }]} />}
@@ -75,5 +78,6 @@ export function InternalFabricPanel({ order, line, go }: Props) {
         {failure && <Banner tone="bad" title={uiText('取消未完成')}>{failure}</Banner>}{activeAllocation && <Facts items={[{ label: '面料', value: `${sourceOrder?.code || ''} · ${sourceLine?.style || ''}` }, { label: '释放米数', value: `${activeAllocation.metres} 米` }]} />}
       </Dialog>
     </>}
+    <MaterialDeliveryPanel rows={deliveries} />
   </section>;
 }
