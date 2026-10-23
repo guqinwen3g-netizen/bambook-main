@@ -501,6 +501,7 @@ export function QuotationCostingPage() {
     <Field label={uiText(label)} required={required} hint={uiText(hint)}>
       <TextInput
         aria-label={uiText(label)}
+        type={field === 'sourceDate' || field === 'sourceValidUntil' ? 'date' : 'text'}
         value={String(input[field])}
         disabled={disabled}
         onChange={(e) => patch(field, e.target.value)}
@@ -553,7 +554,6 @@ export function QuotationCostingPage() {
       {(!can || frozen) && (
         <Banner title={uiText(can ? "本版本只读" : "没有报价写权限")}>{uiText("审批中、已发送或已转单的报价不能改核算；需要改价时从报价主线建立适用新版本。")}</Banner>
       )}
-      <Banner title={uiText("专业计算 · 人工依据与可选 AI 审阅")}>{uiText("当前只支持与报价行相同币种、相同计价单位；不自动取市场原料价或换算米 / 码 / 公斤。供应商成品价与专业拆解二选一，附加费用必须确认未包含。历史成交只作参考证据列出，不自动套用；AI 仅在第二步显式授权后审阅。")}</Banner>
       {editing && can && !frozen ? (
         <div className="mist-wizard">
           <VerticalSteps
@@ -589,11 +589,11 @@ export function QuotationCostingPage() {
                         options={[
                           {
                             value: "supplier",
-                            label: "供应商成品报价＋未包含费用",
+                            label: "供应商报价",
                           },
                           {
                             value: "breakdown",
-                            label: "专业逐项拆解（无成品报价基数）",
+                            label: "分项核算",
                           },
                         ]}
                       />
@@ -601,18 +601,8 @@ export function QuotationCostingPage() {
                     {inputField("currency", "成本币种")}
                     {inputField("unit", "成本计价单位")}
                     {inputField("sourceSpecification", "适用规格")}
-                    {inputField(
-                      "sourceDate",
-                      "来源日期",
-                      true,
-                      "YYYY-MM-DD，记录这次依据日期，不自动填市场日期。",
-                    )}
-                    {inputField(
-                      "sourceValidUntil",
-                      "来源有效期",
-                      false,
-                      "可留空；不等同客户报价有效期。",
-                    )}
+                    {inputField("sourceDate", "来源日期")}
+                    {inputField("sourceValidUntil", "来源有效期", false)}
                     {input.mode === "supplier" && (
                       <>
                         <Field label={uiText("来源供应商")} required>
@@ -663,7 +653,6 @@ export function QuotationCostingPage() {
                         disabled={disabled}
                         onChange={(ids) => patch("fileIds", ids)}
                       />
-                      <span className="mist-field-hint">{uiText("上传供应商报价单、邮件截图等；不传时仅保存人工登记依据。")}</span>
                     </div>
                   </FormGrid>
                 </FormSection>
@@ -671,9 +660,8 @@ export function QuotationCostingPage() {
                   title={
                     uiText(input.mode === "supplier"
                       ? "未包含的额外费用"
-                      : "报价成本拆解与整笔费用")
+                      : "成本明细")
                   }
-                  sub={uiText("每项明确按计价单位计入，或作为仅属于本行的整笔费用分摊；写清计费量、单位、单价及依据。")}
                   tools={
                     <Button
                       disabled={disabled || input.components.length >= 100}
@@ -817,7 +805,6 @@ export function QuotationCostingPage() {
             ) : step === 1 ? (
               <FormSection
                 title={uiText("本次交易的人工报价策略")}
-                description={uiText("客户与交易因人因次而异，不预设大小客户利润率。")}
               >
                 <FormGrid>
                   <Field label={uiText("利润计算方式")}>
@@ -838,23 +825,12 @@ export function QuotationCostingPage() {
                       onChange={(e) => patch("method", e.target.value)}
                     />
                   </Field>
-                  {inputField(
-                    "targetPercent",
-                    "目标百分比",
-                    true,
-                    "明确填写，不自动设置公司底线或客户分类加成。",
-                  )}
-                  {inputField(
-                    "proposedPrice",
-                    "人工拟报价",
-                    true,
-                    "报价单价两位小数；可与建议报价不同，须人工核对。",
-                  )}
+                  {inputField("targetPercent", "目标百分比")}
+                  {inputField("proposedPrice", "人工拟报价")}
                   <Field
                     label={uiText("本次报价策略依据")}
                     full
                     required
-                    hint={uiText("本次数量、客户反馈、付款 / 服务风险、业务目标及可比依据；不得把客户体量当固定定价规则。")}
                   >
                     <TextArea
                       aria-label={uiText("本次报价策略依据")}
@@ -1067,7 +1043,6 @@ export function QuotationCostingPage() {
       ) : (
         <EmptyState
           title={uiText("本条目尚无专业核算快照")}
-          description={uiText("旧报价成本仍按原门禁处理；不替旧记录补造供应商依据。")}
         />
       )}
       {lineSnapshots.length > 0 && (

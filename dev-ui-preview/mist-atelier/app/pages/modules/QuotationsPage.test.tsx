@@ -25,6 +25,11 @@ const button = (label: string) => [...document.body.querySelectorAll('button')].
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
 
 describe('报价管理', () => {
+  it('does not present an unverified zero cost as a 100 percent margin',async()=>{
+    const quote=code('QT-2026-0003-V2');quote.lines=quote.lines.slice(0,1);quote.lines[0].cost='0';quote.lines[0].costBasis='unverified';
+    await mount(quote.id);const detail=host.querySelector('[data-quotation-detail]')!;
+    expect(detail.textContent).toContain('成本待核');expect(detail.textContent).not.toContain('毛利 100%');
+  });
   it('指定主管使用岗位报价审批权限可以办理当前待审报价', async () => {
     bridge.actorId='demo-reviewer';bridge.permissions=['quotations:read','quotations:approve'];
     await mount(code('QT-2026-0003-V2').id);

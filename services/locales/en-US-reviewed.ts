@@ -210,4 +210,5 @@ export const reviewedEnglish: Record<string, string> = {
   '内部面料行须使用米数单位': 'Internal fabric lines must use metres',
   '请选择内部面料供给行': 'Select an internal fabric supply line',
   '汇率（CNY / {0}）': 'Rate (CNY / {0})',
+  '分项核算': 'Itemized costing',
 };

@@ -70,6 +70,12 @@ describe('Mist market screens',()=>{
   expect((host.querySelector('[aria-label="客户"]') as HTMLSelectElement).value).toBe(unique?'c2':'');
   expect(bridge.current.run).not.toHaveBeenCalled();
  });
+ it('leaves an unverified zero product cost blank in the quotation',async()=>{
+  const product=bridge.current.state.market.products[0];product.cost='0';
+  await mount('quotations',undefined,'product:'+product.id);
+  await fill('客户','c1');await fill('有效期','2026-12-01');await fill('贸易术语','FOB 上海');await fill('付款条件','T/T');await click('下一步');
+  expect((host.querySelector('[aria-label="条目1成本"]') as HTMLInputElement).value).toBe('');
+ });
  it('shows unverified product cost without presenting a zero cost estimate',async()=>{
   const product=bridge.current.state.market.products[0];product.cost='0';
   await mount('products',product.id,undefined,'full');
