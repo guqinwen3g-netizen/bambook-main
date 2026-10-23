@@ -546,6 +546,7 @@ export class MistRepository {
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
       const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type);
+      if(MIST_MEMBER_DIRECTORY_COMMANDS.includes(type))context.members=await this.memberDirectory(db,row,actor);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
       const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
       for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;

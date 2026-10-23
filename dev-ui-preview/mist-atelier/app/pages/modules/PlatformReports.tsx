@@ -24,7 +24,7 @@ const businessDay = (at: string) => { try { return platformBusinessDate(at); } c
 export type CustomerSalesRow = { id: string; customerId: string; customer: string; currency: string; orders: number; amount: number; invoiced: number; received: number; open: number };
 /** 订单按业务日（上海）落在范围内；开票、已收、未收只统计这些订单的有效发票。 */
 export function buildCustomerSales(state: MistState, from = '', to = '', currency = ''): CustomerSalesRow[] {
-  const orders = state.orders.filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to) && (!currency || o.currency === currency); });
+  const orders = state.orders.filter(o => o.governance?.contract?.kind !== 'internal').filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to) && (!currency || o.currency === currency); });
   const map = new Map<string, { customerId: string; customer: string; currency: string; orders: number; amount: number; invoiced: number; open: number }>();
   for (const o of orders) {
     const key = (o.customerId || o.customer) + '|' + o.currency, row = map.get(key) ?? { customerId: o.customerId, customer: o.customer, currency: o.currency, orders: 0, amount: 0, invoiced: 0, open: 0 };
@@ -47,7 +47,7 @@ export type OrderMarginRow = { id: string; code: string; customer: string; curre
  */
 export function buildOrderMargin(state: MistState, from = '', to = '', currency = ''): OrderMarginRow[] {
   const purchases = state.fulfillment?.purchases ?? [], bills = (state.payables?.bills ?? []).filter(b => b.state !== 'void');
-  return state.orders.filter(o => (!o.governance || o.governance.status === 'approved') && (!currency || o.currency === currency)).filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to); }).map(o => {
+  return state.orders.filter(o => o.governance?.contract?.kind !== 'internal').filter(o => (!o.governance || o.governance.status === 'approved') && (!currency || o.currency === currency)).filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to); }).map(o => {
     const mine = purchases.filter(p => p.orderId === o.id && !p.cancellation), approved = mine.filter(p => p.state === 'approved');
     let cost = 0, billed = 0; const foreign = new Map<string, number>();
     for (const p of approved) {
@@ -69,7 +69,7 @@ export type OrderMarginCnyRow = { id: string; code: string; customer: string; cu
  */
 export function buildOrderMarginCny(state: MistState, basis: FxBasis, month: string, asOf: string, from = '', to = '', currency = ''): OrderMarginCnyRow[] {
   const purchases = state.fulfillment?.purchases ?? [];
-  return state.orders.filter(o => (!o.governance || o.governance.status === 'approved') && (!currency || o.currency === currency)).filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to); }).map(o => {
+  return state.orders.filter(o => o.governance?.contract?.kind !== 'internal').filter(o => (!o.governance || o.governance.status === 'approved') && (!currency || o.currency === currency)).filter(o => { const d = businessDay(o.createdAt); return (!from || d >= from) && (!to || d <= to); }).map(o => {
     const mine = purchases.filter(p => p.orderId === o.id && !p.cancellation), approved = mine.filter(p => p.state === 'approved');
     const rates = new Map<string, FxResolved | undefined>(), rateOf = (c: string) => { if (!rates.has(c)) rates.set(c, fxRateFor(state, c, basis, { month, asOf, orderId: o.id })); return rates.get(c); };
     // 实际结汇口径：订单收入按结汇分配到账逐笔取实际汇率，其余按月末暂估（fxOrderActual）。

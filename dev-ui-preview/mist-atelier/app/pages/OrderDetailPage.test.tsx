@@ -28,6 +28,13 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('shows an internal budget without external collection or shipping actions',()=>{
+  const order=store.state!.orders[0];order.governance!.contract={...order.governance!.contract,kind:'internal',internalPurpose:'Production supply',receiver:'Garment team'};
+  render();expect(host.textContent).toContain('内部预算');expect(host.textContent).not.toContain('合同待收');
+  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='查看收款核销')).toBe(false);
+  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='装箱单草稿')).toBe(false);
+});
+
 it('uses canonical line amounts for the table, summary, receipt balance and drawer', async () => {
   store.state!.orders[0].amount = 1; // A stale summary must not override the exact current lines.
   render();
@@ -73,7 +80,7 @@ it('lets the business attach contract evidence and submit the entire draft for a
   const ctx={...context,actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader'],fabric:[]}}};
   (store as any).uploadFile=vi.fn(async(file:File)=>{const saved={id:'po-evidence',name:file.name,mimeType:file.type,size:file.size,storageKey:'workspace/po-evidence',createdAt:context.now};store.state!.files.push(saved);return saved;});
   store.run.mockImplementation(async(command:any)=>{const next=applyMistCommand(store.state!,command,ctx);store.state=next.state;render();return{requestId:'governance',revision:1,result:next.result};});render();
-  expect(host.textContent).toContain('批准前不能采购或履约');await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());
+  expect(host.textContent).toContain('草稿待补齐');await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());
   const set=(label:string,value:string)=>{const node=getByLabelText(document.body,label) as HTMLInputElement|HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));});};
   set('PO / 合同号','CUSTOMER-PO');set('付款条款原文','T/T 按合同');set('贸易术语','FOB');set('指定地点 / 港口','上海');
   await act(async()=>{const file=document.body.querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(file,'files',{value:[new File(['purchase order'],'po.pdf',{type:'application/pdf'})],configurable:true});file.dispatchEvent(new Event('change',{bubbles:true}));});

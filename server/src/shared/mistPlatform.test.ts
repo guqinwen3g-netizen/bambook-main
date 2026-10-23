@@ -13,6 +13,15 @@ function orderApprovalFixture(status:'draft'|'pending'|'approved'='approved'){
 }
 function invoiceFixture(){const f=orderApprovalFixture();let r=run(f.state,{type:'platform.invoice.save',payload:{orderId:f.orderId,due:'2026-11-11',amount:100,note:''}},f.c);r=run(r.state,{type:'platform.invoice.issue',payload:{id:r.result.id!}},f.c);seedIssuedClaimSource(r.state,r.result.invoiceId as string);const prepared=applyMistCommand(r.state,{type:'fulfillment.claimInventory.warehouse.save',payload:{code:'WAREHOUSE',name:'真实退回仓',address:'上海退回现场',active:true}},f.c);return{...f,state:prepared.state,invoiceId:r.result.invoiceId as string,warehouseId:prepared.result.id!};}
 describe('platform order invoice issuance governance',()=>{
+ it('does not create sales invoices or issue retained drafts for internal orders',()=>{
+  const f=fixture(),contract=f.state.orders[0].governance!.contract;contract.kind='internal';contract.internalPurpose='Internal supply';contract.receiver='Production team';
+  const before=structuredClone(f.state);
+  expect(()=>run(f.state,{type:'platform.invoice.save',payload:{orderId:f.orderId,due:'2026-11-11',amount:100,note:''}},f.c)).toThrow('内部订单不生成销售发票');
+  expect(f.state).toEqual(before);
+  f.state.platform.invoiceDrafts.push({id:'retained-internal',orderId:f.orderId,due:'2026-11-11',amount:100,note:'',state:'Draft',createdAt:f.c.now});
+  expect(()=>run(f.state,{type:'platform.invoice.issue',payload:{id:'retained-internal'}},f.c)).toThrow('内部订单不生成销售发票');
+  expect(f.state.invoices).toEqual([]);expect(f.state.platform.invoiceDrafts[0].state).toBe('Draft');
+ });
  it.each(['draft','pending'] as const)('permits preparation but atomically refuses issuing against a %s order',status=>{
   const f=orderApprovalFixture(status);
   const prepared=run(f.state,{type:'platform.invoice.save',payload:{orderId:f.orderId,due:'2026-11-11',amount:100,note:'预备票据'}},f.c);

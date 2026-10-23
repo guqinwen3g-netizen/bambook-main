@@ -17,6 +17,13 @@ function fixture() {
 }
 
 describe('订单实际成本与费用分摊', () => {
+  it('keeps an internal budget out of external revenue while retaining its costs',()=>{
+    const ctx={id:()=>'',now:'2026-10-24T00:00:00Z',actorName:'Finance'},state=createMistState(ctx,'empty') as MistState & Record<string,any>;
+    state.orders.push({id:'internal',code:'INT-1',customer:'Production team',currency:'CNY',amount:500,governance:{contract:{kind:'internal'}}} as any);
+    state.orderCosts={expenses:[{id:'expense',code:'EXP-1',category:'trucking',currency:'CNY',amount:50,shares:[{orderId:'internal',orderCode:'INT-1',basisValue:1,amount:50}],scope:'orders',basis:'manual',vendor:'Carrier'} as any]};
+    const result=orderActualCost(state,'internal','period','2026-10','2026-10-24');
+    expect(result.revenue).toEqual([]);expect(result.revenueCny).toBe(0);expect(result.expenseCny).toBe(50);expect(result.marginEx).toBe(-50);expect(result.rateIn).toBeNull();
+  });
   it('费用转应付票据：按票付款，不重复计成本；已转的费用须先作废票据', () => {
     const f = fixture();
     const supplier = f.state.market.suppliers[0];

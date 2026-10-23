@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,9 @@ import { MemoryMistDatabase, testActor, testAuthority } from './__tests__/suppor
 import * as contract from '../shared/mistWorkspace';
 import { createOrderGovernance } from '../shared/mistOrderGovernance';
 import { internalFabricRemaining } from '../shared/mistInternalFabric';
+
+vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{},orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}})}));
+vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:unknown,id:string)=>({id,status:'active',deletedAt:null}),buildLoadedAuthTokenPayload:async(_db:unknown,user:{id:string})=>({userId:user.id,permissions:['orders:write'],roles:[],departmentIds:[]})}));
 
 let directory: string;
 beforeEach(async () => { directory = await mkdtemp(path.join(tmpdir(), 'mist-fabric-allocation-')); });
@@ -36,6 +39,24 @@ function approvedPlans() {
   state.memberGroups = context.members!.map(member => ({ userId: member.id, name: member.name, groups: member.groups, updatedAt: context.now, updatedBy: 'owner' }));
   return { state, source, targets };
 }
+
+it('rechecks current members inside the approval-center transaction and preserves the pending request on rejection',async()=>{
+  const db=new MemoryMistDatabase(),auth=testAuthority();auth.users.get('owner')!.permissions.push('orders:read','orders:write');auth.users.set('reviewer',{active:true,permissions:['orders:read','orders:write']});
+  const repo=new MistRepository(db,contract,new MistPrivateFiles(directory),auth.authorize,()=>new Date('2026-10-24T08:00:00Z'));
+  const workspace=await repo.create(testActor(),{name:'Internal supply review',seed:'empty'}),f=approvedPlans(),source=f.state.orders.find(o=>o.id===f.source.orderId)!;
+  source.governance=createOrderGovernance({id:()=>'',now:'2026-10-24T08:00:00Z',actorName:'Owner'},source.governance!.contract);db.workspaces.get(workspace.id).state=f.state;
+  const submitted=await repo.execute(testActor(),workspace.id,{requestId:'submit-internal-supply',expectedRevision:0,command:{type:'order.governance.submit',payload:{orderId:source.id}}});
+  const review=(await repo.listReviews(testActor('reviewer'))).find((task:{entityId:string})=>task.entityId===source.id)!;
+  const before=structuredClone(db.workspaces.get(workspace.id));db.accounts.set('owner',{status:'disabled'});
+  await expect(repo.decideReview(testActor('reviewer'),workspace.id,review.id,{requestId:'disabled-supply-owner',expectedRevision:submitted.workspace.revision,decision:'approved',note:'Review supply'})).rejects.toThrow('停用');
+  expect(db.workspaces.get(workspace.id)).toEqual(before);
+  db.accounts.set('owner',{status:'active'});
+  const input={requestId:'approve-internal-supply',expectedRevision:submitted.workspace.revision,decision:'approved' as const,note:'Supply owner and receiver checked'};
+  const approved=await repo.decideReview(testActor('reviewer'),workspace.id,review.id,input);
+  expect(approved.receipt.result.orderId).toBe(source.id);
+  expect(db.workspaces.get(workspace.id).state.orders.find((o:{id:string})=>o.id===source.id).governance.status).toBe('approved');
+  expect((await repo.decideReview(testActor('reviewer'),workspace.id,review.id,input)).replayed).toBe(true);
+});
 
 it('serializes competing allocations, replays once, rolls back receipt failures and checks current access', async () => {
   const db = new MemoryMistDatabase(), auth = testAuthority();
