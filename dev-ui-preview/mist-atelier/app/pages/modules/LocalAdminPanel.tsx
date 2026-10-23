@@ -131,12 +131,12 @@ export function LocalAdminPanel() {
       ]} />
       <Card>
         {!workspace.state ? <FormSection title={uiText("正在读取本地空间")}><Skeleton height={180} /></FormSection> : <>
-          {(section === 'company' || section === 'export') && <FormSection title={uiText(section === 'company' ? '公司抬头与联系方式' : '出口与收款资料')} description={uiText(section === 'company' ? '按实际公司资料填写。未录入的信息保持空白。' : '保存实际登记与银行资料，不会替代报关、付款或专业审核。')}>
+          {(section === 'company' || section === 'export') && <FormSection title={uiText(section === 'company' ? '公司抬头与联系方式' : '出口与收款资料')}>
             <FormGrid>{fields.map(field => <Field key={field.key} label={uiText(field.label)} hint={uiText(field.hint)} full={field.key === 'address' || field.key === 'englishAddress'}>
               <TextInput aria-label={uiText(field.label)} type={field.type ?? 'text'} value={values[field.key]} disabled={blocked} onChange={event => edit(field.key, event.target.value)} />
             </Field>)}</FormGrid>
           </FormSection>}
-          {section === 'workspace' && <FormSection title={uiText("本公司")} description={uiText("这些显示资料只属于本公司，不会修改登录账号或其他公司。")}>
+          {section === 'workspace' && <FormSection title={uiText("本公司")}>
             <FormGrid>
               <Field label={uiText("公司名称")} required><TextInput aria-label={uiText("公司名称")} value={values.workspaceName} disabled={blocked} onChange={event => edit('workspaceName', event.target.value)} /></Field>
               <Field label={uiText("显示姓名")} required><TextInput aria-label={uiText("显示姓名")} value={values.profileName} disabled={blocked} onChange={event => edit('profileName', event.target.value)} /></Field>

@@ -1,3 +1,4 @@
+import { purchaseName } from '../businessNames';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 采购管理：面料 / 成衣业务组下分“采购订单”“委外加工单”两个入口；阶段流水线 + 单据详情轨迹，所有对外动作都登记真实依据。 */
@@ -15,7 +16,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
 
@@ -35,7 +36,7 @@ export function purchaseStage(purchase: FulfillmentPurchase): Stage {
   if (purchase.state === 'draft' || purchase.state === 'rejected') return 'draft';
   if (purchase.state === 'pending') return 'pending';
   if (purchase.state === 'cancelled') return 'done';
-  if (purchase.quantity > 0 && purchase.received >= purchase.quantity) return 'done';
+  if (purchase.quantity > 0 && purchase.received === purchase.quantity) return 'done';
   return purchase.supplierConfirmation || purchase.received > 0 ? 'fulfilling' : 'supplier';
 }
 function purchaseFlags(purchase: FulfillmentPurchase, day: string) {
@@ -90,13 +91,12 @@ export function ProcurementPage() {
     .map(s => { const reason = supplierUnavailableReason(s, day); return { value: s.id, label: reason ? `${s.name} · 原供应商（${reason}）` : s.name }; });
   const purchaseSpec = (p?: FulfillmentPurchase): ModuleEditorSpec => ({
     title: p ? `修订${ENTRY_LABEL[entryOf(p)]}草稿` : `新建${ENTRY_LABEL[entry]}`, submitLabel: p ? '保存草稿' : '保存为草稿',
-    description: '先核对来源与供应商，再确认数量、费用及交付约定。保存草稿不会形成对外承诺；批准后才能对外发出。',
     sections: [
-      { id: 'source', label: '来源与供应商', description: '确认由谁供给、为哪个订单条目履约；材料、成品与加工服务分别记录。', fields: ['source', 'kind', 'supplierId', 'description'] },
-      { id: 'commercial', label: '数量与费用', description: '按本次供给的实际计量单位记录数量与单价，不自动换算单位或币种。', fields: ['quantity', 'unit', 'price', 'currency'] },
-      { id: 'delivery', label: '交付约定', description: '交期、付款条件与主要交付地点将随提交版本冻结，批准后再登记线下发出。', fields: ['due', 'terms', 'destination', 'note'] },
+      { id: 'source', label: '来源与供应商', fields: ['source', 'kind', 'supplierId', 'description'] },
+      { id: 'commercial', label: '数量与费用', fields: ['quantity', 'unit', 'price', 'currency'] },
+      { id: 'delivery', label: '交付约定', fields: ['due', 'terms', 'destination', 'note'] },
     ],
-    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false)), hint: sourceHint }, field('kind', '采购类型', 'select', true, [{ value: 'material', label: '材料' }, { value: 'finished', label: '成品' }, { value: 'processing', label: '加工服务' }]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购内容 / 规格'), field('quantity', '承诺数量', 'number'), field('unit', '计量单位'), field('price', '含税 / 约定单价', 'number'), field('currency', '币种'), field('due', '交期', 'date'), field('terms', '付款条件'), field('destination', '主要交付地点'), field('note', '补充约定', 'textarea', false)],
+    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false)), hint: sourceHint }, field('kind', '采购类型', 'select', true, [{ value: 'material', label: '材料' }, { value: 'finished', label: '成品' }, { value: 'processing', label: '加工服务' }]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), field('unit', '计量单位'), field('price', '含税 / 约定单价', 'number'), field('currency', '币种'), field('due', '交期', 'date'), field('terms', '付款条件'), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
     initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p?.kind || (entry === 'processing' ? 'processing' : 'material'), supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', price: p?.price || 0, currency: p?.currency || sourceOrder?.currency || 'USD', due: p?.due || today(), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
     submit: async values => {
       if (!state) return;
@@ -148,8 +148,8 @@ export function ProcurementPage() {
   const stageCount = (value: StageFilter) => value === 'all' ? searched.length : searched.filter(p => purchaseStage(p) === value).length;
   const lineLabel = (p: FulfillmentPurchase) => state ? fulfillmentSourceLabel(state, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) : '';
   const columns: Column<FulfillmentPurchase>[] = [
-    { key: 'code', header: ENTRY_LABEL[entry], width: 'minmax(200px,2.2fr)', render: p => <div className="mist-col" style={{ gap: 2 }}><span><Mono>{p.code}</Mono> · {p.description}</span><small className="mist-muted">{KIND_LABEL[p.kind]} · {lineLabel(p)}</small></div> },
-    { key: 'supplier', header: '供应商', width: 'minmax(120px,1fr)', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span>{p.supplier}</span><small className="mist-muted">{p.terms || '付款条件未填'}</small></div> },
+    { key: 'code', header: ENTRY_LABEL[entry], width: 'minmax(200px,2.2fr)', render: p => <div className="mist-col" style={{ gap: 2 }}><span><Mono>{p.code}</Mono> · {state ? purchaseName(state, p) : p.description}</span><small className="mist-muted">{KIND_LABEL[p.kind]} · {lineLabel(p)}</small></div> },
+    { key: 'supplier', header: '供应商', width: 'minmax(120px,1fr)', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span>{p.supplier}</span></div> },
     { key: 'due', header: '要求 / 承诺交期', width: '128px', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span className={purchaseFlags(p, day).some(flag => flag.key === 'overdue') ? 'mist-tone-bad' : undefined}>{p.due || '未填'}</span><small className="mist-muted">{uiText(p.supplierConfirmation ? `承诺 ${shortWhen(p.supplierConfirmation.confirmedDue)}` : '供应商未确认')}</small></div> },
     { key: 'received', header: entry === 'processing' ? '累计回交' : '累计交付', width: '136px', align: 'right', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{p.received} / {p.quantity} {uiText(p.unit)}</span>{purchaseFlags(p, day).filter(flag => flag.key === 'variance').map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> },
     { key: 'state', header: '审批 / 阶段', width: '104px', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={p.state === 'approved' ? STAGE_TONE[purchaseStage(p)] : p.state === 'rejected' ? 'bad' : p.state === 'pending' ? 'warn' : 'neutral'}>{status[p.state]}</Pill>{p.state === 'approved' && <small className="mist-muted">{STAGE_LABEL[purchaseStage(p)]}</small>}</div> },
@@ -169,12 +169,12 @@ export function ProcurementPage() {
         onAttach={ids => run({ type: 'fulfillment.procurement.save', payload: { ...selected, fileIds: ids } })}
         onInventory={() => go('inventory', undefined, { section: selected.id })} onSupplier={() => go('suppliers', selected.supplierId)}
         onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }} />
-    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText("单据详情")} description={uiText(loading ? '正在读取采购' : '从列表选择一张单据，查看审批、供应商确认与交付轨迹')} compact />;
+    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText(loading ? '正在读取采购' : '未选择单据')} compact />;
 
   const summary = selected && state ? (() => { const p = selected, stage = purchaseStage(p), flags = purchaseFlags(p, day).filter(flag => flag.key !== 'returned');
     return <PreviewSummary openLabel={`打开${ENTRY_LABEL[entryOf(p)]}`} onOpen={() => full.open(p.id)} data={{
       code: p.code, status: <Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill>,
-      title: p.description, description: `${KIND_LABEL[p.kind]} · ${lineLabel(p)}`,
+      title: purchaseName(state, p), description: `${KIND_LABEL[p.kind]} · ${lineLabel(p)}`,
       facts: [
         { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` },
         { label: '单价', value: `${p.price} ${p.currency}` }, { label: '要求交期', value: p.due || '未填' },
@@ -182,10 +182,10 @@ export function ProcurementPage() {
       ],
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined,
     }} />; })() : null;
-  const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有采购写权限，可以查看单据与轨迹；新建、发出与交付登记由对应业务组经办人操作。")}</Banner></div> : null;
+  const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("")}</Banner></div> : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
-    <PageHeader description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style} · ${sourceLine.name} · 只显示本条目的采购与委外。` : '从准确订单条目形成供应承诺：批准后线下发出、登记供应商确认，再逐次登记真实交付与回交。'))} eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")}
+    <PageHeader description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style}` : undefined))} eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")}
       actions={<>
         {sourceOrder && sourceLine && <Button onClick={() => go('orders/detail', sourceOrder.id, { orderLineId: sourceLine.id, customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
         {route.orderLineId && <Button onClick={() => go('procurement')}>{uiText("查看全部采购")}</Button>}
@@ -242,11 +242,12 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
   const transferReason = writeReason || purchaseTransferBlocker(state, p) || (settled.some(x => x.state === 'pending' || x.state === 'confirmed') ? '有待复核或已确认的结算，不能转移' : billed.length ? '已登记供应商票据，请先由财务作废票据' : false);
   const next: { tone: Tone; title: string; text: string } = p.state === 'cancelled' ? { tone: 'neutral', title: p.transferredTo ? `已转给 ${p.transferredTo.supplier}（${p.transferredTo.purchaseCode}）` : '合同已取消', text: `${p.cancellation?.actor || ''} · ${p.cancellation ? shortWhen(p.cancellation.at) : ''} · ${p.cancellation?.reason || ''}。${p.cancellation?.prepayment === 'refund' ? `已付预付 ${amt(p.cancellation.prepaid)} ${p.currency} 选择让工厂退款${prepay.available > 0 ? `，待退回 ${amt(prepay.available)}，到账后由财务登记。` : '，已全部退回。'}` : p.cancellation?.prepayment === 'transfer' ? `已付预付 ${amt(p.cancellation.prepaid)} ${p.currency} 选择转抵到 ${p.cancellation.targetPurchaseCode}${prepay.available > 0 ? '，待财务办理。' : '，已处理。'}` : '取消时没有已付预付。'}取消后不恢复，需要时重新建单。` }
     : p.state === 'rejected' ? { tone: 'bad', title: '审批退回', text: `${p.decision?.actor || '审批人'}：${p.decision?.note || '未写明原因'}。修订草稿后重新提交。` }
-    : stage === 'draft' ? { tone: 'neutral', title: '草稿 · 未形成对外承诺', text: '核对来源、供应商、数量与交付约定后提交审批。' }
-    : stage === 'pending' ? { tone: 'warn', title: '等待审批', text: `已提交 ${p.submittedAt ? shortWhen(p.submittedAt) : ''}，审批名单 ${p.reviewerIds.length} 人；批准前不能发给供应商。` }
-    : !p.offlineSend ? { tone: 'accent', title: '已批准 · 待线下发出', text: `${p.decision?.actor || '审批人'}已批准。把批准版本发给供应商后，在此登记发出方式与依据。` }
-    : !p.supplierConfirmation ? { tone: 'accent', title: '合同已发出 · 待供应商确认', text: '收到对方盖章确认后登记；确认交期须与批准交期一致，不同需先走商业变更。' }
-    : stage === 'done' ? { tone: 'ok', title: processing ? '已全部回交' : '已全部交付', text: `累计 ${p.received} / ${p.quantity} ${p.unit}。供应商票据与付款由财务在应付待办登记。` }
+    : stage === 'draft' ? { tone: 'neutral', title: '草稿', text: '' }
+    : stage === 'pending' ? { tone: 'warn', title: '等待审批', text: p.submittedAt ? shortWhen(p.submittedAt) : '' }
+    : !p.offlineSend ? { tone: 'accent', title: '已批准 · 待线下发出', text: '' }
+    : !p.supplierConfirmation ? { tone: 'accent', title: '合同已发出 · 待供应商确认', text: '' }
+    : p.received > p.quantity ? { tone: 'warn', title: '数量待核对', text: '' }
+    : stage === 'done' ? { tone: 'ok', title: processing ? '已全部回交' : '已全部交付', text: `${p.received} / ${p.quantity} ${p.unit}` }
     : { tone: 'accent', title: processing ? '加工中 · 分批回交' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
   const track = [
     { label: '提交审批', done: !!p.submittedAt || stage !== 'draft', note: p.submittedAt ? shortWhen(p.submittedAt) : '未提交' },
@@ -257,12 +258,12 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
     { label: processing ? '分批回交' : '分批交付', done: stage === 'done', note: `${p.received} / ${p.quantity} ${p.unit}` },
     { label: '拒收退换', done: rejectedQty > 0 && openRejected <= 0, note: rejectedQty ? `已拒收 ${rejectedQty} ${p.unit}${replaceQty ? ` · 供应商补发 ${replaceQty}` : ''}${noReplaceQty ? ` · 不再补发 ${noReplaceQty}` : ''}${openRejected > 0 ? ` · ${openRejected} 待登记退换` : ''}` : '没有拒收', noteTone: openRejected > 0 ? 'bad' as const : undefined },
     ...(prepay.plans.length || prepay.transferredIn ? [{ label: '合同预付款', done: prepay.paid >= prepay.planned && prepay.available <= 0, note: `计划 ${amt(prepay.planned)} · 已付 ${amt(prepay.paid)}${prepay.transferredIn ? ` · 转入 ${amt(prepay.transferredIn)}` : ''} · 已抵扣 ${amt(prepay.applied)}${prepay.refunded ? ` · 已退款 ${amt(prepay.refunded)}` : ''}${prepay.transferredOut ? ` · 已转出 ${amt(prepay.transferredOut)}` : ''} ${p.currency}${prepay.residualAfterFinal > 0 ? ` · 最终结算后剩余 ${amt(prepay.residualAfterFinal)} 待退款或转抵（财务在结算详情登记）` : prepay.available > 0 ? ` · 待抵扣 ${amt(prepay.available)}` : ''}`, noteTone: prepay.residualAfterFinal > 0 ? 'bad' as const : undefined }] : []),
-    { label: '结算确认', done: finalSt, note: settled.length ? `已确认 ${settledQty} / ${p.quantity} ${p.unit}${pendingSt ? ` · ${pendingSt} 笔待财务复核` : ''}${finalSt ? ' · 已最终结算' : ''}` : '业务员按实际收货在应付待办提交结算' },
-    { label: '财务登记供应商票据与付款', done: billed.length > 0 && invoicedMinor >= purchaseContractMinor(p) && billed.every(r => r.bill.open <= 0), note: billed.length ? `已登记票据 ${amt(invoicedMinor / 100)} / 合同 ${amt(purchaseContractMinor(p) / 100)} ${p.currency} · ${billed.filter(r => r.bill.open > 0).length ? billed.filter(r => r.bill.open > 0).length + ' 张未付清' : '已付清'}` : '财务尚未登记供应商票据' },
+    { label: '结算确认', done: finalSt, note: settled.length ? `已确认 ${settledQty} / ${p.quantity} ${p.unit}${pendingSt ? ` · ${pendingSt} 笔待财务复核` : ''}${finalSt ? ' · 已最终结算' : ''}` : '待提交' },
+    { label: '票据与付款', done: billed.length > 0 && invoicedMinor >= purchaseContractMinor(p) && billed.every(r => r.bill.open <= 0), note: billed.length ? `已登记票据 ${amt(invoicedMinor / 100)} / 合同 ${amt(purchaseContractMinor(p) / 100)} ${p.currency} · ${billed.filter(r => r.bill.open > 0).length ? billed.filter(r => r.bill.open > 0).length + ' 张未付清' : '已付清'}` : '待登记' },
   ];
   return <DetailBody data-purchase-detail={p.id} heading={<div>
       <span className="mist-mono mist-muted">{p.code}</span>
-      <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{p.description}</div>
+      <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{purchaseName(state, p)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill><Pill>{KIND_LABEL[p.kind]}</Pill><Pill>{uiText(p.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>{flags.filter(flag => flag.key !== 'returned').map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
     <Banner tone={next.tone} title={uiText(next.title)} actions={p.transferredTo ? <Button variant="quiet" onClick={() => onOpenPurchase(p.transferredTo!.purchaseId)}>{uiText("查看 ")}{p.transferredTo.purchaseCode}</Button> : undefined}>{next.text}</Banner>
@@ -275,8 +276,8 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       { label: '登记供应商确认', icon: FileSignature, onClick: onConfirm, primary: true, reason: writeReason, hidden: p.state !== 'approved' || !p.offlineSend || !!p.supplierConfirmation },
       { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend || !p.supplierConfirmation ? '请先登记合同线下发出和供应商确认' : false), hidden: p.state !== 'approved' },
       { label: '下载批准单据', icon: Download, onClick: onDownload, hidden: p.state !== 'approved' },
-      { label: '取消合同', icon: Undo2, onClick: onCancel, reason: cancelReason, hidden: p.state !== 'approved' || stage === 'done' },
-      { label: '转给其他供应商', onClick: onTransfer, reason: transferReason, hidden: p.state !== 'approved' || stage === 'done' },
+      { label: '取消合同', icon: Undo2, onClick: onCancel, reason: cancelReason, hidden: p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
+      { label: '转给其他供应商', onClick: onTransfer, reason: transferReason, hidden: p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
       { label: '查看预付去向', onClick: onPayables, hidden: p.state !== 'cancelled' || !(prepay.plans.length || prepay.moves.length || p.cancellation?.prepaid) },
     ]} />
     <Facts items={[
@@ -290,14 +291,14 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       { label: processing ? '累计回交' : '累计交付', value: `${p.received} / ${p.quantity} ${p.unit}${p.received > p.quantity ? ' · 超出待处理' : p.received < p.quantity && p.received > 0 ? ` · 尚差 ${round(p.quantity - p.received)}` : ''}` },
     ]} />
     {p.transferredFrom && <Banner tone="accent" title={ui`由 ${p.transferredFrom.purchaseCode}（${p.transferredFrom.supplier}）转入`} actions={<Button variant="quiet" onClick={() => onOpenPurchase(p.transferredFrom!.purchaseId)}>{uiText("查看原合同")}</Button>}>{p.transferredFrom.reason}</Banner>}
-    {p.note && <p className="mist-sub">{p.note}</p>}
+    {(p.note || p.description !== purchaseName(state, p)) && <RecordDisclosure title="规格与约定">{p.description !== purchaseName(state, p) && <p>{p.description}</p>}{p.note && <p>{p.note}</p>}</RecordDisclosure>}
     <DetailBlock title={uiText("阶段轨迹")}><Checklist items={track} /></DetailBlock>
     <DetailBlock title={uiText(processing ? '回交记录' : '交付记录')}>
       {receipts.length ? <DataTable ariaLabel={ui`${p.code} 交付记录`} rows={receipts} rowKey={receipt => receipt.id} columns={[
         { key: 'date', header: '日期', render: receipt => receipt.date },
         { key: 'qty', header: '实收 / 拒收', align: 'right', render: receipt => `${receipt.quantity} / ${receipt.rejected} ${p.unit}` },
         { key: 'loc', header: '实际地点', hideOnMobile: true, render: receipt => `${receipt.destination === 'warehouse' ? '入库' : processing ? '加工交付' : '直送加工方'} · ${receipt.location}` },
-        { key: 'evidence', header: '依据', hideOnMobile: true, render: receipt => receipt.evidence },
+        { key: 'evidence', header: '依据', hideOnMobile: true, render: receipt => <RecordDisclosure title="查看依据">{receipt.evidence}</RecordDisclosure> },
         { key: 'action', header: '操作', render: receipt => { const reason = receiptRejectionBlocker(state, receipt); return receipt.quantity > 0 && receipt.destination === 'warehouse' && can ? <Button size="sm" variant="quiet" disabled={locked || !!reason} title={reason || undefined} onClick={() => onRejectReceived(receipt)}>{uiText('转为拒收')}</Button> : null; } },
       ]} /> : <span className="mist-note">{uiText("还没有")}{uiText(processing ? '回交' : '交付')}{uiText("记录")}</span>}
     </DetailBlock>
@@ -309,12 +310,11 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
     <div className="mist-row mist-module-actions"><Button onClick={onInventory}>{uiText("查看来源库存")}</Button><Button onClick={onSupplier}>{uiText("供应商档案")}</Button></div>
     <DetailBlock title={uiText("附件")}>
       <RecordFiles key={p.id} ids={p.fileIds} onAttach={can && stage === 'draft' ? onAttach : undefined} />
-      {!p.fileIds.length && stage !== 'draft' && <span className="mist-note">{uiText("提交后附件随版本冻结")}</span>}
     </DetailBlock>
-    {!!p.revisionHistory?.length && <DetailBlock title={uiText("承诺与审批版本")}>
+    {!!p.revisionHistory?.length && <RecordDisclosure title="审批版本">
       <Timeline events={p.revisionHistory.slice().reverse().map(revision => ({ who: revision.decision?.actor || p.createdBy, when: new Date(revision.decision?.at || revision.submittedAt).toLocaleString(), text: <><div>{uiText("第 ")}{revision.revision}{uiText(" 版 · ")}{uiText(revision.decision ? status[revision.decision.decision] : '待审批')}</div><div>{revision.snapshot.supplier} · {revision.snapshot.description} · {revision.snapshot.quantity} {uiText(revision.snapshot.unit)} × {revision.snapshot.price} {revision.snapshot.currency}</div><div>{revision.snapshot.terms} · {revision.snapshot.destination} · {revision.snapshot.due}</div>{revision.decision && <div>{revision.decision.note}</div>}<RecordFiles ids={revision.snapshot.fileIds} /></> }))} />
-    </DetailBlock>}
-    <DetailBlock title={uiText("处理记录")}><Events entity="procurement" id={p.id} /></DetailBlock>
+    </RecordDisclosure>}
+    <RecordDisclosure title="处理记录"><Events entity="procurement" id={p.id} /></RecordDisclosure>
   </DetailBody>;
 }
 

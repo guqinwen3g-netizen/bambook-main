@@ -135,10 +135,10 @@ export function DevDetailPage(){
       setFailure(feedback);
     }catch(cause){if(live.current&&scope.current===originalScope)setFailure(String(cause));}finally{busyRef.current=false;if(live.current)setBusy(false);}
   };
-  const toProduct=async(input:{sku:string;supplierCode:string})=>{
+  const toProduct=async(input:{sku:string;name:string;supplierCode:string})=>{
     if(!dev||!version||busyRef.current)return;busyRef.current=true;setBusy(true);setFailure('');
     try{const supplier=state?.market.suppliers.find(item=>item.id===version.factoryId);
-      await run({type:'market.product.fromVersion',payload:{devId:dev.id,versionId:version.id,sku:input.sku,...(supplier?{supplierId:supplier.id}:{}),...(input.supplierCode?{supplierCode:input.supplierCode}:{})}});
+      await run({type:'market.product.fromVersion',payload:{devId:dev.id,versionId:version.id,sku:input.sku,name:input.name,...(supplier?{supplierId:supplier.id}:{}),...(input.supplierCode?{supplierCode:input.supplierCode}:{})}});
       if(live.current)finish(`已从 ${version.label} 建立产品档案 ${input.sku}`);}
     catch(cause){if(live.current)setFailure(cause instanceof Error?cause.message:'档案尚未建立，原内容已保留');}finally{busyRef.current=false;if(live.current)setBusy(false);}
   };

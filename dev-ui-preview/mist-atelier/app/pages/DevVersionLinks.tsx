@@ -45,16 +45,17 @@ export function productConversionBlocker(version: MistVersion | undefined): stri
 }
 
 export function ToProductDialog({ open, version, busy, failure, onClose, onSubmit }: {
-  open: boolean; version?: MistVersion; busy: boolean; failure: string; onClose: () => void; onSubmit: (input: { sku: string; supplierCode: string }) => void;
+  open: boolean; version?: MistVersion; busy: boolean; failure: string; onClose: () => void; onSubmit: (input: { sku: string; name: string; supplierCode: string }) => void;
 }) {
-  const [form, setForm] = React.useState({ sku: '', supplierCode: '' });
-  React.useEffect(() => { if (open) setForm({ sku: '', supplierCode: '' }); }, [open, version?.id]);
-  return <Dialog open={open} onClose={() => !busy && onClose()} icon={Archive} title={ui`将 ${version?.label || ''} 转为产品档案`} description={uiText("按本版实物与 QC 结论建立数字档案；不要求需求方确认。建档后档案号回链到本版。")} footer={<>
+  const [form, setForm] = React.useState({ sku: '', name: '', supplierCode: '' });
+  React.useEffect(() => { if (open) setForm({ sku: '', name: '', supplierCode: '' }); }, [open, version?.id]);
+  return <Dialog open={open} onClose={() => !busy && onClose()} icon={Archive} title={ui`将 ${version?.label || ''} 转为产品档案`} footer={<>
     <Button variant="quiet" disabled={busy} onClick={onClose}>{uiText("取消")}</Button>
-    <Button variant="primary" loading={busy} disabled={!form.sku.trim()} onClick={() => onSubmit({ sku: form.sku.trim(), supplierCode: form.supplierCode.trim() })}>{uiText("建立产品档案")}</Button></>}>
+    <Button variant="primary" loading={busy} disabled={!form.sku.trim() || !form.name.trim()} onClick={() => onSubmit({ sku: form.sku.trim(), name: form.name.trim(), supplierCode: form.supplierCode.trim() })}>{uiText("建立产品档案")}</Button></>}>
     {failure && <Banner tone="bad" title={uiText("档案尚未建立")}>{failure}</Banner>}
     {version?.qc?.result === 'conditional' && <Banner tone="warn" title={uiText("需关注 · QC 有保留通过")}>{version.qc.opinion || '请查看 QC 报告'}</Banner>}
     <FormGrid>
+      <Field label={uiText("产品名称")} required><TextInput value={form.name} onChange={event => setForm(previous => ({ ...previous, name: event.target.value }))} /></Field>
       <Field label={uiText("公司产品编码")} required><TextInput value={form.sku} onChange={event => setForm(previous => ({ ...previous, sku: event.target.value }))} placeholder={uiText("例如：GA-2711")} /></Field>
       <Field label={uiText("供应商产品编码")} hint={ui`供应商按本版工厂：${version?.factory || '—'}`}><TextInput value={form.supplierCode} onChange={event => setForm(previous => ({ ...previous, supplierCode: event.target.value }))} /></Field>
     </FormGrid>

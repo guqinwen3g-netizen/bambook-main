@@ -196,7 +196,7 @@ export function SamplesPage() {
     : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText("样品详情")} description={uiText(loading ? '正在读取样品' : '从列表选择一条样品记录')} compact />;
 
   return <MistPage>
-    <PageHeader description={uiText(sourceHint || (sourceShipment ? `${sourceShipment.code} · 只处理本票船样，绑定实际工厂分支与送审实物。` : '全公司样品统一台账。面料按档案看各形态余额，成衣逐件管理。'))} eyebrow={uiText("订单履约 · 实体样品")} title={uiText("样品仓库")}
+    <PageHeader description={sourceHint || sourceShipment?.code} eyebrow={uiText("订单履约 · 实体样品")} title={uiText("样品仓库")}
       actions={<>
         {sourceShipment && <Button onClick={() => go('shipments', sourceShipment.id, shipmentReturnTarget(state, sourceShipment))}>{uiText("返回本票出运")}</Button>}
         {hasShipmentContext && <Button onClick={() => go('samples')}>{uiText("查看全部样品")}</Button>}

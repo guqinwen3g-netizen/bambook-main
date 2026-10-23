@@ -63,7 +63,7 @@ it('explains blocked movements and records a return against the original issue i
   expect(detail.textContent).toContain('已全部出库 · 70 个');
   expect((getByRole(detail,'button',{name:'登记出库'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('登记出库：当前没有可用数量');
-  expect(detail.textContent).toContain('预留给订单条目、盘点差异与依据 QC 结论的质量冻结：服务端尚未提供');
+  expect(detail.textContent).not.toContain('服务端');
   expect(getByRole(detail,'table',{name:'出库去向'}).textContent).toContain('70 个');
   await click(getByRole(detail,'button',{name:'按原出库退回'}));
   const dialog=getByRole(document.body,'dialog');

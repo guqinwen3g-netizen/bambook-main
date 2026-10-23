@@ -116,7 +116,7 @@ export function DocumentCenterPage() {
   const profile = state?.settings.companyProfile;
 
   return <MistPage width="wide">
-    <PageHeader description={uiText(invalidContext ? '指定出运不存在，请返回货运管理重新进入。' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer} · 仅显示本票单据。` : '按准确出运与合同保留单据版本、正式文件与签发记录；新版本不覆盖旧版本，CI 签发后回到财务应收。')} eyebrow={uiText("订单履约 · 单证")} title={uiText("单据中心")}
+    <PageHeader description={uiText(invalidContext ? '出运记录不存在' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer}` : undefined)} eyebrow={uiText("订单履约 · 单证")} title={uiText("单据中心")}
       actions={<>
         {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>{uiText("返回出运")}</Button>}
         {hasContext && <Button onClick={() => go('document-center')}>{uiText("查看全部单据")}</Button>}

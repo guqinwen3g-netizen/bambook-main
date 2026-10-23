@@ -21,7 +21,7 @@ export function OrderBreakdownEditor({ type, value, seed, unit, disabled, label 
     <Button size="sm" icon={Plus} disabled={disabled} onClick={() => onChange(structuredClone(seed || blankBreakdown(type)))}>{uiText(type === 'garment' ? '按颜色 × 尺码填写数量' : '填写面料规格与分色数量')}</Button>
   </div>;
   const total = breakdownTotal(value);
-  const footer = <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><b className="mist-num" data-breakdown-total>{uiText("合计 ")}{formatOrderQuantity(total)} {uiText(unit)}</b><span className="mist-note">{uiText("条目数量 = 各格之和，以服务端核算为准")}</span><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={disabled} onClick={() => onChange(undefined)}>{uiText("清除分色分码")}</Button></div>;
+  const footer = <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><b className="mist-num" data-breakdown-total>{uiText("合计 ")}{formatOrderQuantity(total)} {uiText(unit)}</b><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={disabled} onClick={() => onChange(undefined)}>{uiText("清除分色分码")}</Button></div>;
   if (value.kind === 'garment') {
     const set = (next: GarmentBreakdown) => onChange(next);
     return <div className="mist-col" style={{ gap: 8 }} data-breakdown="garment">
