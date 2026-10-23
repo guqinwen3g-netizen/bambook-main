@@ -21,6 +21,13 @@
 .mist-ws b { font-weight: var(--mist-fw-medium); font-size: 13.5px; display: block; line-height: 1.2; }
 .mist-ws small { color: var(--mist-side-ink-3); font-size: var(--mist-text-2xs); }
 .mist-ws > .mist-icon { margin-left: auto; color: var(--mist-side-ink-3); }
+.mist-ws[aria-expanded="true"] > .mist-icon { transform: rotate(180deg); }
+.mist-organization { margin: 0 4px 10px; padding: 4px 10px 10px; font-size: var(--mist-text-xs); }
+.mist-organization[hidden] { display: none; }
+.mist-organization dl { margin: 0; display: grid; gap: 10px; }
+.mist-organization dt { color: var(--mist-side-ink-3); font-size: var(--mist-text-2xs); margin-bottom: 2px; }
+.mist-organization dd { margin: 0; overflow-wrap: anywhere; }
+.mist-organization button { margin-top: 10px; text-align: left; color: var(--mist-side-ink); }
 .mist-side-search { margin: 4px 4px 12px; display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 10px; border-radius: var(--mist-r-md); color: var(--mist-side-ink-2); font-size: var(--mist-text-sm); }
 .mist-side-search:hover { background: var(--mist-side-hover); }
 .mist-side-search .mist-kbd { margin-left: auto; background: var(--mist-frost); color: inherit; }
@@ -46,6 +53,7 @@
 .mist-side-ai p { margin-top: 6px; font-size: var(--mist-text-xs); color: var(--mist-side-ink-2); line-height: 1.45; }
 .mist-me { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 14px; text-align: left; }
 .mist-me:hover { background: var(--mist-side-hover); }
+.mist-me[aria-current="page"] { background: var(--mist-side-hover); }
 .mist-me .mist-avatar { background: var(--mist-side-badge); color: var(--mist-side-badge-ink); }
 .mist-me b { display: block; font-weight: var(--mist-fw-medium); font-size: var(--mist-text-sm); line-height: 1.2; }
 .mist-me small { font-size: var(--mist-text-2xs); color: var(--mist-side-ink-3); }
@@ -67,6 +75,7 @@
 .mist-side .mist-brand-mark { transition: transform var(--mist-dur-slow) var(--mist-ease); transform-origin: 50% 50%; will-change: transform; }
 .mist-app[data-collapsed] .mist-side .mist-brand-mark { transform: rotate(-60deg); }
 .mist-app[data-collapsed] .mist-ws { padding-left: 5px; padding-right: 0; }
+.mist-app[data-collapsed] .mist-organization { display: none; }
 .mist-app[data-collapsed] .mist-nav-item { padding-left: 13px; padding-right: 0; }
 .mist-app[data-collapsed] .mist-side-search { padding-left: 11px; padding-right: 0; }
 .mist-app[data-collapsed] .mist-nav-group[data-closed] .mist-nav-items { grid-template-rows: 1fr; }
@@ -466,6 +475,7 @@
   .mist-app :is(.mist-brand-word, .mist-ws > div, .mist-ws > .mist-icon, .mist-side-search > span, .mist-side-search .mist-kbd, .mist-nav-head, .mist-nav-item > span, .mist-side-ai, .mist-me > div, .mist-me > .mist-icon, .mist-side-toggle) { display: none; }
   .mist-app :is(.mist-nav-item, .mist-side-search) { justify-content: center; padding: 0; }
   .mist-app .mist-ws { justify-content: center; padding: 9px 0; }
+  .mist-app .mist-organization { display: none; }
   .mist-app .mist-brand { justify-content: center; padding: 4px 0; }
   .mist-app .mist-nav-group[data-closed] .mist-nav-items { grid-template-rows: 1fr; }
 }

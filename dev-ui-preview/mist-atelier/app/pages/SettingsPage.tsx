@@ -1,43 +1,39 @@
-import { LanguageSetting } from '../../../../components/mist/LanguageSetting';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** T10 设置：保留 Mist 分区导航、设置卡与吸底操作栏。 */
 import React from 'react';
-import { Bell, Building2, Landmark, Laptop, Moon, Palette, Shield, Sun, User, RefreshCw, LayoutDashboard, History } from 'lucide-react';
-import { Banner, Button, Card, DataTable, EmptyState, ChoiceCards, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
+import { Bell, Building2, Landmark, RefreshCw, LayoutDashboard, History } from 'lucide-react';
+import { Banner, Button, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
 import { WorkspaceMembers } from './WorkspaceMembers';
-import { ChangePasswordRow, LogoutAllRow } from './ChangePassword';
 import { CompanyProfileSection } from './CompanyProfileSection';
-import { AvatarSettingRow } from './AvatarStudio';
-import { onThemePreference, readThemePreference, writeThemePreference, type ThemePreference } from '../runtime/themePreference';
-import { readDevice, useDevice, writeDevice, type DeviceValues } from '../runtime/devicePreferences';
 
-type TextKey = 'workspaceName' | 'profileName' | 'profileEmail';
+type TextKey = 'workspaceName';
 type TextValues = Pick<MistSettings, TextKey>;
 type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyProfile?: Partial<MistCompanyProfile> };
 export function SettingsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), toast = useToast(), nav = useNav();
   const { state, loading, saving, pending } = workspace;
-  const [themePreference, setThemePreference] = React.useState<ThemePreference>(readThemePreference);
-  const density = useDevice('density'), reducedMotion = useDevice('reducedMotion');
-  React.useEffect(() => onThemePreference(setThemePreference), []);
-  const [sec, setSec] = React.useState(() => ['overview', 'activity', 'appearance', 'notify', 'workspace', 'company', 'account', 'security'].includes(String(nav?.route?.section)) ? String(nav!.route.section) : 'overview'), [error, setError] = React.useState('');
+  const [sec, setSec] = React.useState(() => ['overview', 'activity', 'notify', 'workspace', 'company'].includes(String(nav?.route?.section)) ? String(nav!.route.section) : 'overview'), [error, setError] = React.useState('');
+  React.useEffect(() => {
+    const section = nav?.route?.section;
+    if (section && ['appearance', 'account', 'security'].includes(section)) nav?.go('account', undefined, { section: section === 'account' ? 'profile' : section });
+  }, [nav?.route?.section]);
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
   const [draft, setDraft] = React.useState<{ scope: string; values: TextValues } | null>(null);
   const dirty = React.useRef<Partial<Record<TextKey, boolean>>>({}), working = React.useRef(false);
   const latest = React.useRef(draft); latest.current = draft;
   React.useEffect(() => {
     dirty.current = {}; working.current = false; setError('');
-    setDraft(state ? { scope, values: { workspaceName: state.settings.workspaceName, profileName: state.settings.profileName, profileEmail: state.settings.profileEmail } } : null);
+    setDraft(state ? { scope, values: { workspaceName: state.settings.workspaceName } } : null);
   }, [scope]);
   React.useEffect(() => {
     if (!state) return;
     setDraft(previous => {
-      const values = { workspaceName: state.settings.workspaceName, profileName: state.settings.profileName, profileEmail: state.settings.profileEmail };
+      const values = { workspaceName: state.settings.workspaceName };
       if (previous?.scope === scope) for (const key of Object.keys(dirty.current) as TextKey[]) if (dirty.current[key]) values[key] = previous.values[key];
       return { scope, values };
     });
@@ -50,12 +46,11 @@ export function SettingsPage() {
   const settingsLocked = busy || member;
   const edit = (key: TextKey, value: string) => {
     if (!values) return;
-    dirty.current[key] = true; setDraft({ scope, values: { workspaceName: values.workspaceName, profileName: values.profileName, profileEmail: values.profileEmail, [key]: value } });
+    dirty.current[key] = true; setDraft({ scope, values: { ...values, [key]: value } });
   };
   const save = async (patch: SettingsPatch, success?: string) => {
     if (!state || busy || working.current) return false;
     if (patch.workspaceName !== undefined && (!patch.workspaceName.trim() || patch.workspaceName.trim().length > 120)) { setError('公司显示名称须为1至120字'); return false; }
-    if (patch.profileEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(patch.profileEmail)) { setError('请输入有效的显示邮箱'); return false; }
     working.current = true; const current = scope; setError('');
     try {
       await workspace.run({ type: 'settings.update', payload: patch });
@@ -85,29 +80,20 @@ export function SettingsPage() {
       <div className="mist-wizard">
         <VerticalSteps mode="page" current={sec} onSelect={setSec} steps={[
           { id: 'overview', label: '管理总览', icon: LayoutDashboard }, ...(!member ? [{ id: 'activity', label: '设置记录', icon: History }] : []),
-          { id: 'appearance', label: '外观与语言', icon: Palette }, { id: 'notify', label: '通知', icon: Bell },
-          { id: 'workspace', label: '公司成员', icon: Building2 }, { id: 'company', label: '公司资料', icon: Landmark }, { id: 'account', label: '账号', icon: User }, { id: 'security', label: '安全', icon: Shield }]} />
+          { id: 'notify', label: '通知', icon: Bell },
+          { id: 'workspace', label: '公司成员', icon: Building2 }, { id: 'company', label: '公司资料', icon: Landmark }]} />
         <Card>
           {!settings || !values ? <FormSection title={uiText("正在读取设置")}><Skeleton height={120} /></FormSection> : <>
-          {member && sec !== 'workspace' && sec !== 'security' && sec !== 'company' && sec !== 'appearance' && <Banner tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看，不能修改。")}</Banner>}
+          {member && sec !== 'workspace' && sec !== 'company' && <Banner tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看，不能修改。")}</Banner>}
           {sec === 'overview' && <FormSection title={uiText("公司管理总览")}>
             <SettingRow title={uiText("公司资料与单据抬头")} control={<Button onClick={()=>setSec('company')}>{uiText("维护公司资料")}</Button>}/>
             <SettingRow title={uiText("成员与业务范围")} control={<Button onClick={()=>setSec('workspace')}>{uiText("管理公司成员")}</Button>}/>
             {(session.hasPermission?.('users:admin') || session.hasRole?.('owner','admin')) && <SettingRow title={uiText("人员账号与岗位权限")} control={<Button onClick={()=>nav?.go('admin-panel')}>{uiText("进入公司后台")}</Button>}/>}
             {(session.hasPermission?.('hr:read') || session.hasPermission?.('hr:write')) && <SettingRow title={uiText("部门、小组与员工档案")} control={<Button onClick={()=>nav?.go('hr')}>{uiText("管理组织架构")}</Button>}/>}
             <SettingRow title={uiText("业务默认项")} control={<Button onClick={()=>setSec('workspace')}>{uiText("查看业务设置")}</Button>}/>
-            <SettingRow title={uiText("当前账号安全")} control={<Button onClick={()=>setSec('security')}>{uiText("查看账号安全")}</Button>}/>
           </FormSection>}
           {sec === 'activity' && !member && <FormSection title={uiText("公司设置变更记录")}>
             <DataTable ariaLabel={uiText("公司设置变更记录")} rows={state.events.filter(item=>item.entityType==='settings').slice(0,100)} rowKey={item=>item.id} columns={[{key:'time',header:'时间',render:item=>new Date(item.at).toLocaleString(interfaceLocale())},{key:'actor',header:'操作人',render:item=>item.actor},{key:'text',header:'变更内容',render:item=>item.text}]} empty={<EmptyState title={uiText("暂无设置变更记录")} description={uiText("之后保存的公司设置将记录在这里。")} compact/>}/>
-          </FormSection>}
-          {sec === 'appearance' && <FormSection title={uiText("外观与语言")}>
-            <LanguageSetting />
-            <ChoiceCards<ThemePreference> ariaLabel={uiText("主题")} value={themePreference} onChange={value => { setThemePreference(value); writeThemePreference(value); }} options={[{ value: 'light', title: '浅色', icon: Sun }, { value: 'dark', title: '深色', icon: Moon }, { value: 'system', title: '跟随系统', icon: Laptop }]} />
-            <div style={{ marginTop: 18 }}>
-              <SettingRow title={uiText("列表密度")} control={<Select aria-label={uiText("列表密度")} value={density} onChange={event => writeDevice('density', event.target.value as DeviceValues['density'])} options={[{ value: 'compact', label: '紧凑' }, { value: 'default', label: '标准' }, { value: 'comfy', label: '宽松' }]} />} />
-              <SettingRow title={uiText("减少动效")} control={<Switch ariaLabel={uiText("减少动效")} checked={reducedMotion} onChange={value => writeDevice('reducedMotion', value)} />} />
-            </div>
           </FormSection>}
           {sec === 'notify' && <FormSection title={uiText("通知")}>
             <SettingRow title={uiText("QC 报告回传")} control={<Switch ariaLabel={uiText("QC 报告回传")} checked={settings.notifications.qc} disabled={settingsLocked} onChange={value => notify('qc', value)} />} />
@@ -117,20 +103,13 @@ export function SettingsPage() {
           </FormSection>}
           {sec === 'workspace' && <FormSection title={uiText("公司基本设置")}>
             <FormGrid><Field label={uiText("名称")}><TextInput aria-label={uiText("公司显示名称")} value={values.workspaceName} disabled={settingsLocked} onChange={event => edit('workspaceName', event.target.value)} onBlur={() => saveField('workspaceName')} /></Field><Field label={uiText("默认币种")} hint={uiText("用于新建资料；客户与来源单据的币种优先")}><Select aria-label={uiText("默认币种")} disabled={settingsLocked} value={settings.companyProfile?.defaultCurrency||'USD'} options={[...new Set(['USD','EUR','CNY','GBP','HKD',settings.companyProfile?.defaultCurrency||'USD'])]} onChange={event=>saveCurrency(event.target.value)} /></Field>
-              <Field label={uiText("时区")} hint={uiText("当前设备时区，只读")}><Select disabled options={[Intl.DateTimeFormat().resolvedOptions().timeZone]} /></Field><Field label={uiText("单号前缀")} hint={uiText("由业务命令生成")}><TextInput value="自动生成" disabled className="mist-mono" /></Field></FormGrid>
+            </FormGrid>
           </FormSection>}
           {sec === 'workspace' && <WorkspaceMembers busy={busy} />}
           {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
           <div hidden={sec !== 'company'}><CompanyProfileSection member={member} /></div>
-          {sec === 'account' && <FormSection title={uiText("账号")}>{!session.localMode && <AvatarSettingRow />}<FormGrid><Field label={uiText("姓名")}><TextInput aria-label={uiText("显示姓名")} value={values.profileName} disabled={settingsLocked} onChange={event => edit('profileName', event.target.value)} onBlur={() => saveField('profileName')} /></Field><Field label={uiText("邮箱")}><TextInput aria-label={uiText("显示邮箱")} type="email" value={values.profileEmail} disabled={settingsLocked} onChange={event => edit('profileEmail', event.target.value)} onBlur={() => saveField('profileEmail')} /></Field>
-</FormGrid></FormSection>}
-          {sec === 'security' && <FormSection title={uiText("安全")}>
-            {!session.localMode && <><ChangePasswordRow /><LogoutAllRow /></>}
-            {session.localMode && <>
-            <SettingRow title={uiText("退出所有设备")} control={<Button size="sm" disabled>{uiText("不适用")}</Button>} /></>}
-          </FormSection>}
           </>}
-          {!['company','overview','activity','appearance'].includes(sec) && <div className="mist-sticky-foot">{saving && <span className="mist-note">{uiText('正在保存…')}</span>}<span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></div>}
+          {!['company','overview','activity'].includes(sec) && <div className="mist-sticky-foot">{saving && <span className="mist-note">{uiText('正在保存…')}</span>}<span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></div>}
         </Card>
       </div>
     </MistPage>

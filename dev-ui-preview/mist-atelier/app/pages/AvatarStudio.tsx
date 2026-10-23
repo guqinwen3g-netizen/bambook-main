@@ -309,7 +309,7 @@ export function AvatarSettingRow() {
   if (!user) return null;
   return <div className="mist-avatar-setting">
     <Avatar name={user.displayName || user.email} src={user.avatarUrl} size="xl" />
-    <div><b>{uiText("头像")}</b><p className="mist-note">{uiText(user.avatarUrl ? '已设置自定义头像' : '当前显示姓名首字')}</p></div>
+    <b>{uiText('头像')}</b>
     <span className="mist-spacer" />
     <Button size="sm" onClick={() => setOpen(true)}>{uiText("编辑头像")}</Button>
     <AvatarStudio open={open} onClose={() => setOpen(false)} />

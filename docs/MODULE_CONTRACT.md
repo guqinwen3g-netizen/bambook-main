@@ -281,6 +281,8 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 
 ### L8 前端注册 + UI
 
+**当前 Mist 运行入口（2026-10-23）**：`dev-ui-preview/mist-atelier/app/routeAccess.ts` 将页面及历史别名归到同一读取权限；模块导航继续使用 `moduleRegistry` / `modulePermissions`。无读权限不展示入口、直接链接不挂载页面；只读权限不授权写入。个人账号与设备偏好独立于公司管理，`company-settings`、`workspace-settings`、`settings`、`system-settings` 都要求 `settings:system:read`。QC 读取为 `qc:read`，办理为 `qc:fabric_chain:write` / `qc:garment_chain:write`，并保留任务归属与业务状态门槛。服务器通过 `mist/access.ts` 投影可读数据、通过 `mist/repository.ts` 校验每笔命令。业务单据所需公司抬头等基础资料继续作为获授权业务的输入，不等于开放公司配置页面。
+
 **目标**：前端能看到模块、能跨模块跳转。
 
 | 必做项 | 文件 | 验收 |

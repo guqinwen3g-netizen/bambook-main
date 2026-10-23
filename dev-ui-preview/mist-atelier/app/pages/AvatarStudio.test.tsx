@@ -24,7 +24,7 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); do
 it('generates a style avatar and saves its preset identity', async () => {
   update.mockResolvedValueOnce({});
   await act(async () => root.render(<ToastProvider><AvatarSettingRow /></ToastProvider>));
-  expect(document.body.textContent).toContain('当前显示姓名首字');
+  expect(button('编辑头像')).toBeDefined();expect(document.body.textContent).not.toContain('当前显示姓名首字');
   await act(async () => button('编辑头像')!.click());
   expect(document.body.textContent).toContain('找到，属于你的样子');
   expect(button('恢复姓名首字')).toBeUndefined();
