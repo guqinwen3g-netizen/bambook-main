@@ -50,7 +50,7 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const o = state.orders.find(x => x.id === orderId); if (!o || o.governance?.status === 'approved') return;
     // SO-G-2026-009 演示信用证付款（即期 L/C，不收定金），其余按 T/T 定金 + 见提单副本付余款。
     const lc = o.code === 'SO-G-2026-009';
-    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认.pdf`)], internalPurpose: '', receiver: '', paymentMethod: lc ? 'LC' : 'TT', depositPercent: lc ? 0 : depositPercent, paymentNote: lc ? '100% 即期信用证（L/C at sight），提单日后 21 天内交单' : `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
+    run('order draft ' + o.code, { type: 'order.governance.saveDraft', payload: { orderId, input: { kind: 'external', poNumber: po, confirmationFileIds: [demoFile('customer-po', orderId, `${o.code} 客户PO确认.pdf`)], internalPurpose: '', receiver: '', paymentMethod: lc ? 'LC' : 'TT', depositPercent: lc ? 0 : depositPercent, preShipmentPercent: lc ? 0 : depositPercent, paymentNote: lc ? '100% 即期信用证（L/C at sight），提单日后 21 天内交单' : `${depositPercent}% 定金，余款见提单副本`, incoterm: 'FOB', deliveryPlace: '上海' } } }, sales);
     run('order submit ' + o.code, { type: 'order.governance.submit', payload: { orderId } }, sales);
     run('order approve ' + o.code, { type: 'order.governance.decide', payload: { id: orderId, decision: 'approved', note: '价格、交期与付款条件已核对' } }, reviewer);
   };

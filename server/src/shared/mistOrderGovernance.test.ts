@@ -98,3 +98,15 @@ it('allows preparation of a procurement draft but blocks commitment and producti
  state=applyMistCommand(state,{type:'fulfillment.procurement.submit',payload:{id:purchaseId}},context).state;
  expect(state.fulfillment.purchases[0].state).toBe('pending');expect(state.receipts).toHaveLength(0);
 });
+
+it('requires approval before a looser pre-shipment payment condition becomes effective',()=>{
+ const f=fixture();f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,preShipmentPercent:100}}});
+ f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'按合同收齐尾款'}},{...f.c,actorId:'leader'});
+ f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,preShipmentPercent:30},reason:'客户申请延后尾款'}});
+ expect(assertOrderApproved(f.state,'order').governance!.contract.preShipmentPercent).toBe(100);
+ f.run({type:'order.governance.submit',payload:{orderId:'order'}});
+ expect(getOrderGovernanceReviews(f.state).at(-1)?.details).toContainEqual({label:'出运前累计收款',value:'30%'});
+ f.run({type:'order.governance.decide',payload:{id:'order',decision:'rejected',note:'维持原合同'}},{...f.c,actorId:'leader'});
+ expect(assertOrderApproved(f.state,'order').governance!.contract.preShipmentPercent).toBe(100);
+});
+it.each([-1,101,30.001,NaN])('rejects an invalid pre-shipment percentage %s',preShipmentPercent=>{const f=fixture();expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,preShipmentPercent}}})).toThrow();});

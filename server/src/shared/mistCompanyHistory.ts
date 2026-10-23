@@ -17,7 +17,7 @@ export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext
  const orderId=run({type:'market.quotation.convert',payload:{id:quotationId,type:family,due:date(25),ownerId:contexts.sales.actorId!}},'sales',3).orderId!;
  const order=state.orders.find(o=>o.id===orderId)!,line=state.orderLines.find(l=>l.orderId===orderId)!;
  const po=proof('customer-po',orderId,order.code+' 客户采购确认.pdf',3);
- run({type:'order.governance.saveDraft',payload:{orderId,input:{kind:'external',poNumber:`CP-${year}${month}-${family==='fabric'?'F':'G'}`,confirmationFileIds:[po],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,paymentNote:'30% 定金，70% 见提单副本',incoterm:'FOB',deliveryPlace:'上海'}}},'sales',3);
+ run({type:'order.governance.saveDraft',payload:{orderId,input:{kind:'external',poNumber:`CP-${year}${month}-${family==='fabric'?'F':'G'}`,confirmationFileIds:[po],internalPurpose:'',receiver:'',paymentMethod:'TT',depositPercent:30,preShipmentPercent:30,paymentNote:'30% 定金，70% 见提单副本',incoterm:'FOB',deliveryPlace:'上海'}}},'sales',3);
  run({type:'order.governance.submit',payload:{orderId}},'sales',3);
  run({type:'order.governance.decide',payload:{id:orderId,decision:'approved',note:'季度补单商务条款核对通过'}},'reviewer',4);
  const purchaseId=run({type:'fulfillment.procurement.save',payload:{orderId,lineId:line.id,kind:'finished',supplierId:supplier.id,supplier:supplier.name,description:product.name+' · 含材料及加工',quantity:qty,unit,price:Number((Number(product.cost)*7).toFixed(2)),currency:'CNY',due:date(18),terms:'验收后月结，价税合计',destination:supplier.name,note:'本批沿用确认样',fileIds:[]}},'sales',4).id!;

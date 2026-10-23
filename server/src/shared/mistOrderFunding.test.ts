@@ -1,3 +1,4 @@
+import {assertOrderShipmentPaymentCovered,orderShipmentPaymentCoverage} from './mistOrderFunding';
 import {describe,it,expect} from 'vitest';
 import {createMistState,type MistContext} from './mistWorkspace';
 import {applyOrderFundingCommand,assertOrderDepositCovered,assertOrderFundingIntegrity,orderDepositCoverage,orderFundingCoveredAmount,orderFundingCommandPermission} from './mistOrderFunding';
@@ -12,4 +13,34 @@ describe('order deposit funding',()=>{
  it('does not declare an unspecified T/T percentage covered and supports precise percentage cents',()=>{const f=setup();(f.state.orders[0] as any).governance.contract.depositPercent=null;expect(orderDepositCoverage(f.state,'o').status).toBe('unconfigured');expect(()=>assertOrderDepositCovered(f.state,'o')).toThrow('明确');(f.state.orders[0] as any).governance.contract.depositPercent=30.01;expect(orderDepositCoverage(f.state,'o').required).toBe(30.01);f.assign(30.01);expect(assertOrderDepositCovered(f.state,'o').status).toBe('covered');});
  it('retains the released assignment history and requires a real actor and finance permission',()=>{const f=setup(),id=f.assign(30).id!;applyOrderFundingCommand(f.state,{type:'funding.release',payload:{id,note:'按客户确认重新归属'}},f.context);expect(f.state.orderFunding!.assignments[0]).toMatchObject({state:'released',amount:30});expect(orderFundingCoveredAmount(f.state,'o')).toBe(0);expect(orderFundingCommandPermission({type:'funding.release',payload:{id,note:'依据'}})).toBe('invoices:reconcile');expect(()=>applyOrderFundingCommand(f.state,{type:'funding.assign',payload:{receiptId:'r',customerId:'c',orderId:'o',amount:1,note:'依据'}},{...f.context,actorId:undefined})).toThrow('真实操作账号');});
  it('names the receipt amount and resulting total when a single attribution exceeds the receipt',()=>{const f=setup();expect(()=>f.assign(60)).toThrow('此到账金额 50.00 USD，归属与核销合计将达 60.00 USD');expect(f.state.orderFunding!.assignments).toHaveLength(0);});
+});
+
+describe('approved pre-shipment cumulative receipts',()=>{
+ it('blocks an unpaid balance and one-cent shortage, then counts assigned and reconciled cash once',()=>{
+  const f=setup();(f.state.orders[0] as any).governance.contract.preShipmentPercent=100;
+  expect(()=>assertOrderShipmentPaymentCovered(f.state,'o')).toThrow('出运前收款不足');
+  f.state.receipts[0].amount=100;f.state.receipts[0].remaining=100;f.assign(99.99);
+  expect(orderShipmentPaymentCoverage(f.state,'o')).toMatchObject({required:100,received:99.99,shortage:0.01,status:'insufficient'});
+  expect(()=>assertOrderShipmentPaymentCovered(f.state,'o')).toThrow('0.01 USD');
+  f.state.orderFunding.assignments[0].amount=100;
+  f.state.invoices=[{id:'i',orderId:'o',currency:'USD'}] as any;f.state.allocations=[{id:'a',receiptId:'r',invoiceId:'i',amount:100,currency:'USD'}] as any;
+  expect(assertOrderShipmentPaymentCovered(f.state,'o')).toMatchObject({received:100,status:'covered'});
+ });
+ it('does not infer an unknown collection gate from payment text or unassigned money',()=>{
+  const f=setup();(f.state.orders[0] as any).governance.contract.paymentNote='100% before shipment';
+  expect(orderShipmentPaymentCoverage(f.state,'o').status).toBe('unconfigured');
+  expect(()=>assertOrderShipmentPaymentCovered(f.state,'o')).toThrow('出运前累计收款比例');
+  (f.state.orders[0] as any).governance.contract.preShipmentPercent=50;
+  expect(orderShipmentPaymentCoverage(f.state,'o').received).toBe(0);
+ });
+ it('supports an explicit credit shipment condition without inventing payment',()=>{
+  const f=setup();Object.assign((f.state.orders[0] as any).governance.contract,{paymentMethod:'OA',depositPercent:null,preShipmentPercent:0});
+  expect(assertOrderShipmentPaymentCovered(f.state,'o')).toMatchObject({required:0,received:0,status:'covered'});
+ });
+ it('rounds the approved percentage in minor units and rejects malformed values',()=>{
+  const f=setup();Object.assign(f.state.orders[0],{amount:123.45});(f.state.orders[0] as any).governance.contract.preShipmentPercent=30.01;
+  expect(orderShipmentPaymentCoverage(f.state,'o').required).toBe(37.05);
+  (f.state.orders[0] as any).governance.contract.preShipmentPercent=101;
+  expect(orderShipmentPaymentCoverage(f.state,'o').status).toBe('unconfigured');
+ });
 });
