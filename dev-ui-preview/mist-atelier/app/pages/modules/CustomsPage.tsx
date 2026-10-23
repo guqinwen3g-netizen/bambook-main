@@ -78,7 +78,7 @@ export function CustomsPage() {
   const hsAll = state ? readCustomsClassifications(state).filter(c => !c.voided) : [];
   const domainOf = (c: FulfillmentCustoms): Domain => shipmentOf(c)?.domain || 'garment';
   const domain: Domain = domainChoice || (routed ? domainOf(routed) : undefined) || contextShipment?.domain || (records.some(c => domainOf(c) === 'garment') || !records.some(c => domainOf(c) === 'fabric') ? 'garment' : 'fabric');
-  const tab: Tab = hasContext ? 'declarations' : tabChoice === 'lc' || tabChoice === 'hs' || !routed ? tabChoice : routed.status === 'draft' ? 'declarations' : tabChoice;
+  const tab: Tab = hasContext ? (tabChoice==='hs'?'hs':'declarations') : tabChoice === 'lc' || tabChoice === 'hs' || !routed ? tabChoice : routed.status === 'draft' ? 'declarations' : tabChoice;
   const inDomain = hasContext ? records : records.filter(c => domainOf(c) === domain);
   const needle = query.trim().toLowerCase();
   const matches = (c: FulfillmentCustoms) => { const s = shipmentOf(c); return !needle || `${c.code} ${c.declarationNo} ${c.broker} ${c.hsCode} ${c.tradeMode} ${s?.code || ''} ${s?.customer || ''} ${s?.portOfDischarge || ''}`.toLowerCase().includes(needle); };
@@ -144,7 +144,7 @@ export function CustomsPage() {
         onBill={id => go('payment-vouchers', id, { section: 'payables' })} onReceipt={id => go('payment-vouchers', id)}
         onEdit={() => setDialog(editSpec(selected))} onDeclare={() => setDialog(declareSpec(selected, selected.status === 'submitted'))} onRelease={() => { if (canClear) setDialog(releaseSpec(selected)); }}
         onAttach={ids => run({ type: 'fulfillment.customs.save', payload: payload(selected, { fileIds: ids }) })}
-        onClassify={() => changeTab('hs')} onShipment={() => go('shipments', selected.shipmentId)} onDocuments={() => go('document-center', undefined, { section: selected.shipmentId })} onInvoice={id => go('invoices', id)} />
+        onClassify={() => {if(hasContext){setTab('hs');setDrawer(false);}else changeTab('hs');}} onShipment={() => go('shipments', selected.shipmentId)} onDocuments={() => go('document-center', undefined, { section: selected.shipmentId })} onInvoice={id => go('invoices', id)} />
     : <EmptyState icon={Stamp} title={uiText("报关详情")} description={uiText(loading ? '正在读取报关记录' : tab === 'rebate' ? '从列表选择一张报关单，查看放行、收汇与退税资料' : '从列表选择一条报关记录，查看申报、放行与装箱核对')} compact />;
   const pendingShown = allPending ? pendingShipments : pendingShipments.slice(0, 3);
   const exportRows = () => exportRecords('报关台账', ['记录', '报关单号', '出运', '客户', 'HS编码', '报关行', '原产地', '成交方式', '状态', '申报日', '放行日'], rows.map(c => [c.code, c.declarationNo, shipmentOf(c)?.code || '', shipmentOf(c)?.customer || '', c.hsCode, c.broker, c.origin, c.tradeMode, CUSTOMS_LABEL[c.status], c.declaredAt, c.clearedAt]));
@@ -153,7 +153,7 @@ export function CustomsPage() {
     <PageHeader description={uiText(invalidContext ? '出运记录不存在' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer}` : undefined)} eyebrow={uiText("订单履约 · 出口")} title={uiText("外贸与报关")}
       actions={<>
         {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>{uiText("返回出运")}</Button>}
-        {hasContext && <Button onClick={() => go('customs')}>{uiText("查看全部报关")}</Button>}
+        {hasContext&&tab==='hs'&&<Button onClick={()=>{setTab('declarations');setDrawer(true);}}>{uiText('返回本票报关')}</Button>}{hasContext && <Button onClick={() => go('customs')}>{uiText("查看全部报关")}</Button>}
         {tab !== 'lc' && tab !== 'hs' && <Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button>}
         {tab === 'declarations' && createButton}
       </>} />

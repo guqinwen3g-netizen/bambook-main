@@ -261,3 +261,10 @@ it('adjusts a generated declaration item by hand with a reason and shows the adj
   await click(getByRole(dialog,'button',{name:'保存调整'}));
   expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.item.adjust',payload:{id:'cus-s',no:1,declaredName:'女式涤纶制大衣',elements:item.elements,legalQty:10,secondQty:10,reason:'按规范申报目录'}});
 });
+
+
+it('opens classification maintenance inside an exact shipment context and returns to that same declaration',async()=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('scoped'));f.packing.push(pack('scoped',10));f.customs.push(customs('scoped','draft'));render('cus-scoped','scoped');
+ const detail=host.querySelector('[data-customs-detail="cus-scoped"]') as HTMLElement;await click(getByRole(detail,'button',{name:'维护商品归类'}));expect(getByRole(host,'button',{name:'新建归类'})).toBeTruthy();expect(getByRole(host,'button',{name:'返回出运'})).toBeTruthy();expect(host.querySelector('[data-customs-detail]')).toBeNull();
+ await click(getByRole(host,'button',{name:'返回本票报关'}));expect(host.querySelector('[data-customs-detail="cus-scoped"]')).toBeTruthy();expect(go).not.toHaveBeenCalled();expect(store.run).not.toHaveBeenCalled();
+});
