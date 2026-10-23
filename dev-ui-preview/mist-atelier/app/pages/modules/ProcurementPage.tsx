@@ -1,3 +1,5 @@
+import { MaterialDeliveryPanel } from '../MaterialDeliveryPanel';
+import { hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
 import { purchaseName } from '../businessNames';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
@@ -112,8 +114,20 @@ export function ProcurementPage() {
     },
   });
   const sendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记批准合同线下发出', submitLabel: '登记发出', fields: [field('at', '实际发出时间', 'datetime-local'), field('evidence', '发出方式与依据', 'textarea')], initialValues: { at: localNow(), evidence: '' }, submit: values => run({ type: 'fulfillment.procurement.send', payload: { id: p.id, at: new Date(text(values, 'at')).toISOString(), evidence: text(values, 'evidence'), fileIds: [] } }) });
-  const confirmSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记供应商线下确认', submitLabel: '登记确认', fields: [field('at', '实际确认时间', 'datetime-local'), { ...field('confirmedDue', '确认交期', 'date'), hint: '须与批准交期一致；不同需先走商业变更。' }, field('evidence', '供应商确认依据', 'textarea')], initialValues: { at: localNow(), confirmedDue: p.due, evidence: '' }, submit: values => run({ type: 'fulfillment.procurement.confirm', payload: { id: p.id, at: new Date(text(values, 'at')).toISOString(), confirmedDue: text(values, 'confirmedDue'), evidence: text(values, 'evidence'), fileIds: [] } }) });
-  const receiveSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: p.kind === 'processing' ? '登记加工回交' : '登记真实交付 / 收货', submitLabel: '登记本次交付', fields: [field('quantity', `接收数量（${p.unit}）`, 'number'), field('rejected', `拒收数量（${p.unit}）`, 'number'), field('destination', '真实路径', 'select', true, [{ value: 'warehouse', label: '入我方仓库' }, { value: 'supplier', label: p.kind === 'processing' ? '加工服务交付' : '供应商直送加工方' }]), field('location', '实际交接地点'), field('date', '实际交付日', 'date'), field('evidence', '点数与交接依据', 'textarea')], initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '' }, submit: values => run({ type: 'fulfillment.procurement.receive', payload: { id: p.id, quantity: number(values, 'quantity'), rejected: number(values, 'rejected'), destination: text(values, 'destination') as 'warehouse' | 'supplier', location: text(values, 'location'), date: text(values, 'date'), evidence: text(values, 'evidence'), fileIds: [] } }) });
+  const confirmSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记供应商线下确认', submitLabel: '登记确认', fields: [field('at', '实际确认时间', 'datetime-local'), field('confirmedDue', '确认交期', 'date'), field('evidence', '供应商确认依据', 'textarea')], initialValues: { at: localNow(), confirmedDue: p.due, evidence: '' }, submit: values => run({ type: 'fulfillment.procurement.confirm', payload: { id: p.id, at: new Date(text(values, 'at')).toISOString(), confirmedDue: text(values, 'confirmedDue'), evidence: text(values, 'evidence'), fileIds: [] } }) });
+  const receiveSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {
+    const linked = !!state && materialDeliveryRequired(state, p.id), targets = linked ? materialDeliveryTargets(state!, p.id) : [];
+    return { title: p.kind === 'processing' ? '登记加工回交' : '登记收料', submitLabel: '登记本次交付',
+      fields: [field('quantity', `接收数量（${p.unit}）`, 'number'), field('rejected', `拒收数量（${p.unit}）`, 'number'), field('destination', '交付路径', 'select', true, [{ value: 'warehouse', label: '入我方仓库' }, { value: 'supplier', label: p.kind === 'processing' ? '加工服务交付' : '供应商直送加工方' }]), ...(linked ? [field('targetProductionId', '直送加工单', 'select', false, [emptyOption, ...targets])] : []), field('location', '实际交接地点'), field('date', '实际交付日', 'date'), field('evidence', '点数与交接依据', 'textarea')],
+      initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', targetProductionId: targets.length === 1 ? targets[0].value : '' },
+      submit: values => {
+        const quantity = number(values, 'quantity'), destination = text(values, 'destination') as 'warehouse' | 'supplier';
+        if (linked && destination === 'supplier' && quantity > 0 && !text(values, 'targetProductionId')) throw new Error('请选择直送加工单');
+        const payload = { id: p.id, quantity, rejected: number(values, 'rejected'), location: text(values, 'location'), date: text(values, 'date'), evidence: text(values, 'evidence'), fileIds: [] };
+        return linked && destination === 'supplier' && quantity > 0 ? run({ type: 'fulfillment.materials.deliver', payload: { ...payload, targetProductionId: text(values, 'targetProductionId') } }) : run({ type: 'fulfillment.procurement.receive', payload: { ...payload, destination } });
+      },
+    };
+  };
   const rejectReceivedSpec = (p: FulfillmentPurchase, r: FulfillmentReceipt): ModuleEditorSpec => {
     const stock = state?.fulfillment.stock.find(row => row.receiptId === r.id && row.purchaseId === p.id);
     const positions = stock ? fulfillmentPositions(stock) : [];
@@ -240,7 +254,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
   const amt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const writeReason = can ? false : '需要采购写权限';
   const reviewerReason = !canApprove ? '需要供应商承诺审批权限' : !p.reviewerIds.includes(me) ? '你不在本单提交时的审批名单中' : false;
-  const cancelReason = writeReason || (receipts.length ? '已有收货记录，不能直接取消；请走结算或拒收退换' : settled.some(x => x.state === 'pending' || x.state === 'confirmed') ? '有待复核或已确认的结算，不能取消' : billed.length ? '已登记供应商票据，请先由财务作废票据' : false);
+  const cancelReason = writeReason || (hasMaterialAtFactory(state, p.id) ? '已有物料交给该分支，须先退回' : false) || (receipts.length ? '已有收货记录，不能直接取消；请走结算或拒收退换' : settled.some(x => x.state === 'pending' || x.state === 'confirmed') ? '有待复核或已确认的结算，不能取消' : billed.length ? '已登记供应商票据，请先由财务作废票据' : false);
   const transferReason = writeReason || purchaseTransferBlocker(state, p) || (settled.some(x => x.state === 'pending' || x.state === 'confirmed') ? '有待复核或已确认的结算，不能转移' : billed.length ? '已登记供应商票据，请先由财务作废票据' : false);
   const next: { tone: Tone; title: string; text: string } = p.state === 'cancelled' ? { tone: 'neutral', title: p.transferredTo ? `已转给 ${p.transferredTo.supplier}（${p.transferredTo.purchaseCode}）` : '合同已取消', text: `${p.cancellation?.actor || ''} · ${p.cancellation ? shortWhen(p.cancellation.at) : ''} · ${p.cancellation?.reason || ''}。${p.cancellation?.prepayment === 'refund' ? `已付预付 ${amt(p.cancellation.prepaid)} ${p.currency} 选择让工厂退款${prepay.available > 0 ? `，待退回 ${amt(prepay.available)}，到账后由财务登记。` : '，已全部退回。'}` : p.cancellation?.prepayment === 'transfer' ? `已付预付 ${amt(p.cancellation.prepaid)} ${p.currency} 选择转抵到 ${p.cancellation.targetPurchaseCode}${prepay.available > 0 ? '，待财务办理。' : '，已处理。'}` : '取消时没有已付预付。'}取消后不恢复，需要时重新建单。` }
     : p.state === 'rejected' ? { tone: 'bad', title: '审批退回', text: `${p.decision?.actor || '审批人'}：${p.decision?.note || '未写明原因'}。修订草稿后重新提交。` }
@@ -251,12 +265,14 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
     : p.received > p.quantity ? { tone: 'warn', title: '数量待核对', text: '' }
     : stage === 'done' ? { tone: 'ok', title: processing ? '已全部回交' : '已全部交付', text: `${p.received} / ${p.quantity} ${p.unit}` }
     : { tone: 'accent', title: processing ? '加工中 · 分批回交' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
+  const deliveries = materialDeliveryRows(state).filter(row => processing ? state.productions.find(branch => branch.id === row.delivery.productionId)?.sourcePurchaseId === p.id : row.purchaseId === p.id);
+  const activeDeliveries = deliveries.filter(row => row.outstanding !== '0');
   const track = [
     { label: '提交审批', done: !!p.submittedAt || stage !== 'draft', note: p.submittedAt ? shortWhen(p.submittedAt) : '未提交' },
     { label: '审批', done: p.state === 'approved', note: p.decision ? `${p.decision.actor} · ${p.decision.decision === 'approved' ? '批准' : '退回'} · ${shortWhen(p.decision.at)}` : '待审批', noteTone: p.state === 'rejected' ? 'bad' as const : undefined },
     { label: '合同线下发出', done: !!p.offlineSend, note: p.offlineSend ? `${p.offlineSend.actor} · ${shortWhen(p.offlineSend.at)}` : '未登记' },
     { label: '供应商确认', done: !!p.supplierConfirmation, note: p.supplierConfirmation ? `承诺 ${p.supplierConfirmation.confirmedDue}` : '未登记' },
-    ...(processing ? [{ label: '原料交接', done: false, note: '发料、损耗与余料归还尚未接入' }] : []),
+    ...(processing ? [{ label: '物料接收', done: activeDeliveries.length > 0 && activeDeliveries.every(row => !!row.delivery.confirmation), note: activeDeliveries.length ? `${activeDeliveries.filter(row => row.delivery.confirmation).length} 笔已收 · ${activeDeliveries.filter(row => !row.delivery.confirmation).length} 笔待收` : '待交接' }] : []),
     { label: processing ? '分批回交' : '分批交付', done: stage === 'done', note: `${p.received} / ${p.quantity} ${p.unit}` },
     { label: '拒收退换', done: rejectedQty > 0 && openRejected <= 0, note: rejectedQty ? `已拒收 ${rejectedQty} ${p.unit}${replaceQty ? ` · 供应商补发 ${replaceQty}` : ''}${noReplaceQty ? ` · 不再补发 ${noReplaceQty}` : ''}${openRejected > 0 ? ` · ${openRejected} 待登记退换` : ''}` : '没有拒收', noteTone: openRejected > 0 ? 'bad' as const : undefined },
     ...(prepay.plans.length || prepay.transferredIn ? [{ label: '合同预付款', done: prepay.paid >= prepay.planned && prepay.available <= 0, note: `计划 ${amt(prepay.planned)} · 已付 ${amt(prepay.paid)}${prepay.transferredIn ? ` · 转入 ${amt(prepay.transferredIn)}` : ''} · 已抵扣 ${amt(prepay.applied)}${prepay.refunded ? ` · 已退款 ${amt(prepay.refunded)}` : ''}${prepay.transferredOut ? ` · 已转出 ${amt(prepay.transferredOut)}` : ''} ${p.currency}${prepay.residualAfterFinal > 0 ? ` · 最终结算后剩余 ${amt(prepay.residualAfterFinal)} 待退款或转抵（财务在结算详情登记）` : prepay.available > 0 ? ` · 待抵扣 ${amt(prepay.available)}` : ''}`, noteTone: prepay.residualAfterFinal > 0 ? 'bad' as const : undefined }] : []),
@@ -311,6 +327,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
     </div>; })}</DetailBlock>}
     <div className="mist-row mist-module-actions"><Button onClick={onInventory}>{uiText("查看来源库存")}</Button><Button onClick={onSupplier}>{uiText("供应商档案")}</Button></div>
     {!!p.documents?.length && <DetailBlock title={uiText("合同文件")}><RecordFiles ids={p.documents.slice().reverse().map(d => d.fileId)} /></DetailBlock>}
+    <MaterialDeliveryPanel rows={deliveries} />
     <DetailBlock title={uiText("附件")}>
       <RecordFiles key={p.id} ids={p.fileIds} onAttach={can && stage === 'draft' ? onAttach : undefined} />
     </DetailBlock>

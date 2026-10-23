@@ -18,6 +18,7 @@ import { platformBusinessDate } from './mistPlatform';
 import { fxOrderActual, fxRateFor, type FxBasis, type FxResolved } from './mistFxRates';
 import { orderRebate } from './mistExportRebate';
 import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
+import { internalFabricCostShare } from './mistInternalFabric';
 
 export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', other: '其他' } as const;
 export type ExpenseCategory = keyof typeof EXPENSE_CATEGORIES;
@@ -186,17 +187,20 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   // 采购：已到票金额 − 索赔扣款；未到票按合同暂估
   const bills = (root.payables?.bills || []).filter(b => b.state !== 'void'), deductions = (root.payables?.deductions || []).filter(d => !d.reversed);
   const purchases: OrderCostLine[] = [];
-  for (const p of (root.fulfillment?.purchases || []).filter(p => p.orderId === orderId && !p.cancellation && p.state === 'approved')) {
+  for (const p of (root.fulfillment?.purchases || []).filter(p => !p.cancellation && p.state === 'approved')) {
     let billed = 0, deducted = 0;
     for (const b of bills) {
       const mine = b.lines.filter(l => l.purchaseId === p.id).reduce((n, l) => n + mistMoneyMinor(l.amount), 0); if (!mine) continue;
       billed += mine; const total = mistMoneyMinor(b.amount);
       if (total) deducted += Math.round(deductions.filter(d => d.billId === b.id).reduce((n, d) => n + mistMoneyMinor(d.amount), 0) * mine / total);
     }
-    const contract = Math.max(0, Math.round(p.quantity * p.price * 100)), unbilled = Math.max(0, contract - billed);
-    if (billed) purchases.push(line('pur:' + p.id, `${p.code} ${p.supplier} 已到票`, p.currency, billed));
-    if (deducted) purchases.push(line('ded:' + p.id, `${p.code} 供应商索赔扣款`, p.currency, -deducted));
-    if (unbilled) purchases.push(line('est:' + p.id, `${p.code} ${p.supplier} 未到票（按合同暂估）`, p.currency, unbilled, { estimated: true }));
+    const settlements = root.payables?.settlements?.filter(s => s.purchaseId === p.id && s.state === 'confirmed') || [];
+    const finalInternal = root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply && settlements.some(s => s.final);
+    const contract = finalInternal ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
+    const unbilled = Math.max(0, contract - billed), share = (minor: number) => internalFabricCostShare(root, p.id, orderId, minor), suffix = p.orderId === orderId ? '' : ' 内部面料';
+    if (share(billed)) purchases.push(line('pur:' + p.id, `${p.code} ${p.supplier}${suffix} 已到票`, p.currency, share(billed)));
+    if (share(deducted)) purchases.push(line('ded:' + p.id, `${p.code}${suffix} 供应商索赔扣款`, p.currency, -share(deducted)));
+    if (share(unbilled)) purchases.push(line('est:' + p.id, `${p.code} ${p.supplier}${suffix} 未到票（按合同暂估）`, p.currency, share(unbilled), { estimated: true }));
   }
   const expenses: OrderCostLine[] = [];
   for (const e of activeExpenses(root)) for (const s of e.shares.filter(s => s.orderId === orderId))

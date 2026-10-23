@@ -92,3 +92,9 @@ it('shows a short paused status and keeps completion evidence out of status valu
  expect(document.body.textContent).not.toContain('完整完工交接依据');
  await click('完工记录');expect(document.body.textContent).toContain('完整完工交接依据');
 });
+
+it('keeps fractional metres visible on production cards',async()=>{
+  bridge.state!.orders[0].type='fabric';bridge.state!.orderLines[0].unit='米';bridge.state!.productions[0].qty=1359.6;
+  await mount();await range('全部');
+  const card=getByRole(host,'button',{name:/PROD-A/});expect(card.textContent).toContain('1,359.6 米');expect(card.textContent).not.toContain('1,360 米');
+});

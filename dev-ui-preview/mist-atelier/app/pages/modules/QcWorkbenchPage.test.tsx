@@ -142,6 +142,7 @@ it('validates garment size checks and confirms the consequence before appending 
   choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');
   typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'R-9');
   typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'M码袖长偏长');
+  typeInto(getByRole(host,'textbox',{name:'实际检查地点'}) as HTMLInputElement,'上海仓 A-01');
   await click(getByRole(host,'button',{name:'提交报告'}));
   expect(host.textContent).toContain('请至少记录一个本次实际检查尺码');
   choose(getByRole(host,'combobox',{name:'尺码 M · 本次结论'}) as HTMLSelectElement,'reject');
@@ -155,7 +156,7 @@ it('validates garment size checks and confirms the consequence before appending 
   expect(dialog.textContent).toContain('生产分支将标记“QC 不通过”风险并阻断');
   expect(store.run).not.toHaveBeenCalled();
   await click(getByRole(dialog,'button',{name:'确认提交'}));
-  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'prod',result:'reject',report:'R-9',sizeChecks:[{size:'M',inspected:3,result:'reject',evidence:'袖长实测'}]})}));
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'prod',result:'reject',report:'R-9',location:'上海仓 A-01',sizeChecks:[{size:'M',inspected:3,result:'reject',evidence:'袖长实测'}]})}));
 });
 
 it('opens business resume over the workbench and explains it to QC-only accounts',async()=>{
@@ -183,4 +184,12 @@ it('shows frozen pioneer conditions when the inspector opens a production report
  render('production-check');
  await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
  expect(host.textContent).toContain('样品关注项');expect(host.textContent).toContain('SMP-STONE');expect(host.textContent).not.toContain('卷边须在首批大货复核');await click(getByRole(host,'button',{name:'查看关注项'}));expect(host.textContent).toContain('卷边须在首批大货复核');
+});
+
+it.each(['fabric','garment'] as const)('shows size-check tables only for garment production reports: %s',domain=>{
+  store.state!.fulfillment.qcTasks.push(task('size-domain',{domain,kind:'production',state:'reported',reportIds:['report-size-domain']}));
+  store.state!.fulfillment.qcReports.push({id:'report-size-domain',taskId:'size-domain',result:'pass',report:'SIZE-DOMAIN',location:'Shanghai warehouse',opinion:'Checked',measurements:[],fileIds:[],reviewer:'QC',reviewedAt:'2026-10-08T00:18:00Z'});
+  render('size-domain');
+  expect(queryByRole(host,'table',{name:'SIZE-DOMAIN · 生产尺码检查'})!==null).toBe(domain==='garment');
+  expect(host.textContent).toContain('Shanghai warehouse');
 });

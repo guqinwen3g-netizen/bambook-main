@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import {materialDeliveryFixture} from '../../../../../server/src/mist/__tests__/materialDelivery';
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
@@ -70,7 +71,7 @@ it('explains blocked movements and records a return against the original issue i
   expect(getByRole(host,'table',{name:'库存批次列表'})).toBeTruthy();
   choose(getByRole(dialog,'combobox',{name:'原出库'}) as HTMLSelectElement,'m1');
   typeInto(getByRole(dialog,'spinbutton',{name:'数量（个）'}) as HTMLInputElement,'20');
-  typeInto(getByRole(dialog,'textbox',{name:'实际交接地点'}) as HTMLInputElement,'A-1');
+  typeInto(getByRole(dialog,'textbox',{name:'交接地点'}) as HTMLInputElement,'A-1');
   typeInto(getByRole(dialog,'textbox',{name:'接收 / 交付方'}) as HTMLInputElement,'仓库');
   typeInto(getByRole(dialog,'textbox',{name:'交接依据'}) as HTMLTextAreaElement,'工厂退回余料实点');
   await click(getByRole(dialog,'button',{name:'登记退回'}));
@@ -98,4 +99,17 @@ it('stays readable without inventory authority and says why movements are unavai
   expect((getByRole(detail,'button',{name:'登记出库'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('登记出库：需要库存写权限');
   expect(store.run).not.toHaveBeenCalled();
+});
+
+it('binds a material issue to the existing processing branch instead of a free-text destination',async()=>{
+  const f=materialDeliveryFixture();store.state=f.state;store.state.memberGroups!.push({userId:'biz',name:'Business',groups:['fabric'],updatedAt:'',updatedBy:'owner'});
+  const stock=store.state.fulfillment.stock[0];render(stock.id);await click(getByRole(host,'button',{name:'登记出库',exact:true}));
+  const dialog=getByRole(document.body,'dialog',{name:'登记发料'});expect((getByRole(dialog,'combobox',{name:'接收加工单'}) as HTMLSelectElement).value).toBe(f.productionId);
+  typeInto(getByRole(dialog,'textbox',{name:'交接地点'}) as HTMLInputElement,'Factory');typeInto(getByRole(dialog,'textbox',{name:'交接联系人'}) as HTMLInputElement,'Factory receiver');typeInto(getByRole(dialog,'textbox',{name:'交接依据'}) as HTMLTextAreaElement,'Delivery note');
+  await click(getByRole(dialog,'button',{name:'登记发料',exact:true}));
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.materials.issue',payload:expect.objectContaining({id:stock.id,targetProductionId:f.productionId,quantity:100.3})}));
+});
+it('keeps an internal fabric stock read-only for a garment-group operator',()=>{
+  const f=materialDeliveryFixture();store.state=f.state;store.state.memberGroups!.push({userId:'biz',name:'Business',groups:['garment'],updatedAt:'',updatedBy:'owner'});render(store.state.fulfillment.stock[0].id);
+  expect((getByRole(host,'button',{name:'登记出库',exact:true}) as HTMLButtonElement).disabled).toBe(true);
 });

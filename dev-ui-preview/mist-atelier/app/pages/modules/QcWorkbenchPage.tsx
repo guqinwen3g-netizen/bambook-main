@@ -310,8 +310,9 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
 function QcReportCard({ report, domain, production, latest }: { report: FulfillmentQcReport; domain: Domain; production: boolean; latest: boolean }) {
   return <div className="mist-col" data-qc-report={report.id}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {new Date(report.reviewedAt).toLocaleString()}</span></div>
+    {report.location && <div className="mist-row"><span>{uiText("检查地点")}</span><span>{report.location}</span></div>}
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
-    {production && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
+    {production && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
     {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} unit={domain === 'fabric' ? '' : 'cm'} />}
     <RecordFiles key={report.id} ids={report.fileIds} />
   </div>;
@@ -322,6 +323,7 @@ type Measurement = { point: string; standard: number; actual: number; tolerance:
 /** Full-page report form with a side guide; submission is confirmed because the conclusion is appended permanently to the source. */
 export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onClose: () => void }) {
   const { state, run, uploadFile, pending, saving } = useMistWorkspace();
+  const [location, setLocation] = React.useState(task.location);
   const [result, setResult] = React.useState<MistQc['result'] | ''>(''), [report, setReport] = React.useState(''), [opinion, setOpinion] = React.useState(''), [at, setAt] = React.useState(localNow());
   const [measurements, setMeasurements] = React.useState<Measurement[]>([]), [ids, setIds] = React.useState<string[]>([]), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [confirming, setConfirming] = React.useState(false);
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
@@ -336,6 +338,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const validate = () => {
     if (!result) return '请选择本次专业结论';
     if (!report.trim()) return '请填写报告编号';
+    if (!location.trim()) return '请填写实际检查地点';
     if (!opinion.trim()) return '请填写专业意见与影响范围';
     const checked = sizeChecks.filter(check => check.result);
     if (garmentProduction && !checked.length) return '请至少记录一个本次实际检查尺码';
@@ -349,7 +352,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     if (!result) return;
     setBusy(true); setFailure('');
     try {
-      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, reviewedAt: new Date(at).toISOString(), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })) } });
+      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: new Date(at).toISOString(), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })) } });
       onClose();
     } catch (e) { setFailure(e instanceof Error ? e.message : '报告未保存'); setConfirming(false); }
     finally { setBusy(false); }
@@ -371,6 +374,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
           <CardBody><FormGrid>
             <Field label={uiText("本次结论")} required><Select aria-label={uiText("本次结论")} value={result} onChange={e => setResult(e.target.value as MistQc['result'])} options={resultOptions} /></Field>
             <Field label={uiText("报告编号")} required><TextInput aria-label={uiText("报告编号")} value={report} onChange={e => setReport(e.target.value)} /></Field>
+            <Field label={uiText("实际检查地点")} required><TextInput aria-label={uiText("实际检查地点")} value={location} onChange={e => setLocation(e.target.value)} /></Field>
             <Field label={uiText("实际检查时间")} required><TextInput aria-label={uiText("实际检查时间")} type="datetime-local" value={at} onChange={e => setAt(e.target.value)} /></Field>
             <Field label={uiText("专业意见与影响范围")} full required><TextArea aria-label={uiText("专业意见与影响范围")} value={opinion} onChange={e => setOpinion(e.target.value)} /></Field>
           </FormGrid></CardBody>
@@ -412,7 +416,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     <Dialog open={confirming} title={uiText("确认提交QC报告")} tone={result === 'reject' ? 'bad' : 'accent'} onClose={() => { if (!busy) setConfirming(false); }}
       footer={<><Button disabled={busy} onClick={() => setConfirming(false)}>{uiText("返回修改")}</Button><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("确认提交")}</Button></>}>
       <div className="mist-col">
-        <Facts cols={2} items={[{ label: '结论', value: result ? RESULT_LABEL[result] : '' }, { label: '报告编号', value: report }, { label: '检查时间', value: at.replace('T', ' ') }, { label: '本次检查尺码', value: sizeChecks.filter(check => check.result).map(check => `${check.size} ${check.inspected}件`).join(' · ') || (task.sampleId?state?.fulfillment.samples.find(sample=>sample.id===task.sampleId)?.size:'') || '—' }]} />
+        <Facts cols={2} items={[{ label: '结论', value: result ? RESULT_LABEL[result] : '' }, { label: '报告编号', value: report }, { label: '检查时间', value: at.replace('T', ' ') }, ...(task.domain === 'garment' ? [{ label: '本次检查尺码', value: sizeChecks.filter(check => check.result).map(check => `${check.size} ${check.inspected}件`).join(' · ') || (task.sampleId?state?.fulfillment.samples.find(sample=>sample.id===task.sampleId)?.size:'') || '—' }] : [])]} />
         <span className="mist-note">{consequence}</span>
         <span className="mist-note">{uiText("提交后报告不可改写")}</span>
       </div>

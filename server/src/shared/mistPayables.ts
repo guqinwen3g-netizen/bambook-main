@@ -1,3 +1,4 @@
+import { hasMaterialAtFactory } from './mistInternalFabric';
 /**
  * 供应商票据与应付（公司端财务首轮）。
  * 业务口径：供应商开出增值税发票后，财务登记票据并形成应付；付款是另一件事实，
@@ -972,6 +973,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
     case 'payable.purchase.cancel': {
       // 合同未执行即取消：没有收货、结算、票据和在途付款申请；已付预付须选择让工厂退款或转抵到其他合同。
       const po = (root.fulfillment?.purchases || []).find(x => x.id === text(p.purchaseId, '采购合同')) || fail('采购合同不存在', 'NOT_FOUND');
+      if (hasMaterialAtFactory(root, po.id)) fail('已有物料交给该加工分支，请先按原交接退回', 'PRECONDITION');
       if (po.state !== 'approved') fail(po.state === 'cancelled' ? `${po.code} 已取消` : `${po.code} 尚未批准；草稿或待审批的单据直接修改或退回即可`, 'PRECONDITION');
       if ((root.fulfillment?.receipts || []).some(r => r.purchaseId === po.id)) fail(`${po.code} 已有收货记录，不能直接取消；请走结算或拒收退换`, 'PRECONDITION');
       if (s.settlements.some(x => x.purchaseId === po.id && (x.state === 'pending' || x.state === 'confirmed'))) fail(`${po.code} 有待复核或已确认的结算，不能取消`, 'PRECONDITION');
