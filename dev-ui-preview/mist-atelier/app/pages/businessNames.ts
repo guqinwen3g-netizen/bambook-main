@@ -18,3 +18,10 @@ export function stockName(state: MistState, stock: FulfillmentStock): string {
   const purchase = state.fulfillment.purchases.find(row => row.id === stock.purchaseId);
   return (purchase && purchaseName(state, purchase)) || stock.name;
 }
+
+/** Keep command identifiers in the audit record; present only the business action. */
+export function businessEventText(text: string): string {
+  if (text === 'market.quotation.status') return '更新报价状态';
+  const costing = /^保存条目专业核算 (.+) \/ [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}（人工依据，成本待审批核实）$/i.exec(text);
+  return costing ? `保存条目核算 ${costing[1]}` : text;
+}
