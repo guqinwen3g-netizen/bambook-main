@@ -79,7 +79,7 @@ export function SettingsPage() {
   const notify = (key: keyof MistSettings['notifications'], value: boolean) => settings && void save({ notifications: { ...settings.notifications, [key]: value } });
   return (
     <MistPage>
-      <PageHeader eyebrow={uiText("公司管理")} title={uiText("公司设置")} description={uiText(sec === 'appearance' ? '设备显示偏好，仅在当前浏览器生效。' : "公司资料、人员组织、业务默认项、通知和账号安全。选择项即时保存，文字离开输入框后保存；公司资料点击保存。")} />
+      <PageHeader eyebrow={uiText("公司管理")} title={uiText("公司设置")} />
       {(error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
       {pending && !saving && <Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(failure=>setError(failure instanceof Error?failure.message:'原请求核对失败'))}>{uiText("核对原请求")}</Button>} />}
       <div className="mist-wizard">
@@ -90,44 +90,44 @@ export function SettingsPage() {
         <Card>
           {!settings || !values ? <FormSection title={uiText("正在读取设置")}><Skeleton height={120} /></FormSection> : <>
           {member && sec !== 'workspace' && sec !== 'security' && sec !== 'company' && sec !== 'appearance' && <Banner tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看，不能修改。")}</Banner>}
-          {sec === 'overview' && <FormSection title={uiText("公司管理总览")} description={uiText("公司共用一套经营资料；部门组织人员，小组划定协作范围，岗位决定操作权限。")}>
-            <SettingRow title={uiText("公司资料与单据抬头")} description={uiText("公司名称、地址、联系方式、出口信息及收款银行，用于公司单据。")} control={<Button onClick={()=>setSec('company')}>{uiText("维护公司资料")}</Button>}/>
-            <SettingRow title={uiText("成员与业务范围")} description={uiText("查看公司成员，维护成员的业务组与可见范围。")} control={<Button onClick={()=>setSec('workspace')}>{uiText("管理公司成员")}</Button>}/>
-            {(session.hasPermission?.('users:admin') || session.hasRole?.('owner','admin')) && <SettingRow title={uiText("人员账号与岗位权限")} description={uiText("维护本公司登录账号、岗位与权限；平台账号由 Sylway Cloud 管理。")} control={<Button onClick={()=>nav?.go('admin-panel')}>{uiText("进入公司后台")}</Button>}/>}
-            {(session.hasPermission?.('hr:read') || session.hasPermission?.('hr:write')) && <SettingRow title={uiText("部门、小组与员工档案")} description={uiText("管理公司 → 部门 → 小组，安排人员归属并维护员工档案。")} control={<Button onClick={()=>nav?.go('hr')}>{uiText("管理组织架构")}</Button>}/>}
-            <SettingRow title={uiText("业务默认项")} description={uiText("维护公司显示名称和新建资料的默认币种，客户及来源单据币种优先。")} control={<Button onClick={()=>setSec('workspace')}>{uiText("查看业务设置")}</Button>}/>
-            <SettingRow title={uiText("当前账号安全")} description={uiText("修改登录密码、退出其他设备。")} control={<Button onClick={()=>setSec('security')}>{uiText("查看账号安全")}</Button>}/>
+          {sec === 'overview' && <FormSection title={uiText("公司管理总览")}>
+            <SettingRow title={uiText("公司资料与单据抬头")} control={<Button onClick={()=>setSec('company')}>{uiText("维护公司资料")}</Button>}/>
+            <SettingRow title={uiText("成员与业务范围")} control={<Button onClick={()=>setSec('workspace')}>{uiText("管理公司成员")}</Button>}/>
+            {(session.hasPermission?.('users:admin') || session.hasRole?.('owner','admin')) && <SettingRow title={uiText("人员账号与岗位权限")} control={<Button onClick={()=>nav?.go('admin-panel')}>{uiText("进入公司后台")}</Button>}/>}
+            {(session.hasPermission?.('hr:read') || session.hasPermission?.('hr:write')) && <SettingRow title={uiText("部门、小组与员工档案")} control={<Button onClick={()=>nav?.go('hr')}>{uiText("管理组织架构")}</Button>}/>}
+            <SettingRow title={uiText("业务默认项")} control={<Button onClick={()=>setSec('workspace')}>{uiText("查看业务设置")}</Button>}/>
+            <SettingRow title={uiText("当前账号安全")} control={<Button onClick={()=>setSec('security')}>{uiText("查看账号安全")}</Button>}/>
           </FormSection>}
-          {sec === 'activity' && !member && <FormSection title={uiText("公司设置变更记录")} description={uiText("从本次版本起记录设置变更的操作人和时间，不记录银行账号等字段原值。")}>
+          {sec === 'activity' && !member && <FormSection title={uiText("公司设置变更记录")}>
             <DataTable ariaLabel={uiText("公司设置变更记录")} rows={state.events.filter(item=>item.entityType==='settings').slice(0,100)} rowKey={item=>item.id} columns={[{key:'time',header:'时间',render:item=>new Date(item.at).toLocaleString(interfaceLocale())},{key:'actor',header:'操作人',render:item=>item.actor},{key:'text',header:'变更内容',render:item=>item.text}]} empty={<EmptyState title={uiText("暂无设置变更记录")} description={uiText("之后保存的公司设置将记录在这里。")} compact/>}/>
           </FormSection>}
-          {sec === 'appearance' && <FormSection title={uiText("外观与语言")} description={uiText("浅色 = 雾蓝 Light Mist，深色 = 深夜 Deep Night。")}>
+          {sec === 'appearance' && <FormSection title={uiText("外观与语言")}>
             <LanguageSetting />
-            <ChoiceCards<ThemePreference> ariaLabel={uiText("主题")} value={themePreference} onChange={value => { setThemePreference(value); writeThemePreference(value); }} options={[{ value: 'light', title: '浅色', description: '雾蓝渐变', icon: Sun }, { value: 'dark', title: '深色', description: '深夜蓝渐变', icon: Moon }, { value: 'system', title: '跟随系统', description: '自动切换', icon: Laptop }]} />
+            <ChoiceCards<ThemePreference> ariaLabel={uiText("主题")} value={themePreference} onChange={value => { setThemePreference(value); writeThemePreference(value); }} options={[{ value: 'light', title: '浅色', icon: Sun }, { value: 'dark', title: '深色', icon: Moon }, { value: 'system', title: '跟随系统', icon: Laptop }]} />
             <div style={{ marginTop: 18 }}>
-              <SettingRow title={uiText("列表密度")} description={uiText("只在这台设备生效，影响数据表的行高")} control={<Select aria-label={uiText("列表密度")} value={density} onChange={event => writeDevice('density', event.target.value as DeviceValues['density'])} options={[{ value: 'compact', label: '紧凑' }, { value: 'default', label: '标准' }, { value: 'comfy', label: '宽松' }]} />} />
-              <SettingRow title={uiText("减少动效")} description={uiText("只在这台设备生效")} control={<Switch ariaLabel={uiText("减少动效")} checked={reducedMotion} onChange={value => writeDevice('reducedMotion', value)} />} />
+              <SettingRow title={uiText("列表密度")} control={<Select aria-label={uiText("列表密度")} value={density} onChange={event => writeDevice('density', event.target.value as DeviceValues['density'])} options={[{ value: 'compact', label: '紧凑' }, { value: 'default', label: '标准' }, { value: 'comfy', label: '宽松' }]} />} />
+              <SettingRow title={uiText("减少动效")} control={<Switch ariaLabel={uiText("减少动效")} checked={reducedMotion} onChange={value => writeDevice('reducedMotion', value)} />} />
             </div>
           </FormSection>}
-          {sec === 'notify' && <FormSection title={uiText("通知")} description={uiText("保存公司通知偏好。")}>
-            <SettingRow title={uiText("QC 报告回传")} description={uiText("显示开发案新评审结论的站内提醒")} control={<Switch ariaLabel={uiText("QC 报告回传")} checked={settings.notifications.qc} disabled={settingsLocked} onChange={value => notify('qc', value)} />} />
-            <SettingRow title={uiText("出运准备提醒")} description={uiText("显示交期与出运准备事项的站内提醒")} control={<Switch ariaLabel={uiText("出运准备提醒")} checked={settings.notifications.shipping} disabled={settingsLocked} onChange={value => notify('shipping', value)} />} />
-            <SettingRow title={uiText("小竹主动建议")} description={uiText("保存主动建议的通知偏好")} control={<Switch ariaLabel={uiText("小竹主动建议")} checked={settings.notifications.suggestions} disabled={settingsLocked} onChange={value => notify('suggestions', value)} />} />
-            <SettingRow title={uiText("站内每日摘要")} description={uiText("在公司内显示每日摘要，不发送邮件")} control={<Switch ariaLabel={uiText("站内每日摘要")} checked={settings.notifications.digest} disabled={settingsLocked} onChange={value => notify('digest', value)} />} />
+          {sec === 'notify' && <FormSection title={uiText("通知")}>
+            <SettingRow title={uiText("QC 报告回传")} control={<Switch ariaLabel={uiText("QC 报告回传")} checked={settings.notifications.qc} disabled={settingsLocked} onChange={value => notify('qc', value)} />} />
+            <SettingRow title={uiText("出运准备提醒")} control={<Switch ariaLabel={uiText("出运准备提醒")} checked={settings.notifications.shipping} disabled={settingsLocked} onChange={value => notify('shipping', value)} />} />
+            <SettingRow title={uiText("小竹主动建议")} control={<Switch ariaLabel={uiText("小竹主动建议")} checked={settings.notifications.suggestions} disabled={settingsLocked} onChange={value => notify('suggestions', value)} />} />
+            <SettingRow title={uiText("站内每日摘要")} control={<Switch ariaLabel={uiText("站内每日摘要")} checked={settings.notifications.digest} disabled={settingsLocked} onChange={value => notify('digest', value)} />} />
           </FormSection>}
-          {sec === 'workspace' && <FormSection title={uiText("公司基本设置")} description={uiText(`${workspace.workspace?.name ?? settings.workspaceName} · ${member ? '当前公司，设置由公司管理人员维护' : '当前公司'}`)}>
+          {sec === 'workspace' && <FormSection title={uiText("公司基本设置")}>
             <FormGrid><Field label={uiText("名称")}><TextInput aria-label={uiText("公司显示名称")} value={values.workspaceName} disabled={settingsLocked} onChange={event => edit('workspaceName', event.target.value)} onBlur={() => saveField('workspaceName')} /></Field><Field label={uiText("默认币种")} hint={uiText("用于新建资料；客户与来源单据的币种优先")}><Select aria-label={uiText("默认币种")} disabled={settingsLocked} value={settings.companyProfile?.defaultCurrency||'USD'} options={[...new Set(['USD','EUR','CNY','GBP','HKD',settings.companyProfile?.defaultCurrency||'USD'])]} onChange={event=>saveCurrency(event.target.value)} /></Field>
               <Field label={uiText("时区")} hint={uiText("当前设备时区，只读")}><Select disabled options={[Intl.DateTimeFormat().resolvedOptions().timeZone]} /></Field><Field label={uiText("单号前缀")} hint={uiText("由业务命令生成")}><TextInput value="自动生成" disabled className="mist-mono" /></Field></FormGrid>
           </FormSection>}
           {sec === 'workspace' && <WorkspaceMembers busy={busy} />}
           {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
           <div hidden={sec !== 'company'}><CompanyProfileSection member={member} /></div>
-          {sec === 'account' && <FormSection title={uiText("账号")} description={uiText("公司内显示资料，不改变登录账号、邮箱或密码。")}>{!session.localMode && <AvatarSettingRow />}<FormGrid><Field label={uiText("姓名")}><TextInput aria-label={uiText("显示姓名")} value={values.profileName} disabled={settingsLocked} onChange={event => edit('profileName', event.target.value)} onBlur={() => saveField('profileName')} /></Field><Field label={uiText("邮箱")}><TextInput aria-label={uiText("显示邮箱")} type="email" value={values.profileEmail} disabled={settingsLocked} onChange={event => edit('profileEmail', event.target.value)} onBlur={() => saveField('profileEmail')} /></Field>
+          {sec === 'account' && <FormSection title={uiText("账号")}>{!session.localMode && <AvatarSettingRow />}<FormGrid><Field label={uiText("姓名")}><TextInput aria-label={uiText("显示姓名")} value={values.profileName} disabled={settingsLocked} onChange={event => edit('profileName', event.target.value)} onBlur={() => saveField('profileName')} /></Field><Field label={uiText("邮箱")}><TextInput aria-label={uiText("显示邮箱")} type="email" value={values.profileEmail} disabled={settingsLocked} onChange={event => edit('profileEmail', event.target.value)} onBlur={() => saveField('profileEmail')} /></Field>
 </FormGrid></FormSection>}
           {sec === 'security' && <FormSection title={uiText("安全")}>
             {!session.localMode && <><ChangePasswordRow /><LogoutAllRow /></>}
             {session.localMode && <>
-            <SettingRow title={uiText("退出所有设备")} description={uiText("本地身份由本机服务提供，设备会话管理不适用")} control={<Button size="sm" disabled>{uiText("不适用")}</Button>} /></>}
+            <SettingRow title={uiText("退出所有设备")} control={<Button size="sm" disabled>{uiText("不适用")}</Button>} /></>}
           </FormSection>}
           </>}
           {!['company','overview','activity','appearance'].includes(sec) && <div className="mist-sticky-foot"><span className="mist-note">{uiText(saving ? '正在保存…' : '选择项即时保存，文字离开输入框后保存')}</span><span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></div>}

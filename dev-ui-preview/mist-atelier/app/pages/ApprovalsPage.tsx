@@ -93,7 +93,7 @@ export function ApprovalsPage() {
     ]} />
   </DetailBody> : <EmptyState title={uiText("选择一项审批")} description={uiText("左侧列表按当前账号的授权显示；选中后核对提交快照再决定。")} />;
   return <MistPage>
-    <PageHeader eyebrow={uiText("我的事务 · 审批与放行")} title={uiText("审批与放行")} description={uiText("订单、报价偏差、采购、付款申请、索赔方案与风险处置的审批集中在这里；决定写回原业务，原业务页同步更新。")} actions={<Button icon={RefreshCw} disabled={reviews.busy} onClick={() => void reviews.refresh()}>{uiText("刷新")}</Button>} />
+    <PageHeader eyebrow={uiText("我的事务 · 审批与放行")} title={uiText("审批与放行")} actions={<Button icon={RefreshCw} disabled={reviews.busy} onClick={() => void reviews.refresh()}>{uiText("刷新")}</Button>} />
     {reviews.error && <Banner tone="bad" title={uiText(reviews.error)} actions={<Button size="sm" onClick={reviews.clearError}>{uiText("知道了")}</Button>} />}
     {reviews.intent && <Banner tone="warn" title={uiText("有审批结果待核对")} actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>{uiText("核对原请求")}</Button>}>{uiText("上次保存审批决定时没有收到明确结果。核对会查询同一请求编号，不会重复决定。")}</Banner>}
     <Banner tone="neutral" title={uiText("开产与出运按硬性条件放行")}>{uiText("订单已批准、定金到账、产前样/船样 QC 通过、出口清关完成后，由业务/后勤在原业务页放行，不需要另行审批；信用冻结客户的出运须先在风险管理申请「带风险放行」，批准后在这里出现。未满足条件先行开裁等受控例外暂不支持。")}</Banner>

@@ -47,7 +47,7 @@ export function DesignSystemPage() {
   const [q, setQ] = React.useState('');
   return (
     <MistPage>
-      <PageHeader eyebrow={uiText("交付 · Mist Atelier v1.0")} title={uiText("设计系统")} description={uiText("Bambook · Flat Frost。代码：styles/mist + components/mist；文档：docs/mist-atelier。")}
+      <PageHeader eyebrow={uiText("交付 · Mist Atelier v1.0")} title={uiText("设计系统")}
         actions={<Button variant="primary" iconRight={ArrowRight} onClick={() => setTab('map')}>{uiText("全站模块映射")}</Button>} />
       <Tabs value={tab} onChange={setTab} options={[{ value: 'rules', label: '原则' }, { value: 'color', label: '色彩' }, { value: 'type', label: '字体' }, { value: 'size', label: '尺寸与圆角' }, { value: 'comp', label: '组件' }, { value: 'map', label: '全站映射', count: MODULE_MAP.length }]} />
       {tab === 'rules' && <section className="mist-grid">{RULES.map(([t, d], i) => <Card key={t} className="mist-col-4"><div className="mist-card-body" style={{ paddingTop: 22 }}><span className="mist-eyebrow">0{uiText(i + 1)}</span><div className="mist-h2" style={{ margin: '8px 0 6px' }}>{t}</div><p className="mist-sub" style={{ fontSize: 13.5 }}>{d}</p></div></Card>)}

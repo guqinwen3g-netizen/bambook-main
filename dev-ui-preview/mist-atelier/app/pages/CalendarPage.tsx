@@ -71,7 +71,7 @@ export function CalendarPage() {
   const resolve = async () => {if(locked.current||loading||saving)return;const original=pending,ticket=++sequence.current,owns=()=>live.current&&scope.current===scopeKey&&sequence.current===ticket;locked.current=true;setBusy(true);try{const receipt=await recover();if(receipt&&owns()){if(original?.command?.type==='calendar.save')setEditing(undefined);setFailure('');toast('原操作结果已核对');}}catch(cause){if(owns())setFailure(String(cause));}finally{if(owns()){locked.current=false;setBusy(false);}}};
   const recovery=pending?<Button loading={busy||saving} onClick={()=>void resolve()}>{uiText("核对原操作结果")}</Button>:null;
   return <MistPage>
-    <PageHeader eyebrow={uiText("我的事务 · 日历")} title={uiText("日历")} description={uiText("查看本周安排，记录日程并返回关联业务。")} actions={<Button variant={activeEditing===undefined?'primary':'quiet'} icon={Plus} disabled={!state||loading||saving||!!pending||busy||activeEditing!==undefined} onClick={()=>open()}>{uiText("新建日程")}</Button>} />
+    <PageHeader eyebrow={uiText("我的事务 · 日历")} title={uiText("日历")} actions={<Button variant={activeEditing===undefined?'primary':'quiet'} icon={Plus} disabled={!state||loading||saving||!!pending||busy||activeEditing!==undefined} onClick={()=>open()}>{uiText("新建日程")}</Button>} />
     <Toolbar right={<Button icon={RefreshCw} loading={loading} disabled={busy||saving} onClick={()=>void retry()}>{uiText("刷新")}</Button>}>
       <Button icon={ChevronLeft} aria-label={uiText("上一周")} onClick={()=>setSelected(date=>shiftDay(date,-7))}>{uiText("上一周")}</Button>
       <Button onClick={()=>setSelected(dayKey(businessNow()))}>{uiText("今天")}</Button>

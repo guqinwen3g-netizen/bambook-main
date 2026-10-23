@@ -20,7 +20,7 @@ export function StatesPage() {
   const filtered = EXAMPLE_ROWS.filter(row => row.a.toLowerCase().includes(query.trim().toLowerCase()));
   return (
     <MistPage>
-      <PageHeader eyebrow={uiText("交付 · 规范")} title={uiText("空 / 加载 / 错误")} description={uiText("受控组件状态示例；不创建业务记录，也不发送权限申请。")} />
+      <PageHeader eyebrow={uiText("交付 · 规范")} title={uiText("空 / 加载 / 错误")} />
       <section className="mist-grid">
         <Card className="mist-col-6"><CardHeader title={uiText(loading ? '加载中 · 表格' : '加载完成 · 表格')} sub={uiText("点击下方重试，查看从骨架到示例结果的变化")} />
           <DataTable loading={loading} rows={EXAMPLE_ROWS} rowKey={row => row.id} columns={COLUMNS} /></Card>

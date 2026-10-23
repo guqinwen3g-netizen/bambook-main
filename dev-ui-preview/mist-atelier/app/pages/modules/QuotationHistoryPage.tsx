@@ -303,7 +303,6 @@ export function QuotationHistoryPage() {
       <PageHeader
         eyebrow={uiText(q.code + " · " + line.style)}
         title={uiText("历史报价条件对照")}
-        description={uiText("先检索准确历史，再逐项核对条件；报价、还价和主线接受不是同一事实。")}
         actions={
           <Button
             icon={Download}

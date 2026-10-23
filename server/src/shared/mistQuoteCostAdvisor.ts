@@ -3,6 +3,7 @@ import type { QuoteCostInput, QuoteCostResult } from "./mistQuotationCosting";
 import type { QuoteHistoryReference } from "./mistQuotationHistoryEvidence";
 export const QUOTE_COST_ADVISOR_POLICY = "quote-cost-advisor-v1";
 export type QuoteCostAdvisorRequest = {
+  locale?: "zh-CN" | "en-US";
   quotationId: string;
   lineId: string;
   expectedTarget: string;

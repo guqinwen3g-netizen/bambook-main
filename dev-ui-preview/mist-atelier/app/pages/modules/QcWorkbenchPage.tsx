@@ -207,7 +207,7 @@ export function QcWorkbenchPage() {
     }} />; })() : null;
   if (full.active && current && state) return <ListDetailPage backLabel="QC 工作台" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
-    <PageHeader eyebrow={uiText("订单履约 · 专业检验")} title={uiText("QC 工作台")} description={uiText("先选专业板块，再处理准确样品与生产分支。报告回到业务来源，由业务员继续主线。")}
+    <PageHeader eyebrow={uiText("订单履约 · 专业检验")} title={uiText("QC 工作台")}
       actions={<>
         <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>{uiText("刷新")}</Button>
         <Button variant="primary" icon={Plus} disabled={!canRequest} title={uiText(canRequest ? undefined : '送检由业务员在准确来源发起')} onClick={request}>{uiText("从来源发起QC")}</Button>
@@ -361,7 +361,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     : (task.kind === 'production' && (task.state === 'blocked' || task.state === 'awaiting_business') ? '复验通过后转为待业务恢复，由业务员确认继续生产。' : '结论回到来源，解锁来源的下一步。');
   return <MistPage>
     <BackLink onClick={onClose}>{uiText("返回QC工作台")}</BackLink>
-    <PageHeader eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} />
+    <PageHeader description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} />
     {failure && <div className="mist-section"><Banner tone="bad" title={uiText("报告未保存")}>{failure}</Banner></div>}
     <div className="mist-detail" data-layout="main-rail">
       <div>

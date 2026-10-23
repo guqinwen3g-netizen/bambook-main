@@ -167,7 +167,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   if (full.active && detail) return <ListDetailPage backLabel="季节性与趋势" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   const createLabel = tab === 'seasons' ? '新建季节' : tab === 'trends' ? '记录趋势' : '新建展会';
   return <MistPage>
-    <PageHeader eyebrow={uiText("客户与市场 · 季节与趋势")} title={uiText("季节性与趋势")} description={uiText("订单、开发与报价按季节编码归季；趋势有来源依据并关联面料档案；展会线索可一键转入 CRM。")}
+    <PageHeader eyebrow={uiText("客户与市场 · 季节与趋势")} title={uiText("季节性与趋势")}
       actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(tab === 'seasons' ? seasonSpec() : tab === 'trends' ? trendSpec() : showSpec())}>{createLabel}</Button>}</>} />
     {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有季节与趋势写权限。")}</Banner></div>}
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}

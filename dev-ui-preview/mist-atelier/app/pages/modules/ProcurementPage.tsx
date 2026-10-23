@@ -177,7 +177,7 @@ export function ProcurementPage() {
   const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有采购写权限，可以查看单据与轨迹；新建、发出与交付登记由对应业务组经办人操作。")}</Banner></div> : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
-    <PageHeader eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")} description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style} · ${sourceLine.name} · 只显示本条目的采购与委外。` : '从准确订单条目形成供应承诺：批准后线下发出、登记供应商确认，再逐次登记真实交付与回交。'))}
+    <PageHeader description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style} · ${sourceLine.name} · 只显示本条目的采购与委外。` : '从准确订单条目形成供应承诺：批准后线下发出、登记供应商确认，再逐次登记真实交付与回交。'))} eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")}
       actions={<>
         {sourceOrder && sourceLine && <Button onClick={() => go('orders/detail', sourceOrder.id, { orderLineId: sourceLine.id, customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
         {route.orderLineId && <Button onClick={() => go('procurement')}>{uiText("查看全部采购")}</Button>}

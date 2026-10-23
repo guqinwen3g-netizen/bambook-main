@@ -97,7 +97,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
     {key:'go',header:'',width:'16px',hideOnMobile:true,render:()=> <span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span>},
   ];
   return <MistPage width={mode==='board'?'wide':undefined}>
-    <PageHeader eyebrow={uiText("订单履约 · 开发")} title={uiText("开发与寻样")} description={uiText("成衣开发、面料开发与面料寻样分开记录；每一版都可追溯到工厂、实物与报告。")} actions={<Button variant="primary" icon={Plus} disabled={!state} onClick={create}>{tabConfig.create}</Button>} />
+    <PageHeader eyebrow={uiText("订单履约 · 开发")} title={uiText("开发与寻样")} actions={<Button variant="primary" icon={Plus} disabled={!state} onClick={create}>{tabConfig.create}</Button>} />
     <Tabs value={tab} onChange={value=>switchTab(value)} options={DEVELOPMENT_LIST_TABS.map(item=>({value:item.value,label:item.label,count:tabCounts[item.value]}))} />
     <Toolbar right={domain&&!drafting?<Segmented ariaLabel={uiText("视图")} value={mode} onChange={value=>setMode(value as 'list'|'board')} options={[{value:'list',icon:List,ariaLabel:'列表视图'},{value:'board',icon:Columns3,ariaLabel:'看板视图'}]} />:undefined}>
       <SearchField value={q} onChange={setQ} placeholder={uiText(tab==='sourcing'?'面料需求、编号或答复':drafting?'草稿名称、客户款号或客户':'名称、客户款式或编号')} />

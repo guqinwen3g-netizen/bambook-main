@@ -149,9 +149,7 @@ describe("quote cost AI advisory boundary", () => {
       scenario: { suggestedPrice: "13.3333", suggestedQuotePrice: "13.33" },
     });
     expect(JSON.stringify(f.workspace)).toBe(before);
-    expect(f.complete.mock.calls[0][0].systemPrompt).toBe(
-      QUOTE_COST_ADVISOR_SYSTEM,
-    );
+    expect(f.complete.mock.calls[0][0].systemPrompt).toContain(QUOTE_COST_ADVISOR_SYSTEM);
     expect(JSON.stringify(r)).not.toContain("not-a-real-key");
   });
   it("sends only exact selected quote evidence, not contacts or unrelated quotes", async () => {
@@ -394,3 +392,5 @@ describe("quote cost AI advisory boundary", () => {
     );
   });
 });
+
+it('applies English to advisory text while keeping structured schema and company data intact',async()=>{const f=fixture(),before=JSON.stringify(f.workspace);await runQuoteCostAdvisor({...f,body:{...f.body,locale:'en-US'}},f.deps);const prompt=f.complete.mock.calls[0][0].systemPrompt;expect(prompt).toContain('Default response language: English');expect(prompt).toContain('keep JSON keys, enum values, IDs and numeric formats unchanged');expect(JSON.stringify(f.workspace)).toBe(before);await expect(runQuoteCostAdvisor({...f,body:{...f.body,locale:'invalid'}},f.deps)).rejects.toMatchObject({code:'INVALID_INPUT'});});

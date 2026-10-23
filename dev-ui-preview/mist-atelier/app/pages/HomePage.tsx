@@ -92,8 +92,7 @@ export function HomePage() {
   const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString(interfaceLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
   return (
     <MistPage>
-      <PageHeader variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
-        description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : ui`${uiText(hidden.size ? '当前可见' : '当前有')} ${allTasks.length + queue.length} 件事等你推进，其中 ${allTasks.filter(task => task.due === today).length} 件今天到期${queue.length ? ui`，${queue.length} 件来自审批、QC、出运或财务` : ''}。`}
+      <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : ui`${uiText(hidden.size ? '当前可见' : '当前有')} ${allTasks.length + queue.length} 件事等你推进，其中 ${allTasks.filter(task => task.due === today).length} 件今天到期${queue.length ? ui`，${queue.length} 件来自审批、QC、出运或财务` : ''}。`} variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
         actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
           <Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建")}</Button></>} />
       {(error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}

@@ -187,7 +187,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   })() : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="报价管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title={uiText("报价操作未完成")}>{failure || error}</Banner></div>}{detail}</ListDetailPage>;
   return <MistPage>
-    <PageHeader eyebrow={uiText("订单履约 · 报价")} title={uiText("报价管理")} description={uiText("按客户接受的版本转订单；改价或续期另出新版本，旧版本保留。")}
+    <PageHeader eyebrow={uiText("订单履约 · 报价")} title={uiText("报价管理")}
       actions={<>
         <Button icon={Download} onClick={() => downloadModuleCsv('报价台账.csv', ['报价号', '版本', '客户', '板块', '币种', '金额', '贸易术语', '付款条件', '有效期', '状态'], rows.map(q => [q.code, version(q), customerName(q.customerId), domainOf(q) === 'fabric' ? '面料' : '成衣', q.currency, q.total, q.deliveryTerms, q.paymentTerms, q.validUntil, quotationStageLabel(q)]))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={onCreate}>{uiText("新建报价")}</Button>}

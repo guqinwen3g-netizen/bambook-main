@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '将本行报价依据及选中历史发送给 AI 审阅': 'Send this line’s quote evidence and selected history for AI review',
   '负责人': 'Owner', '目标日期': 'Target date', '当前状态': 'Status', '开发目标': 'Development target',
   '需求与计划': 'Requirements & planning', '工厂与实物': 'Factory & sample', '需求方确认': 'Requester confirmation',
   '成衣开发案': 'Garment developments', '面料开发案': 'Fabric developments', '面料寻样': 'Fabric sourcing',
