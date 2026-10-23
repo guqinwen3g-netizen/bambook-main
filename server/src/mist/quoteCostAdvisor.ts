@@ -1,4 +1,4 @@
-import { responseLocale, responseLanguagePrompt } from "./responseLanguage";
+import { responseLocale, responseLanguagePrompt, responseUserMessage } from "./responseLanguage";
 /** No business commands or autonomous pricing tools are available to this advisor. */
 import { createLlmCompleter } from "../ai/llmProviders";
 import { hasScope } from "../auth/permissionService";
@@ -187,7 +187,7 @@ export async function runQuoteCostAdvisor(
           ...transport,
           systemPrompt: QUOTE_COST_ADVISOR_SYSTEM + "\n" + responseLanguagePrompt(locale),
           jsonMode: true,
-          messages: [{ role: "user", content: material }],
+          messages: [{ role: "user", content: material }, { role: "user", content: responseUserMessage("Return the required JSON object. Keep its keys and numeric formats unchanged.", locale) }],
           temperature: 0.1,
         }),
     },

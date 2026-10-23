@@ -309,7 +309,7 @@ describe("quote cost AI advisory boundary", () => {
     await runQuoteCostAdvisor(f, f.deps);
     const sent = f.complete.mock.calls[0][0];
     expect(sent.systemPrompt).toContain("不可信资料");
-    expect(sent.messages).toHaveLength(1);
+    expect(sent.messages).toHaveLength(2);
     expect(sent.messages[0].role).toBe("user");
     expect(sent.systemPrompt).not.toContain("IGNORE RULES");
   });
@@ -394,3 +394,5 @@ describe("quote cost AI advisory boundary", () => {
 });
 
 it('applies English to advisory text while keeping structured schema and company data intact',async()=>{const f=fixture(),before=JSON.stringify(f.workspace);await runQuoteCostAdvisor({...f,body:{...f.body,locale:'en-US'}},f.deps);const prompt=f.complete.mock.calls[0][0].systemPrompt;expect(prompt).toContain('Default response language: English');expect(prompt).toContain('keep JSON keys, enum values, IDs and numeric formats unchanged');expect(JSON.stringify(f.workspace)).toBe(before);await expect(runQuoteCostAdvisor({...f,body:{...f.body,locale:'invalid'}},f.deps)).rejects.toMatchObject({code:'INVALID_INPUT'});});
+
+it('reinforces the advisory language after the evidence without changing its JSON material',async()=>{const f=fixture();await runQuoteCostAdvisor({...f,body:{...f.body,locale:'en-US'}},f.deps);const messages=f.complete.mock.calls[0][0].messages;expect(()=>JSON.parse(messages[0].content)).not.toThrow();expect(messages.at(-1)?.content).toContain('Interface language: English (en-US)');expect(messages.at(-1)?.content).toContain('Keep its keys and numeric formats unchanged');});
