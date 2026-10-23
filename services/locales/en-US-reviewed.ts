@@ -148,4 +148,7 @@ export const reviewedEnglish: Record<string, string> = {
   '请上传核对后的发票原件': 'Upload the verified invoice original',
   '公司支出不能直接发起开票，请按客户收费项开具发票': 'Invoice agreed customer charges rather than company expenses',
   '开发发票由业务员开具，财务只确认应收': 'Sales issues development invoices; finance confirms the receivable',
+  '暂无实测记录': 'No measurements recorded', '暂无 QC 报告': 'No QC report',
+  '暂无催收记录': 'No collection records', '暂无操作记录': 'No activity',
+  '未签发，未形成应收。': 'Not issued; no receivable recorded.', '确认后扣减库存': 'Stock is deducted on confirmation',
 };
