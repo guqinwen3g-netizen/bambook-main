@@ -313,3 +313,14 @@ it('keeps customer confirmation inactive while QC is pending or rejected',()=>{
  const pending={...version('va','R1-A','QC'),qc:null};expect(developmentStepStates(record,pending).slice(2)).toEqual(['now','todo','todo']);
  const rejected={...pending,qc:{...version('va','R1-A','QC').qc!,result:'reject' as const}};expect(developmentStepStates(record,rejected).slice(2)).toEqual(['blocked','todo','todo']);
 });
+
+it('blocks customer-confirmation shipping for NOK but permits an explicit factory-rework purpose with a reason',async()=>{
+ const sample={id:'s-nok',code:'SMP-NOK',name:'首样',form:'开发样',unit:'件',quantity:1,available:1,location:'样品室',size:'M',color:'蓝',source:{kind:'version',devId:'dev-a',versionId:'va'}};
+ bridge.current.state.devs[0]={...record,values:{...record.values,domain:'garment'}};
+ bridge.current.state.versions[0]={...version('va','R1-A','QC'),qc:{...version('va','R1-A','QC').qc!,result:'reject'}};
+ bridge.current.state.fulfillment={samples:[sample],sampleMovements:[],qcTasks:[],qcReports:[]};await mount();await click('寄样');await fill('寄出数量（件）','1');await fill('收件方','客户');
+ expect((getByRole(document.body,'button',{name:'确认寄出'}) as HTMLButtonElement).disabled).toBe(true);expect(document.body.textContent).toContain('不能寄客户确认样');
+ const purpose=getByRole(document.body,'combobox',{name:'寄送用途'}) as HTMLSelectElement;await act(async()=>{purpose.value='rework';purpose.dispatchEvent(new Event('change',{bubbles:true}));});
+ expect((getByRole(document.body,'button',{name:'确认寄出'}) as HTMLButtonElement).disabled).toBe(true);await fill('收件方','原工厂');await fill('用途说明','首样仅作对比，重新打样');await click('确认寄出');
+ expect(bridge.current.run).toHaveBeenCalledWith({type:'development.sample.dispatch',payload:expect.objectContaining({sampleId:'s-nok',purpose:'rework',recipient:'原工厂',note:'首样仅作对比，重新打样'})});expect(bridge.current.state.versions[0].qc.result).toBe('reject');
+});

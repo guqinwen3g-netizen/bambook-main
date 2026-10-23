@@ -15,11 +15,11 @@ function fixture(){
 
 
 describe('BB-DEV-10 product archive from an exact version',()=>{
-  it('converts R2-B after a conditional QC without customer confirmation and links both ways',()=>{
+  it('converts R2-B-2 after a conditional QC without customer confirmation and links both ways',()=>{
     const f=fixture();f.garment.factories=['A厂','B厂'];
     const first=f.run({type:'development.submit',payload:{values:f.garment,fileIds:[]}}),devId=first.devId!;
     const r2=f.run({type:'development.round.create',payload:{devId,factories:['A厂','B厂'],requirements:'第二轮：袖长 -1cm',targetDate:'2026-11-01'}});
-    const b=f.state.versions.find(v=>r2.versionIds.includes(v.id)&&v.factory==='B厂')!;expect(b.label).toBe('R2-B');
+    const b=f.state.versions.find(v=>r2.versionIds.includes(v.id)&&v.factory==='B厂')!;expect(b.label).toBe('R2-B-2');
     f.run({type:'development.recordSample',payload:{devId,versionId:b.id,sample:'S-R2B',quantity:1,returnedAt:f.ctx.now}});
     expect(()=>f.run({type:'market.product.fromVersion',payload:{devId,versionId:b.id,sku:'GA-R2B'}})).toThrow(/QC 通过或有保留通过/);
     f.run({type:'development.recordQc',payload:{devId,versionId:b.id,qc:{result:'conditional',reviewer:'QC',reviewedAt:f.ctx.now,report:'QC-R2B',opinion:'袖口需关注',measurements:[]}}});

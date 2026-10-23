@@ -116,3 +116,14 @@ it('records external testing separately from a confirmation send while preservin
  f.unchanged(()=>send(''),/用途说明/);send('外检纤维成分');
  expect(f.samples()[0].available).toBe(1);expect(f.version().qc).toBeNull();expect(f.version().dispatches!.at(-1)).toMatchObject({purpose:'testing',note:'外检纤维成分'});expect(f.state.fulfillment.sampleMovements.at(-1)).toMatchObject({kind:'send',sendPurpose:'testing'});
 });
+
+it('binds a one-item development QC request and requires an explicit item when multiple forms exist',()=>{
+ const f=fixture();f.record(1,'色样','份');const sample=f.samples()[0];
+ const request=()=>f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架A',contact:'',due:'2026-10-16'}});
+ const first=request().id;expect(f.state.fulfillment.qcTasks.find(task=>task.id===first)!.sampleId).toBe(sample.id);
+ f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:2,unit:'米',location:'架B'}});
+ f.unchanged(request,/准确实物/);
+ const second=f.samples().find(row=>row.id!==sample.id)!;
+ f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},sampleId:second.id,domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架B',contact:'',due:'2026-10-16'}});
+ expect(f.state.fulfillment.qcTasks.map(task=>task.sampleId)).toEqual([sample.id,second.id]);
+});
