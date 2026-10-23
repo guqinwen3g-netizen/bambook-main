@@ -74,3 +74,21 @@ it('retains frozen conditional sample findings after production is released',asy
  await mount({view:'production-board',productionId:'production-b'});
  expect(document.body.textContent).toContain('样品关注项');expect(document.body.textContent).toContain('SMP-STONE');expect(document.body.textContent).not.toContain('卷边须在首批大货复核');await click('查看关注项');expect(document.body.textContent).toContain('卷边须在首批大货复核');
 });
+
+it('keeps release evidence on demand and omits obsolete implementation notes',async()=>{
+ const fact=bridge.state!.fulfillment.productionFacts.find(row=>row.productionId==='production-b')!;
+ fact.release!.note='完整的放行核对依据';
+ await mount({view:'production-board',productionId:'production-b'});
+ expect(document.body.textContent).not.toContain('尚未接入');expect(document.body.textContent).not.toContain('完整的放行核对依据');
+ await click('放行记录');expect(document.body.textContent).toContain('完整的放行核对依据');
+});
+
+it('shows a short paused status and keeps completion evidence out of status values',async()=>{
+ const fact=bridge.state!.fulfillment.productionFacts.find(row=>row.productionId==='production-b')!;
+ fact.hold={at:context.now,actor:'业务员',category:'quality',reason:'复检中'};
+ fact.completion={id:'completion',quantity:20,sizeQuantities:[],date:context.now.slice(0,10),at:context.now,actor:'业务员',evidence:'完整完工交接依据',fileIds:[]};
+ await mount({view:'production-board',productionId:'production-b'});
+ expect(document.body.textContent).toContain('已暂停');expect(document.body.textContent).toContain('已完工');
+ expect(document.body.textContent).not.toContain('完整完工交接依据');
+ await click('完工记录');expect(document.body.textContent).toContain('完整完工交接依据');
+});

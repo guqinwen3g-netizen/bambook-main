@@ -121,4 +121,6 @@ export const reviewedEnglish: Record<string, string> = {
   '未选择批次': 'No batch selected', '未选择单据': 'No document selected',
   '订单来源不匹配': 'Order source does not match', '退货来源不匹配': 'Return source does not match',
   '出运记录不存在': 'Shipment not found',
+  '放行记录': 'Release record',
+  '完工状态': 'Completion status', '完工记录': 'Completion record', '差异确认记录': 'Variance acceptance record',
 };
