@@ -8,7 +8,7 @@ import { developmentDomain, type DevelopmentDomain } from './mistDevelopmentDoma
 import { developmentClosure, factoryTaskSync } from './mistDevelopmentRounds';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
 
-export const DEV_NOTICE_TEMPLATE_VERSION = 2 as const;
+export const DEV_NOTICE_TEMPLATE_VERSION = 3 as const;
 export type DevNoticeContent = {
   domain: DevelopmentDomain; title: string; factory: string;
   devId: string; devCode: string; devName: string; versionId: string; versionLabel: string; roundNumber: number; roundTargetDate: string;
