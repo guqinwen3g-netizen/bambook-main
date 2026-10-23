@@ -55,7 +55,7 @@ export function MesHistoryPage() {
   const detail = selected ? <MesDetail row={selected} orderCode={id => state?.orders.find(o => o.id === id)?.code} onOrder={id => go('orders/detail', id)} />
     : <EmptyState icon={History} title={uiText("加工记录详情")} description={uiText(loading ? '正在读取历史记录' : '从列表选择一张历史单据，查看数量、交付、验收与来源')} compact />;
   return <MistPage width="wide">
-    <PageHeader eyebrow={uiText("平台 · 历史")} title={uiText("历史加工记录")} description={uiText("只读保留原系统委外加工单据，不能新建或修改；新的生产跟踪在“生产进度”，委外加工从“采购管理”发起。")}
+    <PageHeader eyebrow={uiText("平台 · 历史")} title={uiText("历史加工记录")}
       actions={<>
         <Button icon={Download} disabled={!shown.length} onClick={() => exportRecords('历史加工记录', ['历史单号', '工艺', '描述', '数量', '单位', '币种', '金额', '下单日', '计划交付', '实际交付', '合格', '不合格', '状态'], shown.map(r => [r.orderNumber, MES_PROCESS[r.processType] || r.processType, r.description || '', r.quantity, r.unit, r.currency, r.totalAmount, r.orderDate || '', r.plannedDeliveryDate || '', r.actualDeliveryDate || '', r.qualityAcceptedQty ?? '', r.qualityRejectedQty ?? '', statusOf(r).label]))}>{uiText("导出本批")}</Button>
         <Button icon={RefreshCw} onClick={() => setRetry(v => v + 1)}>{uiText("重新读取")}</Button>

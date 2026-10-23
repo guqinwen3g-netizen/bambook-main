@@ -155,7 +155,7 @@ export function FinancePage() {
   };
   if(area==='records'&&route.detail==='full'&&route.id)return <FinanceRecords onReceipt={openReceipt}/>;
   return <MistPage>
-    <PageHeader eyebrow={uiText("财务与成本 · 财务")} title={uiText("财务管理")} description={uiText("票据、收付款与资金归属分别记录；不以财务状态替代业务履约。")}
+    <PageHeader eyebrow={uiText("财务与成本 · 财务")} title={uiText("财务管理")}
       actions={<>{(area==='receivables'||area==='records')&&<>{area==='records'&&<Button icon={Upload} disabled={busy||!canVoucher} onClick={()=>fileInput.current?.click()}>{uiText("导入流水")}</Button>}<Button icon={Upload} disabled={busy||!canVoucher} onClick={() => tab === 'pay'||area==='records' ? setPaymentOpen(true) : fileInput.current?.click()}>{uiText(tab === 'pay'||area==='records' ? '登记付款' : '导入流水')}</Button>{area==='receivables'&&<Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>}</>}<Button disabled={busy} onClick={()=>void refresh()}>{uiText("刷新")}</Button></>} />
     <AccessHiddenNotice keys={['receivables','receipts','payments','payables','funding']} />
     {!canFund&&!canVoucher&&<Banner tone="neutral" title={uiText("财务只读")}>{uiText("没有财务写权限，可查看票据与资金事实，不能导入到账、登记付款、采纳建议、核销或调整资金归属。")}</Banner>}

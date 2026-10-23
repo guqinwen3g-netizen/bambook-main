@@ -150,8 +150,7 @@ export function CustomsPage() {
   const exportRows = () => exportRecords('报关台账', ['记录', '报关单号', '出运', '客户', 'HS编码', '报关行', '原产地', '成交方式', '状态', '申报日', '放行日'], rows.map(c => [c.code, c.declarationNo, shipmentOf(c)?.code || '', shipmentOf(c)?.customer || '', c.hsCode, c.broker, c.origin, c.tradeMode, CUSTOMS_LABEL[c.status], c.declaredAt, c.clearedAt]));
 
   return <MistPage width="wide">
-    <PageHeader eyebrow={uiText("订单履约 · 出口")} title={uiText("外贸与报关")}
-      description={uiText(invalidContext ? '指定出运不存在，请返回货运管理重新进入。' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer} · 仅显示本票报关。` : '后勤单证按出运登记外部申报与放行事实；本系统不代替海关或单一窗口申报。退税由财务按退税率版本配单申报、登记核准与到账；信用证按来证登记条款与交单。')}
+    <PageHeader description={uiText(invalidContext ? '指定出运不存在，请返回货运管理重新进入。' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer} · 仅显示本票报关。` : '后勤单证按出运登记外部申报与放行事实；本系统不代替海关或单一窗口申报。退税由财务按退税率版本配单申报、登记核准与到账；信用证按来证登记条款与交单。')} eyebrow={uiText("订单履约 · 出口")} title={uiText("外贸与报关")}
       actions={<>
         {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>{uiText("返回出运")}</Button>}
         {hasContext && <Button onClick={() => go('customs')}>{uiText("查看全部报关")}</Button>}

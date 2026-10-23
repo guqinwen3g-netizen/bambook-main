@@ -10,12 +10,12 @@ import { useNav } from '../nav';
 export function ModuleTemplatePage() {
   const { route, go } = useNav();
   const m = MODULE_MAP.find(x => x.view === route.view);
-  if (!m) return <MistPage><PageHeader title={uiText("页面不存在")} description={ui`未找到视图「${route.view}」。`} actions={<Button variant="primary" onClick={() => go('cockpit')}>{uiText("回到我的工作")}</Button>} /></MistPage>;
+  if (!m) return <MistPage><PageHeader description={ui`未找到视图「${route.view}」。`} title={uiText("页面不存在")} actions={<Button variant="primary" onClick={() => go('cockpit')}>{uiText("回到我的工作")}</Button>} /></MistPage>;
   const t = TEMPLATES[m.template];
   const d = m.detail ? TEMPLATES[m.detail] : undefined;
   return (
     <MistPage>
-      <PageHeader eyebrow={ui`${m.group} · 迁移批次 Wave ${m.wave}`} title={uiText(m.label)} description={ui`列表页使用「${t.name}」${d ? `，详情页使用「${d.name}」` : ''}${m.create ? '，新建使用「T9 新建 / 编辑」' : ''}。`}
+      <PageHeader description={ui`列表页使用「${t.name}」${d ? `，详情页使用「${d.name}」` : ''}${m.create ? '，新建使用「T9 新建 / 编辑」' : ''}。`} eyebrow={ui`${m.group} · 迁移批次 Wave ${m.wave}`} title={uiText(m.label)}
         actions={t.page && <Button variant="primary" iconRight={ArrowRight} onClick={() => go(t.page!)}>{uiText("查看 ")}{t.name}{uiText(" 参考页")}</Button>} />
       <div className="mist-section"><Banner icon={LayoutTemplate} title={uiText("这一页在参考应用里没有单独画，因为它和模板结构完全一致")}>{uiText("照抄模板页的结构与组件，只替换数据字段。")}{uiText(m.notes ? `注意：${m.notes}` : '')}</Banner></div>
       <section className="mist-grid">

@@ -51,7 +51,7 @@ export function NotificationsPage() {
     { key: 'open', header: '', width: '96px', render: n => <Button size="sm" variant="quiet" iconRight={ArrowUpRight} disabled={busy || !canOpen(n)} title={uiText(canOpen(n) ? undefined : '当前账号没有该对象的查看权限')} onClick={event => { event.stopPropagation(); open(n); }}>{uiText(canOpen(n) ? '打开' : '无权限')}</Button> },
   ];
   return <MistPage>
-    <PageHeader eyebrow={uiText("我的事务 · 通知")} title={uiText("通知中心")} description={uiText("本公司的业务提醒。打开一条会标为已读并直达对应对象；不发送邮件或外部消息。")}
+    <PageHeader eyebrow={uiText("我的事务 · 通知")} title={uiText("通知中心")}
       actions={<><Button icon={Settings2} onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("通知订阅")}</Button>
         <Button variant="primary" icon={CheckCheck} disabled={busy || !unread} loading={workspace.saving} onClick={readAll}>{uiText("全部标为已读")}</Button></>} />
     {error && <Banner tone="bad" title={uiText(error)} actions={<Button size="sm" onClick={() => setError('')}>{uiText("知道了")}</Button>} />}

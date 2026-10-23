@@ -81,7 +81,7 @@ export function OrderListPage() {
     { key: 'go', header: '', width: '16px', hideOnMobile: true, render: () => <span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span> },
   ];
   return <MistPage>
-    <PageHeader eyebrow={uiText("订单履约 · 订单")} title={uiText("订单管理")} description={uiText(customerId ? `${state?.customers.find(customer => customer.id === customerId)?.name ?? '客户'}的订单` : '所有成衣与面料订单的履约进度、金额与交期。')}
+    <PageHeader description={uiText(customerId ? `${state?.customers.find(customer => customer.id === customerId)?.name ?? '客户'}的订单` : '所有成衣与面料订单的履约进度、金额与交期。')} eyebrow={uiText("订单履约 · 订单")} title={uiText("订单管理")}
       actions={<><Button icon={Download} disabled={!state} onClick={() => { downloadMistCsv('订单台账.csv', ['订单', '客户', '季节', '数量', '币种', '金额', '交期', '负责人', '主单审批', '状态'], rows.map(order => [order.code, order.customer, order.season, quantityLabel(order), order.currency, order.amount, order.due, order.owner, approvalLabel(order), order.state])); toast('已导出订单台账'); }}>{uiText("导出")}</Button><Button variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>{uiText("新建订单")}</Button></>} />
     <OrderSourceDialog open={createOpen} onClose={() => setCreateOpen(false)} type={tab} customerId={customerId} canWrite={canWrite} />
     {error && <Banner tone="bad" title={uiText("订单读取失败")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}

@@ -329,7 +329,7 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
     } catch (e) { if (currentScope.current === bound) setError(e instanceof Error ? e.message : '删除失败'); }
   };
 
-  const header = <PageHeader title={uiText("工作助手")} description={uiText("在你的电脑上按指令干活，使用你本人的模型连接。对外发送、确认、删除等操作会先请你确认。")} actions={bridge ? <Button icon={Settings2} disabled={!accountReady} onClick={() => setSettings({ open: true, format: null })}>{uiText("我的模型")}</Button> : undefined} />;
+  const header = <PageHeader title={uiText("工作助手")} actions={bridge ? <Button icon={Settings2} disabled={!accountReady} onClick={() => setSettings({ open: true, format: null })}>{uiText("我的模型")}</Button> : undefined} />;
   if (!bridge) return <MistPage>{uiText(header)}{tabs}<Banner tone="warn" title={uiText("需在 Bambook 桌面端使用")}>{uiText("工作助手运行在你的电脑上，邮件、附件和模型凭据都留在本机，浏览器里无法使用。请在 Bambook 桌面端打开此页。")}</Banner></MistPage>;
   const provider = providers.find(p => p.id === providerId);
   const providerReady = provider ? (provider.format === 'chatgpt-subscription' ? !!chatgpt?.connected : provider.has_api_key) : false;

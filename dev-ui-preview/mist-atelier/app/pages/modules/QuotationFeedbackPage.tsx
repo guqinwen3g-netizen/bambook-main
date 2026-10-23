@@ -379,7 +379,6 @@ export function QuotationFeedbackPage() {
               : "登记客户反馈"
             : "报价客户反馈")
         }
-        description={uiText("客户原话、业务判断和未知原因分别记录；还价不等于成交，旧反馈不覆盖。")}
         actions={
           !editing && can && !frozen ? (
             <Button

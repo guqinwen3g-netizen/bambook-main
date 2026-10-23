@@ -30,6 +30,7 @@ describe('original Mist settings with server workspace commands', () => {
 
   it('preserves section navigation and saves the actual three-way theme and density', async () => {
     render(); expect(host.querySelector('.mist-wizard')).toBeTruthy(); expect(host.querySelectorAll('.mist-vsteps button')).toHaveLength(8); await click(button('外观与语言'));
+    expect(host.textContent).not.toContain('只在这台设备生效'); expect(host.textContent).not.toContain('雾蓝渐变');
     const dark = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(item => item.textContent?.startsWith('深色'))!; await click(dark);
     expect(seam.value.run).not.toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ theme: expect.anything() }) })); expect(localStorage.getItem('bambook.device.theme')).toBe('"dark"'); expect(dark.getAttribute('aria-checked')).toBe('true');
     const density = host.querySelector<HTMLSelectElement>('select[aria-label="列表密度"]')!;
@@ -40,13 +41,13 @@ describe('original Mist settings with server workspace commands', () => {
   it('persists notification switches with the shared field names', async () => {
     render(); await click(button('通知')); const controls = host.querySelectorAll<HTMLInputElement>('input[role="switch"]');
     await click(controls[1]); expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { notifications: { qc: true, shipping: false, suggestions: true, digest: false } } });
-    expect(host.textContent).toContain('不发送邮件');
+    expect(host.textContent).not.toContain('不发送邮件');
   });
   it('saves display profile on blur without mutating the authentication identity', async () => {
     render(); await click(button('账号')); const field = input('显示姓名', '公司显示名'); await blur(field);
     expect(seam.value.run).toHaveBeenCalledWith({ type: 'settings.update', payload: { profileName: '公司显示名' } });
     expect(seam.value.state.settings.profileName).toBe('公司显示名'); expect(seam.session.user.displayName).toBe('认证姓名');
-    expect(host.textContent).toContain('不改变登录账号、邮箱或密码');
+    expect(host.textContent).not.toContain('不改变登录账号、邮箱或密码');
   });
   it('retains typed edits after failed persistence and resets them on workspace replacement', async () => {
     seam.value.run.mockRejectedValue(new Error('保存失败，请重试')); render(); await click(button('公司成员'));
@@ -79,7 +80,7 @@ describe('workspace default currency and local-only settings',()=>{
   seam.value.run.mockRejectedValueOnce(new Error('币种保存失败'));render();await click(button('公司成员'));const select=host.querySelector<HTMLSelectElement>('select[aria-label="默认币种"]')!;expect(select.value).toBe('USD');await act(async()=>{select.value='CNY';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(host.textContent).toContain('币种保存失败');expect(seam.value.state.settings.companyProfile).toBeUndefined();
  });
  it('labels MFA and device session controls inapplicable for local identities while keeping them disabled',async()=>{
-  seam.session={...seam.session,localMode:true} as any;render();await click(button('安全'));expect(host.textContent).not.toContain('两步验证');expect(host.textContent).toContain('设备会话管理不适用');expect(button('不适用').disabled).toBe(true);
+  seam.session={...seam.session,localMode:true} as any;render();await click(button('安全'));expect(host.textContent).not.toContain('两步验证');expect(host.textContent).not.toContain('设备会话管理不适用');expect(button('不适用').disabled).toBe(true);
  });
 });
 

@@ -202,7 +202,7 @@ export function PlatformReportsPage() {
   };
 
   return <MistPage>
-    <PageHeader title={uiText("报表中心")} description={uiText("基于本公司的订单、采购与发票实时统计；销售额与账龄按币种分别统计；订单毛利可按所选汇率口径折算人民币，暂估另行标识。")} actions={<Button icon={Download} disabled={!state || tab === 'actual' || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>{uiText("导出当前报表")}</Button>} />
+    <PageHeader title={uiText("报表中心")} actions={<Button icon={Download} disabled={!state || tab === 'actual' || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>{uiText("导出当前报表")}</Button>} />
     {workspace.error && <Banner tone="bad" title={uiText("读取失败")}>{workspace.error}</Banner>}
     <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
     <section className="mist-section">{tab === 'sales' ? <>

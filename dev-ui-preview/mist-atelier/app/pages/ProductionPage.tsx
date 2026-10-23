@@ -84,7 +84,7 @@ export function ProductionPage() {
   const position = (date: string) => Math.max(0, Math.min(100, ((mistDate(date)?.getTime() ?? window.start.getTime()) - window.start.getTime()) / (window.end.getTime() - window.start.getTime()) * 100));
   if(operation)return operation.fields.length>3?<ModuleEditorPage spec={operation} onClose={()=>setOperation(null)}/>:<ModuleEditorDialog spec={operation} onClose={()=>setOperation(null)}/>;
   return <MistPage width="wide">
-    <PageHeader eyebrow={uiText("订单履约 · 生产")} title={uiText("生产进度")} description={uiText("先核对合同与样品并明确开产放行，按实际进度追加记录；最终完工数量与生产QC分别保存。")}
+    <PageHeader eyebrow={uiText("订单履约 · 生产")} title={uiText("生产进度")}
       actions={<><Segmented<ProductionRange> ariaLabel={uiText("范围")} value={range} onChange={setRange} options={[{ value: 'week', label: '本周' }, { value: 'month', label: '本月' },{ value:'all',label:'全部' }]} /><Button icon={CalendarRange} onClick={() => setGantt(value => !value)}>{uiText(gantt ? '看板' : '甘特图')}</Button></>} />
     <SummaryBar items={[{label:'在手分支',value:items.filter(item=>item.col!=='done').length,unit:'个',hint:[...units].map(([unit,qty])=>`${fmt(qty)} ${unit}`).join(' · ')||'暂无在手数量'},{label:'待业务放行',value:unreleased,unit:'个',hint:'放行前不能推进工序'},{label:'QC NOK',value:nokCount,unit:'个',hint:nokCount?'需暂停、复验后恢复':'暂无',hintTone:nokCount?'bad':undefined},{label:'交期风险 / 延期',value:items.filter(item=>item.risk).length,unit:'个',hint:'按分支统计'},{label:'待出运',value:items.filter(item=>item.col==='done').length,unit:'个',hint:'已完成尾期 QC'}]}/>
     {(failure || error) && <Banner tone="bad" title={uiText("生产记录未保存")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}

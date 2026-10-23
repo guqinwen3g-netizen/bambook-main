@@ -2,6 +2,8 @@
 
 ## 2026-10-23 中英文界面与本机偏好
 
+- AI 交互：抽屉聊天、完整聊天页与报价成本审阅每次携带当前 `locale`；服务端 `mist/responseLanguage.ts` 严格校验，只用于该请求的系统指令。中文默认，用户明确要求的输出语言优先；不得改写 JSON 键、枚举、编号和金额。回复要求简洁，不追加例行机制说明。
+
 - 默认 `zh-CN`，可选择 `en-US`。入口在公司设置 → 外观与语言；账号抽屉也提供相同控件，普通公司成员与平台账号无需公司管理权限即可切换。
 - `services/devicePreferences.ts` 是设备偏好真源，沿用 `bambook.device.locale`；应用路径 `runtime/devicePreferences.ts` 仅重导出。选择即时生效，不提交 `settings.update`，不读取公司旧 `settings.locale`，不刷新页面或重新挂载业务表单；禁用浏览器存储时当次会话仍可切换，同源其他标签页通过 storage 事件同步。
 - `services/interfaceLanguage.ts` 提供 `uiText`、整句参数插值 `ui`、`interfaceLocale`；`services/locales/en-US.json` 保存静态界面译文，`en-US-reviewed.ts` 统一行业术语与重点文案。新增界面文案须同步译文并保留插值占位符，不能依靠运行时网页翻译或修改 DOM 文本。

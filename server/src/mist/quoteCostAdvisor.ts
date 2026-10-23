@@ -1,3 +1,4 @@
+import { responseLocale, responseLanguagePrompt } from "./responseLanguage";
 /** No business commands or autonomous pricing tools are available to this advisor. */
 import { createLlmCompleter } from "../ai/llmProviders";
 import { hasScope } from "../auth/permissionService";
@@ -45,6 +46,7 @@ export async function runQuoteCostAdvisor(
     Object.keys(b).some(
       (k) =>
         ![
+          "locale",
           "quotationId",
           "lineId",
           "expectedTarget",
@@ -59,6 +61,7 @@ export async function runQuoteCostAdvisor(
     JSON.stringify(b).length > 80000
   )
     fail("请明确授权发送本次报价依据，且使用有效请求");
+  const locale = responseLocale(b.locale);
   if (b.expectedRevision !== workspace.revision)
     fail("公司已变化，请刷新后重新审阅", 409, "CONFLICT");
   const quote = workspace.state.market.quotations.find(
@@ -175,14 +178,14 @@ export async function runQuoteCostAdvisor(
   const response = await runMistAssistant(
     {
       ...args,
-      body: { message: "仅审阅已授权报价依据，返回规定 JSON", sourceIds: [] },
+      body: { message: "仅审阅已授权报价依据，返回规定 JSON", sourceIds: [], locale },
     },
     {
       ...deps,
       complete: async (transport) =>
         complete({
           ...transport,
-          systemPrompt: QUOTE_COST_ADVISOR_SYSTEM,
+          systemPrompt: QUOTE_COST_ADVISOR_SYSTEM + "\n" + responseLanguagePrompt(locale),
           jsonMode: true,
           messages: [{ role: "user", content: material }],
           temperature: 0.1,

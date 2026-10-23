@@ -446,7 +446,6 @@ export function QuotationCostingPage() {
         <PageHeader
           title={uiText("报价核算历史")}
           eyebrow={<Mono>{q.code}</Mono>}
-          description={uiText("保留本报价所有原条目的冻结依据；历史不自动适用新条目，也不作为当前审批依据。")}
         />
         <Banner title={uiText("历史只读")}>{uiText("新条目与新版本需重新核算，不能把旧单价、规格或策略自动沿用。")}</Banner>
         {snapshots.length ? (
@@ -511,10 +510,9 @@ export function QuotationCostingPage() {
   return (
     <MistPage>
       <Button icon={ArrowLeft} onClick={back}>{uiText("返回报价")}</Button>
-      <PageHeader
+      <PageHeader description={ui`${line.name} · ${line.qty} ${line.unit} · ${q.currency}；成本、建议价与人工拟报价分开。`}
         title={uiText("报价条目核算")}
         eyebrow={<Mono>{uiText(q.code + " · " + line.style)}</Mono>}
-        description={ui`${line.name} · ${line.qty} ${line.unit} · ${q.currency}；成本、建议价与人工拟报价分开。`}
         actions={
           !editing && can && !frozen ? (
             <Button onClick={begin}>{uiText("新建核算")}</Button>

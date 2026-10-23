@@ -148,7 +148,7 @@ export function RisksPage() {
     : !canAll ? <div className="mist-section"><Banner tone="neutral" title={uiText("按负责人处理")}>{uiText("你可以登记和推进本人负责的客户 / 订单上的风险，并直接关闭提示、警告级风险；严重风险的关闭、豁免与带风险放行需提交部门主管审批。")}</Banner></div> : null;
   if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
-    <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")} description={uiText("预警来自逾期应收、往来冻结、供应商认证与状态、QC 与生产交期；登记后由一位负责人推进到关闭。")}
+    <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")}
       actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{(canAll || canOrders) && <Button variant="primary" icon={Plus} disabled={locked || !ownOrders.length} title={uiText(ownOrders.length ? undefined : canAll ? '还没有订单' : '没有负责人绑定为你账号的订单')} onClick={() => setDialog(registerSpec())}>{uiText("手工登记")}</Button>}</>} />
     {roleBanner}
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}

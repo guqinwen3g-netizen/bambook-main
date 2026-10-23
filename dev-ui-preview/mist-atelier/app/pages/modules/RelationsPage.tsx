@@ -149,7 +149,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   })() : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="关系智库" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
-    <PageHeader eyebrow={uiText("客户与市场 · 组织关系")} title={uiText("关系智库")} description={uiText("同一组织只有一份档案：客户、供应商身份与联系人、别名、在手业务集中查看；冻结往来会在报价、订单、采购处生效。")}
+    <PageHeader eyebrow={uiText("客户与市场 · 组织关系")} title={uiText("关系智库")}
       actions={<>
         <Button icon={Download} onClick={() => downloadModuleCsv('关系智库.csv', ['组织', '身份', '别名', '地区', '地址', '联系人', '在手业务', '状态', '冻结原因'], rows.map(r => [r.name, relationIdentities(r).map(i => ({ customer: '客户', supplier: '供应商', agent: '代理', partner: '合作伙伴', other: '其他' })[i]).join(' + '), r.aliases.join('、'), r.country, r.address, relationContacts(state, r).map(c => c.name).join('、'), business.get(r.id)?.total || 0, r.hold ? '已冻结' : r.status === 'archived' ? '已归档' : '正常', r.hold?.reason || '']))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button>}

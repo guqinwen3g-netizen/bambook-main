@@ -23,7 +23,7 @@ export function SearchPage() {
   const submit = (e?: React.FormEvent) => { e?.preventDefault(); go('search', undefined, { section: draft.trim() || undefined }); };
   const open = (hit: MistSearchHit) => go(hit.view, hit.id, hit.target);
   return <MistPage>
-    <PageHeader title={uiText("搜索结果")} description={uiText(workspace.workspace ? `在「${workspace.workspace.name}」中搜索；只列出你有权进入的页面中的记录。` : '只搜索本公司。')} />
+    <PageHeader description={uiText(workspace.workspace ? `在「${workspace.workspace.name}」中搜索；只列出你有权进入的页面中的记录。` : '只搜索本公司。')} title={uiText("搜索结果")} />
     <form onSubmit={submit}><Toolbar right={<Button type="submit" variant="primary" icon={Search}>{uiText("搜索")}</Button>}>
       <TextInput aria-label={uiText("搜索关键词")} icon={Search} placeholder={uiText("名称、编号、客户、供应商… 多个词用空格分开")} value={draft} onChange={e => setDraft(e.target.value)} />
     </Toolbar></form>

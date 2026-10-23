@@ -51,7 +51,7 @@ async function consent() {
   await act(async () => {
     const c = getByLabelText(
       host,
-      "我授权将本次报价依据发送给已配置模型审阅",
+      "将本行报价依据及选中历史发送给 AI 审阅",
     ) as HTMLInputElement;
     c.click();
   });
@@ -112,6 +112,7 @@ it("requires explicit consent, omits attachments, and adopts only human strategy
   const call = fetcher.mock.calls.find((x: any) => !x[0].endsWith("/status"));
   expect(JSON.parse(call[1].body)).toMatchObject({
     consent: true,
+    locale: "zh-CN",
     input: { fileIds: [] },
     expectedRevision: 3,
   });
@@ -171,7 +172,7 @@ it("discards late answers after workspace or input changes", async () => {
   expect(host.textContent).not.toContain("软件测试 AI 审阅");
   expect(p.onAdopt).not.toHaveBeenCalled();
   expect(
-    getByLabelText(host, "我授权将本次报价依据发送给已配置模型审阅"),
+    getByLabelText(host, "将本行报价依据及选中历史发送给 AI 审阅"),
   ).toHaveProperty("checked", false);
 });
 it("rejects forged source or price instead of presenting usable strategy", async () => {

@@ -1,3 +1,4 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** AI reviews evidence; adoption edits only the manual strategy draft, never a business command. */
 import { stableJson } from "../../../../../server/src/shared/stableJson";
@@ -145,6 +146,7 @@ export function QuotationCostAdvisor(p: {
           signal: c.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            locale: interfaceLocale(),
             quotationId: p.quotationId,
             lineId: p.lineId,
             expectedTarget: p.expectedTarget,
@@ -220,7 +222,6 @@ export function QuotationCostAdvisor(p: {
   return (
     <FormSection
       title={uiText("AI 成本与报价审阅")}
-      description={uiText("可选：公式算价格，AI 检查依据和本次策略，人工决定。")}
     >
       <div className="mist-col">
         {!p.permitted ? (
@@ -236,14 +237,14 @@ export function QuotationCostAdvisor(p: {
             {statusError}
           </Banner>
         ) : configured === null ? (
-          <Banner title={uiText("正在读取模型状态")}>{uiText("不会自动发送报价资料。")}</Banner>
+          <Banner title={uiText("正在读取模型状态")} />
         ) : !configured ? (
-          <Banner title={uiText("服务器尚未配置模型")}>{uiText("管理员配置 OpenAI 兼容接口后可使用；不影响人工核算，不用模拟建议代替真实模型。")}</Banner>
+          <Banner title={uiText("服务器尚未配置模型")} />
         ) : (
           <>
-            <Banner tone="ai" title={uiText("只审阅本次授权资料")}>{uiText("将发送本行规格、数量、商业条件、人工成本拆解及明确选取的历史 / 反馈给平台配置模型（测试期为管理员连接的 ChatGPT 订阅，生产期为企业 API；可能使用备用模型）。不发送联系人、整份客户档案或附件正文；附件名称亦不读取。不要在依据文字中填写不应外发的敏感信息。不是行业行情、客户接受概率或已审批报价。")}</Banner>
+
             <Checkbox
-              label={uiText("我授权将本次报价依据发送给已配置模型审阅")}
+              label={uiText("将本行报价依据及选中历史发送给 AI 审阅")}
               checked={consent}
               disabled={p.disabled || busy}
               onChange={setConsent}
