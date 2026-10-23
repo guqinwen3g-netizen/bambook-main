@@ -4,6 +4,7 @@ import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
 import { shipmentStage } from '../pages/modules/ShipmentsPage';
 import { financeReceiptDisplay } from '../pages/FinancePage';
+import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
 
 type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'task';
@@ -11,7 +12,7 @@ export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report'
  * 等我处理的一条事项。module 是它计入的侧栏模块（与模块页「待我处理」同一归属）；
  * 其他公司的审批归到 approvals，只进「我的工作」合计。
  */
-export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; target: MistTarget; module: string };
+export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; due?: string; target: MistTarget; module: string };
 export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', task: '工作事项' };
 export type MistWorkOptions = {
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
@@ -35,6 +36,22 @@ export function mistMyTasks(state: MistState | null | undefined, options: Pick<M
   return (state?.tasks ?? []).filter(task => isMyMistTask(task, options));
 }
 
+/** 开发确认存于准确版本；订单样品确认存于 QC 任务，不能互相代替。 */
+function hasSampleDecision(state: MistState, task: MistState['fulfillment']['qcTasks'][number]): boolean {
+  if (task.source.kind !== 'version') return !!task.businessConfirmation;
+  const source = task.source;
+  const version = state.versions.find(item => item.id === source.versionId && item.devId === source.devId);
+  if (!version) return false;
+  const confirmations = version.confirmations ?? [], samples = developmentVersionSamples(state, version);
+  const sampleIds = task.sampleId ? [task.sampleId] : samples.map(sample => sample.id);
+  if (task.sampleId && !samples.some(sample => sample.id === task.sampleId)) return false;
+  // 未指定形态的旧确认只在单一实物范围内有效，不能清掉后来追加的形态。
+  const covers = (id: string) => confirmations.some(confirmation => confirmation.samples?.length
+    ? confirmation.samples.some(sample => sample.sampleId === id)
+    : samples.length <= 1);
+  return sampleIds.length ? sampleIds.every(covers) : confirmations.some(confirmation => !confirmation.samples?.length);
+}
+
 /**
  * 由业务记录派生、等我处理的事项（不写入公司，原记录状态变化后自动消失）：
  * 待我审批；QC 待认领/处理中（QC 岗）与结果待业务确认（业务岗）；出运待物流接手、资料已回待发单、已出运待寄单；
@@ -53,19 +70,21 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     // 待认领/检验中只给专业 QC（qc:inspect，且有该业务线登记权）；业务主管虽有登记权但不是检验岗。
     const qcRole = can('qc:inspect') && can(`qc:${task.domain}_chain:write`), business = can('orders:write');
     const open = qcRole && task.state === 'pending', working = qcRole && task.state === 'working' && !!me && task.assigneeId === me;
-    const sampleBack = business && task.kind === 'sample' && task.state === 'reported' && !task.businessConfirmation;
+    const sampleBack = business && task.kind === 'sample' && task.state === 'reported' && !hasSampleDecision(state, task)
+      && (task.source.kind !== 'version' || canRead('development'));
     const productionBack = business && task.kind === 'production' && (task.state === 'awaiting_business' || task.state === 'blocked');
     if (!open && !working && !sampleBack && !productionBack) continue;
     const what = open ? '待认领' : working ? '检验中' : task.kind === 'sample' ? '样品评审结果待确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
     push({ id: 'qc:' + task.id, source: 'qc', title: `${task.code} · ${uiText(what)}`, meta: [task.factory, task.requestedBy && uiText('发起人') + ' ' + task.requestedBy].filter(Boolean).join(' · '),
-      when: task.state === 'blocked' ? '已阻断' : open ? '待认领' : working ? '处理中' : '待确认', urgent: task.state === 'blocked' || (!!task.due && task.due <= today), at: task.due || task.createdAt, target: { view: 'qc-workbench', id: task.id } });
+      when: task.state === 'blocked' ? '已阻断' : open ? '待认领' : working ? '处理中' : '待确认', urgent: task.state === 'blocked' || (!!task.due && task.due <= today), at: task.due || task.createdAt, due: task.due || undefined,
+      target: sampleBack && task.source.kind === 'version' ? { view: 'development/detail', id: task.source.devId, versionId: task.source.versionId } : { view: 'qc-workbench', id: task.id } });
   }
   if (canRead('shipments')) for (const shipment of state.fulfillment.shipments) {
     const stage = shipmentStage(state, shipment);
     const intake = stage === 'intake' && can(MIST_LOGISTICS_DUTY), business = stage === 'business' && can('orders:write'), unsent = stage === 'departed' && !shipment.documentsSentAt && can('orders:write');
     if (!intake && !business && !unsent) continue;
     push({ id: 'shipping:' + shipment.id, source: 'shipping', title: `${shipment.code} · ${uiText(intake ? '待物流接手' : business ? '资料已回，待发送 CI/PL' : '已出运，单据待寄送')}`, meta: [shipment.customer, (unsent ? shipment.departedAt : shipment.plannedDate)?.slice(0, 10)].filter(Boolean).join(' · '),
-      when: intake ? '待接手' : business ? '待发单' : '待交单', urgent: !unsent && !!shipment.plannedDate && shipment.plannedDate <= today, at: (unsent ? shipment.departedAt : shipment.plannedDate) || '', target: { view: 'shipments', id: shipment.id } });
+      when: intake ? '待接手' : business ? '待发单' : '待交单', urgent: !unsent && !!shipment.plannedDate && shipment.plannedDate <= today, at: (unsent ? shipment.departedAt : shipment.plannedDate) || '', due: unsent ? undefined : shipment.plannedDate || undefined, target: { view: 'shipments', id: shipment.id } });
   }
   if (canRead('payment-vouchers')) {
     if (can('invoices:reconcile')) for (const receipt of state.receipts ?? []) {
@@ -76,7 +95,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     }
     if (can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))
       push({ id: 'invoice:' + invoice.id, source: 'finance', title: ui`${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
-        target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
+        due: invoice.due || undefined, target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
     const requests = state.payables?.requests ?? [], since = new Date(Date.parse(today + 'T00:00:00Z') - FINANCE_RETURN_DAYS * 86400000).toISOString().slice(0, 10);
     for (const request of requests.filter(item => item.state === 'rejected' && item.requesterId === me && (item.decision?.at ?? '').slice(0, 10) >= since)) {
       const resubmitted = requests.some(other => other.id !== request.id && other.submittedAt > request.submittedAt && other.state !== 'cancelled' && other.supplierId === request.supplierId && other.purpose === request.purpose
@@ -96,7 +115,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
 export function mistMyWork(state: MistState | null | undefined, options: MistWorkOptions): MistWorkItem[] {
   const today = options.today;
   return [...mistWorkQueue(state, options), ...mistMyTasks(state, options).map(task => ({ id: 'task:' + task.id, source: 'task' as const, sourceLabel: MIST_WORK_SOURCE_LABEL.task, title: task.title, meta: task.due ? '期限 ' + task.due : '未定期限',
-    when: !task.due ? '未定期限' : task.due < today ? '已逾期' : task.due === today ? '今天' : task.due.slice(5), urgent: !!task.due && task.due <= today, at: task.due, target: task.target, module: mistWorkModule(task.target?.view) }))];
+    when: !task.due ? '未定期限' : task.due < today ? '已逾期' : task.due === today ? '今天' : task.due.slice(5), urgent: !!task.due && task.due <= today, at: task.due, due: task.due || undefined, target: task.target, module: mistWorkModule(task.target?.view) }))];
 }
 
 /** 由邮件生成的跟进事项（任务本身已保存在公司）。 */
