@@ -3,6 +3,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from 'react';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, FlaskConical, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
 import { BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, type Tone } from '../../../../../components/mist';
+import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCommand, FulfillmentQcReport, FulfillmentQcTask } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentSampleRoleLabel, fulfillmentSourceLabel } from '../../../../../server/src/shared/mistFulfillment';
@@ -98,7 +99,7 @@ export function QcWorkbenchPage() {
     if (route.id) return;
     setSelected('');
     if (route.section === 'sample' || route.section === 'production') setKind(route.section);
-    if (route.versionId) { const dev = state?.devs.find(d => d.id === state.versions.find(v => v.id === route.versionId)?.devId); if (dev) setDomain(dev.values.category.includes('面料') ? 'fabric' : 'garment'); }
+    if (route.versionId) { const dev = state?.devs.find(d => d.id === state.versions.find(v => v.id === route.versionId)?.devId); if (dev) setDomain(developmentDomain(dev.values)); }
     else if (route.orderLineId) { const orderId = state?.orderLines.find(l => l.id === route.orderLineId)?.orderId; const order = state?.orders.find(o => o.id === orderId); if (order) setDomain(order.type); }
   }, [route.id, route.section, route.versionId, route.orderLineId, route.productionId, state?.fulfillment.qcTasks]);
   const scoped = all.filter(t => t.domain === domain && t.kind === kind);
@@ -133,7 +134,7 @@ export function QcWorkbenchPage() {
       const sample = text(values, 'source').startsWith('sample:') ? state.fulfillment.samples.find(item => item.id === text(values, 'source').slice(7)) : undefined;
       const source = sample ? sample.source : parseSource(state, text(values, 'source'));
       if (source.kind === 'manual') throw new Error('请选择准确系统实物');
-      const taskDomain = source.kind === 'version' ? (state.devs.find(d => d.id === source.devId)?.values.category.includes('面料') ? 'fabric' : 'garment') : state.orders.find(o => o.id === source.orderId)!.type;
+      const taskDomain = source.kind === 'version' ? developmentDomain(state.devs.find(d => d.id === source.devId)!.values) : state.orders.find(o => o.id === source.orderId)!.type;
       const taskKind = text(values, 'kind') as Kind;
       const saved = await run({ type: 'fulfillment.qc.request', payload: { source, ...(sample ? { sampleId: sample.id } : {}), domain: taskDomain, kind: taskKind, factory: text(values, 'factory'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } });
       setDomain(taskDomain); setKind(taskKind); setSelected(String(saved.result.id || '')); go('qc-workbench', String(saved.result.id || ''));

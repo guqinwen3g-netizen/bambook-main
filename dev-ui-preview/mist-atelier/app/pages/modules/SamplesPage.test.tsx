@@ -20,6 +20,18 @@ function fabric(id:string,form:string,unit:string,quantity:number,available:numb
 beforeEach(()=>{write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it.each([{domain:'fabric',category:'羊毛混纺斜纹'},{domain:'garment',category:'面料拼接夹克'}] as const)('sends a returned sample to its explicit $domain QC domain',async({domain,category})=>{
+  store.state!.devs.push({id:'dev',code:'DEV-DOMAIN',values:{domain,category}} as any);
+  store.state!.versions.push({id:'ver',devId:'dev',factory:'试样厂',label:'R1-A'} as any);
+  store.state!.fulfillment.samples.push(fabric('smp-domain','米样','米',3,3));
+  store.run.mockResolvedValue({result:{id:'qc-new'}});
+  render('smp-domain');
+  await act(async()=>getByRole(host,'button',{name:'查看 / 发起本样品QC'}).click());
+  await act(async()=>getByRole(host,'button',{name:'下一步'}).click());
+  await act(async()=>getByRole(host,'button',{name:'发起送检'}).click());
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.request',payload:expect.objectContaining({source:version,sampleId:'smp-domain',domain,kind:'sample'})});
+});
+
 it('groups fabric forms of one archive into a single row and never sums different units',()=>{
   store.state!.fulfillment.samples.push(fabric('smp-m','米样','米',12.5,12.5),fabric('smp-c','色卡','份',3,3));
   render();

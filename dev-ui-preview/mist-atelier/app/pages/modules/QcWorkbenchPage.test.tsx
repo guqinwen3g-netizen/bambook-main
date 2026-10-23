@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByRole,queryByRole,within} from '@testing-library/dom';
+import {getByRole,getAllByRole,queryByRole,within} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentQcTask} from '../../../../../server/src/shared/mistFulfillment';
@@ -14,12 +14,32 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:sess
 import {QcWorkbenchPage} from './QcWorkbenchPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string,mode:'full'|'list'=id?'full':'list'){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'qc-workbench',id,detail},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><QcWorkbenchPage/></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string,mode:'full'|'list'=id?'full':'list',source:{versionId?:string}={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'qc-workbench',id,detail,...source},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><QcWorkbenchPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function task(id:string,patch:Partial<FulfillmentQcTask>={}):FulfillmentQcTask{return {id,code:id.toUpperCase(),source:{kind:'orderLine',orderId:'o',lineId:'l'},domain:'garment',kind:'sample',factory:'华美制衣',location:'一号车间',contact:'',due:'2026-10-20',requestedBy:'业务员',assignee:'',state:'pending',reportIds:[],createdAt:'2026-10-10T08:00:00Z',...patch};}
 beforeEach(()=>{session.id='qc-a';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'QC甲'},'empty');store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+
+it.each([{domain:'fabric',category:'羊毛混纺斜纹'},{domain:'garment',category:'面料拼接夹克'}] as const)('submits the explicit $domain domain from a returned development, independent of category wording',async({domain,category})=>{
+  store.state!.devs.push({id:'dev-domain',code:'DEV-DOMAIN',values:{domain,category}} as any);
+  store.state!.versions.push({id:'version-domain',devId:'dev-domain',label:'R1-A',factory:'试样厂',returnedAt:'2026-10-13T08:00:00Z'} as any);
+  store.run.mockResolvedValue({result:{id:'new-qc'}});
+  render(); await click(getAllByRole(host,'button',{name:'从来源发起QC'})[0]);
+  choose(getByRole(host,'combobox',{name:'送检来源'}) as HTMLSelectElement,'version:version-domain');
+  await click(getByRole(host,'button',{name:'下一步'}));
+  typeInto(getByRole(host,'textbox',{name:'工厂'}) as HTMLInputElement,'试样厂');
+  typeInto(getByRole(host,'textbox',{name:'实际检查地点'}) as HTMLInputElement,'样品室');
+  await click(getByRole(host,'button',{name:'下一步'}));
+  await click(getByRole(host,'button',{name:'发起QC'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.request',payload:expect.objectContaining({source:{kind:'version',devId:'dev-domain',versionId:'version-domain'},domain,kind:'sample'})});
+});
+it('opens the correct QC domain when arriving from an explicitly typed development version',()=>{
+  store.state!.devs.push({id:'dev-domain',code:'DEV-DOMAIN',values:{domain:'fabric',category:'羊毛混纺斜纹'}} as any);
+  store.state!.versions.push({id:'version-domain',devId:'dev-domain',label:'R1-A',factory:'试样厂',returnedAt:'2026-10-13T08:00:00Z'} as any);
+  render(undefined,'list',{versionId:'version-domain'});
+  expect(getByRole(host,'tab',{name:/面料QC/}).getAttribute('aria-selected')).toBe('true');
+});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
 it('shows separate fabric and garment entry cards with their own pending, open-branch and NOK numbers',async()=>{
