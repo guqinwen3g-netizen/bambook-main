@@ -167,7 +167,7 @@ export function ProcurementPage() {
         onDecide={decision => setDialog(decideSpec(selected, decision))}
         onSend={() => setDialog(sendSpec(selected))} onConfirm={() => setDialog(confirmSpec(selected))} onReceive={() => setDialog(receiveSpec(selected))} onRejectReceived={r => setDialog(rejectReceivedSpec(selected, r))}
         onReturn={r => setDialog(returnSpec(selected, r))} onReturnReverse={(r, row) => setDialog(returnReverseSpec(selected, r, row))}
-        onDownload={() => void act(async () => downloadApprovedPurchase(state, selected))}
+        onDownload={() => void act(() => run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }))}
         onAttach={ids => run({ type: 'fulfillment.procurement.save', payload: { ...selected, fileIds: ids } })}
         onInventory={() => go('inventory', undefined, { section: selected.id })} onSupplier={() => go('suppliers', selected.supplierId)}
         onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }} />
@@ -277,7 +277,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       { label: '登记合同线下发出', icon: Send, onClick: onSend, primary: !p.offlineSend, reason: writeReason, hidden: p.state !== 'approved' || !!p.offlineSend },
       { label: '登记供应商确认', icon: FileSignature, onClick: onConfirm, primary: true, reason: writeReason, hidden: p.state !== 'approved' || !p.offlineSend || !!p.supplierConfirmation },
       { label: processing ? '登记加工回交' : '登记本次交付', icon: PackageCheck, onClick: onReceive, primary: !!p.supplierConfirmation && stage !== 'done', reason: writeReason || (!p.offlineSend || !p.supplierConfirmation ? '请先登记合同线下发出和供应商确认' : false), hidden: p.state !== 'approved' },
-      { label: '下载批准单据', icon: Download, onClick: onDownload, hidden: p.state !== 'approved' },
+      { label: processing ? '生成加工合同' : '生成采购单', icon: Download, onClick: onDownload, reason: writeReason, hidden: p.state !== 'approved' },
       { label: '取消合同', icon: Undo2, onClick: onCancel, reason: cancelReason, hidden: p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
       { label: '转给其他供应商', onClick: onTransfer, reason: transferReason, hidden: p.state !== 'approved' || stage === 'done' || receipts.length > 0 },
       { label: '查看预付去向', onClick: onPayables, hidden: p.state !== 'cancelled' || !(prepay.plans.length || prepay.moves.length || p.cancellation?.prepaid) },
@@ -310,6 +310,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       {(r.returns || []).map(row => <div className="mist-row mist-module-actions" key={row.id} data-receipt-return={row.id}><span className="mist-note">{row.date}{uiText(" 退回 ")}{row.quantity} {uiText(p.unit)} · {uiText(row.disposition === 'replace' ? '供应商补发' : '不再补发')} · {row.evidence}</span><span className="mist-spacer" />{row.reversed ? <Pill>{uiText("已冲回")}</Pill> : can && !locked && <Button size="sm" variant="quiet" onClick={() => onReturnReverse(r, row)}>{uiText("冲回")}</Button>}</div>)}
     </div>; })}</DetailBlock>}
     <div className="mist-row mist-module-actions"><Button onClick={onInventory}>{uiText("查看来源库存")}</Button><Button onClick={onSupplier}>{uiText("供应商档案")}</Button></div>
+    {!!p.documents?.length && <DetailBlock title={uiText("合同文件")}><RecordFiles ids={p.documents.slice().reverse().map(d => d.fileId)} /></DetailBlock>}
     <DetailBlock title={uiText("附件")}>
       <RecordFiles key={p.id} ids={p.fileIds} onAttach={can && stage === 'draft' ? onAttach : undefined} />
     </DetailBlock>
@@ -318,14 +319,4 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
     </RecordDisclosure>}
     <RecordDisclosure title="处理记录"><Events entity="procurement" id={p.id} /></RecordDisclosure>
   </DetailBody>;
-}
-
-export function downloadApprovedPurchase(root: MistState, p: FulfillmentPurchase) {
-  if (p.state !== 'approved' || !p.decision) throw new Error('当前采购尚未批准');
-  const escape = (v: unknown) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-  const values = [['单据编号', p.code], ['供应商', p.supplier], ['来源订单', fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId })], ['采购内容', purchaseContent(p)], ['内容 / 规格', p.description], ['数量', `${p.quantity} ${p.unit}`], ['单价', `${p.price} ${p.currency}`], ['约定交期', p.due], ['付款条件', p.terms], ['交付地点', p.destination], ['批准人', p.decision.actor], ['批准时间', p.decision.at], ['批准意见', p.decision.note], ['备注', p.note]];
-  const html = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>' + escape(p.code) + '</title><body><h1>' + (p.kind === 'processing' ? '委托加工确认单' : '采购单') + '</h1><dl>' + values.map(([label, value]) => '<dt>' + escape(label) + '</dt><dd>' + escape(value) + '</dd>').join('') + '</dl></body></html>';
-  const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' })), a = document.createElement('a');
-  a.href = url; a.download = p.code + '.html'; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
