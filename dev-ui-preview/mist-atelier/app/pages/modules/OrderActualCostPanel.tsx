@@ -62,13 +62,12 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
       <StatCard icon={Truck} label={uiText("分摊费用")} value={money(t.expense)} />
       <StatCard icon={TrendingUp} label={uiText("实际毛利 · 含退税")} value={`${money(t.margin)}（${pct(t.revenue ? t.margin / t.revenue : null)}）`} />
     </StatGrid>
-    <section className="mist-section"><Card><CardHeader title={uiText("订单实际核算")} sub={uiText("点订单看收入、采购、费用、退税明细。")} />
+    <section className="mist-section"><Card><CardHeader title={uiText("订单实际核算")} />
       <DataTable ariaLabel={uiText("订单实际核算")} rows={rows} rowKey={r => r.orderId} columns={columns} onRowClick={r => setOpen(r.orderId)} empty={<EmptyState title={uiText("没有已生效订单")} compact />} />
     </Card></section>
-    <section className="mist-section"><Card><CardHeader title={uiText("费用台账")} sub={uiText("运费、报关、佣金、银行费用等；登记时按所选口径分摊到订单并冻结。")} tools={<Checkbox checked={showVoided} onChange={setShowVoided} label={uiText("显示已作废")} />} />
-      <DataTable ariaLabel={uiText("费用台账")} rows={expenses} rowKey={e => e.id} columns={expenseColumns} empty={<EmptyState title={uiText("还没有登记费用")} description={uiText("订单毛利此时只扣采购成本。")} compact />} />
+    <section className="mist-section"><Card><CardHeader title={uiText("费用台账")} tools={<Checkbox checked={showVoided} onChange={setShowVoided} label={uiText("显示已作废")} />} />
+      <DataTable ariaLabel={uiText("费用台账")} rows={expenses} rowKey={e => e.id} columns={expenseColumns} empty={<EmptyState title={uiText("还没有登记费用")} compact />} />
     </Card></section>
-    <p className="mist-note">{uiText("收入 = 已确认的销售发票，未开票部分按合同金额暂估；采购 = 已批准采购的已到票金额，扣除供应商索赔扣款，未到票部分按合同暂估；费用按登记时冻结的分摊额；退税已核准按核准额，否则按应退额。缺所选口径汇率的订单不出毛利。费用台账只用于核算，不产生应付或付款。")}</p>
     <Drawer open={!!detail} onClose={() => setOpen(null)} size="lg" title={uiText(detail ? `${detail.code} 实际核算` : '实际核算')} sub={uiText(detail ? `${detail.customer} · ${FX_BASIS_LABEL[basis]}` : undefined)}>
       {detail && <div data-order-cost-detail={detail.orderId}>
         {(['revenue', 'purchases', 'expenses'] as const).map(k => <CostBlock key={k} title={uiText({ revenue: '收入', purchases: '采购成本', expenses: '分摊费用' }[k])} rows={detail[k]} />)}

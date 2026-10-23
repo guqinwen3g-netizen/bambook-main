@@ -182,7 +182,7 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
     revenue.splice(0, revenue.length, ...revenue.filter(r => r.currency !== o.currency));
     if (act) rates.delete(o.currency); else rates.set(o.currency, undefined);
     if (act?.settledMinor) revenue.push({ key: 'rev:settled', label: `已收已结汇（结汇实际汇率 ${act.settledRate}）`, currency: o.currency, amount: major(act.settledMinor), cny: major(act.settledCnyMinor) });
-    if (!act || act.estimatedMinor) revenue.push({ key: 'rev:unsettled', label: act ? `未结汇 / 未收（按 ${act.period!.month} 月末 ${act.period!.rate} 暂估）` : `未结汇 / 未收（缺 ${month} 及以前的月末汇率）`, currency: o.currency, amount: major(act ? act.estimatedMinor : total), cny: act ? major(act.cnyMinor - act.settledCnyMinor) : null, estimated: true });
+    if (!act || act.estimatedMinor) revenue.push({ key: 'rev:unsettled', label: act ? `未结汇（按 ${act.period!.month} 月末 ${act.period!.rate} 暂估）` : `未结汇（缺 ${month} 及以前的月末汇率）`, currency: o.currency, amount: major(act ? act.estimatedMinor : total), cny: act ? major(act.cnyMinor - act.settledCnyMinor) : null, estimated: true });
   }
   // 采购：已到票金额 − 索赔扣款；未到票按合同暂估
   const bills = (root.payables?.bills || []).filter(b => b.state !== 'void'), deductions = (root.payables?.deductions || []).filter(d => !d.reversed);
