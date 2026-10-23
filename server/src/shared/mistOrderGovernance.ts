@@ -15,6 +15,8 @@ export type OrderGovernanceInput={
  paymentMethod:'TT'|'LC'|'OA'|'OTHER';depositPercent:number|null;paymentNote:string;incoterm:string;deliveryPlace:string;
  /** BB-ORD-5：溢装上限 % / 短装下限 %（0–10）；未填不写入，按「未约定，按足量」。 */
  overPercent?:number|null;shortPercent?:number|null;
+ /** Explicit approved customer quantity basis; absence remains unknown. */
+ quantityBasis?:'total'|'size';quantityBasisNote?:string;
  /** Cumulative customer cash required before any shipment, as a percentage of the order total. */
  preShipmentPercent?:number|null;
 };
@@ -42,12 +44,12 @@ function date(v:unknown){const s=text(v,'交期',true);if(!/^\d{4}-\d{2}-\d{2}$/
 function currency(v:unknown){const s=text(v,'币种',true).toUpperCase();return /^[A-Z]{3}$/.test(s)?s:fail('币种须为三位代码');}
 function tolerance(i:Partial<OrderGovernanceInput>){const over=normalizeTolerancePercent(i.overPercent,'溢装上限'),short=normalizeTolerancePercent(i.shortPercent,'短装下限');return{...(over!==null?{overPercent:over}:{}),...(short!==null?{shortPercent:short}:{})};}
 function normalize(input:Partial<OrderGovernanceInput>|undefined):OrderGovernanceInput{
- const i=input||{};if(i.kind!==undefined&&!['external','internal'].includes(i.kind))fail('订单用途无效');if(i.paymentMethod!==undefined&&!['TT','LC','OA','OTHER'].includes(i.paymentMethod))fail('付款方式无效');
+ const i=input||{};if(i.quantityBasis!==undefined&&!['total','size'].includes(i.quantityBasis))fail('数量口径无效');if(i.quantityBasis)text(i.quantityBasisNote,'数量依据',true);if(i.kind!==undefined&&!['external','internal'].includes(i.kind))fail('订单用途无效');if(i.paymentMethod!==undefined&&!['TT','LC','OA','OTHER'].includes(i.paymentMethod))fail('付款方式无效');
  if(i.depositPercent!==undefined&&i.depositPercent!==null&&(typeof i.depositPercent!=='number'||!Number.isFinite(i.depositPercent)||i.depositPercent<0||i.depositPercent>100))fail('定金比例须为0至100之间的百分数');
  if(i.preShipmentPercent!==undefined&&i.preShipmentPercent!==null){if(typeof i.preShipmentPercent!=='number'||!Number.isFinite(i.preShipmentPercent)||i.preShipmentPercent<0||i.preShipmentPercent>100)fail('出运前累计收款比例须为0至100');mistMoneyMinor(i.preShipmentPercent);if((i.paymentMethod||'TT')==='TT'&&typeof i.depositPercent==='number'&&i.preShipmentPercent<i.depositPercent)fail('出运前累计收款比例不得低于定金比例');}
  if(i.confirmationFileIds!==undefined&&(!Array.isArray(i.confirmationFileIds)||i.confirmationFileIds.length>100))fail('合同附件格式无效');
  if(i.internalSupply&&((i.kind||'external')!=='internal'||i.internalSupply.group!=='garment'||typeof i.internalSupply.receiverId!=='string'||!i.internalSupply.receiverId.trim()))fail('内部面料接收方无效');
- return{...(i.internalSupply?{internalSupply:{group:'garment' as const,receiverId:i.internalSupply.receiverId}}:{}),kind:i.kind||'external',poNumber:text(i.poNumber||'','PO/合同号'),confirmationFileIds:[...new Set((i.confirmationFileIds||[]).map(id=>text(id,'附件ID',true,200)))],internalPurpose:text(i.internalPurpose||'','内部用途'),receiver:text(i.receiver||'','接收团队或负责人'),paymentMethod:i.paymentMethod||'TT',depositPercent:i.depositPercent??null,paymentNote:text(i.paymentNote||'','付款条款'),incoterm:text(i.incoterm||'','贸易术语'),deliveryPlace:text(i.deliveryPlace||'','指定地点'),...tolerance(i),...(i.preShipmentPercent!=null?{preShipmentPercent:i.preShipmentPercent}:{})};
+ return{...(i.internalSupply?{internalSupply:{group:'garment' as const,receiverId:i.internalSupply.receiverId}}:{}),kind:i.kind||'external',poNumber:text(i.poNumber||'','PO/合同号'),confirmationFileIds:[...new Set((i.confirmationFileIds||[]).map(id=>text(id,'附件ID',true,200)))],internalPurpose:text(i.internalPurpose||'','内部用途'),receiver:text(i.receiver||'','接收团队或负责人'),paymentMethod:i.paymentMethod||'TT',depositPercent:i.depositPercent??null,paymentNote:text(i.paymentNote||'','付款条款'),incoterm:text(i.incoterm||'','贸易术语'),deliveryPlace:text(i.deliveryPlace||'','指定地点'),...tolerance(i),...(i.quantityBasis?{quantityBasis:i.quantityBasis,quantityBasisNote:text(i.quantityBasisNote,'数量依据',true)}:{}),...(i.preShipmentPercent!=null?{preShipmentPercent:i.preShipmentPercent}:{})};
 }
 export function createOrderGovernance(_context:MistContext,input?:Partial<OrderGovernanceInput>):OrderGovernanceFields{return{contract:normalize(input),status:'draft',rounds:[],effectiveVersion:0};}
 export function orderGovernancePermission(command:OrderGovernanceCommand){if(!['order.governance.saveDraft','order.governance.submit','order.governance.decide','order.governance.discardChange','order.governance.closeLine','order.governance.requestOverShip','order.governance.void','order.governance.requestCancel'].includes(command.type))fail('未知订单治理操作');return 'orders:write';}
@@ -109,7 +111,7 @@ export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
     {label:internal?'接收负责人':'客户',value:internal?contract.receiver:snapshot.customer},
     {label:internal?'内部用途':'合同',value:internal?contract.internalPurpose:contract.poNumber},
     ...(internal?[{label:'交接约定',value:contract.paymentNote}]:[{label:'付款',value:contract.paymentMethod+' · '+contract.paymentNote},{label:'出运前累计收款',value:contract.preShipmentPercent==null?'待核对':contract.preShipmentPercent+'%'}]),
-    {label:'交期',value:snapshot.due},{label:internal?'交付地点':'贸易条件',value:contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:toleranceText(contract)},
+    {label:'交期',value:snapshot.due},{label:internal?'交付地点':'贸易条件',value:contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:toleranceText(contract)},...(snapshot.type==='garment'?[{label:'数量口径',value:contract.quantityBasis==='size'?'按尺码':contract.quantityBasis==='total'?'按总量':'待核对'},{label:'数量依据',value:contract.quantityBasisNote||'待核对'}]:[]),
     ...(round.reason?[{label:'变更原因',value:round.reason}]:[]),...(round.kind==='change'&&round.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,snapshot.lines)):[]),
     ...snapshot.lines.map(line=>({label:line.style+' · '+line.name,value:reviewLine(snapshot,line)})),
    ]};

@@ -1,5 +1,11 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '数量口径':'Quantity basis',
+  '数量依据':'Quantity evidence',
+  '按总量':'By total quantity',
+  '按尺码':'By size',
+  '请先核对并批准订单数量口径':'Confirm and approve the order quantity basis first',
+
   "放行量产": "Release bulk production",
   "放行开产": "Release production",
   "放行依据": "Release evidence",

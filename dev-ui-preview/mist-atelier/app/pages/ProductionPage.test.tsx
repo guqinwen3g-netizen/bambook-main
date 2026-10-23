@@ -113,3 +113,12 @@ it('shows each current PP standard and the actual pending customer step',async()
   const gate=document.querySelector('[data-release-gate]')!;expect(gate.textContent).toContain('产前样 · L');expect(gate.textContent).toContain('待客户确认');expect(gate.textContent).not.toContain('尚未完成准确实物');
   expect((getByRole(document.body,'button',{name:'放行开产'}) as HTMLButtonElement).disabled).toBe(true);
 });
+
+
+it('blocks unknown garment quantity basis and only requests an actual size matrix for an approved size basis',async()=>{
+ await mount({view:'production-board',productionId:'production-b'});let button=getByRole(document.body,'button',{name:'登记最终完工数量'});expect(button.hasAttribute('disabled')).toBe(true);expect(button.title).toContain('数量口径');
+ await act(async()=>root!.unmount());root=undefined;host.remove();const g=bridge.state!.orders[0].governance!;for(const c of [g.contract,g.approvedSnapshot!.contract]){c.quantityBasis='total';c.quantityBasisNote='客户按总量核验';}
+ await mount({view:'production-board',productionId:'production-b'});await click('登记最终完工数量');expect(queryByRole(document.body,'textbox',{name:/各实际尺码数量/})).toBeNull();
+ await act(async()=>root!.unmount());root=undefined;host.remove();for(const c of [g.contract,g.approvedSnapshot!.contract])c.quantityBasis='size';
+ await mount({view:'production-board',productionId:'production-b'});await click('登记最终完工数量');expect(getByRole(document.body,'textbox',{name:/各实际尺码数量/})).toBeTruthy();
+});
