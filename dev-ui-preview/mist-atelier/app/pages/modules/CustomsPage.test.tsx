@@ -178,7 +178,8 @@ it('lets finance match VAT special invoices to a departed declaration and file t
   const st=store.state!,f=st.fulfillment;
   f.shipments.push(shipment('s',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('s','cleared',{hsCode:'6202.1300'}));
   f.purchases.push({id:'po',code:'PC-1',orderId:'o'} as any);
-  st.payables!.bills.push({id:'b1',code:'AP-1',supplierId:'sup',supplier:'嘉兴制衣',invoiceNo:'0451001',invoiceDate:'2026-10-10',currency:'CNY',amount:113000,taxAmount:13000,taxRate:'13%',lines:[{purchaseId:'po'}],terms:[],due:'2026-11-10',dueBasis:'',fileIds:[],note:'',state:'open',registeredAt:'2026-10-10T00:00:00Z',registeredBy:'财务'} as any);
+  st.files.push({id:'vat-proof',name:'vat-special.pdf',mimeType:'application/pdf',size:10,storageKey:'test/vat-proof',createdAt:'2026-10-10T00:00:00Z'});
+  st.payables!.bills.push({invoiceType:'vat-special',id:'b1',code:'AP-1',supplierId:'sup',supplier:'嘉兴制衣',invoiceNo:'0451001',invoiceDate:'2026-10-10',currency:'CNY',amount:113000,taxAmount:13000,taxRate:'13%',lines:[{purchaseId:'po'}],terms:[],due:'2026-11-10',dueBasis:'',fileIds:['vat-proof'],note:'',state:'open',registeredAt:'2026-10-10T00:00:00Z',registeredBy:'财务'} as any);
   (st as any).exportRebate={rates:[{id:'rt',code:'RR-1',hsCode:'6202.13',rate:'13',effectiveFrom:'2020-03-20',basis:'公告',createdAt:'2026-10-01T00:00:00Z',actor:'财务'}],claims:[]};
   render();
   await click(getByRole(host,'tab',{name:/退税/}));
@@ -202,7 +203,8 @@ it('computes the rebate per declaration item HS once items exist, and blocks fil
   const item=(no:number,hsCode:string,key:string)=>({no,classificationId:'c'+no,lineKeys:[key],styles:[],hsCode,declaredName:'x',elements:'',quantity:1,unit:'件',legalQty:1,legalUnit:'件',secondQty:null,secondUnit:'',unitPrice:1,amount:1,currency:'USD',origin:'CN',destination:'US'});
   f.customs.push(customs('s','cleared',{hsCode:'6202.1300',items:[item(1,'6203.3100','l1:p'),item(2,'6204.6200','l2:p')]} as any));
   f.purchases.push({id:'po1',code:'PC-1',orderId:'o',lineId:'l1'} as any,{id:'po2',code:'PC-2',orderId:'o',lineId:'l2'} as any);
-  st.payables!.bills.push({id:'b1',code:'AP-1',supplierId:'sup',supplier:'嘉兴制衣',invoiceNo:'0451001',invoiceDate:'2026-10-10',currency:'CNY',amount:113000,taxAmount:13000,taxRate:'13%',lines:[{purchaseId:'po1',purchaseCode:'PC-1',amount:56500},{purchaseId:'po2',purchaseCode:'PC-2',amount:56500}],terms:[],due:'2026-11-10',dueBasis:'',fileIds:[],note:'',state:'open',registeredAt:'2026-10-10T00:00:00Z',registeredBy:'财务'} as any);
+  st.files.push({id:'vat-proof',name:'vat-special.pdf',mimeType:'application/pdf',size:10,storageKey:'test/vat-proof',createdAt:'2026-10-10T00:00:00Z'});
+  st.payables!.bills.push({invoiceType:'vat-special',id:'b1',code:'AP-1',supplierId:'sup',supplier:'嘉兴制衣',invoiceNo:'0451001',invoiceDate:'2026-10-10',currency:'CNY',amount:113000,taxAmount:13000,taxRate:'13%',lines:[{purchaseId:'po1',purchaseCode:'PC-1',amount:56500},{purchaseId:'po2',purchaseCode:'PC-2',amount:56500}],terms:[],due:'2026-11-10',dueBasis:'',fileIds:['vat-proof'],note:'',state:'open',registeredAt:'2026-10-10T00:00:00Z',registeredBy:'财务'} as any);
   (st as any).exportRebate={rates:[{id:'rt',code:'RR-1',hsCode:'6203.31',rate:'13',effectiveFrom:'2020-03-20',basis:'公告',createdAt:'2026-10-01T00:00:00Z',actor:'财务'}],claims:[]};
   render();
   await click(getByRole(host,'tab',{name:/退税/}));

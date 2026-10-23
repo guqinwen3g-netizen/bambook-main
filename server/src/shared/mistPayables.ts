@@ -29,7 +29,11 @@ import { platformBusinessDate } from './mistPlatform';
 
 /** awaitingSettlement：发票先于结算到达，暂挂待关联已确认结算；暂挂期间不形成可付应付。 */
 export type SupplierBillLine = { purchaseId: string; purchaseCode: string; kind: 'material' | 'finished' | 'processing'; amount: number; settlementId?: string; settlementCode?: string; awaitingSettlement?: boolean; linkedAt?: string; linkedBy?: string };
+export type SupplierInvoiceType = 'vat-special'|'vat-general'|'commercial'|'other';
+export const SUPPLIER_INVOICE_TYPES:Record<SupplierInvoiceType,string>={'vat-special':'增值税专用发票','vat-general':'增值税普通发票',commercial:'商业发票',other:'其他票据'};
 export type SupplierBill = {
+  invoiceType?:SupplierInvoiceType;
+  invoiceTypeHistory?:Array<{previousType?:SupplierInvoiceType;invoiceType:SupplierInvoiceType;fileIds:string[];reason:string;at:string;actor:string;actorId?:string}>;
   id: string; code: string; supplierId: string; supplier: string; invoiceNo: string; invoiceDate: string;
   currency: string; amount: number; taxAmount: number; taxRate: string; lines: SupplierBillLine[];
   terms: string[]; due: string; dueBasis: string; fileIds: string[]; note: string;
@@ -98,7 +102,8 @@ export type PayableReversal = { id: string; kind: 'payment' | 'allocation'; targ
 export type PayablesState = { bills: SupplierBill[]; payments: SupplierPayment[]; allocations: SupplierPaymentAllocation[]; plans?: PrepaymentPlan[]; requests?: PaymentRequest[]; reversals?: PayableReversal[]; settlements?: SupplierSettlement[]; deductions?: SupplierDeduction[]; prepaymentMoves?: PrepaymentMove[] };
 type AllocationInput = Array<{ billId: string; amount: number }>;
 export type PayablesCommand =
-  | { type: 'payable.bill.register'; payload: { supplierId: string; invoiceNo: string; invoiceDate: string; currency: string; amount: number; taxAmount: number; taxRate?: string; lines: Array<{ purchaseId: string; amount: number; settlementId?: string; awaitingSettlement?: boolean }>; due: string; dueBasis: string; fileIds?: string[]; note?: string } }
+  | { type: 'payable.bill.register'; payload: { invoiceType?:SupplierInvoiceType; supplierId: string; invoiceNo: string; invoiceDate: string; currency: string; amount: number; taxAmount: number; taxRate?: string; lines: Array<{ purchaseId: string; amount: number; settlementId?: string; awaitingSettlement?: boolean }>; due: string; dueBasis: string; fileIds?: string[]; note?: string } }
+  | { type:'payable.bill.classify';payload:{id:string;invoiceType:SupplierInvoiceType;fileIds:string[];reason:string} }
   | { type: 'payable.bill.void'; payload: { id: string; reason: string } }
   | { type: 'payable.bill.link'; payload: { id: string; links: Array<{ purchaseId: string; settlementId: string }> } }
   | { type: 'payable.deduction.register'; payload: { recoveryId: string; billId: string; amount: number; reference: string; note?: string } }
@@ -123,7 +128,7 @@ export type PayablesCommand =
   | { type: 'payable.settlement.confirm'; payload: { id: string; prepaymentApplied: number; adjustReason?: string; note?: string } }
   | { type: 'payable.settlement.return'; payload: { id: string; reason: string } }
   | { type: 'payable.settlement.reverse'; payload: { id: string; reason: string } };
-export const PAYABLE_COMMANDS = ['payable.bill.register', 'payable.bill.void', 'payable.plan.register', 'payable.plan.cancel', 'payable.request.submit', 'payable.request.decide', 'payable.request.cancel', 'payable.payment.register', 'payable.payment.allocate', 'payable.payment.reverse', 'payable.allocation.reverse', 'payable.settlement.submit', 'payable.settlement.cancel', 'payable.settlement.confirm', 'payable.settlement.return', 'payable.settlement.reverse', 'payable.bill.link', 'payable.deduction.register', 'payable.deduction.reverse', 'payable.prepayment.refund', 'payable.prepayment.transfer', 'payable.prepayment.reverse', 'payable.payment.backfill', 'payable.payment.plan', 'payable.purchase.cancel'] as const;
+export const PAYABLE_COMMANDS = ['payable.bill.classify','payable.bill.register', 'payable.bill.void', 'payable.plan.register', 'payable.plan.cancel', 'payable.request.submit', 'payable.request.decide', 'payable.request.cancel', 'payable.payment.register', 'payable.payment.allocate', 'payable.payment.reverse', 'payable.allocation.reverse', 'payable.settlement.submit', 'payable.settlement.cancel', 'payable.settlement.confirm', 'payable.settlement.return', 'payable.settlement.reverse', 'payable.bill.link', 'payable.deduction.register', 'payable.deduction.reverse', 'payable.prepayment.refund', 'payable.prepayment.transfer', 'payable.prepayment.reverse', 'payable.payment.backfill', 'payable.payment.plan', 'payable.purchase.cancel'] as const;
 /** 结算提交沿用合同经办权限（业务员）；复核确认、退回与冲回沿用核销权限（财务）。 */
 export const SETTLEMENT_SCOPES = { submit: 'procurement:write', confirm: MIST_FINANCE_SCOPES.reconcile } as const;
 /** 岗位矩阵已有：付款申请创建（业务员、财务）与审批（业务主管）。 */
@@ -148,7 +153,7 @@ const key = (v: string) => v.trim().toLocaleLowerCase();
 
 export const createPayablesState = (_context?: MistContext, _root?: unknown): PayablesState => ({ bills: [], payments: [], allocations: [], plans: [], requests: [], reversals: [], settlements: [], deductions: [], prepaymentMoves: [] });
 export function payablesCommandPermission(command: PayablesCommand) {
-  if (command.type === 'payable.bill.register' || command.type === 'payable.bill.void' || command.type === 'payable.bill.link' || command.type === 'payable.plan.register' || command.type === 'payable.plan.cancel') return MIST_FINANCE_SCOPES.invoice;
+  if (command.type === 'payable.bill.classify' || command.type === 'payable.bill.register' || command.type === 'payable.bill.void' || command.type === 'payable.bill.link' || command.type === 'payable.plan.register' || command.type === 'payable.plan.cancel') return MIST_FINANCE_SCOPES.invoice;
   // 索赔扣款减少票据未付，属于核销；退款是资金到账，沿凭证写；转抵是在合同之间核销预付。
   if (command.type === 'payable.deduction.register' || command.type === 'payable.deduction.reverse' || command.type === 'payable.prepayment.transfer') return MIST_FINANCE_SCOPES.reconcile;
   if (command.type === 'payable.prepayment.refund') return MIST_FINANCE_SCOPES.voucher;
@@ -504,6 +509,19 @@ function allocate(root: Root, c: MistContext, payment: SupplierPayment, input: u
   return applied;
 }
 
+function supplierInvoiceType(value:unknown):SupplierInvoiceType|undefined{
+ if(value===undefined||value===null||value==='')return undefined;
+ if(typeof value!=='string'||!Object.prototype.hasOwnProperty.call(SUPPLIER_INVOICE_TYPES,value))fail('发票类型无效');return value as SupplierInvoiceType;
+}
+export function billRebateLock(root:Root,billId:string):string|undefined{
+ const claim=root.exportRebate?.claims.find(row=>row.state!=='withdrawn'&&row.lines.some(line=>line.billId===billId));
+ return claim?`票据已用于退税申报 ${claim.code}，请先处理原申报`:undefined;
+}
+function invoiceOriginals(invoiceType:SupplierInvoiceType|undefined,currency:string,fileIds:string[]){
+ if(invoiceType==='vat-special'&&currency!=='CNY')fail('增值税专票须按人民币登记');
+ if(invoiceType==='vat-special'&&!fileIds.length)fail('请上传增值税专票原件');
+}
+
 export function applyPayablesCommand(root: Root, command: PayablesCommand, c: MistContext): { id: string; applied?: number } {
   const today = platformBusinessDate(c.now), s = ledger(root), p = command.payload as any;
   switch (command.type) {
@@ -543,14 +561,26 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (sum !== amount) fail('各合同对应金额合计必须等于价税合计');
       const due = day(p.due, '到期日'), dueBasis = text(p.dueBasis, '到期日依据', true, 500);
       const terms = [...new Set(lines.map(l => purchases.find(x => x.id === l.purchaseId)!.terms).filter(Boolean))];
-      const id = c.id();
-      s.bills.push({ id, code: nextCode('AP', s.bills, c.now), supplierId, supplier, invoiceNo, invoiceDate, currency, amount: major(amount), taxAmount: major(tax), taxRate: text(p.taxRate, '税率', false, 40), lines, terms, due, dueBasis, fileIds: files(root, p.fileIds), note: text(p.note, '备注', false), state: 'open', registeredAt: c.now, registeredBy: c.actorName });
+      const id = c.id(), invoiceType=supplierInvoiceType(p.invoiceType),fileIds=files(root,p.fileIds);invoiceOriginals(invoiceType,currency,fileIds);
+      s.bills.push({ ...(invoiceType?{invoiceType,invoiceTypeHistory:[{invoiceType,fileIds:[...fileIds],reason:'票据登记',at:c.now,actor:c.actorName,actorId:c.actorId}]}:{}),id, code: nextCode('AP', s.bills, c.now), supplierId, supplier, invoiceNo, invoiceDate, currency, amount: major(amount), taxAmount: major(tax), taxRate: text(p.taxRate, '税率', false, 40), lines, terms, due, dueBasis, fileIds, note: text(p.note, '备注', false), state: 'open', registeredAt: c.now, registeredBy: c.actorName });
       event(root, c, id, `登记供应商票据 ${invoiceNo}（${supplier}）`);
       return { id };
+    }
+    case 'payable.bill.classify': {
+      const bill=s.bills.find(row=>row.id===text(p.id,'应付票据'))||fail('应付票据不存在','NOT_FOUND');
+      if(!c.actorId)fail('票种核对需要真实操作账号','FORBIDDEN');
+      if(bill.state==='void')fail('已作废票据不能核对票种','PRECONDITION');
+      const lock=billRebateLock(root,bill.id);if(lock)fail(lock,'PRECONDITION');
+      const invoiceType=supplierInvoiceType(p.invoiceType)||fail('请选择发票类型'),reason=text(p.reason,'核对依据',true,1000),fileIds=files(root,p.fileIds);
+      invoiceOriginals(invoiceType,bill.currency,fileIds);
+      bill.invoiceTypeHistory||=[];bill.invoiceTypeHistory.push({previousType:bill.invoiceType,invoiceType,fileIds,reason,at:c.now,actor:c.actorName,actorId:c.actorId});
+      bill.invoiceType=invoiceType;bill.fileIds=[...new Set([...bill.fileIds,...fileIds])];
+      event(root,c,bill.id,`核对票种：${SUPPLIER_INVOICE_TYPES[invoiceType]} · ${reason}`);return{id:bill.id};
     }
     case 'payable.bill.void': {
       const bill = s.bills.find(b => b.id === text(p.id, '应付票据')) || fail('应付票据不存在', 'NOT_FOUND');
       if (bill.state === 'void') fail('该票据已作废', 'PRECONDITION');
+      const rebateLock=billRebateLock(root,bill.id);if(rebateLock)fail(rebateLock,'PRECONDITION');
       if (billPaidMinor(root, bill.id) > 0) fail('该票据已有付款分配，请先冲回分配或付款并写明原因，再作废', 'PRECONDITION');
       if (billRequestedUnpaidMinor(root, bill.id) > 0) fail('该票据有待审批或已批准未付的付款申请，请先撤回申请', 'PRECONDITION');
       if (billDeductedMinor(root, bill.id) > 0) fail('该票据已登记索赔扣款，请先冲回扣款再作废', 'PRECONDITION');

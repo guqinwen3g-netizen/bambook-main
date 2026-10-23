@@ -1,3 +1,5 @@
+import {SupplierInvoiceTypeDialog} from './SupplierInvoiceTypeDialog';
+import {SUPPLIER_INVOICE_TYPES,billRebateLock,type SupplierInvoiceType} from '../../../../server/src/shared/mistPayables';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** 应付待办：供应商票据 → 应付余额 → 付款申请（主管审批）→ 实际付款与多票分配。只用已登记事实，不用合同金额猜应付。
@@ -13,7 +15,7 @@ import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { useNav } from '../nav';
 import { DraftFiles } from './modules/fulfillmentKit';
-import { ActionBar, DetailBlock, DetailBody, ListDetail } from './modules/pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, RecordDisclosure } from './modules/pageKit';
 import { downloadMistCsv } from './OrderListPage';
 import { SettlementConfirmDialog, SettlementDetail, SettlementSubmitDialog, settlementColumns } from './FinanceSettlements';
 import { BillLinkDialog, DeductionDialog, DeductionList, PrepaymentMoveDialog, PrepaymentResidual } from './FinanceCloseout';
@@ -36,7 +38,7 @@ export function payableSupplierOptions(state: MistState | null) {
   return [...map.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
 }
 
-type BillDraft = { supplierId: string; invoiceNo: string; invoiceDate: string; taxAmount: string; taxRate: string; due: string; dueBasis: string; note: string; lines: Record<string, string>; links: Record<string, string>; fileIds?: string[] };
+type BillDraft = { invoiceType?:SupplierInvoiceType; supplierId: string; invoiceNo: string; invoiceDate: string; taxAmount: string; taxRate: string; due: string; dueBasis: string; note: string; lines: Record<string, string>; links: Record<string, string>; fileIds?: string[] };
 /** mode：request = 申请票据付款；pay = 按已批准申请登记实付；allocate = 把未分配金额分到票据。 */
 type PayDraft = { mode: 'request' | 'pay' | 'allocate'; paymentId?: string; requestId?: string; planId?: string; supplierId: string; currency: string; date: string; amount: string; reference: string; note: string; allocations: Record<string, string>; fileIds?: string[] };
 type PlanDraft = { stage: PaymentPlanStage; purchaseId: string; amount: string; trigger: string; basis: string; due: string; note: string };
@@ -68,6 +70,7 @@ export function FinancePayables() {
   const [settleOpen, setSettleOpen] = React.useState(false), [confirmId, setConfirmId] = React.useState('');
   const [linkId, setLinkId] = React.useState(''), [deductId, setDeductId] = React.useState(''), [moveDraft, setMoveDraft] = React.useState<{ kind: 'refund' | 'transfer'; purchaseId: string } | null>(null);
   const [advanceId, setAdvanceId] = React.useState(''), [backfillId, setBackfillId] = React.useState(''), [planLinkId, setPlanLinkId] = React.useState('');
+  const [invoiceTypeId,setInvoiceTypeId]=React.useState('');
   const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
   const busy = working || loading || saving || !!pending;
   React.useEffect(() => { setSelected(route.id || ''); setDrawer(!!route.id); }, [route.id]);
@@ -116,7 +119,7 @@ export function FinancePayables() {
     if (picked.some(id => !(cents(billDraft.lines[id]) > 0))) return setFailure('每张勾选合同的对应金额都要大于零。');
     if (picked.some(id => needsLink(id) && !billDraft.links[id])) return setFailure('已有已确认结算或已付预付的合同，票据须关联已确认结算；结算还没确认时，可选“待关联结算”先登记。');
     const tax = billDraft.taxAmount.trim() ? cents(billDraft.taxAmount) : 0; if (Number.isNaN(tax)) return setFailure('税额格式无效。');
-    void execute({ type: 'payable.bill.register', payload: { supplierId: billDraft.supplierId, invoiceNo: billDraft.invoiceNo, invoiceDate: billDraft.invoiceDate, currency: billCurrency, amount: billTotal / 100, taxAmount: tax / 100, taxRate: billDraft.taxRate, lines: picked.map(id => ({ purchaseId: id, amount: cents(billDraft.lines[id]) / 100, ...(billDraft.links[id] === HELD ? { awaitingSettlement: true } : billDraft.links[id] ? { settlementId: billDraft.links[id] } : {}) })), due: billDraft.due, dueBasis: billDraft.dueBasis, note: billDraft.note, fileIds: billDraft.fileIds || [] } }, r => { const held = picked.some(id => billDraft.links[id] === HELD); setBillDraft(null); setView('bills'); open(String(r.id)); toast(held ? '票据已登记为待关联结算，结算确认后再关联' : '供应商票据已登记，应付已形成'); });
+    void execute({ type: 'payable.bill.register', payload: { invoiceType:billDraft.invoiceType,supplierId: billDraft.supplierId, invoiceNo: billDraft.invoiceNo, invoiceDate: billDraft.invoiceDate, currency: billCurrency, amount: billTotal / 100, taxAmount: tax / 100, taxRate: billDraft.taxRate, lines: picked.map(id => ({ purchaseId: id, amount: cents(billDraft.lines[id]) / 100, ...(billDraft.links[id] === HELD ? { awaitingSettlement: true } : billDraft.links[id] ? { settlementId: billDraft.links[id] } : {}) })), due: billDraft.due, dueBasis: billDraft.dueBasis, note: billDraft.note, fileIds: billDraft.fileIds || [] } }, r => { const held = picked.some(id => billDraft.links[id] === HELD); setBillDraft(null); setView('bills'); open(String(r.id)); toast(held ? '票据已登记为待关联结算，结算确认后再关联' : '供应商票据已登记，应付已形成'); });
   };
 
   // —— 申请 / 付款 / 分配表单
@@ -207,7 +210,7 @@ export function FinancePayables() {
   const allocations = state?.payables?.allocations || [];
   const detail = bill ? <DetailBody data-payable-bill={bill.id} heading={<h2 className="mist-h2">{bill.code}</h2>}>
     <Facts items={[
-      { label: '供应商', value: bill.supplier }, { label: '供应商发票号', value: <Mono>{bill.invoiceNo}</Mono> }, { label: '发票日期', value: bill.invoiceDate },
+      { label: '发票类型',value:bill.invoiceType?uiText(SUPPLIER_INVOICE_TYPES[bill.invoiceType]):uiText('待核对')},{ label: '供应商', value: bill.supplier }, { label: '供应商发票号', value: <Mono>{bill.invoiceNo}</Mono> }, { label: '发票日期', value: bill.invoiceDate },
       { label: '价税合计', value: apMoney(bill.amount, bill.currency) }, { label: '税额 / 税率', value: apMoney(bill.taxAmount, bill.currency) + ' · ' + (bill.taxRate || '未填写') },
       ...(bill.prepaymentCredit > 0 ? [{ label: '预付抵扣（来自结算）', value: apMoney(bill.prepaymentCredit, bill.currency) }] : []),
       ...(bill.advanceCredit > 0 ? [{ label: '先付抵扣（不等票付款）', value: apMoney(bill.advanceCredit, bill.currency) }] : []),
@@ -218,11 +221,13 @@ export function FinancePayables() {
     {bill.held && <Banner tone="warn" title={uiText("待关联结算")}>{uiText("发票先于结算到达，已登记但暂挂：不计入应付和逾期，也不能申请付款。业务员提交结算、财务确认后，在这里关联结算。")}</Banner>}
     {bill.status === 'void' && <Banner title={uiText("已作废")}>{bill.voided?.reason}（{bill.voided?.actor} · {fmtDay(bill.voided?.at)}{uiText("），不再计入应付；原记录保留。")}</Banner>}
     <ActionBar busy={busy} actions={[
+      {label:'核对票种',onClick:()=>setInvoiceTypeId(bill.id),reason:!canBill?'需要票据登记权限':state?billRebateLock(state,bill.id):'公司尚未读取',hidden:bill.status==='void'},
       { label: '关联结算', onClick: () => { setFailure(''); setLinkId(bill.id); }, reason: !canBill ? '需要票据登记权限' : undefined, hidden: !bill.held || bill.status === 'void' },
       { label: '申请付款', onClick: () => startRequest(bill.supplierId, bill.id), reason: !canRequest ? '需要付款申请权限' : bill.held ? '待关联结算后才能申请付款' : bill.open <= 0 ? '本票已无未付余额' : availableMinor(bill) <= 0 ? '未付余额已全部在付款申请中' : undefined, hidden: bill.status === 'void' },
       { label: '登记索赔扣款', onClick: () => { setFailure(''); setDeductId(bill.id); }, reason: !canAllocate ? '需要核销权限（财务）' : bill.held ? '待关联结算后才能扣款' : !state || !deductibleRecoveries(state, bill.supplierId, bill.currency).length ? '这家供应商没有工厂已同意从货款中扣的追偿' : availableMinor(bill) <= 0 ? '本票没有可扣的未付余额' : undefined, hidden: bill.status === 'void' || (!!state && !deductibleRecoveries(state, bill.supplierId).length) },
-      { label: '作废票据', onClick: () => askReason('void', bill.id), reason: !canBill ? '需要票据登记权限' : bill.paid > 0 ? '已有付款分配，请先冲回分配或付款再作废' : bill.deducted > 0 ? '已有索赔扣款，请先冲回扣款再作废' : undefined, hidden: bill.status === 'void' },
+      { label: '作废票据', onClick: () => askReason('void', bill.id), reason: !canBill ? '需要票据登记权限' : state&&billRebateLock(state,bill.id)|| (bill.paid > 0 ? '已有付款分配，请先冲回分配或付款再作废' : bill.deducted > 0 ? '已有索赔扣款，请先冲回扣款再作废' : undefined), hidden: bill.status === 'void' },
     ]} />
+    {!!bill.invoiceTypeHistory?.length&&<RecordDisclosure title="票种核对记录">{bill.invoiceTypeHistory.slice().reverse().map((row,index)=><div key={index}><span>{uiText(SUPPLIER_INVOICE_TYPES[row.invoiceType])} · {row.actor} · {fmtDay(row.at)}</span><p>{row.reason}</p></div>)}</RecordDisclosure>}
     {bill.fileIds.length > 0 && <DetailBlock title={uiText("发票附件")}><DraftFiles ids={bill.fileIds} onChange={() => undefined} disabled /></DetailBlock>}
     {bill.expenseId ? <DetailBlock title={uiText("费用转入")}><span className="mist-note">{bill.dueBasis}{uiText("。由费用台账转入的应付（货代、报关等），没有来源合同；成本已按费用台账分摊到订单，付款不再重复计成本。")}</span></DetailBlock> : null}
     {bill.opening ? <DetailBlock title={uiText("期初登记")}><span className="mist-note">{uiText("系统启用前已收票、仍未付清的供应商票据；原价税合计 ")}{bill.opening.originalAmount} {bill.currency}{uiText("，本系统按启用时未付余额 ")}{bill.amount} {bill.currency}{uiText(" 计应付。没有来源合同。")}</span></DetailBlock> : null}
@@ -313,12 +318,14 @@ export function FinancePayables() {
     </div>
     <ListDetail drawerOpen={drawer && !!(bill || payment || request || plan || settlement)} drawerTitle={bill?.code || payment?.code || request?.code || plan?.code || settlement?.code || '应付详情'} onDrawerClose={() => setDrawer(false)} list={<Card>{list}</Card>} detail={detail} />
 
-    <Dialog open={!!billDraft} onClose={() => { if (!busy) setBillDraft(null); }} width={760} title={uiText("登记供应商票据")} description={uiText("收到供应商开给我们的增值税发票后登记。登记后形成应付；不改变采购 / 加工的交付状态。")}
+    {invoiceTypeId&&bills.find(row=>row.id===invoiceTypeId)&&<SupplierInvoiceTypeDialog key={invoiceTypeId} bill={bills.find(row=>row.id===invoiceTypeId)!} onClose={()=>setInvoiceTypeId('')}/>}
+    <Dialog open={!!billDraft} onClose={() => { if (!busy) setBillDraft(null); }} width={760} title={uiText("登记供应商票据")}
       footer={<><Button disabled={busy} onClick={() => setBillDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canBill} onClick={submitBill}>{uiText("登记应付")}</Button></>}>
       {billDraft && <div className="mist-col">
         {failure && <Banner tone="bad" title={uiText("还不能登记")}>{failure}</Banner>}
         <FormGrid>
           <Field label={uiText("供应商")} required><Select aria-label={uiText("供应商")} value={billDraft.supplierId} options={[{ value: '', label: '请选择供应商' }, ...suppliers]} onChange={e => setBillDraft({ ...billDraft, supplierId: e.target.value, lines: {} })} /></Field>
+          <Field label={uiText('发票类型')}><Select aria-label={uiText('发票类型')} value={billDraft.invoiceType||''} options={[{value:'',label:'待核对'},...Object.entries(SUPPLIER_INVOICE_TYPES).map(([value,label])=>({value,label}))]} onChange={event=>setBillDraft({...billDraft,invoiceType:event.target.value as SupplierInvoiceType||undefined})}/></Field>
           <Field label={uiText("供应商发票号")} required><TextInput aria-label={uiText("供应商发票号")} value={billDraft.invoiceNo} onChange={e => setBillDraft({ ...billDraft, invoiceNo: e.target.value })} /></Field>
         </FormGrid>
         <Field label={uiText("这张票对应哪些合同")} required hint={uiText(billCurrency ? '同一张票只能对应同币种合同（' + billCurrency + '）' : '勾选合同并写明本票对应金额，不能只挂供应商总额')}>

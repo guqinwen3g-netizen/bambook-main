@@ -332,3 +332,21 @@ it('票据登记可上传发票附件，详情可下载', async () => {
   expect(store.value.state.payables.bills[0].fileIds).toEqual(['file-vat']);
   expect(host.textContent).toContain('发票附件'); expect(host.textContent).toContain('增值税发票.pdf');
 });
+
+it('核对票种保留原金额与付款记录，失败后保留原件和核对依据以便重试',async()=>{
+ store.value.state.files.push({id:'vat-proof',name:'原发票.pdf',mimeType:'application/pdf',size:10,storageKey:'test/vat-proof',createdAt:ctx.now});
+ const added=applyMistCommand(store.value.state,{type:'payable.bill.register',payload:{supplierId:po.supplierId,invoiceNo:'CLASSIFY-01',invoiceDate:day,currency:'CNY',amount:1130,taxAmount:130,lines:[{purchaseId:po.id,amount:1130}],due:day,dueBasis:'按合同',fileIds:['vat-proof']}},ctx);
+ store.value.state=added.state;route.id=added.result.id!;render();await click('核对票种');
+ select('发票类型','vat-special');const note=getByRole(document.body,'textbox',{name:'核对依据'}) as HTMLTextAreaElement;
+ act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'票号、日期及金额与原件一致');note.dispatchEvent(new Event('input',{bubbles:true}));});
+ store.value.run.mockRejectedValueOnce(new Error('连接中断'));await click('保存',getByRole(document.body,'dialog',{name:'核对票种'}));
+ expect(getByRole(document.body,'dialog',{name:'核对票种'}).textContent).toContain('连接中断');expect(note.value).toBe('票号、日期及金额与原件一致');
+ await click('保存',getByRole(document.body,'dialog',{name:'核对票种'}));
+ expect(store.value.state.payables.bills[0]).toMatchObject({invoiceType:'vat-special',amount:1130,taxAmount:130,fileIds:['vat-proof']});expect(store.value.state.payables.allocations).toEqual([]);
+ expect(host.textContent).toContain('增值税专用发票');expect(queryAllByRole(document.body,'dialog',{name:'核对票种'})).toHaveLength(0);
+});
+
+it('只读财务账号不能打开票种核对',()=>{
+ const added=applyMistCommand(store.value.state,{type:'payable.bill.register',payload:{supplierId:po.supplierId,invoiceNo:'READ-ONLY',invoiceDate:day,currency:'CNY',amount:100,taxAmount:0,lines:[{purchaseId:po.id,amount:100}],due:day,dueBasis:'按合同'}},ctx);
+ store.value.state=added.state;route.id=added.result.id!;store.value.canWrite=false;render();expect((getByRole(host,'button',{name:'核对票种'}) as HTMLButtonElement).disabled).toBe(true);expect(store.value.run).not.toHaveBeenCalled();
+});

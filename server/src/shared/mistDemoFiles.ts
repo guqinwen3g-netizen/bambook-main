@@ -42,7 +42,7 @@ export function renderDemoFile(state: MistState, file: MistFile): Uint8Array {
   } else if (template === 'vat-invoice' && purchase) {
     const bill = state.payables?.bills.find(b => b.lines.some(l => l.purchaseId === purchase.id));
     body.push(`Seller: ${ascii(purchase.supplier)}`, `Buyer: ${company}`, `Invoice No.: ${ascii(bill?.invoiceNo || '')}    Date: ${bill?.invoiceDate || ''}`, `Contract: ${purchase.code}    Order: ${state.orders.find(o => o.id === purchase.orderId)?.code || ''}`, `Goods: ${purchase.quantity} ${unit(purchase.unit)}`,
-      `Amount incl. VAT: ${purchase.currency} ${(bill?.amount ?? 0).toFixed(2)}    VAT ${ascii(bill?.taxRate || '')}: ${purchase.currency} ${(bill?.taxAmount ?? 0).toFixed(2)}`, '', 'Purpose: export VAT refund (confirmed in e-tax system).');
+      `Amount incl. VAT: ${purchase.currency} ${(bill?.amount ?? 0).toFixed(2)}    VAT ${ascii(bill?.taxRate || '')}: ${purchase.currency} ${(bill?.taxAmount ?? 0).toFixed(2)}`, '', 'Purpose: export VAT refund.');
   } else if (template === 'letter-of-credit' && state.letterOfCredits?.some(l => l.lcNo === ref)) {
     const lc = state.letterOfCredits!.find(l => l.lcNo === ref)!;
     body.push(`:20: Documentary credit number: ${ascii(lc.lcNo)}`, `:31C: Date of issue: ${lc.issueDate}`, `:31D: Date and place of expiry: ${lc.expiryDate} CHINA`, `:52A: Issuing bank: ${ascii(lc.issuingBank)}`, `:50: Applicant: ${ascii(lc.customer)}`, `:59: Beneficiary: ${company}`,
