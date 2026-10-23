@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '返回本票报关':'Back to this declaration',
   '登记船样':'Register shipping samples',
   '尺码与件数':'Sizes and piece counts',
   '请完成本组船样全部尺码与件数的QC':'Inspect every size and piece in this shipping sample set',
