@@ -19,6 +19,18 @@ async function click(node:HTMLElement){await act(async()=>node.click());}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function purchase(id:string,patch:Partial<FulfillmentPurchase>={}):FulfillmentPurchase{return {id,code:id.toUpperCase(),orderId:'o',lineId:'l',kind:'material',domain:'garment',supplierId:'s',supplier:'青禾辅料',description:'主唛与洗标',quantity:100,unit:'个',price:0.3,currency:'CNY',due:'2026-10-30',terms:'月结30天',destination:'江南成衣',note:'',fileIds:[],state:'draft',requesterId:'buyer',createdBy:'经办人',createdAt:'2026-10-01T08:00:00Z',reviewerIds:['boss'],configVersions:{},received:0,...patch};}
 const approved=(patch:Partial<FulfillmentPurchase>={})=>({state:'approved' as const,submittedAt:'2026-10-02T08:00:00Z',decision:{actorId:'boss',actor:'审批人',at:'2026-10-03T08:00:00Z',decision:'approved' as const,note:'同意'},...patch});
+it('generates supplier PDFs through the server and keeps archived files available',async()=>{
+  store.state!.fulfillment.purchases.push(purchase('pdf',approved({documents:[{id:'doc',fileId:'pdf-file',fileName:'PO-V1-01.pdf'} as any]})));
+  store.state!.files.push({id:'pdf-file',name:'PO-V1-01.pdf',mimeType:'application/pdf',size:100,storageKey:'private',createdAt:''});
+  render('pdf');await click(getByRole(host,'button',{name:'生成采购单'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.procurement.document',payload:{id:'pdf'}});
+  expect(host.textContent).toContain('合同文件');expect(host.textContent).toContain('PO-V1-01.pdf');
+  expect(queryByRole(host,'button',{name:'下载批准单据'})).toBeNull();
+});
+it('keeps generation disabled for read-only procurement access',()=>{
+  session.denied.add('procurement:write');store.state!.fulfillment.purchases.push(purchase('readonly',approved({kind:'processing'})));
+  render('readonly');expect((getByRole(host,'button',{name:'生成加工合同'}) as HTMLButtonElement).disabled).toBe(true);
+});
 beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 

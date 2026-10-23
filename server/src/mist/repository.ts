@@ -25,6 +25,8 @@ import type { ImagePreviewMode } from './imagePreview';
 import { prepareMistBusinessNumbers } from './businessNumbers';
 import { buildIssueArchive, bindIssueArchive, prepareCreditDocumentSnapshot, assertCreditIssuePayload, assertIssuedCreditArchive, type PreparedCreditIssueArchive } from './creditPrint';
 import { buildQuotationDocument, bindQuotationDocument, nextQuotationDocumentSeq, prepareQuotationDocumentSnapshot } from './quotationPrint';
+import { buildPurchaseDocument, bindPurchaseDocument } from './purchasePrint';
+import { preparePurchaseDocumentSnapshot } from '../shared/mistPurchaseDocument';
 import { bindDevelopmentNotice, buildDevelopmentNotice, prepareDevelopmentNoticeSnapshot } from './developmentNoticePrint';
 import { bindCustomerStatement, buildCustomerStatement, prepareCustomerStatementSnapshot } from './customerStatementPrint';
 import type { PdfRenderResult } from '../templates/pdf';
@@ -385,6 +387,13 @@ export class MistRepository {
           const prepared = await this.creditArchiveBuilder(printSnapshot);
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           context.creditDocumentIssue = bindIssueArchive(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
+        }
+        if (input.command?.type === 'fulfillment.procurement.document') {
+          const snapshot = preparePurchaseDocumentSnapshot(row.state, input.command.payload, context);
+          const count = row.state.fulfillment.purchases.find(p => p.id === snapshot.purchaseId)?.documents?.length || 0;
+          const prepared = await buildPurchaseDocument(snapshot, count + 1, this.quotationPdfRenderer);
+          stored = await this.files.write(workspaceId, prepared.file, context.now);
+          (context as typeof context & { purchaseDocument?: unknown }).purchaseDocument = bindPurchaseDocument(prepared, stored, { id: context.id, workspaceId });
         }
         if (input.command?.type === 'market.quotation.document') {
           const snapshot = prepareQuotationDocumentSnapshot(row.state, input.command.payload || {}, context);

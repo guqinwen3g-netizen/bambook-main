@@ -1,6 +1,7 @@
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
+import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
 import { productionSampleRequirements, type ProductionSampleEvidence } from './mistProductionSamples';
@@ -167,6 +168,7 @@ export type FulfillmentPurchase = {
         note: string;
     };
     received: number;
+    documents?: PurchaseDocumentRecord[];
     revisionHistory?: FulfillmentPurchaseRevision[];
     offlineSend?: { at: string; actor: string; evidence: string; fileIds: string[]; revision: number };
     supplierConfirmation?: { at: string; actor: string; evidence: string; confirmedDue: string; fileIds: string[]; revision: number };
@@ -467,6 +469,9 @@ export type FulfillmentCommand = {
     payload: {
         id: string;
     };
+} | {
+    type: 'fulfillment.procurement.document';
+    payload: { id: string };
 } | {
     type: 'fulfillment.procurement.decide';
     payload: {
@@ -1241,6 +1246,16 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             fact.customerAcceptance = { at: ctx.now, actor: ctx.actorName, note: text(p.note, '客户明确接受数量差异的依据'), completionId: fact.completion!.id };
             audit(root, ctx, 'production', branch.id, '登记客户接受最终数量差异');
             return { id: branch.id };
+        }
+        case 'fulfillment.procurement.document': {
+            const snapshot = preparePurchaseDocumentSnapshot(root, p, ctx), purchase = get(f.purchases, snapshot.purchaseId, '采购合同');
+            const artifact = (ctx as MistContext & { purchaseDocument?: PurchaseDocumentArtifact }).purchaseDocument;
+            if (!artifact || artifact.record.purchaseId !== purchase.id || artifact.record.revision !== snapshot.revision || artifact.record.snapshotFingerprint !== purchaseDocumentFingerprint(snapshot) || purchaseDocumentFingerprint(artifact.record.snapshot) !== artifact.record.snapshotFingerprint || artifact.record.fileId !== artifact.file.id) fail('单据须由服务端按已批准合同生成');
+            if (root.files.some(file => file.id === artifact!.file.id) || f.purchases.some(item => item.documents?.some(doc => doc.id === artifact!.record.id || doc.fileId === artifact!.file.id))) fail('单据已归档', 'CONFLICT');
+            root.files.push(structuredClone(artifact!.file));
+            purchase.documents = [...(purchase.documents || []), structuredClone(artifact!.record)];
+            audit(root, ctx, 'procurement', purchase.id, '生成合同文件 ' + artifact!.record.fileName);
+            return { id: purchase.id, documentId: artifact!.record.id, fileId: artifact!.file.id };
         }
         case 'fulfillment.procurement.send': {
             const purchase = get(f.purchases, p.id, '采购合同');
