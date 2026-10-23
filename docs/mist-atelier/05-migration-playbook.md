@@ -1,5 +1,13 @@
 # 05 · 在 Mist Atelier 上继续开发
 
+## 2026-10-23 中英文界面与本机偏好
+
+- 默认 `zh-CN`，可选择 `en-US`。入口在公司设置 → 外观与语言；账号抽屉也提供相同控件，普通公司成员与平台账号无需公司管理权限即可切换。
+- `services/devicePreferences.ts` 是设备偏好真源，沿用 `bambook.device.locale`；应用路径 `runtime/devicePreferences.ts` 仅重导出。选择即时生效，不提交 `settings.update`，不读取公司旧 `settings.locale`，不刷新页面或重新挂载业务表单；禁用浏览器存储时当次会话仍可切换，同源其他标签页通过 storage 事件同步。
+- `services/interfaceLanguage.ts` 提供 `uiText`、整句参数插值 `ui`、`interfaceLocale`；`services/locales/en-US.json` 保存静态界面译文，`en-US-reviewed.ts` 统一行业术语与重点文案。新增界面文案须同步译文并保留插值占位符，不能依靠运行时网页翻译或修改 DOM 文本。
+- 翻译发生在展示边界，不翻译输入值、API 枚举、业务编号、客户/公司/人员名称、用户撰写的正文、审计原文或附件/PDF内容。日期显示跟随界面语言，业务时钟、时区、金额和币种不变。工作台派生待办标签可翻译，但不改原始记录。
+- 验证入口：`components/mist/language.test.tsx` 和 `SettingsPage.test.tsx` 覆盖默认语言、即时切换、刷新后保留、业务输入保留、storage 同步、存储失败回退、成员可用与零服务端写入；完整前端/服务端测试、类型、构建与 Mist 规范另按仓库规则执行。页面验收需覆盖长英文标签及手机设置行。
+
 ## 报价成本 AI 审阅操作协议（2026-10-14，quote-cost-advisor-v1）
 
 ### 模型连接（2026-10-15）

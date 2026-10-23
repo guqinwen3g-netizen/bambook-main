@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** BB-ORD-2：条目来源（开发案号 · 版本 / 产品码），可点开来源记录。只读展示。 */
 import React from 'react';
 import type { MistOrderLine, MistState } from '../../../../server/src/shared/mistWorkspace';
@@ -12,7 +13,7 @@ export function lineSource(state: MistState, line: MistOrderLine, go: Go) {
 }
 export function OrderLineSourceValue({ state, line, go }: { state: MistState; line: MistOrderLine; go: Go }) {
   const source = lineSource(state, line, go);
-  return source ? <Button variant="quiet" size="sm" data-line-source={source.kind} onClick={source.open}>{source.label}</Button> : <span className="mist-muted">手工新建 · 无来源记录</span>;
+  return source ? <Button variant="quiet" size="sm" data-line-source={source.kind} onClick={source.open}>{uiText(source.label)}</Button> : <span className="mist-muted">{uiText("手工新建 · 无来源记录")}</span>;
 }
 /** BB-QUO-5 订单条目回链到来源报价（准确版本与条目）；非报价转单的条目返回 null。 */
 export function lineQuotation(state: MistState, line: MistOrderLine, go: Go) {
@@ -23,5 +24,5 @@ export function lineQuotation(state: MistState, line: MistOrderLine, go: Go) {
 }
 export function OrderLineQuotationValue({ state, line, go }: { state: MistState; line: MistOrderLine; go: Go }) {
   const source = lineQuotation(state, line, go);
-  return source ? <Button variant="quiet" size="sm" data-line-quotation onClick={source.open}>{source.label}</Button> : null;
+  return source ? <Button variant="quiet" size="sm" data-line-quotation onClick={source.open}>{uiText(source.label)}</Button> : null;
 }

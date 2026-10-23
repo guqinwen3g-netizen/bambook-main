@@ -171,7 +171,7 @@
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
 | `MistMark` | Bambook 六叶标志。颜色跟随 currentColor（浅色主题白色、深色主题品牌青）。 | `({ className = 'mist-brand-mark', title }: { className?: string; title?: string })` |
-| `MistWordmark` | 标志 + 文字「Bambook 竹衍」 | `()` |
+| `MistWordmark` | 与网页、桌面和账号邮件共用产品名称。 | `()` |
 
 ## 公共类型与工具 · `components/mist/types.ts`
 

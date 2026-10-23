@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** Explicit human-selected reference. Never transfers a historical price or cost into inputs. */
 import React from "react";
 import {
@@ -39,15 +40,15 @@ export function FrozenHistoryEvidence({
     <div className="mist-col">
       <Banner
         title={
-          preview
+          uiText(preview
             ? "待核对来源事实 · 尚未保存"
-            : "人工确认的历史依据 · 冻结时事实"
+            : "人工确认的历史依据 · 冻结时事实")
         }
       >
         {evidence.version}
-        {preview
+        {uiText(preview
           ? "；以下为当前读取的来源事实，需人工核对后才能冻结；不是成交或履约结论。客户名称来自当前档案。"
-          : "；历史报价不等于成交或履约，采用理由不构成价格审批。客户名称为冻结时档案名称，不追溯推定原始名称。"}
+          : "；历史报价不等于成交或履约，采用理由不构成价格审批。客户名称为冻结时档案名称，不追溯推定原始名称。")}
       </Banner>
       <Mono>
         {s.quoteCode} · V{s.revision} · {s.line.style}
@@ -138,22 +139,16 @@ export function FrozenHistoryEvidence({
       />
       {!preview && (
         <div className="mist-row">
-          <Button onClick={() => go("quotations", s.quotationId)}>
-            查看历史原报价
-          </Button>
+          <Button onClick={() => go("quotations", s.quotationId)}>{uiText("查看历史原报价")}</Button>
           <Button
             onClick={() =>
               go("quotations", s.quotationId, { section: "feedback" })
             }
-          >
-            查看原反馈历史
-          </Button>
+          >{uiText("查看原反馈历史")}</Button>
         </div>
       )}
       {!preview && (
-        <span className="mist-note">
-          回看入口显示来源的当前事实；来源后来变化不改写这里的冻结证据。完整原文随本核算导出。
-        </span>
+        <span className="mist-note">{uiText("回看入口显示来源的当前事实；来源后来变化不改写这里的冻结证据。完整原文随本核算导出。")}</span>
       )}
     </div>
   );
@@ -191,12 +186,10 @@ export function QuotationHistoryEvidencePicker({
         ));
   return (
     <div className="mist-col">
-      <Banner title="可选：人工选取历史报价依据">
-        只列本公司另一份已对客报价的同币种、同单位条目，可包含其他客户或产品；不代表专业可比。先看条件对照，再写明规格、数量、税费、MOQ、交期等差异与处理。不选择不影响原有核算。
-      </Banner>
-      <Field label="本次历史依据">
+      <Banner title={uiText("可选：人工选取历史报价依据")}>{uiText("只列本公司另一份已对客报价的同币种、同单位条目，可包含其他客户或产品；不代表专业可比。先看条件对照，再写明规格、数量、税费、MOQ、交期等差异与处理。不选择不影响原有核算。")}</Banner>
+      <Field label={uiText("本次历史依据")}>
         <Select
-          aria-label="本次历史依据"
+          aria-label={uiText("本次历史依据")}
           disabled={disabled}
           value={selected?.key || (value ? "missing" : "")}
           options={[
@@ -240,9 +233,7 @@ export function QuotationHistoryEvidencePicker({
         />
       </Field>
       {stale && (
-        <Banner tone="warn" title="原历史依据已变化">
-          请重新选择并核对，不能继续沿用旧确认。
-        </Banner>
+        <Banner tone="warn" title={uiText("原历史依据已变化")}>{uiText("请重新选择并核对，不能继续沿用旧确认。")}</Banner>
       )}
       {selected && value && (
         <>
@@ -260,10 +251,7 @@ export function QuotationHistoryEvidencePicker({
               }),
             )}
           />
-          <span className="mist-note">
-            主线状态：{selected.quote.status}
-            ；历史价格只作原始事实，不自动填入拟报价或成本。
-          </span>
+          <span className="mist-note">{uiText("主线状态：")}{selected.quote.status}{uiText("；历史价格只作原始事实，不自动填入拟报价或成本。")}</span>
           <FrozenHistoryEvidence
             preview
             evidence={{
@@ -277,12 +265,12 @@ export function QuotationHistoryEvidencePicker({
             }}
           />
           <Field
-            label="采用理由与差异处理"
+            label={uiText("采用理由与差异处理")}
             required
-            hint="说明本次为什么参考、哪些条件不同或未知，以及如何人工处理；不把已发送当成交样本。"
+            hint={uiText("说明本次为什么参考、哪些条件不同或未知，以及如何人工处理；不把已发送当成交样本。")}
           >
             <TextArea
-              aria-label="采用理由与差异处理"
+              aria-label={uiText("采用理由与差异处理")}
               disabled={disabled}
               value={value.reason}
               onChange={(e) =>
@@ -291,7 +279,7 @@ export function QuotationHistoryEvidencePicker({
             />
           </Field>
           <Checkbox
-            label="我已人工核对历史条件及未知项，确认仅作为本次依据"
+            label={uiText("我已人工核对历史条件及未知项，确认仅作为本次依据")}
             disabled={disabled || stale}
             checked={value.confirmed}
             onChange={(confirmed) => onChange({ ...value, confirmed })}

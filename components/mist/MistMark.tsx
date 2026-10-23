@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import { BAMBOOK_MARK_INNER } from './markSvg';
 import { BAMBOOK_BRAND } from '../../server/src/shared/brand';
@@ -8,7 +9,7 @@ export function MistMark({ className = 'mist-brand-mark', title }: { className?:
   const html = React.useMemo(() => BAMBOOK_MARK_INNER.replace(/bb-knot-(\d)/g, `bb-knot-$1-${uid}`), [uid]);
   return (
     <svg className={className} viewBox="0 0 200 200" fill="currentColor" role={title ? 'img' : undefined}
-      aria-label={title} aria-hidden={title ? undefined : true} dangerouslySetInnerHTML={{ __html: html }} />
+      aria-label={uiText(title)} aria-hidden={title ? undefined : true} dangerouslySetInnerHTML={{ __html: html }} />
   );
 }
 

@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** Business page kit: Mist compositions shared by module pages (list + detail, reasoned actions). */
 import React from 'react';
@@ -25,7 +27,7 @@ export const useDetailSurface = () => React.useContext(DetailSurface);
 /** Detail body: card padding in the preview column, plain column inside the drawer. */
 export function DetailBody({ heading, children, ...rest }: { heading?: React.ReactNode; children: React.ReactNode } & Omit<React.HTMLAttributes<HTMLDivElement>, "title">) {
   const surface = useDetailSurface();
-  return <div className={surface === 'drawer' ? 'mist-col' : 'mist-preview-b'} {...rest}>{surface === "card" && heading}{children}</div>;
+  return <div className={surface === 'drawer' ? 'mist-col' : 'mist-preview-b'} {...rest}>{surface === "card" && heading}{uiText(children)}</div>;
 }
 
 /** T2 list + sticky detail card. On compact layouts the same detail opens in a drawer after an explicit pick.
@@ -37,8 +39,8 @@ export function ListDetail({ list, detail, summary, drawerTitle, drawerSub, draw
   const compact = useCompactLayout(), summaryMode = summary !== undefined;
   return <div className="mist-split" data-list-detail="" data-preview-summary={summaryMode ? '' : undefined}>
     {list}
-    {!compact && <Card as="aside" className="mist-preview" aria-label={summaryMode ? '记录预览' : undefined}>{summaryMode ? summary ?? detail : detail}</Card>}
-    {compact && <Drawer open={drawerOpen} onClose={onDrawerClose} title={drawerTitle} sub={drawerSub} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
+    {!compact && <Card as="aside" className="mist-preview" aria-label={uiText(summaryMode ? '记录预览' : undefined)}>{uiText(summaryMode ? summary ?? detail : detail)}</Card>}
+    {compact && <Drawer open={drawerOpen} onClose={onDrawerClose} title={uiText(drawerTitle)} sub={uiText(drawerSub)} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
   </div>;
 }
 
@@ -65,7 +67,7 @@ export function useListDetailRoute() {
   return { active, open, back };
 }
 export function ListDetailPage({ backLabel, onBack, children, before, after }: { backLabel: string; onBack: () => void; children: React.ReactNode; before?: React.ReactNode; after?: React.ReactNode }) {
-  return <MistPage><BackLink onClick={onBack}>返回{backLabel}</BackLink>{before}<Card className="mist-section" data-list-detail-page="">{children}</Card>{after}</MistPage>;
+  return <MistPage><BackLink onClick={onBack}>{uiText("返回")}{backLabel}</BackLink>{before}<Card className="mist-section" data-list-detail-page="">{uiText(children)}</Card>{after}</MistPage>;
 }
 
 export type ReasonedAction = { label: string; icon?: LucideIcon; onClick: () => void; primary?: boolean; reason?: string | false; hidden?: boolean };
@@ -76,17 +78,17 @@ export function ActionBar({ actions, busy }: { actions: ReasonedAction[]; busy?:
   const blocked = visible.filter(action => action.reason);
   return <div className="mist-col">
     <div className="mist-row mist-module-actions">
-      {visible.map(action => <Button key={action.label} icon={action.icon} variant={action.primary ? 'primary' : undefined} disabled={busy || !!action.reason} title={action.reason || undefined} onClick={action.onClick}>{action.label}</Button>)}
+      {visible.map(action => <Button key={action.label} icon={action.icon} variant={action.primary ? 'primary' : undefined} disabled={busy || !!action.reason} title={uiText(action.reason || undefined)} onClick={action.onClick}>{uiText(action.label)}</Button>)}
     </div>
-    {blocked.length > 0 && <div className="mist-col" data-action-reasons>{blocked.map(action => <span key={action.label} className="mist-note">{action.label}：{action.reason}</span>)}</div>}
+    {blocked.length > 0 && <div className="mist-col" data-action-reasons>{blocked.map(action => <span key={action.label} className="mist-note">{uiText(action.label)}：{action.reason}</span>)}</div>}
   </div>;
 }
 
 /** A titled block inside a detail card. */
 export function DetailBlock({ title, aside, children }: { title: React.ReactNode; aside?: React.ReactNode; children: React.ReactNode }) {
   return <section className="mist-col" data-detail-block>
-    <div className="mist-row"><span className="mist-eyebrow">{title}</span><span className="mist-spacer" />{aside}</div>
-    {children}
+    <div className="mist-row"><span className="mist-eyebrow">{uiText(title)}</span><span className="mist-spacer" />{aside}</div>
+    {uiText(children)}
   </section>;
 }
 
@@ -104,5 +106,5 @@ export const businessDay = (value: string) => {
   return get('year') + '-' + get('month') + '-' + get('day');
 };
 /** 完整时刻，按业务时区显示（操作记录等）。 */
-export const businessWhen = (value: string) => { const at = new Date(value); return Number.isFinite(at.getTime()) ? at.toLocaleString('zh-CN', { timeZone: BUSINESS_TZ }) : '—'; };
+export const businessWhen = (value: string) => { const at = new Date(value); return Number.isFinite(at.getTime()) ? at.toLocaleString(interfaceLocale(), { timeZone: BUSINESS_TZ }) : '—'; };
 export const shortWhen = (value: string) => { const day = businessDay(value); return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(5).replace('-', '/') : '—'; };

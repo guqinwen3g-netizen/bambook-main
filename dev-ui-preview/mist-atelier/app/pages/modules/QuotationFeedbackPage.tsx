@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 import React from "react";
 import { ArrowLeft, Download } from "lucide-react";
@@ -56,23 +57,21 @@ function Record({
   return (
     <Card>
       <CardHeader
-        title={QUOTE_FEEDBACK_KINDS[r.input.kind]}
-        sub={r.input.receivedOn + " · " + r.input.contact}
+        title={uiText(QUOTE_FEEDBACK_KINDS[r.input.kind])}
+        sub={uiText(r.input.receivedOn + " · " + r.input.contact)}
         tools={
           canCorrect && !corrected ? (
-            <Button onClick={onCorrect}>追加更正</Button>
+            <Button onClick={onCorrect}>{uiText("追加更正")}</Button>
           ) : undefined
         }
       />
       <div className="mist-card-body mist-col">
         <Mono>{r.id}</Mono>
         {corrected && (
-          <Banner title="已有后续更正">
-            原反馈保留供追溯，不将这条旧表述作为当前结论。
-          </Banner>
+          <Banner title={uiText("已有后续更正")}>{uiText("原反馈保留供追溯，不将这条旧表述作为当前结论。")}</Banner>
         )}
         {r.input.correctionOfId && (
-          <Banner title="追加更正记录">
+          <Banner title={uiText("追加更正记录")}>
             {r.input.correctionOfId} · {r.input.correctionReason}
           </Banner>
         )}
@@ -126,8 +125,8 @@ function Record({
           return (
             <FormSection
               key={l.lineId}
-              title={"还价条目 · " + old.style}
-              description={old.name + " · " + old.specification}
+              title={uiText("还价条目 · " + old.style)}
+              description={uiText(old.name + " · " + old.specification)}
             >
               <Facts
                 items={[
@@ -165,9 +164,7 @@ function Record({
             </FormSection>
           );
         })}
-        <p className="mist-note">
-          客户表述不等于已成交；主线接受、改价版本、审批、对客交付和转单另行确认，不由反馈自动执行。
-        </p>
+        <p className="mist-note">{uiText("客户表述不等于已成交；主线接受、改价版本、审批、对客交付和转单另行确认，不由反馈自动执行。")}</p>
       </div>
     </Card>
   );
@@ -297,20 +294,20 @@ export function QuotationFeedbackPage() {
   if (!q || (correctionId && !old))
     return (
       <MistPage>
-        <PageHeader title="报价客户反馈" />
+        <PageHeader title={uiText("报价客户反馈")} />
         {w.error && (
           <Banner
             tone="bad"
-            title="读取失败"
-            actions={<Button onClick={() => void retry()}>重试读取</Button>}
+            title={uiText("读取失败")}
+            actions={<Button onClick={() => void retry()}>{uiText("重试读取")}</Button>}
           >
             {w.error}
           </Banner>
         )}
         <EmptyState
-          title={w.loading ? "正在读取准确报价" : "未找到指定报价或被更正反馈"}
-          description="不将反馈记到另一份报价或另一条反馈。"
-          action={<Button onClick={back}>返回报价</Button>}
+          title={uiText(w.loading ? "正在读取准确报价" : "未找到指定报价或被更正反馈")}
+          description={uiText("不将反馈记到另一份报价或另一条反馈。")}
+          action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
       </MistPage>
     );
@@ -321,17 +318,17 @@ export function QuotationFeedbackPage() {
     area = false,
     hint?: string,
   ) => (
-    <Field label={label} required={required} full={area} hint={hint}>
+    <Field label={uiText(label)} required={required} full={area} hint={uiText(hint)}>
       {area ? (
         <TextArea
-          aria-label={label}
+          aria-label={uiText(label)}
           value={String(input[field])}
           disabled={disabled}
           onChange={(e) => patch(field, e.target.value as never)}
         />
       ) : (
         <TextInput
-          aria-label={label}
+          aria-label={uiText(label)}
           value={String(input[field])}
           disabled={disabled}
           onChange={(e) => patch(field, e.target.value as never)}
@@ -372,67 +369,61 @@ export function QuotationFeedbackPage() {
   };
   return (
     <MistPage>
-      <Button icon={ArrowLeft} onClick={back}>
-        返回报价
-      </Button>
+      <Button icon={ArrowLeft} onClick={back}>{uiText("返回报价")}</Button>
       <PageHeader
-        eyebrow={<Mono>{q.code + " · V" + (q.revision || 1)}</Mono>}
+        eyebrow={<Mono>{uiText(q.code + " · V" + (q.revision || 1))}</Mono>}
         title={
-          editing
+          uiText(editing
             ? correctionId
               ? "追加反馈更正"
               : "登记客户反馈"
-            : "报价客户反馈"
+            : "报价客户反馈")
         }
-        description="客户原话、业务判断和未知原因分别记录；还价不等于成交，旧反馈不覆盖。"
+        description={uiText("客户原话、业务判断和未知原因分别记录；还价不等于成交，旧反馈不覆盖。")}
         actions={
           !editing && can && !frozen ? (
             <Button
               onClick={() =>
                 go("quotations", q.id, { section: "feedback-new" })
               }
-            >
-              登记反馈
-            </Button>
+            >{uiText("登记反馈")}</Button>
           ) : undefined
         }
       />
       {w.error && (
         <Banner
           tone="bad"
-          title="读取失败"
-          actions={<Button onClick={() => void retry()}>重试读取</Button>}
+          title={uiText("读取失败")}
+          actions={<Button onClick={() => void retry()}>{uiText("重试读取")}</Button>}
         >
           {w.error}
         </Banner>
       )}
       {failure && (
-        <Banner tone="bad" title="反馈未完成">
+        <Banner tone="bad" title={uiText("反馈未完成")}>
           {failure}
         </Banner>
       )}
       {w.pending && !w.saving && (
         <Banner
           tone="warn"
-          title="原请求待核对"
+          title={uiText("原请求待核对")}
           actions={
             canRecover ? (
-              <Button disabled={busy} onClick={() => void recover()}>
-                核对原请求
-              </Button>
+              <Button disabled={busy} onClick={() => void recover()}>{uiText("核对原请求")}</Button>
             ) : undefined
           }
         >
-          {canRecover
+          {uiText(canRecover
             ? "核对同一原请求，不再追加第二条。"
-            : "请在原业务核对待处理请求后再登记反馈。"}
+            : "请在原业务核对待处理请求后再登记反馈。")}
         </Banner>
       )}
       {(!can || frozen) && (
-        <Banner title={!can ? "只读查看" : "尚未登记报价已发送"}>
-          {!can
+        <Banner title={uiText(!can ? "只读查看" : "尚未登记报价已发送")}>
+          {uiText(!can
             ? "没有报价写权限，可查看原反馈。"
-            : "先完成报价主线交付登记；不为未发送的草稿补造客户反馈。"}
+            : "先完成报价主线交付登记；不为未发送的草稿补造客户反馈。")}
         </Banner>
       )}
       {editing && can && !frozen ? (
@@ -450,11 +441,11 @@ export function QuotationFeedbackPage() {
           />
           <Card>
             {step === 0 ? (
-              <FormSection title="准确版本的客户反馈">
+              <FormSection title={uiText("准确版本的客户反馈")}>
                 <FormGrid>
-                  <Field label="反馈类型" required>
+                  <Field label={uiText("反馈类型")} required>
                     <Select
-                      aria-label="反馈类型"
+                      aria-label={uiText("反馈类型")}
                       disabled={disabled}
                       value={input.kind}
                       options={[
@@ -499,18 +490,16 @@ export function QuotationFeedbackPage() {
                     className="mist-field"
                     data-full
                     role="group"
-                    aria-label="反馈凭据附件"
+                    aria-label={uiText("反馈凭据附件")}
                   >
-                    <span className="mist-field-label">反馈凭据附件</span>
+                    <span className="mist-field-label">{uiText("反馈凭据附件")}</span>
                     <DraftFiles
                       ids={input.fileIds}
                       disabled={disabled}
-                      hint="上传客户反馈的原始凭据"
+                      hint={uiText("上传客户反馈的原始凭据")}
                       onChange={(ids) => patch("fileIds", ids)}
                     />
-                    <span className="mist-field-hint">
-                      上传客户回复邮件、聊天截图等；不传时按人工登记依据保存。
-                    </span>
+                    <span className="mist-field-hint">{uiText("上传客户回复邮件、聊天截图等；不传时按人工登记依据保存。")}</span>
                   </div>
                   {correctionId &&
                     text("correctionReason", "更正原因", true, true)}
@@ -518,11 +507,11 @@ export function QuotationFeedbackPage() {
               </FormSection>
             ) : step === 1 ? (
               <>
-                <FormSection title="原因来源与下一步">
+                <FormSection title={uiText("原因来源与下一步")}>
                   <FormGrid>
-                    <Field label="原因来源" required>
+                    <Field label={uiText("原因来源")} required>
                       <Select
-                        aria-label="原因来源"
+                        aria-label={uiText("原因来源")}
                         disabled={disabled}
                         value={input.reasonOrigin}
                         options={[
@@ -543,11 +532,9 @@ export function QuotationFeedbackPage() {
                         }
                       />
                     </Field>
-                    <Field label="原因分类" full required>
+                    <Field label={uiText("原因分类")} full required>
                       {input.reasonOrigin === "unknown" ? (
-                        <p className="mist-note">
-                          已明确记录未知，不推断为价格问题。
-                        </p>
+                        <p className="mist-note">{uiText("已明确记录未知，不推断为价格问题。")}</p>
                       ) : (
                         <div className="mist-row" style={{ flexWrap: "wrap" }}>
                           {Object.entries(QUOTE_FEEDBACK_REASONS)
@@ -555,7 +542,7 @@ export function QuotationFeedbackPage() {
                             .map(([id, label]) => (
                               <Checkbox
                                 key={id}
-                                label={label}
+                                label={uiText(label)}
                                 disabled={disabled || !input.reasonOrigin}
                                 checked={input.reasons.includes(
                                   id as QuoteFeedbackReason,
@@ -587,8 +574,8 @@ export function QuotationFeedbackPage() {
                 </FormSection>
                 {input.kind === "counteroffer" && (
                   <FormSection
-                    title="客户提出的还价与条件"
-                    description="原币与原计价单位保持不变；空价格表示客户未提出价格，不代零。跨币种 / 单位请求写入条件，不能直接比价或换算。"
+                    title={uiText("客户提出的还价与条件")}
+                    description={uiText("原币与原计价单位保持不变；空价格表示客户未提出价格，不代零。跨币种 / 单位请求写入条件，不能直接比价或换算。")}
                   >
                     {q.lines.map((line) => {
                       const r = input.lines.find((x) => x.lineId === line.id);
@@ -596,7 +583,7 @@ export function QuotationFeedbackPage() {
                         <div className="mist-card-body mist-col" key={line.id}>
                           <Checkbox
                             label={
-                              "记录还价 · " + line.style + " · " + line.name
+                              uiText("记录还价 · " + line.style + " · " + line.name)
                             }
                             disabled={disabled}
                             checked={!!r}
@@ -619,8 +606,7 @@ export function QuotationFeedbackPage() {
                               )
                             }
                           />
-                          <p className="mist-note">
-                            原报价：{line.qty} {line.unit} × {line.price}{" "}
+                          <p className="mist-note">{uiText("原报价：")}{line.qty} {uiText(line.unit)} × {line.price}{uiText(" ")}
                             {q.currency} · {line.specification}
                           </p>
                           {r && (
@@ -631,25 +617,25 @@ export function QuotationFeedbackPage() {
                                 <Field
                                   key={field}
                                   label={
-                                    [
+                                    uiText([
                                       "客户提出单价 " +
                                         q.currency +
                                         "/" +
                                         line.unit,
                                       "客户提出数量 " + line.unit,
                                       "条目变更条件",
-                                    ][i]
+                                    ][i])
                                   }
                                 >
                                   <TextInput
                                     aria-label={
-                                      "条目" +
+                                      uiText("条目" +
                                       (q.lines.indexOf(line) + 1) +
                                       [
                                         "客户提出单价",
                                         "客户提出数量",
                                         "变更条件",
-                                      ][i]
+                                      ][i])
                                     }
                                     value={r[field]}
                                     disabled={disabled}
@@ -677,7 +663,7 @@ export function QuotationFeedbackPage() {
               </>
             ) : (
               <>
-                <CardHeader title="核对本次反馈" />
+                <CardHeader title={uiText("核对本次反馈")} />
                 <div className="mist-card-body mist-col">
                   <Facts
                     items={[
@@ -743,41 +729,33 @@ export function QuotationFeedbackPage() {
                         : []),
                     ]}
                   />
-                  <Banner tone="warn" title="仅追加反馈，不改写业务结果">
-                    不改售价、报价状态、审批或订单；客户表示接受仍需在报价主线核实确认，跟进计划不自动成为任务。保存后原记录保留，更正另追加。
-                  </Banner>
+                  <Banner tone="warn" title={uiText("仅追加反馈，不改写业务结果")}>{uiText("不改售价、报价状态、审批或订单；客户表示接受仍需在报价主线核实确认，跟进计划不自动成为任务。保存后原记录保留，更正另追加。")}</Banner>
                 </div>
               </>
             )}
             <div className="mist-sticky-foot">
-              <span className="mist-note">第{step + 1}/3步</span>
+              <span className="mist-note">{uiText("第")}{uiText(step + 1)}{uiText("/3步")}</span>
               <span className="mist-spacer" />
               {step > 0 && (
-                <Button disabled={disabled} onClick={() => setStep(step - 1)}>
-                  上一步
-                </Button>
+                <Button disabled={disabled} onClick={() => setStep(step - 1)}>{uiText("上一步")}</Button>
               )}
               {step < 2 ? (
-                <Button variant="primary" disabled={disabled} onClick={next}>
-                  下一步
-                </Button>
+                <Button variant="primary" disabled={disabled} onClick={next}>{uiText("下一步")}</Button>
               ) : (
                 <Button
                   variant="primary"
                   disabled={disabled}
                   loading={busy}
                   onClick={() => void save()}
-                >
-                  确认追加反馈
-                </Button>
+                >{uiText("确认追加反馈")}</Button>
               )}
             </div>
           </Card>
         </div>
       ) : editing ? (
         <EmptyState
-          title="本版本不可追加反馈"
-          action={<Button onClick={history}>查看反馈历史</Button>}
+          title={uiText("本版本不可追加反馈")}
+          action={<Button onClick={history}>{uiText("查看反馈历史")}</Button>}
         />
       ) : records.length ? (
         <div className="mist-col">
@@ -795,8 +773,8 @@ export function QuotationFeedbackPage() {
         </div>
       ) : (
         <EmptyState
-          title="尚无结构化客户反馈"
-          description="旧客户接受 / 未接受依据继续保留在报价主线，不替历史记录补造原因。"
+          title={uiText("尚无结构化客户反馈")}
+          description={uiText("旧客户接受 / 未接受依据继续保留在报价主线，不替历史记录补造原因。")}
         />
       )}
       {!editing && records.length > 0 && (
@@ -871,9 +849,7 @@ export function QuotationFeedbackPage() {
               ]),
             )
           }
-        >
-          导出本版反馈
-        </Button>
+        >{uiText("导出本版反馈")}</Button>
       )}
     </MistPage>
   );

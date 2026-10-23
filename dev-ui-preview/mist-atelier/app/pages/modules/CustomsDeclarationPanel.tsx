@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 报关申报资料：商品归类库（款号 → HS、申报品名、申报要素、法定单位）与按出运生成的申报商品项。 */
 import React from 'react';
 import { Ban, ListChecks, Pencil, Plus } from 'lucide-react';
@@ -40,17 +41,17 @@ export function CustomsClassificationLedger({ state, domain, needle, can, locked
   const rows = all.filter(c => (showVoided || !c.voided) && (!needle || `${c.code} ${c.hsCode} ${c.declaredName} ${c.styles.join(' ')}`.toLowerCase().includes(needle)));
   const voidSpec = (c: CustomsClassification): ModuleEditorSpec => ({ title: `作废商品归类 ${c.code}`, submitLabel: '作废', description: '作废后不再用于新生成的申报商品项；已生成的保留原样。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.customs.classify.void', payload: { id: c.id, reason: text(v, 'reason') } } as MistCommand) });
   const columns: Column<CustomsClassification>[] = [
-    { key: 'code', header: '归类 / 商品编号', width: 'minmax(150px,1fr)', render: c => <div className="mist-col" style={{ gap: 2 }}><Mono>{hsText(c.hsCode)}</Mono><small className="mist-muted">{c.code}{c.voided ? ' · 已作废' : ''}</small></div> },
+    { key: 'code', header: '归类 / 商品编号', width: 'minmax(150px,1fr)', render: c => <div className="mist-col" style={{ gap: 2 }}><Mono>{hsText(c.hsCode)}</Mono><small className="mist-muted">{c.code}{uiText(c.voided ? ' · 已作废' : '')}</small></div> },
     { key: 'name', header: '申报品名', width: 'minmax(140px,1.2fr)', render: c => c.declaredName },
     { key: 'elements', header: '申报要素', hideOnMobile: true, render: c => <small>{[c.brandType, c.preference, ...c.elements].join('|')}</small> },
     { key: 'unit', header: '法定单位', width: '100px', hideOnMobile: true, render: c => c.secondUnit ? `${c.legalUnit} / ${c.secondUnit}` : c.legalUnit },
     { key: 'styles', header: '适用款号', width: 'minmax(120px,1fr)', render: c => c.styles.join('、') },
-    ...(can ? [{ key: 'act', header: '', width: '150px', align: 'right' as const, render: (c: CustomsClassification) => c.voided ? <span className="mist-muted">{c.voided.reason}</span> : <span className="mist-row"><Button size="sm" icon={Pencil} disabled={locked} aria-label={`修改 ${c.code}`} onClick={() => open(classificationSpec(c.family, run, c))}>修改</Button><Button size="sm" icon={Ban} disabled={locked} aria-label={`作废 ${c.code}`} onClick={() => open(voidSpec(c))}>作废</Button></span> }] : []),
+    ...(can ? [{ key: 'act', header: '', width: '150px', align: 'right' as const, render: (c: CustomsClassification) => c.voided ? <span className="mist-muted">{c.voided.reason}</span> : <span className="mist-row"><Button size="sm" icon={Pencil} disabled={locked} aria-label={ui`修改 ${c.code}`} onClick={() => open(classificationSpec(c.family, run, c))}>{uiText("修改")}</Button><Button size="sm" icon={Ban} disabled={locked} aria-label={ui`作废 ${c.code}`} onClick={() => open(voidSpec(c))}>{uiText("作废")}</Button></span> }] : []),
   ];
   return <div className="mist-section"><Card data-customs-classifications>
-    <CardHeader title={`${CUSTOMS_FAMILY_LABEL[domain]}商品归类 · ${all.filter(c => !c.voided).length}`} sub="按款号建档一次，之后每票出运自动带出商品编号、申报品名、申报要素与法定单位。"
-      tools={<span className="mist-row"><Button size="sm" onClick={() => setShowVoided(v => !v)}>{showVoided ? '隐藏已作废' : '显示已作废'}</Button>{can && <Button size="sm" variant="primary" icon={Plus} disabled={locked} onClick={() => open(classificationSpec(domain, run))}>新建归类</Button>}</span>} />
-    <DataTable ariaLabel="商品归类库" rows={rows} rowKey={c => c.id} columns={columns} empty={all.length ? '没有符合条件的归类' : '尚未建立商品归类'} />
+    <CardHeader title={ui`${CUSTOMS_FAMILY_LABEL[domain]}商品归类 · ${all.filter(c => !c.voided).length}`} sub={uiText("按款号建档一次，之后每票出运自动带出商品编号、申报品名、申报要素与法定单位。")}
+      tools={<span className="mist-row"><Button size="sm" onClick={() => setShowVoided(v => !v)}>{uiText(showVoided ? '隐藏已作废' : '显示已作废')}</Button>{can && <Button size="sm" variant="primary" icon={Plus} disabled={locked} onClick={() => open(classificationSpec(domain, run))}>{uiText("新建归类")}</Button>}</span>} />
+    <DataTable ariaLabel={uiText("商品归类库")} rows={rows} rowKey={c => c.id} columns={columns} empty={all.length ? '没有符合条件的归类' : '尚未建立商品归类'} />
   </Card></div>;
 }
 
@@ -83,23 +84,23 @@ export function CustomsItemsBlock({ record: c, state, can, locked, run, open, on
   const columns: Column<CustomsDeclarationItem>[] = [
     { key: 'no', header: '项号', width: '52px', render: i => i.no },
     { key: 'hs', header: '商品编号', width: '120px', render: i => <Mono>{hsText(i.hsCode)}</Mono> },
-    { key: 'name', header: '商品名称及规格型号', width: 'minmax(200px,2fr)', render: i => <div className="mist-col" style={{ gap: 2 }}><b>{i.declaredName}</b><small className="mist-muted">{i.elements}</small>{i.adjusted && <small data-customs-item-adjusted={i.no}><Pill tone="warn">手工调整</Pill> {i.adjusted.fields.map(k => CUSTOMS_FIELD_LABEL[k]).join('、')} · {i.adjusted.actor} · {i.adjusted.reason}</small>}</div> },
-    { key: 'qty', header: '数量及单位', width: 'minmax(120px,1fr)', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.quantity} {i.unit}</span><small className="mist-muted">法定 {i.legalQty} {i.legalUnit}{i.secondUnit ? ` · ${i.secondQty ?? '—'} ${i.secondUnit}` : ''}</small></div> },
+    { key: 'name', header: '商品名称及规格型号', width: 'minmax(200px,2fr)', render: i => <div className="mist-col" style={{ gap: 2 }}><b>{i.declaredName}</b><small className="mist-muted">{i.elements}</small>{i.adjusted && <small data-customs-item-adjusted={i.no}><Pill tone="warn">{uiText("手工调整")}</Pill> {i.adjusted.fields.map(k => CUSTOMS_FIELD_LABEL[k]).join('、')} · {i.adjusted.actor} · {i.adjusted.reason}</small>}</div> },
+    { key: 'qty', header: '数量及单位', width: 'minmax(120px,1fr)', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.quantity} {uiText(i.unit)}</span><small className="mist-muted">{uiText("法定 ")}{i.legalQty} {i.legalUnit}{uiText(i.secondUnit ? ` · ${i.secondQty ?? '—'} ${i.secondUnit}` : '')}</small></div> },
     { key: 'price', header: '单价 / 总价', width: '140px', align: 'right', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.unitPrice}</span><b>{i.currency} {money(i.amount)}</b></div> },
-    ...(editable ? [{ key: 'act', header: '', width: '84px', align: 'right' as const, render: (i: CustomsDeclarationItem) => <Button size="sm" icon={Pencil} disabled={locked} aria-label={`调整商品项 ${i.no}`} onClick={() => open(adjustItemSpec(c, i, run))}>调整</Button> }] : []),
+    ...(editable ? [{ key: 'act', header: '', width: '84px', align: 'right' as const, render: (i: CustomsDeclarationItem) => <Button size="sm" icon={Pencil} disabled={locked} aria-label={ui`调整商品项 ${i.no}`} onClick={() => open(adjustItemSpec(c, i, run))}>{uiText("调整")}</Button> }] : []),
   ];
-  return <DetailBlock title="申报商品项" aside={items.length ? <span className="mist-muted">{c.itemsBy} · {c.itemsAt?.slice(0, 16).replace('T', ' ')}</span> : undefined}>
+  return <DetailBlock title={uiText("申报商品项")} aside={items.length ? <span className="mist-muted">{c.itemsBy} · {c.itemsAt?.slice(0, 16).replace('T', ' ')}</span> : undefined}>
     {items.length > 0 ? <>
-      {stale && c.status !== 'cleared' && <Banner tone="warn" title="出运或装箱已变化">已生成的商品项与当前出运明细、装箱或归类不一致，请重新生成后再交报关行。</Banner>}
-      {items.some(i => i.adjusted) && <span className="mist-note">重新生成时，自动值没变的字段保留手工调整；归类、出运或装箱改动导致自动值变化的字段以新值为准。</span>}
-      <DataTable ariaLabel={`${c.code} 申报商品项`} rows={items} rowKey={i => String(i.no)} columns={columns} />
+      {stale && c.status !== 'cleared' && <Banner tone="warn" title={uiText("出运或装箱已变化")}>{uiText("已生成的商品项与当前出运明细、装箱或归类不一致，请重新生成后再交报关行。")}</Banner>}
+      {items.some(i => i.adjusted) && <span className="mist-note">{uiText("重新生成时，自动值没变的字段保留手工调整；归类、出运或装箱改动导致自动值变化的字段以新值为准。")}</span>}
+      <DataTable ariaLabel={ui`${c.code} 申报商品项`} rows={items} rowKey={i => String(i.no)} columns={columns} />
       <Facts cols={4} items={[{ label: '件数', value: `${c.packages ?? 0} 件` }, { label: '毛重', value: `${c.grossWeight ?? 0} kg` }, { label: '净重', value: `${c.netWeight ?? 0} kg` }, { label: '总价', value: [...totals].map(([cur, n]) => `${cur} ${money(n)}`).join(' / ') }]} />
-    </> : <span className="mist-note">尚未生成。按款号匹配商品归类，自动带出商品编号、申报品名、申报要素和法定数量；总价与 CI 同一算法，件数和重量取装箱合计。</span>}
-    {c.status !== 'cleared' && draft && draft.blockers.length > 0 && <Banner tone="warn" title="还不能生成">{draft.blockers.join('；')}</Banner>}
+    </> : <span className="mist-note">{uiText("尚未生成。按款号匹配商品归类，自动带出商品编号、申报品名、申报要素和法定数量；总价与 CI 同一算法，件数和重量取装箱合计。")}</span>}
+    {c.status !== 'cleared' && draft && draft.blockers.length > 0 && <Banner tone="warn" title={uiText("还不能生成")}>{draft.blockers.join('；')}</Banner>}
     {can && c.status !== 'cleared' && <ActionBar busy={locked} actions={[
       { label: items.length ? '重新生成商品项' : '生成申报商品项', icon: ListChecks, primary: !items.length || stale, reason, onClick: () => void run({ type: 'fulfillment.customs.items', payload: { id: c.id } } as MistCommand) },
       { label: '维护商品归类', onClick: onClassify },
     ] as ReasonedAction[]} />}
-    <span className="mist-note">本系统只准备申报资料，交报关行或在单一窗口录入；不代替海关申报。</span>
+    <span className="mist-note">{uiText("本系统只准备申报资料，交报关行或在单一窗口录入；不代替海关申报。")}</span>
   </DetailBlock>;
 }

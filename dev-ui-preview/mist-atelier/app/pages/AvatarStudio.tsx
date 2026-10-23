@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 头像自定义：按住头像让颜色在 8 套 Mist 色相间流转、拖动按方向探索 DiceBear 风格；也可上传照片裁剪，或恢复姓名首字。 */
 import React from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
@@ -59,7 +61,7 @@ export function AvatarLivePreview({ src, geometryKey }: { src: string; geometryK
       if (!node.children.length && node.textContent !== target.textContent) node.textContent = target.textContent;
     });
   }, [src, geometryKey]);
-  return <div ref={host} className="mist-avatar-live" role="img" aria-label="头像预览" />;
+  return <div ref={host} className="mist-avatar-live" role="img" aria-label={uiText("头像预览")} />;
 }
 
 type Preset = { src: string; identity: string };
@@ -115,7 +117,7 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
   const [seed, setSeed] = React.useState(randomSeed);
   const [preset, setPreset] = React.useState<Preset | null>(null), [error, setError] = React.useState(false), [readyKey, setReadyKey] = React.useState('');
   const cellX = Math.round(point.x * 12), cellY = Math.round(point.y * 12);
-  const result = React.useMemo(() => exploreAvatarAt(point.x, point.y), [point]);
+  const result = React.useMemo(() => exploreAvatarAt(point.x, point.y), [point, interfaceLocale()]);
   const shapeKey = `${result.family}:${seed}:${cellX + 12}_${cellY + 12}`, key = `${hue}:${shapeKey}`;
   const generating = readyKey !== key;
   const latest = React.useRef({ family: result.family, hue, cellX, cellY, seed, key, shapeKey });
@@ -159,7 +161,7 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   const applied = !!preset && preset.identity === value;
-  return <div className="mist-avatar-explorer" aria-label="探索头像风格">
+  return <div className="mist-avatar-explorer" aria-label={uiText("探索头像风格")}>
     <div className="mist-avatar-stage">
       {avatarDirections.map(direction => {
         const proximity = Math.max(0, 1 - Math.hypot(point.x - direction.x, point.y - direction.y));
@@ -168,10 +170,10 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
           aria-pressed={result.radius >= .25 && (direction.x ? point.x * direction.x : point.y * direction.y) > .65}
           style={{ left: `calc(50% + ${direction.x} * (var(--avatar-size) / 2 + 48px))`, top: `calc(50% + ${direction.y} * (var(--avatar-size) / 2 + 40px))` }}
           onClick={() => { setShowGuide(false); update(direction.x, direction.y); }}>
-          <motion.span animate={{ scale: 1 + eased * .6 }} transition={reduced ? { duration: 0 } : { type: 'spring', stiffness: 90, damping: 22, mass: .9 }}>{direction.label}</motion.span>
+          <motion.span animate={{ scale: 1 + eased * .6 }} transition={reduced ? { duration: 0 } : { type: 'spring', stiffness: 90, damping: 22, mass: .9 }}>{uiText(direction.label)}</motion.span>
         </button>;
       })}
-      <div className="mist-avatar-compass" role="group" aria-label="头像探索" tabIndex={disabled ? -1 : 0} data-held={held || undefined}
+      <div className="mist-avatar-compass" role="group" aria-label={uiText("头像探索")} tabIndex={disabled ? -1 : 0} data-held={held || undefined}
         aria-busy={generating} aria-disabled={disabled} aria-describedby="mist-avatar-mood"
         onPointerDown={e => { if (!disabled && e.button === 0 && !gesture.current) { setShowGuide(false); e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); locate(e); startColor(e.pointerId); } }}
         onPointerMove={e => { if (!disabled && gesture.current?.id === e.pointerId) { if (e.pointerType === 'mouse' && !(e.buttons & 1)) release(e); else if (e.clientX !== lastPointer.current.x || e.clientY !== lastPointer.current.y) locate(e); } }}
@@ -185,7 +187,7 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
           if (delta[e.key]) { e.preventDefault(); update(point.x + delta[e.key][0], point.y + delta[e.key][1]); }
           if (e.key === 'Home') { e.preventDefault(); update(0, 0); }
         }}>
-        {preset ? <AvatarLivePreview src={preset.src} geometryKey={preset.identity.replace(/:c\d+_v/, ':v')} /> : <span className="mist-note">{error ? '生成失败' : '正在寻找灵感…'}</span>}
+        {preset ? <AvatarLivePreview src={preset.src} geometryKey={preset.identity.replace(/:c\d+_v/, ':v')} /> : <span className="mist-note">{uiText(error ? '生成失败' : '正在寻找灵感…')}</span>}
       </div>
       <AnimatePresence>{showGuide && <motion.div key="pointer" className="mist-avatar-guide-pointer" aria-hidden="true" exit={{ opacity: 0 }}
         animate={reduced ? {} : { x: [0, 0, -45, 40, 0, 0], y: [0, 0, -25, 25, 0, 0], scale: [1, .84, .84, .84, 1, 1] }}
@@ -193,20 +195,20 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
         <MousePointer2 size={22} strokeWidth={1.25} />
       </motion.div>}</AnimatePresence>
     </div>
-    <div id="mist-avatar-mood" className="mist-sr-only" aria-live="polite">{result.label === '自由探索' ? result.label : `${result.label}倾向`}</div>
+    <div id="mist-avatar-mood" className="mist-sr-only" aria-live="polite">{uiText(result.label === '自由探索' ? result.label : `${result.label}倾向`)}</div>
     <div className="mist-avatar-explore-foot">
       <AnimatePresence mode="wait" initial={false}>{showGuide
         ? <motion.div key="guide" className="mist-avatar-guide" exit={{ opacity: 0 }} initial={reduced ? false : { opacity: 0 }} animate={{ opacity: 1 }}>
           <motion.span key={guideStep} data-welcome={guideStep === 0 || undefined} initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}>{GUIDE[guideStep]}</motion.span>
           <div className="mist-avatar-guide-progress" aria-hidden="true">{[0, 1, 2].map(step => <i key={step} data-active={step === guideStep - 1 || undefined} />)}</div>
-          <button type="button" className="mist-avatar-link" onClick={() => setShowGuide(false)}>开始探索 ↗</button>
+          <button type="button" className="mist-avatar-link" onClick={() => setShowGuide(false)}>{uiText("开始探索 ↗")}</button>
         </motion.div>
         : !held && <motion.div key="apply" exit={{ opacity: 0 }} initial={reduced ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
           <button type="button" className="mist-avatar-link" data-size="lg" disabled={disabled || generating || error || !preset || applied}
-            onClick={() => preset && onSelect(preset.identity)}>{disabled ? '应用中…' : applied ? '已使用' : '就用这个'}<ArrowUpRight size={18} strokeWidth={1.25} /></button>
+            onClick={() => preset && onSelect(preset.identity)}>{uiText(disabled ? '应用中…' : applied ? '已使用' : '就用这个')}<ArrowUpRight size={18} strokeWidth={1.25} /></button>
         </motion.div>}</AnimatePresence>
     </div>
-    {error && <Banner tone="bad" title="头像生成失败">请关闭后重新打开头像编辑。</Banner>}
+    {error && <Banner tone="bad" title={uiText("头像生成失败")}>{uiText("请关闭后重新打开头像编辑。")}</Banner>}
   </div>;
 }
 
@@ -263,37 +265,37 @@ export function AvatarStudio({ open, onClose }: { open: boolean; onClose: () => 
   const name = user.displayName || user.email || '我';
   const [rw, rh] = crop ? rotatedSize(crop) : [1, 1], previewScale = CROP_PREVIEW / Math.min(rw, rh);
   return <>
-    <Dialog open={open && !crop} onClose={() => !busy && onClose()} width={720} title="编辑头像" description="生成一个属于你的风格头像，或上传照片。头像会显示在侧栏、成员与审批记录中。"
+    <Dialog open={open && !crop} onClose={() => !busy && onClose()} width={720} title={uiText("编辑头像")} description={uiText("生成一个属于你的风格头像，或上传照片。头像会显示在侧栏、成员与审批记录中。")}
       footer={<>
-        <Button icon={ImageUp} disabled={busy} onClick={() => file.current?.click()}>上传照片</Button>
-        {user.avatarUrl && <Button icon={Undo2} disabled={busy} onClick={() => void save(null, '已恢复姓名首字')}>恢复姓名首字</Button>}
+        <Button icon={ImageUp} disabled={busy} onClick={() => file.current?.click()}>{uiText("上传照片")}</Button>
+        {user.avatarUrl && <Button icon={Undo2} disabled={busy} onClick={() => void save(null, '已恢复姓名首字')}>{uiText("恢复姓名首字")}</Button>}
         <span className="mist-spacer" />
-        <span className="mist-row mist-note"><Avatar name={name} src={user.avatarUrl} size="sm" />当前头像</span>
+        <span className="mist-row mist-note"><Avatar name={name} src={user.avatarUrl} size="sm" />{uiText("当前头像")}</span>
       </>}>
-      <input ref={file} type="file" accept="image/*" hidden aria-label="选择头像图片" onChange={e => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
-      {error && <Banner tone="bad" title="头像未更新">{error}</Banner>}
+      <input ref={file} type="file" accept="image/*" hidden aria-label={uiText("选择头像图片")} onChange={e => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
+      {error && <Banner tone="bad" title={uiText("头像未更新")}>{uiText(error)}</Banner>}
       {open && !crop && <AvatarExplorer value={user.avatarUrl} disabled={busy} onSelect={identity => void save(identity, '头像已更新')} />}
     </Dialog>
-    <Dialog open={open && !!crop} onClose={() => !busy && setCrop(null)} title="调整头像" description="拖动照片调整位置，滑块缩放。"
-      footer={<><Button disabled={busy} onClick={() => setCrop(null)}>返回</Button><span className="mist-spacer" /><Button variant="primary" loading={busy} onClick={async () => {
+    <Dialog open={open && !!crop} onClose={() => !busy && setCrop(null)} title={uiText("调整头像")} description={uiText("拖动照片调整位置，滑块缩放。")}
+      footer={<><Button disabled={busy} onClick={() => setCrop(null)}>{uiText("返回")}</Button><span className="mist-spacer" /><Button variant="primary" loading={busy} onClick={async () => {
         if (!crop) return;
         let url = '';
         try { url = await renderCircularAvatar(crop); } catch (e) { setError(explain(e, '头像裁切失败')); return; }
         if (await save(url, '头像已更新')) { setCrop(null); onClose(); }
-      }}>使用这张</Button></>}>
-      {error && <Banner tone="bad" title="头像未更新">{error}</Banner>}
+      }}>{uiText("使用这张")}</Button></>}>
+      {error && <Banner tone="bad" title={uiText("头像未更新")}>{uiText(error)}</Banner>}
       {crop && <>
         <div className="mist-avatar-crop" style={{ width: CROP_PREVIEW, height: CROP_PREVIEW }}
           onPointerDown={e => { e.currentTarget.setPointerCapture?.(e.pointerId); drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, start: crop.offset }; }}
           onPointerMove={e => { const d = drag.current; if (d && d.id === e.pointerId) setCrop({ ...crop, offset: { x: d.start.x + e.clientX - d.x, y: d.start.y + e.clientY - d.y } }); }}
           onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
-          <img src={crop.src} alt="待裁切的头像" draggable={false} style={{ width: crop.width * previewScale, height: crop.height * previewScale, transform: `translate(-50%, -50%) translate(${crop.offset.x}px, ${crop.offset.y}px) rotate(${crop.rotation}deg) scale(${crop.scale})` }} />
+          <img src={crop.src} alt={uiText("待裁切的头像")} draggable={false} style={{ width: crop.width * previewScale, height: crop.height * previewScale, transform: `translate(-50%, -50%) translate(${crop.offset.x}px, ${crop.offset.y}px) rotate(${crop.rotation}deg) scale(${crop.scale})` }} />
         </div>
         <div className="mist-row mist-avatar-crop-tools">
-          <input type="range" aria-label="缩放" min={1} max={3} step={0.01} value={crop.scale} disabled={busy} onChange={e => setCrop({ ...crop, scale: Number(e.target.value) })} />
+          <input type="range" aria-label={uiText("缩放")} min={1} max={3} step={0.01} value={crop.scale} disabled={busy} onChange={e => setCrop({ ...crop, scale: Number(e.target.value) })} />
           <span className="mist-note mist-mono">{crop.scale.toFixed(2)}x</span>
-          <Button size="sm" icon={RotateCw} disabled={busy} onClick={() => setCrop({ ...crop, rotation: (crop.rotation + 90) % 360 })}>旋转</Button>
-          <Button size="sm" disabled={busy} onClick={() => setCrop({ ...crop, scale: 1, rotation: 0, offset: { x: 0, y: 0 } })}>重置</Button>
+          <Button size="sm" icon={RotateCw} disabled={busy} onClick={() => setCrop({ ...crop, rotation: (crop.rotation + 90) % 360 })}>{uiText("旋转")}</Button>
+          <Button size="sm" disabled={busy} onClick={() => setCrop({ ...crop, scale: 1, rotation: 0, offset: { x: 0, y: 0 } })}>{uiText("重置")}</Button>
         </div>
       </>}
     </Dialog>
@@ -307,9 +309,9 @@ export function AvatarSettingRow() {
   if (!user) return null;
   return <div className="mist-avatar-setting">
     <Avatar name={user.displayName || user.email} src={user.avatarUrl} size="xl" />
-    <div><b>头像</b><p className="mist-note">{user.avatarUrl ? '已设置自定义头像' : '当前显示姓名首字'}</p></div>
+    <div><b>{uiText("头像")}</b><p className="mist-note">{uiText(user.avatarUrl ? '已设置自定义头像' : '当前显示姓名首字')}</p></div>
     <span className="mist-spacer" />
-    <Button size="sm" onClick={() => setOpen(true)}>编辑头像</Button>
+    <Button size="sm" onClick={() => setOpen(true)}>{uiText("编辑头像")}</Button>
     <AvatarStudio open={open} onClose={() => setOpen(false)} />
   </div>;
 }

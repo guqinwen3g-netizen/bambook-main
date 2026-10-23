@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 基础资料批量导入：下载模板 → 选择 Excel/CSV → 预览 → 整批导入（任何一行不通过则不导入）。 */
 import React from 'react';
 import { FileSpreadsheet, Upload } from 'lucide-react';
@@ -64,25 +65,25 @@ export function BaseDataImportButton({ kind, disabled, label: buttonLabel = '批
   const preview = parsed?.rows.slice(0, 5) || [], shown = fields.filter(f => preview.some(r => r[f.key])).slice(0, 6);
   return <>
     <Button icon={Upload} disabled={disabled} onClick={() => setOpen(true)}>{buttonLabel}</Button>
-    <Drawer open={open} onClose={close} title={`批量导入${label}`} sub={kind === 'openingReceivable' ? '登记系统启用前已开票、仍未收回的客户欠款；整批校验，全部通过才导入' : kind === 'openingPayable' ? '登记系统启用前已收票、仍未付清的供应商票据；整批校验，全部通过才导入' : '上线时一次录入现有资料；整批校验，全部通过才导入'}
-      footer={<><Button onClick={close} disabled={busy}>关闭</Button><Button variant="primary" disabled={!!blocked} onClick={() => void submit()}>{parsed?.rows.length ? `导入 ${parsed.rows.length} 行` : '导入'}</Button></>}>
+    <Drawer open={open} onClose={close} title={ui`批量导入${label}`} sub={uiText(kind === 'openingReceivable' ? '登记系统启用前已开票、仍未收回的客户欠款；整批校验，全部通过才导入' : kind === 'openingPayable' ? '登记系统启用前已收票、仍未付清的供应商票据；整批校验，全部通过才导入' : '上线时一次录入现有资料；整批校验，全部通过才导入')}
+      footer={<><Button onClick={close} disabled={busy}>{uiText("关闭")}</Button><Button variant="primary" disabled={!!blocked} onClick={() => void submit()}>{uiText(parsed?.rows.length ? `导入 ${parsed.rows.length} 行` : '导入')}</Button></>}>
       <ol className="mist-import-steps" style={{ display: 'grid', gap: 12, margin: 0, paddingLeft: 18 }}>
-        <li>下载模板，按“填写说明”逐行填写（带 * 的列必填）。也可直接用已有表格，只要表头与模板列名一致。<div style={{ marginTop: 6 }}><Button icon={FileSpreadsheet} onClick={() => void downloadTemplate(kind)}>下载{label}模板</Button></div></li>
-        <li>选择填好的 Excel（.xlsx）或 CSV（UTF-8）文件，读取第一个工作表。<div style={{ marginTop: 6 }}><Button icon={Upload} disabled={busy} onClick={() => input.current?.click()}>选择文件</Button>{parsed && <span style={{ marginLeft: 8 }}>{parsed.file} · {parsed.rows.length} 行</span>}</div>
-          <input ref={input} hidden type="file" accept=".xlsx,.xls,.csv" aria-label={`${label}导入文件`} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void choose(file); }} /></li>
-        <li>核对预览后导入。编码重复、必填缺失、负责人或供应商对不上时整批不导入，并逐行列出原因，改好后重新选择文件即可。</li>
+        <li>{uiText("下载模板，按“填写说明”逐行填写（带 * 的列必填）。也可直接用已有表格，只要表头与模板列名一致。")}<div style={{ marginTop: 6 }}><Button icon={FileSpreadsheet} onClick={() => void downloadTemplate(kind)}>{uiText("下载")}{uiText(label)}{uiText("模板")}</Button></div></li>
+        <li>{uiText("选择填好的 Excel（.xlsx）或 CSV（UTF-8）文件，读取第一个工作表。")}<div style={{ marginTop: 6 }}><Button icon={Upload} disabled={busy} onClick={() => input.current?.click()}>{uiText("选择文件")}</Button>{parsed && <span style={{ marginLeft: 8 }}>{parsed.file} · {parsed.rows.length}{uiText(" 行")}</span>}</div>
+          <input ref={input} hidden type="file" accept=".xlsx,.xls,.csv" aria-label={ui`${label}导入文件`} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void choose(file); }} /></li>
+        <li>{uiText("核对预览后导入。编码重复、必填缺失、负责人或供应商对不上时整批不导入，并逐行列出原因，改好后重新选择文件即可。")}</li>
       </ol>
-      {kind === 'product' && <p style={{ marginTop: 12 }}>产品关联供应商时，请先导入供应商。</p>}
-      {kind === 'openingPayable' && <p style={{ marginTop: 12 }}>请先导入供应商。每张供应商发票一行，只填截至启用日仍未付的余额；已付清的不必登记。之后按票据照常申请付款、登记付款分配，计入应付账龄与期末调汇。启用前的出口退税不在本系统申报。</p>}
-      {kind === 'openingReceivable' && <p style={{ marginTop: 12 }}>请先导入客户。每张发票一行，只填截至启用日仍未收回的余额；已收清的不必登记。之后到账照常在“收款与核销”核销，催收、对账单、账龄与期末调汇一并计入。</p>}
-      {parsed?.ignored.length ? <Banner tone="warn" title="以下列不在模板中，将被忽略">{parsed.ignored.join('、')}</Banner> : null}
-      {parsed && blocked && !busy && <Banner tone="warn" title={blocked} />}
-      {preview.length > 0 && shown.length > 0 && <div style={{ marginTop: 12, overflowX: 'auto' }}><table className="mist-mini-table" aria-label="导入预览" style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead><tr><th>行</th>{shown.map(f => <th key={f.key} style={{ textAlign: 'left' }}>{f.label}</th>)}</tr></thead>
+      {kind === 'product' && <p style={{ marginTop: 12 }}>{uiText("产品关联供应商时，请先导入供应商。")}</p>}
+      {kind === 'openingPayable' && <p style={{ marginTop: 12 }}>{uiText("请先导入供应商。每张供应商发票一行，只填截至启用日仍未付的余额；已付清的不必登记。之后按票据照常申请付款、登记付款分配，计入应付账龄与期末调汇。启用前的出口退税不在本系统申报。")}</p>}
+      {kind === 'openingReceivable' && <p style={{ marginTop: 12 }}>{uiText("请先导入客户。每张发票一行，只填截至启用日仍未收回的余额；已收清的不必登记。之后到账照常在“收款与核销”核销，催收、对账单、账龄与期末调汇一并计入。")}</p>}
+      {parsed?.ignored.length ? <Banner tone="warn" title={uiText("以下列不在模板中，将被忽略")}>{parsed.ignored.join('、')}</Banner> : null}
+      {parsed && blocked && !busy && <Banner tone="warn" title={uiText(blocked)} />}
+      {preview.length > 0 && shown.length > 0 && <div style={{ marginTop: 12, overflowX: 'auto' }}><table className="mist-mini-table" aria-label={uiText("导入预览")} style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead><tr><th>{uiText("行")}</th>{shown.map(f => <th key={f.key} style={{ textAlign: 'left' }}>{uiText(f.label)}</th>)}</tr></thead>
         <tbody>{preview.map(r => <tr key={r.__row}><td>{r.__row}</td>{shown.map(f => <td key={f.key}>{r[f.key]}</td>)}</tr>)}</tbody>
-      </table>{parsed!.rows.length > preview.length && <small>仅显示前 {preview.length} 行</small>}</div>}
-      {error && <Banner tone="bad" title="导入未执行"><span style={{ whiteSpace: 'pre-wrap' }}>{error}</span></Banner>}
-      {done && <Banner tone="ok" title={done} />}
+      </table>{parsed!.rows.length > preview.length && <small>{uiText("仅显示前 ")}{preview.length}{uiText(" 行")}</small>}</div>}
+      {error && <Banner tone="bad" title={uiText("导入未执行")}><span style={{ whiteSpace: 'pre-wrap' }}>{uiText(error)}</span></Banner>}
+      {done && <Banner tone="ok" title={uiText(done)} />}
     </Drawer>
   </>;
 }

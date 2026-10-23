@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 智能邮箱：三栏收件箱（邮箱与文件夹 / 邮件列表 / 阅读区）。真实邮箱经 IMAP 增量同步、SMTP 发送；发送结果分为已接受 / 失败 / 不确定，不确定时不自动重发。示例邮箱只用合成数据。 */
 import React from 'react';
 import { AlertTriangle, Archive, ArchiveRestore, CalendarPlus, Download, Forward, Inbox, KeyRound, Link2, Mail, MailOpen, Paperclip, PenLine, Plus, Reply, ReplyAll, RotateCcw, SearchCheck, SearchX, Send, Settings2, Sparkles, Star, Trash2, Unlink, Upload, X } from 'lucide-react';
@@ -270,17 +271,17 @@ export function EmailsPage() {
   const toAccounts = () => setAccountsOpen(true);
 
   const emptyList = isOutbox
-    ? <EmptyState icon={Upload} title="没有待发送邮件" description="发送失败或结果不确定的邮件会停留在这里，供核对与重发。" compact />
-    : !accounts.length && !loading ? <EmptyState icon={Mail} title="未接入任何邮箱" description="在邮箱账号中接入个人邮箱（共享邮箱需邮件账户管理权限）并绑定凭据后，同步的邮件会出现在这里。" action={<Button icon={Settings2} onClick={toAccounts}>打开邮箱账号</Button>} compact />
-    : scoped.length ? <EmptyState icon={SearchX} title="没有符合条件的邮件" description="换个关键词或清除分类筛选。" action={<Button onClick={() => { setQuery(''); setCategory('all'); }}>清除筛选</Button>} compact />
-    : <EmptyState icon={isDrafts ? PenLine : Inbox} title={`${scopeLabel}为空`} description={isDrafts ? '写邮件后保存草稿，会出现在这里。' : '当前邮箱在这里没有邮件。'} compact />;
+    ? <EmptyState icon={Upload} title={uiText("没有待发送邮件")} description={uiText("发送失败或结果不确定的邮件会停留在这里，供核对与重发。")} compact />
+    : !accounts.length && !loading ? <EmptyState icon={Mail} title={uiText("未接入任何邮箱")} description={uiText("在邮箱账号中接入个人邮箱（共享邮箱需邮件账户管理权限）并绑定凭据后，同步的邮件会出现在这里。")} action={<Button icon={Settings2} onClick={toAccounts}>{uiText("打开邮箱账号")}</Button>} compact />
+    : scoped.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的邮件")} description={uiText("换个关键词或清除分类筛选。")} action={<Button onClick={() => { setQuery(''); setCategory('all'); }}>{uiText("清除筛选")}</Button>} compact />
+    : <EmptyState icon={isDrafts ? PenLine : Inbox} title={ui`${scopeLabel}为空`} description={uiText(isDrafts ? '写邮件后保存草稿，会出现在这里。' : '当前邮箱在这里没有邮件。')} compact />;
   const itemOf = (row: Row) => {
-    if (row.kind === 'send') { const status = SEND_STATUS[emailSendEffectiveStatus(row.send)]; return { who: row.send.to || row.send.cc || '密送收件人', subject: row.send.subject || '（无主题）', snippet: row.send.body.replace(/\s+/g, ' ').slice(0, 120), unread: false, starred: false, tags: <Pill tone={status.tone}>{status.label}</Pill>, files: row.send.fileIds.length }; }
-    if (row.kind === 'draft') return { who: row.draft.to || '未填写收件人', subject: row.draft.subject || '（无主题）', snippet: row.draft.body.replace(/\s+/g, ' ').slice(0, 120) || '正文为空', unread: false, starred: false, tags: <Pill tone="warn">草稿</Pill>, files: row.draft.fileIds.length };
+    if (row.kind === 'send') { const status = SEND_STATUS[emailSendEffectiveStatus(row.send)]; return { who: row.send.to || row.send.cc || '密送收件人', subject: row.send.subject || '（无主题）', snippet: row.send.body.replace(/\s+/g, ' ').slice(0, 120), unread: false, starred: false, tags: <Pill tone={status.tone}>{uiText(status.label)}</Pill>, files: row.send.fileIds.length }; }
+    if (row.kind === 'draft') return { who: row.draft.to || '未填写收件人', subject: row.draft.subject || '（无主题）', snippet: row.draft.body.replace(/\s+/g, ' ').slice(0, 120) || '正文为空', unread: false, starred: false, tags: <Pill tone="warn">{uiText("草稿")}</Pill>, files: row.draft.fileIds.length };
     const m = row.message, who = m.folder === 'sent' ? `致 ${m.to.map(item => item.name || item.address).join('、') || '—'}` : m.from.name || m.from.address;
-    const category = m.category.label ? <Pill tone={SOURCE_LABEL[m.category.source].tone}>{m.category.label}</Pill> : m.category.source === 'failed' ? <Pill tone="warn">分类失败</Pill> : null;
-    const follow = state && isFollowUp(state, m) ? <Pill tone="accent">待跟进</Pill> : null;
-    return { who, subject: m.subject || '（无主题）', snippet: m.body.replace(/\s+/g, ' ').slice(0, 120), unread: !m.read, starred: m.starred, tags: <>{m.important && <Pill tone="warn">重要</Pill>}{category}{follow}</>, files: m.attachments.length };
+    const category = m.category.label ? <Pill tone={SOURCE_LABEL[m.category.source].tone}>{uiText(m.category.label)}</Pill> : m.category.source === 'failed' ? <Pill tone="warn">{uiText("分类失败")}</Pill> : null;
+    const follow = state && isFollowUp(state, m) ? <Pill tone="accent">{uiText("待跟进")}</Pill> : null;
+    return { who, subject: m.subject || '（无主题）', snippet: m.body.replace(/\s+/g, ' ').slice(0, 120), unread: !m.read, starred: m.starred, tags: <>{m.important && <Pill tone="warn">{uiText("重要")}</Pill>}{category}{follow}</>, files: m.attachments.length };
   };
   const listRef = React.useRef<HTMLDivElement>(null);
   const moveSelection = (event: React.KeyboardEvent) => {
@@ -291,14 +292,14 @@ export function EmailsPage() {
     pick(next);
     requestAnimationFrame(() => listRef.current?.querySelector<HTMLElement>(`[data-mail-row="${CSS.escape(next.id)}"]`)?.focus());
   };
-  const list = <div ref={listRef} className="mist-mail-list" role="listbox" aria-label={`${scopeLabel}邮件`} onKeyDown={moveSelection}>
-    {loading && !rows.length ? <div className="mist-mail-list-empty"><span className="mist-note">正在读取邮箱…</span></div>
+  const list = <div ref={listRef} className="mist-mail-list" role="listbox" aria-label={ui`${scopeLabel}邮件`} onKeyDown={moveSelection}>
+    {loading && !rows.length ? <div className="mist-mail-list-empty"><span className="mist-note">{uiText("正在读取邮箱…")}</span></div>
       : rows.length ? rows.map(row => { const item = itemOf(row), active = selected?.id === row.id;
         return <button key={row.id} type="button" role="option" aria-selected={active} tabIndex={active || (!selected && row === rows[0]) ? 0 : -1} className="mist-mail-item" data-mail-row={row.id} data-unread={item.unread || undefined} data-active={active || undefined} onClick={() => pick(row)}>
           <span className="mist-mail-avatar" aria-hidden="true">{initialOf(item.who.replace(/^致 /, ''))}</span>
           <span className="mist-mail-item-main">
             <span className="mist-mail-item-top"><span className="mist-mail-who">{item.who}</span><time className="mist-mail-time">{when(stamp(row))}</time></span>
-            <span className="mist-mail-item-subject">{item.starred && <Star size={13} aria-label="星标" className="mist-mail-star" />}<span className="mist-mail-ellipsis">{item.subject}</span></span>
+            <span className="mist-mail-item-subject">{item.starred && <Star size={13} aria-label={uiText("星标")} className="mist-mail-star" />}<span className="mist-mail-ellipsis">{item.subject}</span></span>
             <span className="mist-mail-item-snippet">{item.snippet}</span>
             <span className="mist-mail-item-tags">{item.tags}{item.files > 0 && <small className="mist-muted mist-mail-clip"><Paperclip size={12} />{item.files}</small>}</span>
           </span>
@@ -306,23 +307,23 @@ export function EmailsPage() {
       : <div className="mist-mail-list-empty">{emptyList}</div>}
   </div>;
   const navItem = (key: string, active: boolean, onClick: () => void, icon: React.ReactNode, label: React.ReactNode, badge?: number, title?: string) =>
-    <button key={key} type="button" className="mist-mail-navitem" data-active={active || undefined} onClick={onClick} title={title}>{icon}<span className="mist-mail-navlabel">{label}</span>{badge ? <b>{badge}</b> : null}</button>;
-  const nav = <nav className="mist-mail-nav" aria-label="邮箱与文件夹" data-mist-scroll="x">
-    {can && <div className="mist-mail-compose"><Button variant="primary" icon={PenLine} disabled={!accounts.length || locked} title={accounts.length ? undefined : '尚未接入任何邮箱'} onClick={() => setCompose({ input: blankInput(defaultAccount) })}>写邮件</Button></div>}
+    <button key={key} type="button" className="mist-mail-navitem" data-active={active || undefined} onClick={onClick} title={uiText(title)}>{icon}<span className="mist-mail-navlabel">{uiText(label)}</span>{badge ? <b>{badge}</b> : null}</button>;
+  const nav = <nav className="mist-mail-nav" aria-label={uiText("邮箱与文件夹")} data-mist-scroll="x">
+    {can && <div className="mist-mail-compose"><Button variant="primary" icon={PenLine} disabled={!accounts.length || locked} title={uiText(accounts.length ? undefined : '尚未接入任何邮箱')} onClick={() => setCompose({ input: blankInput(defaultAccount) })}>{uiText("写邮件")}</Button></div>}
     <div className="mist-mail-navgroup">
       {FOLDERS.map(f => navItem(f.value, scope.kind === 'folder' && scope.value === f.value, () => changeScope({ kind: 'folder', value: f.value }), <f.icon size={15} />, f.label, f.value === 'inbox' ? messages.filter(m => m.folder === 'inbox' && !m.read).length : count({ kind: 'folder', value: f.value })))}
     </div>
     <div className="mist-mail-navgroup">
-      <span className="mist-eyebrow">视图</span>
+      <span className="mist-eyebrow">{uiText("视图")}</span>
       {VIEWS.map(v => navItem(v.value, scope.kind === 'view' && scope.value === v.value, () => changeScope({ kind: 'view', value: v.value }), <span className="mist-mail-dot" data-tone={v.value === 'followup' ? 'accent' : v.value === 'important' ? 'warn' : 'neutral'} />, v.label, count({ kind: 'view', value: v.value })))}
     </div>
     <div className="mist-mail-navgroup">
-      <span className="mist-eyebrow">邮箱</span>
+      <span className="mist-eyebrow">{uiText("邮箱")}</span>
       {navItem('all', accountId === 'all', () => changeAccount('all'), <Mail size={15} />, '全部邮箱', email.messages.filter(m => m.folder === 'inbox' && !m.read).length)}
       {accounts.map(a => { const c = connectionLabel(a); return navItem(a.id, accountId === a.id, () => changeAccount(a.id), <span className="mist-mail-dot" data-tone={c.tone} />,
-        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span className="mist-mail-ellipsis">{a.displayName}</span><small className="mist-muted mist-mail-ellipsis">{c.label}</small></span>, undefined, a.address); })}
+        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span className="mist-mail-ellipsis">{a.displayName}</span><small className="mist-muted mist-mail-ellipsis">{uiText(c.label)}</small></span>, undefined, a.address); })}
     </div>
-    <div className="mist-mail-navfoot"><Button size="sm" variant="quiet" icon={Settings2} onClick={toAccounts}>邮箱账号</Button></div>
+    <div className="mist-mail-navfoot"><Button size="sm" variant="quiet" icon={Settings2} onClick={toAccounts}>{uiText("邮箱账号")}</Button></div>
   </nav>;
 
   const editDraft = (d: EmailDraft) => { const { id, createdAt: _c, updatedAt: _u, updatedBy: _b, ...input } = d; setCompose({ id, input }); };
@@ -332,8 +333,8 @@ export function EmailsPage() {
       ? <DraftDetail draft={selected.draft} state={state} can={can} locked={locked} onEdit={() => editDraft(selected.draft)} onDelete={() => void deleteDraft(selected.id)} onSend={() => sendDraft(selected.draft)} />
       : selected.kind === 'send'
         ? <SendDetail send={selected.send} state={state} can={can} me={me} locked={locked} onRetry={row => void retrySend(row)} onVerify={row => void verifySend(row)} onConfirmResend={setConfirmResend} />
-        : <MessageDetail message={selected.message} state={state} can={can} locked={locked} exec={exec} onOpen={(view, id) => go(view, id)} onRespond={mode => respond(selected.message, mode)} onFollowUp={() => setFollowUp(selected.message)} onDownload={id => void downloadAttachment(id)} />
-    : <div className="mist-mail-read-empty"><EmptyState icon={MailOpen} title={rows.length ? '选择一封邮件阅读' : '没有可阅读的邮件'} description={loading ? '正在读取邮箱' : '↑ ↓ 键可在列表中切换邮件'} compact /></div>;
+        : <MessageDetail message={uiText(selected.message)} state={state} can={can} locked={locked} exec={exec} onOpen={(view, id) => go(view, id)} onRespond={mode => respond(selected.message, mode)} onFollowUp={() => setFollowUp(selected.message)} onDownload={id => void downloadAttachment(id)} />
+    : <div className="mist-mail-read-empty"><EmptyState icon={MailOpen} title={uiText(rows.length ? '选择一封邮件阅读' : '没有可阅读的邮件')} description={uiText(loading ? '正在读取邮箱' : '↑ ↓ 键可在列表中切换邮件')} compact /></div>;
   const sendCompose = async (input: EmailDraftInput, requestKey: string) => { if (compose) setPendingSend({ input, requestKey, ...(compose.id ? { draftId: compose.id } : {}), ...(compose.forwardOfId ? { forwardOfId: compose.forwardOfId } : {}), source: 'compose' }); };
   const saveDraft = async (input: EmailDraftInput, id?: string) => { const receipt = await exec({ type: 'email.draft.save', payload: { ...(id ? { id } : {}), input } }, '草稿已保存'); if (receipt) setCompose(null); };
   const createFollowUp = async (owner: string, due: string, note: string) => { if (followUp && await exec({ type: 'email.followUp', payload: { id: followUp.id, owner, due, note } }, '已生成跟进待办，并写入日历')) setFollowUp(null); };
@@ -341,44 +342,41 @@ export function EmailsPage() {
   const selectedSub = selected?.kind === 'message' ? addressText([selected.message.from]) : selected?.kind === 'send' ? '待发送' : selected ? '草稿' : undefined;
 
   return <div className="mist-mail-page">
-    <h1 className="mist-sr-only">智能邮箱</h1>
-    {!can && <Banner tone="neutral" title="只读查看">你的账号没有邮件编辑权限，可以阅读邮件与业务关联，不能标记、关联、跟进或写邮件。</Banner>}
-    {error && <Banner tone="bad" title="邮箱未读取" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner>}
-    {mailPending?.review && <Banner tone="bad" icon={AlertTriangle} title={`发送「${String(mailPending.input.subject || '（无主题）')}」待人工核对`} actions={<Button size="sm" loading={saving} disabled={saving || !closeMailReview} onClick={() => void closeReview()}>已人工核对，关闭记录</Button>}>
-      {mailPending.review}。这次发送不会被算作已发送，系统也不会再自动核对或重发。请在待发送 / 已发送中按发件账号、主题与收件人核对这封邮件；关闭记录不会发送任何邮件。
-    </Banner>}
-    {mailPending && !mailPending.review && <Banner tone="warn" icon={AlertTriangle} title={`上次发送「${String(mailPending.input.subject || '（无主题）')}」未收到服务器回执`} actions={<Button size="sm" variant="primary" loading={saving} disabled={saving} onClick={() => void checkPendingSend()}>核对发送结果</Button>}>
-      收件人：{[mailPending.input.to, mailPending.input.cc, mailPending.input.bcc].map(value => String(value || '').trim()).filter(Boolean).join('；') || '未填写'}。邮件可能已发出，也可能没有到达服务器。核对时使用原发送请求：已登记的只显示原记录、不会重复投递；服务器从未收到时才按原内容发送一次。核对完成前不能发起其他邮件操作。
-    </Banner>}
-    {failure && <Banner tone="bad" title="操作未完成">{failure}</Banner>}
-    {notice && <Banner tone={notice.tone} title={notice.title} actions={<Button size="sm" onClick={() => setNotice(null)}>知道了</Button>}>{notice.text}</Banner>}
+    <h1 className="mist-sr-only">{uiText("智能邮箱")}</h1>
+    {!can && <Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有邮件编辑权限，可以阅读邮件与业务关联，不能标记、关联、跟进或写邮件。")}</Banner>}
+    {error && <Banner tone="bad" title={uiText("邮箱未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
+    {mailPending?.review && <Banner tone="bad" icon={AlertTriangle} title={ui`发送「${String(mailPending.input.subject || '（无主题）')}」待人工核对`} actions={<Button size="sm" loading={saving} disabled={saving || !closeMailReview} onClick={() => void closeReview()}>{uiText("已人工核对，关闭记录")}</Button>}>
+      {mailPending.review}{uiText("。这次发送不会被算作已发送，系统也不会再自动核对或重发。请在待发送 / 已发送中按发件账号、主题与收件人核对这封邮件；关闭记录不会发送任何邮件。")}</Banner>}
+    {mailPending && !mailPending.review && <Banner tone="warn" icon={AlertTriangle} title={ui`上次发送「${String(mailPending.input.subject || '（无主题）')}」未收到服务器回执`} actions={<Button size="sm" variant="primary" loading={saving} disabled={saving} onClick={() => void checkPendingSend()}>{uiText("核对发送结果")}</Button>}>{uiText("收件人：")}{[mailPending.input.to, mailPending.input.cc, mailPending.input.bcc].map(value => String(value || '').trim()).filter(Boolean).join('；') || '未填写'}{uiText("。邮件可能已发出，也可能没有到达服务器。核对时使用原发送请求：已登记的只显示原记录、不会重复投递；服务器从未收到时才按原内容发送一次。核对完成前不能发起其他邮件操作。")}</Banner>}
+    {failure && <Banner tone="bad" title={uiText("操作未完成")}>{failure}</Banner>}
+    {notice && <Banner tone={notice.tone} title={uiText(notice.title)} actions={<Button size="sm" onClick={() => setNotice(null)}>{uiText("知道了")}</Button>}>{notice.text}</Banner>}
     <div className="mist-mail" data-compact={compact || undefined}>
       {nav}
       {compose && state ? <ComposePane key={compose.id || 'new'} state={state} initial={compose} locked={locked} onClose={() => setCompose(null)} onSave={saveDraft} onSend={sendCompose} /> : <>
-      <section className="mist-mail-listpane" aria-label="邮件列表">
+      <section className="mist-mail-listpane" aria-label={uiText("邮件列表")}>
         <div className="mist-mail-listhead">
-          <h2 className="mist-mail-listtitle">{scopeLabel}</h2><small className="mist-muted">{rows.length} 封</small><span className="mist-spacer" />
-          <Button size="sm" variant="quiet" icon={RotateCcw} disabled={!can || locked || !syncable.length} title={!syncable.length ? '没有已绑定凭据的真实邮箱可同步' : '页面打开时每 5 分钟自动收信，也可立即同步'} onClick={() => void syncNow()}>同步</Button>
+          <h2 className="mist-mail-listtitle">{scopeLabel}</h2><small className="mist-muted">{rows.length}{uiText(" 封")}</small><span className="mist-spacer" />
+          <Button size="sm" variant="quiet" icon={RotateCcw} disabled={!can || locked || !syncable.length} title={uiText(!syncable.length ? '没有已绑定凭据的真实邮箱可同步' : '页面打开时每 5 分钟自动收信，也可立即同步')} onClick={() => void syncNow()}>{uiText("同步")}</Button>
         </div>
         <div className="mist-mail-search">
-          <SearchField value={query} onChange={setQuery} placeholder="搜索主题、发件人、正文、附件名或抽取资料" />
-          {!isDrafts && !isOutbox && <Dropdown<string> label="分类" value={category} onChange={setCategory} options={[{ value: 'all', label: '全部' }, ...categories.map(value => ({ value, label: value })), { value: 'none', label: '未分类' }]} />}
+          <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索主题、发件人、正文、附件名或抽取资料")} />
+          {!isDrafts && !isOutbox && <Dropdown<string> label={uiText("分类")} value={category} onChange={setCategory} options={[{ value: 'all', label: '全部' }, ...categories.map(value => ({ value, label: value })), { value: 'none', label: '未分类' }]} />}
         </div>
-        {failedAccounts.length > 0 && <div className="mist-mail-inline-warn" role="status"><AlertTriangle size={14} /><span><b>{scopeFailed ? `${scopeLabel}同步失败` : '部分文件夹同步失败'}</b> · {failedAccounts.map(a => `${a.displayName}：${a.failedFolders.join('、')}未能同步，显示的是上次同步结果`).join('；')}。</span></div>}
+        {failedAccounts.length > 0 && <div className="mist-mail-inline-warn" role="status"><AlertTriangle size={14} /><span><b>{uiText(scopeFailed ? `${scopeLabel}同步失败` : '部分文件夹同步失败')}</b> · {failedAccounts.map(a => `${a.displayName}：${a.failedFolders.join('、')}未能同步，显示的是上次同步结果`).join('；')}。</span></div>}
         {list}
-        {accounts.some(a => a.example) && <p className="mist-note mist-mail-listfoot">示例邮箱：演示公司的合成邮件，不连接邮件服务器、不能发送；标记、关联、跟进与草稿会真实保存。</p>}
+        {accounts.some(a => a.example) && <p className="mist-note mist-mail-listfoot">{uiText("示例邮箱：演示公司的合成邮件，不连接邮件服务器、不能发送；标记、关联、跟进与草稿会真实保存。")}</p>}
       </section>
-      {!compact && <section className="mist-mail-reader" aria-label="阅读邮件">{detail}</section>}
-      {compact && <Drawer open={drawer && !!selected} onClose={() => setDrawer(false)} title={selectedTitle} sub={selectedSub} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
+      {!compact && <section className="mist-mail-reader" aria-label={uiText("阅读邮件")}>{detail}</section>}
+      {compact && <Drawer open={drawer && !!selected} onClose={() => setDrawer(false)} title={uiText(selectedTitle)} sub={uiText(selectedSub)} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
       </>}
     </div>
     {accountsOpen && state && <AccountsDrawer state={state} me={me} can={can} canAdmin={canAdmin} locked={locked} run={run} mail={mail} onClose={() => setAccountsOpen(false)} />}
-    {confirmResend && <Dialog open onClose={() => setConfirmResend(null)} title="确认未送达后重发" icon={AlertTriangle} tone="warn" description={`「${confirmResend.subject}」上次发送结果不确定。`}
-      footer={<><Button onClick={() => setConfirmResend(null)}>取消</Button><Button variant="primary" disabled={locked} onClick={() => void retrySend(confirmResend, true)}>确认未送达，重新发送</Button></>}>
-      <p className="mist-sub">请先点“核对”在本邮箱的已发送中查找，或向收件人确认未收到。只会发给尚未被服务器接受的收件人（{emailSendRetryTargets(confirmResend).map(item => item.address).join('、')}）；若对方其实已收到，会收到两封相同邮件。</p>
+    {confirmResend && <Dialog open onClose={() => setConfirmResend(null)} title={uiText("确认未送达后重发")} icon={AlertTriangle} tone="warn" description={ui`「${confirmResend.subject}」上次发送结果不确定。`}
+      footer={<><Button onClick={() => setConfirmResend(null)}>{uiText("取消")}</Button><Button variant="primary" disabled={locked} onClick={() => void retrySend(confirmResend, true)}>{uiText("确认未送达，重新发送")}</Button></>}>
+      <p className="mist-sub">{uiText("请先点“核对”在本邮箱的已发送中查找，或向收件人确认未收到。只会发给尚未被服务器接受的收件人（")}{emailSendRetryTargets(confirmResend).map(item => item.address).join('、')}{uiText("）；若对方其实已收到，会收到两封相同邮件。")}</p>
     </Dialog>}
     {pendingSend && state && <SendConfirmDialog pending={pendingSend} state={state} locked={locked} onCancel={() => setPendingSend(null)} onConfirm={() => void confirmSend()} />}
-    {followUp && <FollowUpDialog message={followUp} owner={session.user?.displayName || state?.settings.profileName || ''} locked={locked} onClose={() => setFollowUp(null)} onSubmit={createFollowUp} />}
+    {followUp && <FollowUpDialog message={uiText(followUp)} owner={session.user?.displayName || state?.settings.profileName || ''} locked={locked} onClose={() => setFollowUp(null)} onSubmit={createFollowUp} />}
   </div>;
 }
 
@@ -411,74 +409,74 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
   return <DetailBody data-email-detail={m.id}>
     <div className="mist-mail-tools">
       <ActionBar busy={locked} actions={can ? actions : actions.slice(0, 1)} />
-      {can && <div className="mist-row mist-mail-flags" aria-label="邮件标记">
-        <Button size="sm" variant="quiet" icon={MailOpen} disabled={locked} aria-label={m.read ? '标为未读' : '标为已读'} title={m.read ? '标为未读' : '标为已读'} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'read', value: !m.read } })} />
-        <Button size="sm" variant="quiet" icon={Star} disabled={locked} aria-pressed={m.starred} aria-label={m.starred ? '取消星标' : '星标'} title={m.starred ? '取消星标' : '星标'} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'starred', value: !m.starred } })} />
-        <Button size="sm" variant="quiet" icon={AlertTriangle} disabled={locked} aria-pressed={m.important} aria-label={m.important ? '取消重要' : '标为重要'} title={m.important ? '取消重要' : '标为重要'} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'important', value: !m.important } })} />
+      {can && <div className="mist-row mist-mail-flags" aria-label={uiText("邮件标记")}>
+        <Button size="sm" variant="quiet" icon={MailOpen} disabled={locked} aria-label={uiText(m.read ? '标为未读' : '标为已读')} title={uiText(m.read ? '标为未读' : '标为已读')} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'read', value: !m.read } })} />
+        <Button size="sm" variant="quiet" icon={Star} disabled={locked} aria-pressed={m.starred} aria-label={uiText(m.starred ? '取消星标' : '星标')} title={uiText(m.starred ? '取消星标' : '星标')} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'starred', value: !m.starred } })} />
+        <Button size="sm" variant="quiet" icon={AlertTriangle} disabled={locked} aria-pressed={m.important} aria-label={uiText(m.important ? '取消重要' : '标为重要')} title={uiText(m.important ? '取消重要' : '标为重要')} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'important', value: !m.important } })} />
       </div>}
     </div>
     <header className="mist-mail-read-head">
       <h2 className="mist-mail-read-subject">{m.subject || '（无主题）'}</h2>
       <div className="mist-row" style={{ flexWrap: 'wrap', gap: 6 }}>
-        {m.example && <Pill>示例邮件</Pill>}{m.important && <Pill tone="warn">重要</Pill>}{m.starred && <Pill tone="accent">星标</Pill>}
-        {m.folder === 'trash' && <Pill tone="neutral">已删除</Pill>}{m.folder === 'archive' && <Pill tone="neutral">已归档</Pill>}{m.folder === 'sent' && <Pill tone="neutral">已发送</Pill>}
-        {m.category.label && <Pill tone={source.tone}>{m.category.label}</Pill>}
+        {m.example && <Pill>{uiText("示例邮件")}</Pill>}{m.important && <Pill tone="warn">{uiText("重要")}</Pill>}{m.starred && <Pill tone="accent">{uiText("星标")}</Pill>}
+        {m.folder === 'trash' && <Pill tone="neutral">{uiText("已删除")}</Pill>}{m.folder === 'archive' && <Pill tone="neutral">{uiText("已归档")}</Pill>}{m.folder === 'sent' && <Pill tone="neutral">{uiText("已发送")}</Pill>}
+        {m.category.label && <Pill tone={source.tone}>{uiText(m.category.label)}</Pill>}
         <span className="mist-muted mist-mail-boxname">{account?.displayName || '邮箱不可用'}</span>
       </div>
       <div className="mist-mail-sender">
         <span className="mist-mail-avatar" data-size="lg" aria-hidden="true">{initialOf(sender)}</span>
         <div className="mist-mail-sender-main">
           <div className="mist-mail-sender-line"><strong>{sender}</strong>{m.from.name && <small className="mist-muted">&lt;{m.from.address}&gt;</small>}</div>
-          <small className="mist-muted mist-mail-recipients">发给 {m.to.length ? m.to.map(row => row.name || row.address).join('、') : '—'}{m.cc.length ? ` · 抄送 ${m.cc.map(row => row.name || row.address).join('、')}` : ''}</small>
+          <small className="mist-muted mist-mail-recipients">{uiText("发给 ")}{uiText(m.to.length ? m.to.map(row => row.name || row.address).join('、') : '—')}{uiText(m.cc.length ? ` · 抄送 ${m.cc.map(row => row.name || row.address).join('、')}` : '')}</small>
         </div>
         <time className="mist-muted mist-mail-time">{when(m.at)}</time>
       </div>
-      <details className="mist-mail-addrs"><summary>地址详情</summary><Facts items={[
+      <details className="mist-mail-addrs"><summary>{uiText("地址详情")}</summary><Facts items={[
         { label: '发件人', value: <Addresses rows={[m.from]} /> }, { label: '收件人', value: m.to.length ? <Addresses rows={m.to} /> : '—' },
         ...(m.cc.length ? [{ label: '抄送', value: <Addresses rows={m.cc} /> }] : []), { label: '时间', value: when(m.at) },
       ]} /></details>
     </header>
-    {m.folder === 'sent' && <Banner tone={record ? (emailSendEffectiveStatus(record) === 'sent' ? 'ok' : 'warn') : 'neutral'} title="发送记录">{m.example ? '示例已发送邮件，没有真实投递或回执记录。'
+    {m.folder === 'sent' && <Banner tone={record ? (emailSendEffectiveStatus(record) === 'sent' ? 'ok' : 'warn') : 'neutral'} title={uiText("发送记录")}>{uiText(m.example ? '示例已发送邮件，没有真实投递或回执记录。'
       : record && emailSendEffectiveStatus(record) !== 'sent' ? sentPartialText(record)
       : record ? `${record.createdBy} 于 ${when(record.updatedAt)} 发送，发件服务器已接受全部收件人${record.response ? `（${record.response}）` : ''}。“已接受”表示发件服务器收下，不代表对方最终收到或已阅读。`
-      : '从邮箱服务器的已发送文件夹同步，不是经本系统发出，没有投递回执。'}</Banner>}
+      : '从邮箱服务器的已发送文件夹同步，不是经本系统发出，没有投递回执。')}</Banner>}
     <div className="mist-mail-body">{m.body}</div>
-    {m.attachments.length > 0 && <DetailBlock title={`附件（${m.attachments.length}）`}>
+    {m.attachments.length > 0 && <DetailBlock title={ui`附件（${m.attachments.length}）`}>
       {m.attachments.map(file => { const stored = !!file.fileId && state.files.some(row => row.id === file.fileId);
-        return <div key={file.id} className="mist-row mist-mail-attachment"><Paperclip size={14} />{stored ? <FileName file={state.files.find(row => row.id === file.fileId)!} files={m.attachments.map(a => a.fileId ? state.files.find(row => row.id === a.fileId) : undefined)} label={file.name} /> : <span className="mist-mail-ellipsis">{file.name}</span>}<small className="mist-muted">{sizeText(file.size)}</small><span className="mist-spacer" />
-          <Button size="sm" icon={Download} disabled={!stored} title={stored ? undefined : m.example ? '示例附件没有文件内容' : file.omitted || '附件内容未保存，请重新同步'} onClick={() => stored && onDownload(file.fileId!)}>下载</Button></div>; })}
-      {m.example ? <span className="mist-note">示例附件无文件，不能下载。</span> : m.attachments.filter(file => file.omitted).map(file => <span key={file.id} className="mist-note">{file.name}：{file.omitted}</span>)}
+        return <div key={file.id} className="mist-row mist-mail-attachment"><Paperclip size={14} />{stored ? <FileName file={state.files.find(row => row.id === file.fileId)!} files={m.attachments.map(a => a.fileId ? state.files.find(row => row.id === a.fileId) : undefined)} label={uiText(file.name)} /> : <span className="mist-mail-ellipsis">{file.name}</span>}<small className="mist-muted">{sizeText(file.size)}</small><span className="mist-spacer" />
+          <Button size="sm" icon={Download} disabled={!stored} title={uiText(stored ? undefined : m.example ? '示例附件没有文件内容' : file.omitted || '附件内容未保存，请重新同步')} onClick={() => stored && onDownload(file.fileId!)}>{uiText("下载")}</Button></div>; })}
+      {m.example ? <span className="mist-note">{uiText("示例附件无文件，不能下载。")}</span> : m.attachments.filter(file => file.omitted).map(file => <span key={file.id} className="mist-note">{file.name}：{file.omitted}</span>)}
     </DetailBlock>}
-    <div className="mist-mail-assist-title"><Sparkles size={14} />业务关联与智能整理</div>
-    <DetailBlock title="业务关联">
-      {suggestion && <Banner tone="accent" icon={Link2} title="建议关联客户" actions={can ? <Button size="sm" disabled={locked} onClick={() => void link({ kind: 'customer', id: suggestion.customer.id }, `已关联客户 ${suggestion.customer.name}`)}>确认关联</Button> : undefined}>发件人 {m.from.address} 是 {suggestion.customer.name} 的联系人 {suggestion.contact.name}。确认后才会关联。</Banner>}
+    <div className="mist-mail-assist-title"><Sparkles size={14} />{uiText("业务关联与智能整理")}</div>
+    <DetailBlock title={uiText("业务关联")}>
+      {suggestion && <Banner tone="accent" icon={Link2} title={uiText("建议关联客户")} actions={can ? <Button size="sm" disabled={locked} onClick={() => void link({ kind: 'customer', id: suggestion.customer.id }, `已关联客户 ${suggestion.customer.name}`)}>{uiText("确认关联")}</Button> : undefined}>{uiText("发件人 ")}{m.from.address}{uiText(" 是 ")}{suggestion.customer.name}{uiText(" 的联系人 ")}{suggestion.contact.name}{uiText("。确认后才会关联。")}</Banner>}
       {m.links.length ? <div className="mist-col" style={{ gap: 6 }}>{m.links.map(row => {
         const t = emailLinkTarget(state, row), submitted = m.submissions.some(s => linkKey(s.link) === linkKey(row));
         return <div key={linkKey(row)} className="mist-row mist-mail-link">
-          <Pill>{EMAIL_LINK_LABEL[row.kind]}</Pill>{t ? <TextLink onClick={() => onOpen(t.view, t.id)}>{t.label}</TextLink> : <span className="mist-muted">对象已不可用</span>}<span className="mist-spacer" />
-          {can && <Button size="sm" icon={Unlink} disabled={locked || submitted} title={submitted ? '已向该对象提交过资料，关联不能移除' : undefined} onClick={() => void exec({ type: 'email.unlink', payload: { id: m.id, link: row } }, '已移除关联')}>移除</Button>}
+          <Pill>{EMAIL_LINK_LABEL[row.kind]}</Pill>{t ? <TextLink onClick={() => onOpen(t.view, t.id)}>{uiText(t.label)}</TextLink> : <span className="mist-muted">{uiText("对象已不可用")}</span>}<span className="mist-spacer" />
+          {can && <Button size="sm" icon={Unlink} disabled={locked || submitted} title={uiText(submitted ? '已向该对象提交过资料，关联不能移除' : undefined)} onClick={() => void exec({ type: 'email.unlink', payload: { id: m.id, link: row } }, '已移除关联')}>{uiText("移除")}</Button>}
         </div>;
-      })}</div> : <span className="mist-note">尚未关联业务对象。</span>}
+      })}</div> : <span className="mist-note">{uiText("尚未关联业务对象。")}</span>}
       {can && <div className="mist-row mist-mail-picker">
-        <Select aria-label="关联类型" value={kind} onChange={event => { setKind(event.target.value as EmailLinkKind); setTarget(''); }} options={(Object.keys(EMAIL_LINK_LABEL) as EmailLinkKind[]).map(value => ({ value, label: EMAIL_LINK_LABEL[value] }))} />
-        <Select aria-label="关联对象" value={target} onChange={event => setTarget(event.target.value)} placeholder={options[kind].length ? `选择${EMAIL_LINK_LABEL[kind]}` : `没有可关联的${EMAIL_LINK_LABEL[kind]}`} options={options[kind].filter(option => !m.links.some(row => row.kind === kind && row.id === option.value))} />
-        <Button icon={Link2} disabled={locked || !target} onClick={() => void link({ kind, id: target }, '已关联')}>关联</Button>
+        <Select aria-label={uiText("关联类型")} value={kind} onChange={event => { setKind(event.target.value as EmailLinkKind); setTarget(''); }} options={(Object.keys(EMAIL_LINK_LABEL) as EmailLinkKind[]).map(value => ({ value, label: EMAIL_LINK_LABEL[value] }))} />
+        <Select aria-label={uiText("关联对象")} value={target} onChange={event => setTarget(event.target.value)} placeholder={uiText(options[kind].length ? `选择${EMAIL_LINK_LABEL[kind]}` : `没有可关联的${EMAIL_LINK_LABEL[kind]}`)} options={options[kind].filter(option => !m.links.some(row => row.kind === kind && row.id === option.value))} />
+        <Button icon={Link2} disabled={locked || !target} onClick={() => void link({ kind, id: target }, '已关联')}>{uiText("关联")}</Button>
       </div>}
     </DetailBlock>
-    <DetailBlock title="分类与抽取" aside={<Pill tone={source.tone}>{source.label}</Pill>}>
-      <span className="mist-sub">{m.category.label ? `${m.category.label} · ` : ''}{m.category.detail}</span>
-      {m.extracted.length ? <Facts items={m.extracted.map(item => ({ label: item.field, value: item.value }))} /> : <span className="mist-note">没有抽取到结构化资料。</span>}
+    <DetailBlock title={uiText("分类与抽取")} aside={<Pill tone={source.tone}>{uiText(source.label)}</Pill>}>
+      <span className="mist-sub">{uiText(m.category.label ? `${m.category.label} · ` : '')}{m.category.detail}</span>
+      {m.extracted.length ? <Facts items={m.extracted.map(item => ({ label: item.field, value: item.value }))} /> : <span className="mist-note">{uiText("没有抽取到结构化资料。")}</span>}
       {m.extracted.length > 0 && can && <div className="mist-row mist-mail-picker">
-        <Select aria-label="提交到业务对象" value={submitTo} onChange={event => setSubmitTo(event.target.value)} placeholder={submittable.length ? '选择已关联对象' : m.links.length ? '已全部提交' : '请先关联业务对象'} options={submittable.map(row => ({ value: linkKey(row), label: `${EMAIL_LINK_LABEL[row.kind]} · ${emailLinkTarget(state, row)!.label}` }))} />
-        <Button icon={Sparkles} disabled={locked || !submitTo} onClick={() => void submit()}>提交到业务对象</Button>
+        <Select aria-label={uiText("提交到业务对象")} value={submitTo} onChange={event => setSubmitTo(event.target.value)} placeholder={uiText(submittable.length ? '选择已关联对象' : m.links.length ? '已全部提交' : '请先关联业务对象')} options={submittable.map(row => ({ value: linkKey(row), label: `${EMAIL_LINK_LABEL[row.kind]} · ${emailLinkTarget(state, row)!.label}` }))} />
+        <Button icon={Sparkles} disabled={locked || !submitTo} onClick={() => void submit()}>{uiText("提交到业务对象")}</Button>
       </div>}
-      {m.extracted.length > 0 && <span className="mist-note">提交只生成复核待办，不直接改写客户、订单或发票数据。</span>}
-      {m.submissions.map(s => <span key={s.taskId} className="mist-note">{shortWhen(s.at)} {s.actor} 提交到{EMAIL_LINK_LABEL[s.link.kind]} {emailLinkTarget(state, s.link)?.label || '对象已不可用'} · {state.tasks.find(task => task.id === s.taskId)?.done ? '已复核' : '待复核'}</span>)}
+      {m.extracted.length > 0 && <span className="mist-note">{uiText("提交只生成复核待办，不直接改写客户、订单或发票数据。")}</span>}
+      {m.submissions.map(s => <span key={s.taskId} className="mist-note">{shortWhen(s.at)} {s.actor}{uiText(" 提交到")}{EMAIL_LINK_LABEL[s.link.kind]} {emailLinkTarget(state, s.link)?.label || '对象已不可用'} · {uiText(state.tasks.find(task => task.id === s.taskId)?.done ? '已复核' : '待复核')}</span>)}
     </DetailBlock>
-    <DetailBlock title="跟进" aside={can ? <Button size="sm" icon={CalendarPlus} disabled={locked || m.folder === 'trash'} title={m.folder === 'trash' ? '已删除的邮件不能生成跟进' : undefined} onClick={onFollowUp}>生成跟进</Button> : undefined}>
-      {tasks.length ? tasks.map(task => <div key={task.id} className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={task.done ? 'ok' : 'accent'}>{task.done ? '已完成' : '待跟进'}</Pill><span>{task.title}</span><span className="mist-spacer" /><small className="mist-muted">截止 {task.due}</small></div>) : <span className="mist-note">还没有跟进待办。</span>}
+    <DetailBlock title={uiText("跟进")} aside={can ? <Button size="sm" icon={CalendarPlus} disabled={locked || m.folder === 'trash'} title={uiText(m.folder === 'trash' ? '已删除的邮件不能生成跟进' : undefined)} onClick={onFollowUp}>{uiText("生成跟进")}</Button> : undefined}>
+      {tasks.length ? tasks.map(task => <div key={task.id} className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={task.done ? 'ok' : 'accent'}>{uiText(task.done ? '已完成' : '待跟进')}</Pill><span>{task.title}</span><span className="mist-spacer" /><small className="mist-muted">{uiText("截止 ")}{task.due}</small></div>) : <span className="mist-note">{uiText("还没有跟进待办。")}</span>}
     </DetailBlock>
-    <DetailBlock title="处理记录"><Events entity="email" id={m.id} /></DetailBlock>
+    <DetailBlock title={uiText("处理记录")}><Events entity="email" id={m.id} /></DetailBlock>
   </DetailBody>;
 }
 
@@ -488,7 +486,7 @@ function Addresses({ rows }: { rows: Array<{ name: string; address: string }> })
 
 function DraftDetail({ draft: d, state, can, locked, onEdit, onDelete, onSend }: { draft: EmailDraft; state: MistState; can: boolean; locked: boolean; onEdit: () => void; onDelete: () => void; onSend: () => void }) {
   const account = state.email.accounts.find(a => a.id === d.accountId), noWrite = can ? false : '需要邮件编辑权限', blocked = sendBlocked(account);
-  return <DetailBody data-email-draft={d.id} heading={<div><span className="mist-mono mist-muted">草稿 · {account?.displayName || '邮箱不可用'}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{d.subject || '（无主题）'}</div></div>}>
+  return <DetailBody data-email-draft={d.id} heading={<div><span className="mist-mono mist-muted">{uiText("草稿 · ")}{account?.displayName || '邮箱不可用'}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{d.subject || '（无主题）'}</div></div>}>
     <ActionBar busy={locked} actions={[
       { label: '继续编辑', icon: PenLine, onClick: onEdit, primary: true, reason: noWrite },
       { label: '发送', icon: Send, onClick: onSend, reason: noWrite || blocked || (!d.to.trim() && !d.cc.trim() && !d.bcc.trim() ? '请先填写收件人' : false) },
@@ -496,9 +494,9 @@ function DraftDetail({ draft: d, state, can, locked, onEdit, onDelete, onSend }:
     ]} />
     <Facts items={[{ label: '发件身份', value: d.from }, { label: '收件人', value: d.to || '未填写' }, ...(d.cc ? [{ label: '抄送', value: d.cc }] : []), ...(d.bcc ? [{ label: '密送', value: d.bcc }] : []), { label: '模板', value: d.template || '未使用' }, { label: '最后保存', value: `${d.updatedBy} · ${when(d.updatedAt)}` }]} />
     <div className="mist-mail-body">{d.body || '正文为空'}</div>
-    {(d.links.length > 0 || d.fileIds.length > 0) && <DetailBlock title="关联与附件">
+    {(d.links.length > 0 || d.fileIds.length > 0) && <DetailBlock title={uiText("关联与附件")}>
       {d.links.map(row => <span key={linkKey(row)} className="mist-sub">{EMAIL_LINK_LABEL[row.kind]} · {emailLinkTarget(state, row)?.label || '对象已不可用'}</span>)}
-      {d.fileIds.map(id => { const f = state.files.find(file => file.id === id); return f ? <FileName key={id} file={f} files={d.fileIds.map(x => state.files.find(file => file.id === x))} /> : <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />文件不可用</span>; })}
+      {d.fileIds.map(id => { const f = state.files.find(file => file.id === id); return f ? <FileName key={id} file={f} files={d.fileIds.map(x => state.files.find(file => file.id === x))} /> : <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />{uiText("文件不可用")}</span>; })}
     </DetailBlock>}
   </DetailBody>;
 }
@@ -519,18 +517,18 @@ function SendDetail({ send: row, state, can, me, locked, onRetry, onVerify, onCo
     { label: '核对是否已发出', icon: SearchCheck, onClick: () => onVerify(row), primary: true, reason: noWrite, hidden: status !== 'unknown' },
     { label: '确认未送达后重发', icon: RotateCcw, onClick: () => onConfirmResend(row), reason: noWrite, hidden: status !== 'unknown' },
   ];
-  return <DetailBody data-email-send={row.id} heading={<div><span className="mist-mono mist-muted">待发送 · {account?.displayName || '邮箱不可用'}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{row.subject}</div></div>}>
-    <div className="mist-row"><Pill tone={tone.tone}>{tone.label}</Pill></div>
+  return <DetailBody data-email-send={row.id} heading={<div><span className="mist-mono mist-muted">{uiText("待发送 · ")}{account?.displayName || '邮箱不可用'}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{row.subject}</div></div>}>
+    <div className="mist-row"><Pill tone={tone.tone}>{uiText(tone.label)}</Pill></div>
     {status !== 'sending' && <ActionBar busy={locked} actions={actions} />}
-    {status === 'unknown' && <Banner tone="warn" title="不会自动重发">投递过程中连接中断或没有收到服务器的明确答复，对方可能已经收到。可先核对本邮箱的已发送；仍不确定时请向收件人确认后再重发。</Banner>}
-    {status === 'partial' && <Banner tone="warn" title="部分收件人未被接收">发信服务器接受了 {accepted.length} 位收件人，{open.length} 位被拒或未送出。重发只发给未接收的收件人，已接受的不会再收到第二封。“已接受”表示发信服务器收下，不代表对方最终收到或阅读。</Banner>}
-    {status === 'failed' && <Banner tone="bad" title="服务器明确拒绝或未能连接">{row.response || row.attempts[row.attempts.length - 1]?.message || '发送失败'}。修正邮箱设置或收件人后可重发。</Banner>}
-    {status === 'sending' && <Banner tone="neutral" title="正在发送">稍后刷新查看结果；超过 5 分钟仍无结果会转为“结果不确定”。</Banner>}
+    {status === 'unknown' && <Banner tone="warn" title={uiText("不会自动重发")}>{uiText("投递过程中连接中断或没有收到服务器的明确答复，对方可能已经收到。可先核对本邮箱的已发送；仍不确定时请向收件人确认后再重发。")}</Banner>}
+    {status === 'partial' && <Banner tone="warn" title={uiText("部分收件人未被接收")}>{uiText("发信服务器接受了 ")}{accepted.length}{uiText(" 位收件人，")}{open.length}{uiText(" 位被拒或未送出。重发只发给未接收的收件人，已接受的不会再收到第二封。“已接受”表示发信服务器收下，不代表对方最终收到或阅读。")}</Banner>}
+    {status === 'failed' && <Banner tone="bad" title={uiText("服务器明确拒绝或未能连接")}>{row.response || row.attempts[row.attempts.length - 1]?.message || '发送失败'}{uiText("。修正邮箱设置或收件人后可重发。")}</Banner>}
+    {status === 'sending' && <Banner tone="neutral" title={uiText("正在发送")}>{uiText("稍后刷新查看结果；超过 5 分钟仍无结果会转为“结果不确定”。")}</Banner>}
     <Facts items={[{ label: '发件身份', value: row.from }, { label: '发起人', value: `${row.createdBy} · ${when(row.createdAt)}` }]} />
-    <DetailBlock title={`收件人结果（${recipients.length}）`}>{recipients.map(item => <div key={item.address} className="mist-row" data-recipient={item.address} style={{ flexWrap: 'wrap' }}><Pill tone={RECIPIENT_STATUS[item.status].tone}>{RECIPIENT_STATUS[item.status].label}</Pill><span className="mist-sub">{item.address}</span><small className="mist-muted">{ROLE_LABEL[item.role]}</small>{item.reply && <small className="mist-muted" style={{ flexBasis: '100%', overflowWrap: 'anywhere' }}>{item.reply}</small>}</div>)}</DetailBlock>
+    <DetailBlock title={ui`收件人结果（${recipients.length}）`}>{recipients.map(item => <div key={item.address} className="mist-row" data-recipient={item.address} style={{ flexWrap: 'wrap' }}><Pill tone={RECIPIENT_STATUS[item.status].tone}>{uiText(RECIPIENT_STATUS[item.status].label)}</Pill><span className="mist-sub">{item.address}</span><small className="mist-muted">{ROLE_LABEL[item.role]}</small>{item.reply && <small className="mist-muted" style={{ flexBasis: '100%', overflowWrap: 'anywhere' }}>{item.reply}</small>}</div>)}</DetailBlock>
     <div className="mist-mail-body">{row.body || '正文为空'}</div>
-    {row.fileIds.length > 0 && <DetailBlock title={`附件（${row.fileIds.length}）`}>{row.fileIds.map(id => { const f = state.files.find(file => file.id === id); return f ? <FileName key={id} file={f} files={row.fileIds.map(x => state.files.find(file => file.id === x))} /> : <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />文件不可用</span>; })}</DetailBlock>}
-    <DetailBlock title="投递记录">{row.attempts.map((attempt, index) => <div key={index} className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={attempt.outcome === 'accepted' || attempt.outcome === 'verified' ? 'ok' : attempt.outcome === 'failed' ? 'bad' : attempt.outcome === 'unknown' || attempt.outcome === 'not_found' || attempt.outcome === 'partial' || attempt.outcome === 'copy_found' ? 'warn' : 'neutral'}>{ATTEMPT_LABEL[attempt.outcome]}</Pill><span className="mist-sub">{attempt.message}</span><span className="mist-spacer" /><small className="mist-muted">{attempt.actor} · {when(attempt.at)}</small></div>)}</DetailBlock>
+    {row.fileIds.length > 0 && <DetailBlock title={ui`附件（${row.fileIds.length}）`}>{row.fileIds.map(id => { const f = state.files.find(file => file.id === id); return f ? <FileName key={id} file={f} files={row.fileIds.map(x => state.files.find(file => file.id === x))} /> : <span key={id} className="mist-sub mist-row" style={{ gap: 4 }}><Paperclip size={12} />{uiText("文件不可用")}</span>; })}</DetailBlock>}
+    <DetailBlock title={uiText("投递记录")}>{row.attempts.map((attempt, index) => <div key={index} className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={attempt.outcome === 'accepted' || attempt.outcome === 'verified' ? 'ok' : attempt.outcome === 'failed' ? 'bad' : attempt.outcome === 'unknown' || attempt.outcome === 'not_found' || attempt.outcome === 'partial' || attempt.outcome === 'copy_found' ? 'warn' : 'neutral'}>{ATTEMPT_LABEL[attempt.outcome]}</Pill><span className="mist-sub">{attempt.message}</span><span className="mist-spacer" /><small className="mist-muted">{attempt.actor} · {when(attempt.at)}</small></div>)}</DetailBlock>
   </DetailBody>;
 }
 
@@ -551,36 +549,36 @@ function ComposePane({ state, initial, locked, onClose, onSave, onSend }: { stat
   const title = initial.id ? '编辑草稿' : initial.forwardOfId ? '转发' : v.replyToId ? '回复' : '写邮件';
   const blocked = sendBlocked(account) || (!v.to.trim() && !v.cc.trim() && !v.bcc.trim() ? '请填写收件人' : false);
   const files = [...state.files.filter(file => v.fileIds.includes(file.id)), ...state.files.filter(file => !v.fileIds.includes(file.id)).slice(0, 30)];
-  return <section className="mist-mail-composer" aria-label={title}>
-    <header className="mist-mail-composer-head"><h2 className="mist-mail-listtitle">{title}</h2>{account && <small className="mist-muted">{account.displayName}</small>}<span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={onClose}>关闭</Button></header>
+  return <section className="mist-mail-composer" aria-label={uiText(title)}>
+    <header className="mist-mail-composer-head"><h2 className="mist-mail-listtitle">{uiText(title)}</h2>{account && <small className="mist-muted">{account.displayName}</small>}<span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={onClose}>{uiText("关闭")}</Button></header>
     <div className="mist-mail-composer-body">
     <div className="mist-mail-cform">
-      <div className="mist-mail-crow"><span className="mist-mail-clabel">发件人</span><Select aria-label="发件人" value={`${v.accountId}\n${v.from}`} onChange={event => { const [accountId, from] = event.target.value.split('\n'); setV(prev => ({ ...prev, accountId, from })); }} options={senders} /></div>
-      <div className="mist-mail-crow" title="多个地址用逗号、分号或空格分隔；可从已有联系人中选择"><span className="mist-mail-clabel">收件人</span><TextInput aria-label="收件人" list="mist-mail-contacts" value={v.to} onChange={event => set('to', event.target.value)} placeholder="name@example.com" />{!showCc && <TextLink onClick={() => setShowCc(true)}>抄送 / 密送</TextLink>}</div>
+      <div className="mist-mail-crow"><span className="mist-mail-clabel">{uiText("发件人")}</span><Select aria-label={uiText("发件人")} value={`${v.accountId}\n${v.from}`} onChange={event => { const [accountId, from] = event.target.value.split('\n'); setV(prev => ({ ...prev, accountId, from })); }} options={senders} /></div>
+      <div className="mist-mail-crow" title={uiText("多个地址用逗号、分号或空格分隔；可从已有联系人中选择")}><span className="mist-mail-clabel">{uiText("收件人")}</span><TextInput aria-label={uiText("收件人")} list="mist-mail-contacts" value={v.to} onChange={event => set('to', event.target.value)} placeholder="name@example.com" />{!showCc && <TextLink onClick={() => setShowCc(true)}>{uiText("抄送 / 密送")}</TextLink>}</div>
       {showCc && <>
-        <div className="mist-mail-crow"><span className="mist-mail-clabel">抄送</span><TextInput aria-label="抄送" list="mist-mail-contacts" value={v.cc} onChange={event => set('cc', event.target.value)} /></div>
-        <div className="mist-mail-crow"><span className="mist-mail-clabel">密送</span><TextInput aria-label="密送" value={v.bcc} onChange={event => set('bcc', event.target.value)} /></div>
+        <div className="mist-mail-crow"><span className="mist-mail-clabel">{uiText("抄送")}</span><TextInput aria-label={uiText("抄送")} list="mist-mail-contacts" value={v.cc} onChange={event => set('cc', event.target.value)} /></div>
+        <div className="mist-mail-crow"><span className="mist-mail-clabel">{uiText("密送")}</span><TextInput aria-label={uiText("密送")} value={v.bcc} onChange={event => set('bcc', event.target.value)} /></div>
       </>}
-      <div className="mist-mail-crow"><span className="mist-mail-clabel">主题</span><TextInput aria-label="主题" value={v.subject} onChange={event => set('subject', event.target.value)} /></div>
-      <div className="mist-mail-cbody"><TextArea aria-label="正文" rows={14} value={v.body} onChange={event => set('body', event.target.value)} /></div>
+      <div className="mist-mail-crow"><span className="mist-mail-clabel">{uiText("主题")}</span><TextInput aria-label={uiText("主题")} value={v.subject} onChange={event => set('subject', event.target.value)} /></div>
+      <div className="mist-mail-cbody"><TextArea aria-label={uiText("正文")} rows={14} value={v.body} onChange={event => set('body', event.target.value)} /></div>
     </div>
-    <datalist id="mist-mail-contacts">{contacts.map(c => <option key={c.email} value={c.email}>{c.label}</option>)}</datalist>
-    {v.fileIds.length > 0 && <div className="mist-mail-cchips" aria-label="已添加的附件">{state.files.filter(file => v.fileIds.includes(file.id)).map(file => <span key={file.id} className="mist-mail-cchip"><Paperclip size={13} aria-hidden="true" /><span>{file.name}</span><button type="button" aria-label={`移除附件 ${file.name}`} onClick={() => toggleFile(file.id, false)}><X size={13} /></button></span>)}</div>}
+    <datalist id="mist-mail-contacts">{contacts.map(c => <option key={c.email} value={c.email}>{uiText(c.label)}</option>)}</datalist>
+    {v.fileIds.length > 0 && <div className="mist-mail-cchips" aria-label={uiText("已添加的附件")}>{state.files.filter(file => v.fileIds.includes(file.id)).map(file => <span key={file.id} className="mist-mail-cchip"><Paperclip size={13} aria-hidden="true" /><span>{file.name}</span><button type="button" aria-label={ui`移除附件 ${file.name}`} onClick={() => toggleFile(file.id, false)}><X size={13} /></button></span>)}</div>}
     {picking && <div className="mist-mail-cpicker mist-mail-cfiles">
-      <div className="mist-row"><span className="mist-eyebrow">从公司文件添加附件{v.fileIds.length ? ` · 已选 ${v.fileIds.length}` : ''}</span><span className="mist-spacer" /><TextLink onClick={() => setPicking(false)}>完成</TextLink></div>
-      {files.length ? <div className="mist-col mist-mail-files">{files.map(file => <Checkbox key={file.id} checked={v.fileIds.includes(file.id)} onChange={on => toggleFile(file.id, on)} label={file.name} />)}</div> : <span className="mist-note">公司还没有文件；请先在业务对象中上传。</span>}
+      <div className="mist-row"><span className="mist-eyebrow">{uiText("从公司文件添加附件")}{uiText(v.fileIds.length ? ` · 已选 ${v.fileIds.length}` : '')}</span><span className="mist-spacer" /><TextLink onClick={() => setPicking(false)}>{uiText("完成")}</TextLink></div>
+      {files.length ? <div className="mist-col mist-mail-files">{files.map(file => <Checkbox key={file.id} checked={v.fileIds.includes(file.id)} onChange={on => toggleFile(file.id, on)} label={uiText(file.name)} />)}</div> : <span className="mist-note">{uiText("公司还没有文件；请先在业务对象中上传。")}</span>}
     </div>}
     {v.links.length > 0 && <div className="mist-col" style={{ gap: 6, marginTop: 16 }}>
-      <span className="mist-eyebrow">关联业务（随原邮件）</span>
+      <span className="mist-eyebrow">{uiText("关联业务（随原邮件）")}</span>
       {v.links.map(row => <span key={linkKey(row)} className="mist-sub">{EMAIL_LINK_LABEL[row.kind]} · {emailLinkTarget(state, row)?.label || '对象已不可用'}</span>)}
     </div>}
     </div>
     <footer className="mist-mail-composer-foot">
-      <div className="mist-mail-cbar"><Button variant="primary" icon={Send} disabled={locked || !!blocked} title={blocked || undefined} onClick={() => void onSend(v, requestKey)}>发送</Button><Button icon={PenLine} disabled={locked || !account} onClick={() => void onSave(v, initial.id)}>保存草稿</Button>
-        <Button variant="quiet" icon={Paperclip} aria-expanded={picking} onClick={() => setPicking(open => !open)}>{v.fileIds.length ? `附件 ${v.fileIds.length}` : '添加附件'}</Button>
-        <Select aria-label="模板" title="【】处替换为实际内容；签名取自邮箱账号设置" value={v.template} onChange={event => applyTemplate(event.target.value)} placeholder="不使用模板" options={EMAIL_TEMPLATES.map(t => ({ value: t.value, label: t.label }))} />
-        <span className="mist-spacer" /><Button variant="quiet" onClick={onClose}>取消</Button></div>
-      <span className="mist-note">{blocked ? `发送：${blocked}` : '发送后由发件服务器投递；结果不确定时会留在待发送，不会自动重发。'}</span>
+      <div className="mist-mail-cbar"><Button variant="primary" icon={Send} disabled={locked || !!blocked} title={uiText(blocked || undefined)} onClick={() => void onSend(v, requestKey)}>{uiText("发送")}</Button><Button icon={PenLine} disabled={locked || !account} onClick={() => void onSave(v, initial.id)}>{uiText("保存草稿")}</Button>
+        <Button variant="quiet" icon={Paperclip} aria-expanded={picking} onClick={() => setPicking(open => !open)}>{uiText(v.fileIds.length ? `附件 ${v.fileIds.length}` : '添加附件')}</Button>
+        <Select aria-label={uiText("模板")} title={uiText("【】处替换为实际内容；签名取自邮箱账号设置")} value={v.template} onChange={event => applyTemplate(event.target.value)} placeholder={uiText("不使用模板")} options={EMAIL_TEMPLATES.map(t => ({ value: t.value, label: t.label }))} />
+        <span className="mist-spacer" /><Button variant="quiet" onClick={onClose}>{uiText("取消")}</Button></div>
+      <span className="mist-note">{uiText(blocked ? `发送：${blocked}` : '发送后由发件服务器投递；结果不确定时会留在待发送，不会自动重发。')}</span>
     </footer>
   </section>;
 }
@@ -605,52 +603,52 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, onClose }
   const set = <K extends keyof AccountForm>(key: K, value: AccountForm[K]) => setEditing(prev => prev ? { ...prev, form: { ...prev.form, [key]: value } } : prev);
   const setT = <K extends keyof AccountForm['transport']>(key: K, value: AccountForm['transport'][K]) => setEditing(prev => prev ? { ...prev, form: { ...prev.form, transport: { ...prev.form.transport, [key]: value } } } : prev);
   const f = editing?.form;
-  return <Drawer open onClose={onClose} title={editing ? (editing.id ? '修改邮箱设置' : '接入邮箱') : '邮箱账号'} sub={editing ? undefined : '个人邮箱仅本人可见；共享邮箱对接入人与所选成员可见'} size="lg"
-    footer={editing ? <div className="mist-row" style={{ width: '100%' }}><span className="mist-spacer" /><Button onClick={() => setEditing(null)}>返回</Button><Button variant="primary" disabled={locked || !f!.address.trim() || !f!.displayName.trim() || !f!.transport.imapHost.trim() || !f!.transport.smtpHost.trim() || (!editing.id && !f!.password)} onClick={() => void save()}>{f!.password ? '保存并验证登录' : '保存设置'}</Button></div>
-      : <div className="mist-row" style={{ width: '100%' }}><span className="mist-spacer" /><Button onClick={onClose}>关闭</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => { setProblem(''); setEditing({ form: blankAccount() }); }}>接入邮箱</Button>}</div>}>
-    {problem && <Banner tone="bad" title="未完成">{problem}</Banner>}
+  return <Drawer open onClose={onClose} title={uiText(editing ? (editing.id ? '修改邮箱设置' : '接入邮箱') : '邮箱账号')} sub={uiText(editing ? undefined : '个人邮箱仅本人可见；共享邮箱对接入人与所选成员可见')} size="lg"
+    footer={editing ? <div className="mist-row" style={{ width: '100%' }}><span className="mist-spacer" /><Button onClick={() => setEditing(null)}>{uiText("返回")}</Button><Button variant="primary" disabled={locked || !f!.address.trim() || !f!.displayName.trim() || !f!.transport.imapHost.trim() || !f!.transport.smtpHost.trim() || (!editing.id && !f!.password)} onClick={() => void save()}>{uiText(f!.password ? '保存并验证登录' : '保存设置')}</Button></div>
+      : <div className="mist-row" style={{ width: '100%' }}><span className="mist-spacer" /><Button onClick={onClose}>{uiText("关闭")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => { setProblem(''); setEditing({ form: blankAccount() }); }}>{uiText("接入邮箱")}</Button>}</div>}>
+    {problem && <Banner tone="bad" title={uiText("未完成")}>{problem}</Banner>}
     {editing && f ? <FormGrid>
-      <Field label="邮箱地址" required><TextInput aria-label="邮箱地址" type="email" value={f.address} onChange={event => set('address', event.target.value)} placeholder="name@company.com" /></Field>
-      <Field label="显示名称" required><TextInput aria-label="显示名称" value={f.displayName} onChange={event => set('displayName', event.target.value)} /></Field>
-      <Field label="类型" required hint={canAdmin ? '共享邮箱对所选成员可见' : '接入共享邮箱需要邮件账户管理权限'}><Select aria-label="邮箱类型" value={f.kind} onChange={event => set('kind', event.target.value as AccountForm['kind'])} options={[{ value: 'personal', label: '个人邮箱' }, ...(canAdmin || f.kind === 'shared' ? [{ value: 'shared', label: '共享邮箱' }] : [])]} /></Field>
-      <Field label="别名" hint="可用作发件身份的其他地址，逗号分隔"><TextInput aria-label="别名" value={f.aliasText} onChange={event => set('aliasText', event.target.value)} /></Field>
-      {f.kind === 'shared' && <Field label="共享成员" full hint="只能选择本公司已授权的账号">{members.length ? <div className="mist-col">{members.map(row => <Checkbox key={row.userId} checked={f.memberIds.includes(row.userId)} onChange={on => set('memberIds', on ? [...f.memberIds, row.userId] : f.memberIds.filter(id => id !== row.userId))} label={row.name} />)}</div> : <span className="mist-note">本公司还没有其他成员。</span>}</Field>}
-      <Field label="收信服务器（IMAP）" required><TextInput aria-label="IMAP 服务器" value={f.transport.imapHost} onChange={event => setT('imapHost', event.target.value)} placeholder="imap.company.com" /></Field>
-      <Field label="IMAP 端口与加密"><span style={PORT_ROW}><TextInput aria-label="IMAP 端口" type="number" value={String(f.transport.imapPort)} onChange={event => setT('imapPort', Number(event.target.value))} /><Select aria-label="IMAP 加密" value={f.transport.imapSecure ? 'ssl' : 'starttls'} onChange={event => setT('imapSecure', event.target.value === 'ssl')} options={[{ value: 'ssl', label: 'SSL/TLS' }, { value: 'starttls', label: 'STARTTLS' }]} /></span></Field>
-      <Field label="发信服务器（SMTP）" required><TextInput aria-label="SMTP 服务器" value={f.transport.smtpHost} onChange={event => setT('smtpHost', event.target.value)} placeholder="smtp.company.com" /></Field>
-      <Field label="SMTP 端口与加密"><span style={PORT_ROW}><TextInput aria-label="SMTP 端口" type="number" value={String(f.transport.smtpPort)} onChange={event => setT('smtpPort', Number(event.target.value))} /><Select aria-label="SMTP 加密" value={f.transport.smtpSecure ? 'ssl' : 'starttls'} onChange={event => setT('smtpSecure', event.target.value === 'ssl')} options={[{ value: 'starttls', label: 'STARTTLS' }, { value: 'ssl', label: 'SSL/TLS' }]} /></span></Field>
-      <Field label="登录用户名" hint="留空则使用邮箱地址"><TextInput aria-label="登录用户名" value={f.transport.username} onChange={event => setT('username', event.target.value)} autoComplete="off" /></Field>
-      <Field label={editing.id ? '密码 / 授权码（重新绑定时填写）' : '密码 / 授权码'} required={!editing.id} hint="保存时先真实登录收信与发信服务器，成功后才保存；不会回显"><TextInput aria-label="密码或授权码" type="password" value={f.password} onChange={event => set('password', event.target.value)} autoComplete="new-password" /></Field>
-      <Field label="签名" full><TextArea aria-label="签名" rows={3} value={f.signature} onChange={event => set('signature', event.target.value)} /></Field>
+      <Field label={uiText("邮箱地址")} required><TextInput aria-label={uiText("邮箱地址")} type="email" value={f.address} onChange={event => set('address', event.target.value)} placeholder="name@company.com" /></Field>
+      <Field label={uiText("显示名称")} required><TextInput aria-label={uiText("显示名称")} value={f.displayName} onChange={event => set('displayName', event.target.value)} /></Field>
+      <Field label={uiText("类型")} required hint={uiText(canAdmin ? '共享邮箱对所选成员可见' : '接入共享邮箱需要邮件账户管理权限')}><Select aria-label={uiText("邮箱类型")} value={f.kind} onChange={event => set('kind', event.target.value as AccountForm['kind'])} options={[{ value: 'personal', label: '个人邮箱' }, ...(canAdmin || f.kind === 'shared' ? [{ value: 'shared', label: '共享邮箱' }] : [])]} /></Field>
+      <Field label={uiText("别名")} hint={uiText("可用作发件身份的其他地址，逗号分隔")}><TextInput aria-label={uiText("别名")} value={f.aliasText} onChange={event => set('aliasText', event.target.value)} /></Field>
+      {f.kind === 'shared' && <Field label={uiText("共享成员")} full hint={uiText("只能选择本公司已授权的账号")}>{members.length ? <div className="mist-col">{members.map(row => <Checkbox key={row.userId} checked={f.memberIds.includes(row.userId)} onChange={on => set('memberIds', on ? [...f.memberIds, row.userId] : f.memberIds.filter(id => id !== row.userId))} label={uiText(row.name)} />)}</div> : <span className="mist-note">{uiText("本公司还没有其他成员。")}</span>}</Field>}
+      <Field label={uiText("收信服务器（IMAP）")} required><TextInput aria-label={uiText("IMAP 服务器")} value={f.transport.imapHost} onChange={event => setT('imapHost', event.target.value)} placeholder="imap.company.com" /></Field>
+      <Field label={uiText("IMAP 端口与加密")}><span style={PORT_ROW}><TextInput aria-label={uiText("IMAP 端口")} type="number" value={String(f.transport.imapPort)} onChange={event => setT('imapPort', Number(event.target.value))} /><Select aria-label={uiText("IMAP 加密")} value={f.transport.imapSecure ? 'ssl' : 'starttls'} onChange={event => setT('imapSecure', event.target.value === 'ssl')} options={[{ value: 'ssl', label: 'SSL/TLS' }, { value: 'starttls', label: 'STARTTLS' }]} /></span></Field>
+      <Field label={uiText("发信服务器（SMTP）")} required><TextInput aria-label={uiText("SMTP 服务器")} value={f.transport.smtpHost} onChange={event => setT('smtpHost', event.target.value)} placeholder="smtp.company.com" /></Field>
+      <Field label={uiText("SMTP 端口与加密")}><span style={PORT_ROW}><TextInput aria-label={uiText("SMTP 端口")} type="number" value={String(f.transport.smtpPort)} onChange={event => setT('smtpPort', Number(event.target.value))} /><Select aria-label={uiText("SMTP 加密")} value={f.transport.smtpSecure ? 'ssl' : 'starttls'} onChange={event => setT('smtpSecure', event.target.value === 'ssl')} options={[{ value: 'starttls', label: 'STARTTLS' }, { value: 'ssl', label: 'SSL/TLS' }]} /></span></Field>
+      <Field label={uiText("登录用户名")} hint={uiText("留空则使用邮箱地址")}><TextInput aria-label={uiText("登录用户名")} value={f.transport.username} onChange={event => setT('username', event.target.value)} autoComplete="off" /></Field>
+      <Field label={uiText(editing.id ? '密码 / 授权码（重新绑定时填写）' : '密码 / 授权码')} required={!editing.id} hint={uiText("保存时先真实登录收信与发信服务器，成功后才保存；不会回显")}><TextInput aria-label={uiText("密码或授权码")} type="password" value={f.password} onChange={event => set('password', event.target.value)} autoComplete="new-password" /></Field>
+      <Field label={uiText("签名")} full><TextArea aria-label={uiText("签名")} rows={3} value={f.signature} onChange={event => set('signature', event.target.value)} /></Field>
     </FormGrid>
     : state.email.accounts.length ? <div className="mist-col" style={{ gap: 12 }}>{state.email.accounts.map(a => {
       const c = connectionLabel(a), owner = !a.example && (!me || a.ownerId === me);
       return <Card key={a.id} className="mist-col" style={{ gap: 8 }} data-email-account={a.id}>
-        <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{a.displayName}</b><small className="mist-muted">{a.address}</small><span className="mist-spacer" /><Pill>{a.kind === 'shared' ? '共享邮箱' : '个人邮箱'}</Pill><Pill tone={c.tone}>{c.label}</Pill></div>
+        <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{a.displayName}</b><small className="mist-muted">{a.address}</small><span className="mist-spacer" /><Pill>{uiText(a.kind === 'shared' ? '共享邮箱' : '个人邮箱')}</Pill><Pill tone={c.tone}>{uiText(c.label)}</Pill></div>
         {a.lastError && <span className="mist-note" data-tone="bad">{a.lastError.message}（{when(a.lastError.at)}）</span>}
         {(a.folders || []).filter(row => row.error).map(row => <span key={row.remote} className="mist-note">{row.remote}：{row.error}</span>)}
-        <small className="mist-muted">{a.example ? '演示公司合成数据，不连接服务器' : `接入人 ${a.ownerName}${a.kind === 'shared' ? ` · 成员 ${a.memberNames.join('、') || '无'}` : ''}${a.transport ? ` · ${a.transport.imapHost}:${a.transport.imapPort} / ${a.transport.smtpHost}:${a.transport.smtpPort}` : ''}`}</small>
+        <small className="mist-muted">{uiText(a.example ? '演示公司合成数据，不连接服务器' : `接入人 ${a.ownerName}${a.kind === 'shared' ? ` · 成员 ${a.memberNames.join('、') || '无'}` : ''}${a.transport ? ` · ${a.transport.imapHost}:${a.transport.imapPort} / ${a.transport.smtpHost}:${a.transport.smtpPort}` : ''}`)}</small>
         {owner && can && (binding?.id === a.id
-          ? <div className="mist-row" style={{ flexWrap: 'wrap' }}><TextInput aria-label={`${a.displayName} 密码或授权码`} type="password" autoComplete="new-password" value={binding.password} onChange={event => setBinding({ id: a.id, password: event.target.value })} /><Button onClick={() => setBinding(null)}>取消</Button><Button variant="primary" disabled={locked || !binding.password} onClick={() => void attempt(() => mail({ kind: 'bind', accountId: a.id, password: binding.password }), '凭据验证通过，已绑定').then(ok => { if (ok) setBinding(null); })}>验证并绑定</Button></div>
+          ? <div className="mist-row" style={{ flexWrap: 'wrap' }}><TextInput aria-label={ui`${a.displayName} 密码或授权码`} type="password" autoComplete="new-password" value={binding.password} onChange={event => setBinding({ id: a.id, password: event.target.value })} /><Button onClick={() => setBinding(null)}>{uiText("取消")}</Button><Button variant="primary" disabled={locked || !binding.password} onClick={() => void attempt(() => mail({ kind: 'bind', accountId: a.id, password: binding.password }), '凭据验证通过，已绑定').then(ok => { if (ok) setBinding(null); })}>{uiText("验证并绑定")}</Button></div>
           : <div className="mist-row" style={{ flexWrap: 'wrap' }}>
-            <Button size="sm" icon={Settings2} disabled={locked} onClick={() => { setProblem(''); setEditing({ id: a.id, form: accountForm(a) }); }}>修改设置</Button>
-            <Button size="sm" icon={KeyRound} disabled={locked || !a.transport} onClick={() => setBinding({ id: a.id, password: '' })}>{a.credentialSet ? '重新绑定凭据' : '绑定凭据'}</Button>
-            {a.credentialSet && <Button size="sm" icon={Unlink} disabled={locked} onClick={() => void attempt(() => mail({ kind: 'disconnect', accountId: a.id }), '已断开，凭据已删除')}>断开</Button>}
+            <Button size="sm" icon={Settings2} disabled={locked} onClick={() => { setProblem(''); setEditing({ id: a.id, form: accountForm(a) }); }}>{uiText("修改设置")}</Button>
+            <Button size="sm" icon={KeyRound} disabled={locked || !a.transport} onClick={() => setBinding({ id: a.id, password: '' })}>{uiText(a.credentialSet ? '重新绑定凭据' : '绑定凭据')}</Button>
+            {a.credentialSet && <Button size="sm" icon={Unlink} disabled={locked} onClick={() => void attempt(() => mail({ kind: 'disconnect', accountId: a.id }), '已断开，凭据已删除')}>{uiText("断开")}</Button>}
           </div>)}
-        {!owner && !a.example && <span className="mist-note">由 {a.ownerName} 接入；只有接入人可以修改设置或凭据。</span>}
+        {!owner && !a.example && <span className="mist-note">{uiText("由 ")}{a.ownerName}{uiText(" 接入；只有接入人可以修改设置或凭据。")}</span>}
       </Card>; })}</div>
-    : <EmptyState icon={Mail} title="还没有邮箱" description={can ? '接入个人邮箱后可以真实收发邮件。' : '你的账号没有邮件编辑权限，不能接入邮箱。'} compact />}
+    : <EmptyState icon={Mail} title={uiText("还没有邮箱")} description={uiText(can ? '接入个人邮箱后可以真实收发邮件。' : '你的账号没有邮件编辑权限，不能接入邮箱。')} compact />}
   </Drawer>;
 }
 
 function FollowUpDialog({ message: m, owner: initialOwner, locked, onClose, onSubmit }: { message: EmailMessage; owner: string; locked: boolean; onClose: () => void; onSubmit: (owner: string, due: string, note: string) => Promise<void> }) {
   const [owner, setOwner] = React.useState(initialOwner), [due, setDue] = React.useState(todayIso()), [note, setNote] = React.useState('');
-  return <Dialog open onClose={onClose} title="生成跟进" description={`为「${m.subject}」建立待办，同时写入日历。`} icon={CalendarPlus}
-    footer={<><Button onClick={onClose}>取消</Button><Button variant="primary" disabled={locked || !owner.trim() || !due} onClick={() => void onSubmit(owner.trim(), due, note.trim())}>生成跟进</Button></>}>
+  return <Dialog open onClose={onClose} title={uiText("生成跟进")} description={ui`为「${m.subject}」建立待办，同时写入日历。`} icon={CalendarPlus}
+    footer={<><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={locked || !owner.trim() || !due} onClick={() => void onSubmit(owner.trim(), due, note.trim())}>{uiText("生成跟进")}</Button></>}>
     <FormGrid cols={1}>
-      <Field label="负责人" required><TextInput aria-label="负责人" value={owner} onChange={event => setOwner(event.target.value)} /></Field>
-      <Field label="截止日" required><TextInput aria-label="截止日" type="date" value={due} onChange={event => setDue(event.target.value)} /></Field>
-      <Field label="说明"><TextArea aria-label="跟进说明" value={note} onChange={event => setNote(event.target.value)} placeholder="例如：确认三轮样寄出日期" /></Field>
+      <Field label={uiText("负责人")} required><TextInput aria-label={uiText("负责人")} value={owner} onChange={event => setOwner(event.target.value)} /></Field>
+      <Field label={uiText("截止日")} required><TextInput aria-label={uiText("截止日")} type="date" value={due} onChange={event => setDue(event.target.value)} /></Field>
+      <Field label={uiText("说明")}><TextArea aria-label={uiText("跟进说明")} value={note} onChange={event => setNote(event.target.value)} placeholder={uiText("例如：确认三轮样寄出日期")} /></Field>
     </FormGrid>
   </Dialog>;
 }
@@ -659,14 +657,14 @@ function SendConfirmDialog({ pending, state, locked, onCancel, onConfirm }: { pe
   const files = v.fileIds.map(id => state.files.find(file => file.id === id)).filter((file): file is NonNullable<typeof file> => !!file);
   const groups = ([['收件人', v.to], ['抄送', v.cc], ['密送', v.bcc]] as const).map(([label, value]) => [label, parseAddresses(value)] as const).filter(([, list]) => list.length);
   const total = groups.reduce((sum, [, list]) => sum + list.length, 0), size = files.reduce((sum, file) => sum + (file.size || 0), 0);
-  return <Dialog open onClose={onCancel} title="确认发送" icon={Send} width={560} description={`「${v.subject || '（无主题）'}」将由发件服务器投递给 ${total} 位收件人。发出后无法撤回。`}
-    footer={<><Button onClick={onCancel}>取消</Button><Button variant="primary" icon={Send} disabled={locked} onClick={onConfirm}>确认发送</Button></>}>
+  return <Dialog open onClose={onCancel} title={uiText("确认发送")} icon={Send} width={560} description={ui`「${v.subject || '（无主题）'}」将由发件服务器投递给 ${total} 位收件人。发出后无法撤回。`}
+    footer={<><Button onClick={onCancel}>{uiText("取消")}</Button><Button variant="primary" icon={Send} disabled={locked} onClick={onConfirm}>{uiText("确认发送")}</Button></>}>
     <Facts items={[
       { label: '发件邮箱', value: account ? `${account.displayName} · ${account.address}` : '邮箱不可用' },
       { label: '发件身份', value: v.from },
       ...groups.map(([label, list]) => ({ label: `${label}（${list.length}）`, value: list.join('、') })),
       { label: `附件（${files.length}）`, value: files.length ? `${files.map(file => `${file.name}（${sizeText(file.size || 0)}）`).join('、')}，共 ${sizeText(size)}` : '无附件' },
     ]} />
-    <p className="mist-note" style={{ marginTop: 10 }}>结果不确定时邮件会留在待发送，不会自动重发；取消不会发送，写信内容与草稿保持不变。</p>
+    <p className="mist-note" style={{ marginTop: 10 }}>{uiText("结果不确定时邮件会留在待发送，不会自动重发；取消不会发送，写信内容与草稿保持不变。")}</p>
   </Dialog>;
 }

@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowDown, ArrowUp, ChevronsUpDown } from 'lucide-react';
@@ -84,18 +85,18 @@ export function DataTable<T>({ columns, rows, rowKey, selectedKey, onRowClick, o
   }, [rows, sort, columns]);
   const style = { ['--mist-cols' as string]: cols } as React.CSSProperties;
   const body = (
-    <div ref={tableRef} className="mist-table" role="table" aria-label={ariaLabel} style={style}>
+    <div ref={tableRef} className="mist-table" role="table" aria-label={uiText(ariaLabel)} style={style}>
       <div className="mist-thead" role="row">
         {columns.map((c, ci) => c.sortValue
           ? <button key={c.key} type="button" role="columnheader" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci}
               onClick={() => setSort(s => s?.key === c.key ? (s.dir === 1 ? { key: c.key, dir: -1 } : null) : { key: c.key, dir: 1 })}>
-              {c.header}<Icon icon={sort?.key === c.key ? (sort.dir === 1 ? ArrowUp : ArrowDown) : ChevronsUpDown} size="xs" />
+              {uiText(c.header)}<Icon icon={sort?.key === c.key ? (sort.dir === 1 ? ArrowUp : ArrowDown) : ChevronsUpDown} size="xs" />
             </button>
-          : <span key={c.key} role="columnheader" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci}>{c.header}</span>)}
+          : <span key={c.key} role="columnheader" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci}>{uiText(c.header)}</span>)}
       </div>
       {loading ? Array.from({ length: 4 }, (_, i) => (
         <div key={i} className="mist-tr" role="row">{columns.map((c, ci) => <span key={c.key} data-hide-sm={c.hideOnMobile || undefined} data-col={ci}><span className="mist-skel" style={{ width: '70%' }} /></span>)}</div>
-      )) : sorted.length === 0 ? (empty ?? <EmptyState title="暂无数据" compact />) : sorted.map((r, i) => {
+      )) : sorted.length === 0 ? (empty ?? <EmptyState title={uiText("暂无数据")} compact />) : sorted.map((r, i) => {
         const k = rowKey(r);
         return (
           <div key={k} className="mist-tr" role="row" data-density={density === 'default' ? undefined : density}
@@ -104,7 +105,7 @@ export function DataTable<T>({ columns, rows, rowKey, selectedKey, onRowClick, o
             onClick={onRowClick ? () => onRowClick(r) : undefined}
             onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(r) : undefined}
             onKeyDown={onRowClick ? e => { if (e.key === 'Enter') (onRowDoubleClick ?? onRowClick)(r); } : undefined}>
-            {columns.map((c, ci) => <div key={c.key} role="cell" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci} style={{ minWidth: 0 }}>{c.render(r, i)}</div>)}
+            {columns.map((c, ci) => <div key={c.key} role="cell" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci} style={{ minWidth: 0 }}>{uiText(c.render(r, i))}</div>)}
           </div>
         );
       })}
@@ -157,14 +158,14 @@ export type StatCardProps = { icon: LucideIcon; label: React.ReactNode; value: R
 export function StatCard({ icon, label, value, unit, delta, foot, spark, onClick }: StatCardProps) {
   return (
     <CardButton className="mist-stat" onClick={onClick}>
-      <div className="mist-stat-top"><Tile icon={icon} size="sm" />{label}{delta && <span className="mist-stat-delta" data-dir={delta.dir}>{delta.text}</span>}</div>
-      <div className="mist-stat-v">{value}{unit && <small>{unit}</small>}</div>
-      <div className="mist-stat-foot"><span>{foot}</span>{spark && <Sparkline points={spark} />}</div>
+      <div className="mist-stat-top"><Tile icon={icon} size="sm" />{uiText(label)}{delta && <span className="mist-stat-delta" data-dir={delta.dir}>{delta.text}</span>}</div>
+      <div className="mist-stat-v">{value}{unit && <small>{uiText(unit)}</small>}</div>
+      <div className="mist-stat-foot"><span>{uiText(foot)}</span>{spark && <Sparkline points={spark} />}</div>
     </CardButton>
   );
 }
 export function StatGrid({ cols = 4, children }: { cols?: number; children: React.ReactNode }) {
-  return <section className="mist-stats" style={{ ['--mist-stat-cols' as string]: cols }}>{children}</section>;
+  return <section className="mist-stats" style={{ ['--mist-stat-cols' as string]: cols }}>{uiText(children)}</section>;
 }
 
 /* ───────────── Pipeline (阶段筛选) ───────────── */
@@ -173,7 +174,7 @@ export type PipelineItem<V extends string | number> = { value: V; label: React.R
 export function Pipeline<V extends string | number>({ items, value, onChange }: { items: PipelineItem<V>[]; value: V; onChange: (v: V) => void }) {
   return (
     <div className="mist-pipeline" style={{ ['--mist-pipe-cols' as string]: items.length }}>
-      {items.map(it => <button key={String(it.value)} type="button" aria-pressed={it.value === value} onClick={() => onChange(it.value)}><small><i style={{ background: it.color }} />{it.label}</small><b>{it.count}</b></button>)}
+      {items.map(it => <button key={String(it.value)} type="button" aria-pressed={it.value === value} onClick={() => onChange(it.value)}><small><i style={{ background: it.color }} />{uiText(it.label)}</small><b>{it.count}</b></button>)}
     </div>
   );
 }
@@ -187,7 +188,7 @@ export function Donut({ slices, centerLabel, caption }: { slices: DonutSlice[]; 
   const main = Math.round((slices[0]?.value || 0) / total * 100);
   return (
     <div className="mist-donut">
-      <svg viewBox="0 0 42 42" role="img" aria-label={`${centerLabel ?? ''} ${main}%`}>
+      <svg viewBox="0 0 42 42" role="img" aria-label={uiText(`${centerLabel ?? ''} ${main}%`)}>
         <circle cx="21" cy="21" r="15.9" fill="none" stroke="var(--mist-sunken)" strokeWidth="5" />
         {slices.map((s, i) => {
           const pct = s.value / total * 100;
@@ -199,8 +200,8 @@ export function Donut({ slices, centerLabel, caption }: { slices: DonutSlice[]; 
         {centerLabel && <text x="21" y="28" textAnchor="middle" fontSize="2.8" fill="var(--mist-ink-3)">{centerLabel}</text>}
       </svg>
       <div className="mist-legend">
-        {slices.map((s, i) => <div key={i}><i style={{ background: s.color === 'transparent' ? 'var(--mist-fill-2)' : s.color }} />{s.label}<b>{s.display ?? s.value.toLocaleString()}</b></div>)}
-        {caption && <div className="mist-muted" style={{ fontSize: 12 }}>{caption}</div>}
+        {slices.map((s, i) => <div key={i}><i style={{ background: s.color === 'transparent' ? 'var(--mist-fill-2)' : s.color }} />{uiText(s.label)}<b>{s.display ?? s.value.toLocaleString()}</b></div>)}
+        {caption && <div className="mist-muted" style={{ fontSize: 12 }}>{uiText(caption)}</div>}
       </div>
     </div>
   );

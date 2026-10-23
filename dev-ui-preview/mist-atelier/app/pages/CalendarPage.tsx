@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 import React from 'react';
 import { ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
@@ -67,33 +69,33 @@ export function CalendarPage() {
   };
   const retry = async () => {if(locked.current)return;const bound=scopeKey;setFailure('');try{await refresh();}catch(cause){if(live.current&&scope.current===bound)setFailure(String(cause));}};
   const resolve = async () => {if(locked.current||loading||saving)return;const original=pending,ticket=++sequence.current,owns=()=>live.current&&scope.current===scopeKey&&sequence.current===ticket;locked.current=true;setBusy(true);try{const receipt=await recover();if(receipt&&owns()){if(original?.command?.type==='calendar.save')setEditing(undefined);setFailure('');toast('原操作结果已核对');}}catch(cause){if(owns())setFailure(String(cause));}finally{if(owns()){locked.current=false;setBusy(false);}}};
-  const recovery=pending?<Button loading={busy||saving} onClick={()=>void resolve()}>核对原操作结果</Button>:null;
+  const recovery=pending?<Button loading={busy||saving} onClick={()=>void resolve()}>{uiText("核对原操作结果")}</Button>:null;
   return <MistPage>
-    <PageHeader eyebrow="我的事务 · 日历" title="日历" description="查看本周安排，记录日程并返回关联业务。" actions={<Button variant={activeEditing===undefined?'primary':'quiet'} icon={Plus} disabled={!state||loading||saving||!!pending||busy||activeEditing!==undefined} onClick={()=>open()}>新建日程</Button>} />
-    <Toolbar right={<Button icon={RefreshCw} loading={loading} disabled={busy||saving} onClick={()=>void retry()}>刷新</Button>}>
-      <Button icon={ChevronLeft} aria-label="上一周" onClick={()=>setSelected(date=>shiftDay(date,-7))}>上一周</Button>
-      <Button onClick={()=>setSelected(dayKey(businessNow()))}>今天</Button>
-      <Button iconRight={ChevronRight} aria-label="下一周" onClick={()=>setSelected(date=>shiftDay(date,7))}>下一周</Button>
+    <PageHeader eyebrow={uiText("我的事务 · 日历")} title={uiText("日历")} description={uiText("查看本周安排，记录日程并返回关联业务。")} actions={<Button variant={activeEditing===undefined?'primary':'quiet'} icon={Plus} disabled={!state||loading||saving||!!pending||busy||activeEditing!==undefined} onClick={()=>open()}>{uiText("新建日程")}</Button>} />
+    <Toolbar right={<Button icon={RefreshCw} loading={loading} disabled={busy||saving} onClick={()=>void retry()}>{uiText("刷新")}</Button>}>
+      <Button icon={ChevronLeft} aria-label={uiText("上一周")} onClick={()=>setSelected(date=>shiftDay(date,-7))}>{uiText("上一周")}</Button>
+      <Button onClick={()=>setSelected(dayKey(businessNow()))}>{uiText("今天")}</Button>
+      <Button iconRight={ChevronRight} aria-label={uiText("下一周")} onClick={()=>setSelected(date=>shiftDay(date,7))}>{uiText("下一周")}</Button>
     </Toolbar>
-    {(visibleFailure||error)&&<div className="mist-section"><Banner tone="bad" title="日程操作未完成" actions={<Button onClick={()=>void retry()}>重试读取</Button>}>{visibleFailure||error}</Banner></div>}
-    {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title="原操作结果尚待核对" actions={recovery}>核对原请求后再继续保存。</Banner></div>}
+    {(visibleFailure||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("日程操作未完成")} actions={<Button onClick={()=>void retry()}>{uiText("重试读取")}</Button>}>{visibleFailure||error}</Banner></div>}
+    {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("核对原请求后再继续保存。")}</Banner></div>}
     <Card>
-      <CardHeader title={parseDay(selected).toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'})} tools={<span className="mist-muted">{events.length} 项安排</span>} />
+      <CardHeader title={uiText(parseDay(selected).toLocaleDateString(interfaceLocale(),{year:'numeric',month:'long',day:'numeric',weekday:'long'}))} tools={<span className="mist-muted">{events.length}{uiText(" 项安排")}</span>} />
       <WeekStrip days={week} value={selected} onChange={setSelected} />
-      {loading?<div className="mist-card-body"><Skeleton height={56} /><Skeleton height={56} /></div>:events.length?<Agenda events={events.map(event=>({time:event.time,title:<TextLink disabled={activeEditing!==undefined||saving||!!pending} onClick={()=>open(event)}>{event.title}</TextLink>,meta:<><span>{event.note}</span>{event.target&&<TextLink iconRight={ArrowUpRight} onClick={()=>link(event.target!)}>打开关联业务</TextLink>}</>}))} />:<EmptyState icon={CalendarDays} title="当天暂无日程" description="可以添加会议、跟进或工作安排。" action={<Button disabled={!state||loading||saving||!!pending||activeEditing!==undefined} onClick={()=>open()}>添加日程</Button>} />}
+      {loading?<div className="mist-card-body"><Skeleton height={56} /><Skeleton height={56} /></div>:events.length?<Agenda events={events.map(event=>({time:event.time,title:<TextLink disabled={activeEditing!==undefined||saving||!!pending} onClick={()=>open(event)}>{event.title}</TextLink>,meta:<><span>{event.note}</span>{event.target&&<TextLink iconRight={ArrowUpRight} onClick={()=>link(event.target!)}>{uiText("打开关联业务")}</TextLink>}</>}))} />:<EmptyState icon={CalendarDays} title={uiText("当天暂无日程")} description={uiText("可以添加会议、跟进或工作安排。")} action={<Button disabled={!state||loading||saving||!!pending||activeEditing!==undefined} onClick={()=>open()}>{uiText("添加日程")}</Button>} />}
     </Card>
-    {activeEditing!==undefined&&<Card as="section" id="mist-calendar-editor" className="mist-section" aria-label={editing?'编辑日程':'新建日程'} data-calendar-editor>
-      <CardHeader title={editing?'编辑日程':'新建日程'} sub="日程保存到本公司。" />
+    {activeEditing!==undefined&&<Card as="section" id="mist-calendar-editor" className="mist-section" aria-label={uiText(editing?'编辑日程':'新建日程')} data-calendar-editor>
+      <CardHeader title={uiText(editing?'编辑日程':'新建日程')} sub={uiText("日程保存到本公司。")} />
       <form onSubmit={event=>{event.preventDefault();void save();}}><CardBody>
-      {visibleFailure&&<Banner tone="bad" title="日程未保存">{visibleFailure}</Banner>}
+      {visibleFailure&&<Banner tone="bad" title={uiText("日程未保存")}>{visibleFailure}</Banner>}
       <fieldset disabled={busy||saving||!!pending} style={{border:0,padding:0,margin:0}}><FormGrid>
-        <Field label="日程名称" required full><TextInput value={form.title} onChange={event=>setForm(previous=>({...previous,title:event.target.value}))} /></Field>
-        <Field label="日期" required><TextInput type="date" value={form.date} onChange={event=>setForm(previous=>({...previous,date:event.target.value}))} /></Field>
-        <Field label="时间" required><TextInput type="time" value={form.time} onChange={event=>setForm(previous=>({...previous,time:event.target.value}))} /></Field>
-        <Field label="关联业务" full><Select value={form.targetKey} onChange={event=>setForm(previous=>({...previous,targetKey:event.target.value}))} options={[{value:'',label:'不关联业务'},...(form.targetKey==='original'?[{value:'original',label:'保留原业务关联'}]:[]),...targets.map(({value,label})=>({value,label}))]} /></Field>
-        <Field label="安排说明" full><TextArea value={form.note} onChange={event=>setForm(previous=>({...previous,note:event.target.value}))} /></Field>
+        <Field label={uiText("日程名称")} required full><TextInput value={form.title} onChange={event=>setForm(previous=>({...previous,title:event.target.value}))} /></Field>
+        <Field label={uiText("日期")} required><TextInput type="date" value={form.date} onChange={event=>setForm(previous=>({...previous,date:event.target.value}))} /></Field>
+        <Field label={uiText("时间")} required><TextInput type="time" value={form.time} onChange={event=>setForm(previous=>({...previous,time:event.target.value}))} /></Field>
+        <Field label={uiText("关联业务")} full><Select value={form.targetKey} onChange={event=>setForm(previous=>({...previous,targetKey:event.target.value}))} options={[{value:'',label:'不关联业务'},...(form.targetKey==='original'?[{value:'original',label:'保留原业务关联'}]:[]),...targets.map(({value,label})=>({value,label}))]} /></Field>
+        <Field label={uiText("安排说明")} full><TextArea value={form.note} onChange={event=>setForm(previous=>({...previous,note:event.target.value}))} /></Field>
       </FormGrid></fieldset>
-      </CardBody><CardFooter>{recovery}<span className="mist-spacer" /><Button variant="quiet" disabled={busy} onClick={()=>setEditing(undefined)}>取消</Button><Button type="submit" variant="primary" loading={busy} disabled={!state||loading||saving||!!pending}>保存日程</Button></CardFooter></form>
+      </CardBody><CardFooter>{recovery}<span className="mist-spacer" /><Button variant="quiet" disabled={busy} onClick={()=>setEditing(undefined)}>{uiText("取消")}</Button><Button type="submit" variant="primary" loading={busy} disabled={!state||loading||saving||!!pending}>{uiText("保存日程")}</Button></CardFooter></form>
     </Card>}
   </MistPage>;
 }

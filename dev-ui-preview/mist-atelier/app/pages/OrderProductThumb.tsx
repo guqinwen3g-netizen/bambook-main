@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import type {MistOrderLine, MistState} from '../../../../server/src/shared/mistWorkspace';
 import type {MarketProduct} from '../../../../server/src/shared/mistMarket';
@@ -17,5 +18,5 @@ export function OrderProductThumb({line,orderId,category}:{line?:MistOrderLine;o
  const {state}=useMistWorkspace();
  const lines=line?[line]:(state?.orderLines.filter(item=>item.orderId===orderId)??[]);
  const product=state?lines.map(item=>orderLineProduct(state,item,category)).find(Boolean):undefined;
- return product?<ProductThumb product={product}/>:<span className="mist-product-thumb" data-category={category} aria-label={PRODUCT_CATEGORY_LABEL[category]+'暂无图片'}>{PRODUCT_CATEGORY_LABEL[category]}</span>;
+ return product?<ProductThumb product={product}/>:<span className="mist-product-thumb" data-category={category} aria-label={uiText(PRODUCT_CATEGORY_LABEL[category]+'暂无图片')}>{uiText(PRODUCT_CATEGORY_LABEL[category])}</span>;
 }

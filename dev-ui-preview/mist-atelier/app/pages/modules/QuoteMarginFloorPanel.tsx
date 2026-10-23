@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** BB-QUO-3 定价参数 · 报价底价线：按板块设置最低毛利率（带版本与生效日），仅管理层可改；报价保存时冻结适用版本。 */
 import React from 'react';
@@ -39,20 +40,20 @@ export function QuoteMarginFloorPanel() {
     { key: 'by', header: '设置人 / 时间', hideOnMobile: true, render: r => `${r.createdBy || '—'} · ${r.createdAt.slice(0, 16).replace('T', ' ')}` },
   ];
   return <div className="mist-col" data-margin-floors>
-    <Banner title="报价底价线">条目毛利率 =（单价 − 成本）/ 单价。低于所在板块的最低毛利率即“须审批”，与“低于成本 / 成本未核实”并存。报价保存时冻结当时适用的版本，之后修改参数不影响已保存报价。</Banner>
+    <Banner title={uiText("报价底价线")}>{uiText("条目毛利率 =（单价 − 成本）/ 单价。低于所在板块的最低毛利率即“须审批”，与“低于成本 / 成本未核实”并存。报价保存时冻结当时适用的版本，之后修改参数不影响已保存报价。")}</Banner>
     <section className="mist-grid">{FAMILIES.map(f => { const cur = applicableMarginFloor(floors, f, today), next = floors.filter(x => x.family === f && x.effectiveFrom > today).sort((a, b) => a.effectiveFrom.localeCompare(b.effectiveFrom))[0];
-      return <Card key={f} className="mist-col-6"><CardHeader title={`${MARGIN_FLOOR_FAMILY_LABEL[f]} · 当前适用`} sub={cur ? `V${cur.version}，${cur.effectiveFrom} 起生效` : '尚未设置：不按底价线判断'} /><div className="mist-card-body"><span className="mist-h2 mist-num" data-floor-current={f}>{cur ? cur.minMarginPercent + '%' : '未设置'}</span>{next && <p className="mist-sub">待生效：V{next.version} {next.minMarginPercent}%（{next.effectiveFrom} 起）</p>}</div></Card>; })}</section>
-    <Card><CardHeader title="设置最低毛利率" sub="新增一个版本，不改写旧版本；改动留痕。" /><div className="mist-card-body mist-col">
-      {!canAdmin && <Banner tone="warn" title="只读">仅管理层（定价管理权限）可修改最低毛利率；你可以查看当前参数与版本记录。</Banner>}
-      {error && <Banner tone="bad" title="未能保存">{error}</Banner>}
+      return <Card key={f} className="mist-col-6"><CardHeader title={ui`${MARGIN_FLOOR_FAMILY_LABEL[f]} · 当前适用`} sub={uiText(cur ? `V${cur.version}，${cur.effectiveFrom} 起生效` : '尚未设置：不按底价线判断')} /><div className="mist-card-body"><span className="mist-h2 mist-num" data-floor-current={f}>{uiText(cur ? cur.minMarginPercent + '%' : '未设置')}</span>{next && <p className="mist-sub">{uiText("待生效：V")}{next.version} {next.minMarginPercent}%（{next.effectiveFrom}{uiText(" 起）")}</p>}</div></Card>; })}</section>
+    <Card><CardHeader title={uiText("设置最低毛利率")} sub={uiText("新增一个版本，不改写旧版本；改动留痕。")} /><div className="mist-card-body mist-col">
+      {!canAdmin && <Banner tone="warn" title={uiText("只读")}>{uiText("仅管理层（定价管理权限）可修改最低毛利率；你可以查看当前参数与版本记录。")}</Banner>}
+      {error && <Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
       <FormGrid>
-        <Field label="板块" required><Select aria-label="底价线板块" value={input.family} disabled={!canAdmin} options={FAMILIES.map(f => ({ value: f, label: MARGIN_FLOOR_FAMILY_LABEL[f] }))} onChange={e => setInput({ ...input, family: e.target.value as MarginFloorFamily })} /></Field>
-        <Field label="最低毛利率（%）" required hint="0–99.99，最多两位小数"><TextInput aria-label="最低毛利率" inputMode="decimal" value={input.minMarginPercent} disabled={!canAdmin} onChange={e => setInput({ ...input, minMarginPercent: e.target.value })} /></Field>
-        <Field label="生效日" required hint="不能早于今天，不追溯"><TextInput aria-label="底价线生效日" type="date" value={input.effectiveFrom} disabled={!canAdmin} onChange={e => setInput({ ...input, effectiveFrom: e.target.value })} /></Field>
-        <Field label="调整原因" required full><TextArea aria-label="底价线调整原因" value={input.reason} disabled={!canAdmin} onChange={e => setInput({ ...input, reason: e.target.value })} /></Field>
+        <Field label={uiText("板块")} required><Select aria-label={uiText("底价线板块")} value={input.family} disabled={!canAdmin} options={FAMILIES.map(f => ({ value: f, label: MARGIN_FLOOR_FAMILY_LABEL[f] }))} onChange={e => setInput({ ...input, family: e.target.value as MarginFloorFamily })} /></Field>
+        <Field label={uiText("最低毛利率（%）")} required hint={uiText("0–99.99，最多两位小数")}><TextInput aria-label={uiText("最低毛利率")} inputMode="decimal" value={input.minMarginPercent} disabled={!canAdmin} onChange={e => setInput({ ...input, minMarginPercent: e.target.value })} /></Field>
+        <Field label={uiText("生效日")} required hint={uiText("不能早于今天，不追溯")}><TextInput aria-label={uiText("底价线生效日")} type="date" value={input.effectiveFrom} disabled={!canAdmin} onChange={e => setInput({ ...input, effectiveFrom: e.target.value })} /></Field>
+        <Field label={uiText("调整原因")} required full><TextArea aria-label={uiText("底价线调整原因")} value={input.reason} disabled={!canAdmin} onChange={e => setInput({ ...input, reason: e.target.value })} /></Field>
       </FormGrid>
-      <div className="mist-row"><span className="mist-note" data-floor-reason>{blocked || '保存后，新保存的报价按此版本判断'}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={!!blocked} title={blocked || undefined} onClick={() => void save()}>保存新版本</Button></div>
+      <div className="mist-row"><span className="mist-note" data-floor-reason>{blocked || '保存后，新保存的报价按此版本判断'}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={!!blocked} title={uiText(blocked || undefined)} onClick={() => void save()}>{uiText("保存新版本")}</Button></div>
     </div></Card>
-    <Card><CardHeader title="版本记录" sub={`${floors.length} 个版本`} /><DataTable ariaLabel="最低毛利率版本记录" rowKey={r => r.id} rows={[...floors].sort((a, b) => a.family.localeCompare(b.family) || b.version - a.version)} columns={cols} empty="尚未设置最低毛利率" /></Card>
+    <Card><CardHeader title={uiText("版本记录")} sub={ui`${floors.length} 个版本`} /><DataTable ariaLabel={uiText("最低毛利率版本记录")} rowKey={r => r.id} rows={[...floors].sort((a, b) => a.family.localeCompare(b.family) || b.version - a.version)} columns={cols} empty="尚未设置最低毛利率" /></Card>
   </div>;
 }

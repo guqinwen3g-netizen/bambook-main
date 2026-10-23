@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 设置 · 安全：修改当前账号登录密码（服务器 /auth/change-password 校验当前密码）；管理员重置密码后的强制改密页。 */
 import React from 'react';
 import { KeyRound, LogOut, MonitorSmartphone } from 'lucide-react';
@@ -31,9 +32,9 @@ function usePasswordForm(onDone: () => void | Promise<void>, currentLabel = '当
     finally { setBusy(false); }
   };
   const fields = <form onSubmit={e => { e.preventDefault(); void submit(); }}><FormGrid>
-    <Field label={currentLabel} required full><TextInput type="password" autoComplete="current-password" value={current} disabled={busy} onChange={e => setCurrent(e.target.value)} /></Field>
-    <Field label="新密码" required hint={`至少 ${MIN} 位`}><TextInput type="password" autoComplete="new-password" value={next} disabled={busy} onChange={e => setNext(e.target.value)} /></Field>
-    <Field label="确认新密码" required><TextInput type="password" autoComplete="new-password" value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)} /></Field>
+    <Field label={uiText(currentLabel)} required full><TextInput type="password" autoComplete="current-password" value={current} disabled={busy} onChange={e => setCurrent(e.target.value)} /></Field>
+    <Field label={uiText("新密码")} required hint={ui`至少 ${MIN} 位`}><TextInput type="password" autoComplete="new-password" value={next} disabled={busy} onChange={e => setNext(e.target.value)} /></Field>
+    <Field label={uiText("确认新密码")} required><TextInput type="password" autoComplete="new-password" value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)} /></Field>
   </FormGrid></form>;
   return { busy, error, reset, submit, fields };
 }
@@ -42,12 +43,12 @@ function usePasswordForm(onDone: () => void | Promise<void>, currentLabel = '当
 export function ForcedPasswordChangePage() {
   const session = useMistSession(), toast = useToast();
   const form = usePasswordForm(async () => { toast('登录密码已修改'); await session.refresh(); }, '临时密码');
-  return <MistPage width="narrow"><Card><CardHeader title="请先修改登录密码" sub={session.user?.email} />
+  return <MistPage width="narrow"><Card><CardHeader title={uiText("请先修改登录密码")} sub={uiText(session.user?.email)} />
     <div className="mist-card-body">
-      <p>管理员为你重置了密码。为保护账号安全，请用收到的临时密码设置一个只有你知道的新密码，再继续使用系统。</p>
-      {form.error && <Banner tone="bad" title="未修改">{form.error}</Banner>}
+      <p>{uiText("管理员为你重置了密码。为保护账号安全，请用收到的临时密码设置一个只有你知道的新密码，再继续使用系统。")}</p>
+      {form.error && <Banner tone="bad" title={uiText("未修改")}>{form.error}</Banner>}
       {form.fields}
-      <div className="mist-row"><Button variant="primary" loading={form.busy} onClick={() => void form.submit()}>修改并继续</Button><Button icon={LogOut} disabled={form.busy} onClick={() => void session.logout()}>退出登录</Button></div>
+      <div className="mist-row"><Button variant="primary" loading={form.busy} onClick={() => void form.submit()}>{uiText("修改并继续")}</Button><Button icon={LogOut} disabled={form.busy} onClick={() => void session.logout()}>{uiText("退出登录")}</Button></div>
     </div>
   </Card></MistPage>;
 }
@@ -57,10 +58,10 @@ export function ChangePasswordRow() {
   const [open, setOpen] = React.useState(false);
   const { busy, error, reset, submit, fields } = usePasswordForm(async () => { toast('登录密码已修改，其他设备已退出登录'); setOpen(false); if (session.user?.mustChangePassword) await session.refresh(); });
   return <>
-    <SettingRow title="登录密码" description="修改当前账号的登录密码；管理员重置给你的临时密码请尽快在这里改掉。" control={<Button size="sm" icon={KeyRound} onClick={() => { reset(); setOpen(true); }}>修改密码</Button>} />
-    <Dialog open={open} onClose={() => !busy && setOpen(false)} title="修改登录密码" description="需要先验证当前密码；修改后其他设备上的登录会自动退出，当前设备保持登录。"
-      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>确认修改</Button><Button disabled={busy} onClick={() => setOpen(false)}>取消</Button></div>}>
-      {error && <Banner tone="bad" title="未修改">{error}</Banner>}
+    <SettingRow title={uiText("登录密码")} description={uiText("修改当前账号的登录密码；管理员重置给你的临时密码请尽快在这里改掉。")} control={<Button size="sm" icon={KeyRound} onClick={() => { reset(); setOpen(true); }}>{uiText("修改密码")}</Button>} />
+    <Dialog open={open} onClose={() => !busy && setOpen(false)} title={uiText("修改登录密码")} description={uiText("需要先验证当前密码；修改后其他设备上的登录会自动退出，当前设备保持登录。")}
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>{uiText("确认修改")}</Button><Button disabled={busy} onClick={() => setOpen(false)}>{uiText("取消")}</Button></div>}>
+      {error && <Banner tone="bad" title={uiText("未修改")}>{uiText(error)}</Banner>}
       {fields}
     </Dialog>
   </>;
@@ -78,10 +79,10 @@ export function LogoutAllRow() {
     finally { setBusy(false); }
   };
   return <>
-    <SettingRow title="退出所有设备" description="电脑、手机等所有已登录的会话立即失效，包括当前这台；之后需要重新登录。" control={<Button size="sm" icon={MonitorSmartphone} onClick={() => { setError(''); setOpen(true); }}>退出所有设备</Button>} />
-    <Dialog open={open} onClose={() => !busy && setOpen(false)} tone="bad" title="退出所有设备" description="确认后所有设备上的登录立即失效，当前设备也会回到登录页。如怀疑密码外泄，请重新登录后立即修改密码。"
-      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>确认退出</Button><Button disabled={busy} onClick={() => setOpen(false)}>取消</Button></div>}>
-      {error && <Banner tone="bad" title="未完成">{error}</Banner>}
+    <SettingRow title={uiText("退出所有设备")} description={uiText("电脑、手机等所有已登录的会话立即失效，包括当前这台；之后需要重新登录。")} control={<Button size="sm" icon={MonitorSmartphone} onClick={() => { setError(''); setOpen(true); }}>{uiText("退出所有设备")}</Button>} />
+    <Dialog open={open} onClose={() => !busy && setOpen(false)} tone="bad" title={uiText("退出所有设备")} description={uiText("确认后所有设备上的登录立即失效，当前设备也会回到登录页。如怀疑密码外泄，请重新登录后立即修改密码。")}
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>{uiText("确认退出")}</Button><Button disabled={busy} onClick={() => setOpen(false)}>{uiText("取消")}</Button></div>}>
+      {error && <Banner tone="bad" title={uiText("未完成")}>{uiText(error)}</Banner>}
     </Dialog>
   </>;
 }

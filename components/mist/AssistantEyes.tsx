@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 /* Adapted from Bencho Watcher, https://bencho.dev/blocks/eye-tracker.
  * Copyright (c) 2026 Lorenzo Cabra
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -31,7 +32,7 @@ export function AssistantEyesMotionProvider({ frame, fps = 30, gaze, cursorSelec
   frame: number; fps?: number; gaze?: Gaze; cursorSelector?: string; interactive?: boolean; children: React.ReactNode;
 }) {
   const value = React.useMemo(() => interactive ? null : ({ frame, fps, gaze, cursorSelector }), [frame, fps, gaze, cursorSelector, interactive]);
-  return <MotionContext.Provider value={value}>{children}</MotionContext.Provider>;
+  return <MotionContext.Provider value={value}>{uiText(children)}</MotionContext.Provider>;
 }
 
 function pose(x: number, y: number, lid: number, side: number) {
@@ -194,6 +195,6 @@ export const AssistantEyes = React.forwardRef<SVGSVGElement, LucideProps>(functi
       </g>;
     })}
     </g>
-    {children}
+    {uiText(children)}
   </svg>;
 });

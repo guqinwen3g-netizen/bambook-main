@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** T10 local company settings. Saves exclusively through the active Mist workspace. */
 import React from 'react';
 import { Building2, FolderOpen, Landmark, Laptop, RefreshCw, Sparkles } from 'lucide-react';
@@ -113,13 +114,13 @@ export function LocalAdminPanel() {
     catch(failure){if(mounted.current&&currentScope.current===boundScope)setError(failure instanceof Error?failure.message:'原请求核对失败');}
   };
 
-  if (!localMode) return <MistPage><PageHeader title="管理后台" /><Card><EmptyState title="此资料页仅用于本机演示公司" description="当前会话使用服务器账号，请打开对应的服务器管理设置。" /></Card></MistPage>;
+  if (!localMode) return <MistPage><PageHeader title={uiText("管理后台")} /><Card><EmptyState title={uiText("此资料页仅用于本机演示公司")} description={uiText("当前会话使用服务器账号，请打开对应的服务器管理设置。")} /></Card></MistPage>;
 
   const fields = section === 'company' ? COMPANY_FIELDS : EXPORT_FIELDS;
   return <MistPage>
-    <PageHeader eyebrow="平台 · 本机演示公司" title="管理后台" description="维护本机演示的公司抬头、出口方和收款资料。" actions={<Pill tone="neutral">本地开发模式</Pill>} />
-    {(error || workspace.error) && <Banner tone="bad" title="资料尚未保存" actions={workspace.error ? <Button icon={RefreshCw} disabled={busy} onClick={() => void workspace.refresh()}>重新读取</Button> : undefined}>{error || workspace.error}</Banner>}
-    {workspace.pending && <Banner tone="warn" title="上一次保存结果待核对" actions={<Button disabled={busy || workspace.saving} onClick={() => void recover()}>核对原请求</Button>}>输入已保留，核对完成后再继续保存。</Banner>}
+    <PageHeader eyebrow={uiText("平台 · 本机演示公司")} title={uiText("管理后台")} description={uiText("维护本机演示的公司抬头、出口方和收款资料。")} actions={<Pill tone="neutral">{uiText("本地开发模式")}</Pill>} />
+    {(error || workspace.error) && <Banner tone="bad" title={uiText("资料尚未保存")} actions={workspace.error ? <Button icon={RefreshCw} disabled={busy} onClick={() => void workspace.refresh()}>{uiText("重新读取")}</Button> : undefined}>{error || workspace.error}</Banner>}
+    {workspace.pending && <Banner tone="warn" title={uiText("上一次保存结果待核对")} actions={<Button disabled={busy || workspace.saving} onClick={() => void recover()}>{uiText("核对原请求")}</Button>}>{uiText("输入已保留，核对完成后再继续保存。")}</Banner>}
     <div className="mist-wizard">
       <VerticalSteps mode="page" current={section} onSelect={setSection} steps={[
         { id: 'company', label: '公司抬头', icon: Building2 },
@@ -129,22 +130,22 @@ export function LocalAdminPanel() {
         ...(session.hasRole?.('owner') ? [{ id: 'ai', label: '平台 AI 模型', icon: Sparkles }] : []),
       ]} />
       <Card>
-        {!workspace.state ? <FormSection title="正在读取本地空间"><Skeleton height={180} /></FormSection> : <>
-          {(section === 'company' || section === 'export') && <FormSection title={section === 'company' ? '公司抬头与联系方式' : '出口与收款资料'} description={section === 'company' ? '按实际公司资料填写。未录入的信息保持空白。' : '保存实际登记与银行资料，不会替代报关、付款或专业审核。'}>
-            <FormGrid>{fields.map(field => <Field key={field.key} label={field.label} hint={field.hint} full={field.key === 'address' || field.key === 'englishAddress'}>
-              <TextInput aria-label={field.label} type={field.type ?? 'text'} value={values[field.key]} disabled={blocked} onChange={event => edit(field.key, event.target.value)} />
+        {!workspace.state ? <FormSection title={uiText("正在读取本地空间")}><Skeleton height={180} /></FormSection> : <>
+          {(section === 'company' || section === 'export') && <FormSection title={uiText(section === 'company' ? '公司抬头与联系方式' : '出口与收款资料')} description={uiText(section === 'company' ? '按实际公司资料填写。未录入的信息保持空白。' : '保存实际登记与银行资料，不会替代报关、付款或专业审核。')}>
+            <FormGrid>{fields.map(field => <Field key={field.key} label={uiText(field.label)} hint={uiText(field.hint)} full={field.key === 'address' || field.key === 'englishAddress'}>
+              <TextInput aria-label={uiText(field.label)} type={field.type ?? 'text'} value={values[field.key]} disabled={blocked} onChange={event => edit(field.key, event.target.value)} />
             </Field>)}</FormGrid>
           </FormSection>}
-          {section === 'workspace' && <FormSection title="本公司" description="这些显示资料只属于本公司，不会修改登录账号或其他公司。">
+          {section === 'workspace' && <FormSection title={uiText("本公司")} description={uiText("这些显示资料只属于本公司，不会修改登录账号或其他公司。")}>
             <FormGrid>
-              <Field label="公司名称" required><TextInput aria-label="公司名称" value={values.workspaceName} disabled={blocked} onChange={event => edit('workspaceName', event.target.value)} /></Field>
-              <Field label="显示姓名" required><TextInput aria-label="显示姓名" value={values.profileName} disabled={blocked} onChange={event => edit('profileName', event.target.value)} /></Field>
-              <Field label="显示邮箱"><TextInput aria-label="显示邮箱" type="email" value={values.profileEmail} disabled={blocked} onChange={event => edit('profileEmail', event.target.value)} /></Field>
-              <Field label="当前设备时区"><TextInput value={Intl.DateTimeFormat().resolvedOptions().timeZone} readOnly /></Field>
+              <Field label={uiText("公司名称")} required><TextInput aria-label={uiText("公司名称")} value={values.workspaceName} disabled={blocked} onChange={event => edit('workspaceName', event.target.value)} /></Field>
+              <Field label={uiText("显示姓名")} required><TextInput aria-label={uiText("显示姓名")} value={values.profileName} disabled={blocked} onChange={event => edit('profileName', event.target.value)} /></Field>
+              <Field label={uiText("显示邮箱")}><TextInput aria-label={uiText("显示邮箱")} type="email" value={values.profileEmail} disabled={blocked} onChange={event => edit('profileEmail', event.target.value)} /></Field>
+              <Field label={uiText("当前设备时区")}><TextInput value={Intl.DateTimeFormat().resolvedOptions().timeZone} readOnly /></Field>
             </FormGrid>
           </FormSection>}
-          {section === 'local' && <FormSection title="本地开发模式" description="用于在当前设备上录入与验证完整业务。">
-            <Banner tone="neutral" title="资料保存在当前设备">本地身份与公司资料独立于原服务器账号。业务记录保存到本机演示公司，切换设备不会自动带走这些资料。</Banner>
+          {section === 'local' && <FormSection title={uiText("本地开发模式")} description={uiText("用于在当前设备上录入与验证完整业务。")}>
+            <Banner tone="neutral" title={uiText("资料保存在当前设备")}>{uiText("本地身份与公司资料独立于原服务器账号。业务记录保存到本机演示公司，切换设备不会自动带走这些资料。")}</Banner>
             <KeyValue items={[
               { label: '当前身份', value: session.user?.displayName || '本地用户' },
               { label: '本公司', value: workspace.workspace?.name || values.workspaceName },
@@ -154,7 +155,7 @@ export function LocalAdminPanel() {
           </FormSection>}
         </>}
         {section === 'ai' && <PlatformAiProvidersPanel sessionKey={session.sessionKey} />}
-        {section !== 'ai' && <div className="mist-sticky-foot"><span className="mist-note">{busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司'}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>保存资料</Button></div>}
+        {section !== 'ai' && <div className="mist-sticky-foot"><span className="mist-note">{uiText(busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司')}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("保存资料")}</Button></div>}
       </Card>
     </div>
   </MistPage>;

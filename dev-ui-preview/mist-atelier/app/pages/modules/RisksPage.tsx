@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /**
  * 风险管理与合规：预警只从真实记录推出、回到原记录处置；登记后单一负责人推进 接手 → 处置方案 → 审批申请 → 关闭回读。
@@ -42,7 +44,7 @@ export function RisksPage() {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const day = platformBusinessDate(businessNow());
   const risks = state?.platform?.risks || [];
-  const signals = React.useMemo(() => riskSignals(state, day), [state, day]);
+  const signals = React.useMemo(() => riskSignals(state, day), [state, day, interfaceLocale()]);
   const openByKey = new Map(risks.filter(r => r.signalKey && r.state !== 'Resolved').map(r => [r.signalKey!, r]));
   const routeTab = (): Tab => route.section === 'ledger' || (route.section !== 'signals' && !!route.id && risks.some(r => r.id === route.id)) ? 'ledger' : 'signals';
   const [tab, setTab] = React.useState<Tab>(routeTab);
@@ -107,27 +109,27 @@ export function RisksPage() {
   const signalCols: Column<RiskSignal>[] = [
     { key: 'title', header: '预警', width: 'minmax(220px,1.6fr)', render: s => <ObjectCell name={s.title} meta={`${SOURCE_LABEL[s.source.kind]} · ${s.source.label}`} /> },
     { key: 'type', header: '类型', width: '64px', render: s => <Pill>{RISK_TYPE_LABEL[s.type]}</Pill> },
-    { key: 'level', header: '等级', width: '64px', render: s => <Pill tone={LEVEL[s.level].tone}>{LEVEL[s.level].label}</Pill> },
-    { key: 'risk', header: '处理', width: 'minmax(96px,0.7fr)', hideOnMobile: true, render: s => { const r = openByKey.get(s.key); return r ? <span className="mist-col" style={{ gap: 2 }}><span>{r.owner}</span><small className="mist-muted">{RISK_STATE_LABEL[r.state]}</small></span> : <span className="mist-tone-warn">未登记</span>; } },
+    { key: 'level', header: '等级', width: '64px', render: s => <Pill tone={LEVEL[s.level].tone}>{uiText(LEVEL[s.level].label)}</Pill> },
+    { key: 'risk', header: '处理', width: 'minmax(96px,0.7fr)', hideOnMobile: true, render: s => { const r = openByKey.get(s.key); return r ? <span className="mist-col" style={{ gap: 2 }}><span>{r.owner}</span><small className="mist-muted">{RISK_STATE_LABEL[r.state]}</small></span> : <span className="mist-tone-warn">{uiText("未登记")}</span>; } },
   ];
   const ledgerCols: Column<RiskRecord>[] = [
     { key: 'title', header: '风险', width: 'minmax(220px,1.6fr)', render: r => { const src = riskSource(state, r); return <ObjectCell name={r.title} meta={src ? `${SOURCE_LABEL[src.kind]} · ${src.label}` : '来源未记录'} />; } },
     { key: 'type', header: '类型', width: '64px', render: r => <Pill>{RISK_TYPE_LABEL[riskType(r)]}</Pill> },
     { key: 'owner', header: '负责人', width: '84px', hideOnMobile: true, render: r => r.owner },
-    { key: 'state', header: '状态', width: 'minmax(96px,0.7fr)', render: r => { const late = r.state !== 'Resolved' && r.planDue && r.planDue < day, lv = riskEffectiveLevel(state, r, day); return <span className="mist-col" style={{ gap: 2 }}><span><Pill tone={STATE_TONE[r.state]}>{r.disposition === 'waived' ? '已豁免' : RISK_STATE_LABEL[r.state]}</Pill> <Pill tone={LEVEL[lv].tone}>{LEVEL[lv].label}</Pill></span>{late && <small className="mist-tone-warn">方案逾期 · {r.planDue}</small>}</span>; } },
+    { key: 'state', header: '状态', width: 'minmax(96px,0.7fr)', render: r => { const late = r.state !== 'Resolved' && r.planDue && r.planDue < day, lv = riskEffectiveLevel(state, r, day); return <span className="mist-col" style={{ gap: 2 }}><span><Pill tone={STATE_TONE[r.state]}>{uiText(r.disposition === 'waived' ? '已豁免' : RISK_STATE_LABEL[r.state])}</Pill> <Pill tone={LEVEL[lv].tone}>{uiText(LEVEL[lv].label)}</Pill></span>{late && <small className="mist-tone-warn">{uiText("方案逾期 · ")}{r.planDue}</small>}</span>; } },
   ];
 
   const selSignal = tab === 'signals' ? signals.find(s => s.key === picked) : undefined, selRisk = tab === 'ledger' ? risks.find(r => r.id === picked) : undefined;
   const detail = selSignal ? <SignalDetail s={selSignal} risk={openByKey.get(selSignal.key)} registerReason={handleReason(selSignal.source.kind, selSignal.source.id)} locked={locked} onRegister={() => setDialog(registerSpec(selSignal))} onOpenRisk={openRisk} onSource={() => openRiskSource(go, selSignal.source.kind, selSignal.source.id)} />
     : selRisk ? <RiskDetail r={selRisk} state={state} day={day} me={me} meId={meId} locked={locked} writeReason={riskReason(selRisk)}
       onAck={() => setDialog(ackSpec(selRisk))} onPlan={() => setDialog(planSpec(selRisk))} onEscalate={a => setDialog(escalateSpec(selRisk, a))} onWithdraw={() => setDialog(withdrawSpec(selRisk))} onClose={() => setDialog(closeSpec(selRisk))} onSource={(k, id) => openRiskSource(go, k, id)} onApprovals={() => go('approvals')} /> : null;
-  const placeholder = <EmptyState icon={tab === 'signals' ? ShieldAlert : ShieldCheck} title={tab === 'signals' ? '预警详情' : '风险详情'} description={tab === 'signals' ? '选择一条预警，查看依据与原记录；需要统筹处理时登记为风险。' : '选择一条风险，查看处置进度、升级审批与关闭依据。'} />;
+  const placeholder = <EmptyState icon={tab === 'signals' ? ShieldAlert : ShieldCheck} title={uiText(tab === 'signals' ? '预警详情' : '风险详情')} description={uiText(tab === 'signals' ? '选择一条预警，查看依据与原记录；需要统筹处理时登记为风险。' : '选择一条风险，查看处置进度、升级审批与关闭依据。')} />;
   const exportRows = () => tab === 'signals'
     ? downloadModuleCsv('风险预警.csv', ['预警', '类型', '等级', '来源', '依据', '登记状态'], signalRows.map(s => [s.title, RISK_TYPE_LABEL[s.type], LEVEL[s.level].label, `${SOURCE_LABEL[s.source.kind]} ${s.source.label}`, s.basis, openByKey.get(s.key) ? RISK_STATE_LABEL[openByKey.get(s.key)!.state] : '未登记']))
     : downloadModuleCsv('风险台账.csv', ['风险', '类型', '等级', '来源', '负责人', '状态', '依据', '处置方案', '计划完成日', '审批申请', '关闭依据', '登记时间', '关闭时间'], ledgerRows.map(r => { const src = riskSource(state, r); return [r.title, RISK_TYPE_LABEL[riskType(r)], LEVEL[r.level].label, src ? `${SOURCE_LABEL[src.kind]} ${src.label}` : '', r.owner, RISK_STATE_LABEL[r.state], r.basis, r.plan || '', r.planDue || '', (r.escalations || []).map(e => `${RISK_ACTION_LABEL[e.action || 'authorize']}:${e.decidedBy || e.approver}:${DECISION_LABEL[e.decision]}`).join('; '), r.resolution, r.createdAt, r.closedAt || '']; }));
 
   const summary = selSignal ? <PreviewSummary openLabel="打开预警详情" onOpen={() => full.open(selSignal.key)} data={{
-      status: <Pill tone={LEVEL[selSignal.level].tone}>{LEVEL[selSignal.level].label}</Pill>, title: selSignal.title, description: selSignal.basis,
+      status: <Pill tone={LEVEL[selSignal.level].tone}>{uiText(LEVEL[selSignal.level].label)}</Pill>, title: selSignal.title, description: selSignal.basis,
       facts: [
         { label: '类型', value: RISK_TYPE_LABEL[selSignal.type] }, { label: '来源', value: `${SOURCE_LABEL[selSignal.source.kind]} · ${selSignal.source.label}` },
         { label: '登记状态', value: openByKey.get(selSignal.key) ? `${RISK_STATE_LABEL[openByKey.get(selSignal.key)!.state]} · ${openByKey.get(selSignal.key)!.owner}` : '未登记' },
@@ -138,18 +140,18 @@ export function RisksPage() {
         facts: [
           { label: '等级', value: LEVEL[lv].label }, { label: '类型', value: RISK_TYPE_LABEL[riskType(selRisk)] }, { label: '负责人', value: selRisk.owner || '未指定' },
           { label: '来源', value: src ? `${SOURCE_LABEL[src.kind]} · ${src.label}` : '来源未记录' },
-          { label: '计划完成', value: selRisk.planDue ? (late ? <span style={{ color: 'var(--mist-bad)' }}>{selRisk.planDue} · 已逾期</span> : selRisk.planDue) : '未制定方案' },
+          { label: '计划完成', value: selRisk.planDue ? (late ? <span style={{ color: 'var(--mist-bad)' }}>{selRisk.planDue}{uiText(" · 已逾期")}</span> : selRisk.planDue) : '未制定方案' },
           ...(e ? [{ label: '审批中', value: RISK_ACTION_LABEL[e.action || 'authorize'] }] : []),
         ] }} />; })()
     : null;
-  const roleBanner = !can ? <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有风险处理权限，可查看预警与台账，不能登记或推进。</Banner></div>
-    : !canAll ? <div className="mist-section"><Banner tone="neutral" title="按负责人处理">你可以登记和推进本人负责的客户 / 订单上的风险，并直接关闭提示、警告级风险；严重风险的关闭、豁免与带风险放行需提交部门主管审批。</Banner></div> : null;
+  const roleBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有风险处理权限，可查看预警与台账，不能登记或推进。")}</Banner></div>
+    : !canAll ? <div className="mist-section"><Banner tone="neutral" title={uiText("按负责人处理")}>{uiText("你可以登记和推进本人负责的客户 / 订单上的风险，并直接关闭提示、警告级风险；严重风险的关闭、豁免与带风险放行需提交部门主管审批。")}</Banner></div> : null;
   if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
-    <PageHeader eyebrow="财务与成本 · 风险" title="风险管理与合规" description="预警来自逾期应收、往来冻结、供应商认证与状态、QC 与生产交期；登记后由一位负责人推进到关闭。"
-      actions={<><Button icon={Download} onClick={exportRows}>导出</Button>{(canAll || canOrders) && <Button variant="primary" icon={Plus} disabled={locked || !ownOrders.length} title={ownOrders.length ? undefined : canAll ? '还没有订单' : '没有负责人绑定为你账号的订单'} onClick={() => setDialog(registerSpec())}>手工登记</Button>}</>} />
+    <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")} description={uiText("预警来自逾期应收、往来冻结、供应商认证与状态、QC 与生产交期；登记后由一位负责人推进到关闭。")}
+      actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{(canAll || canOrders) && <Button variant="primary" icon={Plus} disabled={locked || !ownOrders.length} title={uiText(ownOrders.length ? undefined : canAll ? '还没有订单' : '没有负责人绑定为你账号的订单')} onClick={() => setDialog(registerSpec())}>{uiText("手工登记")}</Button>}</>} />
     {roleBanner}
-    {error && <div className="mist-section"><Banner tone="bad" title="数据未加载" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
+    {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     <div className="mist-section" data-risk-summary><SummaryBar items={[
       { label: '未登记预警', value: unregistered.length, hint: unregistered.filter(s => s.level === 'critical').length ? `其中严重 ${unregistered.filter(s => s.level === 'critical').length}` : undefined, hintTone: 'bad' },
       { label: '未关闭风险', value: open.length, hint: open.filter(r => r.planDue && r.planDue < day).length ? `方案逾期 ${open.filter(r => r.planDue && r.planDue < day).length}` : undefined, hintTone: 'warn' },
@@ -157,30 +159,30 @@ export function RisksPage() {
       { label: '本月关闭', value: monthClosed.length },
     ]} /></div>
     <div className="mist-section mist-row" style={{ flexWrap: 'wrap', gap: 12 }}>
-      <Segmented<Tab> ariaLabel="内容" value={tab} onChange={switchTab} options={[{ value: 'signals', label: `预警 · ${signals.length}` }, { value: 'ledger', label: `风险台账 · ${risks.length}` }]} />
-      <Segmented<TypeFilter> ariaLabel="风险类型" value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部类型' }, ...typeCounts(tab === 'signals' ? signals : risks.map(r => ({ type: riskType(r) })))]} />
-      {tab === 'ledger' && <Segmented<LedgerFilter> ariaLabel="状态" value={ledgerFilter} onChange={setLedgerFilter} options={[{ value: 'open', label: `未关闭 ${open.length}` }, { value: 'escalated', label: `待审批 ${escalated.length}` }, { value: 'closed', label: `已关闭 ${risks.length - open.length}` }, { value: 'all', label: '全部' }]} />}
+      <Segmented<Tab> ariaLabel={uiText("内容")} value={tab} onChange={switchTab} options={[{ value: 'signals', label: `预警 · ${signals.length}` }, { value: 'ledger', label: `风险台账 · ${risks.length}` }]} />
+      <Segmented<TypeFilter> ariaLabel={uiText("风险类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部类型' }, ...typeCounts(tab === 'signals' ? signals : risks.map(r => ({ type: riskType(r) })))]} />
+      {tab === 'ledger' && <Segmented<LedgerFilter> ariaLabel={uiText("状态")} value={ledgerFilter} onChange={setLedgerFilter} options={[{ value: 'open', label: `未关闭 ${open.length}` }, { value: 'escalated', label: `待审批 ${escalated.length}` }, { value: 'closed', label: `已关闭 ${risks.length - open.length}` }, { value: 'all', label: '全部' }]} />}
     </div>
-    {tab === 'signals' && <p className="mist-note mist-section">外币应收与采购在此按原币显示；按月末汇率的折算、期末调汇与外币敞口见财务管理 · 账户与余额（月末汇率、期末调汇）。</p>}
+    {tab === 'signals' && <p className="mist-note mist-section">{uiText("外币应收与采购在此按原币显示；按月末汇率的折算、期末调汇与外币敞口见财务管理 · 账户与余额（月末汇率、期末调汇）。")}</p>}
     <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSignal?.title || selRisk?.title || ''}
       list={<Card>{tab === 'signals'
-        ? <DataTable ariaLabel="风险预警" loading={loading} rows={signalRows} rowKey={s => s.key} selectedKey={selSignal?.key} density="comfy" onRowClick={s => pick(s.key)} columns={signalCols} empty={<EmptyState icon={ShieldCheck} title="当前没有预警" description="逾期应收、往来冻结、认证到期、供应商暂停、QC 不通过与生产逾期会自动出现在这里。" />} />
-        : <DataTable ariaLabel="风险台账" loading={loading} rows={ledgerRows} rowKey={r => r.id} selectedKey={selRisk?.id} density="comfy" onRowClick={r => pick(r.id)} columns={ledgerCols} empty={<EmptyState icon={ShieldCheck} title={risks.length ? '没有符合筛选的风险' : '还没有登记风险'} description={risks.length ? '换一个状态或类型筛选。' : '从预警登记，或手工登记订单风险。'} />} />}</Card>}
+        ? <DataTable ariaLabel={uiText("风险预警")} loading={loading} rows={signalRows} rowKey={s => s.key} selectedKey={selSignal?.key} density="comfy" onRowClick={s => pick(s.key)} columns={signalCols} empty={<EmptyState icon={ShieldCheck} title={uiText("当前没有预警")} description={uiText("逾期应收、往来冻结、认证到期、供应商暂停、QC 不通过与生产逾期会自动出现在这里。")} />} />
+        : <DataTable ariaLabel={uiText("风险台账")} loading={loading} rows={ledgerRows} rowKey={r => r.id} selectedKey={selRisk?.id} density="comfy" onRowClick={r => pick(r.id)} columns={ledgerCols} empty={<EmptyState icon={ShieldCheck} title={uiText(risks.length ? '没有符合筛选的风险' : '还没有登记风险')} description={uiText(risks.length ? '换一个状态或类型筛选。' : '从预警登记，或手工登记订单风险。')} />} />}</Card>}
       detail={detail || placeholder} summary={summary ?? placeholder} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }
 
 function SignalDetail({ s, risk, registerReason, locked, onRegister, onOpenRisk, onSource }: { s: RiskSignal; risk?: RiskRecord; registerReason: string | false; locked: boolean; onRegister: () => void; onOpenRisk: (id: string) => void; onSource: () => void }) {
-  return <DetailBody data-signal-detail={s.key} heading={<div><span className="mist-muted">{RISK_TYPE_LABEL[s.type]}预警 · {SOURCE_LABEL[s.source.kind]}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{s.title}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={LEVEL[s.level].tone}>{LEVEL[s.level].label}</Pill><Pill>{RISK_TYPE_LABEL[s.type]}</Pill>{risk ? <Pill tone={STATE_TONE[risk.state]}>已登记 · {RISK_STATE_LABEL[risk.state]}</Pill> : <Pill tone="warn">未登记</Pill>}</div>
-    <DetailBlock title="依据"><p className="mist-sub">{s.basis}</p></DetailBlock>
+  return <DetailBody data-signal-detail={s.key} heading={<div><span className="mist-muted">{RISK_TYPE_LABEL[s.type]}{uiText("预警 · ")}{SOURCE_LABEL[s.source.kind]}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{s.title}</div></div>}>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={LEVEL[s.level].tone}>{uiText(LEVEL[s.level].label)}</Pill><Pill>{RISK_TYPE_LABEL[s.type]}</Pill>{risk ? <Pill tone={STATE_TONE[risk.state]}>{uiText("已登记 · ")}{RISK_STATE_LABEL[risk.state]}</Pill> : <Pill tone="warn">{uiText("未登记")}</Pill>}</div>
+    <DetailBlock title={uiText("依据")}><p className="mist-sub">{s.basis}</p></DetailBlock>
     <Facts items={[{ label: '来源', value: `${SOURCE_LABEL[s.source.kind]} · ${s.source.label}` }, { label: '起始', value: s.since }]} />
     <ActionBar busy={locked} actions={[
       { label: '打开原记录', icon: ArrowUpRight, onClick: onSource, primary: !!risk },
       risk ? { label: `查看风险（${risk.owner}）`, icon: FileText, onClick: () => onOpenRisk(risk.id) } : { label: '登记风险', icon: Plus, onClick: onRegister, primary: true, reason: registerReason },
     ]} />
-    <p className="mist-note">预警只读：来源记录改变后自动消失或更新。它不冻结付款、不删单、不改 QC / 账务 / 审批；实际处理在原记录完成。</p>
+    <p className="mist-note">{uiText("预警只读：来源记录改变后自动消失或更新。它不冻结付款、不删单、不改 QC / 账务 / 审批；实际处理在原记录完成。")}</p>
   </DetailBody>;
 }
 
@@ -199,11 +201,11 @@ function RiskDetail({ r, state, day, me, meId, locked, writeReason, onAck, onPla
     { label: '关闭', done, note: done ? `${r.closedBy || '—'} · ${shortWhen(r.closedAt || '')}${r.disposition === 'waived' ? ' · 豁免' : r.disposition === 'closed' ? ' · 经审批关闭' : ''}` : high ? '严重风险关闭须经部门主管审批' : '未关闭' },
   ];
   const stepReason = writeReason || (r.state !== 'InProgress' ? '先制定处置方案' : false);
-  return <DetailBody data-risk-detail={r.id} heading={<div><span className="mist-muted">{RISK_TYPE_LABEL[riskType(r)]} · {src ? `${SOURCE_LABEL[src.kind]} ${src.label}` : '来源未记录'}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{r.title}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{r.disposition === 'waived' ? '已豁免' : RISK_STATE_LABEL[r.state]}</Pill><Pill tone={LEVEL[level].tone}>{LEVEL[level].label}{high && !done ? ' · 高风险' : ''}</Pill><Pill>负责人 {r.owner}</Pill>{r.release && !done && <Pill tone="warn">{r.release.shipmentId ? `带风险放行已用于 ${r.release.shipmentCode || '一票出运'}` : '已获准带风险放行（可放行一票）'}</Pill>}</div>
-    {raised && !done && <p className="mist-note">登记时为{LEVEL[r.level].label}，来源预警当前已升为{LEVEL[level].label}，按当前等级处理。</p>}
+  return <DetailBody data-risk-detail={r.id} heading={<div><span className="mist-muted">{RISK_TYPE_LABEL[riskType(r)]} · {uiText(src ? `${SOURCE_LABEL[src.kind]} ${src.label}` : '来源未记录')}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{r.title}</div></div>}>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{uiText(r.disposition === 'waived' ? '已豁免' : RISK_STATE_LABEL[r.state])}</Pill><Pill tone={LEVEL[level].tone}>{uiText(LEVEL[level].label)}{uiText(high && !done ? ' · 高风险' : '')}</Pill><Pill>{uiText("负责人 ")}{r.owner}</Pill>{r.release && !done && <Pill tone="warn">{uiText(r.release.shipmentId ? `带风险放行已用于 ${r.release.shipmentCode || '一票出运'}` : '已获准带风险放行（可放行一票）')}</Pill>}</div>
+    {raised && !done && <p className="mist-note">{uiText("登记时为")}{uiText(LEVEL[r.level].label)}{uiText("，来源预警当前已升为")}{uiText(LEVEL[level].label)}{uiText("，按当前等级处理。")}</p>}
     {esc && <div className="mist-col" data-risk-escalation>
-      <Banner tone="warn" title={`待部门主管审批 · ${RISK_ACTION_LABEL[esc.action || 'authorize']}`}>{esc.requestedBy} · {shortWhen(esc.requestedAt)}：{esc.reason}</Banner>
+      <Banner tone="warn" title={ui`待部门主管审批 · ${RISK_ACTION_LABEL[esc.action || 'authorize']}`}>{esc.requestedBy} · {shortWhen(esc.requestedAt)}：{esc.reason}</Banner>
       <ActionBar busy={locked} actions={[{ label: '到审批中心', icon: ArrowUpRight, onClick: onApprovals }, { label: '撤回申请', icon: Undo2, onClick: onWithdraw, hidden: !mine }]} />
     </div>}
     {!done && <ActionBar busy={locked} actions={[
@@ -214,15 +216,15 @@ function RiskDetail({ r, state, day, me, meId, locked, writeReason, onAck, onPla
         ? { label: '申请关闭', icon: ShieldCheck, onClick: () => onEscalate('close'), primary: r.state === 'InProgress' && !esc, hidden: r.state === 'Open' || !!esc, reason: stepReason }
         : { label: '关闭风险', icon: ShieldCheck, onClick: onClose, primary: r.state === 'InProgress' && !esc, hidden: r.state === 'Open', reason: writeReason || (esc ? '审批申请尚未答复' : false) },
     ]} />}
-    <DetailBlock title="进度"><Checklist items={steps.map(s => ({ label: s.label, done: s.done, note: s.note, noteTone: s.noteTone }))} /></DetailBlock>
-    <DetailBlock title="事实与依据" aside={src && <Button variant="quiet" icon={ArrowUpRight} onClick={() => onSource(src.kind, src.id)}>打开原记录</Button>}><p className="mist-sub" style={{ whiteSpace: 'pre-line' }}>{r.basis}</p></DetailBlock>
-    {r.plan && <DetailBlock title="处置方案"><p className="mist-sub" style={{ whiteSpace: 'pre-line' }}>{r.plan}</p></DetailBlock>}
-    {r.release && <DetailBlock title="带风险放行"><p className="mist-sub">{r.release.approvedBy} · {shortWhen(r.release.at)} 批准：{r.release.note}</p><p className="mist-note">放行只记在本风险上，原记录的冻结、出运等仍在原模块办理；风险继续跟进到关闭。</p></DetailBlock>}
-    {decided.length > 0 && <DetailBlock title="审批记录"><div className="mist-col" style={{ gap: 0 }}>{decided.map(e => <div key={e.id} className="mist-col mist-quote-line" style={{ gap: 4, padding: '8px 0' }}>
-      <div className="mist-row" style={{ gap: 8 }}><Pill tone={e.decision === 'approved' ? 'ok' : 'neutral'}>{isReviewedEscalation(e) ? DECISION_LABEL[e.decision] : e.decision === 'approved' ? '已授权' : DECISION_LABEL[e.decision]}</Pill>{e.action && <Pill>{RISK_ACTION_LABEL[e.action]}</Pill>}<span className="mist-muted">{e.requestedBy} → {e.decidedBy} · {shortWhen(e.decidedAt)}</span></div>
-      <small className="mist-muted">申请：{e.reason}</small>{e.decisionNote && <small>{e.decision === 'withdrawn' ? '撤回原因' : '意见'}：{e.decisionNote}</small>}</div>)}</div></DetailBlock>}
-    {done && <DetailBlock title={r.disposition === 'waived' ? '豁免依据' : '关闭依据'}><p className="mist-sub" style={{ whiteSpace: 'pre-line' }}>{r.resolution}</p></DetailBlock>}
-    <DetailBlock title="操作记录">{events.length ? <Timeline events={events.map(e => ({ who: e.actor, when: businessWhen(e.at), text: e.text }))} /> : <span className="mist-muted">暂无记录。</span>}</DetailBlock>
-    {!r.type && <span className="mist-note"><AlertTriangle size={12} /> 早期登记的风险，未记录类型与来源类别，按订单来源显示。</span>}
+    <DetailBlock title={uiText("进度")}><Checklist items={steps.map(s => ({ label: s.label, done: s.done, note: s.note, noteTone: s.noteTone }))} /></DetailBlock>
+    <DetailBlock title={uiText("事实与依据")} aside={src && <Button variant="quiet" icon={ArrowUpRight} onClick={() => onSource(src.kind, src.id)}>{uiText("打开原记录")}</Button>}><p className="mist-sub" style={{ whiteSpace: 'pre-line' }}>{r.basis}</p></DetailBlock>
+    {r.plan && <DetailBlock title={uiText("处置方案")}><p className="mist-sub" style={{ whiteSpace: 'pre-line' }}>{r.plan}</p></DetailBlock>}
+    {r.release && <DetailBlock title={uiText("带风险放行")}><p className="mist-sub">{r.release.approvedBy} · {shortWhen(r.release.at)}{uiText(" 批准：")}{r.release.note}</p><p className="mist-note">{uiText("放行只记在本风险上，原记录的冻结、出运等仍在原模块办理；风险继续跟进到关闭。")}</p></DetailBlock>}
+    {decided.length > 0 && <DetailBlock title={uiText("审批记录")}><div className="mist-col" style={{ gap: 0 }}>{decided.map(e => <div key={e.id} className="mist-col mist-quote-line" style={{ gap: 4, padding: '8px 0' }}>
+      <div className="mist-row" style={{ gap: 8 }}><Pill tone={e.decision === 'approved' ? 'ok' : 'neutral'}>{uiText(isReviewedEscalation(e) ? DECISION_LABEL[e.decision] : e.decision === 'approved' ? '已授权' : DECISION_LABEL[e.decision])}</Pill>{e.action && <Pill>{RISK_ACTION_LABEL[e.action]}</Pill>}<span className="mist-muted">{e.requestedBy} → {e.decidedBy} · {shortWhen(e.decidedAt)}</span></div>
+      <small className="mist-muted">{uiText("申请：")}{e.reason}</small>{e.decisionNote && <small>{uiText(e.decision === 'withdrawn' ? '撤回原因' : '意见')}：{e.decisionNote}</small>}</div>)}</div></DetailBlock>}
+    {done && <DetailBlock title={uiText(r.disposition === 'waived' ? '豁免依据' : '关闭依据')}><p className="mist-sub" style={{ whiteSpace: 'pre-line' }}>{r.resolution}</p></DetailBlock>}
+    <DetailBlock title={uiText("操作记录")}>{events.length ? <Timeline events={events.map(e => ({ who: e.actor, when: businessWhen(e.at), text: e.text }))} /> : <span className="mist-muted">{uiText("暂无记录。")}</span>}</DetailBlock>
+    {!r.type && <span className="mist-note"><AlertTriangle size={12} />{uiText(" 早期登记的风险，未记录类型与来源类别，按订单来源显示。")}</span>}
   </DetailBody>;
 }

@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 客户对账单：按客户生成截至今天的未结项对账单（服务端渲染归档，SOA 编号只追加），下载 / 打开原件。不记录发送状态。 */
 import React from 'react';
@@ -41,20 +42,20 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
       const url = URL.createObjectURL(new Blob([await response.arrayBuffer()], { type: 'application/pdf' })); if (win) win.location.href = url; else window.open(url, '_blank'); window.setTimeout(() => URL.revokeObjectURL(url), 60000); })().catch(cause => toast(cause instanceof Error ? cause.message : '对账单打开失败'));
   };
   return <Card id="mist-customer-statements">
-    <CardHeader title="客户对账单" sub={`截至 ${today} · 按币种列未结应收、待核销到账与账龄，不跨币种折算`} tools={<div className="mist-row" style={{ gap: 8 }}>
-      {!customerId && <Select aria-label="对账客户" value={target} disabled={busy || !customers.length} onChange={e => setPicked(e.target.value)} options={customers.length ? customers.map(c => ({ value: c.id, label: c.name })) : [{ value: '', label: '暂无可对账客户' }]} />}
-      <Button size="sm" icon={FileText} disabled={busy || !!blocker} title={blocker || undefined} onClick={() => void generate()}>生成对账单</Button></div>} />
+    <CardHeader title={uiText("客户对账单")} sub={ui`截至 ${today} · 按币种列未结应收、待核销到账与账龄，不跨币种折算`} tools={<div className="mist-row" style={{ gap: 8 }}>
+      {!customerId && <Select aria-label={uiText("对账客户")} value={target} disabled={busy || !customers.length} onChange={e => setPicked(e.target.value)} options={customers.length ? customers.map(c => ({ value: c.id, label: c.name })) : [{ value: '', label: '暂无可对账客户' }]} />}
+      <Button size="sm" icon={FileText} disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={() => void generate()}>{uiText("生成对账单")}</Button></div>} />
     {blocker && canWrite && <div style={{ padding: '0 22px 8px' }}><span className="mist-note">{blocker}</span></div>}
-    <div role="list" aria-label="已生成的客户对账单" style={{ padding: '0 22px 14px' }}>
+    <div role="list" aria-label={uiText("已生成的客户对账单")} style={{ padding: '0 22px 14px' }}>
       {records.length ? records.map(r => <div key={r.id} role="listitem" className="mist-row" data-statement={r.statementNo} style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }}>
         <Mono>{r.statementNo}</Mono>
-        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span>{nameOf(r.customerId)}</span><small className="mist-muted">截至 {r.asOf} · {r.generatedBy} · {r.generatedAt.replace('T', ' ').slice(0, 16)}</small></span>
-        {r.totals.map(t => <Pill key={t.currency} tone="neutral">净欠 {Number(t.net).toLocaleString('en-US', { minimumFractionDigits: 2 })} {t.currency}</Pill>)}
+        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span>{nameOf(r.customerId)}</span><small className="mist-muted">{uiText("截至 ")}{r.asOf} · {r.generatedBy} · {r.generatedAt.replace('T', ' ').slice(0, 16)}</small></span>
+        {r.totals.map(t => <Pill key={t.currency} tone="neutral">{uiText("净欠 ")}{Number(t.net).toLocaleString('en-US', { minimumFractionDigits: 2 })} {t.currency}</Pill>)}
         <span className="mist-spacer" />
         <PreviewButton file={fileOf(r.fileId)} disabled={busy} />
-        <Button size="sm" variant="quiet" icon={Download} disabled={busy} onClick={() => download(r.fileId)}>下载</Button>
-        <Button size="sm" variant="quiet" icon={ExternalLink} disabled={busy} onClick={() => open(r.fileId)}>打开</Button>
-      </div>) : <span className="mist-note">尚未生成。生成后按当时台账冻结内容并归档原件；台账变动后重新生成新编号，旧份保留。</span>}
+        <Button size="sm" variant="quiet" icon={Download} disabled={busy} onClick={() => download(r.fileId)}>{uiText("下载")}</Button>
+        <Button size="sm" variant="quiet" icon={ExternalLink} disabled={busy} onClick={() => open(r.fileId)}>{uiText("打开")}</Button>
+      </div>) : <span className="mist-note">{uiText("尚未生成。生成后按当时台账冻结内容并归档原件；台账变动后重新生成新编号，旧份保留。")}</span>}
     </div>
   </Card>;
 }

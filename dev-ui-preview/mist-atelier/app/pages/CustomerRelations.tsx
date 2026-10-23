@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 客户档案补充：跟进记录、商机与邮件（只读汇总）。全部来自公司状态，命令写入服务端。 */
 import React from 'react';
 import { ArrowRight, CalendarClock, FilePlus2, Flag, Mail, MessageSquarePlus, Pencil, Plus, Receipt, Target, XCircle } from 'lucide-react';
@@ -14,7 +16,7 @@ import { fmt } from '../data';
 
 const STAGE_TONE: Record<CrmStage, Tone> = { intent: 'neutral', sampling: 'accent', quoting: 'ai', won: 'ok', lost: 'bad' };
 const OPEN: CrmStage[] = ['intent', 'sampling', 'quoting'];
-const when = (at: string) => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'; };
+const when = (at: string) => { const d = new Date(at); return Number.isFinite(d.getTime()) ? d.toLocaleString(interfaceLocale(), { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'; };
 const linkValue = (link: CrmLink | null) => link ? `${link.kind}:${link.id}` : '';
 const parseLink = (value: string): CrmLink | null => { const [kind, ...rest] = value.split(':'); return kind && rest.length ? { kind: kind as CrmLink['kind'], id: rest.join(':') } : null; };
 
@@ -49,10 +51,10 @@ export function FollowUpPanel({ customer, state, can, compact }: { customer: Mis
   const shown = compact ? rows.slice(0, 4) : rows;
   const target = (row: CrmFollowUp) => row.link ? crmLinkTarget(state, customer.id, row.link) : null;
   return <Card>
-    <CardHeader title="跟进记录" sub={nextOpen ? `下次跟进 ${nextOpen.due}` : rows.length ? '没有待跟进安排' : undefined} tools={can ? <Button size="sm" icon={MessageSquarePlus} onClick={() => setDialog(spec())}>记录跟进</Button> : undefined} />
-    {shown.length ? <Timeline events={shown.map(row => { const t = target(row); return { who: `${row.actor} · ${CRM_METHOD_LABEL[row.method]}`, when: when(row.at), text: <span className="mist-col" style={{ gap: 4 }}><span style={{ whiteSpace: 'pre-wrap' }}>{row.content}</span>{(t || row.nextDate) && <span className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{t && row.link && <Pill tone="accent">{CRM_LINK_LABEL[row.link.kind]} · {t.label}</Pill>}{row.collection && <Pill tone={row.collection.level === 3 ? 'bad' : 'warn'}>{CRM_COLLECTION_LEVEL_LABEL[row.collection.level]}{row.collection.promisedDate ? ` · 承诺 ${row.collection.promisedDate} 付 ${row.collection.promisedAmount} ${row.collection.currency}` : ''}</Pill>}{row.nextDate && <Pill tone={state.tasks.find(task => task.id === row.nextTaskId)?.done ? 'ok' : 'warn'}><CalendarClock size={12} /> 下次 {row.nextDate}</Pill>}</span>}</span> }; })} />
-      : <EmptyState compact icon={MessageSquarePlus} title="还没有跟进记录" description="记录电话、邮件、会议或拜访的实际沟通内容。" />}
-    {compact && rows.length > shown.length && <div style={{ padding: '0 20px 16px' }}><Button variant="quiet" size="sm" onClick={() => go('crm', customer.id, { customerId: customer.id, section: 'followups' })}>查看全部 {rows.length} 条</Button></div>}
+    <CardHeader title={uiText("跟进记录")} sub={uiText(nextOpen ? `下次跟进 ${nextOpen.due}` : rows.length ? '没有待跟进安排' : undefined)} tools={can ? <Button size="sm" icon={MessageSquarePlus} onClick={() => setDialog(spec())}>{uiText("记录跟进")}</Button> : undefined} />
+    {shown.length ? <Timeline events={shown.map(row => { const t = target(row); return { who: `${row.actor} · ${CRM_METHOD_LABEL[row.method]}`, when: when(row.at), text: <span className="mist-col" style={{ gap: 4 }}><span style={{ whiteSpace: 'pre-wrap' }}>{row.content}</span>{(t || row.nextDate) && <span className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{t && row.link && <Pill tone="accent">{CRM_LINK_LABEL[row.link.kind]} · {uiText(t.label)}</Pill>}{row.collection && <Pill tone={row.collection.level === 3 ? 'bad' : 'warn'}>{CRM_COLLECTION_LEVEL_LABEL[row.collection.level]}{uiText(row.collection.promisedDate ? ` · 承诺 ${row.collection.promisedDate} 付 ${row.collection.promisedAmount} ${row.collection.currency}` : '')}</Pill>}{row.nextDate && <Pill tone={state.tasks.find(task => task.id === row.nextTaskId)?.done ? 'ok' : 'warn'}><CalendarClock size={12} />{uiText(" 下次 ")}{row.nextDate}</Pill>}</span>}</span> }; })} />
+      : <EmptyState compact icon={MessageSquarePlus} title={uiText("还没有跟进记录")} description={uiText("记录电话、邮件、会议或拜访的实际沟通内容。")} />}
+    {compact && rows.length > shown.length && <div style={{ padding: '0 20px 16px' }}><Button variant="quiet" size="sm" onClick={() => go('crm', customer.id, { customerId: customer.id, section: 'followups' })}>{uiText("查看全部 ")}{rows.length}{uiText(" 条")}</Button></div>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </Card>;
 }
@@ -75,17 +77,17 @@ export function OpportunityPanel({ customer, state, can }: { customer: MistCusto
     submit: v => run({ type: 'crm.opportunity.stage', payload: { id: row.id, stage, note: text(v, 'note') } }) });
   const next = (row: CrmOpportunity): CrmStage | null => row.stage === 'intent' ? 'sampling' : row.stage === 'sampling' ? 'quoting' : row.stage === 'quoting' ? 'won' : null;
   return <Card>
-    <CardHeader title="商机" sub={rows.length ? `${rows.filter(row => OPEN.includes(row.stage)).length} 个进行中` : undefined} tools={can ? <Button size="sm" icon={Plus} onClick={() => setDialog(editSpec())}>新建商机</Button> : undefined} />
+    <CardHeader title={uiText("商机")} sub={uiText(rows.length ? `${rows.filter(row => OPEN.includes(row.stage)).length} 个进行中` : undefined)} tools={can ? <Button size="sm" icon={Plus} onClick={() => setDialog(editSpec())}>{uiText("新建商机")}</Button> : undefined} />
     {totals.length > 0 && <div style={{ padding: '0 20px 12px' }}><SummaryBar items={totals.map(t => ({ label: `进行中 · ${t.currency}`, value: fmt(t.amount, 2), unit: t.currency, hint: `${t.count} 个商机` }))} /></div>}
-    <DataTable ariaLabel="客户商机" rows={rows} rowKey={row => row.id} selectedKey={selected?.id} onRowClick={row => setPicked(row.id)} density="comfy"
-      empty={<EmptyState compact icon={Target} title="还没有商机" description="记录意向 → 打样 → 报价 → 下单 / 流失，金额按原币种保存。" />}
+    <DataTable ariaLabel={uiText("客户商机")} rows={rows} rowKey={row => row.id} selectedKey={selected?.id} onRowClick={row => setPicked(row.id)} density="comfy"
+      empty={<EmptyState compact icon={Target} title={uiText("还没有商机")} description={uiText("记录意向 → 打样 → 报价 → 下单 / 流失，金额按原币种保存。")} />}
       columns={[
-        { key: 'title', header: '商机', width: 'minmax(180px,2fr)', render: row => <div className="mist-col" style={{ gap: 2 }}><b className="mist-cell-strong">{row.title}</b><small className="mist-muted">{row.domain === 'fabric' ? '面料' : '成衣'} · {row.owner}</small></div> },
+        { key: 'title', header: '商机', width: 'minmax(180px,2fr)', render: row => <div className="mist-col" style={{ gap: 2 }}><b className="mist-cell-strong">{row.title}</b><small className="mist-muted">{uiText(row.domain === 'fabric' ? '面料' : '成衣')} · {row.owner}</small></div> },
         { key: 'stage', header: '阶段', width: '130px', render: row => <div className="mist-col" style={{ gap: 6 }}>{row.stage !== 'lost' && <StageProgress total={4} current={Math.min(3, OPEN.indexOf(row.stage) + (row.stage === 'won' ? 4 : 0))} />}<Pill tone={STAGE_TONE[row.stage]}>{CRM_STAGE_LABEL[row.stage]}</Pill></div> },
         { key: 'amount', header: '预计金额', width: '130px', align: 'right', render: row => <b className="mist-num">{fmt(Number(row.amount), 2)} <span className="mist-muted">{row.currency}</span></b> },
         { key: 'date', header: '预计成交', width: '96px', hideOnMobile: true, render: row => row.expectedDate },
       ]} />
-    <Drawer open={!!selected} onClose={() => setPicked(null)} title={selected?.title || '商机'} sub={selected ? `${customer.name} · ${CRM_STAGE_LABEL[selected.stage]}` : undefined} size="lg">
+    <Drawer open={!!selected} onClose={() => setPicked(null)} title={uiText(selected?.title || '商机')} sub={uiText(selected ? `${customer.name} · ${CRM_STAGE_LABEL[selected.stage]}` : undefined)} size="lg">
       {selected && <OpportunityDetail row={selected} state={state} customer={customer} can={can} busy={saving} next={next(selected)}
         onEdit={() => setDialog(editSpec(selected))} onStage={stage => setDialog(stageSpec(selected, stage))}
         onDevelop={() => go('development/new', undefined, { customerId: customer.id })} onQuote={() => go('quotations', undefined, { customerId: customer.id })} onOpen={(view, id) => go(view, id)} />}
@@ -99,27 +101,27 @@ function OpportunityDetail({ row, state, customer, can, busy, next, onEdit, onSt
   const links: CrmLink[] = [...row.devIds.map(id => ({ kind: 'development' as const, id })), ...row.quotationIds.map(id => ({ kind: 'quotation' as const, id })), ...row.orderIds.map(id => ({ kind: 'order' as const, id }))];
   const wonReason = next === 'won' && !row.orderIds.length ? '请先在编辑中关联实际订单' : '';
   return <div className="mist-col" style={{ gap: 16 }}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STAGE_TONE[row.stage]}>{CRM_STAGE_LABEL[row.stage]}</Pill><Pill>{row.domain === 'fabric' ? '面料业务' : '成衣业务'}</Pill></div>
-    {!open && <Banner tone={row.stage === 'won' ? 'ok' : 'neutral'} title={row.stage === 'won' ? '已下单 · 商机结束' : '已流失 · 商机结束'}>{row.stage === 'lost' ? `流失原因：${row.lossReason}` : '后续请在关联订单中跟进。'}</Banner>}
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STAGE_TONE[row.stage]}>{CRM_STAGE_LABEL[row.stage]}</Pill><Pill>{uiText(row.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill></div>
+    {!open && <Banner tone={row.stage === 'won' ? 'ok' : 'neutral'} title={uiText(row.stage === 'won' ? '已下单 · 商机结束' : '已流失 · 商机结束')}>{uiText(row.stage === 'lost' ? `流失原因：${row.lossReason}` : '后续请在关联订单中跟进。')}</Banner>}
     {can && open && <div className="mist-col" style={{ gap: 6 }}>
       <div className="mist-row mist-module-actions" style={{ flexWrap: 'wrap' }}>
-        {next && <Button variant="primary" icon={ArrowRight} disabled={busy || !!wonReason} title={wonReason || undefined} onClick={() => onStage(next)}>推进到{CRM_STAGE_LABEL[next]}</Button>}
-        <Button icon={Pencil} disabled={busy} onClick={onEdit}>编辑 / 关联</Button>
-        <Button icon={FilePlus2} onClick={onDevelop}>发起开发</Button>
-        <Button icon={Receipt} onClick={onQuote}>发起报价</Button>
-        <Button icon={XCircle} disabled={busy} onClick={() => onStage('lost')}>标记流失</Button>
+        {next && <Button variant="primary" icon={ArrowRight} disabled={busy || !!wonReason} title={uiText(wonReason || undefined)} onClick={() => onStage(next)}>{uiText("推进到")}{CRM_STAGE_LABEL[next]}</Button>}
+        <Button icon={Pencil} disabled={busy} onClick={onEdit}>{uiText("编辑 / 关联")}</Button>
+        <Button icon={FilePlus2} onClick={onDevelop}>{uiText("发起开发")}</Button>
+        <Button icon={Receipt} onClick={onQuote}>{uiText("发起报价")}</Button>
+        <Button icon={XCircle} disabled={busy} onClick={() => onStage('lost')}>{uiText("标记流失")}</Button>
       </div>
-      {wonReason && <span className="mist-note">推进到已下单：{wonReason}</span>}
-      <span className="mist-note">发起开发 / 报价会带入客户 {customer.name}；建好后回到这里关联。</span>
+      {wonReason && <span className="mist-note">{uiText("推进到已下单：")}{wonReason}</span>}
+      <span className="mist-note">{uiText("发起开发 / 报价会带入客户 ")}{customer.name}{uiText("；建好后回到这里关联。")}</span>
     </div>}
     <Facts items={[{ label: '预计金额', value: `${fmt(Number(row.amount), 2)} ${row.currency}` }, { label: '预计成交日', value: row.expectedDate }, { label: '负责人', value: row.owner }, { label: '最后更新', value: when(row.updatedAt) }]} />
     {row.note && <p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{row.note}</p>}
     <section className="mist-col" style={{ gap: 6 }}>
-      <span className="mist-eyebrow">关联业务</span>
-      {links.length ? links.map(link => { const t = crmLinkTarget(state, customer.id, link); return <div key={link.kind + link.id} className="mist-row" style={{ gap: 8 }}><Pill>{CRM_LINK_LABEL[link.kind]}</Pill>{t ? <Button variant="quiet" size="sm" onClick={() => onOpen(t.view, t.id)}>{t.label}</Button> : <span className="mist-muted">对象已不可用</span>}</div>; }) : <span className="mist-note">尚未关联开发案、报价或订单。</span>}
+      <span className="mist-eyebrow">{uiText("关联业务")}</span>
+      {links.length ? links.map(link => { const t = crmLinkTarget(state, customer.id, link); return <div key={link.kind + link.id} className="mist-row" style={{ gap: 8 }}><Pill>{CRM_LINK_LABEL[link.kind]}</Pill>{t ? <Button variant="quiet" size="sm" onClick={() => onOpen(t.view, t.id)}>{uiText(t.label)}</Button> : <span className="mist-muted">{uiText("对象已不可用")}</span>}</div>; }) : <span className="mist-note">{uiText("尚未关联开发案、报价或订单。")}</span>}
     </section>
     <section className="mist-col" style={{ gap: 6 }}>
-      <span className="mist-eyebrow">阶段记录</span>
+      <span className="mist-eyebrow">{uiText("阶段记录")}</span>
       <Timeline events={[...row.history].reverse().map(h => ({ who: h.actor, when: when(h.at), text: `${h.from ? `${CRM_STAGE_LABEL[h.from]} → ` : ''}${CRM_STAGE_LABEL[h.to]}${h.note ? ` · ${h.note}` : ''}` }))} />
     </section>
   </div>;
@@ -130,12 +132,12 @@ export function CustomerMailPanel({ customer, state }: { customer: MistCustomer;
   const emails = new Set(state.contacts.filter(c => c.customerId === customer.id && c.email).map(c => c.email.toLowerCase()));
   const rows = (state.email?.messages || []).filter(m => m.folder !== 'trash' && (m.links.some(link => link.kind === 'customer' && link.id === customer.id) || emails.has(m.from.address.toLowerCase()) || m.to.some(to => emails.has(to.address.toLowerCase())))).sort((a, b) => b.at.localeCompare(a.at));
   const connected = (state.email?.accounts || []).length > 0;
-  return <Card><CardHeader title="邮件" sub="已关联该客户、或与其联系人往来的邮件" tools={<Button size="sm" variant="quiet" icon={Mail} onClick={() => go('emails')}>打开智能邮箱</Button>} />
-    <DataTable ariaLabel="客户邮件" rows={rows} rowKey={m => m.id} onRowClick={m => go('emails', m.id)} density="comfy"
-      empty={<EmptyState compact icon={Mail} title={connected ? '还没有往来邮件' : '未接入任何邮箱'} description={connected ? '在智能邮箱中把邮件关联到该客户，或为联系人填写邮箱。' : '管理员接入邮箱后，与该客户联系人的往来邮件会出现在这里。'} />}
+  return <Card><CardHeader title={uiText("邮件")} sub={uiText("已关联该客户、或与其联系人往来的邮件")} tools={<Button size="sm" variant="quiet" icon={Mail} onClick={() => go('emails')}>{uiText("打开智能邮箱")}</Button>} />
+    <DataTable ariaLabel={uiText("客户邮件")} rows={rows} rowKey={m => m.id} onRowClick={m => go('emails', m.id)} density="comfy"
+      empty={<EmptyState compact icon={Mail} title={uiText(connected ? '还没有往来邮件' : '未接入任何邮箱')} description={uiText(connected ? '在智能邮箱中把邮件关联到该客户，或为联系人填写邮箱。' : '管理员接入邮箱后，与该客户联系人的往来邮件会出现在这里。')} />}
       columns={[
-        { key: 'subject', header: '主题', width: 'minmax(200px,2fr)', render: m => <div className="mist-col" style={{ gap: 2 }}><span className="mist-mail-strong" data-unread={!m.read || undefined}>{m.subject}</span><small className="mist-muted">{m.folder === 'sent' ? `致 ${m.to.map(to => to.name || to.address).join('、')}` : m.from.name || m.from.address}</small></div> },
-        { key: 'state', header: '关联', width: '110px', hideOnMobile: true, render: m => m.links.some(link => link.kind === 'customer' && link.id === customer.id) ? <Pill tone="ok">已关联</Pill> : <Pill tone="warn"><Flag size={12} /> 待确认</Pill> },
+        { key: 'subject', header: '主题', width: 'minmax(200px,2fr)', render: m => <div className="mist-col" style={{ gap: 2 }}><span className="mist-mail-strong" data-unread={!m.read || undefined}>{m.subject}</span><small className="mist-muted">{uiText(m.folder === 'sent' ? `致 ${m.to.map(to => to.name || to.address).join('、')}` : m.from.name || m.from.address)}</small></div> },
+        { key: 'state', header: '关联', width: '110px', hideOnMobile: true, render: m => m.links.some(link => link.kind === 'customer' && link.id === customer.id) ? <Pill tone="ok">{uiText("已关联")}</Pill> : <Pill tone="warn"><Flag size={12} />{uiText(" 待确认")}</Pill> },
         { key: 'at', header: '时间', width: '96px', render: m => <small className="mist-muted">{when(m.at)}</small> },
       ]} />
   </Card>;

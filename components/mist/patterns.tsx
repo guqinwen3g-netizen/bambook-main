@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowRight, ArrowUpRight, Check, ChevronRight, MessageSquare } from 'lucide-react';
@@ -15,11 +16,11 @@ export function HeroFocus({ tag = '当前焦点', meta, title, description, medi
   return (
     <article className={`mist-hero ${className ?? ''}`}>
       <MistMark className="mist-hero-ring" />
-      {media && <img className="mist-hero-media" src={media.src} alt={media.alt} />}
-      <div className="mist-hero-meta"><span className="mist-hero-tag">{tag}</span>{meta?.map((m, i) => <React.Fragment key={i}>{i > 0 && <span>·</span>}<span>{m}</span></React.Fragment>)}</div>
-      <h2>{title}</h2>
-      {description && <p className="mist-hero-desc">{description}</p>}
-      {steps && <div className="mist-hero-steps">{steps.map((s, i) => <div key={i} data-s={s.state === 'todo' ? undefined : s.state}><i />{s.label}</div>)}</div>}
+      {media && <img className="mist-hero-media" src={media.src} alt={uiText(media.alt)} />}
+      <div className="mist-hero-meta"><span className="mist-hero-tag">{uiText(tag)}</span>{meta?.map((m, i) => <React.Fragment key={i}>{i > 0 && <span>·</span>}<span>{m}</span></React.Fragment>)}</div>
+      <h2>{uiText(title)}</h2>
+      {description && <p className="mist-hero-desc">{uiText(description)}</p>}
+      {steps && <div className="mist-hero-steps">{steps.map((s, i) => <div key={i} data-s={s.state === 'todo' ? undefined : s.state}><i />{uiText(s.label)}</div>)}</div>}
       {actions && <div className="mist-hero-cta">{actions}</div>}
     </article>
   );
@@ -32,9 +33,9 @@ export function AIBrief({ icon, title = '今日简报', sub, items, onAsk, askPl
 }) {
   return (
     <Card tone="ai" className={`mist-brief ${className ?? ''}`}>
-      <CardHeader leading={<AIBadge icon={icon} />} title={title} sub={sub} />
-      <ul>{items.map((it, i) => <li key={i}><button type="button" onClick={it.onClick}><span className="mist-brief-n">{i + 1}</span><span><b>{it.strong}</b> {it.text}</span></button></li>)}</ul>
-      {onAsk && <button type="button" className="mist-brief-ask" onClick={onAsk}><Icon icon={MessageSquare} size="sm" />{askPlaceholder}<span className="mist-send"><Icon icon={ArrowUpRight} size="sm" /></span></button>}
+      <CardHeader leading={<AIBadge icon={icon} />} title={uiText(title)} sub={uiText(sub)} />
+      <ul>{items.map((it, i) => <li key={i}><button type="button" onClick={it.onClick}><span className="mist-brief-n">{uiText(i + 1)}</span><span><b>{it.strong}</b> {it.text}</span></button></li>)}</ul>
+      {onAsk && <button type="button" className="mist-brief-ask" onClick={onAsk}><Icon icon={MessageSquare} size="sm" />{uiText(askPlaceholder)}<span className="mist-send"><Icon icon={ArrowUpRight} size="sm" /></span></button>}
     </Card>
   );
 }
@@ -45,9 +46,9 @@ export function TaskList({ items, onOpen }: { items: TaskItem[]; onOpen: (t: Tas
   return (
     <div className="mist-tasks">{items.map(t => (
       <button key={t.id} type="button" className="mist-task" onClick={() => onOpen(t)}>
-        <span className="mist-task-when" data-urgent={t.urgent || undefined}>{t.when}</span>
+        <span className="mist-task-when" data-urgent={t.urgent || undefined}>{uiText(t.when)}</span>
         <div style={{ minWidth: 0 }}><div className="mist-task-t">{t.title}</div>{t.meta && <div className="mist-task-d">{t.meta}</div>}</div>
-        {t.status ? <Pill tone={t.status.tone}>{t.status.label}</Pill> : <span />}
+        {t.status ? <Pill tone={t.status.tone}>{uiText(t.status.label)}</Pill> : <span />}
         {t.people ? <AvatarStack people={t.people} /> : <span />}
         <span className="mist-go"><Icon icon={ArrowRight} size="sm" /></span>
       </button>
@@ -57,7 +58,7 @@ export function TaskList({ items, onOpen }: { items: TaskItem[]; onOpen: (t: Tas
 
 /** 周条 */
 export function WeekStrip({ days, value, onChange }: { days: Array<{ key: string; weekday: string; day: number; dots: number }>; value: string; onChange: (k: string) => void }) {
-  return <div className="mist-week">{days.map(d => <button key={d.key} type="button" aria-pressed={d.key === value} onClick={() => onChange(d.key)}><span>{d.weekday}</span><b>{d.day}</b><span className="mist-week-dots">{Array.from({ length: Math.min(d.dots, 3) }, (_, i) => <i key={i} />)}</span></button>)}</div>;
+  return <div className="mist-week">{days.map(d => <button key={d.key} type="button" aria-pressed={d.key === value} onClick={() => onChange(d.key)}><span>{uiText(d.weekday)}</span><b>{d.day}</b><span className="mist-week-dots">{Array.from({ length: Math.min(d.dots, 3) }, (_, i) => <i key={i} />)}</span></button>)}</div>;
 }
 /** 日程列表。tone: 默认强调色 / ai 紫藤 / mute 灰 / warn 黄 */
 export function Agenda({ events }: { events: Array<{ time: string; title: React.ReactNode; meta?: React.ReactNode; tone?: 'ai' | 'mute' | 'warn' }> }) {
@@ -73,9 +74,9 @@ export function IdentityHeader({ thumb, meta, title, facts, actions }: { thumb?:
       {thumb}
       <div className="mist-idrow-ttl">
         {meta && <div className="mist-idrow-meta">{meta.map((m, i) => <React.Fragment key={i}>{i > 0 && <i />}<span>{m}</span></React.Fragment>)}</div>}
-        <h1 className="mist-h1">{title}</h1>
+        <h1 className="mist-h1">{uiText(title)}</h1>
       </div>
-      <div className="mist-idrow-people">{facts?.map((f, i) => <div key={i}><small>{f.label}</small><b>{f.value}</b></div>)}{actions}</div>
+      <div className="mist-idrow-people">{facts?.map((f, i) => <div key={i}><small>{uiText(f.label)}</small><b>{f.value}</b></div>)}{actions}</div>
     </section>
   );
 }
@@ -84,11 +85,11 @@ export function IdentityHeader({ thumb, meta, title, facts, actions }: { thumb?:
 export function Stepper({ steps, onSelect, ariaLabel = '阶段' }: { steps: Array<{ label: string; state: StepState; caption?: string }>; onSelect?: (index: number) => void; ariaLabel?: string }) {
   const cap = { done: '已完成', now: '进行中', todo: '未开始', blocked: '受阻' } as const;
   return (
-    <Card as="nav" className="mist-stepper" data-mist-scroll="x" aria-label={ariaLabel} style={{ ['--mist-steps' as string]: steps.length }}>
+    <Card as="nav" className="mist-stepper" data-mist-scroll="x" aria-label={uiText(ariaLabel)} style={{ ['--mist-steps' as string]: steps.length }}>
       {steps.map((s, i) => (
         <button key={i} type="button" className="mist-step" data-state={s.state === 'todo' ? undefined : s.state} aria-current={s.state === 'now' ? 'step' : undefined} onClick={() => onSelect?.(i)}>
           <span className="mist-step-k">{s.state === 'done' ? <Icon icon={Check} size="sm" /> : String(i + 1).padStart(2, '0')}</span>
-          <span><b>{s.label}</b><small>{s.caption ?? cap[s.state]}</small></span>
+          <span><b>{uiText(s.label)}</b><small>{uiText(s.caption ?? cap[s.state])}</small></span>
         </button>
       ))}
     </Card>
@@ -107,7 +108,7 @@ export function VerticalSteps({ steps, current, onSelect, mode = 'step' }: { ste
       {steps.map((s, i) => (
         <button ref={s.id===current?selected:undefined} key={s.id} type="button" aria-current={s.id === current ? mode : undefined} data-state={s.done ? 'done' : undefined} onClick={() => onSelect(s.id)}>
           {mode === 'step' ? <span className="mist-step-k">{s.done && s.id !== current ? <Icon icon={Check} size="xs" /> : i + 1}</span> : s.icon && <Icon icon={s.icon} size="sm" />}
-          {s.label}
+          {uiText(s.label)}
         </button>
       ))}
     </Card>
@@ -121,7 +122,7 @@ export function FlowSteps({ nodes }: { nodes: Array<{ label: string; caption?: s
       <React.Fragment key={i}>
         {i > 0 && <span className="mist-flow-bar" data-done={n.state === 'done' || n.state === 'now' ? true : undefined} />}
         <div className="mist-flow-node" data-state={n.state === 'todo' ? undefined : n.state}>
-          <span className="mist-flow-k"><Icon icon={n.state === 'done' ? Check : n.icon} /></span><b>{n.label}</b>{n.caption && <small>{n.caption}</small>}
+          <span className="mist-flow-k"><Icon icon={n.state === 'done' ? Check : n.icon} /></span><b>{uiText(n.label)}</b>{n.caption && <small>{uiText(n.caption)}</small>}
         </div>
       </React.Fragment>
     ))}</div>
@@ -146,8 +147,8 @@ export function Checklist({ items, onToggle }: { items: Array<{ label: React.Rea
   return (
     <div className="mist-checklist">{items.map((it, i) => (
       <div key={i} data-done={it.done || undefined}>
-        <button type="button" className="mist-checklist-bx" role="checkbox" aria-checked={it.done} aria-label={typeof it.label === 'string' ? it.label : undefined} onClick={() => onToggle?.(i)} disabled={!onToggle}>{it.done && <Icon icon={Check} size="xs" />}</button>
-        <span>{it.label}</span>{it.note && <small data-tone={it.noteTone}>{it.note}</small>}
+        <button type="button" className="mist-checklist-bx" role="checkbox" aria-checked={it.done} aria-label={uiText(typeof it.label === 'string' ? it.label : undefined)} onClick={() => onToggle?.(i)} disabled={!onToggle}>{it.done && <Icon icon={Check} size="xs" />}</button>
+        <span>{uiText(it.label)}</span>{it.note && <small data-tone={it.noteTone}>{it.note}</small>}
       </div>
     ))}</div>
   );
@@ -160,8 +161,8 @@ export function MeasurementTable({ rows, unit = 'cm' }: { rows: Measurement[]; u
   const sameTolerance = tol !== undefined && rows.every(row => row.tolerance === tol);
   return (
     <div className="mist-measure">
-      <div className="mist-measure-row" data-head><span>部位</span><span>标准</span><span>实测</span><span>{sameTolerance ? `公差 ±${Number.isInteger(tol) ? tol.toFixed(1) : String(tol)}${unit}` : `公差（${unit}）`}</span><span style={{ textAlign: 'right' }}>偏差</span></div>
-      {!rows.length && <div className="mist-measure-row"><span className="mist-muted" style={{ gridColumn: '1 / -1' }}>暂无测量记录</span></div>}
+      <div className="mist-measure-row" data-head><span>{uiText("部位")}</span><span>{uiText("标准")}</span><span>{uiText("实测")}</span><span>{uiText(sameTolerance ? `公差 ±${Number.isInteger(tol) ? tol.toFixed(1) : String(tol)}${unit}` : `公差（${unit}）`)}</span><span style={{ textAlign: 'right' }}>{uiText("偏差")}</span></div>
+      {!rows.length && <div className="mist-measure-row"><span className="mist-muted" style={{ gridColumn: '1 / -1' }}>{uiText("暂无测量记录")}</span></div>}
       {rows.map((r, index) => {
         const raw = r.actual - r.standard, epsilon = r.tolerance === 0 ? 0 : Number.EPSILON * Math.max(1, Math.abs(r.standard), Math.abs(r.actual), r.tolerance) * 4;
         const dv = Math.abs(raw) <= epsilon ? 0 : raw;
@@ -172,8 +173,8 @@ export function MeasurementTable({ rows, unit = 'cm' }: { rows: Measurement[]; u
         return (
           <div key={`${r.point}-${index}`} className="mist-measure-row">
             <span>{r.point}</span><span className="mist-muted mist-num">{r.standard.toFixed(1)}</span><span className="mist-num">{r.actual.toFixed(1)}</span>
-            <span className="mist-tol" title={toleranceLabel} aria-label={toleranceLabel}><i data-tone={tone} style={{ left: `${pos}%` }} /></span>
-            <span className={`mist-measure-dv mist-num ${tone ? `mist-tone-${tone}` : ''}`}>{(dv > 0 ? '+' : '') + dv.toFixed(1)}</span>
+            <span className="mist-tol" title={uiText(toleranceLabel)} aria-label={uiText(toleranceLabel)}><i data-tone={tone} style={{ left: `${pos}%` }} /></span>
+            <span className={`mist-measure-dv mist-num ${tone ? `mist-tone-${tone}` : ''}`}>{uiText((dv > 0 ? '+' : '') + dv.toFixed(1))}</span>
           </div>
         );
       })}
@@ -181,29 +182,29 @@ export function MeasurementTable({ rows, unit = 'cm' }: { rows: Measurement[]; u
   );
 }
 export function SummaryNumbers({ items }: { items: Array<{ label: React.ReactNode; value: React.ReactNode; tone?: Tone }> }) {
-  return <div className="mist-summary-nums">{items.map((it, i) => <div key={i}><small>{it.label}</small><b className={it.tone ? `mist-tone-${it.tone}` : undefined}>{it.value}</b></div>)}</div>;
+  return <div className="mist-summary-nums">{items.map((it, i) => <div key={i}><small>{uiText(it.label)}</small><b className={it.tone ? `mist-tone-${it.tone}` : undefined}>{it.value}</b></div>)}</div>;
 }
 
 /** 关联对象列表（详情页右栏）。 */
 export function RelatedList({ items }: { items: Array<{ icon: LucideIcon; title: React.ReactNode; sub?: React.ReactNode; onClick?: () => void }> }) {
-  return <div className="mist-related">{items.map((it, i) => <button key={i} type="button" onClick={it.onClick}><Tile icon={it.icon} /><span><b>{it.title}</b>{it.sub && <small>{it.sub}</small>}</span><span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span></button>)}</div>;
+  return <div className="mist-related">{items.map((it, i) => <button key={i} type="button" onClick={it.onClick}><Tile icon={it.icon} /><span><b>{it.title}</b>{it.sub && <small>{uiText(it.sub)}</small>}</span><span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span></button>)}</div>;
 }
 
 /** 版本选择（R1-A-1 / R2-A-2…）。 */
 export function VersionPicker({ versions, value, onChange }: { versions: string[]; value: string; onChange: (v: string) => void }) {
-  return <div className="mist-vers" role="group" aria-label="版本">{versions.map(v => <button key={v} type="button" aria-pressed={v === value} onClick={() => onChange(v)}>{v}</button>)}</div>;
+  return <div className="mist-vers" role="group" aria-label={uiText("版本")}>{versions.map(v => <button key={v} type="button" aria-pressed={v === value} onClick={() => onChange(v)}>{v}</button>)}</div>;
 }
 
 /** 商品展台（抠图 + 浅色舞台）。 */
 export function ObjectStage({ src, alt, size, topLeft, topRight, caption }: { src: string; alt: string; size?: 'md' | 'lg'; topLeft?: React.ReactNode; topRight?: React.ReactNode; caption?: React.ReactNode }) {
-  return <div className="mist-stage" data-size={size === 'lg' ? 'lg' : undefined}><img key={src} src={src} alt={alt} />{topLeft && <span className="mist-stage-tl">{topLeft}</span>}{topRight && <span className="mist-stage-tr">{topRight}</span>}{caption && <span className="mist-stage-cap">{caption}</span>}</div>;
+  return <div className="mist-stage" data-size={size === 'lg' ? 'lg' : undefined}><img key={src} src={src} alt={uiText(alt)} />{topLeft && <span className="mist-stage-tl">{topLeft}</span>}{topRight && <span className="mist-stage-tr">{topRight}</span>}{caption && <span className="mist-stage-cap">{uiText(caption)}</span>}</div>;
 }
 
 /** 单据汇总条（订单/发票/核销页顶部的 3–4 个大数字）。 */
 export function SummaryBar({ items }: { items: Array<{ label: React.ReactNode; value: React.ReactNode; unit?: React.ReactNode; hint?: React.ReactNode; hintTone?: Tone }> }) {
   return (
     <Card as="section" className="mist-sumbar" style={{ ['--mist-sum-cols' as string]: items.length }}>
-      {items.map((it, i) => <div key={i}><small>{it.label}</small><div className="mist-sumbar-big">{it.value}{it.unit && <small className="mist-muted">{it.unit}</small>}</div>{it.hint && <div className={`mist-sumbar-hint ${it.hintTone ? `mist-tone-${it.hintTone}` : ''}`}>{it.hint}</div>}</div>)}
+      {items.map((it, i) => <div key={i}><small>{uiText(it.label)}</small><div className="mist-sumbar-big">{it.value}{it.unit && <small className="mist-muted">{uiText(it.unit)}</small>}</div>{it.hint && <div className={`mist-sumbar-hint ${it.hintTone ? `mist-tone-${it.hintTone}` : ''}`}>{uiText(it.hint)}</div>}</div>)}
     </Card>
   );
 }
@@ -234,7 +235,7 @@ export function Kanban<T>({ columns, itemKey, renderCard, onMove, onOpen }: { co
 
 /** 设置行：左侧标题+说明，右侧控件。 */
 export function SettingRow({ title, description, control }: { title: React.ReactNode; description?: React.ReactNode; control: React.ReactNode }) {
-  return <div className="mist-setting-row"><div><b>{title}</b>{description && <small>{description}</small>}</div>{control}</div>;
+  return <div className="mist-setting-row"><div><b>{uiText(title)}</b>{description && <small>{uiText(description)}</small>}</div>{control}</div>;
 }
 
 export { toneAttr };

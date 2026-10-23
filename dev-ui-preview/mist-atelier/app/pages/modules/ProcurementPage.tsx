@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 采购管理：面料 / 成衣业务组下分“采购订单”“委外加工单”两个入口；阶段流水线 + 单据详情轨迹，所有对外动作都登记真实依据。 */
 import React from 'react';
@@ -141,14 +142,14 @@ export function ProcurementPage() {
   const columns: Column<FulfillmentPurchase>[] = [
     { key: 'code', header: ENTRY_LABEL[entry], width: 'minmax(200px,2.2fr)', render: p => <div className="mist-col" style={{ gap: 2 }}><span><Mono>{p.code}</Mono> · {p.description}</span><small className="mist-muted">{KIND_LABEL[p.kind]} · {lineLabel(p)}</small></div> },
     { key: 'supplier', header: '供应商', width: 'minmax(120px,1fr)', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span>{p.supplier}</span><small className="mist-muted">{p.terms || '付款条件未填'}</small></div> },
-    { key: 'due', header: '要求 / 承诺交期', width: '128px', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span className={purchaseFlags(p, day).some(flag => flag.key === 'overdue') ? 'mist-tone-bad' : undefined}>{p.due || '未填'}</span><small className="mist-muted">{p.supplierConfirmation ? `承诺 ${shortWhen(p.supplierConfirmation.confirmedDue)}` : '供应商未确认'}</small></div> },
-    { key: 'received', header: entry === 'processing' ? '累计回交' : '累计交付', width: '136px', align: 'right', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{p.received} / {p.quantity} {p.unit}</span>{purchaseFlags(p, day).filter(flag => flag.key === 'variance').map(flag => <small key={flag.key} className="mist-tone-bad">{flag.label}</small>)}</div> },
+    { key: 'due', header: '要求 / 承诺交期', width: '128px', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2 }}><span className={purchaseFlags(p, day).some(flag => flag.key === 'overdue') ? 'mist-tone-bad' : undefined}>{p.due || '未填'}</span><small className="mist-muted">{uiText(p.supplierConfirmation ? `承诺 ${shortWhen(p.supplierConfirmation.confirmedDue)}` : '供应商未确认')}</small></div> },
+    { key: 'received', header: entry === 'processing' ? '累计回交' : '累计交付', width: '136px', align: 'right', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{p.received} / {p.quantity} {uiText(p.unit)}</span>{purchaseFlags(p, day).filter(flag => flag.key === 'variance').map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> },
     { key: 'state', header: '审批 / 阶段', width: '104px', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={p.state === 'approved' ? STAGE_TONE[purchaseStage(p)] : p.state === 'rejected' ? 'bad' : p.state === 'pending' ? 'warn' : 'neutral'}>{status[p.state]}</Pill>{p.state === 'approved' && <small className="mist-muted">{STAGE_LABEL[purchaseStage(p)]}</small>}</div> },
   ];
-  const createButton = can ? <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(purchaseSpec())}>{`新建${ENTRY_LABEL[entry]}`}</Button> : undefined;
+  const createButton = can ? <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(purchaseSpec())}>{ui`新建${ENTRY_LABEL[entry]}`}</Button> : undefined;
   const empty = entryRows.length
-    ? <EmptyState icon={SearchX} title="没有符合条件的单据" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>清除筛选</Button>} />
-    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={sourceLine ? `本条目还没有${ENTRY_LABEL[entry]}` : `还没有${domain === 'fabric' ? '面料' : '成衣'}${ENTRY_LABEL[entry]}`} description={entry === 'processing' ? '委外加工单从订单条目发起：选择加工厂、约定加工费与回交日期，批准后发出。' : '采购订单从订单条目的物料或成品需求发起，批准后才能发给供应商。'} action={can ? <Button icon={Plus} onClick={() => editor.open(purchaseSpec())}>{`新建${ENTRY_LABEL[entry]}`}</Button> : undefined} />;
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的单据")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText(sourceLine ? `本条目还没有${ENTRY_LABEL[entry]}` : `还没有${domain === 'fabric' ? '面料' : '成衣'}${ENTRY_LABEL[entry]}`)} description={uiText(entry === 'processing' ? '委外加工单从订单条目发起：选择加工厂、约定加工费与回交日期，批准后发出。' : '采购订单从订单条目的物料或成品需求发起，批准后才能发给供应商。')} action={can ? <Button icon={Plus} onClick={() => editor.open(purchaseSpec())}>{ui`新建${ENTRY_LABEL[entry]}`}</Button> : undefined} />;
   const detail = selected && state
     ? <PurchaseDetail purchase={selected} state={state} day={day} me={me} can={can} canApprove={canApprove} locked={locked}
         onEdit={() => editor.open(purchaseSpec(selected))}
@@ -160,41 +161,41 @@ export function ProcurementPage() {
         onAttach={ids => run({ type: 'fulfillment.procurement.save', payload: { ...selected, fileIds: ids } })}
         onInventory={() => go('inventory', undefined, { section: selected.id })} onSupplier={() => go('suppliers', selected.supplierId)}
         onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }} />
-    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title="单据详情" description={loading ? '正在读取采购' : '从列表选择一张单据，查看审批、供应商确认与交付轨迹'} compact />;
+    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText("单据详情")} description={uiText(loading ? '正在读取采购' : '从列表选择一张单据，查看审批、供应商确认与交付轨迹')} compact />;
 
   const summary = selected && state ? (() => { const p = selected, stage = purchaseStage(p), flags = purchaseFlags(p, day).filter(flag => flag.key !== 'returned');
     return <PreviewSummary openLabel={`打开${ENTRY_LABEL[entryOf(p)]}`} onOpen={() => full.open(p.id)} data={{
-      code: p.code, status: <Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage]}</Pill>,
+      code: p.code, status: <Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill>,
       title: p.description, description: `${KIND_LABEL[p.kind]} · ${lineLabel(p)}`,
       facts: [
         { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` },
         { label: '单价', value: `${p.price} ${p.currency}` }, { label: '要求交期', value: p.due || '未填' },
         { label: entryOf(p) === 'processing' ? '累计回交' : '累计交付', value: `${p.received} / ${p.quantity} ${p.unit}` }, { label: '付款条件', value: p.terms || '未填' },
       ],
-      extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{flag.label}</Pill>)}</div> : undefined,
+      extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined,
     }} />; })() : null;
-  const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有采购写权限，可以查看单据与轨迹；新建、发出与交付登记由对应业务组经办人操作。</Banner></div> : null;
+  const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有采购写权限，可以查看单据与轨迹；新建、发出与交付登记由对应业务组经办人操作。")}</Banner></div> : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
-    <PageHeader eyebrow="订单履约 · 采购与委外" title="采购管理" description={sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style} · ${sourceLine.name} · 只显示本条目的采购与委外。` : '从准确订单条目形成供应承诺：批准后线下发出、登记供应商确认，再逐次登记真实交付与回交。')}
+    <PageHeader eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")} description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style} · ${sourceLine.name} · 只显示本条目的采购与委外。` : '从准确订单条目形成供应承诺：批准后线下发出、登记供应商确认，再逐次登记真实交付与回交。'))}
       actions={<>
-        {sourceOrder && sourceLine && <Button onClick={() => go('orders/detail', sourceOrder.id, { orderLineId: sourceLine.id, customerId: sourceOrder.customerId, section: sourceOrder.type })}>返回来源订单</Button>}
-        {route.orderLineId && <Button onClick={() => go('procurement')}>查看全部采购</Button>}
-        <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>导出</Button>
+        {sourceOrder && sourceLine && <Button onClick={() => go('orders/detail', sourceOrder.id, { orderLineId: sourceLine.id, customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
+        {route.orderLineId && <Button onClick={() => go('procurement')}>{uiText("查看全部采购")}</Button>}
+        <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('采购台账', ['编号', '入口', '供应商', '内容', '数量', '单位', '单价', '币种', '要求交期', '承诺交期', '审批', '阶段', '累计交付'], rows.map(p => [p.code, ENTRY_LABEL[entryOf(p)], p.supplier, p.description, p.quantity, p.unit, p.price, p.currency, p.due, p.supplierConfirmation?.confirmedDue || '', status[p.state], STAGE_LABEL[purchaseStage(p)], p.received]))}>{uiText("导出")}</Button>
         {!rfqTab && createButton}
       </>} />
     {readOnlyBanner}
-    {(error || failure) && <div className="mist-section"><Banner tone="bad" title="采购操作未完成" actions={error ? <Button onClick={() => void refresh()}>重试</Button> : undefined}>{failure || error}</Banner></div>}
-    <div className="mist-section"><Segmented<Domain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${inScope.filter(p => p.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${inScope.filter(p => p.domain === 'fabric').length}` }]} /></div>
+    {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("采购操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
+    <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${inScope.filter(p => p.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${inScope.filter(p => p.domain === 'fabric').length}` }]} /></div>
     <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open').length : 0 }]} />
     {rfqTab ? <>
-      <Toolbar><SearchField value={query} onChange={setQuery} placeholder="搜索询价单号、内容、来源订单或供应商" /></Toolbar>
+      <Toolbar><SearchField value={query} onChange={setQuery} placeholder={uiText("搜索询价单号、内容、来源订单或供应商")} /></Toolbar>
       <RfqLedger state={state || undefined} day={day} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} presetSupplierId={presetSupplierId}
         onPurchase={id => { setRfqTab(false); setPicked(id); setDrawer(true); setEntryChoice(null); go('procurement', id); }} onSupplier={id => go('suppliers', id)} />
     </> : <>
     <Toolbar>
-      <SearchField value={query} onChange={setQuery} placeholder="搜索单据号、供应商、内容或来源订单" />
-      <Dropdown<FlagFilter> label="异常" value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'overdue', label: '已过要求交期' }, { value: 'variance', label: '数量差异' }, { value: 'returned', label: '审批退回' }]} />
+      <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索单据号、供应商、内容或来源订单")} />
+      <Dropdown<FlagFilter> label={uiText("异常")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'overdue', label: '已过要求交期' }, { value: 'variance', label: '数量差异' }, { value: 'returned', label: '审批退回' }]} />
     </Toolbar>
     <Pipeline<StageFilter> value={stageFilter} onChange={setStageFilter} items={[
       { value: 'all', label: '全部', count: stageCount('all'), color: 'var(--mist-ink-2)' },
@@ -205,7 +206,7 @@ export function ProcurementPage() {
       { value: 'done', label: '已完成', count: stageCount('done'), color: 'var(--mist-ok)' },
     ]} />
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '单据详情'} drawerSub={selected?.supplier}
-      list={<Card><DataTable ariaLabel={`${ENTRY_LABEL[entry]}列表`} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
+      list={<Card><DataTable ariaLabel={ui`${ENTRY_LABEL[entry]}列表`} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
     </>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
@@ -255,8 +256,8 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       <span className="mist-mono mist-muted">{p.code}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{p.description}</div>
     </div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage]}</Pill><Pill>{KIND_LABEL[p.kind]}</Pill><Pill>{p.domain === 'fabric' ? '面料业务' : '成衣业务'}</Pill>{flags.filter(flag => flag.key !== 'returned').map(flag => <Pill key={flag.key} tone="bad">{flag.label}</Pill>)}</div>
-    <Banner tone={next.tone} title={next.title} actions={p.transferredTo ? <Button variant="quiet" onClick={() => onOpenPurchase(p.transferredTo!.purchaseId)}>查看 {p.transferredTo.purchaseCode}</Button> : undefined}>{next.text}</Banner>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill><Pill>{KIND_LABEL[p.kind]}</Pill><Pill>{uiText(p.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>{flags.filter(flag => flag.key !== 'returned').map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
+    <Banner tone={next.tone} title={uiText(next.title)} actions={p.transferredTo ? <Button variant="quiet" onClick={() => onOpenPurchase(p.transferredTo!.purchaseId)}>{uiText("查看 ")}{p.transferredTo.purchaseCode}</Button> : undefined}>{next.text}</Banner>
     <ActionBar busy={locked} actions={[
       { label: '编辑草稿', icon: Pencil, onClick: onEdit, reason: writeReason, hidden: stage !== 'draft' },
       { label: '提交审批', icon: Send, onClick: onSubmit, primary: true, reason: writeReason || (p.state === 'rejected' ? '退回的单据请先修订草稿再提交' : false), hidden: stage !== 'draft' },
@@ -280,30 +281,30 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       { label: '供应商承诺日', value: p.supplierConfirmation?.confirmedDue || '未确认' },
       { label: processing ? '累计回交' : '累计交付', value: `${p.received} / ${p.quantity} ${p.unit}${p.received > p.quantity ? ' · 超出待处理' : p.received < p.quantity && p.received > 0 ? ` · 尚差 ${round(p.quantity - p.received)}` : ''}` },
     ]} />
-    {p.transferredFrom && <Banner tone="accent" title={`由 ${p.transferredFrom.purchaseCode}（${p.transferredFrom.supplier}）转入`} actions={<Button variant="quiet" onClick={() => onOpenPurchase(p.transferredFrom!.purchaseId)}>查看原合同</Button>}>{p.transferredFrom.reason}</Banner>}
+    {p.transferredFrom && <Banner tone="accent" title={ui`由 ${p.transferredFrom.purchaseCode}（${p.transferredFrom.supplier}）转入`} actions={<Button variant="quiet" onClick={() => onOpenPurchase(p.transferredFrom!.purchaseId)}>{uiText("查看原合同")}</Button>}>{p.transferredFrom.reason}</Banner>}
     {p.note && <p className="mist-sub">{p.note}</p>}
-    <DetailBlock title="阶段轨迹"><Checklist items={track} /></DetailBlock>
-    <DetailBlock title={processing ? '回交记录' : '交付记录'}>
-      {receipts.length ? <DataTable ariaLabel={`${p.code} 交付记录`} rows={receipts} rowKey={receipt => receipt.id} columns={[
+    <DetailBlock title={uiText("阶段轨迹")}><Checklist items={track} /></DetailBlock>
+    <DetailBlock title={uiText(processing ? '回交记录' : '交付记录')}>
+      {receipts.length ? <DataTable ariaLabel={ui`${p.code} 交付记录`} rows={receipts} rowKey={receipt => receipt.id} columns={[
         { key: 'date', header: '日期', render: receipt => receipt.date },
         { key: 'qty', header: '实收 / 拒收', align: 'right', render: receipt => `${receipt.quantity} / ${receipt.rejected} ${p.unit}` },
         { key: 'loc', header: '实际地点', hideOnMobile: true, render: receipt => `${receipt.destination === 'warehouse' ? '入库' : processing ? '加工交付' : '直送加工方'} · ${receipt.location}` },
         { key: 'evidence', header: '依据', hideOnMobile: true, render: receipt => receipt.evidence },
-      ]} /> : <span className="mist-note">还没有{processing ? '回交' : '交付'}记录</span>}
+      ]} /> : <span className="mist-note">{uiText("还没有")}{uiText(processing ? '回交' : '交付')}{uiText("记录")}</span>}
     </DetailBlock>
-    {rejectedQty > 0 && <DetailBlock title="拒收退换">{receipts.filter(r => r.rejected > 0).map(r => { const left = round(r.rejected - receiptReturnedQuantity(r)); return <div className="mist-col" key={r.id} data-receipt-returns={r.id} style={{ gap: 4 }}>
-      <div className="mist-row mist-module-actions"><span>{r.date} 收货拒收 {r.rejected} {p.unit}</span><span className="mist-spacer" />{left > 0 ? <Pill tone="warn">{left} {p.unit} 待登记退换</Pill> : <Pill tone="ok">已登记退换</Pill>}{left > 0 && can && !locked && p.state === 'approved' && <Button size="sm" onClick={() => onReturn(r)}>登记退货 / 换货</Button>}</div>
-      {(r.returns || []).map(row => <div className="mist-row mist-module-actions" key={row.id} data-receipt-return={row.id}><span className="mist-note">{row.date} 退回 {row.quantity} {p.unit} · {row.disposition === 'replace' ? '供应商补发' : '不再补发（短交）'} · {row.evidence}</span><span className="mist-spacer" />{row.reversed ? <Pill>已冲回</Pill> : can && !locked && <Button size="sm" variant="quiet" onClick={() => onReturnReverse(r, row)}>冲回</Button>}</div>)}
+    {rejectedQty > 0 && <DetailBlock title={uiText("拒收退换")}>{receipts.filter(r => r.rejected > 0).map(r => { const left = round(r.rejected - receiptReturnedQuantity(r)); return <div className="mist-col" key={r.id} data-receipt-returns={r.id} style={{ gap: 4 }}>
+      <div className="mist-row mist-module-actions"><span>{r.date}{uiText(" 收货拒收 ")}{r.rejected} {uiText(p.unit)}</span><span className="mist-spacer" />{left > 0 ? <Pill tone="warn">{left} {uiText(p.unit)}{uiText(" 待登记退换")}</Pill> : <Pill tone="ok">{uiText("已登记退换")}</Pill>}{left > 0 && can && !locked && p.state === 'approved' && <Button size="sm" onClick={() => onReturn(r)}>{uiText("登记退货 / 换货")}</Button>}</div>
+      {(r.returns || []).map(row => <div className="mist-row mist-module-actions" key={row.id} data-receipt-return={row.id}><span className="mist-note">{row.date}{uiText(" 退回 ")}{row.quantity} {uiText(p.unit)} · {uiText(row.disposition === 'replace' ? '供应商补发' : '不再补发（短交）')} · {row.evidence}</span><span className="mist-spacer" />{row.reversed ? <Pill>{uiText("已冲回")}</Pill> : can && !locked && <Button size="sm" variant="quiet" onClick={() => onReturnReverse(r, row)}>{uiText("冲回")}</Button>}</div>)}
     </div>; })}</DetailBlock>}
-    <div className="mist-row mist-module-actions"><Button onClick={onInventory}>查看来源库存</Button><Button onClick={onSupplier}>供应商档案</Button></div>
-    <DetailBlock title="附件">
+    <div className="mist-row mist-module-actions"><Button onClick={onInventory}>{uiText("查看来源库存")}</Button><Button onClick={onSupplier}>{uiText("供应商档案")}</Button></div>
+    <DetailBlock title={uiText("附件")}>
       <RecordFiles key={p.id} ids={p.fileIds} onAttach={can && stage === 'draft' ? onAttach : undefined} />
-      {!p.fileIds.length && stage !== 'draft' && <span className="mist-note">提交后附件随版本冻结</span>}
+      {!p.fileIds.length && stage !== 'draft' && <span className="mist-note">{uiText("提交后附件随版本冻结")}</span>}
     </DetailBlock>
-    {!!p.revisionHistory?.length && <DetailBlock title="承诺与审批版本">
-      <Timeline events={p.revisionHistory.slice().reverse().map(revision => ({ who: revision.decision?.actor || p.createdBy, when: new Date(revision.decision?.at || revision.submittedAt).toLocaleString(), text: <><div>第 {revision.revision} 版 · {revision.decision ? status[revision.decision.decision] : '待审批'}</div><div>{revision.snapshot.supplier} · {revision.snapshot.description} · {revision.snapshot.quantity} {revision.snapshot.unit} × {revision.snapshot.price} {revision.snapshot.currency}</div><div>{revision.snapshot.terms} · {revision.snapshot.destination} · {revision.snapshot.due}</div>{revision.decision && <div>{revision.decision.note}</div>}<RecordFiles ids={revision.snapshot.fileIds} /></> }))} />
+    {!!p.revisionHistory?.length && <DetailBlock title={uiText("承诺与审批版本")}>
+      <Timeline events={p.revisionHistory.slice().reverse().map(revision => ({ who: revision.decision?.actor || p.createdBy, when: new Date(revision.decision?.at || revision.submittedAt).toLocaleString(), text: <><div>{uiText("第 ")}{revision.revision}{uiText(" 版 · ")}{uiText(revision.decision ? status[revision.decision.decision] : '待审批')}</div><div>{revision.snapshot.supplier} · {revision.snapshot.description} · {revision.snapshot.quantity} {uiText(revision.snapshot.unit)} × {revision.snapshot.price} {revision.snapshot.currency}</div><div>{revision.snapshot.terms} · {revision.snapshot.destination} · {revision.snapshot.due}</div>{revision.decision && <div>{revision.decision.note}</div>}<RecordFiles ids={revision.snapshot.fileIds} /></> }))} />
     </DetailBlock>}
-    <DetailBlock title="处理记录"><Events entity="procurement" id={p.id} /></DetailBlock>
+    <DetailBlock title={uiText("处理记录")}><Events entity="procurement" id={p.id} /></DetailBlock>
   </DetailBody>;
 }
 

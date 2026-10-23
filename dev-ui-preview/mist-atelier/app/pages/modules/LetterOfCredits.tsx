@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 信用证台账（外贸与报关 · 信用证页签）：单证员按来证登记条款、修改书、交单与银行审单结果。系统按条款提示迟装 / 迟交单 / 过期 / 分批不符点，不代替银行审单。 */
 import React from 'react';
 import { Ban, FilePen, Landmark, Plus, SearchX, Send, Stamp } from 'lucide-react';
@@ -90,23 +91,23 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
   const columns: Column<MistLetterOfCredit>[] = [
     { key: 'lc', header: '信用证', width: 'minmax(160px,1.4fr)', render: lc => <div className="mist-col" style={{ gap: 2 }}><Mono>{lc.lcNo}</Mono><small className="mist-muted">{lc.code} · {lc.issuingBank}</small></div> },
     { key: 'customer', header: '客户 / 订单', width: 'minmax(150px,1.3fr)', hideOnMobile: true, render: lc => <div className="mist-col" style={{ gap: 2 }}><span>{lc.customer}</span><small className="mist-muted">{lc.orderIds.map(id => state?.orders.find(o => o.id === id)?.code || id).join('、')}</small></div> },
-    { key: 'amount', header: '金额 / 可用', width: 'minmax(140px,1.2fr)', align: 'right', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(lc.amount, lc.currency)}{lc.tolerancePct ? ` ±${lc.tolerancePct}%` : ''}</span><small className="mist-muted">可用 {money(lcAvailableMinor(lc) / 100, lc.currency)}</small></div> },
-    { key: 'dates', header: '最晚装运 / 有效期', width: '140px', hideOnMobile: true, render: lc => <div className="mist-col" style={{ gap: 2 }}><span>{lc.latestShipmentDate}</span><small className="mist-muted">有效至 {lc.expiryDate}</small></div> },
+    { key: 'amount', header: '金额 / 可用', width: 'minmax(140px,1.2fr)', align: 'right', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(lc.amount, lc.currency)}{uiText(lc.tolerancePct ? ` ±${lc.tolerancePct}%` : '')}</span><small className="mist-muted">{uiText("可用 ")}{money(lcAvailableMinor(lc) / 100, lc.currency)}</small></div> },
+    { key: 'dates', header: '最晚装运 / 有效期', width: '140px', hideOnMobile: true, render: lc => <div className="mist-col" style={{ gap: 2 }}><span>{lc.latestShipmentDate}</span><small className="mist-muted">{uiText("有效至 ")}{lc.expiryDate}</small></div> },
     { key: 'status', header: '状态', width: 'minmax(130px,1.2fr)', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[lcStatus(lc, day)]}>{LC_STATUS_LABEL[lcStatus(lc, day)]}</Pill>{lcAlerts(lc, day).map(a => <small key={a} className="mist-tone-bad">{a}</small>)}</div> },
   ];
   const detail = selected && state ? <LcDetail lc={selected} state={state} day={day} can={can} locked={locked} run={run} onShipment={onShipment}
       onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} presentable={presentable(selected).length} />
-    : <EmptyState icon={Landmark} title="信用证详情" description="从列表选择一张信用证，查看条款、修改记录与交单" compact />;
+    : <EmptyState icon={Landmark} title={uiText("信用证详情")} description={uiText("从列表选择一张信用证，查看条款、修改记录与交单")} compact />;
   const covered = (o: MistOrder) => all.filter(lc => !lc.cancelled && lc.orderIds.includes(o.id));
   const missing = lcOrders.filter(o => !covered(o).length && o.governance?.status === 'approved');
 
   return <>
-    {missing.length > 0 && <div className="mist-section"><Banner tone="warn" title={`${missing.length} 张已审批的信用证付款订单尚未登记来证`}>{missing.map(o => o.code).join('、')}。收到通知行转来的信用证后请登记，核对金额、最晚装运日与有效期是否满足合同交期。</Banner></div>}
+    {missing.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${missing.length} 张已审批的信用证付款订单尚未登记来证`}>{missing.map(o => o.code).join('、')}{uiText("。收到通知行转来的信用证后请登记，核对金额、最晚装运日与有效期是否满足合同交期。")}</Banner></div>}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.lcNo} · ${selected.customer}` : '信用证详情'} drawerSub={selected ? LC_STATUS_LABEL[lcStatus(selected, day)] : undefined}
       list={<Card>
-        <CardHeader title={`信用证台账 · ${all.length}`} sub="按来证登记条款，修改书、交单与银行审单结果逐次记录。" tools={can ? <Button variant="primary" icon={Plus} disabled={locked || !lcOrders.length} title={lcOrders.length ? undefined : '没有合同约定以信用证付款的订单'} onClick={() => open(createSpec())}>登记信用证</Button> : undefined} />
-        <DataTable ariaLabel="信用证台账" loading={loading} rows={rows} rowKey={lc => lc.id} selectedKey={selected?.id} density="comfy" onRowClick={lc => { setPicked(lc.id); setDrawer(true); }} columns={columns}
-          empty={needle && all.length ? <EmptyState icon={SearchX} title="没有符合条件的信用证" description="换个关键词试试。" /> : <EmptyState icon={Landmark} title={`还没有登记${domain === 'fabric' ? '面料' : '成衣'}信用证`} description="收到通知行转来的信用证后，由单证员按正本登记条款。" />} />
+        <CardHeader title={ui`信用证台账 · ${all.length}`} sub={uiText("按来证登记条款，修改书、交单与银行审单结果逐次记录。")} tools={can ? <Button variant="primary" icon={Plus} disabled={locked || !lcOrders.length} title={uiText(lcOrders.length ? undefined : '没有合同约定以信用证付款的订单')} onClick={() => open(createSpec())}>{uiText("登记信用证")}</Button> : undefined} />
+        <DataTable ariaLabel={uiText("信用证台账")} loading={loading} rows={rows} rowKey={lc => lc.id} selectedKey={selected?.id} density="comfy" onRowClick={lc => { setPicked(lc.id); setDrawer(true); }} columns={columns}
+          empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的信用证")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Landmark} title={ui`还没有登记${domain === 'fabric' ? '面料' : '成衣'}信用证`} description={uiText("收到通知行转来的信用证后，由单证员按正本登记条款。")} />} />
       </Card>}
       detail={detail} />
     <ExportedOrders orders={lcOrders} covered={covered} onOrder={onOrder} />
@@ -116,12 +117,12 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
 function ExportedOrders({ orders, covered, onOrder }: { orders: MistOrder[]; covered: (o: MistOrder) => MistLetterOfCredit[]; onOrder: (o: MistOrder) => void }) {
   if (!orders.length) return null;
   return <div className="mist-section"><Card>
-    <CardHeader title="信用证付款订单" sub="合同约定以信用证付款的订单与已登记来证。" />
-    <DataTable ariaLabel="信用证付款订单" rows={orders} rowKey={o => o.id} onRowClick={onOrder} columns={[
+    <CardHeader title={uiText("信用证付款订单")} sub={uiText("合同约定以信用证付款的订单与已登记来证。")} />
+    <DataTable ariaLabel={uiText("信用证付款订单")} rows={orders} rowKey={o => o.id} onRowClick={onOrder} columns={[
       { key: 'order', header: '订单', width: 'minmax(150px,1.2fr)', render: o => <div className="mist-col" style={{ gap: 2 }}><Mono>{o.code}</Mono><small className="mist-muted">{o.customer}</small></div> },
-      { key: 'note', header: '合同付款约定', width: 'minmax(160px,1.6fr)', hideOnMobile: true, render: o => o.governance?.contract.paymentNote || <span className="mist-muted">合同未写明信用证条款</span> },
+      { key: 'note', header: '合同付款约定', width: 'minmax(160px,1.6fr)', hideOnMobile: true, render: o => o.governance?.contract.paymentNote || <span className="mist-muted">{uiText("合同未写明信用证条款")}</span> },
       { key: 'due', header: '订单交期', width: '110px', hideOnMobile: true, render: o => o.due || '未定' },
-      { key: 'lc', header: '来证', width: 'minmax(140px,1.2fr)', render: o => { const list = covered(o); return list.length ? list.map(lc => lc.lcNo).join('、') : <span className="mist-tone-bad">未登记来证</span>; } },
+      { key: 'lc', header: '来证', width: 'minmax(140px,1.2fr)', render: o => { const list = covered(o); return list.length ? list.map(lc => lc.lcNo).join('、') : <span className="mist-tone-bad">{uiText("未登记来证")}</span>; } },
     ]} />
   </Card></div>;
 }
@@ -133,9 +134,9 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
   const status = lcStatus(lc, day), alerts = lcAlerts(lc, day), available = lcAvailableMinor(lc) / 100, cancelled = !!lc.cancelled;
   const openPresentations = lc.presentations.some(p => !final(p));
   return <DetailBody data-lc-detail={lc.id} heading={<div><span className="mist-mono mist-muted">{lc.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{lc.lcNo}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS_TONE[status]}>{LC_STATUS_LABEL[status]}</Pill><Pill>{lc.availableBy === 'sight' ? '即期' : `远期 ${lc.usanceDays} 天`}</Pill>{lc.confirmed && <Pill tone="accent">保兑</Pill>}</div>
-    {alerts.length > 0 && <Banner tone="warn" title="需要关注">{alerts.join('；')}</Banner>}
-    {lc.cancelled && <Banner tone="neutral" title={`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS_TONE[status]}>{LC_STATUS_LABEL[status]}</Pill><Pill>{uiText(lc.availableBy === 'sight' ? '即期' : `远期 ${lc.usanceDays} 天`)}</Pill>{lc.confirmed && <Pill tone="accent">{uiText("保兑")}</Pill>}</div>
+    {alerts.length > 0 && <Banner tone="warn" title={uiText("需要关注")}>{alerts.join('；')}</Banner>}
+    {lc.cancelled && <Banner tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
       { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '没有可交单的出运（须含本信用证订单且尚未交单）' : false },
       { label: '登记修改书', icon: FilePen, onClick: onAmend, reason: cancelled ? '信用证已注销' : false },
@@ -155,20 +156,20 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
       { label: '分批装运', value: yes(lc.partialShipment) },
       { label: '转运', value: yes(lc.transhipment) },
     ]} />
-    {lc.documentsRequired && <p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>单据要求：{lc.documentsRequired}</p>}
-    {lc.note && <p className="mist-sub">备注：{lc.note}</p>}
-    <DetailBlock title={`交单 · ${lc.presentations.length}`}>
-      {lc.presentations.length ? <DataTable ariaLabel={`${lc.lcNo} 交单记录`} rows={[...lc.presentations].reverse()} rowKey={p => p.id} columns={[
-        { key: 'no', header: '交单', render: p => <div className="mist-col" style={{ gap: 2 }}><TextLink onClick={() => onShipment(p.shipmentId)}>第 {p.no} 次 · {p.shipmentCode}</TextLink><small className="mist-muted">装运 {p.shipmentDate} · 交单 {p.presentedAt}（截止 {p.deadline}）</small></div> },
-        { key: 'amount', header: '金额', align: 'right', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(p.amount, lc.currency)}</span>{p.honouredAmount !== undefined && <small className="mist-muted">承付 {money(p.honouredAmount, lc.currency)}</small>}</div> },
-        { key: 'result', header: '结果', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={RESULT_TONE[p.result]}>{LC_RESULT_LABEL[p.result]}</Pill>{p.autoDiscrepancies.map(d => <small key={d} className="mist-tone-bad">{d}</small>)}{p.discrepancies && <small className="mist-muted">不符点：{p.discrepancies}</small>}{p.resultNote && <small className="mist-muted">{p.resultNote}</small>}</div> },
-        ...(can ? [{ key: 'act', header: '', align: 'right' as const, render: (p: MistLcPresentation) => final(p) ? null : <Button size="sm" icon={Stamp} disabled={locked} aria-label={`登记第 ${p.no} 次交单审单结果`} onClick={() => onResult(p)}>审单结果</Button> }] : []),
-      ]} /> : <span className="mist-note">尚未交单。出运装船后，按信用证要求备齐单据在交单期内向银行交单。</span>}
+    {lc.documentsRequired && <p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{uiText("单据要求：")}{lc.documentsRequired}</p>}
+    {lc.note && <p className="mist-sub">{uiText("备注：")}{lc.note}</p>}
+    <DetailBlock title={ui`交单 · ${lc.presentations.length}`}>
+      {lc.presentations.length ? <DataTable ariaLabel={ui`${lc.lcNo} 交单记录`} rows={[...lc.presentations].reverse()} rowKey={p => p.id} columns={[
+        { key: 'no', header: '交单', render: p => <div className="mist-col" style={{ gap: 2 }}><TextLink onClick={() => onShipment(p.shipmentId)}>{uiText("第 ")}{p.no}{uiText(" 次 · ")}{p.shipmentCode}</TextLink><small className="mist-muted">{uiText("装运 ")}{p.shipmentDate}{uiText(" · 交单 ")}{p.presentedAt}{uiText("（截止 ")}{p.deadline}）</small></div> },
+        { key: 'amount', header: '金额', align: 'right', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(p.amount, lc.currency)}</span>{p.honouredAmount !== undefined && <small className="mist-muted">{uiText("承付 ")}{money(p.honouredAmount, lc.currency)}</small>}</div> },
+        { key: 'result', header: '结果', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={RESULT_TONE[p.result]}>{LC_RESULT_LABEL[p.result]}</Pill>{p.autoDiscrepancies.map(d => <small key={d} className="mist-tone-bad">{d}</small>)}{p.discrepancies && <small className="mist-muted">{uiText("不符点：")}{p.discrepancies}</small>}{p.resultNote && <small className="mist-muted">{p.resultNote}</small>}</div> },
+        ...(can ? [{ key: 'act', header: '', align: 'right' as const, render: (p: MistLcPresentation) => final(p) ? null : <Button size="sm" icon={Stamp} disabled={locked} aria-label={ui`登记第 ${p.no} 次交单审单结果`} onClick={() => onResult(p)}>{uiText("审单结果")}</Button> }] : []),
+      ]} /> : <span className="mist-note">{uiText("尚未交单。出运装船后，按信用证要求备齐单据在交单期内向银行交单。")}</span>}
     </DetailBlock>
-    <DetailBlock title={`修改记录 · ${lc.amendments.length}`}>
-      {lc.amendments.length ? <div className="mist-col">{[...lc.amendments].reverse().map(a => <div key={a.no} className="mist-col" style={{ gap: 2 }}><span>第 {a.no} 次修改 · {a.date}</span>{a.changes.map(ch => <small key={ch.field} className="mist-muted">{ch.label}：{ch.from} → {ch.to}</small>)}{a.note && <small className="mist-muted">{a.note}</small>}</div>)}</div> : <span className="mist-note">没有修改书。</span>}
+    <DetailBlock title={ui`修改记录 · ${lc.amendments.length}`}>
+      {lc.amendments.length ? <div className="mist-col">{[...lc.amendments].reverse().map(a => <div key={a.no} className="mist-col" style={{ gap: 2 }}><span>{uiText("第 ")}{a.no}{uiText(" 次修改 · ")}{a.date}</span>{a.changes.map(ch => <small key={ch.field} className="mist-muted">{uiText(ch.label)}：{ch.from} → {ch.to}</small>)}{a.note && <small className="mist-muted">{a.note}</small>}</div>)}</div> : <span className="mist-note">{uiText("没有修改书。")}</span>}
     </DetailBlock>
-    <DetailBlock title="附件"><RecordFiles key={lc.id} ids={lc.fileIds} onAttach={can ? ids => run({ type: 'lc.files', payload: { id: lc.id, fileIds: ids } }) : undefined} />{!lc.fileIds.length && <span className="mist-note">信用证正本、修改书与银行通知作为附件保存，只能追加。</span>}</DetailBlock>
-    <DetailBlock title="记录"><Events entity="customs" id={lc.id} /></DetailBlock>
+    <DetailBlock title={uiText("附件")}><RecordFiles key={lc.id} ids={lc.fileIds} onAttach={can ? ids => run({ type: 'lc.files', payload: { id: lc.id, fileIds: ids } }) : undefined} />{!lc.fileIds.length && <span className="mist-note">{uiText("信用证正本、修改书与银行通知作为附件保存，只能追加。")}</span>}</DetailBlock>
+    <DetailBlock title={uiText("记录")}><Events entity="customs" id={lc.id} /></DetailBlock>
   </DetailBody>;
 }

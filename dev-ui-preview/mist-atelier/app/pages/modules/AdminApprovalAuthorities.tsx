@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 管理后台 · 审批资格：订单主审批负责人与供应商承诺审批人。未配置时订单无法提交审批、采购/加工合同无法提交，首日上线须先在这里办理。 */
 import React from 'react';
 import { Pencil, RefreshCw } from 'lucide-react';
@@ -50,28 +51,28 @@ export function AdminApprovalAuthorities() {
   };
   const missing = data?.rows.filter(row => !row.unavailable && !row.userIds.length) ?? [];
   const columns: Column<Row>[] = [
-    { key: 'label', header: '审批事项', width: 'minmax(180px,1.4fr)', render: row => <><b>{row.label}</b><div className="mist-note">{row.scope}</div></> },
-    { key: 'users', header: '审批人', width: 'minmax(220px,2fr)', render: row => row.unavailable ? <span className="mist-note">{row.unavailable}</span> : row.userIds.length ? row.userIds.map(name).join('、') : <span className="mist-note">未配置</span> },
-    { key: 'status', header: '状态', width: '96px', render: row => row.unavailable ? <Pill tone="neutral">不可读取</Pill> : row.userIds.length ? <Pill tone="ok">已配置</Pill> : <Pill tone="warn">未配置</Pill> },
+    { key: 'label', header: '审批事项', width: 'minmax(180px,1.4fr)', render: row => <><b>{uiText(row.label)}</b><div className="mist-note">{row.scope}</div></> },
+    { key: 'users', header: '审批人', width: 'minmax(220px,2fr)', render: row => row.unavailable ? <span className="mist-note">{row.unavailable}</span> : row.userIds.length ? row.userIds.map(name).join('、') : <span className="mist-note">{uiText("未配置")}</span> },
+    { key: 'status', header: '状态', width: '96px', render: row => row.unavailable ? <Pill tone="neutral">{uiText("不可读取")}</Pill> : row.userIds.length ? <Pill tone="ok">{uiText("已配置")}</Pill> : <Pill tone="warn">{uiText("未配置")}</Pill> },
     { key: 'version', header: '配置版本', width: '96px', hideOnMobile: true, render: row => row.version === undefined ? <span className="mist-note">—</span> : String(row.version) },
-    { key: 'action', header: '', width: '96px', align: 'right', render: row => <Button size="sm" icon={Pencil} disabled={!canEdit(row)} onClick={() => open(row)} aria-label={'调整' + row.label + '审批人'}>调整</Button> },
+    { key: 'action', header: '', width: '96px', align: 'right', render: row => <Button size="sm" icon={Pencil} disabled={!canEdit(row)} onClick={() => open(row)} aria-label={uiText('调整' + row.label + '审批人')}>{uiText("调整")}</Button> },
   ];
   return <>
-    <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={() => void load()}>重新读取</Button>}>
-      <span className="mist-note">审批人仍须持有相应岗位权限，服务器保存与审批时复核。</span>
+    <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={() => void load()}>{uiText("重新读取")}</Button>}>
+      <span className="mist-note">{uiText("审批人仍须持有相应岗位权限，服务器保存与审批时复核。")}</span>
     </Toolbar>
-    {error && <Banner tone="bad" title="审批资格读取失败">{error}</Banner>}
-    {missing.length > 0 && <Banner tone="warn" title={'尚有 ' + missing.length + ' 项审批资格未配置'}>{missing.map(row => row.label).join('、')}在配置前无法提交审批。</Banner>}
-    {data && !supplierWriter && <Banner tone="neutral" title="供应商承诺审批人仅老板或管理员可修改">当前账号可调整订单审批负责人；供应商承诺审批人须由持有数据字典写入权限的老板或管理员办理。</Banner>}
-    <Card><DataTable ariaLabel="审批资格" rows={data?.rows ?? []} rowKey={row => row.id} loading={loading && !data} columns={columns} /></Card>
-    <Drawer open={!!editing} onClose={() => !busy && setEditing(null)} title={editing ? '调整' + editing.label + '审批人' : ''} sub={editing?.scope}
-      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void save()}>保存</Button><Button disabled={busy} onClick={() => setEditing(null)}>取消</Button></div>}>
+    {error && <Banner tone="bad" title={uiText("审批资格读取失败")}>{uiText(error)}</Banner>}
+    {missing.length > 0 && <Banner tone="warn" title={uiText('尚有 ' + missing.length + ' 项审批资格未配置')}>{missing.map(row => row.label).join('、')}{uiText("在配置前无法提交审批。")}</Banner>}
+    {data && !supplierWriter && <Banner tone="neutral" title={uiText("供应商承诺审批人仅老板或管理员可修改")}>{uiText("当前账号可调整订单审批负责人；供应商承诺审批人须由持有数据字典写入权限的老板或管理员办理。")}</Banner>}
+    <Card><DataTable ariaLabel={uiText("审批资格")} rows={data?.rows ?? []} rowKey={row => row.id} loading={loading && !data} columns={columns} /></Card>
+    <Drawer open={!!editing} onClose={() => !busy && setEditing(null)} title={uiText(editing ? '调整' + editing.label + '审批人' : '')} sub={uiText(editing?.scope)}
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void save()}>{uiText("保存")}</Button><Button disabled={busy} onClick={() => setEditing(null)}>{uiText("取消")}</Button></div>}>
       <div className="mist-col">
-      {formError && <Banner tone="bad" title="未保存">{formError}</Banner>}
-      <div className="mist-col" role="group" aria-label={(editing?.label ?? '') + '审批人'}>{[...(data?.users ?? [])].sort((a, b) => Number(editing?.userIds.includes(b.id)) - Number(editing?.userIds.includes(a.id))).map(user =>
-        <Checkbox key={user.id} label={user.displayName} checked={picked.includes(user.id)} disabled={busy}
+      {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
+      <div className="mist-col" role="group" aria-label={uiText((editing?.label ?? '') + '审批人')}>{[...(data?.users ?? [])].sort((a, b) => Number(editing?.userIds.includes(b.id)) - Number(editing?.userIds.includes(a.id))).map(user =>
+        <Checkbox key={user.id} label={uiText(user.displayName)} checked={picked.includes(user.id)} disabled={busy}
           onChange={on => setPicked(on ? [...picked, user.id] : picked.filter(id => id !== user.id))} />)}</div>
-      {editing?.area === 'supplier' && <Field label="配置理由" required full><TextArea value={reason} disabled={busy} onChange={e => setReason(e.target.value)} /></Field>}
+      {editing?.area === 'supplier' && <Field label={uiText("配置理由")} required full><TextArea value={reason} disabled={busy} onChange={e => setReason(e.target.value)} /></Field>}
       </div>
     </Drawer>
   </>;

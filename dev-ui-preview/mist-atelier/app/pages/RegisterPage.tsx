@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /**
  * 注册：创建公司（公司信息 → 管理员账号 → 验证邮箱，完成后直接进入）或
  * 加入公司（受限名称核对 → 申请人信息 → 邮箱验证，管理员审核后可登录）。
@@ -129,77 +130,77 @@ export function RegisterPage() {
     finally { if (mounted.current) setBusy(false); }
   };
 
-  const progress = flow.length ? <div className="mist-register-progress" aria-label={`第 ${flow.indexOf(step) + 1} 步，共 ${flow.length} 步`}>{flow.map((s, i) => <i key={s} data-on={i <= flow.indexOf(step) || undefined} />)}</div> : null;
-  const login = <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('login')}>返回登录</TextLink></p>;
-  const backLink = <TextLink disabled={busy} onClick={back}><Icon icon={ArrowLeft} size="xs" /> 返回</TextLink>;
-  const primary = (label: string, disabled = false) => <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || disabled} iconRight={busy ? undefined : ArrowRight}>{label}</Button>;
-  const alert = error ? <Banner tone="bad" title={error} /> : null;
+  const progress = flow.length ? <div className="mist-register-progress" aria-label={ui`第 ${flow.indexOf(step) + 1} 步，共 ${flow.length} 步`}>{flow.map((s, i) => <i key={s} data-on={i <= flow.indexOf(step) || undefined} />)}</div> : null;
+  const login = <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('login')}>{uiText("返回登录")}</TextLink></p>;
+  const backLink = <TextLink disabled={busy} onClick={back}><Icon icon={ArrowLeft} size="xs" />{uiText(" 返回")}</TextLink>;
+  const primary = (label: string, disabled = false) => <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || disabled} iconRight={busy ? undefined : ArrowRight}>{uiText(label)}</Button>;
+  const alert = error ? <Banner tone="bad" title={uiText(error)} /> : null;
 
   let body: React.ReactNode;
   if (joined) body = <>
-    <h2 className="mist-h1 mist-auth-title">申请已提交</h2>
-    <p className="mist-sub">待「{joined.company}」管理员审核通过后，可使用 {joined.email} 登录。</p>
-    <Button variant="primary" size="lg" block onClick={() => go('login', joined.email)}>返回登录</Button>
+    <h2 className="mist-h1 mist-auth-title">{uiText("申请已提交")}</h2>
+    <p className="mist-sub">{uiText("待「")}{joined.company}{uiText("」管理员审核通过后，可使用 ")}{joined.email}{uiText(" 登录。")}</p>
+    <Button variant="primary" size="lg" block onClick={() => go('login', joined.email)}>{uiText("返回登录")}</Button>
   </>;
   else if (created) body = <>
-    <h2 className="mist-h1 mist-auth-title">公司账户已开通</h2>
-    <p className="mist-sub">登录邮箱：{created.email}</p>
-    <Button variant="primary" size="lg" block iconRight={ArrowRight} onClick={() => go('login', created.email)}>登录</Button>
+    <h2 className="mist-h1 mist-auth-title">{uiText("公司账户已开通")}</h2>
+    <p className="mist-sub">{uiText("登录邮箱：")}{created.email}</p>
+    <Button variant="primary" size="lg" block iconRight={ArrowRight} onClick={() => go('login', created.email)}>{uiText("登录")}</Button>
   </>;
   else if (mode === 'choose') body = <>
-    <h2 className="mist-h1 mist-auth-title">账户开通</h2>
-    <CardButton className="mist-register-option" onClick={() => open('company')}><Icon icon={Building2} /><span><b>开通公司账户</b><span>负责人或授权管理员办理</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
-    <CardButton className="mist-register-option" onClick={() => open('join')}><Icon icon={UserPlus} /><span><b>申请加入公司</b><span>员工申请，需公司管理员审核</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
+    <h2 className="mist-h1 mist-auth-title">{uiText("账户开通")}</h2>
+    <CardButton className="mist-register-option" onClick={() => open('company')}><Icon icon={Building2} /><span><b>{uiText("开通公司账户")}</b><span>{uiText("负责人或授权管理员办理")}</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
+    <CardButton className="mist-register-option" onClick={() => open('join')}><Icon icon={UserPlus} /><span><b>{uiText("申请加入公司")}</b><span>{uiText("员工申请，需公司管理员审核")}</span></span><Icon icon={ArrowRight} size="sm" /></CardButton>
     {login}
   </>;
   else if (step === 'company') body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">公司信息</h2>
+    <h2 className="mist-h1 mist-auth-title">{uiText("公司信息")}</h2>
     {alert}
-    <Field label="公司名称"><TextInput icon={Building2} value={companyName} maxLength={60} autoFocus onChange={e => setCompanyName(e.target.value)} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
-    {existing && <div className="mist-register-note">「{existing.name}」已开通公司账户 · <TextLink onClick={() => { setSelected(existing); setQuery(existing.name); setUseCode(false); open('join', 'account'); }}>申请加入</TextLink></div>}
-    <Field label="主营业务"><Segmented<CompanyBusiness> ariaLabel="主营业务" options={BUSINESS} value={business as CompanyBusiness} onChange={v => { setBusiness(v); setError(''); }} /></Field>
-    <Field label="公司规模（选填）"><Segmented<CompanySize> ariaLabel="公司规模" options={SIZE} value={size as CompanySize} onChange={v => setSize(v === size ? '' : v)} /></Field>
+    <Field label={uiText("公司名称")}><TextInput icon={Building2} value={companyName} maxLength={60} autoFocus onChange={e => setCompanyName(e.target.value)} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
+    {existing && <div className="mist-register-note">「{existing.name}{uiText("」已开通公司账户 · ")}<TextLink onClick={() => { setSelected(existing); setQuery(existing.name); setUseCode(false); open('join', 'account'); }}>{uiText("申请加入")}</TextLink></div>}
+    <Field label={uiText("主营业务")}><Segmented<CompanyBusiness> ariaLabel={uiText("主营业务")} options={BUSINESS} value={business as CompanyBusiness} onChange={v => { setBusiness(v); setError(''); }} /></Field>
+    <Field label={uiText("公司规模（选填）")}><Segmented<CompanySize> ariaLabel={uiText("公司规模")} options={SIZE} value={size as CompanySize} onChange={v => setSize(v === size ? '' : v)} /></Field>
     {primary('下一步')}
   </>;
   else if (step === 'find') body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">核对公司</h2>
+    <h2 className="mist-h1 mist-auth-title">{uiText("核对公司")}</h2>
     {alert}
     {useCode ? <>
-      <Field label="公司代码"><TextInput icon={Hash} value={companyCode} maxLength={50} autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={e => setCompanyCode(e.target.value)} /></Field>
-      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(false); setError(''); }}>使用公司名称</TextLink></p>
+      <Field label={uiText("公司代码")}><TextInput icon={Hash} value={companyCode} maxLength={50} autoFocus autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={e => setCompanyCode(e.target.value)} /></Field>
+      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(false); setError(''); }}>{uiText("使用公司名称")}</TextLink></p>
     </> : <>
-      <Field label="公司名称"><TextInput icon={Search} placeholder="输入公司名称" value={query} maxLength={60} autoFocus onChange={e => { setQuery(e.target.value); setSelected(null); setError(''); }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
-      <div className="mist-register-results" role="listbox" aria-label="匹配的公司" aria-busy={search.loading}>
+      <Field label={uiText("公司名称")}><TextInput icon={Search} placeholder={uiText("输入公司名称")} value={query} maxLength={60} autoFocus onChange={e => { setQuery(e.target.value); setSelected(null); setError(''); }} onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)} /></Field>
+      <div className="mist-register-results" role="listbox" aria-label={uiText("匹配的公司")} aria-busy={search.loading}>
         {search.results.map(c => <button key={c.id} type="button" role="option" aria-selected={selected?.id === c.id} className="mist-register-result" data-on={selected?.id === c.id || undefined} onClick={() => { setSelected(c); setError(''); }}>
           <Icon icon={Building2} size="sm" /><span>{c.name}</span>{businessLabel(c.business) && <small>{businessLabel(c.business)}</small>}{selected?.id === c.id && <Icon icon={Check} size="sm" />}
         </button>)}
-        {search.loading && !search.results.length && <p className="mist-register-empty" role="status">核对中…</p>}
-        {search.checked && !search.results.length && <p className="mist-register-empty" role="status">{search.error || '暂未确认公司，请继续补充名称或使用公司代码。'}{search.error && <> <TextLink onClick={() => setLookupAttempt(value => value + 1)}>重试</TextLink></>}</p>}
+        {search.loading && !search.results.length && <p className="mist-register-empty" role="status">{uiText("核对中…")}</p>}
+        {search.checked && !search.results.length && <p className="mist-register-empty" role="status">{search.error || '暂未确认公司，请继续补充名称或使用公司代码。'}{search.error && <> <TextLink onClick={() => setLookupAttempt(value => value + 1)}>{uiText("重试")}</TextLink></>}</p>}
       </div>
-      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(true); setError(''); }}>使用公司代码</TextLink></p>
+      <p className="mist-auth-switch"><TextLink onClick={() => { setUseCode(true); setError(''); }}>{uiText("使用公司代码")}</TextLink></p>
     </>}
     {primary('下一步', !useCode && !selected)}
   </>;
   else if (step === 'account') body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">{mode === 'company' ? '管理员账号' : '申请人信息'}</h2>
-    {mode === 'join' && <div className="mist-register-result" data-on data-static><Icon icon={Building2} size="sm" /><span>{selected && !useCode ? selected.name : `公司代码 ${companyCode.trim()}`}</span><TextLink onClick={() => setStep('find')}>更换</TextLink></div>}
+    <h2 className="mist-h1 mist-auth-title">{uiText(mode === 'company' ? '管理员账号' : '申请人信息')}</h2>
+    {mode === 'join' && <div className="mist-register-result" data-on data-static><Icon icon={Building2} size="sm" /><span>{uiText(selected && !useCode ? selected.name : `公司代码 ${companyCode.trim()}`)}</span><TextLink onClick={() => setStep('find')}>{uiText("更换")}</TextLink></div>}
     {alert}
-    <Field label="姓名"><TextInput icon={User} value={displayName} maxLength={40} autoComplete="name" autoFocus onChange={e => setDisplayName(e.target.value)} /></Field>
-    <Field label={mode === 'company' ? '联系邮箱' : '工作邮箱'}><TextInput icon={Mail} type="email" value={email} autoComplete="email" onChange={e => setEmail(e.target.value)} /></Field>
-    <Field label="设置密码"><PasswordInput icon={KeyRound} value={password} maxLength={72} autoComplete="new-password" onChange={e => setPassword(e.target.value)} /></Field>
-    <div className="mist-register-checks">{passwordChecks(password).map(c => <span key={c.label} data-ok={c.ok || undefined}><Icon icon={Check} size="xs" />{c.label}</span>)}</div>
+    <Field label={uiText("姓名")}><TextInput icon={User} value={displayName} maxLength={40} autoComplete="name" autoFocus onChange={e => setDisplayName(e.target.value)} /></Field>
+    <Field label={uiText(mode === 'company' ? '联系邮箱' : '工作邮箱')}><TextInput icon={Mail} type="email" value={email} autoComplete="email" onChange={e => setEmail(e.target.value)} /></Field>
+    <Field label={uiText("设置密码")}><PasswordInput icon={KeyRound} value={password} maxLength={72} autoComplete="new-password" onChange={e => setPassword(e.target.value)} /></Field>
+    <div className="mist-register-checks">{passwordChecks(password).map(c => <span key={c.label} data-ok={c.ok || undefined}><Icon icon={Check} size="xs" />{uiText(c.label)}</span>)}</div>
     {primary('下一步')}
   </>;
   else body = <>
     {backLink}{progress}
-    <h2 className="mist-h1 mist-auth-title">邮箱验证</h2>
-    <p className="mist-sub">验证码已发送至 {sentTo}</p>
+    <h2 className="mist-h1 mist-auth-title">{uiText("邮箱验证")}</h2>
+    <p className="mist-sub">{uiText("验证码已发送至 ")}{sentTo}</p>
     {alert}
     <CodeInput value={code} onChange={v => { setCode(v); setError(''); }} onComplete={v => void finish(v)} disabled={busy} autoFocus />
-    <p className="mist-register-resend">{cooldown > 0 ? `${cooldown} 秒后可重新发送` : <TextLink disabled={busy} onClick={() => void sendCode()}>重新发送</TextLink>} · <TextLink disabled={busy} onClick={() => setStep('account')}>修改邮箱</TextLink></p>
+    <p className="mist-register-resend">{cooldown > 0 ? `${cooldown} 秒后可重新发送` : <TextLink disabled={busy} onClick={() => void sendCode()}>{uiText("重新发送")}</TextLink>} · <TextLink disabled={busy} onClick={() => setStep('account')}>{uiText("修改邮箱")}</TextLink></p>
     {primary(mode === 'company' ? '开通公司账户' : '提交申请')}
   </>;
 
@@ -211,7 +212,7 @@ export function RegisterPage() {
         <div className="mist-auth-brand-copy"><h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br />{BAMBOOK_BRAND.headline[1]}</h1><p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p></div>
       </div>
       <div className="mist-auth-panel">
-        <form className="mist-auth-form" aria-label="账户开通" onSubmit={next} noValidate>{body}</form>
+        <form className="mist-auth-form" aria-label={uiText("账户开通")} onSubmit={next} noValidate>{body}</form>
       </div>
     </div>
   );

@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 全景看板 · 团队：业务主管看下属名下在手的事，并对具体订单 / 客户 / 开发案 / 发票督办。 */
 import React from 'react';
@@ -49,77 +50,77 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
   const nudgeable = (r: TeamRow) => can && !r.former && !r.self;
   const nudge = (r: TeamRow, n: Nudge) => setDialog(nudgeSpec(r, n, today, run));
   const nudgeOpen = (r: TeamRow, target: MistTarget) => r.nudges.some(x => x.target?.view === target.view && x.target?.id === target.id);
-  const nudgeButton = (r: TeamRow, n: Nudge) => nudgeable(r) ? (nudgeOpen(r, n.target) ? <span className="mist-muted">督办中</span> : <Button size="sm" icon={BellRing} disabled={busy} aria-label={`督办 ${n.label}`} onClick={() => nudge(r, n)}>督办</Button>) : null;
+  const nudgeButton = (r: TeamRow, n: Nudge) => nudgeable(r) ? (nudgeOpen(r, n.target) ? <span className="mist-muted">{uiText("督办中")}</span> : <Button size="sm" icon={BellRing} disabled={busy} aria-label={ui`督办 ${n.label}`} onClick={() => nudge(r, n)}>{uiText("督办")}</Button>) : null;
   const goTo = (t: MistTarget) => { const { view, id, ...extra } = t; go(view, id, extra); };
   const scopeNote = viewer.owner || !(members.find(m => m.id === viewer.id)?.groups.length) ? '全部成员' : `与你同业务组（${members.find(m => m.id === viewer.id)!.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join('、')}）的成员`;
   const columns: Column<TeamRow>[] = [
-    { key: 'name', header: '成员', width: 'minmax(140px,1.2fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><b>{r.name}{r.self ? '（本人）' : ''}</b><small className="mist-muted">{r.former ? '已不在本公司' : r.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join(' · ') || '未设业务组'}</small></div> },
-    { key: 'attention', header: '状态', width: 'minmax(160px,1.6fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Pill tone={ATTENTION[r.attention].tone}>{ATTENTION[r.attention].label}</Pill>{r.reasons[0] && <small className="mist-muted">{r.reasons[0]}{r.reasons.length > 1 ? ` 等 ${r.reasons.length} 项` : ''}</small>}</div> },
+    { key: 'name', header: '成员', width: 'minmax(140px,1.2fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><b>{r.name}{uiText(r.self ? '（本人）' : '')}</b><small className="mist-muted">{uiText(r.former ? '已不在本公司' : r.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join(' · ') || '未设业务组')}</small></div> },
+    { key: 'attention', header: '状态', width: 'minmax(160px,1.6fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Pill tone={ATTENTION[r.attention].tone}>{uiText(ATTENTION[r.attention].label)}</Pill>{r.reasons[0] && <small className="mist-muted">{r.reasons[0]}{uiText(r.reasons.length > 1 ? ` 等 ${r.reasons.length} 项` : '')}</small>}</div> },
     { key: 'customers', header: '客户', width: '64px', align: 'right', render: r => r.customers },
-    { key: 'orders', header: '在手订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.orders.length} 单</span><small className="mist-muted">{[r.orders.filter(o => o.status === 'overdue').length && `逾期 ${r.orders.filter(o => o.status === 'overdue').length}`, r.orders.filter(o => o.status === 'soon').length && `临近 ${r.orders.filter(o => o.status === 'soon').length}`].filter(Boolean).join(' · ') || sums(r.openAmount) || '—'}</small></div> },
+    { key: 'orders', header: '在手订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.orders.length}{uiText(" 单")}</span><small className="mist-muted">{[r.orders.filter(o => o.status === 'overdue').length && `逾期 ${r.orders.filter(o => o.status === 'overdue').length}`, r.orders.filter(o => o.status === 'soon').length && `临近 ${r.orders.filter(o => o.status === 'soon').length}`].filter(Boolean).join(' · ') || sums(r.openAmount) || '—'}</small></div> },
     { key: 'dev', header: '开发 / 寻样', width: '96px', align: 'right', render: r => `${r.devs.length} / ${r.fabrics.length}` },
     { key: 'opp', header: '商机', width: '64px', align: 'right', render: r => r.opportunities.length },
-    { key: 'tasks', header: '待办', width: '96px', render: r => <span>{r.tasks.length}{r.tasks.some(t => t.overdue) ? <b>（逾期 {r.tasks.filter(t => t.overdue).length}）</b> : null}</span> },
+    { key: 'tasks', header: '待办', width: '96px', render: r => <span>{r.tasks.length}{r.tasks.some(t => t.overdue) ? <b>{uiText("（逾期 ")}{r.tasks.filter(t => t.overdue).length}）</b> : null}</span> },
     { key: 'ar', header: '逾期应收', width: 'minmax(120px,1fr)', align: 'right', render: r => r.overdueReceivable.length ? sums(r.overdueReceivable) : '—' },
     { key: 'nudges', header: '督办中', width: '72px', align: 'right', render: r => r.nudges.length || '—' },
   ];
   return <>
     <div className="mist-section mist-row" style={{ justifyContent: 'space-between' }}>
-      <span className="mist-note">范围：{scopeNote}。统计只含你有权查看的数据；交期 {7} 天内为临近，客户超过 {TEAM_DORMANT_DAYS} 天无跟进且无在手订单为久未跟进。</span>
-      <span className="mist-row"><Segmented<'now' | 'week'> ariaLabel="团队视图" value={mode} onChange={setMode} options={[{ value: 'now', label: '在手' }, { value: 'week', label: '周报' }]} />
-      <Segmented<Group> ariaLabel="业务组" value={group} onChange={setGroup} options={[{ value: 'all', label: '全部' }, { value: 'garment', label: '成衣组' }, { value: 'fabric', label: '面料组' }]} /></span>
+      <span className="mist-note">{uiText("范围：")}{scopeNote}{uiText("。统计只含你有权查看的数据；交期 ")}{7}{uiText(" 天内为临近，客户超过 ")}{TEAM_DORMANT_DAYS}{uiText(" 天无跟进且无在手订单为久未跟进。")}</span>
+      <span className="mist-row"><Segmented<'now' | 'week'> ariaLabel={uiText("团队视图")} value={mode} onChange={setMode} options={[{ value: 'now', label: '在手' }, { value: 'week', label: '周报' }]} />
+      <Segmented<Group> ariaLabel={uiText("业务组")} value={group} onChange={setGroup} options={[{ value: 'all', label: '全部' }, { value: 'garment', label: '成衣组' }, { value: 'fabric', label: '面料组' }]} /></span>
     </div>
     {mode === 'week' ? <TeamWeekly state={state} members={members} viewer={viewer} group={group} today={today} initialWeek={initialWeek} canArchive={can} busy={busy} run={run} /> : <>
     <StatGrid>
-      <StatCard icon={Users} label="需介入 / 需关注" value={`${rows.filter(r => r.attention === 'bad').length} / ${rows.filter(r => r.attention === 'warn').length}`} unit="人" foot={`共 ${rows.length} 人`} />
-      <StatCard icon={Package} label="过交期订单" value={total(r => r.orders.filter(o => o.status === 'overdue').length)} unit="单" foot={`7 天内到期 ${total(r => r.orders.filter(o => o.status === 'soon').length)} 单`} />
-      <StatCard icon={ClipboardList} label="逾期待办" value={total(r => r.tasks.filter(t => t.overdue).length)} unit="条" foot={`督办中 ${total(r => r.nudges.length)} 条`} />
-      <StatCard icon={Receipt} label="逾期应收" value={mainAr ? money(mainAr[1]) : '0.00'} unit={mainAr?.[0] || ''} foot={ar.size > 1 ? sums([...ar].map(([currency, amount]) => ({ currency, amount }))) : '按订单负责人归属'} />
+      <StatCard icon={Users} label={uiText("需介入 / 需关注")} value={`${rows.filter(r => r.attention === 'bad').length} / ${rows.filter(r => r.attention === 'warn').length}`} unit={uiText("人")} foot={`共 ${rows.length} 人`} />
+      <StatCard icon={Package} label={uiText("过交期订单")} value={total(r => r.orders.filter(o => o.status === 'overdue').length)} unit={uiText("单")} foot={`7 天内到期 ${total(r => r.orders.filter(o => o.status === 'soon').length)} 单`} />
+      <StatCard icon={ClipboardList} label={uiText("逾期待办")} value={total(r => r.tasks.filter(t => t.overdue).length)} unit={uiText("条")} foot={`督办中 ${total(r => r.nudges.length)} 条`} />
+      <StatCard icon={Receipt} label={uiText("逾期应收")} value={mainAr ? money(mainAr[1]) : '0.00'} unit={uiText(mainAr?.[0] || '')} foot={ar.size > 1 ? sums([...ar].map(([currency, amount]) => ({ currency, amount }))) : '按订单负责人归属'} />
     </StatGrid>
     <section className="mist-section"><Card>
-      <CardHeader title="团队在手" sub="点成员查看明细；需要推进的，对具体订单、客户、开发案或发票督办。" />
-      <DataTable ariaLabel="团队在手" rows={rows} rowKey={r => r.id} selectedKey={open || undefined} onRowClick={r => setOpen(r.id)} columns={columns}
-        empty={<EmptyState icon={Users} title="范围内没有成员" description="所有者可在 设置 · 公司 授权成员并设置业务组。" compact />} />
+      <CardHeader title={uiText("团队在手")} sub={uiText("点成员查看明细；需要推进的，对具体订单、客户、开发案或发票督办。")} />
+      <DataTable ariaLabel={uiText("团队在手")} rows={rows} rowKey={r => r.id} selectedKey={open || undefined} onRowClick={r => setOpen(r.id)} columns={columns}
+        empty={<EmptyState icon={Users} title={uiText("范围内没有成员")} description={uiText("所有者可在 设置 · 公司 授权成员并设置业务组。")} compact />} />
     </Card></section>
-    <Drawer open={!!row} onClose={() => setOpen(null)} size="lg" title={row ? `${row.name}${row.self ? '（本人）' : ''}` : '成员'} sub={row ? `${ATTENTION[row.attention].label} · 客户 ${row.customers} · 在手订单 ${row.orders.length}` : undefined}>
+    <Drawer open={!!row} onClose={() => setOpen(null)} size="lg" title={uiText(row ? `${row.name}${row.self ? '（本人）' : ''}` : '成员')} sub={uiText(row ? `${ATTENTION[row.attention].label} · 客户 ${row.customers} · 在手订单 ${row.orders.length}` : undefined)}>
       {row && <div className="mist-col" data-team-member={row.id}>
-        {row.former && <Banner tone="bad" icon={AlertTriangle} title="该账号已不在本公司" actions={viewer.owner ? <Button size="sm" onClick={() => go('settings', undefined, { section: 'workspace' })}>去办理成员交接</Button> : undefined}>名下客户、订单与待办没有人跟进。{viewer.owner ? '' : '请公司所有者在 设置 · 公司 办理成员交接。'}</Banner>}
-        {row.reasons.length > 0 && !row.former && <Banner tone={row.attention === 'bad' ? 'bad' : 'warn'} title="需要关注">{row.reasons.join('；')}</Banner>}
-        {!can && !row.former && !row.self && <span className="mist-note">督办需要客户管理主管权限。</span>}
-        <DetailBlock title={`在手订单 · ${row.orders.length}`} aside={row.openAmount.length ? <span className="mist-muted">{sums(row.openAmount)}</span> : undefined}>
-          {row.orders.length ? <DataTable ariaLabel={`${row.name} 在手订单`} rows={row.orders} rowKey={o => o.id} onRowClick={o => go('orders/detail', o.id)} columns={[
+        {row.former && <Banner tone="bad" icon={AlertTriangle} title={uiText("该账号已不在本公司")} actions={viewer.owner ? <Button size="sm" onClick={() => go('settings', undefined, { section: 'workspace' })}>{uiText("去办理成员交接")}</Button> : undefined}>{uiText("名下客户、订单与待办没有人跟进。")}{uiText(viewer.owner ? '' : '请公司所有者在 设置 · 公司 办理成员交接。')}</Banner>}
+        {row.reasons.length > 0 && !row.former && <Banner tone={row.attention === 'bad' ? 'bad' : 'warn'} title={uiText("需要关注")}>{row.reasons.join('；')}</Banner>}
+        {!can && !row.former && !row.self && <span className="mist-note">{uiText("督办需要客户管理主管权限。")}</span>}
+        <DetailBlock title={ui`在手订单 · ${row.orders.length}`} aside={row.openAmount.length ? <span className="mist-muted">{sums(row.openAmount)}</span> : undefined}>
+          {row.orders.length ? <DataTable ariaLabel={ui`${row.name} 在手订单`} rows={row.orders} rowKey={o => o.id} onRowClick={o => go('orders/detail', o.id)} columns={[
             { key: 'code', header: '订单', render: o => <div className="mist-col" style={{ gap: 2 }}><b>{o.code}</b><small className="mist-muted">{o.customer}</small></div> },
-            { key: 'due', header: '交期', width: '150px', render: o => <div className="mist-col" style={{ gap: 2 }}><span>{o.due || '—'}</span><Pill tone={ORDER_STATUS[o.status].tone}>{o.status === 'overdue' ? `逾期 ${o.lateDays} 天` : ORDER_STATUS[o.status].label}</Pill></div> },
+            { key: 'due', header: '交期', width: '150px', render: o => <div className="mist-col" style={{ gap: 2 }}><span>{o.due || '—'}</span><Pill tone={ORDER_STATUS[o.status].tone}>{uiText(o.status === 'overdue' ? `逾期 ${o.lateDays} 天` : ORDER_STATUS[o.status].label)}</Pill></div> },
             { key: 'progress', header: '进度', width: '80px', align: 'right', render: o => `${o.progress}%` },
             { key: 'amount', header: '金额', width: '130px', align: 'right', render: o => `${o.currency} ${money(o.amount)}` },
-            { key: 'act', header: '', width: '96px', align: 'right', render: o => o.pending ? <span className="mist-muted">审批中</span> : nudgeButton(row, { target: { view: 'orders/detail', id: o.id }, label: `订单 ${o.code}`, title: o.status === 'overdue' ? `订单 ${o.code} 已过交期，核对出货安排并回复客户` : `核对订单 ${o.code} 生产进度与交期` }) },
-          ]} /> : <span className="mist-note">没有在手订单。</span>}
+            { key: 'act', header: '', width: '96px', align: 'right', render: o => o.pending ? <span className="mist-muted">{uiText("审批中")}</span> : nudgeButton(row, { target: { view: 'orders/detail', id: o.id }, label: `订单 ${o.code}`, title: o.status === 'overdue' ? `订单 ${o.code} 已过交期，核对出货安排并回复客户` : `核对订单 ${o.code} 生产进度与交期` }) },
+          ]} /> : <span className="mist-note">{uiText("没有在手订单。")}</span>}
         </DetailBlock>
-        {row.receivables.length > 0 && <DetailBlock title={`逾期应收 · ${row.receivables.length}`} aside={<span className="mist-muted">{sums(row.overdueReceivable)}</span>}>
-          <DataTable ariaLabel={`${row.name} 逾期应收`} rows={row.receivables} rowKey={i => i.id} onRowClick={i => go('invoices', i.id)} columns={[
+        {row.receivables.length > 0 && <DetailBlock title={ui`逾期应收 · ${row.receivables.length}`} aside={<span className="mist-muted">{sums(row.overdueReceivable)}</span>}>
+          <DataTable ariaLabel={ui`${row.name} 逾期应收`} rows={row.receivables} rowKey={i => i.id} onRowClick={i => go('invoices', i.id)} columns={[
             { key: 'code', header: '发票', render: i => <div className="mist-col" style={{ gap: 2 }}><b>{i.code}</b><small className="mist-muted">{i.customer}</small></div> },
-            { key: 'due', header: '到期', width: '140px', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.due}</span><Pill tone={i.days > 30 ? 'bad' : 'warn'}>逾期 {i.days} 天</Pill></div> },
+            { key: 'due', header: '到期', width: '140px', render: i => <div className="mist-col" style={{ gap: 2 }}><span>{i.due}</span><Pill tone={i.days > 30 ? 'bad' : 'warn'}>{uiText("逾期 ")}{i.days}{uiText(" 天")}</Pill></div> },
             { key: 'open', header: '未收', width: '130px', align: 'right', render: i => `${i.currency} ${money(i.open)}` },
             { key: 'act', header: '', width: '96px', align: 'right', render: i => nudgeButton(row, { target: { view: 'invoices', id: i.id }, label: `发票 ${i.code}`, title: `催收 ${i.code}，登记客户承诺付款日` }) },
           ]} />
         </DetailBlock>}
-        <DetailBlock title={`未完成待办 · ${row.tasks.length}`}>
+        <DetailBlock title={ui`未完成待办 · ${row.tasks.length}`}>
           {row.tasks.length ? <div className="mist-col">{row.tasks.slice(0, 20).map(t => <div key={t.id} className="mist-row" style={{ justifyContent: 'space-between' }}>
             <TextLink onClick={() => goTo(t.target)}>{t.title}</TextLink>
-            <span className="mist-row">{t.nudge && <Pill tone="accent">{t.nudge.by} 督办</Pill>}<Pill tone={t.overdue ? 'bad' : 'neutral'}>{t.due ? (t.overdue ? `已逾期 · ${t.due}` : t.due) : '未定期限'}</Pill></span>
-          </div>)}{row.tasks.length > 20 && <span className="mist-note">另有 {row.tasks.length - 20} 条。</span>}</div> : <span className="mist-note">没有未完成待办。</span>}
+            <span className="mist-row">{t.nudge && <Pill tone="accent">{t.nudge.by}{uiText(" 督办")}</Pill>}<Pill tone={t.overdue ? 'bad' : 'neutral'}>{uiText(t.due ? (t.overdue ? `已逾期 · ${t.due}` : t.due) : '未定期限')}</Pill></span>
+          </div>)}{row.tasks.length > 20 && <span className="mist-note">{uiText("另有 ")}{uiText(row.tasks.length - 20)}{uiText(" 条。")}</span>}</div> : <span className="mist-note">{uiText("没有未完成待办。")}</span>}
         </DetailBlock>
-        {(row.devs.length > 0 || row.fabrics.length > 0) && <DetailBlock title={`在途开发 · ${row.devs.length} · 寻样 · ${row.fabrics.length}`}>
+        {(row.devs.length > 0 || row.fabrics.length > 0) && <DetailBlock title={ui`在途开发 · ${row.devs.length} · 寻样 · ${row.fabrics.length}`}>
           <div className="mist-col">
             {row.devs.map(d => <div key={d.id} className="mist-row" style={{ justifyContent: 'space-between' }}><TextLink onClick={() => go('development/detail', d.id)}>{d.code} · {d.name}</TextLink><span className="mist-row"><Pill tone={d.overdue ? 'bad' : 'neutral'}>{d.due || '未定期限'}</Pill>{nudgeButton(row, { target: { view: 'development/detail', id: d.id }, label: `开发案 ${d.code}`, title: `推进开发案 ${d.code}，更新打样进度` })}</span></div>)}
             {row.fabrics.map(f => <div key={f.id} className="mist-row" style={{ justifyContent: 'space-between' }}><span>{f.code} · {f.name}</span><Pill tone={f.overdue ? 'bad' : 'neutral'}>{f.due || '未定期限'}</Pill></div>)}
           </div>
         </DetailBlock>}
-        {row.dormant.length > 0 && <DetailBlock title={`久未跟进客户 · ${row.dormant.length}`}>
-          <div className="mist-col">{row.dormant.map(c => <div key={c.id} className="mist-row" style={{ justifyContent: 'space-between' }}><TextLink onClick={() => go('crm', c.id, { customerId: c.id })}>{c.code} · {c.name}</TextLink><span className="mist-row"><span className="mist-muted">{c.lastAt ? `上次跟进 ${c.lastAt.slice(0, 10)}` : '没有跟进记录'}</span>{nudgeButton(row, { target: { view: 'crm', id: c.id }, label: `客户 ${c.name}`, title: `跟进客户 ${c.name}，登记跟进记录` })}</span></div>)}</div>
+        {row.dormant.length > 0 && <DetailBlock title={ui`久未跟进客户 · ${row.dormant.length}`}>
+          <div className="mist-col">{row.dormant.map(c => <div key={c.id} className="mist-row" style={{ justifyContent: 'space-between' }}><TextLink onClick={() => go('crm', c.id, { customerId: c.id })}>{c.code} · {c.name}</TextLink><span className="mist-row"><span className="mist-muted">{uiText(c.lastAt ? `上次跟进 ${c.lastAt.slice(0, 10)}` : '没有跟进记录')}</span>{nudgeButton(row, { target: { view: 'crm', id: c.id }, label: `客户 ${c.name}`, title: `跟进客户 ${c.name}，登记跟进记录` })}</span></div>)}</div>
         </DetailBlock>}
-        {row.opportunities.length > 0 && <DetailBlock title={`进行中商机 · ${row.opportunities.length}`}>
-          <div className="mist-col">{row.opportunities.map(o => <div key={o.id} className="mist-row" style={{ justifyContent: 'space-between' }}><span>{o.name}</span><Pill tone={o.overdue ? 'warn' : 'neutral'}>{o.due ? `预计 ${o.due}` : '未定预计日期'}</Pill></div>)}</div>
+        {row.opportunities.length > 0 && <DetailBlock title={ui`进行中商机 · ${row.opportunities.length}`}>
+          <div className="mist-col">{row.opportunities.map(o => <div key={o.id} className="mist-row" style={{ justifyContent: 'space-between' }}><span>{o.name}</span><Pill tone={o.overdue ? 'warn' : 'neutral'}>{uiText(o.due ? `预计 ${o.due}` : '未定预计日期')}</Pill></div>)}</div>
         </DetailBlock>}
       </div>}
     </Drawer>
@@ -147,34 +148,34 @@ export function TeamWeekly({ state, members, viewer, group, today, initialWeek, 
   const exportCsv = () => downloadModuleCsv(`团队周报-${report.weekStart}.csv`, ['成员', '新接订单', '新单金额', '出运票数', '出运数量', '回款', '新开发案', '客户跟进', '赢单', '流失', '完成待办', '收到督办', '完成督办', '逾期督办', '当前过交期订单', '当前逾期应收'],
     report.rows.map(r => [r.name + (r.former ? '（已不在本公司）' : ''), r.newOrders, sums(r.newOrderAmount), r.shipments, r.shippedQty, sums(r.collected), r.newDevs, r.followUps, r.won, r.lost, r.tasksDone, r.nudgesIn, r.nudgesDone, r.nudgesOpenLate, r.lateOrders, sums(r.overdueReceivable)]));
   const columns: Column<TeamWeekRow>[] = [
-    { key: 'name', header: '成员', width: 'minmax(110px,1fr)', render: r => <b>{r.name}{r.former ? '（已不在本公司）' : ''}</b> },
-    { key: 'orders', header: '新接订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.newOrders} 单</span>{r.newOrderAmount.length > 0 && <small className="mist-muted">{sums(r.newOrderAmount)}</small>}</div> },
+    { key: 'name', header: '成员', width: 'minmax(110px,1fr)', render: r => <b>{r.name}{uiText(r.former ? '（已不在本公司）' : '')}</b> },
+    { key: 'orders', header: '新接订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.newOrders}{uiText(" 单")}</span>{r.newOrderAmount.length > 0 && <small className="mist-muted">{sums(r.newOrderAmount)}</small>}</div> },
     { key: 'ship', header: '出运', width: '96px', align: 'right', render: r => r.shipments ? `${r.shipments} 票 · ${r.shippedQty}` : '—' },
     { key: 'collected', header: '回款', width: 'minmax(110px,1fr)', align: 'right', render: r => moneyCell(r.collected) },
     { key: 'follow', header: '跟进 / 新开发', width: '104px', align: 'right', render: r => `${r.followUps} / ${r.newDevs}` },
     { key: 'opp', header: '赢单 / 流失', width: '96px', align: 'right', render: r => `${r.won} / ${r.lost}` },
     { key: 'tasks', header: '完成待办', width: '80px', align: 'right', render: r => r.tasksDone },
-    { key: 'nudge', header: '督办 收到/完成', width: '112px', align: 'right', render: r => <span>{r.nudgesIn} / {r.nudgesDone}{r.nudgesOpenLate ? <b>（逾期 {r.nudgesOpenLate}）</b> : null}</span> },
+    { key: 'nudge', header: '督办 收到/完成', width: '112px', align: 'right', render: r => <span>{r.nudgesIn} / {r.nudgesDone}{r.nudgesOpenLate ? <b>{uiText("（逾期 ")}{r.nudgesOpenLate}）</b> : null}</span> },
     { key: 'late', header: '当前过交期', width: '88px', align: 'right', render: r => r.lateOrders || '—' },
     { key: 'ar', header: '当前逾期应收', width: 'minmax(110px,1fr)', align: 'right', render: r => moneyCell(r.overdueReceivable) },
   ];
   return <div data-team-weekly={report.weekStart}>
     <div className="mist-section mist-row" style={{ justifyContent: 'space-between' }}>
-      <span className="mist-row"><Button size="sm" icon={ChevronLeft} aria-label="上一周" onClick={() => setWeek(addBusinessDays(week, -7))} /><b>{report.weekStart} 至 {report.weekEnd}</b>{week === current && <Pill tone="accent">本周 · 统计到 {today}</Pill>}<Button size="sm" icon={ChevronRight} aria-label="下一周" disabled={week >= current} onClick={() => setWeek(addBusinessDays(week, 7))} /></span>
-      <span className="mist-row">{ended && !archived && canArchive && run && <Button size="sm" variant="primary" icon={Archive} disabled={busy} onClick={() => void archive()}>生成并存档</Button>}<Button size="sm" icon={Copy} onClick={() => void copy()}>复制周报文字</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>导出 CSV</Button></span>
+      <span className="mist-row"><Button size="sm" icon={ChevronLeft} aria-label={uiText("上一周")} onClick={() => setWeek(addBusinessDays(week, -7))} /><b>{report.weekStart}{uiText(" 至 ")}{report.weekEnd}</b>{week === current && <Pill tone="accent">{uiText("本周 · 统计到 ")}{today}</Pill>}<Button size="sm" icon={ChevronRight} aria-label={uiText("下一周")} disabled={week >= current} onClick={() => setWeek(addBusinessDays(week, 7))} /></span>
+      <span className="mist-row">{ended && !archived && canArchive && run && <Button size="sm" variant="primary" icon={Archive} disabled={busy} onClick={() => void archive()}>{uiText("生成并存档")}</Button>}<Button size="sm" icon={Copy} onClick={() => void copy()}>{uiText("复制周报文字")}</Button><Button size="sm" icon={Download} disabled={!report.rows.length} onClick={exportCsv}>{uiText("导出 CSV")}</Button></span>
     </div>
-    {archived ? <Banner tone="ok" title={`已存档 · ${archived.scope}`}>由 {archived.generatedBy} 于 {archived.generatedAt.slice(0, 16).replace('T', ' ')} 生成；以下是生成那一刻的数据，之后的补录不会改变它。</Banner>
-      : ended && canArchive && run ? <Banner tone="warn" title="这一周已结束，尚未存档">点“生成并存档”把此刻的数据冻结成正式周报，之后可随时回看、复制或导出。</Banner> : null}
+    {archived ? <Banner tone="ok" title={ui`已存档 · ${archived.scope}`}>{uiText("由 ")}{archived.generatedBy}{uiText(" 于 ")}{archived.generatedAt.slice(0, 16).replace('T', ' ')}{uiText(" 生成；以下是生成那一刻的数据，之后的补录不会改变它。")}</Banner>
+      : ended && canArchive && run ? <Banner tone="warn" title={uiText("这一周已结束，尚未存档")}>{uiText("点“生成并存档”把此刻的数据冻结成正式周报，之后可随时回看、复制或导出。")}</Banner> : null}
     <StatGrid>
-      <StatCard icon={Package} label="新接订单" value={t.newOrders} unit="单" foot={sums(t.newOrderAmount) || '本周没有新单'} />
-      <StatCard icon={Ship} label="出运" value={t.shipments} unit="票" foot={`合计 ${t.shippedQty} 件/米`} />
-      <StatCard icon={Wallet} label="回款" value={t.collected[0] ? money(t.collected[0].amount) : '0.00'} unit={t.collected[0]?.currency || ''} foot={t.collected.length > 1 ? sums(t.collected) : '按到账日、已核销到发票'} />
-      <StatCard icon={BellRing} label="督办 完成 / 发出" value={`${t.nudgesDone} / ${t.nudgesIn}`} unit="条" foot={`逾期未完成 ${t.nudgesOpenLate} 条`} />
+      <StatCard icon={Package} label={uiText("新接订单")} value={t.newOrders} unit={uiText("单")} foot={sums(t.newOrderAmount) || '本周没有新单'} />
+      <StatCard icon={Ship} label={uiText("出运")} value={t.shipments} unit={uiText("票")} foot={`合计 ${t.shippedQty} 件/米`} />
+      <StatCard icon={Wallet} label={uiText("回款")} value={t.collected[0] ? money(t.collected[0].amount) : '0.00'} unit={uiText(t.collected[0]?.currency || '')} foot={t.collected.length > 1 ? sums(t.collected) : '按到账日、已核销到发票'} />
+      <StatCard icon={BellRing} label={uiText("督办 完成 / 发出")} value={`${t.nudgesDone} / ${t.nudgesIn}`} unit={uiText("条")} foot={`逾期未完成 ${t.nudgesOpenLate} 条`} />
     </StatGrid>
     <section className="mist-section"><Card>
-      <CardHeader title="成员本周" sub={`新单按建单日、出运按离港日、回款按到账日（已核销到该成员订单的发票）；${archived ? '“当前”两列是存档时的状态。' : '“当前”两列是此刻的状态，不是当周历史值。'}`} />
-      <DataTable ariaLabel="团队周报" rows={report.rows} rowKey={r => r.id} columns={columns} empty={<EmptyState icon={Users} title="范围内没有成员" compact />} />
+      <CardHeader title={uiText("成员本周")} sub={ui`新单按建单日、出运按离港日、回款按到账日（已核销到该成员订单的发票）；${archived ? '“当前”两列是存档时的状态。' : '“当前”两列是此刻的状态，不是当周历史值。'}`} />
+      <DataTable ariaLabel={uiText("团队周报")} rows={report.rows} rowKey={r => r.id} columns={columns} empty={<EmptyState icon={Users} title={uiText("范围内没有成员")} compact />} />
     </Card></section>
-    <span className="mist-note">本系统只生成周报内容；复制或导出后由你自行发送。</span>
+    <span className="mist-note">{uiText("本系统只生成周报内容；复制或导出后由你自行发送。")}</span>
   </div>;
 }

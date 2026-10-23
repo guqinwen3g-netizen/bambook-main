@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 季节性与趋势：季节时间线（SS / AW + 年份，里程碑与今日），本季实时业务；趋势标签关联面料档案与（由报价推出的）客户；展会线索一键转 CRM 客户或商机。 */
 import React from 'react';
@@ -48,12 +50,12 @@ export function SeasonTimeline({ seasons, day, selected, onPick }: { seasons: Ma
   const start = Math.min(...rows.map(s => dayNum(s.startDate)), dayNum(day)), end = Math.max(...rows.map(s => dayNum(s.endDate)), dayNum(day)), span = Math.max(end - start, 86400000);
   const pos = (d: string) => `${((dayNum(d) - start) / span) * 100}%`;
   const months: string[] = []; { const c = new Date(start); c.setUTCDate(1); while (c.getTime() <= end) { if (c.getTime() >= start) months.push(c.toISOString().slice(0, 10)); c.setUTCMonth(c.getUTCMonth() + 3); } }
-  return <Card><div className="mist-card-body mist-season-timeline" data-season-timeline aria-label="季节时间线">
-    <div className="mist-season-axis">{months.map(m => <span key={m} style={{ left: pos(m) }}>{m.slice(0, 7).replace('-', '/')}</span>)}<i className="mist-season-today" style={{ left: pos(day) }} title={`今天 ${day}`}><b>今天</b></i></div>
+  return <Card><div className="mist-card-body mist-season-timeline" data-season-timeline aria-label={uiText("季节时间线")}>
+    <div className="mist-season-axis">{months.map(m => <span key={m} style={{ left: pos(m) }}>{m.slice(0, 7).replace('-', '/')}</span>)}<i className="mist-season-today" style={{ left: pos(day) }} title={ui`今天 ${day}`}><b>{uiText("今天")}</b></i></div>
     {rows.map(s => <button key={s.id} type="button" className="mist-season-row" aria-pressed={s.id === selected} onClick={() => onPick(s)}>
-      <span className="mist-season-label"><Mono>{s.code}</Mono><small className="mist-muted">{SEASON_STATUS[s.status].label}</small></span>
+      <span className="mist-season-label"><Mono>{s.code}</Mono><small className="mist-muted">{uiText(SEASON_STATUS[s.status].label)}</small></span>
       <span className="mist-season-track"><span className="mist-season-bar" data-status={s.status} style={{ left: pos(s.startDate), width: `calc(${pos(s.endDate)} - ${pos(s.startDate)})` }} />
-        {s.milestones.map(m => <span key={m.label + m.date} className="mist-season-dot" data-done={m.date < day || undefined} style={{ left: pos(m.date) }} title={`${m.label} · ${m.date}`} />)}
+        {s.milestones.map(m => <span key={m.label + m.date} className="mist-season-dot" data-done={m.date < day || undefined} style={{ left: pos(m.date) }} title={uiText(`${m.label} · ${m.date}`)} />)}
         <i className="mist-season-today" style={{ left: pos(day) }} /></span>
     </button>)}
   </div></Card>;
@@ -131,9 +133,9 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const selSeason = tab === 'seasons' ? seasons.find(s => s.id === picked) : undefined, selTrend = tab === 'trends' ? trends.find(t => t.id === picked) : undefined, selShow = tab === 'shows' ? shows.find(s => s.id === picked) : undefined;
   const seasonCols: Column<MarketSeason>[] = [
     { key: 'code', header: '季节', width: 'minmax(150px,1fr)', render: s => <ObjectCell name={<><Mono>{s.code}</Mono> {s.name}</>} meta={`${s.startDate} — ${s.endDate}`} /> },
-    { key: 'next', header: '下一个里程碑', width: 'minmax(130px,1fr)', hideOnMobile: true, render: s => { const n = [...s.milestones].sort((a, b) => a.date.localeCompare(b.date)).find(x => x.date >= day); return n ? <span className="mist-col" style={{ gap: 2 }}><span>{n.label}</span><small className={daysBetween(day, n.date) <= 7 ? 'mist-tone-warn' : 'mist-muted'}>{daysBetween(day, n.date) === 0 ? '今天' : `${daysBetween(day, n.date)} 天后`} · {n.date.slice(5)}</small></span> : <span className="mist-muted">—</span>; } },
+    { key: 'next', header: '下一个里程碑', width: 'minmax(130px,1fr)', hideOnMobile: true, render: s => { const n = [...s.milestones].sort((a, b) => a.date.localeCompare(b.date)).find(x => x.date >= day); return n ? <span className="mist-col" style={{ gap: 2 }}><span>{uiText(n.label)}</span><small className={daysBetween(day, n.date) <= 7 ? 'mist-tone-warn' : 'mist-muted'}>{uiText(daysBetween(day, n.date) === 0 ? '今天' : `${daysBetween(day, n.date)} 天后`)} · {n.date.slice(5)}</small></span> : <span className="mist-muted">—</span>; } },
     { key: 'biz', header: '订单 / 开发', width: '96px', align: 'right', render: s => { const b = seasonBusiness(state, s); return <span className="mist-num">{b.orders.length} / {b.devs.length}</span>; } },
-    { key: 'status', header: '状态', width: '84px', render: s => <Pill tone={SEASON_STATUS[s.status].tone}>{SEASON_STATUS[s.status].label}</Pill> },
+    { key: 'status', header: '状态', width: '84px', render: s => <Pill tone={SEASON_STATUS[s.status].tone}>{uiText(SEASON_STATUS[s.status].label)}</Pill> },
   ];
   const trendCols: Column<MarketTrend>[] = [
     { key: 'name', header: '趋势', width: 'minmax(170px,1.3fr)', render: t => <ObjectCell name={t.name} meta={t.source} /> },
@@ -145,36 +147,36 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
     { key: 'name', header: '展会', width: 'minmax(170px,1.3fr)', render: x => <ObjectCell name={x.name} meta={`${x.location}${x.booth ? ' · ' + x.booth : ''}`} /> },
     { key: 'date', header: '日期', width: '104px', render: x => <span className="mist-col" style={{ gap: 2 }}><span className="mist-num">{x.startDate.slice(5)} — {x.endDate.slice(5)}</span><small className="mist-muted">{seasonName(x.seasonId)}</small></span> },
     { key: 'leads', header: '线索 / 转化', width: '96px', align: 'right', render: x => { const ls = showLeads(x); return <span className="mist-num">{ls.length} / {ls.filter(l => l.status === 'Converted').length}</span>; } },
-    { key: 'status', header: '状态', width: '84px', render: x => <Pill tone={SHOW_STATUS[x.status].tone}>{SHOW_STATUS[x.status].label}</Pill> },
+    { key: 'status', header: '状态', width: '84px', render: x => <Pill tone={SHOW_STATUS[x.status].tone}>{uiText(SHOW_STATUS[x.status].label)}</Pill> },
   ];
   const detail = tab === 'seasons' ? (selSeason && <SeasonDetail s={selSeason} state={state} day={day} can={can} locked={locked} onEdit={() => setDialog(seasonSpec(selSeason))} onReview={() => void run({ type: 'market.season.review', payload: { id: selSeason.id } })} onOpen={(view, id, extra) => go(view, id, extra)} onTab={(t, id) => { go('seasons', id, { section: t }); setPicked(id); }} attachments={attachments('season', selSeason, !can)} history={history(selSeason.id)} />)
     : tab === 'trends' ? (selTrend && <TrendDetail t={selTrend} state={state} season={seasonName(selTrend.seasonId)} can={can} locked={locked} onEdit={() => setDialog(trendSpec(selTrend))} onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments('trend', selTrend, !can)} history={history(selTrend.id)} />)
     : (selShow && <ShowDetail x={selShow} leads={showLeads(selShow)} day={day} season={seasonName(selShow.seasonId)} can={can} canCrm={canCrm} locked={locked} onEdit={() => setDialog(showSpec(selShow))} onLead={l => setDialog(leadSpec(selShow, l))} onConvert={l => setDialog(convertSpec(l))} onProgress={(l, n) => setDialog(progressSpec(l, n))} onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments('show', selShow, !can)} history={history(selShow.id)} />);
-  const placeholder = <EmptyState icon={tab === 'seasons' ? CalendarRange : tab === 'trends' ? Sparkles : Tent} title={tab === 'seasons' ? '季节详情' : tab === 'trends' ? '趋势详情' : '展会与线索'} description={tab === 'seasons' ? '从时间线或列表选择一个季节，查看里程碑与本季业务。' : tab === 'trends' ? '选择一条趋势，查看关联面料与客户。' : '选择一个展会，查看线索并转入 CRM。'} compact />;
+  const placeholder = <EmptyState icon={tab === 'seasons' ? CalendarRange : tab === 'trends' ? Sparkles : Tent} title={uiText(tab === 'seasons' ? '季节详情' : tab === 'trends' ? '趋势详情' : '展会与线索')} description={uiText(tab === 'seasons' ? '从时间线或列表选择一个季节，查看里程碑与本季业务。' : tab === 'trends' ? '选择一条趋势，查看关联面料与客户。' : '选择一个展会，查看线索并转入 CRM。')} compact />;
   const exportRows = () => tab === 'seasons' ? downloadModuleCsv('季节.csv', ['编码', '名称', '开始', '结束', '状态', '订单', '开发', '数字档案', '订单金额（原币）'], seasonRows.map(s => { const b = seasonBusiness(state, s); return [s.code, s.name, s.startDate, s.endDate, SEASON_STATUS[s.status].label, b.orders.length, b.devs.length, b.products.length, b.amounts.map(([c, v]) => `${c} ${v}`).join(' / ')]; }))
     : tab === 'trends' ? downloadModuleCsv('趋势.csv', ['趋势', '类别', '季节', '来源', '关联档案', '关联客户'], trendRows.map(t => [t.name, TREND_TYPE[t.type], seasonName(t.seasonId), t.source, t.productIds.map(id => m?.products.find(p => p.id === id)?.sku).join('、'), trendCustomers(state, t).map(c => c.name).join('、')]))
     : downloadModuleCsv('展会线索.csv', ['展会', '联系人', '公司', '邮箱', '需求', '下次跟进', '预计金额', '币种', '状态'], showRows.flatMap(x => showLeads(x).map(l => [x.name, l.name, l.company, l.email, l.demand, l.followUpDate, l.estimatedValue, l.currency, LEAD_STATUS[l.status].label])));
   const summary = selSeason ? (() => {
     const b = seasonBusiness(state, selSeason), next = [...selSeason.milestones].sort((a, b) => a.date.localeCompare(b.date)).find(x => x.date >= day);
-    return <PreviewSummary openLabel="打开季节详情" onOpen={() => full.open(selSeason.id)} data={{ code: selSeason.code, status: <Pill tone={SEASON_STATUS[selSeason.status].tone}>{SEASON_STATUS[selSeason.status].label}</Pill>, title: selSeason.name, description: `${selSeason.startDate} — ${selSeason.endDate}`,
+    return <PreviewSummary openLabel="打开季节详情" onOpen={() => full.open(selSeason.id)} data={{ code: selSeason.code, status: <Pill tone={SEASON_STATUS[selSeason.status].tone}>{uiText(SEASON_STATUS[selSeason.status].label)}</Pill>, title: selSeason.name, description: `${selSeason.startDate} — ${selSeason.endDate}`,
       facts: [{ label: '订单', value: `${b.orders.length} 单` }, { label: '开发', value: `${b.devs.length} 个` }, { label: '里程碑', value: `${selSeason.milestones.length} 个` }, { label: '下一个里程碑', value: next ? `${next.label} · ${next.date.slice(5)}` : '无' }] }} />;
   })() : selTrend ? <PreviewSummary openLabel="打开趋势详情" onOpen={() => full.open(selTrend.id)} data={{ code: seasonName(selTrend.seasonId), status: <Pill>{TREND_TYPE[selTrend.type]}</Pill>, title: selTrend.name, description: selTrend.source,
       facts: [{ label: '关联面料档案', value: `${selTrend.productIds.length} 个` }, { label: '关联客户', value: `${trendCustomers(state, selTrend).length} 个` }] }} />
-    : selShow ? (() => { const ls = showLeads(selShow); return <PreviewSummary openLabel="打开展会与线索" onOpen={() => full.open(selShow.id)} data={{ code: seasonName(selShow.seasonId), status: <Pill tone={SHOW_STATUS[selShow.status].tone}>{SHOW_STATUS[selShow.status].label}</Pill>, title: selShow.name, description: `${selShow.location}${selShow.booth ? ' · ' + selShow.booth : ''}`,
+    : selShow ? (() => { const ls = showLeads(selShow); return <PreviewSummary openLabel="打开展会与线索" onOpen={() => full.open(selShow.id)} data={{ code: seasonName(selShow.seasonId), status: <Pill tone={SHOW_STATUS[selShow.status].tone}>{uiText(SHOW_STATUS[selShow.status].label)}</Pill>, title: selShow.name, description: `${selShow.location}${selShow.booth ? ' · ' + selShow.booth : ''}`,
       facts: [{ label: '日期', value: `${selShow.startDate} — ${selShow.endDate}` }, { label: '费用', value: `${selShow.currency} ${selShow.cost}` }, { label: '线索', value: `${ls.length} 条` }, { label: '已转入 CRM', value: `${ls.filter(l => l.status === 'Converted').length} 条` }] }} />; })() : null;
   if (full.active && detail) return <ListDetailPage backLabel="季节性与趋势" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   const createLabel = tab === 'seasons' ? '新建季节' : tab === 'trends' ? '记录趋势' : '新建展会';
   return <MistPage>
-    <PageHeader eyebrow="客户与市场 · 季节与趋势" title="季节性与趋势" description="订单、开发与报价按季节编码归季；趋势有来源依据并关联面料档案；展会线索可一键转入 CRM。"
-      actions={<><Button icon={Download} onClick={exportRows}>导出</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(tab === 'seasons' ? seasonSpec() : tab === 'trends' ? trendSpec() : showSpec())}>{createLabel}</Button>}</>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有季节与趋势写权限。</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title="数据未加载" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
-    <div className="mist-section"><Segmented<Tab> ariaLabel="内容" value={tab} onChange={switchTab} options={[{ value: 'seasons', label: `季节 · ${seasons.length}` }, { value: 'trends', label: `趋势 · ${trends.length}` }, { value: 'shows', label: `展会与线索 · ${shows.length}` }]} /></div>
+    <PageHeader eyebrow={uiText("客户与市场 · 季节与趋势")} title={uiText("季节性与趋势")} description={uiText("订单、开发与报价按季节编码归季；趋势有来源依据并关联面料档案；展会线索可一键转入 CRM。")}
+      actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(tab === 'seasons' ? seasonSpec() : tab === 'trends' ? trendSpec() : showSpec())}>{createLabel}</Button>}</>} />
+    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有季节与趋势写权限。")}</Banner></div>}
+    {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    <div className="mist-section"><Segmented<Tab> ariaLabel={uiText("内容")} value={tab} onChange={switchTab} options={[{ value: 'seasons', label: `季节 · ${seasons.length}` }, { value: 'trends', label: `趋势 · ${trends.length}` }, { value: 'shows', label: `展会与线索 · ${shows.length}` }]} /></div>
     {tab === 'seasons' && <div className="mist-section"><SeasonTimeline seasons={seasons} day={day} selected={selSeason?.id} onPick={s => pick(s.id)} /></div>}
     <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSeason ? `${selSeason.code} · ${selSeason.name}` : selTrend?.name || selShow?.name || ''}
-      list={<Card>{tab === 'seasons' ? <DataTable ariaLabel="季节列表" loading={loading} rows={seasonRows} rowKey={s => s.id} selectedKey={selSeason?.id} density="comfy" onRowClick={s => pick(s.id)} columns={seasonCols} empty={<EmptyState icon={CalendarRange} title="还没有季节" description="按 SS / AW + 年份建立季节，订单、开发与报价会按编码自动归季。" />} />
-        : tab === 'trends' ? <DataTable ariaLabel="趋势列表" loading={loading} rows={trendRows} rowKey={t => t.id} selectedKey={selTrend?.id} density="comfy" onRowClick={t => pick(t.id)} columns={trendCols} empty={<EmptyState icon={Sparkles} title="还没有趋势记录" description="记录趋势时写明来源依据，并关联面料档案。" />} />
-        : <DataTable ariaLabel="展会列表" loading={loading} rows={showRows} rowKey={x => x.id} selectedKey={selShow?.id} density="comfy" onRowClick={x => pick(x.id)} columns={showCols} empty={<EmptyState icon={Tent} title="还没有展会" description="登记参展计划与费用，展会线索在展会详情中录入。" />} />}</Card>}
+      list={<Card>{tab === 'seasons' ? <DataTable ariaLabel={uiText("季节列表")} loading={loading} rows={seasonRows} rowKey={s => s.id} selectedKey={selSeason?.id} density="comfy" onRowClick={s => pick(s.id)} columns={seasonCols} empty={<EmptyState icon={CalendarRange} title={uiText("还没有季节")} description={uiText("按 SS / AW + 年份建立季节，订单、开发与报价会按编码自动归季。")} />} />
+        : tab === 'trends' ? <DataTable ariaLabel={uiText("趋势列表")} loading={loading} rows={trendRows} rowKey={t => t.id} selectedKey={selTrend?.id} density="comfy" onRowClick={t => pick(t.id)} columns={trendCols} empty={<EmptyState icon={Sparkles} title={uiText("还没有趋势记录")} description={uiText("记录趋势时写明来源依据，并关联面料档案。")} />} />
+        : <DataTable ariaLabel={uiText("展会列表")} loading={loading} rows={showRows} rowKey={x => x.id} selectedKey={selShow?.id} density="comfy" onRowClick={x => pick(x.id)} columns={showCols} empty={<EmptyState icon={Tent} title={uiText("还没有展会")} description={uiText("登记参展计划与费用，展会线索在展会详情中录入。")} />} />}</Card>}
       detail={detail || placeholder} summary={summary} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
@@ -184,27 +186,27 @@ function SeasonDetail({ s, state, day, can, locked, onEdit, onReview, onOpen, on
   const b = seasonBusiness(state, s), left = daysBetween(day, s.endDate), toStart = daysBetween(day, s.startDate);
   const writeReason = !can ? '没有季节写权限' : false;
   return <DetailBody data-season-detail={s.id} heading={<div><span className="mist-mono mist-muted">{s.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{s.name}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={SEASON_STATUS[s.status].tone}>{SEASON_STATUS[s.status].label}</Pill><Pill>{toStart > 0 ? `${toStart} 天后开始` : left >= 0 ? `还剩 ${left} 天` : `已结束 ${-left} 天`}</Pill></div>
-    {s.status === 'Active' && left < 0 && <Banner tone="warn" title="季节已过结束日">状态仍为进行中；确认收尾后改为已结束，并生成季末回顾。</Banner>}
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={SEASON_STATUS[s.status].tone}>{uiText(SEASON_STATUS[s.status].label)}</Pill><Pill>{uiText(toStart > 0 ? `${toStart} 天后开始` : left >= 0 ? `还剩 ${left} 天` : `已结束 ${-left} 天`)}</Pill></div>
+    {s.status === 'Active' && left < 0 && <Banner tone="warn" title={uiText("季节已过结束日")}>{uiText("状态仍为进行中；确认收尾后改为已结束，并生成季末回顾。")}</Banner>}
     <ActionBar busy={locked} actions={[{ label: '编辑季节', icon: Pencil, onClick: onEdit, reason: writeReason }, { label: s.review ? '更新回顾' : '生成回顾', icon: RefreshCw, onClick: onReview, reason: writeReason, primary: s.status === 'Closed' && !s.review }]} />
-    <Facts items={[{ label: '期间', value: `${s.startDate} — ${s.endDate}` }, { label: '订单（进行中 + 已完成）', value: <span className="mist-num">{b.orders.length} 单</span> },
-      { label: '订单金额（原币）', value: <span className="mist-num">{b.amounts.length ? b.amounts.map(([c, v]) => `${c} ${v.toLocaleString('en-US', { minimumFractionDigits: 2 })}`).join(' · ') : '—'}</span> },
+    <Facts items={[{ label: '期间', value: `${s.startDate} — ${s.endDate}` }, { label: '订单（进行中 + 已完成）', value: <span className="mist-num">{b.orders.length}{uiText(" 单")}</span> },
+      { label: '订单金额（原币）', value: <span className="mist-num">{uiText(b.amounts.length ? b.amounts.map(([c, v]) => `${c} ${v.toLocaleString('en-US', { minimumFractionDigits: 2 })}`).join(' · ') : '—')}</span> },
       { label: '开发 / 数字档案', value: <span className="mist-num">{b.devs.length} / {b.products.length}</span> }, { label: '未关闭报价', value: <span className="mist-num">{b.quotations.length}</span> }, { label: '趋势 / 展会', value: <span className="mist-num">{b.trends.length} / {b.shows.length}</span> }]} />
     {s.note && <p className="mist-sub">{s.note}</p>}
-    <DetailBlock title="里程碑">{s.milestones.length ? <Checklist items={[...s.milestones].sort((a, c) => a.date.localeCompare(c.date)).map(x => ({ label: x.label, done: x.date < day, note: x.date < day ? x.date : `${x.date} · ${daysBetween(day, x.date) === 0 ? '今天' : daysBetween(day, x.date) + ' 天后'}` }))} /> : <span className="mist-muted">未设里程碑。</span>}</DetailBlock>
-    {!!(b.orders.length || b.quotations.length) && <DetailBlock title="本季业务">
+    <DetailBlock title={uiText("里程碑")}>{s.milestones.length ? <Checklist items={[...s.milestones].sort((a, c) => a.date.localeCompare(c.date)).map(x => ({ label: x.label, done: x.date < day, note: x.date < day ? x.date : `${x.date} · ${daysBetween(day, x.date) === 0 ? '今天' : daysBetween(day, x.date) + ' 天后'}` }))} /> : <span className="mist-muted">{uiText("未设里程碑。")}</span>}</DetailBlock>
+    {!!(b.orders.length || b.quotations.length) && <DetailBlock title={uiText("本季业务")}>
       <div className="mist-col" style={{ gap: 0 }} data-season-business>
-        {b.orders.slice(0, 6).map(o => <div key={o.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill tone="accent">订单</Pill><Mono>{o.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted">{o.customer} · {o.state}</span><Button variant="quiet" onClick={() => onOpen('orders/detail', o.id)}>打开</Button></div>)}
-        {b.quotations.map(q => <div key={q.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill>报价</Pill><Mono>{q.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted mist-num">{q.currency} {q.total}</span><Button variant="quiet" onClick={() => onOpen('quotations', q.id)}>打开</Button></div>)}
+        {b.orders.slice(0, 6).map(o => <div key={o.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill tone="accent">{uiText("订单")}</Pill><Mono>{o.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted">{o.customer} · {o.state}</span><Button variant="quiet" onClick={() => onOpen('orders/detail', o.id)}>{uiText("打开")}</Button></div>)}
+        {b.quotations.map(q => <div key={q.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><Pill>{uiText("报价")}</Pill><Mono>{q.code}</Mono><span style={{ flex: '1 1 8em', minWidth: 0 }} className="mist-muted mist-num">{q.currency} {q.total}</span><Button variant="quiet" onClick={() => onOpen('quotations', q.id)}>{uiText("打开")}</Button></div>)}
       </div>
     </DetailBlock>}
-    {!!(b.trends.length || b.shows.length) && <DetailBlock title="趋势与展会"><div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>
+    {!!(b.trends.length || b.shows.length) && <DetailBlock title={uiText("趋势与展会")}><div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>
       {b.trends.map(t => <Button key={t.id} variant="quiet" icon={Sparkles} onClick={() => onTab('trends', t.id)}>{t.name}</Button>)}
       {b.shows.map(x => <Button key={x.id} variant="quiet" icon={Tent} onClick={() => onTab('shows', x.id)}>{x.name}</Button>)}
     </div></DetailBlock>}
-    <DetailBlock title="季末回顾">{s.review ? <><Facts cols={3} items={[{ label: '订单', value: s.review.orderCount }, { label: '开发', value: s.review.developmentCount }, { label: '数字档案', value: s.review.productCount }]} /><span className="mist-note">金额（原币，分别合计）：{s.review.amounts.map(x => `${x.currency} ${x.amount}`).join(' · ') || '无'}；快照生成于 {new Date(s.review.at).toLocaleString('zh-CN')}，之后的变化需点“更新回顾”。</span></> : <span className="mist-muted">尚未生成。回顾会保存生成时刻的订单、开发、档案数量与原币金额快照。</span>}</DetailBlock>
-    <DetailBlock title="附件">{attachments}</DetailBlock>
-    <DetailBlock title="处理记录">{history}</DetailBlock>
+    <DetailBlock title={uiText("季末回顾")}>{s.review ? <><Facts cols={3} items={[{ label: '订单', value: s.review.orderCount }, { label: '开发', value: s.review.developmentCount }, { label: '数字档案', value: s.review.productCount }]} /><span className="mist-note">{uiText("金额（原币，分别合计）：")}{s.review.amounts.map(x => `${x.currency} ${x.amount}`).join(' · ') || '无'}{uiText("；快照生成于 ")}{new Date(s.review.at).toLocaleString(interfaceLocale())}{uiText("，之后的变化需点“更新回顾”。")}</span></> : <span className="mist-muted">{uiText("尚未生成。回顾会保存生成时刻的订单、开发、档案数量与原币金额快照。")}</span>}</DetailBlock>
+    <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
+    <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;
 }
 
@@ -215,11 +217,11 @@ function TrendDetail({ t, state, season, can, locked, onEdit, onOpen, attachment
     <ActionBar busy={locked} actions={[{ label: '编辑趋势', icon: Pencil, onClick: onEdit, reason: !can ? '没有季节写权限' : false }]} />
     <Facts items={[{ label: '来源依据', value: t.source }, { label: '季节', value: season }]} />
     {t.note && <p className="mist-sub">{t.note}</p>}
-    <DetailBlock title={`关联面料档案 · ${products.length}`}>{products.length ? <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{products.map(p => <Button key={p.id} variant="quiet" onClick={() => onOpen('products', p.id)}><Mono>{p.sku}</Mono> {p.name}</Button>)}</div> : <span className="mist-muted">未关联面料档案。</span>}</DetailBlock>
-    <DetailBlock title={`关联客户 · ${customers.length}`}>{customers.length ? <div className="mist-col" style={{ gap: 0 }} data-trend-customers>{customers.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><span style={{ flex: 1, minWidth: 0 }}>{c.name}<small className="mist-cell-sub">报价 {c.codes.join('、')}</small></span><Button variant="quiet" onClick={() => onOpen('crm', c.id, { customerId: c.id })}>客户业务</Button></div>)}</div> : <span className="mist-muted">还没有客户的报价引用这些面料。</span>}
-      <span className="mist-note">由报价条目引用的关联档案推出，不另行登记。</span></DetailBlock>
-    <DetailBlock title="附件">{attachments}</DetailBlock>
-    <DetailBlock title="处理记录">{history}</DetailBlock>
+    <DetailBlock title={ui`关联面料档案 · ${products.length}`}>{products.length ? <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{products.map(p => <Button key={p.id} variant="quiet" onClick={() => onOpen('products', p.id)}><Mono>{p.sku}</Mono> {p.name}</Button>)}</div> : <span className="mist-muted">{uiText("未关联面料档案。")}</span>}</DetailBlock>
+    <DetailBlock title={ui`关联客户 · ${customers.length}`}>{customers.length ? <div className="mist-col" style={{ gap: 0 }} data-trend-customers>{customers.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}><span style={{ flex: 1, minWidth: 0 }}>{c.name}<small className="mist-cell-sub">{uiText("报价 ")}{c.codes.join('、')}</small></span><Button variant="quiet" onClick={() => onOpen('crm', c.id, { customerId: c.id })}>{uiText("客户业务")}</Button></div>)}</div> : <span className="mist-muted">{uiText("还没有客户的报价引用这些面料。")}</span>}
+      <span className="mist-note">{uiText("由报价条目引用的关联档案推出，不另行登记。")}</span></DetailBlock>
+    <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
+    <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;
 }
 
@@ -228,27 +230,27 @@ function ShowDetail({ x, leads, day, season, can, canCrm, locked, onEdit, onLead
   const writeReason = !can ? '没有季节写权限' : false, convertReason = !canCrm ? '没有客户关系写权限' : false;
   const order: Record<MarketLead['status'], number> = { New: 0, Following: 1, Contacted: 1, Qualified: 1, Converted: 2, Lost: 3 };
   return <DetailBody data-show-detail={x.id} heading={<div><span className="mist-muted">{x.location}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{x.name}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={SHOW_STATUS[x.status].tone}>{SHOW_STATUS[x.status].label}</Pill><Pill>{season}</Pill>{overdue > 0 && <Pill tone="warn">{overdue} 条线索跟进逾期</Pill>}</div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={SHOW_STATUS[x.status].tone}>{uiText(SHOW_STATUS[x.status].label)}</Pill><Pill>{season}</Pill>{overdue > 0 && <Pill tone="warn">{overdue}{uiText(" 条线索跟进逾期")}</Pill>}</div>
     <ActionBar busy={locked} actions={[{ label: '录入线索', icon: UserPlus, onClick: () => onLead(), reason: writeReason, primary: x.status !== 'Planned' }, { label: '编辑展会', icon: Pencil, onClick: onEdit, reason: writeReason }]} />
     <Facts items={[{ label: '日期', value: `${x.startDate} — ${x.endDate}` }, { label: '展位', value: x.booth || '—' }, { label: '参与人', value: x.attendees || '—' }, { label: '费用', value: <span className="mist-num">{x.currency} {x.cost}</span> }, { label: '线索 / 已转 CRM', value: <span className="mist-num">{leads.length} / {converted}</span> }, { label: '转化率', value: leads.length ? `${Math.round(converted / leads.length * 100)}%` : '—' }]} />
     {x.note && <p className="mist-sub">{x.note}</p>}
-    <DetailBlock title={`展会线索 · ${leads.length}`}>
-      {leads.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label="展会线索" data-show-leads>{[...leads].sort((a, b) => order[a.status] - order[b.status] || (a.followUpDate || '9').localeCompare(b.followUpDate || '9')).map(l => { const late = l.status !== 'Converted' && l.status !== 'Lost' && l.followUpDate && l.followUpDate < day; const open = l.status !== 'Converted' && l.status !== 'Lost'; return <div key={l.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
-        <div className="mist-row" style={{ gap: 8 }}><strong>{l.name}</strong><span className="mist-muted">{l.company}</span><span className="mist-spacer" /><Pill tone={LEAD_STATUS[l.status].tone}>{LEAD_STATUS[l.status].label}</Pill></div>
-        <small className="mist-muted">{l.demand} · 预计 <span className="mist-num">{l.currency} {l.estimatedValue}</span>{l.email ? ' · ' + l.email : ''}</small>
-        {open && <small className={late ? 'mist-tone-warn' : 'mist-muted'}>{l.followUpDate ? `下次跟进 ${l.followUpDate}${late ? `（逾期 ${daysBetween(l.followUpDate, day)} 天）` : ''}` : '未计划跟进'}</small>}
+    <DetailBlock title={ui`展会线索 · ${leads.length}`}>
+      {leads.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("展会线索")} data-show-leads>{[...leads].sort((a, b) => order[a.status] - order[b.status] || (a.followUpDate || '9').localeCompare(b.followUpDate || '9')).map(l => { const late = l.status !== 'Converted' && l.status !== 'Lost' && l.followUpDate && l.followUpDate < day; const open = l.status !== 'Converted' && l.status !== 'Lost'; return <div key={l.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
+        <div className="mist-row" style={{ gap: 8 }}><strong>{l.name}</strong><span className="mist-muted">{l.company}</span><span className="mist-spacer" /><Pill tone={LEAD_STATUS[l.status].tone}>{uiText(LEAD_STATUS[l.status].label)}</Pill></div>
+        <small className="mist-muted">{l.demand}{uiText(" · 预计 ")}<span className="mist-num">{l.currency} {l.estimatedValue}</span>{uiText(l.email ? ' · ' + l.email : '')}</small>
+        {open && <small className={late ? 'mist-tone-warn' : 'mist-muted'}>{uiText(l.followUpDate ? `下次跟进 ${l.followUpDate}${late ? `（逾期 ${daysBetween(l.followUpDate, day)} 天）` : ''}` : '未计划跟进')}</small>}
         <div className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>
-          {open && <Button variant="secondary" icon={UserCheck} disabled={locked || !!convertReason} title={convertReason || undefined} onClick={() => onConvert(l)}>转入 CRM</Button>}
-          {open && can && <Button variant="quiet" icon={Flag} disabled={locked} onClick={() => onProgress(l, 'Following')}>记录跟进</Button>}
-          {open && can && <Button variant="quiet" icon={UserX} disabled={locked} onClick={() => onProgress(l, 'Lost')}>已流失</Button>}
-          {open && can && <Button variant="quiet" disabled={locked} onClick={() => onLead(l)}>编辑</Button>}
-          {l.status === 'Converted' && <Button variant="quiet" onClick={() => onOpen('crm', l.customerId, { customerId: l.customerId })}>客户业务{l.opportunityId ? ' · 商机' : ''}</Button>}
+          {open && <Button variant="secondary" icon={UserCheck} disabled={locked || !!convertReason} title={uiText(convertReason || undefined)} onClick={() => onConvert(l)}>{uiText("转入 CRM")}</Button>}
+          {open && can && <Button variant="quiet" icon={Flag} disabled={locked} onClick={() => onProgress(l, 'Following')}>{uiText("记录跟进")}</Button>}
+          {open && can && <Button variant="quiet" icon={UserX} disabled={locked} onClick={() => onProgress(l, 'Lost')}>{uiText("已流失")}</Button>}
+          {open && can && <Button variant="quiet" disabled={locked} onClick={() => onLead(l)}>{uiText("编辑")}</Button>}
+          {l.status === 'Converted' && <Button variant="quiet" onClick={() => onOpen('crm', l.customerId, { customerId: l.customerId })}>{uiText("客户业务")}{uiText(l.opportunityId ? ' · 商机' : '')}</Button>}
         </div>
         {l.note && <small className="mist-note" style={{ whiteSpace: 'pre-line' }}>{l.note}</small>}
-      </div>; })}</div> : <span className="mist-muted">还没有线索。展会现场交换的名片可在这里录入。</span>}
-      {!canCrm && <span className="mist-note">转入 CRM 需要客户关系写权限。</span>}
+      </div>; })}</div> : <span className="mist-muted">{uiText("还没有线索。展会现场交换的名片可在这里录入。")}</span>}
+      {!canCrm && <span className="mist-note">{uiText("转入 CRM 需要客户关系写权限。")}</span>}
     </DetailBlock>
-    <DetailBlock title="附件">{attachments}</DetailBlock>
-    <DetailBlock title="处理记录">{history}</DetailBlock>
+    <DetailBlock title={uiText("附件")}>{attachments}</DetailBlock>
+    <DetailBlock title={uiText("处理记录")}>{history}</DetailBlock>
   </DetailBody>;
 }

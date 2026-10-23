@@ -1,3 +1,6 @@
+import { LanguageSetting } from '../../../components/mist/LanguageSetting';
+import { interfaceLocale } from '../../../services/interfaceLanguage';
+import { uiText, ui, useInterfaceLanguage, localizedPageTitle } from '../../../services/interfaceLanguage';
 import {businessNow} from './runtime/businessClock';
 import { AccountAccessPage } from './pages/AccountAccessPage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
@@ -115,7 +118,7 @@ function useSections(): NavSection[] {
       ...((platformOnly || session.canAccessView(View.SystemSettings)) ? [{ id: 'system-settings', label: platformOnly ? '平台设置' : '公司设置', icon: Settings2 }] : []),
     ];
     return items.length ? [...real, { id: 'handoff', label: dev ? '设计系统' : '系统', items }] : real;
-  }, [session.sessionKey, session.status, session.hasRole, session.canAccessView]);
+  }, [session.sessionKey, session.status, session.hasRole, session.canAccessView, interfaceLocale()]);
 }
 /** 侧栏数字、模块页「待我处理」、首页合计共用同一口径（见 runtime/workQueue）。 */
 function useMyWorkOptions(): MistWorkOptions {
@@ -133,8 +136,8 @@ function ModuleWorkBar({ view }: { view: string }) {
   const module = mistWorkModule(view), items = mistMyWork(state, useMyWorkOptions()).filter(item => item.module === module);
   React.useEffect(() => setOpen(false), [module]);
   if (!items.length || module === 'cockpit') return null;
-  return <><div data-mist-module-work={module}><Banner tone="accent" icon={ListTodo} title={`待我处理 ${items.length} 项`} actions={<Button size="sm" variant="secondary" onClick={() => setOpen(true)}>查看</Button>}>{items.slice(0, 2).map(item => item.title).join('；')}{items.length > 2 ? ' 等' : ''}</Banner></div>
-    <Drawer open={open} onClose={() => setOpen(false)} title={`待我处理 · ${items.length} 项`} sub="指定给我或我岗位的事项；办理后自动消失">
+  return <><div data-mist-module-work={module}><Banner tone="accent" icon={ListTodo} title={ui`待我处理 ${items.length} 项`} actions={<Button size="sm" variant="secondary" onClick={() => setOpen(true)}>{uiText("查看")}</Button>}>{items.slice(0, 2).map(item => item.title).join('；')}{uiText(items.length > 2 ? ' 等' : '')}</Banner></div>
+    <Drawer open={open} onClose={() => setOpen(false)} title={ui`待我处理 · ${items.length} 项`} sub={uiText("指定给我或我岗位的事项；办理后自动消失")}>
       <TaskList items={items.map(item => ({ id: item.id, when: item.when, urgent: item.urgent || (!!item.at && item.at.slice(0, 10) < today && item.source === 'task'), title: item.title, meta: item.meta }))}
         onOpen={row => { const item = items.find(entry => entry.id === row.id); if (item) { setOpen(false); go(item.target.view, item.target.id, item.target); } }} />
     </Drawer></>;
@@ -157,6 +160,7 @@ function crumbsFor(route: Route, go: (view: string, id?: string) => void, object
   return crumbs;
 }
 function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: ThemeMode) => void }) {
+  const locale = useInterfaceLanguage();
   const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace();
   const {state} = workspace;
   const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
@@ -167,7 +171,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
   const documentTitle = pageDocumentTitle(route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
-  React.useEffect(() => { document.title = documentTitle; }, [documentTitle]);
+  React.useEffect(() => { document.title = localizedPageTitle(documentTitle); }, [documentTitle, locale]);
   const scrollPosition = React.useRef<{ key: string; route: Route; list: boolean }>(null as never);
   if (!scrollPosition.current) { const list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(route); scrollPosition.current = { key: scrollKeyOf(route, list), route, list }; }
   const [collapsed, setCollapsed] = React.useState(false);
@@ -263,14 +267,14 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     if (!state) return {role:'assistant',content:'公司数据尚未读取，请稍后再试。'};
     const visibleDevs=canDevelopment?state.devs:[],visibleOrders=canOrders?state.orders:[],visibleTasks=state.tasks.filter(t=>session.canAccessView(t.target.view.split('/')[0] as View));
     const devs=visibleDevs.filter(d=>d.stage<4).slice(0,4),late=(canProduction?state.productions:[]).filter(p=>!p.closed&&p.col!=='done'&&p.due<platformBusinessDate(businessNow()));
-    return {role:'assistant',content:<div><p>当前公司有 {visibleDevs.length} 个可见开发案、{visibleOrders.length} 张订单；{visibleTasks.filter(t=>!t.done).length} 项待办未完成，{late.length} 项生产已过交期。</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}<p>以上为本地记录查询，未执行修改。发送问题时，仅提供你选中的来源及已授权模块的数量概况。</p></div>,sources:['当前公司 · 版本 '+workspace.workspace?.revision],actions:<><Button disabled={!session.hasPermission('ai:chat')} onClick={()=>go('assistant')}>进入完整助手</Button>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{aiUseRouteSource?'取消引用：':'引用当前来源：'}{currentAiSource.label}</Button>:<span className="mist-note">当前页面没有可引用的订单、发票或风险记录。</span>}</>};
+    return {role:'assistant',content:<div><p>{uiText("当前公司有 ")}{visibleDevs.length}{uiText(" 个可见开发案、")}{visibleOrders.length}{uiText(" 张订单；")}{visibleTasks.filter(t=>!t.done).length}{uiText(" 项待办未完成，")}{late.length}{uiText(" 项生产已过交期。")}</p>{devs.map(d=><p key={d.id}><Button variant="quiet" onClick={()=>go('development/detail',d.id,{versionId:d.currentVersionId||undefined})}>{d.code} · {d.name} · {d.state}</Button></p>)}<p>{uiText("以上为本地记录查询，未执行修改。发送问题时，仅提供你选中的来源及已授权模块的数量概况。")}</p></div>,sources:['当前公司 · 版本 '+workspace.workspace?.revision],actions:<><Button disabled={!session.hasPermission('ai:chat')} onClick={()=>go('assistant')}>{uiText("进入完整助手")}</Button>{currentAiSource?<Button aria-pressed={aiUseRouteSource} disabled={aiBusy} onClick={()=>setAiUseRouteSource(value=>!value)}>{uiText(aiUseRouteSource?'取消引用：':'引用当前来源：')}{uiText(currentAiSource.label)}</Button>:<span className="mist-note">{uiText("当前页面没有可引用的订单、发票或风险记录。")}</span>}</>};
   };
   const send = async (question:string,retrySources?:string[]) => {
     const content=question.trim();if(!content)return;
     const sourceIds=retrySources??(aiUseRouteSource&&currentAiSource?[currentAiSource.id]:[]);
     const available=()=>aiMounted.current&&aiCurrent.current===aiScope;
     if(!available())return;
-    const errorMessage=(message:string):ChatMessage=>({role:'assistant',content:<p>{message}</p>,actions:<Button onClick={()=>void send(content,sourceIds)}>重试此问题</Button>});
+    const errorMessage=(message:string):ChatMessage=>({role:'assistant',content:<p>{message}</p>,actions:<Button onClick={()=>void send(content,sourceIds)}>{uiText("重试此问题")}</Button>});
     if(aiRun.current){setMsgs(items=>[...items,{role:'user',text:content},errorMessage('上一个问题仍在处理。内容已保留，请等待完成后重试。')]);return;}
     if(!workspace.workspace?.id||workspace.loading){setMsgs(items=>[...items,{role:'user',text:content},errorMessage('公司数据尚未读取，请完成读取后重试。')]);return;}
     if(!session.hasPermission('ai:chat')){setMsgs(items=>[...items,{role:'user',text:content},{role:'assistant',content:'当前账号无模型助手权限，仍可查看上方本地概况。'}]);return;}
@@ -283,7 +287,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       if(result?.mode!=='read_only'||typeof result.text!=='string'||!result.text.trim()||!Number.isSafeInteger(result.revision)||!Array.isArray(result.sources)||result.sources.some((source:any)=>!source||!sourceIds.includes(source.id)||typeof source.label!=='string'||typeof source.entityId!=='string'||!['orders/detail','invoices','risks'].includes(source.view)||source.id!==(source.view==='orders/detail'?'orders':source.view)+':'+source.entityId))throw new Error('助手响应格式无效，请重试');
       if(!available()||aiRun.current!==token)return;
       aiHistory.current=[...aiHistory.current,{role:'user',content},{role:'assistant',content:result.text}];
-      setMsgs(items=>[...items,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{result.text}</p>{result.truncated&&<p className="mist-note">回复过长，已截断；可缩小问题范围继续询问。</p>}<p className="mist-note">模型建议 · 未执行业务操作 · 公司数据版本 {result.revision}</p></>,actions:<>{result.sources.map((source:any)=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{source.label}</Button>)}<Button onClick={()=>go('assistant')}>进入完整助手</Button></>}]);
+      setMsgs(items=>[...items,{role:'assistant',content:<><p style={{whiteSpace:'pre-wrap'}}>{result.text}</p>{result.truncated&&<p className="mist-note">{uiText("回复过长，已截断；可缩小问题范围继续询问。")}</p>}<p className="mist-note">{uiText("模型建议 · 未执行业务操作 · 公司数据版本 ")}{result.revision}</p></>,actions:<>{result.sources.map((source:any)=><Button key={source.id} variant="quiet" onClick={()=>go(source.view,source.entityId)}>{uiText(source.label)}</Button>)}<Button onClick={()=>go('assistant')}>{uiText("进入完整助手")}</Button></>}]);
     }catch(error){if(available()&&aiRun.current===token&&!(error instanceof Error&&error.name==='AbortError'))setMsgs(items=>[...items,errorMessage(error instanceof Error?error.message:'模型服务暂不可用，请重试')]);}
     finally{if(available()&&aiRun.current===token){aiRun.current=null;aiController.current=null;setAiBusy(false);}}
   };
@@ -315,7 +319,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (['account-access','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
   if (route.view === 'register') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
   if (session.status === 'loading') return null;
-  if (session.status === 'anonymous' && (session.localMode || session.connectionModeUnverified)) return <MistPage width="narrow"><Card><CardHeader title="公司连接待核对" sub={session.localMode?'本地工作身份由本机服务提供，无需输入旧账号密码。':'暂时无法确认当前公司，请重新连接后继续。'}/><div className="mist-card-body"><p>{session.error||'暂时无法读取公司会话，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>{session.localMode?'重新进入本地身份':'重新连接公司'}</Button></div></Card></MistPage>;
+  if (session.status === 'anonymous' && (session.localMode || session.connectionModeUnverified)) return <MistPage width="narrow"><Card><CardHeader title={uiText("公司连接待核对")} sub={uiText(session.localMode?'本地工作身份由本机服务提供，无需输入旧账号密码。':'暂时无法确认当前公司，请重新连接后继续。')}/><div className="mist-card-body"><p>{session.error||'暂时无法读取公司会话，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>{uiText(session.localMode?'重新进入本地身份':'重新连接公司')}</Button></div></Card></MistPage>;
   if (session.status === 'anonymous' || route.view === 'login') {
     const loginGo = (view: string, id?: string) => {
       if (view === 'cockpit' && !['login', 'platform-admin'].includes(route.view)) go(route.view, route.id, route); else go(view, id);
@@ -351,31 +355,32 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
           extra={platformOnly ? undefined : <MistReviewButton/>} notifications={platformOnly ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={platformOnly ? undefined : ()=>openAI()} />}
       >
-        {workspace.pendingCreate && !workspace.saving && <Banner tone="warn" title="历史数据创建结果需要核对" actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>核对创建结果</Button>}>{workspace.pendingCreate.name}：将查询并继续同一次创建。</Banner>}
-        {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && <Banner tone="warn" title="上次操作的结果需要核对" actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>核对原请求</Button>}>核对前会保留原请求，避免重复保存。{workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':''}</Banner>}
-        {workspace.error && <Banner tone="bad" title={workspace.error} actions={<Button onClick={()=>void workspace.refresh()}>重新读取</Button>} />}
-        {!permitted ? <EmptyState icon={ShieldCheck} title="没有查看权限" description="当前账号无法访问此业务。" action={<Button onClick={() => go('cockpit')}>返回我的工作</Button>} />
+        {workspace.pendingCreate && !workspace.saving && <Banner tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>}
+        {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
+        {workspace.error && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}
+        {!permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : Page ? <>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (FULFILLMENT_PAGES[route.view]||MARKET_PAGES[route.view]||PLATFORM_PAGES[route.view]?route.view:JSON.stringify(route))} /></>
-          : <EmptyState title="没有找到此页面" action={<Button onClick={() => go('cockpit')}>返回我的工作</Button>} />}
+          : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
       </MistAppShell>
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
-      <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={aiBusy?'正在生成只读建议':'基于选定来源回答 · 不执行业务操作'} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
-      <Drawer open={notifications} onClose={()=>setNotifications(false)} title="通知" sub="来自当前公司的操作记录"
-        footer={<><Button variant="quiet" onClick={()=>{setNotifications(false);go('notifications');}}>查看全部通知</Button><Button disabled={!visibleNotifications.some(n=>!n.readAt)} loading={workspace.saving} onClick={()=>void workspace.run({type:'notification.readAll',payload:{}}).catch(report)}>全部标为已读</Button></>}>
-        {state?.settings.notifications.digest&&<Card><CardHeader title="今日工作摘要" sub="按当前记录生成 · 不发送邮件"/><div className="mist-card-body">{dailyDigest.length?dailyDigest.map(item=><p key={item.id}><Button variant="quiet" onClick={()=>go(item.target.view,item.target.id,item.target)}>{item.label} · {item.detail}</Button></p>):<p>今天没有待处理事项。</p>}</div></Card>}
-        {visibleNotifications.length?visibleNotifications.slice().reverse().map(n=><Card key={n.id}><CardHeader title={n.title} sub={new Date(n.at).toLocaleString()} tools={<Button variant="quiet" onClick={()=>{void (n.readAt?Promise.resolve():workspace.run({type:'notification.read',payload:{id:n.id}})).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{n.readAt?'查看':'阅读'}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title="暂无通知" />}
+      <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成只读建议':'基于选定来源回答 · 不执行业务操作')} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
+      <Drawer open={notifications} onClose={()=>setNotifications(false)} title={uiText("通知")} sub={uiText("来自当前公司的操作记录")}
+        footer={<><Button variant="quiet" onClick={()=>{setNotifications(false);go('notifications');}}>{uiText("查看全部通知")}</Button><Button disabled={!visibleNotifications.some(n=>!n.readAt)} loading={workspace.saving} onClick={()=>void workspace.run({type:'notification.readAll',payload:{}}).catch(report)}>{uiText("全部标为已读")}</Button></>}>
+        {state?.settings.notifications.digest&&<Card><CardHeader title={uiText("今日工作摘要")} sub={uiText("按当前记录生成 · 不发送邮件")}/><div className="mist-card-body">{dailyDigest.length?dailyDigest.map(item=><p key={item.id}><Button variant="quiet" onClick={()=>go(item.target.view,item.target.id,item.target)}>{uiText(item.label)} · {item.detail}</Button></p>):<p>{uiText("今天没有待处理事项。")}</p>}</div></Card>}
+        {visibleNotifications.length?visibleNotifications.slice().reverse().map(n=><Card key={n.id}><CardHeader title={uiText(n.title)} sub={uiText(new Date(n.at).toLocaleString())} tools={<Button variant="quiet" onClick={()=>{void (n.readAt?Promise.resolve():workspace.run({type:'notification.read',payload:{id:n.id}})).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{uiText(n.readAt?'查看':'阅读')}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title={uiText("暂无通知")} />}
       </Drawer>
-      <Drawer open={organizationOpen} onClose={()=>setOrganizationOpen(false)} title="我的组织" sub="公司 · 部门 · 小组">
+      <Drawer open={organizationOpen} onClose={()=>setOrganizationOpen(false)} title={uiText("我的组织")} sub={uiText("公司 · 部门 · 小组")}>
         <KeyValue items={[{label:'公司',value:state?.settings.companyProfile?.legalName||'公司资料未填写'},{label:'部门',value:user.department||'未设置'},{label:'小组',value:organization.loading?'正在读取':organization.teams.length?organization.teams.map(team=>team.name).join('、'):organization.error?'读取未完成':'未加入小组'}]} />
-        {organization.error&&<Banner tone="warn" title="小组归属读取未完成" actions={<Button onClick={organization.retry}>重新读取</Button>}>当前先显示部门，不会推测你所属的小组。</Banner>}
-        <Button onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'company'});}}>查看公司资料</Button>
+        {organization.error&&<Banner tone="warn" title={uiText("小组归属读取未完成")} actions={<Button onClick={organization.retry}>{uiText("重新读取")}</Button>}>{uiText("当前先显示部门，不会推测你所属的小组。")}</Banner>}
+        <Button onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'company'});}}>{uiText("查看公司资料")}</Button>
       </Drawer>
-      <Drawer open={account} onClose={() => setAccount(false)} title={session.localMode?'本地身份':'账号'} sub={name}
-        footer={session.localMode?<Button loading={session.refreshing} onClick={()=>void session.refresh()}>重新进入本地身份</Button>:<Button icon={LogOut} loading={session.signingOut} onClick={() => { void session.logout().catch(failure => toast(failure instanceof Error ? failure.message : '退出失败', 'bad')); }}>退出登录</Button>}>
-        {session.localMode&&<><p className="mist-note">选择本地工作身份；权限和名称由本机服务提供。</p><div className="mist-row" data-wrap>{session.localProfiles?.map(profile=><Button key={profile.id} aria-pressed={profile.id===user.id} disabled={session.signingIn} variant={profile.id===user.id?'primary':'secondary'} onClick={()=>void session.selectLocalProfile?.(profile.id).catch(failure=>toast(failure instanceof Error?failure.message:'身份切换未完成','bad'))}>{profile.title?`${profile.name} · ${profile.title}`:profile.name}</Button>)}</div></>}
-        {!session.localMode&&<div className="mist-avatar-setting"><Avatar name={name} src={user.avatarUrl} size="lg" /><span className="mist-spacer" /><Button size="sm" onClick={()=>{setAccount(false);setAvatarStudio(true);}}>编辑头像</Button></div>}
-        {workspace.workspace&&<Button onClick={()=>{setAccount(false);go('company-settings',undefined,{section:'workspace'});}}>公司成员与权限</Button>}
+      <Drawer open={account} onClose={() => setAccount(false)} title={uiText(session.localMode?'本地身份':'账号')} sub={name}
+        footer={session.localMode?<Button loading={session.refreshing} onClick={()=>void session.refresh()}>{uiText("重新进入本地身份")}</Button>:<Button icon={LogOut} loading={session.signingOut} onClick={() => { void session.logout().catch(failure => toast(failure instanceof Error ? failure.message : '退出失败', 'bad')); }}>{uiText("退出登录")}</Button>}>
+        {session.localMode&&<><p className="mist-note">{uiText("选择本地工作身份；权限和名称由本机服务提供。")}</p><div className="mist-row" data-wrap>{session.localProfiles?.map(profile=><Button key={profile.id} aria-pressed={profile.id===user.id} disabled={session.signingIn} variant={profile.id===user.id?'primary':'secondary'} onClick={()=>void session.selectLocalProfile?.(profile.id).catch(failure=>toast(failure instanceof Error?failure.message:'身份切换未完成','bad'))}>{uiText(profile.title?`${profile.name} · ${profile.title}`:profile.name)}</Button>)}</div></>}
+        {!session.localMode&&<div className="mist-avatar-setting"><Avatar name={name} src={user.avatarUrl} size="lg" /><span className="mist-spacer" /><Button size="sm" onClick={()=>{setAccount(false);setAvatarStudio(true);}}>{uiText("编辑头像")}</Button></div>}
+        {workspace.workspace&&<Button onClick={()=>{setAccount(false);go('company-settings',undefined,{section:'workspace'});}}>{uiText("公司成员与权限")}</Button>}
         <KeyValue items={[{ label: '当前工作身份', value: user.displayName || user.email }, { label: '公司内显示名', value: workspaceProfileName || '未设置' }, { label: '工作邮箱', value: user.email }, { label: '职责', value: roles || '未设置' }, { label: '部门', value: user.department || '未设置' }]} />
+        <LanguageSetting />
         {account&&<MistVersionInfo demoSeed={state?.settings.demoSeed} />}
       </Drawer>
       {!session.localMode&&<AvatarStudio open={avatarStudio} onClose={()=>setAvatarStudio(false)} />}

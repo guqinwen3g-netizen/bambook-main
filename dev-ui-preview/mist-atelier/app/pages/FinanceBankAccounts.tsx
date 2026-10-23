@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** 公司银行账户台账：登记账户与期初、逐笔流水归属账户。余额 = 期初 + 已归属到账 − 已归属付款，按原币，不折算汇率。 */
 import React from 'react';
@@ -44,19 +46,19 @@ export function BankAccountDialog({ draft, used, onClose }: { draft: AccountDraf
     void execute({ type: 'finance.account.save', payload: { ...(form.id ? { id: form.id } : {}), name: form.name, bankName: form.bankName, accountNo: form.accountNo, currency: form.currency.trim().toUpperCase(), openingDate: form.openingDate, openingBalance: opening } }, () => { toast(form.id ? '账户已更新' : '账户已登记，可把流水归属到该账户'); onClose(); });
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={form.id ? '编辑银行账户' : '新增银行账户'} description="一个账户一个币种。期初余额为期初日期当天开始前的银行余额，期初日之前的流水不能归属到该账户。"
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>保存账户</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText(form.id ? '编辑银行账户' : '新增银行账户')} description={uiText("一个账户一个币种。期初余额为期初日期当天开始前的银行余额，期初日之前的流水不能归属到该账户。")}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText("保存账户")}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能保存">{message}</Banner>}
-      {!canWrite && <Banner tone="warn" title="只读">需要付款凭证权限才能维护账户。</Banner>}
-      {used && <Banner title="已有流水归属">币种、期初日期和期初余额已锁定；如需更正，先解除相关流水的账户归属。</Banner>}
+      {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
+      {!canWrite && <Banner tone="warn" title={uiText("只读")}>{uiText("需要付款凭证权限才能维护账户。")}</Banner>}
+      {used && <Banner title={uiText("已有流水归属")}>{uiText("币种、期初日期和期初余额已锁定；如需更正，先解除相关流水的账户归属。")}</Banner>}
       <FormGrid>
-        <Field label="账户名称" required><TextInput aria-label="账户名称" value={form.name} onChange={set('name')} placeholder="如 美元收款户" /></Field>
-        <Field label="开户行" required><TextInput aria-label="开户行" value={form.bankName} onChange={set('bankName')} /></Field>
-        <Field label="银行账号" required><TextInput aria-label="银行账号" value={form.accountNo} onChange={set('accountNo')} /></Field>
-        <Field label="币种" required><TextInput aria-label="币种" value={form.currency} disabled={used} onChange={set('currency')} /></Field>
-        <Field label="期初日期" required><TextInput aria-label="期初日期" type="date" value={form.openingDate} disabled={used} onChange={set('openingDate')} /></Field>
-        <Field label="期初余额" required hint="按银行对账单填写原币金额"><TextInput aria-label="期初余额" type="number" step="0.01" value={form.openingBalance} disabled={used} onChange={set('openingBalance')} /></Field>
+        <Field label={uiText("账户名称")} required><TextInput aria-label={uiText("账户名称")} value={form.name} onChange={set('name')} placeholder={uiText("如 美元收款户")} /></Field>
+        <Field label={uiText("开户行")} required><TextInput aria-label={uiText("开户行")} value={form.bankName} onChange={set('bankName')} /></Field>
+        <Field label={uiText("银行账号")} required><TextInput aria-label={uiText("银行账号")} value={form.accountNo} onChange={set('accountNo')} /></Field>
+        <Field label={uiText("币种")} required><TextInput aria-label={uiText("币种")} value={form.currency} disabled={used} onChange={set('currency')} /></Field>
+        <Field label={uiText("期初日期")} required><TextInput aria-label={uiText("期初日期")} type="date" value={form.openingDate} disabled={used} onChange={set('openingDate')} /></Field>
+        <Field label={uiText("期初余额")} required hint={uiText("按银行对账单填写原币金额")}><TextInput aria-label={uiText("期初余额")} type="number" step="0.01" value={form.openingBalance} disabled={used} onChange={set('openingBalance')} /></Field>
       </FormGrid>
     </div>
   </Dialog>;
@@ -75,14 +77,14 @@ export function AccountAssignDialog({ state, kind, row, onClose }: { state: Mist
     void execute({ type: 'finance.account.assign', payload: { kind, id: row.id, accountId: accountId || null, ...(reason.trim() ? { reason } : {}) } }, () => { toast(accountId ? '已归属账户，余额已重算' : '已解除账户归属'); onClose(); });
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title="归属公司银行账户" description={`${row.code} · ${row.date} · ${bankMoney(row.amount, row.currency)}`}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite || (!options.length && !changing)} onClick={submit}>{accountId || !changing ? '确认归属' : '解除归属'}</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={560} title={uiText("归属公司银行账户")} description={uiText(`${row.code} · ${row.date} · ${bankMoney(row.amount, row.currency)}`)}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite || (!options.length && !changing)} onClick={submit}>{uiText(accountId || !changing ? '确认归属' : '解除归属')}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能保存">{message}</Banner>}
-      {!options.length && <Banner tone="warn" title={`没有可用的 ${row.currency} 账户`}>请先在“账户与余额”新增 {row.currency} 账户，且期初日期不晚于 {row.date}。</Banner>}
+      {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
+      {!options.length && <Banner tone="warn" title={ui`没有可用的 ${row.currency} 账户`}>{uiText("请先在“账户与余额”新增 ")}{row.currency}{uiText(" 账户，且期初日期不晚于 ")}{row.date}。</Banner>}
       <FormGrid>
-        <Field label="银行账户" required><Select aria-label="银行账户" value={accountId} options={[...(changing ? [{ value: '', label: '解除归属' }] : []), ...options.map(a => ({ value: a.id, label: `${a.code} · ${accountLabel(a)}` }))]} onChange={e => setAccountId(e.target.value)} /></Field>
-        {changing && <Field label="调整原因" required><TextInput aria-label="调整原因" value={reason} onChange={e => setReason(e.target.value)} /></Field>}
+        <Field label={uiText("银行账户")} required><Select aria-label={uiText("银行账户")} value={accountId} options={[...(changing ? [{ value: '', label: '解除归属' }] : []), ...options.map(a => ({ value: a.id, label: `${a.code} · ${accountLabel(a)}` }))]} onChange={e => setAccountId(e.target.value)} /></Field>
+        {changing && <Field label={uiText("调整原因")} required><TextInput aria-label={uiText("调整原因")} value={reason} onChange={e => setReason(e.target.value)} /></Field>}
       </FormGrid>
     </div>
   </Dialog>;
@@ -123,29 +125,29 @@ export function FxDialog({ state, draft, onClose }: { state: MistState; draft: F
     void execute({ type: 'finance.fx.lock', payload: { date: form.date, bankName: form.bankName, currency: form.currency.trim().toUpperCase(), amount: Number(form.amount), rate: form.rate.trim(), localCurrency: form.localCurrency.trim().toUpperCase(), settleBy: form.settleBy, ref: form.ref, note: form.note } }, () => { toast('锁汇已登记'); onClose(); });
   };
   const message = local || failure, accountOptions = (pick: (a: MistBankAccount) => boolean) => [{ value: '', label: '请选择账户' }, ...accounts.filter(a => !a.closed && pick(a)).map(a => ({ value: a.id, label: `${a.code} · ${a.currency} · ${accountLabel(a)}` }))];
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={settle ? '登记结汇' : '登记锁汇'} description={settle ? '按银行结汇水单登记实际卖出的原币和入账本币；汇率由两笔金额得出，不估算。' : '登记与银行签订的远期锁汇合同；锁汇本身不改变账户余额，交割时另登记结汇。'}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{settle ? '保存结汇' : '保存锁汇'}</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText(settle ? '登记结汇' : '登记锁汇')} description={uiText(settle ? '按银行结汇水单登记实际卖出的原币和入账本币；汇率由两笔金额得出，不估算。' : '登记与银行签订的远期锁汇合同；锁汇本身不改变账户余额，交割时另登记结汇。')}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText(settle ? '保存结汇' : '保存锁汇')}</Button></>}>
     <div className="mist-col">
-      {message && <Banner tone="bad" title="还不能保存">{message}</Banner>}
-      {!canWrite && <Banner tone="warn" title="只读">需要付款凭证权限才能登记。</Banner>}
+      {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
+      {!canWrite && <Banner tone="warn" title={uiText("只读")}>{uiText("需要付款凭证权限才能登记。")}</Banner>}
       <FormGrid>
-        <Field label={settle ? '结汇日期' : '锁汇日期'} required><TextInput aria-label={settle ? '结汇日期' : '锁汇日期'} type="date" value={form.date} onChange={set('date')} /></Field>
-        <Field label={settle ? '银行水单号' : '锁汇合同号'} required><TextInput aria-label={settle ? '银行水单号' : '锁汇合同号'} value={form.ref} onChange={set('ref')} /></Field>
+        <Field label={uiText(settle ? '结汇日期' : '锁汇日期')} required><TextInput aria-label={uiText(settle ? '结汇日期' : '锁汇日期')} type="date" value={form.date} onChange={set('date')} /></Field>
+        <Field label={uiText(settle ? '银行水单号' : '锁汇合同号')} required><TextInput aria-label={uiText(settle ? '银行水单号' : '锁汇合同号')} value={form.ref} onChange={set('ref')} /></Field>
         {settle ? <>
-          <Field label="卖出账户（原币）" required><Select aria-label="卖出账户" value={form.fromAccountId} options={accountOptions(() => true)} onChange={set('fromAccountId')} /></Field>
-          <Field label="入账账户（本币）" required><Select aria-label="入账账户" value={form.toAccountId} options={accountOptions(a => !from || a.currency !== from.currency)} onChange={set('toAccountId')} /></Field>
-          <Field label={`卖出原币金额${from ? '（' + from.currency + '）' : ''}`} required><TextInput aria-label="卖出原币金额" type="number" step="0.01" value={form.amount} onChange={set('amount')} /></Field>
-          <Field label={`入账本币金额${to ? '（' + to.currency + '）' : ''}`} required hint={derived ? `成交汇率 ${derived}` : '按水单填写'}><TextInput aria-label="入账本币金额" type="number" step="0.01" value={form.localAmount} onChange={set('localAmount')} /></Field>
-          <Field label="交割锁汇合同"><Select aria-label="交割锁汇合同" value={form.lockId} options={[{ value: '', label: '不对应锁汇（即期结汇）' }, ...locks.map(({ r, left }) => ({ value: r.id, label: `${r.code} · ${r.ref} · @${r.rate} · 剩余 ${bankMoney(left, r.currency)}` }))]} onChange={set('lockId')} /></Field>
+          <Field label={uiText("卖出账户（原币）")} required><Select aria-label={uiText("卖出账户")} value={form.fromAccountId} options={accountOptions(() => true)} onChange={set('fromAccountId')} /></Field>
+          <Field label={uiText("入账账户（本币）")} required><Select aria-label={uiText("入账账户")} value={form.toAccountId} options={accountOptions(a => !from || a.currency !== from.currency)} onChange={set('toAccountId')} /></Field>
+          <Field label={ui`卖出原币金额${from ? '（' + from.currency + '）' : ''}`} required><TextInput aria-label={uiText("卖出原币金额")} type="number" step="0.01" value={form.amount} onChange={set('amount')} /></Field>
+          <Field label={ui`入账本币金额${to ? '（' + to.currency + '）' : ''}`} required hint={uiText(derived ? `成交汇率 ${derived}` : '按水单填写')}><TextInput aria-label={uiText("入账本币金额")} type="number" step="0.01" value={form.localAmount} onChange={set('localAmount')} /></Field>
+          <Field label={uiText("交割锁汇合同")}><Select aria-label={uiText("交割锁汇合同")} value={form.lockId} options={[{ value: '', label: '不对应锁汇（即期结汇）' }, ...locks.map(({ r, left }) => ({ value: r.id, label: `${r.code} · ${r.ref} · @${r.rate} · 剩余 ${bankMoney(left, r.currency)}` }))]} onChange={set('lockId')} /></Field>
         </> : <>
-          <Field label="锁汇银行" required><TextInput aria-label="锁汇银行" value={form.bankName} onChange={set('bankName')} /></Field>
-          <Field label="原币币种" required><TextInput aria-label="原币币种" value={form.currency} onChange={set('currency')} /></Field>
-          <Field label="原币金额" required><TextInput aria-label="原币金额" type="number" step="0.01" value={form.amount} onChange={set('amount')} /></Field>
-          <Field label="锁定汇率" required hint="1 单位原币兑本币，按合同填写"><TextInput aria-label="锁定汇率" value={form.rate} onChange={set('rate')} /></Field>
-          <Field label="本币币种" required><TextInput aria-label="本币币种" value={form.localCurrency} onChange={set('localCurrency')} /></Field>
-          <Field label="交割截止日" required><TextInput aria-label="交割截止日" type="date" value={form.settleBy} onChange={set('settleBy')} /></Field>
+          <Field label={uiText("锁汇银行")} required><TextInput aria-label={uiText("锁汇银行")} value={form.bankName} onChange={set('bankName')} /></Field>
+          <Field label={uiText("原币币种")} required><TextInput aria-label={uiText("原币币种")} value={form.currency} onChange={set('currency')} /></Field>
+          <Field label={uiText("原币金额")} required><TextInput aria-label={uiText("原币金额")} type="number" step="0.01" value={form.amount} onChange={set('amount')} /></Field>
+          <Field label={uiText("锁定汇率")} required hint={uiText("1 单位原币兑本币，按合同填写")}><TextInput aria-label={uiText("锁定汇率")} value={form.rate} onChange={set('rate')} /></Field>
+          <Field label={uiText("本币币种")} required><TextInput aria-label={uiText("本币币种")} value={form.localCurrency} onChange={set('localCurrency')} /></Field>
+          <Field label={uiText("交割截止日")} required><TextInput aria-label={uiText("交割截止日")} type="date" value={form.settleBy} onChange={set('settleBy')} /></Field>
         </>}
-        <Field label="备注" full><TextInput aria-label="备注" value={form.note} onChange={set('note')} /></Field>
+        <Field label={uiText("备注")} full><TextInput aria-label={uiText("备注")} value={form.note} onChange={set('note')} /></Field>
       </FormGrid>
       {settle && <ReceiptLinksField state={state} accountId={form.fromAccountId} date={form.date} value={links} onChange={setLinks} />}
     </div>
@@ -159,12 +161,12 @@ type Links = Record<string, string>;
 function ReceiptLinksField({ state, accountId, date, value, onChange }: { state: MistState; accountId: string; date: string; value: Links; onChange: (next: Links) => void }) {
   const rows = (state.receipts || []).filter(r => r.accountId === accountId && r.date <= date).map(r => ({ r, left: Math.round(r.amount * 100) - mistReceiptSettledMinor(state, r.id) })).filter(x => x.left > 0).sort((a, b) => a.r.date.localeCompare(b.r.date) || a.r.code.localeCompare(b.r.code));
   if (!accountId) return null;
-  if (!rows.length) return <p className="mist-note">卖出账户在结汇日前没有未结汇的到账；本次结汇将记为“未对应到账”，报表不计入任何订单。</p>;
+  if (!rows.length) return <p className="mist-note">{uiText("卖出账户在结汇日前没有未结汇的到账；本次结汇将记为“未对应到账”，报表不计入任何订单。")}</p>;
   return <div className="mist-col" style={{ gap: 6 }}>
-    <b>对应到账（用于订单实际结汇汇率）</b>
+    <b>{uiText("对应到账（用于订单实际结汇汇率）")}</b>
     {rows.map(({ r, left }) => <div key={r.id} className="mist-row" style={{ justifyContent: 'space-between' }}>
-      <span><span className="mist-mono">{r.code}</span> {r.payer} · {r.date} · 未结汇 {bankMoney(left / 100, r.currency)}</span>
-      <span className="mist-row"><Button size="sm" variant="quiet" onClick={() => onChange({ ...value, [r.id]: (left / 100).toFixed(2) })}>全额</Button><TextInput aria-label={`${r.code} 分配金额`} type="number" step="0.01" style={{ width: 120 }} value={value[r.id] || ''} onChange={e => onChange({ ...value, [r.id]: e.target.value })} /></span>
+      <span><span className="mist-mono">{r.code}</span> {r.payer} · {r.date}{uiText(" · 未结汇 ")}{bankMoney(left / 100, r.currency)}</span>
+      <span className="mist-row"><Button size="sm" variant="quiet" onClick={() => onChange({ ...value, [r.id]: (left / 100).toFixed(2) })}>{uiText("全额")}</Button><TextInput aria-label={ui`${r.code} 分配金额`} type="number" step="0.01" style={{ width: 120 }} value={value[r.id] || ''} onChange={e => onChange({ ...value, [r.id]: e.target.value })} /></span>
     </div>)}
   </div>;
 }
@@ -186,10 +188,10 @@ export function FxAllocateDialog({ state, record, onClose }: { state: MistState;
     if (linkTotalMinor(rows) > left) return setLocal(`分配合计不能超过未对应金额 ${bankMoney(left / 100, record.currency)}。`);
     setLocal(''); void execute({ type: 'finance.fx.allocate', payload: { id: record.id, receipts: rows } }, () => { toast(record.code + ' 已补登对应到账'); onClose(); });
   };
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title="补登对应到账" description={`${record.code} · ${record.date} · 卖出 ${bankMoney(record.amount, record.currency)} @${record.rate}；未对应到账 ${bankMoney(left / 100, record.currency)}。`}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>保存</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText("补登对应到账")} description={ui`${record.code} · ${record.date} · 卖出 ${bankMoney(record.amount, record.currency)} @${record.rate}；未对应到账 ${bankMoney(left / 100, record.currency)}。`}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText("保存")}</Button></>}>
     <div className="mist-col">
-      {(local || failure) && <Banner tone="bad" title="还不能保存">{local || failure}</Banner>}
+      {(local || failure) && <Banner tone="bad" title={uiText("还不能保存")}>{local || failure}</Banner>}
       <ReceiptLinksField state={state} accountId={record.fromAccountId || ''} date={record.date} value={links} onChange={setLinks} />
     </div>
   </Dialog>;
@@ -199,11 +201,11 @@ export function FxReverseDialog({ record, onClose }: { record: MistFxRecord; onC
   const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
   const [reason, setReason] = React.useState(''), [local, setLocal] = React.useState('');
   const submit = () => { if (!reason.trim()) return setLocal('请填写冲回原因。'); setLocal(''); void execute({ type: 'finance.fx.reverse', payload: { id: record.id, reason } }, () => { toast(record.code + ' 已冲回，原记录保留'); onClose(); }); };
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={520} title={record.kind === 'lock' ? '冲回锁汇' : '冲回结汇'} description={`${record.code} · ${record.ref} · ${bankMoney(record.amount, record.currency)} → ${bankMoney(record.localAmount, record.localCurrency)}。原记录保留${record.kind === 'settlement' ? '，两个账户余额恢复' : ''}。`}
-    footer={<><Button disabled={busy} onClick={onClose}>取消</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>确认冲回</Button></>}>
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={520} title={uiText(record.kind === 'lock' ? '冲回锁汇' : '冲回结汇')} description={ui`${record.code} · ${record.ref} · ${bankMoney(record.amount, record.currency)} → ${bankMoney(record.localAmount, record.localCurrency)}。原记录保留${record.kind === 'settlement' ? '，两个账户余额恢复' : ''}。`}
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText("确认冲回")}</Button></>}>
     <div className="mist-col">
-      {(local || failure) && <Banner tone="bad" title="还不能冲回">{local || failure}</Banner>}
-      <Field label="冲回原因" required><TextInput aria-label="冲回原因" value={reason} onChange={e => setReason(e.target.value)} /></Field>
+      {(local || failure) && <Banner tone="bad" title={uiText("还不能冲回")}>{local || failure}</Banner>}
+      <Field label={uiText("冲回原因")} required><TextInput aria-label={uiText("冲回原因")} value={reason} onChange={e => setReason(e.target.value)} /></Field>
     </div>
   </Dialog>;
 }
@@ -224,30 +226,30 @@ export function FxPeriodRatesCard() {
   const voidSpec = (r: FxPeriodRate): ModuleEditorSpec => ({ title: `作废 ${r.month} ${r.currency} 月末汇率`, submitLabel: '作废', description: '作废后保留记录，可重新登记正确汇率。', fields: [{ key: 'reason', label: '作废原因', type: 'textarea', required: true }], initialValues: { reason: '' },
     submit: v => run({ type: 'fxrate.period.void', payload: { id: r.id, reason: String(v.reason || '') } }) });
   return <Card>
-    <CardHeader title={`月末汇率 · ${rows.filter(r => !r.voided).length}`} sub="报表“月末暂估”口径用，也用于实际口径下未结汇部分的暂估；实际汇率按结汇对应到账逐笔取。" tools={canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(add)}>登记月末汇率</Button> : undefined} />
-    <DataTable ariaLabel="月末汇率" rows={rows} rowKey={r => r.id} loading={loading} columns={[
+    <CardHeader title={ui`月末汇率 · ${rows.filter(r => !r.voided).length}`} sub={uiText("报表“月末暂估”口径用，也用于实际口径下未结汇部分的暂估；实际汇率按结汇对应到账逐笔取。")} tools={canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(add)}>{uiText("登记月末汇率")}</Button> : undefined} />
+    <DataTable ariaLabel={uiText("月末汇率")} rows={rows} rowKey={r => r.id} loading={loading} columns={[
       { key: 'month', header: '月份', width: '100px', render: r => r.month },
       { key: 'currency', header: '币种', width: '72px', render: r => r.currency },
       { key: 'rate', header: '汇率', width: '110px', align: 'right', render: r => <span className="mist-num">{r.rate}</span> },
-      { key: 'source', header: '依据', width: 'minmax(160px,2fr)', hideOnMobile: true, render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.source}</span><small className="mist-muted">{r.actor} · {r.createdAt.slice(0, 10)}{r.voided ? ` · 作废：${r.voided.reason}` : ''}</small></div> },
-      { key: 'act', header: '', width: '90px', align: 'right', render: r => r.voided ? <Pill tone="neutral">已作废</Pill> : canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(voidSpec(r))}>作废</Button> : null },
-    ]} empty={<EmptyState title="还没有月末汇率" description="每月初登记上月末各外币汇率，报表即可按月末暂估折算人民币毛利。" compact />} />
+      { key: 'source', header: '依据', width: 'minmax(160px,2fr)', hideOnMobile: true, render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.source}</span><small className="mist-muted">{r.actor} · {r.createdAt.slice(0, 10)}{uiText(r.voided ? ` · 作废：${r.voided.reason}` : '')}</small></div> },
+      { key: 'act', header: '', width: '90px', align: 'right', render: r => r.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(voidSpec(r))}>{uiText("作废")}</Button> : null },
+    ]} empty={<EmptyState title={uiText("还没有月末汇率")} description={uiText("每月初登记上月末各外币汇率，报表即可按月末暂估折算人民币毛利。")} compact />} />
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
   </Card>;
 }
 
-const cny = (v: number) => (v < 0 ? '−' : '') + '¥' + Math.abs(v).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const gain = (v: number) => <span className="mist-num" style={{ color: v > 0 ? 'var(--mist-ok)' : v < 0 ? 'var(--mist-bad)' : undefined }}>{v > 0 ? '收益 ' : v < 0 ? '损失 ' : ''}{cny(Math.abs(v))}</span>;
+const cny = (v: number) => (v < 0 ? '−' : '') + '¥' + Math.abs(v).toLocaleString(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const gain = (v: number) => <span className="mist-num" style={{ color: v > 0 ? 'var(--mist-ok)' : v < 0 ? 'var(--mist-bad)' : undefined }}>{uiText(v > 0 ? '收益 ' : v < 0 ? '损失 ' : '')}{cny(Math.abs(v))}</span>;
 function RevalLinesTable({ lines, label }: { lines: FxRevalLine[]; label: string }) {
-  return <DataTable ariaLabel={label} rows={lines} rowKey={l => l.kind + l.refId} columns={[
+  return <DataTable ariaLabel={uiText(label)} rows={lines} rowKey={l => l.kind + l.refId} columns={[
     { key: 'kind', header: '项目', width: '110px', render: l => FX_REVAL_KIND_LABEL[l.kind] },
     { key: 'ref', header: '对象', width: 'minmax(160px,2fr)', render: l => l.ref },
     { key: 'amount', header: '外币余额', width: '130px', align: 'right', render: l => <span className="mist-num">{l.currency} {l.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}</span> },
-    { key: 'rate', header: '记账 → 月末', width: '150px', align: 'right', hideOnMobile: true, render: l => <span className="mist-num" title={l.kind === 'settlement' ? '结汇按记账汇率转出，与实际成交汇率之差为已实现损益' : '月初汇率入账，按月末汇率重估'}>{l.bookRate} → {l.closingRate}{l.kind === 'settlement' ? '（成交）' : ''}</span> },
+    { key: 'rate', header: '记账 → 月末', width: '150px', align: 'right', hideOnMobile: true, render: l => <span className="mist-num" title={uiText(l.kind === 'settlement' ? '结汇按记账汇率转出，与实际成交汇率之差为已实现损益' : '月初汇率入账，按月末汇率重估')}>{l.bookRate} → {l.closingRate}{uiText(l.kind === 'settlement' ? '（成交）' : '')}</span> },
     { key: 'book', header: '账面人民币', width: '130px', align: 'right', hideOnMobile: true, render: l => <span className="mist-num">{cny(l.bookCny)}</span> },
     { key: 'closing', header: '重估 / 实收', width: '130px', align: 'right', hideOnMobile: true, render: l => <span className="mist-num">{cny(l.closingCny)}</span> },
     { key: 'diff', header: '汇兑损益', width: '140px', align: 'right', render: l => gain(l.diff) },
-  ]} empty={<EmptyState title="没有外币项目" compact />} />;
+  ]} empty={<EmptyState title={uiText("没有外币项目")} compact />} />;
 }
 /** 期末调汇：月初汇率记账、月末汇率重估外币银行存款 / 应收 / 待核销到账，当月结汇差额计已实现损益。 */
 export function FxRevaluationCard() {
@@ -265,24 +267,24 @@ export function FxRevaluationCard() {
   const voidSpec = (r: FxRevaluation): ModuleEditorSpec => ({ title: `作废 ${r.month} 期末调汇`, submitLabel: '作废', description: '作废后保留记录，可重新登记；须从最近一期倒着作废。', fields: [{ key: 'reason', label: '作废原因', type: 'textarea', required: true }], initialValues: { reason: '' },
     submit: v => run({ type: 'fxrate.reval.void', payload: { id: r.id, reason: String(v.reason || '') } }) });
   return <Card>
-    <CardHeader title="期末调汇 · 汇兑损益" sub="当月外币业务按月初汇率（上月末汇率）入账；月末按本月末汇率重估外币银行存款、外币应收与待核销到账，当月结汇与记账汇率之差为已实现损益。" tools={<span className="mist-row">
-      <Select aria-label="调汇月份" value={month} onChange={e => setMonth(e.target.value)} options={months.map(m => ({ value: m, label: m }))} />
-      {canWrite && <Button size="sm" disabled={busy || !view || view.blockers.length > 0} onClick={() => post && setSpec(post)}>登记期末调汇</Button>}</span>} />
+    <CardHeader title={uiText("期末调汇 · 汇兑损益")} sub={uiText("当月外币业务按月初汇率（上月末汇率）入账；月末按本月末汇率重估外币银行存款、外币应收与待核销到账，当月结汇与记账汇率之差为已实现损益。")} tools={<span className="mist-row">
+      <Select aria-label={uiText("调汇月份")} value={month} onChange={e => setMonth(e.target.value)} options={months.map(m => ({ value: m, label: m }))} />
+      {canWrite && <Button size="sm" disabled={busy || !view || view.blockers.length > 0} onClick={() => post && setSpec(post)}>{uiText("登记期末调汇")}</Button>}</span>} />
     <div className="mist-card-body mist-col">
-      {view && view.blockers.length > 0 && <Banner tone="warn" title="暂不能登记">{view.blockers.join('；')}</Banner>}
-      {view && view.currencies.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 16 }}>{view.currencies.map(c => <span key={c.currency} className="mist-col" style={{ gap: 2 }}><b>{c.currency} · {c.bookRate} → {c.closingRate || '缺月末汇率'}</b><small className="mist-muted">未实现 {cny(c.unrealized)} · 结汇 {cny(c.realized)} · 合计 {cny(c.total)}</small></span>)}</div>}
-      {view && <RevalLinesTable lines={view.lines} label={`${month} 期末调汇预览`} />}
-      <span className="mist-note">余额按月末截止：银行按流水日期，应收按开票日期、核销按到账日期计入；外币应付按发票日期、付款按付款日计入，合同预付款不重估。须按月连续登记。</span>
+      {view && view.blockers.length > 0 && <Banner tone="warn" title={uiText("暂不能登记")}>{view.blockers.join('；')}</Banner>}
+      {view && view.currencies.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 16 }}>{view.currencies.map(c => <span key={c.currency} className="mist-col" style={{ gap: 2 }}><b>{c.currency} · {c.bookRate} → {c.closingRate || '缺月末汇率'}</b><small className="mist-muted">{uiText("未实现 ")}{cny(c.unrealized)}{uiText(" · 结汇 ")}{cny(c.realized)}{uiText(" · 合计 ")}{cny(c.total)}</small></span>)}</div>}
+      {view && <RevalLinesTable lines={view.lines} label={ui`${month} 期末调汇预览`} />}
+      <span className="mist-note">{uiText("余额按月末截止：银行按流水日期，应收按开票日期、核销按到账日期计入；外币应付按发票日期、付款按付款日计入，合同预付款不重估。须按月连续登记。")}</span>
     </div>
-    <DataTable ariaLabel="已登记期末调汇" rows={history} rowKey={r => r.id} loading={loading} onRowClick={r => setDetail(r)} columns={[
-      { key: 'code', header: '记录', width: 'minmax(140px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span className="mist-num">{r.code} · {r.month}</span><small className="mist-muted">{r.actor} · {r.createdAt.slice(0, 10)}{r.note ? ' · ' + r.note : ''}{r.voided ? ` · 作废：${r.voided.reason}` : ''}</small></div> },
+    <DataTable ariaLabel={uiText("已登记期末调汇")} rows={history} rowKey={r => r.id} loading={loading} onRowClick={r => setDetail(r)} columns={[
+      { key: 'code', header: '记录', width: 'minmax(140px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span className="mist-num">{r.code} · {r.month}</span><small className="mist-muted">{r.actor} · {r.createdAt.slice(0, 10)}{uiText(r.note ? ' · ' + r.note : '')}{uiText(r.voided ? ` · 作废：${r.voided.reason}` : '')}</small></div> },
       { key: 'unrealized', header: '未实现', width: '140px', align: 'right', render: r => gain(r.unrealized) },
       { key: 'realized', header: '结汇已实现', width: '140px', align: 'right', hideOnMobile: true, render: r => gain(r.realized) },
       { key: 'total', header: '合计', width: '140px', align: 'right', render: r => gain(r.total) },
-      { key: 'act', header: '', width: '90px', align: 'right', render: r => r.voided ? <Pill tone="neutral">已作废</Pill> : canWrite ? <Button size="sm" disabled={busy} onClick={e => { e.stopPropagation(); setSpec(voidSpec(r)); }}>作废</Button> : null },
-    ]} empty={<EmptyState title="还没有登记期末调汇" description="每月结账时先登记本月末汇率，再登记期末调汇。" compact />} />
-    {detail && <Dialog open onClose={() => setDetail(null)} width={900} title={`${detail.code} · ${detail.month} 期末调汇明细`} description={`截至 ${detail.monthEnd}；登记时冻结，之后的流水变动不影响本记录。合计 ${cny(detail.total)}。`}>
-      <RevalLinesTable lines={detail.lines} label="期末调汇明细" />
+      { key: 'act', header: '', width: '90px', align: 'right', render: r => r.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite ? <Button size="sm" disabled={busy} onClick={e => { e.stopPropagation(); setSpec(voidSpec(r)); }}>{uiText("作废")}</Button> : null },
+    ]} empty={<EmptyState title={uiText("还没有登记期末调汇")} description={uiText("每月结账时先登记本月末汇率，再登记期末调汇。")} compact />} />
+    {detail && <Dialog open onClose={() => setDetail(null)} width={900} title={ui`${detail.code} · ${detail.month} 期末调汇明细`} description={ui`截至 ${detail.monthEnd}；登记时冻结，之后的流水变动不影响本记录。合计 ${cny(detail.total)}。`}>
+      <RevalLinesTable lines={detail.lines} label={uiText("期末调汇明细")} />
     </Dialog>}
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
   </Card>;
@@ -299,8 +301,8 @@ export function AccountStatusCell({ account, balance }: { account: MistBankAccou
   const reopen: ModuleEditorSpec = { title: `恢复 ${account.code}`, submitLabel: '恢复', description: `原销户日 ${account.closed?.date || ''}。仅在银行撤销销户或销户登记有误时恢复。`, fields: [{ key: 'reason', label: '恢复原因', type: 'textarea', required: true }], initialValues: { reason: '' },
     submit: v => run({ type: 'finance.account.reopen', payload: { id: account.id, reason: String(v.reason || '') } }) };
   return <span className="mist-row" onClick={e => e.stopPropagation()}>
-    {account.closed ? <Pill tone="neutral">已销户 {account.closed.date}</Pill> : <Pill tone="ok">使用中</Pill>}
-    {canWrite && (account.closed ? <Button size="sm" disabled={busy} onClick={() => setSpec(reopen)}>恢复</Button> : <Button size="sm" disabled={busy} title={Math.round(balance * 100) ? '余额须为零才能销户' : undefined} onClick={() => setSpec(close)}>销户</Button>)}
+    {account.closed ? <Pill tone="neutral">{uiText("已销户 ")}{account.closed.date}</Pill> : <Pill tone="ok">{uiText("使用中")}</Pill>}
+    {canWrite && (account.closed ? <Button size="sm" disabled={busy} onClick={() => setSpec(reopen)}>{uiText("恢复")}</Button> : <Button size="sm" disabled={busy} title={uiText(Math.round(balance * 100) ? '余额须为零才能销户' : undefined)} onClick={() => setSpec(close)}>{uiText("销户")}</Button>)}
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
   </span>;
 }

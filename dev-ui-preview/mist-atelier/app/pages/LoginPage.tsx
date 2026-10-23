@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /**
  * T12 登录模板 —— 对应：Login.tsx / Register.tsx。左侧品牌（雾蓝 shell + 标志），右侧画布表单。
  */
@@ -72,9 +73,9 @@ export function LoginPage() {
         </div>
       </div>
       <div className="mist-auth-panel">
-        <form className="mist-auth-form" aria-label="登录" onSubmit={submit}>
+        <form className="mist-auth-form" aria-label={uiText("登录")} onSubmit={submit}>
           {companies.length > 0 ? (<>
-            <div><h2 className="mist-h1" style={{ fontSize: 28 }}>选择公司</h2><p className="mist-sub" style={{ marginTop: 6 }}>请选择本次登录的公司。</p></div>
+            <div><h2 className="mist-h1" style={{ fontSize: 28 }}>{uiText("选择公司")}</h2><p className="mist-sub" style={{ marginTop: 6 }}>{uiText("请选择本次登录的公司。")}</p></div>
             <div style={{ display: 'grid', gap: 8 }}>
               {companies.map(company => (
                 <Button key={company.id} size="lg" block onClick={() => void doLogin(company.id)} disabled={busy} iconRight={busy ? undefined : ArrowRight}>
@@ -82,14 +83,14 @@ export function LoginPage() {
                 </Button>
               ))}
             </div>
-            <div className="mist-row"><TextLink onClick={backToPassword} disabled={busy}>返回重新登录</TextLink></div>
+            <div className="mist-row"><TextLink onClick={backToPassword} disabled={busy}>{uiText("返回重新登录")}</TextLink></div>
           </>) : (<>
-          <div><h2 className="mist-h1" style={{ fontSize: 28 }}>登录</h2></div>
-          <Field label="工作邮箱"><TextInput icon={Mail} type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} required /></Field>
-          <Field label="密码" error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder="输入密码" disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
-          <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label="保持登录" /><span className="mist-spacer" /><TextLink disabled={busy} title="找回密码" onClick={()=>go('platform-recovery')}>找回密码</TextLink></div>
-          <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{cooldown > 0 ? `请稍候 ${cooldown}s` : '登录'}</Button>
-          <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('register')}>账户开通</TextLink></p>
+          <div><h2 className="mist-h1" style={{ fontSize: 28 }}>{uiText("登录")}</h2></div>
+          <Field label={uiText("工作邮箱")}><TextInput icon={Mail} type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} disabled={busy} required /></Field>
+          <Field label={uiText("密码")} error={errorNode}><PasswordInput icon={KeyRound} autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} placeholder={uiText("输入密码")} disabled={busy} aria-invalid={!!(err || session.error)} aria-describedby={err || session.error ? "mist-login-error" : undefined} /></Field>
+          <div className="mist-row"><Checkbox checked={remember} onChange={setRemember} disabled={busy} label={uiText("保持登录")} /><span className="mist-spacer" /><TextLink disabled={busy} title={uiText("找回密码")} onClick={()=>go('platform-recovery')}>{uiText("找回密码")}</TextLink></div>
+          <Button type="submit" variant="primary" size="lg" block loading={busy} disabled={busy || cooldown > 0 || session.status === 'loading'} iconRight={busy ? undefined : ArrowRight}>{uiText(cooldown > 0 ? `请稍候 ${cooldown}s` : '登录')}</Button>
+          <p className="mist-auth-switch"><TextLink disabled={busy} onClick={() => go('register')}>{uiText("账户开通")}</TextLink></p>
           </>)}
         </form>
       </div>

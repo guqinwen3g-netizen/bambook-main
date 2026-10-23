@@ -1,3 +1,5 @@
+import { interfaceLocale } from '../../../../services/interfaceLanguage';
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** BB-ORD-7：草稿 / 已退回订单作废，已批准订单申请取消；终止后只读。 */
 import React from 'react';
 import { Ban, XCircle } from 'lucide-react';
@@ -18,11 +20,11 @@ export function orderLocked(order: Governed) {
 
 export function OrderTerminationBanner({ order }: { order: Governed }) {
   const g = order.governance, t = g?.termination, c = g?.cancellation;
-  const when = (at?: string) => at ? new Date(at).toLocaleString('zh-CN') : '';
-  if (g?.status === 'void') return <Banner tone="neutral" title="订单已作废，只读">{`${t?.byName || ''} 于 ${when(t?.at)} 作废：${t?.reason || ''}。记录保留，不能再编辑、提交或进入采购与履约。`}</Banner>;
-  if (g?.status === 'cancelled') return <Banner tone="bad" title="订单已取消，只读">{`取消原因：${t?.reason || c?.reason || ''}；${c?.decidedName || t?.byName || ''} 于 ${when(t?.at)} 批准。不能再采购、生产或出运；受影响的采购、生产、出运已生成待办，请到对应模块处理。`}</Banner>;
-  if (c?.status === 'pending') return <Banner tone="warn" title="取消订单审批中，订单已锁定">{`${c.requesterName} 申请取消：${c.reason}。审批期间不能编辑，也不能新建采购、生产或出运；请在审批中心等待订单审批人决定。`}</Banner>;
-  if (c?.status === 'rejected') return <Banner tone="neutral" title="取消订单申请已退回">{`${c.decidedName || ''}：${c.note || ''}。订单继续履约。`}</Banner>;
+  const when = (at?: string) => at ? new Date(at).toLocaleString(interfaceLocale()) : '';
+  if (g?.status === 'void') return <Banner tone="neutral" title={uiText("订单已作废，只读")}>{ui`${t?.byName || ''} 于 ${when(t?.at)} 作废：${t?.reason || ''}。记录保留，不能再编辑、提交或进入采购与履约。`}</Banner>;
+  if (g?.status === 'cancelled') return <Banner tone="bad" title={uiText("订单已取消，只读")}>{ui`取消原因：${t?.reason || c?.reason || ''}；${c?.decidedName || t?.byName || ''} 于 ${when(t?.at)} 批准。不能再采购、生产或出运；受影响的采购、生产、出运已生成待办，请到对应模块处理。`}</Banner>;
+  if (c?.status === 'pending') return <Banner tone="warn" title={uiText("取消订单审批中，订单已锁定")}>{ui`${c.requesterName} 申请取消：${c.reason}。审批期间不能编辑，也不能新建采购、生产或出运；请在审批中心等待订单审批人决定。`}</Banner>;
+  if (c?.status === 'rejected') return <Banner tone="neutral" title={uiText("取消订单申请已退回")}>{ui`${c.decidedName || ''}：${c.note || ''}。订单继续履约。`}</Banner>;
   return null;
 }
 
@@ -49,19 +51,19 @@ export function OrderTerminationButton({ state, order, busy, run, go }: { state:
   };
   const title = mode === 'void' ? '作废订单' : '申请取消订单';
   return <>
-    <Button icon={mode === 'void' ? Ban : XCircle} variant="danger" disabled={busy} onClick={() => { setOpen(true); setFailure(''); }}>{title}</Button>
-    <Dialog open={open} onClose={() => { if (!working) setOpen(false); }} title={`${title} · ${order.code}`} width={720}
-      footer={<><Button disabled={working} onClick={() => setOpen(false)}>返回</Button><Button variant="danger" loading={working} disabled={busy || working || blockers.length > 0 || changePending} onClick={() => void submit()}>{mode === 'void' ? '确认作废' : '提交取消审批'}</Button></>}>
-      {failure && <Banner tone="bad" title="未能提交">{failure}</Banner>}
+    <Button icon={mode === 'void' ? Ban : XCircle} variant="danger" disabled={busy} onClick={() => { setOpen(true); setFailure(''); }}>{uiText(title)}</Button>
+    <Dialog open={open} onClose={() => { if (!working) setOpen(false); }} title={uiText(`${title} · ${order.code}`)} width={720}
+      footer={<><Button disabled={working} onClick={() => setOpen(false)}>{uiText("返回")}</Button><Button variant="danger" loading={working} disabled={busy || working || blockers.length > 0 || changePending} onClick={() => void submit()}>{uiText(mode === 'void' ? '确认作废' : '提交取消审批')}</Button></>}>
+      {failure && <Banner tone="bad" title={uiText("未能提交")}>{failure}</Banner>}
       {mode === 'void'
-        ? <Banner tone="warn" title="作废后订单只读">记录不删除，订单列表默认隐藏（可筛选查看），不能再提交审批或进入采购与履约。仅订单负责人可作废。若订单由报价转来，报价侧仍记为已转单，需在报价模块另行协调。</Banner>
+        ? <Banner tone="warn" title={uiText("作废后订单只读")}>{uiText("记录不删除，订单列表默认隐藏（可筛选查看），不能再提交审批或进入采购与履约。仅订单负责人可作废。若订单由报价转来，报价侧仍记为已转单，需在报价模块另行协调。")}</Banner>
         : blockers.length
-          ? <Banner tone="bad" title={ORDER_CANCEL_ALTERNATIVE}>{`${blockers.join('；')}。已出运或已开票的订单不能整单取消，请在条目详情中按实际数量结案。`}</Banner>
-          : <Banner tone="warn" title="取消须经订单审批人批准">提交后进入审批中心，审批期间订单锁定；申请人不能审批自己的申请。批准后订单只读，不能再采购、生产或出运，受影响的采购、生产、出运各生成一条处理待办，不会删改其他模块的数据。</Banner>}
-      {changePending && <Banner tone="warn" title="有待审批的变更">请先处理变更审批，再申请取消。</Banner>}
+          ? <Banner tone="bad" title={uiText(ORDER_CANCEL_ALTERNATIVE)}>{ui`${blockers.join('；')}。已出运或已开票的订单不能整单取消，请在条目详情中按实际数量结案。`}</Banner>
+          : <Banner tone="warn" title={uiText("取消须经订单审批人批准")}>{uiText("提交后进入审批中心，审批期间订单锁定；申请人不能审批自己的申请。批准后订单只读，不能再采购、生产或出运，受影响的采购、生产、出运各生成一条处理待办，不会删改其他模块的数据。")}</Banner>}
+      {changePending && <Banner tone="warn" title={uiText("有待审批的变更")}>{uiText("请先处理变更审批，再申请取消。")}</Banner>}
       {mode === 'cancel' && <KeyValue items={[{ label: '订单', value: `${order.code} · ${order.customer}` }, { label: '交期', value: order.due }]} />}
-      {mode === 'cancel' && !blockers.length && <OrderChangeImpactList state={state} order={order} lines={[]} go={go} note="批准取消后，下列采购、生产、出运各生成一条“订单已取消，请处理”待办；不会自动改动这些记录。" />}
-      <Field label={mode === 'void' ? '作废原因' : '取消原因'} required full><TextArea aria-label={mode === 'void' ? '作废原因' : '取消原因'} value={reason} onChange={e => setReason(e.target.value)} /></Field>
+      {mode === 'cancel' && !blockers.length && <OrderChangeImpactList state={state} order={order} lines={[]} go={go} note={uiText("批准取消后，下列采购、生产、出运各生成一条“订单已取消，请处理”待办；不会自动改动这些记录。")} />}
+      <Field label={uiText(mode === 'void' ? '作废原因' : '取消原因')} required full><TextArea aria-label={uiText(mode === 'void' ? '作废原因' : '取消原因')} value={reason} onChange={e => setReason(e.target.value)} /></Field>
     </Dialog>
   </>;
 }

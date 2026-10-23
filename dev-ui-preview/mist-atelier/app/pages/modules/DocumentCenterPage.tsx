@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 单据中心：按准确出运与合同保留单据版本（新版本不覆盖旧版本）、正式文件与签发 / 归档记录；我方签发 CI / PL，外部机构单据只归档原件；CI 签发回到财务应收。 */
 import React from 'react';
 import { Archive, Building2, Download, FileText, FilePlus2, Pencil, Plus, Receipt, SearchX, Stamp, XCircle } from 'lucide-react';
@@ -96,35 +97,35 @@ export function DocumentCenterPage() {
 
   const columns: Column<FulfillmentDocument>[] = [
     { key: 'number', header: '单据', width: 'minmax(170px,1.6fr)', render: d => <div className="mist-col" style={{ gap: 2 }}><Mono>{d.number}</Mono><small className="mist-muted">{d.title}</small></div> },
-    { key: 'type', header: '类型 · 版本', width: 'minmax(120px,1fr)', render: d => { const n = (f?.documents || []).filter(o => family(o) === family(d)).length; return <div className="mist-col" style={{ gap: 2 }}><span>{d.type} · V{d.version}</span><small className="mist-muted">{OWN(d.type) ? '我方出具' : '外部机构'}{n > 1 ? ` · 共 ${n} 版` : ''}</small></div>; } },
-    { key: 'shipment', header: '出运 / 订单', width: 'minmax(150px,1.3fr)', hideOnMobile: true, render: d => <div className="mist-col" style={{ gap: 2 }}><Mono>{shipmentOf(d)?.code || '出运不可用'}</Mono><small className="mist-muted">{shipmentOf(d)?.customer}{d.orderId ? ` · ${orderCode(d.orderId)}` : ''}</small></div> },
-    { key: 'date', header: '签发 / 创建', width: '116px', hideOnMobile: true, render: d => <div className="mist-col" style={{ gap: 2 }}><span>{d.issuedAt ? shortWhen(d.issuedAt) : '未签发'}</span><small className="mist-muted">{d.actor} · {shortWhen(d.createdAt)}</small></div> },
-    { key: 'status', header: '状态', width: '128px', render: d => { const st = documentStatus(d); return <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={st.tone}>{st.label}</Pill>{d.status === 'draft' && !d.fileIds.length && <small className="mist-muted">缺正式文件</small>}</div>; } },
+    { key: 'type', header: '类型 · 版本', width: 'minmax(120px,1fr)', render: d => { const n = (f?.documents || []).filter(o => family(o) === family(d)).length; return <div className="mist-col" style={{ gap: 2 }}><span>{d.type} · V{d.version}</span><small className="mist-muted">{uiText(OWN(d.type) ? '我方出具' : '外部机构')}{uiText(n > 1 ? ` · 共 ${n} 版` : '')}</small></div>; } },
+    { key: 'shipment', header: '出运 / 订单', width: 'minmax(150px,1.3fr)', hideOnMobile: true, render: d => <div className="mist-col" style={{ gap: 2 }}><Mono>{shipmentOf(d)?.code || '出运不可用'}</Mono><small className="mist-muted">{shipmentOf(d)?.customer}{uiText(d.orderId ? ` · ${orderCode(d.orderId)}` : '')}</small></div> },
+    { key: 'date', header: '签发 / 创建', width: '116px', hideOnMobile: true, render: d => <div className="mist-col" style={{ gap: 2 }}><span>{uiText(d.issuedAt ? shortWhen(d.issuedAt) : '未签发')}</span><small className="mist-muted">{d.actor} · {shortWhen(d.createdAt)}</small></div> },
+    { key: 'status', header: '状态', width: '128px', render: d => { const st = documentStatus(d); return <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill>{d.status === 'draft' && !d.fileIds.length && <small className="mist-muted">{uiText("缺正式文件")}</small>}</div>; } },
   ];
-  const createButton = can ? <Button variant="primary" icon={Plus} disabled={invalidContext || !shipments.length} title={shipments.length ? undefined : '没有可出具单据的出运'} onClick={() => setDialog(docSpec())}>新建单据</Button> : undefined;
+  const createButton = can ? <Button variant="primary" icon={Plus} disabled={invalidContext || !shipments.length} title={uiText(shipments.length ? undefined : '没有可出具单据的出运')} onClick={() => setDialog(docSpec())}>{uiText("新建单据")}</Button> : undefined;
   const empty = inDomain.length
-    ? <EmptyState icon={SearchX} title="没有符合条件的单据" description="换个关键词或清除筛选。" action={<Button onClick={() => { setQuery(''); setTypeFilter('all'); setStatusFilter('active'); }}>清除筛选</Button>} />
-    : <EmptyState icon={FileText} title={invalidContext ? '来源出运不存在' : hasContext ? '本票还没有单据' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运单据`} description={invalidContext ? '请返回货运管理重新选择准确出运。' : '后勤按出运出具 CI / PL：先保存草稿并上传核对后的正式文件，再签发；提单、原产地证等外部单据归档原件。'} action={createButton && !invalidContext && shipments.length ? <Button icon={Plus} onClick={() => setDialog(docSpec())}>新建单据</Button> : undefined} />;
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的单据")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setTypeFilter('all'); setStatusFilter('active'); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={FileText} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有单据' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运单据`)} description={uiText(invalidContext ? '请返回货运管理重新选择准确出运。' : '后勤按出运出具 CI / PL：先保存草稿并上传核对后的正式文件，再签发；提单、原产地证等外部单据归档原件。')} action={createButton && !invalidContext && shipments.length ? <Button icon={Plus} onClick={() => setDialog(docSpec())}>{uiText("新建单据")}</Button> : undefined} />;
   const detail = selected && state
     ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick}
         onEdit={() => setDialog(docSpec(selected))} onVersion={() => setDialog(docSpec(undefined, selected))} onArchive={() => setDialog(archiveSpec(selected))} onVoid={() => setDialog(voidSpec(selected))}
         onIssue={() => setDialog({ title: `签发 ${selected.number} · V${selected.version}`, submitLabel: '确认签发', description: selected.type === 'CI' ? '签发后生成财务应收（按本票该订单条目数量 × 合同单价），本版本不可再修改。' : '签发后本版本不可再修改；如需更正请作废后建立新版本。', fields: [], initialValues: {}, submit: () => run({ type: 'fulfillment.documents.issue', payload: { id: selected.id } }) })}
         onAttach={ids => run({ type: 'fulfillment.documents.save', payload: { id: selected.id, shipmentId: selected.shipmentId, orderId: selected.orderId, type: selected.type, number: selected.number, title: selected.title, dueDate: selected.dueDate, content: selected.content, fileIds: ids } })}
         onShipment={() => go('shipments', selected.shipmentId)} onInvoice={id => go('invoices', id)} />
-    : <EmptyState icon={FileText} title="单据详情" description={loading ? '正在读取单据' : '从列表选择一份单据，查看版本、正式文件与签发记录'} compact />;
+    : <EmptyState icon={FileText} title={uiText("单据详情")} description={uiText(loading ? '正在读取单据' : '从列表选择一份单据，查看版本、正式文件与签发记录')} compact />;
   const profile = state?.settings.companyProfile;
 
   return <MistPage width="wide">
-    <PageHeader eyebrow="订单履约 · 单证" title="单据中心"
-      description={invalidContext ? '指定出运不存在，请返回货运管理重新进入。' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer} · 仅显示本票单据。` : '按准确出运与合同保留单据版本、正式文件与签发记录；新版本不覆盖旧版本，CI 签发后回到财务应收。'}
+    <PageHeader eyebrow={uiText("订单履约 · 单证")} title={uiText("单据中心")}
+      description={uiText(invalidContext ? '指定出运不存在，请返回货运管理重新进入。' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer} · 仅显示本票单据。` : '按准确出运与合同保留单据版本、正式文件与签发记录；新版本不覆盖旧版本，CI 签发后回到财务应收。')}
       actions={<>
-        {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>返回出运</Button>}
-        {hasContext && <Button onClick={() => go('document-center')}>查看全部单据</Button>}
-        {tab === 'documents' && <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('单据目录', ['编号', '标题', '类型', '版本', '出运', '订单', '状态', '签发时间'], rows.map(d => [d.number, d.title, d.type, d.version, shipmentOf(d)?.code || '', orderCode(d.orderId), documentStatus(d).label, d.issuedAt || '']))}>导出</Button>}
+        {contextShipment && <Button onClick={() => go('shipments', contextShipment.id)}>{uiText("返回出运")}</Button>}
+        {hasContext && <Button onClick={() => go('document-center')}>{uiText("查看全部单据")}</Button>}
+        {tab === 'documents' && <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('单据目录', ['编号', '标题', '类型', '版本', '出运', '订单', '状态', '签发时间'], rows.map(d => [d.number, d.title, d.type, d.version, shipmentOf(d)?.code || '', orderCode(d.orderId), documentStatus(d).label, d.issuedAt || '']))}>{uiText("导出")}</Button>}
         {tab === 'documents' && createButton}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title="只读查看">你的账号没有单证权限，可以查看单据版本与签发记录。</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title="单据未读取" actions={<Button onClick={() => void refresh()}>重试</Button>}>{error}</Banner></div>}
+    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有单证权限，可以查看单据版本与签发记录。")}</Banner></div>}
+    {error && <div className="mist-section"><Banner tone="bad" title={uiText("单据未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: docs.filter(d => d.status !== 'void').length }, { value: 'template', label: '抬头与模板' }]} /></div>}
     {tab === 'template' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
         {profile?.legalName ? <Facts items={[
@@ -132,15 +133,15 @@ export function DocumentCenterPage() {
           { label: '中文地址', value: profile.address || '未填写' }, { label: '英文地址', value: profile.englishAddress || '未填写' },
           { label: '电话 / 邮箱', value: [profile.phone, profile.email].filter(Boolean).join(' · ') || '未填写' }, { label: '税号', value: profile.taxId || '未填写' },
           { label: '海关编码', value: profile.customsCode || '未填写' }, { label: '开户行 / SWIFT', value: [profile.bankName, profile.swift].filter(Boolean).join(' · ') || '未填写' },
-        ]} /> : <EmptyState icon={Building2} title="尚未填写公司抬头" description="CI / PL 的抬头、地址和收款银行取自设置中的公司资料。" compact />}
-        <div className="mist-row"><Button icon={Pencil} onClick={() => go('settings', undefined, { section: 'company' })}>在设置中维护公司资料</Button></div>
-        <span className="mist-note">印章图样、编号规则预览与打印打包尚未接入；PI、样品单、试样通知与采购单在各自页面出具，单据中心暂不汇总。</span>
+        ]} /> : <EmptyState icon={Building2} title={uiText("尚未填写公司抬头")} description={uiText("CI / PL 的抬头、地址和收款银行取自设置中的公司资料。")} compact />}
+        <div className="mist-row"><Button icon={Pencil} onClick={() => go('settings', undefined, { section: 'company' })}>{uiText("在设置中维护公司资料")}</Button></div>
+        <span className="mist-note">{uiText("印章图样、编号规则预览与打印打包尚未接入；PI、样品单、试样通知与采购单在各自页面出具，单据中心暂不汇总。")}</span>
       </div></Card>
     : <>
-      {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel="业务板块" value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${docs.filter(d => domainOf(d) === 'garment' && d.status !== 'void').length}` }, { value: 'fabric', label: `面料业务 · ${docs.filter(d => domainOf(d) === 'fabric' && d.status !== 'void').length}` }]} /></div>}
+      {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${docs.filter(d => domainOf(d) === 'garment' && d.status !== 'void').length}` }, { value: 'fabric', label: `面料业务 · ${docs.filter(d => domainOf(d) === 'fabric' && d.status !== 'void').length}` }]} /></div>}
       <Toolbar>
-        <SearchField value={query} onChange={setQuery} placeholder="搜索单据编号、标题、出运号、客户、订单或签发机构" />
-        <Dropdown<TypeFilter> label="类型" value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部类型' }, ...(['CI', 'PL', 'BL', 'CO', 'OTHER'] as DocType[]).map(value => ({ value, label: TYPE_LABEL[value] }))]} />
+        <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索单据编号、标题、出运号、客户、订单或签发机构")} />
+        <Dropdown<TypeFilter> label={uiText("类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部类型' }, ...(['CI', 'PL', 'BL', 'CO', 'OTHER'] as DocType[]).map(value => ({ value, label: TYPE_LABEL[value] }))]} />
       </Toolbar>
       <Pipeline<StatusFilter> value={statusFilter} onChange={setStatusFilter} items={[
         { value: 'active', label: '当前单据', count: count('active'), color: 'var(--mist-ink-2)' },
@@ -149,7 +150,7 @@ export function DocumentCenterPage() {
         { value: 'void', label: '已作废', count: count('void'), color: 'var(--mist-ink-3)' },
       ]} />
       <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.number} · V${selected.version}` : '单据详情'} drawerSub={selected ? `${TYPE_LABEL[selected.type]} · ${shipmentOf(selected)?.code || ''}` : undefined}
-        list={<Card><DataTable ariaLabel="单据列表" loading={loading} rows={rows} rowKey={d => d.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
+        list={<Card><DataTable ariaLabel={uiText("单据列表")} loading={loading} rows={rows} rowKey={d => d.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
         detail={detail} />
     </>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
@@ -175,8 +176,8 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
       <span className="mist-mono mist-muted">{TYPE_LABEL[d.type]} · V{d.version}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{d.number}</div>
     </div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={st.tone}>{st.label}</Pill><Pill>{OWN(d.type) ? '我方出具' : '外部机构'}</Pill>{s && <Pill>{s.domain === 'fabric' ? '面料业务' : '成衣业务'}</Pill>}</div>
-    <Banner tone={next.tone} title={next.title}>{next.text}</Banner>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill><Pill>{uiText(OWN(d.type) ? '我方出具' : '外部机构')}</Pill>{s && <Pill>{uiText(s.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}</div>
+    <Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>
     {can && <ActionBar busy={locked} actions={[
       { label: '签发', icon: Stamp, onClick: onIssue, primary: true, reason: noWrite || blocker || false, hidden: d.status !== 'draft' || !OWN(d.type) },
       { label: '归档外部签发原件', icon: Archive, onClick: onArchive, primary: true, reason: noWrite || blocker || false, hidden: d.status !== 'draft' || OWN(d.type) },
@@ -194,21 +195,21 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
       { label: '创建', value: `${d.actor} · ${shortWhen(d.createdAt)}` },
       { label: '签发 / 归档', value: d.issuedAt ? shortWhen(d.issuedAt) : '尚未签发' },
     ]} />
-    {d.externalIssue && <p className="mist-sub">原件来源：{d.externalIssue.evidence}</p>}
-    <DetailBlock title="单据正文 / 制单说明"><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
-    {d.type === 'CI' && <DetailBlock title="财务应收" aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>查看应收 {invoice.code}</TextLink> : undefined}>
+    {d.externalIssue && <p className="mist-sub">{uiText("原件来源：")}{d.externalIssue.evidence}</p>}
+    <DetailBlock title={uiText("单据正文 / 制单说明")}><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
+    {d.type === 'CI' && <DetailBlock title={uiText("财务应收")} aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink> : undefined}>
       {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due }]} />
-        : <span className="mist-note">{d.status === 'draft' ? '签发后按本票该订单条目数量 × 合同单价生成应收。' : '未找到对应应收。'}</span>}
+        : <span className="mist-note">{uiText(d.status === 'draft' ? '签发后按本票该订单条目数量 × 合同单价生成应收。' : '未找到对应应收。')}</span>}
     </DetailBlock>}
-    <DetailBlock title={`版本（${versions.length}）`}>
-      <DataTable ariaLabel={`${d.number} 版本`} rows={versions} rowKey={v => v.id} selectedKey={d.id} onRowClick={onPick} columns={[
+    <DetailBlock title={ui`版本（${versions.length}）`}>
+      <DataTable ariaLabel={ui`${d.number} 版本`} rows={versions} rowKey={v => v.id} selectedKey={d.id} onRowClick={onPick} columns={[
         { key: 'v', header: '版本', width: '64px', render: v => `V${v.version}` },
         { key: 'number', header: '编号', render: v => <Mono>{v.number}</Mono> },
-        { key: 'status', header: '状态', render: v => <Pill tone={documentStatus(v).tone}>{documentStatus(v).label}</Pill> },
+        { key: 'status', header: '状态', render: v => <Pill tone={documentStatus(v).tone}>{uiText(documentStatus(v).label)}</Pill> },
         { key: 'at', header: '签发 / 创建', hideOnMobile: true, render: v => v.issuedAt ? shortWhen(v.issuedAt) : shortWhen(v.createdAt) },
       ]} />
     </DetailBlock>
-    <DetailBlock title="正式文件"><RecordFiles key={d.id} ids={d.fileIds} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} />{!d.fileIds.length && <span className="mist-note">{OWN(d.type) ? '签发须引用核对后的正式 PDF 或原始单据' : '归档须上传外部机构签发的原件'}</span>}</DetailBlock>
-    <DetailBlock title="处理记录"><Events entity="document" id={d.id} /></DetailBlock>
+    <DetailBlock title={uiText("正式文件")}><RecordFiles key={d.id} ids={d.fileIds} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} />{!d.fileIds.length && <span className="mist-note">{uiText(OWN(d.type) ? '签发须引用核对后的正式 PDF 或原始单据' : '归档须上传外部机构签发的原件')}</span>}</DetailBlock>
+    <DetailBlock title={uiText("处理记录")}><Events entity="document" id={d.id} /></DetailBlock>
   </DetailBody>;
 }

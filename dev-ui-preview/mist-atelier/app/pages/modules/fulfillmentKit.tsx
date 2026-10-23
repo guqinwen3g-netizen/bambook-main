@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** Shared fulfillment page helpers: exact sources, files, positions and editor plumbing. */
 import React from 'react';
@@ -65,15 +66,15 @@ catch (e) {
 }
 finally {
     setBusy(false);
-} }; return <div className="mist-section">{failure && <Banner tone="bad" title="附件未完成保存">{failure}</Banner>}{ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>下载</TextLink></div> : null; })}{onAttach && <UploadZone hint="上传当前记录的原始照片或附件" onFiles={files => { if (!busy && !saving && !pending)
-    void add(files); }}/>} {!!staged.length && <Button disabled={busy || saving || !!pending} onClick={() => void add([])}>重试关联已上传附件</Button>}</div>; }
+} }; return <div className="mist-section">{failure && <Banner tone="bad" title={uiText("附件未完成保存")}>{failure}</Banner>}{ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink></div> : null; })}{onAttach && <UploadZone hint={uiText("上传当前记录的原始照片或附件")} onFiles={files => { if (!busy && !saving && !pending)
+    void add(files); }}/>} {!!staged.length && <Button disabled={busy || saving || !!pending} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}</div>; }
 /** 表单草稿附件：上传新文件或移除，变化只写回草稿 ids，随表单一并提交。 */
 export function DraftFiles({ ids, onChange, disabled, hint = '上传报价单、邮件截图等原始凭据', max = 20 }: { ids: string[]; onChange: (ids: string[]) => void; disabled?: boolean; hint?: string; max?: number }) {
     const { state, uploadFile, downloadFile } = useMistWorkspace(); const [failure, setFailure] = React.useState(''), [busy, setBusy] = React.useState(false);
     const add = async (files: File[]) => { if (ids.length + files.length > max) { setFailure(`附件不得超过 ${max} 个`); return; } setBusy(true); setFailure(''); const added: string[] = []; try { for (const file of files) added.push((await uploadFile(file)).id); } catch (e) { setFailure(e instanceof Error ? e.message : '附件上传失败'); } finally { setBusy(false); if (added.length) onChange([...ids, ...added]); } };
-    return <div className="mist-col" style={{ gap: 6 }}>{failure && <Banner tone="bad" title="附件未上传">{failure}</Banner>}
-        {ids.map(id => { const f = state?.files.find(file => file.id === id); return <div className="mist-row" key={id}>{f ? <FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /> : <span>附件已不可见</span>}{f && <TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>下载</TextLink>}{!disabled && <TextLink onClick={() => onChange(ids.filter(x => x !== id))}>移除</TextLink>}</div>; })}
-        {!disabled && <UploadZone hint={busy ? '正在上传…' : hint} onFiles={files => { if (!busy) void add(files); }} />}</div>;
+    return <div className="mist-col" style={{ gap: 6 }}>{failure && <Banner tone="bad" title={uiText("附件未上传")}>{failure}</Banner>}
+        {ids.map(id => { const f = state?.files.find(file => file.id === id); return <div className="mist-row" key={id}>{f ? <FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /> : <span>{uiText("附件已不可见")}</span>}{f && <TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink>}{!disabled && <TextLink onClick={() => onChange(ids.filter(x => x !== id))}>{uiText("移除")}</TextLink>}</div>; })}
+        {!disabled && <UploadZone hint={uiText(busy ? '正在上传…' : hint)} onFiles={files => { if (!busy) void add(files); }} />}</div>;
 }
 export function Events({ entity, id }: {
     entity: string;
@@ -82,7 +83,7 @@ export function Events({ entity, id }: {
 export function PositionSummary({ row }: { row: FulfillmentSample | FulfillmentStock }) {
     const positions = fulfillmentPositions(row);
     if (positions.length < 2) return null;
-    return <DataTable ariaLabel="实际位置余额" rows={positions} rowKey={position => position.location} columns={[
+    return <DataTable ariaLabel={uiText("实际位置余额")} rows={positions} rowKey={position => position.location} columns={[
         { key: 'location', header: '实际位置', render: position => position.location || '位置未记录' },
         { key: 'available', header: '可用数量', align: 'right', render: position => `${position.available} ${row.unit}` },
     ]}/>;

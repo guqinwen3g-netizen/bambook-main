@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 审批队列：跨公司读取服务端派生的审批事项（仅提交快照），决定按原请求编号幂等保存并可核对。
  *  顶栏按钮和“审批与放行”页面共用同一份队列与恢复记录，避免两处各自轮询、各自决定。 */
 import React from 'react';
@@ -92,12 +93,12 @@ export function MistReviewProvider({ children }: { children: React.ReactNode }) 
     } catch (e) { if (identity === ref.current) setError(e instanceof Error ? e.message : '附件读取失败'); }
   };
   const value: MistReviewQueue = { rows, loaded, error, busy, intent, refresh, clearError: () => setError(''), decide, recover, download };
-  return <ReviewContext.Provider value={value}>{children}</ReviewContext.Provider>;
+  return <ReviewContext.Provider value={value}>{uiText(children)}</ReviewContext.Provider>;
 }
 
 /** 顶栏入口：有待我决定的审批或待核对的审批结果时显示红点，点击进入“审批与放行”。 */
 export function MistReviewButton() {
   const reviews = useMistReviews(), nav = useNav();
   const waiting = reviews.rows.filter(r => r.canDecide).length;
-  return <IconButton icon={ClipboardCheck} label={waiting ? `审批与放行（${waiting} 项待我审批）` : '审批与放行'} dot={!!reviews.intent || waiting > 0} onClick={() => nav.go('approvals')} />;
+  return <IconButton icon={ClipboardCheck} label={uiText(waiting ? `审批与放行（${waiting} 项待我审批）` : '审批与放行')} dot={!!reviews.intent || waiting > 0} onClick={() => nav.go('approvals')} />;
 }

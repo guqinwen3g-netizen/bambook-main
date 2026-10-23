@@ -1,3 +1,4 @@
+import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowUpRight, Link2 } from 'lucide-react';
@@ -22,7 +23,7 @@ export function AssistantDrawer({ open, onClose, messages, onSend, suggestions =
   React.useEffect(() => { list.current?.scrollTo({ top: list.current.scrollHeight }); }, [messages, open]);
   const send = (t: string) => { const v = t.trim(); if (!v) return; onSend(v); setDraft(''); };
   return (
-    <Drawer open={open} onClose={onClose} title={title} sub={sub} tone="ai" leading={<AIBadge icon={icon} size="lg" />} bodyless>
+    <Drawer open={open} onClose={onClose} title={uiText(title)} sub={uiText(sub)} tone="ai" leading={<AIBadge icon={icon} size="lg" />} bodyless>
       <div className="mist-drawer-body" ref={list}>
         <div className="mist-msgs">
           {messages.map((m, i) => m.role === 'user' ? <div key={i} className="mist-msg" data-role="user">{m.text}</div>
@@ -36,9 +37,9 @@ export function AssistantDrawer({ open, onClose, messages, onSend, suggestions =
       </div>
       {suggestions.length > 0 && <div className="mist-sugg">{suggestions.map(s => <button key={s} type="button" onClick={() => send(s)}>{s}</button>)}</div>}
       <div className="mist-composer">
-        <textarea value={draft} placeholder="问小竹，或让它帮你做事…" aria-label="输入问题" onChange={e => setDraft(e.target.value)}
+        <textarea value={draft} placeholder={uiText("问小竹，或让它帮你做事…")} aria-label={uiText("输入问题")} onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(draft); } }} />
-        <button type="button" className="mist-send" aria-label="发送" onClick={() => send(draft)}><Icon icon={ArrowUpRight} size="sm" /></button>
+        <button type="button" className="mist-send" aria-label={uiText("发送")} onClick={() => send(draft)}><Icon icon={ArrowUpRight} size="sm" /></button>
       </div>
     </Drawer>
   );
