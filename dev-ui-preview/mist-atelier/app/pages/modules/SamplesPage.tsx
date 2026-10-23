@@ -1,6 +1,7 @@
 import {SAMPLE_SEND_PURPOSES,sampleSendPurpose} from '../../../../../server/src/shared/mistSampleSending';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 样品仓库：面料按档案汇总形态余额，成衣按每件实物；详情卡承接借出、寄出、归还、移位与送检。 */
+import { parseShippingSampleSizes } from '../../../../../server/src/shared/mistShippingSample';
 import React from 'react';
 import { ArrowLeftRight, Download, Layers, Package, Pencil, Plus, RefreshCw, SearchX, Send, Shirt, Undo2 } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, Pipeline, SearchField, Tabs, TextLink, Thumb, Timeline, Toolbar, type Column } from '../../../../../components/mist';
@@ -115,28 +116,30 @@ export function SamplesPage() {
   const roleOptions = hasShipmentContext ? [{ value: 'shipping', label: '船样' }] : [emptyOption, { value: 'pp', label: '成衣产前样' }, { value: 'pioneer', label: '面料先锋样' }, { value: 'shipping', label: '船样' }];
   const shipmentOptions = hasShipmentContext ? (sourceShipment ? [{ value: sourceShipment.id, label: sourceShipment.code }] : [emptyOption]) : [emptyOption, ...(state?.fulfillment.shipments || []).filter(shipment => shipment.state !== 'cancelled').map(shipment => ({ value: shipment.id, label: shipment.code }))];
   const defaultCategory = contextShelf ? (contextShelf === 'fabric' ? '面料' : '成衣') : shelf === 'garment' ? '成衣' : shelf === 'other' ? '其他' : '面料';
+  const shippingGarment=hasShipmentContext&&sourceShipment?.domain==='garment';
   const createSpec: ModuleEditorSpec = {
-    title: '新建样品', description: '登记实际收到的实物。有系统来源时选准确版本或生产分支；没有来源时写明手工来源。',
+    title: shippingGarment?'登记船样':'新建样品',
     sections: [
-      { id: 'identity', label: '类别与来源', description: '来源决定样品与开发版本或订单分支的准确关联。', fields: ['category', 'categoryCustom', 'name', 'source', 'sourceText', 'role', 'shipmentId'] },
-      { id: 'form', label: '形态与数量', description: '面料按形态与单位记录；成衣每件单独登记。', fields: ['form', 'quantity', 'unit'] },
-      { id: 'place', label: '规格与位置', fields: ['size', 'color', 'location', 'note'] },
+      { id: 'identity', label: '类别与来源', fields: ['category', 'categoryCustom', 'name', 'source', 'sourceText', 'role', 'shipmentId'] },
+      { id: 'form', label: '形态与数量', fields: shippingGarment?['form','sizeQuantities','unit']:['form', 'quantity', 'unit'] },
+      { id: 'place', label: '规格与位置', fields: shippingGarment?['color','location','note']:['size', 'color', 'location', 'note'] },
     ],
     fields: [field('category', '大类', 'select', true, choices(['面料', '成衣', '其他'])), field('categoryCustom', '其他类别（选其他时填写）', 'text', false), field('name', '名称'),
       { ...field('source', '准确来源', 'select', true, sampleSources), hint: sourceHint }, field('sourceText', '手工来源说明', 'text', false),
       { ...field('role', '订单样品角色', 'select', hasShipmentContext, roleOptions), readonly: hasShipmentContext }, { ...field('shipmentId', '船样对应出运批次', 'select', hasShipmentContext, shipmentOptions), readonly: hasShipmentContext },
-      field('form', '形态'), field('quantity', '数量 / 长度', 'number'), field('unit', '单位', 'select', true, choices(['米', '码', '公斤', '份', '件'])),
-      field('size', '尺码', 'text', false), field('color', '颜色', 'text', false), field('location', '自由文本位置', 'text', false), field('note', '备注', 'textarea', false)],
+      field('form', '形态'), ...(shippingGarment?[field('sizeQuantities','尺码与件数','textarea')]:[field('quantity', '数量 / 长度', 'number')]), {...field('unit', '单位', 'select', true, choices(['米', '码', '公斤', '份', '件'])),readonly:shippingGarment},
+      ...(!shippingGarment?[field('size', '尺码', 'text', false)]:[]), field('color', '颜色', 'text', false), field('location', '自由文本位置', 'text', false), field('note', '备注', 'textarea', false)],
     initialValues: { category: defaultCategory, categoryCustom: '', name: '', source: hasShipmentContext ? (sourceProduction ? 'production:' + sourceProduction.id : '') : route.productionId ? 'production:' + route.productionId : 'manual', sourceText: '',
       role: hasShipmentContext ? 'shipping' : route.productionId ? (state?.orders.find(order => order.id === state.productions.find(branch => branch.id === route.productionId)?.orderId)?.type === 'fabric' ? 'pioneer' : 'pp') : '',
-      shipmentId: sourceShipment?.id || '', form: hasShipmentContext ? '船样' : '', quantity: 1, unit: defaultCategory === '面料' ? '' : '件', size: '', color: '', location: '', note: '' },
+      shipmentId: sourceShipment?.id || '', form: hasShipmentContext ? '船样' : '', quantity: 1,sizeQuantities:'',unit: defaultCategory === '面料' ? '' : '件', size: '', color: '', location: '', note: '' },
     submitLabel: '登记样品',
     submit: async values => {
       if (!state) return; if (invalidShipment) throw new Error('本票出运或生产来源已不可用');
       const category = text(values, 'category') === '其他' ? text(values, 'categoryCustom') : text(values, 'category');
       if (!category) throw new Error('请填写其他类别');
+      const sizeQuantities=shippingGarment?parseShippingSampleSizes(text(values,'sizeQuantities')):undefined,actualQuantity=sizeQuantities?sizeQuantities.reduce((total,row)=>total+row.quantity,0):number(values,'quantity');
       if (category !== '面料' && !Number.isInteger(number(values, 'quantity'))) throw new Error('件或份类样品必须按整数登记');
-      await run({ type: 'fulfillment.samples.create', payload: { name: text(values, 'name'), category, form: text(values, 'form'), unit: text(values, 'unit'), quantity: number(values, 'quantity'), location: text(values, 'location'), size: text(values, 'size'), color: text(values, 'color'), note: text(values, 'note'), fileIds: [],
+      await run({ type: 'fulfillment.samples.create', payload: { name: text(values, 'name'), category, form: text(values, 'form'), unit: text(values, 'unit'), quantity: actualQuantity,...(sizeQuantities?{sizeQuantities}:{}),location: text(values, 'location'), size: text(values, 'size'), color: text(values, 'color'), note: text(values, 'note'), fileIds: [],
         ...(text(values, 'role') ? { role: text(values, 'role') as FulfillmentSample['role'] } : {}), ...(text(values, 'shipmentId') ? { shipmentId: text(values, 'shipmentId') } : {}),
         source: text(values, 'source') === 'manual' ? { kind: 'manual', description: text(values, 'sourceText') } : parseSource(state, text(values, 'source')) } });
     },

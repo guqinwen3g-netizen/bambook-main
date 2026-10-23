@@ -4,6 +4,7 @@ import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
+import { normalizeShippingSampleSizes } from './mistShippingSample';
 import { productionQuantityBasis } from './mistProductionQuantity';
 import { productionSampleRequirements, type ProductionSampleEvidence } from './mistProductionSamples';
 import {developmentDomain} from './mistDevelopmentDomain';
@@ -58,6 +59,8 @@ export type FulfillmentSample = {
     location: string;
     positions?: FulfillmentPosition[];
     size: string;
+    /** One shipping submission's actual physical size/count members; never inferred from the production plan. */
+    sizeQuantities?:FulfillmentSizeQuantity[];
     color: string;
     source: FulfillmentSource;
     sourceSampleCode?: string;
@@ -375,7 +378,7 @@ export type FulfillmentState = {
     documents: FulfillmentDocument[];
 };
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
-type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId'>;
+type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
 type ShipmentInput = Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
 export type FulfillmentCommand = {
     type: 'fulfillment.samples.create';
@@ -791,7 +794,10 @@ function purchaseSnapshot(purchase: FulfillmentPurchase): FulfillmentPurchaseRev
 function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
     const f = root.fulfillment, s = source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
     if (s.kind === 'version' && get(root.devs, s.devId, '来源开发案').billing?.request) fail(DEVELOPMENT_BILLING_LOCK, 'PRECONDITION');
-    if (category === '成衣' && (quantity !== 1 || unit !== '件')) fail('成衣必须逐件建档，数量为1件');
+    const groupedShipping=input.sizeQuantities!==undefined;
+    if(groupedShipping&&(category!=='成衣'||input.role!=='shipping'||s.kind!=='orderLine'))fail('尺码件数组合仅用于成衣船样');
+    const sizeQuantities=groupedShipping?normalizeShippingSampleSizes(input.sizeQuantities,quantity):undefined;
+    if (category === '成衣' && ((!groupedShipping&&quantity !== 1) || unit !== '件')) fail('成衣必须逐件建档，数量为1件');
     if (unit !== '米' && !Number.isInteger(quantity)) fail('非米样数量须为整数');
     if (s.kind === 'orderLine') {
         if (!s.productionId) fail('订单样品必须关联准确生产分支');
@@ -799,14 +805,16 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
         const order = get(root.orders, s.orderId, '订单'), expected = order.type === 'garment' ? 'pp' : 'pioneer';
         if (![expected, 'shipping'].includes(input.role || '')) fail('请选择当前订单的产前/先锋样或船样角色');
         if (category !== (order.type === 'garment' ? '成衣' : '面料')) fail('实物类别与订单业务域不一致');
-        if (order.type === 'garment' && !text(input.size, '实际样品尺码')) fail('请记录实际样品尺码');
+        if (order.type === 'garment' && !groupedShipping && !text(input.size, '实际样品尺码')) fail('请记录实际样品尺码');
         if (input.role === 'shipping') {
             const shipment = get(f.shipments, input.shipmentId || '', '船样对应出运批次');
             if (shipment.state === 'cancelled' || !shipment.lines.some(line => line.lineId === s.lineId && line.productionId === s.productionId)) fail('船样必须属于准确生产分支的有效出运批次');
+            if(!groupedShipping&&f.samples.some(sample=>sample.role==='shipping'&&sample.shipmentId===shipment.id&&sample.source.kind==='orderLine'&&sample.source.productionId===s.productionId&&sample.sizeQuantities?.length))fail('请登记本批船样完整尺码件数');
+            if(sizeQuantities){const plan=fulfillmentProductionFact(root,s.productionId!)?.sizes||[];if(sizeQuantities.some(row=>!plan.some(size=>size.size===row.size)))fail('船样尺码不属于本工厂生产分支');}
         } else if (input.shipmentId) fail('产前/先锋样不绑定出运批次');
     } else if (input.role || input.shipmentId) fail('订单样品角色仅用于准确订单生产分支');
     const id = ctx.id();
-    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: text(input.size, '尺码', false), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
+    f.samples.push({ id, code: code('SMP', f.samples, ctx), name: text(input.name, '名称'), category, form: text(input.form, '形态'), unit, quantity, available: quantity, location: text(input.location, '位置', false), size: sizeQuantities?sizeQuantities.map(row=>`${row.size} ${row.quantity}`).join(' / '):text(input.size, '尺码', false),...(sizeQuantities?{sizeQuantities}:{}), color: text(input.color, '颜色', false), source: s, ...(s.kind === 'version' ? { sourceSampleCode: get(root.versions, s.versionId, '来源版本').sample } : {}), ...(input.role ? { role: input.role } : {}), ...(s.kind === 'orderLine' && input.role === 'pp' ? {materialPlan:garmentMaterialFingerprint(root,s.orderId,s.lineId)} : {}), ...(input.shipmentId ? { shipmentId: input.shipmentId } : {}), qualityRevision: 1, fileIds: files(root, input.fileIds), note: text(input.note, '备注', false), createdAt: ctx.now });
     f.sampleMovements.push({ id: ctx.id(), sampleId: id, kind: 'receive', quantity, person: ctx.actorName, location: input.location, note: input.note, at: ctx.now, actor: ctx.actorName });
     return id;
 }
@@ -999,6 +1007,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.samples.edit': {
             const s = get(f.samples, p.id, '样品');
+            if(s.sizeQuantities&&p.size!==undefined&&p.size!==s.size)fail('船样实际尺码件数已登记，实物变更请重新登记本批船样');
             const changedPhysical = ['form', 'size', 'color'].some(key => p[key] !== undefined && p[key] !== (s as any)[key]);
             if (text(p.location, '位置', false) !== s.location) fail('请通过移位操作登记位置变化');
             if (p.name !== undefined) s.name = text(p.name, '样品名称');
@@ -1017,6 +1026,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.samples.move': {
             const s = get(f.samples, p.id, '样品');
             let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
+            if(s.sizeQuantities&&p.kind!=='move'&&quantity!==s.quantity)fail('本批船样须按整组流转');
             if (s.unit !== '米' && !Number.isInteger(quantity)) fail('件或份类样品必须按整数流转');
             let loan: SampleMovement | undefined;
             if (!['lend', 'return', 'send', 'move'].includes(p.kind))
@@ -1150,8 +1160,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             delete t.businessConfirmation;
             delete t.businessContinued;
             let sizeChecks: NonNullable<FulfillmentQcReport['sizeChecks']> = [];
-            if (t.kind === 'production' && t.source.kind === 'orderLine') {
-                const fact = productionFact(root, t.source.productionId!), sizes = fact.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact.sizes;
+            const shippingSet=t.sampleId?f.samples.find(sample=>sample.id===t.sampleId)?.sizeQuantities:undefined;
+            if ((t.kind === 'production'||shippingSet) && t.source.kind === 'orderLine') {
+                const fact = productionFact(root, t.source.productionId!), sizes = shippingSet||(fact.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact.sizes);
                 if (t.domain === 'garment' && !sizes.length) fail('生产QC须先有准确生产尺码');
                 if (t.domain === 'garment' && (!Array.isArray(p.sizeChecks) || !p.sizeChecks.length)) fail('请记录本次实际检查尺码');
                 sizeChecks = (p.sizeChecks || []).map((check: any) => {
@@ -1163,6 +1174,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     return { size: text(check.size, '检查尺码'), inspected, result: check.result, evidence: text(check.evidence, '尺码检查依据') };
                 });
                 if (new Set(sizeChecks.map(check => check.size)).size !== sizeChecks.length) fail('本次尺码检查不得重复');
+                if(shippingSet&&p.result!=='reject'&&shippingSet.some(size=>!sizeChecks.some(check=>check.size===size.size&&check.inspected===size.quantity)))fail('请完成本组船样全部尺码与件数的QC');
                 if (sizeChecks.some(check => check.result === 'reject') && p.result !== 'reject') fail('存在尺码不通过时，总结论必须不通过');
             }
             const location = text(p.location === undefined ? t.location : p.location, '实际检查地点');

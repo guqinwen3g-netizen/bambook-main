@@ -1,5 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {applyMistCommand,createMistState,type MistCommand,type MistContext} from './mistWorkspace';
+import {productionSampleRequirements} from './mistProductionSamples';
 import {createOrderGovernance} from './mistOrderGovernance';
 import {assertProductionTransition,type FulfillmentSampleRole} from './mistFulfillment';
 
@@ -57,4 +58,25 @@ describe('approved production quantity basis',()=>{
 
 it('rejects unrecognised quantity scope and missing evidence in the approval input',()=>{
  const c=fixture().context;expect(()=>createOrderGovernance(c,{quantityBasis:'size'})).toThrow('数量依据');expect(()=>createOrderGovernance(c,{quantityBasis:'invalid' as 'total',quantityBasisNote:'来源'})).toThrow('数量口径');
+});
+
+
+describe('one factory and shipment sample submission with actual size/count members',()=>{
+ function ready(){const f=fixture(),ids=f.released();f.receiveAndComplete(ids.productionId,ids.purchaseId);f.report(f.productionTask(ids.productionId),'pass');return{f,...ids,shipmentId:f.shipment(ids.productionId)};}
+ function create(x:ReturnType<typeof ready>,rows=[{size:'M',quantity:1},{size:'L',quantity:2}],quantity=3,shipmentId=x.shipmentId){return x.f.run({type:'fulfillment.samples.create',payload:{name:'Jacket',category:'成衣',form:'船样',unit:'件',quantity,size:'',sizeQuantities:rows,color:'Blue',location:'Sample room',role:'shipping',shipmentId,source:{kind:'orderLine',orderId:x.f.orderId,lineId:x.f.state.orderLines[0].id,productionId:x.productionId},fileIds:[],note:'Three separately made physical samples'}}).id!;}
+ it('records a single three-piece submission, rejects incomplete QC and requires customer approval plus business continuation',()=>{
+  const x=ready(),id=create(x),f=x.f;expect(f.state.fulfillment.samples.find(s=>s.id===id)).toMatchObject({quantity:3,available:3,size:'M 1 / L 2',sizeQuantities:[{size:'M',quantity:1},{size:'L',quantity:2}]});
+  const task=f.run({type:'fulfillment.qc.request',payload:{sampleId:id,source:{kind:'orderLine',orderId:f.orderId,lineId:f.state.orderLines[0].id,productionId:x.productionId},domain:'garment',kind:'sample',factory:'Factory',location:'Sample room',contact:'',due:'2026-10-13'}}).id!;f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'garment'}});
+  const report=(sizes:Array<{size:string;inspected:number}>)=>f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'garment',result:'pass',report:'SHIP-SET',opinion:'Actual samples inspected',measurements:[],sizeChecks:sizes.map(s=>({...s,result:'pass',evidence:'Reference and measurements checked'})),fileIds:[],reviewedAt:f.context.now}});
+  expect(()=>report([{size:'M',inspected:1}])).toThrow('全部尺码与件数');expect(()=>report([{size:'M',inspected:1},{size:'L',inspected:1}])).toThrow('全部尺码与件数');report([{size:'M',inspected:1},{size:'L',inspected:2}]);
+  const checks=()=>productionSampleRequirements(f.state,f.state.productions[0],'shipping',x.shipmentId);expect(checks()).toMatchObject([{ok:false,reason:'待客户确认'}]);f.run({type:'fulfillment.qc.confirm',payload:{id:task,result:'approved',note:'Customer accepted this actual set'}});expect(checks()).toMatchObject([{ok:false,reason:'待业务确认'}]);f.run({type:'fulfillment.qc.continue',payload:{id:task,note:'Release this batch'}});expect(checks()).toMatchObject([{ok:true,evidence:{sizeQuantities:[{size:'M',quantity:1},{size:'L',quantity:2}]}}]);
+  expect(()=>f.run({type:'fulfillment.samples.move',payload:{id,kind:'send',quantity:1,person:'Customer',location:'London',note:'Partial',sendPurpose:'confirmation'}})).toThrow('整组');
+  const replacement=create(x,[{size:'M',quantity:1}],1);expect(checks()).toMatchObject([{sampleId:replacement,ok:false}]);expect(f.state.fulfillment.qcReports.some(r=>r.report==='SHIP-SET')).toBe(true);
+ });
+ it('rejects wrong totals, duplicate or unrelated sizes, and a different shipment before making inventory',()=>{
+  const x=ready(),before=x.f.state.fulfillment.samples.length;expect(()=>create(x,[{size:'M',quantity:1}],3)).toThrow('合计');expect(()=>create(x,[{size:'M',quantity:1},{size:'M',quantity:2}],3)).toThrow('重复');expect(()=>create(x,[{size:'S',quantity:3}],3)).toThrow('本工厂');expect(()=>create(x,undefined,3,'other-shipment')).toThrow('出运');expect(x.f.state.fulfillment.samples).toHaveLength(before);
+ });
+ it('keeps PP as individual garments instead of applying the shipping-set exception',()=>{
+  const x=ready();expect(()=>x.f.run({type:'fulfillment.samples.create',payload:{name:'PP',category:'成衣',form:'样衣',unit:'件',quantity:3,size:'M',sizeQuantities:[{size:'M',quantity:3}],color:'Blue',location:'Sample room',role:'pp',source:{kind:'orderLine',orderId:x.f.orderId,lineId:x.f.state.orderLines[0].id,productionId:x.productionId},fileIds:[],note:''}})).toThrow('仅用于成衣船样');
+ });
 });

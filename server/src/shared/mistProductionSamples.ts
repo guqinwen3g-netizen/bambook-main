@@ -8,7 +8,7 @@ import { parseColors, type OrderLineBreakdown } from './mistOrderBreakdown';
 export type ProductionSampleEvidence = {
   sampleId: string; sampleCode: string; color: string; form: string;
   reportId: string; reportNumber: string; result: 'pass' | 'conditional'; opinion: string;
-  size?: string; quantity?: number; unit?: string;
+  size?: string; quantity?: number; unit?: string; sizeQuantities?:Array<{size:string;quantity:number}>;
 };
 export type ProductionSampleRequirement = {
   key: string; label: string; ok: boolean; sampleId?: string; sampleCode?: string; taskId?: string;
@@ -21,10 +21,11 @@ export function productionSampleRequirements(state: MistState, branch: MistProdu
   const f = state.fulfillment;
   let materialPlan='';
   if(role==='pp'){try{materialPlan=garmentMaterialFingerprint(state,branch.orderId,branch.lineId);}catch(error){if(!(error instanceof MistCommandError))throw error;materialPlan='missing-material-plan';}}
-  const samples = f.samples.filter(sample => sample.role === role && sample.source.kind === 'orderLine'
+  let samples = f.samples.filter(sample => sample.role === role && sample.source.kind === 'orderLine'
     && sample.source.orderId === branch.orderId && sample.source.lineId === branch.lineId && sample.source.productionId === branch.id
     && (role !== 'shipping' || sample.shipmentId === shipmentId)
     && (!materialPlan || sample.materialPlan === materialPlan));
+  if(role==='shipping'){const sets=samples.filter(sample=>sample.sizeQuantities?.length);if(sets.length)samples=[sets.at(-1)!];}
   const review = (sample: typeof samples[number], key: string, label: string): ProductionSampleRequirement => {
     const task = f.qcTasks.find(task => task.sampleId === sample.id && task.kind === 'sample'
       && task.source.kind === 'orderLine' && task.source.productionId === branch.id);
@@ -32,7 +33,7 @@ export function productionSampleRequirements(state: MistState, branch: MistProdu
     const current = !!task && task.state === 'reported' && !!report && report.result !== 'reject'
       && report.scopeRevision === (sample.qualityRevision || 1);
     const ok = current && task.businessConfirmation?.result === 'approved' && task.businessContinued?.reportId === report.id;
-    const evidence = current ? { sampleId: sample.id, sampleCode: sample.code, color: sample.color, form: sample.form, size: sample.size, quantity: sample.quantity, unit: sample.unit,
+    const evidence = current ? { sampleId: sample.id, sampleCode: sample.code, color: sample.color, form: sample.form, size: sample.size, quantity: sample.quantity, unit: sample.unit,...(sample.sizeQuantities?{sizeQuantities:structuredClone(sample.sizeQuantities)}:{}),
       reportId: report.id, reportNumber: report.report, result: report.result as 'pass' | 'conditional', opinion: report.opinion } : undefined;
     const external = state.orders.find(order => order.id === branch.orderId)?.governance?.contract.kind === 'external';
     const reason = !report ? '待QC' : report.scopeRevision !== (sample.qualityRevision || 1) ? '待复验' : report.result === 'reject' ? 'QC未通过' : !current ? '待QC'
