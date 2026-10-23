@@ -193,3 +193,11 @@ it.each(['fabric','garment'] as const)('shows size-check tables only for garment
   expect(queryByRole(host,'table',{name:'SIZE-DOMAIN · 生产尺码检查'})!==null).toBe(domain==='garment');
   expect(host.textContent).toContain('Shanghai warehouse');
 });
+
+
+it('checks only the actual shipping-set sizes and requires all actual pieces before a pass report',async()=>{
+ store.state!.fulfillment.samples.push({id:'ship-set',code:'SMP-SET',name:'Jacket',category:'成衣',form:'船样',unit:'件',quantity:3,available:3,size:'S 1 / M 2',sizeQuantities:[{size:'S',quantity:1},{size:'M',quantity:2}],color:'Blue',location:'Sample room',role:'shipping',shipmentId:'ship',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'},fileIds:[],note:'',createdAt:'2026-10-08T00:18:00Z'});
+ store.state!.fulfillment.productionFacts.push({productionId:'p',sizes:[{size:'S',quantity:120},{size:'M',quantity:300},{size:'L',quantity:180}],revision:1});store.state!.fulfillment.qcTasks.push(task('ship-qc',{sampleId:'ship-set',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'},state:'working',assigneeId:'qc-a',assignee:'QC甲'}));render('ship-qc');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+ expect(getByRole(host,'combobox',{name:'尺码 S · 本次结论'})).toBeTruthy();expect(getByRole(host,'combobox',{name:'尺码 M · 本次结论'})).toBeTruthy();expect(queryByRole(host,'combobox',{name:'尺码 L · 本次结论'})).toBeNull();
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'QC-SHIP');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'Actual submitted set checked');choose(getByRole(host,'combobox',{name:'尺码 S · 本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'spinbutton',{name:'尺码 S · 实际检查件数'}) as HTMLInputElement,'1');typeInto(getByRole(host,'textbox',{name:'尺码 S · 检查依据'}) as HTMLInputElement,'Checked');await click(getByRole(host,'button',{name:'提交报告'}));expect(host.textContent).toContain('请完成本组船样全部尺码与件数的QC');expect(store.run).not.toHaveBeenCalled();
+});

@@ -312,7 +312,7 @@ function QcReportCard({ report, domain, production, latest }: { report: Fulfillm
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {new Date(report.reviewedAt).toLocaleString()}</span></div>
     {report.location && <div className="mist-row"><span>{uiText("检查地点")}</span><span>{report.location}</span></div>}
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
-    {production && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
+    {(production||!!report.sizeChecks?.length) && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
     {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} unit={domain === 'fabric' ? '' : 'cm'} />}
     <RecordFiles key={report.id} ids={report.fileIds} />
   </div>;
@@ -328,8 +328,9 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const [measurements, setMeasurements] = React.useState<Measurement[]>([]), [ids, setIds] = React.useState<string[]>([]), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [confirming, setConfirming] = React.useState(false);
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
   const sampleConcerns = task.kind === 'production' ? fact?.release?.sampleChecks?.filter(sample => sample.result === 'conditional') || [] : [];
-  const garmentProduction = task.kind === 'production' && task.domain === 'garment';
-  const [sizeChecks, setSizeChecks] = React.useState<SizeCheck[]>((fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || []).map(size => ({ size: size.size, inspected: 0, result: '', evidence: '' })));
+  const shippingSet=state?.fulfillment.samples.find(sample=>sample.id===task.sampleId)?.sizeQuantities;
+  const garmentProduction = (task.kind === 'production'||!!shippingSet?.length) && task.domain === 'garment';
+  const [sizeChecks, setSizeChecks] = React.useState<SizeCheck[]>((shippingSet||(fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [])).map(size => ({ size: size.size, inspected: 0, result: '', evidence: '' })));
   const blocked = busy || saving || !!pending;
   const previous = state?.fulfillment.qcReports.filter(item => item.taskId === task.id) || [];
   const resultOptions = task.kind === 'production'
@@ -341,6 +342,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     if (!location.trim()) return '请填写实际检查地点';
     if (!opinion.trim()) return '请填写专业意见与影响范围';
     const checked = sizeChecks.filter(check => check.result);
+    if(shippingSet&&result!=='reject'&&shippingSet.some(size=>!checked.some(check=>check.size===size.size&&check.inspected===size.quantity)))return '请完成本组船样全部尺码与件数的QC';
     if (garmentProduction && !checked.length) return '请至少记录一个本次实际检查尺码';
     for (const check of checked) if (!(check.inspected > 0) || !check.evidence.trim()) return `尺码 ${check.size} 需填写实际检查件数和检查依据`;
     if (checked.some(check => check.result === 'reject') && result !== 'reject') return '存在尺码不通过时，总结论必须选择不通过';
@@ -379,7 +381,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <Field label={uiText("专业意见与影响范围")} full required><TextArea aria-label={uiText("专业意见与影响范围")} value={opinion} onChange={e => setOpinion(e.target.value)} /></Field>
           </FormGrid></CardBody>
         </Card>
-        {task.kind === 'production' && sizeChecks.length > 0 && <Card>
+        {garmentProduction && sizeChecks.length > 0 && <Card>
           <CardHeader title={uiText("本次实际尺码检查")} />
           <CardBody><div className="mist-col">{sizeChecks.map((check, index) => <FormGrid key={check.size}>
             <Field label={ui`尺码 ${check.size} · 本次结论`}><Select aria-label={ui`尺码 ${check.size} · 本次结论`} value={check.result} onChange={event => updateSize(index, { result: event.target.value })} options={[{ value: '', label: '本次未检' }, { value: 'pass', label: '通过' }, { value: 'reject', label: '不通过' }]} /></Field>

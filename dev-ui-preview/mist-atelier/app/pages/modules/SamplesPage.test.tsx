@@ -90,3 +90,12 @@ it.each(['fabric','garment'] as const)('follows the linked production domain whe
   expect((getByRole(host,'combobox',{name:'准确来源'}) as HTMLSelectElement).value).toBe('production:linked-production');
   expect((getByRole(host,'combobox',{name:'订单样品角色'}) as HTMLSelectElement).value).toBe(domain==='fabric'?'pioneer':'pp');
 });
+
+
+it('registers one factory/shipment sample set from actual size counts without copying the bulk allocation',async()=>{
+ const state=store.state!;state.orders.push({id:'ship-order',code:'SO-SHIP',type:'garment'} as any);state.orderLines.push({id:'ship-line',orderId:'ship-order',name:'Jacket',style:'JK',qty:600,unit:'件',price:1,img:'coat',made:0,qc:0});state.productions.push({id:'ship-production',orderId:'ship-order',lineId:'ship-line',order:'SO-SHIP',code:'PROD-SHIP',name:'Jacket',factory:'Factory',qty:600,pct:100,col:'done',img:'coat',due:'2026-12-01'});state.fulfillment.shipments.push({id:'ship',code:'SHP-SET',domain:'garment',state:'preparing',customerId:'buyer',lines:[{orderId:'ship-order',lineId:'ship-line',productionId:'ship-production',quantity:600}]} as any);
+ render(undefined,{section:'shipment:ship'});await act(async()=>getAllByRole(host,'button',{name:'新建样品',exact:true})[0].click());
+ const fill=async(name:RegExp,value:string)=>{const input=getByRole(host,'textbox',{name}) as HTMLInputElement|HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});};
+ await fill(/^名称/,'Jacket');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());expect(host.textContent).toContain('尺码与件数');expect(host.textContent).not.toContain('数量 / 长度');await fill(/^尺码与件数/,'S:1\nM:1\nL:1');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await fill(/^自由文本位置/,'Sample room');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'登记样品'}).click());
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.create',payload:expect.objectContaining({quantity:3,unit:'件',role:'shipping',shipmentId:'ship',sizeQuantities:[{size:'S',quantity:1},{size:'M',quantity:1},{size:'L',quantity:1}],source:{kind:'orderLine',orderId:'ship-order',lineId:'ship-line',productionId:'ship-production'}})});
+});

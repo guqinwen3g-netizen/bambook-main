@@ -1,5 +1,10 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '登记船样':'Register shipping samples',
+  '尺码与件数':'Sizes and piece counts',
+  '请完成本组船样全部尺码与件数的QC':'Inspect every size and piece in this shipping sample set',
+  '本批船样须按整组流转':'Move this shipping sample set together',
+
   '数量口径':'Quantity basis',
   '数量依据':'Quantity evidence',
   '按总量':'By total quantity',
