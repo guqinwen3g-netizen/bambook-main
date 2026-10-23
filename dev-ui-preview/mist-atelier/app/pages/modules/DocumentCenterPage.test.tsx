@@ -99,3 +99,13 @@ it('keeps users without document permission read-only and shows the letterhead s
   await click(getByRole(host,'tab',{name:/抬头与模板/}));
   expect(host.textContent).toContain('竹衍服饰');expect(host.textContent).toContain('印章图样、编号规则预览与打印打包尚未接入');
 });
+
+it('shows a pending CI as awaiting finance rather than paid and permits correction before any receipts',()=>{
+  store.state!.fulfillment.documents.push(doc('pending-ci','CI',{status:'issued',invoiceId:'pending-invoice'}));
+  store.state!.invoices.push({id:'pending-invoice',code:'CI-pending',orderId:'o',order:'SO-1',customer:'Cedar',amount:100,open:0,currency:'USD',due:'2026-11-01',financeStatus:'pending'});
+  render('pending-ci');
+  const detail=host.querySelector('[data-document-detail="pending-ci"]') as HTMLElement;
+  expect(detail.textContent).toContain('待财务确认');
+  expect(detail.textContent).not.toContain('CI 已有收款');
+  expect((getByRole(detail,'button',{name:'作废当前版本'}) as HTMLButtonElement).disabled).toBe(false);
+});

@@ -114,15 +114,9 @@ it('links a settlement to receipts in the selling account so order margins can u
  const fxTable=getByRole(host,'table',{name:'锁汇与结汇记录'});expect(fxTable.textContent).toContain('未对应到账 100.00 USD');
  await click('对应到账');expect(document.body.textContent).toContain('没有未结汇的到账');
 });
-it('BB-DEV-9 lists pending development billing requests and issues invoices linked back to the development',async()=>{
- const request={id:'rq',requestedAt:'2026-10-16T00:00:00Z',requestedBy:'业务员',billTo:'客户',lines:[{kind:'making' as const,refId:'s',versionId:'v',versionLabel:'R1-A-1',label:'制作费 · 米样 SMP-1',amount:120,currency:'EUR'}],totals:[{currency:'EUR',amount:120}],state:'pending' as const,invoiceIds:[]};
- store.value.state.devs=[{id:'dev-a',code:'DEV-A',name:'测试开发',style:'',owner:'业务员',customer:'客户',customerId:'customer',due:'2026-10-30',dueRel:'',stage:4,state:'待财务开票',tone:'warn',ver:'',fac:1,img:'clay',factory:'',sample:'',fabric:'',goal:'',currentVersionId:'',versionIds:[],values:{charged:true,factories:['工厂']} as any,fileIds:[],createdAt:'',updatedAt:'',billing:{makingFees:[],request}}];
- render();
- expect(host.textContent).toContain('开发费用待开票');expect(host.textContent).toContain('120.00 EUR');
- await click('开票');input('到期日','2026-11-15');await click('确认开票');
- const issued=store.value.state.invoices.find((invoice:any)=>invoice.devId==='dev-a');
- expect(issued).toMatchObject({code:expect.stringMatching(/^DI-\d{4}-0001$/),orderId:'',order:'DEV-A',customer:'客户',amount:120,open:120,currency:'EUR'});
- expect(store.value.state.devs[0].billing.request.state).toBe('invoiced');expect(host.textContent).not.toContain('开发费用待开票');
- act(()=>{route={view:'payment-vouchers',id:issued.id};render();});
- await click('打开开发案');expect(go).toHaveBeenCalledWith('development/detail','dev-a');
+it('confirms an already-issued development invoice without creating it for the business',async()=>{
+ store.value.state.invoices.push({id:'dev-invoice',code:'DI-2026-0001',orderId:'',order:'DEV-A',customer:'客户',customerId:'customer',amount:120,open:0,currency:'EUR',due:today(),devId:'dev-a',financeStatus:'pending'});
+ render();expect(host.textContent).toContain('开发发票待确认');await click('确认应收');
+ expect(store.value.run).toHaveBeenLastCalledWith({type:'finance.receivable.confirm',payload:{invoiceId:'dev-invoice'}});
+ expect(store.value.state.invoices.find((row:any)=>row.id==='dev-invoice')).toMatchObject({financeStatus:'confirmed',open:120});
 });
