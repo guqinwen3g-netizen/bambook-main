@@ -8,9 +8,11 @@ import { parseColors, type OrderLineBreakdown } from './mistOrderBreakdown';
 export type ProductionSampleEvidence = {
   sampleId: string; sampleCode: string; color: string; form: string;
   reportId: string; reportNumber: string; result: 'pass' | 'conditional'; opinion: string;
+  size?: string; quantity?: number; unit?: string;
 };
 export type ProductionSampleRequirement = {
   key: string; label: string; ok: boolean; sampleId?: string; sampleCode?: string; taskId?: string;
+  reason: string;
   evidence?: ProductionSampleEvidence;
 };
 const normalized = (value: string) => value.normalize('NFC').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -30,13 +32,23 @@ export function productionSampleRequirements(state: MistState, branch: MistProdu
     const current = !!task && task.state === 'reported' && !!report && report.result !== 'reject'
       && report.scopeRevision === (sample.qualityRevision || 1);
     const ok = current && task.businessConfirmation?.result === 'approved' && task.businessContinued?.reportId === report.id;
-    const evidence = current ? { sampleId: sample.id, sampleCode: sample.code, color: sample.color, form: sample.form,
+    const evidence = current ? { sampleId: sample.id, sampleCode: sample.code, color: sample.color, form: sample.form, size: sample.size, quantity: sample.quantity, unit: sample.unit,
       reportId: report.id, reportNumber: report.report, result: report.result as 'pass' | 'conditional', opinion: report.opinion } : undefined;
-    return { key, label, ok, sampleId: sample.id, sampleCode: sample.code, taskId: task?.id, evidence };
+    const external = state.orders.find(order => order.id === branch.orderId)?.governance?.contract.kind === 'external';
+    const reason = !report ? '待QC' : report.scopeRevision !== (sample.qualityRevision || 1) ? '待复验' : report.result === 'reject' ? 'QC未通过' : !current ? '待QC'
+      : task.businessConfirmation?.result === 'rejected' ? '未采用' : task.businessConfirmation?.result !== 'approved' ? external ? '待客户确认' : '待需求方确认'
+      : task.businessContinued?.reportId !== report.id ? '待业务确认' : '已确认';
+    return { key, label, ok, reason, sampleId: sample.id, sampleCode: sample.code, taskId: task?.id, evidence };
   };
   if (role !== 'pioneer') {
-    const rows = samples.map(sample => review(sample, 'sample', ''));
-    return [rows.find(row => row.ok) ?? rows[0] ?? { key: 'sample', label: '', ok: false }];
+    // Review only the standards actually registered, never invent one sample per production size.
+    // A new physical specimen of the same size/colour/form is the current submission;
+    // its pending or rejected review cannot be bypassed by an older approved specimen.
+    const latest = new Map<string, typeof samples[number]>();
+    for (const sample of samples) latest.set(JSON.stringify([normalized(sample.size), normalized(sample.color), normalized(sample.form)]), sample);
+    const colors = new Set([...latest.values()].map(sample => normalized(sample.color))), forms = new Set([...latest.values()].map(sample => normalized(sample.form)));
+    const rows = [...latest].map(([key, sample]) => review(sample, 'sample:' + key, [sample.size, colors.size > 1 ? sample.color : '', forms.size > 1 ? sample.form : ''].filter(Boolean).join(' · ')));
+    return rows.length ? rows : [{ key: 'sample', label: '', ok: false, reason: '未登记' }];
   }
 
   const line = state.orderLines.find(line => line.id === branch.lineId) as (MistState['orderLines'][number] & { breakdown?: OrderLineBreakdown }) | undefined;
@@ -53,7 +65,7 @@ export function productionSampleRequirements(state: MistState, branch: MistProdu
       if (color ? !sampleColors.some(item => normalized(item) === normalized(color)) : sampleColors.length) continue;
       latest.set(normalized(sample.form), sample);
     }
-    if (!latest.size) rows.push({ key: `sample:${normalized(color)}`, label: color, ok: false });
+    if (!latest.size) rows.push({ key: `sample:${normalized(color)}`, label: color, ok: false, reason: '未登记' });
     for (const [form, sample] of latest) rows.push(review(sample, `sample:${normalized(color)}:${form}`, [color, sample.form].filter(Boolean).join(' · ')));
   }
   return rows;
