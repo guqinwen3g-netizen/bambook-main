@@ -212,4 +212,6 @@ export const reviewedEnglish: Record<string, string> = {
   '汇率（CNY / {0}）': 'Rate (CNY / {0})',
   '分项核算': 'Itemized costing',
   '核算记录': 'Costing record', '历史报价参考': 'Historical quote reference', '保存核算': 'Save costing',
+  '条目「{0}」的来源版本尚未通过QC': 'The development source for "{0}" has not passed QC',
+  '更新报价状态': 'Update quotation status', '保存条目核算 {0}': 'Save line costing {0}',
 };

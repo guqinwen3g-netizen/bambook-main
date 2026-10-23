@@ -17,12 +17,13 @@ export function normalizeOrderLineSource(row:OrderLineSource):OrderLineSource{
 
 /** 返回第一个不满足的原因；满足返回 null。label 用于在多条目时指出是哪一条。 */
 export function orderLineSourceProblem(state:MistState,scope:OrderSourceScope,source:OrderLineSource,label:string):string|null{
-  let s=normalizeOrderLineSource(source);const at=`条目「${label}」`;
+  let s=normalizeOrderLineSource(source),activeProduct=false;const at=`条目「${label}」`;
   if(s.sourceProductId){
     const product=(state.market?.products||[]).find(row=>row.id===s.sourceProductId);
     if(!product)return `${at}引用的产品档案不存在`;
     if(product.status!=='active')return `${at}引用的产品档案已归档，不能用于新订单`;
     if(product.category!==scope.type)return `${at}引用的产品档案不是${TYPE_LABEL[scope.type]}，与订单类型不一致`;
+    activeProduct=true;
     // 产品档案自带的开发来源只能原样携带，不能改写成其他开发案或版本
     if(s.sourceDevId&&s.sourceDevId!==(product.sourceDevId||''))return `${at}的来源开发案与产品档案记录不一致`;
     if(s.sourceVersionId&&s.sourceVersionId!==(product.sourceVersionId||''))return `${at}的来源版本与产品档案记录不一致`;
@@ -38,7 +39,10 @@ export function orderLineSourceProblem(state:MistState,scope:OrderSourceScope,so
   const dev=state.devs.find(row=>row.id===s.sourceDevId);
   if(!dev)return `${at}引用的开发案不存在`;
   if(version.devId!==dev.id)return `${at}的来源版本 ${version.label} 不属于开发案 ${dev.code}`;
-  if(version.archivedAt)return `${at}的来源版本 ${dev.code} · ${version.label} 已归档，不能用于新订单`;
+  // Result archiving freezes the development evidence; an active catalog product
+  // continues to use that exact approved result. Direct development sourcing stays locked.
+  if(version.archivedAt&&!activeProduct)return `${at}的来源版本 ${dev.code} · ${version.label} 已归档，不能用于新订单`;
+  if(version.archivedAt&&(!version.qc||!['pass','conditional'].includes(version.qc.result)))return `${at}的来源版本尚未通过QC`;
   const latest=version.confirmations.at(-1);
   if(latest?.result!=='approved')return `${at}的来源版本 ${dev.code} · ${version.label} 尚未获得客户认可（${!latest?'尚无需求方确认':latest.result==='needs_adjustment'?'需求方要求调整':'需求方未认可'}）`;
   if(developmentDomain(dev.values)!==scope.type)return `${at}的来源开发案是${TYPE_LABEL[developmentDomain(dev.values)]}，与${TYPE_LABEL[scope.type]}订单不一致`;

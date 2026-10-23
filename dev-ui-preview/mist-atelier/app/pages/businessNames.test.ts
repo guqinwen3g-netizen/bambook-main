@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
-import { purchaseName, productionName, stockName } from './businessNames';
+import { businessEventText, purchaseName, productionName, stockName } from './businessNames';
 
 describe('business identity is separate from contractual requirements', () => {
+  it('presents quotation audit actions without rewriting raw identifiers or ordinary notes',()=>{
+    const raw='保存条目专业核算 STYLE-UNIT-1 / 00000000-0000-4000-8000-000000000001（人工依据，成本待审批核实）';
+    expect(businessEventText(raw)).toBe('保存条目核算 STYLE-UNIT-1');expect(raw).toContain('00000000');
+    expect(businessEventText('market.quotation.status')).toBe('更新报价状态');
+    expect(businessEventText('客户确认保留原色')).toBe('客户确认保留原色');
+  });
   function fixture() {
     const state = createMistState({id:()=> 'x',now:'2026-10-23T00:00:00Z',actorName:'经办人'},'empty');
     state.orderLines.push({id:'line',orderId:'order',style:'FAB-1',name:'订单品名'} as any);

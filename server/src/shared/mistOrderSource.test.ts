@@ -88,7 +88,6 @@ describe('BB-ORD-2 order line source is written once and validated on the server
 it.each([
  ['none','g',/尚未获得客户认可/],
  ['other','gb',/属于其他客户/],
- ['arch','g',/已归档/],
  ['missing','g',/开发版本不存在/],
  ['fab','f',/面料，与成衣订单不一致/],
 ])('validates the development behind an active product archive: %s',(versionId,devId,message)=>{
@@ -103,4 +102,20 @@ it('rechecks a product-backed development approval at submission and still allow
  f.state.versions.find(v=>v.id==='ok')!.confirmations.push({result:'needs_adjustment'} as never);
  expect(()=>f.run({type:'order.governance.submit',payload:{orderId:id}})).toThrow(/尚未获得客户认可/);
  const fresh=fixture();expect(fresh.create({sourceProductId:'pfab'},{type:'fabric'}).orderId).toBeTruthy();
+});
+it.each(['pass','conditional'] as const)('uses an active product from an approved archived %s development without changing its evidence',result=>{
+ const f=fixture(),product=f.state.market.products.find(p=>p.id==='p')!,version=f.state.versions.find(v=>v.id==='arch')!;
+ product.sourceVersionId=version.id;version.qc={result} as never;
+ const beforeVersion=structuredClone(version),id=f.create({sourceProductId:product.id,sourceDevId:'g',sourceVersionId:version.id}).orderId!;
+ expect(f.run({type:'order.governance.submit',payload:{orderId:id}})).toMatchObject({orderId:id});
+ expect(f.run({type:'order.governance.decide',payload:{id,decision:'approved',note:'核对产品来源'}},{...f.c,actorId:'leader'})).toMatchObject({orderId:id});
+ expect(f.state.versions.find(v=>v.id===version.id)).toEqual(beforeVersion);
+ expect(lineOf(f,id)).toMatchObject({sourceProductId:product.id,sourceDevId:'g',sourceVersionId:version.id});
+ expect(()=>f.create({sourceDevId:'g',sourceVersionId:version.id})).toThrow(/已归档/);
+});
+it('keeps an archived product source blocked without valid QC or with withdrawn customer approval',()=>{
+ const f=fixture(),product=f.state.market.products.find(p=>p.id==='p')!,version=f.state.versions.find(v=>v.id==='arch')!;product.sourceVersionId=version.id;
+ expect(()=>f.create({sourceProductId:product.id})).toThrow();version.qc={result:'reject'} as never;
+ expect(()=>f.create({sourceProductId:product.id})).toThrow();version.qc={result:'pass'} as never;version.confirmations.push({result:'needs_adjustment'} as never);
+ expect(()=>f.create({sourceProductId:product.id})).toThrow(/尚未获得客户认可/);
 });

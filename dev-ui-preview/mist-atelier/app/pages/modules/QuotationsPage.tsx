@@ -104,7 +104,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
     title: next === 'Sent' ? `登记 ${q.code} 已发送给客户` : next === 'Accepted' ? `登记客户接受 ${q.code}` : next === 'Rejected' ? `登记客户未接受 ${q.code}` : `标记 ${q.code} 已失效`,
     submitLabel: '登记',
     initialValues: { evidence: '' },
-    fields: [{ key: 'evidence', label: next === 'Sent' ? '发送方式与对象' : '客户反馈或依据', type: 'textarea', required: true, hint: '登记已经发生的事实与来源，例如邮件、会议纪要；此操作不会代为发送邮件。' }],
+    fields: [{ key: 'evidence', label: next === 'Sent' ? '发送方式与对象' : '客户反馈或依据', type: 'textarea', required: true }],
     submit: v => run({ type: 'market.quotation.status', payload: { id: q.id, status: next, evidence: String(v.evidence ?? '') } }),
   });
   const decideSpec = (q: MarketQuotation, decision: 'approved' | 'rejected'): ModuleEditorSpec => ({
@@ -125,13 +125,12 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
     const choices = lineChoices(q), domain = domainOf(q);
     return {
       title: `从 ${q.code} 创建订单`, submitLabel: '创建订单草稿',
-      description: '只使用客户已接受的这一版报价；勾选本次转单的条目（须同一板块），数量、单位与单价原样带入订单草稿。未勾选的条目之后可再转另一张订单，或标记不再转。',
       initialValues: { type: domain, due: '', ownerId: defaultMemberId(members, session.user?.id), ...Object.fromEntries(choices.map(c => ['line:' + c.line.id, !c.blocked && (!c.family || c.family === domain)])) },
       fields: [
-        ...choices.map(c => ({ key: 'line:' + c.line.id, label: `转入：${c.line.name} · ${c.line.qty} ${c.line.unit} × ${c.line.price}`, type: 'checkbox' as const, readonly: !!c.blocked, hint: c.blocked || (c.family ? (c.family === 'fabric' ? '面料条目' : '成衣条目') : undefined) })),
+        ...choices.map(c => ({ key: 'line:' + c.line.id, label: `转入：${c.line.name} · ${c.line.qty} ${c.line.unit} × ${c.line.price}`, type: 'checkbox' as const, readonly: !!c.blocked, hint: c.blocked || undefined })),
         { key: 'type', label: '订单类型', type: 'select', required: true, options: [{ value: 'garment', label: '成衣订单' }, { value: 'fabric', label: '面料订单' }] },
         { key: 'due', label: '本次订单交期', type: 'date', required: true },
-        { key: 'ownerId', label: '业务负责人', type: 'select', required: true, options: memberSelectOptions(members), hint: '按账号选择本公司成员' },
+        { key: 'ownerId', label: '业务负责人', type: 'select', required: true, options: memberSelectOptions(members) },
       ],
       submit: async v => { const lineIds = checkedLines(v); if (!lineIds.length) throw new Error('请至少勾选一个条目'); const r = await run({ type: 'market.quotation.convert', payload: { id: q.id, type: v.type as QuoteDomain, due: String(v.due ?? ''), ownerId: String(v.ownerId ?? ''), lineIds } }); go('orders/detail', String((r.result as { orderId?: string }).orderId)); },
     };
