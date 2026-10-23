@@ -20,7 +20,7 @@ type Domain = 'fabric' | 'garment';
 type StateFilter = 'all' | 'available' | 'isolated' | 'cleared';
 type SourceFilter = 'all' | 'purchase' | 'claimReturn';
 const DOMAIN_LABEL: Record<Domain, string> = { fabric: '面料库存', garment: '成衣库存' };
-const MOVE_LABEL: Record<string, string> = { receive: '实际入库', issue: '出库', return: '按原出库退回', move: '移位', lock: '隔离锁定', unlock: '批准解锁', scrap: '报废出库' };
+const MOVE_LABEL: Record<string, string> = { receive: '实际入库', issue: '出库', return: '按原出库退回', move: '移位', lock: '隔离锁定', unlock: '批准解锁', scrap: '报废出库', reject: '转为拒收' };
 const round = (value: number) => Math.round(value * 10000) / 10000;
 const isReturn = (stock: FulfillmentStock) => stock.sourceKind === 'claimReturn';
 
