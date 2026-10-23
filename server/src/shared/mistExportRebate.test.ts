@@ -12,7 +12,8 @@ function setup() {
   const customs = state.fulfillment.customs.find(c => state.fulfillment.shipments.find(s => s.id === c.shipmentId)?.state === 'departed')!;
   const po = { ...state.fulfillment.purchases[0], id: 'po-017', code: 'PC-017', orderId: order.id, lineId: line.id, kind: 'finished' as const, state: 'approved' as const };
   state.fulfillment.purchases.push(po);
-  const bill = (id: string, invoiceNo: string, amount: number, taxAmount: number, extra: Partial<SupplierBill> = {}): SupplierBill => ({ id, code: 'AP-' + id, supplierId: po.supplierId, supplier: po.supplier, invoiceNo, invoiceDate: '2026-10-10', currency: 'CNY', amount, taxAmount, taxRate: '13%', lines: [{ purchaseId: po.id, purchaseCode: po.code, kind: 'finished', amount }], terms: [], due: '2026-11-10', dueBasis: '月结', fileIds: [], note: '', state: 'open', registeredAt: ctx.now, registeredBy: '林舒', ...extra });
+  const bill = (id: string, invoiceNo: string, amount: number, taxAmount: number, extra: Partial<SupplierBill> = {}): SupplierBill => ({ invoiceType:'vat-special',id, code: 'AP-' + id, supplierId: po.supplierId, supplier: po.supplier, invoiceNo, invoiceDate: '2026-10-10', currency: 'CNY', amount, taxAmount, taxRate: '13%', lines: [{ purchaseId: po.id, purchaseCode: po.code, kind: 'finished', amount }], terms: [], due: '2026-11-10', dueBasis: '月结', fileIds: ['vat-original'], note: '', state: 'open', registeredAt: ctx.now, registeredBy: '林舒', ...extra });
+  state.files.push({id:'vat-original',name:'supplier-invoice.pdf',mimeType:'application/pdf',size:10,storageKey:'test/vat-original',createdAt:ctx.now});
   state.payables!.bills.push(bill('b1', '0451001', 113000, 13000), bill('b2', '0451002', 56500, 6500), bill('b3', '0451003', 10000, 0), bill('b4', '0451004', 1130, 130, { currency: 'USD' }));
   state.receipts.push({ id: 'r-tax', code: 'BR-TAX-01', date: '2026-10-16', payer: '国家金库上海分库', amount: 19500, remaining: 19500, currency: 'CNY', ref: '出口退税', state: 'unmatched' });
   const run = (command: MistCommand) => { const out = applyMistCommand(state, command, ctx); state = out.state; return out.result as { id: string }; };
@@ -51,7 +52,7 @@ describe('出口退税', () => {
     const f = setup();
     expect(() => f.run({ type: 'rebate.claim.file', payload: { customsId: f.customs.id, billIds: ['b1'], filedAt: '2026-10-16', batchRef: 'SB-01' } })).toThrow('请先登记退税率版本');
     const rate = f.run({ type: 'rebate.rate.save', payload: { hsCode: '6203.31', rate: '13', effectiveFrom: '2020-03-20', basis: '财政部 税务总局公告 2020 年第 15 号' } }).id;
-    // 候选只含本票订单的人民币专票；普票（税额 0）与外币票不在其中。
+    // 候选只含本票订单的人民币专票；零税额票据与外币票不在其中。
     expect(rebateCandidateBills(f.state, f.customs).map(b => b.id)).toEqual(['b1', 'b2']);
     expect(() => f.run({ type: 'rebate.claim.file', payload: { customsId: f.customs.id, billIds: ['b3'], filedAt: '2026-10-16', batchRef: 'SB-01' } })).toThrow('税额为零');
     expect(() => f.run({ type: 'rebate.claim.file', payload: { customsId: f.customs.id, billIds: ['b4'], filedAt: '2026-10-16', batchRef: 'SB-01' } })).toThrow('不是人民币');
@@ -138,4 +139,23 @@ describe('出口退税', () => {
     expect(orderRebate(f.state, other.orderId).expected).toBe(0);
     expect(() => f.run({ type: 'rebate.rate.void', payload: { id: r9, reason: 'x' } })).toThrow('已按该版本申报');
   });
+});
+
+it('does not treat a taxed ordinary invoice or an unclassified bill as a VAT special invoice',()=>{
+ const f=setup();
+ f.run({type:'rebate.rate.save',payload:{hsCode:'6203.31',rate:'13',effectiveFrom:'2020-03-20',basis:'文库'}});
+ const bill=f.state.payables!.bills.find(b=>b.id==='b1')!;
+ const file=()=>f.run({type:'rebate.claim.file',payload:{customsId:f.customs.id,billIds:[bill.id],filedAt:'2026-10-16',batchRef:'NEGATIVE'}});
+ bill.invoiceType='vat-general';expect(rebateCandidateBills(f.state,f.customs).some(b=>b.id===bill.id)).toBe(false);expect(file).toThrow('未核对为增值税专用发票');
+ delete bill.invoiceType;expect(rebateCandidateBills(f.state,f.customs).some(b=>b.id===bill.id)).toBe(false);expect(file).toThrow('未核对为增值税专用发票');
+ bill.invoiceType='vat-special';bill.fileIds=[];expect(file).toThrow('缺少专票原件');
+});
+
+it('freezes the source invoice category and cancellation after filing until the declaration is withdrawn',()=>{
+ const f=setup();f.run({type:'rebate.rate.save',payload:{hsCode:'6203.31',rate:'13',effectiveFrom:'2020-03-20',basis:'核对文库'}});
+ const claim=f.run({type:'rebate.claim.file',payload:{customsId:f.customs.id,billIds:['b1'],filedAt:'2026-10-16',batchRef:'REFUND-1'}}).id;
+ const classify={type:'payable.bill.classify' as const,payload:{id:'b1',invoiceType:'vat-general' as const,reason:'更正票种',fileIds:['vat-original']}};
+ expect(()=>f.run(classify)).toThrow('退税申报');expect(()=>f.run({type:'payable.bill.void',payload:{id:'b1',reason:'更正'}})).toThrow('退税申报');
+ f.run({type:'rebate.claim.withdraw',payload:{id:claim,reason:'更正进货凭证'}});f.run(classify);
+ expect(f.state.payables!.bills.find(b=>b.id==='b1')!.invoiceType).toBe('vat-general');expect(rebateCandidateBills(f.state,f.customs).some(b=>b.id==='b1')).toBe(false);
 });

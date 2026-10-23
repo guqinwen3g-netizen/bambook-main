@@ -98,7 +98,7 @@ const shipmentOrderIds = (root: Pick<MistState, 'fulfillment'>, shipmentId: stri
 export function rebateCandidateBills(root: Root, customs: FulfillmentCustoms): SupplierBill[] {
   const orders = new Set(shipmentOrderIds(root, customs.shipmentId)), purchases = root.fulfillment?.purchases || [];
   const used = new Set(liveRebateClaims(root).flatMap(c => c.lines.map(l => l.billId)));
-  return (root.payables?.bills || []).filter(b => b.state === 'open' && b.currency === 'CNY' && mistMoneyMinor(b.taxAmount) > 0 && !used.has(b.id)
+  return (root.payables?.bills || []).filter(b => b.state === 'open' && b.invoiceType==='vat-special' && b.fileIds.some(id=>root.files.some(file=>file.id===id)) && b.currency === 'CNY' && mistMoneyMinor(b.taxAmount) > 0 && !used.has(b.id)
     && b.lines.some(l => orders.has(purchases.find(p => p.id === l.purchaseId)?.orderId || '')));
 }
 /** 最大余数法分配（分），合计等于 total。 */
@@ -231,7 +231,7 @@ export function applyExportRebateCommand(root: Root, command: ExportRebateComman
         const bill = candidates.find(b => b.id === id);
         if (!bill) {
           const any = (root.payables?.bills || []).find(b => b.id === id);
-          fail(!any ? '发票不存在' : any.state !== 'open' ? `${any.invoiceNo} 已作废` : any.currency !== 'CNY' ? `${any.invoiceNo} 不是人民币发票` : mistMoneyMinor(any.taxAmount) <= 0 ? `${any.invoiceNo} 税额为零，不是可退税的增值税专用发票` : liveRebateClaims(root).some(cl => cl.lines.some(l => l.billId === id)) ? `${any.invoiceNo} 已被其他退税申报占用` : `${any.invoiceNo} 不属于本票出运的订单采购`, 'PRECONDITION');
+          fail(!any ? '发票不存在' : any.state !== 'open' ? `${any.invoiceNo} 已作废` : any.currency !== 'CNY' ? `${any.invoiceNo} 不是人民币发票` : mistMoneyMinor(any.taxAmount) <= 0 ? `${any.invoiceNo} 税额为零，不是可退税的增值税专用发票` : any.invoiceType!=='vat-special' ? `${any.invoiceNo} 未核对为增值税专用发票` : !any.fileIds.some(id=>root.files.some(file=>file.id===id)) ? `${any.invoiceNo} 缺少专票原件` : liveRebateClaims(root).some(cl => cl.lines.some(l => l.billId === id)) ? `${any.invoiceNo} 已被其他退税申报占用` : `${any.invoiceNo} 不属于本票出运的订单采购`, 'PRECONDITION');
         }
         return bill;
       });

@@ -71,7 +71,7 @@ export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext
  const settlementId=run({type:'payable.settlement.submit',payload:{purchaseId,receiptIds:state.fulfillment.receipts.filter(r=>r.purchaseId===purchaseId).map(r=>r.id),final:true,note:'本批全部验收，按合同结算',fileIds:[contractFile]}},'sales',25).id!;
  run({type:'payable.settlement.confirm',payload:{id:settlementId,prepaymentApplied:0,note:'数量、单价与验收凭据一致'}},'finance',26);
  const vatFile=proof('vat-invoice',purchaseId,`${order.code} 供应商专票.pdf`,26);
- const billId=run({type:'payable.bill.register',payload:{supplierId:supplier.id,invoiceNo:`310026${month}${family==='fabric'?'01':'02'}8264`,invoiceDate:date(26),currency:'CNY',amount:payAmount,taxAmount:Number((payAmount*13/113).toFixed(2)),taxRate:'13%',lines:[{purchaseId,amount:payAmount,settlementId}],due:date(28),dueBasis:'本批交付验收后付清',fileIds:[vatFile]}},'finance',26).id!;
+ const billId=run({type:'payable.bill.register',payload:{invoiceType:'vat-special',supplierId:supplier.id,invoiceNo:`310026${month}${family==='fabric'?'01':'02'}8264`,invoiceDate:date(26),currency:'CNY',amount:payAmount,taxAmount:Number((payAmount*13/113).toFixed(2)),taxRate:'13%',lines:[{purchaseId,amount:payAmount,settlementId}],due:date(28),dueBasis:'本批交付验收后付清',fileIds:[vatFile]}},'finance',26).id!;
  const requestId=run({type:'payable.request.submit',payload:{purpose:'bill',supplierId:supplier.id,currency:'CNY',lines:[{billId,amount:payAmount}],reason:'本批结算与供应商发票均已确认',fileIds:[vatFile]}},'sales',27).id!;
  run({type:'payable.request.decide',payload:{id:requestId,decision:'approved',note:'批准按已确认票据付款'}},'reviewer',27);
  const reference=`PAY-${order.code}`;

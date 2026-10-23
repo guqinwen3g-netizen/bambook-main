@@ -154,4 +154,10 @@ export const reviewedEnglish: Record<string, string> = {
   '出运前累计收款（%）': 'Cumulative payment before shipment (%)', '出运前累计收款': 'Payment before shipment',
   '{0}：请确认合同出运前累计收款比例': '{0}: Confirm the agreed pre-shipment payment percentage',
   '{0}：出运前收款不足，尚差 {1} {2}': '{0}: Pre-shipment payment is short by {1} {2}',
+  '核对票种':'Verify invoice type','票种核对记录':'Invoice type history','票种未保存':'Invoice type was not saved',
+  '增值税专用发票':'VAT special invoice','增值税普通发票':'VAT ordinary invoice','其他票据':'Other document',
+  '请选择发票类型':'Select invoice type','上传发票原件':'Upload invoice original','请上传增值税专票原件':'Upload the VAT special invoice original',
+  '发票类型无效':'Invalid invoice type','票种核对需要真实操作账号':'Sign in to verify invoice type','已作废票据不能核对票种':'Voided invoices cannot be reclassified',
+  '增值税专票须按人民币登记':'Record Chinese VAT special invoices in CNY','{0} 未核对为增值税专用发票':'{0} has not been verified as a VAT special invoice','{0} 缺少专票原件':'{0} is missing its VAT invoice original',
+  '票据已用于退税申报 {0}，请先处理原申报':'This invoice is used in refund claim {0}; resolve that claim first',
 };

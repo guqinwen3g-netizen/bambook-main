@@ -576,3 +576,26 @@ describe('付款收尾：不等票付款、合同取消预付、历史补登', (
     expect(prepaymentPlans(s)[0]).toMatchObject({ paid: 0, available: 6000 });
   });
 });
+
+describe('supplier invoice category evidence',()=>{
+ it('records an ordinary taxed invoice without making it a VAT special invoice',()=>{
+  const f=demo();const result=run(f.state,bill(f.po1.supplierId,[{purchaseId:f.po1.id,amount:1130}],{invoiceType:'vat-general',taxAmount:130}));
+  expect(result.state.payables!.bills[0]).toMatchObject({invoiceType:'vat-general',amount:1130,taxAmount:130});
+  expect(mistCommandPermission({type:'payable.bill.classify',payload:{id:'b',invoiceType:'vat-special',fileIds:[],reason:'核对原件'}})).toBe('invoices:write');
+ });
+ it('requires a workspace original for special invoice registration and later classification',()=>{
+  const f=demo();expect(()=>run(f.state,bill(f.po1.supplierId,[{purchaseId:f.po1.id,amount:1130}],{invoiceType:'vat-special',taxAmount:130}))).toThrow('专票原件');
+  const result=run(f.state,bill(f.po1.supplierId,[{purchaseId:f.po1.id,amount:1130}],{taxAmount:130}));const id=result.result.id!;
+  expect(()=>run(result.state,{type:'payable.bill.classify',payload:{id,invoiceType:'vat-special',reason:'原件核对',fileIds:['foreign-file']}})).toThrow('附件');
+  expect(()=>run(result.state,{type:'payable.bill.classify',payload:{id,invoiceType:'vat-special',reason:'原件核对',fileIds:[]}})).toThrow('专票原件');
+ });
+ it('preserves a paid bill and its allocation while appending invoice category evidence',()=>{
+  const f=demo(),first=run(f.state,bill(f.po1.supplierId,[{purchaseId:f.po1.id,amount:1130}],{taxAmount:130})),id=first.result.id!;
+  const original=structuredClone(first.state.payables!.bills[0]);first.state.files.push({id:'vat-proof',name:'invoice.pdf',mimeType:'application/pdf',size:10,storageKey:'test/vat-proof',createdAt:f.c.now});
+  first.state.payables!.allocations.push({id:'allocated',billId:id,supplierPaymentId:'historical',amount:1130,at:f.c.now,actor:'财务'} as any);
+  const allocations=structuredClone(first.state.payables!.allocations);
+  const after=run(first.state,{type:'payable.bill.classify',payload:{id,invoiceType:'vat-special',reason:'核对票号、日期及税额',fileIds:['vat-proof']}}).state;
+  expect(after.payables!.allocations).toEqual(allocations);expect(after.payables!.bills[0]).toMatchObject({...original,invoiceType:'vat-special',fileIds:['vat-proof']});expect(after.payables!.bills[0].invoiceTypeHistory).toEqual([expect.objectContaining({invoiceType:'vat-special',reason:'核对票号、日期及税额',fileIds:['vat-proof'],actor:'财务-林'})]);
+ });
+
+});

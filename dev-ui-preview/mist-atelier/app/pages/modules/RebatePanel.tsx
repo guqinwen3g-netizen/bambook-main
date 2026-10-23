@@ -28,16 +28,16 @@ export function rebateSummary(state: MistState, c: FulfillmentCustoms) {
 export function RebateRatesCard({ state, canWrite, locked, open, run }: { state: MistState; canWrite: boolean; locked: boolean; open: (spec: ModuleEditorSpec) => void; run: Run }) {
   const rates = [...readRebate(state).rates].sort((a, b) => Number(!!a.voided) - Number(!!b.voided) || a.hsCode.localeCompare(b.hsCode) || b.effectiveFrom.localeCompare(a.effectiveFrom));
   const used = new Set(readRebate(state).claims.filter(c => c.state !== 'withdrawn').map(c => c.rateId));
-  const add: ModuleEditorSpec = { title: '登记退税率版本', submitLabel: '登记', description: '按出口退税率文库或财政部 / 税务总局公告登记；同一编码调整税率时另登记新版本，按报关单出口日期自动适用。',
-    fields: [{ ...field('hsCode', 'HS 编码'), hint: '4–10 位，可只登记前 6 或 8 位，按最长前缀匹配。' }, { ...field('rate', '退税率（%）'), hint: '如 13、9；0 表示不退税。' }, field('effectiveFrom', '生效日（按出口日期）', 'date'), field('basis', '依据（公告文号 / 文库版本）')],
+  const add: ModuleEditorSpec = { title: '登记退税率版本', submitLabel: '登记',
+    fields: [{ ...field('hsCode', 'HS 编码'), hint: '4–10 位数字' }, { ...field('rate', '退税率（%）'), hint: '如 13、9；0 表示不退税。' }, field('effectiveFrom', '生效日（按出口日期）', 'date'), field('basis', '依据（公告文号 / 文库版本）')],
     initialValues: { hsCode: '', rate: '13', effectiveFrom: today(), basis: '' },
     submit: v => run({ type: 'rebate.rate.save', payload: { hsCode: text(v, 'hsCode'), rate: text(v, 'rate'), effectiveFrom: text(v, 'effectiveFrom'), basis: text(v, 'basis') } }) };
   const voidSpec = (r: RebateRate): ModuleEditorSpec => ({ title: `作废 HS ${r.hsCode} · ${r.rate}%`, submitLabel: '作废', description: '只能作废尚未被申报使用的版本；作废后保留记录。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'rebate.rate.void', payload: { id: r.id, reason: text(v, 'reason') } }) });
   return <Card>
-    <CardHeader title={ui`退税率版本 · ${rates.filter(r => !r.voided).length}`} sub={uiText("按 HS 编码与生效日适用；登记有误的版本在使用前作废。")}
+    <CardHeader title={ui`退税率版本 · ${rates.filter(r => !r.voided).length}`}
       tools={canWrite ? <TextLink icon={Plus} onClick={() => { if (!locked) open(add); }}>{uiText("登记退税率")}</TextLink> : undefined} />
-    <DataTable ariaLabel={uiText("退税率版本")} rows={rates} rowKey={r => r.id} empty={<EmptyState icon={Landmark} title={uiText("还没有退税率")} description={uiText("财务登记报关 HS 编码的退税率后，系统按出口日期计算应退税额。")} compact />} columns={[
+    <DataTable ariaLabel={uiText("退税率版本")} rows={rates} rowKey={r => r.id} empty={<EmptyState icon={Landmark} title={uiText("还没有退税率")} compact />} columns={[
       { key: 'hs', header: 'HS 编码', width: '120px', render: r => <Mono>{r.hsCode}</Mono> },
       { key: 'rate', header: '退税率', width: '80px', align: 'right', render: r => `${r.rate}%` },
       { key: 'from', header: '生效日', width: '110px', render: r => r.effectiveFrom },
@@ -55,10 +55,9 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
   const billPlan = (id: string) => plan?.bills.find(r => r.bill.id === id);
   const rateText = byItems ? (plan?.rates.length ? `按商品项：${[...new Set(plan.rates.map(r => r.rate + '%'))].join(' / ')}` : '按商品项（待登记）') : rate ? `${rate.rate}% · ${rate.effectiveFrom} 起` : '未登记';
   if (!claim) {
-    const reason = !canWrite ? '需要财务开票权限' : c.status !== 'cleared' ? '报关单尚未海关放行' : !exportDate ? '出运尚未登记实际离港（出口日期）' : !candidates.length ? '没有可配单的增值税专用发票（本票订单的人民币专票，财务在应付登记）' : plan?.blockers.length ? plan.blockers[0] : false;
-    const fileSpec: ModuleEditorSpec = { title: `登记退税申报 · 报关单 ${c.declarationNo}`, submitLabel: '登记申报',
-      description: byItems ? `出口日期 ${exportDate} · 按报关商品项逐项适用退税率（专票行 → 采购合同 → 订单条目 → 商品项 HS）；不在本报关单商品项中的行不计退税。勾选本次配单的增值税专用发票，在电子税务局申报后再登记。`
-        : `出口日期 ${exportDate} · HS ${c.hsCode} 适用 ${rate?.rate}%（${rate?.basis}）。勾选本次配单的增值税专用发票；应退税额 = 计税金额 × 退税率。在电子税务局申报后再登记。`,
+    const reason = !canWrite ? '需要财务开票权限' : c.status !== 'cleared' ? '报关单尚未海关放行' : !exportDate ? '出运尚未登记实际离港（出口日期）' : !candidates.length ? '暂无可配专票，请先核对供应商票据' : plan?.blockers.length ? plan.blockers[0] : false;
+    const fileSpec: ModuleEditorSpec = { title: '登记退税申报', submitLabel: '登记申报',
+      description: `${c.declarationNo} · ${cny(preview)}`,
       fields: [...candidates.map(b => { const r = billPlan(b.id); return { ...field('bill:' + b.id, `${b.invoiceNo} · ${b.supplier} · 计税 ${cny((r?.taxable ?? rebateBillTaxableMinor(b)) / 100)} → 退 ${cny((r?.rebate ?? 0) / 100)}${r?.excluded ? `（${cny(r.excluded / 100)} 不在商品项中不计）` : ''}`, 'checkbox', false) }; }),
         field('filedAt', '申报日', 'date'), field('batchRef', '申报批次号 / 受理回执号'), field('note', '备注', 'textarea', false)],
       initialValues: { ...Object.fromEntries(candidates.map(b => ['bill:' + b.id, true])), filedAt: today(), batchRef: '', note: '' },
@@ -81,18 +80,18 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
   }
   const totals = rebateClaimTotals(claim), live = claim.receipts.filter(r => !r.reversed);
   const receipts = state.receipts.filter(r => r.currency === 'CNY' && r.remaining > 0);
-  const approveSpec: ModuleEditorSpec = { title: `登记税务核准 · ${claim.code}`, submitLabel: '登记核准', description: `应退税额 ${cny(claim.expected)}。按税务机关审核通知登记核准额；与应退不同须写原因。`,
+  const approveSpec: ModuleEditorSpec = { title: '登记税务核准', submitLabel: '登记核准', description: `${claim.code} · 应退 ${cny(claim.expected)}`,
     fields: [field('date', '核准日', 'date'), field('amount', '核准退税额（CNY）', 'number'), field('ref', '审核通知 / 批复文号'), field('reason', '差异原因（核准额不同时必填）', 'textarea', false)],
     initialValues: { date: today(), amount: claim.expected, ref: '', reason: '' },
     submit: v => run({ type: 'rebate.claim.approve', payload: { id: claim.id, date: text(v, 'date'), amount: number(v, 'amount'), ref: text(v, 'ref'), reason: text(v, 'reason') } }) };
-  const receiveSpec: ModuleEditorSpec = { title: `退税到账勾稽 · ${claim.code}`, submitLabel: '勾稽到账', description: `待到账 ${cny(totals.open)}。退税款须先按银行水单导入到账流水；勾稽会占用该笔流水余额。`,
+  const receiveSpec: ModuleEditorSpec = { title: '退税到账勾稽', submitLabel: '勾稽到账', description: `${claim.code} · 待到账 ${cny(totals.open)}`,
     fields: [field('receiptId', '到账流水（人民币）', 'select', true, [emptyOption, ...receipts.map(r => ({ value: r.id, label: `${r.code} · ${r.date.slice(0, 10)} · ${r.payer} · 余 ${cny(r.remaining)}` }))]), field('amount', '勾稽金额（CNY）', 'number'),
       { ...field('settle', '少收也按本次结清', 'checkbox', false), hint: '税务机关扣抵等原因到账少于核准额时勾选，并写明原因。' }, field('reason', '少收原因', 'textarea', false)],
     initialValues: { receiptId: '', amount: totals.open, settle: false, reason: '' },
     submit: v => run({ type: 'rebate.claim.receive', payload: { id: claim.id, receiptId: text(v, 'receiptId'), amount: number(v, 'amount'), settle: v.settle === true, ...(text(v, 'reason') ? { reason: text(v, 'reason') } : {}) } }) };
-  const withdrawSpec: ModuleEditorSpec = { title: `撤回退税申报 · ${claim.code}`, submitLabel: '撤回', description: '撤回后发票与报关单释放，可重新配单申报。', fields: [field('reason', '撤回原因', 'textarea')], initialValues: { reason: '' },
+  const withdrawSpec: ModuleEditorSpec = { title: '撤回退税申报', submitLabel: '撤回', description: `${claim.code} · 释放专票与报关单`, fields: [field('reason', '撤回原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'rebate.claim.withdraw', payload: { id: claim.id, reason: text(v, 'reason') } }) };
-  const reverseSpec = (entryId: string, code: string): ModuleEditorSpec => ({ title: `冲回到账勾稽 · ${code}`, submitLabel: '冲回', description: '冲回后释放流水余额，原记录保留。', fields: [field('reason', '冲回原因', 'textarea')], initialValues: { reason: '' },
+  const reverseSpec = (entryId: string, code: string): ModuleEditorSpec => ({ title: '冲回到账勾稽', submitLabel: '冲回', description: `${code} · 释放流水余额`, fields: [field('reason', '冲回原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'rebate.claim.reverseReceipt', payload: { id: claim.id, entryId, reason: text(v, 'reason') } }) });
   const done = claim.state === 'received';
   return <DetailBlock title={uiText("退税申报")} aside={<Pill tone={REBATE_TONE[claim.state]}>{REBATE_STATE_LABEL[claim.state]}</Pill>}>
