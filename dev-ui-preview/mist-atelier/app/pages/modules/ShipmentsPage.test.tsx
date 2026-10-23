@@ -22,7 +22,7 @@ const doc=(id:string,shipmentId:string,type:FulfillmentDocument['type'],status:F
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
 const customs=(shipmentId:string,status:'draft'|'submitted'|'cleared')=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId,status,declarationNo:'D1',broker:'报关行',hsCode:'6202',origin:'CN',tradeMode:'一般贸易',declaredAt:'2026-10-13',clearedAt:'',evidence:'',fileIds:[],note:''});
 beforeEach(()=>{session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
-  s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD'} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10});
+  s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',amount:100,governance:{contract:{preShipmentPercent:0}}} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
@@ -133,4 +133,13 @@ it('keeps an uploaded departure original through a failed save and submits its f
   await click(getByRole(dialog,'button',{name:'登记离港'}));
   expect(store.uploadFile).toHaveBeenCalledTimes(1);
   expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.shipments.depart',payload:expect.objectContaining({id:'s',evidence:'承运人开航确认',fileIds:['departure-proof']})});
+});
+
+it('shows an unpaid contractual balance and prevents opening departure until the receipt belongs to this order',async()=>{
+ const state=store.state!,f=state.fulfillment;state.orders[0].governance!.contract.preShipmentPercent=100;
+ f.shipments.push(shipment('s',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}));f.customs.push(customs('s','cleared'));
+ state.receipts.push({id:'r',code:'BR',payer:'Cedar',date:'2026-10-13',ref:'balance',amount:100,remaining:100,currency:'USD',state:'unmatched'});
+ render('s');expect((getByRole(host,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(true);expect(host.textContent).toContain('尚差 100.00 USD');expect(store.run).not.toHaveBeenCalled();
+ state.orderFunding.assignments.push({id:'fund',receiptId:'r',customerId:'c',orderId:'o',amount:100,currency:'USD',state:'active',note:'合同收款',createdAt:'',updatedAt:'',actor:'财务',history:[]});store.state={...state};render('s');
+ expect((getByRole(host,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(false);
 });

@@ -65,6 +65,27 @@ export function orderDepositCoverage(root:Root,orderId:string){
 }
 export function assertOrderDepositCovered(root:Root,orderId:string){const coverage=orderDepositCoverage(root,orderId);if(coverage.status==='unconfigured')fail('请先明确合同付款方式及T/T定金比例，不能按未配置视为已收定金','PRECONDITION');if(coverage.status==='insufficient')fail(`订单定金尚不足：要求 ${coverage.required}，已确认归属 ${coverage.received}`,'PRECONDITION');assertOrderFundingIntegrity(root);return coverage;}
 
+/** Explicit cumulative order percentage, approved with the contract; never inferred from prose. */
+export function orderShipmentPaymentCoverage(root:Root,orderId:string){
+ const order=root.orders.find(o=>o.id===orderId);if(!order)return fail('来源订单不存在','NOT_FOUND');
+ const percent=order.governance?.contract.preShipmentPercent,received=orderFundingCoveredAmount(root,orderId);
+ if(typeof percent!=='number'||!Number.isFinite(percent)||percent<0||percent>100)return {status:'unconfigured' as const,required:null,received,percent:null,shortage:null};
+ let rate:number;try{rate=mistMoneyMinor(percent);}catch{return {status:'unconfigured' as const,required:null,received,percent:null,shortage:null};}
+ const requiredMinor=Number((BigInt(mistMoneyMinor(order.amount))*BigInt(rate)+BigInt(5000))/BigInt(10000));
+ const shortage=Math.max(0,requiredMinor-mistMoneyMinor(received))/100;
+ return {status:shortage?'insufficient' as const:'covered' as const,required:requiredMinor/100,received,percent,shortage};
+}
+export function orderShipmentPaymentBlocker(root:Root,orderId:string):string|undefined{
+ const order=root.orders.find(o=>o.id===orderId);if(!order)return '来源订单不存在';
+ const coverage=orderShipmentPaymentCoverage(root,orderId);
+ if(coverage.status==='unconfigured')return `${order.code}：请确认合同出运前累计收款比例`;
+ if(coverage.status==='insufficient')return `${order.code}：出运前收款不足，尚差 ${coverage.shortage!.toFixed(2)} ${order.currency}`;
+}
+export function assertOrderShipmentPaymentCovered(root:Root,orderId:string){
+ const blocker=orderShipmentPaymentBlocker(root,orderId);if(blocker)fail(blocker,'PRECONDITION');
+ assertOrderFundingIntegrity(root);return orderShipmentPaymentCoverage(root,orderId);
+}
+
 export function applyOrderFundingCommand(root:Root,command:OrderFundingCommand,context:MistContext):MistCommandResult{
  orderFundingCommandPermission(command);if(!context.actorId)fail('资金归属需要真实操作账号','FORBIDDEN');
  const assignments=structuredClone(root.orderFunding?.assignments||[]);let row:OrderFundingAssignment;

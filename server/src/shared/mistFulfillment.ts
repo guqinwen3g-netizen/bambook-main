@@ -1,3 +1,4 @@
+import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
 import { productionSampleRequirements, type ProductionSampleEvidence } from './mistProductionSamples';
@@ -1567,7 +1568,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('需完成单据准备并由业务登记对客发送');
             if (!f.customs.some(c => c.shipmentId === s.id && c.status === 'cleared'))
                 fail('出口清关尚未完成');
-            s.lines.forEach(l => { assertMistOrderApproved(root, l.orderId); assertMistOrderDeposit(root, l.orderId); sourceQuality(root, l); requireSampleRole(root, get(root.productions, l.productionId!, '准确生产分支'), 'shipping', s.id); checkPhysicalReservation(root, l, s.id); });
+            s.lines.forEach(l => { assertMistOrderApproved(root, l.orderId); assertMistOrderDeposit(root, l.orderId); assertOrderShipmentPaymentCovered(root, l.orderId); sourceQuality(root, l); requireSampleRole(root, get(root.productions, l.productionId!, '准确生产分支'), 'shipping', s.id); checkPhysicalReservation(root, l, s.id); });
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);
             const at = instant(p.at, ctx, '实际离港/起飞时间');

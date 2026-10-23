@@ -1,3 +1,4 @@
+import {orderShipmentPaymentBlocker} from '../../../../../server/src/shared/mistOrderFunding';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 货运管理：业务发起出运 → 后勤核实装箱、订舱与单证 → 资料回业务对客发送 → 实际离港；按面料 / 成衣业务组分开。 */
@@ -275,7 +276,8 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   const cancelReason = businessReason || (s.requesterId !== me ? '仅原业务发起人可取消' : shipmentCancelBlockers(state, s).join('；') || false);
   const packReason = logisticsReason || (issuedCiPl ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
   const hold = heldShipmentRelease(state as any, s.customerId);
-  const departReason = logisticsReason || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : hold.held && !hold.risk ? '客户往来已冻结：须先经部门主管批准带风险放行' : false);
+  const paymentBlocker = [...new Set(s.lines.map(line=>line.orderId))].map(orderId=>orderShipmentPaymentBlocker(state,orderId)).find(Boolean);
+  const departReason = logisticsReason || paymentBlocker || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : hold.held && !hold.risk ? '客户往来已冻结：须先经部门主管批准带风险放行' : false);
   const track = [
     { label: '业务发起', done: true, note: `${s.requestedBy} · ${shortWhen(s.createdAt)}` },
     { label: '逐条目装箱核实', done: matched, note: packingRows.length ? `${cartons} 箱 · ${matched ? '与计划一致' : '与计划不符'}` : '未装箱', noteTone: packingRows.length && !matched ? 'bad' as const : undefined },

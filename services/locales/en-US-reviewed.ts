@@ -151,4 +151,7 @@ export const reviewedEnglish: Record<string, string> = {
   '暂无实测记录': 'No measurements recorded', '暂无 QC 报告': 'No QC report',
   '暂无催收记录': 'No collection records', '暂无操作记录': 'No activity',
   '未签发，未形成应收。': 'Not issued; no receivable recorded.', '确认后扣减库存': 'Stock is deducted on confirmation',
+  '出运前累计收款（%）': 'Cumulative payment before shipment (%)', '出运前累计收款': 'Payment before shipment',
+  '{0}：请确认合同出运前累计收款比例': '{0}: Confirm the agreed pre-shipment payment percentage',
+  '{0}：出运前收款不足，尚差 {1} {2}': '{0}: Pre-shipment payment is short by {1} {2}',
 };
