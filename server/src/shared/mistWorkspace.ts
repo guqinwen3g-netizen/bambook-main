@@ -1,3 +1,4 @@
+import {sampleSendPurpose,sampleSendBlocker,type SampleSendPurpose} from './mistSampleSending';
 import type {MistBusinessClock} from './mistBusinessClock';
 import{stableJson}from'./stableJson';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
@@ -6,7 +7,7 @@ import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricReq
 import { relationHoldReason } from './mistRelationHold';
 import {demoAccountRef,ownerChangeText,resolveMember,setMemberGroups,type MistMemberDirectoryEntry,type MistMemberGroupAssignment} from './mistAccounts';
 import { supplierBusinessDay, supplierUnavailableReason } from './mistSupplierStatus';
-import {assignFactoryLetters,defaultFactoryTask,developmentClosure,developmentRoundBlocker,duplicateRoundFactories,factoryTaskError,factoryTaskNote,factoryTaskSync,factoryTaskSyncBlocker,minorVersionBlocker,minorVersionLabel,minorVersions,nextRoundNumber,roundVersionLabel,type FactoryTaskInput} from './mistDevelopmentRounds';
+import {assignFactoryLetters,defaultFactoryTask,developmentClosure,developmentRoundBlocker,duplicateRoundFactories,factoryTaskError,factoryTaskNote,factoryTaskSync,factoryTaskSyncBlocker,minorVersionBlocker,minorVersionLabel,minorVersions,nextRoundNumber,nextPhysicalVersionNumber,physicalVersionLabel,roundVersionLabel,type FactoryTaskInput} from './mistDevelopmentRounds';
 import {createFulfillmentState,applyFulfillmentCommand,fulfillmentCommandPermission,getFulfillmentReviews,assertProductionTransition,fulfillmentProductionFact,type FulfillmentState,type FulfillmentCommand} from './mistFulfillment';
 import {createMarketState,applyMarketCommand,backfillQuoteLineFamilies,marketCommandPermission,getMarketReviews,type MarketState,type MarketCommand} from './mistMarket';
 import {createCrmState,applyCrmCommand,crmCommandPermission,type CrmState,type CrmCommand} from './mistCrm';
@@ -295,7 +296,7 @@ export type MistCommand = FulfillmentCommand | MarketCommand | PlatformCommand |
   | { type: 'development.version.syncRequirements'; payload: { devId: string; versionId: string } }
   | { type: 'development.notice.generate'; payload: { devId: string; versionId: string } }
   | { type: 'development.version.addSampleForm'; payload: { devId: string; versionId: string; form: string; quantity: number; unit: string; location?: string; color?: string; note?: string } }
-  | { type: 'development.sample.dispatch'; payload: { devId: string; versionId: string; sampleId: string; quantity: number; recipient: string; trackingNo?: string; fee?: MistSampleFee | null; note?: string; sourceLocation?: string } }
+  | { type: 'development.sample.dispatch'; payload: { devId: string; versionId: string; sampleId: string; quantity: number; purpose?:SampleSendPurpose;recipient: string; trackingNo?: string; fee?: MistSampleFee | null; note?: string; sourceLocation?: string } }
   | { type: 'development.sample.dispatchFee'; payload: { devId: string; versionId: string; dispatchId: string; fee: MistSampleFee } }
   | { type: 'development.fee.recordMaking'; payload: { devId: string; sampleId: string; amount: number; currency: string } }
   | { type: 'development.expense.add'; payload: { devId: string; versionId?: string; amount: number; currency: string; description: string; date: string } }
@@ -615,7 +616,7 @@ function createRound(state: MistState, dev: MistDev, input: RoundInput, context:
     const base = references.find(version => version.factoryId===factory) || references[0];
     const id = context.id(), requirementsCopy = fabric ? (base?.fabricRequirements || dev.values.fabricRequirements) : undefined;
     const task:MistFactoryTask={...tasks[factory],commonRequirements:requirements};
-    const version: MistVersion = {...(requirementsCopy?{fabricRequirements:JSON.parse(JSON.stringify(requirementsCopy))}:{}),id,devId:dev.id,label:roundVersionLabel(number,letters[factory]),factoryId:factory,factory:factoryName(state,factory),sample:'',sampleQuantity:task.sampleQuantity,size:fabric?'':(base?.size??dev.values.sizeBase),fabric:base?.fabric??dev.values.fabric,img:base?.img??dev.img,fileIds:[...new Set([...(base?.fileIds??dev.fileIds),...fileIds])],returnedAt:null,qc:null,confirmations:[],archivedAt:null,note:factoryTaskNote(requirements,task.extraRequirements),roundId:round.id,factoryLetter:letters[factory],task};
+    const version: MistVersion = {...(requirementsCopy?{fabricRequirements:JSON.parse(JSON.stringify(requirementsCopy))}:{}),id,devId:dev.id,label:roundVersionLabel(number,letters[factory],nextPhysicalVersionNumber(state,dev,letters[factory])),factoryId:factory,factory:factoryName(state,factory),sample:'',sampleQuantity:task.sampleQuantity,size:fabric?'':(base?.size??dev.values.sizeBase),fabric:base?.fabric??dev.values.fabric,img:base?.img??dev.img,fileIds:[...new Set([...(base?.fileIds??dev.fileIds),...fileIds])],returnedAt:null,qc:null,confirmations:[],archivedAt:null,note:factoryTaskNote(requirements,task.extraRequirements),roundId:round.id,factoryLetter:letters[factory],task};
     state.versions.push(version); dev.versionIds.push(id); created.push(version);
   }
   dev.values.factories = [...new Set([...dev.values.factories, ...factories])];
@@ -630,7 +631,7 @@ function updateDev(state: MistState, dev: MistDev, context: MistContext) {
   if(dev.closure?.kind==='cancelled'){dev.state='已取消';dev.tone='neutral';}
   else if(dev.closure?.kind==='archived'){dev.state='已归档';dev.tone='neutral';}
   else if(version?.archivedAt){dev.stage=4;dev.state='成果已留档';dev.tone='ok';}
-  else if(latest?.result==='approved'){dev.stage=4;dev.state=developmentCharged(dev.values)?'已认可':'已认可 · 已结案';dev.tone='ok';}
+  else if(latest?.result==='approved'){dev.stage=4;dev.state='已认可';dev.tone='ok';}
   else if(latest?.result==='rejected'){dev.stage=3;dev.state='不采用';dev.tone='bad';}
   else if(latest?.result==='needs_adjustment'){dev.stage=3;dev.state='待改版';dev.tone='warn';}
   else if(version?.qcDecision?.kind==='abandon'){dev.stage=2;dev.state='本版不采用';dev.tone='bad';}
@@ -992,7 +993,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       result={devId:dev.id,versionId:v.id,id};break;
     }
     case 'development.sample.dispatch': {
-      const [dev,v]=versionOf(state,p.devId,p.versionId), blocked=sampleDispatchBlocker(state,dev,v);
+      const [dev,v]=versionOf(state,p.devId,p.versionId),purpose=sampleSendPurpose(p.purpose,{source:{kind:'version',devId:dev.id,versionId:v.id}}),blocked=sampleDispatchBlocker(state,dev,v,purpose,p.sampleId);
       if(blocked)throw new MistCommandError('PRECONDITION',blocked);
       const sample=developmentVersionSamples(state,v).find(s=>s.id===p.sampleId);
       if(!sample)throw new MistCommandError('VALIDATION','请选择本版的准确实物');
@@ -1000,10 +1001,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(sample.unit!=='米'&&!Number.isInteger(p.quantity))throw new MistCommandError('VALIDATION','按份/件的实物必须整数寄出');
       if(p.quantity>sample.available)throw new MistCommandError('PRECONDITION','寄出数量超过可用余额（'+sample.available+' '+sample.unit+'）');
       const recipient=text(p.recipient,'收件方',true,240), trackingNo=text(p.trackingNo||'','运单号',false,120), fee=p.fee==null?null:sampleFee(p.fee), note=text(p.note||'','备注',false,1000);
-      const {id:movementId}=applyFulfillmentCommand(state,{type:'fulfillment.samples.move',payload:{id:sample.id,kind:'send',quantity:p.quantity,person:recipient,location:'',note:['寄样 '+dev.code+' '+v.label,trackingNo&&('运单 '+trackingNo),note].filter(Boolean).join('；'),...(p.sourceLocation!==undefined?{sourceLocation:p.sourceLocation}:{})}},context) as {id:string};
+      const sendBlocked=sampleSendBlocker(state,sample,purpose,note,p.purpose!==undefined);if(sendBlocked)throw new MistCommandError('PRECONDITION',sendBlocked);
+      const {id:movementId}=applyFulfillmentCommand(state,{type:'fulfillment.samples.move',payload:{id:sample.id,kind:'send',sendPurpose:purpose,quantity:p.quantity,person:recipient,location:'',note:['寄样 '+dev.code+' '+v.label,trackingNo&&('运单 '+trackingNo),note].filter(Boolean).join('；'),...(p.sourceLocation!==undefined?{sourceLocation:p.sourceLocation}:{})}},context) as {id:string};
       const dispatchId=context.id(), movement=find(state.fulfillment.sampleMovements,movementId,'出库流水');
       movement.development={devId:dev.id,versionId:v.id,dispatchId};if(trackingNo)movement.trackingNo=trackingNo;
-      (v.dispatches||=[]).push({id:dispatchId,sampleId:sample.id,sampleCode:sample.code,form:sample.form,unit:sample.unit,quantity:movement.quantity,recipient,trackingNo,fee,note,movementId,recordedAt:context.now,recordedBy:context.actorName});
+      (v.dispatches||=[]).push({id:dispatchId,sampleId:sample.id,sampleCode:sample.code,form:sample.form,unit:sample.unit,quantity:movement.quantity,purpose,recipient,trackingNo,fee,note,movementId,recordedAt:context.now,recordedBy:context.actorName});
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,v.label+' 寄样 '+sample.form+' '+movement.quantity+' '+sample.unit+' → '+recipient+(trackingNo?'（运单 '+trackingNo+'）':''),{view:'development/detail',id:dev.id,versionId:v.id});
       result={devId:dev.id,versionId:v.id,id:dispatchId};break;
@@ -1097,7 +1099,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const [dev,parent]=versionOf(state,p.devId,p.versionId), blocked=minorVersionBlocker(state,dev,parent);
       if(blocked)throw new MistCommandError('PRECONDITION',blocked);
       const change=text(p.change,'调整内容'), siblings=minorVersions(state,parent), seq=siblings.length+1, id=context.id();
-      const minor:MistVersion={id,devId:dev.id,label:minorVersionLabel(parent.label,seq),factoryId:parent.factoryId,factory:parent.factory,sample:parent.sample,sampleQuantity:parent.sampleQuantity,
+      const minor:MistVersion={id,devId:dev.id,label:minorVersionLabel(physicalVersionLabel(state,dev,parent),seq),factoryId:parent.factoryId,factory:parent.factory,sample:parent.sample,sampleQuantity:parent.sampleQuantity,
         ...(parent.sampleForm!==undefined?{sampleForm:parent.sampleForm}:{}),...(parent.sampleUnit!==undefined?{sampleUnit:parent.sampleUnit}:{}),
         size:parent.size,fabric:parent.fabric,img:parent.img,fileIds:[...parent.fileIds],returnedAt:parent.returnedAt,qc:structuredClone(parent.qc),confirmations:[],archivedAt:null,note:change,
         ...(parent.roundId?{roundId:parent.roundId}:{}),...(parent.factoryLetter?{factoryLetter:parent.factoryLetter}:{}),

@@ -165,4 +165,9 @@ export const reviewedEnglish: Record<string, string> = {
   '附件包 (zip)':'Attachments (ZIP)','本通知单没有附件':'This notice has no attachments','附件包下载失败':'Attachment bundle download failed','当前不能读取附件原件':'Original attachments cannot be read right now',
   '页面已切换，请重新下载':'The page changed; start the download again','附件超过200MB，请分别下载':'Attachments exceed 200 MB; download them separately','附件大小待核对':'Check attachment sizes',
   '附件不可用或无权读取：{0}':'Attachment unavailable or access denied: {0}','附件原件大小不符：{0}':'Original attachment size does not match: {0}','需要对应业务线QC权限':'QC permission for this business line is required',
+  '寄送用途':'Shipment purpose','用途说明':'Purpose details','外部测试':'External testing','工厂整改':'Factory rework','其他用途':'Other purpose',
+  '寄送用途无效':'Invalid shipment purpose','请填写本次寄送用途说明':'Enter the reason for this shipment','确认样须关联开发或订单来源':'Link a confirmation sample to its development or order',
+  '本版待整改或已不采用，不能寄客户确认样':'This version needs rework or was rejected; it cannot be sent for customer approval',
+  '本件实物QC未通过，不能寄客户确认样':'This item has not passed QC and cannot be sent for customer approval','本件实物尚未完成QC，不能寄客户确认样':'Complete QC for this item before sending it for customer approval',
+  '本版QC不通过，不能寄客户确认样':'This version failed QC and cannot be sent for customer approval','开发案已取消，不能寄客户确认样':'The development is cancelled; confirmation samples cannot be sent','订单已终止，不能寄客户确认样':'The order has ended; confirmation samples cannot be sent','请选择本次待检的准确实物':'Select the exact physical item for this inspection',
 };

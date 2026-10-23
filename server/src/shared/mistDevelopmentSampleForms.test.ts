@@ -59,7 +59,7 @@ describe('BB-DEV-6 fabric version physical forms',()=>{
 });
 describe('BB-DEV-8 dispatch from version detail',()=>{
  it('metre sample 5 m, send 2 m → 3 m available with a send movement linked back to this development',()=>{
-  const f=fixture();f.record(5,'米样','米');const [metre]=f.samples();
+  const f=fixture();f.record(5,'米样','米');f.qc();const [metre]=f.samples();
   const r=f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:metre.id,quantity:2,recipient:'测试客户 Anna',trackingNo:'SF123',fee:null}});
   const after=f.samples()[0], move=f.state.fulfillment.sampleMovements.find(m=>m.kind==='send')!;
   expect(after.available).toBe(3);expect(after.quantity).toBe(5);
@@ -69,7 +69,7 @@ describe('BB-DEV-8 dispatch from version detail',()=>{
   expect(f.state.tasks.filter(t=>t.title.includes('寄'))).toHaveLength(0);
  });
  it('dispatches only from the selected position and preserves the other balance',()=>{
-  const f=fixture();f.record(5,'米样','米');const [metre]=f.samples();
+  const f=fixture();f.record(5,'米样','米');f.qc();const [metre]=f.samples();
   metre.location='多个位置';metre.positions=[{location:'架A',available:1},{location:'架B',available:4}];
   const send=(sourceLocation?:string)=>f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:metre.id,quantity:2,recipient:'客户',...(sourceLocation===undefined?{}:{sourceLocation})}});
   f.unchanged(()=>send(),/请选择本次实际出库位置/);
@@ -79,7 +79,7 @@ describe('BB-DEV-8 dispatch from version detail',()=>{
   expect(f.state.fulfillment.sampleMovements.at(-1)).toMatchObject({kind:'send',sourceLocation:'架B',quantity:2});
  });
  it('lets the fee be added later once, without changing quantities',()=>{
-  const f=fixture();f.record(5,'米样','米');const [metre]=f.samples();
+  const f=fixture();f.record(5,'米样','米');f.qc();const [metre]=f.samples();
   const {id}=f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:metre.id,quantity:1.5,recipient:'客户'}});
   f.unchanged(()=>f.run({type:'development.sample.dispatchFee',payload:{...f.at,dispatchId:id,fee:{amount:12.345,currency:'CNY'}}}),/两位小数/);
   f.run({type:'development.sample.dispatchFee',payload:{...f.at,dispatchId:id,fee:{amount:28.5,currency:'cny'}}});
@@ -88,7 +88,7 @@ describe('BB-DEV-8 dispatch from version detail',()=>{
   f.unchanged(()=>f.run({type:'development.sample.dispatchFee',payload:{...f.at,dispatchId:id,fee:{amount:30,currency:'CNY'}}}),/不能覆盖/);
  });
  it('rejects over-available, fractional pieces, missing recipient, other versions\' samples, and bad fee without writing',()=>{
-  const f=fixture();f.record(3,'色样','份');const [colour]=f.samples();
+  const f=fixture();f.record(3,'色样','份');f.qc();const [colour]=f.samples();
   const send=(patch:object)=>()=>f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:colour.id,quantity:1,recipient:'客户',...patch}});
   f.unchanged(send({quantity:4}),/超过可用余额/);
   f.unchanged(send({quantity:1.5}),/整数/);
@@ -102,4 +102,28 @@ describe('BB-DEV-8 dispatch from version detail',()=>{
   expect(f.samples()[0].available).toBe(0);
   f.unchanged(send({}),/已无可用余额/);
  });
+});
+
+it.each(['development','warehouse'] as const)('blocks a pending or rejected confirmation sample from the %s entry without reducing inventory',entry=>{
+ const f=fixture();f.record(1,'色样','份');const sample=f.samples()[0];
+ const send=()=>entry==='development'?f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:sample.id,quantity:1,recipient:'客户'}}):f.run({type:'fulfillment.samples.move',payload:{id:sample.id,kind:'send',quantity:1,person:'客户',location:'',note:''}});
+ f.unchanged(send,/QC/);
+});
+
+it('records external testing separately from a confirmation send while preserving NOK and its original report',()=>{
+ const f=fixture();f.record(2,'色样','份');const sample=f.samples()[0];
+ const send=(note:string)=>f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:sample.id,quantity:1,recipient:'测试机构',purpose:'testing',note}});
+ f.unchanged(()=>send(''),/用途说明/);send('外检纤维成分');
+ expect(f.samples()[0].available).toBe(1);expect(f.version().qc).toBeNull();expect(f.version().dispatches!.at(-1)).toMatchObject({purpose:'testing',note:'外检纤维成分'});expect(f.state.fulfillment.sampleMovements.at(-1)).toMatchObject({kind:'send',sendPurpose:'testing'});
+});
+
+it('binds a one-item development QC request and requires an explicit item when multiple forms exist',()=>{
+ const f=fixture();f.record(1,'色样','份');const sample=f.samples()[0];
+ const request=()=>f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架A',contact:'',due:'2026-10-16'}});
+ const first=request().id;expect(f.state.fulfillment.qcTasks.find(task=>task.id===first)!.sampleId).toBe(sample.id);
+ f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:2,unit:'米',location:'架B'}});
+ f.unchanged(request,/准确实物/);
+ const second=f.samples().find(row=>row.id!==sample.id)!;
+ f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},sampleId:second.id,domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架B',contact:'',due:'2026-10-16'}});
+ expect(f.state.fulfillment.qcTasks.map(task=>task.sampleId)).toEqual([sample.id,second.id]);
 });

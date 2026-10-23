@@ -1,3 +1,4 @@
+import {sampleConfirmationBlocker} from './mistSampleSending';
 /**
  * 演示公司的模块示例数据。
  *
@@ -265,7 +266,12 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   /* ───────── 样品：借出、寄客户 ───────── */
   const returnedSamples = state.fulfillment.samples.filter(s => s.available > 0);
   if (returnedSamples[0]) run('sample lend', { type: 'fulfillment.samples.move', payload: { id: returnedSamples[0].id, kind: 'lend', quantity: 1, person: '沈禾', location: '版房', note: '版师核对袖笼', expectedReturn: day(3) } }, buyer);
-  if (returnedSamples[1]) run('sample send', { type: 'fulfillment.samples.move', payload: { id: returnedSamples[1].id, kind: 'send', quantity: 1, person: 'DHL 1Z84 2207 31', location: 'Cedar & Crown 伦敦', note: '客户评审样' } }, buyer);
+  const confirmationSample=state.fulfillment.samples.find(sample=>sample.source.kind==='version'&&sample.available>=1&&!sampleConfirmationBlocker(state,sample));
+  if(confirmationSample&&confirmationSample.source.kind==='version'){
+    const sourceDevId=confirmationSample.source.devId,development=state.devs.find(dev=>dev.id===sourceDevId)!;
+    const recipient=state.customers.find(customer=>customer.id===development.customerId)?.name||development.customer;
+    run('sample send',{type:'fulfillment.samples.move',payload:{id:confirmationSample.id,kind:'send',sendPurpose:'confirmation',quantity:1,person:recipient,location:'DHL 1Z84 2207 31',note:'已通过准确实物QC，寄客户确认'}},buyer);
+  }else failures.push({step:'sample send',message:'没有通过准确实物QC的可寄确认样'});
 
   /* ───────── QC：产前样通过、生产中期抽检未通过、待领取任务 ───────── */
   const productionOf = (code: string) => state.productions.find(p => p.code === code);

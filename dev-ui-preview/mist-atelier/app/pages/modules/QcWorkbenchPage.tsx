@@ -1,7 +1,7 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
-import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, FlaskConical, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
+import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
 import { BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, type Tone } from '../../../../../components/mist';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
@@ -301,10 +301,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
       ]} />
     </DetailBlock>}
     <DetailBlock title={uiText(task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`)}>
-      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("还没有报告。认领后到现场检查，提交报告即回到来源。")}</span>}
-    </DetailBlock>
-    <DetailBlock title={uiText("第三方测试")}>
-      <span className="mist-note"><Icon icon={FlaskConical} size="xs" />{uiText("送检机构、项目与预计出报告日的登记尚未接入服务端；外部报告可先作为附件随QC报告上传，由QC判读。")}</span>
+      {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("暂无报告")}</span>}
     </DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="qc" id={task.id} /></DetailBlock>
   </DetailBody>;
@@ -387,19 +384,19 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
           </FormGrid>)}</div></CardBody>
         </Card>}
         <Card>
-          <CardHeader title={uiText("测量记录")} sub={uiText("可选。标准、实测与容差只作记录。")} tools={<Button size="sm" icon={Plus} onClick={() => setMeasurements(rows => [...rows, { point: '', standard: 0, actual: 0, tolerance: 0 }])}>{uiText("增加测量点")}</Button>} />
+          <CardHeader title={uiText("测量记录")} tools={<Button size="sm" icon={Plus} onClick={() => setMeasurements(rows => [...rows, { point: '', standard: 0, actual: 0, tolerance: 0 }])}>{uiText("增加测量点")}</Button>} />
           <CardBody>{measurements.length ? <div className="mist-col">{measurements.map((item, i) => <FormGrid key={i}>
             {(['point', 'standard', 'actual', 'tolerance'] as const).map((key, j) => <Field key={key} label={uiText(['测量点', '标准', '实测', '容差'][j])}><TextInput aria-label={uiText(`${['测量点', '标准', '实测', '容差'][j]} ${i + 1}`)} type={key === 'point' ? 'text' : 'number'} step="0.0001" value={item[key]} onChange={e => setMeasurements(rows => rows.map((row, n) => n === i ? { ...row, [key]: key === 'point' ? e.target.value : Number(e.target.value) } : row))} /></Field>)}
             <Button size="sm" variant="quiet" onClick={() => setMeasurements(rows => rows.filter((_, n) => n !== i))}>{uiText("移除本点")}</Button>
           </FormGrid>)}</div> : <span className="mist-note">{uiText("还没有测量点")}</span>}</CardBody>
         </Card>
         <Card>
-          <CardHeader title={uiText("现场照片与完整报告")} sub={uiText("外部实验室报告也在这里上传，由QC判读后写入结论。")} />
+          <CardHeader title={uiText("现场照片与完整报告")} />
           <CardBody>
             <UploadZone hint={uiText("上传现场照片或完整报告")} onFiles={files => { if (blocked) return; setBusy(true); void (async () => { try { for (const file of files) { const added = await uploadFile(file); setIds(old => [...old, added.id]); } } catch (e) { setFailure(String(e)); } finally { setBusy(false); } })(); }} />
             <RecordFiles ids={ids} />
           </CardBody>
-          <div className="mist-sticky-foot"><span className="mist-note">{uiText("实际检查人由当前登录账号记录")}</span><span className="mist-spacer" /><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={blocked} onClick={review}>{uiText("提交报告")}</Button></div>
+          <div className="mist-sticky-foot"><span className="mist-spacer" /><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={blocked} onClick={review}>{uiText("提交报告")}</Button></div>
         </Card>
       </div>
       <div>
@@ -410,23 +407,14 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <span className="mist-note">{uiText("来源：")}{uiText(state ? fulfillmentSourceLabel(state, task.source) : '')}</span>
           </div></CardBody>
         </Card>
-        <Card>
-          <CardHeader title={uiText("填写要点")} />
-          <CardBody><div className="mist-col">
-
-            {task.kind === 'production' && <span className="mist-note">{uiText("· 任一尺码不通过时，总结论必须为不通过（NOK）。")}</span>}
-            <span className="mist-note">{uiText("· 复验请在本任务追加报告，历史报告保留不可改写。")}</span>
-            <span className="mist-note">{uiText("· 报告只解锁来源的下一步，业务推进由业务员完成。")}</span>
-          </div></CardBody>
-        </Card>
       </div>
     </div>
     <Dialog open={confirming} title={uiText("确认提交QC报告")} tone={result === 'reject' ? 'bad' : 'accent'} onClose={() => { if (!busy) setConfirming(false); }}
       footer={<><Button disabled={busy} onClick={() => setConfirming(false)}>{uiText("返回修改")}</Button><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("确认提交")}</Button></>}>
       <div className="mist-col">
-        <Facts cols={2} items={[{ label: '结论', value: result ? RESULT_LABEL[result] : '' }, { label: '报告编号', value: report }, { label: '检查时间', value: at.replace('T', ' ') }, { label: '本次检查尺码', value: sizeChecks.filter(check => check.result).map(check => `${check.size} ${check.inspected}件`).join(' · ') || '—' }]} />
+        <Facts cols={2} items={[{ label: '结论', value: result ? RESULT_LABEL[result] : '' }, { label: '报告编号', value: report }, { label: '检查时间', value: at.replace('T', ' ') }, { label: '本次检查尺码', value: sizeChecks.filter(check => check.result).map(check => `${check.size} ${check.inspected}件`).join(' · ') || (task.sampleId?state?.fulfillment.samples.find(sample=>sample.id===task.sampleId)?.size:'') || '—' }]} />
         <span className="mist-note">{consequence}</span>
-        <span className="mist-note">{uiText("提交后报告不可改写，如需更正请追加复验报告。")}</span>
+        <span className="mist-note">{uiText("提交后报告不可改写")}</span>
       </div>
     </Dialog>
   </MistPage>;
