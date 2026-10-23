@@ -182,7 +182,7 @@ export class MistRepository {
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
     const projected = projectState(row.state, actor, this.emptyState(actor), row.ownerId), owner = isOwner(row, actor);
     const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner, hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
-    return { ...publicWorkspace({ ...row, state: projected.state }), access };
+    return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}) };
   }
   async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows = await db.mistWorkspace.findMany({ where: { ...(actor.companyId ? { companyId: actor.companyId } : {}), OR: [{ ownerId: actor.userId }, { state: { path: ['memberIds'], array_contains: [actor.userId] } }] }, orderBy: { updatedAt: 'desc' } }); return rows.filter((row:MistWorkspaceRow)=>!archived(row)&&(isOwner(row,actor)||isMember(row,actor))).map((row:MistWorkspaceRow)=>{this.contract.normalizeMistState?.(row.state,this.context(actor));return this.view(row,actor);}); }); }
   /** Navigation needs identities only, never the full business snapshots of every company workspace. */

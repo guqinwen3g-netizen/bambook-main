@@ -284,12 +284,11 @@ export function materialReceiverIds(root: MistState, row: MaterialDeliveryRow): 
 }
 
 /** Preserve every cent across the source's remaining material and all confirmed destination orders. */
-export function internalFabricCostShare(root: MistState, purchaseId: string, orderId: string, minor: number): number {
-  const p = root.fulfillment.purchases.find(p => p.id === purchaseId); if (!p) return 0;
-  const source = root.orders.find(o => o.id === p.orderId);
-  if (!source?.governance?.contract.internalSupply) return p.orderId === orderId ? minor : 0;
+export type InternalFabricCostBasis={purchaseId:string;weights:Array<{orderId:string;weight:string}>};
+function internalFabricCostWeights(root:MistState,purchaseId:string):Map<string,bigint>|null{
+ const p=root.fulfillment.purchases.find(p=>p.id===purchaseId);if(!p||!root.orders.find(o=>o.id===p.orderId)?.governance?.contract.internalSupply)return null;
   const rows = materialDeliveryRows(root).filter(row => row.purchaseId === p.id && row.delivery.allocationId && row.delivery.confirmation && row.outstanding !== '0');
-  if (!rows.length) return p.orderId === orderId ? minor : 0;
+  if (!rows.length) return new Map([[p.orderId,BigInt(1)]]);
   const weights = new Map<string, bigint>();
   for (const row of rows) weights.set(row.delivery.orderId, (weights.get(row.delivery.orderId) || BigInt(0)) + metresMinor(row.outstanding));
   const settled = root.payables?.settlements?.filter(s => s.purchaseId === p.id && s.state === 'confirmed') || [];
@@ -299,6 +298,27 @@ export function internalFabricCostShare(root: MistState, purchaseId: string, ord
   const received = p.received > 0 ? metresMinor(p.received) : BigInt(0);
   const denominator = [base, received, allocated].reduce((max, n) => n > max ? n : max, BigInt(0));
   weights.set(p.orderId, denominator - allocated);
+  return weights;
+}
+/** Read-only financial proportions, without warehouse sites, people, QC evidence or attachment references. */
+export function financialMaterialCostBasis(root:MistState):InternalFabricCostBasis[]{
+ const gcd=(a:bigint,b:bigint):bigint=>b===BigInt(0)?a:gcd(b,a%b);
+ return (root.fulfillment?.purchases||[]).filter(p=>p.state==='approved'&&!p.cancellation).flatMap(p=>{
+  const weights=internalFabricCostWeights(root,p.id);if(!weights)return[];
+  const divisor=[...weights.values()].reduce((a,n)=>gcd(a,n),BigInt(0))||BigInt(1);
+  return [{purchaseId:p.id,weights:[...weights].sort(([a],[b])=>a.localeCompare(b)).map(([orderId,weight])=>({orderId,weight:(weight/divisor).toString()}))}];
+ });
+}
+/** Authoritative callers omit financialBasis; only explicit read-projection consumers supply it. */
+export function internalFabricCostShare(root: MistState, purchaseId: string, orderId: string, minor: number,financialBasis?:ReadonlyArray<InternalFabricCostBasis>|null): number {
+ const p=root.fulfillment.purchases.find(p=>p.id===purchaseId);if(!p)return 0;
+ if(!root.orders.find(o=>o.id===p.orderId)?.governance?.contract.internalSupply)return p.orderId===orderId?minor:0;
+ if(financialBasis===null)fail('内部供料成本依据未读取');
+ const basis=financialBasis?.find(row=>row.purchaseId===purchaseId);
+ if(financialBasis!==undefined&&(!basis||!basis.weights.length))fail('内部供料成本依据不完整');
+ if(basis&&(new Set(basis.weights.map(w=>w.orderId)).size!==basis.weights.length||basis.weights.some(w=>!w.orderId||!/^\d+$/.test(w.weight))))fail('内部供料成本分摊比例无效');
+ const weights=basis?new Map(basis.weights.map(w=>[w.orderId,BigInt(w.weight)])):internalFabricCostWeights(root,purchaseId)!;
+ const denominator=[...weights.values()].reduce((n,w)=>n+w,BigInt(0));if(denominator<=BigInt(0))fail('内部供料成本分摊比例无效');
   const total = BigInt(Math.abs(minor)), shares = [...weights.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, weight]) => ({ id, amount: total * weight / denominator, remainder: total * weight % denominator }));
   let rest = total - shares.reduce((sum, s) => sum + s.amount, BigInt(0));
   for (const s of [...shares].sort((a, b) => a.remainder === b.remainder ? a.id.localeCompare(b.id) : a.remainder > b.remainder ? -1 : 1)) { if (rest === BigInt(0)) break; s.amount++; rest--; }

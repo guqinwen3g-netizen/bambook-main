@@ -1,3 +1,4 @@
+import {financialMaterialCostBasis,type InternalFabricCostBasis} from '../shared/mistInternalFabric';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
@@ -67,8 +68,10 @@ export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {
   return targetVisibility(hiddenSections(actor))(target);
 }
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
-export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string): { state: MistState; hidden: Section[] } {
+export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] } {
   const hidden = hiddenSections(actor), next: MistState = { ...state };
+  // Financial read metadata belongs to the response envelope, never to restorable business state.
+  delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
   if (hidden.length) {
     const blank = empty();
     for (const section of hidden) for (const path of section.paths) {
@@ -97,7 +100,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     }
   }
   next.files = visibleFiles(state, next, actor.userId, ownerId);
-  return { state: next, hidden };
+  const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
+  return { state: next, hidden,...(costVisible?{costMaterialBasis:financialMaterialCostBasis(state)}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */
 function referencedFiles(state: MistState): Set<string> {

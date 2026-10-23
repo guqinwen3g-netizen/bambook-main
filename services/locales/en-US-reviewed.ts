@@ -1,5 +1,12 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '报关资料已保存':'Customs details saved',
+  '已登记申报':'Declaration recorded',
+  '已登记放行':'Customs release recorded',
+  '内部供料成本依据未读取':'Internal fabric cost basis is unavailable',
+  '来源发票不可用':'Source invoice unavailable',
+  '返回发票':'Back to invoice',
+  '查看发票':'View invoice',
   '返回本票报关':'Back to this declaration',
   '登记船样':'Register shipping samples',
   '尺码与件数':'Sizes and piece counts',

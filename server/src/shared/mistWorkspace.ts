@@ -375,7 +375,7 @@ export type MistWorkspaceMember={userId:string;name:string;addedBy:string;addedB
 export type MistWorkspaceMemberLog={id:string;action:'add'|'remove';userId:string;name:string;actorId:string;actorName:string;at:string};
 /** 服务端按当前账号现有读权限裁剪数据后附带的说明：hidden 为当前账号无权查看、已被隐藏的数据范围。 */
 export type MistWorkspaceAccess={role:'owner'|'member';canManageMembers:boolean;hidden:Array<{key:string;label:string;permissions:string[]}>};
-export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; access?: MistWorkspaceAccess };
+export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; access?: MistWorkspaceAccess;/** Read-only financial proportions; never persisted in workspace business state. */costMaterialBasis?:import('./mistInternalFabric').InternalFabricCostBasis[] };
 export type MistRunReceipt = { requestId: string; revision: number; result: MistCommandResult };
 
 import * as Seed from './mistSeed';
