@@ -55,7 +55,7 @@ describe('BB-DEV-7 QC gate and failed-QC handling',()=>{
     const round=f.run({type:'development.round.create',payload:{devId,factories:['实际测试面料厂'],requirements:'QC 意见：克重偏低，请加密',referenceVersionIds:[versionId],targetDate:'2026-11-05',resampleFromVersionId:versionId}});
     const source=f.state.versions.find(x=>x.id===versionId)!;
     expect(source.qcDecision).toMatchObject({kind:'resample',roundId:round.roundId});
-    expect(f.state.versions.find(x=>x.id===round.versionId)!.label).toBe('R2-A');
+    expect(f.state.versions.find(x=>x.id===round.versionId)!.label).toBe('R2-A-2');
     expect(()=>f.run({type:'development.round.create',payload:{devId,factories:['实际测试面料厂'],requirements:'再来',targetDate:'2026-11-05',resampleFromVersionId:versionId}})).toThrow(/尚未处理/);
   });
   it('abandon marks only that version as not adopted and blocks further QC or confirmation',()=>{

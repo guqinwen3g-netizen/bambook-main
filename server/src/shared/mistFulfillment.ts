@@ -1,3 +1,4 @@
+import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 /** Actual fulfillment records in the persisted Mist workspace. No fixture import. */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
@@ -80,6 +81,7 @@ export type SampleMovement = {
     /** BB-DEV-8：由开发案版本详情寄样生成的寄出流水，回链准确开发案、版本与寄样记录。 */
     development?: { devId: string; versionId: string; dispatchId: string };
     trackingNo?: string;
+    sendPurpose?:SampleSendPurpose;
 };
 export type FulfillmentQcTask = {
     id: string;
@@ -388,6 +390,7 @@ export type FulfillmentCommand = {
     payload: {
         id: string;
         kind: 'lend' | 'return' | 'send' | 'move';
+        sendPurpose?:SampleSendPurpose;
         quantity: number;
         person: string;
         location: string;
@@ -974,6 +977,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const person = text(p.person, '借用人/收件人', p.kind === 'lend' || p.kind === 'send'), location = text(p.location, '位置', false), note = text(p.note, '备注', false), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
             if (expectedReturn && expectedReturn < ctx.now.slice(0, 10))
                 fail('预计归还日不能早于借出日');
+            const sendPurpose=p.kind==='send'?sampleSendPurpose(p.sendPurpose,s):undefined;
+            if(sendPurpose){const blocker=sampleSendBlocker(root,s,sendPurpose,note,p.sendPurpose!==undefined);if(blocker)fail(blocker,'PRECONDITION');}
             let sourceLocation: string | undefined;
             if (p.kind === 'return') addAtPosition(s, quantity, location);
             else {
@@ -983,13 +988,14 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (p.kind === 'move') addAtPosition(s, quantity, location);
             }
             const id = ctx.id();
-            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}) });
-            audit(root, ctx, 'sample', s.id, `样品${({ lend: '借出', return: '归还', send: '寄出', move: '移位' } as Record<string, string>)[p.kind]}`);
+            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
+            audit(root, ctx, 'sample', s.id, `样品${({ lend: '借出', return: '归还', send: '寄出', move: '移位' } as Record<string, string>)[p.kind]}${sendPurpose?' · '+SAMPLE_SEND_PURPOSES[sendPurpose]:''}`);
             return { id };
         }
         case 'fulfillment.qc.request': {
-            const sample = p.sampleId ? get(f.samples, p.sampleId, '准确实物样品') : undefined;
+            let sample = p.sampleId ? get(f.samples, p.sampleId, '准确实物样品') : undefined;
             const s = source(root, sample ? sample.source : p.source, false) as FulfillmentQcTask['source'];
+            if(!sample&&s.kind==='version'){const physical=f.samples.filter(item=>item.source.kind==='version'&&item.source.devId===s.devId&&item.source.versionId===s.versionId);if(physical.length!==1)fail('请选择本次待检的准确实物');sample=physical[0];}
             if (sample && sourceKey(s) !== sourceKey(p.source)) fail('QC任务来源与实物样品不一致');
             if (sourceDomain(root, s) !== p.domain)
                 fail('QC业务域与来源不一致');

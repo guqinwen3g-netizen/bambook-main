@@ -1,3 +1,4 @@
+import {sampleConfirmationBlocker,type SampleSendPurpose} from './mistSampleSending';
 /**
  * 面料版本多形态实物与寄样（BB-DEV-6 / BB-DEV-8）。
  * 一个面料大版本可以分批登记多条实物（色样、手织样、米样……），全部同步到样品仓库同一来源档案；
@@ -12,7 +13,7 @@ export type MistSampleRef = { sampleId: string; code: string; form: string; unit
 export type MistSampleFee = { amount: number; currency: string };
 export type MistSampleDispatch = {
   id: string; sampleId: string; sampleCode: string; form: string; unit: string; quantity: number;
-  recipient: string; trackingNo: string; fee: MistSampleFee | null; note: string; movementId: string;
+  purpose?:SampleSendPurpose;recipient: string; trackingNo: string; fee: MistSampleFee | null; note: string; movementId: string;
   recordedAt: string; recordedBy: string; feeRecordedAt?: string; feeRecordedBy?: string;
 };
 type VersionSample = MistState['fulfillment']['samples'][number];
@@ -37,12 +38,13 @@ export function sampleFormBlocker(state: MistState, dev: MistDev, version: MistV
   return null;
 }
 /** 寄样的阻断原因；可以寄样时返回 null。 */
-export function sampleDispatchBlocker(state: MistState, dev: MistDev, version: MistVersion): string | null {
+export function sampleDispatchBlocker(state:MistState,dev:MistDev,version:MistVersion,purpose:SampleSendPurpose='confirmation',sampleId?:string):string|null {
   if (dev.billing?.request) return DEVELOPMENT_BILLING_LOCK;
   if (developmentClosure(state, dev)?.kind === 'cancelled') return '开发案已取消';
   const samples = developmentVersionSamples(state, version);
   if (!samples.length) return '本版还没有入库实物';
   if (!samples.some(sample => sample.available > 0)) return '本版实物已无可用余额';
+  if(purpose==='confirmation'){const selected=sampleId?samples.find(sample=>sample.id===sampleId):samples.find(sample=>sample.available>0);if(selected)return sampleConfirmationBlocker(state,selected);}
   return null;
 }
 /** 需求方确认是否必须写明针对哪些形态：面料版本有多条实物时必须。 */

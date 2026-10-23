@@ -219,7 +219,7 @@ describe('BB-DEV-10 version links and product conversion',()=>{
 describe('BB-DEV-6/8 fabric physical forms and dispatch on the version detail',()=>{
  const metre={id:'s-m',code:'SMP-0002',name:'测试',category:'面料',form:'米样',unit:'米',quantity:5,available:5,location:'架B',size:'',color:'',source:{kind:'version',devId:'dev-a',versionId:'va'},fileIds:[],note:'',createdAt:'2026-10-12T00:00:00Z'};
  const colour={...metre,id:'s-c',code:'SMP-0001',form:'色样',unit:'份',quantity:3,available:3,location:'架A'};
- const useFabric=(samples:object[])=>{const st=bridge.current.state;st.devs=[{...record,img:'clay',values:{...record.values,domain:'fabric',category:'斜纹',sizeBase:'',sampleForm:'色样',sampleUnit:'份'}}];st.versions[0]={...st.versions[0],sample:'R1-A-实物',size:''};st.fulfillment={samples,sampleMovements:[],qcTasks:[]};};
+ const useFabric=(samples:object[])=>{const st=bridge.current.state;st.devs=[{...record,img:'clay',values:{...record.values,domain:'fabric',category:'斜纹',sizeBase:'',sampleForm:'色样',sampleUnit:'份'}}];st.versions[0]={...st.versions[0],sample:'R1-A-实物',size:''};st.fulfillment={samples,sampleMovements:[],qcTasks:samples.map((sample:any)=>({id:'q-'+sample.id,source:sample.source,sampleId:sample.id,kind:'sample',state:'reported',reportIds:['r-'+sample.id]})),qcReports:samples.map((sample:any)=>({id:'r-'+sample.id,taskId:'q-'+sample.id,result:'pass',scopeRevision:sample.qualityRevision||1}))};};
  async function choose(label:string,value:string){const field=[...document.querySelectorAll('label')].find(item=>item.querySelector('.mist-field-label')?.textContent?.replace('*','')===label);const select=field?.querySelector('select') as HTMLSelectElement;expect(select,label).toBeTruthy();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,value);select.dispatchEvent(new Event('change',{bubbles:true}));});}
  it('lists every form with its own balance and appends a metre sample to the same version',async()=>{
   useFabric([colour]);await mount();expect(host.textContent).toContain('本版实物与寄样');expect(host.textContent).toContain('3 / 3 份');
@@ -231,7 +231,7 @@ describe('BB-DEV-6/8 fabric physical forms and dispatch on the version detail',(
   await click('寄样');await choose('寄出实物','s-m');await fill('寄出数量（米）','6');await fill('收件方','客户 Anna');
   expect(document.body.textContent).toContain('超过可用余额 5 米');expect([...document.querySelectorAll('button')].find(b=>b.textContent?.trim()==='确认寄出')!.disabled).toBe(true);
   await fill('寄出数量（米）','2');await fill('运单号','SF123');await click('确认寄出');
-  expect(bridge.current.run).toHaveBeenCalledWith({type:'development.sample.dispatch',payload:{devId:'dev-a',versionId:'va',sampleId:'s-m',quantity:2,recipient:'客户 Anna',trackingNo:'SF123',note:'',fee:null}});
+  expect(bridge.current.run).toHaveBeenCalledWith({type:'development.sample.dispatch',payload:{devId:'dev-a',versionId:'va',purpose:'confirmation',sampleId:'s-m',quantity:2,recipient:'客户 Anna',trackingNo:'SF123',note:'',fee:null}});
  });
  it('selects the actual source position before dispatching stock stored in multiple places',async()=>{
   useFabric([{...metre,location:'多个位置',positions:[{location:'架A',available:1},{location:'架B',available:4}]}]);await mount();
@@ -240,7 +240,7 @@ describe('BB-DEV-6/8 fabric physical forms and dispatch on the version detail',(
   expect(submit().disabled).toBe(true);
   await choose('本次出库位置','架A');expect(submit().disabled).toBe(true);expect(document.body.textContent).toContain('所选位置');
   await choose('本次出库位置','架B');expect(submit().disabled).toBe(false);await click('确认寄出');
-  expect(bridge.current.run).toHaveBeenCalledWith({type:'development.sample.dispatch',payload:{devId:'dev-a',versionId:'va',sampleId:'s-m',quantity:2,recipient:'客户 Anna',trackingNo:'',note:'',fee:null,sourceLocation:'架B'}});
+  expect(bridge.current.run).toHaveBeenCalledWith({type:'development.sample.dispatch',payload:{devId:'dev-a',versionId:'va',purpose:'confirmation',sampleId:'s-m',quantity:2,recipient:'客户 Anna',trackingNo:'',note:'',fee:null,sourceLocation:'架B'}});
  });
  it('requires choosing which forms a confirmation covers when the version has several',async()=>{
   useFabric([colour,metre]);await mount();

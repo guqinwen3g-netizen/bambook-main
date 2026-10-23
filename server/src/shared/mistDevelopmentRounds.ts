@@ -1,11 +1,11 @@
 /**
  * 开发轮次与固定工厂字母（BB-DEV-2）。
- * 轮次 = 一批共同开发要求，可派给任意数量的工厂；某轮某工厂的实体成果是大版本 R{轮次}-{字母}。
- * 工厂字母在本案首次参与时分配，之后固定不变；历史版本号（如 R1-A-1）按原样保留、只读。
+ * 轮次 = 一批共同开发要求，可派给任意数量的工厂；某轮某工厂的实体成果是大版本 R{轮次}-{字母}-{本厂实物序号}。
+ * 工厂字母在本案首次参与时分配，之后固定不变；历史版本号按原样保留，不回写已冻结通知或原记录。
  */
 import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
 import type { MistDev, MistRound, MistState, MistVersion } from './mistWorkspace';
-import { developmentCharged, developmentDomain, validFabricSample } from './mistDevelopmentDomain';
+import { developmentDomain, validFabricSample } from './mistDevelopmentDomain';
 
 /** 第 n 个字母（0 → A，25 → Z，26 → AA）。 */
 export function factoryLetterAt(index: number): string {
@@ -59,7 +59,20 @@ export function nextRoundNumber(state: MistState, dev: MistDev): number {
   return Math.max(...numbers) + 1;
 }
 
-export const roundVersionLabel = (round: number, letter: string) => `R${round}-${letter}`;
+export const roundVersionLabel = (round:number,letter:string,physicalNumber=1)=>`R${round}-${letter}-${physicalNumber}`;
+function factoryPhysicalVersions(state:MistState,dev:MistDev,letter:string){return devVersions(state,dev).filter(version=>!version.minor&&!/\.\d+$/.test(version.label)&&(version.factoryLetter||parseVersionLabel(version.label)?.letter)===letter);}
+export function physicalVersionNumber(state:MistState,dev:MistDev,version:MistVersion):number{
+ const explicit=/^R\d+-[A-Z]+-(\d+)$/.exec(version.label);if(explicit&&Number(explicit[1])>0)return Number(explicit[1]);
+ const letter=version.factoryLetter||parseVersionLabel(version.label)?.letter;if(!letter)return 1;
+ return Math.max(1,factoryPhysicalVersions(state,dev,letter).findIndex(row=>row.id===version.id)+1);
+}
+/** A new physical attempt reserves a unique number; minor edits and unrelated factories do not consume it. */
+export function nextPhysicalVersionNumber(state:MistState,dev:MistDev,letter:string):number{
+ const versions=factoryPhysicalVersions(state,dev,letter);return Math.max(versions.length,0,...versions.map(version=>physicalVersionNumber(state,dev,version)))+1;
+}
+export function physicalVersionLabel(state:MistState,dev:MistDev,version:MistVersion):string{
+ const parsed=parseVersionLabel(version.label);return parsed?roundVersionLabel(parsed.round,parsed.letter,physicalVersionNumber(state,dev,version)):version.label;
+}
 
 /** 页面展示用：本案轮次（含按历史版本号归组、未登记轮次记录的旧轮次）。 */
 export type DevelopmentRoundView = { number: number; round: MistRound | null; versions: MistVersion[] };
@@ -75,12 +88,11 @@ export function developmentRoundViews(state: MistState, dev: MistDev): Developme
   return [...views.values()].sort((a, b) => a.number - b.number);
 }
 
-/** 开发案级结束状态：手工取消 / 归档，或不收费开发案任一版本获需求方认可即结案。 */
-export function developmentClosure(state: MistState, dev: MistDev): { kind: 'closed' | 'archived' | 'cancelled'; label: string } | null {
+/** 整案只由业务员显式结束；版本认可、转档及财务结果均不自动结束其他任务。 */
+export function developmentClosure(_state: MistState, dev: MistDev): { kind: 'closed' | 'archived' | 'cancelled'; label: string } | null {
   if (dev.closure?.kind === 'cancelled') return { kind: 'cancelled', label: '已取消' };
   if (dev.closure?.kind === 'archived') return { kind: 'archived', label: '已归档' };
   if (dev.closure?.kind === 'closed') return { kind: 'closed', label: '已结案' };
-  if (!developmentCharged(dev.values) && state.versions.some(version => version.devId === dev.id && version.confirmations.at(-1)?.result === 'approved')) return { kind: 'closed', label: '已结案' };
   return null;
 }
 /** 开新一轮（含改版、重新打样）的阻断原因；可以开时返回 null。 */

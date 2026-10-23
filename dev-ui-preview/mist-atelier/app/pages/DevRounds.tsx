@@ -4,7 +4,7 @@ import React from 'react';
 import { FileText, Layers, Pencil, Plus, RefreshCw } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checkbox, Dialog, Field, FormGrid, Mono, Pill, Stepper, TextArea, TextInput, UploadZone } from '../../../../components/mist';
 import type { MistDev, MistRound, MistState, MistVersion } from '../../../../server/src/shared/mistWorkspace';
-import { caseFactoryLetters, defaultFactoryTask, developmentClosure, developmentRoundBlocker, duplicateRoundFactories, developmentRoundViews, factoryLetterAt, factoryTaskError, factoryTaskSync, factoryTaskSyncBlocker, nextRoundNumber, roundVersionLabel, type FactoryTaskInput } from '../../../../server/src/shared/mistDevelopmentRounds';
+import { caseFactoryLetters, defaultFactoryTask, developmentClosure, developmentRoundBlocker, duplicateRoundFactories, developmentRoundViews, factoryLetterAt, factoryTaskError, factoryTaskSync, factoryTaskSyncBlocker, nextRoundNumber, nextPhysicalVersionNumber, roundVersionLabel, type FactoryTaskInput } from '../../../../server/src/shared/mistDevelopmentRounds';
 import { developmentDomain } from '../../../../server/src/shared/mistDevelopmentDomain';
 import { withPrimaryImage } from '../../../../server/src/shared/mistPrimaryImage';
 import { ImageRoleTag, PRIMARY_IMAGE_HINT, imageRole, imageUploadTitle } from './modules/PrimaryImage';
@@ -33,7 +33,7 @@ export function previewRoundLabels(state: MistState, dev: MistDev, factories: st
   const letters = caseFactoryLetters(state, dev), used = new Set(Object.values(letters)), round = nextRoundNumber(state, dev);
   return factories.map(factory => {
     if (!letters[factory]) { let index = 0; while (used.has(factoryLetterAt(index))) index++; letters[factory] = factoryLetterAt(index); used.add(letters[factory]); }
-    return roundVersionLabel(round, letters[factory]);
+    return roundVersionLabel(round, letters[factory],nextPhysicalVersionNumber(state,dev,letters[factory]));
   });
 }
 /** 分步校验：返回第 step 步（0 起）之前及本步的第一个问题；不传 step 时校验全部。 */

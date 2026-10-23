@@ -13,21 +13,21 @@ function fixture(){
 const labels=(f:ReturnType<typeof fixture>,devId:string)=>f.state.devs.find(d=>d.id===devId)!.versionIds.map(id=>f.state.versions.find(v=>v.id===id)!.label);
 
 describe('BB-DEV-2 development rounds and fixed factory letters',()=>{
-  it('A/B/C do R1, then R2 sends only C plus new D: versions R2-C and R2-D, R1 unchanged',()=>{
+  it('A/B/C do R1, then R2 sends only C plus new D: versions R2-C-2 and R2-D-1, R1 unchanged',()=>{
     const f=fixture(),ids=f.run({type:'development.submit',payload:{values:f.values,fileIds:[]}}),devId=ids.devId!;
-    expect(labels(f,devId)).toEqual(['R1-A','R1-B','R1-C']);
+    expect(labels(f,devId)).toEqual(['R1-A-1','R1-B-1','R1-C-1']);
     const r1=JSON.parse(JSON.stringify(f.state.versions.filter(v=>v.devId===devId)));
     const c1=r1.find((v:any)=>v.factory==='C厂');
     const r=f.run({type:'development.round.create',payload:{devId,factories:['C厂','D厂'],requirements:'收腰 2cm，换哑光扣',referenceVersionIds:[c1.id],targetDate:'2026-11-10'}});
-    expect(labels(f,devId)).toEqual(['R1-A','R1-B','R1-C','R2-C','R2-D']);
+    expect(labels(f,devId)).toEqual(['R1-A-1','R1-B-1','R1-C-1','R2-C-2','R2-D-1']);
     expect(f.state.versions.filter(v=>r1.some((old:any)=>old.id===v.id))).toEqual(r1);
     const round=f.state.rounds!.find(x=>x.id===r.roundId)!;
     expect(round).toMatchObject({number:2,requirements:'收腰 2cm，换哑光扣',referenceVersionIds:[c1.id],factories:['C厂','D厂'],targetDate:'2026-11-10'});
     expect(f.state.devs.find(d=>d.id===devId)!.factoryLetters).toEqual({'A厂':'A','B厂':'B','C厂':'C','D厂':'D'});
-    expect(f.state.versions.find(v=>v.label==='R2-D')).toMatchObject({roundId:round.id,factoryLetter:'D',note:'收腰 2cm，换哑光扣',returnedAt:null,qc:null});
+    expect(f.state.versions.find(v=>v.label==='R2-D-1')).toMatchObject({roundId:round.id,factoryLetter:'D',note:'收腰 2cm，换哑光扣',returnedAt:null,qc:null});
     // A rejoining later keeps its first letter.
     f.run({type:'development.round.create',payload:{devId,factories:['A厂'],requirements:'回到 A 方案',targetDate:'2026-11-20'}});
-    expect(labels(f,devId).at(-1)).toBe('R3-A');
+    expect(labels(f,devId).at(-1)).toBe('R3-A-2');
   });
   it('validates round inputs in the command and writes nothing on failure',()=>{
     const f=fixture(),devId=f.run({type:'development.submit',payload:{values:f.values,fileIds:[]}}).devId!,before=JSON.stringify(f.state);
@@ -40,9 +40,9 @@ describe('BB-DEV-2 development rounds and fixed factory letters',()=>{
   });
   it('revise opens the next round for the same factory with its fixed letter',()=>{
     const f=fixture(),ids=f.run({type:'development.submit',payload:{values:f.values,fileIds:[]}}),devId=ids.devId!;
-    const b=f.state.versions.find(v=>v.label==='R1-B')!;
+    const b=f.state.versions.find(v=>v.label==='R1-B-1')!;
     const r=f.run({type:'development.revise',payload:{devId,versionId:b.id,note:'袖长 -1cm'}});
-    expect(f.state.versions.find(v=>v.id===r.versionId)!.label).toBe('R2-B');
+    expect(f.state.versions.find(v=>v.id===r.versionId)!.label).toBe('R2-B-2');
     expect(f.state.rounds!.find(x=>x.id===r.roundId)).toMatchObject({number:2,factories:['B厂'],referenceVersionIds:[b.id],requirements:'袖长 -1cm'});
   });
   it('keeps historical labels as-is and derives their letters and rounds read-only',()=>{
@@ -51,8 +51,8 @@ describe('BB-DEV-2 development rounds and fixed factory letters',()=>{
     const state=JSON.parse(JSON.stringify(f.state));const v=state.versions.find((x:any)=>x.id===legacy.id);v.label='R2-B-1';delete v.roundId;delete v.factoryLetter;state.rounds=[];delete state.devs[0].factoryLetters;
     const ctx={...f.ctx};const next=applyMistCommand(state,{type:'development.round.create',payload:{devId,factories:['A厂','E厂'],requirements:'第三轮',targetDate:'2026-11-01'}},ctx).state;
     const after=next.devs[0].versionIds.map((id:string)=>next.versions.find((x:any)=>x.id===id)!.label);
-    expect(after).toEqual(['R2-B-1','R3-B','R3-A']);
-    expect(developmentRoundViews(next,next.devs[0]).map(view=>[view.number,!!view.round,view.versions.map(x=>x.label)])).toEqual([[2,false,['R2-B-1']],[3,true,['R3-B','R3-A']]]);
+    expect(after).toEqual(['R2-B-1','R3-B-2','R3-A-1']);
+    expect(developmentRoundViews(next,next.devs[0]).map(view=>[view.number,!!view.round,view.versions.map(x=>x.label)])).toEqual([[2,false,['R2-B-1']],[3,true,['R3-B-2','R3-A-1']]]);
   });
   it('allocates letters beyond Z and parses both label styles',()=>{
     expect([0,3,25,26,27].map(factoryLetterAt)).toEqual(['A','D','Z','AA','AB']);
@@ -77,14 +77,15 @@ describe('acceptance review #59: round creation boundaries',()=>{
     expect(()=>t.run({type:'development.revise',payload:{devId:t.devId,versionId:t.versionId,note:'改'}})).toThrow(/不能再开新一轮/);
     expect(JSON.stringify(t.state)).toBe(before);
   });
-  it('rejects a new round, including resample, on a closed (non-charged, approved) case',()=>{
+  it('keeps an approved non-charged case open until explicitly ended',()=>{
     const t=setup(),dev=t.state.devs.find(d=>d.id===t.devId)!;dev.values.charged=false;
     t.run({type:'development.recordSample',payload:{devId:t.devId,versionId:t.versionId,sample:'S',quantity:1,returnedAt:t.ctx.now}});
     t.run({type:'development.recordQc',payload:{devId:t.devId,versionId:t.versionId,qc:{result:'pass',reviewer:'QC',reviewedAt:t.ctx.now,report:'R',opinion:'通过',measurements:[]}}});
     t.run({type:'development.confirm',payload:{devId:t.devId,versionId:t.versionId,result:'approved',confirmer:'客户',organization:'',confirmedAt:t.ctx.now,basis:'邮件',originalText:''}});
-    const before=JSON.stringify(t.state);
-    expect(()=>t.run(round(t.devId))).toThrow(/已结案，不能再开新一轮/);
-    expect(JSON.stringify(t.state)).toBe(before);
+    const original=structuredClone(t.state.versions.find(v=>v.id===t.versionId));
+    expect(t.state.devs.find(d=>d.id===t.devId)!.state).toBe('已认可');
+    expect(()=>t.run(round(t.devId))).not.toThrow();
+    expect(t.state.versions.find(v=>v.id===t.versionId)).toEqual(original);
   });
   it('rejects duplicate factories within one round instead of silently de-duplicating',()=>{
     const t=setup(),before=JSON.stringify(t.state);
@@ -96,4 +97,32 @@ describe('acceptance review #59: round creation boundaries',()=>{
     const t=setup();expect(()=>t.run({type:'development.close',payload:{devId:t.devId,kind:'cancelled',reason:'  '}})).toThrow();
     expect(t.state.devs.find(d=>d.id===t.devId)!.closure).toBeUndefined();
   });
+});
+
+it('numbers each factory physical attempt independently from the round and preserves prior versions',()=>{
+ const f=fixture(),devId=f.run({type:'development.submit',payload:{values:f.values,fileIds:[]}}).devId!;
+ expect(labels(f,devId)).toEqual(['R1-A-1','R1-B-1','R1-C-1']);
+ const original=structuredClone(f.state.versions);
+ f.run({type:'development.round.create',payload:{devId,factories:['C厂','D厂'],requirements:'整改',targetDate:'2026-11-01'}});
+ expect(labels(f,devId).slice(-2)).toEqual(['R2-C-2','R2-D-1']);expect(f.state.versions.slice(0,3)).toEqual(original);
+});
+
+it('keeps free development open after an approved version until the business explicitly ends the case',()=>{
+ const f=fixture(),created=f.run({type:'development.submit',payload:{values:{...f.values,factories:['A厂'],charged:false},fileIds:[]}}),devId=created.devId!,versionId=created.versionId!;
+ f.run({type:'development.recordSample',payload:{devId,versionId,sample:'S1',quantity:1,returnedAt:f.ctx.now}});
+ f.run({type:'development.recordQc',payload:{devId,versionId,qc:{result:'pass',reviewer:'QC',reviewedAt:f.ctx.now,report:'Q1',opinion:'通过'}}});
+ f.run({type:'development.confirm',payload:{devId,versionId,result:'approved',confirmer:'客户',organization:'客户',confirmedAt:f.ctx.now,basis:'确认邮件',originalText:'同意'}});
+ expect(f.state.devs.find(d=>d.id===devId)!.state).toBe('已认可');
+ expect(()=>f.run({type:'development.round.create',payload:{devId,factories:['A厂'],requirements:'后续独立打样',targetDate:'2026-11-01'}})).not.toThrow();
+});
+
+it('does not count minor edits as physical attempts or rewrite an old abbreviated label',()=>{
+ const f=fixture(),created=f.run({type:'development.submit',payload:{values:{...f.values,factories:['A厂']},fileIds:[]}}),devId=created.devId!,versionId=created.versionId!;
+ f.run({type:'development.recordSample',payload:{devId,versionId,sample:'S1',quantity:1,returnedAt:f.ctx.now}});f.run({type:'development.recordQc',payload:{devId,versionId,qc:{result:'pass',reviewer:'QC',reviewedAt:f.ctx.now,report:'Q1',opinion:'通过'}}});
+ f.state.versions.find(v=>v.id===versionId)!.label='R1-A';
+ const original=structuredClone(f.state.versions.find(v=>v.id===versionId)!);
+ const minor=f.run({type:'development.version.recordMinor',payload:{devId,versionId,change:'调整洗标位置'}}).versionId!;
+ expect(f.state.versions.find(v=>v.id===minor)!.label).toBe('R1-A-1.1');
+ f.run({type:'development.round.create',payload:{devId,factories:['A厂'],requirements:'新实物复样',targetDate:'2026-11-01'}});
+ expect(labels(f,devId).at(-1)).toBe('R2-A-2');expect(f.state.versions.find(v=>v.id===versionId)).toEqual(original);
 });
