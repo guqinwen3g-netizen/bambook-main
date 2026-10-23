@@ -167,12 +167,12 @@ it("freezes sources without silently applying selling price, then exports only e
       ) as HTMLInputElement
     ).checked,
   ).toBe(false);
-  await click("保存核算快照");
+  await click("保存核算");
   expect(q().lines[0].price).toBe(original.lines[0].price);
   expect(q().lines[0].cost).toBe("10.00");
   expect(q().costingSnapshots).toHaveLength(1);
   expect(bridge.w.state.orders).toEqual(otherOrders);
-  expect(host.textContent).toContain("已冻结条目核算");
+  expect(host.textContent).toContain("核算记录");
   await click("导出本条目核算");
   expect(bridge.csv.mock.calls[0][2]).toHaveLength(1);
 });
@@ -190,7 +190,7 @@ it("distinguishes target gross margin and applies only manually selected quote p
       ) as HTMLInputElement
     ).click(),
   );
-  await click("保存核算快照");
+  await click("保存核算");
   expect(q().lines[0].price).toBe("14.00");
   expect(q().requiresApproval).toBe(true);
   expect(q().status).toBe("Draft");
@@ -215,7 +215,7 @@ it("supports manual professional breakdown without a supplier base and explicit 
   field("本次报价策略依据", "软件验收本次交易");
   await click("下一步");
   expect(host.textContent).toContain("6.6000");
-  await click("保存核算快照");
+  await click("保存核算");
   expect(q().costingSnapshots[0].input.mode).toBe("breakdown");
   expect(q().costingSnapshots[0].supplier).toBeNull();
 });
@@ -235,7 +235,7 @@ it("server rejects unit mismatch and keeps all inputs for correction", async () 
   field("成本计价单位", "公斤");
   await fill();
   await click("下一步");
-  await click("保存核算快照");
+  await click("保存核算");
   expect(host.textContent).toContain("不自动换算");
   await click("上一步");
   await click("上一步");
@@ -249,9 +249,9 @@ it("does not treat incomplete receipt as success", async () => {
   render();
   await fill();
   await click("下一步");
-  await click("保存核算快照");
+  await click("保存核算");
   expect(host.textContent).toContain("回执缺少准确核算快照");
-  expect(getByRole(host, "button", { name: "保存核算快照" })).toBeTruthy();
+  expect(getByRole(host, "button", { name: "保存核算" })).toBeTruthy();
 });
 it("same-tick duplicate save is locked while the exact request is in flight", async () => {
   let resolve: any;
@@ -259,7 +259,7 @@ it("same-tick duplicate save is locked while the exact request is in flight", as
   render();
   await fill();
   await click("下一步");
-  const b = getByRole(host, "button", { name: "保存核算快照" });
+  const b = getByRole(host, "button", { name: "保存核算" });
   act(() => {
     b.click();
     b.click();
@@ -277,7 +277,7 @@ it("rejects optimistic stale commercial terms without rerunning or discarding in
   await click("下一步");
   q().paymentTerms = "changed after draft";
   render();
-  await click("保存核算快照");
+  await click("保存核算");
   expect(host.textContent).toContain("已变化");
   expect(bridge.w.run).not.toHaveBeenCalled();
 });
@@ -320,7 +320,7 @@ it("late response from another workspace cannot replace current draft", async ()
   render();
   await fill();
   await click("下一步");
-  act(() => getByRole(host, "button", { name: "保存核算快照" }).click());
+  act(() => getByRole(host, "button", { name: "保存核算" }).click());
   bridge.w.workspace = { id: "other-space" };
   render();
   expect(
@@ -328,19 +328,19 @@ it("late response from another workspace cannot replace current draft", async ()
   ).toBe("");
   await act(async () => reject(Error("OLD RESPONSE")));
   expect(host.textContent).not.toContain("OLD RESPONSE");
-  expect(host.textContent).not.toContain("已冻结条目核算");
+  expect(host.textContent).not.toContain("核算记录");
 });
 it("copies immutable latest input into a new draft and never overwrites previous snapshot", async () => {
   render();
   await fill();
   await click("下一步");
-  await click("保存核算快照");
+  await click("保存核算");
   const first = structuredClone(q().costingSnapshots[0]);
   await click("新建核算");
   field("供应商成品单价", "20");
   await click("下一步");
   await click("下一步");
-  await click("保存核算快照");
+  await click("保存核算");
   expect(q().costingSnapshots).toHaveLength(2);
   expect(q().costingSnapshots[0]).toEqual(first);
   expect(q().costingSnapshots[1].result.cost).toBe("20.0000");
@@ -350,7 +350,7 @@ it("retains a read-only history route after ordinary quote editing recreates lin
   render();
   await fill();
   await click("下一步");
-  await click("保存核算快照");
+  await click("保存核算");
   const old = structuredClone(q().costingSnapshots[0]),
     quote = q();
   const changed = applyMistCommand(
@@ -381,7 +381,8 @@ it("retains a read-only history route after ordinary quote editing recreates lin
     section: "cost-history",
   });
   expect(host.textContent).toContain("报价核算历史");
-  expect(host.textContent).toContain(old.id);
+  const history=host.querySelector(`[data-cost-snapshot="${old.id}"]`);
+  expect(history).not.toBeNull();expect(history!.textContent).toContain(old.target.line.style);expect(history!.textContent).toContain(old.result.cost);
   expect(host.querySelector("input")).toBeNull();
   expect(q().lines[0].id).not.toBe(old.lineId);
   expect(q().costingSnapshots[0]).toEqual(old);
@@ -405,7 +406,7 @@ it("manually confirms historical evidence without importing its price, then expo
   act(() => check.click());
   await click("下一步");
   expect(host.textContent).toContain("软件验收人工对照");
-  await click("保存核算快照");
+  await click("保存核算");
   const evidence = q().costingSnapshots?.at(-1)?.historyEvidence;
   expect(evidence?.source.quoteCode).toBe("QT-2026-0003");
   expect(q().lines[0].price).not.toBe("14.00");
@@ -473,7 +474,7 @@ it("separates line-only fees, requires ownership, freezes allocation and exports
   await fill();
   await click("下一步");
   expect(host.textContent).toContain("本报价行整笔费用分摊");
-  await click("保存核算快照");
+  await click("保存核算");
   const snap = q().costingSnapshots!.at(-1)!;
   expect(snap.modelVersion).toBe("quote-cost-line-allocation-v2");
   expect(snap.result.allocation).toEqual({
@@ -517,7 +518,7 @@ it("leaves the previous per-unit formula unchanged when the scope is omitted", a
   );
   await fill();
   await click("下一步");
-  await click("保存核算快照");
+  await click("保存核算");
   expect(q().costingSnapshots!.at(-1)!.modelVersion).toBe("quote-cost-v1");
   expect(q().costingSnapshots!.at(-1)!.result.cost).toBe("12.0000");
   expect(q().costingSnapshots!.at(-1)!.result.allocation).toBeUndefined();
