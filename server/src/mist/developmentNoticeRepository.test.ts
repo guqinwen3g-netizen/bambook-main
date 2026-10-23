@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import * as contract from '../shared/mistWorkspace';
-import {developmentNoticeOutdated,developmentNotices} from '../shared/mistDevelopmentNotice';
+import {developmentNoticeOutdated,developmentNotices,developmentNoticeTime} from '../shared/mistDevelopmentNotice';
 import {renderDevelopmentNoticeHtml} from '../templates/developmentNotice';
 import {MistRepository,type MistCommandRequest} from './repository';
 import {MistPrivateFiles} from './files';
@@ -42,6 +42,12 @@ beforeEach(async()=>{
 afterEach(async()=>{vi.restoreAllMocks();await rm(directory,{recursive:true,force:true});});
 
 describe('BB-DEV-4 试样通知单',()=>{
+ it('uses the Beijing date and time without changing the stored timestamp',()=>{
+  const instant='2026-10-08T18:30:00.000Z';
+  expect(developmentNoticeTime(instant)).toBe('2026-10-09 02:30');
+  expect(developmentNoticeTime('2026-10-08T00:18:00.000Z')).toBe('2026-10-08 08:18');
+  expect(instant).toBe('2026-10-08T18:30:00.000Z');
+ });
  it('two factories with different differences each get their own correct notice',async()=>{
   await notice('n-a','R2-A');await notice('n-b','R2-B');
   expect(renderPdf).toHaveBeenCalledTimes(2);
@@ -106,5 +112,8 @@ describe('BB-DEV-4 试样通知单',()=>{
   const html=renderDevelopmentNoticeHtml({domain:'fabric',title:'面料试样通知单',factory:'<b>织厂</b>',devId:'d',devCode:'DEV-F-1',devName:'斜纹',versionId:'v',versionLabel:'R1-A',roundNumber:1,roundTargetDate:'2026-11-01',style:'',category:'斜纹',season:'AW',color:'蓝',fabric:'',sizeBase:'',fabricRequirements:[{label:'成分',value:'棉:100'}],commonRequirements:'克重 240',extraRequirements:'',sampleForm:'米样',sampleQuantity:2,sampleUnit:'米',dueDate:'2026-11-01',attachments:[{fileId:'f',name:'色卡.pdf'}],issuer:{legalName:'公司',englishName:'',address:'',phone:'',email:''},noticeNo:'DEV-F-1-R1-A-N01',seq:1,templateVersion:1,generatedAt:now,generatedBy:'林',generatedById:'u'});
   expect(html).toContain('面料试样通知单');expect(html).toContain('成分');expect(html).toContain('2 米');expect(html).toContain('色卡.pdf');expect(html).toContain('无（按共同要求）');
   expect(html).not.toContain('<b>织厂</b>');expect(html).toContain('&lt;b&gt;织厂&lt;/b&gt;');
+  expect(html).toContain('2026-10-16 16:00（北京时间）');
+  expect(html).not.toContain('Template v');
+  expect(html).not.toContain('version-note');
  });
 });

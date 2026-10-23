@@ -8,7 +8,7 @@ import { developmentDomain, type DevelopmentDomain } from './mistDevelopmentDoma
 import { developmentClosure, factoryTaskSync } from './mistDevelopmentRounds';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
 
-export const DEV_NOTICE_TEMPLATE_VERSION = 1 as const;
+export const DEV_NOTICE_TEMPLATE_VERSION = 2 as const;
 export type DevNoticeContent = {
   domain: DevelopmentDomain; title: string; factory: string;
   devId: string; devCode: string; devName: string; versionId: string; versionLabel: string; roundNumber: number; roundTargetDate: string;
@@ -26,6 +26,14 @@ export type DevNoticeFile = { id: string; name: string; mimeType: string; size: 
 export type DevNoticeArtifact = { requestId: string; record: DevNoticeRecord; file: DevNoticeFile };
 
 export const developmentNoticeTitle = (domain: DevelopmentDomain) => domain === 'fabric' ? '面料试样通知单' : '服装开发通知单';
+/** Keep the stored instant intact; business-facing notice timestamps use Beijing time. */
+export function developmentNoticeTime(instant: string): string {
+  const date = new Date(instant);
+  if (!Number.isFinite(date.getTime())) return '—';
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
+  const part = (type: string) => parts.find(value => value.type === type)?.value;
+  return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}`;
+}
 const FABRIC_LABELS: Array<[keyof NonNullable<MistVersion['fabricRequirements']>, string]> = [['composition', '成分'], ['yarn', '纱支'], ['weave', '组织'], ['usage', '用途'], ['handle', '手感'], ['finish', '后整理'], ['performance', '性能']];
 
 /** 生成通知单的阻断原因；可以生成时返回 null。 */

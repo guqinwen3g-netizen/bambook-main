@@ -4,7 +4,7 @@ import React from 'react';
 import { Download, FileText, Printer, RefreshCw } from 'lucide-react';
 import { Button, Card, CardHeader, Mono, Pill } from '../../../../components/mist';
 import type { MistDev, MistState, MistVersion } from '../../../../server/src/shared/mistWorkspace';
-import { developmentNoticeBlocker, developmentNoticeOutdated, developmentNotices, developmentNoticeTitle } from '../../../../server/src/shared/mistDevelopmentNotice';
+import { developmentNoticeBlocker, developmentNoticeOutdated, developmentNotices, developmentNoticeTitle, developmentNoticeTime } from '../../../../server/src/shared/mistDevelopmentNotice';
 import { developmentDomain } from '../../../../server/src/shared/mistDevelopmentDomain';
 import { PreviewButton } from '../runtime/files';
 
@@ -21,7 +21,7 @@ export function DevNoticeCard({ state, dev, version, busy, onGenerate, onDownloa
     <div role="list" aria-label={uiText(`${version.label} ${title}`)} style={{ padding: '0 22px 14px' }}>
       {notices.length ? notices.map((notice, index) => <div key={notice.id} role="listitem" className="mist-row" data-notice={notice.noticeNo} style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }}>
         <Pill tone={index === 0 ? (outdated ? 'warn' : 'ok') : 'neutral'}>{uiText(index === 0 ? '最新' : '旧版')}</Pill>
-        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><Mono>{notice.noticeNo}</Mono><small className="mist-muted">{notice.generatedBy} · {notice.generatedAt.replace('T', ' ').slice(0, 16)}{uiText(" · 要求 ")}{notice.snapshot.dueDate}</small></span>
+        <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><Mono>{notice.noticeNo}</Mono><small className="mist-muted">{notice.generatedBy} · {developmentNoticeTime(notice.generatedAt)}{uiText(" · 要求 ")}{notice.snapshot.dueDate}</small></span>
         <span className="mist-spacer" />
         <PreviewButton file={state.files.find(f => f.id === notice.fileId)} disabled={busy} />
         <Button size="sm" variant="quiet" icon={Download} disabled={busy} onClick={() => onDownload(notice.fileId)}>{uiText("下载")}</Button>

@@ -114,7 +114,7 @@ describe('BB-DEV-4 试样通知单卡片',()=>{
   it('lists the latest notice first with old ones kept, and flags 工厂任务已更新 after a sync until regenerated',async()=>{
     state.settings.companyProfile={...company};const a=state.versions.find(v=>v.label==='R1-A')!;
     notice('R1-A',1);await rerender(a.id);
-    expect(card().textContent).not.toContain('工厂任务已更新');expect([...card().querySelectorAll('button')].some(b=>b.textContent?.trim()==='重新生成')).toBe(true);
+    expect(card().textContent).toContain('2026-10-16 17:00');expect(card().textContent).not.toContain('工厂任务已更新');expect([...card().querySelectorAll('button')].some(b=>b.textContent?.trim()==='重新生成')).toBe(true);
     apply({type:'development.round.updateRequirements',payload:{devId,roundId:a.roundId!,requirements:'首轮：袖长 -1cm'}});apply({type:'development.version.syncRequirements',payload:{devId,versionId:a.id}});
     await rerender(a.id);expect(card().textContent).toContain('工厂任务已更新，可重新生成');
     notice('R1-A',2);await rerender(a.id);
