@@ -161,7 +161,7 @@ export function MeasurementTable({ rows, unit = 'cm' }: { rows: Measurement[]; u
   const sameTolerance = tol !== undefined && rows.every(row => row.tolerance === tol);
   return (
     <div className="mist-measure">
-      <div className="mist-measure-row" data-head><span>{uiText("部位")}</span><span>{uiText("标准")}</span><span>{uiText("实测")}</span><span>{uiText(sameTolerance ? `公差 ±${Number.isInteger(tol) ? tol.toFixed(1) : String(tol)}${unit}` : `公差（${unit}）`)}</span><span style={{ textAlign: 'right' }}>{uiText("偏差")}</span></div>
+      <div className="mist-measure-row" data-head><span>{uiText("部位")}</span><span>{uiText("标准")}</span><span>{uiText("实测")}</span><span>{uiText(sameTolerance ? `公差 ±${Number.isInteger(tol) ? tol.toFixed(1) : String(tol)}${unit}` : (unit ? `公差（${unit}）` : '公差'))}</span><span style={{ textAlign: 'right' }}>{uiText("偏差")}</span></div>
       {!rows.length && <div className="mist-measure-row"><span className="mist-muted" style={{ gridColumn: '1 / -1' }}>{uiText("暂无测量记录")}</span></div>}
       {rows.map((r, index) => {
         const raw = r.actual - r.standard, epsilon = r.tolerance === 0 ? 0 : Number.EPSILON * Math.max(1, Math.abs(r.standard), Math.abs(r.actual), r.tolerance) * 4;

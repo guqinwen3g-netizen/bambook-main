@@ -42,6 +42,14 @@ it('opens the correct QC domain when arriving from an explicitly typed developme
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it.each(['fabric','garment'] as const)('shows measurement tolerances with units appropriate to %s QC',domain=>{
+  store.state!.fulfillment.qcTasks.push(task('units',{domain,state:'reported',reportIds:['report-units']}));
+  store.state!.fulfillment.qcReports.push({id:'report-units',taskId:'units',result:'pass',report:'UNITS',opinion:'',measurements:[{point:domain==='fabric'?'克重（g/m²）':'袖长',standard:300,actual:306,tolerance:15}],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-08T00:18:00Z'});
+  render('units');
+  const label=host.querySelector('.mist-tol')?.getAttribute('aria-label');
+  expect(label).toBe(domain==='fabric'?'克重（g/m²） 公差 ±15':'袖长 公差 ±15cm');
+});
+
 it('shows separate fabric and garment entry cards with their own pending, open-branch and NOK numbers',async()=>{
   store.state!.fulfillment.qcTasks.push(
     task('g-s1'),task('g-s2',{state:'working',assignee:'QC甲',assigneeId:'qc-a'}),

@@ -6,12 +6,19 @@ import { MeasurementTable } from './patterns';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined, host: HTMLDivElement;
-function render(rows: React.ComponentProps<typeof MeasurementTable>['rows']) {
+function render(rows: React.ComponentProps<typeof MeasurementTable>['rows'], unit?: string) {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  act(() => root!.render(<MeasurementTable rows={rows} />));
+  act(() => root!.render(<MeasurementTable rows={rows} unit={unit} />));
   return host;
 }
 afterEach(() => { act(() => root?.unmount()); host?.remove(); root = undefined; });
+
+it('does not invent a shared unit for measurements with different units', () => {
+  render([{ point: '湿摩擦牢度（级）', standard: 3, actual: 2.5, tolerance: 0 }, { point: '克重（g/m²）', standard: 300, actual: 306, tolerance: 15 }], '');
+  expect(host.querySelector('[data-head]')?.textContent).toContain('公差');
+  expect(host.querySelector('[data-head]')?.textContent).not.toMatch(/cm|（）/);
+  expect([...host.querySelectorAll('.mist-tol')].map(item => item.getAttribute('aria-label'))).toEqual(['湿摩擦牢度（级） 公差 ±0', '克重（g/m²） 公差 ±15']);
+});
 
 it('keeps the original five columns and renders an empty state without an invented tolerance', () => {
   render([]);
