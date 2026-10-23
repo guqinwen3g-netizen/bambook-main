@@ -14,7 +14,7 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'sal
 import {SamplesPage} from './SamplesPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><SamplesPage/></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string,context:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',id,...context},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><SamplesPage/></Nav.Provider></ToastProvider></MistRoot>));}
 const version={kind:'version' as const,devId:'dev',versionId:'ver'};
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
 beforeEach(()=>{write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
@@ -76,4 +76,17 @@ it('links a dispatch movement created on the development version back to that de
   const link=[...document.body.querySelectorAll('button')].find(button=>button.textContent?.trim()==='查看开发案 DEV-6') as HTMLButtonElement;
   expect(link).toBeTruthy();act(()=>link.click());
   expect(go).toHaveBeenCalledWith('development/detail','dev',{versionId:'ver'});
+});
+
+it.each(['fabric','garment'] as const)('follows the linked production domain when the other category already has samples: %s',async domain=>{
+  store.state!.orders.push({id:'linked-order',code:'SO-LINKED',type:domain} as any);
+  store.state!.orderLines.push({id:'linked-line',orderId:'linked-order',name:'Linked item',style:'LINKED',img:'coat',qty:10,unit:domain==='fabric'?'米':'件',price:1,made:0,qc:0});
+  store.state!.productions.push({id:'linked-production',orderId:'linked-order',lineId:'linked-line',order:'SO-LINKED',code:'PO-LINKED',name:'Linked item',factory:'Factory',qty:10,pct:0,col:'cut',img:'coat',due:'2026-12-01'});
+  store.state!.fulfillment.samples.push({...fabric('opposite','样衣','件',1,1),category:domain==='fabric'?'成衣':'面料'});
+  render(undefined,{productionId:'linked-production'});
+  expect(getByRole(host,'tab',{name:domain==='fabric'?/^面料/:/^成衣/}).getAttribute('aria-selected')).toBe('true');
+  await act(async()=>getAllByRole(host,'button',{name:'新建样品',exact:true})[0].click());
+  expect((getByRole(host,'combobox',{name:'大类'}) as HTMLSelectElement).value).toBe(domain==='fabric'?'面料':'成衣');
+  expect((getByRole(host,'combobox',{name:'准确来源'}) as HTMLSelectElement).value).toBe('production:linked-production');
+  expect((getByRole(host,'combobox',{name:'订单样品角色'}) as HTMLSelectElement).value).toBe(domain==='fabric'?'pioneer':'pp');
 });
