@@ -26,6 +26,10 @@ beforeEach(()=>{session.id='biz';session.denied=new Set();const s=createMistStat
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('shows actual air departure states without sea-only labels or a duplicate instruction banner',()=>{
+ const s=shipment('air',{mode:'air',state:'ready',documentsSentAt:'2026-10-13T08:00:00Z'});store.state!.fulfillment.shipments.push(s);render('air');expect(host.textContent).toContain('待起飞');expect(host.textContent).not.toContain('等待离港');expect(host.textContent).not.toContain('业务已对客发送；出口清关完成后才能登记实际离港。');s.state='departed';s.departedAt='2026-10-13T09:00:00Z';store.state={...store.state!};render('air');expect(host.textContent).toContain('已起飞');expect(host.textContent).not.toContain('已离港');
+});
+
 it('derives the logistics stage only from recorded packing, booking, documents, dispatch and departure',()=>{
   const f=store.state!.fulfillment;
   f.shipments.push(shipment('a'),shipment('b',{booking:'BK'}),shipment('c',{state:'ready'}),shipment('d',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}),shipment('e',{state:'departed',departedAt:'2026-10-13T08:00:00Z'}),shipment('f',{state:'cancelled'}),shipment('g'));
@@ -55,7 +59,7 @@ it('shows why documents cannot be marked ready and hides request edits once logi
   const f=store.state!.fulfillment;f.shipments.push(shipment('s',{booking:'BK-1'}));f.packing.push(pack('s',10));f.documents.push(doc('pl','s','PL'),doc('ci','s','CI','draft'));
   render('s');
   const detail=host.querySelector('[data-shipment-detail="s"]') as HTMLElement;
-  expect(detail.textContent).toContain('后勤处理中');
+  expect(detail.textContent).toContain('物流处理中');
   expect((getByRole(detail,'button',{name:'完成单证准备'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('完成单证准备：请按原订单分别签发 CI');
   expect((getByRole(detail,'button',{name:'分配装箱'}) as HTMLButtonElement).disabled).toBe(true);

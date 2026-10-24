@@ -120,7 +120,8 @@ type Domain = FulfillmentShipment['domain'];
 type Stage = 'intake' | 'logistics' | 'business' | 'departure' | 'departed' | 'cancelled';
 type StageFilter = 'all' | Stage;
 type FlagFilter = 'all' | 'overdue' | 'packing' | 'mine';
-export const STAGE_LABEL: Record<Stage, string> = { intake: '待物流接手', logistics: '物流处理中', business: '资料已回业务', departure: '待离港', departed: '已出运', cancelled: '已取消' };
+export const STAGE_LABEL: Record<Stage, string> = { intake: '待物流接手', logistics: '物流处理中', business: '资料已回业务', departure: '待出运', departed: '已出运', cancelled: '已取消' };
+export const shipmentStageLabel = (s: FulfillmentShipment, stage: Stage) => stage === 'departure' ? s.mode === 'air' ? '待起飞' : '待离港' : stage === 'departed' ? s.mode === 'air' ? '已起飞' : '已离港' : STAGE_LABEL[stage];
 export const STAGE_TONE: Record<Stage, Tone> = { intake: 'warn', logistics: 'accent', business: 'warn', departure: 'accent', departed: 'ok', cancelled: 'neutral' };
 export const MODE_LABEL: Record<FulfillmentShipment['mode'], string> = { sea: '海运', air: '空运' };
 const round = (value: number) => Math.round(value * 10000) / 10000;
@@ -196,7 +197,7 @@ export function ShipmentsPage() {
     { key: 'mode', header: '运输', width: 'minmax(140px,1.2fr)', hideOnMobile: true, render: s => <div className="mist-col" style={{ gap: 2 }}><span>{MODE_LABEL[s.mode]} · {s.portOfLoading} → {s.portOfDischarge}</span><small className="mist-muted">{s.incoterm} · {uiText(s.booking ? `订舱 ${s.booking}` : '未订舱')}</small></div> },
     { key: 'source', header: '来源', width: 'minmax(110px,1fr)', hideOnMobile: true, render: s => { const orders = [...new Set(s.lines.map(line => line.orderId))]; return <div className="mist-col" style={{ gap: 2 }}><span>{orders.length}{uiText(" 个订单 · ")}{s.lines.length}{uiText(" 条目")}</span><small className="mist-muted">{orders.map(id => state?.orders.find(o => o.id === id)?.code || '订单不可用').join('、')}</small></div>; } },
     { key: 'date', header: '计划出运', width: '112px', hideOnMobile: true, render: s => <div className="mist-col" style={{ gap: 2 }}><span className={state && shipmentFlags(state, s, day).some(flag => flag.key === 'overdue') ? 'mist-tone-bad' : undefined}>{uiText(s.departedAt ? `ATD ${shortWhen(s.departedAt)}` : s.plannedDate || '未定')}</span><small className="mist-muted">{s.requestedBy}</small></div> },
-    { key: 'stage', header: '阶段', width: '112px', render: s => state ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STAGE_TONE[shipmentStage(state, s)]}>{STAGE_LABEL[shipmentStage(state, s)]}</Pill>{shipmentFlags(state, s, day).map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> : null },
+    { key: 'stage', header: '阶段', width: '112px', render: s => state ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STAGE_TONE[shipmentStage(state, s)]}>{shipmentStageLabel(s, shipmentStage(state, s))}</Pill>{shipmentFlags(state, s, day).map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> : null },
   ];
   const canCreate = business ? <Button variant="primary" icon={Plus} disabled={hasOrderContext && !sourceOrder} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined;
   const empty = domainRows.length
@@ -213,7 +214,7 @@ export function ShipmentsPage() {
 
   const summary = selected && state ? (() => {
     const stage = shipmentStage(state, selected), flags = shipmentFlags(state, selected, day), orders = new Set(selected.lines.map(line => line.orderId)).size;
-    return <PreviewSummary openLabel="打开出运详情" onOpen={() => full.open(selected.id)} data={{ code: selected.code, status: <Pill tone={STAGE_TONE[stage]}>{STAGE_LABEL[stage]}</Pill>, title: selected.customer,
+    return <PreviewSummary openLabel="打开出运详情" onOpen={() => full.open(selected.id)} data={{ code: selected.code, status: <Pill tone={STAGE_TONE[stage]}>{shipmentStageLabel(selected, stage)}</Pill>, title: selected.customer,
       description: `${MODE_LABEL[selected.mode]} · ${selected.portOfLoading} → ${selected.portOfDischarge}`,
       facts: [{ label: '收货方', value: selected.consignee || '未填' }, { label: '贸易术语', value: selected.incoterm || '未填' }, { label: '计划出运', value: selected.plannedDate || '未定' }, { label: '订舱号', value: selected.booking || '未订舱' }, { label: '来源', value: `${orders} 个订单 · ${selected.lines.length} 行` }],
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined }} />;
@@ -225,7 +226,7 @@ export function ShipmentsPage() {
       actions={<>
         {sourceOrder && <Button onClick={() => go('orders/detail', sourceOrder.id, { customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
         {hasOrderContext && <Button onClick={() => go('shipments')}>{uiText("查看全部出运")}</Button>}
-        <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('出运台账', ['编号', '客户', '收货方', '运输', '起运港', '目的港', '计划日', '阶段', '实际离港'], rows.map(s => [s.code, s.customer, s.consignee, MODE_LABEL[s.mode], s.portOfLoading, s.portOfDischarge, s.plannedDate, STAGE_LABEL[shipmentStage(state!, s)], s.departedAt || '']))}>{uiText("导出")}</Button>
+        <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('出运台账', ['编号', '客户', '收货方', '运输', '起运港', '目的港', '计划日', '阶段', '实际离港'], rows.map(s => [s.code, s.customer, s.consignee, MODE_LABEL[s.mode], s.portOfLoading, s.portOfDischarge, s.plannedDate, shipmentStageLabel(s, shipmentStage(state!, s)), s.departedAt || '']))}>{uiText("导出")}</Button>
         {business && <Button icon={ScrollText} disabled={hasOrderContext && !sourceOrder} onClick={() => editor.open(termsSpec())}>{uiText("核对合同收货条款")}</Button>}
         {canCreate}
       </>} />
@@ -264,12 +265,6 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   const unit = (lineId: string) => state.orderLines.find(line => line.id === lineId)?.unit || '';
   const blocker = readyBlocker(state, s), matched = packingMatched(state, s);
   const cartons = new Set(packingRows.map(row => row.carton)).size, net = round(packingRows.reduce((sum, row) => sum + row.netWeight, 0)), gross = round(packingRows.reduce((sum, row) => sum + row.grossWeight, 0)), volume = round(packingRows.reduce((sum, row) => sum + row.volume, 0));
-  const next: { tone: Tone; title: string; text: string } = stage === 'cancelled' ? { tone: 'neutral', title: '已取消', text: s.cancelReason || '未记录原因' }
-    : stage === 'departed' ? { tone: 'ok', title: s.mode === 'air' ? '已起飞' : '已离港', text: `ATD ${s.departedAt ? businessWhen(s.departedAt) : ''}` }
-    : stage === 'intake' ? { tone: 'warn', title: '等待后勤接手', text: '后勤核实来源与数量后逐箱装箱、订舱，并在单据中心签发 CI / PL。' }
-    : stage === 'logistics' ? { tone: 'accent', title: '后勤处理中', text: blocker ? `完成单证准备前：${blocker}。` : '装箱与 CI / PL 已齐，可以完成单证准备并交回业务。' }
-    : stage === 'business' ? { tone: 'warn', title: '资料已回业务', text: '业务员把当前有效 CI / PL 发给客户后登记发送；之后后勤才能登记实际离港。' }
-    : { tone: 'accent', title: '等待离港', text: cleared ? '出口清关已完成，取得实际离港信息后登记 ATD。' : '业务已对客发送；出口清关完成后才能登记实际离港。' };
   const logisticsReason = logistics ? false : '需要后勤出运权限';
   const businessReason = business ? false : '需要订单业务权限';
   const editReason = businessReason || (packingRows.length || issued.length || customsFiled ? '已有装箱、有效单据或申报记录，不能再改请求' : false);
@@ -292,8 +287,8 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
       <span className="mist-mono mist-muted">{s.code}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{s.customer}</div>
     </div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STAGE_TONE[stage]}>{STAGE_LABEL[stage]}</Pill><Pill>{uiText(s.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill><Pill>{MODE_LABEL[s.mode]}</Pill>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
-    <Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STAGE_TONE[stage]}>{shipmentStageLabel(s, stage)}</Pill><Pill>{uiText(s.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill><Pill>{MODE_LABEL[s.mode]}</Pill>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
+    {stage === 'cancelled' && s.cancelReason && <RecordDisclosure title="取消记录">{s.cancelReason}</RecordDisclosure>}
     {(business || logistics) && <ActionBar busy={locked} actions={[
       ...(logistics ? [
         { label: '分配装箱', icon: Boxes, onClick: onPack, primary: stage === 'intake' || (stage === 'logistics' && !matched), reason: packReason, hidden: closed },
@@ -335,7 +330,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
     </DetailBlock>
     <div className="mist-row mist-module-actions"><Button onClick={onSamples}>{uiText("处理本票船样")}</Button></div>
     {!!s.documentDispatches?.length && <DetailBlock title={uiText("对客发送记录")}><Timeline events={s.documentDispatches.map(dispatch => ({ who: dispatch.actor, when: new Date(dispatch.at).toLocaleString(), text: '已登记发送：' + dispatch.documentIds.map(id => f.documents.find(row => row.id === id)?.number || '历史单据').join('、') }))} /></DetailBlock>}
-    {s.departureEvidence&&<RecordDisclosure title="离港依据">{s.departureEvidence}</RecordDisclosure>}<DetailBlock title={uiText("附件")}><RecordFiles key={s.id} ids={s.fileIds} />{!s.fileIds.length && <span className="mist-note">{uiText("离港凭据随“登记实际离港”归档")}</span>}</DetailBlock>
+    {s.departureEvidence&&<RecordDisclosure title="离港依据">{s.departureEvidence}</RecordDisclosure>}<DetailBlock title={uiText("附件")}><RecordFiles key={s.id} ids={s.fileIds} /></DetailBlock>
     <RecordDisclosure title="处理记录"><Events entity="shipment" id={s.id} /></RecordDisclosure>
   </DetailBody>;
 }

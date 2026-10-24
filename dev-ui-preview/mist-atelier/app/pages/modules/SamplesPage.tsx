@@ -124,8 +124,8 @@ export function SamplesPage() {
       { id: 'form', label: '形态与数量', fields: shippingGarment?['form','sizeQuantities','unit']:['form', 'quantity', 'unit'] },
       { id: 'place', label: '规格与位置', fields: shippingGarment?['color','location','note']:['size', 'color', 'location', 'note'] },
     ],
-    fields: [field('category', '大类', 'select', true, choices(['面料', '成衣', '其他'])), field('categoryCustom', '其他类别（选其他时填写）', 'text', false), field('name', '名称'),
-      { ...field('source', '准确来源', 'select', true, sampleSources), hint: sourceHint }, field('sourceText', '手工来源说明', 'text', false),
+    fields: [field('category', '大类', 'select', true, choices(['面料', '成衣', '其他'])), {...field('categoryCustom', '其他类别', 'text', false),when:{key:'category',values:['其他']}}, field('name', '名称'),
+      { ...field('source', '准确来源', 'select', true, sampleSources), hint: sourceHint }, {...field('sourceText', '来源说明', 'text', false),when:{key:'source',values:['manual']}},
       { ...field('role', '订单样品角色', 'select', hasShipmentContext, roleOptions), readonly: hasShipmentContext }, { ...field('shipmentId', '船样对应出运批次', 'select', hasShipmentContext, shipmentOptions), readonly: hasShipmentContext },
       field('form', '形态'), ...(shippingGarment?[field('sizeQuantities','尺码与件数','textarea')]:[field('quantity', '数量 / 长度', 'number')]), {...field('unit', '单位', 'select', true, choices(['米', '码', '公斤', '份', '件'])),readonly:shippingGarment},
       ...(!shippingGarment?[field('size', '尺码', 'text', false)]:[]), field('color', '颜色', 'text', false), field('location', '自由文本位置', 'text', false), field('note', '备注', 'textarea', false)],
@@ -233,7 +233,7 @@ export function SamplesPage() {
       list={<Card><DataTable ariaLabel={uiText("样品台账")} loading={loading} rows={visible} rowKey={row => row.id} selectedKey={selected?.id} density="comfy" onRowClick={pick}
         columns={shelf === 'fabric' ? fabricColumns : pieceColumns}
         empty={shelfRows.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的样品")} description={uiText("换个关键词或清除筛选。")} action={<TextLink onClick={() => { setQuery(''); setForm('all'); setOrigin('all'); setStatusFilter('all'); }}>{uiText("清除筛选")}</TextLink>} />
-          : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText(hasShipmentContext ? '本票还没有船样' : '还没有样品档案')} description={uiText(can ? '收到实物后在这里登记；开发返样可用“同步已返样版本”自动建档。' : '业务员登记样品后会显示在这里。')} action={can && !invalidShipment ? <Button icon={Plus} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button> : undefined} />}
+          : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText(hasShipmentContext ? '本票还没有船样' : '还没有样品档案')}  action={can && !invalidShipment ? <Button icon={Plus} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button> : undefined} />}
         footer={pages > 1 ? <Pagination page={currentPage} pages={pages} onChange={setPage} /> : undefined} /></Card>}
       detail={detail} />
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />

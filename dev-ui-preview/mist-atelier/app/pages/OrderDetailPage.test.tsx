@@ -410,6 +410,10 @@ it('shows no collection obligation for a free replacement and returns to its cla
  await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());const dialog=getByRole(document.body,'dialog');expect(dialog.querySelector('[aria-label="定金比例（%）"]')).toBeNull();expect(dialog.querySelector('[aria-label="出运前累计收款（%）"]')).toBeNull();expect(dialog.textContent).toContain('补发约定');
 });
 
+it('renders a frozen replacement approval without raw payment enums or a zero collection target',async()=>{
+ const order=store.state!.orders[0];order.replacementSource={schemaVersion:1,claimId:'claim'} as any;const contract={...order.governance!.contract,paymentMethod:'OTHER',paymentNote:'批准补发',preShipmentPercent:0};order.governance!.rounds=[{id:'frozen-free',kind:'initial',status:'approved',submittedAt:context.now,snapshot:{contract,currency:order.currency,lines:structuredClone(store.state!.orderLines)},reviewerIds:[],requesterId:'sales'}] as any;const before=structuredClone(order.governance!.rounds);render();await act(async()=>getByRole(host,'button',{name:'查看提交快照'}).click());const dialog=getByRole(document.body,'dialog',{name:'主单审批提交快照'});expect(dialog.textContent).toContain('无需收款');expect(dialog.textContent).not.toContain('OTHER');expect(dialog.textContent).not.toContain('出运前累计收款');expect(order.governance!.rounds).toEqual(before);
+});
+
 it('keeps the source-bound replacement quantity and customer price read-only while allowing size details',async()=>{
  store.state!.orders[0].replacementSource={schemaVersion:1,claimId:'source-case'} as any;render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());await act(async()=>getByRole(document.body,'button',{name:'编辑条目'}).click());expect((getByRole(document.body,'spinbutton',{name:'订单数量'}) as HTMLInputElement).readOnly).toBe(true);expect((getByRole(document.body,'spinbutton',{name:'销售单价'}) as HTMLInputElement).readOnly).toBe(true);expect(getByRole(document.body,'button',{name:'按颜色 × 尺码填写数量'})).toBeTruthy();
 });

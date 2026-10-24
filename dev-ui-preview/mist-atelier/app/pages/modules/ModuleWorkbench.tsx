@@ -8,14 +8,15 @@ import { useNav } from '../../nav';
 import { PreviewSummary, useCompactLayout, type PreviewSummaryData } from './pageKit';
 export type ModuleValue = string | number | boolean;
 export type ModuleValues = Record<string, ModuleValue>;
-export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'datetime-local'|'select'|'textarea'|'checkbox';options?:Array<{value:string;label:string}>;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:{key:string;values:string[]}};
+type ModuleFieldCondition = {key:string;values:string[]};
+export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'datetime-local'|'select'|'textarea'|'checkbox';options?:Array<{value:string;label:string}>;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:ModuleFieldCondition|ModuleFieldCondition[]};
 export type ModuleEditorSection = {id:string;label:string;description?:string;fields:string[]};
 export type ModuleEditorSpec = {title:string;description?:string;sections?:ModuleEditorSection[];fields:ModuleField[];initialValues:ModuleValues;submit:(values:ModuleValues)=>Promise<unknown>;submitLabel?:string};
 /** Domain-owned sections preserve the Mist T9 geometry without arbitrary six-field business boundaries.
  * Any unassigned fields remain visible in fallback sections; a partial declaration can never hide data. */
 /** Applicability only: authorization and transaction constraints remain server-owned. */
 export function moduleVisibleFields(spec:ModuleEditorSpec,values:ModuleValues=spec.initialValues){
-  const current={...spec.initialValues,...values};return spec.fields.filter(field=>!field.when||field.when.values.includes(String(current[field.when.key]??'')));
+  const current={...spec.initialValues,...values};return spec.fields.filter(field=>!field.when||(Array.isArray(field.when)?field.when:[field.when]).every(condition=>condition.values.includes(String(current[condition.key]??''))));
 }
 function applicableValues(spec:ModuleEditorSpec,values:ModuleValues){
   const result={...values},active=new Set(moduleVisibleFields(spec,values).map(field=>field.key));

@@ -140,7 +140,7 @@ export function CustomsPage() {
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的报关记录")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : tab === 'rebate'
       ? <EmptyState icon={Receipt} title={uiText("还没有可核对的退税资料")} description={uiText("报关单登记为已申报或已放行后，会在这里核对放行、本票 CI 收汇与增值税专票，并由财务登记退税申报。")} />
-      : <EmptyState icon={Stamp} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有报关记录' : `还没有${domain === 'fabric' ? '面料' : '成衣'}报关记录`)} description={uiText(invalidContext ? '请返回货运管理重新选择准确出运。' : '报关记录与出运一一对应：后勤接手出运后建立记录，向海关申报后登记报关单号，放行后登记放行日与依据。')} action={createButton && !invalidContext && eligible.length ? <Button icon={Plus} onClick={() => setDialog(createSpec())}>{uiText("建立报关记录")}</Button> : undefined} />;
+      : <EmptyState icon={Stamp} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有报关记录' : `还没有${domain === 'fabric' ? '面料' : '成衣'}报关记录`)} description={invalidContext ? uiText('来源出运不可用') : undefined} action={createButton && !invalidContext && eligible.length ? <Button icon={Plus} onClick={() => setDialog(createSpec())}>{uiText("建立报关记录")}</Button> : undefined} />;
   const detail = selected && state
     ? <CustomsDetail record={selected} state={state} can={can} canClear={canClear} canInvoices={canInvoices} canRebate={canRebate} canReconcile={canReconcile} locked={locked} open={setDialog} run={run}
         onBill={id => go('payment-vouchers', id, { section: 'payables' })} onReceipt={id => go('payment-vouchers', id)}
@@ -169,7 +169,7 @@ export function CustomsPage() {
     </Toolbar>
     {tab === 'declarations' && <>
       {pendingShipments.length > 0 && <div className="mist-section"><Card>
-        <CardHeader title={ui`待建报关 · ${pendingShipments.length}`} sub={uiText("已发起、尚无报关记录的出运；后勤接手后在这里建立记录。")} />
+        <CardHeader title={ui`待建报关 · ${pendingShipments.length}`} />
         <DataTable ariaLabel={uiText("待建报关的出运")} rows={pendingShown} rowKey={s => s.id} columns={[
           { key: 'code', header: '出运', width: 'minmax(150px,1.4fr)', render: s => <div className="mist-col" style={{ gap: 2 }}><Mono>{s.code}</Mono><small className="mist-muted">{s.customer} · {MODE_LABEL[s.mode]} → {s.portOfDischarge}</small></div> },
           { key: 'stage', header: '出运阶段', width: '120px', hideOnMobile: true, render: s => <Pill tone={STAGE_TONE[shipmentStage(state!, s)]}>{STAGE_LABEL[shipmentStage(state!, s)]}</Pill> },
@@ -253,7 +253,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
         { key: 'type', header: '类型', render: row => row.type },
         { key: 'number', header: '编号 · 版本', render: row => `${row.number || '未编号'} · v${row.version}` },
         { key: 'status', header: '状态', render: row => <Pill tone={row.status === 'issued' ? 'ok' : row.status === 'void' ? 'neutral' : 'warn'}>{uiText(row.status === 'issued' ? '已签发' : row.status === 'void' ? '已作废' : '草稿')}</Pill> },
-      ]} /> : <span className="mist-note">{uiText("本票还没有单据；CI / PL 在单据中心按版本签发。")}</span>}
+      ]} /> : <span className="mist-note">{uiText("暂无单据")}</span>}
     </DetailBlock>
     {c.status !== 'draft'&&!evidence.replacement && <DetailBlock title={uiText("退税资料")} aside={<span className="mist-muted">{uiText("已具备 ")}{evidence.ready} / 3</span>}>
       <Checklist items={[
@@ -264,7 +264,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
       {canInvoices && evidence.invoices.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap' }}>{evidence.invoices.map((invoice: MistInvoice) => <TextLink key={invoice.id} icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink>)}</div>}
     </DetailBlock>}
     {c.status !== 'draft'&&!evidence.replacement && canInvoices && <RebateClaimBlock state={state} customs={c} canWrite={canRebate} canReconcile={canReconcile} locked={locked} open={open} run={run} onBill={onBill} onReceipt={onReceipt} />}
-    <DetailBlock title={uiText("附件")}><RecordFiles key={c.id} ids={c.fileIds} onAttach={can && c.status !== 'cleared' && !closed ? onAttach : undefined} />{!c.fileIds.length && <span className="mist-note">{uiText("报关单、放行通知等原件作为附件保存")}</span>}</DetailBlock>
+    <DetailBlock title={uiText("附件")}><RecordFiles key={c.id} ids={c.fileIds} onAttach={can && c.status !== 'cleared' && !closed ? onAttach : undefined} /></DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="customs" id={c.id} /></DetailBlock>
   </DetailBody>;
 }

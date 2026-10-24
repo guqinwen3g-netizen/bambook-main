@@ -594,4 +594,6 @@ export const reviewedEnglish: Record<string, string> = {
   '待对客交单': 'Send documents to customer',
   '单据待补交': 'Outstanding document delivery',
   '待起飞': 'Awaiting take-off',
+  '业务已继续': 'Business confirmed',
+  '其他类别': 'Other category',
 };
