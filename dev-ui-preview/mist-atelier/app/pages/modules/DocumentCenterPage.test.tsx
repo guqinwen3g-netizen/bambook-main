@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getByRole,queryByRole} from '@testing-library/dom';
+import {fireEvent,getAllByRole,getByRole,queryByRole,getByLabelText,queryByLabelText} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
@@ -10,7 +10,7 @@ import {Nav} from '../../nav';
 const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
-vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'ops',displayName:'后勤'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'ops',displayName:'后勤'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:(view:string)=>view!=='system-settings'||!session.denied.has('settings:system:read')}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {DocumentCenterPage,issueBlocker} from './DocumentCenterPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
@@ -57,7 +57,7 @@ it('issues a CI after confirmation and offers a new version only from the latest
   const f=store.state!.fulfillment;f.documents.push(doc('ci','CI'));
   render('ci');
   let detail=host.querySelector('[data-document-detail="ci"]') as HTMLElement;
-  expect(detail.textContent).toContain('签发后按本票该订单条目数量 × 合同单价生成应收');
+  expect(detail.textContent).toContain('待签发');
   await click(getByRole(detail,'button',{name:'签发'}));
   const dialog=getByRole(document.body,'dialog');expect(getByRole(host,'table',{name:'单据列表'})).toBeTruthy();
   await click(getByRole(dialog,'button',{name:'确认签发'}));
@@ -93,11 +93,11 @@ it('keeps users without document permission read-only and shows the letterhead s
   session.denied.add('customs:write');store.state!.fulfillment.documents.push(doc('pl','PL'));
   store.state!.settings.companyProfile={legalName:'竹衍服饰',englishName:'Bambook Apparel',address:'上海',englishAddress:'',phone:'',email:'',taxId:'TAX1',customsCode:'',bankName:'',bankAccount:'',swift:'',defaultCurrency:'USD'};
   render('pl');
-  expect(host.textContent).toContain('只读查看');
+  expect(host.textContent).not.toContain('只读查看');
   expect(queryByRole(host,'button',{name:'新建单据'})).toBeNull();
   expect(queryByRole(host.querySelector('[data-document-detail="pl"]') as HTMLElement,'button',{name:'签发'})).toBeNull();
   await click(getByRole(host,'tab',{name:/抬头与模板/}));
-  expect(host.textContent).toContain('竹衍服饰');expect(host.textContent).toContain('印章图样、编号规则预览与打印打包尚未接入');
+  expect(host.textContent).toContain('竹衍服饰');expect(host.textContent).not.toContain('印章图样、编号规则预览与打印打包尚未接入');
 });
 
 it('shows a pending CI as awaiting finance rather than paid and permits correction before any receipts',()=>{
@@ -112,4 +112,15 @@ it('shows a pending CI as awaiting finance rather than paid and permits correcti
 
 it('shows a replacement CI customs amount without claiming a customer receivable or payment',()=>{
  const s=store.state!;s.orders[0].replacementSource={schemaVersion:1,claimId:'case'} as any;s.fulfillment.documents.push(doc('replacement','CI',{status:'issued',replacementDeclaredAmount:90}));render('replacement');const detail=host.querySelector('[data-document-detail="replacement"]') as HTMLElement;expect(detail.textContent).toContain('无需收款');expect(detail.textContent).toContain('USD 90.00');expect(detail.textContent).not.toContain('已生成财务应收');expect(detail.textContent).not.toContain('未找到对应应收');expect(detail.textContent).not.toContain('CI 合同应收日');
+});
+
+it('asks for a collection date only on a billable CI and never submits hidden collection fields',async()=>{
+ store.state!.orders.push({...store.state!.orders[0],id:'free',code:'SO-FREE',replacementSource:{schemaVersion:1,claimId:'claim'}} as any);store.state!.fulfillment.shipments[0].lines.push({orderId:'free',lineId:'free-line',quantity:1} as any);render(undefined,'s');await click(getAllByRole(host,'button',{name:'新建单据'})[0]);const dialog=getByRole(document.body,'dialog');
+ const choose=(label:string,value:string)=>act(()=>fireEvent.change(getByRole(dialog,'combobox',{name:label}),{target:{value}}));
+ expect(queryByRole(dialog,'combobox',{name:'对应订单'})).toBeNull();expect(queryByLabelText(dialog,'应收到期日')).toBeNull();choose('单据类型','CI');choose('对应订单','o');expect(getByLabelText(dialog,'应收到期日')).toBeTruthy();fireEvent.change(getByLabelText(dialog,'应收到期日'),{target:{value:'2026-11-01'}});choose('单据类型','PL');expect(queryByLabelText(dialog,'应收到期日')).toBeNull();choose('单据类型','CI');choose('对应订单','free');expect(queryByLabelText(dialog,'应收到期日')).toBeNull();
+ typeInto(getByRole(dialog,'textbox',{name:'实际单据编号'}) as HTMLInputElement,'CI-FREE');typeInto(getByRole(dialog,'textbox',{name:'标题'}) as HTMLInputElement,'商业发票');typeInto(getByRole(dialog,'textbox',{name:'单据正文'}) as HTMLTextAreaElement,'Replacement, no charge.');await click(getByRole(dialog,'button',{name:'保存为草稿'}));expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.documents.save',payload:expect.objectContaining({type:'CI',orderId:'free',dueDate:''})});
+});
+
+it('shows company maintenance only to accounts that can read company settings',async()=>{
+ session.denied.add('settings:system:read');render();await click(getByRole(host,'tab',{name:'抬头与模板'}));expect(queryByRole(host,'button',{name:'公司资料'})).toBeNull();session.denied.clear();render();await click(getByRole(host,'button',{name:'公司资料'}));expect(go).toHaveBeenLastCalledWith('system-settings',undefined,{section:'company'});
 });

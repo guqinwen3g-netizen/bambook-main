@@ -13,6 +13,7 @@ export function mistActivityTitle(state: MistState | null | undefined, title: st
   if (view === 'orders' && /^交接后勤(?:[:：]|$)/.test(title)) return label('后勤交接');
   if (view === 'procurement' && /^采购审批通过(?:[:：]|$)/.test(title)) return label('采购已批准');
   if (view === 'procurement' && /^采购审批退回(?:[:：]|$)/.test(title)) return label('采购已退回');
+  if (view === 'qc-workbench' && /^业务确认继续(?:[:：]|$)/.test(title)) return label('业务已继续');
   if (view === 'production-board') {
     const move = title.match(/^更新工序为 (cut|sew|finish|qc|done)$/);
     if (move) return label(PROD_COLUMNS.find(column=>column.id===move[1])!.title);

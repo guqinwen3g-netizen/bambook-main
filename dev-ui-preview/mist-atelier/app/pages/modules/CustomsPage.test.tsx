@@ -256,7 +256,7 @@ it('adjusts a generated declaration item by hand with a reason and shows the adj
   expect(detail.querySelector('[data-customs-item-adjusted="2"]')?.textContent).toContain('申报品名 · 后勤 · 报关行审单');
   await click(getByRole(detail,'button',{name:'调整商品项 1'}));
   const dialog=getByRole(document.body,'dialog');
-  expect(dialog.textContent).toContain('总价 USD 500.00 不在这里改');
+  expect(queryByRole(dialog,'spinbutton',{name:/单价|总价|成交数量/})).toBeNull();
   typeInto(getByRole(dialog,'textbox',{name:'申报品名'}) as HTMLInputElement,'女式涤纶制大衣');
   typeInto(getByRole(dialog,'textbox',{name:'调整原因'}) as HTMLInputElement,'按规范申报目录');
   await click(getByRole(dialog,'button',{name:'保存调整'}));

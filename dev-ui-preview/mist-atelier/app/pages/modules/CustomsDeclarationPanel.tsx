@@ -18,16 +18,15 @@ export function classificationSpec(family: CustomsFamily, run: (c: MistCommand) 
   const labels = CUSTOMS_ELEMENT_LABELS[family], defaults = defaultLegalUnits(family === 'garment' ? '6203' : '5112');
   return {
     title: old ? `修改商品归类 ${old.code}` : `新建${CUSTOMS_FAMILY_LABEL[family]}商品归类`, submitLabel: old ? '保存修改' : '建立归类',
-    description: family === 'garment' ? '服装归入第 61 章（针织）或第 62 章（机织）。货号在生成申报商品项时按款号自动填入。' : '面料归入第 50–60 章；规格写明幅宽与克重，如“幅宽150cm，克重280g/m²”。',
     fields: [
-      { ...field('hsCode', '商品编号（10 位）'), hint: '按《进出口税则》与《规范申报目录》归类，以报关行确认的为准' },
-      { ...field('declaredName', '申报品名'), hint: '中文规范名称，如“男式羊毛西服上衣”“全毛机织物”' },
-      { ...field('styles', '适用款号'), hint: '多个款号用逗号分隔；出运明细按款号匹配归类' },
+      field('hsCode', '商品编号（10 位）'),
+      field('declaredName', '申报品名'),
+      { ...field('styles', '适用款号'), hint: '多个款号用逗号分隔' },
       field('brandType', '品牌类型', 'select', true, CUSTOMS_BRAND_TYPES.map(([v, l]) => ({ value: v, label: `${v} ${l}` }))),
       field('preference', '出口享惠情况', 'select', true, CUSTOMS_PREFERENCES.map(([v, l]) => ({ value: v, label: `${v} ${l}` }))),
-      ...labels.map((label, i) => ({ ...field(elementKey(i), label), ...(label === '品牌' ? { hint: '无品牌填“无品牌”' } : label === '成分含量' ? { hint: '如“100%羊毛”“65%涤纶35%棉”' } : {}) })),
+      ...labels.map((label, i) => field(elementKey(i), label)),
       { ...field('legalUnit', '法定第一单位', 'text', false), hint: `留空按编号默认（${family === 'garment' ? '西服套装为套，其他服装为件' : '机织面料为米，针织面料为千克'}）` },
-      { ...field('secondUnit', '法定第二单位', 'text', false), hint: `一般为${defaults.secondUnit || '无'}；数量取装箱净重` },
+      { ...field('secondUnit', '法定第二单位', 'text', false), hint: `默认${defaults.secondUnit || '无'}` },
       field('note', '备注', 'textarea', false),
     ],
     initialValues: { hsCode: old?.hsCode || '', declaredName: old?.declaredName || '', styles: old?.styles.join(', ') || '', brandType: old?.brandType || '0', preference: old?.preference || '0', ...Object.fromEntries(labels.map((_, i) => [elementKey(i), old?.elements[i] || (labels[i] === '品牌' ? '无品牌' : '')])), legalUnit: old?.legalUnit || '', secondUnit: old ? old.secondUnit : defaults.secondUnit, note: old?.note || '' },
@@ -49,7 +48,7 @@ export function CustomsClassificationLedger({ state, domain, needle, can, locked
     ...(can ? [{ key: 'act', header: '', width: '150px', align: 'right' as const, render: (c: CustomsClassification) => c.voided ? <span className="mist-muted">{c.voided.reason}</span> : <span className="mist-row"><Button size="sm" icon={Pencil} disabled={locked} aria-label={ui`修改 ${c.code}`} onClick={() => open(classificationSpec(c.family, run, c))}>{uiText("修改")}</Button><Button size="sm" icon={Ban} disabled={locked} aria-label={ui`作废 ${c.code}`} onClick={() => open(voidSpec(c))}>{uiText("作废")}</Button></span> }] : []),
   ];
   return <div className="mist-section"><Card data-customs-classifications>
-    <CardHeader title={ui`${CUSTOMS_FAMILY_LABEL[domain]}商品归类 · ${all.filter(c => !c.voided).length}`} sub={uiText("按款号建档一次，之后每票出运自动带出商品编号、申报品名、申报要素与法定单位。")}
+    <CardHeader title={ui`${CUSTOMS_FAMILY_LABEL[domain]}商品归类 · ${all.filter(c => !c.voided).length}`}
       tools={<span className="mist-row"><Button size="sm" onClick={() => setShowVoided(v => !v)}>{uiText(showVoided ? '隐藏已作废' : '显示已作废')}</Button>{can && <Button size="sm" variant="primary" icon={Plus} disabled={locked} onClick={() => open(classificationSpec(domain, run))}>{uiText("新建归类")}</Button>}</span>} />
     <DataTable ariaLabel={uiText("商品归类库")} rows={rows} rowKey={c => c.id} columns={columns} empty={all.length ? '没有符合条件的归类' : '尚未建立商品归类'} />
   </Card></div>;
@@ -60,13 +59,12 @@ export function adjustItemSpec(c: FulfillmentCustoms, item: CustomsDeclarationIt
   const auto = generatedItem(item);
   return {
     title: `调整申报商品项 ${item.no}`, submitLabel: '保存调整',
-    description: `按报关行审单意见调整；商品编号 ${hsText(item.hsCode)}、成交数量 ${item.quantity} ${item.unit}、总价 ${item.currency} ${money(item.amount)} 不在这里改（改归类或出运后重新生成）。改回自动值即取消调整。`,
     fields: [
       { ...field('declaredName', '申报品名'), hint: `自动值：${auto.declaredName}` },
       { ...field('elements', '申报要素', 'textarea'), hint: `按“|”分隔；自动值：${auto.elements}` },
       { ...field('legalQty', `法定数量（${item.legalUnit}）`, 'number'), hint: `自动值：${auto.legalQty}` },
       ...(item.secondUnit ? [{ ...field('secondQty', `第二数量（${item.secondUnit}）`, 'number'), hint: `自动值：${auto.secondQty ?? '—'}` }] : []),
-      { ...field('reason', '调整原因', 'textarea'), hint: '如“报关行审单：品名按规范申报目录”' },
+      { ...field('reason', '调整原因', 'textarea'), hint: undefined },
     ],
     initialValues: { declaredName: item.declaredName, elements: item.elements, legalQty: item.legalQty, ...(item.secondUnit ? { secondQty: item.secondQty ?? '' } : {}), reason: '' },
     submit: v => run({ type: 'fulfillment.customs.item.adjust', payload: { id: c.id, no: item.no, declaredName: text(v, 'declaredName'), elements: text(v, 'elements'), legalQty: number(v, 'legalQty'), ...(item.secondUnit ? { secondQty: number(v, 'secondQty') } : {}), reason: text(v, 'reason') } } as MistCommand),
@@ -95,12 +93,11 @@ export function CustomsItemsBlock({ record: c, state, can, locked, run, open, on
       {items.some(i => i.adjusted) && <span className="mist-note">{uiText("重新生成时，自动值没变的字段保留手工调整；归类、出运或装箱改动导致自动值变化的字段以新值为准。")}</span>}
       <DataTable ariaLabel={ui`${c.code} 申报商品项`} rows={items} rowKey={i => String(i.no)} columns={columns} />
       <Facts cols={4} items={[{ label: '件数', value: `${c.packages ?? 0} 件` }, { label: '毛重', value: `${c.grossWeight ?? 0} kg` }, { label: '净重', value: `${c.netWeight ?? 0} kg` }, { label: '总价', value: [...totals].map(([cur, n]) => `${cur} ${money(n)}`).join(' / ') }]} />
-    </> : <span className="mist-note">{uiText("尚未生成。按款号匹配商品归类，自动带出商品编号、申报品名、申报要素和法定数量；总价与 CI 同一算法，件数和重量取装箱合计。")}</span>}
+    </> : <span className="mist-note">{uiText("尚未生成")}</span>}
     {c.status !== 'cleared' && draft && draft.blockers.length > 0 && <Banner tone="warn" title={uiText("还不能生成")}>{draft.blockers.join('；')}</Banner>}
     {can && c.status !== 'cleared' && <ActionBar busy={locked} actions={[
       { label: items.length ? '重新生成商品项' : '生成申报商品项', icon: ListChecks, primary: !items.length || stale, reason, onClick: () => void run({ type: 'fulfillment.customs.items', payload: { id: c.id } } as MistCommand) },
       { label: '维护商品归类', onClick: onClassify },
     ] as ReasonedAction[]} />}
-    <span className="mist-note">{uiText("本系统只准备申报资料，交报关行或在单一窗口录入；不代替海关申报。")}</span>
   </DetailBlock>;
 }

@@ -1,4 +1,5 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
+import { View } from '../../../../../types';
 /** 单据中心：按准确出运与合同保留单据版本（新版本不覆盖旧版本）、正式文件与签发 / 归档记录；我方签发 CI / PL，外部机构单据只归档原件；CI 签发回到财务应收。 */
 import React from 'react';
 import { Archive, Building2, Download, FileText, FilePlus2, Pencil, Plus, Receipt, SearchX, Stamp, XCircle } from 'lucide-react';
@@ -84,9 +85,9 @@ export function DocumentCenterPage() {
     return { title: d ? '编辑单据草稿' : base ? `基于 V${base.version} 建立新版本` : '新建单据', submitLabel: d ? '保存草稿' : '保存为草稿',
       fields: [
         ...(fixed ? [] : [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...shipments.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` }))]), field('type', '单据类型', 'select', true, (['CI', 'PL', 'BL', 'CO', 'OTHER'] as DocType[]).map(value => ({ value, label: TYPE_LABEL[value] })))]),
-        ...(fixed ? [] : [{ ...field('orderId', 'CI 对应订单', 'select', false, [{ value: '', label: '整票出运（非 CI）' }, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), hint: '仅 CI 需要；须是本票出运包含的订单。' }]),
+        ...(fixed ? [] : [{ ...field('orderId', '对应订单', 'select', true, [emptyOption, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), when: {key:'type',values:['CI']} }]),
         field('number', '实际单据编号'), field('title', '标题'),
-        ...(!fixed || src?.type === 'CI' ? [field('dueDate', '应收到期日', 'date', false)] : []),
+        ...(!fixed || src?.type === 'CI' ? [{...field('dueDate', '应收到期日', 'date'),when:[{key:'type',values:['CI']},{key:'orderId',values:(state?.orders||[]).filter(order=>!order.replacementSource).map(order=>order.id)}]}] : []),
         field('content', '单据正文', 'textarea'),
       ],
       initialValues: { shipmentId: src?.shipmentId || (hasContext ? route.section || '' : ''), type: src?.type || 'PL', orderId: src?.orderId || '', number: d?.number || '', title: src?.title || '', dueDate: src?.dueDate || '', content: src?.content || '' },
@@ -105,7 +106,7 @@ export function DocumentCenterPage() {
   const createButton = can ? <Button variant="primary" icon={Plus} disabled={invalidContext || !shipments.length} title={uiText(shipments.length ? undefined : '没有可出具单据的出运')} onClick={() => setDialog(docSpec())}>{uiText("新建单据")}</Button> : undefined;
   const empty = inDomain.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的单据")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setTypeFilter('all'); setStatusFilter('active'); }}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={FileText} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有单据' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运单据`)} description={uiText(invalidContext ? '请返回货运管理重新选择准确出运。' : '后勤按出运出具 CI / PL：先保存草稿并上传核对后的正式文件，再签发；提单、原产地证等外部单据归档原件。')} action={createButton && !invalidContext && shipments.length ? <Button icon={Plus} onClick={() => setDialog(docSpec())}>{uiText("新建单据")}</Button> : undefined} />;
+    : <EmptyState icon={FileText} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有单据' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运单据`)} description={invalidContext ? uiText('来源出运不可用') : undefined} action={createButton && !invalidContext && shipments.length ? <Button icon={Plus} onClick={() => setDialog(docSpec())}>{uiText("新建单据")}</Button> : undefined} />;
   const detail = selected && state
     ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick}
         onEdit={() => setDialog(docSpec(selected))} onVersion={() => setDialog(docSpec(undefined, selected))} onArchive={() => setDialog(archiveSpec(selected))} onVoid={() => setDialog(voidSpec(selected))}
@@ -123,7 +124,6 @@ export function DocumentCenterPage() {
         {tab === 'documents' && <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('单据目录', ['编号', '标题', '类型', '版本', '出运', '订单', '状态', '签发时间'], rows.map(d => [d.number, d.title, d.type, d.version, shipmentOf(d)?.code || '', orderCode(d.orderId), documentStatus(d).label, d.issuedAt || '']))}>{uiText("导出")}</Button>}
         {tab === 'documents' && createButton}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有单证权限，可以查看单据版本与签发记录。")}</Banner></div>}
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("单据未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: docs.filter(d => d.status !== 'void').length }, { value: 'template', label: '抬头与模板' }]} /></div>}
     {tab === 'template' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
@@ -132,9 +132,8 @@ export function DocumentCenterPage() {
           { label: '中文地址', value: profile.address || '未填写' }, { label: '英文地址', value: profile.englishAddress || '未填写' },
           { label: '电话 / 邮箱', value: [profile.phone, profile.email].filter(Boolean).join(' · ') || '未填写' }, { label: '税号', value: profile.taxId || '未填写' },
           { label: '海关编码', value: profile.customsCode || '未填写' }, { label: '开户行 / SWIFT', value: [profile.bankName, profile.swift].filter(Boolean).join(' · ') || '未填写' },
-        ]} /> : <EmptyState icon={Building2} title={uiText("尚未填写公司抬头")} description={uiText("CI / PL 的抬头、地址和收款银行取自设置中的公司资料。")} compact />}
-        <div className="mist-row"><Button icon={Pencil} onClick={() => go('settings', undefined, { section: 'company' })}>{uiText("在设置中维护公司资料")}</Button></div>
-        <span className="mist-note">{uiText("印章图样、编号规则预览与打印打包尚未接入；PI、样品单、试样通知与采购单在各自页面出具，单据中心暂不汇总。")}</span>
+        ]} /> : <EmptyState icon={Building2} title={uiText("尚未填写公司抬头")}  compact />}
+        {session.canAccessView(View.SystemSettings)&&<div className="mist-row"><Button icon={Pencil} onClick={() => go('system-settings', undefined, { section: 'company' })}>{uiText("公司资料")}</Button></div>}
       </div></Card>
     : <>
       {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${docs.filter(d => domainOf(d) === 'garment' && d.status !== 'void').length}` }, { value: 'fabric', label: `面料业务 · ${docs.filter(d => domainOf(d) === 'fabric' && d.status !== 'void').length}` }]} /></div>}
@@ -168,15 +167,11 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
   const noWrite = can ? false : '需要单证权限';
   const editableShipment = !!s && (OWN(d.type) ? s.state !== 'departed' && s.state !== 'cancelled' : s.state !== 'cancelled');
   const voidReason = d.status === 'issued' ? voidBlocker(state, d) : '';
-  const next: { tone: Tone; title: string; text: string } = d.status === 'void' ? { tone: 'neutral', title: '已作废', text: '本版本保留为历史；当前有效版本见版本列表。' }
-    : d.status === 'issued' ? { tone: 'ok', title: st.label, text: d.externalIssue ? `${d.externalIssue.issuer} · ${shortWhen(d.externalIssue.at)} 签发，由 ${d.externalIssue.recordedBy} 归档。` : d.type === 'CI' ? '有效 CI，已生成财务应收；更正须作废后建立新版本。' : '有效装箱单；装箱变化须作废后重签。' }
-    : { tone: blocker ? 'warn' : 'accent', title: OWN(d.type) ? '草稿 · 待签发' : '草稿 · 待归档原件', text: blocker ? `${OWN(d.type) ? '签发' : '归档'}前：${blocker}。` : OWN(d.type) ? '正式文件已上传，可以签发。' : '原件已上传，登记外部签发机构与时间后归档。' };
   return <DetailBody data-document-detail={d.id} heading={<div>
       <span className="mist-mono mist-muted">{TYPE_LABEL[d.type]} · V{d.version}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{d.number}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill><Pill>{uiText(OWN(d.type) ? '我方出具' : '外部机构')}</Pill>{s && <Pill>{uiText(s.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}</div>
-    {!order?.replacementSource&&<Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>}
     {can && <ActionBar busy={locked} actions={[
       { label: '签发', icon: Stamp, onClick: onIssue, primary: true, reason: noWrite || blocker || false, hidden: d.status !== 'draft' || !OWN(d.type) },
       { label: '归档外部签发原件', icon: Archive, onClick: onArchive, primary: true, reason: noWrite || blocker || false, hidden: d.status !== 'draft' || OWN(d.type) },
@@ -195,11 +190,11 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
       { label: '签发 / 归档', value: d.issuedAt ? shortWhen(d.issuedAt) : '尚未签发' },
     ]} />
     {d.externalIssue && <p className="mist-sub">{uiText("原件来源：")}{d.externalIssue.evidence}</p>}
-    <DetailBlock title={uiText("单据正文 / 制单说明")}><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
+    <DetailBlock title={uiText("单据正文")}><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
     {d.type==='CI'&&order?.replacementSource&&<DetailBlock title={uiText('补发CI')}><Facts items={[{label:'客户收款',value:uiText('无需收款')},{label:'申报货值',value:d.replacementDeclaredAmount!==undefined?order.currency+' '+fmt(d.replacementDeclaredAmount,2):uiText('待签发')}]}/></DetailBlock>}
     {d.type === 'CI'&&!order?.replacementSource && <DetailBlock title={uiText("财务应收")} aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink> : undefined}>
       {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : isPendingFinanceMistInvoice(invoice) ? '待财务确认' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due }]} />
-        : <span className="mist-note">{uiText(d.status === 'draft' ? '签发后按本票该订单条目数量 × 合同单价生成应收。' : '未找到对应应收。')}</span>}
+        : <span className="mist-note">{uiText(d.status === 'draft' ? '待签发' : '未找到对应应收')}</span>}
     </DetailBlock>}
     <DetailBlock title={ui`版本（${versions.length}）`}>
       <DataTable ariaLabel={ui`${d.number} 版本`} rows={versions} rowKey={v => v.id} selectedKey={d.id} onRowClick={onPick} columns={[
@@ -209,7 +204,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
         { key: 'at', header: '签发 / 创建', hideOnMobile: true, render: v => v.issuedAt ? shortWhen(v.issuedAt) : shortWhen(v.createdAt) },
       ]} />
     </DetailBlock>
-    <DetailBlock title={uiText("正式文件")}><RecordFiles key={d.id} ids={d.fileIds} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} />{!d.fileIds.length && <span className="mist-note">{uiText(OWN(d.type) ? '签发须引用核对后的正式 PDF 或原始单据' : '归档须上传外部机构签发的原件')}</span>}</DetailBlock>
+    <DetailBlock title={uiText("正式文件")}><RecordFiles key={d.id} ids={d.fileIds} onAttach={can && d.status === 'draft' && editableShipment ? onAttach : undefined} /></DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="document" id={d.id} /></DetailBlock>
   </DetailBody>;
 }
