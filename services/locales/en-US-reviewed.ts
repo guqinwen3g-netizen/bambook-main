@@ -1,5 +1,17 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '返修批次':'Repair batch',
+  '受检批次':'Inspection batch',
+  '补偿金额':'Compensation amount',
+  '来源商品':'Source item',
+  '数量':'Quantity',
+  '编辑处置':'Edit disposition',
+  '修订处置':'Revise disposition',
+  '新增处置':'Add disposition',
+  '退货办理':'Process return',
+  '履行记录':'Fulfillment history',
+  '退货单缺失':'Return order missing',
+
   '款项待结清':'Financial settlement pending',
   '货物待处理':'Goods processing pending',
   '维修登记':'Record repair',
