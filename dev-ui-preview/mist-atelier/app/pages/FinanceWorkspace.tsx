@@ -53,6 +53,9 @@ export function financeRecords(state: MistState | null): FinanceRecord[] {
     ...(state?.payments || []).map(p => ({ id: p.id, code: p.code, date: p.date, party: p.payee, amount: p.amount, currency: p.currency, ref: p.ref, direction: 'payment' as const, payment: p })),
   ].sort((a, b) => b.date.localeCompare(a.date) || a.code.localeCompare(b.code));
 }
+export function factoryReceiptUses(state:MistState|null,receiptId:string){
+ return (state?.platform?.claims??[]).flatMap(claim=>(claim.coordination?.recoveries??[]).flatMap(recovery=>(recovery.settlements??[]).filter(entry=>entry.kind==='receipt'&&!entry.reversed&&entry.receiptId===receiptId).map(entry=>({id:entry.id,claimId:claim.id,claimCode:claim.code,supplier:recovery.supplierName,amount:entry.amount,currency:entry.currency,date:entry.date,actor:entry.by}))));
+}
 export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void }) {
   const { state, loading } = useMistWorkspace(), { route, go } = useNav();
   const [query, setQuery] = React.useState(''), [direction, setDirection] = React.useState<'all' | 'receipt' | 'payment'>('all'), [currency, setCurrency] = React.useState('all');
@@ -62,6 +65,9 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
   const shown = rows.filter(r => (direction === 'all' || r.direction === direction) && (currency === 'all' || r.currency === currency) && (!query.trim() || `${r.code} ${r.party} ${r.ref} ${r.date}`.toLowerCase().includes(query.trim().toLowerCase())));
   const [assigning, setAssigning] = React.useState(false), { canWrite } = useBankAccountCommand();
   const current = rows.find(r => r.id === selected), currentRow = current?.receipt || current?.payment, account = (state?.bankAccounts || []).find(a => a.id === currentRow?.accountId), supplierPayment = (state?.payables?.payments || []).find(p => p.paymentId === current?.id), allocations = (state?.allocations || []).filter(a => a.receiptId === current?.id);
+  const refundCredit=current?.payment?state?.platform?.credits.find(note=>state.platform?.creditApplications.some(row=>row.creditId===note.id&&row.paymentId===current.id)):undefined;
+  const refundClaim=state?.platform?.claims.find(claim=>claim.id===refundCredit?.claimId),factoryUses=current?.receipt?factoryReceiptUses(state,current.id):[];
+  const paymentPurpose=refundCredit?ui`客户退款 · ${refundCredit.code}`:uiText(supplierPayment?'供应商付款':'一般付款');
   const columns: Column<FinanceRecord>[] = [
     { key: 'code', header: '流水 / 对方', width: 'minmax(170px,1.5fr)', render: r => <ObjectCell name={<Mono>{r.code}</Mono>} meta={r.party} /> },
     { key: 'date', header: '日期 / 方向', width: '108px', render: r => <span className="mist-col"><span>{r.date}</span><Pill tone={r.direction === 'receipt' ? 'accent' : 'neutral'}>{uiText(r.direction === 'receipt' ? '实际收款' : '付款记录')}</Pill></span> },
@@ -73,14 +79,13 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     <Facts items={[{ label: '方向', value: current.direction === 'receipt' ? '实际收款' : '已登记付款记录' }, { label: '交易日期', value: current.date }, { label: '付款方 / 收款方', value: current.party }, { label: '原币金额', value: money(current.amount, current.currency) }, { label: '银行参考 / 附言', value: current.ref || '未填写' }, { label: '公司银行账户', value: account ? `${account.code} · ${accountLabel(account)}` : '未归属' }]} />
     <ActionBar actions={[
       { label: account ? '调整归属账户' : '归属账户', onClick: () => setAssigning(true), reason: canWrite ? undefined : '需要付款凭证权限' },
-      ...(current.receipt ? [{ label: '去收款核销', onClick: () => onReceipt(current.id) }] : [supplierPayment ? { label: '查看应付分配', onClick: () => go('payment-vouchers', supplierPayment.id, { section: 'payables' }) } : { label: '分配到应付', onClick: () => {}, reason: '这是未关联供应商的付款记录；供应商付款请在“应付待办”登记，才能分配到票据' }]),
-      current.receipt ? { label: '核销冲回', onClick: () => onReceipt(current.id), reason: allocations.length ? undefined : '此流水没有有效核销，无需冲回' } : { label: '付款冲回', onClick: () => { if (supplierPayment) go('payment-vouchers', supplierPayment.id, { section: 'payables' }); }, reason: supplierPayment ? undefined : '在“收款核销 → 付款凭证”中逐张冲回，原凭证保留' },
+      ...(current.receipt ? [{label:'去收款核销',onClick:()=>onReceipt(current.id)},...(allocations.length?[{label:'核销冲回',onClick:()=>onReceipt(current.id)}]:[])] : supplierPayment ? [{label:'查看应付分配',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'})},{label:'付款冲回',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'})}] : refundClaim ? [{label:'查看索赔案件',onClick:()=>go('claims',refundClaim.id)}] : []),
     ]} />
-    {current.receipt && <DetailBlock title={uiText("应收核销分配")}><Facts items={[{ label: '当前未分配', value: money(current.receipt.remaining, current.currency) }, { label: '原始到账', value: money(current.amount, current.currency) }]} />
+    {current.receipt && <DetailBlock title={uiText("到账用途")}><Facts items={[{ label: '当前未分配', value: money(current.receipt.remaining, current.currency) }, { label: '原始到账', value: money(current.amount, current.currency) }]} />
       {allocations.map(a => { const i = state?.invoices.find(i => i.id === a.invoiceId); return <div className="mist-col" key={a.id}><div className="mist-row mist-module-actions"><Mono>{i?.code || '来源票据未找到'}</Mono><span className="mist-num">{money(a.amount, a.currency)}</span>{i && <Button size="sm" onClick={() => go('payment-vouchers', i.id)}>{uiText("查看票据")}</Button>}</div><span className="mist-note">{a.createdAt} · {a.actor}{uiText(a.payerBasis ? ` · ${a.payerBasis}` : '')}</span></div>; })}
-      {!allocations.length && <span className="mist-note">{uiText("尚未产生应收核销分配。")}</span>}
+      {factoryUses.map(use=><div className="mist-row" key={use.id}><span>{uiText('工厂补偿')} · {use.claimCode}</span><span>{money(use.amount,use.currency)}</span><Button size="sm" onClick={()=>go('claims',use.claimId)}>{uiText('查看索赔案件')}</Button></div>)}
     </DetailBlock>}
-    {!current.receipt && (supplierPayment ? <Banner title={uiText("供应商付款")}>{uiText("已在应付待办登记，分配到票据的明细在那里查看；付出账户在上方“公司银行账户”归属。")}</Banner> : <Banner title={uiText("只读付款事实")}>{uiText("本记录没有应付分配，不能据此推导供应商未付余额。")}</Banner>)}
+    {!current.receipt&&<Facts items={[{label:'业务来源',value:paymentPurpose}]}/>}
   </DetailBody> : <EmptyState compact title={uiText(route.id ? '未找到交易记录' : '交易详情')} description={uiText("选择一笔记录查看原币金额、核销来源及归属账户。")} />;
   const assignDialog = assigning && state && current && currentRow && <AccountAssignDialog state={state} kind={current.direction} row={currentRow} onClose={() => setAssigning(false)} />;
   if (full.active && current) return <ListDetailPage backLabel="收付款记录" onBack={full.back} after={assignDialog}>{detail}</ListDetailPage>;
@@ -90,7 +95,7 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     facts: [
       { label: '交易日期', value: current.date }, { label: '银行参考 / 附言', value: current.ref || '未填写' },
       { label: '归属账户', value: account ? `${account.code} · ${account.name}` : <Pill tone="warn">{uiText("未归属")}</Pill> },
-      ...(current.receipt ? [{ label: '未分配', value: money(current.receipt.remaining, current.currency) }] : [{ label: '应付分配', value: supplierPayment ? '已在应付待办登记' : '未关联供应商' }]),
+      ...(current.receipt ? [{ label: '未分配', value: money(current.receipt.remaining, current.currency) }] : [{label:'业务来源',value:paymentPurpose}]),
     ] }} /> : null;
   return <div className="mist-col">
     <Toolbar><SearchField value={query} onChange={setQuery} placeholder={uiText("搜索流水号、对方、附言或日期")} /><Button onClick={() => downloadMistCsv('收付款记录.csv', ['流水', '方向', '日期', '对方', '金额', '币种', '附言'], shown.map(r => [r.code, r.direction === 'receipt' ? '收款' : '付款', r.date, r.party, r.amount, r.currency, r.ref]))}>{uiText("导出当前记录")}</Button></Toolbar>

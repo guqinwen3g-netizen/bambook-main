@@ -13,7 +13,7 @@ import { useNav } from '../nav';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { useRouteDraft, useRouteScope } from './modules/useRouteDraft';
-import { FinanceAccounts, FinanceEntrances, FinancePayables, FinanceRecords, financeArea, type FinanceArea } from './FinanceWorkspace';
+import { FinanceAccounts, FinanceEntrances, FinancePayables, FinanceRecords, financeArea, factoryReceiptUses, type FinanceArea } from './FinanceWorkspace';
 import type { OrderFundingAssignment,OrderFundingCommand } from '../../../../server/src/shared/mistOrderFunding';
 import { orderDepositCoverage,orderFundingReconciliationLimit } from '../../../../server/src/shared/mistOrderFunding';
 import { mistPayerMatchesInvoice } from '../../../../server/src/shared/mistOpeningBalance';
@@ -23,7 +23,7 @@ import { useDevice } from '../runtime/devicePreferences';
 
 const STATE = { unmatched: { tone: 'bad' as const, label: '未认领' }, suggested: { tone: 'ai' as const, label: '匹配建议' }, matched: { tone: 'ok' as const, label: '已核销' } };
 export function financeReceiptDisplay(receipt:MistReceipt,funding:readonly OrderFundingAssignment[],allocations:readonly Pick<MistAllocation,'receiptId'|'amount'>[]){
-  const allocated=allocations.some(row=>row.receiptId===receipt.id&&row.amount>0);
+  const allocated=receipt.remaining<receipt.amount||allocations.some(row=>row.receiptId===receipt.id&&row.amount>0);
   const attributed=funding.some(row=>row.receiptId===receipt.id&&row.state==='active'&&row.amount>0);
   if(receipt.remaining===0)return {...STATE.matched,unclaimed:false};
   if(allocated)return {tone:'warn' as const,label:'部分核销',unclaimed:false};
@@ -203,7 +203,8 @@ export function FinancePage() {
           {needsPayerBasis&&<Field label={uiText("付款方关系依据")} required><TextInput disabled={busy||!canFund} value={payerBasis} onChange={event=>setPayerBasis(event.target.value)} placeholder={uiText("说明此付款方与发票客户的实际关系")}/></Field>}
           {invoice&&<Field label={uiText("本次核销金额")} required hint={ui`最多 ${fmt(maximumAllocation,2)} ${receipt.currency}`} error={allocationAmount===null?'金额须大于零、最多两位小数且不超过可分配余额':undefined}><TextInput aria-label={uiText("本次核销金额")} type="number" min="0.01" step="0.01" value={allocationInput} disabled={busy||!canFund} onChange={e=>setAllocationInput(e.target.value)}/></Field>}
           {invoice&&allocationAmount!==null&&<div className="mist-banner" data-tone="neutral"><Tile icon={Link2} size="sm"/><div><b>{uiText("本次分配 ")}{fmt(allocationAmount,2)} {receipt.currency}</b><p>{uiText("核销后流水未分配 ")}{fmt((Math.round(receipt.remaining*100)-Math.round(allocationAmount*100))/100,2)} {receipt.currency}{uiText(" · 发票未收 ")}{fmt((Math.round(invoice.open*100)-Math.round(allocationAmount*100))/100,2)} {invoice.currency}</p></div></div>}
-          <div className="mist-col"><span className="mist-eyebrow">{uiText("此流水核销记录")}</span>{allocations.filter(a=>a.receiptId===receipt.id).map(a=><div className="mist-row mist-module-actions" key={a.id}><Mono>{invoices.find(i=>i.id===a.invoiceId)?.code||a.invoiceId}</Mono><span className="mist-num">{fmt(a.amount,2)} {a.currency}</span><Button size="sm" onClick={()=>setInvoiceId(a.invoiceId)}>{uiText("查看核销票据")}</Button><Button size="sm" disabled={busy||!canFund} onClick={()=>openReversal('allocation',a.id,`${receipt.code} → ${invoices.find(i=>i.id===a.invoiceId)?.code||a.invoiceId} · ${fmt(a.amount,2)} ${a.currency}`)}>{uiText("核销冲回")}</Button></div>)}
+          <div className="mist-col"><span className="mist-eyebrow">{uiText("到账用途")}</span>{allocations.filter(a=>a.receiptId===receipt.id).map(a=><div className="mist-row mist-module-actions" key={a.id}><Mono>{invoices.find(i=>i.id===a.invoiceId)?.code||a.invoiceId}</Mono><span className="mist-num">{fmt(a.amount,2)} {a.currency}</span><Button size="sm" onClick={()=>setInvoiceId(a.invoiceId)}>{uiText("查看核销票据")}</Button><Button size="sm" disabled={busy||!canFund} onClick={()=>openReversal('allocation',a.id,`${receipt.code} → ${invoices.find(i=>i.id===a.invoiceId)?.code||a.invoiceId} · ${fmt(a.amount,2)} ${a.currency}`)}>{uiText("核销冲回")}</Button></div>)}
+            {state&&factoryReceiptUses(state,receipt.id).map(use=><div key={use.id} className="mist-row"><span>{uiText('工厂补偿')} · {use.claimCode} · {fmt(use.amount,2)} {use.currency}</span><Button size="sm" onClick={()=>go('claims',use.claimId)}>{uiText('查看索赔案件')}</Button></div>)}
             {(state?.financeReversals??[]).filter(r=>r.kind==='allocation'&&r.receiptId===receipt.id).map(r=><div className="mist-col" key={r.id}><div className="mist-row mist-module-actions"><Pill tone="neutral">{uiText("已冲回")}</Pill><Mono>{invoices.find(i=>i.id===r.invoiceId)?.code||r.invoiceId}</Mono><span className="mist-num">{fmt(r.amount,2)} {r.currency}</span></div><span className="mist-note">{r.at} · {r.actor} · {r.reason}</span></div>)}
             </div>
         </div><CardFooter><span className="mist-spacer" /><Button variant="primary" iconRight={ArrowRight} loading={busy} disabled={busy||!canFund||!invoice || receipt.remaining <= 0||allocationAmount===null||needsPayerBasis&&!payerBasis.trim()} onClick={confirm}>{uiText(receipt.remaining <= 0 ? '已核销' : '确认核销')}</Button></CardFooter></> : <EmptyState compact title={uiText("请选择一笔到账流水")} />}

@@ -81,3 +81,8 @@ it('keeps customer-only balances out of another customer and development invoice
  expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(0);
  f.state.orderFunding!.assignments[0].state='released';expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(50);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(50);
 });
+
+it('reserves tax-refund receipt usage instead of allowing the same money to become a customer deposit',()=>{
+ const f=setup();f.state.receipts[0].currency='CNY';f.state.orders.forEach(o=>o.currency='CNY');f.state.exportRebate!.claims.push({receipts:[{receiptId:'r',amount:20}]} as any);
+ expect(()=>f.assign(31,'r',null)).toThrow('超出到账金额');
+});

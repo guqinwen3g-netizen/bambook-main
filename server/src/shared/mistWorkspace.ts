@@ -1,3 +1,4 @@
+import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {applyInternalFabricCommand,internalFabricCommandPermission,normalizeGarmentFulfillment,normalizeInternalSupply,internalFabricDeliveryState,type GarmentFulfillmentFields,type MistInternalFabricAllocation,type InternalFabricCommand} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,type SampleSendPurpose} from './mistSampleSending';
 import type {MistBusinessClock} from './mistBusinessClock';
@@ -237,7 +238,7 @@ export type MistFinanceReversal = { id: string; kind: 'allocation' | 'payment'; 
 export type MistCustomer = { id: string; name: string; code: string; country: string; city: string; industry: string; owner: string; /** 同 MistOrder.ownerId。 */ ownerId: string; grade: string; currency: string; terms: string; incoterm: string; categories: string; creditLimit: number; since: string };
 export type MistContact = { id: string; customerId: string; name: string; role: string; email: string; phone: string; tone: MistTone };
 export type MistEvent = { id: string; entityType: string; entityId: string; actor: string; at: string; text: string; fileIds: string[] };
-export type MistTarget = { view: string; id?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string };
+export type MistTarget = { view: string; id?: string; section?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string };
 /**
  * 工作事项必须写明由谁处理：assigneeIds 为指定账号；permission 为「持有该权限的任何人」（岗位事项，如财务开票、后勤接手）。
  * 两者都为空的事项不进入任何人的「我的工作」和侧栏数字。
@@ -649,8 +650,8 @@ function recalculate(state: MistState) {
   for(const invoice of state.invoices) invoice.open=isRecognizedMistInvoice(invoice)?major(Math.max(0,mistMoneyMinor(invoice.amount)-state.allocations.filter(a=>a.invoiceId===invoice.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-platformCreditAppliedMinor(state,invoice.id))):0;
   for(const receipt of state.receipts){
     // 退税到账勾稽同样占用流水余额。
-    receipt.remaining=major(Math.max(0,mistMoneyMinor(receipt.amount)-state.allocations.filter(a=>a.receiptId===receipt.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-rebateReceiptUsedMinor(state,receipt.id)));
-    if(receipt.remaining===0) receipt.state='matched';
+    receipt.remaining=major(Math.max(0,mistMoneyMinor(receipt.amount)-state.allocations.filter(a=>a.receiptId===receipt.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-rebateReceiptUsedMinor(state,receipt.id)-claimRecoveryReceiptUsedMinor(state,receipt.id)));
+    if(receipt.remaining===0) receipt.state='matched';else if(receipt.state==='matched')receipt.state=receipt.suggest?'suggested':'unmatched';
   }
   for(const order of state.orders){
     const rows=state.orderLines.filter(line=>line.orderId===order.id);
@@ -801,7 +802,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('team.')){const result=applyTeamCommand(state,command as TeamCommand,context);return {state,result};}
   if(command.type.startsWith('cost.')){const result=applyOrderCostCommand(state,command as OrderCostCommand,context);return {state,result};}
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.')){const result=applyRfqCommand(state,command as RfqCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
-  if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);return {state,result};}
+  if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);assertOrderFundingIntegrity(state);return {state,result};}
   if(command.type.startsWith('fulfillment.')){const result=applyFulfillmentCommand(state,command as FulfillmentCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type==='market.lead.convertToCrm'){const result=convertLeadToCrm(state,command.payload as Extract<MarketCommand,{type:'market.lead.convertToCrm'}>['payload'],context);recalculate(state);return {state,result};}
   if(command.type.startsWith('market.')){const result=applyMarketCommand(state,command as MarketCommand,context);for(const order of state.orders)if(!original.orders.some(old=>old.id===order.id)&&!order.governance){order.governance=createOrderGovernance(context);order.state='订单草稿';order.tone='neutral';order.checklist=['拟发范围确认','收货与贸易条款确认','收款条件核对'].map((label,index)=>({id:order.id+'-check-'+index,label,done:false,note:''}));}normalizeMistState(state,context);recalculate(state);return {state,result};}
@@ -1312,6 +1313,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(account)assertAccountUsable(account,row.currency,row.date);
       const before=(state.bankAccounts||[]).find(a=>a.id===row.accountId);
       if(before?.closed)throw new MistCommandError('PRECONDITION','原账户 '+before.code+' 已销户，流水归属已锁定；如需调整请先恢复该账户');
+      if(kind==='receipt'&&claimRecoveryReceiptUsedMinor(state,row.id)>0)throw new MistCommandError('PRECONDITION','该到账已有工厂补偿对应，请先冲回对应再调整账户');
       if(kind==='receipt'&&mistReceiptSettledMinor(state,row.id)>0)throw new MistCommandError('PRECONDITION',row.code+' 已有结汇分配，不能调整归属账户；如需调整请先冲回相关结汇');
       if(account)row.accountId=account.id;else delete row.accountId;
       event(state,context,kind==='receipt'?'finance':'payment',row.id,(account?(before?'调整 '+row.code+' 归属账户 '+before.code+' → '+account.code:row.code+' 归属账户 '+account.code):'解除 '+row.code+' 的账户归属 '+(before?.code||''))+(reason?'：'+reason:''));

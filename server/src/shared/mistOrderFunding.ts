@@ -1,3 +1,5 @@
+import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
+import {rebateReceiptUsedMinor} from './mistExportRebate';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import { MistCommandError, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
 
@@ -36,7 +38,7 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
    orderBucket(order.customerId,order.id).allocated+=mistMoneyMinor(allocation.amount);
   }
   // Development-fee invoices have no order; their allocations still consume this receipt.
-  let reserved=development;for(const customer of customers.values()){
+  let reserved=development+rebateReceiptUsedMinor(root,receipt.id)+claimRecoveryReceiptUsedMinor(root,receipt.id);for(const customer of customers.values()){
    const orders=[...customer.orders.values()],assigned=orders.reduce((n,o)=>n+o.assigned,0),used=orders.reduce((n,o)=>n+Math.max(o.assigned,o.allocated),0);
    reserved+=Math.max(assigned+customer.unassigned,used);
   }
@@ -68,6 +70,11 @@ export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoi
   allowed=Math.min(free+Math.max(0,customerAssigned-customerUsed)+assignedRoom,mistMoneyMinor(order.amount)-mistMoneyMinor(orderFundingCoveredAmount(root,order.id))+assignedRoom);
  }
  return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),mistMoneyMinor(invoice.open),allowed))/100;
+}
+/** Money already reserved for customers cannot be spent on a supplier or tax receipt. */
+export function orderFundingNonCustomerReceiptLimit(root:Root,receiptId:string){
+ const receipt=root.receipts.find(row=>row.id===receiptId);if(!receipt)return 0;
+ return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),mistMoneyMinor(receipt.amount)-receiptFundingUse(root,receipt).reserved))/100;
 }
 export function orderFundingCoveredAmount(root:Root,orderId:string){
  let covered=0;for(const receipt of root.receipts){

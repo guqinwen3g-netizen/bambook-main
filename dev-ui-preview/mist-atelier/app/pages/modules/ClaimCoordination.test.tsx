@@ -52,14 +52,14 @@ describe('售后索赔协同面板', () => {
     expect(host.textContent).toContain('客户这边已解决，但还在等工厂补偿');
     expect(host.textContent).toContain('已执行并结清');
     expect(host.textContent).toContain('40.00 ' + cur);
-    expect(button('登记实际落实')).toBeUndefined(); expect(button('批准放弃')).toBeUndefined();
-    expect(host.textContent).toContain('由财务在应付里按工厂票据扣款');
+    expect(button('登记实际落实')).toBeUndefined(); expect(button('对应到账')).toBeUndefined(); expect(button('批准放弃')).toBeUndefined();
+    expect(host.textContent).toContain('待财务扣款');
   });
   it('从货款扣的追偿可改为工厂付款：已扣保留，没有可扣票据时提示，提交改方式命令', async () => {
     const cur = state.invoices[0].currency;
     const recovery = { id: 'r1', supplierId: 'no-bill-supplier', supplierName: '无票工厂', currency: cur, requested: 100, basis: '工厂责任', state: 'Agreed' as const, agreed: 60, method: 'deduction' as const, agreedNote: '邮件确认', createdAt: '', createdBy: '顾言', createdById: 'me', events: [] };
     const { openEditor, command } = await mount(claimFor({ coordination: { notices: [], verifications: [], recoveries: [recovery] } }), { write: true, qc: false, finance: true, approve: false });
-    expect(host.textContent).toContain('暂无可扣的未付票据');
+    expect(host.textContent).toContain('暂无可扣余额');
     await act(async () => button('改为工厂付款')!.click());
     const spec = (openEditor.mock.calls as any[])[0][0];
     expect(spec.title).toBe('改为工厂付款'); expect(spec.description).toContain('已扣 0.00 USD'); expect(spec.description).toContain('待收 60.00 USD');
@@ -77,4 +77,11 @@ describe('售后索赔协同面板', () => {
 it('does not describe a rejected-only proposal as executed financial settlement',async()=>{
  await mount(claimFor({dispositions:[{id:'returned',kind:'Allowance',amount:10,quantity:0,unit:'',returnDisposition:'',basis:'方案未采用',fileIds:[],state:'rejected'}]}));
  expect(host.textContent).toContain('处置未采用');expect(host.textContent).not.toContain('已执行并结清');
+});
+
+it('corresponds factory money to the selected existing bank receipt using the dedicated command',async()=>{
+ const currency=state.invoices[0].currency;state.receipts.push({id:'bank-proof',code:'BR-PROOF',date:'2026-01-01',payer:supplier().name,currency,amount:40,remaining:40,ref:'BANK-REF',state:'unmatched',accountId:'account'});
+ const recovery={id:'r-cash',supplierId:supplier().id,supplierName:supplier().name,currency,requested:100,agreed:100,method:'payment' as const,state:'Agreed' as const,basis:'确认补偿',createdAt:'',createdBy:'业务',createdById:'business',events:[]};
+ const {openEditor,command}=await mount(claimFor({coordination:{notices:[],verifications:[],recoveries:[recovery]}}),{write:false,qc:false,finance:true,approve:false});await act(async()=>button('对应到账')!.click());const spec=openEditor.mock.calls[0][0];expect(spec.fields.find((f:any)=>f.key==='receiptId').options).toEqual(expect.arrayContaining([expect.objectContaining({value:'bank-proof'})]));
+ await spec.submit({receiptId:'bank-proof',amount:40,payerBasis:''});expect(command).toHaveBeenCalledWith({type:'platform.claim.recovery.receipt.allocate',payload:{id:'r-cash',receiptId:'bank-proof',amount:40}});
 });

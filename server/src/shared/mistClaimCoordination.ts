@@ -1,3 +1,5 @@
+import {orderFundingNonCustomerReceiptLimit} from './mistOrderFunding';
+import {recoveryOtherFulfilledMinor,type ClaimRecoverySettlement} from './mistClaimRecoveryReceipts';
 /**
  * 售后索赔协同（CAP-claims-01..03 · 协同首轮）。
  * 业务口径（2026-10-14 用户确认的实际做法）：
@@ -23,6 +25,7 @@ export type ClaimVerification = { id: string; at: string; by: string; byId: stri
 export type ClaimRecoveryEvent = { at: string; by: string; action: string; note: string };
 export type ClaimRecovery = {
   id: string; supplierId: string; supplierName: string; currency: string; requested: number; basis: string; state: ClaimRecoveryState; createdAt: string; createdBy: string; createdById: string;
+  settlements?: ClaimRecoverySettlement[];
   agreed?: number; method?: ClaimRecoveryMethod; agreedNote?: string; settled?: number; settledRef?: string; settledDate?: string; waiveReason?: string; events: ClaimRecoveryEvent[];
 };
 export type ClaimCoordination = { notices: ClaimNotice[]; verifications: ClaimVerification[]; recoveries: ClaimRecovery[] };
@@ -34,10 +37,12 @@ export type ClaimCoordinationCommand =
   | { type: 'platform.claim.recovery.open'; payload: { claimId: string; supplierId: string; currency: string; requested: number; basis: string } }
   | { type: 'platform.claim.recovery.agree'; payload: { id: string; agreed: number; method: ClaimRecoveryMethod; note: string } }
   | { type: 'platform.claim.recovery.method'; payload: { id: string; method: 'payment'; reason: string } }
-  | { type: 'platform.claim.recovery.settle'; payload: { id: string; amount: number; reference: string; date: string } }
+  | { type: 'platform.claim.recovery.settle'; payload: { id: string; amount: number; reference?: string; date?: string; receiptId?:string; payerBasis?:string } }
+  | { type: 'platform.claim.recovery.receipt.allocate'; payload:{id:string;amount:number;receiptId:string;payerBasis?:string;reference?:string;date?:string} }
+  | { type: 'platform.claim.recovery.settlement.reverse'; payload:{id:string;settlementId:string;reason:string} }
   | { type: 'platform.claim.recovery.waive'; payload: { id: string; reason: string } };
 
-export const CLAIM_COORDINATION_COMMANDS = ['platform.claim.notify', 'platform.claim.verify', 'platform.claim.recovery.open', 'platform.claim.recovery.agree', 'platform.claim.recovery.method', 'platform.claim.recovery.settle', 'platform.claim.recovery.waive'] as const;
+export const CLAIM_COORDINATION_COMMANDS = ['platform.claim.notify', 'platform.claim.verify', 'platform.claim.recovery.open', 'platform.claim.recovery.agree', 'platform.claim.recovery.method', 'platform.claim.recovery.settle', 'platform.claim.recovery.receipt.allocate', 'platform.claim.recovery.settlement.reverse', 'platform.claim.recovery.waive'] as const;
 export const CLAIM_GOODS_LOCATIONS: ClaimGoodsLocation[] = ['factory', 'transit', 'customer', 'sold', 'unknown'];
 export const CLAIM_RECOVERY_METHODS: ClaimRecoveryMethod[] = ['deduction', 'payment', 'replacement', 'mixed'];
 export const CLAIM_LOCATION_LABEL: Record<ClaimGoodsLocation, string> = { factory: '还在工厂', transit: '运输途中', customer: '已到客户仓库', sold: '已上架 / 已销售', unknown: '尚不清楚' };
@@ -47,7 +52,7 @@ export const CLAIM_RECOVERY_LABEL: Record<ClaimRecoveryState, string> = { Negoti
 
 export function claimCoordinationPermission(type: ClaimCoordinationCommand['type']): string {
   if (type === 'platform.claim.verify') return 'qc:inspect';
-  if (type === 'platform.claim.recovery.settle') return 'invoices:reconcile';
+  if (type === 'platform.claim.recovery.settle'||type==='platform.claim.recovery.settlement.reverse'||type==='platform.claim.recovery.receipt.allocate') return 'invoices:reconcile';
   if (type === 'platform.claim.recovery.waive') return 'aftersales:approve';
   return 'aftersales:write';
 }
@@ -91,8 +96,8 @@ export function claimLedger(root: MistState, claim: ClaimLike, opts: { creditsOp
   const pendingMinor = claim.dispositions.filter(d => ['Draft', 'pending'].includes(d.state) && !d.supersededById).reduce((s, d) => s + mistMoneyMinor(d.amount || 0), 0);
   const recoveries = (claim.coordination?.recoveries ?? []).filter(r => r.state !== 'Withdrawn');
   const sameCurrency = recoveries.every(r => r.currency === currency);
-  const agreedMinor = recoveries.filter(r => r.state === 'Agreed' || r.state === 'Settled').reduce((s, r) => s + mistMoneyMinor(r.agreed ?? 0), 0);
-  const settledMinor = recoveries.filter(r => r.state === 'Settled').reduce((s, r) => s + mistMoneyMinor(r.settled ?? 0), 0);
+  const agreedMinor = recoveries.filter(r => r.state === 'Agreed' || r.state === 'Settled' || r.state === 'Waived' && (r.settled??0)>0).reduce((s, r) => s + mistMoneyMinor(r.state==='Waived'?(r.settled??0):(r.agreed??0)), 0);
+  const settledMinor = recoveries.filter(r => r.state !== 'Withdrawn').reduce((s, r) => s + mistMoneyMinor(r.settled ?? 0), 0);
   const requestedMinor = recoveries.filter(r => r.state !== 'Waived').reduce((s, r) => s + mistMoneyMinor(r.requested), 0);
   const customerOpen = claim.dispositions.some(d => ['Draft', 'pending', 'approved'].includes(d.state) && !d.supersededById);
   const recoveryOpen = recoveries.some(r => OPEN_RECOVERY.includes(r.state));
@@ -106,14 +111,14 @@ export function claimLedger(root: MistState, claim: ClaimLike, opts: { creditsOp
 
 /** 关闭前置：工厂追偿必须已落实、已批准放弃或已撤回。 */
 export function assertClaimRecoveriesSettled(claim: ClaimLike) {
-  const open = (claim.coordination?.recoveries ?? []).filter(r => OPEN_RECOVERY.includes(r.state));
+  const open = (claim.coordination?.recoveries ?? []).filter(r => OPEN_RECOVERY.includes(r.state)||r.state==='Settled'&&mistMoneyMinor(r.settled??0)!==mistMoneyMinor(r.agreed??0));
   if (open.length) fail('客户这边已处理，但还有 ' + open.length + ' 笔工厂补偿未落实；落实或经负责人批准放弃后才能关闭', 'PRECONDITION');
 }
 
 /** 撤销案件：已落实的工厂补偿不能随案撤销；协商中 / 已同意的追偿一并撤回并留痕。 */
 export function withdrawClaimRecoveries(claim: ClaimLike, reason: string, c: MistContext) {
   const rows = claim.coordination?.recoveries ?? [];
-  if (rows.some(r => r.state === 'Settled')) fail('工厂补偿已落实，不能直接撤销案件；请人工核对退回工厂款项', 'PRECONDITION');
+  if (rows.some(r => r.state === 'Settled'||(r.settled??0)>0||recoveryOtherFulfilledMinor(r)>0)) fail('工厂补偿已落实，不能直接撤销案件；请人工核对退回工厂款项', 'PRECONDITION');
   for (const r of rows) if (OPEN_RECOVERY.includes(r.state)) { r.state = 'Withdrawn'; r.events.push({ at: c.now, by: c.actorName, action: 'withdraw', note: '随案撤销：' + reason }); }
 }
 
@@ -154,6 +159,7 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       const v = command.payload, { claim, row } = recoveryOf(claims, v.id); active(claim); actor(c);
       if (row.state !== 'Negotiating') fail('只有协商中的追偿可以记录工厂同意结果');
       row.agreed = amount(v.agreed, '工厂同意承担的金额'); row.method = enumOf(v.method, CLAIM_RECOVERY_METHODS, '补偿方式'); row.agreedNote = text(v.note, '工厂确认依据（邮件 / 签字等）'); row.state = 'Agreed';
+      task(root,c,claim.id,'claim-recovery:'+row.id,'工厂补偿 · '+claim.code,{assigneeIds:[row.createdById],permission:'invoices:reconcile'});
       row.events.push({ at: c.now, by: c.actorName, action: 'agree', note: '工厂同意 ' + row.currency + ' ' + row.agreed + ' · ' + CLAIM_METHOD_LABEL[row.method] + ' · ' + row.agreedNote });
       emit(root, c, claim.id, '工厂 ' + row.supplierName + ' 同意承担 ' + row.currency + ' ' + row.agreed + '（' + CLAIM_METHOD_LABEL[row.method] + '）');
       return { id: row.id, claimId: claim.id };
@@ -164,7 +170,7 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       if (row.state !== 'Agreed') fail('只有工厂已同意、尚未落实的追偿可以改补偿方式', 'PRECONDITION');
       if (row.method !== 'deduction' && row.method !== 'mixed') fail('只有“从货款中扣”或组合方式可以改为工厂付款', 'PRECONDITION');
       if (v.method !== 'payment') fail('目前只支持改为工厂付款');
-      const deductedMinor = recoveryDeductedMinor(root, row.id), left = mistMoneyMinor(row.agreed ?? 0) - deductedMinor;
+      const deductedMinor = recoveryDeductedMinor(root, row.id), left = mistMoneyMinor(row.agreed ?? 0) - deductedMinor-recoveryOtherFulfilledMinor(row);
       if (left <= 0) fail('同意金额已全部从货款中扣，无需改方式', 'PRECONDITION');
       const reason = text(v.reason, '改方式原因与工厂确认依据', true, 1000), from = row.method;
       row.method = 'payment';
@@ -173,21 +179,49 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       emit(root, c, claim.id, '向 ' + row.supplierName + ' 的追偿改为工厂付款：' + reason);
       return { id: row.id, claimId: claim.id };
     }
+    case 'platform.claim.recovery.receipt.allocate':
     case 'platform.claim.recovery.settle': {
-      const v = command.payload, { claim, row } = recoveryOf(claims, v.id); active(claim); actor(c);
-      if (row.state !== 'Agreed') fail('须先记录工厂同意的金额与方式，才能登记实际落实');
-      // 从货款中扣：由财务在应付里按票据登记扣款，扣满后自动落实；其他方式（含由扣款改来的工厂付款）：已扣部分 + 本次落实合计不超过同意金额。
-      if (row.method === 'deduction') fail('该追偿方式为“从货款中扣”，请由财务在应付里按工厂票据登记索赔扣款，扣满后自动落实', 'PRECONDITION');
-      const deducted = recoveryDeductedMinor(root, row.id);
-      const other = amount(v.amount, '实际落实金额'), settledMinor = deducted + mistMoneyMinor(other);
-      if (settledMinor > mistMoneyMinor(row.agreed ?? 0)) fail(deducted ? `已从货款中扣 ${(deducted / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}，加上本次落实会超过工厂同意金额` : '实际落实金额不能超过工厂同意金额');
-      const settled = settledMinor / 100;
-      const date = day(v.date); if (date > businessDay(c.now)) fail('落实日期不能在未来');
-      row.settled = settled; row.settledRef = text(v.reference, '实际扣款 / 收款凭据'); row.settledDate = date; row.state = 'Settled';
-      row.events.push({ at: c.now, by: c.actorName, action: 'settle', note: '实际落实 ' + row.currency + ' ' + settled + ' · ' + row.settledRef });
-      done(root, claim.id, 'claim-recovery:' + row.id);
-      emit(root, c, claim.id, '工厂补偿已落实 ' + row.currency + ' ' + settled + ' · ' + row.settledRef);
-      return { id: row.id, claimId: claim.id };
+      const v=command.payload,{claim,row}=recoveryOf(claims,v.id);active(claim);const byId=actor(c);
+      if(row.state!=='Agreed')fail('须先记录工厂同意的金额与方式，才能登记实际落实');
+      if(row.method==='deduction')fail('请在应付票据登记索赔扣款','PRECONDITION');
+      const value=amount(v.amount,'本次落实金额'),minor=mistMoneyMinor(value),deducted=recoveryDeductedMinor(root,row.id),previous=recoveryOtherFulfilledMinor(row);
+      if(deducted+previous+minor>mistMoneyMinor(row.agreed??0))fail('本次金额超过工厂补偿未落实余额');
+      if((row.method==='payment'||row.method==='mixed')&&command.type!=='platform.claim.recovery.receipt.allocate')fail('请使用对应到账办理工厂付款','PRECONDITION');
+      if(command.type==='platform.claim.recovery.receipt.allocate'&&row.method!=='payment'&&row.method!=='mixed')fail('当前补偿方式不是工厂付款');
+      let entry:ClaimRecoverySettlement;
+      if(row.method==='payment'||row.method==='mixed'){
+        const receiptId=text(v.receiptId,'对应到账'),receipt=root.receipts.find(item=>item.id===receiptId);
+        if(!receipt)fail('对应到账不存在','NOT_FOUND');
+        if(receipt!.currency!==row.currency)fail('到账与工厂补偿币种不同');
+        const account=root.bankAccounts?.find(item=>item.id===receipt!.accountId);
+        if(!account||account.currency!==receipt!.currency)fail('请先将到账归属公司账户','PRECONDITION');
+        if(receipt!.date>businessDay(c.now))fail('到账日期不能在未来');
+        const normalized=(value:string)=>value.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
+        const samePayer=normalized(receipt!.payer)===normalized(row.supplierName),payerBasis=v.payerBasis===undefined?'':text(v.payerBasis,'付款方关系依据',false);
+        if(!samePayer&&!payerBasis)fail('请填写付款方关系依据');
+        if(minor>mistMoneyMinor(orderFundingNonCustomerReceiptLimit(root,receiptId)))fail('到账可对应余额不足，或已归属客户款项','PRECONDITION');
+        entry={id:c.id(),kind:'receipt',receiptId,receiptCode:receipt!.code,amount:value,currency:row.currency,date:receipt!.date,reference:receipt!.ref||receipt!.code,...(payerBasis?{payerBasis}:{}),at:c.now,by:c.actorName,byId};
+      }else{
+        const date=day(v.date);if(date>businessDay(c.now))fail('落实日期不能在未来');
+        entry={id:c.id(),kind:'noncash',amount:value,currency:row.currency,date,reference:text(v.reference,'实际补偿凭据'),at:c.now,by:c.actorName,byId};
+      }
+      (row.settlements??=[]).push(entry);row.settled=(deducted+previous+minor)/100;row.settledRef=entry.reference;row.settledDate=entry.date;
+      const complete=deducted+previous+minor===mistMoneyMinor(row.agreed??0);row.state=complete?'Settled':'Agreed';
+      row.events.push({at:c.now,by:c.actorName,action:'settle',note:'落实 '+row.currency+' '+value+' · '+entry.reference});
+      if(complete)done(root,claim.id,'claim-recovery:'+row.id);
+      emit(root,c,claim.id,complete?'工厂补偿已落实':'工厂补偿部分落实');return{id:row.id,claimId:claim.id,settlementId:entry.id};
+    }
+    case 'platform.claim.recovery.settlement.reverse': {
+      const v=command.payload,{claim,row}=recoveryOf(claims,v.id);active(claim);const byId=actor(c);
+      if(row.state==='Waived'||row.state==='Withdrawn')fail('追偿已结束，请核对原决定','PRECONDITION');
+      const entry=row.settlements?.find(item=>item.id===text(v.settlementId,'落实记录'));
+      if(!entry||entry.reversed)fail('落实记录不存在或已冲回','PRECONDITION');
+      const reason=text(v.reason,'冲回原因');entry!.reversed={at:c.now,by:c.actorName,byId,reason};
+      const remaining=recoveryDeductedMinor(root,row.id)+recoveryOtherFulfilledMinor(row);row.state='Agreed';
+      if(remaining)row.settled=remaining/100;else{delete row.settled;delete row.settledRef;delete row.settledDate;}
+      row.events.push({at:c.now,by:c.actorName,action:'settle-reverse',note:entry!.reference+' · '+reason});
+      task(root,c,claim.id,'claim-recovery:'+row.id,'工厂补偿 · '+claim.code,{assigneeIds:[row.createdById],permission:'invoices:reconcile'});
+      emit(root,c,claim.id,'冲回工厂补偿对应：'+reason);return{id:row.id,claimId:claim.id,settlementId:entry!.id};
     }
     case 'platform.claim.recovery.waive': {
       const v = command.payload, { claim, row } = recoveryOf(claims, v.id); active(claim); const byId = actor(c);
