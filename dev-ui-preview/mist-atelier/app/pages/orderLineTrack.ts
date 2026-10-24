@@ -2,6 +2,7 @@
  * 成衣：产前样 → 面辅料 → 开裁 → 生产检验 → 完工登记 → 出运（6 步）。
  * 面料：坯布 / 染整 → 色样确认 → 生产检验 → 完工 → 出运（5 步，没有开裁；生产须有实际放行记录）。 */
 import type { MistOrder, MistOrderLine, MistState } from '../../../../server/src/shared/mistWorkspace';
+import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
 import { materialDeliveryRows } from '../../../../server/src/shared/mistInternalFabric';
 import type { StepState } from '../../../../components/mist';
 
@@ -23,18 +24,17 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
   const f = state.fulfillment, unit = line.unit;
   const reportOf = (task: { reportIds: string[] }) => f?.qcReports.find(report => report.id === task.reportIds.at(-1));
   const fabric = order.type === 'fabric';
-  // 产前样 / 色样：来源为本条目的样品与样品评审
-  const samples = (f?.samples || []).filter(sample => sample.source.kind === 'orderLine' && sample.source.lineId === line.id && (fabric || sample.role === 'pp'));
-  const sampleTasks = (f?.qcTasks || []).filter(task => task.kind === 'sample' && task.source.kind === 'orderLine' && task.source.lineId === line.id);
+  const jobs = state.productions.filter(job => job.lineId === line.id && !job.closed);
   const sampleName = fabric ? '色样' : '产前样';
   const pp: LineStage = (() => {
     const base = { key: 'pp' as const, label: fabric ? '色样确认' : '产前样' };
-    const latest = sampleTasks.at(-1), report = latest && reportOf(latest);
-    if (report?.result === 'reject') return { ...base, state: 'blocked', caption: `${sampleName}未通过`, reason: `${sampleName}评审结论为不通过，需要重新打样后再评审。`, target: { view: 'qc-workbench', id: latest!.id } };
-    if (report) return { ...base, state: 'done', caption: report.result === 'conditional' ? '有条件认可' : '已认可' };
-    if (latest) return { ...base, state: 'now', caption: latest.state === 'awaiting_business' ? '待业务确认' : '评审中', target: { view: 'qc-workbench', id: latest.id } };
-    if (samples.length) return { ...base, state: 'now', caption: '已收样 · 待送审', target: { view: 'samples', id: samples[0].id } };
-    return { ...base, state: 'todo', caption: `未登记${sampleName}` };
+    const requirements = jobs.flatMap(job => productionSampleRequirements(state, job, fabric ? 'pioneer' : 'pp'));
+    if (requirements.length && requirements.every(row => row.ok)) return { ...base, state: 'done', caption: '已认可' };
+    const pending = requirements.find(row => !row.ok);
+    if (!pending || pending.reason === '未登记') return { ...base, state: 'todo', caption: `未登记${sampleName}`, target: { view: 'samples' } };
+    const blocked = ['QC未通过', '未采用'].includes(pending.reason);
+    return { ...base, state: blocked ? 'blocked' : 'now', caption: pending.reason === 'QC未通过' ? `${sampleName}未通过` : pending.reason,
+      target: pending.taskId ? { view: 'qc-workbench', id: pending.taskId } : { view: 'samples', id: pending.sampleId } };
   })();
   // 面辅料 / 坯布·染整：来源为本条目的采购
   const purchases = (f?.purchases || []).filter(purchase => purchase.lineId === line.id && purchase.state !== 'cancelled' && (fabric || purchase.kind === 'material'));
@@ -54,7 +54,6 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
     if (approved.length === purchases.length && arrived.length === purchases.length) return { ...base, state: 'done', caption: `${purchases.length} 张已到齐` };
     return { ...base, state: 'now', caption: `${approved.length} / ${purchases.length} 已批 · ${arrived.length} 到齐`, target: { view: 'procurement', id: (purchases.find(purchase => purchase.state !== 'approved' || purchase.received < purchase.quantity) || purchases[0]).id } };
   })();
-  const jobs = state.productions.filter(job => job.lineId === line.id && !job.closed);
   const cut: LineStage = (() => {
     const base = { key: 'cut' as const, label: '开裁' };
     if (!jobs.length) return { ...base, state: 'todo', caption: '未开立生产' };
