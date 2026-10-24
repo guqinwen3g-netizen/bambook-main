@@ -93,11 +93,11 @@ describe('company profile maintenance in system settings',()=>{
  });
  it('keeps the draft after a failed save and can retry it',async()=>{
   seam.value.state.settings.companyProfile={...full};seam.value.run.mockRejectedValueOnce(new Error('网络中断'));await open();input('收款银行名称','新的示例银行');await click(button('保存公司资料'));
-  expect(host.textContent).toContain('网络中断');expect(host.textContent).toContain('已填写的内容仍保留');expect(value('收款银行名称')).toBe('新的示例银行');expect(seam.value.state.settings.companyProfile.bankName).toBe(full.bankName);
+  expect(host.textContent).toContain('网络中断');expect(host.textContent).toContain('公司资料未保存');expect(value('收款银行名称')).toBe('新的示例银行');expect(seam.value.state.settings.companyProfile.bankName).toBe(full.bankName);
   await click(button('保存公司资料'));expect(seam.value.state.settings.companyProfile).toEqual({...full,bankName:'新的示例银行'});
  });
- it('explains owner maintenance to members and offers no save action',async()=>{
-  seam.value.workspace={...seam.value.workspace,access:{role:'member'}};await open();expect(host.textContent).toContain('公司资料由公司管理人员维护');expect(host.textContent).toContain('请联系公司管理人员补全');
+ it('keeps member fields read-only and gives a short recovery path for missing company details',async()=>{
+  seam.value.workspace={...seam.value.workspace,access:{role:'member'}};await open();expect(host.textContent).toContain('公司资料待补全');expect(host.textContent).toContain('请联系管理员');expect(host.textContent).toContain('只读');
   expect(host.querySelector<HTMLInputElement>('input[aria-label="公司中文抬头"]')!.disabled).toBe(true);expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='保存公司资料')).toBe(false);
  });
  it('drops an unsaved draft when the account or workspace changes',async()=>{

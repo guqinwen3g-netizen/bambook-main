@@ -612,7 +612,7 @@ export class MistRepository {
     identifier(creditId, '贷项编号'); identifier(versionId, '来源版本编号');
     return this.transact(async db => {
       const { actor, row } = await this.own(db, prior, workspaceId, 'aftersales:read');
-      const snapshot = prepareCreditDocumentSnapshot(row.state, creditId, versionId, this.context(actor));
+      const snapshot = prepareCreditDocumentSnapshot(row.state, creditId, versionId, this.context(actor, row.state));
       const prepared = await this.creditArchiveBuilder(snapshot, { draft: true });
       await this.authorize(db, prior, 'aftersales:read');
       return { name: prepared.file.name, bytes: Buffer.from(prepared.file.bytes), sha256: prepared.sha256 };

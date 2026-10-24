@@ -47,7 +47,7 @@ async function uploadProof(){
  const zone=getByRole(document.body,'button',{name:/上传案件事实附件/});const input=zone.querySelector<HTMLInputElement>('input[type="file"]')!;
  await act(async()=>{Object.defineProperty(input,'files',{value:[new File(['refund evidence'],'refund-proof.pdf',{type:'application/pdf'})],configurable:true});input.dispatchEvent(new Event('change',{bubbles:true}));});
 }
-function approved(kind:'ReturnRefund'|'Replace'|'Repair'){const invoiceId=invoice();const claim=command({type:'platform.claim.create',payload:{orderId,invoiceId,problem:'实物客诉',fileIds:[]}});const disposition=command({type:'platform.claim.disposition',payload:{claimId:claim.result.id!,kind,amount:kind==='ReturnRefund'?10:0,quantity:2,unit:'件',returnDisposition:kind==='ReturnRefund'?'Scrap':kind,basis:'已核实方案',fileIds:[]}});command({type:'platform.claim.submit',payload:{id:disposition.result.id!}});bridge.actor='reviewer';command({type:'platform.claim.decide',payload:{id:disposition.result.id!,decision:'approved',note:'审核通过'}});bridge.actor='operator';return claim.result.id!;}
+function approved(kind:'Allowance'|'ReturnRefund'|'Replace'|'Repair'){const invoiceId=invoice();const claim=command({type:'platform.claim.create',payload:{orderId,invoiceId,problem:'实物客诉',fileIds:[]}});const disposition=command({type:'platform.claim.disposition',payload:{claimId:claim.result.id!,kind,amount:kind==='ReturnRefund'||kind==='Allowance'?10:0,quantity:kind==='Allowance'?0:2,unit:kind==='Allowance'?'':'件',returnDisposition:kind==='Allowance'?'':kind==='ReturnRefund'?'Scrap':kind,basis:'已核实方案',fileIds:[]}});command({type:'platform.claim.submit',payload:{id:disposition.result.id!}});bridge.actor='reviewer';command({type:'platform.claim.decide',payload:{id:disposition.result.id!,decision:'approved',note:'审核通过'}});bridge.actor='operator';return claim.result.id!;}
 
 describe('platform form and return-path actions',()=>{
  it('uploads a case fact directly, keeps the draft disposition evidence, then freezes both for review',async()=>{
@@ -169,3 +169,13 @@ it('rejects exponent notation in reference labor rather than converting it into 
   const {claimId}=claimWithDraft();bridge.permissions=['aftersales:read','qc:inspect',`qc:${domain}_chain:write`];await mount(ClaimsPage,'claims',claimId);
   const visible=[...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='记录质检核实');expect(visible).toBe(domain==='garment');
  });
+
+it('removes financial posting actions once the approved credit is fully settled',async()=>{
+ const claimId=approved('Allowance'),d=bridge.current.state.platform.claims.find((c:any)=>c.id===claimId).dispositions[0];
+ command({type:'platform.claim.execute',payload:{id:d.id}});
+ const credit=bridge.current.state.platform.credits.find((c:any)=>c.claimId===claimId);
+ command({type:'platform.credit.apply',payload:{creditId:credit.id,invoiceId:credit.sourceInvoiceId,amount:10}});
+ bridge.permissions=['aftersales:read','invoices:reconcile'];await mount(ClaimsPage,'claims',claimId);
+ expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='抵扣发票')).toBe(false);
+ expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='登记实际退款')).toBe(false);
+});

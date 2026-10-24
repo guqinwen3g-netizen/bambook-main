@@ -1,5 +1,9 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '处置未采用':'Proposal not adopted',
+  '公司资料待补全':'Company details are missing',
+  '请联系管理员':'Contact an administrator',
+  '生成报价单需中文抬头。':'A Chinese company name is required for quotations.',
   '报关资料已保存':'Customs details saved',
   '已登记申报':'Declaration recorded',
   '已登记放行':'Customs release recorded',

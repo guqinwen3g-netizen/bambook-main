@@ -24,7 +24,7 @@ function CompanyJoinCode() {
   }, [session.sessionKey]);
   if (!code) return null;
   const copy = async () => { try { await navigator.clipboard.writeText(code); toast('公司代码已复制'); } catch { toast('请手动复制公司代码'); } };
-  return <FormSection title={uiText("同事注册")} description={uiText("同事在登录页选择「立即注册 › 加入公司」时填写这个代码；提交后由公司管理员在「公司后台 › 账号」审核。")}>
+  return <FormSection title={uiText("同事注册")}>
     <div className="mist-row"><span className="mist-note">{uiText("公司代码")}</span><Mono>{code}</Mono><Button size="sm" variant="quiet" icon={Copy} onClick={() => void copy()}>{uiText("复制")}</Button></div>
   </FormSection>;
 }
@@ -32,7 +32,7 @@ function CompanyJoinCode() {
 export type CompanyProfileKey = keyof MistCompanyProfile;
 export type CompanyProfileField = { key: CompanyProfileKey; label: string; type?: React.HTMLInputTypeAttribute; hint?: string };
 export const COMPANY_FIELDS: CompanyProfileField[] = [
-  { key: 'legalName', label: '公司中文抬头', hint: '报价单必须有中文抬头才能生成' },
+  { key: 'legalName', label: '公司中文抬头' },
   { key: 'englishName', label: '公司英文抬头' },
   { key: 'address', label: '中文地址' },
   { key: 'englishAddress', label: '英文地址' },
@@ -45,7 +45,7 @@ export const EXPORT_FIELDS: CompanyProfileField[] = [
   { key: 'bankName', label: '收款银行名称' },
   { key: 'bankAccount', label: '收款账号' },
   { key: 'swift', label: 'SWIFT / BIC' },
-  { key: 'defaultCurrency', label: '常用结算币种', hint: '三位币种代码，例如 USD。业务单据仍逐单确认币种。' },
+  { key: 'defaultCurrency', label: '常用结算币种' },
 ];
 export const EMPTY_COMPANY: MistCompanyProfile = {
   legalName: '', englishName: '', address: '', englishAddress: '', phone: '', email: '',
@@ -105,23 +105,23 @@ export function CompanyProfileSection({ member }: { member: boolean }) {
   const field = (f: CompanyProfileField) => <Field key={f.key} label={uiText(f.label)} hint={uiText(problem?.key === f.key ? undefined : f.hint)} error={problem?.key === f.key ? problem.message : undefined}>
     <TextInput aria-label={uiText(f.label)} type={f.type} value={values[f.key]} disabled={locked} maxLength={f.key === 'defaultCurrency' ? 3 : undefined} className={f.key === 'defaultCurrency' || f.key === 'swift' || f.key === 'bankAccount' ? 'mist-mono' : undefined} onChange={event => edit(f.key, event.target.value)} />
   </Field>;
-  const notices = member || empty || !stored?.legalName?.trim() || (problem && !problem.key);
+  const notices = empty || !stored?.legalName?.trim() || (problem && !problem.key);
   return <div data-company-profile ref={host}>
     <CompanyJoinCode />
-    <FormSection title={uiText("公司资料")} description={uiText("报价单、CI / PL 的抬头、地址与收款信息取自这里。保存后新生成的单据使用当前资料，已生成的单据保持原样。")}>
+    <FormSection title={uiText("公司资料")}>
       {notices && <div className="mist-col" style={{ gap: 12, marginBottom: 16 }}>
-      {member && <Banner tone="neutral" title={uiText("公司资料由公司管理人员维护")}>{uiText(empty ? '当前公司尚未填写资料，生成报价单需要中文公司抬头，请联系公司管理人员补全。' : '你是被授权成员，可以查看，不能修改。')}</Banner>}
-      {!member && empty && <Banner tone="neutral" title={uiText("尚未填写公司资料")}>{uiText("至少填写公司中文抬头后才能生成报价单；其余字段按需补全。印章图样不在此维护。")}</Banner>}
+      {member && empty && <Banner tone="neutral" title={uiText("公司资料待补全")}>{uiText("请联系管理员")}</Banner>}
+      {!member && empty && <Banner tone="neutral" title={uiText("尚未填写公司资料")}>{uiText("生成报价单需中文抬头。")}</Banner>}
       {!member && !empty && !stored?.legalName?.trim() && <Banner tone="warn" title={uiText("缺少公司中文抬头")}>{uiText("报价单需要中文抬头，补全后才能生成。")}</Banner>}
-      {problem && !problem.key && <Banner tone="bad" title={uiText("公司资料未保存")} actions={<Button size="sm" icon={RefreshCw} disabled={locked} onClick={() => { setProblem(null); void workspace.refresh(); }}>{uiText("重新读取")}</Button>}>{problem.message}{uiText("。已填写的内容仍保留，可修改后重新保存。")}</Banner>}
+      {problem && !problem.key && <Banner tone="bad" title={uiText("公司资料未保存")} actions={<Button size="sm" icon={RefreshCw} disabled={locked} onClick={() => { setProblem(null); void workspace.refresh(); }}>{uiText("重新读取")}</Button>}>{problem.message}</Banner>}
       </div>}
       <FormGrid>{COMPANY_FIELDS.map(field)}</FormGrid>
     </FormSection>
-    <FormSection title={uiText("出口与收款")} description={uiText("税号、海关编码与收款银行，用于对外单据。")}>
+    <FormSection title={uiText("出口与收款")}>
       <FormGrid>{EXPORT_FIELDS.map(field)}</FormGrid>
     </FormSection>
     <div className="mist-sticky-foot" data-static>
-      <span className="mist-note">{uiText(busy ? '正在保存…' : saved ? '已保存，新生成的单据将使用当前资料' : member ? '只读' : '填写后点击保存')}</span><span className="mist-spacer" />
+      <span className="mist-note">{uiText(busy ? '正在保存…' : saved ? '已保存' : member ? '只读' : '')}</span><span className="mist-spacer" />
       {returnId && <Button icon={ArrowLeft} disabled={busy} onClick={() => nav?.go('quotations', returnId)}>{uiText("返回报价")}</Button>}
       {!member && <Button variant="primary" icon={Save} disabled={locked} loading={busy} onClick={() => void save()}>{uiText("保存公司资料")}</Button>}
     </div>

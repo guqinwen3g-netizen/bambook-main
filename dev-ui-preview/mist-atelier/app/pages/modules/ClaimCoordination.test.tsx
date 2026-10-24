@@ -73,3 +73,8 @@ describe('售后索赔协同面板', () => {
     rows.forEach(p => { p.factory = '未登记工厂'; }); expect(claimDefaultSupplierId(state, claim)).toBe('');
   });
 });
+
+it('does not describe a rejected-only proposal as executed financial settlement',async()=>{
+ await mount(claimFor({dispositions:[{id:'returned',kind:'Allowance',amount:10,quantity:0,unit:'',returnDisposition:'',basis:'方案未采用',fileIds:[],state:'rejected'}]}));
+ expect(host.textContent).toContain('处置未采用');expect(host.textContent).not.toContain('已执行并结清');
+});
