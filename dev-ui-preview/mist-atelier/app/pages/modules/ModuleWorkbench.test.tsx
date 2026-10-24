@@ -5,7 +5,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByText,queryByText} from '@testing-library/dom';
 import {Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
-import {ModuleWorkbench,moduleEditorSections,type ModuleEditorSpec} from './ModuleWorkbench';
+import {ModuleWorkbench,ModuleEditorDialog,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
 
 const bridge=vi.hoisted(()=>({workspace:null as any,route:{view:'test-ledger'} as any,go:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>bridge.workspace}));
@@ -44,6 +44,25 @@ describe('ModuleWorkbench real Mist T9 workflow',()=>{
   it('blocks Next on required fields in each section without calling submit',async()=>{const spec=editor(undefined,'');spec.initialValues.source='';await mount(spec);await click('新建');await click('下一步');expect(getByText(document.body,'请填写业务名称')).toBeTruthy();expect(queryByRole(document.body,'textbox',{name:'来源依据'})).toBeNull();expect(spec.submit).not.toHaveBeenCalled();await fill('业务名称','补全的名称');await click('下一步');await click('下一步');expect(getByText(document.body,'请填写来源依据')).toBeTruthy();expect(queryByRole(document.body,'button',{name:'确认创建'})).toBeNull();expect(spec.submit).not.toHaveBeenCalled();});
   it('shows a human-readable confirmation summary for text, number, select and checkbox',async()=>{await mount(editor());await confirmStep();const summary=document.body;for(const value of ['初始业务','2.5','蓝组','2026-10-13','原始说明','是','原始凭据'])expect(getByText(summary,value,{exact:true})).toBeTruthy();expect(queryByRole(summary,'textbox',{name:'业务名称'})).toBeNull();expect(queryByText(summary,'blue',{exact:true})).toBeNull();});
   it('sends one submission when the confirm button is clicked twice before React flushes',async()=>{let finish!:(value:any)=>void;const submit=vi.fn(()=>new Promise(resolve=>{finish=resolve;}));await mount(editor(submit));await confirmStep();const button=getByRole(document.body,'button',{name:'确认创建'}) as HTMLButtonElement;await act(async()=>{button.click();button.click();});expect(submit).toHaveBeenCalledTimes(1);expect(button.disabled).toBe(true);await act(async()=>button.click());expect(submit).toHaveBeenCalledTimes(1);await act(async()=>finish({id:'saved'}));expect(queryByRole(document.body,'heading',{name:'创建业务记录'})).toBeNull();});
+});
+
+function conditionalEditor(submit=vi.fn(async(_values:any)=>({id:'saved'}))):ModuleEditorSpec{return{title:'处理方案',submit,submitLabel:'确认创建',fields:[
+ {key:'kind',label:'处置方式',type:'select',required:true,options:[{value:'Repair',label:'返修'},{value:'Allowance',label:'折让'},{value:'Replace',label:'换货'}]},
+ {key:'name',label:'处理记录',required:true},
+ {key:'amount',label:'补偿金额',type:'number',required:true,min:0.01,when:{key:'kind',values:['Allowance']}},
+ {key:'replacementSpec',label:'补发规格',required:true,when:{key:'kind',values:['Replace']}},
+],initialValues:{id:'source-id',kind:'Repair',name:'来源已核实',amount:'not-a-number',replacementSpec:''}};}
+describe('ModuleWorkbench applicable business fields',()=>{
+ it('keeps an inapplicable field out of both explicit sections and fallbacks',()=>{const spec=conditionalEditor();spec.sections=[{id:'money',label:'款项',fields:['amount']}];expect(moduleVisibleFields(spec).map(f=>f.key)).toEqual(['kind','name']);expect(moduleEditorSections(spec).flatMap(g=>g.fields.map(f=>f.key))).toEqual(['kind','name']);expect(moduleVisibleFields(spec,{...spec.initialValues,kind:'Replace'}).map(f=>f.key)).toEqual(['kind','name','replacementSpec']);});
+ it('does not validate or submit hidden required amounts in a short dialog, retaining source metadata',async()=>{
+  const spec=conditionalEditor(),close=vi.fn();host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={close}/></ToastProvider></MistRoot>));expect(queryByRole(document.body,'spinbutton',{name:'补偿金额'})).toBeNull();await click('确认创建');expect(spec.submit).toHaveBeenCalledWith({id:'source-id',kind:'Repair',name:'来源已核实'});expect(close).toHaveBeenCalledTimes(1);
+ });
+ it('shows and validates the selected kind fields and keeps hidden fields out of confirmation',async()=>{
+  const spec=conditionalEditor();await mount(spec);await click('新建');await fill('处置方式','Replace','combobox');expect(getByRole(document.body,'textbox',{name:'补发规格'})).toBeTruthy();await click('下一步');expect(getByText(document.body,'请填写补发规格')).toBeTruthy();await fill('补发规格','同原件，M码');await click('下一步');expect(getByText(document.body,'同原件，M码')).toBeTruthy();expect(queryByText(document.body,'补偿金额',{exact:true})).toBeNull();await click('确认创建');expect(spec.submit).toHaveBeenCalledWith({id:'source-id',kind:'Replace',name:'来源已核实',replacementSpec:'同原件，M码'});
+ });
+ it('preserves input when switching back but never submits a hidden amount under another kind',async()=>{
+  const spec=conditionalEditor();await mount(spec);await click('新建');await fill('处置方式','Allowance','combobox');await fill('补偿金额','50','spinbutton');await fill('处置方式','Repair','combobox');expect(queryByRole(document.body,'spinbutton',{name:'补偿金额'})).toBeNull();await fill('处置方式','Allowance','combobox');expect((getByRole(document.body,'spinbutton',{name:'补偿金额'}) as HTMLInputElement).value).toBe('50');await fill('处置方式','Repair','combobox');await click('下一步');await click('确认创建');expect(spec.submit).toHaveBeenCalledWith({id:'source-id',kind:'Repair',name:'来源已核实'});
+ });
 });
 
 describe('ModuleWorkbench exact route identity',()=>{

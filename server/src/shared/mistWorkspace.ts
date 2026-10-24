@@ -781,6 +781,24 @@ function closeTakenOverHandoffs(state: MistState){
     if(f.shipments.some(s=>s.state!=='cancelled'&&s.lines.some(l=>l.orderId===orderId)&&(s.state==='ready'||s.state==='departed'||!!s.booking||f.packing.some(r=>r.shipmentId===s.id)||f.documents.some(d=>d.shipmentId===s.id&&d.status!=='void')||f.customs.some(c=>c.shipmentId===s.id))))task.done=true;
   }
 }
+
+/** Shared record creation; approved source producers must apply their own authorization separately. */
+export function createMistOrderRecords(state:MistState,p:MistOrderInput,context:MistContext):MistCommandResult{
+      const governance=createOrderGovernance(context,p.governance);
+      const c=governance.contract.kind==='internal'?null:find(state.customers,p.customerId,'客户');if(c){const held=relationHoldReason(state,{customerId:c.id});if(held)throw new MistCommandError('PRECONDITION',held);}if(!['garment','fabric'].includes(p.type)||!Array.isArray(p.lines)||!p.lines.length||p.lines.length>200)throw new MistCommandError('VALIDATION','订单类型或条目无效');
+      const orderOwner=resolveMember(context,p.ownerId,'订单负责人');
+      governance.contract=normalizeInternalSupply(governance.contract,{type:p.type,ownerId:orderOwner.id},context);
+      const id=context.id(),code='SO-'+(p.type==='fabric'?'F':'G')+'-'+context.now.slice(0,4)+'-'+String(state.orders.length+1).padStart(4,'0'),currency=text(p.currency,'币种',true,3).toUpperCase();
+      if(!/^[A-Z]{3}$/.test(currency))throw new MistCommandError('VALIDATION','币种格式无效');
+      const order:MistOrder={id,code,type:p.type,customerId:c?.id||'',customer:c?.name||governance.contract.receiver||'内部接收方待填写',governance,season:text(p.season,'季节'),lines:0,qty:0,amount:0,currency,due:date(p.due),progress:0,state:'订单草稿',tone:'neutral',owner:orderOwner.name,ownerId:orderOwner.id,img:p.lines[0].img||'coat',checklist:['拟发范围确认','收货与贸易条款确认','收款条件核对'].map((label,index)=>({id:id+'-check-'+index,label,done:false,note:''})),handoffAt:null,createdAt:context.now,updatedAt:context.now};
+      // BB-ORD-2：来源与条目同一命令写入，先全部校验再落库，任何一条不合规整单拒绝
+      const scope={type:p.type,customerId:c?.id||'',internal:governance.contract.kind==='internal'};
+      const rows=(p.lines as MistOrderInput['lines']).map((row,index)=>{const name=text(row.name,'品名'),fromBreakdown=lineQuantityFromBreakdown(p.type,row,`条目「${name||index+1}」`),qty=fromBreakdown.qty??positive(row.qty,'数量'),price=positive(row.price,'单价',true);lineAmount(qty,price);return {...(p.type==='garment'?normalizeGarmentFulfillment(row,false):{}),...(fromBreakdown.breakdown?{breakdown:fromBreakdown.breakdown}:{}),name,style:text(row.style,'款号'),img:['coat','blazer','suit','clay'].includes(row.img)?row.img:'coat' as MistImage,qty,unit:text(row.unit,'单位',true,20),price,source:assertOrderLineSource(state,scope,row,name||String(index+1))};});
+      state.orders.unshift(order);
+      for(const {source,...row} of rows)state.orderLines.push({id:context.id(),orderId:id,...row,made:0,qc:0,...source} as MistOrderLine);
+      event(state,context,'order',id,'创建订单 '+code,{view:'orders/detail',id});return{id,orderId:id};
+}
+
 export function applyMistCommand(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
   return applyMistCommandUnbound(original, command, context);
 }
@@ -1136,21 +1154,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       f.confirmed=!!p.approved;f.state=p.approved?'已结案':'待补充';f.tone=p.approved?'ok':'warn';f.sub=text(p.note,'确认意见',!p.approved);
       event(state,context,'fabric',f.id,p.approved?'确认寻样答复':'退回补充寻样');result={id:f.id};break;
     }
-    case 'order.create': {
-      const governance=createOrderGovernance(context,p.governance);
-      const c=governance.contract.kind==='internal'?null:find(state.customers,p.customerId,'客户');if(c){const held=relationHoldReason(state,{customerId:c.id});if(held)throw new MistCommandError('PRECONDITION',held);}if(!['garment','fabric'].includes(p.type)||!Array.isArray(p.lines)||!p.lines.length||p.lines.length>200)throw new MistCommandError('VALIDATION','订单类型或条目无效');
-      const orderOwner=resolveMember(context,p.ownerId,'订单负责人');
-      governance.contract=normalizeInternalSupply(governance.contract,{type:p.type,ownerId:orderOwner.id},context);
-      const id=context.id(),code='SO-'+(p.type==='fabric'?'F':'G')+'-'+context.now.slice(0,4)+'-'+String(state.orders.length+1).padStart(4,'0'),currency=text(p.currency,'币种',true,3).toUpperCase();
-      if(!/^[A-Z]{3}$/.test(currency))throw new MistCommandError('VALIDATION','币种格式无效');
-      const order:MistOrder={id,code,type:p.type,customerId:c?.id||'',customer:c?.name||governance.contract.receiver||'内部接收方待填写',governance,season:text(p.season,'季节'),lines:0,qty:0,amount:0,currency,due:date(p.due),progress:0,state:'订单草稿',tone:'neutral',owner:orderOwner.name,ownerId:orderOwner.id,img:p.lines[0].img||'coat',checklist:['拟发范围确认','收货与贸易条款确认','收款条件核对'].map((label,index)=>({id:id+'-check-'+index,label,done:false,note:''})),handoffAt:null,createdAt:context.now,updatedAt:context.now};
-      // BB-ORD-2：来源与条目同一命令写入，先全部校验再落库，任何一条不合规整单拒绝
-      const scope={type:p.type,customerId:c?.id||'',internal:governance.contract.kind==='internal'};
-      const rows=(p.lines as MistOrderInput['lines']).map((row,index)=>{const name=text(row.name,'品名'),fromBreakdown=lineQuantityFromBreakdown(p.type,row,`条目「${name||index+1}」`),qty=fromBreakdown.qty??positive(row.qty,'数量'),price=positive(row.price,'单价',true);lineAmount(qty,price);return {...(p.type==='garment'?normalizeGarmentFulfillment(row,false):{}),...(fromBreakdown.breakdown?{breakdown:fromBreakdown.breakdown}:{}),name,style:text(row.style,'款号'),img:['coat','blazer','suit','clay'].includes(row.img)?row.img:'coat' as MistImage,qty,unit:text(row.unit,'单位',true,20),price,source:assertOrderLineSource(state,scope,row,name||String(index+1))};});
-      state.orders.unshift(order);
-      for(const {source,...row} of rows)state.orderLines.push({id:context.id(),orderId:id,...row,made:0,qc:0,...source} as MistOrderLine);
-      event(state,context,'order',id,'创建订单 '+code,{view:'orders/detail',id});result={id,orderId:id};break;
-    }
+    case 'order.create': {result=createMistOrderRecords(state,p,context);break;}
     case 'order.update': {
       const o=find(state.orders,p.orderId,'订单');assertOrderWritable(o);
       if((p as Record<string,unknown>).owner!==undefined)throw new MistCommandError('VALIDATION','负责人须按账号选择');

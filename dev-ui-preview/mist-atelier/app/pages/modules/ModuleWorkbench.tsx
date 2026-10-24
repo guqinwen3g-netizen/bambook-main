@@ -8,18 +8,27 @@ import { useNav } from '../../nav';
 import { PreviewSummary, useCompactLayout, type PreviewSummaryData } from './pageKit';
 export type ModuleValue = string | number | boolean;
 export type ModuleValues = Record<string, ModuleValue>;
-export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'datetime-local'|'select'|'textarea'|'checkbox';options?:Array<{value:string;label:string}>;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string};
+export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'datetime-local'|'select'|'textarea'|'checkbox';options?:Array<{value:string;label:string}>;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:{key:string;values:string[]}};
 export type ModuleEditorSection = {id:string;label:string;description?:string;fields:string[]};
 export type ModuleEditorSpec = {title:string;description?:string;sections?:ModuleEditorSection[];fields:ModuleField[];initialValues:ModuleValues;submit:(values:ModuleValues)=>Promise<unknown>;submitLabel?:string};
 /** Domain-owned sections preserve the Mist T9 geometry without arbitrary six-field business boundaries.
  * Any unassigned fields remain visible in fallback sections; a partial declaration can never hide data. */
-export function moduleEditorSections(spec:ModuleEditorSpec){
+/** Applicability only: authorization and transaction constraints remain server-owned. */
+export function moduleVisibleFields(spec:ModuleEditorSpec,values:ModuleValues=spec.initialValues){
+  const current={...spec.initialValues,...values};return spec.fields.filter(field=>!field.when||field.when.values.includes(String(current[field.when.key]??'')));
+}
+function applicableValues(spec:ModuleEditorSpec,values:ModuleValues){
+  const result={...values},active=new Set(moduleVisibleFields(spec,values).map(field=>field.key));
+  for(const field of spec.fields)if(!active.has(field.key))delete result[field.key];return result;
+}
+export function moduleEditorSections(spec:ModuleEditorSpec,values:ModuleValues=spec.initialValues){
+  const visible=moduleVisibleFields(spec,values);
   const groups:Array<{id:string;label:string;description?:string;fields:ModuleField[]}>=[],used=new Set<string>();
   for(const section of spec.sections||[]){
-    const fields=section.fields.flatMap(key=>{const field=spec.fields.find(item=>item.key===key);if(!field||used.has(key))return[];used.add(key);return[field];});
+    const fields=section.fields.flatMap(key=>{const field=visible.find(item=>item.key===key);if(!field||used.has(key))return[];used.add(key);return[field];});
     if(fields.length)groups.push({...section,fields});
   }
-  const remaining=spec.fields.filter(field=>!used.has(field.key));
+  const remaining=visible.filter(field=>!used.has(field.key));
   for(let i=0;i<remaining.length;i+=6)groups.push({id:'fallback-'+i,label:groups.length===0?'基本信息':groups.length===1?'业务信息':'补充信息',fields:remaining.slice(i,i+6)});
   groups.push({id:'review',label:'确认提交',fields:[]});
   return groups;
@@ -32,11 +41,12 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
   const mounted=React.useRef(true),lock=React.useRef(false),generation=React.useRef(0);
   React.useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
   React.useEffect(()=>{generation.current++;setValues(spec?{...spec.initialValues}:{});setError('');setBusy(false);lock.current=false;},[spec]);
+  const visible=spec?moduleVisibleFields(spec,values):[];
   const disabled=busy||saving||!!pending||!!pendingCreate;
   const submit=async()=>{
     if(!spec||disabled||lock.current)return;
-    for(const f of spec.fields){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()==='')){setError('请填写'+f.label);return;}const invalid=selectError(f,values[f.key]);if(invalid){setError(invalid);return;}}
-    const converted={...values};for(const f of spec.fields)if(f.type==='number'){
+    for(const f of visible){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()==='')){setError('请填写'+f.label);return;}const invalid=selectError(f,values[f.key]);if(invalid){setError(invalid);return;}}
+    const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'){
       if(converted[f.key]===''&&!f.required)continue; const n=Number(converted[f.key]);
       if(!Number.isFinite(n)||(f.min!==undefined&&n<f.min)){setError(f.label+'无效');return;}converted[f.key]=n;
     }
@@ -51,7 +61,7 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
     {spec?.description&&<p className="mist-sub" style={{margin:'0 0 12px'}}>{spec.description}</p>}
     {error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
     {(pending||pendingCreate)&&!saving&&<Banner tone="warn" title={uiText("请先核对上次操作的结果")}>{uiText("输入会保留；使用页面上的原请求核对入口后继续。")}</Banner>}
-    <FormGrid>{spec?.fields.map(f=><Field key={f.key} label={uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>
+    <FormGrid>{visible.map(f=><Field key={f.key} label={uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>
       {f.type==='select'?<Select aria-label={uiText(f.label)} placeholder={uiText(f.options?.some(option=>option.value==='')?undefined:'请选择')} value={selectValue(f,values[f.key])} options={f.options||[]} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />
       :f.type==='textarea'?<TextArea aria-label={uiText(f.label)} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />
       :f.type==='checkbox'?<Checkbox label={uiText(f.label)} checked={!!values[f.key]} disabled={disabled||f.readonly} onChange={v=>change(f.key,v)} />
@@ -121,13 +131,14 @@ export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:(
   const workspace=useMistWorkspace(),toast=useToast();
   const [values,setValues]=React.useState<ModuleValues>({...spec.initialValues}),[step,setStep]=React.useState(0),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false);
   const live=React.useRef(true),lock=React.useRef(false);React.useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
-  const groups=moduleEditorSections(spec);
-  const current=groups[step],last=step===groups.length-1,blocked=busy||workspace.saving||!!workspace.pending||!!workspace.pendingCreate;
+  const visible=moduleVisibleFields(spec,values),groups=moduleEditorSections(spec,values),shownStep=Math.min(step,groups.length-1);
+  React.useEffect(()=>{setStep(previous=>Math.min(previous,groups.length-1));},[groups.length]);
+  const current=groups[shownStep],last=shownStep===groups.length-1,blocked=busy||workspace.saving||!!workspace.pending||!!workspace.pendingCreate;
   const validate=(fields:ModuleField[])=>{for(const f of fields){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()===''))return '请填写'+f.label;const invalid=selectError(f,values[f.key]);if(invalid)return invalid;if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined&&(!Number.isFinite(Number(values[f.key]))||(f.min!==undefined&&Number(values[f.key])<f.min)))return f.label+'无效';}return '';};
-  const save=async()=>{if(blocked||lock.current)return;const problem=validate(spec.fields);if(problem){setError(problem);return;}lock.current=true;setBusy(true);const converted={...values};for(const f of spec.fields)if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined)converted[f.key]=Number(values[f.key]);try{await spec.submit(converted);if(live.current){onClose();toast('已保存');}}catch(e){if(live.current)setError(e instanceof Error?e.message:'保存未完成');}finally{if(live.current){lock.current=false;setBusy(false);}}};
+  const save=async()=>{if(blocked||lock.current)return;const problem=validate(visible);if(problem){setError(problem);return;}lock.current=true;setBusy(true);const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined)converted[f.key]=Number(values[f.key]);try{await spec.submit(converted);if(live.current){onClose();toast('已保存');}}catch(e){if(live.current)setError(e instanceof Error?e.message:'保存未完成');}finally{if(live.current){lock.current=false;setBusy(false);}}};
   const set=(key:string,v:ModuleValue)=>{setValues(old=>({...old,[key]:v}));setError('');};
-  return <MistPage><BackLink onClick={onClose}>{uiText("返回列表")}</BackLink><PageHeader  title={uiText(spec.title)}/>{error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}<div className="mist-wizard"><VerticalSteps current={String(step)} onSelect={id=>{const target=Number(id);if(target<=step){setStep(target);setError('');}}} steps={groups.map((g,i)=>({id:String(i),label:g.label,done:i<step}))}/><Card>
-    <FormSection title={uiText(current.label)}>{last?<KeyValue items={spec.fields.map(f=>({label:f.label,value:f.type==='checkbox'?(values[f.key]?'是':'否'):f.type==='select'?(f.options?.find(o=>o.value===values[f.key])?.label||String(values[f.key]??'—')):String(values[f.key]??'—')}))}/>:<FormGrid>{current.fields.map(f=><Field key={f.key} label={uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>{f.type==='select'?<Select aria-label={uiText(f.label)} placeholder={uiText(f.options?.some(option=>option.value==='')?undefined:'请选择')} value={selectValue(f,values[f.key])} options={f.options||[]} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>:f.type==='textarea'?<TextArea aria-label={uiText(f.label)} value={String(values[f.key]??'')} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>:f.type==='checkbox'?<Checkbox label={uiText(f.label)} checked={!!values[f.key]} disabled={blocked||f.readonly} onChange={v=>set(f.key,v)}/>:<TextInput aria-label={uiText(f.label)} type={f.type||'text'} min={f.min} step={f.step} value={String(values[f.key]??'')} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>}</Field>)}</FormGrid>}</FormSection>
-    <div className="mist-sticky-foot"><span className="mist-note">{uiText("第 ")}{uiText(step+1)} / {groups.length}{uiText(" 步")}</span><span className="mist-spacer"/>{step>0&&<Button icon={ArrowLeft} disabled={blocked} onClick={()=>{setStep(i=>i-1);setError('');}}>{uiText("上一步")}</Button>}{last?<Button variant="primary" loading={busy} disabled={blocked} onClick={()=>void save()}>{spec.submitLabel||'确认保存'}</Button>:<Button variant="primary" iconRight={ArrowRight} disabled={blocked} onClick={()=>{const problem=validate(current.fields);if(problem)setError(problem);else setStep(i=>i+1);}}>{uiText("下一步")}</Button>}</div>
+  return <MistPage><BackLink onClick={onClose}>{uiText("返回列表")}</BackLink><PageHeader  title={uiText(spec.title)}/>{error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}<div className="mist-wizard"><VerticalSteps current={String(shownStep)} onSelect={id=>{const target=Number(id);if(target<=step){setStep(target);setError('');}}} steps={groups.map((g,i)=>({id:String(i),label:g.label,done:i<step}))}/><Card>
+    <FormSection title={uiText(current.label)}>{last?<KeyValue items={visible.map(f=>({label:f.label,value:f.type==='checkbox'?(values[f.key]?'是':'否'):f.type==='select'?(f.options?.find(o=>o.value===values[f.key])?.label||String(values[f.key]??'—')):String(values[f.key]??'—')}))}/>:<FormGrid>{current.fields.map(f=><Field key={f.key} label={uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>{f.type==='select'?<Select aria-label={uiText(f.label)} placeholder={uiText(f.options?.some(option=>option.value==='')?undefined:'请选择')} value={selectValue(f,values[f.key])} options={f.options||[]} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>:f.type==='textarea'?<TextArea aria-label={uiText(f.label)} value={String(values[f.key]??'')} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>:f.type==='checkbox'?<Checkbox label={uiText(f.label)} checked={!!values[f.key]} disabled={blocked||f.readonly} onChange={v=>set(f.key,v)}/>:<TextInput aria-label={uiText(f.label)} type={f.type||'text'} min={f.min} step={f.step} value={String(values[f.key]??'')} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>}</Field>)}</FormGrid>}</FormSection>
+    <div className="mist-sticky-foot"><span className="mist-note">{uiText("第 ")}{uiText(shownStep+1)} / {groups.length}{uiText(" 步")}</span><span className="mist-spacer"/>{step>0&&<Button icon={ArrowLeft} disabled={blocked} onClick={()=>{setStep(i=>i-1);setError('');}}>{uiText("上一步")}</Button>}{last?<Button variant="primary" loading={busy} disabled={blocked} onClick={()=>void save()}>{spec.submitLabel||'确认保存'}</Button>:<Button variant="primary" iconRight={ArrowRight} disabled={blocked} onClick={()=>{const problem=validate(current.fields);if(problem)setError(problem);else setStep(i=>i+1);}}>{uiText("下一步")}</Button>}</div>
   </Card></div></MistPage>;
 }
