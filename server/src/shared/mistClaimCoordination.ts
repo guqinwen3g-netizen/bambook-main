@@ -65,7 +65,7 @@ function supplier(root: MistState, id: string) { const row = (root as MistState 
 function claimOf(claims: ClaimLike[], id: string) { const row = claims.find(r => r.id === id); if (!row) fail('客诉案件不存在', 'NOT_FOUND'); return row!; }
 function recoveryOf(claims: ClaimLike[], id: string) { for (const claim of claims) { const row = claim.coordination?.recoveries.find(r => r.id === id); if (row) return { claim, row }; } return fail('工厂追偿记录不存在', 'NOT_FOUND'); }
 function emit(root: MistState, c: MistContext, claimId: string, message: string, fileIds: string[] = []) { root.events.unshift({ id: c.id(), entityType: 'claim', entityId: claimId, at: c.now, actor: c.actorName, text: message, fileIds: [...fileIds] }); }
-function task(root: MistState, c: MistContext, claimId: string, kind: string, title: string, who: { assigneeIds?: string[]; permission?: string }) { const existing = root.tasks.find(t => t.kind === kind && t.target.view === 'claims' && t.target.id === claimId); if (existing) { existing.title = title; existing.done = false; return; } root.tasks.unshift({ id: c.id(), title, due: '', done: false, kind, target: { view: 'claims', id: claimId }, assigneeIds: who.assigneeIds ?? [], ...(who.permission ? { permission: who.permission } : {}) }); }
+function task(root: MistState, c: MistContext, claimId: string, kind: string, title: string, who: { assigneeIds?: string[]; permission?: string }) { const existing = root.tasks.find(t => t.kind === kind && t.target.view === 'claims' && t.target.id === claimId); if (existing) { existing.title = title; existing.done = false; existing.assigneeIds = who.assigneeIds ?? []; existing.permission = who.permission; return; } root.tasks.unshift({ id: c.id(), title, due: '', done: false, kind, target: { view: 'claims', id: claimId }, assigneeIds: who.assigneeIds ?? [], ...(who.permission ? { permission: who.permission } : {}) }); }
 function done(root: MistState, claimId: string, kind: string) { for (const t of root.tasks) if (t.kind === kind && t.target.view === 'claims' && t.target.id === claimId) t.done = true; }
 function notify(root: MistState, c: MistContext, claimId: string, title: string, detail: string) { root.notifications.unshift({ id: c.id(), title, detail, at: c.now, readAt: null, target: { view: 'claims', id: claimId }, category: 'general' }); }
 function claimFiles(root: MistState, ids: unknown) { if (!Array.isArray(ids) || ids.length > 50) fail('附件无效'); for (const id of ids) if (!root.files.some(f => f.id === id)) fail('附件不存在', 'NOT_FOUND'); return [...new Set(ids as string[])]; }
@@ -74,9 +74,19 @@ function claimFiles(root: MistState, ids: unknown) { if (!Array.isArray(ids) || 
 export function currentClaimVerification(claim: { coordination?: ClaimCoordination }) { const rows = claim.coordination?.verifications ?? []; return rows.length ? rows[rows.length - 1] : null; }
 const OPEN_RECOVERY: ClaimRecoveryState[] = ['Negotiating', 'Agreed'];
 
+/** Verification follows the authoritative order domain, never a domain supplied by the caller. */
+export function claimQcPermission(root: Pick<MistState, 'orders'>, claim: Pick<ClaimLike, 'orderId'>): string | null {
+  const domain = root.orders.find(order => order.id === claim.orderId)?.type;
+  return domain === 'fabric' || domain === 'garment' ? `qc:${domain}_chain:write` : null;
+}
+export function canVerifyClaim(root: Pick<MistState, 'orders'>, claim: Pick<ClaimLike, 'orderId'>, can: MistContext['can']): boolean {
+  const permission = claimQcPermission(root, claim);
+  return !!permission && !!can?.('qc:inspect') && !!can?.(permission);
+}
+
 /** 两笔账（creditsOpen：贷项通知单仍有未结清余额，客户这边尚未真正处理完）：对客户已批准 / 已执行的金额、工厂已同意 / 已落实的金额、公司自担（同币种才计算）。 */
 export function claimLedger(root: MistState, claim: ClaimLike, opts: { creditsOpen?: boolean } = {}) {
-  const currency = root.invoices.find(i => i.id === claim.invoiceId)?.currency ?? '';
+  const currency = root.invoices.find(i => i.id === claim.invoiceId)?.currency ?? root.orders.find(order => order.id === claim.orderId)?.currency ?? '';
   const customerMinor = claim.dispositions.filter(d => ['approved', 'Executed'].includes(d.state) && !d.supersededById).reduce((s, d) => s + mistMoneyMinor(d.amount || 0), 0);
   const pendingMinor = claim.dispositions.filter(d => ['Draft', 'pending'].includes(d.state) && !d.supersededById).reduce((s, d) => s + mistMoneyMinor(d.amount || 0), 0);
   const recoveries = (claim.coordination?.recoveries ?? []).filter(r => r.state !== 'Withdrawn');
@@ -113,7 +123,7 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       const v = command.payload, claim = claimOf(claims, v.id); active(claim); const byId = actor(c), s = supplier(root, text(v.supplierId, '相关工厂'));
       const notice: ClaimNotice = { id: c.id(), at: c.now, by: c.actorName, byId, supplierId: s.id, supplierName: s.name, factoryChannel: text(v.factoryChannel, '通知工厂的实际方式', true, 200), note: text(v.note, '备注', false) };
       coordination(claim).notices.push(notice);
-      task(root, c, claim.id, 'claim-verify:' + claim.id, '质检核实客诉事实 · ' + claim.code, { permission: 'qc:inspect' });
+      task(root, c, claim.id, 'claim-verify:' + claim.id, '质检核实客诉事实 · ' + claim.code, { permission: claimQcPermission(root, claim) ?? 'qc:inspect' });
       task(root, c, claim.id, 'claim-factory:' + claim.id, '跟进工厂核实回复 · ' + claim.code + ' · ' + s.name, { assigneeIds: [byId] });
       notify(root, c, claim.id, claim.code + ' · 新客诉待关注', '业务员 ' + c.actorName + ' 已通知质检、跟单与工厂（' + s.name + '）配合核实；通知工厂不代表认定责任或答应客户金额。');
       emit(root, c, claim.id, '通知相关人员：内部质检 / 负责人 / 跟单，工厂 ' + s.name + '（' + notice.factoryChannel + '）');
@@ -121,6 +131,7 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
     }
     case 'platform.claim.verify': {
       const v = command.payload, claim = claimOf(claims, v.id); active(claim); const byId = actor(c);
+      if (!canVerifyClaim(root, claim, c.can)) throw new MistCommandError('FORBIDDEN', '仅对应业务线QC可核实客诉', 403);
       const qty = v.affectedQuantity; if (typeof qty !== 'number' || !Number.isFinite(qty) || qty < 0 || !Number.isInteger(qty * 10000)) fail('影响数量须为非负数');
       const row: ClaimVerification = { id: c.id(), at: c.now, by: c.actorName, byId, result: enumOf(v.result, ['confirmed', 'partial', 'notConfirmed'] as const, '核实结论'), scope: text(v.scope, '影响范围（款式 / 批次）'), affectedQuantity: qty, unit: text(v.unit, '数量单位', qty > 0, 20), goodsLocation: enumOf(v.goodsLocation, CLAIM_GOODS_LOCATIONS, '货物现在的位置'), mitigation: text(v.mitigation, '减少损失的办法', false), factoryResponse: text(v.factoryResponse, '工厂回复', false), safety: v.safety === true, fileIds: claimFiles(root, v.fileIds ?? []) };
       const first = !coordination(claim).verifications.length; coordination(claim).verifications.push(row);
