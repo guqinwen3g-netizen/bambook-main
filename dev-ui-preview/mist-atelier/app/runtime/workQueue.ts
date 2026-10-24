@@ -6,6 +6,7 @@ import { shipmentStage } from '../pages/modules/ShipmentsPage';
 import { financeReceiptDisplay } from '../pages/FinancePage';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
+import { SETTLEMENT_SCOPES } from '../../../../server/src/shared/mistPayables';
 
 type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
@@ -131,6 +132,12 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       target: { view: 'shipments', id: shipment.id, detail: 'full' } });
   }
   if (canRead('payment-vouchers')) {
+    if (can(SETTLEMENT_SCOPES.confirm)) for (const settlement of state.payables?.settlements ?? []) {
+      if (settlement.state !== 'pending') continue;
+      push({ id: 'settlement:' + settlement.id, source: 'finance', title: `${settlement.code} · ${uiText('待财务复核')}`,
+        meta: [settlement.supplier, settlement.purchaseCode, `${settlement.currency} ${settlement.amount.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2})}`].filter(Boolean).join(' · '),
+        when: '待复核', urgent: false, at: settlement.submittedAt, target: {view:'payment-vouchers',id:settlement.id,section:'payables'} });
+    }
     if (can('invoices:reconcile')) for (const receipt of state.receipts ?? []) {
       const display = financeReceiptDisplay(receipt, state.orderFunding?.assignments ?? [], state.allocations ?? []);
       if (receipt.remaining <= 0 || (display.label !== '未认领' && display.label !== '匹配建议')) continue;
@@ -145,7 +152,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       const resubmitted = requests.some(other => other.id !== request.id && other.submittedAt > request.submittedAt && other.state !== 'cancelled' && other.supplierId === request.supplierId && other.purpose === request.purpose
         && (other.purchaseId ?? other.settlementId ?? other.planId ?? '') === (request.purchaseId ?? request.settlementId ?? request.planId ?? ''));
       if (resubmitted) continue;
-      push({ id: 'finance:' + request.id, source: 'finance', title: ui`${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id } });
+      push({ id: 'finance:' + request.id, source: 'finance', title: ui`${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id, section: 'payables' } });
     }
   }
   // 每周一起：主管把上周团队周报生成并存档（服务端冻结此刻数据）；存档后自动消失。

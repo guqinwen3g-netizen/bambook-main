@@ -28,8 +28,12 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('opens a routed settlement after workspace facts load and after navigating from another payable tab',async()=>{
+ const state=store.value.state;state.payables.settlements=[{id:'handoff-settlement',code:'ST-HANDOFF',purchaseId:po.id,purchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:po.currency,unit:po.unit,price:po.price,receiptIds:[],quantity:1,rejected:0,amount:po.price,final:false,disputes:[],note:'原结算依据',fileIds:[],state:'pending',submitterId:'business',submittedBy:'业务员',submittedAt:ctx.now}];route.id='handoff-settlement';store.value.state=null;render();store.value.state=state;render();expect(getByRole(host,'table',{name:'供应商结算'})).toBeTruthy();expect(host.querySelector('[data-settlement="handoff-settlement"]')).toBeTruthy();await click(/^应付票据 ·/);expect(getByRole(host,'table',{name:'应付票据'})).toBeTruthy();state.payables.settlements.push({...state.payables.settlements[0],id:'another-settlement',code:'ST-ANOTHER'});route={...route,id:'another-settlement'};render();expect(getByRole(host,'table',{name:'供应商结算'})).toBeTruthy();expect(host.querySelector('[data-settlement="another-settlement"]')).toBeTruthy();
+});
+
 it('从待登记来源登记供应商票据：形成应付，合同还没收到票的金额同步减少', async () => {
-  render(); expect(host.textContent).toContain('合同金额不是应付');
+  render(); expect(host.textContent).toContain('暂无供应商票据');
   await click(/待登记来源/); const row = getByRole(host, 'table', { name: '待登记来源合同' });
   expect(row.textContent).toContain('111,600.00 CNY');
   await click('登记票据', row);

@@ -41,7 +41,6 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
       ...(st.state === 'pending' ? [{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + ` · 合同剩余可抵扣 ${money(st.available, st.currency)}` }] : []),
       ...(st.note ? [{ label: '结算说明', value: st.note }] : []),
     ]} />
-    {st.state === 'pending' && <Banner tone="warn" title={uiText("等待财务复核")}>{uiText("财务核对收货记录、数量和单价后确认；确认后才算已确认结算，并按比例抵扣预付。")}</Banner>}
     {st.confirmation && <Banner tone="ok" title={uiText("财务已确认")}>{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{uiText(st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : '')}{uiText(st.confirmation.note ? `。${st.confirmation.note}` : '')}</Banner>}
     {st.returned && <Banner tone="bad" title={uiText("财务已退回")}>{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}{uiText("）。收货记录已释放，可修正后重新提交。")}</Banner>}
     {st.cancelled && <Banner title={uiText("已撤回")}>{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
@@ -91,7 +90,7 @@ export function SettlementSubmitDialog({ open, state, busy, canSettle, failure, 
     execute({ type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: chosen.map(r => r.receipt.id), final: draft.final, disputes: disputes.map(d => ({ description: d.description, amount: cents(d.amount) / 100 })), note: draft.note } }, r => onDone(String(r.id)));
   };
   const message = local || failure;
-  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} width={760} title={uiText("提交结算")} description={uiText("按实际收货记录提交，财务复核确认后成为已确认结算。拒收不计；争议和未确认扣款单列，不抵减结算金额。")}
+  return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} width={760} title={uiText("提交结算")}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canSettle} onClick={submit}>{uiText("提交复核")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能提交")}>{message}</Banner>}
@@ -102,9 +101,9 @@ export function SettlementSubmitDialog({ open, state, busy, canSettle, failure, 
           {!rows.length && <span className="mist-note">{uiText("这张合同还没有实际收货记录；先在采购详情登记收货。")}</span>}</div>
       </FieldGroup>}
       {po && (() => { const all = state ? state.fulfillment.receipts.filter(r => r.purchaseId === po.id) : [], noReplace = all.reduce((n, r) => n + receiptReturnedQuantity(r, 'noReplace'), 0), open = all.reduce((n, r) => n + r.rejected - receiptReturnedQuantity(r), 0); return noReplace > 0 || open > 0 ? <Banner tone={open > 0 ? 'warn' : undefined} title={uiText("拒收与退换")}>{uiText(noReplace > 0 ? `供应商已确认不再补发 ${Math.round(noReplace * 10000) / 10000} ${po.unit}；如本合同不再交货，可勾选最终结算。` : '')}{uiText(open > 0 ? `还有 ${Math.round(open * 10000) / 10000} ${po.unit} 拒收未登记退换，请先在采购详情登记供应商补发或不再补发。` : '')}</Banner> : null; })()}
-      {po && <Checkbox checked={draft.final} onChange={v => setDraft({ ...draft, final: v })} label={uiText("这是本合同最终结算（短交关闭或已全部交付）；将抵扣剩余全部预付")} />}
+      {po && <Checkbox checked={draft.final} onChange={v => setDraft({ ...draft, final: v })} label={uiText("最终结算")} />}
       {po && prepay && prepay.paid > 0 && <Banner title={uiText("预付抵扣建议（由财务确认）")}>{uiText("合同已付预付 ")}{money(prepay.paid, po.currency)}{uiText("，已抵扣 ")}{money(prepay.applied, po.currency)}{uiText("。本次建议抵扣 ")}{money(suggested / 100, po.currency)}{uiText(draft.final || qty === 0 ? '' : `（预付 × ${qty} ÷ ${po.quantity}）`)}。</Banner>}
-      <FieldGroup label={uiText("争议 / 未确认扣款")} hint={uiText("例如色差、短码待供应商确认的扣款；单列记录，不抵减结算金额")}>
+      <FieldGroup label={uiText("争议 / 未确认扣款")}>
         <div className="mist-col">{draft.disputes.map((d, i) => <FormGrid key={i}>
           <TextInput aria-label={ui`争议说明 ${i + 1}`} value={d.description} onChange={e => setDraft({ ...draft, disputes: draft.disputes.map((x, j) => j === i ? { ...x, description: e.target.value } : x) })} />
           <TextInput aria-label={ui`争议金额 ${i + 1}`} type="number" min="0.01" step="0.01" value={d.amount} onChange={e => setDraft({ ...draft, disputes: draft.disputes.map((x, j) => j === i ? { ...x, amount: e.target.value } : x) })} />
@@ -132,13 +131,13 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
     setLocal(''); execute({ type: 'payable.settlement.confirm', payload: { id: st.id, prepaymentApplied: value / 100, adjustReason: changed ? adjust : undefined, note } }, onDone);
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText("确认结算")} description={ui`${st.code} · ${st.purchaseCode} · 实收 ${st.quantity} ${st.unit} · ${money(st.amount, st.currency)}。核对收货记录、数量与单价后确认。`}
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={640} title={uiText("确认结算")} description={ui`${st.code} · ${st.purchaseCode}`}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canConfirm} onClick={submit}>{uiText("确认结算")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能确认")}>{message}</Banner>}
       <Facts items={[{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + (st.final ? '（最终结算：抵扣剩余全部预付）' : '（按结算数量比例）') }, { label: '合同剩余可抵扣', value: money(st.available, st.currency) }, ...(st.disputes.length ? [{ label: '争议 / 扣款（不抵减）', value: st.disputes.map(d => `${d.description} ${money(d.amount, st.currency)}`).join('；') }] : [])]} />
       <Field label={uiText("本次预付抵扣")} required><TextInput aria-label={uiText("本次预付抵扣")} type="number" min="0" step="0.01" value={applied} onChange={e => setApplied(e.target.value)} /></Field>
-      {changed && <Field label={uiText("调整原因")} required hint={uiText("抵扣额与建议不同时必须写明，例如合同约定首批不抵扣")}><TextInput aria-label={uiText("调整原因")} value={adjust} onChange={e => setAdjust(e.target.value)} /></Field>}
+      {changed && <Field label={uiText("调整原因")} required><TextInput aria-label={uiText("调整原因")} value={adjust} onChange={e => setAdjust(e.target.value)} /></Field>}
       <Field label={uiText("复核意见")}><TextArea aria-label={uiText("复核意见")} rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
     </div>
   </Dialog>;

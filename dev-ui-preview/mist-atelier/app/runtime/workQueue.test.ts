@@ -209,3 +209,10 @@ it('keeps adopted order samples pending for business until continuation referenc
 it('finishes a rejected order-sample decision without requiring an approval-only continuation',()=>{
  const state=base();state.fulfillment.qcTasks=[qc({businessConfirmation:{result:'rejected',actor:'业务员',at:'2026-10-24',note:'不采用'}})] as any;expect(mistWorkQueue(state,{canRead:all,can:(p:string)=>p==='orders:write',me:'sales',today:'2026-10-24'})).toEqual([]);
 });
+
+describe('supplier settlement finance handoff',()=>{
+ function pending(){const state=base();state.payables!.settlements=[{id:'settlement',code:'ST-READY',purchaseId:'purchase',purchaseCode:'PO-READY',supplierId:'supplier',supplier:'供货工厂',currency:'CNY',unit:'件',price:434,receiptIds:['receipt'],quantity:1,rejected:0,amount:434,final:true,disputes:[],note:'原始结算说明',fileIds:[],state:'pending',submitterId:'sales',submittedBy:'业务员',submittedAt:'2099-01-01T00:00:00Z'}];return state;}
+ const finance={canRead:all,can:(permission:string)=>permission==='invoices:reconcile',me:'finance',today:'2026-10-08'};
+ it('surfaces the exact pending settlement only to the finance confirmation role without changing source facts',()=>{const state=pending(),before=structuredClone(state);expect(mistWorkQueue(state,finance)).toEqual([expect.objectContaining({id:'settlement:settlement',source:'finance',title:'ST-READY · 待财务复核',when:'待复核',target:{view:'payment-vouchers',id:'settlement',section:'payables'}})]);expect(state).toEqual(before);expect(mistWorkQueue(state,{...finance,canRead:()=>false})).toEqual([]);expect(mistWorkQueue(state,{...finance,can:permission=>permission==='procurement:write'||permission==='invoices:write'})).toEqual([]);});
+ it.each(['confirmed','returned','cancelled','reversed'] as const)('removes the finance confirmation item once the settlement is %s',status=>{const state=pending();state.payables!.settlements[0].state=status;expect(mistWorkQueue(state,finance)).toEqual([]);});
+});
