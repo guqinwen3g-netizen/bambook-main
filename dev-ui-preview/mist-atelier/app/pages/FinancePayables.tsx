@@ -264,7 +264,6 @@ export function FinancePayables() {
     <DetailBlock title={uiText("提交时冻结的审批材料")}><Facts items={request.snapshot.map(d => ({ label: d.label, value: d.value }))} /></DetailBlock>
     {request.fileIds.length > 0 && <DetailBlock title={uiText("申请附件")}><DraftFiles ids={request.fileIds} onChange={() => undefined} disabled /></DetailBlock>}
     {request.decision && <Banner tone={request.decision.decision === 'approved' ? 'ok' : 'bad'} title={uiText(request.decision.decision === 'approved' ? '主管已批准' : '主管已退回')}>{request.decision.note}（{request.decision.actor} · {fmtDay(request.decision.at)}）</Banner>}
-    {request.state === 'pending' && <Banner tone="warn" title={uiText("等待主管审批")}>{uiText("主管在“审批事项”中按冻结材料决定；批准前不能付款。")}</Banner>}
     {request.cancelled && <Banner title={uiText("已撤回")}>{request.cancelled.reason}（{request.cancelled.actor} · {fmtDay(request.cancelled.at)}）</Banner>}
     <ActionBar busy={busy} actions={[
       { label: '登记实付', onClick: () => startPayRequest(request), reason: !canPay ? '需要付款登记权限' : request.purpose === 'bill' && !canAllocate ? '票据付款需同时具备核销分配权限' : undefined, hidden: request.state !== 'approved' },

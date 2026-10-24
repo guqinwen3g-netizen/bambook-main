@@ -22,7 +22,7 @@ export function SettlementAdvance({ state, settlement: st, busy, canRequest, onR
   return <DetailBlock title={uiText("不等票付款")}>
     <Facts items={[{ label: '不等票可申请', value: money(room, st.currency) }, ...(paid > 0 ? [{ label: '已先付 / 其中未收票', value: money(paid, st.currency) + ' / ' + money(open, st.currency) }] : [])]} />
     {open > 0 && <Banner tone="warn" title={uiText("已付未收票")}>{uiText("供应商票据到后按本结算登记，先付款自动抵到票据；超过 ")}{ADVANCE_INVOICE_REMIND_DAYS}{uiText(" 天未收票会在应付汇总中提醒催票。")}</Banner>}
-    {room > 0 && <div className="mist-row"><Button size="sm" disabled={busy || !canRequest} title={uiText(!canRequest ? '需要付款申请权限' : undefined)} onClick={onRequest}>{uiText("不等票申请付款")}</Button><span className="mist-note">{uiText("工厂开票慢、货已到等情况；须写明未收票原因，经主管审批后付款。")}</span></div>}
+    {room > 0 && <div className="mist-row"><Button size="sm" disabled={busy || !canRequest} title={uiText(!canRequest ? '需要付款申请权限' : undefined)} onClick={onRequest}>{uiText("不等票申请付款")}</Button></div>}
   </DetailBlock>;
 }
 
@@ -33,16 +33,17 @@ export function AdvanceRequestDialog({ state, settlement: st, busy, allowed, fai
     const value = cents(amount);
     if (!(value > 0)) return setLocal('申请金额必须大于零。');
     if (value > Math.round(room * 100)) return setLocal('申请金额超过不等票可申请额度。');
-    if (!reason.trim()) return setLocal('请写明为什么不等发票先付款，供主管审批核对。');
+    if (!reason.trim()) return setLocal('请填写未收票原因');
     setLocal(''); execute({ type: 'payable.request.submit', payload: { purpose: 'settlement', settlementId: st.id, amount: value / 100, reason } }, onDone);
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={600} title={uiText("不等票申请付款")} description={ui`${st.code} · ${st.purchaseCode} · ${st.supplier}。结算净额 ${money(st.net, st.currency)}，不等票可申请 ${money(room, st.currency)}（未开票部分扣除待随票计入的预付抵扣和已申请的先付款）。`}
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={600} title={uiText("不等票申请付款")} description={ui`${st.code} · ${st.purchaseCode} · ${st.supplier}`}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !allowed} onClick={submit}>{uiText("提交审批")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能提交")}>{message}</Banner>}
+      <Facts items={[{label:'结算净额',value:money(st.net,st.currency)},{label:'不等票可申请',value:money(room,st.currency)}]}/>
       <Field label={uiText("申请金额")} required><TextInput aria-label={uiText("不等票申请金额")} type="number" min="0.01" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} /></Field>
-      <Field label={uiText("未收票原因")} required hint={uiText("例如：工厂开票慢、货已发出验收合格。")}><TextArea aria-label={uiText("未收票原因")} rows={2} value={reason} onChange={e => setReason(e.target.value)} /></Field>
+      <Field label={uiText("未收票原因")} required><TextArea aria-label={uiText("未收票原因")} rows={2} value={reason} onChange={e => setReason(e.target.value)} /></Field>
     </div>
   </Dialog>;
 }

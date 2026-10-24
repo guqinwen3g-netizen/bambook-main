@@ -601,4 +601,6 @@ export const reviewedEnglish: Record<string, string> = {
   '起飞依据': 'Take-off evidence',
   '上传起飞通知或承运人凭据': 'Upload take-off notice or carrier evidence',
   '暂无供应商票据': 'No supplier invoices',
+  '请填写未收票原因': 'Enter the reason the invoice has not arrived',
+  '结算净额': 'Net settlement amount',
 };

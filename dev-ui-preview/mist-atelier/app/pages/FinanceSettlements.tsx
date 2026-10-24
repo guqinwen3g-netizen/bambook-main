@@ -135,7 +135,7 @@ export function SettlementConfirmDialog({ settlement: st, busy, canConfirm, fail
     footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canConfirm} onClick={submit}>{uiText("确认结算")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能确认")}>{message}</Banner>}
-      <Facts items={[{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + (st.final ? '（最终结算：抵扣剩余全部预付）' : '（按结算数量比例）') }, { label: '合同剩余可抵扣', value: money(st.available, st.currency) }, ...(st.disputes.length ? [{ label: '争议 / 扣款（不抵减）', value: st.disputes.map(d => `${d.description} ${money(d.amount, st.currency)}`).join('；') }] : [])]} />
+      <Facts items={[{ label: '实收结算数量', value: `${st.quantity} ${uiText(st.unit)} × ${money(st.price, st.currency)}` }, { label: '结算金额', value: money(st.amount, st.currency) }, { label: '建议预付抵扣', value: money(st.suggested, st.currency) + (st.final ? '（最终结算：抵扣剩余全部预付）' : '（按结算数量比例）') }, { label: '合同剩余可抵扣', value: money(st.available, st.currency) }, ...(st.disputes.length ? [{ label: '争议 / 扣款（不抵减）', value: st.disputes.map(d => `${d.description} ${money(d.amount, st.currency)}`).join('；') }] : [])]} />
       <Field label={uiText("本次预付抵扣")} required><TextInput aria-label={uiText("本次预付抵扣")} type="number" min="0" step="0.01" value={applied} onChange={e => setApplied(e.target.value)} /></Field>
       {changed && <Field label={uiText("调整原因")} required><TextInput aria-label={uiText("调整原因")} value={adjust} onChange={e => setAdjust(e.target.value)} /></Field>}
       <Field label={uiText("复核意见")}><TextArea aria-label={uiText("复核意见")} rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
