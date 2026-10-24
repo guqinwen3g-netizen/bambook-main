@@ -1,3 +1,4 @@
+import {getOrderGovernanceReviews} from './mistOrderGovernance';
 import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,type MistCommand,type MistContext} from './mistWorkspace';
 import {seedIssuedClaimSource,testClaimNumberConsumer} from './mistClaimTestFixtures';
@@ -80,4 +81,8 @@ it('refuses a previously pending short close but permits rejection without chang
 });
 it('allows the replacement line to close after its full actual shipment',()=>{
  const f=fixture(),id=f.create();f.approve(id);const scope=f.declaration(id),shipment=f.state.fulfillment.shipments.find(s=>s.id===scope.shipmentId)!;shipment.state='departed';shipment.departedAt=f.c.now;f.run({type:'order.governance.closeLine',payload:{orderId:id,lineId:scope.lineId,reason:'已按批准数量发齐'}});expect((f.state.orderLines.find(l=>l.id===scope.lineId) as any).closure).toMatchObject({status:'closed',quantity:1,ordered:1});
+});
+
+it('presents a source-bound replacement review in business terms without changing its frozen contract',()=>{
+ const f=fixture(),id=f.create();f.run({type:'order.governance.submit',payload:{orderId:id}});const snapshot=structuredClone(f.state.orders.find(o=>o.id===id)!.governance!.rounds[0].snapshot),review=getOrderGovernanceReviews(f.state).find(r=>r.entityId===id)!,details=Object.fromEntries(review.details.map(d=>[d.label,d.value]));expect(details).toMatchObject({'订单用途':'换货补发','来源案件':f.state.platform.claims[0].code,'客户收款':'无需收款','溢短装':'按批准数量'});expect(details['付款']).toBeUndefined();expect(details['出运前累计收款']).toBeUndefined();expect(JSON.stringify(review.details)).not.toContain('OTHER');expect(review.fileIds).toEqual(['proof']);expect(f.state.orders.find(o=>o.id===id)!.governance!.rounds[0].snapshot).toEqual(snapshot);
 });
