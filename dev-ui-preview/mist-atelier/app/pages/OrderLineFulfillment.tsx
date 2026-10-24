@@ -53,7 +53,7 @@ export function OrderLineFulfillment({ state, order, line, go, onCloseLine }: { 
         { label: '已排出运', value: `${q(shipping.planned)} ${unit}` },
         { label: '已离港', value: `${q(shipping.departed)} ${unit}` },
         { label: '短溢装', value: <span className={shipping.variance < 0 && shipping.departed ? 'mist-tone-warn' : undefined}>{variance}</span> },
-        { label: '溢短装条款', value: <span data-line-tolerance>{tolerance.text}</span> },
+        { label: '溢短装条款', value: <span data-line-tolerance>{order.replacementSource?uiText('按批准数量'):tolerance.text}</span> },
         { label: '允许范围', value: <span data-line-range>{q(tolerance.min)} – {q(tolerance.max)} {uiText(unit)}</span> },
         { label: '剩余待出', value: `${q(tolerance.remaining)} ${unit}` },
         { label: '范围判断（含已排未离港）', value: <span data-line-verdict={tolerance.verdict} className={tolerance.verdict === 'within' ? undefined : 'mist-tone-warn'}>{uiText(!tolerance.planned ? '尚未排出运' : tolerance.verdict === 'within' ? '在允许范围内' : tolerance.verdict === 'over' ? `超出溢装上限 ${q(tolerance.planned - tolerance.max)} ${unit}` : `低于短装下限 ${q(tolerance.min - tolerance.planned)} ${unit}`)}</span> },
