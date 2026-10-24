@@ -106,13 +106,15 @@ export function getOrderGovernanceReviews(root:MistState):MistReviewTask[]{
  const tasks=root.orders.flatMap(source=>{
   const order=source as GovernedOrder;
   return(order.governance?.rounds||[]).map(round=>{
-   const snapshot=round.snapshot,contract=snapshot.contract,internal=contract.kind==='internal';
+   const snapshot=round.snapshot,contract=snapshot.contract,internal=contract.kind==='internal',replacement=!!order.replacementSource;
+   const sourceCase=replacement?root.platform?.claims.find(claim=>claim.id===order.replacementSource!.claimId):undefined;
    return{id:'order:'+round.id,kind:'order' as const,entityId:order.id,title:order.code+(round.kind==='change'?' 订单变更审批':' 订单主单审批'),requesterId:round.requesterId,reviewerIds:round.reviewerIds,status:round.status,submittedAt:round.submittedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},fileIds:contract.confirmationFileIds,details:[
-    {label:'订单用途',value:internal?'内部用途订单':'外部客户订单'},
+    {label:'订单用途',value:replacement?'换货补发':internal?'内部用途订单':'外部客户订单'},
+    ...(sourceCase?[{label:'来源案件',value:sourceCase.code}]:[]),
     {label:internal?'接收负责人':'客户',value:internal?contract.receiver:snapshot.customer},
     {label:internal?'内部用途':'合同',value:internal?contract.internalPurpose:contract.poNumber},
-    ...(internal?[{label:'交接约定',value:contract.paymentNote}]:[{label:'付款',value:contract.paymentMethod+' · '+contract.paymentNote},{label:'出运前累计收款',value:contract.preShipmentPercent==null?'待核对':contract.preShipmentPercent+'%'}]),
-    {label:'交期',value:snapshot.due},{label:internal?'交付地点':'贸易条件',value:contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:toleranceText(contract)},...(snapshot.type==='garment'?[{label:'数量口径',value:contract.quantityBasis==='size'?'按尺码':contract.quantityBasis==='total'?'按总量':'待核对'},{label:'数量依据',value:contract.quantityBasisNote||'待核对'}]:[]),
+    ...(internal?[{label:'交接约定',value:contract.paymentNote}]:replacement?[{label:'客户收款',value:'无需收款'}]:[{label:'付款',value:(contract.paymentMethod==='OTHER'?'其他':contract.paymentMethod)+' · '+contract.paymentNote},{label:'出运前累计收款',value:contract.preShipmentPercent==null?'待核对':contract.preShipmentPercent+'%'}]),
+    {label:'交期',value:snapshot.due},{label:internal?'交付地点':'贸易条件',value:contract.incoterm+' '+contract.deliveryPlace},{label:'溢短装',value:replacement?'按批准数量':toleranceText(contract)},...(snapshot.type==='garment'?[{label:'数量口径',value:contract.quantityBasis==='size'?'按尺码':contract.quantityBasis==='total'?'按总量':'待核对'},{label:'数量依据',value:contract.quantityBasisNote||'待核对'}]:[]),
     ...(round.reason?[{label:'变更原因',value:round.reason}]:[]),...(round.kind==='change'&&round.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,snapshot.lines)):[]),
     ...snapshot.lines.map(line=>({label:line.style+' · '+line.name,value:reviewLine(snapshot,line)})),
    ]};
