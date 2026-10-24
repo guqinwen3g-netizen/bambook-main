@@ -1,5 +1,11 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '无附件':'No attachment',
+  '退货尚未收齐':'Returned goods have not all been received',
+  '退货尚未报废，不能结案':'Dispose of the approved returns before closing the case',
+  '返修货物尚未交还，不能结案':'Hand repaired goods back before closing the case',
+  '退回货物尚未完成处置，不能结案':'Complete the return disposition before closing the case',
+
   '返修批次':'Repair batch',
   '受检批次':'Inspection batch',
   '补偿金额':'Compensation amount',

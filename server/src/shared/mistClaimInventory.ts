@@ -69,11 +69,11 @@ function ledger(root:MistState,goodsId:string){
   const known=new Set([record.inboundMovementId,record.holdMovementId,...(record.disposal?[record.disposal.unlockMovementId,record.disposal.outboundMovementId]:[]),...(handback?[handback.unlockMovementId,handback.outboundMovementId]:[])]);if(f.stockMovements.some(row=>row.stockId===stock!.id&&!known.has(row.id)))fail('退回库存存在未绑定真实收货批次的流水','INVALID_STATE');
  }
  const received=total(records.map(row=>row.quantity));if(units(received)>units(source.quantity)||goods.receivedQuantity!==undefined&&goods.receivedQuantity!==received)fail('实际收货汇总超过批准量或与退回履行不一致','INVALID_STATE');
- return {goods,source,receipt,records,received};
+ return {goods,source,disposition,receipt,records,received};
 }
 export function getClaimGoodsReceivedQuantity(root:MistState,goodsId:string){return ledger(root,goodsId).received;}
-export function assertClaimGoodsFullyReturned(root:MistState,goodsId:string){const {source,records,received}=ledger(root,goodsId);if(!records.length||units(received)!==units(source.quantity))fail('退货退款须完整实际收货，不能以状态或部分收货代替','PRECONDITION');}
-export function assertClaimGoodsInventorySettled(root:MistState,goodsId:string){const scope=ledger(root,goodsId);assertClaimGoodsFullyReturned(root,goodsId);const settled=scope.goods.destination==='Scrap'?scope.records.every(record=>record.disposal):scope.goods.destination==='Repair'&&scope.records.every(record=>record.releasedRepairId);if(!settled)fail('退回库存仍有隔离货物，或缺少返修/补发真实放行事实，不能关闭案件','PRECONDITION');}
+export function assertClaimGoodsFullyReturned(root:MistState,goodsId:string){const {source,records,received}=ledger(root,goodsId);if(!records.length||units(received)!==units(source.quantity))fail('退货尚未收齐','PRECONDITION');}
+export function assertClaimGoodsInventorySettled(root:MistState,goodsId:string){const scope=ledger(root,goodsId);assertClaimGoodsFullyReturned(root,goodsId);const settled=scope.goods.destination==='Scrap'?scope.records.every(record=>record.disposal):scope.goods.destination==='Repair'&&scope.records.every(record=>record.releasedRepairId);if(!settled)fail(scope.goods.destination==='Scrap'?'退货尚未报废，不能结案':scope.disposition.kind==='Repair'&&scope.goods.destination==='Repair'?'返修货物尚未交还，不能结案':'退回货物尚未完成处置，不能结案','PRECONDITION');}
 function event(root:MistState,context:MistContext,claimId:string,stockId:string,message:string,fileIds:string[]){root.events.unshift({id:context.id(),entityType:'inventory',entityId:stockId,actor:context.actorName,at:context.now,text:message,fileIds});root.notifications.unshift({id:context.id(),category:'general',title:message,detail:'',at:context.now,readAt:null,target:{view:'claims',id:claimId}});}
 
 type RepairCommand=Extract<ClaimInventoryCommand,{type:'fulfillment.claimInventory.repair.record'|'fulfillment.claimInventory.repair.qc'|'fulfillment.claimInventory.repair.handback'}>;
