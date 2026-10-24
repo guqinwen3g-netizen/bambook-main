@@ -10,6 +10,8 @@ export default defineConfig(
       port: 3001,
       host: '127.0.0.1',
       strictPort: true,
+      // Production builds must not reload an in-progress local business form.
+      watch: { ignored: ['**/dist/**', '**/dist-*/**', '**/out/**', '**/.git/**'] },
       proxy: mistDevelopmentProxy(),
     },
     preview: { port: 4174, host: '127.0.0.1', strictPort: true },

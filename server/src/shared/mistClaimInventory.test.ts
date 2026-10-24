@@ -33,10 +33,10 @@ it('aggregates one numbered RT per case, binds each executed goods line to the a
 
 it('receives two pieces in separate one-piece batches, isolates each, scraps each and retains the original inbound history',()=>{
  const f=fixture();f.state.fulfillment.stock.push({id:'purchase-stock',purchaseId:'purchase',receiptId:'purchase-receipt',orderId:'other',lineId:'other-line',name:'原采购库存',unit:'件',quantity:10,available:10,owner:'公司',location:'原区',createdAt:f.ctx.now});
- const first=f.run(f.receive()),firstId=first.receivedEventId!;expect(f.state.platform.claimGoods[0]).toMatchObject({state:'PartiallyReceived',receivedQuantity:1});expect(()=>assertClaimGoodsFullyReturned(f.state,'goods')).toThrow(/完整实际收货/);
+ const first=f.run(f.receive()),firstId=first.receivedEventId!;expect(f.state.platform.claimGoods[0]).toMatchObject({state:'PartiallyReceived',receivedQuantity:1});expect(()=>assertClaimGoodsFullyReturned(f.state,'goods')).toThrow(/尚未收齐/);
  expect(f.state.fulfillment.stock[1]).toMatchObject({sourceKind:'claimReturn',quantity:1,onHand:1,locked:1,available:0,warehouseId:f.warehouseId});expect(f.state.fulfillment.stock[1].purchaseId).toBeUndefined();expect(f.state.fulfillment.stockMovements.map(row=>row.kind)).toEqual(['receive','lock']);
  f.run(f.scrap(firstId));expect(f.state.fulfillment.stock[1]).toMatchObject({quantity:1,onHand:0,locked:0,available:0});expect(f.state.platform.claimGoods[0].state).toBe('PartiallyReceived');
- const second=f.run(f.receive(1,'RETURN-LOT-2'));expect(f.state.platform.claimGoods[0]).toMatchObject({state:'Received',receivedQuantity:2});expect(()=>assertClaimGoodsFullyReturned(f.state,'goods')).not.toThrow();expect(()=>assertClaimGoodsInventorySettled(f.state,'goods')).toThrow(/隔离货物/);
+ const second=f.run(f.receive(1,'RETURN-LOT-2'));expect(f.state.platform.claimGoods[0]).toMatchObject({state:'Received',receivedQuantity:2});expect(()=>assertClaimGoodsFullyReturned(f.state,'goods')).not.toThrow();expect(()=>assertClaimGoodsInventorySettled(f.state,'goods')).toThrow(/尚未报废/);
  f.run(f.scrap(second.receivedEventId!));expect(f.state.platform.claimGoods[0].state).toBe('Scrapped');expect(()=>assertClaimGoodsInventorySettled(f.state,'goods')).not.toThrow();expect(getClaimGoodsReceivedQuantity(f.state,'goods')).toBe(2);
  expect(f.state.fulfillment.stock.slice(1).map(row=>[row.quantity,row.onHand,row.locked,row.available])).toEqual([[1,0,0,0],[1,0,0,0]]);expect(f.state.fulfillment.stock[0].available).toBe(10);expect(f.state.fulfillment.stockMovements).toHaveLength(8);expect(f.state.fulfillment.receivedRecords).toHaveLength(2);expect(f.state.tasks.find(task=>task.kind==='claim-inventory:goods')?.done).toBe(true);
  f.state.platform.claims[0].state='Closed';expect(getClaimGoodsReceivedQuantity(f.state,'goods')).toBe(2);expect(f.state.fulfillment.receivedRecords[0].fileIds).toEqual(['proof']);
@@ -62,7 +62,7 @@ it.each(['Closed','Cancelled'] as const)('refuses new receipt or disposal on a %
 });
 
 it.each(['Repair','Replace'] as const)('keeps %s stock isolated and refuses an invented Scrap or settled status',destination=>{
- const f=fixture(destination);const saved=f.run(f.receive(2));expect(()=>f.run(f.scrap(saved.receivedEventId!))).toThrow(/批准退回去向/);expect(()=>assertClaimGoodsInventorySettled(f.state,'goods')).toThrow(/真实放行/);expect(f.state.fulfillment.stock[0]).toMatchObject({onHand:2,locked:2,available:0});
+ const f=fixture(destination);const saved=f.run(f.receive(2));expect(()=>f.run(f.scrap(saved.receivedEventId!))).toThrow(/批准退回去向/);expect(()=>assertClaimGoodsInventorySettled(f.state,'goods')).toThrow(/未完成处置/);expect(f.state.fulfillment.stock[0]).toMatchObject({onHand:2,locked:2,available:0});
 });
 
 it('preserves explicitly confirmed customer ownership, and keeps decimal fabric quantities in the approved unit',()=>{

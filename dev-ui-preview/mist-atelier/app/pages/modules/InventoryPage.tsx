@@ -158,7 +158,7 @@ export function InventoryPage() {
         <Select aria-label={uiText("退货条目")} value={selectedGoods} onChange={event => setSelectedGoods(event.target.value)} options={[emptyOption, ...claimGoods.map(goods => ({ value: goods.id, label: `${f?.returnReceipts.find(rt => rt.id === goods.returnReceiptId)?.code || '退货单不可用'} · ${goods.source!.style} · 批准${goods.quantity}${goods.unit} / 已收${goods.receivedQuantity || 0}${goods.unit}` }))]} />
         {can && <Button variant="primary" icon={PackageMinus} disabled={receivingBlocked} title={uiText(receivingReason || undefined)} onClick={receive}>{uiText("登记收货")}</Button>}
       </div>
-      {can && receivingBlocked && receivingReason && <span className="mist-note">{uiText("登记收货：")}{receivingReason}</span>}
+      {can && receivingBlocked && receivingReason && !['请先选择退货条目','本条目已全部收货'].includes(receivingReason) && <span className="mist-note">{uiText("登记收货：")}{receivingReason}</span>}
     </div></Card></div>}
     {!sourceMode && <div className="mist-domains" role="tablist" aria-label={uiText("库存业务板块")}>
       {(['fabric', 'garment'] as const).map(value => { const m = metrics(value); return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" onClick={() => changeDomain(value)}>
@@ -213,7 +213,7 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{stockName(state, stock)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[current]}>{STATE_LABEL[current]}</Pill><Pill>{uiText(returned ? '批准退货入库' : '采购交付入库')}</Pill>{domain && <Pill>{uiText(domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}{out > 0 && <Pill>{uiText("已出库 ")}{out} {uiText(stock.unit)}</Pill>}</div>
-    <Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>
+    {(!isRepair||!repair)&&<Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>}
     <ActionBar busy={locked} actions={[
       { label: '登记出库', icon: PackageMinus, onClick: () => onMove('issue'), primary: !returned && stock.available > 0, reason: writeReason || (returned ? returnedReason : stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
       { label: '按原出库退回', icon: Undo2, onClick: () => onMove('return'), primary: !returned && stock.available <= 0 && openIssues.length > 0, reason: writeReason || (!openIssues.length ? '没有未归还的出库' : false), hidden: returned },

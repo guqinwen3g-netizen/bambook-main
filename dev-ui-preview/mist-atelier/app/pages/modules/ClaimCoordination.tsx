@@ -47,7 +47,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
     { label: '通知相关人员：质检、负责人、跟单、工厂', done: !!notice, note: notice ? notice.by + ' · ' + when(notice.at) + ' · 工厂 ' + notice.supplierName + '（' + notice.factoryChannel + '）' : '尚未通知' },
     { label: '内部质检核实事实（工厂配合）', done: !!check, note: check ? CLAIM_RESULT_LABEL[check.result] + ' · ' + check.by : '尚未核实', noteTone: !check && claim.dispositions.length ? 'bad' as const : undefined },
     { label: '对客户的处理方案经负责人批准', done: approved > 0, note: approved ? approved + ' 条已批准' : '尚无已批准方案' },
-    { label: '客户这边处理完（款项 / 货物）', done: ledger.customerSettled, note: ledger.customerSettled ? (executed ? '已执行并结清' : '处置未采用') : ledger.customerMoneyOpen ? '款项待结清' : ledger.customerGoodsOpen ? '货物待处理' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
+    { label: '客户这边处理完（款项 / 货物）', done: ledger.customerSettled, note: ledger.customerSettled ? (executed ? customerMoney?'已执行并结清':'已完成' : '处置未采用') : ledger.customerMoneyOpen ? '款项待结清' : ledger.customerGoodsOpen ? '货物待处理' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
     ...(ledger.hasRecovery?[{label:'工厂补偿落实',done:!ledger.recoveryOpen,note:ledger.recoveryOpen?'还在等工厂':'已落实或已批准放弃'}]:[]),
   ];
 
