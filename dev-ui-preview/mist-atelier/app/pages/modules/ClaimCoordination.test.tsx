@@ -27,7 +27,8 @@ describe('售后索赔协同面板', () => {
     const { command, openEditor } = await mount(claimFor());
     expect(host.textContent).toContain('通知相关人员：质检、负责人、跟单、工厂');
     expect(host.textContent).toContain('尚未通知');
-    expect(host.textContent).toContain('公司自担');
+    expect(host.textContent).not.toContain('公司自担');
+    expect(button('向工厂追偿')).toBeDefined();
     expect(button('记录质检核实')).toBeUndefined();
     await act(async () => button('通知相关人员')!.click());
     const spec = openEditor.mock.calls[0][0];
@@ -77,6 +78,10 @@ describe('售后索赔协同面板', () => {
 it('does not describe a rejected-only proposal as executed financial settlement',async()=>{
  await mount(claimFor({dispositions:[{id:'returned',kind:'Allowance',amount:10,quantity:0,unit:'',returnDisposition:'',basis:'方案未采用',fileIds:[],state:'rejected'}]}));
  expect(host.textContent).toContain('处置未采用');expect(host.textContent).not.toContain('已执行并结清');
+});
+it('keeps an executed repair pending until physical handback and omits unrelated financial amounts',async()=>{
+ const claim=claimFor({dispositions:[{id:'repair',kind:'Repair',amount:0,quantity:1,unit:'件',returnDisposition:'Repair',basis:'Repair and return',fileIds:[],state:'Executed'}]});state.platform.claimGoods.push({id:'goods',claimId:claim.id,state:'Ready'} as any);await mount(claim);
+ expect(host.textContent).toContain('货物待处理');expect(host.textContent).not.toContain('已执行并结清');expect(host.textContent).not.toContain('公司自担');expect(host.textContent).not.toContain('尚未向工厂提出');expect(button('向工厂追偿')).toBeDefined();
 });
 
 it('corresponds factory money to the selected existing bank receipt using the dedicated command',async()=>{

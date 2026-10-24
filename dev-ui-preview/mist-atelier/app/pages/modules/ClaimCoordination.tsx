@@ -41,13 +41,14 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   const recoveries = co?.recoveries ?? [], suppliers = (state.market?.suppliers ?? []).map(row => ({ value: row.id, label: row.name + (row.status === 'active' ? '' : '（' + (row.status === 'paused' ? '已暂停' : '已停用') + '）') }));
   const defaultSupplier = claimDefaultSupplierId(state, claim);
   const approved = claim.dispositions.filter(d => ['approved', 'Executed'].includes(d.state) && !d.supersededById).length;
+  const customerMoney=claim.dispositions.some(row=>['Allowance','ReturnRefund'].includes(row.kind)&&!row.supersededById);
   const executed = claim.dispositions.some(d => d.state === 'Executed' && !d.supersededById);
   const steps = [
     { label: '通知相关人员：质检、负责人、跟单、工厂', done: !!notice, note: notice ? notice.by + ' · ' + when(notice.at) + ' · 工厂 ' + notice.supplierName + '（' + notice.factoryChannel + '）' : '尚未通知' },
     { label: '内部质检核实事实（工厂配合）', done: !!check, note: check ? CLAIM_RESULT_LABEL[check.result] + ' · ' + check.by : '尚未核实', noteTone: !check && claim.dispositions.length ? 'bad' as const : undefined },
     { label: '对客户的处理方案经负责人批准', done: approved > 0, note: approved ? approved + ' 条已批准' : '尚无已批准方案' },
-    { label: '客户这边处理完（款项 / 货物）', done: ledger.customerSettled, note: ledger.customerSettled ? (executed ? '已执行并结清' : '处置未采用') : ledger.customerMoneyOpen ? '方案已执行，贷项款项待抵扣 / 退款' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
-    { label: '工厂补偿落实', done: ledger.hasRecovery && !ledger.recoveryOpen, note: !ledger.hasRecovery ? '尚未向工厂提出' : ledger.recoveryOpen ? '还在等工厂' : '已落实或已批准放弃' },
+    { label: '客户这边处理完（款项 / 货物）', done: ledger.customerSettled, note: ledger.customerSettled ? (executed ? '已执行并结清' : '处置未采用') : ledger.customerMoneyOpen ? '款项待结清' : ledger.customerGoodsOpen ? '货物待处理' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
+    ...(ledger.hasRecovery?[{label:'工厂补偿落实',done:!ledger.recoveryOpen,note:ledger.recoveryOpen?'还在等工厂':'已落实或已批准放弃'}]:[]),
   ];
 
   const notify = () => openEditor({
@@ -130,14 +131,15 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
         ]} />
       </div>
     </Card>}
-    <Card>
-      <CardHeader title={uiText("两笔账")} tools={can.write && open ? <Button disabled={busy} onClick={openRecovery}>{uiText("向工厂追偿")}</Button> : undefined} />
+    {!customerMoney&&!recoveries.length&&can.write&&open&&<div className="mist-row"><Button disabled={busy} onClick={openRecovery}>{uiText("向工厂追偿")}</Button></div>}
+    {(customerMoney||recoveries.length>0)&&<Card>
+      <CardHeader title={uiText(customerMoney?"两笔账":"工厂补偿")} tools={can.write && open ? <Button disabled={busy} onClick={openRecovery}>{uiText("向工厂追偿")}</Button> : undefined} />
       <div className="mist-card-body">
-        <Facts cols={3} items={[
+        {customerMoney&&<Facts cols={3} items={[
           { label: '对客户（已批准）', value: money(ledger.customer, ledger.currency) + (ledger.customerPending ? ' · 另有 ' + money(ledger.customerPending, ledger.currency) + ' 待批' : '') },
           { label: '工厂同意承担', value: ledger.hasRecovery ? money(ledger.recoveryAgreed, ledger.currency) + (ledger.recoverySettled ? ' · 已落实 ' + money(ledger.recoverySettled, ledger.currency) : '') : '尚未提出' },
           { label: '公司自担', value: money(ledger.companyLoss, ledger.currency) },
-        ]} />
+        ]} />}
         {recoveries.length > 0 && <DataTable rows={recoveries} rowKey={r => r.id} columns={[
           { key: 'supplier', header: '工厂', render: r => r.supplierName },
           { key: 'requested', header: '提出', align: 'right', render: r => money(r.requested, r.currency) },
@@ -155,6 +157,6 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
           </div> },
         ]} />}
       </div>
-    </Card>
+    </Card>}
   </>;
 }

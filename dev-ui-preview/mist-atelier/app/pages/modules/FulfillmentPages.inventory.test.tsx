@@ -32,6 +32,18 @@ function physicalFixture(){
 }
 const receiptValues={'本次实收数量（件）':'1','库位':'退货隔离区A','退货批号':'RETURN-LOT-1','货权':'Owned','货权确认日期':'2026-10-13','货权依据':'客户确认退回货权归我方','收货日期':'2026-10-13','收货依据':'实际点数一件并签收'};
 
+it('keeps repair stock isolated through failed inspection and hands it back only after the latest repair passes',async()=>{
+ const rt=physicalFixture(),state=store.state!,d=state.platform.claims[0].dispositions[0],goods=state.platform.claimGoods[0];
+ Object.assign(d,{kind:'Repair',amount:0,returnDisposition:'Repair'});const snapshot=JSON.parse(d.snapshot!);d.snapshot=JSON.stringify({...snapshot,kind:'Repair',amount:0,destination:'Repair'});goods.destination='Repair';state.market.suppliers.push({id:'repair-factory',name:'维修工厂'} as any);
+ store.state=applyMistCommand(state,{type:'fulfillment.claimInventory.receive',payload:{goodsId:goods.id,quantity:2,unit:'件',warehouseId:rt.warehouseId,location:'返修区',batchNumber:'REPAIR-LOT',ownership:'Transferred',ownershipDate:'2026-10-13',ownershipEvidence:'客户保留货权',receivedAt:'2026-10-13',basis:'签收两件返修',fileIds:[]}},context).state;render();
+ await click(getByRole(host,'row',{name:/REPAIR-LOT/}));await click(getByRole(host,'button',{name:'登记维修'}));
+ await wizard({'维修工厂':'repair-factory','维修人员':'维修人员甲','维修日期':'2026-10-13','维修记录':'重缝完成'});await click(getByRole(document.body,'button',{name:'确认保存'}));expect(store.state!.fulfillment.stock[0]).toMatchObject({onHand:2,locked:2,available:0});expect(queryByRole(host,'button',{name:'登记交还'})).toBeNull();
+ const inspect=(result:'pass'|'fail')=>{const repairId=store.state!.platform.claimGoods[0].repairs!.at(-1)!.id;store.state=applyMistCommand(store.state!,{type:'fulfillment.claimInventory.repair.qc',payload:{goodsId:goods.id,repairId,result,checkedAt:'2026-10-13',basis:result==='pass'?'复检合格':'仍需加固',fileIds:[]}},{...context,actorId:'qc',actorName:'QC',can:()=>true}).state;render();};
+ inspect('fail');expect(host.textContent).toContain('复检不合格');expect(queryByRole(host,'button',{name:'登记交还'})).toBeNull();await click(getByRole(host,'button',{name:'登记维修'}));await wizard({'维修工厂':'repair-factory','维修人员':'维修人员甲','维修日期':'2026-10-13','维修记录':'重新加固完成'});await click(getByRole(document.body,'button',{name:'确认保存'}));inspect('pass');
+ await click(getByRole(host,'button',{name:'登记交还'}));await wizard({'客户接收人':'客户代理','交还日期':'2026-10-13','交接凭据':'HANDOVER-1','交接记录':'交还原客户两件'});await click(getByRole(document.body,'button',{name:'确认保存'}));
+ expect(store.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.claimInventory.repair.handback',payload:expect.objectContaining({goodsId:goods.id,reference:'HANDOVER-1',recipient:'客户代理'})}));expect(store.state!.fulfillment.stock[0]).toMatchObject({onHand:0,locked:0,available:0,ownership:'Transferred',ownerCustomerId:'customer'});expect(store.state!.platform.claimGoods[0].state).toBe('HandedBack');expect(store.state!.platform.claimGoods[0].repairs![0].qc?.result).toBe('fail');
+});
+
 it('registers a real warehouse with the existing Mist wizard and returns to the exact case without creating inventory',async()=>{
  render();expect(host.textContent).toContain('尚无真实仓库');await click(getByRole(host,'button',{name:'新增仓库'}));expect(host.querySelector('.mist-wizard')).not.toBeNull();await wizard({'仓库代码':'WH-NEW','仓库名称':'新增真实仓库','仓库地址':'实际上海地址'});await click(getByRole(document.body,'button',{name:'确认保存'}));expect(store.state!.fulfillment.warehouses[0]).toMatchObject({code:'WH-NEW',name:'新增真实仓库',active:true});expect(store.state!.fulfillment.stock).toEqual([]);await click(getByRole(host,'button',{name:'返回来源案件'}));expect(go).toHaveBeenCalledWith('claims','case');
 });

@@ -1,3 +1,5 @@
+import {ClaimRepairWork,repairRecordSpec,repairHandbackSpec} from './ClaimRepairWork';
+import {latestClaimRepair} from '../../../../../server/src/shared/mistClaimInventory';
 import { materialDeliveryRequired, materialDeliveryTargets } from '../../../../../server/src/shared/mistInternalFabric';
 import { stockName } from '../businessNames';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -84,9 +86,14 @@ export function InventoryPage() {
   const warehouseSpec = (row?: ClaimInventoryWarehouse): ModuleEditorSpec => ({ title: row ? '更新真实仓库' : '新增仓库', fields: [field('code', '仓库代码'), field('name', '仓库名称'), field('address', '仓库地址'), field('active', '当前启用', 'checkbox', false)], initialValues: { code: row?.code || '', name: row?.name || '', address: row?.address || '', active: row?.active ?? true }, submit: v => run({ type: 'fulfillment.claimInventory.warehouse.save', payload: { ...(row ? { id: row.id } : {}), code: text(v, 'code'), name: text(v, 'name'), address: text(v, 'address'), active: !!v.active } }) });
   const receive = () => {
     if (!sourceGoods?.source || !state) return; const goods = sourceGoods, source = goods.source!, rt = f!.returnReceipts.find(row => row.id === goods.returnReceiptId)!;
-    editor.open({ title: '退货收货', fields: [{ ...field('warehouseId', '收货仓库', 'select', true, (f?.warehouses || []).map(row => ({ value: row.id, label: row.code + ' · ' + row.name }))), readonly: true }, field('quantity', `本次实收数量（${source.unit}）`, 'number'), field('location', '库位'), field('batchNumber', '退货批号'), field('ownership', '货权', 'select', true, [emptyOption, { value: 'Owned', label: '我方货权' }, { value: 'Transferred', label: '客户货权' }]), field('ownershipDate', '货权确认日期', 'date'), { ...field('ownershipEvidence', '货权依据', 'textarea') }, field('receivedAt', '收货日期', 'date'), { ...field('basis', '收货依据', 'textarea'), hint: `${source.style} · 批准 ${source.quantity}${source.unit}，已收 ${goods.receivedQuantity || 0}${source.unit}` }, field('fileId', '收货凭据', 'select', false, [emptyOption, ...state.files.map(file => ({ value: file.id, label: file.name }))])], initialValues: { warehouseId: rt.warehouseId, quantity: 0, location: '', batchNumber: '', ownership: '', ownershipDate: today(), ownershipEvidence: '', receivedAt: today(), basis: '', fileId: '' }, submit: v => run({ type: 'fulfillment.claimInventory.receive', payload: { goodsId: goods.id, quantity: number(v, 'quantity'), unit: source.unit, warehouseId: rt.warehouseId, location: text(v, 'location'), batchNumber: text(v, 'batchNumber'), ownership: text(v, 'ownership') as 'Owned' | 'Transferred', ownershipDate: text(v, 'ownershipDate'), ownershipEvidence: text(v, 'ownershipEvidence'), receivedAt: text(v, 'receivedAt'), basis: text(v, 'basis'), fileIds: text(v, 'fileId') ? [text(v, 'fileId')] : [] } }) });
+    editor.open({ title: '退货收货', fields: [{ ...field('warehouseId', '收货仓库', 'select', true, (f?.warehouses || []).map(row => ({ value: row.id, label: row.code + ' · ' + row.name }))), readonly: true }, field('quantity', `本次实收数量（${source.unit}）`, 'number'), field('location', '库位'), field('batchNumber', '退货批号'), field('ownership', '货权', 'select', true, [emptyOption, ...(claim?.dispositions.find(row=>row.id===goods.dispositionId)?.kind==='Repair'?[]:[{ value: 'Owned', label: '我方货权' }]), { value: 'Transferred', label: '客户货权' }]), field('ownershipDate', '货权确认日期', 'date'), { ...field('ownershipEvidence', '货权依据', 'textarea') }, field('receivedAt', '收货日期', 'date'), { ...field('basis', '收货依据', 'textarea'), hint: `${source.style} · 批准 ${source.quantity}${source.unit}，已收 ${goods.receivedQuantity || 0}${source.unit}` }, field('fileId', '收货凭据', 'select', false, [emptyOption, ...state.files.map(file => ({ value: file.id, label: file.name }))])], initialValues: { warehouseId: rt.warehouseId, quantity: 0, location: '', batchNumber: '', ownership: '', ownershipDate: today(), ownershipEvidence: '', receivedAt: today(), basis: '', fileId: '' }, submit: v => run({ type: 'fulfillment.claimInventory.receive', payload: { goodsId: goods.id, quantity: number(v, 'quantity'), unit: source.unit, warehouseId: rt.warehouseId, location: text(v, 'location'), batchNumber: text(v, 'batchNumber'), ownership: text(v, 'ownership') as 'Owned' | 'Transferred', ownershipDate: text(v, 'ownershipDate'), ownershipEvidence: text(v, 'ownershipEvidence'), receivedAt: text(v, 'receivedAt'), basis: text(v, 'basis'), fileIds: text(v, 'fileId') ? [text(v, 'fileId')] : [] } }) });
   };
   const scrapSpec = (stock: FulfillmentStock): ModuleEditorSpec | null => { const record = f?.receivedRecords.find(row => row.stockId === stock.id); if (!record) return null; return { title: '报废登记', fields: [{ ...field('batch', '收货批次'), readonly: true }, field('basis', '报废依据', 'textarea')], initialValues: { batch: stock.batchNumber + ' · ' + record.quantity + ' ' + record.unit, basis: '' }, submit: v => run({ type: 'fulfillment.claimInventory.scrap', payload: { goodsId: record.goodsId, receivedEventId: record.id, basis: text(v, 'basis'), fileIds: [] } }) }; };
+  const repairSpec = (stock:FulfillmentStock,handback=false):ModuleEditorSpec|null => {
+    const record=f?.receivedRecords.find(row=>row.stockId===stock.id),goods=state?.platform.claimGoods.find(row=>row.id===stock.goodsId);
+    if(!state||!record||!goods)return null;const job=latestClaimRepair(goods,record.id);
+    return handback&&job?repairHandbackSpec(state,goods,job,run):repairRecordSpec(state,goods,record,run);
+  };
   const canStockWrite = (stock: FulfillmentStock) => {
     const groups = state?.memberGroups?.find(row => row.userId === session.user?.id)?.groups || [];
     return can && (!state || !materialDeliveryRequired(state, stock.purchaseId || '') || !groups.length || groups.includes(domainOf(state, stock)!));
@@ -136,14 +143,13 @@ export function InventoryPage() {
     : <EmptyState icon={Boxes} title={uiText(invalidSource ? '来源不匹配' : sourceMode ? '本来源还没有入库批次' : `还没有${DOMAIN_LABEL[domain]}`)} description={uiText(invalidSource ? '请返回来源案件重新选择准确退货单。' : '')} action={!sourceMode && session.canAccessView(View.Procurement) ? <Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button> : undefined} />;
   const detail = selected && state
     ? <StockDetail stock={selected} state={state} can={canStockWrite(selected)} locked={locked}
-        onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))}
+        onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))} onRepair={() => {const spec=repairSpec(selected);if(spec)editor.open(spec);}} onHandback={() => {const spec=repairSpec(selected,true);if(spec)editor.open(spec);}}
         onPurchase={id => go('procurement', id)} onClaim={(id, section) => section ? go('claims', id, { section }) : go('claims', id)} canClaims={session.canAccessView(View.Claims)} />
     : <EmptyState icon={Boxes} title={uiText(loading ? '正在读取库存' : '未选择批次')} compact />;
 
   return <Nav.Provider value={{ ...nav, route: { ...route, id: receipt || invalidSource ? undefined : route.id } }}><MistPage width="wide">
     <PageHeader description={uiText(hasClaim ? invalidSource ? '退货来源不匹配' : claim?.code : route.section ? f?.purchases.find(purchase => purchase.id === route.section)?.code : undefined)} eyebrow={uiText("订单履约 · 库存")} title={uiText("库存与仓储")}
       actions={<>{back}<Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button><Button icon={Warehouse} onClick={() => setCatalog(true)}>{uiText("仓库目录")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(warehouseSpec())}>{uiText("新增仓库")}</Button>}</>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有库存写权限，可以查看批次、位置与流水；出入库由实际经手的业务组成员登记。")}</Banner></div>}
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("库存读取未完成")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     {hasClaim && !f?.warehouses.length && <div className="mist-section"><Banner tone="warn" title={uiText("尚无真实仓库")}>{uiText("请先登记，再返回案件选择退货仓库。")}</Banner></div>}
     {hasClaim && !invalidSource && <div className="mist-section"><Card><div className="mist-card-body mist-col">
@@ -182,21 +188,22 @@ export function InventoryPage() {
   </MistPage></Nav.Provider>;
 }
 
-function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, onPurchase, onClaim }: {
+function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, onRepair, onHandback, onPurchase, onClaim }: {
   stock: FulfillmentStock; state: MistState; can: boolean; locked: boolean; canClaims: boolean;
-  onMove: (kind: 'issue' | 'return' | 'move') => void; onScrap: () => void; onPurchase: (id: string) => void; onClaim: (id: string, section?: string) => void;
+  onMove: (kind: 'issue' | 'return' | 'move') => void; onScrap: () => void; onRepair:()=>void; onHandback:()=>void; onPurchase: (id: string) => void; onClaim: (id: string, section?: string) => void;
 }) {
   const f = state.fulfillment, returned = isReturn(stock), current = stockState(state, stock), out = stockOutstanding(state, stock), domain = domainOf(state, stock);
   const purchase = f.purchases.find(row => row.id === stock.purchaseId), receipt = f.receipts.find(row => row.id === stock.receiptId);
   const record = f.receivedRecords.find(row => row.stockId === stock.id), sourceClaim = state.platform.claims.find(row => row.id === stock.claimId);
   const goods = state.platform.claimGoods.find(row => row.id === stock.goodsId), disposition = sourceClaim?.dispositions.find(row => row.id === stock.dispositionId);
+  const repair=goods&&record?latestClaimRepair(goods,record.id):undefined,isRepair=disposition?.kind==='Repair'&&goods?.destination==='Repair';
   const warehouse = f.warehouses.find(row => row.id === stock.warehouseId);
   const movements = f.stockMovements.filter(movement => movement.stockId === stock.id);
   const openIssues = movements.filter(movement => movement.kind === 'issue' && stockIssueRemaining(state, movement.id) > 0);
   const writeReason = can ? false : '需要库存写权限';
   const claimOpen = !!sourceClaim && !['Closed', 'Cancelled'].includes(sourceClaim.state);
   const next: { tone: Tone; title: string; text: string } = returned
-    ? record && !record.disposal ? { tone: 'warn', title: '退回隔离库存', text: '待按批准去向处置' } : { tone: 'ok', title: '已按批准去向处置', text: record?.disposal ? `${record.disposal.actor} · ${shortWhen(record.disposal.at)} · ${record.disposal.basis}` : '本批没有待处置数量。' }
+    ? isRepair ? {tone:record?.releasedRepairId?'ok':repair?.qc?.result==='fail'?'bad':'warn',title:record?.releasedRepairId?'已交还':!repair?'待维修':!repair.qc?'待复检':repair.qc.result==='pass'?'待交还':'复检不合格',text:''} : record && !record.disposal ? { tone: 'warn', title: '退回隔离库存', text: '待按批准去向处置' } : { tone: 'ok', title: '已按批准去向处置', text: record?.disposal ? `${record.disposal.actor} · ${shortWhen(record.disposal.at)} · ${record.disposal.basis}` : '本批没有待处置数量。' }
     : current === 'available' ? { tone: 'accent', title: `可用 ${stock.available} ${stock.unit}`, text: '' }
     : out > 0 ? { tone: 'neutral', title: `已全部出库 · ${out} ${stock.unit}`, text: '' }
     : { tone: 'neutral', title: '已出清', text: '' };
@@ -211,8 +218,11 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
       { label: '登记出库', icon: PackageMinus, onClick: () => onMove('issue'), primary: !returned && stock.available > 0, reason: writeReason || (returned ? returnedReason : stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
       { label: '按原出库退回', icon: Undo2, onClick: () => onMove('return'), primary: !returned && stock.available <= 0 && openIssues.length > 0, reason: writeReason || (!openIssues.length ? '没有未归还的出库' : false), hidden: returned },
       { label: '登记移位', icon: ArrowRightLeft, onClick: () => onMove('move'), reason: writeReason || (stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
+      {label:repair?.qc?.result==='pass'?'重新维修':'登记维修',onClick:onRepair,primary:repair?.qc?.result!=='pass',hidden:!isRepair||!record||!!record.releasedRepairId||!!repair&&!repair.qc||!can,reason:!claimOpen?'来源案件已结束':false},
+      {label:'登记交还',onClick:onHandback,primary:true,hidden:!isRepair||!record||!!record.releasedRepairId||repair?.qc?.result!=='pass'||!can,reason:!claimOpen?'来源案件已结束':false},
       { label: '登记本批报废', icon: Trash2, onClick: onScrap, primary: true, reason: writeReason || (!claimOpen ? '来源案件已结束' : false), hidden: !returned || !record || !!record.disposal || goods?.destination !== 'Scrap' || !can },
     ]} />
+    {isRepair&&goods&&record&&<ClaimRepairWork goods={goods} state={state} receivedEventId={record.id} busy={locked}/>}
     {returned
       ? <KeyValue items={[{ label: '来源订单', value: <SourceLink source={{ kind: 'orderLine', orderId: stock.orderId, lineId: stock.lineId }} /> }, { label: '正式退货单', value: returnCode(state, stock) || '不可用' }, { label: '来源案件', value: sourceClaim?.code || '不可用' }, { label: '来源CI', value: state.invoices.find(invoice => invoice.id === stock.invoiceId)?.code || '来源发票不可用' }, { label: '来源出运', value: f.shipments.find(shipment => shipment.id === record?.source.shipmentId)?.code || '来源出运不可用' }, { label: '真实批号', value: stock.batchNumber }, { label: '累计入库', value: `${stock.quantity} ${stock.unit}` }, { label: '物理现存', value: `${stock.onHand} ${stock.unit}` }, { label: '隔离数量', value: `${stock.locked} ${stock.unit}` }, { label: '可用数量', value: `${stock.available} ${stock.unit}` }, { label: '仓库', value: warehouse ? `${warehouse.code} · ${warehouse.name}` : '仓库不可用' }, { label: '位置', value: stock.location }, { label: '货权', value: stock.owner }, { label: '货权确认日期', value: stock.ownershipDate }, { label: '货权依据', value: stock.ownershipEvidence }, { label: '计量单位', value: stock.unit }]} />
       : <Facts items={[
