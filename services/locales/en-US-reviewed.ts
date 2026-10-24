@@ -607,4 +607,7 @@ export const reviewedEnglish: Record<string, string> = {
   '直接付款分配': 'Direct payment allocations',
   '付款依据': 'Payment basis',
   '请填写付款依据': 'Enter the payment basis',
+  '请选择出运': 'Select a shipment',
+  '按出运': 'By shipment',
+  '按订单': 'By order',
 };

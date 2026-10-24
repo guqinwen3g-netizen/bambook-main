@@ -50,6 +50,10 @@ it('hides registering and voiding for read-only viewers',()=>{
   render(false);
   expect(queryByRole(host,'button',{name:'登记费用'})).toBeNull();
 });
+it('requires an explicit shipment before an expense can be registered instead of silently using the oldest shipment',async()=>{
+  render();await click(getByRole(host,'button',{name:'登记费用'}));const dialog=getByRole(document.body,'dialog',{name:'登记费用'}),shipment=getByRole(dialog,'combobox',{name:'出运'}) as HTMLSelectElement,submit=getByRole(dialog,'button',{name:'登记并分摊'}) as HTMLButtonElement;
+  type(getByRole(dialog,'textbox',{name:'费用金额'}),'65');expect(shipment.value).toBe('');expect(submit.disabled).toBe(true);await click(submit);expect(run).not.toHaveBeenCalled();const selected=state.fulfillment.shipments.at(-1)!;type(shipment,selected.id);expect(submit.disabled).toBe(false);await click(submit);expect(run).toHaveBeenCalledWith({type:'cost.expense.register',payload:expect.objectContaining({scope:'shipment',shipmentId:selected.id,amount:'65'})});
+});
 it('turns an expense into a payable bill and then only shows the bill code',async()=>{
   const supplier=state.market.suppliers[0];
   state=applyMistCommand(state,{type:'cost.expense.register',payload:{category:'freight',vendor:supplier.name,ref:'FW-1',date:'2026-10-15',currency:'USD',amount:800,scope:'shipment',shipmentId:state.fulfillment.shipments[0].id,basis:'volume'}} as MistCommand,ctx).state;
