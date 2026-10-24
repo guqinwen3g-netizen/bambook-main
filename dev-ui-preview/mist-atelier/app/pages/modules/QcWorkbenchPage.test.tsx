@@ -103,15 +103,15 @@ it('keeps QC actions visible with concrete reasons when another QC owns the task
   expect(detail.textContent).toContain('仅当前QC（QC乙）可提交');
   expect((getByRole(detail,'button',{name:'转交'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('仅当前QC（QC乙）可转交');
-  expect(detail.textContent).toContain('QC乙 检查中');
+  expect(detail.textContent).toContain('QC乙');expect(detail.textContent).toContain('检查中');
 });
 it('lets a read-only viewer inspect a task without claiming or reporting it',()=>{
   session.denied=new Set(['qc:fabric_chain:write','qc:garment_chain:write']);
   store.state!.fulfillment.qcTasks.push(task('readonly'));
   render('readonly');
   expect(host.textContent).toContain('READONLY');
-  expect((getByRole(host,'button',{name:'认领任务'}) as HTMLButtonElement).disabled).toBe(true);
-  expect((getByRole(host,'button',{name:'提交 / 追加复验报告'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(queryByRole(host,'button',{name:'认领任务'})).toBeNull();
+  expect(queryByRole(host,'button',{name:'提交 / 追加复验报告'})).toBeNull();expect(host.textContent).not.toContain('需要成衣QC权限');
   expect(store.run).not.toHaveBeenCalled();
 });
 
@@ -153,13 +153,13 @@ it('validates garment size checks and confirms the consequence before appending 
   choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'reject');
   await click(getByRole(host,'button',{name:'提交报告'}));
   const dialog=getByRole(document.body,'dialog');
-  expect(dialog.textContent).toContain('生产分支将标记“QC 不通过”风险并阻断');
+  expect(dialog.textContent).toContain('不通过将阻断生产，需复验。');expect(dialog.textContent).toContain('提交后报告不可改写');
   expect(store.run).not.toHaveBeenCalled();
   await click(getByRole(dialog,'button',{name:'确认提交'}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.qc.report',payload:expect.objectContaining({id:'prod',result:'reject',report:'R-9',location:'上海仓 A-01',sizeChecks:[{size:'M',inspected:3,result:'reject',evidence:'袖长实测'}]})}));
 });
 
-it('opens business resume over the workbench and explains it to QC-only accounts',async()=>{
+it('keeps business resume available to business users and absent for QC-only accounts',async()=>{
   store.state!.fulfillment.qcTasks.push(task('resume',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p1'},state:'awaiting_business',assignee:'QC甲',assigneeId:'qc-a'}));
   render('resume');
   await click(getByRole(host,'button',{name:'确认继续生产'}));
@@ -170,8 +170,8 @@ it('opens business resume over the workbench and explains it to QC-only accounts
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.continue',payload:{id:'resume',note:'整改已复核'}});
   session.denied=new Set(['orders:write','products:write']);
   render('resume');
-  expect((getByRole(host,'button',{name:'确认继续生产'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(host.textContent).toContain('确认继续生产：由业务员确认恢复');
+  expect(queryByRole(host,'button',{name:'确认继续生产'})).toBeNull();
+  expect(host.textContent).not.toContain('由业务员确认恢复');
   render('resume','list');
   expect((getByRole(host,'button',{name:'从来源发起QC'}) as HTMLButtonElement).disabled).toBe(true);
   expect(queryByRole(document.body,'dialog')).toBeNull();
@@ -200,4 +200,14 @@ it('checks only the actual shipping-set sizes and requires all actual pieces bef
  store.state!.fulfillment.productionFacts.push({productionId:'p',sizes:[{size:'S',quantity:120},{size:'M',quantity:300},{size:'L',quantity:180}],revision:1});store.state!.fulfillment.qcTasks.push(task('ship-qc',{sampleId:'ship-set',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'},state:'working',assigneeId:'qc-a',assignee:'QC甲'}));render('ship-qc');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
  expect(getByRole(host,'combobox',{name:'尺码 S · 本次结论'})).toBeTruthy();expect(getByRole(host,'combobox',{name:'尺码 M · 本次结论'})).toBeTruthy();expect(queryByRole(host,'combobox',{name:'尺码 L · 本次结论'})).toBeNull();
  choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'QC-SHIP');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'Actual submitted set checked');choose(getByRole(host,'combobox',{name:'尺码 S · 本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'spinbutton',{name:'尺码 S · 实际检查件数'}) as HTMLInputElement,'1');typeInto(getByRole(host,'textbox',{name:'尺码 S · 检查依据'}) as HTMLInputElement,'Checked');await click(getByRole(host,'button',{name:'提交报告'}));expect(host.textContent).toContain('请完成本组船样全部尺码与件数的QC');expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps the permanent report notice without claiming a passed report automatically unlocks the source',async()=>{
+ store.state!.fulfillment.qcTasks.push(task('passed',{state:'working',assignee:'QC甲',assigneeId:'qc-a'}));render('passed');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+ choose(getByRole(host,'combobox',{name:'本次结论'}) as HTMLSelectElement,'pass');typeInto(getByRole(host,'textbox',{name:'报告编号'}) as HTMLInputElement,'R-PASS');typeInto(getByRole(host,'textbox',{name:'专业意见与影响范围'}) as HTMLTextAreaElement,'已核对本件样品');await click(getByRole(host,'button',{name:'提交报告'}));
+ const dialog=getByRole(document.body,'dialog');expect(dialog.textContent).toContain('提交后报告不可改写');expect(dialog.textContent).not.toContain('解锁');expect(store.run).not.toHaveBeenCalled();
+});
+
+it('keeps confirmation and continuation evidence in expandable records',async()=>{
+ store.state!.fulfillment.qcTasks.push(task('evidence',{state:'reported',businessConfirmation:{result:'approved',actor:'业务员',at:'2026-10-08',note:'燕麦布样批准依据'},businessContinued:{reportId:'r',actor:'业务员',at:'2026-10-08',note:'本批继续依据'}}));render('evidence');expect(host.textContent).not.toContain('燕麦布样批准依据');expect(host.textContent).not.toContain('本批继续依据');await click(getByRole(host,'button',{name:'需求方确认'}));expect(host.textContent).toContain('燕麦布样批准依据');await click(getByRole(host,'button',{name:'业务继续记录'}));expect(host.textContent).toContain('本批继续依据');
 });

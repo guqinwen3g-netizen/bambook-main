@@ -128,3 +128,9 @@ it('counts genuine production risks without a wall of ordinary workflow reminder
  await mount({view:'production-board'});await click('查看全部生产单');expect(host.querySelector('.mist-sumbar')!.textContent).toContain('生产风险1');expect(host.textContent).not.toContain('待合同确认、产前样与业务开产放行');expect(host.textContent).toContain('面料复染延期');
  await click('查看生产单');expect((getByRole(document.body,'textbox',{name:'风险'}) as HTMLInputElement).value).toBe('面料复染延期');
 });
+
+it('labels finished-fabric purchase release as supply while preserving the release gate',async()=>{
+ const branch=bridge.state!.productions[1];branch.sourcePurchaseId='finished';bridge.state!.orders[0].type='fabric';bridge.state!.orderLines[1].unit='米';bridge.state!.fulfillment.productionFacts.find(row=>row.productionId===branch.id)!.release=undefined;
+ bridge.state!.fulfillment.purchases.push({id:'finished',kind:'finished',state:'approved',offlineSend:{},supplierConfirmation:{}} as any);
+ await mount({view:'production-board',productionId:branch.id});expect(document.body.textContent).toContain('供货核对');expect(document.body.textContent).toContain('供货状态');expect(queryByRole(document.body,'button',{name:'放行量产'})).toBeNull();expect((getByRole(document.body,'button',{name:'放行供货'}) as HTMLButtonElement).disabled).toBe(true);expect(bridge.run).not.toHaveBeenCalled();
+});

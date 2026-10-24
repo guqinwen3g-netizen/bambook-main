@@ -14,7 +14,7 @@ import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { ProductionSampleNotes } from '../ProductionSampleNotes';
 
 type Domain = FulfillmentQcTask['domain'];
@@ -48,17 +48,17 @@ export function qcDomainMetrics(tasks: FulfillmentQcTask[], domain: Domain) {
 /** What the source module may do next, derived only from the task's recorded state and decisions. */
 function qcGate(task: FulfillmentQcTask): { tone: Tone; title: string; text: string } {
   switch (task.state) {
-    case 'pending': return { tone: 'warn', title: '等待QC认领', text: `${DOMAIN_LABEL[task.domain]}认领后安排现场检查；报告回传前，来源的下一步保持锁定。` };
-    case 'working': return { tone: 'accent', title: `${task.assignee || 'QC'} 检查中`, text: '待提交报告' };
-    case 'blocked': return { tone: 'bad', title: '质量阻断', text: task.kind === 'production' ? '最新报告不通过，生产分支已标记风险。整改后由当前QC追加复验报告。' : '最新报告不通过。整改或重新打样后，由当前QC追加复验报告。' };
-    case 'awaiting_business': return { tone: 'warn', title: '复验已回传 · 待业务恢复', text: '业务员核对整改与复验结论后，确认继续生产。' };
+    case 'pending': return { tone: 'warn', title: '待认领', text: '' };
+    case 'working': return { tone: 'accent', title: '检查中', text: '' };
+    case 'blocked': return { tone: 'bad', title: 'QC未通过', text: '' };
+    case 'awaiting_business': return { tone: 'warn', title: '待业务恢复', text: '' };
     case 'reported':
-      if (task.kind === 'production') return task.businessContinued ? { tone: 'ok', title: '业务已恢复生产', text: task.businessContinued.note } : { tone: 'ok', title: '检验已回传', text: '生产分支按计划继续，后续检查在本任务追加报告。' };
-      if (task.source.kind === 'version') return { tone: 'ok', title: '报告已回到开发版本', text: '业务员在开发案记录需求方意见，并决定是否进入下一轮。' };
-      if (task.businessContinued) return { tone: 'ok', title: '业务已继续', text: task.businessContinued.note };
-      if (task.businessConfirmation?.result === 'approved') return { tone: 'accent', title: '需求方已确认采用', text: '等待业务员确认继续。' };
-      if (task.businessConfirmation?.result === 'rejected') return { tone: 'bad', title: '需求方不采用', text: task.businessConfirmation.note };
-      return { tone: 'accent', title: '报告已回传', text: '等待业务员记录需求方确认。' };
+      if (task.kind === 'production') return { tone: 'ok', title: task.businessContinued ? '已恢复' : '报告已回传', text: '' };
+      if (task.source.kind === 'version') return { tone: 'ok', title: '报告已回传', text: '' };
+      if (task.businessContinued) return { tone: 'ok', title: '业务已继续', text: '' };
+      if (task.businessConfirmation?.result === 'approved') return { tone: 'accent', title: '待业务确认', text: '' };
+      if (task.businessConfirmation?.result === 'rejected') return { tone: 'bad', title: '未采用', text: task.businessConfirmation.note };
+      return { tone: 'accent', title: '待需求方确认', text: '' };
   }
 }
 
@@ -123,10 +123,9 @@ export function QcWorkbenchPage() {
   const qcSources = [emptyOption, ...(state?.fulfillment.samples || []).filter(sample => sample.source.kind !== 'manual').map(sample => ({ value: 'sample:' + sample.id, label: `${sample.code} · ${sample.name} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'} · ${sample.size}` })), ...sourceOptions(state).filter(option => option.value.startsWith('version:') || option.value.startsWith('production:'))];
   const request = () => editor.open({
     title: '从准确来源发起QC', submitLabel: '发起QC',
-    description: '选择已返样的开发版本、订单样品实物或生产分支。QC 认领后到现场检查并回传报告；结论只解锁来源的下一步，不替来源推进业务。',
     sections: [
-      { id: 'source', label: '来源与类别', description: '样品评审对应开发返样或订单样品实物；生产检验必须对应准确生产分支。', fields: ['source', 'kind'] },
-      { id: 'site', label: '现场安排', description: '同一工厂与检查地点的任务会在工作台合并显示，便于QC一次到场。', fields: ['factory', 'location', 'contact', 'due'] },
+      { id: 'source', label: '来源与类别', fields: ['source', 'kind'] },
+      { id: 'site', label: '现场安排', fields: ['factory', 'location', 'contact', 'due'] },
     ],
     fields: [field('source', '送检来源', 'select', true, qcSources.filter(option => !option.value || (option.value.startsWith('version:') ? session.hasPermission('products:write') : session.hasPermission('orders:write')))), field('kind', '任务类别', 'select', true, [{ value: 'sample', label: '样品评审' }, { value: 'production', label: '生产检验' }]), field('factory', '工厂'), field('location', '实际检查地点'), field('contact', '现场联系人', 'text', false), field('due', '预计检查日', 'date')],
     initialValues: { source: route.productionId ? 'production:' + route.productionId : route.versionId ? 'version:' + route.versionId : route.orderLineId ? 'line:' + route.orderLineId : '', kind, factory: state?.productions.find(p => p.id === route.productionId)?.factory || state?.versions.find(v => v.id === route.versionId)?.factory || '', location: '', contact: '', due: today() },
@@ -142,8 +141,8 @@ export function QcWorkbenchPage() {
     },
   });
   const confirmSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: '记录需求方样品确认', submitLabel: '记录确认', fields: [field('result', '需求方决定', 'select', true, [emptyOption, { value: 'approved', label: '确认采用' }, { value: 'rejected', label: '不采用' }]), field('note', '需求方确认依据', 'textarea')], initialValues: { result: '', note: '' }, submit: values => run({ type: 'fulfillment.qc.confirm', payload: { id: task.id, result: text(values, 'result') as 'approved' | 'rejected', note: text(values, 'note') } }) });
-  const transferSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `转交 ${task.code}`, submitLabel: '转交', description: '接收人须有本板块QC权限，转交后由其认领现场检查并提交报告。', fields: [field('assigneeId', '接收QC', 'select', true, [emptyOption, ...memberSelectOptions(workspaceMembers(workspace, state, session.user)).filter(option => option.value !== task.assigneeId)]), field('reason', '转交原因', 'textarea')], initialValues: { assigneeId: '', reason: '' }, submit: values => run({ type: 'fulfillment.qc.transfer', payload: { id: task.id, domain: task.domain, assigneeId: text(values, 'assigneeId'), reason: text(values, 'reason') } }) });
-  const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `改期 ${task.code}`, submitLabel: '改期', description: `原预计检查日：${task.due || '未排期'}。新日期不早于今天，原因记入处理记录。`, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => run({ type: 'fulfillment.qc.reschedule', payload: { id: task.id, domain: task.domain, due: text(values, 'due'), reason: text(values, 'reason') } }) });
+  const transferSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `转交 ${task.code}`, submitLabel: '转交', fields: [field('assigneeId', '接收QC', 'select', true, [emptyOption, ...memberSelectOptions(workspaceMembers(workspace, state, session.user)).filter(option => option.value !== task.assigneeId)]), field('reason', '转交原因', 'textarea')], initialValues: { assigneeId: '', reason: '' }, submit: values => run({ type: 'fulfillment.qc.transfer', payload: { id: task.id, domain: task.domain, assigneeId: text(values, 'assigneeId'), reason: text(values, 'reason') } }) });
+  const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `改期 ${task.code}`, submitLabel: '改期', description: task.due ? `原检查日 ${task.due}` : undefined, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => run({ type: 'fulfillment.qc.reschedule', payload: { id: task.id, domain: task.domain, due: text(values, 'due'), reason: text(values, 'reason') } }) });
   const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) });
 
   const metrics = { fabric: qcDomainMetrics(all, 'fabric'), garment: qcDomainMetrics(all, 'garment') };
@@ -153,8 +152,8 @@ export function QcWorkbenchPage() {
   const clearFilters = () => { setQuery(''); setStateFilter('all'); setOwner('all'); };
   const sourceSample = current ? state?.fulfillment.samples.find(sample => sample.id === current.sampleId) : undefined;
   const empty = scoped.length
-    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的QC任务")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={clearFilters}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={ClipboardCheck} title={uiText(loading ? '正在读取QC任务' : `还没有${DOMAIN_LABEL[domain]}的${KIND_LABEL[kind]}任务`)} description={uiText(kind === 'sample' ? '业务员在已返样的开发版本或订单样品实物上发起送检后，任务会出现在这里。' : '业务员在准确生产分支发起生产检验后，任务会出现在这里。')} action={canRequest ? <Button icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : undefined} />;
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的QC任务")} action={<Button onClick={clearFilters}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={ClipboardCheck} title={uiText(loading ? '正在读取QC任务' : `还没有${DOMAIN_LABEL[domain]}的${KIND_LABEL[kind]}任务`)} action={canRequest ? <Button icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : undefined} />;
 
   const list = mode === 'board'
     ? (rows.length ? <Kanban columns={[
@@ -192,7 +191,7 @@ export function QcWorkbenchPage() {
         onReschedule={() => setDialog(rescheduleSpec(current))}
         onBack={sourceSample ? () => go('samples', sourceSample.id, sourceSample.role === 'shipping' && sourceSample.shipmentId ? { section: 'shipment:' + sourceSample.shipmentId, productionId: sourceSample.source.kind === 'orderLine' ? sourceSample.source.productionId : undefined } : {}) : undefined}
         backLabel={sourceSample?.role === 'shipping' ? '返回本票船样' : '返回实物样品'} />
-    : <EmptyState icon={ClipboardCheck} title={uiText("任务详情")} description={uiText(loading ? '正在读取QC任务' : '从左侧选择一条任务，查看来源、现场与报告')} compact />;
+    : <EmptyState icon={ClipboardCheck} title={uiText("任务详情")} compact />;
 
   const summary = current && state ? (() => { const gate = qcGate(current);
     return <PreviewSummary openLabel="打开QC任务" onOpen={() => full.open(current.id)} data={{
@@ -272,9 +271,10 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         { label: '业务发起人', value: task.requestedBy || '未记录' },
         { label: '发起', value: shortWhen(task.createdAt) },
         ...(task.kind === 'production' && sizes.length ? [{ label: '生产尺码', value: sizes.map(size => `${size.size} ${size.quantity}`).join(' · ') }] : []),
-        { label: task.kind === 'production' ? '业务恢复记录' : '样品业务继续', value: task.businessContinued ? task.businessContinued.note : '尚未记录' },
+        ...(task.businessConfirmation ? [{ label: '需求方决定', value: uiText(task.businessConfirmation.result === 'approved' ? '确认采用' : '不采用') }] : []),
       ]} />
-      {task.businessConfirmation && <span className="mist-note">{uiText("需求方")}{uiText(task.businessConfirmation.result === 'approved' ? '确认采用' : '不采用')} · {task.businessConfirmation.actor} · {shortWhen(task.businessConfirmation.at)} · {task.businessConfirmation.note}</span>}
+      {task.businessConfirmation && <RecordDisclosure title="需求方确认"><Facts items={[{label:'经办人',value:task.businessConfirmation.actor},{label:'时间',value:shortWhen(task.businessConfirmation.at)}]} /><p>{task.businessConfirmation.note}</p></RecordDisclosure>}
+      {task.businessContinued && <RecordDisclosure title={task.kind === 'production' ? '业务恢复记录' : '业务继续记录'}><Facts items={[{label:'经办人',value:task.businessContinued.actor},{label:'时间',value:shortWhen(task.businessContinued.at)}]} /><p>{task.businessContinued.note}</p></RecordDisclosure>}
       {onBack && <Button block onClick={onBack}>{backLabel}</Button>}
     </DetailBlock>
     <DetailBlock title={uiText("现场信息")}>
@@ -286,15 +286,15 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         { label: '当前QC', value: task.assignee || '待认领' },
       ]} />
     </DetailBlock>
-    <DetailBlock title={uiText("QC 操作")}>
+    {canQc && <DetailBlock title={uiText("QC 操作")}>
       <ActionBar busy={locked} actions={[
         { label: '认领任务', icon: UserRoundCheck, onClick: onClaim, reason: claimReason, hidden: mine, primary: task.state === 'pending' },
         { label: '提交 / 追加复验报告', icon: ClipboardCheck, onClick: onReport, reason: reportReason, primary: mine && task.state !== 'reported' },
         { label: '转交', icon: Repeat2, onClick: onTransfer, reason: handoverReason('转交'), hidden: !canQc },
         { label: '改期', icon: CalendarClock, onClick: onReschedule, reason: handoverReason('改期'), hidden: !canQc },
       ]} />
-    </DetailBlock>
-    {(confirmable || continuable) && <DetailBlock title={uiText("业务接续")}>
+    </DetailBlock>}
+    {canBusiness && (confirmable || continuable) && <DetailBlock title={uiText("业务接续")}>
       <ActionBar busy={locked} actions={[
         { label: '记录需求方确认', onClick: onConfirm, reason: canBusiness ? false : '由业务员记录需求方决定', hidden: !confirmable },
         { label: task.kind === 'production' ? '确认继续生产' : '业务确认继续', onClick: onContinue, reason: canBusiness ? false : '由业务员确认恢复', hidden: !continuable, primary: true },
@@ -360,10 +360,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     finally { setBusy(false); }
   };
   const updateSize = (index: number, patch: Partial<SizeCheck>) => setSizeChecks(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
-  const consequence = !result ? '' : result === 'reject'
-    ? (task.kind === 'production' ? '生产分支将标记“QC 不通过”风险并阻断；整改后需在本任务追加复验报告。' : '来源保持锁定；整改或重新打样后需追加复验报告。')
-    : result === 'conditional' ? (task.kind === 'production' ? '任务转为待业务恢复，由业务员确认后继续生产。' : '结论回到来源，由业务员结合需求方意见决定。')
-    : (task.kind === 'production' && (task.state === 'blocked' || task.state === 'awaiting_business') ? '复验通过后转为待业务恢复，由业务员确认继续生产。' : '结论回到来源，解锁来源的下一步。');
+  const consequence = result === 'reject' ? (task.kind === 'production' ? '不通过将阻断生产，需复验。' : '样品未通过，待复验。') : result === 'conditional' ? '有保留项待确认。' : '';
   return <MistPage>
     <BackLink onClick={onClose}>{uiText("返回QC工作台")}</BackLink>
     <PageHeader description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} />
@@ -419,7 +416,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
       footer={<><Button disabled={busy} onClick={() => setConfirming(false)}>{uiText("返回修改")}</Button><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("确认提交")}</Button></>}>
       <div className="mist-col">
         <Facts cols={2} items={[{ label: '结论', value: result ? RESULT_LABEL[result] : '' }, { label: '报告编号', value: report }, { label: '检查时间', value: at.replace('T', ' ') }, ...(task.domain === 'garment' ? [{ label: '本次检查尺码', value: sizeChecks.filter(check => check.result).map(check => `${check.size} ${check.inspected}件`).join(' · ') || (task.sampleId?state?.fulfillment.samples.find(sample=>sample.id===task.sampleId)?.size:'') || '—' }] : [])]} />
-        <span className="mist-note">{consequence}</span>
+        {consequence && <span className="mist-note">{uiText(consequence)}</span>}
         <span className="mist-note">{uiText("提交后报告不可改写")}</span>
       </div>
     </Dialog>
