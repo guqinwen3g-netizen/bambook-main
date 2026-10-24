@@ -2,13 +2,15 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getByRole, getByText, getByLabelText, within } from '@testing-library/dom';
+import { getByRole, getByText, getByLabelText, within, queryByRole } from '@testing-library/dom';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { applyMistCommand, createMistState, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import type {OrderFundingAssignment} from '../../../../server/src/shared/mistOrderFunding';
 import { Nav } from '../nav';
 const store = vi.hoisted(() => ({ state: null as MistState | null, loading: false, error: '', run: vi.fn(), refresh: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
+const permissions=vi.hoisted(()=>({ordersWrite:true,shippingRead:true}));
+vi.mock('../runtime/auth',()=>{const session=()=>({user:{id:'sales',displayName:'业务员甲'},sessionKey:'detail-session',hasPermission:(p:string)=>p==='orders:write'?permissions.ordersWrite:p==='shipments:read'?permissions.shippingRead:true,canAccessView:(view:string)=>view==='shipments'?permissions.shippingRead:true});return{useOptionalMistSession:session,useMistSession:session};});
 import { OrderDetailPage } from './OrderDetailPage';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -19,7 +21,7 @@ function render() {
   act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'orders/detail', id: orderId }, go, openAI: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}><OrderDetailPage /></Nav.Provider></ToastProvider></MistRoot>));
 }
 beforeEach(() => {
-  sequence = 0;go.mockClear();store.run.mockReset();
+  sequence = 0;permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();
   const empty = createMistState(context, 'empty');
   empty.customers.push({ id: 'customer-a', code: 'C-A', name: '客户甲', country: '', city: '', industry: '', owner: '业务员甲', grade: 'A', currency: 'USD', terms: '', incoterm: '', categories: '', creditLimit: 0, since: '2026-01-01' });
   const result = applyMistCommand(empty, { type: 'order.create', payload: { type: 'garment', customerId: 'customer-a', season: 'AW28', currency: 'USD', due: '2026-10-30', ownerId:'sales', lines: [{ name: '精确金额条目', style: 'ROUND-01', img: 'coat', fulfillmentMode:'cmt', cmtIncludedItems:[], qty: 1.005, unit: '件', price: 1 }] } }, context);
@@ -410,4 +412,16 @@ it('shows no collection obligation for a free replacement and returns to its cla
 
 it('keeps the source-bound replacement quantity and customer price read-only while allowing size details',async()=>{
  store.state!.orders[0].replacementSource={schemaVersion:1,claimId:'source-case'} as any;render();await act(async()=>getByRole(host,'row',{name:/精确金额条目/}).click());await act(async()=>getByRole(document.body,'button',{name:'编辑条目'}).click());expect((getByRole(document.body,'spinbutton',{name:'订单数量'}) as HTMLInputElement).readOnly).toBe(true);expect((getByRole(document.body,'spinbutton',{name:'销售单价'}) as HTMLInputElement).readOnly).toBe(true);expect(getByRole(document.body,'button',{name:'按颜色 × 尺码填写数量'})).toBeTruthy();
+});
+
+it('keeps the original handover note in a collapsed record for this exact order',()=>{
+ const order=store.state!.orders[0];order.handoffAt=context.now;const note='本票一件CPT客户约定及完整交接说明';store.state!.events.unshift({id:'handoff',entityType:'order',entityId:order.id,actor:'原业务员',at:context.now,text:'交接后勤：'+note,fileIds:[]},{id:'other-handoff',entityType:'order',entityId:'another-order',actor:'他人',at:context.now,text:'交接后勤：别的订单说明',fileIds:[]});render();expect(host.textContent).not.toContain(note);act(()=>getByRole(host,'button',{name:'后勤交接记录'}).click());expect(host.textContent).toContain(note);expect(host.textContent).toContain('原业务员');expect(host.textContent).not.toContain('别的订单说明');
+});
+
+it('keeps a read-only order inspectable and shipping reachable without commercial mutation controls',()=>{
+ permissions.ordersWrite=false;store.state!.orders[0].handoffAt=context.now;render();expect(queryByRole(host,'button',{name:'编辑',exact:true})).toBeNull();expect(queryByRole(host,'button',{name:'合同与审批资料',exact:true})).toBeNull();expect(queryByRole(host,'button',{name:'提交主单审批',exact:true})).toBeNull();expect(getByRole(host,'button',{name:'出运准备',exact:true})).toBeTruthy();
+ const check=getByRole(host,'checkbox',{name:'拟发范围确认'});expect(check.hasAttribute('disabled')).toBe(true);act(()=>check.click());expect(store.run).not.toHaveBeenCalled();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'编辑条目',exact:true})).toBeNull();
+});
+it('closes a commercial editor when order write authority is revoked and hides unreadable shipping entry',()=>{
+ render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());expect(queryByRole(document.body,'dialog')).not.toBeNull();permissions.ordersWrite=false;permissions.shippingRead=false;store.state!.orders[0].handoffAt=context.now;render();expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByRole(host,'button',{name:'出运准备',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });

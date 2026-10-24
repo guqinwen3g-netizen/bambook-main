@@ -152,3 +152,8 @@ it('shows exact pending material receipt on the receiver home and opens the proc
  const f=materialDeliveryFixture(3);f.issue();seam.value.state=f.state;seam.session.user={id:'garment',displayName:'成衣接收人'};render();const contract=f.state.fulfillment.purchases.find(row=>row.id===f.processingId)!;expect(host.textContent).toContain(contract.code+' · 物料接收');
  const item=[...host.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.includes(contract.code+' · 物料接收'))!;await click(item);expect(go).toHaveBeenCalledWith('procurement',f.processingId,expect.objectContaining({detail:'full',orderLineId:f.target.lineId}));
 });
+
+it('keeps an assigned logistics handover visible before the customer delivery deadline without rewriting it',async()=>{
+ const order=seam.value.state.orders[0],title='核对 '+order.code+' 出运交接';seam.value.state.tasks=[{id:'handover',title,due:'2099-12-31',done:false,kind:'shipping',target:{view:'orders/detail',id:order.id},assigneeIds:[],permission:'logistics:handle'}];seam.value.state.settings.notifications.shipping=false;
+ seam.session.user={id:'logistics',displayName:'后勤'};seam.session.hasPermission=(p:string)=>p==='logistics:handle';render();expect(host.textContent).toContain(title);const item=[...host.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.includes(title))!;await click(item);expect(go).toHaveBeenCalledWith('orders/detail',order.id,expect.objectContaining({id:order.id}));expect(seam.value.state.tasks[0].due).toBe('2099-12-31');expect(seam.value.state.tasks[0].done).toBe(false);
+});

@@ -31,3 +31,7 @@ describe('workspace notification preferences',()=>{
   expect(visibleMistNotifications(state,view=>view==='claims')).toHaveLength(1);expect(visibleMistNotifications(state,view=>view!=='claims')).toEqual([]);
  });
 });
+
+it('summarizes known handover and production actions without changing archived notes or visibility',()=>{
+ const state=fixture();state.orders.push({id:'order',code:'SO-G-1'} as any);state.productions.push({id:'production',code:'FUL-1'} as any);const note='客户确认的完整交接说明，应留在原始记录';state.notifications=[{id:'handoff',title:'交接后勤：'+note,detail:'业务员',at:'2026-10-13',readAt:null,category:'shipping',target:{view:'orders/detail',id:'order'}},{id:'move',title:'更新工序为 done',detail:'业务员',at:'2026-10-13',readAt:null,category:'general',target:{view:'production-board',id:'production'}}];const before=structuredClone(state.notifications);const rows=visibleMistNotifications(state,()=>true);expect(rows.map(row=>row.title)).toEqual(['SO-G-1 · 后勤交接','FUL-1 · 待出运']);expect(rows[0].detail).toBe('业务员');expect(state.notifications).toEqual(before);expect(visibleMistNotifications(state,view=>view!=='orders').map(row=>row.id)).toEqual(['move']);
+});

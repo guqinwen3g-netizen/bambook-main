@@ -1,3 +1,4 @@
+import {mistActivityTitle} from './activityLabels';
 import type {MistState,MistTarget} from '../../../../server/src/shared/mistWorkspace';
 
 type CanRead=(view:string)=>boolean;
@@ -6,7 +7,7 @@ export function visibleMistNotifications(state:MistState|null|undefined,canRead:
     if(!canRead(item.target.view.split('/')[0]))return false;
     const category=item.category??'general',prefs=state!.settings.notifications;
     return category==='qc'?prefs.qc:category==='shipping'?prefs.shipping:category==='suggestion'?prefs.suggestions:true;
-  });
+  }).map(item=>{const title=mistActivityTitle(state,item.title,item.target);return title===item.title?item:{...item,title};});
 }
 export type MistDigestItem={id:string;label:string;detail:string;target:MistTarget};
 /** A read-only, on-demand digest of current records. No email or scheduled side effects. */
