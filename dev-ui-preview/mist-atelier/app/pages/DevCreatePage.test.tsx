@@ -98,6 +98,12 @@ describe('five-step development form validation',()=>{
 });
 
 describe('exact customer and actual factory sources',()=>{
+ it('excludes service providers even when their service text mentions garment and fabric production',()=>{
+  const state={market:{suppliers:[{id:'logistics',name:'浦江物流',type:'服务商',capabilities:'成衣及面料加工出口物流',status:'active'}]},devs:[],versions:[],drafts:[]} as unknown as MistState;
+  expect(developmentFactoryOptions(state,[],'garment')).toEqual([]);expect(developmentFactoryOptions(state,[],'fabric')).toEqual([]);
+  expect(developmentFactoryOptions(state,['logistics'],'garment')[0]).toMatchObject({id:'logistics',historical:true,unavailable:true});
+ });
+
  it('keeps the requested second customer ID even when two customers share a display name',async()=>{bridge.current.state.customers.push({id:'customer-b',name:'Cedar & Crown'});await mount(undefined,'customer-b');const select=[...host.querySelectorAll('label')].find(l=>l.querySelector('.mist-field-label')?.textContent==='客户*')?.querySelector('select')!;expect(select.value).toBe('customer-b');await fill('开发对象名称','客户B开发');await fill('客户款号','B-1');await pickType();await click('存为草稿');expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'development.saveDraft',payload:expect.objectContaining({values:expect.objectContaining({customer:'customer-b'})})}));});
  it('does not silently fall back to the first customer when the requested ID is missing',async()=>{await mount(undefined,'missing');expect(host.textContent).toContain('指定客户不存在');await fill('开发对象名称','开发');await fill('客户款号','S1');await click('存为草稿');expect(bridge.current.run).not.toHaveBeenCalled();expect(host.textContent).toContain('重新选择准确客户');});
  it('has no static factory options in an empty workspace',async()=>{bridge.current.state.market.suppliers=[];await mount();await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent?.endsWith('工厂与计划'))!.click());expect(host.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);expect(host.textContent).not.toContain('江南成衣');expect(host.textContent).not.toContain('远山服装');expect(host.textContent).toContain('尚无可用');});

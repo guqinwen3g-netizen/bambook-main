@@ -9,7 +9,7 @@ import {applyOpeningCommand,mistPayerMatchesInvoice,openingCommandPermission,typ
 import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricRequirements,fabricRequirementError,validFabricSample,type DevelopmentDomain,type DevelopmentInitiator,type DevelopmentRequestType,type FabricDevelopmentRequirements} from './mistDevelopmentDomain';
 import { relationHoldReason } from './mistRelationHold';
 import {demoAccountRef,ownerChangeText,resolveMember,setMemberGroups,type MistMemberDirectoryEntry,type MistMemberGroupAssignment} from './mistAccounts';
-import { supplierBusinessDay, supplierUnavailableReason } from './mistSupplierStatus';
+import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
 import {assignFactoryLetters,defaultFactoryTask,developmentClosure,developmentRoundBlocker,duplicateRoundFactories,factoryTaskError,factoryTaskNote,factoryTaskSync,factoryTaskSyncBlocker,minorVersionBlocker,minorVersionLabel,minorVersions,nextRoundNumber,nextPhysicalVersionNumber,physicalVersionLabel,roundVersionLabel,type FactoryTaskInput} from './mistDevelopmentRounds';
 import {createFulfillmentState,applyFulfillmentCommand,fulfillmentCommandPermission,getFulfillmentReviews,assertProductionTransition,fulfillmentProductionFact,type FulfillmentState,type FulfillmentCommand} from './mistFulfillment';
 import {createMarketState,applyMarketCommand,backfillQuoteLineFamilies,marketCommandPermission,getMarketReviews,type MarketState,type MarketCommand} from './mistMarket';
@@ -572,7 +572,7 @@ function assertDevelopmentFactories(state: MistState, factories: string[], fabri
   for(const id of factories){
     const supplier=state.market.suppliers.find(s=>s.id===id);
     if(!supplier)throw new MistCommandError('VALIDATION','请从供应商档案选择工厂'+(id.length<=60?'：'+id:''));
-    const unavailable=supplierUnavailableReason(supplier,supplierBusinessDay(context.now));if(unavailable)throw new MistCommandError('PRECONDITION',unavailable);
+    const unavailable=productionSupplierUnavailableReason(supplier,supplierBusinessDay(context.now));if(unavailable)throw new MistCommandError('PRECONDITION',unavailable);
     if(fabric&&!/面料|纺织|织造|染整|fabric|textile|weav|dye/i.test(supplier.type+' '+supplier.capabilities))throw new MistCommandError('VALIDATION',`${supplier.name} 不是面料工厂，请选择面料工厂`);
   }
 }

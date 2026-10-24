@@ -13,7 +13,7 @@ import {assertGarmentProcurement,type MistMaterialKind} from './mistInternalFabr
 import { MistCommandError, assertMistOrderOpen, type MistContext, type MistState } from './mistWorkspace';
 import { applyFulfillmentCommand, type FulfillmentPurchase } from './mistFulfillment';
 import { applyPayablesCommand, purchasePrepaymentAvailableMinor } from './mistPayables';
-import { supplierBusinessDay, supplierUnavailableReason } from './mistSupplierStatus';
+import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
 import { fxRateFor } from './mistFxRates';
 
@@ -57,7 +57,7 @@ const find = (root: Root, id: unknown) => readRfqs(root).find(r => r.id === id) 
 const open = (r: MistRfq) => { if (r.state !== 'open') fail(`询价单${RFQ_STATE_LABEL[r.state]}，不能再操作`, 'PRECONDITION'); };
 function supplierOk(root: Root, id: string, today: string) {
   const s = root.market.suppliers.find(x => x.id === id) || fail('供应商不存在', 'NOT_FOUND');
-  const blocked = supplierUnavailableReason(s, today) || relationHoldReason(root, { supplierId: s.id });
+  const blocked = productionSupplierUnavailableReason(s, today) || relationHoldReason(root, { supplierId: s.id });
   if (blocked) fail(`${s.name}：${blocked}`);
   return s;
 }

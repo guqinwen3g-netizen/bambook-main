@@ -1,5 +1,10 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '服务商':'Service provider',
+  '服务内容':'Services',
+  '经营地址':'Business address',
+  '服务商不能作为生产供应商':'Service providers cannot supply production goods or processing',
+  '服务内容未填写':'Services are required',
   '查看案件':'View case',
   '退货入库':'Returned goods receipt',
   '在库数量':'On-hand quantity',

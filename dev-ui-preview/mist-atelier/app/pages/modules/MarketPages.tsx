@@ -17,7 +17,7 @@ import { businessEventText } from '../businessNames';
 import { PRODUCT_SPEC_FIELDS, createMarketState, marketBusinessDate, marketLineAmount, marketSum, quotationNeedsApproval, legalQuoteUnit, quoteLineFamily, quoteUnitOptions, QUOTE_FAMILY_LABEL, type MarketCommand, type MarketState, type MarketProduct, type MarketSupplier, type MarketRelation, type MarketQuotation, type MarketQuoteLine, type MarketSeason, type MarketTrend, type MarketShow, type MarketCampaign, type MarketLead, type MarketLookbook } from '../../../../../server/src/shared/mistMarket';
 import { QUOTE_MOQ_LABEL, QUOTE_SPEC_FIELDS, quoteMoqStatus, quoteSpecDefaults, type QuoteLineSpecs } from '../../../../../server/src/shared/mistQuotationSpecs';
 import { developmentDomain as devDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
-import { supplierBusinessDay, supplierStatusOn, supplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
+import { supplierBusinessDay, productionSupplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
 import { SupplierWorkbench } from './SuppliersPage';
 import { RelationWorkbench } from './RelationsPage';
 import { QuotationWorkbench } from './QuotationsPage';
@@ -93,8 +93,8 @@ function approvalHistory(q:MarketQuotation){return q.approvalHistory?.length?<Ca
 function productInput(row:MarketProduct){const {id,createdAt,updatedAt,status,...input}=row;return input;}
 function productSupplierOptions(suppliers:MarketSupplier[],currentId?:string){
  const day=supplierBusinessDay(businessNow());
- return suppliers.filter(s=>s.id===currentId||supplierStatusOn(s,day)==='active').map(s=>{
-  const reason=supplierUnavailableReason(s,day);
+ return suppliers.filter(s=>s.id===currentId||!productionSupplierUnavailableReason(s,day)).map(s=>{
+  const reason=productionSupplierUnavailableReason(s,day);
   return {value:s.id,label:reason?`${s.name} · 原供应商（${reason}）`:s.name};
  });
 }

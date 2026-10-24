@@ -13,3 +13,9 @@ export function supplierUnavailableReason(s: SupplierStatusFields, day: string):
   const now = supplierStatusOn(s, day);
   return now === 'active' ? '' : `供应商${now === 'paused' ? '已暂停合作' : '已停用'}${s.blockReason ? '：' + s.blockReason : ''}`;
 }
+
+/** 服务商可进入费用应付往来，不能作为货物 / 加工采购及开发工厂。 */
+export const isServiceSupplier = (s: { type: string }): boolean => s.type === '服务商';
+export function productionSupplierUnavailableReason(s: SupplierStatusFields & { type: string }, day: string): string {
+  return supplierUnavailableReason(s, day) || (isServiceSupplier(s) ? '服务商不能作为生产供应商' : '');
+}

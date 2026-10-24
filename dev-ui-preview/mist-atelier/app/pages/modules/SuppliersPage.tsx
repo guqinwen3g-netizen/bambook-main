@@ -9,7 +9,7 @@ import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage,
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 import { SUPPLIER_GRADES, SUPPLIER_TYPES, marketBusinessDate, supplierGrade, type MarketSupplier, type SupplierCertificate } from '../../../../../server/src/shared/mistMarket';
-import { supplierStatusOn } from '../../../../../server/src/shared/mistSupplierStatus';
+import { supplierStatusOn, isServiceSupplier } from '../../../../../server/src/shared/mistSupplierStatus';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
@@ -86,25 +86,29 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const locked = saving || !!pending;
   const pick = (s: MarketSupplier) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target, { keepScroll: true }); };
   const typeOptions = (current = '') => [...SUPPLIER_TYPES, ...(current && !(SUPPLIER_TYPES as readonly string[]).includes(current) ? [current] : [])].map(t => ({ value: t, label: t }));
+  const productionWhen = (s?:MarketSupplier) => ({key:'type',values:typeOptions(s?.type).map(t=>t.value).filter(t=>t!=='服务商')});
   const profileSpec = (s?: MarketSupplier): ModuleEditorSpec => ({
     title: s ? `编辑供应商 ${s.name}` : '新增供应商', submitLabel: '保存',
-    initialValues: { ...(s ? { code: s.code, name: s.name, type: s.type, country: s.country, address: s.address, capabilities: s.capabilities, capacity: s.capacity, capacityUnit: s.capacityUnit, leadDays: s.leadDays, note: s.note } : { code: '', name: '', type: '织造', country: '中国', address: '', capabilities: '', capacity: 0, capacityUnit: '米/月', leadDays: 0, note: '' }), ...Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => ['handler:' + g, s?.handlers?.[g]?.id || ''])) },
-    sections: [{ id: 'id', label: '身份', fields: ['code', 'name', 'type', 'country', 'address'] }, { id: 'cap', label: '产能与工艺', fields: ['capabilities', 'capacity', 'capacityUnit', 'leadDays', 'note'] }, { id: 'handlers', label: '经手人', fields: MIST_BUSINESS_GROUPS.map(g => 'handler:' + g) }],
+    initialValues: { ...(s ? { code: s.code, name: s.name, type: s.type, country: s.country, address: s.address, capabilities: s.capabilities, capacity: s.capacity, capacityUnit: s.capacityUnit, leadDays: s.leadDays, note: s.note, serviceAddress: s.address, serviceCapabilities: s.capabilities } : { code: '', name: '', type: '织造', country: '中国', address: '', capabilities: '', capacity: 0, capacityUnit: '米/月', leadDays: 0, note: '', serviceAddress: '', serviceCapabilities: '' }), ...Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => ['handler:' + g, s?.handlers?.[g]?.id || ''])) },
+    sections: [{ id: 'id', label: '身份', fields: ['code', 'name', 'type', 'country', 'address', 'serviceAddress'] }, { id: 'cap', label: '业务信息', fields: ['serviceCapabilities', 'capabilities', 'capacity', 'capacityUnit', 'leadDays', 'note'] }, { id: 'handlers', label: '经手人', fields: MIST_BUSINESS_GROUPS.map(g => 'handler:' + g) }],
     fields: [
       { key: 'code', label: '供应商编码', required: true }, { key: 'name', label: '名称', required: true },
       { key: 'type', label: '供应商类型', type: 'select', required: true, options: typeOptions(s?.type) },
-      { key: 'country', label: '国家地区' }, { key: 'address', label: '实际生产地址' },
-      { key: 'capabilities', label: '工艺与生产能力', type: 'textarea', required: true },
-      { key: 'capacity', label: '月产能', type: 'number', min: 0 }, { key: 'capacityUnit', label: '产能单位', required: true, hint: '例如 米/月、件/月、粒/月；不同单位的产能不会合计' },
-      { key: 'leadDays', label: '通常交付周期（天）', type: 'number', min: 0 }, { key: 'note', label: '备注', type: 'textarea' },
-      ...MIST_BUSINESS_GROUPS.map(g => ({ key: 'handler:' + g, label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, type: 'select' as const, hint: `每组一人，从${MIST_BUSINESS_GROUP_LABEL[g]}业务组成员中按账号选择；业务组在“设置 · 公司”由所有者设置`, options: [{ value: '', label: '未指定' }, ...memberSelectOptions(members, { group: g, current: s?.handlers?.[g] })] })),
+      { key: 'country', label: '国家地区' },
+      { key: 'serviceAddress', label: '经营地址', when: {key:'type',values:['服务商']} },
+      { key: 'serviceCapabilities', label: '服务内容', type: 'textarea', required: true, when: {key:'type',values:['服务商']} },
+      { key: 'address', label: '实际生产地址', when: productionWhen(s) },
+      { key: 'capabilities', label: '工艺与生产能力', type: 'textarea', required: true, when: productionWhen(s) },
+      { key: 'capacity', label: '月产能', type: 'number', min: 0, when: productionWhen(s) }, { key: 'capacityUnit', label: '产能单位', required: true, when: productionWhen(s) },
+      { key: 'leadDays', label: '通常交付周期（天）', type: 'number', min: 0, when: productionWhen(s) }, { key: 'note', label: '备注', type: 'textarea' },
+      ...MIST_BUSINESS_GROUPS.map(g => ({ key: 'handler:' + g, label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, type: 'select' as const, options: [{ value: '', label: '未指定' }, ...memberSelectOptions(members, { group: g, current: s?.handlers?.[g] })] })),
     ],
-    submit: async v => { const r = await run({ type: 'market.supplier.save', payload: { id: s?.id, input: { code: String(v.code ?? ''), name: String(v.name ?? ''), type: String(v.type ?? ''), country: String(v.country ?? ''), address: String(v.address ?? ''), capabilities: String(v.capabilities ?? ''), capacity: Number(v.capacity), capacityUnit: String(v.capacityUnit ?? ''), leadDays: Number(v.leadDays), note: String(v.note ?? ''), fileIds: s?.fileIds || [], handlerIds: Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => [g, String(v['handler:' + g] ?? '')])) } } }); const id = String((r.result as { id?: string }).id || ''); if (!s && id) { setPicked(id); go('suppliers', id); } },
+    submit: async v => { const service=isServiceSupplier({type:String(v.type??'')}); const r = await run({ type: 'market.supplier.save', payload: { id: s?.id, input: { code: String(v.code ?? ''), name: String(v.name ?? ''), type: String(v.type ?? ''), country: String(v.country ?? ''), address: String((service?v.serviceAddress:v.address) ?? ''), capabilities: String((service?v.serviceCapabilities:v.capabilities) ?? ''), capacity: service?0:Number(v.capacity), capacityUnit: service?'':String(v.capacityUnit ?? ''), leadDays: service?0:Number(v.leadDays), note: String(v.note ?? ''), fileIds: s?.fileIds || [], handlerIds: Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => [g, String(v['handler:' + g] ?? '')])) } } }); const id = String((r.result as { id?: string }).id || ''); if (!s && id) { setPicked(id); go('suppliers', id); } },
   });
   const certSpec = (s: MarketSupplier, c?: SupplierCertificate): ModuleEditorSpec => ({
-    title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存', description: '登记供应商已取得的认证与证书有效期；证书原件可在附件中上传。',
+    title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存',
     initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil } : { name: '', number: '', issuer: '', validUntil: '' },
-    fields: [{ key: 'name', label: '认证名称', required: true, hint: '例如 OEKO-TEX Standard 100、GOTS、GRS、BSCI、ISO 9001' }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }],
+    fields: [{ key: 'name', label: '认证名称', required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }],
     submit: v => run({ type: 'market.supplier.certificate.save', payload: { supplierId: s.id, id: c?.id, name: String(v.name ?? ''), number: String(v.number ?? ''), issuer: String(v.issuer ?? ''), validUntil: String(v.validUntil ?? ''), fileIds: c?.fileIds || [] } }),
   });
   const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅在登记错误时删除；过期认证请保留，以便追溯。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });
@@ -138,7 +142,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   ];
   const empty = all.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的供应商")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setTypeFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={Building2} title={uiText("还没有供应商")} description={uiText("登记织造、染整、印花、成衣加工、辅料等供应商后，采购单才能选择供应商。")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button> : undefined} />;
+    : <EmptyState icon={Building2} title={uiText("还没有供应商")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button> : undefined} />;
   const detail = selected && state
     ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
@@ -153,8 +157,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
       description: [selected.type, selected.country].filter(Boolean).join(' · '),
       facts: [
         { label: '评级', value: g ? g.grade : '未评级' }, { label: '认证', value: certs.length ? `${certs.length} 项` : '未登记' },
-        { label: '在手采购', value: `${p?.open.length || 0} 单` }, { label: '准交率', value: p?.completed.length ? rate(p.onTime, p.completed.length) : '暂无完成单' },
-        { label: '通常交付周期', value: `${selected.leadDays} 天` }, { label: '主联系人', value: contact ? contact.name : '未登记' },
+        ...(!isServiceSupplier(selected)?[{ label: '在手采购', value: `${p?.open.length || 0} 单` }, { label: '准交率', value: p?.completed.length ? rate(p.onTime, p.completed.length) : '暂无完成单' },
+        { label: '通常交付周期', value: `${selected.leadDays} 天` }]:[]), { label: '主联系人', value: contact ? contact.name : '未登记' },
       ],
       extra: alerts.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{alerts.map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}</div> : undefined,
     }} />;
@@ -192,6 +196,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
   onEdit: () => void; onRate: () => void; onCert: (c?: SupplierCertificate) => void; onDeleteCert: (c: SupplierCertificate) => void; onStatus: (s: MarketSupplier['status']) => void;
   onContact: (c?: MarketSupplier['contacts'][number]) => void; onOpen: (view: string, id?: string) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
+  const service=isServiceSupplier(s);
   const now = supplierStatusOn(s, day), grade = supplierGrade(s), flags = supplierFlags(s, day), certs = s.certificates || [];
   const products = state.market.products.filter(p => p.supplierId === s.id);
   const writeReason = !can ? '没有供应商写权限' : false, adminReason = !canAdmin ? '评级与合作状态须由主管（供应商管理权限）办理' : false;
@@ -212,33 +217,34 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
       { label: '编辑档案', icon: Pencil, onClick: onEdit, reason: writeReason },
       { label: '评级', icon: Award, onClick: onRate, reason: adminReason },
       { label: '登记认证', icon: FileBadge, onClick: () => onCert(), reason: writeReason },
-      { label: '询价比价', icon: Scale, onClick: onRfq, reason: !canProcure ? '需要采购写权限' : now !== 'active' ? '供应商当前不可合作，不能邀请报价' : false },
+      { label: '询价比价', icon: Scale, onClick: onRfq, hidden: service, reason: !canProcure ? '需要采购写权限' : now !== 'active' ? '供应商当前不可合作，不能邀请报价' : false },
       { label: '暂停合作', icon: Pause, onClick: () => onStatus('paused'), reason: adminReason, hidden: s.status !== 'active' },
       { label: '停用', icon: Ban, onClick: () => onStatus('blocked'), reason: adminReason, hidden: s.status === 'blocked' },
       { label: now === 'active' ? '取消计划' : '恢复合作', icon: Play, onClick: () => onStatus('active'), primary: true, reason: adminReason, hidden: s.status === 'active' },
     ]} />
     <Facts items={[
-      { label: '生产地址', value: `${s.country} ${s.address}`.trim() || '未填' },
-      { label: '月产能', value: <span className="mist-num">{s.capacity} {s.capacityUnit}</span> },
+      { label: service?'经营地址':'生产地址', value: `${s.country} ${s.address}`.trim() || '未填' },
+      ...(!service? [{ label: '月产能', value: <span className="mist-num">{s.capacity} {s.capacityUnit}</span> },
       { label: '通常交付周期', value: `${s.leadDays} 天` },
       { label: '准交率', value: perf.completed.length ? `${rate(perf.onTime, perf.completed.length)}（${perf.onTime}/${perf.completed.length} 单）` : '暂无完成单' },
-      { label: '来料无退货', value: perf.receipts ? `${perf.clean}/${perf.receipts} 批` : '暂无到货' },
+      { label: '来料无退货', value: perf.receipts ? `${perf.clean}/${perf.receipts} 批` : '暂无到货' }]:[]),
       { label: '主联系人', value: primary ? `${primary.name}${primary.role ? ' · ' + primary.role : ''}` : '未登记' },
       ...MIST_BUSINESS_GROUPS.map(g => ({ label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, value: s.handlers?.[g]?.name || '未指定' })),
     ]} />
-    <DetailBlock title={uiText("产能与工艺")}><p className="mist-sub" style={{ margin: 0 }}>{s.capabilities}</p>{s.note && <span className="mist-note">{s.note}</span>}</DetailBlock>
+    <DetailBlock title={uiText(service?"服务内容":"产能与工艺")}><p className="mist-sub" style={{ margin: 0 }}>{s.capabilities}</p>{s.note && <span className="mist-note">{s.note}</span>}</DetailBlock>
     <DetailBlock title={ui`认证 · ${certs.length}`} aside={can ? <Button variant="quiet" icon={Plus} disabled={locked} onClick={() => onCert()}>{uiText("登记")}</Button> : undefined}>
       {certs.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={ui`${s.name} 认证`} data-supplier-certs>{[...certs].sort((a, b) => a.validUntil.localeCompare(b.validUntil)).map(c => { const st = certificateState(c, day); return <div key={c.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
         <div className="mist-row" style={{ gap: 8 }}><strong>{c.name}</strong><span className="mist-spacer" /><Pill tone={st.tone}>{uiText(st.label)}</Pill></div>
         <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{[c.number && <Mono key="n">{c.number}</Mono>, c.issuer].filter(Boolean).reduce<React.ReactNode[]>((acc, x, i) => i ? [...acc, ' · ', x] : [x], [])}{!c.number && !c.issuer && '未填证书编号'}{uiText(" · 至 ")}{c.validUntil}</small><span className="mist-spacer" />
           {can && <><Button variant="quiet" disabled={locked} onClick={() => onCert(c)}>{uiText("更新")}</Button><Button variant="quiet" disabled={locked} onClick={() => onDeleteCert(c)}>{uiText("删除")}</Button></>}</div>
-      </div>; })}</div> : <span className="mist-muted">{uiText("未登记认证。客户要求 OEKO-TEX、GOTS、BSCI 等认证时，请先登记证书与有效期。")}</span>}
+      </div>; })}</div> : <span className="mist-muted">{uiText("未登记认证")}</span>}
     </DetailBlock>
-    <DetailBlock title={ui`在手业务 · ${perf.open.length}`}>
+    {(!service||!!perf.open.length)&&<DetailBlock title={ui`在手业务 · ${perf.open.length}`}>
       {perf.open.length ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("在手采购单")}>{perf.open.map(p => <div key={p.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
         <Mono>{p.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{p.description}<small className="mist-cell-sub">{perf.arrived(p)} / {p.quantity} {uiText(p.unit)}{uiText(" 已到 · 交期 ")}{perf.promised(p)}</small></span><Pill tone={p.state === 'pending' ? 'warn' : p.state === 'draft' ? 'neutral' : 'accent'}>{purchaseStage(p)}</Pill><Button variant="quiet" onClick={() => onOpen('procurement', p.id)}>{uiText("打开")}</Button>
       </div>)}</div> : <span className="mist-muted">{uiText("没有进行中的采购单。")}</span>}
     </DetailBlock>
+    }
     {!!perf.completed.length && <DetailBlock title={uiText("交付记录")}>
       <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={uiText("已完成采购单")}>{perf.completed.map(c => <div key={c.purchase.id} role="listitem" className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0', flexWrap: 'wrap' }}>
         <Mono>{c.purchase.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{c.purchase.description}<small className="mist-cell-sub">{uiText("到货 ")}{c.last}{uiText(" · 承诺 ")}{c.promised}</small></span><Pill tone={c.onTime ? 'ok' : 'bad'}>{uiText(c.onTime ? '准时' : '延迟')}</Pill>

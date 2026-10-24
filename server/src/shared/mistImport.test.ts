@@ -11,6 +11,10 @@ function fixture() {
 }
 
 describe('基础资料批量导入', () => {
+  it('imports service providers without factory capacity fields',()=>{
+    const f=fixture();f.run('supplier',[{code:'LOG-001',name:'浦江物流',type:'服务商',capabilities:'出口货运及报关',address:'上海'}]);
+    expect(f.state.market.suppliers[0]).toMatchObject({type:'服务商',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0});
+  });
   it('权限按导入类型；表头可用中文名并忽略星号与括号说明', () => {
     expect(mistCommandPermission({ type: 'market.import', payload: { kind: 'customer', rows: [] } } as MistCommand)).toBe('relations:write');
     expect(mistCommandPermission({ type: 'market.import', payload: { kind: 'supplier', rows: [] } } as MistCommand)).toBe('suppliers:write');

@@ -320,3 +320,12 @@ it('does not call confirmed processing started until the exact production branch
   store.state!.fulfillment.productionFacts.push({productionId:'branch',release:{at:'',actor:'',note:''}} as any);render('start');expect(host.textContent).not.toContain('待放行');expect(host.textContent).toContain('加工中');
   (store.state!.fulfillment.productionFacts.at(-1) as any).hold={at:'',actor:'',category:'material',reason:'待料'};render('start');expect(host.textContent).toContain('已暂停');
 });
+
+it('excludes service providers from production purchases and RFQ invitations',async()=>{
+  store.state!.market.suppliers.push({id:'service',code:'LOG-001',name:'浦江物流',type:'服务商',status:'active',capabilities:'成衣面料物流',capacity:0,capacityUnit:'',leadDays:0,contacts:[],country:'中国',address:'上海',blockReason:'',fileIds:[],note:'',createdAt:'',updatedAt:''});
+  render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
+  const supplier=getByRole(document.body,'combobox',{name:'供应商'});expect(supplier.textContent).not.toContain('浦江物流');
+  await click(getByRole(document.body,'button',{name:'返回列表',exact:true}));
+  await click(getByRole(host,'tab',{name:/^询价比价/}));await click(getAllByRole(host,'button',{name:'发起询价',exact:true})[0]);
+  expect(queryByRole(document.body,'checkbox',{name:'浦江物流 · 服务商'})).toBeNull();
+});
