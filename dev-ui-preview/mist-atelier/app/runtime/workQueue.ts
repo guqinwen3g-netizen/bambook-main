@@ -4,16 +4,17 @@ import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
 import { shipmentStage } from '../pages/modules/ShipmentsPage';
 import { financeReceiptDisplay } from '../pages/FinancePage';
+import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
 
 type CanRead = (view: string) => boolean;
-export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'task';
+export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
 /**
  * 等我处理的一条事项。module 是它计入的侧栏模块（与模块页「待我处理」同一归属）；
  * 其他公司的审批归到 approvals，只进「我的工作」合计。
  */
-export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; due?: string; target: MistTarget; module: string };
-export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', task: '工作事项' };
+export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; due?: string; target: MistTarget & { detail?: 'full' }; module: string };
+export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项' };
 export type MistWorkOptions = {
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
   /** 当前账号是否持有某项权限；不传时岗位事项（按权限分派）一律不算我的。 */
@@ -80,6 +81,20 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       target: { view: 'approvals', id: `${review.workspaceId}|${review.id}`, section: 'mine' } as MistTarget, module: local && canRead(module) ? module : 'approvals' });
   }
   if (!state) return items;
+  const f = state.fulfillment;
+  if (me && canRead('procurement') && can('orders:write') && f.stock && f.stockMovements && f.receipts && f.purchases) {
+    // Receiving authority follows the same current-owner rule as the server; no manual task completion.
+    for (const row of materialDeliveryRows(state)) {
+      if (row.outstanding === '0' || row.delivery.confirmation || !materialReceiverIds(state, row).includes(me)) continue;
+      const branch = state.productions.find(item => item.id === row.delivery.productionId && !item.closed);
+      const contract = f.purchases.find(item => item.id === branch?.sourcePurchaseId && item.kind === 'processing' && item.state === 'approved');
+      const source = f.purchases.find(item => item.id === row.purchaseId);
+      if (!contract || !source) continue;
+      push({ id: `material:${row.kind}:${row.id}`, source: 'material', title: `${contract.code} · ${uiText('物料接收')}`,
+        meta: [source.code, `${row.outstanding} ${uiText(row.unit)}`, row.delivery.supplier].join(' · '), when: '待接收', urgent: false, at: row.at,
+        target: { view: 'procurement', id: contract.id, detail: 'full', section: 'order:' + row.delivery.orderId, orderLineId: row.delivery.lineId } });
+    }
+  }
   if (canRead('qc-workbench')) for (const task of state.fulfillment.qcTasks) {
     // 待认领/检验中只给专业 QC（qc:inspect，且有该业务线登记权）；业务主管虽有登记权但不是检验岗。
     const qcRole = can('qc:inspect') && can(`qc:${task.domain}_chain:write`), business = can('orders:write');

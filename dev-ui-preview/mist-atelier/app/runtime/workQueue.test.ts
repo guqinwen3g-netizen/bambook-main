@@ -1,3 +1,4 @@
+import {materialDeliveryFixture} from '../../../../server/src/mist/__tests__/materialDelivery';
 import { describe, expect, it } from 'vitest';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
 import { mistEmailFollowUpTaskIds, mistMyTasks, mistMyWork, mistWorkQueue } from './workQueue';
@@ -159,4 +160,22 @@ it('hands an agreed compensation to finance while leaving negotiation with its b
 it('routes a repair inspection to its own QC business line without inventory access',()=>{
  const state=base();state.platform.claims=[{id:'claim',code:'CLM-REPAIR'}] as any;state.platform.claimGoods=[{claimId:'claim',repairs:[{id:'repair',domain:'garment'}]}] as any;state.tasks=[{id:'task',kind:'claim-repair-qc:repair',title:'返修复检',due:'',done:false,assigneeIds:[],target:{view:'claims',id:'claim'},permission:'qc:garment_chain:write'}];
  expect(mistMyTasks(state,{me:'garment-qc',canRead:view=>view==='claims',can:scope=>scope==='qc:garment_chain:write'})).toMatchObject([{id:'task',title:'返修复检 · CLM-REPAIR'}]);expect(mistMyTasks(state,{me:'fabric-qc',canRead:all,can:scope=>scope==='qc:fabric_chain:write'})).toEqual([]);expect(mistMyTasks(state,{me:'warehouse',canRead:all,can:scope=>scope==='inventory:write'})).toEqual([]);
+});
+
+describe('exact material receiving work',()=>{
+ const options={canRead:all,can:(p:string)=>p==='orders:write',me:'garment',today:'2026-10-24'};
+ it('routes the receiver to the exact processing detail and disappears after real confirmation',()=>{
+  const f=materialDeliveryFixture(3),id=f.issue();const before=structuredClone(f.state),items=mistWorkQueue(f.state,options);expect(items).toHaveLength(1);expect(items[0]).toMatchObject({id:'material:issue:'+id,source:'material',module:'procurement',when:'待接收',target:{view:'procurement',id:f.processingId,detail:'full',orderLineId:f.target.lineId}});expect(items[0].meta).toContain('3 米');expect(f.state).toEqual(before);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'实际点收三米'}},'garment');expect(mistWorkQueue(f.state,options)).toEqual([]);
+ });
+ it('never assigns receipt to another employee, a read-only receiver, or an account without procurement access',()=>{
+  const f=materialDeliveryFixture(3);f.issue();expect(mistWorkQueue(f.state,{...options,me:'owner'})).toEqual([]);expect(mistWorkQueue(f.state,{...options,can:()=>false})).toEqual([]);expect(mistWorkQueue(f.state,{...options,canRead:view=>view!=='procurement'})).toEqual([]);
+ });
+ it('does not leave a receipt task after the whole delivery is returned',()=>{
+  const f=materialDeliveryFixture(3),id=f.issue();f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:3,location:'A-01',person:'factory',note:'整批退回'}});expect(mistWorkQueue(f.state,options)).toEqual([]);
+ });
+ it('includes direct supplier deliveries and uses their original receipt identity',()=>{
+  const f=materialDeliveryFixture(3,false),id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:3,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Direct delivery',fileIds:[],targetProductionId:f.productionId}}).id!;
+  expect(mistWorkQueue(f.state,options)).toEqual([expect.objectContaining({id:'material:direct:'+id,target:expect.objectContaining({id:f.processingId,detail:'full'})})]);
+ });
 });

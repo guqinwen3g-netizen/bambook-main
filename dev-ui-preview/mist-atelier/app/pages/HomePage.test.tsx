@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import {materialDeliveryFixture} from '../../../../server/src/mist/__tests__/materialDelivery';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -145,4 +146,9 @@ it('marks actually due work as urgent without repeating a summary paragraph', ()
 
 it.each([['products:read','在途开发案'],['qc:read','待 QC 评审'],['shipments:read','本周出运'],['invoices:read','应收待核销']])('hides the statistic for a denied %s scope before projection metadata is available',(scope,label)=>{
  seam.value.workspace.access=undefined;seam.session.hasPermission=(...permissions:string[])=>salesPermission(...permissions)&&!permissions.includes(scope);render();expect([...host.querySelectorAll('.mist-stat')].some(card=>card.textContent?.includes(label))).toBe(false);
+});
+
+it('shows exact pending material receipt on the receiver home and opens the processing detail',async()=>{
+ const f=materialDeliveryFixture(3);f.issue();seam.value.state=f.state;seam.session.user={id:'garment',displayName:'成衣接收人'};render();const contract=f.state.fulfillment.purchases.find(row=>row.id===f.processingId)!;expect(host.textContent).toContain(contract.code+' · 物料接收');
+ const item=[...host.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.includes(contract.code+' · 物料接收'))!;await click(item);expect(go).toHaveBeenCalledWith('procurement',f.processingId,expect.objectContaining({detail:'full',orderLineId:f.target.lineId}));
 });
