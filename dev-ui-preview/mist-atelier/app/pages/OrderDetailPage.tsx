@@ -1,10 +1,12 @@
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
+import {RecordDisclosure} from './modules/pageKit';
 import {OrderProductThumb} from './OrderProductThumb';
 /** T5 单据详情：沿用原 Mist 结构，全部内容属于当前订单。 */
 import React from 'react';
 import { BadgeCheck, Factory, FileText, Handshake, Package, Pencil, Send, Ship, Wallet } from 'lucide-react';
 import { BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dialog, Donut, Drawer, EmptyState, Field, FlowSteps, FormGrid, KeyValue, Meter, MistPage, Mono, ObjectCell, PageHeader, Pill, Select, SummaryBar, TextArea, TextInput, Thumb, UploadZone, useToast } from '../../../../components/mist';
+import type { View } from '../../../../types';
 import type { MistOrder, MistOrderLine } from '../../../../server/src/shared/mistWorkspace';
 import { fmt } from '../data';
 import { useNav } from '../nav';
@@ -126,6 +128,8 @@ export function OrderDetailPage() {
   const { go, route } = useNav(), toast = useToast();
   const workspace=useMistWorkspace(),{ state, loading, error, run, refresh, saving, pending, recover } = workspace;
   const session = useOptionalMistSession(),members=workspaceMembers(workspace.workspace,state,session?.user);
+  const canWriteOrders=!!session?.hasPermission('orders:write');
+  const canReadShipping=!!session?.canAccessView?.('shipments' as View);
   const scope=`${workspace.workspace?.id||''}:${session?.sessionKey||''}:${session?.user?.id||''}:${route.id||''}`,activeScope=React.useRef(scope);activeScope.current=scope;
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const operation=React.useRef(false);
@@ -148,6 +152,7 @@ export function OrderDetailPage() {
   const selectedRound=governance?.rounds.find(round=>round.id===reviewRoundId);
   const [edit, setEdit] = React.useState({ season: '', due: '', ownerId: '',reason:'' }), [note, setNote] = React.useState('');
   const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
+  React.useEffect(()=>{if(!canWriteOrders){setEditOpen(false);setContractOpen(false);setHandoffOpen(false);setLineEditorId(null);}},[canWriteOrders]);
   const busy=working||loading||saving||!!pending;
   React.useEffect(() => { setLineId(route.orderLineId ?? null); setFailure(''); }, [route.id, route.orderLineId]);
   React.useEffect(()=>{setLineEditorId(null);},[scope,lineId]);
@@ -155,6 +160,7 @@ export function OrderDetailPage() {
   const selectedLine = lines.find(line => line.id === lineId);
   const productions = (state?.productions ?? []).filter(item => item.orderId === order?.id && !item.closed);
   const invoices = (state?.invoices ?? []).filter(item => item.orderId === order?.id);
+  const logisticsHandoff = state?.events.find(event => event.entityType === 'order' && event.entityId === order?.id && /^交接后勤(?:[:：]|$)/.test(event.text));
   const sameCurrencyReceipts=(state?.receipts??[]).filter(receipt=>receipt.currency===order?.currency),receiptIds=new Set(sameCurrencyReceipts.map(receipt=>receipt.id));
   const sameCurrencyInvoices=invoices.filter(invoice=>invoice.currency===order?.currency);
   const orderAllocations=(state?.allocations??[]).filter(allocation=>allocation.currency===order?.currency&&receiptIds.has(allocation.receiptId)&&sameCurrencyInvoices.some(invoice=>invoice.id===allocation.invoiceId));
@@ -186,8 +192,9 @@ export function OrderDetailPage() {
   return <MistPage>
     <BackLink onClick={() => go('orders', undefined, { customerId: route.customerId,section:order.type })}>{uiText("订单管理")}</BackLink>
     <PageHeader description={ui`${order.customer} · ${order.season} · ${lines.length} 个条目 · 负责人 ${order.owner}`} eyebrow={uiText("订单履约 · 订单")} title={uiText(order.code)}
-      actions={<>{order.replacementSource&&state?.platform.claims.some(c=>c.id===order.replacementSource!.claimId)&&<Button onClick={()=>go('claims',order.replacementSource!.claimId)}>{uiText('售后来源')}</Button>}<Button icon={Pencil} disabled={busy||approvalPending} onClick={() => { setEdit({ season: governance?.changeDraft?.orderPatch.season??order.season, due: governance?.changeDraft?.orderPatch.due??order.due, ownerId: order.ownerId,reason:governance?.changeDraft?.reason||'' }); setEditOpen(true); setFailure(''); }}>{uiText("编辑")}</Button>{!internal&&<Button icon={FileText} onClick={() => setDocumentOpen(true)}>{uiText("装箱单草稿")}</Button>}<Button disabled={busy||approvalPending} onClick={()=>setContractOpen(true)}>{uiText("合同与审批资料")}</Button>{locked?null:!approved||governance?.changeDraft?<Button variant="primary" disabled={busy||approvalPending} onClick={()=>void act({type:'order.governance.submit',payload:{orderId:order.id}},()=>toast('已提交订单主单审批'))}>{uiText(approvalPending?'待审批':governance?.changeDraft?'提交变更审批':'提交主单审批')}</Button>:internal?null:<Button variant="primary" icon={Send} disabled={busy || !!order.handoffAt} onClick={() => { setHandoffOpen(true); setFailure(''); }}>{uiText(order.handoffAt ? '已交接后勤' : '交接后勤')}</Button>}{!internal&&order.handoffAt&&<Button variant="secondary" icon={Ship} onClick={()=>go('shipments',undefined,{section:'order:'+order.id,customerId:order.customerId})}>{uiText("出运准备")}</Button>}{state&&<OrderTerminationButton state={state} order={order as MistOrder&{governance?:OrderGovernanceFields}} busy={busy} run={run} go={go}/>}</>} />
+      actions={<>{order.replacementSource&&state?.platform.claims.some(c=>c.id===order.replacementSource!.claimId)&&<Button onClick={()=>go('claims',order.replacementSource!.claimId)}>{uiText('售后来源')}</Button>}{canWriteOrders&&<Button icon={Pencil} disabled={busy||approvalPending} onClick={() => { setEdit({ season: governance?.changeDraft?.orderPatch.season??order.season, due: governance?.changeDraft?.orderPatch.due??order.due, ownerId: order.ownerId,reason:governance?.changeDraft?.reason||'' }); setEditOpen(true); setFailure(''); }}>{uiText("编辑")}</Button>}{!internal&&<Button icon={FileText} onClick={() => setDocumentOpen(true)}>{uiText("装箱单草稿")}</Button>}{canWriteOrders&&<Button disabled={busy||approvalPending} onClick={()=>setContractOpen(true)}>{uiText("合同与审批资料")}</Button>}{!canWriteOrders||locked?null:!approved||governance?.changeDraft?<Button variant="primary" disabled={busy||approvalPending} onClick={()=>void act({type:'order.governance.submit',payload:{orderId:order.id}},()=>toast('已提交订单主单审批'))}>{uiText(approvalPending?'待审批':governance?.changeDraft?'提交变更审批':'提交主单审批')}</Button>:internal?null:<Button variant="primary" icon={Send} disabled={busy || !!order.handoffAt} onClick={() => { setHandoffOpen(true); setFailure(''); }}>{uiText(order.handoffAt ? '已交接后勤' : '交接后勤')}</Button>}{!internal&&order.handoffAt&&canReadShipping&&<Button variant="secondary" icon={Ship} onClick={()=>go('shipments',undefined,{section:'order:'+order.id,customerId:order.customerId})}>{uiText("出运准备")}</Button>}{state&&<OrderTerminationButton state={state} order={order as MistOrder&{governance?:OrderGovernanceFields}} busy={busy} run={run} go={go}/>}</>} />
     <OrderTerminationBanner order={order as MistOrder&{governance?:OrderGovernanceFields}}/>
+    {order.handoffAt && logisticsHandoff && <RecordDisclosure key={order.id+':handoff'} title="后勤交接记录"><KeyValue items={[{label:'经办人',value:logisticsHandoff.actor},{label:'时间',value:new Date(logisticsHandoff.at).toLocaleString(interfaceLocale())}]} />{logisticsHandoff.text.replace(/^交接后勤[:：]?/,'').trim() && <p>{logisticsHandoff.text.replace(/^交接后勤[:：]?/,'').trim()}</p>}</RecordDisclosure>}
     {(error || failure) && <Banner tone="bad" title={uiText("操作尚未完成")}>{failure || error}</Banner>}
     {pending&&!saving&&<Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button disabled={working||saving} onClick={()=>void recover().catch(problem=>setFailure(problem instanceof Error?problem.message:'原请求核对失败'))}>{uiText("核对原操作结果")}</Button>}/>}
     {amounts.error && <Banner tone="bad" title={uiText("订单金额无法核对")}>{amounts.error}{uiText("，请核对订单条目的数量与单价。")}</Banner>}
@@ -209,13 +216,13 @@ export function OrderDetailPage() {
     <section className="mist-grid">
       <Card className={internal?"mist-col-12":"mist-col-8"}><CardHeader title={uiText("条目")} tools={<span className="mist-muted">{uiText("生产 · 已 QC")}</span>} /><DataTable density={density} ariaLabel={uiText("订单条目")} rows={lines} rowKey={line => line.id} onRowClick={line => {setLineId(line.id);go('orders/detail',order.id,{customerId:route.customerId,section:order.type,orderLineId:line.id});}} columns={columns} /></Card>
       {!internal&&<div className="mist-col mist-col-4">
-        <Card><CardHeader title={uiText("出运准备")} tools={<span className="mist-muted">{order.checklist.filter(item => item.done).length} / {order.checklist.length}</span>} /><Checklist items={order.checklist} onToggle={busy||locked ? undefined : index => { const item = order.checklist[index]; void act({ type: 'order.checklist', payload: { orderId: order.id, itemId: item.id, done: !item.done } }); }} /></Card>
+        <Card><CardHeader title={uiText("出运准备")} tools={<span className="mist-muted">{order.checklist.filter(item => item.done).length} / {order.checklist.length}</span>} /><Checklist items={order.checklist} onToggle={busy||locked||!canWriteOrders ? undefined : index => { const item = order.checklist[index]; void act({ type: 'order.checklist', payload: { orderId: order.id, itemId: item.id, done: !item.done } }); }} /></Card>
         <Card><CardHeader title={uiText("收款")} />{replacement?<KeyValue items={[{label:'客户收款',value:uiText('无需收款')}]}/>:remaining === null ? <Banner tone="warn" title={uiText("待核对订单金额")}>{uiText("金额核对完成后显示收款比例。")}</Banner> : <Donut centerLabel="已收" slices={[{ label: '已确认到账', value: received.total!, display: amountLabel(received.total), color: 'var(--mist-accent)' }, { label: '合同待收', value: remaining, display: amountLabel(remaining), color: 'transparent' }]} caption={<><span className="mist-note">{uiText("已核销 ")}{amountLabel(reconciled.total)} {order.currency}</span><Button variant="quiet" onClick={() => go('payment-vouchers',undefined,{section:'funding:'+order.id,customerId:order.customerId})}>{uiText("查看收款核销")}</Button></>} />}</Card>
       </div>}
     </section>
     <Drawer open={!!selectedLine} onClose={() => {setLineId(null);go('orders/detail',order.id,{customerId:route.customerId,section:order.type});}} title={uiText(selectedLine?.name ?? '订单条目')} sub={uiText(selectedLine?.style)} size="lg">
       {selectedLine && <div className="mist-col" data-module-detail>{state&&!internal&&<OrderLineFulfillment state={state} order={order} line={selectedLine} go={go} onCloseLine={reason=>run({type:'order.governance.closeLine',payload:{orderId:order.id,lineId:selectedLine.id,reason}})}/>}<KeyValue items={[...(state?[{ label: '来源', value: <OrderLineSourceValue state={state} line={selectedLine} go={go}/> }]:[]),...(state&&lineQuotation(state,selectedLine,go)?[{ label: '来源报价', value: <OrderLineQuotationValue state={state} line={selectedLine} go={go}/> }]:[]), { label: '数量', value: `${formatOrderQuantity(selectedLine.qty)} ${selectedLine.unit}` }, { label: '单价', value: `${amountLabel(lineAmounts.get(selectedLine.id) == null ? null : selectedLine.price)} ${order.currency}` }, { label: '小计', value: `${amountLabel(lineAmounts.get(selectedLine.id))} ${order.currency}` }]} />
-        <InternalFabricPanel key={`${scope}:${selectedLine.id}`} order={order} line={selectedLine} go={go}/><Button icon={Pencil} disabled={busy||approvalPending} onClick={()=>setLineEditorId(selectedLine.id)}>{uiText("编辑条目")}</Button>
+        <InternalFabricPanel key={`${scope}:${selectedLine.id}`} order={order} line={selectedLine} go={go}/>{canWriteOrders&&<Button icon={Pencil} disabled={busy||approvalPending} onClick={()=>setLineEditorId(selectedLine.id)}>{uiText("编辑条目")}</Button>}
         <CardHeader title={uiText("采购")} /><Button block disabled={busy||locked} onClick={()=>go('procurement',undefined,{orderLineId:selectedLine.id,section:'order:'+order.id,customerId:order.customerId})}>{uiText("准备采购草稿")}</Button>
         {!approved&&<Banner tone="warn" title={uiText("仅可准备采购草稿")}>{uiText("主单批准前不能提交采购承诺、发出合同或进入生产。")}</Banner>}
         {purchases.filter(purchase=>purchase.lineId===selectedLine.id).map(purchase=><Button key={purchase.id} block onClick={()=>go('procurement',purchase.id,{orderLineId:selectedLine.id,section:'order:'+order.id,customerId:order.customerId})}>{uiText(['draft','rejected'].includes(purchase.state)?'查看采购草稿':'查看采购承诺')} {purchase.code}</Button>)}

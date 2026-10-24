@@ -583,4 +583,11 @@ export const reviewedEnglish: Record<string, string> = {
   '有保留项待确认。': 'Conditions require confirmation.',
   '原检查日 {0}': 'Original inspection date {0}',
   '检查中': 'Inspection in progress', '已恢复': 'Resumed', '业务继续记录': 'Business continuation record',
+  '后勤交接': 'Logistics handover',
+  '后勤交接记录': 'Logistics handover record',
+  '采购已批准': 'Purchase approved',
+  '采购已退回': 'Purchase returned for revision',
+  '裁剪': 'Cutting',
+  '车缝': 'Sewing',
+  '整烫包装': 'Finishing and packing',
 };

@@ -5,12 +5,13 @@ import {businessNow} from '../runtime/businessClock';
 import React from 'react';
 import { ArrowRight, BadgeCheck, FileText, Layers, Plus, Ship, SlidersHorizontal, Sparkles, Wallet, ArrowUpRight, RefreshCw } from 'lucide-react';
 import { AIBrief, Agenda, Banner, Button, Card, CardBody, CardHeader, Dialog, Dropdown, EmptyState, Field, FormGrid, HeroFocus, KeyValue, MistPage, PageHeader, Segmented, Select, Skeleton, StatCard, StatGrid, Switch, TaskList, TextLink, WeekStrip, useToast, type TaskItem } from '../../../../components/mist';
-import type { MistTarget } from '../../../../server/src/shared/mistWorkspace';
+import { MIST_LOGISTICS_DUTY, type MistTarget } from '../../../../server/src/shared/mistWorkspace';
 import { IMG, STAGES } from '../data';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMyDisplayName } from '../runtime/me';
+import {mistActivityTitle} from '../runtime/activityLabels';
 import { visibleMistNotifications } from '../runtime/notificationPreferences';
 import { useOptionalMistReviews } from '../runtime/reviews';
 import { mistWorkQueue, mistMyTasks, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
@@ -49,7 +50,7 @@ export function HomePage() {
   const workOptions: MistWorkOptions = { canRead: view => session.canAccessView(view as View), can: permission => session.hasPermission(permission), me: session.user?.id ?? '', reviews: reviews?.rows, today, workspaceId: workspace.workspace?.id };
   const allTasks = mistMyTasks(state, workOptions);
   const inRange = (date: string) => !date || (range === 'today' ? date <= today : date <= weekEnd);
-  const tasks = allTasks.filter(task => inRange(task.due)).slice().sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : (a.due || '9999').localeCompare(b.due || '9999') || a.title.localeCompare(b.title, 'zh-CN'));
+  const tasks = allTasks.filter(task => (task.kind === 'shipping' && task.permission === MIST_LOGISTICS_DUTY) || inRange(task.due)).slice().sort((a, b) => sort === 'title' ? a.title.localeCompare(b.title, 'zh-CN') : (a.due || '9999').localeCompare(b.due || '9999') || a.title.localeCompare(b.title, 'zh-CN'));
   const queue = mistWorkQueue(state, workOptions);
   const focus = tasks.at(0) ?? queue.at(0);
   const dev = state?.devs.find(item => item.id === focus?.target.id);
@@ -85,7 +86,7 @@ export function HomePage() {
   const unread = visibleMistNotifications(state,view=>session.canAccessView(view as View)).filter(notification=>!notification.readAt);
   const brief: Array<{ strong: React.ReactNode; text: React.ReactNode; onClick?: () => void }> = unread.slice(0, 3).map(notification => ({ strong: notification.title, text: notification.detail,
     onClick: () => void run(async () => { const bound=scope;await workspace.run({ type: 'notification.read', payload: { id: notification.id } }); if(alive.current&&activeScope.current===bound)go(notification.target.view, notification.target.id, notification.target); }) }));
-  if (!brief.length) (state?.events.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3) ?? []).forEach(event => brief.push({ strong: event.actor, text: event.text, onClick: () => openAI(`说明这条工作记录：${event.text}`) }));
+  if (!brief.length) (state?.events.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3) ?? []).forEach(event => brief.push({ strong: event.actor, text: mistActivityTitle(state,event.text,{view:({order:'orders/detail',production:'production-board',procurement:'procurement',qc:'qc-workbench'} as Record<string,string>)[event.entityType]||'cockpit',id:event.entityId}), onClick: () => openAI(`说明这条工作记录：${event.text}`) }));
   if (!brief.length) brief.push({ strong: '暂无工作动态', text: '创建开发案或推进工作后，这里会显示对应记录。', onClick: () => go('development/new') });
   const beginTask = () => { const task = tasks[0] ?? allTasks[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
   const chosenTask = state?.tasks.find(task => task.id === selectedTask);
