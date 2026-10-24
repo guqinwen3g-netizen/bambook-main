@@ -596,4 +596,8 @@ export const reviewedEnglish: Record<string, string> = {
   '待起飞': 'Awaiting take-off',
   '业务已继续': 'Business confirmed',
   '其他类别': 'Other category',
+  '登记起飞': 'Record take-off',
+  '出运凭据': 'Departure evidence',
+  '起飞依据': 'Take-off evidence',
+  '上传起飞通知或承运人凭据': 'Upload take-off notice or carrier evidence',
 };
