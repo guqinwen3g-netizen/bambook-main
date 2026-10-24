@@ -7,7 +7,7 @@ describe('mistNavCounts', () => {
   it('counts what waits for me per module, with 我的工作 as the total', () => {
     const state = { ...base,
       tasks: [task('t1', 'development/detail'), task('t2', 'development/detail', { done: true }), task('t3', 'orders/detail'), task('t4', 'orders/detail', { assigneeIds: ['u2'] }), task('t5', 'orders/detail', { assigneeIds: [] }), task('t6', 'invoices', { assigneeIds: [], permission: 'invoices:write' })],
-      fulfillment: { qcTasks: [{ id: 'q1', code: 'QC-1', source: { kind: 'orderLine', orderId: 'o1', lineId: 'l1' }, kind: 'sample', domain: 'garment', state: 'reported', factory: 'F', createdAt: '2026-10-01' }], shipments: [] },
+      fulfillment: { qcTasks: [{ id: 'q1', code: 'QC-1', source: { kind: 'orderLine', orderId: 'o1', lineId: 'l1' }, kind: 'sample', domain: 'garment', state: 'reported', reportIds: ['report-1'], factory: 'F', createdAt: '2026-10-01' }], shipments: [] },
       // 存量记录（订单、开发案总数）不计入侧栏数字。
       orders: [{ id: 'o1' }, { id: 'o2' }], devs: [{ id: 'd1' }, { id: 'd2' }] };
     const reviews = [{ id: 'r1', workspaceId: 'w1', workspaceName: '甲', title: '本公司', status: 'pending', canDecide: true, submittedAt: '2026-10-16T00:00:00Z', target: { view: 'orders/detail', id: 'o1' } }, { id: 'r2', workspaceId: 'w2', workspaceName: '乙', title: '其他公司', status: 'pending', canDecide: true, submittedAt: '2026-10-16T00:00:00Z', target: { view: 'orders/detail', id: 'o9' } }] as any;

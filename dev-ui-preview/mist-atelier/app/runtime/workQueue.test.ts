@@ -32,7 +32,7 @@ describe('my work queue sources', () => {
       qc({ id: 'qc-4', code: 'QC-4', businessConfirmation: { result: 'approved', note: '', actor: 'a', at: 'x' } }), qc({ id: 'qc-5', code: 'QC-5', state: 'pending' })] as any;
     const business = (p: string) => p === 'orders:write';
     const items = mistWorkQueue(state, { canRead: all, can: business, me: 'me', today: '2026-10-15' });
-    expect(items.map(item => item.id)).toEqual(['qc:qc-1', 'qc:qc-2', 'qc:qc-3']);
+    expect(items.map(item => item.id)).toEqual(['qc:qc-1', 'qc:qc-2', 'qc:qc-3','qc:qc-4']);
     expect(items[2]).toMatchObject({ when: '已阻断', urgent: true, module: 'qc-workbench', target: { view: 'qc-workbench', id: 'qc-3' } });
     expect(mistWorkQueue(state, { canRead: view => view !== 'qc-workbench', can: business, me: 'me', today: '2026-10-15' })).toEqual([]);
     expect(mistWorkQueue(state, { canRead: all, me: 'me', today: '2026-10-15' })).toEqual([]);
@@ -49,7 +49,7 @@ describe('my work queue sources', () => {
     state.fulfillment.shipments = [{ id: 'sh-1', code: 'SH-1', customer: '客户', state: 'departed', departedAt: '2026-10-14T00:00:00Z' }, { id: 'sh-2', code: 'SH-2', customer: '客户', state: 'departed', documentsSentAt: '2026-10-14' }, { id: 'sh-3', code: 'SH-3', customer: '客户', state: 'ready' }] as any;
     state.fulfillment.shipments.push({ id: 'sh-4', code: 'SH-4', customer: '客户', state: 'preparing', plannedDate: '2026-10-20', lines: [] } as any);
     const business = (p: string) => p === 'orders:write', logistics = (p: string) => p === 'logistics:handle';
-    expect(mistWorkQueue(state, { canRead: all, can: business, me: 'me', today: '2026-10-15' }).map(item => item.target)).toEqual([{ view: 'shipments', id: 'sh-1' }, { view: 'shipments', id: 'sh-3' }]);
+    expect(mistWorkQueue(state, { canRead: all, can: business, me: 'me', today: '2026-10-15' }).map(item => item.target)).toEqual([{ view: 'shipments', id: 'sh-1',detail:'full' }, { view: 'shipments', id: 'sh-3',detail:'full' }]);
     expect(mistWorkQueue(state, { canRead: all, can: logistics, me: 'me', today: '2026-10-15' }).map(item => [item.target.id, item.when])).toEqual([['sh-4', '待接手']]);
     // 业务员也有 shipments:write，但没有后勤岗位标识，不接收待物流接手。
     expect(mistWorkQueue(state, { canRead: all, can: p => p === 'shipments:write', me: 'me', today: '2026-10-15' })).toEqual([]);
@@ -178,4 +178,34 @@ describe('exact material receiving work',()=>{
   const f=materialDeliveryFixture(3,false),id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:3,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Direct delivery',fileIds:[],targetProductionId:f.productionId}}).id!;
   expect(mistWorkQueue(f.state,options)).toEqual([expect.objectContaining({id:'material:direct:'+id,target:expect.objectContaining({id:f.processingId,detail:'full'})})]);
  });
+});
+
+describe('shipment role continuity',()=>{
+ const logistics={canRead:all,can:(p:string)=>p==='logistics:handle',me:'logistics',today:'2026-10-24'},business={...logistics,can:(p:string)=>p==='orders:write',me:'sales'};
+ function pending(){const state=base();state.fulfillment.shipments=[{id:'shipment',code:'SHP-1',state:'preparing',mode:'air',booking:'BK-1',plannedDate:'2026-11-20',customer:'客户',lines:[{orderId:'order',lineId:'line',quantity:1}]}] as any;state.tasks=[{id:'handoff',kind:'shipping',title:'核对订单出运交接',due:'2026-11-20',done:false,assigneeIds:[],permission:'logistics:handle',target:{view:'orders/detail',id:'order'}}];return state;}
+ it('keeps logistics preparation and actual departure on logistics, returning the document step to business',()=>{
+  const state=pending(),shipment=state.fulfillment.shipments[0],before=structuredClone(state);
+  expect(mistWorkQueue(state,logistics)).toEqual([expect.objectContaining({id:'shipping:shipment',when:'处理中',title:'SHP-1 · 单证准备',target:{view:'shipments',id:'shipment',detail:'full'}})]);expect(mistWorkQueue(state,business)).toEqual([]);expect(state).toEqual(before);
+  shipment.state='ready';expect(mistWorkQueue(state,logistics)).toEqual([]);expect(mistWorkQueue(state,business)).toEqual([expect.objectContaining({title:'SHP-1 · 待对客交单'})]);
+  shipment.documentsSentAt='2026-10-24T08:00:00Z';expect(mistWorkQueue(state,business)).toEqual([]);expect(mistWorkQueue(state,logistics)).toEqual([expect.objectContaining({title:'SHP-1 · 待起飞',when:'待起飞'})]);
+  shipment.state='departed';expect(mistWorkQueue(state,logistics)).toEqual([]);expect(mistWorkQueue(state,business)).toEqual([]);
+ });
+ it('replaces the raw order handoff with the exact active shipment without marking it complete',()=>{
+  const state=pending();expect(mistMyTasks(state,logistics)).toEqual([]);expect(mistMyWork(state,logistics).map(row=>row.id)).toEqual(['shipping:shipment']);expect(state.tasks[0].done).toBe(false);
+  state.fulfillment.shipments[0].state='cancelled';expect(mistWorkQueue(state,logistics)).toEqual([]);expect(mistMyTasks(state,logistics).map(row=>row.id)).toEqual(['handoff']);
+ });
+ it('does not hide the readable order handoff when the employee cannot enter the shipping module',()=>{
+  const state=pending(),options={...logistics,canRead:(view:string)=>view!=='shipments'};expect(mistWorkQueue(state,options)).toEqual([]);expect(mistMyTasks(state,options).map(row=>row.id)).toEqual(['handoff']);expect(mistWorkQueue(state,{...logistics,can:(p:string)=>p==='shipments:write'})).toEqual([]);
+ });
+ it('keeps one item for a combined shipment rather than one task per source order',()=>{
+  const state=pending();state.tasks.push({...state.tasks[0],id:'other-handoff',target:{view:'orders/detail',id:'other-order'}});state.fulfillment.shipments[0].lines.push({orderId:'other-order',lineId:'other-line',quantity:1} as any);expect(mistMyWork(state,logistics).map(row=>row.id)).toEqual(['shipping:shipment']);expect(state.tasks.every(row=>!row.done)).toBe(true);
+ });
+});
+
+it('keeps adopted order samples pending for business until continuation references the current report',()=>{
+ const state=base(),task=qc({businessConfirmation:{result:'approved',actor:'业务员',at:'2026-10-24',note:'采用'}});state.fulfillment.qcTasks=[task] as any;const options={canRead:all,can:(p:string)=>p==='orders:write',me:'sales',today:'2026-10-24'};
+ expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'qc:qc-1',title:'QC-1 · 待业务确认'})]);(task as any).businessContinued={reportId:'previous'};expect(mistWorkQueue(state,options)).toHaveLength(1);(task as any).businessContinued={reportId:'r'};expect(mistWorkQueue(state,options)).toEqual([]);
+});
+it('finishes a rejected order-sample decision without requiring an approval-only continuation',()=>{
+ const state=base();state.fulfillment.qcTasks=[qc({businessConfirmation:{result:'rejected',actor:'业务员',at:'2026-10-24',note:'不采用'}})] as any;expect(mistWorkQueue(state,{canRead:all,can:(p:string)=>p==='orders:write',me:'sales',today:'2026-10-24'})).toEqual([]);
 });

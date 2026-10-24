@@ -48,12 +48,23 @@ export function mistMyTasks(state: MistState | null | undefined, options: Pick<M
       if(claim&&recovery?.state==='Agreed')return {...task,title:localizedPageTitle('工厂补偿')+' · '+claim.code,permission:'invoices:reconcile'};
     }
     return task;
-  }).filter(task => isMyMistTask(task, options));
+  }).filter(task => {
+    if (!isMyMistTask(task, options)) return false;
+    // Once a request exists, the shipment supplies the actionable handoff; keep the original task fact intact.
+    const shipmentHandoff = task.kind === 'shipping' && task.permission === MIST_LOGISTICS_DUTY && task.target.view === 'orders/detail';
+    return !(shipmentHandoff && options.can?.(MIST_LOGISTICS_DUTY) && options.canRead('shipments')
+      && state?.fulfillment.shipments.some(shipment => !['cancelled','departed'].includes(shipment.state) && shipment.lines?.some(line => line.orderId === task.target.id)));
+  });
 }
 
 /** 开发确认存于准确版本；订单样品确认存于 QC 任务，不能互相代替。 */
-function hasSampleDecision(state: MistState, task: MistState['fulfillment']['qcTasks'][number]): boolean {
-  if (task.source.kind !== 'version') return !!task.businessConfirmation;
+function sampleBusinessFinished(state: MistState, task: MistState['fulfillment']['qcTasks'][number]): boolean {
+  if (task.source.kind !== 'version') {
+    if (task.businessConfirmation?.result === 'rejected') return true;
+    if (task.businessConfirmation?.result !== 'approved') return false;
+    const reportId = task.reportIds.at(-1);
+    return !!reportId && task.businessContinued?.reportId === reportId;
+  }
   const source = task.source;
   const version = state.versions.find(item => item.id === source.versionId && item.devId === source.devId);
   if (!version) return false;
@@ -69,7 +80,7 @@ function hasSampleDecision(state: MistState, task: MistState['fulfillment']['qcT
 
 /**
  * 由业务记录派生、等我处理的事项（不写入公司，原记录状态变化后自动消失）：
- * 待我审批；QC 待认领/处理中（QC 岗）与结果待业务确认（业务岗）；出运待物流接手、资料已回待发单、已出运待寄单；
+ * 待我审批；QC 待认领/处理中（QC 岗）与结果待业务确认（业务岗）；出运承接、单证准备、对客交单及实际出运；
  * 未认领收款、待确认发票（财务岗）；我提交后被退回的付款申请。
  */
 export function mistWorkQueue(state: MistState | null | undefined, options: MistWorkOptions): MistWorkItem[] {
@@ -99,21 +110,25 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     // 待认领/检验中只给专业 QC（qc:inspect，且有该业务线登记权）；业务主管虽有登记权但不是检验岗。
     const qcRole = can('qc:inspect') && can(`qc:${task.domain}_chain:write`), business = can('orders:write');
     const open = qcRole && task.state === 'pending', working = qcRole && task.state === 'working' && !!me && task.assigneeId === me;
-    const sampleBack = business && task.kind === 'sample' && task.state === 'reported' && !hasSampleDecision(state, task)
+    const sampleBack = business && task.kind === 'sample' && task.state === 'reported' && !sampleBusinessFinished(state, task)
       && (task.source.kind !== 'version' || canRead('development'));
     const productionBack = business && task.kind === 'production' && (task.state === 'awaiting_business' || task.state === 'blocked');
     if (!open && !working && !sampleBack && !productionBack) continue;
-    const what = open ? '待认领' : working ? '检验中' : task.kind === 'sample' ? '样品评审结果待确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
+    const what = open ? '待认领' : working ? '检验中' : task.kind === 'sample' ? task.source.kind === 'orderLine' && task.businessConfirmation?.result === 'approved' ? '待业务确认' : '待需求方确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
     push({ id: 'qc:' + task.id, source: 'qc', title: `${task.code} · ${uiText(what)}`, meta: [task.factory, task.requestedBy && uiText('发起人') + ' ' + task.requestedBy].filter(Boolean).join(' · '),
       when: task.state === 'blocked' ? '已阻断' : open ? '待认领' : working ? '处理中' : '待确认', urgent: task.state === 'blocked' || (!!task.due && task.due <= today), at: task.due || task.createdAt, due: task.due || undefined,
       target: sampleBack && task.source.kind === 'version' ? { view: 'development/detail', id: task.source.devId, versionId: task.source.versionId } : { view: 'qc-workbench', id: task.id } });
   }
   if (canRead('shipments')) for (const shipment of state.fulfillment.shipments) {
-    const stage = shipmentStage(state, shipment);
-    const intake = stage === 'intake' && can(MIST_LOGISTICS_DUTY), business = stage === 'business' && can('orders:write'), unsent = stage === 'departed' && !shipment.documentsSentAt && can('orders:write');
-    if (!intake && !business && !unsent) continue;
-    push({ id: 'shipping:' + shipment.id, source: 'shipping', title: `${shipment.code} · ${uiText(intake ? '待物流接手' : business ? '资料已回，待发送 CI/PL' : '已出运，单据待寄送')}`, meta: [shipment.customer, (unsent ? shipment.departedAt : shipment.plannedDate)?.slice(0, 10)].filter(Boolean).join(' · '),
-      when: intake ? '待接手' : business ? '待发单' : '待交单', urgent: !unsent && !!shipment.plannedDate && shipment.plannedDate <= today, at: (unsent ? shipment.departedAt : shipment.plannedDate) || '', due: unsent ? undefined : shipment.plannedDate || undefined, target: { view: 'shipments', id: shipment.id } });
+    const stage = shipmentStage(state, shipment), logisticsDuty = can(MIST_LOGISTICS_DUTY);
+    const intake = stage === 'intake' && logisticsDuty, preparing = stage === 'logistics' && logisticsDuty, departure = stage === 'departure' && logisticsDuty;
+    const business = stage === 'business' && can('orders:write'), unsent = stage === 'departed' && !shipment.documentsSentAt && can('orders:write');
+    if (!intake && !preparing && !departure && !business && !unsent) continue;
+    const action = intake ? '待物流接手' : preparing ? '单证准备' : departure ? shipment.mode === 'air' ? '待起飞' : '待离港' : business ? '待对客交单' : '单据待补交';
+    const when = intake ? '待接手' : preparing ? '处理中' : departure ? shipment.mode === 'air' ? '待起飞' : '待离港' : '待交单';
+    push({ id: 'shipping:' + shipment.id, source: 'shipping', title: `${shipment.code} · ${uiText(action)}`, meta: [shipment.customer, (unsent ? shipment.departedAt : shipment.plannedDate)?.slice(0, 10)].filter(Boolean).join(' · '),
+      when, urgent: !unsent && !!shipment.plannedDate && shipment.plannedDate <= today, at: (unsent ? shipment.departedAt : shipment.plannedDate) || '', due: unsent ? undefined : shipment.plannedDate || undefined,
+      target: { view: 'shipments', id: shipment.id, detail: 'full' } });
   }
   if (canRead('payment-vouchers')) {
     if (can('invoices:reconcile')) for (const receipt of state.receipts ?? []) {
