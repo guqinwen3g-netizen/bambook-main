@@ -102,6 +102,7 @@ it('derives line stages and short shipment only from recorded facts', () => {
   const s = store.state!; const order = { id: 'o', code: 'SO-1', type: 'garment', customer: '客户甲' } as never;
   const line = { id: 'l', orderId: 'o', name: '大衣', style: 'C1', img: 'coat', qty: 100, unit: '件', price: 1, made: 0, qc: 0 } as never;
   s.productions.push({ id: 'p', code: 'P-1', orderId: 'o', lineId: 'l', order: 'SO-1', name: '大衣', factory: '甲厂', qty: 100, due: '2026-11-01', pct: 80, img: 'coat', col: 'qc' });
+  s.fulfillment.productionFacts.push({ productionId: 'p', sizes: [], revision: 1, release: { at: context.now, actor: '业务员', note: '已核对' } });
   const task = (id: string, kind: 'sample' | 'production') => ({ id, code: id, kind, domain: 'garment', source: { kind: 'orderLine', orderId: 'o', lineId: 'l', ...(kind === 'production' ? { productionId: 'p' } : {}) }, factory: '甲厂', location: '', contact: '', due: '', requestedBy: '', assignee: '', state: 'reported', reportIds: [id + 'r'], createdAt: '' });
   s.fulfillment.qcTasks.push(task('qs', 'sample') as never, task('qp', 'production') as never);
   s.fulfillment.qcReports.push({ id: 'qsr', taskId: 'qs', result: 'pass' } as never, { id: 'qpr', taskId: 'qp', result: 'reject' } as never);
