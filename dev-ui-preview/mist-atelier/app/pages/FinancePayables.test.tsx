@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
-import { getAllByRole, getByRole, getByLabelText, queryAllByRole } from '@testing-library/dom';
+import { getAllByRole, getByRole, getByLabelText, getByText, queryAllByRole } from '@testing-library/dom';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { createMistState, applyMistCommand } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
@@ -304,9 +304,10 @@ it('不等票付款：已确认结算可写明未收票原因申请先付，经�
   expect(getByRole(host, 'table', { name: '供应商应付汇总' }).textContent).toContain('已付未收票');
   await click(/供应商付款 ·/);
   expect(getByRole(host, 'table', { name: '供应商付款' }).textContent).toContain('已付未收票');
+  const cashBeforeBackfill=structuredClone(store.value.state.payments);
   const bill = actAs('finance', { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'VAT-LATE', invoiceDate: '2026-10-15', currency: po.currency, amount, taxAmount: 0, lines: [{ purchaseId: po.id, amount, settlementId: st.id }], due: '2026-11-14', dueBasis: '月结' } });
   route = { view: 'payment-vouchers', section: 'payables', id: bill.id }; render();
-  expect(host.textContent).toContain('先付抵扣（不等票付款）'); expect(host.textContent).toContain('按结算先付的款已自动抵扣');
+  expect(host.textContent).toContain('先付抵扣（不等票付款）');const detail=host.querySelector('[data-payable-bill="'+bill.id+'"]') as HTMLElement;expect(getByText(detail,'已结清 / 未付')).toBeTruthy();expect(getByText(detail,'1,000.00 CNY / '+(amount-1000).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' CNY')).toBeTruthy();expect(detail.textContent).not.toContain('直接付款分配');expect(getByRole(host,'table',{name:'供应商应付汇总'}).textContent).toContain('已结清');expect(store.value.state.payments).toEqual(cashBeforeBackfill);
 });
 
 it('历史付款补登：计划详情按凭证补登，不走审批，记为历史补登', async () => {
