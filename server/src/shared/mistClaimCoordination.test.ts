@@ -6,7 +6,7 @@ import {claimLedger,currentClaimVerification} from './mistClaimCoordination';
 function fixture(){
  let id=0;const ctx:MistContext={id:()=>`coord-${++id}`,now:'2026-10-14T08:00:00Z',actorId:'business',actorName:'业务员顾言',consumeBusinessNumber:testClaimNumberConsumer('2026-10-14T08:00:00Z'),authority:{supplier:{},claimReviewerId:'reviewer',orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}}};let state=createMistState(ctx,'empty');
  const run=(command:MistCommand,actor=ctx)=>{const result=applyMistCommand(state,command,actor);state=result.state;return result.result as Record<string,any>;};
- const qc={...ctx,actorId:'qc',actorName:'质检许言'},leader={...ctx,actorId:'reviewer',actorName:'负责人周敏'},finance={...ctx,actorId:'finance',actorName:'财务'};
+ const qc={...ctx,actorId:'qc',actorName:'质检许言',can:(scope:string)=>['qc:inspect','qc:garment_chain:write'].includes(scope)},leader={...ctx,actorId:'reviewer',actorName:'负责人周敏'},finance={...ctx,actorId:'finance',actorName:'财务'};
  run({type:'market.customer.create',payload:{input:{name:'实际客户',country:'FR',city:'巴黎',industry:'成衣',ownerId:'business',grade:'A',currency:'USD',terms:'OA 30天',incoterm:'FOB',categories:'成衣',creditLimit:0,since:'2026-10-13'}}});
  run({type:'files.add',payload:{file:{id:'photo',name:'客户照片.jpg',mimeType:'image/jpeg',size:10,storageKey:'fixture/photo',createdAt:ctx.now}}});
  const supplierId=run({type:'market.supplier.save',payload:{input:{code:'F1',name:'江南成衣',type:'成衣加工',country:'CN',address:'嘉兴',capabilities:'成衣',capacity:1,capacityUnit:'件',leadDays:10}}} as MistCommand).id;
@@ -70,3 +70,20 @@ describe('售后索赔协同',()=>{
   expect(()=>g.run({type:'platform.claim.cancel',payload:{id:g.claimId,reason:'撤回'}})).toThrow('已落实');expect(rid).toBeTruthy();
  });
 });
+
+ it('requires current QC authority for the source order business line and leaves denied evidence unchanged',()=>{
+  for(const domain of ['garment','fabric'] as const){
+   const f=fixture();f.state.orders.find(o=>o.id===f.claim().orderId)!.type=domain;
+   const command={type:'platform.claim.verify',payload:{id:f.claimId,result:'confirmed',scope:'来源订单当前批次',affectedQuantity:1,unit:'件',goodsLocation:'customer',mitigation:'',factoryResponse:'',safety:false,fileIds:[]}} as MistCommand;
+   const before=structuredClone(f.state),other=domain==='garment'?'fabric':'garment';
+   for(const can of [undefined,()=>false,(scope:string)=>scope==='qc:inspect'||scope===`qc:${other}_chain:write`,(scope:string)=>scope===`qc:${domain}_chain:write`]){
+    expect(()=>f.run(command,{...f.qc,can})).toThrow('对应业务线');expect(f.state).toEqual(before);
+   }
+   f.run(command,{...f.qc,can:scope=>scope==='qc:inspect'||scope===`qc:${domain}_chain:write`});
+   expect(currentClaimVerification(f.claim())?.byId).toBe('qc');
+  }
+ });
+ it('routes QC follow-up to the source line and retains claim currency when invoice access is hidden',()=>{
+  const f=fixture();notify(f);expect(f.state.tasks.find(t=>t.kind==='claim-verify:'+f.claimId)?.permission).toBe('qc:garment_chain:write');
+  f.state.invoices=[];expect(claimLedger(f.state,f.claim()).currency).toBe('USD');
+ });

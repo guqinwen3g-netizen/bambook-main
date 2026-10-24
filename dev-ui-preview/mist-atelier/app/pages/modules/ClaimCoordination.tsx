@@ -102,7 +102,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
     {open && !check && claim.dispositions.length > 0 && <Banner tone="warn" title={uiText("质检尚未核实")}>{uiText("紧急情况可以先采取保护措施，但责任和金额要等事实核实后再定。")}</Banner>}
     {open && ledger.customerSettled && ledger.recoveryOpen && <Banner tone="warn" title={uiText("客户这边已解决，但还在等工厂补偿")}>{uiText("工厂补偿落实或经负责人批准放弃后，案件才能关闭。")}</Banner>}
     <Card>
-      <CardHeader title={uiText("处理进度")} sub={uiText("业务员协调，质检给结论，负责人批准对外承诺，跟单落实工厂，财务处理款项")} tools={<div className="mist-row">
+      <CardHeader title={uiText("处理进度")} tools={<div className="mist-row">
         {can.write && open && <Button disabled={busy} onClick={notify}>{uiText(notice ? '再次通知' : '通知相关人员')}</Button>}
         {can.qc && open && <Button disabled={busy} onClick={verify}>{uiText(check ? '更新质检核实' : '记录质检核实')}</Button>}
       </div>} />
@@ -123,7 +123,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
       </div>
     </Card>}
     <Card>
-      <CardHeader title={uiText("两笔账")} sub={uiText("我们答应客户什么 · 工厂答应我们什么 · 公司自己承担多少")} tools={can.write && open ? <Button disabled={busy} onClick={openRecovery}>{uiText("向工厂追偿")}</Button> : undefined} />
+      <CardHeader title={uiText("两笔账")} tools={can.write && open ? <Button disabled={busy} onClick={openRecovery}>{uiText("向工厂追偿")}</Button> : undefined} />
       <div className="mist-card-body">
         <Facts cols={3} items={[
           { label: '对客户（已批准）', value: money(ledger.customer, ledger.currency) + (ledger.customerPending ? ' · 另有 ' + money(ledger.customerPending, ledger.currency) + ' 待批' : '') },
