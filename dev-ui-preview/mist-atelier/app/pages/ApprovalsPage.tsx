@@ -75,7 +75,7 @@ export function ApprovalsPage() {
   const targetBase = selected?.target.view.split('/')[0] ?? '';
   const sameSpace = !!selected && selected.workspaceId === current?.id;
   const openReason = !selected ? '' : !sameSpace ? `该审批属于公司“${selected.workspaceName}”，请先切换到该公司再打开原业务` : !session.canAccessView(targetBase as View) ? '当前账号没有原业务的查看权限' : undefined;
-  const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '你是发起人，不能审批本人提交的事项' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent ? '上一次审批结果待核对，请先核对原请求' : undefined;
+  const decideReason = !selected ? '' : selected.status !== 'pending' ? '这项审批已处理' : selected.local ? '你是发起人，不能审批本人提交的事项' : !selected.canDecide ? '你不在本次审批人名单中，或缺少该类审批权限' : reviews.intent&&!reviews.busy ? '上一次审批结果待核对，请先核对原请求' : undefined;
   const detail = selected ? <DetailBody data-approval={selected.id} heading={<h2 className="mist-h2">{localizedPageTitle(selected.title)}</h2>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{uiText(STATUS[selected.status].label)}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill></div>
     <Facts items={[{ label: '发起人', value: requester(selected) }, { label: '提交时间', value: day(selected.submittedAt) }, { label: '审批人', value: selected.reviewerIds.includes(me) ? (selected.reviewerIds.length > 1 ? `我及另外 ${selected.reviewerIds.length - 1} 人` : '我') : `${selected.reviewerIds.length} 人` }]} />
@@ -93,7 +93,7 @@ export function ApprovalsPage() {
   return <MistPage>
     <PageHeader eyebrow={uiText("我的事务 · 审批与放行")} title={uiText("审批与放行")} actions={<Button icon={RefreshCw} disabled={reviews.busy} onClick={() => void reviews.refresh()}>{uiText("刷新")}</Button>} />
     {reviews.error && <Banner tone="bad" title={uiText(reviews.error)} actions={<Button size="sm" onClick={reviews.clearError}>{uiText("知道了")}</Button>} />}
-    {reviews.intent && <Banner tone="warn" title={uiText("有审批结果待核对")} actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>{uiText("核对原请求")}</Button>}>{uiText("审批结果未确认，请核对。")}</Banner>}
+    {reviews.intent&&!reviews.busy && <Banner tone="warn" title={uiText("有审批结果待核对")} actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>{uiText("核对原请求")}</Button>}>{uiText("审批结果未确认，请核对。")}</Banner>}
     <Tabs<ApprovalTab> value={tab} onChange={next => { setDrawer(false); go('approvals', undefined, { section: next }); }} options={[
       { value: 'mine', label: '待我审批', count: counts.mine }, { value: 'sent', label: '我发起的', count: counts.sent }, { value: 'done', label: '已处理', count: counts.done },
       ...(counts.others ? [{ value: 'others' as const, label: '公司内其他待审', count: counts.others }] : []),

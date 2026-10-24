@@ -1,12 +1,13 @@
+import {recoveryOtherFulfilledMinor,type ClaimRecoverySettlement} from '../../../../../server/src/shared/mistClaimRecoveryReceipts';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
-import {businessWhen} from './pageKit';
+import {businessWhen,RecordDisclosure} from './pageKit';
 /** 售后索赔协同：通知相关人员 → 质检核实（工厂参与）→ 客户处置（原审批）→ 两笔账（客户 / 工厂追偿）→ 两边都落实才结束。 */
 import React from 'react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Facts, Pill, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
-import { platformCreditRemaining, type PlatformClaim, type PlatformCommand } from '../../../../../server/src/shared/mistPlatform';
+import { platformCreditRemaining,platformBusinessDate, type PlatformClaim, type PlatformCommand } from '../../../../../server/src/shared/mistPlatform';
 import { CLAIM_LOCATION_LABEL, CLAIM_METHOD_LABEL, CLAIM_RECOVERY_LABEL, CLAIM_RESULT_LABEL, claimLedger, currentClaimVerification, type ClaimGoodsLocation, type ClaimRecovery, type ClaimRecoveryMethod, type ClaimVerifyResult } from '../../../../../server/src/shared/mistClaimCoordination';
 import { billRequestedUnpaidMinor, payableBills, recoveryDeductedMinor, supplierDeductions } from '../../../../../server/src/shared/mistPayables';
 import type { ModuleEditorSpec, ModuleField, ModuleValues } from './ModuleWorkbench';
@@ -24,7 +25,7 @@ type Props = {
   can: { write: boolean; qc: boolean; finance: boolean; approve: boolean };
   command: (command: PlatformCommand) => Promise<unknown>; openEditor: (spec: ModuleEditorSpec) => void;
   /** 打开应付（“从货款中扣”由财务在应付里按票据登记扣款）。 */
-  onPayables?: () => void;
+  onPayables?: () => void; onReceipt?:(id:string)=>void;
 };
 
 /** 默认工厂：订单生产分支上登记的工厂，名称在供应商档案中唯一时才预选。 */
@@ -34,7 +35,7 @@ export function claimDefaultSupplierId(state: MistState, claim: PlatformClaim) {
   return matches.length === 1 ? matches[0].id : '';
 }
 
-export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, command, openEditor, onPayables }: Props) {
+export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, command, openEditor, onPayables,onReceipt }: Props) {
   const open = !['Closed', 'Cancelled'].includes(claim.state);
   const co = claim.coordination, notice = co?.notices.at(-1), check = currentClaimVerification(claim), ledger = claimLedger(state, claim, { creditsOpen: (state.platform?.credits ?? []).some(note => note.claimId === claim.id && platformCreditRemaining(state, note.id) > 0) });
   const recoveries = co?.recoveries ?? [], suppliers = (state.market?.suppliers ?? []).map(row => ({ value: row.id, label: row.name + (row.status === 'active' ? '' : '（' + (row.status === 'paused' ? '已暂停' : '已停用') + '）') }));
@@ -84,16 +85,21 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   /** 这家工厂同币种还有可扣的未付票据吗（未作废、未暂挂、未付扣除待付申请后仍有余额）。 */
   const deductRoom = (r: ClaimRecovery) => payableBills(state, '').some(b => b.supplierId === r.supplierId && b.currency === r.currency && b.status !== 'void' && !b.held && Math.round(b.open * 100) - billRequestedUnpaidMinor(state, b.id) > 0);
   const switchToPayment = (r: ClaimRecovery) => openEditor({
-    title: '改为工厂付款', description: `已扣 ${money(deducted(r), r.currency)} · 待收 ${money(Math.max(0, (r.agreed ?? 0) - deducted(r)), r.currency)}`,
-    fields: [f('reason', '改方式原因与确认依据', 'textarea')], initialValues: { reason: '' }, submitLabel: '确认改为工厂付款',
+    title: '改为工厂付款', description: `已扣 ${money(deducted(r), r.currency)} · 待收 ${money(Math.max(0, (r.agreed ?? 0) - deducted(r)-recoveryOtherFulfilledMinor(r)/100), r.currency)}`,
+    fields: [f('reason', '变更依据', 'textarea')], initialValues: { reason: '' }, submitLabel: '确认改为工厂付款',
     submit: v => command({ type: 'platform.claim.recovery.method', payload: { id: r.id, method: 'payment', reason: s(v, 'reason') } } as PlatformCommand),
   });
-  const settle = (r: ClaimRecovery) => openEditor({
-    title: '落实补偿', description: deducted(r) > 0 ? `已扣 ${money(deducted(r), r.currency)}` : undefined,
-    fields: [f('amount', (deducted(r) > 0 ? '其他方式落实金额（' : '实际落实金额（') + r.currency + '）', 'number', { min: 0.01, step: '0.01' }), f('date', '落实日期', 'date'), f('reference', '实际扣款 / 收款凭据', 'text')],
-    initialValues: { amount: r.agreed === undefined ? '' : Math.max(0, Math.round((r.agreed - deducted(r)) * 100) / 100), date: businessNow().toISOString().slice(0, 10), reference: '' }, submitLabel: '确认已落实',
-    submit: v => command({ type: 'platform.claim.recovery.settle', payload: { id: r.id, amount: n(v, 'amount'), date: s(v, 'date'), reference: s(v, 'reference') } }),
-  });
+  const fulfilled=(r:ClaimRecovery)=>Math.max(r.settled??0,deducted(r)+recoveryOtherFulfilledMinor(r)/100);
+  const settle=(r:ClaimRecovery)=>{
+    const cash=r.method==='payment'||r.method==='mixed',left=Math.max(0,(r.agreed??0)-fulfilled(r));
+    const receipts=state.receipts.filter(row=>row.currency===r.currency&&row.remaining>0&&!!row.accountId&&row.date<=platformBusinessDate(businessNow()));
+    openEditor({title:cash?'对应工厂到账':'落实补偿',description:r.supplierName+' · 待落实 '+money(left,r.currency),
+      fields:cash?[f('receiptId','对应到账','select',{options:[{value:'',label:receipts.length?'请选择':'暂无可对应到账'},...receipts.map(row=>({value:row.id,label:row.code+' · '+row.payer+' · '+money(row.remaining,row.currency)}))]}),f('amount','本次对应金额','number',{min:0.01,step:'0.01'}),f('payerBasis','付款方关系依据','textarea',{required:false})]:[f('amount','本次落实金额','number',{min:0.01,step:'0.01'}),f('date','落实日期','date'),f('reference','补偿凭据')],
+      initialValues:cash?{receiptId:'',amount:'',payerBasis:''}:{amount:'',date:platformBusinessDate(businessNow()),reference:''},submitLabel:cash?'确认对应':'确认落实',
+      submit:v=>cash?command({type:'platform.claim.recovery.receipt.allocate',payload:{id:r.id,receiptId:s(v,'receiptId'),amount:n(v,'amount'),...(s(v,'payerBasis')?{payerBasis:s(v,'payerBasis')}: {})}}):command({type:'platform.claim.recovery.settle',payload:{id:r.id,amount:n(v,'amount'),date:s(v,'date'),reference:s(v,'reference')}}),
+    });
+  };
+  const reverse=(r:ClaimRecovery,entry:ClaimRecoverySettlement)=>openEditor({title:'冲回对应',description:(entry.receiptCode||entry.reference)+' · '+money(entry.amount,entry.currency),fields:[f('reason','冲回原因','textarea')],initialValues:{reason:''},submitLabel:'确认冲回',submit:v=>command({type:'platform.claim.recovery.settlement.reverse',payload:{id:r.id,settlementId:entry.id,reason:s(v,'reason')}})});
   const waive = (r: ClaimRecovery) => openEditor({
     title: '放弃追偿', fields: [f('reason', '放弃的原因', 'textarea')], initialValues: { reason: '' }, submitLabel: '批准放弃',
     submit: v => command({ type: 'platform.claim.recovery.waive', payload: { id: r.id, reason: s(v, 'reason') } }),
@@ -136,15 +142,15 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
           { key: 'supplier', header: '工厂', render: r => r.supplierName },
           { key: 'requested', header: '提出', align: 'right', render: r => money(r.requested, r.currency) },
           { key: 'agreed', header: '工厂同意', align: 'right', render: r => r.agreed === undefined ? '—' : money(r.agreed, r.currency) + (r.method ? ' · ' + CLAIM_METHOD_LABEL[r.method] : '') },
-          { key: 'state', header: '状态', render: r => <Pill tone={RECOVERY_TONE[r.state]}>{CLAIM_RECOVERY_LABEL[r.state]}</Pill> },
-          { key: 'note', header: '依据 / 凭据', render: r => <span className="mist-col"><span>{r.settledRef || r.waiveReason || r.agreedNote || r.basis}</span>{(r.method === 'deduction' || r.method === 'mixed' || deducted(r) > 0) && r.state === 'Agreed' && <span className="mist-note">{uiText("已从货款扣 ")}{money(deducted(r), r.currency)}{uiText(" / 同意 ")}{money(r.agreed ?? 0, r.currency)}{uiText(supplierDeductions(state).some(d => d.recoveryId === r.id && !d.reversed) ? ' · ' + supplierDeductions(state).filter(d => d.recoveryId === r.id && !d.reversed).map(d => d.code + ' ' + d.billCode).join('、') : '')}</span>}</span> },
+          { key: 'state', header: '状态', render: r => <Pill tone={RECOVERY_TONE[r.state]}>{uiText(r.state==='Agreed'&&fulfilled(r)>0?'部分落实':CLAIM_RECOVERY_LABEL[r.state])}</Pill> },
+          { key: 'note', header: '依据 / 凭据', render: r => <div className="mist-col"><span>{r.settledRef || r.waiveReason || r.agreedNote || r.basis}</span>{fulfilled(r)>0&&<span className="mist-note">{uiText('已落实 ')}{money(fulfilled(r),r.currency)} · {uiText('未落实 ')}{money(Math.max(0,(r.agreed??0)-fulfilled(r)),r.currency)}</span>}{(r.method === 'deduction' || r.method === 'mixed' || deducted(r) > 0) && r.state === 'Agreed' && <span className="mist-note">{uiText("已从货款扣 ")}{money(deducted(r), r.currency)}{uiText(" / 同意 ")}{money(r.agreed ?? 0, r.currency)}{uiText(supplierDeductions(state).some(d => d.recoveryId === r.id && !d.reversed) ? ' · ' + supplierDeductions(state).filter(d => d.recoveryId === r.id && !d.reversed).map(d => d.code + ' ' + d.billCode).join('、') : '')}</span>}{!!r.settlements?.length&&<RecordDisclosure title={uiText('落实记录')}><div className="mist-col">{r.settlements.map(entry=><div key={entry.id} className="mist-col"><div className="mist-row"><span>{entry.receiptCode||entry.reference}</span><span>{money(entry.amount,entry.currency)}</span>{entry.reversed?<Pill tone="neutral">{uiText('已冲回')}</Pill>:can.finance&&open&&!['Waived','Withdrawn'].includes(r.state)?<Button size="sm" variant="quiet" disabled={busy} onClick={()=>reverse(r,entry)}>{uiText('冲回对应')}</Button>:null}{entry.receiptId&&onReceipt&&<Button size="sm" variant="quiet" onClick={()=>onReceipt(entry.receiptId!)}>{uiText('查看到账')}</Button>}</div><span className="mist-note">{entry.date} · {entry.by} · {entry.reference}{entry.reversed?' · '+entry.reversed.reason:''}</span></div>)}</div></RecordDisclosure>}</div> },
           { key: 'actions', header: '操作', render: r => <div className="mist-row">
             {can.write && open && r.state === 'Negotiating' && <Button variant="quiet" disabled={busy} onClick={() => agree(r)}>{uiText("记录工厂同意")}</Button>}
-            {can.finance && open && r.state === 'Agreed' && r.method !== 'deduction' && <Button variant="quiet" disabled={busy} onClick={() => settle(r)}>{uiText("登记实际落实")}</Button>}
-            {open && r.state === 'Agreed' && r.method === 'deduction' && <span className="mist-note">{uiText("由财务在应付里按工厂票据扣款，扣满自动落实")}</span>}
+            {can.finance && open && r.state === 'Agreed' && r.method !== 'deduction' && <Button variant="quiet" disabled={busy} onClick={() => settle(r)}>{uiText(r.method==='payment'||r.method==='mixed'?'对应到账':'登记实际落实')}</Button>}
+            {open && r.state === 'Agreed' && r.method === 'deduction' && <Pill tone="neutral">{uiText("待财务扣款")}</Pill>}
             {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && onPayables && deductRoom(r) && <Button variant="quiet" disabled={busy} onClick={onPayables}>{uiText("去应付扣款")}</Button>}
-            {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && !deductRoom(r) && <span className="mist-note">{uiText("这家工厂暂无可扣的未付票据（货款可能已付清），可改为工厂直接付款")}</span>}
-            {can.write && open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && (r.agreed ?? 0) - deducted(r) > 0 && <Button variant="quiet" disabled={busy} onClick={() => switchToPayment(r)}>{uiText("改为工厂付款")}</Button>}
+            {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && !deductRoom(r) && <span className="mist-note">{uiText("暂无可扣余额")}</span>}
+            {can.write && open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && (r.agreed ?? 0) - deducted(r)-recoveryOtherFulfilledMinor(r)/100 > 0 && <Button variant="quiet" disabled={busy} onClick={() => switchToPayment(r)}>{uiText("改为工厂付款")}</Button>}
             {can.approve && open && ['Negotiating', 'Agreed'].includes(r.state) && r.createdById !== actorId && <Button variant="quiet" disabled={busy} onClick={() => waive(r)}>{uiText("批准放弃")}</Button>}
           </div> },
         ]} />}

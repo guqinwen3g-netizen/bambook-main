@@ -148,3 +148,11 @@ describe('development QC return follows the exact version decision', () => {
     expect(mistWorkQueue(state, options)).toHaveLength(1);
   });
 });
+
+it('routes an existing return task to warehouse writers without exposing it to finance or QC or mutating stored assignments',()=>{
+ const state=base();state.fulfillment.returnReceipts=[{id:'rt',code:'RT-EXAMPLE',claimId:'claim',warehouseId:'warehouse',goodsIds:['goods'],createdAt:'',actorId:'business',actor:'业务'}];state.tasks=[{id:'task',kind:'claim-inventory:goods',title:'较长的原任务标题',due:'',done:false,target:{view:'inventory',id:'rt'},assigneeIds:['business']}];const before=JSON.stringify(state.tasks);
+ expect(mistMyTasks(state,{me:'warehouse',canRead:v=>v==='inventory',can:p=>p==='inventory:write'})).toMatchObject([{id:'task',title:'退货处理 · RT-EXAMPLE',permission:'inventory:write'}]);expect(mistMyTasks(state,{me:'finance',canRead:all,can:p=>p==='invoices:reconcile'})).toEqual([]);expect(mistMyTasks(state,{me:'qc',canRead:all,can:p=>p==='qc:inspect'})).toEqual([]);expect(JSON.stringify(state.tasks)).toBe(before);
+});
+it('hands an agreed compensation to finance while leaving negotiation with its business owner',()=>{
+ const state=base();state.platform!.claims=[{id:'claim',code:'CLM-EXAMPLE',state:'Processing',orderId:'order',invoiceId:'invoice',problem:'',fileIds:[],createdAt:'',dispositions:[],coordination:{notices:[],verifications:[],recoveries:[{id:'recovery',supplierId:'s',supplierName:'工厂',currency:'CNY',requested:100,agreed:100,state:'Negotiating',method:'payment',basis:'',createdAt:'',createdBy:'业务',createdById:'business',events:[]}]}}];state.tasks=[{id:'task',kind:'claim-recovery:recovery',title:'跟进补偿',due:'',done:false,target:{view:'claims',id:'claim'},assigneeIds:['business']}];const options={me:'finance',canRead:all,can:(p:string)=>p==='invoices:reconcile'};expect(mistMyTasks(state,options)).toHaveLength(0);state.platform!.claims[0].coordination!.recoveries[0].state='Agreed';expect(mistMyTasks(state,options)).toMatchObject([{id:'task',permission:'invoices:reconcile'}]);
+});

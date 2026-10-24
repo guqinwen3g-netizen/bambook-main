@@ -33,7 +33,17 @@ export function isMyMistTask(task: MistTask, options: Pick<MistWorkOptions, 'me'
   return mine && options.canRead(mistWorkModule(task.target?.view));
 }
 export function mistMyTasks(state: MistState | null | undefined, options: Pick<MistWorkOptions, 'me' | 'can' | 'canRead'>) {
-  return (state?.tasks ?? []).filter(task => isMyMistTask(task, options));
+  return (state?.tasks ?? []).map(task=>{
+    if(task.kind?.startsWith('claim-inventory:')&&task.target.view==='inventory'){
+      const receipt=state?.fulfillment.returnReceipts?.find(row=>row.id===task.target.id);
+      if(receipt)return {...task,title:localizedPageTitle('退货处理')+' · '+receipt.code,target:{...task.target,section:'claim:'+receipt.claimId},permission:'inventory:write'};
+    }
+    if(task.kind?.startsWith('claim-recovery:')&&task.target.view==='claims'){
+      const claim=state?.platform?.claims.find(row=>row.id===task.target.id),recovery=claim?.coordination?.recoveries.find(row=>task.kind==='claim-recovery:'+row.id);
+      if(claim&&recovery?.state==='Agreed')return {...task,title:localizedPageTitle('工厂补偿')+' · '+claim.code,permission:'invoices:reconcile'};
+    }
+    return task;
+  }).filter(task => isMyMistTask(task, options));
 }
 
 /** 开发确认存于准确版本；订单样品确认存于 QC 任务，不能互相代替。 */

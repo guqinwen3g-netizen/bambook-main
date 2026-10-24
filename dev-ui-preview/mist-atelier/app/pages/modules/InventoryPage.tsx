@@ -52,10 +52,11 @@ function UnitLines({ totals, tone }: { totals: Array<[string, number]>; tone?: T
 
 export function InventoryPage() {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), nav = useNav(), { route, go } = nav;
-  const f = state?.fulfillment, hasClaim = route.section?.startsWith('claim:') === true, claimId = hasClaim ? route.section!.slice(6) : undefined;
-  const claim = state?.platform.claims.find(row => row.id === claimId), receipt = f?.returnReceipts?.find(row => row.id === route.id), incomingStock = f?.stock.find(row => row.id === route.id);
+  const f=state?.fulfillment,receipt=f?.returnReceipts?.find(row=>row.id===route.id);
+  const explicitClaim=route.section?.startsWith('claim:')===true,hasClaim=explicitClaim||!!receipt,claimId=explicitClaim?route.section!.slice(6):receipt?.claimId;
+  const claim=state?.platform.claims.find(row=>row.id===claimId),incomingStock=f?.stock.find(row=>row.id===route.id);
   const invalidSource = hasClaim && !!state && (!claim || !!route.id && !receipt && !incomingStock || !!receipt && receipt.claimId !== claim?.id || !!incomingStock && incomingStock.claimId !== claim?.id);
-  const [warehouseFilter, setWarehouseFilter] = React.useState(''); React.useEffect(() => { setWarehouseFilter(''); }, [route.section, session.sessionKey]);
+  const [warehouseFilter, setWarehouseFilter] = React.useState(''); React.useEffect(() => { setWarehouseFilter(''); }, [route.section, receipt?.id, session.sessionKey]);
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [sourceFilter, setSourceFilter] = React.useState<SourceFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(incomingStock ? incomingStock.id : null), [drawer, setDrawer] = React.useState(!!incomingStock);
   React.useEffect(() => { if (incomingStock) { setPicked(incomingStock.id); setDomainChoice(null); } }, [incomingStock?.id]);
@@ -63,8 +64,8 @@ export function InventoryPage() {
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const claimGoods = (state?.platform.claimGoods || []).filter(goods => goods.source && goods.returnReceiptId && (!hasClaim || goods.claimId === claim?.id) && (!receipt || goods.returnReceiptId === receipt.id));
   const sourceGoods = claimGoods.find(goods => goods.id === selectedGoods), terminal = !!claim && ['Closed', 'Cancelled'].includes(claim.state);
-  const scoped = invalidSource ? [] : (f?.stock || []).filter(stock => { if (!route.section) return true; if (hasClaim) return !!claim && stock.claimId === claim.id && (!receipt || stock.returnReceiptId === receipt.id); return stock.purchaseId === route.section; });
-  const sourceMode = !!route.section;
+  const scoped = invalidSource ? [] : (f?.stock || []).filter(stock => { if (hasClaim) return !!claim && stock.claimId === claim.id && (!receipt || stock.returnReceiptId === receipt.id); if(!route.section)return true;return stock.purchaseId === route.section; });
+  const sourceMode = !!route.section||!!receipt;
   const routedDomain = state && incomingStock ? domainOf(state, incomingStock) : undefined;
   const domain: Domain = domainChoice || routedDomain || (!state || scoped.some(stock => domainOf(state, stock) === 'garment') || !scoped.some(stock => domainOf(state, stock) === 'fabric') ? 'garment' : 'fabric');
   const domainRows = sourceMode || !state ? scoped : scoped.filter(stock => { const value = domainOf(state, stock); return !value || value === domain; });
@@ -115,7 +116,7 @@ export function InventoryPage() {
   const back = <>{hasClaim && claim && session.canAccessView(View.Claims) && <Button onClick={() => go('claims', claim.id)}>{uiText("返回来源案件")}</Button>}{hasClaim && <Button onClick={() => go('inventory')}>{uiText("查看全部库存")}</Button>}{!hasClaim && route.section && <Button onClick={() => go('procurement', route.section)}>{uiText("返回来源采购")}</Button>}</>;
   if (catalog) return <Nav.Provider value={{ ...nav, route: { ...route, id: catalogId }, go: (view, id, target) => { if (view === 'inventory') setCatalogId(id); else go(view, id, target); } }}><ModuleWorkbench title={uiText("仓库目录")} rows={f?.warehouses || []} columns={[{ key: 'code', header: '仓库', render: row => <><Mono>{row.code}</Mono><div>{row.name}</div></> }, { key: 'address', header: '实际地址', render: row => row.address }, { key: 'active', header: '状态', render: row => <Pill tone={row.active ? 'ok' : 'neutral'}>{uiText(row.active ? '启用' : '停用')}</Pill> }]} create={can ? warehouseSpec() : undefined} edit={can ? row => warehouseSpec(row) : undefined} detail={row => <KeyValue items={[{ label: '仓库代码', value: row.code }, { label: '仓库名称', value: row.name }, { label: '实际地址', value: row.address }, { label: '当前状态', value: row.active ? '启用' : '停用' }]} />} toolbar={<>{back}<Button onClick={() => { setCatalog(false); setCatalogId(undefined); }}>{uiText("返回库存台账")}</Button></>} /></Nav.Provider>;
   const receivingBlocked = !sourceGoods || terminal || invalidSource || (sourceGoods.receivedQuantity || 0) >= sourceGoods.quantity || !f?.warehouses.some(row => row.id === f.returnReceipts.find(rt => rt.id === sourceGoods.returnReceiptId)?.warehouseId && row.active);
-  const receivingReason = !sourceGoods ? '请先选择准确退回履行条目' : terminal ? '来源案件已结束' : (sourceGoods.receivedQuantity || 0) >= sourceGoods.quantity ? '本条目已全部收货' : receivingBlocked ? '退货单仓库未启用' : '';
+  const receivingReason = !sourceGoods ? '请先选择退货条目' : terminal ? '来源案件已结束' : (sourceGoods.receivedQuantity || 0) >= sourceGoods.quantity ? '本条目已全部收货' : receivingBlocked ? '退货单仓库未启用' : '';
 
   const pick = (stock: FulfillmentStock) => { setPicked(stock.id); setDrawer(true); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStateFilter('all'); setPicked(null); };
@@ -132,7 +133,7 @@ export function InventoryPage() {
   const filtersOn = !!needle || stateFilter !== 'all' || sourceFilter !== 'all' || !!warehouseFilter;
   const empty = filtersOn && domainRows.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的库存")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStateFilter('all'); setSourceFilter('all'); setWarehouseFilter(''); }}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={Boxes} title={uiText(invalidSource ? '来源不匹配' : sourceMode ? '本来源还没有入库批次' : `还没有${DOMAIN_LABEL[domain]}`)} description={uiText(invalidSource ? '请返回来源案件重新选择准确退货单。' : '库存只来自真实的采购交付入库（在采购单上登记“入我方仓库”）和批准的退货入库，不能在这里手工新增。')} action={!sourceMode && session.canAccessView(View.Procurement) ? <Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button> : undefined} />;
+    : <EmptyState icon={Boxes} title={uiText(invalidSource ? '来源不匹配' : sourceMode ? '本来源还没有入库批次' : `还没有${DOMAIN_LABEL[domain]}`)} description={uiText(invalidSource ? '请返回来源案件重新选择准确退货单。' : '')} action={!sourceMode && session.canAccessView(View.Procurement) ? <Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button> : undefined} />;
   const detail = selected && state
     ? <StockDetail stock={selected} state={state} can={canStockWrite(selected)} locked={locked}
         onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))}
@@ -146,12 +147,12 @@ export function InventoryPage() {
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("库存读取未完成")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     {hasClaim && !f?.warehouses.length && <div className="mist-section"><Banner tone="warn" title={uiText("尚无真实仓库")}>{uiText("请先登记，再返回案件选择退货仓库。")}</Banner></div>}
     {hasClaim && !invalidSource && <div className="mist-section"><Card><div className="mist-card-body mist-col">
-      <div className="mist-row" style={{ flexWrap: 'wrap' }}><span className="mist-eyebrow">{uiText("退货收货 · ")}{claim?.code}</span><span className="mist-spacer" /><span className="mist-note">{uiText("逐条选择准确退回履行条目，按实际点数登记；收货后自动隔离。")}</span></div>
+      <div className="mist-row" style={{ flexWrap: 'wrap' }}><span className="mist-eyebrow">{uiText("退货收货 · ")}{claim?.code}</span><span className="mist-spacer" /></div>
       <div className="mist-row" style={{ flexWrap: 'wrap' }}>
-        <Select aria-label={uiText("准确退回履行条目")} value={selectedGoods} onChange={event => setSelectedGoods(event.target.value)} options={[emptyOption, ...claimGoods.map(goods => ({ value: goods.id, label: `${f?.returnReceipts.find(rt => rt.id === goods.returnReceiptId)?.code || '退货单不可用'} · ${goods.source!.style} · 批准${goods.quantity}${goods.unit} / 已收${goods.receivedQuantity || 0}${goods.unit}` }))]} />
-        {can && <Button variant="primary" icon={PackageMinus} disabled={receivingBlocked} title={uiText(receivingReason || undefined)} onClick={receive}>{uiText("登记本批真实收货")}</Button>}
+        <Select aria-label={uiText("退货条目")} value={selectedGoods} onChange={event => setSelectedGoods(event.target.value)} options={[emptyOption, ...claimGoods.map(goods => ({ value: goods.id, label: `${f?.returnReceipts.find(rt => rt.id === goods.returnReceiptId)?.code || '退货单不可用'} · ${goods.source!.style} · 批准${goods.quantity}${goods.unit} / 已收${goods.receivedQuantity || 0}${goods.unit}` }))]} />
+        {can && <Button variant="primary" icon={PackageMinus} disabled={receivingBlocked} title={uiText(receivingReason || undefined)} onClick={receive}>{uiText("登记收货")}</Button>}
       </div>
-      {can && receivingBlocked && receivingReason && <span className="mist-note">{uiText("登记本批真实收货：")}{receivingReason}</span>}
+      {can && receivingBlocked && receivingReason && <span className="mist-note">{uiText("登记收货：")}{receivingReason}</span>}
     </div></Card></div>}
     {!sourceMode && <div className="mist-domains" role="tablist" aria-label={uiText("库存业务板块")}>
       {(['fabric', 'garment'] as const).map(value => { const m = metrics(value); return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" onClick={() => changeDomain(value)}>

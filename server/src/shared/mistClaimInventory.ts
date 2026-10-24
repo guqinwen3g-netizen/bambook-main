@@ -34,7 +34,7 @@ export function createClaimReturnReceipt(root:MistState,goodsId:string,warehouse
  if(receipt){if(receipt.warehouseId!==warehouseId)fail('同一案件退货单不能混入第二个仓库');if(goods.returnReceiptId&&goods.returnReceiptId!==receipt.id)fail('退回履行关联的正式退货单不一致','INVALID_STATE');if(!receipt.goodsIds.includes(goodsId))receipt.goodsIds.push(goodsId);}
  else{const consume=(context as NumberContext).consumeBusinessNumber;if(!consume)fail('正式RT号段尚未准备，不能建立退货单','PRECONDITION');const code=consume!('RT');if(typeof code!=='string'||!code.startsWith('RT-')||f.returnReceipts.some(row=>row.code===code))fail('正式RT编号无效或重复','INVALID_STATE');receipt={id:context.id(),code,claimId:source.claimId,warehouseId,goodsIds:[goodsId],createdAt:context.now,...who};f.returnReceipts.push(receipt);}
  goods.returnReceiptId=receipt.id;
- const kind='claim-inventory:'+goodsId;if(!root.tasks.some(task=>task.kind===kind&&!task.done))root.tasks.unshift({id:context.id(),kind,title:'办理 '+receipt.code+' 真实退货收货与处置',due:'',done:false,target:{view:'inventory',id:receipt.id},assigneeIds:disposition.requesterId?[disposition.requesterId]:mistOrderOwnerIds(root,claim.orderId)});
+ const kind='claim-inventory:'+goodsId;if(!root.tasks.some(task=>task.kind===kind&&!task.done))root.tasks.unshift({id:context.id(),kind,title:'退货处理 · '+receipt.code,due:'',done:false,target:{view:'inventory',id:receipt.id,section:'claim:'+claim.id},permission:'inventory:write',assigneeIds:disposition.requesterId?[disposition.requesterId]:mistOrderOwnerIds(root,claim.orderId)});
  return receipt;
 }
 

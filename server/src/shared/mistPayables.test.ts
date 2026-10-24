@@ -378,11 +378,11 @@ describe('索赔工厂扣款抵应付', () => {
     expect(err(() => as('财务-林', s, { type: 'payable.bill.void', payload: { id: billId, reason: '开错' } }))).toContain('扣款');
     s = as('财务-林', s, { type: 'payable.deduction.reverse', payload: { id: d1.result.id, reason: '扣款通知金额有误' } }).state;
     expect(recOf(s)).toMatchObject({ state: 'Agreed' });
-    expect(recOf(s).settled).toBeUndefined();
+    expect(recOf(s).settled).toBe(2000);
     expect(payableBills(s, today)[0]).toMatchObject({ deducted: 2000, open: 18000 });
     expect(err(() => as('财务-林', s, { type: 'payable.deduction.reverse', payload: { id: d1.result.id, reason: '再冲' } }))).toContain('已冲回');
     // 协调人不能手工登记“从货款中扣”的落实
-    expect(err(() => as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 1000, reference: 'x', date: today } }))).toContain('应付里');
+    expect(err(() => as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 1000, reference: 'x', date: today } }))).toContain('应付票据');
   });
 
   it('拒绝：非货款扣方式、超过票据可扣、别家票据、案件已结束不能冲回', () => {
@@ -397,14 +397,19 @@ describe('索赔工厂扣款抵应付', () => {
     expect(err(() => as('财务-林', s, { type: 'payable.deduction.reverse', payload: { id: d.result.id, reason: 'x' } }))).toContain('已结束');
   });
 
-  it('组合方式：已扣部分加其他方式落实合计不超过同意金额；登记落实后不能单独冲回扣款', () => {
+  function factoryBankReceipt(s:MistState,amount:number,ref:string){
+    const currency=recOf(s).currency;let account=s.bankAccounts?.find(a=>a.currency===currency);
+    if(!account){s=as('财务-林',s,{type:'finance.account.save',payload:{name:'补偿收款户',bankName:'测试银行',accountNo:'TEST-'+currency,currency,openingDate:'2026-01-01',openingBalance:0}}).state;account=s.bankAccounts!.at(-1)!;}
+    s=as('财务-林',s,{type:'finance.importReceipts',payload:{accountId:account.id,receipts:[{date:today,payer:recOf(s).supplierName,amount,currency,ref}]}}).state;return {s,receiptId:s.receipts.at(-1)!.id};
+  }
+  it('组合方式：扣款与对应到账合计不超约定，冲回扣款保留银行到账', () => {
     let { s, billId } = withClaim('mixed', 3000);
     const d = deduct(s, billId, 1000); s = d.state;
     expect(recOf(s).state).toBe('Agreed');
-    expect(err(() => as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 2000.01, reference: '工厂电汇', date: today } }))).toContain('已从货款中扣 1,000.00');
-    s = as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 2000, reference: '工厂电汇 TT-9', date: today } }).state;
+    expect(err(() => as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 2000.01, reference: '工厂电汇', date: today } }))).toContain('超过工厂补偿未落实余额');
+    const bank=factoryBankReceipt(s,2000,'TT-9');s=bank.s;s = as('财务-林', s, { type: 'platform.claim.recovery.receipt.allocate', payload: { id: 'rec-1', receiptId:bank.receiptId, amount: 2000 } }).state;
     expect(recOf(s)).toMatchObject({ state: 'Settled', settled: 3000 });
-    expect(err(() => as('财务-林', s, { type: 'payable.deduction.reverse', payload: { id: d.result.id, reason: 'x' } }))).toContain('不能单独冲回');
+    const open=payableBills(s,today).find(b=>b.id===billId)!.open;s=as('财务-林',s,{type:'payable.deduction.reverse',payload:{id:d.result.id,reason:'扣款对应有误'}}).state;expect(recOf(s)).toMatchObject({state:'Agreed',settled:2000});expect(payableBills(s,today).find(b=>b.id===billId)!.open).toBe(open+1000);expect(s.receipts.find(r=>r.id===bank.receiptId)?.remaining).toBe(0);
   });
 
   it('货款已付清没地方扣：经工厂确认改为工厂付款，已扣部分保留，落实时合计不超过同意金额', () => {
@@ -417,14 +422,14 @@ describe('索赔工厂扣款抵应付', () => {
     expect(recOf(s).events.at(-1).note).toContain('已从货款扣 CNY 1,000.00 保留');
     expect(err(() => deduct(s, billId, 100, 'DN-9'))).toContain('不是从货款中扣');
     expect(err(() => as('业务-王', s, { type: 'platform.claim.recovery.method', payload: { id: 'rec-1', method: 'payment', reason: '再改' } }))).toContain('只有“从货款中扣”');
-    expect(err(() => as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 2000.01, reference: '工厂电汇', date: today } }))).toContain('已从货款中扣 1,000.00');
-    s = as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 2000, reference: '工厂电汇 TT-10', date: today } }).state;
+    expect(err(() => as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 2000.01, reference: '工厂电汇', date: today } }))).toContain('超过工厂补偿未落实余额');
+    const bank=factoryBankReceipt(s,2000,'TT-10');s=bank.s;s = as('财务-林', s, { type: 'platform.claim.recovery.receipt.allocate', payload: { id: 'rec-1', receiptId:bank.receiptId, amount: 2000 } }).state;
     expect(recOf(s)).toMatchObject({ state: 'Settled', settled: 3000 });
   });
   it('已全部扣完时无需改方式', () => {
     let { s, billId } = withClaim('mixed', 1000);
     s = deduct(s, billId, 1000).state;
-    expect(err(() => as('业务-王', s, { type: 'platform.claim.recovery.method', payload: { id: 'rec-1', method: 'payment', reason: '改' } }))).toContain('无需改方式');
+    expect(err(() => as('业务-王', s, { type: 'platform.claim.recovery.method', payload: { id: 'rec-1', method: 'payment', reason: '改' } }))).toContain('尚未落实');
   });
 });
 

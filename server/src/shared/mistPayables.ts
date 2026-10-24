@@ -1,3 +1,4 @@
+import {recoveryOtherFulfilledMinor} from './mistClaimRecoveryReceipts';
 import { hasMaterialAtFactory } from './mistInternalFabric';
 /**
  * 供应商票据与应付（公司端财务首轮）。
@@ -445,7 +446,7 @@ export function recoveryDeductedMinor(root: Root, recoveryId: string, exceptId =
 export function deductibleRecoveries(root: Root, supplierId?: string, currency?: string) {
   return claimsOf(root).filter(c => c.state !== 'Closed' && c.state !== 'Cancelled').flatMap(c => (c.coordination?.recoveries || []).filter(r => r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && (!supplierId || r.supplierId === supplierId) && (!currency || r.currency === currency)).map(r => {
     const deducted = recoveryDeductedMinor(root, r.id);
-    return { claimId: c.id, claimCode: c.code, recovery: r, deducted: major(deducted), left: major(Math.max(0, mistMoneyMinor(r.agreed || 0) - deducted)) };
+    return { claimId: c.id, claimCode: c.code, recovery: r, deducted: major(deducted), left: major(Math.max(0, mistMoneyMinor(r.agreed || 0) - deducted-recoveryOtherFulfilledMinor(r))) };
   })).filter(x => x.left > 0);
 }
 export function supplierDeductions(root: Root, billId?: string): SupplierDeduction[] { return read(root).deductions.filter(d => !billId || d.billId === billId).sort((a, b) => b.at.localeCompare(a.at) || b.code.localeCompare(a.code)); }
@@ -854,13 +855,14 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (billHeld(bill)) fail(`${bill.code} 还在等待关联已确认结算，暂不能扣款`, 'PRECONDITION');
       if (bill.supplierId !== recovery.supplierId) fail(`${bill.code} 不是追偿工厂 ${recovery.supplierName} 的票据`);
       if (bill.currency !== recovery.currency) fail(`${bill.code} 币种为 ${bill.currency}，与追偿币种 ${recovery.currency} 不同；当前不做汇率换算`);
-      const amount = minor(p.amount, '扣款金额'), left = mistMoneyMinor(recovery.agreed || 0) - recoveryDeductedMinor(root, recovery.id);
+      const amount = minor(p.amount, '扣款金额'), left = mistMoneyMinor(recovery.agreed || 0) - recoveryDeductedMinor(root, recovery.id)-recoveryOtherFulfilledMinor(recovery);
       if (amount > left) fail(`该追偿还可扣 ${fx(major(Math.max(0, left)))} ${recovery.currency}，本次扣款超出`);
       const room = billOpenMinor(root, bill) - billRequestedUnpaidMinor(root, bill.id);
       if (amount > room) fail(`${bill.code} 可扣金额 ${fx(major(Math.max(0, room)))} ${bill.currency}（未付扣除待付申请），本次扣款超出`);
       const id = c.id(), code = nextCode('DD', s.deductions, c.now), reference = text(p.reference, '扣款依据（扣款通知 / 对账单）', true, 200);
       s.deductions.push({ id, code, supplierId: bill.supplierId, supplier: bill.supplier, currency: bill.currency, amount: major(amount), claimId: claim.id, claimCode: claim.code, recoveryId: recovery.id, billId: bill.id, billCode: bill.code, reference, note: text(p.note, '备注', false, 500), at: c.now, actor: c.actorName });
-      const done = recovery.method === 'deduction' && amount === left;
+      recovery.settled=(recoveryDeductedMinor(root,recovery.id)+recoveryOtherFulfilledMinor(recovery))/100;
+      const done = amount === left;
       if (done) {
         const codes = s.deductions.filter(d => !d.reversed && d.recoveryId === recovery!.id).map(d => d.code);
         recovery.state = 'Settled'; recovery.settled = recovery.agreed; recovery.settledRef = '应付扣款 ' + codes.join('、'); recovery.settledDate = today;
@@ -876,11 +878,13 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (d.reversed) fail(`${d.code} 已冲回`, 'PRECONDITION');
       const claim = claimsOf(root).find(x => x.id === d.claimId), recovery = claim?.coordination?.recoveries.find(r => r.id === d.recoveryId);
       if (claim && (claim.state === 'Closed' || claim.state === 'Cancelled')) fail('索赔案件已结束，不能冲回扣款；请人工核对与工厂的往来', 'PRECONDITION');
-      if (recovery?.state === 'Settled' && !(recovery.settledRef || '').startsWith('应付扣款')) fail('该追偿已由协调人登记实际落实（含本笔扣款），不能单独冲回扣款；请人工核对与工厂的往来', 'PRECONDITION');
+      if(recovery?.state==='Waived'||recovery?.state==='Withdrawn')fail('追偿已结束，请核对原决定','PRECONDITION');
+      if (recovery?.state === 'Settled' && !(recovery.settledRef || '').startsWith('应付扣款')&&!recoveryOtherFulfilledMinor(recovery)) fail('该追偿已由协调人登记实际落实（含本笔扣款），不能单独冲回扣款；请人工核对与工厂的往来', 'PRECONDITION');
       const reason = text(p.reason, '冲回原因', true, 500);
       d.reversed = { at: c.now, actor: c.actorName, reason };
       if (recovery) {
-        if (recovery.state === 'Settled' && (recovery.settledRef || '').startsWith('应付扣款')) { recovery.state = 'Agreed'; delete recovery.settled; delete recovery.settledRef; delete recovery.settledDate; }
+        recovery.state='Agreed';const remaining=recoveryDeductedMinor(root,recovery.id)+recoveryOtherFulfilledMinor(recovery);if(remaining)recovery.settled=remaining/100;else{delete recovery.settled;delete recovery.settledRef;delete recovery.settledDate;}
+        root.tasks.filter(task=>task.kind==='claim-recovery:'+recovery.id).forEach(task=>task.done=false);
         recovery.events.push({ at: c.now, by: c.actorName, action: 'deduct-reverse', note: `冲回应付扣款 ${d.code}：${reason}` });
         root.events.unshift({ id: c.id(), entityType: 'claim', entityId: d.claimId, at: c.now, actor: c.actorName, text: `冲回应付扣款 ${d.code}：${reason}；追偿回到工厂已同意、待落实`, fileIds: [] });
       }
