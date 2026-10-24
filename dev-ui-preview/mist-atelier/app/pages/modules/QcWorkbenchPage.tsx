@@ -273,8 +273,8 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         ...(task.kind === 'production' && sizes.length ? [{ label: '生产尺码', value: sizes.map(size => `${size.size} ${size.quantity}`).join(' · ') }] : []),
         ...(task.businessConfirmation ? [{ label: '需求方决定', value: uiText(task.businessConfirmation.result === 'approved' ? '确认采用' : '不采用') }] : []),
       ]} />
-      {task.businessConfirmation && <RecordDisclosure title="需求方确认"><Facts items={[{label:'经办人',value:task.businessConfirmation.actor},{label:'时间',value:shortWhen(task.businessConfirmation.at)}]} /><p>{task.businessConfirmation.note}</p></RecordDisclosure>}
-      {task.businessContinued && <RecordDisclosure title={task.kind === 'production' ? '业务恢复记录' : '业务继续记录'}><Facts items={[{label:'经办人',value:task.businessContinued.actor},{label:'时间',value:shortWhen(task.businessContinued.at)}]} /><p>{task.businessContinued.note}</p></RecordDisclosure>}
+      {task.businessConfirmation && <RecordDisclosure key={task.id+':confirmation'} title="需求方确认"><Facts items={[{label:'经办人',value:task.businessConfirmation.actor},{label:'时间',value:shortWhen(task.businessConfirmation.at)}]} /><p>{task.businessConfirmation.note}</p></RecordDisclosure>}
+      {task.businessContinued && <RecordDisclosure key={task.id+':continued'} title={task.kind === 'production' ? '业务恢复记录' : '业务继续记录'}><Facts items={[{label:'经办人',value:task.businessContinued.actor},{label:'时间',value:shortWhen(task.businessContinued.at)}]} /><p>{task.businessContinued.note}</p></RecordDisclosure>}
       {onBack && <Button block onClick={onBack}>{backLabel}</Button>}
     </DetailBlock>
     <DetailBlock title={uiText("现场信息")}>
