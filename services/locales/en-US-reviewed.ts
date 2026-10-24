@@ -1,5 +1,23 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '文书版本无效':'Invalid document revision',
+  '归档文书版本无效':'Invalid archived document revision',
+  '文书版本号超限':'Document revision limit exceeded',
+  '原件与批准来源不一致':'The original document does not match the approved source',
+  '缺少准确归档原件，不能更正':'The archived original is unavailable for correction',
+  '签发仅接受贷项、准确来源和更正信息':'Only the credit, exact source and correction details are accepted',
+
+  '更正文书':'Correct document',
+  '更正原因':'Correction reason',
+  '签发更正件':'Issue correction',
+  '预览更正':'Preview correction',
+  '贷项文书版本':'Credit document versions',
+  '文书记录':'Document history',
+  '历史版本':'Previous version',
+  '未签发':'Not issued',
+  '待签发':'Awaiting issue',
+  '请填写更正原因并选择准确原件':'Enter a correction reason and select the exact original',
+  '原件版本已变化，请重新读取':'The document version has changed. Refresh and try again',
   '处置未采用':'Proposal not adopted',
   '公司资料待补全':'Company details are missing',
   '请联系管理员':'Contact an administrator',

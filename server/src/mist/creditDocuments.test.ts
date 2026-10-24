@@ -9,6 +9,7 @@ import * as contract from '../shared/mistWorkspace';
 import {MistRepository,type MistCommandRequest} from './repository';
 import {MistPrivateFiles} from './files';
 import {buildIssueArchive} from './creditPrint';
+import {creditDocumentFingerprint} from '../shared/mistCreditDocuments';
 import {createMistRouter} from './route';
 import {MistLocalDatabase} from './local';
 import {MemoryMistDatabase,requestReceiptCount,testActor,testAuthority} from './__tests__/support';
@@ -147,4 +148,49 @@ it('uses the same workspace business clock for a read-only draft and its issued 
  expect(draft.issueDate).toBe('2026-10-20');expect(draft.issuedAt).toBe('2026-10-20T00:18:00.000Z');
  await current.execute(testActor(),workspaceId,issue('business-clock-issue'));
  expect(credit().printVersions![0].snapshot.issueDate).toBe(draft.issueDate);expect(credit().printVersions![0].issuedAt).toBe(draft.issuedAt);
+});
+
+const moneyFacts=()=>structuredClone({invoices:state().invoices,receipts:state().receipts,payments:state().payments,allocations:state().allocations,applications:state().platform.creditApplications,sources:credit().sourceVersions,amount:credit().amount,currentAmount:credit().currentAmount});
+const correction=(priorId:string,requestId='correct-v1',expectedRevision=1)=>({requestId,expectedRevision,command:{type:'platform.credit.issue',payload:{creditId:ids.credit,versionId:ids.source,correctsPrintId:priorId,reason:'Correct customer-facing document wording'}}}) as any;
+it('appends a corrected print revision without changing the approved credit, settlement or original bytes',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());const first=structuredClone(credit().printVersions![0]),before=moneyFacts();
+ const result=await repo.execute(testActor(),workspaceId,correction(first.id));const second=credit().printVersions![1];
+ expect(credit().printVersions).toHaveLength(2);expect(credit().printVersions![0]).toEqual(first);expect(second.version).toBe(2);expect(second.sourceVersionId).toBe(ids.source);expect(second.snapshot.sourceVersion).toBe(1);
+ expect((second.snapshot as any).correction).toEqual({correctsPrintId:first.id,reason:'Correct customer-facing document wording'});expect(second.fileName).toContain('-v2.pdf');expect(moneyFacts()).toEqual(before);
+ const old=await repo.downloadCreditDocument(testActor(),workspaceId,ids.credit,first.id),current=await repo.downloadCreditDocument(testActor(),workspaceId,ids.credit,second.id);expect(old.bytes).toEqual(pdfBytes);expect(current.sha256).toBe(second.sha256);
+ const replay=await repo.execute(testActor(),workspaceId,correction(first.id));expect(replay.replayed).toBe(true);expect(replay.receipt).toEqual(result.receipt);expect(credit().printVersions).toHaveLength(2);expect(await names()).toHaveLength(3);
+});
+it('rejects missing correction reasons, stale originals and a second ordinary issue without another file',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());const first=credit().printVersions![0],missing=correction(first.id,'empty');missing.command.payload.reason='';
+ await expect(repo.execute(testActor(),workspaceId,missing)).rejects.toMatchObject({status:422});expect(credit().printVersions).toHaveLength(1);
+ await repo.execute(testActor(),workspaceId,correction(first.id));const before=structuredClone(state()),count=builder.mock.calls.length;
+ await expect(repo.execute(testActor(),workspaceId,correction(first.id,'stale',2))).rejects.toMatchObject({status:422});
+ await expect(repo.execute(testActor(),workspaceId,issue('ordinary-again',2))).rejects.toMatchObject({status:409});expect(state()).toEqual(before);expect(builder).toHaveBeenCalledTimes(count);expect(await names()).toHaveLength(3);
+});
+it('allows only current business document writers to correct an issued original',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());const first=credit().printVersions![0];auth.users.get('owner')!.permissions=['aftersales:read','invoices:reconcile'];
+ await expect(repo.execute(testActor(),workspaceId,correction(first.id))).rejects.toMatchObject({status:403});expect(credit().printVersions).toHaveLength(1);expect(await names()).toHaveLength(2);
+});
+it('rolls back a failed correction while retaining the original print and all financial facts',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());const first=credit().printVersions![0],before=structuredClone(state());db.failReceipt=true;
+ await expect(repo.execute(testActor(),workspaceId,correction(first.id))).rejects.toThrow();expect(state()).toEqual(before);expect(await names()).toHaveLength(2);expect(builder).toHaveBeenCalledTimes(2);
+});
+
+it('retains legacy template-one snapshots byte-for-byte and appends a template-two correction',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());const first=credit().printVersions![0];first.templateVersion=1;first.snapshot.templateVersion=1;delete first.snapshot.printRevision;first.snapshotFingerprint=creditDocumentFingerprint(first.snapshot);const frozen=structuredClone(first);
+ const old=await repo.downloadCreditDocument(testActor(),workspaceId,ids.credit,first.id);expect(old.bytes).toEqual(pdfBytes);expect(first).toEqual(frozen);
+ await repo.execute(testActor(),workspaceId,correction(first.id));expect(credit().printVersions![0]).toEqual(frozen);expect(credit().printVersions![1]).toMatchObject({version:2,templateVersion:2});
+});
+
+it('corrects a closed settled case without reopening it or posting any money',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());let serial=0;const ctx={id:()=>`upstream-${++serial}`,now,actorId:'owner',actorName:'owner'};
+ let upstream=contract.applyMistCommand(state(),{type:'platform.credit.apply',payload:{creditId:ids.credit,invoiceId:ids.invoice,amount:15}},ctx).state;
+ upstream=contract.applyMistCommand(upstream,{type:'platform.claim.close',payload:{id:ids.claim}},ctx).state;db.workspaces.get(workspaceId).state=upstream;
+ expect(state().platform.claims[0].state).toBe('Closed');const before=moneyFacts(),first=credit().printVersions![0];await repo.execute(testActor(),workspaceId,correction(first.id));
+ expect(state().platform.claims[0].state).toBe('Closed');expect(moneyFacts()).toEqual(before);expect(credit().printVersions).toHaveLength(2);
+});
+it('keeps print revisions independent when a later approved business source is appended',async()=>{
+ await repo.execute(testActor(),workspaceId,issue());const first=credit().printVersions![0];await repo.execute(testActor(),workspaceId,correction(first.id));
+ db.workspaces.get(workspaceId).state=appendFrozenCreditDocumentV2(state());const source=credit().currentVersionId!,input=issue('issue-next-business-source',2);input.command={type:'platform.credit.issue',payload:{creditId:ids.credit,versionId:source}};
+ await repo.execute(testActor(),workspaceId,input);expect(credit().printVersions!.at(-1)).toMatchObject({version:3,sourceVersionId:source,snapshot:{sourceVersion:2,printRevision:3}});
 });

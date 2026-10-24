@@ -1,3 +1,4 @@
+import type {CreditPrintCorrection} from '../../../../server/src/shared/mistCreditDocuments';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {bindBusinessClock} from './businessClock';
 import React from 'react';
@@ -24,7 +25,7 @@ export interface MistWorkspaceContext {
   /** 读取附件原件（带登录凭据），供在线预览使用；不会触发下载。 */
   readFile: (file: MistFile) => Promise<Blob>;
   prepareCreditDocument: (creditId: string, versionId: string) => Promise<void>;
-  issueCreditDocument: (creditId: string, versionId: string) => Promise<Record<string, unknown>>;
+  issueCreditDocument: (creditId: string, versionId: string, correction?:CreditPrintCorrection) => Promise<Record<string, unknown>>;
   downloadCreditDocument: (creditId: string, versionId: string) => Promise<void>;
   fileUrl: (file: MistFile) => string;
   refresh: () => Promise<void>; recover: () => Promise<MistRunReceipt | undefined>;
@@ -534,9 +535,10 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   }, [authority.key, authority.userId, authority.status, boundEpoch, boundWorkspaceId, assertSource]);
   const prepareCreditDocument = React.useCallback((creditId: string, versionId: string) => readCreditDocument(creditId, versionId, true), [readCreditDocument]);
   const downloadCreditDocument = React.useCallback((creditId: string, versionId: string) => readCreditDocument(creditId, versionId, false), [readCreditDocument]);
-  const issueCreditDocument = React.useCallback(async (creditId: string, versionId: string) => {
+  const issueCreditDocument = React.useCallback(async (creditId: string, versionId: string, correction?:CreditPrintCorrection) => {
     if (!claimIdentifier(creditId) || !claimIdentifier(versionId)) throw new RequestError('CN 或版本编号无效');
-    return (await run({ type: 'platform.credit.issue', payload: { creditId, versionId } })).result;
+    if(correction&&(!claimIdentifier(correction.correctsPrintId)||!correction.reason.trim()))throw new RequestError('请填写更正原因并选择准确原件');
+    return (await run({ type: 'platform.credit.issue', payload: { creditId, versionId,...(correction??{}) } })).result;
   }, [run]);
   const recover = React.useCallback(async (): Promise<MistRunReceipt | undefined> => {
     assertIdentity(authority);

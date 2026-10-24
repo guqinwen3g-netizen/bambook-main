@@ -382,8 +382,9 @@ export class MistRepository {
         if (input.command?.type === 'platform.credit.issue') {
           const payload = assertCreditIssuePayload(input.command.payload);
           const credit = row.state.platform.credits.find(note => note.id === payload.creditId);
-          if (credit?.printVersions?.some(version => version.sourceVersionId === payload.versionId)) fail('CREDIT_ALREADY_ISSUED', '该来源版本已签发，请读取已归档的正式原件', 409);
-          const printSnapshot = prepareCreditDocumentSnapshot(row.state, payload.creditId, payload.versionId, context);
+          if (!payload.correctsPrintId && credit?.printVersions?.some(version => version.sourceVersionId === payload.versionId)) fail('CREDIT_ALREADY_ISSUED', '该来源版本已签发，请读取已归档的正式原件', 409);
+          const printSnapshot = prepareCreditDocumentSnapshot(row.state, payload.creditId, payload.versionId, context,payload.correctsPrintId?{correctsPrintId:payload.correctsPrintId,reason:payload.reason!}:undefined);
+          if(payload.correctsPrintId){const prior=credit!.printVersions!.find(version=>version.id===payload.correctsPrintId)!,originalFile=row.state.files.find(file=>file.id===prior.fileId);if(!originalFile||originalFile.name!==prior.fileName||originalFile.mimeType!=='application/pdf'||originalFile.size!==prior.bytes)fail('CREDIT_DOCUMENT_INVALID','缺少准确归档原件，不能更正',422);assertIssuedCreditArchive(prior,await this.files.read(workspaceId,originalFile));}
           const prepared = await this.creditArchiveBuilder(printSnapshot);
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           context.creditDocumentIssue = bindIssueArchive(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
