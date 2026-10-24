@@ -126,7 +126,7 @@ it('lists derived work from QC returns and rejected payment requests and opens t
   expect(host.querySelector('.mist-hero')?.textContent).toContain('QC-BACK');
   expect(host.querySelector('.mist-hero h2')?.textContent?.match(/QC-BACK/g)).toHaveLength(1);
   expect(host.querySelector('.mist-page-head')?.textContent).not.toContain('件来自审批、QC、出运或财务');
-  await click(rows.find(row=>row.textContent?.includes('PR-BACK'))!);expect(go).toHaveBeenLastCalledWith('payment-vouchers','pr-back',{view:'payment-vouchers',id:'pr-back'});
+  await click(rows.find(row=>row.textContent?.includes('PR-BACK'))!);expect(go).toHaveBeenLastCalledWith('payment-vouchers','pr-back',{view:'payment-vouchers',id:'pr-back',section:'payables'});
   await click(rows.find(row=>row.textContent?.includes('QC-BACK'))!);expect(go).toHaveBeenLastCalledWith('qc-workbench','qc-back',{view:'qc-workbench',id:'qc-back'});
 });
 
@@ -161,4 +161,8 @@ it('keeps an assigned logistics handover visible before the customer delivery de
 it('keeps an in-progress logistics shipment on the home and opens its exact complete detail',async()=>{
  const state=seam.value.state,order=state.orders[0];state.tasks=[{id:'raw-handoff',title:'核对原单出运交接',due:'2099-12-31',done:false,kind:'shipping',permission:'logistics:handle',assigneeIds:[],target:{view:'orders/detail',id:order.id}}];state.fulfillment.shipments=[{id:'working-shipment',code:'SHP-WORK',state:'preparing',mode:'air',booking:'BK-1',customer:'客户',plannedDate:'2099-12-31',lines:[{orderId:order.id,lineId:state.orderLines[0].id,quantity:1}]}];
  seam.session.user={id:'logistics',displayName:'后勤'};seam.session.hasPermission=(p:string)=>p==='logistics:handle';render();expect(host.textContent).toContain('SHP-WORK · 单证准备');expect(host.textContent).not.toContain('核对原单出运交接');const item=[...host.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.includes('SHP-WORK · 单证准备'))!;await click(item);expect(go).toHaveBeenCalledWith('shipments','working-shipment',expect.objectContaining({detail:'full'}));expect(state.tasks[0].done).toBe(false);
+});
+
+it('shows a submitted settlement immediately and opens its exact payable review',async()=>{
+ const state=seam.value.state;state.payables!.settlements=[{id:'finance-settlement',code:'ST-WORK',state:'pending',supplier:'供货工厂',purchaseCode:'PO-WORK',currency:'CNY',amount:434,submittedAt:'2099-01-01T00:00:00Z'}];seam.session.user={id:'finance',displayName:'财务'};seam.session.hasPermission=(permission:string)=>permission==='invoices:reconcile';render();const button=[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.textContent?.includes('ST-WORK · 待财务复核'))!;expect(button).toBeTruthy();await click(button);expect(go).toHaveBeenCalledWith('payment-vouchers','finance-settlement',expect.objectContaining({section:'payables'}));
 });

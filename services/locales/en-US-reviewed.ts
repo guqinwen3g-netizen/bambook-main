@@ -600,4 +600,5 @@ export const reviewedEnglish: Record<string, string> = {
   '出运凭据': 'Departure evidence',
   '起飞依据': 'Take-off evidence',
   '上传起飞通知或承运人凭据': 'Upload take-off notice or carrier evidence',
+  '暂无供应商票据': 'No supplier invoices',
 };
