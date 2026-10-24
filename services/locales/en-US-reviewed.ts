@@ -603,4 +603,6 @@ export const reviewedEnglish: Record<string, string> = {
   '暂无供应商票据': 'No supplier invoices',
   '请填写未收票原因': 'Enter the reason the invoice has not arrived',
   '结算净额': 'Net settlement amount',
+  '已结清 / 未付': 'Cleared / outstanding',
+  '直接付款分配': 'Direct payment allocations',
 };
