@@ -34,6 +34,12 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 适用于 `app/runtime/workspace.tsx` 的 `run / recover` 及 `app/pages/modules/ModuleWorkbench.tsx` 的长短编辑器。未知命令错误携带 `mistPendingCommand`（请求、公司、账号），只有服务端验证过的成功核对才发布同键 `commandRecovery`；该确认只驻留本机内存，不写业务状态或公司设置。原表单据此锁为已保存并提供查看记录，不能因 `pending` 消失就重新启用创建，也不能用新的请求重做已保存操作。不同表单/公司/账号不消费该确认；明确拒绝的输入仍可修正重试。专用创建表单不自动获得此行为，需按同一归属约束接入；不把单条命令恢复等同多步流程全部完成。
 
 
+## 当前 Mist 物料接收待办
+
+- 待办由已授权工作区中的 `materialDeliveryRows` 事实派生；接收人复用 `materialReceiverIds`，并要求采购可读及 `orders:write`。不为待办扩大库存或业务权限。
+- 未确认且仍有交接余量时，首页/侧栏给当前有效接收人同一条事项，直接打开准确加工合同详情。真实确认接收或整笔退回后自动消失，不创建可手工勾完的替代任务。
+- 源码：`runtime/workQueue.ts::mistWorkQueue` → `MaterialDeliveryPanel` → `fulfillment.materials.confirm`。仓库发料和供应商直送沿用原交接ID、数量、分配版本与QC来源。
+
 ## 1. 名词约定
 
 | 名词 | 含义 |

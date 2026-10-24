@@ -85,10 +85,15 @@ it('reads back production size facts and uses the correct business recovery labe
  expect(within(retest).getByRole('cell',{name:'3'})).toBeTruthy();
  expect(within(retest).getByRole('cell',{name:'通过'})).toBeTruthy();
  expect(retest.textContent).toContain('复验M码实物依据');
+ expect(host.textContent).not.toContain('复验后核对整改，业务恢复生产');
+ act(()=>getByRole(host,'button',{name:'业务恢复记录'}).click());
  expect(host.textContent).toContain('复验后核对整改，业务恢复生产');
  render(<QcWorkbenchPage/>,'qc-workbench','sample-qc');
- expect(host.textContent).toContain('样品业务继续');
+ expect(host.textContent).toContain('业务继续记录');
  expect(host.textContent).not.toContain('业务恢复记录');
+ expect(host.textContent).not.toContain('样品确认后继续');
+ act(()=>getByRole(host,'button',{name:'业务继续记录'}).click());
+ expect(host.textContent).toContain('样品确认后继续');
 });
 
 function shipmentContextSources(){
