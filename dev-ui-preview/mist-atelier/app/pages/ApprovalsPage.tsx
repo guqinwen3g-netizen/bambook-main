@@ -87,7 +87,7 @@ export function ApprovalsPage() {
     <ActionBar busy={reviews.busy} actions={[
       { label: '批准', icon: Check, primary: true, onClick: () => void decide('approved'), reason: decideReason, hidden: selected.status !== 'pending' },
       { label: '退回', icon: CornerUpLeft, onClick: () => void decide('rejected'), reason: decideReason, hidden: selected.status !== 'pending' },
-      { label: '打开原业务', icon: ArrowUpRight, onClick: () => go(selected.target.view, selected.target.id), reason: openReason },
+      { label: '打开原业务', icon: ArrowUpRight, onClick: () => selected.kind === 'payment' ? go(selected.target.view, selected.target.id, { section: 'payables' }) : go(selected.target.view, selected.target.id), reason: openReason },
     ]} />
   </DetailBody> : <EmptyState title={uiText("选择一项审批")} />;
   return <MistPage>
