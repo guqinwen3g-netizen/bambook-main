@@ -4,7 +4,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 订单核算：费用台账（按出运 / 按订单分摊）+ 每单实际成本与毛利（人民币管理口径）。 */
 import React from 'react';
 import { Plus, Receipt, TrendingUp, Truck, Wallet } from 'lucide-react';
-import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, Pill, Select, StatCard, StatGrid, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
+import { Banner, Button, Card, CardBody, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Facts, Field, FormGrid, Pill, Select, StatCard, StatGrid, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { FX_BASIS_LABEL, type FxBasis } from '../../../../../server/src/shared/mistFxRates';
 import { ALLOCATION_BASES, EXPENSE_CATEGORIES, activeExpenses, expensePayableBill, orderActualCost, orderExpenses, type AllocationBasis, type ExpenseCategory, type OrderActualCost, type OrderCostLine, type OrderExpense } from '../../../../../server/src/shared/mistOrderCost';
@@ -68,14 +68,15 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     <section className="mist-section"><Card><CardHeader title={uiText("费用台账")} tools={<Checkbox checked={showVoided} onChange={setShowVoided} label={uiText("显示已作废")} />} />
       <DataTable ariaLabel={uiText("费用台账")} rows={expenses} rowKey={e => e.id} columns={expenseColumns} empty={<EmptyState title={uiText("还没有登记费用")} compact />} />
     </Card></section>
-    <Drawer open={!!detail} onClose={() => setOpen(null)} size="lg" title={uiText(detail ? `${detail.code} 实际核算` : '实际核算')} sub={uiText(detail ? `${detail.customer} · ${FX_BASIS_LABEL[basis]}` : undefined)}>
+    <Drawer open={!!detail} onClose={() => setOpen(null)} size="lg" title={uiText(detail ? `${detail.code} 实际核算` : '实际核算')} sub={detail?[detail.customer,uiText(FX_BASIS_LABEL[basis]),...(detail.estimated?[uiText('含暂估')]:[])].join(' · '):undefined}>
       {detail && <div data-order-cost-detail={detail.orderId}>
         {(['revenue', 'purchases', 'expenses'] as const).map(k => <CostBlock key={k} title={uiText({ revenue: '收入', purchases: '采购成本', expenses: '分摊费用' }[k])} rows={detail[k]} />)}
         <Card><CardHeader title={uiText("出口退税")} sub={ui`应退 ${money(detail.rebate.expected)} · 核准 ${money(detail.rebate.approved)} · 已到账 ${money(detail.rebate.received)}`} /></Card>
-        <StatGrid>
-          <StatCard icon={TrendingUp} label={uiText("毛利 · 不含退税")} value={detail.marginEx === null ? '—' : money(detail.marginEx)} />
-          <StatCard icon={TrendingUp} label={uiText("毛利 · 含退税")} value={detail.marginIn === null ? '—' : money(detail.marginIn)} foot={pct(detail.rateIn)} />
-        </StatGrid>
+        <Card><CardBody><Facts items={[
+          {label:uiText('毛利 · 不含退税'),value:detail.marginEx===null?'—':money(detail.marginEx)},
+          {label:uiText('毛利 · 含退税'),value:detail.marginIn===null?'—':money(detail.marginIn)},
+          ...(detail.rateIn===null?[]:[{label:uiText('毛利率'),value:pct(detail.rateIn)}]),
+        ]}/></CardBody></Card>
       </div>}
     </Drawer>
     {register && <RegisterExpense state={state} asOf={asOf} busy={busy} run={run} onClose={() => setRegister(false)} onDone={() => { setRegister(false); toast('费用已登记并分摊'); }} />}
@@ -99,7 +100,8 @@ function CostBlock({ title, rows }: { title: string; rows: OrderCostLine[] }) {
     { key: 'amount', header: '原币', align: 'right', render: r => `${r.currency} ${money(r.amount)}` },
     { key: 'cny', header: 'CNY', align: 'right', render: r => cnyCell(r.cny) },
   ];
-  return <section className="mist-section"><Card><CardHeader title={uiText(title)} /><DataTable ariaLabel={uiText(title)} rows={rows} rowKey={r => r.key} columns={cols} empty={<EmptyState title={uiText("无")} compact />} /></Card></section>;
+  const sources=[...new Map(rows.filter(r=>r.fx).map(r=>[r.currency+' '+r.fx!.label,r])).values()];
+  return <section className="mist-section"><Card><CardHeader title={uiText(title)} />{sources.length>0&&<CardBody><Facts items={sources.map(r=>({label:uiText("汇率依据"),value:r.currency+" · "+uiText(r.fx!.label.replace(/（暂估）$/,''))}))}/></CardBody>}<DataTable ariaLabel={uiText(title)} rows={rows} rowKey={r => r.key} columns={cols} empty={<EmptyState title={uiText("无")} compact />} /></Card></section>;
 }
 
 function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: MistState; asOf: string; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onClose: () => void; onDone: () => void }) {

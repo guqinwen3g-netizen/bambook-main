@@ -1,5 +1,7 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '汇率依据':'Exchange rate source',
+  '{0} 月末 {1}':'{0} month-end {1}',
   '服务商':'Service provider',
   '服务内容':'Services',
   '经营地址':'Business address',

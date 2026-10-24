@@ -68,3 +68,11 @@ it('turns an expense into a payable bill and then only shows the bill code',asyn
   expect(queryByRole(host,'button',{name:'转应付 FY-2026-0001'})).toBeNull();expect(queryByRole(host,'button',{name:'作废 FY-2026-0001'})).toBeNull();
   expect(getByRole(host,'table',{name:'费用台账'}).textContent).toMatch(/AP-/);
 });
+
+it('keeps estimate status and the resolved exchange source visible in the detail',async()=>{
+  state.orders.push({...state.orders[0],id:'free',code:'SO-FREE',currency:'USD',amount:0});
+  (state as any).orderCosts={expenses:[{id:'fx-expense',code:'FY-FX',category:'freight',date:'2026-10-18',vendor:'物流',ref:'AIR',currency:'USD',amount:65,scope:'orders',basis:'equal',shares:[{orderId:'free',orderCode:'SO-FREE',basisValue:1,amount:65}],createdAt:ctx.now,createdBy:'财务'}]};
+  render();const list=getByRole(host,'table',{name:'订单实际核算'}),row=[...list.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('SO-FREE'))!;expect(row.textContent).toContain('含暂估');await click(row);
+  const detail=document.querySelector('[data-order-cost-detail="free"]')!;const fees=getByRole(detail as HTMLElement,'table',{name:'分摊费用'});
+  expect(fees.textContent).toContain('暂估');expect(detail.textContent).toContain('汇率依据');expect(detail.textContent).toContain('2026-10 月末 7.100000');expect(fees.textContent).toContain('461.50');
+});
