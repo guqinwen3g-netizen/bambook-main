@@ -63,3 +63,21 @@ it('invalidates generated customs items when a draft valuation changes, retainin
  f.run({type:'fulfillment.customs.reviewReplacement',payload:reviewPayload(scope.id,id)});f.run({type:'fulfillment.customs.items',payload:{id:scope.id}});expect(f.state.fulfillment.customs[0].items![0].amount).toBe(90);
  f.run({type:'fulfillment.customs.reviewReplacement',payload:{...reviewPayload(scope.id,id),unitPrice:95}});expect(f.state.fulfillment.customs[0].items).toBeUndefined();expect(f.state.fulfillment.customs[0].itemsAt).toBeUndefined();expect(f.state.fulfillment.customs[0].itemsBy).toBeUndefined();expect(draftCustomsDeclaration(f.state,f.state.fulfillment.shipments.find(s=>s.id===scope.shipmentId)!).items[0].amount).toBe(95);expect(f.state.events.filter(e=>(e as any).audit?.action==='replacement.export.review').map(e=>(e as any).audit.review.unitPrice)).toEqual([95,90]);
 });
+
+it.each(['void','requestCancel','closeLine'] as const)('does not let a source-bound replacement bypass its obligation via %s',action=>{
+ const f=fixture(),id=f.create();if(action!=='void')f.approve(id);const before=structuredClone(f.state),line=f.state.orderLines.find(l=>l.orderId===id)!;
+ const command=action==='closeLine'?{type:'order.governance.closeLine' as const,payload:{orderId:id,lineId:line.id,reason:'结束补发'}}:{type:('order.governance.'+action) as 'order.governance.void'|'order.governance.requestCancel',payload:{orderId:id,reason:'结束补发'}};
+ expect(()=>f.run(command)).toThrow(action==='closeLine'?'补发货物尚未发齐':'补发订单不能单独');expect(f.state).toEqual(before);
+});
+
+it('refuses approval of a previously pending replacement cancellation, while allowing its rejection to unlock fulfillment',()=>{
+ const f=fixture(),id=f.create();f.approve(id);const g=f.state.orders.find(o=>o.id===id)!.governance!;g.cancellation={id:'old-cancel',status:'pending',reason:'撤回补发',requesterId:'business',requesterName:'业务员',requestedAt:f.c.now,reviewerIds:['leader']};const before=structuredClone(f.state),actor={...f.c,actorId:'leader',actorName:'负责人'};
+ expect(()=>f.run({type:'order.governance.decide',payload:{id:id+'#cancel:old-cancel',decision:'approved',note:'批准'}},actor)).toThrow('补发订单不能单独取消');expect(f.state).toEqual(before);f.run({type:'order.governance.decide',payload:{id:id+'#cancel:old-cancel',decision:'rejected',note:'继续批准的补发'}},actor);expect(f.state.orders.find(o=>o.id===id)!.governance!.cancellation!.status).toBe('rejected');expect(f.state.orders.find(o=>o.id===id)!.governance!.status).toBe('approved');
+});
+it('refuses a previously pending short close but permits rejection without changing approved quantities',()=>{
+ const f=fixture(),id=f.create();f.approve(id);const line=f.state.orderLines.find(l=>l.orderId===id)! as typeof f.state.orderLines[number]&{closure:any};line.closure={id:'old-close',status:'pending',quantity:0,ordered:1,min:1,max:1,reason:'少发结案',requesterId:'business',requesterName:'业务员',requestedAt:f.c.now,reviewerIds:['leader']};const before=structuredClone(f.state),actor={...f.c,actorId:'leader',actorName:'负责人'},reviewId=id+'#close:'+line.id;
+ expect(()=>f.run({type:'order.governance.decide',payload:{id:reviewId,decision:'approved',note:'批准'}},actor)).toThrow('补发货物尚未发齐');expect(f.state).toEqual(before);f.run({type:'order.governance.decide',payload:{id:reviewId,decision:'rejected',note:'继续发齐补发'}},actor);expect((f.state.orderLines.find(l=>l.id===line.id) as typeof line).closure.status).toBe('rejected');expect(f.state.orderLines.find(l=>l.id===line.id)!.qty).toBe(1);
+});
+it('allows the replacement line to close after its full actual shipment',()=>{
+ const f=fixture(),id=f.create();f.approve(id);const scope=f.declaration(id),shipment=f.state.fulfillment.shipments.find(s=>s.id===scope.shipmentId)!;shipment.state='departed';shipment.departedAt=f.c.now;f.run({type:'order.governance.closeLine',payload:{orderId:id,lineId:scope.lineId,reason:'已按批准数量发齐'}});expect((f.state.orderLines.find(l=>l.id===scope.lineId) as any).closure).toMatchObject({status:'closed',quantity:1,ordered:1});
+});

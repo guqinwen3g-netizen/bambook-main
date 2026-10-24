@@ -1,5 +1,8 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '按批准数量':'Approved quantity',
+  '补发订单不能单独作废':'Replacement orders cannot be voided independently',
+  '补发订单不能单独取消':'Replacement orders cannot be cancelled independently',
   '查看记录':'View record',
   '原操作已保存':'The original operation was saved',
   // Replacement orders and export review.

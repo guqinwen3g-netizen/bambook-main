@@ -174,6 +174,7 @@ function closeLine(root:MistState,p:{orderId:string;lineId:string;reason:string}
  if(g.status!=='approved')fail('订单主单尚未批准，不能结案','PRECONDITION');if(g.changeDraft?.status==='pending')fail('订单有待审批的变更，请先处理变更审批','PRECONDITION');
  if(line.closure?.status==='closed')fail('条目已结案','PRECONDITION');if(line.closure?.status==='pending')fail('条目已有待审批的结案申请','PRECONDITION');
  const reason=text(p.reason,'结案原因',true,500),facts=lineShipmentFacts(root,line.id);
+ if(order.replacementSource&&Math.round(facts.departed*10000)!==Math.round(line.qty*10000))fail('补发货物尚未发齐，不能结案','PRECONDITION');
  if(facts.open.length)fail(`该条目还有未离港的有效出运（${facts.open.map(s=>s.code).join('、')}），须先离港或取消后再结案`,'PRECONDITION');
  const range=toleranceRange(line.qty,g.contract),within=facts.departed>=range.min&&facts.departed<=range.max;
  const closure:OrderLineClosure={id:context.id(),status:within?'closed':'pending',quantity:facts.departed,ordered:line.qty,min:range.min,max:range.max,reason,requesterId:context.actorId||'',requesterName:context.actorName,requestedAt:context.now,reviewerIds:[]};
@@ -189,7 +190,7 @@ function decideClosure(root:MistState,p:{id:string;decision:'approved'|'rejected
  if(!context.actorId||context.actorId===c!.requesterId)fail('申请人不能审批自己的结案申请','FORBIDDEN');
  if(!c!.reviewerIds.includes(context.actorId)||!reviewers(context,order.type).includes(context.actorId))fail('当前账号不在本次及当前有效审批名单','FORBIDDEN');
  if(!['approved','rejected'].includes(p.decision))fail('审批决定无效');const note=text(p.note,'审批意见',true);
- const facts=lineShipmentFacts(root,line.id);if(p.decision==='approved'&&(facts.open.length||facts.departed!==c!.quantity))fail('条目出运事实已变化，请退回后重新申请结案','CONFLICT');
+ const facts=lineShipmentFacts(root,line.id);if(order.replacementSource&&p.decision==='approved'&&Math.round(facts.departed*10000)!==Math.round(line.qty*10000))fail('补发货物尚未发齐，不能结案','PRECONDITION');if(p.decision==='approved'&&(facts.open.length||facts.departed!==c!.quantity))fail('条目出运事实已变化，请退回后重新申请结案','CONFLICT');
  c!.status=p.decision==='approved'?'closed':'rejected';c!.decidedBy=context.actorId;c!.decidedName=context.actorName;c!.decidedAt=context.now;c!.note=note;
  event(root,context,order,`条目结案审批${p.decision==='approved'?'通过':'退回'}：${line.style}，${note}`);root.notifications.unshift({id:context.id(),title:`${order.code} · ${line.style} 结案审批${p.decision==='approved'?'通过':'退回'}`,detail:note,at:context.now,readAt:null,target:{view:'orders/detail',id:order.id}});order.updatedAt=context.now;
  return{id:order.id,orderId:order.id,lineId:line.id,closure:c!.status};
@@ -253,6 +254,7 @@ export function orderCancelBlockers(root:MistState,order:Pick<MistOrder,'id'>){
 export const ORDER_CANCEL_ALTERNATIVE='不能整单取消，请改用条目结案';
 function voidOrder(root:MistState,p:{orderId:string;reason:string},context:MistContext):MistCommandResult{
  const order=getOrder(root,p.orderId),g=governance(order);orderGovernancePermission({type:'order.governance.void',payload:p});
+ if(order.replacementSource)fail('补发订单不能单独作废','PRECONDITION');
  if(g.status==='void')fail('订单已作废','PRECONDITION');if(g.status==='cancelled')fail('订单已取消','PRECONDITION');
  if(g.status==='pending')fail('订单审批中，请先撤回或等待审批决定后再作废','PRECONDITION');
  if(g.status==='approved')fail('已批准订单不能作废，请发起取消订单申请','PRECONDITION');
@@ -267,6 +269,7 @@ function voidOrder(root:MistState,p:{orderId:string;reason:string},context:MistC
 }
 function requestCancel(root:MistState,p:{orderId:string;reason:string},context:MistContext):MistCommandResult{
  const order=getOrder(root,p.orderId),g=governance(order);orderGovernancePermission({type:'order.governance.requestCancel',payload:p});
+ if(order.replacementSource)fail('补发订单不能单独取消','PRECONDITION');
  if(g.status==='cancelled')fail('订单已取消','PRECONDITION');if(g.status==='void')fail('订单已作废','PRECONDITION');
  if(g.status!=='approved')fail('仅已批准订单可申请取消；草稿或已退回订单请直接作废','PRECONDITION');
  if(g.cancellation?.status==='pending')fail('订单已有待审批的取消申请','PRECONDITION');
@@ -284,6 +287,7 @@ function decideCancel(root:MistState,p:{id:string;decision:'approved'|'rejected'
  if(!context.actorId||context.actorId===c!.requesterId)fail('申请人不能审批自己的取消订单申请','FORBIDDEN');
  if(!c!.reviewerIds.includes(context.actorId)||!reviewers(context,order.type).includes(context.actorId))fail('当前账号不在本次及当前有效审批名单','FORBIDDEN');
  if(!['approved','rejected'].includes(p.decision))fail('审批决定无效');const note=text(p.note,'审批意见',true);
+ if(order.replacementSource&&p.decision==='approved')fail('补发订单不能单独取消','PRECONDITION');
  if(p.decision==='approved'){const blockers=orderCancelBlockers(root,order);if(blockers.length)fail(`${blockers.join('；')}，${ORDER_CANCEL_ALTERNATIVE}；请退回本申请`,'CONFLICT');}
  c!.status=p.decision;c!.decidedBy=context.actorId;c!.decidedName=context.actorName;c!.decidedAt=context.now;c!.note=note;
  let created=0;

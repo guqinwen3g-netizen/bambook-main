@@ -37,7 +37,7 @@ export function orderFulfilled(state: MistState, order: Pick<MistOrder, 'id'>) {
 
 export function OrderTerminationButton({ state, order, busy, run, go }: { state: MistState; order: Governed; busy: boolean; run: (command: MistCommand) => Promise<unknown>; go: Go }) {
   const g = order.governance, [open, setOpen] = React.useState(false), [reason, setReason] = React.useState(''), [failure, setFailure] = React.useState(''), [working, setWorking] = React.useState(false);
-  if (!g || g.status === 'void' || g.status === 'cancelled' || g.cancellation?.status === 'pending') return null;
+  if (order.replacementSource || !g || g.status === 'void' || g.status === 'cancelled' || g.cancellation?.status === 'pending') return null;
   const mode: 'void' | 'cancel' | null = g.status === 'draft' || g.status === 'rejected' ? 'void' : g.status === 'approved' ? 'cancel' : null;
   if (!mode || (mode === 'cancel' && orderFulfilled(state, order))) return null;
   const blockers = mode === 'cancel' ? orderCancelBlockers(state, order) : [], changePending = g.changeDraft?.status === 'pending';
