@@ -1,11 +1,11 @@
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
-const mocks=vi.hoisted(()=>({resolve:vi.fn(),dept:vi.fn(),users:new Map<string,any>(),build:vi.fn()}));
-vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:()=>({resolveReviewerByDepartment:mocks.dept,resolveClaimLeader:vi.fn()})}));
+const mocks=vi.hoisted(()=>({resolve:vi.fn(),dept:vi.fn(),claim:vi.fn(),users:new Map<string,any>(),build:vi.fn()}));
+vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:()=>({resolveReviewerByDepartment:mocks.dept,resolveClaimLeader:mocks.claim})}));
 vi.mock('../orders/orderMainApprovalService',()=>({createOrderMainApprovalService:()=>({resolveEligibleReviewerIds:mocks.resolve})}));
 vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:any,id:string)=>mocks.users.get(id)||null,buildLoadedAuthTokenPayload:mocks.build}));
 import {mistApprovalAuthority} from './context';
 const actor={userId:'owner',roles:[],permissions:['orders:write'],departmentIds:[]} as any;
-beforeEach(()=>{mocks.resolve.mockReset();mocks.dept.mockReset();mocks.users.clear();mocks.build.mockReset();mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,authorizationLoaded:true}));vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('NODE_ENV','test');});
+beforeEach(()=>{mocks.resolve.mockReset();mocks.dept.mockReset();mocks.claim.mockReset();mocks.claim.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));mocks.users.clear();mocks.build.mockReset();mocks.build.mockImplementation(async(_db:any,user:any,companyId?:string)=>({userId:user.id,companyId,roles:[],departmentIds:[],permissions:user.permissions,authorizationLoaded:true}));vi.stubEnv('MIST_LOCAL_WORKSPACE','0');vi.stubEnv('NODE_ENV','test');});
 afterEach(()=>vi.unstubAllEnvs());
 describe('Mist order reviewer authority',()=>{
  it('uses both built-in local identities for both domains without querying the old account database',async()=>{vi.stubEnv('MIST_LOCAL_WORKSPACE','1');const value=await mistApprovalAuthority({}, {...actor,mistLocal:true},'order.governance.submit');expect(value.orderReviewerIds).toEqual({garment:['local-operator','local-reviewer','local-manager'],fabric:['local-operator','local-reviewer','local-manager']});expect(mocks.resolve).not.toHaveBeenCalled();});
@@ -58,5 +58,19 @@ describe('company context across approval transaction callbacks',()=>{
   mocks.dept.mockResolvedValue({reviewerId:'outsider'});mocks.users.set('outsider',{id:'outsider',status:'active',permissions:['finance:payment_request:approve']});
   mocks.build.mockRejectedValue(Object.assign(new Error('outside company'),{code:'COMPANY_ACCESS_DENIED'}));
   await expect(mistApprovalAuthority({}, {...actor,companyId:'company-a'},'payable.request.submit')).rejects.toMatchObject({code:'COMPANY_ACCESS_DENIED'});
+ });
+});
+
+describe('Mist claim leader authority',()=>{
+ it('keeps the current company and checks the leader current approval grant before nomination',async()=>{
+  mocks.claim.mockResolvedValue({reviewerId:'leader'});mocks.users.set('leader',{id:'leader',status:'active',permissions:['aftersales:approve']});
+  expect((await mistApprovalAuthority({},{...actor,companyId:'company-a'},'platform.claim.submit')).claimReviewerId).toBe('leader');
+  expect(mocks.build).toHaveBeenCalledWith({},mocks.users.get('leader'),'company-a');
+  mocks.users.set('leader',{id:'leader',status:'active',permissions:['aftersales:write']});
+  expect((await mistApprovalAuthority({},actor,'platform.claim.decide')).claimReviewerId).toBeUndefined();
+  mocks.users.set('leader',{id:'leader',status:'disabled',permissions:['aftersales:approve']});
+  expect((await mistApprovalAuthority({},actor,'platform.claim.submit')).claimReviewerId).toBeUndefined();
+  mocks.claim.mockResolvedValue({reviewerId:'owner'});mocks.users.set('owner',{id:'owner',status:'active',permissions:['aftersales:approve']});
+  expect((await mistApprovalAuthority({},actor,'platform.claim.submit')).claimReviewerId).toBeUndefined();
  });
 });

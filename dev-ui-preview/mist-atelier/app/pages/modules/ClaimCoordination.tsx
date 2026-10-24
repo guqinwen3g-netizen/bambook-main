@@ -1,6 +1,7 @@
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
+import {businessWhen} from './pageKit';
 /** 售后索赔协同：通知相关人员 → 质检核实（工厂参与）→ 客户处置（原审批）→ 两笔账（客户 / 工厂追偿）→ 两边都落实才结束。 */
 import React from 'react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Facts, Pill, type Tone } from '../../../../../components/mist';
@@ -16,7 +17,7 @@ const f = (key: string, label: string, type: ModuleField['type'] = 'text', extra
 const s = (v: ModuleValues, k: string) => String(v[k] ?? '').trim();
 const n = (v: ModuleValues, k: string) => Number(v[k]);
 const money = (value: number | null, currency: string) => value === null ? '币种不同，不自动换算' : new Intl.NumberFormat(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value) + ' ' + currency;
-const when = (iso: string) => iso.slice(0, 16).replace('T', ' ');
+const when = businessWhen;
 
 type Props = {
   claim: PlatformClaim; state: MistState; actorId?: string; busy: boolean;

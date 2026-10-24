@@ -110,7 +110,6 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'ai:write:high', reason: 'no-scope-enforcement', note: '同上' },
 
   // ── *:admin 系列：只出现在 permissionGuard 的 WRITE_SCOPE_EXACT 高危分类集 ──
-  { scope: 'reports:admin', reason: 'no-scope-enforcement', note: '仅在 permissionGuard.WRITE_SCOPE_EXACT（高危分类），无业务强制点' },
   { scope: 'customs:admin', reason: 'no-scope-enforcement', note: '同上（单证模板/签章配置实际未按本码把关）' },
 
   // ── 审批类：设计上走审批策略内核（approvals/），未用 scope 门 ──

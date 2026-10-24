@@ -372,7 +372,7 @@ export class MistRepository {
           const kind=REVIEW_KIND_BY_COMMAND.get(input.command.type),payload=input.command.payload as {id?:unknown;escalationId?:unknown}|undefined;
           const review=kind?this.reviews(row.state).find(task=>task.kind===kind&&(kind==='risk'?task.entityId===payload?.escalationId&&task.target.id===payload?.id:task.entityId===payload?.id)):undefined;
           const subject=review?await this.reviewSubject(db,actor,review.requesterId):actor;
-          context.authority = await mistApprovalAuthority(db,subject,input.command.type);
+          context.authority = await mistApprovalAuthority(db,subject,input.command.type,[row.ownerId,...memberIds(row.state)]);
         }
         if(input.command && MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type)) context.members = await this.memberDirectory(db,row,actor);
         const plan = input.command ? this.contract.getRequiredBusinessNumberPlan?.(row.state, input.command) ?? [] : [];
@@ -554,7 +554,7 @@ export class MistRepository {
       const command={type,payload:task.kind==='risk'?{id:task.target.id,escalationId:task.entityId,decision:input.decision,note:input.note}:{id:task.entityId,decision:input.decision,note:input.note}} as MistCommand;
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
-      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type);
+      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,[row.ownerId,...memberIds(row.state)]);
       if(MIST_MEMBER_DIRECTORY_COMMANDS.includes(type))context.members=await this.memberDirectory(db,row,actor);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
       const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));

@@ -87,3 +87,5 @@ describe('售后索赔协同',()=>{
   const f=fixture();notify(f);expect(f.state.tasks.find(t=>t.kind==='claim-verify:'+f.claimId)?.permission).toBe('qc:garment_chain:write');
   f.state.invoices=[];expect(claimLedger(f.state,f.claim()).currency).toBe('USD');
  });
+
+it('requires the dedicated approval scope for a claim decision',()=>{expect(mistCommandPermission({type:'platform.claim.decide',payload:{id:'pending',decision:'approved',note:'review'}})).toBe('aftersales:approve');});
