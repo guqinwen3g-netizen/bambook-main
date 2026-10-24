@@ -400,3 +400,10 @@ it('keeps the approved mode effective while reviewing the proposed CMT scope',as
   expect(store.state!.orders[0].governance?.changeDraft?.lines[0]).toMatchObject({fulfillmentMode:'trims_cmt',cmtIncludedItems:['packaging']});
   const changes=getByRole(host,'table',{name:'订单变更前后差异'});expect(within(changes).getByRole('row',{name:/履约模式/}).textContent).toContain('辅料 + CMT');expect(within(changes).getByRole('row',{name:/CMT 包含/}).textContent).toContain('包装');
 });
+
+it('shows no collection obligation for a free replacement and returns to its claim',async()=>{
+ const order=store.state!.orders[0];order.replacementSource={schemaVersion:1,claimId:'replacement-case'} as any;order.amount=0;store.state!.orderLines[0].price=0;order.governance!.contract={...order.governance!.contract,paymentMethod:'OTHER',depositPercent:0,preShipmentPercent:0,paymentNote:'批准换货补发，无需客户付款',overPercent:0,shortPercent:0};store.state!.platform.claims.push({id:'replacement-case'} as any);
+ render();expect(host.textContent).toContain('无需收款');expect(host.textContent).not.toContain('已到账');expect(host.textContent).not.toContain('已确认到账');expect(host.textContent).not.toContain('合同待收');expect(host.textContent).not.toContain('OTHER');
+ await act(async()=>getByRole(host,'button',{name:'售后来源'}).click());expect(go).toHaveBeenLastCalledWith('claims','replacement-case');
+ await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());const dialog=getByRole(document.body,'dialog');expect(dialog.querySelector('[aria-label="定金比例（%）"]')).toBeNull();expect(dialog.querySelector('[aria-label="出运前累计收款（%）"]')).toBeNull();expect(dialog.textContent).toContain('补发约定');
+});
