@@ -88,7 +88,7 @@ it('reports a workspace refresh failure without claiming the saved approval must
 
 it('requires a written reason before returning and never posts an empty decision',async()=>{
  await render();await openRow();await click('退回');
- expect(postCount).toBe(0);expect(document.body.textContent).toContain('退回必须写明理由');
+ expect(postCount).toBe(0);expect(document.body.textContent).toContain('请填写退回理由');
  await typeNote('单价与合同不符');await click('退回');
  expect(postCount).toBe(1);expect(serverStatus).toBe('rejected');
 });

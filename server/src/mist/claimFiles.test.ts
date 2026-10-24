@@ -12,7 +12,7 @@ vi.mock('../auth/tokenHelpers',()=>({loadUserWithRoles:async(_db:unknown,id:stri
 let directory:string,db:MemoryMistDatabase,repo:MistRepository,auth:ReturnType<typeof testAuthority>;
 beforeEach(async()=>{
  directory=await mkdtemp(path.join(tmpdir(),'mist-claim-files-'));db=new MemoryMistDatabase();auth=testAuthority();
- auth.users.get('owner')!.permissions.push('relations:write','orders:write','invoices:write','aftersales:write');auth.users.set('reviewer',{active:true,permissions:['orders:write','aftersales:write']});
+ auth.users.get('owner')!.permissions.push('relations:write','orders:write','invoices:write','aftersales:write');auth.users.set('reviewer',{active:true,permissions:['orders:write','aftersales:approve']});
  repo=new MistRepository(db,contract,new MistPrivateFiles(directory),auth.authorize,()=>new Date('2026-10-13T08:00:00Z'));
 });
 afterEach(async()=>{await rm(directory,{recursive:true,force:true});});
@@ -36,7 +36,7 @@ async function fixture(){
 }
 
 it('allows the assigned reviewer to download only frozen case and disposition files across accounts',async()=>{
- const f=await fixture();auth.users.get('owner')!.permissions=['aftersales:write'];const proof=await f.upload('refund-proof.pdf','QA refund proof',f.claimId);
+ const f=await fixture();const reviewerActor={...testActor('reviewer'),roles:[],authorizationLoaded:true};auth.users.get('reviewer')!.permissions=['aftersales:approve'];auth.users.get('owner')!.permissions=['aftersales:write'];const proof=await f.upload('refund-proof.pdf','QA refund proof',f.claimId);
  const before=await repo.get(testActor(),f.workspaceId),receiptCount=db.receipts.size;
  await expect(repo.execute(testActor(),f.workspaceId,{requestId:'missing-file',expectedRevision:f.getRevision(),command:{type:'platform.claim.attachFiles',payload:{id:f.claimId,fileIds:[proof.id,'foreign-file']}}})).rejects.toThrow(/附件不存在/);
  expect(await repo.get(testActor(),f.workspaceId)).toEqual(before);expect(db.receipts.size).toBe(receiptCount);
@@ -46,12 +46,13 @@ it('allows the assigned reviewer to download only frozen case and disposition fi
  const frozen=(await repo.get(testActor(),f.workspaceId)).state.platform.claims[0].dispositions[0];
  expect(frozen.fileIds).toEqual([f.ci.id]);expect(frozen.reviewFileIds).toEqual([f.ci.id,proof.id]);
  const later=await f.upload('after-submit.pdf','not in the submitted approval',f.claimId);await f.run({type:'platform.claim.attachFiles',payload:{id:f.claimId,fileIds:[later.id]}});
- const review=(await repo.listReviews(testActor('reviewer'))).find((row:{entityId:string})=>row.entityId===f.dispositionId)!;
+ const review=(await repo.listReviews(reviewerActor)).find((row:{entityId:string})=>row.entityId===f.dispositionId)!;
+ await expect(repo.get(reviewerActor,f.workspaceId)).rejects.toMatchObject({status:404});
  expect(review.fileIds).toEqual([f.ci.id,proof.id]);expect(review.files.map((file:{name:string})=>file.name)).toEqual(['CI-v2.pdf','refund-proof.pdf']);
- expect((await repo.reviewFile(testActor('reviewer'),f.workspaceId,review.id,proof.id)).bytes.toString()).toContain('QA refund proof');
- await expect(repo.reviewFile(testActor('reviewer'),f.workspaceId,review.id,later.id)).rejects.toMatchObject({code:'FILE_NOT_FOUND'});
+ expect((await repo.reviewFile(reviewerActor,f.workspaceId,review.id,proof.id)).bytes.toString()).toContain('QA refund proof');
+ await expect(repo.reviewFile(reviewerActor,f.workspaceId,review.id,later.id)).rejects.toMatchObject({code:'FILE_NOT_FOUND'});
  await expect(repo.reviewFile(testActor('other'),f.workspaceId,review.id,proof.id)).rejects.toMatchObject({status:404});
- await repo.decideReview(testActor('reviewer'),f.workspaceId,review.id,{requestId:'approve-return-refund',expectedRevision:f.getRevision(),decision:'approved',note:'核对冻结退款事实'});
+ await repo.decideReview(reviewerActor,f.workspaceId,review.id,{requestId:'approve-return-refund',expectedRevision:f.getRevision(),decision:'approved',note:'核对冻结退款事实'});
  const decided=(await repo.get(testActor(),f.workspaceId)).state.platform.claims[0].dispositions[0];expect(decided.snapshot).toBe(frozen.snapshot);expect(decided.reviewFileIds).toEqual(frozen.reviewFileIds);expect(decided.basis).toBe(frozen.basis);
 });
 

@@ -94,7 +94,7 @@ it('stays readable without inventory authority and says why movements are unavai
   store.state!.fulfillment.stock.push(stock('a'));
   render('a');
   expect(host.textContent).toContain('只读查看');
-  expect(queryByRole(host,'button',{name:'登记真实仓库'})).toBeNull();
+  expect(queryByRole(host,'button',{name:'新增仓库'})).toBeNull();
   const detail=host.querySelector('[data-stock-detail="a"]') as HTMLElement;
   expect((getByRole(detail,'button',{name:'登记出库'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('登记出库：需要库存写权限');
