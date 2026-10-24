@@ -7,6 +7,7 @@ import { financeReceiptDisplay } from '../pages/FinancePage';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
 import { SETTLEMENT_SCOPES } from '../../../../server/src/shared/mistPayables';
+import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 
 type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
@@ -148,6 +149,13 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       push({ id: 'invoice:' + invoice.id, source: 'finance', title: ui`${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
         due: invoice.due || undefined, target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
     const requests = state.payables?.requests ?? [], since = new Date(Date.parse(today + 'T00:00:00Z') - FINANCE_RETURN_DAYS * 86400000).toISOString().slice(0, 10);
+    if (can(MIST_FINANCE_SCOPES.voucher)) for (const request of requests) {
+      if (request.state !== 'approved' || !(request.amount > 0) || request.purpose === 'bill' && !can(MIST_FINANCE_SCOPES.reconcile)) continue;
+      // Approval returns to the original full request after a reversal; historical payment IDs are not a live balance.
+      push({id:'payment-request:'+request.id,source:'finance',title:`${request.code} · ${uiText('待付款')}`,
+        meta:[request.supplier,`${request.currency} ${request.amount.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`].filter(Boolean).join(' · '),
+        when:'待付款',urgent:false,at:request.decision?.at||request.submittedAt,target:{view:'payment-vouchers',id:request.id,section:'payables'}});
+    }
     for (const request of requests.filter(item => item.state === 'rejected' && item.requesterId === me && (item.decision?.at ?? '').slice(0, 10) >= since)) {
       const resubmitted = requests.some(other => other.id !== request.id && other.submittedAt > request.submittedAt && other.state !== 'cancelled' && other.supplierId === request.supplierId && other.purpose === request.purpose
         && (other.purchaseId ?? other.settlementId ?? other.planId ?? '') === (request.purchaseId ?? request.settlementId ?? request.planId ?? ''));
