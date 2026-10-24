@@ -1,7 +1,7 @@
 import {assertOrderShipmentPaymentCovered,orderShipmentPaymentCoverage} from './mistOrderFunding';
 import {describe,it,expect} from 'vitest';
-import {createMistState,type MistContext} from './mistWorkspace';
-import {applyOrderFundingCommand,assertOrderDepositCovered,assertOrderFundingIntegrity,orderDepositCoverage,orderFundingCoveredAmount,orderFundingCommandPermission} from './mistOrderFunding';
+import {createMistState,applyMistCommand,type MistContext} from './mistWorkspace';
+import {applyOrderFundingCommand,assertOrderDepositCovered,assertOrderFundingIntegrity,orderDepositCoverage,orderFundingCoveredAmount,orderFundingCommandPermission,orderFundingReconciliationLimit} from './mistOrderFunding';
 function setup(){let n=0;const context:MistContext={id:()=>`fund-${++n}`,now:'2026-10-13T00:00:00Z',actorName:'财务',actorId:'finance'};const state=createMistState(context,'empty');state.customers=[{id:'c',name:'客户',code:'C',country:'',city:'',industry:'',owner:'',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''}];state.orders=[{id:'o',code:'O',customerId:'c',currency:'USD',amount:100,governance:{contract:{paymentMethod:'TT',depositPercent:30}}},{id:'other',code:'OTHER',customerId:'c',currency:'USD',amount:100,governance:{contract:{paymentMethod:'TT',depositPercent:30}}}] as any;state.receipts=[{id:'r',code:'R',payer:'客户',currency:'USD',amount:50,remaining:50,state:'unmatched',date:'2026-10-13',ref:'r'},{id:'r2',code:'R2',payer:'客户',currency:'USD',amount:20,remaining:20,state:'unmatched',date:'2026-10-13',ref:'r2'}];const assign=(amount:number,receiptId='r',orderId:string|null='o')=>applyOrderFundingCommand(state,{type:'funding.assign',payload:{receiptId,customerId:'c',orderId,amount,note:'实际到账归属依据'}},context);return{state,context,assign};}
 describe('order deposit funding',()=>{
  it('accepts multiple advance receipts without any CI and does not reconcile or consume either balance',()=>{const f=setup();f.assign(20);f.assign(10,'r2');expect(assertOrderDepositCovered(f.state,'o')).toMatchObject({required:30,received:30,status:'covered'});expect(f.state.receipts.map(r=>r.remaining)).toEqual([50,20]);expect(f.state.invoices).toEqual([]);expect(f.state.allocations).toEqual([]);});
@@ -43,4 +43,41 @@ describe('approved pre-shipment cumulative receipts',()=>{
   (f.state.orders[0] as any).governance.contract.preShipmentPercent=101;
   expect(orderShipmentPaymentCoverage(f.state,'o').status).toBe('unconfigured');
  });
+});
+
+describe('reconciliation headroom matches the authoritative funding guard',()=>{
+ it.each([
+  {name:'unreserved cash',target:0,balance:0,other:0,used:0,orderPaidElsewhere:0,want:[50,50,50]},
+  {name:'full order earmark',target:50,balance:0,other:0,used:0,orderPaidElsewhere:0,want:[50,0,0]},
+  {name:'partial order earmark',target:30,balance:0,other:0,used:0,orderPaidElsewhere:0,want:[50,20,20]},
+  {name:'customer balance',target:0,balance:50,other:0,used:0,orderPaidElsewhere:0,want:[50,50,0]},
+  {name:'customer balance and exact order',target:20,balance:30,other:0,used:0,orderPaidElsewhere:0,want:[50,30,0]},
+  {name:'different order and customer pool',target:0,balance:20,other:30,used:0,orderPaidElsewhere:0,want:[20,50,0]},
+  {name:'partial allocation overlaps its earmark',target:50,balance:0,other:0,used:10,orderPaidElsewhere:0,want:[40,0,0]},
+  {name:'allocation beyond earmark',target:20,balance:10,other:0,used:25,orderPaidElsewhere:0,want:[25,25,20]},
+  {name:'contract already partly covered elsewhere',target:0,balance:0,other:0,used:0,orderPaidElsewhere:80,want:[20,50,50]},
+ ])('$name',scenario=>{
+  const f=setup();f.state.orderLines=f.state.orders.map(o=>({id:'line-'+o.id,orderId:o.id,name:'商品',style:'A',img:'clay',qty:1,unit:'件',price:100,made:0,qc:0}));f.state.receipts[1].amount=100;f.state.receipts[1].remaining=100;
+  if(scenario.target)f.assign(scenario.target);
+  if(scenario.balance)f.assign(scenario.balance,'r',null);
+  if(scenario.other)f.assign(scenario.other,'r','other');
+  if(scenario.orderPaidElsewhere)f.assign(scenario.orderPaidElsewhere,'r2','o');
+  f.state.invoices=['o','other'].map((orderId,n)=>({id:'i'+n,code:'I'+n,orderId,order:orderId,customer:'客户',due:'2026-10-13',currency:'USD',amount:100,open:100}));
+  f.state.invoices.push({id:'dev',code:'DEV',orderId:'',order:'',customer:'客户',due:'2026-10-13',currency:'USD',amount:100,open:100,devId:'development'} as any);
+  if(scenario.used){f.state.allocations.push({id:'used',receiptId:'r',invoiceId:'i0',currency:'USD',amount:scenario.used,createdAt:f.context.now,actor:'财务'});f.state.receipts[0].remaining-=scenario.used;f.state.invoices[0].open-=scenario.used;}
+  const original=JSON.stringify(f.state);
+  for(const [n,invoiceId] of ['i0','i1','dev'].entries()){
+   const limit=orderFundingReconciliationLimit(f.state,'r',invoiceId);expect(limit).toBe(scenario.want[n]);
+   if(limit>0)expect(()=>applyMistCommand(f.state,{type:'finance.reconcile',payload:{receiptId:'r',invoiceId,amount:limit,payerBasis:'核对原始付款依据'}},f.context)).not.toThrow();
+   expect(()=>applyMistCommand(f.state,{type:'finance.reconcile',payload:{receiptId:'r',invoiceId,amount:limit+.01,payerBasis:'核对原始付款依据'}},f.context)).toThrow();
+  }
+  expect(JSON.stringify(f.state)).toBe(original);
+ });
+ it('returns zero for a different currency or missing source',()=>{const f=setup();f.state.invoices=[{id:'eur',currency:'EUR',open:50} as any];expect(orderFundingReconciliationLimit(f.state,'r','eur')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'missing','eur')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'r','missing')).toBe(0);});
+});
+
+it('keeps customer-only balances out of another customer and development invoices',()=>{
+ const f=setup();f.assign(50,'r',null);f.state.orders[1].customerId='other-customer';f.state.invoices=[{id:'foreign',orderId:'other',currency:'USD',open:100} as any,{id:'opening',currency:'USD',open:100,opening:{}} as any];
+ expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(0);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(0);
+ f.state.orderFunding!.assignments[0].state='released';expect(orderFundingReconciliationLimit(f.state,'r','foreign')).toBe(50);expect(orderFundingReconciliationLimit(f.state,'r','opening')).toBe(50);
 });

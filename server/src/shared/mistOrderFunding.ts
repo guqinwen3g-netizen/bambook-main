@@ -19,8 +19,7 @@ export const createOrderFundingState=(_context?:MistContext,_root?:unknown):Orde
 export function orderFundingCommandPermission(command:OrderFundingCommand){if(command.type==='funding.assign'||command.type==='funding.release')return MIST_FINANCE_SCOPES.reconcile;return fail('未知资金归属操作');}
 
 /** Customer balances can fund that customer's invoices; order deposits cannot be spent on another order. */
-export function assertOrderFundingIntegrity(root:Root){
- for(const receipt of root.receipts){
+function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   const customers=new Map<string,{unassigned:number;orders:Map<string,{assigned:number;allocated:number}>}>();
   const group=(id:string)=>{if(!customers.has(id))customers.set(id,{unassigned:0,orders:new Map()});return customers.get(id)!;};
   const orderBucket=(customerId:string,orderId:string)=>{const customer=group(customerId);if(!customer.orders.has(orderId))customer.orders.set(orderId,{assigned:0,allocated:0});return customer.orders.get(orderId)!;};
@@ -41,10 +40,34 @@ export function assertOrderFundingIntegrity(root:Root){
    const orders=[...customer.orders.values()],assigned=orders.reduce((n,o)=>n+o.assigned,0),used=orders.reduce((n,o)=>n+Math.max(o.assigned,o.allocated),0);
    reserved+=Math.max(assigned+customer.unassigned,used);
   }
+  return {customers,reserved};
+}
+export function assertOrderFundingIntegrity(root:Root){
+ for(const receipt of root.receipts){
+  const {reserved}=receiptFundingUse(root,receipt);
   if(reserved>mistMoneyMinor(receipt.amount)){const money=(n:number)=>(n/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+' '+receipt.currency;fail(`此到账金额 ${money(mistMoneyMinor(receipt.amount))}，归属与核销合计将达 ${money(reserved)}，超出到账金额，不能重复计入；请核对本次金额或该到账已有的归属`,'PRECONDITION');}
  }
+
  for(const row of active(root))if(!root.receipts.some(r=>r.id===row.receiptId))fail('归属的到账来源不存在');
  for(const order of root.orders)if(mistMoneyMinor(orderFundingCoveredAmount(root,order.id))>mistMoneyMinor(order.amount))fail('订单已归属与核销金额超过合同金额，超额部分请登记为客户余额','PRECONDITION');
+}
+/** Read-only headroom for the reconciliation picker. Earmarks and allocations overlap only within their existing customer/order buckets. */
+export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoiceId:string):number{
+ const receipt=root.receipts.find(r=>r.id===receiptId),invoice=root.invoices.find(i=>i.id===invoiceId);
+ if(!receipt||!invoice||receipt.currency!==invoice.currency||receipt.remaining<=0||invoice.open<=0)return 0;
+ const {customers,reserved}=receiptFundingUse(root,receipt);
+ const free=mistMoneyMinor(receipt.amount)-reserved;
+ let allowed=free;
+ if(!(invoice as {devId?:string;opening?:unknown}).devId&&!(invoice as {opening?:unknown}).opening){
+  const order=root.orders.find(o=>o.id===invoice.orderId);if(!order)return 0;
+  const customer=customers.get(order.customerId),bucket=customer?.orders.get(order.id);
+  const assignedRoom=Math.max(0,(bucket?.assigned??0)-(bucket?.allocated??0));
+  const buckets=[...(customer?.orders.values()??[])];
+  const customerAssigned=buckets.reduce((n,b)=>n+b.assigned,0)+(customer?.unassigned??0);
+  const customerUsed=buckets.reduce((n,b)=>n+Math.max(b.assigned,b.allocated),0);
+  allowed=Math.min(free+Math.max(0,customerAssigned-customerUsed)+assignedRoom,mistMoneyMinor(order.amount)-mistMoneyMinor(orderFundingCoveredAmount(root,order.id))+assignedRoom);
+ }
+ return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),mistMoneyMinor(invoice.open),allowed))/100;
 }
 export function orderFundingCoveredAmount(root:Root,orderId:string){
  let covered=0;for(const receipt of root.receipts){

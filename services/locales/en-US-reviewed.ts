@@ -1,5 +1,10 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '该银行水单已登记结汇':'This bank slip already has an active FX settlement',
+  '没有可核销发票':'No eligible invoices',
+  '核销已冲回':'Reconciliation reversed',
+  '付款凭证已冲回':'Payment record reversed',
+  '仅冲回账务记录，不发起银行退款':'Reverses the accounting entry only; no bank refund is sent',
   '文书版本无效':'Invalid document revision',
   '归档文书版本无效':'Invalid archived document revision',
   '文书版本号超限':'Document revision limit exceeded',

@@ -125,7 +125,7 @@ export function FxDialog({ state, draft, onClose }: { state: MistState; draft: F
     void execute({ type: 'finance.fx.lock', payload: { date: form.date, bankName: form.bankName, currency: form.currency.trim().toUpperCase(), amount: Number(form.amount), rate: form.rate.trim(), localCurrency: form.localCurrency.trim().toUpperCase(), settleBy: form.settleBy, ref: form.ref, note: form.note } }, () => { toast('锁汇已登记'); onClose(); });
   };
   const message = local || failure, accountOptions = (pick: (a: MistBankAccount) => boolean) => [{ value: '', label: '请选择账户' }, ...accounts.filter(a => !a.closed && pick(a)).map(a => ({ value: a.id, label: `${a.code} · ${a.currency} · ${accountLabel(a)}` }))];
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText(settle ? '登记结汇' : '登记锁汇')} description={uiText(settle ? '按银行结汇水单登记实际卖出的原币和入账本币；汇率由两笔金额得出，不估算。' : '登记与银行签订的远期锁汇合同；锁汇本身不改变账户余额，交割时另登记结汇。')}
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText(settle ? '登记结汇' : '登记锁汇')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText(settle ? '保存结汇' : '保存锁汇')}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能保存")}>{message}</Banner>}
@@ -137,7 +137,7 @@ export function FxDialog({ state, draft, onClose }: { state: MistState; draft: F
           <Field label={uiText("卖出账户（原币）")} required><Select aria-label={uiText("卖出账户")} value={form.fromAccountId} options={accountOptions(() => true)} onChange={set('fromAccountId')} /></Field>
           <Field label={uiText("入账账户（本币）")} required><Select aria-label={uiText("入账账户")} value={form.toAccountId} options={accountOptions(a => !from || a.currency !== from.currency)} onChange={set('toAccountId')} /></Field>
           <Field label={ui`卖出原币金额${from ? '（' + from.currency + '）' : ''}`} required><TextInput aria-label={uiText("卖出原币金额")} type="number" step="0.01" value={form.amount} onChange={set('amount')} /></Field>
-          <Field label={ui`入账本币金额${to ? '（' + to.currency + '）' : ''}`} required hint={uiText(derived ? `成交汇率 ${derived}` : '按水单填写')}><TextInput aria-label={uiText("入账本币金额")} type="number" step="0.01" value={form.localAmount} onChange={set('localAmount')} /></Field>
+          <Field label={ui`入账本币金额${to ? '（' + to.currency + '）' : ''}`} required hint={derived ? ui`成交汇率 ${derived}` : undefined}><TextInput aria-label={uiText("入账本币金额")} type="number" step="0.01" value={form.localAmount} onChange={set('localAmount')} /></Field>
           <Field label={uiText("交割锁汇合同")}><Select aria-label={uiText("交割锁汇合同")} value={form.lockId} options={[{ value: '', label: '不对应锁汇（即期结汇）' }, ...locks.map(({ r, left }) => ({ value: r.id, label: `${r.code} · ${r.ref} · @${r.rate} · 剩余 ${bankMoney(left, r.currency)}` }))]} onChange={set('lockId')} /></Field>
         </> : <>
           <Field label={uiText("锁汇银行")} required><TextInput aria-label={uiText("锁汇银行")} value={form.bankName} onChange={set('bankName')} /></Field>
@@ -163,7 +163,7 @@ function ReceiptLinksField({ state, accountId, date, value, onChange }: { state:
   if (!accountId) return null;
   if (!rows.length) return <p className="mist-note">{uiText("卖出账户在结汇日前没有未结汇的到账；本次结汇将记为“未对应到账”，报表不计入任何订单。")}</p>;
   return <div className="mist-col" style={{ gap: 6 }}>
-    <b>{uiText("对应到账（用于订单实际结汇汇率）")}</b>
+    <b>{uiText("对应到账")}</b>
     {rows.map(({ r, left }) => <div key={r.id} className="mist-row" style={{ justifyContent: 'space-between' }}>
       <span><span className="mist-mono">{r.code}</span> {r.payer} · {r.date}{uiText(" · 未结汇 ")}{bankMoney(left / 100, r.currency)}</span>
       <span className="mist-row"><Button size="sm" variant="quiet" onClick={() => onChange({ ...value, [r.id]: (left / 100).toFixed(2) })}>{uiText("全额")}</Button><TextInput aria-label={ui`${r.code} 分配金额`} type="number" step="0.01" style={{ width: 120 }} value={value[r.id] || ''} onChange={e => onChange({ ...value, [r.id]: e.target.value })} /></span>
@@ -201,7 +201,7 @@ export function FxReverseDialog({ record, onClose }: { record: MistFxRecord; onC
   const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
   const [reason, setReason] = React.useState(''), [local, setLocal] = React.useState('');
   const submit = () => { if (!reason.trim()) return setLocal('请填写冲回原因。'); setLocal(''); void execute({ type: 'finance.fx.reverse', payload: { id: record.id, reason } }, () => { toast(record.code + ' 已冲回，原记录保留'); onClose(); }); };
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={520} title={uiText(record.kind === 'lock' ? '冲回锁汇' : '冲回结汇')} description={ui`${record.code} · ${record.ref} · ${bankMoney(record.amount, record.currency)} → ${bankMoney(record.localAmount, record.localCurrency)}。原记录保留${record.kind === 'settlement' ? '，两个账户余额恢复' : ''}。`}
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={520} title={uiText(record.kind === 'lock' ? '冲回锁汇' : '冲回结汇')} description={ui`${record.code} · ${record.ref} · ${bankMoney(record.amount, record.currency)} → ${bankMoney(record.localAmount, record.localCurrency)}`}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canWrite} onClick={submit}>{uiText("确认冲回")}</Button></>}>
     <div className="mist-col">
       {(local || failure) && <Banner tone="bad" title={uiText("还不能冲回")}>{local || failure}</Banner>}
@@ -226,14 +226,14 @@ export function FxPeriodRatesCard() {
   const voidSpec = (r: FxPeriodRate): ModuleEditorSpec => ({ title: `作废 ${r.month} ${r.currency} 月末汇率`, submitLabel: '作废', description: '作废后保留记录，可重新登记正确汇率。', fields: [{ key: 'reason', label: '作废原因', type: 'textarea', required: true }], initialValues: { reason: '' },
     submit: v => run({ type: 'fxrate.period.void', payload: { id: r.id, reason: String(v.reason || '') } }) });
   return <Card>
-    <CardHeader title={ui`月末汇率 · ${rows.filter(r => !r.voided).length}`} sub={uiText("报表“月末暂估”口径用，也用于实际口径下未结汇部分的暂估；实际汇率按结汇对应到账逐笔取。")} tools={canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(add)}>{uiText("登记月末汇率")}</Button> : undefined} />
+    <CardHeader title={ui`月末汇率 · ${rows.filter(r => !r.voided).length}`} tools={canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(add)}>{uiText("登记月末汇率")}</Button> : undefined} />
     <DataTable ariaLabel={uiText("月末汇率")} rows={rows} rowKey={r => r.id} loading={loading} columns={[
       { key: 'month', header: '月份', width: '100px', render: r => r.month },
       { key: 'currency', header: '币种', width: '72px', render: r => r.currency },
       { key: 'rate', header: '汇率', width: '110px', align: 'right', render: r => <span className="mist-num">{r.rate}</span> },
       { key: 'source', header: '依据', width: 'minmax(160px,2fr)', hideOnMobile: true, render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.source}</span><small className="mist-muted">{r.actor} · {r.createdAt.slice(0, 10)}{uiText(r.voided ? ` · 作废：${r.voided.reason}` : '')}</small></div> },
       { key: 'act', header: '', width: '90px', align: 'right', render: r => r.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite ? <Button size="sm" disabled={busy} onClick={() => setSpec(voidSpec(r))}>{uiText("作废")}</Button> : null },
-    ]} empty={<EmptyState title={uiText("还没有月末汇率")} description={uiText("每月初登记上月末各外币汇率，报表即可按月末暂估折算人民币毛利。")} compact />} />
+    ]} empty={<EmptyState title={uiText("还没有月末汇率")} compact />} />
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
   </Card>;
 }
@@ -267,7 +267,7 @@ export function FxRevaluationCard() {
   const voidSpec = (r: FxRevaluation): ModuleEditorSpec => ({ title: `作废 ${r.month} 期末调汇`, submitLabel: '作废', description: '作废后保留记录，可重新登记；须从最近一期倒着作废。', fields: [{ key: 'reason', label: '作废原因', type: 'textarea', required: true }], initialValues: { reason: '' },
     submit: v => run({ type: 'fxrate.reval.void', payload: { id: r.id, reason: String(v.reason || '') } }) });
   return <Card>
-    <CardHeader title={uiText("期末调汇 · 汇兑损益")} sub={uiText("当月外币业务按月初汇率（上月末汇率）入账；月末按本月末汇率重估外币银行存款、外币应收与待核销到账，当月结汇与记账汇率之差为已实现损益。")} tools={<span className="mist-row">
+    <CardHeader title={uiText("期末调汇 · 汇兑损益")} tools={<span className="mist-row">
       <Select aria-label={uiText("调汇月份")} value={month} onChange={e => setMonth(e.target.value)} options={months.map(m => ({ value: m, label: m }))} />
       {canWrite && <Button size="sm" disabled={busy || !view || view.blockers.length > 0} onClick={() => post && setSpec(post)}>{uiText("登记期末调汇")}</Button>}</span>} />
     <div className="mist-card-body mist-col">
@@ -282,7 +282,7 @@ export function FxRevaluationCard() {
       { key: 'realized', header: '结汇已实现', width: '140px', align: 'right', hideOnMobile: true, render: r => gain(r.realized) },
       { key: 'total', header: '合计', width: '140px', align: 'right', render: r => gain(r.total) },
       { key: 'act', header: '', width: '90px', align: 'right', render: r => r.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite ? <Button size="sm" disabled={busy} onClick={e => { e.stopPropagation(); setSpec(voidSpec(r)); }}>{uiText("作废")}</Button> : null },
-    ]} empty={<EmptyState title={uiText("还没有登记期末调汇")} description={uiText("每月结账时先登记本月末汇率，再登记期末调汇。")} compact />} />
+    ]} empty={<EmptyState title={uiText("还没有登记期末调汇")} compact />} />
     {detail && <Dialog open onClose={() => setDetail(null)} width={900} title={ui`${detail.code} · ${detail.month} 期末调汇明细`} description={ui`截至 ${detail.monthEnd}；登记时冻结，之后的流水变动不影响本记录。合计 ${cny(detail.total)}。`}>
       <RevalLinesTable lines={detail.lines} label={uiText("期末调汇明细")} />
     </Dialog>}
