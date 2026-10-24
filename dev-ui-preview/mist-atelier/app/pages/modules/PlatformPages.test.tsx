@@ -1,3 +1,4 @@
+import {queryByRole} from '@testing-library/dom';
 // @vitest-environment jsdom
 import {seedIssuedClaimSource,testClaimNumberConsumer} from '../../../../../server/src/shared/mistClaimTestFixtures';
 import React,{act} from 'react';
@@ -50,12 +51,14 @@ describe('platform editor route ownership',()=>{
   bridge.workspace.state.platform.claimGoods.push({id:'g',claimId,dispositionId:'d',orderId,quantity:1,receivedQuantity:1,unit:'件',destination:'Scrap',state:'Scrapped',returnReceiptId:'hidden-return',source:{style:'A',name:'源产品'},events:[]});
   bridge.denied=['inventory:read','inventory:write'];
   await mount(PLATFORM_PAGES.claims,'claims',claimId);
-  expect(host.textContent).toContain('当前岗位无权查看仓储详情');
+  expect(host.textContent).not.toContain('当前岗位无权查看仓储详情');
+  expect(queryByRole(host,'button',{name:'退货办理'})).toBeNull();
+  expect(host.textContent).toContain('1 / 1 件');
   expect(host.textContent).not.toContain('缺少真实退货单');
  });
  it('never carries a claim disposition draft into another claim or a changed source section',async()=>{
   const{apply,orderId,invoiceId}=source(),a=apply({type:'platform.claim.create',payload:{orderId,invoiceId,problem:'客诉A',fileIds:[]}}).id!,b=apply({type:'platform.claim.create',payload:{orderId,invoiceId,problem:'客诉B',fileIds:[]}}).id!;
-  await mount(PLATFORM_PAGES.claims,'claims',a);await click('新增处置');await input(document.querySelector('[aria-label="处置依据"]') as HTMLTextAreaElement,'A未保存依据');await reroute(PLATFORM_PAGES.claims,'claims',a,'other-source');expect(document.querySelector('[aria-label="处置依据"]')).toBeNull();await reroute(PLATFORM_PAGES.claims,'claims',b);await click('新增处置');expect((document.querySelector('[aria-label="处置依据"]') as HTMLTextAreaElement).value).toBe('');await input(document.querySelector('[aria-label="金额（折让 / 退货退款）"]') as HTMLInputElement,'10');await input(document.querySelector('[aria-label="处置依据"]') as HTMLTextAreaElement,'B核实折让依据');await click('下一步');await click('下一步');await click('确认保存');expect(bridge.workspace.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'platform.claim.disposition',payload:expect.objectContaining({claimId:b,basis:'B核实折让依据',amount:10})}));expect(bridge.workspace.state.platform.claims.find((r:any)=>r.id===a).dispositions).toHaveLength(0);expect(bridge.workspace.state.platform.claims.find((r:any)=>r.id===b).dispositions).toHaveLength(1);
+  await mount(PLATFORM_PAGES.claims,'claims',a);await click('新增处置');await input(document.querySelector('[aria-label="处置依据"]') as HTMLTextAreaElement,'A未保存依据');await reroute(PLATFORM_PAGES.claims,'claims',a,'other-source');expect(document.querySelector('[aria-label="处置依据"]')).toBeNull();await reroute(PLATFORM_PAGES.claims,'claims',b);await click('新增处置');expect((document.querySelector('[aria-label="处置依据"]') as HTMLTextAreaElement).value).toBe('');await input(document.querySelector('[aria-label="补偿金额"]') as HTMLInputElement,'10');await input(document.querySelector('[aria-label="处置依据"]') as HTMLTextAreaElement,'B核实折让依据');await click('下一步');await click('确认保存');expect(bridge.workspace.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'platform.claim.disposition',payload:expect.objectContaining({claimId:b,basis:'B核实折让依据',amount:10})}));expect(bridge.workspace.state.platform.claims.find((r:any)=>r.id===a).dispositions).toHaveLength(0);expect(bridge.workspace.state.platform.claims.find((r:any)=>r.id===b).dispositions).toHaveLength(1);
  });
 });
 
