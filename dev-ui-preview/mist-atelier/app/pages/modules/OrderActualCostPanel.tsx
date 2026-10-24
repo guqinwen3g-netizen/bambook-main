@@ -105,7 +105,7 @@ function CostBlock({ title, rows }: { title: string; rows: OrderCostLine[] }) {
 function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: MistState; asOf: string; busy: boolean; run: (c: MistCommand) => Promise<unknown>; onClose: () => void; onDone: () => void }) {
   const shipments = state.fulfillment.shipments.filter(s => s.state !== 'cancelled');
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
-  const [v, setV] = React.useState({ category: 'freight' as ExpenseCategory, vendor: '', ref: '', date: asOf, currency: 'USD', amount: '', note: '', scope: (shipments.length ? 'shipment' : 'orders') as 'shipment' | 'orders', shipmentId: shipments[0]?.id ?? '', basis: 'volume' as AllocationBasis });
+  const [v, setV] = React.useState({ category: 'freight' as ExpenseCategory, vendor: '', ref: '', date: asOf, currency: 'USD', amount: '', note: '', scope: (shipments.length ? 'shipment' : 'orders') as 'shipment' | 'orders', shipmentId: '', basis: 'volume' as AllocationBasis });
   const [picked, setPicked] = React.useState<string[]>([]), [manual, setManual] = React.useState<Record<string, string>>({}), [error, setError] = React.useState('');
   const set = (patch: Partial<typeof v>) => setV(x => ({ ...x, ...patch }));
   const bases = v.scope === 'shipment' ? SHIPMENT_BASES : ORDER_BASES;
@@ -118,7 +118,7 @@ function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: M
       onDone();
     } catch (e) { setError(e instanceof Error ? e.message : '登记失败'); }
   };
-  return <Dialog open onClose={() => !busy && onClose()} title={uiText("登记费用")} description={uiText("选择费用发生在哪票出运或哪些订单，系统按口径分摊到订单并冻结。")} width={640}
+  return <Dialog open onClose={() => !busy && onClose()} title={uiText("登记费用")} width={640}
     footer={<><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={busy || !v.amount || !scopeOrders.length} onClick={() => void submit()}>{uiText("登记并分摊")}</Button></>}>
     {error && <Banner tone="bad" title={uiText(error)} />}
     <FormGrid>
@@ -128,10 +128,10 @@ function RegisterExpense({ state, asOf, busy, run, onClose, onDone }: { state: M
       <Field label={uiText("金额")}><TextInput aria-label={uiText("费用金额")} inputMode="decimal" value={v.amount} onChange={e => set({ amount: e.target.value })} /></Field>
       <Field label={uiText("收款方")}><TextInput aria-label={uiText("收款方")} value={v.vendor} onChange={e => set({ vendor: e.target.value })} /></Field>
       <Field label={uiText("发票 / 单据号")}><TextInput aria-label={uiText("发票或单据号")} value={v.ref} onChange={e => set({ ref: e.target.value })} /></Field>
-      <Field label={uiText("分摊范围")}><Select aria-label={uiText("分摊范围")} value={v.scope} onChange={e => { const scope = e.target.value as 'shipment' | 'orders'; set({ scope, basis: scope === 'shipment' ? 'volume' : 'value' }); }} options={[{ value: 'shipment', label: '按出运（一票货的订单之间）' }, { value: 'orders', label: '按订单（直接指定）' }]} /></Field>
+      <Field label={uiText("分摊范围")}><Select aria-label={uiText("分摊范围")} value={v.scope} onChange={e => { const scope = e.target.value as 'shipment' | 'orders'; set({ scope, basis: scope === 'shipment' ? 'volume' : 'value' }); }} options={[{ value: 'shipment', label: '按出运' }, { value: 'orders', label: '按订单' }]} /></Field>
       <Field label={uiText("分摊口径")}><Select aria-label={uiText("分摊口径")} value={v.basis} onChange={e => set({ basis: e.target.value as AllocationBasis })} options={bases.map(b => ({ value: b, label: ALLOCATION_BASES[b] }))} /></Field>
     </FormGrid>
-    {v.scope === 'shipment' ? <Field label={uiText("出运")}><Select aria-label={uiText("出运")} value={v.shipmentId} onChange={e => set({ shipmentId: e.target.value })} options={shipments.map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))} /></Field>
+    {v.scope === 'shipment' ? <Field label={uiText("出运")} required><Select aria-label={uiText("出运")} value={v.shipmentId} onChange={e => set({ shipmentId: e.target.value })} options={[{value:'',label:'请选择出运'},...shipments.map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))]} /></Field>
       : <div className="mist-col" role="group" aria-label={uiText("选择订单")} style={{ gap: 4, maxHeight: 200, overflow: 'auto' }}>{orders.map(o => <Checkbox key={o.id} checked={picked.includes(o.id)} onChange={c => setPicked(p => c ? [...p, o.id] : p.filter(x => x !== o.id))} label={uiText(`${o.code} · ${o.customer} · ${o.currency}`)} />)}</div>}
     {v.basis === 'manual' && <div className="mist-col" style={{ gap: 4 }}>{scopeOrders.map(id => <Field key={id} label={ui`${code(id)} 分摊金额`}><TextInput aria-label={ui`${code(id)} 分摊金额`} inputMode="decimal" value={manual[id] ?? ''} onChange={e => setManual(m => ({ ...m, [id]: e.target.value }))} /></Field>)}</div>}
     <Field label={uiText("备注")}><TextInput aria-label={uiText("费用备注")} value={v.note} onChange={e => set({ note: e.target.value })} /></Field>
