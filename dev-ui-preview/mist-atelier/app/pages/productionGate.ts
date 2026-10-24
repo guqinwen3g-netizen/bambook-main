@@ -40,3 +40,12 @@ export function productionNok(state: MistState, branch: MistProduction) {
   const f = state.fulfillment;
   return (f?.qcTasks || []).find(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && f.qcReports.find(report => report.id === task.reportIds.at(-1))?.result === 'reject' && !task.businessContinued);
 }
+
+/** Older generated workflow reminders are progress facts, not business risks. */
+export function productionRiskText(branch: Pick<MistProduction, 'risk'>): string {
+  const risk = branch.risk || '';
+  if (risk === '待合同确认、先锋样与业务开产放行' || risk === '待合同确认、产前样与业务开产放行'
+    || /^(?:成品采购|加工采购) · 已交付 .+，待对应生产QC$/.test(risk)
+    || /^合格实收 .+，待对应生产QC$/.test(risk)) return '';
+  return risk;
+}

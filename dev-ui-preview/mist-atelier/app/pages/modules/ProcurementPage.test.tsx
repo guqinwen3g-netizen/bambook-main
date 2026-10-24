@@ -311,3 +311,12 @@ it.each(['warehouse','supplier'] as const)('records the processing target only o
   await click(getByRole(dialog,'button',{name:'登记本次交付',exact:true}));
   const command=store.run.mock.calls.at(-1)![0],payload=command.payload;expect(command.type).toBe(destination==='supplier'?'fulfillment.materials.deliver':'fulfillment.procurement.receive');expect(payload.destination).toBe(destination==='warehouse'?'warehouse':undefined);expect(payload.targetProductionId).toBe(destination==='supplier'?f.productionId:undefined);
 });
+
+it('does not call confirmed processing started until the exact production branch has a release',()=>{
+  store.state!.fulfillment.purchases.push(purchase('start',approved({kind:'processing',offlineSend:{at:'2026-10-04T08:00:00Z',actor:'经办人',evidence:'交厂',fileIds:[],revision:1},supplierConfirmation:{at:'2026-10-05T08:00:00Z',actor:'经办人',evidence:'回函',confirmedDue:'2026-10-30',fileIds:[],revision:1}})));
+  store.state!.productions.push({id:'branch',sourcePurchaseId:'start',orderId:'o',lineId:'l',col:'cut',pct:0} as any);
+  render('start');expect(host.textContent).toContain('待放行');expect(host.textContent).not.toContain('加工中 ·');
+  store.state!.fulfillment.productionFacts.push({productionId:'other',release:{at:'',actor:'',note:''}} as any);render('start');expect(host.textContent).toContain('待放行');
+  store.state!.fulfillment.productionFacts.push({productionId:'branch',release:{at:'',actor:'',note:''}} as any);render('start');expect(host.textContent).not.toContain('待放行');expect(host.textContent).toContain('加工中');
+  (store.state!.fulfillment.productionFacts.at(-1) as any).hold={at:'',actor:'',category:'material',reason:'待料'};render('start');expect(host.textContent).toContain('已暂停');
+});

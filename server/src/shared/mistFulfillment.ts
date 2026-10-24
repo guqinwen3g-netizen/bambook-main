@@ -1418,7 +1418,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (other.some(item => item.kind !== purchase.kind)) fail('同一订单条目不得混用加工与成品履约模式');
                 if (sum([...other.map(item => item.quantity), purchase.quantity]) > line.qty) fail('批准的生产分配总量超过订单条目数量');
                 const productionId = ctx.id();
-                root.productions.push({ id: productionId, sourcePurchaseId: purchase.id, code: 'FUL-' + purchase.code, orderId: order.id, lineId: line.id, order: order.code, name: purchase.description, factory: purchase.supplier, qty: purchase.quantity, due: purchase.due, pct: 0, img: line.img, col: purchase.kind === 'processing' ? 'cut' : 'finish', risk: order.type === 'fabric' ? '待合同确认、先锋样与业务开产放行' : '待合同确认、产前样与业务开产放行' });
+                root.productions.push({ id: productionId, sourcePurchaseId: purchase.id, code: 'FUL-' + purchase.code, orderId: order.id, lineId: line.id, order: order.code, name: purchase.description, factory: purchase.supplier, qty: purchase.quantity, due: purchase.due, pct: 0, img: line.img, col: purchase.kind === 'processing' ? 'cut' : 'finish', risk: '' });
                 productionFact(root, productionId);
             }
             audit(root, ctx, 'procurement', purchase.id, `采购审批${p.decision === 'approved' ? '通过' : '退回'}：${note}`, { view: 'procurement', id: purchase.id });
@@ -1453,7 +1453,6 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 productionFact(root, branch.id).revision++;
                 branch.pct = Math.min(100, Math.round(purchase.received / purchase.quantity * 100));
                 branch.col = 'qc';
-                branch.risk = `${purchase.kind === 'finished' ? '成品采购' : '加工采购'} · 已交付 ${purchase.received} ${purchase.unit}，待对应生产QC`;
                 for (const task of f.qcTasks) if (task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && task.state === 'reported') task.state = 'working';
             }
             if (p.destination === 'warehouse' && quantity > 0) {
@@ -1487,7 +1486,6 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 productionFact(root, branch.id).revision++;
                 branch.pct = Math.min(100, Math.round(purchase.received / purchase.quantity * 100));
                 branch.col = 'qc';
-                branch.risk = `合格实收 ${purchase.received} ${purchase.unit}，待对应生产QC`;
                 for (const task of f.qcTasks) if (task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && task.state === 'reported') task.state = 'working';
             }
             audit(root, ctx, 'procurement', purchase.id, `收货后转为拒收 ${quantity} ${purchase.unit} · ${evidence}`, { view: 'procurement', id: purchase.id });

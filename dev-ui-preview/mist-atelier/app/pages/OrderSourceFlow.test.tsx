@@ -13,6 +13,7 @@ vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status: 'authenticated', sessionKey: 's', user: { id: 'u', displayName: '业务员甲' }, hasPermission: () => auth.write }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { OrderCreatePage } from './OrderCreatePage';
 import { OrderListPage } from './OrderListPage';
+import {garmentMaterialFingerprint} from '../../../../server/src/shared/mistInternalFabric';
 import { currentLineStage, lineShipping, lineStages } from './orderLineTrack';
 import { OrderLineQuotationValue, OrderLineSourceValue } from './orderLineSource';
 
@@ -102,9 +103,12 @@ it('derives line stages and short shipment only from recorded facts', () => {
   const s = store.state!; const order = { id: 'o', code: 'SO-1', type: 'garment', customer: '客户甲' } as never;
   const line = { id: 'l', orderId: 'o', name: '大衣', style: 'C1', img: 'coat', qty: 100, unit: '件', price: 1, made: 0, qc: 0 } as never;
   s.productions.push({ id: 'p', code: 'P-1', orderId: 'o', lineId: 'l', order: 'SO-1', name: '大衣', factory: '甲厂', qty: 100, due: '2026-11-01', pct: 80, img: 'coat', col: 'qc' });
-  const task = (id: string, kind: 'sample' | 'production') => ({ id, code: id, kind, domain: 'garment', source: { kind: 'orderLine', orderId: 'o', lineId: 'l', ...(kind === 'production' ? { productionId: 'p' } : {}) }, factory: '甲厂', location: '', contact: '', due: '', requestedBy: '', assignee: '', state: 'reported', reportIds: [id + 'r'], createdAt: '' });
+  s.fulfillment.productionFacts.push({ productionId: 'p', sizes: [], revision: 1, release: { at: context.now, actor: '业务员', note: '已核对' } });
+  s.orders.push(order);s.orderLines.push({...line as MistState['orderLines'][number],fulfillmentMode:'cmt',cmtIncludedItems:[]});
+  s.fulfillment.samples.push({id:'sample',code:'sample',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'},role:'pp',qualityRevision:1,materialPlan:garmentMaterialFingerprint(s,'o','l'),form:'实物',size:'M',color:'蓝'} as never);
+  const task = (id: string, kind: 'sample' | 'production') => ({ id, code: id, kind, domain: 'garment', source: { kind: 'orderLine', orderId: 'o', lineId: 'l', productionId:'p' }, ...(kind==='sample'?{sampleId:'sample',businessConfirmation:{result:'approved'},businessContinued:{reportId:id+'r'}}:{}), factory: '甲厂', location: '', contact: '', due: '', requestedBy: '', assignee: '', state: 'reported', reportIds: [id + 'r'], createdAt: '' });
   s.fulfillment.qcTasks.push(task('qs', 'sample') as never, task('qp', 'production') as never);
-  s.fulfillment.qcReports.push({ id: 'qsr', taskId: 'qs', result: 'pass' } as never, { id: 'qpr', taskId: 'qp', result: 'reject' } as never);
+  s.fulfillment.qcReports.push({ id: 'qsr', taskId: 'qs', result: 'pass',scopeRevision:1 } as never, { id: 'qpr', taskId: 'qp', result: 'reject' } as never);
   s.fulfillment.shipments.push({ id: 'sh', code: 'SHP-1', state: 'departed', plannedDate: '2026-10-01', lines: [{ lineId: 'l', orderId: 'o', productionId: 'p', quantity: 96, factoryConfirmedAt: '' }] } as never);
   const stages = lineStages(s, order, line);
   expect(stages.map(stage => [stage.key, stage.state])).toEqual([['pp', 'done'], ['material', 'todo'], ['cut', 'done'], ['inspection', 'blocked'], ['completion', 'todo'], ['shipment', 'now']]);

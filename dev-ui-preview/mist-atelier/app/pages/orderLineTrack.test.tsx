@@ -6,6 +6,7 @@ import { getAllByRole, getByRole, getByText } from '@testing-library/dom';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { createMistState, type MistOrder, type MistOrderLine, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { OrderLineFulfillment } from './OrderLineFulfillment';
+import {garmentMaterialFingerprint} from '../../../../server/src/shared/mistInternalFabric';
 import { currentLineStage, lineStages, lineTrackLabel, orderLineFlags } from './orderLineTrack';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -14,8 +15,16 @@ const context = { id: () => crypto.randomUUID(), now: '2026-10-16T02:00:00.000Z'
 const order = (type: 'garment' | 'fabric') => ({ id: 'o-' + type, code: 'SO-' + type, type, customer: '客户甲' }) as unknown as MistOrder;
 const line = (type: 'garment' | 'fabric') => ({ id: 'l-' + type, orderId: 'o-' + type, name: type === 'fabric' ? '双面呢面料' : '大衣', style: 'S1', img: 'coat', qty: 100, unit: type === 'fabric' ? '米' : '件', price: 1, made: 0, qc: 0 }) as unknown as MistOrderLine;
 const job = (type: 'garment' | 'fabric', col: 'cut' | 'sew' | 'finish' | 'qc' | 'done', id = 'p-' + type) => ({ id, code: id, orderId: 'o-' + type, lineId: 'l-' + type, order: 'SO-' + type, name: 'x', factory: '甲厂', qty: 100, due: '2026-11-01', pct: 10, img: 'coat', col }) as MistState['productions'][number];
-const task = (type: 'garment' | 'fabric', id: string, kind: 'sample' | 'production', state = 'reported') => ({ id, code: id, kind, domain: type, source: { kind: 'orderLine', orderId: 'o-' + type, lineId: 'l-' + type, ...(kind === 'production' ? { productionId: 'p-' + type } : {}) }, factory: '甲厂', location: '', contact: '', due: '', requestedBy: '', assignee: '', state, reportIds: state === 'reported' ? [id + 'r'] : [], createdAt: '' }) as never;
-const report = (taskId: string, result: 'pass' | 'reject') => ({ id: taskId + 'r', taskId, result }) as never;
+const task = (type: 'garment' | 'fabric', id: string, kind: 'sample' | 'production', state = 'reported') => {
+  const source = {kind:'orderLine',orderId:'o-'+type,lineId:'l-'+type,productionId:'p-'+type};
+  if (kind === 'sample') {
+    if (!s.orders.some(row=>row.id===source.orderId)) s.orders.push(order(type));
+    if (!s.orderLines.some(row=>row.id===source.lineId)) s.orderLines.push({...line(type),fulfillmentMode:'cmt',cmtIncludedItems:[]});
+    s.fulfillment.samples.push({id:'sample-'+id,code:'sample-'+id,source,role:type==='fabric'?'pioneer':'pp',size:'M',form:'实物',color:'蓝',qualityRevision:1,...(type==='garment'?{materialPlan:garmentMaterialFingerprint(s,source.orderId,source.lineId)}:{})} as never);
+  }
+  return {id,code:id,kind,domain:type,source,...(kind==='sample'?{sampleId:'sample-'+id,businessConfirmation:{result:'approved'},businessContinued:{reportId:id+'r'}}:{}),factory:'甲厂',location:'',contact:'',due:'',requestedBy:'',assignee:'',state,reportIds:state==='reported'?[id+'r']:[],createdAt:''} as never;
+};
+const report = (taskId: string, result: 'pass' | 'reject') => ({ id: taskId + 'r', taskId, result, scopeRevision:1 }) as never;
 const purchase = (type: 'garment' | 'fabric', state = 'approved', received = 100) => ({ id: 'pu-' + type, code: 'PU-' + type, lineId: 'l-' + type, kind: 'material', state, quantity: 100, received }) as never;
 const keys = (type: 'garment' | 'fabric') => lineStages(s, order(type), line(type)).map(stage => [stage.key, stage.state]);
 beforeEach(() => { s = createMistState(context, 'empty'); host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
@@ -35,10 +44,11 @@ it('BB-ORD-1 fabric "in production" comes from open production branches, not fro
   s.fulfillment.purchases.push(purchase('fabric'));
   s.fulfillment.qcTasks.push(task('fabric', 'qs', 'sample'));
   s.fulfillment.qcReports.push(report('qs', 'pass'));
-  expect(keys('fabric')).toEqual([['material', 'done'], ['pp', 'done'], ['inspection', 'todo'], ['completion', 'todo'], ['shipment', 'todo']]);
+  expect(keys('fabric')).toEqual([['material', 'done'], ['pp', 'todo'], ['inspection', 'todo'], ['completion', 'todo'], ['shipment', 'todo']]);
   expect(lineStages(s, order('fabric'), line('fabric'))[2].caption).toBe('未开立生产');
   for (const col of ['sew', 'finish', 'qc', 'cut'] as const) {
     s.productions = [job('fabric', col)];
+    s.fulfillment.productionFacts = [{ productionId: 'p-fabric', release: {at: context.now, actor: '业务员甲', note: '已核对'} }] as never;
     const stages = lineStages(s, order('fabric'), line('fabric')), current = currentLineStage(stages)!;
     expect(stages.some(stage => stage.key === 'cut')).toBe(false);
     expect(current).toMatchObject({ key: 'inspection', state: 'now', caption: '生产中 · 1 个分支 · 未发起检验', target: { view: 'production-board', id: 'p-fabric' } });
@@ -71,6 +81,7 @@ it('BB-ORD-1 fabric blocked reasons, entry points and list counters stay consist
 
 it('BB-ORD-1 line fulfillment panel shows the fabric track, matching mode text and the handle entry', async () => {
   s.productions = [job('fabric', 'sew')];
+  s.fulfillment.productionFacts = [{ productionId: 'p-fabric', release: {at: context.now, actor: '业务员甲', note: '已核对'} }] as never;
   s.fulfillment.purchases.push(purchase('fabric', 'rejected', 0));
   const go = vi.fn();
   act(() => root.render(<MistRoot><ToastProvider><OrderLineFulfillment state={s} order={order('fabric')} line={line('fabric')} go={go} /></ToastProvider></MistRoot>));
@@ -114,4 +125,36 @@ it('still surfaces a current quality blocker even when stored shipments have dep
   s.fulfillment.shipments.push({id:'sent',code:'SHP-SENT',state:'departed',lines:[{orderId:o.id,lineId:l.id,quantity:100}]} as never);
   s.fulfillment.qcTasks.push(task('fabric','nok','production'));s.fulfillment.qcReports.push(report('nok','reject'));
   expect(currentLineStage(lineStages(s,o,l))).toMatchObject({key:'inspection',state:'blocked',caption:'QC NOK'});
+});
+
+it.each(['garment','fabric'] as const)('keeps a newly created %s branch waiting for its actual release',type=>{
+  s.productions=[job(type,'cut')];const stage=()=>lineStages(s,order(type),line(type)).find(row=>row.key===(type==='garment'?'cut':'inspection'))!;
+  expect(stage()).toMatchObject({state:'now',caption:'待放行'});
+  s.fulfillment.productionFacts=[{productionId:'p-'+type,release:{at:context.now,actor:'业务员甲',note:'已核对'}}] as never;
+  expect(stage().caption).toContain(type==='garment'?'开裁中':'生产中');
+  (s.fulfillment.productionFacts[0] as any).hold={at:context.now,actor:'业务员甲',category:'material',reason:'待料'};
+  expect(stage()).toMatchObject({state:'blocked',caption:'已暂停'});
+});
+it('shows allocated internal fabric as waiting for handover instead of requiring duplicate purchases',()=>{
+  const o=order('garment'),l={...line('garment'),fulfillmentMode:'full_package' as const,cmtIncludedItems:['trims','packaging'] as const};
+  s.internalFabricAllocations=[{id:'a',orderId:o.id,lineId:l.id,fabricOrderId:'fo',fabricLineId:'fl',metres:'3',revision:1,status:'active'}] as never;
+  const stage=()=>lineStages(s,o,l as MistOrderLine).find(row=>row.key==='material');expect(stage()).toMatchObject({state:'now',caption:'内供待交接'});
+  s.fulfillment.purchases.push({id:'supply',unit:'米'} as never);
+  s.fulfillment.receipts.push({id:'r',purchaseId:'supply',quantity:3,materialDelivery:{allocationId:'a',allocationRevision:1,confirmation:{actor:'业务员甲'}}} as never);
+  expect(stage()).toMatchObject({state:'done',caption:'内供已交接'});
+  s.fulfillment.receipts[0].materialDelivery!.allocationRevision=2;expect(stage()).toMatchObject({state:'now',caption:'内供待交接'});
+});
+
+it('keeps PP pending after QC until the requester confirms and business continues the current report',()=>{
+ const o={...order('garment'),governance:{contract:{kind:'external'}}} as MistOrder,l={...line('garment'),fulfillmentMode:'cmt' as const,cmtIncludedItems:[]};s.orders.push(o);s.orderLines.push(l);s.productions=[job('garment','cut')];
+ const t=task('garment','current','sample') as any;delete t.businessConfirmation;delete t.businessContinued;s.fulfillment.qcTasks.push(t);s.fulfillment.qcReports.push(report('current','pass'));
+ const stage=()=>lineStages(s,o,l).find(row=>row.key==='pp');expect(stage()).toMatchObject({state:'now',caption:'待客户确认'});
+ t.businessConfirmation={result:'approved'};expect(stage()).toMatchObject({state:'now',caption:'待业务确认'});
+ t.businessContinued={reportId:'currentr'};expect(stage()).toMatchObject({state:'done',caption:'已认可'});
+ t.businessContinued={reportId:'old-report'};expect(stage()).toMatchObject({state:'now',caption:'待业务确认'});
+});
+
+it('does not reuse a passed PP after the material plan changes',()=>{
+ const o=order('garment'),l={...line('garment'),fulfillmentMode:'full_package' as const,cmtIncludedItems:[] as Array<'trims'|'packaging'>};s.orders.push(o,order('fabric'));s.orderLines.push(l,line('fabric'));s.internalFabricAllocations=[{id:'a',orderId:o.id,lineId:l.id,fabricOrderId:'o-fabric',fabricLineId:'l-fabric',metres:'3',revision:1,status:'active'}] as never;s.productions=[job('garment','cut')];s.fulfillment.qcTasks.push(task('garment','plan','sample'));s.fulfillment.qcReports.push(report('plan','pass'));
+ const stage=()=>lineStages(s,o,l).find(row=>row.key==='pp');expect(stage()).toMatchObject({state:'done'});l.cmtIncludedItems=['trims'];expect(stage()).toMatchObject({state:'todo',caption:'未登记产前样'});
 });

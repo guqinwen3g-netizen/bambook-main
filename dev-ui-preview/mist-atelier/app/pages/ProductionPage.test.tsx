@@ -122,3 +122,9 @@ it('blocks unknown garment quantity basis and only requests an actual size matri
  await act(async()=>root!.unmount());root=undefined;host.remove();for(const c of [g.contract,g.approvedSnapshot!.contract])c.quantityBasis='size';
  await mount({view:'production-board',productionId:'production-b'});await click('登记最终完工数量');expect(getByRole(document.body,'textbox',{name:/各实际尺码数量/})).toBeTruthy();
 });
+
+it('counts genuine production risks without a wall of ordinary workflow reminders',async()=>{
+ bridge.state!.productions[0].risk='待合同确认、产前样与业务开产放行';bridge.state!.productions[1].risk='面料复染延期';
+ await mount({view:'production-board'});await click('查看全部生产单');expect(host.querySelector('.mist-sumbar')!.textContent).toContain('生产风险1');expect(host.textContent).not.toContain('待合同确认、产前样与业务开产放行');expect(host.textContent).toContain('面料复染延期');
+ await click('查看生产单');expect((getByRole(document.body,'textbox',{name:'风险'}) as HTMLInputElement).value).toBe('面料复染延期');
+});

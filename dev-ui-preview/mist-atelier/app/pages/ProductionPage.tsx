@@ -16,7 +16,7 @@ import { useMistSession } from '../runtime/auth';
 import { ModuleEditorPage, ModuleEditorDialog, type ModuleEditorSpec } from './modules/ModuleWorkbench';
 import { PRODUCTION_HOLD_CATEGORIES, type FulfillmentSizeQuantity } from '../../../../server/src/shared/mistFulfillment';
 import { mistDate } from './OrderListPage';
-import { productionNok, productionReleaseGate } from './productionGate';
+import { productionNok, productionReleaseGate, productionRiskText } from './productionGate';
 import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
 import { workspaceMembers } from '../runtime/members';
 import { ProductionSampleNotes } from './ProductionSampleNotes';
@@ -72,7 +72,7 @@ export function ProductionPage() {
   const unreleased=items.filter(item=>!state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release)).length;
   const nokCount=state?items.filter(item=>productionNok(state,item)).length:0;
   React.useEffect(() => { setSelectedId(route.productionId ?? null); if(route.productionId){setRange('all');setOrderId('all');setQ('');} }, [route.productionId]);
-  React.useEffect(() => { if (selected) setDraft({ pct: selected.pct, risk: selected.risk ?? '', note: '', startDate: selected.startDate ?? '', due: selected.due }); setFailure(''); }, [selected?.id]);
+  React.useEffect(() => { if (selected) setDraft({ pct: selected.pct, risk: productionRiskText(selected), note: '', startDate: selected.startDate ?? '', due: selected.due }); setFailure(''); }, [selected?.id]);
   const matching = items.filter(item => !(orderId !== 'all' && item.orderId !== orderId || q && !`${item.name} ${item.code} ${item.factory} ${item.order}`.toLowerCase().includes(q.toLowerCase())));
   const window = productionWindow(range,businessNow(),matching);
   const shown = matching.filter(item => {
@@ -82,7 +82,7 @@ export function ProductionPage() {
     if (start) return start.getTime() < window.end.getTime() && due.getTime() >= window.start.getTime();
     return due.getTime() >= window.start.getTime() && due.getTime() < window.end.getTime();
   });
-  const risks = shown.filter(item => item.risk);
+  const risks = shown.filter(item => productionRiskText(item));
   const move = async (id: string, col: string) => {
     if (busy || !PROD_COLUMNS.some(column => column.id === col)) return;
     const item = items.find(item => item.id === id); if (!item || item.col === col) return;
@@ -95,9 +95,9 @@ export function ProductionPage() {
   return <MistPage width="wide">
     <PageHeader eyebrow={uiText("订单履约 · 生产")} title={uiText("生产进度")}
       actions={<><Segmented<ProductionRange> ariaLabel={uiText("范围")} value={range} onChange={setRange} options={[{ value: 'week', label: '本周' }, { value: 'month', label: '本月' },{ value:'all',label:'全部' }]} /><Button icon={CalendarRange} onClick={() => setGantt(value => !value)}>{uiText(gantt ? '看板' : '甘特图')}</Button></>} />
-    <SummaryBar items={[{label:'在手分支',value:items.filter(item=>item.col!=='done').length,unit:'个',hint:[...units].map(([unit,qty])=>`${qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${unit}`).join(' · ')||'暂无在手数量'},{label:'待业务放行',value:unreleased,unit:'个'},{label:'QC NOK',value:nokCount,unit:'个',hintTone:nokCount?'bad':undefined},{label:'交期风险 / 延期',value:items.filter(item=>item.risk).length,unit:'个'},{label:'待出运',value:items.filter(item=>item.col==='done').length,unit:'个'}]}/>
+    <SummaryBar items={[{label:'在手分支',value:items.filter(item=>item.col!=='done').length,unit:'个',hint:[...units].map(([unit,qty])=>`${qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${unit}`).join(' · ')||'暂无在手数量'},{label:'待业务放行',value:unreleased,unit:'个'},{label:'QC NOK',value:nokCount,unit:'个',hintTone:nokCount?'bad':undefined},{label:'生产风险',value:items.filter(item=>productionRiskText(item)).length,unit:'个'},{label:'待出运',value:items.filter(item=>item.col==='done').length,unit:'个'}]}/>
     {(failure || error) && <Banner tone="bad" title={uiText("生产记录未保存")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}
-    {risks.length > 0 && <div className="mist-section"><Banner tone="warn" icon={AlertTriangle} title={ui`${risks.length} 个生产单有交期风险`} actions={<Button size="sm" onClick={() => { setSelectedId(risks[0].id); }}>{uiText("查看生产单")}</Button>}>{risks.map(item => `${item.code}：${item.risk}`).join('；')}</Banner></div>}
+    {risks.length > 0 && <div className="mist-section"><Banner tone="warn" icon={AlertTriangle} title={ui`${risks.length} 个生产单有风险`} actions={<Button size="sm" onClick={() => { setSelectedId(risks[0].id); }}>{uiText("查看生产单")}</Button>} /></div>}
     <Toolbar><SearchField value={q} onChange={setQ} placeholder={uiText("款式、生产单或工厂")} /><Dropdown label={uiText("订单")} value={orderId} onChange={setOrderId} options={[{ value: 'all', label: '全部' }, ...(state?.orders ?? []).map(order => ({ value: order.id, label: order.code }))]} /></Toolbar>
     {!shown.length && !loading ? <Card><EmptyState title={uiText(q || orderId !== 'all' ? '没有匹配的生产单' : range==='all'?'暂无生产单':`本${range === 'week' ? '周' : '月'}没有计划中的生产单`)} action={range!=='all'||q||orderId!=='all'?<Button onClick={() => { setQ(''); setOrderId('all'); setRange('all'); }}>{uiText("查看全部生产单")}</Button>:undefined} /></Card> : gantt ? <Card><CardHeader title={uiText("生产计划")} sub={uiText(`${window.start.toLocaleDateString(interfaceLocale())} — ${new Date(window.end.getTime() - 1).toLocaleDateString(interfaceLocale())}`)} /><DataTable density={density} ariaLabel={uiText("生产甘特图")} rows={shown} loading={loading} rowKey={item => item.id} onRowClick={item => setSelectedId(item.id)} columns={[
       { key: 'object', header: '生产单', width: 'minmax(180px,1fr)', render: item => <ObjectCell name={item.name} meta={<Mono>{item.code}</Mono>} /> },
@@ -109,7 +109,7 @@ export function ProductionPage() {
       onMove={busy ? undefined : (id, col) => { void move(id, col); }} onOpen={item => setSelectedId(item.id)} renderCard={item => <>
         <div className="mist-row"><Thumb src={IMG[item.img]} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={uiText(`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`)}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
         <Meter segments={[{ value: item.pct, tone: item.pct === 100 ? 'ok' : 'accent' }]} caption={uiText(`${item.pct}% · ${item.qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${productionUnit(item)}`)} />
-        <div className="mist-kb-card-foot"><Factory className="mist-icon" data-size="xs" />{item.factory}<span className="mist-spacer" />{state&&productionNok(state,item) ? <Pill tone="bad">QC NOK</Pill> : item.risk ? <Pill tone="warn">{uiText(item.risk.length>14?item.risk.slice(0,14)+'…':item.risk)}</Pill> : !state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release) ? <Pill tone="neutral">{uiText("待放行")}</Pill> : <span>{item.due}</span>}</div>
+        <div className="mist-kb-card-foot"><Factory className="mist-icon" data-size="xs" />{item.factory}<span className="mist-spacer" />{state&&productionNok(state,item) ? <Pill tone="bad">QC NOK</Pill> : productionRiskText(item) ? <Pill tone="warn">{uiText(productionRiskText(item).length>14?productionRiskText(item).slice(0,14)+'…':productionRiskText(item))}</Pill> : !state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release) ? <Pill tone="neutral">{uiText("待放行")}</Pill> : <span>{item.due}</span>}</div>
       </>} />}
     <Drawer open={!!selected} onClose={() => { if (!busy) setSelectedId(null); }} title={uiText(selected?.code ?? '生产单')} sub={uiText(selected?.name)} size="lg"
       footer={<><Button disabled={busy} onClick={() => selected && go('orders/detail', selected.orderId, { orderLineId: selected.lineId, productionId: selected.id })}>{uiText("打开关联订单")}</Button><Button variant="primary" loading={busy} onClick={async () => {
