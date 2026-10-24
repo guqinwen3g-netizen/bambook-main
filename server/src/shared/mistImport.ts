@@ -3,6 +3,7 @@
  * 每一行按对应的单条保存命令执行（同样的校验、编码查重、负责人按账号核对）；
  * 整批要么全部导入，要么一行都不导入，并逐行列出不通过的原因。
  */
+import { isServiceSupplier } from './mistSupplierStatus';
 import type { MistMemberDirectoryEntry } from './mistAccounts';
 
 export type MistImportKind = 'customer' | 'supplier' | 'product' | 'openingReceivable' | 'openingPayable';
@@ -139,10 +140,11 @@ export function mistImportRowCommand(kind: MistImportKind, row: MistImportRow, c
     } } }, contact: contact('customer', row) };
   }
   if (kind === 'supplier') {
-    for (const [key, label] of [['capacity', '月产能'], ['leadDays', '交付周期天']] as const) if (!text(row, key)) throw new Error(`${label}未填写`);
+    const service=isServiceSupplier({type:text(row,'type')});
+    for (const [key, label] of [['capacity', '月产能'], ['leadDays', '交付周期天']] as const) if (!service && !text(row, key)) throw new Error(`${label}未填写`);
     return { command: { type: 'market.supplier.save', payload: { input: {
       code: text(row, 'code'), name: text(row, 'name'), type: text(row, 'type'), country: text(row, 'country'), address: text(row, 'address'),
-      capabilities: text(row, 'capabilities'), capacity: num(text(row, 'capacity'), '月产能'), capacityUnit: text(row, 'capacityUnit'), leadDays: num(text(row, 'leadDays'), '交付周期天', true),
+      capabilities: text(row, 'capabilities'), capacity: service?0:num(text(row, 'capacity'), '月产能'), capacityUnit: service?'':text(row, 'capacityUnit'), leadDays: service?0:num(text(row, 'leadDays'), '交付周期天', true),
       note: text(row, 'note'), fileIds: [],
     } } }, contact: contact('supplier', row) };
   }
@@ -185,7 +187,7 @@ export function mistImportEach(kind: MistImportKind, rows: unknown, handle: (row
     try {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('行格式无效');
       const row = Object.fromEntries(Object.entries(raw as Record<string, unknown>).map(([k, v]) => [k, typeof v === 'string' ? v : v == null ? '' : String(v)]));
-      const missing = MIST_IMPORT_FIELDS[kind].filter(f => f.required && !text(row, f.key)).map(f => f.label);
+      const missing = MIST_IMPORT_FIELDS[kind].filter(f => f.required && !(kind==='supplier' && isServiceSupplier({type:text(row,'type')}) && ['capacity','capacityUnit','leadDays'].includes(f.key)) && !text(row, f.key)).map(f => f.label);
       if (missing.length) throw new Error(missing.join('、') + '未填写');
       handle(row);
       imported++;

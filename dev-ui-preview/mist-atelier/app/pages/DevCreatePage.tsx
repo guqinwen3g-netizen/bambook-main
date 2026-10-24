@@ -4,6 +4,7 @@ import React from 'react';
 import {DEVELOPMENT_REQUEST_TYPES,developmentCharged,developmentInitiator,developmentInitiatorLabel,developmentDomain,emptyFabricRequirements,fabricRequirementError,validFabricSample,type DevelopmentDomain,type FabricDevelopmentRequirements} from '../../../../server/src/shared/mistDevelopmentDomain';
 import { ArrowLeft, ArrowRight, Building2, CalendarDays, Download, Factory, Palette, Ruler, Tag, Trash2, Users } from 'lucide-react';
 import { BackLink, Banner, Button, Card, Checkbox, ChoiceCards, Dialog, Field, FormGrid, FormSection, KeyValue, MistPage, PageHeader, Select, TextArea, TextInput, TextLink, UploadZone, VerticalSteps, useToast } from '../../../../components/mist';
+import { isServiceSupplier } from '../../../../server/src/shared/mistSupplierStatus';
 import type { DevelopmentValues, MistFile, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../runtime/workspace';
 import { ImageRoleTag, imageRole } from './modules/PrimaryImage';
@@ -47,10 +48,10 @@ export function firstInvalidDevelopmentStep(values:DevelopmentFormValues){return
 /** 开发工厂选项：按供应商 ID 引用（显示当前供应商名称）。只列有效且对口的供应商，另含本案 / 草稿已选或历史参与、现已不可用的供应商。 */
 export function developmentFactoryOptions(state:MistState|null,selected:string[]=[],domain:DevelopmentDomain='garment'){
   const suppliers=state?.market?.suppliers||[];
-  const relevant=(supplier:{type:string;capabilities:string})=>domain==='fabric'?/面料|纺织|织造|染整|fabric|textile|weav|dye/i.test(supplier.type+' '+supplier.capabilities):/成衣|服装|制衣|缝制|裁剪|加工|garment|apparel|sew|manufactur|process/i.test(supplier.type+' '+supplier.capabilities);
+  const relevant=(supplier:{type:string;capabilities:string})=>!isServiceSupplier(supplier)&&(domain==='fabric'?/面料|纺织|织造|染整|fabric|textile|weav|dye/i.test(supplier.type+' '+supplier.capabilities):/成衣|服装|制衣|缝制|裁剪|加工|garment|apparel|sew|manufactur|process/i.test(supplier.type+' '+supplier.capabilities));
   const active=suppliers.filter(s=>s.status==='active'&&relevant(s)).map(s=>s.id);
   const relevantIds=new Set((state?.devs||[]).filter(d=>developmentDomain(d.values)===domain).map(d=>d.id));const historic=[...(state?.versions||[]).filter(v=>domain==='garment'&&!state?.devs||relevantIds.has(v.devId)).map(v=>v.factoryId),...(state?.drafts||[]).filter(d=>developmentDomain(d.values)===domain).flatMap(d=>d.values.factories),...selected];
-  return [...new Set([...active,...historic].filter(Boolean))].map(id=>{const supplier=suppliers.find(s=>s.id===id);return{id,name:supplier?.name||'供应商档案已不存在',historical:!active.includes(id),unavailable:!supplier||supplier.status!=='active'};});
+  return [...new Set([...active,...historic].filter(Boolean))].map(id=>{const supplier=suppliers.find(s=>s.id===id);return{id,name:supplier?.name||'供应商档案已不存在',historical:!active.includes(id),unavailable:!supplier||supplier.status!=='active'||isServiceSupplier(supplier)};});
 }
 /** 工厂供应商 ID → 当前显示名。 */
 export const developmentFactoryName=(state:MistState|null|undefined,id:string)=>state?.market?.suppliers.find(s=>s.id===id)?.name||id;

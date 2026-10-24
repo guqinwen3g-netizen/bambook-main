@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MARKET_PAGES } from './MarketPages';
 import { supplierFlags, supplierPerformance } from './SuppliersPage';
+import { fireEvent, getByRole, queryByRole } from '@testing-library/dom';
 import { Nav } from '../../nav';
 import { createMistState, type MistContext, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 
@@ -25,6 +26,28 @@ const button = (label: string) => [...document.body.querySelectorAll('button')].
 async function click(label: string) { const b = button(label); expect(b, label).toBeTruthy(); await act(async () => b!.click()); }
 
 describe('供应商管理', () => {
+  it('switches a service provider form to service details and submits no factory capacity',async()=>{
+    await mount();await click('新增供应商');
+    const type=getByRole(document.body,'combobox',{name:'供应商类型'});
+    await act(async()=>fireEvent.change(type,{target:{value:'服务商'}}));
+    expect(queryByRole(document.body,'spinbutton',{name:'月产能'})).toBeNull();
+    expect(queryByRole(document.body,'textbox',{name:'产能单位'})).toBeNull();
+    expect(queryByRole(document.body,'textbox',{name:'工艺与生产能力'})).toBeNull();
+    for(const [name,value] of [['供应商编码','LOG-001'],['名称','浦江物流'],['经营地址','上海'],['服务内容','出口货运及报关']]){
+      await act(async()=>fireEvent.change(getByRole(document.body,'textbox',{name,exact:true}),{target:{value}}));
+    }
+    await click('保存');
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({type:'服务商',address:'上海',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0})})}));
+  });
+  it('shows service details and contacts without manufacturing KPIs or a production RFQ action',async()=>{
+    const row={...named('华盛毛纺'),id:'service',code:'LOG-001',name:'浦江物流',type:'服务商',capabilities:'出口货运及报关',capacity:0,capacityUnit:'',leadDays:0,certificates:[],ratings:[]};state.market.suppliers.push(row);
+    await mount(row.id,'full');const detail=host.querySelector('[data-supplier-detail]')!;
+    expect(detail.textContent).toContain('经营地址');expect(detail.textContent).toContain('服务内容');expect(detail.textContent).toContain('主联系人');
+    for(const text of ['月产能','准交率','通常交付周期','来料无退货'])expect(detail.textContent).not.toContain(text);
+    expect(button('询价比价')).toBeUndefined();expect(button('编辑档案')).toBeTruthy();
+    expect(button('登记认证')).toBeTruthy();
+  });
+
   it('交付表现与提醒由采购、到货与认证记录推出', () => {
     const huasheng = supplierPerformance(state, named('华盛毛纺').id);
     expect(huasheng.completed.length).toBe(1); expect(huasheng.onTime).toBe(1); expect(huasheng.open.length).toBe(1);

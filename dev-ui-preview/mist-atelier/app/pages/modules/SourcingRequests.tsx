@@ -6,7 +6,7 @@ import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Facts, Mono, P
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { fulfillmentSourceLabel, type FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 import { RFQ_STATE_LABEL, readRfqs, rfqAwardFlags, rfqComparison, rfqCurrentQuotes, type MistRfq, type RfqComparisonRow } from '../../../../../server/src/shared/mistSourcing';
-import { supplierStatusOn, supplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
+import { productionSupplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
 import type { ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, field, parseSource, sourceOptions, text, today } from './fulfillmentKit';
 import { parsePurchaseContent, purchaseChoices, purchaseContent } from './purchaseContent';
@@ -27,7 +27,7 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
   const rows = all.filter(r => !needle || `${r.code} ${r.description} ${label(r)} ${r.quotes.map(q => q.supplier).join(' ')}`.toLowerCase().includes(needle))
     .sort((a, b) => Number(a.state !== 'open') - Number(b.state !== 'open') || a.deadline.localeCompare(b.deadline));
   const selected = rows.find(r => r.id === picked) || all.find(r => r.id === picked);
-  const available = (state?.market.suppliers || []).filter(s => supplierStatusOn(s, day) === 'active');
+  const available = (state?.market.suppliers || []).filter(s => !productionSupplierUnavailableReason(s, day));
   const preset = presetSupplierId ? state?.market.suppliers.find(s => s.id === presetSupplierId) : undefined;
 
   const createSpec = (): ModuleEditorSpec => ({
@@ -73,7 +73,7 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
       onQuote={() => open(quoteSpec(selected))} onDecline={() => open(declineSpec(selected))} onInvite={() => open(inviteSpec(selected))} onAward={row => open(awardSpec(selected, row))} onCancel={() => open(cancelSpec(selected))} canInvite={available.some(s => !selected.supplierIds.includes(s.id))} />
     : <EmptyState icon={Scale} title={uiText("询价详情")} description={uiText("从列表选择一张询价单，查看比价与定标")} compact />;
   return <>
-    {preset && <div className="mist-section"><Banner tone="neutral" title={ui`从供应商 ${preset.name} 进入`}>{uiText(supplierUnavailableReason(preset, day) ? `${preset.name} 当前不可合作（${supplierUnavailableReason(preset, day)}），不能邀请报价。` : `发起询价时已默认勾选 ${preset.name}，至少再邀请一家供应商比价。`)}</Banner></div>}
+    {preset && <div className="mist-section"><Banner tone="neutral" title={ui`从供应商 ${preset.name} 进入`}>{uiText(productionSupplierUnavailableReason(preset, day) ? `${preset.name} 当前不可合作（${productionSupplierUnavailableReason(preset, day)}），不能邀请报价。` : `发起询价时已默认勾选 ${preset.name}，至少再邀请一家供应商比价。`)}</Banner></div>}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.description}` : '询价详情'} drawerSub={selected ? RFQ_STATE_LABEL[selected.state] : undefined}
       list={<Card>
         <CardHeader title={ui`询价比价 · ${all.length}`} sub={uiText("多家报价按折人民币单价比价；定标生成采购草稿后走审批。")} tools={can ? <Button variant="primary" icon={Plus} disabled={locked} onClick={() => open(createSpec())}>{uiText("发起询价")}</Button> : undefined} />

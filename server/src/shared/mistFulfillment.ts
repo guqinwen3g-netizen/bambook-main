@@ -14,7 +14,7 @@ import { platformBusinessDate } from './mistPlatform';
 import { resolveMember } from './mistAccounts';
 import type { MistState, MistContext, MistCommandResult, MistQc, MistTarget, MistProduction } from './mistWorkspace';
 import type { MistReviewTask } from './mistReview';
-import { supplierBusinessDay, supplierUnavailableReason } from './mistSupplierStatus';
+import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
 import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
 import { assertOrderLineOpen, assertShipmentWithinTolerance } from './mistOrderClosure';
 import {applyCustomsDeclarationCommand,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
@@ -1346,7 +1346,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const quantity = qty(p.quantity), price = qty(p.price, '单价', true);
             lineAmount(quantity, price);
             const supplierId = text(p.supplierId, '供应商ID'), supplierRecord = get(root.market.suppliers, supplierId, '供应商');
-            const supplierBlocked = supplierUnavailableReason(supplierRecord, supplierBusinessDay(ctx.now));
+            const supplierBlocked = productionSupplierUnavailableReason(supplierRecord, supplierBusinessDay(ctx.now));
             if (supplierBlocked)
                 fail(supplierBlocked);
             const supplierHeld = existing ? '' : relationHoldReason(root, { supplierId });

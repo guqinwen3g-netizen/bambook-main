@@ -765,3 +765,8 @@ describe("exact quote-line fixed fee allocation", () => {
     expect(snap.result.allocation?.quantity).toBe("10.0000");
   });
 });
+
+it('rejects service provider prices as finished goods costing sources',()=>{
+ const t=setup();t.state().market.suppliers.find(s=>s.id===t.supplier)!.type='服务商';
+ const before=structuredClone(t.state());expect(()=>t.run(t.command())).toThrow('服务商不能作为生产供应商');expect(t.state()).toEqual(before);
+});

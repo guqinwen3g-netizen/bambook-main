@@ -1,6 +1,7 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** Quote-entry professional costing; internal, manual and auditable, not AI prediction. */
 import React from "react";
+import {isServiceSupplier} from "../../../../../server/src/shared/mistSupplierStatus";
 import { ArrowLeft, Download } from "lucide-react";
 import {
   Banner,
@@ -613,7 +614,7 @@ export function QuotationCostingPage() {
                             }
                             options={[
                               { value: "", label: "选择准确供应商" },
-                              ...(w.state?.market.suppliers || []).map((s) => ({
+                              ...(w.state?.market.suppliers || []).filter(s=>!isServiceSupplier(s)).map((s) => ({
                                 value: s.id,
                                 label: s.code + " · " + s.name,
                               })),

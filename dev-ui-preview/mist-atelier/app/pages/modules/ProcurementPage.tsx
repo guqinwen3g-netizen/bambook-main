@@ -11,7 +11,7 @@ import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentPurchase, FulfillmentReceipt, FulfillmentReceiptReturn } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentPositions, fulfillmentSourceLabel, receiptRejectionBlocker, receiptReturnedQuantity } from '../../../../../server/src/shared/mistFulfillment';
 import { prepaymentTransferTargets, purchaseContractMinor, purchasePayableReadback, purchasePrepaymentReadback, supplierSettlements } from '../../../../../server/src/shared/mistPayables';
-import { supplierBusinessDay, supplierStatusOn, supplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
+import { supplierBusinessDay, productionSupplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
@@ -89,8 +89,8 @@ export function ProcurementPage() {
   const changeEntry = (value: Entry) => { setEntryChoice(value); setStageFilter('all'); setPicked(null); };
   const act = async (work: () => Promise<unknown>) => { setFailure(''); try { await work(); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
   const supplierOptions = (currentId?: string) => (state?.market.suppliers || [])
-    .filter(s => s.id === currentId || supplierStatusOn(s, day) === 'active')
-    .map(s => { const reason = supplierUnavailableReason(s, day); return { value: s.id, label: reason ? `${s.name} · 原供应商（${reason}）` : s.name }; });
+    .filter(s => s.id === currentId || !productionSupplierUnavailableReason(s, day))
+    .map(s => { const reason = productionSupplierUnavailableReason(s, day); return { value: s.id, label: reason ? `${s.name} · 原供应商（${reason}）` : s.name }; });
   const purchaseSpec = (p?: FulfillmentPurchase): ModuleEditorSpec => ({
     title: p ? `修订${ENTRY_LABEL[entryOf(p)]}草稿` : `新建${ENTRY_LABEL[entry]}`, submitLabel: p ? '保存草稿' : '保存为草稿',
     sections: [
@@ -152,7 +152,7 @@ export function ProcurementPage() {
   };
   const transferSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {
     const prepaid = state ? purchasePrepaymentReadback(state, p.id).available : 0;
-    const options = (state?.market.suppliers || []).filter(s => s.id !== p.supplierId && !supplierUnavailableReason(s, day)).map(s => ({ value: s.id, label: `${s.name} · ${s.type}` }));
+    const options = (state?.market.suppliers || []).filter(s => s.id !== p.supplierId && !productionSupplierUnavailableReason(s, day)).map(s => ({ value: s.id, label: `${s.name} · ${s.type}` }));
     return { title: '转给其他供应商', submitLabel: '确认转移',
       description: `${p.code} · ${p.supplier} · ${p.quantity} ${p.unit}。原合同按“未执行即取消”办理${prepaid > 0 ? `，已付预付 ${prepaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${p.currency} 由原供应商退回` : ''}${state?.productions.some(j => j.sourcePurchaseId === p.id && !j.closed) ? '，对应生产分支关闭（样品与 QC 记录保留）' : ''}；同时按新供应商报价生成采购草稿，须重新提交审批、线下发出并取得供应商确认。请先取得原供应商同意取消的书面确认。`,
       fields: [field('supplierId', '新供应商', 'select', true, [emptyOption, ...options]), { ...field('price', `新单价（每${p.unit}）`, 'number'), min: 0.0001 }, field('currency', '币种'), field('due', '新供应商交期', 'date'), field('terms', '付款条件'), field('reason', '转移原因与原供应商确认依据', 'textarea')],
