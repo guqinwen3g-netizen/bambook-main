@@ -1,3 +1,4 @@
+import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
@@ -306,6 +307,7 @@ export type FulfillmentPacking = {
     note: string;
 };
 export type FulfillmentCustoms = {
+    replacementReviews?:ReplacementExportReview[];
     id: string;
     shipmentId: string;
     code: string;
@@ -329,6 +331,7 @@ export type FulfillmentCustoms = {
     grossWeight?: number;
 };
 export type FulfillmentDocument = {
+    replacementDeclaredAmount?:number;
     id: string;
     shipmentId: string;
     orderId: string;
@@ -380,7 +383,7 @@ export type FulfillmentState = {
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
 type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
 type ShipmentInput = Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
-export type FulfillmentCommand = {
+export type FulfillmentCommand = ReplacementExportCommand | {
     type: 'fulfillment.samples.create';
     payload: SampleInput;
 } | {
@@ -674,6 +677,7 @@ export function fulfillmentCommandPermission(command: FulfillmentCommand): strin
     // 登记“已申报/已清关”是后勤/单证的专属事实；草稿仍是报关单证写权限。
     if (command.type === 'fulfillment.customs.save' && ['submitted', 'cleared'].includes(command.payload?.status))
         return FULFILLMENT_CUSTOMS_CLEAR_SCOPE;
+    if (command.type === 'fulfillment.customs.reviewReplacement')return FULFILLMENT_CUSTOMS_CLEAR_SCOPE;
     if (command.type.startsWith('fulfillment.customs.') || command.type.startsWith('fulfillment.documents.'))
         return 'customs:write';
     throw new MistCommandError('VALIDATION', '未知履约操作');
@@ -1574,6 +1578,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!Array.isArray(p.lines) || !p.lines.length)
                 fail('请选准确订单条目');
             if(p.lines.some((line:ShipmentLine)=>get(root.orders,line.orderId,'订单').governance?.contract.kind==='internal'))fail('内部订单请登记库存交接');
+            if(new Set(p.lines.map((line:ShipmentLine)=>!!get(root.orders,line.orderId,'订单').replacementSource)).size>1)fail('补发货物与销售货物请分开出运');
             const old = p.id ? get(f.shipments, p.id, '出运') : undefined;
             if (old)
                 requireEditableShipment(old);
@@ -1706,6 +1711,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             audit(root, ctx, 'shipment', s.id, '取消本次出运请求');
             return { id: s.id };
         }
+        case 'fulfillment.customs.reviewReplacement':return recordReplacementExportReview(root,command.payload,ctx);
         case 'fulfillment.customs.save': {
             const s = get(f.shipments, p.shipmentId, '出运');
             requireEditableShipment(s);
@@ -1721,6 +1727,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 throw new MistCommandError('FORBIDDEN', '登记已申报须由后勤/单证办理', 403);
             if (p.status === 'cleared' && !ctx.can?.(FULFILLMENT_CUSTOMS_CLEAR_SCOPE))
                 throw new MistCommandError('FORBIDDEN', '清关完成须由后勤/单证登记', 403);
+            if(p.status!=='draft')for(const line of s.lines)if(root.orders.find(o=>o.id===line.orderId)?.replacementSource){assertMistOrderApproved(root,line.orderId);replacementDeclaredUnitPrice(root,s.id,line.orderId,line.lineId);}
             const id = old?.id || ctx.id(), fileIds = files(root, p.fileIds);
             const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, declarationNo: text(p.declarationNo, '报关单号', p.status !== 'draft'), broker: text(p.broker, '报关行', p.status !== 'draft'), hsCode: text(p.hsCode, 'HS编码', p.status !== 'draft'), origin: text(p.origin, '原产地', p.status !== 'draft'), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft'), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
             if (row.clearedAt && row.declaredAt && row.clearedAt < row.declaredAt)
@@ -1751,7 +1758,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (old && old.status !== 'draft')
                 fail('已签发或作废单据保留历史，请建立新版本');
             const id = old?.id || ctx.id();
-            const row: FulfillmentDocument = { id, shipmentId: s.id, orderId: p.orderId || '', type: p.type, number: text(p.number, '单据编号'), version: old?.version || Math.max(0, ...f.documents.filter(d => d.shipmentId === s.id && d.type === p.type && d.orderId === p.orderId).map(d => d.version)) + 1, title: text(p.title, '标题'), dueDate: day(p.dueDate, 'CI合同应收日', p.type === 'CI'), content: text(p.content, '单据正文'), fileIds: files(root, p.fileIds), status: 'draft', createdAt: old?.createdAt || ctx.now, actor: ctx.actorName };
+            const row: FulfillmentDocument = { id, shipmentId: s.id, orderId: p.orderId || '', type: p.type, number: text(p.number, '单据编号'), version: old?.version || Math.max(0, ...f.documents.filter(d => d.shipmentId === s.id && d.type === p.type && d.orderId === p.orderId).map(d => d.version)) + 1, title: text(p.title, '标题'), dueDate: day(p.dueDate, 'CI合同应收日', p.type === 'CI'&&!root.orders.find(o=>o.id===p.orderId)?.replacementSource), content: text(p.content, '单据正文'), fileIds: files(root, p.fileIds), status: 'draft', createdAt: old?.createdAt || ctx.now, actor: ctx.actorName };
             if (old)
                 Object.assign(old, row);
             else
@@ -1775,6 +1782,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('装箱分配未匹配计划');
             if (d.type === 'CI') {
                 const order = get(root.orders, d.orderId, '订单');
+                if(order.replacementSource){
+                    assertMistOrderApproved(root,order.id);
+                    const amount=sum(s.lines.filter(l=>l.orderId===order.id).map(l=>lineAmount(l.quantity,replacementDeclaredUnitPrice(root,s.id,order.id,l.lineId)!)));
+                    d.replacementDeclaredAmount=amount;
+                }else{
                 const amount = sum(s.lines.filter(l => l.orderId === order.id).map(l => lineAmount(l.quantity, get(root.orderLines, l.lineId, '条目').price)));
                 const existing = root.invoices.filter(i => i.orderId === order.id && isActiveMistInvoice(i));
                 if (existing.some(i => i.currency !== order.currency))
@@ -1786,10 +1798,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 // CI 只形成待财务确认的应收：确认前不计入余额、账龄、报表、催收，也不能核销。
                 root.invoices.push({ id, code: d.number, orderId: order.id, order: order.code, customer: order.customer, due: d.dueDate, amount, open: 0, currency: order.currency, financeStatus: 'pending', sourceDocumentId: d.id, issuedAt: platformBusinessDate(ctx.now) });
                 d.invoiceId = id;
+                }
             }
             d.status = 'issued';
             d.issuedAt = ctx.now;
-            audit(root, ctx, 'document', d.id, '签发单据并返回来源', { view: d.type === 'CI' ? 'invoices' : 'shipments', id: d.type === 'CI' ? d.invoiceId : s.id });
+            audit(root, ctx, 'document', d.id, '签发单据并返回来源', { view: d.invoiceId ? 'invoices' : 'shipments', id: d.invoiceId || s.id });
             return { id: d.id, invoiceId: d.invoiceId };
         }
         case 'fulfillment.documents.archiveExternal': {

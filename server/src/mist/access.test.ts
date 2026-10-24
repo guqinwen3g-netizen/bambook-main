@@ -101,3 +101,14 @@ describe('按已有业务查看权限投影，不因成员资格扩大权限', (
     expect(canReadFile(state, actor(['orders:read']), 'development-original', empty, 'owner')).toBe(false);
   });
 });
+
+it('keeps replacement customs valuation and tax attachments behind customs reading, independent of order/claim visibility',()=>{
+ const state=empty();state.files.push(file('replacement-contract'),file('tax-proof'),file('private-claim'));
+ state.orders.push({id:'replacement-order',replacementSource:{schemaVersion:1,claimId:'claim',dispositionId:'disp'},governance:{contract:{confirmationFileIds:['replacement-contract']}}} as any);
+ state.platform.claims.push({id:'claim',fileIds:['private-claim']} as any);
+ state.fulfillment.customs.push({id:'declaration',replacementReviews:[{orderId:'replacement-order',taxHandling:'原单税务资料',fileIds:['tax-proof']}]} as any);
+ state.events.push({id:'customs-event',entityType:'customs',entityId:'declaration',fileIds:['tax-proof']} as any);
+ const orderReader=projectState(state,actor(['orders:read']),empty).state;expect(orderReader.orders[0].replacementSource).toMatchObject({claimId:'claim'});expect(orderReader.platform.claims).toEqual([]);expect(orderReader.fulfillment.customs).toEqual([]);expect(orderReader.files.map(f=>f.id)).toEqual(['replacement-contract']);
+ const claimReader=projectState(state,actor(['aftersales:read']),empty).state;expect(claimReader.files.map(f=>f.id)).toEqual(['private-claim']);
+ const customsReader=projectState(state,actor(['customs:read']),empty).state;expect(customsReader.fulfillment.customs[0].replacementReviews).toHaveLength(1);expect(customsReader.files.map(f=>f.id)).toEqual(['tax-proof']);
+});

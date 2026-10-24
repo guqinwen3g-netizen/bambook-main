@@ -1,3 +1,4 @@
+import {ReplacementExportReviewBlock} from './ReplacementExportReviewBlock';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 外贸与报关：后勤单证按出运登记外部申报与放行事实（本系统不代替海关 / 单一窗口申报）；退税由财务按退税率版本配单申报、登记核准与到账勾稽；信用证由单证员按来证登记条款、修改书、交单与银行审单结果。 */
 import React from 'react';
@@ -53,9 +54,10 @@ export function rebateEvidence(root: MistState, c: FulfillmentCustoms) {
   const open = new Map<string, number>();
   for (const invoice of invoices) if (invoice.open > 0) open.set(invoice.currency, round((open.get(invoice.currency) || 0) + invoice.open));
   const released = c.status === 'cleared';
+  const replacement=!!c.replacementReviews?.length||root.fulfillment.shipments.find(s=>s.id===c.shipmentId)?.lines.some(line=>root.orders.find(o=>o.id===line.orderId)?.replacementSource)===true;
   const collected = invoices.length > 0 && invoices.length === cis.length && open.size === 0;
   const vat = rebateSummary(root, c);
-  return { released, cis, invoices, open: [...open].map(([currency, amount]) => ({ currency, amount })), collected, vat, ready: Number(released) + Number(collected) + Number(vat.vatReady) };
+  return { replacement,released, cis, invoices, open: [...open].map(([currency, amount]) => ({ currency, amount })), collected, vat, ready: Number(released) + Number(collected) + Number(vat.vatReady) };
 }
 const openText = (open: Array<{ currency: string; amount: number }>) => open.map(row => `${row.currency} ${fmt(row.amount, 2)}`).join(' / ');
 
@@ -98,19 +100,19 @@ export function CustomsPage() {
   const changeTab = (value: Tab) => { setTab(value); setPicked(null); setDrawer(false); };
   const eligibleShipments = () => (f?.shipments || []).filter(s => isOpenShipment(s) && !f!.customs.some(c => c.shipmentId === s.id) && (!hasContext || s.id === route.section));
   const payload = (c: FulfillmentCustoms | undefined, patch: Partial<FulfillmentCustoms>) => ({ ...(c ? { id: c.id } : {}), shipmentId: c?.shipmentId || '', status: c?.status || 'draft', declarationNo: c?.declarationNo || '', broker: c?.broker || '', hsCode: c?.hsCode || '', origin: c?.origin || '', tradeMode: c?.tradeMode || '', declaredAt: c?.declaredAt || '', clearedAt: c?.clearedAt || '', evidence: c?.evidence || '', fileIds: c?.fileIds || [], note: c?.note || '', ...patch });
-  const prepFields = [field('broker', '报关行', 'text', false), { ...field('hsCode', 'HS 编码', 'text', false), hint: '按实际申报品名归类；不同品名分开记录在报关单原件中。' }, field('origin', '原产地', 'text', false), field('tradeMode', '贸易方式 / 成交方式', 'text', false), field('note', '备注', 'textarea', false)];
-  const createSpec = (shipmentId = ''): ModuleEditorSpec => ({ title: '建立报关记录', submitLabel: '建立记录', description: '先登记报关资料准备；实际向海关申报后再登记报关单号与申报日。本系统不代替海关或单一窗口申报。',
+  const prepFields = [field('broker', '报关行', 'text', false), field('hsCode', 'HS 编码', 'text', false), field('origin', '原产地', 'text', false), field('tradeMode', '贸易方式 / 成交方式', 'text', false), field('note', '备注', 'textarea', false)];
+  const createSpec = (shipmentId = ''): ModuleEditorSpec => ({ title: '建立报关记录', submitLabel: '建立记录',
     fields: [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...eligibleShipments().map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))]), ...prepFields],
     initialValues: { shipmentId: shipmentId || (hasContext ? route.section || '' : ''), broker: '', hsCode: '', origin: '', tradeMode: '', note: '' },
     submit: v => run({ type: 'fulfillment.customs.save', payload: payload(undefined, { shipmentId: text(v, 'shipmentId'), broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
   const editSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '编辑报关资料', fields: prepFields, initialValues: { broker: c.broker, hsCode: c.hsCode, origin: c.origin, tradeMode: c.tradeMode, note: c.note },
     submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
-  const declareSpec = (c: FulfillmentCustoms, correcting: boolean): ModuleEditorSpec => ({ title: correcting ? '更正申报信息' : '登记已向海关申报', submitLabel: correcting ? '保存更正' : '登记已申报', description: '以单一窗口回执或报关行回执为准；申报日不能晚于今天。',
+  const declareSpec = (c: FulfillmentCustoms, correcting: boolean): ModuleEditorSpec => ({ title: correcting ? '更正申报信息' : '登记已向海关申报', submitLabel: correcting ? '保存更正' : '登记已申报',
     fields: [field('declarationNo', '报关单号'), field('broker', '报关行'), field('hsCode', 'HS 编码'), field('origin', '原产地'), field('tradeMode', '贸易方式 / 成交方式'), field('declaredAt', '实际申报日', 'date'), field('note', '备注', 'textarea', false)],
     initialValues: { declarationNo: c.declarationNo, broker: c.broker, hsCode: c.hsCode, origin: c.origin, tradeMode: c.tradeMode, declaredAt: c.declaredAt || day, note: c.note },
     submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { status: 'submitted', declarationNo: text(v, 'declarationNo'), broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), declaredAt: text(v, 'declaredAt'), note: text(v, 'note') }) }) });
-  const releaseSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '登记海关放行', submitLabel: '登记放行', description: `报关单 ${c.declarationNo} · 申报日 ${c.declaredAt}。放行后本记录不可覆盖。`,
-    fields: [field('clearedAt', '实际放行日', 'date'), { ...field('evidence', '放行依据', 'textarea'), hint: '如海关放行通知或报关行放行回执编号；原件请作为附件保存。' }],
+  const releaseSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '登记海关放行', submitLabel: '登记放行',
+    fields: [field('clearedAt', '实际放行日', 'date'), field('evidence', '放行依据', 'textarea')],
     initialValues: { clearedAt: day, evidence: c.evidence },
     submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { status: 'cleared', clearedAt: text(v, 'clearedAt'), evidence: text(v, 'evidence') }) }) });
 
@@ -125,7 +127,7 @@ export function CustomsPage() {
   const rebateColumns: Column<FulfillmentCustoms>[] = [
     { key: 'code', header: '报关单', width: 'minmax(150px,1.3fr)', render: c => <div className="mist-col" style={{ gap: 2 }}><Mono>{c.declarationNo}</Mono><small className="mist-muted">{shipmentOf(c)?.code} · {shipmentOf(c)?.customer}</small></div> },
     { key: 'release', header: '报关单放行', width: '120px', render: c => c.status === 'cleared' ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone="ok">{uiText("已放行")}</Pill><small className="mist-muted">{c.clearedAt}</small></div> : <Pill tone="warn">{uiText("待放行")}</Pill> },
-    { key: 'collect', header: '收汇', width: 'minmax(130px,1.1fr)', render: c => { const e = rebateEvidence(state!, c); return e.collected ? <Pill tone="ok">{uiText("已全部收汇")}</Pill> : !e.cis.length ? <span className="mist-muted">{uiText("未签发 CI")}</span> : e.open.length ? <span className="mist-tone-bad">{uiText("未收 ")}{openText(e.open)}</span> : <span className="mist-muted">{uiText("CI 应收不可用")}</span>; } },
+    { key: 'collect', header: '收汇', width: 'minmax(130px,1.1fr)', render: c => { const e = rebateEvidence(state!, c); return e.replacement?<Pill>{uiText("无需收款")}</Pill>:e.collected ? <Pill tone="ok">{uiText("已全部收汇")}</Pill> : !e.cis.length ? <span className="mist-muted">{uiText("未签发 CI")}</span> : e.open.length ? <span className="mist-tone-bad">{uiText("未收 ")}{openText(e.open)}</span> : <span className="mist-muted">{uiText("CI 应收不可用")}</span>; } },
     { key: 'vat', header: '增值税专票', width: '110px', hideOnMobile: true, render: c => { const v = rebateEvidence(state!, c).vat; return v.claim ? `已配 ${v.claim.lines.length} 张` : v.candidates.length ? `可配 ${v.candidates.length} 张` : <span className="mist-muted">{uiText("未登记")}</span>; } },
     { key: 'claim', header: '退税申报', width: 'minmax(130px,1.1fr)', render: c => { const v = rebateEvidence(state!, c).vat; return v.claim ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={REBATE_TONE[v.claim.state]}>{REBATE_STATE_LABEL[v.claim.state]}</Pill><small className="mist-muted">{uiText("应退 ")}{fmt(v.claim.expected, 2)} CNY</small></div> : v.rate && v.candidates.length ? <div className="mist-col" style={{ gap: 2 }}><span className="mist-muted">{uiText("未申报")}</span><small className="mist-muted">{uiText("预计 ")}{fmt(v.preview, 2)} CNY</small></div> : <span className="mist-muted">{uiText(v.rate ? '未申报' : '缺退税率')}</span>; } },
     { key: 'ready', header: '资料', width: '90px', align: 'right', hideOnMobile: true, render: c => `${rebateEvidence(state!, c).ready} / 3` },
@@ -209,16 +211,12 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
   const evidence = rebateEvidence(state, c);
   const unit = (lineId: string) => state.orderLines.find(line => line.id === lineId)?.unit || '';
   const cartons = new Set(packingRows.map(row => row.carton)).size, net = round(packingRows.reduce((sum, row) => sum + row.netWeight, 0)), gross = round(packingRows.reduce((sum, row) => sum + row.grossWeight, 0)), volume = round(packingRows.reduce((sum, row) => sum + row.volume, 0));
-  const next: { tone: Tone; title: string; text: string } = flags.some(flag => flag.key === 'cancelled') ? { tone: 'neutral', title: '出运已取消', text: '本报关记录保留为历史；如已向海关申报，请在外部办理撤单。' }
-    : c.status === 'draft' ? { tone: 'warn', title: '资料准备中', text: '向海关申报后，登记报关单号、报关行、HS 编码、原产地、贸易方式与申报日。' }
-    : c.status === 'submitted' ? { tone: flags.some(flag => flag.key === 'awaiting') ? 'bad' : 'accent', title: '已申报，等待放行', text: flags.some(flag => flag.key === 'awaiting') ? '业务已对客发送 CI / PL，出运正在等海关放行才能登记实际离港。' : '取得海关放行后登记放行日与依据；放行后本记录不可覆盖。' }
-    : { tone: 'ok', title: '已放行', text: s?.state === 'departed' ? `已随出运离港（ATD ${s.departedAt ? shortWhen(s.departedAt) : ''}）。` : '出口清关已完成，后勤可在出运中登记实际离港。' };
   return <DetailBody data-customs-detail={c.id} heading={<div>
       <span className="mist-mono mist-muted">{c.code}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{uiText(c.declarationNo ? `报关单 ${c.declarationNo}` : `${s?.code || '出运'} · 未申报`)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={CUSTOMS_TONE[c.status]}>{CUSTOMS_LABEL[c.status]}</Pill>{s && <Pill>{uiText(s.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}{s && <Pill>{MODE_LABEL[s.mode]}</Pill>}{flags.map(flag => <Pill key={flag.key} tone={flag.key === 'unpacked' ? 'warn' : 'bad'}>{uiText(flag.label)}</Pill>)}</div>
-    <Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>
+    <ReplacementExportReviewBlock state={state} customs={c} can={canClear} busy={locked} open={open} run={run}/>
     {can && c.status !== 'cleared' && <ActionBar busy={locked} actions={[
       { label: '登记已申报', icon: Stamp, onClick: onDeclare, primary: true, reason: baseReason, hidden: c.status !== 'draft' || !canClear },
       { label: '编辑报关资料', icon: Pencil, onClick: onEdit, reason: baseReason, hidden: c.status !== 'draft' },
@@ -257,7 +255,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
         { key: 'status', header: '状态', render: row => <Pill tone={row.status === 'issued' ? 'ok' : row.status === 'void' ? 'neutral' : 'warn'}>{uiText(row.status === 'issued' ? '已签发' : row.status === 'void' ? '已作废' : '草稿')}</Pill> },
       ]} /> : <span className="mist-note">{uiText("本票还没有单据；CI / PL 在单据中心按版本签发。")}</span>}
     </DetailBlock>
-    {c.status !== 'draft' && <DetailBlock title={uiText("退税资料")} aside={<span className="mist-muted">{uiText("已具备 ")}{evidence.ready} / 3</span>}>
+    {c.status !== 'draft'&&!evidence.replacement && <DetailBlock title={uiText("退税资料")} aside={<span className="mist-muted">{uiText("已具备 ")}{evidence.ready} / 3</span>}>
       <Checklist items={[
         { label: '报关单（海关放行）', done: evidence.released, note: evidence.released ? `${c.declarationNo} · 放行 ${c.clearedAt}` : `${c.declarationNo} · 待放行` },
         { label: '收汇（本票 CI 应收）', done: evidence.collected, note: !evidence.cis.length ? '本票尚未签发 CI' : evidence.collected ? `${evidence.invoices.length} 张应收已全部收汇` : evidence.open.length ? `未收 ${openText(evidence.open)}` : 'CI 对应应收不可用', noteTone: evidence.open.length ? 'bad' : undefined },
@@ -265,7 +263,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
       ]} />
       {canInvoices && evidence.invoices.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap' }}>{evidence.invoices.map((invoice: MistInvoice) => <TextLink key={invoice.id} icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink>)}</div>}
     </DetailBlock>}
-    {c.status !== 'draft' && canInvoices && <RebateClaimBlock state={state} customs={c} canWrite={canRebate} canReconcile={canReconcile} locked={locked} open={open} run={run} onBill={onBill} onReceipt={onReceipt} />}
+    {c.status !== 'draft'&&!evidence.replacement && canInvoices && <RebateClaimBlock state={state} customs={c} canWrite={canRebate} canReconcile={canReconcile} locked={locked} open={open} run={run} onBill={onBill} onReceipt={onReceipt} />}
     <DetailBlock title={uiText("附件")}><RecordFiles key={c.id} ids={c.fileIds} onAttach={can && c.status !== 'cleared' && !closed ? onAttach : undefined} />{!c.fileIds.length && <span className="mist-note">{uiText("报关单、放行通知等原件作为附件保存")}</span>}</DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="customs" id={c.id} /></DetailBlock>
   </DetailBody>;

@@ -1,3 +1,4 @@
+import {syncClaimReplacementShipments,type ClaimReplacementSource} from './mistClaimReplacement';
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {applyInternalFabricCommand,internalFabricCommandPermission,normalizeGarmentFulfillment,normalizeInternalSupply,internalFabricDeliveryState,type GarmentFulfillmentFields,type MistInternalFabricAllocation,type InternalFabricCommand} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,type SampleSendPurpose} from './mistSampleSending';
@@ -128,6 +129,7 @@ export type MistFabric = { id: string; code: string; name: string; owner: string
 export type MistOrderLine = GarmentFulfillmentFields & { id: string; orderId: string; name: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number };
 export type MistChecklistItem = { id: string; label: string; done: boolean; note: string; actor?: string; at?: string };
 export type MistOrder = {
+  replacementSource?:ClaimReplacementSource;
   governance?:OrderGovernanceFields;
   id: string; code: string; type: 'garment' | 'fabric'; customerId: string; customer: string;
   season: string; lines: number; qty: number; amount: number; currency: string; due: string;
@@ -800,7 +802,9 @@ export function createMistOrderRecords(state:MistState,p:MistOrderInput,context:
 }
 
 export function applyMistCommand(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
-  return applyMistCommandUnbound(original, command, context);
+  const result=applyMistCommandUnbound(original, command, context);
+  syncClaimReplacementShipments(result.state,context);
+  return result;
 }
 function applyMistCommandUnbound(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
   if(!original||original.schemaVersion!==1)throw new MistCommandError('INVALID_STATE','公司数据版本无效',500);

@@ -1,3 +1,4 @@
+import {replacementDeclaredUnitPrice} from './mistClaimReplacement';
 /**
  * 报关申报资料（2026-10-18 按《中华人民共和国海关进出口货物报关单填制规范》与《规范申报目录》的通行做法确定首版）。
  * - 商品归类库：单证员按款号建立归类档案——10 位商品编号（HS）、申报品名、申报要素（品牌类型、出口享惠情况及按章节的必报要素）、法定第一 / 第二计量单位。
@@ -74,7 +75,9 @@ export function draftCustomsDeclaration(root: MistState, shipment: FulfillmentSh
     const net = packing.filter(r => r.lineId === line.lineId && (r.productionId || '') === (line.productionId || '')).reduce((s, r) => s + r.netWeight, 0);
     const gk = `${cls.id}|${unit}|${order.currency}`;
     const g = groups.get(gk) || { cls, unit, currency: order.currency, lines: [] };
-    g.lines.push({ key, style: ol.style, quantity: line.quantity, amountMinor: mistMoneyMinor(lineAmount(line.quantity, ol.price)), net });
+    let price=ol.price;
+    if(order.replacementSource){try{price=replacementDeclaredUnitPrice(root,shipment.id,order.id,ol.id)!;}catch(error){if(!(error instanceof MistCommandError))throw error;blockers.push(error.message);continue;}}
+    g.lines.push({ key, style: ol.style, quantity: line.quantity, amountMinor: mistMoneyMinor(lineAmount(line.quantity, price)), net });
     groups.set(gk, g);
   }
   const needsWeight = [...groups.values()].some(g => normalizeUnit(g.cls.legalUnit) === '千克' || g.cls.secondUnit);
