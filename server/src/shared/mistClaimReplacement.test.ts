@@ -57,3 +57,9 @@ it('rejects combining free replacement with ordinary sale goods before creating 
 it('does not silently reuse ordinary export tax filing for a free replacement',()=>{
  const f=fixture(),id=f.create(),scope=f.declaration(id);f.state.fulfillment.customs[0].status='cleared';f.state.fulfillment.shipments.find(s=>s.id===scope.shipmentId)!.state='departed';f.state.fulfillment.shipments.find(s=>s.id===scope.shipmentId)!.departedAt=f.c.now;expect(()=>f.run({type:'rebate.claim.file',payload:{customsId:scope.id}} as never)).toThrow('不支持补发单独申报退税');
 });
+
+it('invalidates generated customs items when a draft valuation changes, retaining the prior review audit',()=>{
+ const f=fixture(),id=f.create(),scope=f.declaration(id);f.run({type:'fulfillment.customs.classify.save',payload:{family:'garment',hsCode:'6203310000',declaredName:'羊毛外套',brandType:'0',preference:'0',elements:['机织','外套','男式','羊毛混纺','无'],styles:['CT1'],legalUnit:'件',secondUnit:''}});
+ f.run({type:'fulfillment.customs.reviewReplacement',payload:reviewPayload(scope.id,id)});f.run({type:'fulfillment.customs.items',payload:{id:scope.id}});expect(f.state.fulfillment.customs[0].items![0].amount).toBe(90);
+ f.run({type:'fulfillment.customs.reviewReplacement',payload:{...reviewPayload(scope.id,id),unitPrice:95}});expect(f.state.fulfillment.customs[0].items).toBeUndefined();expect(f.state.fulfillment.customs[0].itemsAt).toBeUndefined();expect(f.state.fulfillment.customs[0].itemsBy).toBeUndefined();expect(draftCustomsDeclaration(f.state,f.state.fulfillment.shipments.find(s=>s.id===scope.shipmentId)!).items[0].amount).toBe(95);expect(f.state.events.filter(e=>(e as any).audit?.action==='replacement.export.review').map(e=>(e as any).audit.review.unitPrice)).toEqual([95,90]);
+});

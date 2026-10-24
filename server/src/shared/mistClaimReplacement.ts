@@ -55,6 +55,8 @@ export function recordReplacementExportReview(root:MistState,p:ReplacementExport
  if(root.fulfillment.documents.some(d=>d.shipmentId===shipment.id&&d.orderId===order.id&&d.type==='CI'&&d.status==='issued'))fail('请先作废原补发CI，再修改申报货值');
  const review:ReplacementExportReview={schemaVersion:1,orderId:order.id,lineId:scope.line.id,unitPrice:p.unitPrice,originalDeclarationNo:required(p.originalDeclarationNo,'原出口单号'),returnReference:required(p.returnReference,'退运依据'),taxHandling:required(p.taxHandling,'退税处理'),basis:required(p.basis,'估价依据'),fileIds:[...new Set(p.fileIds)],actorId:context.actorId,actor:context.actorName,at:context.now};
  declaration.replacementReviews=[...(declaration.replacementReviews??[]).filter(row=>row.orderId!==order.id),review];
+ // Derived declaration rows must be regenerated; previous reviewed values remain in audit history.
+ delete declaration.items;delete declaration.itemsAt;delete declaration.itemsBy;
  const event={id:context.id(),entityType:'customs',entityId:declaration.id,at:context.now,actor:context.actorName,text:'核对补发出口 '+order.code,fileIds:[...review.fileIds],audit:{action:'replacement.export.review',review:structuredClone(review)}};root.events.unshift(event);
  return{id:declaration.id};
 }
