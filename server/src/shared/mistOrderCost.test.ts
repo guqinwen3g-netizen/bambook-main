@@ -17,6 +17,16 @@ function fixture() {
 }
 
 describe('订单实际成本与费用分摊', () => {
+  it('exposes the actual-basis fallback exchange source and marks the foreign expense estimate without changing money or state',()=>{
+    const state=createMistState({id:()=>'',now:'2026-10-08T00:18:00Z',actorName:'财务'},'empty') as MistState & Record<string,any>;
+    state.orders.push({id:'free',code:'SO-FREE',customer:'客户',currency:'USD',amount:0} as any);
+    state.fxPeriodRates=[{id:'period',currency:'USD',month:'2026-09',rate:'7.1180'}];
+    state.orderCosts={expenses:[{id:'freight',code:'FY-1',category:'freight',currency:'USD',amount:65,shares:[{orderId:'free',orderCode:'SO-FREE',basisValue:1,amount:65}],scope:'orders',basis:'equal',vendor:'物流'} as any]};
+    const before=structuredClone(state),result=orderActualCost(state,'free','actual','2026-10','2026-10-08');
+    expect(result).toMatchObject({revenueCny:0,expenseCny:462.67,marginEx:-462.67,estimated:true,status:'ok'});
+    expect(result.expenses[0]).toMatchObject({amount:65,cny:462.67,estimated:true,fx:{rate:7.118,label:'2026-09 月末 7.1180（暂估）',estimated:true}});expect(state).toEqual(before);
+  });
+
   it('keeps an internal budget out of external revenue while retaining its costs',()=>{
     const ctx={id:()=>'',now:'2026-10-24T00:00:00Z',actorName:'Finance'},state=createMistState(ctx,'empty') as MistState & Record<string,any>;
     state.orders.push({id:'internal',code:'INT-1',customer:'Production team',currency:'CNY',amount:500,governance:{contract:{kind:'internal'}}} as any);
