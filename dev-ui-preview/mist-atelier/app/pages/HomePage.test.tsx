@@ -96,20 +96,16 @@ it('共用公司的成员按自己账号称呼，不沿用所有者的公司显�
 it('uses the workspace display name and preferred receivable currency without changing session identity',()=>{seam.value.workspace.ownerId='owner';seam.value.state.settings.profileName='工作显示名';seam.value.state.settings.companyProfile={defaultCurrency:'EUR'};render();expect(host.querySelector('.mist-page-head')?.textContent).toContain('工作显示名');expect(host.querySelectorAll('.mist-stat')[3].querySelector('.mist-stat-v')?.textContent).toContain('77.00EUR');expect(seam.session.user.displayName).toBe('当前员工');});
 it('stops proactive brief content while keeping manual assistant access',async()=>{seam.value.state.settings.notifications.suggestions=false;render();expect(host.querySelector('.mist-brief')?.textContent).toContain('主动建议已关闭');await click(host.querySelector<HTMLElement>('.mist-brief-ask')!);expect(openAI).toHaveBeenCalledWith('请根据当前可见业务记录，整理下一步行动建议。');});
 it('uses shared notification preferences and view access before showing unread facts',()=>{seam.value.state.events=[];seam.value.state.settings.notifications.qc=false;seam.session.canAccessView=(view:string)=>view!=='shipments';seam.value.state.notifications=[{id:'hidden-qc',category:'qc',title:'关闭的QC通知',detail:'不应显示',readAt:null,target:{view:'development/detail',id:'d'}},{id:'hidden-scope',category:'general',title:'无权出运通知',detail:'不应显示',readAt:null,target:{view:'shipments',id:'s'}},{id:'visible',category:'general',title:'可见实际通知',detail:'应显示',readAt:null,target:{view:'orders/detail',id:'o'}}];render();expect(host.querySelector('.mist-brief')?.textContent).toContain('可见实际通知');expect(host.querySelector('.mist-brief')?.textContent).not.toContain('关闭的QC通知');expect(host.querySelector('.mist-brief')?.textContent).not.toContain('无权出运通知');});
-it('does not present projected-away receivables as zero money or zero unpaid invoices',async()=>{
+it('omits inaccessible receivable statistics instead of showing zeroes or permission placeholders',()=>{
   seam.value.state.invoices=[];seam.value.workspace.access={role:'member',hidden:[{key:'receivables'}]};render();
-  const card=host.querySelectorAll<HTMLElement>('.mist-stat')[3];
-  expect(card.querySelector('.mist-stat-v')?.textContent).toBe('已隐藏');
-  expect(card.textContent).toContain('不代表应收为零');expect(card.textContent).not.toContain('0 张未结发票');
-  await click(card);expect(host.querySelector('[role=dialog]')).toBeNull();
-  expect(host.querySelector('.mist-page-head')?.textContent).toContain('当前可见');
+  expect(host.querySelectorAll('.mist-stat')).toHaveLength(3);expect(host.textContent).not.toContain('应收待核销');expect(host.textContent).not.toContain('不代表应收为零');expect(host.querySelector('[role=dialog]')).toBeNull();
 });
-it('does not report a partial QC aggregate when development versions are hidden',async()=>{
+it('omits incomplete development and QC statistics when their source is not readable',()=>{
   seam.value.state.devs=[];seam.value.state.versions=[];seam.value.workspace.access={role:'member',hidden:[{key:'products'}]};render();
-  const cards=host.querySelectorAll<HTMLElement>('.mist-stat');
-  for(const index of [0,1]){expect(cards[index].querySelector('.mist-stat-v')?.textContent).toBe('已隐藏');await click(cards[index]);expect(host.querySelector('[role=dialog]')).toBeNull();}
-  expect(cards[2].querySelector('.mist-stat-v')?.textContent).not.toBe('已隐藏');
-  expect(cards[3].querySelector('.mist-stat-v')?.textContent).not.toBe('已隐藏');
+  const cards=host.querySelectorAll<HTMLElement>('.mist-stat');expect(cards).toHaveLength(2);expect(host.textContent).not.toContain('在途开发案');expect(host.textContent).not.toContain('待 QC 评审');expect(cards[0].textContent).toContain('本周出运');expect(cards[1].textContent).toContain('应收待核销');
+});
+it('uses current account read permissions before any workspace hidden-section metadata arrives',()=>{
+  seam.value.workspace.access=undefined;seam.session.hasPermission=(...permissions:string[])=>salesPermission(...permissions)&&!permissions.includes('invoices:read');render();expect(host.textContent).not.toContain('应收待核销');expect(host.querySelectorAll('.mist-stat')).toHaveLength(3);expect(host.textContent).not.toContain('无查看权限');
 });
 it('closes an open statistic detail immediately when its source becomes hidden',async()=>{
   render();await click(host.querySelectorAll<HTMLElement>('.mist-stat')[3]);expect(host.querySelector('[role=dialog]')).not.toBeNull();
@@ -128,13 +124,13 @@ it('lists derived work from QC returns and rejected payment requests and opens t
   render();const rows=[...host.querySelectorAll<HTMLElement>('.mist-task')];expect(rows.map(row=>row.textContent).join('|')).toContain('QC-BACK');expect(rows.map(row=>row.textContent).join('|')).toContain('PR-BACK · 付款申请被退回');
   expect(host.querySelector('.mist-hero')?.textContent).toContain('QC-BACK');
   expect(host.querySelector('.mist-hero h2')?.textContent?.match(/QC-BACK/g)).toHaveLength(1);
-  expect(host.querySelector('.mist-page-head')?.textContent).toContain('件来自审批、QC、出运或财务');
+  expect(host.querySelector('.mist-page-head')?.textContent).not.toContain('件来自审批、QC、出运或财务');
   await click(rows.find(row=>row.textContent?.includes('PR-BACK'))!);expect(go).toHaveBeenLastCalledWith('payment-vouchers','pr-back',{view:'payment-vouchers',id:'pr-back'});
   await click(rows.find(row=>row.textContent?.includes('QC-BACK'))!);expect(go).toHaveBeenLastCalledWith('qc-workbench','qc-back',{view:'qc-workbench',id:'qc-back'});
 });
 
 
-it('counts only actual due dates from derived work in today summary', () => {
+it('marks actually due work as urgent without repeating a summary paragraph', () => {
   const state = seam.value.state, today = state.tasks[0].due;
   state.fulfillment.qcTasks = [
     { id: 'due-qc', code: 'QC-DUE', source: { kind: 'orderLine', orderId: 'o', lineId: 'l' }, kind: 'sample', domain: 'garment', factory: '工厂', state: 'reported', due: today, createdAt: today, reportIds: [] },
@@ -142,5 +138,11 @@ it('counts only actual due dates from derived work in today summary', () => {
     { id: 'future-qc', code: 'QC-FUTURE', source: { kind: 'orderLine', orderId: 'o', lineId: 'l' }, kind: 'sample', domain: 'garment', factory: '工厂', state: 'reported', due: '2099-01-01', createdAt: today, reportIds: [] }
   ];
   render();
-  expect(host.querySelector('.mist-page-head')?.textContent).toContain('其中 2 件今天到期');
+  const due=host.querySelectorAll('.mist-task-when[data-urgent]');expect(due).toHaveLength(2);
+  const undated=[...host.querySelectorAll('.mist-task')].find(node=>node.textContent?.includes('QC-NO-DUE'));expect(undated).toBeDefined();expect(undated?.querySelector('.mist-task-when')?.hasAttribute('data-urgent')).toBe(false);
+  expect(host.querySelector('.mist-page-head')?.textContent).not.toContain('其中');
+});
+
+it.each([['products:read','在途开发案'],['qc:read','待 QC 评审'],['shipments:read','本周出运'],['invoices:read','应收待核销']])('hides the statistic for a denied %s scope before projection metadata is available',(scope,label)=>{
+ seam.value.workspace.access=undefined;seam.session.hasPermission=(...permissions:string[])=>salesPermission(...permissions)&&!permissions.includes(scope);render();expect([...host.querySelectorAll('.mist-stat')].some(card=>card.textContent?.includes(label))).toBe(false);
 });
