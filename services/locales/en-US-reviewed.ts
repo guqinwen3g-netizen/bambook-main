@@ -575,4 +575,12 @@ export const reviewedEnglish: Record<string, string> = {
   '内部订单请登记库存交接': 'Record an inventory handover for internal orders',
   '已有销售发票或资金归属，不能更改订单用途': 'The order has sales invoices or assigned funds; its purpose cannot be changed',
   '交付方式 / 地点': 'Delivery method / location',
+  '供货核对': 'Supply checks',
+  '供货状态': 'Supply status',
+  '放行供货': 'Release supply',
+  '不通过将阻断生产，需复验。': 'A failed report blocks production and requires reinspection.',
+  '样品未通过，待复验。': 'Sample failed; reinspection required.',
+  '有保留项待确认。': 'Conditions require confirmation.',
+  '原检查日 {0}': 'Original inspection date {0}',
+  '检查中': 'Inspection in progress', '已恢复': 'Resumed', '业务继续记录': 'Business continuation record',
 };
