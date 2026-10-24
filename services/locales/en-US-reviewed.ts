@@ -590,4 +590,8 @@ export const reviewedEnglish: Record<string, string> = {
   '裁剪': 'Cutting',
   '车缝': 'Sewing',
   '整烫包装': 'Finishing and packing',
+  '单证准备': 'Prepare documents',
+  '待对客交单': 'Send documents to customer',
+  '单据待补交': 'Outstanding document delivery',
+  '待起飞': 'Awaiting take-off',
 };
