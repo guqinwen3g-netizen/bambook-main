@@ -100,12 +100,13 @@ export function claimLedger(root: MistState, claim: ClaimLike, opts: { creditsOp
   const settledMinor = recoveries.filter(r => r.state !== 'Withdrawn').reduce((s, r) => s + mistMoneyMinor(r.settled ?? 0), 0);
   const requestedMinor = recoveries.filter(r => r.state !== 'Waived').reduce((s, r) => s + mistMoneyMinor(r.requested), 0);
   const customerOpen = claim.dispositions.some(d => ['Draft', 'pending', 'approved'].includes(d.state) && !d.supersededById);
+  const customerGoodsOpen=(root.platform?.claimGoods??[]).some(goods=>goods.claimId===claim.id&&!['Scrapped','Dispatched','HandedBack'].includes(goods.state));
   const recoveryOpen = recoveries.some(r => OPEN_RECOVERY.includes(r.state));
   return {
     currency, customer: customerMinor / 100, customerPending: pendingMinor / 100, recoveryRequested: sameCurrency ? requestedMinor / 100 : null,
     recoveryAgreed: sameCurrency ? agreedMinor / 100 : null, recoverySettled: sameCurrency ? settledMinor / 100 : null,
     companyLoss: sameCurrency ? (customerMinor - agreedMinor) / 100 : null, sameCurrency,
-    customerSettled: claim.dispositions.length > 0 && !customerOpen && !opts.creditsOpen, customerMoneyOpen: !!opts.creditsOpen, recoveryOpen, hasRecovery: recoveries.length > 0,
+    customerSettled: claim.dispositions.length > 0 && !customerOpen && !opts.creditsOpen&&!customerGoodsOpen, customerMoneyOpen: !!opts.creditsOpen, customerGoodsOpen, recoveryOpen, hasRecovery: recoveries.length > 0,
   };
 }
 

@@ -34,6 +34,10 @@ export function isMyMistTask(task: MistTask, options: Pick<MistWorkOptions, 'me'
 }
 export function mistMyTasks(state: MistState | null | undefined, options: Pick<MistWorkOptions, 'me' | 'can' | 'canRead'>) {
   return (state?.tasks ?? []).map(task=>{
+    if(task.kind?.startsWith('claim-repair-qc:')&&task.target.view==='claims'){
+      const claim=state?.platform?.claims.find(row=>row.id===task.target.id),job=state?.platform?.claimGoods.filter(row=>row.claimId===claim?.id).flatMap(row=>row.repairs??[]).find(row=>task.kind==='claim-repair-qc:'+row.id);
+      if(claim&&job)return {...task,title:localizedPageTitle('返修复检')+' · '+claim.code,permission:`qc:${job.domain}_chain:write`};
+    }
     if(task.kind?.startsWith('claim-inventory:')&&task.target.view==='inventory'){
       const receipt=state?.fulfillment.returnReceipts?.find(row=>row.id===task.target.id);
       if(receipt)return {...task,title:localizedPageTitle('退货处理')+' · '+receipt.code,target:{...task.target,section:'claim:'+receipt.claimId},permission:'inventory:write'};
