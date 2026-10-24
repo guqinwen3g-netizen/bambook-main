@@ -85,3 +85,12 @@ describe('订单核算 · 实际结汇口径', () => {
     expect(orderActualCost(f.s, 'o1', 'actual', '2026-10', '2026-10-17')).toMatchObject({ status: 'norate', revenueCny: null, missing: ['USD'] });
   });
 });
+
+ it('rejects a second active settlement for the same dated bank slip and debit account, even with different amounts or receipt links',()=>{
+  const f=setup();settle(f,{amount:1000,localAmount:7100,receipts:[{receiptId:f.r1.id,amount:1000}]});const before=JSON.stringify(f.s);
+  expect(()=>settle(f,{amount:500,localAmount:3550,receipts:[{receiptId:f.r2.id,amount:500}]})).toThrow('该银行水单已登记结汇');expect(JSON.stringify(f.s)).toBe(before);
+ });
+ it('retains the reversed original while allowing a corrected bank slip, and scopes daily slip numbers to the debit account and date',()=>{
+  const f=setup();const first=settle(f,{amount:1000,localAmount:7100});f.run({type:'finance.fx.reverse',payload:{id:first.id,reason:'水单金额录入错误'}});settle(f,{amount:2000,localAmount:14240});expect(f.s.fxRecords!.find(r=>r.id===first.id)?.reversed?.reason).toBe('水单金额录入错误');
+  expect(()=>settle(f,{date:'2026-10-11',amount:1000,localAmount:7100})).not.toThrow();expect(()=>settle(f,{fromAccountId:f.r3.accountId,amount:100,localAmount:710})).not.toThrow();
+ });

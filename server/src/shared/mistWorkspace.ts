@@ -1333,6 +1333,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       }else{
         const accounts=state.bankAccounts||[],from=find(accounts,text(p.fromAccountId,'卖出账户'),'卖出账户'),to=find(accounts,text(p.toAccountId,'入账账户'),'入账账户');
         if(from.id===to.id||from.currency===to.currency)throw new MistCommandError('VALIDATION','卖出账户与入账账户须为不同币种');
+        if(records.some(row=>row.kind==='settlement'&&!row.reversed&&row.fromAccountId===from.id&&row.date===day&&row.ref===ref))throw new MistCommandError('PRECONDITION','该银行水单已登记结汇');
         if(from.openingDate>day||to.openingDate>day)throw new MistCommandError('PRECONDITION','结汇日期早于账户期初日期');
         for(const acc of [from,to])if(acc.closed)throw new MistCommandError('PRECONDITION','账户 '+acc.code+' 已于 '+acc.closed.date+' 销户，不能记入结汇');
         const localAmount=positive(p.localAmount,'入账本币金额');mistMoneyMinor(localAmount);
