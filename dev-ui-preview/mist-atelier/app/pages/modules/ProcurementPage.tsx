@@ -264,7 +264,9 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
     : !p.supplierConfirmation ? { tone: 'accent', title: '合同已发出 · 待供应商确认', text: '' }
     : p.received > p.quantity ? { tone: 'warn', title: '数量待核对', text: '' }
     : stage === 'done' ? { tone: 'ok', title: processing ? '已全部回交' : '已全部交付', text: `${p.received} / ${p.quantity} ${p.unit}` }
-    : { tone: 'accent', title: processing ? '加工中 · 分批回交' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
+    : processing && !state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.release) ? { tone: 'accent', title: '待放行', text: '' }
+    : processing && state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.hold) ? { tone: 'warn', title: '已暂停', text: '' }
+    : { tone: 'accent', title: processing ? '加工中' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
   const deliveries = materialDeliveryRows(state).filter(row => processing ? state.productions.find(branch => branch.id === row.delivery.productionId)?.sourcePurchaseId === p.id : row.purchaseId === p.id);
   const activeDeliveries = deliveries.filter(row => row.outstanding !== '0');
   const track = [

@@ -39,6 +39,7 @@ it('BB-ORD-1 fabric "in production" comes from open production branches, not fro
   expect(lineStages(s, order('fabric'), line('fabric'))[2].caption).toBe('未开立生产');
   for (const col of ['sew', 'finish', 'qc', 'cut'] as const) {
     s.productions = [job('fabric', col)];
+    s.fulfillment.productionFacts = [{ productionId: 'p-fabric', release: {at: context.now, actor: '业务员甲', note: '已核对'} }] as never;
     const stages = lineStages(s, order('fabric'), line('fabric')), current = currentLineStage(stages)!;
     expect(stages.some(stage => stage.key === 'cut')).toBe(false);
     expect(current).toMatchObject({ key: 'inspection', state: 'now', caption: '生产中 · 1 个分支 · 未发起检验', target: { view: 'production-board', id: 'p-fabric' } });
@@ -71,6 +72,7 @@ it('BB-ORD-1 fabric blocked reasons, entry points and list counters stay consist
 
 it('BB-ORD-1 line fulfillment panel shows the fabric track, matching mode text and the handle entry', async () => {
   s.productions = [job('fabric', 'sew')];
+  s.fulfillment.productionFacts = [{ productionId: 'p-fabric', release: {at: context.now, actor: '业务员甲', note: '已核对'} }] as never;
   s.fulfillment.purchases.push(purchase('fabric', 'rejected', 0));
   const go = vi.fn();
   act(() => root.render(<MistRoot><ToastProvider><OrderLineFulfillment state={s} order={order('fabric')} line={line('fabric')} go={go} /></ToastProvider></MistRoot>));
@@ -114,4 +116,22 @@ it('still surfaces a current quality blocker even when stored shipments have dep
   s.fulfillment.shipments.push({id:'sent',code:'SHP-SENT',state:'departed',lines:[{orderId:o.id,lineId:l.id,quantity:100}]} as never);
   s.fulfillment.qcTasks.push(task('fabric','nok','production'));s.fulfillment.qcReports.push(report('nok','reject'));
   expect(currentLineStage(lineStages(s,o,l))).toMatchObject({key:'inspection',state:'blocked',caption:'QC NOK'});
+});
+
+it.each(['garment','fabric'] as const)('keeps a newly created %s branch waiting for its actual release',type=>{
+  s.productions=[job(type,'cut')];const stage=()=>lineStages(s,order(type),line(type)).find(row=>row.key===(type==='garment'?'cut':'inspection'))!;
+  expect(stage()).toMatchObject({state:'now',caption:'待放行'});
+  s.fulfillment.productionFacts=[{productionId:'p-'+type,release:{at:context.now,actor:'业务员甲',note:'已核对'}}] as never;
+  expect(stage().caption).toContain(type==='garment'?'开裁中':'生产中');
+  (s.fulfillment.productionFacts[0] as any).hold={at:context.now,actor:'业务员甲',category:'material',reason:'待料'};
+  expect(stage()).toMatchObject({state:'blocked',caption:'已暂停'});
+});
+it('shows allocated internal fabric as waiting for handover instead of requiring duplicate purchases',()=>{
+  const o=order('garment'),l={...line('garment'),fulfillmentMode:'full_package' as const,cmtIncludedItems:['trims','packaging'] as const};
+  s.internalFabricAllocations=[{id:'a',orderId:o.id,lineId:l.id,fabricOrderId:'fo',fabricLineId:'fl',metres:'3',revision:1,status:'active'}] as never;
+  const stage=()=>lineStages(s,o,l as MistOrderLine).find(row=>row.key==='material');expect(stage()).toMatchObject({state:'now',caption:'内供待交接'});
+  s.fulfillment.purchases.push({id:'supply',unit:'米'} as never);
+  s.fulfillment.receipts.push({id:'r',purchaseId:'supply',quantity:3,materialDelivery:{allocationId:'a',allocationRevision:1,confirmation:{actor:'业务员甲'}}} as never);
+  expect(stage()).toMatchObject({state:'done',caption:'内供已交接'});
+  s.fulfillment.receipts[0].materialDelivery!.allocationRevision=2;expect(stage()).toMatchObject({state:'now',caption:'内供待交接'});
 });

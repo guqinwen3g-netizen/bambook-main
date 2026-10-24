@@ -567,6 +567,8 @@ export const reviewedEnglish: Record<string, string> = {
   '核算记录': 'Costing record', '历史报价参考': 'Historical quote reference', '保存核算': 'Save costing',
   '条目「{0}」的来源版本尚未通过QC': 'The development source for "{0}" has not passed QC',
   '更新报价状态': 'Update quotation status', '保存条目核算 {0}': 'Save line costing {0}',
+  '生产风险': 'Production risks', '{0} 个生产单有风险': '{0} production orders at risk',
+  '内供待交接': 'Internal fabric awaiting handover', '内供已交接': 'Internal fabric handed over', '待分配主料': 'Main fabric not allocated',
   '内部预算': 'Internal budget', '交接约定': 'Handover terms', '交付方式': 'Delivery method',
   '上传内部依据': 'Upload internal evidence', '请记录内部交接约定': 'Enter the internal handover terms',
   '内部订单不生成销售发票': 'Internal orders do not create sales invoices',

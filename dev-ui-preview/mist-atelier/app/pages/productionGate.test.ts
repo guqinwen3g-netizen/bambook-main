@@ -1,6 +1,6 @@
 import {describe,expect,it} from 'vitest';
 import {createMistState,type MistProduction} from '../../../../server/src/shared/mistWorkspace';
-import {productionReleaseGate} from './productionGate';
+import {productionReleaseGate,productionRiskText} from './productionGate';
 
 function fixture(stoneConfirmed=false){
  const state=createMistState({id:()=>'',now:'2026-10-08T00:00:00Z',actorName:'测试'},'empty');
@@ -34,3 +34,6 @@ describe('fabric production gate',()=>{
   expect(rows.find(item=>item.label.includes('Stone'))?.detail).toContain('有保留通过');
  });
 });
+
+it.each(['待合同确认、先锋样与业务开产放行','待合同确认、产前样与业务开产放行','成品采购 · 已交付 3 米，待对应生产QC','加工采购 · 已交付 1 件，待对应生产QC','合格实收 3 米，待对应生产QC'])('does not classify routine workflow copy as a business risk: %s',risk=>expect(productionRiskText({risk})).toBe(''));
+it.each(['交期可能延后两天','QC 不通过：袖长超差','样品有保留通过：SMP-1','异常暂停（工厂产能 / 停工）：设备检修'])('keeps genuine business risk visible: %s',risk=>expect(productionRiskText({risk})).toBe(risk));
