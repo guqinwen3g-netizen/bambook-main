@@ -109,3 +109,7 @@ it('shows a pending CI as awaiting finance rather than paid and permits correcti
   expect(detail.textContent).not.toContain('CI 已有收款');
   expect((getByRole(detail,'button',{name:'作废当前版本'}) as HTMLButtonElement).disabled).toBe(false);
 });
+
+it('shows a replacement CI customs amount without claiming a customer receivable or payment',()=>{
+ const s=store.state!;s.orders[0].replacementSource={schemaVersion:1,claimId:'case'} as any;s.fulfillment.documents.push(doc('replacement','CI',{status:'issued',replacementDeclaredAmount:90}));render('replacement');const detail=host.querySelector('[data-document-detail="replacement"]') as HTMLElement;expect(detail.textContent).toContain('无需收款');expect(detail.textContent).toContain('USD 90.00');expect(detail.textContent).not.toContain('已生成财务应收');expect(detail.textContent).not.toContain('未找到对应应收');expect(detail.textContent).not.toContain('CI 合同应收日');
+});

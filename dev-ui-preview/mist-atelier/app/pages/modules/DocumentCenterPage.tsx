@@ -35,6 +35,7 @@ export function issueBlocker(root: MistState, d: FulfillmentDocument) {
   if (OWN(d.type) ? s.state === 'departed' || s.state === 'cancelled' : s.state === 'cancelled') return OWN(d.type) ? '出运已离港或已取消' : '出运已取消';
   if (!d.fileIds.length) return OWN(d.type) ? '请先上传核对后的正式单据文件' : '请先上传外部机构签发的原件';
   if (root.fulfillment.documents.some(o => o.id !== d.id && family(o) === family(d) && o.status === 'issued')) return '相同来源已有有效版本，请先作废';
+  if(d.type==='CI'&&root.orders.find(o=>o.id===d.orderId)?.replacementSource&&!root.fulfillment.customs.some(c=>c.shipmentId===s.id&&c.replacementReviews?.some(r=>r.orderId===d.orderId&&r.unitPrice>0)))return '补发申报货值尚未核定';
   if (d.type === 'PL' && !packingMatched(root, s)) return '装箱分配与计划数量不一致';
   return '';
 }
@@ -81,13 +82,12 @@ export function DocumentCenterPage() {
     const s = src ? f?.shipments.find(row => row.id === src.shipmentId) : contextShipment;
     const orderOptions = (s ? [...new Set(s.lines.map(line => line.orderId))] : []).map(id => ({ value: id, label: orderCode(id) || '订单不可用' }));
     return { title: d ? '编辑单据草稿' : base ? `基于 V${base.version} 建立新版本` : '新建单据', submitLabel: d ? '保存草稿' : '保存为草稿',
-      description: d ? '只有草稿可以修改；签发或归档后保留为历史版本。' : base ? '新版本保存为草稿，原版本保持不变；有效版本须先作废，新版本才能签发。' : '我方出具 CI / PL；提单、原产地证等外部机构单据保存草稿后归档原件。CI 须绑定一份准确订单。',
       fields: [
         ...(fixed ? [] : [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...shipments.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` }))]), field('type', '单据类型', 'select', true, (['CI', 'PL', 'BL', 'CO', 'OTHER'] as DocType[]).map(value => ({ value, label: TYPE_LABEL[value] })))]),
         ...(fixed ? [] : [{ ...field('orderId', 'CI 对应订单', 'select', false, [{ value: '', label: '整票出运（非 CI）' }, ...(orderOptions.length ? orderOptions : (state?.orders || []).map(o => ({ value: o.id, label: o.code })))]), hint: '仅 CI 需要；须是本票出运包含的订单。' }]),
         field('number', '实际单据编号'), field('title', '标题'),
-        ...(!fixed || src?.type === 'CI' ? [{ ...field('dueDate', 'CI 合同应收日', 'date', false), hint: 'CI 必填，签发后成为财务应收到期日。' }] : []),
-        field('content', '单据正文 / 制单说明', 'textarea'),
+        ...(!fixed || src?.type === 'CI' ? [field('dueDate', '应收到期日', 'date', false)] : []),
+        field('content', '单据正文', 'textarea'),
       ],
       initialValues: { shipmentId: src?.shipmentId || (hasContext ? route.section || '' : ''), type: src?.type || 'PL', orderId: src?.orderId || '', number: d?.number || '', title: src?.title || '', dueDate: src?.dueDate || '', content: src?.content || '' },
       submit: v => run({ type: 'fulfillment.documents.save', payload: { ...(d ? { id: d.id } : {}), shipmentId: src?.shipmentId || text(v, 'shipmentId'), orderId: src ? src.orderId : text(v, 'orderId'), type: (src?.type || text(v, 'type')) as DocType, number: text(v, 'number'), title: text(v, 'title'), dueDate: text(v, 'dueDate'), content: text(v, 'content'), fileIds: d?.fileIds || [] } }) };
@@ -109,7 +109,7 @@ export function DocumentCenterPage() {
   const detail = selected && state
     ? <DocumentDetail doc={selected} state={state} can={can} canInvoices={canInvoices} locked={locked} onPick={pick}
         onEdit={() => setDialog(docSpec(selected))} onVersion={() => setDialog(docSpec(undefined, selected))} onArchive={() => setDialog(archiveSpec(selected))} onVoid={() => setDialog(voidSpec(selected))}
-        onIssue={() => setDialog({ title: `签发 ${selected.number} · V${selected.version}`, submitLabel: '确认签发', description: selected.type === 'CI' ? '签发后生成财务应收（按本票该订单条目数量 × 合同单价），本版本不可再修改。' : '签发后本版本不可再修改；如需更正请作废后建立新版本。', fields: [], initialValues: {}, submit: () => run({ type: 'fulfillment.documents.issue', payload: { id: selected.id } }) })}
+        onIssue={() => setDialog({ title: `签发 ${selected.number} · V${selected.version}`, submitLabel: '确认签发', fields: [], initialValues: {}, submit: () => run({ type: 'fulfillment.documents.issue', payload: { id: selected.id } }) })}
         onAttach={ids => run({ type: 'fulfillment.documents.save', payload: { id: selected.id, shipmentId: selected.shipmentId, orderId: selected.orderId, type: selected.type, number: selected.number, title: selected.title, dueDate: selected.dueDate, content: selected.content, fileIds: ids } })}
         onShipment={() => go('shipments', selected.shipmentId)} onInvoice={id => go('invoices', id)} />
     : <EmptyState icon={FileText} title={uiText("单据详情")} description={uiText(loading ? '正在读取单据' : '从列表选择一份单据，查看版本、正式文件与签发记录')} compact />;
@@ -176,7 +176,7 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{d.number}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill><Pill>{uiText(OWN(d.type) ? '我方出具' : '外部机构')}</Pill>{s && <Pill>{uiText(s.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}</div>
-    <Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>
+    {!order?.replacementSource&&<Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>}
     {can && <ActionBar busy={locked} actions={[
       { label: '签发', icon: Stamp, onClick: onIssue, primary: true, reason: noWrite || blocker || false, hidden: d.status !== 'draft' || !OWN(d.type) },
       { label: '归档外部签发原件', icon: Archive, onClick: onArchive, primary: true, reason: noWrite || blocker || false, hidden: d.status !== 'draft' || OWN(d.type) },
@@ -189,14 +189,15 @@ function DocumentDetail({ doc: d, state, can, canInvoices, locked, onPick, onEdi
       { label: '客户', value: s?.customer || '—' },
       { label: '运输', value: s ? `${MODE_LABEL[s.mode]} · ${s.portOfLoading} → ${s.portOfDischarge}` : '—' },
       { label: '对应订单', value: order?.code || (d.orderId ? '订单不可用' : '整票出运') },
-      ...(d.type === 'CI' ? [{ label: 'CI 合同应收日', value: d.dueDate || '未填写' }] : []),
+      ...(d.type === 'CI'&&!order?.replacementSource ? [{ label: 'CI 合同应收日', value: d.dueDate || '未填写' }] : []),
       { label: '标题', value: d.title },
       { label: '创建', value: `${d.actor} · ${shortWhen(d.createdAt)}` },
       { label: '签发 / 归档', value: d.issuedAt ? shortWhen(d.issuedAt) : '尚未签发' },
     ]} />
     {d.externalIssue && <p className="mist-sub">{uiText("原件来源：")}{d.externalIssue.evidence}</p>}
     <DetailBlock title={uiText("单据正文 / 制单说明")}><p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{d.content}</p></DetailBlock>
-    {d.type === 'CI' && <DetailBlock title={uiText("财务应收")} aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink> : undefined}>
+    {d.type==='CI'&&order?.replacementSource&&<DetailBlock title={uiText('补发CI')}><Facts items={[{label:'客户收款',value:'无需收款'},{label:'申报货值',value:d.replacementDeclaredAmount!==undefined?order.currency+' '+fmt(d.replacementDeclaredAmount,2):'待签发'}]}/></DetailBlock>}
+    {d.type === 'CI'&&!order?.replacementSource && <DetailBlock title={uiText("财务应收")} aside={invoice && canInvoices ? <TextLink icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink> : undefined}>
       {invoice ? <Facts items={[{ label: '应收金额', value: `${invoice.currency} ${fmt(invoice.amount, 2)}` }, { label: '未收', value: invoice.voidedAt ? '已随 CI 作废' : isPendingFinanceMistInvoice(invoice) ? '待财务确认' : `${invoice.currency} ${fmt(invoice.open, 2)}` }, { label: '到期日', value: invoice.due }]} />
         : <span className="mist-note">{uiText(d.status === 'draft' ? '签发后按本票该订单条目数量 × 合同单价生成应收。' : '未找到对应应收。')}</span>}
     </DetailBlock>}

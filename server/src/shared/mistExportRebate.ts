@@ -219,6 +219,7 @@ export function applyExportRebateCommand(root: Root, command: ExportRebateComman
       const customsId = text(p.customsId, '报关单'), customs = (root.fulfillment?.customs || []).find(x => x.id === customsId) || fail('报关单不存在', 'NOT_FOUND');
       if (customs.status !== 'cleared') fail('报关单尚未海关放行，不能申报退税', 'PRECONDITION');
       const shipment = root.fulfillment.shipments.find(x => x.id === customs.shipmentId);
+      if(shipment?.lines.some(line=>root.orders.find(order=>order.id===line.orderId)?.replacementSource))fail('当前不支持补发单独申报退税','PRECONDITION');
       const exportDate = rebateExportDate(root, customs); if (!exportDate) fail('出运尚未登记实际离港，取得出口日期后才能申报退税', 'PRECONDITION');
       const existing = rebateClaimForCustoms(root, customs.id); if (existing) fail(`报关单已在 ${existing.code} 中申报`, 'CONFLICT');
       const byItems = !!customs.items?.length;

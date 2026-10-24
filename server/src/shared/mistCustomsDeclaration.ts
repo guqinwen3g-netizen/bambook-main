@@ -1,8 +1,9 @@
+import {replacementDeclaredUnitPrice} from './mistClaimReplacement';
 /**
  * 报关申报资料（2026-10-18 按《中华人民共和国海关进出口货物报关单填制规范》与《规范申报目录》的通行做法确定首版）。
  * - 商品归类库：单证员按款号建立归类档案——10 位商品编号（HS）、申报品名、申报要素（品牌类型、出口享惠情况及按章节的必报要素）、法定第一 / 第二计量单位。
  * - 申报商品项：按出运明细自动生成——每条出运明细按款号匹配归类档案；同一归类、同一成交单位与币制的明细合并为一个商品项。
- *   成交数量 = 出运数量；总价 = 出运数量 × 订单单价（与 CI 应收同一算法）；法定数量按单位换算或取装箱净重；件数、毛重、净重取装箱合计。
+ *   成交数量 = 出运数量；销售货值取订单单价，批准补发取单证核定申报单价；法定数量按单位换算或取装箱净重；件数、毛重、净重取装箱合计。
  * - 手工微调：生成后可逐项调整申报品名、申报要素与法定数量（报关行审单意见常见于此），须填原因并留痕；商品编号、成交数量与总价不改（改归类或出运后重新生成，总价与 CI 一致）。
  *   重新生成时，某项的某个字段若自动生成值没变，保留手工调整；自动值变了（归类、出运或装箱改了）则以新值为准、需要再调。
  * - 本系统只准备申报资料、交给报关行或在单一窗口录入，不代替海关申报；已放行的报关记录不再改动。
@@ -74,7 +75,9 @@ export function draftCustomsDeclaration(root: MistState, shipment: FulfillmentSh
     const net = packing.filter(r => r.lineId === line.lineId && (r.productionId || '') === (line.productionId || '')).reduce((s, r) => s + r.netWeight, 0);
     const gk = `${cls.id}|${unit}|${order.currency}`;
     const g = groups.get(gk) || { cls, unit, currency: order.currency, lines: [] };
-    g.lines.push({ key, style: ol.style, quantity: line.quantity, amountMinor: mistMoneyMinor(lineAmount(line.quantity, ol.price)), net });
+    let price=ol.price;
+    if(order.replacementSource){try{price=replacementDeclaredUnitPrice(root,shipment.id,order.id,ol.id)!;}catch(error){if(!(error instanceof MistCommandError))throw error;blockers.push(error.message);continue;}}
+    g.lines.push({ key, style: ol.style, quantity: line.quantity, amountMinor: mistMoneyMinor(lineAmount(line.quantity, price)), net });
     groups.set(gk, g);
   }
   const needsWeight = [...groups.values()].some(g => normalizeUnit(g.cls.legalUnit) === '千克' || g.cls.secondUnit);

@@ -1,3 +1,4 @@
+import {assertReplacementOrder} from './mistClaimReplacement';
 import {normalizeGarmentFulfillment,normalizeInternalSupply,assertInternalFabricOrderChange,GARMENT_FULFILLMENT_LABELS,CMT_INCLUDED_ITEM_LABELS,type InternalSupply} from './mistInternalFabric';
 /** Formal order approval and proposed commercial changes, independent of the Mist view layer. */
 import{stableJson}from'./stableJson';
@@ -78,7 +79,7 @@ function assertOrderPurposeChangeAllowed(root:MistState,order:GovernedOrder,cont
 }
 function validateSubmission(root:MistState,s:OrderGovernanceSnapshot,context:MistContext){
  if(s.type==='garment')s.lines.forEach(line=>normalizeGarmentFulfillment(line));
- const order=getOrder(root,s.orderId);assertOrderPurposeChangeAllowed(root,order,s.contract);normalizeInternalSupply(s.contract,order,context,false);assertInternalFabricOrderChange(root,order,s.lines,s.contract);
+ const order=getOrder(root,s.orderId);assertReplacementOrder(root,order,s);assertOrderPurposeChangeAllowed(root,order,s.contract);normalizeInternalSupply(s.contract,order,context,false);assertInternalFabricOrderChange(root,order,s.lines,s.contract);
  idsExist(root,s.contract);if(!s.lines.length)fail('至少需要一个条目');date(s.due);currency(s.currency);
  if(s.contract.kind==='external'){if(!s.customerId||!root.customers.some(c=>c.id===s.customerId))fail('请选择实际客户');if(!s.contract.poNumber)fail('请填写PO或合同号');if(!s.contract.confirmationFileIds.length)fail('外部订单须上传客户书面确认依据');if(!s.contract.incoterm||!s.contract.deliveryPlace)fail('请记录合同贸易术语和指定地点');}
  else if(!s.contract.internalPurpose||!s.contract.receiver)fail('内部订单须记录用途、接收团队和负责人');
@@ -123,6 +124,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
  if(command.type==='order.governance.decide'&&command.payload.id.includes(CLOSE_MARK))return decideClosure(root,command.payload,context);
  if(command.type==='order.governance.closeLine')return closeLine(root,command.payload,context);
  if(command.type==='order.governance.decide'&&command.payload.id.includes(OVER_MARK))return decideOverShip(root,command.payload,context);
+ if(command.type==='order.governance.requestOverShip'&&getOrder(root,command.payload.orderId).replacementSource)fail('补发数量按批准处置执行，不能另增溢装');
  if(command.type==='order.governance.requestOverShip')return requestOverShip(root,command.payload,context);
  if(command.type==='order.governance.decide'&&command.payload.id.includes(CANCEL_MARK))return decideCancel(root,command.payload,context);
  if(command.type==='order.governance.void')return voidOrder(root,command.payload,context);
@@ -132,6 +134,7 @@ export function applyOrderGovernanceCommand(root:MistState,command:OrderGovernan
   if(g.status==='pending'||g.changeDraft?.status==='pending')fail('审批中订单内容已锁定');const p=command.payload,contract=normalizeInternalSupply(normalize(p.input),{type:order.type,ownerId:p.orderPatch?.ownerId??order.ownerId},context);assertOrderPurposeChangeAllowed(root,order,contract);idsExist(root,contract);
   const orderPatch={season:p.orderPatch?.season===undefined?order.season:text(p.orderPatch.season,'季节'),currency:p.orderPatch?.currency===undefined?order.currency:currency(p.orderPatch.currency),due:p.orderPatch?.due===undefined?order.due:date(p.orderPatch.due)};
   const lines=checkLineSources(root,order,validateLines(root,order,p.lines||root.orderLines.filter(l=>l.orderId===id).map(snapshotLine)),contract.kind==='internal');
+  assertReplacementOrder(root,order,{contract,lines,currency:orderPatch.currency});
   assertInternalFabricOrderChange(root,order,lines,contract);
   if(g.status==='approved'){
    const reason=text(p.reason||'','变更原因',true);

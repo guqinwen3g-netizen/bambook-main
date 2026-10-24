@@ -88,7 +88,8 @@ it('registers the declaration and then the release in dialogs, and stops edits o
   const f=store.state!.fulfillment;f.shipments.push(shipment('s'));f.packing.push(pack('s',10));f.customs.push(customs('s','draft'));
   render('cus-s');
   let detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
-  expect(detail.textContent).toContain('资料准备中');
+  expect(detail.textContent).toContain('未申报');
+  expect(detail.textContent).not.toContain('向海关申报后，登记');
   await click(getByRole(detail,'button',{name:'登记已申报'}));
   let dialog=getByRole(document.body,'dialog');
   typeInto(getByRole(dialog,'textbox',{name:'报关单号'}) as HTMLInputElement,'223320260001');

@@ -29,7 +29,7 @@ export type ClaimRecovery = {
   agreed?: number; method?: ClaimRecoveryMethod; agreedNote?: string; settled?: number; settledRef?: string; settledDate?: string; waiveReason?: string; events: ClaimRecoveryEvent[];
 };
 export type ClaimCoordination = { notices: ClaimNotice[]; verifications: ClaimVerification[]; recoveries: ClaimRecovery[] };
-type ClaimLike = { id: string; code: string; orderId: string; invoiceId: string; state: string; coordination?: ClaimCoordination; dispositions: Array<{ kind: string; amount: number; state: string; supersededById?: string }> };
+type ClaimLike = { id: string; code: string; orderId: string; invoiceId: string; state: string; coordination?: ClaimCoordination; dispositions: Array<{ kind: string; amount: number; quantity?:number;replacementShipments?:Array<{quantity:number}>;state: string; supersededById?: string }> };
 
 export type ClaimCoordinationCommand =
   | { type: 'platform.claim.notify'; payload: { id: string; supplierId: string; factoryChannel: string; note: string } }
@@ -100,7 +100,7 @@ export function claimLedger(root: MistState, claim: ClaimLike, opts: { creditsOp
   const settledMinor = recoveries.filter(r => r.state !== 'Withdrawn').reduce((s, r) => s + mistMoneyMinor(r.settled ?? 0), 0);
   const requestedMinor = recoveries.filter(r => r.state !== 'Waived').reduce((s, r) => s + mistMoneyMinor(r.requested), 0);
   const customerOpen = claim.dispositions.some(d => ['Draft', 'pending', 'approved'].includes(d.state) && !d.supersededById);
-  const customerGoodsOpen=(root.platform?.claimGoods??[]).some(goods=>goods.claimId===claim.id&&!['Scrapped','Dispatched','HandedBack'].includes(goods.state));
+  const customerGoodsOpen=(root.platform?.claimGoods??[]).some(goods=>goods.claimId===claim.id&&!['Scrapped','Dispatched','HandedBack'].includes(goods.state))||claim.dispositions.some(d=>d.kind==='Replace'&&d.state==='Executed'&&(d.replacementShipments??[]).reduce((sum,s)=>sum+s.quantity,0)<(d.quantity??Infinity));
   const recoveryOpen = recoveries.some(r => OPEN_RECOVERY.includes(r.state));
   return {
     currency, customer: customerMinor / 100, customerPending: pendingMinor / 100, recoveryRequested: sameCurrency ? requestedMinor / 100 : null,
