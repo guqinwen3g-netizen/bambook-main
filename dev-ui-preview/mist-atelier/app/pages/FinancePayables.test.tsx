@@ -77,8 +77,8 @@ it('票据付款：先申请并经主管批准，再按批准登记实付；分�
   expect(store.value.run).not.toHaveBeenCalled(); expect(document.body.textContent).toContain('不能超过可申请金额');
   input(b.code + ' 申请金额', '100');
   await click('提交审批', dialog('申请票据付款'));
-  expect(document.body.textContent).toContain('请填写申请说明'); expect(store.value.run).not.toHaveBeenCalled();
-  text('申请说明', '两张票均已到期，按合同 30 天付款');
+  expect(document.body.textContent).toContain('请填写付款依据'); expect(store.value.run).not.toHaveBeenCalled();
+  text('付款依据', '两张票均已到期，按合同 30 天付款');
   await click('提交审批', dialog('申请票据付款'));
   const req = store.value.state.payables.requests[0];
   expect(req).toMatchObject({ state: 'pending', amount: 400, reviewerIds: ['manager'] });
@@ -114,7 +114,7 @@ it('预付款：财务按合同登记计划，申请经主管批准后实付，�
   expect(plan).toMatchObject({ purchaseId: po.id, amount: 33480, trigger: '合同回签后 7 天内' });
   expect(host.textContent).toContain('计划不是应付');
   await click('申请预付款');
-  input('申请金额', '33480.01'); text('申请说明', '合同已于本周回签');
+  input('申请金额', '33480.01'); text('付款依据', '合同已于本周回签');
   await click('提交审批', dialog('申请预付款'));
   expect(document.body.textContent).toContain('超过该计划剩余可申请金额');
   input('申请金额', '33480'); await click('提交审批', dialog('申请预付款'));
