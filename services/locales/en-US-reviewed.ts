@@ -605,4 +605,6 @@ export const reviewedEnglish: Record<string, string> = {
   '结算净额': 'Net settlement amount',
   '已结清 / 未付': 'Cleared / outstanding',
   '直接付款分配': 'Direct payment allocations',
+  '付款依据': 'Payment basis',
+  '请填写付款依据': 'Enter the payment basis',
 };

@@ -152,7 +152,7 @@ export function FinancePayables() {
     if (payDraft.mode === 'allocate') { if (!existing) return; if (allocTotal > payable) return setFailure('分配合计超过付款金额。'); if (!allocations.length) return setFailure('请至少给一张票据填写分配金额。'); void execute({ type: 'payable.payment.allocate', payload: { supplierPaymentId: existing.id, allocations } }, () => { setPayDraft(null); toast('付款已分配到应付'); }); return; }
     if (payDraft.mode === 'request') {
       if (!payDraft.supplierId || !allocations.length) return setFailure('请选择供应商，并至少给一张票据填写申请金额。');
-      if (!payDraft.note.trim()) return setFailure('请填写申请说明，供主管审批核对。');
+      if (!payDraft.note.trim()) return setFailure('请填写付款依据');
       void execute({ type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: payDraft.supplierId, currency: payDraft.currency, lines: allocations, ...(payDraft.planId ? { planId: payDraft.planId } : {}), reason: payDraft.note, fileIds: payDraft.fileIds || [] } }, r => { setPayDraft(null); setView('requests'); open(String(r.id)); toast('付款申请已提交，等待主管审批'); }); return;
     }
     if (!payRequest) return;
@@ -171,7 +171,7 @@ export function FinancePayables() {
     const amount = cents(preDraft.amount);
     if (!(amount > 0)) return setFailure('申请金额必须大于零。');
     if (amount > Math.round(prePlan.available * 100)) return setFailure('申请金额超过该计划剩余可申请金额。');
-    if (!preDraft.reason.trim()) return setFailure('请填写申请说明，供主管审批核对。');
+    if (!preDraft.reason.trim()) return setFailure('请填写付款依据');
     void execute({ type: 'payable.request.submit', payload: { purpose: 'prepayment', planId: prePlan.id, amount: amount / 100, reason: preDraft.reason, fileIds: preDraft.fileIds || [] } }, r => { setPreDraft(null); setView('requests'); open(String(r.id)); toast('预付款申请已提交，等待主管审批'); });
   };
   const submitReason = () => {
@@ -356,7 +356,7 @@ export function FinancePayables() {
           <Field label={uiText("发票日期")} required><TextInput aria-label={uiText("发票日期")} type="date" max={day} value={billDraft.invoiceDate} onChange={e => setBillDraft({ ...billDraft, invoiceDate: e.target.value })} /></Field>
           <Field label={uiText("到期日")} required><TextInput aria-label={uiText("到期日")} type="date" value={billDraft.due} onChange={e => setBillDraft({ ...billDraft, due: e.target.value })} /></Field>
         </FormGrid>
-        <Field label={uiText("到期日依据")} required hint={uiText("按合同付款条件推算，写清楚怎么算的")}><TextInput aria-label={uiText("到期日依据")} value={billDraft.dueBasis} onChange={e => setBillDraft({ ...billDraft, dueBasis: e.target.value })} /></Field>
+        <Field label={uiText("到期日依据")} required><TextInput aria-label={uiText("到期日依据")} value={billDraft.dueBasis} onChange={e => setBillDraft({ ...billDraft, dueBasis: e.target.value })} /></Field>
         <Field label={uiText("备注")}><TextArea aria-label={uiText("备注")} rows={2} value={billDraft.note} onChange={e => setBillDraft({ ...billDraft, note: e.target.value })} /></Field>
         <Field label={uiText("发票附件")}><DraftFiles ids={billDraft.fileIds || []} onChange={fileIds => setBillDraft({ ...billDraft, fileIds })} hint={uiText("上传供应商发票扫描件或电子发票")} /></Field>
       </div>}
@@ -364,7 +364,7 @@ export function FinancePayables() {
 
     <Dialog open={!!payDraft} onClose={() => { if (!busy) setPayDraft(null); }} width={760}
       title={uiText(payDraft?.mode === 'allocate' ? '分配付款到应付' : payDraft?.mode === 'pay' ? '按已批准申请登记实付' : '申请票据付款')}
-      description={uiText(existing ? `${existing.code} · 还有 ${apMoney(existing.unallocated, existing.currency)} 未分配` : payRequest ? `${payRequest.code} · ${payRequest.supplier} · 已批准 ${apMoney(payRequest.amount, payRequest.currency)}。实付金额与分配须与批准一致；金额不同请撤回后重新申请。` : '选择要付款的票据和金额，提交后由主管审批；批准后财务登记实付。')}
+      description={uiText(existing ? `${existing.code} · 还有 ${apMoney(existing.unallocated, existing.currency)} 未分配` : payRequest ? `${payRequest.code} · ${payRequest.supplier}` : undefined)}
       footer={<><Button disabled={busy} onClick={() => setPayDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !(existing ? canAllocate : payRequest ? canPay : canRequest)} onClick={submitPay}>{uiText(existing ? '确认分配' : payRequest ? '登记实付' : '提交审批')}</Button></>}>
       {payDraft && <div className="mist-col">
         {failure && <Banner tone="bad" title={uiText("还不能保存")}>{failure}</Banner>}
@@ -386,7 +386,7 @@ export function FinancePayables() {
         </Field>}
         {payRequest?.purpose === 'settlement' && <Banner title={uiText("按结算先付（发票未到）")}>{payRequest.settlementCode} · {payRequest.purchaseCode}{uiText(" · 登记后记为已付未收票，不分配到票据；票到后按结算登记，自动抵到票据。")}</Banner>}
         {payRequest?.purpose === 'prepayment' && <Banner title={uiText("合同预付款")}>{payRequest.purchaseCode}{uiText(" · 登记后挂在合同上，等结算确认后抵扣，不分配到票据。")}</Banner>}
-        <Field label={uiText(payDraft.mode === 'request' ? '申请说明' : '备注')} required={payDraft.mode === 'request'} hint={uiText(payDraft.mode === 'request' ? '写明付款依据（到期、合同条款、供应商催款等），主管据此审批' : undefined)}><TextArea aria-label={uiText(payDraft.mode === 'request' ? '申请说明' : '付款备注')} rows={2} value={payDraft.note} onChange={e => setPayDraft({ ...payDraft, note: e.target.value })} /></Field>
+        <Field label={uiText(payDraft.mode === 'request' ? '付款依据' : '备注')} required={payDraft.mode === 'request'}><TextArea aria-label={uiText(payDraft.mode === 'request' ? '付款依据' : '付款备注')} rows={2} value={payDraft.note} onChange={e => setPayDraft({ ...payDraft, note: e.target.value })} /></Field>
         {payDraft.mode !== 'allocate' && <Field label={uiText(payDraft.mode === 'request' ? '申请附件' : '付款凭证')}><DraftFiles ids={payDraft.fileIds || []} onChange={fileIds => setPayDraft({ ...payDraft, fileIds })} hint={uiText(payDraft.mode === 'request' ? '上传对账单、催款函等付款依据' : '上传银行回单')} /></Field>}
       </div>}
     </Dialog>
@@ -413,7 +413,7 @@ export function FinancePayables() {
         {failure && <Banner tone="bad" title={uiText("还不能提交")}>{failure}</Banner>}
         <Facts items={[{ label: '付款触发条件', value: prePlan.trigger }, { label: '合同条款依据', value: prePlan.basis }]} />
         <Field label={uiText("申请金额")} required><TextInput aria-label={uiText("申请金额")} type="number" min="0.01" step="0.01" value={preDraft.amount} onChange={e => setPreDraft({ ...preDraft, amount: e.target.value })} /></Field>
-        <Field label={uiText("申请说明")} required hint={uiText("写明触发条件已满足的依据，例如合同已回签日期")}><TextArea aria-label={uiText("申请说明")} rows={3} value={preDraft.reason} onChange={e => setPreDraft({ ...preDraft, reason: e.target.value })} /></Field>
+        <Field label={uiText("付款依据")} required><TextArea aria-label={uiText("付款依据")} rows={3} value={preDraft.reason} onChange={e => setPreDraft({ ...preDraft, reason: e.target.value })} /></Field>
         <Field label={uiText("申请附件")}><DraftFiles ids={preDraft.fileIds || []} onChange={fileIds => setPreDraft({ ...preDraft, fileIds })} hint={uiText("上传回签合同等付款依据")} /></Field>
       </div>}
     </Dialog>
