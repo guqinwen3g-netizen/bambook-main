@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from 'react';
 import { ArrowLeft, ArrowRight, Download, Edit3, Plus } from 'lucide-react';
 import { BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
-import { useMistWorkspace } from '../../runtime/workspace';
+import { useMistWorkspace,type MistWorkspaceContext,type MistCommandRecovery } from '../../runtime/workspace';
 import { useNav } from '../../nav';
 import { PreviewSummary, useCompactLayout, type PreviewSummaryData } from './pageKit';
 export type ModuleValue = string | number | boolean;
@@ -35,14 +35,28 @@ export function moduleEditorSections(spec:ModuleEditorSpec,values:ModuleValues=s
 }
 function selectValue(field:ModuleField,value:ModuleValue|undefined){const current=String(value??'');return field.options?.some(option=>option.value===current)?current:'';}
 function selectError(field:ModuleField,value:ModuleValue|undefined){const current=String(value??'');return field.type==='select'&&current!==''&&!field.options?.some(option=>option.value===current)?'请重新选择'+field.label:'';}
+/** A recovered acknowledgement belongs to one failed form submission, never to another open form. */
+function useRecoveredModuleCommand(spec:ModuleEditorSpec|null,workspace:MistWorkspaceContext){
+  const [attempt,setAttempt]=React.useState<{form:ModuleEditorSpec;key:Omit<MistCommandRecovery,'revision'>}|null>(null),[completedForm,setCompletedForm]=React.useState<ModuleEditorSpec|null>(null);
+  React.useEffect(()=>{setAttempt(null);setCompletedForm(null);},[spec,workspace.workspace?.id]);
+  const acknowledgement=workspace.commandRecovery;
+  const matched=!!spec&&attempt?.form===spec&&!!acknowledgement&&attempt.key.requestId===acknowledgement.requestId&&attempt.key.workspaceId===acknowledgement.workspaceId&&attempt.key.actorId===acknowledgement.actorId&&workspace.workspace?.id===acknowledgement.workspaceId;
+  React.useEffect(()=>{if(matched&&spec)setCompletedForm(spec);},[matched,spec]);
+  const failed=(problem:unknown)=>{
+    const key=problem&&typeof problem==='object'?(problem as {mistPendingCommand?:Partial<MistCommandRecovery>}).mistPendingCommand:undefined;
+    if(spec&&key&&typeof key.requestId==='string'&&typeof key.workspaceId==='string'&&typeof key.actorId==='string')setAttempt({form:spec,key:{requestId:key.requestId,workspaceId:key.workspaceId,actorId:key.actorId}});
+  };
+  // Derive immediately as well as latch, so clearing pending cannot briefly re-enable Save.
+  return {completed:!!spec&&(matched||completedForm===spec&&attempt?.key.workspaceId===workspace.workspace?.id&&attempt?.key.actorId===acknowledgement?.actorId),failed};
+}
 export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec|null;onClose:()=>void;onSaved?:()=>void}){
-  const {saving,pending,pendingCreate}=useMistWorkspace(),toast=useToast();
+  const workspace=useMistWorkspace(),{saving,pending,pendingCreate}=workspace,toast=useToast(),recovery=useRecoveredModuleCommand(spec,workspace);
   const [values,setValues]=React.useState<ModuleValues>({}),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false);
   const mounted=React.useRef(true),lock=React.useRef(false),generation=React.useRef(0);
   React.useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;generation.current++;};},[]);
   React.useEffect(()=>{generation.current++;setValues(spec?{...spec.initialValues}:{});setError('');setBusy(false);lock.current=false;},[spec]);
   const visible=spec?moduleVisibleFields(spec,values):[];
-  const disabled=busy||saving||!!pending||!!pendingCreate;
+  const disabled=busy||saving||!!pending||!!pendingCreate||recovery.completed;
   const submit=async()=>{
     if(!spec||disabled||lock.current)return;
     for(const f of visible){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()==='')){setError('请填写'+f.label);return;}const invalid=selectError(f,values[f.key]);if(invalid){setError(invalid);return;}}
@@ -52,14 +66,14 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
     }
     const run=++generation.current;lock.current=true;setBusy(true);setError('');
     try{await spec.submit(converted);if(mounted.current&&run===generation.current){onSaved?.();onClose();toast('已保存');}}
-    catch(problem){if(mounted.current&&run===generation.current)setError(problem instanceof Error?problem.message:'保存未完成，请重试');}
+    catch(problem){if(mounted.current&&run===generation.current){recovery.failed(problem);setError(problem instanceof Error?problem.message:'保存未完成，请重试');}}
     finally{if(mounted.current&&run===generation.current){lock.current=false;setBusy(false);}}
   };
   const change=(key:string,value:ModuleValue)=>setValues(v=>({...v,[key]:value}));
   return <Dialog open={!!spec} title={uiText(spec?.title||'编辑')} onClose={()=>{if(!busy)onClose();}} width={760}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={disabled} onClick={()=>void submit()}>{spec?.submitLabel||'保存'}</Button></>}>
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText(recovery.completed?"关闭":"取消")}</Button>{recovery.completed?<Button variant="primary" onClick={onClose}>{uiText("查看记录")}</Button>:<Button variant="primary" loading={busy} disabled={disabled} onClick={()=>void submit()}>{spec?.submitLabel||'保存'}</Button>}</>}>
     {spec?.description&&<p className="mist-sub" style={{margin:'0 0 12px'}}>{spec.description}</p>}
-    {error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
+    {recovery.completed?<Banner tone="ok" title={uiText("原操作已保存")}/>:error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
     {(pending||pendingCreate)&&!saving&&<Banner tone="warn" title={uiText("请先核对上次操作的结果")}>{uiText("输入会保留；使用页面上的原请求核对入口后继续。")}</Banner>}
     <FormGrid>{visible.map(f=><Field key={f.key} label={uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>
       {f.type==='select'?<Select aria-label={uiText(f.label)} placeholder={uiText(f.options?.some(option=>option.value==='')?undefined:'请选择')} value={selectValue(f,values[f.key])} options={f.options||[]} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />
@@ -128,17 +142,17 @@ export function downloadModuleCsv(filename:string,headers:string[],rows:Array<Ar
 }
 
 export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:()=>void}){
-  const workspace=useMistWorkspace(),toast=useToast();
+  const workspace=useMistWorkspace(),toast=useToast(),recovery=useRecoveredModuleCommand(spec,workspace);
   const [values,setValues]=React.useState<ModuleValues>({...spec.initialValues}),[step,setStep]=React.useState(0),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false);
   const live=React.useRef(true),lock=React.useRef(false);React.useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
   const visible=moduleVisibleFields(spec,values),groups=moduleEditorSections(spec,values),shownStep=Math.min(step,groups.length-1);
   React.useEffect(()=>{setStep(previous=>Math.min(previous,groups.length-1));},[groups.length]);
-  const current=groups[shownStep],last=shownStep===groups.length-1,blocked=busy||workspace.saving||!!workspace.pending||!!workspace.pendingCreate;
+  const current=groups[shownStep],last=shownStep===groups.length-1,blocked=busy||workspace.saving||!!workspace.pending||!!workspace.pendingCreate||recovery.completed;
   const validate=(fields:ModuleField[])=>{for(const f of fields){if(f.required&&(values[f.key]===undefined||String(values[f.key]).trim()===''))return '请填写'+f.label;const invalid=selectError(f,values[f.key]);if(invalid)return invalid;if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined&&(!Number.isFinite(Number(values[f.key]))||(f.min!==undefined&&Number(values[f.key])<f.min)))return f.label+'无效';}return '';};
-  const save=async()=>{if(blocked||lock.current)return;const problem=validate(visible);if(problem){setError(problem);return;}lock.current=true;setBusy(true);const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined)converted[f.key]=Number(values[f.key]);try{await spec.submit(converted);if(live.current){onClose();toast('已保存');}}catch(e){if(live.current)setError(e instanceof Error?e.message:'保存未完成');}finally{if(live.current){lock.current=false;setBusy(false);}}};
+  const save=async()=>{if(blocked||lock.current)return;const problem=validate(visible);if(problem){setError(problem);return;}lock.current=true;setBusy(true);const converted=applicableValues(spec,values);for(const f of visible)if(f.type==='number'&&values[f.key]!==''&&values[f.key]!==undefined)converted[f.key]=Number(values[f.key]);try{await spec.submit(converted);if(live.current){onClose();toast('已保存');}}catch(e){if(live.current){recovery.failed(e);setError(e instanceof Error?e.message:'保存未完成');}}finally{if(live.current){lock.current=false;setBusy(false);}}};
   const set=(key:string,v:ModuleValue)=>{setValues(old=>({...old,[key]:v}));setError('');};
-  return <MistPage><BackLink onClick={onClose}>{uiText("返回列表")}</BackLink><PageHeader  title={uiText(spec.title)}/>{error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}<div className="mist-wizard"><VerticalSteps current={String(shownStep)} onSelect={id=>{const target=Number(id);if(target<=step){setStep(target);setError('');}}} steps={groups.map((g,i)=>({id:String(i),label:g.label,done:i<step}))}/><Card>
+  return <MistPage><BackLink onClick={onClose}>{uiText("返回列表")}</BackLink><PageHeader  title={uiText(spec.title)}/>{recovery.completed?<Banner tone="ok" title={uiText("原操作已保存")}/>:error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}<div className="mist-wizard"><VerticalSteps current={String(shownStep)} onSelect={id=>{const target=Number(id);if(target<=step){setStep(target);setError('');}}} steps={groups.map((g,i)=>({id:String(i),label:g.label,done:i<step}))}/><Card>
     <FormSection title={uiText(current.label)}>{last?<KeyValue items={visible.map(f=>({label:f.label,value:f.type==='checkbox'?(values[f.key]?'是':'否'):f.type==='select'?(f.options?.find(o=>o.value===values[f.key])?.label||String(values[f.key]??'—')):String(values[f.key]??'—')}))}/>:<FormGrid>{current.fields.map(f=><Field key={f.key} label={uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>{f.type==='select'?<Select aria-label={uiText(f.label)} placeholder={uiText(f.options?.some(option=>option.value==='')?undefined:'请选择')} value={selectValue(f,values[f.key])} options={f.options||[]} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>:f.type==='textarea'?<TextArea aria-label={uiText(f.label)} value={String(values[f.key]??'')} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>:f.type==='checkbox'?<Checkbox label={uiText(f.label)} checked={!!values[f.key]} disabled={blocked||f.readonly} onChange={v=>set(f.key,v)}/>:<TextInput aria-label={uiText(f.label)} type={f.type||'text'} min={f.min} step={f.step} value={String(values[f.key]??'')} disabled={blocked||f.readonly} onChange={e=>set(f.key,e.target.value)}/>}</Field>)}</FormGrid>}</FormSection>
-    <div className="mist-sticky-foot"><span className="mist-note">{uiText("第 ")}{uiText(shownStep+1)} / {groups.length}{uiText(" 步")}</span><span className="mist-spacer"/>{step>0&&<Button icon={ArrowLeft} disabled={blocked} onClick={()=>{setStep(i=>i-1);setError('');}}>{uiText("上一步")}</Button>}{last?<Button variant="primary" loading={busy} disabled={blocked} onClick={()=>void save()}>{spec.submitLabel||'确认保存'}</Button>:<Button variant="primary" iconRight={ArrowRight} disabled={blocked} onClick={()=>{const problem=validate(current.fields);if(problem)setError(problem);else setStep(i=>i+1);}}>{uiText("下一步")}</Button>}</div>
+    <div className="mist-sticky-foot"><span className="mist-note">{uiText("第 ")}{uiText(shownStep+1)} / {groups.length}{uiText(" 步")}</span><span className="mist-spacer"/>{step>0&&<Button icon={ArrowLeft} disabled={blocked} onClick={()=>{setStep(i=>i-1);setError('');}}>{uiText("上一步")}</Button>}{recovery.completed?<Button variant="primary" onClick={onClose}>{uiText("查看记录")}</Button>:last?<Button variant="primary" loading={busy} disabled={blocked} onClick={()=>void save()}>{spec.submitLabel||'确认保存'}</Button>:<Button variant="primary" iconRight={ArrowRight} disabled={blocked} onClick={()=>{const problem=validate(current.fields);if(problem)setError(problem);else setStep(i=>i+1);}}>{uiText("下一步")}</Button>}</div>
   </Card></div></MistPage>;
 }

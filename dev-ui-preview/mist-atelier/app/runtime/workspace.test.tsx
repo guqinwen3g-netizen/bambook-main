@@ -894,3 +894,9 @@ it('stops at manual review when the receipt was created by another person: kept,
   await act(async () => { expect(String(await capture(api.recover()))).toContain('待人工核对'); });
   expect(server.posts()).toBe(posts); expect(server.deliveries).toHaveLength(1); expect(stored()).not.toBeNull();
 });
+
+it.each(['committed','not-committed'] as const)('publishes the exact successful command recovery for a %s original request',async mode=>{
+ await mount();intercept=request=>{if(request.url.endsWith('/commands')){if(mode==='committed')commit(request);return Promise.reject(new TypeError('lost acknowledgement'));}};
+ let problem:unknown;await act(async()=>{problem=await capture(api.run(command('recovered form')));});const pending=clone(api.pending!);expect(problem).toMatchObject({mistPendingCommand:{workspaceId:A,requestId:pending.requestId,actorId:auth.session.user.id}});expect(api.commandRecovery).toBeNull();
+ if(mode==='not-committed')intercept=undefined;await act(async()=>{await api.recover();});expect(api.commandRecovery).toEqual({workspaceId:A,requestId:pending.requestId,actorId:auth.session.user.id,revision:1});expect(stores.get(A)!.revision).toBe(1);expect(receipts.size).toBe(1);expect(api.state!.settings.profileName).toBe('recovered form');expect(posts()).toHaveLength(mode==='committed'?1:2);
+});

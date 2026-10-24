@@ -15,10 +15,12 @@ export type MistUploadOptions={claimId:string};
 export type ArchivedMistWorkspace={id:string;name:string;revision:number;archivedAt:string};
 export type MistPendingCreate = { actorId: string; slug: string; name: string; seed: 'demo' | 'empty' };
 type Authority = { key: string; userId?: string; status: string };
+export type MistCommandRecovery={workspaceId:string;requestId:string;actorId:string;revision:number};
 export interface MistWorkspaceContext {
   state: MistState | null; workspace: MistWorkspaceEnvelope | null; workspaces: Array<{ id: string; name: string; shared?: boolean }>;
   loading: boolean; saving: boolean; error: string; pending: Pending | null;
   pendingCreate?: MistPendingCreate | null;
+  commandRecovery?:MistCommandRecovery|null;
   run: (command: MistCommand) => Promise<MistRunReceipt>;
   uploadFile: (file: File, options?:MistUploadOptions) => Promise<MistFile>;
   downloadFile: (file: MistFile) => Promise<void>;
@@ -218,6 +220,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   const [loading, setLoading] = React.useState(true), [saving, setSaving] = React.useState(false), [error, setError] = React.useState('');
   const [pending, setPending] = React.useState<Pending | null>(null);
   const [pendingCreate, setPendingCreate] = React.useState<MistPendingCreate | null>(null);
+  const [commandRecovery,setCommandRecovery]=React.useState<MistCommandRecovery|null>(null);
   const live = React.useRef<Authority>({ key: session.sessionKey, userId: session.user?.id, status: session.status });
   live.current = { key: session.sessionKey, userId: session.user?.id, status: session.status };
   const activeScope = React.useRef<Authority>(live.current);
@@ -477,7 +480,12 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     const token = lock();
     try {
       const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)) };
-      return await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority);
+      try{return await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority);}
+      catch(failure){
+        // Forms retain the exact unresolved command identity, even if React batches away the saving frame.
+        if(failure instanceof Error&&(pendingRef.current as Pending|null)?.requestId===intent.requestId)Object.assign(failure,{mistPendingCommand:{workspaceId:intent.workspaceId,requestId:intent.requestId,actorId:authority.userId!}});
+        throw failure;
+      }
     } finally { unlock(token, authority); }
   }, [authority.key, authority.userId, authority.status, boundEpoch, boundWorkspaceId, assertSource, lock, perform, unlock]);
   const uploadFile = React.useCallback(async (file: File,options?:MistUploadOptions) => {
@@ -586,12 +594,17 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       } finally { unlock(token, authority); }
     }
     const token = lock(); setError('');
+    const recovered=(acknowledged:MistRunReceipt)=>{
+      assertSource(authority,boundEpoch,boundWorkspaceId);
+      if(intent.kind==='command')setCommandRecovery({workspaceId:intent.workspaceId,requestId:intent.requestId,actorId:authority.userId!,revision:acknowledged.revision});
+      return acknowledged;
+    };
     try {
       let data: any;
       try { data = await request(BASE + '/' + encodeURIComponent(intent.workspaceId) + '/receipts/' + encodeURIComponent(intent.requestId)); }
       catch (failure) {
         assertSource(authority, boundEpoch, boundWorkspaceId);
-        if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'command') return await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority);
+        if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'command') return recovered(await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority));
         if (failure instanceof RequestError && failure.status === 404 && intent.kind === 'member') return await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, action: intent.action, account: intent.account }), authority);
         throw failure;
       }
@@ -599,7 +612,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       const next = await request(BASE + '/' + encodeURIComponent(intent.workspaceId)); assertSource(authority, boundEpoch, boundWorkspaceId);
       const value = envelope(next.workspace, authority.userId!, intent.workspaceId);
       validateReceiptState(value, acknowledged, intent);
-      put(value, authority); clearPending(authority); return acknowledged;
+      put(value, authority); clearPending(authority); return recovered(acknowledged);
     } catch (failure) {
       if (mounted.current && live.current.key === authority.key && live.current.userId === authority.userId && live.current.status === 'authenticated') setError(failure instanceof Error ? failure.message : '原请求仍待核对');
       throw failure;
@@ -653,7 +666,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     if(kind==='archive')assertSource(authority,boundEpoch,boundWorkspaceId);const row=kind==='archive'?snapshot.current:archivedWorkspaces.find(row=>row.id===id);if(!row)throw new RequestError('公司不存在，请刷新回收站');
     const token=lock();try{await performLifecycle({workspaceId:row.id,expectedRevision:row.revision,requestId:crypto.randomUUID(),actorId:authority.userId,kind},authority);}finally{unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,archivedWorkspaces,assertIdentity,assertSource,lock,performLifecycle,unlock]);
-  return <Context.Provider value={{ state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, run, uploadFile, downloadFile, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}>{uiText(children)}</Context.Provider>;
+  return <Context.Provider value={{ state: visible?.state ?? null, workspace: visible, workspaces: scopeIsCurrent ? workspaces : [], archivedWorkspaces:scopeIsCurrent?archivedWorkspaces:[],refreshArchived,archiveWorkspace:()=>changeArchive('archive'),restoreWorkspace:id=>changeArchive('restore',id),changeMember,mail,closeMailReview,loading: scopeIsCurrent ? loading : session.status !== 'anonymous', error: scopeIsCurrent ? error : '', saving: scopeIsCurrent ? saving : false, pending: scopeIsCurrent ? pending : null, pendingCreate: scopeIsCurrent ? pendingCreate : null, commandRecovery:scopeIsCurrent&&commandRecovery?.workspaceId===visible?.id&&commandRecovery?.actorId===session.user?.id?commandRecovery:null, run, uploadFile, downloadFile, readFile, prepareCreditDocument, issueCreditDocument, downloadCreditDocument, fileUrl, refresh, recover, switchWorkspace, createWorkspace }}>{uiText(children)}</Context.Provider>;
 }
 export function useMistWorkspace(): MistWorkspaceContext {
   const context = React.useContext(Context); if (!context) throw new Error('useMistWorkspace must be used inside MistWorkspaceProvider'); return context;
