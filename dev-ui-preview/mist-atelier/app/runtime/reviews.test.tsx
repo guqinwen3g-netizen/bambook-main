@@ -103,6 +103,11 @@ it('shows the submitted snapshot and blocks opening another workspace business r
  expect((getByRole(document.body,'button',{name:'打开原业务'}) as HTMLButtonElement).disabled).toBe(true);
  expect(document.body.textContent).toContain('请先切换到该公司');
 });
+it('opens a payment approval in the payable section at its exact original request',async()=>{
+ rows=[row({kind:'payment',entityId:'payment-one',title:'PR-ONE 付款申请',target:{view:'payment-vouchers',id:'payment-one'}})];
+ await render();await openRow('PR-ONE');await click('打开原业务');
+ expect(go).toHaveBeenLastCalledWith('payment-vouchers','payment-one',{section:'payables'});
+});
 it('opens the exact business record when the review belongs to the current workspace',async()=>{
  await render();await openRow();await click('打开原业务');
  expect(go).toHaveBeenLastCalledWith('orders/detail','order-one');
