@@ -31,7 +31,7 @@ describe('售后索赔协同面板', () => {
     expect(button('记录质检核实')).toBeUndefined();
     await act(async () => button('通知相关人员')!.click());
     const spec = openEditor.mock.calls[0][0];
-    expect(spec.description).toContain('不等于认定工厂责任');
+    expect(spec.description).toBeUndefined();
     await spec.submit({ supplierId: supplier().id, factoryChannel: '微信群', note: '底线 3000' });
     expect(command).toHaveBeenCalledWith({ type: 'platform.claim.notify', payload: { id: 'c1', supplierId: supplier().id, factoryChannel: '微信群', note: '底线 3000' } });
   });
@@ -62,7 +62,7 @@ describe('售后索赔协同面板', () => {
     expect(host.textContent).toContain('暂无可扣的未付票据');
     await act(async () => button('改为工厂付款')!.click());
     const spec = (openEditor.mock.calls as any[])[0][0];
-    expect(spec.title).toBe('改为工厂付款'); expect(spec.description).toContain('保留不动');
+    expect(spec.title).toBe('改为工厂付款'); expect(spec.description).toContain('已扣 0.00 USD'); expect(spec.description).toContain('待收 60.00 USD');
     await spec.submit({ reason: '工厂邮件同意直接付款' });
     expect(command).toHaveBeenCalledWith({ type: 'platform.claim.recovery.method', payload: { id: 'r1', method: 'payment', reason: '工厂邮件同意直接付款' } });
   });

@@ -50,18 +50,18 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   ];
 
   const notify = () => openEditor({
-    title: '通知相关人员', description: '系统会给质检、负责人和跟单生成待办 / 通知；工厂由你通过实际方式联系，这里只记录。通知工厂只是请其配合核实，不等于认定工厂责任，也不等于答应客户金额。',
-    fields: [f('supplierId', '相关工厂', 'select', { options: suppliers }), f('factoryChannel', '你实际通知工厂的方式', 'text', { hint: '例如：微信群、电话、邮件' }), f('note', '备注', 'textarea', { required: false, hint: '例如：客户要求、需要工厂配合的事项' })],
+    title: '通知相关人员',
+    fields: [f('supplierId', '相关工厂', 'select', { options: suppliers }), f('factoryChannel', '联系渠道', 'text', {}), f('note', '备注', 'textarea', { required: false })],
     initialValues: { supplierId: notice?.supplierId ?? defaultSupplier, factoryChannel: '', note: '' }, submitLabel: '记录并通知',
     submit: v => command({ type: 'platform.claim.notify', payload: { id: claim.id, supplierId: s(v, 'supplierId'), factoryChannel: s(v, 'factoryChannel'), note: s(v, 'note') } }),
   });
   const verify = () => openEditor({
-    title: '记录质检核实', description: '先把事实弄清楚，再谈责任和金额。',
+    title: '记录质检核实',
     fields: [
-      f('result', '问题是否属实', 'select', { options: (Object.keys(CLAIM_RESULT_LABEL) as ClaimVerifyResult[]).map(k => ({ value: k, label: CLAIM_RESULT_LABEL[k] })) }),
-      f('scope', '影响哪些款式 / 批次', 'textarea'), f('affectedQuantity', '影响数量', 'number', { min: 0, step: '1' }), f('unit', '单位', 'text', { required: false }),
-      f('goodsLocation', '货物现在在哪里', 'select', { options: (Object.keys(CLAIM_LOCATION_LABEL) as ClaimGoodsLocation[]).map(k => ({ value: k, label: CLAIM_LOCATION_LABEL[k] })) }),
-      f('mitigation', '有没有办法减少损失', 'textarea', { required: false }), f('factoryResponse', '工厂的回复', 'textarea', { required: false }),
+      f('result', '核实结论', 'select', { options: (Object.keys(CLAIM_RESULT_LABEL) as ClaimVerifyResult[]).map(k => ({ value: k, label: CLAIM_RESULT_LABEL[k] })) }),
+      f('scope', '影响范围', 'textarea'), f('affectedQuantity', '影响数量', 'number', { min: 0, step: '1' }), f('unit', '单位', 'text', { required: false }),
+      f('goodsLocation', '货物位置', 'select', { options: (Object.keys(CLAIM_LOCATION_LABEL) as ClaimGoodsLocation[]).map(k => ({ value: k, label: CLAIM_LOCATION_LABEL[k] })) }),
+      f('mitigation', '减损措施', 'textarea', { required: false }), f('factoryResponse', '工厂回复', 'textarea', { required: false }),
       f('safety', '涉及安全隐患（需评估停售或召回）', 'checkbox', { required: false }),
     ],
     initialValues: { result: check?.result ?? '', scope: check?.scope ?? '', affectedQuantity: check?.affectedQuantity ?? '', unit: check?.unit ?? '件', goodsLocation: check?.goodsLocation ?? '', mitigation: check?.mitigation ?? '', factoryResponse: check?.factoryResponse ?? '', safety: check?.safety ?? false },
@@ -69,13 +69,13 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
     submit: v => command({ type: 'platform.claim.verify', payload: { id: claim.id, result: s(v, 'result') as ClaimVerifyResult, scope: s(v, 'scope'), affectedQuantity: n(v, 'affectedQuantity'), unit: s(v, 'unit'), goodsLocation: s(v, 'goodsLocation') as ClaimGoodsLocation, mitigation: s(v, 'mitigation'), factoryResponse: s(v, 'factoryResponse'), safety: v.safety === true || v.safety === 'true', fileIds: [] } }),
   });
   const openRecovery = () => openEditor({
-    title: '向工厂追偿', description: '和对客户的赔偿分开记录。可以和客户同时谈，但进度分开跟。',
-    fields: [f('supplierId', '追偿工厂', 'select', { options: suppliers }), f('currency', '币种', 'text'), f('requested', '要求工厂承担的金额', 'number', { min: 0.01, step: '0.01' }), f('basis', '依据（质检结论、合同条款）', 'textarea')],
+    title: '向工厂追偿',
+    fields: [f('supplierId', '追偿工厂', 'select', { options: suppliers }), f('currency', '币种', 'text'), f('requested', '追偿金额', 'number', { min: 0.01, step: '0.01' }), f('basis', '追偿依据', 'textarea')],
     initialValues: { supplierId: notice?.supplierId ?? defaultSupplier, currency: ledger.currency || 'USD', requested: '', basis: check ? '质检核实：' + CLAIM_RESULT_LABEL[check.result] + ' · ' + check.scope : '' }, submitLabel: '提出追偿',
     submit: v => command({ type: 'platform.claim.recovery.open', payload: { claimId: claim.id, supplierId: s(v, 'supplierId'), currency: s(v, 'currency'), requested: n(v, 'requested'), basis: s(v, 'basis') } }),
   });
   const agree = (r: ClaimRecovery) => openEditor({
-    title: '记录工厂同意的结果', fields: [f('agreed', '工厂同意承担的金额（' + r.currency + '）', 'number', { min: 0.01, step: '0.01' }), f('method', '补偿方式', 'select', { options: (Object.keys(CLAIM_METHOD_LABEL) as ClaimRecoveryMethod[]).map(k => ({ value: k, label: CLAIM_METHOD_LABEL[k] })) }), f('note', '工厂确认依据（邮件 / 签字）', 'textarea')],
+    title: '工厂确认', fields: [f('agreed', '工厂同意承担的金额（' + r.currency + '）', 'number', { min: 0.01, step: '0.01' }), f('method', '补偿方式', 'select', { options: (Object.keys(CLAIM_METHOD_LABEL) as ClaimRecoveryMethod[]).map(k => ({ value: k, label: CLAIM_METHOD_LABEL[k] })) }), f('note', '确认依据', 'textarea')],
     initialValues: { agreed: '', method: '', note: '' }, submitLabel: '保存',
     submit: v => command({ type: 'platform.claim.recovery.agree', payload: { id: r.id, agreed: n(v, 'agreed'), method: s(v, 'method') as ClaimRecoveryMethod, note: s(v, 'note') } }),
   });
@@ -84,18 +84,18 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   /** 这家工厂同币种还有可扣的未付票据吗（未作废、未暂挂、未付扣除待付申请后仍有余额）。 */
   const deductRoom = (r: ClaimRecovery) => payableBills(state, '').some(b => b.supplierId === r.supplierId && b.currency === r.currency && b.status !== 'void' && !b.held && Math.round(b.open * 100) - billRequestedUnpaidMinor(state, b.id) > 0);
   const switchToPayment = (r: ClaimRecovery) => openEditor({
-    title: '改为工厂付款', description: `原约定${CLAIM_METHOD_LABEL[r.method!]}。已从货款扣 ${money(deducted(r), r.currency)} 保留不动；剩余 ${money(Math.max(0, (r.agreed ?? 0) - deducted(r)), r.currency)} 改由工厂直接付款，到账后由财务登记实际落实。`,
-    fields: [f('reason', '改方式原因与工厂确认依据（邮件 / 签字）', 'textarea')], initialValues: { reason: '' }, submitLabel: '确认改为工厂付款',
+    title: '改为工厂付款', description: `已扣 ${money(deducted(r), r.currency)} · 待收 ${money(Math.max(0, (r.agreed ?? 0) - deducted(r)), r.currency)}`,
+    fields: [f('reason', '改方式原因与确认依据', 'textarea')], initialValues: { reason: '' }, submitLabel: '确认改为工厂付款',
     submit: v => command({ type: 'platform.claim.recovery.method', payload: { id: r.id, method: 'payment', reason: s(v, 'reason') } } as PlatformCommand),
   });
   const settle = (r: ClaimRecovery) => openEditor({
-    title: '登记工厂补偿实际落实', description: deducted(r) > 0 ? `已在应付中从货款扣 ${money(deducted(r), r.currency)}；这里只登记其他方式（工厂付款、补货等）落实的部分，合计不超过工厂同意金额。` : undefined,
+    title: '落实补偿', description: deducted(r) > 0 ? `已扣 ${money(deducted(r), r.currency)}` : undefined,
     fields: [f('amount', (deducted(r) > 0 ? '其他方式落实金额（' : '实际落实金额（') + r.currency + '）', 'number', { min: 0.01, step: '0.01' }), f('date', '落实日期', 'date'), f('reference', '实际扣款 / 收款凭据', 'text')],
     initialValues: { amount: r.agreed === undefined ? '' : Math.max(0, Math.round((r.agreed - deducted(r)) * 100) / 100), date: businessNow().toISOString().slice(0, 10), reference: '' }, submitLabel: '确认已落实',
     submit: v => command({ type: 'platform.claim.recovery.settle', payload: { id: r.id, amount: n(v, 'amount'), date: s(v, 'date'), reference: s(v, 'reference') } }),
   });
   const waive = (r: ClaimRecovery) => openEditor({
-    title: '批准放弃向工厂追偿', fields: [f('reason', '放弃的原因', 'textarea')], initialValues: { reason: '' }, submitLabel: '批准放弃',
+    title: '放弃追偿', fields: [f('reason', '放弃的原因', 'textarea')], initialValues: { reason: '' }, submitLabel: '批准放弃',
     submit: v => command({ type: 'platform.claim.recovery.waive', payload: { id: r.id, reason: s(v, 'reason') } }),
   });
 

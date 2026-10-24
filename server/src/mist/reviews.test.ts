@@ -1,3 +1,4 @@
+import {getPlatformReviews} from '../shared/mistPlatform';
 import {beforeEach,afterEach,describe,it,expect,vi} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';import path from 'node:path';
@@ -37,4 +38,13 @@ describe('scoped cross-account Mist review',()=>{
  });
  it('returns only a decision actor own receipt',async()=>{await repo.decideReview(testActor('reviewer'),wid,'review-1',{requestId:'receipt',expectedRevision:0,decision:'rejected',note:'需要修改'});expect((await repo.reviewReceipt(testActor('reviewer'),wid,'receipt')).result.reviewId).toBe('review-1');await expect(repo.reviewReceipt(testActor('other'),wid,'receipt')).rejects.toMatchObject({status:404});});
  it('restricts evidence to frozen attachment IDs and assigned current permission',async()=>{const uploaded=await repo.upload(testActor(),wid,{requestId:'upload',expectedRevision:0},{bytes:Buffer.from('frozen evidence'),name:'evidence.txt',mimeType:'text/plain'});const id=uploaded.receipt.result.fileId||uploaded.receipt.result.id;db.workspaces.get(wid).state.reviewTasks[0].fileIds=[id];expect((await repo.reviewFile(testActor('reviewer'),wid,'review-1',id)).bytes.toString()).toBe('frozen evidence');await expect(repo.reviewFile(testActor('other'),wid,'review-1',id)).rejects.toMatchObject({status:404});await expect(repo.reviewFile(testActor('reviewer'),wid,'review-1','not-in-snapshot')).rejects.toMatchObject({status:404});});
+});
+
+it('uses the dedicated claim approval scope for assigned reviewers without granting the underlying business workspace',async()=>{
+ const reviewerActor={...testActor('reviewer'),roles:[],authorizationLoaded:true};
+ const snapshot=JSON.stringify({case:'CLM-2026-0001',kind:'ReturnRefund',amount:20,currency:'USD',quantity:1,unit:'件',destination:'Scrap',basis:'客户退件依据'});
+ const tasks=getPlatformReviews({platform:{claims:[{id:'claim',code:'CLM-2026-0001',state:'Processing',dispositions:[{id:'disposition',kind:'ReturnRefund',state:'pending',reviewerId:'reviewer',requesterId:'owner',submittedAt:'2026-10-13',snapshot,fileIds:[]}]}],risks:[]}} as any);
+ db.workspaces.get(wid).state.reviewTasks=tasks;auth.users.get('reviewer')!.permissions=['aftersales:approve'];
+ const rows=await repo.listReviews(reviewerActor);expect(rows).toHaveLength(1);expect(rows[0]).toMatchObject({requiredPermission:'aftersales:approve',canDecide:true,title:'CLM-2026-0001 · 退货退款'});await expect(repo.get(reviewerActor,wid)).rejects.toMatchObject({status:404});
+ auth.users.get('reviewer')!.permissions=['aftersales:write'];expect(await repo.listReviews(reviewerActor)).toEqual([]);
 });
