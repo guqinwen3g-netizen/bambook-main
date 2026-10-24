@@ -40,11 +40,12 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   const recoveries = co?.recoveries ?? [], suppliers = (state.market?.suppliers ?? []).map(row => ({ value: row.id, label: row.name + (row.status === 'active' ? '' : '（' + (row.status === 'paused' ? '已暂停' : '已停用') + '）') }));
   const defaultSupplier = claimDefaultSupplierId(state, claim);
   const approved = claim.dispositions.filter(d => ['approved', 'Executed'].includes(d.state) && !d.supersededById).length;
+  const executed = claim.dispositions.some(d => d.state === 'Executed' && !d.supersededById);
   const steps = [
     { label: '通知相关人员：质检、负责人、跟单、工厂', done: !!notice, note: notice ? notice.by + ' · ' + when(notice.at) + ' · 工厂 ' + notice.supplierName + '（' + notice.factoryChannel + '）' : '尚未通知' },
     { label: '内部质检核实事实（工厂配合）', done: !!check, note: check ? CLAIM_RESULT_LABEL[check.result] + ' · ' + check.by : '尚未核实', noteTone: !check && claim.dispositions.length ? 'bad' as const : undefined },
     { label: '对客户的处理方案经负责人批准', done: approved > 0, note: approved ? approved + ' 条已批准' : '尚无已批准方案' },
-    { label: '客户这边处理完（款项 / 货物）', done: ledger.customerSettled, note: ledger.customerSettled ? '已执行并结清' : ledger.customerMoneyOpen ? '方案已执行，贷项款项待抵扣 / 退款' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
+    { label: '客户这边处理完（款项 / 货物）', done: ledger.customerSettled, note: ledger.customerSettled ? (executed ? '已执行并结清' : '处置未采用') : ledger.customerMoneyOpen ? '方案已执行，贷项款项待抵扣 / 退款' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
     { label: '工厂补偿落实', done: ledger.hasRecovery && !ledger.recoveryOpen, note: !ledger.hasRecovery ? '尚未向工厂提出' : ledger.recoveryOpen ? '还在等工厂' : '已落实或已批准放弃' },
   ];
 

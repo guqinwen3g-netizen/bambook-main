@@ -138,3 +138,13 @@ it('serves byte-exact preview and issued PDF through the real local transaction 
  expect(document.body.subarray(0,5).toString()).toBe('%PDF-');expect(document.body.length).toBe(pdfBytes.length);expect(document.body).toEqual(pdfBytes);expect(digest(document.body)).toBe(digest(pdfBytes));expect(document.headers['x-document-sha256']).toBe(digest(document.body));
  const after=await localRepo.get(testActor(),workspace.id);expect(after.state.platform.credits[0].printVersions).toHaveLength(1);expect(after.revision).toBe(1);
 });
+
+it('uses the same workspace business clock for a read-only draft and its issued original',async()=>{
+ state().settings.businessClock={mode:'fixed',at:'2026-10-20T00:18:00.000Z',timezone:'Asia/Shanghai'};
+ const current=new MistRepository(db,contract,files,auth.authorize,()=>new Date('2026-10-24T03:00:00.000Z'),builder),before=structuredClone(state()),receipts=db.receipts.size;
+ await current.previewCreditDocument(testActor(),workspaceId,ids.credit,ids.source);
+ const draft=builder.mock.calls.at(-1)![0];expect(state()).toEqual(before);expect(db.receipts.size).toBe(receipts);
+ expect(draft.issueDate).toBe('2026-10-20');expect(draft.issuedAt).toBe('2026-10-20T00:18:00.000Z');
+ await current.execute(testActor(),workspaceId,issue('business-clock-issue'));
+ expect(credit().printVersions![0].snapshot.issueDate).toBe(draft.issueDate);expect(credit().printVersions![0].issuedAt).toBe(draft.issuedAt);
+});
