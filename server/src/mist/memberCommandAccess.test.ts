@@ -155,3 +155,9 @@ describe('供应商付款登记附带分配必须同时具有既有凭证写和�
     expect(db.receipts.size).toBe(receipts);
   });
 });
+it.each(['owner','other'])('rejects %s claim approval with business write permission alone before changing any state',async subject=>{
+ auth.users.get(subject)!.permissions=['aftersales:write'];
+ const before=structuredClone(db.workspaces.get(workspaceId)),receiptCount=db.receipts.size;
+ await expect(execute({type:'platform.claim.decide',payload:{id:'pending-disposition',decision:'approved',note:'attempt'}},'claim-approve-denied',actor(subject))).rejects.toMatchObject({status:403,code:'FORBIDDEN'});
+ expect(db.workspaces.get(workspaceId)).toEqual(before);expect(db.receipts.size).toBe(receiptCount);
+});

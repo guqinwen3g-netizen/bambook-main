@@ -4,7 +4,7 @@ import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHel
 import { hasScope } from '../auth/permissionService';
 import { createApprovalRoutingService } from '../approvals/approvalRoutingService';
 /** Approval authority is rebuilt in the same DB transaction as the business command. */
-export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string):Promise<NonNullable<MistContext['authority']>>{
+export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[]):Promise<NonNullable<MistContext['authority']>>{
   const authority:NonNullable<MistContext['authority']>={supplier:{}};
   // 风险处理权：按当前账号此刻的岗位权限重建（risk:write 不限来源；否则只认本人客户/订单 + 现有订单写/客户档案写权限）。
   if(kind.startsWith('platform.risk.'))authority.risk={all:hasScope(actor,'risk:write' as any),orders:hasScope(actor,'orders:write' as any),customers:hasScope(actor,'relations:write' as any)};
@@ -42,8 +42,8 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       authority.supplier[key]={version:row.version,userIds};
     }
   }
-  const routing=createApprovalRoutingService({prisma:db});
-  if(kind.startsWith('platform.claim.')){try{authority.claimReviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
+  const routing=createApprovalRoutingService({prisma:db,companyId:actor.companyId??null,eligibleReviewerIds});
+  if(kind.startsWith('platform.claim.')){try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   // 付款申请由申请人所在部门主管审批；主管必须当前仍持有付款申请审批权，不能自审。
   if(kind.startsWith('payable.request.')){authority.paymentReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null),'finance:payment_request:approve' as any))authority.paymentReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   // 风险关闭/豁免/带风险放行申请：由申请人所在部门主管审批；主管须当前在职、仍持有风险处理权，且不能是申请人本人。

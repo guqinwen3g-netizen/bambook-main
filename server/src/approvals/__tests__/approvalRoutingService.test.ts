@@ -1,3 +1,4 @@
+import {runWithCompanyContext} from '../../auth/requestCompanyContext';
 import { describe, expect, it } from 'vitest';
 import {
   createApprovalRoutingService,
@@ -15,9 +16,9 @@ import {
  *   BASE-39-A2 departmentSnapshotId = 创建时 requester.primaryDeptId（快照语义）
  */
 
-type User = { id: string; status: string; deletedAt: null | number; primaryDeptId: string | null };
-type Dept = { id: string; status: string; headId: string | null; parentId: string | null };
-type Role = { id: string; name: string };
+type User = { id: string; status: string; deletedAt: null | number; primaryDeptId: string | null; companyMembers?: Array<{companyId:string;status:string}> };
+type Dept = { id: string; status: string; headId: string | null; parentId: string | null; companyId?:string };
+type Role = { id: string; name: string; companyId?:string; code?:string; isSystem?:boolean };
 type UserRole = { userId: string; roleId: string; departmentId: string | null; createdAt: Date };
 
 function makePrisma(data: {
@@ -34,6 +35,9 @@ function makePrisma(data: {
   const activeUser = (id: string) =>
     users.find((u) => u.id === id && u.status === 'active' && u.deletedAt === null) ?? null;
 
+  const inCompany = (user: User | null | undefined, where: any) => !where?.companyMembers?.some ||
+    !!user?.companyMembers?.some(member => member.companyId === where.companyMembers.some.companyId && member.status === where.companyMembers.some.status);
+
   const matchUserRole = (row: UserRole, where: any): boolean => {
     if (where.departmentId !== undefined && row.departmentId !== where.departmentId) return false;
     if (where.roleId?.in ? !where.roleId.in.includes(row.roleId) : where.roleId !== undefined && row.roleId !== where.roleId) return false;
@@ -41,7 +45,16 @@ function makePrisma(data: {
     if (where.userId?.not !== undefined && row.userId === where.userId.not) return false;
     if (where.user) {
       const u = users.find((x) => x.id === row.userId);
-      if (!u || u.status !== where.user.status || u.deletedAt !== where.user.deletedAt) return false;
+      if (!u || u.status !== where.user.status || u.deletedAt !== where.user.deletedAt || !inCompany(u, where.user) || (where.user.id?.in && !where.user.id.in.includes(u.id))) return false;
+    }
+    if (where.role) {
+      const role = roles.find(role => role.id === row.roleId);
+      if (!role || role.companyId !== where.role.companyId || (where.role.isSystem !== undefined && role.isSystem !== where.role.isSystem) ||
+        (where.role.code?.in && !where.role.code.in.includes(role.code))) return false;
+    }
+    if (where.department) {
+      const dept = departments.find(dept => dept.id === row.departmentId);
+      if (!dept || dept.companyId !== where.department.companyId || dept.status !== where.department.status) return false;
     }
     if (where.OR) {
       const ok = where.OR.some((cond: any) => {
@@ -63,7 +76,7 @@ function makePrisma(data: {
       findFirst: async ({ where }: any) => {
         if (where.id && where.status === 'active' && where.deletedAt === null) {
           const found = activeUser(where.id);
-          return where.primaryDeptId !== undefined && found?.primaryDeptId !== where.primaryDeptId ? null : found;
+          return !inCompany(found, where) || where.primaryDeptId !== undefined && found?.primaryDeptId !== where.primaryDeptId ? null : found;
         }
         return null;
       },
@@ -76,7 +89,7 @@ function makePrisma(data: {
         const rows = userRoles
           .filter((r) => matchUserRole(r, where))
           .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-        return rows.slice(0, take ?? rows.length).map((r) => ({ userId: r.userId }));
+        return rows.slice(0, take ?? rows.length).map((r) => ({ userId: r.userId, departmentId:r.departmentId }));
       },
     },
   };
@@ -343,4 +356,71 @@ describe('approvalRoutingService: BASE-39-A2 部门快照语义', () => {
     // 模拟申请人调动到面料部后，快照值来源仍是「当前」primaryDeptId；
     // 已落库的审批单快照在创建时固化（createOnce），由 approvalCreateService 写入保证
   });
+});
+
+describe('company approval routing',()=>{
+ const member=(id:string,companyId='company-a',status='active'):User=>({...u(id),companyMembers:[{companyId,status}]});
+ const role=(companyId:string,code='role-admin',id=`${code}@${companyId}`):Role=>({id,name:'显示名不决定审批权',code,companyId,isSystem:true});
+ it('resolves the current company system role by code rather than a global role ID',async()=>{
+  const admin=role('company-a'),other=role('company-b');
+  const prisma=makePrisma({users:[member('requester'),member('leader'),member('outsider','company-b')],roles:[admin,other],userRoles:[ur('leader',admin.id),ur('outsider',other.id)]});
+  expect((await createApprovalRoutingService({prisma,companyId:'company-a'} as any).resolveClaimLeader('requester')).reviewerId).toBe('leader');
+  expect((await createApprovalRoutingService({prisma,companyId:'company-a'} as any).resolveReviewerByDepartment('requester')).reviewerId).toBe('leader');
+ });
+ it('never falls back to a foreign legacy administrator or suspended company member',async()=>{
+  const admin=role('company-a');
+  const prisma=makePrisma({users:[member('requester'),member('inactive','company-a','suspended'),member('foreign','company-b')],roles:[admin,{id:'role-admin',name:'历史管理员'}],userRoles:[ur('inactive',admin.id),ur('foreign','role-admin')]});
+  await expect(createApprovalRoutingService({prisma,companyId:'company-a'} as any).resolveClaimLeader('requester')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+  await expect(createApprovalRoutingService({prisma,companyId:'company-a'} as any).resolveReviewerByDepartment('requester')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+ });
+ it('does not promote a company boss or custom role name to the claim general leader',async()=>{
+  const boss=role('company-a','role-super-admin'),custom={...role('company-a','role-admin','custom'),isSystem:false};
+  const prisma=makePrisma({users:[member('requester'),member('boss'),member('custom')],roles:[boss,custom],userRoles:[ur('boss',boss.id),ur('custom',custom.id)]});
+  await expect(createApprovalRoutingService({prisma,companyId:'company-a'} as any).resolveClaimLeader('requester')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+ });
+ it('uses the unique department in the current company and never its foreign parent or head',async()=>{
+  const admin=role('company-a'),sales=role('company-a','role-sales'),manager=role('company-a','role-sales-manager');
+  const requester={...member('requester'),primaryDeptId:'foreign'},lead=member('leader'),head=member('head'),foreign=member('foreign-head','company-b');
+  const prisma=makePrisma({users:[requester,lead,head,foreign],departments:[{...d('foreign','foreign-head'),companyId:'company-b'},{...d('current','head','foreign'),companyId:'company-a'}],roles:[admin,sales,manager],userRoles:[ur('requester',sales.id,'current'),ur('leader',admin.id),ur('head',manager.id,'current')]});
+  expect(await createApprovalRoutingService({prisma,companyId:'company-a'} as any).resolveReviewerByDepartment('requester')).toMatchObject({reviewerId:'head',departmentSnapshotId:'current'});
+ });
+ it('keeps company scope when resolving with a transaction client and rejects an inactive requester membership',async()=>{
+  const current=role('company-a'),prisma=makePrisma({users:[member('requester'),member('current')],roles:[current],userRoles:[ur('current',current.id)]});
+  const root=makePrisma({users:[u('requester'),u('old')],userRoles:[ur('old','role-admin')]});
+  expect((await createApprovalRoutingService({prisma:root,companyId:'company-a'} as any).resolveClaimLeader('requester',prisma)).reviewerId).toBe('current');
+  await expect(createApprovalRoutingService({prisma,companyId:'company-b'} as any).resolveClaimLeader('requester')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+ });
+});
+
+it.each(['foreign-head','foreign-parent'])('never follows a %s outside the current company',async(branch)=>{
+ const active=(id:string,companyId='company-a'):User=>({...u(id,'current'),companyMembers:[{companyId,status:'active'}]});
+ const admin:Role={id:'admin-a',name:'负责人',companyId:'company-a',code:'role-admin',isSystem:true};
+ const requester=active('requester'),leader={...active('leader'),primaryDeptId:null};
+ const prisma=makePrisma({users:[requester,leader,active('foreign','company-b')],roles:[admin],departments:[{...d('current',branch==='foreign-head'?'foreign':'requester','other'),companyId:'company-a'},{...d('other','foreign'),companyId:'company-b'}],userRoles:[ur('leader',admin.id)]});
+ expect((await createApprovalRoutingService({prisma,companyId:'company-a'}).resolveReviewerByDepartment('requester')).reviewerId).toBe('leader');
+});
+
+it('limits company leader candidates to the authoritative business access set, including an empty set',async()=>{
+ const users=['requester','current','other-work'].map(id=>({...u(id),companyMembers:[{companyId:'company-a',status:'active'}]}));
+ const admin:Role={id:'tenant-admin',name:'负责人',companyId:'company-a',code:'role-admin',isSystem:true};
+ const prisma=makePrisma({users,roles:[admin],userRoles:[ur('current',admin.id),ur('other-work',admin.id)]});
+ expect((await createApprovalRoutingService({prisma,companyId:'company-a',eligibleReviewerIds:['requester','current']} as any).resolveClaimLeader('requester')).reviewerId).toBe('current');
+ await expect(createApprovalRoutingService({prisma,companyId:'company-a',eligibleReviewerIds:[]} as any).resolveClaimLeader('requester')).rejects.toMatchObject({code:NO_REVIEWER_RESOLVED});
+});
+
+it('does not bypass business access through a same-company ADMIN department head',async()=>{
+ const active=(id:string,dept:string|null=null):User=>({...u(id,dept),companyMembers:[{companyId:'company-a',status:'active'}]});
+ const admin:Role={id:'admin-a',name:'负责人',companyId:'company-a',code:'role-admin',isSystem:true};
+ const prisma=makePrisma({users:[active('requester','dept'),active('inaccessible-head','dept'),active('current')],roles:[admin],departments:[{...d('dept','inaccessible-head'),companyId:'company-a'}],userRoles:[ur('inaccessible-head',admin.id),ur('current',admin.id)]});
+ expect((await createApprovalRoutingService({prisma,companyId:'company-a',eligibleReviewerIds:['requester','current']}).resolveClaimLeader('requester')).reviewerId).toBe('current');
+});
+
+it('binds an implicit request company at operation time without sharing it between concurrent requests',async()=>{
+ const member=(id:string,companyId:string):User=>({...u(id),companyMembers:[{companyId,status:'active'}]});
+ const roles=['a','b'].map(companyId=>({id:`admin-${companyId}`,companyId,code:'role-admin',isSystem:true,name:'负责人'}));
+ const prisma=makePrisma({users:[member('requester-a','a'),member('leader-a','a'),member('requester-b','b'),member('leader-b','b')],roles,userRoles:[ur('leader-a','admin-a'),ur('leader-b','admin-b')]});
+ const service=createApprovalRoutingService({prisma});
+ const results=await Promise.all(['a','b'].map(companyId=>runWithCompanyContext(companyId,()=>service.resolveClaimLeader(`requester-${companyId}`))));
+ expect(results.map(row=>row.reviewerId)).toEqual(['leader-a','leader-b']);
+ expect((await runWithCompanyContext('b',()=>createApprovalRoutingService({prisma,companyId:'a'}).resolveClaimLeader('requester-a'))).reviewerId).toBe('leader-a');
 });

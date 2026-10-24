@@ -17,6 +17,7 @@ import type { PrismaClient } from '@prisma/client';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 import { CLAIM_LEADER_ROLE_IDS } from '../claims/claimApprovalFact';
+import { currentCompanyId } from '../auth/requestCompanyContext';
 
 // ───────────────────────────────────────────────────────────────────
 // 解析路径枚举（ApprovalRequest.reviewerResolverRoute 真源，createOnce 写入）
@@ -56,10 +57,40 @@ const ADMIN_FALLBACK_ROLE_IDS = [
 
 export interface ApprovalRoutingServiceOptions {
   prisma: PrismaClient;
+  companyId?: string | null;
+  /** Server-owned set of actors who can enter the current business records. */
+  eligibleReviewerIds?: readonly string[];
 }
 
 export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions) {
   const { prisma } = opts;
+  const companyId = opts.companyId !== undefined ? opts.companyId : currentCompanyId();
+  const eligibleReviewerIds = opts.eligibleReviewerIds;
+  const eligible = (id: string) => eligibleReviewerIds === undefined || eligibleReviewerIds.includes(id);
+  const activeUserWhere = () => ({ status: 'active', deletedAt: null,
+    ...(companyId ? { companyMembers: { some: { companyId, status: 'active' } } } : {}) });
+  const candidateUserWhere = () => ({ ...activeUserWhere(), ...(eligibleReviewerIds !== undefined ? { id: { in: [...eligibleReviewerIds] } } : {}) });
+  // System role codes survive tenant-specific IDs. Custom display names never confer approval authority.
+  const roleWhere = (codes: string[]) => companyId
+    ? { role: { companyId, code: { in: codes }, isSystem: true } }
+    : { roleId: { in: codes } };
+  async function readDepartment(id: string) {
+    const row = await prisma.department.findUnique({ where: { id }, select: { id: true, status: true, headId: true, parentId: true, companyId: true } });
+    return row && (!companyId || row.companyId === companyId) ? row : null;
+  }
+  async function requesterSource(requesterId: string) {
+    const requester = await prisma.userAccount.findFirst({ where: { id: requesterId, ...activeUserWhere() }, select: { id: true, primaryDeptId: true } });
+    if (!requester) throw noReviewerError(requesterId, DEPT_NONE, '申请人不是当前公司的在职成员');
+    let dept = requester.primaryDeptId ? await readDepartment(requester.primaryDeptId) : null;
+    // A shared account's primary department may belong to another company. Only use an unambiguous assignment here.
+    if (companyId && !dept) {
+      const rows = await prisma.userRole.findMany({ where: { userId: requesterId, role: { companyId }, department: { companyId, status: 'active' } }, select: { departmentId: true } });
+      const ids = [...new Set(rows.map(row => row.departmentId).filter((id): id is string => !!id))];
+      if (ids.length > 1) throw noReviewerError(requesterId, DEPT_NONE, '当前公司部门归属不唯一');
+      if (ids.length === 1) dept = await readDepartment(ids[0]);
+    }
+    return { requester, dept, departmentSnapshotId: dept?.id ?? (companyId ? DEPT_NONE : requester.primaryDeptId ?? DEPT_NONE) };
+  }
 
   // ── 内部：构造 fail-closed 错误 ──
   function noReviewerError(requesterId: string, snapshotId: string, reason: string): Error & { code: string } {
@@ -72,8 +103,9 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
 
   // ── 内部：查 active 用户（软删排除） ──
   async function findActiveUser(userId: string) {
+    if (!eligible(userId)) return null;
     return prisma.userAccount.findFirst({
-      where: { id: userId, status: 'active', deletedAt: null },
+      where: { id: userId, ...activeUserWhere() },
       select: { id: true },
     });
   }
@@ -82,11 +114,7 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
   async function resolveUpstreamHead(startDeptId: string, requesterId: string): Promise<string | null> {
     let cursor: string | null = startDeptId;
     for (let depth = 0; depth < MAX_UPSTREAM_DEPTH && cursor; depth++) {
-      const dept: { id: string; status: string; headId: string | null; parentId: string | null } | null =
-        await prisma.department.findUnique({
-          where: { id: cursor },
-          select: { id: true, status: true, headId: true, parentId: true },
-        });
+      const dept = await readDepartment(cursor);
       if (!dept) return null;
       if (dept.status === 'active' && dept.headId && dept.headId !== requesterId) {
         const head = await findActiveUser(dept.headId);
@@ -102,9 +130,9 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
     const candidates = await prisma.userRole.findMany({
       where: {
         departmentId: deptId,
-        roleId: SYSTEM_ROLE_IDS.SALES_MANAGER,
+        ...roleWhere([SYSTEM_ROLE_IDS.SALES_MANAGER]),
         userId: { not: requesterId },
-        user: { status: 'active', deletedAt: null },
+        user: candidateUserWhere(),
       },
       orderBy: { createdAt: 'asc' },
       take: 1,
@@ -114,7 +142,7 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
   }
 
   // ── 内部：ADMIN 最终兜底 ──
-  // 仅识别明确系统/遗留角色 ID；自定义角色名称不能生成领导权威。
+  // 公司内按系统角色码识别；历史无公司上下文保留明确角色 ID，自定义名称不能生成领导权威。
   // 用户 active、跳过申请人本人、按 createdAt 升序取第一个。
   // 极端情况：全系统仅剩申请人本人是管理员时允许返回其本人（decide 403 自审守卫兜底）。
   async function adminFallback(
@@ -123,8 +151,8 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
     departmentSnapshotId: string,
   ): Promise<ReviewerResolution> {
     const baseWhere: any = {
-      user: { status: 'active', deletedAt: null },
-      roleId: { in: ADMIN_FALLBACK_ROLE_IDS },
+      user: candidateUserWhere(),
+      ...roleWhere(ADMIN_FALLBACK_ROLE_IDS),
     };
     const pick = async (where: any) => {
       const rows = await prisma.userRole.findMany({
@@ -156,23 +184,9 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
   // 主入口：resolveReviewerByDepartment(requesterId)
   // ══════════════════════════════════════════════════════════════════
   async function resolveReviewerByDepartment(requesterId: string, client?: any): Promise<ReviewerResolution> {
-    if (client && client !== prisma) return createApprovalRoutingService({ prisma: client }).resolveReviewerByDepartment(requesterId);
-    // a. 读申请人（active + 未软删）→ 部门快照
-    const requester = await prisma.userAccount.findFirst({
-      where: { id: requesterId, status: 'active', deletedAt: null },
-      select: { id: true, primaryDeptId: true },
-    });
-    if (!requester) {
-      throw noReviewerError(requesterId, DEPT_NONE, '申请人不存在或已停用/已删除');
-    }
-    const departmentSnapshotId = requester.primaryDeptId ?? DEPT_NONE;
-
-    const dept = requester.primaryDeptId
-      ? await prisma.department.findUnique({
-          where: { id: requester.primaryDeptId },
-          select: { id: true, status: true, headId: true, parentId: true },
-        })
-      : null;
+    const requestCompany = opts.companyId !== undefined ? opts.companyId : currentCompanyId();
+    if (client && client !== prisma || requestCompany !== companyId) return createApprovalRoutingService({ prisma: client ?? prisma, companyId: requestCompany, eligibleReviewerIds }).resolveReviewerByDepartment(requesterId);
+    const { dept, departmentSnapshotId } = await requesterSource(requesterId);
 
     if (dept && dept.status === 'active') {
       // b. 部门主管路径：headId 非空且 head 用户 active
@@ -207,22 +221,18 @@ export function createApprovalRoutingService(opts: ApprovalRoutingServiceOptions
 
   /** A7: an ordinary department manager or a delegated reviewer is not the general leader. */
   async function resolveClaimLeader(requesterId: string, client?: any): Promise<ReviewerResolution> {
-    if (client && client !== prisma) return createApprovalRoutingService({ prisma: client }).resolveClaimLeader(requesterId);
-    const requester = await prisma.userAccount.findFirst({
-      where: { id: requesterId, status: 'active', deletedAt: null }, select: { id: true, primaryDeptId: true },
-    });
-    if (!requester) throw noReviewerError(requesterId, DEPT_NONE, '申请人不存在或已停用/已删除');
-    const departmentSnapshotId = requester.primaryDeptId ?? DEPT_NONE;
-    const dept = requester.primaryDeptId ? await prisma.department.findUnique({ where: { id: requester.primaryDeptId } }) : null;
-    if (dept?.status === 'active' && dept.headId && dept.headId !== requesterId) {
+    const requestCompany = opts.companyId !== undefined ? opts.companyId : currentCompanyId();
+    if (client && client !== prisma || requestCompany !== companyId) return createApprovalRoutingService({ prisma: client ?? prisma, companyId: requestCompany, eligibleReviewerIds }).resolveClaimLeader(requesterId);
+    const { dept, departmentSnapshotId } = await requesterSource(requesterId);
+    if (dept?.status === 'active' && dept.headId && dept.headId !== requesterId && eligible(dept.headId)) {
       const head = await prisma.userAccount.findFirst({
-        where: { id: dept.headId, status: 'active', deletedAt: null, primaryDeptId: dept.id }, select: { id: true },
+        where: { id: dept.headId, ...activeUserWhere(), primaryDeptId: dept.id }, select: { id: true },
       });
-      const roles = head ? await prisma.userRole.findMany({ where: { userId: head.id, roleId: { in: CLAIM_LEADER_ROLE_IDS } }, select: { userId: true } }) : [];
+      const roles = head ? await prisma.userRole.findMany({ where: { userId: head.id, ...roleWhere(CLAIM_LEADER_ROLE_IDS) }, select: { userId: true } }) : [];
       if (roles.length) return { reviewerId: head!.id, route: 'CLAIM_GENERAL_LEADER', departmentSnapshotId };
     }
     const rows = await prisma.userRole.findMany({
-      where: { roleId: { in: CLAIM_LEADER_ROLE_IDS }, userId: { not: requesterId }, user: { status: 'active', deletedAt: null } },
+      where: { ...roleWhere(CLAIM_LEADER_ROLE_IDS), userId: { not: requesterId }, user: candidateUserWhere() },
       select: { userId: true },
     });
     const ids = [...new Set(rows.map(row => row.userId))];
