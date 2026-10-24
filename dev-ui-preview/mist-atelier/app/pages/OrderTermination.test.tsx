@@ -10,6 +10,7 @@ const store = vi.hoisted(() => ({ state: null as MistState | null, loading: fals
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status: 'authenticated', sessionKey: 't', user: { id: 'sales', displayName: '业务员甲' }, hasPermission: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { OrderDetailPage } from './OrderDetailPage';
+import {OrderLineFulfillment} from './OrderLineFulfillment';
 import { OrderListPage } from './OrderListPage';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -93,4 +94,13 @@ it('hides voided and cancelled orders from the list and in-transit count by defa
   expect(host.textContent).not.toContain('SO-VOID'); expect(host.textContent).not.toContain('SO-CANCEL');
   expect(host.textContent).toContain(base.code);
   expect(host.textContent).toContain('全部（不含作废 / 取消）');
+});
+
+it.each(['draft','approved'] as const)('does not offer ordinary termination controls for a %s source-bound replacement',status=>{
+ const order=store.state!.orders[0];order.replacementSource={schemaVersion:1,claimId:'case'} as any;order.governance!.status=status;render();expect(queryByRole(host,'button',{name:'作废订单'})).toBeNull();expect(queryByRole(host,'button',{name:'申请取消订单'})).toBeNull();
+});
+
+it.each([0,5,10])('offers replacement line completion only after the full quantity: departed %s of 10',departed=>{
+ const state=store.state!,order=state.orders[0],line=state.orderLines[0];order.replacementSource={schemaVersion:1,claimId:'case'} as any;order.governance!.status='approved';if(departed)state.fulfillment.shipments.push({id:'ship',code:'SHP',state:'departed',departedAt:context.now,lines:[{orderId:order.id,lineId:line.id,quantity:departed}],plannedDate:'2026-10-13'} as any);
+ act(()=>root.render(<MistRoot><ToastProvider><OrderLineFulfillment state={state} order={order} line={line} go={go} onCloseLine={vi.fn()}/></ToastProvider></MistRoot>));expect(!!queryByRole(host,'button',{name:'按实际完工结案'})).toBe(departed===10);
 });
