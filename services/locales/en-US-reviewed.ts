@@ -1,5 +1,7 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '查看记录':'View record',
+  '原操作已保存':'The original operation was saved',
   // Replacement orders and export review.
   '换货补发':'Replacement',
   '生成补发订单':'Create replacement order',
