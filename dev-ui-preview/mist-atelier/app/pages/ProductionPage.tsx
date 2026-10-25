@@ -14,7 +14,7 @@ import { useNav } from '../nav';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { ModuleEditorPage, ModuleEditorDialog, type ModuleEditorSpec } from './modules/ModuleWorkbench';
-import { PRODUCTION_HOLD_CATEGORIES, type FulfillmentSizeQuantity } from '../../../../server/src/shared/mistFulfillment';
+import { PRODUCTION_HOLD_CATEGORIES, fulfillmentProductionColumn, type FulfillmentSizeQuantity } from '../../../../server/src/shared/mistFulfillment';
 import { mistDate } from './OrderListPage';
 import { productionNok, productionReleaseGate, productionRiskText } from './productionGate';
 import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
@@ -51,7 +51,7 @@ export function ProductionPage() {
   const [selectedId, setSelectedId] = React.useState<string | null>(route.productionId ?? null);
   const [draft, setDraft] = React.useState({ pct: 0, risk: '', note: '', startDate: '', due: '' });
   const [busy, setBusy] = React.useState(false), [failure, setFailure] = React.useState('');
-  const items = (state?.productions ?? []).filter(item => !item.closed).map(item => ({ ...item, name: state ? productionName(state, item) : item.name })), selected = items.find(item => item.id === selectedId);
+  const items = (state?.productions ?? []).filter(item => !item.closed).map(item => ({ ...item, col: state ? fulfillmentProductionColumn(state, item) : item.col, name: state ? productionName(state, item) : item.name })), selected = items.find(item => item.id === selectedId);
   const fact=state?.fulfillment.productionFacts?.find(item=>item.productionId===selectedId);
   const quantityBasis=state&&selected?productionQuantityBasis(state,selected.orderId):null;
   const selectedDomain=state?.orders.find(order=>order.id===selected?.orderId)?.type;

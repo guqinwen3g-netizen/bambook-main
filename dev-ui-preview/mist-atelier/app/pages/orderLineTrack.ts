@@ -4,6 +4,7 @@
 import type { MistOrder, MistOrderLine, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
 import { materialDeliveryRows } from '../../../../server/src/shared/mistInternalFabric';
+import { fulfillmentProductionQcPassed } from '../../../../server/src/shared/mistFulfillment';
 import type { StepState } from '../../../../components/mist';
 
 export type LineStageKey = 'pp' | 'material' | 'cut' | 'inspection' | 'completion' | 'shipment';
@@ -84,7 +85,7 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
     const waiting = qcTasks.find(task => task.state === 'awaiting_business');
     if (waiting) return { ...base, state: 'blocked', caption: '待业务恢复', reason: `${waiting.code} 复检已出结论，须由业务核对后明确继续。`, target: { view: 'qc-workbench', id: waiting.id } };
     const passed = qcTasks.filter(task => { const result = reportOf(task)?.result; return result === 'pass' || result === 'conditional' || !!task.businessContinued; });
-    const covered = jobs.length > 0 && jobs.every(job => qcTasks.some(task => task.source.kind === 'orderLine' && task.source.productionId === job.id && passed.includes(task)));
+    const covered = jobs.length > 0 && jobs.every(job => fulfillmentProductionQcPassed(state, job));
     if (covered) return { ...base, state: 'done', caption: '全部分支 OK' };
     return { ...base, state: 'now', caption: `${passed.length} / ${qcTasks.length} 已出结论`, target: { view: 'qc-workbench', id: (qcTasks.find(task => !passed.includes(task)) || qcTasks[0]).id } };
   })();

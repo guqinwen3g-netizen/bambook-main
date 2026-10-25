@@ -71,7 +71,7 @@ it('BB-ORD-1 fabric blocked reasons, entry points and list counters stay consist
   expect(orderLineFlags(s, order('fabric'))).toMatchObject({ nok: 1, toShip: 0 });
   // 复验通过并登记完工后：NOK 清零，计入待出运
   (s.fulfillment.qcReports as Array<{ result: string }>)[1].result = 'pass';
-  s.fulfillment.productionFacts = [{ productionId: 'p-fabric', completion: { quantity: 100 } }] as never;
+  s.fulfillment.productionFacts = [{ productionId: 'p-fabric', revision:1, sizes:[], completion: { quantity: 100, sizeQuantities:[] } }] as never;
   expect(orderLineFlags(s, order('fabric'))).toMatchObject({ nok: 0, toShip: 1 });
   expect(currentLineStage(lineStages(s, order('fabric'), line('fabric')))).toMatchObject({ key: 'shipment', state: 'todo' });
   // 色样不通过：受阻在第 2 步，去处理指向样品评审
@@ -117,6 +117,7 @@ it('keeps a passed production retest blocked until business explicitly resumes i
   expect(currentLineStage(lineStages(s,o,l))).toMatchObject({key:'inspection',state:'blocked',caption:'待业务恢复'});
   expect(orderLineFlags(s,o)).toMatchObject({business:1,nok:0});
   waiting.state='reported';waiting.businessContinued={reportId:'retestr'};
+  s.fulfillment.productionFacts.push({productionId:'p-garment',revision:1,sizes:[{size:'M',quantity:100}]});s.fulfillment.qcReports[0].sizeChecks=[{size:'M',inspected:10,result:'pass',evidence:'复检'}];
   expect(lineStages(s,o,l).find(stage=>stage.key==='inspection')).toMatchObject({state:'done'});
 });
 
@@ -157,4 +158,14 @@ it('keeps PP pending after QC until the requester confirms and business continue
 it('does not reuse a passed PP after the material plan changes',()=>{
  const o=order('garment'),l={...line('garment'),fulfillmentMode:'full_package' as const,cmtIncludedItems:[] as Array<'trims'|'packaging'>};s.orders.push(o,order('fabric'));s.orderLines.push(l,line('fabric'));s.internalFabricAllocations=[{id:'a',orderId:o.id,lineId:l.id,fabricOrderId:'o-fabric',fabricLineId:'l-fabric',metres:'3',revision:1,status:'active'}] as never;s.productions=[job('garment','cut')];s.fulfillment.qcTasks.push(task('garment','plan','sample'));s.fulfillment.qcReports.push(report('plan','pass'));
  const stage=()=>lineStages(s,o,l).find(row=>row.key==='pp');expect(stage()).toMatchObject({state:'done'});l.cmtIncludedItems=['trims'];expect(stage()).toMatchObject({state:'todo',caption:'未登记产前样'});
+});
+
+it('requires current all-size QC for the inspection track, without requiring final completion',()=>{
+ const o=order('garment'),l=line('garment');s.orders.push(o);s.orderLines.push(l);s.productions.push(job('garment','qc'));
+ s.fulfillment.productionFacts.push({productionId:'p-garment',revision:2,sizes:[{size:'S',quantity:50},{size:'M',quantity:50}]});
+ s.fulfillment.qcTasks.push(task('garment','current','production'));
+ const r={...report('current','pass') as any,scopeRevision:2,sizeChecks:[{size:'S',inspected:5,result:'pass'}]};s.fulfillment.qcReports.push(r);
+ const inspection=()=>lineStages(s,o,l).find(stage=>stage.key==='inspection')!;
+ expect(inspection().state).not.toBe('done');r.sizeChecks.push({size:'M',inspected:5,result:'pass'});expect(inspection().state).toBe('done');
+ r.scopeRevision=1;expect(inspection().state).not.toBe('done');expect(s.fulfillment.productionFacts[0].completion).toBeUndefined();
 });

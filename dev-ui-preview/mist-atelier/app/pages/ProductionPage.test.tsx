@@ -136,7 +136,7 @@ it('labels finished-fabric purchase release as supply while preserving the relea
 });
 
 it('labels a completed fabric supply as complete and uses fabric stages without shipment wording',async()=>{
- bridge.state!.orders[0].type='fabric';bridge.state!.productions[0].col='done';bridge.state!.productions[0].pct=100;
+ bridge.state!.orders[0].type='fabric';const state=bridge.state!,branch=state.productions[0],fact=state.fulfillment.productionFacts.find(row=>row.productionId===branch.id)!;branch.col='done';branch.pct=100;fact.completion={id:'fabric-final',quantity:branch.qty,sizeQuantities:[],date:context.now.slice(0,10),at:context.now,actor:'业务员',evidence:'完工单',fileIds:[]};state.fulfillment.qcTasks.push({id:'fabric-qc',kind:'production',source:{kind:'orderLine',orderId,lineId:branch.lineId,productionId:branch.id},state:'reported',reportIds:['fabric-report']} as any);state.fulfillment.qcReports.push({id:'fabric-report',taskId:'fabric-qc',result:'pass',scopeRevision:fact.revision} as any);
  await mount();await range('全部');
  expect(host.textContent).toContain('备货');expect(host.textContent).toContain('加工');expect(host.textContent).not.toContain('裁剪');expect(host.textContent).not.toContain('车缝');expect(host.textContent).not.toContain('待出运');
  expect(host.querySelector('.mist-sumbar')!.textContent).toContain('已完成1');expect(host.textContent).toContain('已完成');expect(bridge.run).not.toHaveBeenCalled();
@@ -145,4 +145,12 @@ it('keeps a read-only production user out of editing and drag actions while reta
  bridge.denied=new Set(['production:write','orders:write']);await mount({view:'production-board',productionId:'production-b'});
  expect(queryByRole(document.body,'button',{name:'保存进度'})).toBeNull();expect(queryByRole(document.body,'spinbutton',{name:'生产进度（%）'})).toBeNull();expect(getByRole(document.body,'button',{name:'打开关联订单'})).toBeTruthy();expect(document.body.textContent).toContain('完工状态');
  await click('关闭');const cards=[...host.querySelectorAll<HTMLButtonElement>('.mist-kb-card')];expect(cards.length).toBeGreaterThan(0);expect(cards.every(card=>!card.draggable)).toBe(true);expect(bridge.run).not.toHaveBeenCalled();
+});
+
+it('places a completed branch with current all-size production QC in the done lane without rewriting it',async()=>{
+ const state=bridge.state!,branch=state.productions[1],f=state.fulfillment,fact=f.productionFacts.find(row=>row.productionId===branch.id)!;
+ branch.col='qc';branch.pct=100;fact.completion={id:'finished',quantity:20,sizeQuantities:[{size:'M',quantity:20}],date:context.now.slice(0,10),at:context.now,actor:'业务员',evidence:'回交点数',fileIds:[]};
+ f.qcTasks.push({id:'final',code:'QC-FINAL',kind:'production',source:{kind:'orderLine',orderId,lineId:branch.lineId,productionId:branch.id},state:'reported',reportIds:['final-report']} as any);
+ f.qcReports.push({id:'final-report',taskId:'final',scopeRevision:fact.revision,result:'pass',sizeChecks:[{size:'M',inspected:2,result:'pass',evidence:'实检'}]} as any);
+ await mount();await range('全部');const card=getByRole(host,'button',{name:/未来分支乙/});expect(card.closest('.mist-kb-col')?.querySelector('.mist-kb-h')?.textContent).toContain('已完成');expect(branch.col).toBe('qc');
 });
