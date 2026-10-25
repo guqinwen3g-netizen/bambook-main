@@ -727,6 +727,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
     }
     case 'payable.request.cancel': {
       const request = s.requests.find(r => r.id === text(p.id, '付款申请')) || fail('付款申请不存在', 'NOT_FOUND');
+      if (!c.actorId || request.requesterId !== c.actorId) throw new MistCommandError('FORBIDDEN', '仅申请人可撤回付款申请', 403);
       if (request.state !== 'pending' && request.state !== 'approved') fail(request.state === 'paid' ? '已付款的申请不能撤回；如登记有误请冲回付款' : '该申请已结束', 'PRECONDITION');
       request.state = 'cancelled'; request.cancelled = { at: c.now, actor: c.actorName, reason: text(p.reason, '撤回原因', true, 500) };
       event(root, c, request.id, `撤回付款申请 ${request.code}`);

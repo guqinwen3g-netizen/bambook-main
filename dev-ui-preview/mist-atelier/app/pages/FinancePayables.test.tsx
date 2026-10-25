@@ -2,14 +2,16 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
-import { getAllByRole, getByRole, getByLabelText, getByText, queryAllByRole } from '@testing-library/dom';
+import { getAllByRole, getByRole, getByLabelText, getByText, queryByRole, queryAllByRole } from '@testing-library/dom';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { createMistState, applyMistCommand } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
+import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
+import { PAYMENT_REQUEST_SCOPES, SETTLEMENT_SCOPES } from '../../../../server/src/shared/mistPayables';
 import { Nav } from '../nav';
 const store = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store.value }));
-vi.mock('../runtime/auth', () => { const useMistSession = () => ({ hasPermission: (scope: string) => store.value?.canWrite !== false && (!store.value?.permissions || store.value.permissions.includes(scope)) }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = () => ({ user:{id:store.value?.userId||'finance'}, hasPermission: (scope: string) => store.value?.canWrite !== false && (!store.value?.permissions || store.value.permissions.includes(scope)) }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { FinancePayables } from './FinancePayables';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, route: { view: string; id?: string; section?: string };
@@ -99,7 +101,7 @@ it('票据付款：先申请并经主管批准，再按批准登记实付；分�
   expect((getByRole(dialog('冲回分配'), 'button', { name: '确认冲回' }) as HTMLButtonElement).disabled).toBe(true);
   text('冲回原因', 'A-1 金额分错', dialog('冲回分配')); await click('确认冲回', dialog('冲回分配'));
   expect(store.value.state.payables.reversals).toHaveLength(1);
-  expect(host.textContent).toContain('还有钱没分到票据上');
+  expect(host.textContent).toContain('付款待分配');
   await click('分配到应付'); input(b.code + ' 分配金额', '100'); await click('确认分配');
   expect(store.value.state.payables.allocations).toHaveLength(3);
 });
@@ -112,7 +114,7 @@ it('预付款：财务按合同登记计划，申请经主管批准后实付，�
   await click('登记计划', dialog('登记付款计划'));
   const plan = store.value.state.payables.plans[0];
   expect(plan).toMatchObject({ purchaseId: po.id, amount: 33480, trigger: '合同回签后 7 天内' });
-  expect(host.textContent).toContain('计划不是应付');
+  expect(host.textContent).toContain(plan.code);expect(host.textContent).not.toContain('计划不是应付');
   await click('申请预付款');
   input('申请金额', '33480.01'); text('付款依据', '合同已于本周回签');
   await click('提交审批', dialog('申请预付款'));
@@ -125,17 +127,17 @@ it('预付款：财务按合同登记计划，申请经主管批准后实付，�
   const payment = store.value.state.payables.payments[0];
   expect(payment).toMatchObject({ purpose: 'prepayment', purchaseId: po.id });
   route = { view: 'payment-vouchers', section: 'payables', id: payment.id }; render();
-  expect(host.textContent).toContain('预付款挂在合同上'); expect(queryAllByRole(host, 'button', { name: '分配到应付' })).toHaveLength(0);
+  expect(host.textContent).toContain('合同预付款'); expect(queryAllByRole(host, 'button', { name: '分配到应付' })).toHaveLength(0);
   await click('付款冲回'); text('冲回原因', '流水号录错', dialog('付款冲回')); await click('确认冲回', dialog('付款冲回'));
   expect(host.textContent).toContain('已冲回');
   expect(store.value.state.payables.requests[0].state).toBe('approved');
   expect(store.value.state.payments.at(-1).amount).toBe(-33480);
 });
 
-it('没有财务写权限：可以查看，登记和申请按钮禁用', async () => {
+it('没有财务写权限：保留查看，隐藏登记和申请入口', async () => {
   store.value.canWrite = false; render();
-  for (const name of ['登记供应商票据', '登记付款计划', '提交结算', '申请票据付款']) expect((getByRole(host, 'button', { name }) as HTMLButtonElement).disabled).toBe(true);
-  await click(/待登记来源/); expect(getByRole(host, 'table', { name: '待登记来源合同' }).textContent).toContain(po.code);
+  for (const name of ['登记供应商票据', '登记付款计划', '提交结算', '申请票据付款']) expect(queryByRole(host, 'button', { name })).toBeNull();
+  await click(/待登记来源/); expect(getByRole(host, 'table', { name: '待登记来源合同' }).textContent).toContain(po.code);expect(queryByRole(host,'button',{name:'登记票据',exact:true})).toBeNull();
   expect(store.value.run).not.toHaveBeenCalled();
 });
 
@@ -144,11 +146,11 @@ function approvedBillRequest() {
   store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: po.supplierId, currency: 'CNY', lines: [{ billId: bill.id, amount: 100 }], reason: '到期' } } as any, { id: () => 'perm-req', now: new Date().toISOString(), actorName: '业务', actorId: 'sales', authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any).state;
   approve('perm-req'); return { bill, request: store.value.state.payables.requests[0] };
 }
-it('只有付款登记权限、没有核销权时，票据付款申请的登记实付禁用并写明原因', async () => {
+it('只有付款登记权限、没有核销权时，隐藏票据复合付款入口', async () => {
   const { request } = approvedBillRequest();
   store.value.permissions = ['vouchers:write', 'invoices:read', 'vouchers:read'];
   route = { view: 'payment-vouchers', section: 'payables', id: request.id }; render();
-  expect((getByRole(host, 'button', { name: '登记实付' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(queryByRole(host, 'button', { name: '登记实付' })).toBeNull();
   expect(store.value.run).not.toHaveBeenCalled();
 });
 it('打开登记实付后失去核销权限，不能提交附带分配的复合付款', async () => {
@@ -353,5 +355,35 @@ it('核对票种保留原金额与付款记录，失败后保留原件和核对�
 
 it('只读财务账号不能打开票种核对',()=>{
  const added=applyMistCommand(store.value.state,{type:'payable.bill.register',payload:{supplierId:po.supplierId,invoiceNo:'READ-ONLY',invoiceDate:day,currency:'CNY',amount:100,taxAmount:0,lines:[{purchaseId:po.id,amount:100}],due:day,dueBasis:'按合同'}},ctx);
- store.value.state=added.state;route.id=added.result.id!;store.value.canWrite=false;render();expect((getByRole(host,'button',{name:'核对票种'}) as HTMLButtonElement).disabled).toBe(true);expect(store.value.run).not.toHaveBeenCalled();
+ store.value.state=added.state;route.id=added.result.id!;store.value.canWrite=false;render();expect(queryByRole(host,'button',{name:'核对票种'})).toBeNull();expect(store.value.run).not.toHaveBeenCalled();
+});
+
+function planFixture(){
+ const made=applyMistCommand(store.value.state,{type:'payable.plan.register',payload:{purchaseId:po.id,stage:'prepayment',amount:100,trigger:'合同确认后',basis:'合同约定预付',due:day}} as any,ctx);store.value.state=made.state;return made.result.id!;
+}
+function prepayRequestFixture(){
+ const planId=planFixture(),made=applyMistCommand(store.value.state,{type:'payable.request.submit',payload:{purpose:'prepayment',planId,amount:100,reason:'合同已确认'}} as any,{...ctx,actorId:'sales',actorName:'业务员'});store.value.state=made.state;return store.value.state.payables.requests.find((r:any)=>r.id===made.result.id)!;
+}
+it('业务只有申请及采购经办权限时仍可申请预付，不能管理票据计划或登记实付',async()=>{
+ const planId=planFixture();store.value.permissions=[PAYMENT_REQUEST_SCOPES.create,SETTLEMENT_SCOPES.submit,'invoices:read','vouchers:read'];store.value.userId='sales';ctx.actorId='sales';ctx.actorName='业务员';route.id=planId;render();
+ expect(queryByRole(host,'button',{name:'登记供应商票据'})).toBeNull();expect(queryByRole(host,'button',{name:'登记付款计划'})).toBeNull();expect(queryByRole(host,'button',{name:'历史付款补登'})).toBeNull();expect(queryByRole(host,'button',{name:'取消计划'})).toBeNull();
+ expect((getByRole(host,'button',{name:'提交结算'}) as HTMLButtonElement).disabled).toBe(false);
+ await click('申请预付款');text('付款依据','按已确认合同预付');await click('提交审批',dialog('申请预付款'));
+ expect(store.value.state.payables.requests[0]).toMatchObject({purpose:'prepayment',requesterId:'sales',state:'pending',amount:100});expect(queryByRole(host,'button',{name:'登记实付'})).toBeNull();
+});
+it('付款登记和核销权限独立：只有付款登记权仍可登记无票据分配的预付款',async()=>{
+ const request=prepayRequestFixture();approve(request.id);store.value.permissions=[MIST_FINANCE_SCOPES.voucher,'invoices:read','vouchers:read'];route.id=request.id;render();
+ expect((getByRole(host,'button',{name:'登记实付'}) as HTMLButtonElement).disabled).toBe(false);expect(queryByRole(host,'button',{name:'撤回申请'})).toBeNull();expect(store.value.run).not.toHaveBeenCalled();
+});
+it('只给申请人本人显示撤回，当前申请权限撤回后入口消失',()=>{
+ const request=prepayRequestFixture();store.value.permissions=[PAYMENT_REQUEST_SCOPES.create,'invoices:read','vouchers:read'];store.value.userId='other-sales';route.id=request.id;render();
+ expect(host.textContent).toContain(request.code);expect(queryByRole(host,'button',{name:'撤回申请'})).toBeNull();
+ store.value.userId='sales';render();expect((getByRole(host,'button',{name:'撤回申请'}) as HTMLButtonElement).disabled).toBe(false);
+ store.value.permissions=['invoices:read','vouchers:read'];render();expect(queryByRole(host,'button',{name:'撤回申请'})).toBeNull();expect(store.value.run).not.toHaveBeenCalled();
+});
+it('只读付款计划保留金额与合同事实，不显示写操作及权限教学',()=>{
+ const planId=planFixture();store.value.permissions=['invoices:read','vouchers:read'];route.id=planId;render();
+ expect(host.textContent).toContain('计划金额');expect(host.textContent).toContain(po.code);
+ for(const name of ['申请预付款','历史付款补登','取消计划'])expect(queryByRole(host,'button',{name})).toBeNull();
+ expect(host.textContent).not.toContain('需要票据登记权限');expect(host.textContent).not.toContain('计划不是应付');expect(store.value.run).not.toHaveBeenCalled();
 });
