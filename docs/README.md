@@ -28,6 +28,7 @@
 | 供应商询价比价、在途采购换供应商与在手业务交接现在缺什么、哪些待定 | [范围核对](design/global/2026-10-06/27-供应商询价比价与在手业务交接范围核对-2026-10-17.md) | 2026-10-17 基于 main `90239add` 的静态核对：已定/现状/工程建议/业务待定分层及后续包 A-D；不是规则冻结、实现或验收 |
 | 新增模块要改哪几层 | `docs/MODULE_CONTRACT.md` | 八层契约 + 反模式存照表，工程宪法 |
 | 业务规则怎么办 | `docs/design/03-业务规则/业务规则总览.md`（22 条矩阵）+ 同目录 MOQ / 价格审批 / 信用控制 / 质量门禁 / 订单变更 / 交期生产 / 事件联动七篇 | 行业规则的裁决出处 |
+| 单据原件和版本怎么归属 | [Mist 现行单据边界](design/07-单据模板/1-单据体系总览.md#mist-current-versions) | 独立外部原件、明确修订来源与历史保留 |
 | 数据结构是什么 | 代码即真源：`server/prisma/schema.prisma`；导航用 `docs/design/02-数据模型/实体关系总览.md` | 总览的模型计数滞后，分组框架仍有效 |
 | 页面长什么样 / 怎么交互 | [Mist Atelier](mist-atelier/README.md) + `.qoder/skills/bambook-ui/SKILL.md` | 2026-10-13 用户确认唯一运行前端；从现成 Mist 页面继续开发，保护原布局与交互；旧 UI 只按需参考业务 |
 | 组件怎么选 | [Mist 组件](mist-atelier/03-components.md) + [页面配方](mist-atelier/04-page-recipes.md) | 组件真源 `components/mist`，参数真源 `styles/mist`；旧 BDS 处方退役 |

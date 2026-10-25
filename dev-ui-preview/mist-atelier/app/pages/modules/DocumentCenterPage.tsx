@@ -1,3 +1,4 @@
+import {fulfillmentDocumentFamily} from '../../../../../server/src/shared/mistFulfillment';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import { View } from '../../../../../types';
 /** 单据中心：按准确出运与合同保留单据版本（新版本不覆盖旧版本）、正式文件与签发 / 归档记录；我方签发 CI / PL，外部机构单据只归档原件；CI 签发回到财务应收。 */
@@ -23,7 +24,7 @@ type StatusFilter = 'active' | 'draft' | 'issued' | 'void';
 type TypeFilter = 'all' | DocType;
 const TYPE_LABEL: Record<DocType, string> = { CI: '商业发票 CI', PL: '装箱单 PL', BL: '提单 BL', CO: '原产地证 CO', OTHER: '其他外部单据' };
 const OWN = (type: DocType) => type === 'CI' || type === 'PL';
-const family = (d: FulfillmentDocument) => `${d.shipmentId}|${d.type}|${d.orderId}`;
+const family = fulfillmentDocumentFamily;
 export function documentStatus(d: FulfillmentDocument): { label: string; tone: Tone } {
   if (d.status === 'void') return { label: '已作废', tone: 'neutral' };
   if (d.status === 'issued') return d.externalIssue ? { label: '外部原件已归档', tone: 'ok' } : { label: '已签发', tone: 'ok' };
@@ -91,7 +92,7 @@ export function DocumentCenterPage() {
         field('content', '单据正文', 'textarea'),
       ],
       initialValues: { shipmentId: src?.shipmentId || (hasContext ? route.section || '' : ''), type: src?.type || 'PL', orderId: src?.orderId || '', number: d?.number || '', title: src?.title || '', dueDate: src?.dueDate || '', content: src?.content || '' },
-      submit: v => run({ type: 'fulfillment.documents.save', payload: { ...(d ? { id: d.id } : {}), shipmentId: src?.shipmentId || text(v, 'shipmentId'), orderId: src ? src.orderId : text(v, 'orderId'), type: (src?.type || text(v, 'type')) as DocType, number: text(v, 'number'), title: text(v, 'title'), dueDate: text(v, 'dueDate'), content: text(v, 'content'), fileIds: d?.fileIds || [] } }) };
+      submit: v => run({ type: 'fulfillment.documents.save', payload: { ...(d ? { id: d.id } : {}), ...(base ? { baseDocumentId: base.id } : {}), shipmentId: src?.shipmentId || text(v, 'shipmentId'), orderId: src ? src.orderId : text(v, 'orderId'), type: (src?.type || text(v, 'type')) as DocType, number: text(v, 'number'), title: text(v, 'title'), dueDate: text(v, 'dueDate'), content: text(v, 'content'), fileIds: d?.fileIds || [] } }) };
   };
   const archiveSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: '归档外部机构原件', submitLabel: '归档原件', description: `${TYPE_LABEL[d.type]} ${d.number} · 以外部机构签发的原件为准。`, fields: [field('issuer', '外部签发机构'), field('at', '实际签发时间', 'datetime-local'), field('evidence', '原件来源依据', 'textarea')], initialValues: { issuer: '', at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.documents.archiveExternal', payload: { id: d.id, issuer: text(v, 'issuer'), at: new Date(text(v, 'at')).toISOString(), evidence: text(v, 'evidence') } }) });
   const voidSpec = (d: FulfillmentDocument): ModuleEditorSpec => ({ title: `作废 ${d.number} · V${d.version}`, submitLabel: '确认作废', description: d.invoiceId ? '作废 CI 会同时作废其财务应收，出运回到单证处理中；已对客发送的需重新发送。' : '作废后出运回到单证处理中；原版本保留为历史。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.documents.void', payload: { id: d.id, reason: text(v, 'reason') } }) });

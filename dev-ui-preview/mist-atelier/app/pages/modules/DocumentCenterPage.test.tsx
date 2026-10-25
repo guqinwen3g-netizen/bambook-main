@@ -72,7 +72,7 @@ it('issues a CI after confirmation and offers a new version only from the latest
   const versionDialog=getByRole(document.body,'dialog');
   typeInto(getByRole(versionDialog,'textbox',{name:'实际单据编号'}) as HTMLInputElement,'CI-ci-2');
   await click(getByRole(versionDialog,'button',{name:'保存为草稿'}));
-  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.documents.save',payload:expect.objectContaining({shipmentId:'s',orderId:'o',type:'CI',number:'CI-ci-2',fileIds:[]})});
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.documents.save',payload:expect.objectContaining({shipmentId:'s',orderId:'o',type:'CI',number:'CI-ci-2',fileIds:[],baseDocumentId:'ci'})});
   expect(store.run.mock.calls.at(-1)![0].payload.id).toBeUndefined();
 });
 
@@ -123,4 +123,11 @@ it('asks for a collection date only on a billable CI and never submits hidden co
 
 it('shows company maintenance only to accounts that can read company settings',async()=>{
  session.denied.add('settings:system:read');render();await click(getByRole(host,'tab',{name:'抬头与模板'}));expect(queryByRole(host,'button',{name:'公司资料'})).toBeNull();session.denied.clear();render();await click(getByRole(host,'button',{name:'公司资料'}));expect(go).toHaveBeenLastCalledWith('system-settings',undefined,{section:'company'});
+});
+
+it('keeps unrelated factory and booking originals visible as separate current documents',()=>{
+ const f=store.state!.fulfillment;f.documents.push(doc('factory','OTHER',{number:'PK-1',title:'工厂装箱单',status:'issued'}),doc('booking','OTHER',{number:'BOOK-1',title:'订舱确认',status:'issued'}));render();const table=getByRole(host,'table',{name:'单据列表'});expect(table.textContent).toContain('PK-1');expect(table.textContent).toContain('BOOK-1');expect(getAllByRole(table,'row')).toHaveLength(3);expect(table.textContent).not.toContain('共 2 版');
+});
+it('shows only the explicit external document family in its version history',()=>{
+ const f=store.state!.fulfillment;f.documents.push(doc('factory-v1','OTHER',{number:'PK-1',status:'void',familyId:'factory-v1'}),doc('factory-v2','OTHER',{number:'PK-2',status:'issued',version:2,familyId:'factory-v1'}),doc('booking','OTHER',{number:'BOOK-1',status:'issued',familyId:'booking'}));render('factory-v2');const list=getByRole(host,'table',{name:'单据列表'});expect(list.textContent).toContain('BOOK-1');expect(list.textContent).toContain('PK-2');const history=getByRole(host,'table',{name:'PK-2 版本'});expect(history.textContent).toContain('PK-1');expect(history.textContent).toContain('PK-2');expect(history.textContent).not.toContain('BOOK-1');
 });

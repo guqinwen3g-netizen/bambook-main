@@ -333,6 +333,8 @@ export type FulfillmentCustoms = {
 export type FulfillmentDocument = {
     replacementDeclaredAmount?:number;
     id: string;
+    /** OTHER originals are independent unless a new version explicitly names its source. */
+    familyId?: string;
     shipmentId: string;
     orderId: string;
     type: 'CI' | 'PL' | 'BL' | 'CO' | 'OTHER';
@@ -351,6 +353,10 @@ export type FulfillmentDocument = {
     /** 财务驳回 CI 应收后退回草稿时的最近一次驳回事实。 */
     financeRejection?: { reason: string; at: string; actor: string; invoiceId: string };
 };
+export function fulfillmentDocumentFamily(document: Pick<FulfillmentDocument, 'id' | 'shipmentId' | 'orderId' | 'type' | 'familyId'>): string {
+    const source = `${document.shipmentId}|${document.type}|${document.orderId}`;
+    return document.type === 'OTHER' ? `${source}|${document.familyId || document.id}` : source;
+}
 export type FulfillmentShippingTerms = {
     orderId: string;
     consignee: string;
@@ -621,6 +627,7 @@ export type FulfillmentCommand = ReplacementExportCommand | {
     type: 'fulfillment.documents.save';
     payload: {
         id?: string;
+        baseDocumentId?: string;
         shipmentId: string;
         orderId: string;
         type: FulfillmentDocument['type'];
@@ -1765,8 +1772,14 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('单据来源/类型不可更换');
             if (old && old.status !== 'draft')
                 fail('已签发或作废单据保留历史，请建立新版本');
+            if (old && p.baseDocumentId) fail('已有单据不可更换版本来源');
+            const base = p.baseDocumentId ? get(f.documents, p.baseDocumentId, '版本来源') : undefined;
+            if (base && (base.shipmentId !== s.id || base.type !== p.type || base.orderId !== (p.orderId || ''))) fail('版本来源必须属于同一出运、类型和订单');
             const id = old?.id || ctx.id();
-            const row: FulfillmentDocument = { id, shipmentId: s.id, orderId: p.orderId || '', type: p.type, number: text(p.number, '单据编号'), version: old?.version || Math.max(0, ...f.documents.filter(d => d.shipmentId === s.id && d.type === p.type && d.orderId === p.orderId).map(d => d.version)) + 1, title: text(p.title, '标题'), dueDate: day(p.dueDate, 'CI合同应收日', p.type === 'CI'&&!root.orders.find(o=>o.id===p.orderId)?.replacementSource), content: text(p.content, '单据正文'), fileIds: files(root, p.fileIds), status: 'draft', createdAt: old?.createdAt || ctx.now, actor: ctx.actorName };
+            const familyId = p.type === 'OTHER' ? old?.familyId || old?.id || base?.familyId || base?.id || id : undefined;
+            const family = fulfillmentDocumentFamily({ id, shipmentId: s.id, orderId: p.orderId || '', type: p.type, ...(familyId ? { familyId } : {}) });
+            const version = old?.version || Math.max(0, ...f.documents.filter(d => fulfillmentDocumentFamily(d) === family).map(d => d.version)) + 1;
+            const row: FulfillmentDocument = { id, ...(familyId ? { familyId } : {}), shipmentId: s.id, orderId: p.orderId || '', type: p.type, number: text(p.number, '单据编号'), version, title: text(p.title, '标题'), dueDate: day(p.dueDate, 'CI合同应收日', p.type === 'CI'&&!root.orders.find(o=>o.id===p.orderId)?.replacementSource), content: text(p.content, '单据正文'), fileIds: files(root, p.fileIds), status: 'draft', createdAt: old?.createdAt || ctx.now, actor: ctx.actorName };
             if (old)
                 Object.assign(old, row);
             else
