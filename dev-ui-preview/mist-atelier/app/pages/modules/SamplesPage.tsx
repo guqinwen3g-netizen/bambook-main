@@ -190,9 +190,9 @@ export function SamplesPage() {
 
   if (editor.spec) return editor.view;
 
-  const balanceLines = (row: LedgerRow) => row.samples.map(sample => <span key={sample.id} className="mist-cell-sub">{sample.form} · <b className="mist-num">{sample.available}</b> {uiText(sample.unit)}{uiText(" 可用")}</span>);
+  const balanceLines = (row: LedgerRow) => row.samples.map(sample => <span key={sample.id} className="mist-cell-sub">{[sample.form,sample.color].filter(Boolean).join(' · ')} · <b className="mist-num">{sample.available}</b> {uiText(sample.unit)}{uiText(" 可用")}</span>);
   const fabricColumns: Column<LedgerRow>[] = [
-    { key: 'archive', header: '面料档案', width: 'minmax(190px,1.6fr)', render: row => <ObjectCell thumb={<Thumb icon={Layers} />} name={row.name} meta={<><Mono>{row.primary.code}</Mono>{uiText(row.samples.length > 1 ? ` · ${row.samples.length} 种形态` : '')}</>} />, sortValue: row => row.name },
+    { key: 'archive', header: '面料档案', width: 'minmax(190px,1.6fr)', render: row => <ObjectCell thumb={<Thumb icon={Layers} />} name={row.name} meta={<><Mono>{row.primary.code}</Mono>{uiText(row.samples.length > 1 ? ` · ${row.samples.length}份样品` : '')}</>} />, sortValue: row => row.name },
     { key: 'balance', header: '形态与余额', width: 'minmax(150px,1.2fr)', render: row => <div className="mist-col">{balanceLines(row)}</div> },
     { key: 'source', header: '来源', width: 'minmax(140px,1fr)', hideOnMobile: true, render: row => state ? <span className="mist-cell-sub">{fulfillmentSourceLabel(state, row.primary.source)}</span> : null },
     { key: 'location', header: '位置', width: '110px', hideOnMobile: true, render: row => locationSummary(row) },
@@ -272,7 +272,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill>{primary.category}</Pill><Pill tone={status.tone}>{uiText(status.label)}</Pill>{primary.role && <Pill tone="accent">{fulfillmentSampleRoleLabel(primary.role)}</Pill>}</div>
     <Facts items={[
       { label: '来源', value: <SourceLink source={primary.source} /> },
-      { label: row.shelf === 'fabric' ? '形态数' : '规格', value: row.shelf === 'fabric' ? `${row.samples.length} 种` : [primary.size, primary.color].filter(Boolean).join(' · ') || '未记录' },
+      { label: row.shelf === 'fabric' ? '样品数' : '规格', value: row.shelf === 'fabric' ? `${row.samples.length}` : [primary.size, primary.color].filter(Boolean).join(' · ') || '未记录' },
       ...(shipment ? [{ label: '出运批次', value: <Mono>{shipment.code}</Mono> }] : []),
       { label: '登记', value: shortWhen(primary.createdAt) },
     ]} />

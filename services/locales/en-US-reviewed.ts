@@ -1,5 +1,7 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '样品数': 'Samples',
+  '· {0}份样品': '· {0} samples',
   '样品用途': 'Sample purpose',
   '返回生产单': 'Back to production',
   '生产单已不可用': 'Production unavailable',

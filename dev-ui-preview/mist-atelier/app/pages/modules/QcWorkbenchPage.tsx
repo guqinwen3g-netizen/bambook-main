@@ -80,7 +80,7 @@ function groupTasks(tasks: FulfillmentQcTask[]): TaskGroup[] {
 
 function taskSubject(state: MistState, task: FulfillmentQcTask) {
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
-  if (sample) return `${sample.code} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'}${sample.size ? ' · ' + sample.size : ''}`;
+  if (sample) return [sample.code, sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样', sample.color, sample.size].filter(Boolean).join(' · ');
   if (task.source.kind === 'version') return '开发返样';
   const production = state.productions.find(item => task.source.kind === 'orderLine' && item.id === task.source.productionId);
   return production ? `生产分支 ${production.code}` : '订单条目';
@@ -189,7 +189,7 @@ export function QcWorkbenchPage() {
         onContinue={() => setDialog(continueSpec(current))}
         onTransfer={() => setDialog(transferSpec(current))}
         onReschedule={() => setDialog(rescheduleSpec(current))}
-        onBack={sourceSample ? () => go('samples', sourceSample.id, sourceSample.role === 'shipping' && sourceSample.shipmentId ? { section: 'shipment:' + sourceSample.shipmentId, productionId: sourceSample.source.kind === 'orderLine' ? sourceSample.source.productionId : undefined } : {}) : undefined}
+        onBack={sourceSample ? () => go('samples', sourceSample.id, sourceSample.role === 'shipping' && sourceSample.shipmentId ? { section: 'shipment:' + sourceSample.shipmentId, productionId: sourceSample.source.kind === 'orderLine' ? sourceSample.source.productionId : undefined } : sourceSample.source.kind === 'orderLine' ? {productionId:sourceSample.source.productionId} : {}) : undefined}
         backLabel={sourceSample?.role === 'shipping' ? '返回本票船样' : '返回实物样品'} />
     : <EmptyState icon={ClipboardCheck} title={uiText("任务详情")} compact />;
 
@@ -267,7 +267,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
     <DetailBlock title={uiText("来源与送审实物")}>
       <Facts items={[
         { label: '准确来源', value: <SourceLink source={task.source} /> },
-        { label: task.kind === 'production' ? '生产分支' : '准确实物', value: sample ? `${sample.code} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'}` : production ? `${production.code} · ${production.qty} ${line?.unit || ''}`.trim() : task.source.kind === 'version' ? '开发版本返样' : '订单条目' },
+        { label: task.kind === 'production' ? '生产分支' : '准确实物', value: sample ? taskSubject(state,task) : production ? `${production.code} · ${production.qty} ${line?.unit || ''}`.trim() : task.source.kind === 'version' ? '开发版本返样' : '订单条目' },
         { label: '业务发起人', value: task.requestedBy || '未记录' },
         { label: '发起', value: shortWhen(task.createdAt) },
         ...(task.kind === 'production' && sizes.length ? [{ label: '生产尺码', value: sizes.map(size => `${size.size} ${size.quantity}`).join(' · ') }] : []),

@@ -150,6 +150,8 @@ it('can inspect the second colour in a grouped fabric archive using its own phys
   state.fulfillment.samples.push({...fabric('camel','米样','米',0.5,0.5),source,role:'pioneer',color:'驼色'},{...fabric('charcoal','米样','米',0.5,0.5),source,role:'pioneer',color:'炭灰'});
   store.run.mockResolvedValue({result:{id:'qc-charcoal'}});render(undefined,{productionId:'branch'});
   const second=host.querySelector('[data-sample-form="charcoal"]') as HTMLElement;
+  const table=getByRole(host,'table',{name:'样品台账'});
+  expect(table.textContent).toContain('2份样品');expect(table.textContent).toContain('驼色');expect(table.textContent).toContain('炭灰');expect(host.textContent).not.toContain('2 种形态');
   expect(second.textContent).toContain('炭灰');
   await act(async()=>getByRole(second,'button',{name:'查看 / 发起本样品QC'}).click());
   await act(async()=>getByRole(host,'button',{name:'下一步'}).click());
