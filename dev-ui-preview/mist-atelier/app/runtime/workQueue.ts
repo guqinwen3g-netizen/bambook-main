@@ -41,8 +41,16 @@ export function mistMyTasks(state: MistState | null | undefined, options: Pick<M
       const claim=state?.platform?.claims.find(row=>row.id===task.target.id),job=state?.platform?.claimGoods.filter(row=>row.claimId===claim?.id).flatMap(row=>row.repairs??[]).find(row=>task.kind==='claim-repair-qc:'+row.id);
       if(claim&&job)return {...task,title:localizedPageTitle('返修复检')+' · '+claim.code,permission:`qc:${job.domain}_chain:write`};
     }
+    if(task.kind?.startsWith('claim-repair-return:')&&task.target.view==='inventory')return {...task,title:localizedPageTitle(task.title),target:{...task.target,detail:'full' as const}};
     if(task.kind?.startsWith('claim-inventory:')&&task.target.view==='inventory'){
       const receipt=state?.fulfillment.returnReceipts?.find(row=>row.id===task.target.id);
+      const goods=state?.platform.claimGoods.find(row=>task.kind==='claim-inventory:'+row.id);
+      if(goods?.destination==='Repair'&&goods.receivedQuantity===goods.quantity){
+        const outstanding=(state?.fulfillment.receivedRecords||[]).filter(row=>row.goodsId===goods.id&&!row.releasedRepairId&&!row.disposal);
+        // A dedicated return task replaces the parent only while every outstanding lot is outside.
+        // The persisted parent remains unfinished and returns when local work is available again.
+        if(outstanding.length&&outstanding.every(record=>(goods.repairDispatches||[]).some(trip=>trip.receivedEventId===record.id&&!trip.returned&&state?.tasks.some(child=>!child.done&&child.kind==='claim-repair-return:'+trip.id))))return {...task,done:true};
+      }
       if(receipt)return {...task,title:localizedPageTitle('退货处理')+' · '+receipt.code,target:{...task.target,section:'claim:'+receipt.claimId},permission:'inventory:write'};
     }
     if(task.kind?.startsWith('claim-recovery:')&&task.target.view==='claims'){

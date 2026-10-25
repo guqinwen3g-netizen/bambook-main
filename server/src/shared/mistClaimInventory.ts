@@ -2,18 +2,27 @@
 import {MistCommandError,mistOrderOwnerIds,type MistState,type MistContext,type MistCommandResult} from './mistWorkspace';
 import {getExecutedClaimGoodsSource,platformBusinessDate,type PlatformClaimGoodsSource,type PlatformClaimGoods} from './mistPlatform';
 import {canVerifyClaim,claimQcPermission} from './mistClaimCoordination';
+import {supplierBusinessDay,supplierUnavailableReason} from './mistSupplierStatus';
 import type {FulfillmentStock,FulfillmentStockMovement} from './mistFulfillment';
 
-export type ClaimInventoryWarehouse={id:string;code:string;name:string;address:string;active:boolean;createdAt:string;updatedAt:string};
+export type ClaimInventoryWarehouse={id:string;code:string;name:string;address:string;active:boolean;supplierId?:string;custodian?:'company'|'supplier';createdAt:string;updatedAt:string};
 export type ClaimReturnReceipt={id:string;code:string;claimId:string;warehouseId:string;goodsIds:string[];createdAt:string;actorId:string;actor:string};
 type RepairActor={at:string;actorId:string;actor:string};
+export type ClaimRepairDispatch=RepairActor&{id:string;receivedEventId:string;stockId:string;batchNumber:string;originWarehouseId:string;originWarehouseName:string;originLocation:string;quantity:number;unit:string;supplierId:string;supplierName:string;warehouseId:string;warehouseName:string;address:string;location:string;date:string;recipient:string;reference:string;basis:string;fileIds:string[];movementId:string;returned?:RepairActor&{id:string;date:string;warehouseId:string;warehouseName:string;location:string;recipient:string;reference:string;basis:string;fileIds:string[];movementId:string}};
+/** Latest physical custody for one original received batch; the formal RT source stays immutable. */
+export const latestRepairDispatch=(goods:Pick<PlatformClaimGoods,'repairDispatches'>,recordId:string)=>goods.repairDispatches?.filter(row=>row.receivedEventId===recordId).at(-1);
+export function pendingRepairDispatch(goods:Pick<PlatformClaimGoods,'repairDispatches'>,recordId:string){const latest=latestRepairDispatch(goods,recordId);return latest&&!latest.returned?latest:undefined;}
+export function unrecordedRepairDispatch(goods:Pick<PlatformClaimGoods,'repairDispatches'|'repairs'>,recordId:string){const latest=latestRepairDispatch(goods,recordId);return latest?.returned&&!goods.repairs?.some(job=>job.externalDispatchId===latest.id)?latest:undefined;}
+
 /** Repair work is shared with Claims/QC; physical stock and movement records remain in Inventory. */
-export type ClaimRepairJob=RepairActor&{id:string;receivedEventId:string;stockId:string;batchNumber:string;quantity:number;unit:string;domain:'fabric'|'garment';warehouseId:string;place:string;supplierId:string;supplierName:string;technician:string;completedAt:string;basis:string;fileIds:string[];qc?:RepairActor&{id:string;result:'pass'|'fail';checkedAt:string;basis:string;fileIds:string[]};handback?:RepairActor&{id:string;date:string;customerId:string;recipient:string;reference:string;basis:string;fileIds:string[];unlockMovementId:string;outboundMovementId:string}};
+export type ClaimRepairJob=RepairActor&{id:string;receivedEventId:string;stockId:string;batchNumber:string;quantity:number;unit:string;domain:'fabric'|'garment';warehouseId:string;place:string;supplierId:string;supplierName:string;externalDispatchId?:string;technician:string;completedAt:string;basis:string;fileIds:string[];qc?:RepairActor&{id:string;result:'pass'|'fail';checkedAt:string;basis:string;fileIds:string[]};handback?:RepairActor&{id:string;date:string;customerId:string;recipient:string;reference:string;basis:string;fileIds:string[];unlockMovementId:string;outboundMovementId:string}};
 export type ClaimReceivedRecord={id:string;returnReceiptId:string;goodsId:string;stockId:string;source:PlatformClaimGoodsSource;quantity:number;unit:string;warehouseId:string;batchNumber:string;location:string;ownership:'Owned'|'Transferred';ownerCustomerId?:string;ownershipDate:string;ownershipEvidence:string;receivedAt:string;basis:string;fileIds:string[];at:string;actorId:string;actor:string;inboundMovementId:string;holdMovementId:string;releasedRepairId?:string;disposal?:{id:string;basis:string;fileIds:string[];at:string;actorId:string;actor:string;unlockMovementId:string;outboundMovementId:string}};
 export type ClaimInventoryCommand=
- |{type:'fulfillment.claimInventory.warehouse.save';payload:{id?:string;code:string;name:string;address:string;active:boolean}}
+ |{type:'fulfillment.claimInventory.warehouse.save';payload:{id?:string;code:string;name:string;address:string;active:boolean;supplierId?:string;custodian?:'company'|'supplier'}}
  |{type:'fulfillment.claimInventory.receive';payload:{goodsId:string;quantity:number;unit:string;warehouseId:string;location:string;batchNumber:string;ownership:'Owned'|'Transferred';ownershipDate:string;ownershipEvidence:string;receivedAt:string;basis:string;fileIds:string[]}}
  |{type:'fulfillment.claimInventory.scrap';payload:{goodsId:string;receivedEventId:string;basis:string;fileIds:string[]}}
+ |{type:'fulfillment.claimInventory.repair.dispatch';payload:{goodsId:string;receivedEventId:string;supplierId:string;warehouseId:string;location:string;date:string;recipient:string;reference:string;basis:string;fileIds:string[]}}
+ |{type:'fulfillment.claimInventory.repair.return';payload:{goodsId:string;dispatchId:string;date:string;recipient:string;reference:string;basis:string;fileIds:string[]}}
  |{type:'fulfillment.claimInventory.repair.record';payload:{goodsId:string;receivedEventId:string;supplierId:string;technician:string;completedAt:string;basis:string;fileIds:string[]}}
  |{type:'fulfillment.claimInventory.repair.qc';payload:{goodsId:string;repairId:string;result:'pass'|'fail';checkedAt:string;basis:string;fileIds:string[]}}
  |{type:'fulfillment.claimInventory.repair.handback';payload:{goodsId:string;repairId:string;date:string;recipient:string;reference:string;basis:string;fileIds:string[]}};
@@ -48,25 +57,49 @@ export function createClaimReturnReceipt(root:MistState,goodsId:string,warehouse
  return receipt;
 }
 
+function verifyRepairCustody(root:MistState,goods:PlatformClaimGoods,record:ClaimReceivedRecord){
+ const journeys=(goods.repairDispatches??[]).filter(row=>row.receivedEventId===record.id),f=data(root),movementIds:string[]=[];
+ let warehouseId=record.warehouseId,location=record.location,earliest=record.receivedAt;
+ for(const journey of journeys){
+  if(warehouseId!==record.warehouseId||journey.stockId!==record.stockId||journey.batchNumber!==record.batchNumber||journey.originWarehouseId!==record.warehouseId||!journey.originWarehouseName||journey.originLocation!==record.location||journey.quantity!==record.quantity||journey.unit!==record.unit||journey.warehouseId===record.warehouseId||!journey.supplierId||!journey.supplierName||!journey.warehouseName||!journey.address||!journey.location||!journey.actorId||!journey.actor||journey.date<earliest)fail('外修移交与原收货批次不一致','INVALID_STATE');
+  files(root,journey.fileIds);
+  const verify=(fact:RepairActor&{movementId:string;recipient:string;basis:string},targetWarehouseId:string,targetLocation:string,sourceLocation:string)=>{
+   const m=f.stockMovements.find(row=>row.id===fact.movementId);
+   if(!m||m.stockId!==record.stockId||m.kind!=='move'||m.goodsId!==goods.id||m.receivedEventId!==record.id||m.quantity!==record.quantity||m.unit!==record.unit||m.warehouseId!==targetWarehouseId||m.location!==targetLocation||m.sourceLocation!==sourceLocation||m.person!==fact.recipient||m.note!==fact.basis||m.at!==fact.at||m.actor!==fact.actor||m.onHandBefore!==record.quantity||m.onHandAfter!==record.quantity||m.lockedBefore!==record.quantity||m.lockedAfter!==record.quantity)fail('外修缺少准确送出或返库流水','INVALID_STATE');
+   movementIds.push(m!.id);
+  };
+  verify(journey,journey.warehouseId,journey.location,record.location);warehouseId=journey.warehouseId;location=journey.location;
+  if(journey.returned){
+   const back=journey.returned;if(!back.actorId||!back.actor||back.date<journey.date||back.warehouseId!==record.warehouseId||!back.warehouseName||back.location!==record.location)fail('外修返库记录无效','INVALID_STATE');files(root,back.fileIds);
+   verify(back,record.warehouseId,record.location,journey.location);warehouseId=record.warehouseId;location=record.location;earliest=back.date;
+  }
+ }
+ if(new Set(movementIds).size!==movementIds.length)fail('外修移交流水重复','INVALID_STATE');
+ return{warehouseId,location,movementIds};
+}
+
 function ledger(root:MistState,goodsId:string){
  const {goods,source,disposition}=getExecutedClaimGoodsSource(root,goodsId),f=data(root),receipt=receiptFor(root,goodsId),records=f.receivedRecords.filter(row=>row.goodsId===goodsId);
+ if(goods.repairDispatches?.length&&(goods.destination!=='Repair'||disposition.kind!=='Repair'||new Set(goods.repairDispatches.map(row=>row.id)).size!==goods.repairDispatches.length||goods.repairDispatches.some(row=>!records.some(record=>record.id===row.receivedEventId))))fail('外修记录与批准处置或收货来源不一致','INVALID_STATE');
  if(goods.repairs?.length&&(goods.destination!=='Repair'||disposition.kind!=='Repair'||new Set(goods.repairs.map(row=>row.id)).size!==goods.repairs.length||goods.repairs.some(job=>!records.some(record=>record.id===job.receivedEventId))))fail('返修记录与批准处置或收货来源不一致','INVALID_STATE');
  if(new Set(records.map(row=>row.id)).size!==records.length||new Set(records.map(row=>row.stockId)).size!==records.length)fail('实际退货批次编号或库存关联重复','INVALID_STATE');
  for(const record of records){
-  amount(record.quantity);const stock=f.stock.find(row=>row.id===record.stockId),jobs=(goods.repairs??[]).filter(job=>job.receivedEventId===record.id),released=jobs.find(job=>job.id===record.releasedRepairId),handback=released?.handback,remaining=record.disposal||handback?0:record.quantity;
+  amount(record.quantity);const stock=f.stock.find(row=>row.id===record.stockId),jobs=(goods.repairs??[]).filter(job=>job.receivedEventId===record.id),released=jobs.find(job=>job.id===record.releasedRepairId),handback=released?.handback,remaining=record.disposal||handback?0:record.quantity,custody=verifyRepairCustody(root,goods,record);
   if(record.releasedRepairId&&!handback||record.disposal&&handback||jobs.some(job=>job.handback&&job!==released))fail('返修交还与收货批次关联不一致','INVALID_STATE');
+  if((handback||record.disposal)&&(custody.warehouseId!==record.warehouseId||unrecordedRepairDispatch(goods,record.id)))fail('外修尚未完成返库及本次复检','INVALID_STATE');
   for(const job of jobs){
    if(job.stockId!==record.stockId||job.quantity!==record.quantity||job.unit!==record.unit||job.warehouseId!==record.warehouseId||job.batchNumber!==record.batchNumber||!job.actorId||!job.actor)fail('维修记录与真实收货批次不一致','INVALID_STATE');
+   if(job.externalDispatchId){const journey=goods.repairDispatches?.find(row=>row.id===job.externalDispatchId);if(!journey?.returned||journey.receivedEventId!==record.id||journey.supplierId!==job.supplierId||job.place!==journey.warehouseName+' · '+journey.location||job.completedAt<journey.date||job.completedAt>journey.returned.date||jobs.filter(other=>other.externalDispatchId===journey.id).length!==1)fail('外修结果与准确移交批次不一致','INVALID_STATE');}
    files(root,job.fileIds);if(job.qc)files(root,job.qc.fileIds);
    if(job.handback){files(root,job.handback.fileIds);if(job!==latestClaimRepair(goods,record.id)||job.qc?.result!=='pass'||record.ownership!=='Transferred'||record.ownerCustomerId!==source.customerId||job.handback.customerId!==source.customerId||!job.handback.actorId||!job.handback.actor)fail('返修交还缺少准确客户货权或合格复检','INVALID_STATE');}
   }
-  if(!same(record.source,source)||record.returnReceiptId!==receipt.id||record.warehouseId!==receipt.warehouseId||record.unit!==source.unit||!stock||stock.sourceKind!=='claimReturn'||stock.goodsId!==goodsId||stock.claimId!==source.claimId||stock.dispositionId!==source.dispositionId||stock.invoiceId!==source.invoiceId||stock.orderId!==source.orderId||stock.lineId!==source.lineId||stock.returnReceiptId!==receipt.id||stock.receivedEventId!==record.id||stock.warehouseId!==record.warehouseId||stock.batchNumber!==record.batchNumber||stock.unit!==record.unit||stock.location!==record.location||stock.ownership!==record.ownership||stock.ownerCustomerId!==record.ownerCustomerId||stock.ownershipDate!==record.ownershipDate||stock.ownershipEvidence!==record.ownershipEvidence||stock.quantity!==record.quantity||stock.onHand!==remaining||stock.locked!==remaining||stock.available!==0||stock.purchaseId||stock.receiptId)fail('退货库存、隔离余额或冻结来源与实收事实不一致','INVALID_STATE');
+  if(!same(record.source,source)||record.returnReceiptId!==receipt.id||record.warehouseId!==receipt.warehouseId||record.unit!==source.unit||!stock||stock.sourceKind!=='claimReturn'||stock.goodsId!==goodsId||stock.claimId!==source.claimId||stock.dispositionId!==source.dispositionId||stock.invoiceId!==source.invoiceId||stock.orderId!==source.orderId||stock.lineId!==source.lineId||stock.returnReceiptId!==receipt.id||stock.receivedEventId!==record.id||stock.warehouseId!==custody.warehouseId||stock.batchNumber!==record.batchNumber||stock.unit!==record.unit||stock.location!==custody.location||stock.ownership!==record.ownership||stock.ownerCustomerId!==record.ownerCustomerId||stock.ownershipDate!==record.ownershipDate||stock.ownershipEvidence!==record.ownershipEvidence||stock.quantity!==record.quantity||stock.onHand!==remaining||stock.locked!==remaining||stock.available!==0||stock.purchaseId||stock.receiptId)fail('退货库存、隔离余额或冻结来源与实收事实不一致','INVALID_STATE');
   files(root,record.fileIds);if(record.disposal)files(root,record.disposal.fileIds);
   const verify=(id:string,kind:FulfillmentStockMovement['kind'],onHandBefore:number,onHandAfter:number,lockedBefore:number,lockedAfter:number)=>{const movement=f.stockMovements.find(row=>row.id===id),fact=kind==='unlock'||kind==='scrap'||kind==='issue'?record.disposal??handback:record;if(!movement||!fact||movement.stockId!==stock!.id||movement.kind!==kind||movement.quantity!==record.quantity||movement.unit!==record.unit||movement.goodsId!==goodsId||movement.receivedEventId!==record.id||movement.warehouseId!==record.warehouseId||movement.location!==record.location||movement.actor!==fact.actor||movement.at!==fact.at||movement.note!==fact.basis||movement.onHandBefore!==onHandBefore||movement.onHandAfter!==onHandAfter||movement.lockedBefore!==lockedBefore||movement.lockedAfter!==lockedAfter)fail('退回库存缺少完整入库、隔离或处置流水','INVALID_STATE');};
   verify(record.inboundMovementId,'receive',0,record.quantity,0,0);verify(record.holdMovementId,'lock',record.quantity,record.quantity,0,record.quantity);
   if(record.disposal){verify(record.disposal.unlockMovementId,'unlock',record.quantity,record.quantity,record.quantity,0);verify(record.disposal.outboundMovementId,'scrap',record.quantity,0,0,0);}
   if(handback){verify(handback.unlockMovementId,'unlock',record.quantity,record.quantity,record.quantity,0);verify(handback.outboundMovementId,'issue',record.quantity,0,0,0);}
-  const known=new Set([record.inboundMovementId,record.holdMovementId,...(record.disposal?[record.disposal.unlockMovementId,record.disposal.outboundMovementId]:[]),...(handback?[handback.unlockMovementId,handback.outboundMovementId]:[])]);if(f.stockMovements.some(row=>row.stockId===stock!.id&&!known.has(row.id)))fail('退回库存存在未绑定真实收货批次的流水','INVALID_STATE');
+  const known=new Set([record.inboundMovementId,record.holdMovementId,...custody.movementIds,...(record.disposal?[record.disposal.unlockMovementId,record.disposal.outboundMovementId]:[]),...(handback?[handback.unlockMovementId,handback.outboundMovementId]:[])]);if(f.stockMovements.some(row=>row.stockId===stock!.id&&!known.has(row.id)))fail('退回库存存在未绑定真实收货批次的流水','INVALID_STATE');
  }
  const received=total(records.map(row=>row.quantity));if(units(received)>units(source.quantity)||goods.receivedQuantity!==undefined&&goods.receivedQuantity!==received)fail('实际收货汇总超过批准量或与退回履行不一致','INVALID_STATE');
  return {goods,source,disposition,receipt,records,received};
@@ -76,10 +109,48 @@ export function assertClaimGoodsFullyReturned(root:MistState,goodsId:string){con
 export function assertClaimGoodsInventorySettled(root:MistState,goodsId:string){const scope=ledger(root,goodsId);assertClaimGoodsFullyReturned(root,goodsId);const settled=scope.goods.destination==='Scrap'?scope.records.every(record=>record.disposal):scope.goods.destination==='Repair'&&scope.records.every(record=>record.releasedRepairId);if(!settled)fail(scope.goods.destination==='Scrap'?'退货尚未报废，不能结案':scope.disposition.kind==='Repair'&&scope.goods.destination==='Repair'?'返修货物尚未交还，不能结案':'退回货物尚未完成处置，不能结案','PRECONDITION');}
 function event(root:MistState,context:MistContext,claimId:string,stockId:string,message:string,fileIds:string[]){root.events.unshift({id:context.id(),entityType:'inventory',entityId:stockId,actor:context.actorName,at:context.now,text:message,fileIds});root.notifications.unshift({id:context.id(),category:'general',title:message,detail:'',at:context.now,readAt:null,target:{view:'claims',id:claimId}});}
 
+type CustodyCommand=Extract<ClaimInventoryCommand,{type:'fulfillment.claimInventory.repair.dispatch'|'fulfillment.claimInventory.repair.return'}>;
+function applyRepairCustodyCommand(root:MistState,command:CustodyCommand,context:MistContext):MistCommandResult{
+ if(context.can&&!context.can('inventory:write'))fail('外修移交须由仓储经手人办理','FORBIDDEN');
+ const p=command.payload,{goods,claim,disposition}=active(root,p.goodsId),scope=ledger(root,p.goodsId),f=data(root),who=actor(context);
+ if(goods.destination!=='Repair'||disposition.kind!=='Repair')fail('批准处置不是返修交还','PRECONDITION');
+ const trip=command.type==='fulfillment.claimInventory.repair.return'?goods.repairDispatches?.find(row=>row.id===command.payload.dispatchId):undefined;
+ const record=scope.records.find(row=>row.id===(command.type==='fulfillment.claimInventory.repair.dispatch'?command.payload.receivedEventId:trip?.receivedEventId));
+ if(!record)fail('请选择本案真实返修批次','NOT_FOUND');
+ if(record!.releasedRepairId||record!.disposal)fail('本批已经处置或交还','PRECONDITION');
+ if(record!.ownership!=='Transferred'||record!.ownerCustomerId!==scope.source.customerId)fail('返修交还须保留来源客户货权','PRECONDITION');
+ const stock=f.stock.find(row=>row.id===record!.stockId)!,fileIds=repairEvidence(root,p.fileIds,[...claim.fileIds,...disposition.fileIds]);
+ const move=(fact:RepairActor&{recipient:string;basis:string},id:string,warehouseId:string,location:string)=>{
+  f.stockMovements.push({id,stockId:stock.id,kind:'move',quantity:record!.quantity,unit:record!.unit,goodsId:goods.id,receivedEventId:record!.id,warehouseId,location,sourceLocation:stock.location,person:fact.recipient,note:fact.basis,at:fact.at,actor:fact.actor,onHandBefore:record!.quantity,onHandAfter:record!.quantity,lockedBefore:record!.quantity,lockedAfter:record!.quantity});
+  stock.warehouseId=warehouseId;stock.location=location;
+ };
+ if(command.type==='fulfillment.claimInventory.repair.dispatch'){
+  const v=command.payload,previous=latestClaimRepair(goods,record!.id);
+  if(pendingRepairDispatch(goods,record!.id))fail('本批外修尚未返库','PRECONDITION');
+  if(unrecordedRepairDispatch(goods,record!.id))fail('请先登记上次外修结果','PRECONDITION');
+  if(previous&&!previous.qc)fail('本批维修尚待复检','PRECONDITION');
+  const site=warehouse(root,v.warehouseId),home=warehouse(root,record!.warehouseId),supplier=root.market.suppliers.find(row=>row.id===v.supplierId);
+  if(!supplier||!site.supplierId||site.supplierId!==supplier.id||site.id===record!.warehouseId)fail('请选择对应维修单位的外部保管点');
+  const unavailable=supplierUnavailableReason(supplier!,supplierBusinessDay(context.now));if(unavailable)fail(unavailable,'PRECONDITION');
+  const earliest=[record!.receivedAt,previous?.qc?.checkedAt||'',latestRepairDispatch(goods,record!.id)?.returned?.date||''].sort().at(-1)!;
+  const id=context.id(),movementId=context.id(),date=repairDate(v.date,'送修日期',earliest,context);
+  const next:ClaimRepairDispatch={id,receivedEventId:record!.id,stockId:stock.id,batchNumber:record!.batchNumber,originWarehouseId:record!.warehouseId,originWarehouseName:home.name,originLocation:record!.location,quantity:record!.quantity,unit:record!.unit,supplierId:supplier!.id,supplierName:supplier!.name,warehouseId:site.id,warehouseName:site.name,address:site.address,location:text(v.location,'外修位置',500),date,recipient:text(v.recipient,'接收人',200),reference:text(v.reference,'交接凭据',300),basis:text(v.basis,'送修依据'),fileIds,movementId,at:context.now,...who};
+  (goods.repairDispatches??=[]).push(next);move(next,movementId,site.id,next.location);refreshRepairProgress(root,goods);ledger(root,goods.id);
+  root.tasks.unshift({id:context.id(),kind:'claim-repair-return:'+id,title:'外修返库 · '+claim.code,due:'',done:false,permission:'inventory:write',assigneeIds:[],target:{view:'inventory',id:stock.id}});
+  event(root,context,claim.id,stock.id,claim.code+' 外送维修 · '+record!.batchNumber,fileIds);return{id,claimId:claim.id,stockId:stock.id,receivedEventId:record!.id};
+ }
+ if(!trip||trip!==pendingRepairDispatch(goods,record!.id))fail('请办理本批尚未返库的外修移交','PRECONDITION');
+ const v=command.payload,home=warehouse(root,record!.warehouseId),id=context.id(),movementId=context.id();
+ trip!.returned={id,date:repairDate(v.date,'返库日期',trip!.date,context),warehouseId:home.id,warehouseName:home.name,location:record!.location,recipient:text(v.recipient,'收货人',200),reference:text(v.reference,'返库凭据',300),basis:text(v.basis,'返库依据'),fileIds,movementId,at:context.now,...who};
+ move(trip!.returned,movementId,home.id,record!.location);refreshRepairProgress(root,goods);ledger(root,goods.id);
+ root.tasks.filter(task=>task.kind==='claim-repair-return:'+trip!.id).forEach(task=>task.done=true);
+ event(root,context,claim.id,stock.id,claim.code+' 外修返库 · '+record!.batchNumber,fileIds);return{id,claimId:claim.id,stockId:stock.id,receivedEventId:record!.id,dispatchId:trip!.id};
+}
+
 type RepairCommand=Extract<ClaimInventoryCommand,{type:'fulfillment.claimInventory.repair.record'|'fulfillment.claimInventory.repair.qc'|'fulfillment.claimInventory.repair.handback'}>;
 function refreshRepairProgress(root:MistState,goods:PlatformClaimGoods){
  const rows=data(root).receivedRecords.filter(row=>row.goodsId===goods.id),complete=units(total(rows.map(row=>row.quantity)))===units(goods.quantity);
- goods.state=complete&&rows.every(row=>row.releasedRepairId)?'HandedBack':complete&&rows.every(row=>row.releasedRepairId||latestClaimRepair(goods,row.id)?.qc?.result==='pass')?'Ready':'Repairing';
+ goods.state=complete&&rows.every(row=>row.releasedRepairId)?'HandedBack':complete&&rows.every(row=>row.releasedRepairId||!pendingRepairDispatch(goods,row.id)&&!unrecordedRepairDispatch(goods,row.id)&&latestClaimRepair(goods,row.id)?.qc?.result==='pass')?'Ready':'Repairing';
  if(goods.state==='HandedBack')root.tasks.filter(task=>task.kind==='claim-inventory:'+goods.id).forEach(task=>task.done=true);
 }
 function applyRepairCommand(root:MistState,command:RepairCommand,context:MistContext):MistCommandResult{
@@ -91,14 +162,20 @@ function applyRepairCommand(root:MistState,command:RepairCommand,context:MistCon
  if(record!.disposal||record!.releasedRepairId)fail('本批已处置或交还，不能重复办理','PRECONDITION');
  if(record!.ownership!=='Transferred'||record!.ownerCustomerId!==source.customerId)fail('返修交还须保留来源客户货权','PRECONDITION');
  warehouse(root,record!.warehouseId);
+ if(pendingRepairDispatch(goods,record!.id))fail('外修尚未返库','PRECONDITION');
+ const returned=unrecordedRepairDispatch(goods,record!.id);
+ if(returned&&command.type!=='fulfillment.claimInventory.repair.record')fail('请先登记本次外修结果','PRECONDITION');
  const latest=latestClaimRepair(goods,record!.id);
  if(command.type==='fulfillment.claimInventory.repair.record'){
   const v=command.payload;if(latest&&!latest.qc)fail('本批维修尚待复检，请勿重复登记','PRECONDITION');
   const supplier=root.market.suppliers.find(row=>row.id===text(v.supplierId,'维修工厂'));
   if(!supplier)fail('请选择本公司维修工厂','NOT_FOUND');
   const domain=root.orders.find(row=>row.id===source.orderId)?.type;if(domain!=='fabric'&&domain!=='garment')fail('返修来源业务线无法核实','INVALID_STATE');
-  const completedAt=repairDate(v.completedAt,'维修日期',record!.receivedAt,context),basis=text(v.basis,'维修记录'),fileIds=repairEvidence(root,v.fileIds,[...claim.fileIds,...disposition.fileIds]);
-  const next:ClaimRepairJob={id:context.id(),receivedEventId:record!.id,stockId:record!.stockId,batchNumber:record!.batchNumber,quantity:record!.quantity,unit:record!.unit,domain:domain!,warehouseId:record!.warehouseId,place:warehouse(root,record!.warehouseId).name+' · '+record!.location,supplierId:supplier!.id,supplierName:supplier!.name,technician:text(v.technician,'维修人员',200),completedAt,basis,fileIds,at:context.now,...who};
+  if(returned&&supplier!.id!==returned.supplierId)fail('维修单位须与本次外修移交一致');
+  const earliest=[record!.receivedAt,latest?.qc?.checkedAt||'',returned?.date||latestRepairDispatch(goods,record!.id)?.returned?.date||''].sort().at(-1)!;
+  const completedAt=repairDate(v.completedAt,'维修日期',earliest,context),basis=text(v.basis,'维修记录'),fileIds=repairEvidence(root,v.fileIds,[...claim.fileIds,...disposition.fileIds]);
+  if(returned&&completedAt>returned.returned!.date)fail('外修完成日不能晚于返库日');
+  const next:ClaimRepairJob={id:context.id(),receivedEventId:record!.id,stockId:record!.stockId,batchNumber:record!.batchNumber,quantity:record!.quantity,unit:record!.unit,domain:domain!,warehouseId:record!.warehouseId,place:returned?returned.warehouseName+' · '+returned.location:warehouse(root,record!.warehouseId).name+' · '+record!.location,supplierId:supplier!.id,supplierName:supplier!.name,...(returned?{externalDispatchId:returned.id}:{}),technician:text(v.technician,'维修人员',200),completedAt,basis,fileIds,at:context.now,...who};
   (goods.repairs??=[]).push(next);refreshRepairProgress(root,goods);
   root.tasks.unshift({id:context.id(),kind:'claim-repair-qc:'+next.id,title:'返修复检 · '+claim.code,due:'',done:false,assigneeIds:[],permission:claimQcPermission(root,claim)??'qc:inspect',target:{view:'claims',id:claim.id}});
   goods.events.push({at:context.now,actor:who.actor,action:'Repairing',basis,fileIds});event(root,context,claim.id,record!.stockId,claim.code+' 返修待复检 · '+record!.batchNumber,fileIds);return{id:next.id,claimId:claim.id,receivedEventId:record!.id};
@@ -121,11 +198,19 @@ function applyRepairCommand(root:MistState,command:RepairCommand,context:MistCon
 
 export function applyClaimInventoryCommand(root:MistState,command:ClaimInventoryCommand,context:MistContext):MistCommandResult{
  const f=data(root),who=actor(context);
+ if(command.type==='fulfillment.claimInventory.repair.dispatch'||command.type==='fulfillment.claimInventory.repair.return')return applyRepairCustodyCommand(root,command,context);
  if(command.type==='fulfillment.claimInventory.repair.record'||command.type==='fulfillment.claimInventory.repair.qc'||command.type==='fulfillment.claimInventory.repair.handback')return applyRepairCommand(root,command,context);
  if(command.type==='fulfillment.claimInventory.warehouse.save'){
   const p=command.payload,code=text(p.code,'仓库代码',80),name=text(p.name,'仓库名称',200),address=text(p.address,'实际仓库地址',1000);if(typeof p.active!=='boolean')fail('仓库启用状态无效');if(f.warehouses.some(row=>row.id!==p.id&&row.code.toLocaleLowerCase()===code.toLocaleLowerCase()))fail('仓库代码已被使用');
   const old=p.id?f.warehouses.find(row=>row.id===p.id):undefined;if(p.id&&!old)fail('仓库不存在','NOT_FOUND');if(old&&!p.active&&f.stock.some(row=>row.warehouseId===old.id&&((row.onHand??0)>0||(row.locked??0)>0)))fail('仓库仍有实际库存或隔离数量，不能停用');
-  const id=old?.id||context.id();if(old)Object.assign(old,{code,name,address,active:p.active,updatedAt:context.now});else f.warehouses.push({id,code,name,address,active:p.active,createdAt:context.now,updatedAt:context.now});root.events.unshift({id:context.id(),entityType:'inventory',entityId:id,actor:who.actor,at:context.now,text:'保存真实仓库资料 '+name,fileIds:[]});return{id};
+  const awaitingHome=!!old&&f.receivedRecords.some(record=>record.warehouseId===old.id&&!record.releasedRepairId&&!record.disposal&&root.platform.claimGoods.some(goods=>goods.id===record.goodsId&&pendingRepairDispatch(goods,record.id)));
+  if(awaitingHome&&!p.active)fail('仓库仍有待返库批次，不能停用');
+  if(p.custodian!==undefined&&!['company','supplier'].includes(p.custodian))fail('请选择保管方');
+  const custodian=p.custodian??(p.supplierId?'supplier':p.supplierId===undefined?old?.custodian:'company');
+  if(custodian==='company'&&p.supplierId)fail('公司保管点不能选择合作方');
+  const supplierId=custodian==='supplier'?text(p.supplierId??old?.supplierId,'保管单位'):'';if(supplierId&&!root.market.suppliers.some(row=>row.id===supplierId))fail('请选择本公司已建档的保管单位');
+  if(old&&(old.supplierId||'')!==supplierId&&(awaitingHome||f.stock.some(row=>row.warehouseId===old.id&&((row.onHand??0)>0||(row.locked??0)>0))))fail('仓库仍有实际库存，不能变更保管单位');
+  const id=old?.id||context.id();if(old){Object.assign(old,{code,name,address,active:p.active,updatedAt:context.now,...(custodian?{custodian}:{})});if(supplierId)old.supplierId=supplierId;else delete old.supplierId;}else f.warehouses.push({id,code,name,address,active:p.active,...(supplierId?{supplierId}:{}),...(custodian?{custodian}:{}),createdAt:context.now,updatedAt:context.now});root.events.unshift({id:context.id(),entityType:'inventory',entityId:id,actor:who.actor,at:context.now,text:'保存真实仓库资料 '+name,fileIds:[]});return{id};
  }
  if(command.type==='fulfillment.claimInventory.receive'){
   const p=command.payload,{goods,source,claim,disposition}=active(root,p.goodsId),current=ledger(root,p.goodsId),place=warehouse(root,p.warehouseId);if(p.warehouseId!==current.receipt.warehouseId)fail('实际收货仓库必须与正式退货单一致');const quantity=amount(p.quantity);if(p.unit!==source.unit)fail('实收单位必须保持批准来源单位，本次不自动换算');if(units(current.received)+units(quantity)>units(source.quantity))fail('累计实收超过批准退回数量');if(!['Owned','Transferred'].includes(p.ownership))fail('请明确选择我方或客户货权');const location=text(p.location,'实际仓内位置',500),batchNumber=text(p.batchNumber,'真实退回批号',200),basis=text(p.basis,'实际点数与交接依据'),ownershipDate=day(p.ownershipDate,'货权确认日期'),ownershipEvidence=text(p.ownershipEvidence,'货权确认依据'),receivedAt=day(p.receivedAt,'实际收货日期'),fileIds=files(root,p.fileIds);if(p.ownership==='Transferred'&&!root.customers.some(row=>row.id===source.customerId))fail('客户货权缺少实际来源客户','INVALID_STATE');

@@ -1,5 +1,5 @@
 import {createClaimReplacementOrder,assertClaimReplacementShipped,type ClaimReplacementOrderCommand} from './mistClaimReplacement';
-import type {ClaimRepairJob} from './mistClaimInventory';
+import type {ClaimRepairJob,ClaimRepairDispatch} from './mistClaimInventory';
 import {claimReviewDisplay} from './mistClaimReview';
 /** Business records for Mist platform modules. No legacy or fabricated identities. */
 import { MistCommandError,mistOrderOwnerIds, mistMoneyMinor, lineAmount, assertMistOrderApproved, isActiveMistInvoice, type MistContext, type MistState, type MistCommandResult } from './mistWorkspace';
@@ -28,7 +28,7 @@ export type PlatformClaimDisposition={id:string;kind:'Allowance'|'ReturnRefund'|
 export type PlatformClaim={id:string;code:string;orderId:string;invoiceId:string;problem:string;fileIds:string[];state:'Registered'|'Processing'|'Closed'|'Cancelled';cancelReason?:string;createdAt:string;dispositions:PlatformClaimDisposition[];coordination?:ClaimCoordination};
 export type PlatformCredit={id:string;code:string;claimId:string;dispositionId:string;customerId:string;currency:string;amount:number;createdAt:string;schemaVersion?:1;sourceInvoiceId?:string;originalAmount?:number;currentAmount?:number;currentVersionId?:string;sourceVersions?:PlatformCreditSourceVersion[];printVersions?:MistCreditPrintVersion[]};
 export type PlatformCreditApplication={id:string;creditId:string;invoiceId?:string;paymentId?:string;amount:number;at:string;actor:string};
-export type PlatformClaimGoods={id:string;claimId:string;dispositionId:string;orderId:string;quantity:number;unit:string;destination:'Scrap'|'Replace'|'Repair';source?:PlatformClaimGoodsSource;returnReceiptId?:string;receivedQuantity?:number;repairs?:ClaimRepairJob[];state:'AwaitingReturn'|'PartiallyReceived'|'Received'|'Scrapped'|'Repairing'|'Ready'|'Dispatched'|'HandedBack';events:Array<{at:string;actor:string;action:string;basis:string;fileIds:string[]}>};
+export type PlatformClaimGoods={id:string;claimId:string;dispositionId:string;orderId:string;quantity:number;unit:string;destination:'Scrap'|'Replace'|'Repair';source?:PlatformClaimGoodsSource;returnReceiptId?:string;receivedQuantity?:number;repairs?:ClaimRepairJob[];repairDispatches?:ClaimRepairDispatch[];state:'AwaitingReturn'|'PartiallyReceived'|'Received'|'Scrapped'|'Repairing'|'Ready'|'Dispatched'|'HandedBack';events:Array<{at:string;actor:string;action:string;basis:string;fileIds:string[]}>};
 export type PlatformState={invoiceDrafts:PlatformInvoiceDraft[];boms:PlatformBom[];pricing:PlatformPricing[];risks:PlatformRisk[];employees:PlatformEmployee[];claims:PlatformClaim[];credits:PlatformCredit[];creditApplications:PlatformCreditApplication[];claimGoods:PlatformClaimGoods[];assistantDrafts:Array<{id:string;title:string;content:string;orderId:string;createdAt:string}>;
  /** 定价标准参数版本，只追加不改写。 */
  pricingParams:PricingParamVersion[]};
