@@ -106,3 +106,7 @@ it('selects the receiving garment member by account ID for an internal fabric or
   expect(store.run.mock.calls[0][0].payload.governance).toMatchObject({kind:'internal',paymentMethod:'OTHER',depositPercent:0,preShipmentPercent:0,internalSupply:{group:'garment',receiverId:'garment-owner'}});
   expect(store.run.mock.calls[0][0].payload.lines[0]).not.toHaveProperty('fulfillmentMode');
 });
+
+it('captures TT cumulative pre-shipment payment in creation and review without default teaching notes',async()=>{
+ await enterLine('100','69.8');await next();input('交期','2026-11-20');input('定金比例（%）','30');input('出运前累计收款（%）','100');expect(host.textContent).not.toContain('未填表示尚未配置');expect(host.textContent).not.toContain('可以先保存草稿');await next();await next();expect(amount('出运前累计收款')).toBe('100%');await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.create',payload:expect.objectContaining({governance:expect.objectContaining({depositPercent:30,preShipmentPercent:100})})}));
+});

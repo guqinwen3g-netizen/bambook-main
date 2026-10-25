@@ -17,7 +17,7 @@ type Props = { type: 'garment' | 'fabric'; value?: OrderLineBreakdown; seed?: Or
 export function OrderBreakdownEditor({ type, value, seed, unit, disabled, label = '', onChange }: Props) {
   const prefix = label ? `${label} ` : '';
   if (!value) return <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }} data-breakdown-empty>
-    <span className="mist-note">{uiText("未分色分码：数量按整条填写。")}</span><span className="mist-spacer" />
+    <span className="mist-spacer" />
     <Button size="sm" icon={Plus} disabled={disabled} onClick={() => onChange(structuredClone(seed || blankBreakdown(type)))}>{uiText(type === 'garment' ? '按颜色 × 尺码填写数量' : '填写面料规格与分色数量')}</Button>
   </div>;
   const total = breakdownTotal(value);
