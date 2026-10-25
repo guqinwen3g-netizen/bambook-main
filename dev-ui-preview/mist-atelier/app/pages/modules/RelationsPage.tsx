@@ -31,7 +31,7 @@ export function relationIdentities(r: MarketRelation): Exclude<Identity, 'all'>[
 }
 /** 在手业务：客户侧（进行中订单、未关闭报价、进行中商机、未收发票按币种），供应商侧（未到齐采购单）。 */
 export function relationBusiness(state: MistState | null, r: MarketRelation) {
-  const orders = r.customerId ? (state?.orders || []).filter(o => o.customerId === r.customerId && o.progress < 100) : [];
+  const orders = state&&r.customerId ? customerHandoverScope(state,r.customerId).orders : [];
   const quotations = r.customerId ? (state?.market.quotations || []).filter(q => q.customerId === r.customerId && ['draft', 'pending', 'sent', 'accepted'].includes(quotationStage(q))) : [];
   const opportunities = r.customerId ? (state?.crm.opportunities || []).filter(o => o.customerId === r.customerId && o.stage !== 'won' && o.stage !== 'lost') : [];
   const orderIds = new Set((state?.orders || []).filter(o => o.customerId === r.customerId).map(o => o.id));
