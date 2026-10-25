@@ -5,6 +5,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByText,queryByText} from '@testing-library/dom';
 import {Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
+import {readDevice,writeDevice} from '../../runtime/devicePreferences';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {ModuleWorkbench,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
 
@@ -297,4 +298,8 @@ it.each(['dialog','page'])('renders a checkbox label once in a %s and retains it
  expect((host.textContent?.match(/订单 SO-G-25/g)||[])).toHaveLength(1);const check=getByRole(document.body,'checkbox',{name:'订单 SO-G-25',exact:true});act(()=>check.click());
  if(surface==='page'){await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'确认交接'}).click());}else await act(async()=>getByRole(document.body,'button',{name:'确认交接'}).click());
  expect(submit).toHaveBeenCalledWith({move:false});
+});
+
+it('translates dialog interface descriptions without translating business input values',async()=>{
+ const original=readDevice('locale');try{writeDevice('locale','en-US');const spec:ModuleEditorSpec={title:'解冻往来',description:'Maison Lune · 当前负责人 林澈',initialValues:{reason:'原业务依据保持中文'},fields:[{key:'reason',label:'解冻说明',type:'textarea'}],submit:vi.fn()};host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><ModuleEditorDialog spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));expect(getByRole(document.body,'dialog',{name:'Restore trading'})).toBeTruthy();expect(document.body.textContent).toContain('Maison Lune · Current owner: 林澈');expect((document.body.querySelector('textarea') as HTMLTextAreaElement).value).toBe('原业务依据保持中文');expect(spec.submit).not.toHaveBeenCalled();}finally{writeDevice('locale',original);}
 });

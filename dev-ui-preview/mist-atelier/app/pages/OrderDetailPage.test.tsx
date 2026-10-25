@@ -447,3 +447,7 @@ it('keeps an approved order line readable without exposing closure to a reader',
 it('shows the current business state instead of presenting an old 100-percent field as overall completion',()=>{
  const order=store.state!.orders[0];order.progress=100;order.state='已批准待履约';order.governance!.status='approved';render();expect(host.textContent).not.toContain('整体进度');expect(getByText(host,'当前状态')).toBeTruthy();expect(host.textContent).toContain('已批准待履约');expect(store.run).not.toHaveBeenCalled();
 });
+
+it.each(['LC','OA'] as const)('keeps a %s order inspectable without TT cash-threshold prompts in detail or its editor',async paymentMethod=>{
+ const order=store.state!.orders[0];order.governance!.contract.paymentMethod=paymentMethod;order.governance!.contract.preShipmentPercent=100;render();expect(host.querySelectorAll('.mist-kv dt').length).toBeGreaterThan(0);expect([...host.querySelectorAll('.mist-kv dt')].some(row=>row.textContent==='出运前累计收款')).toBe(false);act(()=>getByRole(host,'button',{name:'合同与审批资料'}).click());const dialog=getByRole(document.body,'dialog');expect(queryByRole(dialog,'spinbutton',{name:'出运前累计收款（%）'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});
