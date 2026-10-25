@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {createMistState,type MistContext,type MistState} from './mistWorkspace';
-import {createMarketState,applyMarketCommand,marketLineAmount,marketSum,getMarketReviews,quotationVersions,type MarketState,type MarketCommand} from './mistMarket';
+import {createMarketState,applyMarketCommand,marketCommandPermission,marketLineAmount,marketSum,getMarketReviews,quotationVersions,type MarketState,type MarketCommand} from './mistMarket';
 const setup=()=>{let n=0;const ctx:MistContext={id:()=>`m-${++n}`,now:'2026-10-13T08:00:00.000Z',actorName:'业务员',actorId:'sales',members:[{id:'sales',name:'业务员',active:true,groups:['fabric','garment']}],authority:{supplier:{},businessReviewerId:'leader'}};const s=createMistState(ctx,'empty') as MistState&{market:MarketState};s.market=createMarketState(ctx,s);s.customers.push({id:'c',name:'客户',code:'C',country:'CN',city:'',industry:'',owner:'业务员',ownerId:'sales',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:'2026-01-01'});return {ctx,s};};
 const productInput={sku:'P1',name:'面料',category:'fabric' as const,season:'AW26',supplierId:'',supplierCode:'',composition:'棉',specification:'150cm',color:'蓝',unit:'米',cost:'0.10',currency:'USD',sourceDevId:'',sourceVersionId:''};
 const quoteInput=(productId:string)=>({customerId:'c',currency:'USD',season:'AW26',validUntil:'2026-11-01',deliveryTerms:'FOB',paymentTerms:'T/T',lines:[{productId,sourceDevId:'',sourceVersionId:'',name:'面料',style:'P1',specification:'150cm',qty:'3',unit:'米',price:'0.10',cost:'0.20'}]});
@@ -146,3 +146,5 @@ describe('remaining market state guards',()=>{
   run(s,{type:'market.product.save',payload:{id,input:{...productInput,name:'改名'}}},ctx);const kept=s.market.products.find(x=>x.id===id)!;expect(kept.customerCodes).toEqual([{customerId:'c',code:'CUST-01'}]);expect(kept.refPrice).toBe('2.35');expect(kept.specs).toEqual({weight:'180',width:'148',weave:'斜纹'});
   run(s,{type:'market.product.save',payload:{id,input:{...productInput,category:'trimming'}}},ctx);expect(s.market.products.find(x=>x.id===id)!.specs).toBeUndefined();});
 });
+
+it.each([true,false])('requires relation administration for hold mutation (frozen=%s)',frozen=>{expect(marketCommandPermission({type:'market.relation.hold',payload:{id:'relation',frozen,reason:'真实业务依据'}})).toBe('relations:admin');expect(marketCommandPermission({type:'market.relation.save',payload:{input:{}}} as any)).toBe('relations:write');});

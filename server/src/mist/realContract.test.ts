@@ -75,3 +75,12 @@ describe('Mist repository with the real shared business commands', () => {
     await expect(repo.execute(testActor(), workspace.id, { requestId: 'fake-file', expectedRevision: 1, command: { type: 'files.add', payload: { file: { ...file, id: 'fake' } } } })).rejects.toMatchObject({ code: 'INVALID_COMMAND' });
   });
 });
+
+it('requires fresh relations admin authority to change a hold even when the caller can edit the archive',async()=>{
+ const authority=testAuthority(),actor={...testActor(),roles:['viewer' as const],authorizationLoaded:true};authority.users.get('owner')!.permissions=['products:write','relations:read','relations:write','orders:read','orders:write'];repo=new MistRepository(db,contract,new MistPrivateFiles(root),authority.authorize,()=>new Date('2026-10-13T04:00:00Z'));
+ const workspace=await repo.create(actor,{name:'Hold authority boundary',seed:'demo'}),relation=workspace.state.market.relations.find(row=>row.hold)!;expect(relation).toBeDefined();const before=structuredClone(db.workspaces.get(workspace.id)),beforeReceipts=requestReceiptCount(db);
+ const restore={type:'market.relation.hold' as const,payload:{id:relation.id,frozen:false,reason:'核销已确认'}};
+ await expect(repo.execute(actor,workspace.id,{requestId:'editor-restore',expectedRevision:0,command:restore})).rejects.toMatchObject({code:'FORBIDDEN'});expect(db.workspaces.get(workspace.id)).toEqual(before);expect(requestReceiptCount(db)).toBe(beforeReceipts);
+ authority.users.get('owner')!.permissions.push('relations:admin');const restored=await repo.execute(actor,workspace.id,{requestId:'manager-restore',expectedRevision:0,command:restore});expect(restored.workspace.revision).toBe(1);expect(restored.workspace.state.market.relations.find(row=>row.id===relation.id)?.hold).toBeNull();expect(restored.workspace.state.invoices).toEqual(workspace.state.invoices);expect(restored.workspace.state.receipts).toEqual(workspace.state.receipts);expect(restored.workspace.state.orders).toEqual(workspace.state.orders);
+ authority.users.get('owner')!.permissions=authority.users.get('owner')!.permissions.filter(scope=>scope!=='relations:admin');const after=structuredClone(db.workspaces.get(workspace.id));await expect(repo.execute(actor,workspace.id,{requestId:'revoked-freeze',expectedRevision:1,command:{type:'market.relation.hold',payload:{id:relation.id,frozen:true,reason:'新的风险需复核'}}})).rejects.toMatchObject({code:'FORBIDDEN'});expect(db.workspaces.get(workspace.id)).toEqual(after);
+});
