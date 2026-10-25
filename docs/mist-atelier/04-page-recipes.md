@@ -49,12 +49,12 @@
 **用于**：生产进度、QC 工作台、营销推广。
 
 ## T9 新建 / 编辑 · `DevCreatePage.tsx` · `?view=development/new`
-**结构**：`BackLink` → `PageHeader`（右上「存为草稿」quiet）→ `mist-wizard`：左 `VerticalSteps`（240，可点跳转，完成项打勾）| 右 `Card`：可选 AI 自动填写 `Banner tone="ai"` → 每步一个 `FormSection` + `FormGrid` + `Field` → `mist-sticky-foot`（第 n/N 步 · 上一步 · primary 下一步/提交）。
+**结构**：`BackLink` → `PageHeader`（右上「存为草稿」quiet）→ `mist-wizard`：左 `VerticalSteps`（240，可点跳转，完成项打勾）| 右 `Card`：可选 AI 自动填写 `Banner tone="ai"` → 每步一个 `FormSection` + `FormGrid` + `Field` → `FormFooter`（第 n/N 步 · 上一步 · primary 下一步/提交）。操作栏由外壳放在内容滚动区之外，不在卡片内使用 `sticky` 覆盖字段；移动端按实际栏高保留底部空间。
 **校验**：必填 `Field required`，错误 `Field error="…"`，点下一步时校验本步；最后一步 `KeyValue` 汇总确认。
 **用于**：全站所有「新建 xx」与长表单编辑。≤3 个字段的快速新建用 `Dialog` + `FormGrid cols={1}`。
 
 ## T10 设置 · `SettingsPage.tsx` · `?view=system-settings`
-**结构**：`PageHeader` → `mist-wizard`：左 `VerticalSteps mode="page"`（分区）| 右 `Card`：`FormSection` + `SettingRow`（标题 + 说明 + 右侧 `Switch`/`Select`/`ChoiceCards`）→ `mist-sticky-foot`（自动保存提示 + 完成）。危险项（删除工作空间）`Dialog tone="bad"`。`MistPage width="narrow"`。
+**结构**：`PageHeader` → `mist-wizard`：左 `VerticalSteps mode="page"`（分区）| 右 `Card`：`FormSection` + `SettingRow`（标题 + 说明 + 右侧 `Switch`/`Select`/`ChoiceCards`）→ `FormFooter`（自动保存提示 + 完成）。危险项（删除工作空间）`Dialog tone="bad"`。`MistPage width="narrow"`。
 **用于**：设置、管理后台、各模块配置子页。
 
 ## T11 分析报表（无独立参考页）

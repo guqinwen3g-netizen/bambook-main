@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** T10 设置：保留 Mist 分区导航、设置卡与吸底操作栏。 */
 import React from 'react';
 import { Bell, Building2, Landmark, RefreshCw, LayoutDashboard, History } from 'lucide-react';
-import { Banner, Button, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
+import { FormFooter, Banner, Button, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -109,7 +109,7 @@ export function SettingsPage() {
           {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
           <div hidden={sec !== 'company'}><CompanyProfileSection member={member} /></div>
           </>}
-          {!['company','overview','activity'].includes(sec) && <div className="mist-sticky-foot">{saving && <span className="mist-note">{uiText('正在保存…')}</span>}<span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></div>}
+          {!['company','overview','activity'].includes(sec) && <FormFooter>{saving && <span className="mist-note">{uiText('正在保存…')}</span>}<span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></FormFooter>}
         </Card>
       </div>
     </MistPage>

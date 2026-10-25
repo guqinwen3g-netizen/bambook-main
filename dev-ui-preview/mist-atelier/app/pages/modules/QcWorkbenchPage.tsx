@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
-import { BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, type Tone } from '../../../../../components/mist';
+import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, type Tone } from '../../../../../components/mist';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCommand, FulfillmentQcReport, FulfillmentQcTask } from '../../../../../server/src/shared/mistFulfillment';
@@ -399,7 +399,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <UploadZone hint={uiText("上传现场照片或完整报告")} onFiles={files => { if (blocked) return; setBusy(true); void (async () => { try { for (const file of files) { const added = await uploadFile(file); setIds(old => [...old, added.id]); } } catch (e) { setFailure(String(e)); } finally { setBusy(false); } })(); }} />
             <RecordFiles ids={ids} />
           </CardBody>
-          <div className="mist-sticky-foot"><span className="mist-spacer" /><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={blocked} onClick={review}>{uiText("提交报告")}</Button></div>
+          <FormFooter><span className="mist-spacer" /><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={blocked} onClick={review}>{uiText("提交报告")}</Button></FormFooter>
         </Card>
       </div>
       <div>

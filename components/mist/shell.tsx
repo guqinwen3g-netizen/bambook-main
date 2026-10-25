@@ -5,6 +5,7 @@ import { ArrowLeft, Bell, ChevronDown, ChevronRight, Menu, Moon, PanelLeft, Sear
 import { MistMark, MistWordmark } from './MistMark';
 import { AIBadge, Avatar, Icon, IconButton, Kbd, plainText } from './primitives';
 import { cx, type ThemeMode } from './types';
+import { FormFooterTargetContext, FormFooterWidthContext } from './formFooter';
 
 /* ───────────── Root / Theme ───────────── */
 const PortalCtx = React.createContext<HTMLElement | null>(null);
@@ -145,6 +146,16 @@ export function MistTopbar({ crumbs, scrolled, sync, theme, onToggleTheme, onSea
  */
 export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey }: { sidebar: React.ReactNode; topbar: (scrolled: boolean) => React.ReactNode; collapsed?: boolean; children: React.ReactNode; scrollKey?: string }) {
   const ref = React.useRef<HTMLDivElement>(null);
+  const [footerTarget, setFooterTarget] = React.useState<HTMLDivElement | null>(null);
+  const [footerHeight, setFooterHeight] = React.useState(0);
+  React.useLayoutEffect(() => {
+    if (!footerTarget) return;
+    const measure = () => setFooterHeight(Math.ceil(footerTarget.getBoundingClientRect().height));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure); observer.observe(footerTarget);
+    return () => observer.disconnect();
+  }, [footerTarget]);
   const [scrolled, setScrolled] = React.useState(false);
   React.useEffect(() => { ref.current?.scrollTo?.({ top: 0 }); if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 760px)').matches) window.scrollTo?.({ top: 0 }); setScrolled(false); }, [scrollKey]);
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -170,20 +181,23 @@ export function MistAppShell({ sidebar, topbar, collapsed, children, scrollKey }
   };
   return (
     <MobileNavCtx.Provider value={menu}>
+      <FormFooterTargetContext.Provider value={footerTarget}>
       <div className="mist-app" data-collapsed={collapsed || undefined} data-menu-open={menuOpen || undefined} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         {sidebar}
-        <main className="mist-canvas">
+        <main className="mist-canvas" style={{ '--mist-form-footer-height': `${footerHeight}px` } as React.CSSProperties}>
           {topbar(scrolled)}
           <div className="mist-scroll" ref={ref} onScroll={e => setScrolled((e.target as HTMLDivElement).scrollTop > 4)}>{uiText(children)}</div>
+          <div className="mist-form-dock" ref={setFooterTarget} />
         </main>
       </div>
+      </FormFooterTargetContext.Provider>
     </MobileNavCtx.Provider>
   );
 }
 
 /** 页面容器：最大宽 1240，入场动画。width='narrow' 用于表单/设置，'wide' 用于看板。 */
 export function MistPage({ children, width }: { children: React.ReactNode; width?: 'narrow' | 'wide' }) {
-  return <div className="mist-page" data-width={width}>{uiText(children)}</div>;
+  return <FormFooterWidthContext.Provider value={width}><div className="mist-page" data-width={width}>{uiText(children)}</div></FormFooterWidthContext.Provider>;
 }
 
 /** 页头：eyebrow（所属分组）+ 标题 + 一句话说明 + 右侧操作（最多 1 个 primary）。 */

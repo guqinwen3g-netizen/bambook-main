@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** T10 local company settings. Saves exclusively through the active Mist workspace. */
 import React from 'react';
 import { Building2, FolderOpen, Landmark, Laptop, RefreshCw, Sparkles } from 'lucide-react';
-import {
+import { FormFooter,
   Banner, Button, Card, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage,
   PageHeader, Pill, Skeleton, TextInput, VerticalSteps, useToast,
 } from '../../../../../components/mist';
@@ -155,7 +155,7 @@ export function LocalAdminPanel() {
           </FormSection>}
         </>}
         {section === 'ai' && <PlatformAiProvidersPanel sessionKey={session.sessionKey} />}
-        {section !== 'ai' && <div className="mist-sticky-foot"><span className="mist-note">{uiText(busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司')}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("保存资料")}</Button></div>}
+        {section !== 'ai' && <FormFooter><span className="mist-note">{uiText(busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司')}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("保存资料")}</Button></FormFooter>}
       </Card>
     </div>
   </MistPage>;

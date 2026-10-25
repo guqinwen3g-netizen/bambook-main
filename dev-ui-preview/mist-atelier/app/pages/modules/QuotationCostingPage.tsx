@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from "react";
 import {isServiceSupplier} from "../../../../../server/src/shared/mistSupplierStatus";
 import { ArrowLeft, Download } from "lucide-react";
-import {
+import { FormFooter,
   Banner,
   Button,
   Card,
@@ -967,7 +967,7 @@ export function QuotationCostingPage() {
                 </div>
               </>
             )}
-            <div className="mist-sticky-foot">
+            <FormFooter>
               <span className="mist-note">{uiText("第")}{uiText(step + 1)}{uiText("/3步")}</span>
               <span className="mist-spacer" />
               {step > 0 && (
@@ -1023,7 +1023,7 @@ export function QuotationCostingPage() {
                   onClick={() => void save()}
                 >{uiText("保存核算")}</Button>
               )}
-            </div>
+            </FormFooter>
           </Card>
         </div>
       ) : lineSnapshots.length ? (
