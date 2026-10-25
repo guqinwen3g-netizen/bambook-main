@@ -290,8 +290,8 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
       <ActionBar busy={locked} actions={[
         { label: '认领任务', icon: UserRoundCheck, onClick: onClaim, reason: claimReason, hidden: mine, primary: task.state === 'pending' },
         { label: '提交 / 追加复验报告', icon: ClipboardCheck, onClick: onReport, reason: reportReason, primary: mine && task.state !== 'reported' },
-        { label: '转交', icon: Repeat2, onClick: onTransfer, reason: handoverReason('转交'), hidden: !canQc },
-        { label: '改期', icon: CalendarClock, onClick: onReschedule, reason: handoverReason('改期'), hidden: !canQc },
+        { label: '转交', icon: Repeat2, onClick: onTransfer, reason: handoverReason('转交'), hidden: !canQc || task.state === 'reported' },
+        { label: '改期', icon: CalendarClock, onClick: onReschedule, reason: handoverReason('改期'), hidden: !canQc || task.state === 'reported' },
       ]} />
     </DetailBlock>}
     {canBusiness && (confirmable || continuable) && <DetailBlock title={uiText("业务接续")}>

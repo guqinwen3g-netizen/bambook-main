@@ -167,7 +167,7 @@ export function SamplesPage() {
         ...(kind !== 'move' ? [field('quantity', `本次数量（${sample.unit}）`, 'number')] : []),
         field('person', kind === 'send' ? '收件人 / 公司' : kind === 'lend' ? '借用人' : '经手人', 'text', kind === 'lend' || kind === 'send'),
         field('location', kind === 'send' ? '寄送去向 / 运单号' : '新位置', 'text', false), ...(kind === 'lend' ? [field('expectedReturn', '预计归还日', 'date', false)] : []), field('note', '交接说明', 'textarea', false)],
-      initialValues: {sendPurpose:sample.source.kind==='manual'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', location: kind === 'return' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
+      initialValues: {sendPurpose:sample.source.kind==='manual'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
       submitLabel: '保存流转',
       submit: values => run({ type: 'fulfillment.samples.move', payload: { id: sample.id, kind,...(kind==='send'?{sendPurpose:sampleSendPurpose(text(values,'sendPurpose'),sample)}:{}),quantity: kind === 'move' ? 0 : number(values, 'quantity'), person: text(values, 'person'), location: text(values, 'location'), note: text(values, 'note'),
         ...(text(values, 'loanId') ? { loanId: text(values, 'loanId') } : {}), ...(text(values, 'expectedReturn') ? { expectedReturn: text(values, 'expectedReturn') } : {}), ...(text(values, 'sourceLocation') !== '__choose__' ? { sourceLocation: text(values, 'sourceLocation') } : {}) } }) });
@@ -283,10 +283,10 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
         {facts.overdue.map(loan => <span key={loan.id} className="mist-note"><Icon icon={Undo2} size="xs" />{loan.person}{uiText(" 应于 ")}{loan.expectedReturn}{uiText(" 归还，已逾期")}</span>)}
         <PositionSummary row={sample} />
         {can && <ActionBar busy={locked} actions={[
-          { label: '借出', icon: ArrowLeftRight, onClick: () => onMove(sample, 'lend'), reason: why(sample, 'lend') },
-          { label: '寄出', icon: Send, onClick: () => onMove(sample, 'send'), reason: why(sample, 'send') },
-          { label: '归还', icon: Undo2, onClick: () => onMove(sample, 'return'), reason: why(sample, 'return') },
-          { label: '移位', onClick: () => onMove(sample, 'move'), reason: why(sample, 'move') },
+          { label: '借出', icon: ArrowLeftRight, onClick: () => onMove(sample, 'lend'), hidden: !!why(sample, 'lend') },
+          { label: '寄出', icon: Send, onClick: () => onMove(sample, 'send'), hidden: !!why(sample, 'send') },
+          { label: '归还', icon: Undo2, onClick: () => onMove(sample, 'return'), hidden: !!why(sample, 'return') },
+          { label: '移位', onClick: () => onMove(sample, 'move'), hidden: !!why(sample, 'move') },
         ]} />}
         {sample.source.kind !== 'manual' && (state.fulfillment.qcTasks.some(task=>task.sampleId===sample.id) || session.hasPermission(sample.source.kind==='version'?'products:write':'orders:write')) && <Button onClick={() => onQc(sample)}>{uiText("查看 / 发起本样品QC")}</Button>}
       </div>; })}

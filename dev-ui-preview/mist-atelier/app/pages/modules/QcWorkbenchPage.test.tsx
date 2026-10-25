@@ -115,6 +115,13 @@ it('lets a read-only viewer inspect a task without claiming or reporting it',()=
   expect(store.run).not.toHaveBeenCalled();
 });
 
+it('keeps reinspection available to the assigned QC while hiding completed transfer and schedule actions',()=>{
+  store.state!.fulfillment.qcTasks.push(task('finished',{state:'reported',assignee:'QC甲',assigneeId:'qc-a'}));
+  render('finished');expect((getByRole(host,'button',{name:'提交 / 追加复验报告'}) as HTMLButtonElement).disabled).toBe(false);
+  expect(queryByRole(host,'button',{name:'转交',exact:true})).toBeNull();expect(queryByRole(host,'button',{name:'改期',exact:true})).toBeNull();
+  expect(host.textContent).not.toContain('已出结论，不能');expect(store.run).not.toHaveBeenCalled();
+});
+
 it.each(['pioneer','pp','shipping','development'] as const)('returns the exact %s physical sample with its source context and visible colour',async role=>{
   const source=role==='development'?{kind:'version' as const,devId:'dev',versionId:'version'}:{kind:'orderLine' as const,orderId:'o',lineId:'l',productionId:'factory'};
   store.state!.fulfillment.samples.push({id:'physical',code:'SMP-EXACT',name:'Coating',category:'面料',form:'米样',unit:'米',quantity:.5,available:.5,color:'炭灰',size:'幅宽150cm',source,...(role==='development'?{}:{role}),...(role==='shipping'?{shipmentId:'ticket'}:{}),location:'Room',fileIds:[],note:'',createdAt:'2026-10-08T08:00:00Z'});
