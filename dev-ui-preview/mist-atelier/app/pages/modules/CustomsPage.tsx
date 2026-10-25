@@ -12,7 +12,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { fmt } from '../../data';
 import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
-import { emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
+import { documentTypeLabel, emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { CustomsClassificationLedger, CustomsItemsBlock } from './CustomsDeclarationPanel';
@@ -251,7 +251,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
     </DetailBlock>
     <DetailBlock title={uiText("本票单据")} aside={s && <TextLink icon={FileText} onClick={onDocuments}>{uiText("处理本票单据")}</TextLink>}>
       {documents.length ? <DataTable ariaLabel={ui`${c.code} 本票单据`} rows={documents} rowKey={row => row.id} columns={[
-        { key: 'type', header: '类型', render: row => row.type },
+        { key: 'type', header: '类型', render: row => documentTypeLabel(row.type) },
         { key: 'number', header: '编号 · 版本', render: row => `${row.number || '未编号'} · v${row.version}` },
         { key: 'status', header: '状态', render: row => <Pill tone={row.status === 'issued' ? 'ok' : row.status === 'void' ? 'neutral' : 'warn'}>{uiText(row.status === 'issued' ? '已签发' : row.status === 'void' ? '已作废' : '草稿')}</Pill> },
       ]} /> : <span className="mist-note">{uiText("暂无单据")}</span>}

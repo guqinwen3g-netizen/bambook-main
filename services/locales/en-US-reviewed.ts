@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '部分签发': 'Partially issued',
   '样品数': 'Samples',
   '· {0}份样品': '· {0} samples',
   '样品用途': 'Sample purpose',

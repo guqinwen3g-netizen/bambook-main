@@ -15,7 +15,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
-import { emptyOption, Events, exportRecords, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
+import { documentTypeLabel, emptyOption, Events, exportRecords, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ShipmentDepartureDialog } from './ShipmentDepartureDialog';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen,businessWhen,RecordDisclosure, useListDetailRoute, type ReasonedAction } from './pageKit';
@@ -263,7 +263,9 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   const f = state.fulfillment, stage = shipmentStage(state, s), flags = shipmentFlags(state, s, day), closed = stage === 'departed' || stage === 'cancelled';
   const packingRows = f.packing.filter(row => row.shipmentId === s.id), documents = f.documents.filter(row => row.shipmentId === s.id), customs = f.customs.filter(row => row.shipmentId === s.id);
   const issued = documents.filter(row => row.status === 'issued'), cleared = customs.some(row => row.status === 'cleared');
-  const issuedCiPl = issued.some(row => ['CI', 'PL'].includes(row.type)), customsFiled = customs.some(row => row.status !== 'draft');
+  const issuedTradeDocuments = issued.filter(row => row.type === 'CI' || row.type === 'PL');
+  const tradeDocumentsComplete = issuedTradeDocuments.some(row => row.type === 'PL') && [...new Set(s.lines.map(line => line.orderId))].every(orderId => issuedTradeDocuments.some(row => row.type === 'CI' && row.orderId === orderId));
+  const issuedCiPl = issuedTradeDocuments.length > 0, customsFiled = customs.some(row => row.status !== 'draft');
   const unit = (lineId: string) => state.orderLines.find(line => line.id === lineId)?.unit || '';
   const blocker = readyBlocker(state, s), matched = packingMatched(state, s);
   const cartons = new Set(packingRows.map(row => row.carton)).size, net = round(packingRows.reduce((sum, row) => sum + row.netWeight, 0)), gross = round(packingRows.reduce((sum, row) => sum + row.grossWeight, 0)), volume = round(packingRows.reduce((sum, row) => sum + row.volume, 0));
@@ -279,7 +281,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
     { label: '业务发起', done: true, note: `${s.requestedBy} · ${shortWhen(s.createdAt)}` },
     { label: '逐条目装箱核实', done: matched, note: packingRows.length ? `${cartons} 箱 · ${matched ? '与计划一致' : '与计划不符'}` : '未装箱', noteTone: packingRows.length && !matched ? 'bad' as const : undefined },
     { label: '订舱', done: !!s.booking, note: s.booking || '未订舱' },
-    { label: 'CI / PL 签发', done: issued.some(row => row.type === 'PL') && [...new Set(s.lines.map(line => line.orderId))].every(orderId => issued.some(row => row.type === 'CI' && row.orderId === orderId)), note: issued.length ? issued.map(row => `${row.type} ${row.number}`).join('、') : '未签发' },
+    { label: 'CI / PL 签发', done: tradeDocumentsComplete, note: tradeDocumentsComplete ? '已签发' : issuedTradeDocuments.length ? '部分签发' : '未签发' },
     { label: '出口报关', done: cleared, note: customs.length ? customs.map(row => status[row.status] || row.status).join('、') : '未建报关记录' },
     { label: '单证准备完毕 · 交回业务', done: s.state === 'ready' || s.state === 'departed', note: s.state === 'ready' || s.state === 'departed' ? '已交回' : '未完成' },
     { label: '业务对客发送', done: !!s.documentsSentAt, note: s.documentsSentAt ? shortWhen(s.documentsSentAt) : '未登记' },
@@ -324,7 +326,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
     {packingRows.length > 0 && <DetailBlock title={uiText("装箱汇总")}><Facts items={[{ label: '箱数', value: `${cartons} 箱` }, { label: '净重 / 毛重', value: `${net} / ${gross} kg` }, { label: '体积', value: `${volume} m³` }, { label: '装箱行', value: `${packingRows.length} 行` }]} /></DetailBlock>}
     <DetailBlock title={uiText("单证与报关")} aside={<span className="mist-row"><TextLink icon={FileText} onClick={onDocuments}>{uiText("处理本票单据")}</TextLink><TextLink onClick={onCustoms}>{uiText("处理本票报关")}</TextLink></span>}>
       {documents.length ? <DataTable ariaLabel={ui`${s.code} 单据`} rows={documents} rowKey={row => row.id} columns={[
-        { key: 'type', header: '类型', render: row => row.type },
+        { key: 'type', header: '类型', render: row => documentTypeLabel(row.type) },
         { key: 'number', header: '编号 · 版本', render: row => `${row.number || '未编号'} · v${row.version}` },
         { key: 'status', header: '状态', render: row => <Pill tone={row.status === 'issued' ? 'ok' : row.status === 'void' ? 'neutral' : 'warn'}>{uiText(row.status === 'issued' ? '已签发' : row.status === 'void' ? '已作废' : '草稿')}</Pill> },
       ]} /> : <span className="mist-note">{uiText("还没有单据；CI / PL 在单据中心按版本签发。")}</span>}
