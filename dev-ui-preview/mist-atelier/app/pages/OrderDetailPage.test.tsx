@@ -429,3 +429,9 @@ it('keeps a read-only order inspectable and shipping reachable without commercia
 it('closes a commercial editor when order write authority is revoked and hides unreadable shipping entry',()=>{
  render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());expect(queryByRole(document.body,'dialog')).not.toBeNull();permissions.ordersWrite=false;permissions.shippingRead=false;store.state!.orders[0].handoffAt=context.now;render();expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByRole(host,'button',{name:'出运准备',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });
+
+it.each(['draft','approved'] as const)('hides termination from an order reader for %s and closes it when write access is revoked',async status=>{
+ const order=store.state!.orders[0];order.governance!.status=status;render();const name=status==='draft'?'作废订单':'申请取消订单';
+ act(()=>getByRole(host,'button',{name,exact:true}).click());expect(queryByRole(document.body,'dialog')).not.toBeNull();
+ permissions.ordersWrite=false;render();expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByRole(host,'button',{name,exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
+});

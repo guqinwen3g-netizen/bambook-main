@@ -290,3 +290,11 @@ it('lets a standalone wizard retain its own error even when the workspace holds 
 it('does not duplicate the enclosing host error on a workbench catalog',async()=>{
  bridge.workspace.error='仓库代码已被使用';host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistPresentedErrorContext.Provider value={bridge.workspace.error}>{tree()}</MistPresentedErrorContext.Provider>));expect(host.textContent).not.toContain('仓库代码已被使用');
 });
+
+it.each(['dialog','page'])('renders a checkbox label once in a %s and retains its editable value',async surface=>{
+ const submit=vi.fn(async()=>({})),spec:ModuleEditorSpec={title:'交接',submitLabel:'确认交接',initialValues:{move:true},fields:[{key:'move',label:'订单 SO-G-25',type:'checkbox'}],submit};host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ await act(async()=>root!.render(<MistRoot><ToastProvider>{surface==='dialog'?<ModuleEditorDialog spec={spec} onClose={vi.fn()}/>:<ModuleEditorPage spec={spec} onClose={vi.fn()}/>}</ToastProvider></MistRoot>));
+ expect((host.textContent?.match(/订单 SO-G-25/g)||[])).toHaveLength(1);const check=getByRole(document.body,'checkbox',{name:'订单 SO-G-25',exact:true});act(()=>check.click());
+ if(surface==='page'){await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'确认交接'}).click());}else await act(async()=>getByRole(document.body,'button',{name:'确认交接'}).click());
+ expect(submit).toHaveBeenCalledWith({move:false});
+});
