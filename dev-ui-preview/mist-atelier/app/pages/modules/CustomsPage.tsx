@@ -11,7 +11,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { fmt } from '../../data';
-import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
@@ -81,6 +81,7 @@ export function CustomsPage() {
   const domainOf = (c: FulfillmentCustoms): Domain => shipmentOf(c)?.domain || 'garment';
   const domain: Domain = domainChoice || (routed ? domainOf(routed) : undefined) || contextShipment?.domain || (records.some(c => domainOf(c) === 'garment') || !records.some(c => domainOf(c) === 'fabric') ? 'garment' : 'fabric');
   const tab: Tab = hasContext ? (tabChoice==='hs'?'hs':'declarations') : tabChoice === 'lc' || tabChoice === 'hs' || !routed ? tabChoice : routed.status === 'draft' ? 'declarations' : tabChoice;
+  React.useEffect(()=>{if(tab==='lc'&&!can)setDialog(null);},[tab,can]);
   const inDomain = hasContext ? records : records.filter(c => domainOf(c) === domain);
   const needle = query.trim().toLowerCase();
   const matches = (c: FulfillmentCustoms) => { const s = shipmentOf(c); return !needle || `${c.code} ${c.declarationNo} ${c.broker} ${c.hsCode} ${c.tradeMode} ${s?.code || ''} ${s?.customer || ''} ${s?.portOfDischarge || ''}`.toLowerCase().includes(needle); };
@@ -151,6 +152,7 @@ export function CustomsPage() {
   const pendingShown = allPending ? pendingShipments : pendingShipments.slice(0, 3);
   const exportRows = () => exportRecords('报关台账', ['记录', '报关单号', '出运', '客户', 'HS编码', '报关行', '原产地', '成交方式', '状态', '申报日', '放行日'], rows.map(c => [c.code, c.declarationNo, shipmentOf(c)?.code || '', shipmentOf(c)?.customer || '', c.hsCode, c.broker, c.origin, c.tradeMode, CUSTOMS_LABEL[c.status], c.declaredAt, c.clearedAt]));
 
+  if(dialog?.sections?.length&&!(tab==='lc'&&!can))return <ModuleEditorPage spec={dialog} onClose={()=>setDialog(null)}/>;
   return <MistPage width="wide">
     <PageHeader description={uiText(invalidContext ? '出运记录不存在' : contextShipment ? `${contextShipment.code} · ${contextShipment.customer}` : undefined)} eyebrow={uiText("订单履约 · 出口")} title={uiText("外贸与报关")}
       actions={<>
@@ -159,7 +161,6 @@ export function CustomsPage() {
         {tab !== 'lc' && tab !== 'hs' && <Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button>}
         {tab === 'declarations' && createButton}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有报关单证权限，可以查看报关记录、信用证台账与退税资料。")}</Banner></div>}
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("报关数据未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={changeTab} options={[{ value: 'declarations', label: '报关', count: inDomain.length }, { value: 'lc', label: '信用证', count: lcAll.filter(o => o.type === domain).length }, { value: 'rebate', label: '退税', count: inDomain.filter(c => c.status !== 'draft').length }, { value: 'hs', label: '商品归类', count: hsAll.filter(c => c.family === domain).length }]} /></div>}
     {!hasContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'garment').length : tab === 'hs' ? hsAll.filter(c => c.family === 'garment').length : records.filter(c => domainOf(c) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${tab === 'lc' ? lcAll.filter(o => o.type === 'fabric').length : tab === 'hs' ? hsAll.filter(c => c.family === 'fabric').length : records.filter(c => domainOf(c) === 'fabric').length}` }]} /></div>}
@@ -195,7 +196,7 @@ export function CustomsPage() {
       : <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.declarationNo || selected.code} · ${shipmentOf(selected)?.customer || ''}` : '报关详情'} drawerSub={selected ? `${shipmentOf(selected)?.code || ''} · ${CUSTOMS_LABEL[selected.status]}` : undefined}
           list={<Card><DataTable ariaLabel={uiText(tab === 'rebate' ? '退税资料核对' : '报关列表')} loading={loading} rows={rows} rowKey={c => c.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={tab === 'rebate' ? rebateColumns : declarationColumns} empty={empty} /></Card>}
           detail={detail} />}
-    <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
+    <ModuleEditorDialog spec={tab==='lc'&&!can?null:dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }
 

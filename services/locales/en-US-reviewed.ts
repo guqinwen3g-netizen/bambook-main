@@ -1,5 +1,16 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  "交单期须为 1–365 的整数": "Presentation period must be 1–365 whole days.",
+  "金额容差比例须为 0–10 的整数": "Amount tolerance must be a whole percentage from 0 to 10.",
+
+  "金额容差 %": "Amount tolerance (%)",
+  "未登记来证 · {0}": "LC records missing · {0}",
+  "选择信用证": "Select a letter of credit",
+  "来证": "Credit advice",
+  "对应订单": "Orders covered",
+  "金额与日期": "Amount and dates",
+  "未保兑": "Unconfirmed credit",
+
   "提交主单审批": "Submit for approval",
   "合同与审批资料": "Contract details",
   "装箱单草稿": "Draft packing list",

@@ -33,20 +33,20 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
   const lcOrders = (state?.orders || []).filter(o => o.type === domain && o.governance?.contract.paymentMethod === 'LC');
 
   const createSpec = (): ModuleEditorSpec => ({
-    title: '登记信用证', submitLabel: '登记信用证', description: '按开证行经通知行转来的信用证正本逐项登记；一张信用证只能对应同一客户、同一币种、合同约定以信用证付款的订单。信用证正本登记后作为附件追加。',
+    title: '登记信用证', submitLabel: '登记信用证',
     sections: [
       { id: 'lc', label: '来证', fields: ['lcNo', 'issuingBank', 'advisingBank', 'confirmed', 'availableBy', 'usanceDays'] },
-      { id: 'orders', label: '对应订单', description: '勾选本信用证项下的订单。', fields: lcOrders.map(o => `order:${o.id}`) },
+      { id: 'orders', label: '对应订单', fields: lcOrders.map(o => `order:${o.id}`) },
       { id: 'amount', label: '金额与日期', fields: ['currency', 'amount', 'tolerancePct', 'issueDate', 'latestShipmentDate', 'expiryDate', 'expiryPlace', 'presentationDays'] },
       { id: 'terms', label: '条款', fields: ['partialShipment', 'transhipment', 'documentsRequired', 'note'] },
     ],
     fields: [
-      field('lcNo', '信用证号'), field('issuingBank', '开证行'), field('advisingBank', '通知行', 'text', false), { ...field('confirmed', '保兑信用证', 'checkbox', false), hint: '通知行或其他银行加具保兑时勾选。' },
-      field('availableBy', '付款期限', 'select', true, [{ value: 'sight', label: '即期' }, { value: 'usance', label: '远期' }]), { ...field('usanceDays', '远期天数', 'number', false), hint: '远期信用证填写，如提单日后 60 天。' },
+      field('lcNo', '信用证号'), field('issuingBank', '开证行'), field('advisingBank', '通知行', 'text', false), field('confirmed', '保兑信用证', 'checkbox', false),
+      field('availableBy', '付款期限', 'select', true, [{ value: 'sight', label: '即期' }, { value: 'usance', label: '远期' }]), { ...field('usanceDays', '远期天数', 'number'), min:1, when:{key:'availableBy',values:['usance']} },
       ...lcOrders.map(o => field(`order:${o.id}`, `${o.code} · ${o.customer} · ${o.currency}`, 'checkbox', false)),
-      field('currency', '币种'), field('amount', '信用证金额', 'number'), { ...field('tolerancePct', '溢短装 %', 'number', false), hint: '如 “+/-5%” 填 5；未写明填 0。' },
+      field('currency', '币种'), field('amount', '信用证金额', 'number'), field('tolerancePct', '金额容差 %', 'number', false),
       field('issueDate', '开证日', 'date'), field('latestShipmentDate', '最晚装运日', 'date'), field('expiryDate', '有效期', 'date'), field('expiryPlace', '到期地点', 'text', false),
-      { ...field('presentationDays', '交单期（装运后天数）', 'number', false), hint: '信用证未规定时按 UCP 600 为装运后 21 天，且不得晚于有效期。' },
+      { ...field('presentationDays', '交单期（装运后天数）', 'number', false),min:1 },
       field('partialShipment', '允许分批装运', 'checkbox', false), field('transhipment', '允许转运', 'checkbox', false), field('documentsRequired', '单据要求（46A）', 'textarea', false), field('note', '备注', 'textarea', false),
     ],
     initialValues: { lcNo: '', issuingBank: '', advisingBank: '', confirmed: false, availableBy: 'sight', usanceDays: '', currency: lcOrders[0]?.currency || 'USD', amount: '', tolerancePct: '0', issueDate: day, latestShipmentDate: '', expiryDate: '', expiryPlace: '', presentationDays: '21', partialShipment: false, transhipment: false, documentsRequired: '', note: '', ...Object.fromEntries(lcOrders.map(o => [`order:${o.id}`, lcOrders.length === 1])) },
@@ -58,7 +58,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
     } } }) });
   const amendSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
     title: '登记修改书', submitLabel: '登记修改', description: `${lc.lcNo} · 只登记受益人已接受的修改书；改动的条款会连同原条款记入修改记录。`,
-    fields: [field('date', '修改书日期', 'date'), field('amount', `金额（${lc.currency}）`, 'number'), field('tolerancePct', '溢短装 %', 'number'), field('latestShipmentDate', '最晚装运日', 'date'), field('expiryDate', '有效期', 'date'), field('presentationDays', '交单期（天）', 'number'), field('partialShipment', '允许分批装运', 'checkbox', false), field('transhipment', '允许转运', 'checkbox', false), field('documentsRequired', '单据要求', 'textarea', false), field('note', '修改说明', 'textarea', false)],
+    fields: [field('date', '修改书日期', 'date'), field('amount', `金额（${lc.currency}）`, 'number'), field('tolerancePct', '金额容差 %', 'number'), field('latestShipmentDate', '最晚装运日', 'date'), field('expiryDate', '有效期', 'date'), field('presentationDays', '交单期（天）', 'number'), field('partialShipment', '允许分批装运', 'checkbox', false), field('transhipment', '允许转运', 'checkbox', false), field('documentsRequired', '单据要求', 'textarea', false), field('note', '修改说明', 'textarea', false)],
     initialValues: { date: day, amount: String(lc.amount), tolerancePct: String(lc.tolerancePct), latestShipmentDate: lc.latestShipmentDate, expiryDate: lc.expiryDate, presentationDays: String(lc.presentationDays), partialShipment: lc.partialShipment, transhipment: lc.transhipment, documentsRequired: lc.documentsRequired, note: '' },
     submit: v => {
       const changes: Partial<Record<LcAmendField, unknown>> = {};
@@ -97,17 +97,17 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
   ];
   const detail = selected && state ? <LcDetail lc={selected} state={state} day={day} can={can} locked={locked} run={run} onShipment={onShipment}
       onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} presentable={presentable(selected).length} />
-    : <EmptyState icon={Landmark} title={uiText("信用证详情")} description={uiText("从列表选择一张信用证，查看条款、修改记录与交单")} compact />;
+    : <EmptyState icon={Landmark} title={uiText("选择信用证")} compact />;
   const covered = (o: MistOrder) => all.filter(lc => !lc.cancelled && lc.orderIds.includes(o.id));
   const missing = lcOrders.filter(o => !covered(o).length && o.governance?.status === 'approved');
 
   return <>
-    {missing.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${missing.length} 张已审批的信用证付款订单尚未登记来证`}>{missing.map(o => o.code).join('、')}{uiText("。收到通知行转来的信用证后请登记，核对金额、最晚装运日与有效期是否满足合同交期。")}</Banner></div>}
+    {missing.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`未登记来证 · ${missing.length}`}>{missing.map(o => o.code).join('、')}</Banner></div>}
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.lcNo} · ${selected.customer}` : '信用证详情'} drawerSub={selected ? LC_STATUS_LABEL[lcStatus(selected, day)] : undefined}
       list={<Card>
-        <CardHeader title={ui`信用证台账 · ${all.length}`} sub={uiText("按来证登记条款，修改书、交单与银行审单结果逐次记录。")} tools={can ? <Button variant="primary" icon={Plus} disabled={locked || !lcOrders.length} title={uiText(lcOrders.length ? undefined : '没有合同约定以信用证付款的订单')} onClick={() => open(createSpec())}>{uiText("登记信用证")}</Button> : undefined} />
+        <CardHeader title={ui`信用证台账 · ${all.length}`} tools={can ? <Button variant="primary" icon={Plus} disabled={locked || !lcOrders.length} title={uiText(lcOrders.length ? undefined : '没有合同约定以信用证付款的订单')} onClick={() => open(createSpec())}>{uiText("登记信用证")}</Button> : undefined} />
         <DataTable ariaLabel={uiText("信用证台账")} loading={loading} rows={rows} rowKey={lc => lc.id} selectedKey={selected?.id} density="comfy" onRowClick={lc => { setPicked(lc.id); setDrawer(true); }} columns={columns}
-          empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的信用证")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Landmark} title={ui`还没有登记${domain === 'fabric' ? '面料' : '成衣'}信用证`} description={uiText("收到通知行转来的信用证后，由单证员按正本登记条款。")} />} />
+          empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的信用证")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Landmark} title={ui`还没有登记${domain === 'fabric' ? '面料' : '成衣'}信用证`} />} />
       </Card>}
       detail={detail} />
     <ExportedOrders orders={lcOrders} covered={covered} onOrder={onOrder} />
@@ -117,7 +117,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
 function ExportedOrders({ orders, covered, onOrder }: { orders: MistOrder[]; covered: (o: MistOrder) => MistLetterOfCredit[]; onOrder: (o: MistOrder) => void }) {
   if (!orders.length) return null;
   return <div className="mist-section"><Card>
-    <CardHeader title={uiText("信用证付款订单")} sub={uiText("合同约定以信用证付款的订单与已登记来证。")} />
+    <CardHeader title={uiText("信用证付款订单")} />
     <DataTable ariaLabel={uiText("信用证付款订单")} rows={orders} rowKey={o => o.id} onRowClick={onOrder} columns={[
       { key: 'order', header: '订单', width: 'minmax(150px,1.2fr)', render: o => <div className="mist-col" style={{ gap: 2 }}><Mono>{o.code}</Mono><small className="mist-muted">{o.customer}</small></div> },
       { key: 'note', header: '合同付款约定', width: 'minmax(160px,1.6fr)', hideOnMobile: true, render: o => o.governance?.contract.paymentNote || <span className="mist-muted">{uiText("合同未写明信用证条款")}</span> },
@@ -134,7 +134,7 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
   const status = lcStatus(lc, day), alerts = lcAlerts(lc, day), available = lcAvailableMinor(lc) / 100, cancelled = !!lc.cancelled;
   const openPresentations = lc.presentations.some(p => !final(p));
   return <DetailBody data-lc-detail={lc.id} heading={<div><span className="mist-mono mist-muted">{lc.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{lc.lcNo}</div></div>}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS_TONE[status]}>{LC_STATUS_LABEL[status]}</Pill><Pill>{uiText(lc.availableBy === 'sight' ? '即期' : `远期 ${lc.usanceDays} 天`)}</Pill>{lc.confirmed && <Pill tone="accent">{uiText("保兑")}</Pill>}</div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS_TONE[status]}>{LC_STATUS_LABEL[status]}</Pill><Pill>{uiText(lc.availableBy === 'sight' ? '即期' : `远期 ${lc.usanceDays} 天`)}</Pill><Pill tone={lc.confirmed?"accent":"neutral"}>{uiText(lc.confirmed?"保兑":"未保兑")}</Pill></div>
     {alerts.length > 0 && <Banner tone="warn" title={uiText("需要关注")}>{alerts.join('；')}</Banner>}
     {lc.cancelled && <Banner tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
