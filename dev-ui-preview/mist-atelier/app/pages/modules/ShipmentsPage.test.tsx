@@ -11,17 +11,18 @@ const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:''
 const session=vi.hoisted(()=>({id:'biz',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {ShipmentsPage,shipmentStage} from './ShipmentsPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
-let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'shipments',id,...(id?{detail:'full' as const}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ShipmentsPage/></Nav.Provider></ToastProvider></MistRoot>));}
+let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
+function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'shipments',id,...(id?{detail:'full' as const}:{})},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><ShipmentsPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'经办人',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const doc=(id:string,shipmentId:string,type:FulfillmentDocument['type'],status:FulfillmentDocument['status']='issued'):FulfillmentDocument=>({id,shipmentId,orderId:type==='CI'?'o':'',type,number:type+'-'+id,version:1,title:type,dueDate:'',content:'',fileIds:[],status,createdAt:'2026-10-10T08:00:00Z',actor:'后勤'});
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
 const customs=(shipmentId:string,status:'draft'|'submitted'|'cleared')=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId,status,declarationNo:'D1',broker:'报关行',hsCode:'6202',origin:'CN',tradeMode:'一般贸易',declaredAt:'2026-10-13',clearedAt:'',evidence:'',fileIds:[],note:''});
-beforeEach(()=>{session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
+beforeEach(()=>{presentedError=undefined;store.error='';session.id='biz';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD',amount:100,governance:{contract:{preShipmentPercent:0}}} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10});
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
@@ -151,3 +152,10 @@ it('shows an unpaid contractual balance and prevents opening departure until the
 
 
 it('keeps departure evidence out of the status banner and makes the original record available on demand',async()=>{const evidence='Carrier reference and complete departure evidence retained';store.state!.fulfillment.shipments.push(shipment('short-status',{state:'departed',departedAt:'2026-10-13T08:00:00Z',departureEvidence:evidence}));render('short-status');const detail=host.querySelector('[data-shipment-detail="short-status"]') as HTMLElement;expect(detail.textContent).toContain('已离港');expect(detail.textContent).not.toContain(evidence);await click(getByRole(detail,'button',{name:'离港依据'}));expect(detail.textContent).toContain(evidence);});
+
+it('keeps standalone packing failures but suppresses the same error already shown by the app',async()=>{
+ store.state!.fulfillment.shipments.push(shipment('packing-feedback'));render('packing-feedback');await click(getByRole(host,'button',{name:'分配装箱'}));
+ store.run.mockRejectedValueOnce(new Error('逐条目装箱数量必须等于本次计划数量'));await click(getByRole(host,'button',{name:'保存装箱分配'}));expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+ presentedError='另一个错误';render('packing-feedback');expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+ presentedError='逐条目装箱数量必须等于本次计划数量';render('packing-feedback');expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);expect((getByRole(host,'spinbutton',{name:'装箱数量'}) as HTMLInputElement).value).toBe('10');expect(getByRole(host,'button',{name:'保存装箱分配'}).hasAttribute('disabled')).toBe(false);
+});
