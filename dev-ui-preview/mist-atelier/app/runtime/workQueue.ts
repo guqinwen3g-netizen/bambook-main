@@ -37,6 +37,10 @@ export function isMyMistTask(task: MistTask, options: Pick<MistWorkOptions, 'me'
 }
 export function mistMyTasks(state: MistState | null | undefined, options: Pick<MistWorkOptions, 'me' | 'can' | 'canRead'>) {
   return (state?.tasks ?? []).map(task=>{
+    if(task.kind==='customer-handover'&&task.target.view==='relations'){
+      const relation=state?.market.relations.find(row=>row.id===task.target.id),customer=state?.customers.find(row=>row.id===(relation?.customerId||task.target.id));
+      if(customer)return {...task,title:localizedPageTitle('接手客户')+' · '+customer.name};
+    }
     if(task.target.view==='claims'&&(task.kind?.startsWith('claim-verify:')||task.kind?.startsWith('claim-factory:'))){
       const claim=state?.platform.claims.find(row=>row.id===task.target.id);
       if(claim)return {...task,title:localizedPageTitle(task.kind.startsWith('claim-verify:')?'客诉核实':'工厂回复')+' · '+claim.code};

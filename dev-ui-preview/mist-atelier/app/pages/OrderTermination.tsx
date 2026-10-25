@@ -56,10 +56,10 @@ export function OrderTerminationButton({ state, order, busy, run, go }: { state:
       footer={<><Button disabled={working} onClick={() => setOpen(false)}>{uiText("返回")}</Button><Button variant="danger" loading={working} disabled={busy || working || blockers.length > 0 || changePending} onClick={() => void submit()}>{uiText(mode === 'void' ? '确认作废' : '提交取消审批')}</Button></>}>
       {failure && <Banner tone="bad" title={uiText("未能提交")}>{failure}</Banner>}
       {mode === 'void'
-        ? <Banner tone="warn" title={uiText("作废后订单只读")}>{uiText("记录不删除，订单列表默认隐藏（可筛选查看），不能再提交审批或进入采购与履约。仅订单负责人可作废。若订单由报价转来，报价侧仍记为已转单，需在报价模块另行协调。")}</Banner>
+        ? <Banner tone="warn" title={uiText("作废后订单只读")}>{uiText("记录保留，停止采购与履约。")}</Banner>
         : blockers.length
           ? <Banner tone="bad" title={uiText(ORDER_CANCEL_ALTERNATIVE)}>{ui`${blockers.join('；')}。已出运或已开票的订单不能整单取消，请在条目详情中按实际数量结案。`}</Banner>
-          : <Banner tone="warn" title={uiText("取消须经订单审批人批准")}>{uiText("提交后进入审批中心，审批期间订单锁定；申请人不能审批自己的申请。批准后订单只读，不能再采购、生产或出运，受影响的采购、生产、出运各生成一条处理待办，不会删改其他模块的数据。")}</Banner>}
+          : <Banner tone="warn" title={uiText("取消须经订单审批人批准")}>{uiText("审批期间暂停新的采购、生产与出运。")}</Banner>}
       {changePending && <Banner tone="warn" title={uiText("有待审批的变更")}>{uiText("请先处理变更审批，再申请取消。")}</Banner>}
       {mode === 'cancel' && <KeyValue items={[{ label: '订单', value: `${order.code} · ${order.customer}` }, { label: '交期', value: order.due }]} />}
       {mode === 'cancel' && !blockers.length && <OrderChangeImpactList state={state} order={order} lines={[]} go={go} note={uiText("批准取消后，下列采购、生产、出运各生成一条“订单已取消，请处理”待办；不会自动改动这些记录。")} />}

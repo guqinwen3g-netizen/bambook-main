@@ -27,7 +27,7 @@ export const customerHandovers = (c: MistCustomer) => (c as MistCustomer & { han
 export function customerHandoverScope(root: MistState, customerId: string) {
   const orders = root.orders.filter(o => o.customerId === customerId && o.state !== '履约完成' && !['void', 'cancelled'].includes(o.governance?.status || ''));
   const opportunities = (root.crm?.opportunities || []).filter(o => o.customerId === customerId && o.stage !== 'won' && o.stage !== 'lost');
-  const locked = (o: MistState['orders'][number]) => o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' ? '审批中，审批完成后再交接' : '';
+  const locked = (o: MistState['orders'][number]) => o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' || o.governance?.cancellation?.status === 'pending' ? '审批中，审批完成后再交接' : '';
   return { orders, opportunities, locked };
 }
 
@@ -46,7 +46,7 @@ export function accountOwners(root: MistState): Array<{ id: string; name: string
 /** 整体交接的阻断项：审批中的订单内容锁定；供应商经手人须属于对应业务组。 */
 export function accountHandoverBlockers(root: MistState, fromId: string, to?: { id: string; name: string; groups: string[] }) {
   const out: string[] = [];
-  for (const o of root.orders) if (o.ownerId === fromId && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
+  for (const o of root.orders) if (o.ownerId === fromId && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' || o.governance?.cancellation?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
   if (to) for (const s of root.market?.suppliers || []) for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id === fromId && !to.groups.includes(g)) out.push(`供应商 ${s.code} · ${s.name} 的${MIST_BUSINESS_GROUP_LABEL[g]}经手：${to.name} 不属于${MIST_BUSINESS_GROUP_LABEL[g]}业务组，请先设置业务组`);
   return out;
 }
@@ -121,6 +121,6 @@ export function applyHandoverCommand(root: MistState, command: HandoverCommand, 
   const summary = `客户交接：${from || '未指定'}→${to.name}；订单 ${record.orders.length} 张${record.orders.length ? `（${record.orders.join('、')}）` : ''}、商机 ${record.opportunities.length} 个、改派待办 ${tasks} 条。原因：${reason}`;
   for (const entityId of new Set([customer.id, relation?.id].filter(Boolean) as string[])) root.events.unshift({ id: c.id(), entityType: entityId === customer.id ? 'customer' : 'market.relation', entityId, actor: c.actorName, at: c.now, text: summary, fileIds: [] });
   const due = new Date(Date.parse(c.now) + 3 * 86400000).toISOString().slice(0, 10);
-  root.tasks.unshift({ id: c.id(), title: `接手客户 ${customer.name}：核对在手订单、报价、未收款与联系人`, due, done: false, kind: 'customer-handover', target: { view: 'relations', id: relation?.id || customer.id }, assigneeIds: [to.id] });
+  root.tasks.unshift({ id: c.id(), title: `接手客户 · ${customer.name}`, due, done: false, kind: 'customer-handover', target: { view: 'relations', id: relation?.id || customer.id }, assigneeIds: [to.id] });
   return { id: record.id };
 }

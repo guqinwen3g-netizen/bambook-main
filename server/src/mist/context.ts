@@ -20,12 +20,28 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     if(kind.startsWith('platform.risk.'))authority.riskReviewerIds=[...managers];
     return authority;
   }
+  const routing=createApprovalRoutingService({prisma:db,companyId:actor.companyId??null,eligibleReviewerIds});
   if(kind.startsWith('order.governance.')){
     const {createOrderMainApprovalService}=await import('../orders/orderMainApprovalService');
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
     for(const domain of ['garment','fabric'] as const){
       let configured:string[];try{configured=await service.resolveEligibleReviewerIds(db,domain);}catch(error:any){if(error?.code==='ORDER_APPROVAL_AUTHORITY_MISSING')continue;throw error;}
-      for(const id of configured){const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)continue;const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null);if(hasScope({...fresh,roles:[]},'orders:write'))authority.orderReviewerIds[domain].push(id);}
+      const current=async(id:string)=>{
+        if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
+        const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return false;
+        const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId??null);
+        return hasScope({...fresh,roles:[]},'orders:write');
+      };
+      for(const id of configured){
+        if(!await current(id))continue;
+        authority.orderReviewerIds[domain].push(id);
+        // DR007: a configured supervisor's own request needs the existing company leadership route.
+        // Rebuild from that supervisor for both submission and decision, not from the deciding actor.
+        try{const leader=(await routing.resolveReviewerByDepartment(id))?.reviewerId;
+          if(leader&&leader!==id&&await current(leader))authority.orderReviewerIds[domain].push(leader);
+        }catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+      }
+      authority.orderReviewerIds[domain]=[...new Set(authority.orderReviewerIds[domain])];
     }
   }
   if(kind.startsWith('fulfillment.procurement.')){
@@ -42,7 +58,6 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       authority.supplier[key]={version:row.version,userIds};
     }
   }
-  const routing=createApprovalRoutingService({prisma:db,companyId:actor.companyId??null,eligibleReviewerIds});
   if(kind.startsWith('platform.claim.')){try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}
   // 付款申请由申请人所在部门主管审批；主管必须当前仍持有付款申请审批权，不能自审。
   if(kind.startsWith('payable.request.')){authority.paymentReviewerIds=[];try{const reviewerId=(await routing.resolveReviewerByDepartment(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null),'finance:payment_request:approve' as any))authority.paymentReviewerIds.push(reviewerId);}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}

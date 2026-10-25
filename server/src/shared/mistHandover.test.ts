@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,mistCommandPermission,type MistContext,type MistCommand,type MistState} from './mistWorkspace';
-import {customerHandovers} from './mistHandover';
+import {customerHandovers,accountHandoverBlockers} from './mistHandover';
 
 function fixture(){
   let id=0;const ctx={id:()=>`ho-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'demo-sales',actorName:'顾言',members:[{id:'demo-sales',name:'顾言',active:true,groups:['garment']},{id:'demo-buyer',name:'沈禾',active:true,groups:['garment']},{id:'demo-new',name:'林舟',active:true,groups:['garment']},{id:'gone',name:'已离职',active:false,groups:[]}]} as unknown as MistContext;
@@ -89,4 +89,13 @@ describe('成员按账号整体交接',()=>{
     expect(()=>f.run({fromUserId:'demo-buyer',toUserId:'demo-new',reason:'离职'})).toThrow(supplier?'业务组':'审批中');
     expect(f.state).toEqual(s0);
   });
+});
+
+it('locks customer and whole-account handover throughout cancellation review without changing records',()=>{
+ const f=fixture(),o=order(f.state,'SO-G-2026-015') as any;o.governance={...o.governance,status:'approved',cancellation:{id:'cancel-1',status:'pending',requesterId:'demo-sales',reviewerIds:['leader']}};
+ const before=JSON.stringify(f.state);
+ expect(()=>f.run({customerId:'customer-0',toUserId:'demo-new',reason:'调岗',orderIds:[o.id]})).toThrow('审批中，审批完成后再交接');
+ expect(accountHandoverBlockers(f.state,o.ownerId)).toContain(`订单 ${o.code} 审批中，审批完成后再交接`);
+ expect(JSON.stringify(f.state)).toBe(before);
+ o.governance.cancellation.status='rejected';expect(accountHandoverBlockers(f.state,o.ownerId)).not.toContain(`订单 ${o.code} 审批中，审批完成后再交接`);
 });
