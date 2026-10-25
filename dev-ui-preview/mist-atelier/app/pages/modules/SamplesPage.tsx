@@ -216,7 +216,7 @@ export function SamplesPage() {
     <PageHeader description={sourceHint || sourceShipment?.code || (hasProductionContext && contextProduction ? `${contextProduction.code} · ${contextProduction.factory}` : undefined)} eyebrow={uiText("订单履约 · 实体样品")} title={uiText("样品仓库")}
       actions={<>
         {sourceShipment && <Button onClick={() => go('shipments', sourceShipment.id, shipmentReturnTarget(state, sourceShipment))}>{uiText("返回本票出运")}</Button>}
-        {hasProductionContext && contextProduction && <Button onClick={() => go('production-board', contextProduction.id, {orderLineId:contextProduction.lineId})}>{uiText("返回生产单")}</Button>}
+        {hasProductionContext && contextProduction && <Button onClick={() => go('production-board', undefined, {productionId:contextProduction.id,orderLineId:contextProduction.lineId})}>{uiText("返回生产单")}</Button>}
         {(hasShipmentContext || hasProductionContext) && <Button onClick={() => go('samples')}>{uiText("查看全部样品")}</Button>}
         {can && !hasShipmentContext && !hasProductionContext && <Button icon={RefreshCw} loading={syncing} disabled={syncing || locked} onClick={() => void synchronize()}>{uiText("同步已返样版本")}</Button>}
         <Button icon={Download} disabled={!filtered.length} onClick={() => exportRecords('样品仓库', ['编号', '名称', '来源', '形态', '总量', '可用', '单位', '位置'], filtered.flatMap(row => row.samples).map(sample => [sample.code, sample.name, state ? fulfillmentSourceLabel(state, sample.source) : '', sample.form, sample.quantity, sample.available, sample.unit, fulfillmentPositions(sample).map(position => `${position.location || '位置未记录'} ${position.available}${sample.unit}`).join('；')]))}>{uiText("导出")}</Button>

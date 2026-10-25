@@ -106,7 +106,7 @@ it('scopes the ledger, selection and return to the exact production before group
   for(const other of ['DEVELOPMENT','other-branch','wrong-line','wrong-order'])expect(table.textContent).not.toContain(other);
   expect(host.textContent).not.toContain('同步已返样版本');
   act(()=>getByRole(host,'button',{name:'返回生产单'}).click());
-  expect(go).toHaveBeenCalledWith('production-board','branch',{orderLineId:'line'});
+  expect(go).toHaveBeenCalledWith('production-board',undefined,{productionId:'branch',orderLineId:'line'});
   expect(store.run).not.toHaveBeenCalled();
 });
 
