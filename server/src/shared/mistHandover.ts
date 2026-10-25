@@ -118,7 +118,8 @@ export function applyHandoverCommand(root: MistState, command: HandoverCommand, 
   const record: MistCustomerHandover = { id: c.id(), at: c.now, actor: c.actorName, fromId, from, toId: to.id, to: to.name, reason, orders: changedOrders.map(o => o.code), opportunities: changedOpps.map(o => o.title), tasks };
   ((customer as MistCustomer & { handovers?: MistCustomerHandover[] }).handovers ||= []).push(record);
   const relation = root.market?.relations?.find(r => r.customerId === customer.id);
-  const summary = `客户交接：${from || '未指定'}→${to.name}；订单 ${record.orders.length} 张${record.orders.length ? `（${record.orders.join('、')}）` : ''}、商机 ${record.opportunities.length} 个、改派待办 ${tasks} 条。原因：${reason}`;
+  const heading=fromId===to.id?`在手业务交接给 ${to.name}`:`客户交接：${from || '未指定'}→${to.name}`;
+  const summary = `${heading}；订单 ${record.orders.length} 张${record.orders.length ? `（${record.orders.join('、')}）` : ''}、商机 ${record.opportunities.length} 个、改派待办 ${tasks} 条。原因：${reason}`;
   for (const entityId of new Set([customer.id, relation?.id].filter(Boolean) as string[])) root.events.unshift({ id: c.id(), entityType: entityId === customer.id ? 'customer' : 'market.relation', entityId, actor: c.actorName, at: c.now, text: summary, fileIds: [] });
   const due = new Date(Date.parse(c.now) + 3 * 86400000).toISOString().slice(0, 10);
   root.tasks.unshift({ id: c.id(), title: `接手客户 · ${customer.name}`, due, done: false, kind: 'customer-handover', target: { view: 'relations', id: relation?.id || customer.id }, assigneeIds: [to.id] });

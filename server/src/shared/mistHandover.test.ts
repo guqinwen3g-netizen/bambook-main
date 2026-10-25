@@ -99,3 +99,9 @@ it('locks customer and whole-account handover throughout cancellation review wit
  expect(JSON.stringify(f.state)).toBe(before);
  o.governance.cancellation.status='rejected';expect(accountHandoverBlockers(f.state,o.ownerId)).not.toContain(`订单 ${o.code} 审批中，审批完成后再交接`);
 });
+
+it('moves selected old orders to the existing customer owner without changing commercial facts or unrelated tasks',()=>{
+ const f=fixture(),customer=f.state.customers.find(row=>row.id==='customer-1')!,selected=order(f.state,'SO-G-2026-009'),other=order(f.state,'SO-G-2026-017');expect(selected.ownerId).not.toBe(customer.ownerId);
+ f.state.tasks.push({id:'old-order-task',title:'核对原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:selected.id},assigneeIds:[selected.ownerId]},{id:'other-order-task',title:'另一原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:other.id},assigneeIds:['demo-sales']});const before=structuredClone(f.state),ownerId=customer.ownerId;
+ f.run({customerId:customer.id,toUserId:ownerId,reason:'在手订单由现客户负责人接续',orderIds:[selected.id]});const after=order(f.state,selected.code);expect(after).toEqual({...before.orders.find(row=>row.id===selected.id),ownerId,owner:customer.owner});expect(f.state.customers.find(row=>row.id===customer.id)?.ownerId).toBe(ownerId);expect(order(f.state,other.code)).toEqual(before.orders.find(row=>row.id===other.id));expect(f.state.orderLines).toEqual(before.orderLines);expect(f.state.fulfillment).toEqual(before.fulfillment);expect(f.state.invoices).toEqual(before.invoices);expect(f.state.payments).toEqual(before.payments);expect(f.state.tasks.find(row=>row.id==='old-order-task')?.assigneeIds).toEqual([ownerId]);expect(f.state.tasks.find(row=>row.id==='other-order-task')).toEqual(before.tasks.find(row=>row.id==='other-order-task'));expect(f.state.events.some(row=>row.text.startsWith('在手业务交接给 '+customer.owner))).toBe(true);
+});
