@@ -1,5 +1,8 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  "待归属 · {0}": "Unassigned · {0}",
+  "余额未含待归属流水": "Balances exclude unassigned transactions.",
+  "查看收款核销": "View receipt reconciliation",
   "申请依据": "Request evidence",
   "付款待分配": "Payment awaiting allocation",
   "仅申请人可撤回付款申请": "Only the requester can withdraw this payment request.",
