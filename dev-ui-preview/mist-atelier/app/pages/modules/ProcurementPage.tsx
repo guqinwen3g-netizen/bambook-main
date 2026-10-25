@@ -8,6 +8,7 @@ import React from 'react';
 import { CheckCircle2, Download, FileSignature, PackageCheck, Pencil, Plus, SearchX, Send, ShoppingCart, Undo2, Workflow } from 'lucide-react';
 import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
+import { assertOrderNotTerminated } from '../../../../../server/src/shared/mistOrderGovernance';
 import type { FulfillmentPurchase, FulfillmentReceipt, FulfillmentReceiptReturn } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentPositions, fulfillmentSourceLabel, receiptRejectionBlocker, receiptReturnedQuantity } from '../../../../../server/src/shared/mistFulfillment';
 import { prepaymentTransferTargets, purchaseContractMinor, purchasePayableReadback, purchasePrepaymentReadback, supplierSettlements } from '../../../../../server/src/shared/mistPayables';
@@ -22,6 +23,9 @@ import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, Preview
 import { RfqLedger } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
 import { parsePurchaseContent, purchaseChoices, purchaseContent } from './purchaseContent';
+
+// Match the server gate for cancelled, void and pending-cancellation orders.
+const sourceOrderBlocker = (order: MistState['orders'][number]) => { try { assertOrderNotTerminated(order); return ''; } catch (error) { return error instanceof Error ? error.message : '订单不可采购'; } };
 
 type Domain = FulfillmentPurchase['domain'];
 type Entry = 'purchase' | 'processing';
@@ -66,6 +70,7 @@ export function ProcurementPage() {
   const incomingOrder = state?.orders.find(order => order.id === incomingLine?.orderId);
   const sourceLine = incomingLine && incomingOrder && (!expectedOrderId || incomingLine.orderId === expectedOrderId) && (!route.customerId || incomingOrder.customerId === route.customerId) ? incomingLine : undefined;
   const sourceOrder = sourceLine ? incomingOrder : undefined, invalidSource = !!state && !!route.orderLineId && !sourceLine;
+  const blockedSource = sourceOrder ? sourceOrderBlocker(sourceOrder) : '';
   const sourceHint = invalidSource ? '指定来源不存在或不属于当前订单，请重新选择准确订单条目。' : undefined;
   const all = state?.fulfillment.purchases || [];
   const inScope = all.filter(p => !route.orderLineId || (!!sourceLine && p.lineId === sourceLine.id && p.orderId === sourceLine.orderId));
@@ -98,7 +103,7 @@ export function ProcurementPage() {
       { id: 'commercial', label: '数量与费用', fields: ['quantity', 'unit', 'price', 'currency'] },
       { id: 'delivery', label: '交付约定', fields: ['due', 'terms', 'destination', 'note'] },
     ],
-    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain)))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), field('unit', '计量单位'), field('price', '含税 / 约定单价', 'number'), field('currency', '币种'), field('due', '交期', 'date'), field('terms', '付款条件'), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
+    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), field('unit', '计量单位'), field('price', '含税 / 约定单价', 'number'), field('currency', '币种'), field('due', '交期', 'date'), field('terms', '付款条件'), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
     initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', price: p?.price || 0, currency: p?.currency || sourceOrder?.currency || 'USD', due: p?.due || today(), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
     submit: async values => {
       if (!state) return;
@@ -170,10 +175,10 @@ export function ProcurementPage() {
     { key: 'received', header: entry === 'processing' ? '累计回交' : '累计交付', width: '136px', align: 'right', hideOnMobile: true, render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{p.received} / {p.quantity} {uiText(p.unit)}</span>{purchaseFlags(p, day).filter(flag => flag.key === 'variance').map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> },
     { key: 'state', header: '审批 / 阶段', width: '104px', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={p.state === 'approved' ? STAGE_TONE[purchaseStage(p)] : p.state === 'rejected' ? 'bad' : p.state === 'pending' ? 'warn' : 'neutral'}>{status[p.state]}</Pill>{p.state === 'approved' && <small className="mist-muted">{STAGE_LABEL[purchaseStage(p)]}</small>}</div> },
   ];
-  const createButton = can ? <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(purchaseSpec())}>{ui`新建${ENTRY_LABEL[entry]}`}</Button> : undefined;
+  const createButton = can ? <Button variant="primary" icon={Plus} disabled={locked || !!blockedSource} title={uiText(blockedSource || undefined)} onClick={() => editor.open(purchaseSpec())}>{ui`新建${ENTRY_LABEL[entry]}`}</Button> : undefined;
   const empty = entryRows.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的单据")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText(sourceLine ? `本条目还没有${ENTRY_LABEL[entry]}` : `还没有${domain === 'fabric' ? '面料' : '成衣'}${ENTRY_LABEL[entry]}`)} description={uiText(entry === 'processing' ? '委外加工单从订单条目发起：选择加工厂、约定加工费与回交日期，批准后发出。' : '采购订单从订单条目的物料或成品需求发起，批准后才能发给供应商。')} action={can ? <Button icon={Plus} onClick={() => editor.open(purchaseSpec())}>{ui`新建${ENTRY_LABEL[entry]}`}</Button> : undefined} />;
+    : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText(sourceLine ? `本条目还没有${ENTRY_LABEL[entry]}` : `还没有${domain === 'fabric' ? '面料' : '成衣'}${ENTRY_LABEL[entry]}`)} action={can ? <Button icon={Plus} disabled={locked || !!blockedSource} title={uiText(blockedSource || undefined)} onClick={() => editor.open(purchaseSpec())}>{ui`新建${ENTRY_LABEL[entry]}`}</Button> : undefined} />;
   const detail = selected && state
     ? <PurchaseDetail purchase={selected} state={state} day={day} me={me} can={can} canApprove={canApprove} locked={locked}
         onEdit={() => editor.open(purchaseSpec(selected))}

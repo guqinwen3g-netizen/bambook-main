@@ -15,7 +15,7 @@ vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:sess
 import {ProcurementPage} from './ProcurementPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string,mode:'full'|'list'=id?'full':'list'){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id,detail},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
+function render(id?:string,mode:'full'|'list'=id?'full':'list',scope:Record<string,string>={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id,detail,...scope},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function purchase(id:string,patch:Partial<FulfillmentPurchase>={}):FulfillmentPurchase{return {id,code:id.toUpperCase(),orderId:'o',lineId:'l',kind:'material',domain:'garment',supplierId:'s',supplier:'青禾辅料',description:'主唛与洗标',quantity:100,unit:'个',price:0.3,currency:'CNY',due:'2026-10-30',terms:'月结30天',destination:'江南成衣',note:'',fileIds:[],state:'draft',requesterId:'buyer',createdBy:'经办人',createdAt:'2026-10-01T08:00:00Z',reviewerIds:['boss'],configVersions:{},received:0,...patch};}
@@ -328,4 +328,18 @@ it('excludes service providers from production purchases and RFQ invitations',as
   await click(getByRole(document.body,'button',{name:'返回列表',exact:true}));
   await click(getByRole(host,'tab',{name:/^询价比价/}));await click(getAllByRole(host,'button',{name:'发起询价',exact:true})[0]);
   expect(queryByRole(document.body,'checkbox',{name:'浦江物流 · 服务商'})).toBeNull();
+});
+
+it('excludes void, cancelled and pending-cancellation orders from new procurement sources',async()=>{
+  for(const [id,governance] of [['void',{status:'void'}],['cancelled',{status:'cancelled'}],['cancelling',{status:'approved',cancellation:{status:'pending'}}]] as const){
+    store.state!.orders.push({id,code:id,type:'garment',currency:'USD',governance} as any);
+    store.state!.orderLines.push({...store.state!.orderLines[0],id:id+'-line',orderId:id});
+  }
+  render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
+  expect([...(getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement).options].map(o=>o.value)).toEqual(['','line:l']);
+});
+it.each(['void','cancelled','cancelling'])('disables new procurement from a locked order route: %s',status=>{
+  store.state!.orders[0].governance=(status==='cancelling'?{status:'approved',cancellation:{status:'pending'}}:{status}) as any;
+  render(undefined,'list',{section:'order:o',orderLineId:'l'});
+  expect(getAllByRole(host,'button',{name:'新建采购订单'}).every(button=>(button as HTMLButtonElement).disabled)).toBe(true);
 });
