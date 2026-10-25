@@ -39,3 +39,8 @@ it('summarizes known handover and production actions without changing archived n
 it('keeps a QC continuation note in the source while showing a short task identity',()=>{
  const state=fixture();state.fulfillment.qcTasks.push({id:'ship-qc',code:'QC-SHIP'} as any);const note='已核对一件船样及需求方确认，按本票继续出运';state.notifications=[{id:'continued',title:'业务确认继续：'+note,detail:'林澈',at:'2026-10-13',readAt:null,category:'qc',target:{view:'qc-workbench',id:'ship-qc'}},{id:'user',title:'客户要求：'+note,detail:'林澈',at:'2026-10-13',readAt:null,category:'qc',target:{view:'qc-workbench',id:'ship-qc'}}];const before=structuredClone(state.notifications);expect(visibleMistNotifications(state,()=>true).map(row=>row.title)).toEqual(['QC-SHIP · 业务已继续','客户要求：'+note]);expect(state.notifications).toEqual(before);
 });
+
+it('summarises the legacy generated claim notice without rewriting the stored message or target',()=>{
+ const state=fixture(),detail='业务员 林澈 已通知质检、跟单与工厂（平湖启程服饰）配合核实；通知工厂不代表认定责任或答应客户金额。';state.notifications=[{id:'claim-notice',title:'CLM-1 · 新客诉待关注',detail,at:'2026-10-13',readAt:null,category:'general',target:{view:'claims',id:'claim'}}];const before=structuredClone(state.notifications);
+ expect(visibleMistNotifications(state,()=>true)[0]).toMatchObject({title:'CLM-1 · 新客诉',detail:'林澈 · 平湖启程服饰',target:{view:'claims',id:'claim'}});expect(state.notifications).toEqual(before);
+});

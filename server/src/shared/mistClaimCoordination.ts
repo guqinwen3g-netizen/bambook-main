@@ -129,9 +129,10 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       const v = command.payload, claim = claimOf(claims, v.id); active(claim); const byId = actor(c), s = supplier(root, text(v.supplierId, '相关工厂'));
       const notice: ClaimNotice = { id: c.id(), at: c.now, by: c.actorName, byId, supplierId: s.id, supplierName: s.name, factoryChannel: text(v.factoryChannel, '通知工厂的实际方式', true, 200), note: text(v.note, '备注', false) };
       coordination(claim).notices.push(notice);
-      task(root, c, claim.id, 'claim-verify:' + claim.id, '质检核实客诉事实 · ' + claim.code, { permission: claimQcPermission(root, claim) ?? 'qc:inspect' });
-      task(root, c, claim.id, 'claim-factory:' + claim.id, '跟进工厂核实回复 · ' + claim.code + ' · ' + s.name, { assigneeIds: [byId] });
-      notify(root, c, claim.id, claim.code + ' · 新客诉待关注', '业务员 ' + c.actorName + ' 已通知质检、跟单与工厂（' + s.name + '）配合核实；通知工厂不代表认定责任或答应客户金额。');
+      task(root, c, claim.id, 'claim-verify:' + claim.id, '客诉核实 · ' + claim.code, { permission: claimQcPermission(root, claim) ?? 'qc:inspect' });
+      task(root, c, claim.id, 'claim-factory:' + claim.id, '工厂回复 · ' + claim.code, { assigneeIds: [byId] });
+      // Recording contact does not approve liability or compensation; those remain separate commands.
+      notify(root, c, claim.id, claim.code + ' · 新客诉', c.actorName + ' · ' + s.name);
       emit(root, c, claim.id, '通知相关人员：内部质检 / 负责人 / 跟单，工厂 ' + s.name + '（' + notice.factoryChannel + '）');
       return { id: notice.id, claimId: claim.id };
     }

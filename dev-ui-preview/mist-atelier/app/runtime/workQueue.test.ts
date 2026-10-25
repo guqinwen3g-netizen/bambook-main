@@ -239,3 +239,8 @@ it('suppresses only a redundant parent while all remaining repair lots have thei
  state.fulfillment.receivedRecords.push({id:'other',goodsId:'goods'} as any);expect(mistMyTasks(state,options).map(t=>t.id)).toEqual(['parent','child']);state.fulfillment.receivedRecords.pop();
  state.platform.claimGoods[0].repairDispatches![0].returned={} as any;state.tasks[1].done=true;expect(mistMyTasks(state,options).map(t=>t.id)).toEqual(['parent']);expect(state.tasks[0].done).toBe(false);
 });
+
+it('uses short claim work labels while preserving exact targets and source task facts',()=>{
+ const state=base();state.platform.claims=[{id:'claim',code:'CLM-1'} as any];state.tasks=['claim-verify:claim','claim-factory:claim'].map((kind,i)=>({id:String(i),kind,title:'Old long label',due:'',done:false,permission:'qc:inspect',target:{view:'claims',id:'claim'}}));const before=structuredClone(state.tasks);
+ expect(mistMyTasks(state,{me:'me',can:all,canRead:all}).map(t=>t.title)).toEqual(['客诉核实 · CLM-1','工厂回复 · CLM-1']);expect(state.tasks).toEqual(before);
+});

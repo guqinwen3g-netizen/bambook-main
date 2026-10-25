@@ -170,3 +170,8 @@ it('shows a submitted settlement immediately and opens its exact payable review'
 it('keeps an approved unpaid request actionable now and opens the original payable request',async()=>{
  const state=seam.value.state;state.payables!.requests=[{id:'approved-payment',code:'PR-PAY',state:'approved',purpose:'settlement',supplier:'供货工厂',currency:'CNY',amount:434,submittedAt:'2099-01-01T00:00:00Z',paymentHistory:[]}];seam.session.user={id:'finance',displayName:'财务'};seam.session.hasPermission=(permission:string)=>permission==='vouchers:write';render();const button=[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.textContent?.includes('PR-PAY · 待付款'))!;expect(button).toBeTruthy();await click(button);expect(go).toHaveBeenCalledWith('payment-vouchers','approved-payment',expect.objectContaining({section:'payables'}));
 });
+
+it('offers only the source action when the focus has no QC report',()=>{
+ seam.value.state=createMistState(ctx(),'empty');seam.value.state.tasks=[{id:'follow-up',kind:'general',title:'Follow-up',due:new Date().toISOString().slice(0,10),done:false,assigneeIds:['owner'],target:{view:'claims',id:'case'}}];render();
+ expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='打开事项')).toBe(true);expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='QC 报告')).toBe(false);
+});
