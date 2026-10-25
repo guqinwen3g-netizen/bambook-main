@@ -14,7 +14,7 @@ export type LcPresentationResult = 'pending' | 'complying' | 'discrepant' | 'hon
 export const LC_RESULT_LABEL: Record<LcPresentationResult, string> = { pending: '待银行审单', complying: '单证相符', discrepant: '存在不符点', honoured: '已承付', refused: '已拒付' };
 export type LcAmendChange = { field: LcAmendField; label: string; from: string; to: string };
 export type LcAmendField = 'amount' | 'tolerancePct' | 'latestShipmentDate' | 'expiryDate' | 'presentationDays' | 'partialShipment' | 'transhipment' | 'documentsRequired';
-export const LC_AMEND_LABEL: Record<LcAmendField, string> = { amount: '金额', tolerancePct: '溢短装 %', latestShipmentDate: '最晚装运日', expiryDate: '有效期', presentationDays: '交单期（天）', partialShipment: '分批装运', transhipment: '转运', documentsRequired: '单据要求' };
+export const LC_AMEND_LABEL: Record<LcAmendField, string> = { amount: '金额', tolerancePct: '金额容差 %', latestShipmentDate: '最晚装运日', expiryDate: '有效期', presentationDays: '交单期（天）', partialShipment: '分批装运', transhipment: '转运', documentsRequired: '单据要求' };
 export type MistLcAmendment = { no: number; date: string; changes: LcAmendChange[]; note: string; at: string; actor: string };
 export type MistLcPresentation = {
   id: string; no: number; shipmentId: string; shipmentCode: string; shipmentDate: string; presentedAt: string; deadline: string; amount: number; documents: string;
@@ -69,7 +69,8 @@ export function lcAlerts(lc: MistLetterOfCredit, today: string): string[] {
   for (const p of lc.presentations) if (p.result === 'discrepant') out.push(`第 ${p.no} 次交单存在不符点，待申请人答复`);
   return out;
 }
-/** 交单期截止日：装运日 + 交单期，且不晚于有效期。 */
+/** The credit may modify the UCP 600 default of 21 days (articles 1/14c); expiry still caps presentation.
+ * 1–365 is this input's engineering bound, not an ICC maximum. */
 export const lcPresentationDeadline = (lc: Pick<MistLetterOfCredit, 'presentationDays' | 'expiryDate'>, shipmentDate: string) => { const d = addDays(shipmentDate, lc.presentationDays); return d < lc.expiryDate ? d : lc.expiryDate; };
 /** 按信用证条款自动识别的不符点（不代替银行审单）。 */
 export function lcAutoDiscrepancies(lc: MistLetterOfCredit, shipmentDate: string, presentedAt: string): string[] {
@@ -112,8 +113,8 @@ export function applyLcCommand(root: Root, command: LcCommand, c: MistContext): 
       const code = (() => { const head = 'LC-' + today.slice(0, 4) + '-'; let n = list.filter(l => l.code.startsWith(head)).length + 1; while (list.some(l => l.code === head + String(n).padStart(4, '0'))) n++; return head + String(n).padStart(4, '0'); })();
       const lc: MistLetterOfCredit = {
         id: c.id(), code, lcNo, customerId: orders[0].customerId, customer: orders[0].customer, orderIds: orders.map(o => o.id), issuingBank, advisingBank: text(i.advisingBank, '通知行', false, 200), confirmed: i.confirmed === true,
-        availableBy: i.availableBy, usanceDays, currency, amount: money(i.amount, '信用证金额'), tolerancePct: int(i.tolerancePct, '溢短装比例', 0, 10, 0), issueDate, latestShipmentDate, expiryDate, expiryPlace: text(i.expiryPlace, '到期地点', false, 120),
-        presentationDays: int(i.presentationDays, '交单期', 1, 21, 21), partialShipment: i.partialShipment === true, transhipment: i.transhipment === true, documentsRequired: text(i.documentsRequired, '单据要求', false, 4000), note: text(i.note, '备注', false, 2000),
+        availableBy: i.availableBy, usanceDays, currency, amount: money(i.amount, '信用证金额'), tolerancePct: int(i.tolerancePct, '金额容差比例', 0, 10, 0), issueDate, latestShipmentDate, expiryDate, expiryPlace: text(i.expiryPlace, '到期地点', false, 120),
+        presentationDays: int(i.presentationDays, '交单期', 1, 365, 21), partialShipment: i.partialShipment === true, transhipment: i.transhipment === true, documentsRequired: text(i.documentsRequired, '单据要求', false, 4000), note: text(i.note, '备注', false, 2000),
         fileIds: [...new Set((i.fileIds || []).map(String))].filter(id => root.files.some(f => f.id === id) || fail('附件不存在', 'NOT_FOUND')), amendments: [], presentations: [], createdAt: c.now, actor: c.actorName,
       };
       list.unshift(lc); event(root, c, lc, `登记信用证 ${lc.lcNo}（${lc.issuingBank}，${fmt(lc.amount)} ${lc.currency}，最晚装运 ${lc.latestShipmentDate}，有效期 ${lc.expiryDate}）`);
@@ -129,7 +130,7 @@ export function applyLcCommand(root: Root, command: LcCommand, c: MistContext): 
       for (const f of keys) {
         if (!(f in LC_AMEND_LABEL)) fail('修改项目无效');
         const v = raw[f];
-        const value = f === 'amount' ? money(v, '修改后金额') : f === 'tolerancePct' ? int(v, '溢短装比例', 0, 10, 0) : f === 'presentationDays' ? int(v, '交单期', 1, 21, 21) : f === 'partialShipment' || f === 'transhipment' ? (typeof v === 'boolean' ? v : fail('请明确是否允许')) : f === 'documentsRequired' ? text(v, '单据要求', true, 4000) : day(v, LC_AMEND_LABEL[f]);
+        const value = f === 'amount' ? money(v, '修改后金额') : f === 'tolerancePct' ? int(v, '金额容差比例', 0, 10, 0) : f === 'presentationDays' ? int(v, '交单期', 1, 365, 21) : f === 'partialShipment' || f === 'transhipment' ? (typeof v === 'boolean' ? v : fail('请明确是否允许')) : f === 'documentsRequired' ? text(v, '单据要求', true, 4000) : day(v, LC_AMEND_LABEL[f]);
         if ((lc as Record<string, unknown>)[f] === value) continue;
         changes.push({ field: f, label: LC_AMEND_LABEL[f], from: show(f, (lc as Record<string, unknown>)[f]), to: show(f, value) }); (next as Record<string, unknown>)[f] = value;
       }

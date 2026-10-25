@@ -117,7 +117,7 @@ it('explains why a departed shipment\'s record is locked and keeps users without
   expect((getByRole(detail,'button',{name:'登记海关放行'}) as HTMLButtonElement).disabled).toBe(true);
   expect(detail.textContent).toContain('出运已离港或已取消，报关记录不能再修改');
   session.denied.add('customs:write');render('cus-s');
-  expect(host.textContent).toContain('只读查看');
+  expect(host.textContent).not.toContain('你的账号没有报关单证权限');
   expect(queryByRole(host,'button',{name:'建立报关记录'})).toBeNull();
   expect(queryByRole(host,'button',{name:'为 T 建立报关记录'})).toBeNull();
   expect(queryByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记海关放行'})).toBeNull();
@@ -134,7 +134,7 @@ it('keeps a letter of credit ledger with terms, presentations and bank results, 
     presentations:[{id:'p1',no:1,shipmentId:'s',shipmentCode:'S',shipmentDate:'2026-10-10',presentedAt:'2026-10-12',deadline:'2026-10-31',amount:60,documents:'发票',autoDiscrepancies:[],discrepancies:'',result:'pending',history:[],createdAt:'2026-10-12T01:00:00Z',actor:'单证'}],createdAt:'2026-09-02T01:00:00Z',actor:'单证'}];
   render();
   await click(getByRole(host,'tab',{name:/信用证/}));
-  expect(host.textContent).toContain('1 张已审批的信用证付款订单尚未登记来证');
+  expect(host.textContent).toContain('未登记来证 · 1');
   const ledger=getByRole(host,'table',{name:'信用证台账'});
   expect(ledger.textContent).toContain('LCA2026001');expect(ledger.textContent).toContain('可用 45.00 USD');expect(ledger.textContent).toContain('有效');
   const orders=getByRole(host,'table',{name:'信用证付款订单'});
@@ -153,14 +153,11 @@ it('keeps a letter of credit ledger with terms, presentations and bank results, 
   expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).toContain('T');expect(getByRole(dialog,'combobox',{name:'出运'}).textContent).not.toContain('S ·');
   await click(getByRole(dialog,'button',{name:'取消'}));
   await click(getByRole(host,'button',{name:'登记信用证'}));
-  dialog=getByRole(document.body,'dialog');
-  typeInto(dialog.querySelector('input[aria-label="信用证号"]') as HTMLInputElement,'lcb-2');
-  typeInto(dialog.querySelector('input[aria-label="开证行"]') as HTMLInputElement,'HSBC');
-  typeInto(dialog.querySelector('input[aria-label="信用证金额"]') as HTMLInputElement,'500');
-  typeInto(dialog.querySelector('input[aria-label="最晚装运日"]') as HTMLInputElement,'2099-01-10');
-  typeInto(dialog.querySelector('input[aria-label="有效期"]') as HTMLInputElement,'2099-01-31');
-  await click(getByRole(dialog,'checkbox',{name:/SO-2/}));
-  await click(getByRole(dialog,'button',{name:'登记信用证'}));
+  expect(queryByRole(document.body,'dialog')).toBeNull();expect(getByRole(host,'heading',{name:'登记信用证'})).toBeTruthy();
+  typeInto(host.querySelector('input[aria-label="信用证号"]') as HTMLInputElement,'lcb-2');typeInto(host.querySelector('input[aria-label="开证行"]') as HTMLInputElement,'HSBC');expect(queryByRole(host,'spinbutton',{name:'远期天数'})).toBeNull();
+  await click(getByRole(host,'button',{name:'下一步'}));await click(getByRole(host,'checkbox',{name:/SO-2/}));await click(getByRole(host,'button',{name:'下一步'}));
+  typeInto(host.querySelector('input[aria-label="信用证金额"]') as HTMLInputElement,'500');typeInto(host.querySelector('input[aria-label="最晚装运日"]') as HTMLInputElement,'2099-01-10');typeInto(host.querySelector('input[aria-label="有效期"]') as HTMLInputElement,'2099-01-31');
+  expect(queryByRole(host,'spinbutton',{name:'金额容差 %'})).toBeTruthy();await click(getByRole(host,'button',{name:'下一步'}));await click(getByRole(host,'button',{name:'下一步'}));await click(getByRole(host,'button',{name:'登记信用证'}));
   expect(store.run).toHaveBeenLastCalledWith({type:'lc.save',payload:{input:expect.objectContaining({lcNo:'lcb-2',issuingBank:'HSBC',orderIds:['o2'],currency:'USD',amount:'500',availableBy:'sight',latestShipmentDate:'2099-01-10',expiryDate:'2099-01-31',presentationDays:'21'})}});
 });
 
@@ -268,4 +265,10 @@ it('opens classification maintenance inside an exact shipment context and return
  const f=store.state!.fulfillment;f.shipments.push(shipment('scoped'));f.packing.push(pack('scoped',10));f.customs.push(customs('scoped','draft'));render('cus-scoped','scoped');
  const detail=host.querySelector('[data-customs-detail="cus-scoped"]') as HTMLElement;await click(getByRole(detail,'button',{name:'维护商品归类'}));expect(getByRole(host,'button',{name:'新建归类'})).toBeTruthy();expect(getByRole(host,'button',{name:'返回出运'})).toBeTruthy();expect(host.querySelector('[data-customs-detail]')).toBeNull();
  await click(getByRole(host,'button',{name:'返回本票报关'}));expect(host.querySelector('[data-customs-detail="cus-scoped"]')).toBeTruthy();expect(go).not.toHaveBeenCalled();expect(store.run).not.toHaveBeenCalled();
+});
+
+it('requires usance days only for a usance credit and closes a page editor when write authority is revoked',async()=>{
+ const order=store.state!.orders[0];order.governance={status:'approved',contract:{paymentMethod:'LC'}} as any;render();await click(getByRole(host,'tab',{name:/信用证/}));await click(getByRole(host,'button',{name:'登记信用证'}));expect(queryByRole(host,'spinbutton',{name:'远期天数'})).toBeNull();
+ const method=getByRole(host,'combobox',{name:'付款期限'}) as HTMLSelectElement;await act(async()=>{method.value='usance';method.dispatchEvent(new Event('change',{bubbles:true}));});expect(getByRole(host,'spinbutton',{name:'远期天数'})).toBeTruthy();typeInto(host.querySelector('input[aria-label="信用证号"]') as HTMLInputElement,'LC-NEW');typeInto(host.querySelector('input[aria-label="开证行"]') as HTMLInputElement,'Issuing bank');await click(getByRole(host,'button',{name:'下一步'}));expect(host.textContent).toContain('请填写远期天数');
+ typeInto(host.querySelector('input[aria-label="远期天数"]') as HTMLInputElement,'30');await click(getByRole(host,'button',{name:'下一步'}));expect(getByRole(host,'checkbox',{name:/SO-1/})).toBeTruthy();session.denied.add('customs:write');render();expect(queryByRole(host,'heading',{name:'登记信用证'})).toBeNull();expect(queryByRole(host,'button',{name:'登记信用证'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });

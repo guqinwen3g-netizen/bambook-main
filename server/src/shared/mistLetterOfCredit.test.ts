@@ -1,6 +1,6 @@
 import {describe,it,expect} from 'vitest';
 import {applyMistCommand,createMistState,mistCommandPermission,type MistContext,type MistCommand,type MistState} from './mistWorkspace';
-import {lcAlerts,lcAvailableMinor,lcStatus,readLetterOfCredits} from './mistLetterOfCredit';
+import {lcAlerts,lcAvailableMinor,lcStatus,readLetterOfCredits,lcPresentationDeadline,lcAutoDiscrepancies} from './mistLetterOfCredit';
 
 function fixture(){
   let id=0;const ctx={id:()=>`lc-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'docs',actorName:'单证 林'} as MistContext;
@@ -98,4 +98,12 @@ describe('信用证台账',()=>{
     expect(()=>f.run(present(id,f.shipmentId))).toThrow('已注销');
     expect(()=>f.run({type:'lc.cancel',payload:{id,date:'2026-10-18',reason:'x'}} as MistCommand)).toThrow('已注销');
   });
+});
+
+it('preserves an express presentation period over 21 days while expiry still caps presentation',()=>{
+ const f=fixture();f.run(save({presentationDays:30,expiryDate:'2026-11-30'}));expect(f.lc.presentationDays).toBe(30);expect(lcPresentationDeadline(f.lc,'2026-10-14')).toBe('2026-11-13');expect(lcAutoDiscrepancies(f.lc,'2026-10-14','2026-11-08').some(row=>row.startsWith('迟交单'))).toBe(false);
+ const shorterExpiry={...f.lc,expiryDate:'2026-11-05'};expect(lcPresentationDeadline(shorterExpiry,'2026-10-14')).toBe('2026-11-05');expect(lcAutoDiscrepancies(shorterExpiry,'2026-10-14','2026-11-08').some(row=>row.startsWith('信用证过期'))).toBe(true);
+});
+it('accepts an express presentation period from an accepted amendment and keeps the original value in history',()=>{
+ const f=fixture();f.run(save());expect(f.lc.presentationDays).toBe(21);f.run({type:'lc.amend',payload:{id:f.lc.id,date:'2026-10-18',changes:{presentationDays:30},note:'银行修改书已由受益人接受'}});expect(f.lc.presentationDays).toBe(30);expect(f.lc.amendments.at(-1)?.changes).toContainEqual({field:'presentationDays',label:'交单期（天）',from:'21',to:'30'});
 });
