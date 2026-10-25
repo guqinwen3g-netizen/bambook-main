@@ -2,6 +2,7 @@ import { MistCommandError, assertMistOrderApproved, lineAmount, type MistContext
 import type { FulfillmentPurchaseRevision } from './mistFulfillment';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
 import { platformBusinessDate } from './mistPlatform';
+import type { MistRfq } from './mistSourcing';
 
 export type PurchaseDocumentSnapshot = {
   purchaseId: string; code: string; revision: number; templateVersion: 1; date: string;
@@ -29,11 +30,21 @@ export function preparePurchaseDocumentSnapshot(root: MistState, payload: unknow
   const order = root.orders.find(o => o.id === revision.snapshot.orderId), line = root.orderLines.find(l => l.id === revision.snapshot.lineId && l.orderId === order?.id);
   if (!order || !line || !ctx.actorId) return fail('无法核对合同来源或经办人');
   const supplier = root.market.suppliers.find(s => s.id === revision.snapshot.supplierId);
+  const contract = structuredClone(revision.snapshot);
+  const rfq = (root as MistState & { rfqs?: MistRfq[] }).rfqs?.find(r => r.award?.purchaseId === p.id && r.orderId === contract.orderId && r.lineId === contract.lineId);
+  if (rfq?.award) {
+    // Remove only the exact system-generated award paragraph backed by this RFQ.
+    // Free supplier requirements and the original approved/audit records remain intact.
+    const count = rfq.quotes.filter(q => !q.supersededAt && !q.declined).length;
+    const memo = `询价 ${rfq.code} 定标（${count} 家报价）${rfq.award.reason ? '：' + rfq.award.reason : ''}`;
+    const sections = contract.note.split(/\n\s*\n/), supplierSections = sections.filter(section => section.trim() !== memo);
+    if (supplierSections.length !== sections.length) contract.note = supplierSections.join('\n\n');
+  }
   return {
     purchaseId: p.id, code: p.code, revision: revision.revision, templateVersion: 1, date: platformBusinessDate(ctx.now),
     issuer: { legalName: c.legalName, englishName: c.englishName || '', address: c.address || '', englishAddress: c.englishAddress || '', phone: c.phone || '', email: c.email || '', taxId: c.taxId || '' },
     supplier: { name: revision.snapshot.supplier, address: supplier?.address || '' }, orderCode: order.code, style: line.style,
-    contract: structuredClone(revision.snapshot), total: lineAmount(revision.snapshot.quantity, revision.snapshot.price).toFixed(2),
+    contract, total: lineAmount(revision.snapshot.quantity, revision.snapshot.price).toFixed(2),
     generatedAt: ctx.now, generatedBy: ctx.actorName, generatedById: ctx.actorId,
   };
 }
