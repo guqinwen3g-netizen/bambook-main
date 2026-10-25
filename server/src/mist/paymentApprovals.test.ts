@@ -62,3 +62,25 @@ for(const endpoint of ['command','review'] as const)describe(`付款审批：${e
   expect((await repo.get(actor(),f.workspaceId)).revision).toBe(f.revision);
  });
 });
+
+describe('付款申请撤回：本人和当前权限',()=>{
+ it.each(['pending','approved'])('不能凭申请权限撤回其他人的%s申请，拒绝不占用请求号也不改状态',async status=>{
+  const f=await fixture();let revision=f.revision;
+  if(status==='approved'){const next=await repo.execute(actor('manager'),f.workspaceId,{requestId:'approve-for-cancel',expectedRevision:revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'核对后批准'}}});revision=next.workspace.revision;}
+  auth.users.get('manager2')!.permissions.push('finance:payment_request:create');
+  const before=structuredClone(db.workspaces.get(f.workspaceId));
+  const input={requestId:'cancel-other-'+status,expectedRevision:revision,command:{type:'payable.request.cancel',payload:{id:f.id,reason:'申请依据已变化'}}};
+  await expect(repo.execute(actor('manager2'),f.workspaceId,input as any)).rejects.toMatchObject({code:'FORBIDDEN',status:403});
+  expect(db.workspaces.get(f.workspaceId)).toEqual(before);
+  const own=await repo.execute(actor(),f.workspaceId,input as any);
+  expect(own.workspace.revision).toBe(revision+1);expect(db.workspaces.get(f.workspaceId)!.state.payables.requests.find((r:any)=>r.id===f.id).state).toBe('cancelled');
+ });
+ it('本人失去申请权限后旧会话也不能撤回，恢复同一权限后正常办理',async()=>{
+  const f=await fixture(),stale=actor(),before=structuredClone(db.workspaces.get(f.workspaceId));
+  auth.users.get('owner')!.permissions=auth.users.get('owner')!.permissions.filter(p=>p!=='finance:payment_request:create');
+  const input={requestId:'cancel-current-scope',expectedRevision:f.revision,command:{type:'payable.request.cancel',payload:{id:f.id,reason:'申请依据已变化'}}};
+  await expect(repo.execute(stale,f.workspaceId,input as any)).rejects.toMatchObject({code:'FORBIDDEN',status:403});expect(db.workspaces.get(f.workspaceId)).toEqual(before);
+  auth.users.get('owner')!.permissions.push('finance:payment_request:create');await repo.execute(stale,f.workspaceId,input as any);
+  expect(db.workspaces.get(f.workspaceId)!.state.payables.requests.find((r:any)=>r.id===f.id).state).toBe('cancelled');
+ });
+});

@@ -1,5 +1,8 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  "申请依据": "Request evidence",
+  "付款待分配": "Payment awaiting allocation",
+  "仅申请人可撤回付款申请": "Only the requester can withdraw this payment request.",
   "选择询价单": "Select an RFQ",
   "来证备注：": "Original credit notes: ",
   "银行通知摘要": "Bank advice summary",

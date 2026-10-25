@@ -22,7 +22,7 @@ export function SettlementAdvance({ state, settlement: st, busy, canRequest, onR
   return <DetailBlock title={uiText("不等票付款")}>
     <Facts items={[{ label: '不等票可申请', value: money(room, st.currency) }, ...(paid > 0 ? [{ label: '已先付 / 其中未收票', value: money(paid, st.currency) + ' / ' + money(open, st.currency) }] : [])]} />
     {open > 0 && <Banner tone="warn" title={uiText("已付未收票")}>{uiText("供应商票据到后按本结算登记，先付款自动抵到票据；超过 ")}{ADVANCE_INVOICE_REMIND_DAYS}{uiText(" 天未收票会在应付汇总中提醒催票。")}</Banner>}
-    {room > 0 && <div className="mist-row"><Button size="sm" disabled={busy || !canRequest} title={uiText(!canRequest ? '需要付款申请权限' : undefined)} onClick={onRequest}>{uiText("不等票申请付款")}</Button></div>}
+    {room > 0 && canRequest && <div className="mist-row"><Button size="sm" disabled={busy} onClick={onRequest}>{uiText("不等票申请付款")}</Button></div>}
   </DetailBlock>;
 }
 
