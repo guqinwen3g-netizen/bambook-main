@@ -115,6 +115,16 @@ it('lets a read-only viewer inspect a task without claiming or reporting it',()=
   expect(store.run).not.toHaveBeenCalled();
 });
 
+it.each(['pioneer','pp','shipping','development'] as const)('returns the exact %s physical sample with its source context and visible colour',async role=>{
+  const source=role==='development'?{kind:'version' as const,devId:'dev',versionId:'version'}:{kind:'orderLine' as const,orderId:'o',lineId:'l',productionId:'factory'};
+  store.state!.fulfillment.samples.push({id:'physical',code:'SMP-EXACT',name:'Coating',category:'面料',form:'米样',unit:'米',quantity:.5,available:.5,color:'炭灰',size:'幅宽150cm',source,...(role==='development'?{}:{role}),...(role==='shipping'?{shipmentId:'ticket'}:{}),location:'Room',fileIds:[],note:'',createdAt:'2026-10-08T08:00:00Z'});
+  store.state!.fulfillment.qcTasks.push(task('exact',{source,sampleId:'physical',domain:'fabric'}));render('exact');
+  expect(host.textContent).toContain('炭灰');
+  await click(getByRole(host,'button',{name:role==='shipping'?'返回本票船样':'返回实物样品'}));
+  expect(go).toHaveBeenLastCalledWith('samples','physical',role==='shipping'?{section:'shipment:ticket',productionId:'factory'}:role==='development'?{}:{productionId:'factory'});
+  expect(store.run).not.toHaveBeenCalled();
+});
+
 it('lets the current QC transfer to a named member and reschedule with reasons',async()=>{
   store.state!.members=[{userId:'qc-b',name:'QC乙'} as any];
   store.state!.fulfillment.qcTasks.push(task('mine',{state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
