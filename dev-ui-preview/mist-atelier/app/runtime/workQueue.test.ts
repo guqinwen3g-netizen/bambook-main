@@ -244,3 +244,11 @@ it('uses short claim work labels while preserving exact targets and source task 
  const state=base();state.platform.claims=[{id:'claim',code:'CLM-1'} as any];state.tasks=['claim-verify:claim','claim-factory:claim'].map((kind,i)=>({id:String(i),kind,title:'Old long label',due:'',done:false,permission:'qc:inspect',target:{view:'claims',id:'claim'}}));const before=structuredClone(state.tasks);
  expect(mistMyTasks(state,{me:'me',can:all,canRead:all}).map(t=>t.title)).toEqual(['客诉核实 · CLM-1','工厂回复 · CLM-1']);expect(state.tasks).toEqual(before);
 });
+
+it('presents an existing customer handover concisely while preserving its source, assignee and deadline',()=>{
+ const state=base(),customer={id:'handover-customer',name:'Alder & Vale Apparel'};state.customers.push(customer as any);state.market.relations.push({id:'handover-relation',customerId:customer.id} as any);
+ const task={id:'handover-task',kind:'customer-handover',title:'接手客户 Alder & Vale Apparel：核对在手订单、报价、未收款与联系人',due:'2026-10-18',done:false,assigneeIds:['me'],target:{view:'relations',id:'handover-relation'}} as any;state.tasks.push(task);const before=JSON.stringify(task);
+ const shown=mistMyTasks(state,{me:'me',canRead:all,can:all}).find(row=>row.id===task.id)!;
+ expect(shown.title).toBe('接手客户 · Alder & Vale Apparel');expect(shown.target).toEqual(task.target);expect(shown.assigneeIds).toEqual(['me']);expect(shown.due).toBe('2026-10-18');expect(JSON.stringify(task)).toBe(before);
+ expect(mistMyTasks(state,{me:'other',canRead:all,can:()=>false}).some(row=>row.id===task.id)).toBe(false);
+});

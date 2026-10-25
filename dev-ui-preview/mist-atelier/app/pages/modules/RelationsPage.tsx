@@ -103,14 +103,14 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
   const handoverSpec = (r: MarketRelation): ModuleEditorSpec | null => {
     const c = state?.customers.find(x => x.id === r.customerId); if (!state || !c) return null;
     const scope = customerHandoverScope(state, c.id), lockedOrders = scope.orders.filter(o => scope.locked(o)), movable = scope.orders.filter(o => !scope.locked(o));
-    return { title: `交接 ${c.name} 的在手业务`, submitLabel: '确认交接',
-      description: `客户负责人现为 ${c.owner || '未指定'}。交接后客户与勾选的订单、商机改由新负责人负责，原负责人在这些对象上未完成的待办一并改派，并给新负责人生成“接手客户”待办；报价跟随客户负责人。未勾选的订单保留原负责人。${lockedOrders.length ? `审批中的订单 ${lockedOrders.map(o => o.code).join('、')} 须审批完成后再交接。` : ''}`,
+    return { title: '在手业务交接', submitLabel: '确认交接',
+      description: `${c.name} · 当前负责人 ${c.owner||'未指定'}${lockedOrders.length?`；待审批订单暂不交接：${lockedOrders.map(o=>o.code).join('、')}`:''}`,
       initialValues: { toUserId: '', reason: '', ...Object.fromEntries(movable.map(o => ['order:' + o.id, true])), ...Object.fromEntries(scope.opportunities.map(o => ['opp:' + o.id, true])) },
       fields: [
         { key: 'toUserId', label: '新负责人', type: 'select', required: true, options: [{ value: '', label: '选择成员' }, ...memberSelectOptions(members).filter(o => o.value !== c.ownerId)] },
-        ...movable.map(o => ({ key: 'order:' + o.id, label: `订单 ${o.code} · ${o.state} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
+        ...movable.map(o => ({ key: 'order:' + o.id, label: `订单 ${o.code}`, type: 'checkbox' as const })),
         ...scope.opportunities.map(o => ({ key: 'opp:' + o.id, label: `商机 ${o.title} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
-        { key: 'reason', label: '交接原因', type: 'textarea', required: true, hint: '例如离职、调岗、休假代管、客户重新分配' },
+        { key: 'reason', label: '交接原因', type: 'textarea', required: true },
       ],
       submit: v => run({ type: 'handover.customer', payload: { customerId: c.id, toUserId: String(v.toUserId ?? ''), reason: String(v.reason ?? ''), orderIds: movable.filter(o => v['order:' + o.id]).map(o => o.id), opportunityIds: scope.opportunities.filter(o => v['opp:' + o.id]).map(o => o.id) } } as any) };
   };

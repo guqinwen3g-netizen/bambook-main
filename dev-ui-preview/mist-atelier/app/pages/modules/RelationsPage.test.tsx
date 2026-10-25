@@ -74,7 +74,7 @@ describe('关系智库', () => {
     expect(host.querySelector('[data-relation-detail]')!.textContent).toMatch(/联系人 · 3.*Emma Clarke/);
     await click('在手业务交接');
     const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
-    expect(dialog.textContent).toContain('客户负责人现为 顾言');
+    expect(dialog.textContent).toContain('当前负责人 顾言');
     const owner = dialog.querySelector('select') as HTMLSelectElement;
     expect([...owner.options].map(o => o.value)).toEqual(['', 'demo-new']);
     expect([...dialog.querySelectorAll('input[type="checkbox"]')].map(c => (c as HTMLInputElement).checked)).toEqual([true, true, true]);

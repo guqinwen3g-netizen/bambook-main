@@ -12,6 +12,27 @@ describe('Mist order reviewer authority',()=>{
  it('reuses business-domain eligibility and filters revoked or inactive ordinary accounts',async()=>{mocks.resolve.mockImplementation(async(_db,domain)=>domain==='garment'?['garment-reviewer','revoked','inactive']:['fabric-reviewer']);for(const id of ['garment-reviewer','fabric-reviewer'])mocks.users.set(id,{id,status:'active',permissions:['orders:write']});mocks.users.set('revoked',{id:'revoked',status:'active',permissions:[]});mocks.users.set('inactive',{id:'inactive',status:'disabled',permissions:['orders:write']});const value=await mistApprovalAuthority({},actor,'order.governance.decide');expect(value.orderReviewerIds).toEqual({garment:['garment-reviewer'],fabric:['fabric-reviewer']});expect(mocks.resolve.mock.calls.map(call=>call[1])).toEqual(['garment','fabric']);});
  it('leaves an unconfigured domain unavailable rather than inventing a reviewer',async()=>{mocks.resolve.mockRejectedValue(Object.assign(new Error('missing'),{code:'ORDER_APPROVAL_AUTHORITY_MISSING'}));expect((await mistApprovalAuthority({},actor,'order.governance.submit')).orderReviewerIds).toEqual({garment:[],fabric:[]});});
 });
+describe('company leadership fallback for order governance',()=>{
+ it.each(['order.governance.requestCancel','order.governance.decideCancel'])('keeps the supervisor and independently routed company leader eligible for %s',async kind=>{
+  mocks.resolve.mockImplementation(async(_db,domain)=>domain==='garment'?['head']:[]);
+  mocks.users.set('head',{id:'head',status:'active',permissions:['orders:write']});mocks.users.set('leader',{id:'leader',status:'active',permissions:['orders:write']});
+  mocks.dept.mockResolvedValue({reviewerId:'leader'});
+  const value=await mistApprovalAuthority({}, {...actor,userId:kind.endsWith('requestCancel')?'head':'leader',companyId:'company-a'},kind,['head','leader']);
+  expect(value.orderReviewerIds).toEqual({garment:['head','leader'],fabric:[]});expect(mocks.dept).toHaveBeenCalledWith('head');
+  for(const call of mocks.build.mock.calls)expect(call[2]).toBe('company-a');
+ });
+ it.each(['revoked','disabled','outside-workspace','self'])('does not nominate a %s fallback',async condition=>{
+  mocks.resolve.mockResolvedValue(['head']);mocks.users.set('head',{id:'head',status:'active',permissions:['orders:write']});
+  mocks.users.set('leader',{id:'leader',status:condition==='disabled'?'disabled':'active',permissions:condition==='revoked'?[]:['orders:write']});
+  mocks.dept.mockResolvedValue({reviewerId:condition==='self'?'head':'leader'});
+  const value=await mistApprovalAuthority({}, {...actor,companyId:'company-a'},'order.governance.requestCancel',condition==='outside-workspace'?['head']:['head','leader']);
+  expect(value.orderReviewerIds).toEqual({garment:['head'],fabric:['head']});
+ });
+ it('keeps configured approval available when no valid upper leader exists',async()=>{
+  mocks.resolve.mockResolvedValue(['head']);mocks.users.set('head',{id:'head',status:'active',permissions:['orders:write']});mocks.dept.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));
+  expect((await mistApprovalAuthority({},actor,'order.governance.submit')).orderReviewerIds).toEqual({garment:['head'],fabric:['head']});
+ });
+});
 describe('Mist payment request reviewer authority',()=>{
  it('local identities use the sales-manager test profile',async()=>{vi.stubEnv('MIST_LOCAL_WORKSPACE','1');expect((await mistApprovalAuthority({},{...actor,mistLocal:true},'payable.request.submit')).paymentReviewerIds).toEqual(['local-manager','local-reviewer']);});
  it('uses the requester department head only while that account still holds payment-request approval',async()=>{

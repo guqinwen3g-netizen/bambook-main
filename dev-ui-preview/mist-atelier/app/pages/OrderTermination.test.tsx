@@ -36,7 +36,7 @@ it('voids a draft only with a reason and sends the void command', async () => {
   render();
   await act(async () => getByRole(host, 'button', { name: '作废订单' }).click());
   const dialog = getByRole(document.body, 'dialog', { name: /作废订单/ });
-  expect(dialog.textContent).toContain('记录不删除');
+  expect(dialog.textContent).toContain('记录保留');
   await act(async () => getByRole(dialog, 'button', { name: '确认作废' }).click());
   expect(dialog.textContent).toContain('请填写作废原因'); expect(store.run).not.toHaveBeenCalled();
   const input = getByLabelText(dialog, '作废原因') as HTMLTextAreaElement;
@@ -63,7 +63,7 @@ it('offers cancellation for an approved order and blocks it after departure, poi
   render();
   await act(async () => getByRole(host, 'button', { name: '申请取消订单' }).click());
   let dialog = getByRole(document.body, 'dialog', { name: /申请取消订单/ });
-  expect(dialog.textContent).toContain('申请人不能审批自己的申请');
+  expect(dialog.textContent).toContain('审批期间暂停新的采购、生产与出运');
   expect((getByRole(dialog, 'button', { name: '提交取消审批' }) as HTMLButtonElement).disabled).toBe(false);
   await act(async () => getByRole(dialog, 'button', { name: '返回' }).click());
   store.state!.fulfillment.shipments.push({ id: 'sh', code: 'SH-9', lines: [{ orderId, lineId: store.state!.orderLines[0].id, quantity: 5 }], state: 'departed' } as never);
