@@ -90,7 +90,7 @@ function ShipmentEditor({ shipment, onClose }: {
         setStep(s => s + 1);
     }
     catch (e) {
-        setFailure(String(e));
+        setFailure(e instanceof Error ? e.message : '请核对出运信息');
     } }}>{uiText(step === 2 ? '保存出运请求' : '下一步')}</Button></FormFooter></Card></div></MistPage>;
 }
 function PackingEditor({ shipment, onClose }: {

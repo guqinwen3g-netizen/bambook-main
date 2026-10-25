@@ -11,17 +11,18 @@ const store = vi.hoisted(() => ({ state: null as MistState | null, loading: fals
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 const permissions=vi.hoisted(()=>({ordersWrite:true,shippingRead:true}));
 vi.mock('../runtime/auth',()=>{const session=()=>({user:{id:'sales',displayName:'业务员甲'},sessionKey:'detail-session',hasPermission:(p:string)=>p==='orders:write'?permissions.ordersWrite:p==='shipments:read'?permissions.shippingRead:true,canAccessView:(view:string)=>view==='shipments'?permissions.shippingRead:true});return{useOptionalMistSession:session,useMistSession:session};});
+import {MistPresentedErrorContext} from '../runtime/errorPresentation';
 import { OrderDetailPage } from './OrderDetailPage';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, orderId: string;
-let sequence = 0;const go=vi.fn();
+let sequence = 0;let presentedError:string|undefined;const go=vi.fn();
 const context = { id: () => `detail-${++sequence}`, now: '2026-10-13T02:00:00.000Z', actorName: '业务员甲', actorId: 'sales' };
 function render() {
-  act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'orders/detail', id: orderId }, go, openAI: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}><OrderDetailPage /></Nav.Provider></ToastProvider></MistRoot>));
+  act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'orders/detail', id: orderId }, go, openAI: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}><MistPresentedErrorContext.Provider value={presentedError}><OrderDetailPage /></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));
 }
 beforeEach(() => {
-  sequence = 0;permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();
+  sequence = 0;presentedError=undefined;store.error='';permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();
   const empty = createMistState(context, 'empty');
   empty.customers.push({ id: 'customer-a', code: 'C-A', name: '客户甲', country: '', city: '', industry: '', owner: '业务员甲', grade: 'A', currency: 'USD', terms: '', incoterm: '', categories: '', creditLimit: 0, since: '2026-01-01' });
   const result = applyMistCommand(empty, { type: 'order.create', payload: { type: 'garment', customerId: 'customer-a', season: 'AW28', currency: 'USD', due: '2026-10-30', ownerId:'sales', lines: [{ name: '精确金额条目', style: 'ROUND-01', img: 'coat', fulfillmentMode:'cmt', cmtIncludedItems:[], qty: 1.005, unit: '件', price: 1 }] } }, context);
@@ -469,4 +470,11 @@ it('shows actual completion and current final QC independently of the stored lan
 });
 it('retains a completed shipment node after the order is financially closed',()=>{
  const state=store.state!,line=state.orderLines[0];state.orders[0].state='履约完成';state.fulfillment.shipments.push({id:'departed',code:'SHP',state:'departed',lines:[{orderId,lineId:line.id,quantity:line.qty}]} as any);render();expect(progressNode('出运').getAttribute('data-state')).toBe('done');
+});
+
+it('keeps one actionable handoff error and retained input on a standalone page',async()=>{
+ store.state!.orders[0].governance!.status='approved';store.run.mockRejectedValueOnce(new Error('请先核对三项准备'));render();await act(async()=>getByRole(host,'button',{name:'交接后勤'}).click());const note=getByRole(document.body,'textbox',{name:'交接说明'}) as HTMLTextAreaElement;
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'原交接内容');note.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>getByRole(document.body,'button',{name:'确认交接'}).click());expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);expect(note.value).toBe('原交接内容');expect(document.body.textContent?.split('请先核对三项准备')).toHaveLength(2);
+ presentedError='请先核对三项准备';render();expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(0);expect(note.value).toBe('原交接内容');
 });

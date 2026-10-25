@@ -108,6 +108,7 @@ it('BB-ORD-6 warns before saving a shipment above the over-ship cap and offers a
   const qty=host.querySelector('input[type="number"]') as HTMLInputElement;typeInto(qty,'50');
   const over=host.querySelector('[data-over-ship="l"]')!;expect(host.textContent).toContain('超出允许溢装，须经理审批');expect(over.textContent).toContain('累计出运 1050');expect(over.textContent).toContain('溢装上限 1030');expect(over.textContent).toContain('超出 20');
   expect(host.querySelector('.mist-banner p p, .mist-banner p div')).toBeNull();
+  await click(getByRole(host,'button',{name:'下一步'}));expect(host.textContent).not.toContain('Error:');expect(qty.value).toBe('50');
   const request=getByRole(host,'button',{name:'发起超量出运申请'}) as HTMLButtonElement;expect(request.disabled).toBe(true);
   typeInto(getByRole(host,'textbox',{name:'超量原因 COAT-1'}) as HTMLTextAreaElement,'客户要求多发补损');
   await click(request);
