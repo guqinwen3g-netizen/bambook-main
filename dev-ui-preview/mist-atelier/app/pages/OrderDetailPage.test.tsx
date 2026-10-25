@@ -476,5 +476,5 @@ it('keeps one actionable handoff error and retained input on a standalone page',
  store.state!.orders[0].governance!.status='approved';store.run.mockRejectedValueOnce(new Error('请先核对三项准备'));render();await act(async()=>getByRole(host,'button',{name:'交接后勤'}).click());const note=getByRole(document.body,'textbox',{name:'交接说明'}) as HTMLTextAreaElement;
  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'原交接内容');note.dispatchEvent(new Event('input',{bubbles:true}));});
  await act(async()=>getByRole(document.body,'button',{name:'确认交接'}).click());expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);expect(note.value).toBe('原交接内容');expect(document.body.textContent?.split('请先核对三项准备')).toHaveLength(2);
- presentedError='请先核对三项准备';render();expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(0);expect(note.value).toBe('原交接内容');
+ presentedError='请先核对三项准备';render();expect(within(getByRole(document.body,'dialog',{name:'交接后勤'})).getByRole('alert').textContent).toContain('请先核对三项准备');expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);expect(note.value).toBe('原交接内容');
 });
