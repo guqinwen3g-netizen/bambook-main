@@ -1,5 +1,7 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '送修 {0}':'Transfer {0}',
+  '维修 {0}':'Repair {0}',
   '记录通知':'Log notice',
   '客诉核实':'Claim verification',
   '对客处理':'Customer resolution',

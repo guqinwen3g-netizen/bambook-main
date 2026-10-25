@@ -5,7 +5,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByText,queryByText} from '@testing-library/dom';
 import {Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
-import {ModuleWorkbench,ModuleEditorDialog,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
+import {ModuleWorkbench,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
 
 const bridge=vi.hoisted(()=>({workspace:null as any,route:{view:'test-ledger'} as any,go:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>bridge.workspace}));
@@ -272,4 +272,12 @@ describe('exact form command recovery',()=>{
   bridge.workspace.workspace={id:recoveryKey.workspaceId};const submit=vi.fn(async()=>{throw lostAcknowledgement();}),spec={...editor(submit),fields:[{key:'name',label:'业务名称',required:true}]},close=vi.fn();host=document.createElement('div');document.body.append(host);root=createRoot(host);const dialog=(form:ModuleEditorSpec)=><MistRoot><ToastProvider><ModuleEditorDialog spec={form} onClose={close}/></ToastProvider></MistRoot>;await act(async()=>root!.render(dialog(spec)));await click('确认创建');bridge.workspace.pending=null;bridge.workspace.commandRecovery={...recoveryKey,revision:1};await act(async()=>root!.render(dialog(spec)));expect(queryByRole(document.body,'button',{name:'确认创建'})).toBeNull();expect((getByRole(document.body,'textbox',{name:'业务名称'}) as HTMLInputElement).disabled).toBe(true);await click('查看记录');expect(close).toHaveBeenCalledTimes(1);expect(submit).toHaveBeenCalledTimes(1);
   const other={...spec,initialValues:{name:'另一笔记录'},submit:vi.fn(async()=>({id:'second'}))};await act(async()=>root!.render(dialog(other)));expect(queryByRole(document.body,'button',{name:'查看记录'})).toBeNull();expect((getByRole(document.body,'textbox',{name:'业务名称'}) as HTMLInputElement).value).toBe('另一笔记录');expect((getByRole(document.body,'button',{name:'确认创建'}) as HTMLButtonElement).disabled).toBe(false);
  });
+});
+
+it('keeps one visible reason for the same workspace and wizard failure while retaining input and retry controls',async()=>{
+ const reason='仓库仍有待返库批次，不能停用';bridge.workspace.error=reason;
+ const spec:ModuleEditorSpec={title:'更新仓库',fields:[{key:'name',label:'仓库名称',required:true}],initialValues:{name:'上海仓'},submit:vi.fn(async()=>{throw new Error(reason);})};
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><p data-testid="workspace-error">{bridge.workspace.error}</p><ModuleEditorPage spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));
+ await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'确认保存'}).click());expect(host.textContent!.split(reason)).toHaveLength(2);expect(getByRole(host,'button',{name:'确认保存'}).hasAttribute('disabled')).toBe(false);
+ await act(async()=>getByRole(host,'button',{name:'上一步'}).click());expect((getByRole(host,'textbox',{name:'仓库名称'}) as HTMLInputElement).value).toBe('上海仓');expect(bridge.workspace.refresh).not.toHaveBeenCalled();
 });

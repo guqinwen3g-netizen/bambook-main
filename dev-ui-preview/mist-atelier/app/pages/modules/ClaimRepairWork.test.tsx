@@ -40,3 +40,8 @@ it('shows physical transfer history before any repair job and keeps a returned p
  state.market.suppliers[0].status='paused';state.market.suppliers[0].statusFrom='2000-01-01';expect(repairDispatchSpec(state,goods,record,command).fields.find(f=>f.key==='warehouseId')?.options?.some(o=>o.value==='site')).toBe(false);
  state.fulfillment.receivedRecords=[];state.fulfillment.warehouses=[];act(()=>root.render(<Nav.Provider value={{route:{view:'claims',id:'case'},go:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistRoot><ToastProvider><ClaimRepairWork goods={goods} state={state} busy={false}/></ToastProvider></MistRoot></Nav.Provider>));expect(host.textContent).toContain('LOT-1');await act(async()=>getByRole(host,'button',{name:'返库记录'}).click());expect(host.textContent).toContain('Home site · Hold area');expect(host.textContent).toContain('BACK-1');
 });
+
+it('identifies repeated repair rounds without changing old results or adding explanations',()=>{
+ const first={...structuredClone(job),id:'first',qc:{id:'qc-first',result:'fail' as const,checkedAt:'2026-10-13',basis:'Failed',fileIds:[],at:job.at,actorId:'qc',actor:'QC'}},second={...structuredClone(job),id:'second'};
+ const before=structuredClone([first,second]);render([first,second],()=>true);expect(host.textContent).toContain('维修 1');expect(host.textContent).toContain('维修 2');expect([first,second]).toEqual(before);
+});
