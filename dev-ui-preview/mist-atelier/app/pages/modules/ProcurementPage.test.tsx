@@ -35,9 +35,9 @@ it('generates supplier PDFs through the server and keeps archived files availabl
   expect(host.textContent).toContain('合同文件');expect(host.textContent).toContain('PO-V1-01.pdf');
   expect(queryByRole(host,'button',{name:'下载批准单据'})).toBeNull();
 });
-it('keeps generation disabled for read-only procurement access',()=>{
+it('keeps generation hidden for read-only procurement access',()=>{
   session.denied.add('procurement:write');store.state!.fulfillment.purchases.push(purchase('readonly',approved({kind:'processing'})));
-  render('readonly');expect((getByRole(host,'button',{name:'生成加工合同'}) as HTMLButtonElement).disabled).toBe(true);
+  render('readonly');expect(queryByRole(host,'button',{name:'生成加工合同'})).toBeNull();
 });
 beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
@@ -150,12 +150,13 @@ it('shows a summary preview in the list and the complete purchase on its own pag
   act(()=>(getByRole(host,'button',{name:/返回采购管理/}) as HTMLButtonElement).click());
   expect(go).toHaveBeenLastCalledWith('procurement','p1',{},{keepScroll:true});
 });
-it('shows approval reasons, returned notes and processing-only track steps',()=>{
+it('hides observer approval controls and retains returned notes and processing-only steps',()=>{
   store.state!.fulfillment.purchases.push(purchase('wait',{state:'pending',submittedAt:'2026-10-02T08:00:00Z',kind:'processing'}),purchase('back',{state:'rejected',decision:{actorId:'boss',actor:'审批人',at:'2026-10-03T08:00:00Z',decision:'rejected',note:'单价高于报价'}}));
   render('wait');
   let detail=host.querySelector('[data-purchase-detail="wait"]') as HTMLElement;
-  expect((getByRole(detail,'button',{name:'批准承诺'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(detail.textContent).toContain('你不在本单提交时的审批名单中');
+  expect(queryByRole(detail,'button',{name:'批准承诺'})).toBeNull();
+  expect(queryByRole(detail,'button',{name:'退回修改'})).toBeNull();
+  expect(detail.textContent).not.toContain('你不在本单提交时的审批名单中');
   expect(detail.textContent).toContain('物料接收');
   render('back');
   detail=host.querySelector('[data-purchase-detail="back"]') as HTMLElement;
@@ -171,8 +172,9 @@ it('keeps the ledger readable without write permission',()=>{
   render('ro');
   expect(host.textContent).toContain('只读查看');
   expect(queryByRole(host,'button',{name:'新建采购订单'})).toBeNull();
-  expect((getByRole(host,'button',{name:'提交审批'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(host.textContent).toContain('提交审批：需要采购写权限');
+  expect(queryByRole(host,'button',{name:'提交审批'})).toBeNull();
+  expect(queryByRole(host,'button',{name:'编辑草稿'})).toBeNull();
+  expect(host.textContent).not.toContain('需要采购写权限');
   render('ro','list');
   expect(queryByRole(host,'button',{name:'新建采购订单'})).toBeNull();
   expect(host.textContent).toContain('只读查看');
@@ -377,4 +379,25 @@ it.each(['purchase','rfq'])('closes and discards a %s editor when write access i
  expect(getByRole(host,'button',{name:'返回列表',exact:true})).toBeTruthy();
  session.denied.add('procurement:write');render();expect(queryByRole(host,'button',{name:'返回列表',exact:true})).toBeNull();
  session.denied.delete('procurement:write');render();expect(queryByRole(host,'button',{name:'返回列表',exact:true})).toBeNull();
+});
+
+it.each([false,true])('keeps assigned approval independent of procurement write access: %s',async canWrite=>{
+ session.id='boss';if(!canWrite)session.denied.add('procurement:write');
+ store.state!.fulfillment.purchases.push(purchase('approve-only',{state:'pending',submittedAt:'2026-10-02T08:00:00Z'}));
+ render('approve-only');await click(getByRole(host,'button',{name:'批准承诺',exact:true}));
+ let dialog=getByRole(document.body,'dialog');
+ typeInto(getByRole(dialog,'textbox',{name:'审批意见',exact:true}) as HTMLTextAreaElement,'规格及报价已核对');
+ await click(getByRole(dialog,'button',{name:'批准',exact:true}));
+ expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.procurement.decide',payload:{id:'approve-only',decision:'approved',note:'规格及报价已核对'}});
+ await click(getByRole(host,'button',{name:'批准承诺',exact:true}));expect(getByRole(document.body,'dialog')).toBeTruthy();
+ session.denied.add('procurement:approve');render('approve-only');expect(queryByRole(document.body,'dialog')).toBeNull();
+ session.denied.delete('procurement:approve');render('approve-only');expect(queryByRole(document.body,'dialog')).toBeNull();
+ expect(store.run).toHaveBeenCalledTimes(1);
+});
+
+it.each(['awarded','cancelled'])('keeps closed RFQ history visible without obsolete action controls: %s',async state=>{
+ (store.state as any).rfqs=[{id:'closed',code:'RFQ-CLOSED',orderId:'o',lineId:'l',kind:'processing',domain:'garment',description:'风衣加工',quantity:100,unit:'件',currency:'CNY',due:'2099-01-31',destination:'嘉兴仓',deadline:'2099-01-10',supplierIds:[],quotes:[],note:'原要求',state,createdAt:'',actor:'经办人',...(state==='cancelled'?{cancelled:{reason:'需求结束'}}:{award:{supplier:'江南成衣',purchaseId:'po',purchaseCode:'PO-CLOSED',flags:[],reason:''}})}];
+ render();await click(getByRole(host,'tab',{name:/^询价比价/}));await click(getByRole(getByRole(host,'table',{name:'询价单列表'}),'row',{name:/RFQ-CLOSED/}));
+ const detail=host.querySelector('[data-rfq-detail="closed"]') as HTMLElement;expect(detail.textContent).toContain('原要求');
+ for(const name of ['登记报价','登记谢绝','追加邀请','取消询价'])expect(queryByRole(detail,'button',{name,exact:true})).toBeNull();
 });

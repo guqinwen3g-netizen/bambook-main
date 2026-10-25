@@ -98,7 +98,7 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{RFQ_STATE_LABEL[r.state]}</Pill>{isOpen && r.deadline < day && <Pill tone="warn">{uiText("已过报价截止日")}</Pill>}</div>
     {r.award && <Banner tone="ok" title={ui`已定标 ${r.award.supplier}`}>{uiText("生成采购草稿 ")}<TextLink onClick={() => onPurchase(r.award!.purchaseId)}>{r.award.purchaseCode}</TextLink>{uiText(r.award.flags.length ? `；${r.award.flags.join('；')}；理由：${r.award.reason}` : '')}。</Banner>}
     {r.cancelled && <Banner tone="neutral" title={uiText("询价已取消")}>{r.cancelled.reason}</Banner>}
-    {can && <ActionBar busy={locked} actions={[
+    {can && isOpen && <ActionBar busy={locked} actions={[
       { label: '登记报价', icon: MessageSquareQuote, onClick: onQuote, primary: true, reason: closedReason },
       { label: '登记谢绝', icon: XCircle, onClick: onDecline, reason: closedReason },
       { label: '追加邀请', icon: UserPlus, onClick: onInvite, reason: closedReason || (canInvite ? false : '没有其他可合作供应商') },
