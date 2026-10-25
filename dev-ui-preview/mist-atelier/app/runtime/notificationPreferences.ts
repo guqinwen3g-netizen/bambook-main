@@ -7,7 +7,16 @@ export function visibleMistNotifications(state:MistState|null|undefined,canRead:
     if(!canRead(item.target.view.split('/')[0]))return false;
     const category=item.category??'general',prefs=state!.settings.notifications;
     return category==='qc'?prefs.qc:category==='shipping'?prefs.shipping:category==='suggestion'?prefs.suggestions:true;
-  }).map(item=>{const title=mistActivityTitle(state,item.title,item.target);return title===item.title?item:{...item,title};});
+  }).map(item=>{
+    let title=mistActivityTitle(state,item.title,item.target),detail=item.detail;
+    // Compact the old generated notice in presentation; keep stored communication facts untouched.
+    if(item.target.view==='claims'){
+      title=title.replace(/ · 新客诉待关注$/,' · 新客诉');
+      const legacy=/^业务员 (.+?) 已通知质检、跟单与工厂（(.+)）配合核实；通知工厂不代表认定责任或答应客户金额。$/.exec(detail);
+      if(legacy)detail=legacy[1]+' · '+legacy[2];
+    }
+    return title===item.title&&detail===item.detail?item:{...item,title,detail};
+  });
 }
 export type MistDigestItem={id:string;label:string;detail:string;target:MistTarget};
 /** A read-only, on-demand digest of current records. No email or scheduled side effects. */

@@ -25,12 +25,12 @@ const supplier = () => state.market.suppliers[0];
 describe('售后索赔协同面板', () => {
   it('新案件：显示五步进度，业务员可通知相关人员，提交记录通知命令（只记录工厂通知，不对外发送）', async () => {
     const { command, openEditor } = await mount(claimFor());
-    expect(host.textContent).toContain('通知相关人员：质检、负责人、跟单、工厂');
-    expect(host.textContent).toContain('尚未通知');
+    expect(host.textContent).toContain('质检核实');
+    expect(host.textContent).toContain('待通知');
     expect(host.textContent).not.toContain('公司自担');
     expect(button('向工厂追偿')).toBeDefined();
     expect(button('记录质检核实')).toBeUndefined();
-    await act(async () => button('通知相关人员')!.click());
+    await act(async () => button('记录通知')!.click());
     const spec = openEditor.mock.calls[0][0];
     expect(spec.description).toBeUndefined();
     await spec.submit({ supplierId: supplier().id, factoryChannel: '微信群', note: '底线 3000' });
@@ -40,7 +40,7 @@ describe('售后索赔协同面板', () => {
     const d = { id: 'd1', kind: 'Allowance' as const, amount: 10, quantity: 0, unit: '', returnDisposition: '' as const, basis: 'x', fileIds: [], state: 'Draft' as const };
     await mount(claimFor({ dispositions: [d] }), { write: false, qc: true, finance: false, approve: false });
     expect(host.textContent).toContain('质检尚未核实');
-    expect(button('记录质检核实')).toBeTruthy(); expect(button('通知相关人员')).toBeUndefined();
+    expect(button('记录质检核实')).toBeTruthy(); expect(button('记录通知')).toBeUndefined();
     await act(async () => root!.unmount()); root = undefined; host.remove();
     await mount(claimFor({ coordination: { notices: [], recoveries: [], verifications: [{ id: 'v', at: '2026-10-14T03:00:00Z', by: '许言', byId: 'qc', result: 'confirmed', scope: 'A款', affectedQuantity: 5, unit: '件', goodsLocation: 'sold', mitigation: '', factoryResponse: '工厂承认', safety: true, fileIds: [] }] } }));
     expect(host.textContent).toContain('涉及安全隐患'); expect(host.textContent).toContain('已上架 / 已销售'); expect(host.textContent).toContain('工厂承认');

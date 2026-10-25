@@ -44,15 +44,15 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   const customerMoney=claim.dispositions.some(row=>['Allowance','ReturnRefund'].includes(row.kind)&&!row.supersededById);
   const executed = claim.dispositions.some(d => d.state === 'Executed' && !d.supersededById);
   const steps = [
-    { label: '通知相关人员：质检、负责人、跟单、工厂', done: !!notice, note: notice ? notice.by + ' · ' + when(notice.at) + ' · 工厂 ' + notice.supplierName + '（' + notice.factoryChannel + '）' : '尚未通知' },
-    { label: '内部质检核实事实（工厂配合）', done: !!check, note: check ? CLAIM_RESULT_LABEL[check.result] + ' · ' + check.by : '尚未核实', noteTone: !check && claim.dispositions.length ? 'bad' as const : undefined },
-    { label: '对客户的处理方案经负责人批准', done: approved > 0, note: approved ? approved + ' 条已批准' : '尚无已批准方案' },
-    { label: '客户这边处理完（款项 / 货物）', done: ledger.customerSettled, note: ledger.customerSettled ? (executed ? customerMoney?'已执行并结清':'已完成' : '处置未采用') : ledger.customerMoneyOpen ? '款项待结清' : ledger.customerGoodsOpen ? '货物待处理' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
-    ...(ledger.hasRecovery?[{label:'工厂补偿落实',done:!ledger.recoveryOpen,note:ledger.recoveryOpen?'还在等工厂':'已落实或已批准放弃'}]:[]),
+    { label: '通知', done: !!notice, note: notice ? undefined : '待通知' },
+    { label: '质检核实', done: !!check, note: check ? CLAIM_RESULT_LABEL[check.result] : '待核实', noteTone: !check && claim.dispositions.length ? 'bad' as const : undefined },
+    { label: '处置审批', done: approved > 0, note: approved ? approved + ' 条已批准' : '尚无已批准方案' },
+    { label: '对客处理', done: ledger.customerSettled, note: ledger.customerSettled ? (executed ? customerMoney?'已执行并结清':'已完成' : '处置未采用') : ledger.customerMoneyOpen ? '款项待结清' : ledger.customerGoodsOpen ? '货物待处理' : claim.dispositions.length ? '还有方案待审批或待执行' : '—' },
+    ...(ledger.hasRecovery?[{label:'工厂补偿',done:!ledger.recoveryOpen,note:ledger.recoveryOpen?'还在等工厂':'已落实或已批准放弃'}]:[]),
   ];
 
   const notify = () => openEditor({
-    title: '通知相关人员',
+    title: '记录通知',
     fields: [f('supplierId', '相关工厂', 'select', { options: suppliers }), f('factoryChannel', '联系渠道', 'text', {}), f('note', '备注', 'textarea', { required: false })],
     initialValues: { supplierId: notice?.supplierId ?? defaultSupplier, factoryChannel: '', note: '' }, submitLabel: '记录并通知',
     submit: v => command({ type: 'platform.claim.notify', payload: { id: claim.id, supplierId: s(v, 'supplierId'), factoryChannel: s(v, 'factoryChannel'), note: s(v, 'note') } }),
@@ -112,7 +112,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
     {open && ledger.customerSettled && ledger.recoveryOpen && <Banner tone="warn" title={uiText("客户这边已解决，但还在等工厂补偿")}>{uiText("工厂补偿落实或经负责人批准放弃后，案件才能关闭。")}</Banner>}
     <Card>
       <CardHeader title={uiText("处理进度")} tools={<div className="mist-row">
-        {can.write && open && <Button disabled={busy} onClick={notify}>{uiText(notice ? '再次通知' : '通知相关人员')}</Button>}
+        {can.write && open && <Button disabled={busy} onClick={notify}>{uiText(notice ? '再次通知' : '记录通知')}</Button>}
         {can.qc && open && <Button disabled={busy} onClick={verify}>{uiText(check ? '更新质检核实' : '记录质检核实')}</Button>}
       </div>} />
       <div className="mist-card-body"><Checklist items={steps} /></div>

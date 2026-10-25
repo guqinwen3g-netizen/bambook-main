@@ -33,10 +33,10 @@ describe('售后索赔协同',()=>{
   expect(p('platform.claim.recovery.settle')).toBe('invoices:reconcile');expect(p('platform.claim.recovery.waive')).toBe('aftersales:approve');
  });
  it('records notification of internal parties and factory without sending anything externally, and creates follow-up work',()=>{
-  const f=fixture();notify(f);const n=f.claim().coordination!.notices[0];
+  const f=fixture(),before=structuredClone([f.claim().dispositions,f.state.platform.credits,f.state.payments,f.state.payables]);notify(f);const n=f.claim().coordination!.notices[0];
   expect(n).toMatchObject({supplierName:'江南成衣',factoryChannel:'微信群',note:'客户要求赔 10000',byId:'business'});
   const tasks=f.state.tasks.filter(t=>t.target.id===f.claimId&&!t.done).map(t=>t.kind);expect(tasks).toEqual(expect.arrayContaining(['claim-verify:'+f.claimId,'claim-factory:'+f.claimId]));
-  expect(f.state.notifications[0].detail).toContain('不代表认定责任');
+  expect(f.state.notifications[0].detail).toBe('业务员顾言 · 江南成衣');expect([f.claim().dispositions,f.state.platform.credits,f.state.payments,f.state.payables]).toEqual(before);
   expect(()=>f.run({type:'platform.claim.notify',payload:{id:f.claimId,supplierId:'nope',factoryChannel:'电话',note:''}})).toThrow('准确工厂');
  });
  it('lets QC record facts, closes the QC task and flags safety issues',()=>{

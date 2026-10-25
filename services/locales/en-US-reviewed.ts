@@ -1,5 +1,10 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '记录通知':'Log notice',
+  '客诉核实':'Claim verification',
+  '对客处理':'Customer resolution',
+  '新客诉':'New claim',
+
   '送出地点':'Dispatch from',
   '暂无可用外修地点':'No repair site is currently available',
   '外修移交与原收货批次不一致':'The repair transfer does not match the received batch',
