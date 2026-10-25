@@ -435,3 +435,11 @@ it.each(['draft','approved'] as const)('hides termination from an order reader f
  act(()=>getByRole(host,'button',{name,exact:true}).click());expect(queryByRole(document.body,'dialog')).not.toBeNull();
  permissions.ordersWrite=false;render();expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByRole(host,'button',{name,exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });
+
+it.each(['void','cancelled','pending-cancel'] as const)('presents %s as halted without new-fulfillment guidance or closure action',status=>{
+ const order=store.state!.orders[0],line=store.state!.orderLines[0];line.fulfillmentMode='full_package';Object.assign(order.governance!,{status:status==='pending-cancel'?'approved':status,...(status==='pending-cancel'?{cancellation:{id:'cancel',status:'pending',reason:'客户撤单',requesterName:'业务员甲'}}:{})});order.state=status==='void'?'已作废':status==='cancelled'?'已取消':'取消审批中';render();
+ expect(host.textContent).not.toContain('待交接后勤');expect(host.textContent).not.toContain('按条目计划');act(()=>getByText(host,'精确金额条目').click());expect(document.body.textContent).not.toContain('仅可准备采购草稿');expect(document.body.textContent).not.toContain('用料待落实');expect(document.body.textContent).not.toContain('当前：产前样');expect(queryByRole(document.body,'button',{name:'按实际完工结案'})).toBeNull();expect((getByRole(document.body,'button',{name:'准备采购草稿'}) as HTMLButtonElement).disabled).toBe(true);expect(store.run).not.toHaveBeenCalled();
+});
+it('keeps an approved order line readable without exposing closure to a reader',()=>{
+ permissions.ordersWrite=false;store.state!.orders[0].governance!.status='approved';render();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'按实际完工结案'})).toBeNull();expect(document.body.textContent).toContain('精确金额条目');expect(store.run).not.toHaveBeenCalled();
+});

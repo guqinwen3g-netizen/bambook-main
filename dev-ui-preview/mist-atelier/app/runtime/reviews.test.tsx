@@ -117,9 +117,9 @@ it('lists my submitted items, including current-workspace requests where I am no
  rows=[];await render();
  await act(async()=>getByRole(host,'tab',{name:/我发起的/}).click());
  await openRow('PR-2026-0001');
- expect(document.body.textContent).toContain('货款');expect(document.body.textContent).toContain('你是发起人，不能审批本人提交的事项');
+ expect(document.body.textContent).toContain('货款');
  expect(queryByRole(document.body,'textbox',{name:'审批意见'})).toBeNull();
- expect((getByRole(document.body,'button',{name:'批准'}) as HTMLButtonElement).disabled).toBe(true);
+ expect(queryByRole(document.body,'button',{name:'批准'})).toBeNull();expect(queryByRole(document.body,'button',{name:'退回'})).toBeNull();expect(getByRole(document.body,'button',{name:'打开原业务'})).toBeTruthy();
 });
 it('separates pending decisions for me from history and other pending items',()=>{
  const base=row();const list=[base,{...base,id:'b',status:'approved',canDecide:false},{...base,id:'c',canDecide:false,requesterId:'actor-c'},{...base,id:'d',canDecide:false,requesterId:'actor-a'}] as any[];

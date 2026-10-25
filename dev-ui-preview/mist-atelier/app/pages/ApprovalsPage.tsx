@@ -85,8 +85,8 @@ export function ApprovalsPage() {
     {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
     {local && <Banner tone="bad" title={uiText("还不能保存决定")}>{local}</Banner>}
     <ActionBar busy={reviews.busy} actions={[
-      { label: '批准', icon: Check, primary: true, onClick: () => void decide('approved'), reason: decideReason, hidden: selected.status !== 'pending' },
-      { label: '退回', icon: CornerUpLeft, onClick: () => void decide('rejected'), reason: decideReason, hidden: selected.status !== 'pending' },
+      { label: '批准', icon: Check, primary: true, onClick: () => void decide('approved'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },
+      { label: '退回', icon: CornerUpLeft, onClick: () => void decide('rejected'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },
       { label: '打开原业务', icon: ArrowUpRight, onClick: () => selected.kind === 'payment' ? go(selected.target.view, selected.target.id, { section: 'payables' }) : go(selected.target.view, selected.target.id), reason: openReason },
     ]} />
   </DetailBody> : <EmptyState title={uiText("选择一项审批")} />;
