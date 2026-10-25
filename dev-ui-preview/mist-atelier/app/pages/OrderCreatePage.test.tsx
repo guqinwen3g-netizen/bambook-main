@@ -110,3 +110,15 @@ it('selects the receiving garment member by account ID for an internal fabric or
 it('captures TT cumulative pre-shipment payment in creation and review without default teaching notes',async()=>{
  await enterLine('100','69.8');await next();input('交期','2026-11-20');input('定金比例（%）','30');input('出运前累计收款（%）','100');expect(host.textContent).not.toContain('未填表示尚未配置');expect(host.textContent).not.toContain('可以先保存草稿');await next();await next();expect(amount('出运前累计收款')).toBe('100%');await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.create',payload:expect.objectContaining({governance:expect.objectContaining({depositPercent:30,preShipmentPercent:100})})}));
 });
+
+it('blocks a frozen customer before entering products and allows choosing another active customer',async()=>{
+ const state=store.state!;state.market.relations.push({id:'held-customer',name:'客户甲',customerId:'customer-a',supplierId:'',hold:{reason:'逾期款待财务核对，不应成为创建页教学说明',actor:'主管',at:context.now}} as any);state.customers.push({...state.customers[0],id:'customer-b',name:'客户乙'});act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'orders/new',customerId:'customer-a'},go,openAI:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn()}}><OrderCreatePage/></Nav.Provider></ToastProvider></MistRoot>));
+ input('季节 / 批次','AW27');expect(host.textContent).toContain('客户往来已冻结');expect(host.textContent).not.toContain('创建页教学说明');expect((getByRole(host,'button',{name:'下一步'}) as HTMLButtonElement).disabled).toBe(true);await next();expect(store.run).not.toHaveBeenCalled();
+ const customer=getByRole(host,'combobox',{name:/^客户/}) as HTMLSelectElement;act(()=>{customer.value='customer-b';customer.dispatchEvent(new Event('change',{bubbles:true}));});expect((getByRole(host,'button',{name:'下一步'}) as HTMLButtonElement).disabled).toBe(false);await next();expect(getByLabelText(host,/^品名/)).toBeTruthy();expect(store.run).not.toHaveBeenCalled();
+});
+it('blocks a newly frozen customer at final review without discarding the draft or sending a create command',async()=>{
+ await enterLine('10','42');await next();input('交期','2026-11-30');await next();await next();
+ const paint=()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'orders/new',customerId:'customer-a'},go,openAI:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn()}}><OrderCreatePage/></Nav.Provider></ToastProvider></MistRoot>);
+ store.state!.market.relations.push({id:'held-at-review',name:'客户甲',customerId:'customer-a',supplierId:'',hold:{reason:'暂停新增',actor:'主管',at:context.now}} as any);act(paint);expect((getByRole(host,'button',{name:'创建订单草稿'}) as HTMLButtonElement).disabled).toBe(true);expect(amount('总金额')).toBe('420.00 USD');await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());expect(store.run).not.toHaveBeenCalled();
+ store.state!.market.relations=[];act(paint);expect((getByRole(host,'button',{name:'创建订单草稿'}) as HTMLButtonElement).disabled).toBe(false);expect(amount('总金额')).toBe('420.00 USD');expect(store.run).not.toHaveBeenCalled();
+});
