@@ -11,7 +11,7 @@ import { relationHoldReason } from './mistRelationHold';
 import {demoAccountRef,ownerChangeText,resolveMember,setMemberGroups,type MistMemberDirectoryEntry,type MistMemberGroupAssignment} from './mistAccounts';
 import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
 import {assignFactoryLetters,defaultFactoryTask,developmentClosure,developmentRoundBlocker,duplicateRoundFactories,factoryTaskError,factoryTaskNote,factoryTaskSync,factoryTaskSyncBlocker,minorVersionBlocker,minorVersionLabel,minorVersions,nextRoundNumber,nextPhysicalVersionNumber,physicalVersionLabel,roundVersionLabel,type FactoryTaskInput} from './mistDevelopmentRounds';
-import {createFulfillmentState,applyFulfillmentCommand,fulfillmentCommandPermission,getFulfillmentReviews,assertProductionTransition,fulfillmentProductionFact,type FulfillmentState,type FulfillmentCommand} from './mistFulfillment';
+import {createFulfillmentState,applyFulfillmentCommand,fulfillmentCommandPermission,getFulfillmentReviews,assertProductionTransition,fulfillmentProductionFact,fulfillmentProductionColumn,type FulfillmentState,type FulfillmentCommand} from './mistFulfillment';
 import {createMarketState,applyMarketCommand,backfillQuoteLineFamilies,marketCommandPermission,getMarketReviews,type MarketState,type MarketCommand} from './mistMarket';
 import {createCrmState,applyCrmCommand,crmCommandPermission,type CrmState,type CrmCommand} from './mistCrm';
 import {seedDemoModules,DEMO_SEED_VERSION} from './mistDemoSeed';
@@ -676,7 +676,8 @@ function recalculate(state: MistState) {
     }else if(shipments.length){order.state='出运准备中';order.tone='accent';}
     // 加工合同批准即建生产分支；放行开产或已有进度前订单仍是"备料中"，不显示"生产中"。
     else if(jobs.some(job=>job.sourcePurchaseId&&((state.fulfillment&&fulfillmentProductionFact(state,job.id)?.release)||job.pct>0))){
-      order.state=jobs.every(job=>job.col==='done')?(order.governance?.contract.internalSupply?'待交接':'待出运'):jobs.some(job=>job.col==='qc')?'待终期 QC':'生产中';order.tone='accent';
+      const columns=jobs.map(job=>fulfillmentProductionColumn(state,job));
+      order.state=columns.every(column=>column==='done')?(order.governance?.contract.internalSupply?'待交接':'待出运'):columns.some(column=>column==='qc')?'待终期 QC':'生产中';order.tone='accent';
     }else if(jobs.some(job=>job.sourcePurchaseId)||(state.fulfillment?.purchases||[]).some(p=>p.orderId===order.id&&p.state==='approved')){order.state='备料中';order.tone='neutral';}
     if(order.governance?.status==='approved'&&order.governance.cancellation?.status==='pending'){order.state='取消审批中';order.tone='warn';}
   }

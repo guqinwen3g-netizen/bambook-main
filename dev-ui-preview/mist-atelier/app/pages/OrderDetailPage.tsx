@@ -21,6 +21,9 @@ import { OrderLineQuotationValue, OrderLineSourceValue, lineQuotation } from './
 import { OrderBreakdownEditor } from './OrderBreakdownEditor';
 import { OrderChangeImpactList } from './OrderChangeImpactList';
 import { OrderTerminationBanner, OrderTerminationButton, orderLocked } from './OrderTermination';
+import { fulfillmentProductionQcPassed, fulfillmentProductionFact } from '../../../../server/src/shared/mistFulfillment';
+import { lineShipping } from './orderLineTrack';
+import { isLineClosed } from '../../../../server/src/shared/mistOrderClosure';
 import { orderLineFacts } from '../../../../server/src/shared/mistOrderChangeImpact';
 import { toleranceText } from '../../../../server/src/shared/mistOrderClosure';
 import { breakdownDiff, breakdownShort, breakdownTotal, normalizeOrderBreakdown, type OrderLineBreakdown } from '../../../../server/src/shared/mistOrderBreakdown';
@@ -172,7 +175,7 @@ export function OrderDetailPage() {
   })();
   const purchases=(state?.fulfillment.purchases||[]).filter(purchase=>purchase.orderId===order?.id);
   const shipments=(state?.fulfillment.shipments||[]).filter(shipment=>shipment.lines.some(line=>line.orderId===order?.id));
-  const productionQc=(productionId:string)=>{const tasks=(state?.fulfillment.qcTasks||[]).filter(task=>task.kind==='production'&&task.source.kind==='orderLine'&&task.source.productionId===productionId);return tasks.length>0&&tasks.every(task=>{const report=state?.fulfillment.qcReports.find(report=>report.id===task.reportIds.at(-1));return task.state==='reported'&&!!report&&report.result!=='reject';});};
+  const productionQc=(productionId:string)=>{const job=productions.find(job=>job.id===productionId);return !!state&&!!job&&!!fulfillmentProductionFact(state,job.id)?.completion&&fulfillmentProductionQcPassed(state,job);};
   const lineProgress=(line:MistOrderLine)=>{const jobs=productions.filter(job=>job.lineId===line.id),total=jobs.reduce((sum,job)=>sum+job.qty,0);return total?{made:Math.round(jobs.reduce((sum,job)=>sum+job.qty*job.pct,0)/total),qc:Math.round(jobs.reduce((sum,job)=>sum+(productionQc(job.id)?job.qty*100:0),0)/total)}:{made:0,qc:0};};
   const remaining = amounts.cents === null || received.cents === null ? null : Math.max(0, amounts.cents - received.cents) / 100;
   const quantities = [...new Set(lines.map(line => line.unit))].map(unit => ({ unit, quantity: lines.filter(line => line.unit === unit).reduce((sum, line) => sum + line.qty, 0) }));
@@ -208,9 +211,9 @@ export function OrderDetailPage() {
     {!internal&&<Card as="section" className="mist-section"><CardHeader title={uiText("履约进度")} tools={<Pill tone={order.tone}>{order.state}</Pill>} /><FlowSteps nodes={[
       { label: '主单审批', caption: approvalLabel, icon: Handshake, state: approved?'done':locked?'todo':'now' },
       { label: '采购', caption: purchases.length?`${purchases.length} 张采购 · ${purchases.filter(p=>p.state==='approved').length} 已批`:locked?'未开始':'按条目计划', icon: Package, state: purchases.length&&purchases.every(p=>p.state==='approved') ? 'done' : purchases.length?'now':'todo' },
-      { label: '生产', caption: productions.length ? `${productions.length} 个生产单` : locked?'未开始':'待安排', icon: Factory, state: productions.length && productions.every(item => item.pct === 100) ? 'done' : productions.length ? 'now' : 'todo' },
+      { label: '生产', caption: productions.length ? `${productions.length} 个生产单` : locked?'未开始':'待安排', icon: Factory, state: productions.length && productions.every(item => !!state&&!!fulfillmentProductionFact(state,item.id)?.completion) ? 'done' : productions.length ? 'now' : 'todo' },
       { label: '尾期 QC', caption: lines.length&&lines.every(line => lineProgress(line).qc === 100) ? '已完成' : locked?'未检验':'待检验', icon: BadgeCheck, state: lines.length && lines.every(line => lineProgress(line).qc === 100) ? 'done' : productions.some(item => item.col === 'qc') ? 'now' : 'todo' },
-      { label: '出运', caption: shipments.length?`${shipments.filter(shipment=>shipment.state==='departed').length} / ${shipments.length} 票已出运`:locked?'未出运':order.handoffAt ? '已交接后勤' : order.due, icon: Ship, state: order.state === '已出运'||order.state==='待收尾款' ? 'done' : shipments.length||order.handoffAt ? 'now' : 'todo' },
+      { label: '出运', caption: shipments.length?`${shipments.filter(shipment=>shipment.state==='departed').length} / ${shipments.length} 票已出运`:locked?'未出运':order.handoffAt ? '已交接后勤' : order.due, icon: Ship, state: lines.length&&lines.every(line=>isLineClosed(line)||!!state&&lineShipping(state,line).departed>=line.qty) ? 'done' : shipments.length||order.handoffAt ? 'now' : 'todo' },
       { label: '收款', caption: replacement?uiText('无需收款'):`已到账 ${amountLabel(received.total)} ${order.currency}`, icon: Wallet, state: replacement?'done':amounts.cents !== null && received.cents !== null && received.cents >= amounts.cents && amounts.cents > 0 ? 'done' : received.cents !== null && received.cents > 0 ? 'now' : 'todo' },
     ]} /></Card>}
     <section className="mist-grid">

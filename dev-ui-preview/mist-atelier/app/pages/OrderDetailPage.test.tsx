@@ -451,3 +451,22 @@ it('shows the current business state instead of presenting an old 100-percent fi
 it.each(['LC','OA'] as const)('keeps a %s order inspectable without TT cash-threshold prompts in detail or its editor',async paymentMethod=>{
  const order=store.state!.orders[0];order.governance!.contract.paymentMethod=paymentMethod;order.governance!.contract.preShipmentPercent=100;render();expect(host.querySelectorAll('.mist-kv dt').length).toBeGreaterThan(0);expect([...host.querySelectorAll('.mist-kv dt')].some(row=>row.textContent==='出运前累计收款')).toBe(false);act(()=>getByRole(host,'button',{name:'合同与审批资料'}).click());const dialog=getByRole(document.body,'dialog');expect(queryByRole(dialog,'spinbutton',{name:'出运前累计收款（%）'})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });
+
+function productionProgressFixture(){
+ const state=store.state!,line=state.orderLines[0],branch={id:'bulk',code:'BULK',orderId,lineId:line.id,order:state.orders[0].code,name:'外套',factory:'工厂',qty:line.qty,due:state.orders[0].due,pct:100,col:'qc',img:'coat'} as const;
+ state.productions.push(branch);state.fulfillment.productionFacts.push({productionId:branch.id,revision:2,sizes:[{size:'M',quantity:line.qty}],completion:{id:'finished',quantity:line.qty,sizeQuantities:[{size:'M',quantity:line.qty}],date:'2026-10-08',at:context.now,actor:'业务员',evidence:'回交单',fileIds:[]}});
+ state.fulfillment.qcTasks.push({id:'bulk-qc',code:'QC-BULK',kind:'production',source:{kind:'orderLine',orderId,lineId:line.id,productionId:branch.id},state:'reported',reportIds:['bulk-report']} as any);
+ state.fulfillment.qcReports.push({id:'bulk-report',taskId:'bulk-qc',scopeRevision:2,result:'pass',sizeChecks:[{size:'M',inspected:1,result:'pass',evidence:'实检'}]} as any);
+ return{state,branch,report:state.fulfillment.qcReports.at(-1)!};
+}
+const progressNode=(label:string)=>[...host.querySelectorAll('.mist-flow-node')].find(node=>node.querySelector('b')?.textContent===label)!;
+it.each(['stale','missing-size','unfinished'] as const)('does not mark final QC completed for %s evidence',problem=>{
+ const f=productionProgressFixture();if(problem==='stale')f.report.scopeRevision=1;if(problem==='missing-size')f.report.sizeChecks=[];if(problem==='unfinished')delete f.state.fulfillment.productionFacts[0].completion;
+ render();expect(progressNode('尾期 QC').getAttribute('data-state')).not.toBe('done');
+});
+it('shows actual completion and current final QC independently of the stored lane',()=>{
+ const f=productionProgressFixture();render();expect(progressNode('生产').getAttribute('data-state')).toBe('done');expect(progressNode('尾期 QC').getAttribute('data-state')).toBe('done');expect(f.branch.col).toBe('qc');
+});
+it('retains a completed shipment node after the order is financially closed',()=>{
+ const state=store.state!,line=state.orderLines[0];state.orders[0].state='履约完成';state.fulfillment.shipments.push({id:'departed',code:'SHP',state:'departed',lines:[{orderId,lineId:line.id,quantity:line.qty}]} as any);render();expect(progressNode('出运').getAttribute('data-state')).toBe('done');
+});

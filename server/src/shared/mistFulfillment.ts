@@ -879,6 +879,16 @@ function requireProductionQc(root: MistState, branch: MistProduction) {
         }
     }
 }
+/** Read projections share the shipping gate's current-scope and size coverage rules. */
+export function fulfillmentProductionQcPassed(root: MistState, branch: MistProduction): boolean {
+    try { requireProductionQc(root, branch); return true; }
+    catch { return false; }
+}
+/** Completion is an explicit quantity fact; a legacy lane or percentage cannot replace it. */
+export function fulfillmentProductionColumn(root: MistState, branch: MistProduction): MistProduction['col'] {
+    if (fulfillmentProductionFact(root, branch.id)?.completion && fulfillmentProductionQcPassed(root, branch)) return 'done';
+    return branch.col === 'done' ? 'qc' : branch.col;
+}
 function materialQualityProof(root: MistState, purchase: FulfillmentPurchase, delivery: MaterialDeliveryLink) {
     if (!root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
     const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
