@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {getAllByRole,getByRole} from '@testing-library/dom';
+import {getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentSample} from '../../../../../server/src/shared/mistFulfillment';
@@ -42,15 +42,15 @@ it('groups fabric forms of one archive into a single row and never sums differen
   expect(host.querySelectorAll('[data-sample-form]')).toHaveLength(2);
 });
 
-it('flags overdue loans and explains why return is unavailable',()=>{
+it('keeps return available for an open loan and hides it when no loan remains',()=>{
   const sample=fabric('smp-m','米样','米',10,8);store.state!.fulfillment.samples.push(sample);
   store.state!.fulfillment.sampleMovements.push({id:'loan',sampleId:'smp-m',kind:'lend',quantity:2,person:'李工',location:'工厂',note:'',at:'2026-10-01T08:00:00Z',actor:'业务员',expectedReturn:'2026-10-05'});
   render('smp-m');
   expect(host.textContent).toContain('1 笔借出已超过预计归还日');expect(host.textContent).toContain('逾期未还');
   expect((getByRole(host,'button',{name:'归还'}) as HTMLButtonElement).disabled).toBe(false);
   store.state!.fulfillment.sampleMovements=[];render('smp-m');
-  expect((getByRole(host,'button',{name:'归还'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(host.textContent).toContain('归还：没有未归还的借出');
+  expect(queryByRole(host,'button',{name:'归还'})).toBeNull();
+  expect(host.textContent).not.toContain('归还：没有未归还的借出');
 });
 
 it('keeps the ledger readable and hides unauthorized actions',()=>{
@@ -65,6 +65,22 @@ it('opens a quick movement dialog over the ledger instead of replacing the page'
   await act(async()=>getByRole(host,'button',{name:'寄出'}).click());
   expect(getByRole(document.body,'dialog',{name:/登记永久寄出/})).toBeTruthy();
   expect(getByRole(host,'table',{name:'样品台账'})).toBeTruthy();
+  expect((getByRole(document.body,'textbox',{name:'寄送去向 / 运单号'}) as HTMLInputElement).value).toBe('');
+});
+
+it('keeps a fully dispatched sample readable without inapplicable movement buttons or repeated notes',()=>{
+  store.state!.fulfillment.samples.push(fabric('sent','米样','米',1,0));
+  store.state!.fulfillment.sampleMovements.push({id:'dispatch',sampleId:'sent',kind:'send',sendPurpose:'confirmation',quantity:1,person:'客户',location:'Paris',note:'',at:'2026-10-10T08:00:00Z',actor:'业务员'});
+  render('sent');expect(host.textContent).toContain('已寄出');
+  for(const name of ['借出','寄出','归还','移位'])expect(queryByRole(host,'button',{name,exact:true})).toBeNull();
+  expect(host.textContent).not.toContain('当前没有可用数量');expect(getByRole(host,'button',{name:'查看 / 发起本样品QC'})).toBeTruthy();
+});
+
+it('allows the outstanding borrowed quantity to return even when warehouse availability is zero',()=>{
+  store.state!.fulfillment.samples.push(fabric('lent','米样','米',2,0));
+  store.state!.fulfillment.sampleMovements.push({id:'loan',sampleId:'lent',kind:'lend',quantity:2,person:'同事',location:'办公室',note:'',at:'2026-10-10T08:00:00Z',actor:'业务员'});
+  render('lent');expect((getByRole(host,'button',{name:'归还'}) as HTMLButtonElement).disabled).toBe(false);
+  for(const name of ['借出','寄出','移位'])expect(queryByRole(host,'button',{name,exact:true})).toBeNull();
 });
 
 it('links a dispatch movement created on the development version back to that development',()=>{
