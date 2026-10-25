@@ -76,3 +76,23 @@ it('cleans up files and leaves no document after render or transaction failure',
   await expect(generate()).rejects.toMatchObject({ code: 'PURCHASE_PDF_UNAVAILABLE' }); expect(state()).toEqual(before);
   db.failReceipt = true; await expect(generate()).rejects.toThrow('transaction failed'); expect(state()).toEqual(before); expect(await storedNames()).toHaveLength(0);
 });
+
+it('keeps structured RFQ award decisions internal while printing every supplier requirement from the approved revision',async()=>{
+ const p=purchase(),revision=p.revisionHistory!.at(-1)!,reason='INTERNAL-COMPARISON-SECRET';
+ const memo=`询价 RFQ-EXAMPLE-001 定标（2 家报价）：${reason}`;
+ const requirements='<质量要求> 同批次供货\n\n报价备注：分色分缸，逐卷标识。\n\n'+memo+'\n\n交付前按确认样检验。';
+ p.note=revision.snapshot.note=requirements;
+ const q=(id:string,patch:Record<string,unknown>={})=>({id,supplierId:id,supplier:id,declined:false,declineReason:'',price:68,currency:'CNY',moq:0,promisedDue:p.due,terms:p.terms,validUntil:'2026-12-01',note:'',fileIds:[],at:now,actor:'Buyer',...patch});
+ (state() as any).rfqs=[{id:'source-rfq',code:'RFQ-EXAMPLE-001',orderId:p.orderId,lineId:p.lineId,kind:p.kind,materialKind:p.materialKind,domain:p.domain,description:p.description,quantity:p.quantity,unit:p.unit,currency:p.currency,due:p.due,destination:p.destination,deadline:'2026-10-24',supplierIds:['supplier','other','declined'],quotes:[q('old',{supersededAt:now}),q('supplier'),q('other'),q('declined',{declined:true})],note:'原始技术要求',state:'awarded',createdAt:now,actor:'Buyer',award:{quoteId:'supplier',supplierId:p.supplierId,supplier:p.supplier,reason,flags:[],purchaseId:p.id,purchaseCode:p.code,at:now,actor:'Buyer'}}];
+ const originalRevision=structuredClone(revision),originalRfq=structuredClone((state() as any).rfqs);
+ await generate();const html=renderPdf.mock.calls[0][0];
+ expect(html).toContain('&lt;质量要求&gt; 同批次供货');expect(html).toContain('分色分缸，逐卷标识。');expect(html).toContain('交付前按确认样检验。');
+ expect(html).not.toContain(reason);expect(html).not.toContain('定标（2 家报价）');
+ expect(purchase().revisionHistory!.at(-1)).toEqual(originalRevision);expect((state() as any).rfqs).toEqual(originalRfq);
+ expect(purchase().documents![0].snapshot.contract.note).not.toContain(memo);
+});
+it('does not trim supplier-authored requirements that merely resemble an internal award label',async()=>{
+ const text='询价 RFQ-EXAMPLE-001 定标（2 家报价）：客户要求原文保留。\n\n供货批次按确认样。';
+ purchase().note=purchase().revisionHistory!.at(-1)!.snapshot.note=text;
+ await generate();expect(purchase().documents![0].snapshot.contract.note).toBe(text);expect(renderPdf.mock.calls[0][0]).toContain('客户要求原文保留。');
+});
