@@ -1,3 +1,5 @@
+import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
+import { assertOrderNotTerminated } from '../../../../../server/src/shared/mistOrderGovernance';
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 
 const KIND_LABEL = { material: '材料', finished: '成品', processing: '加工服务' };
@@ -18,3 +20,6 @@ export function parsePurchaseContent(choice: string, domain: FulfillmentPurchase
   const [kind, materialKind] = choice.split(':') as [FulfillmentPurchase['kind'], FulfillmentPurchase['materialKind']];
   return { kind, ...(kind === 'material' ? { materialKind } : {}) };
 }
+
+// New purchase and RFQ sources use the same lifecycle gate as server commands.
+export const sourceOrderBlocker = (order: MistState['orders'][number]) => { try { assertOrderNotTerminated(order); return ''; } catch (error) { return error instanceof Error ? error.message : '订单不可采购'; } };

@@ -153,7 +153,7 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       const flags = rfqAwardFlags(root, r, q.id, today), reason = text(p.reason, '定标理由', false, 2000);
       if (flags.length && !reason) fail(`请写明定标理由：${flags.join('；')}`);
       const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: r.orderId, lineId: r.lineId, kind: r.kind, ...(r.materialKind?{materialKind:r.materialKind}:{}), supplierId: q.supplierId, supplier: q.supplier, description: r.description, quantity: r.quantity, unit: r.unit, price: q.price, currency: q.currency, due: q.promisedDue, terms: q.terms, destination: r.destination,
-        note: `询价 ${r.code} 定标（${rfqCurrentQuotes(r).filter(x => !x.declined).length} 家报价）${reason ? '：' + reason : ''}`, fileIds: q.fileIds } }, c) as { id: string };
+        note: [r.note, q.note && `报价备注：${q.note}`, `询价 ${r.code} 定标（${rfqCurrentQuotes(r).filter(x => !x.declined).length} 家报价）${reason ? '：' + reason : ''}`].filter(note => note?.trim()).join('\n\n'), fileIds: q.fileIds } }, c) as { id: string };
       const purchase = root.fulfillment.purchases.find(x => x.id === saved.id)!;
       r.state = 'awarded'; r.award = { quoteId: q.id, supplierId: q.supplierId, supplier: q.supplier, reason, flags, purchaseId: purchase.id, purchaseCode: purchase.code, at: c.now, actor: c.actorName };
       event(root, c, r, `定标 ${q.supplier}（${q.price} ${q.currency}/${r.unit}），生成采购草稿 ${purchase.code}${flags.length ? `；${flags.join('；')}；理由：${reason}` : ''}`);

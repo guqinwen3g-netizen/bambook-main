@@ -8,7 +8,6 @@ import React from 'react';
 import { CheckCircle2, Download, FileSignature, PackageCheck, Pencil, Plus, SearchX, Send, ShoppingCart, Undo2, Workflow } from 'lucide-react';
 import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
-import { assertOrderNotTerminated } from '../../../../../server/src/shared/mistOrderGovernance';
 import type { FulfillmentPurchase, FulfillmentReceipt, FulfillmentReceiptReturn } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentPositions, fulfillmentSourceLabel, receiptRejectionBlocker, receiptReturnedQuantity } from '../../../../../server/src/shared/mistFulfillment';
 import { prepaymentTransferTargets, purchaseContractMinor, purchasePayableReadback, purchasePrepaymentReadback, supplierSettlements } from '../../../../../server/src/shared/mistPayables';
@@ -16,16 +15,13 @@ import { supplierBusinessDay, productionSupplierUnavailableReason } from '../../
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
-import { parsePurchaseContent, purchaseChoices, purchaseContent } from './purchaseContent';
-
-// Match the server gate for cancelled, void and pending-cancellation orders.
-const sourceOrderBlocker = (order: MistState['orders'][number]) => { try { assertOrderNotTerminated(order); return ''; } catch (error) { return error instanceof Error ? error.message : '订单不可采购'; } };
+import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
 
 type Domain = FulfillmentPurchase['domain'];
 type Entry = 'purchase' | 'processing';
@@ -87,7 +83,9 @@ export function ProcurementPage() {
   const selected = rows.find(p => p.id === picked) || (picked ? all.find(p => p.id === picked && p.domain === domain && entryOf(p) === entry) : undefined);
   const can = session.hasPermission('procurement:write'), canApprove = session.hasPermission('procurement:approve'), me = session.user?.id || '';
   const locked = saving || !!pending;
-  if (editor.spec) return editor.view;
+  React.useEffect(()=>{if(!can){editor.open(null);setDialog(null);}},[can]);
+  if (editor.spec && can) return editor.view;
+  if (dialog?.sections?.length && can) return <ModuleEditorPage spec={dialog} onClose={()=>setDialog(null)}/>;
 
   const pick = (purchase: FulfillmentPurchase) => { setPicked(purchase.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, purchase.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setEntryChoice(null); setStageFilter('all'); setPicked(null); };
@@ -204,7 +202,7 @@ export function ProcurementPage() {
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined,
     }} />; })() : null;
   const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("")}</Banner></div> : null;
-  if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
+  if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={can ? dialog : null} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
     <PageHeader description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style}` : undefined))} eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")}
       actions={<>
@@ -216,10 +214,10 @@ export function ProcurementPage() {
     {readOnlyBanner}
     {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("采购操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
     <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${inScope.filter(p => p.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${inScope.filter(p => p.domain === 'fabric').length}` }]} /></div>
-    <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open').length : 0 }]} />
+    <Tabs<Entry | 'rfq'> value={rfqTab ? 'rfq' : entry} onChange={value => { if (value === 'rfq') setRfqTab(true); else { setRfqTab(false); changeEntry(value); } }} options={[{ value: 'purchase', label: '采购订单', count: domainRows.filter(p => entryOf(p) === 'purchase').length }, { value: 'processing', label: '委外加工单', count: domainRows.filter(p => entryOf(p) === 'processing').length }, { value: 'rfq', label: '询价比价', count: state ? readRfqs(state).filter(r => r.domain === domain && r.state === 'open' && (!route.orderLineId || r.lineId === route.orderLineId)).length : 0 }]} />
     {rfqTab ? <>
       <Toolbar><SearchField value={query} onChange={setQuery} placeholder={uiText("搜索询价单号、内容、来源订单或供应商")} /></Toolbar>
-      <RfqLedger state={state || undefined} day={day} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} presetSupplierId={presetSupplierId}
+      <RfqLedger state={state || undefined} day={day} domain={domain} needle={needle} can={can} locked={locked} loading={loading} open={setDialog} run={run} presetSupplierId={presetSupplierId} sourceLineId={route.orderLineId} blockedSource={blockedSource || sourceHint}
         onPurchase={id => { setRfqTab(false); setPicked(id); setDrawer(true); setEntryChoice(null); go('procurement', id); }} onSupplier={id => go('suppliers', id)} />
     </> : <>
     <Toolbar>
@@ -238,7 +236,7 @@ export function ProcurementPage() {
       list={<Card><DataTable ariaLabel={ui`${ENTRY_LABEL[entry]}列表`} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} summary={summary} />
     </>}
-    <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
+    <ModuleEditorDialog spec={can ? dialog : null} onClose={() => setDialog(null)} />
   </MistPage>;
 }
 
