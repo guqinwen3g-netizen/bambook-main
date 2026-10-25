@@ -94,17 +94,17 @@ export function RisksPage() {
       const id = (r as { result?: { id?: string } } | undefined)?.result?.id; if (id) openRisk(id);
     },
   });
-  const ackSpec = (r: RiskRecord): ModuleEditorSpec => ({ title: `接手 ${r.title}`, submitLabel: '确认接手', description: r.owner === me ? '确认由你负责推进。' : `负责人将由 ${r.owner} 变更为你（${me}），变更写入记录。`, initialValues: { note: '' }, fields: [{ key: 'note', label: '接手说明', type: 'textarea' }], submit: v => run({ type: 'platform.risk.transition', payload: { id: r.id, state: 'Acknowledged', resolution: String(v.note ?? '') } }) });
-  const planSpec = (r: RiskRecord): ModuleEditorSpec => ({ title: r.plan ? '更新处置方案' : '制定处置方案', submitLabel: '保存', description: '写明谁、做什么、何时完成；需要其他岗位办理的，请到对应原记录发起，风险模块不替代原业务操作。', initialValues: { plan: r.plan || '', planDue: r.planDue || '' }, fields: [{ key: 'plan', label: '处置方案', type: 'textarea', required: true }, { key: 'planDue', label: '计划完成日', type: 'date' }], submit: v => run({ type: 'platform.risk.plan', payload: { id: r.id, plan: String(v.plan ?? ''), planDue: String(v.planDue ?? '') } }) });
+  const ackSpec = (r: RiskRecord): ModuleEditorSpec => ({ title: '接手风险', submitLabel: '确认接手', description: r.owner === me ? r.title : `${r.title} · ${r.owner} → ${me}`, initialValues: { note: '' }, fields: [{ key: 'note', label: '接手说明', type: 'textarea' }], submit: v => run({ type: 'platform.risk.transition', payload: { id: r.id, state: 'Acknowledged', resolution: String(v.note ?? '') } }) });
+  const planSpec = (r: RiskRecord): ModuleEditorSpec => ({ title: r.plan ? '更新处置方案' : '制定处置方案', submitLabel: '保存', description: r.title, initialValues: { plan: r.plan || '', planDue: r.planDue || '' }, fields: [{ key: 'plan', label: '处置方案', type: 'textarea', required: true }, { key: 'planDue', label: '计划完成日', type: 'date' }], submit: v => run({ type: 'platform.risk.plan', payload: { id: r.id, plan: String(v.plan ?? ''), planDue: String(v.planDue ?? '') } }) });
   const escalateSpec = (r: RiskRecord, action: RiskRequestAction = 'waive'): ModuleEditorSpec => ({
-    title: action === 'close' ? `申请关闭 ${r.title}` : '申请审批', submitLabel: '提交审批',
-    description: '由你所在部门的主管在审批中心答复（审批人由系统确定，不能自选），结果回到本风险。批准关闭 / 豁免后风险关闭；批准带风险放行后风险仍保持处理中继续跟进；驳回则继续按原规则处理。风险模块不会替原记录解冻或放行，实际操作仍在原记录完成。',
+    title: action === 'close' ? '申请关闭风险' : '申请审批', submitLabel: '提交审批',
+    description: r.title,
     initialValues: { action, reason: '' },
-    fields: [{ key: 'action', label: '申请事项', type: 'select', required: true, options: RISK_ACTIONS.map(a => ({ value: a, label: RISK_ACTION_LABEL[a] })) }, { key: 'reason', label: '依据与申请范围', type: 'textarea', required: true, hint: '关闭写明问题如何解决；豁免写明为何可以不处理；放行写明放行范围与条件' }],
+    fields: [{ key: 'action', label: '申请事项', type: 'select', required: true, options: RISK_ACTIONS.map(a => ({ value: a, label: RISK_ACTION_LABEL[a] })) }, { key: 'reason', label: '依据与申请范围', type: 'textarea', required: true }],
     submit: v => run({ type: 'platform.risk.escalate', payload: { id: r.id, action: String(v.action) as RiskRequestAction, reason: String(v.reason ?? '') } }),
   });
-  const withdrawSpec = (r: RiskRecord): ModuleEditorSpec => { const e = pendingEscalation(r)!; return { title: '撤回申请', submitLabel: '撤回', description: `撤回「${RISK_ACTION_LABEL[e.action || 'authorize']}」申请后，审批中心不再显示这条申请，风险回到处理中。`, initialValues: { reason: '' }, fields: [{ key: 'reason', label: '撤回原因', type: 'textarea' }], submit: v => run({ type: 'platform.risk.withdraw', payload: { id: r.id, escalationId: e.id, reason: String(v.reason ?? '') } }) }; };
-  const closeSpec = (r: RiskRecord): ModuleEditorSpec => ({ title: `关闭 ${r.title}`, submitLabel: '确认关闭', description: '写明业务问题如何解决、依据是什么。忽略提醒不等于问题已解决；关闭后只读，可回看。', initialValues: { resolution: '' }, fields: [{ key: 'resolution', label: '关闭依据', type: 'textarea', required: true }], submit: v => run({ type: 'platform.risk.transition', payload: { id: r.id, state: 'Resolved', resolution: String(v.resolution ?? '') } }) });
+  const withdrawSpec = (r: RiskRecord): ModuleEditorSpec => { const e = pendingEscalation(r)!; return { title: '撤回申请', submitLabel: '撤回', description: r.title, initialValues: { reason: '' }, fields: [{ key: 'reason', label: '撤回原因', type: 'textarea' }], submit: v => run({ type: 'platform.risk.withdraw', payload: { id: r.id, escalationId: e.id, reason: String(v.reason ?? '') } }) }; };
+  const closeSpec = (r: RiskRecord): ModuleEditorSpec => ({ title: '关闭风险', submitLabel: '确认关闭', description: r.title, initialValues: { resolution: '' }, fields: [{ key: 'resolution', label: '关闭依据', type: 'textarea', required: true }], submit: v => run({ type: 'platform.risk.transition', payload: { id: r.id, state: 'Resolved', resolution: String(v.resolution ?? '') } }) });
 
   const signalCols: Column<RiskSignal>[] = [
     { key: 'title', header: '预警', width: 'minmax(220px,1.6fr)', render: s => <ObjectCell name={s.title} meta={`${SOURCE_LABEL[s.source.kind]} · ${s.source.label}`} /> },

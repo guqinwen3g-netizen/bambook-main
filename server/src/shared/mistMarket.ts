@@ -87,6 +87,8 @@ export type MarketCommand =
 
 export function createMarketState(_context:MistContext,_rootState:Partial<MistState>):MarketState { return {products:[],suppliers:[],relations:[],seasons:[],trends:[],shows:[],campaigns:[],leads:[],quotations:[],lookbooks:[]}; }
 export function marketCommandPermission(command:MarketCommand):string|null {
+ // Restoring a hold must not let an archive editor bypass controlled shipment release.
+ if(command.type==='market.relation.hold')return 'relations:admin';
  if(command.type==='market.import'){try{if(command.payload?.kind==='openingReceivable'||command.payload?.kind==='openingPayable')throw 0;return mistImportPermission(command.payload?.kind);}catch{throw new MistCommandError('VALIDATION','导入类型无效');}}
  if(command.type.startsWith('market.customer.')||command.type==='market.lead.convertToCrm')return 'relations:write';
  if(command.type==='market.contact.delete')return command.payload?.kind==='supplier'?'suppliers:write':'relations:write';

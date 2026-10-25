@@ -7,13 +7,13 @@ import { relationBusiness, relationIdentities } from './RelationsPage';
 import { Nav } from '../../nav';
 import { createMistState, type MistContext, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 
-const bridge = vi.hoisted(() => ({ current: null as any }));
+const bridge = vi.hoisted(() => ({ current: null as any, write:true, admin:true }));
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => bridge.current }));
-vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'demo-buyer', displayName: '沈禾' }, hasPermission: () => true, hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'demo-buyer', displayName: '沈禾' }, hasPermission: (scope:string) => scope==='relations:write'?bridge.write:scope==='relations:admin'?bridge.admin:true, hasRole: () => false, canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host: HTMLDivElement, root: Root | undefined, state: MistState; const go = vi.fn();
 const named = (n: string) => state.market.relations.find(r => r.name.includes(n))!;
 beforeEach(() => {
-  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; go.mockReset();bridge.write=true;bridge.admin=true;
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-14T04:00:00Z'));
   let n = 0; const ctx: MistContext = { id: () => `r-test-${++n}`, actorName: '演示', now: '2026-10-14T02:00:00.000Z' };
   state = createMistState(ctx, 'demo');
@@ -54,7 +54,7 @@ describe('关系智库', () => {
     await mount(lune.id);
     const detail = host.querySelector('[data-relation-detail]')!;
     expect(detail.textContent).toContain('往来已冻结');
-    expect(detail.textContent).toContain('不能新建报价、发送报价、转订单或新建订单');
+    expect(detail.textContent).toContain(lune.hold!.reason);
     expect(button('解冻')).toBeTruthy(); expect(button('冻结往来')).toBeUndefined();
     expect(button('归档')!.disabled).toBe(true);
     expect(detail.textContent).toMatch(/还有在手业务 \d+ 项/);
@@ -62,7 +62,7 @@ describe('关系智库', () => {
   it('双重身份：客户联系人与供应商联系人分开维护，不再提供关联', async () => {
     await mount(named('博远').id);
     const detail = host.querySelector('[data-relation-detail]')!;
-    expect(detail.textContent).toContain('既是客户也是供应商');
+    expect([...detail.querySelectorAll('.mist-pill')].map(row=>row.textContent)).toEqual(expect.arrayContaining(['客户','供应商']));
     expect(detail.textContent).toMatch(/供应商联系人 · 1.*何静/);
     expect(button('关联供应商身份')).toBeUndefined();
     expect(button('打开供应商')).toBeTruthy(); expect(button('打开客户业务')).toBeTruthy();
@@ -85,7 +85,20 @@ describe('关系智库', () => {
     expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'handover.customer', payload: expect.objectContaining({ customerId: named('Cedar').customerId, toUserId: 'demo-new', reason: '顾言调岗', orderIds: state.orders.filter(o => o.customerId === named('Cedar').customerId && o.state !== '履约完成').map(o => o.id), opportunityIds: [] }) }));
     bridge.current.run.mockClear();
     await click('冻结往来');
-    expect(document.body.textContent).toMatch(/已有在手业务 \d+ 项不受影响/);
+    expect(document.body.textContent).toContain('出运须逐票批准');expect(document.body.textContent).not.toContain('不受影响，继续执行');
     expect(bridge.current.run).not.toHaveBeenCalled();
   });
+});
+
+it.each([{write:true,held:true},{write:true,held:false},{write:false,held:true}])('hides hold controls from a non-admin archive reader/editor ($write, $held)',async({write,held})=>{
+ bridge.write=write;bridge.admin=false;await mount(state.market.relations.find(row=>row.customerId&&!!row.hold===held)!.id);expect(button('解冻')).toBeUndefined();expect(button('冻结往来')).toBeUndefined();expect(button('在手业务交接')).toBeUndefined();expect(!!button('编辑档案')).toBe(write);expect(document.body.textContent).not.toContain('没有关系档案写权限');expect(button('打开客户业务')).toBeTruthy();expect(bridge.current.run).not.toHaveBeenCalled();
+});
+it('lets relation administration restore a hold without implying archive edit permission',async()=>{
+ bridge.write=false;bridge.admin=true;const relation=state.market.relations.find(row=>row.hold)!;await mount(relation.id);expect(button('编辑档案')).toBeUndefined();expect(button('解冻')!.disabled).toBe(false);await click('解冻');const input=document.body.querySelector('textarea')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(input,'原回款已核销');input.dispatchEvent(new Event('input',{bubbles:true}));});await act(async()=>{[...document.body.querySelector('[role="dialog"]')!.querySelectorAll<HTMLButtonElement>('button')].find(row=>row.textContent?.trim()==='解冻')!.click();});expect(bridge.current.run).toHaveBeenCalledWith({type:'market.relation.hold',payload:{id:relation.id,frozen:false,reason:'原回款已核销'}});
+});
+
+it('closes an administrative hold form after authority is revoked and does not resurrect it',async()=>{
+ const relation=state.market.relations.find(row=>row.hold)!;await mount(relation.id);await click('解冻');expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();const Page=MARKET_PAGES.relations;
+ const paint=()=>root!.render(<Nav.Provider value={{route:{view:'relations',id:relation.id,detail:'full'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><Page/></Nav.Provider>);
+ bridge.admin=false;await act(async()=>paint());expect(document.body.querySelector('[role="dialog"]')).toBeNull();expect(button('解冻')).toBeUndefined();bridge.admin=true;await act(async()=>paint());expect(document.body.querySelector('[role="dialog"]')).toBeNull();expect(bridge.current.run).not.toHaveBeenCalled();
 });

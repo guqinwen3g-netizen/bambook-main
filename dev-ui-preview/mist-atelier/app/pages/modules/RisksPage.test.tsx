@@ -100,7 +100,7 @@ describe('风险管理与合规', () => {
     await click(button('申请关闭', d));
     const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
     expect((dialog.querySelector('[aria-label="申请事项"]') as HTMLSelectElement).value).toBe('close');
-    expect(dialog.textContent).toContain('部门的主管'); expect(dialog.querySelector('[aria-label="审批人"]')).toBeNull();
+    expect(dialog.textContent).toContain(r.title); expect(dialog.querySelector('[aria-label="审批人"]')).toBeNull();
     await type('依据与申请范围', '工厂已补产，客户确认新交期');
     await click(button('提交审批', dialog));
     expect(bridge.current.run).toHaveBeenCalledWith({ type: 'platform.risk.escalate', payload: { id: r.id, action: 'close', reason: '工厂已补产，客户确认新交期' } });
