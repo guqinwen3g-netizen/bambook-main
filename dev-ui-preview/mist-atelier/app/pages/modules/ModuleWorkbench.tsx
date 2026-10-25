@@ -74,7 +74,7 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
   const change=(key:string,value:ModuleValue)=>setValues(v=>({...v,[key]:value}));
   return <Dialog open={!!spec} title={uiText(spec?.title||'编辑')} onClose={()=>{if(!busy)onClose();}} width={760}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText(recovery.completed?"关闭":"取消")}</Button>{recovery.completed?<Button variant="primary" onClick={onClose}>{uiText("查看记录")}</Button>:<Button variant="primary" loading={busy} disabled={disabled} onClick={()=>void submit()}>{spec?.submitLabel||'保存'}</Button>}</>}>
-    {spec?.description&&<p className="mist-sub" style={{margin:'0 0 12px'}}>{spec.description}</p>}
+    {spec?.description&&<p className="mist-sub" style={{margin:'0 0 12px'}}>{uiText(spec.description)}</p>}
     {recovery.completed?<Banner tone="ok" title={uiText("原操作已保存")}/>:error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
     {(pending||pendingCreate)&&!saving&&<Banner tone="warn" title={uiText("请先核对上次操作的结果")}>{uiText("输入会保留；使用页面上的原请求核对入口后继续。")}</Banner>}
     <FormGrid>{visible.map(f=><Field key={f.key} label={f.type==='checkbox'?undefined:uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>

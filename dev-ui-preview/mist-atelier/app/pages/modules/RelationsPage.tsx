@@ -106,11 +106,11 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     const c = state?.customers.find(x => x.id === r.customerId); if (!state || !c) return null;
     const scope = customerHandoverScope(state, c.id), lockedOrders = scope.orders.filter(o => scope.locked(o)), movable = scope.orders.filter(o => !scope.locked(o));
     return { adminOnly:true, title: '在手业务交接', submitLabel: '确认交接',
-      description: `${c.name} · 当前负责人 ${c.owner||'未指定'}${lockedOrders.length?`；待审批订单暂不交接：${lockedOrders.map(o=>o.code).join('、')}`:''}`,
+      description: lockedOrders.length?ui`${c.name} · 当前负责人 ${c.owner||'未指定'}；待审批订单暂不交接：${lockedOrders.map(o=>o.code).join('、')}`:ui`${c.name} · 当前负责人 ${c.owner||'未指定'}`,
       initialValues: { toUserId: '', reason: '', ...Object.fromEntries(movable.map(o => ['order:' + o.id, true])), ...Object.fromEntries(scope.opportunities.map(o => ['opp:' + o.id, true])) },
       fields: [
         { key: 'toUserId', label: '新负责人', type: 'select', required: true, options: [{ value: '', label: '选择成员' }, ...memberSelectOptions(members).filter(o => o.value !== c.ownerId || movable.some(order=>order.ownerId!==c.ownerId) || scope.opportunities.some(opportunity=>opportunity.ownerId!==c.ownerId))] },
-        ...movable.map(o => ({ key: 'order:' + o.id, label: `订单 ${o.code}`, hint: o.ownerId!==c.ownerId?`负责人 ${o.owner||'未指定'}`:undefined, type: 'checkbox' as const })),
+        ...movable.map(o => ({ key: 'order:' + o.id, label: `订单 ${o.code}`, hint: o.ownerId!==c.ownerId?ui`负责人 ${o.owner||'未指定'}`:undefined, type: 'checkbox' as const })),
         ...scope.opportunities.map(o => ({ key: 'opp:' + o.id, label: `商机 ${o.title} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
         { key: 'reason', label: '交接原因', type: 'textarea', required: true },
       ],

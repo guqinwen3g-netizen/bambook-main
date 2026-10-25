@@ -124,3 +124,7 @@ it('requires approval before a looser pre-shipment payment condition becomes eff
  expect(assertOrderApproved(f.state,'order').governance!.contract.preShipmentPercent).toBe(100);
 });
 it.each([-1,101,30.001,NaN])('rejects an invalid pre-shipment percentage %s',preShipmentPercent=>{const f=fixture();expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:{...f.contract,preShipmentPercent}}})).toThrow();});
+
+it.each(['TT','LC','OA'] as const)('shows cumulative pre-shipment cash only for the TT approval snapshot (%s)',paymentMethod=>{
+ const f=fixture();f.order.governance.contract={...f.order.governance.contract,paymentMethod,depositPercent:0,preShipmentPercent:100,paymentNote:'按原合同付款'};f.run({type:'order.governance.submit',payload:{orderId:'order'}});const details=getOrderGovernanceReviews(f.state)[0].details;expect(details.some(row=>row.label==='出运前累计收款')).toBe(paymentMethod==='TT');expect(details.find(row=>row.label==='付款')?.value).toContain(paymentMethod);
+});

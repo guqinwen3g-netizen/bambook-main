@@ -106,3 +106,12 @@ describe('device-local interface language', () => {
     expect(ui`Company ${'雾织贸易'} / ${'订单管理'}`).toBe('Company 雾织贸易 / 订单管理');
   });
 });
+
+it('adapts new trading and handover copy while preserving record names and leaving the server untouched',()=>{
+ const fetch=vi.spyOn(globalThis,'fetch');writeDevice('locale','en-US');for(const [source,expected] of [['客户往来已冻结','Customer on hold'],['解冻往来','Restore trading'],['未排数量','Unscheduled quantity'],['未开始','Not started'],['未检验','Not inspected'],['未出运','Not shipped'],['取消已退回','Cancellation declined'],['接手客户','Customer handover']])expect(uiText(source)).toBe(expected);
+ expect(ui`${'Maison Lune'} · 当前负责人 ${'林澈'}`).toBe('Maison Lune · Current owner: 林澈');expect(uiText('Maison Lune · 暂停新报价和订单，出运须逐票批准。')).toBe('Maison Lune · New quotes and orders are paused; each shipment requires approval.');expect(uiText('在手业务 → 林澈')).toBe('Business handover → 林澈');expect(fetch).not.toHaveBeenCalled();writeDevice('locale','zh-CN');expect(uiText('客户往来已冻结')).toBe('客户往来已冻结');
+});
+
+it('translates order readiness labels, quantity summaries and receipts without changing the local Chinese default',()=>{
+ writeDevice('locale','en-US');for(const [key,value] of [['草稿待补齐','Draft'],['作废订单','Void order'],['待核对','Pending review'],['拟发范围确认','Shipment scope confirmed'],['收货与贸易条款确认','Consignee and trade terms confirmed'],['收款条件核对','Payment terms checked']])expect(uiText(key)).toBe(value);expect(uiText('2 色 × 3 码')).toBe('2 colours × 3 sizes');expect(uiText('溢装 +0% / 短装 −0%')).toBe('Over +0% / short −0%');expect(uiText('已收 0%')).toBe('Received 0%');writeDevice('locale','zh-CN');expect(interfaceLocale()).toBe('zh-CN');
+});
