@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  "未登记账户": "No account registered",
   "待归属 · {0}": "Unassigned · {0}",
   "余额未含待归属流水": "Balances exclude unassigned transactions.",
   "查看收款核销": "View receipt reconciliation",

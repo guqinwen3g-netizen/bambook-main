@@ -36,13 +36,13 @@ export function FinanceEntrances({ state, area, onChange }: { state: MistState |
   const amount = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // 多币种时每个币种一行（与报表中心统计卡一致），不折算、不合计。
   const stat = (totals: ReturnType<typeof financeCurrencyTotals>): React.ReactNode => totals.length === 1 ? amount(totals[0].amount) : totals.length ? <span className="mist-stat-lines">{totals.map(t => <span key={t.currency}>{t.currency} {amount(t.amount)}</span>)}</span> : '暂无';
-  const foot = (totals: ReturnType<typeof financeCurrencyTotals>, fallback: string) => totals.length > 1 ? '' : totals.length ? totalsText(totals) : fallback;
+  const foot = (totals: ReturnType<typeof financeCurrencyTotals>, fallback: string) => totals.length ? '' : fallback;
   return <div className="mist-section" data-finance-entrances>
     <StatGrid>
       <StatCard icon={ReceiptText} label={uiText("应收未收")} value={stat(open)} unit={uiText(open.length === 1 ? open[0].currency : undefined)} foot={foot(open, totalsText(open))} onClick={() => onChange('receivables')} />
       <StatCard icon={ArrowUpRight} label={uiText("应付未付")} value={stat(payable)} unit={uiText(payable.length === 1 ? payable[0].currency : undefined)} foot={foot(payable, '按已登记的供应商票据计算')} onClick={() => onChange('payables')} />
       <StatCard icon={ArrowDownLeft} label={uiText("未分配到账")} value={stat(unallocated)} unit={uiText(unallocated.length === 1 ? unallocated[0].currency : undefined)} foot={foot(unallocated, totalsText(unallocated))} onClick={() => onChange('records')} />
-      <StatCard icon={Landmark} label={uiText("公司账户余额")} value={bank?.accounts.length ? stat(balances) : '—'} unit={uiText(balances.length === 1 ? balances[0].currency : undefined)} foot={bank?.accounts.length ? foot(balances, '') + (unassigned ? ` · ${unassigned} 笔流水未归属账户` : '') : '尚未登记账户；登记账户与期初后按归属流水计算'} onClick={() => onChange('accounts')} />
+      <StatCard icon={Landmark} label={uiText("公司账户余额")} value={bank?.accounts.length ? stat(balances) : '—'} unit={uiText(balances.length === 1 ? balances[0].currency : undefined)} foot={bank?.accounts.length ? (unassigned ? ui`待归属 · ${unassigned}` : undefined) : uiText('未登记账户')} onClick={() => onChange('accounts')} />
     </StatGrid>
     <Tabs<FinanceArea> value={area} onChange={onChange} options={[{ value: 'receivables', label: '应收待办' }, { value: 'payables', label: '应付待办' }, { value: 'records', label: '收付款记录' }, { value: 'accounts', label: '账户与余额' }]} />
   </div>;
@@ -95,7 +95,7 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
       {factoryUses.map(use=><div className="mist-row" key={use.id}><span>{uiText('工厂补偿')} · {use.claimCode}</span><span>{money(use.amount,use.currency)}</span><Button size="sm" onClick={()=>go('claims',use.claimId)}>{uiText('查看索赔案件')}</Button></div>)}
     </DetailBlock>}
     {!current.receipt&&<Facts items={[{label:'业务来源',value:paymentPurpose}]}/>}
-  </DetailBody> : <EmptyState compact title={uiText(route.id ? '未找到交易记录' : '交易详情')} description={uiText("选择一笔记录查看原币金额、核销来源及归属账户。")} />;
+  </DetailBody> : <EmptyState compact title={uiText(route.id ? '未找到交易记录' : '交易详情')} />;
   const assignDialog = assigning && state && current && currentRow && <AccountAssignDialog state={state} kind={current.direction} row={currentRow} onClose={() => setAssigning(false)} />;
   if (full.active && current) return <ListDetailPage backLabel="收付款记录" onBack={full.back} after={assignDialog}>{detail}</ListDetailPage>;
   const summary = current ? <PreviewSummary openLabel="打开交易详情" onOpen={() => full.open(current.id)} data={{
