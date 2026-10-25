@@ -1,5 +1,9 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  "来证备注：": "Original credit notes: ",
+  "银行通知摘要": "Bank advice summary",
+  "暂无修改": "No amendments",
+  "留空按交单金额": "Leave blank to use the presentation amount",
   "交单期须为 1–365 的整数": "Presentation period must be 1–365 whole days.",
   "金额容差比例须为 0–10 的整数": "Amount tolerance must be a whole percentage from 0 to 10.",
 

@@ -57,7 +57,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
       partialShipment: v.partialShipment === true, transhipment: v.transhipment === true, documentsRequired: text(v, 'documentsRequired'), note: text(v, 'note'),
     } } }) });
   const amendSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
-    title: '登记修改书', submitLabel: '登记修改', description: `${lc.lcNo} · 只登记受益人已接受的修改书；改动的条款会连同原条款记入修改记录。`,
+    title: '登记修改书', submitLabel: '登记修改', description: lc.lcNo,
     fields: [field('date', '修改书日期', 'date'), field('amount', `金额（${lc.currency}）`, 'number'), field('tolerancePct', '金额容差 %', 'number'), field('latestShipmentDate', '最晚装运日', 'date'), field('expiryDate', '有效期', 'date'), field('presentationDays', '交单期（天）', 'number'), field('partialShipment', '允许分批装运', 'checkbox', false), field('transhipment', '允许转运', 'checkbox', false), field('documentsRequired', '单据要求', 'textarea', false), field('note', '修改说明', 'textarea', false)],
     initialValues: { date: day, amount: String(lc.amount), tolerancePct: String(lc.tolerancePct), latestShipmentDate: lc.latestShipmentDate, expiryDate: lc.expiryDate, presentationDays: String(lc.presentationDays), partialShipment: lc.partialShipment, transhipment: lc.transhipment, documentsRequired: lc.documentsRequired, note: '' },
     submit: v => {
@@ -74,13 +74,13 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
     } });
   const presentable = (lc: MistLetterOfCredit) => (state?.fulfillment.shipments || []).filter(s => s.state !== 'cancelled' && s.lines.some(l => lc.orderIds.includes(l.orderId)) && !lc.presentations.some(p => p.shipmentId === s.id && p.result !== 'refused'));
   const presentSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
-    title: '登记交单', submitLabel: '登记交单', description: `${lc.lcNo} · 可用余额 ${money(lcAvailableMinor(lc) / 100, lc.currency)}。系统按条款列出迟装、迟交单、过期与分批不符点，银行审单结论以银行通知为准。`,
-    fields: [field('shipmentId', '出运', 'select', true, [emptyOption, ...presentable(lc).map(s => ({ value: s.id, label: `${s.code} · ${s.portOfLoading} → ${s.portOfDischarge}` }))]), { ...field('shipmentDate', '装运日（运输单据日）', 'date'), hint: '以提单 / 空运单上的装船或签发日期为准。' }, field('presentedAt', '交单日', 'date'), field('amount', `交单金额（${lc.currency}）`, 'number'), field('documents', '提交单据', 'textarea'), field('discrepancies', '已知不符点', 'textarea', false)],
+    title: '登记交单', submitLabel: '登记交单', description: `${lc.lcNo} · 可用余额 ${money(lcAvailableMinor(lc) / 100, lc.currency)}`,
+    fields: [field('shipmentId', '出运', 'select', true, [emptyOption, ...presentable(lc).map(s => ({ value: s.id, label: `${s.code} · ${s.portOfLoading} → ${s.portOfDischarge}` }))]), field('shipmentDate', '装运日（运输单据日）', 'date'), field('presentedAt', '交单日', 'date'), field('amount', `交单金额（${lc.currency}）`, 'number'), field('documents', '提交单据', 'textarea'), field('discrepancies', '已知不符点', 'textarea', false)],
     initialValues: { shipmentId: '', shipmentDate: day, presentedAt: day, amount: '', documents: lc.documentsRequired, discrepancies: '' },
     submit: v => run({ type: 'lc.present', payload: { id: lc.id, shipmentId: text(v, 'shipmentId'), shipmentDate: text(v, 'shipmentDate'), presentedAt: text(v, 'presentedAt'), amount: num(v, 'amount'), documents: text(v, 'documents'), discrepancies: text(v, 'discrepancies') } }) });
   const resultSpec = (lc: MistLetterOfCredit, p: MistLcPresentation): ModuleEditorSpec => ({
-    title: `登记第 ${p.no} 次交单审单结果`, submitLabel: '登记结果', description: `${p.shipmentCode} · ${money(p.amount, lc.currency)} · 交单日 ${p.presentedAt}。承付或拒付登记后不能再改；承付款到账由财务按银行流水核销。`,
-    fields: [field('result', '银行结论', 'select', true, (['complying', 'discrepant', 'honoured', 'refused'] as const).map(value => ({ value, label: LC_RESULT_LABEL[value] }))), field('date', '银行通知日', 'date'), { ...field('discrepancies', '不符点', 'textarea', false), hint: '银行提出不符点时逐条填写。' }, { ...field('honouredAmount', `承付金额（${lc.currency}）`, 'number', false), hint: '承付时填写；扣不符点费等时填实际承付金额，留空按交单金额。' }, { ...field('note', '说明', 'textarea', false), hint: '拒付须写明银行拒付理由。' }],
+    title: `登记第 ${p.no} 次交单审单结果`, submitLabel: '登记结果', description: `${p.shipmentCode} · ${money(p.amount, lc.currency)} · 交单日 ${p.presentedAt} · 承付或拒付后不可修改`,
+    fields: [field('result', '银行结论', 'select', true, (['complying', 'discrepant', 'honoured', 'refused'] as const).map(value => ({ value, label: LC_RESULT_LABEL[value] }))), field('date', '银行通知日', 'date'), field('discrepancies', '不符点', 'textarea', false), { ...field('honouredAmount', `承付金额（${lc.currency}）`, 'number', false), hint: '留空按交单金额' }, field('note', '银行通知摘要', 'textarea', false)],
     initialValues: { result: p.result === 'pending' ? 'complying' : 'honoured', date: day, discrepancies: p.discrepancies, honouredAmount: '', note: '' },
     submit: v => run({ type: 'lc.presentation.result', payload: { id: lc.id, presentationId: p.id, result: text(v, 'result') as Exclude<LcPresentationResult, 'pending'>, date: text(v, 'date'), discrepancies: text(v, 'discrepancies'), honouredAmount: num(v, 'honouredAmount'), note: text(v, 'note') } }) });
   const cancelSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
@@ -157,19 +157,19 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
       { label: '转运', value: yes(lc.transhipment) },
     ]} />
     {lc.documentsRequired && <p className="mist-sub" style={{ whiteSpace: 'pre-wrap' }}>{uiText("单据要求：")}{lc.documentsRequired}</p>}
-    {lc.note && <p className="mist-sub">{uiText("备注：")}{lc.note}</p>}
+    {lc.note && <p className="mist-sub">{uiText("来证备注：")}{lc.note}</p>}
     <DetailBlock title={ui`交单 · ${lc.presentations.length}`}>
       {lc.presentations.length ? <DataTable ariaLabel={ui`${lc.lcNo} 交单记录`} rows={[...lc.presentations].reverse()} rowKey={p => p.id} columns={[
         { key: 'no', header: '交单', render: p => <div className="mist-col" style={{ gap: 2 }}><TextLink onClick={() => onShipment(p.shipmentId)}>{uiText("第 ")}{p.no}{uiText(" 次 · ")}{p.shipmentCode}</TextLink><small className="mist-muted">{uiText("装运 ")}{p.shipmentDate}{uiText(" · 交单 ")}{p.presentedAt}{uiText("（截止 ")}{p.deadline}）</small></div> },
         { key: 'amount', header: '金额', align: 'right', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(p.amount, lc.currency)}</span>{p.honouredAmount !== undefined && <small className="mist-muted">{uiText("承付 ")}{money(p.honouredAmount, lc.currency)}</small>}</div> },
         { key: 'result', header: '结果', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={RESULT_TONE[p.result]}>{LC_RESULT_LABEL[p.result]}</Pill>{p.autoDiscrepancies.map(d => <small key={d} className="mist-tone-bad">{d}</small>)}{p.discrepancies && <small className="mist-muted">{uiText("不符点：")}{p.discrepancies}</small>}{p.resultNote && <small className="mist-muted">{p.resultNote}</small>}</div> },
         ...(can ? [{ key: 'act', header: '', align: 'right' as const, render: (p: MistLcPresentation) => final(p) ? null : <Button size="sm" icon={Stamp} disabled={locked} aria-label={ui`登记第 ${p.no} 次交单审单结果`} onClick={() => onResult(p)}>{uiText("审单结果")}</Button> }] : []),
-      ]} /> : <span className="mist-note">{uiText("尚未交单。出运装船后，按信用证要求备齐单据在交单期内向银行交单。")}</span>}
+      ]} /> : <span className="mist-note">{uiText("尚未交单")}</span>}
     </DetailBlock>
     <DetailBlock title={ui`修改记录 · ${lc.amendments.length}`}>
-      {lc.amendments.length ? <div className="mist-col">{[...lc.amendments].reverse().map(a => <div key={a.no} className="mist-col" style={{ gap: 2 }}><span>{uiText("第 ")}{a.no}{uiText(" 次修改 · ")}{a.date}</span>{a.changes.map(ch => <small key={ch.field} className="mist-muted">{uiText(ch.label)}：{ch.from} → {ch.to}</small>)}{a.note && <small className="mist-muted">{a.note}</small>}</div>)}</div> : <span className="mist-note">{uiText("没有修改书。")}</span>}
+      {lc.amendments.length ? <div className="mist-col">{[...lc.amendments].reverse().map(a => <div key={a.no} className="mist-col" style={{ gap: 2 }}><span>{uiText("第 ")}{a.no}{uiText(" 次修改 · ")}{a.date}</span>{a.changes.map(ch => <small key={ch.field} className="mist-muted">{uiText(ch.label)}：{ch.from} → {ch.to}</small>)}{a.note && <small className="mist-muted">{a.note}</small>}</div>)}</div> : <span className="mist-note">{uiText("暂无修改")}</span>}
     </DetailBlock>
-    <DetailBlock title={uiText("附件")}><RecordFiles key={lc.id} ids={lc.fileIds} onAttach={can ? ids => run({ type: 'lc.files', payload: { id: lc.id, fileIds: ids } }) : undefined} />{!lc.fileIds.length && <span className="mist-note">{uiText("信用证正本、修改书与银行通知作为附件保存，只能追加。")}</span>}</DetailBlock>
+    <DetailBlock title={uiText("附件")}><RecordFiles key={lc.id} ids={lc.fileIds} onAttach={can ? ids => run({ type: 'lc.files', payload: { id: lc.id, fileIds: ids } }) : undefined} /></DetailBlock>
     <DetailBlock title={uiText("记录")}><Events entity="customs" id={lc.id} /></DetailBlock>
   </DetailBody>;
 }
