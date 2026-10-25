@@ -175,3 +175,9 @@ it('offers only the source action when the focus has no QC report',()=>{
  seam.value.state=createMistState(ctx(),'empty');seam.value.state.tasks=[{id:'follow-up',kind:'general',title:'Follow-up',due:new Date().toISOString().slice(0,10),done:false,assigneeIds:['owner'],target:{view:'claims',id:'case'}}];render();
  expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='打开事项')).toBe(true);expect([...host.querySelectorAll('button')].some(b=>b.textContent?.trim()==='QC 报告')).toBe(false);
 });
+
+it('deduplicates a presented handover by business task ID and completes the original task once',async()=>{
+ const state=seam.value.state,customer=state.customers[0],relation=state.market.relations.find((row:any)=>row.customerId===customer.id);Object.assign(state.tasks[0],{kind:'customer-handover',title:`接手客户 ${customer.name}：核对在手订单、报价、未收款与联系人`,target:{view:'relations',id:relation?.id||customer.id}});const originalTitle=state.tasks[0].title;
+ render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!,select=dialog.querySelector('select')!;expect([...select.options].map(row=>[row.value,row.textContent])).toEqual([['task-exact',`接手客户 · ${customer.name}`]]);expect(state.tasks[0].title).toBe(originalTitle);
+ await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));expect(seam.value.run).toHaveBeenCalledOnce();expect(seam.value.run).toHaveBeenCalledWith({type:'task.complete',payload:{id:'task-exact',done:true}});expect(seam.value.state.tasks[0].done).toBe(true);
+});
