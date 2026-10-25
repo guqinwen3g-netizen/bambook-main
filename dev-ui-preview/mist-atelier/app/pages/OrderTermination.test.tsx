@@ -50,7 +50,7 @@ it('shows a voided order as read-only without edit, submit or termination action
   Object.assign(gov(), { status: 'void', termination: { kind: 'void', reason: '客户未下单', at: context.now, byName: '业务员甲' } });
   store.state!.orders[0].state = '已作废';
   render();
-  expect(host.textContent).toContain('订单已作废，只读');
+  expect(host.textContent).toContain('已作废');
   expect(host.textContent).not.toContain('待审批');
   expect(host.textContent).not.toContain('批准前不能采购或履约');
   expect((getByRole(host, 'button', { name: '编辑' }) as HTMLButtonElement).disabled).toBe(true);
@@ -82,7 +82,7 @@ it('offers cancellation for an approved order and blocks it after departure, poi
 it('locks the order while cancellation is pending', () => {
   Object.assign(gov(), { status: 'approved', cancellation: { id: 'c', status: 'pending', reason: '客户撤单', requesterName: '业务员甲', requesterId: 'sales', reviewerIds: ['leader'], requestedAt: context.now } });
   render();
-  expect(host.textContent).toContain('取消订单审批中，订单已锁定');
+  expect(host.textContent).toContain('取消审批中');
   expect((getByRole(host, 'button', { name: '编辑' }) as HTMLButtonElement).disabled).toBe(true);
   expect(queryByRole(host, 'button', { name: '申请取消订单' })).toBeNull();
 });

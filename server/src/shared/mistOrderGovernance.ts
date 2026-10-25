@@ -310,5 +310,5 @@ function decideCancel(root:MistState,p:{id:string;decision:'approved'|'rejected'
 function cancelReviews(root:MistState):MistReviewTask[]{
  return root.orders.flatMap(source=>{const order=source as GovernedOrder,c=order.governance?.cancellation;if(!c)return [];
   return [{id:'order-cancel:'+c.id,kind:'order' as const,entityId:cancelReviewEntity(order.id,c.id),title:`${order.code} 取消订单审批`,requesterId:c.requesterId,reviewerIds:c.reviewerIds,status:c.status,submittedAt:c.requestedAt,requiredPermission:'orders:write',target:{view:'orders/detail',id:order.id},
-   details:[{label:'订单',value:`${order.code} · ${order.customer}`},{label:'取消原因',value:c.reason},{label:'申请人',value:c.requesterName},...(c.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,[])):[]),{label:'说明',value:'批准后订单只读，不能再采购 / 生产 / 出运；受影响的采购、生产、出运生成待办，其他模块数据不在此删改'},...(c.note?[{label:'审批意见',value:c.note}]:[])]}];});
+   details:[{label:'订单',value:`${order.code} · ${order.customer}`},{label:'取消原因',value:c.reason},{label:'申请人',value:c.requesterName},...(c.status==='pending'?orderChangeImpactDetails(orderChangeImpact(root,order,[])):[]),...(c.note?[{label:'审批意见',value:c.note}]:[])]}];});
 }

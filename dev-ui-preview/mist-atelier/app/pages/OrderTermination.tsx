@@ -21,10 +21,11 @@ export function orderLocked(order: Governed) {
 export function OrderTerminationBanner({ order }: { order: Governed }) {
   const g = order.governance, t = g?.termination, c = g?.cancellation;
   const when = (at?: string) => at ? new Date(at).toLocaleString(interfaceLocale()) : '';
-  if (g?.status === 'void') return <Banner tone="neutral" title={uiText("订单已作废，只读")}>{ui`${t?.byName || ''} 于 ${when(t?.at)} 作废：${t?.reason || ''}。记录保留，不能再编辑、提交或进入采购与履约。`}</Banner>;
-  if (g?.status === 'cancelled') return <Banner tone="bad" title={uiText("订单已取消，只读")}>{ui`取消原因：${t?.reason || c?.reason || ''}；${c?.decidedName || t?.byName || ''} 于 ${when(t?.at)} 批准。不能再采购、生产或出运；受影响的采购、生产、出运已生成待办，请到对应模块处理。`}</Banner>;
-  if (c?.status === 'pending') return <Banner tone="warn" title={uiText("取消订单审批中，订单已锁定")}>{ui`${c.requesterName} 申请取消：${c.reason}。审批期间不能编辑，也不能新建采购、生产或出运；请在审批中心等待订单审批人决定。`}</Banner>;
-  if (c?.status === 'rejected') return <Banner tone="neutral" title={uiText("取消订单申请已退回")}>{ui`${c.decidedName || ''}：${c.note || ''}。订单继续履约。`}</Banner>;
+  const facts=(reason:string,role:string,name:string,at?:string)=><><span>{reason}</span><span className="mist-row" style={{gap:16,marginTop:4,flexWrap:'wrap'}}><span>{uiText(role)}：{name}</span>{at&&<time>{when(at)}</time>}</span></>;
+  if (g?.status === 'void') return <Banner tone="neutral" title={uiText("已作废")}>{facts(t?.reason||'','作废人',t?.byName||'',t?.at)}</Banner>;
+  if (g?.status === 'cancelled') return <Banner tone="bad" title={uiText("已取消")}>{facts(t?.reason||c?.reason||'','批准人',c?.decidedName||t?.byName||'',t?.at)}</Banner>;
+  if (c?.status === 'pending') return <Banner tone="warn" title={uiText("取消审批中")}>{facts(c.reason,'申请人',c.requesterName,c.requestedAt)}</Banner>;
+  if (c?.status === 'rejected') return <Banner tone="neutral" title={uiText("取消已退回")}>{facts(c.note||'','审批人',c.decidedName||'',c.decidedAt)}</Banner>;
   return null;
 }
 
