@@ -1,5 +1,13 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '样品用途': 'Sample purpose',
+  '返回生产单': 'Back to production',
+  '生产单已不可用': 'Production unavailable',
+  '生产单已关闭': 'Production closed',
+  '本票出运或生产来源已不可用': 'Shipment or production source unavailable',
+  '生产来源已不可用': 'Production source unavailable',
+  '请选择本票生产来源': 'Select a production source for this shipment',
+  '请选择本次船样的生产来源': 'Select the production source for this shipping sample',
   "未登记账户": "No account registered",
   "待归属 · {0}": "Unassigned · {0}",
   "余额未含待归属流水": "Balances exclude unassigned transactions.",

@@ -53,11 +53,10 @@ it('flags overdue loans and explains why return is unavailable',()=>{
   expect(host.textContent).toContain('归还：没有未归还的借出');
 });
 
-it('keeps the ledger readable without write permission and states the reason on actions',()=>{
+it('keeps the ledger readable and hides unauthorized actions',()=>{
   write.allowed=false;store.state!.fulfillment.samples.push(fabric('smp-m','米样','米',10,10));render('smp-m');
-  expect(host.textContent).toContain('只读查看');
-  expect((getByRole(host,'button',{name:'借出'}) as HTMLButtonElement).disabled).toBe(true);
-  expect(host.textContent).toContain('借出：没有样品写权限');
+  expect(getByRole(host,'table',{name:'样品台账'})).toBeTruthy();
+  for(const label of ['借出','寄出','归还','移位','查看 / 发起本样品QC'])expect(getAllByRole(host,'button').some(button=>button.textContent===label)).toBe(false);
   expect(host.textContent).not.toContain('新建样品');
 });
 
@@ -87,15 +86,86 @@ it.each(['fabric','garment'] as const)('follows the linked production domain whe
   expect(getByRole(host,'tab',{name:domain==='fabric'?/^面料/:/^成衣/}).getAttribute('aria-selected')).toBe('true');
   await act(async()=>getAllByRole(host,'button',{name:'新建样品',exact:true})[0].click());
   expect((getByRole(host,'combobox',{name:'大类'}) as HTMLSelectElement).value).toBe(domain==='fabric'?'面料':'成衣');
-  expect((getByRole(host,'combobox',{name:'准确来源'}) as HTMLSelectElement).value).toBe('production:linked-production');
-  expect((getByRole(host,'combobox',{name:'订单样品角色'}) as HTMLSelectElement).value).toBe(domain==='fabric'?'pioneer':'pp');
+  const source=getByRole(host,'combobox',{name:'来源'}) as HTMLSelectElement;
+  expect(source.value).toBe('production:linked-production');expect(source.disabled).toBe(true);
+  expect([...source.options].filter(option=>option.value).map(option=>option.value)).toEqual(['production:linked-production']);
+  expect((getByRole(host,'combobox',{name:'大类'}) as HTMLSelectElement).disabled).toBe(true);
+  expect((getByRole(host,'textbox',{name:'名称'}) as HTMLInputElement).value).toBe('Linked item');
+  expect((getByRole(host,'combobox',{name:'样品用途'}) as HTMLSelectElement).value).toBe(domain==='fabric'?'pioneer':'pp');
+  expect(host.textContent).not.toContain('出运批次');
 });
 
+it('scopes the ledger, selection and return to the exact production before grouping',()=>{
+  const state=store.state!;state.orders.push({id:'order',code:'SO',type:'fabric'} as any);
+  state.productions.push({id:'branch',orderId:'order',lineId:'line',order:'SO',code:'FUL-ONE',factory:'One',qty:20,pct:0} as any);
+  const sample=(id:string,orderId:string,lineId:string,productionId:string)=>({...fabric(id,'米样','米',1,1),name:id,source:{kind:'orderLine' as const,orderId,lineId,productionId}});
+  state.fulfillment.samples.push(fabric('development','米样','米',1,1),sample('other-branch','order','line','other'),sample('wrong-line','order','else','branch'),sample('wrong-order','else','line','branch'),sample('exact-branch','order','line','branch'));
+  render('development',{productionId:'branch'});
+  const table=getByRole(host,'table',{name:'样品台账'});
+  expect(table.textContent).toContain('exact-branch');
+  for(const other of ['DEVELOPMENT','other-branch','wrong-line','wrong-order'])expect(table.textContent).not.toContain(other);
+  expect(host.textContent).not.toContain('同步已返样版本');
+  act(()=>getByRole(host,'button',{name:'返回生产单'}).click());
+  expect(go).toHaveBeenCalledWith('production-board','branch',{orderLineId:'line'});
+  expect(store.run).not.toHaveBeenCalled();
+});
+
+it.each([false,true])('never falls back to all samples or offers creation for an unavailable branch (closed=%s)',closed=>{
+  const state=store.state!;state.fulfillment.samples.push(fabric('development','米样','米',1,1));
+  if(closed)state.productions.push({id:'missing',orderId:'order',lineId:'line',code:'FUL-CLOSED',closed:true} as any);
+  render('development',{productionId:'missing'});
+  expect(getAllByRole(host,'button').some(button=>button.textContent==='新建样品')).toBe(false);
+  expect(getByRole(host,'table',{name:'样品台账'}).textContent).not.toContain('DEVELOPMENT');
+  expect(host.textContent).toContain(closed?'生产单已关闭':'生产单已不可用');
+  expect(store.run).not.toHaveBeenCalled();
+});
+
+it('shows a required shipment only for a production shipping sample, keeping manual samples free of order roles',async()=>{
+  store.state!.orders.push({id:'order',code:'SO',type:'fabric'} as any);
+  store.state!.productions.push({id:'branch',orderId:'order',lineId:'line',order:'SO',code:'FUL',factory:'Factory',qty:20,pct:0} as any);
+  render();await act(async()=>getAllByRole(host,'button',{name:'新建样品',exact:true})[0].click());
+  expect(host.textContent).not.toContain('样品用途');expect(host.textContent).not.toContain('出运批次');
+  const change=async(label:string,value:string)=>{const select=getByRole(host,'combobox',{name:label}) as HTMLSelectElement;await act(async()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});};
+  await change('来源','production:branch');await change('样品用途','pioneer');
+  expect(host.textContent).not.toContain('出运批次');
+  await change('样品用途','shipping');expect(getByRole(host,'combobox',{name:'出运批次'})).toBeTruthy();
+  const name=getByRole(host,'textbox',{name:'名称'}) as HTMLInputElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(name,'Fabric');name.dispatchEvent(new Event('input',{bubbles:true}));});
+  await act(async()=>getByRole(host,'button',{name:'下一步'}).click());
+  expect(host.textContent).toContain('请填写出运批次');expect(store.run).not.toHaveBeenCalled();
+  await change('来源','manual');expect(host.textContent).not.toContain('样品用途');expect(host.textContent).not.toContain('出运批次');
+});
 
 it('registers one factory/shipment sample set from actual size counts without copying the bulk allocation',async()=>{
  const state=store.state!;state.orders.push({id:'ship-order',code:'SO-SHIP',type:'garment'} as any);state.orderLines.push({id:'ship-line',orderId:'ship-order',name:'Jacket',style:'JK',qty:600,unit:'件',price:1,img:'coat',made:0,qc:0});state.productions.push({id:'ship-production',orderId:'ship-order',lineId:'ship-line',order:'SO-SHIP',code:'PROD-SHIP',name:'Jacket',factory:'Factory',qty:600,pct:100,col:'done',img:'coat',due:'2026-12-01'});state.fulfillment.shipments.push({id:'ship',code:'SHP-SET',domain:'garment',state:'preparing',customerId:'buyer',lines:[{orderId:'ship-order',lineId:'ship-line',productionId:'ship-production',quantity:600}]} as any);
  render(undefined,{section:'shipment:ship'});await act(async()=>getAllByRole(host,'button',{name:'新建样品',exact:true})[0].click());
  const fill=async(name:RegExp,value:string)=>{const input=getByRole(host,'textbox',{name}) as HTMLInputElement|HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});};
- await fill(/^名称/,'Jacket');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());expect(host.textContent).toContain('尺码与件数');expect(host.textContent).not.toContain('数量 / 长度');await fill(/^尺码与件数/,'S:1\nM:1\nL:1');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await fill(/^自由文本位置/,'Sample room');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'登记样品'}).click());
+ await fill(/^名称/,'Jacket');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());expect(host.textContent).toContain('尺码与件数');expect(host.textContent).not.toContain('数量 / 长度');await fill(/^尺码与件数/,'S:1\nM:1\nL:1');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await fill(/^存放位置/,'Sample room');await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'登记样品'}).click());
  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.samples.create',payload:expect.objectContaining({quantity:3,unit:'件',role:'shipping',shipmentId:'ship',sizeQuantities:[{size:'S',quantity:1},{size:'M',quantity:1},{size:'L',quantity:1}],source:{kind:'orderLine',orderId:'ship-order',lineId:'ship-line',productionId:'ship-production'}})});
+});
+
+it('can inspect the second colour in a grouped fabric archive using its own physical sample',async()=>{
+  const state=store.state!;state.orders.push({id:'order',code:'SO',type:'fabric'} as any);
+  state.productions.push({id:'branch',orderId:'order',lineId:'line',order:'SO',code:'FUL',factory:'Factory',qty:20,pct:0} as any);
+  const source={kind:'orderLine' as const,orderId:'order',lineId:'line',productionId:'branch'};
+  state.fulfillment.samples.push({...fabric('camel','米样','米',0.5,0.5),source,role:'pioneer',color:'驼色'},{...fabric('charcoal','米样','米',0.5,0.5),source,role:'pioneer',color:'炭灰'});
+  store.run.mockResolvedValue({result:{id:'qc-charcoal'}});render(undefined,{productionId:'branch'});
+  const second=host.querySelector('[data-sample-form="charcoal"]') as HTMLElement;
+  expect(second.textContent).toContain('炭灰');
+  await act(async()=>getByRole(second,'button',{name:'查看 / 发起本样品QC'}).click());
+  await act(async()=>getByRole(host,'button',{name:'下一步'}).click());
+  await act(async()=>getByRole(host,'button',{name:'发起送检'}).click());
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.request',payload:expect.objectContaining({source,sampleId:'charcoal',domain:'fabric'})});
+});
+
+it('keeps all of a multi-branch shipment selectable while excluding samples outside the shipment',async()=>{
+  const state=store.state!;state.orders.push({id:'order',code:'SO',type:'fabric'} as any);
+  for(const id of ['first','second','outside'])state.productions.push({id,orderId:'order',lineId:'line',order:'SO',code:id,factory:id,qty:10,pct:0} as any);
+  state.fulfillment.shipments.push({id:'ship',code:'SHP',domain:'fabric',state:'preparing',lines:['first','second'].map(productionId=>({productionId,orderId:'order',lineId:'line',quantity:10}))} as any);
+  for(const id of ['first','second','outside'])state.fulfillment.samples.push({...fabric(id,'米样','米',1,1),name:id,source:{kind:'orderLine',orderId:'order',lineId:'line',productionId:id},role:'shipping',shipmentId:'ship'});
+  render('outside',{section:'shipment:ship',productionId:'outside'});
+  expect(getByRole(host,'table',{name:'样品台账'}).textContent).not.toContain('outside');
+  await act(async()=>getAllByRole(host,'button',{name:'新建样品',exact:true})[0].click());
+  const source=getByRole(host,'combobox',{name:'来源'}) as HTMLSelectElement;
+  expect(source.disabled).toBe(false);expect(source.value).toBe('');
+  expect([...source.options].filter(option=>option.value).map(option=>option.value)).toEqual(['production:first','production:second']);
 });
