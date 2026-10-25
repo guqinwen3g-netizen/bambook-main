@@ -96,3 +96,19 @@ describe('供应商询价比价',()=>{
     expect(f.state.events.some(e=>e.entityId===id&&e.text.includes('由 PO-2026-00003（远山服装）转入 江南成衣'))).toBe(true);
   });
 });
+
+it('carries technical requirements and the winning quote notes into procurement and its approval',()=>{
+ const f=fixture(),requirements='羊毛90% / 羊绒10%；480g/m²；门幅150cm；两色分缸交付。',quoteNote='Q-LQ-01：逐卷标识并留同批产前样用料。';
+ const {id}=f.run({type:'rfq.save',payload:{input:input(f,{note:requirements})}} as MistCommand);
+ const quoteId=f.run(quote(id,f.sup('江南成衣'),{note:quoteNote})).quoteId!;
+ const original=JSON.stringify(f.rfq);
+ const {purchaseId}=f.run({type:'rfq.award',payload:{id,quoteId,reason:'符合交期'}} as MistCommand);
+ const po=f.state.fulfillment.purchases.find(p=>p.id===purchaseId)!;
+ expect(po.note).toContain(requirements);expect(po.note).toContain(quoteNote);expect(po.note).toContain('符合交期');
+ f.run({type:'fulfillment.procurement.submit',payload:{id:purchaseId}} as MistCommand);
+ expect(po.orderId).toBe('SO-G-2026-018');
+ expect(JSON.parse(original).note).toBe(f.rfq.note);expect(f.rfq.quotes[0].note).toBe(quoteNote);
+ const submitted=f.state.fulfillment.purchases.find(p=>p.id===purchaseId)!;
+ expect(submitted.revisionHistory!.at(-1)!.snapshot.note).toContain(requirements);
+ expect(submitted.revisionHistory!.at(-1)!.snapshot.note).toContain(quoteNote);
+});

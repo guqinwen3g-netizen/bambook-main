@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  "选择询价单": "Select an RFQ",
   "来证备注：": "Original credit notes: ",
   "银行通知摘要": "Bank advice summary",
   "暂无修改": "No amendments",

@@ -17,6 +17,13 @@ import {ProcurementPage} from './ProcurementPage';
 let host:HTMLElement,root:Root;const go=vi.fn();
 function render(id?:string,mode:'full'|'list'=id?'full':'list',scope:Record<string,string>={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id,detail,...scope},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
+async function advanceRfqNeed(){
+  const source=getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement;
+  act(()=>{source.value=source.options[1].value;source.dispatchEvent(new Event('change',{bubbles:true}));});
+  for(const [name,value] of [['询价内容','风衣加工'],['需求数量','100'],['需求交期','2099-01-31'],['交付地点','嘉兴仓']])typeInto((name==='需求交期'?host.querySelector('input[type="date"]'):getByRole(host,name==='需求数量'?'spinbutton':'textbox',{name})) as HTMLInputElement,value);
+  await click(getByRole(host,'button',{name:'下一步',exact:true}));
+}
+
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 function purchase(id:string,patch:Partial<FulfillmentPurchase>={}):FulfillmentPurchase{return {id,code:id.toUpperCase(),orderId:'o',lineId:'l',kind:'material',domain:'garment',supplierId:'s',supplier:'青禾辅料',description:'主唛与洗标',quantity:100,unit:'个',price:0.3,currency:'CNY',due:'2026-10-30',terms:'月结30天',destination:'江南成衣',note:'',fileIds:[],state:'draft',requesterId:'buyer',createdBy:'经办人',createdAt:'2026-10-01T08:00:00Z',reviewerIds:['boss'],configVersions:{},received:0,...patch};}
 const approved=(patch:Partial<FulfillmentPurchase>={})=>({state:'approved' as const,submittedAt:'2026-10-02T08:00:00Z',decision:{actorId:'boss',actor:'审批人',at:'2026-10-03T08:00:00Z',decision:'approved' as const,note:'同意'},...patch});
@@ -245,7 +252,6 @@ it('compares RFQ quotes in CNY, requires a reason to award a non-lowest quote, a
   const q=(id:string,supplierId:string,supplier:string,price:number,currency:string,promisedDue:string)=>({id,supplierId,supplier,declined:false,declineReason:'',price,currency,moq:0,promisedDue,terms:'月结 30 天',validUntil:'2099-12-31',note:'',fileIds:[],at:'2026-10-12T01:00:00Z',actor:'经办人'});
   (st as any).rfqs=[{id:'rfq1',code:'RFQ-2026-0001',orderId:'o',lineId:'l',kind:'processing',domain:'garment',description:'风衣 CMT',quantity:100,unit:'件',currency:'CNY',due:'2099-01-31',destination:'嘉兴仓',deadline:'2099-01-10',supplierIds:['a','b'],quotes:[q('qa','a','江南成衣',80,'CNY','2099-01-20'),q('qb','b','远山服装',12,'USD','2099-01-25')],note:'',state:'open',createdAt:'2026-10-11T01:00:00Z',actor:'经办人'}];
   act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',section:'rfq:a'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));
-  expect(host.textContent).toContain('发起询价时已默认勾选 江南成衣');
   const list=getByRole(host,'table',{name:'询价单列表'});
   expect(list.textContent).toContain('RFQ-2026-0001');expect(list.textContent).toContain('80.00 CNY');expect(list.textContent).toContain('2 / 2 家');
   await click(getByRole(list,'row',{name:/RFQ-2026-0001/}));
@@ -261,7 +267,9 @@ it('compares RFQ quotes in CNY, requires a reason to award a non-lowest quote, a
   await click(getByRole(dialog,'button',{name:'定标并生成采购草稿'}));
   expect(store.run).toHaveBeenLastCalledWith({type:'rfq.award',payload:{id:'rfq1',quoteId:'qb',reason:'交期更稳'}});
   await click(getByRole(host,'button',{name:'发起询价'}));
-  dialog=getByRole(document.body,'dialog');
+  expect(queryByRole(document.body,'dialog')).toBeNull();
+  await advanceRfqNeed();
+  dialog=host;
   expect((getByRole(dialog,'checkbox',{name:/江南成衣/}) as HTMLInputElement).checked).toBe(true);
   expect((getByRole(dialog,'checkbox',{name:/远山服装/}) as HTMLInputElement).checked).toBe(false);
   expect(queryByRole(dialog,'checkbox',{name:/恒彩印花/})).toBeNull();
@@ -327,6 +335,7 @@ it('excludes service providers from production purchases and RFQ invitations',as
   const supplier=getByRole(document.body,'combobox',{name:'供应商'});expect(supplier.textContent).not.toContain('浦江物流');
   await click(getByRole(document.body,'button',{name:'返回列表',exact:true}));
   await click(getByRole(host,'tab',{name:/^询价比价/}));await click(getAllByRole(host,'button',{name:'发起询价',exact:true})[0]);
+  await advanceRfqNeed();
   expect(queryByRole(document.body,'checkbox',{name:'浦江物流 · 服务商'})).toBeNull();
 });
 
@@ -337,9 +346,35 @@ it('excludes void, cancelled and pending-cancellation orders from new procuremen
   }
   render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
   expect([...(getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement).options].map(o=>o.value)).toEqual(['','line:l']);
+  await click(getByRole(host,'button',{name:'返回列表',exact:true}));
+  await click(getByRole(host,'tab',{name:/^询价比价/}));await click(getByRole(host,'button',{name:'发起询价',exact:true}));
+  expect([...(getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement).options].map(o=>o.value)).toEqual(['','line:l']);
 });
-it.each(['void','cancelled','cancelling'])('disables new procurement from a locked order route: %s',status=>{
+it.each(['void','cancelled','cancelling'])('disables new procurement from a locked order route: %s',async status=>{
   store.state!.orders[0].governance=(status==='cancelling'?{status:'approved',cancellation:{status:'pending'}}:{status}) as any;
   render(undefined,'list',{section:'order:o',orderLineId:'l'});
   expect(getAllByRole(host,'button',{name:'新建采购订单'}).every(button=>(button as HTMLButtonElement).disabled)).toBe(true);
+  await click(getByRole(host,'tab',{name:/^询价比价/}));expect((getByRole(host,'button',{name:'发起询价',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it('keeps an order-scoped RFQ list on that line and carries its need into the page form',async()=>{
+ const st=store.state!;st.orders[0].due='2099-01-31';st.orders[0].governance={contract:{deliveryPlace:'嘉兴仓'}} as any;
+ st.orders.push({id:'other',code:'OTHER',type:'garment'} as any);st.orderLines.push({...st.orderLines[0],id:'other-line',orderId:'other'});
+ const request=(id:string,lineId:string,orderId:string)=>({id,code:id,orderId,lineId,kind:'processing',domain:'garment',description:id,quantity:100,unit:'件',currency:'CNY',due:'2099-01-31',destination:'嘉兴仓',deadline:'2099-01-10',supplierIds:[],quotes:[],note:'',state:'open',createdAt:'',actor:''});
+ (st as any).rfqs=[request('CURRENT','l','o'),request('OTHER-RFQ','other-line','other')];
+ render(undefined,'list',{section:'order:o',orderLineId:'l'});await click(getByRole(host,'tab',{name:/^询价比价\s*1$/}));
+ const list=getByRole(host,'table',{name:'询价单列表'});expect(list.textContent).toContain('CURRENT');expect(list.textContent).not.toContain('OTHER-RFQ');
+ await click(getByRole(host,'button',{name:'发起询价',exact:true}));expect(queryByRole(document.body,'dialog')).toBeNull();
+ expect((getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement).value).toBe('line:l');
+ expect((getByRole(host,'textbox',{name:'询价内容'}) as HTMLInputElement).value).toBe('风衣');
+ expect((getByRole(host,'spinbutton',{name:'需求数量'}) as HTMLInputElement).value).toBe('100');
+ expect((getByRole(host,'textbox',{name:'交付地点'}) as HTMLInputElement).value).toBe('嘉兴仓');
+ expect((host.querySelector('input[type="date"]') as HTMLInputElement).value).toBe('2099-01-31');
+});
+it.each(['purchase','rfq'])('closes and discards a %s editor when write access is revoked',async kind=>{
+ render();if(kind==='rfq')await click(getByRole(host,'tab',{name:/^询价比价/}));
+ await click(getAllByRole(host,'button',{name:kind==='rfq'?'发起询价':'新建采购订单',exact:true})[0]);
+ expect(getByRole(host,'button',{name:'返回列表',exact:true})).toBeTruthy();
+ session.denied.add('procurement:write');render();expect(queryByRole(host,'button',{name:'返回列表',exact:true})).toBeNull();
+ session.denied.delete('procurement:write');render();expect(queryByRole(host,'button',{name:'返回列表',exact:true})).toBeNull();
 });
