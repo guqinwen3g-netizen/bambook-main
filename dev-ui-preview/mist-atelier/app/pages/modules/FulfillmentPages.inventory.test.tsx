@@ -28,7 +28,7 @@ function physicalFixture(){
  store.state!.orders.push({id:'order',code:'SO-EXACT',type:'garment',customerId:'customer',customer:'实际来源客户',season:'AW26',lines:1,qty:4,amount:60,currency:'USD',due:'2026-12-01',progress:100,state:'履行中',tone:'ok',owner:'实际业务',img:'coat',checklist:[],handoffAt:context.now,createdAt:context.now,updatedAt:context.now});store.state!.orderLines.push({id:'line',orderId:'order',name:'实际退回成衣',style:'RETURN-M',img:'coat',qty:4,unit:'件',price:15,made:4,qc:4});
  const source:PlatformClaimGoodsSource={schemaVersion:1,claimId:'case',dispositionId:'d',invoiceId:'invoice',documentId:'ci',orderId:'order',lineId:'line',shipmentId:'ship',productionId:'production',customerId:'customer',currency:'USD',name:'实际退回成衣',style:'RETURN-M',unit:'件',quantity:2,unitPrice:15,sourceQuantity:4,sourceAmount:60,orderApprovedVersion:1};
  const disposition={id:'d',kind:'ReturnRefund' as const,amount:30,quantity:2,unit:'件',returnDisposition:'Scrap' as const,basis:'真实批准处置',fileIds:[],state:'Executed' as const,reviewDecision:'approved' as const,requesterId:'business',reviewerId:'leader',submittedAt:context.now,goodsSource:source,snapshot:JSON.stringify({kind:'ReturnRefund',amount:30,quantity:2,unit:'件',destination:'Scrap',basis:'真实批准处置',goodsSource:source}),goodsId:'goods',creditNoteId:'cn'};store.state!.platform.claims[0].dispositions.push(disposition);store.state!.platform.claimGoods.push({id:'goods',claimId:'case',dispositionId:'d',orderId:'order',quantity:2,unit:'件',destination:'Scrap',source,state:'AwaitingReturn',events:[]});
- const created=applyMistCommand(store.state!,{type:'fulfillment.claimInventory.warehouse.save',payload:{code:'WH-EXACT',name:'真实退货仓库',address:'实际上海地址',active:true}},context);store.state=created.state;const rt=createClaimReturnReceipt(store.state,'goods',created.result.id!,context);route.id=rt.id;return rt;
+ const created=applyMistCommand(store.state!,{type:'fulfillment.claimInventory.warehouse.save',payload:{code:'WH-EXACT',name:'真实退货仓库',address:'实际上海地址',active:true,custodian:'company'}},context);store.state=created.state;const rt=createClaimReturnReceipt(store.state,'goods',created.result.id!,context);route.id=rt.id;return rt;
 }
 const receiptValues={'本次实收数量（件）':'1','库位':'退货隔离区A','退货批号':'RETURN-LOT-1','货权':'Owned','货权确认日期':'2026-10-13','货权依据':'客户确认退回货权归我方','收货日期':'2026-10-13','收货依据':'实际点数一件并签收'};
 
@@ -78,4 +78,28 @@ it('filters the actual ledger by a catalog warehouse without changing stock or t
 
 it('resolves an exact return-order deep link without a section query back to its original case and fixed warehouse',()=>{
  physicalFixture();route={view:'inventory',id:store.state!.fulfillment.returnReceipts[0].id};render();expect(host.textContent).toContain('退货收货');expect(getByLabelText(host,'退货条目')).toBeTruthy();expect(getByRole(host,'button',{name:'登记收货'})).toBeTruthy();expect(host.textContent).toContain('CLM-2026-00001');
+});
+
+it('follows a real external repair transfer and return before recording repair and handback',async()=>{
+ const rt=physicalFixture(),state=store.state!,d=state.platform.claims[0].dispositions[0],goods=state.platform.claimGoods[0];Object.assign(d,{kind:'Repair',amount:0,returnDisposition:'Repair'});d.snapshot=JSON.stringify({...JSON.parse(d.snapshot!),kind:'Repair',amount:0,destination:'Repair'});goods.destination='Repair';
+ state.market.suppliers.push({id:'repair-factory',name:'维修工厂',status:'active',type:'成衣加工'} as any);
+ store.state=applyMistCommand(state,{type:'fulfillment.claimInventory.warehouse.save',payload:{code:'WH-REPAIR',name:'工厂维修点',address:'工厂实际地址',active:true,supplierId:'repair-factory'}},context).state;const site=store.state.fulfillment.warehouses.find(w=>w.code==='WH-REPAIR')!;
+ store.state=applyMistCommand(store.state,{type:'fulfillment.claimInventory.receive',payload:{goodsId:goods.id,quantity:2,unit:'件',warehouseId:rt.warehouseId,location:'返修区',batchNumber:'EXTERNAL-LOT',ownership:'Transferred',ownershipDate:'2026-10-13',ownershipEvidence:'客户保留货权',receivedAt:'2026-10-13',basis:'签收两件返修',fileIds:[]}},context).state;render();
+ await click(getByRole(host,'row',{name:/EXTERNAL-LOT/}));await click(getByRole(host,'button',{name:'外送维修'}));
+ expect((getByRole(document.body,'combobox',{name:'外修地点'}) as HTMLSelectElement).value).toBe('');
+ await wizard({'外修地点':site.id,'外修库位':'维修组','送修日期':'2026-10-13','接收人':'工厂接收人','交接凭据':'OUT-1','送修依据':'整批两件交给工厂维修'});await click(getByRole(document.body,'button',{name:'确认保存'}));
+ expect(store.state!.fulfillment.stock[0]).toMatchObject({warehouseId:site.id,location:'维修组',onHand:2,locked:2,available:0,ownership:'Transferred'});expect(host.textContent).toContain('外修中');expect(queryByRole(host,'button',{name:'登记维修'})).toBeNull();expect(queryByRole(host,'button',{name:'登记交还'})).toBeNull();
+ permissions.inventory=false;render();expect(queryByRole(host,'button',{name:'送修返库'})).toBeNull();expect(queryByRole(host,'button',{name:'外送维修'})).toBeNull();permissions.inventory=true;render();
+ await click(getByRole(host,'button',{name:'送修返库'}));expect((getByRole(document.body,'textbox',{name:'返库地点'}) as HTMLInputElement).value).toContain('真实退货仓库');
+ await wizard({'返库日期':'2026-10-13','收货人':'仓库收货人','返库凭据':'BACK-1','返库依据':'两件已返库'});await click(getByRole(document.body,'button',{name:'确认保存'}));
+ expect(store.state!.fulfillment.stock[0]).toMatchObject({warehouseId:rt.warehouseId,location:'返修区',locked:2,available:0});expect(queryByRole(host,'button',{name:'登记交还'})).toBeNull();
+ await click(getByRole(host,'button',{name:'登记维修'}));expect((getByRole(document.body,'combobox',{name:'维修工厂'}) as HTMLSelectElement).disabled).toBe(true);expect((getByRole(document.body,'textbox',{name:'维修地点'}) as HTMLInputElement).value).toBe('工厂维修点 · 维修组');
+ await wizard({'维修人员':'维修人员甲','维修日期':'2026-10-13','维修记录':'工厂修复完成'});await click(getByRole(document.body,'button',{name:'确认保存'}));const job=store.state!.platform.claimGoods[0].repairs![0];expect(job.externalDispatchId).toBe(store.state!.platform.claimGoods[0].repairDispatches![0].id);
+ store.state=applyMistCommand(store.state!,{type:'fulfillment.claimInventory.repair.qc',payload:{goodsId:goods.id,repairId:job.id,result:'pass',checkedAt:'2026-10-13',basis:'返库后专业复检合格',fileIds:[]}},{...context,actorId:'qc',actorName:'QC',can:()=>true}).state;render();expect(getByRole(host,'button',{name:'登记交还'})).toBeTruthy();
+});
+
+it('records a supplier custodian through the real warehouse catalog form without creating stock',async()=>{
+ physicalFixture();store.state!.market.suppliers.push({id:'repair-factory',name:'维修工厂',status:'active'} as any);render();await click(getByRole(host,'button',{name:'仓库目录'}));await click(getByRole(host,'button',{name:'新建'}));
+ await wizard({'仓库代码':'WH-PARTNER','仓库名称':'工厂维修点','仓库地址':'实际工厂地址','保管方':'supplier','保管单位':'repair-factory'});await click(getByRole(document.body,'button',{name:'确认保存'}));
+ expect(store.state!.fulfillment.warehouses.find(w=>w.code==='WH-PARTNER')).toMatchObject({supplierId:'repair-factory',name:'工厂维修点'});expect(store.state!.fulfillment.stock).toEqual([]);expect(host.textContent).toContain('维修工厂');
 });

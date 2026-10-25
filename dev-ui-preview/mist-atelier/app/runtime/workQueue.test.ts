@@ -225,3 +225,17 @@ describe('approved supplier payments return to finance',()=>{
  it.each(['pending','rejected','paid','cancelled'] as const)('has no payment action for a %s request',state=>{expect(mistWorkQueue(approved({state}),finance)).toEqual([]);});
  it('returns the full approved amount after reversal without deducting preserved payment history',()=>{const state=approved({paymentHistory:['old-reversed-payment']});expect(mistWorkQueue(state,finance)[0].meta).toContain('CNY 434.00');});
 });
+
+it('keeps an outstanding external repair return on the permitted inventory work path',()=>{
+ const state=base();state.tasks=[{id:'external-return',kind:'claim-repair-return:trip',title:'外修返库 · CLM-1',due:'',done:false,permission:'inventory:write',assigneeIds:[],target:{view:'inventory',id:'stock'}}];
+ const tasks=mistMyTasks(state,{me:'warehouse',can:all,canRead:all});expect(tasks[0].target).toEqual({view:'inventory',id:'stock',detail:'full'});
+ expect(mistMyTasks(state,{me:'qc',can:()=>false,canRead:all})).toEqual([]);state.tasks[0].done=true;expect(mistMyTasks(state,{me:'warehouse',can:all,canRead:all})).toEqual([]);
+});
+
+it('suppresses only a redundant parent while all remaining repair lots have their own return work',()=>{
+ const state=base();state.fulfillment.returnReceipts=[{id:'rt',code:'RT-1',claimId:'case'} as any];state.fulfillment.receivedRecords=[{id:'received',goodsId:'goods'} as any];state.platform.claimGoods=[{id:'goods',destination:'Repair',quantity:1,receivedQuantity:1,repairDispatches:[{id:'trip',receivedEventId:'received'}]} as any];
+ state.tasks=[{id:'parent',kind:'claim-inventory:goods',title:'Original handling',due:'',done:false,permission:'inventory:write',assigneeIds:[],target:{view:'inventory',id:'rt'}},{id:'child',kind:'claim-repair-return:trip',title:'Repair return',due:'',done:false,permission:'inventory:write',assigneeIds:[],target:{view:'inventory',id:'stock'}}];
+ const options={me:'warehouse',can:all,canRead:all};expect(mistMyTasks(state,options).map(t=>t.id)).toEqual(['child']);expect(state.tasks[0].done).toBe(false);
+ state.fulfillment.receivedRecords.push({id:'other',goodsId:'goods'} as any);expect(mistMyTasks(state,options).map(t=>t.id)).toEqual(['parent','child']);state.fulfillment.receivedRecords.pop();
+ state.platform.claimGoods[0].repairDispatches![0].returned={} as any;state.tasks[1].done=true;expect(mistMyTasks(state,options).map(t=>t.id)).toEqual(['parent']);expect(state.tasks[0].done).toBe(false);
+});

@@ -7,7 +7,8 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {ClaimRepairJob} from '../../../../../server/src/shared/mistClaimInventory';
 import type {PlatformClaimGoods} from '../../../../../server/src/shared/mistPlatform';
-import {ClaimRepairWork} from './ClaimRepairWork';
+import {Nav} from '../../nav';
+import {ClaimRepairWork,repairDispatchSpec,repairReturnSpec,repairRecordSpec} from './ClaimRepairWork';
 const bridge=vi.hoisted(()=>({value:null as any}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>bridge.value}));
 let host:HTMLDivElement,root:Root;
@@ -25,4 +26,17 @@ it('shows old results but offers only the latest uninspected repair',async()=>{
 });
 it('does not offer inspection after a recorded verdict or after the case closes',()=>{
  const checked={...structuredClone(job),qc:{id:'check',result:'pass' as const,checkedAt:'2026-10-13',basis:'Passed',fileIds:[],at:job.at,actorId:'qc',actor:'QC'}};render([checked],()=>true);expect(host.textContent).toContain('复检合格');expect(queryByRole(host,'button',{name:'登记复检'})).toBeNull();bridge.value.state.platform.claims[0].state='Closed';render([structuredClone(job)],()=>true);expect(queryByRole(host,'button',{name:'登记复检'})).toBeNull();
+});
+
+it('shows physical transfer history before any repair job and keeps a returned provider fixed in the new repair record',async()=>{
+ const state=bridge.value.state;state.market.suppliers.push({id:'factory',name:'Repair provider',status:'active'});state.fulfillment.warehouses.push({id:'home',name:'Home site',active:true},{id:'site',name:'External site',active:true,supplierId:'factory'});
+ const record={id:'received',warehouseId:'home',stockId:'stock',location:'Hold area',batchNumber:'LOT-1',quantity:1,unit:'件'} as any;
+ state.fulfillment.receivedRecords.push(record);const trip={id:'trip',receivedEventId:'received',stockId:'stock',batchNumber:'LOT-1',originWarehouseId:'home',originWarehouseName:'Home site',originLocation:'Hold area',quantity:1,unit:'件',supplierId:'factory',supplierName:'Repair provider',warehouseId:'site',warehouseName:'External site',address:'Physical address',location:'Repair desk',date:'2026-10-13',recipient:'Factory recipient',reference:'OUT-1',basis:'Actual dispatch',fileIds:[],at:job.at,actorId:'warehouse-user',actor:'Warehouse',movementId:'move-out'};
+ const goods={id:'goods',claimId:'case',repairs:[],repairDispatches:[trip]} as unknown as PlatformClaimGoods,command=vi.fn(async()=>({}));
+ act(()=>root.render(<Nav.Provider value={{route:{view:'claims',id:'case'},go:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistRoot><ToastProvider><ClaimRepairWork goods={goods} state={state} busy={false}/></ToastProvider></MistRoot></Nav.Provider>));expect(host.textContent).toContain('外修中');await act(async()=>getByRole(host,'button',{name:'送修记录'}).click());expect(host.textContent).toContain('Physical address');expect(host.textContent).toContain('OUT-1');
+ const dispatch=repairDispatchSpec(state,goods,record,command);expect(dispatch.initialValues.warehouseId).toBe('');expect(dispatch.initialValues.origin).toBe('Home site · Hold area');expect(dispatch.fields.find(f=>f.key==='origin')?.readonly).toBe(true);await dispatch.submit({warehouseId:'site',location:'Repair desk',date:'2026-10-13',recipient:'Factory recipient',reference:'OUT-2',basis:'Actual handover',fileId:''});expect(command).toHaveBeenLastCalledWith(expect.objectContaining({type:'fulfillment.claimInventory.repair.dispatch',payload:expect.objectContaining({warehouseId:'site',supplierId:'factory',receivedEventId:'received'})}));
+ const returned=repairReturnSpec(state,goods,record,trip as any,command);expect(returned.initialValues.place).toBe('Home site · Hold area');
+ Object.assign(trip,{returned:{date:'2026-10-13',warehouseId:'home',warehouseName:'Home site',location:'Hold area',recipient:'Receiver',reference:'BACK-1',basis:'Returned batch',fileIds:[],actor:'Warehouse',actorId:'warehouse-user',at:job.at,movementId:'move-back'}});const repair=repairRecordSpec(state,goods,record,command);expect(repair.fields.find(f=>f.key==='supplierId')?.readonly).toBe(true);expect(repair.initialValues.place).toBe('External site · Repair desk');
+ state.market.suppliers[0].status='paused';state.market.suppliers[0].statusFrom='2000-01-01';expect(repairDispatchSpec(state,goods,record,command).fields.find(f=>f.key==='warehouseId')?.options?.some(o=>o.value==='site')).toBe(false);
+ state.fulfillment.receivedRecords=[];state.fulfillment.warehouses=[];act(()=>root.render(<Nav.Provider value={{route:{view:'claims',id:'case'},go:vi.fn(),theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistRoot><ToastProvider><ClaimRepairWork goods={goods} state={state} busy={false}/></ToastProvider></MistRoot></Nav.Provider>));expect(host.textContent).toContain('LOT-1');await act(async()=>getByRole(host,'button',{name:'返库记录'}).click());expect(host.textContent).toContain('Home site · Hold area');expect(host.textContent).toContain('BACK-1');
 });
