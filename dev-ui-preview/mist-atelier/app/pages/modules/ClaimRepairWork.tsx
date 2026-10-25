@@ -1,6 +1,6 @@
 import React from 'react';
 import {Button,Facts,Mono,Pill} from '../../../../../components/mist';
-import {uiText} from '../../../../../services/interfaceLanguage';
+import {uiText,ui} from '../../../../../services/interfaceLanguage';
 import type {MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {PlatformClaimGoods} from '../../../../../server/src/shared/mistPlatform';
 import {supplierUnavailableReason} from '../../../../../server/src/shared/mistSupplierStatus';
@@ -10,6 +10,7 @@ import {RecordDisclosure} from './pageKit';
 import type {ModuleEditorSpec,ModuleValues} from './ModuleWorkbench';
 
 type Command=(command:ClaimInventoryCommand)=>Promise<unknown>;
+const roundOf=(rows:ReadonlyArray<{id:string;receivedEventId:string}>,row:{id:string;receivedEventId:string})=>rows.filter(item=>item.receivedEventId===row.receivedEventId).findIndex(item=>item.id===row.id)+1;
 const ids=(v:ModuleValues)=>text(v,'fileId')?[text(v,'fileId')]:[];
 const evidence=(state:MistState,goods:PlatformClaimGoods)=>{
  const claim=state.platform.claims.find(row=>row.id===goods.claimId),allowed=new Set([...claim?.fileIds??[],...claim?.dispositions.find(row=>row.id===goods.dispositionId)?.fileIds??[]]);
@@ -34,11 +35,11 @@ export function ClaimRepairWork({goods,state,receivedEventId,busy,canInspect,ope
  if(!jobs.length&&!trips.length)return null;
  const inspect=(job:ClaimRepairJob)=>{if(!openEditor||!command)return;openEditor({title:'返修复检',description:job.batchNumber+' · '+job.quantity+' '+job.unit,fields:[{...field('batch','受检批次','text',false),readonly:true},field('result','复检结果','select',true,[{value:'',label:'请选择'},{value:'pass',label:'合格'},{value:'fail',label:'不合格'}]),field('checkedAt','复检日期','date'),field('basis','复检记录','textarea'),evidence(state,goods)],initialValues:{batch:job.batchNumber+' · '+job.quantity+' '+job.unit,result:'',checkedAt:today(),basis:'',fileId:''},submit:v=>command({type:'fulfillment.claimInventory.repair.qc',payload:{goodsId:goods.id,repairId:job.id,result:text(v,'result') as 'pass'|'fail',checkedAt:text(v,'checkedAt'),basis:text(v,'basis'),fileIds:ids(v)}})});};
  return <div className="mist-col">{trips.map(trip=>{return <div className="mist-col" key={trip.id}>
-  <div className="mist-row"><Mono>{trip.batchNumber}</Mono><span>{trip.quantity} {uiText(trip.unit)}</span><Pill tone={trip.returned?'ok':'warn'}>{uiText(trip.returned?'已返库':'外修中')}</Pill></div>
+  <div className="mist-row"><strong>{ui`送修 ${roundOf(goods.repairDispatches??[],trip)}`}</strong><Mono>{trip.batchNumber}</Mono><span>{trip.quantity} {uiText(trip.unit)}</span><Pill tone={trip.returned?'ok':'warn'}>{uiText(trip.returned?'已返库':'外修中')}</Pill></div>
   <RecordDisclosure title="送修记录"><Facts items={[{label:'维修单位',value:trip.supplierName},{label:'送出地点',value:trip.originWarehouseName+' · '+trip.originLocation},{label:'外修地点',value:trip.warehouseName+' · '+trip.location},{label:'地址',value:trip.address},{label:'送修日期',value:trip.date},{label:'接收人',value:trip.recipient},{label:'交接凭据',value:trip.reference},{label:'送修依据',value:trip.basis},{label:'经办人',value:trip.actor}]}/><RecordFiles ids={trip.fileIds}/></RecordDisclosure>
   {trip.returned&&<RecordDisclosure title="返库记录"><Facts items={[{label:'返库日期',value:trip.returned.date},{label:'返库地点',value:trip.returned.warehouseName+' · '+trip.returned.location},{label:'收货人',value:trip.returned.recipient},{label:'返库凭据',value:trip.returned.reference},{label:'返库依据',value:trip.returned.basis},{label:'经办人',value:trip.returned.actor}]}/><RecordFiles ids={trip.returned.fileIds}/></RecordDisclosure>}
  </div>;})}{jobs.map(job=>{const current=latestClaimRepair(goods,job.receivedEventId)?.id===job.id&&!pendingRepairDispatch(goods,job.receivedEventId)&&!unrecordedRepairDispatch(goods,job.receivedEventId),terminal=['Closed','Cancelled'].includes(state.platform.claims.find(row=>row.id===goods.claimId)?.state||'');return <div className="mist-col" key={job.id}>
-  <div className="mist-row"><Mono>{job.batchNumber}</Mono><span>{job.quantity} {uiText(job.unit)}</span><Pill tone={job.handback?'ok':job.qc?.result==='fail'?'bad':job.qc?.result==='pass'?'ok':'warn'}>{uiText(job.handback?'已交还':job.qc?.result==='pass'?'复检合格':job.qc?.result==='fail'?'复检不合格':'待复检')}</Pill>{current&&!job.qc&&!terminal&&canInspect?.(job.domain)&&openEditor&&command&&<Button size="sm" disabled={busy} onClick={()=>inspect(job)}>{uiText('登记复检')}</Button>}</div>
+  <div className="mist-row"><strong>{ui`维修 ${roundOf(goods.repairs??[],job)}`}</strong><Mono>{job.batchNumber}</Mono><span>{job.quantity} {uiText(job.unit)}</span><Pill tone={job.handback?'ok':job.qc?.result==='fail'?'bad':job.qc?.result==='pass'?'ok':'warn'}>{uiText(job.handback?'已交还':job.qc?.result==='pass'?'复检合格':job.qc?.result==='fail'?'复检不合格':'待复检')}</Pill>{current&&!job.qc&&!terminal&&canInspect?.(job.domain)&&openEditor&&command&&<Button size="sm" disabled={busy} onClick={()=>inspect(job)}>{uiText('登记复检')}</Button>}</div>
   <RecordDisclosure title={uiText('维修记录')}><Facts items={[{label:'维修工厂',value:job.supplierName},{label:'维修人员',value:job.technician},{label:'维修地点',value:job.place},{label:'维修日期',value:job.completedAt},{label:'维修记录',value:job.basis},{label:'登记人',value:job.actor}]} /><RecordFiles ids={job.fileIds}/></RecordDisclosure>
   {job.qc&&<RecordDisclosure title={uiText('复检记录')}><Facts items={[{label:'复检日期',value:job.qc.checkedAt},{label:'复检记录',value:job.qc.basis},{label:'复检人',value:job.qc.actor}]} /><RecordFiles ids={job.qc.fileIds}/></RecordDisclosure>}
   {job.handback&&<RecordDisclosure title={uiText('交接记录')}><Facts items={[{label:'交还日期',value:job.handback.date},{label:'客户接收人',value:job.handback.recipient},{label:'交接凭据',value:job.handback.reference},{label:'交接记录',value:job.handback.basis},{label:'经办人',value:job.handback.actor}]} /><RecordFiles ids={job.handback.fileIds}/></RecordDisclosure>}
