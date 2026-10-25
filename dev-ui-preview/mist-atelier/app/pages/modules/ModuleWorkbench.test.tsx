@@ -5,6 +5,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole,getByText,queryByText} from '@testing-library/dom';
 import {Card,MistRoot,ToastProvider,type Column} from '../../../../../components/mist';
+import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {ModuleWorkbench,ModuleEditorDialog,ModuleEditorPage,moduleEditorSections,moduleVisibleFields,type ModuleEditorSpec} from './ModuleWorkbench';
 
 const bridge=vi.hoisted(()=>({workspace:null as any,route:{view:'test-ledger'} as any,go:vi.fn()}));
@@ -277,7 +278,15 @@ describe('exact form command recovery',()=>{
 it('keeps one visible reason for the same workspace and wizard failure while retaining input and retry controls',async()=>{
  const reason='仓库仍有待返库批次，不能停用';bridge.workspace.error=reason;
  const spec:ModuleEditorSpec={title:'更新仓库',fields:[{key:'name',label:'仓库名称',required:true}],initialValues:{name:'上海仓'},submit:vi.fn(async()=>{throw new Error(reason);})};
- host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><p data-testid="workspace-error">{bridge.workspace.error}</p><ModuleEditorPage spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><p data-testid="workspace-error">{bridge.workspace.error}</p><MistPresentedErrorContext.Provider value={bridge.workspace.error}><ModuleEditorPage spec={spec} onClose={vi.fn()}/></MistPresentedErrorContext.Provider></ToastProvider></MistRoot>));
  await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'确认保存'}).click());expect(host.textContent!.split(reason)).toHaveLength(2);expect(getByRole(host,'button',{name:'确认保存'}).hasAttribute('disabled')).toBe(false);
  await act(async()=>getByRole(host,'button',{name:'上一步'}).click());expect((getByRole(host,'textbox',{name:'仓库名称'}) as HTMLInputElement).value).toBe('上海仓');expect(bridge.workspace.refresh).not.toHaveBeenCalled();
+});
+
+it('lets a standalone wizard retain its own error even when the workspace holds the same reason',async()=>{
+ const reason='仓库代码已被使用';bridge.workspace.error=reason;const spec:ModuleEditorSpec={title:'新增仓库',fields:[{key:'code',label:'仓库代码',required:true}],initialValues:{code:'SH-01'},submit:vi.fn(async()=>{throw new Error(reason);})};
+ host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistRoot><ToastProvider><ModuleEditorPage spec={spec} onClose={vi.fn()}/></ToastProvider></MistRoot>));await act(async()=>getByRole(host,'button',{name:'下一步'}).click());await act(async()=>getByRole(host,'button',{name:'确认保存'}).click());expect(host.textContent).toContain(reason);expect(host.textContent).toContain('未能保存');
+});
+it('does not duplicate the enclosing host error on a workbench catalog',async()=>{
+ bridge.workspace.error='仓库代码已被使用';host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<MistPresentedErrorContext.Provider value={bridge.workspace.error}>{tree()}</MistPresentedErrorContext.Provider>));expect(host.textContent).not.toContain('仓库代码已被使用');
 });

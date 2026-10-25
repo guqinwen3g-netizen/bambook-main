@@ -22,6 +22,7 @@ import { onThemePreference, readThemePreference, resolveTheme, writeThemePrefere
 import { useDevice } from './runtime/devicePreferences';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
+import {MistPresentedErrorContext} from './runtime/errorPresentation';
 import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
 import { HomePage } from './pages/HomePage';
@@ -360,7 +361,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
         {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
         {workspace.error && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}
         {!permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
-          : Page ? <>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (FULFILLMENT_PAGES[route.view]||MARKET_PAGES[route.view]||PLATFORM_PAGES[route.view]?route.view:JSON.stringify(route))} /></>
+          : Page ? <MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (FULFILLMENT_PAGES[route.view]||MARKET_PAGES[route.view]||PLATFORM_PAGES[route.view]?route.view:JSON.stringify(route))} /></MistPresentedErrorContext.Provider>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
       </MistAppShell>
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />

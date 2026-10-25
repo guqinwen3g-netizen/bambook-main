@@ -1,4 +1,5 @@
 import {ClaimRepairWork,repairRecordSpec,repairHandbackSpec,repairDispatchSpec,repairReturnSpec} from './ClaimRepairWork';
+import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {latestClaimRepair,pendingRepairDispatch,unrecordedRepairDispatch} from '../../../../../server/src/shared/mistClaimInventory';
 import { materialDeliveryRequired, materialDeliveryTargets } from '../../../../../server/src/shared/mistInternalFabric';
 import { stockName } from '../businessNames';
@@ -53,6 +54,7 @@ function UnitLines({ totals, tone }: { totals: Array<[string, number]>; tone?: T
 }
 
 export function InventoryPage() {
+  const presentedError=React.useContext(MistPresentedErrorContext);
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), nav = useNav(), { route, go } = nav;
   const f=state?.fulfillment,receipt=f?.returnReceipts?.find(row=>row.id===route.id);
   const explicitClaim=route.section?.startsWith('claim:')===true,hasClaim=explicitClaim||!!receipt,claimId=explicitClaim?route.section!.slice(6):receipt?.claimId;
@@ -155,7 +157,7 @@ export function InventoryPage() {
   return <Nav.Provider value={{ ...nav, route: { ...route, id: receipt || invalidSource ? undefined : route.id } }}><MistPage width="wide">
     <PageHeader description={uiText(hasClaim ? invalidSource ? '退货来源不匹配' : claim?.code : route.section ? f?.purchases.find(purchase => purchase.id === route.section)?.code : undefined)} eyebrow={uiText("订单履约 · 库存")} title={uiText("库存与仓储")}
       actions={<>{back}<Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button><Button icon={Warehouse} onClick={() => setCatalog(true)}>{uiText("仓库目录")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(warehouseSpec())}>{uiText("新增仓库")}</Button>}</>} />
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("库存读取未完成")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {error&&error!==presentedError && <div className="mist-section"><Banner tone="bad" title={uiText("库存读取未完成")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     {hasClaim && !f?.warehouses.length && <div className="mist-section"><Banner tone="warn" title={uiText("尚无真实仓库")}>{uiText("请先登记，再返回案件选择退货仓库。")}</Banner></div>}
     {hasClaim && !invalidSource && <div className="mist-section"><Card><div className="mist-card-body mist-col">
       <div className="mist-row" style={{ flexWrap: 'wrap' }}><span className="mist-eyebrow">{uiText("退货收货 · ")}{claim?.code}</span><span className="mist-spacer" /></div>
