@@ -443,3 +443,7 @@ it.each(['void','cancelled','pending-cancel'] as const)('presents %s as halted w
 it('keeps an approved order line readable without exposing closure to a reader',()=>{
  permissions.ordersWrite=false;store.state!.orders[0].governance!.status='approved';render();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'按实际完工结案'})).toBeNull();expect(document.body.textContent).toContain('精确金额条目');expect(store.run).not.toHaveBeenCalled();
 });
+
+it('shows the current business state instead of presenting an old 100-percent field as overall completion',()=>{
+ const order=store.state!.orders[0];order.progress=100;order.state='已批准待履约';order.governance!.status='approved';render();expect(host.textContent).not.toContain('整体进度');expect(getByText(host,'当前状态')).toBeTruthy();expect(host.textContent).toContain('已批准待履约');expect(store.run).not.toHaveBeenCalled();
+});
