@@ -159,3 +159,20 @@ it('keeps standalone packing failures but suppresses the same error already show
  presentedError='另一个错误';render('packing-feedback');expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
  presentedError='逐条目装箱数量必须等于本次计划数量';render('packing-feedback');expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);expect((getByRole(host,'spinbutton',{name:'装箱数量'}) as HTMLInputElement).value).toBe('10');expect(getByRole(host,'button',{name:'保存装箱分配'}).hasAttribute('disabled')).toBe(false);
 });
+
+it.each([
+ {name:'only external originals',orders:['o'],pl:false,invoices:[],done:false,note:'未签发'},
+ {name:'only PL',orders:['o'],pl:true,invoices:[],done:false,note:'部分签发'},
+ {name:'only CI',orders:['o'],pl:false,invoices:['o'],done:false,note:'部分签发'},
+ {name:'one complete order',orders:['o'],pl:true,invoices:['o'],done:true,note:'已签发'},
+ {name:'one invoice missing from a combined shipment',orders:['o','o2'],pl:true,invoices:['o'],done:false,note:'部分签发'},
+ {name:'all combined order invoices',orders:['o','o2'],pl:true,invoices:['o','o2'],done:true,note:'已签发'},
+])('shows the CI/PL stage from the required trade documents: $name',scenario=>{
+ const state=store.state!,f=state.fulfillment,s=shipment('s');
+ if(scenario.orders.length===2){state.orders.push({...state.orders[0],id:'o2',code:'SO-2'});state.orderLines.push({...state.orderLines[0],id:'l2',orderId:'o2'});s.lines.push({...s.lines[0],orderId:'o2',lineId:'l2',productionId:'p2'});}
+ f.shipments.push(s);f.documents.push({...doc('factory','s','OTHER'),number:'PK-1'},{...doc('booking','s','OTHER'),number:'BOOK-1'});
+ if(scenario.pl)f.documents.push(doc('pl','s','PL'));
+ for(const orderId of scenario.invoices)f.documents.push({...doc('ci-'+orderId,'s','CI'),orderId});
+ render('s');const checkbox=getByRole(host,'checkbox',{name:'CI / PL 签发'});expect(checkbox.getAttribute('aria-checked')).toBe(String(scenario.done));expect(checkbox.parentElement!.querySelector('small')?.textContent).toBe(scenario.note);
+ const documents=getByRole(host,'table',{name:'S 单据'});expect(documents.textContent).toContain('PK-1');expect(documents.textContent).toContain('BOOK-1');
+});
