@@ -286,25 +286,25 @@
 .mist-drawer { position: fixed; right: 10px; top: 10px; bottom: 10px; width: 400px; max-width: calc(100vw - 20px); z-index: calc(var(--mist-z-overlay) + 1); border-radius: var(--mist-r-hero); display: flex; flex-direction: column; overflow: hidden; animation: mist-slide .4s var(--mist-ease) both; }
 .mist-drawer[data-size="lg"] { width: 560px; }
 @keyframes mist-slide { from { opacity: 0; transform: translateX(24px); } }
-.mist-drawer-h { display: flex; align-items: center; gap: 12px; padding: 18px 16px 16px 18px; }
+.mist-drawer-h { display: flex; flex: none; align-items: center; gap: 12px; padding: 18px 16px 16px 18px; }
 .mist-drawer-h[data-tone="ai"] { background: var(--mist-ai-surface); }
 .mist-drawer-h b { display: block; font-weight: var(--mist-fw-medium); font-size: 15px; }
 .mist-drawer-h small { font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
 .mist-drawer-h .mist-icon-btn { margin-left: auto; }
-.mist-drawer-body { flex: 1; overflow-y: auto; padding: 8px 18px 18px; }
-.mist-drawer-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 14px 18px 18px; border-top: 1px solid var(--mist-line); }
+.mist-drawer-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 18px 18px; }
+.mist-drawer-foot { display: flex; flex: none; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding: 14px 18px 18px; border-top: 1px solid var(--mist-line); }
 
-.mist-dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, 92vw); max-height: 86vh; overflow: auto; z-index: calc(var(--mist-z-overlay) + 1); border-radius: var(--mist-r-card); animation: mist-pop-c .3s var(--mist-ease) both; }
+.mist-dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(520px, 92vw); max-height: 86dvh; display: flex; flex-direction: column; overflow: hidden; z-index: calc(var(--mist-z-overlay) + 1); border-radius: var(--mist-r-card); animation: mist-pop-c .3s var(--mist-ease) both; }
 @keyframes mist-pop-c { from { opacity: 0; transform: translate(-50%, -48%) scale(.98); } }
-.mist-dialog-h { display: flex; gap: 14px; padding: 22px 22px 0; align-items: flex-start; }
+.mist-dialog-h { display: flex; flex: none; gap: 14px; padding: 22px 22px 0; align-items: flex-start; }
 .mist-dialog-h .mist-h2 + p { color: var(--mist-ink-2); font-size: var(--mist-text-md); margin-top: 6px; }
-.mist-dialog-body { padding: 16px 22px 4px; }
+.mist-dialog-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 22px 4px; }
 /* 内容区叠放间距：Mist 组件不带外边距，块与块之间的距离由容器给出。抽屉 / 弹窗 / 卡片内容区是普通块级排版
    （里面可能直接放行内文字，不能改成 flex），用相邻块的上边距补齐；已经自带 flex / grid 排布的卡片内容区
    （mist-col、mist-season-timeline、行内 display）由它自己的 gap 负责，不再叠加。 */
 .mist-root :where(.mist-drawer-body, .mist-dialog-body, .mist-card-body:not(.mist-col, .mist-season-timeline, [style*="display"])) > :where(div:not(.mist-stack), p, section, article, aside, form, fieldset, ul, ol, dl, table, details, figure, header, footer, nav, h2, h3, h4) + :where(div:not(.mist-stack), p, section, article, aside, form, fieldset, ul, ol, dl, table, details, figure, header, footer, nav, h2, h3, h4) { margin-top: var(--mist-space-3); }
 .mist-root :where(.mist-drawer-body, .mist-dialog-body, .mist-card-body:not(.mist-col, .mist-season-timeline, [style*="display"])) > .mist-skel + .mist-skel { margin-top: var(--mist-space-2); }
-.mist-dialog-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 18px 22px 22px; }
+.mist-dialog-foot { display: flex; flex: none; flex-wrap: wrap; gap: 10px; justify-content: flex-end; padding: 18px 22px 22px; }
 
 .mist-menu { position: fixed; z-index: calc(var(--mist-z-overlay) + 2); min-width: 200px; padding: 6px; border-radius: var(--mist-r-lg); animation: mist-fade .15s both; }
 .mist-menu > button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; font-size: var(--mist-text-md); text-align: left; }

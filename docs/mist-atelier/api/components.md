@@ -95,6 +95,14 @@
 | `UploadZone` | 上传区：点击或拖拽。onFiles 拿到 File[]。 | `({ title = '拖拽文件到这里，或点击上传', hint, accept, multiple = true, onFiles }: { title?: React.ReactNode; hint?: React.ReactNode; accept?: string; multiple?: boolean; onFiles: (files: File[]) => void })` |
 | `FormSection` | 表单分节（创建/编辑页）：标题 + 说明 + 内容，节与节之间 1px 分隔。 | `({ id, title, description, children }: { id?: string; title: React.ReactNode; description?: React.ReactNode; children: React.ReactNode })` |
 
+## 表单操作栏 · `components/mist/formFooter.tsx`
+
+| 导出 | 说明 | Props / 签名 |
+|---|---|---|
+| `FormFooterTargetContext` | — | — |
+| `FormFooterWidthContext` | — | — |
+| `FormFooter` | Form actions belong outside the scrolling fields. Standalone previews stay in normal flow. | `({ children }: { children: React.ReactNode })` |
+
 ## 数据展示 · `components/mist/data.tsx`
 
 | 导出 | 说明 | Props / 签名 |
@@ -185,4 +193,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 132 个导出声明（102 个组件/函数/值，30 个类型）。重导出别名不重复计数。
+共 135 个导出声明（105 个组件/函数/值，30 个类型）。重导出别名不重复计数。

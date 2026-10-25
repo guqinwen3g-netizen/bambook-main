@@ -82,6 +82,8 @@ const columns: Column<Order>[] = [
 ```
 
 ### 危险操作确认
+全页表单使用 `FormFooter`，操作栏独立于主内容滚动区；页面内的详情卡自然展开，共用主页面滚动，不另设纵向滚动条。`Dialog` 与 `Drawer` 的正文可以滚动，标题和操作栏独立占位。
+
 ```tsx
 <Dialog open={open} onClose={() => setOpen(false)} tone="bad" icon={Trash2} title="删除这个开发案？" description="删除后无法恢复。"
   footer={<><Button onClick={() => setOpen(false)}>取消</Button><Button variant="danger" onClick={doDelete}>删除</Button></>} />

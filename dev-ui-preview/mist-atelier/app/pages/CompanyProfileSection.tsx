@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 公司资料：系统设置中的唯一维护入口，写入 settings.companyProfile；报价单、CI/PL 生成时读取当前值并冻结快照。 */
 import React from 'react';
 import { ArrowLeft, Copy, RefreshCw, Save } from 'lucide-react';
-import { Banner, Button, Field, FormGrid, FormSection, Mono, TextInput, useToast } from '../../../../components/mist';
+import { FormFooter, Banner, Button, Field, FormGrid, FormSection, Mono, TextInput, useToast } from '../../../../components/mist';
 import { apiService } from '../../../../services/apiService';
 import { getAuthApiBase } from '../../../../services/authService';
 import type { MistCompanyProfile } from '../../../../server/src/shared/mistWorkspace';
@@ -120,10 +120,10 @@ export function CompanyProfileSection({ member }: { member: boolean }) {
     <FormSection title={uiText("出口与收款")}>
       <FormGrid>{EXPORT_FIELDS.map(field)}</FormGrid>
     </FormSection>
-    <div className="mist-sticky-foot" data-static>
+    <FormFooter>
       <span className="mist-note">{uiText(busy ? '正在保存…' : saved ? '已保存' : member ? '只读' : '')}</span><span className="mist-spacer" />
       {returnId && <Button icon={ArrowLeft} disabled={busy} onClick={() => nav?.go('quotations', returnId)}>{uiText("返回报价")}</Button>}
       {!member && <Button variant="primary" icon={Save} disabled={locked} loading={busy} onClick={() => void save()}>{uiText("保存公司资料")}</Button>}
-    </div>
+    </FormFooter>
   </div>;
 }

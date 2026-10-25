@@ -15,7 +15,7 @@ fs.mkdirSync(outDir, { recursive: true });
 
 const FILES = [
   ['shell.tsx', '外壳 / 页面框架'], ['connected.tsx', '接入真实 App 的适配层'], ['primitives.tsx', '原子组件'],
-  ['form.tsx', '表单'], ['data.tsx', '数据展示'], ['patterns.tsx', '业务模式'], ['overlays.tsx', '浮层'], ['ai.tsx', 'AI'], ['MistMark.tsx', '品牌'], ['types.ts', '公共类型与工具'],
+  ['form.tsx', '表单'], ['formFooter.tsx', '表单操作栏'], ['data.tsx', '数据展示'], ['patterns.tsx', '业务模式'], ['overlays.tsx', '浮层'], ['ai.tsx', 'AI'], ['MistMark.tsx', '品牌'], ['types.ts', '公共类型与工具'],
 ];
 
 /** 用项目已有 TypeScript AST 读取导出，避免跨 JSDoc 吞入实现或截断 forwardRef。 */

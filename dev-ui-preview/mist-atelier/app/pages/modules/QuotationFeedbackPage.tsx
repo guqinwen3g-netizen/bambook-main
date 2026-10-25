@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 import React from "react";
 import { ArrowLeft, Download } from "lucide-react";
-import {
+import { FormFooter,
   Banner,
   Button,
   Card,
@@ -732,7 +732,7 @@ export function QuotationFeedbackPage() {
                 </div>
               </>
             )}
-            <div className="mist-sticky-foot">
+            <FormFooter>
               <span className="mist-note">{uiText("第")}{uiText(step + 1)}{uiText("/3步")}</span>
               <span className="mist-spacer" />
               {step > 0 && (
@@ -748,7 +748,7 @@ export function QuotationFeedbackPage() {
                   onClick={() => void save()}
                 >{uiText("确认追加反馈")}</Button>
               )}
-            </div>
+            </FormFooter>
           </Card>
         </div>
       ) : editing ? (

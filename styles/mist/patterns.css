@@ -104,7 +104,7 @@
 .mist-sync[data-state="syncing"] i { background: var(--mist-warn); }
 .mist-ask { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px 0 6px; border-radius: var(--mist-r-md); font-size: var(--mist-text-sm); font-weight: var(--mist-fw-medium); color: var(--mist-ai-ink); background: var(--mist-ai-tint); margin-left: 6px; white-space: nowrap; }
 .mist-ask > .mist-badge { width: 32px; height: 32px; border-radius: var(--mist-r-md); }
-.mist-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 8px 32px 48px; }
+.mist-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 32px 48px; }
 .mist-scroll::-webkit-scrollbar { width: 10px; }
 .mist-scroll::-webkit-scrollbar-thumb { background: var(--mist-ink-4); border-radius: 10px; border: 3px solid var(--mist-canvas); }
 .mist-page { max-width: var(--mist-page-max); margin: 0 auto; animation: mist-enter .55s var(--mist-ease) both; }
@@ -231,7 +231,7 @@
 
 /* ════ 列表 + 预览 ════ */
 .mist-split { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: var(--mist-gap); align-items: start; }
-.mist-preview { position: sticky; top: 0; overflow: hidden; }
+.mist-preview { position: static; overflow: hidden; }
 .mist-stage { position: relative; height: 250px; background: var(--mist-object-stage); overflow: hidden; }
 .mist-stage img { position: absolute; inset: 8% 0; width: 100%; height: 84%; object-fit: contain; filter: var(--mist-object-shadow); animation: mist-enter .5s both; }
 .mist-stage[data-size="lg"] { height: 320px; }
@@ -239,21 +239,14 @@
 .mist-stage-tr { position: absolute; right: 16px; top: 16px; font-family: var(--mist-font-mono); font-size: var(--mist-text-2xs); color: var(--mist-ink-2); padding: 3px 8px; border-radius: var(--mist-r-xs); background: var(--mist-card); }
 .mist-stage-cap { position: absolute; left: 14px; bottom: 12px; font-size: var(--mist-text-2xs); color: var(--mist-ink-2); padding: 3px 8px; border-radius: var(--mist-r-xs); background: color-mix(in srgb, var(--mist-card) 60%, transparent); backdrop-filter: blur(8px); }
 .mist-preview-b { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 14px; }
-/* 列表 + 详情：选中对象后详情加宽（约 56%），列表按 data-col 逐列收起次要列；详情超出视口时在面板内滚动。 */
+/* 列表 + 详情共用页面滚动；卡片按内容展开，不制造第二个纵向滚动区。 */
 @media (min-width: 1181px) {
   .mist-split[data-list-detail]:not([data-preview-summary]):has(> .mist-preview > .mist-preview-b) { grid-template-columns: minmax(0, 44fr) minmax(0, 56fr); }
 }
 @media (min-width: 1181px) and (max-width: 1320px) {
   .mist-split[data-list-detail]:not([data-preview-summary]):has(> .mist-preview > .mist-preview-b) { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
-@media (min-width: 1181px) {
-  .mist-split[data-list-detail] > .mist-preview { max-height: calc(100dvh - 112px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-}
-
-/* 列表 + 快速预览（T2）：预览只放识别与决策所需的摘要，超出视口时在面板内滚动，完整内容走完整详情页。 */
-@media (min-width: 1181px) {
-  .mist-split[data-preview-summary] > .mist-preview { max-height: calc(100dvh - 112px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-}
+/* 快速预览同样自然展开；完整内容仍可进入详情页。 */
 .mist-preview-code { font-size: 12px; }
 .mist-preview-head { gap: 4px; }
 .mist-preview-title { font-size: 19px; overflow-wrap: anywhere; }
@@ -418,8 +411,15 @@
 .mist-form-section .mist-form-section { padding: 20px 0 0; }
 .mist-form-section-h { margin-bottom: 16px; }
 .mist-form-section-h p { color: var(--mist-ink-3); font-size: var(--mist-text-sm); margin-top: 4px; }
-.mist-sticky-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 14px 24px; background: color-mix(in srgb, var(--mist-card) 88%, transparent); backdrop-filter: blur(16px); border-radius: 0 0 var(--mist-r-card) var(--mist-r-card); border-top: 1px solid var(--mist-line); }
+.mist-sticky-foot { position: static; display: flex; align-items: center; gap: 10px; padding: 14px 24px; background: color-mix(in srgb, var(--mist-card) 88%, transparent); backdrop-filter: blur(16px); border-radius: 0 0 var(--mist-r-card) var(--mist-r-card); border-top: 1px solid var(--mist-line); }
 .mist-sticky-foot[data-static] { position: static; }
+/* Form actions occupy their own shell row, never the scrolling fields' paint area. */
+.mist-form-dock { flex: none; }
+.mist-form-dock:empty { display: none; }
+.mist-form-footer { padding: 14px 32px; background: var(--mist-card); border-top: 1px solid var(--mist-line); }
+.mist-form-footer-content { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; max-width: var(--mist-page-max); margin: 0 auto; }
+.mist-form-footer[data-width="narrow"] > .mist-form-footer-content { max-width: 880px; }
+.mist-form-footer[data-width="wide"] > .mist-form-footer-content { max-width: 1480px; }
 .mist-setting-row { display: flex; align-items: center; gap: 20px; padding: 16px 0; }
 .mist-setting-row + .mist-setting-row { border-top: 1px solid var(--mist-line); }
 .mist-setting-row > div:first-child { flex: 1; min-width: 0; }
@@ -506,6 +506,10 @@
   .mist-app[data-menu-open] { overflow: hidden; height: 100dvh; }
   .mist-canvas { margin: 0; border-radius: 0; min-height: 100dvh; overflow: clip; }
   .mist-scroll { padding: 6px calc(16px + env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); overflow: visible; }
+  .mist-canvas:has(> .mist-form-dock:not(:empty)) > .mist-scroll { padding-bottom: calc(40px + var(--mist-form-footer-height)); }
+  .mist-form-dock:not(:empty) { position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--mist-z-sticky); }
+  .mist-form-dock > .mist-form-footer { padding: 12px calc(16px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .mist-canvas:has(> .mist-form-dock:not(:empty)) :is(input, select, textarea, button) { scroll-margin-bottom: calc(var(--mist-form-footer-height) + 24px); }
   .mist-topbar { position: sticky; top: 0; z-index: var(--mist-z-sticky); background: var(--mist-canvas); gap: 6px; height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) calc(8px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left)); }
   .mist-top-menu, .mist-top-back { display: grid; }
   .mist-crumbs { flex: 1 1 auto; }
