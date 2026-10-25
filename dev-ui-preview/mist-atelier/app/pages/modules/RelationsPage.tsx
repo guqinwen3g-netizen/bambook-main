@@ -109,8 +109,8 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
       description: `${c.name} · 当前负责人 ${c.owner||'未指定'}${lockedOrders.length?`；待审批订单暂不交接：${lockedOrders.map(o=>o.code).join('、')}`:''}`,
       initialValues: { toUserId: '', reason: '', ...Object.fromEntries(movable.map(o => ['order:' + o.id, true])), ...Object.fromEntries(scope.opportunities.map(o => ['opp:' + o.id, true])) },
       fields: [
-        { key: 'toUserId', label: '新负责人', type: 'select', required: true, options: [{ value: '', label: '选择成员' }, ...memberSelectOptions(members).filter(o => o.value !== c.ownerId)] },
-        ...movable.map(o => ({ key: 'order:' + o.id, label: `订单 ${o.code}`, type: 'checkbox' as const })),
+        { key: 'toUserId', label: '新负责人', type: 'select', required: true, options: [{ value: '', label: '选择成员' }, ...memberSelectOptions(members).filter(o => o.value !== c.ownerId || movable.some(order=>order.ownerId!==c.ownerId) || scope.opportunities.some(opportunity=>opportunity.ownerId!==c.ownerId))] },
+        ...movable.map(o => ({ key: 'order:' + o.id, label: `订单 ${o.code}`, hint: o.ownerId!==c.ownerId?`负责人 ${o.owner||'未指定'}`:undefined, type: 'checkbox' as const })),
         ...scope.opportunities.map(o => ({ key: 'opp:' + o.id, label: `商机 ${o.title} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
         { key: 'reason', label: '交接原因', type: 'textarea', required: true },
       ],
@@ -229,7 +229,7 @@ function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business,
       <ContactRows contacts={supplier!.contacts} edit={can ? c => onContact('supplier', supplier!.id, supplier!.name, c) : undefined} />
     </DetailBlock>}
     {customer && !!customerHandovers(customer).length && <DetailBlock title={uiText("交接记录")}>
-      <Timeline events={[...customerHandovers(customer)].reverse().map(h => ({ who: `${h.from || '未指定'} → ${h.to}`, when: `${shortWhen(h.at)} · ${h.actor}`, text: `${h.reason}${h.orders.length ? ` · 订单 ${h.orders.join('、')}` : ''}${h.opportunities.length ? ` · 商机 ${h.opportunities.length} 个` : ''}${h.tasks ? ` · 改派待办 ${h.tasks} 条` : ''}` }))} />
+      <Timeline events={[...customerHandovers(customer)].reverse().map(h => ({ who: h.fromId===h.toId?`在手业务 → ${h.to}`:`${h.from || '未指定'} → ${h.to}`, when: `${shortWhen(h.at)} · ${h.actor}`, text: `${h.reason}${h.orders.length ? ` · 订单 ${h.orders.join('、')}` : ''}${h.opportunities.length ? ` · 商机 ${h.opportunities.length} 个` : ''}${h.tasks ? ` · 改派待办 ${h.tasks} 条` : ''}` }))} />
     </DetailBlock>}
     {!!r.holdHistory?.length && <DetailBlock title={uiText("冻结记录")}>
       <Timeline events={[...r.holdHistory].reverse().map(h => ({ who: h.action === 'freeze' ? '冻结' : '解冻', when: `${shortWhen(h.at)} · ${h.actor}`, text: h.reason }))} />
