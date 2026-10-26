@@ -174,7 +174,7 @@ it('opens the unassigned bank worklist, includes missing account references and 
  await click('全部币种');await click('全部 · 5');expect(go).toHaveBeenLastCalledWith('payment-vouchers',undefined,{section:'records'},{keepScroll:true});table=getByRole(host,'table',{name:'收付款记录'});expect(table.textContent).toContain('R-EUR');expect(table.textContent).toContain('P-ASSIGNED');
  expect(JSON.stringify(st)).toBe(before);expect(store.value.run).not.toHaveBeenCalled();
 });
-it('keeps bank and transaction facts readable without showing bank write or reversal entrances',async()=>{
+it('keeps company bank accounts with finance staff and transaction facts readable without write entrances',async()=>{
  store.value.canWrite=false;route.section='accounts';render();for(const name of ['新增账户','登记锁汇','登记结汇'])expect(queryByRole(host,'button',{name})).toBeNull();
- expect(host.textContent).toContain('还没有登记公司银行账户');route={view:'payment-vouchers',section:'records',id:'receipt',detail:'full'};render();expect(host.textContent).toContain('R-EUR');expect(queryByRole(host,'button',{name:'归属账户'})).toBeNull();expect(getByRole(host,'button',{name:'查看收款核销'})).toBeTruthy();expect(store.value.run).not.toHaveBeenCalled();
+ expect(host.textContent).not.toContain('还没有登记公司银行账户');expect(host.textContent).not.toContain('公司账户余额');expect(queryByRole(host,'tab',{name:'账户与余额'})).toBeNull();route={view:'payment-vouchers',section:'records',id:'receipt',detail:'full'};render();expect(host.textContent).toContain('R-EUR');expect(queryByRole(host,'button',{name:'归属账户'})).toBeNull();expect(getByRole(host,'button',{name:'查看收款核销'})).toBeTruthy();expect(store.value.run).not.toHaveBeenCalled();
 });

@@ -27,7 +27,7 @@ export function financeCurrencyTotals(rows: ReadonlyArray<{ currency: string; am
 const money = (amount: number, currency: string) => `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 const totalsText = (totals: ReturnType<typeof financeCurrencyTotals>) => totals.map(t => money(t.amount, t.currency)).join(' · ') || '暂无已登记金额';
 
-export function FinanceEntrances({ state, area, onChange }: { state: MistState | null; area: FinanceArea; onChange: (area: FinanceArea) => void }) {
+export function FinanceEntrances({ state, area, onChange, accounts = true }: { state: MistState | null; area: FinanceArea; onChange: (area: FinanceArea) => void; accounts?: boolean }) {
   const open = financeCurrencyTotals((state?.invoices || []).filter(i => isActiveMistInvoice(i) && i.open > 0).map(i => ({ currency: i.currency, amount: i.open })));
   const unallocated = financeCurrencyTotals((state?.receipts || []).filter(r => r.remaining > 0).map(r => ({ currency: r.currency, amount: r.remaining })));
   const payable = financeCurrencyTotals(state ? supplierPayableSummary(state, platformBusinessDate(businessNow())).filter(r => r.open > 0).map(r => ({ currency: r.currency, amount: r.open })) : []);
@@ -42,9 +42,9 @@ export function FinanceEntrances({ state, area, onChange }: { state: MistState |
       <StatCard icon={ReceiptText} label={uiText("应收未收")} value={stat(open)} unit={uiText(open.length === 1 ? open[0].currency : undefined)} foot={foot(open, totalsText(open))} onClick={() => onChange('receivables')} />
       <StatCard icon={ArrowUpRight} label={uiText("应付未付")} value={stat(payable)} unit={uiText(payable.length === 1 ? payable[0].currency : undefined)} foot={foot(payable, '按已登记的供应商票据计算')} onClick={() => onChange('payables')} />
       <StatCard icon={ArrowDownLeft} label={uiText("未分配到账")} value={stat(unallocated)} unit={uiText(unallocated.length === 1 ? unallocated[0].currency : undefined)} foot={foot(unallocated, totalsText(unallocated))} onClick={() => onChange('records')} />
-      <StatCard icon={Landmark} label={uiText("公司账户余额")} value={bank?.accounts.length ? stat(balances) : '—'} unit={uiText(balances.length === 1 ? balances[0].currency : undefined)} foot={bank?.accounts.length ? (unassigned ? ui`待归属 · ${unassigned}` : undefined) : uiText('未登记账户')} onClick={() => onChange('accounts')} />
+      {accounts && <StatCard icon={Landmark} label={uiText("公司账户余额")} value={bank?.accounts.length ? stat(balances) : '—'} unit={uiText(balances.length === 1 ? balances[0].currency : undefined)} foot={bank?.accounts.length ? (unassigned ? ui`待归属 · ${unassigned}` : undefined) : uiText('未登记账户')} onClick={() => onChange('accounts')} />}
     </StatGrid>
-    <Tabs<FinanceArea> value={area} onChange={onChange} options={[{ value: 'receivables', label: '应收待办' }, { value: 'payables', label: '应付待办' }, { value: 'records', label: '收付款记录' }, { value: 'accounts', label: '账户与余额' }]} />
+    <Tabs<FinanceArea> value={area} onChange={onChange} options={[{ value: 'receivables', label: '应收待办' }, { value: 'payables', label: '应付待办' }, { value: 'records', label: '收付款记录' }, ...(accounts ? [{ value: 'accounts' as const, label: '账户与余额' }] : [])]} />
   </div>;
 }
 
@@ -62,7 +62,7 @@ export function factoryReceiptUses(state:MistState|null,receiptId:string){
  return (state?.platform?.claims??[]).flatMap(claim=>(claim.coordination?.recoveries??[]).flatMap(recovery=>(recovery.settlements??[]).filter(entry=>entry.kind==='receipt'&&!entry.reversed&&entry.receiptId===receiptId).map(entry=>({id:entry.id,claimId:claim.id,claimCode:claim.code,supplier:recovery.supplierName,amount:entry.amount,currency:entry.currency,date:entry.date,actor:entry.by}))));
 }
 export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void }) {
-  const { state, loading } = useMistWorkspace(), { route, go } = useNav(), canReconcile=useMistSession().hasPermission(MIST_FINANCE_SCOPES.reconcile);
+  const { state, loading } = useMistWorkspace(), { route, go } = useNav(), session=useMistSession(),canReconcile=session.hasPermission(MIST_FINANCE_SCOPES.reconcile),accountsVisible=session.hasPermission(MIST_FINANCE_SCOPES.voucher);
   const [query, setQuery] = React.useState(''), [direction, setDirection] = React.useState<FinanceRecordFilter>(()=>recordFilter(route.section)), [currency, setCurrency] = React.useState('all');
   const [selected, setSelected] = React.useState(route.id || ''), [drawer, setDrawer] = React.useState(!!route.id), full = useListDetailRoute();
   React.useEffect(() => { setSelected(route.id || ''); setDrawer(!!route.id); }, [route.id]);
@@ -71,7 +71,7 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
   const rows = financeRecords(state), currencies = [...new Set(rows.map(r => r.currency))].sort();
   const knownAccounts=new Set((state?.bankAccounts||[]).map(a=>a.id));
   const isUnassigned=(r:FinanceRecord)=>!knownAccounts.has((r.receipt||r.payment)?.accountId||'');
-  const shown = rows.filter(r => (direction === 'all' || (direction==='unassigned'?isUnassigned(r):r.direction === direction)) && (currency === 'all' || r.currency === currency) && (!query.trim() || `${r.code} ${r.party} ${r.ref} ${r.date}`.toLowerCase().includes(query.trim().toLowerCase())));
+  const shown = rows.filter(r => (direction === 'all' || (direction==='unassigned'?accountsVisible&&isUnassigned(r):r.direction === direction)) && (currency === 'all' || r.currency === currency) && (!query.trim() || `${r.code} ${r.party} ${r.ref} ${r.date}`.toLowerCase().includes(query.trim().toLowerCase())));
   const [assigning, setAssigning] = React.useState(false), { canWrite } = useBankAccountCommand();
   const current = rows.find(r => r.id === selected), currentRow = current?.receipt || current?.payment, account = (state?.bankAccounts || []).find(a => a.id === currentRow?.accountId), supplierPayment = (state?.payables?.payments || []).find(p => p.paymentId === current?.id), allocations = (state?.allocations || []).filter(a => a.receiptId === current?.id);
   const refundCredit=current?.payment?state?.platform?.credits.find(note=>state.platform?.creditApplications.some(row=>row.creditId===note.id&&row.paymentId===current.id)):undefined;
@@ -82,10 +82,10 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     { key: 'date', header: '日期 / 方向', width: '108px', render: r => <span className="mist-col"><span>{r.date}</span><Pill tone={r.direction === 'receipt' ? 'accent' : 'neutral'}>{uiText(r.direction === 'receipt' ? '实际收款' : '付款记录')}</Pill></span> },
     { key: 'amount', header: '原币金额', width: '140px', align: 'right', render: r => <span className="mist-num">{money(r.amount, r.currency)}</span> },
     { key: 'ref', header: '银行参考 / 附言', width: 'minmax(130px,1fr)', hideOnMobile: true, render: r => r.ref || '未填写' },
-    { key: 'account', header: '账户', width: '110px', hideOnMobile: true, render: r => { const a = (state?.bankAccounts || []).find(x => x.id === (r.receipt || r.payment)?.accountId); return a ? <Mono>{a.code}</Mono> : <Pill tone="warn">{uiText("未归属")}</Pill>; } },
+    ...(accountsVisible ? [{ key: 'account', header: '账户', width: '110px', hideOnMobile: true, render: (r: FinanceRecord) => { const a = (state?.bankAccounts || []).find(x => x.id === (r.receipt || r.payment)?.accountId); return a ? <Mono>{a.code}</Mono> : <Pill tone="warn">{uiText("未归属")}</Pill>; } }] : []),
   ];
   const detail = current ? <DetailBody data-finance-record={current.id} heading={<h2 className="mist-h2">{current.code}</h2>}>
-    <Facts items={[{ label: '方向', value: current.direction === 'receipt' ? '实际收款' : '已登记付款记录' }, { label: '交易日期', value: current.date }, { label: '付款方 / 收款方', value: current.party }, { label: '原币金额', value: money(current.amount, current.currency) }, { label: '银行参考 / 附言', value: current.ref || '未填写' }, { label: '公司银行账户', value: account ? `${account.code} · ${accountLabel(account)}` : '未归属' }]} />
+    <Facts items={[{ label: '方向', value: current.direction === 'receipt' ? '实际收款' : '已登记付款记录' }, { label: '交易日期', value: current.date }, { label: '付款方 / 收款方', value: current.party }, { label: '原币金额', value: money(current.amount, current.currency) }, { label: '银行参考 / 附言', value: current.ref || '未填写' }, ...(accountsVisible ? [{ label: '公司银行账户', value: account ? `${account.code} · ${accountLabel(account)}` : '未归属' }] : [])]} />
     <ActionBar actions={[
       { label: account ? '调整归属账户' : '归属账户', onClick: () => setAssigning(true), hidden:!canWrite },
       ...(current.receipt ? [{label:'查看收款核销',onClick:()=>onReceipt(current.id)},...(allocations.length&&canReconcile?[{label:'核销冲回',onClick:()=>onReceipt(current.id)}]:[])] : supplierPayment ? [{label:'查看应付分配',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'})},{label:'付款冲回',onClick:()=>go('payment-vouchers',supplierPayment.id,{section:'payables'}),hidden:!canWrite||!canReconcile}] : refundClaim ? [{label:'查看索赔案件',onClick:()=>go('claims',refundClaim.id)}] : []),
@@ -108,7 +108,7 @@ export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void 
     ] }} /> : null;
   return <div className="mist-col">
     <Toolbar><SearchField value={query} onChange={setQuery} placeholder={uiText("搜索流水号、对方、附言或日期")} /><Button onClick={() => downloadMistCsv('收付款记录.csv', ['流水', '方向', '日期', '对方', '金额', '币种', '附言'], shown.map(r => [r.code, r.direction === 'receipt' ? '收款' : '付款', r.date, r.party, r.amount, r.currency, r.ref]))}>{uiText("导出当前记录")}</Button></Toolbar>
-    <Segmented<FinanceRecordFilter> value={direction} onChange={changeDirection} options={[{ value: 'all', label: `全部 · ${rows.length}` }, { value: 'receipt', label: `收款 · ${rows.filter(r => r.direction === 'receipt').length}` }, { value: 'payment', label: `付款 · ${rows.filter(r => r.direction === 'payment').length}` },{value:'unassigned',label:`待归属 · ${rows.filter(isUnassigned).length}`}]} />
+    <Segmented<FinanceRecordFilter> value={direction} onChange={changeDirection} options={[{ value: 'all', label: `全部 · ${rows.length}` }, { value: 'receipt', label: `收款 · ${rows.filter(r => r.direction === 'receipt').length}` }, { value: 'payment', label: `付款 · ${rows.filter(r => r.direction === 'payment').length}` },...(accountsVisible?[{value:'unassigned' as const,label:`待归属 · ${rows.filter(isUnassigned).length}`}]:[])]} />
     <Segmented value={currency} onChange={setCurrency} options={[{ value: 'all', label: '全部币种' }, ...currencies.map(c => ({ value: c, label: c }))]} />
     {assignDialog}
     <ListDetail drawerOpen={drawer && !!current} drawerTitle={current?.code || '交易详情'} onDrawerClose={() => setDrawer(false)} detail={detail} summary={summary} list={<Card><DataTable ariaLabel={uiText("收付款记录")} rows={shown} columns={columns} loading={loading} selectedKey={selected} rowKey={r => r.id} onRowClick={r => { setSelected(r.id); setDrawer(true); go('payment-vouchers', r.id, { section: recordSection(direction) }, { keepScroll: true }); }} empty={<EmptyState title={uiText(rows.length ? '没有符合条件的收付款记录' : '还没有收付款记录')} action={rows.length ? <Button onClick={() => { setQuery(''); changeDirection('all'); setCurrency('all'); }}>{uiText("清除筛选")}</Button> : undefined} />} /></Card>} />
