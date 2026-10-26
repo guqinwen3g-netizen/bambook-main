@@ -67,13 +67,14 @@ export function FieldGroup({ label, required, hint, children }: { label: string;
   return <div className="mist-field" role="group" aria-label={uiText(label)}><span className="mist-field-label">{uiText(label)}{required && <em>*</em>}</span>{uiText(children)}{hint && <span className="mist-field-hint">{uiText(hint)}</span>}</div>;
 }
 
-export function SettlementSubmitDialog({ open, state, busy, canSettle, failure, onClose, execute, onDone }: {
-  open: boolean; state: MistState | null; busy: boolean; canSettle: boolean; failure: string; onClose: () => void;
+export function SettlementSubmitDialog({ open, state, initialPurchaseId, busy, canSettle, failure, onClose, execute, onDone }: {
+  open: boolean; state: MistState | null; initialPurchaseId?: string; busy: boolean; canSettle: boolean; failure: string; onClose: () => void;
   execute: (command: PayablesCommand, done: (result: Record<string, unknown>) => void, local?: string) => void; onDone: (id: string) => void;
 }) {
   const [draft, setDraft] = React.useState<SubmitDraft>({ purchaseId: '', receipts: {}, final: false, disputes: [], note: '' }), [local, setLocal] = React.useState('');
-  React.useEffect(() => { if (open) { setDraft({ purchaseId: '', receipts: {}, final: false, disputes: [], note: '' }); setLocal(''); } }, [open]);
-  const purchases = (state?.fulfillment.purchases || []).filter(p => p.state === 'approved');
+  React.useEffect(() => { if (open) { setDraft({ purchaseId: initialPurchaseId || '', receipts: {}, final: false, disputes: [], note: '' }); setLocal(''); } }, [open, initialPurchaseId]);
+  const purchases = (state?.fulfillment.purchases || []).filter(p => p.state === 'approved' && (!initialPurchaseId || p.id === initialPurchaseId));
+  const unavailable = !!initialPurchaseId && !purchases.some(purchase => purchase.id === initialPurchaseId);
   const po = purchases.find(p => p.id === draft.purchaseId);
   const rows = state && po ? settlementReceipts(state, po.id) : [];
   const chosen = rows.filter(r => draft.receipts[r.receipt.id] && !r.settled);
@@ -91,10 +92,11 @@ export function SettlementSubmitDialog({ open, state, busy, canSettle, failure, 
   };
   const message = local || failure;
   return <Dialog open={open} onClose={() => { if (!busy) onClose(); }} width={760} title={uiText("提交结算")}
-    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canSettle} onClick={submit}>{uiText("提交复核")}</Button></>}>
+    footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canSettle || unavailable} onClick={submit}>{uiText("提交复核")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能提交")}>{message}</Banner>}
-      <Field label={uiText("来源合同")} required><Select aria-label={uiText("结算合同")} value={draft.purchaseId} options={[{ value: '', label: '请选择已批准合同' }, ...purchases.map(p => ({ value: p.id, label: `${p.code} · ${p.supplier} · ${p.quantity} ${p.unit} · ${money(purchaseContractMinor(p) / 100, p.currency)}` }))]} onChange={e => setDraft({ ...draft, purchaseId: e.target.value, receipts: {} })} /></Field>
+      {unavailable && <Banner tone="bad" title={uiText('来源合同已不可用')} />}
+      <Field label={uiText("来源合同")} required><Select aria-label={uiText("结算合同")} disabled={!!initialPurchaseId} value={draft.purchaseId} options={[{ value: '', label: '请选择已批准合同' }, ...purchases.map(p => ({ value: p.id, label: `${p.code} · ${p.supplier} · ${p.quantity} ${p.unit} · ${money(purchaseContractMinor(p) / 100, p.currency)}` }))]} onChange={e => setDraft({ ...draft, purchaseId: e.target.value, receipts: {} })} /></Field>
       {po && <FieldGroup label={uiText("实际收货记录")} required hint={ui`本次实收 ${qty} ${po.unit} · 结算金额 ${money(amount / 100, po.currency)}`}>
         <div className="mist-col">{rows.map(({ receipt: r, settled }) => <div className="mist-row mist-module-actions" key={r.id} data-settle-receipt={r.id}>
           <Checkbox checked={!!draft.receipts[r.id] && !settled} disabled={settled || r.quantity <= 0} onChange={v => setDraft({ ...draft, receipts: { ...draft.receipts, [r.id]: v } })} label={<span>{r.date} · {r.location}{uiText(" · 实收 ")}{r.quantity}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(po.unit)}{uiText(settled ? ' · 已在结算中' : r.quantity <= 0 ? ' · 无实收' : '')}</span>} /></div>)}

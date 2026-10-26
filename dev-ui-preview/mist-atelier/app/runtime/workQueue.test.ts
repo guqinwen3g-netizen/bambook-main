@@ -1,12 +1,41 @@
 import {materialDeliveryFixture} from '../../../../server/src/mist/__tests__/materialDelivery';
 import { describe, expect, it } from 'vitest';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
-import { mistEmailFollowUpTaskIds, mistMyTasks, mistMyWork, mistWorkQueue } from './workQueue';
+import { mistEmailFollowUpTaskIds, mistMyTasks, mistMyWork, mistWorkQueue, type MistWorkOptions } from './workQueue';
 
 let n = 0;
 const ctx = () => ({ id: () => `id-${++n}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
 const all = () => true;
 const base = () => { const state = createMistState(ctx(), 'empty'); state.fulfillment.qcTasks = []; state.fulfillment.shipments = []; return state; };
+describe('received-goods settlement handoff', () => {
+  const fixture = () => {
+    const state = base();
+    state.fulfillment.purchases.push({id:'po-settle',code:'PO-SETTLE',state:'approved',requesterId:'me',supplier:'工厂',currency:'CNY',unit:'米',price:135,quantity:10} as any);
+    state.fulfillment.receipts.push({id:'r-settle-1',purchaseId:'po-settle',quantity:4,rejected:1,date:'2026-10-10'} as any,{id:'r-settle-2',purchaseId:'po-settle',quantity:6,rejected:0,date:'2026-10-11'} as any);
+    return state;
+  };
+  const options: MistWorkOptions = {canRead:all,can:(p:string)=>p==='procurement:write',me:'me',today:'2026-10-15'};
+  const items = (state:ReturnType<typeof base>,opts: MistWorkOptions=options) => mistWorkQueue(state,opts).filter(x=>x.id.startsWith('settlement-submit:'));
+  it('assigns one actionable item to the original purchaser without writing a task or using the future contract due date', () => {
+    const state=fixture();state.fulfillment.purchases[0].due='2099-12-01';const before=structuredClone(state);
+    expect(items(state)).toHaveLength(1);expect(items(state)[0]).toMatchObject({id:'settlement-submit:po-settle',title:'PO-SETTLE · 待结算',module:'payment-vouchers',when:'待结算',target:{view:'payment-vouchers',id:'po-settle',section:'payables'}});
+    expect(items(state)[0].meta).toContain('10 米');expect(state).toEqual(before);
+  });
+  it('requires source and finance read access, submit permission and the actual purchaser identity', () => {
+    const state=fixture();expect(items(state,{...options,me:'another'})).toEqual([]);expect(items(state,{...options,me:''})).toEqual([]);expect(items(state,{...options,can:()=>false})).toEqual([]);
+    for(const denied of ['procurement','payment-vouchers'])expect(items(state,{...options,canRead:view=>view!==denied})).toEqual([]);
+    delete state.fulfillment.purchases[0].requesterId;expect(items(state)).toEqual([]);
+  });
+  it('waits for pending finance review, returns after rejection, and stops at final settlement or no accepted goods', () => {
+    const state=fixture();state.payables.settlements.push({id:'st-pending',purchaseId:'po-settle',state:'pending',receiptIds:['r-settle-1'],final:false} as any);
+    expect(items(state)).toEqual([]);state.payables.settlements[0].state='returned';expect(items(state)).toHaveLength(1);
+    state.payables.settlements[0].state='confirmed';expect(items(state)[0].meta).toContain('6 米');state.payables.settlements[0].final=true;expect(items(state)).toEqual([]);
+    state.payables.settlements=[];state.fulfillment.receipts.forEach(r=>r.quantity=0);expect(items(state)).toEqual([]);state.fulfillment.receipts[0].quantity=4;state.fulfillment.purchases[0].state='cancelled';expect(items(state)).toEqual([]);
+  });
+  it('does not infer unsettled goods from a projection missing settlement facts', () => {
+    const state=fixture();delete (state as any).payables;expect(items(state)).toEqual([]);
+  });
+});
 const qc = (patch: any) => ({ id: 'qc-1', code: 'QC-1', source: { kind: 'orderLine', orderId: 'o', lineId: 'l' }, domain: 'garment', kind: 'sample', factory: '实际工厂', location: '', contact: '', due: '2026-10-20', requestedBy: '业务员甲', assignee: '', state: 'reported', reportIds: ['r'], createdAt: '2026-10-01', ...patch });
 const request = (patch: any) => ({ id: 'pr-1', code: 'PR-1', purpose: 'prepayment', supplierId: 's1', supplier: '实际供应商', currency: 'CNY', amount: 100, planId: 'plan-1', lines: [], reason: '', fileIds: [], requesterId: 'me', requester: '我', submittedAt: '2026-10-10T00:00:00Z', reviewerIds: ['boss'], snapshot: [], state: 'rejected', decision: { actorId: 'boss', actor: '财务主管', at: '2026-10-12T00:00:00Z', decision: 'rejected', note: '缺少合同' }, paymentHistory: [], ...patch });
 

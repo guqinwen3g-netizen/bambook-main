@@ -1,5 +1,7 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '待结算': 'Awaiting settlement',
+  '来源合同已不可用': 'Source contract unavailable',
   '结算确认后关联。': 'Link after settlement confirmation.',
   '第 {0} 次交单有不符点': 'Presentation {0} has discrepancies',
   '部分签发': 'Partially issued',

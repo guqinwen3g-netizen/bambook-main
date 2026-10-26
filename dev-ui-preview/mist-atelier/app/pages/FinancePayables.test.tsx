@@ -30,6 +30,23 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('opens the purchaser work item at its fixed contract without selecting receipts or final settlement on their behalf',async()=>{
+  prepaidWithReceipt();store.value.userId='sales';store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;const before=structuredClone(store.value.state);render();
+  const form=getByRole(document.body,'dialog',{name:'提交结算'}),contract=getByLabelText(form,'结算合同') as HTMLSelectElement;
+  expect(contract.value).toBe(po.id);expect(contract.disabled).toBe(true);expect([...contract.options].every(o=>!o.value||o.value===po.id)).toBe(true);
+  expect([...form.querySelectorAll('input[type="checkbox"]')].every(e=>!(e as HTMLInputElement).checked)).toBe(true);expect(store.value.state).toEqual(before);expect(store.value.run).not.toHaveBeenCalled();
+  await click('取消',form);expect(go).toHaveBeenLastCalledWith('payment-vouchers',undefined,{section:'payables'});
+});
+
+it('does not open a settlement write form from a contract URL without submit permission',()=>{
+  prepaidWithReceipt();store.value.permissions=[MIST_FINANCE_SCOPES.invoice];route.id=po.id;render();expect(queryByRole(document.body,'dialog',{name:'提交结算'})).toBeNull();expect(queryByRole(host,'button',{name:'提交结算'})).toBeNull();
+});
+
+it('does not replace an unavailable work-item contract with another approved contract',()=>{
+  prepaidWithReceipt();store.value.permissions=[SETTLEMENT_SCOPES.submit];store.value.state.fulfillment.purchases.find((p:any)=>p.id===po.id).state='cancelled';route.id=po.id;render();
+  const form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('来源合同已不可用');expect((getByRole(form,'button',{name:'提交复核'}) as HTMLButtonElement).disabled).toBe(true);expect(store.value.run).not.toHaveBeenCalled();
+});
+
 it('opens a routed settlement after workspace facts load and after navigating from another payable tab',async()=>{
  const state=store.value.state;state.payables.settlements=[{id:'handoff-settlement',code:'ST-HANDOFF',purchaseId:po.id,purchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:po.currency,unit:po.unit,price:po.price,receiptIds:[],quantity:1,rejected:0,amount:po.price,final:false,disputes:[],note:'原结算依据',fileIds:[],state:'pending',submitterId:'business',submittedBy:'业务员',submittedAt:ctx.now}];route.id='handoff-settlement';store.value.state=null;render();store.value.state=state;render();expect(getByRole(host,'table',{name:'供应商结算'})).toBeTruthy();expect(host.querySelector('[data-settlement="handoff-settlement"]')).toBeTruthy();await click(/^应付票据 ·/);expect(getByRole(host,'table',{name:'应付票据'})).toBeTruthy();state.payables.settlements.push({...state.payables.settlements[0],id:'another-settlement',code:'ST-ANOTHER'});route={...route,id:'another-settlement'};render();expect(getByRole(host,'table',{name:'供应商结算'})).toBeTruthy();expect(host.querySelector('[data-settlement="another-settlement"]')).toBeTruthy();
 });

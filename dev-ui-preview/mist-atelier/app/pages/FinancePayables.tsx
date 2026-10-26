@@ -84,6 +84,12 @@ export function FinancePayables() {
   const [invoiceTypeId,setInvoiceTypeId]=React.useState('');
   const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
   const busy = working || loading || saving || !!pending;
+  const settlementPurchaseId = state?.fulfillment?.purchases?.find(purchase => purchase.id === route.id)?.id;
+  React.useEffect(() => {
+    if (!settlementPurchaseId) return;
+    if (!canSettle) { setSettleOpen(false); return; }
+    setView('settlements'); setFailure(''); setSettleOpen(true);
+  }, [settlementPurchaseId, canSettle]);
   React.useEffect(() => { setSelected(route.id || ''); setDrawer(!!route.id); if (routedView) setView(routedView); }, [route.id, routedView]);
 
   const bills = state ? payableBills(state, day) : [], payments = state ? supplierPayments(state, day) : [], sources = state ? payableSources(state) : [], summary = state ? supplierPayableSummary(state, day) : [];
@@ -415,7 +421,7 @@ export function FinancePayables() {
       </div>}
     </Dialog>
 
-    <SettlementSubmitDialog open={settleOpen} state={state} busy={busy} canSettle={canSettle} failure={settleOpen ? failure : ''} onClose={() => { setSettleOpen(false); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={id => { setSettleOpen(false); setView('settlements'); open(id); toast('结算已提交，等待财务复核'); }} />
+    <SettlementSubmitDialog open={settleOpen} state={state} initialPurchaseId={settlementPurchaseId} busy={busy} canSettle={canSettle} failure={settleOpen ? failure : ''} onClose={() => { setSettleOpen(false); setFailure(''); if (settlementPurchaseId) go('payment-vouchers', undefined, { section: 'payables' }); }} execute={(command, done) => void execute(command, done)} onDone={id => { setSettleOpen(false); setView('settlements'); open(id); toast('结算已提交，等待财务复核'); }} />
     <SettlementConfirmDialog settlement={settlements.find(x => x.id === confirmId)} busy={busy} canConfirm={canConfirm} failure={confirmId ? failure : ''} onClose={() => { setConfirmId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setConfirmId(''); toast('结算已确认'); }} />
     {linkId && state && bills.find(b => b.id === linkId) && <BillLinkDialog bill={bills.find(b => b.id === linkId)!} state={state} busy={busy} allowed={canBill} failure={failure} onClose={() => { setLinkId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setLinkId(''); toast('已关联结算'); }} />}
     {deductId && state && bills.find(b => b.id === deductId) && <DeductionDialog bill={bills.find(b => b.id === deductId)!} state={state} busy={busy} allowed={canAllocate} failure={failure} onClose={() => { setDeductId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setDeductId(''); toast('索赔扣款已登记'); }} />}
