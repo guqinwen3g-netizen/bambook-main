@@ -68,8 +68,10 @@ async function fileText(file: File) {
 export function FinancePage() {
   const density = useDevice('density');
   const { go,route } = useNav(), toast = useToast(), workspace=useMistWorkspace(),session=useMistSession(),routeScope=useRouteScope();
-  const [area,setArea]=React.useState<FinanceArea>(()=>financeArea(route.section));
-  React.useEffect(()=>setArea(financeArea(route.section)),[route.section]);
+  // 公司银行账户与余额只对登记收付款的财务开放（服务端同样不下发）。
+  const canSeeAccounts=session.hasPermission(MIST_FINANCE_SCOPES.voucher),areaOf=(section?:string)=>{const next=financeArea(section);return next==='accounts'&&!canSeeAccounts?'receivables':next;};
+  const [area,setArea]=React.useState<FinanceArea>(()=>areaOf(route.section));
+  React.useEffect(()=>setArea(areaOf(route.section)),[route.section,canSeeAccounts]);
   const { state, loading, error, run, refresh, saving, pending, recover }=workspace;
   const scope=`${workspace.workspace?.id||''}:${workspace.workspace?.ownerId||''}`,activeScope=React.useRef(scope);activeScope.current=scope;
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
@@ -159,7 +161,7 @@ export function FinancePage() {
     <PageHeader eyebrow={uiText("财务与成本 · 财务")} title={uiText("财务管理")}
       actions={<>{(area==='receivables'||area==='records')&&<>{area==='records'&&canVoucher&&<Button icon={Upload} disabled={busy} onClick={()=>fileInput.current?.click()}>{uiText("导入流水")}</Button>}{canVoucher&&<Button icon={Upload} disabled={busy||!canVoucher} onClick={() => tab === 'pay'||area==='records' ? setPaymentOpen(true) : fileInput.current?.click()}>{uiText(tab === 'pay'||area==='records' ? '登记付款' : '导入流水')}</Button>}{area==='receivables'&&<Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>}</>}<Button disabled={busy} onClick={()=>void refresh()}>{uiText("刷新")}</Button></>} />
     <AccessHiddenNotice keys={['receivables','receipts','payments','payables','funding']} />
-    <FinanceEntrances state={state} area={area} onChange={openArea}/>
+    <FinanceEntrances state={state} area={area} onChange={openArea} accounts={canSeeAccounts}/>
     {sourceInvoiceId&&<Banner tone={sourceInvoice?'neutral':'bad'} title={sourceInvoice?sourceInvoice.code:'来源发票不可用'} actions={sourceInvoice?<Button onClick={()=>go('invoices',sourceInvoice.id)}>{uiText('返回发票')}</Button>:undefined}>{sourceInvoice?`${sourceInvoice.customer} · ${isPendingFinanceMistInvoice(sourceInvoice)?uiText('待财务确认'):`${fmt(sourceInvoice.open,2)} ${sourceInvoice.currency}`}`:undefined}</Banner>}
     <input ref={fileInput} hidden type="file" accept=".csv,text/csv" aria-label={uiText("银行流水文件")} disabled={!canVoucher||busy} onChange={async event => { const input=event.target,file=input.files?.[0];if(!file||busy||!canVoucher)return;const bound=scope,sequence=++fileSequence.current;setWorking(true);setFailure('');try{const rows=parseMistReceiptCsv(await fileText(file));if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent()){setImportRows(rows);setFileName(file.name);}}catch(problem){if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent())setFailure(problem instanceof Error?problem.message:'文件读取失败');}finally{input.value='';if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence)setWorking(false);} }} />
     {(failure || error) && <Banner tone="bad" title={uiText("操作尚未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}
