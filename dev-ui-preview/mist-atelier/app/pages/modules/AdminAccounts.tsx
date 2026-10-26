@@ -1,9 +1,9 @@
+import { permissionLabel } from '../../runtime/permissionLabels';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 管理后台 · 账号：公司成员身份只在这里新建或经注册审批产生（2026-10-08 决定）；角色权限仅老板可调整（2026-10-16 起），审计只读。 */
 import React from 'react';
 import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
-import { PERMISSION_SCOPES } from '../../../../../lib/rolePermissionMatrix';
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Mono, Pill, Select, TextArea, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -156,9 +156,8 @@ export function AdminAccounts() {
   </>;
 }
 
-const SCOPE_LABEL = PERMISSION_SCOPES as Record<string, string>;
-const scopeLabel = (scope: string, description?: string | null) => SCOPE_LABEL[scope] ?? description ?? scope;
-const DOMAIN_LABEL: Record<string, string> = { dashboard: '经营总览', cockpit: '经营驾驶舱', customers: '客户', relations: '客户关系', marketing: '营销', emails: '邮件', quotations: '报价', orders: '订单', production: '生产', shipments: '物流', customs: '单证报关', inventory: '库存', suppliers: '供应商', products: '开发与产品', bom: '成本核算', pricing: '定价', invoices: '发票', vouchers: '收付款', finance: '财务', tax: '退税', risk: '风险', aftersales: '售后', approvals: '审批', reports: '报表', knowledge: '资料中心', hr: '人事', users: '账号', audit: '审计', settings: '设置', dictionary: '数据字典', data: '数据导入导出', tools: '业务工具', ai: 'AI 助手', seasons: '季节', development: '开发' };
+const scopeLabel = permissionLabel;
+const DOMAIN_LABEL: Record<string, string> = { sample: '样品', sensitive: '敏感数据', vat: '增值税发票', crm: '客户跟进', agent: 'AI 操作', business: '业务记录', dashboard: '经营总览', cockpit: '经营驾驶舱', customers: '客户', relations: '客户关系', marketing: '营销', emails: '邮件', quotations: '报价', orders: '订单', production: '生产', shipments: '物流', customs: '单证报关', inventory: '库存', suppliers: '供应商', products: '开发与产品', bom: '成本核算', pricing: '定价', invoices: '发票', vouchers: '收付款', finance: '财务', tax: '退税', risk: '风险', aftersales: '售后', approvals: '审批', reports: '报表', knowledge: '资料中心', hr: '人事', users: '账号', audit: '审计', settings: '设置', dictionary: '数据字典', data: '数据导入导出', tools: '业务工具', ai: 'AI 助手', seasons: '季节', development: '开发' };
 const domainOf = (scope: string) => scope.split(':')[0];
 
 /** 权限勾选：按模块分组，可按模块、名称或代码筛选。 */
