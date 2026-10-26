@@ -28,14 +28,14 @@ export function BillLinkDialog({ bill, state, busy, allowed, failure, onClose, e
     setLocal(''); execute({ type: 'payable.bill.link', payload: { id: bill.id, links: chosen.map(l => ({ purchaseId: l.purchaseId, settlementId: links[l.purchaseId] })) } }, onDone);
   };
   const message = local || failure;
-  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText("关联结算")} description={ui`${bill.code} · 发票 ${bill.invoiceNo}。结算经财务确认后关联，关联后按结算计入预付抵扣并可申请付款。`}
+  return <Dialog open onClose={() => { if (!busy) onClose(); }} width={680} title={uiText("关联结算")} description={[bill.code,bill.invoiceNo].join(' · ')}
     footer={<><Button disabled={busy} onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !allowed} onClick={submit}>{uiText("确认关联")}</Button></>}>
     <div className="mist-col">
       {message && <Banner tone="bad" title={uiText("还不能关联")}>{message}</Banner>}
-      <FieldGroup label={uiText("待关联的合同行")} required hint={uiText("一行对应一笔结算；票额跨多笔结算时，请作废后按结算分行重新登记")}>
+      <FieldGroup label={uiText("待关联的合同行")} required>
         <div className="mist-col">{rows.map(l => { const options = invoiceableSettlements(state, l.purchaseId); return <div className="mist-row mist-module-actions" key={l.purchaseId} data-link-line={l.purchaseId}>
           <Mono>{l.purchaseCode}</Mono><span className="mist-note">{uiText("本票 ")}{money(l.amount, bill.currency)}</span><span className="mist-spacer" />
-          {options.length ? <Select aria-label={uiText(l.purchaseCode + ' 关联结算')} value={links[l.purchaseId] || ''} options={[{ value: '', label: '暂不关联' }, ...options.map(o => ({ value: o.settlement.id, label: `${o.settlement.code} · 未开票 ${money(o.left, o.settlement.currency)}${o.left < l.amount ? ' · 不足' : ''}` }))]} onChange={e => setLinks({ ...links, [l.purchaseId]: e.target.value })} />
+          {options.length ? <Select aria-label={uiText(l.purchaseCode + ' 关联结算')} value={links[l.purchaseId] || ''} options={[{ value: '', label: '暂不关联' }, ...options.map(o => ({ value: o.settlement.id, label: `${o.settlement.code} · ${uiText("可关联")} ${money(o.left, o.settlement.currency)}${o.left < l.amount ? ' · 不足' : ''}` }))]} onChange={e => setLinks({ ...links, [l.purchaseId]: e.target.value })} />
             : <span className="mist-note">{uiText("还没有已确认、未开票的结算")}</span>}
         </div>; })}</div>
       </FieldGroup>

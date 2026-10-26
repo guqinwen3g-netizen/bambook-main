@@ -257,6 +257,27 @@ it('发票先到：登记为待关联结算并暂挂，汇总单列；结算确�
   expect((getAllByRole(host, 'button', { name: '申请付款' })[0] as HTMLButtonElement).disabled).toBe(false);
 });
 
+function confirmedWithEarlyBill(part=1){
+ prepaidWithReceipt();store.value.state.fulfillment.receipts.find((r:any)=>r.id==='rcpt-ui').quantity=po.quantity;
+ const gross=Math.round(po.quantity*po.price*100)/100;
+ const bill=as('finance','财务',{type:'payable.bill.register',payload:{supplierId:po.supplierId,invoiceType:'commercial',invoiceNo:'INV-0528',invoiceDate:day,currency:po.currency,amount:gross*part,taxAmount:0,taxRate:'',lines:[{purchaseId:po.id,amount:gross*part,awaitingSettlement:true}],due:day,dueBasis:'验收后支付',fileIds:[]}});
+ const settlement=as('sales','业务',{type:'payable.settlement.submit',payload:{purchaseId:po.id,receiptIds:['rcpt-ui'],final:true}});
+ as('finance','财务',{type:'payable.settlement.confirm',payload:{id:settlement.id,prepaymentApplied:33480}});route.id=String(settlement.id);return{bill,settlement,gross};
+}
+it('从结算直接关联已到票据，不引导重复登记或生成第二张票据',async()=>{
+ const{bill,settlement}=confirmedWithEarlyBill();render();expect(queryByRole(document.body,'button',{name:'按结算登记票据'})).toBeNull();expect(host.textContent).toContain('待关联票据');expect(host.textContent).toContain('INV-0528');await click(/关联结算/);const form=dialog('关联结算');expect((getByLabelText(form,po.code+' 关联结算') as HTMLSelectElement).value).toBe(settlement.id);await click('确认关联',form);
+ expect(store.value.state.payables.bills).toHaveLength(1);expect(store.value.state.payables.bills[0]).toMatchObject({id:bill.id,lines:[expect.objectContaining({settlementId:settlement.id})]});expect(store.value.run).toHaveBeenCalledWith(expect.objectContaining({type:'payable.bill.link',payload:{id:bill.id,links:[{purchaseId:po.id,settlementId:settlement.id}]}}));
+});
+it('已到部分票据时保留登记余票和关联已有票据两个入口',()=>{
+ confirmedWithEarlyBill(.5);render();expect(queryByRole(document.body,'button',{name:'按结算登记票据'})).toBeTruthy();expect(queryByRole(document.body,'button',{name:/关联结算/})).toBeTruthy();expect(store.value.run).not.toHaveBeenCalled();
+});
+it('只读结算保留已到票据事实，不显示关联或登记动作',()=>{
+ confirmedWithEarlyBill();store.value.permissions=['invoices:read','vouchers:read'];render();expect(host.textContent).toContain('待关联票据');expect(host.textContent).toContain('INV-0528');expect(queryByRole(document.body,'button',{name:/关联结算/})).toBeNull();expect(queryByRole(document.body,'button',{name:'按结算登记票据'})).toBeNull();expect(store.value.run).not.toHaveBeenCalled();
+});
+it('已作废票据不占用结算登记入口，也不作为待关联票据显示',()=>{
+ const{bill}=confirmedWithEarlyBill();as('finance','财务',{type:'payable.bill.void',payload:{id:bill.id,reason:'重开票据'}});render();expect(queryByRole(document.body,'button',{name:'按结算登记票据'})).toBeTruthy();expect(host.textContent).not.toContain('待关联票据');expect(queryByRole(document.body,'button',{name:/关联结算/})).toBeNull();
+});
+
 it('索赔扣款：工厂同意从货款中扣的追偿在票据上登记扣款，扣满自动落实；可冲回', async () => {
   reg('V-CL', 5000);
   const bill = store.value.state.payables.bills[0];
