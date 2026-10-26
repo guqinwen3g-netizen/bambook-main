@@ -1,9 +1,10 @@
+import {PayableDialog as Dialog} from './PayableDialog';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** 应付收尾：发票先于结算到达的暂挂票据关联结算、索赔工厂扣款抵应付、短交最终结算后剩余预付的退款 / 转抵。
  *  都是财务对已登记事实的处理；错误由冲回更正，原记录保留。 */
 import React from 'react';
-import { Banner, Button, Dialog, Facts, Field, FormGrid, Mono, Pill, Select, TextArea, TextInput } from '../../../../components/mist';
+import { Banner, Button, Facts, Field, FormGrid, Mono, Pill, Select, TextArea, TextInput } from '../../../../components/mist';
 import { type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { billRequestedUnpaidMinor, deductibleRecoveries, invoiceableSettlements, prepaymentTransferTargets, purchasePrepaymentReadback, type PayableBillView, type PayablesCommand, type PrepaymentMove, type SupplierDeduction } from '../../../../server/src/shared/mistPayables';

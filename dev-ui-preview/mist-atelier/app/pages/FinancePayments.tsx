@@ -1,9 +1,10 @@
+import {PayableDialog as Dialog} from './PayableDialog';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** 付款收尾：发票未到时按已确认结算先付（已付未收票）、系统上线前历史付款补登到计划、审批规则前的旧付款对应计划。
  *  都走已有权限；先付款须经主管审批，补登与对应只登记已经发生的事实，错误由冲回或取消对应更正。 */
 import React from 'react';
-import { Banner, Button, Dialog, Facts, Field, FormGrid, Pill, Select, TextArea, TextInput } from '../../../../components/mist';
+import { Banner, Button, Facts, Field, FormGrid, Pill, Select, TextArea, TextInput } from '../../../../components/mist';
 import { type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { ADVANCE_INVOICE_REMIND_DAYS, backfillBillOptions, legacyPaymentPlanOptions, paymentPlanStageLabel, settlementAdvanceOpenMinor, settlementAdvancePaidMinor, settlementAdvanceRoomMinor, settlementHasLiveAdvance, type PayablesCommand, type PrepaymentPlanView, type SettlementView, type SupplierPaymentView } from '../../../../server/src/shared/mistPayables';
