@@ -21,6 +21,12 @@ beforeEach(() => { localStorage.clear(); });
 afterEach(() => { if (root) act(() => root.unmount()); host?.remove(); localStorage.clear(); vi.restoreAllMocks(); });
 
 describe('device-local interface language', () => {
+  it('translates a numbered bank discrepancy alert without assigning a decision owner', () => {
+    writeDevice('locale', 'en-US');
+    expect(uiText('第 2 次交单有不符点')).toBe('Presentation 2 has discrepancies');
+    writeDevice('locale', 'zh-CN');
+    expect(uiText('第 2 次交单有不符点')).toBe('第 2 次交单有不符点');
+  });
   it('preserves all interpolation slots in the English catalogue', () => {
     const slots = (text: string) => [...new Set(text.match(/\{\d+\}/g) ?? [])].sort();
     for (const [source, translated] of Object.entries({ ...english, ...reviewedEnglish })) {

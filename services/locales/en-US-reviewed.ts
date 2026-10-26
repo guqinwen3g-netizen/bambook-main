@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '第 {0} 次交单有不符点': 'Presentation {0} has discrepancies',
   '部分签发': 'Partially issued',
   '样品数': 'Samples',
   '· {0}份样品': '· {0} samples',
