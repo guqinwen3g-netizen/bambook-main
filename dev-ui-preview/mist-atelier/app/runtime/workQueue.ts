@@ -6,7 +6,7 @@ import { shipmentStage } from '../pages/modules/ShipmentsPage';
 import { financeReceiptDisplay } from '../pages/FinancePage';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
-import { SETTLEMENT_SCOPES, settlementReceipts, purchaseRequiresSettlementLink } from '../../../../server/src/shared/mistPayables';
+import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, payableBills, billRequestedUnpaidMinor } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 
 type CanRead = (view: string) => boolean;
@@ -149,6 +149,22 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       target: { view: 'shipments', id: shipment.id, detail: 'full' } });
   }
   if (canRead('payment-vouchers')) {
+    const requests = state.payables?.requests ?? [], since = new Date(Date.parse(today + 'T00:00:00Z') - FINANCE_RETURN_DAYS * 86400000).toISOString().slice(0, 10);
+    if(me&&canRead('procurement')&&can(PAYMENT_REQUEST_SCOPES.create)&&Array.isArray(state.payables?.bills)&&Array.isArray(f.purchases)){
+      const contracts=new Map(f.purchases.map(purchase=>[purchase.id,purchase]));
+      for(const bill of payableBills(state,today)){
+        if(bill.status==='void'||bill.held||bill.open<=0||!bill.lines.length)continue;
+        // Only unambiguous source ownership yields a personal work item. This
+        // reminder never assigns a mixed invoice, creates a request or pays it.
+        if(bill.lines.some(line=>{const purchase=contracts.get(line.purchaseId);return !purchase||purchase.requesterId!==me||purchase.supplierId!==bill.supplierId||purchase.currency!==bill.currency;}))continue;
+        if(requests.some(request=>request.purpose==='bill'&&request.requesterId===me&&request.state==='rejected'&&(request.decision?.at.slice(0,10)||'')>=since&&request.lines.some(line=>line.billId===bill.id)))continue;
+        const available=Math.max(0,Math.round(bill.open*100)-billRequestedUnpaidMinor(state,bill.id));if(!available)continue;
+        const linkedAt=bill.lines.flatMap(line=>[line.linkedAt,state.payables?.settlements?.find(row=>row.id===line.settlementId)?.confirmation?.at]);
+        const cancelledAt=requests.filter(request=>request.state==='cancelled'&&request.lines.some(line=>line.billId===bill.id)).map(request=>request.cancelled?.at);
+        const readyAt=[bill.registeredAt,...linkedAt,...cancelledAt].filter((value):value is string=>!!value).sort().at(-1)||bill.invoiceDate||today;
+        push({id:'bill-request:'+bill.id,source:'finance',title:`${bill.code} · ${uiText('待申请付款')}`,meta:[bill.supplier,`${bill.currency} ${(available/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`].join(' · '),when:bill.overdue?'已逾期':'待申请',urgent:bill.overdue,at:readyAt,due:bill.due,target:{view:'payment-vouchers',id:bill.id,section:'payables'}});
+      }
+    }
     const settlementFacts = state.payables?.settlements;
     if (me && canRead('procurement') && can(SETTLEMENT_SCOPES.submit) && Array.isArray(settlementFacts) && f.purchases && f.receipts) {
       for (const purchase of f.purchases) {
@@ -183,7 +199,6 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     if (can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))
       push({ id: 'invoice:' + invoice.id, source: 'finance', title: ui`${invoice.code} · 发票待财务确认`, meta: [invoice.customer, invoice.order].filter(Boolean).join(' · '), when: '待确认', urgent: false, at: invoice.due || '',
         due: invoice.due || undefined, target: { view: 'invoices', section: 'pending', id: invoice.id } as MistTarget });
-    const requests = state.payables?.requests ?? [], since = new Date(Date.parse(today + 'T00:00:00Z') - FINANCE_RETURN_DAYS * 86400000).toISOString().slice(0, 10);
     if (can(MIST_FINANCE_SCOPES.voucher)) for (const request of requests) {
       if (request.state !== 'approved' || !(request.amount > 0) || request.purpose === 'bill' && !can(MIST_FINANCE_SCOPES.reconcile)) continue;
       // Approval returns to the original full request after a reversal; historical payment IDs are not a live balance.

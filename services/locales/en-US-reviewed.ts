@@ -853,4 +853,6 @@ export const reviewedEnglish: Record<string, string> = {
   '待关联票额': 'Unlinked amount',
   '待关联票据': 'Invoices to link',
   '可关联': 'Available to link',
+  '待申请付款': 'Payment request needed',
+  '待申请': 'To request',
 };
