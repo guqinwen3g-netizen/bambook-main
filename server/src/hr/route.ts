@@ -1,3 +1,4 @@
+import { createCompanyEmploymentService } from './companyEmploymentService';
 import { companyHrClient } from './companyClient';
 import { Router, Request, Response } from 'express';
 import { createOrganizationDepartment, updateOrganizationDepartment, retireOrganizationDepartment, OrganizationError } from './organizationService';
@@ -106,7 +107,7 @@ export function createHRRouter(options: HRRouterOptions) {
   // ════════════════════════════════════════════
   // Personnel Overview (aggregated from UserAccount)
   // ════════════════════════════════════════════
-  router.get('/personnel', async (_req: Request, res: Response) => {
+  router.get('/personnel', async (req: Request, res: Response) => {
     try {
       // 查询条件：未软删 或 停用（status='disabled'）。
       // 已抹除个人数据(metadata.erased/deletionMode='erase-personal-data')的用户
@@ -124,7 +125,16 @@ export function createHRRouter(options: HRRouterOptions) {
         },
         orderBy: { createdAt: 'desc' },
       });
-      const users = usersRaw.filter(u => {
+      const companyId = extractActorFromRequest(req)?.companyId;
+      const companyPeople = companyId ? await options.prisma.userAccount.findMany({
+        where: { companyMembers: { some: { companyId, status: { in: ['active', 'suspended'] } } } },
+        include: { roles: { where: { role: { companyId } }, include: { role: true, department: true } }, companyMembers: { where: { companyId }, select: { status: true } } },
+        orderBy: { createdAt: 'desc' },
+      }) : null;
+      const projected = companyPeople?.map(u => ({ ...u, primaryDeptId: u.roles[0]?.departmentId ?? null,
+        primaryDepartment: u.roles[0]?.department ?? null,
+        status: u.companyMembers[0]?.status === 'suspended' ? 'disabled' : u.status }));
+      const users = (projected ?? usersRaw).filter(u => {
         const metadata = (u.metadata || {}) as any;
         return u.status !== 'pending' && !metadata.personnelOnly && !!u.passwordHash && !metadata.erased && metadata.deletionMode !== 'erase-personal-data';
       });
@@ -943,6 +953,10 @@ export function createHRRouter(options: HRRouterOptions) {
   // 业务规则统一收口 hrService，route 只做参数透传 + 审计
   // ════════════════════════════════════════════
   const hr = createHrService(prisma);
+  const employment = (req: Request) => {
+    const actor = extractActorFromRequest(req);
+    return actor?.companyId ? createCompanyEmploymentService(options.prisma, actor.companyId, actor.userId) : hr;
+  };
 
   /**
    * 带审计的写操作包装。错误出口走 `shared/routeError`（G6.5 · §9 B22）：
@@ -957,7 +971,8 @@ export function createHRRouter(options: HRRouterOptions) {
   ) {
     try {
       const { payload, auditAfter } = await fn();
-      await writeRouteAuditLog({
+      const companyEmployment = extractActorFromRequest(req)?.companyId && ['EmployeeProfile', 'EmploymentEvent'].includes(ctx.targetType);
+      if (!companyEmployment) await writeRouteAuditLog({
         prisma,
         actorId: actorIdFromRequest(req),
         source: ctx.source,
@@ -978,7 +993,7 @@ export function createHRRouter(options: HRRouterOptions) {
   router.get('/employees', async (req: Request, res: Response) => {
     try {
       const { status, deptId, q } = req.query as any;
-      const employees = await hr.listProfiles({ status, deptId, q });
+      const employees = await employment(req).listProfiles({ status, deptId, q });
       res.json({ ok: true, employees });
     } catch (err: any) {
       const r = safeRouteError(err, { fallbackCode: 'HR_EMPLOYEES_FETCH_FAILED' });
@@ -988,7 +1003,7 @@ export function createHRRouter(options: HRRouterOptions) {
 
   router.get('/employees/:userId', async (req: Request, res: Response) => {
     try {
-      const profile = await hr.getProfile(req.params.userId);
+      const profile = await employment(req).getProfile(req.params.userId);
       if (!profile) return res.status(404).json({ ok: false, error: 'PROFILE_NOT_FOUND', message: '员工档案不存在' });
       res.json({ ok: true, profile });
     } catch (err: any) {
@@ -1002,7 +1017,7 @@ export function createHRRouter(options: HRRouterOptions) {
       source: 'route:hr:upsert_employee', operation: 'upsert_employee',
       targetType: 'EmployeeProfile', targetId: () => req.params.userId,
     }, async () => {
-      const { profile, created } = await hr.upsertProfile({ ...req.body, userId: req.params.userId });
+      const { profile, created } = await employment(req).upsertProfile({ ...req.body, userId: req.params.userId });
       return { payload: { profile, created } };
     });
   });
@@ -1011,14 +1026,14 @@ export function createHRRouter(options: HRRouterOptions) {
     await audited(req, res, {
       source: 'route:hr:delete_employee', operation: 'delete_employee',
       targetType: 'EmployeeProfile', targetId: () => req.params.userId,
-    }, async () => ({ payload: await hr.deleteProfile(req.params.userId) }));
+    }, async () => ({ payload: await employment(req).deleteProfile(req.params.userId) }));
   });
 
   // ── C3a 生命周期事件 ──
   router.get('/employment-events', async (req: Request, res: Response) => {
     try {
       const { userId, type, limit } = req.query as any;
-      const events = await hr.listEmploymentEvents({ userId, type, limit: limit ? Number(limit) : undefined });
+      const events = await employment(req).listEmploymentEvents({ userId, type, limit: limit ? Number(limit) : undefined });
       res.json({ ok: true, events });
     } catch (err: any) {
       const r = safeRouteError(err, { fallbackCode: 'HR_EVENTS_FETCH_FAILED' });
@@ -1031,7 +1046,7 @@ export function createHRRouter(options: HRRouterOptions) {
       source: 'route:hr:record_employment_event', operation: 'record_employment_event',
       targetType: 'EmploymentEvent', targetId: () => req.body?.userId || 'unknown',
     }, async () => {
-      const { event, accountDisabled, leftTeams } = await hr.recordEmploymentEvent(actorIdFromRequest(req) ?? 'unknown', req.body || {});
+      const { event, accountDisabled, leftTeams } = await employment(req).recordEmploymentEvent(actorIdFromRequest(req) ?? 'unknown', req.body || {});
       if (leftTeams) invalidateTeamMembershipCache();
       return { payload: { event, accountDisabled, leftTeams } };
     });

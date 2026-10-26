@@ -62,6 +62,7 @@ function seedProfile(prisma: any, over: Record<string, any>) {
     id: over.id ?? `emp_${over.userId}`,
     userId: over.userId,
     employeeNo: over.employeeNo ?? `EMP-${over.userId}`,
+    companyId: null,
     employmentStatus: 'Probation',
     regularDate: null,
     contractType: 'FixedTerm',
@@ -77,6 +78,12 @@ function seedProfile(prisma: any, over: Record<string, any>) {
 describe('C3 · 试用转正 / 合同到期预警', () => {
   let prisma: any;
   beforeEach(() => { prisma = makeMockPrisma(); });
+
+  it('does not publish company employment data into the legacy shared risk list', async () => {
+    seedProfile(prisma, { userId: 'company-user', companyId: 'company-a', regularDate: dateFromToday(1), contractEnd: dateFromToday(1) });
+    expect(await scanHrLifecycle(prisma as any)).toEqual({ alerted: 0 });
+    expect(prisma._stores.riskAlerts).toHaveLength(0);
+  });
 
   it('试用转正：转正日前 7 天窗口内 → warning，标题含剩余天数', async () => {
     seedProfile(prisma, { userId: 'U1', regularDate: dateFromToday(5) });

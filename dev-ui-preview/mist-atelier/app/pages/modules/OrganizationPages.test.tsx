@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Nav } from '../../nav';
 import { AdminPanelPage, PLATFORM_PAGES } from './PlatformPages';
 
-const bridge = vi.hoisted(() => ({ roles: ['owner'] as string[], perms: ['*'] as string[], localMode: false, changeMember: vi.fn(), members: [] as any[], calls: [] as Array<{ method: string; url: string; body: any }>, routes: {} as Record<string, (body: any) => any> }));
-vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'owner-1', displayName: '老板', roles: bridge.roles, roleLabels: [] }, sessionKey: 'k', localMode: bridge.localMode, hasRole: (...r: string[]) => r.some(x => bridge.roles.includes(x)), hasPermission: (p: string) => bridge.perms.includes('*') || bridge.perms.includes(p), canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+const bridge = vi.hoisted(() => ({ companyId: null as string | null, roles: ['owner'] as string[], perms: ['*'] as string[], localMode: false, changeMember: vi.fn(), members: [] as any[], calls: [] as Array<{ method: string; url: string; body: any }>, routes: {} as Record<string, (body: any) => any> }));
+vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'owner-1', companyId: bridge.companyId, displayName: '老板', roles: bridge.roles, roleLabels: [] }, sessionKey: 'k', localMode: bridge.localMode, hasRole: (...r: string[]) => r.some(x => bridge.roles.includes(x)), hasPermission: (p: string) => bridge.perms.includes('*') || bridge.perms.includes(p), canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: { members: bridge.members }, workspace: { id: 'w', name: '空间', ownerId: 'owner-1', access: { canManageMembers: bridge.roles.includes('owner') } }, changeMember: bridge.changeMember }) }));
 vi.mock('../../../../../services/apiService', () => ({ apiService: { getAuthHeaders: () => ({ Authorization: 'Bearer t' }), getCompanyExporterProfile: vi.fn(async () => ({ value: { nameEn: 'X' }, version: 1 })), updateCompanyExporterProfile: vi.fn() } }));
 
@@ -16,7 +16,7 @@ let root: Root | undefined, host: HTMLDivElement; const go = vi.fn();
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
-  bridge.roles = ['owner']; bridge.perms = ['*']; bridge.localMode = false; bridge.members = []; bridge.calls = []; bridge.changeMember.mockReset(); bridge.changeMember.mockResolvedValue(undefined); go.mockReset();
+  bridge.companyId = null; bridge.roles = ['owner']; bridge.perms = ['*']; bridge.localMode = false; bridge.members = []; bridge.calls = []; bridge.changeMember.mockReset(); bridge.changeMember.mockResolvedValue(undefined); go.mockReset();
   bridge.routes = {
     'GET /api/admin/users': () => ({ ok: true, departments, users: [{ id: 'u1', displayName: '张三', email: 'z@x.test', status: 'pending', roles: [], roleIds: [], departmentId: null, department: null, lastLoginAt: null, createdAt: '2026-10-01T00:00:00Z' }] }),
     'GET /api/admin/roles': () => ({ ok: true, roles }),
@@ -75,6 +75,14 @@ describe('管理后台 · 账号', () => {
     expect(table).not.toContain('UserAccount');
     expect(table).toContain('ghost');
     expect(table).toContain('新建角色');
+  });
+  it('keeps an account action failure visible inside its confirmation dialog', async () => {
+    bridge.routes['GET /api/admin/users'] = () => ({ ok: true, departments, users: [{ id: 'u1', displayName: '张三', email: 'z@x.test', status: 'disabled', roles: ['业务员'], roleIds: ['role-sales'], departmentId: 'd1', department: '面料业务部', lastLoginAt: null, createdAt: '' }] });
+    bridge.routes['PATCH /api/admin/users/u1'] = () => { throw new Error('请在人事管理中办理复职或返聘。'); };
+    await render(AdminPanelPage, 'admin-panel');
+    await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
+    await click('重新启用'); await click('确认');
+    expect(document.querySelector('.mist-dialog')?.textContent).toContain('请在人事管理中办理复职或返聘。');
   });
   it('locks the 老板 role for administrators who are not the owner and offers no workspace grant', async () => {
     bridge.roles = ['admin'];
@@ -194,6 +202,31 @@ describe('人事管理', () => {
     await click('保存');
     expect(document.body.textContent).toContain('建档须填写入职日期');
   });
+  it('saves a company employee profile in one request with its onboarding information', async () => {
+    bridge.companyId = 'company-a';
+    bridge.routes['PUT /api/hr/employees/u3'] = () => ({ ok: true, profile: { userId: 'u3', employeeNo: 'E1', employmentStatus: 'Probation' } });
+    await render(PLATFORM_PAGES.hr, 'hr', 'people');
+    await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    await click('建立员工档案');
+    await type(labelled('入职日期'), '2026-10-26');
+    await click('保存');
+    expect(bridge.calls.filter(c => c.method === 'PUT' && c.url === '/api/hr/employees/u3')).toHaveLength(1);
+    expect(bridge.calls.some(c => c.method === 'POST' && c.url === '/api/hr/employment-events')).toBe(false);
+  });
+  it('saves company identity and role assignment in one request', async () => {
+    bridge.companyId = 'company-a';
+    bridge.routes['GET /api/admin/users'] = () => ({ ok: true, departments, users: [{ id: 'u1', displayName: '张三', email: 'z@x.test', status: 'active', roleIds: ['role-sales'], roles: ['业务员'], departmentId: 'd1', department: '面料业务部', createdAt: '', lastLoginAt: null }] });
+    bridge.routes['PATCH /api/admin/users/u1/roles'] = () => ({ ok: true });
+    await render(AdminPanelPage, 'admin-panel');
+    await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
+    await click('修改资料与角色');
+    await type(labelled('姓名'), '新姓名');
+    await click('保存');
+    const writes = bridge.calls.filter(c => c.method === 'PATCH');
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ url: '/api/admin/users/u1/roles', body: { displayName: '新姓名', email: 'z@x.test', departmentId: 'd1', roles: ['role-sales'] } });
+  });
   it('lists positions with staffing against headcount and creates a position', async () => {
     const position = { id: 'p1', title: '面料跟单', departmentId: 'd1', department: '面料业务部', headcount: 2, status: 'active', description: null };
     bridge.routes['GET /api/hr/personnel'] = () => ({ ok: true, departments, positions: [position], personnel: [] });
@@ -250,7 +283,7 @@ describe('人事管理', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     await click('办理在职变动');
     await type(labelled('新岗位'), 'p3');
-    expect(document.body.textContent).toContain('部门随新岗位确定');
+    expect(document.body.textContent).not.toContain('部门将从');
     await type(labelled('新岗位'), 'p2');
     expect(document.body.textContent).toContain('部门将从 面料业务部 调为 成衣业务部');
     const submit = [...document.querySelectorAll('.mist-dialog button, [role="dialog"] button')].find(b => /^确认/.test(b.textContent?.trim() ?? '')) as HTMLButtonElement;

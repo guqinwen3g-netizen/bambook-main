@@ -17,14 +17,14 @@ export const EMPLOYMENT_STATUS: Record<string, string> = { Probation: '试用期
 export const CONTRACT_TYPES = [{ value: 'FixedTerm', label: '固定期限' }, { value: 'OpenEnded', label: '无固定期限' }, { value: 'PartTime', label: '非全日制' }, { value: 'Intern', label: '实习' }];
 
 export interface OrgDepartment { id: string; name: string; parentId: string | null; status?: string; businessAttributes?: BusinessAttribute[] }
-export interface AdminAccount { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null; createdAt: string; metadata?: Record<string, unknown> | null }
+export interface AdminAccount { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null; createdAt: string; metadata?: Record<string, unknown> | null; identityEditable?: boolean }
 export interface AdminRole { id: string; name: string; description: string | null; isSystem: boolean; permissions: string[] }
 export interface AuditLogRow { id: string; actorId: string; action: string; targetType: string; targetId: string | null; createdAt: string; ip?: string | null }
 export interface OrgPerson { id: string; displayName: string; email: string; status: string; roles: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null }
 export interface OrgTeam { id: string; name: string; description: string | null; leaderId: string | null; departmentId: string; department: string | null; businessAttributes: BusinessAttribute[]; status: string; memberCount: number; members: Array<{ id: string; userId: string; role: string; leftAt: string | null }> }
 export interface EmployeeProfile { userId: string; employeeNo: string; displayName: string | null; departmentId?: string | null; department?: string | null; positionId: string | null; position: string | null; hireDate: string | null; regularDate: string | null; contractType: string | null; contractEnd: string | null; employmentStatus: string; phone: string | null; emergencyContact: string | null; workLocation: string | null; notes: string | null }
 export interface OrgPosition { id: string; title: string; departmentId: string | null; department: string | null; headcount?: number; status?: string; description?: string | null }
-export interface EmploymentEvent { id: string; userId: string; type: string; effectiveDate: string; fromDeptId: string | null; toDeptId: string | null; fromPositionId: string | null; toPositionId: string | null; reason: string | null; operatorId: string | null; createdAt: string }
+export interface EmploymentEvent { id: string; userId: string; type: string; effectiveDate: string; fromStatus?: string | null; toStatus?: string | null; fromDeptId: string | null; toDeptId: string | null; fromPositionId: string | null; toPositionId: string | null; reason: string | null; operatorId: string | null; createdAt: string }
 
 /** 在职变动（与服务端 hrService EVENT_ALLOWED_FROM 同口径；服务端仍是最终校验）。 */
 export const EMPLOYMENT_EVENTS: Array<{ value: string; label: string; from: string[]; terminal?: boolean; position?: boolean }> = [
@@ -37,7 +37,7 @@ export const EMPLOYMENT_EVENTS: Array<{ value: string; label: string; from: stri
   { value: 'Terminate', label: '解除劳动关系', from: ['Probation', 'Regular', 'Suspended'], terminal: true },
   { value: 'Onboard', label: '返聘', from: ['Resigned', 'Terminated'] },
 ];
-export const eventLabel = (type: string) => type === 'Onboard' ? '入职 / 返聘' : EMPLOYMENT_EVENTS.find(e => e.value === type)?.label ?? type;
+export const eventLabel = (type: string, fromStatus?: string | null) => type === 'Onboard' ? fromStatus === undefined ? '入职 / 返聘' : fromStatus === null ? '入职' : '返聘' : EMPLOYMENT_EVENTS.find(e => e.value === type)?.label ?? type;
 export const ACTIVE_EMPLOYMENT = ['Probation', 'Regular', 'Suspended'];
 
 export type ApprovalBusinessLine = 'fabric' | 'garment';
@@ -77,6 +77,7 @@ export const organizationApi = {
   createAccount: (body: { displayName: string; email: string; password: string; roles: string[]; departmentId: string }) => call<{ userId: string; reactivated: boolean }>('/admin/users', { method: 'POST', body }),
   updateAccount: (userId: string, body: { displayName?: string; email?: string; departmentId?: string; status?: string }) => call<{ ok: true }>('/admin/users/' + id(userId), { method: 'PATCH', body }),
   setRoles: (userId: string, roles: string[], departmentId: string | null) => call<{ ok: true }>('/admin/users/' + id(userId) + '/roles', { method: 'PATCH', body: { roles, departmentId } }),
+  saveAccountAssignment: (userId: string, body: { roles: string[]; departmentId: string | null; displayName?: string; email?: string }) => call<{ ok: true }>('/admin/users/' + id(userId) + '/roles', { method: 'PATCH', body }),
   approve: (userId: string, roles: string[], departmentId: string) => call<{ emailStatus?: string }>('/admin/users/' + id(userId) + '/approve', { method: 'POST', body: { roles, departmentId } }),
   reject: (userId: string, reason: string) => call<{ ok: true }>('/admin/users/' + id(userId) + '/reject', { method: 'POST', body: { reason } }),
   disable: (userId: string) => call<{ ok: true }>('/admin/users/' + id(userId) + '/disable-account', { method: 'POST', body: {} }),

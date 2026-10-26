@@ -21,6 +21,12 @@ export async function setCompanyAccountAccess(prisma: PrismaClient, input: {
     if (input.enabled && (member.company.status !== 'active' || member.user.status !== 'active' || member.user.deletedAt !== null)) {
       throw new CompanyAccountError('账号或公司已停用，无法恢复公司访问。', 409, 'ACCOUNT_UNAVAILABLE');
     }
+    if (input.enabled) {
+      const employment = await tx.employeeProfile.findFirst({ where: { companyId: input.companyId, userId: input.userId, deletedAt: null } });
+      if (employment && ['Suspended', 'Resigned', 'Terminated'].includes(employment.employmentStatus)) {
+        throw new CompanyAccountError('请在人事管理中办理复职或返聘。', 409, 'EMPLOYMENT_RESTORATION_REQUIRED');
+      }
+    }
     const status = input.enabled ? 'active' : 'suspended';
     if (member.status === status) return;
     if (input.enabled && member.company.seatLimit !== null) {

@@ -52,6 +52,8 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 迁移顺序：备份并校验 → 新增表/列及应用数据库账号授权 → 部署兼容代码 → `migrate-company-tenancy.ts --dry-run` → 执行迁移 → 对比工作区业务状态指纹及岗位登录。迁移包含系统及自定义角色、组织、成员和个人补充授权，重复执行不重复建数据。迁移后不要回退到不认识公司角色的旧代码。
 
+员工档案与在职事件的公司归属迁移见 `server/prisma/migrations/20261026143000_company_employment_ownership/migration.sql`。先盘点并备份这两张表，归属只能依据明确的岗位所属公司或唯一历史成员关系；存在多公司歧义时整段迁移回滚，不能猜选公司。档案按公司与账号唯一、工号按公司唯一；未归属公司的历史档案保留独立约束。运行入口为 `hr/companyEmploymentService.ts`：建档与入职记录同事务保存，调岗同步当前公司角色部门及小组，停职/离职只停止本公司访问，复职/返聘重核账号、公司与席位，其他公司资料不随之改动。普通账号“重新启用”不能绕过在职状态恢复。
+
 跨公司 HTTP 回归位于 `server/src/auth/__tests__/companyIsolation.pg.test.ts`，使用 `MIST_PG_CONFLICT_TEST_URL` 指向独立验收 PostgreSQL 库；覆盖共用账号、伪造范围、读写、附件、审批、成员撤销、平台边界和组织权限。不得指向共享开发业务库运行该测试。
 
 平台人员必须使用独立账号，不得有客户公司的 CompanyMember 或 UserRole；客户公司负责人不得为验证方便授予 platformRole。`grant-platform-admin.ts` 拒绝客户成员/岗位账号。平台账号凭据只留私有目录，不进入仓库、PR 或日志；角色互斥与平台/公司入口均由服务端复核。
