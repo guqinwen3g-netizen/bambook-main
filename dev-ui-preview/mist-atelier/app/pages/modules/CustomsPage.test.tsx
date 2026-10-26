@@ -16,6 +16,14 @@ import {CustomsPage,customsFlags,rebateEvidence} from './CustomsPage';
 let host:HTMLElement,root:Root;const go=vi.fn();
 function render(id?:string,section?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'customs',id,section},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><CustomsPage/></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
+
+it('shows the unresolved bank discrepancy in both the ledger and detail when the credit is fully occupied',async()=>{
+ const st=store.state!;st.orders[0].governance={status:'approved',contract:{paymentMethod:'LC'}} as any;
+ st.letterOfCredits=[{id:'lc-alert',code:'LC-ALERT',lcNo:'LC-ALERT',customerId:'c',customer:'Cedar',orderIds:['o'],issuingBank:'Issuing bank',advisingBank:'Advising bank',confirmed:false,availableBy:'sight',usanceDays:0,currency:'USD',amount:100,tolerancePct:0,issueDate:'2026-09-01',latestShipmentDate:'2099-01-31',expiryDate:'2099-02-21',expiryPlace:'上海',presentationDays:21,partialShipment:true,transhipment:false,documentsRequired:'CI, PL, BL',note:'',fileIds:[],amendments:[],presentations:[{id:'p-alert',no:1,shipmentId:'s',shipmentCode:'S',shipmentDate:'2026-10-10',presentedAt:'2026-10-12',deadline:'2026-10-31',amount:100,documents:'CI, PL, BL',autoDiscrepancies:[],discrepancies:'缺一份正本',result:'discrepant',history:[],createdAt:'2026-10-12T01:00:00Z',actor:'单证'}],createdAt:'2026-09-02T01:00:00Z',actor:'单证'}];
+ render();await click(getByRole(host,'tab',{name:/信用证/}));const ledger=getByRole(host,'table',{name:'信用证台账'});
+ expect(ledger.textContent).toContain('第 1 次交单有不符点');await click(getByRole(ledger,'row',{name:/LC-ALERT/}));
+ const detail=host.querySelector('[data-lc-detail="lc-alert"]') as HTMLElement;expect(detail.textContent).toContain('需要关注');expect(detail.textContent).toContain('第 1 次交单有不符点');expect(detail.textContent).not.toContain('待申请人答复');expect(store.run).not.toHaveBeenCalled();
+});
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'业务',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});

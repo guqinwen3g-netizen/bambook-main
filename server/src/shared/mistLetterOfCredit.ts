@@ -59,14 +59,17 @@ export function lcStatus(lc: MistLetterOfCredit, today: string): LcStatus {
   if (lcAvailableMinor(lc) <= 0) return 'drawn';
   return lc.expiryDate < today ? 'expired' : 'active';
 }
-/** 有效信用证的提醒：最晚装运日 / 有效期临近（≤ 7 天）或已过，交单期截止临近。 */
+/** Open bank discrepancies remain actionable even when presentations occupy the full credit. */
 export function lcAlerts(lc: MistLetterOfCredit, today: string): string[] {
-  if (lcStatus(lc, today) !== 'active') return [];
+  const status = lcStatus(lc, today);
+  if (status === 'cancelled') return [];
   const out: string[] = [], diff = (d: string) => Math.round((Date.parse(d + 'T00:00:00Z') - Date.parse(today + 'T00:00:00Z')) / 86400000);
-  const ship = diff(lc.latestShipmentDate), exp = diff(lc.expiryDate);
-  if (ship < 0) out.push(`已过最晚装运日 ${lc.latestShipmentDate}`); else if (ship <= 7) out.push(`距最晚装运日 ${ship} 天`);
-  if (exp <= 7) out.push(`距有效期 ${exp} 天`);
-  for (const p of lc.presentations) if (p.result === 'discrepant') out.push(`第 ${p.no} 次交单存在不符点，待申请人答复`);
+  if (status === 'active') {
+    const ship = diff(lc.latestShipmentDate), exp = diff(lc.expiryDate);
+    if (ship < 0) out.push(`已过最晚装运日 ${lc.latestShipmentDate}`); else if (ship <= 7) out.push(`距最晚装运日 ${ship} 天`);
+    if (exp <= 7) out.push(`距有效期 ${exp} 天`);
+  }
+  for (const p of lc.presentations) if (p.result === 'discrepant') out.push(`第 ${p.no} 次交单有不符点`);
   return out;
 }
 /** The credit may modify the UCP 600 default of 21 days (articles 1/14c); expiry still caps presentation.

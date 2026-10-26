@@ -93,7 +93,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
     { key: 'customer', header: '客户 / 订单', width: 'minmax(150px,1.3fr)', hideOnMobile: true, render: lc => <div className="mist-col" style={{ gap: 2 }}><span>{lc.customer}</span><small className="mist-muted">{lc.orderIds.map(id => state?.orders.find(o => o.id === id)?.code || id).join('、')}</small></div> },
     { key: 'amount', header: '金额 / 可用', width: 'minmax(140px,1.2fr)', align: 'right', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(lc.amount, lc.currency)}{uiText(lc.tolerancePct ? ` ±${lc.tolerancePct}%` : '')}</span><small className="mist-muted">{uiText("可用 ")}{money(lcAvailableMinor(lc) / 100, lc.currency)}</small></div> },
     { key: 'dates', header: '最晚装运 / 有效期', width: '140px', hideOnMobile: true, render: lc => <div className="mist-col" style={{ gap: 2 }}><span>{lc.latestShipmentDate}</span><small className="mist-muted">{uiText("有效至 ")}{lc.expiryDate}</small></div> },
-    { key: 'status', header: '状态', width: 'minmax(130px,1.2fr)', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[lcStatus(lc, day)]}>{LC_STATUS_LABEL[lcStatus(lc, day)]}</Pill>{lcAlerts(lc, day).map(a => <small key={a} className="mist-tone-bad">{a}</small>)}</div> },
+    { key: 'status', header: '状态', width: 'minmax(130px,1.2fr)', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[lcStatus(lc, day)]}>{LC_STATUS_LABEL[lcStatus(lc, day)]}</Pill>{lcAlerts(lc, day).map(a => <small key={a} className="mist-tone-bad">{uiText(a)}</small>)}</div> },
   ];
   const detail = selected && state ? <LcDetail lc={selected} state={state} day={day} can={can} locked={locked} run={run} onShipment={onShipment}
       onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} presentable={presentable(selected).length} />
@@ -135,7 +135,7 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
   const openPresentations = lc.presentations.some(p => !final(p));
   return <DetailBody data-lc-detail={lc.id} heading={<div><span className="mist-mono mist-muted">{lc.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{lc.lcNo}</div></div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS_TONE[status]}>{LC_STATUS_LABEL[status]}</Pill><Pill>{uiText(lc.availableBy === 'sight' ? '即期' : `远期 ${lc.usanceDays} 天`)}</Pill><Pill tone={lc.confirmed?"accent":"neutral"}>{uiText(lc.confirmed?"保兑":"未保兑")}</Pill></div>
-    {alerts.length > 0 && <Banner tone="warn" title={uiText("需要关注")}>{alerts.join('；')}</Banner>}
+    {alerts.length > 0 && <Banner tone="warn" title={uiText("需要关注")}>{alerts.map(uiText).join('；')}</Banner>}
     {lc.cancelled && <Banner tone="neutral" title={ui`已于 ${lc.cancelled.date} 注销`}>{lc.cancelled.reason}</Banner>}
     {can && <ActionBar busy={locked} actions={[
       { label: '登记交单', icon: Send, onClick: onPresent, primary: true, reason: cancelled ? '信用证已注销' : available <= 0 ? '可用余额为零' : !presentable ? '没有可交单的出运（须含本信用证订单且尚未交单）' : false },

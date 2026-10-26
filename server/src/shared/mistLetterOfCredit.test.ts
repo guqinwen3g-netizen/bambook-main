@@ -14,6 +14,14 @@ const save=(patch:Record<string,unknown>={})=>({type:'lc.save',payload:{input:in
 const present=(id:string,shipmentId:string,patch:Record<string,unknown>={})=>({type:'lc.present',payload:{id,shipmentId,shipmentDate:'2026-10-14',presentedAt:'2026-10-17',amount:'30000',documents:'发票、提单、装箱单',...patch}}) as MistCommand;
 
 describe('信用证台账',()=>{
+  it.each(['2026-10-18','2026-12-01'])('keeps unresolved bank discrepancies visible at zero available balance on %s',today=>{
+    const f=fixture(),{id}=f.run(save({amount:'30000',tolerancePct:'0'}));const {presentationId}=f.run(present(id,f.shipmentId));
+    f.run({type:'lc.presentation.result',payload:{id,presentationId,result:'discrepant',date:'2026-10-18',discrepancies:'缺少第三份提单正本'}} as MistCommand);
+    const before=structuredClone(f.lc);expect(lcAvailableMinor(f.lc)).toBe(0);
+    expect(lcAlerts(f.lc,today)).toEqual(['第 1 次交单有不符点']);expect(f.lc).toEqual(before);
+    f.run({type:'lc.presentation.result',payload:{id,presentationId,result:'honoured',date:'2026-10-18',honouredAmount:'30000'}} as MistCommand);
+    expect(lcAlerts(f.lc,today)).toEqual([]);
+  });
   it('登记来证：订单须为信用证付款、同一客户、同一币种；日期顺序；同开证行信用证号不得重复',()=>{
     const f=fixture();
     expect(()=>f.run(save({orderIds:['SO-G-2026-018']}))).toThrow('不是信用证');
@@ -67,7 +75,7 @@ describe('信用证台账',()=>{
     expect(()=>f.run(result({result:'honoured',honouredAmount:'30000.01'}))).toThrow('不能超过交单金额');
     expect(()=>f.run(result({result:'complying',date:'2026-10-16'}))).toThrow('交单日与今天之间');
     f.run(result({result:'discrepant',discrepancies:'提单未注明运费已付'}));
-    expect(lcAlerts(f.lc,'2026-10-18')).toContain('第 1 次交单存在不符点，待申请人答复');
+    expect(lcAlerts(f.lc,'2026-10-18')).toContain('第 1 次交单有不符点');
     expect(()=>f.run({type:'lc.cancel',payload:{id,date:'2026-10-18',reason:'结束'}} as MistCommand)).toThrow('未承付或未拒付');
     f.run(result({result:'honoured',honouredAmount:'29800',note:'扣不符点费 200 USD'}));
     expect(f.lc.presentations[0]).toMatchObject({result:'honoured',honouredAmount:29800,discrepancies:'提单未注明运费已付'});
