@@ -10,7 +10,8 @@ import { platformSettingsRouter, readCompanyDefaults } from './settings';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 import { CompanyAccessError } from '../auth/companyAccess';
-import { buildLoadedAuthTokenPayload, loadUserWithRoles, serializeAuthUser, supportActingUser } from '../auth/tokenHelpers';
+import { buildLoadedAuthTokenPayload, loadUserWithRoles, serializeAuthUser, platformCompanyUser } from '../auth/tokenHelpers';
+import { createPlatformCompanySettings } from './companySettings';
 
 type PlatformRouterOptions = AccountAccessOptions & {
   prisma: PrismaClient;
@@ -27,6 +28,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
   const router = Router();
   const auth = createAuthService();
   const access = createAccountAccessService(options.prisma, options);
+  const companySettings = createPlatformCompanySettings(options.prisma);
   router.use((_req, res, next) => { res.setHeader('Cache-Control', 'private, no-store'); next(); });
 
   async function requirePlatformAdmin(req: Request, res: Response): Promise<{ userId: string } | null> {
@@ -82,45 +84,54 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     }catch(e){next(e);}
   });
 
-  // 平台代管（2026-10-26）：平台人员说明原因后，限时进入该公司后台代为办理；全程留痕。
-  const SUPPORT_HOURS = 2;
-  const supportCookie = (res: Response, token: string) => res.cookie('bambook_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000, path: '/' });
-  router.post('/companies/:id/support-session', async (req: Request, res: Response, next) => {
+  // 平台身份选择公司范围，不成为该公司成员，也不依赖公司的角色配置。
+  const managementCookie = (res: Response, token: string) => res.cookie('bambook_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000, path: '/' });
+  router.post('/companies/:id/management-session', async (req: Request, res: Response, next) => {
     try {
       const admin = await requirePlatformAdmin(req, res);
       if (!admin) return;
-      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
-      if (reason.length < 2 || reason.length > 200) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写代管原因（2–200 字）。' });
-      const company = await options.prisma.company.findFirst({ where: { id: req.params.id, status: 'active' }, select: { id: true, name: true, slug: true } });
-      if (!company) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '公司不存在或已停用。' });
+      const company = await options.prisma.company.findFirst({ where: { id: req.params.id }, select: { id: true, name: true, slug: true } });
+      if (!company) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '公司不存在。' });
       const user = await loadUserWithRoles(options.prisma, admin.userId);
       if (!user) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '账号不可用。' });
       const now = new Date();
-      const support = { companyId: company.id, companyName: company.name, reason, startedAt: now.toISOString(), expiresAt: new Date(now.getTime() + SUPPORT_HOURS * 3600_000).toISOString() };
+      const platformCompany = { companyId: company.id, companyName: company.name, startedAt: now.toISOString() };
       let current;
-      try { current = await buildLoadedAuthTokenPayload(options.prisma, user, company.id, support); }
+      try { current = await buildLoadedAuthTokenPayload(options.prisma, user, company.id, platformCompany); }
       catch (error) { if (error instanceof CompanyAccessError) return res.status(error.status).json({ ok: false, error: error.code, message: error.message }); throw error; }
       const token = auth.signToken(current);
-      await audit(admin.userId, 'platform_support_start', company.id, { reason, expiresAt: support.expiresAt });
-      supportCookie(res, token);
-      const acting = await supportActingUser(options.prisma, user, support, company.id);
-      return res.json({ ok: true, token, company, support, user: { ...serializeAuthUser(acting, current.roles, current.permissions, current.departmentIds, { companyId: company.id, newRoleIds: current.roleIds, authorizationLoaded: true }), support } });
+      await audit(admin.userId, 'platform_company_enter', company.id, {});
+      managementCookie(res, token);
+      const acting = await platformCompanyUser(options.prisma, user, platformCompany, company.id);
+      return res.json({ ok: true, token, company, platformCompany, user: { ...serializeAuthUser(acting, current.roles, current.permissions, current.departmentIds, { companyId: company.id, newRoleIds: current.roleIds, authorizationLoaded: true }), platformCompany } });
     } catch (error) { next(error); }
   });
 
-  router.post('/support-session/exit', async (req: Request, res: Response, next) => {
+  router.post('/management-session/exit', async (req: Request, res: Response, next) => {
     try {
       const admin = await requirePlatformAdmin(req, res);
       if (!admin) return;
       const prior = auth.verifyToken(pickRequestToken(req)!);
-      if (prior.support) await audit(admin.userId, 'platform_support_end', prior.support.companyId, { startedAt: prior.support.startedAt });
+      if (prior.platformCompany) await audit(admin.userId, 'platform_company_exit', prior.platformCompany.companyId, { startedAt: prior.platformCompany.startedAt });
       const user = await loadUserWithRoles(options.prisma, admin.userId);
       if (!user) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '账号不可用。' });
       const current = await buildLoadedAuthTokenPayload(options.prisma, user, null);
       const token = auth.signToken(current);
-      supportCookie(res, token);
+      managementCookie(res, token);
       return res.json({ ok: true, token, user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { companyId: null, newRoleIds: current.roleIds, authorizationLoaded: true }) });
     } catch (error) { next(error); }
+  });
+
+  for (const method of ['get', 'patch'] as const) router[method]('/companies/:id/settings', async (req: Request, res: Response, next) => {
+    try {
+      if (!await requirePlatformAdmin(req, res)) return;
+      const prior = auth.verifyToken(pickRequestToken(req)!);
+      const result = method === 'get' ? { snapshot: await companySettings.read(prior, req.params.id) } : await companySettings.update(prior, req.params.id, req.body);
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof CompanyAccessError) return res.status(error.status).json({ ok: false, error: error.code, message: error.message });
+      next(error);
+    }
   });
 
   router.get('/companies', async (req: Request, res: Response) => {

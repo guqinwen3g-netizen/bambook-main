@@ -105,9 +105,9 @@ export function SettingsPage() {
             <FormGrid><Field label={uiText("名称")}><TextInput aria-label={uiText("公司显示名称")} value={values.workspaceName} disabled={settingsLocked} onChange={event => edit('workspaceName', event.target.value)} onBlur={() => saveField('workspaceName')} /></Field><Field label={uiText("默认币种")} hint={uiText("用于新建资料；客户与来源单据的币种优先")}><Select aria-label={uiText("默认币种")} disabled={settingsLocked} value={settings.companyProfile?.defaultCurrency||'USD'} options={[...new Set(['USD','EUR','CNY','GBP','HKD',settings.companyProfile?.defaultCurrency||'USD'])]} onChange={event=>saveCurrency(event.target.value)} /></Field>
             </FormGrid>
           </FormSection>}
-          {sec === 'workspace' && <WorkspaceMembers busy={busy} />}
+          {sec === 'workspace' && (session.user?.platformCompany ? <FormSection title={uiText("公司成员")}><Button onClick={()=>nav?.go('admin-panel')}>{uiText("管理账号与权限")}</Button></FormSection> : <WorkspaceMembers busy={busy} />)}
           {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
-          <div hidden={sec !== 'company'}><CompanyProfileSection member={member} /></div>
+          <div hidden={sec !== 'company'}><CompanyProfileSection member={member} active={sec === 'company'} /></div>
           </>}
           {!['company','overview','activity'].includes(sec) && <FormFooter>{saving && <span className="mist-note">{uiText('正在保存…')}</span>}<span className="mist-spacer" /><Button variant="primary" disabled={busy || !settings} loading={saving} onClick={finish}>{uiText("完成")}</Button></FormFooter>}
         </Card>

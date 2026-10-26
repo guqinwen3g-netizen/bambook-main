@@ -36,24 +36,24 @@ export function createAuthorizationSnapshotGuard(options: {
       }
       if(jwt && isTokenRevoked(user.metadata,(jwt as any).iat,jwt.credentialVersion))return res.status(401).json({error:'SESSION_REVOKED',message:'密码已更新，请重新登录。'});
       const platformRequest = /^\/platform(?:\/|$)/.test(req.path) && (user as any).platformRole === 'platform_admin';
-      const support = jwt && !platformRequest ? jwt.support : undefined;
-      const current = await buildLoadedAuthTokenPayload(options.prisma, user, platformRequest ? null : prior.companyId ?? null, support);
+      const platformCompany = jwt && !platformRequest ? jwt.platformCompany : undefined;
+      const current = await buildLoadedAuthTokenPayload(options.prisma, user, platformRequest ? null : prior.companyId ?? null, platformCompany);
       // Refresh account grants without expanding the verified credential's
       // upper bound. The prior actor came from a signed JWT or configured key
       // binding; request body fields never participate in this decision.
       if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
       (req as Request & { actor?: TokenPayload }).actor = current;
       (req as Request & { authSource?: string }).authSource = jwt ? 'user-session' : 'api-key';
-      if (current.support && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
-        // 平台代管期间的每一次变更都留痕；留痕失败则不执行。
+      if (current.platformCompany && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+        // 平台进入公司后的变更仍使用真实平台人员身份留痕。
         const recorded = await options.prisma.auditLog.create({ data: {
-          id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: user.id, action: 'platform_support_request',
-          targetType: 'Company', targetId: current.support.companyId, ip: req.ip || null,
-          detail: { method: req.method, path: req.path, reason: current.support.reason, startedAt: current.support.startedAt },
+          id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: user.id, action: 'platform_company_request',
+          targetType: 'Company', targetId: current.platformCompany.companyId, ip: req.ip || null,
+          detail: { method: req.method, path: req.path, startedAt: current.platformCompany.startedAt },
         } }).then(() => true, () => false);
-        if (!recorded) return res.status(503).json({ error: 'AUDIT_UNAVAILABLE', message: '暂时无法记录代管操作，请稍后重试。' });
+        if (!recorded) return res.status(503).json({ error: 'AUDIT_UNAVAILABLE', message: '暂时无法记录管理操作，请稍后重试。' });
       }
-      return runWithCompanyContext(current.companyId ?? null, () => next(), current.support);
+      return runWithCompanyContext(current.companyId ?? null, () => next(), current.platformCompany);
     } catch (error) {
       if (error instanceof CompanyAccessError) return res.status(error.status).json({ error: error.code, message: error.message });
       logger.warn('[authorization] current permission load failed', {

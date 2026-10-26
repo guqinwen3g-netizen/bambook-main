@@ -4,6 +4,7 @@ import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
 import { createAuthService } from '../auth/service';
+import { extractActorFromRequest } from '../auth/middleware';
 import { requirePermission } from '../auth/permissionGuard';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
 import { createModuleAuthGuard } from '../auth/moduleGuard';
@@ -285,7 +286,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       displayName: u.displayName,
       email: u.email,
       avatarUrl: (u as any).avatarUrl || null,
-      identityEditable: !companyId || (u._count?.companyMembers ?? 2) <= 1,
+      identityEditable: !companyId || !!extractActorFromRequest(req)?.platformCompany || (u._count?.companyMembers ?? 2) <= 1,
       status: companyId && (u as any).companyMembers?.[0]?.status === 'suspended' ? 'disabled' : u.status,
       roles: u.roles.map(ur => ur.role.name),
       roleIds: u.roles.map(ur => ur.roleId),
@@ -389,7 +390,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       return res.json({ ok: true });
     }
     if (companyId) {
-      await saveCompanyAccountAssignment(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, actorIsOwner: actorIsOwner(req), departmentId, displayName, email });
+      await saveCompanyAccountAssignment(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, actorIsOwner: actorIsOwner(req), actorIsPlatform: !!extractActorFromRequest(req)?.platformCompany, departmentId, displayName, email });
       return res.json({ ok: true });
     }
     if (departmentId !== undefined && !(await departmentExists(options.prisma, departmentId, companyId))) {
@@ -700,7 +701,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const { id } = req.params;
     const companyId = actorCompanyId(req);
     if (companyId) {
-      await saveCompanyAccountAssignment(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, actorIsOwner: actorIsOwner(req),
+      await saveCompanyAccountAssignment(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, actorIsOwner: actorIsOwner(req), actorIsPlatform: !!extractActorFromRequest(req)?.platformCompany,
         roles: req.body?.roles, departmentId: req.body?.departmentId, displayName: req.body?.displayName, email: req.body?.email });
       return res.json({ ok: true });
     }

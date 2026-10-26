@@ -18,17 +18,17 @@ describe('public entry route boundary',()=>{
     expect((await request(app({platformOnly:true})).get('/api/mist/workspaces').set('Host',admin)).status).toBe(403);
     expect((await request(app({platformOnly:true},'mist')).get('/api/workspaces').set('Host',admin)).status).toBe(403);
   });
-  it('allows platform operations and scoped support without adding company access',async()=>{
+  it('allows platform operations and scoped platformCompany without adding company access',async()=>{
     expect((await request(app({platformOnly:true})).get('/api/platform/companies').set('Host',admin)).status).toBe(200);
-    expect((await request(app({support:{id:'support'}})).get('/api/hr/personnel').set('Host',admin)).status).toBe(200);
+    expect((await request(app({platformCompany:{id:'platformCompany'}})).get('/api/hr/personnel').set('Host',admin)).status).toBe(200);
     expect((await request(app({companyId:'a'})).get('/api/hr/personnel').set('Host',admin)).status).toBe(403);
   });
-  it('does not accept platform or support tokens on the company origin',async()=>{
-    for(const actor of [{platformOnly:true},{support:{id:'support'}}]) expect((await request(app(actor)).get('/api/auth/me').set('Host',company)).status).toBe(403);
+  it('does not accept platform or platformCompany tokens on the company origin',async()=>{
+    for(const actor of [{platformOnly:true},{platformCompany:{id:'platformCompany'}}]) expect((await request(app(actor)).get('/api/auth/me').set('Host',company)).status).toBe(403);
   });
   it('allows only the existing platform AI configuration surface to platform sessions',async()=>{
     expect((await request(app({platformOnly:true},'mist')).get('/api/ai/platform-model').set('Host',admin)).status).toBe(200);
-    expect((await request(app({support:{id:'support'}},'mist')).get('/api/ai/platform-model').set('Host',admin)).status).toBe(403);
+    expect((await request(app({platformCompany:{id:'platformCompany'}},'mist')).get('/api/ai/platform-model').set('Host',admin)).status).toBe(403);
     expect((await request(app({platformOnly:true},'mist')).get('/api/ai/chat').set('Host',admin)).status).toBe(403);
   });
   it('does not use a forwarded-host header as entry authority',async()=>{

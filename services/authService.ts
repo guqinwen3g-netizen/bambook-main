@@ -24,8 +24,8 @@ export interface AuthUser {
   department: string | null;
   /** 管理员重置密码后为 true：须先修改密码才能继续使用。 */
   mustChangePassword?: boolean;
-  /** 平台代管会话：平台人员限时代公司办理后台事务。 */
-  support?: { companyId: string; companyName: string; reason: string; startedAt: string; expiresAt: string };
+  /** 平台管理员当前选择的公司。 */
+  platformCompany?: { companyId: string; companyName: string; startedAt: string };
 }
 
 export interface AuthState {
@@ -397,7 +397,7 @@ export async function devLoginAs(token: string, user: AuthUser): Promise<AuthUse
   return adoptIssuedSession(token, user);
 }
 
-/** 换用服务端刚签发的会话（开发面板切换账号、平台代管进入/退出）。 */
+/** 换用服务端刚签发的会话（开发面板切换账号、平台切换管理公司）。 */
 export async function adoptIssuedSession(token: string, user: AuthUser): Promise<AuthUser> {
   authMutationEpoch += 1;
   if (token) {

@@ -11,7 +11,7 @@ import { EmailService, buildVerificationEmail, createEmailService, isDevEmailFal
 import { VerificationStore, createVerificationStore } from './verification';
 import { logger } from '../lib/logger';
 import { ROLE_ID_TO_LEGACY_AGENT_ROLE } from './permissionService';
-import { buildLoadedAuthTokenPayload, supportActingUser, loadUserWithRoles, serializeAuthUser } from './tokenHelpers';
+import { buildLoadedAuthTokenPayload, platformCompanyUser, loadUserWithRoles, serializeAuthUser } from './tokenHelpers';
 import { createLoginRateLimiter } from './loginRateLimiter';
 import { pickRequestToken } from './middleware';
 import { invalidateAccountStatusCache } from './accountStatusGuard';
@@ -379,9 +379,9 @@ export function createAuthRouter(options: AuthRouterOptions) {
         res.clearCookie(COOKIE_NAME, { path: '/' });
         return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Account disabled.' });
       }
-      const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, payload.companyId ?? null, payload.support);
+      const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, payload.companyId ?? null, payload.platformCompany);
       const { roles, permissions, departmentIds, roleIds: newRoleIds } = tokenPayload;
-      const shownUser = tokenPayload.support ? await supportActingUser(options.prisma, user, tokenPayload.support, tokenPayload.support.companyId) : user;
+      const shownUser = tokenPayload.platformCompany ? await platformCompanyUser(options.prisma, user, tokenPayload.platformCompany, tokenPayload.platformCompany.companyId) : user;
       let company: { id: string; name: string; slug: string } | null = null;
       if (payload.companyId) {
         const row = await options.prisma.company.findUnique({
@@ -396,7 +396,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       }
       return res.json({
         ok: true,
-        user: { ...serializeAuthUser(shownUser, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }), ...(tokenPayload.support ? { support: tokenPayload.support } : {}) },
+        user: { ...serializeAuthUser(shownUser, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }), ...(tokenPayload.platformCompany ? { platformCompany: tokenPayload.platformCompany } : {}) },
         ...(company ? { company } : {}),
       });
     } catch {
@@ -544,7 +544,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       }
       // Re-authentication boundary: never re-sign stale role/grant claims from
       // the old JWT, even if every current role permission has been revoked.
-      const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null, prior.support);
+      const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null, prior.platformCompany);
       if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
       const refreshed = auth.signToken(current);
       res.cookie(COOKIE_NAME, refreshed, {
@@ -597,7 +597,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       try {
         const loaded = await loadUserWithRoles(options.prisma, payload.userId);
         if (loaded) {
-          const current = await buildLoadedAuthTokenPayload(options.prisma, loaded, payload.companyId ?? null, payload.support);
+          const current = await buildLoadedAuthTokenPayload(options.prisma, loaded, payload.companyId ?? null, payload.platformCompany);
           if (payload.permissionCeiling !== undefined) current.permissionCeiling = [...payload.permissionCeiling];
           token = auth.signToken(current);
           res.cookie(COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: COOKIE_MAX_AGE, path: '/' });

@@ -26,6 +26,11 @@ beforeEach(() => {
 });
 afterEach(() => { if (root) act(() => root!.unmount()); host?.remove(); root = undefined; });
 describe('original Mist settings with server workspace commands', () => {
+  it('shows the company profile footer only in its section', async () => {
+    render(); expect([...document.querySelectorAll('button')].some(button => button.textContent?.trim() === '保存公司资料')).toBe(false);
+    await click(button('公司资料')); expect(button('保存公司资料')).toBeTruthy();
+    await click(button('管理总览')); expect([...document.querySelectorAll('button')].some(button => button.textContent?.trim() === '保存公司资料')).toBe(false);
+  });
   it('does not expose workspace archive or switching actions in company settings',async()=>{render();expect(host.textContent).not.toContain('回收站');expect(host.textContent).not.toContain('恢复公司');expect(seam.value.archiveWorkspace).not.toHaveBeenCalled();expect(seam.value.refreshArchived).not.toHaveBeenCalled();});
 
   it('keeps only company sections and no personal appearance or security controls', () => {

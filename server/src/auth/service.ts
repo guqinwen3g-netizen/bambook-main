@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { AgentRole } from '../agent/types';
-import type { SupportSession } from './requestCompanyContext';
+import type { PlatformCompanyContext } from './requestCompanyContext';
 import { jwtSecretProblems, hasFatalSecretProblem, reportSecretProblemsOnce } from './secretPolicy';
 
 type AuthServiceOptions = {
@@ -29,8 +29,8 @@ export type TokenPayload = {
   /** Server-owned API-key session ceiling; never loaded from a tool input. */
   permissionCeiling?: string[];
   departmentIds: string[];
-  /** 平台代管会话；只由平台代管入口签发。 */
-  support?: SupportSession;
+  /** 平台管理员所选公司；仅由平台入口签发，不属于公司角色授权。 */
+  platformCompany?: PlatformCompanyContext;
 };
 
 export function createAuthService(options: AuthServiceOptions = {}) {

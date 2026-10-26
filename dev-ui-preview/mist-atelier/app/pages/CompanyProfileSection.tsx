@@ -64,7 +64,7 @@ export function validateCompanyProfile(values: MistCompanyProfile): { key?: Comp
   return null;
 }
 
-export function CompanyProfileSection({ member }: { member: boolean }) {
+export function CompanyProfileSection({ member, active = true }: { member: boolean; active?: boolean }) {
   const workspace = useMistWorkspace(), session = useMistSession(), toast = useToast(), nav = useNav();
   const scope = `${session.sessionKey}:${workspace.workspace?.id ?? ''}`, activeScope = React.useRef(scope); activeScope.current = scope;
   const stored = workspace.state?.settings.companyProfile;
@@ -120,10 +120,10 @@ export function CompanyProfileSection({ member }: { member: boolean }) {
     <FormSection title={uiText("出口与收款")}>
       <FormGrid>{EXPORT_FIELDS.map(field)}</FormGrid>
     </FormSection>
-    <FormFooter>
+    {active && <FormFooter>
       <span className="mist-note">{uiText(busy ? '正在保存…' : saved ? '已保存' : member ? '只读' : '')}</span><span className="mist-spacer" />
       {returnId && <Button icon={ArrowLeft} disabled={busy} onClick={() => nav?.go('quotations', returnId)}>{uiText("返回报价")}</Button>}
       {!member && <Button variant="primary" icon={Save} disabled={locked} loading={busy} onClick={() => void save()}>{uiText("保存公司资料")}</Button>}
-    </FormFooter>
+    </FormFooter>}
   </div>;
 }

@@ -5,7 +5,8 @@ import {businessNow} from './runtime/businessClock';
 import { AccountAccessPage } from './pages/AccountAccessPage';
 import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
 import { SaasAdminPage } from './pages/SaasAdminPage';
-import { exitCompanySupport } from './runtime/platformAdmin';
+import { exitCompanyManagement } from './runtime/platformAdmin';
+import { PlatformCompanySettingsPage } from './pages/PlatformCompanySettingsPage';
 import React from 'react';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
@@ -105,20 +106,20 @@ export function nextScrollKey(previous: { key: string; route: Route; list: boole
 }
 function scrollKeyOf(route: Route, list: boolean) { return route.view + (route.id ?? '') + (list ? '#list' : '');
 }
-/** 平台代管只开放公司后台与组织人事。 */
-const SUPPORT_VIEWS = ['admin-panel', 'hr'];
+/** 平台管理范围：账号、组织人事及公司设置；业务执行仍走公司端。 */
+const COMPANY_MANAGEMENT_VIEWS = ['admin-panel', 'hr', 'system-settings', 'settings', 'company-settings', 'workspace-settings'];
 function useSections(): NavSection[] {
   const session = useMistSession();
   return React.useMemo(() => {
     const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
-    const supporting = !!session.user?.support;
+    const supporting = !!session.user?.platformCompany;
     const modules = platformOnly ? [] : getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), canAccessView: session.canAccessView })
-      .filter(m => !supporting || SUPPORT_VIEWS.includes(String(m.view)));
+      .filter(m => !supporting || COMPANY_MANAGEMENT_VIEWS.includes(String(m.view)));
     const real = groupPrimaryNavigationModules(modules).map(g => ({
       id: g.group, label: g.label === '平台' ? '公司管理' : g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
       items: g.modules.map(m => ({ id: String(m.view), label: String(m.view) === 'admin-panel' ? '公司后台' : productName(m), icon: m.icon })),
     }));
-    const items = supporting ? [] : [
+    const items = supporting ? [{ id: 'company-settings', label: '公司设置', icon: Settings2 }] : [
       ...(session.user?.platformRole === 'platform_admin' ? [{ id: 'platform-admin', label: '平台管理', icon: ShieldCheck }] : []),
       ...((platformOnly || session.canAccessView(View.SystemSettings)) ? [{ id: 'system-settings', label: platformOnly ? '平台设置' : '公司设置', icon: Settings2 }] : []),
     ];
@@ -154,6 +155,7 @@ const productName = (m: { productLabel: string }) => m.productLabel.replace('（
 
 function crumbsFor(route: Route, go: (view: string, id?: string) => void, objectLabel?: string, versionLabel?: string): Crumb[] {
   if (route.view === 'admin-panel') return [{ label: '公司管理', hideOnMobile: true }, { label: '公司后台' }];
+  if (['system-settings','settings','company-settings','workspace-settings'].includes(route.view)) return [{ label: '公司管理', hideOnMobile: true }, { label: '公司设置' }];
   if (route.view === 'platform-admin') return [{ label: '平台运营', hideOnMobile: true }, { label: '平台管理' }];
   const base = route.view.split('/')[0], mod = getModuleByView(base as View);
   const label = (mod && productName(mod)) ?? LABELS[base] ?? base;
@@ -170,7 +172,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace();
   const {state} = workspace;
   const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
-  const support = session.user?.support;
+  const platformCompany = session.user?.platformCompany;
   const [exitingSupport, setExitingSupport] = React.useState(false);
   const organization = useOrganizationContext();
   const [organizationOpen, setOrganizationOpen] = React.useState(false);
@@ -226,18 +228,18 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   // 平台会话退出后回到平台管理登录，不落到公司登录页。
   const platformSession = React.useRef(false);
   React.useEffect(() => {
-    if (platformOnly || support) platformSession.current = true;
+    if (platformOnly || platformCompany) platformSession.current = true;
     else if (session.status === 'anonymous' && platformSession.current) { platformSession.current = false; go('platform-login'); }
-  }, [platformOnly, support, session.status, go]);
+  }, [platformOnly, platformCompany, session.status, go]);
   React.useEffect(() => {
     if (publicEntryForHost(location.host) === 'platform' && platformOnly && !personalSection
       && !['platform-admin','system-settings','settings','platform-login','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
   }, [platformOnly, personalSection, route.view, go]);
-  // 平台代管只停留在公司后台与组织人事。
-  React.useEffect(() => { if (support && !personalSection && !SUPPORT_VIEWS.includes(route.view.split('/')[0])) go('admin-panel'); }, [support, personalSection, route.view, go]);
-  const exitSupport = async () => {
+  // 公司管理会话保持在当前公司的管理页面。
+  React.useEffect(() => { if (platformCompany && !personalSection && !COMPANY_MANAGEMENT_VIEWS.includes(route.view.split('/')[0])) go('admin-panel'); }, [platformCompany, personalSection, route.view, go]);
+  const exitManagement = async () => {
     setExitingSupport(true);
-    try { await exitCompanySupport(); go('platform-admin'); } catch (failure) { report(failure); } finally { setExitingSupport(false); }
+    try { await exitCompanyManagement(); go('platform-admin', platformCompany?.companyId); } catch (failure) { report(failure); } finally { setExitingSupport(false); }
   };
   React.useEffect(() => { if (personalSection && session.status === 'authenticated') go('account', undefined, { section: personalSection }); }, [personalSection, session.status, go]);
   React.useEffect(() => {
@@ -358,7 +360,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
   const permitted = !!personalSection || canOpenMistView(route.view, { canAccessView: session.canAccessView, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
-  const Page = personalSection ? AccountPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
+  const Page = personalSection ? AccountPage : platformCompany && ['system-settings','settings','company-settings','workspace-settings'].includes(route.view) ? PlatformCompanySettingsPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
     : session.localMode && route.view === 'mes' ? LocalMesPage
     : PAGES[route.view] ?? null;
@@ -368,22 +370,22 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const user = session.user!;
   const workspaceProfileName = state?.settings.profileName?.trim() || '';
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
-  const roles = platformOnly ? '平台管理员' : support ? '平台代管' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
+  const roles = platformOnly ? '平台管理员' : platformCompany ? '平台管理' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
   return (
     <Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
       <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
-          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : support ? { symbol: support.companyName.slice(0,1), name: support.companyName, caption: '平台代管', onClick:()=>go('admin-panel') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, expanded: organizationOpen, onClick:()=>{if(collapsed || matchMedia('(min-width: 761px) and (max-width: 1180px)').matches){go('account');return;}setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();}, disclosure: <><dl><div><dt>{uiText('公司')}</dt><dd>{state?.settings.companyProfile?.legalName||'—'}</dd></div><div><dt>{uiText('部门')}</dt><dd>{user.department||'—'}</dd></div><div><dt>{uiText('小组')}</dt><dd>{uiText(organization.loading?'正在读取':organization.error?'读取失败':organization.teams.map(team=>team.name).join('、')||'未加入小组')}</dd></div></dl>{organization.error&&<button type="button" onClick={organization.retry}>{uiText('重新读取')}</button>}{session.canAccessView(View.SystemSettings)&&<button type="button" onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'company'});}}>{uiText('公司设置')}</button>}</> }}
+          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('admin-panel') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, expanded: organizationOpen, onClick:()=>{if(collapsed || matchMedia('(min-width: 761px) and (max-width: 1180px)').matches){go('account');return;}setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();}, disclosure: <><dl><div><dt>{uiText('公司')}</dt><dd>{state?.settings.companyProfile?.legalName||'—'}</dd></div><div><dt>{uiText('部门')}</dt><dd>{user.department||'—'}</dd></div><div><dt>{uiText('小组')}</dt><dd>{uiText(organization.loading?'正在读取':organization.error?'读取失败':organization.teams.map(team=>team.name).join('、')||'未加入小组')}</dd></div></dl>{organization.error&&<button type="button" onClick={organization.retry}>{uiText('重新读取')}</button>}{session.canAccessView(View.SystemSettings)&&<button type="button" onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'company'});}}>{uiText('公司设置')}</button>}</> }}
           account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
           onSearch={() => setPalette(true)}
-          assistant={platformOnly || support ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
+          assistant={platformOnly || platformCompany ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
-          sync={base === 'account' ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : support ? { state: 'ok', text: '平台代管' } : { state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? (workspace.pending||workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '已保存 · 公司' : '设计组件展示' }}
+          sync={base === 'account' ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : { state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? (workspace.pending||workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '已保存 · 公司' : '设计组件展示' }}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
-          extra={platformOnly || support ? undefined : <MistReviewButton/>} notifications={platformOnly || support ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={platformOnly || support ? undefined : ()=>openAI()} />}
+          extra={platformOnly || platformCompany ? undefined : <MistReviewButton/>} notifications={platformOnly || platformCompany ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={platformOnly || platformCompany ? undefined : ()=>openAI()} />}
       >
-        {support && <Banner tone="warn" title={ui`平台代管 · ${support.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitSupport()}>{uiText("退出代管")}</Button>}>{ui`${support.reason} · ${new Date(support.expiresAt).toLocaleTimeString(interfaceLocale(), { hour: '2-digit', minute: '2-digit' })} 自动结束`}</Banner>}
+        {platformCompany && <Banner tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>}
         {workspace.pendingCreate && !workspace.saving && <Banner tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>}
         {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
         {workspace.error && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}

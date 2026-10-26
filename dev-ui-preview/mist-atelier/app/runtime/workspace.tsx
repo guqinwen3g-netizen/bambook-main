@@ -321,7 +321,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     mounted.current = true; scopeEpoch.current++; readEpoch.current++; readController.current?.abort();
     snapshot.current = null; latest.current.clear(); wanted.current = undefined; navigating.current = false; mutation.current = null;
     setCurrent(null); setWorkspaces([]); setArchivedWorkspaces([]); setError(''); setSaving(false); publishPending(null); publishCreate(null);
-    if (authority.status === 'authenticated' && authority.userId && !(session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length) && !session.user?.support) {
+    if (authority.status === 'authenticated' && authority.userId && !(session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length) && !session.user?.platformCompany) {
       let restored: Pending | null = null;
       let selected: string | undefined;
       let recoveryError = '';
@@ -670,4 +670,9 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
 }
 export function useMistWorkspace(): MistWorkspaceContext {
   const context = React.useContext(Context); if (!context) throw new Error('useMistWorkspace must be used inside MistWorkspaceProvider'); return context;
+}
+
+/** Reuse settings components with the platform settings projection, not a business workspace. */
+export function MistWorkspaceScope({ value, children }: { value: MistWorkspaceContext; children: React.ReactNode }) {
+  return <Context.Provider value={value}>{children}</Context.Provider>;
 }
