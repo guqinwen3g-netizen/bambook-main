@@ -65,7 +65,7 @@ describe('authService checkAuth', () => {
       isAuthenticated: false,
     });
     expect(fetchSpy).toHaveBeenCalledWith(
-      'https://jiangsupanda.com/bambook/api/auth/me',
+      'https://bambook.sylway.cloud/api/auth/me',
       expect.objectContaining({
         method: 'GET',
         headers: {},
@@ -183,7 +183,7 @@ describe('authService checkAuth', () => {
     await login('user@example.com', 'correct-password');
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://jiangsupanda.com/bambook/api/auth/login',
+      'https://bambook.sylway.cloud/api/auth/login',
       expect.objectContaining({ method: 'POST' }),
     );
   });
@@ -236,7 +236,7 @@ describe('authService checkAuth', () => {
     const user = await updateMyProfile({ avatarUrl: 'data:image/webp;base64,next' });
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://jiangsupanda.com/bambook/api/auth/me',
+      'https://bambook.sylway.cloud/api/auth/me',
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ avatarUrl: 'data:image/webp;base64,next' }),
@@ -277,7 +277,7 @@ describe('authService checkAuth', () => {
     await login('user@example.com', 'correct-password');
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://jiangsupanda.com/bambook/api/auth/login',
+      'https://bambook.sylway.cloud/api/auth/login',
       expect.objectContaining({ method: 'POST' }),
     );
   });
@@ -341,7 +341,7 @@ describe('authService checkAuth', () => {
     await login('user@example.com', 'correct-password');
 
     expect(fetch).toHaveBeenCalledWith(
-      'https://jiangsupanda.com/bambook/api/auth/login',
+      'https://bambook.sylway.cloud/api/auth/login',
       expect.objectContaining({ method: 'POST' }),
     );
   });

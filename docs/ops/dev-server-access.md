@@ -4,6 +4,19 @@
 
 当前服务按正式 SaaS 基础设施保护，测试和真实生产租户可能共存。域名、脚本、服务名中的 dev 只是历史技术标识，不授权重置数据库、批量替换账号或覆盖真实租户文件。任何数据写入必须核对目标租户，并保留可恢复备份。详见 GO-LIVE.md 最新裁决。
 
+## 对外入口（2026-10-26）
+
+| 用途 | 域名 | 范围 |
+| --- | --- | --- |
+| 公司用户 | `bambook.sylway.cloud` | 公司登录与业务 |
+| 平台管理 | `bambook-admin.sylway.cloud` | 平台登录、管理及受审计的限时代管 |
+| 客户查单 | `bambook-customer.sylway.cloud` | 预留，尚不发布门户 |
+| 供应商 | `bambook-supplier.sylway.cloud` | 预留，尚不发布门户 |
+
+公司与平台入口分别使用独立的主机 Cookie；主机名由反向代理传给应用，不能用客户端 `X-Forwarded-Host` 改变入口。平台域名禁止公司业务 API，平台模型配置仅向独立平台会话开放，代管会话仍不能进入。邀请/找回邮件配置 `BAMBOOK_PUBLIC_URL` 与 `BAMBOOK_PLATFORM_PUBLIC_URL`；两者分别指向公司和平台地址。源码锚点：`server/src/shared/bambookPublicOrigins.ts`、`auth/publicEntryHostGuard.ts`、`auth/accountAccess.ts`。旧 dev 域名保留为公司兼容入口和发布校验地址。
+
+入口变更先备份 DNS、Nginx、cloudflared 与应用配置；先验证候选配置，再启用明确主机名的隧道路由和 DNS。保持 TLS 校验、原上传限制与代理头缓冲；不将预留门户转发到现有公司应用。配置及回执留在本机私有目录，不把隧道身份、密钥或服务器配置包提交到仓库。
+
 ## 原则
 
 - 2026-10-19 用户定案：开发发布由本机直接上传，GitHub 只保存源码版本，不再自动验证或部署。专用受限密钥、主机指纹、构建包和回执只存本机私有目录；不读取或转发私钥。

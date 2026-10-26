@@ -1,3 +1,4 @@
+import { createPublicEntryHostGuard } from '../auth/publicEntryHostGuard';
 import { withResponseLocale } from './responseLanguage';
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
 import multer from 'multer';
@@ -56,6 +57,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
       next();
     })().catch(error => publicError(res, error));
   });
+  router.use(createPublicEntryHostGuard('mist'));
   const actor = (req: Request) => (req as Request & { actor: TokenPayload }).actor;
   const run = (handler: (req: Request, res: Response) => Promise<void>): RequestHandler => (req, res) => { void handler(req, res).catch(error => publicError(res, error)); };
   // ChatGPT 订阅连接：凭据只留在服务器，响应只含连接状态与设备验证码。

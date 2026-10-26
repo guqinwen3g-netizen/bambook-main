@@ -1,3 +1,4 @@
+import { publicEntryForHost } from '../shared/bambookPublicOrigins';
 import { accountAccessRouter } from './accountAccess';
 import { CompanyAccessError } from './companyAccess';
 import { selfRegistrationRouter } from './selfRegistration';
@@ -141,7 +142,9 @@ export function createAuthRouter(options: AuthRouterOptions) {
     loginRateLimiter?.reset(rateLimitKey);
 
     // 平台管理入口与公司登录入口分开（2026-10-26 用户定案）：平台账号只能从平台入口登录，公司账号只能从公司入口登录。
-    const entry = req.body?.entry === 'platform' ? 'platform' : 'company';
+    const entryHost = publicEntryForHost(String(req.headers.host ?? ''));
+    const entry = entryHost ?? (req.body?.entry === 'platform' ? 'platform' : 'company');
+    if (entryHost && req.body?.entry && req.body.entry !== entryHost) return res.status(403).json({ ok: false, error: entryHost === 'platform' ? 'PLATFORM_ENTRY_ONLY' : 'COMPANY_ENTRY_ONLY', message: entryHost === 'platform' ? '请从公司入口登录公司账号。' : '请从平台管理入口登录平台账号。' });
     const platformAccount = (user as any).platformRole === 'platform_admin';
     if (entry === 'platform' && !platformAccount) return res.status(403).json({ ok: false, error: 'PLATFORM_ENTRY_ONLY', message: '该账号不是平台账号，请从公司登录入口登录。' });
     if (entry === 'company' && platformAccount) return res.status(403).json({ ok: false, error: 'COMPANY_ENTRY_ONLY', message: '平台账号请从平台管理入口登录。' });

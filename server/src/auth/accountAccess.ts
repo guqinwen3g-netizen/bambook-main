@@ -9,7 +9,7 @@ import { passwordProblem } from './passwordPolicy';
 
 type Kind = 'invite' | 'recovery';
 export type Delivery = { status: 'sent' | 'unconfirmed' | 'unavailable' | 'cooldown'; message: string };
-export type AccountAccessOptions = { email?: EmailService; publicUrl?: string };
+export type AccountAccessOptions = { email?: EmailService; publicUrl?: string; platformPublicUrl?: string };
 const purpose = (kind:Kind) => `account-access-${kind}`;
 const hash = (value:string) => createHash('sha256').update(value).digest('hex');
 const meta = (value:unknown):any => value && typeof value==='object' && !Array.isArray(value) ? value : {};
@@ -29,8 +29,8 @@ function publicBase(configured?:string) {
 export function createAccountAccessService(db:PrismaClient, options:AccountAccessOptions={}) {
  const email=options.email??createEmailService(), auth=createAuthService();
  async function deliver(userId:string, kind:Kind, actorId?:string, companyName?:string):Promise<Delivery> {
-  let base:string;
-  try{base=publicBase(options.publicUrl);}catch{return{status:'unavailable',message:'账号已保留，邮件入口地址未配置，请联系平台管理员后重发。'};}
+  let base:string,platformBase:string;
+  try{base=publicBase(options.publicUrl);platformBase=publicBase(options.platformPublicUrl||process.env.BAMBOOK_PLATFORM_PUBLIC_URL||options.publicUrl||process.env.BAMBOOK_PUBLIC_URL);}catch{return{status:'unavailable',message:'账号已保留，邮件入口地址未配置，请联系平台管理员后重发。'};}
   if(!email.isReal)return{status:'unavailable',message:'账号已保留，邮件服务未配置，请联系平台管理员后重发。'};
   const token=randomBytes(32).toString('base64url'), tokenHash=hash(token), now=new Date();
   const entry=await db.$transaction(async tx=>{
@@ -49,7 +49,7 @@ export function createAccountAccessService(db:PrismaClient, options:AccountAcces
   });
   if(!entry)return{status:'unavailable',message:'该账号当前不能接收邀请。'};
   if('cooldown'in entry)return{status:'cooldown',message:'发送过于频繁，请稍后再试（每分钟一次、每小时最多五次）。'};
-  const url=new URL(base);url.searchParams.set('view',entry.setup?'account-access':'login');
+  const url=new URL(entry.platform?platformBase:base);url.searchParams.set('view',entry.setup?'account-access':entry.platform?'platform-login':'login');
   if(entry.setup){url.searchParams.set('kind',kind);url.searchParams.set('email',entry.email);url.hash=token;}
   const label=entry.platform?'Sylway Cloud 平台':companyName||'Bambook 公司';
   let status:Delivery['status']='sent';
