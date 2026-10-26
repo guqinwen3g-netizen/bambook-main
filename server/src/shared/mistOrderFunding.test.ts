@@ -16,6 +16,15 @@ describe('order deposit funding',()=>{
 });
 
 describe('approved pre-shipment cumulative receipts',()=>{
+ it.each(['LC','OA','OTHER'] as const)('does not impose the T/T cash percentage on an approved %s contract',paymentMethod=>{
+  const f=setup(),contract=f.state.orders[0].governance!.contract;
+  contract.paymentMethod=paymentMethod;delete contract.preShipmentPercent;
+  expect(assertOrderShipmentPaymentCovered(f.state,'o')).toMatchObject({status:'not_required',required:0,received:0,percent:null,shortage:0});
+  contract.preShipmentPercent=100;
+  expect(assertOrderShipmentPaymentCovered(f.state,'o').status).toBe('not_required');
+  contract.paymentMethod='TT';
+  expect(()=>assertOrderShipmentPaymentCovered(f.state,'o')).toThrow('出运前收款不足');
+ });
  it('blocks an unpaid balance and one-cent shortage, then counts assigned and reconciled cash once',()=>{
   const f=setup();(f.state.orders[0] as any).governance.contract.preShipmentPercent=100;
   expect(()=>assertOrderShipmentPaymentCovered(f.state,'o')).toThrow('出运前收款不足');
@@ -35,7 +44,7 @@ describe('approved pre-shipment cumulative receipts',()=>{
  });
  it('supports an explicit credit shipment condition without inventing payment',()=>{
   const f=setup();Object.assign((f.state.orders[0] as any).governance.contract,{paymentMethod:'OA',depositPercent:null,preShipmentPercent:0});
-  expect(assertOrderShipmentPaymentCovered(f.state,'o')).toMatchObject({required:0,received:0,status:'covered'});
+  expect(assertOrderShipmentPaymentCovered(f.state,'o')).toMatchObject({required:0,received:0,status:'not_required'});
  });
  it('rounds the approved percentage in minor units and rejects malformed values',()=>{
   const f=setup();Object.assign(f.state.orders[0],{amount:123.45});(f.state.orders[0] as any).governance.contract.preShipmentPercent=30.01;

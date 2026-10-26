@@ -185,7 +185,7 @@ it.each(['ready','depart'] as const)('rechecks a tightened over-shipment limit b
 });
 
 
-it('rejects actual departure while a contractual balance or one cent is missing, then releases at full payment',()=>{
+it.each(['TT','LC'] as const)('applies the approved %s cash condition to actual departure without inventing receipts',paymentMethod=>{
  const f=setup();terms(f);const id=shipment(f),line=f.root.fulfillment.shipments[0].lines[0];
  const qc=f.run({type:'fulfillment.qc.request',payload:{source:{kind:'orderLine',orderId:line.orderId,lineId:line.lineId,productionId:line.productionId},domain:'garment',kind:'production',factory:'工厂',location:'现场',contact:'',due:'2026-10-13'}}).id!;
  f.run({type:'fulfillment.qc.claim',payload:{id:qc,domain:'garment'}});
@@ -194,7 +194,13 @@ it('rejects actual departure while a contractual balance or one cent is missing,
  for(const type of ['CI','PL'] as const)f.run({type:'fulfillment.documents.issue',payload:{id:document(f,id,type)}});
  f.run({type:'fulfillment.shipments.ready',payload:{id}});f.run({type:'fulfillment.shipments.sent',payload:{id,at:f.ctx.now}});
  f.run({type:'fulfillment.customs.save',payload:{shipmentId:id,status:'cleared',declarationNo:'DECL',broker:'报关行',hsCode:'620530',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-13',evidence:'放行回执',fileIds:[],note:''}},{...f.ctx,can:()=>true});
- const order=f.root.orders[0];order.governance!.contract.preShipmentPercent=100;order.governance!.approvedSnapshot!.contract.preShipmentPercent=100;
+ const order=f.root.orders[0];
+ for(const contract of [order.governance!.contract,order.governance!.approvedSnapshot!.contract]){contract.paymentMethod=paymentMethod;if(paymentMethod==='LC')delete contract.preShipmentPercent;else contract.preShipmentPercent=100;}
+ if(paymentMethod==='LC'){
+  const beforeReceipts=structuredClone(f.root.receipts),beforeAllocations=structuredClone(f.root.allocations);
+  f.run({type:'fulfillment.shipments.depart',payload:{id,at:f.ctx.now,evidence:'承运人离港通知',fileIds:[]}});
+  expect(f.root.fulfillment.shipments[0].state).toBe('departed');expect(f.root.receipts).toEqual(beforeReceipts);expect(f.root.allocations).toEqual(beforeAllocations);return;
+ }
  f.root.receipts.push({id:'funding',code:'BR',date:'2026-10-13',payer:'真实客户',amount:120,remaining:120,currency:'USD',ref:'actual',state:'unmatched'});
  f.root.orderFunding.assignments.push({id:'fund',receiptId:'funding',customerId:'customer',orderId:order.id,amount:36,currency:'USD',note:'合同定金',state:'active',createdAt:f.ctx.now,updatedAt:f.ctx.now,actor:'财务',history:[]});
  const depart={type:'fulfillment.shipments.depart' as const,payload:{id,at:f.ctx.now,evidence:'船公司离港通知',fileIds:[]}};
