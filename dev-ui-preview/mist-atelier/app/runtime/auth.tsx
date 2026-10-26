@@ -233,7 +233,11 @@ export function MistSessionProvider({children}:{children:React.ReactNode}) {
    const nextSignature=localIdentity(next);if(signature.current!==nextSignature){signature.current=nextSignature;setRevision(v=>v+1);}
    current.current=next;setData(next);setMode('local');setStatus('authenticated');setError('');return next.user;
   }catch(failure){
-   if(mounted.current&&sequence===generation.current){current.current=null;setData(null);signature.current='';setRevision(v=>v+1);setMode(modeRef.current==='local'?'local':'error');setStatus('anonymous');setError(failure instanceof Error&&failure.name!=='AbortError'?failure.message:'公司连接超时，请重试');}
+   // A background re-check that cannot reach the server keeps the current identity;
+   // only a server answer (or a blocking switch) can end the local session.
+   const offline=failure instanceof TypeError||(failure as {name?:unknown})?.name==='AbortError';
+   if(mounted.current&&sequence===generation.current&&!blocking&&offline&&current.current)setError(mapAuthErrorMessage(failure,'公司连接超时，请重试'));
+   else if(mounted.current&&sequence===generation.current){current.current=null;setData(null);signature.current='';setRevision(v=>v+1);setMode(modeRef.current==='local'?'local':'error');setStatus('anonymous');setError(mapAuthErrorMessage(failure,'公司连接超时，请重试'));}
    throw failure;
   }finally{window.clearTimeout(timeout);if(mounted.current&&sequence===generation.current){switchLock.current=false;setSwitching(false);setRefreshing(false);}}
  },[]);

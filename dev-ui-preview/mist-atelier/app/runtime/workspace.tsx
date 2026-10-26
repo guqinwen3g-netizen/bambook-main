@@ -198,7 +198,10 @@ function createNotice(intent: MistPendingCreate) { return `公司“${intent.nam
 async function request(path: string, init: RequestInit = {}): Promise<any> {
   const headers = { ...apiService.getAuthHeaders(), ...(init.headers as Record<string, string> | undefined) };
   if (init.body instanceof FormData) delete headers['Content-Type'];
-  const response = await fetch(path, { ...init, headers, credentials: 'include' });
+  let response: Response;
+  // A dropped connection leaves the outcome unknown (status 0), so writes stay pending for recovery.
+  try { response = await fetch(path, { ...init, headers, credentials: 'include' }); }
+  catch (failure) { if ((failure as { name?: unknown })?.name === 'AbortError') throw failure; throw new RequestError('服务器不可达或超时，请检查网络', 0, 'NETWORK'); }
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new RequestError(data?.error?.message || data?.message || '操作未完成，请重试', response.status, data?.error?.code);
   if (!data) throw new RequestError('没有收到可核对的操作结果');
