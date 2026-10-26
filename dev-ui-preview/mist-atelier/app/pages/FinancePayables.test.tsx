@@ -174,7 +174,7 @@ it('结算：业务员按收货提交，财务确认预付抵扣（与建议不�
   render();
   // 已付预付后，未确认结算的合同不能直接登记票据。
   await click(/待登记来源/); await click('登记票据', getByRole(host, 'table', { name: '待登记来源合同' }));
-  expect([...(getByLabelText(dialog('登记供应商票据'), po.code + ' 关联结算') as HTMLSelectElement).options].map(o => o.textContent)).toEqual(['请选择结算', '待关联结算（发票先到，结算确认后再关联）']);
+  expect([...(getByLabelText(dialog('登记供应商票据'), po.code + ' 关联结算') as HTMLSelectElement).options].map(o => o.textContent)).toEqual(['请选择结算', '待关联结算']);
   await click('取消', dialog('登记供应商票据'));
   ctx.actorId = 'sales'; ctx.actorName = '业务';
   await click('提交结算'); const sd = dialog('提交结算');
@@ -226,7 +226,7 @@ it('发票先到：登记为待关联结算并暂挂，汇总单列；结算确�
   const bill = store.value.state.payables.bills[0];
   expect(bill.lines[0]).toMatchObject({ awaitingSettlement: true });
   expect(getByRole(host, 'table', { name: '供应商应付汇总' }).textContent).toContain('1 张待关联结算（46,500.00 CNY）');
-  expect(host.textContent).toContain('发票先于结算到达');
+  expect(host.textContent).toContain('结算确认后关联。');
   expect((getAllByRole(host, 'button', { name: '申请付款' })[0] as HTMLButtonElement).disabled).toBe(true);
   const st = as('sales', '业务', { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: ['rcpt-ui'] } });
   as('finance', '财务', { type: 'payable.settlement.confirm', payload: { id: st.id, prepaymentApplied: 13950 } });
@@ -235,7 +235,7 @@ it('发票先到：登记为待关联结算并暂挂，汇总单列；结算确�
   expect((getByLabelText(ld, po.code + ' 关联结算') as HTMLSelectElement).value).toBe(st.id);
   await click('确认关联', ld);
   expect(store.value.state.payables.bills[0].lines[0]).toMatchObject({ settlementId: st.id });
-  expect(host.textContent).not.toContain('发票先于结算到达');
+  expect(host.textContent).not.toContain('结算确认后关联。');
   expect(host.textContent).toContain('13,950.00');
   expect((getAllByRole(host, 'button', { name: '申请付款' })[0] as HTMLButtonElement).disabled).toBe(false);
 });
