@@ -25,7 +25,7 @@ import { onThemePreference, readThemePreference, resolveTheme, writeThemePrefere
 import { useDevice } from './runtime/devicePreferences';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
-import {MistPresentedErrorContext} from './runtime/errorPresentation';
+import {MistPresentedErrorContext,useClaimedUploadRecovery} from './runtime/errorPresentation';
 import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
 import { HomePage } from './pages/HomePage';
@@ -168,7 +168,7 @@ function crumbsFor(route: Route, go: (view: string, id?: string) => void, object
 }
 function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: ThemeMode) => void }) {
   const locale = useInterfaceLanguage();
-  const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace();
+  const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace(), claimedUpload = useClaimedUploadRecovery();
   const {state} = workspace;
   const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
   const platformCompany = session.user?.platformCompany;
@@ -382,13 +382,13 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
           onSearch={() => setPalette(true)}
           assistant={!canAI ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
-          sync={base === 'account' ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : { state: workspace.error ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.error ? (workspace.pending||workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '已保存 · 公司' : '设计组件展示' }}
+          sync={base === 'account' ? undefined : platformOnly ? { state: 'ok', text: '平台运营' } : platformCompany ? { state: 'ok', text: '平台管理' } : { state: workspace.error||workspace.pending&&!workspace.saving ? 'offline' : workspace.loading||workspace.saving ? 'syncing' : 'ok', text: workspace.saving ? '正在保存' : workspace.loading ? '读取公司数据' : workspace.pending ? '需要核对同步状态' : workspace.error ? (workspace.pendingCreate ? '需要核对同步状态' : '操作未完成') : live ? '已保存 · 公司' : '设计组件展示' }}
           theme={theme} onToggleTheme={toggleTheme} onSearch={() => setPalette(true)}
           extra={platformOnly || platformCompany ? undefined : <MistReviewButton/>} notifications={platformOnly || platformCompany ? undefined : { unread: visibleNotifications.some(n=>!n.readAt), onClick:()=>setNotifications(true) }} onAsk={!canAI ? undefined : ()=>openAI()} />}
       >
         {platformCompany && <Banner tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>}
         {workspace.pendingCreate && !workspace.saving && <Banner tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>}
-        {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
+        {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
         {workspace.error && !workspace.pending && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}
         {!permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
           : Page ? <MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (FULFILLMENT_PAGES[route.view]||MARKET_PAGES[route.view]||PLATFORM_PAGES[route.view]?route.view:JSON.stringify(route))} /></MistPresentedErrorContext.Provider>

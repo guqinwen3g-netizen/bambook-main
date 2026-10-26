@@ -8,6 +8,7 @@ import type { MistState, MistFile } from '../../../../../server/src/shared/mistW
 import type { FulfillmentDocument, FulfillmentSource, FulfillmentSample, FulfillmentShipment, FulfillmentStock } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentSourceLabel, fulfillmentPositions } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
+import { useUploadRecoveryClaim } from '../../runtime/errorPresentation';
 import { useNav } from '../../nav';
 import { useRouteDraft } from './useRouteDraft';
 import { ModuleEditorDialog, ModuleEditorPage, downloadModuleCsv, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
@@ -52,23 +53,44 @@ export function shipmentReturnTarget(state:MistState|null,shipment:FulfillmentSh
 export function RecordFiles({ ids, onAttach }: {
     ids: string[];
     onAttach?: (ids: string[]) => Promise<unknown>;
-}) { const { state, uploadFile, downloadFile, pending, saving } = useMistWorkspace(); const [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [staged, setStaged] = useRouteDraft<MistFile[]>([]); const add = async (files: File[]) => { setBusy(true); setFailure(''); try {
+}) {
+  const { state, uploadFile, downloadFile, recover, pending, saving } = useMistWorkspace();
+  const [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [staged, setStaged] = useRouteDraft<MistFile[]>([]);
+  // 本记录发起、回执丢失的上传；只在同一记录页内核对后关联，换页即不再自动关联。
+  const [lost, setLost] = useRouteDraft('');
+  const owned = !!lost && pending?.kind === 'upload' && pending.requestId === lost;
+  useUploadRecoveryClaim(owned ? lost : null);
+  const attach = async (added: MistFile[]) => { setStaged(added); await onAttach?.([...ids, ...added.map(f => f.id)]); setStaged([]); };
+  const add = async (files: File[]) => {
+    setBusy(true); setFailure('');
     const added = [...staged];
-    for (const file of files) {
-        added.push(await uploadFile(file));
-        setStaged([...added]);
-    }
-    setStaged(added);
-    await onAttach?.([...ids, ...added.map(f => f.id)]);
-    setStaged([]);
+    try {
+      for (const file of files) { added.push(await uploadFile(file)); setStaged([...added]); }
+      setLost(''); await attach(added);
+    } catch (e) {
+      setFailure(e instanceof Error ? e.message : '附件保存失败'); setLost(current => current || 'pending');
+    } finally { setBusy(false); }
+  };
+  // 上传失败后待核对记录才落定：把本组件刚触发的那一笔认领下来。
+  React.useEffect(() => { if (lost === 'pending' && pending?.kind === 'upload') setLost(pending.requestId); else if (lost === 'pending' && !saving) setLost(''); }, [lost, pending, saving]);
+  const verify = async () => {
+    setBusy(true); setFailure('');
+    try {
+      const receipt = await recover(), id = receipt?.result.fileId || receipt?.result.id;
+      setLost('');
+      if (typeof id === 'string') await attach([...staged, { id } as MistFile]);
+    } catch (e) {
+      setFailure(e instanceof Error && 'status' in e && (e as { status: number }).status === 404 ? '服务器未收到原附件，请重新选择同一附件' : e instanceof Error ? e.message : '核对未完成');
+    } finally { setBusy(false); }
+  };
+  return <div className="mist-section">
+    {owned && !saving && <Banner tone="warn" title={uiText("附件上传结果待核对")} actions={<Button disabled={busy} onClick={() => void verify()}>{uiText("核对并关联")}</Button>}>{uiText(failure || '核对后关联到本记录，不会重复上传。')}</Banner>}
+    {failure && !owned && <Banner tone="bad" title={uiText("附件未完成保存")}>{failure}</Banner>}
+    {ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink></div> : null; })}
+    {onAttach && <UploadZone hint={uiText("上传当前记录的原始照片或附件")} onFiles={files => { if (!busy && !saving && (!pending || owned)) void add(files); }}/>}
+    {!!staged.length && <Button disabled={busy || saving || !!pending} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}
+  </div>;
 }
-catch (e) {
-    setFailure(e instanceof Error ? e.message : '附件保存失败');
-}
-finally {
-    setBusy(false);
-} }; return <div className="mist-section">{failure && <Banner tone="bad" title={uiText("附件未完成保存")}>{failure}</Banner>}{ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink></div> : null; })}{onAttach && <UploadZone hint={uiText("上传当前记录的原始照片或附件")} onFiles={files => { if (!busy && !saving && !pending)
-    void add(files); }}/>} {!!staged.length && <Button disabled={busy || saving || !!pending} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}</div>; }
 /** 表单草稿附件：上传新文件或移除，变化只写回草稿 ids，随表单一并提交。 */
 export function DraftFiles({ ids, onChange, onBusyChange, disabled, hint = '上传报价单、邮件截图等原始凭据', max = 20 }: { ids: string[]; onChange: (ids: string[]) => void; onBusyChange?: (busy: boolean) => void; disabled?: boolean; hint?: string; max?: number }) {
     const { state, uploadFile, downloadFile } = useMistWorkspace(); const [failure, setFailure] = React.useState(''), [busy, setBusy] = React.useState(false);
