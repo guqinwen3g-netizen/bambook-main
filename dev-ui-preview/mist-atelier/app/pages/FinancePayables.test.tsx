@@ -30,6 +30,23 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('opens the purchaser work item at its fixed contract without selecting receipts or final settlement on their behalf',async()=>{
+  prepaidWithReceipt();store.value.userId='sales';store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;const before=structuredClone(store.value.state);render();
+  const form=getByRole(document.body,'dialog',{name:'提交结算'}),contract=getByLabelText(form,'结算合同') as HTMLSelectElement;
+  expect(contract.value).toBe(po.id);expect(contract.disabled).toBe(true);expect([...contract.options].every(o=>!o.value||o.value===po.id)).toBe(true);
+  expect([...form.querySelectorAll('input[type="checkbox"]')].every(e=>!(e as HTMLInputElement).checked)).toBe(true);expect(store.value.state).toEqual(before);expect(store.value.run).not.toHaveBeenCalled();
+  await click('取消',form);expect(go).toHaveBeenLastCalledWith('payment-vouchers',undefined,{section:'payables'});
+});
+
+it('does not open a settlement write form from a contract URL without submit permission',()=>{
+  prepaidWithReceipt();store.value.permissions=[MIST_FINANCE_SCOPES.invoice];route.id=po.id;render();expect(queryByRole(document.body,'dialog',{name:'提交结算'})).toBeNull();expect(queryByRole(host,'button',{name:'提交结算'})).toBeNull();
+});
+
+it('does not replace an unavailable work-item contract with another approved contract',()=>{
+  prepaidWithReceipt();store.value.permissions=[SETTLEMENT_SCOPES.submit];store.value.state.fulfillment.purchases.find((p:any)=>p.id===po.id).state='cancelled';route.id=po.id;render();
+  const form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('来源合同已不可用');expect((getByRole(form,'button',{name:'提交复核'}) as HTMLButtonElement).disabled).toBe(true);expect(store.value.run).not.toHaveBeenCalled();
+});
+
 it('opens a routed settlement after workspace facts load and after navigating from another payable tab',async()=>{
  const state=store.value.state;state.payables.settlements=[{id:'handoff-settlement',code:'ST-HANDOFF',purchaseId:po.id,purchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:po.currency,unit:po.unit,price:po.price,receiptIds:[],quantity:1,rejected:0,amount:po.price,final:false,disputes:[],note:'原结算依据',fileIds:[],state:'pending',submitterId:'business',submittedBy:'业务员',submittedAt:ctx.now}];route.id='handoff-settlement';store.value.state=null;render();store.value.state=state;render();expect(getByRole(host,'table',{name:'供应商结算'})).toBeTruthy();expect(host.querySelector('[data-settlement="handoff-settlement"]')).toBeTruthy();await click(/^应付票据 ·/);expect(getByRole(host,'table',{name:'应付票据'})).toBeTruthy();state.payables.settlements.push({...state.payables.settlements[0],id:'another-settlement',code:'ST-ANOTHER'});route={...route,id:'another-settlement'};render();expect(getByRole(host,'table',{name:'供应商结算'})).toBeTruthy();expect(host.querySelector('[data-settlement="another-settlement"]')).toBeTruthy();
 });
@@ -181,7 +198,7 @@ it('结算：业务员按收货提交，财务确认预付抵扣（与建议不�
   select('结算合同', po.id);
   const box = getByRole(sd, 'checkbox', { name: /嘉兴仓 · 实收 1000/ }) as HTMLInputElement;
   await act(async () => box.click());
-  expect(sd.textContent).toContain('本次建议抵扣 13,950.00');
+  expect(sd.textContent).toContain('建议抵扣');expect(sd.textContent).toContain('13,950.00');
   await click('添加争议 / 扣款', sd); input('争议说明 1', '色差待确认扣款'); input('争议金额 1', '500');
   await click('提交复核', dialog('提交结算'));
   const st = store.value.state.payables.settlements[0];
@@ -386,4 +403,61 @@ it('只读付款计划保留金额与合同事实，不显示写操作及权限�
  expect(host.textContent).toContain('计划金额');expect(host.textContent).toContain(po.code);
  for(const name of ['申请预付款','历史付款补登','取消计划'])expect(queryByRole(host,'button',{name})).toBeNull();
  expect(host.textContent).not.toContain('需要票据登记权限');expect(host.textContent).not.toContain('计划不是应付');expect(store.value.run).not.toHaveBeenCalled();
+});
+
+it('shows full-quantity settlement as final before submission and presents the money as fields',async()=>{
+ prepaidWithReceipt();store.value.state.fulfillment.receipts.find((r:any)=>r.id==='rcpt-ui').quantity=po.quantity;store.value.permissions=[SETTLEMENT_SCOPES.submit];store.value.userId='sales';route.id=po.id;render();
+ const form=getByRole(document.body,'dialog',{name:'提交结算'}),receipt=form.querySelector('[data-settle-receipt="rcpt-ui"] input') as HTMLInputElement;
+ await act(async()=>receipt.click());const final=getByLabelText(form,'最终结算') as HTMLInputElement;expect(final.checked).toBe(true);expect(final.disabled).toBe(true);expect(form.textContent).toContain('合同单价');expect(form.textContent).toContain('建议抵扣');expect(store.value.run).not.toHaveBeenCalled();
+});
+it('does not reopen a completed final settlement as a writable work item',()=>{
+ prepaidWithReceipt();const settlement=as('sales','业务',{type:'payable.settlement.submit',payload:{purchaseId:po.id,receiptIds:['rcpt-ui'],final:true}});as('finance','财务',{type:'payable.settlement.confirm',payload:{id:settlement.id,prepaymentApplied:33480}});store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;render();
+ const form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('合同已完成最终结算');expect((getByRole(form,'button',{name:'提交复核'}) as HTMLButtonElement).disabled).toBe(true);expect(store.value.run).not.toHaveBeenCalled();
+});
+it('explains a pending finance review instead of permitting duplicate settlement submission',()=>{
+ prepaidWithReceipt();as('sales','业务',{type:'payable.settlement.submit',payload:{purchaseId:po.id,receiptIds:['rcpt-ui']}});store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;render();
+ const form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('已有待财务复核结算');expect((getByRole(form,'button',{name:'提交复核'}) as HTMLButtonElement).disabled).toBe(true);expect(store.value.run).not.toHaveBeenCalled();
+});
+
+it.each(['success','failure'] as const)('does not apply a prior contract %s response to the next settlement editor',async outcome=>{
+ prepaidWithReceipt();const state=store.value.state;state.fulfillment.purchases.push({...po,id:'next-contract',code:'PO-NEXT'});state.fulfillment.receipts.push({id:'next-receipt',purchaseId:'next-contract',quantity:1,rejected:0,date:day,location:'成品仓'});store.value.permissions=[SETTLEMENT_SCOPES.submit];store.value.userId='sales';route.id=po.id;
+ let resolve!:(value:any)=>void,reject!:(error:Error)=>void;store.value.run.mockImplementationOnce(()=>new Promise((yes,no)=>{resolve=yes;reject=no;}));render();let form=getByRole(document.body,'dialog',{name:'提交结算'});await act(async()=>form.querySelector<HTMLInputElement>('[data-settle-receipt="rcpt-ui"] input')!.click());await click('提交复核',form);
+ route={...route,id:'next-contract'};render();await act(async()=>outcome==='success'?resolve({requestId:'prior',revision:2,result:{id:'previous-settlement'}}):reject(new Error('上一合同的迟到失败')));
+ form=getByRole(document.body,'dialog',{name:'提交结算'});expect((getByLabelText(form,'结算合同') as HTMLSelectElement).value).toBe('next-contract');expect(form.textContent).not.toContain('上一合同的迟到失败');expect(go).not.toHaveBeenCalledWith('payment-vouchers','previous-settlement',expect.anything(),expect.anything());
+});
+it('retains settlement receipt choices and notes during a same-contract refresh',async()=>{
+ prepaidWithReceipt();store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;render();let form=getByRole(document.body,'dialog',{name:'提交结算'});await act(async()=>form.querySelector<HTMLInputElement>('[data-settle-receipt="rcpt-ui"] input')!.click());text('结算说明','明细已核对',form);store.value.state=structuredClone(store.value.state);render();form=getByRole(document.body,'dialog',{name:'提交结算'});expect((getByLabelText(form,'结算说明') as HTMLTextAreaElement).value).toBe('明细已核对');expect(form.querySelector<HTMLInputElement>('[data-settle-receipt="rcpt-ui"] input')!.checked).toBe(true);expect(store.value.run).not.toHaveBeenCalled();
+});
+
+it('shows transferred-in prepayment even when this contract has no direct prepayment',()=>{prepaidWithReceipt();store.value.state.payables.payments=[];store.value.state.payables.prepaymentMoves.push({id:'incoming',code:'PM-IN',kind:'transfer',purchaseId:'another',purchaseCode:'PO-FROM',targetPurchaseId:po.id,targetPurchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:po.currency,amount:1000,date:day,reference:'对账依据',reason:'同供应商转抵',at:ctx.now,actor:'财务'});store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;render();const form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('转入预付');expect(form.textContent).toContain('1,000.00');expect(store.value.run).not.toHaveBeenCalled();});
+
+it('recovers a lost settlement response inside the locked dialog without submitting again',async()=>{
+ prepaidWithReceipt();store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;
+ store.value.run=vi.fn(async(command:any)=>{const result=applyMistCommand(store.value.state,command,ctx);store.value.state=result.state;store.value.pending={kind:'command',workspaceId:'space',requestId:'lost',actorId:'finance',command};render();throw Object.assign(new Error('网络连接中断'),{mistPendingCommand:{workspaceId:'space',requestId:'lost',actorId:'finance'}});});
+ store.value.recover=vi.fn(async()=>{const id=store.value.state.payables.settlements[0].id;store.value.pending=null;render();return{requestId:'lost',revision:2,result:{id}};});render();
+ let form=getByRole(document.body,'dialog',{name:'提交结算'});await act(async()=>form.querySelector<HTMLInputElement>('[data-settle-receipt="rcpt-ui"] input')!.click());await click('提交复核',form);
+ form=getByRole(document.body,'dialog',{name:'提交结算'});expect(queryByRole(form,'button',{name:'提交复核'})).toBeNull();expect(getByLabelText(form,'结算说明').matches(':disabled')).toBe(true);
+ await click('核对原操作结果',form);expect(store.value.recover).toHaveBeenCalledOnce();expect(store.value.run).toHaveBeenCalledOnce();expect(store.value.state.payables.settlements).toHaveLength(1);expect(queryByRole(document.body,'dialog',{name:'提交结算'})).toBeNull();expect(go).toHaveBeenLastCalledWith('payment-vouchers',store.value.state.payables.settlements[0].id,{section:'payables'},{keepScroll:true});
+});
+
+it('shows settlement actions only to the responsible purchaser or finance role',()=>{
+ prepaidWithReceipt();const result=as('sales','业务',{type:'payable.settlement.submit',payload:{purchaseId:po.id,receiptIds:['rcpt-ui']}});route.id=result.id;
+ store.value.userId='sales';store.value.permissions=[SETTLEMENT_SCOPES.submit];render();expect(queryByRole(document.body,'button',{name:'确认结算'})).toBeNull();expect(queryByRole(document.body,'button',{name:'退回结算'})).toBeNull();expect(queryByRole(document.body,'button',{name:'撤回结算'})).toBeTruthy();expect(document.body.textContent).not.toContain('需要核销权限');
+ store.value.userId='another-sales';render();expect(queryByRole(document.body,'button',{name:'撤回结算'})).toBeNull();
+ store.value.userId='finance';store.value.permissions=[SETTLEMENT_SCOPES.confirm];render();expect(queryByRole(document.body,'button',{name:'撤回结算'})).toBeNull();expect((getByRole(document.body,'button',{name:'确认结算'}) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it('opens the exact recovered settlement after a reload without recreating or resubmitting the draft',async()=>{
+ prepaidWithReceipt();store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;const command={type:'payable.settlement.submit',payload:{purchaseId:po.id,receiptIds:['rcpt-ui']}};
+ const result=as('sales','业务',command);store.value.userId='sales';store.value.pending={kind:'command',workspaceId:'space',requestId:'restored',actorId:'sales',command};store.value.recover=vi.fn(async()=>{store.value.pending=null;render();return{requestId:'restored',revision:2,result};});render();
+ const form=getByRole(document.body,'dialog',{name:'提交结算'});await click('核对原操作结果',form);expect(store.value.run).not.toHaveBeenCalled();expect(store.value.state.payables.settlements).toHaveLength(1);expect(queryByRole(document.body,'dialog',{name:'提交结算'})).toBeNull();expect(go).toHaveBeenLastCalledWith('payment-vouchers',result.id,{section:'payables'},{keepScroll:true});
+});
+
+it('retains the recovery action after another network failure and does not navigate a new contract to the old result',async()=>{
+ prepaidWithReceipt();store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;
+ store.value.run=vi.fn(async(command:any)=>{store.value.pending={kind:'command',workspaceId:'space',requestId:'lost',actorId:'finance',command};render();throw Object.assign(new Error('网络连接中断'),{mistPendingCommand:{workspaceId:'space',requestId:'lost',actorId:'finance'}});});
+ let resolve!:Function;store.value.recover=vi.fn().mockRejectedValueOnce(new Error('仍未连接')).mockImplementationOnce(()=>new Promise(r=>{resolve=r;}));render();
+ let form=getByRole(document.body,'dialog',{name:'提交结算'});await act(async()=>form.querySelector<HTMLInputElement>('[data-settle-receipt="rcpt-ui"] input')!.click());await click('提交复核',form);await click('核对原操作结果',getByRole(document.body,'dialog',{name:'提交结算'}));
+ form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('仍未连接');expect((getByRole(form,'button',{name:'核对原操作结果'}) as HTMLButtonElement).disabled).toBe(false);await click('核对原操作结果',form);
+ store.value.state.fulfillment.purchases.push({...po,id:'next-contract',code:'PO-NEXT'});route={...route,id:'next-contract'};render();await act(async()=>{store.value.pending=null;resolve({requestId:'lost',revision:2,result:{id:'old-settlement'}});});expect(go).not.toHaveBeenCalledWith('payment-vouchers','old-settlement',expect.anything(),expect.anything());expect((getByLabelText(document.body,'结算合同') as HTMLSelectElement).value).toBe('next-contract');
 });

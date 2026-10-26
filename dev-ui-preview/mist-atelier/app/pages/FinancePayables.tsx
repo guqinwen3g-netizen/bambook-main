@@ -1,3 +1,4 @@
+import {PayableDialog as Dialog,PayableDialogRecovery} from './PayableDialog';
 import {SupplierInvoiceTypeDialog} from './SupplierInvoiceTypeDialog';
 import {SUPPLIER_INVOICE_TYPES,billRebateLock,type SupplierInvoiceType} from '../../../../server/src/shared/mistPayables';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
@@ -7,7 +8,7 @@ import {businessNow} from '../runtime/businessClock';
 import { BaseDataImportButton } from './modules/BaseDataImport';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import React from 'react';
-import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, EmptyState, Facts, Field, FormGrid, Mono, ObjectCell, Pill, Segmented, Select, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
+import { Banner, Button, Card, CardHeader, Checkbox, DataTable, EmptyState, Facts, Field, FormGrid, Mono, ObjectCell, Pill, Segmented, Select, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import { type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { payableBills, payableSources, supplierPayableSummary, supplierPayments, payablesCommandPermissions, prepaymentPlans, paymentRequests, billRequestedUnpaidMinor, PAYMENT_REQUEST_SCOPES, SETTLEMENT_SCOPES, supplierSettlements, invoiceableSettlements, purchaseRequiresSettlementLink, paymentPlanStageLabel, type PaymentPlanStage, type PayableBillView, type PayablesCommand, type SupplierPaymentView, type PaymentRequest, type PrepaymentPlanView, purchasePrepaymentReadback, supplierDeductions, deductibleRecoveries, supplierSettlements as settlementsOf, type PrepaymentMove } from '../../../../server/src/shared/mistPayables';
@@ -70,7 +71,7 @@ const REASON: Record<ReasonKind, { title: string; label: string; action: string;
 };
 
 export function FinancePayables() {
-  const { state, loading, run, saving, pending } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), toast = useToast();
+  const { state, loading, run, saving, pending, workspace, recover } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), toast = useToast();
   const canBill = session.hasPermission(MIST_FINANCE_SCOPES.invoice), canPay = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canAllocate = session.hasPermission(MIST_FINANCE_SCOPES.reconcile), canRequest = session.hasPermission(PAYMENT_REQUEST_SCOPES.create as any), canSettle = session.hasPermission(SETTLEMENT_SCOPES.submit as any), canConfirm = canAllocate, day = today();
   const routedView = payableTargetView(state, route.id);
   const [view, setView] = React.useState<View>(() => routedView ?? 'bills');
@@ -82,8 +83,18 @@ export function FinancePayables() {
   const [linkId, setLinkId] = React.useState(''), [deductId, setDeductId] = React.useState(''), [moveDraft, setMoveDraft] = React.useState<{ kind: 'refund' | 'transfer'; purchaseId: string } | null>(null);
   const [advanceId, setAdvanceId] = React.useState(''), [backfillId, setBackfillId] = React.useState(''), [planLinkId, setPlanLinkId] = React.useState('');
   const [invoiceTypeId,setInvoiceTypeId]=React.useState('');
-  const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
+  const [working, setWorking] = React.useState(false), [operationFailure, setFailure] = React.useState(''), [recovering,setRecovering]=React.useState(false);
   const busy = working || loading || saving || !!pending;
+  const actionKey=`${session.sessionKey??session.user?.id??''}:${workspace?.id??''}:${route.id??''}`,actionScope=React.useRef(actionKey),mounted=React.useRef(true);actionScope.current=actionKey;
+  const unresolved=React.useRef<{scope:string;requestId:string;workspaceId:string;actorId:string;done:(result:Record<string,unknown>)=>void}|null>(null);
+  React.useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  React.useEffect(()=>{setWorking(false);setRecovering(false);setFailure('');setBillDraft(null);setPayDraft(null);setReasonDraft(null);setPlanDraft(null);setPreDraft(null);setSettleOpen(false);setConfirmId('');setLinkId('');setDeductId('');setMoveDraft(null);setAdvanceId('');setBackfillId('');setPlanLinkId('');setInvoiceTypeId('');},[actionKey]);
+  const settlementPurchaseId = state?.fulfillment?.purchases?.find(purchase => purchase.id === route.id)?.id;
+  React.useEffect(() => {
+    if (!settlementPurchaseId) return;
+    if (!canSettle) { setSettleOpen(false); return; }
+    setView('settlements'); setFailure(''); setSettleOpen(true);
+  }, [settlementPurchaseId, canSettle, actionKey]);
   React.useEffect(() => { setSelected(route.id || ''); setDrawer(!!route.id); if (routedView) setView(routedView); }, [route.id, routedView]);
 
   const bills = state ? payableBills(state, day) : [], payments = state ? supplierPayments(state, day) : [], sources = state ? payableSources(state) : [], summary = state ? supplierPayableSummary(state, day) : [];
@@ -97,7 +108,31 @@ export function FinancePayables() {
   const execute = async (command: PayablesCommand, done: (result: Record<string, unknown>) => void) => {
     if (payablesCommandPermissions(command).some(permission => !session.hasPermission(permission as any))) { setFailure('没有办理此项财务动作的权限。'); return; }
     if (busy) return; setWorking(true); setFailure('');
-    try { const receipt = await run(command as any); done(receipt.result as Record<string, unknown>); } catch (problem) { setFailure(problem instanceof Error ? problem.message : '操作失败，请重试'); } finally { setWorking(false); }
+    const scope=actionScope.current,available=()=>mounted.current&&actionScope.current===scope;
+    unresolved.current=null;
+    try { const receipt = await run(command as any); if(available())done(receipt.result as Record<string, unknown>); } catch (problem) { if(available()){
+      const intent=(problem as {mistPendingCommand?:{requestId:string;workspaceId:string;actorId:string}})?.mistPendingCommand;
+      if(intent)unresolved.current={...intent,scope,done};
+      setFailure(intent?'':problem instanceof Error ? problem.message : '操作失败，请重试');
+    } } finally { if(available())setWorking(false); }
+  };
+  const pendingPayable=pending?.kind==='command'&&!!pending.command?.type.startsWith('payable.');
+  const failure=pendingPayable?'':operationFailure;
+  const recoverPayable=async()=>{
+    if(!pendingPayable||saving||working)return;
+    const scope=actionScope.current,intent=pending,original=unresolved.current;
+    const available=()=>mounted.current&&actionScope.current===scope;
+    setWorking(true);setRecovering(true);setFailure('');
+    try{
+      const receipt=await recover();
+      if(!available())return;
+      if(!receipt||receipt.requestId!==intent.requestId)return;
+      if(original?.scope===scope&&original.requestId===intent.requestId&&original.workspaceId===intent.workspaceId&&original.actorId===session.user?.id){unresolved.current=null;original.done(receipt.result as Record<string,unknown>);}
+      // A reload loses the form callback, while the persisted command still
+      // identifies its exact source. Only this known create result has a route.
+      else if(intent.command?.type==='payable.settlement.submit'&&intent.command.payload.purchaseId===route.id&&intent.workspaceId===workspace?.id&&intent.actorId===session.user?.id){setSettleOpen(false);setView('settlements');open(String(receipt.result.id));}
+    }catch(problem){if(available())setFailure(problem instanceof Error?problem.message:'原操作仍待核对');}
+    finally{if(available()){setWorking(false);setRecovering(false);}}
   };
 
   /** 勾选合同时的默认关联：有可开票结算就关联第一笔，金额取结算未开票额。 */
@@ -299,7 +334,7 @@ export function FinancePayables() {
     : view === 'sources' ? <DataTable ariaLabel={uiText("待登记来源合同")} rows={sources} columns={canBill ? sourceColumns : sourceColumns.filter(column=>column.key!=='act')} loading={loading} rowKey={r => r.purchase.id} onRowClick={r => go('procurement', r.purchase.id)} empty={<EmptyState title={uiText("暂无已批准的采购 / 加工合同")} description={uiText("合同批准后才可登记供应商票据。")} />} />
     : <DataTable ariaLabel={uiText("供应商付款")} rows={payments} columns={paymentColumns} loading={loading} rowKey={p => p.id} selectedKey={selected} onRowClick={p => open(p.id)} empty={<EmptyState title={uiText("还没有供应商付款")} description={uiText("实际付款后在这里登记，并分配到一张或多张票据。")} />} />;
 
-  return <div className="mist-col" data-finance-payables>
+  return <PayableDialogRecovery value={{pending:pendingPayable&&(!saving||recovering),failure:operationFailure,busy:working||saving||loading,recover:()=>void recoverPayable()}}><div className="mist-col" data-finance-payables>
     {failure && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId && <Banner tone="bad" title={uiText("操作没有完成")}>{failure}</Banner>}
     <Card>
       <CardHeader title={uiText("供应商应付（按原币）")} tools={<div className="mist-row" style={{ flexWrap: 'wrap' }}>
@@ -415,7 +450,7 @@ export function FinancePayables() {
       </div>}
     </Dialog>
 
-    <SettlementSubmitDialog open={settleOpen} state={state} busy={busy} canSettle={canSettle} failure={settleOpen ? failure : ''} onClose={() => { setSettleOpen(false); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={id => { setSettleOpen(false); setView('settlements'); open(id); toast('结算已提交，等待财务复核'); }} />
+    <SettlementSubmitDialog open={settleOpen} state={state} initialPurchaseId={settlementPurchaseId} busy={busy} canSettle={canSettle} failure={settleOpen ? failure : ''} onClose={() => { setSettleOpen(false); setFailure(''); if (settlementPurchaseId) go('payment-vouchers', undefined, { section: 'payables' }); }} execute={(command, done) => void execute(command, done)} onDone={id => { setSettleOpen(false); setView('settlements'); open(id); toast('结算已提交，等待财务复核'); }} />
     <SettlementConfirmDialog settlement={settlements.find(x => x.id === confirmId)} busy={busy} canConfirm={canConfirm} failure={confirmId ? failure : ''} onClose={() => { setConfirmId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setConfirmId(''); toast('结算已确认'); }} />
     {linkId && state && bills.find(b => b.id === linkId) && <BillLinkDialog bill={bills.find(b => b.id === linkId)!} state={state} busy={busy} allowed={canBill} failure={failure} onClose={() => { setLinkId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setLinkId(''); toast('已关联结算'); }} />}
     {deductId && state && bills.find(b => b.id === deductId) && <DeductionDialog bill={bills.find(b => b.id === deductId)!} state={state} busy={busy} allowed={canAllocate} failure={failure} onClose={() => { setDeductId(''); setFailure(''); }} execute={(command, done) => void execute(command, done)} onDone={() => { setDeductId(''); toast('索赔扣款已登记'); }} />}
@@ -427,5 +462,5 @@ export function FinancePayables() {
       footer={<><Button disabled={busy} onClick={() => setReasonDraft(null)}>{uiText("取消")}</Button><Button variant="danger" loading={busy} disabled={busy || !reasonDraft || !reasonAllowed(reasonDraft.kind) || !reasonDraft.reason.trim()} onClick={submitReason}>{uiText(reasonDraft ? REASON[reasonDraft.kind].action : '')}</Button></>}>
       {reasonDraft && <div className="mist-col">{failure && <Banner tone="bad" title={uiText("未能完成")}>{failure}</Banner>}<Field label={uiText(REASON[reasonDraft.kind].label)} required><TextArea aria-label={uiText(REASON[reasonDraft.kind].label)} rows={3} value={reasonDraft.reason} onChange={e => setReasonDraft({ ...reasonDraft, reason: e.target.value })} /></Field></div>}
     </Dialog>
-  </div>;
+  </div></PayableDialogRecovery>;
 }

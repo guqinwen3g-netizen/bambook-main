@@ -6,7 +6,7 @@ import { shipmentStage } from '../pages/modules/ShipmentsPage';
 import { financeReceiptDisplay } from '../pages/FinancePage';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
-import { SETTLEMENT_SCOPES } from '../../../../server/src/shared/mistPayables';
+import { SETTLEMENT_SCOPES, settlementReceipts, purchaseRequiresSettlementLink } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 
 type CanRead = (view: string) => boolean;
@@ -149,6 +149,25 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       target: { view: 'shipments', id: shipment.id, detail: 'full' } });
   }
   if (canRead('payment-vouchers')) {
+    const settlementFacts = state.payables?.settlements;
+    if (me && canRead('procurement') && can(SETTLEMENT_SCOPES.submit) && Array.isArray(settlementFacts) && f.purchases && f.receipts) {
+      for (const purchase of f.purchases) {
+        if (purchase.state !== 'approved' || purchase.requesterId !== me) continue;
+        const heldInvoice=state.payables?.bills.some(bill=>bill.state==='open'&&bill.lines.some(line=>line.purchaseId===purchase.id&&line.awaitingSettlement&&!line.settlementId));
+        const formalFollowup=settlementFacts.some(row=>row.purchaseId===purchase.id&&['returned','reversed'].includes(row.state));
+        if(!purchaseRequiresSettlementLink(state,purchase.id)&&!heldInvoice&&!formalFollowup)continue;
+        if (settlementFacts.some(row => row.purchaseId === purchase.id && (row.state === 'pending' || row.state === 'confirmed' && row.final))) continue;
+        const receipts = settlementReceipts(state, purchase.id).filter(row => !row.settled && row.receipt.quantity > 0);
+        if (!receipts.length) continue;
+        const quantity = receipts.reduce((sum, row) => sum + row.receipt.quantity, 0);
+        // Reuse the current receipt/settlement facts; this reminder never marks
+        // goods accepted, creates a settlement or changes the contract due date.
+        push({ id: 'settlement-submit:' + purchase.id, source: 'finance', title: `${purchase.code} · ${uiText('待结算')}`,
+          meta: [purchase.supplier, `${quantity.toLocaleString('en-US', { maximumFractionDigits: 4 })} ${uiText(purchase.unit)}`].join(' · '),
+          when: '待结算', urgent: false, at: receipts.map(row => row.receipt.date).sort().at(-1) || '',
+          target: { view: 'payment-vouchers', id: purchase.id, section: 'payables' } });
+      }
+    }
     if (can(SETTLEMENT_SCOPES.confirm)) for (const settlement of state.payables?.settlements ?? []) {
       if (settlement.state !== 'pending') continue;
       push({ id: 'settlement:' + settlement.id, source: 'finance', title: `${settlement.code} · ${uiText('待财务复核')}`,
