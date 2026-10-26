@@ -95,10 +95,14 @@ export function orderDepositCoverage(root:Root,orderId:string){
 }
 export function assertOrderDepositCovered(root:Root,orderId:string){const coverage=orderDepositCoverage(root,orderId);if(coverage.status==='unconfigured')fail('请先明确合同付款方式及T/T定金比例，不能按未配置视为已收定金','PRECONDITION');if(coverage.status==='insufficient')fail(`订单定金尚不足：要求 ${coverage.required}，已确认归属 ${coverage.received}`,'PRECONDITION');assertOrderFundingIntegrity(root);return coverage;}
 
-/** Explicit cumulative order percentage, approved with the contract; never inferred from prose. */
+/** Explicit T/T cumulative order percentage; other settlement methods do not impose a cash percentage. */
 export function orderShipmentPaymentCoverage(root:Root,orderId:string){
  const order=root.orders.find(o=>o.id===orderId);if(!order)return fail('来源订单不存在','NOT_FOUND');
- const percent=order.governance?.contract.preShipmentPercent,received=orderFundingCoveredAmount(root,orderId);
+ const contract=order.governance?.contract,received=orderFundingCoveredAmount(root,orderId);
+ // The contract editor exposes this percentage only for T/T. A previous T/T
+ // value must not turn L/C presentation or agreed credit into advance cash.
+ if(contract&&['LC','OA','OTHER'].includes(contract.paymentMethod))return {status:'not_required' as const,required:0,received,percent:null,shortage:0};
+ const percent=contract?.preShipmentPercent;
  if(typeof percent!=='number'||!Number.isFinite(percent)||percent<0||percent>100)return {status:'unconfigured' as const,required:null,received,percent:null,shortage:null};
  let rate:number;try{rate=mistMoneyMinor(percent);}catch{return {status:'unconfigured' as const,required:null,received,percent:null,shortage:null};}
  const requiredMinor=Number((BigInt(mistMoneyMinor(order.amount))*BigInt(rate)+BigInt(5000))/BigInt(10000));

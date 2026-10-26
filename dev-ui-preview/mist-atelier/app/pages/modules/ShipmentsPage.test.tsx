@@ -141,6 +141,13 @@ it('keeps an uploaded departure original through a failed save and submits its f
   expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.shipments.depart',payload:expect.objectContaining({id:'s',evidence:'承运人开航确认',fileIds:['departure-proof']})});
 });
 
+it('allows an L/C shipment without demanding a T/T cash percentage while retaining other departure gates',()=>{
+ const state=store.state!,contract=state.orders[0].governance!.contract;contract.paymentMethod='LC';delete contract.preShipmentPercent;
+ state.fulfillment.shipments.push(shipment('lc',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}));state.fulfillment.customs.push(customs('lc','cleared'));
+ render('lc');expect((getByRole(host,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(false);expect(host.textContent).not.toContain('出运前累计收款比例');
+ delete state.fulfillment.shipments[0].documentsSentAt;store.state={...state};render('lc');expect((getByRole(host,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(true);expect(host.textContent).toContain('等待业务登记对客发送 CI / PL');
+});
+
 it('shows an unpaid contractual balance and prevents opening departure until the receipt belongs to this order',async()=>{
  const state=store.state!,f=state.fulfillment;state.orders[0].governance!.contract.preShipmentPercent=100;
  f.shipments.push(shipment('s',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}));f.customs.push(customs('s','cleared'));
