@@ -145,6 +145,13 @@ describe('高风险关闭、豁免、带风险放行走部门主管审批，结�
     expect(after.platform!.risks[0].state).toBe('InProgress'); expect(getRiskReviews(after).filter(t => t.target.id === id)).toEqual([]);
     expect(() => run(after, { type: 'platform.risk.decide', payload: { id, escalationId: e.id, decision: 'approved', note: 'x' } }, ctx('周经理'))).toThrow(/已答复/);
   });
+  it.each(['lost-write','transferred'] as const)('原申请人失去当前处理权后不可撤回：%s', cause => {
+    const {s:s0,id,me}=setup();const s=run(s0,{type:'platform.risk.escalate',payload:{id,action:'release',reason:'按原交期出运'}},me).state;
+    const risk=s.platform!.risks.find(r=>r.id===id)!,e=pendingEscalation(risk)!;
+    if(cause==='transferred'){const order=s.orders.find(o=>o.id===risk.orderId)!;order.owner='新经办';order.ownerId='id-new-owner';}
+    const actor=cause==='lost-write'?sales(me.actorName,{orders:false,customers:false}):me,before=structuredClone(s);
+    expect(()=>run(s,{type:'platform.risk.withdraw',payload:{id,escalationId:e.id}},actor)).toThrow(/本人负责/);expect(s).toEqual(before);
+  });
   it('预警等级不能被调低；来源预警升为严重后按高风险处理', () => {
     const { state, c, day } = demo(); const inv = state.invoices.find(i => i.open > 0 && i.orderId)!; inv.due = '2026-09-20';
     const sig = riskSignals(state, day).find(x => x.key === 'invoice-overdue:' + inv.id)!; expect(sig.level).toBe('warning');

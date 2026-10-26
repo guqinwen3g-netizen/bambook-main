@@ -267,6 +267,9 @@ export function applyRiskCommand(root: MistState, risks: RiskRecord[], command: 
       const row = find(risks, v.id), e = pendingEscalation(row);
       if (!e || e.id !== v.escalationId) fail('这次申请已答复或已变化，请刷新后查看', 'CONFLICT');
       if (!(e!.requesterId ? e!.requesterId === c.actorId : e!.requestedBy === c.actorName)) fail('只有申请人可以撤回申请', 'FORBIDDEN');
+      // A frozen requester identity does not preserve handling rights after
+      // permission revocation or transfer of the source business record.
+      assertHandle(root, c, row);
       const reason = text(v.reason ?? '', '撤回原因', false, 500);
       e!.decision = 'withdrawn'; e!.decisionNote = reason; e!.decidedBy = c.actorName; e!.decidedById = c.actorId; e!.decidedAt = c.now; row.state = 'InProgress'; row.updatedAt = c.now;
       for (const t of root.tasks) if (t.kind === 'risk-escalation:' + e!.id) t.done = true;

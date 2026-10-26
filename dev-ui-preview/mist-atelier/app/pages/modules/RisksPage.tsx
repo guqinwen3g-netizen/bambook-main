@@ -144,8 +144,7 @@ export function RisksPage() {
           ...(e ? [{ label: '审批中', value: RISK_ACTION_LABEL[e.action || 'authorize'] }] : []),
         ] }} />; })()
     : null;
-  const roleBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有风险处理权限，可查看预警与台账，不能登记或推进。")}</Banner></div>
-    : !canAll ? <div className="mist-section"><Banner tone="neutral" title={uiText("按负责人处理")}>{uiText("你可以登记和推进本人负责的客户 / 订单上的风险，并直接关闭提示、警告级风险；严重风险的关闭、豁免与带风险放行需提交部门主管审批。")}</Banner></div> : null;
+  const roleBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}/></div> : null;
   if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")}
@@ -180,7 +179,7 @@ function SignalDetail({ s, risk, registerReason, locked, onRegister, onOpenRisk,
     <Facts items={[{ label: '来源', value: `${SOURCE_LABEL[s.source.kind]} · ${s.source.label}` }, { label: '起始', value: s.since }]} />
     <ActionBar busy={locked} actions={[
       { label: '打开原记录', icon: ArrowUpRight, onClick: onSource, primary: !!risk },
-      risk ? { label: `查看风险（${risk.owner}）`, icon: FileText, onClick: () => onOpenRisk(risk.id) } : { label: '登记风险', icon: Plus, onClick: onRegister, primary: true, reason: registerReason },
+      risk ? { label: `查看风险（${risk.owner}）`, icon: FileText, onClick: () => onOpenRisk(risk.id) } : { label: '登记风险', icon: Plus, onClick: onRegister, primary: true, hidden: !!registerReason },
     ]} />
     <p className="mist-note">{uiText("预警只读：来源记录改变后自动消失或更新。它不冻结付款、不删单、不改 QC / 账务 / 审批；实际处理在原记录完成。")}</p>
   </DetailBody>;
@@ -206,9 +205,9 @@ function RiskDetail({ r, state, day, me, meId, locked, writeReason, onAck, onPla
     {raised && !done && <p className="mist-note">{uiText("登记时为")}{uiText(LEVEL[r.level].label)}{uiText("，来源预警当前已升为")}{uiText(LEVEL[level].label)}{uiText("，按当前等级处理。")}</p>}
     {esc && <div className="mist-col" data-risk-escalation>
       <Banner tone="warn" title={ui`待部门主管审批 · ${RISK_ACTION_LABEL[esc.action || 'authorize']}`}>{esc.requestedBy} · {shortWhen(esc.requestedAt)}：{esc.reason}</Banner>
-      <ActionBar busy={locked} actions={[{ label: '到审批中心', icon: ArrowUpRight, onClick: onApprovals }, { label: '撤回申请', icon: Undo2, onClick: onWithdraw, hidden: !mine }]} />
+      <ActionBar busy={locked} actions={[{ label: '到审批中心', icon: ArrowUpRight, onClick: onApprovals }, { label: '撤回申请', icon: Undo2, onClick: onWithdraw, hidden: !mine || !!writeReason }]} />
     </div>}
-    {!done && <ActionBar busy={locked} actions={[
+    {!done && !writeReason && <ActionBar busy={locked} actions={[
       { label: '接手', icon: UserCheck, onClick: onAck, primary: true, hidden: r.state !== 'Open', reason: writeReason },
       { label: r.plan ? '更新处置方案' : '制定处置方案', icon: FileText, onClick: onPlan, primary: r.state === 'Acknowledged', hidden: r.state === 'Open' || !!esc, reason: writeReason },
       { label: '申请审批', icon: Gavel, onClick: () => onEscalate(high ? 'waive' : 'release'), hidden: r.state === 'Open' || !!esc, reason: stepReason },
