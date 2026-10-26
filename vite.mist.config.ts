@@ -5,6 +5,7 @@ import { mistDevelopmentProxy } from './scripts/mist-dev-target.mjs';
 // Both Mist ports run the same approved frontend source. Business adapters attach here.
 export default defineConfig(
   mergeConfig(referenceConfig, {
+    define: { 'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('false') },
     cacheDir: '/tmp/bambook-mist-runtime-cache',
     server: {
       port: 3001,

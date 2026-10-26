@@ -13,11 +13,11 @@ export function personalSettingsSection(route: { view: string; section?: string 
 }
 
 /** Navigation and direct URLs use the same read permission; write actions retain their own guards. */
-export function canOpenMistView(view: string, context: { canAccessView: (view: View) => boolean; platformOperator: boolean }, developmentBuild: boolean): boolean {
+export function canOpenMistView(view: string, context: { canAccessView: (view: View) => boolean; platformOperator: boolean }, referencePreview: boolean): boolean {
   if (COMPANY_SETTINGS_VIEWS.has(view)) return context.canAccessView(View.SystemSettings);
   if (PERSONAL_VIEWS.has(view)) return true;
   if (view === 'platform-admin') return context.platformOperator;
-  if (view === 'states' || view === 'design-system') return developmentBuild;
+  if (view === 'states' || view === 'design-system') return referencePreview;
   const base = view.split('/')[0];
   return REGISTERED_VIEWS.has(base) && context.canAccessView(base as View);
 }

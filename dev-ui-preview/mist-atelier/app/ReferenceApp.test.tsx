@@ -3,7 +3,7 @@ import {createMistState as newModuleFixture} from '../../../server/src/shared/mi
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getByRole, queryByRole } from '@testing-library/dom';
+import { getByRole, queryByRole, queryAllByRole } from '@testing-library/dom';
 import * as auth from '../../../services/authService';
 import type { MistState } from '../../../server/src/shared/mistWorkspace';
 import type { MistWorkspaceContext } from './runtime/workspace';
@@ -134,6 +134,19 @@ beforeEach(async () => {
 afterEach(() => {
   if (root) act(() => root!.unmount()); host?.remove(); root = undefined; host = undefined;
   vi.restoreAllMocks(); vi.unstubAllGlobals(); HTMLElement.prototype.scrollTo = originalScrollTo;
+});
+
+it('keeps design showcase navigation out of the business client in development builds', async () => {
+  await signIn(); await mount();
+  await waitFor(() => expect(queryByRole(host!, 'button', { name: /我的工作/ })).not.toBeNull());
+  expect(queryAllByRole(host!, 'button', { name: '设计系统', exact: true })).toHaveLength(0);
+  expect(queryByRole(host!, 'button', { name: '空 / 加载 / 错误', exact: true })).toBeNull();
+  expect(queryByRole(host!, 'button', { name: '登录页', exact: true })).toBeNull();
+});
+
+it.each(['design-system', 'states'])('does not expose the %s showcase through a business-client URL', async view => {
+  await signIn(); history.replaceState(null, '', '/?intro=0&view='+view); await mount();
+  await waitFor(() => expect(host!.textContent).toContain('没有查看权限'));
 });
 
 describe('one Mist entry with real authentication and workspace state', () => {

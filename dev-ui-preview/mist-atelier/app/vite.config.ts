@@ -13,6 +13,7 @@ const repoRoot = path.resolve(appRoot, '../../..');
  *   构建：npx vite build --config dev-ui-preview/mist-atelier/app/vite.config.ts
  */
 export default defineConfig({
+  define: { 'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('true') },
   root: appRoot,
   publicDir: path.join(repoRoot, 'public'),
   plugins: [react(), mistVersionPlugin(repoRoot), mobileIconsPlugin(repoRoot)],

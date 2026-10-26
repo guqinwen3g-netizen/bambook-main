@@ -96,6 +96,7 @@ export default defineConfig(({ mode }) => {
     },
     plugins: [react(), mistVersionPlugin(repoRoot), mobileIconsPlugin(repoRoot)],
     define: {
+      'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('false'),
       'import.meta.env.VITE_UI_MODE': JSON.stringify(uiMode)
     },
     resolve: {
