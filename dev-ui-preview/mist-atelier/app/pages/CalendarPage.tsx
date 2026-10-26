@@ -77,7 +77,7 @@ export function CalendarPage() {
       <Button onClick={()=>setSelected(dayKey(businessNow()))}>{uiText("今天")}</Button>
       <Button iconRight={ChevronRight} aria-label={uiText("下一周")} onClick={()=>setSelected(date=>shiftDay(date,7))}>{uiText("下一周")}</Button>
     </Toolbar>
-    {(visibleFailure||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("日程操作未完成")} actions={<Button onClick={()=>void retry()}>{uiText("重试读取")}</Button>}>{visibleFailure||error}</Banner></div>}
+    {!pending&&(visibleFailure||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("日程操作未完成")} actions={<Button onClick={()=>void retry()}>{uiText("重试读取")}</Button>}>{visibleFailure||error}</Banner></div>}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("核对原请求后再继续保存。")}</Banner></div>}
     <Card>
       <CardHeader title={uiText(parseDay(selected).toLocaleDateString(interfaceLocale(),{year:'numeric',month:'long',day:'numeric',weekday:'long'}))} tools={<span className="mist-muted">{events.length}{uiText(" 项安排")}</span>} />
@@ -87,7 +87,7 @@ export function CalendarPage() {
     {activeEditing!==undefined&&<Card as="section" id="mist-calendar-editor" className="mist-section" aria-label={uiText(editing?'编辑日程':'新建日程')} data-calendar-editor>
       <CardHeader title={uiText(editing?'编辑日程':'新建日程')} sub={uiText("日程保存到本公司。")} />
       <form onSubmit={event=>{event.preventDefault();void save();}}><CardBody>
-      {visibleFailure&&<Banner tone="bad" title={uiText("日程未保存")}>{visibleFailure}</Banner>}
+      {visibleFailure&&<Banner tone={pending?'warn':'bad'} title={uiText(pending?'保存结果待核对':'日程未保存')}>{pending?uiText('请先核对原请求，不要重复保存。'):visibleFailure}</Banner>}
       <fieldset disabled={busy||saving||!!pending} style={{border:0,padding:0,margin:0}}><FormGrid>
         <Field label={uiText("日程名称")} required full><TextInput value={form.title} onChange={event=>setForm(previous=>({...previous,title:event.target.value}))} /></Field>
         <Field label={uiText("日期")} required><TextInput type="date" value={form.date} onChange={event=>setForm(previous=>({...previous,date:event.target.value}))} /></Field>
