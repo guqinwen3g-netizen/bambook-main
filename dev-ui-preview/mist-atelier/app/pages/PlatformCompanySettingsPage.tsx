@@ -20,6 +20,7 @@ export function PlatformCompanySettingsPage() {
     const scope = key; setLoading(true); setError('');
     try {
       const result = await platformAdminApi.companySettings(companyId, signal);
+      if (result.snapshot?.companyId !== companyId) throw new Error('公司范围不一致，请重新读取');
       if (current.current === scope && !signal?.aborted) setData({ key: scope, snapshot: result.snapshot });
     } catch (failure) {
       if (current.current === scope && !signal?.aborted) setError(failure instanceof Error ? failure.message : '公司设置读取失败');
@@ -30,7 +31,9 @@ export function PlatformCompanySettingsPage() {
     if (command.type !== 'settings.update' || !companyId || !snapshot.current) throw new Error('公司设置尚未就绪');
     const scope = key; setSaving(true); setError('');
     try {
-      const result = await platformAdminApi.saveCompanySettings(companyId, { requestId: crypto.randomUUID(), expectedRevision: snapshot.current.revision, patch: command.payload });
+      const input = { requestId: crypto.randomUUID(), expectedRevision: snapshot.current.revision, patch: command.payload };
+      const result = await platformAdminApi.saveCompanySettings(companyId, input);
+      if (result.snapshot?.companyId !== companyId || result.receipt?.requestId !== input.requestId || result.receipt.revision !== input.expectedRevision + 1 || result.snapshot.revision < result.receipt.revision) throw new Error('保存回执不一致，请重新读取核对');
       if (current.current === scope) setData({ key: scope, snapshot: result.snapshot });
       return result.receipt;
     } finally { if (current.current === scope) setSaving(false); }

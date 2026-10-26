@@ -7,6 +7,7 @@ import type { TokenPayload } from '../auth/service';
 const url = process.env.MIST_PG_CONFLICT_TEST_URL;
 describe.skipIf(!url)('platform company settings transaction', () => {
   const companyId = randomUUID(), userId = 'platform-settings-' + randomUUID(), ownerId = 'settings-owner-' + randomUUID();
+  const ownerRoleId = 'role-super-admin@'+companyId;
   const prior: TokenPayload = { userId, roles: [], permissions: [], departmentIds: [], platformOnly: true };
   let db: PrismaClient;
   beforeAll(async () => {
@@ -15,13 +16,24 @@ describe.skipIf(!url)('platform company settings transaction', () => {
     await db.userAccount.create({ data: { id: userId, email: userId+'@example.invalid', displayName: '平台管理员', status: 'active', platformRole: 'platform_admin' } });
     await db.userAccount.create({ data: { id: ownerId, email: ownerId+'@example.invalid', displayName: '负责人', status: 'active' } });
     await db.companyMember.create({ data: { id: randomUUID(), companyId, userId: ownerId, status: 'active' } });
+    await db.role.create({ data: { id: ownerRoleId, companyId, code: 'role-super-admin', name: '负责人', isSystem: true } });
+    await db.userRole.create({ data: { id: randomUUID(), userId: ownerId, roleId: ownerRoleId } });
   });
   afterAll(async () => {
     if (!db) return;
     await db.auditLog.deleteMany({ where: { actorId: userId } });
+    await db.userRole.deleteMany({ where: { roleId: ownerRoleId } });
+    await db.role.delete({ where: { id: ownerRoleId } });
     await db.company.delete({ where: { id: companyId } });
     await db.userAccount.deleteMany({ where: { id: { in: [userId, ownerId] } } });
     await db.$disconnect();
+  });
+  it('does not initialize a workspace under an ordinary member when the owner role is absent', async () => {
+    await db.userRole.deleteMany({ where: { userId: ownerId, roleId: ownerRoleId } });
+    try {
+      await expect(createPlatformCompanySettings(db).update(prior, companyId, { requestId: randomUUID(), expectedRevision: 0, patch: { workspaceName: '不能新建' } })).rejects.toMatchObject({ code: 'OWNER_REQUIRED' });
+      expect(await db.mistWorkspace.count({ where: { companyId } })).toBe(0);
+    } finally { await db.userRole.create({ data: { id: randomUUID(), userId: ownerId, roleId: ownerRoleId } }); }
   });
   it('creates settings under the real company member, without company permissions for the platform account', async () => {
     const service = createPlatformCompanySettings(db), initial = await service.read(prior, companyId);

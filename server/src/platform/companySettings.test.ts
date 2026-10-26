@@ -75,4 +75,10 @@ describe('platform company settings', () => {
     await f.service.update(prior, 'c1', input);
     expect(f.row.state.workspaceArchive.at).toBe('2026-10-01'); expect(f.db.mistWorkspace.create).not.toHaveBeenCalled();
   });
+  it('does not grant workspace ownership to an arbitrary company member', async () => {
+    const f = fixture(); f.clear(); f.db.companyMember.findFirst.mockResolvedValue(null);
+    await expect(f.service.update(prior, 'c1', { ...input, expectedRevision: 0 })).rejects.toMatchObject({ code: 'OWNER_REQUIRED' });
+    expect(f.db.companyMember.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ user: expect.objectContaining({ roles: expect.anything() }) }) }));
+    expect(f.db.mistWorkspace.create).not.toHaveBeenCalled();
+  });
 });

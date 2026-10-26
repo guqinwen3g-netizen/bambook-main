@@ -16,7 +16,7 @@ beforeEach(() => { (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; m.sessio
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 it('uses the selected company settings API and saves with the current revision', async () => {
   m.read.mockResolvedValue({ snapshot: snapshot('c1', '雾织') });
-  m.save.mockResolvedValue({ snapshot: { ...snapshot('c1', '新名称'), revision: 4 }, receipt: { requestId: 'saved', revision: 4, result: {} } });
+  m.save.mockImplementation(async (_id, input) => ({ snapshot: { ...snapshot('c1', '新名称'), revision: 4 }, receipt: { requestId: input.requestId, revision: 4, result: {} } }));
   await paint(); await settle(); expect(host.textContent).toContain('雾织');
   await act(async () => host.querySelector('button')!.click()); await settle();
   expect(m.save).toHaveBeenCalledWith('c1', expect.objectContaining({ expectedRevision: 3, patch: { workspaceName: '新名称' } }));
@@ -32,4 +32,8 @@ it('discards the previous company response after switching context', async () =>
 it('shows a read failure without making up a company workspace', async () => {
   m.read.mockRejectedValue(new Error('无权管理此公司')); await paint(); await settle();
   expect(host.textContent).toContain('无权管理此公司'); expect(host.textContent).not.toContain('雾织'); expect(m.save).not.toHaveBeenCalled();
+});
+it('rejects a response from a different company', async () => {
+  m.read.mockResolvedValue({ snapshot: snapshot('c2', '错误公司') }); await paint(); await settle();
+  expect(host.textContent).toContain('公司范围不一致'); expect(host.textContent).not.toContain('错误公司');
 });

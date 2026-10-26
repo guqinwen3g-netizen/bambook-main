@@ -4,6 +4,7 @@ import type { TokenPayload } from '../auth/service';
 import { CompanyAccessError } from '../auth/companyAccess';
 import { loadUserWithRoles } from '../auth/tokenHelpers';
 import { isTokenRevoked } from '../auth/sessionRevocation';
+import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { applyMistCommand, createMistState, MistCommandError, type MistSettings, type MistState } from '../shared/mistWorkspace';
 
 export type CompanySettingsPatch = Pick<Partial<MistSettings>, 'workspaceName' | 'notifications'> & { companyProfile?: Partial<NonNullable<MistSettings['companyProfile']>> };
@@ -67,8 +68,8 @@ export function createPlatformCompanySettings(prisma: PrismaClient) {
       catch (error) { if (error instanceof MistCommandError) fail('VALIDATION_FAILED', error.message); throw error; }
       // Only the settings command's changes are persisted. All unrelated state stays as read.
       if (!row) {
-        const owner = await db.companyMember.findFirst({ where: { companyId, status: 'active', user: { platformRole: null } }, orderBy: { createdAt: 'asc' } });
-        if (!owner) return fail('OWNER_REQUIRED', '请先为公司配置成员账号。', 409);
+        const owner = await db.companyMember.findFirst({ where: { companyId, status: 'active', user: { status: 'active', deletedAt: null, platformRole: null, roles: { some: { role: { companyId, OR: [{ code: SYSTEM_ROLE_IDS.SUPER_ADMIN }, { id: `${SYSTEM_ROLE_IDS.SUPER_ADMIN}@${companyId}` }] } } } } }, orderBy: { createdAt: 'asc' } });
+        if (!owner) return fail('OWNER_REQUIRED', '请先为公司配置负责人。', 409);
         row = await db.mistWorkspace.create({ data: { id: randomUUID(), companyId, ownerId: owner.userId, slug: `default@${companyId}`, name: next.settings.workspaceName, revision: 1, state: next as any } });
       } else {
         row = await db.mistWorkspace.update({ where: { id: row.id }, data: { name: next.settings.workspaceName, state: next as any, revision: row.revision + 1 } });
