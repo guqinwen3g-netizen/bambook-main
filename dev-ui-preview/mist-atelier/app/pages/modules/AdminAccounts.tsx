@@ -124,11 +124,10 @@ export function AdminAccounts() {
         {current.status === 'disabled' && <Button onClick={() => setConfirm({ kind: 'enable', account: current })}>{uiText("重新启用")}</Button>}
       </div>}>
       {current && <>
-        <KeyValue items={[{ label: '状态', value: ACCOUNT_STATUS[current.status]?.label ?? current.status }, { label: '任职部门', value: current.department ?? '未分配' }, { label: '角色', value: current.roleIds.map(roleName).join('、') || '无角色' }, { label: '账号编号', value: current.id, mono: true }, { label: '创建时间', value: when(current.createdAt) }, { label: '最近登录', value: when(current.lastLoginAt) }]} />
+        <KeyValue items={[{ label: '状态', value: ACCOUNT_STATUS[current.status]?.label ?? current.status }, { label: '任职部门', value: current.department ?? '未分配' }, { label: '角色', value: current.roleIds.map(roleName).join('、') || '无角色' }, { label: '创建时间', value: when(current.createdAt) }, { label: '最近登录', value: when(current.lastLoginAt) }]} />
         {envelope && current.status === 'active' && <div className="mist-section">{envelope.ownerId === current.id ? <Banner tone="neutral" title={ui`「${envelope.name}」的所有者`} /> : memberIds.has(current.id)
           ? <Banner tone="ok" title={ui`已授权进入「${envelope.name}」`}>{uiText("能办理哪些业务仍按其角色与任职部门决定。")}</Banner>
           : <Banner tone="warn" title={ui`尚未授权进入「${envelope.name}」`} actions={canGrant ? <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); if (await grant(current.id, current.displayName)) toast('已授权进入本公司'); setBusy(false); }}>{uiText("授权进入")}</Button> : undefined}>{uiText(canGrant ? '授权只让对方进入这家公司，不增加任何业务权限。' : '请公司所有者在“公司设置 · 授权访问”中授权。')}</Banner>}</div>}
-        <p className="mist-note">{uiText("小组归属在“人事管理”维护；停用账号保留历史单据和审计，不删除数据。")}</p>
       </>}
     </Drawer>
     <Drawer open={!!form} onClose={() => !busy && setForm(null)} title={uiText(form?.mode === 'create' ? '新建账号' : form?.mode === 'approve' ? '审批注册申请' : '修改资料与角色')} sub={uiText(form?.account?.email)}
@@ -138,9 +137,9 @@ export function AdminAccounts() {
         <FormGrid>
           <Field label={uiText("姓名")} required><TextInput value={form.displayName} disabled={busy || form.mode === 'approve'} onChange={e => setForm({ ...form, displayName: e.target.value })} /></Field>
           <Field label={uiText("登录邮箱")} required><TextInput type="email" value={form.email} disabled={busy || form.mode === 'approve'} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
-          {form.mode === 'create' && <Field label={uiText("初始密码")} required hint={uiText("至少 8 位；对方登录后可在“设置 · 安全”中修改。")}><TextInput type="password" autoComplete="new-password" value={form.password} disabled={busy} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
-          <Field label={uiText("任职部门")} required hint={uiText("决定业务属性；小组须在同一部门。")}><Select aria-label={uiText("任职部门")} value={form.departmentId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departments} /></Field>
-          <Field label={uiText("角色")} required full hint={uiText("角色决定能做哪些动作；与部门业务属性同时满足才可办理。")}><RolePicker roles={data.roles} value={form.roles} owner={owner} disabled={busy} onChange={roles => setForm({ ...form, roles })} /></Field>
+          {form.mode === 'create' && <Field label={uiText("初始密码")} required hint={uiText("至少 8 位，含字母和数字")}><TextInput type="password" autoComplete="new-password" value={form.password} disabled={busy} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
+          <Field label={uiText("任职部门")} required><Select aria-label={uiText("任职部门")} value={form.departmentId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departments} /></Field>
+          <Field label={uiText("角色")} required full><RolePicker roles={data.roles} value={form.roles} owner={owner} disabled={busy} onChange={roles => setForm({ ...form, roles })} /></Field>
           {form.mode !== 'edit' && envelope && <Field label={uiText("公司")} full>{canGrant ? <Checkbox checked={form.grant} disabled={busy} onChange={grant => setForm({ ...form, grant })} label={ui`同时授权进入「${envelope.name}」`} /> : <span className="mist-note">{uiText("你不是「")}{envelope.name}{uiText("」的所有者；账号生效后请所有者授权。")}</span>}</Field>}
         </FormGrid>
       </>}
@@ -173,7 +172,7 @@ function PermissionPicker({ catalog, value, onChange, keep, describe, disabled }
     <Field label={uiText("筛选")}><TextInput aria-label={uiText("筛选权限")} placeholder={uiText("模块、权限名称或代码")} value={filter} onChange={e => setFilter(e.target.value)} /></Field>
     {groups.map(g => <div key={g.domain} className="mist-section">
       <CardHeader title={uiText(DOMAIN_LABEL[g.domain] ?? g.domain)} sub={uiText(`${g.scopes.filter(sc => value.includes(sc)).length} / ${g.scopes.length}`)} />
-      <div className="mist-col">{g.scopes.map(sc => <Checkbox key={sc} label={uiText(`${describe(sc)}（${sc}）`)} checked={value.includes(sc)} disabled={disabled}
+      <div className="mist-col">{g.scopes.map(sc => <Checkbox key={sc} label={uiText(describe(sc))} checked={value.includes(sc)} disabled={disabled}
         onChange={on => onChange(on ? [...value, sc] : value.filter(x => x !== sc))} />)}</div>
     </div>)}
     {!groups.length && <EmptyState compact title={uiText("没有符合筛选的权限")} />}
@@ -236,41 +235,41 @@ export function AdminRoles() {
   const removingHolders = removing ? holders(removing.id) : [];
   return <>
     {error && <Banner tone="bad" title={uiText("角色读取失败")} actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
-    <Banner tone="neutral" title={uiText(owner ? '角色由老板维护' : '角色权限只读')}>{uiText(owner ? '可按公司实际岗位新建角色并组合权限；调整后对拥有该角色的所有账号生效，并记入审计。系统角色只能调整权限，“老板”角色固定拥有全部权限。给账号分配角色在“账号”中办理。' : '只有老板可以调整角色包含的权限，或新建、删除角色；给账号分配角色在“账号”中办理。')}</Banner>
+    {!owner && <Pill plain>{uiText("只读")}</Pill>}
     {owner && <Toolbar right={<Button variant="primary" icon={Plus} onClick={() => void openCreate()}>{uiText("新建角色")}</Button>}><span className="mist-note">{uiText("共 ")}{data?.roles.length ?? 0}{uiText(" 个角色 · 自定义 ")}{(data?.roles ?? []).filter(r => !r.isSystem).length}{uiText(" 个")}</span></Toolbar>}
-    <Card><DataTable ariaLabel={uiText("角色")} rows={data?.roles ?? []} rowKey={r => r.id} loading={loading && !data} onRowClick={owner ? r => { if (!isSuperAdmin(r)) void openEditor(r); } : undefined} columns={[
-      { key: 'name', header: '角色', width: 'minmax(160px,1fr)', render: r => <><b>{r.name}</b> <Pill plain>{uiText(r.isSystem ? '系统' : '自定义')}</Pill>{r.description && <div className="mist-note">{r.description}</div>}</> },
+    <Card><DataTable ariaLabel={uiText("角色")} rows={data?.roles ?? []} rowKey={r => r.id} loading={loading && !data} onRowClick={r => void openEditor(r)} columns={[
+      { key: 'name', header: '角色', width: 'minmax(160px,1fr)', render: r => <><b>{r.name}</b> <Pill plain>{uiText(r.isSystem ? '系统' : '自定义')}</Pill></> },
       { key: 'users', header: '启用账号', width: '96px', align: 'right', render: r => counts(r.id) },
-      { key: 'permissions', header: '权限', width: 'minmax(260px,3fr)', render: r => r.permissions.includes('*') ? <span className="mist-note">{uiText("全部权限")}</span> : r.permissions.length ? <span className="mist-note">{r.permissions.length}{uiText(" 项：")}{r.permissions.slice(0, 6).map(sc => scopeLabel(sc)).join('、')}{uiText(r.permissions.length > 6 ? ' 等' : '')}</span> : <span className="mist-note">{uiText("无")}</span> },
+      { key: 'permissions', header: '权限', width: 'minmax(260px,3fr)', render: r => r.permissions.includes('*') ? <span className="mist-note">{uiText("全部权限")}</span> : r.permissions.length ? <span>{ui`${r.permissions.length} 项权限`}</span> : <span className="mist-note">{uiText("无")}</span> },
       ...(owner ? [{ key: 'edit', header: '', width: '260px', render: (r: AdminRole) => isSuperAdmin(r) ? <span className="mist-note">{uiText("不可调整")}</span> : <div className="mist-row" onClick={e => e.stopPropagation()}>
         <Button size="sm" icon={ShieldCheck} onClick={() => void openEditor(r)}>{uiText("调整权限")}</Button>
         {!r.isSystem && <><Button size="sm" icon={Pencil} aria-label={ui`编辑「${r.name}」`} onClick={() => openRename(r)}>{uiText("编辑")}</Button><Button size="sm" variant="quiet" icon={Trash2} aria-label={ui`删除「${r.name}」`} onClick={() => { setSaveError(''); setRemoving(r); }}>{uiText("删除")}</Button></>}
-      </div> }] : []),
+      </div> }] : [{ key: 'view', header: '', width: '120px', render: (r: AdminRole) => <Button size="sm" onClick={() => void openEditor(r)}>{uiText("查看权限")}</Button> }]),
     ]} empty={<EmptyState title={uiText("没有角色")} />} /></Card>
 
-    <Drawer open={!!editing} onClose={() => !busy && setEditing(null)} title={uiText(editing ? `调整「${editing.role.name}」的权限` : '')} sub={uiText(editing ? `${counts(editing.role.id)} 个启用账号使用此角色` : undefined)}
-      footer={<div className="mist-row"><Button variant="primary" disabled={!catalog || (!added.length && !removed.length)} onClick={() => setConfirming(true)}>{uiText("保存（新增 ")}{added.length}{uiText(" · 移除 ")}{removed.length}）</Button><Button disabled={busy} onClick={() => setEditing(null)}>{uiText("取消")}</Button></div>}>
+    <Drawer open={!!editing} onClose={() => !busy && setEditing(null)} title={editing ? ui`${editing.role.name} · 权限` : ''} sub={uiText(editing ? `${counts(editing.role.id)} 个启用账号使用此角色` : undefined)}
+      footer={<div className="mist-row">{owner && editing && !isSuperAdmin(editing.role) && <Button variant="primary" disabled={!catalog || (!added.length && !removed.length)} onClick={() => setConfirming(true)}>{uiText("保存（新增 ")}{added.length}{uiText(" · 移除 ")}{removed.length}）</Button>}<Button disabled={busy} onClick={() => setEditing(null)}>{uiText("取消")}</Button></div>}>
       {editing && <>
         {saveError && <Banner tone="bad" title={uiText("未保存")}>{saveError}</Banner>}
-        {catalogError ? <Banner tone="bad" title={uiText("权限目录读取失败")}>{catalogError}</Banner> : !catalog ? <p className="mist-note">{uiText("读取权限目录…")}</p> :
-          <PermissionPicker catalog={catalog} value={editing.next} keep={editing.role.permissions} describe={describe} disabled={busy} onChange={next => setEditing({ ...editing, next })} />}
+        {isSuperAdmin(editing.role) ? <Pill plain>{uiText("全部权限")}</Pill> : catalogError ? <Banner tone="bad" title={uiText("权限目录读取失败")}>{catalogError}</Banner> : !catalog ? <p className="mist-note">{uiText("读取权限目录…")}</p> :
+          <PermissionPicker catalog={catalog} value={editing.next} keep={editing.role.permissions} describe={describe} disabled={busy || !owner} onChange={next => setEditing({ ...editing, next })} />}
       </>}
     </Drawer>
     <Dialog open={confirming} onClose={() => !busy && setConfirming(false)} tone="warn" title={uiText(editing ? `确认调整「${editing.role.name}」的权限` : '')}
-      description={uiText(editing ? `将影响 ${counts(editing.role.id)} 个启用账号；服务器按新权限即时判定，对方刷新页面后界面随之更新。此操作记入审计。` : undefined)}
+      description={editing ? ui`影响 ${counts(editing.role.id)} 个启用账号。` : undefined}
       footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void save()}>{uiText("确认调整")}</Button><Button disabled={busy} onClick={() => setConfirming(false)}>{uiText("返回修改")}</Button></div>}>
-      {added.length > 0 && <><b>{uiText("新增")}</b><ul>{added.map(sc => <li key={sc}>{describe(sc)}（{sc}）</li>)}</ul></>}
-      {removed.length > 0 && <><b>{uiText("移除")}</b><ul>{removed.map(sc => <li key={sc}>{describe(sc)}（{sc}）</li>)}</ul></>}
+      {added.length > 0 && <><b>{uiText("新增")}</b><ul>{added.map(sc => <li key={sc}>{describe(sc)}</li>)}</ul></>}
+      {removed.length > 0 && <><b>{uiText("移除")}</b><ul>{removed.map(sc => <li key={sc}>{describe(sc)}</li>)}</ul></>}
     </Dialog>
 
-    <Drawer open={!!draft} onClose={() => !busy && setDraft(null)} title={uiText(draft?.mode === 'create' ? '新建角色' : draft?.role ? `编辑「${draft.role.name}」` : '')} sub={uiText(draft?.mode === 'create' ? '按公司实际岗位命名，并组合该岗位需要的权限' : '角色名称与说明；权限在“调整权限”中修改')}
+    <Drawer open={!!draft} onClose={() => !busy && setDraft(null)} title={uiText(draft?.mode === 'create' ? '新建角色' : draft?.role ? `编辑「${draft.role.name}」` : '')}
       footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void saveDraft()}>{uiText(draft?.mode === 'create' ? `创建角色（${draft.permissions.length} 项权限）` : '保存')}</Button><Button disabled={busy} onClick={() => setDraft(null)}>{uiText("取消")}</Button></div>}>
       {draft && <>
         {saveError && <Banner tone="bad" title={uiText("未保存")}>{saveError}</Banner>}
         <FormGrid cols={1}>
-          <Field label={uiText("角色名称")} required hint={uiText("不超过 40 个字，不能与已有角色重名")}><TextInput aria-label={uiText("角色名称")} value={draft.name} maxLength={40} onChange={e => setDraft({ ...draft, name: e.target.value })} /></Field>
+          <Field label={uiText("角色名称")} required><TextInput aria-label={uiText("角色名称")} value={draft.name} maxLength={40} onChange={e => setDraft({ ...draft, name: e.target.value })} /></Field>
           <Field label={uiText("说明")}><TextArea aria-label={uiText("角色说明")} value={draft.description} maxLength={200} onChange={e => setDraft({ ...draft, description: e.target.value })} /></Field>
-          {draft.mode === 'create' && <Field label={uiText("参照角色")} hint={uiText("可选：先带入某个现有角色的权限，再逐项增减")}><Select aria-label={uiText("参照角色")} value={draft.template} onChange={e => { const template = templates.find(r => r.id === e.target.value); setDraft({ ...draft, template: e.target.value, permissions: template ? template.permissions.filter(sc => sc !== '*') : draft.permissions }); }} options={[{ value: '', label: '不参照，从空白开始' }, ...templates.map(r => ({ value: r.id, label: r.name }))]} /></Field>}
+          {draft.mode === 'create' && <Field label={uiText("参照角色")}><Select aria-label={uiText("参照角色")} value={draft.template} onChange={e => { const template = templates.find(r => r.id === e.target.value); setDraft({ ...draft, template: e.target.value, permissions: template ? template.permissions.filter(sc => sc !== '*') : draft.permissions }); }} options={[{ value: '', label: '不参照，从空白开始' }, ...templates.map(r => ({ value: r.id, label: r.name }))]} /></Field>}
         </FormGrid>
         {draft.mode === 'create' && (catalogError ? <Banner tone="bad" title={uiText("权限目录读取失败")}>{catalogError}</Banner> : !catalog ? <p className="mist-note">{uiText("读取权限目录…")}</p> :
           <PermissionPicker catalog={catalog} value={draft.permissions} keep={[]} describe={describe} disabled={busy} onChange={permissions => setDraft({ ...draft, permissions })} />)}

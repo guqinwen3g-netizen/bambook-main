@@ -1,5 +1,13 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '至少 8 位，含字母和数字': 'At least 8 characters, including letters and numbers',
+  '查看权限': 'View permissions',
+  '{0} · 权限': '{0} · Permissions',
+  '影响 {0} 个启用账号。': 'Affects {0} active accounts.',
+  '{0} 项权限': '{0} permissions',
+  '账号或公司已停用，无法恢复公司访问。': 'The account or company is disabled. Access cannot be restored.',
+  '公司席位已用完。': 'No company seats are available.',
+  '请单独办理账号启用或停用。': 'Change account access separately.',
   '结算确认后关联。': 'Link after settlement confirmation.',
   '第 {0} 次交单有不符点': 'Presentation {0} has discrepancies',
   '部分签发': 'Partially issued',

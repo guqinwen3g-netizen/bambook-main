@@ -92,7 +92,7 @@ describe('管理后台 · 账号', () => {
     expect(document.body.textContent).toContain('不可调整');
     await click('调整权限');
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
-    const reports = [...document.querySelectorAll('label.mist-check')].find(l => l.textContent?.includes('reports:read'))!.querySelector('input')!;
+    const reports = [...document.querySelectorAll('label.mist-check')].find(l => l.textContent?.includes('报表中心查看与运行'))!.querySelector('input')!;
     const orders = [...document.querySelectorAll('label.mist-check')].find(l => l.textContent?.includes('order:read'))!.querySelector('input')!;
     expect(orders.checked).toBe(true);
     await act(async () => reports.click());
@@ -118,7 +118,7 @@ describe('管理后台 · 账号', () => {
       await type(document.querySelector('select[aria-label="参照角色"]') as HTMLSelectElement, 'role-sales');
       expect([...document.querySelectorAll('select[aria-label="参照角色"] option')].map(o => o.textContent)).not.toContain('老板');
       expect([...document.querySelectorAll('label.mist-check')].some(l => l.textContent?.includes('（*）'))).toBe(false);
-      const reports = [...document.querySelectorAll('label.mist-check')].find(l => l.textContent?.includes('reports:read'))!.querySelector('input')!;
+      const reports = [...document.querySelectorAll('label.mist-check')].find(l => l.textContent?.includes('报表中心查看与运行'))!.querySelector('input')!;
       await act(async () => reports.click());
       await click('创建角色（2 项权限）');
       expect(bridge.calls.find(c => c.method === 'POST')?.body).toEqual({ name: '跟单员', description: '', permissions: ['order:read', 'reports:read'] });
@@ -152,8 +152,12 @@ describe('管理后台 · 账号', () => {
   it('keeps role permissions read-only for administrators who are not the owner', async () => {
     bridge.roles = ['admin'];
     await render(AdminPanelPage, 'admin-panel', 'roles');
-    expect(document.body.textContent).toContain('只有老板可以调整');
+    expect(document.body.textContent).toContain('只读');
     expect(button('调整权限')).toBeUndefined();
+    bridge.routes['GET /api/admin/permissions'] = () => ({ ok: true, permissions: [{ scope: 'reports:read', description: null }] });
+    await click('查看权限');
+    expect([...document.querySelectorAll('input[type=checkbox]')].every(input => (input as HTMLInputElement).disabled)).toBe(true);
+    expect([...document.querySelectorAll('button')].some(b => b.textContent?.startsWith('保存（'))).toBe(false);
   });
   it('shows only the exporter profile to non-managers', async () => {
     bridge.roles = []; bridge.perms = [];
