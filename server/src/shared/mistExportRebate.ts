@@ -101,6 +101,15 @@ export function rebateCandidateBills(root: Root, customs: FulfillmentCustoms): S
   return (root.payables?.bills || []).filter(b => b.state === 'open' && b.invoiceType==='vat-special' && b.fileIds.some(id=>root.files.some(file=>file.id===id)) && b.currency === 'CNY' && mistMoneyMinor(b.taxAmount) > 0 && !used.has(b.id)
     && b.lines.some(l => orders.has(purchases.find(p => p.id === l.purchaseId)?.orderId || '')));
 }
+/**
+ * 首版一张专票整票对应一张报关单：票内货物另有其他出运时不能拆票申报，明确拒绝而不是整票计入本单。
+ */
+export function rebateBillSplitBlocker(root: Root, customs: FulfillmentCustoms, bill: SupplierBill) {
+  const purchases = root.fulfillment?.purchases || [];
+  const lines = new Set(bill.lines.map(l => purchases.find(p => p.id === l.purchaseId)?.lineId).filter(Boolean) as string[]);
+  const others = (root.fulfillment?.shipments || []).filter(s => s.id !== customs.shipmentId && s.state !== 'cancelled' && s.lines.some(l => lines.has(l.lineId))).map(s => s.code);
+  return others.length ? `专票 ${bill.invoiceNo} 的货物另在 ${others.join('、')} 出运；首版只支持一张专票整票对应一张报关单` : '';
+}
 /** 最大余数法分配（分），合计等于 total。 */
 function splitByWeight(total: number, weights: number[]) {
   const sum = weights.reduce((n, w) => n + w, 0); if (!(sum > 0)) return weights.map(() => 0);
@@ -120,8 +129,8 @@ export function rebatePlan(root: Root, customs: FulfillmentCustoms, exportDate: 
   const items = customs.items || [];
   if (!items.length) {
     const rate = exportDate ? rebateRateFor(root, customs.hsCode, exportDate) : undefined;
-    const rows = bills.map(bill => { const taxable = rebateBillTaxableMinor(bill),inputTaxCap=mistMoneyMinor(bill.taxAmount),calculated=rate?rebateFor(taxable,rate.rate):0; return { bill, taxable, rebate: Math.min(calculated,inputTaxCap),inputTaxCap,taxLimited:calculated>inputTaxCap, excluded: 0, parts: [], blockers: [] }; });
-    const blockers = !exportDate ? [] : !rate ? [`没有适用于 HS ${customs.hsCode}（出口日期 ${exportDate}）的退税率，请先登记退税率版本`] : rebateRateBasisPoints(rate.rate) <= 0 ? [`HS ${customs.hsCode} 适用退税率为 0，不能申报退税`] : [];
+    const rows = bills.map(bill => { const taxable = rebateBillTaxableMinor(bill),inputTaxCap=mistMoneyMinor(bill.taxAmount),calculated=rate?rebateFor(taxable,rate.rate):0,split=rebateBillSplitBlocker(root,customs,bill); return { bill, taxable, rebate: Math.min(calculated,inputTaxCap),inputTaxCap,taxLimited:calculated>inputTaxCap, excluded: 0, parts: [], blockers: split?[split]:[] }; });
+    const blockers = !exportDate ? [] : !rate ? [`没有适用于 HS ${customs.hsCode}（出口日期 ${exportDate}）的退税率，请先登记退税率版本`] : rebateRateBasisPoints(rate.rate) <= 0 ? [`HS ${customs.hsCode} 适用退税率为 0，不能申报退税`] : rows.flatMap(r => r.blockers);
     return { mode: 'header', rate, rates: rate ? [rate] : [], bills: rows, blockers, taxable: rows.reduce((n, r) => n + r.taxable, 0), rebate: rows.reduce((n, r) => n + r.rebate, 0) };
   }
   const purchases = root.fulfillment?.purchases || [], rates = new Map<string, RebateRate>(), blockers = new Set<string>();
@@ -149,6 +158,7 @@ export function rebatePlan(root: Root, customs: FulfillmentCustoms, exportDate: 
       group.forEach((part,index)=>{part.rebate=major(allocated[index]);if(calculated>cap)part.taxLimited=true;});
     }
     if (!parts.length && !own.length) own.push(`${bill.invoiceNo} 的货物不在本报关单的商品项中`);
+    const split = rebateBillSplitBlocker(root, customs, bill); if (split) own.push(split);
     own.forEach(b => blockers.add(b));
     return { bill, taxable: parts.reduce((n, p) => n + mistMoneyMinor(p.taxable), 0), rebate: parts.reduce((n, p) => n + mistMoneyMinor(p.rebate), 0),inputTaxCap,taxLimited:parts.some(p=>!!p.taxLimited), excluded, parts, blockers: own };
   });

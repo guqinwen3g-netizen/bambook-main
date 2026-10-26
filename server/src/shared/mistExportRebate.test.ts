@@ -31,6 +31,18 @@ describe('出口退税', () => {
     const claim=readRebate(f.state).claims.find(c=>c.id===id)!;expect(claim.expected).toBe(300);expect(claim.lines[0]).toMatchObject({inputTaxCap:300,taxLimited:true});
     expect(()=>f.run({type:'rebate.claim.approve',payload:{id,date:'2026-10-17',amount:1300,ref:'ADJ',reason:'超出本票进项税额'}})).toThrow(/不能超过/);
   });
+  it.each(['header','items'] as const)('专票货物另有出运时（%s）明确拒绝，不整票计入本报关单',mode=>{
+    const f=setup(),bill=f.state.payables!.bills[0],purchase=f.state.fulfillment.purchases.find(p=>p.id===bill.lines[0].purchaseId)!;
+    const shipment=f.state.fulfillment.shipments.find(s=>s.id===f.customs.shipmentId)!;
+    if(mode==='items')f.customs.items=[{no:1,hsCode:f.customs.hsCode,lineKeys:[purchase.lineId+':one']}] as any;else delete f.customs.items;
+    f.run({type:'rebate.rate.save',payload:{hsCode:f.customs.hsCode,rate:'13',effectiveFrom:'2020-01-01',basis:'文库'}});
+    expect(rebatePlan(f.state,f.customs,'2026-10-13',[bill]).blockers).toEqual([]);
+    f.state.fulfillment.shipments.push({...shipment,id:'second-batch',code:'SHP-SECOND',state:'preparing',lines:[{lineId:purchase.lineId,orderId:purchase.orderId,quantity:1,factoryConfirmedAt:''}]});
+    expect(rebatePlan(f.state,f.customs,'2026-10-13',[bill]).blockers).toEqual([expect.stringContaining('SHP-SECOND')]);
+    expect(()=>f.run({type:'rebate.claim.file',payload:{customsId:f.customs.id,billIds:[bill.id],filedAt:'2026-10-17',batchRef:'SPLIT',fileIds:['vat-original']}})).toThrow(/整票对应一张报关单/);
+    f.state.fulfillment.shipments.find(s=>s.id==='second-batch')!.state='cancelled';
+    expect(rebatePlan(f.state,f.customs,'2026-10-13',[bill]).blockers).toEqual([]);
+  });
   it('多商品项按各自进项税额封顶，未出口行与零退税率行不能抬高其他商品的可退额度',()=>{
     const f=setup(),bill=f.state.payables!.bills[0],purchase=f.state.fulfillment.purchases.find(p=>p.id===bill.lines[0].purchaseId)!;
     const other={...purchase,id:'other-purchase',lineId:'other-line',code:'PC-OTHER'};f.state.fulfillment.purchases.push(other);

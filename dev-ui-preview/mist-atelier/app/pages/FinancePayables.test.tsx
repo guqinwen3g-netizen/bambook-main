@@ -482,3 +482,12 @@ it('retains the recovery action after another network failure and does not navig
  form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('仍未连接');expect((getByRole(form,'button',{name:'核对原操作结果'}) as HTMLButtonElement).disabled).toBe(false);await click('核对原操作结果',form);
  store.value.state.fulfillment.purchases.push({...po,id:'next-contract',code:'PO-NEXT'});route={...route,id:'next-contract'};render();await act(async()=>{store.value.pending=null;resolve({requestId:'lost',revision:2,result:{id:'old-settlement'}});});expect(go).not.toHaveBeenCalledWith('payment-vouchers','old-settlement',expect.anything(),expect.anything());expect((getByLabelText(document.body,'结算合同') as HTMLSelectElement).value).toBe('next-contract');
 });
+it('locks the bill form while registration is in flight',async()=>{
+  let finish!:()=>void;const original=store.value.run;store.value.run=vi.fn(()=>new Promise<any>(resolve=>{finish=()=>resolve(undefined);}));
+  render();await click(/待登记来源/);await click('登记票据',getByRole(host,'table',{name:'待登记来源合同'}));
+  const dialog=getByRole(document.body,'dialog',{name:'登记供应商票据'});
+  input('供应商发票号','VAT-LOCK-01');input('税额','1');input('到期日',day);
+  await click('登记应付',dialog);
+  expect((getByLabelText(dialog,'供应商发票号') as HTMLInputElement).matches(':disabled')).toBe(true);
+  await act(async()=>finish());store.value.run=original;
+});

@@ -16,11 +16,11 @@ const pct = (r: number | null) => r === null ? '—' : (r * 100).toFixed(1) + '%
 const SHIPMENT_BASES: AllocationBasis[] = ['volume', 'weight', 'value', 'quantity', 'equal', 'manual'];
 const ORDER_BASES: AllocationBasis[] = ['value', 'quantity', 'equal', 'manual'];
 
-export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,materialCostBasis }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown> }) {
+export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,materialCostBasis,initialOrderId }: { materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null;initialOrderId?:string;state: MistState; asOf: string; canWrite: boolean; busy: boolean; run: (c: MistCommand) => Promise<unknown> }) {
   const toast = useToast();
   const [basisChoice, setBasis] = React.useState<FxBasis | null>(null), [month, setMonth] = React.useState(asOf.slice(0, 7));
   const basis: FxBasis = basisChoice ?? ((state.fxRecords || []).some(r => r.kind === 'settlement' && !r.reversed) ? 'actual' : 'period');
-  const [open, setOpen] = React.useState<string | null>(null), [register, setRegister] = React.useState(false), [voiding, setVoiding] = React.useState<OrderExpense | null>(null), [reason, setReason] = React.useState(''), [showVoided, setShowVoided] = React.useState(false), [paying, setPaying] = React.useState<OrderExpense | null>(null), [payForm, setPayForm] = React.useState({ supplierId: '', invoiceNo: '', due: '', taxAmount: '' });
+  const [open, setOpen] = React.useState<string | null>(initialOrderId ?? null), [register, setRegister] = React.useState(false), [voiding, setVoiding] = React.useState<OrderExpense | null>(null), [reason, setReason] = React.useState(''), [showVoided, setShowVoided] = React.useState(false), [paying, setPaying] = React.useState<OrderExpense | null>(null), [payForm, setPayForm] = React.useState({ supplierId: '', invoiceNo: '', due: '', taxAmount: '' });
   if(materialCostBasis===null)return <Banner tone="warn" title={uiText('内部供料成本依据未读取')}/>;
   const orders = state.orders.filter(o => !o.governance || o.governance.status === 'approved');
   const rows = orders.map(o => orderActualCost(state, o.id, basis, month, asOf,materialCostBasis)).sort((a, b) => ({ ok: 0, norate: 1 }[a.status] - { ok: 0, norate: 1 }[b.status]) || (a.rateIn ?? 0) - (b.rateIn ?? 0) || a.code.localeCompare(b.code));
@@ -36,7 +36,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     { key: 'rebate', header: '退税', align: 'right', render: r => r.rebate.used ? money(r.rebate.used) : '—' },
     { key: 'margin', header: '实际毛利（含退税）', align: 'right', render: r => r.marginIn === null ? <span className="mist-note">—</span> : <b className={r.marginIn < 0 ? 'mist-tone-bad' : undefined}>{money(r.marginIn)}</b>, sortValue: r => r.marginIn ?? -Infinity },
     { key: 'rate', header: '毛利率', align: 'right', render: r => pct(r.rateIn) },
-    { key: 'status', header: '状态', render: r => r.status === 'norate' ? <Pill tone="warn">{uiText("缺 ")}{r.missing.join('、')}{uiText(" 汇率")}</Pill> : r.estimated ? <Pill tone="neutral">{uiText("含暂估")}</Pill> : <Pill tone="ok">{uiText("已决算")}</Pill> },
+    { key: 'status', header: '状态', render: r => r.status === 'norate' ? <Pill tone="warn">{uiText("缺 ")}{r.missing.join('、')}{uiText(" 汇率")}</Pill> : r.estimated ? <Pill tone="neutral">{uiText("含暂估")}</Pill> : <Pill tone="ok">{uiText("无暂估")}</Pill> },
   ];
   const expenseColumns: Column<OrderExpense>[] = [
     { key: 'code', header: '编号', render: e => <div className="mist-col" style={{ gap: 2 }}><b>{e.code}</b><small className="mist-muted">{e.date}</small></div> },
@@ -48,7 +48,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     { key: 'state', header: '', render: e => e.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite && !expensePayableBill(state, e) ? <Button size="sm" variant="quiet" disabled={busy} aria-label={ui`作废 ${e.code}`} onClick={() => { setReason(''); setVoiding(e); }}>{uiText("作废")}</Button> : null },
   ];
   const exportCsv = () => downloadModuleCsv(`订单核算-${FX_BASIS_LABEL[basis]}-${asOf}.csv`, ['订单', '客户', '收入CNY', '采购CNY', '费用CNY', '退税CNY', '毛利不含退税', '毛利含退税', '毛利率%', '状态'],
-    rows.map(r => [r.code, r.customer, r.revenueCny ?? '', r.purchaseCny ?? '', r.expenseCny ?? '', r.rebate.used, r.marginEx ?? '', r.marginIn ?? '', r.rateIn === null ? '' : (r.rateIn * 100).toFixed(1), r.status === 'norate' ? '缺汇率' : r.estimated ? '含暂估' : '已决算']));
+    rows.map(r => [r.code, r.customer, r.revenueCny ?? '', r.purchaseCny ?? '', r.expenseCny ?? '', r.rebate.used, r.marginEx ?? '', r.marginIn ?? '', r.rateIn === null ? '' : (r.rateIn * 100).toFixed(1), r.status === 'norate' ? '缺汇率' : r.estimated ? '含暂估' : '无暂估']));
   const doPayable = async () => { if (!paying) return; await run({ type: 'cost.expense.payable', payload: { id: paying.id, supplierId: payForm.supplierId, invoiceNo: payForm.invoiceNo, due: payForm.due, taxAmount: payForm.taxAmount } } as MistCommand); setPaying(null); toast('已转入应付待办，可按票申请付款'); };
   const doVoid = async () => { if (!voiding) return; await run({ type: 'cost.expense.void', payload: { id: voiding.id, reason } } as MistCommand); setVoiding(null); toast('费用已作废'); };
   return <div data-order-actual-cost>
