@@ -45,8 +45,8 @@ export function collectPermissionScopes(roles: Array<{ role?: { permissions?: Ar
   return Array.from(scopes).sort();
 }
 
-export function serializeAuthUser(user: any, roles: AgentRole[], permissions: string[], departmentIds: string[], extra?: { newRoleIds?: string[]; authorizationLoaded?: true; permissionCeiling?: string[] }) {
-  const assignedCompany = (user.roles || []).find((r: any) => extra?.newRoleIds?.includes(r.roleId))?.role?.companyId;
+export function serializeAuthUser(user: any, roles: AgentRole[], permissions: string[], departmentIds: string[], extra?: { companyId?: string | null; newRoleIds?: string[]; authorizationLoaded?: true; permissionCeiling?: string[] }) {
+  const assignedCompany = extra?.companyId ?? (user.roles || []).find((r: any) => extra?.newRoleIds?.includes(r.roleId))?.role?.companyId;
   user = companyScopedUser(user, assignedCompany);
   // Display metadata comes only from this user's current loaded role tree.
   const roleLabels = Array.from(new Set(extra?.newRoleIds || [])).flatMap(id => {
@@ -56,6 +56,7 @@ export function serializeAuthUser(user: any, roles: AgentRole[], permissions: st
   });
   return {
     id: user.id,
+    companyId: assignedCompany ?? null,
     displayName: user.displayName,
     email: user.email,
     avatarUrl: (user as any).avatarUrl || null,

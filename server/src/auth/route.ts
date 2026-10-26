@@ -1,4 +1,5 @@
 import { accountAccessRouter } from './accountAccess';
+import { CompanyAccessError } from './companyAccess';
 import { selfRegistrationRouter } from './selfRegistration';
 import { passwordProblem } from './passwordPolicy';
 import { Router, Request, Response } from 'express';
@@ -143,9 +144,13 @@ export function createAuthRouter(options: AuthRouterOptions) {
     // 多家时先返回公司列表让用户选择；未归属任何公司时保持历史行为（companyId 为空）。
     const companyMemberships = await loadCompanyMemberships(user.id);
     const activeCompanies = companyMemberships.filter((m) => m.company.status === 'active');
+    if (!activeCompanies.length && typeof options.prisma.companyMember?.count === 'function'
+      && await options.prisma.companyMember.count({ where: { userId: user.id } }) > 0) {
+      return res.status(403).json({ ok: false, error: 'COMPANY_ACCESS_DENIED', message: '没有可访问的公司，请联系管理员。' });
+    }
     const requestedCompanyId = typeof req.body?.companyId === 'string' ? req.body.companyId.trim() : '';
     if (requestedCompanyId && !activeCompanies.some((m) => m.companyId === requestedCompanyId)) {
-      return res.status(403).json({ ok: false, error: 'COMPANY_ACCESS_DENIED', message: '当前账号不属于该公司。' });
+      return res.status(403).json({ ok: false, error: 'COMPANY_ACCESS_DENIED', message: '当前账号无法访问该公司。' });
     }
     if (!requestedCompanyId && activeCompanies.length > 1) {
       return res.json({
@@ -170,6 +175,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     try {
       tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, company?.id ?? null);
     } catch (error) {
+      if (error instanceof CompanyAccessError) return res.status(error.status).json({ ok: false, error: error.code, message: error.message });
       logger.error('[auth] current authorization load failed', { userId: user.id, error: (error as Error).message });
       return res.status(500).json({ ok: false, error: 'AUTHORIZATION_LOAD_FAILED', message: '账号权限暂时无法加载，请稍后重试。' });
     }
@@ -196,7 +202,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
 
     return res.json({
       ok: true,
-      user: serializeAuthUser(user, roles, permissions, departmentIds, { newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded }),
+      user: serializeAuthUser(user, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded }),
       token,
       ...(company ? { company } : {}),
       ...extra,
@@ -380,7 +386,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       }
       return res.json({
         ok: true,
-        user: serializeAuthUser(user, roles, permissions, departmentIds, { newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }),
+        user: serializeAuthUser(user, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }),
         ...(company ? { company } : {}),
       });
     } catch {
@@ -435,7 +441,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     return res.json({
       ok: true,
       token: next,
-      user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { newRoleIds: current.roleIds, authorizationLoaded: true }),
+      user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { companyId: current.companyId, newRoleIds: current.roleIds, authorizationLoaded: true }),
       company: { id: membership.company.id, name: membership.company.name, slug: membership.company.slug },
     });
   });
@@ -507,7 +513,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       await options.prisma.auditLog.create({
         data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: user.id, action: 'update_profile', targetType: 'UserAccount', targetId: user.id, ip: req.ip },
       }).catch(() => undefined);
-      return res.json({ ok: true, user: serializeAuthUser(user, roles, permissions, departmentIds, { newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }) });
+      return res.json({ ok: true, user: serializeAuthUser(user, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }) });
     } catch {
       res.clearCookie(COOKIE_NAME, { path: '/' });
       return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' });

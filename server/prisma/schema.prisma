@@ -1301,7 +1301,7 @@ model UserAccount {
   notificationPreferences NotificationPreference[]
   workflowInitiated       WorkflowInstance[]       @relation("WorkflowInitiator")
   workflowDecided         WorkflowStep[]           @relation("WorkflowDecider")
-  employeeProfile         EmployeeProfile?
+  employeeProfiles        EmployeeProfile[]
   cashRefundRequests      CreditNoteRefund[] @relation("CashRefundRequester")
   cashRefundEvents        CreditNoteRefundEvent[]
   cashRefundEvidence      CreditNoteRefundEvidence[]
@@ -1590,8 +1590,9 @@ model WorkAssignment {
 /// C3a 员工档案扩展（与 UserAccount 1:1，承载 HR 业务字段，UserAccount 保持认证纯净）
 model EmployeeProfile {
   id               String   @id
-  userId           String   @unique
-  employeeNo       String   @unique
+  companyId        String?  @db.Uuid
+  userId           String
+  employeeNo       String
   positionId       String?
   hireDate         String // YYYY-MM-DD
   regularDate      String? // 转正日期（试用期待转正提醒依据）
@@ -1608,7 +1609,11 @@ model EmployeeProfile {
 
   user     UserAccount  @relation(fields: [userId], references: [id])
   position JobPosition? @relation(fields: [positionId], references: [id])
+  company  Company?     @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@unique([companyId, userId])
+  @@unique([companyId, employeeNo])
+  @@index([userId])
   @@index([employmentStatus])
   @@index([positionId])
 }
@@ -1616,8 +1621,11 @@ model EmployeeProfile {
 /// C3a 员工生命周期事件（入/转/调/升/停/复/离，历史流水 — 故意用松散 id 引用，部门/岗位改名删除不影响历史）
 model EmploymentEvent {
   id             String   @id
+  companyId      String?  @db.Uuid
   userId         String
   type           String // Onboard/Regularize/Transfer/Promote/Suspend/Resume/Resign/Terminate
+  fromStatus     String?
+  toStatus       String?
   effectiveDate  String // YYYY-MM-DD
   fromDeptId     String?
   toDeptId       String?
@@ -1626,7 +1634,9 @@ model EmploymentEvent {
   reason         String?
   operatorId     String?
   createdAt      DateTime @default(now())
+  company        Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
+  @@index([companyId, userId])
   @@index([userId])
   @@index([type])
   @@index([effectiveDate])
@@ -9813,6 +9823,8 @@ model Company {
   roles       Role[]
   departments Department[]
   workspaces  MistWorkspace[]
+  employeeProfiles EmployeeProfile[]
+  employmentEvents EmploymentEvent[]
 
   @@index([status])
   @@index([createdAt])

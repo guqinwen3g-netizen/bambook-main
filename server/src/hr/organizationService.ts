@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import { validateDepartmentBusinessAttributes } from './departmentBusinessAttributes';
+import { currentCompanyId } from '../auth/requestCompanyContext';
 
 export class OrganizationError extends Error {
   constructor(message: string, public status = 400) { super(message); }
@@ -46,9 +47,11 @@ export async function retireOrganizationDepartment(prisma: PrismaClient, id: str
     ]);
     if (teams || people || positions) {
       const target = input.targetDepartmentId ? await tx.department.findUnique({ where: { id: input.targetDepartmentId } }) : null;
-      if (!target || target.id === id || target.parentId !== current.parentId || target.status !== 'active') throw new OrganizationError(`该部门有 ${teams} 个小组、${people} 名人员、${positions} 个岗位，请选择承接部门。`, 409);
+      const sameCompany = currentCompanyId() ? target?.companyId === current.companyId && !!target?.parentId : target?.parentId === current.parentId;
+      if (!target || target.id === id || !sameCompany || target.status !== 'active') throw new OrganizationError(`该部门有 ${teams} 个小组、${people} 名人员、${positions} 个岗位，请选择承接部门。`, 409);
       await tx.team.updateMany({ where: { departmentId: id, deletedAt: null }, data: { departmentId: target.id } });
-      await tx.userAccount.updateMany({ where: { primaryDeptId: id, deletedAt: null }, data: { primaryDeptId: target.id } });
+      if (currentCompanyId()) await tx.userRole.updateMany({ where: { departmentId: id }, data: { departmentId: target.id } });
+      else await tx.userAccount.updateMany({ where: { primaryDeptId: id, deletedAt: null }, data: { primaryDeptId: target.id } });
       await tx.jobPosition.updateMany({ where: { departmentId: id, deletedAt: null }, data: { departmentId: target.id } });
     }
     await tx.department.update({ where: { id }, data: { status: 'inactive' } });

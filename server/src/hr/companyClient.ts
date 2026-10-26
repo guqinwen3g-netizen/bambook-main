@@ -12,13 +12,20 @@ export function companyHrClient(client: PrismaClient): PrismaClient {
       const fn = model[operation];
       if (typeof fn !== 'function') return fn;
       return async (args: any = {}) => {
-        const companyId = currentCompanyId(); if (!companyId) return fn.call(model, args);
+        const companyId = currentCompanyId();
+        if (!companyId) {
+          // Unscoped HTTP sessions cannot read company-owned employment records.
+          if (companyId !== null || key !== 'employeeProfile') return fn.call(model, args);
+          const data = args.data ?? args.create;
+          if (data?.companyId) throw new CompanyAccessError('NOT_FOUND', '记录不存在。', 404);
+          return fn.call(model, { ...args, ...(!['create', 'createMany'].includes(String(operation)) ? { where: { ...args.where, AND: [args.where?.AND ?? {}, { companyId: null }] } } : {}) });
+        }
         const member = { companyMembers: { some: { companyId, status: 'active' } } };
         const scopes: Record<string, any> = {
           department: { companyId }, role: { companyId }, userAccount: member,
           userRole: { role: { companyId } }, team: { department: { companyId } },
           teamMember: { team: { department: { companyId } } }, jobPosition: { department: { companyId } },
-          employeeProfile: { AND: [{ user: member }, { OR: [{ position: { department: { companyId } } }, { positionId: null, user: { companyMembers: { none: { companyId: { not: companyId }, status: 'active' } } } }] }] },
+          employeeProfile: { companyId },
         };
         const scope = scopes[String(key)];
         if (!scope) {
@@ -41,10 +48,17 @@ export function companyHrClient(client: PrismaClient): PrismaClient {
           }
         }
         if (!['create', 'createMany'].includes(String(operation))) next.where = { ...args.where, AND: [args.where?.AND ?? {}, scope] };
+        if (key === 'userAccount' && args.where?.primaryDeptId !== undefined) {
+          delete next.where.primaryDeptId;
+          next.where.AND.push({ roles: { some: { departmentId: args.where.primaryDeptId, role: { companyId } } } });
+        }
         if (key === 'userAccount' && next.include?.roles) next.include = { ...next.include, roles: { ...next.include.roles, where: { role: { companyId } }, include: { ...next.include.roles.include, department: true } } };
         const result = await fn.call(model, next);
         if (key !== 'userAccount' || !result) return result;
-        const project = (row: any) => { const department = row.roles?.find((r: any) => r.department?.companyId === companyId)?.department ?? (row.primaryDepartment?.companyId === companyId ? row.primaryDepartment : null); return { ...row, primaryDeptId: department?.id ?? null, ...(row.primaryDepartment !== undefined ? { primaryDepartment: department } : {}) }; };
+        const rows = Array.isArray(result) ? result : [result];
+        const unloaded = rows.filter((row: any) => row && typeof row.id === 'string' && !row.roles).map((row: any) => row.id);
+        const assignments = unloaded.length ? await db.userRole.findMany({ where: { userId: { in: unloaded }, role: { companyId } }, include: { department: true } }) : [];
+        const project = (row: any) => { const roles = row.roles ?? assignments.filter((r: any) => r.userId === row.id); const department = roles.find((r: any) => r.department?.companyId === companyId)?.department ?? (row.primaryDepartment?.companyId === companyId ? row.primaryDepartment : null); return { ...row, primaryDeptId: department?.id ?? null, ...(row.primaryDepartment !== undefined ? { primaryDepartment: department } : {}) }; };
         return Array.isArray(result) ? result.map(project) : typeof result === 'object' ? project(result) : result;
       };
     } });

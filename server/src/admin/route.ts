@@ -1,3 +1,4 @@
+import { saveCompanyAccountAssignment } from './companyAccountAssignment';
 import { setCompanyAccountAccess } from './companyAccountLifecycle';
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
@@ -264,7 +265,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       : baseWhere;
     const usersRaw = await options.prisma.userAccount.findMany({
       where,
-      include: { roles: { ...(companyId ? { where: { role: { companyId } } } : {}), include: { role: true, department: true } }, primaryDepartment: true, ...(companyId ? { companyMembers: { where: { companyId }, select: { status: true } } } : {}) },
+      include: { roles: { ...(companyId ? { where: { role: { companyId } } } : {}), include: { role: true, department: true } }, primaryDepartment: true, _count: { select: { companyMembers: { where: { status: { in: ['active', 'pending', 'suspended'] } } } } }, ...(companyId ? { companyMembers: { where: { companyId }, select: { status: true } } } : {}) },
       orderBy: { createdAt: 'desc' },
     });
     const users = usersRaw.filter(u => {
@@ -284,6 +285,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       displayName: u.displayName,
       email: u.email,
       avatarUrl: (u as any).avatarUrl || null,
+      identityEditable: !companyId || (u._count?.companyMembers ?? 2) <= 1,
       status: companyId && (u as any).companyMembers?.[0]?.status === 'suspended' ? 'disabled' : u.status,
       roles: u.roles.map(ur => ur.role.name),
       roleIds: u.roles.map(ur => ur.roleId),
@@ -384,6 +386,10 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (companyId && status !== undefined) {
       if (status !== 'active' || displayName !== undefined || email !== undefined || departmentId !== undefined) return res.status(400).json({ ok: false, error: 'INVALID_STATUS_CHANGE', message: '请单独办理账号启用或停用。' });
       await setCompanyAccountAccess(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, enabled: true });
+      return res.json({ ok: true });
+    }
+    if (companyId) {
+      await saveCompanyAccountAssignment(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, actorIsOwner: actorIsOwner(req), departmentId, displayName, email });
       return res.json({ ok: true });
     }
     if (departmentId !== undefined && !(await departmentExists(options.prisma, departmentId, companyId))) {
@@ -692,6 +698,12 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
   router.patch('/users/:id/roles', withRouteErrorGuard(async (req: Request, res: Response) => {
     const { id } = req.params;
+    const companyId = actorCompanyId(req);
+    if (companyId) {
+      await saveCompanyAccountAssignment(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, actorIsOwner: actorIsOwner(req),
+        roles: req.body?.roles, departmentId: req.body?.departmentId, displayName: req.body?.displayName, email: req.body?.email });
+      return res.json({ ok: true });
+    }
     const { roles, departmentId } = req.body || {};
     if (!(await departmentExists(options.prisma, departmentId, actorCompanyId(req)))) return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: '请选择本公司部门。' });
     // 存在性前置：对不存在用户返 200 会静默吞掉前端/调用方的 ID 错误（与 disable/approve/reject 同标准 404）

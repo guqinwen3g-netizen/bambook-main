@@ -1,3 +1,4 @@
+import { useNav } from '../../nav';
 import { permissionLabel } from '../../runtime/permissionLabels';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -43,13 +44,16 @@ type Form = { mode: 'create' | 'approve' | 'edit'; account?: AdminAccount; displ
 function blank(): Form { return { mode: 'create', displayName: '', email: '', password: '', departmentId: '', roles: [], grant: true }; }
 
 export function AdminAccounts() {
-  const session = useMistSession(), workspace = useMistWorkspace(), toast = useToast();
+  const session = useMistSession(), workspace = useMistWorkspace(), toast = useToast(), { route, go } = useNav();
   const { data, loading, error, load } = useDirectory();
   const owner = session.hasRole('owner');
   const [query, setQuery] = React.useState(''), [status, setStatus] = React.useState('');
   const [selected, setSelected] = React.useState<string | null>(null), [form, setForm] = React.useState<Form | null>(null);
+  React.useEffect(() => { setSelected(route.id ?? null); }, [route.id]);
   const [busy, setBusy] = React.useState(false), [formError, setFormError] = React.useState('');
   const [confirm, setConfirm] = React.useState<{ kind: 'disable' | 'enable' | 'reset' | 'reject'; account: AdminAccount } | null>(null), [reason, setReason] = React.useState('');
+  const [decisionError, setDecisionError] = React.useState('');
+  React.useEffect(() => { setDecisionError(''); }, [confirm?.kind, confirm?.account.id]);
   const [temporary, setTemporary] = React.useState<{ name: string; password: string } | null>(null);
   const envelope = workspace.workspace, canGrant = envelope?.access?.canManageMembers === true && !!workspace.changeMember;
   const memberIds = new Set((workspace.state?.members ?? []).map(m => m.userId));
@@ -74,7 +78,9 @@ export function AdminAccounts() {
       let userId = f.account?.id ?? '';
       if (f.mode === 'create') userId = (await organizationApi.createAccount({ displayName: f.displayName.trim(), email: f.email.trim(), password: f.password, roles: f.roles, departmentId: f.departmentId })).userId;
       else if (f.mode === 'approve') await organizationApi.approve(userId, f.roles, f.departmentId);
-      else {
+      else if (session.user?.companyId) {
+        await organizationApi.saveAccountAssignment(userId, { displayName: f.displayName.trim(), email: f.email.trim(), departmentId: f.departmentId || null, roles: f.roles });
+      } else {
         await organizationApi.updateAccount(userId, { displayName: f.displayName.trim(), email: f.email.trim(), departmentId: f.departmentId || undefined });
         await organizationApi.setRoles(userId, f.roles, f.departmentId || null);
       }
@@ -88,7 +94,7 @@ export function AdminAccounts() {
     if (!confirm || busy) return;
     const { kind, account } = confirm;
     if (kind === 'reject' && !reason.trim()) return;
-    setBusy(true);
+    setBusy(true); setDecisionError('');
     try {
       if (kind === 'disable') await organizationApi.disable(account.id);
       else if (kind === 'enable') await organizationApi.updateAccount(account.id, { status: 'active' });
@@ -96,7 +102,7 @@ export function AdminAccounts() {
       else { const result = await organizationApi.resetPassword(account.id); if (result.temporaryPassword) setTemporary({ name: account.displayName, password: result.temporaryPassword }); }
       toast({ disable: '账号已停用，历史记录保留', enable: '账号已重新启用', reject: '已拒绝注册申请', reset: '密码已重置' }[kind]);
       setConfirm(null); setReason(''); await load();
-    } catch (e) { toast(message(e, '操作未完成'), 'bad'); }
+    } catch (e) { setDecisionError(message(e, '操作未完成')); }
     finally { setBusy(false); }
   };
 
@@ -121,6 +127,7 @@ export function AdminAccounts() {
       footer={current && <div className="mist-row">
         {current.status === 'pending' && <><Button variant="primary" onClick={() => { setFormError(''); setForm({ ...blank(), mode: 'approve', account: current, displayName: current.displayName, email: current.email, departmentId: current.departmentId ?? '', roles: current.roleIds }); }}>{uiText("审批通过")}</Button><Button onClick={() => setConfirm({ kind: 'reject', account: current })}>{uiText("拒绝")}</Button></>}
         {current.status === 'active' && <><Button onClick={() => { setFormError(''); setForm({ ...blank(), mode: 'edit', account: current, displayName: current.displayName, email: current.email, departmentId: current.departmentId ?? '', roles: current.roleIds }); }}>{uiText("修改资料与角色")}</Button><Button icon={KeyRound} onClick={() => setConfirm({ kind: 'reset', account: current })}>{uiText("重置密码")}</Button><Button disabled={self} onClick={() => setConfirm({ kind: 'disable', account: current })}>{uiText(self ? '不能停用自己' : '停用账号')}</Button></>}
+        {(session.hasPermission('hr:read') || session.hasPermission('hr:write')) && <Button onClick={() => go('hr', current.id, { section: 'people' })}>{uiText("员工档案")}</Button>}
         {current.status === 'disabled' && <Button onClick={() => setConfirm({ kind: 'enable', account: current })}>{uiText("重新启用")}</Button>}
       </div>}>
       {current && <>
@@ -135,8 +142,8 @@ export function AdminAccounts() {
       {form && data && <>
         {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
         <FormGrid>
-          <Field label={uiText("姓名")} required><TextInput value={form.displayName} disabled={busy || form.mode === 'approve'} onChange={e => setForm({ ...form, displayName: e.target.value })} /></Field>
-          <Field label={uiText("登录邮箱")} required><TextInput type="email" value={form.email} disabled={busy || form.mode === 'approve'} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+          <Field label={uiText("姓名")} required><TextInput value={form.displayName} disabled={busy || form.mode === 'approve' || form.account?.identityEditable === false} onChange={e => setForm({ ...form, displayName: e.target.value })} /></Field>
+          <Field label={uiText("登录邮箱")} required><TextInput type="email" value={form.email} disabled={busy || form.mode === 'approve' || form.account?.identityEditable === false} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
           {form.mode === 'create' && <Field label={uiText("初始密码")} required hint={uiText("至少 8 位，含字母和数字")}><TextInput type="password" autoComplete="new-password" value={form.password} disabled={busy} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
           <Field label={uiText("任职部门")} required><Select aria-label={uiText("任职部门")} value={form.departmentId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departments} /></Field>
           <Field label={uiText("角色")} required full><RolePicker roles={data.roles} value={form.roles} owner={owner} disabled={busy} onChange={roles => setForm({ ...form, roles })} /></Field>
@@ -148,6 +155,7 @@ export function AdminAccounts() {
       title={uiText(confirm ? { disable: '停用账号', enable: '重新启用账号', reset: '重置密码', reject: '拒绝注册申请' }[confirm.kind] : '')}
       description={uiText(confirm ? { disable: `${confirm.account.displayName} 将无法登录，已登录的会话随即失效；历史单据与小组记录保留。`, enable: `${confirm.account.displayName} 可以再次登录，角色与部门保持不变。`, reset: `将为 ${confirm.account.displayName} 生成临时密码，只显示一次，请当面或经内部渠道转交，并提醒对方登录后在“设置 · 安全”中修改。`, reject: `${confirm.account.displayName} 的申请将被拒绝，请写明原因。` }[confirm.kind] : undefined)}
       footer={<div className="mist-row"><Button variant="primary" loading={busy} disabled={confirm?.kind === 'reject' && !reason.trim()} onClick={() => void decide()}>{uiText("确认")}</Button><Button disabled={busy} onClick={() => setConfirm(null)}>{uiText("取消")}</Button></div>}>
+      {decisionError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(decisionError)}</Banner>}
       {confirm?.kind === 'reject' && <Field label={uiText("拒绝原因")} required><TextArea value={reason} onChange={e => setReason(e.target.value)} /></Field>}
     </Dialog>
     <Dialog open={!!temporary} onClose={() => setTemporary(null)} title={uiText("临时密码")} description={ui`请转交 ${temporary?.name ?? ''}；对方用它登录后会被要求先设置新密码。关闭后不再显示。`} footer={<Button variant="primary" onClick={() => setTemporary(null)}>{uiText("已转交")}</Button>}>
@@ -157,7 +165,7 @@ export function AdminAccounts() {
 }
 
 const scopeLabel = permissionLabel;
-const DOMAIN_LABEL: Record<string, string> = { sample: '样品', sensitive: '敏感数据', vat: '增值税发票', crm: '客户跟进', agent: 'AI 操作', business: '业务记录', dashboard: '经营总览', cockpit: '经营驾驶舱', customers: '客户', relations: '客户关系', marketing: '营销', emails: '邮件', quotations: '报价', orders: '订单', production: '生产', shipments: '物流', customs: '单证报关', inventory: '库存', suppliers: '供应商', products: '开发与产品', bom: '成本核算', pricing: '定价', invoices: '发票', vouchers: '收付款', finance: '财务', tax: '退税', risk: '风险', aftersales: '售后', approvals: '审批', reports: '报表', knowledge: '资料中心', hr: '人事', users: '账号', audit: '审计', settings: '设置', dictionary: '数据字典', data: '数据导入导出', tools: '业务工具', ai: 'AI 助手', seasons: '季节', development: '开发' };
+const DOMAIN_LABEL: Record<string, string> = { credit: '信用', exception: '异常处理', fx: '汇率', logistics: '物流', moq: '起订量', order: '订单', procurement: '采购', qc: '质量检验', remit: '收汇', sample: '样品', sensitive: '敏感数据', vat: '增值税发票', crm: '客户跟进', agent: 'AI 操作', business: '业务记录', dashboard: '经营总览', cockpit: '经营驾驶舱', customers: '客户', relations: '客户关系', marketing: '营销', emails: '邮件', quotations: '报价', orders: '订单', production: '生产', shipments: '物流', customs: '单证报关', inventory: '库存', suppliers: '供应商', products: '开发与产品', bom: '成本核算', pricing: '定价', invoices: '发票', vouchers: '收付款', finance: '财务', tax: '退税', risk: '风险', aftersales: '售后', approvals: '审批', reports: '报表', knowledge: '资料中心', hr: '人事', users: '账号', audit: '审计', settings: '设置', dictionary: '数据字典', data: '数据导入导出', tools: '业务工具', ai: 'AI 助手', seasons: '季节', development: '开发' };
 const domainOf = (scope: string) => scope.split(':')[0];
 
 /** 权限勾选：按模块分组，可按模块、名称或代码筛选。 */

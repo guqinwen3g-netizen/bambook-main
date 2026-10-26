@@ -70,6 +70,9 @@ function hrCodesActuallyThrown(): string[] {
  * `VALIDATION_FAILED` → 400、`*_NOT_FOUND` → 404、其余业务冲突 → 409。
  */
 function expectedTierForHrCode(code: string): number {
+  if (code === 'UNAUTHORIZED') return 401;
+  if (code === 'FORBIDDEN') return 403;
+  if (code === 'INTERNAL_ERROR') return 500;
   if (code === 'VALIDATION_FAILED') return 400;
   if (code.endsWith('_NOT_FOUND')) return 404;
   return 409;

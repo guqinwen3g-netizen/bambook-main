@@ -40,7 +40,7 @@ describe.skipIf(!url)('real HTTP company isolation',()=>{
   await db.userRole.create({data:{id:randomUUID(),userId:staff,roleId:'role-sales@'+companies[0],departmentId:depts[0]}});
   await db.userRole.create({data:{id:randomUUID(),userId:staff,roleId:'role-super-admin@'+companies[1],departmentId:depts[1]}});
   await db.jobPosition.create({data:{id:position,title:'Company A role',departmentId:depts[0]}});
-  await db.employeeProfile.create({data:{id:randomUUID(),userId:staff,employeeNo:'employee-'+key,hireDate:'2026-01-01',positionId:position}});
+  await db.employeeProfile.create({data:{id:randomUUID(),companyId:companies[0],userId:staff,employeeNo:'employee-'+key,hireDate:'2026-01-01',positionId:position}});
   tokens=companies.map(companyId=>auth.signToken({userId:user,companyId,roles:['owner'],permissions:[],departmentIds:[]}));
   legacy=auth.signToken({userId:user,roles:['owner'],permissions:[],departmentIds:[]}); pt=auth.signToken({userId:platform,roles:[],permissions:[],departmentIds:[]});
   app=express();app.use(express.json());app.use(cookieParser());app.use('/api',createAuthorizationSnapshotGuard({prisma:db}),tenantSurfaceGuard);
@@ -80,5 +80,11 @@ describe.skipIf(!url)('real HTTP company isolation',()=>{
  it('platform staff cannot switch into or read a customer company',async()=>{expect((await api().post('/api/auth/switch-company').set('Authorization','Bearer '+pt).send({companyId:companies[0]})).status).toBe(403);const forged=auth.signToken({userId:platform,companyId:companies[0],roles:['owner'],permissions:['*'],departmentIds:[]});expect((await api().get('/api/mist/workspaces').set('Authorization','Bearer '+forged)).status).toBe(403);});
  it('company administrators cannot grant the company owner role by its scoped id',async()=>{await db.userPermissionOverrides.create({data:{id:randomUUID(),userId:staff,companyId:companies[0],scope:'users:admin',grantedBy:user,reason:'administrator fixture'}});const token=auth.signToken({userId:staff,companyId:companies[0],roles:['owner'],permissions:[],departmentIds:[]});expect((await api().patch('/api/admin/users/'+user+'/roles').set('Authorization','Bearer '+token).send({roles:['role-super-admin@'+companies[0]],departmentId:depts[0]})).status).toBe(403);});
  it('suspension invalidates current session immediately',async()=>{await db.company.update({where:{id:companies[0]},data:{status:'suspended'}});try{expect((await api().get('/api/mist/workspaces').set('Authorization',bearer())).status).toBe(403);}finally{await db.company.update({where:{id:companies[0]},data:{status:'active'}});}});
+ it('a valid password with every company suspended is a clear access denial, not a server failure',async()=>{
+  const password='IsolatedPassword43!';await db.userAccount.update({where:{id:user},data:{passwordHash:await auth.hashPassword(password)}});
+  await db.companyMember.updateMany({where:{userId:user},data:{status:'suspended'}});
+  try{const response=await api().post('/api/auth/login').send({email:user+'@example.invalid',password});expect(response.status).toBe(403);expect(response.body.error).toBe('COMPANY_ACCESS_DENIED');expect(response.body.token).toBeUndefined();}
+  finally{await db.companyMember.updateMany({where:{userId:user},data:{status:'active'}});}
+ });
  it('membership removal invalidates current session immediately',async()=>{await db.companyMember.updateMany({where:{companyId:companies[0],userId:user},data:{status:'left'}});try{expect((await api().get('/api/mist/workspaces').set('Authorization',bearer())).status).toBe(403);}finally{await db.companyMember.updateMany({where:{companyId:companies[0],userId:user},data:{status:'active'}});}});
 });

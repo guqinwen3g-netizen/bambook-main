@@ -421,7 +421,7 @@ describe('★ Task 4b F1 · 组端点与「未归因 ⇒ 500」甄别腿的执�
     // 与上一条对照的是：同样「认不出」，非 HrError 才答 500（F2 的边界）。
     const prisma = {
       userAccount: { findUnique: vi.fn().mockResolvedValue({ id: 'u-1' }) },
-      employeeProfile: { findUnique: vi.fn().mockResolvedValue({ userId: 'u-1', employmentStatus: 'Regular', deletedAt: null }) },
+      employeeProfile: { findFirst: vi.fn().mockResolvedValue({ userId: 'u-1', employmentStatus: 'Regular', deletedAt: null }) },
       auditLog: { create: vi.fn().mockResolvedValue({ id: 'alog_1' }) },
     };
     const res = await callHr('put', '/hr/employees/u-1', prisma, { employmentStatus: 'Resigned' });

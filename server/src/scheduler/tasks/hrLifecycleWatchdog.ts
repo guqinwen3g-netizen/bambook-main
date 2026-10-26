@@ -45,7 +45,7 @@ export async function scanHrLifecycle(prisma: PrismaClient, today: Date = busine
   const risk = createRiskService(prisma);
 
   const profiles = await db.employeeProfile.findMany({
-    where: { deletedAt: null, employmentStatus: { notIn: ['Resigned', 'Terminated'] } },
+    where: { companyId: null, deletedAt: null, employmentStatus: { notIn: ['Resigned', 'Terminated'] } },
     include: { user: true },
   });
 

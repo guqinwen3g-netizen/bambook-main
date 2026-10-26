@@ -2,7 +2,7 @@
  * C3 HR 深化 — 员工全生命周期 / 考勤请假 / 薪资 / 绩效 / 培训 统一服务层
  *
  * 设计要点：
- *   1. EmployeeProfile 与 UserAccount 1:1，UserAccount 保持认证纯净，HR 业务字段全部落 Profile
+ *   1. EmployeeProfile 按公司与 UserAccount 关联，UserAccount 保持认证纯净，HR 业务字段全部落 Profile
  *   2. 生命周期事件（EmploymentEvent）是唯一状态变更入口：所有 employmentStatus / 岗位变动
  *      必须经 recordEmploymentEvent 写入历史流水，禁止直接改 Profile 状态字段
  *   3. 考勤每人每日一条（userId+date 唯一），upsert 语义；状态自动推导（迟到/早退）
@@ -304,7 +304,7 @@ export function createHrService(prisma: PrismaClient) {
     for (let attempt = 0; attempt < 5; attempt++) {
       const count = await db.employeeProfile.count();
       const candidate = `EMP${String(count + 1 + attempt).padStart(4, '0')}`;
-      const clash = await db.employeeProfile.findUnique({ where: { employeeNo: candidate } });
+      const clash = await db.employeeProfile.findFirst({ where: { employeeNo: candidate } });
       if (!clash) return candidate;
     }
     // 极端兜底：时间戳后缀
@@ -359,7 +359,7 @@ export function createHrService(prisma: PrismaClient) {
   }
 
   async function getProfile(userId: string) {
-    const p = await db.employeeProfile.findUnique({
+    const p = await db.employeeProfile.findFirst({
       where: { userId },
       include: { user: { include: { primaryDepartment: true } }, position: true },
     });
@@ -390,7 +390,7 @@ export function createHrService(prisma: PrismaClient) {
       throw new HrError('VALIDATION_FAILED', `非法合同类型：${input.contractType}`);
     }
     // employmentStatus 不由此入口直接变更（须走生命周期事件），仅建档时允许指定初始状态
-    const existing = await db.employeeProfile.findUnique({ where: { userId: input.userId } });
+    const existing = await db.employeeProfile.findFirst({ where: { userId: input.userId } });
     if (existing && input.employmentStatus && input.employmentStatus !== existing.employmentStatus) {
       throw new HrError('STATUS_VIA_EVENT_ONLY', '在职状态变更必须经生命周期事件（recordEmploymentEvent）');
     }
@@ -400,7 +400,7 @@ export function createHrService(prisma: PrismaClient) {
 
     if (existing) {
       const updated = await db.employeeProfile.update({
-        where: { userId: input.userId },
+        where: { id: existing.id },
         data: {
           ...(input.positionId !== undefined && { positionId: input.positionId || null }),
           ...(input.hireDate !== undefined && { hireDate: input.hireDate }),
@@ -470,7 +470,7 @@ export function createHrService(prisma: PrismaClient) {
     const user = await db.userAccount.findUnique({ where: { id: input.userId } });
     if (!user) throw new HrError('USER_NOT_FOUND', `用户 ${input.userId} 不存在`);
 
-    let profile = await db.employeeProfile.findUnique({ where: { userId: input.userId } });
+    let profile = await db.employeeProfile.findFirst({ where: { userId: input.userId } });
 
     // Onboard 允许无档案（自动建档）；其余事件必须有在职档案
     if (input.type === 'Onboard') {
@@ -546,7 +546,7 @@ export function createHrService(prisma: PrismaClient) {
       profilePatch.positionId = input.toPositionId;
     }
     if (Object.keys(profilePatch).length > 0) {
-      await db.employeeProfile.update({ where: { userId: input.userId }, data: profilePatch });
+      await db.employeeProfile.update({ where: { id: profile.id }, data: profilePatch });
     }
     // 部门异动落 UserAccount.primaryDeptId；小组须与部门一致，换部门即退出原部门的小组。
     let leftTeams = 0;

@@ -32,6 +32,8 @@ export function HrOrganizationPage() {
   const [data, setData] = React.useState<Directory | null>(null), [loading, setLoading] = React.useState(true), [error, setError] = React.useState('');
   const [open, setOpen] = React.useState<Open>(null), [form, setForm] = React.useState<Form | null>(null), [formError, setFormError] = React.useState('');
   const [confirm, setConfirm] = React.useState<Confirm>(null), [busy, setBusy] = React.useState(false);
+  const [operationError, setOperationError] = React.useState('');
+  React.useEffect(() => { setOperationError(''); }, [open?.kind, open?.id, confirm?.kind]);
   const [query, setQuery] = React.useState(''), [deptFilter, setDeptFilter] = React.useState('');
   const [profile, setProfile] = React.useState<{ userId: string; value: EmployeeProfile | null; error?: string } | null>(null);
   const [events, setEvents] = React.useState<{ userId: string; rows: EmploymentEvent[] | null; error?: string } | null>(null), [profileTick, setProfileTick] = React.useState(0);
@@ -47,6 +49,13 @@ export function HrOrganizationPage() {
   }, []);
   React.useEffect(() => { setData(null); setOpen(null); setForm(null); if (!session.localMode && canRead) void load(); else setLoading(false); return () => { serial.current++; }; }, [session.sessionKey, session.localMode, canRead, load]);
 
+  const linkedPerson = React.useRef<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (!route.id) { linkedPerson.current = undefined; return; }
+    if (route.id !== linkedPerson.current && data?.people.some(person => person.id === route.id)) {
+      linkedPerson.current = route.id; setOpen({ kind: 'person', id: route.id });
+    }
+  }, [route.id, data]);
   const root = data?.departments.find(d => !d.parentId) ?? null;
   const departments = (data?.departments ?? []).filter(d => d.parentId);
   const person = (userId: string) => data?.people.find(p => p.id === userId);
@@ -79,9 +88,9 @@ export function HrOrganizationPage() {
 
   const run = async (action: () => Promise<unknown>, done: string) => {
     if (busy) return false;
-    setBusy(true);
+    setBusy(true); setOperationError('');
     try { await action(); toast(done); await load(); return true; }
-    catch (e) { toast(message(e, '操作未完成'), 'bad'); return false; }
+    catch (e) { setOperationError(message(e, '操作未完成')); return false; }
     finally { setBusy(false); }
   };
   const submit = async () => {
@@ -96,7 +105,7 @@ export function HrOrganizationPage() {
     if (form.kind === 'position' && !/^\d{1,4}$/.test(form.headcount.trim()) || form.kind === 'position' && Number(form.headcount) < 1) return setFormError('编制人数须为 1–9999 的整数');
     if (form.kind === 'event' && (!form.type || !form.effectiveDate)) return setFormError('请选择变动类型并填写生效日期');
     if (form.kind === 'event' && EMPLOYMENT_EVENTS.find(e => e.value === form.type)?.position && !form.toPositionId) return setFormError('调岗 / 晋升须选择新岗位');
-    if (form.kind === 'event' && EMPLOYMENT_EVENTS.find(e => e.value === form.type)?.terminal && !form.acknowledged) return setFormError('请先勾选确认：办理后该员工的系统账号会立即停用');
+    if (form.kind === 'event' && (EMPLOYMENT_EVENTS.find(e => e.value === form.type)?.terminal || session.user?.companyId && form.type === 'Suspend') && !form.acknowledged) return setFormError(session.user?.companyId ? '请确认暂停本公司访问。' : '请先勾选确认：办理后该员工的系统账号会立即停用');
     setBusy(true);
     try {
       if (form.kind === 'dept') {
@@ -115,15 +124,15 @@ export function HrOrganizationPage() {
         const result = await organizationApi.recordEvent({ userId: form.userId, type: form.type, effectiveDate: form.effectiveDate, reason: form.reason.trim() || null,
           fromDeptId: person(form.userId)?.departmentId ?? null, fromPositionId: current?.positionId ?? null, ...(def?.position ? { toPositionId: form.toPositionId, ...(deptMove(form.userId, form.toPositionId) ? { toDeptId: deptMove(form.userId, form.toPositionId) } : {}) } : {}) });
         setForm(null); setProfileTick(t => t + 1);
-        toast(result.accountDisabled ? `已办理${def?.label ?? '变动'}，系统账号已停用` : result.leftTeams ? `已办理${def?.label ?? '变动'}，部门已调整并退出原小组` : form.type === 'Onboard' ? '已办理返聘，账号已恢复启用' : `已办理${def?.label ?? '变动'}`);
+        toast(result.accountDisabled ? (session.user?.companyId ? `已办理${def?.label ?? '变动'}，本公司访问已停用` : `已办理${def?.label ?? '变动'}，系统账号已停用`) : result.leftTeams ? `已办理${def?.label ?? '变动'}，部门已调整并退出原小组` : form.type === 'Onboard' ? '已办理返聘，账号已恢复启用' : `已办理${def?.label ?? '变动'}`);
         await load(); return;
       } else {
-        if (!form.exists) {
+        if (!form.exists && !session.user?.companyId) {
           // 新建档案按入职事件写入（留下在职变动记录）；填了转正日期则同时记一次转正。
           await organizationApi.recordEvent({ userId: form.userId, type: 'Onboard', effectiveDate: form.hireDate, fromDeptId: null, reason: '建立员工档案' });
           if (form.regularDate) await organizationApi.recordEvent({ userId: form.userId, type: 'Regularize', effectiveDate: form.regularDate, reason: '建档时已转正' });
         }
-        const { profile: saved } = await organizationApi.saveProfile(form.userId, { positionId: form.positionId || null, ...(form.hireDate ? { hireDate: form.hireDate } : {}), contractType: form.contractType || null, contractEnd: form.contractEnd || null, phone: form.phone || null, emergencyContact: form.emergencyContact || null, workLocation: form.workLocation || null, notes: form.notes || null });
+        const { profile: saved } = await organizationApi.saveProfile(form.userId, { positionId: form.positionId || null, ...(form.hireDate ? { hireDate: form.hireDate } : {}), ...(!form.exists && form.regularDate ? { regularDate: form.regularDate } : {}), contractType: form.contractType || null, contractEnd: form.contractEnd || null, phone: form.phone || null, emergencyContact: form.emergencyContact || null, workLocation: form.workLocation || null, notes: form.notes || null });
         setProfile({ userId: form.userId, value: saved }); setProfileTick(t => t + 1);
       }
       toast(form.kind === 'profile' ? (form.exists ? '员工档案已保存' : '已建立员工档案') : form.id ? '已保存' : form.kind === 'dept' ? '部门已新建' : form.kind === 'position' ? '岗位已新建' : '小组已新建');
@@ -185,12 +194,12 @@ export function HrOrganizationPage() {
         empty={<EmptyState title={uiText("还没有部门")} description={uiText(canWrite ? '用“新建部门”建立第一个部门。' : '请联系人事或管理员建立部门。')} />} /></Card>
     </> : tab === 'positions' ? <>
       <Toolbar right={canWrite ? <Button variant="primary" icon={Plus} disabled={!data || !departments.length} onClick={() => { setFormError(''); setForm({ kind: 'position', title: '', departmentId: '', headcount: '1', description: '' }); }}>{uiText("新建岗位")}</Button> : undefined}>
-        <span className="mist-note">{uiText("岗位用于员工档案与调岗 / 晋升记录；“在岗”只统计试用、正式、停职的员工。岗位不决定系统权限。")}</span>
+
       </Toolbar>
       <Card><DataTable ariaLabel={uiText("岗位")} rows={data?.positions ?? []} rowKey={p => p.id} loading={loading && !data} selectedKey={openPosition?.id ?? null} onRowClick={p => setOpen({ kind: 'position', id: p.id })} columns={positionColumns}
-        empty={<EmptyState title={uiText("还没有岗位")} description={uiText(canWrite ? '用“新建岗位”建立岗位，再在员工档案中选择。' : '请联系人事建立岗位。')} />} /></Card>
+        empty={<EmptyState title={uiText("还没有岗位")} />} /></Card>
     </> : <>
-      <Toolbar right={<span className="mist-note">{uiText("新成员账号在“管理后台 · 账号”中新建或审批。")}</span>}>
+      <Toolbar right={session.hasPermission('users:admin') ? <Button onClick={() => go('admin-panel', undefined, { section: 'accounts' })}>{uiText("账号管理")}</Button> : undefined}>
         <Field label={uiText("搜索")}><TextInput aria-label={uiText("搜索人员")} placeholder={uiText("姓名、邮箱、部门或小组")} value={query} onChange={e => setQuery(e.target.value)} /></Field>
         <Field label={uiText("部门")}><Select aria-label={uiText("部门筛选")} value={deptFilter} onChange={e => setDeptFilter(e.target.value)} options={[{ value: '', label: '全部部门' }, ...departmentOptions(data?.departments ?? [])]} /></Field>
       </Toolbar>
@@ -205,6 +214,7 @@ export function HrOrganizationPage() {
         <Button onClick={() => setConfirm({ kind: 'retire', department: openDept, target: '' })}>{uiText("裁撤部门")}</Button>
       </div>}>
       {openDept && <>
+        {operationError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(operationError)}</Banner>}
         <KeyValue items={[{ label: '业务属性', value: <AttributePills values={openDept.businessAttributes} /> }, { label: '启用人员', value: data?.people.filter(p => p.departmentId === openDept.id && p.status === 'active').length ?? 0 }]} />
         <CardHeader title={uiText("小组")} sub={ui`${teamsIn(openDept.id).length} 个`} />
         {teamsIn(openDept.id).length ? <DataTable ariaLabel={uiText("部门小组")} rows={teamsIn(openDept.id)} rowKey={t => t.id} onRowClick={t => setOpen({ kind: 'team', id: t.id })} columns={[
@@ -223,10 +233,11 @@ export function HrOrganizationPage() {
         <Button variant="quiet" onClick={() => setOpen({ kind: 'dept', id: openTeam.departmentId })}>{uiText("返回部门")}</Button>
       </div>}>
       {openTeam && <>
+        {operationError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(operationError)}</Banner>}
         <KeyValue items={[{ label: '所属部门', value: openTeam.department ?? '—' }, { label: '业务属性', value: <AttributePills values={openTeam.businessAttributes} /> }, { label: '说明', value: openTeam.description || '—' }]} />
         <CardHeader title={uiText("成员")} sub={ui`${openTeam.memberCount} 人`} />
         {activeMembers(openTeam).length ? activeMembers(openTeam).map(m => { const p = person(m.userId); return <p key={m.id} className="mist-row"><b>{p?.displayName ?? m.userId}</b><span className="mist-note">{p?.email}</span>{canWrite && <Button size="sm" variant="quiet" disabled={busy} onClick={() => setConfirm({ kind: 'remove', team: openTeam, person: p ?? { id: m.userId, displayName: m.userId } })}>{uiText("移出")}</Button>}</p>; }) : <EmptyState compact title={uiText("还没有成员")} />}
-        {canWrite && <div className="mist-section"><Field label={uiText("加入成员")} hint={uiText("只列出同一部门、尚未加入其他小组的启用账号；每人只能在一个小组。")}>
+        {canWrite && <div className="mist-section"><Field label={uiText("加入成员")}>
           <div className="mist-row"><Select aria-label={uiText("选择成员")} value={candidate} disabled={busy || !candidates?.length} placeholder={uiText(candidates === null ? '读取中' : candidates.length ? '选择人员' : '没有可加入的人员')} onChange={e => setCandidate(e.target.value)} options={(candidates ?? []).map(c => ({ value: c.id, label: `${c.displayName}（${c.email}）` }))} />
             <Button icon={UserPlus} disabled={!candidate || busy} onClick={() => void run(() => organizationApi.addMember(openTeam.id, candidate), '已加入小组')}>{uiText("加入")}</Button></div>
         </Field></div>}
@@ -240,7 +251,8 @@ export function HrOrganizationPage() {
         <Button disabled={busy || incumbents(openPosition.id).length > 0} onClick={() => setConfirm({ kind: 'deletePosition', position: openPosition })}>{uiText("删除")}</Button>
       </div>}>
       {openPosition && <>
-        <KeyValue items={[{ label: '所属部门', value: openPosition.department ?? '未分配' }, { label: '编制人数', value: openPosition.headcount ?? 1 }, { label: '在岗人数', value: incumbents(openPosition.id).length }, { label: '状态', value: openPosition.status === 'inactive' ? '已停用（新档案与调岗不再可选）' : '启用' }, { label: '说明', value: openPosition.description || '—' }]} />
+        {operationError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(operationError)}</Banner>}
+        <KeyValue items={[{ label: '所属部门', value: openPosition.department ?? '未分配' }, { label: '编制人数', value: openPosition.headcount ?? 1 }, { label: '在岗人数', value: incumbents(openPosition.id).length }, { label: '状态', value: openPosition.status === 'inactive' ? '已停用' : '启用' }, { label: '说明', value: openPosition.description || '—' }]} />
         {incumbents(openPosition.id).length > (openPosition.headcount ?? 1) && <Banner tone="warn" title={uiText("在岗人数超出编制")}>{uiText("请调整编制人数或为部分员工调岗。")}</Banner>}
         <CardHeader title={uiText("在岗员工")} sub={ui`${incumbents(openPosition.id).length} 人`} />
         {incumbents(openPosition.id).length ? incumbents(openPosition.id).map(e => <p key={e.userId} className="mist-row"><Button variant="quiet" size="sm" onClick={() => setOpen({ kind: 'person', id: e.userId })}>{e.displayName ?? e.employeeNo}</Button><span className="mist-note">{e.employeeNo} · {EMPLOYMENT_STATUS[e.employmentStatus] ?? e.employmentStatus}</span></p>) : <EmptyState compact title={uiText("暂无在岗员工")} />}
@@ -254,6 +266,8 @@ export function HrOrganizationPage() {
         {profile.value && eventChoices(profile.value.employmentStatus).length > 0 && <Button variant={ACTIVE_EMPLOYMENT.includes(profile.value.employmentStatus) ? 'secondary' : 'primary'} onClick={() => { const first = eventChoices(profile.value!.employmentStatus)[0]; setFormError(''); setForm({ kind: 'event', userId: openPerson.id, fromStatus: profile.value!.employmentStatus, type: first.value, effectiveDate: today(), toPositionId: '', reason: '', acknowledged: false }); }}>{uiText("办理在职变动")}</Button>}
       </div>}>
       {openPerson && <>
+        {operationError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(operationError)}</Banner>}
+        {session.hasPermission('users:admin') && <Button size="sm" onClick={() => go('admin-panel', openPerson.id, { section: 'accounts' })}>{uiText("账号与权限")}</Button>}
         <KeyValue items={[{ label: '任职部门', value: openPerson.department ?? '未分配' }, { label: '小组', value: teamOf(openPerson.id)?.name ?? '未入组' }, { label: '角色', value: openPerson.roles.join('、') || '无角色' }, { label: '账号状态', value: ACCOUNT_STATUS[openPerson.status]?.label ?? openPerson.status }]} />
         <CardHeader title={uiText("员工档案")} sub={uiText(profile?.value ? profile.value.employeeNo : undefined)} />
         {profile?.userId !== openPerson.id ? null : profile.error ? <Banner tone="bad" title={uiText("档案读取失败")}>{profile.error}</Banner> : profile.value ? <KeyValue items={[
@@ -262,17 +276,17 @@ export function HrOrganizationPage() {
           { label: '合同类型', value: CONTRACT_TYPES.find(c => c.value === profile.value!.contractType)?.label ?? '—' }, { label: '合同到期', value: profile.value.contractEnd ?? '—' },
           { label: '联系电话', value: profile.value.phone ?? '—' }, { label: '紧急联系人', value: profile.value.emergencyContact ?? '—' },
           { label: '工作地点', value: profile.value.workLocation ?? '—' }, { label: '备注', value: profile.value.notes ?? '—' },
-        ]} /> : <EmptyState compact title={uiText("尚未建立员工档案")} description={uiText(canWrite ? '建档即办理入职（试用期）；填了转正日期会同时记一次转正。不影响账号权限。' : undefined)} />}
+        ]} /> : <EmptyState compact title={uiText("尚未建立员工档案")} />}
         {profile?.userId === openPerson.id && profile.value && <>
           <CardHeader title={uiText("在职变动记录")} sub={uiText(events?.userId === openPerson.id && events.rows ? `${events.rows.length} 条` : undefined)} />
           {events?.userId !== openPerson.id || !events.rows ? <p className="mist-note">{uiText("读取中…")}</p> : events.error ? <Banner tone="bad" title={uiText("变动记录读取失败")}>{events.error}</Banner> : events.rows.length ? <DataTable ariaLabel={uiText("在职变动记录")} rows={events.rows} rowKey={e => e.id} columns={[
             { key: 'date', header: '生效日期', width: '110px', render: e => e.effectiveDate },
-            { key: 'type', header: '变动', width: '110px', render: e => <b>{eventLabel(e.type)}</b> },
-            { key: 'detail', header: '说明', render: e => <>{(e.type === 'Transfer' || e.type === 'Promote') && <div>{positionTitle(e.fromPositionId)} → {positionTitle(e.toPositionId)}</div>}{e.toDeptId && <div>{uiText("部门：")}{deptName(e.fromDeptId)} → {deptName(e.toDeptId)}</div>}{e.reason && <div className="mist-note">{e.reason}</div>}</> },
+            { key: 'type', header: '变动', width: '110px', render: e => <b>{eventLabel(e.type, e.fromStatus)}</b> },
+            { key: 'detail', header: '说明', render: e => <>{(e.type === 'Transfer' || e.type === 'Promote') && <div>{positionTitle(e.fromPositionId)} → {positionTitle(e.toPositionId)}</div>}{e.toDeptId && e.toDeptId !== e.fromDeptId && <div>{uiText("部门：")}{deptName(e.fromDeptId)} → {deptName(e.toDeptId)}</div>}{e.reason && <div className="mist-note">{e.reason}</div>}</> },
             { key: 'by', header: '办理人', width: '110px', render: e => e.operatorId ? person(e.operatorId)?.displayName ?? '—' : '—' },
-          ]} /> : <EmptyState compact title={uiText("还没有变动记录")} description={uiText("早于本功能建立的档案没有入职记录，属正常。")} />}
+          ]} /> : <EmptyState compact title={uiText("还没有变动记录")} />}
         </>}
-        <p className="mist-note">{uiText("部门与角色在“管理后台 · 账号”调整；转正、调岗、晋升、停职、离职、返聘用“办理在职变动”。")}</p>
+
       </>}
     </Drawer>
 
@@ -283,7 +297,7 @@ export function HrOrganizationPage() {
         {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
         {form.kind === 'dept' ? <FormGrid>
           <Field label={uiText("部门名称")} required full><TextInput value={form.name} disabled={busy} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label={uiText("业务属性")} full hint={uiText("部门成员可承接的业务范围；修改后对该部门全部人员生效。")}><div className="mist-col">{BUSINESS_ATTRIBUTES.map(a => <Checkbox key={a.value} label={uiText(a.label)} checked={form.attributes.includes(a.value)} disabled={busy} onChange={on => setForm({ ...form, attributes: on ? [...form.attributes, a.value] : form.attributes.filter(v => v !== a.value) })} />)}</div></Field>
+          <Field label={uiText("业务属性")} full hint={uiText("影响本部门全部成员")}><div className="mist-col">{BUSINESS_ATTRIBUTES.map(a => <Checkbox key={a.value} label={uiText(a.label)} checked={form.attributes.includes(a.value)} disabled={busy} onChange={on => setForm({ ...form, attributes: on ? [...form.attributes, a.value] : form.attributes.filter(v => v !== a.value) })} />)}</div></Field>
         </FormGrid> : form.kind === 'team' ? <FormGrid>
           <Field label={uiText("小组名称")} required><TextInput value={form.name} disabled={busy} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
           <Field label={uiText("所属部门")} required hint={uiText(form.id ? '小组成员须与部门一致，建立后不在此改部门。' : undefined)}><Select aria-label={uiText("所属部门")} value={form.departmentId} disabled={busy || !!form.id} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departmentOptions(data?.departments ?? [])} /></Field>
@@ -291,25 +305,25 @@ export function HrOrganizationPage() {
         </FormGrid> : form.kind === 'position' ? <FormGrid>
           <Field label={uiText("岗位名称")} required><TextInput value={form.title} disabled={busy} onChange={e => setForm({ ...form, title: e.target.value })} /></Field>
           <Field label={uiText("所属部门")} required><Select aria-label={uiText("岗位所属部门")} value={form.departmentId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departmentOptions(data?.departments ?? [])} /></Field>
-          <Field label={uiText("编制人数")} required hint={uiText("计划配置的人数；在岗超出编制时会提示。")}><TextInput inputMode="numeric" value={form.headcount} disabled={busy} onChange={e => setForm({ ...form, headcount: e.target.value })} /></Field>
+          <Field label={uiText("编制人数")} required><TextInput inputMode="numeric" value={form.headcount} disabled={busy} onChange={e => setForm({ ...form, headcount: e.target.value })} /></Field>
           <Field label={uiText("岗位说明")} full><TextArea value={form.description} disabled={busy} onChange={e => setForm({ ...form, description: e.target.value })} /></Field>
-        </FormGrid> : form.kind === 'event' ? (() => { const def = EMPLOYMENT_EVENTS.find(e => e.value === form.type); const current = employeeOf(form.userId); return <FormGrid>
+        </FormGrid> : form.kind === 'event' ? (() => { const def = EMPLOYMENT_EVENTS.find(e => e.value === form.type); const current = employeeOf(form.userId); const stopsAccess = def?.terminal || session.user?.companyId && form.type === 'Suspend'; return <FormGrid>
           <Field label={uiText("当前状态")}><span>{EMPLOYMENT_STATUS[form.fromStatus] ?? form.fromStatus}{uiText(current?.position ? ` · ${current.position}` : '')}</span></Field>
           <Field label={uiText("变动类型")} required><Select aria-label={uiText("变动类型")} value={form.type} disabled={busy} onChange={e => setForm({ ...form, type: e.target.value, acknowledged: false })} options={eventChoices(form.fromStatus).map(e => ({ value: e.value, label: e.label }))} /></Field>
           <Field label={uiText("生效日期")} required><TextInput type="date" value={form.effectiveDate} disabled={busy} onChange={e => setForm({ ...form, effectiveDate: e.target.value })} /></Field>
           {def?.position && <Field label={uiText("新岗位")} required><Select aria-label={uiText("新岗位")} value={form.toPositionId} disabled={busy} placeholder={uiText("选择岗位")} onChange={e => setForm({ ...form, toPositionId: e.target.value })} options={positionOptions().filter(o => o.value !== current?.positionId)} /></Field>}
           <Field label={uiText("原因 / 说明")} full><TextArea value={form.reason} disabled={busy} onChange={e => setForm({ ...form, reason: e.target.value })} /></Field>
           {def?.position && (() => { const to = deptMove(form.userId, form.toPositionId); return to
-            ? <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={ui`部门将从 ${deptName(person(form.userId)?.departmentId ?? null)} 调为 ${deptName(to)}`}>{uiText("新岗位属于其他部门，办理后任职部门随岗位调整；该员工会退出原部门的小组，可在新部门的小组里重新加入。")}</Banner></div>
-            : <p className="mist-note" style={{ gridColumn: '1 / -1' }}>{uiText("部门随新岗位确定：选择其他部门的岗位即同时调部门。")}</p>; })()}
-          {def?.terminal && <div style={{ gridColumn: '1 / -1' }}><Banner tone="bad" title={uiText("办理后系统账号立即停用")}>{uiText("该员工将无法登录，已登录的会话也会失效。请先在业务交接中转移其负责的客户与单据。之后如需返聘，可在此办理“返聘”，账号会恢复启用。")}</Banner>
-            <Checkbox label={uiText("我已确认，办理后立即停用该员工的系统账号")} checked={form.acknowledged} disabled={busy} onChange={on => setForm({ ...form, acknowledged: on })} /></div>}
-          {form.type === 'Onboard' && <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={uiText("返聘会恢复系统账号")}>{uiText("员工回到试用期，账号恢复为启用，原有角色与部门不变；请在管理后台核对其权限。")}</Banner></div>}
+            ? <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={ui`部门将从 ${deptName(person(form.userId)?.departmentId ?? null)} 调为 ${deptName(to)}`}>{uiText("同时退出原部门的小组。")}</Banner></div>
+            : null; })()}
+          {stopsAccess && <div style={{ gridColumn: '1 / -1' }}><Banner tone="bad" title={uiText(session.user?.companyId ? "办理后暂停本公司访问" : "办理后系统账号立即停用")}>{uiText("请先完成业务交接。")}</Banner>
+            <Checkbox label={uiText(session.user?.companyId ? "我已确认，暂停此人在本公司的访问" : "我已确认，办理后立即停用该员工的系统账号")} checked={form.acknowledged} disabled={busy} onChange={on => setForm({ ...form, acknowledged: on })} /></div>}
+          {form.type === 'Onboard' && <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={uiText(session.user?.companyId ? "返聘将恢复本公司访问" : "返聘会恢复系统账号")}>{uiText("原有角色保留。")}</Banner></div>}
         </FormGrid>; })() : <FormGrid>
           <Field label={uiText("岗位")}><Select aria-label={uiText("岗位")} value={form.positionId} disabled={busy} placeholder={uiText("未设岗位")} onChange={e => setForm({ ...form, positionId: e.target.value })} options={[{ value: '', label: '未设岗位' }, ...positionOptions(form.positionId)]} /></Field>
           <Field label={uiText("入职日期")} required={!form.exists}><TextInput type="date" value={form.hireDate} disabled={busy} onChange={e => setForm({ ...form, hireDate: e.target.value })} /></Field>
           {form.exists ? <Field label={uiText("转正日期")} hint={uiText("转正请用“办理在职变动 · 转正”，会同时更新在职状态。")}><span>{form.regularDate || '—'}</span></Field>
-            : <Field label={uiText("转正日期")} hint={uiText("已转正的老员工补建档时填写；留空则为试用期。")}><TextInput type="date" value={form.regularDate} disabled={busy} onChange={e => setForm({ ...form, regularDate: e.target.value })} /></Field>}
+            : <Field label={uiText("转正日期")}><TextInput type="date" value={form.regularDate} disabled={busy} onChange={e => setForm({ ...form, regularDate: e.target.value })} /></Field>}
           <Field label={uiText("合同类型")}><Select aria-label={uiText("合同类型")} value={form.contractType} disabled={busy} onChange={e => setForm({ ...form, contractType: e.target.value })} options={[{ value: '', label: '未填写' }, ...CONTRACT_TYPES]} /></Field>
           <Field label={uiText("合同到期")}><TextInput type="date" value={form.contractEnd} disabled={busy} onChange={e => setForm({ ...form, contractEnd: e.target.value })} /></Field>
           <Field label={uiText("联系电话")}><TextInput value={form.phone} disabled={busy} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
@@ -322,8 +336,9 @@ export function HrOrganizationPage() {
 
     <Dialog open={!!confirm} onClose={() => !busy && setConfirm(null)} tone="bad"
       title={uiText(confirm?.kind === 'retire' ? `裁撤「${confirm.department.name}」` : confirm?.kind === 'deletePosition' ? `删除岗位「${confirm.position.title}」` : confirm?.kind === 'dissolve' ? `解散「${confirm.team.name}」` : confirm ? `把 ${confirm.person.displayName} 移出小组` : '')}
-      description={uiText(confirm?.kind === 'retire' ? '部门下仍有小组、人员或岗位时，须选择承接部门，系统会一并转入；无承接部门时只能裁撤空部门。' : confirm?.kind === 'deletePosition' ? '删除后不再出现在岗位列表；历史变动记录中的岗位名称会显示为“已删除岗位”。如只是暂不使用，建议停用。' : confirm?.kind === 'dissolve' ? '成员退出小组但保留任职部门，按小组授予的共享随之撤销；历史记录保留。' : confirm ? `${confirm.person.displayName} 仍留在原部门，可再加入同部门的其他小组。` : undefined)}
+      description={uiText(confirm?.kind === 'retire' ? '有关联记录时请选择承接部门。' : confirm?.kind === 'deletePosition' ? '删除后保留历史任职记录。' : confirm?.kind === 'dissolve' ? '成员退出，撤销小组共享。' : confirm ? '保留部门归属。' : undefined)}
       footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void decide()}>{uiText("确认")}</Button><Button disabled={busy} onClick={() => setConfirm(null)}>{uiText("取消")}</Button></div>}>
+      {operationError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(operationError)}</Banner>}
       {confirm?.kind === 'retire' && <Field label={uiText("承接部门")}><Select aria-label={uiText("承接部门")} value={confirm.target} onChange={e => setConfirm({ ...confirm, target: e.target.value })} options={[{ value: '', label: '不转入（仅限空部门）' }, ...departmentOptions(data?.departments ?? []).filter(o => o.value !== confirm.department.id)]} /></Field>}
     </Dialog>
   </MistPage>;

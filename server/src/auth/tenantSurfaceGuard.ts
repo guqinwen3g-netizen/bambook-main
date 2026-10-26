@@ -9,6 +9,6 @@ export function tenantSurfaceGuard(req: Request, res: Response, next: NextFuncti
   const route = req.path;
   if (/^\/(auth|platform|mist)(\/|$)/.test(route) || route === '/health') return next();
   if (/^\/admin\/(users|roles|permissions)(\/|$)/.test(route)) return next();
-  if (/^\/hr\/(personnel|departments|positions|teams|employees)(\/|$)/.test(route) && !/\/(overview|grants)(\/|$)/.test(route)) return next();
+  if (/^\/hr\/(personnel|departments|positions|teams|employees|employment-events)(\/|$)/.test(route) && !/\/(overview|grants)(\/|$)/.test(route)) return next();
   return res.status(403).json({ ok: false, error: 'TENANT_ROUTE_UNAVAILABLE', message: '此旧接口尚未支持公司隔离，请使用公司业务页面。' });
 }
