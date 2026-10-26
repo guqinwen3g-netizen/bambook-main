@@ -155,8 +155,12 @@ describe('管理后台 · 账号', () => {
     expect(document.body.textContent).toContain('只读');
     expect(button('调整权限')).toBeUndefined();
     bridge.routes['GET /api/admin/permissions'] = () => ({ ok: true, permissions: [{ scope: 'reports:read', description: null }] });
-    await click('查看权限');
-    expect([...document.querySelectorAll('input[type=checkbox]')].every(input => (input as HTMLInputElement).disabled)).toBe(true);
+    const controls = [...document.querySelectorAll('button')].filter(b => b.textContent === '查看权限');
+    await act(async () => controls[1].click());
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    const permissions = [...document.querySelectorAll('input[type=checkbox]')];
+    expect(permissions.length).toBeGreaterThan(0);
+    expect(permissions.every(input => (input as HTMLInputElement).disabled)).toBe(true);
     expect([...document.querySelectorAll('button')].some(b => b.textContent?.startsWith('保存（'))).toBe(false);
   });
   it('shows only the exporter profile to non-managers', async () => {
