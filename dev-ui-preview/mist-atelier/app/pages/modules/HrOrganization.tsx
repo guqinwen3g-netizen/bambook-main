@@ -179,7 +179,7 @@ export function HrOrganizationPage() {
     <Tabs<'org' | 'people' | 'positions'> value={tab} onChange={next => { setOpen(null); go('hr', undefined, { section: next }); }} options={[{ value: 'org', label: '组织架构', icon: Building2, count: departments.length }, { value: 'positions', label: '岗位', icon: Briefcase, count: data?.positions.length }, { value: 'people', label: '全部人员', icon: Users, count: data?.people.length }]} />
     <section className="mist-section">{tab === 'org' ? <>
       <Toolbar right={canWrite ? <Button variant="primary" icon={Plus} disabled={!data} onClick={() => { setFormError(''); setForm({ kind: 'dept', name: '', attributes: [] }); }}>{uiText("新建部门")}</Button> : undefined}>
-        <span className="mist-note">{uiText(root ? `公司：${root.name}` : '')}{uiText(root ? ' · ' : '')}{uiText("业务属性决定部门能承接哪些业务；同时还须具备相应角色。")}</span>
+        <span />
       </Toolbar>
       <Card><DataTable ariaLabel={uiText("部门")} rows={departments} rowKey={d => d.id} loading={loading && !data} selectedKey={openDept?.id ?? null} onRowClick={d => setOpen({ kind: 'dept', id: d.id })} columns={deptColumns}
         empty={<EmptyState title={uiText("还没有部门")} description={uiText(canWrite ? '用“新建部门”建立第一个部门。' : '请联系人事或管理员建立部门。')} />} /></Card>

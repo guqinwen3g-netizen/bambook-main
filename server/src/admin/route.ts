@@ -1,3 +1,4 @@
+import { setCompanyAccountAccess } from './companyAccountLifecycle';
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import crypto from 'crypto';
@@ -221,14 +222,15 @@ export function createAdminRouter(options: AdminRouterOptions) {
       const companyMember = (options.prisma as { companyMember?: { findMany?: unknown } }).companyMember;
       if (typeof companyMember?.findMany !== 'function') return next();
       const links = await options.prisma.companyMember.findMany({
-        where: { userId: req.params.id, status: { in: ['active', 'pending'] } },
+        where: { userId: req.params.id, status: { in: ['active', 'pending', 'suspended'] } },
         select: { companyId: true },
       });
       if (!links.length) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '账号不存在。' });
       if (!links.some((link) => link.companyId === companyId)) {
         return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '账号不存在。' });
       }
-      if (links.length > 1 && req.method !== 'GET' && !req.path.endsWith('/roles') && !req.path.endsWith('/disable-account')) return res.status(403).json({ ok: false, error: 'PLATFORM_ACCOUNT_REQUIRED', message: '跨公司账号的身份资料由本人或平台管理员维护。' });
+      const restoreCompanyAccess = req.method === 'PATCH' && req.path === '/' && req.body?.status === 'active' && Object.keys(req.body).length === 1;
+      if (links.length > 1 && req.method !== 'GET' && !req.path.endsWith('/roles') && !req.path.endsWith('/disable-account') && !restoreCompanyAccess) return res.status(403).json({ ok: false, error: 'PLATFORM_ACCOUNT_REQUIRED', message: '跨公司账号的身份资料由本人或平台管理员维护。' });
       return next();
     } catch {
       return res.status(503).json({ ok: false, error: 'COMPANY_CHECK_FAILED', message: '暂时无法核对该账号所属公司，请稍后重试。' });
@@ -255,14 +257,14 @@ export function createAdminRouter(options: AdminRouterOptions) {
   router.get('/users', withRouteErrorGuard(async (req: Request, res: Response) => {
     const { status } = req.query as { status?: string };
     const companyId = actorCompanyId(req);
-    const baseWhere: any = status ? { status } : { OR: [{ deletedAt: null }, { status: 'disabled' }] };
+    const baseWhere: any = status && !companyId ? { status } : { OR: [{ deletedAt: null }, { status: 'disabled' }] };
     // 公司管理员只看本公司成员；没有公司上下文的历史会话保持原行为。
     const where: any = companyId
-      ? { AND: [baseWhere, { companyMembers: { some: { companyId, status: { in: ['active', 'pending'] } } } }] }
+      ? { AND: [baseWhere, { companyMembers: { some: { companyId, status: { in: ['active', 'pending', 'suspended'] } } } }] }
       : baseWhere;
     const usersRaw = await options.prisma.userAccount.findMany({
       where,
-      include: { roles: { ...(companyId ? { where: { role: { companyId } } } : {}), include: { role: true, department: true } }, primaryDepartment: true },
+      include: { roles: { ...(companyId ? { where: { role: { companyId } } } : {}), include: { role: true, department: true } }, primaryDepartment: true, ...(companyId ? { companyMembers: { where: { companyId }, select: { status: true } } } : {}) },
       orderBy: { createdAt: 'desc' },
     });
     const users = usersRaw.filter(u => {
@@ -282,7 +284,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       displayName: u.displayName,
       email: u.email,
       avatarUrl: (u as any).avatarUrl || null,
-      status: u.status,
+      status: companyId && (u as any).companyMembers?.[0]?.status === 'suspended' ? 'disabled' : u.status,
       roles: u.roles.map(ur => ur.role.name),
       roleIds: u.roles.map(ur => ur.roleId),
       departmentId: companyId ? u.roles[0]?.departmentId ?? null : u.primaryDeptId,
@@ -292,7 +294,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       lastLoginIp: u.lastLoginIp,
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
-    })) });
+    })).filter(u => !status || u.status === status) });
   }));
 
   router.post('/users', withRouteErrorGuard(async (req: Request, res: Response) => {
@@ -378,7 +380,13 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (await rejectIfSuperAdminTarget(req, res, req.params.id)) return;
     const { id } = req.params;
     const { displayName, email, status, departmentId } = req.body || {};
-    if (departmentId !== undefined && !(await departmentExists(options.prisma, departmentId))) {
+    const companyId = actorCompanyId(req);
+    if (companyId && status !== undefined) {
+      if (status !== 'active' || displayName !== undefined || email !== undefined || departmentId !== undefined) return res.status(400).json({ ok: false, error: 'INVALID_STATUS_CHANGE', message: '请单独办理账号启用或停用。' });
+      await setCompanyAccountAccess(options.prisma, { companyId, userId: id, actorId: (req as any).actor.userId, enabled: true });
+      return res.json({ ok: true });
+    }
+    if (departmentId !== undefined && !(await departmentExists(options.prisma, departmentId, companyId))) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${departmentId}` });
     }
     const data: any = {};
@@ -443,8 +451,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
   const disableUserAccount = withRouteErrorGuard(async (req: Request, res: Response) => {
     const companyId = actorCompanyId(req);
     if (companyId) {
-      if (req.params.id === (req as any).actor?.userId) return res.status(400).json({ ok: false, error: 'SELF_DISABLE', message: '不能停用自己。' });
-      await options.prisma.companyMember.updateMany({ where: { companyId, userId: req.params.id }, data: { status: 'suspended' } });
+      if (await rejectIfSuperAdminTarget(req, res, req.params.id)) return;
+      await setCompanyAccountAccess(options.prisma, { companyId, userId: req.params.id, actorId: (req as any).actor.userId, enabled: false });
       return res.json({ ok: true });
     }
     if (await rejectIfSuperAdminTarget(req, res, req.params.id)) return;

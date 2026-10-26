@@ -47,7 +47,7 @@ describe('company admin handling of join requests', () => {
   it('lets the company admin reach its own pending applicant', async () => {
     const res = await request(app()).post('/admin/users/applicant/approve').set('Authorization', `Bearer ${token()}`).send({ roles: [`role-sales@${COMPANY}`], departmentId: 'dept-sales' });
     expect(res.status).not.toBe(404);
-    expect(prisma.companyMember.findMany.mock.calls[0][0].where.status).toEqual({ in: ['active', 'pending'] });
+    expect(prisma.companyMember.findMany.mock.calls[0][0].where.status).toEqual({ in: ['active', 'pending', 'suspended'] });
   });
 
   it('activates the pending membership together with the account', async () => {

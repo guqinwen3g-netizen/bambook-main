@@ -115,11 +115,24 @@ export const organizationApi = {
   saveProfile: (userId: string, body: Partial<Pick<EmployeeProfile, 'positionId' | 'hireDate' | 'regularDate' | 'contractType' | 'contractEnd' | 'phone' | 'emergencyContact' | 'workLocation' | 'notes'>>) => call<{ profile: EmployeeProfile }>('/hr/employees/' + id(userId), { method: 'PUT', body }),
 };
 
-/** Department tree order: company root first, then its departments by name. */
+/** Keep every active descendant selectable; the path distinguishes nested departments. */
 export function departmentOptions(departments: OrgDepartment[], { includeRoot = false } = {}) {
-  const roots = departments.filter(d => !d.parentId);
-  return roots.flatMap(root => [
-    ...(includeRoot ? [{ value: root.id, label: root.name }] : []),
-    ...departments.filter(d => d.parentId === root.id).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')).map(d => ({ value: d.id, label: (includeRoot ? '　' : '') + d.name })),
-  ]);
+  const active = departments.filter(d => !d.status || d.status === 'active');
+  const roots = active.filter(d => !d.parentId), visited = new Set<string>();
+  const options: Array<{ value: string; label: string }> = [];
+  const walk = (parentId: string, path: string[]) => {
+    for (const department of active.filter(d => d.parentId === parentId).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))) {
+      if (visited.has(department.id)) continue;
+      visited.add(department.id);
+      const names = [...path, department.name];
+      options.push({ value: department.id, label: names.join(' / ') });
+      walk(department.id, names);
+    }
+  };
+  for (const root of roots) {
+    visited.add(root.id);
+    if (includeRoot) options.push({ value: root.id, label: root.name });
+    walk(root.id, roots.length > 1 || includeRoot ? [root.name] : []);
+  }
+  return options;
 }
