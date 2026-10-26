@@ -55,7 +55,7 @@ export const MODULE_MAP: ModuleMapEntry[] = [
   { id: 'document-center', view: 'document-center', label: '单据中心', group: '订单履约', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/FulfillmentPages.tsx', lines: 99, template: 'list-preview', detail: 'document', wave: 4, notes: '预览区放单据 PDF 缩略图' },
   // ── Wave 5：平台与其他 ──
   { id: 'calendar', view: 'calendar', label: '日历', group: '我的事务', entry: 'dev-ui-preview/mist-atelier/app/pages/CalendarPage.tsx', lines: 96, template: 'calendar', wave: 5 },
-  { id: 'emails', view: 'emails', label: '智能邮箱', group: '我的事务', entry: 'components/EmailManager.tsx', lines: 2326, template: 'list-preview', wave: 5, notes: '右侧预览=邮件正文；AI 摘要用 Banner tone=ai' },
+  { id: 'emails', view: 'emails', label: '智能邮箱', group: '我的事务', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/EmailsPage.tsx', lines: 670, template: 'list-preview', wave: 5, notes: '右侧预览=邮件正文；AI 摘要用 Banner tone=ai' },
   { id: 'dashboard', view: 'dashboard', label: '全景看板', group: '我的事务', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'special', wave: 5, notes: '使用 Mist 统计卡与订单履约聚合，不恢复旧可视化页面' },
   { id: 'reports', view: 'reports', label: '报表中心', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'analytics', wave: 5 },
   { id: 'data-center', view: 'data-center', label: '数据中心', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'analytics', wave: 5, notes: '本公司的数据关联质量、记录汇总与来源入口' },

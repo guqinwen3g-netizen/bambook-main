@@ -181,3 +181,5 @@ it('deduplicates a presented handover by business task ID and completes the orig
  render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!,select=dialog.querySelector('select')!;expect([...select.options].map(row=>[row.value,row.textContent])).toEqual([['task-exact',`接手客户 · ${customer.name}`]]);expect(state.tasks[0].title).toBe(originalTitle);
  await click(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!);await click(button('保存状态',dialog));expect(seam.value.run).toHaveBeenCalledOnce();expect(seam.value.run).toHaveBeenCalledWith({type:'task.complete',payload:{id:'task-exact',done:true}});expect(seam.value.state.tasks[0].done).toBe(true);
 });
+
+it('does not offer AI questioning without ai chat permission',()=>{seam.session.hasPermission=(scope:string)=>scope.endsWith(':read');render();expect(host.querySelector('.mist-brief-ask')).toBeNull();});

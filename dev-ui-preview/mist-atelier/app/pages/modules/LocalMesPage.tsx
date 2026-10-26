@@ -1,6 +1,8 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
-/** 本地历史加工记录：只汇总本公司已批准的加工合同及其实际交付（只读）；办理在采购管理，跟单在生产进度。 */
+/** 公司历史加工记录：只汇总本公司已批准的加工合同及其实际交付（只读）；办理在采购管理，跟单在生产进度。 */
 import React from 'react';
+import { View } from '../../../../../types';
+import { useMistSession } from '../../runtime/auth';
 import { Download, Factory, History, SearchX } from 'lucide-react';
 import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
@@ -13,11 +15,11 @@ import { DetailBlock, DetailBody, ListDetail } from './pageKit';
 type Domain = FulfillmentPurchase['domain'];
 type Stage = 'open' | 'done' | 'variance';
 type StageFilter = 'all' | Stage;
-const STAGE: Record<Stage, { label: string; tone: Tone }> = { open: { label: '履行中', tone: 'accent' }, done: { label: '已交付', tone: 'ok' }, variance: { label: '数量差异待处理', tone: 'warn' } };
+const STAGE: Record<Stage, { label: string; tone: Tone }> = { open: { label: '履行中', tone: 'accent' }, done: { label: '已交付', tone: 'ok' }, variance: { label: '数量差异', tone: 'warn' } };
 const stageOf = (p: FulfillmentPurchase): Stage => p.received > p.quantity ? 'variance' : p.received === p.quantity ? 'done' : 'open';
 
 export function LocalMesPage() {
-  const { state, loading } = useMistWorkspace(), { go, route } = useNav();
+  const { state, loading, error, refresh } = useMistWorkspace(), { go, route } = useNav(), session = useMistSession();
   const all = (state?.fulfillment?.purchases || []).filter(p => p.kind === 'processing' && p.state === 'approved');
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [stage, setStage] = React.useState<StageFilter>('all'), [supplier, setSupplier] = React.useState('all'), [year, setYear] = React.useState('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
@@ -43,16 +45,16 @@ export function LocalMesPage() {
     { key: 'due', header: '交期', width: '96px', hideOnMobile: true, render: p => <span className={overdue(p) ? 'mist-tone-bad' : undefined}>{p.due || '未定'}</span> },
     { key: 'state', header: '状态', width: '92px', render: p => <Pill tone={STAGE[stageOf(p)].tone}>{uiText(STAGE[stageOf(p)].label)}</Pill> },
   ];
-  const empty = inDomain.length
-    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的加工记录")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setSupplier('all'); setYear('all'); setStage('all'); }}>{uiText("清除筛选")}</Button>} />
-    : <EmptyState icon={History} title={uiText("还没有历史加工记录")} description={uiText("采购管理中已批准的加工合同及其实际交付会在这里汇总。")} action={<Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button>} />;
+  const empty = error ? <EmptyState icon={History} title={uiText('加工记录暂不可读')} action={<Button onClick={()=>void refresh()}>{uiText('重新读取')}</Button>} /> : inDomain.length
+    ? <EmptyState icon={SearchX} title={uiText("没有符合条件的加工记录")} action={<Button onClick={() => { setQuery(''); setSupplier('all'); setYear('all'); setStage('all'); }}>{uiText("清除筛选")}</Button>} />
+    : <EmptyState icon={History} title={uiText("暂无加工记录")} action={<Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button>} />;
   const detail = selected && state ? <LocalMesDetail purchase={selected} state={state} orderCode={orderCode} go={go} />
     : <EmptyState icon={History} title={uiText("加工记录详情")} description={uiText(loading ? '正在读取加工记录' : '从列表选择一份加工合同，查看实际交付与来源')} compact />;
   return <MistPage width="wide">
-    <PageHeader eyebrow={uiText("平台 · 加工履行")} title={uiText("历史加工记录")}
+    <PageHeader eyebrow={uiText("订单履约")} title={uiText("历史加工记录")}
       actions={<>
         <Button icon={Download} disabled={!rows.length} onClick={() => downloadModuleCsv('加工履行记录.csv', ['合同', '订单', '加工方', '加工内容', '合同数量', '单位', '已交付', '交期', '状态'], rows.map(p => [p.code, orderCode(p.orderId), p.supplier, p.description, p.quantity, p.unit, p.received, p.due, STAGE[stageOf(p)].label]))}>{uiText("导出")}</Button>
-        <Button icon={Factory} variant="primary" onClick={() => go('production-board')}>{uiText("前往生产进度")}</Button>
+        {session.canAccessView(View.ProductionBoard) && <Button icon={Factory} variant="primary" onClick={() => go('production-board')}>{uiText("前往生产进度")}</Button>}
       </>} />
     <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={value => { setDomainChoice(value); setStage('all'); setSupplier('all'); setPicked(null); }} options={[{ value: 'garment', label: `成衣业务 · ${all.filter(p => (p.domain || 'garment') === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${all.filter(p => p.domain === 'fabric').length}` }]} /></div>
     <Toolbar>
@@ -66,6 +68,7 @@ export function LocalMesPage() {
       { value: 'done', label: '已交付', count: count('done'), color: 'var(--mist-ok)' },
       { value: 'variance', label: '数量差异', count: count('variance'), color: 'var(--mist-warn)' },
     ]} />
+    {route.id && !selected && !loading && !error && <Banner tone="bad" title={uiText('加工合同不存在或无权查看')} actions={<Button onClick={()=>go('mes')}>{uiText('返回列表')}</Button>}/> }
     <ListDetail drawerOpen={drawer && !!selected} onDrawerClose={() => setDrawer(false)} drawerTitle={selected ? `${selected.code} · ${selected.supplier}` : '加工记录详情'} drawerSub={selected?.description}
       list={<Card><DataTable ariaLabel={uiText("历史加工记录")} loading={loading} rows={rows} rowKey={p => p.id} selectedKey={selected?.id} density="comfy" onRowClick={pick} columns={columns} empty={empty} /></Card>}
       detail={detail} />
@@ -73,15 +76,14 @@ export function LocalMesPage() {
 }
 
 function LocalMesDetail({ purchase: p, state, orderCode, go }: { purchase: FulfillmentPurchase; state: NonNullable<ReturnType<typeof useMistWorkspace>['state']>; orderCode: (id: string) => string; go: ReturnType<typeof useNav>['go'] }) {
+  const session=useMistSession();
   const receipts = state.fulfillment.receipts.filter(receipt => receipt.purchaseId === p.id), production = state.productions.find(row => row.sourcePurchaseId === p.id);
   const rejected = receipts.reduce((sum, receipt) => sum + (receipt.rejected || 0), 0), st = STAGE[stageOf(p)];
   return <DetailBody data-mes-detail={p.id} heading={<div>
-      <span className="mist-mono mist-muted">{p.code}{uiText(" · 只读汇总")}</span>
+      <span className="mist-mono mist-muted">{p.code}</span>
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{p.description}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={st.tone}>{uiText(st.label)}</Pill><Pill>{uiText(p.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill></div>
-    {stageOf(p) === 'variance' ? <Banner tone="warn" title={uiText("交付数量超过合同")}>{uiText("实际交付 ")}{p.received} {uiText(p.unit)}{uiText("，合同 ")}{p.quantity} {uiText(p.unit)}{uiText("；差异请在采购管理中按合同处理。")}</Banner>
-      : <Banner tone="neutral" title={uiText("只读汇总")}>{uiText("加工合同在采购管理中办理，本页只汇总已批准合同的实际交付。")}</Banner>}
     <Facts items={[
       { label: '加工方', value: p.supplier },
       { label: '来源订单', value: orderCode(p.orderId) || '来源订单不可用' },
@@ -102,9 +104,8 @@ function LocalMesDetail({ purchase: p, state, orderCode, go }: { purchase: Fulfi
     </DetailBlock>
     <div className="mist-row mist-module-actions" style={{ flexWrap: 'wrap' }}>
       <Button onClick={() => go('procurement', p.id)}>{uiText("打开加工合同")}</Button>
-      <Button onClick={() => go('orders/detail', p.orderId, { orderLineId: p.lineId, productionId: production?.id })}>{uiText("返回来源条目")}</Button>
-      <Button disabled={!production} title={uiText(production ? undefined : '尚未生成生产跟单')} onClick={() => go('production-board', undefined, { productionId: production?.id })}>{uiText("查看生产跟单")}</Button>
+      {session.canAccessView(View.Orders) && state.orders.some(order=>order.id===p.orderId) && <Button onClick={() => go('orders/detail', p.orderId, { orderLineId: p.lineId, productionId: production?.id })}>{uiText("返回来源条目")}</Button>}
+      {session.canAccessView(View.ProductionBoard) && production && <Button onClick={() => go('production-board', undefined, { productionId: production.id })}>{uiText("查看生产跟单")}</Button>}
     </div>
-    {!production && <span className="mist-note">{uiText("该加工合同尚未生成生产跟单，可在生产进度中从来源条目开立。")}</span>}
   </DetailBody>;
 }

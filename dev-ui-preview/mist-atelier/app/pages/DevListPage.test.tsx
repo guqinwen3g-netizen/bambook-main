@@ -7,7 +7,8 @@ import type { Dev } from '../data';
 import type { MistDev } from '../../../../server/src/shared/mistWorkspace';
 import { Nav, type Route, type RouteTarget } from '../nav';
 
-const bridge=vi.hoisted(()=>({current:null as any}));
+const bridge=vi.hoisted(()=>({current:null as any,canWrite:true}));
+vi.mock('../runtime/auth',()=>{const useMistSession=()=>({user:{id:'user-a',displayName:'甲'},hasPermission:(scope:string)=>scope.endsWith(':read')||bridge.canWrite,canAccessView:()=>true});return{useMistSession,useOptionalMistSession:useMistSession};});
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
 
 describe('development CSV',()=>{
@@ -26,7 +27,7 @@ describe('development CSV',()=>{
 
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
 const dev=(index:number):MistDev=>({id:`real-${index}`,code:`DEV-${index}`,name:`实际开发 ${index}`,style:`STYLE-${index}`,owner:index%2?'甲':'乙',ownerId:index%2?'user-a':'user-b',customer:index%2?'客户 A':'客户 B',customerId:index%2?'a':'b',due:'2026-10-30',dueRel:'待交付',stage:1,state:'工厂制作中',tone:'neutral',ver:'R1-A-1',fac:1,img:'coat',factory:'实际工厂',sample:'未返样',fabric:'羊毛',goal:'实际需求',currentVersionId:`version-${index}`,versionIds:[`version-${index}`],values:{} as any,fileIds:[],createdAt:'2026-10-13T00:00:00Z',updatedAt:'2026-10-13T00:00:00Z'});
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.current={state:{devs:[dev(1),dev(2)],drafts:[],fabrics:[],customers:[{name:'客户 A'},{name:'客户 B'}],settings:{workspaceName:'测试公司'},files:[]},loading:false,error:'',run:vi.fn(async()=>({requestId:'c-1',revision:1,result:{}})),uploadFile:vi.fn(),downloadFile:vi.fn()};});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();bridge.canWrite=true;bridge.current={state:{devs:[dev(1),dev(2)],drafts:[],fabrics:[],customers:[{name:'客户 A'},{name:'客户 B'}],settings:{workspaceName:'测试公司'},files:[]},loading:false,error:'',run:vi.fn(async()=>({requestId:'c-1',revision:1,result:{}})),uploadFile:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 /** 与 ReferenceApp 一致：go 写入路由，列表页按路由 section 选择页签。 */
 function Harness({initial}:{initial:Route}){const [route,setRoute]=React.useState<Route>(initial);const navigate=(view:string,id?:string,target:RouteTarget={})=>{go(view,id,target);if(view==='development')setRoute({view,id,...target});};return <Nav.Provider value={{route,go:navigate,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><DevListPage/></Nav.Provider>;}
@@ -125,3 +126,8 @@ describe('three sibling development entries',()=>{
   await act(async()=>[...document.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='关闭')!.click());expect(go).toHaveBeenLastCalledWith('development',undefined,{section:'sourcing'});expect(document.body.textContent).not.toContain('创建寻样任务');
  });
 });
+
+it('hides development creation for read-only accounts',async()=>{bridge.canWrite=false;await mount();expect([...host.querySelectorAll('button')].some(b=>b.textContent?.includes('新建成衣开发案'))).toBe(false);});
+it('does not open sourcing creation from a read-only deep link',async()=>{bridge.canWrite=false;await mount({view:'development',id:'new',section:'sourcing'});expect(document.querySelector('[role=dialog]')).toBeNull();expect(bridge.current.run).not.toHaveBeenCalled();});
+
+it('does not make development cards draggable for read-only accounts',async()=>{bridge.canWrite=false;await mount();await act(async()=>host.querySelector<HTMLElement>('[aria-label="看板视图"]')!.click());expect(host.querySelector('[draggable="true"]')).toBeNull();expect(bridge.current.run).not.toHaveBeenCalled();});

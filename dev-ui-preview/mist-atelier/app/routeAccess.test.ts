@@ -29,3 +29,6 @@ describe('Mist page read permissions', () => {
     expect(canOpenMistView('platform-admin', access(), true)).toBe(false);
   });
 });
+
+it.each([['development/new',View.Development,'products:write'],['orders/new',View.Orders,'orders:write']] as const)('requires write access for %s', (route,view,scope)=>{expect(canOpenMistView(route,{...access(view),hasPermission:()=>false},false)).toBe(false);expect(canOpenMistView(route,{...access(view),hasPermission:(permission:string)=>permission===scope},false)).toBe(true);});
+it('rejects read-only sourcing creation URLs',()=>{expect(canOpenMistView({view:'development',id:'new',section:'sourcing'},{...access(View.Development),hasPermission:()=>false},false)).toBe(false);});

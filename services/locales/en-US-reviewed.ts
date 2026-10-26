@@ -828,4 +828,9 @@ export const reviewedEnglish: Record<string, string> = {
   '公司设置尚未就绪': 'Company settings are not ready',
   '公司范围不一致，请重新读取': 'Company mismatch. Reload the settings.',
   '保存回执不一致，请重新读取核对': 'Save response mismatch. Reload to verify.',
+  '暂无加工记录': 'No processing records',
+  '加工记录暂不可读': 'Processing records are unavailable',
+  '加工合同不存在或无权查看': 'Processing contract not found or access denied',
+  '部分数据未授权': 'Some data is restricted',
+  '数量差异': 'Quantity variance',
 };

@@ -8,7 +8,7 @@ import {Nav} from '../nav';
 import {createMistState} from '../../../../server/src/shared/mistWorkspace';
 const bridge=vi.hoisted(()=>({current:null as any,canCreate:true}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
-vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local',displayName:'本地操作员'},hasPermission:()=>bridge.canCreate}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local',displayName:'本地操作员'},hasPermission:(scope:string)=>scope.endsWith(':read')||bridge.canCreate,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host:HTMLDivElement,root:Root|undefined;const go=vi.fn(),openAI=vi.fn();
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local'},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
@@ -51,3 +51,5 @@ describe('customer default currency',()=>{
   bridge.current.state.settings.companyProfile={defaultCurrency:'CNY'};bridge.current.state.customers=[{...customer('a'),currency:'JPY'}];await mount('a');await act(async()=>getByRole(host,'button',{name:'编辑客户资料'}).click());const dialog=getByRole(document.body,'dialog',{name:'编辑客户资料'});expect((dialog.querySelector('select[aria-label="结算币种"]') as HTMLSelectElement|null)?.value).toBe('JPY');
  });
 });
+
+it('keeps customer and contact details read-only without write access',async()=>{bridge.canCreate=false;bridge.current.state.customers=[customer('a')];bridge.current.state.contacts=[{id:'contact-read',customerId:'a',name:'客户联系人',role:'采购',email:'contact@example.invalid',phone:'123'}];await mount('a');expect(queryByRole(host,'button',{name:'编辑客户资料'})).toBeNull();expect(queryByRole(host,'button',{name:'添加联系人'})).toBeNull();expect(queryByRole(host,'button',{name:'新建开发案'})).toBeNull();const contact=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('客户联系人'))!;await act(async()=>contact.click());const dialog=getByRole(document.body,'dialog',{name:'联系人'});expect(queryByRole(dialog,'button',{name:'保存'})).toBeNull();expect(queryByRole(dialog,'button',{name:'删除'})).toBeNull();expect([...dialog.querySelectorAll<HTMLInputElement>('input')].every(input=>input.readOnly)).toBe(true);expect(bridge.current.run).not.toHaveBeenCalled();});

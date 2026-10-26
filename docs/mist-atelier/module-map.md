@@ -67,12 +67,12 @@
 | ☐ | 外贸与报关 | `customs` | `dev-ui-preview/mist-atelier/app/pages/modules/FulfillmentPages.tsx` | 99 | T3 宽表列表 | T5 单据详情 | — |  |
 | ☐ | 单据中心 | `document-center` | `dev-ui-preview/mist-atelier/app/pages/modules/FulfillmentPages.tsx` | 99 | T2 列表 + 预览 | T5 单据详情 | — | 预览区放单据 PDF 缩略图 |
 
-## Wave 5（11 个模块，3,031 行）
+## Wave 5（11 个模块，1,375 行）
 
 | ☐ | 模块 | view | 入口文件 | 行数 | 列表/主页模板 | 详情模板 | 新建 | 备注 |
 |---|---|---|---|---|---|---|---|---|
 | ☐ | 日历 | `calendar` | `dev-ui-preview/mist-atelier/app/pages/CalendarPage.tsx` | 96 | T12 日历 | — | — |  |
-| ☐ | 智能邮箱 | `emails` | `components/EmailManager.tsx` | 2326 | T2 列表 + 预览 | — | — | 右侧预览=邮件正文；AI 摘要用 Banner tone=ai |
+| ☐ | 智能邮箱 | `emails` | `dev-ui-preview/mist-atelier/app/pages/modules/EmailsPage.tsx` | 670 | T2 列表 + 预览 | — | — | 右侧预览=邮件正文；AI 摘要用 Banner tone=ai |
 | ☐ | 全景看板 | `dashboard` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | 特殊可视化 | — | — | 使用 Mist 统计卡与订单履约聚合，不恢复旧可视化页面 |
 | ☐ | 报表中心 | `reports` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T11 分析报表 | — | — |  |
 | ☐ | 数据中心 | `data-center` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T11 分析报表 | — | — | 本公司的数据关联质量、记录汇总与来源入口 |

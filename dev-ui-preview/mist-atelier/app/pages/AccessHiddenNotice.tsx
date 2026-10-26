@@ -8,5 +8,5 @@ import { useMistWorkspace } from '../runtime/workspace';
 export function AccessHiddenNotice({ keys }: { keys: string[] }) {
   const hidden = (useMistWorkspace().workspace?.access?.hidden ?? []).filter(item => keys.includes(item.key));
   if (!hidden.length) return null;
-  return <Banner tone="neutral" icon={ShieldCheck} title={uiText("当前账号无权查看部分数据")}>{hidden.map(item => item.label).join('、')}{uiText("不在你的岗位查看权限内，已由系统隐藏；下方数字与列表不含这些内容，并不代表没有记录。")}</Banner>;
+  return <Banner tone="neutral" icon={ShieldCheck} title={uiText("部分数据未授权")}>{hidden.map(item => item.label).join('、')}</Banner>;
 }

@@ -34,7 +34,7 @@ export function AIBrief({ icon, title = '今日简报', sub, items, onAsk, askPl
   return (
     <Card tone="ai" className={`mist-brief ${className ?? ''}`}>
       <CardHeader leading={<AIBadge icon={icon} />} title={uiText(title)} sub={uiText(sub)} />
-      <ul>{items.map((it, i) => <li key={i}><button type="button" onClick={it.onClick}><span className="mist-brief-n">{uiText(i + 1)}</span><span><b>{it.strong}</b> {it.text}</span></button></li>)}</ul>
+      <ul>{items.map((it, i) => { const content=<><span className="mist-brief-n">{uiText(i + 1)}</span><span><b>{it.strong}</b> {it.text}</span></>; return <li key={i}>{it.onClick?<button type="button" onClick={it.onClick}>{content}</button>:<div className="mist-brief-static">{content}</div>}</li>; })}</ul>
       {onAsk && <button type="button" className="mist-brief-ask" onClick={onAsk}><Icon icon={MessageSquare} size="sm" />{uiText(askPlaceholder)}<span className="mist-send"><Icon icon={ArrowUpRight} size="sm" /></span></button>}
     </Card>
   );
