@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React,{act} from 'react';import{createRoot,type Root}from'react-dom/client';import{afterEach,beforeEach,expect,it,vi}from'vitest';import{SaasAdminPage}from'./SaasAdminPage';
-const m=vi.hoisted(()=>({session:{sessionKey:'one',user:{platformRole:'platform_admin'} as any},api:{list:vi.fn(),members:vi.fn(),create:vi.fn(),update:vi.fn(),addMember:vi.fn(),removeMember:vi.fn(),resendMember:vi.fn()}}));
-vi.mock('../runtime/auth',()=>({useMistSession:()=>m.session}));vi.mock('../runtime/platformAdmin',()=>({platformAdminApi:m.api}));
+const m=vi.hoisted(()=>({session:{sessionKey:'one',user:{platformRole:'platform_admin'} as any},api:{list:vi.fn(),members:vi.fn(),create:vi.fn(),update:vi.fn(),addMember:vi.fn(),removeMember:vi.fn(),resendMember:vi.fn()},enter:vi.fn(),go:vi.fn()}));
+vi.mock('../runtime/auth',()=>({useMistSession:()=>m.session}));vi.mock('../runtime/platformAdmin',()=>({platformAdminApi:m.api,enterCompanySupport:m.enter}));vi.mock('../nav',()=>({useNav:()=>({go:m.go})}));
 const company={id:'c1',name:'雾织贸易',slug:'mistweave',status:'active',plan:'standard',seatLimit:10,members:1,workspaces:1,createdAt:'2026-10-19T00:00:00Z'};
 let root:Root,host:HTMLDivElement;const text=(s:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===s)!;
 const wait=(fn:()=>void)=>vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});fn();});
@@ -18,3 +18,7 @@ it('does not submit removal when cancelled',async()=>{m.api.members.mockResolved
 it('discards a prior identity response',async()=>{let resolve!:(v:any)=>void;m.api.list.mockReturnValueOnce(new Promise(r=>resolve=r));await render();m.session={sessionKey:'two',user:{platformRole:null}};await render();await act(async()=>resolve({companies:[company]}));expect(document.body.textContent).not.toContain('雾织贸易');expect(document.body.textContent).toContain('需要平台管理员身份');});
 
 it('confirms service suspension before writing and preserves cancel',async()=>{await render();await wait(()=>expect(text('管理')).toBeTruthy());await act(async()=>text('管理').click());const select=document.querySelector('[aria-label="服务状态"]') as HTMLSelectElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,'suspended');select.dispatchEvent(new Event('change',{bubbles:true}));});await act(async()=>text('保存服务设置').click());expect(document.body.textContent).toContain('该公司的现有访问将立即失效');expect(m.api.update).not.toHaveBeenCalled();await act(async()=>text('取消').click());expect(m.api.update).not.toHaveBeenCalled();});
+
+it('opens a company backend only with a stated reason',async()=>{m.enter.mockResolvedValue({});await render();await wait(()=>expect(text('管理')).toBeTruthy());await act(async()=>text('管理').click());
+ expect(text('进入公司后台').disabled).toBe(true);await act(async()=>fill('代管原因','客户来电协助开通账号'));await act(async()=>text('进入公司后台').click());
+ await wait(()=>expect(m.go).toHaveBeenCalledWith('admin-panel'));expect(m.enter).toHaveBeenCalledWith('c1','客户来电协助开通账号');});

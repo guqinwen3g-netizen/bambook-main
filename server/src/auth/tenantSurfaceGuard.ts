@@ -6,6 +6,8 @@ export function tenantSurfaceGuard(req: Request, res: Response, next: NextFuncti
   const actor = (req as Request & { actor?: TokenPayload }).actor;
   if (actor?.platformOnly && !/^\/(auth|platform)(\/|$)/.test(req.path) && req.path !== '/health') return res.status(403).json({ ok: false, error: 'COMPANY_SELECTION_REQUIRED', message: '请先选择公司再进入业务。' });
   if (!actor?.companyId) return next();
+  // 平台代管只开放公司后台（账号、加入审批、角色权限、组织与人事），不进入公司业务数据。
+  if (actor.support && /^\/mist(\/|$)/.test(req.path)) return res.status(403).json({ ok: false, error: 'SUPPORT_ROUTE_UNAVAILABLE', message: '平台代管只能办理公司后台事务。' });
   const route = req.path;
   if (/^\/(auth|platform|mist)(\/|$)/.test(route) || route === '/health') return next();
   if (/^\/admin\/(users|roles|permissions)(\/|$)/.test(route)) return next();

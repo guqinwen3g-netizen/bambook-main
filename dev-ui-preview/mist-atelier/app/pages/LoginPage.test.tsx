@@ -10,7 +10,7 @@ import { LoginPage } from './LoginPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root | undefined, host: HTMLElement | undefined;
 const go = vi.fn();
-function render(view = 'login') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(() => root!.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><LoginPage /></Nav.Provider></ToastProvider></MistRoot>)); return host; }
+function render(view = 'login', entry: 'company' | 'platform' = 'company') { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(() => root!.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() }}><LoginPage entry={entry} /></Nav.Provider></ToastProvider></MistRoot>)); return host; }
 function input(type: string, value: string) { const element = host!.querySelector<HTMLInputElement>(`input[type="${type}"]`)!; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function submit() { await act(async () => { host!.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }); }
 beforeEach(() => { vi.clearAllMocks(); seam.session.signingIn = false; seam.session.status = 'anonymous'; seam.session.error = ''; });
@@ -33,7 +33,7 @@ describe('original Mist login with real-session binding', () => {
     const host = render(); input('email', 'real@example.com'); input('password', 'password');
     const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!; act(() => checkbox.click());
     await submit(); await submit();
-    expect(seam.session.login).toHaveBeenCalledTimes(1); expect(seam.session.login).toHaveBeenCalledWith('real@example.com', 'password', { remember: false }); expect(go).not.toHaveBeenCalled();
+    expect(seam.session.login).toHaveBeenCalledTimes(1); expect(seam.session.login).toHaveBeenCalledWith('real@example.com', 'password', { remember: false, entry: 'company' }); expect(go).not.toHaveBeenCalled();
     await act(async () => resolve({ id: 'real', displayName: '真实用户', email: 'real@example.com' }));
     expect(go).toHaveBeenCalledWith('cockpit');
     expect(host.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('');
@@ -60,14 +60,16 @@ it.each(['login', 'platform-admin'])('uses the same form at %s and sends company
   const host = render(view); expect(host.querySelector('h2')?.textContent).toBe('登录'); expect(host.textContent).not.toContain('公司账号登录');
   input('email', 'employee@example.com'); input('password', 'password'); await submit(); expect(go).toHaveBeenCalledWith('cockpit');
 });
-it('recognizes platform identity only from the successful login response', async () => {
+it('signs platform staff in from the separate platform entry', async () => {
   seam.session.login.mockResolvedValue({ id: 'operator', displayName: '平台人员', roleIds: [], platformRole: 'platform_admin' });
-  render(); input('email', 'operator@example.com'); input('password', 'password'); await submit(); expect(go).toHaveBeenCalledWith('platform-admin');
+  const host = render('platform-login', 'platform'); expect(host.querySelector('h2')?.textContent).toBe('平台管理'); expect(host.textContent).not.toContain('账户开通');
+  input('email', 'operator@example.com'); input('password', 'password'); await submit();
+  expect(seam.session.login).toHaveBeenCalledWith('operator@example.com', 'password', { remember: true, entry: 'platform' }); expect(go).toHaveBeenCalledWith('platform-admin');
 });
 it('asks for company selection only after account authentication requires it', async () => {
   seam.session.login.mockRejectedValueOnce(Object.assign(new Error('选择公司'), { code: 'COMPANY_SELECTION_REQUIRED', companies: [{ id: 'company-b', name: '另一家公司', slug: 'company-b' }] }));
   seam.session.login.mockResolvedValueOnce({ id: 'employee', roleIds: ['sales'] });
   render(); expect(host!.textContent).not.toContain('另一家公司'); input('email', 'employee@example.com'); input('password', 'password'); await submit();
   expect(go).not.toHaveBeenCalled(); const button = [...host!.querySelectorAll('button')].find(value => value.textContent === '另一家公司')!;
-  await act(async () => button.click()); expect(seam.session.login).toHaveBeenLastCalledWith('employee@example.com', 'password', { remember: true, companyId: 'company-b' }); expect(go).toHaveBeenCalledWith('cockpit');
+  await act(async () => button.click()); expect(seam.session.login).toHaveBeenLastCalledWith('employee@example.com', 'password', { remember: true, companyId: 'company-b', entry: 'company' }); expect(go).toHaveBeenCalledWith('cockpit');
 });

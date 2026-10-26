@@ -1,12 +1,14 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { AgentRole } from '../agent/types';
+import type { SupportSession } from './requestCompanyContext';
 import { jwtSecretProblems, hasFatalSecretProblem, reportSecretProblemsOnce } from './secretPolicy';
 
 type AuthServiceOptions = {
   jwtSecret?: string;
   jwtExpiresIn?: string;
 };
+
 
 export type TokenPayload = {
   businessAttributes?: string[];
@@ -27,6 +29,8 @@ export type TokenPayload = {
   /** Server-owned API-key session ceiling; never loaded from a tool input. */
   permissionCeiling?: string[];
   departmentIds: string[];
+  /** 平台代管会话；只由平台代管入口签发。 */
+  support?: SupportSession;
 };
 
 export function createAuthService(options: AuthServiceOptions = {}) {

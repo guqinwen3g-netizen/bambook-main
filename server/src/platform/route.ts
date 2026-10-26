@@ -9,6 +9,8 @@ import { createCompany } from './companyProvisioning';
 import { platformSettingsRouter, readCompanyDefaults } from './settings';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
+import { CompanyAccessError } from '../auth/companyAccess';
+import { buildLoadedAuthTokenPayload, loadUserWithRoles, serializeAuthUser, supportActingUser } from '../auth/tokenHelpers';
 
 type PlatformRouterOptions = AccountAccessOptions & {
   prisma: PrismaClient;
@@ -78,6 +80,47 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       if(!member)return res.status(404).json({ok:false,message:'有效公司成员不存在。'});
       return res.json({ok:true,invitation:await access.deliver(member.userId,'invite',admin.userId,member.company.name)});
     }catch(e){next(e);}
+  });
+
+  // 平台代管（2026-10-26）：平台人员说明原因后，限时进入该公司后台代为办理；全程留痕。
+  const SUPPORT_HOURS = 2;
+  const supportCookie = (res: Response, token: string) => res.cookie('bambook_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000, path: '/' });
+  router.post('/companies/:id/support-session', async (req: Request, res: Response, next) => {
+    try {
+      const admin = await requirePlatformAdmin(req, res);
+      if (!admin) return;
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      if (reason.length < 2 || reason.length > 200) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写代管原因（2–200 字）。' });
+      const company = await options.prisma.company.findFirst({ where: { id: req.params.id, status: 'active' }, select: { id: true, name: true, slug: true } });
+      if (!company) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '公司不存在或已停用。' });
+      const user = await loadUserWithRoles(options.prisma, admin.userId);
+      if (!user) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '账号不可用。' });
+      const now = new Date();
+      const support = { companyId: company.id, companyName: company.name, reason, startedAt: now.toISOString(), expiresAt: new Date(now.getTime() + SUPPORT_HOURS * 3600_000).toISOString() };
+      let current;
+      try { current = await buildLoadedAuthTokenPayload(options.prisma, user, company.id, support); }
+      catch (error) { if (error instanceof CompanyAccessError) return res.status(error.status).json({ ok: false, error: error.code, message: error.message }); throw error; }
+      const token = auth.signToken(current);
+      await audit(admin.userId, 'platform_support_start', company.id, { reason, expiresAt: support.expiresAt });
+      supportCookie(res, token);
+      const acting = await supportActingUser(options.prisma, user, support, company.id);
+      return res.json({ ok: true, token, company, support, user: { ...serializeAuthUser(acting, current.roles, current.permissions, current.departmentIds, { companyId: company.id, newRoleIds: current.roleIds, authorizationLoaded: true }), support } });
+    } catch (error) { next(error); }
+  });
+
+  router.post('/support-session/exit', async (req: Request, res: Response, next) => {
+    try {
+      const admin = await requirePlatformAdmin(req, res);
+      if (!admin) return;
+      const prior = auth.verifyToken(pickRequestToken(req)!);
+      if (prior.support) await audit(admin.userId, 'platform_support_end', prior.support.companyId, { startedAt: prior.support.startedAt });
+      const user = await loadUserWithRoles(options.prisma, admin.userId);
+      if (!user) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '账号不可用。' });
+      const current = await buildLoadedAuthTokenPayload(options.prisma, user, null);
+      const token = auth.signToken(current);
+      supportCookie(res, token);
+      return res.json({ ok: true, token, user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { companyId: null, newRoleIds: current.roleIds, authorizationLoaded: true }) });
+    } catch (error) { next(error); }
   });
 
   router.get('/companies', async (req: Request, res: Response) => {

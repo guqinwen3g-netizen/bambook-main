@@ -24,6 +24,8 @@ export interface AuthUser {
   department: string | null;
   /** 管理员重置密码后为 true：须先修改密码才能继续使用。 */
   mustChangePassword?: boolean;
+  /** 平台代管会话：平台人员限时代公司办理后台事务。 */
+  support?: { companyId: string; companyName: string; reason: string; startedAt: string; expiresAt: string };
 }
 
 export interface AuthState {
@@ -339,7 +341,7 @@ export async function registerJoinCompany(input: SelfRegistrationAccount & ({ co
   return { company: data.company, email: data.email };
 }
 
-export async function login(identifier: string, password: string, companyId?: string): Promise<AuthUser> {
+export async function login(identifier: string, password: string, companyId?: string, entry: 'company' | 'platform' = 'company'): Promise<AuthUser> {
   const epoch = ++authMutationEpoch;
   const base = getAuthApiBase();
   const initialToken = getStoredAuthToken();
@@ -352,7 +354,7 @@ export async function login(identifier: string, password: string, companyId?: st
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email: identifier, identifier, password, ...(companyId ? { companyId } : {}) }),
+      body: JSON.stringify({ email: identifier, identifier, password, entry, ...(companyId ? { companyId } : {}) }),
     }, { fallbackToOmitCredentials: true });
     data = await readJsonResponse(res);
   } catch (error) {
@@ -392,6 +394,11 @@ export async function login(identifier: string, password: string, companyId?: st
  * 但跳过口令校验 —— 仅 dev 面板可调用（后端 BAMBOOK_DEV_PANEL 护栏）。
  */
 export async function devLoginAs(token: string, user: AuthUser): Promise<AuthUser> {
+  return adoptIssuedSession(token, user);
+}
+
+/** 换用服务端刚签发的会话（开发面板切换账号、平台代管进入/退出）。 */
+export async function adoptIssuedSession(token: string, user: AuthUser): Promise<AuthUser> {
   authMutationEpoch += 1;
   if (token) {
     localStorage.setItem(AUTH_TOKEN_KEY, token);
@@ -399,7 +406,7 @@ export async function devLoginAs(token: string, user: AuthUser): Promise<AuthUse
   }
   const normalized = normalizeAuthUser(user);
   if (!normalized) {
-    throw new Error('devLoginAs: 缺少有效用户，无法进入');
+    throw new Error('缺少有效用户，无法进入');
   }
   currentState = { user: normalized, isLoading: false, isAuthenticated: true };
   cacheAuthUser(normalized);
