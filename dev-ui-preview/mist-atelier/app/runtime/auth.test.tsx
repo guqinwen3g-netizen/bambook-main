@@ -102,6 +102,43 @@ describe('Mist session adapter with production auth service', () => {
     override = undefined; await act(async () => session.login('new-server-user', 'password'));
     expect(session.status).toBe('authenticated'); expect(session.user?.id).toBe('new-server-user');
   });
+  it.each(['write', 'remove'] as const)('keeps a settled guest screen when another tab %s changes only the user cache', async change => {
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    const key = session.sessionKey, count = requests.length;
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', {
+      key: 'bambook_auth_user', newValue: change === 'write' ? JSON.stringify(user('other-tab')) : null,
+    })));
+    expect(session.status).toBe('anonymous'); expect(session.sessionKey).toBe(key);
+    expect(session.user).toBeNull(); expect(requests).toHaveLength(count);
+  });
+  it('does not retire a pending login or adopt another tabs cached permissions', async () => {
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    const response = deferred<Response>();
+    override = url => url.pathname.endsWith('/auth/login') ? response.promise : null;
+    let login!: Promise<unknown>;
+    act(() => { login = session.login('current', 'password').catch(error => error); });
+    const count = requests.length;
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', {
+      key: 'bambook_auth_user', newValue: JSON.stringify({ ...user('other-tab'), permissions: ['*'] }),
+    })));
+    expect(requests).toHaveLength(count); expect(session.signingIn).toBe(true);
+    await act(async () => response.resolve(json({ user: user('current'), token: 'token-current' })));
+    expect(await login).toMatchObject({ id: 'current' });
+    expect(session.user?.id).toBe('current'); expect(session.hasPermission('finance:write')).toBe(false);
+  });
+  it('still revalidates changed credentials and a cleared storage instead of trusting the display cache', async () => {
+    await auth.login('first', 'password'); await mount();
+    await waitFor(() => expect(session.user?.id).toBe('first'));
+    actor = user('second'); localStorage.setItem('bambook_auth_token', 'token-second');
+    const count = requests.length;
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: 'bambook_auth_token' })));
+    await waitFor(() => expect(session.user?.id).toBe('second'));
+    expect(requests.slice(count).map(r => r.path)).toEqual(['/api/auth/me']);
+    actor = null; localStorage.clear(); sessionStorage.clear();
+    await act(async () => window.dispatchEvent(new StorageEvent('storage', { key: null })));
+    await waitFor(() => expect(session.status).toBe('anonymous'));
+    expect(session.user).toBeNull(); expect(session.hasPermission('orders:read')).toBe(false);
+  });
   it('retired provider callbacks cannot log out a later session', async () => {
     await mount(); await waitFor(() => expect(session.status).toBe('anonymous')); const retired = session;
     act(() => root!.unmount()); root = undefined;

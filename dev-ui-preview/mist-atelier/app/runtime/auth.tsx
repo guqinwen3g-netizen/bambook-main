@@ -36,7 +36,10 @@ export interface MistSession {
 }
 const SessionContext = React.createContext<MistSession | null>(null);
 const AUTH_TOKEN_KEY = 'bambook_auth_token';
-const SESSION_STORAGE_KEYS = new Set([AUTH_TOKEN_KEY, 'bambook_auth_user', 'panda_system_config', 'cloudEndpoint']);
+// The user cache is a startup/display aid, never an authentication signal.
+// Treating its writes/removals as credential changes makes signed-in and guest
+// tabs revalidate each other indefinitely and retires an in-progress login.
+const SESSION_STORAGE_KEYS = new Set([AUTH_TOKEN_KEY, 'panda_system_config', 'cloudEndpoint']);
 
 function storedToken() {
   try { return localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY) || ''; }
