@@ -822,4 +822,10 @@ export const reviewedEnglish: Record<string, string> = {
   '请选择出运': 'Select a shipment',
   '按出运': 'By shipment',
   '按订单': 'By order',
+  '返回平台': 'Back to platform',
+  '公司管理 · {0}': 'Company management · {0}',
+  '暂时无法记录管理操作，请稍后重试。': 'Unable to record this action. Try again shortly.',
+  '公司设置尚未就绪': 'Company settings are not ready',
+  '公司范围不一致，请重新读取': 'Company mismatch. Reload the settings.',
+  '保存回执不一致，请重新读取核对': 'Save response mismatch. Reload to verify.',
 };

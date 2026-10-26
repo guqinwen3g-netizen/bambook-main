@@ -3,8 +3,8 @@ import { departmentAuthorization } from './departmentAuthorization';
 import { PrismaClient } from '@prisma/client';
 import { AgentRole } from '../agent/types';
 import { ROLE_ID_TO_LEGACY_AGENT_ROLE, legacyAgentRoleForId, loadEffectivePermissionScopes } from './permissionService';
-import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
-import { currentCompanyId, currentSupportSession, type SupportSession } from './requestCompanyContext';
+import { PERMISSION_SCOPES, SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
+import { currentCompanyId, currentPlatformCompanyContext, type PlatformCompanyContext } from './requestCompanyContext';
 import type { TokenPayload } from './service';
 
 /**
@@ -124,14 +124,14 @@ export function buildAuthTokenPayload(user: any, companyId?: string | null): Tok
  * DB query with roles -> role -> permissions -> permission included. Only after
  * the additional personal-grant query succeeds do we stamp a loaded snapshot.
  */
-export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: any, companyId?: string | null, support?: SupportSession): Promise<TokenPayload> {
+export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: any, companyId?: string | null, platformCompany?: PlatformCompanyContext): Promise<TokenPayload> {
   if (user.status !== 'active' || user.deletedAt != null) throw new Error('AUTHORIZATION_ACCOUNT_INACTIVE');
-  const contextSupport = currentSupportSession();
-  const activeSupport = support ?? (companyId === undefined || companyId === contextSupport?.companyId ? contextSupport : undefined);
-  if (activeSupport && user.platformRole === 'platform_admin') {
-    const acting = await supportActingUser(prisma, user, activeSupport, companyId === undefined ? activeSupport.companyId : companyId);
+  const contextSupport = currentPlatformCompanyContext();
+  const activeSupport = platformCompany ?? (companyId === undefined || companyId === contextSupport?.companyId ? contextSupport : undefined);
+  if (activeSupport) {
+    const acting = await platformCompanyUser(prisma, user, activeSupport, companyId === undefined ? activeSupport.companyId : companyId);
     const payload = buildAuthTokenPayload(acting, activeSupport.companyId);
-    return { ...payload, support: activeSupport, ...departmentAuthorization(acting, payload.roleIds || [], payload.permissions), authorizationLoaded: true };
+    return { ...payload, platformCompany: activeSupport, ...departmentAuthorization(acting, payload.roleIds || [], payload.permissions), authorizationLoaded: true };
   }
   if (!Array.isArray(user.roles) || user.roles.some((ur: any) => !Array.isArray(ur.role?.permissions))) {
     throw new Error('AUTHORIZATION_ROLE_TREE_NOT_LOADED');
@@ -147,18 +147,17 @@ export async function buildLoadedAuthTokenPayload(prisma: PrismaClient, user: an
 }
 
 /**
- * 平台代管：平台人员不成为公司成员，只在会话期内按该公司超级管理员角色的当前权限办理。
- * 每次重载都核验时限、公司状态与角色，任何一项失效即结束代管。
+ * 平台权限来自当前平台身份，不依赖客户公司的角色配置或服务状态。
+ * 仍绑定明确公司，每次请求重载身份；公司管理页面不开放业务执行接口。
  */
-export async function supportActingUser(prisma: PrismaClient, user: any, support: SupportSession, companyId: string | null) {
-  if (user.platformRole !== 'platform_admin' || !support.companyId || support.companyId !== companyId || !(Date.parse(support.expiresAt) > Date.now())) {
-    throw new CompanyAccessError('SUPPORT_SESSION_ENDED', '平台代管已结束，请从平台管理重新进入。', 401);
+export async function platformCompanyUser(prisma: PrismaClient, user: any, platformCompany: PlatformCompanyContext, companyId: string | null) {
+  if (user.platformRole !== 'platform_admin' || !platformCompany.companyId || platformCompany.companyId !== companyId) {
+    throw new CompanyAccessError('PLATFORM_COMPANY_ACCESS_DENIED', '请从平台管理选择公司。', 403);
   }
   const db = prisma as any;
-  const company = await db.company.findFirst({ where: { id: companyId, status: 'active' }, select: { id: true } });
-  if (!company) throw new CompanyAccessError('COMPANY_ACCESS_DENIED', '公司已停用，无法代管。');
+  const company = await db.company.findFirst({ where: { id: companyId }, select: { id: true } });
+  if (!company) throw new CompanyAccessError('COMPANY_ACCESS_DENIED', '公司不存在。');
   const roleId = `${SYSTEM_ROLE_IDS.SUPER_ADMIN}@${companyId}`;
-  const role = await db.role.findFirst({ where: { id: roleId, companyId }, include: { permissions: { include: { permission: true } } } });
-  if (!role) throw new CompanyAccessError('SUPPORT_ROLE_MISSING', '该公司缺少超级管理员角色，无法代管。', 409);
+  const role = { id: roleId, companyId, code: SYSTEM_ROLE_IDS.SUPER_ADMIN, name: '平台管理员', permissions: Object.keys(PERMISSION_SCOPES).map(scope => ({ permission: { scope } })) };
   return { ...user, roles: [{ roleId, role, departmentId: null, department: null }], primaryDepartment: null, primaryDeptId: null };
 }

@@ -9,11 +9,11 @@
 | 用途 | 域名 | 范围 |
 | --- | --- | --- |
 | 公司用户 | `bambook.sylway.cloud` | 公司登录与业务 |
-| 平台管理 | `bambook-admin.sylway.cloud` | 平台登录、管理及受审计的限时代管 |
+| 平台管理 | `bambook-admin.sylway.cloud` | 平台登录、公司管理与服务运营 |
 | 客户查单 | `bambook-customer.sylway.cloud` | 预留，尚不发布门户 |
 | 供应商 | `bambook-supplier.sylway.cloud` | 预留，尚不发布门户 |
 
-公司与平台入口分别使用独立的主机 Cookie；主机名由反向代理传给应用，不能用客户端 `X-Forwarded-Host` 改变入口。平台域名禁止公司业务 API，平台模型配置仅向独立平台会话开放，代管会话仍不能进入。邀请/找回邮件配置 `BAMBOOK_PUBLIC_URL` 与 `BAMBOOK_PLATFORM_PUBLIC_URL`；两者分别指向公司和平台地址。源码锚点：`server/src/shared/bambookPublicOrigins.ts`、`auth/publicEntryHostGuard.ts`、`auth/accountAccess.ts`。旧 dev 域名保留为公司兼容入口和发布校验地址。
+公司与平台入口分别使用独立的主机 Cookie；主机名由反向代理传给应用，不能用客户端 `X-Forwarded-Host` 改变入口。平台管理员选择公司后，可管理该公司的账号、组织人事与设置，不成为公司成员，权限不依赖公司的角色配置；停止公司服务不会取消平台管理权限。公司设置在 `/api/platform/companies/:id/settings` 投影读取并以版本/请求编号保存，修改记录实际平台人员。平台域名不承接公司业务执行 API；平台模型配置仍在返回平台后维护。邀请/找回邮件配置 `BAMBOOK_PUBLIC_URL` 与 `BAMBOOK_PLATFORM_PUBLIC_URL`；两者分别指向公司和平台地址。源码锚点：`server/src/shared/bambookPublicOrigins.ts`、`auth/publicEntryHostGuard.ts`、`auth/tokenHelpers.ts`、`platform/companySettings.ts`。旧 dev 域名保留为公司兼容入口和发布校验地址。
 
 入口变更先备份 DNS、Nginx、cloudflared 与应用配置；先验证候选配置，再启用明确主机名的隧道路由和 DNS。保持 TLS 校验、原上传限制与代理头缓冲；不将预留门户转发到现有公司应用。配置及回执留在本机私有目录，不把隧道身份、密钥或服务器配置包提交到仓库。
 

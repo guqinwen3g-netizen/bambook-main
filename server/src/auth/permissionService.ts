@@ -1,4 +1,4 @@
-import { currentCompanyId } from './requestCompanyContext';
+import { currentCompanyId, currentPlatformCompanyContext } from './requestCompanyContext';
 import { departmentAuthorization } from './departmentAuthorization';
 /**
  * permissionService.ts — Phase 0-02 权限服务层（不含 Express 中间件，纯函数+Prisma 查询）
@@ -30,6 +30,7 @@ import { businessError } from '../shared/errorCodes';
 // 通过快照副本绕过 tsconfig rootDir 限制；权威源仍为根 lib/rolePermissionMatrix.ts）
 import {
   SYSTEM_ROLE_IDS,
+  PERMISSION_SCOPES,
   type PermissionScope,
   type DataScopeRule,
   type SensitiveFieldScope,
@@ -196,6 +197,7 @@ export function createPermissionService(opts: PermissionServiceOptions) {
         primaryDeptId: true,
         primaryDepartment: true,
         status: true,
+        platformRole: true,
         roles: {
           ...(currentCompanyId() ? { where: { role: { companyId: currentCompanyId() } } } : {}),
           select: {
@@ -211,6 +213,13 @@ export function createPermissionService(opts: PermissionServiceOptions) {
       },
     });
     if (!user || user.status !== 'active') return null;
+
+    const management = currentPlatformCompanyContext();
+    if (management) {
+      if (user.platformRole !== 'platform_admin' || management.companyId !== currentCompanyId()) return null;
+      if (!await prisma.company.findFirst({ where: { id: management.companyId }, select: { id: true } })) return null;
+      return { userId, roleIds: [`${SYSTEM_ROLE_IDS.SUPER_ADMIN}@${management.companyId}`], legacyRoleCodes: ['owner', 'admin'], scopes: Object.keys(PERMISSION_SCOPES), businessAttributes: [], globalBusinessScope: true, authorizationLoaded: true, departmentIds: [], primaryDeptId: null, departmentSubtreeIds: [] };
+    }
 
     const roleIds: string[] = [];
     const roleScopes = new Set<string>();
