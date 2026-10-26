@@ -1,4 +1,5 @@
 import { apiService } from '../../../../services/apiService';
+import { adoptIssuedSession, type AuthUser } from '../../../../services/authService';
 export type Invitation = {status:'sent'|'unconfirmed'|'unavailable'|'cooldown'|'accepted'|'sending';message?:string;at?:string};
 export type PlatformCompany = { id:string; slug:string; name:string; legalName?:string|null; status:'active'|'suspended'|'closed'; plan:string; seatLimit:number|null; members:number; workspaces:number; createdAt:string };
 export type PlatformMember = { userId:string; displayName:string; email:string; accountStatus:string; memberStatus:string; jobTitle:string|null; joinedAt:string|null; invitation?:Invitation|null };
@@ -28,5 +29,11 @@ export const platformAdminApi={
  update:(id:string,draft:{status:string;plan:string;seatLimit:number|null})=>call('/companies/'+encodeURIComponent(id),'PATCH',draft),
  members:(id:string,signal?:AbortSignal)=>call<{members:PlatformMember[]}>('/companies/'+encodeURIComponent(id)+'/members','GET',undefined,signal),
  addMember:(id:string,email:string)=>call('/companies/'+encodeURIComponent(id)+'/members','POST',{email}),
+ startSupport:(id:string,reason:string)=>call<{token:string;user:AuthUser}>('/companies/'+encodeURIComponent(id)+'/support-session','POST',{reason}),
+ exitSupport:()=>call<{token:string;user:AuthUser}>('/support-session/exit','POST',{}),
  removeMember:(id:string,userId:string)=>call('/companies/'+encodeURIComponent(id)+'/members/'+encodeURIComponent(userId),'DELETE'),
 };
+
+/** 平台代管：进入或退出公司后台都换用服务端新签发的会话。 */
+export async function enterCompanySupport(companyId:string,reason:string){const result=await platformAdminApi.startSupport(companyId,reason);return adoptIssuedSession(result.token,result.user);}
+export async function exitCompanySupport(){const result=await platformAdminApi.exitSupport();return adoptIssuedSession(result.token,result.user);}

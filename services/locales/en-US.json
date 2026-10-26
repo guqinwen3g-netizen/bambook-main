@@ -6548,5 +6548,15 @@
   "本周没有新单": "No new orders this week",
   "合计 {0} 件/米": "Total {0} items/meters",
   "按到账日、已核销到发票": "By received date, verified to invoice",
-  "逾期未完成 {0} 条": "Overdue and not completed {0} items"
+  "逾期未完成 {0} 条": "Overdue and not completed {0} items",
+  "平台代管": "Platform support",
+  "退出代管": "End support",
+  "代管公司后台": "Support company backend",
+  "代公司办理账号、加入审批、角色权限与组织人事。限时 2 小时，全程留痕。": "Handle accounts, join approvals, roles and organization for the company. Limited to 2 hours and fully audited.",
+  "代管原因": "Reason",
+  "例如：客户来电，协助开通新员工账号": "e.g. Customer called to set up a new employee account",
+  "平台账号请从平台管理入口登录。": "Platform accounts sign in from the platform entry.",
+  "该账号不是平台账号，请从公司登录入口登录。": "This is not a platform account. Sign in from the company entry.",
+  "平台代管 · {0}": "Platform support · {0}",
+  "{0} · {1} 自动结束": "{0} · ends at {1}"
 }

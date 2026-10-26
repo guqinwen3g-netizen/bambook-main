@@ -10,7 +10,7 @@ import { EmailService, buildVerificationEmail, createEmailService, isDevEmailFal
 import { VerificationStore, createVerificationStore } from './verification';
 import { logger } from '../lib/logger';
 import { ROLE_ID_TO_LEGACY_AGENT_ROLE } from './permissionService';
-import { buildLoadedAuthTokenPayload, loadUserWithRoles, serializeAuthUser } from './tokenHelpers';
+import { buildLoadedAuthTokenPayload, supportActingUser, loadUserWithRoles, serializeAuthUser } from './tokenHelpers';
 import { createLoginRateLimiter } from './loginRateLimiter';
 import { pickRequestToken } from './middleware';
 import { invalidateAccountStatusCache } from './accountStatusGuard';
@@ -139,6 +139,12 @@ export function createAuthRouter(options: AuthRouterOptions) {
 
     // 登录成功：清除该 IP+账号的失败计数
     loginRateLimiter?.reset(rateLimitKey);
+
+    // 平台管理入口与公司登录入口分开（2026-10-26 用户定案）：平台账号只能从平台入口登录，公司账号只能从公司入口登录。
+    const entry = req.body?.entry === 'platform' ? 'platform' : 'company';
+    const platformAccount = (user as any).platformRole === 'platform_admin';
+    if (entry === 'platform' && !platformAccount) return res.status(403).json({ ok: false, error: 'PLATFORM_ENTRY_ONLY', message: '该账号不是平台账号，请从公司登录入口登录。' });
+    if (entry === 'company' && platformAccount) return res.status(403).json({ ok: false, error: 'COMPANY_ENTRY_ONLY', message: '平台账号请从平台管理入口登录。' });
 
     // 多租户：确定本次会话进入哪家公司。一个账号可属于多家公司，
     // 多家时先返回公司列表让用户选择；未归属任何公司时保持历史行为（companyId 为空）。
@@ -370,8 +376,9 @@ export function createAuthRouter(options: AuthRouterOptions) {
         res.clearCookie(COOKIE_NAME, { path: '/' });
         return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Account disabled.' });
       }
-      const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, payload.companyId ?? null);
+      const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, payload.companyId ?? null, payload.support);
       const { roles, permissions, departmentIds, roleIds: newRoleIds } = tokenPayload;
+      const shownUser = tokenPayload.support ? await supportActingUser(options.prisma, user, tokenPayload.support, tokenPayload.support.companyId) : user;
       let company: { id: string; name: string; slug: string } | null = null;
       if (payload.companyId) {
         const row = await options.prisma.company.findUnique({
@@ -386,7 +393,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       }
       return res.json({
         ok: true,
-        user: serializeAuthUser(user, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }),
+        user: { ...serializeAuthUser(shownUser, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded, permissionCeiling: payload.permissionCeiling }), ...(tokenPayload.support ? { support: tokenPayload.support } : {}) },
         ...(company ? { company } : {}),
       });
     } catch {
@@ -534,7 +541,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       }
       // Re-authentication boundary: never re-sign stale role/grant claims from
       // the old JWT, even if every current role permission has been revoked.
-      const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null);
+      const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null, prior.support);
       if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
       const refreshed = auth.signToken(current);
       res.cookie(COOKIE_NAME, refreshed, {
@@ -587,7 +594,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       try {
         const loaded = await loadUserWithRoles(options.prisma, payload.userId);
         if (loaded) {
-          const current = await buildLoadedAuthTokenPayload(options.prisma, loaded, payload.companyId ?? null);
+          const current = await buildLoadedAuthTokenPayload(options.prisma, loaded, payload.companyId ?? null, payload.support);
           if (payload.permissionCeiling !== undefined) current.permissionCeiling = [...payload.permissionCeiling];
           token = auth.signToken(current);
           res.cookie(COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: COOKIE_MAX_AGE, path: '/' });
