@@ -140,3 +140,16 @@ it('keeps fabric procurement quantity, contractual unit and currency in semantic
  procurementSources();store.state!.orders.find(order=>order.id==='order-b')!.type='fabric';store.state!.orders.find(order=>order.id==='order-b')!.currency='EUR';const line=store.state!.orderLines.find(line=>line.id==='line-b')!;line.qty=120.5;line.unit='码';store.state!.market.suppliers.push({id:'supplier',name:'真实面料工厂',status:'active'} as any);
  render(<ProcurementPage/>,'procurement',undefined,{orderLineId:'line-b',section:'order:order-b',customerId:'customer-b'});await click(getAllByRole(host,'button',{name:/^新建(采购订单|委外加工单)$/})[0]);expect(getByText(host.querySelector('.mist-form-section')!,'来源与供应商',{exact:true})).toBeTruthy();const supplier=getByRole(host,'combobox',{name:/供应商/}) as HTMLSelectElement;act(()=>{supplier.value='supplier';supplier.dispatchEvent(new Event('change',{bubbles:true}));});setInput('采购品名','棉麻斜纹');const content=getByRole(host,'combobox',{name:'采购内容'}) as HTMLSelectElement;act(()=>{content.value='material:fabric';content.dispatchEvent(new Event('change',{bubbles:true}));});await click(getByRole(host,'button',{name:'下一步'}));expect(getByText(host.querySelector('.mist-form-section')!,'数量与费用',{exact:true})).toBeTruthy();expect((getByRole(host,'spinbutton',{name:/承诺数量/}) as HTMLInputElement).value).toBe('120.5');expect((getByRole(host,'textbox',{name:/计量单位/}) as HTMLInputElement).value).toBe('码');expect((getByRole(host,'textbox',{name:/币种/}) as HTMLInputElement).value).toBe('EUR');expect(queryByRole(host,'textbox',{name:/付款条件/})).toBeNull();expect(store.run).not.toHaveBeenCalled();
 });
+it('checks a lost upload reply on the same record and attaches the stored file once',async()=>{
+ store.state!.fulfillment.samples.push(sample('sample','面料'));const lost=Object.assign(new Error('服务器不可达或超时，请检查网络'),{status:0});
+ const recover=vi.fn().mockRejectedValueOnce(Object.assign(new Error('请求回执不存在'),{status:404})).mockImplementationOnce(async()=>{store.pending=null;return {result:{fileId:'file-lost'}};});Object.assign(store,{recover});
+ store.uploadFile.mockImplementation(async()=>{(store as any).pending={kind:'upload',requestId:'req-1'};throw lost;});
+ render(<SamplesPage/>,'samples','sample');const pick=async()=>{const input=host.querySelector('input[type=file]')!;Object.defineProperty(input,'files',{configurable:true,value:[new File(['1'],'a.txt')]});await act(async()=>input.dispatchEvent(new Event('change',{bubbles:true})));};
+ await pick();render(<SamplesPage/>,'samples','sample');
+ expect(host.textContent).toContain('附件上传结果待核对');expect(host.textContent).not.toContain('附件未完成保存');expect(host.textContent).not.toContain('读取失败');
+ await click(getByRole(host,'button',{name:'核对并关联'}));expect(host.textContent).toContain('服务器未收到原附件，请重新选择同一附件');
+ await pick();expect(store.uploadFile).toHaveBeenCalledTimes(2);
+ await click(getByRole(host,'button',{name:'核对并关联'}));
+ expect(store.run).toHaveBeenCalledTimes(1);expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.samples.edit',payload:expect.objectContaining({id:'sample',fileIds:['file-lost']})}));
+ store.pending=null;
+});
