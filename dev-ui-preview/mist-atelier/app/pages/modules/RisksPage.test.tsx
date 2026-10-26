@@ -81,6 +81,10 @@ describe('风险管理与合规', () => {
     await click(button('撤回', document.body.querySelector('[role="dialog"]') as HTMLElement));
     expect(bridge.current.run).toHaveBeenCalledWith({ type: 'platform.risk.withdraw', payload: { id: r.id, escalationId: r.escalations![0].id, reason: '客户已付清' } });
   });
+  it('只读的原申请人不能撤回风险审批申请',async()=>{
+    bridge.user={id:'demo-finance',displayName:'林舒'};bridge.perms=['risk:read'];const r=risk('Escalated');await mount(r.id);
+    expect(button('撤回申请',detail(r.id))).toBeUndefined();expect(bridge.current.run).not.toHaveBeenCalled();
+  });
   it('审批只在审批中心办理：风险页不提供直接批准/驳回', async () => {
     const r = risk('Escalated'); await mount(r.id); const d = detail(r.id);
     expect(d.textContent).toContain('待部门主管审批');
@@ -122,27 +126,27 @@ describe('风险管理与合规', () => {
     bridge.perms = ['risk:read', 'orders:write'];
     const mine = orderRisk({ id: 'risk-mine', state: 'Open', plan: undefined }, '沈禾', 'demo-buyer');
     await mount(mine.id);
-    expect(host.textContent).toContain('按负责人处理');
+    expect(host.textContent).not.toContain('你可以登记和推进');
     expect(button('接手', detail(mine.id))!.disabled).toBe(false);
     expect(await inList(mine.id, undefined, () => button('手工登记')!.disabled)).toBe(false);
     await act(async () => root!.unmount()); host.remove();
     // 同显示名（沈禾）但负责人绑定的是另一个账号：不能处理，也不能把该订单当作本人订单登记。
     state.orders[0].ownerId = 'demo-buyer-2'; state.orders.slice(1).forEach(o => { delete o.ownerId; }); await mount(mine.id);
-    expect(button('接手', detail(mine.id))!.disabled).toBe(true); expect(detail(mine.id).textContent).toContain('只有来源负责人（沈禾）本人');
+    expect(button('接手', detail(mine.id))).toBeUndefined();expect(detail(mine.id).textContent).toContain(mine.title);
     expect(await inList(mine.id, undefined, () => button('手工登记')!.disabled)).toBe(true);
     await act(async () => root!.unmount()); host.remove();
     // 旧资料：负责人只有姓名、未绑定账号，即使与我同名也不按姓名认定。
     delete state.orders[0].ownerId; await mount(mine.id);
-    expect(button('接手', detail(mine.id))!.disabled).toBe(true); expect(detail(mine.id).textContent).toContain('尚未绑定账号');
+    expect(button('接手', detail(mine.id))).toBeUndefined();
     await act(async () => root!.unmount()); host.remove();
     state.orders[0].owner = '顾言'; state.orders[0].ownerId = 'demo-sales'; await mount(mine.id);
-    expect(button('接手', detail(mine.id))!.disabled).toBe(true); expect(detail(mine.id).textContent).toContain('只有来源负责人（顾言）');
+    expect(button('接手', detail(mine.id))).toBeUndefined();
     const cert = state.platform!.risks.find(r => r.source?.kind === 'supplier')!; await act(async () => root!.unmount()); host.remove(); await mount(cert.id);
-    expect(detail(cert.id).textContent).toContain('供应商来源的风险需要风险处理权限');
+    expect(detail(cert.id).textContent).toContain(cert.title);expect(button('接手',detail(cert.id))).toBeUndefined();
   });
-  it('无处理权限：只读，动作可见但禁用并写明原因', async () => {
+  it('无处理权限时保留只读事实，隐藏写操作和权限教学', async () => {
     bridge.perms = ['risk:read']; const r = risk('Open'); await mount(r.id);
-    expect(button('接手', detail(r.id))!.disabled).toBe(true);
+    expect(button('接手', detail(r.id))).toBeUndefined();expect(host.textContent).not.toContain('你的账号没有风险处理权限');
     expect(await inList(r.id, undefined, () => button('手工登记'))).toBeUndefined(); expect(host.textContent).toContain('只读查看');
   });
 });
