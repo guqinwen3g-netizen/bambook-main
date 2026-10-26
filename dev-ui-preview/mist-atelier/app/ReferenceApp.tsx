@@ -1,3 +1,4 @@
+import { loginEntryForHost, publicEntryForHost } from '../../../server/src/shared/bambookPublicOrigins';
 import { interfaceLocale } from '../../../services/interfaceLanguage';
 import { uiText, ui, useInterfaceLanguage, localizedPageTitle } from '../../../services/interfaceLanguage';
 import {businessNow} from './runtime/businessClock';
@@ -178,7 +179,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
   const personalSection = personalSettingsSection(route);
-  const documentTitle = pageDocumentTitle(personalSection ? 'account' : route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
+  const documentTitle = pageDocumentTitle(personalSection ? 'account' : session.status === 'anonymous' && publicEntryForHost(location.host) === 'platform' ? 'platform-login' : route.view, { anonymous: session.status === 'anonymous', loading: session.status === 'loading', platformOnly, mustChangePassword: !session.localMode && session.user?.mustChangePassword, invitation: new URLSearchParams(location.search).get('kind') === 'invite' });
   React.useEffect(() => { document.title = localizedPageTitle(documentTitle); }, [documentTitle, locale]);
   const scrollPosition = React.useRef<{ key: string; route: Route; list: boolean }>(null as never);
   if (!scrollPosition.current) { const list = typeof history.state?.mistListState === 'boolean' ? history.state.mistListState : isListState(route); scrollPosition.current = { key: scrollKeyOf(route, list), route, list }; }
@@ -228,6 +229,10 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     if (platformOnly || support) platformSession.current = true;
     else if (session.status === 'anonymous' && platformSession.current) { platformSession.current = false; go('platform-login'); }
   }, [platformOnly, support, session.status, go]);
+  React.useEffect(() => {
+    if (publicEntryForHost(location.host) === 'platform' && platformOnly && !personalSection
+      && !['platform-admin','system-settings','settings','platform-login','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
+  }, [platformOnly, personalSection, route.view, go]);
   // 平台代管只停留在公司后台与组织人事。
   React.useEffect(() => { if (support && !personalSection && !SUPPORT_VIEWS.includes(route.view.split('/')[0])) go('admin-panel'); }, [support, personalSection, route.view, go]);
   const exitSupport = async () => {
@@ -338,12 +343,12 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
   if (['account-access','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
-  if (route.view === 'register') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
+  if (route.view === 'register' && publicEntryForHost(location.host) !== 'platform') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
   if (session.status === 'loading') return null;
   if (session.status === 'anonymous' && (session.localMode || session.connectionModeUnverified)) return <MistPage width="narrow"><Card><CardHeader title={uiText("公司连接待核对")} sub={uiText(session.localMode?'本地工作身份由本机服务提供，无需输入旧账号密码。':'暂时无法确认当前公司，请重新连接后继续。')}/><div className="mist-card-body"><p>{session.error||'暂时无法读取公司会话，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>{uiText(session.localMode?'重新进入本地身份':'重新连接公司')}</Button></div></Card></MistPage>;
   if (session.status === 'anonymous' || route.view === 'login' || route.view === 'platform-login') {
     // 平台管理入口与公司登录分开：platform-* 地址只显示平台登录。
-    const platformEntry = route.view.startsWith('platform');
+    const platformEntry = loginEntryForHost(location.host, route.view) === 'platform';
     const loginGo = (view: string, id?: string) => {
       if (view === 'cockpit' && !['login', 'platform-admin', 'platform-login'].includes(route.view)) go(route.view, route.id, route); else go(view, id);
     };

@@ -1,3 +1,7 @@
+import { samePublicOrigin, publicOriginAllowed } from '../shared/bambookPublicOrigins';
+import { createAuthRouter } from '../auth/route';
+import { createDbVerificationStore } from '../auth/verificationDb';
+import { createEmailService } from '../auth/email';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
@@ -15,10 +19,11 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
   const local=options.local??(mistLocalRequested()?createMistLocalRuntime({host}):undefined);
   if(local)assertMistLocalMode(host);
   const configured = new Set((local?'':process.env.MIST_CORS_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
-  app.use(cors({ credentials: true, origin(origin, callback) {
-    if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin) || configured.has(origin)) callback(null, true);
+  app.use((req, res, next) => cors({ credentials: true, origin(origin, callback) {
+    const requestHost = String(req.headers.host ?? '');
+    if (publicOriginAllowed(requestHost, origin) && (!origin || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin) || configured.has(origin) || samePublicOrigin(requestHost, origin))) callback(null, true);
     else callback(null, false);
-  } }));
+  } })(req, res, next));
   app.use(express.json({ limit: '4mb' })); app.use(cookieParser());
   app.get('/api/health', async (_req, res) => {
     try { if(local){await local.ready;await local.database.health();res.json({status:'ok',service:'mist-workspace',mode:'local',storage:'local-file'});return;}await prisma.$queryRawUnsafe('SELECT 1'); res.json({ status: 'ok', service: 'mist-workspace', database: 'ok' }); }
@@ -36,9 +41,6 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.use('/api/mist',createMistRouter({repository,mailTransport:options.mailTransport,mailCredentialsRoot:process.env.MIST_MAIL_CREDENTIAL_DIR||path.join(local.database.directory,'mail-credentials'),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
-    const {createAuthRouter}=require('../auth/route') as typeof import('../auth/route');
-    const {createDbVerificationStore}=require('../auth/verificationDb') as typeof import('../auth/verificationDb');
-    const {createEmailService}=require('../auth/email') as typeof import('../auth/email');
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
     app.use('/api/auth', createAuthRouter({ prisma, email: createEmailService(), verification: createDbVerificationStore({ prisma }), requireEmailVerification }));
     // The local-identity session exists only in local mode. Answer 404 before authentication so the web app

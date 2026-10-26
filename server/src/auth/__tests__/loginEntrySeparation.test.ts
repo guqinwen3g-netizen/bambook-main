@@ -58,4 +58,18 @@ describe('separate platform and company login entries', () => {
     expect(res.status).toBe(401);
     expect(res.body.error).toBe('INVALID_CREDENTIALS');
   });
+  it('selects platform sign-in from the platform hostname without a query parameter', async () => {
+    const res = await request(app('platform_admin')).post('/auth/login').set('Host', 'bambook-admin.sylway.cloud').send({ email: 'entry@example.invalid', password });
+    expect(res.status).toBe(200);
+    expect(res.headers['set-cookie']?.join(';')).not.toMatch(/Domain=/i);
+  });
+  it('does not accept a company login payload on the platform hostname', async () => {
+    const res = await request(app(null)).post('/auth/login').set('Host', 'bambook-admin.sylway.cloud').send({ email: 'entry@example.invalid', password, entry: 'company' });
+    expect(res.status).toBe(403); expect(res.body.error).toBe('PLATFORM_ENTRY_ONLY');
+  });
+  it('does not trust forwarded-host or platform entry fields on the company hostname', async () => {
+    const res = await request(app('platform_admin')).post('/auth/login').set('Host', 'bambook.sylway.cloud').set('X-Forwarded-Host', 'bambook-admin.sylway.cloud').send({ email: 'entry@example.invalid', password, entry: 'platform' });
+    expect(res.status).toBe(403); expect(res.body.error).toBe('COMPANY_ENTRY_ONLY');
+  });
+
 });

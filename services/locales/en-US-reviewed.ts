@@ -1,5 +1,11 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '请从当前入口操作。': 'Use the current entry point.',
+  '请从平台管理入口操作。': 'Use the platform administration entry.',
+  '请从公司入口操作。': 'Use the company entry.',
+  '请从公司入口注册。': 'Register from the company entry.',
+  '请从公司入口登录公司账号。': 'Sign in to company accounts from the company entry.',
+  '请从平台管理入口登录平台账号。': 'Sign in to platform accounts from the administration entry.',
   '没有可访问的公司，请联系管理员。': 'No company access is available. Contact your administrator.',
   '当前账号无法访问该公司。': 'This account cannot access this company.',
   "有关联记录时请选择承接部门。": "Select a receiving department for linked records.",

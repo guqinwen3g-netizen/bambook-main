@@ -1,3 +1,4 @@
+import { BAMBOOK_PUBLIC_ORIGINS } from '../server/src/shared/bambookPublicOrigins';
 /**
  * 统一 API 根路径：
  *
@@ -7,7 +8,7 @@
  * 3. 兜底                          — DEV 闭环本地 8081 后端；PROD 走生产数据中心
  */
 
-const PROD_BAMBOOK_ENDPOINT = 'https://jiangsupanda.com/bambook';
+const PROD_BAMBOOK_ENDPOINT = BAMBOOK_PUBLIC_ORIGINS.company;
 const DEV_BAMBOOK_ENDPOINT = 'http://localhost:8081';
 
 /** DEV 运行时（vite dev / vitest）判定；调用时读取，便于测试 stub。 */

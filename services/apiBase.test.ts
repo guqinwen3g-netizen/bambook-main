@@ -32,7 +32,7 @@ describe('getApiBaseUrl', () => {
 
     const { getApiBaseUrl } = await import('./apiBase');
 
-    expect(getApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
+    expect(getApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
   });
 
   // —— DEV 本地闭环：默认端点落本地 8081 后端 ———
@@ -61,7 +61,7 @@ describe('getApiBaseUrl', () => {
 
     const { getApiBaseUrl } = await import('./apiBase');
 
-    expect(getApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
+    expect(getApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
   });
 
   it('keeps an explicitly stored localhost endpoint untouched in DEV (no remap to production)', async () => {
@@ -80,7 +80,7 @@ describe('getApiBaseUrl', () => {
 
     const { getApiBaseUrl } = await import('./apiBase');
 
-    expect(getApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
+    expect(getApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
   });
 
   it('allows an explicit localhost VITE_API_BASE_URL in DEV (local closed loop)', async () => {
@@ -104,8 +104,8 @@ describe('getApiBaseUrl', () => {
       getAgentRuntimeDevHeaders,
     } = await import('./apiBase');
 
-    expect(getApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
-    expect(getAgentRuntimeApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
+    expect(getApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
+    expect(getAgentRuntimeApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
     expect(getAgentRuntimeModeLabel()).toBe('数据中心 Agent Runtime');
     expect(getAgentRuntimeDevHeaders()).toEqual({});
   });
@@ -117,7 +117,7 @@ describe('getApiBaseUrl', () => {
 
     const { getAgentRuntimeApiBaseUrl } = await import('./apiBase');
 
-    expect(getAgentRuntimeApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
+    expect(getAgentRuntimeApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
   });
 
   it('allows deploy builds to use a relative API base', async () => {
@@ -136,7 +136,7 @@ describe('getApiBaseUrl', () => {
 
     const { getApiBaseUrl } = await import('./apiBase');
 
-    expect(getApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
+    expect(getApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
   });
 
   it('still migrates legacy direct-IP data endpoints in DEV (only localhost is exempt)', async () => {
@@ -157,6 +157,6 @@ describe('getApiBaseUrl', () => {
 
     const { getApiBaseUrl } = await import('./apiBase');
 
-    expect(getApiBaseUrl()).toBe('https://jiangsupanda.com/bambook/api');
+    expect(getApiBaseUrl()).toBe('https://bambook.sylway.cloud/api');
   });
 });

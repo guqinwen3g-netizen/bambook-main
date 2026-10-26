@@ -1,3 +1,5 @@
+import { createPublicEntryHostGuard } from './auth/publicEntryHostGuard';
+import { samePublicOrigin, publicOriginAllowed } from './shared/bambookPublicOrigins';
 import { tenantSurfaceGuard } from './auth/tenantSurfaceGuard';
 // Load env BEFORE Prisma is initialized.
 // Local dev overrides come from .env.local (gitignored); .env is the fallback (e.g. cloud creds).
@@ -381,13 +383,13 @@ const ALLOWED_ORIGINS = new Set<string>([
     'http://localhost:3005', // 客户门户 dev（customer-portal）
     'http://localhost:8081', // dev 后端自身
 ]);
-const corsWithCredentials = cors({
+const corsWithCredentials: express.RequestHandler = (req, res, next) => cors({
     origin(origin, cb) {
-        if (!origin || ALLOWED_ORIGINS.has(origin)) return cb(null, true);
-        cb(null, false);
+        const host = String(req.headers.host ?? '');
+        cb(null, publicOriginAllowed(host, origin) && (!origin || ALLOWED_ORIGINS.has(origin) || samePublicOrigin(host, origin)));
     },
     credentials: true,
-});
+})(req, res, next);
 app.use(corsWithCredentials);
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
@@ -407,6 +409,7 @@ app.use((req, _res, next) => {
 });
 
 app.use('/api', createAuthorizationSnapshotGuard({ prisma, apiKeys: SDK_CONFIG.apiKeys, apiKeyActors: AGENT_API_KEY_ACTORS }));
+app.use('/api', createPublicEntryHostGuard());
 app.use('/api', tenantSurfaceGuard);
 // 请求耗时日志：5xx→error / 慢请求→warn / 其余→debug（Phase 1 · 任务 1.2）
 app.use(createRequestTimingMiddleware());
@@ -414,7 +417,7 @@ app.use((req, res, next) => {
     // 与 corsWithCredentials 同口径：仅白名单 Origin 回显（不反射任意 Origin，
     // 否则带凭证请求可被任意站点读取——P2 双保险，该手写中间件与 cors 包并存）。
     const origin = req.headers.origin;
-    if (origin && ALLOWED_ORIGINS.has(origin)) {
+    if (origin && publicOriginAllowed(String(req.headers.host ?? ''), origin) && (ALLOWED_ORIGINS.has(origin) || samePublicOrigin(String(req.headers.host ?? ''), origin))) {
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Vary', 'Origin');
         res.header('Access-Control-Allow-Credentials', 'true');
