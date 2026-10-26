@@ -200,7 +200,18 @@ it('lets finance match VAT special invoices to a departed declaration and file t
   await click(getByRole(dialog,'button',{name:'登记申报'}));
   expect(store.run).toHaveBeenLastCalledWith({type:'rebate.claim.file',payload:expect.objectContaining({customsId:'cus-s',billIds:['b1'],batchRef:'202610-01'})});
   session.denied.add('invoices:write');render();
-  expect((getByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记退税申报'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(queryByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记退税申报'})).toBeNull();
+});
+
+it('distinguishes the published rebate rate from a lower input VAT ceiling',async()=>{
+ const st=store.state!,f=st.fulfillment;
+ f.shipments.push(shipment('low-rate',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('low-rate','cleared',{hsCode:'6202200000'}));
+ f.purchases.push({id:'low-po',code:'PO-LOW',orderId:'o'} as any);
+ st.files.push({id:'low-vat',name:'input-vat.pdf',mimeType:'application/pdf',size:10,storageKey:'test/input-vat',createdAt:'2026-10-10T00:00:00Z'});
+ st.payables!.bills.push({invoiceType:'vat-special',id:'low-bill',code:'AP-LOW',supplierId:'sup',supplier:'嘉兴制衣',invoiceNo:'LOW-3',invoiceDate:'2026-10-10',currency:'CNY',amount:10300,taxAmount:300,taxRate:'3%',lines:[{purchaseId:'low-po',amount:10300}],terms:[],due:'2026-11-10',dueBasis:'月结',fileIds:['low-vat'],note:'',state:'open',registeredAt:'2026-10-10T00:00:00Z',registeredBy:'财务'} as any);
+ st.exportRebate={rates:[{id:'low-policy',code:'RR-LOW',hsCode:'6202200000',rate:'13',effectiveFrom:'2020-03-20',basis:'文库',createdAt:'2026-10-01T00:00:00Z',actor:'财务'}],claims:[]};
+ render();await click(getByRole(host,'tab',{name:/退税/}));const table=getByRole(host,'table',{name:'退税资料核对'});expect(table.textContent).toContain('预计 300.00 CNY');await click(Array.from(table.querySelectorAll('[role="row"]')).find(r=>r.textContent?.includes('D-low-rate')) as HTMLElement);
+ const detail=host.querySelector('[data-customs-detail="cus-low-rate"]') as HTMLElement;expect(detail.textContent).toContain('文库退税率');const bills=getByRole(detail,'table',{name:'CUS-LOW-RATE 可配专票'});expect(bills.textContent).toContain('对应进项税额');expect(bills.textContent).toContain('进项封顶');expect(bills.textContent).not.toContain('1,300.00');expect(store.run).not.toHaveBeenCalled();
 });
 
 it('computes the rebate per declaration item HS once items exist, and blocks filing until every item has a rate',async()=>{

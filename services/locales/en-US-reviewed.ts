@@ -855,4 +855,9 @@ export const reviewedEnglish: Record<string, string> = {
   '可关联': 'Available to link',
   '待申请付款': 'Payment request needed',
   '待申请': 'To request',
+  '文库退税率': 'Published rebate rate',
+  '对应进项税额': 'Related input VAT',
+  '进项封顶': 'Input VAT limit',
+  '商品项 · 文库率': 'Goods item · published rate',
+  '申报税额': 'Filed refund amount',
 };

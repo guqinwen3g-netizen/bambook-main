@@ -21,6 +21,32 @@ function setup() {
 }
 
 describe('出口退税', () => {
+  it.each(['header','items'] as const)('低征收率专票的%s测算和申报不能超过对应进项税额',mode=>{
+    const f=setup(),bill=f.state.payables!.bills[0],purchase=f.state.fulfillment.purchases.find(p=>p.id===bill.lines[0].purchaseId)!;
+    bill.amount=10300;bill.taxAmount=300;bill.taxRate='3%';bill.lines[0].amount=10300;
+    if(mode==='items')f.customs.items=[{no:1,hsCode:f.customs.hsCode,lineKeys:[purchase.lineId+':one']}] as any;else delete f.customs.items;
+    f.run({type:'rebate.rate.save',payload:{hsCode:f.customs.hsCode,rate:'13',effectiveFrom:'2020-01-01',basis:'适用文库税率'}});
+    const plan=rebatePlan(f.state,f.customs,'2026-10-13',[bill]);expect(plan.rebate).toBe(30000);expect(plan.bills[0]).toMatchObject({inputTaxCap:30000,taxLimited:true});
+    const id=f.run({type:'rebate.claim.file',payload:{customsId:f.customs.id,billIds:[bill.id],filedAt:'2026-10-17',batchRef:'TAX-LOW-RATE',fileIds:['vat-original']}}).id;
+    const claim=readRebate(f.state).claims.find(c=>c.id===id)!;expect(claim.expected).toBe(300);expect(claim.lines[0]).toMatchObject({inputTaxCap:300,taxLimited:true});
+    expect(()=>f.run({type:'rebate.claim.approve',payload:{id,date:'2026-10-17',amount:1300,ref:'ADJ',reason:'超出本票进项税额'}})).toThrow(/不能超过/);
+  });
+  it('多商品项按各自进项税额封顶，未出口行与零退税率行不能抬高其他商品的可退额度',()=>{
+    const f=setup(),bill=f.state.payables!.bills[0],purchase=f.state.fulfillment.purchases.find(p=>p.id===bill.lines[0].purchaseId)!;
+    const other={...purchase,id:'other-purchase',lineId:'other-line',code:'PC-OTHER'};f.state.fulfillment.purchases.push(other);
+    bill.amount=10300;bill.taxAmount=300;bill.taxRate='3%';bill.lines=[{...bill.lines[0],amount:5150},{purchaseId:other.id,purchaseCode:other.code,kind:'finished',amount:5150}];
+    f.customs.items=[{no:1,hsCode:'620331',lineKeys:[purchase.lineId+':one']},{no:2,hsCode:'620432',lineKeys:[other.lineId+':two']}] as any;
+    for(const[hsCode,rate]of[['620331','13'],['620432','0']])f.run({type:'rebate.rate.save',payload:{hsCode,rate,effectiveFrom:'2020-01-01',basis:'文库'}});
+    let plan=rebatePlan(f.state,f.customs,'2026-10-13',[bill]);expect(plan.rebate).toBe(15000);expect(plan.bills[0].parts.map(p=>p.rebate)).toEqual([150,0]);
+    f.customs.items.pop();plan=rebatePlan(f.state,f.customs,'2026-10-13',[bill]);expect(plan.rebate).toBe(15000);expect(plan.bills[0].inputTaxCap).toBe(15000);expect(plan.bills[0].excluded).toBe(500000);
+  });
+  it('同一商品项跨采购合同先合计再计算，分拆结果保留合法的一分退税',()=>{
+    const f=setup(),bill=f.state.payables!.bills[0],purchase=f.state.fulfillment.purchases.find(p=>p.id===bill.lines[0].purchaseId)!;
+    const purchases=[purchase,...[1,2].map(n=>({...purchase,id:'round-po-'+n,code:'PO-R-'+n}))];f.state.fulfillment.purchases.push(...purchases.slice(1));
+    bill.amount=.09;bill.taxAmount=.01;bill.lines=purchases.map(p=>({purchaseId:p.id,purchaseCode:p.code,kind:'finished',amount:.03}));
+    f.customs.items=[{no:1,hsCode:f.customs.hsCode,lineKeys:[purchase.lineId+':one']}] as any;f.run({type:'rebate.rate.save',payload:{hsCode:f.customs.hsCode,rate:'13',effectiveFrom:'2020-01-01',basis:'文库'}});
+    const plan=rebatePlan(f.state,f.customs,'2026-10-13',[bill]);expect(plan.rebate).toBe(1);expect(plan.bills[0].parts.reduce((sum,part)=>sum+Math.round(part.rebate*100),0)).toBe(1);expect(plan.bills[0].inputTaxCap).toBe(1);
+  });
   it('演示数据：已离港报关单有一张可配单的 13% 专票与退税率，预计应退 26,000 元', () => {
     const state = createMistState({ id: (() => { let n = 0; return () => `d-${++n}`; })(), now: '2026-10-17T04:00:00Z', actorName: '林舒' }, 'demo');
     const customs = state.fulfillment.customs.find(c => state.fulfillment.shipments.find(s => s.id === c.shipmentId)?.state === 'departed')!;
