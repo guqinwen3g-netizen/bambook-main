@@ -61,6 +61,9 @@ import { platformBusinessDate } from '../../../server/src/shared/mistPlatform';
 import { visibleMistNotifications, mistDailyDigest } from './runtime/notificationPreferences';
 import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from './developmentEntry';
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
+// Only the separate reference preview enables developer showcase pages.
+// Running the business app through Vite does not make them client features.
+const REFERENCE_PREVIEW = import.meta.env.VITE_MIST_REFERENCE === 'true';
 
 const PAGES: Record<string, React.FC> = {
   'platform-admin': SaasAdminPage, account: AccountPage, 'account-settings': AccountPage,
@@ -68,8 +71,7 @@ const PAGES: Record<string, React.FC> = {
   emails: EmailsPage, cockpit: HomePage, development: DevListPage, 'development/detail': DevDetailPage, 'development/new': DevCreatePage,
   orders: OrderListPage, 'orders/detail': OrderDetailPage, 'orders/new': OrderCreatePage, calendar: CalendarPage, 'payment-vouchers': FinancePage, crm: CustomerPage,
   'production-board': ProductionPage, 'system-settings': SettingsPage, settings: SettingsPage, 'company-settings': SettingsPage, 'workspace-settings': SettingsPage, approvals: ApprovalsPage, notifications: NotificationsPage, search: SearchPage,
-  // 设计系统、空/加载/错误样张只在开发构建可达，正式构建不出现在侧栏，也不能经地址打开。
-  ...(import.meta.env.DEV ? { states: StatesPage, 'design-system': DesignSystemPage } : {}),
+  ...(REFERENCE_PREVIEW ? { states: StatesPage, 'design-system': DesignSystemPage } : {}),
 };
 const LIVE_VIEWS = new Set(['account','platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
@@ -110,14 +112,12 @@ function useSections(): NavSection[] {
       id: g.group, label: g.label === '平台' ? '公司管理' : g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
       items: g.modules.map(m => ({ id: String(m.view), label: String(m.view) === 'admin-panel' ? '公司后台' : productName(m), icon: m.icon })),
     }));
-    const dev = import.meta.env.DEV;
     const items = [
       ...(session.user?.platformRole === 'platform_admin' ? [{ id: 'platform-admin', label: '平台管理', icon: ShieldCheck }] : []),
-      ...(dev ? [{ id: 'design-system', label: '设计系统', icon: Component }, { id: 'states', label: '空 / 加载 / 错误', icon: SquareDashed }] : []),
-      ...(dev && !session.localMode ? [{ id: 'login', label: '登录页', icon: KeyRound }] : []),
       ...((platformOnly || session.canAccessView(View.SystemSettings)) ? [{ id: 'system-settings', label: platformOnly ? '平台设置' : '公司设置', icon: Settings2 }] : []),
     ];
-    return items.length ? [...real, { id: 'handoff', label: dev ? '设计系统' : '系统', items }] : real;
+    const reference = REFERENCE_PREVIEW ? [{ id: 'design-system', label: '设计系统', icon: Component }, { id: 'states', label: '空 / 加载 / 错误', icon: SquareDashed }, ...(!session.localMode ? [{ id: 'login', label: '登录页', icon: KeyRound }] : [])] : [];
+    return [...real, ...(items.length ? [{ id: 'handoff', label: '系统', items }] : []), ...(reference.length ? [{ id: 'reference', label: '开发预览', items: reference }] : [])];
   }, [session.sessionKey, session.status, session.hasRole, session.canAccessView, interfaceLocale()]);
 }
 /** 侧栏数字、模块页「待我处理」、首页合计共用同一口径（见 runtime/workQueue）。 */
@@ -331,7 +331,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
-  const permitted = !!personalSection || canOpenMistView(route.view, { canAccessView: session.canAccessView, platformOperator: session.user?.platformRole === 'platform_admin' }, import.meta.env.DEV) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
+  const permitted = !!personalSection || canOpenMistView(route.view, { canAccessView: session.canAccessView, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
   const Page = personalSection ? AccountPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
     : session.localMode && route.view === 'mes' ? LocalMesPage
