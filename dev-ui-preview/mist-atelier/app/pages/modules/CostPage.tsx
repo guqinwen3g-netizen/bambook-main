@@ -27,7 +27,7 @@ export function CostPage({reference}:{reference:React.ReactNode}){
  const actualOf=(id:string):OrderActualCost|null=>{if(!canSeeMargin||!w.state)return null;try{return orderActualCost(w.state,id,fxBasis,asOf.slice(0,7),asOf,w.workspace?.costMaterialBasis??(w.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined));}catch{return null;}};
  const cny=(n:number|null)=>n===null?'—':'¥'+n.toLocaleString(interfaceLocale(),{minimumFractionDigits:2,maximumFractionDigits:2});
  const actualText=(id:string)=>{if(!canSeeMargin)return '需报表管理权限查看';const a=actualOf(id);if(!a)return '暂不能核算';return a.status==='ok'?`人民币毛利 ${cny(a.marginIn)}${a.estimated?'（含暂估）':''}`:`缺汇率：${a.missing.join('、')||'外币'}`;};
- const openActual={label:'查看订单核算',onClick:()=>go('reports',undefined,{section:'actual'}),reason:canSeeMargin?undefined:'订单核算含采购成本，仅报表管理者可查看'};
+ const openActual={label:'查看订单核算',onClick:()=>go('reports',current?.id,{section:'actual'}),reason:canSeeMargin?undefined:'订单核算含采购成本，仅报表管理者可查看'};
  const tab=tabOf(route.section,route.id),orders=costOrderEvidence(w.state).filter(o=>!route.customerId||o.customerId===route.customerId),sources=costEvidenceRows(w.state).filter(r=>!route.customerId||orders.some(o=>o.id===r.orderId));
  const filteredOrders=orders.filter(o=>(orderFilter==='all'||o.id===orderFilter)&&`${o.code} ${o.customer} ${o.owner}`.toLowerCase().includes(query.trim().toLowerCase()));
  const filteredSources=sources.filter(r=>(orderFilter==='all'||r.orderId===orderFilter)&&(kind==='all'||r.kind===kind)&&`${r.code} ${r.description} ${kindLabels[r.kind]} ${orders.find(o=>o.id===r.orderId)?.code||''} ${orders.find(o=>o.id===r.orderId)?.customer||''} ${r.currency} ${r.state}`.toLowerCase().includes(query.trim().toLowerCase()));

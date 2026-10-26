@@ -8,9 +8,10 @@ const Recovery=React.createContext<{pending:boolean;busy:boolean;failure:string;
 export const PayableDialogRecovery=Recovery.Provider;
 export function PayableDialog(props:React.ComponentProps<typeof Dialog>){
  const recovery=React.useContext(Recovery);
- if(!recovery?.pending)return <Dialog {...props}/>;
+ // While a command is in flight the form stays readable but cannot be edited.
+ if(!recovery?.pending)return props.children==null||props.children===false?<Dialog {...props}/>:<Dialog {...props}><fieldset className="mist-form-lock" disabled={!!recovery?.busy}>{props.children}</fieldset></Dialog>;
  return <Dialog {...props} footer={<Button variant="primary" loading={recovery.busy} disabled={recovery.busy} onClick={recovery.recover}>{uiText('核对原操作结果')}</Button>}>
   <Banner tone="warn" title={uiText('操作结果待核对')}>{uiText(recovery.failure)}</Banner>
-  <fieldset disabled style={{border:0,padding:0,margin:0,minWidth:0}}>{props.children}</fieldset>
+  <fieldset className="mist-form-lock" disabled>{props.children}</fieldset>
  </Dialog>;
 }

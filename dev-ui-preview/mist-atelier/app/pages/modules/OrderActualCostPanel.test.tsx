@@ -76,3 +76,8 @@ it('keeps estimate status and the resolved exchange source visible in the detail
   const detail=document.querySelector('[data-order-cost-detail="free"]')!;const fees=getByRole(detail as HTMLElement,'table',{name:'分摊费用'});
   expect(fees.textContent).toContain('暂估');expect(detail.textContent).toContain('汇率依据');expect(detail.textContent).toContain('2026-10 月末 7.100000');expect(fees.textContent).toContain('461.50');
 });
+it('opens the order it was sent for',()=>{
+  const order=state.orders.find(o=>o.code==='SO-G-2026-017')!;
+  act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite busy={false} run={run} initialOrderId={order.id}/></ToastProvider></MistRoot>));
+  expect(document.querySelector(`[data-order-cost-detail="${order.id}"]`)).not.toBeNull();
+});

@@ -6558,5 +6558,6 @@
   "平台账号请从平台管理入口登录。": "Platform accounts sign in from the platform entry.",
   "该账号不是平台账号，请从公司登录入口登录。": "This is not a platform account. Sign in from the company entry.",
   "平台代管 · {0}": "Platform support · {0}",
-  "{0} · {1} 自动结束": "{0} · ends at {1}"
+  "{0} · {1} 自动结束": "{0} · ends at {1}",
+  "无暂估": "No estimates"
 }
