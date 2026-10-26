@@ -27,6 +27,7 @@ const money = (value: number) => value.toLocaleString(interfaceLocale(), { minim
 
 export function HomePage() {
   const { go, openAI } = useNav(), toast = useToast(), session = useMistSession(), workspace = useMistWorkspace(), myName = useMyDisplayName(workspace.workspace, workspace.state);
+  const canAI=session.hasPermission('ai:chat');
   const { state, loading, saving, pending } = workspace;
   const [range, setRange] = React.useState<'today' | 'week'>('today');
   const [today, setToday] = React.useState(() => dateKey(businessNow()));
@@ -86,8 +87,8 @@ export function HomePage() {
   const unread = visibleMistNotifications(state,view=>session.canAccessView(view as View)).filter(notification=>!notification.readAt);
   const brief: Array<{ strong: React.ReactNode; text: React.ReactNode; onClick?: () => void }> = unread.slice(0, 3).map(notification => ({ strong: notification.title, text: notification.detail,
     onClick: () => void run(async () => { const bound=scope;await workspace.run({ type: 'notification.read', payload: { id: notification.id } }); if(alive.current&&activeScope.current===bound)go(notification.target.view, notification.target.id, notification.target); }) }));
-  if (!brief.length) (state?.events.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3) ?? []).forEach(event => brief.push({ strong: event.actor, text: mistActivityTitle(state,event.text,{view:({order:'orders/detail',production:'production-board',procurement:'procurement',qc:'qc-workbench'} as Record<string,string>)[event.entityType]||'cockpit',id:event.entityId}), onClick: () => openAI(`说明这条工作记录：${event.text}`) }));
-  if (!brief.length) brief.push({ strong: '暂无工作动态', text: '创建开发案或推进工作后，这里会显示对应记录。', onClick: () => go('development/new') });
+  if (!brief.length) (state?.events.slice().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 3) ?? []).forEach(event => brief.push({ strong: event.actor, text: mistActivityTitle(state,event.text,{view:({order:'orders/detail',production:'production-board',procurement:'procurement',qc:'qc-workbench'} as Record<string,string>)[event.entityType]||'cockpit',id:event.entityId}), onClick: canAI ? () => openAI(`说明这条工作记录：${event.text}`) : undefined }));
+  if (!brief.length) brief.push({ strong: '暂无工作动态', text: '', onClick: session.hasPermission('products:write') ? () => go('development/new') : undefined });
   const beginTask = () => { const task = tasks[0] ?? allTasks[0]; setSelectedTask(task?.id ?? ''); setTaskDone(task?.done ?? false); setTaskDialog(true); };
   const chosenTask = state?.tasks.find(task => task.id === selectedTask);
   const dateLabel = new Date(`${today}T12:00:00`).toLocaleDateString(interfaceLocale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
@@ -110,7 +111,7 @@ export function HomePage() {
           title={loading ? '正在读取当前焦点' : focus ? dev ? <>{dev.name}<br />{uiText(version ? `${version.label} · ${dev.state}` : dev.state)}</> : focus.title : '当前没有待处理事项'} description={uiText(dev?.goal)}
           steps={dev ? STAGES.map((label, index) => ({ label, state: index < dev.stage ? 'done' : index === dev.stage ? 'now' : 'todo' })) : undefined}
           actions={<><Button variant="white" disabled={busy || !focus} iconRight={ArrowRight} onClick={() => focus && openTarget(focus.target)}>{uiText("打开事项")}</Button>{version?.qc&&<Button variant="glass" disabled={busy} icon={FileText} onClick={() => setReportVersion(version.id)}>{uiText("QC 报告")}</Button>}</>} />
-        <AIBrief className="mist-col-4" icon={Sparkles} onAsk={() => openAI('请根据当前可见业务记录，整理下一步行动建议。')} items={state?.settings.notifications.suggestions===false?[{strong:'主动建议已关闭',text:'仍可手动打开小竹。',onClick:()=>openAI('请根据当前可见业务记录，整理下一步行动建议。')}]:brief} />
+        <AIBrief className="mist-col-4" icon={Sparkles} onAsk={canAI?() => openAI('请根据当前可见业务记录，整理下一步行动建议。'):undefined} items={canAI&&state?.settings.notifications.suggestions===false?[{strong:'主动建议已关闭',text:'仍可手动打开小竹。',onClick:()=>openAI('请根据当前可见业务记录，整理下一步行动建议。')}]:brief} />
         <Card className="mist-col-8">
           <CardHeader title={uiText("接着完成")} tools={<><Dropdown<'due' | 'title'> label={uiText("排序")} value={sort} onChange={setSort} options={[{ value: 'due', label: '按期限' }, { value: 'title', label: '按名称' }]} />{reviews && <Button variant="quiet" size="sm" icon={BadgeCheck} onClick={() => go('approvals')}>{uiText(waitingReviews ? `待我审批 ${waitingReviews}` : '审批与放行')}</Button>}<Button variant="quiet" size="sm" icon={SlidersHorizontal} disabled={busy || !state?.tasks.length} onClick={beginTask}>{uiText("管理任务")}</Button></>}><span className="mist-muted" style={{ fontSize: 13 }}>{taskRows.length}{uiText(" 项")}</span></CardHeader>
           {loading ? <CardBody><Skeleton height={72} /><Skeleton height={72} /></CardBody> : taskRows.length ? <TaskList items={taskRows} onOpen={item => { const target = queue.find(entry => entry.id === item.id)?.target ?? tasks.find(task => task.id === item.id)?.target; if (target) openTarget(target); }} /> : <EmptyState compact title={uiText("这个时间范围没有待办")} description={uiText("可以切换本周，或查看其他业务事项。")} />}

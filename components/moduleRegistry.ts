@@ -549,7 +549,7 @@ export const BAMBOOK_MODULES: readonly BambookModuleDefinition[] = [
     permissions: getViewPermissionDefinition(View.MES),
     compiler: compiler('mes', 'provisional'),
     runtime: desktopRuntime,
-    entry: { current: 'components/MesManager.tsx' },
+    entry: { current: 'dev-ui-preview/mist-atelier/app/pages/modules/MesHistoryPage.tsx' },
   },
   {
     id: 'customs',

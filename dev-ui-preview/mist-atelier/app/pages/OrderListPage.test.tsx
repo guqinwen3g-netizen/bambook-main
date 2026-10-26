@@ -8,9 +8,9 @@ import { getAllByRole, getByRole, getByLabelText, queryByRole } from '@testing-l
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
-const store = vi.hoisted(() => ({ state: null as MistState | null, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user' }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
+const store = vi.hoisted(() => ({ state: null as MistState | null, canWrite:true, loading: false, error: '', workspace: { id: 'w', ownerId: 'test-user' }, run: vi.fn(), refresh: vi.fn(), downloadFile: vi.fn(), uploadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
-vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status:'authenticated', sessionKey:'order-test', user:{id:'test-user',displayName:'负责人'}, hasPermission:()=>true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = () => ({ status:'authenticated', sessionKey:'order-test', user:{id:'test-user',displayName:'负责人'}, hasPermission:(scope:string)=>scope.endsWith(':read')||store.canWrite,canAccessView:()=>true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import { OrderListPage } from './OrderListPage';
 import { OrderDetailPage } from './OrderDetailPage';
 import { OrderCreatePage } from './OrderCreatePage';
@@ -55,6 +55,7 @@ function select(label: string, value: string) {
 }
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 beforeEach(() => {
+  store.canWrite=true;
   store.state = fixture(); store.loading = false; store.error = ''; store.run.mockReset(); store.refresh.mockReset(); store.downloadFile.mockReset(); go.mockReset();
   store.run.mockResolvedValue({ requestId: 'r1', revision: 2, result: {} });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -171,3 +172,5 @@ it('parses quoted bank CSV values and rejects invalid amounts before creating a 
   const range = productionWindow('week', new Date('2026-10-14T12:00:00')); expect(range.start.getDay()).toBe(1); expect((range.end.getTime() - range.start.getTime()) / 86400000).toBe(7);
 });
 it('opens a fabric list in its incoming family and retains that scope when opening an order',async()=>{store.state!.orders.push({...store.state!.orders[0],id:'fabric-order',code:'SO-FABRIC',type:'fabric'});render(<OrderListPage/>,{view:'orders',section:'fabric',customerId:'customer-a'});expect(getByRole(host,'tab',{name:/面料订单/}).getAttribute('aria-selected')).toBe('true');await click(getByRole(host,'row',{name:/SO-FABRIC/}));expect(go).toHaveBeenCalledWith('orders/detail','fabric-order',{customerId:'customer-a',section:'fabric'});});
+
+it('hides new-order actions for read-only accounts',()=>{store.canWrite=false;render(<OrderListPage/>);expect(queryByRole(host,'button',{name:'新建订单'})).toBeNull();expect(store.run).not.toHaveBeenCalled();});

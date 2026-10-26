@@ -157,7 +157,7 @@
 /* ════ AI 简报 ════ */
 .mist-brief { display: flex; flex-direction: column; }
 .mist-brief ul { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px 0; }
-.mist-brief li > button { width: 100%; display: flex; gap: 12px; padding: 10px 8px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); line-height: 1.5; text-align: left; }
+.mist-brief li > button, .mist-brief-static { width: 100%; display: flex; gap: 12px; padding: 10px 8px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); line-height: 1.5; text-align: left; }
 .mist-brief li > button:hover { background: var(--mist-card-2); }
 .mist-brief-n { width: 20px; height: 20px; border-radius: 6px; flex: none; display: grid; place-items: center; font-size: 11px; background: var(--mist-sunken); color: var(--mist-ink-2); margin-top: 1px; }
 .mist-brief b { font-weight: var(--mist-fw-medium); }

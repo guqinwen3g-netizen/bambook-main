@@ -79,7 +79,7 @@ describe('授权访问沿用 Mist 设置组件', () => {
     seam.workspace.workspace.access.hidden = [{ key: 'payables', label: '供应商票据与应付' }, { key: 'employees', label: '员工档案' }];
     act(() => paint(true));
     expect(host.textContent).toContain('供应商票据与应付');
-    expect(host.textContent).toContain('并不代表没有记录');
+    expect(host.textContent).toContain('部分数据未授权');
     expect(host.textContent).not.toContain('员工档案');
     seam.workspace.workspace.access.hidden = [];
     act(() => paint(true)); expect(host.textContent).toBe('');

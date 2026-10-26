@@ -12,8 +12,12 @@ export function personalSettingsSection(route: { view: string; section?: string 
   return route.section === 'appearance' || route.section === 'security' ? route.section : undefined;
 }
 
-/** Navigation and direct URLs use the same read permission; write actions retain their own guards. */
-export function canOpenMistView(view: string, context: { canAccessView: (view: View) => boolean; platformOperator: boolean }, referencePreview: boolean): boolean {
+/** Read pages and creation URLs have distinct requirements, including query-driven creation. */
+export function canOpenMistView(target: string | { view: string; id?: string; section?: string }, context: { canAccessView: (view: View) => boolean; platformOperator: boolean; hasPermission?: (scope: string) => boolean }, referencePreview: boolean): boolean {
+  const view = typeof target === 'string' ? target : target.view;
+  const sourcingCreate = typeof target !== 'string' && view === 'development' && target.section === 'sourcing' && target.id === 'new';
+  const write = view === 'development/new' || sourcingCreate ? 'products:write' : view === 'orders/new' ? 'orders:write' : undefined;
+  if (write && !context.hasPermission?.(write)) return false;
   if (COMPANY_SETTINGS_VIEWS.has(view)) return context.canAccessView(View.SystemSettings);
   if (PERSONAL_VIEWS.has(view)) return true;
   if (view === 'platform-admin') return context.platformOperator;

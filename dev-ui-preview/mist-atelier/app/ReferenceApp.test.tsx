@@ -302,7 +302,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
   });
 
   it('does not disclose inaccessible development records through the workspace assistant', async () => {
-    await signIn('limited', ['orders:read']); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
+    await signIn('limited', ['orders:read','ai:chat']); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', metaKey: true, bubbles: true, cancelable: true })));
     await waitFor(() => expect(queryByRole(host!, 'dialog', { name: '小竹' })).not.toBeNull());
     const assistant = getByRole(host!, 'dialog', { name: '小竹' });
@@ -318,15 +318,15 @@ describe('one Mist entry with real authentication and workspace state', () => {
   });
 
   it('replaces search and assistant session content when another account signs in', async () => {
-    await signIn(); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled()); await openSearch();
+    await signIn('staff-a',['products:read','orders:read','crm:read','ai:chat']); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled()); await openSearch();
     input(searchInput(), 'STYLE-staff-a'); expect(getByRole(host!, 'dialog', { name: '搜索' }).textContent).toContain('开发-staff-a');
-    await signIn('staff-b'); await waitFor(() => expect(queryByRole(host!, 'dialog', { name: '搜索' })).toBeNull());
+    await signIn('staff-b',['products:read','orders:read','crm:read','ai:chat']); await waitFor(() => expect(queryByRole(host!, 'dialog', { name: '搜索' })).toBeNull());
     await openSearch(); expect(searchInput().value).toBe(''); expect(getByRole(host!, 'dialog', { name: '搜索' }).textContent).toContain('开发-staff-b');
     expect(getByRole(host!, 'dialog', { name: '搜索' }).textContent).not.toContain('开发-staff-a');
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', metaKey: true, bubbles: true, cancelable: true })));
     await waitFor(() => expect(host!.textContent).toContain('DEV-staff-b'));
-    await signIn('staff-c'); await waitFor(() => expect(queryByRole(host!, 'dialog')).toBeNull());
+    await signIn('staff-c',['products:read','orders:read','crm:read','ai:chat']); await waitFor(() => expect(queryByRole(host!, 'dialog')).toBeNull());
     act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', metaKey: true, bubbles: true, cancelable: true })));
     await waitFor(() => expect(host!.textContent).toContain('DEV-staff-c')); expect(host!.textContent).not.toContain('DEV-staff-b');
   });
@@ -398,7 +398,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
   it('splits ⌘K development creation into three entries and lands the palette and sidebar on the exact tab', async () => {
     const qs = () => Object.fromEntries(new URLSearchParams(location.search));
     const palette = async (text: string, name: RegExp) => { await openSearch(); input(searchInput(), text); await click(getByRole(getByRole(host!, 'dialog', { name: '搜索' }), 'button', { name })); };
-    await signIn(); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
+    await signIn('staff-a',['products:read','products:write','orders:read','crm:read']); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
     await openSearch(); input(searchInput(), '新建');
     const labels = [...getByRole(host!, 'dialog', { name: '搜索' }).querySelectorAll('button')].map(button => button.textContent || '');
     expect(labels.some(label => label.startsWith('新建成衣开发案'))).toBe(true); expect(labels.some(label => label.startsWith('新建面料开发案'))).toBe(true); expect(labels.some(label => label.startsWith('新建面料寻样'))).toBe(true);
@@ -470,3 +470,5 @@ it('keeps the owner custom workspace nickname on the owner account',async()=>{
   await mount();await waitFor(()=>expect(probes.home).toHaveBeenCalled());
   expect(getByRole(host!,'button',{name:/本人的显示名.*业务员/})).toBeTruthy();
 });
+
+it('hides AI entry points and creation commands for a read-only account',async()=>{await signIn('read-only',['products:read','orders:read','crm:read']);await mount();expect(queryByRole(host!,'button',{name:'问小竹'})).toBeNull();expect(queryByRole(host!,'button',{name:/小竹 查询/})).toBeNull();act(()=>window.dispatchEvent(new KeyboardEvent('keydown',{key:'j',metaKey:true,bubbles:true})));expect(queryByRole(host!,'dialog',{name:'小竹'})).toBeNull();await openSearch();input(searchInput(),'新建');const dialog=getByRole(host!,'dialog',{name:'搜索'});expect(dialog.textContent).not.toContain('新建成衣开发案');expect(dialog.textContent).not.toContain('新建面料开发案');});
