@@ -849,4 +849,8 @@ export const reviewedEnglish: Record<string, string> = {
   '建议抵扣': 'Suggested application',
   '核对原操作结果': 'Check original result',
   '操作结果待核对': 'Result needs confirmation',
+  '已关联票额': 'Linked invoice amount',
+  '待关联票额': 'Unlinked amount',
+  '待关联票据': 'Invoices to link',
+  '可关联': 'Available to link',
 };
