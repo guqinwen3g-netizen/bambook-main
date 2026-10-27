@@ -58,9 +58,9 @@ export function SettingsPage() {
   }, [state?.settings, scope]);
   const settings = state?.settings;
   const values = draft?.scope === scope ? draft.values : settings;
-  const member = workspace.workspace?.access?.role === 'member';
+  const access = workspace.workspace?.access, member = !(access?.canManageCompany ?? access?.role !== 'member');
   const busy = loading || saving || !!pending || !!workspace.pendingCreate;
-  /** 空间设置写入整个共享空间，只有所有者可改；服务端同样拒绝成员修改。 */
+  /** 公司设置写入整个公司库，只有公司管理员（本机空间为所有者）可改；服务端同样拒绝其他成员修改。 */
   const settingsLocked = busy || member;
   const edit = (key: TextKey, value: string) => {
     if (!values) return;

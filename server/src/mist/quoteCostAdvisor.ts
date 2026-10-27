@@ -33,7 +33,7 @@ export async function runQuoteCostAdvisor(
 ): Promise<QuoteCostAdvisorResponse> {
   const { workspace, actor } = args;
   if (
-    workspace.ownerId !== actor.userId ||
+    !(workspace.access?.canManageCompany ?? workspace.ownerId === actor.userId) ||
     !hasScope(actor, "ai:chat") ||
     !hasScope(actor, "quotations:read")
   )

@@ -2,24 +2,39 @@ import { randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../../auth/service';
 import { MistApiError } from '../errors';
 import type { MistContract } from '../repository';
+/** 最小的 Prisma where 子集：字段相等、OR、state JSON 数组包含。 */
+function matches(row: any, where: any): boolean {
+  if (!where) return true;
+  return Object.entries(where).every(([key, value]: [string, any]) => key === 'OR' ? value.some((rule: any) => matches(row, rule))
+    : key === 'state' ? (row.state[value.path?.[0] || 'reviewerIds'] || []).includes(value.array_contains[0]) : (row[key] ?? null) === value);
+}
 /** In-memory transactional test fixture only. It never connects to a database. */
 export class MemoryMistDatabase {
   workspaces = new Map<string, any>(); receipts = new Map<string, any>(); businessSequences = new Map<string, any>(); failReceipt = false;
   /** 账号表（包 A 成员目录）：未登记的账号视为在职账号、显示名为账号编号；测试可登记停用 / 删除状态。 */
   accounts = new Map<string, { displayName?: string; status?: string; deletedAt?: Date | null }>();
+  /** 公司成员表（公司单库名册）：仅公司会话的测试需要登记。 */
+  companyMembers: Array<{ companyId: string; userId: string; status: string; joinedAt?: Date; createdAt?: Date }> = [];
   private queue = Promise.resolve();
   private delegates(workspaces: Map<string, any>, receipts: Map<string, any>, businessSequences = this.businessSequences) {
     return {
       $queryRawUnsafe: async () => [],
+      companyMember: {
+        findMany: async ({ where }: any) => this.companyMembers.filter(m => m.companyId === where.companyId && (!where.status || m.status === where.status)).flatMap(m => {
+          const a = this.accounts.get(m.userId), user = { displayName: a?.displayName ?? m.userId, status: a?.status ?? 'active', deletedAt: a?.deletedAt ?? null };
+          if (where.user && (user.status !== where.user.status || user.deletedAt)) return [];
+          return [{ userId: m.userId, joinedAt: m.joinedAt ?? new Date('2026-10-01T00:00:00Z'), createdAt: m.createdAt ?? new Date('2026-10-01T00:00:00Z'), user: { displayName: user.displayName } }];
+        }),
+      },
       userAccount: {
         findMany: async ({ where }: any) => ((where?.id?.in ?? []) as string[]).map(id => { const a = this.accounts.get(id); return { id, displayName: a?.displayName ?? id, status: a?.status ?? 'active', deletedAt: a?.deletedAt ?? null }; }),
       },
       mistWorkspace: {
         findFirst: async ({ where }: any) => [...workspaces.values()].find(row => Object.entries(where).every(([key, value]) => row[key] === value)) ?? null,
-        findMany: async ({ where }: any = {}) => [...workspaces.values()].filter(row => !where || !Object.keys(where).length ? true : where.OR ? where.OR.some((rule:any)=>rule.ownerId===row.ownerId || (rule.state && (row.state[rule.state.path?.[0]||'reviewerIds']||[]).includes(rule.state.array_contains[0]))) : row.ownerId === where.ownerId),
+        findMany: async ({ where }: any = {}) => [...workspaces.values()].filter(row => matches(row, where)),
         findUnique: async ({ where }: any) => [...workspaces.values()].find(row => row.ownerId === where.ownerId_slug.ownerId && row.slug === where.ownerId_slug.slug) ?? null,
         create: async ({ data }: any) => {
-          if ([...workspaces.values()].some(row => row.ownerId === data.ownerId && row.slug === data.slug)) throw Object.assign(new Error('unique'), { code: 'P2002' });
+          if ([...workspaces.values()].some(row => row.ownerId === data.ownerId && row.slug === data.slug || data.companyId && row.companyId === data.companyId)) throw Object.assign(new Error('unique'), { code: 'P2002' });
           const row = { createdAt: new Date(), updatedAt: new Date(), ...data }; workspaces.set(row.id, row); return row;
         },
         update: async ({ where, data }: any) => { const original=workspaces.get(where.id);const row = { ...original, ...data, ...(typeof data.revision==='object'?{revision:original.revision+data.revision.increment}:{}), updatedAt: new Date() }; workspaces.set(row.id, row); return row; },

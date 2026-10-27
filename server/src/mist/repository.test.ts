@@ -85,26 +85,7 @@ describe('Mist transactional workspace', () => {
     expect(landed.id).toBe(company.id);
     expect((await repo.list(testActor('other'))).map(item => item.id)).toEqual([company.id]);
   });
-  it('prefers an explicitly shared company workspace over an older personal default without moving data', async () => {
-    const actor = { ...testActor('other'), companyId: 'company-a' };
-    const personal = await repo.create(actor, { name: 'Personal default', seed: 'empty' }, true);
-    const company = await repo.create({ ...testActor(), companyId: 'company-a' }, { name: 'Company', seed: 'empty' });
-    const row = db.workspaces.get(company.id)!;
-    row.state.memberIds = ['other'];
-    const before = structuredClone([...db.workspaces.values()]);
-    const landed = await repo.create(actor, { name: 'Default' }, true);
-    expect(landed.id).toBe(company.id);
-    expect(landed.id).not.toBe(personal.id);
-    expect([...db.workspaces.values()]).toEqual(before);
-    db.workspaces.get(company.id)!.companyId = 'another-company';
-    expect((await repo.create(actor, { name: 'Default' }, true)).id).toBe(personal.id);
-    db.workspaces.get(company.id)!.companyId = actor.companyId;
-    db.workspaces.get(company.id)!.state.workspaceArchive = { at: '2026-10-27T00:00:00Z', actorId: 'owner' };
-    expect((await repo.create(actor, { name: 'Default' }, true)).id).toBe(personal.id);
-    delete db.workspaces.get(company.id)!.state.workspaceArchive;
-    db.workspaces.get(company.id)!.state.memberIds = [];
-    expect((await repo.create(actor, { name: 'Default' }, true)).id).toBe(personal.id);
-  });
+  // 公司会话的进入规则（一家公司一个业务库）见 companyLibrary.test.ts。
   it('creates one default per owner and isolates read/write/receipt access', async () => {
     const actor = testActor(), a = await repo.create(actor, { name: 'One' }, true), again = await repo.create(actor, { name: 'One' }, true);
     expect(again.id).toBe(a.id); expect(await repo.list(testActor('other'))).toEqual([]);
