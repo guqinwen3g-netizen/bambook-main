@@ -119,7 +119,8 @@ function PackingEditor({ shipment, onClose }: {
     return <MistPage><BackLink onClick={onClose}>{uiText("返回出运详情")}</BackLink><PageHeader description={shipment.code} title={uiText("装箱分配")}/>{failure && failure!==presentedError && <Banner tone="bad" title={uiText("装箱未保存")}>{failure}</Banner>}<div className="mist-reconcile"><Card><CardHeader title={uiText("本次计划")}/><KeyValue items={shipment.lines.map(l => ({ label: state?.orderLines.find(o => o.id === l.lineId)?.name || '来源条目', value: `${l.quantity} ${state?.orderLines.find(o => o.id === l.lineId)?.unit || ''}` }))}/></Card><Card><CardHeader title={uiText("实际装箱")} tools={<Button icon={Plus} onClick={() => setRows(all => [...all, { id: crypto.randomUUID(), lineId: shipment.lines[0].lineId, productionId: shipment.lines[0].productionId, carton: String(all.length + 1), quantity: 0, netWeight: 0, grossWeight: 0, volume: 0, note: '' }])}>{uiText("增加装箱行")}</Button>}/><DataTable rows={rows} columns={columns} rowKey={r => r.id}/><Checklist items={shipment.lines.map(l => { const packed = Math.round(rows.filter(r => r.lineId === l.lineId && r.productionId === l.productionId).reduce((n, r) => n + r.quantity, 0) * 10000) / 10000; return { label: `${state?.orderLines.find(o => o.id === l.lineId)?.name}：已分配 ${packed} / ${l.quantity}`, done: packed === l.quantity }; })}/><FormFooter><span className="mist-spacer"/><Button variant="primary" disabled={busy || saving || !!pending} onClick={() => { setBusy(true); setFailure(''); void run({ type: 'fulfillment.shipments.pack', payload: { id: shipment.id, lines: rows.map(({ id, ...row }) => row) } }).then(onClose).catch(e => setFailure(e instanceof Error ? e.message : '装箱分配未保存')).finally(() => setBusy(false)); }}>{uiText("保存装箱分配")}</Button></FormFooter></Card></div></MistPage>;
 }
 type Domain = FulfillmentShipment['domain'];
-type Stage = 'intake' | 'logistics' | 'business' | 'departure' | 'departed' | 'cancelled';
+import { shipmentStage, type ShipmentStage as Stage } from '../../runtime/shipmentStage';
+export { shipmentStage };
 type StageFilter = 'all' | Stage;
 type FlagFilter = 'all' | 'overdue' | 'packing' | 'mine';
 export const STAGE_LABEL: Record<Stage, string> = { intake: '待物流接手', logistics: '物流处理中', business: '资料已回业务', departure: '待出运', departed: '已出运', cancelled: '已取消' };
@@ -127,15 +128,6 @@ export const shipmentStageLabel = (s: FulfillmentShipment, stage: Stage) => stag
 export const STAGE_TONE: Record<Stage, Tone> = { intake: 'warn', logistics: 'accent', business: 'warn', departure: 'accent', departed: 'ok', cancelled: 'neutral' };
 export const MODE_LABEL: Record<FulfillmentShipment['mode'], string> = { sea: '海运', air: '空运' };
 const round = (value: number) => Math.round(value * 10000) / 10000;
-/** Logistics workbench stage derived only from recorded facts (packing, booking, documents, customs, dispatch, departure). */
-export function shipmentStage(root: MistState, s: FulfillmentShipment): Stage {
-  if (s.state === 'cancelled') return 'cancelled';
-  if (s.state === 'departed') return 'departed';
-  if (s.state === 'ready') return s.documentsSentAt ? 'departure' : 'business';
-  const f = root.fulfillment;
-  const touched = !!s.booking || f.packing.some(row => row.shipmentId === s.id) || f.documents.some(row => row.shipmentId === s.id && row.status !== 'void') || f.customs.some(row => row.shipmentId === s.id);
-  return touched ? 'logistics' : 'intake';
-}
 export const packedFor = (root: MistState, s: FulfillmentShipment, line: FulfillmentShipment['lines'][number]) => round(root.fulfillment.packing.filter(row => row.shipmentId === s.id && row.lineId === line.lineId && row.productionId === line.productionId).reduce((sum, row) => sum + row.quantity, 0));
 export const packingMatched = (root: MistState, s: FulfillmentShipment) => s.lines.length > 0 && s.lines.every(line => packedFor(root, s, line) === line.quantity);
 function shipmentFlags(root: MistState, s: FulfillmentShipment, day: string) {
