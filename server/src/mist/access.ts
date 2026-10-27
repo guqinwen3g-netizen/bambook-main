@@ -3,6 +3,7 @@ import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import { emailVisibleScope } from '../shared/mistEmail';
+import { applyDataScope, type MistDataScope } from '../shared/mistDataScope';
 import type { MistState, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
 /**
  * 公司访问与读投影。
@@ -70,8 +71,8 @@ export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {
   return targetVisibility(hiddenSections(actor))(target);
 }
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
-export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] } {
-  const hidden = hiddenSections(actor), next: MistState = { ...state };
+export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] } {
+  const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(state, scope, actor.userId) : { ...state };
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
@@ -89,9 +90,9 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     const deniedTypes = new Set(hidden.flatMap(s => s.entityTypes)), allowedTypes = new Set(MIST_READ_SECTIONS.flatMap(s => s.entityTypes));
     const visibleTarget = targetVisibility(hidden);
     next.events = (next.events || []).filter(event => event.entityType === 'workspace' || allowedTypes.has(event.entityType) && !deniedTypes.has(event.entityType));
-    next.tasks = (state.tasks || []).filter(task => visibleTarget(task.target));
-    next.notifications = (state.notifications || []).filter(item => visibleTarget(item.target));
-    next.calendar = (state.calendar || []).filter(item => visibleTarget(item.target));
+    next.tasks = (next.tasks || []).filter(task => visibleTarget(task.target));
+    next.notifications = (next.notifications || []).filter(item => visibleTarget(item.target));
+    next.calendar = (next.calendar || []).filter(item => visibleTarget(item.target));
   }
   // 邮箱按用户 ID 隔离：个人邮箱只给本人，共享邮箱给本人与授权成员；不可见邮箱的邮件、草稿、发送记录、处理记录与跟进来源一并移除，附件随引用隐藏。
   if (next.email && !hidden.some(section => section.key === 'email')) {
@@ -126,6 +127,6 @@ function visibleFiles(full: MistState, projected: MistState, actorId: string, ow
   const visible = referencedFiles(projected), referenced = referencedFiles(full);
   return (full.files || []).filter(file => visible.has(file.id) || !referenced.has(file.id) && (actorId === ownerId || file.uploadedBy === actorId));
 }
-export function canReadFile(state: MistState, actor: TokenPayload, fileId: string, empty: () => MistState, ownerId?: string) {
-  return projectState(state, actor, empty, ownerId).state.files.some(file => file.id === fileId);
+export function canReadFile(state: MistState, actor: TokenPayload, fileId: string, empty: () => MistState, ownerId?: string, scope?: MistDataScope) {
+  return projectState(state, actor, empty, ownerId, scope).state.files.some(file => file.id === fileId);
 }

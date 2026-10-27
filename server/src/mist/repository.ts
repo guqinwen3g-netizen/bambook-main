@@ -17,7 +17,8 @@ import { hasScope } from '../auth/permissionService';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
-import { applyRoster, canMaintainCompany, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
+import { applyRoster, canMaintainCompany, companyDataScope, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
+import { scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
@@ -134,6 +135,9 @@ const archived=(row:MistWorkspaceRow)=>!companyRow(row)&&!!row.state.workspaceAr
 /** 文件可见性所用的“所有者”：公司库没有所有者特权（未引用附件只对上传人可见）。 */
 const fileOwner=(row:MistWorkspaceRow)=>companyRow(row)?undefined:row.ownerId;
 /** 审批候选与成员目录：公司库只取公司在职成员名册（已覆盖到 memberIds），不含已离职的库创建人。 */
+/** 本次读取时为该行解析的受限范围（undefined = 不裁剪）；随行对象存活，不写入状态。 */
+const ROW_SCOPE=new WeakMap<object,MistDataScope>();
+const scopeOf=(row:MistWorkspaceRow)=>ROW_SCOPE.get(row);
 const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):[row.ownerId,...memberIds(row.state)];
 /** 同一数据库客户端共享的按公司写入队列（多个仓储实例共用一个连接池时也按同一队列排队）。 */
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
@@ -160,7 +164,7 @@ export class MistRepository {
     if (row && companyRow(row) && ownerOnly) singleLibrary();
     if (!row || !(companyRow(row) || isOwner(row, actor) || (!ownerOnly && isMember(row, actor)))) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
     if(archived(row)&&!allowArchived)fail('NOT_FOUND','公司已移入回收站，请先恢复',404);
-    if (companyRow(row)) applyRoster(row.state, await companyRoster(db, row.companyId!));
+    if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
     return { actor, row };
   }
@@ -188,11 +192,11 @@ export class MistRepository {
   private emptyState(actor: TokenPayload) { return () => { const context = this.context(actor), state = this.contract.createMistState(context, 'empty'); this.contract.normalizeMistState?.(state, context); return state; }; }
   /** 返回给当前账号的公司：按其现有读权限裁剪，并附带访问说明。 */
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
-    const projected = projectState(row.state, actor, this.emptyState(actor), fileOwner(row)), owner = isOwner(row, actor), company = companyRow(row);
+    const projected = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
     const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner && !company, canManageCompany: company ? canMaintainCompany(actor) : owner, hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
     return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}) };
   }
-  async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) applyRoster(row.state, await companyRoster(db, row.companyId!)); this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
+  async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
   /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */
   private accessibleWhere(actor: TokenPayload) { return companyLibrary(actor) ? { companyId: actor.companyId } : { ...(actor.companyId ? { companyId: actor.companyId } : {}), OR: [{ ownerId: actor.userId }, { state: { path: ['memberIds'], array_contains: [actor.userId] } }] }; }
   private accessible(row: MistWorkspaceRow, actor: TokenPayload) { return !archived(row) && (companyLibrary(actor) ? row.companyId === actor.companyId : isOwner(row, actor) || isMember(row, actor)); }
@@ -281,13 +285,13 @@ export class MistRepository {
         const library: MistWorkspaceRow | null = await db.mistWorkspace.findFirst({ where: { companyId: actor.companyId } });
         if (library) {
           if (!defaultOnly) singleLibrary();
-          applyRoster(library.state, await companyRoster(db, actor.companyId!));
+          applyRoster(library.state, await companyRoster(db, actor.companyId!)); { const scope = await companyDataScope(db, library, actor); if (scope) ROW_SCOPE.set(library, scope); }
           this.contract.normalizeMistState?.(library.state, this.context(actor));
           return this.view(library, actor);
         }
         const state = this.contract.createMistState(this.context(actor), 'empty'); state.settings.workspaceName = name;
         const row = await db.mistWorkspace.create({ data: { id: randomUUID(), ownerId: actor.userId, companyId: actor.companyId, slug: companySlug(actor.companyId!), name, revision: 0, state } });
-        applyRoster(row.state, await companyRoster(db, actor.companyId!));
+        applyRoster(row.state, await companyRoster(db, actor.companyId!)); { const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); }
         await this.authorize(db, prior);
         return this.view(row, actor);
       }
@@ -385,7 +389,7 @@ export class MistRepository {
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
-          const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row)).state;
+          const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
           const { type, payload } = input.command;
           const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' ? visible.tasks : type === 'calendar.save' && payload.id ? visible.calendar : undefined;
           if (collection && !collection.some(item => item.id === payload.id)) fail('NOT_FOUND', '记录不存在或当前账号无权访问', 404);
@@ -448,12 +452,16 @@ export class MistRepository {
         if(this.contract.getMistReviewTasks)(applied.state as any).reviewerIds=[...new Set(this.contract.getMistReviewTasks(applied.state).flatMap(t=>t.reviewerIds))];
         canonical(applied.state); canonical(applied.result);
         const changeKeys = mistChangeKeys(row.state, applied.state);
+        // 行级范围写侧：受限岗位不能改看不到的业务，也不能在看不到的业务下新建。
+        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope) : null;
+        if (violation) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         if (concurrent) {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
         const nextRevision = row.revision + 1;
         const saved = await db.mistWorkspace.update({ where: { id: workspaceId }, data: { state: applied.state, name: identifier(applied.state.settings.workspaceName, '公司名称'), revision: nextRevision } });
+        if (scope) ROW_SCOPE.set(saved, scope);
         const result = { revision: nextRevision, result: applied.result };
         await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: input.requestId, actorId: actor.userId, inputHash: hash, expectedRevision: input.expectedRevision, result } });
         // 同事务记下本版本写入的位置，供之后落后版本的保存判断能否安全合并；原请求回执保持原样。
@@ -616,7 +624,7 @@ export class MistRepository {
   async mailSnapshot(prior: TokenPayload, workspaceId: string) {
     return this.transact(async db => {
       const { actor, row } = await this.own(db, prior, workspaceId, 'emails:write');
-      return { actor, revision: row.revision as number, state: projectState(row.state, actor, this.emptyState(actor), fileOwner(row)).state };
+      return { actor, revision: row.revision as number, state: projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state };
     });
   }
   /** 邮件服务写回真实收发结果：每次读取最新版本作为基线，经同一命令事务（权限、成员、邮箱归属复核）落库。 */
@@ -639,7 +647,7 @@ export class MistRepository {
     const result = await this.transact(async db => {
       const { row, actor } = await this.own(db, prior, workspaceId);
       const file = Array.isArray(row.state.files) ? row.state.files.find((item: MistStoredFile) => item.id === fileId) : null;
-      if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), fileOwner(row))) fail('FILE_NOT_FOUND', '附件不存在或不属于此公司', 404);
+      if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), fileOwner(row), scopeOf(row))) fail('FILE_NOT_FOUND', '附件不存在或不属于此公司', 404);
       // 只有主图提供抠图；补充图请求抠图尺寸时退回同尺寸普通预览，且不进入抠图队列。
       const cutoutRequested=!!preview?.startsWith('cutout-'),cutoutAllowed=cutoutRequested&&primaryImageIds(row.state).has(file.id),mode:ImagePreviewMode|undefined=cutoutRequested&&!cutoutAllowed?(preview==='cutout-thumb'?'thumb':'display'):preview;
       const previewReady=mode?await this.files.previewReady(workspaceId,file,mode):undefined,bytes = mode ? await this.files.readPreview(workspaceId, file, mode) : await this.files.read(workspaceId, file);
@@ -653,6 +661,8 @@ export class MistRepository {
     identifier(creditId, '贷项编号'); identifier(versionId, '来源版本编号');
     return this.transact(async db => {
       const { actor, row } = await this.own(db, prior, workspaceId, 'aftersales:read');
+      const scope = scopeOf(row);
+      if (scope && !scopedVisibility(row.state, scope).get('platform.credits')?.has(creditId)) fail('CREDIT_DOCUMENT_NOT_FOUND', '该贷项没有所选版本', 404);
       const snapshot = prepareCreditDocumentSnapshot(row.state, creditId, versionId, this.context(actor, row.state));
       const prepared = await this.creditArchiveBuilder(snapshot, { draft: true });
       await this.authorize(db, prior, 'aftersales:read');
@@ -663,6 +673,8 @@ export class MistRepository {
     identifier(creditId, '贷项编号'); identifier(versionId, '已签版本编号');
     return this.transact(async db => {
       const { row } = await this.own(db, prior, workspaceId, 'aftersales:read');
+      const scope = scopeOf(row);
+      if (scope && !scopedVisibility(row.state, scope).get('platform.credits')?.has(creditId)) fail('CREDIT_DOCUMENT_NOT_FOUND', '该贷项没有所选版本', 404);
       const credit = row.state.platform.credits.find(note => note.id === creditId);
       const version = credit?.printVersions?.find(item => item.id === versionId);
       const source = version && credit?.sourceVersions?.find(item => item.id === version.sourceVersionId);

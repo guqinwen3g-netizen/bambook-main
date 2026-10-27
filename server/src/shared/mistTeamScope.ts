@@ -33,7 +33,8 @@ const KINDS: TeamScopeNodeKind[] = ['opportunity', 'development', 'quotation', '
 const KIND_LABEL: Record<TeamScopeNodeKind, string> = { opportunity: '商机', development: '开发案', quotation: '报价', order: '订单' };
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'PRECONDITION' ? 409 : 422); };
 const key = (kind: string, id: string) => `${kind}:${id}`;
-const season = (value: unknown) => typeof value === 'string' ? value.trim().toUpperCase() : '';
+/** 季节按开头的季节代码比较（“AW27 补单”“AW27 首批”都算 AW27）；空值不匹配。 */
+const season = (value: unknown) => typeof value === 'string' ? (value.trim().toUpperCase().split(/\s+/)[0] ?? '') : '';
 const str = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 
 /** 业务链节点（商机、开发案、报价、订单）及其可匹配字段。 */
