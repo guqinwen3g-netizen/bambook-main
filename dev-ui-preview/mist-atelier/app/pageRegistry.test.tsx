@@ -2,7 +2,7 @@
 import React,{act} from 'react';
 import {createRoot} from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
-import { MODULE_VIEWS, PageLoadBoundary } from './pageRegistry';
+import { MODULE_VIEWS, PageLoadBoundary, page, preloadPage } from './pageRegistry';
 import { FULFILLMENT_PAGES } from './pages/modules/FulfillmentPages';
 import { MARKET_PAGES } from './pages/modules/MarketPages';
 import { PLATFORM_PAGES } from './pages/modules/PlatformPages';
@@ -14,6 +14,28 @@ it('lists exactly the views each module file exports', () => {
 });
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
+it('opens a preloaded page without committing the loading fallback', async () => {
+  const loader = vi.fn(async () => ({ Example: () => <h1>Ready page</h1> }));
+  const Page = page(loader, module => module.Example);
+  await Promise.all([preloadPage(Page), preloadPage(Page)]);
+  expect(loader).toHaveBeenCalledTimes(1);
+  const fallbackCommitted = vi.fn();
+  function Fallback() { React.useLayoutEffect(fallbackCommitted, []); return <p>Loading</p>; }
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  await act(async () => root.render(<React.Suspense fallback={<Fallback />}><Page /></React.Suspense>));
+  expect(host.textContent).toBe('Ready page');
+  expect(fallbackCommitted).not.toHaveBeenCalled();
+  act(() => root.unmount()); host.remove();
+});
+
+it('retries a page preload after a network failure', async () => {
+  const loader = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ Example: () => null });
+  const Page = page(loader, module => module.Example);
+  await expect(preloadPage(Page)).rejects.toThrow('offline');
+  await expect(preloadPage(Page)).resolves.toBeDefined();
+  expect(loader).toHaveBeenCalledTimes(2);
+});
+
 it('offers a reload instead of a blank shell when page code cannot be downloaded', async () => {
   const Broken = React.lazy(() => Promise.reject(new TypeError('Failed to fetch dynamically imported module')));
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
