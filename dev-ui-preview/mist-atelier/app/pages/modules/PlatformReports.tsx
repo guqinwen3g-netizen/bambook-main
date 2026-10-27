@@ -124,7 +124,7 @@ type ReportTab = 'sales' | 'margin' | 'actual' | 'aging' | 'orders';
 export function PlatformReportsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), state = workspace.state;
   // 毛利涉及采购成本，只给报表管理者（业务主管、财务、老板）看；本机演示公司为单人使用。
-  const canSeeMargin = !!session.localMode || session.hasPermission('reports:admin');
+  const canSeeMargin = session.hasPermission('reports:admin');
   const tab: ReportTab = route.section === 'aging' || route.section === 'orders' || ((route.section === 'margin' || route.section === 'actual') && canSeeMargin) ? route.section : 'sales';
   const asOf = platformBusinessDate(businessNow());
   const [from, setFrom] = React.useState(''), [to, setTo] = React.useState(''), [currency, setCurrency] = React.useState(''), [progressFilter, setProgressFilter] = React.useState('');

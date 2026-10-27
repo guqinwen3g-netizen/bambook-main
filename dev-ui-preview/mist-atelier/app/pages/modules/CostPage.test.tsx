@@ -8,9 +8,9 @@ import {getByRole,getAllByRole,getByLabelText} from '@testing-library/dom';
 import {MistRoot} from '../../../../../components/mist';
 import {createMistState} from '../../../../../server/src/shared/mistWorkspace';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({w:null as any,write:true,csv:vi.fn()}));
+const store=vi.hoisted(()=>({w:null as any,write:true,local:undefined as boolean|undefined,csv:vi.fn()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store.w}));
-vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'actor'},hasPermission:()=>store.write}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'actor'},localMode:store.local,hasPermission:()=>store.write}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('./ModuleWorkbench',()=>({downloadModuleCsv:store.csv}));
 import {CostPage} from './CostPage';
 import {costEvidenceRows,costOrderEvidence} from './CostEvidence';
@@ -47,3 +47,4 @@ it('uses the financial material proportions when inventory is hidden and otherwi
  const f=materialDeliveryFixture(),id=f.issue(50);f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'Counted'}},'garment');const projected=structuredClone(f.state);projected.fulfillment.stock=[];projected.fulfillment.stockMovements=[];store.w.state=projected;store.w.workspace={id:'space',costMaterialBasis:financialMaterialCostBasis(f.state),access:{hidden:[{key:'inventory'}]}};route={view:'bom',id:f.target.orderId,section:'orders'};render();expect(host.textContent).toContain('¥-3,420.00');expect(host.textContent).not.toContain('证据归集不等于已完成核算');
  store.w.workspace.costMaterialBasis=undefined;render();expect(host.textContent).toContain('暂不能核算');expect(host.textContent).not.toContain('¥-20.00');
 });
+it('keeps order margin behind report permission for a local role profile',()=>{store.write=false;store.local=true;render();expect(host.textContent).toContain('需报表管理权限查看');store.local=undefined;});
