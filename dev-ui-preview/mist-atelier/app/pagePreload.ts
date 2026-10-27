@@ -1,12 +1,13 @@
 import type React from 'react';
-import { preloadPage } from './pageRegistry';
+import { pagePreloadKey, preloadPage } from './pageRegistry';
 
 /** Preload code only, one page at a time after the current screen is ready. */
 export function preloadPagesWhenIdle(pages: React.FC[], loadPage = preloadPage) {
   const connection = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
   if (connection?.saveData || /(^|-)2g$/.test(connection?.effectiveType || '')) return () => {};
 
-  const queue = [...new Set(pages)];
+  const seen = new Set<ReturnType<typeof pagePreloadKey>>();
+  const queue = pages.filter(page => { const key = pagePreloadKey(page); if (seen.has(key)) return false; seen.add(key); return true; });
   let stopped = false, timer: number | undefined, idle: number | undefined, running = false;
   const schedule = () => {
     if (stopped || running || document.hidden || !queue.length || timer !== undefined || idle !== undefined) return;

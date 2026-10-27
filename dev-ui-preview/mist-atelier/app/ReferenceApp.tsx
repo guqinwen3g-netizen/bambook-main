@@ -26,7 +26,7 @@ import { useDevice } from './runtime/devicePreferences';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
 import {MistPresentedErrorContext,useClaimedUploadRecovery} from './runtime/errorPresentation';
-import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
+import { clearPrivateImages, schedulePrivateImagePrefetch } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
 import { canOpenCompanyAdmin, canOpenMistView, COMPANY_ADMIN_VIEWS, personalSettingsSection } from './routeAccess';
 import { LoginPage } from './pages/LoginPage';
@@ -179,8 +179,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     const developmentIds=[...state.devs,...state.versions].flatMap(owner=>{const id=primaryImageId(files,owner.fileIds);return id?[id]:[];});
     const developmentPaths=[...new Set(developmentIds)].flatMap(id=>{const file=files.get(id);return file?[`${workspace.fileUrl(file)}?preview=cutout-display`]:[];});
     const paths=[...productPaths,...developmentPaths];
-    const timer = window.setTimeout(() => { void prefetchPrivateImages(scope, paths); }, 0);
-    return () => window.clearTimeout(timer);
+    return schedulePrivateImagePrefetch(scope, paths);
   }, [session.sessionKey, session.user?.id, workspace.workspace?.id, workspace.loading, workspace.workspace?.revision]);
   React.useEffect(() => () => clearPrivateImages(), [session.sessionKey, workspace.workspace?.id]);
   const aiCurrent=React.useRef(aiScope);aiCurrent.current=aiScope;
