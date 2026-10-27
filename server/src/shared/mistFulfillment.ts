@@ -976,7 +976,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     const p: any = command.payload;
     if (['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm','fulfillment.procurement.receive'].includes(command.type) || command.type === 'fulfillment.procurement.decide' && p.decision === 'approved') {
         const purchase = get(f.purchases, p.id, '采购'), order = get(root.orders, purchase.orderId, '订单'), line = get(root.orderLines, purchase.lineId, '订单条目');
-        assertGarmentProcurement(order, line, purchase.kind, purchase.materialKind);
+        assertGarmentProcurement(order, line, purchase.kind, purchase.materialKind, root, purchase.id);
         if (order.governance?.contract.internalSupply && ['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm'].includes(command.type)) normalizeInternalSupply(order.governance.contract, order, ctx);
     }
     switch (command.type) {
@@ -1354,7 +1354,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const s = source(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }), order = get(root.orders, p.orderId, '订单');
             assertMistOrderOpen(root, order.id);
             const existing = p.id ? get(f.purchases, p.id, '采购') : undefined;
-            const materialKind = assertGarmentProcurement(order, get(root.orderLines, p.lineId, '订单条目'), p.kind, p.materialKind);
+            const materialKind = assertGarmentProcurement(order, get(root.orderLines, p.lineId, '订单条目'), p.kind, p.materialKind, root, p.id);
             if (order.governance?.contract.internalSupply) normalizeInternalSupply(order.governance.contract, order, ctx);
             if (existing && !['draft', 'rejected'].includes(existing.state))
                 fail('已提交采购须退回后修订');
@@ -1448,7 +1448,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!purchase.offlineSend || !purchase.supplierConfirmation) fail('请先登记批准合同线下发出和供应商确认');
             const production = root.productions.find(job => job.sourcePurchaseId === purchase.id);
             if (production && fulfillmentProductionFact(root, production.id)?.completion) fail('最终完工事实已冻结，请勿继续追加交付');
-            if (production && purchase.kind === 'processing') requireProductionRelease(root, production, ctx);
+            if (production && (purchase.kind === 'processing' || purchase.domain === 'garment' && purchase.kind === 'finished')) requireProductionRelease(root, production, ctx);
             const quantity = qty(p.quantity, '实收数量', true), rejected = qty(p.rejected, '拒收数量', true), location = text(p.location, '实际收货地点'), date = day(p.date, '收货日期'), evidence = text(p.evidence, '交接依据'), fileIds = files(root, p.fileIds);
             if (sum([quantity, rejected]) <= 0) fail('实收与拒收数量至少有一项大于零');
             if (date > ctx.now.slice(0, 10))

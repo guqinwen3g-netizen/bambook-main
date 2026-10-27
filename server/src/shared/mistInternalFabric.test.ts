@@ -146,7 +146,7 @@ describe('current Mist internal fabric contract', () => {
     expect(garmentMaterialBlocker(f.state, target.orderId, target.lineId, f.context)).toBe('');
   });
   it('rejects fabric and finished purchases on garment lines and preserves typed material classifications', () => {
-    const f = fixture(); expect(() => f.purchase('material', 'fabric')).toThrow('面料组'); expect(() => f.purchase('finished')).toThrow('加工服务');
+    const f = fixture(); expect(() => f.purchase('material', 'fabric')).toThrow('面料组'); const cmt=fixture();cmt.state.orderLines.find(l=>l.id===cmt.target.lineId)!.fulfillmentMode='cmt';expect(() => cmt.purchase('finished')).toThrow('仅全包');
     expect(() => f.purchase('material')).toThrow('物料类别');
     const id = f.purchase('material', 'trims'); expect(f.state.fulfillment.purchases.find(row => row.id === id)!.materialKind).toBe('trims');
     f.run({ type: 'fulfillment.procurement.submit', payload: { id } }); expect(f.state.fulfillment.purchases.find(row => row.id === id)!.revisionHistory![0].snapshot.materialKind).toBe('trims');
@@ -194,4 +194,30 @@ it('freezes the actual QC location without changing the planned inspection site'
   const f=fixture();f.allocate();const branch=f.production();f.approvePp(branch.productionId,'检验台 B');
   const report=f.state.fulfillment.qcReports.find(r=>r.report==='PP-REPORT')!;
   expect(report.location).toBe('检验台 B');expect(f.state.fulfillment.qcTasks.find(t=>t.id===report.taskId)!.location).toBe('样品室');
+});
+
+it('accepts full-package finished garment purchase without internal fabric and preserves production gates',()=>{
+ const f=fixture();const id=f.purchase('finished');
+ expect(f.state.fulfillment.purchases.find(p=>p.id===id)?.kind).toBe('finished');
+ f.run({type:'fulfillment.procurement.submit',payload:{id}});
+ f.run({type:'fulfillment.procurement.decide',payload:{id,decision:'approved',note:'确认全包成品采购'}},f.leader);
+ expect(()=>assertGarmentMaterial(f.state,f.target.orderId,f.target.lineId,{...f.context,members:[]})).not.toThrow();
+ expect(f.state.internalFabricAllocations||[]).toHaveLength(0);
+ const branch=f.state.productions.find(p=>p.sourcePurchaseId===id)!;
+ expect(branch).toBeTruthy();
+ expect(()=>f.run({type:'production.move',payload:{id:branch.id,col:'qc'}} as never)).toThrow();
+ f.run({type:'fulfillment.procurement.send',payload:{id,at:f.context.now,evidence:'已发全包合同',fileIds:['po']}});
+ f.run({type:'fulfillment.procurement.confirm',payload:{id,at:f.context.now,confirmedDue:'2026-11-20',evidence:'供应商确认',fileIds:['po']}});
+ f.run({type:'fulfillment.production.plan',payload:{productionId:branch.id,sizes:[{size:'M',quantity:10}]}});
+ f.approvePp(branch.id);
+ expect(()=>f.run({type:'fulfillment.production.release',payload:{productionId:branch.id,note:'全包合同和产前样已核对'}})).not.toThrow();
+});
+
+it('keeps supplier full-package purchases separate from self-supplied material and processing',()=>{
+ const f=fixture();f.purchase('finished');
+ expect(()=>f.purchase('processing')).toThrow('全包成品采购');
+ expect(()=>f.purchase('material','trims')).toThrow('全包成品采购');
+ expect(()=>f.allocate()).toThrow('全包成品采购');
+ const g=fixture();g.purchase('processing');expect(()=>g.purchase('finished')).toThrow('混用');
+ const h=fixture();h.allocate();expect(()=>h.purchase('finished')).toThrow('内部供料');
 });

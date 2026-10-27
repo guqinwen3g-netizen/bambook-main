@@ -109,7 +109,7 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       if (ids.length < 2) fail('请至少邀请两家供应商报价');
       ids.forEach(id => supplierOk(root, id, today));
       const head = 'RFQ-' + today.slice(0, 4) + '-'; let n = list.filter(r => r.code.startsWith(head)).length + 1; while (list.some(r => r.code === head + String(n).padStart(4, '0'))) n++;
-      const r: MistRfq = { id: c.id(), code: head + String(n).padStart(4, '0'), orderId: order.id, lineId: line.id, kind: i.kind, ...(assertGarmentProcurement(order,line,i.kind,i.materialKind)?{materialKind:i.materialKind}:{}), domain: order.type, description: text(i.description, '询价内容', true, 500), quantity: positive(i.quantity, '需求数量'), unit: text(i.unit, '单位', true, 20), currency: currencyOf(i.currency),
+      const r: MistRfq = { id: c.id(), code: head + String(n).padStart(4, '0'), orderId: order.id, lineId: line.id, kind: i.kind, ...(assertGarmentProcurement(order,line,i.kind,i.materialKind,root)?{materialKind:i.materialKind}:{}), domain: order.type, description: text(i.description, '询价内容', true, 500), quantity: positive(i.quantity, '需求数量'), unit: text(i.unit, '单位', true, 20), currency: currencyOf(i.currency),
         due, destination: text(i.destination, '交付地点', true, 200), deadline, supplierIds: ids, quotes: [], note: text(i.note, '备注', false, 2000), state: 'open', createdAt: c.now, actor: c.actorName };
       list.unshift(r);
       event(root, c, r, `发起询价 ${r.code}：${r.description} ${r.quantity} ${r.unit}，邀请 ${ids.map(id => root.market.suppliers.find(s => s.id === id)!.name).join('、')}，${deadline} 截止报价`);
