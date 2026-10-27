@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import React,{act} from 'react';import{createRoot,type Root}from'react-dom/client';import{afterEach,beforeEach,expect,it,vi}from'vitest';import{SaasAdminPage}from'./SaasAdminPage';
+import React,{act} from 'react';import{createRoot,type Root}from'react-dom/client';import{afterEach,beforeEach,expect,it,vi}from'vitest';import{SaasAdminPage,memberState}from'./SaasAdminPage';
 const m=vi.hoisted(()=>({session:{sessionKey:'one',user:{platformRole:'platform_admin'} as any},api:{list:vi.fn(),members:vi.fn(),create:vi.fn(),update:vi.fn(),addMember:vi.fn(),removeMember:vi.fn(),resendMember:vi.fn(),companySettings:vi.fn()},enter:vi.fn(),go:vi.fn()}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>m.session}));vi.mock('../runtime/platformAdmin',()=>({platformAdminApi:m.api,enterCompanyManagement:m.enter}));vi.mock('../nav',()=>({useNav:()=>({go:m.go})}));
 const company={id:'c1',name:'雾织贸易',slug:'mistweave',status:'active',plan:'standard',seatLimit:10,members:1,workspaces:1,createdAt:'2026-10-19T00:00:00Z'};
@@ -26,3 +26,9 @@ it('directly opens the company backend without a reason or time limit',async()=>
 it('allows opening the backend of a suspended company',async()=>{m.api.list.mockResolvedValue({companies:[{...company,status:'suspended'}]});await render();await wait(()=>expect(text('管理')).toBeTruthy());await act(async()=>text('管理').click());expect(text('进入公司后台').disabled).toBe(false);});
 
 it('reads the current legal name from company settings',async()=>{m.api.companySettings.mockResolvedValue({snapshot:{settings:{companyProfile:{legalName:'雾织贸易有限公司'}}}});await render();await wait(()=>expect(text('管理')).toBeTruthy());await act(async()=>text('管理').click());await wait(()=>expect(document.body.textContent).toContain('雾织贸易有限公司'));});
+it('labels a registration awaiting approval as pending, not disabled', () => {
+  expect(memberState({ accountStatus: 'pending', memberStatus: 'pending' }).label).toBe('待审批');
+  expect(memberState({ accountStatus: 'disabled', memberStatus: 'active' }).label).toBe('账号停用');
+  expect(memberState({ accountStatus: 'rejected', memberStatus: 'pending' }).label).toBe('已拒绝');
+  expect(memberState({ accountStatus: 'active', memberStatus: 'suspended' }).label).toBe('已暂停');
+});
