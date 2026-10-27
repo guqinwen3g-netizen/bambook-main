@@ -126,11 +126,11 @@ it('票据付款：先申请并经主管批准，再按批准登记实付；分�
 it('预付款：财务按合同登记计划，申请经主管批准后实付，挂在合同上；登记错误可冲回，申请回到已批准待付', async () => {
   render();
   await click('登记付款计划');
-  select('来源合同', po.id); input('计划金额', '33480'); input('付款触发条件', '合同回签后 7 天内');
+  select('来源合同', po.id); input('计划金额', '33480'); select('付款触发条件', '合同签订后');
   expect((getByLabelText(document.body, '合同条款依据') as HTMLInputElement).value).toContain('合同付款条件');
   await click('登记计划', dialog('登记付款计划'));
   const plan = store.value.state.payables.plans[0];
-  expect(plan).toMatchObject({ purchaseId: po.id, amount: 33480, trigger: '合同回签后 7 天内' });
+  expect(plan).toMatchObject({ purchaseId: po.id, amount: 33480, trigger: '合同签订后' });
   expect(host.textContent).toContain(plan.code);expect(host.textContent).not.toContain('计划不是应付');
   await click('申请预付款');
   input('申请金额', '33480.01'); text('付款依据', '合同已于本周回签');

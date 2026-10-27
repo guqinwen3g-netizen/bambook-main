@@ -450,7 +450,7 @@ it("separates line-only fees, requires ownership, freezes allocation and exports
   field("成本1计入范围", "per_line");
   field("成本1名称", "软件验收本行整笔运费");
   field("成本1用量", "1");
-  field("成本1单位", "笔");
+  field("成本1单位", "票");
   field("成本1单价", "100");
   field("成本1依据", "软件验收：仅本行承担，其他报价行不重复计入");
   act(() =>
@@ -508,7 +508,7 @@ it("leaves the previous per-unit formula unchanged when the scope is omitted", a
   ).toBe("per_unit");
   field("成本1名称", "软件验收每件包装");
   field("成本1用量", "1");
-  field("成本1单位", "份");
+  field("成本1单位", "个");
   field("成本1单价", "2");
   field("成本1依据", "软件验收按件包装");
   act(() =>

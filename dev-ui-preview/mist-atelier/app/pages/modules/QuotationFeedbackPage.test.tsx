@@ -81,7 +81,7 @@ async function click(label: string) {
 async function facts(kind = "considering") {
   field("反馈类型", kind);
   field("反馈发生日期", "2026-10-14");
-  field("反馈渠道", "软件验收会议纪要");
+  field("反馈渠道", "视频会议");
   field("反馈人及身份", "软件验收采购，非真实客户反馈");
   field("反馈事实与来源", "软件验收：客户尚在核对项目，未说明原因");
   await click("下一步");

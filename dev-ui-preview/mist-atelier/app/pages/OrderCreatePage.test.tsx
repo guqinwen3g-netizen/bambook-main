@@ -17,8 +17,16 @@ const go = vi.fn();
 let sequence = 0;
 const context = { id: () => `amount-${++sequence}`, now: '2026-10-13T02:00:00.000Z', actorName: '业务员甲', actorId: 'sales' };
 function input(label: string, value: string) {
-  const node = getByLabelText(host, new RegExp(`^${label}\\s*\\*?$`)) as HTMLInputElement|HTMLTextAreaElement;
+  const node = getByLabelText(host, new RegExp(`^${label}\\s*\\*?$`)) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;
+  if (node instanceof HTMLSelectElement) return choose(node, label, value);
   act(() => { Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })); });
+}
+/** 常用选项下拉：有该选项直接选；没有时走「其他（手动填写）」再录入原文。 */
+function choose(node: HTMLSelectElement, label: string, value: string) {
+  const has = (option: string) => Array.from(node.options).some(item => item.value === option), preset = has(value);
+  if (!preset && !has('__custom__')) throw new Error(`${label} 没有选项 ${value}`);
+  act(() => { node.value = preset ? value : '__custom__'; node.dispatchEvent(new Event('change', { bubbles: true })); });
+  if (!preset) input(`${label}（手动填写）`, value);
 }
 async function next() { await act(async () => getByRole(host, 'button', { name: '下一步' }).click()); }
 async function enterLine(qty: string, price: string) {
@@ -78,10 +86,10 @@ it('does not navigate from an old create acknowledgement after switching workspa
 
 it('creates only a governed draft and preserves uploaded customer contract evidence',async()=>{
   (store as any).uploadFile=vi.fn(async(file:File)=>{const stored={id:'customer-po',name:file.name,mimeType:file.type,size:file.size,storageKey:'workspace/customer-po',createdAt:context.now};store.state!.files.push(stored);return stored;});
-  input('PO / 合同号','PO-2026-10');await enterLine('10','10');await next();input('交期','2026-12-01');input('付款条款原文','T/T 30%定金，余款按合同');input('定金比例（%）','30');input('贸易术语','FOB');input('指定地点 / 港口','上海');
+  input('PO / 合同号','PO-2026-10');await enterLine('10','10');await next();input('交期','2026-12-01');input('付款条款','T/T 30% 定金，70% 发货前付清');input('定金比例（%）','30');input('贸易术语','FOB');input('指定地点 / 港口','上海');
   await act(async()=>{const picker=host.querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(picker,'files',{value:[new File(['confirmed purchase order'],'customer-po.pdf',{type:'application/pdf'})],configurable:true});picker.dispatchEvent(new Event('change',{bubbles:true}));});
   await next();await next();await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());
-  expect(store.state!.orders[0].governance).toMatchObject({status:'draft',contract:{kind:'external',poNumber:'PO-2026-10',confirmationFileIds:['customer-po'],paymentMethod:'TT',depositPercent:30,incoterm:'FOB',deliveryPlace:'上海'}});expect(store.state!.orders[0].state).toBe('订单草稿');
+  expect(store.state!.orders[0].governance).toMatchObject({status:'draft',contract:{kind:'external',poNumber:'PO-2026-10',confirmationFileIds:['customer-po'],paymentMethod:'TT',depositPercent:30,paymentNote:'T/T 30% 定金，70% 发货前付清',incoterm:'FOB',deliveryPlace:'上海'}});expect(store.state!.orders[0].state).toBe('订单草稿');
 });
 
 
