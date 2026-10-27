@@ -128,11 +128,11 @@ function systemRank(id: string): number {
 /** 自定义角色名称 1–40 字、说明至多 200 字。 */
 function parseRoleText(body: any): { ok: true; name: string; description: string | null } | { ok: false; message: string } {
   const name = typeof body?.name === 'string' ? body.name.trim().replace(/\s+/g, ' ') : '';
-  if (!name) return { ok: false, message: '请填写角色名称。' };
-  if (name.length > 40) return { ok: false, message: '角色名称不超过 40 个字。' };
-  if (body?.description !== undefined && body.description !== null && typeof body.description !== 'string') return { ok: false, message: '角色说明须为文字。' };
+  if (!name) return { ok: false, message: '请填写岗位名称。' };
+  if (name.length > 40) return { ok: false, message: '岗位名称不超过 40 个字。' };
+  if (body?.description !== undefined && body.description !== null && typeof body.description !== 'string') return { ok: false, message: '岗位说明须为文字。' };
   const description = typeof body?.description === 'string' ? body.description.trim() : '';
-  if (description.length > 200) return { ok: false, message: '角色说明不超过 200 个字。' };
+  if (description.length > 200) return { ok: false, message: '岗位说明不超过 200 个字。' };
   return { ok: true, name, description: description || null };
 }
 
@@ -166,7 +166,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (actorIsOwner(req)) return false;
     let links: any[] = [];
     try { links = await options.prisma.userRole.findMany({ where: { userId }, include: { role: true } }); }
-    catch { res.status(503).json({ ok: false, error: 'ROLE_CHECK_FAILED', message: '暂时无法核对目标账号的角色，请稍后重试。' }); return true; }
+    catch { res.status(503).json({ ok: false, error: 'ROLE_CHECK_FAILED', message: '暂时无法核对目标账号的岗位，请稍后重试。' }); return true; }
     if (links.some(link => link.role && isSuperAdminRole(link.role))) {
       res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '老板账号只能由老板本人维护。' });
       return true;
@@ -317,18 +317,19 @@ export function createAdminRouter(options: AdminRouterOptions) {
       return res.status(409).json({ ok: false, error: 'DUPLICATE', message: 'Email already in use.' });
     }
     const requestedRoles = [...new Set<string>(Array.isArray(roles) ? roles : (typeof roles === 'string' && roles ? [roles] : []))];
+    if (actorCompanyId(req) && requestedRoles.length > 1) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: '每个账号只设一个岗位。' });
     const resolvedRoles: Array<{ id: string }> = [];
     for (const roleNameOrId of requestedRoles) {
         const role = actorCompanyId(req) ? await roleInCompany(req, roleNameOrId) : await resolveRoleByNameOrId(options.prisma, roleNameOrId);
         if (!role) {
-          return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: `角色不存在：${roleNameOrId}` });
+          return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: `岗位不存在：${roleNameOrId}` });
         }
         // 公司管理员只能授予本公司角色，避免把别家公司的角色或全局模板挂到本公司成员上。
         if (companyId && (role as any).companyId !== companyId) {
-          return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '只能授予本公司角色。' });
+          return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '只能授予本公司岗位。' });
         }
         if (isSuperAdminRole(role) && !actorIsOwner(req)) {
-          return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'SuperAdmin 角色仅 SuperAdmin(owner) 可授予。' });
+          return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '总经理岗位只能由总经理授予。' });
         }
         resolvedRoles.push(role);
       }
@@ -560,6 +561,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const finalRoles: string[] = Array.isArray(roles) && roles.length
       ? roles
       : (requestedRole ? [requestedRole] : ['role-sales']);
+    if (actorCompanyId(req) && new Set(finalRoles).size > 1) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: '每个账号只设一个岗位。' });
 
     const finalDeptId = departmentId || target.primaryDeptId || null;
     if (!(await departmentExists(options.prisma, finalDeptId, actorCompanyId(req)))) {
@@ -569,10 +571,10 @@ export function createAdminRouter(options: AdminRouterOptions) {
     for (const roleNameOrId of finalRoles) {
       const role = actorCompanyId(req) ? await roleInCompany(req, roleNameOrId) : await resolveRoleByNameOrId(options.prisma, roleNameOrId);
       if (!role) {
-        return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: `角色不存在：${roleNameOrId}` });
+        return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: `岗位不存在：${roleNameOrId}` });
       }
       if (isSuperAdminRole(role) && !actorIsOwner(req)) {
-        return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'SuperAdmin 角色仅 SuperAdmin(owner) 可授予。' });
+        return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '总经理岗位只能由总经理授予。' });
       }
       resolvedApproveRoles.push(role);
     }
@@ -769,16 +771,16 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
   // ---- Custom roles（公司按实际岗位新建 / 改名 / 删除；与“角色权限仅老板调整”同口径，仅老板可办理）----
   router.post('/roles', withRouteErrorGuard(async (req: Request, res: Response) => {
-    if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义角色仅老板可新建、修改或删除。' });
+    if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义岗位仅老板可新建、修改或删除。' });
     const input = parseRoleText(req.body);
     if (!input.ok) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: input.message });
     const requested: unknown = req.body?.permissions;
     if (!Array.isArray(requested) || requested.some(scope => typeof scope !== 'string' || !scope.trim())) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: 'permissions 必须是权限代码数组。' });
     const scopes = [...new Set((requested as string[]).map(scope => scope.trim()))];
     if (!scopes.length) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请至少选择一项权限。' });
-    if (scopes.includes('*')) return res.status(400).json({ ok: false, error: 'INVALID_PERMISSION', message: '全部权限只属于“老板”角色，自定义角色须逐项组合权限。' });
+    if (scopes.includes('*')) return res.status(400).json({ ok: false, error: 'INVALID_PERMISSION', message: '全部权限只属于“总经理”岗位，自定义岗位须逐项组合权限。' });
     const conflict = await roleNameConflict(input.name, undefined, actorCompanyId(req));
-    if (conflict) return res.status(409).json({ ok: false, error: 'DUPLICATE_ROLE_NAME', message: `已有同名角色「${conflict}」，请换一个名称。` });
+    if (conflict) return res.status(409).json({ ok: false, error: 'DUPLICATE_ROLE_NAME', message: `已有同名岗位「${conflict}」，请换一个名称。` });
     const permissions = await options.prisma.permission.findMany({ where: { scope: { in: scopes } } });
     const unknown = scopes.filter(scope => !permissions.some(p => p.scope === scope));
     if (unknown.length) return res.status(400).json({ ok: false, error: 'INVALID_PERMISSION', message: `权限目录中没有：${unknown.join('、')}` });
@@ -793,14 +795,14 @@ export function createAdminRouter(options: AdminRouterOptions) {
   }));
 
   router.patch('/roles/:id', withRouteErrorGuard(async (req: Request, res: Response) => {
-    if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义角色仅老板可新建、修改或删除。' });
+    if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义岗位仅老板可新建、修改或删除。' });
     const role = await roleInCompany(req, req.params.id);
-    if (!role) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '角色不存在。' });
-    if (isSystemRole(role)) return res.status(409).json({ ok: false, error: 'SYSTEM_ROLE', message: '系统角色不能改名或删除，只能调整权限。' });
+    if (!role) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '岗位不存在。' });
+    if (isSystemRole(role)) return res.status(409).json({ ok: false, error: 'SYSTEM_ROLE', message: '系统岗位不能改名或删除，只能调整权限。' });
     const input = parseRoleText(req.body);
     if (!input.ok) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: input.message });
     const conflict = await roleNameConflict(input.name, role.id, actorCompanyId(req));
-    if (conflict) return res.status(409).json({ ok: false, error: 'DUPLICATE_ROLE_NAME', message: `已有同名角色「${conflict}」，请换一个名称。` });
+    if (conflict) return res.status(409).json({ ok: false, error: 'DUPLICATE_ROLE_NAME', message: `已有同名岗位「${conflict}」，请换一个名称。` });
     const actor = (req as any).actor;
     await options.prisma.$transaction(async tx => {
       await tx.role.update({ where: { id: role.id }, data: { name: input.name, description: input.description } });
@@ -810,10 +812,10 @@ export function createAdminRouter(options: AdminRouterOptions) {
   }));
 
   router.delete('/roles/:id', withRouteErrorGuard(async (req: Request, res: Response) => {
-    if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义角色仅老板可新建、修改或删除。' });
+    if (!actorIsOwner(req)) return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '自定义岗位仅老板可新建、修改或删除。' });
     const role = await roleInCompany(req, req.params.id);
-    if (!role) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '角色不存在。' });
-    if (isSystemRole(role)) return res.status(409).json({ ok: false, error: 'SYSTEM_ROLE', message: '系统角色不能改名或删除，只能调整权限。' });
+    if (!role) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '岗位不存在。' });
+    if (isSystemRole(role)) return res.status(409).json({ ok: false, error: 'SYSTEM_ROLE', message: '系统岗位不能改名或删除，只能调整权限。' });
     // 仍有在用 / 待审批账号持有该角色时不得删除：先在“账号”中改派角色，避免账号静默失去权限。
     const holders = await options.prisma.userRole.findMany({ where: { roleId: role.id, user: { deletedAt: null, status: { in: ['active', 'pending'] } } }, include: { user: { select: { displayName: true } } } });
     if (holders.length) {
@@ -1001,15 +1003,15 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const { addPermissions, removePermissions } = req.body || {};
     const role = await roleInCompany(req, id);
     if (!role) {
-      return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '角色不存在。' });
+      return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '岗位不存在。' });
     }
     // SuperAdmin 防线（安全修复）：admin 修改 role-super-admin 权限集合 = 静默自我提权，
     // 与矩阵「SuperAdmin 最高权限、不可删除」不变量冲突——仅 owner（SuperAdmin）可改。
     if (isSuperAdminRole(role) && !actorIsOwner(req)) {
-      return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: 'SuperAdmin 角色权限仅 SuperAdmin(owner) 可修改。' });
+      return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '总经理岗位的权限仅 总经理 可修改。' });
     }
     if (Array.isArray(addPermissions) && addPermissions.includes('*') && !isSuperAdminRole(role)) {
-      return res.status(400).json({ ok: false, error: 'INVALID_PERMISSION', message: '全部权限只属于“老板”角色，其他角色须逐项组合权限。' });
+      return res.status(400).json({ ok: false, error: 'INVALID_PERMISSION', message: '全部权限只属于“总经理”岗位，其他岗位须逐项组合权限。' });
     }
     if (Array.isArray(addPermissions)) {
       for (const scope of addPermissions) {

@@ -12,6 +12,8 @@ type ProfileInput = {
 type EventInput = {
   userId: string; type: EmploymentEventType; effectiveDate: string; fromDeptId?: string | null;
   toDeptId?: string | null; fromPositionId?: string | null; toPositionId?: string | null; reason?: string | null;
+  /** 调岗 / 晋升后的岗位（公司岗位即权限角色）；toPositionId 作为同义旧字段接受。 */
+  toRoleId?: string | null;
 };
 type EventSnapshot = EventInput & { fromStatus?: string | null; toStatus?: string | null };
 const ALLOWED: Record<EmploymentEventType, string[]> = {
@@ -30,16 +32,18 @@ function date(value: unknown, label: string): asserts value is string {
   }
 }
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
-const PROFILE_INCLUDE = { user: { include: { roles: { include: { role: true, department: true } } } }, position: true } as const;
+const PROFILE_INCLUDE = { user: { include: { roles: { include: { role: true, department: true } } } } } as const;
 
-export function createCompanyEmploymentService(prisma: PrismaClient, companyId: string, actorId: string) {
+/** 岗位与权限角色是同一对象：员工档案和在职变动里的“岗位”都指公司岗位（Role），旧 JobPosition 只保留历史名称。 */
+export function createCompanyEmploymentService(prisma: PrismaClient, companyId: string, actorId: string, options: { canAssignJobs?: boolean } = {}) {
   const membership = (userId: string) => ({ companyId_userId: { companyId, userId } });
   const profileWhere = (userId: string) => ({ companyId_userId: { companyId, userId } });
   const view = (row: any) => {
-    const department = row.user?.roles?.find((r: any) => r.role?.companyId === companyId)?.department;
+    const jobs = (row.user?.roles ?? []).filter((r: any) => r.role?.companyId === companyId);
+    const department = jobs[0]?.department;
     return { ...row, displayName: row.user?.displayName ?? null, email: row.user?.email ?? null,
       departmentId: department?.id ?? null, department: department?.name ?? null,
-      position: row.position?.title ?? null, user: undefined };
+      positionId: jobs[0]?.roleId ?? null, position: jobs.map((r: any) => r.role.name).join('、') || null, user: undefined };
   };
   async function lock(tx: Tx) {
     await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${companyId}::uuid FOR UPDATE`;
@@ -81,15 +85,23 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
       throw new HrError('SEAT_LIMIT_REACHED', '公司席位已用完。', 409);
     }
   }
-  async function selectedPosition(tx: Tx, positionId: string) {
-    if (typeof positionId !== 'string' || !positionId) throw new HrError('INVALID_POSITION', '请选择有效岗位。', 400);
-    const position = await tx.jobPosition.findFirst({ where: { id: positionId, deletedAt: null, status: 'active', department: { companyId, status: 'active' } } });
-    if (!position) throw new HrError('INVALID_POSITION', '岗位不存在或已停用。', 400);
-    return position;
+  async function selectedRole(tx: Tx, roleId: unknown) {
+    if (typeof roleId !== 'string' || !roleId) throw new HrError('INVALID_POSITION', '请选择新岗位。', 400);
+    const role = await tx.role.findFirst({ where: { id: roleId, companyId } });
+    if (!role) throw new HrError('INVALID_POSITION', '岗位不存在。', 400);
+    return role;
+  }
+  async function selectedDepartment(tx: Tx, departmentId: unknown) {
+    if (typeof departmentId !== 'string' || !departmentId) throw new HrError('INVALID_DEPARTMENT', '请选择任职部门。', 400);
+    const department = await tx.department.findFirst({ where: { id: departmentId, companyId, status: 'active', parentId: { not: null } } });
+    if (!department) throw new HrError('INVALID_DEPARTMENT', '请选择本公司部门。', 400);
+    return department.id;
   }
   function departmentOf(user: { roles: Array<{ departmentId: string | null }> }) {
     return user.roles.find(r => r.departmentId)?.departmentId ?? null;
   }
+  const jobOf = (user: { roles: Array<{ roleId: string }> }) => user.roles[0]?.roleId ?? null;
+  const OWNER_ROLE = 'role-super-admin@' + companyId;
   return {
     async listProfiles(query: { status?: string; deptId?: string; q?: string } = {}) {
       const rows = await prisma.employeeProfile.findMany({ where: { companyId, deletedAt: null, ...(query.status ? { employmentStatus: query.status } : {}) }, include: PROFILE_INCLUDE, orderBy: { employeeNo: 'asc' } });
@@ -118,13 +130,8 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
         if (input.regularDate && input.regularDate < (input.hireDate || existing!.hireDate)) throw new HrError('VALIDATION_FAILED', '转正日期不能早于入职日期。');
         if (!creating && input.regularDate !== undefined && input.regularDate !== existing!.regularDate) throw new HrError('STATUS_VIA_EVENT_ONLY', '请通过转正办理在职变动。');
         if (input.contractType && !['FixedTerm', 'OpenEnded', 'PartTime', 'Intern'].includes(input.contractType)) throw new HrError('VALIDATION_FAILED', '合同类型无效。');
-        if (input.positionId) {
-          const position = await selectedPosition(tx, input.positionId);
-          if (position.departmentId !== departmentOf(person.user)) throw new HrError('POSITION_DEPARTMENT_MISMATCH', '岗位不属于任职部门，请先办理调岗。');
-          await tx.companyMember.update({ where: membership(input.userId), data: { jobTitle: position.title } });
-        }
-        if (!creating && existing!.positionId && input.positionId !== undefined && input.positionId !== existing!.positionId) throw new HrError('STATUS_VIA_EVENT_ONLY', '请通过调岗调整岗位。');
-        const fields = ['positionId', 'hireDate', 'regularDate', 'contractType', 'contractEnd', 'phone', 'emergencyContact', 'workLocation', 'notes'] as const;
+        if (input.positionId !== undefined && input.positionId !== null && input.positionId !== jobOf(person.user)) throw new HrError('STATUS_VIA_EVENT_ONLY', '请通过调岗调整岗位。');
+        const fields = ['hireDate', 'regularDate', 'contractType', 'contractEnd', 'phone', 'emergencyContact', 'workLocation', 'notes'] as const;
         const patch = Object.fromEntries(fields.filter(k => input[k] !== undefined).map(k => [k, input[k] || null]));
         let saved;
         if (creating) {
@@ -135,10 +142,10 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
           const employeeNo = existing?.employeeNo ?? 'E' + String(next).padStart(4, '0');
           const data = { ...patch, companyId, userId: input.userId, employeeNo, hireDate: input.hireDate!, employmentStatus: input.regularDate ? 'Regular' : 'Probation', deletedAt: null };
           saved = existing ? await tx.employeeProfile.update({ where: { id: existing.id }, data }) : await tx.employeeProfile.create({ data: { ...data, id: randomUUID() } });
-          await event(tx, { userId: input.userId, type: 'Onboard', effectiveDate: input.hireDate!, toDeptId: departmentOf(person.user), toPositionId: input.positionId, toStatus: 'Probation' });
-          if (input.regularDate) await event(tx, { userId: input.userId, type: 'Regularize', effectiveDate: input.regularDate, toDeptId: departmentOf(person.user), toPositionId: input.positionId, fromStatus: 'Probation', toStatus: 'Regular' });
+          await event(tx, { userId: input.userId, type: 'Onboard', effectiveDate: input.hireDate!, toDeptId: departmentOf(person.user), toPositionId: jobOf(person.user), toStatus: 'Probation' });
+          if (input.regularDate) await event(tx, { userId: input.userId, type: 'Regularize', effectiveDate: input.regularDate, toDeptId: departmentOf(person.user), toPositionId: jobOf(person.user), fromStatus: 'Probation', toStatus: 'Regular' });
         } else saved = await tx.employeeProfile.update({ where: { id: existing!.id }, data: patch });
-        await audit(tx, creating ? 'onboard_employee' : 'upsert_employee', input.userId, { positionId: saved.positionId, employmentStatus: saved.employmentStatus, fields: Object.keys(patch), fromHireDate: existing?.hireDate ?? null, toHireDate: saved.hireDate });
+        await audit(tx, creating ? 'onboard_employee' : 'upsert_employee', input.userId, { positionId: jobOf(person.user), employmentStatus: saved.employmentStatus, fields: Object.keys(patch), fromHireDate: existing?.hireDate ?? null, toHireDate: saved.hireDate });
         return { profile: saved, created: creating };
       });
       return result;
@@ -172,15 +179,24 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
         const previous = await tx.employmentEvent.findFirst({ where: { companyId, userId: input.userId }, orderBy: [{ effectiveDate: 'desc' }, { createdAt: 'desc' }] });
         if (input.effectiveDate < profile.hireDate || previous && input.effectiveDate < previous.effectiveDate) throw new HrError('INVALID_TRANSITION', '生效日期不能早于已登记的变动。', 409);
         const currentDepartment = departmentOf(person.user);
-        if (input.fromDeptId !== undefined && input.fromDeptId !== currentDepartment || input.fromPositionId !== undefined && input.fromPositionId !== profile.positionId) throw new HrError('CONFLICT', '任职信息已更新，请重新打开。', 409);
-        let nextDepartment = currentDepartment, nextPosition = profile.positionId, leftTeams = 0;
+        const currentJob = jobOf(person.user);
+        if (input.fromDeptId !== undefined && input.fromDeptId !== currentDepartment || input.fromPositionId !== undefined && input.fromPositionId !== currentJob) throw new HrError('CONFLICT', '任职信息已更新，请重新打开。', 409);
+        let nextDepartment = currentDepartment, nextPosition = currentJob, leftTeams = 0, jobChanged = false;
         if (input.type === 'Transfer' || input.type === 'Promote') {
-          if (!input.toPositionId) throw new HrError('INVALID_POSITION', '请选择新岗位。');
-          const position = await selectedPosition(tx, input.toPositionId);
-          if (input.toDeptId && input.toDeptId !== position.departmentId) throw new HrError('POSITION_DEPARTMENT_MISMATCH', '岗位与调入部门不一致。');
-          nextDepartment = position.departmentId; nextPosition = position.id;
-          await tx.userRole.updateMany({ where: { userId: input.userId, role: { companyId } }, data: { departmentId: nextDepartment } });
-          await tx.companyMember.update({ where: membership(input.userId), data: { jobTitle: position.title } });
+          const role = await selectedRole(tx, input.toRoleId ?? input.toPositionId ?? currentJob);
+          nextDepartment = input.toDeptId === undefined ? currentDepartment : await selectedDepartment(tx, input.toDeptId);
+          if (!nextDepartment) throw new HrError('INVALID_DEPARTMENT', '请选择任职部门。', 400);
+          jobChanged = role.id !== currentJob;
+          if (!jobChanged && nextDepartment === currentDepartment) throw new HrError('VALIDATION_FAILED', '请选择新的岗位或部门。');
+          if (jobChanged && !options.canAssignJobs) throw new HrError('FORBIDDEN', '调整岗位需要账号与岗位管理权限。', 403);
+          const owner = async () => (await member(tx, actorId)).user.roles.some(r => r.roleId === OWNER_ROLE);
+          if (jobChanged && role.id === OWNER_ROLE && !await owner()) throw new HrError('FORBIDDEN', '总经理岗位只能由总经理安排。', 403);
+          if (jobChanged && input.userId === actorId && currentJob === OWNER_ROLE) throw new HrError('SELF_OWNER_REQUIRED', '不能调离自己的总经理岗位。', 409);
+          nextPosition = role.id;
+          // 一人一个岗位：调岗 / 晋升后只保留新岗位，权限随岗位立即生效。
+          await tx.userRole.deleteMany({ where: { userId: input.userId, role: { companyId } } });
+          await tx.userRole.create({ data: { id: randomUUID(), userId: input.userId, roleId: role.id, departmentId: nextDepartment } });
+          await tx.companyMember.update({ where: membership(input.userId), data: { jobTitle: role.name } });
         }
         const ending = ['Resign', 'Terminate'].includes(input.type), suspending = input.type === 'Suspend';
         const restoring = input.type === 'Onboard' || input.type === 'Resume';
@@ -200,13 +216,13 @@ export function createCompanyEmploymentService(prisma: PrismaClient, companyId: 
           if (!suspension?.fromStatus || !['Probation', 'Regular'].includes(suspension.fromStatus)) throw new HrError('INVALID_TRANSITION', '无法确认停职前状态，请核对在职记录。', 409);
           status = suspension.fromStatus;
         }
-        const patch = { employmentStatus: status, positionId: nextPosition,
+        const patch = { employmentStatus: status,
           ...(input.type === 'Regularize' ? { regularDate: input.effectiveDate } : {}),
           ...(input.type === 'Onboard' ? { hireDate: input.effectiveDate, regularDate: null } : {}) };
         await tx.employeeProfile.update({ where: { id: profile.id }, data: patch });
-        const savedEvent = await event(tx, { ...input, fromDeptId: currentDepartment, fromPositionId: profile.positionId, toDeptId: nextDepartment, toPositionId: nextPosition, fromStatus: profile.employmentStatus, toStatus: patch.employmentStatus });
-        await audit(tx, 'employment_' + input.type.toLowerCase(), input.userId, { eventId: savedEvent.id, fromStatus: profile.employmentStatus, toStatus: patch.employmentStatus });
-        return { event: savedEvent, accountDisabled: ending || suspending, accountReenabled: restoring, leftTeams };
+        const savedEvent = await event(tx, { ...input, fromDeptId: currentDepartment, fromPositionId: currentJob, toDeptId: nextDepartment, toPositionId: nextPosition, fromStatus: profile.employmentStatus, toStatus: patch.employmentStatus });
+        await audit(tx, 'employment_' + input.type.toLowerCase(), input.userId, { eventId: savedEvent.id, fromStatus: profile.employmentStatus, toStatus: patch.employmentStatus, ...(jobChanged ? { fromRoleId: currentJob, toRoleId: nextPosition } : {}) });
+        return { event: savedEvent, accountDisabled: ending || suspending, accountReenabled: restoring, leftTeams, jobChanged };
       });
     },
   };

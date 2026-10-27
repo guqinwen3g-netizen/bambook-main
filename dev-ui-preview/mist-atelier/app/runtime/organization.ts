@@ -20,10 +20,11 @@ export interface OrgDepartment { id: string; name: string; parentId: string | nu
 export interface AdminAccount { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null; createdAt: string; metadata?: Record<string, unknown> | null; identityEditable?: boolean }
 export interface AdminRole { id: string; name: string; description: string | null; isSystem: boolean; permissions: string[] }
 export interface AuditLogRow { id: string; actorId: string; action: string; targetType: string; targetId: string | null; createdAt: string; ip?: string | null }
-export interface OrgPerson { id: string; displayName: string; email: string; status: string; roles: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null }
+export interface OrgPerson { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds?: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null }
 export interface OrgTeam { id: string; name: string; description: string | null; leaderId: string | null; departmentId: string; department: string | null; businessAttributes: BusinessAttribute[]; status: string; memberCount: number; members: Array<{ id: string; userId: string; role: string; leftAt: string | null }> }
 export interface EmployeeProfile { userId: string; employeeNo: string; displayName: string | null; departmentId?: string | null; department?: string | null; positionId: string | null; position: string | null; hireDate: string | null; regularDate: string | null; contractType: string | null; contractEnd: string | null; employmentStatus: string; phone: string | null; emergencyContact: string | null; workLocation: string | null; notes: string | null }
-export interface OrgPosition { id: string; title: string; departmentId: string | null; department: string | null; headcount?: number; status?: string; description?: string | null }
+/** 公司岗位即权限角色（AdminRole）；人事页只需名称。 */
+export interface OrgJob { id: string; name: string }
 export interface EmploymentEvent { id: string; userId: string; type: string; effectiveDate: string; fromStatus?: string | null; toStatus?: string | null; fromDeptId: string | null; toDeptId: string | null; fromPositionId: string | null; toPositionId: string | null; reason: string | null; operatorId: string | null; createdAt: string }
 
 /** 在职变动（与服务端 hrService EVENT_ALLOWED_FROM 同口径；服务端仍是最终校验）。 */
@@ -92,7 +93,7 @@ export const organizationApi = {
     return call<{ logs: AuditLogRow[]; total: number }>('/admin/audit-logs' + (q.size ? '?' + q : ''));
   },
   // 人事（hr:read / hr:write）
-  personnel: () => call<{ personnel: OrgPerson[]; departments: OrgDepartment[]; positions: OrgPosition[] }>('/hr/personnel'),
+  personnel: () => call<{ personnel: OrgPerson[]; departments: OrgDepartment[]; jobs: OrgJob[]; positionNames: Record<string, string> }>('/hr/personnel'),
   teams: () => call<{ teams: OrgTeam[] }>('/hr/teams'),
   createDepartment: (body: { name: string; parentId: string; businessAttributes: BusinessAttribute[] }) => call<{ department: OrgDepartment }>('/hr/departments', { method: 'POST', body }),
   updateDepartment: (departmentId: string, body: { name: string; businessAttributes: BusinessAttribute[] }) => call<unknown>('/hr/departments/' + id(departmentId), { method: 'PATCH', body }),
@@ -108,12 +109,9 @@ export const organizationApi = {
     catch (error) { if (error instanceof OrganizationRequestError && error.status === 404) return null; throw error; }
   },
   employees: () => call<{ employees: EmployeeProfile[] }>('/hr/employees'),
-  createPosition: (body: { title: string; departmentId: string; headcount: number; description?: string }) => call<unknown>('/hr/positions', { method: 'POST', body }),
-  updatePosition: (positionId: string, body: { title?: string; departmentId?: string; headcount?: number; description?: string | null; status?: string }) => call<unknown>('/hr/positions/' + id(positionId), { method: 'PATCH', body }),
-  deletePosition: (positionId: string) => call<unknown>('/hr/positions/' + id(positionId), { method: 'DELETE' }),
   employmentEvents: (userId: string) => call<{ events: EmploymentEvent[] }>('/hr/employment-events?userId=' + id(userId) + '&limit=50'),
-  recordEvent: (body: { userId: string; type: string; effectiveDate: string; fromDeptId?: string | null; toDeptId?: string | null; fromPositionId?: string | null; toPositionId?: string | null; reason?: string | null }) => call<{ event: EmploymentEvent; accountDisabled?: boolean; leftTeams?: number }>('/hr/employment-events', { method: 'POST', body }),
-  saveProfile: (userId: string, body: Partial<Pick<EmployeeProfile, 'positionId' | 'hireDate' | 'regularDate' | 'contractType' | 'contractEnd' | 'phone' | 'emergencyContact' | 'workLocation' | 'notes'>>) => call<{ profile: EmployeeProfile }>('/hr/employees/' + id(userId), { method: 'PUT', body }),
+  recordEvent: (body: { userId: string; type: string; effectiveDate: string; fromDeptId?: string | null; toDeptId?: string | null; fromPositionId?: string | null; toPositionId?: string | null; toRoleId?: string | null; reason?: string | null }) => call<{ event: EmploymentEvent; accountDisabled?: boolean; leftTeams?: number; jobChanged?: boolean }>('/hr/employment-events', { method: 'POST', body }),
+  saveProfile: (userId: string, body: Partial<Pick<EmployeeProfile, 'hireDate' | 'regularDate' | 'contractType' | 'contractEnd' | 'phone' | 'emergencyContact' | 'workLocation' | 'notes'>>) => call<{ profile: EmployeeProfile }>('/hr/employees/' + id(userId), { method: 'PUT', body }),
 };
 
 /** Keep every active descendant selectable; the path distinguishes nested departments. */

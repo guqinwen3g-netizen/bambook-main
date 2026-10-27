@@ -7,6 +7,7 @@ import { departmentBusinessAttributes } from './departmentBusinessAttributes';
 import { PrismaClient } from '@prisma/client';
 import { extractActorFromRequest } from '../auth/middleware';
 import { requirePermission } from '../auth/permissionGuard';
+import { hasScope } from '../auth/permissionService';
 import { createModuleAuthGuard } from '../auth/moduleGuard';
 import { writeRouteAuditLog, actorIdFromRequest } from '../audit/routeAudit';
 import { createHrService, HrError, hrStatusForBareCode } from './hrService';
@@ -144,11 +145,9 @@ export function createHRRouter(options: HRRouterOptions) {
         orderBy: { name: 'asc' },
       });
 
-      const positions = await prisma.jobPosition.findMany({
-        where: { deletedAt: null },
-        include: { department: true },
-        orderBy: { title: 'asc' },
-      });
+      // 公司岗位 = 权限角色；旧 JobPosition 只用于显示历史在职变动里的原岗位名称。
+      const jobs = companyId ? await options.prisma.role.findMany({ where: { companyId }, select: { id: true, name: true }, orderBy: { name: 'asc' } }) : [];
+      const legacy = companyId ? await options.prisma.jobPosition.findMany({ where: { department: { companyId } }, select: { id: true, title: true } }) : [];
 
       res.json({
         ok: true,
@@ -159,6 +158,7 @@ export function createHRRouter(options: HRRouterOptions) {
           avatarUrl: (u as any).avatarUrl || null,
           status: u.status,
           roles: u.roles.map(ur => ur.role.name),
+          roleIds: u.roles.map(ur => ur.roleId),
           departmentId: u.primaryDeptId,
           department: u.primaryDepartment?.name || null,
           lastLoginAt: u.lastLoginAt,
@@ -171,15 +171,8 @@ export function createHRRouter(options: HRRouterOptions) {
           status: d.status,
           businessAttributes: departmentBusinessAttributes(d),
         })),
-        positions: positions.map(p => ({
-          id: p.id,
-          title: p.title,
-          departmentId: p.departmentId,
-          department: p.department?.name || null,
-          headcount: p.headcount,
-          status: p.status,
-          description: p.description,
-        })),
+        jobs,
+        positionNames: Object.fromEntries([...legacy.map(p => [p.id, p.title]), ...jobs.map(j => [j.id, j.name])]),
       });
     } catch (err: any) {
       const r = safeRouteError(err, { fallbackCode: 'HR_PERSONNEL_FETCH_FAILED' });
@@ -190,117 +183,8 @@ export function createHRRouter(options: HRRouterOptions) {
   // ════════════════════════════════════════════
   // Job Positions CRUD
   // ════════════════════════════════════════════
-  router.post('/positions', async (req: Request, res: Response) => {
-    try {
-      const { title, departmentId, description, headcount } = req.body || {};
-      if (!title?.trim()) {
-        return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: 'title is required.' });
-      }
-      if (!(await isAssignableDepartment(departmentId))) {
-        return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请选择所属部门，不能直接归属公司。' });
-      }
-      if (headcount !== undefined && !(Number.isInteger(headcount) && headcount >= 1 && headcount <= 9999)) {
-        return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '编制人数须为 1–9999 的整数。' });
-      }
-      const position = await prisma.jobPosition.create({
-        data: {
-          id: genId('pos'),
-          title: title.trim(),
-          departmentId: departmentId || null,
-          description: description || null,
-          headcount: headcount || 1,
-        },
-      });
-      await writeRouteAuditLog({
-        prisma,
-        actorId: actorIdFromRequest(req),
-        source: 'route:hr:create_position',
-        operation: 'create_position',
-        targetType: 'JobPosition',
-        targetId: position.id,
-        after: { id: position.id, title: position.title, departmentId: position.departmentId, headcount: position.headcount },
-        ip: req.ip || null,
-      });
-      res.json({ ok: true, position });
-    } catch (err: any) {
-      const r = safeRouteError(err, { fallbackCode: 'HR_POSITION_CREATE_FAILED' });
-      res.status(r.status).json({ ok: false, error: r.code, message: r.message });
-    }
-  });
-
-  router.patch('/positions/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { title, departmentId, description, headcount, status } = req.body || {};
-      if (departmentId !== undefined && !(await isAssignableDepartment(departmentId))) {
-        return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请选择所属部门，不能直接归属公司。' });
-      }
-      if (title !== undefined && !String(title).trim()) {
-        return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '岗位名称不能为空。' });
-      }
-      if (headcount !== undefined && !(Number.isInteger(headcount) && headcount >= 1 && headcount <= 9999)) {
-        return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '编制人数须为 1–9999 的整数。' });
-      }
-      if (status !== undefined && !['active', 'inactive'].includes(status)) {
-        return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '岗位状态只能是启用或停用。' });
-      }
-      const updated = await prisma.jobPosition.update({
-        where: { id },
-        data: {
-          ...(title !== undefined && { title: String(title).trim() }),
-          ...(departmentId !== undefined && { departmentId: departmentId || null }),
-          ...(description !== undefined && { description }),
-          ...(headcount !== undefined && { headcount }),
-          ...(status !== undefined && { status }),
-        },
-      });
-      await writeRouteAuditLog({
-        prisma,
-        actorId: actorIdFromRequest(req),
-        source: 'route:hr:update_position',
-        operation: 'update_position',
-        targetType: 'JobPosition',
-        targetId: id,
-        after: { id: updated.id, title: updated.title, status: updated.status, headcount: updated.headcount },
-        ip: req.ip || null,
-      });
-      res.json({ ok: true, position: updated });
-    } catch (err: any) {
-      const r = safeRouteError(err, { fallbackCode: 'HR_POSITION_UPDATE_FAILED' });
-      res.status(r.status).json({ ok: false, error: r.code, message: r.message });
-    }
-  });
-
-  router.delete('/positions/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      // 仍有在职员工挂在该岗位时不允许删除（否则档案显示一个已删除的岗位）；可改为停用。
-      const inUse = await prisma.employeeProfile.count({
-        where: { positionId: id, deletedAt: null, employmentStatus: { in: ['Probation', 'Regular', 'Suspended'] } },
-      });
-      if (inUse > 0) {
-        return res.status(409).json({ ok: false, error: 'POSITION_IN_USE', message: `该岗位仍有 ${inUse} 名在职员工，请先调岗或改为停用。` });
-      }
-      await prisma.jobPosition.update({
-        where: { id },
-        data: { deletedAt: deletionStamp() },
-      });
-      await writeRouteAuditLog({
-        prisma,
-        actorId: actorIdFromRequest(req),
-        source: 'route:hr:delete_position',
-        operation: 'delete_position',
-        targetType: 'JobPosition',
-        targetId: id,
-        after: { deleted: true },
-        ip: req.ip || null,
-      });
-      res.json({ ok: true, deleted: true });
-    } catch (err: any) {
-      const r = safeRouteError(err, { fallbackCode: 'HR_POSITION_DELETE_FAILED' });
-      res.status(r.status).json({ ok: false, error: r.code, message: r.message });
-    }
-  });
+  // 岗位已与账号权限角色合并：岗位在“公司管理 · 岗位与权限”维护，调岗在员工在职变动中办理。
+  router.all(['/positions', '/positions/:id'], (_req, res) => res.status(410).json({ ok: false, error: 'POSITIONS_MERGED', message: '岗位已并入“岗位与权限”，请在公司管理中维护。' }));
 
   // ════════════════════════════════════════════
   // Teams CRUD
@@ -955,7 +839,7 @@ export function createHRRouter(options: HRRouterOptions) {
   const hr = createHrService(prisma);
   const employment = (req: Request) => {
     const actor = extractActorFromRequest(req);
-    return actor?.companyId ? createCompanyEmploymentService(options.prisma, actor.companyId, actor.userId) : hr;
+    return actor?.companyId ? createCompanyEmploymentService(options.prisma, actor.companyId, actor.userId, { canAssignJobs: hasScope(actor, 'users:admin') }) : hr;
   };
 
   /**
@@ -1046,9 +930,9 @@ export function createHRRouter(options: HRRouterOptions) {
       source: 'route:hr:record_employment_event', operation: 'record_employment_event',
       targetType: 'EmploymentEvent', targetId: () => req.body?.userId || 'unknown',
     }, async () => {
-      const { event, accountDisabled, leftTeams } = await employment(req).recordEmploymentEvent(actorIdFromRequest(req) ?? 'unknown', req.body || {});
-      if (leftTeams) invalidateTeamMembershipCache();
-      return { payload: { event, accountDisabled, leftTeams } };
+      const { event, accountDisabled, leftTeams, jobChanged } = await employment(req).recordEmploymentEvent(actorIdFromRequest(req) ?? 'unknown', req.body || {}) as { event: unknown; accountDisabled?: boolean; leftTeams?: number; jobChanged?: boolean };
+      if (leftTeams || jobChanged) invalidateTeamMembershipCache();
+      return { payload: { event, accountDisabled, leftTeams, jobChanged } };
     });
   });
 
