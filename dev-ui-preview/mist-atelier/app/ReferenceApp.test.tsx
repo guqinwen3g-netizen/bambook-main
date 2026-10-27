@@ -166,7 +166,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
     await click(getByRole(host!,'button',{name:'打开准确版本'}));
     input(getByRole(host!,'textbox',{name:'本批次草稿'}) as HTMLInputElement,'属于原身份的草稿');
     await click(host!.querySelector<HTMLButtonElement>('.mist-me')!);
-    const drawer=host!;expect(getByRole(host!,'heading',{name:'我的账号'})).toBeTruthy();
+    const drawer=host!;await waitFor(()=>expect(getByRole(host!,'heading',{name:'我的账号'})).toBeTruthy());
     expect(queryByRole(drawer,'button',{name:'退出登录'})).toBeNull();
     await click(getByRole(drawer,'button',{name:'本地审批人'}));
     await waitFor(()=>expect(new URLSearchParams(location.search).get('view')).toBe('cockpit'));

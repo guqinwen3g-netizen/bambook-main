@@ -2,8 +2,8 @@ import { uiText, ui, localizedPageTitle } from '../../../../services/interfaceLa
 import { isPendingFinanceMistInvoice, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
-import { shipmentStage } from '../pages/modules/ShipmentsPage';
-import { financeReceiptDisplay } from '../pages/FinancePage';
+import { shipmentStage } from './shipmentStage';
+import { financeReceiptDisplay } from './financeReceiptDisplay';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
 import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, payableBills, billRequestedUnpaidMinor } from '../../../../server/src/shared/mistPayables';

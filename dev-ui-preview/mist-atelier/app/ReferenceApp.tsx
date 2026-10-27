@@ -3,16 +3,14 @@ import { interfaceLocale } from '../../../services/interfaceLanguage';
 import { uiText, ui, useInterfaceLanguage, localizedPageTitle } from '../../../services/interfaceLanguage';
 import {businessNow} from './runtime/businessClock';
 import { AccountAccessPage } from './pages/AccountAccessPage';
-import { PlatformSettingsPage } from './pages/PlatformSettingsPage';
-import { SaasAdminPage } from './pages/SaasAdminPage';
 import { exitCompanyManagement } from './runtime/platformAdmin';
-import { PlatformCompanySettingsPage } from './pages/PlatformCompanySettingsPage';
 import React from 'react';
+import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage, LocalAdminPanel } from './pageRegistry';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
 
 import {
-  AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
+  AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, Skeleton, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
   type ChatMessage, type CommandItem, type Crumb, type NavSection, type ThemeMode,
 } from '../../../components/mist';
 import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
@@ -28,36 +26,13 @@ import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
 import {MistPresentedErrorContext,useClaimedUploadRecovery} from './runtime/errorPresentation';
 import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
-import { HomePage } from './pages/HomePage';
-import { DevListPage } from './pages/DevListPage';
-import { DevDetailPage } from './pages/DevDetailPage';
-import { DevCreatePage } from './pages/DevCreatePage';
-import { OrderListPage } from './pages/OrderListPage';
-import { OrderDetailPage } from './pages/OrderDetailPage';
-import { OrderCreatePage } from './pages/OrderCreatePage';
-import { CalendarPage } from './pages/CalendarPage';
-import { FinancePage } from './pages/FinancePage';
-import { CustomerPage } from './pages/CustomerPage';
-import { ProductionPage } from './pages/ProductionPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { AccountPage } from './pages/AccountPage';
 import { canOpenMistView, personalSettingsSection } from './routeAccess';
-import { StatesPage } from './pages/StatesPage';
-import { DesignSystemPage } from './pages/DesignSystemPage';
 import { LoginPage } from './pages/LoginPage';
 import { ForcedPasswordChangePage } from './pages/ChangePassword';
-import { FULFILLMENT_PAGES } from './pages/modules/FulfillmentPages';
-import { MARKET_PAGES } from './pages/modules/MarketPages';
-import { PLATFORM_PAGES } from './pages/modules/PlatformPages';
-import { LocalAdminPanel } from './pages/modules/LocalAdminPanel';
 import { RegisterPage } from './pages/RegisterPage';
-import { EmailsPage } from './pages/modules/EmailsPage';
 import { MistReviewButton, MistReviewProvider, useOptionalMistReviews } from './runtime/reviews';
 import { mistMyWork, mistNavCounts, mistWorkModule, type MistWorkOptions } from './runtime/workQueue';
-import { ApprovalsPage } from './pages/ApprovalsPage';
-import { NotificationsPage } from './pages/NotificationsPage';
 import { workspaceSearchRecords } from './runtime/search';
-import { SearchPage } from './pages/SearchPage';
 import { apiService } from '../../../services/apiService';
 import { platformBusinessDate } from '../../../server/src/shared/mistPlatform';
 import { visibleMistNotifications, mistDailyDigest } from './runtime/notificationPreferences';
@@ -67,14 +42,7 @@ const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单:
 // Running the business app through Vite does not make them client features.
 const REFERENCE_PREVIEW = import.meta.env.VITE_MIST_REFERENCE === 'true';
 
-const PAGES: Record<string, React.FC> = {
-  'platform-admin': SaasAdminPage, account: AccountPage, 'account-settings': AccountPage,
-  ...FULFILLMENT_PAGES,...MARKET_PAGES,...PLATFORM_PAGES,
-  emails: EmailsPage, cockpit: HomePage, development: DevListPage, 'development/detail': DevDetailPage, 'development/new': DevCreatePage,
-  orders: OrderListPage, 'orders/detail': OrderDetailPage, 'orders/new': OrderCreatePage, calendar: CalendarPage, 'payment-vouchers': FinancePage, crm: CustomerPage,
-  'production-board': ProductionPage, 'system-settings': SettingsPage, settings: SettingsPage, 'company-settings': SettingsPage, 'workspace-settings': SettingsPage, approvals: ApprovalsPage, notifications: NotificationsPage, search: SearchPage,
-  ...(REFERENCE_PREVIEW ? { states: StatesPage, 'design-system': DesignSystemPage } : {}),
-};
+const PAGES = buildPages(REFERENCE_PREVIEW);
 const LIVE_VIEWS = new Set(['account','platform-admin','emails','cockpit','development','development/detail','development/new','orders','orders/detail','orders/new','payment-vouchers','crm','production-board','calendar','system-settings','settings','company-settings','workspace-settings','approvals','notifications','search']);
 const ROUTE_KEYS = ['view','id','versionId','batchId','section','customerId','orderLineId','productionId','detail'] as const;
 const GROUPS: Record<string, string> = { overview: '我的事务', customer: '客户与市场', fulfillment: '订单履约', finance: '财务与成本', platform: '平台' };
@@ -361,7 +329,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
-  const permitted = !!personalSection || canOpenMistView(route, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || !!FULFILLMENT_PAGES[route.view] || !!MARKET_PAGES[route.view] || !!PLATFORM_PAGES[route.view];
+  const permitted = !!personalSection || canOpenMistView(route, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || MODULE_VIEW_SET.has(route.view);
   const Page = personalSection ? AccountPage : platformCompany && ['system-settings','settings','company-settings','workspace-settings'].includes(route.view) ? PlatformCompanySettingsPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
     : PAGES[route.view] ?? null;
@@ -391,7 +359,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
         {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
         {workspace.error && !workspace.pending && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}
         {!permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
-          : Page ? <MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (FULFILLMENT_PAGES[route.view]||MARKET_PAGES[route.view]||PLATFORM_PAGES[route.view]?route.view:JSON.stringify(route))} /></MistPresentedErrorContext.Provider>
+          : Page ? <MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<MistPage><Card><Skeleton height={18} width="40%"/><Skeleton height={12}/><Skeleton height={12} width="70%"/></Card></MistPage>}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
       </MistAppShell>
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />

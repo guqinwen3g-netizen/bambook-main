@@ -21,15 +21,8 @@ import { downloadMistCsv, mistDate } from './OrderListPage';
 import { FinanceDevBilling } from './FinanceDevBilling';
 import { useDevice } from '../runtime/devicePreferences';
 
-const STATE = { unmatched: { tone: 'bad' as const, label: '未认领' }, suggested: { tone: 'ai' as const, label: '匹配建议' }, matched: { tone: 'ok' as const, label: '已核销' } };
-export function financeReceiptDisplay(receipt:MistReceipt,funding:readonly OrderFundingAssignment[],allocations:readonly Pick<MistAllocation,'receiptId'|'amount'>[]){
-  const allocated=receipt.remaining<receipt.amount||allocations.some(row=>row.receiptId===receipt.id&&row.amount>0);
-  const attributed=funding.some(row=>row.receiptId===receipt.id&&row.state==='active'&&row.amount>0);
-  if(receipt.remaining===0)return {...STATE.matched,unclaimed:false};
-  if(allocated)return {tone:'warn' as const,label:'部分核销',unclaimed:false};
-  if(attributed)return {tone:'accent' as const,label:'已归属待核销',unclaimed:false};
-  return {...STATE[receipt.state],unclaimed:receipt.state==='unmatched'&&receipt.remaining>0};
-}
+import { financeReceiptDisplay, RECEIPT_STATE as STATE } from '../runtime/financeReceiptDisplay';
+export { financeReceiptDisplay };
 type ImportedReceipt = Extract<MistCommand, { type: 'finance.importReceipts' }>['payload']['receipts'][number];
 export function parseMistReceiptCsv(text: string): ImportedReceipt[] {
   const rows:string[][]=[];let row:string[]=[],value='',quoted=false,closed=false;
