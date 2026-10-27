@@ -267,6 +267,19 @@ export class MistRepository {
     const inputHash = createHash('sha256').update(canonical({ type: 'workspace.create', actorId: prior.userId, name, seed })).digest('hex');
     const create = () => this.transact(async db => {
       const actor = await this.authorize(db, prior);
+      // A company member may have a legacy personal default from before being invited.
+      // Prefer only an existing explicit grant in this company; never merge or grant data here.
+      if (defaultOnly && actor.companyId && !localMode(actor)) {
+        const shared: MistWorkspaceRow[] = await db.mistWorkspace.findMany({
+          where: { companyId: actor.companyId, OR: [{ state: { path: ['memberIds'], array_contains: [actor.userId] } }] },
+          orderBy: { updatedAt: 'desc' },
+        });
+        const joined = shared.find(row => row.companyId === actor.companyId && !archived(row) && isMember(row, actor));
+        if (joined) {
+          this.contract.normalizeMistState?.(joined.state, this.context(actor));
+          return this.view(joined, actor);
+        }
+      }
       const scopedSlug = actor.companyId ? `${slug}@${actor.companyId}` : slug;
       const found = await db.mistWorkspace.findUnique({ where: { ownerId_slug: { ownerId: actor.userId, slug: scopedSlug } } });
       if (found) {

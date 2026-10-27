@@ -396,6 +396,11 @@
 .mist-kb-card b { font-weight: var(--mist-fw-medium); font-size: var(--mist-text-md); }
 .mist-kb-card-foot { display: flex; align-items: center; gap: 8px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); }
 
+/* Colour/size entry stays inside its form; additional sizes scroll within the grid. */
+.mist-breakdown-scroll { min-width: 0; max-width: 100%; overflow-x: auto; }
+.mist-breakdown .mist-input { width: 100%; min-width: 0; box-sizing: border-box; }
+.mist-breakdown .mist-row > .mist-input { flex: 1; }
+
 /* ════ 向导 / 设置 侧导航 ════ */
 .mist-wizard { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--mist-gap); align-items: start; }
 .mist-vsteps { position: sticky; top: 0; display: flex; flex-direction: column; gap: 4px; padding: 10px; }

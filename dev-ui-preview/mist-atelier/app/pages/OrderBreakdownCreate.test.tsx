@@ -92,3 +92,15 @@ it('BB-ORD-3 brings colours, width, weight and composition from a fabric develop
   expect(line).toMatchObject({ qty: 500.5, sourceVersionId: 'ver-f', breakdown: { kind: 'fabric', width: 150, weight: 320, composition: '100% 羊毛', rows: [{ color: '藏青 NV-01', quantity: 300 }, { color: '黑 BK-02', quantity: 200.5 }] } });
   expect(getAllByRole).toBeTruthy();
 });
+
+it('keeps cleared colour quantities blank instead of restoring zero', async () => {
+  render({ view: 'orders/new', customerId: 'customer-a', section: 'garment' }, <OrderCreatePage />);
+  input('季节 / 批次', 'AW27'); await next();
+  await click(getByRole(host, 'button', { name: '按颜色 × 尺码填写数量' }));
+  const label = '条目 1 颜色 1 · S 数量';
+  input(label, '');
+  expect((getByLabelText(host, label) as HTMLInputElement).value).toBe('');
+  input(label, '020');
+  expect((getByLabelText(host, label) as HTMLInputElement).value).toBe('20');
+  expect(host.querySelector('[data-breakdown-total]')!.textContent).toBe('合计 20 件');
+});
