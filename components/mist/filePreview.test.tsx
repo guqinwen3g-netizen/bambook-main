@@ -3,6 +3,9 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as XLSX from 'xlsx';
+const pdfMock = vi.hoisted(() => ({ getDocument: vi.fn(), options: { workerSrc: '' } }));
+vi.mock('pdfjs-dist', () => ({ getDocument: pdfMock.getDocument, GlobalWorkerOptions: pdfMock.options }));
+vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/assets/pdf.worker.mjs' }));
 import { FilePreview, previewKind, formatFileSize, type PreviewFile } from './filePreview';
 
 let host: HTMLDivElement, root: Root;
@@ -81,4 +84,13 @@ describe('附件预览浮层', () => {
     const view = mount([{ id: 'a', name: 'a.png' }], async () => new Blob(['x'])); await flush();
     await act(async () => btn('关闭').click()); expect(view.onClose).toHaveBeenCalled();
   });
+});
+
+
+it.each([['UnknownErrorException','预览加载失败，请刷新后重试'],['InvalidPDFException','PDF 无法解析，文件可能已损坏']])('distinguishes PDF loading errors (%s) from invalid original files',async(name,message)=>{
+  pdfMock.options.workerSrc='';pdfMock.getDocument.mockImplementation(()=>({promise:Promise.reject(Object.assign(new Error('load failed'),{name}))}));
+  mount([{id:'pdf',name:'purchase.pdf',mimeType:'application/pdf'}],async()=>new Blob(['%PDF-1.4'],{type:'application/pdf'}));
+  await flush();expect(document.body.textContent).toContain(message);
+  expect(pdfMock.options.workerSrc).toBe('/assets/pdf.worker.mjs?module=1');
+  if(name==='UnknownErrorException')expect(document.body.textContent).not.toContain('文件可能已损坏');
 });

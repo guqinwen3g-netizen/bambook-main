@@ -184,7 +184,8 @@ function ImageView({ blob, name, zoom, rotate, onFitScale, onFail }: RendererPro
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<any>; destroy: () => Promise<void> };
 async function loadPdfjs() {
   const [pdfjs, worker] = await Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.mjs?url')]);
-  if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  // A prior octet-stream response may be immutable in an existing browser cache.
+  if (!pdfjs.GlobalWorkerOptions.workerSrc) pdfjs.GlobalWorkerOptions.workerSrc = worker.default + (worker.default.includes('?') ? '&' : '?') + 'module=1';
   return pdfjs;
 }
 function PdfView({ blob, zoom, onFitScale, onPages, onFail }: RendererProps) {
@@ -199,7 +200,7 @@ function PdfView({ blob, zoom, onFitScale, onPages, onFail }: RendererProps) {
         if (!live) { void d.destroy(); return; }
         const first = await d.getPage(1), vp = first.getViewport({ scale: 1 });
         if (!live) return; setBase({ w: vp.width, h: vp.height }); setDoc(d); onPages(d.numPages);
-      } catch (e) { if (live) onFail((e as { name?: string })?.name === 'PasswordException' ? '该 PDF 设有打开密码，请下载后输入密码查看' : 'PDF 无法解析，文件可能已损坏'); }
+      } catch (e) { if (live) { const name=(e as { name?: string })?.name; onFail(name === 'PasswordException' ? '该 PDF 设有打开密码，请下载后输入密码查看' : name === 'InvalidPDFException' ? 'PDF 无法解析，文件可能已损坏' : '预览加载失败，请刷新后重试'); } }
     })();
     return () => { live = false; if (loaded) void loaded.destroy(); };
   }, [blob]); // eslint-disable-line react-hooks/exhaustive-deps
