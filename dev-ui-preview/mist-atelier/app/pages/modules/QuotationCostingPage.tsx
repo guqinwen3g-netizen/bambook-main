@@ -49,6 +49,8 @@ import { useNav } from "../../nav";
 import { useRouteDraft, useRouteScope } from "./useRouteDraft";
 import { downloadModuleCsv } from "./ModuleWorkbench";
 import { shortWhen } from "./pageKit";
+import { OptionInput } from '../OptionInput';
+import { CHARGE_UNITS, UNITS } from '../../runtime/tradeOptions';
 const kinds: Record<QuoteCostComponent["kind"], string> = {
   yarn: "纱线 / 原料",
   weaving: "织造",
@@ -503,6 +505,8 @@ export function QuotationCostingPage() {
         type={field === 'sourceDate' || field === 'sourceValidUntil' ? 'date' : 'text'}
         value={String(input[field])}
         disabled={disabled}
+        // 服务端要求成本币种、计价单位与本报价行一致，不换算，因此只读展示。
+        readOnly={field === 'currency' || field === 'unit'}
         onChange={(e) => patch(field, e.target.value)}
       />
     </Field>
@@ -756,6 +760,15 @@ export function QuotationCostingPage() {
                           }
                           required
                         >
+                          {field === "unit" ? (
+                            <OptionInput
+                              ariaLabel={ui`成本${i + 1}单位`}
+                              options={r.scope === "per_line" ? CHARGE_UNITS : UNITS}
+                              value={r[field]}
+                              disabled={disabled}
+                              onChange={(value) => patchRow(i, { [field]: value })}
+                            />
+                          ) : (
                           <TextInput
                             aria-label={ui`成本${i + 1}${["名称", "用量", "单位", "损耗", "单价", "依据"][j]}`}
                             value={r[field]}
@@ -764,6 +777,7 @@ export function QuotationCostingPage() {
                               patchRow(i, { [field]: e.target.value })
                             }
                           />
+                          )}
                         </Field>
                       ))}
                       {r.scope === "per_line" && (

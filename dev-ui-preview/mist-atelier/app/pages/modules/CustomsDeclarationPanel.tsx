@@ -9,6 +9,7 @@ import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTO
 import type { ModuleEditorSpec, ModuleValues } from './ModuleWorkbench';
 import { field, number, text } from './fulfillmentKit';
 import { ActionBar, DetailBlock, businessWhen,type ReasonedAction } from './pageKit';
+import { CUSTOMS_ELEMENT_OPTIONS, CUSTOMS_UNITS } from '../../runtime/tradeOptions';
 
 const hsText = (hs: string) => hs.length === 10 ? `${hs.slice(0, 4)}.${hs.slice(4, 6)}.${hs.slice(6)}` : hs;
 const money = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -24,9 +25,9 @@ export function classificationSpec(family: CustomsFamily, run: (c: MistCommand) 
       { ...field('styles', '适用款号'), hint: '多个款号用逗号分隔' },
       field('brandType', '品牌类型', 'select', true, CUSTOMS_BRAND_TYPES.map(([v, l]) => ({ value: v, label: `${v} ${l}` }))),
       field('preference', '出口享惠情况', 'select', true, CUSTOMS_PREFERENCES.map(([v, l]) => ({ value: v, label: `${v} ${l}` }))),
-      ...labels.map((label, i) => field(elementKey(i), label)),
-      { ...field('legalUnit', '法定第一单位', 'text', false), hint: `留空按编号默认（${family === 'garment' ? '西服套装为套，其他服装为件' : '机织面料为米，针织面料为千克'}）` },
-      { ...field('secondUnit', '法定第二单位', 'text', false), hint: `默认${defaults.secondUnit || '无'}` },
+      ...labels.map((label, i) => CUSTOMS_ELEMENT_OPTIONS[label] ? field(elementKey(i), label, 'choice', true, CUSTOMS_ELEMENT_OPTIONS[label]) : field(elementKey(i), label)),
+      { ...field('legalUnit', '法定第一单位', 'choice', false, CUSTOMS_UNITS), strict: true, hint: `留空按编号默认（${family === 'garment' ? '西服套装为套，其他服装为件' : '机织面料为米，针织面料为千克'}）` },
+      { ...field('secondUnit', '法定第二单位', 'choice', false, CUSTOMS_UNITS), strict: true, hint: `默认${defaults.secondUnit || '无'}` },
       field('note', '备注', 'textarea', false),
     ],
     initialValues: { hsCode: old?.hsCode || '', declaredName: old?.declaredName || '', styles: old?.styles.join(', ') || '', brandType: old?.brandType || '0', preference: old?.preference || '0', ...Object.fromEntries(labels.map((_, i) => [elementKey(i), old?.elements[i] || (labels[i] === '品牌' ? '无品牌' : '')])), legalUnit: old?.legalUnit || '', secondUnit: old ? old.secondUnit : defaults.secondUnit, note: old?.note || '' },

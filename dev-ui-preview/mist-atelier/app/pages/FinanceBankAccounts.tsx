@@ -11,6 +11,8 @@ import { mistCommandPermission, mistFxLockUsage, mistFxRate, mistReceiptSettledM
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
+import { OptionInput } from './OptionInput';
+import { BANKS, CURRENCIES, FX_RATE_SOURCES } from '../runtime/tradeOptions';
 
 export const bankMoney = (amount: number, currency: string) => `${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 export const accountLabel = (a: MistBankAccount) => `${a.name} · ${a.bankName} 尾号 ${a.accountNo.slice(-4)}`;
@@ -54,9 +56,9 @@ export function BankAccountDialog({ draft, used, onClose }: { draft: AccountDraf
       {used && <Banner title={uiText("已有流水归属")}>{uiText("币种、期初日期和期初余额已锁定；如需更正，先解除相关流水的账户归属。")}</Banner>}
       <FormGrid>
         <Field label={uiText("账户名称")} required><TextInput aria-label={uiText("账户名称")} value={form.name} onChange={set('name')} placeholder={uiText("如 美元收款户")} /></Field>
-        <Field label={uiText("开户行")} required><TextInput aria-label={uiText("开户行")} value={form.bankName} onChange={set('bankName')} /></Field>
+        <Field label={uiText("开户行")} required><OptionInput ariaLabel="开户行" options={BANKS} value={form.bankName} onChange={bankName => setForm({ ...form, bankName })} /></Field>
         <Field label={uiText("银行账号")} required><TextInput aria-label={uiText("银行账号")} value={form.accountNo} onChange={set('accountNo')} /></Field>
-        <Field label={uiText("币种")} required><TextInput aria-label={uiText("币种")} value={form.currency} disabled={used} onChange={set('currency')} /></Field>
+        <Field label={uiText("币种")} required><OptionInput ariaLabel="币种" strict options={CURRENCIES} value={form.currency} disabled={used} onChange={currency => setForm({ ...form, currency })} /></Field>
         <Field label={uiText("期初日期")} required><TextInput aria-label={uiText("期初日期")} type="date" value={form.openingDate} disabled={used} onChange={set('openingDate')} /></Field>
         <Field label={uiText("期初余额")} required hint={uiText("按银行对账单填写原币金额")}><TextInput aria-label={uiText("期初余额")} type="number" step="0.01" value={form.openingBalance} disabled={used} onChange={set('openingBalance')} /></Field>
       </FormGrid>
@@ -140,11 +142,11 @@ export function FxDialog({ state, draft, onClose }: { state: MistState; draft: F
           <Field label={ui`入账本币金额${to ? '（' + to.currency + '）' : ''}`} required hint={derived ? ui`成交汇率 ${derived}` : undefined}><TextInput aria-label={uiText("入账本币金额")} type="number" step="0.01" value={form.localAmount} onChange={set('localAmount')} /></Field>
           <Field label={uiText("交割锁汇合同")}><Select aria-label={uiText("交割锁汇合同")} value={form.lockId} options={[{ value: '', label: '不对应锁汇（即期结汇）' }, ...locks.map(({ r, left }) => ({ value: r.id, label: `${r.code} · ${r.ref} · @${r.rate} · 剩余 ${bankMoney(left, r.currency)}` }))]} onChange={set('lockId')} /></Field>
         </> : <>
-          <Field label={uiText("锁汇银行")} required><TextInput aria-label={uiText("锁汇银行")} value={form.bankName} onChange={set('bankName')} /></Field>
-          <Field label={uiText("原币币种")} required><TextInput aria-label={uiText("原币币种")} value={form.currency} onChange={set('currency')} /></Field>
+          <Field label={uiText("锁汇银行")} required><OptionInput ariaLabel="锁汇银行" options={BANKS} value={form.bankName} onChange={bankName => setForm({ ...form, bankName })} /></Field>
+          <Field label={uiText("原币币种")} required><OptionInput ariaLabel="原币币种" strict options={CURRENCIES.filter(option => option.value !== 'CNY')} value={form.currency} onChange={currency => setForm({ ...form, currency })} /></Field>
           <Field label={uiText("原币金额")} required><TextInput aria-label={uiText("原币金额")} type="number" step="0.01" value={form.amount} onChange={set('amount')} /></Field>
           <Field label={uiText("锁定汇率")} required hint={uiText("1 单位原币兑本币，按合同填写")}><TextInput aria-label={uiText("锁定汇率")} value={form.rate} onChange={set('rate')} /></Field>
-          <Field label={uiText("本币币种")} required><TextInput aria-label={uiText("本币币种")} value={form.localCurrency} onChange={set('localCurrency')} /></Field>
+          <Field label={uiText("本币币种")} required><OptionInput ariaLabel="本币币种" strict options={CURRENCIES} value={form.localCurrency} onChange={localCurrency => setForm({ ...form, localCurrency })} /></Field>
           <Field label={uiText("交割截止日")} required><TextInput aria-label={uiText("交割截止日")} type="date" value={form.settleBy} onChange={set('settleBy')} /></Field>
         </>}
         <Field label={uiText("备注")} full><TextInput aria-label={uiText("备注")} value={form.note} onChange={set('note')} /></Field>
@@ -219,8 +221,8 @@ export function FxPeriodRatesCard() {
   const currencies = [...new Set([...(state?.orders || []).map(o => o.currency), ...(state?.bankAccounts || []).map(a => a.currency)])].filter(c => c && c !== 'CNY').sort();
   const lastMonth = (() => { const d = businessNow(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7); })();
   const add: ModuleEditorSpec = { title: '登记月末汇率', submitLabel: '登记', description: '用于报表“月末暂估”折算；通常取中国人民银行月末中间价或开户行月末牌价。每月每币种一条。',
-    fields: [{ key: 'month', label: '月份（YYYY-MM）', type: 'text', required: true }, { key: 'currency', label: '币种', type: 'select', required: true, options: (currencies.length ? currencies : ['USD', 'EUR']).map(c => ({ value: c, label: c })) },
-      { key: 'rate', label: '汇率（1 单位外币兑人民币）', type: 'text', required: true, hint: '最多 6 位小数，如 7.1234' }, { key: 'source', label: '依据', type: 'text', required: true, hint: '如：人民银行 2026-09-30 中间价' }],
+    fields: [{ key: 'month', label: '月份', type: 'month', required: true }, { key: 'currency', label: '币种', type: 'select', required: true, options: (currencies.length ? currencies : ['USD', 'EUR']).map(c => ({ value: c, label: c })) },
+      { key: 'rate', label: '汇率（1 单位外币兑人民币）', type: 'text', required: true, hint: '最多 6 位小数，如 7.1234' }, { key: 'source', label: '依据', type: 'choice', options: FX_RATE_SOURCES, required: true }],
     initialValues: { month: lastMonth, currency: currencies[0] || 'USD', rate: '', source: '' },
     submit: v => run({ type: 'fxrate.period.save', payload: { month: String(v.month || ''), currency: String(v.currency || ''), rate: String(v.rate || '').trim(), source: String(v.source || '') } }) };
   const voidSpec = (r: FxPeriodRate): ModuleEditorSpec => ({ title: `作废 ${r.month} ${r.currency} 月末汇率`, submitLabel: '作废', description: '作废后保留记录，可重新登记正确汇率。', fields: [{ key: 'reason', label: '作废原因', type: 'textarea', required: true }], initialValues: { reason: '' },

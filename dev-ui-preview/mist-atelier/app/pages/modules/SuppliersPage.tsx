@@ -18,6 +18,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { CAPACITY_UNITS, CERTIFICATES, COUNTRIES } from '../../runtime/tradeOptions';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'blocked';
 type FlagFilter = 'all' | 'certExpiring' | 'certExpired' | 'noCert' | 'unrated' | 'scheduled';
@@ -94,12 +95,12 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     fields: [
       ...(s ? [{ key: 'code', label: '供应商编码', readonly: true }] : []), { key: 'name', label: '名称', required: true },
       { key: 'type', label: '供应商类型', type: 'select', required: true, options: typeOptions(s?.type) },
-      { key: 'country', label: '国家地区' },
+      { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES },
       { key: 'serviceAddress', label: '经营地址', when: {key:'type',values:['服务商']} },
       { key: 'serviceCapabilities', label: '服务内容', type: 'textarea', when: {key:'type',values:['服务商']} },
       { key: 'address', label: '实际生产地址', when: productionWhen(s) },
       { key: 'capabilities', label: '工艺与生产能力', type: 'textarea', when: productionWhen(s) },
-      { key: 'capacity', label: '月产能', type: 'number', min: 0, when: productionWhen(s) }, { key: 'capacityUnit', label: '产能单位', when: productionWhen(s) },
+      { key: 'capacity', label: '月产能', type: 'number', min: 0, when: productionWhen(s) }, { key: 'capacityUnit', label: '产能单位', type: 'choice', options: CAPACITY_UNITS, when: productionWhen(s) },
       { key: 'leadDays', label: '通常交付周期（天）', type: 'number', min: 0, when: productionWhen(s) }, { key: 'note', label: '备注', type: 'textarea' },
       ...MIST_BUSINESS_GROUPS.map(g => ({ key: 'handler:' + g, label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, type: 'select' as const, options: [{ value: '', label: '未指定' }, ...memberSelectOptions(members, { group: g, current: s?.handlers?.[g] })] })),
     ],
@@ -108,7 +109,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const certSpec = (s: MarketSupplier, c?: SupplierCertificate): ModuleEditorSpec => ({
     title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存',
     initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil } : { name: '', number: '', issuer: '', validUntil: '' },
-    fields: [{ key: 'name', label: '认证名称', required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }],
+    fields: [{ key: 'name', label: '认证名称', type: 'choice', options: CERTIFICATES, required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }],
     submit: v => run({ type: 'market.supplier.certificate.save', payload: { supplierId: s.id, id: c?.id, name: String(v.name ?? ''), number: String(v.number ?? ''), issuer: String(v.issuer ?? ''), validUntil: String(v.validUntil ?? ''), fileIds: c?.fileIds || [] } }),
   });
   const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅在登记错误时删除；过期认证请保留，以便追溯。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });

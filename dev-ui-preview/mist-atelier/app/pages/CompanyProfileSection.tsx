@@ -9,6 +9,8 @@ import type { MistCompanyProfile } from '../../../../server/src/shared/mistWorks
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
+import { OptionInput } from './OptionInput';
+import { CURRENCIES } from '../runtime/tradeOptions';
 
 /** 公司代码：同事在登录页「立即注册 › 加入公司」时填写；读不到（如本地模式）时不显示。 */
 function CompanyJoinCode() {
@@ -106,7 +108,9 @@ export function CompanyProfileSection({ member, active = true }: { member: boole
     } finally { if (mounted.current && activeScope.current === bound) { working.current = false; setBusy(false); } }
   };
   const field = (f: CompanyProfileField) => <Field key={f.key} label={uiText(f.label)} hint={uiText(problem?.key === f.key ? undefined : f.hint)} error={problem?.key === f.key ? problem.message : undefined}>
-    <TextInput aria-label={uiText(f.label)} type={f.type} value={values[f.key]} disabled={locked} maxLength={f.key === 'defaultCurrency' ? 3 : undefined} className={f.key === 'defaultCurrency' || f.key === 'swift' || f.key === 'bankAccount' ? 'mist-mono' : undefined} onChange={event => edit(f.key, event.target.value)} />
+    {f.key === 'defaultCurrency'
+      ? <OptionInput ariaLabel={f.label} strict options={CURRENCIES} value={values[f.key]} disabled={locked} onChange={value => edit(f.key, value)} />
+      : <TextInput aria-label={uiText(f.label)} type={f.type} value={values[f.key]} disabled={locked} className={f.key === 'swift' || f.key === 'bankAccount' ? 'mist-mono' : undefined} onChange={event => edit(f.key, event.target.value)} />}
   </Field>;
   const notices = empty || !stored?.legalName?.trim() || (problem && !problem.key);
   return <div data-company-profile ref={host}>

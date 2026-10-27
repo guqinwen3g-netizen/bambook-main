@@ -7,8 +7,9 @@ import type { MistCommand, MistOrder, MistState } from '../../../../../server/sr
 import { LC_RESULT_LABEL, LC_STATUS_LABEL, lcAlerts, lcAvailableMinor, lcStatus, readLetterOfCredits, type LcAmendField, type LcPresentationResult, type LcStatus, type MistLcPresentation, type MistLetterOfCredit } from '../../../../../server/src/shared/mistLetterOfCredit';
 import { fmt } from '../../data';
 import type { ModuleEditorSpec, ModuleValues } from './ModuleWorkbench';
-import { emptyOption, Events, field, RecordFiles, text, today } from './fulfillmentKit';
+import { choiceField, emptyOption, Events, field, RecordFiles, text, today } from './fulfillmentKit';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, type ReasonedAction } from './pageKit';
+import { BANKS, CURRENCIES, LC_EXPIRY_PLACES } from '../../runtime/tradeOptions';
 
 const STATUS_TONE: Record<LcStatus, Tone> = { active: 'ok', expired: 'bad', drawn: 'neutral', cancelled: 'neutral' };
 const RESULT_TONE: Record<LcPresentationResult, Tone> = { pending: 'accent', complying: 'ok', discrepant: 'warn', honoured: 'ok', refused: 'bad' };
@@ -41,11 +42,11 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
       { id: 'terms', label: '条款', fields: ['partialShipment', 'transhipment', 'documentsRequired', 'note'] },
     ],
     fields: [
-      field('lcNo', '信用证号'), field('issuingBank', '开证行'), field('advisingBank', '通知行', 'text', false), field('confirmed', '保兑信用证', 'checkbox', false),
+      field('lcNo', '信用证号'), field('issuingBank', '开证行'), field('advisingBank', '通知行', 'choice', false, BANKS), field('confirmed', '保兑信用证', 'checkbox', false),
       field('availableBy', '付款期限', 'select', true, [{ value: 'sight', label: '即期' }, { value: 'usance', label: '远期' }]), { ...field('usanceDays', '远期天数', 'number'), min:1, when:{key:'availableBy',values:['usance']} },
       ...lcOrders.map(o => field(`order:${o.id}`, `${o.code} · ${o.customer} · ${o.currency}`, 'checkbox', false)),
-      field('currency', '币种'), field('amount', '信用证金额', 'number'), field('tolerancePct', '金额容差 %', 'number', false),
-      field('issueDate', '开证日', 'date'), field('latestShipmentDate', '最晚装运日', 'date'), field('expiryDate', '有效期', 'date'), field('expiryPlace', '到期地点', 'text', false),
+      choiceField('currency', '币种', CURRENCIES, true, true), field('amount', '信用证金额', 'number'), field('tolerancePct', '金额容差 %', 'number', false),
+      field('issueDate', '开证日', 'date'), field('latestShipmentDate', '最晚装运日', 'date'), field('expiryDate', '有效期', 'date'), field('expiryPlace', '到期地点', 'choice', false, LC_EXPIRY_PLACES),
       { ...field('presentationDays', '交单期（装运后天数）', 'number', false),min:1 },
       field('partialShipment', '允许分批装运', 'checkbox', false), field('transhipment', '允许转运', 'checkbox', false), field('documentsRequired', '单据要求（46A）', 'textarea', false), field('note', '备注', 'textarea', false),
     ],

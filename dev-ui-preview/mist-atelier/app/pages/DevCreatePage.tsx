@@ -11,6 +11,9 @@ import { ImageRoleTag, imageRole } from './modules/PrimaryImage';
 import { withPrimaryImage } from '../../../../server/src/shared/mistPrimaryImage';
 import { useNav } from '../nav';
 import { FileName } from '../runtime/files';
+import { OptionInput } from './OptionInput';
+import { businessNow } from '../runtime/businessClock';
+import { CURRENCIES, FABRIC_CATEGORIES, FABRIC_PRICE_UNITS, FABRIC_SAMPLE_FORMS, FINISHES, GARMENT_CATEGORIES, WEAVES, WEIGHT_UNITS, WIDTH_UNITS, sampleFormUnit, seasonOptions } from '../runtime/tradeOptions';
 
 const STEPS = [{id:'basic',label:'基本信息'},{id:'style',label:'款式与面料'},{id:'plan',label:'工厂与计划'},{id:'files',label:'附件'},{id:'review',label:'确认提交'}];
 type DevelopmentFormValues = Omit<DevelopmentValues,'collaborators'|'sampleQuantity'> & {collaborators:string;sampleQuantity:string};
@@ -128,8 +131,8 @@ export function DevCreatePage(){
             </>:<Field label={uiText("内部需求方")} required error={err('requester')}><TextInput icon={Users} list="mist-dev-requesters" value={f.requester||''} onChange={event=>{const name=event.target.value,employee=(state?.platform?.employees||[]).find(item=>item.active&&item.name===name);setF(previous=>({...previous,requester:name,requesterId:employee?.id}));setDirty(true);setMessage('');}} placeholder={uiText("员工姓名")} /><datalist id="mist-dev-requesters">{(state?.platform?.employees||[]).filter(item=>item.active).map(item=><option key={item.id} value={item.name}>{item.department}</option>)}</datalist></Field>}
             <Field label={uiText("是否收费")}><Checkbox checked={developmentCharged(f)} label={uiText(developmentCharged(f)?'收费开发':'不收费')} onChange={checked=>set('charged',checked)} /></Field>
             <Field label={uiText(fabricDomain?'客户面料标识':'客户款号')} required={!fabricDomain} error={err('style')}><TextInput value={f.style} onChange={event=>set('style',event.target.value)} placeholder="CC-AW27-…" className="mist-mono" /></Field>
-            <Field label={uiText("季节")}><Select value={f.season} onChange={event=>set('season',event.target.value)} options={['AW27','SS27','AW26']} /></Field>
-            <Field label={uiText(fabricDomain?'面料分类':'品类')}>{fabricDomain?<TextInput value={f.category} onChange={event=>set('category',event.target.value)} placeholder={uiText("实际分类名称")}/>:<Select value={f.category} onChange={event=>set('category',event.target.value)} options={['大衣','西装','Blazer','套装','针织']} />}</Field>
+            <Field label={uiText("季节")}><OptionInput ariaLabel="季节" options={seasonOptions(businessNow().getFullYear(),state?.market?.seasons)} value={f.season} onChange={value=>set('season',value)} /></Field>
+            <Field label={uiText(fabricDomain?'面料分类':'品类')}><OptionInput ariaLabel={fabricDomain?'面料分类':'品类'} options={fabricDomain?FABRIC_CATEGORIES:GARMENT_CATEGORIES} value={f.category} onChange={value=>set('category',value)} /></Field>
             <Field label={uiText("参考开发案")} error={err('sourceDevId')} full><Select value={f.sourceDevId||''} onChange={event=>set('sourceDevId',event.target.value||undefined)} options={[{value:'',label:'不引用已有开发案'},...(state?.devs.filter(dev=>developmentDomain(dev.values)===domain).map(dev=>({value:dev.id,label:`${dev.code} · ${dev.name}`}))||[])]} />{f.sourceDevId&&<Button size="sm" onClick={autofill}>{uiText("带入要求")}</Button>}</Field>
           </FormGrid></FormSection>
           <FormSection title={uiText("开发类型")}><ChoiceCards value={f.kind} onChange={value=>set('kind',value)} options={[{value:'new',title:'全新开发'},{value:'rev',title:'基于已有改版'},{value:'copy',title:'复制其他客户款'}]} /></FormSection>
@@ -148,19 +151,19 @@ export function DevCreatePage(){
               <Field label={uiText("面料描述")} full><TextInput value={f.fabric} onChange={e=>set('fabric',e.target.value)} placeholder={uiText("名称、手感或参考来源；未知可注明待寻样")}/></Field>
               <Field label={uiText("目标成分")} full hint={uiText("纤维:比例，合计100%")}><TextArea value={requirements.composition} onChange={e=>setRequirement('composition',e.target.value)} rows={3}/></Field>
               <Field label={uiText("目标克重")}><TextInput value={requirements.weightValue} inputMode="decimal" onChange={e=>setRequirement('weightValue',e.target.value)}/></Field>
-              <Field label={uiText("克重原单位")}><TextInput value={requirements.weightUnit} onChange={e=>setRequirement('weightUnit',e.target.value)} placeholder={uiText("例如：g/m²")}/></Field>
+              <Field label={uiText("克重原单位")}><OptionInput ariaLabel="克重原单位" options={WEIGHT_UNITS} value={requirements.weightUnit} onChange={value=>setRequirement('weightUnit',value)}/></Field>
               <Field label={uiText("目标幅宽")} hint={uiText("在开发目标中说明全幅或有效幅宽")}><TextInput value={requirements.widthValue} inputMode="decimal" onChange={e=>setRequirement('widthValue',e.target.value)}/></Field>
-              <Field label={uiText("幅宽原单位")}><TextInput value={requirements.widthUnit} onChange={e=>setRequirement('widthUnit',e.target.value)} placeholder={uiText("例如：cm")}/></Field>
+              <Field label={uiText("幅宽原单位")}><OptionInput ariaLabel="幅宽原单位" options={WIDTH_UNITS} value={requirements.widthUnit} onChange={value=>setRequirement('widthUnit',value)}/></Field>
               <Field label={uiText("纱支要求")}><TextInput value={requirements.yarn} onChange={e=>setRequirement('yarn',e.target.value)}/></Field>
-              <Field label={uiText("组织 / 花型")}><TextInput value={requirements.weave} onChange={e=>setRequirement('weave',e.target.value)}/></Field>
+              <Field label={uiText("组织 / 花型")}><OptionInput ariaLabel="组织 / 花型" options={WEAVES} value={requirements.weave} onChange={value=>setRequirement('weave',value)}/></Field>
               <Field label={uiText("颜色参考")}><TextInput value={f.color} onChange={e=>set('color',e.target.value)}/></Field>
-              <Field label={uiText("用途")}><TextInput value={requirements.usage} onChange={e=>setRequirement('usage',e.target.value)}/></Field>
+              <Field label={uiText("用途")}><OptionInput ariaLabel="用途" options={GARMENT_CATEGORIES} value={requirements.usage} onChange={value=>setRequirement('usage',value)}/></Field>
               <Field label={uiText("手感要求")}><TextInput value={requirements.handle} onChange={e=>setRequirement('handle',e.target.value)}/></Field>
-              <Field label={uiText("后整理")}><TextInput value={requirements.finish} onChange={e=>setRequirement('finish',e.target.value)}/></Field>
+              <Field label={uiText("后整理")}><OptionInput ariaLabel="后整理" options={FINISHES} value={requirements.finish} onChange={value=>setRequirement('finish',value)}/></Field>
               <Field label={uiText("性能要求")} full><TextArea value={requirements.performance} onChange={e=>setRequirement('performance',e.target.value)}/></Field>
               <Field label={uiText("目标单价")} error={err('target')}><TextInput value={f.target} inputMode="decimal" onChange={e=>set('target',e.target.value)}/></Field>
-              <Field label={uiText("目标价币种")}><TextInput value={f.targetCurrency||''} onChange={e=>set('targetCurrency',e.target.value)} placeholder={uiText("实际币种")}/></Field>
-              <Field label={uiText("计价单位")}><TextInput value={f.targetUnit||''} onChange={e=>set('targetUnit',e.target.value)} placeholder={uiText("例如：米、码或公斤")}/></Field>
+              <Field label={uiText("目标价币种")}><OptionInput ariaLabel="目标价币种" strict options={CURRENCIES} value={f.targetCurrency||''} onChange={value=>set('targetCurrency',value)}/></Field>
+              <Field label={uiText("计价单位")}><OptionInput ariaLabel="计价单位" strict options={FABRIC_PRICE_UNITS} value={f.targetUnit||''} onChange={value=>set('targetUnit',value)}/></Field>
               <Field label={uiText("开发目标")} full><TextArea value={f.goal} onChange={e=>set('goal',e.target.value)} rows={3}/></Field>
             </FormGrid>
           </FormSection>
@@ -171,7 +174,7 @@ export function DevCreatePage(){
           <FormGrid>
             <Field label={uiText("目标日期")} required error={err('due')}><TextInput icon={CalendarDays} type="date" value={f.due} onChange={event=>set('due',event.target.value)} /></Field>
             <Field label={uiText("协作人")}><TextInput icon={Users} value={f.collaborators} onChange={event=>set('collaborators',event.target.value)} placeholder={uiText("使用顿号或逗号分隔")} /></Field>
-            {fabricDomain&&<><Field label={uiText("计划样品形态")} required><TextInput value={f.sampleForm||''} onChange={e=>{set('sampleForm',e.target.value);set('sampleUnit',e.target.value.trim()==='米样'?'米':'份');}} placeholder={uiText("米样、色样、手织样、样卡…")}/></Field><Field label={uiText("计划样品单位")}><TextInput readOnly value={f.sampleUnit||''}/></Field></>}
+            {fabricDomain&&<><Field label={uiText("计划样品形态")} required><OptionInput ariaLabel="计划样品形态" options={FABRIC_SAMPLE_FORMS} value={f.sampleForm||''} onChange={value=>{set('sampleForm',value);set('sampleUnit',sampleFormUnit(value));}}/></Field><Field label={uiText("计划样品单位")}><TextInput readOnly value={f.sampleUnit||''}/></Field></>}
             <Field label={uiText("首样数量")} required error={err('sampleQuantity')}><TextInput icon={Factory} value={f.sampleQuantity} onChange={event=>set('sampleQuantity',event.target.value)} inputMode={fabricDomain?'decimal':'numeric'} suffix={`${fabricDomain?f.sampleUnit:'件'} / 工厂`} /></Field>
           </FormGrid>
         </FormSection>}

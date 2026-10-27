@@ -16,12 +16,13 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
-import { emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
+import { choiceField, emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
 import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
+import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
 
 type ProcurementEditorSpec = ModuleEditorSpec & { approvalFor?: string };
 type Domain = FulfillmentPurchase['domain'];
@@ -104,7 +105,7 @@ export function ProcurementPage() {
       { id: 'commercial', label: '数量与费用', fields: ['quantity', 'unit', 'price', 'currency'] },
       { id: 'delivery', label: '交付约定', fields: ['due', 'terms', 'destination', 'note'] },
     ],
-    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), field('unit', '计量单位'), field('price', '含税 / 约定单价', 'number'), field('currency', '币种'), field('due', '交期', 'date'), field('terms', '付款条件'), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
+    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), choiceField('unit', '计量单位', UNITS), field('price', '含税 / 约定单价', 'number'), choiceField('currency', '币种', CURRENCIES, true, true), field('due', '交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
     initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : sourceLine?.fulfillmentMode === 'full_package' && domain === 'garment' ? 'finished' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', price: p?.price || 0, currency: p?.currency || sourceOrder?.currency || 'USD', due: p?.due || today(), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
     submit: async values => {
       if (!state) return;
@@ -161,7 +162,7 @@ export function ProcurementPage() {
     const options = (state?.market.suppliers || []).filter(s => s.id !== p.supplierId && !productionSupplierUnavailableReason(s, day)).map(s => ({ value: s.id, label: `${s.name} · ${s.type}` }));
     return { title: '转给其他供应商', submitLabel: '确认转移',
       description: `${p.code} · ${p.supplier} · ${p.quantity} ${p.unit}。原合同按“未执行即取消”办理${prepaid > 0 ? `，已付预付 ${prepaid.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${p.currency} 由原供应商退回` : ''}${state?.productions.some(j => j.sourcePurchaseId === p.id && !j.closed) ? '，对应生产分支关闭（样品与 QC 记录保留）' : ''}；同时按新供应商报价生成采购草稿，须重新提交审批、线下发出并取得供应商确认。请先取得原供应商同意取消的书面确认。`,
-      fields: [field('supplierId', '新供应商', 'select', true, [emptyOption, ...options]), { ...field('price', `新单价（每${p.unit}）`, 'number'), min: 0.0001 }, field('currency', '币种'), field('due', '新供应商交期', 'date'), field('terms', '付款条件'), field('reason', '转移原因与原供应商确认依据', 'textarea')],
+      fields: [field('supplierId', '新供应商', 'select', true, [emptyOption, ...options]), { ...field('price', `新单价（每${p.unit}）`, 'number'), min: 0.0001 }, choiceField('currency', '币种', CURRENCIES, true, true), field('due', '新供应商交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('reason', '转移原因与原供应商确认依据', 'textarea')],
       initialValues: { supplierId: '', price: p.price, currency: p.currency, due: p.due, terms: p.terms, reason: '' },
       submit: async values => { const r = await run({ type: 'sourcing.purchase.transfer', payload: { purchaseId: p.id, supplierId: text(values, 'supplierId'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), reason: text(values, 'reason') } } as any); const id = String((r.result as { id?: string }).id || ''); if (id) go('procurement', id); } };
   };

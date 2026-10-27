@@ -14,6 +14,7 @@ import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { quotationStage } from './QuotationsPage';
+import { CURRENCIES } from '../../runtime/tradeOptions';
 
 type Tab = 'seasons' | 'trends' | 'shows';
 const SEASON_STATUS: Record<MarketSeason['status'], { label: string; tone: Tone }> = { Planning: { label: '规划中', tone: 'neutral' }, Active: { label: '进行中', tone: 'accent' }, Closed: { label: '已结束', tone: 'neutral' } };
@@ -103,14 +104,14 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
     initialValues: x ? { name: x.name, location: x.location, seasonId: x.seasonId, startDate: x.startDate, endDate: x.endDate, booth: x.booth, attendees: x.attendees, cost: x.cost, currency: x.currency, status: x.status, note: x.note } : { name: '', location: '', seasonId: '', startDate: '', endDate: '', booth: '', attendees: '', cost: '0', currency: 'USD', status: 'Planned', note: '' },
     fields: [{ key: 'name', label: '展会名称', required: true }, { key: 'location', label: '地点', required: true }, { key: 'seasonId', label: '季节', type: 'select', options: seasonOptions },
       { key: 'startDate', label: '开始日期', type: 'date', required: true }, { key: 'endDate', label: '结束日期', type: 'date', required: true }, { key: 'booth', label: '展位' }, { key: 'attendees', label: '参与人' },
-      { key: 'cost', label: '费用', required: true, hint: '最多两位小数' }, { key: 'currency', label: '币种', required: true }, { key: 'status', label: '状态', type: 'select', options: (Object.keys(SHOW_STATUS) as MarketShow['status'][]).map(k => ({ value: k, label: SHOW_STATUS[k].label })) }, { key: 'note', label: '备注', type: 'textarea' }],
+      { key: 'cost', label: '费用', required: true, hint: '最多两位小数' }, { key: 'currency', label: '币种', type: 'choice', options: CURRENCIES, strict: true, required: true }, { key: 'status', label: '状态', type: 'select', options: (Object.keys(SHOW_STATUS) as MarketShow['status'][]).map(k => ({ value: k, label: SHOW_STATUS[k].label })) }, { key: 'note', label: '备注', type: 'textarea' }],
     submit: v => run({ type: 'market.show.save', payload: { id: x?.id, input: { name: String(v.name ?? ''), location: String(v.location ?? ''), seasonId: String(v.seasonId ?? ''), startDate: String(v.startDate ?? ''), endDate: String(v.endDate ?? ''), booth: String(v.booth ?? ''), attendees: String(v.attendees ?? ''), cost: String(v.cost ?? ''), currency: String(v.currency ?? '').toUpperCase(), status: String(v.status) as MarketShow['status'], note: String(v.note ?? ''), fileIds: x?.fileIds || [] } } }),
   });
   const leadSpec = (show: MarketShow, l?: MarketLead): ModuleEditorSpec => ({
     title: l ? `编辑线索 ${l.name}` : `录入 ${show.name} 线索`, submitLabel: '保存',
     initialValues: l ? { name: l.name, company: l.company, email: l.email, phone: l.phone, demand: l.demand, followUpDate: l.followUpDate, estimatedValue: l.estimatedValue, currency: l.currency, note: l.note } : { name: '', company: '', email: '', phone: '', demand: '', followUpDate: '', estimatedValue: '0', currency: show.currency, note: '' },
     fields: [{ key: 'name', label: '联系人', required: true }, { key: 'company', label: '公司', required: true }, { key: 'email', label: '邮箱' }, { key: 'phone', label: '电话' }, { key: 'demand', label: '采购需求', type: 'textarea', required: true },
-      { key: 'followUpDate', label: '下次跟进日期', type: 'date' }, { key: 'estimatedValue', label: '预计金额', required: true }, { key: 'currency', label: '币种', required: true }, { key: 'note', label: '跟进说明', type: 'textarea' }],
+      { key: 'followUpDate', label: '下次跟进日期', type: 'date' }, { key: 'estimatedValue', label: '预计金额', required: true }, { key: 'currency', label: '币种', type: 'choice', options: CURRENCIES, strict: true, required: true }, { key: 'note', label: '跟进说明', type: 'textarea' }],
     submit: v => run({ type: 'market.showLead.save', payload: { id: l?.id, input: { name: String(v.name ?? ''), company: String(v.company ?? ''), email: String(v.email ?? ''), phone: String(v.phone ?? ''), demand: String(v.demand ?? ''), customerId: l?.customerId || '', followUpDate: String(v.followUpDate ?? ''), estimatedValue: String(v.estimatedValue ?? ''), actualValue: l?.actualValue || '0', currency: String(v.currency ?? '').toUpperCase(), note: String(v.note ?? ''), source: 'show', parentId: show.id, fileIds: l?.fileIds || [] } } }),
   });
   const convertSpec = (l: MarketLead): ModuleEditorSpec => {
@@ -119,7 +120,7 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
       initialValues: { customerId: same?.id || '', withOpportunity: true, title: `${l.company} · ${l.demand.slice(0, 24)}`, domain: /面料|米|码|fabric/i.test(l.demand) ? 'fabric' : 'garment', amount: l.estimatedValue || '0', currency: l.currency, expectedDate: new Date(dayNum(day) + 30 * 86400000).toISOString().slice(0, 10) },
       fields: [{ key: 'customerId', label: '客户', type: 'select', options: [...(same ? [] : [{ value: '', label: `新建客户：${l.company}` }]), ...(state?.customers || []).map(c => ({ value: c.id, label: `${c.name} · ${c.code}` }))] },
         { key: 'withOpportunity', label: '同时建立商机', type: 'checkbox' }, { key: 'title', label: '商机名称' }, { key: 'domain', label: '业务板块', type: 'select', options: [{ value: 'garment', label: '成衣' }, { value: 'fabric', label: '面料' }] },
-        { key: 'amount', label: '预计金额' }, { key: 'currency', label: '币种' }, { key: 'expectedDate', label: '预计成交日', type: 'date' }],
+        { key: 'amount', label: '预计金额' }, { key: 'currency', label: '币种', type: 'choice', options: CURRENCIES, strict: true }, { key: 'expectedDate', label: '预计成交日', type: 'date' }],
       submit: async v => { const opp = v.withOpportunity ? { title: String(v.title ?? '').trim(), domain: String(v.domain) as 'garment' | 'fabric', amount: String(v.amount ?? ''), currency: String(v.currency ?? '').toUpperCase(), expectedDate: String(v.expectedDate ?? '') } : null;
         if (opp && (!opp.title || !opp.expectedDate)) throw new Error('建立商机须填写商机名称与预计成交日');
         await run({ type: 'market.lead.convertToCrm', payload: { id: l.id, customerId: String(v.customerId ?? '') || undefined, opportunity: opp } }); } };

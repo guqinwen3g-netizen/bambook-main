@@ -11,6 +11,7 @@ import { platformCreditRemaining,platformBusinessDate, type PlatformClaim, type 
 import { CLAIM_LOCATION_LABEL, CLAIM_METHOD_LABEL, CLAIM_RECOVERY_LABEL, CLAIM_RESULT_LABEL, claimLedger, currentClaimVerification, type ClaimGoodsLocation, type ClaimRecovery, type ClaimRecoveryMethod, type ClaimVerifyResult } from '../../../../../server/src/shared/mistClaimCoordination';
 import { billRequestedUnpaidMinor, payableBills, recoveryDeductedMinor, supplierDeductions } from '../../../../../server/src/shared/mistPayables';
 import type { ModuleEditorSpec, ModuleField, ModuleValues } from './ModuleWorkbench';
+import { CONTACT_CHANNELS, CURRENCIES, UNITS } from '../../runtime/tradeOptions';
 
 const RECOVERY_TONE: Record<ClaimRecovery['state'], Tone> = { Negotiating: 'warn', Agreed: 'accent', Settled: 'ok', Waived: 'neutral', Withdrawn: 'neutral' };
 const RESULT_TONE: Record<ClaimVerifyResult, Tone> = { confirmed: 'bad', partial: 'warn', notConfirmed: 'ok' };
@@ -53,7 +54,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
 
   const notify = () => openEditor({
     title: '记录通知',
-    fields: [f('supplierId', '相关工厂', 'select', { options: suppliers }), f('factoryChannel', '联系渠道', 'text', {}), f('note', '备注', 'textarea', { required: false })],
+    fields: [f('supplierId', '相关工厂', 'select', { options: suppliers }), f('factoryChannel', '联系渠道', 'choice', { options: CONTACT_CHANNELS }), f('note', '备注', 'textarea', { required: false })],
     initialValues: { supplierId: notice?.supplierId ?? defaultSupplier, factoryChannel: '', note: '' }, submitLabel: '记录并通知',
     submit: v => command({ type: 'platform.claim.notify', payload: { id: claim.id, supplierId: s(v, 'supplierId'), factoryChannel: s(v, 'factoryChannel'), note: s(v, 'note') } }),
   });
@@ -61,7 +62,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
     title: '记录质检核实',
     fields: [
       f('result', '核实结论', 'select', { options: (Object.keys(CLAIM_RESULT_LABEL) as ClaimVerifyResult[]).map(k => ({ value: k, label: CLAIM_RESULT_LABEL[k] })) }),
-      f('scope', '影响范围', 'textarea'), f('affectedQuantity', '影响数量', 'number', { min: 0, step: '1' }), f('unit', '单位', 'text', { required: false }),
+      f('scope', '影响范围', 'textarea'), f('affectedQuantity', '影响数量', 'number', { min: 0, step: '1' }), f('unit', '单位', 'choice', { required: false, options: UNITS }),
       f('goodsLocation', '货物位置', 'select', { options: (Object.keys(CLAIM_LOCATION_LABEL) as ClaimGoodsLocation[]).map(k => ({ value: k, label: CLAIM_LOCATION_LABEL[k] })) }),
       f('mitigation', '减损措施', 'textarea', { required: false }), f('factoryResponse', '工厂回复', 'textarea', { required: false }),
       f('safety', '涉及安全隐患（需评估停售或召回）', 'checkbox', { required: false }),
@@ -72,7 +73,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
   });
   const openRecovery = () => openEditor({
     title: '向工厂追偿',
-    fields: [f('supplierId', '追偿工厂', 'select', { options: suppliers }), f('currency', '币种', 'text'), f('requested', '追偿金额', 'number', { min: 0.01, step: '0.01' }), f('basis', '追偿依据', 'textarea')],
+    fields: [f('supplierId', '追偿工厂', 'select', { options: suppliers }), f('currency', '币种', 'choice', { options: CURRENCIES, strict: true }), f('requested', '追偿金额', 'number', { min: 0.01, step: '0.01' }), f('basis', '追偿依据', 'textarea')],
     initialValues: { supplierId: notice?.supplierId ?? defaultSupplier, currency: ledger.currency || 'USD', requested: '', basis: check ? '质检核实：' + CLAIM_RESULT_LABEL[check.result] + ' · ' + check.scope : '' }, submitLabel: '提出追偿',
     submit: v => command({ type: 'platform.claim.recovery.open', payload: { claimId: claim.id, supplierId: s(v, 'supplierId'), currency: s(v, 'currency'), requested: n(v, 'requested'), basis: s(v, 'basis') } }),
   });
