@@ -1,3 +1,4 @@
+import { OrderNumberInput } from './OrderNumberInput';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** BB-ORD-3：条目规格明细编辑。成衣：颜色 × 尺码数量表；面料：颜色/色号、门幅、克重、成分 + 按颜色数量。
  * 合计仅作展示，提交后由服务端重新计算并校验。 */
@@ -10,7 +11,6 @@ import { formatOrderQuantity } from './orderAmounts';
 export function blankBreakdown(type: 'garment' | 'fabric'): OrderLineBreakdown {
   return type === 'garment' ? { kind: 'garment', sizes: ['S', 'M', 'L', 'XL'], rows: [{ color: '', quantities: [0, 0, 0, 0] }] } : { kind: 'fabric', composition: '', width: null, weight: null, rows: [{ color: '', quantity: 0 }] };
 }
-const num = (value: string) => value.trim() === '' ? 0 : Number(value);
 const cellStyle: React.CSSProperties = { minWidth: 64 };
 
 type Props = { type: 'garment' | 'fabric'; value?: OrderLineBreakdown; seed?: OrderLineBreakdown; unit: string; disabled?: boolean; label?: string; onChange: (value: OrderLineBreakdown | undefined) => void };
@@ -25,11 +25,12 @@ export function OrderBreakdownEditor({ type, value, seed, unit, disabled, label 
   if (value.kind === 'garment') {
     const set = (next: GarmentBreakdown) => onChange(next);
     return <div className="mist-col" style={{ gap: 8 }} data-breakdown="garment">
-      <div style={{ overflowX: 'auto' }}><table className="mist-breakdown" aria-label={ui`${prefix}颜色 × 尺码数量`} style={{ borderCollapse: 'separate', borderSpacing: 6 }}>
+      <div className="mist-breakdown-scroll" data-mist-scroll="x"><table className="mist-breakdown" aria-label={ui`${prefix}颜色 × 尺码数量`} style={{ borderCollapse: 'separate', borderSpacing: 6, tableLayout: 'fixed', width: '100%', minWidth: 280 + value.sizes.length * 120 }}>
+        <colgroup><col style={{ width: 160 }} />{value.sizes.map((_, index) => <col key={index} />)}<col style={{ width: 80 }} /><col style={{ width: 40 }} /></colgroup>
         <thead><tr><th scope="col">{uiText("颜色")}</th>{value.sizes.map((size, index) => <th key={index} scope="col" style={cellStyle}><div className="mist-row" style={{ gap: 2 }}><TextInput aria-label={ui`${prefix}尺码 ${index + 1}`} value={size} disabled={disabled} onChange={event => set({ ...value, sizes: value.sizes.map((item, i) => i === index ? event.target.value : item) })} />{value.sizes.length > 1 && <IconButton size="sm" icon={X} label={ui`${prefix}删除尺码 ${size || index + 1}`} disabled={disabled} onClick={() => set({ sizes: value.sizes.filter((_, i) => i !== index), kind: 'garment', rows: value.rows.map(row => ({ ...row, quantities: row.quantities.filter((_, i) => i !== index) })) })} />}</div></th>)}<th scope="col">{uiText("小计")}</th><th /></tr></thead>
         <tbody>{value.rows.map((row, rowIndex) => <tr key={rowIndex}>
           <th scope="row"><TextInput aria-label={ui`${prefix}颜色 ${rowIndex + 1}`} value={row.color} placeholder={uiText("颜色")} disabled={disabled} onChange={event => set({ ...value, rows: value.rows.map((item, i) => i === rowIndex ? { ...item, color: event.target.value } : item) })} /></th>
-          {row.quantities.map((quantity, index) => <td key={index} style={cellStyle}><TextInput aria-label={ui`${prefix}${row.color || '颜色 ' + (rowIndex + 1)} · ${value.sizes[index] || '尺码 ' + (index + 1)} 数量`} type="number" min="0" step="1" value={quantity} disabled={disabled} onChange={event => set({ ...value, rows: value.rows.map((item, i) => i === rowIndex ? { ...item, quantities: item.quantities.map((q, j) => j === index ? num(event.target.value) : q) } : item) })} /></td>)}
+          {row.quantities.map((quantity, index) => <td key={index} style={cellStyle}><OrderNumberInput aria-label={ui`${prefix}${row.color || '颜色 ' + (rowIndex + 1)} · ${value.sizes[index] || '尺码 ' + (index + 1)} 数量`} min="0" step="1" value={quantity} disabled={disabled} onValueChange={quantity => set({ ...value, rows: value.rows.map((item, i) => i === rowIndex ? { ...item, quantities: item.quantities.map((q, j) => j === index ? quantity : q) } : item) })} /></td>)}
           <td className="mist-num">{formatOrderQuantity(row.quantities.reduce((sum, q) => sum + (Number.isFinite(q) ? q : 0), 0))}</td>
           <td>{value.rows.length > 1 && <IconButton size="sm" icon={X} label={ui`${prefix}删除颜色 ${row.color || rowIndex + 1}`} disabled={disabled} onClick={() => set({ ...value, rows: value.rows.filter((_, i) => i !== rowIndex) })} />}</td>
         </tr>)}</tbody>
@@ -49,7 +50,7 @@ export function OrderBreakdownEditor({ type, value, seed, unit, disabled, label 
     <div className="mist-col" style={{ gap: 6 }} role="group" aria-label={ui`${prefix}分色数量`}>
       {value.rows.map((row, rowIndex) => <div key={rowIndex} className="mist-row" style={{ gap: 6 }}>
         <TextInput aria-label={ui`${prefix}颜色 / 色号 ${rowIndex + 1}`} value={row.color} placeholder={uiText("颜色 / 色号")} disabled={disabled} onChange={event => set({ ...value, rows: value.rows.map((item, i) => i === rowIndex ? { ...item, color: event.target.value } : item) })} />
-        <TextInput aria-label={ui`${prefix}${row.color || '颜色 ' + (rowIndex + 1)} 数量`} type="number" min="0" step="any" value={row.quantity} suffix={unit} disabled={disabled} onChange={event => set({ ...value, rows: value.rows.map((item, i) => i === rowIndex ? { ...item, quantity: num(event.target.value) } : item) })} />
+        <OrderNumberInput aria-label={ui`${prefix}${row.color || '颜色 ' + (rowIndex + 1)} 数量`} min="0" step="any" value={row.quantity} suffix={unit} disabled={disabled} onValueChange={quantity => set({ ...value, rows: value.rows.map((item, i) => i === rowIndex ? { ...item, quantity } : item) })} />
         {value.rows.length > 1 && <IconButton size="sm" icon={X} label={ui`${prefix}删除颜色 ${row.color || rowIndex + 1}`} disabled={disabled} onClick={() => set({ ...value, rows: value.rows.filter((_, i) => i !== rowIndex) })} />}
       </div>)}
     </div>

@@ -339,7 +339,9 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       } catch { recoveryError = '本机公司选择不可读，请重新选择公司'; }
       // An unresolved command must reopen its exact workspace before recovery.
       const lifecycle=restored&&(restored.kind==='archive'||restored.kind==='restore');
-      const initialId = lifecycle?selected:restored?.workspaceId ?? selected;
+      // Company sessions resolve their current shared default on sign-in, not a legacy personal cache.
+      // Pending writes still reopen their exact source so they can be reconciled safely.
+      const initialId = lifecycle ? selected : restored?.workspaceId ?? (session.user?.companyId ? undefined : selected);
       publishPending(restored); void load(authority, initialId, true, !!lifecycle||!restored && !!selected).finally(() => {
         if (recoveryError && mounted.current && live.current.key === authority.key && live.current.userId === authority.userId && live.current.status === 'authenticated') setError(previous => previous || recoveryError);
       });

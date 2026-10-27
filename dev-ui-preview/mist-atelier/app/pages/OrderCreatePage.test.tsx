@@ -122,3 +122,14 @@ it('blocks a newly frozen customer at final review without discarding the draft 
  store.state!.market.relations.push({id:'held-at-review',name:'客户甲',customerId:'customer-a',supplierId:'',hold:{reason:'暂停新增',actor:'主管',at:context.now}} as any);act(paint);expect((getByRole(host,'button',{name:'创建订单草稿'}) as HTMLButtonElement).disabled).toBe(true);expect(amount('总金额')).toBe('420.00 USD');await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());expect(store.run).not.toHaveBeenCalled();
  store.state!.market.relations=[];act(paint);expect((getByRole(host,'button',{name:'创建订单草稿'}) as HTMLButtonElement).disabled).toBe(false);expect(amount('总金额')).toBe('420.00 USD');expect(store.run).not.toHaveBeenCalled();
 });
+
+it('keeps cleared quantity and price blank while editing, and replaces the initial zero', async () => {
+  input('季节 / 批次', 'AW28'); await next();
+  const quantity = getByLabelText(host, /^数量/) as HTMLInputElement;
+  const price = getByLabelText(host, /^单价 USD/) as HTMLInputElement;
+  input('数量', ''); input('单价 USD', '');
+  expect(quantity.value).toBe(''); expect(price.value).toBe('');
+  input('数量', '025'); input('单价 USD', '012.50');
+  expect(quantity.value).toBe('25'); expect(price.value).toBe('12.50');
+  input('单价 USD', '0.05'); expect(price.value).toBe('0.05');
+});

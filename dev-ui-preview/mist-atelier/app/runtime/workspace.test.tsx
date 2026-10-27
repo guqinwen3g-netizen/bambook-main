@@ -900,3 +900,21 @@ it.each(['committed','not-committed'] as const)('publishes the exact successful 
  let problem:unknown;await act(async()=>{problem=await capture(api.run(command('recovered form')));});const pending=clone(api.pending!);expect(problem).toMatchObject({mistPendingCommand:{workspaceId:A,requestId:pending.requestId,actorId:auth.session.user.id}});expect(api.commandRecovery).toBeNull();
  if(mode==='not-committed')intercept=undefined;await act(async()=>{await api.recover();});expect(api.commandRecovery).toEqual({workspaceId:A,requestId:pending.requestId,actorId:auth.session.user.id,revision:1});expect(stores.get(A)!.revision).toBe(1);expect(receipts.size).toBe(1);expect(api.state!.settings.profileName).toBe('recovered form');expect(posts()).toHaveLength(mode==='committed'?1:2);
 });
+
+it('company sign-in rechecks the server default instead of restoring a personal workspace cache', async () => {
+  auth.session.user = { id: 'actor-a', companyId: 'company-a' } as typeof auth.session.user;
+  localStorage.setItem('bambook.mist.selected-workspace:actor-a', B);
+  await mount();
+  expect(calls[0].url).toBe(BASE + '/default');
+  expect(api.workspace?.id).toBe(A);
+});
+
+it('company sign-in preserves the exact source of an unresolved write', async () => {
+  auth.session.user = { id: 'actor-a', companyId: 'company-a' } as typeof auth.session.user;
+  localStorage.setItem('bambook.mist.selected-workspace:actor-a', A);
+  localStorage.setItem('bambook.mist.pending:actor-a', JSON.stringify({ actorId: 'actor-a', workspaceId: B, requestId: 'company-pending', expectedRevision: 0, kind: 'command', command: command('原对象') }));
+  await mount();
+  expect(calls[0].url).toBe(BASE + '/' + B);
+  expect(api.workspace?.id).toBe(B);
+  expect(api.pending?.workspaceId).toBe(B);
+});
