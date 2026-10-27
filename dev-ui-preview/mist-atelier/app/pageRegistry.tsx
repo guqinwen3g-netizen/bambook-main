@@ -5,7 +5,7 @@ type PageModule = Record<string, unknown>;
 type PageLoader = () => Promise<PageModule>;
 type PageCacheEntry = { pending: Promise<PageModule>; ready?: PageModule };
 const cache = new Map<PageLoader, PageCacheEntry>();
-const preloaders = new WeakMap<React.FC, () => Promise<PageModule>>();
+const preloaders = new WeakMap<React.FC, PageLoader>();
 const load = (loader: () => Promise<PageModule>) => {
   let entry = cache.get(loader);
   if (!entry) {
@@ -26,10 +26,11 @@ export function page(loader: PageLoader, pick: (module: PageModule) => unknown):
     }
     return load(loader).then(module => ({ default: pick(module) as React.FC }));
   });
-  preloaders.set(component, () => load(loader));
+  preloaders.set(component, loader);
   return component;
 }
-export function preloadPage(component: React.FC): Promise<unknown> { return preloaders.get(component)?.() ?? Promise.resolve(); }
+export function preloadPage(component: React.FC): Promise<unknown> { const loader = preloaders.get(component); return loader ? load(loader) : Promise.resolve(); }
+export function pagePreloadKey(component: React.FC): PageLoader | React.FC { return preloaders.get(component) ?? component; }
 const named = (loader: () => Promise<PageModule>, name: string) => page(loader, module => module[name]);
 const mapped = (loader: () => Promise<PageModule>, map: string, view: string) => page(loader, module => (module[map] as Record<string, React.FC>)[view]);
 
