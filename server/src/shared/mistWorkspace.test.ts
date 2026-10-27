@@ -203,3 +203,12 @@ describe('finance reversals keep the original fact and recompute balances',()=>{
     expect(result.orders.find(o=>o.id===order.id)?.state).toBe('生产中');
   });
 });
+
+it('stores registered and contact addresses separately and preserves bank address on partial edits',()=>{
+ const ctx=context();let state=createMistState(ctx,'empty');
+ const companyProfile={legalName:'公司甲',address:'联系地址',englishAddress:'Contact Address',registeredAddress:'注册地址',registeredEnglishAddress:'Registered Address',bankAddress:'Bank Address'};
+ state=applyMistCommand(state,{type:'settings.update',payload:{companyProfile}},ctx).state;
+ expect(state.settings.companyProfile).toMatchObject(companyProfile);
+ state=applyMistCommand(state,{type:'settings.update',payload:{companyProfile:{phone:'123'}}},ctx).state;
+ expect(state.settings.companyProfile).toMatchObject({...companyProfile,phone:'123'});
+});

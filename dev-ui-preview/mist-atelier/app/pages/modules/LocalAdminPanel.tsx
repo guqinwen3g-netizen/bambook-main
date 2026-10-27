@@ -18,7 +18,7 @@ export type LocalCompanyProfile = MistCompanyProfile;
 
 type LocalSettings = MistSettings & { companyProfile?: LocalCompanyProfile };
 type WorkspaceDetails = Pick<MistSettings, 'workspaceName' | 'profileName' | 'profileEmail'>;
-type DraftValues = WorkspaceDetails & LocalCompanyProfile;
+type DraftValues = WorkspaceDetails & Required<LocalCompanyProfile>;
 type DraftKey = keyof DraftValues;
 
 function readDraft(settings?: LocalSettings): DraftValues {
@@ -31,13 +31,14 @@ function readDraft(settings?: LocalSettings): DraftValues {
   };
 }
 
-export function validateLocalCompanyDraft(values: DraftValues): string {
+export function validateLocalCompanyDraft(input: WorkspaceDetails & LocalCompanyProfile): string {
+  const values = { ...EMPTY_COMPANY, ...input };
   if (!values.workspaceName.trim() || values.workspaceName.trim().length > 120) return '公司名称须为1至120字';
   if (!values.profileName.trim() || values.profileName.trim().length > 120) return '显示姓名须为1至120字';
   const profileKeys = Object.keys(EMPTY_COMPANY) as Array<keyof LocalCompanyProfile>;
   if (profileKeys.some(key => values[key].trim()) && !values.legalName.trim() && !values.englishName.trim()) return '请填写中文或英文公司抬头';
   for (const key of profileKeys) {
-    const limit = key === 'address' || key === 'englishAddress' ? 500 : 240;
+    const limit = key.toLowerCase().includes('address') ? 500 : 240;
     if (values[key].length > limit) return `${[...COMPANY_FIELDS, ...EXPORT_FIELDS].find(field => field.key === key)?.label}不能超过${limit}字`;
   }
   for (const [key, label] of [['email', '公司联系邮箱'], ['profileEmail', '显示邮箱']] as const) {

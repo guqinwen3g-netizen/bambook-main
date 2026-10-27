@@ -252,7 +252,7 @@ export const MIST_LOGISTICS_DUTY = 'logistics:handle';
 export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: string): string[] { const owner = root.orders.find(order => order.id === orderId)?.ownerId; return owner ? [owner] : []; }
 export type MistNotification = { id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
 export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget };
-export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAccount:string;swift:string;defaultCurrency:string};
+export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;registeredAddress?:string;registeredEnglishAddress?:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAddress?:string;bankAccount:string;swift:string;defaultCurrency:string};
 export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示公司：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
 export type MistState = {
   internalFabricAllocations?: MistInternalFabricAllocation[];
@@ -1402,9 +1402,9 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const patch=p;
       if(patch.companyProfile!==undefined){
         const input=patch.companyProfile;if(!input||typeof input!=='object'||Array.isArray(input))throw new MistCommandError('VALIDATION','公司资料格式无效');
-        const fields=['legalName','englishName','address','englishAddress','phone','email','taxId','customsCode','bankName','bankAccount','swift','defaultCurrency'] as const;
+        const fields=['legalName','englishName','address','englishAddress','registeredAddress','registeredEnglishAddress','phone','email','taxId','customsCode','bankName','bankAddress','bankAccount','swift','defaultCurrency'] as const;
         if(Object.keys(input).some(k=>!fields.includes(k as any)))throw new MistCommandError('VALIDATION','公司资料含未知字段');
-        const previous=state.settings.companyProfile,value={} as MistCompanyProfile;for(const key of fields)value[key]=text(input[key]??previous?.[key]??'',key,false,500);
+        const previous=state.settings.companyProfile,value={} as MistCompanyProfile;for(const key of fields){if(['registeredAddress','registeredEnglishAddress','bankAddress'].includes(key)&&input[key]===undefined&&previous?.[key]===undefined)continue;value[key]=text(input[key]??previous?.[key]??'',key,false,500);}
         if(value.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email))throw new MistCommandError('VALIDATION','公司邮箱格式无效，请填写如 name@example.com 的完整地址');
         if(value.defaultCurrency&&!/^[A-Z]{3}$/.test(value.defaultCurrency))throw new MistCommandError('VALIDATION','币种须使用三位大写代码，如 USD、CNY、EUR');
         state.settings.companyProfile=value;
