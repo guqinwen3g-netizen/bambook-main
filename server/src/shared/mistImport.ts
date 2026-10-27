@@ -38,15 +38,15 @@ export const MIST_IMPORT_FIELDS: Record<MistImportKind, MistImportField[]> = {
     ...contactFields,
   ],
   supplier: [
-    { key: 'code', label: '供应商编码', required: true, example: 'SUP-001' },
+    { key: 'code', label: '供应商编码', hint: '留空自动生成', example: '' },
     { key: 'name', label: '供应商名称', required: true, example: '江南成衣厂' },
     { key: 'type', label: '供应商类型', required: true, hint: '如 织造、印染、成衣、辅料', example: '成衣' },
     { key: 'country', label: '国家地区', example: '中国' },
     { key: 'address', label: '生产地址', example: '浙江省绍兴市' },
-    { key: 'capabilities', label: '生产能力', required: true, example: '梭织外套、羽绒服' },
-    { key: 'capacity', label: '月产能', required: true, hint: '数字', example: '20000' },
-    { key: 'capacityUnit', label: '产能单位', required: true, example: '件/月' },
-    { key: 'leadDays', label: '交付周期天', required: true, hint: '数字', example: '45' },
+    { key: 'capabilities', label: '生产能力', example: '梭织外套、羽绒服' },
+    { key: 'capacity', label: '月产能', hint: '数字', example: '20000' },
+    { key: 'capacityUnit', label: '产能单位', example: '件/月' },
+    { key: 'leadDays', label: '交付周期天', hint: '数字', example: '45' },
     { key: 'note', label: '备注', example: '' },
     ...contactFields,
   ],
@@ -141,7 +141,6 @@ export function mistImportRowCommand(kind: MistImportKind, row: MistImportRow, c
   }
   if (kind === 'supplier') {
     const service=isServiceSupplier({type:text(row,'type')});
-    for (const [key, label] of [['capacity', '月产能'], ['leadDays', '交付周期天']] as const) if (!service && !text(row, key)) throw new Error(`${label}未填写`);
     return { command: { type: 'market.supplier.save', payload: { input: {
       code: text(row, 'code'), name: text(row, 'name'), type: text(row, 'type'), country: text(row, 'country'), address: text(row, 'address'),
       capabilities: text(row, 'capabilities'), capacity: service?0:num(text(row, 'capacity'), '月产能'), capacityUnit: service?'':text(row, 'capacityUnit'), leadDays: service?0:num(text(row, 'leadDays'), '交付周期天', true),

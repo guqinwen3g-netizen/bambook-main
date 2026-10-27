@@ -21,9 +21,8 @@ describe('service supplier boundaries',()=>{
   f.run('market.supplier.save',{id:row.id,input:{...f.input,name:'浦江货运',capacity:undefined,capacityUnit:undefined,leadDays:undefined}});
   expect(f.state.market.suppliers.find(s=>s.id===row.id)).toMatchObject({contacts:before.contacts,status:before.status,createdAt:before.createdAt,capacity:0,capacityUnit:'',leadDays:0});
   expect(f.state.market.relations.find(r=>r.supplierId===row.id)?.name).toBe('浦江货运');
-  const unchanged=structuredClone(f.state);
-  expect(()=>f.run('market.supplier.save',{input:{...f.input,code:'EMPTY',capabilities:''}})).toThrow('服务内容');expect(f.state).toEqual(unchanged);
-  expect(()=>f.run('market.supplier.save',{input:{...f.input,code:'FACTORY',type:'织造',capacityUnit:''}})).toThrow('产能单位');
+  expect(()=>f.run('market.supplier.save',{input:{...f.input,code:'EMPTY',capabilities:''}})).not.toThrow();
+  expect(()=>f.run('market.supplier.save',{input:{...f.input,code:'FACTORY',type:'织造',capacityUnit:''}})).not.toThrow();
  });
  it('accepts service supplier expense payables without adding a second production cost',()=>{
   const f=fixture(),shipment=f.state.fulfillment.shipments[0];

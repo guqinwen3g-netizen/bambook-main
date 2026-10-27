@@ -218,3 +218,19 @@ describe('多人保存冲突自动重试：只在最新状态上重新执行可�
     expect(mistChangeKeys({ list: [] }, { list: Array.from({ length: 2001 }, (_, i) => ({ id: String(i) })) })).toBeNull();
   });
 });
+
+it('allocates distinct supplier codes for concurrent creators and keeps the code on receipt replay',async()=>{
+ const permissions=[...new Set(MIST_READ_SECTIONS.flatMap(section=>section.permissions)),'suppliers:write'];
+ auth.users.get('owner')!.permissions=permissions;auth.users.get('other')!.permissions=permissions;
+ const repo=repoFor(db,contract),workspace=await repo.create(owner,{name:'Supplier numbering',seed:'empty'});
+ db.workspaces.get(workspace.id).state.memberIds=['other'];
+ const save=(requestId:string,name:string)=>({requestId,expectedRevision:0,command:{type:'market.supplier.save',payload:{input:{name,type:'成衣加工'}}} as const});
+ const first=save('supplier-a','Factory A'),second=save('supplier-b','Factory B');
+ const results=await Promise.all([repo.execute(owner,workspace.id,first),repo.execute(other,workspace.id,second)]);
+ const suppliers=db.workspaces.get(workspace.id).state.market.suppliers;
+ expect(new Set(suppliers.map((s:any)=>s.code)).size).toBe(2);
+ for(const supplier of suppliers)expect(supplier.code).toMatch(/^SUP-\d{4}-000[12]$/);
+ const replay=await repo.execute(owner,workspace.id,first);
+ expect(replay.replayed).toBe(true);expect(replay.receipt.result).toEqual(results[0].receipt.result);
+ expect(db.workspaces.get(workspace.id).state.market.suppliers).toHaveLength(2);
+});
