@@ -9773,8 +9773,8 @@ model OrderSampleCommandCancellation {
 model MistWorkspace {
   id String @id @default(uuid()) @db.Uuid
   ownerId String
-  /// 所属公司。null 表示尚未归属公司的历史空间（迁移前）。
-  companyId String? @db.Uuid
+  /// 所属公司。一家公司只有一个业务库（唯一）；null 表示尚未归属公司的历史空间（迁移前）或本机演示空间。
+  companyId String? @unique @db.Uuid
   slug String
   name String
   revision Int @default(0)
@@ -9785,7 +9785,6 @@ model MistWorkspace {
   receipts MistCommandReceipt[]
   @@unique([ownerId, slug])
   @@index([ownerId, updatedAt])
-  @@index([companyId])
 }
 
 /// Durable idempotency result, committed with the corresponding workspace state.

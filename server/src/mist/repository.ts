@@ -17,6 +17,7 @@ import { hasScope } from '../auth/permissionService';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
+import { applyRoster, canMaintainCompany, companyLibrary, companyRoster, companyRow, companySlug, localMode, singleLibrary } from './companyLibrary';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { primaryImageIds } from '../shared/mistPrimaryImage';
@@ -127,8 +128,12 @@ function activeUploadClaim(state:MistState,claimId:string){
   if(claim!.state==='Closed'||claim!.state==='Cancelled')fail('CLAIM_CLOSED','案件已结束，不能上传新的案件凭据',409);
 }
 export function publicWorkspace(row: MistWorkspaceRow) { return { id: row.id, ownerId: row.ownerId, name: row.name, revision: row.revision, state: row.state }; }
-const archived=(row:MistWorkspaceRow)=>!!row.state.workspaceArchive;
-const localMode=(actor:TokenPayload)=>(actor as any).mistLocal===true&&process.env.MIST_LOCAL_WORKSPACE==='1'&&process.env.NODE_ENV!=='production';
+/** 公司库没有回收站：历史上误标的回收站标记对公司库不生效。 */
+const archived=(row:MistWorkspaceRow)=>!companyRow(row)&&!!row.state.workspaceArchive;
+/** 文件可见性所用的“所有者”：公司库没有所有者特权（未引用附件只对上传人可见）。 */
+const fileOwner=(row:MistWorkspaceRow)=>companyRow(row)?undefined:row.ownerId;
+/** 审批候选与成员目录：公司库只取公司在职成员名册（已覆盖到 memberIds），不含已离职的库创建人。 */
+const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):[row.ownerId,...memberIds(row.state)];
 /** 同一数据库客户端共享的按公司写入队列（多个仓储实例共用一个连接池时也按同一队列排队）。 */
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
 export class MistRepository {
@@ -142,7 +147,7 @@ export class MistRepository {
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
   }
-  /** 所有者或被所有者明确授权的成员可进入；ownerOnly 的动作（回收站、成员管理）只限所有者。 */
+  /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) fail('INVALID_INPUT', '公司编号无效', 400);
     const actor = await this.authorize(db, prior, permission);
@@ -151,14 +156,16 @@ export class MistRepository {
     // 公司边界：会话属于某家公司时，只能进入该公司。
     // 即使某账号在另一家公司里被列为成员，当前会话也不能跨公司读取。
     if (row && row.companyId !== (actor.companyId ?? null) && (row.companyId || actor.companyId)) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
-    if (!row || !(isOwner(row, actor) || (!ownerOnly && isMember(row, actor)))) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
+    if (row && companyRow(row) && ownerOnly) singleLibrary();
+    if (!row || !(companyRow(row) || isOwner(row, actor) || (!ownerOnly && isMember(row, actor)))) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
     if(archived(row)&&!allowArchived)fail('NOT_FOUND','公司已移入回收站，请先恢复',404);
+    if (companyRow(row)) applyRoster(row.state, await companyRoster(db, row.companyId!));
     this.contract.normalizeMistState?.(row.state,this.context(actor));
     return { actor, row };
   }
   /** 包 A：本次执行时的成员目录（所有者 + 授权成员，账号状态与业务组）。账号已停用 / 删除或查不到时记为停用（失败关闭）。 */
   private async memberDirectory(db: any, row: MistWorkspaceRow, actor: TokenPayload) {
-    const ids = [row.ownerId, ...memberIds(row.state)], accounts = new Map<string, { name: string; active: boolean }>();
+    const ids = candidateIds(row), accounts = new Map<string, { name: string; active: boolean }>();
     if (localMode(actor)) for (const profile of MIST_LOCAL_PROFILES) accounts.set(profile.id, { name: profile.name, active: true });
     else if (typeof db.userAccount?.findMany === 'function') for (const user of await db.userAccount.findMany({ where: { id: { in: ids } }, select: { id: true, displayName: true, status: true, deletedAt: true } })) accounts.set(user.id, { name: user.displayName || user.id, active: user.status === 'active' && !user.deletedAt });
     return buildMemberDirectory({ ownerId: row.ownerId, state: row.state, accounts });
@@ -180,22 +187,22 @@ export class MistRepository {
   private emptyState(actor: TokenPayload) { return () => { const context = this.context(actor), state = this.contract.createMistState(context, 'empty'); this.contract.normalizeMistState?.(state, context); return state; }; }
   /** 返回给当前账号的公司：按其现有读权限裁剪，并附带访问说明。 */
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
-    const projected = projectState(row.state, actor, this.emptyState(actor), row.ownerId), owner = isOwner(row, actor);
-    const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner, hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
+    const projected = projectState(row.state, actor, this.emptyState(actor), fileOwner(row)), owner = isOwner(row, actor), company = companyRow(row);
+    const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner && !company, canManageCompany: company ? canMaintainCompany(actor) : owner, hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
     return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}) };
   }
-  async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows = await db.mistWorkspace.findMany({ where: { ...(actor.companyId ? { companyId: actor.companyId } : {}), OR: [{ ownerId: actor.userId }, { state: { path: ['memberIds'], array_contains: [actor.userId] } }] }, orderBy: { updatedAt: 'desc' } }); return rows.filter((row:MistWorkspaceRow)=>!archived(row)&&(isOwner(row,actor)||isMember(row,actor))).map((row:MistWorkspaceRow)=>{this.contract.normalizeMistState?.(row.state,this.context(actor));return this.view(row,actor);}); }); }
+  async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) applyRoster(row.state, await companyRoster(db, row.companyId!)); this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
+  /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */
+  private accessibleWhere(actor: TokenPayload) { return companyLibrary(actor) ? { companyId: actor.companyId } : { ...(actor.companyId ? { companyId: actor.companyId } : {}), OR: [{ ownerId: actor.userId }, { state: { path: ['memberIds'], array_contains: [actor.userId] } }] }; }
+  private accessible(row: MistWorkspaceRow, actor: TokenPayload) { return !archived(row) && (companyLibrary(actor) ? row.companyId === actor.companyId : isOwner(row, actor) || isMember(row, actor)); }
   /** Navigation needs identities only, never the full business snapshots of every company workspace. */
   async listSummaries(prior: TokenPayload) { return this.transact(async db => {
     const actor = await this.authorize(db, prior);
-    const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({where: {
-      ...(actor.companyId ? {companyId: actor.companyId} : {}),
-      OR: [{ownerId: actor.userId}, {state: {path: ['memberIds'], array_contains: [actor.userId]}}]
-    }, orderBy: {updatedAt: 'desc'}});
-    return rows.filter(row => !archived(row) && (isOwner(row, actor) || isMember(row, actor)))
+    const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({where: this.accessibleWhere(actor), orderBy: {updatedAt: 'desc'}});
+    return rows.filter(row => this.accessible(row, actor))
       .map(row => ({id: row.id, name: row.name, ownerId: row.ownerId, revision: row.revision, access: {role: isOwner(row, actor) ? 'owner' : 'member'}}));
   }); }
-  async listArchived(prior:TokenPayload){return this.transact(async db=>{const actor=await this.authorize(db,prior);const rows: MistWorkspaceRow[]=await db.mistWorkspace.findMany({where:{ownerId:actor.userId,...(actor.companyId?{companyId:actor.companyId}:{})},orderBy:{updatedAt:'desc'}});return rows.filter(archived).map(row=>({id:row.id,name:row.name,revision:row.revision,archivedAt:row.state.workspaceArchive!.at}));});}
+  async listArchived(prior:TokenPayload){return this.transact(async db=>{const actor=await this.authorize(db,prior);if(companyLibrary(actor))return [];const rows: MistWorkspaceRow[]=await db.mistWorkspace.findMany({where:{ownerId:actor.userId,...(actor.companyId?{companyId:actor.companyId}:{})},orderBy:{updatedAt:'desc'}});return rows.filter(archived).map(row=>({id:row.id,name:row.name,revision:row.revision,archivedAt:row.state.workspaceArchive!.at}));});}
   private async activeWorkspace(db:any,actor:TokenPayload,preferredId?:string){const rows:MistWorkspaceRow[]=await db.mistWorkspace.findMany({where:{ownerId:actor.userId,...(actor.companyId?{companyId:actor.companyId}:{})},orderBy:{updatedAt:'desc'}});const active=rows.filter(row=>!archived(row));const existing=active.find(row=>row.id===preferredId)??active[0];if(existing){this.contract.normalizeMistState?.(existing.state,this.context(actor));return existing;}const context=this.context(actor),state=this.contract.createMistState(context,'empty');state.settings.workspaceName='新的公司';return db.mistWorkspace.create({data:{id:randomUUID(),ownerId:actor.userId,companyId:actor.companyId??null,slug:'continuation-'+randomUUID(),name:state.settings.workspaceName,revision:0,state}});}
   async changeArchive(prior:TokenPayload,workspaceId:string,input:{requestId:string;expectedRevision:number},action:'archive'|'restore'){
     requestIdentifier(input.requestId);revision(input.expectedRevision);const hash=createHash('sha256').update(canonical({actorId:prior.userId,action,expectedRevision:input.expectedRevision})).digest('hex');
@@ -249,7 +256,7 @@ export class MistRepository {
     return this.transact(async db => {
       const actor = await this.authorize(db, prior), row: MistWorkspaceRow | null = await db.mistWorkspace.findFirst({ where: { id } });
       if (row && row.companyId !== (actor.companyId ?? null) && (row.companyId || actor.companyId)) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
-      if (!row || !(isOwner(row, actor) || isMember(row, actor)) || archived(row)) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
+      if (!row || !(companyRow(row) || isOwner(row, actor) || isMember(row, actor)) || archived(row)) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
       return { id: row!.id, revision: row!.revision };
     });
   }
@@ -267,18 +274,21 @@ export class MistRepository {
     const inputHash = createHash('sha256').update(canonical({ type: 'workspace.create', actorId: prior.userId, name, seed })).digest('hex');
     const create = () => this.transact(async db => {
       const actor = await this.authorize(db, prior);
-      // A company member may have a legacy personal default from before being invited.
-      // Prefer only an existing explicit grant in this company; never merge or grant data here.
-      if (defaultOnly && actor.companyId && !localMode(actor)) {
-        const shared: MistWorkspaceRow[] = await db.mistWorkspace.findMany({
-          where: { companyId: actor.companyId, OR: [{ state: { path: ['memberIds'], array_contains: [actor.userId] } }] },
-          orderBy: { updatedAt: 'desc' },
-        });
-        const joined = shared.find(row => row.companyId === actor.companyId && !archived(row) && isMember(row, actor));
-        if (joined) {
-          this.contract.normalizeMistState?.(joined.state, this.context(actor));
-          return this.view(joined, actor);
+      // 一家公司一个业务库：已有则直接进入（任何在职成员都进同一个库）；没有才由首位进入的成员建立空白公司库。
+      // 显式“新建公司”在公司会话中不可用；不合并、不迁移任何历史个人空间的数据。
+      if (companyLibrary(actor)) {
+        const library: MistWorkspaceRow | null = await db.mistWorkspace.findFirst({ where: { companyId: actor.companyId } });
+        if (library) {
+          if (!defaultOnly) singleLibrary();
+          applyRoster(library.state, await companyRoster(db, actor.companyId!));
+          this.contract.normalizeMistState?.(library.state, this.context(actor));
+          return this.view(library, actor);
         }
+        const state = this.contract.createMistState(this.context(actor), 'empty'); state.settings.workspaceName = name;
+        const row = await db.mistWorkspace.create({ data: { id: randomUUID(), ownerId: actor.userId, companyId: actor.companyId, slug: companySlug(actor.companyId!), name, revision: 0, state } });
+        applyRoster(row.state, await companyRoster(db, actor.companyId!));
+        await this.authorize(db, prior);
+        return this.view(row, actor);
       }
       const scopedSlug = actor.companyId ? `${slug}@${actor.companyId}` : slug;
       const found = await db.mistWorkspace.findUnique({ where: { ownerId_slug: { ownerId: actor.userId, slug: scopedSlug } } });
@@ -363,7 +373,7 @@ export class MistRepository {
         const permission = await permissionFor(db);
         const { actor, row } = await this.own(db, prior, workspaceId, permission, true);
         await this.authorizeCompoundCommand(db, prior, input.command);
-        if (!isOwner(row, actor) && permission === null && !MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) fail('FORBIDDEN', '公司设置只能由所有者修改', 403);
+        if (permission === null && !MEMBER_PERSONAL_COMMANDS.includes(input.command?.type) && !(companyRow(row) ? canMaintainCompany(actor) : isOwner(row, actor))) fail('FORBIDDEN', companyRow(row) ? '公司设置只能由公司管理员修改' : '公司设置只能由所有者修改', 403);
         const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
         if (previous) {
           if (previous.actorId !== actor.userId || previous.inputHash !== hash || previous.expectedRevision !== input.expectedRevision) fail('REQUEST_CONFLICT', '此请求编号已用于另一项操作', 409);
@@ -374,7 +384,7 @@ export class MistRepository {
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
-          const visible = projectState(row.state, actor, this.emptyState(actor), row.ownerId).state;
+          const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row)).state;
           const { type, payload } = input.command;
           const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' ? visible.tasks : type === 'calendar.save' && payload.id ? visible.calendar : undefined;
           if (collection && !collection.some(item => item.id === payload.id)) fail('NOT_FOUND', '记录不存在或当前账号无权访问', 404);
@@ -385,7 +395,7 @@ export class MistRepository {
           const kind=REVIEW_KIND_BY_COMMAND.get(input.command.type),payload=input.command.payload as {id?:unknown;escalationId?:unknown}|undefined;
           const review=kind?this.reviews(row.state).find(task=>task.kind===kind&&(kind==='risk'?task.entityId===payload?.escalationId&&task.target.id===payload?.id:task.entityId===payload?.id)):undefined;
           const subject=review?await this.reviewSubject(db,actor,review.requesterId):actor;
-          context.authority = await mistApprovalAuthority(db,subject,input.command.type,[row.ownerId,...memberIds(row.state)]);
+          context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row));
         }
         if(input.command && MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type)) context.members = await this.memberDirectory(db,row,actor);
         const plan = input.command ? this.contract.getRequiredBusinessNumberPlan?.(row.state, input.command) ?? [] : [];
@@ -528,15 +538,15 @@ export class MistRepository {
   }
   async listReviews(prior:TokenPayload){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);
-    const rows=await db.mistWorkspace.findMany({where:{...(actor.companyId?{companyId:actor.companyId}:{}),OR:[{ownerId:actor.userId},{state:{path:['reviewerIds'],array_contains:[actor.userId]}}]},orderBy:{updatedAt:'desc'},take:200});
-    return rows.filter((row:MistWorkspaceRow)=>!archived(row)).flatMap((row:MistWorkspaceRow)=>this.reviews(row.state).filter(t=>row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any))).map(t=>({workspaceId:row.id,workspaceName:row.name,revision:row.revision,canDecide:t.status==='pending'&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any),files:(t.fileIds||[]).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),...t})));
+    const mine={state:{path:['reviewerIds'],array_contains:[actor.userId]}},rows=await db.mistWorkspace.findMany({where:companyLibrary(actor)?{companyId:actor.companyId,OR:[mine]}:{...(actor.companyId?{companyId:actor.companyId}:{}),OR:[{ownerId:actor.userId},mine]},orderBy:{updatedAt:'desc'},take:200});
+    return rows.filter((row:MistWorkspaceRow)=>!archived(row)).flatMap((row:MistWorkspaceRow)=>this.reviews(row.state).filter(t=>!companyRow(row)&&row.ownerId===actor.userId||(t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any))).map(t=>({workspaceId:row.id,workspaceName:row.name,revision:row.revision,canDecide:t.status==='pending'&&t.reviewerIds.includes(actor.userId)&&hasScope(actor,t.requiredPermission as any),files:(t.fileIds||[]).flatMap(id=>{const file=row.state.files.find(f=>f.id===id);return file?[{id:file.id,name:file.name,size:file.size}]:[];}),...t})));
   });}
   async reviewFile(prior:TokenPayload,workspaceId:string,reviewId:string,fileId:string){return this.transact(async db=>{
     const actor=await this.authorize(db,prior),row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});
     if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批不存在',404);
     if(!row||archived(row))fail('NOT_FOUND','审批不存在',404);
     const task=this.reviews(row.state).find(t=>t.id===reviewId);
-    if(!task||(row.ownerId!==actor.userId&&(!task.reviewerIds.includes(actor.userId)||!hasScope(actor,task.requiredPermission as any))))fail('NOT_FOUND','该审批不属于当前账号',404);
+    if(!task||((companyRow(row)||row.ownerId!==actor.userId)&&(!task.reviewerIds.includes(actor.userId)||!hasScope(actor,task.requiredPermission as any))))fail('NOT_FOUND','该审批不属于当前账号',404);
     if(!(task.fileIds||[]).includes(fileId))fail('FILE_NOT_FOUND','附件不在提交的审批快照中',404);
     const file=row.state.files.find((f:MistStoredFile)=>f.id===fileId);if(!file)fail('FILE_NOT_FOUND','附件不存在',404);
     const bytes=await this.files.read(workspaceId,file);await this.authorize(db,prior);return {file,bytes};
@@ -555,7 +565,7 @@ export class MistRepository {
     return this.writeTransact(workspaceId,async db=>{
       const actor=await this.authorize(db,prior);
       await db.$queryRawUnsafe('SELECT "id" FROM "MistWorkspace" WHERE "id" = $1::uuid FOR UPDATE',workspaceId);
-      const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);
+      const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);if(companyRow(row))applyRoster(row.state,await companyRoster(db,row.companyId));
       const previous=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:input.requestId}}});
       if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','原请求编号用于另一项决定',409);return {receipt:{requestId:previous.requestId,...previous.result},replayed:true};}
       const task=this.reviews(row.state).find(t=>t.id===reviewId);
@@ -568,7 +578,7 @@ export class MistRepository {
       const command={type,payload:task.kind==='risk'?{id:task.target.id,escalationId:task.entityId,decision:input.decision,note:input.note}:{id:task.entityId,decision:input.decision,note:input.note}} as MistCommand;
       // 审批人所见版本落后时：只要期间没有人改过本次审批写入的同一记录，就在最新状态上重新执行审批门禁后落库；否则要求刷新核对。
       const concurrent=row.revision===input.expectedRevision?undefined:await this.concurrentChanges(db,workspaceId,row.revision,input.expectedRevision,type);
-      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,[row.ownerId,...memberIds(row.state)]);
+      const context=this.context(actor,row.state);context.authority=await mistApprovalAuthority(db,subject,type,candidateIds(row));
       if(MIST_MEMBER_DIRECTORY_COMMANDS.includes(type))context.members=await this.memberDirectory(db,row,actor);
       const applied=this.contract.applyMistCommand(structuredClone(row.state),command,context);
       const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
@@ -589,7 +599,7 @@ export class MistRepository {
   async mailSnapshot(prior: TokenPayload, workspaceId: string) {
     return this.transact(async db => {
       const { actor, row } = await this.own(db, prior, workspaceId, 'emails:write');
-      return { actor, revision: row.revision as number, state: projectState(row.state, actor, this.emptyState(actor), row.ownerId).state };
+      return { actor, revision: row.revision as number, state: projectState(row.state, actor, this.emptyState(actor), fileOwner(row)).state };
     });
   }
   /** 邮件服务写回真实收发结果：每次读取最新版本作为基线，经同一命令事务（权限、成员、邮箱归属复核）落库。 */
@@ -612,7 +622,7 @@ export class MistRepository {
     const result = await this.transact(async db => {
       const { row, actor } = await this.own(db, prior, workspaceId);
       const file = Array.isArray(row.state.files) ? row.state.files.find((item: MistStoredFile) => item.id === fileId) : null;
-      if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), row.ownerId)) fail('FILE_NOT_FOUND', '附件不存在或不属于此公司', 404);
+      if (!file || !canReadFile(row.state, actor, fileId, this.emptyState(actor), fileOwner(row))) fail('FILE_NOT_FOUND', '附件不存在或不属于此公司', 404);
       // 只有主图提供抠图；补充图请求抠图尺寸时退回同尺寸普通预览，且不进入抠图队列。
       const cutoutRequested=!!preview?.startsWith('cutout-'),cutoutAllowed=cutoutRequested&&primaryImageIds(row.state).has(file.id),mode:ImagePreviewMode|undefined=cutoutRequested&&!cutoutAllowed?(preview==='cutout-thumb'?'thumb':'display'):preview;
       const previewReady=mode?await this.files.previewReady(workspaceId,file,mode):undefined,bytes = mode ? await this.files.readPreview(workspaceId, file, mode) : await this.files.read(workspaceId, file);

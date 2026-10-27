@@ -1,0 +1,38 @@
+import type { TokenPayload } from '../auth/service';
+import type { MistState, MistWorkspaceMember } from '../shared/mistWorkspace';
+import { hasScope } from '../auth/permissionService';
+import { fail } from './errors';
+
+/**
+ * 一家公司 = 一个业务库（公司-部门-小组与数据范围 R1/R2）。
+ * 公司库没有个人空间、没有切换、没有回收站；进入资格只看当前公司的在职成员身份（由 freshMistAuthority 校验），
+ * 不再看库所有者或 memberIds 授权名单。本机演示模式（mistLocal）维持原有个人空间行为。
+ */
+export const localMode = (actor: TokenPayload) => (actor as any).mistLocal === true && process.env.MIST_LOCAL_WORKSPACE === '1' && process.env.NODE_ENV !== 'production';
+export const companyLibrary = (actor: TokenPayload) => !!actor.companyId && !localMode(actor);
+export const companyRow = (row: { companyId?: string | null }) => !!row.companyId;
+export const companySlug = (companyId: string) => `company@${companyId}`;
+/** 公司库的公司设置、业务组划分等无业务权限点的维护动作：须有公司用户管理权限（管理员 / 老板），不看是否为库创建人。 */
+export const COMPANY_MAINTAIN_SCOPE = 'users:write';
+export const canMaintainCompany = (actor: TokenPayload) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as any);
+export function singleLibrary(): never { fail('COMPANY_SINGLE_LIBRARY', '一家公司只有一个业务库：不能另建、移入回收站或单独授权成员；成员随公司在职身份自动进入', 409); }
+
+export type CompanyRosterEntry = { userId: string; name: string; joinedAt: string };
+/** 当前公司在职成员名册（公司成员 active 且账号 active、未删除）。缺少公司成员表的隔离适配器失败关闭为空名册。 */
+export async function companyRoster(db: any, companyId: string): Promise<CompanyRosterEntry[]> {
+  if (typeof db.companyMember?.findMany !== 'function') return [];
+  const rows: any[] = await db.companyMember.findMany({
+    where: { companyId, status: 'active', user: { status: 'active', deletedAt: null } },
+    select: { userId: true, joinedAt: true, createdAt: true, user: { select: { displayName: true } } },
+    orderBy: { createdAt: 'asc' },
+  });
+  return rows.map(row => ({ userId: row.userId, name: row.user?.displayName || row.userId, joinedAt: new Date(row.joinedAt ?? row.createdAt ?? 0).toISOString() }));
+}
+/**
+ * 把公司名册覆盖到本次读取的库状态上（只在内存中）：成员目录、负责人选择、审批候选都以公司在职成员为准，
+ * 已离职的库创建人不再出现。历史 memberIds/members 授权名单在公司库中不再生效。
+ */
+export function applyRoster(state: MistState, roster: CompanyRosterEntry[]) {
+  state.memberIds = roster.map(entry => entry.userId);
+  state.members = roster.map((entry): MistWorkspaceMember => ({ userId: entry.userId, name: entry.name, addedBy: 'company', addedByName: '公司成员', addedAt: entry.joinedAt }));
+}
