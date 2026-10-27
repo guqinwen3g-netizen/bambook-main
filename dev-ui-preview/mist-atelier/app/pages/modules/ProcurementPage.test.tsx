@@ -47,7 +47,7 @@ it('offers garment supplies and processing without a fabric purchase shortcut',a
   store.state!.orderLines.push({id:'fabric-line',orderId:'fabric-order',name:'斜纹',style:'FB',qty:100,unit:'米',price:10} as any);
   render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
   const content=getByRole(host,'combobox',{name:'采购内容'}) as HTMLSelectElement;
-  expect([...content.options].map(option=>option.value)).toEqual(['','material:trims','material:packaging','processing']);
+  expect([...content.options].map(option=>option.value)).toEqual(['','material:trims','material:packaging','finished','processing']);
   const source=getByRole(host,'combobox',{name:'来源条目'}) as HTMLSelectElement;
   expect([...source.options].map(option=>option.value)).toEqual(['','line:l']);
   expect(content.value).toBe('');
@@ -400,4 +400,13 @@ it.each(['awarded','cancelled'])('keeps closed RFQ history visible without obsol
  render();await click(getByRole(host,'tab',{name:/^询价比价/}));await click(getByRole(getByRole(host,'table',{name:'询价单列表'}),'row',{name:/RFQ-CLOSED/}));
  const detail=host.querySelector('[data-rfq-detail="closed"]') as HTMLElement;expect(detail.textContent).toContain('原要求');
  for(const name of ['登记报价','登记谢绝','追加邀请','取消询价'])expect(queryByRole(detail,'button',{name,exact:true})).toBeNull();
+});
+
+it('prepares a full-package garment as a finished-goods purchase rather than processing',async()=>{
+ store.state!.orderLines[0].fulfillmentMode='full_package';
+ render(undefined,'list',{section:'order:o',orderLineId:'l'});
+ await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
+ const content=getByRole(host,'combobox',{name:'采购内容'}) as HTMLSelectElement;
+ expect([...content.options].map(option=>option.value)).toContain('finished');
+ expect(content.value).toBe('finished');
 });

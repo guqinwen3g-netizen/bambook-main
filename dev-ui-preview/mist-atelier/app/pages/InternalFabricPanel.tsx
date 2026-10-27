@@ -28,7 +28,9 @@ export function InternalFabricPanel({ order, line, go }: Props) {
   React.useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   React.useEffect(() => { lock.current = false; setBusy(false); setEditing(false); setCancelling(false); setFailure(''); setFabricLineId(''); setMetres(''); }, [scope]);
   const allocation = state?.internalFabricAllocations?.find(row => row.orderId === order.id && row.lineId === line.id), activeAllocation = allocation?.status === 'active' ? allocation : undefined;
-  const isGarment = order.type === 'garment' && (line.fulfillmentMode === 'full_package' || !!activeAllocation);
+  const hasFinished = !!state?.fulfillment.purchases.some(p => p.lineId === line.id && p.kind === 'finished' && p.state !== 'cancelled');
+  const hasInternalPlan = !!state?.fulfillment.purchases.some(p => p.lineId === line.id && p.kind === 'processing' && p.state !== 'cancelled') || !!state?.orders.some(o => o.type === 'fabric' && o.governance?.contract.internalSupply?.receiverId === order.ownerId);
+  const isGarment = order.type === 'garment' && (!!activeAllocation || line.fulfillmentMode === 'full_package' && !hasFinished && hasInternalPlan);
   const isSource = order.type === 'fabric' && !!order.governance?.contract.internalSupply;
   const rows = state?.internalFabricAllocations?.filter(row => row.fabricOrderId === order.id && row.fabricLineId === line.id && row.status === 'active') || [];
   const blocked = busy || workspace.loading || workspace.saving || !!workspace.pending || !!workspace.pendingCreate || orderLocked(order) || order.governance?.status === 'pending' || order.governance?.changeDraft?.status === 'pending' || (line as ClosableLine).closure?.status === 'closed' || (line as ClosableLine).closure?.status === 'pending';

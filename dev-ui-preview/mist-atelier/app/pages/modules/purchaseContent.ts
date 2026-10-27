@@ -11,7 +11,7 @@ export function purchaseContent(p: Pick<FulfillmentPurchase, 'kind' | 'materialK
 
 export const purchaseChoices = (domain: FulfillmentPurchase['domain']) => [
   ...Object.entries(MATERIAL_LABEL).filter(([key]) => domain === 'fabric' || key === 'trims' || key === 'packaging').map(([key, label]) => ({ value: `material:${key}`, label })),
-  ...(domain === 'fabric' ? [{ value: 'finished', label: '成品' }] : []),
+  { value: 'finished', label: domain === 'garment' ? '成衣成品（全包）' : '成品' },
   { value: 'processing', label: '加工服务' },
 ];
 

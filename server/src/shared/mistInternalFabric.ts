@@ -86,10 +86,16 @@ export function internalFabricCandidates(root: MistState, orderId: string, lineI
     catch (error) { if (error instanceof MistCommandError) return []; throw error; }
   });
 }
+/** Finished garment contracts mean the supplier supplies materials and manufacturing. */
+export function garmentFinishedPurchases(root: MistState, orderId: string, lineId: string) {
+  return (root.fulfillment?.purchases || []).filter(p => p.orderId === orderId && p.lineId === lineId && p.kind === 'finished' && p.state !== 'cancelled');
+}
 export function assertGarmentMaterial(root: MistState, orderId: string, lineId: string, context: InternalFabricContext): void {
   const { order, line } = lineFor(root, orderId, lineId); if (order.type !== 'garment') return;
   const mode = normalizeGarmentFulfillment(line);
   if (mode.fulfillmentMode !== 'full_package') return;
+  const finished=garmentFinishedPurchases(root,orderId,lineId);
+  if(finished.length){if(!finished.some(p=>p.state==='approved'))fail('全包成品采购尚未批准');return;}
   resolveMember(context, order.ownerId, '成衣负责人', 'garment');
   const rows = (root.internalFabricAllocations || []).filter(row => row.lineId === lineId && row.status === 'active');
   if (rows.length !== 1 || rows[0].orderId !== orderId) fail('全包条目须先分配内部面料');
@@ -99,6 +105,8 @@ export function assertGarmentMaterial(root: MistState, orderId: string, lineId: 
 export function garmentMaterialFingerprint(root: MistState, orderId: string, lineId: string): string {
   const {order,line}=lineFor(root,orderId,lineId);
   if(order.type!=='garment'||line.fulfillmentMode!=='full_package')return '';
+  const finished=garmentFinishedPurchases(root,orderId,lineId).filter(p=>p.state==='approved');
+  if(finished.length)return JSON.stringify({mode:'supplier_full_package',contracts:finished.map(p=>({id:p.id,supplierId:p.supplierId,description:p.description,note:p.note,fileIds:[...p.fileIds].sort()})).sort((a,b)=>a.id.localeCompare(b.id))});
   const allocation=(root.internalFabricAllocations||[]).find(row=>row.orderId===orderId&&row.lineId===lineId&&row.status==='active');
   if(!allocation)fail('全包条目须先分配内部面料');
   const source=lineFor(root,allocation!.fabricOrderId,allocation!.fabricLineId);
@@ -111,8 +119,15 @@ export function garmentMaterialBlocker(root: MistState, orderId: string, lineId:
   try { assertGarmentMaterial(root, orderId, lineId, context); return ''; } catch (error) { if (error instanceof MistCommandError) return error.message; throw error; }
 }
 /** Material classification is a stored business field, never inferred from a description. */
-export function assertGarmentProcurement(order: Pick<MistOrder, 'type'>, line: GarmentFulfillmentFields, kind: string, materialKind: unknown): MistMaterialKind | undefined {
-  if (order.type === 'garment' && kind === 'finished') fail('成衣请选择加工服务');
+export function assertGarmentProcurement(order: Pick<MistOrder, 'type'> & {id?:string}, line: GarmentFulfillmentFields & {id?:string}, kind: string, materialKind: unknown, root?:MistState, purchaseId?:string): MistMaterialKind | undefined {
+  if (order.type === 'garment' && kind === 'finished' && normalizeGarmentFulfillment(line).fulfillmentMode !== 'full_package') fail('仅全包条目可采购成衣成品');
+  if(order.type==='garment'&&root&&order.id&&line.id){
+    const others=(root.fulfillment?.purchases||[]).filter(p=>p.orderId===order.id&&p.lineId===line.id&&p.id!==purchaseId&&p.state!=='cancelled');
+    if(kind==='finished'){
+      if((root.internalFabricAllocations||[]).some(a=>a.orderId===order.id&&a.lineId===line.id&&a.status==='active'))fail('已有内部供料，不能重复采购全包成品');
+      if(others.some(p=>p.kind!=='finished'))fail('已有物料或加工采购，不能混用全包成品采购');
+    }else if(others.some(p=>p.kind==='finished'))fail('已有全包成品采购，不能重复采购物料或加工服务');
+  }
   if (kind !== 'material') {
     if (materialKind !== undefined) fail('仅物料采购填写物料类别', 'VALIDATION');
     if (order.type === 'garment') normalizeGarmentFulfillment(line);
@@ -171,6 +186,7 @@ export function applyInternalFabricCommand(root: MistState, command: InternalFab
   const input = command.payload, target = lineFor(root, identity(input.orderId, '成衣订单'), identity(input.lineId, '成衣条目'));
   assertOrderWritable(target.order); assertOrderLineOpen(target.line);
   if (target.order.type !== 'garment' || normalizeGarmentFulfillment(target.line).fulfillmentMode !== 'full_package') fail('只有全包条目分配内部面料');
+  if(garmentFinishedPurchases(root,target.order.id,target.line.id).length)fail('已有全包成品采购，不能重复分配内部面料');
   resolveMember(context, target.order.ownerId, '成衣负责人', 'garment');
   if (target.order.governance?.status === 'pending' || target.order.governance?.changeDraft?.status === 'pending') fail('审批中不能调整面料分配');
   const supply = supplyFor(root, identity(input.fabricOrderId, '面料订单'), identity(input.fabricLineId, '面料条目'), context);

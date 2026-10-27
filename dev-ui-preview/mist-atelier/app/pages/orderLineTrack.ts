@@ -42,6 +42,9 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
   const material: LineStage = (() => {
     const base = { key: 'material' as const, label: fabric ? '坯布 / 染整' : '面辅料' };
     if (!fabric && line.fulfillmentMode === 'full_package') {
+      const packages=state.fulfillment.purchases.filter(p=>p.lineId===line.id&&p.kind==='finished'&&p.state!=='cancelled');
+      if(packages.length)return {...base,state:packages.every(p=>p.state==='approved')?'now':'todo',caption:packages.every(p=>p.state==='approved')?'供应商包工包料':'全包成品采购待批准',target:{view:'procurement',id:packages[0].id}};
+      if(!state.internalFabricAllocations?.some(a=>a.lineId===line.id&&a.status==='active')&&!state.fulfillment.purchases.some(p=>p.lineId===line.id&&p.kind==='processing'&&p.state!=='cancelled'))return {...base,state:'todo',caption:'待建全包成品采购',target:{view:'procurement'}};
       const allocation = state.internalFabricAllocations?.find(row => row.lineId === line.id && row.status === 'active');
       if (!allocation) return { ...base, state: 'todo', caption: '待分配主料', target: { view: 'orders/detail', id: order.id } };
       const confirmed = materialDeliveryRows(state).filter(row => row.delivery.allocationId === allocation.id && row.delivery.allocationRevision === allocation.revision && row.delivery.confirmation).reduce((total, row) => total + Number(row.outstanding), 0);
