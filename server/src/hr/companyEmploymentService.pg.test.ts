@@ -73,35 +73,40 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
   const change = (type: string, extra = {}) => call('post', '/employment-events').send({ userId: shared, type, effectiveDate: '2026-10-26', ...extra });
 
   it('creates the profile and onboarding record atomically, and retrying does not duplicate onboarding', async () => {
-    const body = { hireDate: '2026-10-26', positionId: p1 };
+    const body = { hireDate: '2026-10-26' };
     expect((await call('put', '/employees/' + shared).send(body)).status).toBe(200);
     expect((await call('put', '/employees/' + shared).send(body)).status).toBe(200);
     expect(await db.employmentEvent.count({ where: { companyId: a, userId: shared, type: 'Onboard' } })).toBe(1);
-    expect((await call('get', '/employees/' + shared)).body.profile).toMatchObject({ positionId: p1, departmentId: d1, employmentStatus: 'Probation' });
+    expect((await call('get', '/employees/' + shared)).body.profile).toMatchObject({ positionId: 'role-sales@' + a, position: '业务员', departmentId: d1, employmentStatus: 'Probation' });
   });
   it('gives a shared login separate employment records in its two companies', async () => {
-    expect((await call('put', '/employees/' + shared, b).send({ hireDate: '2026-10-25', regularDate: '2026-10-26', positionId: pb })).status).toBe(200);
+    expect((await call('put', '/employees/' + shared, b).send({ hireDate: '2026-10-25', regularDate: '2026-10-26' })).status).toBe(200);
     expect(await db.employeeProfile.count({ where: { userId: shared } })).toBe(2);
-    expect((await call('get', '/employees/' + shared, b)).body.profile).toMatchObject({ positionId: pb, employmentStatus: 'Regular' });
+    expect((await call('get', '/employees/' + shared, b)).body.profile).toMatchObject({ positionId: 'role-sales@' + b, employmentStatus: 'Regular' });
     expect((await call('get', '/employment-events')).body.events.every((e: any) => e.companyId === a)).toBe(true);
   });
-  it('rejects cross-company positions and invalid dates without leaving a partial profile', async () => {
-    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-02-30', positionId: p1 })).status).toBe(400);
-    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2999-01-01', positionId: p1 })).status).toBe(400);
-    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-10-26', positionId: pb })).status).toBe(400);
+  it('rejects a 岗位 change outside 调岗 and invalid dates without leaving a partial profile', async () => {
+    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-02-30' })).status).toBe(400);
+    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2999-01-01' })).status).toBe(400);
+    expect((await call('put', '/employees/' + newHire).send({ hireDate: '2026-10-26', positionId: 'role-sales@' + b })).status).toBe(409);
     expect(await db.employeeProfile.count({ where: { companyId: a, userId: newHire } })).toBe(0);
     expect(await db.employmentEvent.count({ where: { companyId: a, userId: newHire } })).toBe(0);
   });
-  it('moves only this company role scope, position and team membership', async () => {
-    expect((await change('Transfer', { toPositionId: p2, toDeptId: d2, fromDeptId: d1, fromPositionId: p1 })).status).toBe(200);
+  it('moves only this company 岗位, department and team membership', async () => {
+    const documents = 'hr-doc-role-' + key;
+    await db.role.create({ data: { id: documents, companyId: a, name: '单证报关', isSystem: false } });
+    expect((await change('Transfer', { toRoleId: documents, toDeptId: d2, fromDeptId: d1, fromPositionId: 'role-sales@' + a })).status).toBe(200);
     const assignments = await db.userRole.findMany({ where: { userId: shared }, include: { role: true } });
-    expect(assignments.find(r => r.role.companyId === a)?.departmentId).toBe(d2);
+    expect(assignments.filter(r => r.role.companyId === a).map(r => [r.roleId, r.departmentId])).toEqual([[documents, d2]]);
+    expect((await db.companyMember.findUniqueOrThrow({ where: { companyId_userId: { companyId: a, userId: shared } } })).jobTitle).toBe('单证报关');
+    expect(await db.employmentEvent.findFirst({ where: { companyId: a, userId: shared, type: 'Transfer' } })).toMatchObject({ fromPositionId: 'role-sales@' + a, toPositionId: documents });
+    await expect(createCompanyEmploymentService(db, a, owner, { canAssignJobs: false }).recordEmploymentEvent(owner, { userId: shared, type: 'Promote', effectiveDate: '2026-10-26', toRoleId: 'role-sales@' + a })).rejects.toMatchObject({ code: 'FORBIDDEN' });
     expect(assignments.find(r => r.role.companyId === b)?.departmentId).toBe(dbDept);
     expect((await db.teamMember.findUniqueOrThrow({ where: { teamId_userId: { teamId: ta, userId: shared } } })).leftAt).not.toBeNull();
     expect((await db.teamMember.findUniqueOrThrow({ where: { teamId_userId: { teamId: tb, userId: shared } } })).leftAt).toBeNull();
     expect((await db.team.findUniqueOrThrow({ where: { id: ta } })).leaderId).toBeNull();
     expect((await db.team.findUniqueOrThrow({ where: { id: tb } })).leaderId).toBe(shared);
-    expect((await call('get', '/employees/' + shared, b)).body.profile.positionId).toBe(pb);
+    expect((await call('get', '/employees/' + shared, b)).body.profile.positionId).toBe('role-sales@' + b);
   });
   it('suspends this company access and restores the prior probation state', async () => {
     expect((await change('Suspend')).status).toBe(200);
@@ -139,7 +144,7 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
       if (name === '$transaction') return (fn: any) => target.$transaction(tx => fn(new Proxy(tx, { get(t, n) { return n === 'auditLog' ? { create: async () => { throw Error('audit unavailable'); } } : Reflect.get(t, n); } })));
       const value = Reflect.get(target, name); return typeof value === 'function' ? value.bind(target) : value;
     } });
-    await expect(createCompanyEmploymentService(failing, a, owner).upsertProfile({ userId: newHire, hireDate: '2026-10-26', positionId: p1 })).rejects.toThrow('audit unavailable');
+    await expect(createCompanyEmploymentService(failing, a, owner).upsertProfile({ userId: newHire, hireDate: '2026-10-26' })).rejects.toThrow('audit unavailable');
     expect(await db.employeeProfile.count({ where: { companyId: a, userId: newHire } })).toBe(0);
     expect(await db.employmentEvent.count({ where: { companyId: a, userId: newHire } })).toBe(0);
   });

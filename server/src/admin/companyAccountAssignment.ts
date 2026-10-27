@@ -8,7 +8,7 @@ export async function saveCompanyAccountAssignment(prisma: PrismaClient, input: 
   companyId: string; userId: string; actorId: string; actorIsOwner: boolean; actorIsPlatform?: boolean;
   roles?: unknown; departmentId?: string | null; displayName?: unknown; email?: unknown;
 }) {
-  if (input.roles !== undefined && (!Array.isArray(input.roles) || input.roles.some(role => typeof role !== 'string'))) throw new CompanyAccountError('请选择有效角色。', 400, 'INVALID_ROLE');
+  if (input.roles !== undefined && (!Array.isArray(input.roles) || input.roles.some(role => typeof role !== 'string'))) throw new CompanyAccountError('请选择有效岗位。', 400, 'INVALID_ROLE');
   if (input.departmentId !== undefined && input.departmentId !== null && (typeof input.departmentId !== 'string' || !input.departmentId.trim())) throw new CompanyAccountError('请选择有效部门。', 400, 'INVALID_DEPARTMENT');
   const suppliedName = input.displayName !== undefined, suppliedEmail = input.email !== undefined;
   if (suppliedName && (typeof input.displayName !== 'string' || !input.displayName.trim())) throw new CompanyAccountError('请填写姓名。', 400, 'VALIDATION_FAILED');
@@ -25,12 +25,15 @@ export async function saveCompanyAccountAssignment(prisma: PrismaClient, input: 
     const owns = (roles: string[]) => roles.some(role => systemRoleCode(role) === SYSTEM_ROLE_IDS.SUPER_ADMIN);
     if ((owns(previous.map(role => role.roleId)) || owns(roleIds)) && !input.actorIsOwner) throw new CompanyAccountError('总经理账号只能由总经理维护。', 403, 'FORBIDDEN');
     const roles = await tx.role.findMany({ where: { id: { in: roleIds }, companyId: input.companyId } });
-    if (roles.length !== roleIds.length) throw new CompanyAccountError('角色不存在。', 400, 'INVALID_ROLE');
+    if (roles.length !== roleIds.length) throw new CompanyAccountError('岗位不存在。', 400, 'INVALID_ROLE');
+    if (roleIds.length > 1) throw new CompanyAccountError('每个账号只设一个岗位。', 400, 'INVALID_ROLE');
     const beforeDepartment = previous.find(role => role.departmentId)?.departmentId ?? null;
     const departmentId = input.departmentId === undefined ? beforeDepartment : input.departmentId;
     if (departmentId && !await tx.department.findFirst({ where: { id: departmentId, companyId: input.companyId, status: 'active', parentId: { not: null } } })) throw new CompanyAccountError('请选择本公司部门。', 400, 'INVALID_DEPARTMENT');
     if (input.userId === input.actorId && owns(previous.map(role => role.roleId)) && !owns(roleIds)) throw new CompanyAccountError('不能移除自己的总经理权限。', 409, 'SELF_OWNER_REQUIRED');
-    if (beforeDepartment !== departmentId && await tx.employeeProfile.findFirst({ where: { companyId: input.companyId, userId: input.userId, deletedAt: null } })) throw new CompanyAccountError('请在人事管理中办理调岗。', 409, 'EMPLOYMENT_TRANSFER_REQUIRED');
+    const jobChanged = [...previous.map(role => role.roleId)].sort().join() !== [...roleIds].sort().join();
+    // 已建员工档案的人，部门与岗位都经人事“调岗 / 晋升”办理，留下在职变动记录。
+    if ((beforeDepartment !== departmentId || jobChanged) && await tx.employeeProfile.findFirst({ where: { companyId: input.companyId, userId: input.userId, deletedAt: null } })) throw new CompanyAccountError('请在人事管理中办理调岗。', 409, 'EMPLOYMENT_TRANSFER_REQUIRED');
     const displayName = suppliedName ? (input.displayName as string).trim() : target.displayName;
     const normalizedEmail = suppliedEmail ? (input.email as string).trim().toLowerCase() : target.email;
     const email = normalizedEmail === target.email?.toLowerCase() ? target.email : normalizedEmail;

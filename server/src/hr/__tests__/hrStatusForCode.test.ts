@@ -175,7 +175,7 @@ describe('★ G6.5 结构守卫：真源之外不得再有第二份 code→statu
   it('★ B22：route.ts 的错误出口只许 safeRouteError，原始错误文本不得外发', () => {
     const route = readSrcStripComments('route.ts');
     // 逐处核准后的收敛数（本文件由 `message: err.message` 36 处收敛而来）：只许降不许升
-    expect(route.match(/safeRouteError\(err, \{ fallbackCode/g)?.length, 'safeRouteError 调用点数与基线不符').toBe(35);
+    expect(route.match(/safeRouteError\(err, \{ fallbackCode/g)?.length, 'safeRouteError 调用点数与基线不符').toBe(32); // 岗位并入岗位与权限后删去三处岗位端点
     expect(route, '路由里又出现把原始错误文本外发的写法').not.toMatch(/message:\s*(err|e)\.message/);
     // 阳性对照（防恒真）：本条删掉前的真实形状必须被抓得住
     expect("res.status(500).json({ ok: false, message: err.message });").toMatch(/message:\s*(err|e)\.message/);

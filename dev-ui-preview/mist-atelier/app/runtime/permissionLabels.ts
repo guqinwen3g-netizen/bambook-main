@@ -17,8 +17,8 @@ const LABELS: Record<string, string> = {
   'orders:approve:change_qty': '审批数量变更',
   'orders:approve:change_price': '审批价格变更',
   'orders:approve:cancel': '审批订单取消',
-  'users:admin': '管理账号与权限',
-  'users:write': '创建、编辑账号与分配角色',
+  'users:admin': '管理账号、岗位与权限',
+  'users:write': '创建、编辑账号与分配岗位',
   'settings:read': '查看公司设置',
   'settings:write': '修改公司设置',
 };
