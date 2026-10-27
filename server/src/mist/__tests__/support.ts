@@ -15,10 +15,15 @@ export class MemoryMistDatabase {
   accounts = new Map<string, { displayName?: string; status?: string; deletedAt?: Date | null }>();
   /** 公司成员表（公司单库名册）：仅公司会话的测试需要登记。 */
   companyMembers: Array<{ companyId: string; userId: string; status: string; joinedAt?: Date; createdAt?: Date }> = [];
+  /** 人事小组（经部门归属公司）：仅小组范围测试需要登记。 */
+  teams: Array<{ id: string; name: string; companyId: string; status?: string; deletedAt?: bigint | null }> = [];
   private queue = Promise.resolve();
   private delegates(workspaces: Map<string, any>, receipts: Map<string, any>, businessSequences = this.businessSequences) {
     return {
       $queryRawUnsafe: async () => [],
+      team: {
+        findMany: async ({ where }: any) => this.teams.filter(t => t.companyId === where.department?.companyId && (t.status ?? 'active') === where.status && !t.deletedAt).map(t => ({ id: t.id, name: t.name })),
+      },
       companyMember: {
         findMany: async ({ where }: any) => this.companyMembers.filter(m => m.companyId === where.companyId && (!where.status || m.status === where.status)).flatMap(m => {
           const a = this.accounts.get(m.userId), user = { displayName: a?.displayName ?? m.userId, status: a?.status ?? 'active', deletedAt: a?.deletedAt ?? null };

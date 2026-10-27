@@ -17,7 +17,8 @@ import { hasScope } from '../auth/permissionService';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
-import { applyRoster, canMaintainCompany, companyLibrary, companyRoster, companyRow, companySlug, localMode, singleLibrary } from './companyLibrary';
+import { applyRoster, canMaintainCompany, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
+import { normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { primaryImageIds } from '../shared/mistPrimaryImage';
@@ -398,6 +399,7 @@ export class MistRepository {
           context.authority = await mistApprovalAuthority(db,subject,input.command.type,candidateIds(row));
         }
         if(input.command && MIST_MEMBER_DIRECTORY_COMMANDS.includes(input.command.type)) context.members = await this.memberDirectory(db,row,actor);
+        if(input.command?.type?.startsWith('teamScope.')) context.teams = await companyTeams(db,row.companyId);
         const plan = input.command ? this.contract.getRequiredBusinessNumberPlan?.(row.state, input.command) ?? [] : [];
         const numbers = await prepareMistBusinessNumbers(db, row.state, plan, context.now);
         context.consumeBusinessNumber = prefix => numbers.consume(prefix);
@@ -593,6 +595,21 @@ export class MistRepository {
       await this.markRevision(db,workspaceId,actor.userId,row.revision,next.revision,changeKeys);
       await this.authorize(db,prior,task.requiredPermission);
       return {receipt:{requestId:input.requestId,...result},replayed:false};
+    });
+  }
+  /** 小组协作范围：本公司在用的小组、各组已存范围与当前匹配数量。范围明细会涉及全公司业务，限人事小组管理权限。 */
+  async teamScopes(prior: TokenPayload, workspaceId: string) {
+    return this.transact(async db => {
+      const { row } = await this.own(db, prior, workspaceId, 'hr:write'), teams = await companyTeams(db, row.companyId), stored = row.state.teamScopes ?? [];
+      return { revision: row.revision, teams: teams.map(team => { const scope = stored.find(item => item.teamId === team.id); return { ...team, scope: scope ?? null, counts: scope ? previewTeamScope(row.state, scope).counts : null }; }) };
+    });
+  }
+  /** 设置范围时的即时预览：用与保存相同的校验，在最新完整数据上匹配，不写库。 */
+  async previewTeamScope(prior: TokenPayload, workspaceId: string, input: unknown) {
+    return this.transact(async db => {
+      const { row } = await this.own(db, prior, workspaceId, 'hr:write');
+      const { team, scope } = normalizeTeamScopeInput(row.state, input, await companyTeams(db, row.companyId));
+      return { teamId: team.id, revision: row.revision, preview: previewTeamScope(row.state, scope) };
     });
   }
   /** 邮件服务读取：按当前账号的读投影返回（只含本人/授权成员可见的邮箱、邮件与附件），并要求邮件编辑权限。 */

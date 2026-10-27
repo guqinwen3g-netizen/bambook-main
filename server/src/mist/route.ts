@@ -175,6 +175,8 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.get('/workspaces/:id/assistant/status',run(async(req,res)=>{await repository.getForAssistant(actor(req),req.params.id);res.json(getMistAssistantStatus());}));
   router.post('/workspaces/:id/assistant',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.json(await runMistAssistant({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
   router.post('/workspaces/:id/quotation-cost-advisor',run(async(req,res)=>{const context=await repository.getForAssistant(actor(req),req.params.id);const controller=new AbortController();res.once('close',()=>{if(!res.writableEnded)controller.abort();});res.setHeader('Cache-Control','private, no-store');res.json(await runQuoteCostAdvisor({...context,body:withResponseLocale(req.body,req.get('X-Bambook-Locale')),signal:controller.signal}));}));
+  router.get('/workspaces/:id/team-scopes', run(async (req, res) => { res.json(await repository.teamScopes(actor(req), req.params.id)); }));
+  router.post('/workspaces/:id/team-scopes/preview', run(async (req, res) => { res.json(await repository.previewTeamScope(actor(req), req.params.id, exactBody(req.body, ['teamId', 'conditions', 'picks', 'exclusions', 'note']))); }));
   router.post('/workspaces/:id/commands', run(async (req, res) => {
     const body = exactBody(req.body, ['requestId', 'expectedRevision', 'command']);
     exactBody(body.command, ['type', 'payload']);

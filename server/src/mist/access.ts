@@ -74,6 +74,11 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   const hidden = hiddenSections(actor), next: MistState = { ...state };
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
+  // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
+  if (!hasScope(actor, 'hr:write')) {
+    delete next.teamScopes;
+    next.events = (state.events || []).filter(event => event.entityType !== 'teamScope');
+  }
   if (hidden.length) {
     const blank = empty();
     for (const section of hidden) for (const path of section.paths) {
@@ -83,7 +88,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     }
     const deniedTypes = new Set(hidden.flatMap(s => s.entityTypes)), allowedTypes = new Set(MIST_READ_SECTIONS.flatMap(s => s.entityTypes));
     const visibleTarget = targetVisibility(hidden);
-    next.events = (state.events || []).filter(event => event.entityType === 'workspace' || allowedTypes.has(event.entityType) && !deniedTypes.has(event.entityType));
+    next.events = (next.events || []).filter(event => event.entityType === 'workspace' || allowedTypes.has(event.entityType) && !deniedTypes.has(event.entityType));
     next.tasks = (state.tasks || []).filter(task => visibleTarget(task.target));
     next.notifications = (state.notifications || []).filter(item => visibleTarget(item.target));
     next.calendar = (state.calendar || []).filter(item => visibleTarget(item.target));

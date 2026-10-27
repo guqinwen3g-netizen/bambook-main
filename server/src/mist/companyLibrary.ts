@@ -36,3 +36,10 @@ export function applyRoster(state: MistState, roster: CompanyRosterEntry[]) {
   state.memberIds = roster.map(entry => entry.userId);
   state.members = roster.map((entry): MistWorkspaceMember => ({ userId: entry.userId, name: entry.name, addedBy: 'company', addedByName: '公司成员', addedAt: entry.joinedAt }));
 }
+
+/** 本公司在用的人事小组（小组经部门归属公司）；非公司库（本机演示）没有人事小组。 */
+export async function companyTeams(db: any, companyId: string | null | undefined): Promise<Array<{ id: string; name: string }>> {
+  if (!companyId || typeof db.team?.findMany !== 'function') return [];
+  const rows: any[] = await db.team.findMany({ where: { deletedAt: null, status: 'active', department: { companyId } }, select: { id: true, name: true }, orderBy: { createdAt: 'asc' } });
+  return rows.map(row => ({ id: row.id, name: row.name }));
+}
