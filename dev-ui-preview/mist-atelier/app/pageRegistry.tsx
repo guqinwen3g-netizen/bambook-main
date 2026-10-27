@@ -24,7 +24,7 @@ const account = () => import('./pages/AccountPage');
 export const MODULE_VIEWS = {
   FULFILLMENT_PAGES: ['samples', 'qc-workbench', 'shipments', 'procurement', 'inventory', 'customs', 'document-center', 'mes'],
   MARKET_PAGES: ['products', 'quotations', 'suppliers', 'relations', 'seasons', 'marketing'],
-  PLATFORM_PAGES: ['invoices', 'pricing', 'bom', 'risks', 'claims', 'reports', 'dashboard', 'data-center', 'hr', 'business-tools', 'admin-panel', 'assistant'],
+  PLATFORM_PAGES: ['invoices', 'pricing', 'bom', 'risks', 'claims', 'reports', 'dashboard', 'data-center', 'hr', 'business-tools', 'assistant'],
 } as const;
 export const MODULE_VIEW_SET = new Set<string>(Object.values(MODULE_VIEWS).flat());
 const loaders = { FULFILLMENT_PAGES: fulfillment, MARKET_PAGES: market, PLATFORM_PAGES: platform };
@@ -34,7 +34,6 @@ export const SettingsPage = named(settings, 'SettingsPage');
 export const SaasAdminPage = named(() => import('./pages/SaasAdminPage'), 'SaasAdminPage');
 export const PlatformSettingsPage = named(() => import('./pages/PlatformSettingsPage'), 'PlatformSettingsPage');
 export const PlatformCompanySettingsPage = named(() => import('./pages/PlatformCompanySettingsPage'), 'PlatformCompanySettingsPage');
-export const LocalAdminPanel = named(() => import('./pages/modules/LocalAdminPanel'), 'LocalAdminPanel');
 export const StatesPage = named(() => import('./pages/StatesPage'), 'StatesPage');
 export const DesignSystemPage = named(() => import('./pages/DesignSystemPage'), 'DesignSystemPage');
 
@@ -55,7 +54,8 @@ export function buildPages(referencePreview: boolean): Record<string, React.FC> 
     'payment-vouchers': named(() => import('./pages/FinancePage'), 'FinancePage'),
     crm: named(() => import('./pages/CustomerPage'), 'CustomerPage'),
     'production-board': named(() => import('./pages/ProductionPage'), 'ProductionPage'),
-    'system-settings': SettingsPage, settings: SettingsPage, 'company-settings': SettingsPage, 'workspace-settings': SettingsPage,
+    // 公司管理：原公司设置与公司后台的地址都打开同一页的对应分区；人事管理（hr）保留独立页面。
+    'system-settings': SettingsPage, settings: SettingsPage, 'company-settings': SettingsPage, 'workspace-settings': SettingsPage, 'admin-panel': SettingsPage,
     approvals: named(() => import('./pages/ApprovalsPage'), 'ApprovalsPage'),
     notifications: named(() => import('./pages/NotificationsPage'), 'NotificationsPage'),
     search: named(() => import('./pages/SearchPage'), 'SearchPage'),

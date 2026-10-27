@@ -47,7 +47,8 @@ export function validateLocalCompanyDraft(values: DraftValues): string {
   return '';
 }
 
-export function LocalAdminPanel() {
+/** embedded：嵌在公司管理“本机设置”分区，只放本机身份、本地模式说明与平台 AI；公司资料统一在“公司资料”分区维护。 */
+export function LocalAdminPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const workspace = useMistWorkspace();
   const session = useMistSession();
   const toast = useToast();
@@ -116,6 +117,26 @@ export function LocalAdminPanel() {
 
   if (!localMode) return <MistPage><PageHeader title={uiText("管理后台")} /><Card><EmptyState title={uiText("此资料页仅用于本机演示公司")} description={uiText("当前会话使用服务器账号，请打开对应的服务器管理设置。")} /></Card></MistPage>;
 
+  const footer = <FormFooter><span className="mist-note">{uiText(busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司')}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("保存资料")}</Button></FormFooter>;
+  if (embedded) return <>
+    {error && <Banner tone="bad" title={uiText("资料尚未保存")}>{error}</Banner>}
+    <Card>
+      {!workspace.state ? <FormSection title={uiText("正在读取本地空间")}><Skeleton height={120} /></FormSection> : <>
+        <FormSection title={uiText("本机身份")}>
+          <FormGrid>
+            <Field label={uiText("显示姓名")} required><TextInput aria-label={uiText("显示姓名")} value={values.profileName} disabled={blocked} onChange={event => edit('profileName', event.target.value)} /></Field>
+            <Field label={uiText("显示邮箱")}><TextInput aria-label={uiText("显示邮箱")} type="email" value={values.profileEmail} disabled={blocked} onChange={event => edit('profileEmail', event.target.value)} /></Field>
+            <Field label={uiText("当前设备时区")}><TextInput value={Intl.DateTimeFormat().resolvedOptions().timeZone} readOnly /></Field>
+          </FormGrid>
+        </FormSection>
+        <FormSection title={uiText("本地开发模式")}>
+          <KeyValue items={[{ label: '当前身份', value: session.user?.displayName || '本地用户' }, { label: '本公司', value: workspace.workspace?.name || values.workspaceName }, { label: '数据位置', value: '当前设备' }]} />
+        </FormSection>
+      </>}
+      {footer}
+    </Card>
+    {session.hasRole?.('owner') && <Card><PlatformAiProvidersPanel sessionKey={session.sessionKey} /></Card>}
+  </>;
   const fields = section === 'company' ? COMPANY_FIELDS : EXPORT_FIELDS;
   return <MistPage>
     <PageHeader eyebrow={uiText("平台 · 本机演示公司")} title={uiText("管理后台")} actions={<Pill tone="neutral">{uiText("本地开发模式")}</Pill>} />

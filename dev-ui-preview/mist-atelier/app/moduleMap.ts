@@ -60,9 +60,9 @@ export const MODULE_MAP: ModuleMapEntry[] = [
   { id: 'reports', view: 'reports', label: '报表中心', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'analytics', wave: 5 },
   { id: 'data-center', view: 'data-center', label: '数据中心', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'analytics', wave: 5, notes: '本公司的数据关联质量、记录汇总与来源入口' },
   { id: 'assistant', view: 'assistant', label: 'AI 助手', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'assistant', wave: 5 },
-  { id: 'hr', view: 'hr', label: '人事管理', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'list-table', detail: 'profile', wave: 5, notes: '7 个子视图用 Tabs；组织架构保留树形，外层 Card' },
+  { id: 'hr', view: 'hr', label: '人事管理', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/HrOrganization.tsx', lines: 58, template: 'list-table', detail: 'profile', wave: 5, notes: '独立页面：组织架构 / 人员；员工档案与在职变动见 EmployeeFile' },
   { id: 'business-tools', view: 'business-tools', label: '业务工具', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'workbench', wave: 5, notes: '工具入口用 CardButton 网格' },
-  { id: 'admin', view: 'admin-panel', label: '管理后台', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx', lines: 58, template: 'settings', wave: 5 },
+  { id: 'admin', view: 'admin-panel', label: '公司管理 · 账号与岗位', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/SettingsPage.tsx', lines: 58, template: 'settings', wave: 5, notes: '并入公司管理；旧地址打开“账号 / 岗位与权限”分区' },
   { id: 'settings', view: 'settings', label: '设置', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/SettingsPage.tsx', lines: 104, template: 'settings', wave: 5, notes: '设置=参考页' },
   { id: 'mes', view: 'mes', label: '历史加工记录', group: '平台', entry: 'dev-ui-preview/mist-atelier/app/pages/modules/FulfillmentPages.tsx', lines: 99, template: 'list-table', wave: 5 },
 ];

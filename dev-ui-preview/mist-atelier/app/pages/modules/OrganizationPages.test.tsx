@@ -3,7 +3,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Nav } from '../../nav';
-import { AdminPanelPage, PLATFORM_PAGES } from './PlatformPages';
+import { SettingsPage as CompanyAdminPage } from '../SettingsPage';
+import { HrOrganizationPage } from './HrOrganization';
 
 const bridge = vi.hoisted(() => ({ companyId: null as string | null, roles: ['owner'] as string[], perms: ['*'] as string[], localMode: false, changeMember: vi.fn(), members: [] as any[], calls: [] as Array<{ method: string; url: string; body: any }>, routes: {} as Record<string, (body: any) => any> }));
 vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'owner-1', companyId: bridge.companyId, displayName: '老板', roles: bridge.roles, roleLabels: [] }, sessionKey: 'k', localMode: bridge.localMode, hasRole: (...r: string[]) => r.some(x => bridge.roles.includes(x)), hasPermission: (p: string) => bridge.perms.includes('*') || bridge.perms.includes(p), canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -54,7 +55,7 @@ const labelled = (label: string) => [...document.querySelectorAll('label.mist-fi
 
 describe('管理后台 · 账号', () => {
   it('lists accounts, flags pending registrations and approves with department, roles and workspace access', async () => {
-    await render(AdminPanelPage, 'admin-panel');
+    await render(CompanyAdminPage, 'admin-panel');
     expect(document.body.textContent).toContain('1 个注册申请待审批');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
     await click('审批通过');
@@ -66,7 +67,7 @@ describe('管理后台 · 账号', () => {
   });
   it('shows audit operators and account targets by name with Chinese action and object labels', async () => {
     bridge.routes['GET /api/admin/audit-logs?limit=50&offset=0'] = () => ({ ok: true, total: 2, logs: [{ id: 'a1', actorId: 'u1', action: 'login', targetType: 'UserAccount', targetId: 'u1', createdAt: '2026-10-18T02:00:00Z' }, { id: 'a2', actorId: 'ghost', action: 'create_role', targetType: 'Role', targetId: 'role-x', createdAt: '2026-10-18T03:00:00Z' }] });
-    await render(AdminPanelPage, 'admin-panel', 'audit');
+    await render(CompanyAdminPage, 'admin-panel', 'audit');
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     const table = document.querySelector('[aria-label="审计日志"]')!.textContent!;
     expect(table).toContain('张三');
@@ -79,14 +80,14 @@ describe('管理后台 · 账号', () => {
   it('keeps an account action failure visible inside its confirmation dialog', async () => {
     bridge.routes['GET /api/admin/users'] = () => ({ ok: true, departments, users: [{ id: 'u1', displayName: '张三', email: 'z@x.test', status: 'disabled', roles: ['业务员'], roleIds: ['role-sales'], departmentId: 'd1', department: '面料业务部', lastLoginAt: null, createdAt: '' }] });
     bridge.routes['PATCH /api/admin/users/u1'] = () => { throw new Error('请在人事管理中办理复职或返聘。'); };
-    await render(AdminPanelPage, 'admin-panel');
+    await render(CompanyAdminPage, 'admin-panel');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
     await click('重新启用'); await click('确认');
     expect(document.querySelector('.mist-dialog')?.textContent).toContain('请在人事管理中办理复职或返聘。');
   });
   it('locks the 老板 role for administrators who are not the owner and offers no workspace grant', async () => {
     bridge.roles = ['admin'];
-    await render(AdminPanelPage, 'admin-panel');
+    await render(CompanyAdminPage, 'admin-panel');
     await click('新建账号');
     expect([...labelled('岗位').querySelectorAll('option')].map(o => o.textContent)).not.toContain('老板');
     expect(document.body.textContent).toContain('你不是「空间」的所有者');
@@ -95,7 +96,7 @@ describe('管理后台 · 账号', () => {
   it('lets the owner set module levels for a 岗位 after reviewing the diff, and keeps 老板 fixed', async () => {
     bridge.routes['GET /api/admin/permissions'] = () => ({ ok: true, permissions: ['orders:read', 'orders:write', 'orders:delete', 'reports:read', 'shipments:read', 'shipments:write'].map((scope, i) => ({ id: 'p' + i, scope, description: null })) });
     bridge.routes['PATCH /api/admin/roles/role-sales/permissions'] = () => ({ ok: true });
-    await render(AdminPanelPage, 'admin-panel', 'roles');
+    await render(CompanyAdminPage, 'admin-panel', 'roles');
     expect(document.body.textContent).toContain('不可调整');
     expect(document.body.textContent).toContain('查看 1');
     await click('调整权限');
@@ -115,7 +116,7 @@ describe('管理后台 · 账号', () => {
     bridge.routes['PATCH /api/admin/roles/role-custom-1'] = body => { Object.assign(roles.find(r => r.id === 'role-custom-1')!, body); return { ok: true }; };
     bridge.routes['DELETE /api/admin/roles/role-custom-1'] = () => { roles.splice(roles.findIndex(r => r.id === 'role-custom-1'), 1); return { ok: true }; };
     try {
-      await render(AdminPanelPage, 'admin-panel', 'roles');
+      await render(CompanyAdminPage, 'admin-panel', 'roles');
       await click('新建岗位');
       await click('创建岗位（0 项权限）');
       expect(document.body.textContent).toContain('请填写岗位名称');
@@ -151,7 +152,7 @@ describe('管理后台 · 账号', () => {
     roles.push({ id: 'role-custom-2', name: '单证员', description: null, isSystem: false, permissions: ['order:read'] });
     bridge.routes['GET /api/admin/users'] = () => ({ ok: true, departments, users: [{ id: 'u9', displayName: '陈晓', email: 'c@x.test', status: 'active', roles: ['单证员'], roleIds: ['role-custom-2'], departmentId: null, department: null, lastLoginAt: null, createdAt: '2026-10-01T00:00:00Z' }] });
     try {
-      await render(AdminPanelPage, 'admin-panel', 'roles');
+      await render(CompanyAdminPage, 'admin-panel', 'roles');
       expect([...document.querySelectorAll('button')].filter(b => b.textContent?.trim() === '删除')).toHaveLength(1);
       await click('删除');
       expect(document.body.textContent).toContain('还有 1 人在此岗位');
@@ -161,7 +162,7 @@ describe('管理后台 · 账号', () => {
   });
   it('keeps role permissions read-only for administrators who are not the owner', async () => {
     bridge.roles = ['admin'];
-    await render(AdminPanelPage, 'admin-panel', 'roles');
+    await render(CompanyAdminPage, 'admin-panel', 'roles');
     expect(document.body.textContent).toContain('只读');
     expect(button('调整权限')).toBeUndefined();
     bridge.routes['GET /api/admin/permissions'] = () => ({ ok: true, permissions: [{ scope: 'reports:read', description: null }] });
@@ -172,17 +173,20 @@ describe('管理后台 · 账号', () => {
     expect(document.body.textContent).toContain('不可用');
     expect([...document.querySelectorAll('button')].some(b => b.textContent?.startsWith('保存（'))).toBe(false);
   });
-  it('shows only the exporter profile to non-managers', async () => {
+  it('shows no people or 岗位 sections to accounts without account or HR rights', async () => {
     bridge.roles = []; bridge.perms = [];
-    await render(AdminPanelPage, 'admin-panel', 'accounts');
-    expect(document.body.textContent).toContain('账号管理仅限老板与管理员');
+    await render(CompanyAdminPage, 'admin-panel', 'accounts');
+    const steps = [...document.querySelectorAll('.mist-vsteps button')].map(b => b.textContent);
+    expect(steps).not.toContain('人员'); expect(steps).not.toContain('岗位与权限');
     expect(bridge.calls.some(c => c.url.startsWith('/api/admin/users'))).toBe(false);
   });
 });
 
 describe('人事管理', () => {
+  // 只有人事权限时，“人员”分区显示人事名册；有账号管理权限时显示账号列表（见“管理后台 · 账号”）。
+  beforeEach(() => { bridge.roles = []; bridge.perms = ['hr:read', 'hr:write']; });
   it('shows departments with business attributes and creates a department under the company root', async () => {
-    await render(PLATFORM_PAGES.hr, 'hr');
+    await render(HrOrganizationPage, 'hr');
     expect(document.body.textContent).toContain('面料业务部');
     expect(document.body.textContent).toContain('面料业务');
     await click('新建部门');
@@ -193,7 +197,7 @@ describe('人事管理', () => {
     expect(bridge.calls.find(c => c.method === 'POST' && c.url === '/api/hr/departments')?.body).toEqual({ name: '成衣业务部', parentId: 'root', businessAttributes: ['garment_business'] });
   });
   it('lists people with their team and offers to create a missing employee profile', async () => {
-    await render(PLATFORM_PAGES.hr, 'hr', 'people');
+    await render(HrOrganizationPage, 'hr', 'people');
     expect(document.body.textContent).toContain('李四');
     expect(document.body.textContent).toContain('面料一组');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
@@ -206,7 +210,7 @@ describe('人事管理', () => {
   it('saves a company employee profile in one request with its onboarding information', async () => {
     bridge.companyId = 'company-a';
     bridge.routes['PUT /api/hr/employees/u3'] = () => ({ ok: true, profile: { userId: 'u3', employeeNo: 'E1', employmentStatus: 'Probation' } });
-    await render(PLATFORM_PAGES.hr, 'hr', 'people');
+    await render(HrOrganizationPage, 'hr', 'people');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     await click('建立员工档案');
@@ -216,10 +220,10 @@ describe('人事管理', () => {
     expect(bridge.calls.some(c => c.method === 'POST' && c.url === '/api/hr/employment-events')).toBe(false);
   });
   it('saves company identity and role assignment in one request', async () => {
-    bridge.companyId = 'company-a';
+    bridge.companyId = 'company-a'; bridge.roles = ['owner']; bridge.perms = ['*'];
     bridge.routes['GET /api/admin/users'] = () => ({ ok: true, departments, users: [{ id: 'u1', displayName: '张三', email: 'z@x.test', status: 'active', roleIds: ['role-sales'], roles: ['业务员'], departmentId: 'd1', department: '面料业务部', createdAt: '', lastLoginAt: null }] });
     bridge.routes['PATCH /api/admin/users/u1/roles'] = () => ({ ok: true });
-    await render(AdminPanelPage, 'admin-panel');
+    await render(CompanyAdminPage, 'admin-panel');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
     await click('修改资料与岗位');
     await type(labelled('姓名'), '新姓名');
@@ -229,7 +233,7 @@ describe('人事管理', () => {
     expect(writes[0]).toMatchObject({ url: '/api/admin/users/u1/roles', body: { displayName: '新姓名', email: 'z@x.test', departmentId: 'd1', roles: ['role-sales'] } });
   });
   it('shows each person\'s 岗位 in the people list without a separate 岗位 tab', async () => {
-    await render(PLATFORM_PAGES.hr, 'hr', 'positions');
+    await render(HrOrganizationPage, 'hr', 'positions');
     expect(document.querySelector('[aria-label="全部人员"], [role="table"]')).toBeTruthy();
     expect(document.body.textContent).toContain('业务员');
     expect([...document.querySelectorAll('[role="tab"]')].map(t => t.textContent)).not.toContainEqual(expect.stringMatching(/^岗位/));
@@ -241,7 +245,7 @@ describe('人事管理', () => {
     bridge.routes['GET /api/hr/employees'] = () => ({ ok: true, employees: [profile] });
     bridge.routes['GET /api/hr/employment-events?userId=u3&limit=50'] = () => ({ ok: true, events: [{ id: 'e1', userId: 'u3', type: 'Regularize', effectiveDate: '2025-04-01', fromDeptId: null, toDeptId: null, fromPositionId: null, toPositionId: null, reason: null, operatorId: 'u3', createdAt: '' }] });
     bridge.routes['POST /api/hr/employment-events'] = () => ({ ok: true, event: { id: 'e2' }, accountDisabled: true });
-    await render(PLATFORM_PAGES.hr, 'hr', 'people');
+    await render(HrOrganizationPage, 'hr', 'people');
     expect(document.body.textContent).toContain('正式');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
@@ -262,15 +266,18 @@ describe('人事管理', () => {
   it('transfers a person to a new 岗位 and department in one change, and needs account rights to change the 岗位', async () => {
     const profile = { userId: 'u3', employeeNo: 'E001', displayName: '李四', positionId: 'role-sales', position: '业务员', hireDate: '2025-01-01', regularDate: '2025-04-01', contractType: null, contractEnd: null, employmentStatus: 'Regular', phone: null, emergencyContact: null, workLocation: null, notes: null };
     const depts = [...departments, { id: 'd2', name: '成衣业务部', parentId: 'root', businessAttributes: [] }];
+    bridge.perms = ['hr:read', 'hr:write', 'users:admin'];
     bridge.routes['GET /api/hr/personnel'] = () => ({ ok: true, departments: depts, jobs: [{ id: 'role-sales', name: '业务员' }, { id: 'role-docs', name: '单证报关' }], positionNames: {}, personnel: [{ id: 'u3', displayName: '李四', email: 'l@x.test', status: 'active', roles: ['业务员'], roleIds: ['role-sales'], departmentId: 'd1', department: '面料业务部', lastLoginAt: null }] });
     bridge.routes['GET /api/hr/employees/u3'] = () => ({ ok: true, profile });
     bridge.routes['GET /api/hr/employees'] = () => ({ ok: true, employees: [profile] });
     bridge.routes['GET /api/hr/employment-events?userId=u3&limit=50'] = () => ({ ok: true, events: [] });
     bridge.routes['POST /api/hr/employment-events'] = () => ({ ok: true, event: { id: 'e2' }, leftTeams: 1, jobChanged: true });
-    await render(PLATFORM_PAGES.hr, 'hr', 'people');
+    await render(HrOrganizationPage, 'hr', 'people');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(document.body.textContent).toContain('员工档案');
     await click('办理在职变动');
+    expect((labelled('岗位') as HTMLSelectElement).disabled).toBe(false);
     expect((labelled('岗位') as HTMLSelectElement).value).toBe('role-sales');
     await type(labelled('岗位'), 'role-docs');
     expect(document.body.textContent).not.toContain('部门将从');
@@ -280,8 +287,8 @@ describe('人事管理', () => {
     await act(async () => submit.click());
     expect(bridge.calls.find(c => c.method === 'POST' && c.url === '/api/hr/employment-events')?.body).toMatchObject({ userId: 'u3', type: 'Transfer', fromDeptId: 'd1', fromPositionId: 'role-sales', toRoleId: 'role-docs', toDeptId: 'd2' });
 
-    bridge.perms = ['hr:read', 'hr:write'];
-    await render(PLATFORM_PAGES.hr, 'hr', 'people');
+    bridge.roles = []; bridge.perms = ['hr:read', 'hr:write'];
+    await render(HrOrganizationPage, 'hr', 'people');
     await act(async () => (document.querySelector('[role="row"][tabindex]') as HTMLElement).click());
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     await click('办理在职变动');
@@ -289,13 +296,13 @@ describe('人事管理', () => {
   });
   it('explains that local workspaces have no company organization and calls nothing', async () => {
     bridge.localMode = true;
-    await render(PLATFORM_PAGES.hr, 'hr');
+    await render(HrOrganizationPage, 'hr');
     expect(document.body.textContent).toContain('本机演示模式没有组织架构');
     expect(bridge.calls).toHaveLength(0);
   });
   it('is read-only without hr:write', async () => {
     bridge.perms = ['hr:read'];
-    await render(PLATFORM_PAGES.hr, 'hr');
+    await render(HrOrganizationPage, 'hr');
     expect(button('新建部门')).toBeUndefined();
   });
 });
@@ -309,7 +316,7 @@ describe('管理后台 · 审批资格', () => {
     bridge.routes['GET /api/admin/order-approval-authorities'] = () => ({ ok: true, assignments: [], users });
     bridge.routes['PUT /api/admin/order-approval-authorities/fabric'] = () => ({ ok: true, assignments: [] });
     supplierRoutes(0, []);
-    await render(AdminPanelPage, 'admin-panel', 'approvals');
+    await render(CompanyAdminPage, 'admin-panel', 'approvals');
     expect(document.body.textContent).toContain('尚有 6 项审批资格未配置');
     await edit('面料订单');
     await pick('面料订单审批人', '销售主管');
@@ -320,7 +327,7 @@ describe('管理后台 · 审批资格', () => {
     bridge.routes['GET /api/admin/order-approval-authorities'] = () => ({ ok: true, assignments: [{ businessLine: 'fabric', userId: 'mgr' }, { businessLine: 'garment', userId: 'gm' }], users });
     bridge.routes['PUT /api/v1/procurement/contracts/approval-authority/purchase/fabric'] = () => ({ ok: true });
     supplierRoutes(3, []);
-    await render(AdminPanelPage, 'admin-panel', 'approvals');
+    await render(CompanyAdminPage, 'admin-panel', 'approvals');
     expect(document.body.textContent).toContain('尚有 4 项审批资格未配置');
     expect(document.body.textContent).toContain('销售主管');
     await edit('面料采购合同');
@@ -339,7 +346,7 @@ describe('管理后台 · 审批资格', () => {
     bridge.roles = ['manager']; bridge.perms = ['users:admin'];
     bridge.routes['GET /api/admin/order-approval-authorities'] = () => ({ ok: true, assignments: [], users });
     supplierRoutes(1, ['mgr']);
-    await render(AdminPanelPage, 'admin-panel', 'approvals');
+    await render(CompanyAdminPage, 'admin-panel', 'approvals');
     expect(document.body.textContent).toContain('供应商承诺审批人仅老板或管理员可修改');
     expect((document.querySelector('button[aria-label="调整面料采购合同审批人"]') as HTMLButtonElement).disabled).toBe(true);
     expect((document.querySelector('button[aria-label="调整面料订单审批人"]') as HTMLButtonElement).disabled).toBe(false);

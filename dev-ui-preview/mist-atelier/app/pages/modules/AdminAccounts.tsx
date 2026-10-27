@@ -45,7 +45,7 @@ function blank(): Form { return { mode: 'create', displayName: '', email: '', pa
 export function AdminAccounts() {
   const session = useMistSession(), workspace = useMistWorkspace(), toast = useToast(), { route, go } = useNav();
   const { data, loading, error, load } = useDirectory();
-  const owner = session.hasRole('owner');
+  const owner = session.hasRole('owner'), hrRead = session.hasPermission('hr:read') || session.hasPermission('hr:write');
   const [query, setQuery] = React.useState(''), [status, setStatus] = React.useState('');
   const [selected, setSelected] = React.useState<string | null>(null), [form, setForm] = React.useState<Form | null>(null);
   React.useEffect(() => { setSelected(route.id ?? null); }, [route.id]);
@@ -126,14 +126,14 @@ export function AdminAccounts() {
       footer={current && <div className="mist-row">
         {current.status === 'pending' && <><Button variant="primary" onClick={() => { setFormError(''); setForm({ ...blank(), mode: 'approve', account: current, displayName: current.displayName, email: current.email, departmentId: current.departmentId ?? '', roles: current.roleIds }); }}>{uiText("审批通过")}</Button><Button onClick={() => setConfirm({ kind: 'reject', account: current })}>{uiText("拒绝")}</Button></>}
         {current.status === 'active' && <><Button onClick={() => { setFormError(''); setForm({ ...blank(), mode: 'edit', account: current, displayName: current.displayName, email: current.email, departmentId: current.departmentId ?? '', roles: current.roleIds }); }}>{uiText("修改资料与岗位")}</Button><Button icon={KeyRound} onClick={() => setConfirm({ kind: 'reset', account: current })}>{uiText("重置密码")}</Button><Button disabled={self} onClick={() => setConfirm({ kind: 'disable', account: current })}>{uiText(self ? '不能停用自己' : '停用账号')}</Button></>}
-        {(session.hasPermission('hr:read') || session.hasPermission('hr:write')) && <Button onClick={() => go('hr', current.id, { section: 'people' })}>{uiText("员工档案")}</Button>}
         {current.status === 'disabled' && <Button onClick={() => setConfirm({ kind: 'enable', account: current })}>{uiText("重新启用")}</Button>}
+        {hrRead && current.status !== 'pending' && <Button onClick={() => go('hr', current.id, { section: 'people' })}>{uiText("员工档案")}</Button>}
       </div>}>
       {current && <>
         <KeyValue items={[{ label: '状态', value: ACCOUNT_STATUS[current.status]?.label ?? current.status }, { label: '任职部门', value: current.department ?? '未分配' }, { label: '岗位', value: current.roleIds.map(roleName).join('、') || '未设岗位' }, { label: '创建时间', value: when(current.createdAt) }, { label: '最近登录', value: when(current.lastLoginAt) }]} />
         {envelope && current.status === 'active' && <div className="mist-section">{envelope.ownerId === current.id ? <Banner tone="neutral" title={ui`「${envelope.name}」的所有者`} /> : memberIds.has(current.id)
           ? <Banner tone="ok" title={ui`已授权进入「${envelope.name}」`}>{uiText("能办理哪些业务仍按其岗位与任职部门决定。")}</Banner>
-          : <Banner tone="warn" title={ui`尚未授权进入「${envelope.name}」`} actions={canGrant ? <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); if (await grant(current.id, current.displayName)) toast('已授权进入本公司'); setBusy(false); }}>{uiText("授权进入")}</Button> : undefined}>{uiText(canGrant ? '授权只让对方进入这家公司，不增加任何业务权限。' : '请公司所有者在“公司设置 · 授权访问”中授权。')}</Banner>}</div>}
+          : <Banner tone="warn" title={ui`尚未授权进入「${envelope.name}」`} actions={canGrant ? <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); if (await grant(current.id, current.displayName)) toast('已授权进入本公司'); setBusy(false); }}>{uiText("授权进入")}</Button> : undefined}>{uiText(canGrant ? '授权只让对方进入这家公司，不增加任何业务权限。' : '请公司所有者在“公司管理 · 数据访问”中授权。')}</Banner>}</div>}
       </>}
     </Drawer>
     <Drawer open={!!form} onClose={() => !busy && setForm(null)} title={uiText(form?.mode === 'create' ? '新建账号' : form?.mode === 'approve' ? '审批注册申请' : '修改资料与岗位')} sub={uiText(form?.account?.email)}

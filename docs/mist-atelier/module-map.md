@@ -77,8 +77,8 @@
 | ☐ | 报表中心 | `reports` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T11 分析报表 | — | — |  |
 | ☐ | 数据中心 | `data-center` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T11 分析报表 | — | — | 本公司的数据关联质量、记录汇总与来源入口 |
 | ☐ | AI 助手 | `assistant` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T13 助手 | — | — |  |
-| ☐ | 人事管理 | `hr` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T3 宽表列表 | T7 档案详情 | — | 7 个子视图用 Tabs；组织架构保留树形，外层 Card |
+| ☐ | 人事管理 | `hr` | `dev-ui-preview/mist-atelier/app/pages/modules/HrOrganization.tsx` | 58 | T3 宽表列表 | T7 档案详情 | — | 独立页面：组织架构 / 人员；员工档案与在职变动见 EmployeeFile |
 | ☐ | 业务工具 | `business-tools` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T1 工作台 | — | — | 工具入口用 CardButton 网格 |
-| ☐ | 管理后台 | `admin-panel` | `dev-ui-preview/mist-atelier/app/pages/modules/PlatformPages.tsx` | 58 | T10 设置 | — | — |  |
+| ☐ | 公司管理 · 账号与岗位 | `admin-panel` | `dev-ui-preview/mist-atelier/app/pages/SettingsPage.tsx` | 58 | T10 设置 | — | — | 并入公司管理；旧地址打开“账号 / 岗位与权限”分区 |
 | ☐ | 设置 | `settings` | `dev-ui-preview/mist-atelier/app/pages/SettingsPage.tsx` | 104 | T10 设置 | — | — | 设置=参考页 |
 | ☐ | 历史加工记录 | `mes` | `dev-ui-preview/mist-atelier/app/pages/modules/FulfillmentPages.tsx` | 99 | T3 宽表列表 | — | — |  |
