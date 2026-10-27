@@ -109,3 +109,9 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 2026-10-19 实测：应用本机上传正常，外部入口的 QUIC 隧道在传输中途断开，Nginx 只收到部分请求体。保留私有配置备份后，将当前隧道的 `protocol` 固定为 `http2`；原 2.5MB 请求在服务器公网入口和本机分别复测为 201，返回同一回执而未新增副本。TLS、认证和私有附件权限保持。相关官方参数见 [Cloudflare Tunnel run parameters](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/)。
 
 大批量资料可由本机 SCP 直传到服务器 0700 暂存目录，再用指定租户会话调用本机业务 API，保留版本号和幂等请求 ID。不得绕过接口直接改写业务 JSON。校验文件哈希、引用和原数据后，保留无凭据的私有回执备份，移除暂存令牌。
+
+## 静态模块与 PDF 预览
+
+`/assets/` 必须给 `.mjs` 返回 JavaScript MIME。系统默认 `mime.types` 可能只有 `.js`，此时 PDF.js module worker 会因 `application/octet-stream` 被浏览器拒绝。资产 location 先 `include /etc/nginx/mime.types;` 保留 CSS/字体等类型，再加 `types { application/javascript mjs; }`；基线在 `scripts/deploy/bootstrap-dev-server.sh`。变更前保存私有备份，`nginx -t` 通过才 reload，并同时核对 worker 和 CSS 的公开 Content-Type。
+
+`components/mist/filePreview.tsx` 的 worker 地址附加模块版本查询参数，避免已缓存的错误 MIME 响应；模块加载失败不应被误报为 PDF 原件损坏。

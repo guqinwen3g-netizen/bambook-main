@@ -201,6 +201,9 @@ server {
         include snippets/bambook-dev-proxy.conf;
     }
     location /assets/ {
+        # Module workers must be JavaScript; keep the full type map for CSS/fonts too.
+        include /etc/nginx/mime.types;
+        types { application/javascript mjs; }
         add_header Cache-Control "public, max-age=31536000, immutable";
         try_files $uri =404;
     }
