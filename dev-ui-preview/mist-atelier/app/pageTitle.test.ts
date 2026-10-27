@@ -14,7 +14,9 @@ describe('application page titles', () => {
   });
   it('distinguishes platform and company settings and mandatory password changes', () => {
     expect(pageDocumentTitle('system-settings', { platformOnly: true })).toBe('Bambook · 平台设置');
-    expect(pageDocumentTitle('system-settings')).toBe('Bambook · 公司设置');
+    expect(pageDocumentTitle('system-settings')).toBe('Bambook · 公司管理');
+    expect(pageDocumentTitle('hr')).toBe('Bambook · 人事管理');
+    expect(pageDocumentTitle('admin-panel')).toBe('Bambook · 公司管理');
     expect(pageDocumentTitle(View.Orders, { mustChangePassword: true })).toBe('Bambook · 修改密码');
   });
   it('keeps the base brand while loading or when a route has no known label', () => {

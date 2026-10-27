@@ -5,9 +5,9 @@ import {businessNow} from './runtime/businessClock';
 import { AccountAccessPage } from './pages/AccountAccessPage';
 import { exitCompanyManagement } from './runtime/platformAdmin';
 import React from 'react';
-import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage, LocalAdminPanel } from './pageRegistry';
+import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
-import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed } from 'lucide-react';
+import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
   AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, Skeleton, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
@@ -26,7 +26,7 @@ import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
 import {MistPresentedErrorContext,useClaimedUploadRecovery} from './runtime/errorPresentation';
 import { clearPrivateImages, prefetchPrivateImages } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
-import { canOpenMistView, personalSettingsSection } from './routeAccess';
+import { canOpenCompanyAdmin, canOpenMistView, COMPANY_ADMIN_VIEWS, personalSettingsSection } from './routeAccess';
 import { LoginPage } from './pages/LoginPage';
 import { ForcedPasswordChangePage } from './pages/ChangePassword';
 import { RegisterPage } from './pages/RegisterPage';
@@ -83,15 +83,17 @@ function useSections(): NavSection[] {
     const modules = platformOnly ? [] : getPrimaryNavigationModules({ isAdmin: session.hasRole('owner', 'admin') || session.hasPermission('users:admin'), canAccessView: session.canAccessView })
       .filter(m => !supporting || COMPANY_MANAGEMENT_VIEWS.includes(String(m.view)));
     const real = groupPrimaryNavigationModules(modules).map(g => ({
-      id: g.group, label: g.label === '平台' ? '公司管理' : g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
-      items: g.modules.map(m => ({ id: String(m.view), label: String(m.view) === 'admin-panel' ? '公司后台' : productName(m), icon: m.icon })),
-    }));
-    const items = supporting ? [{ id: 'company-settings', label: '公司设置', icon: Settings2 }] : [
+      id: g.group, label: g.label === '平台' ? '数据与工具' : g.label, defaultClosed: !['overview', 'fulfillment'].includes(g.group),
+      items: g.modules.filter(m => !COMPANY_ADMIN_VIEWS.has(String(m.view)) && m.view !== View.HR).map(m => ({ id: String(m.view), label: productName(m), icon: m.icon })),
+    })).filter(g => g.items.length);
+    const hr = !platformOnly && !session.localMode && session.canAccessView(View.HR) ? [{ id: 'hr', label: '人事管理', icon: Users }] : [];
+    const items = supporting ? [...hr, { id: 'company-settings', label: '公司管理', icon: Settings2 }] : [
+      ...hr,
+      ...(platformOnly ? [{ id: 'system-settings', label: '平台设置', icon: Settings2 }] : canOpenCompanyAdmin(session.canAccessView) ? [{ id: 'company-settings', label: '公司管理', icon: Settings2 }] : []),
       ...(session.user?.platformRole === 'platform_admin' ? [{ id: 'platform-admin', label: '平台管理', icon: ShieldCheck }] : []),
-      ...((platformOnly || session.canAccessView(View.SystemSettings)) ? [{ id: 'system-settings', label: platformOnly ? '平台设置' : '公司设置', icon: Settings2 }] : []),
     ];
     const reference = REFERENCE_PREVIEW ? [{ id: 'design-system', label: '设计系统', icon: Component }, { id: 'states', label: '空 / 加载 / 错误', icon: SquareDashed }, ...(!session.localMode ? [{ id: 'login', label: '登录页', icon: KeyRound }] : [])] : [];
-    return [...real, ...(items.length ? [{ id: 'handoff', label: '系统', items }] : []), ...(reference.length ? [{ id: 'reference', label: '开发预览', items: reference }] : [])];
+    return [...real, ...(items.length ? [{ id: 'handoff', label: '管理', items }] : []), ...(reference.length ? [{ id: 'reference', label: '开发预览', items: reference }] : [])];
   }, [session.sessionKey, session.status, session.hasRole, session.canAccessView, interfaceLocale()]);
 }
 /** 侧栏数字、模块页「待我处理」、首页合计共用同一口径（见 runtime/workQueue）。 */
@@ -121,8 +123,8 @@ const developmentCreateLabel = (section?: string) => DEVELOPMENT_LIST_TABS.find(
 const productName = (m: { productLabel: string }) => m.productLabel.replace('（开发中）', '');
 
 function crumbsFor(route: Route, go: (view: string, id?: string) => void, objectLabel?: string, versionLabel?: string): Crumb[] {
-  if (route.view === 'admin-panel') return [{ label: '公司管理', hideOnMobile: true }, { label: '公司后台' }];
-  if (['system-settings','settings','company-settings','workspace-settings'].includes(route.view)) return [{ label: '公司管理', hideOnMobile: true }, { label: '公司设置' }];
+  if (COMPANY_ADMIN_VIEWS.has(route.view)) return [{ label: '公司管理' }];
+  if (route.view === 'hr') return [{ label: '人事管理' }];
   if (route.view === 'platform-admin') return [{ label: '平台运营', hideOnMobile: true }, { label: '平台管理' }];
   const base = route.view.split('/')[0], mod = getModuleByView(base as View);
   const label = (mod && productName(mod)) ?? LABELS[base] ?? base;
@@ -206,7 +208,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       && !['platform-admin','system-settings','settings','platform-login','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
   }, [platformOnly, personalSection, route.view, go]);
   // 公司管理会话保持在当前公司的管理页面。
-  React.useEffect(() => { if (platformCompany && !personalSection && !COMPANY_MANAGEMENT_VIEWS.includes(route.view.split('/')[0])) go('admin-panel'); }, [platformCompany, personalSection, route.view, go]);
+  React.useEffect(() => { if (platformCompany && !personalSection && !COMPANY_MANAGEMENT_VIEWS.includes(route.view.split('/')[0])) go('company-settings'); }, [platformCompany, personalSection, route.view, go]);
   const exitManagement = async () => {
     setExitingSupport(true);
     try { await exitCompanyManagement(); go('platform-admin', platformCompany?.companyId); } catch (failure) { report(failure); } finally { setExitingSupport(false); }
@@ -329,9 +331,8 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   if (!session.localMode && session.user?.mustChangePassword) return <ForcedPasswordChangePage />;
   const base = route.view.split('/')[0], module = getModuleByView(base as View);
   // 空间设置只处理本公司；不能为此授予系统设置/后台管理权限。
-  const permitted = !!personalSection || canOpenMistView(route, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || MODULE_VIEW_SET.has(route.view);
-  const Page = personalSection ? AccountPage : platformCompany && ['system-settings','settings','company-settings','workspace-settings'].includes(route.view) ? PlatformCompanySettingsPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
-    : session.localMode && route.view === 'admin-panel' ? LocalAdminPanel
+  const permitted = !!personalSection || canOpenMistView(route, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW) || platformOnly && ['system-settings','settings'].includes(route.view), live = LIVE_VIEWS.has(route.view) || MODULE_VIEW_SET.has(route.view) || COMPANY_ADMIN_VIEWS.has(route.view);
+  const Page = personalSection ? AccountPage : platformCompany && COMPANY_ADMIN_VIEWS.has(route.view) ? PlatformCompanySettingsPage : platformOnly && ['system-settings','settings'].includes(route.view) ? PlatformSettingsPage
     : PAGES[route.view] ?? null;
   // 二级页（详情 / 新建）：应用内有上一页时按历史返回，直接打开链接时回到所属模块。
   const backTarget = route.view.includes('/') ? { view: base, label: (module && productName(module)) ?? LABELS[base] ?? '' } : null;
@@ -343,9 +344,9 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   return (
     <Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
       <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key}
-        sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : base}
+        sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
-          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('admin-panel') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, expanded: organizationOpen, onClick:()=>{if(collapsed || matchMedia('(min-width: 761px) and (max-width: 1180px)').matches){go('account');return;}setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();}, disclosure: <><dl><div><dt>{uiText('公司')}</dt><dd>{state?.settings.companyProfile?.legalName||'—'}</dd></div><div><dt>{uiText('部门')}</dt><dd>{user.department||'—'}</dd></div><div><dt>{uiText('小组')}</dt><dd>{uiText(organization.loading?'正在读取':organization.error?'读取失败':organization.teams.map(team=>team.name).join('、')||'未加入小组')}</dd></div></dl>{organization.error&&<button type="button" onClick={organization.retry}>{uiText('重新读取')}</button>}{session.canAccessView(View.SystemSettings)&&<button type="button" onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'company'});}}>{uiText('公司设置')}</button>}</> }}
+          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, expanded: organizationOpen, onClick:()=>{if(collapsed || matchMedia('(min-width: 761px) and (max-width: 1180px)').matches){go('account');return;}setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();}, disclosure: <><dl><div><dt>{uiText('公司')}</dt><dd>{state?.settings.companyProfile?.legalName||'—'}</dd></div><div><dt>{uiText('部门')}</dt><dd>{user.department||'—'}</dd></div><div><dt>{uiText('小组')}</dt><dd>{uiText(organization.loading?'正在读取':organization.error?'读取失败':organization.teams.map(team=>team.name).join('、')||'未加入小组')}</dd></div></dl>{organization.error&&<button type="button" onClick={organization.retry}>{uiText('重新读取')}</button>}{session.canAccessView(View.SystemSettings)&&<button type="button" onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'profile'});}}>{uiText('公司资料')}</button>}</> }}
           account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
           onSearch={() => setPalette(true)}
           assistant={!canAI ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
