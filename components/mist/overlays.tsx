@@ -21,6 +21,8 @@ function focusableIn(container: HTMLElement): HTMLElement[] {
 }
 
 function ownedMenu(node: HTMLElement, target: Node | null) {
+  const controlled = target instanceof HTMLElement && node.contains(target) && target.getAttribute('aria-expanded') === 'true' ? document.getElementById(target.getAttribute('aria-controls') ?? '') : null;
+  if (controlled?.dataset.mistOwner === node.id) return controlled;
   return Array.from(document.querySelectorAll<HTMLElement>('[data-mist-owner]'))
     .find(menu => menu.dataset.mistOwner === node.id && !!target && menu.contains(target));
 }
