@@ -8,6 +8,7 @@ import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import { useNav } from '../../nav';
 import { PreviewSummary, useCompactLayout, type PreviewSummaryData } from './pageKit';
 import { IncotermPlaceInput, OptionInput } from '../OptionInput';
+import { downloadGeneratedBlob, requestGeneratedExport } from '../../runtime/exportRequests';
 export type ModuleValue = string | number | boolean;
 export type ModuleValues = Record<string, ModuleValue>;
 type ModuleFieldCondition = {key:string;values:string[]};
@@ -144,7 +145,7 @@ export function ModuleWorkbench<T extends {id:string}>({title,eyebrow,descriptio
 export function downloadModuleCsv(filename:string,headers:string[],rows:Array<Array<unknown>>){
   const cell=(input:unknown)=>{let value=input==null?'':String(input);if(/^[=+@\t\r]/.test(value)||(/^-/ .test(value)&&!/^-[\d.]+$/.test(value)))value="'"+value;return '"'+value.replace(/"/g,'""')+'"';};
   const data='\uFEFF'+[headers,...rows].map(row=>row.map(cell).join(',')).join('\r\n');
-  const url=URL.createObjectURL(new Blob([data],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  requestGeneratedExport({filename,rowCount:rows.length,run:()=>downloadGeneratedBlob(new Blob([data],{type:'text/csv;charset=utf-8'}),filename)});
 }
 
 export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:()=>void}){
