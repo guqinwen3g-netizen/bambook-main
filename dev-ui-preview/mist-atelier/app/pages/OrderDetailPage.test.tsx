@@ -478,3 +478,13 @@ it('keeps one actionable handoff error and retained input on a standalone page',
  await act(async()=>getByRole(document.body,'button',{name:'确认交接'}).click());expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);expect(note.value).toBe('原交接内容');expect(document.body.textContent?.split('请先核对三项准备')).toHaveLength(2);
  presentedError='请先核对三项准备';render();expect(within(getByRole(document.body,'dialog',{name:'交接后勤'})).getByRole('alert').textContent).toContain('请先核对三项准备');expect(document.body.querySelectorAll('[role="alert"]')).toHaveLength(1);expect(note.value).toBe('原交接内容');
 });
+
+it('marks commercial approval requirements while leaving later quantity and tolerance choices optional',async()=>{
+ render();await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());
+ const dialog=getByRole(document.body,'dialog',{name:'合同与审批资料'});
+ for(const name of ['PO / 合同号','贸易术语','指定地点 / 港口','付款条款原文']){
+  const field=getByLabelText(dialog,new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))).closest('label');
+  expect(field?.querySelector('.mist-field-label em')?.textContent).toBe('*');
+ }
+ for(const name of ['数量口径','溢装上限 %','短装下限 %','定金比例（%）'])expect(getByLabelText(dialog,name).closest('label')?.querySelector('.mist-field-label em')).toBeNull();
+});

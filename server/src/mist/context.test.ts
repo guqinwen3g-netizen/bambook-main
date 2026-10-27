@@ -95,3 +95,24 @@ describe('Mist claim leader authority',()=>{
   expect((await mistApprovalAuthority({},actor,'platform.claim.submit')).claimReviewerId).toBeUndefined();
  });
 });
+
+describe('company order approval without duplicate legacy configuration',()=>{
+ it('routes a supervisor request to existing company leadership in the matching business domain',async()=>{
+  mocks.resolve.mockRejectedValue(Object.assign(new Error('missing'),{code:'ORDER_APPROVAL_AUTHORITY_MISSING'}));
+  mocks.users.set('gm',{id:'gm',status:'active',permissions:['orders:write'],globalBusinessScope:true});
+  mocks.dept.mockResolvedValue({reviewerId:'gm'});
+  mocks.build.mockImplementation(async(_db,user,companyId)=>({...user,userId:user.id,companyId,roles:[],departmentIds:[],authorizationLoaded:true}));
+  const result=await mistApprovalAuthority({}, {...actor,userId:'supervisor',companyId:'company-a'},'order.governance.submit',['supervisor','gm']);
+  expect(result.orderReviewerIds).toEqual({garment:['gm'],fabric:['gm']});
+  expect(mocks.dept).toHaveBeenCalledWith('supervisor');
+ });
+ it.each(['inactive','revoked','different-domain','not-a-member','self'])('does not use %s as a company order reviewer',async condition=>{
+  mocks.resolve.mockResolvedValue([]);
+  mocks.users.set('candidate',{id:'candidate',status:condition==='inactive'?'disabled':'active',permissions:condition==='revoked'?[]:['orders:write'],businessAttributes:condition==='different-domain'?['finance']:['garment_business']});
+  mocks.users.set('supervisor',{id:'supervisor',status:'active',permissions:['orders:write'],businessAttributes:['garment_business']});
+  mocks.build.mockImplementation(async(_db,user,companyId)=>({...user,userId:user.id,companyId,roles:[],departmentIds:[],authorizationLoaded:true}));
+  mocks.dept.mockResolvedValue({reviewerId:condition==='self'?'supervisor':'candidate'});
+  const result=await mistApprovalAuthority({}, {...actor,userId:'supervisor',companyId:'company-a'},'order.governance.submit',condition==='not-a-member'?['supervisor']:['supervisor','candidate']);
+  expect(result.orderReviewerIds).toEqual({garment:[],fabric:[]});
+ });
+});

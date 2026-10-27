@@ -128,3 +128,15 @@ it.each([-1,101,30.001,NaN])('rejects an invalid pre-shipment percentage %s',pre
 it.each(['TT','LC','OA'] as const)('shows cumulative pre-shipment cash only for the TT approval snapshot (%s)',paymentMethod=>{
  const f=fixture();f.order.governance.contract={...f.order.governance.contract,paymentMethod,depositPercent:0,preShipmentPercent:100,paymentNote:'按原合同付款'};f.run({type:'order.governance.submit',payload:{orderId:'order'}});const details=getOrderGovernanceReviews(f.state)[0].details;expect(details.some(row=>row.label==='出运前累计收款')).toBe(paymentMethod==='TT');expect(details.find(row=>row.label==='付款')?.value).toContain(paymentMethod);
 });
+
+it('allows optional size, tolerance and payment percentages to remain unset at main-order submission',()=>{
+ const f=fixture();const contract={...f.contract,quantityBasis:undefined,quantityBasisNote:undefined,overPercent:undefined,shortPercent:undefined,depositPercent:null,preShipmentPercent:null};
+ f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:contract}});
+ expect(()=>f.run({type:'order.governance.submit',payload:{orderId:'order'}})).not.toThrow();
+});
+it('reports all missing commercial approval fields together without changing the draft',()=>{
+ const f=fixture();f.order.governance.contract={...f.contract,poNumber:'',confirmationFileIds:[],incoterm:'',deliveryPlace:'',paymentNote:''};const before=structuredClone(f.state);
+ let message='';try{f.run({type:'order.governance.submit',payload:{orderId:'order'}});}catch(e){message=(e as Error).message;}
+ for(const field of ['PO','书面确认','贸易术语','指定地点','付款条款'])expect(message).toContain(field);
+ expect(f.state).toEqual(before);
+});
