@@ -57,6 +57,14 @@ describe('one company = one library', () => {
     expect(await repo.list(member('clerk', OTHER_COMPANY))).toEqual([]);
     expect(await repo.revisionOf(member('clerk'), library.id)).toEqual({ id: library.id, revision: 0 });
   });
+  it('does not expose an archived legacy library detached from company access', async () => {
+    const main = await repo.create(member('owner'), { name: '公司' }, true);
+    const legacyId = '33333333-3333-4333-8333-333333333333';
+    db.workspaces.set(legacyId, { id: legacyId, companyId: null, ownerId: 'clerk', slug: 'legacy', name: '旧档', revision: 1, state: { ...structuredClone(main.state), workspaceArchive: { at: '2026-10-28T00:00:00Z', actorId: 'system' } } });
+    expect((await repo.list(member('clerk'))).map(row => row.id)).toEqual([main.id]);
+    await expect(repo.get(member('clerk'), legacyId)).rejects.toMatchObject({ status: 404 });
+    await expect(repo.changeArchive(member('clerk'), legacyId, { requestId: 'restore-legacy', expectedRevision: 1 }, 'restore')).rejects.toMatchObject({ status: 404 });
+  });
   it('has no recycle bin and no per-account grants', async () => {
     const library = await repo.create(member('owner'), { name: '公司' }, true);
     await expect(repo.changeArchive(member('owner'), library.id, { requestId: 'archive', expectedRevision: 0 }, 'archive')).rejects.toMatchObject({ code: 'COMPANY_SINGLE_LIBRARY' });
