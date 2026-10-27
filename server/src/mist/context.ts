@@ -58,18 +58,37 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       authority.orderReviewerIds[domain]=[...new Set(authority.orderReviewerIds[domain])];
     }
   }
-  if(kind.startsWith('fulfillment.procurement.')){
+  // Only submission/decision consumes approval authority. Drafts, documents and
+  // receipt records must not reload unrelated global reviewer accounts.
+  if(['fulfillment.procurement.submit','fulfillment.procurement.decide'].includes(kind)){
+    const current=async(id:string,family:string,strictDomain=false)=>{
+      if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
+      if(actor.companyId&&db.companyMember?.findFirst&&!await db.companyMember.findFirst({where:{companyId:actor.companyId,userId:id,status:'active'}}))return false;
+      const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return false;
+      const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId??null);
+      return hasScope(fresh,'procurement:approve' as any)&&(strictDomain
+        ? fresh.globalBusinessScope||fresh.businessAttributes?.includes(family+'_business')
+        : fresh.globalBusinessScope||fresh.departmentIds.some(id=>actor.departmentIds.includes(id))||fresh.userId===actor.userId);
+    };
     for(const contract of ['purchase','processing'])for(const family of ['fabric','garment']){
       const key=`supplierCommitment.approvers.${contract}.${family}`;
       const row=await db.systemConfig?.findUnique({where:{id:`global::${key}`}});
       let value:any=row?.value;try{if(typeof value==='string')value=JSON.parse(value);}catch{value=null;}
-      if(value?.schemaVersion!==1||!Array.isArray(value.userIds)||!Number.isSafeInteger(row?.version))continue;
+      const valid=value?.schemaVersion===1&&Array.isArray(value.userIds)&&Number.isSafeInteger(row?.version);
       const userIds:string[]=[];
-      for(const id of [...new Set(value.userIds.filter((id:any)=>typeof id==='string'))].slice(0,100) as string[]){
-        const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)continue;
-        const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId ?? null);if(hasScope(fresh,'procurement:approve' as any) && (fresh.globalBusinessScope || fresh.departmentIds.some(id=>actor.departmentIds.includes(id)) || fresh.userId===actor.userId))userIds.push(id);
+      for(const id of (valid?[...new Set(value.userIds.filter((id:any)=>typeof id==='string'))].slice(0,100):[]) as string[]){
+        if(await current(id,family))userIds.push(id);
       }
-      authority.supplier[key]={version:row.version,userIds};
+      if(!userIds.length&&actor.companyId&&eligibleReviewerIds){
+        const candidates:string[]=[];
+        for(const id of eligibleReviewerIds)if(id!==actor.userId&&await current(id,family,true))candidates.push(id);
+        if(candidates.length){
+          const companyRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
+          try{const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;if(id&&id!==actor.userId&&candidates.includes(id))userIds.push(id);}
+          catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+        }
+      }
+      authority.supplier[key]={version:valid?row.version:0,userIds};
     }
   }
   if(kind.startsWith('platform.claim.')){try{const reviewerId=(await routing.resolveClaimLeader(actor.userId)).reviewerId;const user=reviewerId&&reviewerId!==actor.userId?await loadUserWithRoles(db,reviewerId):null;if(user&&user.status==='active'&&!user.deletedAt&&hasScope(await buildLoadedAuthTokenPayload(db,user,actor.companyId??null),'aftersales:approve'))authority.claimReviewerId=reviewerId;}catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}}

@@ -116,3 +116,38 @@ describe('company order approval without duplicate legacy configuration',()=>{
   expect(result.orderReviewerIds).toEqual({garment:[],fabric:[]});
  });
 });
+
+describe('company procurement authority isolation',()=>{
+ it('saves drafts without loading unrelated approval configuration or reviewer accounts',async()=>{
+  mocks.users.set('foreign',{id:'foreign',status:'active',permissions:['procurement:approve']});
+  mocks.build.mockRejectedValue(Object.assign(new Error('foreign company'),{code:'COMPANY_ACCESS_DENIED'}));
+  const findUnique=vi.fn(async()=>({version:1,value:{schemaVersion:1,userIds:['foreign']}}));
+  await expect(mistApprovalAuthority({systemConfig:{findUnique}},{...actor,companyId:'company-a'},'fulfillment.procurement.save',['owner','leader'])).resolves.toEqual({supplier:{}});
+  expect(findUnique).not.toHaveBeenCalled();expect(mocks.build).not.toHaveBeenCalled();
+ });
+ it('ignores foreign legacy nominees and routes approval to the current company leader',async()=>{
+  mocks.users.set('foreign',{id:'foreign',status:'active',permissions:['procurement:approve']});
+  mocks.users.set('leader',{id:'leader',status:'active',permissions:['procurement:approve'],globalBusinessScope:true});
+  mocks.build.mockImplementation(async(_db,user,companyId)=>{if(user.id==='foreign')throw Object.assign(new Error('foreign company'),{code:'COMPANY_ACCESS_DENIED'});return {...user,userId:user.id,companyId,departmentIds:[],authorizationLoaded:true};});
+  mocks.dept.mockResolvedValue({reviewerId:'leader'});
+  const db={systemConfig:{findUnique:async()=>({version:3,value:{schemaVersion:1,userIds:['foreign']}})}};
+  const value=await mistApprovalAuthority(db,{...actor,companyId:'company-a'},'fulfillment.procurement.submit',['owner','leader']);
+  expect(value.supplier['supplierCommitment.approvers.purchase.garment']?.userIds).toEqual(['leader']);
+  expect(mocks.build.mock.calls.some(call=>call[1].id==='foreign')).toBe(false);
+ });
+});
+
+it('keeps procurement fallback within current members, matching business domain and current permission',async()=>{
+ mocks.users.set('foreign',{id:'foreign',status:'active',permissions:['procurement:approve'],businessAttributes:['garment_business']});
+ mocks.users.set('leader',{id:'leader',status:'active',permissions:['procurement:approve'],businessAttributes:['garment_business']});
+ mocks.build.mockImplementation(async(_db,user,companyId)=>({...user,userId:user.id,companyId,departmentIds:[],authorizationLoaded:true}));
+ mocks.dept.mockResolvedValue({reviewerId:'leader'});
+ const db={companyMember:{findFirst:async({where}:any)=>where.userId==='foreign'?null:{companyId:where.companyId}},systemConfig:{findUnique:async()=>({version:1,value:{schemaVersion:1,userIds:['foreign']}})}};
+ const args=[db,{...actor,companyId:'company-a'},'fulfillment.procurement.submit',['owner','leader','foreign']] as const;
+ const value=await mistApprovalAuthority(...args);
+ expect(value.supplier['supplierCommitment.approvers.purchase.garment']?.userIds).toEqual(['leader']);
+ expect(value.supplier['supplierCommitment.approvers.purchase.fabric']?.userIds).toEqual([]);
+ expect(mocks.build.mock.calls.some(call=>call[1].id==='foreign')).toBe(false);
+ mocks.users.get('leader').permissions=[];
+ expect((await mistApprovalAuthority(...args)).supplier['supplierCommitment.approvers.purchase.garment']?.userIds).toEqual([]);
+});
