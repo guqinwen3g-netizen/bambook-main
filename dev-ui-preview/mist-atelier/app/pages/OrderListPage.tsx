@@ -8,7 +8,7 @@ import {OrderProductThumb} from './OrderProductThumb';
 import React from 'react';
 import {orderLocked} from './OrderTermination';
 import { ChevronRight, ClipboardList, Download, Plus, SearchX, Ship, Wallet, AlertTriangle } from 'lucide-react';
-import { Avatar, Banner, Button, Card, DataTable, Dropdown, EmptyState, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, SearchField, StatCard, StatGrid, Tabs, TextLink, Thumb, Toolbar, useToast, type Column } from '../../../../components/mist';
+import { Avatar, Banner, Button, Card, DataTable, Dropdown, EmptyState, Icon, MistPage, Mono, ObjectCell, PageHeader, Pagination, Pill, SearchField, StatCard, StatGrid, Tabs, TextLink, Thumb, Toolbar, type Column } from '../../../../components/mist';
 import { fmt } from '../data';
 import type { MistOrder } from '../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -18,22 +18,22 @@ import { useMistSession } from '../runtime/auth';
 import { OrderSourceDialog } from './OrderSourceDialog';
 import { currentLineStage, orderLineFlags } from './orderLineTrack';
 import { useDevice } from '../runtime/devicePreferences';
+import { downloadGeneratedBlob, requestGeneratedExport } from '../runtime/exportRequests';
 const approvalOf=(order:MistOrder)=>(order as MistOrder&{governance?:OrderGovernanceFields}).governance?.status;
 /** BB-ORD-7：已作废 / 已取消订单默认不在列表与统计中，可按主单审批筛选查看。 */
 export const isTerminatedOrder=(order:MistOrder)=>['void','cancelled'].includes(approvalOf(order)||'');
 const approvalLabel=(order:MistOrder)=>({draft:'订单草稿',pending:'待主单审批',approved:'主单已批准',rejected:'主单已退回',void:'已作废',cancelled:'已取消'}[approvalOf(order)||'']||'待补主单审批');
 
 /** Export the displayed records as a real UTF-8 spreadsheet-compatible file. */
-export function downloadMistCsv(filename: string, headings: string[], rows: Array<Array<string | number | null | undefined>>) {
+export function downloadMistCsv(filename: string, headings: string[], rows: Array<Array<string | number | null | undefined>>, options: { direct?: boolean } = {}) {
   const cell = (value: string | number | null | undefined) => {
     let text = value == null ? '' : String(value);
     if (typeof value === 'string' && /^[=+@-]/.test(text)) text = `'${text}`;
     return `"${text.replace(/"/g, '""')}"`;
   };
   const blob = new Blob(['\uFEFF', [headings, ...rows].map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob), anchor = document.createElement('a');
-  anchor.href = url; anchor.download = filename; anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const run = () => downloadGeneratedBlob(blob, filename);
+  if (options.direct) run(); else requestGeneratedExport({ filename, rowCount: rows.length, run });
   return blob;
 }
 
@@ -45,7 +45,6 @@ export function mistDate(value: string): Date | null {
 export function OrderListPage() {
   const density = useDevice('density');
   const { go, route } = useNav();
-  const toast = useToast();
   const { state, loading, error, refresh } = useMistWorkspace();
   const [tab, setTab] = React.useState<'garment' | 'fabric'>(route.section==='fabric'?'fabric':'garment');
   const [q, setQ] = React.useState('');
@@ -83,7 +82,7 @@ export function OrderListPage() {
   ];
   return <MistPage>
     <PageHeader description={uiText(customerId ? state?.customers.find(customer => customer.id === customerId)?.name : undefined)} eyebrow={uiText("订单履约 · 订单")} title={uiText("订单管理")}
-      actions={<><Button icon={Download} disabled={!state} onClick={() => { downloadMistCsv('订单台账.csv', ['订单', '客户', '季节', '数量', '币种', '金额', '交期', '负责人', '主单审批', '状态'], rows.map(order => [order.code, order.customer, order.season, quantityLabel(order), order.currency, order.amount, order.due, order.owner, approvalLabel(order), order.state])); toast('已导出订单台账'); }}>{uiText("导出")}</Button>{canWrite&&<Button variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>{uiText("新建订单")}</Button>}</>} />
+      actions={<><Button icon={Download} disabled={!state} onClick={() => { downloadMistCsv('订单台账.csv', ['订单', '客户', '季节', '数量', '币种', '金额', '交期', '负责人', '主单审批', '状态'], rows.map(order => [order.code, order.customer, order.season, quantityLabel(order), order.currency, order.amount, order.due, order.owner, approvalLabel(order), order.state])); }}>{uiText("导出")}</Button>{canWrite&&<Button variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>{uiText("新建订单")}</Button>}</>} />
     <OrderSourceDialog open={createOpen} onClose={() => setCreateOpen(false)} type={tab} customerId={customerId} canWrite={canWrite} />
     {error && <Banner tone="bad" title={uiText("订单读取失败")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
     <StatGrid>
