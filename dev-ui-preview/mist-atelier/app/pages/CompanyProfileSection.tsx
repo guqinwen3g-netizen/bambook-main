@@ -34,8 +34,10 @@ export type CompanyProfileField = { key: CompanyProfileKey; label: string; type?
 export const COMPANY_FIELDS: CompanyProfileField[] = [
   { key: 'legalName', label: '公司中文抬头' },
   { key: 'englishName', label: '公司英文抬头' },
-  { key: 'address', label: '中文地址' },
-  { key: 'englishAddress', label: '英文地址' },
+  { key: 'address', label: '中文联系地址' },
+  { key: 'englishAddress', label: '英文联系地址' },
+  { key: 'registeredAddress', label: '中文注册地址' },
+  { key: 'registeredEnglishAddress', label: '英文注册地址' },
   { key: 'phone', label: '联系电话', type: 'tel' },
   { key: 'email', label: '公司联系邮箱', type: 'email' },
 ];
@@ -43,22 +45,23 @@ export const EXPORT_FIELDS: CompanyProfileField[] = [
   { key: 'taxId', label: '税务登记编号' },
   { key: 'customsCode', label: '海关登记编码' },
   { key: 'bankName', label: '收款银行名称' },
+  { key: 'bankAddress', label: '银行地址' },
   { key: 'bankAccount', label: '收款账号' },
   { key: 'swift', label: 'SWIFT / BIC' },
   { key: 'defaultCurrency', label: '常用结算币种' },
 ];
-export const EMPTY_COMPANY: MistCompanyProfile = {
-  legalName: '', englishName: '', address: '', englishAddress: '', phone: '', email: '',
-  taxId: '', customsCode: '', bankName: '', bankAccount: '', swift: '', defaultCurrency: '',
+export const EMPTY_COMPANY: Required<MistCompanyProfile> = {
+  legalName: '', englishName: '', address: '', englishAddress: '', registeredAddress: '', registeredEnglishAddress: '', phone: '', email: '',
+  taxId: '', customsCode: '', bankName: '', bankAddress: '', bankAccount: '', swift: '', defaultCurrency: '',
 };
 const KEYS = Object.keys(EMPTY_COMPANY) as CompanyProfileKey[];
 const label = (key: CompanyProfileKey) => [...COMPANY_FIELDS, ...EXPORT_FIELDS].find(field => field.key === key)!.label;
-export const readCompanyProfile = (profile?: Partial<MistCompanyProfile>): MistCompanyProfile => ({ ...EMPTY_COMPANY, ...profile });
+export const readCompanyProfile = (profile?: Partial<MistCompanyProfile>): Required<MistCompanyProfile> => ({ ...EMPTY_COMPANY, ...profile });
 
 /** 返回可直接展示的错误，并指出字段；服务端用同一规则兜底。 */
 export function validateCompanyProfile(values: MistCompanyProfile): { key?: CompanyProfileKey; message: string } | null {
-  if (KEYS.some(key => values[key].trim()) && !values.legalName.trim() && !values.englishName.trim()) return { key: 'legalName', message: '请填写中文或英文公司抬头' };
-  for (const key of KEYS) { const limit = key === 'address' || key === 'englishAddress' ? 500 : 240; if (values[key].length > limit) return { key, message: `${label(key)}不能超过${limit}字` }; }
+  if (KEYS.some(key => (values[key]??'').trim()) && !values.legalName.trim() && !values.englishName.trim()) return { key: 'legalName', message: '请填写中文或英文公司抬头' };
+  for (const key of KEYS) { const limit = key.toLowerCase().includes('address') ? 500 : 240; if ((values[key]??'').length > limit) return { key, message: `${label(key)}不能超过${limit}字` }; }
   if (values.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) return { key: 'email', message: '公司联系邮箱格式不正确，请填写如 name@example.com 的完整地址' };
   if (values.defaultCurrency.trim() && !/^[A-Z]{3}$/.test(values.defaultCurrency.trim().toUpperCase())) return { key: 'defaultCurrency', message: '常用结算币种须为三位英文字母，如 USD、CNY、EUR' };
   return null;
@@ -83,7 +86,7 @@ export function CompanyProfileSection({ member, active = true }: { member: boole
   const edit = (key: CompanyProfileKey, value: string) => { dirty.current.add(key); setSaved(false); setProblem(current => current?.key === key || !current?.key ? null : current); setDraft(previous => ({ scope, values: { ...(previous.scope === scope ? previous.values : readCompanyProfile(stored)), [key]: value } })); };
   const save = async () => {
     if (locked || working.current) return;
-    const normalized = Object.fromEntries(KEYS.map(key => [key, values[key].trim()])) as MistCompanyProfile; normalized.defaultCurrency = normalized.defaultCurrency.toUpperCase();
+    const normalized = Object.fromEntries(KEYS.map(key => [key, values[key].trim()])) as Required<MistCompanyProfile>; normalized.defaultCurrency = normalized.defaultCurrency.toUpperCase();
     const invalid = validateCompanyProfile(normalized);
     if (invalid) { setProblem(invalid); const target = invalid.key && host.current?.querySelector<HTMLInputElement>(`input[aria-label="${label(invalid.key)}"]`); if (target) { target.focus(); target.scrollIntoView?.({ block: 'center' }); } return; }
     const changed = KEYS.filter(key => dirty.current.has(key) && normalized[key] !== (stored?.[key] ?? ''));

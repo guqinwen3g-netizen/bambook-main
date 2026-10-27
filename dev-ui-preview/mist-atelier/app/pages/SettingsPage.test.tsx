@@ -76,12 +76,12 @@ describe('workspace default currency and local-only settings',()=>{
 });
 
 describe('company profile maintenance in system settings',()=>{
- const full={legalName:'示例公司',englishName:'Sample Co',address:'示例地址',englishAddress:'Sample Address',phone:'000',email:'ops@example.com',taxId:'TAX-SAMPLE',customsCode:'CUS-SAMPLE',bankName:'示例银行',bankAccount:'0000',swift:'SAMPLEXX',defaultCurrency:'USD'};
+ const full={legalName:'示例公司',englishName:'Sample Co',address:'示例地址',englishAddress:'Sample Address',registeredAddress:'注册地址',registeredEnglishAddress:'Registered Address',phone:'000',email:'ops@example.com',taxId:'TAX-SAMPLE',customsCode:'CUS-SAMPLE',bankName:'示例银行',bankAddress:'Bank Address',bankAccount:'0000',swift:'SAMPLEXX',defaultCurrency:'USD'};
  const value=(label:string)=>host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!.value;
  const open=async()=>{render();await click(button('公司资料'));};
  it('shows an empty state, saves all twelve fields and reads them back after a fresh mount',async()=>{
   await open();expect(host.textContent).toContain('尚未填写公司资料');
-  const labels:[string,string][]=[['公司中文抬头',full.legalName],['公司英文抬头',full.englishName],['中文地址',full.address],['英文地址',full.englishAddress],['联系电话',full.phone],['公司联系邮箱',full.email],['税务登记编号',full.taxId],['海关登记编码',full.customsCode],['收款银行名称',full.bankName],['收款账号',full.bankAccount],['SWIFT / BIC',full.swift],['常用结算币种','usd']];
+  const labels:[string,string][]=[['公司中文抬头',full.legalName],['公司英文抬头',full.englishName],['中文联系地址',full.address],['英文联系地址',full.englishAddress],['中文注册地址',full.registeredAddress],['英文注册地址',full.registeredEnglishAddress],['联系电话',full.phone],['公司联系邮箱',full.email],['税务登记编号',full.taxId],['海关登记编码',full.customsCode],['收款银行名称',full.bankName],['银行地址',full.bankAddress],['收款账号',full.bankAccount],['SWIFT / BIC',full.swift],['常用结算币种','usd']];
   for(const [label,v] of labels)input(label,v);await click(button('保存公司资料'));
   expect(seam.value.run).toHaveBeenCalledWith({type:'settings.update',payload:{companyProfile:full}});expect(seam.value.state.settings.companyProfile).toEqual(full);
   act(()=>root!.unmount());host.remove();await open();for(const [label] of labels)expect(value(label)).toBe(label==='常用结算币种'?'USD':full[Object.keys(full)[labels.findIndex(x=>x[0]===label)] as keyof typeof full]);expect(host.textContent).not.toContain('尚未填写公司资料');
