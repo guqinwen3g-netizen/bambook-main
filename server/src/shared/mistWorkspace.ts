@@ -25,6 +25,7 @@ import {confirmationNeedsForms,developmentVersionSamples,sampleDispatchBlocker,s
 import {assertOrderLineSource,type OrderLineSource} from './mistOrderSource';
 import {lineQuantityFromBreakdown,type OrderLineBreakdown} from './mistOrderBreakdown';
 import {isLineClosed} from './mistOrderClosure';
+import {quotationContract} from './mistTradeTerms';
 import {createOrderGovernance,applyOrderGovernanceCommand,orderGovernancePermission,getOrderGovernanceReviews,assertOrderApproved,assertOrderWritable,assertOrderNotTerminated,type OrderGovernanceFields,type OrderGovernanceCommand,type OrderGovernanceInput} from './mistOrderGovernance';
 import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
 import {applyCustomerStatementCommand,customerStatementCommandPermission,type CustomerStatementCommand,type CustomerStatementRecord} from './mistCustomerStatement';
@@ -828,7 +829,10 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);assertOrderFundingIntegrity(state);return {state,result};}
   if(command.type.startsWith('fulfillment.')){const result=applyFulfillmentCommand(state,command as FulfillmentCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type==='market.lead.convertToCrm'){const result=convertLeadToCrm(state,command.payload as Extract<MarketCommand,{type:'market.lead.convertToCrm'}>['payload'],context);recalculate(state);return {state,result};}
-  if(command.type.startsWith('market.')){const result=applyMarketCommand(state,command as MarketCommand,context);for(const order of state.orders)if(!original.orders.some(old=>old.id===order.id)&&!order.governance){order.governance=createOrderGovernance(context);order.state='订单草稿';order.tone='neutral';order.checklist=['拟发范围确认','收货与贸易条款确认','收款条件核对'].map((label,index)=>({id:order.id+'-check-'+index,label,done:false,note:''}));}normalizeMistState(state,context);recalculate(state);return {state,result};}
+  if(command.type.startsWith('market.')){const result=applyMarketCommand(state,command as MarketCommand,context);
+    // 报价转单：报价的贸易术语、指定地点与付款条件作为订单合同初稿，仍走主单审批。
+    const sourceQuote=command.type==='market.quotation.convert'?state.market?.quotations.find(q=>q.id===(command as Extract<MarketCommand,{type:'market.quotation.convert'}>).payload.id):undefined;
+    for(const order of state.orders)if(!original.orders.some(old=>old.id===order.id)&&!order.governance){order.governance=createOrderGovernance(context,sourceQuote&&(result as {orderId?:string}|undefined)?.orderId===order.id?quotationContract(sourceQuote):undefined);order.state='订单草稿';order.tone='neutral';order.checklist=['拟发范围确认','收货与贸易条款确认','收款条件核对'].map((label,index)=>({id:order.id+'-check-'+index,label,done:false,note:''}));}normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('platform.')){const result=applyPlatformCommand(state,command as PlatformCommand,context);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('email.')){const result=applyEmailCommand(state,command as EmailCommand,context);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('crm.')){const result=applyCrmCommand(state,command as CrmCommand,context);normalizeMistState(state,context);recalculate(state);return {state,result};}

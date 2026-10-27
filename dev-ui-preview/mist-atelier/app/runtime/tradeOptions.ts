@@ -2,7 +2,10 @@
  * 外贸常用选项：贸易术语、付款条件、币种、国家地区、港口、单位等。
  * 只是录入时的常用值；保存的仍是文本或代码，服务端校验口径不变（贸易术语代码见 server/src/_shared/incoterm.ts）。
  */
+import { CUSTOMER_PAYMENT_TERMS as SHARED_CUSTOMER_TERMS, paymentTermContract, type PaymentMethod as SharedPaymentMethod } from '../../../../server/src/shared/mistTradeTerms';
+
 export type TradeOption = { value: string; label: string };
+
 const plain = (values: string[]): TradeOption[] => values.map(value => ({ value, label: value }));
 
 /** Incoterms 2020 全部 11 条。保存代码，指定地点另填。 */
@@ -24,37 +27,14 @@ export function splitIncoterm(value: string): { code: string; place: string } {
 }
 export const joinIncoterm = (code: string, place: string) => code && place ? `${code} ${place}` : code || place;
 
-/** 付款方式与合同字段的对应：选常用条款时同步订单的结构化收款口径。 */
-export type PaymentMethod = 'TT' | 'LC' | 'OA' | 'OTHER';
+/** 付款方式与合同字段的对应：常用条款及其收款口径与报价转单共用服务端同一份（mistTradeTerms）。 */
+export type PaymentMethod = SharedPaymentMethod;
 export const PAYMENT_METHODS: TradeOption[] = [{ value: 'TT', label: 'T/T 电汇' }, { value: 'LC', label: 'L/C 信用证' }, { value: 'OA', label: 'O/A 赊销' }, { value: 'OTHER', label: '其他（D/P、D/A 等）' }];
 export const paymentMethodLabel = (value: string | undefined) => PAYMENT_METHODS.find(option => option.value === value)?.label || value || '';
-export type CustomerPaymentTerm = TradeOption & { method: PaymentMethod; deposit?: number; preShipment?: number };
-const term = (value: string, method: PaymentMethod, deposit?: number, preShipment?: number): CustomerPaymentTerm =>
-  ({ value, label: value, method, ...(deposit === undefined ? {} : { deposit }), ...(preShipment === undefined ? {} : { preShipment }) });
-
 /** 对客户（出口销售）的常用付款条件。 */
-export const CUSTOMER_PAYMENT_TERMS: CustomerPaymentTerm[] = [
-  term('T/T 100% 预付', 'TT', 100, 100),
-  term('T/T 30% 定金，70% 发货前付清', 'TT', 30, 100),
-  term('T/T 30% 定金，70% 见提单副本', 'TT', 30, 30),
-  term('T/T 50% 定金，50% 发货前付清', 'TT', 50, 100),
-  term('T/T 50% 定金，50% 见提单副本', 'TT', 50, 50),
-  term('T/T 发货前付清', 'TT', 0, 100),
-  term('T/T 见提单副本', 'TT', 0, 0),
-  term('T/T 提单日后 30 天', 'TT', 0, 0),
-  term('T/T 提单日后 60 天', 'TT', 0, 0),
-  term('L/C 即期', 'LC'),
-  term('L/C 远期 30 天', 'LC'), term('L/C 远期 60 天', 'LC'), term('L/C 远期 90 天', 'LC'),
-  term('D/P 即期', 'OTHER'),
-  term('D/A 30 天', 'OTHER'), term('D/A 60 天', 'OTHER'), term('D/A 90 天', 'OTHER'),
-  term('O/A 30 天', 'OA'), term('O/A 60 天', 'OA'), term('O/A 90 天', 'OA'),
-];
-export const customerPaymentTerm = (value: string) => CUSTOMER_PAYMENT_TERMS.find(option => option.value === value.trim());
+export const CUSTOMER_PAYMENT_TERMS: TradeOption[] = SHARED_CUSTOMER_TERMS.map(term => ({ value: term.value, label: term.value }));
 /** 订单合同选了常用条款时，一并带出付款方式、定金与出运前累计收款；手动填写的条款只改原文。 */
-export function paymentTermPatch(value: string): { paymentNote: string; paymentMethod?: PaymentMethod; depositPercent?: number; preShipmentPercent?: number | null } {
-  const found = customerPaymentTerm(value);
-  return found ? { paymentNote: value, paymentMethod: found.method, depositPercent: found.deposit ?? 0, preShipmentPercent: found.method === 'TT' ? found.preShipment ?? null : null } : { paymentNote: value };
-}
+export const paymentTermPatch = paymentTermContract;
 
 /** 对供应商、加工厂（国内采购）的常用付款条件。 */
 export const SUPPLIER_PAYMENT_TERMS: TradeOption[] = plain([
