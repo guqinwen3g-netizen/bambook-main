@@ -25,12 +25,12 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     const {createOrderMainApprovalService}=await import('../orders/orderMainApprovalService');
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
     for(const domain of ['garment','fabric'] as const){
-      let configured:string[];try{configured=await service.resolveEligibleReviewerIds(db,domain);}catch(error:any){if(error?.code==='ORDER_APPROVAL_AUTHORITY_MISSING')continue;throw error;}
-      const current=async(id:string)=>{
+      let configured:string[]=[];try{configured=await service.resolveEligibleReviewerIds(db,domain);}catch(error:any){if(error?.code!=='ORDER_APPROVAL_AUTHORITY_MISSING')throw error;}
+      const current=async(id:string,checkDomain=false)=>{
         if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
         const user=await loadUserWithRoles(db,id);if(!user||user.status!=='active'||user.deletedAt)return false;
         const fresh=await buildLoadedAuthTokenPayload(db,user,actor.companyId??null);
-        return hasScope({...fresh,roles:[]},'orders:write');
+        return hasScope({...fresh,roles:[]},'orders:write') && (!checkDomain || fresh.globalBusinessScope === true || fresh.businessAttributes?.includes(domain+'_business'));
       };
       for(const id of configured){
         if(!await current(id))continue;
@@ -40,6 +40,20 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
         try{const leader=(await routing.resolveReviewerByDepartment(id))?.reviewerId;
           if(leader&&leader!==id&&await current(leader))authority.orderReviewerIds[domain].push(leader);
         }catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+      }
+      // Company roles and department hierarchy are the authority when no usable legacy
+      // domain assignment exists. Resolve from the original requester on both submit
+      // and decide (the repository supplies reviewSubject for decisions).
+      if(actor.companyId && !authority.orderReviewerIds[domain].length && eligibleReviewerIds){
+        const candidates:string[]=[];
+        for(const id of eligibleReviewerIds)if(id!==actor.userId&&await current(id,true))candidates.push(id);
+        if(candidates.length){
+          const companyRouting=createApprovalRoutingService({prisma:db,companyId:actor.companyId,eligibleReviewerIds:candidates});
+          try{
+            const id=(await companyRouting.resolveReviewerByDepartment(actor.userId))?.reviewerId;
+            if(id&&id!==actor.userId&&candidates.includes(id))authority.orderReviewerIds[domain].push(id);
+          }catch(error:any){if(error?.code!=='NO_REVIEWER_RESOLVED')throw error;}
+        }
       }
       authority.orderReviewerIds[domain]=[...new Set(authority.orderReviewerIds[domain])];
     }
