@@ -1,4 +1,5 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
+import { downloadGeneratedBlob, requestGeneratedExport } from '../runtime/exportRequests';
 import {businessNow} from '../runtime/businessClock';
 /** T2: original list/preview and board compositions, using the shared Mist workspace. */
 import React from 'react';
@@ -21,7 +22,7 @@ export function developmentCsv(rows:CsvDev[]):string {
   const cell=(value:unknown)=>`"${String(value??'').replaceAll('"','""')}"`;
   return '\uFEFF'+[['开发编号','开发对象','客户款号','客户','负责人','目标日期','当前阶段','当前状态','版本','工厂'],...rows.map(row=>[row.code||row.id,row.name,row.style,row.customer,row.owner,row.due,STAGES[row.stage]??'',row.state,row.ver,row.factory])].map(row=>row.map(cell).join(',')).join('\r\n');
 }
-function downloadDevelopmentCsv(rows:CsvDev[],label='开发案'){const url=URL.createObjectURL(new Blob([developmentCsv(rows)],{type:'text/csv;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download=`Bambook-${label}案.csv`;document.body.append(link);link.click();link.remove();URL.revokeObjectURL(url);}
+function downloadDevelopmentCsv(rows:CsvDev[],label='开发案'){const filename=`Bambook-${label}案.csv`, data=developmentCsv(rows);requestGeneratedExport({filename,rowCount:rows.length,run:()=>downloadGeneratedBlob(new Blob([data],{type:'text/csv;charset=utf-8'}),filename,{attach:true,revokeAfter:0})});}
 const shortDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/.test(value)?value.slice(5).replace('-','/'):value||'未定';
 function developmentImageFile(state:MistState|null|undefined,dev:MistDev|undefined){if(!state||!dev)return undefined;const version=(state.versions??[]).find(item=>item.id===dev.currentVersionId),files=state.files??[];return firstWorkspaceImage(files,version?.fileIds)||firstWorkspaceImage(files,dev.fileIds);}
 function DevelopmentThumb({state,dev,size}:{state:MistState|null|undefined;dev:MistDev;size?:'sm'}){const file=developmentImageFile(state,dev),image=useWorkspaceImage(file,'cutout-thumb');return <Thumb {...(image.src?{src:image.src}:developmentDomain(dev.values)==='fabric'?{icon:Layers}:{src:IMG[dev.img]})} size={size}/>;}

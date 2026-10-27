@@ -898,6 +898,8 @@
   "个": "pcs",
   "案 ·": "case ·",
   "导出": "Export",
+  "确认导出": "Confirm export",
+  "导出未能开始，请重试": "Could not start the export. Try again.",
   "尚未上传实物图片": "Physical images not uploaded yet",
   "打开开发案查看准确版本与返样记录": "Open the development case to view the accurate version and sample return records",
   "打开开发案": "Open Development Case",
