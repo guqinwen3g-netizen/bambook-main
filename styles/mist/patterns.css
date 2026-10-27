@@ -107,7 +107,7 @@
 .mist-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px 32px 48px; }
 .mist-scroll::-webkit-scrollbar { width: 10px; }
 .mist-scroll::-webkit-scrollbar-thumb { background: var(--mist-ink-4); border-radius: 10px; border: 3px solid var(--mist-canvas); }
-.mist-page { max-width: var(--mist-page-max); margin: 0 auto; animation: mist-enter .55s var(--mist-ease) both; }
+.mist-page { max-width: var(--mist-page-max); margin: 0 auto; }
 .mist-page[data-width="narrow"] { max-width: 880px; }
 .mist-page[data-width="wide"] { max-width: 1480px; }
 @keyframes mist-enter { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -594,7 +594,7 @@
 
 /* 智能邮箱：邮箱与文件夹导航 + 列表 + 阅读区 */
 /* 邮箱：像真正的邮件客户端——三栏铺满可视高度（文件夹 / 邮件列表 / 阅读区），各栏独立滚动；≤1180 列表单栏、阅读进抽屉。 */
-.mist-mail-page { display: flex; flex-direction: column; gap: 12px; max-width: 1600px; margin: 0 auto; animation: mist-enter .55s var(--mist-ease) both; }
+.mist-mail-page { display: flex; flex-direction: column; gap: 12px; max-width: 1600px; margin: 0 auto; }
 .mist-mail { display: grid; grid-template-columns: 216px minmax(300px, 380px) minmax(0, 1fr); gap: 0; background: var(--mist-card); border-radius: var(--mist-r-card); overflow: hidden; box-shadow: 0 1px 2px color-mix(in srgb, var(--mist-ink) 4%, transparent); height: calc(100dvh - var(--mist-topbar-h) - 64px); min-height: 520px; }
 .mist-mail-nav, .mist-mail-listpane, .mist-mail-reader { min-width: 0; min-height: 0; }
 .mist-mail-nav { background: color-mix(in srgb, var(--mist-fill) 55%, transparent); border-right: 1px solid var(--mist-line); }

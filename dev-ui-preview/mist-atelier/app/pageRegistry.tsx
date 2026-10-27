@@ -2,15 +2,34 @@ import React from 'react';
 
 /** 页面按需加载：登录页与外壳先到，进入哪个页面再取哪个页面的代码。 */
 type PageModule = Record<string, unknown>;
-const cache = new Map<() => Promise<PageModule>, Promise<PageModule>>();
+type PageLoader = () => Promise<PageModule>;
+type PageCacheEntry = { pending: Promise<PageModule>; ready?: PageModule };
+const cache = new Map<PageLoader, PageCacheEntry>();
+const preloaders = new WeakMap<React.FC, () => Promise<PageModule>>();
 const load = (loader: () => Promise<PageModule>) => {
-  let pending = cache.get(loader);
-  if (!pending) { pending = loader().catch(failure => { cache.delete(loader); throw failure; }); cache.set(loader, pending); }
-  return pending;
+  let entry = cache.get(loader);
+  if (!entry) {
+    entry = { pending: undefined as never };
+    const current = entry;
+    current.pending = Promise.resolve().then(loader).then(module => { current.ready = module; return module; }, failure => { if (cache.get(loader) === current) cache.delete(loader); throw failure; });
+    cache.set(loader, current);
+  }
+  return entry.pending;
 };
-function page(loader: () => Promise<PageModule>, pick: (module: PageModule) => unknown): React.LazyExoticComponent<React.FC> {
-  return React.lazy(async () => ({ default: pick(await load(loader)) as React.FC }));
+export function page(loader: PageLoader, pick: (module: PageModule) => unknown): React.LazyExoticComponent<React.FC> {
+  const component = React.lazy(() => {
+    const ready = cache.get(loader)?.ready;
+    if (ready) {
+      // React.lazy accepts a thenable. Resolve immediately when idle preloading has
+      // already completed, so its first render does not flash the Suspense fallback.
+      return { then: (resolve: (value: { default: React.FC }) => void) => resolve({ default: pick(ready) as React.FC }) } as unknown as Promise<{ default: React.FC }>;
+    }
+    return load(loader).then(module => ({ default: pick(module) as React.FC }));
+  });
+  preloaders.set(component, () => load(loader));
+  return component;
 }
+export function preloadPage(component: React.FC): Promise<unknown> { return preloaders.get(component)?.() ?? Promise.resolve(); }
 const named = (loader: () => Promise<PageModule>, name: string) => page(loader, module => module[name]);
 const mapped = (loader: () => Promise<PageModule>, map: string, view: string) => page(loader, module => (module[map] as Record<string, React.FC>)[view]);
 

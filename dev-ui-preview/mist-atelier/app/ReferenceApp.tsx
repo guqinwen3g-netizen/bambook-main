@@ -6,11 +6,13 @@ import { AccountAccessPage } from './pages/AccountAccessPage';
 import { exitCompanyManagement } from './runtime/platformAdmin';
 import React from 'react';
 import { buildPages, MODULE_VIEW_SET, PageLoadBoundary, AccountPage, PlatformSettingsPage, PlatformCompanySettingsPage } from './pageRegistry';
+import { PageLoading } from './PageLoading';
+import { preloadPagesWhenIdle } from './pagePreload';
 import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
-  AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, Skeleton, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
+  AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
   type ChatMessage, type CommandItem, type Crumb, type NavSection, type ThemeMode,
 } from '../../../components/mist';
 import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
@@ -188,6 +190,20 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   React.useEffect(()=>{aiController.current?.abort();aiController.current=null;aiRun.current=null;aiHistory.current=[];setAiBusy(false);setAiUseRouteSource(false);},[aiScope]);
   React.useEffect(()=>setAiUseRouteSource(false),[route.view,route.id]);
   const sections = useSections();
+  React.useEffect(() => {
+    if (session.status !== 'authenticated' || session.user?.mustChangePassword || (!platformOnly && workspace.loading)) return;
+    const views = sections.flatMap(section => section.items.map(item => item.id));
+    // Details and creation pages are prepared only when their parent module is visible.
+    if (views.includes('orders')) views.push('orders/detail', 'orders/new');
+    if (views.includes('development')) views.push('development/detail', 'development/new');
+    for (const view of ['approvals', 'notifications', 'search']) {
+      if (canOpenMistView({ view }, { canAccessView: session.canAccessView, hasPermission: session.hasPermission, platformOperator: session.user?.platformRole === 'platform_admin' }, REFERENCE_PREVIEW)) views.push(view);
+    }
+    const pages = [AccountPage, ...views.map(view => PAGES[view]).filter((page): page is React.FC => !!page)];
+    if (platformOnly) pages.push(PlatformSettingsPage);
+    if (platformCompany) pages.push(PlatformCompanySettingsPage);
+    return preloadPagesWhenIdle(pages);
+  }, [sections, session.status, session.sessionKey, session.user?.mustChangePassword, session.canAccessView, session.hasPermission, session.user?.platformRole, platformOnly, !!platformCompany, workspace.loading]);
   // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
   const lastDevelopmentTab = React.useRef<DevelopmentListTab>('garment');
   if (route.view === 'development') lastDevelopmentTab.current = developmentListTab(route.section);
@@ -360,7 +376,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
         {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
         {workspace.error && !workspace.pending && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}
         {!permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
-          : Page ? <MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<MistPage><Card><Skeleton height={18} width="40%"/><Skeleton height={12}/><Skeleton height={12} width="70%"/></Card></MistPage>}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider>
+          : Page ? <MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
       </MistAppShell>
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
