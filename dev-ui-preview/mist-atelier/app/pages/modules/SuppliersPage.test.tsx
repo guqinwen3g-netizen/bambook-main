@@ -33,7 +33,7 @@ describe('供应商管理', () => {
     expect(queryByRole(document.body,'spinbutton',{name:'月产能'})).toBeNull();
     expect(queryByRole(document.body,'textbox',{name:'产能单位'})).toBeNull();
     expect(queryByRole(document.body,'textbox',{name:'工艺与生产能力'})).toBeNull();
-    for(const [name,value] of [['供应商编码','LOG-001'],['名称','浦江物流'],['经营地址','上海'],['服务内容','出口货运及报关']]){
+    for(const [name,value] of [['名称','浦江物流'],['经营地址','上海'],['服务内容','出口货运及报关']]){
       await act(async()=>fireEvent.change(getByRole(document.body,'textbox',{name,exact:true}),{target:{value}}));
     }
     await click('保存');
@@ -98,4 +98,14 @@ describe('供应商管理', () => {
     expect(document.body.textContent).toContain('转给其他供应商”（仅限已批准、尚未收货的合同');
     expect(bridge.current.run).not.toHaveBeenCalled();
   });
+});
+
+it.each(['成衣加工','服务商'])('creates %s with only name and type and no manual code field',async type=>{
+ await mount();await click('新增供应商');
+ expect(queryByRole(document.body,'textbox',{name:'供应商编码'})).toBeNull();
+ await act(async()=>fireEvent.change(getByRole(document.body,'textbox',{name:'名称',exact:true}),{target:{value:'新供应商'}}));
+ await act(async()=>fireEvent.change(getByRole(document.body,'combobox',{name:'供应商类型'}),{target:{value:type}}));
+ await click('保存');
+ expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'market.supplier.save',payload:expect.objectContaining({input:expect.objectContaining({name:'新供应商',type,capabilities:'',capacity:0,capacityUnit:'',leadDays:0})})}));
+ expect(bridge.current.run.mock.calls[0][0].payload.input.code).toBeUndefined();
 });

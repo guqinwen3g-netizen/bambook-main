@@ -148,3 +148,24 @@ describe('remaining market state guards',()=>{
 });
 
 it.each([true,false])('requires relation administration for hold mutation (frozen=%s)',frozen=>{expect(marketCommandPermission({type:'market.relation.hold',payload:{id:'relation',frozen,reason:'真实业务依据'}})).toBe('relations:admin');expect(marketCommandPermission({type:'market.relation.save',payload:{input:{}}} as any)).toBe('relations:write');});
+
+it('generates supplier codes and accepts only name and type while preserving existing codes',()=>{
+ const {ctx,s}=setup();
+ const create=(name:string)=>run(s,{type:'market.supplier.save',payload:{input:{name,type:'成衣加工'}}},ctx).id!;
+ const first=create('第一加工厂'),second=create('第二加工厂');
+ const a=s.market.suppliers.find(x=>x.id===first)!,b=s.market.suppliers.find(x=>x.id===second)!;
+ expect(a.code).toBe('SUP-2026-0001');expect(b.code).toBe('SUP-2026-0002');
+ expect(a).toMatchObject({country:'',address:'',capabilities:'',capacity:0,capacityUnit:'',leadDays:0});
+ run(s,{type:'market.supplier.save',payload:{id:first,input:{name:'第一加工厂改名',type:'成衣加工'}}},ctx);
+ expect(s.market.suppliers.find(x=>x.id===first)!.code).toBe(a.code);
+ expect(s.market.relations.find(x=>x.supplierId===first)?.name).toBe('第一加工厂改名');
+});
+it('skips occupied automatic supplier codes and still rejects missing identity or invalid supplied numbers',()=>{
+ const {ctx,s}=setup();
+ run(s,{type:'market.supplier.save',payload:{input:{name:'导入加工厂',type:'成衣加工',code:'SUP-2026-0002'}}},ctx);
+ const id=run(s,{type:'market.supplier.save',payload:{input:{name:'新加工厂',type:'成衣加工'}}},ctx).id!;
+ expect(s.market.suppliers.find(x=>x.id===id)!.code).not.toBe('SUP-2026-0002');
+ for(const input of [{name:'',type:'成衣加工'},{name:'新厂',type:''},{name:'新厂',type:'成衣加工',capacity:-1},{name:'新厂',type:'成衣加工',leadDays:Number.NaN}]){
+  const before=s.market.suppliers.length;expect(()=>run(s,{type:'market.supplier.save',payload:{input}},ctx)).toThrow();expect(s.market.suppliers).toHaveLength(before);
+ }
+});

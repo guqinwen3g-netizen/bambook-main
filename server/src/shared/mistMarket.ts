@@ -53,7 +53,7 @@ export type MarketCommand =
  | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}}
  | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}}
  | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}}
- | {type:'market.supplier.save';payload:{id?:string;input:Omit<Input<MarketSupplier>,'contacts'|'blockReason'|'statusFrom'|'statusHistory'|'certificates'|'ratings'|'handlers'>&{/** 各业务组经手人账号 ID；省略的组保持不变，空字符串表示清除。 */handlerIds?:Partial<Record<MistBusinessGroup,string>>}}}
+ | {type:'market.supplier.save';payload:{id?:string;input:Pick<MarketSupplier,'name'|'type'>&Partial<Omit<Input<MarketSupplier>,'name'|'type'|'contacts'|'blockReason'|'statusFrom'|'statusHistory'|'certificates'|'ratings'|'handlers'>>&{/** 各业务组经手人账号 ID；省略的组保持不变，空字符串表示清除。 */handlerIds?:Partial<Record<MistBusinessGroup,string>>}}}
  | {type:'market.supplier.status';payload:{id:string;status:MarketSupplier['status'];reason:string;effectiveDate?:string}}
  | {type:'market.supplier.certificate.save';payload:{supplierId:string;id?:string;name:string;number:string;issuer:string;validUntil:string;fileIds:string[]}}
  | {type:'market.supplier.certificate.delete';payload:{supplierId:string;id:string}}
@@ -299,9 +299,13 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const composition=isFabric&&known(fr?.composition)?fr!.composition.split('\n').map(x=>x.trim()).filter(Boolean).join(' / '):v.fabric;
    const saved=execute(root,{type:'market.product.save',payload:{input:{sku:command.payload.sku,name:command.payload.name===undefined?d.name:str(command.payload.name,'产品名称',true,80),category:isFabric?'fabric':'garment',season:d.values.season,supplierId:command.payload.supplierId||'',supplierCode:command.payload.supplierCode||'',composition,specification:v.size,color:d.values.color,specs,refPrice:'',unit:d.values.targetUnit||(isFabric?'米':'件'),cost:'0',currency:d.values.targetCurrency||'USD',sourceDevId:devId,sourceVersionId:versionId,fileIds:v.fileIds,note:`来源 ${d.code} / ${v.label}；成本待核实`}}},ctx);result={...saved,devId,versionId};break;}
   case 'market.product.status':{const row=find(m.products,command.payload.id,'产品');row.status=one(command.payload.status,['active','archived'],'产品状态');row.updatedAt=ctx.now;result={id:row.id};break;}
-  case 'market.supplier.save':{const {id,input}=command.payload,old=id?find(m.suppliers,id,'供应商'):undefined,code=str(input.code,'供应商编码');if(m.suppliers.some(x=>x.id!==id&&x.code.toLowerCase()===code.toLowerCase()))fail('供应商编码已存在');
+  case 'market.supplier.save':{const {id,input:supplied}=command.payload,old=id?find(m.suppliers,id,'供应商'):undefined,input={...old,...supplied};
+   // Allocate inside the workspace command transaction; replay returns the existing receipt.
+   let code=str(input.code??'','供应商编码',false)||old?.code||'';
+   if(!code){let serial=m.suppliers.length+1;do{code=`SUP-${ctx.now.slice(0,4)}-${String(serial++).padStart(4,'0')}`;}while(m.suppliers.some(x=>x.code.toLowerCase()===code.toLowerCase()));}
+   if(m.suppliers.some(x=>x.id!==id&&x.code.toLowerCase()===code.toLowerCase()))fail('供应商编码已存在');
    const type=str(input.type,'供应商类型'),service=isServiceSupplier({type});
-   const row:MarketSupplier={...base(root,ctx,input,old),code,name:str(input.name,'供应商名称'),type,country:str(input.country,'国家地区',false),address:str(input.address,service?'经营地址':'生产地址',false),capabilities:str(input.capabilities,service?'服务内容':'生产能力'),capacity:service?0:count(input.capacity,'月产能'),capacityUnit:service?'':str(input.capacityUnit,'产能单位'),leadDays:service?0:count(input.leadDays,'交付周期'),status:old?.status||'active',blockReason:old?.blockReason||'',statusFrom:old?.statusFrom,statusHistory:old?.statusHistory,certificates:old?.certificates,ratings:old?.ratings,...(old?.handlers?{handlers:{...old.handlers}}:{}),contacts:old?.contacts||[]};
+   const row:MarketSupplier={...base(root,ctx,input,old),code,name:str(input.name,'供应商名称'),type,country:str(input.country??'','国家地区',false),address:str(input.address??'',service?'经营地址':'生产地址',false),capabilities:str(input.capabilities??'',service?'服务内容':'生产能力',false),capacity:service?0:count(input.capacity??0,'月产能'),capacityUnit:service?'':str(input.capacityUnit??'','产能单位',false),leadDays:service?0:count(input.leadDays??0,'交付周期'),status:old?.status||'active',blockReason:old?.blockReason||'',statusFrom:old?.statusFrom,statusHistory:old?.statusHistory,certificates:old?.certificates,ratings:old?.ratings,...(old?.handlers?{handlers:{...old.handlers}}:{}),contacts:old?.contacts||[]};
    const handlerTexts=supplierHandlers(row,old,input.handlerIds,ctx);put(m.suppliers,row,old);
    if(old&&old.name!==row.name)renameDevelopmentFactory(root,row);
    if(handlerTexts.length)history(root,ctx,'supplier',row.id,handlerTexts.join('；'));

@@ -66,11 +66,18 @@ describe('基础资料批量导入', () => {
     expect(f.state.market.products.map((p: any) => [p.sku, p.category, p.supplierId, p.cost, p.currency]).sort()).toEqual([['FB-1', 'fabric', supplier.id, '18.5', 'CNY'], ['TR-1', 'trimming', supplier.id, '0', 'CNY']]);
     expect(() => f.run('product', [{ sku: 'X', name: 'x', category: '鞋', unit: '双' }])).toThrow('类别须为');
     expect(() => f.run('product', [{ sku: 'Y', name: 'y', category: '成衣', unit: '件', supplier: '无此厂' }])).toThrow('请先导入供应商');
-    expect(() => f.run('supplier', [{ code: 'S2', name: 'n', type: 't', capabilities: 'c', capacityUnit: 'u', leadDays: '3' }])).toThrow('月产能未填写');
+    expect(() => f.run('supplier', [{ code: 'S2', name: 'n', type: 't', capabilities: 'c', capacityUnit: 'u', leadDays: '3' }])).not.toThrow();
   });
   it('空表与超量拒绝', () => {
     const f = fixture();
     expect(() => f.run('customer', [])).toThrow('没有数据行');
     expect(() => f.run('customer', Array.from({ length: 1001 }, () => ({ name: 'x', currency: 'USD' })))).toThrow('一次最多导入 1000 行');
   });
+});
+
+it('imports suppliers with only name and type and assigns unique codes',()=>{
+ const f=fixture();f.run('supplier',[{name:'甲加工厂',type:'成衣加工'},{name:'乙服务商',type:'服务商'}]);
+ expect(f.state.market.suppliers).toHaveLength(2);
+ expect(new Set(f.state.market.suppliers.map((s:any)=>s.code)).size).toBe(2);
+ for(const supplier of f.state.market.suppliers)expect(supplier.code).toMatch(/^SUP-2026-000[12]$/);
 });

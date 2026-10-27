@@ -89,21 +89,21 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const productionWhen = (s?:MarketSupplier) => ({key:'type',values:typeOptions(s?.type).map(t=>t.value).filter(t=>t!=='服务商')});
   const profileSpec = (s?: MarketSupplier): ModuleEditorSpec => ({
     title: s ? `编辑供应商 ${s.name}` : '新增供应商', submitLabel: '保存',
-    initialValues: { ...(s ? { code: s.code, name: s.name, type: s.type, country: s.country, address: s.address, capabilities: s.capabilities, capacity: s.capacity, capacityUnit: s.capacityUnit, leadDays: s.leadDays, note: s.note, serviceAddress: s.address, serviceCapabilities: s.capabilities } : { code: '', name: '', type: '织造', country: '中国', address: '', capabilities: '', capacity: 0, capacityUnit: '米/月', leadDays: 0, note: '', serviceAddress: '', serviceCapabilities: '' }), ...Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => ['handler:' + g, s?.handlers?.[g]?.id || ''])) },
+    initialValues: { ...(s ? { code: s.code, name: s.name, type: s.type, country: s.country, address: s.address, capabilities: s.capabilities, capacity: s.capacity, capacityUnit: s.capacityUnit, leadDays: s.leadDays, note: s.note, serviceAddress: s.address, serviceCapabilities: s.capabilities } : { name: '', type: '', country: '', address: '', capabilities: '', capacity: '', capacityUnit: '', leadDays: '', note: '', serviceAddress: '', serviceCapabilities: '' }), ...Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => ['handler:' + g, s?.handlers?.[g]?.id || ''])) },
     sections: [{ id: 'id', label: '身份', fields: ['code', 'name', 'type', 'country', 'address', 'serviceAddress'] }, { id: 'cap', label: '业务信息', fields: ['serviceCapabilities', 'capabilities', 'capacity', 'capacityUnit', 'leadDays', 'note'] }, { id: 'handlers', label: '经手人', fields: MIST_BUSINESS_GROUPS.map(g => 'handler:' + g) }],
     fields: [
-      { key: 'code', label: '供应商编码', required: true }, { key: 'name', label: '名称', required: true },
+      ...(s ? [{ key: 'code', label: '供应商编码', readonly: true }] : []), { key: 'name', label: '名称', required: true },
       { key: 'type', label: '供应商类型', type: 'select', required: true, options: typeOptions(s?.type) },
       { key: 'country', label: '国家地区' },
       { key: 'serviceAddress', label: '经营地址', when: {key:'type',values:['服务商']} },
-      { key: 'serviceCapabilities', label: '服务内容', type: 'textarea', required: true, when: {key:'type',values:['服务商']} },
+      { key: 'serviceCapabilities', label: '服务内容', type: 'textarea', when: {key:'type',values:['服务商']} },
       { key: 'address', label: '实际生产地址', when: productionWhen(s) },
-      { key: 'capabilities', label: '工艺与生产能力', type: 'textarea', required: true, when: productionWhen(s) },
-      { key: 'capacity', label: '月产能', type: 'number', min: 0, when: productionWhen(s) }, { key: 'capacityUnit', label: '产能单位', required: true, when: productionWhen(s) },
+      { key: 'capabilities', label: '工艺与生产能力', type: 'textarea', when: productionWhen(s) },
+      { key: 'capacity', label: '月产能', type: 'number', min: 0, when: productionWhen(s) }, { key: 'capacityUnit', label: '产能单位', when: productionWhen(s) },
       { key: 'leadDays', label: '通常交付周期（天）', type: 'number', min: 0, when: productionWhen(s) }, { key: 'note', label: '备注', type: 'textarea' },
       ...MIST_BUSINESS_GROUPS.map(g => ({ key: 'handler:' + g, label: `${MIST_BUSINESS_GROUP_LABEL[g]}经手人`, type: 'select' as const, options: [{ value: '', label: '未指定' }, ...memberSelectOptions(members, { group: g, current: s?.handlers?.[g] })] })),
     ],
-    submit: async v => { const service=isServiceSupplier({type:String(v.type??'')}); const r = await run({ type: 'market.supplier.save', payload: { id: s?.id, input: { code: String(v.code ?? ''), name: String(v.name ?? ''), type: String(v.type ?? ''), country: String(v.country ?? ''), address: String((service?v.serviceAddress:v.address) ?? ''), capabilities: String((service?v.serviceCapabilities:v.capabilities) ?? ''), capacity: service?0:Number(v.capacity), capacityUnit: service?'':String(v.capacityUnit ?? ''), leadDays: service?0:Number(v.leadDays), note: String(v.note ?? ''), fileIds: s?.fileIds || [], handlerIds: Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => [g, String(v['handler:' + g] ?? '')])) } } }); const id = String((r.result as { id?: string }).id || ''); if (!s && id) { setPicked(id); go('suppliers', id); } },
+    submit: async v => { const service=isServiceSupplier({type:String(v.type??'')}); const r = await run({ type: 'market.supplier.save', payload: { id: s?.id, input: { ...(s ? {code:s.code} : {}), name: String(v.name ?? ''), type: String(v.type ?? ''), country: String(v.country ?? ''), address: String((service?v.serviceAddress:v.address) ?? ''), capabilities: String((service?v.serviceCapabilities:v.capabilities) ?? ''), capacity: service?0:Number(v.capacity||0), capacityUnit: service?'':String(v.capacityUnit ?? ''), leadDays: service?0:Number(v.leadDays||0), note: String(v.note ?? ''), fileIds: s?.fileIds || [], handlerIds: Object.fromEntries(MIST_BUSINESS_GROUPS.map(g => [g, String(v['handler:' + g] ?? '')])) } } }); const id = String((r.result as { id?: string }).id || ''); if (!s && id) { setPicked(id); go('suppliers', id); } },
   });
   const certSpec = (s: MarketSupplier, c?: SupplierCertificate): ModuleEditorSpec => ({
     title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存',
