@@ -8,6 +8,8 @@ import { useNav } from '../nav';
 import { useOptionalMistSession } from '../runtime/auth';
 import { DraftFiles, today } from './modules/fulfillmentKit';
 import { RecordDisclosure } from './modules/pageKit';
+import { OptionInput } from './OptionInput';
+import { CURRENCIES } from '../runtime/tradeOptions';
 
 type Props = { state: MistState; dev: MistDev; disabled?: boolean; run: (command: MistCommand) => Promise<unknown> };
 type Action = 'making' | 'expense' | 'charge' | 'invoice' | 'withdraw' | 'void';
@@ -79,7 +81,7 @@ export function DevBillingCard({ state, dev, disabled, run }: Props) {
       <FormGrid>
         {action === 'making' && <Field label={uiText('实物')} required><Select aria-label={uiText('实物')} value={form.sampleId} options={unrecorded.map(row => ({ value: row.id, label: `${row.form} ${row.code}` }))} onChange={e => update('sampleId', e.target.value)} /></Field>}
         {(action === 'charge' || action === 'expense') && <><Field label={uiText('范围')}><Select aria-label={uiText('范围')} value={form.version} options={versionOptions} onChange={e => update('version', e.target.value)} /></Field><Field label={uiText(action === 'charge' ? '收费内容' : '费用说明')} required><TextInput aria-label={uiText(action === 'charge' ? '收费内容' : '费用说明')} value={form.description} onChange={e => update('description', e.target.value)} /></Field></>}
-        {(action === 'making' || action === 'expense' || action === 'charge') && <><Field label={uiText('金额')} required><TextInput aria-label={uiText('金额')} inputMode="decimal" value={form.amount} onChange={e => update('amount', e.target.value)} /></Field><Field label={uiText('币种')} required><TextInput aria-label={uiText('币种')} value={form.currency} onChange={e => update('currency', e.target.value)} /></Field></>}
+        {(action === 'making' || action === 'expense' || action === 'charge') && <><Field label={uiText('金额')} required><TextInput aria-label={uiText('金额')} inputMode="decimal" value={form.amount} onChange={e => update('amount', e.target.value)} /></Field><Field label={uiText('币种')} required><OptionInput ariaLabel="币种" strict options={CURRENCIES} value={form.currency} onChange={value => update('currency', value)} /></Field></>}
         {(action === 'charge' || action === 'withdraw' || action === 'void') && <Field label={uiText(action === 'charge' ? '收费约定依据' : action === 'void' ? '作废原因' : '撤回原因')} required full><TextArea aria-label={uiText(action === 'charge' ? '收费约定依据' : action === 'void' ? '作废原因' : '撤回原因')} value={form.evidence} onChange={e => update('evidence', e.target.value)} /></Field>}
         {action === 'invoice' && <><Field label={uiText('发票编号')} required><TextInput aria-label={uiText('发票编号')} value={form.number} onChange={e => update('number', e.target.value)} /></Field><Field label={uiText('到期日')} required><TextInput aria-label={uiText('到期日')} type="date" value={form.date} onChange={e => update('date', e.target.value)} /></Field>{mixed && <Banner tone="warn" title={uiText('不同币种须分别开票')} />}<Field label={uiText('发票原件')} required full><DraftFiles ids={fileIds} onChange={setFileIds} onBusyChange={setUploading} disabled={busy || !!disabled} hint="上传开发发票" /></Field></>}
         {action === 'expense' && <Field label={uiText('费用日期')} required><TextInput aria-label={uiText('费用日期')} type="date" value={form.date} onChange={e => update('date', e.target.value)} /></Field>}

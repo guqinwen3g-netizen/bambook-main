@@ -8,9 +8,10 @@ import { fulfillmentSourceLabel, type FulfillmentPurchase } from '../../../../..
 import { RFQ_STATE_LABEL, readRfqs, rfqAwardFlags, rfqComparison, rfqCurrentQuotes, type MistRfq, type RfqComparisonRow } from '../../../../../server/src/shared/mistSourcing';
 import { productionSupplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
 import type { ModuleEditorSpec } from './ModuleWorkbench';
-import { emptyOption, Events, field, parseSource, sourceOptions, text, today } from './fulfillmentKit';
+import { choiceField, emptyOption, Events, field, parseSource, sourceOptions, text, today } from './fulfillmentKit';
 import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
+import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
 
 const STATE_TONE: Record<MistRfq['state'], Tone> = { open: 'accent', awarded: 'ok', cancelled: 'neutral' };
 
@@ -38,7 +39,7 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
       { id: 'need', label: '需求', fields: ['source', 'kind', 'description', 'quantity', 'unit', 'currency', 'due', 'destination', 'deadline', 'note'] },
       { id: 'suppliers', label: '邀请供应商', fields: available.map(s => `s:${s.id}`) },
     ],
-    fields: [field('source', '来源条目', 'select', true, sourceOptions(state || null, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('description', '询价内容'), field('quantity', '需求数量', 'number'), field('unit', '单位'), field('currency', '比价币种'),
+    fields: [field('source', '来源条目', 'select', true, sourceOptions(state || null, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('description', '询价内容'), field('quantity', '需求数量', 'number'), choiceField('unit', '单位', UNITS), choiceField('currency', '比价币种', CURRENCIES, true, true),
       field('due', '需求交期', 'date'), field('destination', '交付地点'), field('deadline', '报价截止日', 'date'), field('note', '技术要求 / 备注', 'textarea', false),
       ...available.map(s => field(`s:${s.id}`, `${s.name} · ${s.type}`, 'checkbox', false))],
     initialValues: { source: sourceLine ? 'line:' + sourceLine.id : '', kind: domain === 'garment' ? 'processing' : '', description: sourceLine?.name || '', quantity: sourceLine?.qty || '', unit: sourceLine?.unit || (domain === 'garment' ? '件' : '米'), currency: 'CNY', due: sourceOrder?.due || '', destination: sourceOrder?.governance?.contract.deliveryPlace || '', deadline: today(), note: '', ...Object.fromEntries(available.map(s => [`s:${s.id}`, s.id === preset?.id])) },
@@ -53,7 +54,7 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
   const quoteSpec = (r: MistRfq): ModuleEditorSpec => ({
     title: '登记报价', submitLabel: '登记报价', description: `${r.code} · ${r.description} ${r.quantity} ${r.unit}，需求交期 ${r.due}`,
     sections: [{id:'quote',label:'报价',fields:['supplierId','price','currency','moq']},{id:'delivery',label:'交付约定',fields:['promisedDue','terms','validUntil','note']}],
-    fields: [field('supplierId', '供应商', 'select', true, [emptyOption, ...invited(r)]), field('price', `单价（每${r.unit}）`, 'number'), field('currency', '报价币种'), field('moq', `MOQ（${r.unit}）`, 'number', false), field('promisedDue', '承诺交期', 'date'), field('terms', '付款条件'), field('validUntil', '报价有效期', 'date'), field('note', '备注', 'textarea', false)],
+    fields: [field('supplierId', '供应商', 'select', true, [emptyOption, ...invited(r)]), field('price', `单价（每${r.unit}）`, 'number'), choiceField('currency', '报价币种', CURRENCIES, true, true), field('moq', `MOQ（${r.unit}）`, 'number', false), field('promisedDue', '承诺交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('validUntil', '报价有效期', 'date'), field('note', '备注', 'textarea', false)],
     initialValues: { supplierId: '', price: '', currency: r.currency, moq: '', promisedDue: r.due, terms: '', validUntil: '', note: '' },
     submit: v => run({ type: 'rfq.quote', payload: { id: r.id, supplierId: text(v, 'supplierId'), price: num(v, 'price'), currency: text(v, 'currency'), moq: num(v, 'moq'), promisedDue: text(v, 'promisedDue'), terms: text(v, 'terms'), validUntil: text(v, 'validUntil'), note: text(v, 'note') } }) });
   const declineSpec = (r: MistRfq): ModuleEditorSpec => ({ title: '登记谢绝报价', submitLabel: '登记谢绝', fields: [field('supplierId', '供应商', 'select', true, [emptyOption, ...invited(r)]), field('declineReason', '谢绝原因', 'textarea')], initialValues: { supplierId: '', declineReason: '' },

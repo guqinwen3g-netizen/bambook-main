@@ -20,6 +20,8 @@ export const status: Record<string, string> = { draft: '草稿', pending: '待�
 export const pill = (s: string) => <Pill tone={['approved', 'issued', 'cleared', 'departed', 'reported'].includes(s) ? 'ok' : ['rejected', 'blocked', 'void'].includes(s) ? 'bad' : ['pending', 'awaiting_business'].includes(s) ? 'warn' : 'neutral'}>{status[s] || s}</Pill>;
 export const field = (key: string, label: string, type: ModuleField['type'] = 'text', required = true, options?: ModuleField['options']): ModuleField => ({ key, label, type, required, ...(type === 'number' ? { min: 0, step: '0.0001' } : {}), ...(options ? { options } : {}) });
 export const choices = (values: string[]) => values.map(value => ({ value, label: value }));
+/** 常用选项字段（见 runtime/tradeOptions）：strict 时只能选列表内的值，否则可手动填写。 */
+export const choiceField = (key: string, label: string, options: ModuleField['options'], required = true, strict = false): ModuleField => ({ key, label, type: 'choice', required, options, ...(strict ? { strict } : {}) });
 export const emptyOption = { value: '', label: '请选择' };
 export const text = (v: ModuleValues, key: string) => String(v[key] ?? '');
 export const number = (v: ModuleValues, key: string) => Number(v[key]);

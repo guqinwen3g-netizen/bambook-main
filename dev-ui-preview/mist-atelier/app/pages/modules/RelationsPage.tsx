@@ -16,6 +16,7 @@ import { quotationStage } from './QuotationsPage';
 import { supplierPerformance } from './SuppliersPage';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { customerHandoverScope, customerHandovers } from '../../../../../server/src/shared/mistHandover';
+import { COUNTRIES } from '../../runtime/tradeOptions';
 
 type Identity = 'all' | 'customer' | 'supplier' | 'agent' | 'partner' | 'other';
 type FlagFilter = 'all' | 'hold' | 'dual' | 'noContact';
@@ -80,7 +81,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     fields: [
       { key: 'category', label: '关系类别', type: 'select', required: true, readonly: linked(r), options: (linked(r) ? Object.keys(CATEGORY_LABEL) : ['Agent', 'Partner', 'Government', 'Internal', 'Other']).map(k => ({ value: k, label: CATEGORY_LABEL[k as MarketRelation['category']] })) },
       { key: 'name', label: '组织名称', required: !linked(r), readonly: linked(r) },
-      { key: 'country', label: '国家地区', readonly: linked(r) && !!r?.supplierId && !r?.customerId }, { key: 'address', label: '地址', readonly: linked(r) && !!r?.supplierId && !r?.customerId },
+      { key: 'country', label: '国家地区', type: 'choice', options: COUNTRIES, readonly: linked(r) && !!r?.supplierId && !r?.customerId }, { key: 'address', label: '地址', readonly: linked(r) && !!r?.supplierId && !r?.customerId },
       { key: 'aliases', label: '别名', hint: '英文全称、简称、旧名等，用顿号分隔；搜索与付款人匹配会用到' }, { key: 'note', label: '偏好与备注', type: 'textarea' },
     ],
     submit: async v => { const res = await run({ type: 'market.relation.save', payload: { id: r?.id, input: { name: String(v.name ?? ''), category: String(v.category) as MarketRelation['category'], customerId: r?.customerId || '', supplierId: r?.supplierId || '', country: String(v.country ?? ''), address: String(v.address ?? ''), aliases: String(v.aliases ?? '').split(/[、,\n]/).map(x => x.trim()).filter(Boolean), note: String(v.note ?? ''), fileIds: r?.fileIds || [] } } }); const id = String((res.result as { id?: string }).id || ''); if (!r && id) { setPicked(id); go('relations', id); } },

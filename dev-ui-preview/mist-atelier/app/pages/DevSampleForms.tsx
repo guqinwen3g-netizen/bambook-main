@@ -8,9 +8,11 @@ import { validFabricSample, developmentDomain } from '../../../../server/src/sha
 import { developmentVersionSamples, sampleDispatchBlocker, sampleFormBlocker, type MistSampleDispatch } from '../../../../server/src/shared/mistDevelopmentSamples';
 import { fulfillmentPositions } from '../../../../server/src/shared/mistFulfillment';
 import type { MistCommand, MistDev, MistState, MistVersion } from '../../../../server/src/shared/mistWorkspace';
+import { OptionInput } from './OptionInput';
+import { CURRENCIES, FABRIC_SAMPLE_FORMS } from '../runtime/tradeOptions';
 
 type Props = { state: MistState; dev: MistDev; version: MistVersion; disabled?: boolean; run: (command: MistCommand) => Promise<unknown> };
-const FORMS = ['色样', '手织样', '米样', '剪样', '布样'];
+const FORMS = FABRIC_SAMPLE_FORMS.map(option => option.value);
 const emptyForm = () => ({ form: '米样', quantity: '', unit: '米', location: '', color: '' });
 const emptyDispatch = () => ({ purpose:'confirmation' as SampleSendPurpose,sampleId: '', sourceLocation: '__choose__', quantity: '', recipient: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', note: '' });
 /** 寄样表单的前端校验（服务端仍按可用余额复核）；通过时返回 null。 */
@@ -105,7 +107,7 @@ export function DevSampleFormsCard({ state, dev, version, disabled, run }: Props
         <Field label={uiText("收件方")} required><TextInput value={dispatch.recipient} onChange={event => setDispatch(previous => ({ ...previous, recipient: event.target.value }))} placeholder={uiText("客户 / 联系人")} /></Field>
         <Field label={uiText("运单号")}><TextInput value={dispatch.trackingNo} onChange={event => setDispatch(previous => ({ ...previous, trackingNo: event.target.value }))} /></Field>
         <Field label={uiText("寄样费")} hint={uiText("可留空，之后补登")}><TextInput inputMode="decimal" value={dispatch.feeAmount} onChange={event => setDispatch(previous => ({ ...previous, feeAmount: event.target.value }))} /></Field>
-        <Field label={uiText("币种")}><TextInput value={dispatch.feeCurrency} onChange={event => setDispatch(previous => ({ ...previous, feeCurrency: event.target.value }))} /></Field>
+        <Field label={uiText("币种")}><OptionInput ariaLabel="币种" strict options={CURRENCIES} value={dispatch.feeCurrency} onChange={feeCurrency => setDispatch(previous => ({ ...previous, feeCurrency }))} /></Field>
         <Field label={uiText("用途说明")} required={dispatch.purpose!=='confirmation'} full><TextInput value={dispatch.note} onChange={event => setDispatch(previous => ({ ...previous, note: event.target.value }))} /></Field>
       </FormGrid>
     </Dialog>
@@ -113,7 +115,7 @@ export function DevSampleFormsCard({ state, dev, version, disabled, run }: Props
       {failure && dialog === 'fee' && <Banner tone="bad" title={uiText("费用尚未保存")}>{uiText(failure)}</Banner>}
       <FormGrid>
         <Field label={uiText("寄样费")} required><TextInput inputMode="decimal" value={fee.amount} onChange={event => setFee(previous => ({ ...previous, amount: event.target.value }))} /></Field>
-        <Field label={uiText("币种")} required><TextInput value={fee.currency} onChange={event => setFee(previous => ({ ...previous, currency: event.target.value }))} /></Field>
+        <Field label={uiText("币种")} required><OptionInput ariaLabel="币种" strict options={CURRENCIES} value={fee.currency} onChange={currency => setFee(previous => ({ ...previous, currency }))} /></Field>
       </FormGrid>
     </Dialog>
   </Card>;

@@ -21,6 +21,8 @@ import { downloadMistCsv } from './OrderListPage';
 import { SettlementConfirmDialog, SettlementDetail, SettlementSubmitDialog, settlementColumns } from './FinanceSettlements';
 import { BillLinkDialog, DeductionDialog, DeductionList, PrepaymentMoveDialog, PrepaymentResidual } from './FinanceCloseout';
 import { AdvanceRequestDialog, BackfillDialog, PlanLinkDialog, SettlementAdvance, advancePill } from './FinancePayments';
+import { OptionInput } from './OptionInput';
+import { SUPPLIER_PAYMENT_TRIGGERS, VAT_RATES } from '../runtime/tradeOptions';
 
 type View = 'bills' | 'requests' | 'settlements' | 'prepay' | 'sources' | 'payments';
 function payableTargetView(state: MistState | null | undefined, id?: string): View | undefined {
@@ -384,7 +386,7 @@ export function FinancePayables() {
         <FormGrid cols={3}>
           <Field label={uiText("价税合计")}><TextInput aria-label={uiText("价税合计")} readOnly value={picked.length ? apMoney(billTotal / 100, billCurrency) : '—'} /></Field>
           <Field label={uiText("税额")}><TextInput aria-label={uiText("税额")} type="number" min="0" step="0.01" value={billDraft.taxAmount} onChange={e => setBillDraft({ ...billDraft, taxAmount: e.target.value })} /></Field>
-          <Field label={uiText("税率")}><TextInput aria-label={uiText("税率")} value={billDraft.taxRate} onChange={e => setBillDraft({ ...billDraft, taxRate: e.target.value })} /></Field>
+          <Field label={uiText("税率")}><OptionInput ariaLabel="税率" options={VAT_RATES} value={billDraft.taxRate} onChange={taxRate => setBillDraft({ ...billDraft, taxRate })} /></Field>
           <Field label={uiText("发票日期")} required><TextInput aria-label={uiText("发票日期")} type="date" max={day} value={billDraft.invoiceDate} onChange={e => setBillDraft({ ...billDraft, invoiceDate: e.target.value })} /></Field>
           <Field label={uiText("到期日")} required><TextInput aria-label={uiText("到期日")} type="date" value={billDraft.due} onChange={e => setBillDraft({ ...billDraft, due: e.target.value })} /></Field>
         </FormGrid>
@@ -433,7 +435,7 @@ export function FinancePayables() {
           <Field label={uiText(paymentPlanStageLabel(planDraft.stage) + '金额')} required><TextInput aria-label={uiText("计划金额")} type="number" min="0.01" step="0.01" value={planDraft.amount} onChange={e => setPlanDraft({ ...planDraft, amount: e.target.value })} /></Field>
           <Field label={uiText("计划付款日")}><TextInput aria-label={uiText("计划付款日")} type="date" value={planDraft.due} onChange={e => setPlanDraft({ ...planDraft, due: e.target.value })} /></Field>
         </FormGrid>
-        <Field label={uiText("付款触发条件")} required><TextInput aria-label={uiText("付款触发条件")} value={planDraft.trigger} onChange={e => setPlanDraft({ ...planDraft, trigger: e.target.value })} /></Field>
+        <Field label={uiText("付款触发条件")} required><OptionInput ariaLabel="付款触发条件" options={SUPPLIER_PAYMENT_TRIGGERS} value={planDraft.trigger} onChange={trigger => setPlanDraft({ ...planDraft, trigger })} /></Field>
         <Field label={uiText("合同条款依据")} required><TextInput aria-label={uiText("合同条款依据")} value={planDraft.basis} onChange={e => setPlanDraft({ ...planDraft, basis: e.target.value })} /></Field>
         <Field label={uiText("备注")}><TextArea aria-label={uiText("计划备注")} rows={2} value={planDraft.note} onChange={e => setPlanDraft({ ...planDraft, note: e.target.value })} /></Field>
       </div>}

@@ -10,6 +10,7 @@ import { fmt } from '../../data';
 import type { ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, field, number, text, today } from './fulfillmentKit';
 import { ActionBar, DetailBlock, type ReasonedAction } from './pageKit';
+import { EXPORT_REBATE_RATES } from '../../runtime/tradeOptions';
 
 type Run = (command: MistCommand) => Promise<unknown>;
 const cny = (value: number) => `${fmt(value, 2)} CNY`;
@@ -29,7 +30,7 @@ export function RebateRatesCard({ state, canWrite, locked, open, run }: { state:
   const rates = [...readRebate(state).rates].sort((a, b) => Number(!!a.voided) - Number(!!b.voided) || a.hsCode.localeCompare(b.hsCode) || b.effectiveFrom.localeCompare(a.effectiveFrom));
   const used = new Set(readRebate(state).claims.filter(c => c.state !== 'withdrawn').map(c => c.rateId));
   const add: ModuleEditorSpec = { title: '登记退税率版本', submitLabel: '登记',
-    fields: [{ ...field('hsCode', 'HS 编码'), hint: '4–10 位数字' }, { ...field('rate', '退税率（%）'), hint: '如 13、9；0 表示不退税。' }, field('effectiveFrom', '生效日（按出口日期）', 'date'), field('basis', '依据（公告文号 / 文库版本）')],
+    fields: [{ ...field('hsCode', 'HS 编码'), hint: '4–10 位数字' }, field('rate', '退税率（%）', 'choice', true, EXPORT_REBATE_RATES), field('effectiveFrom', '生效日（按出口日期）', 'date'), field('basis', '依据（公告文号 / 文库版本）')],
     initialValues: { hsCode: '', rate: '13', effectiveFrom: today(), basis: '' },
     submit: v => run({ type: 'rebate.rate.save', payload: { hsCode: text(v, 'hsCode'), rate: text(v, 'rate'), effectiveFrom: text(v, 'effectiveFrom'), basis: text(v, 'basis') } }) };
   const voidSpec = (r: RebateRate): ModuleEditorSpec => ({ title: `作废 HS ${r.hsCode} · ${r.rate}%`, submitLabel: '作废', description: '只能作废尚未被申报使用的版本；作废后保留记录。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' },

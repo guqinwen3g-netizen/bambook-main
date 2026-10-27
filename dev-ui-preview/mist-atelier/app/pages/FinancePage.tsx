@@ -22,6 +22,8 @@ import { FinanceDevBilling } from './FinanceDevBilling';
 import { useDevice } from '../runtime/devicePreferences';
 
 import { financeReceiptDisplay, RECEIPT_STATE as STATE } from '../runtime/financeReceiptDisplay';
+import { OptionInput } from './OptionInput';
+import { CURRENCIES, PAYER_RELATIONS, withCurrent } from '../runtime/tradeOptions';
 export { financeReceiptDisplay };
 type ImportedReceipt = Extract<MistCommand, { type: 'finance.importReceipts' }>['payload']['receipts'][number];
 export function parseMistReceiptCsv(text: string): ImportedReceipt[] {
@@ -194,7 +196,7 @@ export function FinancePage() {
             {candidates.map(item => <button key={item.id} type="button" role="radio" aria-checked={pick === item.id} className="mist-choice" disabled={busy} onClick={() => setPick(item.id)}><b><Mono>{item.code}</Mono>{item.id === receipt.suggest && receipt.confidence && <Pill tone="ai" plain>{receipt.confidence}{uiText("% 匹配")}</Pill>}<span className="mist-radio" /></b><small>{item.customer} · {item.order}{uiText(" · 未收 ")}{fmt(item.open, 2)} {item.currency}</small></button>)}
             {!candidates.length && <EmptyState compact title={uiText("没有可核销发票")} />}
           </div>
-          {needsPayerBasis&&<Field label={uiText("付款方关系依据")} required><TextInput disabled={busy||!canFund} value={payerBasis} onChange={event=>setPayerBasis(event.target.value)} placeholder={uiText("说明此付款方与发票客户的实际关系")}/></Field>}
+          {needsPayerBasis&&<Field label={uiText("付款方关系依据")} required><OptionInput ariaLabel="付款方关系依据" options={PAYER_RELATIONS} disabled={busy||!canFund} value={payerBasis} onChange={setPayerBasis}/></Field>}
           {invoice&&<Field label={uiText("本次核销金额")} required hint={ui`最多 ${fmt(maximumAllocation,2)} ${receipt.currency}`} error={allocationAmount===null?'金额须大于零、最多两位小数且不超过可分配余额':undefined}><TextInput aria-label={uiText("本次核销金额")} type="number" min="0.01" step="0.01" value={allocationInput} disabled={busy||!canFund} onChange={e=>setAllocationInput(e.target.value)}/></Field>}
           {invoice&&allocationAmount!==null&&<div className="mist-banner" data-tone="neutral"><Tile icon={Link2} size="sm"/><div><b>{uiText("本次分配 ")}{fmt(allocationAmount,2)} {receipt.currency}</b><p>{uiText("核销后流水未分配 ")}{fmt((Math.round(receipt.remaining*100)-Math.round(allocationAmount*100))/100,2)} {receipt.currency}{uiText(" · 发票未收 ")}{fmt((Math.round(invoice.open*100)-Math.round(allocationAmount*100))/100,2)} {invoice.currency}</p></div></div>}
           <div className="mist-col"><span className="mist-eyebrow">{uiText("到账用途")}</span>{allocations.filter(a=>a.receiptId===receipt.id).map(a=><div className="mist-row mist-module-actions" key={a.id}><Mono>{invoices.find(i=>i.id===a.invoiceId)?.code||a.invoiceId}</Mono><span className="mist-num">{fmt(a.amount,2)} {a.currency}</span><Button size="sm" onClick={()=>setInvoiceId(a.invoiceId)}>{uiText("查看核销票据")}</Button><Button size="sm" disabled={busy||!canFund} onClick={()=>openReversal('allocation',a.id,`${receipt.code} → ${invoices.find(i=>i.id===a.invoiceId)?.code||a.invoiceId} · ${fmt(a.amount,2)} ${a.currency}`)}>{uiText("核销冲回")}</Button></div>)}
@@ -233,7 +235,7 @@ export function FinancePage() {
         <Field label={uiText("付款日期")} required><TextInput type="date" value={payment.date} onChange={event => setPayment(value => ({ ...value, date: event.target.value }))} /></Field>
         <Field label={uiText("收款方")} required><TextInput value={payment.payee} onChange={event => setPayment(value => ({ ...value, payee: event.target.value }))} /></Field>
         <Field label={uiText("金额")} required><TextInput type="number" min="0.01" step="0.01" value={payment.amount} onChange={event => setPayment(value => ({ ...value, amount: event.target.value }))} /></Field>
-        <Field label={uiText("币种")}><Select value={payment.currency} onChange={event => setPayment(value => ({ ...value, currency: event.target.value, accountId: '' }))} options={['USD', 'CNY', 'EUR', 'GBP', 'HKD']} /></Field>
+        <Field label={uiText("币种")}><Select aria-label={uiText("币种")} value={payment.currency} onChange={event => setPayment(value => ({ ...value, currency: event.target.value, accountId: '' }))} options={withCurrent(CURRENCIES, payment.currency)} /></Field>
         <Field label={uiText("付款账户")} hint={uiText("付出的公司银行账户；也可之后再归属")}><Select aria-label={uiText("付款账户")} value={payment.accountId || ''} onChange={event => setPayment(value => ({ ...value, accountId: event.target.value }))} options={[{ value: '', label: '暂不归属' }, ...(state?.bankAccounts ?? []).filter(a => !a.closed && a.currency === payment.currency && a.openingDate <= payment.date).map(a => ({ value: a.id, label: `${a.code} · ${a.name}` }))]} /></Field>
         <Field label={uiText("附言")} full><TextInput value={payment.ref} onChange={event => setPayment(value => ({ ...value, ref: event.target.value }))} /></Field>
       </FormGrid>

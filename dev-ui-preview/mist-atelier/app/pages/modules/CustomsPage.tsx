@@ -22,6 +22,7 @@ import { REBATE_STATE_LABEL } from '../../../../../server/src/shared/mistExportR
 import { LetterOfCreditLedger, lcOrderDomain } from './LetterOfCredits';
 import { readLetterOfCredits } from '../../../../../server/src/shared/mistLetterOfCredit';
 import { MODE_LABEL, packedFor, packingMatched, shipmentStage, STAGE_LABEL, STAGE_TONE } from './ShipmentsPage';
+import { COUNTRIES, CUSTOMS_TRADE_MODES } from '../../runtime/tradeOptions';
 
 type Tab = 'declarations' | 'lc' | 'rebate' | 'hs';
 type Domain = FulfillmentShipment['domain'];
@@ -101,7 +102,7 @@ export function CustomsPage() {
   const changeTab = (value: Tab) => { setTab(value); setPicked(null); setDrawer(false); };
   const eligibleShipments = () => (f?.shipments || []).filter(s => isOpenShipment(s) && !f!.customs.some(c => c.shipmentId === s.id) && (!hasContext || s.id === route.section));
   const payload = (c: FulfillmentCustoms | undefined, patch: Partial<FulfillmentCustoms>) => ({ ...(c ? { id: c.id } : {}), shipmentId: c?.shipmentId || '', status: c?.status || 'draft', declarationNo: c?.declarationNo || '', broker: c?.broker || '', hsCode: c?.hsCode || '', origin: c?.origin || '', tradeMode: c?.tradeMode || '', declaredAt: c?.declaredAt || '', clearedAt: c?.clearedAt || '', evidence: c?.evidence || '', fileIds: c?.fileIds || [], note: c?.note || '', ...patch });
-  const prepFields = [field('broker', '报关行', 'text', false), field('hsCode', 'HS 编码', 'text', false), field('origin', '原产地', 'text', false), field('tradeMode', '贸易方式 / 成交方式', 'text', false), field('note', '备注', 'textarea', false)];
+  const prepFields = [field('broker', '报关行', 'text', false), field('hsCode', 'HS 编码', 'text', false), field('origin', '原产地', 'choice', false, COUNTRIES), field('tradeMode', '贸易方式 / 成交方式', 'choice', false, CUSTOMS_TRADE_MODES), field('note', '备注', 'textarea', false)];
   const createSpec = (shipmentId = ''): ModuleEditorSpec => ({ title: '建立报关记录', submitLabel: '建立记录',
     fields: [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...eligibleShipments().map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))]), ...prepFields],
     initialValues: { shipmentId: shipmentId || (hasContext ? route.section || '' : ''), broker: '', hsCode: '', origin: '', tradeMode: '', note: '' },

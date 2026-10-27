@@ -38,6 +38,8 @@ import { useNav } from "../../nav";
 import { useRouteDraft, useRouteScope } from "./useRouteDraft";
 import { downloadModuleCsv } from "./ModuleWorkbench";
 import { DraftFiles } from "./fulfillmentKit";
+import { OptionInput } from '../OptionInput';
+import { FEEDBACK_CHANNELS } from '../../runtime/tradeOptions';
 const origins = {
   customer: "客户明确说明",
   business: "业务判断（非客户原话）",
@@ -470,13 +472,15 @@ export function QuotationFeedbackPage() {
                     false,
                     "YYYY-MM-DD；不自动填系统日期或允许未来事实。",
                   )}
-                  {text(
-                    "channel",
-                    "反馈渠道",
-                    true,
-                    false,
-                    "例如邮件 / 会议 / 电话 / 中间方，人工写清来源。",
-                  )}
+                  <Field label={uiText("反馈渠道")} required>
+                    <OptionInput
+                      ariaLabel="反馈渠道"
+                      options={FEEDBACK_CHANNELS}
+                      value={String(input.channel)}
+                      disabled={disabled}
+                      onChange={(value) => patch("channel", value as never)}
+                    />
+                  </Field>
                   {text("contact", "反馈人及身份")}
                   {text(
                     "evidence",
