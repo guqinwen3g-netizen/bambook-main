@@ -25,6 +25,7 @@ it('shows the unresolved bank discrepancy in both the ledger and detail when the
  const detail=host.querySelector('[data-lc-detail="lc-alert"]') as HTMLElement;expect(detail.textContent).toContain('需要关注');expect(detail.textContent).toContain('第 1 次交单有不符点');expect(detail.textContent).not.toContain('待申请人答复');expect(store.run).not.toHaveBeenCalled();
 });
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
+function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});expect(select.value).toBe(value);}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'业务',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const pack=(shipmentId:string,quantity:number)=>({id:shipmentId+quantity,shipmentId,lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
 const customs=(shipmentId:string,status:FulfillmentCustoms['status'],patch:Partial<FulfillmentCustoms>={}):FulfillmentCustoms=>({id:'cus-'+shipmentId,shipmentId,code:'CUS-'+shipmentId.toUpperCase(),status,declarationNo:status==='draft'?'':'D-'+shipmentId,broker:'上港报关',hsCode:'6202.13',origin:'CN',tradeMode:'一般贸易',declaredAt:status==='draft'?'':'2026-10-12',clearedAt:status==='cleared'?'2026-10-13':'',evidence:'',fileIds:[],note:'',...patch});
@@ -248,7 +249,8 @@ it('lists missing classifications instead of guessing, and creates a style class
   expect(getByRole(host,'tab',{name:/商品归类/}).getAttribute('aria-selected')).toBe('true');
   await click(getByRole(host,'button',{name:'新建归类'}));
   const dialog=getByRole(document.body,'dialog');
-  for(const [name,value] of [['商品编号（10 位）','6202.9300.00'],['申报品名','女式化纤制大衣'],['适用款号','COAT-1'],['织造方法','机织'],['种类','大衣'],['类别','女式'],['成分含量','100%涤纶']]) typeInto(getByRole(dialog,'textbox',{name}) as HTMLInputElement,value);
+  for(const [name,value] of [['商品编号（10 位）','6202.9300.00'],['申报品名','女式化纤制大衣'],['适用款号','COAT-1'],['成分含量','100%涤纶']]) typeInto(getByRole(dialog,'textbox',{name}) as HTMLInputElement,value);
+  for(const [name,value] of [['织造方法','机织'],['种类','大衣'],['类别','女式']]) choose(getByRole(dialog,'combobox',{name}) as HTMLSelectElement,value);
   await click(getByRole(dialog,'button',{name:'建立归类'}));
   expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.classify.save',payload:expect.objectContaining({family:'garment',hsCode:'6202.9300.00',declaredName:'女式化纤制大衣',styles:['COAT-1'],brandType:'0',preference:'0',elements:['机织','大衣','女式','100%涤纶','无品牌'],secondUnit:'千克'})});
 });

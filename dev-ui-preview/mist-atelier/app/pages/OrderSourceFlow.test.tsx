@@ -24,8 +24,16 @@ const context = { id: () => `id-${++sequence}`, now: '2026-10-13T02:00:00.000Z',
 const product = { id: 'prd-1', sku: 'CC-COAT-14', name: '双面羊毛大衣', category: 'garment', status: 'active', season: 'AW27', supplierId: '', supplierCode: '', composition: '', specification: '双面呢', color: '', unit: '件', cost: '', currency: 'USD', sourceDevId: '', sourceVersionId: '' };
 function render(route: Route, page: React.ReactNode) { act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route, go, openAI: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}>{page}</Nav.Provider></ToastProvider></MistRoot>)); }
 function input(label: string, value: string, scope: HTMLElement = host) {
-  const node = getByLabelText(scope, new RegExp(`^${label}\\s*\\*?$`)) as HTMLInputElement;
+  const node = getByLabelText(scope, new RegExp(`^${label}\\s*\\*?$`)) as HTMLInputElement | HTMLSelectElement;
+  if (node instanceof HTMLSelectElement) return choose(node, label, value, scope);
   act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event('input', { bubbles: true })); });
+}
+/** 常用选项下拉：有该选项直接选；没有时走「其他（手动填写）」再录入原文。 */
+function choose(node: HTMLSelectElement, label: string, value: string, scope: HTMLElement) {
+  const has = (option: string) => Array.from(node.options).some(item => item.value === option), preset = has(value);
+  if (!preset && !has('__custom__')) throw new Error(`${label} 没有选项 ${value}`);
+  act(() => { node.value = preset ? value : '__custom__'; node.dispatchEvent(new Event('change', { bubbles: true })); });
+  if (!preset) input(`${label}（手动填写）`, value, scope);
 }
 const click = async (node: HTMLElement) => { await act(async () => node.click()); };
 beforeEach(() => {

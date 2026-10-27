@@ -76,7 +76,7 @@ it('does not render a misleading percentage when a received amount is invalid', 
   expect(host.textContent).toContain('收款金额无法核对');
   expect(host.querySelector('.mist-donut')).toBeNull();
 });
-it('retains the current order editor when an older order save completes',async()=>{render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());let finish!:(value:unknown)=>void;store.run.mockReturnValue(new Promise(resolve=>finish=resolve));await act(async()=>getByRole(document.body,'button',{name:'保存'}).click());store.state!.orders.push({...store.state!.orders[0],id:'other',code:'OTHER',season:'NEW-SEASON'});orderId='other';render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());await act(async()=>finish({result:{orderId:'old'}}));expect(getByRole(document.body,'dialog',{name:'编辑订单'})).toBeTruthy();expect((getByLabelText(document.body,'季节') as HTMLInputElement).value).toBe('NEW-SEASON');});
+it('retains the current order editor when an older order save completes',async()=>{render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());let finish!:(value:unknown)=>void;store.run.mockReturnValue(new Promise(resolve=>finish=resolve));await act(async()=>getByRole(document.body,'button',{name:'保存'}).click());store.state!.orders.push({...store.state!.orders[0],id:'other',code:'OTHER',season:'NEW-SEASON'});orderId='other';render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());await act(async()=>finish({result:{orderId:'old'}}));expect(getByRole(document.body,'dialog',{name:'编辑订单'})).toBeTruthy();expect((getByLabelText(document.body,'季节（手动填写）') as HTMLInputElement).value).toBe('NEW-SEASON');});
 it('labels the order quantity document as a draft and links the real shipment separately',async()=>{store.state!.fulfillment.shipments.push({id:'ship',code:'SHIP-ACTUAL',lines:[{orderId,lineId:store.state!.orderLines[0].id,quantity:1}],state:'preparing'} as any);render();await act(async()=>getByRole(host,'button',{name:'装箱单草稿'}).click());expect(document.body.textContent).toContain('正式装箱与原件以具体出运为准');await act(async()=>getByRole(document.body,'button',{name:'打开正式出运 SHIP-ACTUAL'}).click());expect(go).toHaveBeenCalledWith('shipments','ship');});
 
 it('lets the business attach contract evidence and submit the entire draft for approval',async()=>{
@@ -84,8 +84,8 @@ it('lets the business attach contract evidence and submit the entire draft for a
   (store as any).uploadFile=vi.fn(async(file:File)=>{const saved={id:'po-evidence',name:file.name,mimeType:file.type,size:file.size,storageKey:'workspace/po-evidence',createdAt:context.now};store.state!.files.push(saved);return saved;});
   store.run.mockImplementation(async(command:any)=>{const next=applyMistCommand(store.state!,command,ctx);store.state=next.state;render();return{requestId:'governance',revision:1,result:next.result};});render();
   expect(host.textContent).toContain('草稿待补齐');await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());
-  const set=(label:string,value:string)=>{const node=getByLabelText(document.body,label) as HTMLInputElement|HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));});};
-  set('PO / 合同号','CUSTOMER-PO');set('付款条款原文','T/T 按合同');set('贸易术语','FOB');set('指定地点 / 港口','上海');
+  const set=(label:string,value:string)=>{const node=getByLabelText(document.body,label) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;act(()=>{if(node instanceof HTMLSelectElement){node.value=value;node.dispatchEvent(new Event('change',{bubbles:true}));return;}Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));});};
+  set('PO / 合同号','CUSTOMER-PO');set('付款条款','T/T 30% 定金，70% 发货前付清');set('贸易术语','FOB');set('指定地点 / 港口','上海');
   await act(async()=>{const file=document.body.querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(file,'files',{value:[new File(['purchase order'],'po.pdf',{type:'application/pdf'})],configurable:true});file.dispatchEvent(new Event('change',{bubbles:true}));});
   await act(async()=>getByRole(document.body,'button',{name:'保存合同资料'}).click());await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());
   expect(store.state!.orders[0].governance?.status).toBe('pending');expect(store.state!.orders[0].governance?.rounds[0].snapshot.lines).toHaveLength(1);expect(store.state!.orders[0].governance?.rounds[0].snapshot.contract.confirmationFileIds).toEqual(['po-evidence']);expect(queryByRoleSafe('交接后勤')).toBeNull();
@@ -222,7 +222,7 @@ it.each(['contract-first','header-first'] as const)('merges price, amended contr
   render();await openLineEditor();await lineInput('销售单价','15');await lineInput('变更原因','修订PO单价15 USD并顺延交期');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
   const amendContract=async()=>{
     await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());
-    await lineInput('PO / 合同号','AMENDED-PO-15');await lineInput('付款条款原文','OA，修订PO约定发票日起30天');
+    await lineInput('PO / 合同号','AMENDED-PO-15');await lineInput('付款条款（手动填写）','OA，修订PO约定发票日起30天');
     await act(async()=>{const input=getByRole(document.body,'dialog',{name:'拟议合同变更'}).querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(input,'files',{value:[new File(['amended price and due'],'amended-po.pdf',{type:'application/pdf'})],configurable:true});input.dispatchEvent(new Event('change',{bubbles:true}));});
     await act(async()=>getByRole(document.body,'button',{name:'保存变更草稿'}).click());
   };
@@ -482,7 +482,7 @@ it('keeps one actionable handoff error and retained input on a standalone page',
 it('marks commercial approval requirements while leaving later quantity and tolerance choices optional',async()=>{
  render();await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());
  const dialog=getByRole(document.body,'dialog',{name:'合同与审批资料'});
- for(const name of ['PO / 合同号','贸易术语','指定地点 / 港口','付款条款原文']){
+ for(const name of ['PO / 合同号','贸易术语','指定地点 / 港口','付款条款']){
   const field=getByLabelText(dialog,new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'))).closest('label');
   expect(field?.querySelector('.mist-field-label em')?.textContent).toBe('*');
  }

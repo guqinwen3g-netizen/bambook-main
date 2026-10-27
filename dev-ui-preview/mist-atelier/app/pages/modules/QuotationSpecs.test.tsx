@@ -19,7 +19,7 @@ async function mount(){host=document.createElement('div');document.body.append(h
 async function click(label:string){const button=[...document.body.querySelectorAll('button')].find(b=>b.textContent?.trim()===label);expect(button,label).toBeTruthy();await act(async()=>button!.click());}
 const el=(label:string)=>host.querySelector(`[aria-label="${label}"]`) as HTMLInputElement|HTMLSelectElement;
 async function fill(label:string,value:string){const e=el(label);expect(e,label).toBeTruthy();await act(async()=>{const p=e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(p,'value')!.set!.call(e,value);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));});}
-async function toLines(){await mount();await click('新建报价');await fill('有效期','2026-12-01');await fill('贸易术语','FOB 上海');await fill('付款条件','T/T');await click('下一步');}
+async function toLines(){await mount();await click('新建报价');await fill('有效期','2026-12-01');await fill('贸易术语','FOB');await fill('贸易术语指定地点','上海');await fill('付款条件','T/T 30% 定金，70% 发货前付清');await click('下一步');}
 const options=(label:string)=>[...(el(label) as HTMLSelectElement).options].map(o=>o.value);
 const fabricVersion=()=>{const s=bridge.current.state;return s.versions.find((v:any)=>developmentDomain(s.devs.find((d:any)=>d.id===v.devId).values)==='fabric');};
 const garmentVersion=()=>{const s=bridge.current.state;return s.versions.find((v:any)=>developmentDomain(s.devs.find((d:any)=>d.id===v.devId).values)==='garment');};

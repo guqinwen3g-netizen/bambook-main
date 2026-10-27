@@ -16,8 +16,8 @@ function paint() { root!.render(<MistRoot><ToastProvider><SettingsPage /></Toast
 function render() { host = document.createElement('div'); document.body.append(host); root = createRoot(host); act(paint); }
 function button(text: string) { const found = [...host.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === text); expect(found).toBeDefined(); return found!; }
 async function click(item: HTMLElement) { await act(async () => item.click()); }
-function input(label: string, value: string) { const field = host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!; act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); }); return field; }
-async function blur(field: HTMLInputElement) { await act(async () => field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))); }
+function input(label: string, value: string) { const field = host.querySelector<HTMLInputElement | HTMLSelectElement>(`input[aria-label="${label}"],select[aria-label="${label}"]`)!; act(() => { if (field instanceof HTMLSelectElement) { field.value = value; field.dispatchEvent(new Event('change', { bubbles: true })); return; } Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); }); return field; }
+async function blur(field: HTMLElement) { await act(async () => field.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))); }
 beforeEach(() => {
   localStorage.removeItem('bambook.device.locale');
   vi.clearAllMocks(); sequence = 0; seam.nav = null; seam.session = { sessionKey: 'one', user: { id: 'owner', displayName: '认证姓名' }, hasRole: () => false, hasPermission: () => false, canAccessView: () => true } as any;
@@ -77,11 +77,11 @@ describe('workspace default currency and local-only settings',()=>{
 
 describe('company profile maintenance in system settings',()=>{
  const full={legalName:'示例公司',englishName:'Sample Co',address:'示例地址',englishAddress:'Sample Address',registeredAddress:'注册地址',registeredEnglishAddress:'Registered Address',phone:'000',email:'ops@example.com',taxId:'TAX-SAMPLE',customsCode:'CUS-SAMPLE',bankName:'示例银行',bankAddress:'Bank Address',bankAccount:'0000',swift:'SAMPLEXX',defaultCurrency:'USD'};
- const value=(label:string)=>host.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!.value;
+ const value=(label:string)=>host.querySelector<HTMLInputElement|HTMLSelectElement>(`input[aria-label="${label}"],select[aria-label="${label}"]`)!.value;
  const open=async()=>{render();await click(button('公司资料'));};
  it('shows an empty state, saves all twelve fields and reads them back after a fresh mount',async()=>{
   await open();expect(host.textContent).toContain('尚未填写公司资料');
-  const labels:[string,string][]=[['公司中文抬头',full.legalName],['公司英文抬头',full.englishName],['中文联系地址',full.address],['英文联系地址',full.englishAddress],['中文注册地址',full.registeredAddress],['英文注册地址',full.registeredEnglishAddress],['联系电话',full.phone],['公司联系邮箱',full.email],['税务登记编号',full.taxId],['海关登记编码',full.customsCode],['收款银行名称',full.bankName],['银行地址',full.bankAddress],['收款账号',full.bankAccount],['SWIFT / BIC',full.swift],['常用结算币种','usd']];
+  const labels:[string,string][]=[['公司中文抬头',full.legalName],['公司英文抬头',full.englishName],['中文联系地址',full.address],['英文联系地址',full.englishAddress],['中文注册地址',full.registeredAddress],['英文注册地址',full.registeredEnglishAddress],['联系电话',full.phone],['公司联系邮箱',full.email],['税务登记编号',full.taxId],['海关登记编码',full.customsCode],['收款银行名称',full.bankName],['银行地址',full.bankAddress],['收款账号',full.bankAccount],['SWIFT / BIC',full.swift],['常用结算币种','USD']];
   for(const [label,v] of labels)input(label,v);await click(button('保存公司资料'));
   expect(seam.value.run).toHaveBeenCalledWith({type:'settings.update',payload:{companyProfile:full}});expect(seam.value.state.settings.companyProfile).toEqual(full);
   act(()=>root!.unmount());host.remove();await open();for(const [label] of labels)expect(value(label)).toBe(label==='常用结算币种'?'USD':full[Object.keys(full)[labels.findIndex(x=>x[0]===label)] as keyof typeof full]);expect(host.textContent).not.toContain('尚未填写公司资料');
@@ -94,7 +94,7 @@ describe('company profile maintenance in system settings',()=>{
  it('blocks invalid email and currency with field-level guidance before sending',async()=>{
   seam.value.state.settings.companyProfile={...full};await open();input('公司联系邮箱','not-mail');await click(button('保存公司资料'));
   expect(host.textContent).toContain('name@example.com');expect(seam.value.run).not.toHaveBeenCalled();
-  input('公司联系邮箱','ok@example.com');input('常用结算币种','U1');await click(button('保存公司资料'));expect(host.textContent).toContain('三位英文字母');expect(seam.value.run).not.toHaveBeenCalled();
+  const currency=host.querySelector<HTMLSelectElement>('select[aria-label="常用结算币种"]')!;expect([...currency.options].map(option=>option.value).filter(Boolean).every(code=>/^[A-Z]{3}$/.test(code))).toBe(true);expect([...currency.options].some(option=>option.value==='__custom__')).toBe(false);
  });
  it('keeps the draft after a failed save and can retry it',async()=>{
   seam.value.state.settings.companyProfile={...full};seam.value.run.mockRejectedValueOnce(new Error('网络中断'));await open();input('收款银行名称','新的示例银行');await click(button('保存公司资料'));

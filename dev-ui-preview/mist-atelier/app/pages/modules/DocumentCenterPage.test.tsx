@@ -83,7 +83,8 @@ it('archives an external BL original instead of offering company issue',async()=
   expect(queryByRole(detail,'button',{name:'签发'})).toBeNull();
   await click(getByRole(detail,'button',{name:'归档外部签发原件'}));
   const dialog=getByRole(document.body,'dialog',{name:'归档外部机构原件'});
-  typeInto(getByRole(dialog,'textbox',{name:'外部签发机构'}) as HTMLInputElement,'COSCO');
+  act(()=>fireEvent.change(getByRole(dialog,'combobox',{name:'外部签发机构'}),{target:{value:'__custom__'}}));
+  typeInto(getByRole(dialog,'textbox',{name:'外部签发机构（手动填写）'}) as HTMLInputElement,'COSCO');
   typeInto(getByRole(dialog,'textbox',{name:'原件来源依据'}) as HTMLTextAreaElement,'船公司电放');
   await click(getByRole(dialog,'button',{name:'归档原件'}));
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.archiveExternal',payload:expect.objectContaining({id:'bl',issuer:'COSCO',evidence:'船公司电放'})});
