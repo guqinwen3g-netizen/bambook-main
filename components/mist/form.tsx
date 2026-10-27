@@ -1,9 +1,11 @@
 import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Check, ChevronDown, Eye, EyeOff, Search, UploadCloud } from 'lucide-react';
+import { Check, Eye, EyeOff, Search, UploadCloud } from 'lucide-react';
 import { Icon } from './primitives';
 import { cx } from './types';
+import { DateInput } from './DateInput';
+import { AutocompleteInput } from './AutocompleteInput';
 
 /** 表单栅格：默认两列；字段加 full 占满一行。 */
 export function FormGrid({ cols = 2, children, style }: { cols?: 1 | 2 | 3; children: React.ReactNode; style?: React.CSSProperties }) {
@@ -24,8 +26,10 @@ export function Field({ label, required, hint, error, full, children, htmlFor }:
 
 type InputBase = { icon?: LucideIcon; suffix?: React.ReactNode; disabled?: boolean };
 /** 单行输入。外层是填充底（无描边），聚焦变强调色浅底。 */
-export const TextInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & InputBase>(function TextInput({ icon, suffix, className, disabled, ...rest }, ref) {
-  return <span className={cx('mist-input', className)} data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<input ref={ref} disabled={disabled} {...rest} />{suffix && <span className="mist-input-suffix">{suffix}</span>}</span>;
+export const TextInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement> & InputBase>(function TextInput({ icon, suffix, className, disabled, type, list, ...rest }, ref) {
+  if (type === 'date' || type === 'datetime-local' || type === 'month' || type === 'time') return <DateInput ref={ref} type={type === 'date' ? 'date' : type === 'datetime-local' ? 'datetime-local' : type === 'month' ? 'month' : 'time'} icon={icon} suffix={suffix} className={className} disabled={disabled} {...rest} />;
+  if (list) return <AutocompleteInput ref={ref} list={list} type={type} icon={icon} suffix={suffix} className={className} disabled={disabled} {...rest} />;
+  return <span className={cx('mist-input', className)} data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<input ref={ref} type={type} disabled={disabled} {...rest} />{suffix && <span className="mist-input-suffix">{suffix}</span>}</span>;
 });
 /** 密码输入：右侧眼睛按钮切换明文显示。按下按钮不夺走输入焦点，光标位置保持不变。 */
 export const PasswordInput = React.forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & Omit<InputBase, 'suffix'>>(function PasswordInput({ icon, className, disabled, ...rest }, ref) {
@@ -58,19 +62,7 @@ export function CodeInput({ length = 6, value, onChange, onComplete, disabled, a
 export const TextArea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & InputBase>(function TextArea({ icon, className, disabled, rows = 3, ...rest }, ref) {
   return <span className={cx('mist-input', className)} data-multiline data-disabled={disabled || undefined}>{icon && <Icon icon={icon} size="sm" />}<textarea ref={ref} rows={rows} disabled={disabled} {...rest} /></span>;
 });
-/** 原生下拉（保证可访问性与移动端体验）。options 可为字符串或 {value,label}。 */
-export function Select({ icon, options, placeholder, disabled, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & InputBase & { options: Array<string | { value: string; label: string }>; placeholder?: string }) {
-  return (
-    <span className="mist-input" data-disabled={disabled || undefined}>
-      {icon && <Icon icon={icon} size="sm" />}
-      <select disabled={disabled} {...rest}>
-        {placeholder && <option value="">{placeholder}</option>}
-        {options.map(o => typeof o === 'string' ? <option key={o} value={o}>{uiText(o)}</option> : <option key={o.value} value={o.value}>{uiText(o.label)}</option>)}
-      </select>
-      <Icon icon={ChevronDown} size="xs" />
-    </span>
-  );
-}
+export { Select } from './Select';
 export function SearchField({ value, onChange, placeholder = '搜索', autoFocus, style }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; style?: React.CSSProperties }) {
   return <label className="mist-search" style={style}><Icon icon={Search} size="sm" /><input value={value} onChange={e => onChange(e.target.value)} placeholder={uiText(placeholder)} autoFocus={autoFocus} aria-label={uiText(placeholder)} /></label>;
 }
