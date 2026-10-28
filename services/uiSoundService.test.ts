@@ -28,7 +28,7 @@ describe('device sound preferences', () => {
   it('persists independent toggles and clamped volume, notifies settings', () => {
     const listener = vi.fn(), unsubscribe = subscribeUiSoundPreferences(listener);
     setUiSoundPreferences({ scroll: false, notifications: true, volume: 8 });
-    expect(getUiSoundPreferences()).toEqual({ scroll: false, notifications: true, operations: true, soundStyle: 'classic', volume: 1 });
+    expect(getUiSoundPreferences()).toEqual({ scroll: false, notifications: true, operations: true, volume: 1 });
     expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!)).toEqual(getUiSoundPreferences());
     expect(listener).toHaveBeenCalledTimes(1);
     unsubscribe();
@@ -55,11 +55,11 @@ it('respects the operation toggle and provides distinct completion and failure c
   window.dispatchEvent(new Event('pointerdown'));
   f.sound.playFeedbackSound('success',true);
   f.sound.playFeedbackSound('failure',true);
-  expect(f.fake.createOscillator).toHaveBeenCalledTimes(4);
+  expect(f.fake.createOscillator).toHaveBeenCalledTimes(6);
   const frequencies=f.fake.createOscillator.mock.results.map((row:any)=>row.value.frequency.setValueAtTime.mock.calls[0][0]);
-  expect(frequencies).toEqual([659.25,783.99,440,349.23]);
+  expect(frequencies).toEqual([587.33,1174.66,783.99,440,880,349.23]);
   f.sound.setUiSoundPreferences({operations:false});f.sound.playFeedbackSound('failure',true);
-  expect(f.fake.createOscillator).toHaveBeenCalledTimes(4);
+  expect(f.fake.createOscillator).toHaveBeenCalledTimes(6);
  }finally{f.cleanup();vi.unstubAllGlobals();}
 });
 
@@ -69,7 +69,8 @@ it('does not let a preview suppress a real notification that arrives immediately
   window.dispatchEvent(new Event('pointerdown'));
   f.sound.playNotificationSound(undefined,true);
   f.sound.playNotificationSound('after-preview');
-  expect(f.fake.createOscillator).toHaveBeenCalledTimes(4);
+  expect(f.fake.createOscillator).toHaveBeenCalledTimes(8);
+  expect(f.fake.createOscillator.mock.results.slice(0,4).map((row:any)=>row.value.frequency.setValueAtTime.mock.calls[0][0])).toEqual([659.25,1318.5,880,1760]);
  }finally{f.cleanup();vi.unstubAllGlobals();}
 });
 
@@ -98,11 +99,11 @@ describe('synthesized audio', () => {
     expect(fake.createDelay).toHaveBeenCalledTimes(2);
     const count = fake.createOscillator.mock.calls.length;
     sound.playNotificationSound('unique'); sound.playNotificationSound('unique'); sound.playNotificationSound('burst');
-    expect(fake.createOscillator).toHaveBeenCalledTimes(count + 2);
+    expect(fake.createOscillator).toHaveBeenCalledTimes(count + 4);
     sound.setUiSoundPreferences({ scroll: false, notifications: false });
     sound.playScrollTick(); sound.playNotificationSound('muted', true);
     expect(fake.createBufferSource).toHaveBeenCalledTimes(1);
-    expect(fake.createOscillator).toHaveBeenCalledTimes(count + 2);
+    expect(fake.createOscillator).toHaveBeenCalledTimes(count + 4);
     cleanup(); expect(fake.close).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
@@ -118,33 +119,10 @@ async function audioFixture() {
     createBuffer:vi.fn((_c,length)=>({getChannelData:()=>new Float32Array(length)})),
     close:vi.fn(async()=>{}),resume:vi.fn(async()=>{fake.state='running';})};
   const Constructor=vi.fn(function(){return fake;});vi.stubGlobal('AudioContext',Constructor);
-  const sound=await import('./uiSoundService');sound.setUiSoundPreferences({scroll:true,notifications:true,operations:true,soundStyle:'classic',volume:.4});
+  const sound=await import('./uiSoundService');sound.setUiSoundPreferences({scroll:true,notifications:true,volume:.4});
   const cleanup=sound.installUiSoundActivation();
   return {sound,fake,Constructor,nodes,cleanup};
 }
-
-it('offers distinct selectable notification timbres and preserves the existing sound as the default',async()=>{
-  vi.resetModules();localStorage.setItem('bambook.ui-sound.v1',JSON.stringify({scroll:true,notifications:true,operations:true,volume:.4}));
-  const old=await import('./uiSoundService');expect(old.getUiSoundPreferences().soundStyle).toBe('classic');
-  const f=await audioFixture();
-  try {
-    window.dispatchEvent(new Event('pointerdown'));
-    const patterns:number[][]=[],successPatterns:number[][]=[],failurePatterns:number[][]=[];
-    for(const style of ['classic','bell','soft','single'] as const){
-      f.sound.setUiSoundPreferences({soundStyle:style});
-      const before=f.fake.createOscillator.mock.calls.length;f.sound.playNotificationSound(undefined,true);
-      patterns.push(f.fake.createOscillator.mock.results.slice(before).map((row:any)=>row.value.frequency.setValueAtTime.mock.calls[0][0]));
-      const successStart=f.fake.createOscillator.mock.calls.length;f.sound.playFeedbackSound('success',true);
-      successPatterns.push(f.fake.createOscillator.mock.results.slice(successStart).map((row:any)=>row.value.frequency.setValueAtTime.mock.calls[0][0]));
-      const failureStart=f.fake.createOscillator.mock.calls.length;f.sound.playFeedbackSound('failure',true);
-      failurePatterns.push(f.fake.createOscillator.mock.results.slice(failureStart).map((row:any)=>row.value.frequency.setValueAtTime.mock.calls[0][0]));
-      expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!).soundStyle).toBe(style);
-    }
-    expect(new Set(patterns.map(value=>JSON.stringify(value))).size).toBe(4);
-    expect(new Set(successPatterns.map(value=>JSON.stringify(value))).size).toBe(4);
-    expect(new Set(failurePatterns.map(value=>JSON.stringify(value))).size).toBe(4);
-  } finally {f.cleanup();vi.unstubAllGlobals();}
-});
 
 it('activates before a page consumes the gesture and recovers suspended scroll audio without opening notifications',async()=>{
   const f=await audioFixture();
