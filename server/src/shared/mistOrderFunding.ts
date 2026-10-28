@@ -77,7 +77,7 @@ export function orderFundingNonCustomerReceiptLimit(root:Root,receiptId:string){
  return Math.max(0,Math.min(mistMoneyMinor(receipt.remaining),mistMoneyMinor(receipt.amount)-receiptFundingUse(root,receipt).reserved))/100;
 }
 export function orderFundingCoveredAmount(root:Root,orderId:string){
- let covered=0;for(const receipt of root.receipts){
+ let covered=0;for(const receipt of [...root.receipts,...(root.partialReceipts??[]).filter(partial=>!root.receipts.some(row=>row.id===partial.id))]){
   const assigned=active(root).filter(row=>row.receiptId===receipt.id&&row.orderId===orderId).reduce((n,row)=>n+mistMoneyMinor(row.amount),0);
   const allocated=root.allocations.filter(a=>a.receiptId===receipt.id&&root.invoices.some(i=>i.id===a.invoiceId&&i.orderId===orderId)).reduce((n,a)=>n+mistMoneyMinor(a.amount),0);
   covered+=Math.max(assigned,allocated);

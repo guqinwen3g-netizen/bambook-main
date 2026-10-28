@@ -81,3 +81,5 @@ it('opens the order it was sent for',()=>{
   act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite busy={false} run={run} initialOrderId={order.id}/></ToastProvider></MistRoot>));
   expect(document.querySelector(`[data-order-cost-detail="${order.id}"]`)).not.toBeNull();
 });
+
+it('shows only visible expense shares when full cost basis is unavailable',()=>{state.partialExpenses=[{id:'e',code:'EX-P',category:'freight',date:'2026-10-18',currency:'USD',shares:[{orderId:'o',orderCode:'SO-OWN',basisValue:1,amount:40}],hiddenCount:1,voided:false}];act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite={false} busy={false} run={run} materialCostBasis={null}/></ToastProvider></MistRoot>));const list=getByRole(host,'list',{name:'部分可见费用'});expect(list.textContent).toContain('SO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('100.00');});

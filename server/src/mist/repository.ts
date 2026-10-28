@@ -18,7 +18,7 @@ import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projec
 import { payablesCommandPermissions } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
-import { scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
+import { canGenerateScopedStatement, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
@@ -438,6 +438,8 @@ export class MistRepository {
           (context as typeof context & { developmentNotice?: unknown }).developmentNotice = bindDevelopmentNotice(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
         }
         if (input.command?.type === 'finance.statement.generate') {
+          const statementScope = scopeOf(row), customerId = String(input.command.payload?.customerId ?? '');
+          if (statementScope && !canGenerateScopedStatement(row.state, statementScope, customerId)) fail('FORBIDDEN', '对账单包含当前范围外的业务，请由财务生成', 403);
           const snapshot = prepareCustomerStatementSnapshot(row.state, input.command.payload || {}, context);
           const prepared = await buildCustomerStatement(snapshot, { renderPdf: this.quotationPdfRenderer });
           stored = await this.files.write(workspaceId, prepared.file, context.now);

@@ -3,7 +3,7 @@ import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import { emailVisibleScope } from '../shared/mistEmail';
-import { applyDataScope, type MistDataScope } from '../shared/mistDataScope';
+import { applyDataScope, scopedHiddenFiles, type MistDataScope } from '../shared/mistDataScope';
 import type { MistState, MistWorkspaceMember, MistWorkspaceMemberLog, MistWorkspaceAccess as SharedAccess } from '../shared/mistWorkspace';
 /**
  * 公司访问与读投影。
@@ -16,11 +16,11 @@ export type MistMemberLog = MistWorkspaceMemberLog;
 export type MistWorkspaceAccess = SharedAccess;
 type Section = { key: string; label: string; permissions: PermissionScope[]; paths: string[][]; entityTypes: string[]; views: string[] };
 export const MIST_READ_SECTIONS: Section[] = [
-  { key: 'receivables', label: '应收票据', permissions: ['invoices:read'], paths: [['invoices'], ['platform', 'invoiceDrafts'], ['customerStatements']], entityTypes: ['invoice'], views: ['invoices'] },
-  { key: 'receipts', label: '收款与核销', permissions: ['invoices:read', 'vouchers:read'], paths: [['receipts'], ['allocations']], entityTypes: ['finance', 'receipt'], views: ['receipts', 'payment-vouchers'] },
+  { key: 'receivables', label: '应收票据', permissions: ['invoices:read'], paths: [['invoices'], ['platform', 'invoiceDrafts'], ['customerStatements'], ['partialStatements']], entityTypes: ['invoice'], views: ['invoices'] },
+  { key: 'receipts', label: '收款与核销', permissions: ['invoices:read', 'vouchers:read'], paths: [['receipts'], ['partialReceipts'], ['allocations'], ['financeReversals']], entityTypes: ['finance', 'receipt'], views: ['receipts', 'payment-vouchers'] },
   { key: 'payments', label: '付款记录', permissions: ['vouchers:read'], paths: [['payments']], entityTypes: ['payment'], views: [] },
-  { key: 'payables', label: '供应商票据与应付', permissions: ['invoices:read', 'vouchers:read'], paths: [['payables']], entityTypes: ['payable'], views: ['payables'] },
-  { key: 'orderCosts', label: '订单费用与分摊', permissions: ['invoices:read', 'vouchers:read'], paths: [['orderCosts']], entityTypes: [], views: [] },
+  { key: 'payables', label: '供应商票据与应付', permissions: ['invoices:read', 'vouchers:read'], paths: [['payables'], ['partialPayableBills']], entityTypes: ['payable'], views: ['payables'] },
+  { key: 'orderCosts', label: '订单费用与分摊', permissions: ['invoices:read', 'vouchers:read'], paths: [['orderCosts'], ['partialExpenses']], entityTypes: [], views: [] },
   // 公司银行账户与余额只给登记收付款的财务；业务员的财务只读只到本人应收/应付。
   { key: 'bankAccounts', label: '公司银行账户', permissions: ['vouchers:write'], paths: [['bankAccounts']], entityTypes: [], views: [] },
   { key: 'treasury', label: '锁汇结汇', permissions: ['vouchers:read'], paths: [['fxRecords'], ['fxRevaluations']], entityTypes: [], views: [] },
@@ -48,7 +48,7 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'qc', label: '质检工作台', permissions: ['qc:read'], paths: [['fulfillment', 'qcTasks'], ['fulfillment', 'qcReports']], entityTypes: ['qc'], views: ['qc-workbench'] },
   { key: 'inventory', label: '库存', permissions: ['inventory:read'], paths: [['fulfillment', 'warehouses'], ['fulfillment', 'returnReceipts'], ['fulfillment', 'receivedRecords'], ['fulfillment', 'stock'], ['fulfillment', 'stockMovements']], entityTypes: ['inventory', 'stock'], views: ['inventory'] },
   { key: 'shipments', label: '出运与装箱', permissions: ['shipments:read'], paths: [['fulfillment', 'shipments'], ['fulfillment', 'packing'], ['fulfillment', 'shippingTerms']], entityTypes: ['shipment', 'packing'], views: ['shipments', 'shipping', 'packing'] },
-  { key: 'customs', label: '报关与单证', permissions: ['customs:read'], paths: [['fulfillment', 'customs'], ['fulfillment', 'customsClassifications'], ['fulfillment', 'documents'], ['letterOfCredits']], entityTypes: ['customs', 'document'], views: ['customs', 'documents'] },
+  { key: 'customs', label: '报关与单证', permissions: ['customs:read'], paths: [['fulfillment', 'customs'], ['fulfillment', 'customsClassifications'], ['fulfillment', 'documents'], ['letterOfCredits'], ['partialLettersOfCredit']], entityTypes: ['customs', 'document'], views: ['customs', 'documents'] },
   { key: 'orders', label: '订单', permissions: ['orders:read'], paths: [['orders'], ['orderLines'], ['internalFabricAllocations']], entityTypes: ['order'], views: ['orders/detail', 'orders/list', 'orders/new'] },
   { key: 'production', label: '生产', permissions: ['production:read'], paths: [['productions'], ['fulfillment', 'productionFacts']], entityTypes: ['production'], views: ['production-board'] },
 ];
@@ -71,7 +71,7 @@ export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {
   return targetVisibility(hiddenSections(actor))(target);
 }
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
-export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] } {
+export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null } {
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(state, scope, actor.userId) : { ...state };
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
@@ -107,9 +107,10 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
       next.calendar = (next.calendar || []).filter(item => allowed(item.target));
     }
   }
-  next.files = visibleFiles(state, next, actor.userId, ownerId);
+  const restrictedFiles = scopedHiddenFiles(next);
+  next.files = visibleFiles(state, next, actor.userId, ownerId).filter(file => !restrictedFiles.has(file.id));
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
-  return { state: next, hidden,...(costVisible?{costMaterialBasis:financialMaterialCostBasis(state)}:{}) };
+  return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state)}:{}) };
 }
 /** 精确匹配附件 ID，不用全文子串判断，避免相似文本开放隐藏附件。 */
 function referencedFiles(state: MistState): Set<string> {

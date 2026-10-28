@@ -99,7 +99,8 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
   const detail = selected && state ? <LcDetail lc={selected} state={state} day={day} can={can} locked={locked} run={run} onShipment={onShipment}
       onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} presentable={presentable(selected).length} />
     : <EmptyState icon={Landmark} title={uiText("选择信用证")} compact />;
-  const covered = (o: MistOrder) => all.filter(lc => !lc.cancelled && lc.orderIds.includes(o.id));
+  const partials = (state?.partialLettersOfCredit ?? []).filter(lc => lc.orderIds.some(id => state?.orders.some(order => order.id === id && order.type === domain)) && (!needle || `${lc.code} ${lc.lcNo} ${lc.customer}`.toLowerCase().includes(needle)));
+  const covered = (o: MistOrder) => [...all, ...partials].filter(lc => !lc.cancelled && lc.orderIds.includes(o.id));
   const missing = lcOrders.filter(o => !covered(o).length && o.governance?.status === 'approved');
 
   return <>
@@ -111,11 +112,12 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
           empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的信用证")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Landmark} title={ui`还没有登记${domain === 'fabric' ? '面料' : '成衣'}信用证`} />} />
       </Card>}
       detail={detail} />
+    {partials.length > 0 && <div className="mist-section"><Card><CardHeader title={uiText('部分可见信用证')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见信用证')}>{partials.map(lc=><div className="mist-row" role="listitem" key={lc.id}><Mono>{lc.lcNo}</Mono><span>{lc.customer}</span><span className="mist-spacer"/><span>{ui`另有 ${lc.hiddenCount} 笔其他范围业务`}</span></div>)}</div></Card></div>}
     <ExportedOrders orders={lcOrders} covered={covered} onOrder={onOrder} />
   </>;
 }
 
-function ExportedOrders({ orders, covered, onOrder }: { orders: MistOrder[]; covered: (o: MistOrder) => MistLetterOfCredit[]; onOrder: (o: MistOrder) => void }) {
+function ExportedOrders({ orders, covered, onOrder }: { orders: MistOrder[]; covered: (o: MistOrder) => Array<{lcNo:string}>; onOrder: (o: MistOrder) => void }) {
   if (!orders.length) return null;
   return <div className="mist-section"><Card>
     <CardHeader title={uiText("信用证付款订单")} />

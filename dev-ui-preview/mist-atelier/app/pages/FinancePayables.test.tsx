@@ -491,3 +491,5 @@ it('locks the bill form while registration is in flight',async()=>{
   expect((getByLabelText(dialog,'供应商发票号') as HTMLInputElement).matches(':disabled')).toBe(true);
   await act(async()=>finish());store.value.run=original;
 });
+
+it('shows only scoped purchase lines for a partially visible supplier invoice',()=>{store.value.state.partialPayableBills=[{id:'part',code:'AP-PART',supplier:'供应商',currency:'USD',lines:[{purchaseId:'p',purchaseCode:'PO-OWN',kind:'finished',amount:40}],hiddenCount:1,voided:false}];render();const list=getByRole(host,'list',{name:'部分可见应付票据'});expect(list.textContent).toContain('AP-PART');expect(list.textContent).toContain('PO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('100.00');});

@@ -254,6 +254,14 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   shipment: FulfillmentShipment; state: MistState; day: string; me: string; business: boolean; logistics: boolean; locked: boolean;
   onEdit: () => void; onPack: () => void; onTransport: () => void; onReady: () => void; onSent: () => void; onDepart: () => void; onCancel: () => void; onCustoms: () => void; onDocuments: () => void; onSamples: () => void;
 }) {
+  if (s.hiddenCount) return <DetailBody data-shipment-detail={s.id} heading={<div><span className="mist-mono mist-muted">{s.code}</span><div className="mist-h2">{s.customer}</div></div>}>
+    <Pill>{uiText('部分可见')}</Pill><DetailBlock title={uiText('来源范围')} aside={<span>{ui`另有 ${s.hiddenCount} 笔其他范围业务`}</span>}>
+      <DataTable ariaLabel={ui`${s.code} 来源范围`} rows={s.lines} rowKey={line => line.lineId + ':' + (line.productionId || '')} columns={[
+        { key: 'source', header: '准确条目', render: line => <SourceLink source={{ kind: 'orderLine', orderId: line.orderId, lineId: line.lineId, productionId: line.productionId }} /> },
+        { key: 'quantity', header: '计划数量', align: 'right', render: line => line.quantity },
+      ]} />
+    </DetailBlock>
+  </DetailBody>;
   const f = state.fulfillment, stage = shipmentStage(state, s), flags = shipmentFlags(state, s, day), closed = stage === 'departed' || stage === 'cancelled';
   const packingRows = f.packing.filter(row => row.shipmentId === s.id), documents = f.documents.filter(row => row.shipmentId === s.id), customs = f.customs.filter(row => row.shipmentId === s.id);
   const issued = documents.filter(row => row.status === 'issued'), cleared = customs.some(row => row.status === 'cleared');

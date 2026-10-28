@@ -17,12 +17,12 @@ const PEOPLE: Record<string, { role: SystemRoleId | 'owner' }> = {
   boss: { role: 'owner' }, finance: { role: SYSTEM_ROLE_IDS.FINANCE }, qc: { role: SYSTEM_ROLE_IDS.QC }, logistics: { role: SYSTEM_ROLE_IDS.LOGISTICS },
   head: { role: SYSTEM_ROLE_IDS.SALES_MANAGER }, 'demo-sales': { role: SYSTEM_ROLE_IDS.SALES }, 'demo-buyer': { role: SYSTEM_ROLE_IDS.SALES }, teammate: { role: SYSTEM_ROLE_IDS.SALES }, loner: { role: SYSTEM_ROLE_IDS.SALES },
 };
-let root: string, db: MemoryMistDatabase, repo: MistRepository, workspaceId: string;
+let root: string, db: MemoryMistDatabase, repo: MistRepository, workspaceId: string, auth: ReturnType<typeof testAuthority>;
 const actor = (userId: string): any => { const role = PEOPLE[userId].role; return role === 'owner' ? { userId, displayName: userId, roles: ['owner'], departmentIds: [], companyId: COMPANY } : { userId, displayName: userId, roles: [], roleIds: [`${role}@${COMPANY}`], departmentIds: [], companyId: COMPANY, authorizationLoaded: true }; };
 const orders = async (userId: string) => (await repo.get(actor(userId), workspaceId)).state.orders.map(o => o.id).sort();
 beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), 'mist-scope-matrix-'));
-  db = new MemoryMistDatabase(); const auth = testAuthority();
+  db = new MemoryMistDatabase(); auth = testAuthority();
   for (const [userId, { role }] of Object.entries(PEOPLE)) { auth.users.set(userId, { active: true, permissions: role === 'owner' ? getDefaultScopeListForRole(SYSTEM_ROLE_IDS.SUPER_ADMIN) : getDefaultScopeListForRole(role) }); db.companyMembers.push({ companyId: COMPANY, userId, status: 'active' }); }
   // 部门：业务部（负责人 head）→ 二组（demo-buyer 所在）。
   db.departments.push({ id: 'sales-dept', companyId: COMPANY, parentId: null, headId: 'head' }, { id: 'sales-2', companyId: COMPANY, parentId: 'sales-dept', headId: null });
@@ -78,6 +78,29 @@ describe('row-level data scope by role', () => {
     row.state.platform.credits = [{ id: 'private-credit', claimId: 'private-claim', printVersions: [], sourceVersions: [] }];
     await expect(repo.previewCreditDocument(actor('loner'), workspaceId, 'private-credit', 'version')).rejects.toMatchObject({ code: 'CREDIT_DOCUMENT_NOT_FOUND', status: 404 });
     await expect(repo.downloadCreditDocument(actor('loner'), workspaceId, 'private-credit', 'version')).rejects.toMatchObject({ code: 'CREDIT_DOCUMENT_NOT_FOUND', status: 404 });
+  });
+  it('returns only the visible allocations of a shared receipt in the authenticated workspace', async () => {
+    const state: any = db.workspaces.get(workspaceId)!.state;
+    state.invoices.push({id:'mine-invoice',orderId:'SO-G-2026-018'}, {id:'private-invoice',orderId:'SO-G-2026-017'});
+    state.receipts.push({id:'shared-receipt',code:'SHARED',date:'2026-10-01',payer:'客户',amount:1000,remaining:0,currency:'USD',ref:'private reference',state:'matched'});
+    state.allocations.push({id:'mine-allocation',receiptId:'shared-receipt',invoiceId:'mine-invoice',amount:400,currency:'USD'}, {id:'private-allocation',receiptId:'shared-receipt',invoiceId:'private-invoice',amount:600,currency:'USD'});
+    const view = (await repo.get(actor('demo-sales'), workspaceId)).state;
+    expect(view.receipts.some(row=>row.id==='shared-receipt')).toBe(false);
+    expect(view.partialReceipts?.find(row=>row.id==='shared-receipt')).toMatchObject({visibleAllocatedAmount:400,hiddenCount:1});
+    expect(view.allocations.some(row=>row.id==='private-allocation')).toBe(false);
+    expect(JSON.stringify(view.partialReceipts)).not.toContain('private reference');
+  });
+  it('rejects generating an original customer statement containing out-of-scope facts before writing a file', async () => {
+    const source = db.workspaces.get(workspaceId)!.state as any;
+    const customer = source.customers.find((row:any)=>row.ownerId==='demo-buyer');
+    source.orders.push({ ...source.orders[0], id:'visible-order', customerId:customer.id, ownerId:'demo-sales' });
+    source.orders.push({ ...source.orders[0], id:'private-order', customerId:customer.id, ownerId:'other-person' });
+    source.invoices.push({ ...source.invoices[0], id:'private-customer-invoice', orderId:'private-order', customerId:customer.id });
+    auth.users.get('demo-sales')!.permissions.push('invoices:write');
+    const before=structuredClone(db.workspaces.get(workspaceId));
+    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'partial-statement',expectedRevision:0,command:{type:'finance.statement.generate',payload:{customerId:customer.id}} as any})).rejects.toMatchObject({status:403});
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(0);
   });
   it('hides files referenced only by records outside the scope', async () => {
     const full = (await repo.get(actor('boss'), workspaceId)).state.files.length, scoped = (await repo.get(actor('loner'), workspaceId)).state.files.length;

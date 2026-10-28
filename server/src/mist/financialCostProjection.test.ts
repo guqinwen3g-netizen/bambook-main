@@ -27,3 +27,5 @@ it('rejects missing or malformed projected proportions, and authoritative calcul
 });
 
 it('keeps minimal workspaces readable before a fulfillment module exists',()=>{const {f}=fixture();const minimal={...f.state} as any;delete minimal.fulfillment;const before=structuredClone(minimal);const result=projectState(minimal,actor(),()=>createMistState(f.context,'empty'));expect(result.costMaterialBasis).toEqual([]);expect(minimal).toEqual(before);});
+
+it('does not return full-company cost weights to a row-scoped account',()=>{const {f}=fixture();const view=projectState(f.state,actor(),()=>createMistState(f.context,'empty'),undefined,{userIds:['finance'],teamIds:[]});expect(view.costMaterialBasis).toBeNull();});

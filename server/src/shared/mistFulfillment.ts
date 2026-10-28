@@ -269,6 +269,8 @@ export type ShipmentLine = {
     factoryConfirmedAt: string;
 };
 export type FulfillmentShipment = {
+    /** Response-only: number of shipment lines outside the viewer's scope. */
+    hiddenCount?: number;
     id: string;
     code: string;
     customerId: string;
