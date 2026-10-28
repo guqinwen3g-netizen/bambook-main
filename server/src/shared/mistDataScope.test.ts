@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { applyDataScope, scopedWriteViolation } from './mistDataScope';
-import { orderFundingCoveredAmount } from './mistOrderFunding';
+import { assertOrderDepositCovered, orderDepositCoverage, orderFundingCoveredAmount } from './mistOrderFunding';
 import { projectState } from '../mist/access';
 
 it('keeps an upstream development read-only when a team only collaborates on its order', () => {
@@ -35,6 +35,44 @@ it('does not expose totals for receipts allocated to out-of-scope invoices', () 
   expect(orderFundingCoveredAmount(projected, 'order-mine')).toBe(400);
   const after = structuredClone(state); after.receipts[0].amount = 900;
   expect(scopedWriteViolation(state, after, { userIds: ['member'], teamIds: [] })).toMatchObject({ path: 'receipts', id: 'receipt' });
+});
+
+it.each(['owner', 'team', 'supervisor'] as const)('reads an uninvoiced order deposit through the %s scope without exposing shared receipt totals', mode => {
+  const state: any = {
+    customers: [{ id: 'customer', ownerId: 'another' }], crm: { opportunities: [], followUps: [] }, devs: [], market: { quotations: [], suppliers: [] },
+    orders: [
+      { id: 'mine', customerId: 'customer', ownerId: mode === 'owner' ? 'member' : 'another', type: 'fabric', amount: 1000, currency: 'USD', governance: { contract: { paymentMethod: 'TT', depositPercent: 30 } } },
+      { id: 'other', customerId: 'customer', ownerId: 'another', type: 'garment', amount: 2000, currency: 'USD' },
+    ],
+    orderLines: [], invoices: [], allocations: [],
+    receipts: [
+      { id: 'shared', code: 'RC-1', date: '2026-10-29', payer: 'Customer', amount: 900, remaining: 900, currency: 'USD', ref: 'whole-bank-reference', state: 'unclaimed' },
+      { id: 'unassigned', amount: 100, remaining: 100, currency: 'USD' },
+      { id: 'released', amount: 80, remaining: 80, currency: 'USD' },
+    ],
+    orderFunding: { assignments: [
+      { id: 'mine-deposit', receiptId: 'shared', orderId: 'mine', customerId: 'customer', amount: 300, currency: 'USD', state: 'active' },
+      { id: 'other-deposit', receiptId: 'shared', orderId: 'other', customerId: 'customer', amount: 600, currency: 'USD', state: 'active' },
+      { id: 'released-deposit', receiptId: 'released', orderId: 'mine', customerId: 'customer', amount: 80, currency: 'USD', state: 'released' },
+    ] },
+    teamScopes: [{ teamId: 'team', conditions: [], picks: [{ kind: 'order', id: 'mine' }], exclusions: [] }],
+    fulfillment: {}, platform: {}, events: [], tasks: [], notifications: [], calendar: [], files: [], settings: {},
+  };
+  const scope = { userIds: ['member'], teamIds: mode === 'team' ? ['team'] : [], ...(mode === 'supervisor' ? { lines: ['fabric'] as Array<'fabric'> } : {}) };
+  const original = structuredClone(state);
+  const actor: any = { userId: 'member', roles: [], permissions: ['orders:read', 'finance:read', 'invoices:read', 'vouchers:read'], authorizationLoaded: true };
+  const projected = projectState(state, actor, () => ({}) as any, undefined, scope).state;
+  expect(projected.receipts).toEqual([]);
+  expect(projected.partialReceipts).toEqual([{ id: 'shared', code: 'RC-1', date: '2026-10-29', payer: 'Customer', currency: 'USD', visibleAllocatedAmount: 0, hiddenCount: 1 }]);
+  expect(projected.orderFunding.assignments.map(row => row.id)).toEqual(['mine-deposit', 'released-deposit']);
+  expect(orderDepositCoverage(projected, 'mine')).toMatchObject({ status: 'covered', required: 300, received: 300 });
+  expect(() => assertOrderDepositCovered(state, 'mine')).not.toThrow();
+  expect(() => assertOrderDepositCovered(projected, 'mine')).toThrow('归属的到账来源不存在');
+  expect(JSON.stringify(projected)).not.toContain('whole-bank-reference');
+  expect(state).toEqual(original);
+  const withoutFinancialRead = projectState(state, { ...actor, permissions: ['orders:read'] }, () => ({}) as any, undefined, scope).state;
+  expect(withoutFinancialRead.partialReceipts).toEqual([]);
+  expect(withoutFinancialRead.orderFunding).toEqual([]);
 });
 
 it('redacts full documents and hidden lines from a shared shipment', () => {

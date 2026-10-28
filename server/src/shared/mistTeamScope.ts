@@ -99,6 +99,10 @@ function orderRecords(state: MistState, orderIds: Set<string>): TeamScopeRecords
   for (const row of f.documents ?? []) if (shipments.has(row?.shipmentId)) put('fulfillment.documents', row.id);
   for (const row of p.credits ?? []) if (claims.has(row?.claimId)) put('platform.credits', row.id);
   for (const row of state.allocations ?? []) if (invoices.has((row as any).invoiceId)) put('receipts', (row as any).receiptId);
+  // Deposits precede invoices. Keep their receipt source reachable so the
+  // partial financial projection can calculate this order's assigned funding.
+  // applyDataScope still removes full bank totals, balances and hidden shares.
+  for (const row of state.orderFunding?.assignments ?? []) if (row.state === 'active' && has(row.orderId)) put('receipts', row.receiptId);
   return out;
 }
 

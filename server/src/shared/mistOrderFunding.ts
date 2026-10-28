@@ -93,7 +93,13 @@ export function orderDepositCoverage(root:Root,orderId:string){
  const required=Number((BigInt(mistMoneyMinor(order.amount))*BigInt(rateMinor)+BigInt(5000))/BigInt(10000))/100;
  return {status:received>=required?'covered' as const:'insufficient' as const,required,received,percent};
 }
-export function assertOrderDepositCovered(root:Root,orderId:string){const coverage=orderDepositCoverage(root,orderId);if(coverage.status==='unconfigured')fail('请先明确合同付款方式及T/T定金比例，不能按未配置视为已收定金','PRECONDITION');if(coverage.status==='insufficient')fail(`订单定金尚不足：要求 ${coverage.required}，已确认归属 ${coverage.received}`,'PRECONDITION');assertOrderFundingIntegrity(root);return coverage;}
+/** Read-only coverage also works with scoped receipt summaries; writes still validate the complete ledger below. */
+export function orderDepositBlocker(root:Root,orderId:string):string|undefined{
+ const coverage=orderDepositCoverage(root,orderId);
+ if(coverage.status==='unconfigured')return '请先明确合同付款方式及T/T定金比例，不能按未配置视为已收定金';
+ if(coverage.status==='insufficient')return `订单定金尚不足：要求 ${coverage.required}，已确认归属 ${coverage.received}`;
+}
+export function assertOrderDepositCovered(root:Root,orderId:string){const blocker=orderDepositBlocker(root,orderId);if(blocker)fail(blocker,'PRECONDITION');assertOrderFundingIntegrity(root);return orderDepositCoverage(root,orderId);}
 
 /** Explicit T/T cumulative order percentage; other settlement methods do not impose a cash percentage. */
 export function orderShipmentPaymentCoverage(root:Root,orderId:string){
