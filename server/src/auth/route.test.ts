@@ -91,7 +91,7 @@ describe('auth profile avatar', () => {
 describe('editable avatar profile identities',()=>{
   it.each(['initials:v1:clay','person','pattern'])('saves a validated %s avatar on the authenticated account only',async kind=>{
     const {defaultPersonAvatar,personIdentity}=await import('../shared/avatarAppearance');
-    const avatarUrl=kind==='person'?personIdentity({...defaultPersonAvatar('u1'),hair:'bun'}):kind==='pattern'?'dicebear:v1:glass:pblue_v9_12_12_test-0:still':kind;
+    const avatarUrl=kind==='person'?personIdentity({...defaultPersonAvatar('u1'),hair:'bun'}):kind==='pattern'?'dicebear:v1:glass:pblue_v10_12_12_test-0:still':kind;
     const prisma={userAccount:{update:vi.fn().mockImplementation(async({data})=>({id:'u1',displayName:'One',status:'active',email:'one@example.com',roles:[],primaryDeptId:null,primaryDepartment:null,...data}))},auditLog:{create:vi.fn().mockResolvedValue({})},userPermissionOverrides:{findMany:vi.fn().mockResolvedValue([])}};
     const response=await request(makeApp(prisma)).patch('/auth/me').set('Authorization',`Bearer ${authToken()}`).send({avatarUrl,userId:'someone-else'});
     expect(response.status).toBe(200);expect(response.body.user.avatarUrl).toBe(avatarUrl);

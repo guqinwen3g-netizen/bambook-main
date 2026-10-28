@@ -113,7 +113,7 @@ export function AvatarExplorer({ value, disabled, active=true, palette, onPalett
         const job = latest.current, interval = job.shapeKey === processedShape ? 24 : 80;
         if (!document.hidden && job.key !== processedKey && now - last >= interval) {
           try {
-            const id = `p${job.palette}_v9_${job.cellX + 12}_${job.cellY + 12}_${job.seed}-0`;
+            const id = `p${job.palette}_v10_${job.cellX + 12}_${job.cellY + 12}_${job.seed}-0`;
             const animated = ANIMATED_AVATAR_FAMILIES.has(job.family);
             setPreset({ src: generateAvatar(job.family, id, animated), identity: avatarIdentity(job.family, id, animated) });
             setError(false); processedShape = job.shapeKey;
@@ -168,7 +168,7 @@ export function AvatarExplorer({ value, disabled, active=true, palette, onPalett
           if (delta[e.key]) { e.preventDefault(); update(point.x + delta[e.key][0], point.y + delta[e.key][1]); }
           if (e.key === 'Home') { e.preventDefault(); update(0, 0); }
         }}>
-        {preset ? <AvatarLivePreview src={preset.src} geometryKey={preset.identity.replace(/:p[a-z]+_v9_/, ':v9_')} /> : <span className="mist-note">{uiText(error ? '生成失败' : '正在寻找灵感…')}</span>}
+        {preset ? <AvatarLivePreview src={preset.src} geometryKey={preset.identity.replace(/:p[a-z]+_v10_/, ':v10_')} /> : <span className="mist-note">{uiText(error ? '生成失败' : '正在寻找灵感…')}</span>}
       </div>
       <AnimatePresence>{active && showGuide && <motion.div key="pointer" className="mist-avatar-guide-pointer" aria-hidden="true" exit={{ opacity: 0 }}
         animate={reduced ? {} : { x: [0, 0, -45, 40, 0, 0], y: [0, 0, -25, 25, 0, 0], scale: [1, .84, .84, .84, 1, 1] }}
