@@ -962,3 +962,16 @@ it('checks for notifications in a hidden tab at most once per minute when sound 
   await act(async()=>{window.dispatchEvent(new Event('focus'));});await waitFor(()=>revisions()===2);
  }finally{if(own)Object.defineProperty(document,'visibilityState',own);else delete (document as any).visibilityState;playable.mockRestore();now.mockRestore();}
 });
+
+it('marks notices created by a confirmed command so other tabs do not announce the user’s own action',async()=>{
+ await mount();
+ intercept=request=>{
+  if(request.method!=='POST'||!request.url.endsWith('/commands'))return;
+  const body=JSON.parse(request.init.body as string),value=clone(stores.get(A)!);value.revision++;
+  value.state.notifications.push({id:'own-created-notice',title:'业务已提交',detail:'测试',at:'2026-10-13',readAt:null,target:{view:'development'}});
+  stores.set(A,value);return response({workspace:value,receipt:{requestId:body.requestId,revision:value.revision,result:{}}});
+ };
+ await act(async()=>{await api.run({type:'task.complete',payload:{id:'task-1'}});});
+ const {markNoticeSounds}=await import('./notificationSound');
+ expect(markNoticeSounds(JSON.stringify(['actor-a',A]),['own-created-notice'])).toBe(false);
+});
