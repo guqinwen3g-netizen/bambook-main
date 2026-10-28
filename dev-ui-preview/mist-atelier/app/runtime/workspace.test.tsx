@@ -918,3 +918,47 @@ it('company sign-in preserves the exact source of an unresolved write', async ()
   expect(api.workspace?.id).toBe(B);
   expect(api.pending?.workspaceId).toBe(B);
 });
+
+it('sounds once for newly synchronized unread notices visible to this account, without replaying history',async()=>{
+ const sounds=await import('../../../../services/uiSoundService');
+ const playable=vi.spyOn(sounds,'canPlayNotificationSound').mockReturnValue(true);
+ const notify=vi.spyOn(sounds,'playNotificationSound').mockImplementation(()=>{});
+ (auth.session as any).canAccessView=(view:string)=>view==='development';
+ const original=stores.get(A)!;
+ original.state.notifications=[{id:'old-notice',title:'历史通知',detail:'',at:'2026-10-13',readAt:null,target:{view:'development'}}];
+ await mount();expect(notify).not.toHaveBeenCalled();
+ original.state.notifications.unshift(
+  {id:'new-notice',title:'新通知',detail:'',at:'2026-10-13',readAt:null,target:{view:'development'}},
+  {id:'private-notice',title:'其他模块',detail:'',at:'2026-10-13',readAt:null,target:{view:'shipments'}}
+ );original.revision++;
+ await act(async()=>{window.dispatchEvent(new Event('focus'));});await waitFor(()=>api.workspace?.revision===1);
+ expect(notify).toHaveBeenCalledTimes(1);
+ await act(async()=>{window.dispatchEvent(new Event('focus'));});expect(notify).toHaveBeenCalledTimes(1);
+ playable.mockRestore();notify.mockRestore();
+});
+
+it('uses quiet operation feedback only for actual business commands',async()=>{
+ const sounds=await import('../../../../services/uiSoundService');
+ const feedback=vi.spyOn(sounds,'playFeedbackSound').mockImplementation(()=>{});
+ await mount();await act(async()=>{await api.run(command('changed'));});
+ expect(feedback).not.toHaveBeenCalled();
+ await act(async()=>{await api.run({type:'task.complete',payload:{id:'task-1'}});});
+ expect(feedback).toHaveBeenCalledWith('success');
+ feedback.mockRestore();
+});
+
+it('checks for notifications in a hidden tab at most once per minute when sound is playable',async()=>{
+ const sounds=await import('../../../../services/uiSoundService');
+ const playable=vi.spyOn(sounds,'canPlayNotificationSound').mockReturnValue(true);
+ const now=vi.spyOn(Date,'now').mockReturnValue(1_000_000);
+ const own=Object.getOwnPropertyDescriptor(document,'visibilityState');
+ await mount();
+ Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});
+ try{
+  const revisions=()=>calls.filter(call=>call.url.endsWith('/revision')).length;
+  await act(async()=>{window.dispatchEvent(new Event('focus'));});await waitFor(()=>revisions()===1);
+  await act(async()=>{window.dispatchEvent(new Event('focus'));});expect(revisions()).toBe(1);
+  now.mockReturnValue(1_060_000);
+  await act(async()=>{window.dispatchEvent(new Event('focus'));});await waitFor(()=>revisions()===2);
+ }finally{if(own)Object.defineProperty(document,'visibilityState',own);else delete (document as any).visibilityState;playable.mockRestore();now.mockRestore();}
+});

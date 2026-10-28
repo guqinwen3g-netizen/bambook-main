@@ -5,6 +5,7 @@ import { LanguageSetting } from '../../../../components/mist/LanguageSetting';
 import { uiText } from '../../../../services/interfaceLanguage';
 import { useDevice, writeDevice, type DeviceValues } from '../runtime/devicePreferences';
 import { onThemePreference, readThemePreference, writeThemePreference, type ThemePreference } from '../runtime/themePreference';
+import { DeviceSounds } from './DeviceSounds';
 
 /** Personal preferences never dispatch a company settings command. */
 export function DeviceAppearance() {
@@ -20,5 +21,6 @@ export function DeviceAppearance() {
       { value: 'compact', label: '紧凑' }, { value: 'default', label: '标准' }, { value: 'comfy', label: '宽松' },
     ]} />} />
     <SettingRow title={uiText('减少动效')} control={<Switch ariaLabel={uiText('减少动效')} checked={reducedMotion} onChange={value => writeDevice('reducedMotion', value)} />} />
+    <DeviceSounds />
   </>;
 }

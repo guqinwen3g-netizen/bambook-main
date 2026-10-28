@@ -1,6 +1,6 @@
-export type UiSoundPreferences = { scroll: boolean; notifications: boolean; volume: number };
+export type UiSoundPreferences = { scroll: boolean; notifications: boolean; operations: boolean; volume: number };
 const KEY = 'bambook.ui-sound.v1';
-const defaults: UiSoundPreferences = { scroll: true, notifications: true, volume: 0.4 };
+const defaults: UiSoundPreferences = { scroll: true, notifications: true, operations: true, volume: 0.4 };
 let preferences: UiSoundPreferences | undefined;
 const listeners = new Set<() => void>();
 export function getUiSoundPreferences(): UiSoundPreferences {
@@ -11,6 +11,7 @@ export function getUiSoundPreferences(): UiSoundPreferences {
       if (stored) preferences = {
         scroll: typeof stored.scroll === 'boolean' ? stored.scroll : defaults.scroll,
         notifications: typeof stored.notifications === 'boolean' ? stored.notifications : defaults.notifications,
+        operations: typeof stored.operations === 'boolean' ? stored.operations : defaults.operations,
         volume: typeof stored.volume === 'number' && Number.isFinite(stored.volume) ? Math.max(0, Math.min(1, stored.volume)) : defaults.volume,
       };
     } catch { /* Storage is optional. */ }
@@ -26,7 +27,9 @@ export function setUiSoundPreferences(patch: Partial<UiSoundPreferences>) {
 }
 export function subscribeUiSoundPreferences(listener: () => void) {
   listeners.add(listener);
-  return () => { listeners.delete(listener); };
+  const storage = (event: StorageEvent) => { if (event.key === KEY || event.key === null) { preferences = undefined; listener(); } };
+  window.addEventListener('storage', storage);
+  return () => { listeners.delete(listener); window.removeEventListener('storage', storage); };
 }
 let context: AudioContext | undefined;
 let noise: AudioBuffer | undefined;
@@ -187,6 +190,10 @@ export function playScrollTick(speed = .5) {
 }
 let lastNotification = -Infinity;
 const heard = new Set<string>();
+export function canPlayNotificationSound() {
+  const prefs = getUiSoundPreferences();
+  return !!prefs.notifications && !!prefs.volume && context?.state === 'running';
+}
 export function playNotificationSound(eventId?: string, preview = false) {
   const prefs = getUiSoundPreferences();
   if (!prefs.notifications || !prefs.volume) return;
@@ -198,17 +205,39 @@ export function playNotificationSound(eventId?: string, preview = false) {
   }
   const now = performance.now();
   if (!preview && now - lastNotification < 2500) return;
-  lastNotification = now;
-  const ctx = context, at = ctx.currentTime;
-  tone(ctx, 784, at, 0.30, prefs.volume * 0.10);
-  tone(ctx, 1176, at + 0.095, 0.40, prefs.volume * 0.065);
+  if (!preview) lastNotification = now;
+  try {
+    const ctx = context, at = ctx.currentTime;
+    tone(ctx, 698.46, at, 0.28, prefs.volume * 0.085);
+    tone(ctx, 987.77, at + 0.10, 0.34, prefs.volume * 0.055);
+  } catch { /* Sound must not interrupt the underlying operation. */ }
 }
-export async function previewUiSound(kind: 'scroll' | 'notifications') {
+let lastFeedback = -Infinity;
+export function playFeedbackSound(kind: 'success' | 'failure', preview = false) {
+  const prefs = getUiSoundPreferences();
+  if (!prefs.operations || !prefs.volume) return;
+  if (context?.state !== 'running') { unlock(false); return; }
+  const now = performance.now();
+  if (!preview && now - lastFeedback < 800) return;
+  if (!preview) lastFeedback = now;
+  try {
+    const at = context.currentTime;
+    if (kind === 'success') {
+      tone(context, 659.25, at, .16, prefs.volume * .055);
+      tone(context, 783.99, at + .07, .19, prefs.volume * .035);
+    } else {
+      tone(context, 440, at, .17, prefs.volume * .065);
+      tone(context, 349.23, at + .10, .22, prefs.volume * .045);
+    }
+  } catch { /* Sound must not interrupt the underlying operation. */ }
+}
+export async function previewUiSound(kind: 'scroll' | 'notifications' | 'success' | 'failure') {
   unlock();
   try {
     if (context?.state === 'suspended') await context.resume();
     if (kind === 'scroll') playScrollTick(0.7);
-    else playNotificationSound(undefined, true);
+    else if (kind === 'notifications') playNotificationSound(undefined, true);
+    else playFeedbackSound(kind, true);
   } catch { /* Autoplay restrictions or unavailable device. */ }
 }
 /** One tooth per 32px of actual travel; never queue a burst after a large jump. */

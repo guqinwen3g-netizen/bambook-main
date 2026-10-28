@@ -45,3 +45,16 @@ it('changes theme and table density without updating the company', () => {
   act(() => { density.value = 'compact'; density.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(localStorage.getItem('bambook.device.density')).toBe('"compact"'); expect(seam.run).not.toHaveBeenCalled();
 });
+it('offers device-only notification and operation sound controls',()=>{
+  seam.section='appearance';act(paint);
+  const notifications=getByRole(host,'switch',{name:'通知提示音'});
+  const operations=getByRole(host,'switch',{name:'操作反馈音'});
+  expect((notifications as HTMLInputElement).checked).toBe(true);
+  expect((operations as HTMLInputElement).checked).toBe(true);
+  expect(getByRole(host,'button',{name:'试听通知'})).toBeTruthy();
+  expect(getByRole(host,'button',{name:'试听完成'})).toBeTruthy();
+  expect(getByRole(host,'button',{name:'试听失败'})).toBeTruthy();
+  act(()=>notifications.click());
+  expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!).notifications).toBe(false);
+  expect(seam.run).not.toHaveBeenCalled();
+});

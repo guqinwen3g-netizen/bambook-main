@@ -459,10 +459,16 @@
 .mist-setting-row + .mist-setting-row { border-top: 1px solid var(--mist-line); }
 .mist-setting-row > div:first-child { flex: 1; min-width: 0; }
 .mist-setting-row b { font-weight: var(--mist-fw-medium); font-size: var(--mist-text-md); display: block; }
+.mist-sound-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.mist-sound-controls input[type="range"] { width: min(150px, 32vw); accent-color: var(--mist-accent); }
+.mist-sound-controls > span { min-width: 35px; text-align: right; color: var(--mist-ink-2); font-size: var(--mist-text-xs); }
 .mist-setting-row small { color: var(--mist-ink-3); font-size: var(--mist-text-xs); }
 @media (max-width: 600px) {
   .mist-setting-row:has(select) { flex-direction: column; align-items: stretch; gap: 12px; }
   .mist-setting-row:has(select) > .mist-input { width: 100%; }
+  .mist-setting-row:has(.mist-sound-controls) { flex-direction: column; align-items: stretch; gap: 8px; }
+  .mist-sound-controls { justify-content: flex-start; }
+  .mist-sound-controls .mist-switch { margin-left: auto; }
 }
 
 /* ════ 认证 ════ */
