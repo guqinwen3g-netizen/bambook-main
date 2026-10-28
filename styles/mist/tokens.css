@@ -127,7 +127,7 @@
   --mist-side-hover: rgba(255,255,255,.14);
   --mist-side-badge: rgba(255,255,255,.92);
   --mist-side-badge-ink: #275768;
-  --mist-side-halo: var(--mist-brand-mist-1);   /* 侧栏头像串描边：与侧栏顶部底色相同 */
+  --mist-side-halo: var(--mist-card);   /* 小组头像框：浅色白框、深色深框 */
   --mist-blur: blur(12px);
 
   --mist-accent: #34768D;
@@ -202,7 +202,7 @@
   --mist-side-hover: rgba(141,213,222,.07);
   --mist-side-badge: #8DD5DE;
   --mist-side-badge-ink: #101C35;
-  --mist-side-halo: var(--mist-brand-deep-1);
+  --mist-side-halo: var(--mist-card);
 
   --mist-accent: #8DD5DE;
   --mist-accent-hover: #A8E1E8;
