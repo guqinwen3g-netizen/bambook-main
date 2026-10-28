@@ -968,6 +968,15 @@ function requiredShipmentDocuments(root: MistState, shipment: FulfillmentShipmen
 }
 export function getFulfillmentReviews(root: MistState): MistReviewTask[] { return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => ({ id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id, title: `${p.code} · ${p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds, status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected', submittedAt: p.submittedAt!, requiredPermission: 'procurement:approve', fileIds: [...p.fileIds], target: { view: 'procurement', id: p.id }, details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '采购内容', value: p.description }, { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` }, { label: '金额', value: `${lineAmount(p.quantity, p.price)} ${p.currency}` }, { label: '付款条件', value: p.terms }, { label: '交付地点', value: p.destination }, { label: '交期', value: p.due }, ...((p.revisionHistory?.at(-1)?.snapshot.note ?? p.note).trim() ? [{ label: '规格与交付要求', value: p.revisionHistory?.at(-1)?.snapshot.note ?? p.note }] : [])] })); }
 /** Called only on the aggregate's transaction clone; throws before its snapshot is committed. */
+/** A disposed development version keeps its original report; further inspection belongs to the successor. */
+export function fulfillmentQcSourceBlocker(root: MistState, source: FulfillmentSource): string | null {
+    if (source.kind !== 'version') return null;
+    const version = root.versions.find(item => item.id === source.versionId && item.devId === source.devId);
+    if (version?.qcDecision?.kind === 'abandon') return '本版已放弃，不能再办理QC';
+    if (version?.qcDecision) return '本版已重新打样，请在新一轮版本上办理QC';
+    return null;
+}
+
 export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext): MistCommandResult {
     const f = root.fulfillment || (root.fulfillment = createFulfillmentState(ctx, root));
     f.shippingTerms ||= [];
@@ -1084,6 +1093,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.qc.request': {
             let sample = p.sampleId ? get(f.samples, p.sampleId, '准确实物样品') : undefined;
             const s = source(root, sample ? sample.source : p.source, false) as FulfillmentQcTask['source'];
+            const sourceBlocker = fulfillmentQcSourceBlocker(root, s); if (sourceBlocker) fail(sourceBlocker);
             if(!sample&&s.kind==='version'){const physical=f.samples.filter(item=>item.source.kind==='version'&&item.source.devId===s.devId&&item.source.versionId===s.versionId);if(physical.length!==1)fail('请选择本次待检的准确实物');sample=physical[0];}
             if (sample && sourceKey(s) !== sourceKey(p.source)) fail('QC任务来源与实物样品不一致');
             if (sourceDomain(root, s) !== p.domain)
@@ -1107,6 +1117,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const t = get(f.qcTasks, p.id, 'QC任务');
             if (t.domain !== p.domain)
                 fail('QC业务域不一致');
+            const sourceBlocker = fulfillmentQcSourceBlocker(root, t.source); if (sourceBlocker) fail(sourceBlocker);
             if (!ctx.actorId)
                 fail('QC认领需要真实账号');
             if (t.assigneeId && t.assigneeId !== ctx.actorId)
@@ -1123,6 +1134,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const t = get(f.qcTasks, p.id, 'QC任务');
             if (t.domain !== p.domain)
                 fail('QC业务域不一致');
+            const sourceBlocker = fulfillmentQcSourceBlocker(root, t.source); if (sourceBlocker) fail(sourceBlocker);
             if (!ctx.actorId)
                 fail('需要真实账号');
             if (t.state === 'reported')
@@ -1156,6 +1168,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const t = get(f.qcTasks, p.id, 'QC任务');
             if (t.domain !== p.domain)
                 fail('QC业务域不一致');
+            const sourceBlocker = fulfillmentQcSourceBlocker(root, t.source); if (sourceBlocker) fail(sourceBlocker);
             if (!ctx.actorId || t.assigneeId !== ctx.actorId)
                 fail('请先由当前QC认领任务');
             if (t.kind === 'production' && t.source.kind === 'orderLine') requireProductionRelease(root, liveBranch(root, t.source.productionId!), ctx, true);

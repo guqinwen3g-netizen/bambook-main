@@ -42,6 +42,17 @@ it('opens the correct QC domain when arriving from an explicitly typed developme
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it.each(['resample','abandon'] as const)('locks the %s source, retaining history without counting it as open QC work',disposition=>{
+  store.state!.devs.push({id:'disposed-d',code:'DEV-OLD',values:{domain:'fabric'}} as any);
+  store.state!.versions.push({id:'disposed-v',devId:'disposed-d',label:'R1-A-1',qcDecision:{kind:disposition}} as any);
+  store.state!.fulfillment.qcTasks.push(task('old',{domain:'fabric',state:'blocked',assignee:'QC甲',assigneeId:'qc-a',source:{kind:'version',devId:'disposed-d',versionId:'disposed-v'}}),task('new',{domain:'fabric'}));
+  render('old');
+  for(const name of ['提交 / 追加复验报告','转交','改期'])expect((getByRole(host,'button',{name}) as HTMLButtonElement).disabled).toBe(true);
+  expect(host.textContent).toContain(disposition==='resample'?'本版已重新打样':'本版已放弃');
+  render(undefined,'list');expect(getByRole(host,'tab',{name:/面料QC/}).textContent).toMatch(/待处理样品1.*NOK 待恢复0/);
+  expect(host.textContent).toContain('OLD');expect(host.textContent).toContain('NEW');expect(host.querySelector('[data-qc-group]')?.textContent).toContain('1 条待办');
+});
+
 it('opens the professional writable fabric domain by default and preserves a manual read-only switch',async()=>{
   session.denied.add('qc:garment_chain:write');
   store.state!.fulfillment.qcTasks.push(task('f-own',{domain:'fabric'}),task('g-read'));

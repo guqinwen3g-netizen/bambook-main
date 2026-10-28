@@ -6,7 +6,7 @@ import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardH
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCommand, FulfillmentQcReport, FulfillmentQcTask } from '../../../../../server/src/shared/mistFulfillment';
-import { fulfillmentSampleRoleLabel, fulfillmentSourceLabel } from '../../../../../server/src/shared/mistFulfillment';
+import { fulfillmentQcSourceBlocker, fulfillmentSampleRoleLabel, fulfillmentSourceLabel } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
@@ -30,17 +30,17 @@ const RESULT_TONE: Record<MistQc['result'], Tone> = { pass: 'ok', conditional: '
 const DOMAIN_LABEL: Record<Domain, string> = { fabric: '面料QC', garment: '成衣QC' };
 const KIND_LABEL: Record<Kind, string> = { sample: '样品评审', production: '生产检验' };
 const isNok = (task: FulfillmentQcTask) => task.state === 'blocked' || task.state === 'awaiting_business';
-const isOpen = (task: FulfillmentQcTask) => task.state !== 'reported';
+const isOpen = (task: FulfillmentQcTask, state?: MistState) => task.state !== 'reported' && (!state || !fulfillmentQcSourceBlocker(state, task.source));
 const isOverdue = (task: FulfillmentQcTask, day: string) => (task.state === 'pending' || task.state === 'working') && !!task.due && task.due < day;
 const branchKey = (task: FulfillmentQcTask) => task.source.kind === 'orderLine' && task.source.productionId ? task.source.productionId : task.id;
 
 /** Entry-card numbers per professional domain; never a mixed fabric + garment total. */
-export function qcDomainMetrics(tasks: FulfillmentQcTask[], domain: Domain) {
+export function qcDomainMetrics(tasks: FulfillmentQcTask[], domain: Domain, state?: MistState) {
   const scoped = tasks.filter(task => task.domain === domain);
   return {
-    samples: scoped.filter(task => task.kind === 'sample' && (task.state === 'pending' || task.state === 'working')).length,
-    branches: new Set(scoped.filter(task => task.kind === 'production' && isOpen(task)).map(branchKey)).size,
-    nok: scoped.filter(isNok).length,
+    samples: scoped.filter(task => task.kind === 'sample' && (task.state === 'pending' || task.state === 'working') && isOpen(task, state)).length,
+    branches: new Set(scoped.filter(task => task.kind === 'production' && isOpen(task, state)).map(branchKey)).size,
+    nok: scoped.filter(task => isNok(task) && isOpen(task, state)).length,
     total: scoped.length,
   };
 }
@@ -64,17 +64,17 @@ function qcGate(task: FulfillmentQcTask): { tone: Tone; title: string; text: str
 
 type TaskGroup = { key: string; factory: string; location: string; tasks: FulfillmentQcTask[]; open: number; earliest: string; contacts: string[] };
 /** Factory × inspection site groups: open work first, earliest planned inspection first. */
-function groupTasks(tasks: FulfillmentQcTask[]): TaskGroup[] {
+function groupTasks(tasks: FulfillmentQcTask[], state?: MistState): TaskGroup[] {
   const groups = new Map<string, TaskGroup>();
   for (const task of tasks) {
     const key = `${task.factory}\u0000${task.location}`;
     const group = groups.get(key) || { key, factory: task.factory || '工厂未记录', location: task.location || '地点未记录', tasks: [], open: 0, earliest: '', contacts: [] };
     group.tasks.push(task);
-    if (isOpen(task)) { group.open++; if (task.due && (!group.earliest || task.due < group.earliest)) group.earliest = task.due; }
+    if (isOpen(task, state)) { group.open++; if (task.due && (!group.earliest || task.due < group.earliest)) group.earliest = task.due; }
     if (task.contact && !group.contacts.includes(task.contact)) group.contacts.push(task.contact);
     groups.set(key, group);
   }
-  for (const group of groups.values()) group.tasks.sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || (isOpen(a) ? (a.due || '9').localeCompare(b.due || '9') : b.createdAt.localeCompare(a.createdAt)));
+  for (const group of groups.values()) group.tasks.sort((a, b) => Number(isOpen(b, state)) - Number(isOpen(a, state)) || (isOpen(a, state) ? (a.due || '9').localeCompare(b.due || '9') : b.createdAt.localeCompare(a.createdAt)));
   return [...groups.values()].sort((a, b) => Number(b.open > 0) - Number(a.open > 0) || (a.earliest || '9').localeCompare(b.earliest || '9') || a.factory.localeCompare(b.factory));
 }
 
@@ -145,9 +145,9 @@ export function QcWorkbenchPage() {
   const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `改期 ${task.code}`, submitLabel: '改期', description: task.due ? `原检查日 ${task.due}` : undefined, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => run({ type: 'fulfillment.qc.reschedule', payload: { id: task.id, domain: task.domain, due: text(values, 'due'), reason: text(values, 'reason') } }) });
   const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) });
 
-  const metrics = { fabric: qcDomainMetrics(all, 'fabric'), garment: qcDomainMetrics(all, 'garment') };
+  const metrics = { fabric: qcDomainMetrics(all, 'fabric', state || undefined), garment: qcDomainMetrics(all, 'garment', state || undefined) };
   const stateCount = (value: StateFilter) => value === 'all' ? searched.length : searched.filter(t => t.state === value).length;
-  const groups = groupTasks(rows);
+  const groups = groupTasks(rows, state || undefined);
   const toggleGroup = (key: string) => setCollapsed(keys => keys.includes(key) ? keys.filter(item => item !== key) : [...keys, key]);
   const clearFilters = () => { setQuery(''); setStateFilter('all'); setOwner('all'); };
   const sourceSample = current ? state?.fulfillment.samples.find(sample => sample.id === current.sampleId) : undefined;
@@ -247,15 +247,16 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
   onClaim: () => void; onReport: () => void; onConfirm: () => void; onContinue: () => void; onTransfer: () => void; onReschedule: () => void; onBack?: () => void; backLabel: string;
 }) {
   const reports = state.fulfillment.qcReports.filter(report => report.taskId === task.id).slice().reverse();
-  const gate = qcGate(task), mine = !!task.assigneeId && task.assigneeId === me;
+  const sourceBlocker = fulfillmentQcSourceBlocker(state, task.source);
+  const gate = sourceBlocker ? { tone: 'neutral' as const, title: sourceBlocker, text: '' } : qcGate(task), mine = !!task.assigneeId && task.assigneeId === me;
   const production = task.source.kind === 'orderLine' ? state.productions.find(item => item.id === (task.source as { productionId?: string }).productionId) : undefined;
   const line = task.source.kind === 'orderLine' ? state.orderLines.find(item => item.id === (task.source as { lineId: string }).lineId) : undefined;
   const fact = production ? state.fulfillment.productionFacts?.find(item => item.productionId === production.id) : undefined;
   const sizes = fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [];
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
-  const claimReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.assigneeId && !mine ? `已由 ${task.assignee} 认领` : false;
-  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : !task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false;
-  const handoverReason = (verb: string) => !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.state === 'reported' ? `已出结论，不能${verb}；需复验请追加报告` : task.assigneeId && !mine ? `仅当前QC（${task.assignee}）可${verb}` : false;
+  const claimReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.assigneeId && !mine ? `已由 ${task.assignee} 认领` : false);
+  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
+  const handoverReason = (verb: string) => !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.state === 'reported' ? `已出结论，不能${verb}；需复验请追加报告` : task.assigneeId && !mine ? `仅当前QC（${task.assignee}）可${verb}` : false);
   const confirmable = task.kind === 'sample' && task.source.kind === 'orderLine' && task.state === 'reported';
   const continuable = task.state === 'awaiting_business' || (task.kind === 'sample' && task.businessConfirmation?.result === 'approved' && !task.businessContinued);
   return <DetailBody data-qc-detail={task.id} heading={<div>
@@ -337,6 +338,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     ? [emptyOption, { value: 'pass', label: '通过（OK）' }, { value: 'conditional', label: '有保留通过 · 待业务确认' }, { value: 'reject', label: '不通过（NOK）' }]
     : [emptyOption, { value: 'pass', label: '通过' }, { value: 'conditional', label: '有保留通过' }, { value: 'reject', label: '不通过' }];
   const validate = () => {
+    const sourceBlocker = state && fulfillmentQcSourceBlocker(state, task.source); if (sourceBlocker) return sourceBlocker;
     if (!result) return '请选择本次专业结论';
     if (!report.trim()) return '请填写报告编号';
     if (!location.trim()) return '请填写实际检查地点';
