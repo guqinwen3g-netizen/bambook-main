@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
+import { SYSTEM_ROLE_IDS, SYSTEM_ROLE_META, PERMISSION_SCOPES, getDefaultScopeListForRole, type SystemRoleId } from '../_shared/rolePermissionMatrix';
 
 /** 每家公司初始拥有的系统角色码。 */
 export const COMPANY_SYSTEM_ROLE_CODES: string[] = [
@@ -16,37 +16,24 @@ export const COMPANY_SYSTEM_ROLE_CODES: string[] = [
 /**
  * 为一家公司建立自己的系统角色副本。
  * 角色 id 为 `<code>@<companyId>`，权限矩阵按 code 查询（见 rolePermissionMatrix.systemRoleCode）。
- * 幂等：已存在的角色与权限关联不会重复创建。
+ * 新岗位使用当前代码定义的标准权限，不复制可能陈旧或被修改的全局数据库模板。
+ * 已存在的公司岗位保持原配置，重复调用不能补回公司有意撤销的权限。
  */
 export async function provisionCompanyRoles(tx: Prisma.TransactionClient, companyId: string): Promise<number> {
-  let created = 0;
-  for (const code of COMPANY_SYSTEM_ROLE_CODES) {
-    const template = await tx.role.findFirst({ where: { id: code, companyId: null } });
-    if (!template) continue;
-    const scopedId = `${code}@${companyId}`;
-    await tx.role.upsert({
-      where: { id: scopedId },
-      update: { code, companyId },
-      create: {
-        id: scopedId,
-        companyId,
-        code,
-        name: template.name,
-        description: template.description,
-        isSystem: true,
-      },
-    });
-    const permissions = await tx.rolePermission.findMany({ where: { roleId: code } });
-    for (const row of permissions) {
-      await tx.rolePermission.upsert({
-        where: { roleId_permissionId: { roleId: scopedId, permissionId: row.permissionId } },
-        update: {},
-        create: { id: `rp_${scopedId}__${row.permissionId}`, roleId: scopedId, permissionId: row.permissionId },
-      });
-    }
-    created += 1;
+  const existing = await tx.role.findMany({ where: { id: { in: COMPANY_SYSTEM_ROLE_CODES.map(code => `${code}@${companyId}`) } }, select: { id: true, companyId: true } });
+  if (existing.some(role => role.companyId !== companyId)) throw new Error('公司岗位标识冲突。');
+  const existingIds = new Set(existing.map(role => role.id));
+  const pending = COMPANY_SYSTEM_ROLE_CODES.filter(code => !existingIds.has(`${code}@${companyId}`)).map(code => ({ code: code as SystemRoleId, scopes: getDefaultScopeListForRole(code as SystemRoleId) }));
+  if (!pending.length) return 0;
+  const scopes = [...new Set(pending.flatMap(role => role.scopes))];
+  await tx.permission.createMany({ data: scopes.map(scope => ({ id: randomUUID(), scope, description: PERMISSION_SCOPES[scope as keyof typeof PERMISSION_SCOPES] })), skipDuplicates: true });
+  const catalog = new Map((await tx.permission.findMany({ where: { scope: { in: scopes } }, select: { id: true, scope: true } })).map(permission => [permission.scope, permission.id]));
+  for (const { code, scopes: grants } of pending) {
+    const id = `${code}@${companyId}`, meta = SYSTEM_ROLE_META[code];
+    await tx.role.create({ data: { id, companyId, code, name: meta.name, description: meta.description, isSystem: true } });
+    await tx.rolePermission.createMany({ data: grants.map(scope => ({ id: randomUUID(), roleId: id, permissionId: catalog.get(scope)! })), skipDuplicates: true });
   }
-  return created;
+  return pending.length;
 }
 
 /** 公司内某个系统角色的实际 id。 */

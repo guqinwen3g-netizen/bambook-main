@@ -5,8 +5,8 @@ import request from 'supertest';
 import {PrismaClient} from '@prisma/client';
 import {randomUUID} from 'node:crypto';
 import {createPlatformRouter} from './route';
-import {COMPANY_SYSTEM_ROLE_CODES} from './companyProvisioning';
-import {SYSTEM_ROLE_META,type SystemRoleId} from '../_shared/rolePermissionMatrix';
+import {COMPANY_SYSTEM_ROLE_CODES,provisionCompanyRoles} from './companyProvisioning';
+import {SYSTEM_ROLE_META,getDefaultScopeListForRole,type SystemRoleId} from '../_shared/rolePermissionMatrix';
 import {createAuthService} from '../auth/service';
 import {createAuthRouter} from '../auth/route';
 import {createAuthorizationSnapshotGuard} from '../auth/authorizationSnapshotGuard';
@@ -31,7 +31,7 @@ describe.runIf(url)('independent company administration and explicit onboarding'
   app.use('/auth',createAuthRouter({prisma:db,requireEmailVerification:false,loginRateLimit:false}));
   app.use('/check',createAuthorizationSnapshotGuard({prisma:db}));
   app.use('/api/admin',createAuthorizationSnapshotGuard({prisma:db}),createAdminRouter({prisma:db}));
-  for(const [path,scope] of [['management','users:admin'],['finance','vouchers:write'],['qc','qc:inspect'],['approval','orders:approve']])app.post('/check/'+path,requirePermission(scope as any),(_req,res)=>res.json({ok:true}));
+  for(const [path,scope] of [['management','users:admin'],['finance','vouchers:write'],['qc','qc:inspect'],['approval','orders:approve'],['suppliers','suppliers:write'],['marketing','marketing:write'],['pricing','pricing:write']])app.post('/check/'+path,requirePermission(scope as any),(_req,res)=>res.json({ok:true}));
  });
  afterAll(async()=>{
   if(!db)return;
@@ -55,10 +55,42 @@ describe.runIf(url)('independent company administration and explicit onboarding'
   const payload=auth.verifyToken(operatorToken);expect(payload.companyId).toBe(operatorCompany);expect(payload.globalBusinessScope).toBe(false);expect(payload.roles).not.toContain('owner');
   const audit=await db.auditLog.findFirst({where:{action:'platform.company.create',targetId:operatorCompany}});expect(JSON.stringify(audit)).not.toContain(password);
  });
- it('allows only system management and denies finance, quality signing and business approvals',async()=>{
+ it('initializes current standard company duties and allows the normal salesperson business actions',async()=>{
+  for(const code of COMPANY_SYSTEM_ROLE_CODES){
+   const grants=await db.rolePermission.findMany({where:{roleId:code+'@'+operatorCompany},include:{permission:true}});
+   expect(grants.map(row=>row.permission.scope).sort(),code).toEqual(getDefaultScopeListForRole(code as SystemRoleId).sort());
+  }
+  for(const path of ['suppliers','marketing','pricing'])expect((await request(app).post('/check/'+path).set('Authorization','Bearer '+operatorToken)).status,path).toBe(200);
+ });
+ it('keeps administration separate from finance, quality signing and approval authority',async()=>{
   for(const [path,status] of [['management',200],['finance',403],['qc',403],['approval',403]] as const){
    const result=await request(app).post('/check/'+path).set('Authorization','Bearer '+operatorToken);expect(result.status,path).toBe(status);
   }
+ });
+ it('does not copy a stale global template with an unrelated finance grant into new company jobs',async()=>{
+  const rollback=new Error('rollback-role-template-fixture');
+  await expect(db.$transaction(async tx=>{
+   const companyId=randomUUID();await tx.company.create({data:{id:companyId,slug:companyId,name:'Default role fixture'}});
+   const finance=await tx.permission.upsert({where:{scope:'vouchers:write'},update:{},create:{id:randomUUID(),scope:'vouchers:write'}});
+   const legacy=new Proxy(tx,{get(target,name){if(name==='rolePermission')return new Proxy(target.rolePermission,{get(delegate,method){if(method==='findMany')return async(args:any)=>args?.where?.roleId==='role-sales'?[{permissionId:finance.id}]:[];const value=Reflect.get(delegate,method);return typeof value==='function'?value.bind(delegate):value;}});return Reflect.get(target,name);}});
+   await provisionCompanyRoles(legacy,companyId);
+   const grants=await tx.rolePermission.findMany({where:{roleId:'role-sales@'+companyId},include:{permission:true}});
+   expect(grants.map(row=>row.permission.scope).sort()).toEqual(getDefaultScopeListForRole('role-sales').sort());
+   expect(grants.some(row=>row.permission.scope==='vouchers:write')).toBe(false);
+   throw rollback;
+  })).rejects.toBe(rollback);
+ });
+ it('preserves explicit existing company job changes when provisioning is repeated',async()=>{
+  const rollback=new Error('rollback-custom-role-fixture');
+  await expect(db.$transaction(async tx=>{
+   const roleId='role-sales@'+operatorCompany,permission=await tx.permission.findUniqueOrThrow({where:{scope:'suppliers:write'}});
+   await tx.rolePermission.upsert({where:{roleId_permissionId:{roleId:'role-sales',permissionId:permission.id}},update:{},create:{id:randomUUID(),roleId:'role-sales',permissionId:permission.id}});
+   await tx.rolePermission.deleteMany({where:{roleId,permissionId:permission.id}});
+   const before=await tx.rolePermission.findMany({where:{roleId},orderBy:{permissionId:'asc'}});
+   await provisionCompanyRoles(tx,operatorCompany);
+   expect(await tx.rolePermission.findMany({where:{roleId},orderBy:{permissionId:'asc'}})).toEqual(before);
+   throw rollback;
+  })).rejects.toBe(rollback);
  });
  it('can initialize company settings with an explicit administrator who has no manager job',async()=>{
   const service=createPlatformCompanySettings(db);
@@ -111,8 +143,6 @@ describe.runIf(url)('independent company administration and explicit onboarding'
   const id='business-admin-'+key;users.push(id);
   await db.userAccount.create({data:{id,displayName:'业务管理',email:id+'@example.invalid',passwordHash:await auth.hashPassword(password),status:'active'}});
   await db.companyMember.create({data:{id:randomUUID(),companyId:operatorCompany,userId:id}});
-  const permission=await db.permission.upsert({where:{scope:'users:admin'},update:{},create:{id:'users-admin-'+key,scope:'users:admin'}});
-  await db.rolePermission.create({data:{id:randomUUID(),roleId:'role-admin@'+operatorCompany,permissionId:permission.id}});
   await db.userRole.create({data:{id:randomUUID(),userId:id,roleId:'role-admin@'+operatorCompany,departmentId:'management-'+key}});
   const login=await request(app).post('/auth/login').send({email:id+'@example.invalid',password});expect(login.status).toBe(200);
   const directory=await request(app).get('/api/admin/users').set('Authorization','Bearer '+login.body.token);expect(directory.status).toBe(200);expect(directory.body.capabilities.canAppointInitialGeneralManager).toBe(false);
