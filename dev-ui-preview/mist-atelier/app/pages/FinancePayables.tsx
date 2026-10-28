@@ -339,7 +339,7 @@ export function FinancePayables() {
   return <PayableDialogRecovery value={{pending:pendingPayable&&(!saving||recovering),failure:operationFailure,busy:working||saving||loading,recover:()=>void recoverPayable()}}><div className="mist-col" data-finance-payables>
     {failure && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId && <Banner tone="bad" title={uiText("操作没有完成")}>{failure}</Banner>}
     <Card>
-      <CardHeader title={uiText("供应商应付（按原币）")} tools={<div className="mist-row" style={{ flexWrap: 'wrap' }}>
+      <CardHeader title={uiText(state?.partialPayableBills?.length ? "完整可见票据汇总（按原币）" : "供应商应付（按原币）")} tools={<div className="mist-row" style={{ flexWrap: 'wrap' }}>
         {canBill && <Button disabled={busy} onClick={() => startBill()}>{uiText("登记供应商票据")}</Button>}
         {canBill && <BaseDataImportButton kind="openingPayable" label={uiText("导入期初应付")} disabled={busy} />}
         {canBill && <Button disabled={busy} onClick={() => { setFailure(''); setPlanDraft({ stage: 'prepayment', purchaseId: '', amount: '', trigger: '', basis: '', due: '', note: '' }); }}>{uiText("登记付款计划")}</Button>}
@@ -354,7 +354,7 @@ export function FinancePayables() {
         { key: 'pre', header: '预付（待抵扣）', width: '140px', align: 'right', hideOnMobile: summary.every(x => x.prepaid <= 0), render: r => <span className="mist-col"><span className="mist-note mist-cell-sm-label">{uiText("预付待抵扣")}</span>{r.prepaid > 0 ? <span className="mist-num">{apMoney(r.prepaid, r.currency)}</span> : <span>—</span>}</span> },
         ...(summary.some(x => x.ahead > 0) ? [{ key: 'ahead', header: '已付未收票', width: '140px', align: 'right' as const, render: (r: (typeof summary)[number]) => <span className="mist-col"><span className="mist-note mist-cell-sm-label">{uiText("已付未收票")}</span>{r.ahead > 0 ? <span className={'mist-num' + (r.aheadOverdue ? ' mist-tone-bad' : '')}>{apMoney(r.ahead, r.currency)}</span> : <span>—</span>}</span> }] : []),
         ...(summary.some(x => x.refundDue > 0) ? [{ key: 'refund', header: '待工厂退回', width: '140px', align: 'right' as const, render: (r: (typeof summary)[number]) => <span className="mist-col"><span className="mist-note mist-cell-sm-label">{uiText("待工厂退回")}</span>{r.refundDue > 0 ? <span className="mist-num">{apMoney(r.refundDue, r.currency)}</span> : <span>—</span>}</span> }] : []),
-      ]} /> : <span className="mist-note">{uiText("暂无供应商票据")}</span>}
+      ]} /> : <span className="mist-note">{uiText(state?.partialPayableBills?.length ? "没有完整可见的供应商票据" : "暂无供应商票据")}</span>}
     </div></Card>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}>
       <Segmented<View> value={view} onChange={v => { setView(v); setSelected(''); setDrawer(false); }} options={[{ value: 'bills', label: `应付票据 · ${bills.filter(b => b.open > 0).length}` }, { value: 'requests', label: `付款申请 · ${requests.filter(r => r.state === 'pending' || r.state === 'approved').length}` }, { value: 'settlements', label: `结算 · ${settlements.filter(x => x.state === 'pending').length}` }, { value: 'prepay', label: `付款计划 · ${plans.filter(p => p.state === 'active').length}` }, { value: 'sources', label: `待登记来源 · ${sources.filter(s => s.uninvoiced > 0).length}` }, { value: 'payments', label: `供应商付款 · ${payments.length}` }]} />
@@ -363,6 +363,7 @@ export function FinancePayables() {
       {view === 'bills' && <Button onClick={() => downloadMistCsv('供应商应付.csv', ['应付号', '供应商', '发票号', '发票日期', '币种', '价税合计', '税额', '已结清', '未付', '到期日', '状态', '来源合同'], shownBills.map(b => [b.code, b.supplier, b.invoiceNo, b.invoiceDate, b.currency, b.amount, b.taxAmount, billClearedMinor(b)/100, b.open, b.due, STATUS[b.status].label, b.lines.map(l => l.purchaseCode + ':' + l.amount).join(' / ')]))}>{uiText("导出当前票据")}</Button>}
     </div>
     <ListDetail drawerOpen={drawer && !!(bill || payment || request || plan || settlement)} drawerTitle={bill?.code || payment?.code || request?.code || plan?.code || settlement?.code || '应付详情'} onDrawerClose={() => setDrawer(false)} list={<Card>{list}</Card>} detail={detail} />
+    {view === 'bills' && (state?.partialPayableBills?.length ?? 0)>0 && <Card><CardHeader title={uiText('部分可见应付票据')}/><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见应付票据')}>{state!.partialPayableBills!.map(item=><div className="mist-col" role="listitem" key={item.id}><div className="mist-row"><Mono>{item.code}</Mono><span>{item.supplier}</span><span className="mist-spacer"/><span>{ui`另有 ${item.hiddenCount} 笔其他范围业务`}</span></div>{item.lines.map(line=><div className="mist-row" key={line.purchaseId}><Mono>{line.purchaseCode}</Mono><span className="mist-spacer"/><span>{apMoney(line.amount,item.currency)}</span></div>)}</div>)}</div></Card>}
 
     {invoiceTypeId&&bills.find(row=>row.id===invoiceTypeId)&&<SupplierInvoiceTypeDialog key={invoiceTypeId} bill={bills.find(row=>row.id===invoiceTypeId)!} onClose={()=>setInvoiceTypeId('')}/>}
     <Dialog open={!!billDraft} onClose={() => { if (!busy) setBillDraft(null); }} width={760} title={uiText("登记供应商票据")}

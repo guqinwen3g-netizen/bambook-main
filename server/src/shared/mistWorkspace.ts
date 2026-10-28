@@ -68,7 +68,7 @@ export type DevelopmentValues = {
   requester?: string; requesterId?: string; charged?: boolean;
 };
 export type MistFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string };
-export type MistDraft = { id: string; values: DevelopmentValues; fileIds: string[]; updatedAt: string };
+export type MistDraft = { id: string; values: DevelopmentValues; fileIds: string[]; updatedAt: string; /** Server-assigned creator; old drafts may not have attribution. */ ownerId?: string };
 export type MistConfirmation = { id: string; result: 'approved' | 'needs_adjustment' | 'rejected'; confirmer: string; organization: string; confirmedAt: string; basis: string; originalText: string; recordedAt: string; recordedBy: string;
   /** BB-DEV-6：面料版本有多条实物时，本次确认针对的准确实物（记录时快照编号与形态）。旧记录没有该字段。 */
   samples?: MistSampleRef[] };
@@ -151,6 +151,8 @@ export type MistPayment = { id: string; code: string; date: string; payee: strin
   origin?: 'finance'; reversalOf?: string;
   /** 该笔付款从哪个公司银行账户付出（财务逐笔归属）；反向冲回凭证沿用原凭证的账户。 */
   accountId?: string };
+/** Read-only, scoped view of a receipt shared with hidden business; never a replacement for its original total or balance. */
+export type MistPartialReceipt = { id: string; code: string; date: string; payer: string; currency: string; visibleAllocatedAmount: number; hiddenCount: number };
 export type MistReceipt = { id: string; code: string; date: string; payer: string; amount: number; remaining: number; currency: string; ref: string; state: 'unmatched' | 'suggested' | 'matched'; suggest?: string; confidence?: number;
   /** 到账进入的公司银行账户（财务逐笔归属）。 */
   accountId?: string };
@@ -262,12 +264,20 @@ export type MistState = {
   internalFabricAllocations?: MistInternalFabricAllocation[];
   orderFunding?:OrderFundingState;
   payables?:PayablesState;
+  /** Response-only scoped purchase lines from mixed supplier invoices. */
+  partialPayableBills?: Array<{id:string;code:string;supplier:string;currency:string;lines:import('./mistPayables').SupplierBillLine[];hiddenCount:number;voided:boolean}>;
   /** 出口退税：退税率版本与退税申报（配单、核准、到账勾稽）。 */
   exportRebate?:ExportRebateState;
   workspaceArchive?: {at:string;actorId:string};
   schemaVersion: 1; devs: MistDev[]; versions: MistVersion[]; rounds?: MistRound[]; drafts: MistDraft[]; fabrics: MistFabric[];
   orders: MistOrder[]; orderLines: MistOrderLine[]; productions: MistProduction[];
   receipts: MistReceipt[]; invoices: MistInvoice[]; allocations: MistAllocation[]; payments: MistPayment[];
+  /** Response-only scoped summaries; never written as receipt records. */
+  partialReceipts?: MistPartialReceipt[];
+  /** Response-only scoped expense shares, without the full expense amount. */
+  partialExpenses?: Array<{id:string;code:string;category:import('./mistOrderCost').ExpenseCategory;date:string;currency:string;shares:import('./mistOrderCost').ExpenseShare[];hiddenCount:number;voided:boolean}>;
+  /** Response-only partial statement summaries, without the archived full PDF or total. */
+  partialStatements?: Array<{ id: string; customerId: string; statementNo: string; asOf: string; hiddenCount: number; sections: Array<{ currency: string; lines: import('./mistCustomerStatement').StatementLine[]; hiddenCount: number }> }>;
   financeReversals?: MistFinanceReversal[];
   bankAccounts?: MistBankAccount[];
   fxRecords?: MistFxRecord[];
@@ -278,6 +288,8 @@ export type MistState = {
   customerStatements?: CustomerStatementRecord[];
   /** 信用证台账，见 mistLetterOfCredit。 */
   letterOfCredits?: MistLetterOfCredit[];
+  /** Response-only scoped view of a credit shared with hidden orders. */
+  partialLettersOfCredit?: Array<{id:string;code:string;lcNo:string;customerId:string;customer:string;currency:string;orderIds:string[];hiddenCount:number;cancelled:boolean}>;
   /** 供应商询价比价，见 mistSourcing。 */
   rfqs?: MistRfq[];
   customers: MistCustomer[]; contacts: MistContact[]; files: MistFile[];
@@ -383,8 +395,8 @@ export type MistCommandResult = { id?: string; draftId?: string; devId?: string;
 export type MistWorkspaceMember={userId:string;name:string;addedBy:string;addedByName:string;addedAt:string};
 export type MistWorkspaceMemberLog={id:string;action:'add'|'remove';userId:string;name:string;actorId:string;actorName:string;at:string};
 /** 服务端按当前账号现有读权限裁剪数据后附带的说明：hidden 为当前账号无权查看、已被隐藏的数据范围。 */
-export type MistWorkspaceAccess={role:'owner'|'member';canManageMembers:boolean;/** 可维护公司设置与业务组划分：公司库看公司用户管理权限，本机空间看是否为所有者。 */canManageCompany?:boolean;hidden:Array<{key:string;label:string;permissions:string[]}>};
-export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; access?: MistWorkspaceAccess;/** Read-only financial proportions; never persisted in workspace business state. */costMaterialBasis?:import('./mistInternalFabric').InternalFabricCostBasis[] };
+export type MistWorkspaceAccess={role:'owner'|'member';canManageMembers:boolean;/** Present for restricted company sessions: customer records maintainable within current authority. */manageableCustomerIds?:string[];/** 可维护公司设置与业务组划分：公司库看公司用户管理权限，本机空间看是否为所有者。 */canManageCompany?:boolean;hidden:Array<{key:string;label:string;permissions:string[]}>};
+export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; access?: MistWorkspaceAccess;/** Read-only financial proportions; never persisted in workspace business state. */costMaterialBasis?:import('./mistInternalFabric').InternalFabricCostBasis[] | null };
 export type MistRunReceipt = { requestId: string; revision: number; result: MistCommandResult };
 
 import * as Seed from './mistSeed';
@@ -848,9 +860,10 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   switch(command.type){
     case 'development.saveDraft': {
       const v=values(p.values,false), fileIds=files(state,p.fileIds), id=p.draftId||context.id();
-      if(p.draftId)find(state.drafts,p.draftId,'草稿');
+      const existing = p.draftId ? find(state.drafts,p.draftId,'草稿') : undefined;
+      const ownerId = existing?.ownerId ?? (existing ? undefined : context.actorId);
       state.drafts=state.drafts.filter(d=>d.id!==id);
-      state.drafts.push({id,values:v,fileIds,updatedAt:context.now}); result={id,draftId:id}; break;
+      state.drafts.push({id,values:v,fileIds,updatedAt:context.now,...(ownerId?{ownerId}:{})}); result={id,draftId:id}; break;
     }
     case 'development.submit': {
       const v=values(p.values,true), fileIds=files(state,p.fileIds);

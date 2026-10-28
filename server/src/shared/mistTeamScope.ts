@@ -33,7 +33,8 @@ const KINDS: TeamScopeNodeKind[] = ['opportunity', 'development', 'quotation', '
 const KIND_LABEL: Record<TeamScopeNodeKind, string> = { opportunity: '商机', development: '开发案', quotation: '报价', order: '订单' };
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'PRECONDITION' ? 409 : 422); };
 const key = (kind: string, id: string) => `${kind}:${id}`;
-const season = (value: unknown) => typeof value === 'string' ? value.trim().toUpperCase() : '';
+/** 季节按开头的季节代码比较（“AW27 补单”“AW27 首批”都算 AW27）；空值不匹配。 */
+const season = (value: unknown) => typeof value === 'string' ? (value.trim().toUpperCase().split(/\s+/)[0] ?? '') : '';
 const str = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 
 /** 业务链节点（商机、开发案、报价、订单）及其可匹配字段。 */
@@ -67,13 +68,13 @@ export function buildTeamScopeGraph(state: MistState): TeamScopeGraph {
   }
   // 开发案 → 报价（条目来源）；报价版本链：旧版本 → 新版本；报价 → 已转订单。
   for (const q of quotations) {
-    for (const line of q.lines ?? []) if (line?.sourceDevId) link(key('development', line.sourceDevId), key('quotation', q.id));
+    for (const line of q.lines ?? []) if (line?.sourceDevId && !line.productId) link(key('development', line.sourceDevId), key('quotation', q.id));
     if (q.previousId) link(key('quotation', q.previousId), key('quotation', q.id));
     if (q.convertedOrderId) link(key('quotation', q.id), key('order', q.convertedOrderId));
   }
   // 开发案 / 报价 → 订单（订单条目来源，订单整单为单位）。产品档案是公司共享资料，不作为链路桥梁，避免跨客户扩散。
   for (const line of (state.orderLines ?? []) as any[]) {
-    if (line.sourceDevId) link(key('development', line.sourceDevId), key('order', line.orderId));
+    if (line.sourceDevId && !line.sourceProductId) link(key('development', line.sourceDevId), key('order', line.orderId));
     if (line.sourceQuotationId) link(key('quotation', line.sourceQuotationId), key('order', line.orderId));
   }
   // 订单 → 索赔补货单。

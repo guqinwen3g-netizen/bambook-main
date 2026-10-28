@@ -488,3 +488,10 @@ it('marks commercial approval requirements while leaving later quantity and tole
  }
  for(const name of ['数量口径','溢装上限 %','短装下限 %','定金比例（%）'])expect(getByLabelText(dialog,name).closest('label')?.querySelector('.mist-field-label em')).toBeNull();
 });
+
+it('counts visible allocations from partially visible receipts without inventing the bank total', () => {
+  store.state!.invoices.push({ id: 'invoice-part', code: 'INV-PART', orderId, order: 'SO-A', customer: '客户甲', due: '2026-10-30', amount: 1.01, open: 0.61, currency: 'USD' });
+  store.state!.partialReceipts=[{id:'receipt-part',code:'BR-PART',date:'2026-10-13',payer:'客户甲',currency:'USD',visibleAllocatedAmount:0.4,hiddenCount:1}];
+  store.state!.allocations.push({id:'allocation-part',invoiceId:'invoice-part',receiptId:'receipt-part',amount:0.4,currency:'USD',createdAt:context.now,actor:context.actorName});
+  render();expect(getByText(host, '已确认到账').textContent).toContain('0.40');
+});

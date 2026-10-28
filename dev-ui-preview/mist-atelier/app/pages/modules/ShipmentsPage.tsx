@@ -133,6 +133,7 @@ const round = (value: number) => Math.round(value * 10000) / 10000;
 export const packedFor = (root: MistState, s: FulfillmentShipment, line: FulfillmentShipment['lines'][number]) => round(root.fulfillment.packing.filter(row => row.shipmentId === s.id && row.lineId === line.lineId && row.productionId === line.productionId).reduce((sum, row) => sum + row.quantity, 0));
 export const packingMatched = (root: MistState, s: FulfillmentShipment) => s.lines.length > 0 && s.lines.every(line => packedFor(root, s, line) === line.quantity);
 function shipmentFlags(root: MistState, s: FulfillmentShipment, day: string) {
+  if (s.hiddenCount) return [];
   const flags: Array<{ key: 'overdue' | 'packing'; label: string }> = [], stage = shipmentStage(root, s);
   if (stage !== 'departed' && stage !== 'cancelled' && s.plannedDate && s.plannedDate < day) flags.push({ key: 'overdue', label: '计划出运日已过' });
   if (stage !== 'departed' && stage !== 'cancelled' && root.fulfillment.packing.some(row => row.shipmentId === s.id) && !packingMatched(root, s)) flags.push({ key: 'packing', label: '装箱与计划不符' });
@@ -171,7 +172,7 @@ export function ShipmentsPage() {
   const searched = !state ? [] : domainRows.filter(s => (!needle || `${s.code} ${s.customer} ${s.consignee} ${s.portOfLoading} ${s.portOfDischarge} ${s.booking} ${s.requestedBy} ${s.lines.map(line => fulfillmentSourceLabel(state, { kind: 'orderLine', orderId: line.orderId, lineId: line.lineId })).join(' ')}`.toLowerCase().includes(needle))
     && (flagFilter === 'all' || (flagFilter === 'mine' ? s.requesterId === me : shipmentFlags(state, s, day).some(flag => flag.key === flagFilter))));
   const order: Record<Stage, number> = { business: 0, intake: 1, logistics: 2, departure: 3, departed: 4, cancelled: 5 };
-  const rows = !state ? [] : searched.filter(s => stageFilter === 'all' ? shipmentStage(state, s) !== 'cancelled' : shipmentStage(state, s) === stageFilter)
+  const rows = !state ? [] : searched.filter(s => stageFilter === 'all' ? (s.hiddenCount ? s.state !== 'cancelled' : shipmentStage(state, s) !== 'cancelled') : !s.hiddenCount && shipmentStage(state, s) === stageFilter)
     .sort((a, b) => Number(shipmentFlags(state, b, day).length > 0) - Number(shipmentFlags(state, a, day).length > 0) || order[shipmentStage(state, a)] - order[shipmentStage(state, b)] || (a.plannedDate || '9').localeCompare(b.plannedDate || '9'));
   const selected = rows.find(s => s.id === picked) || (picked ? scoped.find(s => s.id === picked) : undefined);
   if (editing) return <ShipmentEditor shipment={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />;
@@ -186,14 +187,14 @@ export function ShipmentsPage() {
 
   const sentSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '登记已向客户发送 CI / PL', submitLabel: '登记发送', fields: [{ ...field('at', '向客户发送时间', 'datetime-local'), hint: '发送的是当前有效签发版本；作废或重签后需重新登记。' }], initialValues: { at: localNow() }, submit: v => run({ type: 'fulfillment.shipments.sent', payload: { id: s.id, at: new Date(text(v, 'at')).toISOString() } }) });
   const cancelSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '取消本次出运请求', submitLabel: '确认取消', fields: [field('reason', '取消原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.shipments.cancel', payload: { id: s.id, reason: text(v, 'reason') } }) });
-  const stageCount = (value: StageFilter) => !state ? 0 : value === 'all' ? searched.filter(s => shipmentStage(state, s) !== 'cancelled').length : searched.filter(s => shipmentStage(state, s) === value).length;
+  const stageCount = (value: StageFilter) => !state ? 0 : value === 'all' ? searched.filter(s => s.hiddenCount ? s.state !== 'cancelled' : shipmentStage(state, s) !== 'cancelled').length : searched.filter(s => !s.hiddenCount && shipmentStage(state, s) === value).length;
   const cancelledCount = stageCount('cancelled');
   const columns: Column<FulfillmentShipment>[] = [
     { key: 'code', header: '出运', width: 'minmax(170px,1.6fr)', render: s => <div className="mist-col" style={{ gap: 2 }}><Mono>{s.code}</Mono><small className="mist-muted">{s.customer}</small></div> },
     { key: 'mode', header: '运输', width: 'minmax(140px,1.2fr)', hideOnMobile: true, render: s => <div className="mist-col" style={{ gap: 2 }}><span>{MODE_LABEL[s.mode]} · {s.portOfLoading} → {s.portOfDischarge}</span><small className="mist-muted">{s.incoterm} · {uiText(s.booking ? `订舱 ${s.booking}` : '未订舱')}</small></div> },
     { key: 'source', header: '来源', width: 'minmax(110px,1fr)', hideOnMobile: true, render: s => { const orders = [...new Set(s.lines.map(line => line.orderId))]; return <div className="mist-col" style={{ gap: 2 }}><span>{orders.length}{uiText(" 个订单 · ")}{s.lines.length}{uiText(" 条目")}</span><small className="mist-muted">{orders.map(id => state?.orders.find(o => o.id === id)?.code || '订单不可用').join('、')}</small></div>; } },
     { key: 'date', header: '计划出运', width: '112px', hideOnMobile: true, render: s => <div className="mist-col" style={{ gap: 2 }}><span className={state && shipmentFlags(state, s, day).some(flag => flag.key === 'overdue') ? 'mist-tone-bad' : undefined}>{uiText(s.departedAt ? `ATD ${shortWhen(s.departedAt)}` : s.plannedDate || '未定')}</span><small className="mist-muted">{s.requestedBy}</small></div> },
-    { key: 'stage', header: '阶段', width: '112px', render: s => state ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STAGE_TONE[shipmentStage(state, s)]}>{shipmentStageLabel(s, shipmentStage(state, s))}</Pill>{shipmentFlags(state, s, day).map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> : null },
+    { key: 'stage', header: '阶段', width: '112px', render: s => state ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={s.hiddenCount ? 'neutral' : STAGE_TONE[shipmentStage(state, s)]}>{s.hiddenCount ? uiText('部分可见') : shipmentStageLabel(s, shipmentStage(state, s))}</Pill>{shipmentFlags(state, s, day).map(flag => <small key={flag.key} className="mist-tone-bad">{uiText(flag.label)}</small>)}</div> : null },
   ];
   const canCreate = business ? <Button variant="primary" icon={Plus} disabled={hasOrderContext && !sourceOrder} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined;
   const empty = domainRows.length
@@ -210,7 +211,7 @@ export function ShipmentsPage() {
 
   const summary = selected && state ? (() => {
     const stage = shipmentStage(state, selected), flags = shipmentFlags(state, selected, day), orders = new Set(selected.lines.map(line => line.orderId)).size;
-    return <PreviewSummary openLabel="打开出运详情" onOpen={() => full.open(selected.id)} data={{ code: selected.code, status: <Pill tone={STAGE_TONE[stage]}>{shipmentStageLabel(selected, stage)}</Pill>, title: selected.customer,
+    return <PreviewSummary openLabel="打开出运详情" onOpen={() => full.open(selected.id)} data={{ code: selected.code, status: <Pill tone={selected.hiddenCount ? 'neutral' : STAGE_TONE[stage]}>{selected.hiddenCount ? uiText('部分可见') : shipmentStageLabel(selected, stage)}</Pill>, title: selected.customer,
       description: `${MODE_LABEL[selected.mode]} · ${selected.portOfLoading} → ${selected.portOfDischarge}`,
       facts: [{ label: '收货方', value: selected.consignee || '未填' }, { label: '贸易术语', value: selected.incoterm || '未填' }, { label: '计划出运', value: selected.plannedDate || '未定' }, { label: '订舱号', value: selected.booking || '未订舱' }, { label: '来源', value: `${orders} 个订单 · ${selected.lines.length} 行` }],
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined }} />;
@@ -222,7 +223,7 @@ export function ShipmentsPage() {
       actions={<>
         {sourceOrder && <Button onClick={() => go('orders/detail', sourceOrder.id, { customerId: sourceOrder.customerId, section: sourceOrder.type })}>{uiText("返回来源订单")}</Button>}
         {hasOrderContext && <Button onClick={() => go('shipments')}>{uiText("查看全部出运")}</Button>}
-        <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('出运台账', ['编号', '客户', '收货方', '运输', '起运港', '目的港', '计划日', '阶段', '实际离港'], rows.map(s => [s.code, s.customer, s.consignee, MODE_LABEL[s.mode], s.portOfLoading, s.portOfDischarge, s.plannedDate, shipmentStageLabel(s, shipmentStage(state!, s)), s.departedAt || '']))}>{uiText("导出")}</Button>
+        <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('出运台账', ['编号', '客户', '收货方', '运输', '起运港', '目的港', '计划日', '阶段', '实际离港'], rows.map(s => [s.code, s.customer, s.consignee, MODE_LABEL[s.mode], s.portOfLoading, s.portOfDischarge, s.plannedDate, s.hiddenCount ? '部分可见' : shipmentStageLabel(s, shipmentStage(state!, s)), s.departedAt || '']))}>{uiText("导出")}</Button>
         {business && <Button icon={ScrollText} disabled={hasOrderContext && !sourceOrder} onClick={() => editor.open(termsSpec())}>{uiText("核对合同收货条款")}</Button>}
         {canCreate}
       </>} />
@@ -254,6 +255,14 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   shipment: FulfillmentShipment; state: MistState; day: string; me: string; business: boolean; logistics: boolean; locked: boolean;
   onEdit: () => void; onPack: () => void; onTransport: () => void; onReady: () => void; onSent: () => void; onDepart: () => void; onCancel: () => void; onCustoms: () => void; onDocuments: () => void; onSamples: () => void;
 }) {
+  if (s.hiddenCount) return <DetailBody data-shipment-detail={s.id} heading={<div><span className="mist-mono mist-muted">{s.code}</span><div className="mist-h2">{s.customer}</div></div>}>
+    <Pill>{uiText('部分可见')}</Pill><DetailBlock title={uiText('来源范围')} aside={<span>{ui`另有 ${s.hiddenCount} 笔其他范围业务`}</span>}>
+      <DataTable ariaLabel={ui`${s.code} 来源范围`} rows={s.lines} rowKey={line => line.lineId + ':' + (line.productionId || '')} columns={[
+        { key: 'source', header: '准确条目', render: line => <SourceLink source={{ kind: 'orderLine', orderId: line.orderId, lineId: line.lineId, productionId: line.productionId }} /> },
+        { key: 'quantity', header: '计划数量', align: 'right', render: line => line.quantity },
+      ]} />
+    </DetailBlock>
+  </DetailBody>;
   const f = state.fulfillment, stage = shipmentStage(state, s), flags = shipmentFlags(state, s, day), closed = stage === 'departed' || stage === 'cancelled';
   const packingRows = f.packing.filter(row => row.shipmentId === s.id), documents = f.documents.filter(row => row.shipmentId === s.id), customs = f.customs.filter(row => row.shipmentId === s.id);
   const issued = documents.filter(row => row.status === 'issued'), cleared = customs.some(row => row.status === 'cleared');

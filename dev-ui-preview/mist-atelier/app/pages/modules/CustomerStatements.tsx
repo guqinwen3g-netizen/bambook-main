@@ -26,6 +26,7 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
   const canWrite = session.hasPermission('invoices:write' as never);
   const blocker = !state ? '公司未加载' : !canWrite ? '生成对账单需要应收写权限（财务）' : !target ? '没有未结应收或待核销到账的客户' : customerStatementBlocker(state, target, today);
   const records = readCustomerStatements(state || {}).filter(r => !customerId || r.customerId === customerId).sort((a, b) => b.generatedAt.localeCompare(a.generatedAt)).slice(0, 8);
+  const partials = (state?.partialStatements ?? []).filter(r => !customerId || r.customerId === customerId).slice(0, 8);
   const nameOf = (id: string) => state?.customers.find(c => c.id === id)?.name || id;
   const fileOf = (id: string) => state?.files.find(f => f.id === id);
   const generate = async () => {
@@ -47,7 +48,7 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
       <Button size="sm" icon={FileText} disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={() => void generate()}>{uiText("生成对账单")}</Button></div>} />
     {blocker && canWrite && <div style={{ padding: '0 22px 8px' }}><span className="mist-note">{blocker}</span></div>}
     <div role="list" aria-label={uiText("已生成的客户对账单")} style={{ padding: '0 22px 14px' }}>
-      {records.length ? records.map(r => <div key={r.id} role="listitem" className="mist-row" data-statement={r.statementNo} style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }}>
+      {records.map(r => <div key={r.id} role="listitem" className="mist-row" data-statement={r.statementNo} style={{ gap: 8, flexWrap: 'wrap', padding: '8px 0' }}>
         <Mono>{r.statementNo}</Mono>
         <span className="mist-col" style={{ gap: 0, minWidth: 0 }}><span>{nameOf(r.customerId)}</span><small className="mist-muted">{uiText("截至 ")}{r.asOf} · {r.generatedBy} · {r.generatedAt.replace('T', ' ').slice(0, 16)}</small></span>
         {r.totals.map(t => <Pill key={t.currency} tone="neutral">{uiText("净欠 ")}{Number(t.net).toLocaleString('en-US', { minimumFractionDigits: 2 })} {t.currency}</Pill>)}
@@ -55,7 +56,9 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
         <PreviewButton file={fileOf(r.fileId)} disabled={busy} />
         <Button size="sm" variant="quiet" icon={Download} disabled={busy} onClick={() => download(r.fileId)}>{uiText("下载")}</Button>
         <Button size="sm" variant="quiet" icon={ExternalLink} disabled={busy} onClick={() => open(r.fileId)}>{uiText("打开")}</Button>
-      </div>) : <span className="mist-note">{uiText("尚未生成。生成后按当时台账冻结内容并归档原件；台账变动后重新生成新编号，旧份保留。")}</span>}
+      </div>)}
+      {partials.map(r => <div key={r.id} role="listitem" className="mist-col" data-statement={r.statementNo} style={{ gap: 8, padding: '8px 0' }}><div className="mist-row"><Mono>{r.statementNo}</Mono><span>{nameOf(r.customerId)} · {uiText("部分可见")}</span><span className="mist-spacer"/><span>{ui`另有 ${r.hiddenCount} 笔其他范围业务`}</span></div>{r.sections.flatMap(section => section.lines.map(line => <div className="mist-row" key={section.currency + ':' + line.invoiceId}><Mono>{line.code}</Mono><span className="mist-spacer"/><span>{line.open} {section.currency}</span></div>))}</div>)}
+      {!records.length && !partials.length && <span className="mist-note">{uiText("尚未生成。生成后按当时台账冻结内容并归档原件；台账变动后重新生成新编号，旧份保留。")}</span>}
     </div>
   </Card>;
 }

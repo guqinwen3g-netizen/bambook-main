@@ -6,11 +6,11 @@ import {getByRole,queryByRole} from '@testing-library/dom';
 import {CustomerPage} from './CustomerPage';
 import {Nav} from '../nav';
 import {createMistState} from '../../../../server/src/shared/mistWorkspace';
-const bridge=vi.hoisted(()=>({current:null as any,canCreate:true}));
+const bridge=vi.hoisted(()=>({current:null as any,canCreate:true,canAdmin:true,localMode:true}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge.current}));
-vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local',displayName:'本地操作员'},hasPermission:(scope:string)=>scope.endsWith(':read')||bridge.canCreate,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = ()=>({user:{id:'local',displayName:'本地操作员'},localMode:bridge.localMode,hasPermission:(scope:string)=>scope==='relations:admin'?bridge.canAdmin:scope.endsWith(':read')||bridge.canCreate,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 let host:HTMLDivElement,root:Root|undefined;const go=vi.fn(),openAI=vi.fn();
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local'},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;go.mockReset();openAI.mockReset();bridge.canCreate=true;bridge.canAdmin=true;bridge.localMode=true;const state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T08:00:00Z',actorName:'本地操作员'},'empty');bridge.current={state,workspace:{id:'w',ownerId:'local'},loading:false,saving:false,pending:null,pendingCreate:null,error:'',run:vi.fn(async()=>({requestId:'saved',revision:1,result:{id:'created-customer',customerId:'created-customer'}})),refresh:vi.fn(),downloadFile:vi.fn()};});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();});
 async function mount(id?:string){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Nav.Provider value={{route:{view:'crm',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI}}><CustomerPage/></Nav.Provider>));}
 async function click(label:string){await act(async()=>getByRole(host,'button',{name:label}).click());}
@@ -53,3 +53,9 @@ describe('customer default currency',()=>{
 });
 
 it('keeps customer and contact details read-only without write access',async()=>{bridge.canCreate=false;bridge.current.state.customers=[customer('a')];bridge.current.state.contacts=[{id:'contact-read',customerId:'a',name:'客户联系人',role:'采购',email:'contact@example.invalid',phone:'123'}];await mount('a');expect(queryByRole(host,'button',{name:'编辑客户资料'})).toBeNull();expect(queryByRole(host,'button',{name:'添加联系人'})).toBeNull();expect(queryByRole(host,'button',{name:'新建开发案'})).toBeNull();const contact=[...host.querySelectorAll('button')].find(b=>b.textContent?.includes('客户联系人'))!;await act(async()=>contact.click());const dialog=getByRole(document.body,'dialog',{name:'联系人'});expect(queryByRole(dialog,'button',{name:'保存'})).toBeNull();expect(queryByRole(dialog,'button',{name:'删除'})).toBeNull();expect([...dialog.querySelectorAll<HTMLInputElement>('input')].every(input=>input.readOnly)).toBe(true);expect(bridge.current.run).not.toHaveBeenCalled();});
+
+it('keeps the customer owner selector disabled without customer-management permission',async()=>{bridge.canAdmin=false;bridge.localMode=false;bridge.current.state.customers=[{...customer('a'),ownerId:'local'}];await mount('a');await click('编辑客户资料');const dialog=getByRole(document.body,'dialog',{name:'编辑客户资料'});expect((getByRole(dialog,'combobox',{name:'客户经理'}) as HTMLSelectElement).disabled).toBe(true);});
+
+it('keeps another customer archive readable without offering maintenance to a salesperson',async()=>{bridge.canAdmin=false;bridge.localMode=false;bridge.current.state.customers=[{...customer('a'),ownerId:'another'}];await mount('a');expect(host.textContent).toContain('客户-a');expect(queryByRole(host,'button',{name:'编辑客户资料'})).toBeNull();expect(queryByRole(host,'button',{name:'添加联系人'})).toBeNull();});
+
+it('uses the server customer-maintenance scope for a department manager',async()=>{bridge.localMode=false;bridge.current.workspace.access={role:'member',canManageMembers:false,hidden:[],manageableCustomerIds:[]};bridge.current.state.customers=[{...customer('a'),ownerId:'another'}];await mount('a');expect(queryByRole(host,'button',{name:'编辑客户资料'})).toBeNull();});

@@ -183,3 +183,5 @@ it.each([
  render('s');const checkbox=getByRole(host,'checkbox',{name:'CI / PL 签发'});expect(checkbox.getAttribute('aria-checked')).toBe(String(scenario.done));expect(checkbox.parentElement!.querySelector('small')?.textContent).toBe(scenario.note);
  const documents=getByRole(host,'table',{name:'S 单据'});expect(documents.textContent).toContain('PK-1');expect(documents.textContent).toContain('BOOK-1');
 });
+
+it('shows only scoped shipment lines and no full-document actions for a partial shipment',()=>{store.state!.fulfillment.shipments.push(shipment('partial',{hiddenCount:1,lines:[{orderId:'o',lineId:'l',quantity:3}]}));render('partial');const detail=host.querySelector('[data-shipment-detail=partial]') as HTMLElement;expect(detail.textContent).toContain('部分可见');expect(detail.textContent).toContain('另有 1 笔其他范围业务');expect(detail.textContent).not.toContain('编辑出运请求');expect(detail.textContent).not.toContain('附件');});

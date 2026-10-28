@@ -170,7 +170,7 @@ export function OrderDetailPage() {
   const productions = (state?.productions ?? []).filter(item => item.orderId === order?.id && !item.closed);
   const invoices = (state?.invoices ?? []).filter(item => item.orderId === order?.id);
   const logisticsHandoff = state?.events.find(event => event.entityType === 'order' && event.entityId === order?.id && /^交接后勤(?:[:：]|$)/.test(event.text));
-  const sameCurrencyReceipts=(state?.receipts??[]).filter(receipt=>receipt.currency===order?.currency),receiptIds=new Set(sameCurrencyReceipts.map(receipt=>receipt.id));
+  const sameCurrencyReceipts=(state?.receipts??[]).filter(receipt=>receipt.currency===order?.currency),receiptIds=new Set([...sameCurrencyReceipts,...(state?.partialReceipts??[]).filter(receipt=>receipt.currency===order?.currency)].map(receipt=>receipt.id));
   const sameCurrencyInvoices=invoices.filter(invoice=>invoice.currency===order?.currency);
   const orderAllocations=(state?.allocations??[]).filter(allocation=>allocation.currency===order?.currency&&receiptIds.has(allocation.receiptId)&&sameCurrencyInvoices.some(invoice=>invoice.id===allocation.invoiceId));
   const reconciled=sumOrderMoney(orderAllocations.map(allocation=>allocation.amount));

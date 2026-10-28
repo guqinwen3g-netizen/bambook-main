@@ -85,3 +85,5 @@ it('disables statement generation without invoice write permission',()=>{
 it('hands collection to the exact invoice reconciliation context rather than a preview',async()=>{
  route.id='a';render();await click('收款与核销');expect(go).toHaveBeenCalledWith('payment-vouchers',undefined,{section:'invoice:a'});expect(store.value.run).not.toHaveBeenCalled();
 });
+
+it('shows only visible statement lines when the archived statement spans hidden business',()=>{const s=store.value.state;s.customers=[{id:'customer',name:'客户',code:'C-1'}];s.partialStatements=[{id:'st-part',customerId:'customer',statementNo:'SOA-PART',asOf:'2026-10-13',hiddenCount:1,sections:[{currency:'USD',lines:[{invoiceId:'a',code:'CI-A',open:'70.00'}],hiddenCount:1}]}];render();const list=getByRole(host,'list',{name:'已生成的客户对账单'});expect(list.textContent).toContain('SOA-PART');expect(list.textContent).toContain('CI-A');expect(list.textContent).toContain('70.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('净欠');expect(getAllByRole(list,'listitem')[0].querySelector('button')).toBeNull();});

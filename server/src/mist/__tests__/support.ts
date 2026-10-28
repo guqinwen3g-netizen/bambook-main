@@ -17,12 +17,22 @@ export class MemoryMistDatabase {
   companyMembers: Array<{ companyId: string; userId: string; status: string; joinedAt?: Date; createdAt?: Date }> = [];
   /** 人事小组（经部门归属公司）：仅小组范围测试需要登记。 */
   teams: Array<{ id: string; name: string; companyId: string; status?: string; deletedAt?: bigint | null }> = [];
+  /** 小组成员、部门（负责人与上下级）与账号所属部门：仅行级范围测试需要登记。 */
+  teamMembers: Array<{ teamId: string; userId: string; leftAt?: Date | null }> = [];
+  departments: Array<{ id: string; companyId: string; parentId: string | null; headId: string | null; status?: string }> = [];
+  userDepartments = new Map<string, string>();
   private queue = Promise.resolve();
   private delegates(workspaces: Map<string, any>, receipts: Map<string, any>, businessSequences = this.businessSequences) {
     return {
       $queryRawUnsafe: async () => [],
       team: {
         findMany: async ({ where }: any) => this.teams.filter(t => t.companyId === where.department?.companyId && (t.status ?? 'active') === where.status && !t.deletedAt).map(t => ({ id: t.id, name: t.name })),
+      },
+      teamMember: {
+        findMany: async ({ where }: any) => this.teamMembers.filter(m => m.userId === where.userId && !m.leftAt && this.teams.some(t => t.id === m.teamId && t.companyId === where.team?.department?.companyId && !t.deletedAt && (t.status ?? 'active') === 'active')).map(m => ({ teamId: m.teamId })),
+      },
+      department: {
+        findMany: async ({ where }: any) => this.departments.filter(d => d.companyId === where.companyId && (d.status ?? 'active') === where.status).map(({ id, parentId, headId }) => ({ id, parentId, headId })),
       },
       companyMember: {
         findMany: async ({ where }: any) => this.companyMembers.filter(m => m.companyId === where.companyId && (!where.status || m.status === where.status)).flatMap(m => {
@@ -32,7 +42,7 @@ export class MemoryMistDatabase {
         }),
       },
       userAccount: {
-        findMany: async ({ where }: any) => ((where?.id?.in ?? []) as string[]).map(id => { const a = this.accounts.get(id); return { id, displayName: a?.displayName ?? id, status: a?.status ?? 'active', deletedAt: a?.deletedAt ?? null }; }),
+        findMany: async ({ where }: any) => where?.OR ? [...this.userDepartments.entries()].filter(([, dept]) => where.OR[0].primaryDeptId.in.includes(dept)).map(([id]) => ({ id })) : ((where?.id?.in ?? []) as string[]).map(id => { const a = this.accounts.get(id); return { id, displayName: a?.displayName ?? id, status: a?.status ?? 'active', deletedAt: a?.deletedAt ?? null }; }),
       },
       mistWorkspace: {
         findFirst: async ({ where }: any) => [...workspaces.values()].find(row => Object.entries(where).every(([key, value]) => row[key] === value)) ?? null,

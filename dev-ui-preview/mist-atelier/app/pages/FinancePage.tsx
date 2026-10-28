@@ -64,7 +64,7 @@ export function FinancePage() {
   const density = useDevice('density');
   const { go,route } = useNav(), toast = useToast(), workspace=useMistWorkspace(),session=useMistSession(),routeScope=useRouteScope();
   // 公司银行账户与余额只对登记收付款的财务开放（服务端同样不下发）。
-  const canSeeAccounts=session.hasPermission(MIST_FINANCE_SCOPES.voucher),areaOf=(section?:string)=>{const next=financeArea(section);return next==='accounts'&&!canSeeAccounts?'receivables':next;};
+  const canSeeAccounts=session.hasPermission(MIST_FINANCE_SCOPES.voucher)&&!workspace.workspace?.access?.hidden.some(section=>section.key==='bankAccounts'),areaOf=(section?:string)=>{const next=financeArea(section);return next==='accounts'&&!canSeeAccounts?'receivables':next;};
   const [area,setArea]=React.useState<FinanceArea>(()=>areaOf(route.section));
   React.useEffect(()=>setArea(areaOf(route.section)),[route.section,canSeeAccounts]);
   const { state, loading, error, run, refresh, saving, pending, recover }=workspace;
@@ -148,7 +148,7 @@ export function FinancePage() {
   const exportRows = () => {
     if (tab === 'pay') downloadMistCsv('付款凭证.csv', ['凭证', '日期', '收款方', '金额', '币种', '附言'], payments.map(item => [item.code, item.date, item.payee, item.amount, item.currency, item.ref]));
     else if (tab === 'inv') downloadMistCsv('发票台账.csv', ['发票', '订单', '客户', '金额', '未收余额', '币种', '到期日', '状态'], visibleInvoices.map(item => [item.code, item.order, item.customer, item.amount, isPendingFinanceMistInvoice(item)?'待财务确认':item.open, item.currency, item.due, isPendingFinanceMistInvoice(item)?'待财务确认':isActiveMistInvoice(item)?'有效':'已作废']));
-    else downloadMistCsv('核销明细.csv', ['流水', '发票', '核销金额', '币种', '时间', '操作人'], allocations.map(item => [receipts.find(receipt => receipt.id === item.receiptId)?.code ?? item.receiptId, invoices.find(invoice => invoice.id === item.invoiceId)?.code ?? item.invoiceId, item.amount, item.currency, item.createdAt, item.actor]));
+    else downloadMistCsv('核销明细.csv', ['流水', '发票', '核销金额', '币种', '时间', '操作人'], allocations.map(item => [receipts.find(receipt => receipt.id === item.receiptId)?.code ?? state?.partialReceipts?.find(receipt => receipt.id === item.receiptId)?.code ?? item.receiptId, invoices.find(invoice => invoice.id === item.invoiceId)?.code ?? item.invoiceId, item.amount, item.currency, item.createdAt, item.actor]));
     toast('已导出当前台账');
   };
   if(area==='records'&&route.detail==='full'&&route.id)return <FinanceRecords onReceipt={openReceipt}/>;
@@ -166,9 +166,9 @@ export function FinancePage() {
     {hasInvoiceFilter&&tab==='inv'&&<Banner title={uiText(overdueScope?'当前仅显示对应范围的逾期未结发票':'当前仅显示对应范围的未结发票')} actions={<Button onClick={()=>go('payment-vouchers')}>{uiText("查看全部发票")}</Button>}/>}
     {area==='receivables'?<>
     <SummaryBar items={[
-      { label: '待核销到账', value: fmt(pendingAmount, 2), unit: displayCurrency, hint: otherPending || `${pendingReceipts.length} 笔流水` },
+      { label: '待核销到账', value: state?.partialReceipts?.length ? '—' : fmt(pendingAmount, 2), unit: state?.partialReceipts?.length ? undefined : displayCurrency, hint: state?.partialReceipts?.length ? '部分到账余额不可见' : otherPending || `${pendingReceipts.length} 笔流水` },
       { label: '本月已核销', value: fmt(cashTotal(monthAllocations.filter(item => item.currency === displayCurrency).map(item=>item.amount)),2), unit: displayCurrency, hint: `${monthAllocations.length} 条本月核销记录` },
-      { label: '未认领', value: unclaimedCount, unit: '笔', hint: unclaimedCount?'需联系付款方':'暂无待认领流水', hintTone: unclaimedCount?'bad':undefined },
+      { label: '未认领', value: state?.partialReceipts?.length ? '—' : unclaimedCount, unit: state?.partialReceipts?.length ? undefined : '笔', hint: state?.partialReceipts?.length ? '部分到账余额不可见' : unclaimedCount?'需联系付款方':'暂无待认领流水', hintTone: unclaimedCount?'bad':undefined },
       { label: '逾期应收', value: fmt(cashTotal(overdueInvoices.filter(item=>item.currency===displayCurrency).map(item=>item.open)),2), unit: displayCurrency, hint: '按发票余额统计', hintTone: 'warn' }]} />
     {suggestions.length > 0 && <div className="mist-section"><Banner tone="ai" icon={Sparkles} title={ui`小竹匹配了 ${suggestions.length} 笔到账`} actions={canFund?<Button size="sm" variant="ai" disabled={busy} onClick={() => void execute({ type: 'finance.acceptSuggestions', payload: { receiptIds: suggestions.map(item => item.id) } }, result => toast(`已采纳 ${Number(result.applied??0)} 条核销建议`))}>{uiText("全部采纳")}</Button>:undefined} /></div>}
     {state&&<FinanceDevBilling state={state} canInvoice={session.hasPermission(MIST_FINANCE_SCOPES.invoice)} busy={busy} execute={execute} />}
@@ -184,7 +184,7 @@ export function FinancePage() {
       { key: 'open', header: '未收余额', width: '120px', align: 'right', sortValue: item => item.open, render: item => isPendingFinanceMistInvoice(item)?uiText('待财务确认'):`${fmt(item.open, 2)} ${item.currency}` },
       { key: 'due', header: '到期日', width: '110px', render: item => item.due },
     ]} /></Card> : <div className="mist-detail" data-layout="main-rail" style={{ gridTemplateColumns: 'minmax(0,1fr) 380px' }}>
-      <Card><DataTable density={density} ariaLabel={uiText("到账流水")} loading={loading} rows={receipts} rowKey={item => item.id} columns={columns} selectedKey={receipt?.id} onRowClick={item => setSel(item.id)} empty={<EmptyState title={uiText("还没有银行流水")} action={<Button disabled={!canVoucher||busy} onClick={() => fileInput.current?.click()}>{uiText("导入流水")}</Button>} />} footer={<span>{receipts.length}{uiText(" 笔流水")}</span>} /></Card>
+      <Card><DataTable density={density} ariaLabel={uiText("到账流水")} loading={loading} rows={receipts} rowKey={item => item.id} columns={columns} selectedKey={receipt?.id} onRowClick={item => setSel(item.id)} empty={<EmptyState title={uiText(state?.partialReceipts?.length ? '没有完整可见的银行流水' : '还没有银行流水')} action={<Button disabled={!canVoucher||busy} onClick={() => fileInput.current?.click()}>{uiText("导入流水")}</Button>} />} footer={<span>{state?.partialReceipts?.length ? ui`完整可见 ${receipts.length} 笔` : ui`${receipts.length} 笔流水`}</span>} />{(state?.partialReceipts?.length ?? 0)>0 && <div className="mist-card-body mist-col" role="list" aria-label={uiText("部分可见到账")}><b>{uiText("部分可见到账")}</b>{state!.partialReceipts!.map(item=><div className="mist-row" role="listitem" key={item.id}><Mono>{item.code}</Mono><span>{item.date} · {item.payer}</span><span className="mist-spacer"/><span>{uiText("本范围已核销")} {fmt(item.visibleAllocatedAmount,2)} {item.currency}</span>{item.hiddenCount>0 && <span>{ui`另有 ${item.hiddenCount} 笔其他范围业务`}</span>}</div>)}</div>}</Card>
       <Card><CardHeader title={uiText("核销到发票")} sub={receipt && <Mono>{receipt.code}</Mono>} tools={receiptDisplay && <Pill tone={receiptDisplay.tone}>{uiText(receiptDisplay.label)}</Pill>} />
         {receipt ? <><div className="mist-card-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Facts items={[{ label: '未分配金额', value: <span className="mist-num">{fmt(receipt.remaining, 2)} {receipt.currency}</span> }, { label: '付款方', value: receipt.payer }]} />

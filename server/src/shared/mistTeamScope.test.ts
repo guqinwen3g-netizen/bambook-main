@@ -112,3 +112,9 @@ describe('team scope input and command', () => {
     expect(state.events[0]).toMatchObject({ entityType: 'teamScope', entityId: 't1' });
   });
 });
+
+it('does not cross the shared product library to expose its private source development',()=>{
+ const state=fixture();state.market.products=[{id:'shared-product',sourceDevId:'shared-dev',sourceVersionId:'version'}];state.market.quotations=[{id:'product-quote',customerId:'hm',lines:[{productId:'shared-product',sourceDevId:'shared-dev',sourceVersionId:'version'}]}];
+ const r=resolveTeamScope(state,scope([],[{kind:'quotation',id:'product-quote'}]));
+ expect(r.collaborate.has('quotation:product-quote')).toBe(true);expect(r.readonly.has('development:shared-dev')).toBe(false);
+});

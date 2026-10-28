@@ -77,7 +77,7 @@ export function CustomsPage() {
   const hasContext = !!route.section, invalidContext = hasContext && !!state && !contextShipment;
   const records = (f?.customs || []).filter(c => !hasContext || c.shipmentId === route.section);
   const routed = records.find(c => c.id === route.id);
-  const lcAll = state ? readLetterOfCredits(state).map(lc => ({ type: lcOrderDomain(state, lc) })) : [];
+  const lcAll = state ? [...readLetterOfCredits(state).map(lc => ({ type: lcOrderDomain(state, lc) })), ...(state.partialLettersOfCredit ?? []).flatMap(lc => { const order = state.orders.find(row => lc.orderIds.includes(row.id)); return order ? [{ type: order.type }] : []; })] : [];
   const hsAll = state ? readCustomsClassifications(state).filter(c => !c.voided) : [];
   const domainOf = (c: FulfillmentCustoms): Domain => shipmentOf(c)?.domain || 'garment';
   const domain: Domain = domainChoice || (routed ? domainOf(routed) : undefined) || contextShipment?.domain || (records.some(c => domainOf(c) === 'garment') || !records.some(c => domainOf(c) === 'fabric') ? 'garment' : 'fabric');

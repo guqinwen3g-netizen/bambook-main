@@ -24,7 +24,7 @@ export function CostPage({reference}:{reference:React.ReactNode}){
  const workspaceKey=`${session.user?.id||''}:${w.workspace?.id||''}`,liveKey=React.useRef(workspaceKey);liveKey.current=workspaceKey;
  React.useEffect(()=>{setQuery('');setOrderFilter('all');setKind('all');setFailure('');setRecovering(false);lock.current=null;},[workspaceKey]);
  const canSeeMargin=session.hasPermission('reports:admin'),asOf=platformBusinessDate(businessNow()),fxBasis=(w.state?.fxRecords||[]).some(r=>r.kind==='settlement'&&!r.reversed)?'actual' as const:'period' as const;
- const actualOf=(id:string):OrderActualCost|null=>{if(!canSeeMargin||!w.state)return null;try{return orderActualCost(w.state,id,fxBasis,asOf.slice(0,7),asOf,w.workspace?.costMaterialBasis??(w.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined));}catch{return null;}};
+ const actualOf=(id:string):OrderActualCost|null=>{if(!canSeeMargin||!w.state)return null;try{return orderActualCost(w.state,id,fxBasis,asOf.slice(0,7),asOf,w.workspace?.costMaterialBasis === null ? null : w.workspace?.costMaterialBasis??(w.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined));}catch{return null;}};
  const cny=(n:number|null)=>n===null?'—':'¥'+n.toLocaleString(interfaceLocale(),{minimumFractionDigits:2,maximumFractionDigits:2});
  const actualText=(id:string)=>{if(!canSeeMargin)return '需报表管理权限查看';const a=actualOf(id);if(!a)return '暂不能核算';return a.status==='ok'?`人民币毛利 ${cny(a.marginIn)}${a.estimated?'（含暂估）':''}`:`缺汇率：${a.missing.join('、')||'外币'}`;};
  const openActual={label:'查看订单核算',onClick:()=>go('reports',current?.id,{section:'actual'}),reason:canSeeMargin?undefined:'订单核算含采购成本，仅报表管理者可查看'};

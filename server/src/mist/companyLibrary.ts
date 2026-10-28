@@ -2,6 +2,8 @@ import type { TokenPayload } from '../auth/service';
 import type { MistState, MistWorkspaceMember } from '../shared/mistWorkspace';
 import { hasScope } from '../auth/permissionService';
 import { fail } from './errors';
+import { getDataScopeRule, SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
+import type { MistDataScope } from '../shared/mistDataScope';
 
 /**
  * 一家公司 = 一个业务库（公司-部门-小组与数据范围 R1/R2）。
@@ -42,4 +44,32 @@ export async function companyTeams(db: any, companyId: string | null | undefined
   if (!companyId || typeof db.team?.findMany !== 'function') return [];
   const rows: any[] = await db.team.findMany({ where: { deletedAt: null, status: 'active', department: { companyId } }, select: { id: true, name: true }, orderBy: { createdAt: 'asc' } });
   return rows.map(row => ({ id: row.id, name: row.name }));
+}
+
+/**
+ * 岗位为全公司范围：超级管理员 / 老板，或任一岗位在业务数据上为全公司（管理员、财务、QC、后勤，见 DEFAULT_DATA_SCOPE_BY_ROLE）。
+ * 业务员、业务主管与自定义岗位按行级范围（本人 ∪ 部门领导所辖 ∪ 小组）裁剪。
+ */
+export function companyWideActor(actor: TokenPayload) {
+  if (actor.globalBusinessScope === true || actor.roles?.some(role => role === 'owner' || (role as string) === SYSTEM_ROLE_IDS.SUPER_ADMIN)) return true;
+  return (actor.roleIds ?? []).some(id => getDataScopeRule(id, 'orders').kind === 'all');
+}
+/**
+ * 受限账号的行级范围：本人 + 作为部门负责人所辖部门（含下级部门）的在职成员；本人所在的在用小组。
+ * 返回 undefined 表示不裁剪（非公司库、本机演示、全公司岗位）。查询失败按异常抛出，不放宽。
+ */
+export async function companyDataScope(db: any, row: { companyId?: string | null; state: MistState }, actor: TokenPayload): Promise<MistDataScope | undefined> {
+  if (!row.companyId || localMode(actor) || companyWideActor(actor)) return undefined;
+  const companyId = row.companyId, userIds = new Set([actor.userId]), teamIds: string[] = [];
+  if (typeof db.teamMember?.findMany === 'function') for (const m of await db.teamMember.findMany({ where: { userId: actor.userId, leftAt: null, team: { deletedAt: null, status: 'active', department: { companyId } } }, select: { teamId: true } })) teamIds.push(m.teamId);
+  if (typeof db.department?.findMany === 'function') {
+    const departments: Array<{ id: string; parentId: string | null; headId: string | null }> = await db.department.findMany({ where: { companyId, status: 'active' }, select: { id: true, parentId: true, headId: true } });
+    const led = new Set(departments.filter(d => d.headId === actor.userId).map(d => d.id));
+    for (let grew = true; grew;) { grew = false; for (const d of departments) if (d.parentId && led.has(d.parentId) && !led.has(d.id)) { led.add(d.id); grew = true; } }
+    if (led.size && typeof db.userAccount?.findMany === 'function') {
+      const roster = new Set(Array.isArray(row.state.memberIds) ? row.state.memberIds : []);
+      for (const user of await db.userAccount.findMany({ where: { OR: [{ primaryDeptId: { in: [...led] } }, { roles: { some: { departmentId: { in: [...led] } } } }] }, select: { id: true } })) if (roster.has(user.id)) userIds.add(user.id);
+    }
+  }
+  return { userIds: [...userIds], teamIds };
 }

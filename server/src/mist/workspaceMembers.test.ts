@@ -71,7 +71,8 @@ describe('公司成员与岗位权限（服务端）',()=>{
   await finance.post(W+id+'/archive').send({requestId:'fin-archive',expectedRevision:fv.revision}).expect(404);
   // 财务登记供应商票据与付款
   const yesterday=new Date(Date.now()-86400_000).toISOString().slice(0,10),later=new Date(Date.now()+30*86400_000).toISOString().slice(0,10);
-  const uploaded=await sales.post(W+id+'/files').field('requestId','member-private-file').field('expectedRevision',String(fv.revision)).attach('file',Buffer.from('%PDF-1.4 financial attachment'),{filename:'finance-only.pdf',contentType:'application/pdf'}).expect(201);
+  // Unbound uploads are private to the uploader; finance registers the original it uploaded.
+  const uploaded=await finance.post(W+id+'/files').field('requestId','member-private-file').field('expectedRevision',String(fv.revision)).attach('file',Buffer.from('%PDF-1.4 financial attachment'),{filename:'finance-only.pdf',contentType:'application/pdf'}).expect(201);
   const financialFileId=uploaded.body.receipt.result.fileId||uploaded.body.receipt.result.id;
   expect(financialFileId).toBeTruthy();
   r=await command(finance,id,uploaded.body.workspace.revision,'payable.bill.register',{supplierId:po.supplierId,invoiceNo:'VAT-MEMBER-1',invoiceDate:yesterday,currency:po.currency,amount:1000,taxAmount:0,taxRate:'13%',lines:[{purchaseId:po.id,amount:1000}],due:later,dueBasis:'合同付款条件',fileIds:[financialFileId]}).expect(200);
