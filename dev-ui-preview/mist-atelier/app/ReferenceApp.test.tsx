@@ -228,7 +228,7 @@ describe('one Mist entry with real authentication and workspace state', () => {
   it('shows department context and opens authorized company settings without workspace switching', async () => {
     await signIn('staff-a',['products:read','settings:system:read']);await mount();await waitFor(() => expect(probes.home).toHaveBeenCalled());
     await waitFor(()=>expect(host!.textContent).toContain('当前部门'));expect(host!.textContent).not.toContain('切换公司');
-    const entry=[...host!.querySelectorAll('button')].find(button=>button.textContent?.includes('当前部门'))!;await click(entry);expect(entry.getAttribute('aria-expanded')).toBe('true');expect(host!.querySelector('#mist-organization')?.getAttribute('hidden')).toBeNull();expect(queryByRole(host!,'dialog')).toBeNull();await click(getByRole(host!.querySelector('#mist-organization')!,'button',{name:'公司资料'}));
+    const entry=[...host!.querySelectorAll('button')].find(button=>button.textContent?.includes('当前部门'))!;await click(entry);expect(entry.getAttribute('aria-expanded')).toBe('true');expect(host!.querySelector('#mist-organization')?.getAttribute('hidden')).toBeNull();expect(queryByRole(host!,'dialog')).toBeNull();await click(getByRole(host!.querySelector('#mist-organization')!,'menuitem',{name:'公司资料'}));
     expect(new URLSearchParams(location.search).get('view')).toBe('company-settings');expect(new URLSearchParams(location.search).get('section')).toBe('profile');expect(probes.settings).toHaveBeenCalled();expect(host!.textContent).not.toContain('没有查看权限');
     expect(host!.textContent).not.toContain('创建空白公司');expect(host!.textContent).not.toContain('创建演示公司');
   });

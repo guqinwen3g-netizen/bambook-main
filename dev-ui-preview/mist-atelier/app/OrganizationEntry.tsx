@@ -45,15 +45,15 @@ export function organizationEntry(input: {
     </button></li>;
   };
   const disclosure = <>
-    {hasTeams && <ul className="mist-team-list" role="menu" aria-label={uiText('切换小组视角')}>
+    {hasTeams && <ul className="mist-team-list" role="group" aria-label={uiText('切换小组视角')}>
       {row(ALL_TEAMS, '全部小组', unionMembers(teams), unionMembers(teams).length)}
       {teams.map(team => row(team.id, team.name, team.members ?? [], team.members?.length ?? 0))}
     </ul>}
     {!hasTeams && !organization.loading && !organization.error && <p className="mist-note">{uiText('未加入小组')}</p>}
-    {organization.error && <button type="button" onClick={organization.retry}>{uiText('重新读取')}</button>}
+    {organization.error && <button type="button" role="menuitem" onClick={organization.retry}>{uiText('重新读取')}</button>}
     <div className="mist-team-sep" role="separator" />
-    {input.onCompanyProfile && <button type="button" onClick={input.onCompanyProfile}>{uiText('公司资料')}</button>}
-    {input.onManageTeams && <button type="button" onClick={input.onManageTeams}>{uiText('管理小组')}</button>}
+    {input.onCompanyProfile && <button type="button" role="menuitem" onClick={input.onCompanyProfile}>{uiText('公司资料')}</button>}
+    {input.onManageTeams && <button type="button" role="menuitem" onClick={input.onManageTeams}>{uiText('管理小组')}</button>}
   </>;
   return { symbol: name.slice(0, 1), lead: <Lead members={hasTeams ? members : undefined} department={!hasTeams} />, name, caption, disclosure };
 }
