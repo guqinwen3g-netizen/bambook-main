@@ -41,7 +41,7 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
   run: (c: MistCommand) => Promise<unknown>; go: (view: string, id?: string, extra?: Record<string, unknown>) => void;
 }) {
   const today = platformBusinessDate(businessNow());
-  const [group, setGroup] = React.useState<Group>('all'), [mode, setMode] = React.useState<'now' | 'week'>(initialMode), [open, setOpen] = React.useState<string | null>(null), [dialog, setDialog] = React.useState<ModuleEditorSpec | null>(null);
+  const group: Group = 'all', [mode, setMode] = React.useState<'now' | 'week'>(initialMode), [open, setOpen] = React.useState<string | null>(null), [dialog, setDialog] = React.useState<ModuleEditorSpec | null>(null);
   const rows = teamOverview(state, members, viewer, today, group);
   const row = rows.find(r => r.id === open);
   const total = (f: (r: TeamRow) => number) => rows.reduce((n, r) => n + f(r), 0);
@@ -52,9 +52,9 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
   const nudgeOpen = (r: TeamRow, target: MistTarget) => r.nudges.some(x => x.target?.view === target.view && x.target?.id === target.id);
   const nudgeButton = (r: TeamRow, n: Nudge) => nudgeable(r) ? (nudgeOpen(r, n.target) ? <span className="mist-muted">{uiText("督办中")}</span> : <Button size="sm" icon={BellRing} disabled={busy} aria-label={ui`督办 ${n.label}`} onClick={() => nudge(r, n)}>{uiText("督办")}</Button>) : null;
   const goTo = (t: MistTarget) => { const { view, id, ...extra } = t; go(view, id, extra); };
-  const scopeNote = viewer.owner || !(members.find(m => m.id === viewer.id)?.groups.length) ? '全部成员' : `与你同业务组（${members.find(m => m.id === viewer.id)!.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join('、')}）的成员`;
+  const lines = members.find(m => m.id === viewer.id)?.groups ?? [], scopeNote = viewer.owner || !lines.length ? '全部成员' : `全部成员（你管理${lines.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join('、')}业务线）`;
   const columns: Column<TeamRow>[] = [
-    { key: 'name', header: '成员', width: 'minmax(140px,1.2fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><b>{r.name}{uiText(r.self ? '（本人）' : '')}</b><small className="mist-muted">{uiText(r.former ? '已不在本公司' : r.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join(' · ') || '未设业务组')}</small></div> },
+    { key: 'name', header: '成员', width: 'minmax(140px,1.2fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><b>{r.name}{uiText(r.self ? '（本人）' : '')}</b><small className="mist-muted">{uiText(r.former ? '已不在本公司' : r.groups.length ? '管理 ' + r.groups.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join(' · ') : '')}</small></div> },
     { key: 'attention', header: '状态', width: 'minmax(160px,1.6fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><Pill tone={ATTENTION[r.attention].tone}>{uiText(ATTENTION[r.attention].label)}</Pill>{r.reasons[0] && <small className="mist-muted">{r.reasons[0]}{uiText(r.reasons.length > 1 ? ` 等 ${r.reasons.length} 项` : '')}</small>}</div> },
     { key: 'customers', header: '客户', width: '64px', align: 'right', render: r => r.customers },
     { key: 'orders', header: '在手订单', width: 'minmax(120px,1fr)', render: r => <div className="mist-col" style={{ gap: 2 }}><span>{r.orders.length}{uiText(" 单")}</span><small className="mist-muted">{[r.orders.filter(o => o.status === 'overdue').length && `逾期 ${r.orders.filter(o => o.status === 'overdue').length}`, r.orders.filter(o => o.status === 'soon').length && `临近 ${r.orders.filter(o => o.status === 'soon').length}`].filter(Boolean).join(' · ') || sums(r.openAmount) || '—'}</small></div> },
@@ -68,7 +68,7 @@ export function TeamBoard({ state, members, viewer, can, busy, run, go, initialM
     <div className="mist-section mist-row" style={{ justifyContent: 'space-between' }}>
       <span className="mist-note">{uiText("范围：")}{scopeNote}{uiText("。统计只含你有权查看的数据；交期 ")}{7}{uiText(" 天内为临近，客户超过 ")}{TEAM_DORMANT_DAYS}{uiText(" 天无跟进且无在手订单为久未跟进。")}</span>
       <span className="mist-row"><Segmented<'now' | 'week'> ariaLabel={uiText("团队视图")} value={mode} onChange={setMode} options={[{ value: 'now', label: '在手' }, { value: 'week', label: '周报' }]} />
-      <Segmented<Group> ariaLabel={uiText("业务组")} value={group} onChange={setGroup} options={[{ value: 'all', label: '全部' }, { value: 'garment', label: '成衣组' }, { value: 'fabric', label: '面料组' }]} /></span>
+</span>
     </div>
     {mode === 'week' ? <TeamWeekly state={state} members={members} viewer={viewer} group={group} today={today} initialWeek={initialWeek} canArchive={can} busy={busy} run={run} /> : <>
     <StatGrid>

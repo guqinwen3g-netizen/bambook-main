@@ -14,7 +14,7 @@ import { buildTeamScopeGraph, resolveTeamScope, type MistTeamScope, type TeamSco
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
 
 /** 受限账号的数据范围：账号集合为本人 + 部门领导所辖成员；teamIds 为本人所在的在用小组。 */
-export type MistDataScope = { userIds: string[]; teamIds: string[] };
+export type MistDataScope = { userIds: string[]; teamIds: string[]; lines?: Array<'fabric' | 'garment'> };
 
 /** 受行级范围裁剪的集合（路径 = 状态内位置）。写入校验也只对这些集合生效。 */
 export const SCOPED_COLLECTIONS = [
@@ -48,6 +48,7 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const o of state.orders ?? []) if (users.has(o.ownerId) || ownedCustomers.has(o.customerId)) picks.push({ kind: 'order', id: o.id });
   const teams = new Set(scope.teamIds), resolutions = [resolveTeamScope(state, { conditions: [], picks, exclusions: [] }, graph)];
   for (const team of (state.teamScopes ?? []) as MistTeamScope[]) if (teams.has(team.teamId)) resolutions.push(resolveTeamScope(state, team, graph));
+  if (scope.lines?.length) resolutions.push(resolveTeamScope(state, { conditions: scope.lines.map(line => ({ id: `line-${line}`, line })), picks: [], exclusions: [] }, graph));
   const collaboratingOrders = new Set(resolutions.flatMap(result => [...result.collaborate].filter(id => id.startsWith('order:')).map(id => id.slice(6))));
   const collaboratingDevs = new Set(resolutions.flatMap(result => [...result.collaborate].filter(id => id.startsWith('development:')).map(id => id.slice(12))));
   const out: ScopedVisibility = new Map(SCOPED_COLLECTIONS.map(path => [path, new Set<string>()]));

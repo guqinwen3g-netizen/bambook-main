@@ -195,6 +195,8 @@ function readPendingCreate(raw: string, actorId: string): MistPendingCreate {
   return value;
 }
 function createNotice(intent: MistPendingCreate) { return `公司“${intent.name}”的创建结果待核对，请用相同名称和初始方式重试原创建请求`; }
+/** 公司库 API 请求（带会话头与统一错误）；小组范围设置等只读或预览接口复用。 */
+export async function mistApiRequest(path: string, init: RequestInit = {}): Promise<any> { return request(path, init); }
 async function request(path: string, init: RequestInit = {}): Promise<any> {
   const headers = { ...apiService.getAuthHeaders(), ...(init.headers as Record<string, string> | undefined) };
   if (init.body instanceof FormData) delete headers['Content-Type'];

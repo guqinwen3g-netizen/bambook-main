@@ -4,6 +4,7 @@ import { hasScope } from '../auth/permissionService';
 import { fail } from './errors';
 import { getDataScopeRule, SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import type { MistDataScope } from '../shared/mistDataScope';
+import { memberGroups } from '../shared/mistAccounts';
 
 /**
  * 一家公司 = 一个业务库（公司-部门-小组与数据范围 R1/R2）。
@@ -16,6 +17,8 @@ export const companyRow = (row: { companyId?: string | null }) => !!row.companyI
 export const companySlug = (companyId: string) => `company@${companyId}`;
 /** 公司库的公司设置、业务组划分等无业务权限点的维护动作：须有公司用户管理权限（管理员 / 老板），不看是否为库创建人。 */
 export const COMPANY_MAINTAIN_SCOPE = 'users:write';
+/** 业务线主管：现有主管权限（团队视角、督办、客户交接）。 */
+export const LINE_SUPERVISOR_SCOPE = 'relations:admin';
 export const canMaintainCompany = (actor: TokenPayload) => hasScope(actor, COMPANY_MAINTAIN_SCOPE as any);
 export function singleLibrary(): never { fail('COMPANY_SINGLE_LIBRARY', '一家公司只有一个业务库：不能另建、移入回收站或单独授权成员；成员随公司在职身份自动进入', 409); }
 
@@ -46,6 +49,13 @@ export async function companyTeams(db: any, companyId: string | null | undefined
   return rows.map(row => ({ id: row.id, name: row.name }));
 }
 
+/** Own active groups only; used for view metadata even by company-wide roles. */
+export async function companyTeamIds(db: any, companyId: string, userId: string): Promise<string[]> {
+  if (typeof db.teamMember?.findMany !== 'function') return [];
+  const rows = await db.teamMember.findMany({ where: { userId, leftAt: null, team: { deletedAt: null, status: 'active', department: { companyId } } }, select: { teamId: true } });
+  return rows.map((row: {teamId: string}) => row.teamId);
+}
+
 /**
  * 岗位为全公司范围：超级管理员 / 老板，或任一岗位在业务数据上为全公司（管理员、财务、QC、后勤，见 DEFAULT_DATA_SCOPE_BY_ROLE）。
  * 业务员、业务主管与自定义岗位按行级范围（本人 ∪ 部门领导所辖 ∪ 小组）裁剪。
@@ -61,7 +71,7 @@ export function companyWideActor(actor: TokenPayload) {
 export async function companyDataScope(db: any, row: { companyId?: string | null; state: MistState }, actor: TokenPayload): Promise<MistDataScope | undefined> {
   if (!row.companyId || localMode(actor) || companyWideActor(actor)) return undefined;
   const companyId = row.companyId, userIds = new Set([actor.userId]), teamIds: string[] = [];
-  if (typeof db.teamMember?.findMany === 'function') for (const m of await db.teamMember.findMany({ where: { userId: actor.userId, leftAt: null, team: { deletedAt: null, status: 'active', department: { companyId } } }, select: { teamId: true } })) teamIds.push(m.teamId);
+  teamIds.push(...await companyTeamIds(db, companyId, actor.userId));
   if (typeof db.department?.findMany === 'function') {
     const departments: Array<{ id: string; parentId: string | null; headId: string | null }> = await db.department.findMany({ where: { companyId, status: 'active' }, select: { id: true, parentId: true, headId: true } });
     const led = new Set(departments.filter(d => d.headId === actor.userId).map(d => d.id));
@@ -71,5 +81,7 @@ export async function companyDataScope(db: any, row: { companyId?: string | null
       for (const user of await db.userAccount.findMany({ where: { OR: [{ primaryDeptId: { in: [...led] } }, { roles: { some: { departmentId: { in: [...led] } } } }] }, select: { id: true } })) if (roster.has(user.id)) userIds.add(user.id);
     }
   }
-  return { userIds: [...userIds], teamIds };
+  // 业务线主管（R7，P4）：持主管权限且设置了管理业务线者，本线全部业务可见。
+  const lines = hasScope(actor, LINE_SUPERVISOR_SCOPE as any) ? memberGroups(row.state, actor.userId) : [];
+  return { userIds: [...userIds], teamIds, ...(lines.length ? { lines } : {}) };
 }

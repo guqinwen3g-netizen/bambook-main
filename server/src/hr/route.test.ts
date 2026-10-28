@@ -476,3 +476,14 @@ describe('HR 考勤写入外键校验（POST /hr/attendance）', () => {
     expect(prisma.attendanceRecord.upsert).toHaveBeenCalled();
   });
 });
+
+it('returns own active teams with active roster names and avatars', async () => {
+  const teams = vi.fn().mockResolvedValueOnce([{team:{id:'team-1',name:'Team One',status:'active'}}]).mockResolvedValueOnce([{teamId:'team-1',userId:'active-user'},{teamId:'team-1',userId:'disabled-user'}]);
+  const people = vi.fn().mockResolvedValue([{id:'active-user',displayName:'Active',avatarUrl:'/api/avatar/active'}]);
+  const app = makeApp({teamMember:{findMany:teams},userAccount:{findMany:people}});
+  const response = await request(app).get('/hr/teams/mine').set('Authorization',`Bearer ${ownerToken()}`);
+  expect(response.status).toBe(200);
+  expect(teams.mock.calls[0][0].where).toMatchObject({userId:'owner-1',leftAt:null,team:{status:'active',deletedAt:null}});
+  expect(people.mock.calls[0][0].where).toMatchObject({status:'active',deletedAt:null});
+  expect(response.body.teams[0].members).toEqual([{id:'active-user',name:'Active',avatarUrl:'/api/avatar/active'}]);
+});

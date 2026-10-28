@@ -141,6 +141,26 @@ describe('row-level data scope by role', () => {
     const saved=await repo.execute(actor('demo-sales'),workspaceId,{requestId:'edit-own-customer',expectedRevision:0,command:{type:'market.customer.update',payload:{id:mine.id,patch:{city:'Updated city'}}}} as any);
     expect(saved.workspace.state.customers.find(row=>row.id===mine.id)?.city).toBe('Updated city');
   });
+  it('a line supervisor adds its managed line to existing department access', async () => {
+    const row: any = db.workspaces.get(workspaceId);
+    row.state.memberGroups = [{ userId: 'head', name: 'head', groups: ['fabric'], updatedAt: '', updatedBy: 'boss' }, { userId: 'demo-sales', name: 'demo-sales', groups: ['garment'], updatedAt: '', updatedBy: 'boss' }];
+    expect(await orders('head')).toContain('id-165');
+    expect(await orders('head')).not.toContain('SO-G-2026-018');
+    (db.workspaces.get(workspaceId) as any).state.memberGroups[0].groups = ['garment'];
+    expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-018', 'SO-G-2026-015', 'SO-G-2026-009']));
+    expect(await orders('head')).not.toContain('id-165');
+    // 管理业务线只对主管权限生效；业务员设置了也不扩大范围。
+    expect(await orders('demo-sales')).not.toContain('SO-G-2026-017');
+  });
+  it('provides only resolved own-group references without exposing scope configuration', async () => {
+    const view = await repo.get(actor('teammate'), workspaceId);
+    expect(view.state.teamScopes).toBeUndefined();
+    expect(view.access?.teamViews).toEqual({'team-lune': expect.arrayContaining([{kind:'order',id:'SO-G-2026-012'}])});
+    expect(JSON.stringify(view.access?.teamViews)).not.toContain('customer-2');
+    expect((await repo.get(actor('loner'), workspaceId)).access?.teamViews).toEqual({});
+    db.teamMembers[0].leftAt = new Date();
+    expect((await repo.get(actor('teammate'), workspaceId)).access?.teamViews).toEqual({});
+  });
   it('hides files referenced only by records outside the scope', async () => {
     const full = (await repo.get(actor('boss'), workspaceId)).state.files.length, scoped = (await repo.get(actor('loner'), workspaceId)).state.files.length;
     expect(scoped).toBeLessThan(full);

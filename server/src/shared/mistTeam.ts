@@ -1,6 +1,6 @@
 /**
  * 主管团队视角（2026-10-18）。业务主管（relations:admin）一屏看到下属名下在手的事，卡在哪里一眼就清楚：
- * - 团队范围：所有者或未设业务组的主管看全部成员；否则看与自己同业务组（成衣 / 面料）的成员，含本人；
+ * - 团队范围：全部成员（P4 起业务员不分面料/成衣）；统计只含当前账号数据范围内可读的记录，主管按管理业务线看到本线全部业务；
  *   已不在本公司、名下仍有业务的前成员单独列出，提示办理交接。
  * - 每人一行：客户、在手订单（逾期 / 7 天内到期）、在途开发与寻样、进行中商机、未完成与逾期待办、逾期应收（按币种）、
  *   审批中订单、久未跟进客户、未完成督办；按需要关注程度排序。统计只基于当前账号可读的数据。
@@ -41,11 +41,9 @@ const daysBetween = (from: string, to: string) => dayNo(to) - dayNo(from);
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const sumBy = (rows: Array<{ currency: string; amount: number }>) => { const m = new Map<string, number>(); for (const r of rows) m.set(r.currency, round2((m.get(r.currency) || 0) + r.amount)); return [...m].sort(([a], [b]) => a.localeCompare(b)).map(([currency, amount]) => ({ currency, amount })); };
 
-/** 主管能看到的成员：所有者或未设业务组的看全部；否则看同业务组成员（含本人）。 */
-export function teamMembers(directory: TeamMember[], viewer: { id: string; owner: boolean }, group: MistBusinessGroup | 'all' = 'all'): TeamMember[] {
-  const me = directory.find(m => m.id === viewer.id), mine = me?.groups || [];
-  const scoped = viewer.owner || !mine.length ? directory : directory.filter(m => m.id === viewer.id || m.groups.some(g => mine.includes(g)));
-  return group === 'all' ? scoped : scoped.filter(m => m.groups.includes(group));
+/** 主管看全部成员（P4：业务员不再分面料/成衣）；各行统计只基于当前账号按数据范围可读的记录，主管按管理业务线看到本线全部业务。 */
+export function teamMembers(directory: TeamMember[], _viewer: { id: string; owner: boolean }, _group: MistBusinessGroup | 'all' = 'all'): TeamMember[] {
+  return directory;
 }
 
 const openTask = (t: MistTask, id: string) => !t.done && (t.assigneeIds || []).includes(id);
@@ -242,7 +240,7 @@ function archiveWeekly(root: MistState, p: { weekStart?: unknown }, c: MistConte
   const me = c.members!.find(m => m.id === c.actorId);
   const viewer = { id: c.actorId!, owner: !!me?.owner };
   const report = teamWeeklyReport(root, directory, viewer, weekStart, today);
-  const scope = viewer.owner || !me?.groups.length ? '全部成员' : `${me.groups.map(g => g === 'garment' ? '成衣' : '面料').join('、')}业务组`;
+  const scope = viewer.owner || !me?.groups.length ? '全部成员' : `全部成员（管理业务线：${me.groups.map(g => g === 'garment' ? '成衣' : '面料').join('、')}）`;
   const id = c.id();
   const row: TeamWeeklyArchive = { id, weekStart, weekEnd, generatedAt: c.now, generatedById: c.actorId!, generatedBy: c.actorName, scope, report, text: teamWeeklyText(report, `团队周报 · ${scope}`) };
   const all = root as MistState & { teamReports?: TeamWeeklyArchive[] };

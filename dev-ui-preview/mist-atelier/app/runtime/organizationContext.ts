@@ -2,7 +2,9 @@ import React from 'react';
 import { apiService } from '../../../../services/apiService';
 import { useMistSession } from './auth';
 
-export type OwnTeam = { id: string; name: string; status?: string };
+export type TeamPerson = { id: string; name: string; avatarUrl?: string };
+/** 本人所在小组；members 为在职成员（账号、姓名、头像），用于左上角头像串。 */
+export type OwnTeam = { id: string; name: string; status?: string; members?: TeamPerson[] };
 export function organizationLabel(department: string | null | undefined, teams: OwnTeam[]) {
   const active = teams.filter(team => team.status === undefined || team.status === 'active');
   return active.length
@@ -24,7 +26,7 @@ export function useOrganizationContext() {
       .then(async response => {
         if (!response.ok) throw Error('小组归属读取失败');
         const data = await response.json();
-        if (data.ok !== true || !Array.isArray(data.teams) || data.teams.some((team: OwnTeam) => !team || typeof team.id !== 'string' || typeof team.name !== 'string')) throw Error('小组归属格式无效');
+        if (data.ok !== true || !Array.isArray(data.teams) || data.teams.some((team: OwnTeam) => !team || typeof team.id !== 'string' || typeof team.name !== 'string' || team.members !== undefined && (!Array.isArray(team.members) || team.members.some(person => !person || typeof person.id !== 'string' || typeof person.name !== 'string')))) throw Error('小组归属格式无效');
         if (active) setResult({ scope, teams: data.teams.filter((team: OwnTeam) => team.status === undefined || team.status === 'active'), error: false });
       }).catch(() => { if (active) setResult({ scope, teams: [], error: true }); });
     return () => { active = false; controller.abort(); };

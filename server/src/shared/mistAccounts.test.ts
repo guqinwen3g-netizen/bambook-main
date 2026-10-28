@@ -23,13 +23,13 @@ describe('成员目录与账号解析',()=>{
   expect(resolveMember(c,'u-shen','经手人','fabric')).toEqual({id:'u-shen',name:'沈禾'});
   expect(()=>resolveMember(c,'u-outsider','负责人')).toThrow(/本公司的成员/);
   expect(()=>resolveMember(c,'u-left','负责人')).toThrow(/已停用/);
-  expect(()=>resolveMember(c,'u-gu','面料经手人','fabric')).toThrow(/不属于面料业务组/);
+  expect(resolveMember(c,'u-gu','面料经手人','fabric').id).toBe('u-gu'); // P4：业务员通用，不按业务线校验
   expect(()=>resolveMember(c,'顾言','负责人')).toThrow(/本公司的成员/);
   expect(()=>resolveMember({},'u-gu','负责人')).toThrow(/无法核对/);
   // 未带目录时只接受执行人本人（不限业务组以外的场景）；指定他人或按业务组指定仍拒绝
   expect(resolveMember({actorId:'u-gu',actorName:'顾言'},'u-gu','负责人')).toEqual({id:'u-gu',name:'顾言'});
   expect(()=>resolveMember({actorId:'u-gu',actorName:'顾言'},'u-shen','负责人')).toThrow(/无法核对/);
-  expect(()=>resolveMember({actorId:'u-gu',actorName:'顾言'},'u-gu','经手人','garment')).toThrow(/无法核对/);
+  expect(resolveMember({actorId:'u-gu',actorName:'顾言'},'u-gu','经手人','garment')).toEqual({id:'u-gu',name:'顾言'});
   expect(ownerChangeText('负责人','顾言','沈禾')).toBe('负责人：顾言→沈禾');
  });
  it('目录只含所有者与被授权成员；缺失或停用的账号标为不可用',()=>{
@@ -63,9 +63,8 @@ describe('负责人按账号写入',()=>{
   const id=s.market.suppliers.find(x=>x.code==='SUP-T1')!.id;
   expect(s.market.suppliers.find(x=>x.id===id)!.handlers).toEqual({garment:{id:'u-gu',name:'顾言'},fabric:{id:'u-shen',name:'沈禾'}});
   const sup=s.market.suppliers.find(x=>x.id===id)!;
-  const before=JSON.stringify(s);
-  expect(()=>applyMistCommand(s,{type:'market.supplier.save',payload:{id,input:{...sup,handlerIds:{fabric:'u-gu'}} as any}},f.ctx)).toThrow(/不属于面料业务组/);
-  expect(JSON.stringify(s)).toBe(before);
+  s=applyMistCommand(s,{type:'market.supplier.save',payload:{id,input:{...sup,handlerIds:{fabric:'u-gu'}} as any}},f.ctx).state;
+  expect(s.market.suppliers.find(x=>x.id===id)!.handlers?.fabric?.id).toBe('u-gu');
   s=applyMistCommand(s,{type:'market.supplier.save',payload:{id,input:{...sup,handlerIds:{fabric:'u-gu-2'}} as any}},f.ctx).state;
   expect(s.market.suppliers.find(x=>x.id===id)!.handlers).toEqual({garment:{id:'u-gu',name:'顾言'},fabric:{id:'u-gu-2',name:'顾言'}});
   expect(accountOwnedObjects(s,'u-gu-2').map(o=>o.role)).toContain('面料经手人');

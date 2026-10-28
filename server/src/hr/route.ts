@@ -410,14 +410,20 @@ export function createHRRouter(options: HRRouterOptions) {
     try {
       const actor = extractActorFromRequest(req);
       if (!actor?.userId) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '需登录' });
+      // 公司会话只返回本公司部门下的小组；成员只列在职（公司成员在职且账号启用）者，供左上角头像串使用（规格 §5）。
+      const companyId = actor.companyId || null;
       const memberships = await prisma.teamMember.findMany({
-        where: { userId: actor.userId, leftAt: null, team: { deletedAt: null } },
+        where: { userId: actor.userId, leftAt: null, team: { deletedAt: null, status: 'active', ...(companyId ? { department: { companyId } } : {}) } },
         include: { team: true },
       });
-      const teams = memberships
-        .map((m: any) => m.team)
-        .filter(Boolean)
-        .map((t: any) => ({ id: t.id, name: t.name, description: t.description, leaderId: t.leaderId, status: t.status }));
+      const rows = memberships.map((m: any) => m.team).filter(Boolean);
+      const roster = rows.length ? await prisma.teamMember.findMany({ where: { teamId: { in: rows.map((t: any) => t.id) }, leftAt: null }, select: { teamId: true, userId: true, joinedAt: true }, orderBy: { joinedAt: 'asc' } }) : [];
+      // companyHrClient filters userAccount to active memberships in the current company.
+      const userIds = [...new Set(roster.map((m: any) => m.userId as string))];
+      const people = new Map<string, { id: string; name: string; avatarUrl?: string }>();
+      if (userIds.length) for (const u of await prisma.userAccount.findMany({ where: { id: { in: userIds }, status: 'active', deletedAt: null }, select: { id: true, displayName: true, avatarUrl: true } })) people.set(u.id, { id: u.id, name: u.displayName || u.id, ...(u.avatarUrl ? { avatarUrl: u.avatarUrl } : {}) });
+      const teams = rows.map((t: any) => ({ id: t.id, name: t.name, description: t.description, leaderId: t.leaderId, status: t.status,
+        members: roster.filter((m: any) => m.teamId === t.id && people.has(m.userId)).map((m: any) => people.get(m.userId)!) }));
       res.json({ ok: true, teams });
     } catch (err: any) {
       const r = safeRouteError(err, { fallbackCode: 'HR_MY_TEAMS_FETCH_FAILED' });

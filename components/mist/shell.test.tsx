@@ -55,3 +55,26 @@ it('uses the brand mark as the mobile menu trigger and opens the menu with a lef
     expect(side.dataset.menuOpen).toBeUndefined();
   } finally { act(() => root.unmount()); host.remove(); window.matchMedia = mm; }
 });
+
+it('opens the organization menu in collapsed navigation and handles keyboard focus', () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div'); document.body.append(host);
+  const root = createRoot(host);
+  function Example() {
+    const [open, setOpen] = React.useState(false);
+    return <MistSidebarPresentation sections={[]} activeId="account" onNavigate={() => {}} collapsed onToggleCollapsed={() => {}} account={{name:'Test'}} workspace={{symbol:'T',name:'Team',caption:'当前小组',expanded:open,onClick:()=>setOpen(value=>!value),disclosure:<><button role="menuitemradio" aria-checked="true">All</button><button role="menuitemradio">One</button></>}} />;
+  }
+  try {
+    act(() => root.render(<Example/>));
+    const trigger = host.querySelector<HTMLButtonElement>('.mist-ws')!;
+    act(() => trigger.click());
+    const panel = host.querySelector<HTMLElement>('#mist-organization')!;
+    expect(panel.getAttribute('role')).toBe('menu');
+    expect(document.activeElement?.textContent).toBe('All');
+    act(() => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})));
+    expect(document.activeElement?.textContent).toBe('One');
+    act(() => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+    expect(host.querySelector('#mist-organization')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  } finally { act(() => root.unmount()); host.remove(); }
+});

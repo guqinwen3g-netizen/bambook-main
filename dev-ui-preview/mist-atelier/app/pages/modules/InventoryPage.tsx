@@ -101,9 +101,8 @@ export function InventoryPage() {
     if(!state||!record||!goods)return null;const trip=pendingRepairDispatch(goods,record.id);
     return returning?(trip?repairReturnSpec(state,goods,record,trip,run):null):repairDispatchSpec(state,goods,record,run);
   };
-  const canStockWrite = (stock: FulfillmentStock) => {
-    const groups = state?.memberGroups?.find(row => row.userId === session.user?.id)?.groups || [];
-    return can && (!state || !materialDeliveryRequired(state, stock.purchaseId || '') || !groups.length || groups.includes(domainOf(state, stock)!));
+  const canStockWrite = (_stock: FulfillmentStock) => {
+    return can;
   };
   const moveSpec = (stock: FulfillmentStock, kind: 'issue' | 'return' | 'move'): ModuleEditorSpec => {
     const linked = kind === 'issue' && !!state && materialDeliveryRequired(state, stock.purchaseId || '');

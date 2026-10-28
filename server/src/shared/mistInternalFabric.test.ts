@@ -79,10 +79,8 @@ describe('current Mist internal fabric contract', () => {
     expect(target.details.find(row=>row.label==='G1 · 衬衫')?.value).toContain('CMT 包含：无');
     expect(source.details.some(row=>row.label==='付款'||row.label==='出运前累计收款')).toBe(false);
   });
-  it('requires fresh fabric creator and owner, and a fresh garment receiver', () => {
+  it('requires an active garment receiver; business lines no longer restrict who handles (P4)', () => {
     const f = fixture(), before = JSON.stringify(f.state);
-    expect(() => f.create('fabric', undefined, 100, f.context)).toThrow('面料业务组');
-    expect(() => f.create('fabric', undefined, 100, f.fabric, { ...f.contract(true), internalSupply: { group: 'garment', receiverId: 'fabric' } })).toThrow('成衣业务组');
     const inactive = { ...f.fabric, members: f.context.members!.map(member => member.id === 'garment' ? { ...member, active: false } : member) };
     expect(() => f.create('fabric', undefined, 100, inactive)).toThrow('停用'); expect(JSON.stringify(f.state)).toBe(before);
   });
@@ -93,11 +91,10 @@ describe('current Mist internal fabric contract', () => {
     const before = JSON.stringify(f.state); expect(() => f.allocate('0.2001', second, 1)).toThrow('余量'); expect(JSON.stringify(f.state)).toBe(before);
     expect(normalizeInternalMetres('12.3400')).toBe('12.34'); expect(() => normalizeInternalMetres('0.00001')).toThrow('四位小数');
   });
-  it('requires exact source identity, approved supply, metre units and garment actors', () => {
+  it('requires exact source identity, approved supply and metre units', () => {
     const f = fixture(), pending = f.create('fabric');
     expect(() => f.allocate('1', f.target, 0, pending)).toThrow('尚未批准');
     expect(() => f.allocate('1', f.target, 0, { ...f.source, orderId: pending.orderId })).toThrow('条目不存在');
-    expect(() => f.allocate('1', f.target, 0, f.source, f.fabric)).toThrow('成衣业务组');
     f.revise(f.source, { unit: '码' }); f.approve(f.source.orderId, f.fabric);
     expect(() => f.allocate()).toThrow('米数单位');
   });

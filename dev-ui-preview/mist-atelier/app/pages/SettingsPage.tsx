@@ -5,7 +5,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
  * 旧地址（system-settings / admin-panel 及其分区）仍打开本页对应分区；各分区按本人权限出现，服务端照常复核。
  */
 import React from 'react';
-import { Bell, Briefcase, History, Landmark, Laptop, RefreshCw, ScrollText, ShieldCheck, Stamp, Users } from 'lucide-react';
+import { Bell, Briefcase, History, Landmark, Laptop, RefreshCw, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
 import { Banner, Button, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { View } from '../../../../types';
@@ -13,6 +13,7 @@ import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
 import { WorkspaceMembers } from './WorkspaceMembers';
+import { TeamScopesSection } from './TeamScopesSection';
 import { CompanyProfileSection } from './CompanyProfileSection';
 import { AdminAccounts, AdminAuditLog, AdminRoles } from './modules/AdminAccounts';
 import { AdminApprovalAuthorities } from './modules/AdminApprovalAuthorities';
@@ -22,8 +23,8 @@ import { ExporterProfilePanel } from './modules/ExporterProfilePanel';
 type TextKey = 'workspaceName';
 type TextValues = Pick<MistSettings, TextKey>;
 type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyProfile?: Partial<MistCompanyProfile> };
-export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'access' | 'notify' | 'activity' | 'audit' | 'local';
-const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'access', 'notify', 'activity', 'audit', 'local'];
+export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local';
+const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'access', 'teams', 'notify', 'activity', 'audit', 'local'];
 /** 旧页面与分区地址 → 公司管理分区。 */
 export function companySection(view: string, section?: string, id?: string): CompanySection | undefined {
   if (section && (SECTIONS as string[]).includes(section)) return section as CompanySection;
@@ -100,6 +101,7 @@ export function SettingsPage() {
     manager && !scoped && { id: 'approvals', label: '审批资格', icon: Stamp },
     settingsAccess && { id: 'profile', label: '公司资料', icon: Landmark },
     settingsAccess && !platformCompany && { id: 'access', label: '数据访问', icon: ShieldCheck },
+    settingsAccess && !platformCompany && !local && session.hasPermission('hr:write') && { id: 'teams', label: '小组范围', icon: UsersRound },
     settingsAccess && { id: 'notify', label: '通知', icon: Bell },
     settingsAccess && !member && { id: 'activity', label: '设置记录', icon: History },
     manager && !scoped && { id: 'audit', label: '审计日志', icon: ScrollText },
@@ -108,7 +110,7 @@ export function SettingsPage() {
   const requested = companySection(nav?.route?.view ?? '', nav?.route?.section, nav?.route?.id);
   const [chosen, setChosen] = React.useState<CompanySection | undefined>(requested);
   const sec: CompanySection | undefined = steps.find(step => step.id === chosen)?.id ?? steps[0]?.id;
-  const workspaceSection = sec === 'profile' || sec === 'access' || sec === 'notify' || sec === 'activity';
+  const workspaceSection = sec === 'profile' || sec === 'access' || sec === 'teams' || sec === 'notify' || sec === 'activity';
 
   return (
     <MistPage>
@@ -140,6 +142,7 @@ export function SettingsPage() {
             <SettingRow title={uiText("站内每日摘要")} control={<Switch ariaLabel={uiText("站内每日摘要")} checked={settings.notifications.digest} disabled={settingsLocked} onChange={value => notify('digest', value)} />} />
           </FormSection>}
             {sec === 'access' && <WorkspaceMembers busy={busy} />}
+            {sec === 'teams' && <TeamScopesSection canEdit={session.hasPermission('hr:write')} />}
             {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
             <div hidden={sec !== 'profile'}><CompanyProfileSection member={member} active={sec === 'profile'} /></div>
             </>}

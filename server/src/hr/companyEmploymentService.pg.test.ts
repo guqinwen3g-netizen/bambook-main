@@ -72,6 +72,26 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
     request(app)[method]('/api/hr' + path).set('Authorization', 'Bearer ' + tokens[company]);
   const change = (type: string, extra = {}) => call('post', '/employment-events').send({ userId: shared, type, effectiveDate: '2026-10-26', ...extra });
 
+  it('returns only the current company team and active company roster for its own member', async () => {
+    for (const userId of [owner, reader, newHire]) await db.teamMember.create({data:{id:randomUUID(),teamId:ta,userId}});
+    await db.userAccount.update({where:{id:reader},data:{status:'disabled'}});
+    await db.companyMember.updateMany({where:{companyId:a,userId:newHire},data:{status:'left'}});
+    try {
+      const token = (companyId: string) => createAuthService().signToken({userId:shared,companyId,roles:[],permissions:[],departmentIds:[]});
+      const result = await request(app).get('/api/hr/teams/mine').set('Authorization', 'Bearer ' + token(a));
+      expect(result.status).toBe(200);
+      expect(result.body.teams.map((team: any) => team.id)).toEqual([ta]);
+      expect(result.body.teams[0].members.map((member: any) => member.id).sort()).toEqual([owner,shared].sort());
+      const other = await request(app).get('/api/hr/teams/mine').set('Authorization', 'Bearer ' + token(b));
+      expect(other.body.teams.map((team: any) => team.id)).toEqual([tb]);
+      expect(other.body.teams[0].members.map((member: any) => member.id)).toEqual([shared]);
+    } finally {
+      await db.userAccount.update({where:{id:reader},data:{status:'active'}});
+      await db.companyMember.updateMany({where:{companyId:a,userId:newHire},data:{status:'active'}});
+      await db.teamMember.deleteMany({where:{teamId:ta,userId:{in:[owner,reader,newHire]}}});
+    }
+  });
+
   it('creates the profile and onboarding record atomically, and retrying does not duplicate onboarding', async () => {
     const body = { hireDate: '2026-10-26' };
     expect((await call('put', '/employees/' + shared).send(body)).status).toBe(200);

@@ -123,6 +123,7 @@
 | `--mist-side-hover` | `rgba(255,255,255,.14)` | `rgba(141,213,222,.07)` |
 | `--mist-side-badge` | `rgba(255,255,255,.92)` | `#8DD5DE` |
 | `--mist-side-badge-ink` | `#275768` | `#101C35` |
+| `--mist-side-halo` | `var(--mist-brand-mist-1)` | `var(--mist-brand-deep-1)` |
 
 ## topbar
 

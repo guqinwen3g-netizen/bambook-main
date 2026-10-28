@@ -29,6 +29,8 @@ import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
 import {MistPresentedErrorContext,useClaimedUploadRecovery} from './runtime/errorPresentation';
 import { clearPrivateImages, schedulePrivateImagePrefetch } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
+import { TeamViewScope, useTeamView } from './runtime/teamView';
+import { organizationEntry } from './OrganizationEntry';
 import { canOpenCompanyAdmin, canOpenMistView, COMPANY_ADMIN_VIEWS, personalSettingsSection } from './routeAccess';
 import { LoginPage } from './pages/LoginPage';
 import { ForcedPasswordChangePage } from './pages/ChangePassword';
@@ -148,7 +150,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const canAI = session.hasPermission('ai:chat') && !platformOnly && !platformCompany;
   const canCreateDevelopment = session.hasPermission('products:write');
   const [exitingSupport, setExitingSupport] = React.useState(false);
-  const organization = useOrganizationContext();
+  const organization = useOrganizationContext(), teamView = useTeamView(session.user?.id ? `${session.user.companyId ?? 'local'}:${session.user.id}` : undefined, organization.teams);
   const [organizationOpen, setOrganizationOpen] = React.useState(false);
   const visibleNotifications=visibleMistNotifications(state,view=>session.canAccessView(view as View));
   const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
@@ -362,7 +364,10 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
-          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { symbol: organization.name.slice(0,1), name: organization.name, caption: organization.caption, expanded: organizationOpen, onClick:()=>{if(collapsed || matchMedia('(min-width: 761px) and (max-width: 1180px)').matches){go('account');return;}setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();}, disclosure: <><dl><div><dt>{uiText('公司')}</dt><dd>{state?.settings.companyProfile?.legalName||'—'}</dd></div><div><dt>{uiText('部门')}</dt><dd>{user.department||'—'}</dd></div><div><dt>{uiText('小组')}</dt><dd>{uiText(organization.loading?'正在读取':organization.error?'读取失败':organization.teams.map(team=>team.name).join('、')||'未加入小组')}</dd></div></dl>{organization.error&&<button type="button" onClick={organization.retry}>{uiText('重新读取')}</button>}{session.canAccessView(View.SystemSettings)&&<button type="button" onClick={()=>{setOrganizationOpen(false);go('company-settings',undefined,{section:'profile'});}}>{uiText('公司资料')}</button>}</> }}
+          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
+              onCompanyProfile: session.canAccessView(View.SystemSettings) ? () => { setOrganizationOpen(false); go('company-settings', undefined, { section: 'profile' }); } : undefined,
+              onManageTeams: session.hasPermission('hr:write') && session.canAccessView(View.SystemSettings) ? () => { setOrganizationOpen(false); go('company-settings', undefined, { section: 'teams' }); } : undefined }),
+            expanded: organizationOpen, onClick:()=>{setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();} }}
           account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
           onSearch={() => setPalette(true)}
           assistant={!canAI ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
@@ -376,7 +381,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
         {workspace.pending && !workspace.saving && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>}
         {workspace.error && !workspace.pending && <Banner tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />}
         {!permitted ? <EmptyState icon={ShieldCheck} title={uiText("没有查看权限")} description={uiText("当前账号无法访问此业务。")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />
-          : Page ? <MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider>
+          : Page ? <TeamViewScope teamId={COMPANY_ADMIN_VIEWS.has(base) || base === 'account' ? 'all' : teamView.teamId} actorId={user.id} teams={organization.teams}><MistPresentedErrorContext.Provider value={workspace.error||undefined}>{!route.id && !route.view.includes('/') && <ModuleWorkBar view={route.view} />}<PageLoadBoundary resetKey={route.view} fallback={retry=><MistPage><Banner tone="bad" title={uiText('页面未能加载')} actions={<Button onClick={retry}>{uiText('重新加载')}</Button>}/></MistPage>}><React.Suspense fallback={<PageLoading />}><Page key={session.sessionKey + ':' + workspace.workspace?.id + ':' + (MODULE_VIEW_SET.has(route.view)?route.view:JSON.stringify(route))} /></React.Suspense></PageLoadBoundary></MistPresentedErrorContext.Provider></TeamViewScope>
           : <EmptyState title={uiText("没有找到此页面")} action={<Button onClick={() => go('cockpit')}>{uiText("返回我的工作")}</Button>} />}
       </MistAppShell>
       <ExportConfirmHost scope={JSON.stringify([session.sessionKey, user.id, user.companyId, user.roles, user.roleIds, user.permissions, user.permissionCeiling, user.businessAttributes, user.globalBusinessScope, workspace.workspace?.id, workspace.workspace?.access, route])} />
