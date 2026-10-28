@@ -49,6 +49,17 @@ describe('row-level data scope by role', () => {
     expect(state.tasks.some(task => task.target?.view === 'orders/detail' && task.target.id === 'SO-G-2026-017' && !task.assigneeIds?.includes('demo-sales'))).toBe(false); // 指派给本人的待办保留
     expect(state.customers).toHaveLength(6); // 档案全公司共享
   });
+  it.each(['demo-sales', 'demo-buyer', 'loner'])('%s can read company marketing and seasonal materials while orders stay scoped', async userId => {
+    const raw = db.workspaces.get(workspaceId)!.state;
+    const view = (await repo.get(actor(userId), workspaceId)).state;
+    expect(view.market.leads).toEqual(raw.market.leads);
+    expect(view.market.campaigns).toEqual(raw.market.campaigns);
+    expect(view.market.lookbooks).toEqual(raw.market.lookbooks);
+    expect(view.market.seasons).toEqual(raw.market.seasons);
+    expect(view.market.trends).toEqual(raw.market.trends);
+    expect(view.market.shows).toEqual(raw.market.shows);
+    expect(view.orders.length).toBeLessThan(raw.orders.length);
+  });
   it('a salesperson without customers, orders or groups sees no business records', async () => {
     const state = (await repo.get(actor('loner'), workspaceId)).state;
     expect(state.orders).toEqual([]); expect(state.devs).toEqual([]); expect(state.market.quotations).toEqual([]); expect(state.crm.opportunities).toEqual([]);

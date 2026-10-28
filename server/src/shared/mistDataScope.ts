@@ -275,6 +275,23 @@ function verifiedReplacementSync(before: any, after: any, state: MistState): boo
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+/** Reject common direct-target writes before domain validation or document generation. Approval decisions retain their own assignment rules. */
+export function scopedTargetViolation(state: MistState, scope: MistDataScope, command?: {type?: string;payload?: any}, claimId?: string): {path: string; id: string} | null {
+  const type = command?.type ?? '', payload = command?.payload ?? {};
+  let path: ScopedCollection | undefined, id: unknown;
+  if (claimId) { path='platform.claims'; id=claimId; }
+  else if (['order.update','order.checklist','order.handoff'].includes(type) || type.startsWith('order.governance.') && type !== 'order.governance.decide') { path='orders'; id=payload.orderId; }
+  else if (type === 'development.saveDraft' || type === 'development.submit') { path='drafts'; id=payload.draftId; }
+  else if (type.startsWith('development.') || type === 'finance.developmentInvoice.issue') { path='devs'; id=payload.devId; }
+  else if (['production.move','production.update'].includes(type)) { path='productions'; id=payload.id; }
+  else if (type.startsWith('market.quotation.') && type !== 'market.quotation.decide') { path='market.quotations'; id=payload.quotationId ?? payload.id; }
+  else if (['finance.receivable.confirm','finance.receivable.reject'].includes(type)) { path='invoices'; id=payload.invoiceId; }
+  else if (type === 'platform.credit.issue') { path='platform.credits'; id=payload.creditId; }
+  else if (type === 'fulfillment.procurement.document') { path='fulfillment.purchases'; id=payload.id; }
+  if (!path || typeof id !== 'string' || !id) return null;
+  return scopedVisibility(state, scope, false).get(path)?.has(id) ? null : {path,id};
+}
+
 /** 写入校验：每条改动的受限记录，原有的须本来可见，新建的须建成后可见（不能改看不到的业务，也不能在看不到的业务下新建）。返回第一条越权记录。 */
 export function scopedWriteViolation(before: MistState, after: MistState, scope: MistDataScope): { path: string; id: string } | null {
   let pre: ScopedVisibility | undefined, post: ScopedVisibility | undefined;

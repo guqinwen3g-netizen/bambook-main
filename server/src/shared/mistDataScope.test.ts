@@ -145,3 +145,13 @@ it('shows and permits only the actor’s attributed development drafts',()=>{
  const other=structuredClone(state);other.drafts[1].values.name='changed';expect(scopedWriteViolation(state,other,scope)).toMatchObject({path:'drafts',id:'other'});
  const mine=structuredClone(state);mine.drafts[0].values.name='changed';expect(scopedWriteViolation(state,mine,scope)).toBeNull();
 });
+
+it('checks direct business targets before validation while leaving assigned decisions to the approval gate',async()=>{
+ const {scopedTargetViolation}=await import('./mistDataScope');
+ const state:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[{id:'private-dev',ownerId:'other',values:{}}],drafts:[],market:{quotations:[],suppliers:[]},orders:[{id:'private-order',ownerId:'other',type:'garment'}],orderLines:[],invoices:[],allocations:[],receipts:[],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};
+ const scope={userIds:['member'],teamIds:[]};
+ expect(scopedTargetViolation(state,scope,{type:'order.governance.submit',payload:{orderId:'private-order'}})).toMatchObject({path:'orders'});
+ expect(scopedTargetViolation(state,scope,{type:'development.notice.generate',payload:{devId:'private-dev'}})).toMatchObject({path:'devs'});
+ expect(scopedTargetViolation(state,scope,{type:'order.governance.decide',payload:{id:'private-order'}})).toBeNull();
+ expect(scopedTargetViolation(state,scope,{type:'development.saveDraft',payload:{}})).toBeNull();
+});

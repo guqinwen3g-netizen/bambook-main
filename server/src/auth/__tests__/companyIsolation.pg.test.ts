@@ -45,11 +45,11 @@ describe.skipIf(!url)('real HTTP company isolation',()=>{
   legacy=auth.signToken({userId:user,roles:['owner'],permissions:[],departmentIds:[]}); pt=auth.signToken({userId:platform,roles:[],permissions:[],departmentIds:[]});
   app=express();app.use(express.json());app.use(cookieParser());app.use('/api',createAuthorizationSnapshotGuard({prisma:db}),tenantSurfaceGuard);
   app.use('/api/admin',createAdminRouter({prisma:db}));app.use('/api/hr',createHRRouter({prisma:db}));app.use('/api/platform',createPlatformRouter({prisma:db}));app.use('/api/auth',createAuthRouter({prisma:db,requireEmailVerification:false,loginRateLimit:false}));app.use('/api/mist',createMistRouter({prisma:db,contract,filesRoot}));
-  for(let i=0;i<2;i++){const r=await api().post('/api/mist/workspaces').set('Authorization',bearer(i)).send({name:'Workspace '+i,seed:'empty'});expect(r.status).toBe(201);workspaces.push(r.body.workspace.id);}
+  for(let i=0;i<2;i++){const r=await api().post('/api/mist/workspaces').set('Authorization',bearer(i)).send({name:'Same name',slug:'same-key',seed:'empty'});expect(r.status).toBe(201);workspaces.push(r.body.workspace.id);}
  });
  afterAll(async()=>{if(!db)return;await db.mistCommandReceipt.deleteMany({where:{workspaceId:{in:workspaces}}});await db.mistWorkspace.deleteMany({where:{id:{in:workspaces}}});await db.employeeProfile.deleteMany({where:{userId:staff}});await db.jobPosition.deleteMany({where:{id:position}});await db.teamMember.deleteMany({where:{teamId:{in:teams}}});await db.team.deleteMany({where:{id:{in:teams}}});await db.userRole.deleteMany({where:{userId:{in:[user,outsider,platform,staff]}}});await db.company.deleteMany({where:{id:{in:companies}}});await db.auditLog.deleteMany({where:{actorId:{in:[user,outsider,platform,staff]}}});await db.userPermissionOverrides.deleteMany({where:{userId:{in:[user,outsider,platform,staff]}}});await db.userAccount.deleteMany({where:{id:{in:[user,outsider,platform,staff]}}});await db.$disconnect();await rm(filesRoot,{recursive:true,force:true});});
  it('default entry selects the current company only',async()=>{for(let i=0;i<2;i++){const r=await api().get('/api/mist/workspaces/default').set('Authorization',bearer(i));expect(r.status).toBe(200);expect(r.body.workspace.id).toBe(workspaces[i]);}});
- it('the same creation key is independent across companies',async()=>{const ids=[];for(let i=0;i<2;i++){const r=await api().post('/api/mist/workspaces').set('Authorization',bearer(i)).send({name:'Same name',slug:'same-key',seed:'empty'});expect(r.status).toBe(201);ids.push(r.body.workspace.id);workspaces.push(r.body.workspace.id);}expect(ids[0]).not.toBe(ids[1]);await db.mistCommandReceipt.deleteMany({where:{workspaceId:{in:ids}}});await db.mistWorkspace.deleteMany({where:{id:{in:ids}}});workspaces.splice(2);});
+ it('isolates identical names across companies and rejects a second company library',async()=>{expect(workspaces[0]).not.toBe(workspaces[1]);for(let i=0;i<2;i++){const r=await api().post('/api/mist/workspaces').set('Authorization',bearer(i)).send({name:'Same name',slug:'same-key',seed:'empty'});expect(r.status).toBe(409);expect(await db.mistWorkspace.count({where:{companyId:companies[i]}})).toBe(1);}});
  it.each([0,1])('lists only current company %s for a shared owner',async i=>{const r=await api().get('/api/mist/workspaces').set('Authorization',bearer(i));expect(r.status).toBe(200);expect(r.body.workspaces.map((w:any)=>w.id)).toEqual([workspaces[i]]);});
  it.each(['','/revision','/receipts/unknown','/agent/query?type=products'])('hides foreign workspace %s',async suffix=>{expect((await api().get('/api/mist/workspaces/'+workspaces[1]+suffix).set('Authorization',bearer())).status).toBe(404);});
  it('rejects foreign command without changing state',async()=>{const old=await db.mistWorkspace.findUniqueOrThrow({where:{id:workspaces[1]}});const r=await api().post('/api/mist/workspaces/'+workspaces[1]+'/commands').set('Authorization',bearer()).send({requestId:randomUUID(),expectedRevision:0,command:{type:'market.product.save',payload:{name:'Foreign'}}});expect(r.status).toBe(404);expect((await db.mistWorkspace.findUniqueOrThrow({where:{id:workspaces[1]}})).state).toEqual(old.state);});
@@ -87,4 +87,34 @@ describe.skipIf(!url)('real HTTP company isolation',()=>{
   finally{await db.companyMember.updateMany({where:{userId:user},data:{status:'active'}});}
  });
  it('membership removal invalidates current session immediately',async()=>{await db.companyMember.updateMany({where:{companyId:companies[0],userId:user},data:{status:'left'}});try{expect((await api().get('/api/mist/workspaces').set('Authorization',bearer())).status).toBe(403);}finally{await db.companyMember.updateMany({where:{companyId:companies[0],userId:user},data:{status:'active'}});}});
+ it('applies row scope to real PostgreSQL sessions while sharing marketing and seasonal materials',async()=>{
+  const roleId='role-sales@'+companies[0], permissionLinks:string[]=[], original=await db.mistWorkspace.findUniqueOrThrow({where:{id:workspaces[0]}}), department=await db.department.findUniqueOrThrow({where:{id:depts[0]}});
+  try{
+   for(const scope of ['orders:read','orders:write','marketing:read','seasons:read']){
+    const permission=await db.permission.upsert({where:{scope},create:{id:'p3-'+scope,scope},update:{}}), id=randomUUID();
+    await db.rolePermission.create({data:{id,roleId,permissionId:permission.id}});permissionLinks.push(id);
+   }
+   await db.department.update({where:{id:depts[0]},data:{metadata:{businessAttributes:['garment_business']}}});
+   let n=0;const ctx:any={id:()=>`pg-scope-${++n}`,now:'2026-10-13T00:00:00Z',actorName:'fixture',actorId:user};
+   const state:any=contract.createMistState(ctx,'demo');
+   const [first,second]=state.orders;state.customers=state.customers.slice(0,2);state.customers[0].ownerId=staff;state.customers[1].ownerId=user;
+   state.orders=[{...first,id:'pg-own',customerId:state.customers[0].id,ownerId:staff,governance:undefined,checklist:[{id:'pg-check-own',done:false,note:''}]},{...second,id:'pg-hidden',customerId:state.customers[1].id,ownerId:user,governance:undefined,checklist:[{id:'pg-check-hidden',done:false,note:''}]}];
+   state.orderLines=[];state.devs=[];state.versions=[];state.rounds=[];state.crm.opportunities=[];state.market.quotations=[];
+   state.market.leads=[{id:'pg-shared-lead',name:'Shared',company:'Example',email:'',phone:'',demand:'',source:'show',parentId:'',customerId:'',status:'New',followUpDate:'',estimatedValue:'',actualValue:'',currency:'USD',convertedAt:null,createdAt:ctx.now,updatedAt:ctx.now,fileIds:[],note:''}];
+   await db.mistCommandReceipt.deleteMany({where:{workspaceId:workspaces[0]}});
+   await db.mistWorkspace.update({where:{id:workspaces[0]},data:{state,revision:0}});
+   const token=auth.signToken({userId:staff,companyId:companies[0],roles:[],permissions:[],departmentIds:[]});
+   const get=()=>api().get('/api/mist/workspaces/'+workspaces[0]).set('Authorization','Bearer '+token);
+   const view=await get();expect(view.status).toBe(200);expect(view.body.workspace.state.orders.map((row:any)=>row.id)).toEqual(['pg-own']);expect(view.body.workspace.state.market.leads.map((row:any)=>row.id)).toEqual(['pg-shared-lead']);
+   const command=(orderId:string,itemId:string)=>api().post('/api/mist/workspaces/'+workspaces[0]+'/commands').set('Authorization','Bearer '+token).send({requestId:randomUUID(),expectedRevision:0,command:{type:'order.checklist',payload:{orderId,itemId,done:true}}});
+   const denied=await command('pg-hidden','pg-check-hidden');expect(denied.status,JSON.stringify(denied.body)).toBe(404);
+   const deniedUpdate=await api().post('/api/mist/workspaces/'+workspaces[0]+'/commands').set('Authorization','Bearer '+token).send({requestId:randomUUID(),expectedRevision:0,command:{type:'order.update',payload:{orderId:'pg-hidden',season:'AW27'}}});expect(deniedUpdate.status,JSON.stringify(deniedUpdate.body)).toBe(404);
+   const saved=await api().post('/api/mist/workspaces/'+workspaces[0]+'/commands').set('Authorization','Bearer '+token).send({requestId:randomUUID(),expectedRevision:0,command:{type:'order.update',payload:{orderId:'pg-own'}}});expect(saved.status,JSON.stringify(saved.body)).toBe(200);expect(saved.body.workspace.state.orders.map((row:any)=>row.id)).toEqual(['pg-own']);
+  }finally{
+   await db.mistWorkspace.update({where:{id:workspaces[0]},data:{state:original.state as any,revision:original.revision,name:original.name}});
+   await db.department.update({where:{id:depts[0]},data:{metadata:department.metadata as any}});
+   await db.rolePermission.deleteMany({where:{id:{in:permissionLinks}}});
+  }
+ });
+
 });

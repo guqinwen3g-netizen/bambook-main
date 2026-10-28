@@ -73,6 +73,8 @@ export function canReadTarget(actor: TokenPayload, target?: { view?: string }) {
 /** 按账号自身读权限裁剪状态；被隐藏的数据结构用空公司的同名结构替换，保证页面结构完整。 */
 export function projectState(state: MistState, actor: TokenPayload, empty: () => MistState, ownerId?: string, scope?: MistDataScope): { state: MistState; hidden: Section[];costMaterialBasis?:InternalFabricCostBasis[] | null } {
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(state, scope, actor.userId) : { ...state };
+  // Account balances require the complete company ledger; a row-scoped projection cannot compute them safely.
+  if (scope && !hidden.some(section => section.key === 'bankAccounts')) hidden.push(MIST_READ_SECTIONS.find(section => section.key === 'bankAccounts')!);
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.

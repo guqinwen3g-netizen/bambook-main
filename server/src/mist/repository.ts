@@ -18,7 +18,7 @@ import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projec
 import { payablesCommandPermissions } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
-import { canGenerateScopedStatement, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
+import { canGenerateScopedStatement, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
@@ -386,6 +386,8 @@ export class MistRepository {
         }
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
+        const earlyScope = scopeOf(row);
+        if (earlyScope && scopedTargetViolation(row.state, earlyScope, input.command, input.claimId)) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {

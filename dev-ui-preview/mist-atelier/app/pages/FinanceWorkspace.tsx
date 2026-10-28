@@ -40,8 +40,8 @@ export function FinanceEntrances({ state, area, onChange, accounts = true }: { s
   return <div className="mist-section" data-finance-entrances>
     <StatGrid>
       <StatCard icon={ReceiptText} label={uiText("应收未收")} value={stat(open)} unit={uiText(open.length === 1 ? open[0].currency : undefined)} foot={foot(open, totalsText(open))} onClick={() => onChange('receivables')} />
-      <StatCard icon={ArrowUpRight} label={uiText("应付未付")} value={stat(payable)} unit={uiText(payable.length === 1 ? payable[0].currency : undefined)} foot={foot(payable, '按已登记的供应商票据计算')} onClick={() => onChange('payables')} />
-      <StatCard icon={ArrowDownLeft} label={uiText("未分配到账")} value={stat(unallocated)} unit={uiText(unallocated.length === 1 ? unallocated[0].currency : undefined)} foot={foot(unallocated, totalsText(unallocated))} onClick={() => onChange('records')} />
+      <StatCard icon={ArrowUpRight} label={uiText("应付未付")} value={state?.partialPayableBills?.length ? '—' : stat(payable)} unit={uiText(!state?.partialPayableBills?.length && payable.length === 1 ? payable[0].currency : undefined)} foot={state?.partialPayableBills?.length ? uiText('部分票据余额不可完整核对') : foot(payable, '按已登记的供应商票据计算')} onClick={() => onChange('payables')} />
+      <StatCard icon={ArrowDownLeft} label={uiText("未分配到账")} value={state?.partialReceipts?.length ? '—' : stat(unallocated)} unit={uiText(!state?.partialReceipts?.length && unallocated.length === 1 ? unallocated[0].currency : undefined)} foot={state?.partialReceipts?.length ? uiText('部分到账余额不可见') : foot(unallocated, totalsText(unallocated))} onClick={() => onChange('records')} />
       {accounts && <StatCard icon={Landmark} label={uiText("公司账户余额")} value={bank?.accounts.length ? stat(balances) : '—'} unit={uiText(balances.length === 1 ? balances[0].currency : undefined)} foot={bank?.accounts.length ? (unassigned ? ui`待归属 · ${unassigned}` : undefined) : uiText('未登记账户')} onClick={() => onChange('accounts')} />}
     </StatGrid>
     <Tabs<FinanceArea> value={area} onChange={onChange} options={[{ value: 'receivables', label: '应收待办' }, { value: 'payables', label: '应付待办' }, { value: 'records', label: '收付款记录' }, ...(accounts ? [{ value: 'accounts' as const, label: '账户与余额' }] : [])]} />
@@ -62,7 +62,7 @@ export function factoryReceiptUses(state:MistState|null,receiptId:string){
  return (state?.platform?.claims??[]).flatMap(claim=>(claim.coordination?.recoveries??[]).flatMap(recovery=>(recovery.settlements??[]).filter(entry=>entry.kind==='receipt'&&!entry.reversed&&entry.receiptId===receiptId).map(entry=>({id:entry.id,claimId:claim.id,claimCode:claim.code,supplier:recovery.supplierName,amount:entry.amount,currency:entry.currency,date:entry.date,actor:entry.by}))));
 }
 export function FinanceRecords({ onReceipt }: { onReceipt: (id: string) => void }) {
-  const { state, loading } = useMistWorkspace(), { route, go } = useNav(), session=useMistSession(),canReconcile=session.hasPermission(MIST_FINANCE_SCOPES.reconcile),accountsVisible=session.hasPermission(MIST_FINANCE_SCOPES.voucher);
+  const workspace = useMistWorkspace(), { state, loading } = workspace, { route, go } = useNav(), session=useMistSession(),canReconcile=session.hasPermission(MIST_FINANCE_SCOPES.reconcile),accountsVisible=session.hasPermission(MIST_FINANCE_SCOPES.voucher)&&!workspace.workspace?.access?.hidden.some(section=>section.key==='bankAccounts');
   const [query, setQuery] = React.useState(''), [direction, setDirection] = React.useState<FinanceRecordFilter>(()=>recordFilter(route.section)), [currency, setCurrency] = React.useState('all');
   const [selected, setSelected] = React.useState(route.id || ''), [drawer, setDrawer] = React.useState(!!route.id), full = useListDetailRoute();
   React.useEffect(() => { setSelected(route.id || ''); setDrawer(!!route.id); }, [route.id]);
