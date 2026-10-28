@@ -287,7 +287,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         { label: '当前QC', value: task.assignee || '待认领' },
       ]} />
     </DetailBlock>
-    {canQc && <DetailBlock title={uiText("QC 操作")}>
+    {canQc && !sourceBlocker && <DetailBlock title={uiText("QC 操作")}>
       <ActionBar busy={locked} actions={[
         { label: '认领任务', icon: UserRoundCheck, onClick: onClaim, reason: claimReason, hidden: mine, primary: task.state === 'pending' },
         { label: '提交 / 追加复验报告', icon: ClipboardCheck, onClick: onReport, reason: reportReason, primary: mine && task.state !== 'reported' },
