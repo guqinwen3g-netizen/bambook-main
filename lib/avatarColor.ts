@@ -1,5 +1,5 @@
-/** Eight distinct muted schemes, ordered around the color wheel. */
-export const mistSchemeHues = [22, 45, 100, 155, 205, 240, 275, 335] as const;
+/** Ten evenly spaced hues; the chosen family remains stable after saving. */
+export const mistSchemeHues = [0, 36, 72, 108, 144, 180, 216, 252, 288, 324] as const;
 /** The aura shares the avatar hue, with more chroma so it remains visible on frost. */
 export function avatarAuraColor(hue: number) {
   return `hsl(${hue} 38% 60%)`;
@@ -12,9 +12,9 @@ export function closestMistScheme(hue: number) {
 }
 
 /** Saved avatars retain continuous hue support and fixed mist saturation/lightness. */
-export function mistPalette(hue: number): string[] {
+export function mistPalette(hue: number, lightnessShift = 0): string[] {
   return [[15,96],[20,86],[18,73],[17,56],[16,35]].map(([saturation, lightness]) => {
-    const s = saturation / 100, l = lightness / 100;
+    const s = saturation / 100, l = Math.max(0,Math.min(100,lightness + lightnessShift)) / 100;
     const a = s * Math.min(l, 1 - l);
     const channel = (n: number) => {
       const k = (n + hue / 30) % 12;

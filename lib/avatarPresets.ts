@@ -77,8 +77,9 @@ export function generateAvatar(family: string, seed: string, animated = false): 
     for (const character of seed.replace(/^p[0-5]_v3_\d+_\d+_/, "")) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
     tone = ((hash >>> 0) % 7) - 3;
   }
-  const hue = seed.match(/^c(\d{1,3})_v[56]_/);
-  const basePalette = hue ? mistPalette(Number(hue[1]) % 360) : palettes[paletteIndex];
+  const hue = seed.match(/^c(\d{1,3})_v[567]_/);
+  const deeper = /^c\d{1,3}_v7_/.test(seed);
+  const basePalette = hue ? mistPalette(Number(hue[1]) % 360, deeper ? -5 : 0) : palettes[paletteIndex];
   const adjusted = basePalette.map((hex, index) => {
     if (!tone) return hex;
     const delta = tone * (index === 0 ? 1 : 3);
@@ -86,7 +87,7 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   });
   const [frost, mist, middle, gray, ink] = adjusted;
   const colors = [gray, middle, mist];
-  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}`;
+  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}:${deeper ? 'v7' : 'legacy'}`;
   let style = styles.get(cacheKey);
   if (!style) {
     const definition = definitions[family as keyof typeof definitions];
@@ -112,8 +113,8 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   }
   const definition = definitions[family as keyof typeof definitions];
   // v6 uses the unmodified DiceBear component distribution. Legacy avatars retain their appearance.
-  const variants = /^c\d{1,3}_v6_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components as Parameters<typeof avatarVariantPreferences>[2]);
-  const shapeSeed = seed.replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
+  const variants = /^c\d{1,3}_v[67]_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components as Parameters<typeof avatarVariantPreferences>[2]);
+  const shapeSeed = seed.replace(/^c(\d+)_v7_/, 'c$1_v6_').replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
   const svg = new Avatar(style, { seed: shapeSeed, size: 256, animationVariant: animated ? 'slow' : 'none', ...variants }).toString();
   // This rule lives inside the SVG so it also applies when rendered as an img.
   const mutedSvg = ['croodles-neutral','dylan','fun-emoji','gaze','pixelbot','rings','stripes','planets','disco'].includes(family)

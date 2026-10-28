@@ -1088,3 +1088,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 }
 
 .mist-avatar-crop:focus-visible { outline: 2px solid var(--mist-accent-ink); outline-offset: 4px; }
+.mist-avatar-auto-choice { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--mist-card); color: var(--mist-ink-2); }
+@media(max-width:640px) { .mist-avatar-initial-options .mist-avatar-auto-choice { width: 46px; height: 46px; } }
+/* Ten equally spaced color families fit without clipping the last choice. */
+.mist-avatar-initial-options { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.mist-avatar-pattern-view { flex: 1; min-height: 0; overflow-y: auto; display: grid; place-items: center; padding: 8px 0 18px; }
+.mist-avatar-pattern-view .mist-avatar-explorer { width: min(100%, 680px); }
+@media(max-width:640px) { .mist-avatar-initial-options { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; } .mist-avatar-initial-options .mist-avatar-choice { padding-inline: 2px; } .mist-avatar-initial-options .mist-avatar-color-example { width: 46px; height: 46px; font-size: 19px; } }
