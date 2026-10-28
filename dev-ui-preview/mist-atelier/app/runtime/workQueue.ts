@@ -8,6 +8,7 @@ import { materialDeliveryRows, materialReceiverIds } from '../../../../server/sr
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
 import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, payableBills, billRequestedUnpaidMinor } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
+import { businessDate } from './businessClock';
 
 type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
@@ -106,7 +107,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
   const push = (item: Omit<MistWorkItem, 'sourceLabel' | 'module'> & { module?: string }) => items.push({ ...item, sourceLabel: uiText(MIST_WORK_SOURCE_LABEL[item.source]), when: uiText(item.when), module: item.module ?? mistWorkModule(item.target.view) });
   for (const review of reviews.filter(row => row.status === 'pending' && row.canDecide)) {
     const local = !!workspaceId && review.workspaceId === workspaceId, module = mistWorkModule(review.target?.view);
-    push({ id: `review:${review.workspaceId}|${review.id}`, source: 'review', title: localizedPageTitle(review.title), meta: [review.workspaceName, review.submittedAt.slice(0, 10)].filter(Boolean).join(' · '), when: '待审批', urgent: true, at: review.submittedAt,
+    push({ id: `review:${review.workspaceId}|${review.id}`, source: 'review', title: localizedPageTitle(review.title), meta: [review.workspaceName, businessDate(review.submittedAt)].filter(Boolean).join(' · '), when: '待审批', urgent: true, at: review.submittedAt,
       target: { view: 'approvals', id: `${review.workspaceId}|${review.id}`, section: 'mine' } as MistTarget, module: local && canRead(module) ? module : 'approvals' });
   }
   if (!state) return items;

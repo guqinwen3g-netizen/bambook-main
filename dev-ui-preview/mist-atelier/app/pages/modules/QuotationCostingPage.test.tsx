@@ -169,7 +169,7 @@ it("freezes sources without silently applying selling price, then exports only e
   ).toBe(false);
   await click("保存核算");
   expect(q().lines[0].price).toBe(original.lines[0].price);
-  expect(q().lines[0].cost).toBe("10.00");
+  expect(q().lines[0].cost).toBe("10.0000");
   expect(q().costingSnapshots).toHaveLength(1);
   expect(bridge.w.state.orders).toEqual(otherOrders);
   expect(host.textContent).toContain("核算记录");
@@ -476,7 +476,7 @@ it("separates line-only fees, requires ownership, freezes allocation and exports
   expect(host.textContent).toContain("本报价行整笔费用分摊");
   await click("保存核算");
   const snap = q().costingSnapshots!.at(-1)!;
-  expect(snap.modelVersion).toBe("quote-cost-line-allocation-v2");
+  expect(snap.modelVersion).toBe("quote-cost-line-allocation-v3");
   expect(snap.result.allocation).toEqual({
     quantity: "1200.0000",
     total: "100.0000",
@@ -519,7 +519,7 @@ it("leaves the previous per-unit formula unchanged when the scope is omitted", a
   await fill();
   await click("下一步");
   await click("保存核算");
-  expect(q().costingSnapshots!.at(-1)!.modelVersion).toBe("quote-cost-v1");
+  expect(q().costingSnapshots!.at(-1)!.modelVersion).toBe("quote-cost-v3");
   expect(q().costingSnapshots!.at(-1)!.result.cost).toBe("12.0000");
   expect(q().costingSnapshots!.at(-1)!.result.allocation).toBeUndefined();
 });
