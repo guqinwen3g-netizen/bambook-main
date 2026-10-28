@@ -28,7 +28,7 @@ describe('device sound preferences', () => {
   it('persists independent toggles and clamped volume, notifies settings', () => {
     const listener = vi.fn(), unsubscribe = subscribeUiSoundPreferences(listener);
     setUiSoundPreferences({ scroll: false, notifications: true, volume: 8 });
-    expect(getUiSoundPreferences()).toEqual({ scroll: false, notifications: true, volume: 1 });
+    expect(getUiSoundPreferences()).toEqual({ scroll: false, notifications: true, operations: true, volume: 1 });
     expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!)).toEqual(getUiSoundPreferences());
     expect(listener).toHaveBeenCalledTimes(1);
     unsubscribe();
@@ -39,6 +39,38 @@ describe('device sound preferences', () => {
     expect(() => playNotificationSound('event-1')).not.toThrow();
     expect(() => playNotificationSound('event-1')).not.toThrow();
   });
+  it('updates a settings subscriber when another tab changes the sound preferences',()=>{
+    const listener=vi.fn(),unsubscribe=subscribeUiSoundPreferences(listener);
+    localStorage.setItem('bambook.ui-sound.v1',JSON.stringify({scroll:true,notifications:false,operations:false,volume:.2}));
+    window.dispatchEvent(new StorageEvent('storage',{key:'bambook.ui-sound.v1'}));
+    expect(getUiSoundPreferences()).toMatchObject({notifications:false,operations:false,volume:.2});
+    expect(listener).toHaveBeenCalledOnce();unsubscribe();
+    setUiSoundPreferences({notifications:true,operations:true,volume:.4});
+  });
+});
+
+it('respects the operation toggle and provides distinct completion and failure cues',async()=>{
+ const f=await audioFixture();
+ try{
+  window.dispatchEvent(new Event('pointerdown'));
+  f.sound.playFeedbackSound('success',true);
+  f.sound.playFeedbackSound('failure',true);
+  expect(f.fake.createOscillator).toHaveBeenCalledTimes(4);
+  const frequencies=f.fake.createOscillator.mock.results.map((row:any)=>row.value.frequency.setValueAtTime.mock.calls[0][0]);
+  expect(frequencies).toEqual([659.25,783.99,440,349.23]);
+  f.sound.setUiSoundPreferences({operations:false});f.sound.playFeedbackSound('failure',true);
+  expect(f.fake.createOscillator).toHaveBeenCalledTimes(4);
+ }finally{f.cleanup();vi.unstubAllGlobals();}
+});
+
+it('does not let a preview suppress a real notification that arrives immediately afterwards',async()=>{
+ const f=await audioFixture();
+ try{
+  window.dispatchEvent(new Event('pointerdown'));
+  f.sound.playNotificationSound(undefined,true);
+  f.sound.playNotificationSound('after-preview');
+  expect(f.fake.createOscillator).toHaveBeenCalledTimes(4);
+ }finally{f.cleanup();vi.unstubAllGlobals();}
 });
 
 describe('synthesized audio', () => {

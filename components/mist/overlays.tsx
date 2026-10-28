@@ -5,6 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import { AlertCircle, ChevronDown, CircleCheck, Search, X } from 'lucide-react';
 import { useMistPortalTarget } from './shell';
 import { EmptyState, Icon, IconButton, Kbd, Tile } from './primitives';
+import { installUiSoundActivation, playFeedbackSound } from '../../services/uiSoundService';
 
 const modalStack: HTMLElement[] = [];
 const focusableSelector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]';
@@ -206,8 +207,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [t, setT] = React.useState<ToastState>(null);
   const timer = React.useRef<number | undefined>(undefined);
   React.useEffect(() => () => { window.clearTimeout(timer.current); }, []);
+  React.useEffect(() => installUiSoundActivation(), []);
   const show = React.useCallback((text: string, tone?: 'ok' | 'bad') => {
     window.clearTimeout(timer.current); setT({ id: Date.now(), text, tone });
+    if (tone === 'bad') playFeedbackSound('failure');
     timer.current = window.setTimeout(() => setT(null), 2600);
   }, []);
   return <ToastCtx.Provider value={show}>{uiText(children)}{t && <Portal><div key={t.id} className="mist-toast" role="status" data-tone={t.tone === 'bad' ? 'bad' : undefined}><Icon icon={t.tone === 'bad' ? AlertCircle : CircleCheck} size="sm" />{t.text}</div></Portal>}</ToastCtx.Provider>;

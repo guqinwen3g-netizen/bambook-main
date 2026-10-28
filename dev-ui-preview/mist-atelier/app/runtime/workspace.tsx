@@ -3,6 +3,8 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {bindBusinessClock} from './businessClock';
 import React from 'react';
 import { apiService } from '../../../../services/apiService';
+import { canPlayNotificationSound, playFeedbackSound, playNotificationSound } from '../../../../services/uiSoundService';
+import { markNoticeSounds, newAudibleNotices } from './notificationSound';
 import { useMistSession } from './auth';
 import type { MistCommand, MistFile, MistRunReceipt, MistState, MistWorkspaceEnvelope } from '../../../../server/src/shared/mistWorkspace';
 
@@ -219,6 +221,7 @@ async function fileDigest(file: File): Promise<string> {
 
 export function MistWorkspaceProvider({ children }: { children: React.ReactNode }) {
   const session = useMistSession();
+  const canAccessView = React.useRef(session.canAccessView); canAccessView.current = session.canAccessView;
   const [current, setCurrent] = React.useState<{ key: string; value: MistWorkspaceEnvelope } | null>(null);
   const [workspaces, setWorkspaces] = React.useState<Array<{ id: string; name: string; shared?: boolean }>>([]);
   const [archivedWorkspaces,setArchivedWorkspaces]=React.useState<ArchivedMistWorkspace[]>([]);
@@ -352,18 +355,23 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
   }, [authority.key, authority.userId, authority.status, load, publishPending, publishCreate, forgetSelection]);
 
   /**
-   * 后台同步：页面可见时每 15 秒（以及切回窗口时）只查一次版本号，别人有更新才静默读取完整内容。
+   * 后台同步：前台每 15 秒查版本，后台最多每分钟查一次；有更新才静默读取完整内容。
    * 不打断正在进行的保存、切换或待核对的请求；读到的内容经结构共享并入，没变的记录引用不变。
    * 这样多人同时办公时，本页看到的版本始终接近最新，保存时极少因“落后太多”被要求刷新。
    */
   React.useEffect(() => {
     if (authority.status !== 'authenticated' || !authority.userId || !boundWorkspaceId) return;
     const bound = authority, workspaceId = boundWorkspaceId, epoch = boundEpoch;
-    let busy = false, stopped = false;
+    let busy = false, stopped = false, lastHiddenSync = -Infinity;
     const quiet = () => stopped || !mounted.current || navigating.current || !!mutation.current || !!pendingRef.current || !!pendingCreateRef.current
       || epoch !== scopeEpoch.current || snapshot.current?.id !== workspaceId || live.current.key !== bound.key || live.current.userId !== bound.userId || live.current.status !== 'authenticated';
     const sync = async () => {
-      if (busy || typeof document !== 'undefined' && document.visibilityState === 'hidden' || quiet()) return;
+      if (busy || quiet()) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        if (!canPlayNotificationSound()) return;
+        if (Date.now() - lastHiddenSync < 60_000) return;
+        lastHiddenSync = Date.now();
+      }
       busy = true;
       try {
         const known = snapshot.current!.revision, generation = readEpoch.current;
@@ -371,7 +379,15 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
         if (!Number.isSafeInteger(head?.revision) || head.revision <= known || quiet()) return;
         const data = await request(BASE + '/' + encodeURIComponent(workspaceId));
         if (quiet() || generation !== readEpoch.current) return;
-        put(envelope(data.workspace, bound.userId!, workspaceId), bound);
+        const previous = snapshot.current, next = envelope(data.workspace, bound.userId!, workspaceId);
+        put(next, bound);
+        // Sound is advisory and must not interrupt workspace synchronization.
+        try {
+          if (previous && next.revision > previous.revision && canPlayNotificationSound()) {
+            const ids = newAudibleNotices(previous.state, next.state, view => !!canAccessView.current?.(view as Parameters<typeof session.canAccessView>[0]));
+            if (markNoticeSounds(JSON.stringify([bound.userId, workspaceId]), ids)) playNotificationSound();
+          }
+        } catch { /* Do not interfere with data synchronization. */ }
       } catch { /* 后台同步失败不打扰当前操作，下一轮或下一次保存时再处理。 */ }
       finally { busy = false; }
     };
@@ -397,6 +413,13 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       assertIdentity(bound);
       const acknowledged = receipt(data.receipt, intent), value = envelope(data.workspace, bound.userId!, intent.workspaceId);
       validateReceiptState(value, acknowledged, intent);
+      // Other tabs of this same account should not announce the user's own command.
+      try {
+        if (snapshot.current?.id === intent.workspaceId) {
+          const oldIds = new Set(snapshot.current.state.notifications.map(item => item.id));
+          markNoticeSounds(JSON.stringify([bound.userId, intent.workspaceId]), value.state.notifications.filter(item => !oldIds.has(item.id)).map(item => item.id));
+        }
+      } catch { /* Sound deduplication cannot affect a successful receipt. */ }
       put(value, bound); clearPending(bound); return acknowledged;
     } catch (failure) {
       if (mounted.current && live.current.key === bound.key && live.current.userId === bound.userId && live.current.status === 'authenticated') {
@@ -487,8 +510,10 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     const token = lock();
     try {
       const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)) };
-      try{return await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority);}
+      const audible = !['settings.update','notification.read','notification.readAll','email.flag','email.move'].includes(command.type);
+      try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority); if(audible)playFeedbackSound('success');return result;}
       catch(failure){
+        if(audible)playFeedbackSound('failure');
         // Forms retain the exact unresolved command identity, even if React batches away the saving frame.
         if(failure instanceof Error&&(pendingRef.current as Pending|null)?.requestId===intent.requestId)Object.assign(failure,{mistPendingCommand:{workspaceId:intent.workspaceId,requestId:intent.requestId,actorId:authority.userId!}});
         throw failure;
