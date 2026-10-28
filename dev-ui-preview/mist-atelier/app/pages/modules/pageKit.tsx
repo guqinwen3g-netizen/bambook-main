@@ -1,6 +1,6 @@
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
-import {businessNow} from '../../runtime/businessClock';
+import {businessToday} from '../../runtime/businessClock';
 /** Business page kit: Mist compositions shared by module pages (list + detail, reasoned actions). */
 import React from 'react';
 import { ArrowRight, ChevronDown, ChevronUp, type LucideIcon } from 'lucide-react';
@@ -93,7 +93,7 @@ export function DetailBlock({ title, aside, children }: { title: React.ReactNode
 }
 
 export const isoDay = (value: string) => (value || '').slice(0, 10);
-export const todayIso = () => businessNow().toISOString().slice(0, 10);
+export const todayIso = businessToday;
 /** 应用业务时区（与服务端 BUSINESS_TIME_ZONE、platformBusinessDate、审批中心同口径）。 */
 export const BUSINESS_TZ = 'Asia/Shanghai';
 /** 时刻（ISO 时间戳）所在的业务日；纯日期原样返回。不能直接截取 UTC 字符串，否则北京时间 0–8 点会落到前一天。 */

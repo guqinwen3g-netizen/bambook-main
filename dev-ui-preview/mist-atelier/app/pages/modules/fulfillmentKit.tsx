@@ -1,5 +1,5 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
-import {businessNow} from '../../runtime/businessClock';
+import {businessNow,businessToday} from '../../runtime/businessClock';
 /** Shared fulfillment page helpers: exact sources, files, positions and editor plumbing. */
 import React from 'react';
 import { Download } from 'lucide-react';
@@ -14,7 +14,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ModuleEditorDialog, ModuleEditorPage, downloadModuleCsv, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
 import { FileName } from '../../runtime/files';
 export const documentTypeLabel = (type: FulfillmentDocument['type']) => type === 'OTHER' ? uiText('其他') : type;
-export const today = () => businessNow().toISOString().slice(0, 10);
+export const today = businessToday;
 export const localNow = () => { const d = businessNow(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 export const status: Record<string, string> = { draft: '草稿', pending: '待审批', approved: '已批准', rejected: '已退回', preparing: '单证处理中', ready: '待实际出运', departed: '已出运', cancelled: '已取消', submitted: '已申报', cleared: '已清关', issued: '已签发', void: '已作废', working: '处理中', reported: '报告已回传', blocked: '质量阻断', awaiting_business: '待业务恢复' };
 export const pill = (s: string) => <Pill tone={['approved', 'issued', 'cleared', 'departed', 'reported'].includes(s) ? 'ok' : ['rejected', 'blocked', 'void'].includes(s) ? 'bad' : ['pending', 'awaiting_business'].includes(s) ? 'warn' : 'neutral'}>{status[s] || s}</Pill>;

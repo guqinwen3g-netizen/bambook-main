@@ -1,4 +1,5 @@
 import {createClaimReplacementOrder,assertClaimReplacementShipped,type ClaimReplacementOrderCommand} from './mistClaimReplacement';
+import {mistBusinessDate} from './mistBusinessClock';
 import type {ClaimRepairJob,ClaimRepairDispatch} from './mistClaimInventory';
 import {claimReviewDisplay} from './mistClaimReview';
 /** Business records for Mist platform modules. No legacy or fabricated identities. */
@@ -60,7 +61,7 @@ export type PlatformCommand=
  |{type:'platform.assistant.saveDraft';payload:{title:string;content:string;orderId:string}};
 type Root=MistState&{platform?:PlatformState};
 /** Portable business-date projection for this shared browser/server domain. */
-export function platformBusinessDate(instant:string|Date){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(instant));const get=(key:string)=>parts.find(p=>p.type===key)!.value;return get('year')+'-'+get('month')+'-'+get('day');}
+export function platformBusinessDate(instant:string|Date){return mistBusinessDate(instant);}
 export function createPlatformState(_context:MistContext,_rootState:MistState):PlatformState{return {invoiceDrafts:[],boms:[],pricing:[],risks:[],employees:[],claims:[],credits:[],creditApplications:[],claimGoods:[],assistantDrafts:[],pricingParams:[]};}
 function fail(message:string,code='VALIDATION'):never{throw new MistCommandError(code,message);}
 function text(v:unknown,label:string,required=true,max=4000){if(typeof v!=='string'||v.length>max||(required&&!v.trim()))fail(label+'未填写或格式无效');return (v as string).trim();}

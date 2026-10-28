@@ -152,3 +152,7 @@ v14 装饰配色采用清爽的蓝、青、紫、粉，去除棕黄、灰褐主�
 ### 小组业务范围入口
 
 人事小组详情对已有范围管理权限的公司账号显示真实条件摘要及手选/排除数量，使用当前获准的 `teamScopes` 与共享档案名称，不显示原始业务ID。配置入口为 `company-settings?id=<teamId>&section=teams`，`TeamScopesSection` 通过 `initialTeamId` 打开指定小组；之后允许手动切组，返回时通过 `hr?id=<selectedTeamId>&section=teams` 回到实际选中的小组详情。业务数据版本变化重新请求服务端匹配预览，保留尚未提交的条件和说明。
+
+### 业务日期默认值
+
+`runtime/businessClock.ts` 的 `businessNow()` 保留实际或所选公司固定时钟的瞬时值，`businessDate()` / `businessToday()` 使用与服务端相同的上海业务日投影；共用 `today` / `todayIso` 不截断UTC日期。日期字段的默认值和逾期判断与业务日一致；带时间字段继续保留原时刻，不改写已存事实或内部固定场景配置。
