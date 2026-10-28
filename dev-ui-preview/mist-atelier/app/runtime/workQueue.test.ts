@@ -63,6 +63,10 @@ describe('my work queue sources', () => {
     expect(items[0].target).toEqual({ view: 'approvals', id: 'w1|payment:1', section: 'mine' });
     expect(items[0].module).toBe('approvals');
   });
+  it('shows the Shanghai submission day while preserving the UTC review instant',()=>{
+    const at='2026-10-28T18:13:22.000Z';const items=mistWorkQueue(base(),{canRead:all,me:'me',today:'2026-10-29',reviews:[{id:'quote-review',workspaceId:'w',workspaceName:'公司',title:'报价审批',status:'pending',canDecide:true,submittedAt:at} as any]});
+    expect(items[0].meta).toBe('公司 · 2026-10-29');expect(items[0].at).toBe(at);
+  });
   it('files reviews of the current workspace under their business module and other workspaces under approvals', () => {
     const row = (id: string, workspaceId: string) => ({ id, workspaceId, workspaceName: workspaceId, title: id, status: 'pending', canDecide: true, submittedAt: '2026-10-14T00:00:00Z', target: { view: 'procurement', id: 'p1' } }) as any;
     const items = mistWorkQueue(base(), { canRead: all, me: 'me', today: '2026-10-15', workspaceId: 'w1', reviews: [row('a', 'w1'), row('b', 'w2')] });

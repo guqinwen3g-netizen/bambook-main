@@ -1,7 +1,7 @@
 /** Auditable manual quote costing. No AI prices, FX assumptions or actual-profit recognition. */
 import type { MarketQuotation, MarketQuoteLine } from "./mistMarket";
-export const QUOTE_COST_MODEL_VERSION = "quote-cost-v1";
-export const QUOTE_COST_ALLOCATION_VERSION = "quote-cost-line-allocation-v2";
+export const QUOTE_COST_MODEL_VERSION = "quote-cost-v3";
+export const QUOTE_COST_ALLOCATION_VERSION = "quote-cost-line-allocation-v3";
 export function quoteCostModelVersion(input: QuoteCostInput) {
   return input.components.some((r) => r.scope === "per_line")
     ? QUOTE_COST_ALLOCATION_VERSION
@@ -287,7 +287,8 @@ export function calculateQuoteCosting(raw: QuoteCostInput): {
         }
       : {}),
     cost: show(total),
-    approvalCost: show(round(total, BigInt(100)), 2),
+    // This is a unit rate, not a payable amount: keep allocation precision in the quote and its review.
+    approvalCost: show(total),
     suggestedPrice: show(suggested),
     suggestedQuotePrice: show(round(suggested, BigInt(100)), 2),
     proposedPrice: input.proposedPrice,
@@ -299,7 +300,7 @@ export function calculateQuoteCosting(raw: QuoteCostInput): {
     components,
   };
   if (
-    quoteCostDecimal(result.approvalCost, "单位成本", 2) > BigInt(999999999999)
+    quoteCostDecimal(result.approvalCost, "单位成本") > BigInt(99999999999999)
   )
     throw Error("单位成本超出当前报价金额范围");
   if (

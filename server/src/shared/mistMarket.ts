@@ -37,7 +37,7 @@ export type MarketShow = RecordBase & { name:string; location:string; seasonId:s
 export type MarketCampaign = RecordBase & { code:string; name:string; type:string; seasonId:string; showId:string; startDate:string; endDate:string; target:string; budget:string; actualCost:string; currency:string; status:'Draft'|'Active'|'Paused'|'Completed'|'Cancelled'; owner:string; productIds:string[] };
 export type MarketLead = RecordBase & { name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string };
 export type MarketQuoteLine = { id:string; productId:string; sourceDevId:string; sourceVersionId:string; name:string; style:string; specification:string; qty:string; unit:string; price:string; cost:string; amount:string; costBasis?:'product'|'unverified'; /** BB-QUO-2 结构化规格与 MOQ；历史条目可能没有。 */ specs?:QuoteLineSpecs; /** BB-QUO-3 保存时冻结的最低毛利率版本；历史条目没有则不按底价线判断。 */ marginFloor?:FrozenMarginFloor; /** BB-QUO-3 服务端保存时按当时来源判定的板块（null=当时不属面料/成衣）；历史条目没有，编辑时按已保存单位兼容推断。不随产品档案之后改类别变化。 */ family?:QuoteFamily|null; /** BB-QUO-5 条目转单去向；仅转单命令写入。 */ conversion?:QuoteLineConversion; /** BB-QUO-5 标记不再转及原因。 */ skipped?:QuoteLineSkip };
-export type MarketQuoteApproval = { id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[] };
+export type MarketQuoteApproval = { id:string; requesterId:string; reviewerId:string; status:'pending'|'approved'|'rejected'; submittedAt:string; decidedAt?:string; note?:string; details:Array<{label:string;value:string}>; fileIds:string[]; /** Immutable audit links, separate from human-readable approval text. */ costingRefs?:Array<{lineId:string;snapshotId:string;modelVersion:string}> };
 export type MarketQuotation = RecordBase & { code:string; customerId:string; currency:string; season:string; validUntil:string; deliveryTerms:string; paymentTerms:string; status:'Draft'|'Sent'|'Accepted'|'Rejected'|'Expired'; lines:MarketQuoteLine[]; total:string; deliveryEvidence:string; responseEvidence:string; approval:MarketQuoteApproval|null; approvalHistory?:MarketQuoteApproval[]; requiresApproval?:boolean; convertedOrderId:string|null; /** 报价汇率：1 单位报价币种折人民币（报价时预计的结汇汇率，非人民币报价才有）；随报价版本冻结，已发送版本不可改，报表“报价预计”口径取此值。 */ fxRate?:string; /** 版本链：V1 无 previousId；新版本不覆盖旧版本。 */ revision?:number; rootId?:string; previousId?:string;costingSnapshots?:QuoteCostSnapshot[];feedback?:QuoteFeedbackRecord[]; /** BB-QUO-6 生成的报价单文件记录；只追加，仅由生成命令写入。 */ documents?:QuoteDocumentRecord[] };
 export type MarketLookbook = RecordBase & { name:string; customerId:string; productIds:string[]; status:'Draft'|'Prepared'|'Archived'; preparedAt:string|null; snapshots:Array<{id:string;sku:string;name:string;specification:string}> };
 export type MarketState = { products:MarketProduct[]; suppliers:MarketSupplier[]; relations:MarketRelation[]; seasons:MarketSeason[]; trends:MarketTrend[]; shows:MarketShow[]; campaigns:MarketCampaign[]; leads:MarketLead[]; quotations:MarketQuotation[]; lookbooks:MarketLookbook[]; /** BB-QUO-3 定价参数：最低毛利率版本，只追加不改写。 */ marginFloors?:QuoteMarginFloor[] };
@@ -109,7 +109,15 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  throw new MistCommandError('VALIDATION','未知市场操作');
 }
 export function getMarketReviews(rootState:MistState):MistReviewTask[] {
- return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},details:approval.details,fileIds:approval.fileIds})));
+ return ((rootState as MistState&{market?:MarketState}).market?.quotations||[]).flatMap(q=>[...(q.approvalHistory||[]),...(q.approval?[q.approval]:[])].map(approval=>({id:approval.id,kind:'quotation' as const,entityId:q.id,title:q.code+' 报价审批',requesterId:approval.requesterId,reviewerIds:[approval.reviewerId],status:approval.status,submittedAt:approval.submittedAt,requiredPermission:'quotations:approve',target:{view:'quotations',id:q.id},details:quoteApprovalDisplayDetails(approval.details),fileIds:approval.fileIds})));
+}
+/** Present old frozen evidence without changing its stored facts or audit identifiers. */
+function quoteApprovalDisplayDetails(details:MarketQuoteApproval['details']):MarketQuoteApproval['details']{
+ return details.map(row=>{
+  if(row.label==='核算快照')return {label:'核算依据',value:row.value.replace(/^[^;\n]+ \/ quote-cost-[^;\n]+;\s*(supplier|breakdown);\s*/,(_,mode)=>mode==='supplier'?'供应商报价；':'分项核算；').replace(/;\s*margin\s+([^;]+);/,'；目标销售毛利率 $1；').replace(/;\s*markup\s+([^;]+);/,'；成本加成率 $1；')};
+  if(row.label==='本行整笔费用分摊')return {...row,value:row.value.replace(/^[A-Za-z0-9_-]+;\s*(?=\d)/,'')};
+  return row;
+ });
 }
 export function applyMarketCommand(rootState:MistState,command:MarketCommand,context:MistContext):MistCommandResult { return execute(rootState,command,context); }
 
@@ -154,7 +162,7 @@ function sourceLine(root:MistState,m:MarketState,input:Omit<MarketQuoteLine,'id'
  validateSource(root,sourceDevId,sourceVersionId);
  const price=decimal(input.price,'单价').text,qty=decimal(input.qty,'数量',4,true).text,product=productId?find(m.products,productId,'产品'):undefined;
  const costBasis=product&&product.currency===quoteCurrency&&decimal(product.cost,'产品成本').minor>BigInt(0)?'product':'unverified';
- const cost=costBasis==='product'?product!.cost:input.cost?decimal(input.cost,'参考成本价').text:'';
+ const cost=costBasis==='product'?product!.cost:input.cost?decimal(input.cost,'参考成本价',4).text:'';
  const unit=str(input.unit,'单位'),family=quoteLineFamily(root,m,{productId,sourceDevId}),units=quoteUnitOptions(family);
  if(units&&!units.includes(unit))fail(`${QUOTE_FAMILY_LABEL[family!]}条目「${str(input.name,'品名')}」计价单位只能是 ${units.join(' / ')}，不能用“${unit}”；不自动换算`);
  const name=str(input.name,'品名'),specs=family?normalizeQuoteSpecs(family,(input as {specs?:unknown}).specs,QUOTE_UNITS[family],name,fail):{};
@@ -226,11 +234,11 @@ export function prepareQuotationDocumentSnapshot(root:MistState,payload:{id:unkn
  if(!ctx.actorId)fail('缺少真实生成人');
  return buildQuotationDocumentSnapshot({q,issuer:issuer!,customer:customer!,family:l=>quoteLineFamily(root,m!,l),draft:payload.draft as boolean,date:marketBusinessDate(ctx.now),now:ctx.now,actorName:ctx.actorName,actorId:ctx.actorId!});
 }
-export function quotationNeedsApproval(q:MarketQuotation){return q.requiresApproval===true||q.lines.some(l=>l.costBasis==='unverified'||!l.cost||decimal(l.price,'单价').minor<decimal(l.cost,'成本').minor||lineBelowMarginFloor(l));}
+export function quotationNeedsApproval(q:MarketQuotation){return q.requiresApproval===true||q.lines.some(l=>l.costBasis==='unverified'||!l.cost||decimal(l.price,'单价',4).minor<decimal(l.cost,'成本',4).minor||lineBelowMarginFloor(l));}
 /** 低于保存时冻结的最低毛利率的条目（与“低于成本 / 成本未核实”并存）。 */
 export function quotationMarginFloorBreaches(q:Pick<MarketQuotation,'lines'>){return q.lines.filter(l=>lineBelowMarginFloor(l)).map(l=>({line:l,margin:quoteLineMarginPercent(l.price,l.cost),floor:l.marginFloor!}));}
 function archiveApproval(q:MarketQuotation){
- if(q.approval&&!q.approvalHistory?.some(a=>a.id===q.approval!.id))q.approvalHistory=[...(q.approvalHistory||[]),{...q.approval,details:q.approval.details.map(d=>({...d})),fileIds:[...q.approval.fileIds]}];
+ if(q.approval&&!q.approvalHistory?.some(a=>a.id===q.approval!.id))q.approvalHistory=[...(q.approvalHistory||[]),{...q.approval,details:q.approval.details.map(d=>({...d})),fileIds:[...q.approval.fileIds],...(q.approval.costingRefs?{costingRefs:q.approval.costingRefs.map(ref=>({...ref}))}:{})}];
 }
 function customerRelation(root:MistState,m:MarketState,customerId:string,ctx:MistContext){
  const customer=find(root.customers,customerId,'客户');let relation=m.relations.find(r=>r.customerId===customerId);
@@ -359,14 +367,16 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const requesterId = ctx.actorId, reviewerId = ctx.authority?.businessReviewerId;
    if (!requesterId || !reviewerId || reviewerId === requesterId) fail('未能解析独立的业务审批负责人', 'PRECONDITION');
    archiveApproval(q);q.requiresApproval=true;
+   const costing=activeQuoteCostSnapshots(q);
    const approval: MarketQuoteApproval = {
     id: ctx.id(), requesterId, reviewerId, status: 'pending', submittedAt: ctx.now, fileIds: [...new Set([...q.fileIds,...activeQuoteCostSnapshots(q).flatMap(x=>x.input.fileIds)])],
+    costingRefs:costing.map(x=>({lineId:x.lineId,snapshotId:x.id,modelVersion:x.modelVersion})),
     details: [
      {label:'报价',value:q.code}, {label:'客户',value:find(root.customers,q.customerId,'客户').name},
      {label:'金额',value:q.currency+' '+q.total}, {label:'贸易与付款',value:q.deliveryTerms+' / '+q.paymentTerms},
      {label:'有效期',value:q.validUntil},
-     ...activeQuoteCostSnapshots(q).map(x=>({label:'核算快照',value:`${x.id} / ${x.modelVersion}; ${x.input.mode}; ${x.input.currency}/${x.input.unit}; 成本 ${x.result.cost}; ${x.input.method} ${x.input.targetPercent}%; 人工拟报价 ${x.result.proposedPrice}; 依据 ${x.input.basis}; 策略 ${x.input.strategyBasis}`})),
-     ...activeQuoteCostSnapshots(q).filter(x=>x.result.allocation).map(x=>({label:'本行整笔费用分摊',value:`${x.id}; ${x.result.allocation!.total} ${x.input.currency} / ${x.result.allocation!.quantity} ${x.input.unit} = 单位 ${x.result.allocation!.unitCost} ${x.input.currency}; 仅本行参考，不是实际费用归属`})),
+     ...costing.map(x=>({label:'核算依据',value:`${x.input.mode==='supplier'?'供应商报价':'分项核算'}；单位参考成本 ${x.result.cost} ${x.input.currency}/${x.input.unit}；${x.input.method==='margin'?'目标销售毛利率':'成本加成率'} ${x.input.targetPercent}%；人工拟报价 ${x.result.proposedPrice} ${x.input.currency}/${x.input.unit}；依据 ${x.input.basis}；策略 ${x.input.strategyBasis}`})),
+     ...costing.filter(x=>x.result.allocation).map(x=>({label:'本行整笔费用分摊',value:`${x.result.allocation!.total} ${x.input.currency} ÷ ${x.result.allocation!.quantity} ${x.input.unit} = ${x.result.allocation!.unitCost} ${x.input.currency}/${x.input.unit}；仅本报价行`})),
      ...activeQuoteCostSnapshots(q).filter(x=>x.historyEvidence).map(x=>({label:'人工历史依据',value:`${x.id}; ${x.historyEvidence!.version}; ${x.historyEvidence!.source.quoteCode} / ${x.historyEvidence!.source.lineId}; ${x.historyEvidence!.source.status}; ${x.historyEvidence!.source.line.price} ${x.historyEvidence!.source.currency}/${x.historyEvidence!.source.line.unit}; 采用理由与差异处理 ${x.historyEvidence!.reason}`})),
      ...q.lines.map(l=>{const family=quoteLineFamily(root,m,l);return {label:l.name+' / '+l.style,value:`${l.qty} ${l.unit} × ${l.price} = ${l.amount}; 成本 ${l.cost||'未填写'}; 来源 ${quoteLineSourceLabel(root,m,l)}${family?'; 规格 '+quoteSpecSummary(family,l.specs):''}`};}),
      ...[...new Map(q.lines.filter(l=>l.marginFloor).map(l=>[l.marginFloor!.id,l.marginFloor!])).values()].map(f=>({label:'适用最低毛利率',value:marginFloorText(f)})),

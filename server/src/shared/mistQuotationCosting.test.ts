@@ -1,4 +1,5 @@
 import { quotationHistorySource } from "./mistQuotationHistoryEvidence";
+import { getMarketReviews } from "./mistMarket";
 import { describe, it, expect } from "vitest";
 import {
   calculateQuoteCosting,
@@ -151,6 +152,25 @@ function setup() {
   return { ctx, run, q, command, qi, id, supplier, state: () => s };
 }
 describe("quote-cost-v1 deterministic costing", () => {
+  it("keeps four-decimal unit cost through writeback, review and a returned quote edit", () => {
+    const t=setup();
+    t.run({type:'market.quotation.save',payload:{id:t.id,input:{...t.qi,lines:t.qi.lines.map((line,i)=>i===0?{...line,qty:'5000',price:'3.80'}:line)}}});
+    t.run(t.command({applyPrice:true,input:{...input(),supplierId:t.supplier,supplierPrice:'1.9167',allocationQuantity:'5000',method:'margin',targetPercent:'30',proposedPrice:'3.80',components:[component({scope:'per_line',lineOnlyConfirmed:true,unit:'票',unitPrice:'398.3333'})]}}));
+    const snapshot=t.q().costingSnapshots![0];expect(snapshot.result.cost).toBe('1.9964');expect(snapshot.result.approvalCost).toBe('1.9964');expect(t.q().lines[0].cost).toBe('1.9964');
+    t.run({type:'market.quotation.submit',payload:{id:t.id}});const approval=structuredClone(t.q().approval!);
+    expect(approval.costingRefs).toEqual([{lineId:t.q().lines[0].id,snapshotId:snapshot.id,modelVersion:snapshot.modelVersion}]);
+    const details=getMarketReviews(t.state())[0].details;expect(details.find(d=>d.label==='核算依据')?.value).toContain('1.9964');expect(details.find(d=>d.label.startsWith('条目毛利率'))?.value).toContain('47.46%');expect(details.map(d=>d.value).join('\n')).not.toContain(snapshot.id);expect(details.map(d=>d.value).join('\n')).not.toContain(snapshot.modelVersion);
+    t.run({type:'market.quotation.decide',payload:{id:t.id,decision:'rejected',note:'补交期'}},{...t.ctx,actorId:'reviewer'});
+    t.state().market.products[0].cost='0';
+    t.run({type:'market.quotation.save',payload:{id:t.id,input:{...t.qi,lines:t.q().lines.map(line=>({...line})),note:'补充交期'}}});
+    expect(t.q().lines[0].cost).toBe('1.9964');expect(t.q().approvalHistory![0].details).toEqual(approval.details);expect(t.q().costingSnapshots![0]).toEqual(snapshot);
+  });
+  it('projects legacy technical evidence without rewriting its stored approval',()=>{
+    const t=setup();t.run(t.command());t.run({type:'market.quotation.submit',payload:{id:t.id}});
+    t.q().approval!.details=[{label:'核算快照',value:'legacy-cost / quote-cost-line-allocation-v2; supplier; USD/米; 成本 1.9964; margin 30.0000%; 人工拟报价 3.80; 依据 报价单; 策略 目标毛利'},{label:'本行整笔费用分摊',value:'legacy-cost; 398.3333 USD / 5000.0000 米 = 单位 0.0797 USD; 仅本行参考，不是实际费用归属'}];
+    const before=JSON.stringify(t.state()),details=getMarketReviews(t.state())[0].details;
+    expect(details[0].label).toBe('核算依据');expect(details[0].value).toContain('供应商报价');expect(details[0].value).toContain('目标销售毛利率');expect(details[0].value).not.toContain('legacy-cost');expect(details[0].value).not.toContain('quote-cost-');expect(details[1].value).not.toContain('legacy-cost');expect(JSON.stringify(t.state())).toBe(before);
+  });
   it("distinguishes markup from sales margin without rounding intermediate quantity", () => {
     expect(calculateQuoteCosting(input()).result).toMatchObject({
       cost: "100.0000",
@@ -205,7 +225,7 @@ describe("quote-cost-v1 deterministic costing", () => {
       ],
     }).result;
     expect(r.cost).toBe("8.6000");
-    expect(r.approvalCost).toBe("8.60");
+    expect(r.approvalCost).toBe("8.6000");
   });
   it.each(["", "1e3", "-1", "NaN", "0.00001", "10000000000"])(
     "rejects invalid explicit decimal %s",
@@ -254,7 +274,7 @@ describe("exact quote-line snapshots and approval handoff", () => {
       snapshotId: expect.any(String),
     });
     expect(t.q().lines[0]).toMatchObject({
-      cost: "100.00",
+      cost: "100.0000",
       costBasis: "unverified",
       price: "20",
       amount: "200.00",
@@ -372,10 +392,11 @@ describe("exact quote-line snapshots and approval handoff", () => {
     t.run({ type: "market.quotation.submit", payload: { id: t.id } });
     const details = t
       .q()
-      .approval!.details.filter((d) => d.label === "核算快照");
+      .approval!.details.filter((d) => d.label === "核算依据");
     expect(details).toHaveLength(1);
-    expect(details[0].value).toContain(t.q().costingSnapshots![1].id);
-    expect(details[0].value).not.toContain(t.q().costingSnapshots![0].id);
+    expect(t.q().approval!.costingRefs!.map(ref=>ref.snapshotId)).toEqual([t.q().costingSnapshots![1].id]);
+    expect(details[0].value).not.toContain(t.q().costingSnapshots![1].id);
+    expect(details[0].value).toContain('10.0000%');
   });
   it("includes latest exact file provenance but not replaced historical costing files in approval", () => {
     const t = setup();
@@ -633,10 +654,10 @@ describe("exact quote-line fixed fee allocation", () => {
       lineOnlyConfirmed: true,
     });
     expect(quoteCostModelVersion(r.input)).toBe(
-      "quote-cost-line-allocation-v2",
+      "quote-cost-line-allocation-v3",
     );
     expect(quoteCostModelVersion(calculateQuoteCosting(input()).input)).toBe(
-      "quote-cost-v1",
+      "quote-cost-v3",
     );
     expect(calculateQuoteCosting(input()).result.allocation).toBeUndefined();
   });
@@ -750,7 +771,7 @@ describe("exact quote-line fixed fee allocation", () => {
       }),
     );
     const snap = t.q().costingSnapshots![0];
-    expect(snap.modelVersion).toBe("quote-cost-line-allocation-v2");
+    expect(snap.modelVersion).toBe("quote-cost-line-allocation-v3");
     expect(snap.result.cost).toBe("110.0000");
     expect(t.q().lines[1]).toEqual(other);
     expect(t.q().lines[0].price).toBe("20");
@@ -759,7 +780,7 @@ describe("exact quote-line fixed fee allocation", () => {
     expect(
       t.q().approval!.details.find((d) => d.label === "本行整笔费用分摊")
         ?.value,
-    ).toContain("100.0000 USD / 10.0000 米");
+    ).toContain("100.0000 USD ÷ 10.0000 米");
     t.q().lines[0].qty = "20";
     expect(activeQuoteCostSnapshots(t.q())).toHaveLength(0);
     expect(snap.result.allocation?.quantity).toBe("10.0000");
