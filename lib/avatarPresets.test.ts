@@ -36,3 +36,16 @@ it('writes the exact shared palette background into every explored style while r
   if(family==='glyphs')expect(svg).not.toMatch(/<path fill="white" d="M0 0h72v72H0z"\/><path opacity="\.2"/);
  }
 });
+
+it('retains the selected background and introduces distinct artwork colors for new patterns',async()=>{
+ const {AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
+ for(const color of AVATAR_COLORS){let changed=0;for(const family of ['glyphs','glass','waves','weave','slice']){
+  const svg=decodeURIComponent(generateAvatar(family,`p${color.id}_v9_12_12_shared-0`,false).split(',')[1]);
+  expect(svg).toContain(`data-bambook-background="${color.id}"`);
+  expect(svg.toLowerCase()).toContain(`fill="${color.value.toLowerCase()}"`);
+  const old=generateAvatar(family,`p${color.id}_v8_12_12_shared-0`,false);
+  if(generateAvatar(family,`p${color.id}_v9_12_12_shared-0`,false)!==old)changed++;
+  // Some original motifs only contain one shape; it must remain visible on the background.
+  expect(new Set((svg.match(/#[0-9a-f]{6}(?![0-9a-f])/gi)||[]).map(v=>v.toLowerCase())).size).toBeGreaterThanOrEqual(2);
+ }expect(changed).toBeGreaterThan(0);}
+});
