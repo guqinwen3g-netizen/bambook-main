@@ -78,3 +78,22 @@ it('opens the organization menu in collapsed navigation and handles keyboard foc
     expect(document.activeElement).toBe(trigger);
   } finally { act(() => root.unmount()); host.remove(); }
 });
+
+it('closes a department-only menu with Escape even when it has no focusable items', () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const host = document.createElement('div'); document.body.append(host);
+  const root = createRoot(host);
+  function Example() {
+    const [open, setOpen] = React.useState(false);
+    return <MistSidebarPresentation sections={[]} activeId="account" onNavigate={()=>{}} collapsed={false} onToggleCollapsed={()=>{}} account={{name:'Test'}} workspace={{symbol:'D',name:'Department',expanded:open,onClick:()=>setOpen(value=>!value),disclosure:<p>No groups</p>}}/>;
+  }
+  try {
+    act(()=>root.render(<Example/>));
+    const trigger=host.querySelector<HTMLButtonElement>('.mist-ws')!;
+    act(()=>{trigger.focus();trigger.click();});
+    expect(host.querySelector('#mist-organization')).not.toBeNull();
+    act(()=>trigger.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+    expect(host.querySelector('#mist-organization')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  } finally { act(()=>root.unmount());host.remove(); }
+});
