@@ -127,9 +127,8 @@ export function selfRegistrationRouter(options: Options) {
       const company = await options.prisma.$transaction(async tx => {
         await tx.userAccount.create({ data: { id: userId, displayName: account.displayName, email: account.email, passwordHash, status: 'active', metadata: metadata(req, { selfRegistration: 'company' }) } });
         const defaults = await readCompanyDefaults(tx);
-        const created = await createCompany(tx, { slug: code, name: companyName, plan: defaults.plan, seatLimit: defaults.seatLimit, ownerUserId: userId, ownerJobTitle: '管理员' });
-        if (business || size) await tx.company.update({ where: { id: created.company.id }, data: { settings: { registration: { ...(business ? { business } : {}), ...(size ? { size } : {}) } } } });
-        await tx.userRole.create({ data: { id: `ur_${userId}_${SYSTEM_ROLE_IDS.SUPER_ADMIN}@${created.company.id}`, userId, roleId: `${SYSTEM_ROLE_IDS.SUPER_ADMIN}@${created.company.id}`, departmentId: `dept-company@${created.company.id}` } });
+        const created = await createCompany(tx, { slug: code, name: companyName, plan: defaults.plan, seatLimit: defaults.seatLimit, ownerUserId: userId });
+        if (business || size) await tx.company.update({ where: { id: created.company.id }, data: { settings: { ...((created.company.settings as Record<string, unknown>) ?? {}), registration: { ...(business ? { business } : {}), ...(size ? { size } : {}) } } } });
         await tx.auditLog.create({ data: { id: randomUUID(), actorId: userId, action: 'platform.company.self_register', targetType: 'Company', targetId: created.company.id, detail: { name: companyName, code, adminEmail: account.email }, ip: req.ip } });
         return created.company;
       });

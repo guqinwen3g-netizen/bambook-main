@@ -22,6 +22,7 @@ import { departmentAuthorization } from './departmentAuthorization';
  *     迁移到 requirePermission('xxx:write') 基于 scope 的更精确校验。
  */
 import type { PrismaClient } from '@prisma/client';
+import { COMPANY_ADMINISTRATION_SCOPES, isCompanyAdministrator } from './companyAdministration';
 import type { AgentRole } from '../agent/types';
 import type { TokenPayload } from './service';
 import { businessError } from '../shared/errorCodes';
@@ -119,7 +120,7 @@ const SENSITIVE_MASK_NUMBER = null as unknown as number; // 数字用 null，前
  * Query failures propagate: an unknown grant set is never an empty loaded set.
  */
 export async function loadEffectivePermissionScopes(
-  prisma: Pick<PrismaClient, 'userPermissionOverrides'>,
+  prisma: Pick<PrismaClient, 'userPermissionOverrides'> & Partial<Pick<PrismaClient, 'companyMember'>>,
   userId: string,
   roleScopes: Iterable<string>,
   companyId = currentCompanyId(),
@@ -133,6 +134,10 @@ export async function loadEffectivePermissionScopes(
     select: { scope: true },
   });
   for (const grant of overrides) if (grant.scope) scopes.add(grant.scope);
+  if (companyId && typeof prisma.companyMember?.findFirst === 'function') {
+    const membership = await prisma.companyMember.findFirst({where:{companyId,userId,status:'active'},include:{company:true}});
+    if (membership?.companyId === companyId && membership.company?.id === companyId && isCompanyAdministrator(membership,userId)) for (const scope of COMPANY_ADMINISTRATION_SCOPES) scopes.add(scope);
+  }
   return Array.from(scopes).sort();
 }
 

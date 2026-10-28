@@ -37,7 +37,7 @@ const company = { companyName: '雾织贸易', displayName: '沈霁', email: 'Ow
 const join = { companyCode: 'wuzhimaoyi', displayName: '林澈', email: 'staff@example.test', password: STRONG, code: '123456' };
 
 describe('self-service company registration', () => {
-  it('creates the company with an active super-admin owner and records it for the platform', async () => {
+  it('creates the company administrator without implicitly assigning a general-manager role', async () => {
     const res = await request(app()).post('/auth/register/company').send(company);
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ ok: true, company: { name: '雾织贸易', code: 'wuzhimaoyi' }, email: 'owner@example.test' });
@@ -45,7 +45,7 @@ describe('self-service company registration', () => {
     const user = prisma.userAccount.create.mock.calls[0][0].data;
     expect(user).toMatchObject({ displayName: '沈霁', email: 'owner@example.test', passwordHash: 'hash:' + STRONG, status: 'active' });
     expect(provisioning.createCompany.mock.calls[0][1]).toMatchObject({ slug: 'wuzhimaoyi', name: '雾织贸易', plan: 'standard', seatLimit: 20, ownerUserId: user.id });
-    expect(prisma.userRole.create.mock.calls[0][0].data).toMatchObject({ userId: user.id, roleId: 'role-super-admin@co-new', departmentId: 'dept-company@co-new' });
+    expect(prisma.userRole.create).not.toHaveBeenCalled();
     expect(prisma.auditLog.create.mock.calls[0][0].data).toMatchObject({ action: 'platform.company.self_register', targetId: 'co-new' });
     expect(JSON.stringify(prisma.auditLog.create.mock.calls)).not.toContain(STRONG);
   });

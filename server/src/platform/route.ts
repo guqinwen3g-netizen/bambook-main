@@ -5,9 +5,11 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { createAuthService } from '../auth/service';
 import { pickRequestToken } from '../auth/middleware';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
-import { createCompany } from './companyProvisioning';
+import { createCompany, companyRoleId, COMPANY_SYSTEM_ROLE_CODES } from './companyProvisioning';
+import { companyAdministratorIds } from '../auth/companyAdministration';
+import { passwordProblem } from '../auth/passwordPolicy';
 import { platformSettingsRouter, readCompanyDefaults } from './settings';
-import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
+import { SYSTEM_ROLE_IDS, SYSTEM_ROLE_META, type SystemRoleId } from '../_shared/rolePermissionMatrix';
 import { logger } from '../lib/logger';
 import { CompanyAccessError } from '../auth/companyAccess';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles, serializeAuthUser, platformCompanyUser } from '../auth/tokenHelpers';
@@ -171,14 +173,18 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
     const ownerEmail = typeof body.ownerEmail === 'string' ? body.ownerEmail.trim().toLowerCase() : '';
     const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
-
+    const ownerRoleCode = typeof body.ownerRoleCode === 'string' ? body.ownerRoleCode.trim() : '';
+    const deliveryMode = body.deliveryMode ?? 'invite';
+    if (!['invite','password'].includes(deliveryMode)) return res.status(400).json({ok:false,error:'VALIDATION_FAILED',message:'请选择账号开通方式。'});
+    if (ownerRoleCode && !COMPANY_SYSTEM_ROLE_CODES.includes(ownerRoleCode)) return res.status(400).json({ok:false,error:'INVALID_ROLE',message:'请选择有效的业务岗位。'});
+    if (deliveryMode === 'password') { const weak = passwordProblem(body.initialPassword); if (weak) return res.status(400).json({ok:false,error:'WEAK_PASSWORD',message:weak}); }
 
     if (!name) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写公司名称。' });
     if (!SLUG_PATTERN.test(slug)) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '公司标识只能用小写字母、数字和连字符，2–50 位。' });
     }
     if (!EMAIL_PATTERN.test(ownerEmail)) {
-      return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写有效的所有者邮箱。' });
+      return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写有效的管理员登录邮箱。' });
     }
 
     if (body.seatLimit != null && (!Number.isInteger(body.seatLimit) || body.seatLimit < 1)) return res.status(400).json({ ok: false, error: 'INVALID_SEAT_LIMIT', message: '席位上限须为正整数。' });
@@ -199,12 +205,13 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       if (owner && owner.status !== 'active') {
         return res.status(409).json({ ok: false, error: 'OWNER_ACCOUNT_INACTIVE', message: '该邮箱对应的账号未启用，请先在账号管理里处理。' });
       }
-      const password = randomBytes(32).toString('base64url');
+      if (owner && deliveryMode === 'password') return res.status(409).json({ok:false,error:'ACCOUNT_EXISTS',message:'该账号已存在，请使用邀请方式；开通公司不会更改原账号密码。'});
+      const password = deliveryMode === 'password' ? body.initialPassword : randomBytes(32).toString('base64url');
       const passwordHash = ownerUserId ? null : await auth.hashPassword(password);
 
       const result = await options.prisma.$transaction(async (tx) => {
         if (!ownerUserId) {
-          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active', metadata: { forceChangePassword: true } } });
+          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active', metadata: { forceChangePassword: deliveryMode !== 'password' } } });
           ownerUserId = account.id;
         }
         const defaults = await readCompanyDefaults(tx);
@@ -216,14 +223,14 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
           plan: typeof body.plan === 'string' && body.plan.trim() ? body.plan.trim() : defaults.plan,
           seatLimit: body.seatLimit === undefined ? defaults.seatLimit : body.seatLimit,
           ownerUserId,
-          ownerJobTitle: typeof body.ownerJobTitle === 'string' ? body.ownerJobTitle.trim() : '总经理',
+          ownerJobTitle: ownerRoleCode ? SYSTEM_ROLE_META[ownerRoleCode as SystemRoleId].name : null,
         });
-        // 所有者拿到本公司的超级管理员角色。
-        await tx.userRole.create({
+        // Business role is explicit; system administration never implies general-manager powers.
+        if (ownerRoleCode) await tx.userRole.create({
           data: {
-            id: `ur_${ownerUserId}_${SYSTEM_ROLE_IDS.SUPER_ADMIN}@${created.company.id}`,
+            id: `ur_${ownerUserId}_${ownerRoleCode}@${created.company.id}`,
             userId: ownerUserId!,
-            roleId: `${SYSTEM_ROLE_IDS.SUPER_ADMIN}@${created.company.id}`,
+            roleId: companyRoleId(ownerRoleCode, created.company.id),
             departmentId: `dept-company@${created.company.id}`,
           },
         });
@@ -231,9 +238,9 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       });
 
       if (ownerUserId) invalidateAccountStatusCache(ownerUserId);
-      await audit(admin.userId, 'platform.company.create', result.company.id, { slug, name, ownerEmail });
+      await audit(admin.userId, 'platform.company.create', result.company.id, { slug, name, ownerEmail, ownerRoleCode, deliveryMode });
 
-      const invitation = await access.deliver(ownerUserId!, 'invite', admin.userId, result.company.name);
+      const invitation = deliveryMode === 'password' ? {status:'manual',message:'账号已开通。'} : await access.deliver(ownerUserId!, 'invite', admin.userId, result.company.name);
       return res.status(201).json({
         ok: true,
         company: {
@@ -296,9 +303,11 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
     try {
       const rows = await options.prisma.companyMember.findMany({
         where: { companyId: req.params.id },
-        include: { user: { select: { id: true, displayName: true, email: true, status: true, metadata:true } } },
+        include: { user: { select: { id: true, displayName: true, email: true, status: true, metadata:true,roles:{where:{role:{companyId:req.params.id}},include:{role:{select:{name:true}}}} } } },
         orderBy: { createdAt: 'asc' },
       });
+      const company = await options.prisma.company.findUnique({where:{id:req.params.id},select:{settings:true}});
+      const administrators = companyAdministratorIds(company?.settings);
       return res.json({
         ok: true,
         members: rows.map((row) => ({
@@ -307,7 +316,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
           email: row.user.email,
           accountStatus: row.user.status,
           memberStatus: row.status,
-          jobTitle: row.jobTitle,
+          jobTitle: row.user.roles.map(item=>item.role.name).join('、') || null,
+          companyAdministrator: administrators.includes(row.userId),
           joinedAt: row.joinedAt,
           invitation: invitationSummary(row.user.metadata),
         })),
@@ -367,9 +377,11 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
         await tx.$queryRawUnsafe('SELECT "id" FROM "Company" WHERE "id"=$1::uuid FOR UPDATE', companyId);
         const ownerRole = await tx.userRole.findFirst({ where: { userId, role: { companyId, code: SYSTEM_ROLE_IDS.SUPER_ADMIN } } });
         if (ownerRole && await tx.companyMember.count({ where: { companyId, status: 'active', userId: { not: userId }, user: { status: 'active', deletedAt: null, roles: { some: { role: { companyId, code: SYSTEM_ROLE_IDS.SUPER_ADMIN } } } } } }) === 0) return false;
+        const company = await tx.company.findUnique({where:{id:companyId},select:{settings:true}}), administrators = companyAdministratorIds(company?.settings);
+        if (administrators.includes(userId) && await tx.companyMember.count({where:{companyId,status:'active',userId:{not:userId},user:{status:'active',deletedAt:null},OR:[{userId:{in:administrators}},{user:{roles:{some:{role:{companyId,code:SYSTEM_ROLE_IDS.SUPER_ADMIN}}}}}]}}) === 0) return false;
         await tx.companyMember.update({ where: { companyId_userId: { companyId, userId } }, data: { status: 'left' } }); return true;
       });
-      if (!removed) return res.status(409).json({ ok: false, error: 'LAST_OWNER', message: '不能移除公司的最后一位负责人，请先安排接替人。' });
+      if (!removed) return res.status(409).json({ ok: false, error: 'LAST_OWNER', message: '不能移除公司的最后一位管理员或总经理，请先安排接替人。' });
       await audit(admin.userId, 'platform.company.member.remove', req.params.id, { userId: req.params.userId });
       return res.json({ ok: true });
     } catch (error: any) {

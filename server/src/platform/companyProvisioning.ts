@@ -66,8 +66,8 @@ export type CreateCompanyInput = {
 };
 
 /**
- * 创建一家公司并完成最小初始化：公司记录、系统角色、默认部门、老板成员关系。
- * 不创建公司——老板首次登录时按现有逻辑自动建立空白公司。
+ * 创建公司、系统角色、默认部门和管理员成员关系；业务岗位由开通表单独立指定。
+ * 不预置经营记录，首次进入时按现有逻辑建立空白公司库。
  */
 export async function createCompany(tx: Prisma.TransactionClient, input: CreateCompanyInput) {
   if (input.ownerUserId && (await tx.userAccount.findUnique({ where: { id: input.ownerUserId }, select: { platformRole: true } }))?.platformRole) throw new Error('平台人员账号不能成为公司负责人。');
@@ -81,6 +81,7 @@ export async function createCompany(tx: Prisma.TransactionClient, input: CreateC
       plan: input.plan ?? 'standard',
       seatLimit: input.seatLimit ?? null,
       status: 'active',
+      ...(input.ownerUserId ? { settings: { administratorIds: [input.ownerUserId] } } : {}),
     },
   });
 
@@ -106,7 +107,7 @@ export async function createCompany(tx: Prisma.TransactionClient, input: CreateC
         companyId: company.id,
         userId: input.ownerUserId,
         status: 'active',
-        jobTitle: input.ownerJobTitle ?? '总经理',
+        jobTitle: input.ownerJobTitle ?? null,
         joinedAt: new Date(),
       },
     });

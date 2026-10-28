@@ -13,7 +13,7 @@ it('denies company-only administrators without requesting platform data',async()
 it('shows a real empty state',async()=>{m.api.list.mockResolvedValue({companies:[]});await render();await wait(()=>expect(document.body.textContent).toContain('尚未开通公司'));});
 it('retries failed loading',async()=>{m.api.list.mockRejectedValueOnce(new Error('连接失败'));await render();await wait(()=>expect(document.body.textContent).toContain('连接失败'));await act(async()=>text('刷新').click());await wait(()=>expect(document.body.textContent).toContain('雾织贸易'));});
 it('filters company list without modifying data',async()=>{await render();await wait(()=>expect(document.body.textContent).toContain('雾织贸易'));await act(async()=>fill('搜索公司','不存在'));expect(document.body.textContent).toContain('没有匹配的公司');expect(m.api.update).not.toHaveBeenCalled();});
-it('validates create and reports invitation delivery after success',async()=>{m.api.create.mockResolvedValue({company,owner:{email:'owner@example.invalid'},invitation:{status:'sent',message:'邀请邮件已提交发送'}});await render();await act(async()=>text('开通公司').click());await act(async()=>text('确认开通').click());expect(m.api.create).not.toHaveBeenCalled();await act(async()=>{fill('公司名称','雾织贸易');fill('公司标识','mistweave');fill('负责人姓名','沈霁');fill('负责人邮箱','owner@example.invalid');});await act(async()=>text('确认开通').click());await wait(()=>expect(document.body.textContent).toContain('邀请邮件已提交发送'));expect(m.api.create).toHaveBeenCalledWith(expect.objectContaining({ownerEmail:'owner@example.invalid',slug:'mistweave'}));await act(async()=>text('关闭').click());expect(document.body.textContent).not.toContain('邀请邮件已提交发送');});
+it('validates create and reports invitation delivery after success',async()=>{m.api.create.mockResolvedValue({company,owner:{email:'owner@example.invalid'},invitation:{status:'sent',message:'邀请邮件已提交发送'}});await render();await act(async()=>text('开通公司').click());await act(async()=>text('确认开通').click());expect(m.api.create).not.toHaveBeenCalled();await act(async()=>{fill('公司名称','雾织贸易');fill('公司标识','mistweave');fill('公司管理员姓名','沈霁');fill('管理员登录邮箱','owner@example.invalid');});await act(async()=>text('确认开通').click());await wait(()=>expect(document.body.textContent).toContain('邀请邮件已提交发送'));expect(m.api.create).toHaveBeenCalledWith(expect.objectContaining({ownerEmail:'owner@example.invalid',slug:'mistweave'}));await act(async()=>text('关闭').click());expect(document.body.textContent).not.toContain('邀请邮件已提交发送');});
 it('does not submit removal when cancelled',async()=>{m.api.members.mockResolvedValue({members:[{userId:'u1',displayName:'林澈',email:'lin@example.invalid',memberStatus:'active'}]});await render();await wait(()=>expect(text('管理')).toBeTruthy());await act(async()=>text('管理').click());await wait(()=>expect(text('移出公司')).toBeTruthy());await act(async()=>text('移出公司').click());await act(async()=>text('取消').click());expect(m.api.removeMember).not.toHaveBeenCalled();});
 it('discards a prior identity response',async()=>{let resolve!:(v:any)=>void;m.api.list.mockReturnValueOnce(new Promise(r=>resolve=r));await render();m.session={sessionKey:'two',user:{platformRole:null}};await render();await act(async()=>resolve({companies:[company]}));expect(document.body.textContent).not.toContain('雾织贸易');expect(document.body.textContent).toContain('需要平台管理员身份');});
 
@@ -31,4 +31,18 @@ it('labels a registration awaiting approval as pending, not disabled', () => {
   expect(memberState({ accountStatus: 'disabled', memberStatus: 'active' }).label).toBe('账号停用');
   expect(memberState({ accountStatus: 'rejected', memberStatus: 'pending' }).label).toBe('已拒绝');
   expect(memberState({ accountStatus: 'active', memberStatus: 'suspended' }).label).toBe('已暂停');
+});
+
+it('separates the administrator business job and explicit password onboarding from email delivery',async()=>{
+ m.api.create.mockResolvedValue({company:{...company,id:'manual'},owner:{email:'operator@example.invalid'},invitation:{status:'manual',message:'账号已开通。'}});
+ await render();await act(async()=>text('开通公司').click());
+ const choose=(label:string,value:string)=>{const e=document.querySelector(`[aria-label="${label}"]`) as HTMLSelectElement;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(e,value);e.dispatchEvent(new Event('change',{bubbles:true}));};
+ expect((document.querySelector('[aria-label="业务岗位"]') as HTMLSelectElement).value).toBe('');
+ await act(async()=>{fill('公司名称','青屿服饰');fill('公司标识','qingyu-demo');fill('公司管理员姓名','叶澄');fill('管理员登录邮箱','operator@example.invalid');choose('业务岗位','role-sales');choose('账号开通方式','password');});
+ await act(async()=>text('确认开通').click());expect(m.api.create).not.toHaveBeenCalled();
+ await act(async()=>fill('初始密码','DemoCompany7!'));await act(async()=>text('确认开通').click());
+ await wait(()=>expect(m.api.create).toHaveBeenCalled());
+ expect(m.api.create).toHaveBeenCalledWith(expect.objectContaining({ownerRoleCode:'role-sales',deliveryMode:'password',initialPassword:'DemoCompany7!'}));
+ expect(document.querySelector('[aria-label="初始密码"]')).toBeNull();
+ expect(document.body.textContent).not.toContain('DemoCompany7!');
 });

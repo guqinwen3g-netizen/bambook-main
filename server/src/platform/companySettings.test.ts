@@ -78,7 +78,10 @@ describe('platform company settings', () => {
   it('does not grant workspace ownership to an arbitrary company member', async () => {
     const f = fixture(); f.clear(); f.db.companyMember.findFirst.mockResolvedValue(null);
     await expect(f.service.update(prior, 'c1', { ...input, expectedRevision: 0 })).rejects.toMatchObject({ code: 'OWNER_REQUIRED' });
-    expect(f.db.companyMember.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ user: expect.objectContaining({ roles: expect.anything() }) }) }));
+    const where=f.db.companyMember.findFirst.mock.calls[0][0].where;
+    expect(where.user).toMatchObject({status:'active',deletedAt:null,platformRole:null});
+    expect(where.OR[0]).toEqual({userId:{in:[]}});
+    expect(where.OR[1].user.roles.some.role.companyId).toBe('c1');
     expect(f.db.mistWorkspace.create).not.toHaveBeenCalled();
   });
 });
