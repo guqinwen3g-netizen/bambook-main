@@ -93,6 +93,31 @@ describe('管理后台 · 账号', () => {
     expect(document.body.textContent).toContain('你不是「空间」的所有者');
     expect(button('AI 模型订阅')).toBeUndefined();
   });
+  it('automatically joins new company accounts without the retired workspace-owner authorization', async () => {
+    bridge.companyId = 'company-1'; bridge.roles = ['sales'];
+    await render(CompanyAdminPage, 'company-settings'); await click('新建账号');
+    expect(document.body.textContent).not.toContain('所有者');
+    await type(labelled('姓名'), '王宁'); await type(labelled('登录邮箱'), 'wang@example.invalid');
+    await type(labelled('初始密码'), 'SyntheticAccount7!'); await type(labelled('任职部门'), 'd1'); await type(labelled('岗位'), 'role-sales');
+    await click('创建账号');
+    expect(bridge.calls.some(c => c.method === 'POST' && c.url === '/api/admin/users')).toBe(true);
+    expect(bridge.changeMember).not.toHaveBeenCalled();
+  });
+  it('confirms first-manager appointment only when the server offers it for a new account', async () => {
+    bridge.companyId = 'company-1'; bridge.roles = ['sales'];
+    const accounts = bridge.routes['GET /api/admin/users'];
+    bridge.routes['GET /api/admin/users'] = () => ({ ...accounts(undefined), capabilities: { canAppointInitialGeneralManager: true } });
+    await render(CompanyAdminPage, 'company-settings'); await click('新建账号');
+    expect([...labelled('岗位').querySelectorAll('option')].map(o => o.value)).toContain('role-super-admin');
+    await type(labelled('姓名'), '王宁'); await type(labelled('登录邮箱'), 'wang@example.invalid');
+    await type(labelled('初始密码'), 'SyntheticAccount7!'); await type(labelled('任职部门'), 'd1'); await type(labelled('岗位'), 'role-super-admin');
+    await click('创建账号');
+    expect(bridge.calls.some(c => c.method === 'POST')).toBe(false);
+    expect(document.querySelector('.mist-dialog')?.textContent).toContain('全公司业务与审批权限');
+    await click('确认指定');
+    expect(bridge.calls.find(c => c.method === 'POST')?.body).toMatchObject({ appointInitialGeneralManager: true, roles: ['role-super-admin'] });
+    expect(bridge.changeMember).not.toHaveBeenCalled();
+  });
   it('lets the owner set module levels for a 岗位 after reviewing the diff, and keeps 老板 fixed', async () => {
     bridge.routes['GET /api/admin/permissions'] = () => ({ ok: true, permissions: ['orders:read', 'orders:write', 'orders:delete', 'reports:read', 'shipments:read', 'shipments:write'].map((scope, i) => ({ id: 'p' + i, scope, description: null })) });
     bridge.routes['PATCH /api/admin/roles/role-sales/permissions'] = () => ({ ok: true });

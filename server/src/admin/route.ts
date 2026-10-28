@@ -17,6 +17,7 @@ import { safeRouteError } from '../shared/routeError';
 import { createApprovalDecisionService, type OnApprovalDecided } from '../approvals/approvalDecisionService';
 import { createOrderMainApprovalService, OrderMainApprovalError } from '../orders/orderMainApprovalService';
 import { passwordProblem } from '../auth/passwordPolicy';
+import { initialGeneralManagerEligibility } from './initialGeneralManager';
 
 type AdminRouterOptions = {
   prisma: PrismaClient;
@@ -281,7 +282,9 @@ export function createAdminRouter(options: AdminRouterOptions) {
       orderBy: { name: 'asc' },
       select: { id: true, name: true, parentId: true },
     });
-    res.json({ ok: true, departments, users: users.map(u => ({
+    const capabilities = { canAppointInitialGeneralManager: !!companyId &&
+      await initialGeneralManagerEligibility(options.prisma, companyId, extractActorFromRequest(req)!.userId) === 'allowed' };
+    res.json({ ok: true, departments, capabilities, users: users.map(u => ({
       id: u.id,
       displayName: u.displayName,
       email: u.email,
@@ -301,7 +304,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
   }));
 
   router.post('/users', withRouteErrorGuard(async (req: Request, res: Response) => {
-    const { displayName, email, password, roles, departmentId } = req.body || {};
+    const { displayName, email, password, roles, departmentId, appointInitialGeneralManager } = req.body || {};
     if (!displayName || !email || !password) {
       return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: 'displayName, email, password are required.' });
     }
@@ -312,6 +315,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${departmentId}` });
     }
     const existing = await options.prisma.userAccount.findFirst({ where: { email } });
+    if (appointInitialGeneralManager === true && existing) return res.status(409).json({ ok: false, error: 'ACCOUNT_EXISTS', message: '请为首位总经理新建独立账号。' });
     if (existing?.platformRole) return res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '平台人员不能作为公司账号使用。' });
     if (existing && existing.status !== 'disabled' && existing.deletedAt === null) {
       return res.status(409).json({ ok: false, error: 'DUPLICATE', message: 'Email already in use.' });
@@ -328,7 +332,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
         if (companyId && (role as any).companyId !== companyId) {
           return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '只能授予本公司岗位。' });
         }
-        if (isSuperAdminRole(role) && !actorIsOwner(req)) {
+        if (isSuperAdminRole(role) && !actorIsOwner(req) && appointInitialGeneralManager !== true) {
           return res.status(403).json({ ok: false, error: 'FORBIDDEN', message: '总经理岗位只能由总经理授予。' });
         }
         resolvedRoles.push(role);
@@ -336,12 +340,22 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
     const passwordHash = await auth.hashPassword(password);
 
+    const initialAppointment = appointInitialGeneralManager === true;
+    if (initialAppointment && (!companyId || resolvedRoles.length !== 1 || systemRoleCode(resolvedRoles[0].id) !== SYSTEM_ROLE_IDS.SUPER_ADMIN)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: '首位总经理须选择总经理岗位。' });
+
     const reactivatedMetadata = existing ? { ...((existing.metadata as any) || {}) } : {};
     delete reactivatedMetadata.deletedAt;
     delete reactivatedMetadata.deletedBy;
     delete reactivatedMetadata.deletionMode;
     delete reactivatedMetadata.personnelOnly;
     const user = await options.prisma.$transaction(async tx => {
+      if (initialAppointment) {
+        await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${companyId}::uuid FOR UPDATE`;
+        const eligibility = await initialGeneralManagerEligibility(tx, companyId!, extractActorFromRequest(req)!.userId);
+        if (eligibility !== 'allowed') throw new RoleWriteRejectedError(eligibility === 'configured' ? '公司已配置过总经理，请由总经理或平台管理员办理。' : '只有本公司管理员可以指定首位总经理。', eligibility === 'configured' ? 409 : 403, eligibility === 'configured' ? 'GENERAL_MANAGER_CONFIGURED' : 'FORBIDDEN');
+        const company = await tx.company.findUniqueOrThrow({ where: { id: companyId! } });
+        if (company.seatLimit !== null && await tx.companyMember.count({ where: { companyId: companyId!, status: 'active', user: { status: 'active', deletedAt: null } } }) >= company.seatLimit) throw new RoleWriteRejectedError('公司席位已用完。', 409, 'SEAT_LIMIT_REACHED');
+      }
       const created = existing
       ? await tx.userAccount.update({
         where: { id: existing.id },
@@ -371,10 +385,16 @@ export function createAdminRouter(options: AdminRouterOptions) {
           create: { id: crypto.randomUUID(), companyId, userId: created.id, status: 'active', joinedAt: new Date() },
         });
       }
+      if (initialAppointment) {
+        const company = await tx.company.findUniqueOrThrow({ where: { id: companyId! } });
+        const settings = company.settings && typeof company.settings === 'object' && !Array.isArray(company.settings) ? company.settings : {};
+        await tx.company.update({ where: { id: companyId! }, data: { settings: { ...settings, generalManagerAppointedAt: new Date().toISOString() } } });
+        await tx.auditLog.create({ data: { id: auditId(), actorId: extractActorFromRequest(req)!.userId, action: 'appoint_initial_general_manager', targetType: 'UserAccount', targetId: created.id, detail: { companyId, departmentId, roleIds: resolvedRoles.map(role => role.id) } } });
+      }
       return created;
     });
     const actor = (req as any).actor;
-    await options.prisma.auditLog.create({
+    if (!initialAppointment) await options.prisma.auditLog.create({
       data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: actor?.userId || 'system', action: existing ? 'reactivate_user' : 'create_user', targetType: 'UserAccount', targetId: user.id, ip: req.ip },
     });
     res.json({ ok: true, userId: user.id, reactivated: Boolean(existing) });
