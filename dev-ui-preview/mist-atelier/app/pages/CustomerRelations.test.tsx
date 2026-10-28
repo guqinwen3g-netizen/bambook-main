@@ -36,6 +36,16 @@ it('blocks marking an opportunity won until a real order is linked',async()=>{
   expect(button('发起开发')).toBeDefined();
 });
 
+it.each(['fabric','garment'] as const)('starts %s development from its opportunity while retaining the exact customer',async domain=>{
+  const s=store.state!;s.crm.opportunities.push(opp('domain-case',{domain}));
+  wrap(<OpportunityPanel customer={s.customers[0]} state={s} can />);
+  await act(async()=>{[...host.querySelectorAll('*')].find(el=>el.textContent==='商机 domain-case')?.dispatchEvent(new MouseEvent('click',{bubbles:true}));});
+  expect(button('发起开发')).toBeDefined();
+  await act(async()=>button('发起开发')!.click());
+  expect(go).toHaveBeenCalledWith('development/new',undefined,{customerId:s.customers[0].id,section:domain});
+  expect(store.run).not.toHaveBeenCalled();
+});
+
 it('shows follow-ups read-only without relation write permission and lists customer mail',()=>{
   const s=store.state!;
   wrap(<><FollowUpPanel customer={s.customers[0]} state={s} can={false} /><CustomerMailPanel customer={s.customers[0]} state={s} /></>);

@@ -91,7 +91,7 @@ export function OpportunityPanel({ customer, state, can }: { customer: MistCusto
     <Drawer open={!!selected} onClose={() => setPicked(null)} title={uiText(selected?.title || '商机')} sub={uiText(selected ? `${customer.name} · ${CRM_STAGE_LABEL[selected.stage]}` : undefined)} size="lg">
       {selected && <OpportunityDetail row={selected} state={state} customer={customer} can={can} busy={saving} next={next(selected)}
         onEdit={() => setDialog(editSpec(selected))} onStage={stage => setDialog(stageSpec(selected, stage))}
-        onDevelop={() => go('development/new', undefined, { customerId: customer.id })} onQuote={() => go('quotations', undefined, { customerId: customer.id })} onOpen={(view, id) => go(view, id)} />}
+        onDevelop={() => go('development/new', undefined, { customerId: customer.id, section: selected.domain })} onQuote={() => go('quotations', undefined, { customerId: customer.id })} onOpen={(view, id) => go(view, id)} />}
     </Drawer>
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </Card>;
