@@ -7,6 +7,21 @@ let n = 0;
 const ctx = () => ({ id: () => `id-${++n}`, now: '2026-10-15T08:00:00.000Z', actorName: '当前员工' });
 const all = () => true;
 const base = () => { const state = createMistState(ctx(), 'empty'); state.fulfillment.qcTasks = []; state.fulfillment.shipments = []; return state; };
+describe('returned quotation handoff',()=>{
+ const options={canRead:all,can:(permission:string)=>permission==='quotations:write',me:'sales',today:'2026-10-29'};
+ const fixture=()=>{const state=base();state.customers.push({id:'quote-customer',name:'客户'} as any);state.market.quotations.push({id:'quote-return',code:'QT-1',status:'Draft',customerId:'quote-customer',requiresApproval:true,approval:{id:'review',requesterId:'sales',reviewerId:'supervisor',status:'rejected',submittedAt:'2026-10-28T18:13:00Z',decidedAt:'2026-10-28T18:16:00Z',note:'补齐交期',details:[],fileIds:[]}} as any);return state;};
+ it('returns the exact rejected quote to its requester without adding stored tasks',()=>{
+  const state=fixture(),before=structuredClone(state);const items=mistWorkQueue(state,options);expect(items).toEqual([expect.objectContaining({id:'quote-return:quote-return',module:'quotations',source:'task',sourceLabel:'工作事项',title:'QT-1 报价',when:'退回修改',meta:'客户 · 补齐交期',at:'2026-10-28T18:16:00Z',target:{view:'quotations',id:'quote-return',detail:'full'}})]);expect(state).toEqual(before);
+ });
+ it('keeps the handoff after draft edits and costing until the quote is resubmitted',()=>{
+  const state=fixture(),quote=state.market.quotations[0],returned=quote.approval!;quote.approval=null;quote.approvalHistory=[returned];expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-return:quote-return',when:'待重新提交'})]);
+  quote.approval={...returned,id:'resubmission',status:'pending'};expect(mistWorkQueue(state,options)).toEqual([]);quote.approval.status='approved';expect(mistWorkQueue(state,options)).toEqual([]);
+ });
+ it('does not assign the return to another user, a reader, or a completed customer-facing quote',()=>{
+  const state=fixture();expect(mistWorkQueue(state,{...options,me:'supervisor'})).toEqual([]);expect(mistWorkQueue(state,{...options,can:()=>false})).toEqual([]);expect(mistWorkQueue(state,{...options,canRead:()=>false})).toEqual([]);
+  state.market.quotations[0].status='Sent';expect(mistWorkQueue(state,options)).toEqual([]);state.market.quotations[0].status='Rejected';expect(mistWorkQueue(state,options)).toEqual([]);
+ });
+});
 describe('supplier invoice payment request handoff',()=>{
  const options={me:'buyer',today:'2026-10-08',canRead:all,can:(scope:string)=>scope==='finance:payment_request:create'};
  const fixture=()=>{const state=base();state.fulfillment.purchases.push({id:'purchase',code:'PO-1',state:'approved',requesterId:'buyer',supplierId:'supplier',supplier:'工厂',currency:'CNY',quantity:10,price:100,unit:'米',kind:'finished'} as any);state.payables.bills.push({id:'bill',code:'AP-1',supplierId:'supplier',supplier:'工厂',invoiceNo:'INV-1',invoiceType:'commercial',invoiceDate:'2026-10-01',currency:'CNY',amount:1000,taxAmount:0,taxRate:'',lines:[{purchaseId:'purchase',purchaseCode:'PO-1',kind:'finished',amount:1000,settlementId:'settlement',linkedAt:'2026-10-08T00:18:00Z'}],due:'2026-11-08',dueBasis:'验收后付',state:'open',registeredAt:'2026-10-01T00:18:00Z',registeredBy:'财务',fileIds:[],note:''} as any);state.payables.settlements.push({id:'settlement',purchaseId:'purchase',state:'confirmed',amount:1000,currency:'CNY',quantity:10,confirmation:{prepaymentApplied:200,at:'2026-10-08T00:18:00Z'}} as any);return state;};

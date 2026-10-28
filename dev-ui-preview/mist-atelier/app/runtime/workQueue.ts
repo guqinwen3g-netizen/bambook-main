@@ -111,6 +111,18 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       target: { view: 'approvals', id: `${review.workspaceId}|${review.id}`, section: 'mine' } as MistTarget, module: local && canRead(module) ? module : 'approvals' });
   }
   if (!state) return items;
+  if (me && canRead('quotations') && can('quotations:write')) {
+    for (const quote of state.market?.quotations || []) {
+      if (quote.status !== 'Draft') continue;
+      const returned = quote.approval?.status === 'rejected' ? quote.approval
+        : !quote.approval && quote.requiresApproval ? quote.approvalHistory?.at(-1) : undefined;
+      if (returned?.status !== 'rejected' || returned.requesterId !== me) continue;
+      push({ id: `quote-return:${quote.id}`, source: 'task', title: `${quote.code} 报价`,
+        meta: [state.customers.find(customer => customer.id === quote.customerId)?.name, returned.note].filter(Boolean).join(' · '),
+        when: quote.approval ? '退回修改' : '待重新提交', urgent: true, at: returned.decidedAt || returned.submittedAt,
+        target: { view: 'quotations', id: quote.id, detail: 'full' } });
+    }
+  }
   const f = state.fulfillment;
   if (me && canRead('procurement') && can('orders:write') && f.stock && f.stockMovements && f.receipts && f.purchases) {
     // Receiving authority follows the same current-owner rule as the server; no manual task completion.
