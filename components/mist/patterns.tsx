@@ -173,7 +173,7 @@ export function MeasurementTable({ rows, unit = 'cm' }: { rows: Measurement[]; u
         return (
           <div key={`${r.point}-${index}`} className="mist-measure-row">
             <span>{r.point}</span><span className="mist-muted mist-num">{r.standard.toFixed(1)}</span><span className="mist-num">{r.actual.toFixed(1)}</span>
-            <span className="mist-tol" data-tone={tone} data-centered={dv === 0 || undefined} title={uiText(toleranceLabel)} aria-label={uiText(toleranceLabel)}>
+            <span className="mist-tol" data-tone={tone} data-centered={dv === 0 || undefined} data-negative={dv < 0 || undefined} title={uiText(toleranceLabel)} aria-label={uiText(toleranceLabel)}>
               <span className="mist-tol-fill" style={{ left: `${Math.min(50, pos)}%`, width: `${Math.abs(pos - 50)}%` }} />
               <i data-tone={tone} style={{ left: `${pos}%` }} />
             </span>

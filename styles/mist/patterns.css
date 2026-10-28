@@ -329,8 +329,9 @@
 .mist-tol::before { content: ""; position: absolute; left: 30%; right: 30%; top: 0; bottom: 0; border-radius: inherit; background: var(--mist-ok-tint); }
 .mist-tol::after { content: ""; position: absolute; left: 50%; top: 2px; bottom: 2px; width: 1px; background: var(--mist-ink-4); }
 .mist-tol-fill { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: var(--mist-tol-tone); }
-.mist-tol i { position: absolute; top: 50%; width: 2px; height: var(--mist-space-2); border-radius: var(--mist-r-pill); background: var(--mist-on-accent); transform: translate(-50%, -50%); z-index: 1; }
-.mist-tol[data-centered] i { background: var(--mist-tol-tone); }
+.mist-tol i { position: absolute; top: 50%; width: 2px; height: var(--mist-space-2); margin-left: calc(-1 * var(--mist-space-1)); border-radius: var(--mist-r-pill); background: var(--mist-on-accent); transform: translate(-50%, -50%); z-index: 1; }
+.mist-tol[data-negative] i { margin-left: var(--mist-space-1); }
+.mist-tol[data-centered] i { margin-left: 0; background: var(--mist-tol-tone); }
 .mist-measure-dv { text-align: right; font-weight: var(--mist-fw-medium); }
 .mist-summary-nums { display: flex; gap: 30px; padding: 16px 22px 4px; flex-wrap: wrap; }
 .mist-summary-nums small { display: block; font-size: var(--mist-text-2xs); color: var(--mist-ink-3); }
