@@ -15,6 +15,37 @@ function fixture(){
 
 const qc=(result:'pass'|'conditional'|'reject',opinion='意见',fabric=false)=>({result,reviewer:'QC 甲',reviewedAt:'2026-10-16T09:00:00Z',report:'QC-'+result,opinion,...(fabric?{fabricMeasurements:[]}:{measurements:[]})});
 const confirm=(devId:string,versionId:string)=>({type:'development.confirm' as const,payload:{devId,versionId,result:'approved' as const,confirmer:'客户',organization:'',confirmedAt:'2026-10-16T09:00:00Z',basis:'邮件',originalText:'OK'}});
+function disposedWorkbenchVersion(disposition:'resample'|'abandon'){
+  const f=fixture(),ids=f.run({type:'development.submit',payload:{values:f.fabric,fileIds:[]}}),devId=ids.devId!,versionId=ids.versionId!;
+  f.run({type:'development.recordSample',payload:{devId,versionId,sample:'FAB-1',quantity:2,form:'米样',unit:'米',returnedAt:f.ctx.now}});
+  const source={kind:'version' as const,devId,versionId};
+  const request={type:'fulfillment.qc.request' as const,payload:{source,domain:'fabric' as const,kind:'sample' as const,factory:'实际测试面料厂',location:'样品间',contact:'业务员',due:'2026-10-16'}};
+  const id=f.run(request).id!;f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}});
+  f.run({type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:'reject',report:'FIRST-FAIL',opinion:'尺寸变化率超限',measurements:[],fileIds:[],reviewedAt:f.ctx.now}});
+  if(disposition==='resample')f.run({type:'development.round.create',payload:{devId,factories:['实际测试面料厂'],requirements:'调整预缩后返样',targetDate:'2026-10-30',resampleFromVersionId:versionId}});
+  else f.run({type:'development.qc.decide',payload:{devId,versionId,decision:'abandon',note:'不再采用'}});
+  return{f,id,source,request};
+}
+describe('QC workbench preserves disposed development versions',()=>{
+  for(const disposition of ['resample','abandon'] as const)it.each(['claim','report','transfer','reschedule','request'] as const)(`${disposition}: rejects %s without changing the failed version or task`,operation=>{
+    const {f,id,request}=disposedWorkbenchVersion(disposition),before=JSON.stringify(f.state);
+    const commands:Record<typeof operation,MistCommand>={
+      claim:{type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}},
+      report:{type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:'pass',report:'REPLACE',opinion:'不能覆盖旧版',measurements:[],fileIds:[],reviewedAt:f.ctx.now}},
+      transfer:{type:'fulfillment.qc.transfer',payload:{id,domain:'fabric',assigneeId:'other',reason:'移交'}},
+      reschedule:{type:'fulfillment.qc.reschedule',payload:{id,domain:'fabric',due:'2026-10-17',reason:'改期'}},
+      request,
+    };
+    expect(()=>f.run(commands[operation])).toThrow(disposition==='resample'?/重新打样/:/已放弃/);expect(JSON.stringify(f.state)).toBe(before);
+  });
+  it('allows the new round to proceed while preserving the first failed report',()=>{
+    const {f,source}=disposedWorkbenchVersion('resample'),version=f.state.versions.find(v=>v.id!==source.versionId)!;
+    f.run({type:'development.recordSample',payload:{devId:source.devId,versionId:version.id,sample:'FAB-2',quantity:2,form:'米样',unit:'米',returnedAt:f.ctx.now}});
+    const id=f.run({type:'fulfillment.qc.request',payload:{source:{...source,versionId:version.id},domain:'fabric',kind:'sample',factory:'实际测试面料厂',location:'样品间',contact:'业务员',due:'2026-10-16'}}).id!;
+    f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}});f.run({type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:'pass',report:'SECOND-PASS',opinion:'新实物复验通过',measurements:[],fileIds:[],reviewedAt:f.ctx.now}});
+    expect(f.state.versions.find(v=>v.id===source.versionId)!.qc).toMatchObject({result:'reject',report:'FIRST-FAIL'});expect(f.state.versions.find(v=>v.id===version.id)!.qc).toMatchObject({result:'pass',report:'SECOND-PASS'});expect(f.state.fulfillment.qcReports.map(r=>r.report)).toEqual(['FIRST-FAIL','SECOND-PASS']);
+  });
+});
 function garmentCase(){
   const f=fixture(),ids=f.run({type:'development.submit',payload:{values:f.garment,fileIds:[]}}),devId=ids.devId!,versionId=ids.versionId!;
   f.run({type:'development.recordSample',payload:{devId,versionId,sample:'S-1',quantity:1,returnedAt:f.ctx.now}});
