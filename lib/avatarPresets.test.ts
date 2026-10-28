@@ -3,6 +3,29 @@ import { describe,expect,it } from 'vitest';
 import { generateAvatar } from './avatarPresets';
 import { mistPalette,mistSchemeHues } from './avatarColor';
 
+it('keeps eyes neutral and human features natural across background colors',async()=>{
+ const {AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
+ let firstPortraitFeatures:string[]|undefined;let sawHighlight=false;
+ for(const color of AVATAR_COLORS){
+  const render=(family:string)=>decodeURIComponent(generateAvatar(family,`p${color.id}_v12_12_12_features-0`,false).split(',')[1]).toLowerCase();
+  for(let i=0;i<6;i++){
+   const gaze=decodeURIComponent(generateAvatar('gaze',`p${color.id}_v12_12_12_eyes${i}-0`,false).split(',')[1]).toLowerCase();
+   const eye=gaze.match(/<g class="dbga-eye">([\s\S]*?)<\/g>/)?.[1];
+   expect(eye).toBeTruthy();
+   const eyeColors=eye!.match(/#[0-9a-f]{6}/g)||[];
+   expect(eyeColors.length).toBeGreaterThan(0);
+   expect(eyeColors.every(value=>['#25313a','#fffdf8'].includes(value))).toBe(true);
+   sawHighlight ||= eyeColors.includes('#fffdf8');
+  }
+  const portrait=render('dylan');
+  const features=Array.from(new Set(portrait.match(/#(?:e8b99b|d7a17f|bf8667|2c2927|4a3328|695246)\b/g)||[])).sort();
+  expect(features.some(value=>['#e8b99b','#d7a17f','#bf8667'].includes(value))).toBe(true);
+  expect(features.some(value=>['#2c2927','#4a3328','#695246'].includes(value))).toBe(true);
+  if(firstPortraitFeatures)expect(features).toEqual(firstPortraitFeatures);else firstPortraitFeatures=features;
+ }
+ expect(sawHighlight).toBe(true);
+});
+
 describe('pattern avatar versions',()=>{
  it('preserves previously saved v5/v6 artwork even after rendering a newer color version',()=>{
   const inputs=[
