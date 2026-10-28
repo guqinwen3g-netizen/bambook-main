@@ -1,15 +1,136 @@
-DiceBear avatar presets, generated locally using @dicebear/core and @dicebear/styles v10.x.
+DiceBear avatar styles used by Bambook
 https://www.dicebear.com/styles/
 
-Modified by Bambook: colors adapted to Frost / Mist / Indigo Gray.
+Bambook modifies colors and, for shared-palette avatars, adds a background. Original creator and license metadata remains embedded in generated SVG files.
 
-Blobs, Disco, Glass, Squircles, Slice, Waves, Weave, Critters, Cameo, Line Face, Thumbs, Landscape:
-Copyright DiceBear. CC0 1.0 Universal
-https://creativecommons.org/publicdomain/zero/1.0/
+blobs
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Blobs (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/blobs/
 
-Glyphs (Abstract Avatars for All Creative Profile Use):
-Copyright Matt Houser. CC BY 4.0
-https://www.figma.com/community/file/1249154526125777853
-https://creativecommons.org/licenses/by/4.0/
-https://www.dicebear.com/styles/glyphs/
-Original attribution and license metadata is also preserved in generated SVG previews.
+disco
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Disco (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/disco/
+
+glass
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Glass (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/glass/
+
+glyphs
+  Creator: Matt Houser (https://x.com/mattkhouser)
+  Source: Abstract Avatars for All Creative Profile Use (https://www.figma.com/community/file/1249154526125777853)
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+  Style: https://www.dicebear.com/styles/glyphs/
+
+squircles
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Squircles (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/squircles/
+
+slice
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Slice (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/slice/
+
+waves
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Waves (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/waves/
+
+weave
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Weave (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/weave/
+
+critters
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Critters (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/critters/
+
+cameo
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Cameo (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/cameo/
+
+line-face
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Line Face (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/line-face/
+
+thumbs
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Thumbs (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/thumbs/
+
+landscape
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Landscape (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/landscape/
+
+croodles-neutral
+  Creator: vijay verma (https://vjy.me/)
+  Source: Croodles - Doodle your face (https://www.figma.com/community/file/966199982810283152)
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+  Style: https://www.dicebear.com/styles/croodles-neutral/
+
+dylan
+  Creator: Natalia Spivak (https://nataspvk.tilda.ws/)
+  Source: Dylan! The Avatar Generator (https://www.figma.com/community/file/1356575240759683500)
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+  Style: https://www.dicebear.com/styles/dylan/
+
+fun-emoji
+  Creator: Davis Uche (https://www.instagram.com/davedirect3/)
+  Source: Fun Emoji Set (https://www.figma.com/community/file/968125295144990435)
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+  Style: https://www.dicebear.com/styles/fun-emoji/
+
+gaze
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Gaze (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/gaze/
+
+pixelbot
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Pixelbot (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/pixelbot/
+
+rings
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Rings (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/rings/
+
+stripes
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Stripes (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/stripes/
+
+planets
+  Creator: DiceBear (https://www.dicebear.com)
+  Source: Planets (https://www.dicebear.com)
+  License: CC0 1.0 (https://creativecommons.org/publicdomain/zero/1.0/)
+  Style: https://www.dicebear.com/styles/planets/
+
+toon-head
+  Creator: Johan Melin (https://www.johanmelin.com)
+  Source: ToonHead (https://www.figma.com/community/file/1589627891082866389)
+  License: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+  Style: https://www.dicebear.com/styles/toon-head/

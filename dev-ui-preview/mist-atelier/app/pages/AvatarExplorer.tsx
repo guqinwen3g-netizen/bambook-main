@@ -1,11 +1,10 @@
 import React from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ArrowUpRight, MousePointer2 } from 'lucide-react';
-import { Banner } from '../../../../components/mist';
+import { ArrowUpRight, Check, MousePointer2 } from 'lucide-react';
+import { Banner, Icon } from '../../../../components/mist';
 import { interfaceLocale, uiText } from '../../../../services/interfaceLanguage';
 import { avatarDirections, exploreAvatarAt } from '../../../../lib/avatarExploration';
-import { ANIMATED_AVATAR_FAMILIES, avatarIdentity, parseAvatarIdentity } from '../../../../lib/avatarIdentity';
-import { closestMistScheme, mistSchemeHues } from '../../../../lib/avatarColor';
+import { ANIMATED_AVATAR_FAMILIES, AVATAR_COLORS, avatarIdentity, type AvatarColor } from '../../../../lib/avatarIdentity';
 const GUIDE = ['找到，属于你的样子', '按住头像，让颜色流转', '保持按住，拖动探索不同风格', '松开，留下喜欢的这一刻'];
 const randomSeed = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
 /** 只接受本地生成器产出的 SVG：持久 SVG 树换色只改属性，换形状 220ms 淡入淡出。 */
@@ -58,73 +57,63 @@ export function AvatarLivePreview({ src, geometryKey }: { src: string; geometryK
 
 type Preset = { src: string; identity: string };
 /** 探索器：位置决定风格族，按住时间决定色相；松开后颜色落到最近的 Mist 色系。 */
-export function AvatarExplorer({ value, disabled, onSelect }: { value?: string | null; disabled: boolean; onSelect: (identity: string) => void }) {
+export function AvatarExplorer({ value, disabled, active=true, palette, onPaletteChange, onSelect }: { value?: string | null; disabled: boolean; active?:boolean; palette:AvatarColor; onPaletteChange:(color:AvatarColor)=>void; onSelect: (identity: string) => void }) {
   const reduced = useReducedMotion();
   const [showGuide, setShowGuide] = React.useState(true), [guideStep, setGuideStep] = React.useState(0);
   React.useEffect(() => {
-    if (!showGuide || guideStep >= 3) return;
+    if (!active || !showGuide || guideStep >= 3) return;
     const timer = window.setTimeout(() => setGuideStep(step => step + 1), guideStep === 0 ? 2400 : 2000);
     return () => window.clearTimeout(timer);
-  }, [showGuide, guideStep]);
-  const [hue, setHue] = React.useState(() => {
-    const saved = parseAvatarIdentity(value)?.seed.match(/^c(\d{1,3})_v[567]_/);
-    return saved ? Number(saved[1]) % 360 : mistSchemeHues[6];
-  });
-  const hueRef = React.useRef(hue); hueRef.current = hue;
+  }, [active, showGuide, guideStep]);
+  const paletteRef=React.useRef(palette);paletteRef.current=palette;
+  const changeRef=React.useRef(onPaletteChange);changeRef.current=onPaletteChange;
   const [point, setPoint] = React.useState({ x: 0, y: 0 });
   const lastPointer = React.useRef({ x: NaN, y: NaN });
-  const gesture = React.useRef<{ id: number | 'keyboard'; scheme: number; hue: number; started: number } | null>(null);
+  const gesture = React.useRef<{ id:number|'keyboard'; index:number; last:number; started:number } | null>(null);
   const frame = React.useRef(0);
   const [held, setHeld] = React.useState(false);
-  const stopColor = React.useCallback(() => {
-    if (!gesture.current) return;
-    gesture.current = null;
-    window.cancelAnimationFrame(frame.current);
-    const settled = mistSchemeHues[closestMistScheme(hueRef.current)];
-    hueRef.current = settled; setHue(settled); setHeld(false);
-  }, []);
-  const startColor = (id: number | 'keyboard') => {
-    if (disabled || gesture.current) return;
-    gesture.current = { id, scheme: closestMistScheme(hueRef.current), hue: hueRef.current, started: performance.now() };
-    setHeld(true);
-    const tick = (now: number) => {
-      const g = gesture.current;
-      if (!g) return;
-      const progress = (now - g.started) / 500, step = Math.floor(progress);
-      const from = step === 0 ? g.hue : mistSchemeHues[(g.scheme + step) % mistSchemeHues.length];
-      const to = mistSchemeHues[(g.scheme + step + 1) % mistSchemeHues.length];
-      const distance = ((to - from + 540) % 360) - 180;
-      const next = Math.round((from + distance * (progress - step) + 360) % 360) % 360;
-      if (next !== hueRef.current) { hueRef.current = next; setHue(next); }
-      frame.current = window.requestAnimationFrame(tick);
+  const stopColor=React.useCallback(()=>{
+    if(!gesture.current)return;
+    gesture.current=null;window.cancelAnimationFrame(frame.current);setHeld(false);
+  },[]);
+  const startColor=(id:number|'keyboard')=>{
+    if(disabled||!active||gesture.current)return;
+    const index=Math.max(0,AVATAR_COLORS.findIndex(color=>color.id===paletteRef.current));
+    gesture.current={id,index,last:index,started:performance.now()};setHeld(true);
+    const tick=(now:number)=>{
+      const current=gesture.current;if(!current)return;
+      const next=(current.index+Math.floor((now-current.started)/500))%AVATAR_COLORS.length;
+      if(next!==current.last){current.last=next;changeRef.current(AVATAR_COLORS[next].id);}
+      frame.current=window.requestAnimationFrame(tick);
     };
-    frame.current = window.requestAnimationFrame(tick);
+    frame.current=window.requestAnimationFrame(tick);
   };
-  React.useEffect(() => {
-    const onVisibility = () => { if (document.hidden) stopColor(); };
-    window.addEventListener('blur', stopColor); document.addEventListener('visibilitychange', onVisibility);
-    return () => { gesture.current = null; window.cancelAnimationFrame(frame.current); window.removeEventListener('blur', stopColor); document.removeEventListener('visibilitychange', onVisibility); };
-  }, [stopColor]);
-  React.useEffect(() => { if (disabled) stopColor(); }, [disabled, stopColor]);
+  React.useEffect(()=>{
+    const onVisibility=()=>{if(document.hidden)stopColor();};
+    window.addEventListener('blur',stopColor);document.addEventListener('visibilitychange',onVisibility);
+    return()=>{gesture.current=null;window.cancelAnimationFrame(frame.current);window.removeEventListener('blur',stopColor);document.removeEventListener('visibilitychange',onVisibility);};
+  },[stopColor]);
+  React.useEffect(()=>{if(disabled||!active)stopColor();},[active,disabled,stopColor]);
   const [seed, setSeed] = React.useState(randomSeed);
   const [preset, setPreset] = React.useState<Preset | null>(null), [error, setError] = React.useState(false), [readyKey, setReadyKey] = React.useState('');
   const cellX = Math.round(point.x * 12), cellY = Math.round(point.y * 12);
   const result = React.useMemo(() => exploreAvatarAt(point.x, point.y), [point, interfaceLocale()]);
-  const shapeKey = `${result.family}:${seed}:${cellX + 12}_${cellY + 12}`, key = `${hue}:${shapeKey}`;
+  const shapeKey = `${result.family}:${seed}:${cellX + 12}_${cellY + 12}`, key = `${palette}:${shapeKey}`;
   const generating = readyKey !== key;
-  const latest = React.useRef({ family: result.family, hue, cellX, cellY, seed, key, shapeKey });
-  latest.current = { family: result.family, hue, cellX, cellY, seed, key, shapeKey };
+  const latest = React.useRef({ family: result.family, palette, cellX, cellY, seed, key, shapeKey });
+  latest.current = { family: result.family, palette, cellX, cellY, seed, key, shapeKey };
   React.useEffect(() => {
-    let active = true, raf = 0, processedKey = '', processedShape = '', last = -Infinity;
+    if(!active)return;
+    let live = true, raf = 0, processedKey = '', processedShape = '', last = -Infinity;
     import('../../../../lib/avatarPresets').then(({ generateAvatar }) => {
-      if (!active) return;
+      if (!live) return;
       // 持续采样最新位置；移动不重置节拍，同形换色更快。
       const tick = (now: number) => {
-        if (!active) return;
+        if (!live) return;
         const job = latest.current, interval = job.shapeKey === processedShape ? 24 : 80;
         if (!document.hidden && job.key !== processedKey && now - last >= interval) {
           try {
-            const id = `c${job.hue}_v7_${job.cellX + 12}_${job.cellY + 12}_${job.seed}-0`;
+            const id = `p${job.palette}_v8_${job.cellX + 12}_${job.cellY + 12}_${job.seed}-0`;
             const animated = ANIMATED_AVATAR_FAMILIES.has(job.family);
             setPreset({ src: generateAvatar(job.family, id, animated), identity: avatarIdentity(job.family, id, animated) });
             setError(false); processedShape = job.shapeKey;
@@ -134,9 +123,9 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
         raf = window.requestAnimationFrame(tick);
       };
       raf = window.requestAnimationFrame(tick);
-    }).catch(() => { if (active) setError(true); });
-    return () => { active = false; window.cancelAnimationFrame(raf); };
-  }, []);
+    }).catch(() => { if (live) setError(true); });
+    return () => { live = false; window.cancelAnimationFrame(raf); };
+  }, [active]);
   const update = (x: number, y: number) => {
     const length = Math.max(1, Math.hypot(x, y));
     setSeed(randomSeed()); setPoint({ x: x / length, y: y / length });
@@ -152,8 +141,6 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
     stopColor();
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const [credit,setCredit]=React.useState<{creator:string;url:string}|null>(null);
-  React.useEffect(()=>{let live=true;setCredit(null);void import('../../../../lib/avatarPresets').then(module=>{if(live)setCredit(module.avatarCredit(result.family));}).catch(()=>{});return()=>{live=false;};},[result.family]);
   const applied = !!preset && preset.identity === value;
   return <div className="mist-avatar-explorer" aria-label={uiText("探索头像风格")}>
     <div className="mist-avatar-stage">
@@ -167,7 +154,7 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
           <motion.span animate={{ scale: 1 + eased * .6 }} transition={reduced ? { duration: 0 } : { type: 'spring', stiffness: 90, damping: 22, mass: .9 }}>{uiText(direction.label)}</motion.span>
         </button>;
       })}
-      <div className="mist-avatar-compass" role="group" aria-label={uiText("头像探索")} tabIndex={disabled ? -1 : 0} data-held={held || undefined}
+      <div className="mist-avatar-compass" style={{backgroundColor:AVATAR_COLORS.find(color=>color.id===palette)!.value}} role="group" aria-label={uiText("头像探索")} tabIndex={disabled ? -1 : 0} data-held={held || undefined}
         aria-busy={generating} aria-disabled={disabled} aria-describedby="mist-avatar-mood"
         onPointerDown={e => { if (!disabled && e.button === 0 && !gesture.current) { setShowGuide(false); e.preventDefault(); e.currentTarget.setPointerCapture?.(e.pointerId); locate(e); startColor(e.pointerId); } }}
         onPointerMove={e => { if (!disabled && gesture.current?.id === e.pointerId) { if (e.pointerType === 'mouse' && !(e.buttons & 1)) release(e); else if (e.clientX !== lastPointer.current.x || e.clientY !== lastPointer.current.y) locate(e); } }}
@@ -181,13 +168,16 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
           if (delta[e.key]) { e.preventDefault(); update(point.x + delta[e.key][0], point.y + delta[e.key][1]); }
           if (e.key === 'Home') { e.preventDefault(); update(0, 0); }
         }}>
-        {preset ? <AvatarLivePreview src={preset.src} geometryKey={preset.identity.replace(/:c\d+_v/, ':v')} /> : <span className="mist-note">{uiText(error ? '生成失败' : '正在寻找灵感…')}</span>}
+        {preset ? <AvatarLivePreview src={preset.src} geometryKey={preset.identity.replace(/:p[a-z]+_v8_/, ':v8_')} /> : <span className="mist-note">{uiText(error ? '生成失败' : '正在寻找灵感…')}</span>}
       </div>
-      <AnimatePresence>{showGuide && <motion.div key="pointer" className="mist-avatar-guide-pointer" aria-hidden="true" exit={{ opacity: 0 }}
+      <AnimatePresence>{active && showGuide && <motion.div key="pointer" className="mist-avatar-guide-pointer" aria-hidden="true" exit={{ opacity: 0 }}
         animate={reduced ? {} : { x: [0, 0, -45, 40, 0, 0], y: [0, 0, -25, 25, 0, 0], scale: [1, .84, .84, .84, 1, 1] }}
         transition={{ delay: 2.4, duration: 6, times: [0, .3, .45, .6, .72, 1], ease: 'easeInOut' }}>
         <MousePointer2 size={22} strokeWidth={1.25} />
       </motion.div>}</AnimatePresence>
+    </div>
+    <div className="mist-avatar-explorer-palette" role="group" aria-label={uiText('图案颜色')}>
+      {AVATAR_COLORS.map(color=><button key={color.id} type="button" disabled={disabled} aria-label={uiText(`图案颜色 · ${color.label}`)} aria-pressed={palette===color.id} title={uiText(color.label)} style={{backgroundColor:color.value}} onClick={()=>{setShowGuide(false);onPaletteChange(color.id);}}>{palette===color.id&&<Icon icon={Check} size="xs"/>}</button>)}
     </div>
     <div id="mist-avatar-mood" className="mist-sr-only" aria-live="polite">{uiText(result.label === '自由探索' ? result.label : `${result.label}倾向`)}</div>
     <div className="mist-avatar-explore-foot">
@@ -202,7 +192,6 @@ export function AvatarExplorer({ value, disabled, onSelect }: { value?: string |
             onClick={() => preset && onSelect(preset.identity)}>{uiText(disabled ? '应用中…' : applied ? '已使用' : '就用这个')}<ArrowUpRight size={18} strokeWidth={1.25} /></button>
         </motion.div>}</AnimatePresence>
     </div>
-    {credit && <a className="mist-avatar-credit" href={credit.url} target="_blank" rel="noreferrer">{credit.creator} · CC BY 4.0</a>}
     {error && <Banner tone="bad" title={uiText("头像生成失败")}>{uiText("请关闭后重新打开头像编辑。")}</Banner>}
   </div>;
 }

@@ -26,3 +26,13 @@ describe('pattern avatar versions',()=>{
   for(const hue of mistSchemeHues)for(let i=0;i<5;i++)expect(brightness(mistPalette(hue,-5)[i])).toBeLessThan(brightness(mistPalette(hue)[i]));
  });
 });
+
+it('writes the exact shared palette background into every explored style while retaining attribution metadata',async()=>{
+ const {AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
+ for(const color of AVATAR_COLORS)for(const family of ['glyphs','glass','waves','weave','dylan','line-face','critters','thumbs','gaze','slice','stripes','cameo']){
+  const svg=decodeURIComponent(generateAvatar(family,`p${color.id}_v8_12_12_shared-0`,false).split(',')[1]);
+  expect(svg).toContain(`data-bambook-background="${color.id}"`);expect(svg.toLowerCase()).toContain(`fill="${color.value.toLowerCase()}"`);
+  expect(svg).toContain('<metadata');
+  if(family==='glyphs')expect(svg).not.toMatch(/<path fill="white" d="M0 0h72v72H0z"\/><path opacity="\.2"/);
+ }
+});

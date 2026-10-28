@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ChevronLeft, ChevronRight, Loader2, Sparkles } from 'lucide-react'; // mist-allow: Button 的 loading 态是唯一允许的 spinner
 import { cx, toneAttr, type Size, type Tone } from './types';
 import { AssistantEyes } from './AssistantEyes';
-import { parseAvatarIdentity, parsePersonIdentity, parseInitialsIdentity, defaultAvatarColor, AVATAR_COLORS } from '../../lib/avatarIdentity';
+import { parseAvatarIdentity, parsePersonIdentity, parseInitialsIdentity, patternColorFromIdentity, defaultAvatarColor, AVATAR_COLORS } from '../../lib/avatarIdentity';
 import { useAvatarPerson } from './avatarDirectory';
 
 /* ───────────── 长文本 ───────────── */
@@ -145,7 +145,7 @@ export function Avatar({ name, src, tone, size, identityKey }: { name: string; s
   const [failedSrc,setFailedSrc]=React.useState<string>();
   const shown = useAvatarSource(source);
   const counter = name.startsWith('+');
-  const color = AVATAR_COLORS.find(color => color.id === (parseInitialsIdentity(source) ?? defaultAvatarColor(person?.id ?? identityKey ?? name)))!;
+  const color = AVATAR_COLORS.find(color => color.id === (parseInitialsIdentity(source) ?? patternColorFromIdentity(source) ?? defaultAvatarColor(person?.id ?? identityKey ?? name)))!;
   return (
     <span className="mist-avatar" data-tone={toneAttr(tone)} data-counter={counter || undefined} data-size={size && size !== 'md' ? size : undefined} title={uiText(name)} style={counter ? undefined : {backgroundColor:color.value,color:color.ink}}>
       {shown && failedSrc!==shown ? <img onError={()=>setFailedSrc(shown)} src={shown} alt="" /> : counter ? name : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
