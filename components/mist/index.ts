@@ -8,6 +8,7 @@ export * from './types';
 export * from './MistMark';
 export * from './primitives';
 export * from './form';
+export * from './Slider';
 export * from './formFooter';
 export * from './data';
 export * from './patterns';

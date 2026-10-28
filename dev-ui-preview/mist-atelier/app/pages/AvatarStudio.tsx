@@ -1,6 +1,6 @@
 import React from 'react';
 import { ImageUp, RotateCw, Undo2 } from 'lucide-react';
-import { Avatar, Banner, Button, Dialog, Icon, Tabs, useToast } from '../../../../components/mist';
+import { Avatar, Banner, Button, Dialog, Icon, Slider, Tabs, useToast } from '../../../../components/mist';
 import { updateMyProfile } from '../../../../services/authService';
 import { uiText } from '../../../../services/interfaceLanguage';
 import { defaultAvatarColor, initialsIdentity, parseAvatarIdentity, parseInitialsIdentity, parsePersonIdentity, patternColorFromIdentity, type AvatarColor } from '../../../../lib/avatarIdentity';
@@ -93,7 +93,7 @@ export function AvatarStudio({open,onClose}:{open:boolean;onClose:()=>void}) {
               onKeyDown={event=>{const delta:Record<string,[number,number]>={ArrowLeft:[-5,0],ArrowRight:[5,0],ArrowUp:[0,-5],ArrowDown:[0,5]};if(delta[event.key]&&!busy){event.preventDefault();const [x,y]=delta[event.key];adjustCrop({...crop,offset:{x:crop.offset.x+x,y:crop.offset.y+y}});}}}
               onPointerDown={event=>{if(busy)return;event.currentTarget.setPointerCapture?.(event.pointerId);drag.current={id:event.pointerId,x:event.clientX,y:event.clientY,start:crop.offset};}} onPointerMove={event=>{const d=drag.current;if(d&&d.id===event.pointerId&&!busy)adjustCrop({...crop,offset:{x:d.start.x+event.clientX-d.x,y:d.start.y+event.clientY-d.y}});}} onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}>
               <img src={crop.src} alt={uiText('待裁剪的照片')} draggable={false} style={{width:crop.width*previewScale,height:crop.height*previewScale,transform:`translate(-50%, -50%) translate(${crop.offset.x}px, ${crop.offset.y}px) rotate(${crop.rotation}deg) scale(${crop.scale})`}}/>
-            </div><div className="mist-row mist-avatar-crop-tools"><input type="range" aria-label={uiText('缩放')} min={1} max={3} step={.01} value={crop.scale} disabled={busy} onChange={event=>adjustCrop({...crop,scale:Number(event.target.value)})}/><Button size="sm" icon={RotateCw} disabled={busy} onClick={()=>adjustCrop({...crop,rotation:(crop.rotation+90)%360,offset:{x:0,y:0}})}>{uiText('旋转')}</Button></div></>:<div className="mist-avatar-photo-existing"><Avatar name={name} src={photo} size="xl"/><Button variant="quiet" disabled={busy} onClick={()=>void loadPhoto(photo!)}>{uiText('调整裁剪')}</Button></div>}
+            </div><div className="mist-row mist-avatar-crop-tools"><Slider aria-label={uiText('缩放')} min={1} max={3} step={.01} value={crop.scale} disabled={busy} onChange={event=>adjustCrop({...crop,scale:Number(event.target.value)})}/><Button size="sm" icon={RotateCw} disabled={busy} onClick={()=>adjustCrop({...crop,rotation:(crop.rotation+90)%360,offset:{x:0,y:0}})}>{uiText('旋转')}</Button></div></>:<div className="mist-avatar-photo-existing"><Avatar name={name} src={photo} size="xl"/><Button variant="quiet" disabled={busy} onClick={()=>void loadPhoto(photo!)}>{uiText('调整裁剪')}</Button></div>}
           </>}
         </div>:mode==='initials'?<div className="mist-avatar-editor" data-mode={mode}>
           <div className="mist-avatar-editor-preview" aria-busy={!ready}>

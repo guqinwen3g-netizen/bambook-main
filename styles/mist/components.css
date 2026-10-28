@@ -129,6 +129,23 @@
 :is(.mist-ws, .mist-team-row):hover .mist-stack[data-overlap] > .mist-avatar + .mist-avatar { margin-left: -4px; }
 @media (prefers-reduced-motion: reduce) { .mist-stack[data-overlap] > .mist-avatar { transition: none; } }
 
+/* ── 滑杆 ── */
+.mist-slider { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: var(--mist-control-h); min-width: 0; padding: 0; margin: 0; border: 0; background: transparent; cursor: pointer; touch-action: pan-y; }
+.mist-slider::-webkit-slider-runnable-track { height: var(--mist-slider-track-h); border-radius: var(--mist-r-pill); background: linear-gradient(to right, var(--mist-accent) 0 var(--mist-slider-progress), var(--mist-fill-2) var(--mist-slider-progress) 100%); }
+.mist-slider::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; box-sizing: border-box; width: var(--mist-space-4); height: var(--mist-space-6); margin-top: calc((var(--mist-slider-track-h) - var(--mist-space-6)) / 2); border: 2px solid var(--mist-card); border-radius: var(--mist-r-pill); background: var(--mist-accent); transition: transform var(--mist-dur-fast) var(--mist-ease); }
+.mist-slider::-moz-range-track { height: var(--mist-slider-track-h); border-radius: var(--mist-r-pill); background: var(--mist-fill-2); }
+.mist-slider::-moz-range-progress { height: var(--mist-slider-track-h); border-radius: var(--mist-r-pill); background: var(--mist-accent); }
+.mist-slider::-moz-range-thumb { box-sizing: border-box; width: var(--mist-space-4); height: var(--mist-space-6); border: 2px solid var(--mist-card); border-radius: var(--mist-r-pill); background: var(--mist-accent); transition: transform var(--mist-dur-fast) var(--mist-ease); }
+.mist-slider:hover:not(:disabled)::-webkit-slider-thumb { transform: scale(1.1); }
+.mist-slider:hover:not(:disabled)::-moz-range-thumb { transform: scale(1.1); }
+.mist-slider:active:not(:disabled)::-webkit-slider-thumb { transform: scale(1.15); }
+.mist-slider:active:not(:disabled)::-moz-range-thumb { transform: scale(1.15); }
+.mist-root .mist-slider:focus-visible { outline: none; }
+.mist-slider:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--mist-accent); outline-offset: 2px; }
+.mist-slider:focus-visible::-moz-range-thumb { outline: 2px solid var(--mist-accent); outline-offset: 2px; }
+.mist-slider:disabled { cursor: not-allowed; opacity: .45; }
+@media (prefers-reduced-motion: reduce) { .mist-slider::-webkit-slider-thumb { transition: none; } .mist-slider::-moz-range-thumb { transition: none; } }
+
 /* ── 卡片 ── */
 .mist-card { background: var(--mist-card); border-radius: var(--mist-r-card); min-width: 0; }
 .mist-card[data-interactive] { cursor: pointer; transition: background var(--mist-dur); text-align: left; }

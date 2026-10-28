@@ -94,6 +94,13 @@
 | `UploadZone` | 上传区：点击或拖拽。onFiles 拿到 File[]。 | `({ title = '拖拽文件到这里，或点击上传', hint, accept, multiple = true, onFiles }: { title?: React.ReactNode; hint?: React.ReactNode; accept?: string; multiple?: boolean; onFiles: (files: File[]) => void })` |
 | `FormSection` | 表单分节（创建/编辑页）：标题 + 说明 + 内容，节与节之间 1px 分隔。 | `({ id, title, description, children }: { id?: string; title: React.ReactNode; description?: React.ReactNode; children: React.ReactNode })` |
 
+## 滑杆 · `components/mist/Slider.tsx`
+
+| 导出 | 说明 | Props / 签名 |
+|---|---|---|
+| `SliderProps` | — | `type SliderProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' \| 'value' \| 'defaultValue' \| 'min' \| 'max'> & { value: number; min?: number; max?: number };` |
+| `Slider` | Mist 滑杆：自定义轨道与胶囊滑块，保留原生触摸、键盘和表单语义。 | `forwardRef<HTMLInputElement, SliderProps>` |
+
 ## 表单操作栏 · `components/mist/formFooter.tsx`
 
 | 导出 | 说明 | Props / 签名 |
@@ -192,4 +199,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 134 个导出声明（104 个组件/函数/值，30 个类型）。重导出别名不重复计数。
+共 136 个导出声明（105 个组件/函数/值，31 个类型）。重导出别名不重复计数。
