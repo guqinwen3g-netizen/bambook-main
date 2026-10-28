@@ -55,7 +55,7 @@ export type SidebarPresentationProps = {
   onToggleCollapsed: () => void;
   /** lead：替代首字母方块的前置内容（小组头像串或部门图标容器）。 */
   workspace?: { symbol: string; lead?: React.ReactNode; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode };
-  account: { name: string; caption?: string; avatarUrl?: string; onClick?: () => void };
+  account: { name: string; identityKey?: string; caption?: string; avatarUrl?: string; onClick?: () => void };
   onSearch?: () => void;
   assistant?: { title: string; text: React.ReactNode; onClick: () => void };
 };
@@ -133,7 +133,7 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
         ))}
       </nav>
       {assistant && <button type="button" className="mist-side-ai" onClick={within(assistant.onClick)}><div className="mist-side-ai-t"><AIBadge />{uiText(assistant.title)}</div><p>{uiText(assistant.text)}</p></button>}
-      <button type="button" className="mist-me" aria-current={activeId === 'account' ? 'page' : undefined} onClick={within(account.onClick)}><Avatar name={account.name} src={account.avatarUrl} /><div><b>{account.name}</b>{account.caption && <small>{uiText(account.caption)}</small>}</div><Icon icon={ChevronRight} size="sm" /></button>
+      <button type="button" className="mist-me" aria-current={activeId === 'account' ? 'page' : undefined} onClick={within(account.onClick)}><Avatar name={account.name} identityKey={account.identityKey} src={account.avatarUrl} /><div><b>{account.name}</b>{account.caption && <small>{uiText(account.caption)}</small>}</div><Icon icon={ChevronRight} size="sm" /></button>
     </aside>
   );
 }
