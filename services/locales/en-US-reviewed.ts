@@ -1,5 +1,10 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '公司管理员姓名': 'Company administrator name', '管理员登录邮箱': 'Administrator login email',
+  '业务岗位': 'Business role', '账号开通方式': 'Account setup', '邮件邀请': 'Email invitation',
+  '设置初始密码': 'Set initial password', '稍后设置': 'Set up later',
+  '公司账号已开通': 'Company account created', '使用初始密码登录': 'Sign in with initial password',
+  '系统管理': 'System administration', '公司管理员负责账号和系统配置，业务岗位单独设置。': 'Company administrators manage accounts and system settings. Assign the business role separately.',
   '通知提示音': 'Notification sound', '操作反馈音': 'Action sounds', '提示音量': 'Sound volume',
   '请从当前入口操作。': 'Use the current entry point.',
   '请从平台管理入口操作。': 'Use the platform administration entry.',
