@@ -1,13 +1,13 @@
 /** Versioned, data-only avatar choices. Shared by profile validation and the renderer. */
 export const AVATAR_COLORS = [
-  { id: 'blue', label: '雾蓝', value: '#466D8A' },
-  { id: 'teal', label: '青绿', value: '#377A79' },
-  { id: 'forest', label: '松绿', value: '#50765C' },
-  { id: 'clay', label: '赤陶', value: '#A1634C' },
-  { id: 'rose', label: '莓红', value: '#995E75' },
-  { id: 'indigo', label: '靛青', value: '#5B668D' },
-  { id: 'ochre', label: '赭金', value: '#8B6C38' },
-  { id: 'slate', label: '石青', value: '#586E77' },
+  { id: 'blue', label: '雾蓝', value: '#C6DAE3', ink: '#465668' },
+  { id: 'teal', label: '青绿', value: '#C2DBD6', ink: '#385D58' },
+  { id: 'forest', label: '松绿', value: '#D3DFD1', ink: '#4D5F4B' },
+  { id: 'clay', label: '赤陶', value: '#E5D5CA', ink: '#6A554A' },
+  { id: 'rose', label: '莓红', value: '#E5D2D7', ink: '#68505A' },
+  { id: 'indigo', label: '靛青', value: '#DCD5E7', ink: '#5D526E' },
+  { id: 'ochre', label: '赭金', value: '#E5DCCB', ink: '#655B49' },
+  { id: 'slate', label: '石青', value: '#D0DADC', ink: '#4D6065' },
 ] as const;
 export type AvatarColor = typeof AVATAR_COLORS[number]['id'];
 export function defaultAvatarColor(key: string): AvatarColor {

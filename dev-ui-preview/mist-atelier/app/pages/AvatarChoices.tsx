@@ -50,8 +50,9 @@ export function PersonChoices({value,onChange,disabled}:{value:PersonAvatar;onCh
   </>;
 }
 export function InitialsChoices({name,identityKey,value,disabled,onChange}:{name:string;identityKey:string;value:AvatarColor|null;disabled:boolean;onChange:(next:AvatarColor|null)=>void}) {
-  const choices=[{id:null,label:'自动',value:AVATAR_COLORS.find(x=>x.id===defaultAvatarColor(identityKey))!.value},...AVATAR_COLORS];
-  return <div className="mist-avatar-option-grid mist-avatar-initial-options" role="group" aria-label={uiText('头像底色')}>{choices.map(item=><button key={item.id??'auto'} type="button" className="mist-avatar-choice" disabled={disabled} aria-label={uiText(item.label)} aria-pressed={value===item.id} onClick={()=>onChange(item.id)}><span className="mist-avatar-color-example" style={{backgroundColor:item.value}}>{name.slice(0,1)}</span><span>{uiText(item.label)}</span>{value===item.id&&<span className="mist-avatar-choice-check"><Icon icon={Check} size="xs"/></span>}</button>)}</div>;
+  const automatic=AVATAR_COLORS.find(x=>x.id===defaultAvatarColor(identityKey))!;
+  const choices=[{...automatic,id:null,label:'自动'},...AVATAR_COLORS];
+  return <div className="mist-avatar-option-grid mist-avatar-initial-options" role="group" aria-label={uiText('头像底色')}>{choices.map(item=><button key={item.id??'auto'} type="button" className="mist-avatar-choice" disabled={disabled} aria-label={uiText(item.label)} aria-pressed={value===item.id} onClick={()=>onChange(item.id)}><span className="mist-avatar-color-example" style={{backgroundColor:item.value,color:item.ink}}>{name.slice(0,1)}</span><span>{uiText(item.label)}</span>{value===item.id&&<span className="mist-avatar-choice-check"><Icon icon={Check} size="xs"/></span>}</button>)}</div>;
 }
 const PATTERNS=[['glass','琉璃'],['waves','波纹'],['weave','织纹'],['blobs','流形'],['squircles','柔方'],['disco','光谱'],['landscape','风景'],['planets','星球'],['glyphs','符号']] as const;
 export function PatternChoices({value,onChange,disabled}:{value:string;onChange:(value:string)=>void;disabled:boolean}) {
