@@ -50,7 +50,7 @@
 .mist-organization dd { margin: 0; overflow-wrap: anywhere; }
 .mist-organization button { margin-top: 10px; text-align: left; color: var(--mist-side-ink); }
 .mist-organization > button { display: block; }
-.mist-organization-popover { margin: 0; padding: 10px; --mist-side-ink: var(--mist-ink); --mist-side-ink-2: var(--mist-ink-2); --mist-side-ink-3: var(--mist-ink-3); --mist-side-hover: var(--mist-accent-tint); --mist-side-halo: var(--mist-overlay-bg); --mist-side-badge: var(--mist-accent-tint); --mist-side-badge-ink: var(--mist-accent-ink); }
+.mist-organization-popover { margin: 0; padding: 10px; --mist-side-ink: var(--mist-ink); --mist-side-ink-2: var(--mist-ink-2); --mist-side-ink-3: var(--mist-ink-3); --mist-side-hover: var(--mist-accent-tint); --mist-side-badge: var(--mist-accent-tint); --mist-side-badge-ink: var(--mist-accent-ink); }
 .mist-organization-popover > button { margin-top: 0; }
 .mist-organization-popover .mist-team-row b { font-weight: var(--mist-fw-medium); }
 .mist-organization-popover .mist-note { margin: 8px; }
