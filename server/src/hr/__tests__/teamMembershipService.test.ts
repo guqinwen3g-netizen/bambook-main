@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { runWithCompanyContext } from '../../auth/requestCompanyContext';
 import { addExistingTeamMember, listTeamMemberCandidates } from '../teamMembershipService';
 function fixture() {
   const user = { id: 'user', displayName: 'User', email: 'user@example.com', status: 'active', deletedAt: null, primaryDeptId: 'dept', passwordHash: 'hashed', metadata: {} };
@@ -40,4 +41,23 @@ describe('existing account membership', () => {
     tx.teamMember.findMany.mockResolvedValue([{ userId: 'user' }] as any);
     expect(await listTeamMemberCandidates(db, 'team')).toEqual([]);
   });
+});
+
+it('allows active company colleagues from other departments and existing groups', async () => {
+  const {db,user,team,tx} = fixture(); Object.assign(team.department,{companyId:'company'}); user.primaryDeptId='other';
+  (tx.userAccount as any).findFirst=vi.fn().mockResolvedValue(user); tx.teamMember.findMany.mockResolvedValue([{teamId:'other-team'}] as any);
+  await runWithCompanyContext('company',()=>addExistingTeamMember(db,'team','user'));
+  expect((tx.userAccount as any).findFirst).toHaveBeenCalledWith({where:{id:'user',companyMembers:{some:{companyId:'company',status:'active'}}}});
+  expect(tx.teamMember.upsert).toHaveBeenCalledOnce();
+});
+it('rejects an account or group outside the current company', async () => {
+  const {db,team,tx}=fixture(); Object.assign(team.department,{companyId:'elsewhere'});
+  await expect(runWithCompanyContext('company',()=>addExistingTeamMember(db,'team','user'))).rejects.toThrow('当前公司');
+  Object.assign(team.department,{companyId:'company'}); (tx.userAccount as any).findFirst=vi.fn().mockResolvedValue(null);
+  await expect(runWithCompanyContext('company',()=>addExistingTeamMember(db,'team','user'))).rejects.toThrow('登录账号'); expect(tx.teamMember.upsert).not.toHaveBeenCalled();
+});
+it('offers same-company candidates even when they belong to another group', async () => {
+  const {db,user,team,tx}=fixture(); Object.assign(team.department,{companyId:'company'});
+  expect(await runWithCompanyContext('company',()=>listTeamMemberCandidates(db,'team'))).toEqual([{id:'user',displayName:'User',email:user.email}]);
+  expect(tx.teamMember.findMany).toHaveBeenCalledWith(expect.objectContaining({where:expect.objectContaining({teamId:'team'})}));
 });

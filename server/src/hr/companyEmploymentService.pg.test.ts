@@ -92,6 +92,27 @@ describe.skipIf(!url)('company employment lifecycle on PostgreSQL', () => {
     }
   });
 
+  it('supports multi-group company collaboration across departments without cross-company access', async () => {
+    const second = 'hr-extra-' + key;
+    await db.team.create({data:{id:second,departmentId:d2,name:'Second group'}});
+    await db.userRole.updateMany({where:{userId:newHire,role:{companyId:a}},data:{departmentId:d2}});
+    const before = await db.userRole.findMany({where:{userId:newHire}});
+    try {
+      const first = await call('post','/teams/'+ta+'/members').send({userId:newHire});
+      expect(first.status).toBe(200);
+      expect((await call('post','/teams/'+second+'/members').send({userId:newHire})).status).toBe(200);
+      expect((await call('post','/teams/'+ta+'/members').send({userId:newHire})).body.member.id).toBe(first.body.member.id);
+      expect((await call('post','/teams/'+tb+'/members').send({userId:newHire})).status).toBeGreaterThanOrEqual(400);
+      expect((await call('post','/teams/'+tb+'/members',b).send({userId:newHire})).status).toBeGreaterThanOrEqual(400);
+      expect(await db.teamMember.count({where:{userId:newHire,leftAt:null}})).toBe(2);
+      expect(await db.userRole.findMany({where:{userId:newHire}})).toEqual(before);
+    } finally {
+      await db.teamMember.deleteMany({where:{userId:newHire,teamId:{in:[ta,second]}}});
+      await db.team.delete({where:{id:second}});
+      await db.userRole.updateMany({where:{userId:newHire,role:{companyId:a}},data:{departmentId:d1}});
+    }
+  });
+
   it('creates the profile and onboarding record atomically, and retrying does not duplicate onboarding', async () => {
     const body = { hireDate: '2026-10-26' };
     expect((await call('put', '/employees/' + shared).send(body)).status).toBe(200);

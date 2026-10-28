@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { PrismaClient, Prisma } from '@prisma/client';
 import { OrganizationError } from './organizationService';
+import { currentCompanyId } from '../auth/requestCompanyContext';
 
 async function activeTeam(db: any, teamId: string) {
   const team = await db.team.findUnique({ where: { id: teamId }, include: { department: true } });
   if (!team || team.deletedAt != null || team.status !== 'active' || !team.department?.parentId || team.department.status !== 'active')
     throw new OrganizationError('请选择有效部门下的小组。');
+  if (currentCompanyId() && team.department.companyId !== currentCompanyId()) throw new OrganizationError('小组不属于当前公司。', 404);
   return team;
 }
 function realAccount(user: any) {
@@ -14,9 +16,10 @@ function realAccount(user: any) {
 }
 export async function listTeamMemberCandidates(prisma: PrismaClient, teamId: string) {
   const team = await activeTeam(prisma, teamId);
+  const companyId = currentCompanyId();
   const [users, assigned] = await Promise.all([
-    prisma.userAccount.findMany({ where: { primaryDeptId: team.departmentId, status: 'active', deletedAt: null }, orderBy: { displayName: 'asc' } }),
-    prisma.teamMember.findMany({ where: { leftAt: null, team: { deletedAt: null, status: 'active' } }, select: { userId: true } }),
+    prisma.userAccount.findMany({ where: { ...(companyId ? { companyMembers: { some: { companyId, status: 'active' } } } : { primaryDeptId: team.departmentId }), status: 'active', deletedAt: null }, orderBy: { displayName: 'asc' } }),
+    prisma.teamMember.findMany({ where: { ...(companyId ? {teamId} : {}), leftAt: null, team: { deletedAt: null, status: 'active' } }, select: { userId: true } }),
   ]);
   const assignedIds = new Set(assigned.map(row => row.userId));
   return users.filter(user => realAccount(user) && !assignedIds.has(user.id)).map(user => ({ id: user.id, displayName: user.displayName, email: user.email }));
@@ -25,14 +28,16 @@ export async function addExistingTeamMember(prisma: PrismaClient, teamId: string
   audit?: (tx: Prisma.TransactionClient, member: any) => Promise<void>) {
   if (typeof userId !== 'string' || !userId) throw new OrganizationError('请选择已有用户。');
   return prisma.$transaction(async tx => {
-    // Serializes two simultaneous assignments of the same account to different groups.
+    // Serialize membership changes while preserving the unique user/team pair.
     await tx.$queryRaw`SELECT id FROM "UserAccount" WHERE id = ${userId} FOR UPDATE`;
     const team = await activeTeam(tx, teamId);
-    const user = await tx.userAccount.findUnique({ where: { id: userId } });
+    const companyId = currentCompanyId();
+    const user = companyId ? await tx.userAccount.findFirst({where:{id:userId,companyMembers:{some:{companyId,status:'active'}}}}) : await tx.userAccount.findUnique({ where: { id: userId } });
     if (!realAccount(user)) throw new OrganizationError('只能添加已启用且具有登录账号的用户。');
-    if (user!.primaryDeptId !== team.departmentId) throw new OrganizationError('用户所属部门与小组不一致，请先在管理后台调整所属部门。', 409);
+    // R3/R8: company groups may collaborate across departments; job permissions stay unchanged.
+    if (!companyId && user!.primaryDeptId !== team.departmentId) throw new OrganizationError('用户所属部门与小组不一致，请先在管理后台调整所属部门。', 409);
     const memberships = await tx.teamMember.findMany({ where: { userId, leftAt: null, team: { deletedAt: null, status: 'active' } } });
-    if (memberships.some(row => row.teamId !== teamId)) throw new OrganizationError('该用户已分配小组，请先移出原小组。', 409);
+    if (!companyId && memberships.some(row => row.teamId !== teamId)) throw new OrganizationError('该用户已分配小组，请先移出原小组。', 409);
     const existing = memberships.find(row => row.teamId === teamId);
     if (existing) return existing;
     const member = await tx.teamMember.upsert({ where: { teamId_userId: { teamId, userId } },
