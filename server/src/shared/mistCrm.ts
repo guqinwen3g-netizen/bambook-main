@@ -67,7 +67,8 @@ function ids(root: MistState, customerId: string, kind: Exclude<CrmLinkKind, 'op
   for (const id of list) if (!crmLinkTarget(root, customerId, { kind, id })) fail(`关联的${CRM_LINK_LABEL[kind]}不属于该客户`, 'NOT_FOUND');
   return list;
 }
-function log(root: MistState, context: MistContext, entityId: string, value: string) { root.events.unshift({ id: context.id(), entityType: 'customer', entityId, actor: context.actorName, at: context.now, text: value, fileIds: [] }); }
+/** Keep the customer timeline anchor, but authorize business activity by its concrete source record. */
+function log(root: MistState, context: MistContext, entityId: string, value: string, businessRef: { kind: 'opportunity' | 'followUp'; id: string }) { root.events.unshift({ id: context.id(), entityType: 'customer', entityId, actor: context.actorName, at: context.now, text: value, fileIds: [], businessRef }); }
 
 export function applyCrmCommand(root: MistState, command: CrmCommand, context: MistContext): { id: string } {
   switch (command.type) {
@@ -99,7 +100,7 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       if (nextDate) { nextTaskId = context.id(); root.tasks.unshift({ id: nextTaskId, title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, due: nextDate, done: false, kind: 'crm-follow-up', target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id }, assigneeIds: context.actorId ? [context.actorId] : [] }); }
       root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, createdAt: context.now, ...(collection ? { collection } : {}) });
       const what = collection && inv ? `${CRM_COLLECTION_LEVEL_LABEL[collection.level]} ${inv.code}${collection.promisedDate ? `，客户承诺 ${collection.promisedDate} 付 ${collection.promisedAmount} ${collection.currency}` : ''}` : '';
-      log(root, context, c.id, `记录${CRM_METHOD_LABEL[p.method]}${what ? '催收：' + what : '跟进'}${nextDate ? `，下次跟进 ${nextDate}` : ''}`);
+      log(root, context, c.id, `记录${CRM_METHOD_LABEL[p.method]}${what ? '催收：' + what : '跟进'}${nextDate ? `，下次跟进 ${nextDate}` : ''}`, { kind: 'followUp', id });
       if (collection && inv) root.events.unshift({ id: context.id(), entityType: 'invoice', entityId: inv.id, actor: context.actorName, at: context.now, text: `${CRM_METHOD_LABEL[p.method]}${what}`, fileIds: [] });
       return { id };
     }
@@ -115,7 +116,7 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       const row: CrmOpportunity = { id: old?.id || context.id(), customerId: c.id, title: text(input.title, '商机名称', true, 160), domain: input.domain, stage: old?.stage || 'intent', amount, currency, expectedDate: day(input.expectedDate, '预计成交日', true), owner: owner.name, ownerId: owner.id, note: text(input.note, '说明', false, 2000), lossReason: old?.lossReason || '', devIds: ids(root, c.id, 'development', input.devIds), quotationIds: ids(root, c.id, 'quotation', input.quotationIds), orderIds: ids(root, c.id, 'order', input.orderIds), history: old?.history || [{ at: context.now, actor: context.actorName, from: null, to: 'intent', note: '建立商机' }], createdAt: old?.createdAt || context.now, updatedAt: context.now };
       const ownerText = old && old.ownerId !== row.ownerId ? ' · ' + ownerChangeText('负责人', old.owner, owner.name) : '';
       if (old) Object.assign(old, row); else root.crm.opportunities.unshift(row);
-      log(root, context, c.id, `${old ? '更新' : '建立'}商机 ${row.title}${ownerText}`); return { id: row.id };
+      log(root, context, c.id, `${old ? '更新' : '建立'}商机 ${row.title}${ownerText}`, { kind: 'opportunity', id: row.id }); return { id: row.id };
     }
     case 'crm.opportunity.stage': {
       const row = root.crm.opportunities.find(item => item.id === command.payload.id) || fail('商机不存在', 'NOT_FOUND'), stage = command.payload.stage, note = text(command.payload.note, '说明', false, 1000);
@@ -126,7 +127,7 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       if (stage === 'won' && !row.orderIds.length) fail('请先关联实际订单，再标记为已下单', 'PRECONDITION');
       if (stage === 'quoting' && !row.quotationIds.length && !note) fail('请关联报价，或说明报价依据');
       row.history.push({ at: context.now, actor: context.actorName, from: row.stage, to: stage, note }); row.stage = stage; if (stage === 'lost') row.lossReason = note; row.updatedAt = context.now;
-      log(root, context, row.customerId, `商机 ${row.title} 推进到${CRM_STAGE_LABEL[stage]}`); return { id: row.id };
+      log(root, context, row.customerId, `商机 ${row.title} 推进到${CRM_STAGE_LABEL[stage]}`, { kind: 'opportunity', id: row.id }); return { id: row.id };
     }
   }
   return fail('未知客户关系操作');

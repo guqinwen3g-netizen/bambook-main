@@ -65,6 +65,47 @@ describe('row-level data scope by role', () => {
     expect(state.orders).toEqual([]); expect(state.devs).toEqual([]); expect(state.market.quotations).toEqual([]); expect(state.crm.opportunities).toEqual([]);
     expect(state.invoices).toEqual([]); expect(state.fulfillment.shipments).toEqual([]);
   });
+  it('scopes customer activity to its actual opportunity through normal CRM commands', async () => {
+    const created = await repo.execute(actor('demo-sales'), workspaceId, { requestId: 'scoped-crm-create', expectedRevision: 0,
+      command: { type: 'crm.opportunity.save', payload: { input: { customerId: 'customer-2', title: 'Private fabric demand', domain: 'fabric', amount: '19000', currency: 'USD', expectedDate: '2026-11-10', ownerId: 'demo-sales', note: '', devIds: [], quotationIds: [], orderIds: [] } } } });
+    const id = String(created.receipt.result.id);
+    db.workspaces.get(workspaceId)!.state.events.unshift({ id: 'wrong-customer-source', entityType: 'customer', entityId: 'customer-1', actor: 'sales', at: '2026-10-13T00:00:00Z', text: 'Wrong customer anchor', fileIds: [], businessRef: { kind: 'opportunity', id } });
+    const outside = (await repo.get(actor('loner'), workspaceId)).state;
+    expect(outside.customers.some(row => row.id === 'customer-2')).toBe(true);
+    expect(outside.crm.opportunities.some(row => row.id === id)).toBe(false);
+    expect(outside.events.some(row => row.text.includes('Private fabric demand'))).toBe(false);
+    const peer = (await repo.get(actor('teammate'), workspaceId)).state;
+    expect(peer.crm.opportunities.some(row => row.id === id)).toBe(true);
+    expect(peer.events.some(row => row.text.includes('Private fabric demand'))).toBe(true);
+    expect(peer.events.some(row => row.id === 'wrong-customer-source')).toBe(false);
+    const updated = await repo.execute(actor('demo-sales'), workspaceId, { requestId: 'scoped-crm-stage', expectedRevision: created.workspace.revision,
+      command: { type: 'crm.opportunity.stage', payload: { id, stage: 'sampling', note: 'Customer requested samples' } } });
+    expect(updated.workspace.state.events[0].businessRef).toEqual({ kind: 'opportunity', id });
+    const follow = await repo.execute(actor('demo-sales'), workspaceId, { requestId: 'scoped-crm-followup', expectedRevision: updated.workspace.revision,
+      command: { type: 'crm.followUp.save', payload: { customerId: 'customer-2', method: 'call', content: 'Private fabric terms', at: '2026-10-13T03:00:00Z', nextDate: '', link: { kind: 'opportunity', id } } } });
+    const followId = String(follow.receipt.result.id);
+    expect(follow.workspace.state.events[0].businessRef).toEqual({ kind: 'followUp', id: followId });
+    expect((await repo.get(actor('loner'), workspaceId)).state.events.some(row => row.businessRef?.id === followId)).toBe(false);
+    expect((await repo.get(actor('teammate'), workspaceId)).state.events.some(row => row.businessRef?.id === followId)).toBe(true);
+    db.teamMembers[0].leftAt = new Date();
+    expect((await repo.get(actor('teammate'), workspaceId)).state.events.some(row => row.text.includes('Private fabric demand'))).toBe(false);
+  });
+  it('does not expose old ambiguous customer-business activity or a mismatched source reference', async () => {
+    const source = db.workspaces.get(workspaceId)!.state;
+    source.events.unshift({ id: 'old-private', entityType: 'customer', entityId: 'customer-2', actor: 'sales', at: '2026-10-13T00:00:00Z', text: 'Legacy customer business detail', fileIds: [] });
+    source.events.unshift({ id: 'bad-ref', entityType: 'customer', entityId: 'customer-1', actor: 'sales', at: '2026-10-13T00:00:00Z', text: 'Mismatched customer detail', fileIds: [], businessRef: { kind: 'opportunity', id: 'missing' } } as any);
+    expect((await repo.get(actor('loner'), workspaceId)).state.events.some(row => ['old-private', 'bad-ref'].includes(row.id))).toBe(false);
+    expect((await repo.get(actor('demo-sales'), workspaceId)).state.events.some(row => row.id === 'old-private')).toBe(true);
+    expect((await repo.get(actor('boss'), workspaceId)).state.events.some(row => row.id === 'old-private')).toBe(true);
+  });
+  it('keeps row filtering when hiding team-management history from ordinary staff', async () => {
+    const source = db.workspaces.get(workspaceId)!.state;
+    source.events.unshift({ id: 'hidden-order-event', entityType: 'order', entityId: 'SO-G-2026-017', actor: 'buyer', at: '2026-10-13T00:00:00Z', text: 'Other business private detail', fileIds: [] });
+    source.events.unshift({ id: 'scope-management-event', entityType: 'teamScope', entityId: 'team-lune', actor: 'boss', at: '2026-10-13T00:00:00Z', text: 'Private scope configuration', fileIds: [] });
+    const view = (await repo.get(actor('demo-sales'), workspaceId)).state;
+    expect(view.events.some(row => ['hidden-order-event', 'scope-management-event'].includes(row.id))).toBe(false);
+    expect(source.events.some(row => row.id === 'hidden-order-event')).toBe(true);
+  });
   it('a department head sees members of the department and its sub-departments', async () => {
     expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-017', 'id-320', 'id-300']));
     expect(await orders('head')).not.toContain('SO-G-2026-018');
