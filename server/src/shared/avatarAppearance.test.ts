@@ -55,10 +55,12 @@ it('accepts only known shared palette IDs in the new pattern identity',()=>{
  expect(isAvatarIdentity('dicebear:v1:glass:pblue_v11_12_12_test-0:still')).toBe(true);
  expect(isAvatarIdentity('dicebear:v1:glass:pblue_v12_12_12_test-0:still')).toBe(true);
  expect(isAvatarIdentity('dicebear:v1:gaze:pblue_v13_12_12_test-0:still')).toBe(true);
+ expect(isAvatarIdentity('dicebear:v1:gaze:ppearl_v14_12_12_test-0:still')).toBe(true);
  expect(isAvatarIdentity('dicebear:v1:glass:punknown_v8_12_12_test-0:still')).toBe(false);
  expect(isAvatarIdentity('dicebear:v1:glass:punknown_v9_12_12_test-0:still')).toBe(false);
  expect(isAvatarIdentity('dicebear:v1:glass:punknown_v10_12_12_test-0:still')).toBe(false);
  expect(isAvatarIdentity('dicebear:v1:glass:punknown_v11_12_12_test-0:still')).toBe(false);
  expect(isAvatarIdentity('dicebear:v1:glass:punknown_v12_12_12_test-0:still')).toBe(false);
  expect(isAvatarIdentity('dicebear:v1:gaze:punknown_v13_12_12_test-0:still')).toBe(false);
+ expect(isAvatarIdentity('dicebear:v1:gaze:punknown_v14_12_12_test-0:still')).toBe(false);
 });

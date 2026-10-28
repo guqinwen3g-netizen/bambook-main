@@ -69,7 +69,7 @@ export function parsePersonIdentity(value?: string | null): PersonAvatar | null 
 export const LEGACY_AVATAR_PATTERN = /^dicebear:v1:(blobs|disco|glass|glyphs|squircles|slice|waves|weave|critters|cameo|line-face|thumbs|landscape|croodles-neutral|dylan|fun-emoji|gaze|pixelbot|rings|stripes|planets):([A-Za-z0-9_-]{1,80}):(animated|still)$/;
 /** Shared pattern colors are stored by palette ID; older identities remain unchanged. */
 export function patternColorFromSeed(seed:string): AvatarColor | null {
-  const match=seed.match(/^p([a-z]+)_v(?:8|9|10|11|12|13)_(\d{1,2})_(\d{1,2})_([A-Za-z0-9_-]{1,48})-0$/);
+  const match=seed.match(/^p([a-z]+)_v(?:8|9|10|11|12|13|14)_(\d{1,2})_(\d{1,2})_([A-Za-z0-9_-]{1,48})-0$/);
   if(!match || Number(match[2])>24 || Number(match[3])>24)return null;
   return AVATAR_COLORS.find(color=>color.id===match[1])?.id ?? null;
 }
@@ -86,6 +86,6 @@ export function patternColorFromIdentity(value?:string|null, includeLegacy=false
 }
 export function isAvatarIdentity(value:string) {
   const legacy=value.match(LEGACY_AVATAR_PATTERN);
-  if(legacy) return !/^p[^_]*_v(?:8|9|10|11|12|13)(?:_|$)/.test(legacy[2]) || !!patternColorFromSeed(legacy[2]);
+  if(legacy) return !/^p[^_]*_v(?:8|9|10|11|12|13|14)(?:_|$)/.test(legacy[2]) || !!patternColorFromSeed(legacy[2]);
   return !!parseInitialsIdentity(value) || !!parsePersonIdentity(value);
 }

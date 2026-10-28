@@ -50,6 +50,16 @@ const coordinatedAccents: Record<string, readonly [string,string,string]> = {
   pearl:['#718392','#9D8172','#7B9283'], charcoal:['#91ADB0','#D1AE91','#B5A0C7'],
 };
 
+// Clean cool/pink accents for new artwork. Natural skin and hair remain separate.
+const freshAccents: Record<string, readonly [string,string,string]> = {
+  blue:['#648FC7','#DD92B5','#77B8B1'], indigo:['#8A80C9','#79B7B2','#D58EB6'],
+  plum:['#A67DC2','#76A9C3','#DB93B4'], rose:['#C47DA5','#74A8BB','#9995CD'],
+  clay:['#CD84A7','#789EC8','#84B8AD'], ochre:['#71A7AF','#9596CF','#D18FB4'],
+  sage:['#75AA98','#A18CCC','#78AEC6'], forest:['#68A693','#8E9CCD','#CF91BB'],
+  teal:['#64A8AA','#B18FCB','#7D9DC8'], slate:['#70A0BD','#C38AB7','#7CB5AC'],
+  pearl:['#91A8D2','#86ADCE','#B29DCF'], charcoal:['#A2B4DF','#95CACB','#D3AAD3'],
+};
+
 const paletteIndexFor = (seed: string) => {
   const explicit = seed.match(/^p([0-5])_/);
   if (explicit) return Number(explicit[1]);
@@ -95,16 +105,19 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   const hue = seed.match(/^c(\d{1,3})_v[567]_/);
   const deeper = /^c\d{1,3}_v7_/.test(seed);
   const sharedId=patternColorFromSeed(seed), shared=AVATAR_COLORS.find(color=>color.id===sharedId);
-  if(/^p[^_]*_v(?:8|9|10|11|12|13)(?:_|$)/.test(seed) && !shared) throw new Error('未知的头像配色');
+  if(/^p[^_]*_v(?:8|9|10|11|12|13|14)(?:_|$)/.test(seed) && !shared) throw new Error('未知的头像配色');
   const blend=(from:string,to:string,amount:number)=>'#'+[1,3,5].map(i=>Math.round(parseInt(from.slice(i,i+2),16)*(1-amount)+parseInt(to.slice(i,i+2),16)*amount).toString(16).padStart(2,'0')).join('');
   const colorful = !!shared && /^p[a-z]+_v9_/.test(seed);
-  const distinctCharacter = !!shared && /^p[a-z]+_v13_/.test(seed);
-  const naturalFeatures = !!shared && /^p[a-z]+_v(?:12|13)_/.test(seed);
-  const familyColors = !!shared && /^p[a-z]+_v(?:11|12|13)_/.test(seed);
-  const originalColors = !!shared && /^p[a-z]+_v(?:10|11|12|13)_/.test(seed);
+  const freshColors = !!shared && /^p[a-z]+_v14_/.test(seed);
+  const distinctCharacter = !!shared && /^p[a-z]+_v(?:13|14)_/.test(seed);
+  const naturalFeatures = !!shared && /^p[a-z]+_v(?:12|13|14)_/.test(seed);
+  const familyColors = !!shared && /^p[a-z]+_v(?:11|12|13|14)_/.test(seed);
+  const originalColors = !!shared && /^p[a-z]+_v(?:10|11|12|13|14)_/.test(seed);
+  const artworkAccents = freshColors ? freshAccents : coordinatedAccents;
   // New designs mix three contrasting families, while retaining the chosen background.
   const accents = shared && colorful ? [3,5,7].map(offset=>patternAccents[(AVATAR_COLORS.indexOf(shared)+offset)%patternAccents.length]) : [];
-  const basePalette = shared ? originalColors ? [blend(shared.value,'#ffffff',.58),...coordinatedAccents[shared.id],shared.ink] : colorful ? [blend(shared.value,'#ffffff',.58),...accents,shared.ink] : [blend(shared.value,'#ffffff',.58),shared.value,blend(shared.value,shared.ink,.2),blend(shared.value,shared.ink,.45),shared.ink] : hue ? mistPalette(Number(hue[1]) % 360, deeper ? -5 : 0) : palettes[paletteIndex];
+  const artworkInk = freshColors ? (shared?.id === 'charcoal' ? '#EEF3F8' : '#344252') : shared?.ink;
+  const basePalette = shared ? originalColors ? [blend(shared.value,'#ffffff',.58),...artworkAccents[shared.id],artworkInk!] : colorful ? [blend(shared.value,'#ffffff',.58),...accents,shared.ink] : [blend(shared.value,'#ffffff',.58),shared.value,blend(shared.value,shared.ink,.2),blend(shared.value,shared.ink,.45),shared.ink] : hue ? mistPalette(Number(hue[1]) % 360, deeper ? -5 : 0) : palettes[paletteIndex];
   const adjusted = basePalette.map((hex, index) => {
     if (!tone) return hex;
     const delta = tone * (index === 0 ? 1 : 3);
@@ -112,7 +125,7 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   });
   const [frost, mist, middle, gray, ink] = adjusted;
   const colors = [gray, middle, mist];
-  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}:${shared ? `v${distinctCharacter ? 13 : naturalFeatures ? 12 : familyColors ? 11 : originalColors ? 10 : colorful ? 9 : 8}-${shared.id}` : deeper ? 'v7' : 'legacy'}`;
+  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}:${shared ? `v${freshColors ? 14 : distinctCharacter ? 13 : naturalFeatures ? 12 : familyColors ? 11 : originalColors ? 10 : colorful ? 9 : 8}-${shared.id}` : deeper ? 'v7' : 'legacy'}`;
   let style = styles.get(cacheKey);
   if (!style) {
     const definition = definitions[family as keyof typeof definitions];
@@ -122,7 +135,7 @@ export function generateAvatar(family: string, seed: string, animated = false): 
       if (familyColors) {
         // Assign colors according to each drawing's structure, rather than
         // letting the renderer independently randomize related layers.
-        const [primary,secondary,tertiary] = coordinatedAccents[shared!.id];
+        const [primary,secondary,tertiary] = artworkAccents[shared!.id];
         const roles: Record<string, Record<string,string[]>> = {
           weave: { colorA:[primary],colorB:[secondary],colorC:[tertiary],line:[ink] },
           critters: { body:[primary],accent:[secondary],ink:[ink] },
@@ -177,7 +190,7 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   const definition = definitions[family as keyof typeof definitions];
   // v6 uses the unmodified DiceBear component distribution. Legacy avatars retain their appearance.
   const variants = shared || /^c\d{1,3}_v[67]_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components as Parameters<typeof avatarVariantPreferences>[2]);
-  const shapeSeed = seed.replace(/^p[a-z]+_v(?:8|9|10|11|12|13)_/, 'v6_').replace(/^c(\d+)_v7_/, 'c$1_v6_').replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
+  const shapeSeed = seed.replace(/^p[a-z]+_v(?:8|9|10|11|12|13|14)_/, 'v6_').replace(/^c(\d+)_v7_/, 'c$1_v6_').replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
   const svg = new Avatar(style, { seed: shapeSeed, size: 256, animationVariant: animated ? 'slow' : 'none', ...variants }).toString();
   // This rule lives inside the SVG so it also applies when rendered as an img.
   const preserveFeatures = naturalFeatures && ['dylan','gaze'].includes(family);
