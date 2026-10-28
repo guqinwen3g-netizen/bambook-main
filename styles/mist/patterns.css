@@ -461,7 +461,7 @@
 .mist-setting-row b { font-weight: var(--mist-fw-medium); font-size: var(--mist-text-md); display: block; }
 .mist-sound-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .mist-sound-controls .mist-slider { width: clamp(150px, 20vw, 200px); }
-.mist-sound-controls > span { min-width: 35px; text-align: right; color: var(--mist-ink-2); font-size: var(--mist-text-xs); }
+.mist-sound-controls > span:not(.mist-slider) { min-width: 35px; text-align: right; color: var(--mist-ink-2); font-size: var(--mist-text-xs); }
 .mist-setting-row small { color: var(--mist-ink-3); font-size: var(--mist-text-xs); }
 @media (max-width: 600px) {
   .mist-setting-row:has(select) { flex-direction: column; align-items: stretch; gap: 12px; }

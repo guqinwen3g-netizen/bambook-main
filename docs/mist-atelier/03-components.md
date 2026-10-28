@@ -36,7 +36,7 @@ import { Button, Card, CardHeader, DataTable, Pill, useToast, type Column } from
 | 图片 / 款式缩略 | `img.rounded` | `Thumb`（列表）/ `ObjectStage`（大图预览）/ `ObjectCell`（表格首列：图 + 名称 + 编号） |
 | 编号 | `font-mono text-xs` | `Mono` |
 | 进度 | 自写 bar | `Meter`（数值）/ `StageProgress`（第 n/5 阶段） |
-| 连续调节 | 浏览器默认 range | `Slider value min max step onChange`，统一轨道与滑块，保留原生键盘/触摸操作 |
+| 连续调节 | 浏览器默认 range | `Slider value min max step onChange`，填充轨道与短刻度标记，保留原生键盘/触摸操作 |
 | 阶段流转 | 自写 steps | `Stepper`（横向，详情页顶部）/ `FlowSteps`（单据履约）/ `VerticalSteps`（向导侧栏） |
 | 动态 / 日志 | 自写列表 | `Timeline events` |
 | 待办 | 自写列表 | `TaskList`（首页）/ `Checklist`（出运准备等） |
