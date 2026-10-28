@@ -3,6 +3,21 @@ import { describe,expect,it } from 'vitest';
 import { generateAvatar } from './avatarPresets';
 import { mistPalette,mistSchemeHues } from './avatarColor';
 
+it('uses cool or pink decorative bodies without changing natural portrait features',async()=>{
+ const {AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
+ const decode=(src:string)=>decodeURIComponent(src.split(',')[1]).toLowerCase();
+ for(const color of AVATAR_COLORS){
+  const svg=decode(generateAvatar('gaze',`p${color.id}_v14_12_12_fresh-0`,false));
+  const colors=Array.from(new Set(svg.match(/#[0-9a-f]{6}\b/g)||[]));
+  const body=colors.filter(hex=>![color.value.toLowerCase(),'#25313a','#fffdf8'].includes(hex));
+  expect(body).toHaveLength(1);
+  const [r,g,b]=[1,3,5].map(i=>parseInt(body[0].slice(i,i+2),16)/255),max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min;
+  const hue=(((max===r?(g-b)/d:max===g?(b-r)/d+2:(r-g)/d+4)*60)+360)%360;
+  expect(hue).toBeGreaterThan(150);expect(hue).toBeLessThan(355);
+  for(const family of ['dylan','cameo'])expect(generateAvatar(family,`p${color.id}_v14_12_12_fresh-0`,false)).toBe(generateAvatar(family,`p${color.id}_v13_12_12_fresh-0`,false));
+ }
+});
+
 it('separates simple character body hues from their backgrounds without changing their features',async()=>{
  const {AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
  const hue=(hex:string)=>{const [r,g,b]=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255);const max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min;if(!d)return 0;return ((max===r?(g-b)/d:max===g?(b-r)/d+2:(r-g)/d+4)*60+360)%360;};
