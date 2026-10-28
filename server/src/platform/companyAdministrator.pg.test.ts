@@ -12,6 +12,7 @@ import {createAuthRouter} from '../auth/route';
 import {createAuthorizationSnapshotGuard} from '../auth/authorizationSnapshotGuard';
 import {requirePermission} from '../auth/permissionGuard';
 import {createPlatformCompanySettings} from './companySettings';
+import {createAdminRouter} from '../admin/route';
 
 const url=process.env.TEST_DATABASE_URL;
 describe.runIf(url)('independent company administration and explicit onboarding',()=>{
@@ -29,6 +30,7 @@ describe.runIf(url)('independent company administration and explicit onboarding'
   app=express();app.use(express.json());app.use(cookieParser());app.use('/api/platform',createPlatformRouter({prisma:db}));
   app.use('/auth',createAuthRouter({prisma:db,requireEmailVerification:false,loginRateLimit:false}));
   app.use('/check',createAuthorizationSnapshotGuard({prisma:db}));
+  app.use('/api/admin',createAuthorizationSnapshotGuard({prisma:db}),createAdminRouter({prisma:db}));
   for(const [path,scope] of [['management','users:admin'],['finance','vouchers:write'],['qc','qc:inspect'],['approval','orders:approve']])app.post('/check/'+path,requirePermission(scope as any),(_req,res)=>res.json({ok:true}));
  });
  afterAll(async()=>{
@@ -38,6 +40,7 @@ describe.runIf(url)('independent company administration and explicit onboarding'
   await db.auditLog.deleteMany({where:{actorId:{in:users}}});
   await db.company.deleteMany({where:{id:{in:companies}}});
   await db.userAccount.deleteMany({where:{id:{in:users}}});
+  await db.permission.deleteMany({where:{id:'users-admin-'+key}});
   await db.role.deleteMany({where:{id:{in:templates}}});await db.$disconnect();
  });
  it('opens an ordinary company with a salesperson administrator and an explicitly supplied initial password',async()=>{
@@ -85,5 +88,65 @@ describe.runIf(url)('independent company administration and explicit onboarding'
  it('protects the last explicit company administrator even when that person is not a manager',async()=>{
   const result=await request(app).delete(`/api/platform/companies/${operatorCompany}/members/${operatorId}`).set('Authorization','Bearer '+platformToken);
   expect(result.status).toBe(409);
+ });
+ it('exposes a first-manager capability only to the explicit administrator of an unconfigured company',async()=>{
+  const directory=await request(app).get('/api/admin/users').set('Authorization','Bearer '+operatorToken);
+  expect(directory.status).toBe(200);expect(directory.body.capabilities).toEqual({canAppointInitialGeneralManager:true});
+  await db.company.update({where:{id:operatorCompany},data:{settings:{administratorIds:[]}}});
+  const denied=await request(app).get('/api/admin/users').set('Authorization','Bearer '+operatorToken);expect(denied.status).toBe(403);
+  await db.company.update({where:{id:operatorCompany},data:{settings:{administratorIds:[operatorId]}}});
+ });
+ it('requires explicit first-manager confirmation and cannot promote the administrator or reuse an account',async()=>{
+  const root=await db.department.findFirstOrThrow({where:{companyId:operatorCompany,parentId:null}});
+  const departmentId='management-'+key;await db.department.create({data:{id:departmentId,name:'总经办',companyId:operatorCompany,parentId:root.id}});
+  const body={displayName:'总经理',email:'first-manager-'+key+'@example.invalid',password,roles:['role-super-admin@'+operatorCompany],departmentId};
+  const create=(data:any)=>request(app).post('/api/admin/users').set('Authorization','Bearer '+operatorToken).send(data);
+  expect((await create(body)).status).toBe(403);
+  const before=await db.userAccount.findUniqueOrThrow({where:{id:operatorId}});
+  expect((await create({...body,email:before.email,appointInitialGeneralManager:true})).status).toBe(409);
+  expect((await db.userAccount.findUniqueOrThrow({where:{id:operatorId}})).passwordHash).toBe(before.passwordHash);
+  expect(await db.userRole.count({where:{userId:operatorId,role:{code:'role-super-admin'}}})).toBe(0);
+ });
+ it('does not offer bootstrap to a business administrator without the explicit system duty',async()=>{
+  const id='business-admin-'+key;users.push(id);
+  await db.userAccount.create({data:{id,displayName:'业务管理',email:id+'@example.invalid',passwordHash:await auth.hashPassword(password),status:'active'}});
+  await db.companyMember.create({data:{id:randomUUID(),companyId:operatorCompany,userId:id}});
+  const permission=await db.permission.upsert({where:{scope:'users:admin'},update:{},create:{id:'users-admin-'+key,scope:'users:admin'}});
+  await db.rolePermission.create({data:{id:randomUUID(),roleId:'role-admin@'+operatorCompany,permissionId:permission.id}});
+  await db.userRole.create({data:{id:randomUUID(),userId:id,roleId:'role-admin@'+operatorCompany,departmentId:'management-'+key}});
+  const login=await request(app).post('/auth/login').send({email:id+'@example.invalid',password});expect(login.status).toBe(200);
+  const directory=await request(app).get('/api/admin/users').set('Authorization','Bearer '+login.body.token);expect(directory.status).toBe(200);expect(directory.body.capabilities.canAppointInitialGeneralManager).toBe(false);
+  const denied=await request(app).post('/api/admin/users').set('Authorization','Bearer '+login.body.token).send({displayName:'不可指定',email:'denied-'+key+'@example.invalid',password,roles:['role-super-admin@'+operatorCompany],departmentId:'management-'+key,appointInitialGeneralManager:true});expect(denied.status).toBe(403);
+  expect(await db.userAccount.count({where:{email:'denied-'+key+'@example.invalid'}})).toBe(0);
+ });
+ it('checks company capacity and rolls back the initial appointment if its audit cannot be written',async()=>{
+  const email='rollback-manager-'+key+'@example.invalid';
+  const body={displayName:'总经理',email,password,roles:['role-super-admin@'+operatorCompany],departmentId:'management-'+key,appointInitialGeneralManager:true};
+  const company=await db.company.findUniqueOrThrow({where:{id:operatorCompany}});
+  await db.company.update({where:{id:operatorCompany},data:{seatLimit:1}});
+  const full=await request(app).post('/api/admin/users').set('Authorization','Bearer '+operatorToken).send(body);expect(full.status).toBe(409);expect(full.body.error).toBe('SEAT_LIMIT_REACHED');
+  await db.company.update({where:{id:operatorCompany},data:{seatLimit:company.seatLimit}});
+  const failing=new Proxy(db,{get(target,name){if(name==='$transaction')return (fn:any)=>target.$transaction(tx=>fn(new Proxy(tx,{get(t,n){return n==='auditLog'?{create:async()=>{throw Error('audit unavailable');}}:Reflect.get(t,n);}})));const value=Reflect.get(target,name);return typeof value==='function'?value.bind(target):value;}});
+  const failApp=express();failApp.use(express.json());failApp.use(createAuthorizationSnapshotGuard({prisma:db}));failApp.use('/api/admin',createAdminRouter({prisma:failing}));
+  const failed=await request(failApp).post('/api/admin/users').set('Authorization','Bearer '+operatorToken).send(body);expect(failed.status).toBe(500);
+  expect(await db.userAccount.count({where:{email}})).toBe(0);
+  expect((await db.company.findUniqueOrThrow({where:{id:operatorCompany}})).settings).toEqual(company.settings);
+ });
+ it('appoints only one initial manager under concurrent requests and preserves the business-role boundary',async()=>{
+  const create=(suffix:string)=>request(app).post('/api/admin/users').set('Authorization','Bearer '+operatorToken).send({displayName:'总经理'+suffix,email:'first-manager-'+suffix+'-'+key+'@example.invalid',password,roles:['role-super-admin@'+operatorCompany],departmentId:'management-'+key,appointInitialGeneralManager:true});
+  const results=await Promise.all([create('a'),create('b')]);
+  for(const result of results)if(result.body.userId)users.push(result.body.userId);
+  expect(results.map(r=>r.status).sort()).toEqual([200,409]);
+  const manager=results.find(r=>r.status===200)!.body.userId;
+  expect(await db.companyMember.count({where:{companyId:operatorCompany,userId:manager,status:'active'}})).toBe(1);
+  expect((await db.company.findUniqueOrThrow({where:{id:operatorCompany}})).settings).toMatchObject({administratorIds:[operatorId],generalManagerAppointedAt:expect.any(String)});
+  const audit=await db.auditLog.findFirst({where:{actorId:operatorId,action:'appoint_initial_general_manager'}});
+  expect(audit?.targetId).toBe(manager);expect(JSON.stringify(audit)).not.toContain(password);
+  const listing=await request(app).get('/api/admin/users').set('Authorization','Bearer '+operatorToken);expect(listing.body.capabilities.canAppointInitialGeneralManager).toBe(false);
+  expect((await request(app).post('/check/approval').set('Authorization','Bearer '+operatorToken)).status).toBe(403);
+  expect((await request(app).patch('/api/admin/users/'+manager+'/roles').set('Authorization','Bearer '+operatorToken).send({roles:['role-sales@'+operatorCompany],departmentId:'management-'+key})).status).toBe(403);
+  // An inactive/removed manager is a recovery case, never a fresh company bootstrap.
+  await db.userRole.deleteMany({where:{userId:manager}});
+  expect((await create('c')).status).toBe(409);
  });
 });

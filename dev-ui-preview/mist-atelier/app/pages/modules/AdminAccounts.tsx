@@ -18,14 +18,14 @@ const isSuperAdmin = (role: AdminRole) => SUPER_ADMIN.has(role.id.split('@')[0])
 const when = (at: string | null | undefined) => at ? new Date(at).toLocaleString(interfaceLocale(), { hour12: false }) : '—';
 const message = (e: unknown, fallback: string) => e instanceof Error ? e.message : fallback;
 
-type Directory = { users: AdminAccount[]; departments: OrgDepartment[]; roles: AdminRole[] };
+type Directory = { users: AdminAccount[]; departments: OrgDepartment[]; roles: AdminRole[]; canAppointInitialGeneralManager: boolean };
 function useDirectory() {
   const session = useMistSession();
   const [data, setData] = React.useState<Directory | null>(null), [loading, setLoading] = React.useState(true), [error, setError] = React.useState('');
   const serial = React.useRef(0);
   const load = React.useCallback(async () => {
     const run = ++serial.current; setLoading(true); setError('');
-    try { const [accounts, roles] = await Promise.all([organizationApi.listAccounts(), organizationApi.listRoles()]); if (run === serial.current) setData({ users: accounts.users ?? [], departments: accounts.departments ?? [], roles: roles.roles ?? [] }); }
+    try { const [accounts, roles] = await Promise.all([organizationApi.listAccounts(), organizationApi.listRoles()]); if (run === serial.current) setData({ users: accounts.users ?? [], departments: accounts.departments ?? [], roles: roles.roles ?? [], canAppointInitialGeneralManager: accounts.capabilities?.canAppointInitialGeneralManager === true }); }
     catch (e) { if (run === serial.current) setError(message(e, '账号读取失败')); }
     finally { if (run === serial.current) setLoading(false); }
   }, []);
@@ -54,7 +54,10 @@ export function AdminAccounts() {
   const [decisionError, setDecisionError] = React.useState('');
   React.useEffect(() => { setDecisionError(''); }, [confirm?.kind, confirm?.account.id]);
   const [temporary, setTemporary] = React.useState<{ name: string; password: string } | null>(null);
-  const envelope = workspace.workspace, canGrant = envelope?.access?.canManageMembers === true && !!workspace.changeMember;
+  const [confirmInitialManager, setConfirmInitialManager] = React.useState(false);
+  React.useEffect(() => { setForm(null); setConfirmInitialManager(false); }, [session.sessionKey]);
+  const companyMode = !!session.user?.companyId;
+  const envelope = workspace.workspace, canGrant = !companyMode && envelope?.access?.canManageMembers === true && !!workspace.changeMember;
   const memberIds = new Set((workspace.state?.members ?? []).map(m => m.userId));
   const roleName = (roleId: string) => data?.roles.find(r => r.id === roleId)?.name ?? roleId;
   const departments = data ? departmentOptions(data.departments) : [];
@@ -66,16 +69,19 @@ export function AdminAccounts() {
     try { await workspace.changeMember!('add', userId); return true; }
     catch (e) { toast(`账号已生效，但授权进入「${envelope?.name}」未完成：${message(e, '请稍后在账号详情重试')}`, 'bad'); return false; }
   };
-  const submit = async () => {
+  const submit = async (initialManagerConfirmed = false) => {
     if (!form || busy) return;
     const f = form;
     if (f.mode !== 'edit' && !f.departmentId) return setFormError('请选择任职部门（不能直接归属公司）');
     if (f.mode !== 'edit' && !f.roles.length) return setFormError('请选择岗位');
     if (f.mode === 'create' && (!f.displayName.trim() || !f.email.trim() || !passwordOk(f.password))) return setFormError('请填写姓名、邮箱，初始密码须包含字母和数字且至少 8 位');
+    const initialAppointment = f.mode === 'create' && !owner && data?.canAppointInitialGeneralManager === true &&
+      data.roles.some(role => f.roles.includes(role.id) && isSuperAdmin(role));
+    if (initialAppointment && !initialManagerConfirmed) { setConfirmInitialManager(true); return; }
     setBusy(true); setFormError('');
     try {
       let userId = f.account?.id ?? '';
-      if (f.mode === 'create') userId = (await organizationApi.createAccount({ displayName: f.displayName.trim(), email: f.email.trim(), password: f.password, roles: f.roles, departmentId: f.departmentId })).userId;
+      if (f.mode === 'create') userId = (await organizationApi.createAccount({ displayName: f.displayName.trim(), email: f.email.trim(), password: f.password, roles: f.roles, departmentId: f.departmentId, ...(initialAppointment ? { appointInitialGeneralManager: true } : {}) })).userId;
       else if (f.mode === 'approve') await organizationApi.approve(userId, f.roles, f.departmentId);
       else if (session.user?.companyId) {
         await organizationApi.saveAccountAssignment(userId, { displayName: f.displayName.trim(), email: f.email.trim(), departmentId: f.departmentId || null, roles: f.roles });
@@ -85,8 +91,8 @@ export function AdminAccounts() {
       }
       const granted = f.mode !== 'edit' && f.grant && canGrant ? await grant(userId, f.displayName) : false;
       toast(f.mode === 'create' ? (granted ? `账号已创建并授权进入「${envelope?.name}」` : '账号已创建') : f.mode === 'approve' ? (granted ? `已通过审批并授权进入「${envelope?.name}」` : '已通过注册审批') : '账号已更新');
-      setForm(null); setSelected(userId); await load();
-    } catch (e) { setFormError(message(e, '保存未完成')); }
+      setConfirmInitialManager(false); setForm(null); setSelected(userId); await load();
+    } catch (e) { setConfirmInitialManager(false); setFormError(message(e, '保存未完成')); }
     finally { setBusy(false); }
   };
   const decide = async () => {
@@ -131,7 +137,7 @@ export function AdminAccounts() {
       </div>}>
       {current && <>
         <KeyValue items={[{ label: '状态', value: ACCOUNT_STATUS[current.status]?.label ?? current.status }, { label: '任职部门', value: current.department ?? '未分配' }, { label: '岗位', value: current.roleIds.map(roleName).join('、') || '未设岗位' }, { label: '创建时间', value: when(current.createdAt) }, { label: '最近登录', value: when(current.lastLoginAt) }]} />
-        {envelope && current.status === 'active' && <div className="mist-section">{envelope.ownerId === current.id ? <Banner tone="neutral" title={ui`「${envelope.name}」的所有者`} /> : memberIds.has(current.id)
+        {!companyMode && envelope && current.status === 'active' && <div className="mist-section">{envelope.ownerId === current.id ? <Banner tone="neutral" title={ui`「${envelope.name}」的所有者`} /> : memberIds.has(current.id)
           ? <Banner tone="ok" title={ui`已授权进入「${envelope.name}」`}>{uiText("能办理哪些业务仍按其岗位与任职部门决定。")}</Banner>
           : <Banner tone="warn" title={ui`尚未授权进入「${envelope.name}」`} actions={canGrant ? <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); if (await grant(current.id, current.displayName)) toast('已授权进入本公司'); setBusy(false); }}>{uiText("授权进入")}</Button> : undefined}>{uiText(canGrant ? '授权只让对方进入这家公司，不增加任何业务权限。' : '请公司所有者在“公司管理 · 数据访问”中授权。')}</Banner>}</div>}
       </>}
@@ -145,11 +151,14 @@ export function AdminAccounts() {
           <Field label={uiText("登录邮箱")} required><TextInput type="email" value={form.email} disabled={busy || form.mode === 'approve' || form.account?.identityEditable === false} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
           {form.mode === 'create' && <Field label={uiText("初始密码")} required hint={uiText("至少 8 位，含字母和数字")}><TextInput type="password" autoComplete="new-password" value={form.password} disabled={busy} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
           <Field label={uiText("任职部门")} required><Select aria-label={uiText("任职部门")} value={form.departmentId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departments} /></Field>
-          <Field label={uiText("岗位")} required><JobSelect roles={data.roles} value={form.roles} owner={owner} disabled={busy} onChange={roles => setForm({ ...form, roles })} /></Field>
-          {form.mode !== 'edit' && envelope && <Field label={uiText("公司")} full>{canGrant ? <Checkbox checked={form.grant} disabled={busy} onChange={grant => setForm({ ...form, grant })} label={ui`同时授权进入「${envelope.name}」`} /> : <span className="mist-note">{uiText("你不是「")}{envelope.name}{uiText("」的所有者；账号生效后请所有者授权。")}</span>}</Field>}
+          <Field label={uiText("岗位")} required><JobSelect roles={data.roles} value={form.roles} owner={owner || (form.mode === 'create' && data.canAppointInitialGeneralManager)} disabled={busy} onChange={roles => setForm({ ...form, roles })} /></Field>
+          {!companyMode && form.mode !== 'edit' && envelope && <Field label={uiText("公司")} full>{canGrant ? <Checkbox checked={form.grant} disabled={busy} onChange={grant => setForm({ ...form, grant })} label={ui`同时授权进入「${envelope.name}」`} /> : <span className="mist-note">{uiText("你不是「")}{envelope.name}{uiText("」的所有者；账号生效后请所有者授权。")}</span>}</Field>}
         </FormGrid>
       </>}
     </Drawer>
+    <Dialog open={confirmInitialManager} onClose={() => !busy && setConfirmInitialManager(false)} tone="warn" title={uiText('指定首位总经理')}
+      description={ui`${form?.displayName ?? ''} 将获得全公司业务与审批权限。后续总经理岗位由总经理维护。`}
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit(true)}>{uiText('确认指定')}</Button><Button disabled={busy} onClick={() => setConfirmInitialManager(false)}>{uiText('取消')}</Button></div>} />
     <Dialog open={!!confirm} onClose={() => !busy && setConfirm(null)} tone={confirm?.kind === 'disable' || confirm?.kind === 'reject' ? 'bad' : 'warn'}
       title={uiText(confirm ? { disable: '停用账号', enable: '重新启用账号', reset: '重置密码', reject: '拒绝注册申请' }[confirm.kind] : '')}
       description={uiText(confirm ? { disable: `${confirm.account.displayName} 将无法登录，已登录的会话随即失效；历史单据与小组记录保留。`, enable: `${confirm.account.displayName} 可以再次登录，岗位与部门保持不变。`, reset: `将为 ${confirm.account.displayName} 生成临时密码，只显示一次，请当面或经内部渠道转交，并提醒对方登录后在“设置 · 安全”中修改。`, reject: `${confirm.account.displayName} 的申请将被拒绝，请写明原因。` }[confirm.kind] : undefined)}

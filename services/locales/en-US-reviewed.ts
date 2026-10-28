@@ -1,5 +1,11 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '指定首位总经理': 'Appoint the first general manager', '确认指定': 'Confirm appointment',
+  '{0} 将获得全公司业务与审批权限。后续总经理岗位由总经理维护。': '{0} will receive company-wide business and approval access. Subsequent manager appointments are managed by a general manager.',
+  '请为首位总经理新建独立账号。': 'Create a separate new account for the first general manager.',
+  '首位总经理须选择总经理岗位。': 'Select the general manager role for this appointment.',
+  '公司已配置过总经理，请由总经理或平台管理员办理。': 'A general manager has already been appointed. Contact a general manager or platform administrator.',
+  '只有本公司管理员可以指定首位总经理。': 'Only this company’s administrator can appoint its first general manager.',
   '公司管理员姓名': 'Company administrator name', '管理员登录邮箱': 'Administrator login email',
   '业务岗位': 'Business role', '账号开通方式': 'Account setup', '邮件邀请': 'Email invitation',
   '设置初始密码': 'Set initial password', '稍后设置': 'Set up later',
