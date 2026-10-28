@@ -13,6 +13,7 @@ import { Button, Card, CardHeader, DataTable, Pill, useToast, type Column } from
 - 图标：`lucide-react` 组件直接作为 `icon` prop 传入（`icon={Plus}`），不要自己包 `<Plus size=…/>`；独立图标用 `<Icon icon={X} size="sm" />`。
 - 变体用 props，不要加 className 改样式。确实需要排版微调只用 `className="mist-row" / "mist-grid" + "mist-col-n" / "mist-spacer" / "mist-muted" / "mist-section"` 这些工具类。
 - 所有浮层（Dialog / Drawer / Dropdown / CommandPalette / Toast）自动 portal 到最近的 `MistRoot`，深色自动生效。
+- `Checkbox` / `Switch` 的原生输入定位在各自标签内，并与可见控件命中区一致；不能让隐藏输入脱离内部滚动容器，导致键盘焦点或点击把整页滚出画面。
 - Dialog/Drawer/CommandPalette 打开后管理焦点、Tab 循环，最上层处理 Esc，关闭后回到触发器。Dropdown 使用方向键/Home/End 导航，Esc 返回触发器，Tab 接续真实下一控件；在模态浮层内的 portal 菜单保留所属关系，不误关宿主。
 
 ## 选型速查：旧写法 → Mist 组件
