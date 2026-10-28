@@ -34,7 +34,7 @@ it('restores the original four-direction DiceBear explorer and saves a deeper ne
  for(const label of ['具象','活泼','抽象','沉静'])expect(getByRole(document.body,'button',{name:label})).toBeTruthy();
  await click('button','开始探索 ↗');
  await settle(()=>expect((getByRole(document.body,'button',{name:'就用这个'}) as HTMLButtonElement).disabled).toBe(false));
- expect(update).not.toHaveBeenCalled();await click('button','就用这个');expect(update.mock.calls[0][0].avatarUrl).toMatch(/^dicebear:v1:[a-z-]+:p[a-z]+_v12_/);
+ expect(update).not.toHaveBeenCalled();await click('button','就用这个');expect(update.mock.calls[0][0].avatarUrl).toMatch(/^dicebear:v1:[a-z-]+:p[a-z]+_v13_/);
 });
 it('accepts a photo draft and crop without updating the profile until final save',async()=>{
  class FakeImage {naturalWidth=400;naturalHeight=300;onload:any;onerror:any;set src(_value:string){queueMicrotask(()=>this.onload?.());}}
