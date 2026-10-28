@@ -117,7 +117,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       const returned = quote.approval?.status === 'rejected' ? quote.approval
         : !quote.approval && quote.requiresApproval ? quote.approvalHistory?.at(-1) : undefined;
       if (returned?.status !== 'rejected' || returned.requesterId !== me) continue;
-      push({ id: `quote-return:${quote.id}`, source: 'review', title: `${quote.code} 报价`,
+      push({ id: `quote-return:${quote.id}`, source: 'task', title: `${quote.code} 报价`,
         meta: [state.customers.find(customer => customer.id === quote.customerId)?.name, returned.note].filter(Boolean).join(' · '),
         when: quote.approval ? '退回修改' : '待重新提交', urgent: true, at: returned.decidedAt || returned.submittedAt,
         target: { view: 'quotations', id: quote.id, detail: 'full' } });
