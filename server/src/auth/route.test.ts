@@ -89,7 +89,7 @@ describe('auth profile avatar', () => {
 });
 
 describe('editable avatar profile identities',()=>{
-  it.each(['initials:v1:clay','person','pattern'])('saves a validated %s avatar on the authenticated account only',async kind=>{
+  it.each(['initials:v1:clay','initials:v1:pearl','initials:v1:charcoal','dicebear:v1:gaze:pcharcoal_v13_12_12_test-0:still','dicebear:v1:gaze:ppearl_v13_12_12_test-0:still','person','pattern'])('saves a validated %s avatar on the authenticated account only',async kind=>{
     const {defaultPersonAvatar,personIdentity}=await import('../shared/avatarAppearance');
     const avatarUrl=kind==='person'?personIdentity({...defaultPersonAvatar('u1'),hair:'bun'}):kind==='pattern'?'dicebear:v1:gaze:pblue_v13_12_12_test-0:still':kind;
     const prisma={userAccount:{update:vi.fn().mockImplementation(async({data})=>({id:'u1',displayName:'One',status:'active',email:'one@example.com',roles:[],primaryDeptId:null,primaryDepartment:null,...data}))},auditLog:{create:vi.fn().mockResolvedValue({})},userPermissionOverrides:{findMany:vi.fn().mockResolvedValue([])}};

@@ -47,6 +47,7 @@ const coordinatedAccents: Record<string, readonly [string,string,string]> = {
   clay:['#A86756','#5D8F8B','#A78550'], ochre:['#927046','#628C88','#A86F76'],
   sage:['#788149','#AD7467','#658C95'], forest:['#5B8667','#AD7772','#7C7FA9'],
   teal:['#558C83','#BA7A70','#8F78A0'], slate:['#5E8798','#C78372','#87956A'],
+  pearl:['#718392','#9D8172','#7B9283'], charcoal:['#91ADB0','#D1AE91','#B5A0C7'],
 };
 
 const paletteIndexFor = (seed: string) => {

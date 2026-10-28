@@ -75,3 +75,12 @@ it('saves the displayed pattern color and restores it on reopening',async()=>{
  await click('button','编辑头像');expect(getByRole(document.body,'button',{name:'图案颜色 · 薄荷'}).getAttribute('aria-pressed')).toBe('true');
  await click('tab','姓名');expect(getByRole(document.body,'button',{name:'薄荷'}).getAttribute('aria-pressed')).toBe('true');
 });
+
+it.each([['柔白','pearl'],['炭灰','charcoal']])('shares and saves the %s neutral in both avatar modes',async(label,id)=>{
+ update.mockImplementation(async({avatarUrl})=>{session.user.avatarUrl=avatarUrl;return session.user;});
+ await open();await click('button',label);await click('tab','图案');
+ expect(getByRole(document.body,'button',{name:`图案颜色 · ${label}`}).getAttribute('aria-pressed')).toBe('true');
+ await click('tab','姓名');await click('button','保存头像');
+ expect(update).toHaveBeenLastCalledWith({avatarUrl:`initials:v1:${id}`});
+ await click('button','编辑头像');expect(getByRole(document.body,'button',{name:label}).getAttribute('aria-pressed')).toBe('true');
+});

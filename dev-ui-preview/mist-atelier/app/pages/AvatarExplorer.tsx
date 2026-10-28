@@ -177,7 +177,7 @@ export function AvatarExplorer({ value, disabled, active=true, palette, onPalett
       </motion.div>}</AnimatePresence>
     </div>
     <div className="mist-avatar-explorer-palette" role="group" aria-label={uiText('图案颜色')}>
-      {AVATAR_COLORS.map(color=><button key={color.id} type="button" disabled={disabled} aria-label={uiText(`图案颜色 · ${color.label}`)} aria-pressed={palette===color.id} title={uiText(color.label)} style={{backgroundColor:color.value}} onClick={()=>{setShowGuide(false);onPaletteChange(color.id);}}>{palette===color.id&&<Icon icon={Check} size="xs"/>}</button>)}
+      {AVATAR_COLORS.map(color=><button key={color.id} type="button" disabled={disabled} data-color={color.id} aria-label={uiText(`图案颜色 · ${color.label}`)} aria-pressed={palette===color.id} title={uiText(color.label)} style={{backgroundColor:color.value}} onClick={()=>{setShowGuide(false);onPaletteChange(color.id);}}>{palette===color.id&&<Icon icon={Check} size="xs"/>}</button>)}
     </div>
     <div id="mist-avatar-mood" className="mist-sr-only" aria-live="polite">{uiText(result.label === '自由探索' ? result.label : `${result.label}倾向`)}</div>
     <div className="mist-avatar-explore-foot">

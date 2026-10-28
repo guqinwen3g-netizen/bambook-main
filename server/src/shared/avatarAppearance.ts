@@ -1,5 +1,5 @@
 /** Versioned, data-only avatar choices. Shared by profile validation and the renderer. */
-export const AVATAR_COLORS = [
+export const CHROMATIC_AVATAR_COLORS = [
   { id:'blue', hue:252, label:'雾蓝', value:'#B4D1F1', ink:'#304155' },
   { id:'indigo', hue:288, label:'雾紫', value:'#CBC9F1', ink:'#3E3D54' },
   { id:'plum', hue:324, label:'柔紫', value:'#E0C2E2', ink:'#4A394C' },
@@ -11,11 +11,17 @@ export const AVATAR_COLORS = [
   { id:'teal', hue:180, label:'薄荷', value:'#A7DACF', ink:'#264740' },
   { id:'slate', hue:216, label:'雾青', value:'#A5D7E5', ink:'#25454D' },
 ] as const;
+export const AVATAR_COLORS = [
+  ...CHROMATIC_AVATAR_COLORS,
+  { id:'pearl', hue:0, label:'柔白', value:'#F2F1ED', ink:'#454A50' },
+  { id:'charcoal', hue:0, label:'炭灰', value:'#343B43', ink:'#F2F1ED' },
+] as const;
 export type AvatarColor = typeof AVATAR_COLORS[number]['id'];
 export function defaultAvatarColor(key: string): AvatarColor {
   let hash = 2166136261;
   for (const char of key.normalize('NFC').trim()) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
-  return AVATAR_COLORS[(hash >>> 0) % AVATAR_COLORS.length].id;
+  // Keep automatic initials stable when adding optional palette choices.
+  return CHROMATIC_AVATAR_COLORS[(hash >>> 0) % CHROMATIC_AVATAR_COLORS.length].id;
 }
 export function initialsIdentity(color: AvatarColor) { return `initials:v1:${color}`; }
 export function parseInitialsIdentity(value?: string | null): AvatarColor | null {
@@ -73,7 +79,7 @@ export function patternColorFromIdentity(value?:string|null, includeLegacy=false
   if(!includeLegacy)return null;
   const legacy=match[2].match(/^c(\d{1,3})_v[567]_/);if(!legacy)return null;
   const hue=Number(legacy[1])%360;
-  return AVATAR_COLORS.reduce((best,color)=>{
+  return CHROMATIC_AVATAR_COLORS.reduce((best,color)=>{
     const distance=(candidate:number)=>Math.abs(((candidate-hue+540)%360)-180);
     return distance(color.hue)<distance(best.hue)?color:best;
   }).id;
