@@ -6,9 +6,9 @@ import { Nav } from '../../nav';
 import { SettingsPage as CompanyAdminPage } from '../SettingsPage';
 import { HrOrganizationPage } from './HrOrganization';
 
-const bridge = vi.hoisted(() => ({ companyId: null as string | null, roles: ['owner'] as string[], perms: ['*'] as string[], localMode: false, changeMember: vi.fn(), members: [] as any[], calls: [] as Array<{ method: string; url: string; body: any }>, routes: {} as Record<string, (body: any) => any> }));
+const bridge = vi.hoisted(() => ({ companyId: null as string | null, roles: ['owner'] as string[], perms: ['*'] as string[], localMode: false, changeMember: vi.fn(), members: [] as any[], teamScopes: [] as any[], customers: [] as any[], calls: [] as Array<{ method: string; url: string; body: any }>, routes: {} as Record<string, (body: any) => any> }));
 vi.mock('../../runtime/auth', () => { const useMistSession = () => ({ user: { id: 'owner-1', companyId: bridge.companyId, displayName: '老板', roles: bridge.roles, roleLabels: [] }, sessionKey: 'k', localMode: bridge.localMode, hasRole: (...r: string[]) => r.some(x => bridge.roles.includes(x)), hasPermission: (p: string) => bridge.perms.includes('*') || bridge.perms.includes(p), canAccessView: () => true }); return { useMistSession, useOptionalMistSession: useMistSession }; });
-vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: { members: bridge.members }, workspace: { id: 'w', name: '空间', ownerId: 'owner-1', access: { canManageMembers: bridge.roles.includes('owner') } }, changeMember: bridge.changeMember }) }));
+vi.mock('../../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: { members: bridge.members, teamScopes: bridge.teamScopes, customers: bridge.customers, market: { suppliers: [] } }, workspace: { id: 'w', name: '空间', ownerId: 'owner-1', access: { canManageMembers: bridge.roles.includes('owner'), companyLibrary: !!bridge.companyId } }, changeMember: bridge.changeMember }) }));
 vi.mock('../../../../../services/apiService', () => ({ apiService: { getAuthHeaders: () => ({ Authorization: 'Bearer t' }), getCompanyExporterProfile: vi.fn(async () => ({ value: { nameEn: 'X' }, version: 1 })), updateCompanyExporterProfile: vi.fn() } }));
 
 const departments = [{ id: 'root', name: '公司', parentId: null }, { id: 'd1', name: '面料业务部', parentId: 'root', businessAttributes: ['fabric_business'] }];
@@ -17,7 +17,7 @@ let root: Root | undefined, host: HTMLDivElement; const go = vi.fn();
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
-  bridge.companyId = null; bridge.roles = ['owner']; bridge.perms = ['*']; bridge.localMode = false; bridge.members = []; bridge.calls = []; bridge.changeMember.mockReset(); bridge.changeMember.mockResolvedValue(undefined); go.mockReset();
+  bridge.companyId = null; bridge.roles = ['owner']; bridge.perms = ['*']; bridge.localMode = false; bridge.members = []; bridge.teamScopes = []; bridge.customers = []; bridge.calls = []; bridge.changeMember.mockReset(); bridge.changeMember.mockResolvedValue(undefined); go.mockReset();
   bridge.routes = {
     'GET /api/admin/users': () => ({ ok: true, departments, users: [{ id: 'u1', displayName: '张三', email: 'z@x.test', status: 'pending', roles: [], roleIds: [], departmentId: null, department: null, lastLoginAt: null, createdAt: '2026-10-01T00:00:00Z' }] }),
     'GET /api/admin/roles': () => ({ ok: true, roles }),
@@ -39,9 +39,9 @@ beforeEach(() => {
   }));
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.unstubAllGlobals(); });
-async function render(Page: React.FC, view: string, section?: string) {
+async function render(Page: React.FC, view: string, section?: string, id?: string) {
   if (!root) { host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host); }
-  await act(async () => root!.render(<Nav.Provider value={{ route: { view, section }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() } as any}><Page /></Nav.Provider>));
+  await act(async () => root!.render(<Nav.Provider value={{ route: { view, section, id }, go, theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn(), openAI: vi.fn() } as any}><Page /></Nav.Provider>));
   await act(async () => { await new Promise(r => setTimeout(r, 0)); });
 }
 const button = (text: string) => [...document.querySelectorAll('button')].find(b => b.textContent?.trim() === text) as HTMLButtonElement | undefined;
@@ -213,6 +213,17 @@ describe('管理后台 · 账号', () => {
 });
 
 describe('人事管理', () => {
+  it('shows the actual customer scope on a linked group and opens that same scope for configuration', async () => {
+    bridge.companyId = 'company-1';
+    bridge.customers = [{ id: 'client-1', name: 'Linden Apparel Ltd.' }];
+    bridge.teamScopes = [{ teamId: 't1', conditions: [{ id: 'rule-1', customerId: 'client-1', line: 'fabric' }], picks: [{ kind: 'order', id: 'private-record-id' }], exclusions: [], history: [] }];
+    await render(HrOrganizationPage, 'hr', 'teams', 't1');
+    expect(document.querySelector('.mist-drawer')?.textContent).toContain('面料一组');
+    expect(document.querySelector('.mist-drawer')?.textContent).toContain('Linden Apparel Ltd. · 面料');
+    expect(document.querySelector('.mist-drawer')?.textContent).not.toContain('private-record-id');
+    await click('配置业务范围');
+    expect(go).toHaveBeenCalledWith('company-settings', 't1', { section: 'teams' });
+  });
   // 只有人事权限时，“人员”分区显示人事名册；有账号管理权限时显示账号列表（见“管理后台 · 账号”）。
   beforeEach(() => { bridge.roles = []; bridge.perms = ['hr:read', 'hr:write']; });
   it('shows departments with business attributes and creates a department under the company root', async () => {

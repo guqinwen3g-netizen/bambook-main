@@ -1,5 +1,9 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '配置业务范围': 'Configure business scope', '返回小组': 'Back to group',
+  '范围条件': 'Scope conditions', '排除业务': 'Excluded business',
+  '指定客户': 'Specified customer', '指定供应商/工厂': 'Specified supplier/factory',
+  '{0} 笔': '{0} records',
   '指定首位总经理': 'Appoint the first general manager', '确认指定': 'Confirm appointment',
   '{0} 将获得全公司业务与审批权限。后续总经理岗位由总经理维护。': '{0} will receive company-wide business and approval access. Subsequent manager appointments are managed by a general manager.',
   '请为首位总经理新建独立账号。': 'Create a separate new account for the first general manager.',

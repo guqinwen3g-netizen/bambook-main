@@ -142,7 +142,7 @@ export function SettingsPage() {
             <SettingRow title={uiText("站内每日摘要")} control={<Switch ariaLabel={uiText("站内每日摘要")} checked={settings.notifications.digest} disabled={settingsLocked} onChange={value => notify('digest', value)} />} />
           </FormSection>}
             {sec === 'access' && <WorkspaceMembers busy={busy} />}
-            {sec === 'teams' && <TeamScopesSection canEdit={session.hasPermission('hr:write')} />}
+            {sec === 'teams' && <TeamScopesSection canEdit={session.hasPermission('hr:write')} initialTeamId={nav?.route?.id} onReturnToTeam={nav?.route?.id ? teamId => nav.go('hr', teamId, { section: 'teams' }) : undefined} />}
             {/* 常驻挂载：在分区间切换不丢公司资料草稿；保存按钮在其自身吸底栏。 */}
             <div hidden={sec !== 'profile'}><CompanyProfileSection member={member} active={sec === 'profile'} /></div>
             </>}
