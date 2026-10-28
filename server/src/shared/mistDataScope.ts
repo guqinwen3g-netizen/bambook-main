@@ -6,7 +6,7 @@
  * 向下全覆盖、向上只读、订单下游随订单。
  *
  * 档案是公司共享资料（R6）：客户、联系人、供应商、产品、季节、趋势、展会、活动、看册、面料寻样等不裁剪。
- * 未在 SCOPED_COLLECTIONS 列出的业务集合保持模块级权限（应付、出口退税、汇率等财务专业模块，默认只给全公司岗位）。
+ * 营销与季节类共享资料仅按模块权限控制；财务来源按可证明的业务关系裁剪，银行及外汇全局资料仅供全公司岗位。
  */
 import type { MistState } from './mistWorkspace';
 import type { OrderCostState } from './mistOrderCost';
@@ -48,6 +48,8 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const o of state.orders ?? []) if (users.has(o.ownerId) || ownedCustomers.has(o.customerId)) picks.push({ kind: 'order', id: o.id });
   const teams = new Set(scope.teamIds), resolutions = [resolveTeamScope(state, { conditions: [], picks, exclusions: [] }, graph)];
   for (const team of (state.teamScopes ?? []) as MistTeamScope[]) if (teams.has(team.teamId)) resolutions.push(resolveTeamScope(state, team, graph));
+  const collaboratingOrders = new Set(resolutions.flatMap(result => [...result.collaborate].filter(id => id.startsWith('order:')).map(id => id.slice(6))));
+  const collaboratingDevs = new Set(resolutions.flatMap(result => [...result.collaborate].filter(id => id.startsWith('development:')).map(id => id.slice(12))));
   const out: ScopedVisibility = new Map(SCOPED_COLLECTIONS.map(path => [path, new Set<string>()]));
   const add = (path: string, id: unknown) => { if (typeof id === 'string' && id) out.get(path)!.add(id); };
   const nodePath = { opportunity: 'crm.opportunities', development: 'devs', quotation: 'market.quotations', order: 'orders' } as const;
@@ -58,28 +60,32 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   const f: any = state.fulfillment ?? {}, p: any = state.platform ?? {};
   const orders = out.get('orders')!, devs = out.get('devs')!, has = (path: string, id: unknown) => typeof id === 'string' && out.get(path)!.has(id);
   for (const row of state.orderLines ?? []) if (orders.has(row.orderId)) add('orderLines', row.id);
-  for (const draft of state.drafts ?? []) if (users.has(draft.ownerId ?? '') || users.has(draft.values?.requesterId ?? '') || !!draft.values?.sourceDevId && devs.has(draft.values.sourceDevId)) add('drafts', draft.id);
+  for (const draft of state.drafts ?? []) if (users.has(draft.ownerId ?? '') || users.has(draft.values?.requesterId ?? '') || !!draft.values?.sourceDevId && collaboratingDevs.has(draft.values.sourceDevId)) add('drafts', draft.id);
   for (const row of state.versions ?? []) if (devs.has(row.devId)) add('versions', row.id);
   for (const row of state.rounds ?? []) if (devs.has(row.devId)) add('rounds', row.id);
   for (const row of state.allocations ?? []) if (has('invoices', row.invoiceId)) add('allocations', row.id);
   for (const row of f.qcTasks ?? []) if (row.source?.kind === 'version' && devs.has(row.source.devId)) add('fulfillment.qcTasks', row.id);
   for (const row of f.qcReports ?? []) if (has('fulfillment.qcTasks', row.taskId)) add('fulfillment.qcReports', row.id);
-  for (const row of f.samples ?? []) { const s = row.source; if (s?.kind === 'version' && devs.has(s.devId) || s?.kind === 'orderLine' && orders.has(s.orderId)) add('fulfillment.samples', row.id); }
-  for (const row of f.shipments ?? []) if (row.lines?.some((line: any) => orders.has(line.orderId))) add('fulfillment.shipments', row.id);
-  for (const row of f.shippingTerms ?? []) if (orders.has(row.orderId)) add('fulfillment.shippingTerms', row.orderId);
+  for (const row of f.samples ?? []) { const s = row.source; if (s?.kind === 'version' && devs.has(s.devId) || s?.kind === 'orderLine' && collaboratingOrders.has(s.orderId)) add('fulfillment.samples', row.id); }
+  for (const row of f.shipments ?? []) if (row.lines?.some((line: any) => collaboratingOrders.has(line.orderId))) add('fulfillment.shipments', row.id);
+  for (const row of f.shippingTerms ?? []) if (collaboratingOrders.has(row.orderId)) add('fulfillment.shippingTerms', row.orderId);
   for (const row of f.productionFacts ?? []) if (has('productions', row.productionId)) add('fulfillment.productionFacts', row.productionId);
   for (const row of p.creditApplications ?? []) if (has('platform.credits', row.creditId)) add('platform.creditApplications', row.id);
   for (const row of f.sampleMovements ?? []) if (has('fulfillment.samples', row.sampleId)) add('fulfillment.sampleMovements', row.id);
   for (const row of f.returnReceipts ?? []) if (has('platform.claims', row.claimId)) add('fulfillment.returnReceipts', row.id);
   for (const row of f.receivedRecords ?? []) if (has('platform.claimGoods', row.goodsId)) add('fulfillment.receivedRecords', row.id);
-  for (const row of f.stockMovements ?? []) if (has('fulfillment.stock', row.stockId) && (!row.materialDelivery?.orderId || orders.has(row.materialDelivery.orderId))) add('fulfillment.stockMovements', row.id);
-  for (const row of (state as MistState & { orderCosts?: OrderCostState }).orderCosts?.expenses ?? []) if (row.shares?.length && row.shares.every(share => orders.has(share.orderId))) add('orderCosts.expenses', row.id);
+  for (const row of f.stockMovements ?? []) if (has('fulfillment.stock', row.stockId) && (!row.materialDelivery?.orderId || collaboratingOrders.has(row.materialDelivery.orderId))) add('fulfillment.stockMovements', row.id);
+  for (const row of (state as MistState & { orderCosts?: OrderCostState }).orderCosts?.expenses ?? []) if (row.shares?.length && row.shares.every(share => collaboratingOrders.has(share.orderId))) add('orderCosts.expenses', row.id);
 
-  for (const path of ['platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts'] as const) for (const row of get(state, path)) if (orders.has(row.orderId)) add(path, row.id);
+  for (const path of ['platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts'] as const) for (const row of get(state, path)) if (collaboratingOrders.has(row.orderId)) add(path, row.id);
   // 客户跟进与对账单：本人跟进的客户，或可见业务所属的客户。
   const customers = new Set(ownedCustomers);
   for (const path of ['crm.opportunities', 'devs', 'market.quotations', 'orders'] as const) for (const row of get(state, path)) if (out.get(path)!.has(row.id) && row.customerId) customers.add(row.customerId);
-  for (const row of state.crm?.followUps ?? []) if (customers.has(row.customerId) || users.has((row as any).ownerId)) add('crm.followUps', row.id);
+  const linkedPath: Record<string, ScopedCollection> = {development:'devs',quotation:'market.quotations',order:'orders',opportunity:'crm.opportunities',invoice:'invoices'};
+  for (const row of state.crm?.followUps ?? []) {
+    const path = row.link?.kind ? linkedPath[row.link.kind] : undefined;
+    if (row.link?.id ? !!path && has(path, row.link.id) : ownedCustomers.has(row.customerId) || users.has((row as any).ownerId)) add('crm.followUps', row.id);
+  }
   for (const row of get(state, 'customerStatements')) if (customers.has(row.customerId)) add('customerStatements', row.id);
   // Financial source facts must be provably linked to visible business; mixed bills remain hidden until a safe partial view exists.
   const purchases = out.get('fulfillment.purchases')!, payables: any = state.payables ?? {};
@@ -101,7 +107,7 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const row of payables.reversals ?? []) if (row.kind === 'payment' ? has('payables.payments', row.targetId) : has('payables.allocations', row.targetId)) add('payables.reversals', row.id);
   for (const row of state.platform?.creditApplications ?? []) if (has('platform.creditApplications', row.id) && row.paymentId) add('payments', row.paymentId);
   for (const row of state.financeReversals ?? []) if (row.kind === 'allocation' ? has('invoices', row.invoiceId) : has('payments', row.targetId)) add('financeReversals', row.id);
-  for (const row of state.exportRebate?.claims ?? []) if (row.orderIds?.length && row.orderIds.every(id => orders.has(id)) && has('fulfillment.customs', row.customsId)) add('exportRebate.claims', row.id);
+  for (const row of state.exportRebate?.claims ?? []) if (row.orderIds?.length && row.orderIds.every(id => collaboratingOrders.has(id)) && has('fulfillment.customs', row.customsId)) add('exportRebate.claims', row.id);
   // FX lock and period revaluation facts can cover unrelated orders and have no complete per-order provenance yet.
 
   return out;
@@ -141,7 +147,7 @@ export function canGenerateScopedStatement(state: MistState, scope: MistDataScop
 
 /** 按受限范围裁剪状态（不改原对象）。动态、待办、通知、日历按其指向的记录同步裁剪；本人被指派的待办始终保留。 */
 export function applyDataScope(state: MistState, scope: MistDataScope, actorId: string): MistState {
-  const visible = scopedVisibility(state, scope), next: any = { ...state };
+  const visible = scopedVisibility(state, scope), writable = scopedVisibility(state, scope, false), next: any = { ...state };
   const hiddenFiles = new Set<string>(), knownFiles = new Set((state.files ?? []).map(file => file.id));
   const hideFiles = (value: unknown): void => { if (typeof value === 'string') { if (knownFiles.has(value)) hiddenFiles.add(value); } else if (Array.isArray(value)) value.forEach(hideFiles); else if (value && typeof value === 'object') Object.values(value).forEach(hideFiles); };
   Object.defineProperty(next, HIDDEN_FILES, { value: hiddenFiles });
@@ -158,7 +164,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   }
   next.partialExpenses = [];
   for (const expense of (state as MistState & {orderCosts?: OrderCostState}).orderCosts?.expenses ?? []) {
-    const shares = Array.isArray(expense.shares) ? expense.shares : [], shown = shares.filter(share => visible.get('orders')!.has(share.orderId)), hiddenCount = shares.length - shown.length;
+    const shares = Array.isArray(expense.shares) ? expense.shares : [], shown = shares.filter(share => writable.get('orders')!.has(share.orderId)), hiddenCount = shares.length - shown.length;
     if (shown.length && hiddenCount) next.partialExpenses.push({id:expense.id,code:expense.code,category:expense.category,date:expense.date,currency:expense.currency,shares:shown,hiddenCount,voided:!!expense.voided});
   }
   // Partial receipts are separate response-only summaries: never counterfeit original totals or balances.
@@ -174,7 +180,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   // 共用单据部分遮罩：出运只列可见订单的条目，信用证只列可见订单。
   const partialShipmentIds = new Set<string>();
   if (Array.isArray(next.fulfillment?.shipments)) {
-    const orders = visible.get('orders')!;
+    const orders = writable.get('orders')!;
     const shipments = next.fulfillment.shipments.map((row: any) => {
       const lines = Array.isArray(row.lines) ? row.lines : [];
       const visibleLines = lines.filter((line: any) => line.orderId && orders.has(line.orderId));
@@ -213,7 +219,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   });
   next.partialLettersOfCredit = [];
   if (Array.isArray(next.letterOfCredits)) {
-    const orders = visible.get('orders')!;
+    const orders = writable.get('orders')!;
     next.letterOfCredits = next.letterOfCredits.filter((lc: any) => {
       const ids = Array.isArray(lc.orderIds) ? lc.orderIds : [], visibleIds = ids.filter((id: string) => orders.has(id)), hiddenCount = ids.length - visibleIds.length;
       if (!hiddenCount) return true;
@@ -273,6 +279,30 @@ function verifiedReplacementSync(before: any, after: any, state: MistState): boo
     delete previous.replacementShipments; delete current.replacementShipments;
   }
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** Existing source ids must already be readable before a command can link them into new visible records. */
+export function scopedReferenceViolation(state: MistState, scope: MistDataScope, payload: unknown, allowProductSourceRefs = false): {path:string;id:string} | null {
+  const visible = scopedVisibility(state, scope), known = new Map<string,string>(), allowed = new Set<string>();
+  for (const path of SCOPED_COLLECTIONS) for (const row of get(state,path)) {
+    const id = rowKey(path,row); if (typeof id !== 'string' || !id) continue;
+    known.set(id,path); if (visible.get(path)!.has(id)) allowed.add(id);
+  }
+  let violation: {path:string;id:string} | null = null;
+  const walk=(value:unknown):void=>{
+    if(violation)return;
+    if(typeof value==='string'&&known.has(value)&&!allowed.has(value))violation={path:known.get(value)!,id:value};
+    else if(Array.isArray(value))value.forEach(walk);
+    else if(value&&typeof value==='object') {
+      const record=value as Record<string,unknown>, productId=record.productId??record.sourceProductId;
+      const product=allowProductSourceRefs && typeof productId==='string' ? state.market?.products.find(item=>item.id===productId) : undefined;
+      for(const [key,item] of Object.entries(record)) {
+        if(product && (key==='sourceDevId' && item===product.sourceDevId || key==='sourceVersionId' && item===product.sourceVersionId)) continue;
+        walk(item);
+      }
+    }
+  };
+  walk(payload);return violation;
 }
 
 /** Reject common direct-target writes before domain validation or document generation. Approval decisions retain their own assignment rules. */

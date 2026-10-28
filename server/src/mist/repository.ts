@@ -18,7 +18,7 @@ import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projec
 import { payablesCommandPermissions } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
-import { canGenerateScopedStatement, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
+import { canGenerateScopedStatement, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
@@ -193,7 +193,7 @@ export class MistRepository {
   /** 返回给当前账号的公司：按其现有读权限裁剪，并附带访问说明。 */
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
     const projected = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
-    const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner && !company, canManageCompany: company ? canMaintainCompany(actor) : owner, hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
+    const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner && !company, canManageCompany: company ? canMaintainCompany(actor) : owner, ...(scopeOf(row) ? {manageableCustomerIds: (row.state.customers??[]).filter(customer=>scopeOf(row)!.userIds.includes(customer.ownerId)).map(customer=>customer.id)} : {}), hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
     return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}) };
   }
   async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
@@ -387,7 +387,34 @@ export class MistRepository {
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
         const earlyScope = scopeOf(row);
+        if (companyRow(row) && ['market.customer.update','customer.update'].includes(input.command?.type)) {
+          const customer = row.state.customers.find(item => item.id === input.command.payload?.id);
+          const ownerId = input.command.payload?.patch?.ownerId;
+          if (customer && ownerId !== undefined && ownerId !== customer.ownerId && !hasScope(actor, 'relations:admin')) fail('FORBIDDEN', '客户负责人变更需要客户管理权限', 403);
+          if (customer && earlyScope && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可维护范围内', 404);
+        }
+        if (earlyScope && ['market.contact.save','market.contact.delete','contact.save'].includes(input.command?.type)) {
+          const payload=input.command.payload, customerId=input.command.type==='contact.save'?payload?.customerId:payload?.kind==='customer'?payload.parentId:payload?.kind==='relation'?row.state.market.relations.find(item=>item.id===payload.parentId)?.customerId:undefined;
+          const customer = row.state.customers.find(item => item.id === customerId);
+          if (customer && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可维护范围内', 404);
+        }
+        if (earlyScope && input.command?.type === 'handover.customer') {
+          const customer = row.state.customers.find(item => item.id === input.command.payload?.customerId);
+          if (customer && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可交接范围内', 404);
+        }
+        if (input.command) {
+          const known = new Set(row.state.files.map(file => file.id));
+          const allowed = new Set(projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state.files.map(file => file.id));
+          const check = (value: unknown): void => {
+            if (typeof value === 'string' && known.has(value) && !allowed.has(value)) fail('FILE_NOT_FOUND', '附件不存在或当前账号无权引用', 404);
+            else if (Array.isArray(value)) value.forEach(check);
+            else if (value && typeof value === 'object') Object.values(value).forEach(check);
+          };
+          check(input.command.payload);
+        }
         if (earlyScope && scopedTargetViolation(row.state, earlyScope, input.command, input.claimId)) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
+        const scopeManagement = input.command?.type?.startsWith('teamScope.') || REVIEW_KIND_BY_COMMAND.has(input.command?.type);
+        if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type))) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {

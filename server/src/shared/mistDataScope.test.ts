@@ -156,3 +156,32 @@ it('checks direct business targets before validation while leaving assigned deci
  expect(scopedTargetViolation(state,scope,{type:'development.saveDraft',payload:{}})).toBeNull();
  expect(scopedTargetViolation(state,scope,{type:'finance.account.save',payload:{name:'new'}})).toMatchObject({path:'bankAccounts'});
 });
+
+it('does not expand a supplier-scoped read-only order into unrelated downstream records',()=>{
+ const state:any={customers:[{id:'c',ownerId:'other'}],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[{id:'supplier',name:'Selected'}]},orders:[{id:'o',customerId:'c',ownerId:'other',type:'garment'}],orderLines:[{id:'l',orderId:'o'}],invoices:[],allocations:[],receipts:[],
+ fulfillment:{purchases:[{id:'p1',orderId:'o',supplierId:'supplier'},{id:'p2',orderId:'o',supplierId:'other-supplier'}],shipments:[{id:'s',lines:[{orderId:'o',lineId:'l'}],fileIds:[]}],packing:[]},orderCosts:{expenses:[{id:'expense',shares:[{orderId:'o',amount:100}]}]},platform:{},teamScopes:[{teamId:'team',conditions:[{supplierId:'supplier'}],picks:[],exclusions:[]}],events:[],tasks:[],notifications:[],calendar:[]};
+ const view:any=applyDataScope(state,{userIds:['member'],teamIds:['team']},'member');
+ expect(view.orders.map((r:any)=>r.id)).toEqual(['o']);expect(view.fulfillment.purchases.map((r:any)=>r.id)).toEqual(['p1']);
+ expect(view.fulfillment.shipments).toEqual([]);expect(view.orderCosts.expenses).toEqual([]);
+});
+
+it('does not reveal another order follow-up merely because one order of the customer is visible',()=>{
+ const state:any={customers:[{id:'c',ownerId:'other'}],crm:{opportunities:[],followUps:[{id:'own-note',customerId:'c',link:{kind:'order',id:'own'}},{id:'hidden-note',customerId:'c',link:{kind:'order',id:'hidden'}},{id:'customer-note',customerId:'c',link:null}]},devs:[],market:{quotations:[],suppliers:[]},orders:[{id:'own',customerId:'c',ownerId:'member',type:'garment'},{id:'hidden',customerId:'c',ownerId:'other',type:'garment'}],orderLines:[],invoices:[],allocations:[],receipts:[],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};
+ const view:any=applyDataScope(state,{userIds:['member'],teamIds:[]},'member');
+ expect(view.crm.followUps.map((r:any)=>r.id)).toEqual(['own-note']);
+});
+
+it('rejects references that would bring hidden source records into a new visible business chain',async()=>{
+ const {scopedReferenceViolation}=await import('./mistDataScope');
+ const state:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[{id:'private-source',ownerId:'other',values:{}}],market:{quotations:[],suppliers:[]},orders:[],orderLines:[],invoices:[],allocations:[],receipts:[],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};
+ expect(scopedReferenceViolation(state,{userIds:['member'],teamIds:[]},{input:{sourceDevId:'private-source'}})).toMatchObject({path:'devs',id:'private-source'});
+});
+
+it('permits only the exact lineage of a shared product in product-backed inputs',async()=>{
+ const {scopedReferenceViolation}=await import('./mistDataScope');
+ const state:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[{id:'source',ownerId:'other',values:{}},{id:'other-source',ownerId:'other',values:{}}],versions:[{id:'version',devId:'source'}],market:{quotations:[],suppliers:[],products:[{id:'product',sourceDevId:'source',sourceVersionId:'version'}]},orders:[],orderLines:[],invoices:[],allocations:[],receipts:[],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};
+ const payload={input:{lines:[{productId:'product',sourceDevId:'source',sourceVersionId:'version'}]}};
+ expect(scopedReferenceViolation(state,{userIds:['member'],teamIds:[]},payload,true)).toBeNull();
+ expect(scopedReferenceViolation(state,{userIds:['member'],teamIds:[]},payload)).toMatchObject({id:'source'});
+ payload.input.lines[0].sourceDevId='other-source';expect(scopedReferenceViolation(state,{userIds:['member'],teamIds:[]},payload,true)).toMatchObject({id:'other-source'});
+});

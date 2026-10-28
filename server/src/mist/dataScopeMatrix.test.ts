@@ -113,6 +113,34 @@ describe('row-level data scope by role', () => {
     expect(db.workspaces.get(workspaceId)).toEqual(before);
     expect(db.receipts.size).toBe(0);
   });
+  it('rejects reattaching an unreadable file to a shared product', async () => {
+    const state:any = db.workspaces.get(workspaceId)!.state;
+    const fileId = '11111111-2222-4333-8444-555555555555';
+    state.files.push({id:fileId,name:'private.pdf',mimeType:'application/pdf',size:10,storageKey:workspaceId+'/'+fileId,createdAt:'2026-10-13T00:00:00Z',uploadedBy:'another'});
+    const hiddenPurchase = state.fulfillment.purchases.find((purchase:any)=>purchase.orderId==='SO-G-2026-017');
+    expect(hiddenPurchase).toBeTruthy();hiddenPurchase.fileIds=[fileId];
+    const product = state.market.products[0];expect(product).toBeTruthy();
+    const before=structuredClone(db.workspaces.get(workspaceId));
+    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'attach-hidden',expectedRevision:0,command:{type:'market.attachment.set',payload:{kind:'product',id:product.id,fileIds:[fileId]}} as any})).rejects.toMatchObject({status:404});
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+  });
+  it('rejects linking a private order through a personal calendar entry',async()=>{
+    const before=structuredClone(db.workspaces.get(workspaceId));
+    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'calendar-hidden-source',expectedRevision:0,command:{type:'calendar.save',payload:{title:'Reminder',date:'2026-10-13',time:'12:00',note:'',target:{view:'orders/detail',id:'SO-G-2026-017'}}}} as any)).rejects.toMatchObject({status:404});
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+  });
+  it.each(['market.customer.update','customer.update'])('does not let a salesperson acquire another customer’s scope through %s',async(type)=>{
+    const state=db.workspaces.get(workspaceId)!.state, customer=state.customers.find((row:any)=>row.ownerId==='demo-buyer');
+    expect(customer).toBeTruthy();const before=structuredClone(db.workspaces.get(workspaceId));
+    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'take-customer',expectedRevision:0,command:{type,payload:{id:customer.id,patch:{ownerId:'demo-sales'}}}} as any)).rejects.toMatchObject({status:403});
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+  });
+  it('keeps customer archives readable company-wide but limits maintenance to the responsible scope',async()=>{
+    const state=db.workspaces.get(workspaceId)!.state, other=state.customers.find((row:any)=>row.ownerId==='demo-buyer')!, mine=state.customers.find((row:any)=>row.ownerId==='demo-sales')!;
+    await expect(repo.execute(actor('demo-sales'),workspaceId,{requestId:'edit-other-customer',expectedRevision:0,command:{type:'market.customer.update',payload:{id:other.id,patch:{city:'changed'}}}} as any)).rejects.toMatchObject({status:404});
+    const saved=await repo.execute(actor('demo-sales'),workspaceId,{requestId:'edit-own-customer',expectedRevision:0,command:{type:'market.customer.update',payload:{id:mine.id,patch:{city:'Updated city'}}}} as any);
+    expect(saved.workspace.state.customers.find(row=>row.id===mine.id)?.city).toBe('Updated city');
+  });
   it('hides files referenced only by records outside the scope', async () => {
     const full = (await repo.get(actor('boss'), workspaceId)).state.files.length, scoped = (await repo.get(actor('loner'), workspaceId)).state.files.length;
     expect(scoped).toBeLessThan(full);
