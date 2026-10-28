@@ -142,7 +142,7 @@ export function AdminAccounts() {
           : <Banner tone="warn" title={ui`尚未授权进入「${envelope.name}」`} actions={canGrant ? <Button size="sm" disabled={busy} onClick={async () => { setBusy(true); if (await grant(current.id, current.displayName)) toast('已授权进入本公司'); setBusy(false); }}>{uiText("授权进入")}</Button> : undefined}>{uiText(canGrant ? '授权只让对方进入这家公司，不增加任何业务权限。' : '请公司所有者在“公司管理 · 数据访问”中授权。')}</Banner>}</div>}
       </>}
     </Drawer>
-    <Drawer open={!!form} onClose={() => !busy && setForm(null)} title={uiText(form?.mode === 'create' ? '新建账号' : form?.mode === 'approve' ? '审批注册申请' : '修改资料与岗位')} sub={uiText(form?.account?.email)}
+    <Drawer open={!!form && !confirmInitialManager} onClose={() => !busy && setForm(null)} title={uiText(form?.mode === 'create' ? '新建账号' : form?.mode === 'approve' ? '审批注册申请' : '修改资料与岗位')} sub={uiText(form?.account?.email)}
       footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit()}>{uiText(form?.mode === 'create' ? '创建账号' : form?.mode === 'approve' ? '通过审批' : '保存')}</Button><Button disabled={busy} onClick={() => setForm(null)}>{uiText("取消")}</Button></div>}>
       {form && data && <>
         {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
@@ -158,7 +158,9 @@ export function AdminAccounts() {
     </Drawer>
     <Dialog open={confirmInitialManager} onClose={() => !busy && setConfirmInitialManager(false)} tone="warn" title={uiText('指定首位总经理')}
       description={ui`${form?.displayName ?? ''} 将获得全公司业务与审批权限。后续总经理岗位由总经理维护。`}
-      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit(true)}>{uiText('确认指定')}</Button><Button disabled={busy} onClick={() => setConfirmInitialManager(false)}>{uiText('取消')}</Button></div>} />
+      footer={<div className="mist-row"><Button variant="primary" loading={busy} onClick={() => void submit(true)}>{uiText('确认指定')}</Button><Button disabled={busy} onClick={() => setConfirmInitialManager(false)}>{uiText('取消')}</Button></div>}>
+      <KeyValue items={[{ label: '登录邮箱', value: form?.email }, { label: '任职部门', value: data?.departments.find(department => department.id === form?.departmentId)?.name }]} />
+    </Dialog>
     <Dialog open={!!confirm} onClose={() => !busy && setConfirm(null)} tone={confirm?.kind === 'disable' || confirm?.kind === 'reject' ? 'bad' : 'warn'}
       title={uiText(confirm ? { disable: '停用账号', enable: '重新启用账号', reset: '重置密码', reject: '拒绝注册申请' }[confirm.kind] : '')}
       description={uiText(confirm ? { disable: `${confirm.account.displayName} 将无法登录，已登录的会话随即失效；历史单据与小组记录保留。`, enable: `${confirm.account.displayName} 可以再次登录，岗位与部门保持不变。`, reset: `将为 ${confirm.account.displayName} 生成临时密码，只显示一次，请当面或经内部渠道转交，并提醒对方登录后在“设置 · 安全”中修改。`, reject: `${confirm.account.displayName} 的申请将被拒绝，请写明原因。` }[confirm.kind] : undefined)}
