@@ -1095,3 +1095,10 @@ html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar,
 .mist-avatar-pattern-view { flex: 1; min-height: 0; overflow-y: auto; display: grid; place-items: center; padding: 8px 0 18px; }
 .mist-avatar-pattern-view .mist-avatar-explorer { width: min(100%, 680px); }
 @media(max-width:640px) { .mist-avatar-initial-options { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; } .mist-avatar-initial-options .mist-avatar-choice { padding-inline: 2px; } .mist-avatar-initial-options .mist-avatar-color-example { width: 46px; height: 46px; font-size: 19px; } }
+
+/* The same named palette drives both initials and the live pattern background. */
+.mist-avatar-pattern-view[hidden] { display: none; }
+.mist-avatar-explorer-palette { width: min(100%, 340px); display: grid; grid-template-columns: repeat(10,minmax(0,1fr)); gap: 6px; padding: 4px 0; }
+.mist-avatar-explorer-palette > button { width: min(28px,100%); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; justify-self: center; color: var(--mist-avatar-initials-ink); }
+.mist-avatar-explorer-palette > button[aria-pressed="true"] .mist-icon { background: var(--mist-avatar-selection-bg); border-radius: 50%; padding: 1px; }
+.mist-avatar-explorer-palette > button:focus-visible { outline: 2px solid var(--mist-accent-ink); outline-offset: 3px; }

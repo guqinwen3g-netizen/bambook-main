@@ -48,3 +48,7 @@ describe('versioned avatar choices',()=>{
 
  });
 });
+it('accepts only known shared palette IDs in the new pattern identity',()=>{
+ expect(isAvatarIdentity('dicebear:v1:glass:pblue_v8_12_12_test-0:still')).toBe(true);
+ expect(isAvatarIdentity('dicebear:v1:glass:punknown_v8_12_12_test-0:still')).toBe(false);
+});

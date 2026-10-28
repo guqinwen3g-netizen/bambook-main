@@ -1,15 +1,15 @@
 /** Versioned, data-only avatar choices. Shared by profile validation and the renderer. */
 export const AVATAR_COLORS = [
-  { id:'blue', label:'雾蓝', value:'#B4D1F1', ink:'#304155' },
-  { id:'indigo', label:'雾紫', value:'#CBC9F1', ink:'#3E3D54' },
-  { id:'plum', label:'柔紫', value:'#E0C2E2', ink:'#4A394C' },
-  { id:'rose', label:'藕粉', value:'#EDBFCC', ink:'#52373F' },
-  { id:'clay', label:'浅陶', value:'#EFC2B5', ink:'#533831' },
-  { id:'ochre', label:'暖杏', value:'#E5C9A7', ink:'#4D3C28' },
-  { id:'sage', label:'新芽', value:'#D1D1A8', ink:'#424128' },
-  { id:'forest', label:'柔绿', value:'#B9D8B8', ink:'#334532' },
-  { id:'teal', label:'薄荷', value:'#A7DACF', ink:'#264740' },
-  { id:'slate', label:'雾青', value:'#A5D7E5', ink:'#25454D' },
+  { id:'blue', hue:252, label:'雾蓝', value:'#B4D1F1', ink:'#304155' },
+  { id:'indigo', hue:288, label:'雾紫', value:'#CBC9F1', ink:'#3E3D54' },
+  { id:'plum', hue:324, label:'柔紫', value:'#E0C2E2', ink:'#4A394C' },
+  { id:'rose', hue:0, label:'藕粉', value:'#EDBFCC', ink:'#52373F' },
+  { id:'clay', hue:36, label:'浅陶', value:'#EFC2B5', ink:'#533831' },
+  { id:'ochre', hue:72, label:'暖杏', value:'#E5C9A7', ink:'#4D3C28' },
+  { id:'sage', hue:108, label:'新芽', value:'#D1D1A8', ink:'#424128' },
+  { id:'forest', hue:144, label:'柔绿', value:'#B9D8B8', ink:'#334532' },
+  { id:'teal', hue:180, label:'薄荷', value:'#A7DACF', ink:'#264740' },
+  { id:'slate', hue:216, label:'雾青', value:'#A5D7E5', ink:'#25454D' },
 ] as const;
 export type AvatarColor = typeof AVATAR_COLORS[number]['id'];
 export function defaultAvatarColor(key: string): AvatarColor {
@@ -61,4 +61,25 @@ export function parsePersonIdentity(value?: string | null): PersonAvatar | null 
   try { const parsed: unknown = JSON.parse(decodeURIComponent(value.slice(10))); return validPerson(parsed) ? parsed : null; } catch { return null; }
 }
 export const LEGACY_AVATAR_PATTERN = /^dicebear:v1:(blobs|disco|glass|glyphs|squircles|slice|waves|weave|critters|cameo|line-face|thumbs|landscape|croodles-neutral|dylan|fun-emoji|gaze|pixelbot|rings|stripes|planets):([A-Za-z0-9_-]{1,80}):(animated|still)$/;
-export const isAvatarIdentity = (value: string) => LEGACY_AVATAR_PATTERN.test(value) || !!parseInitialsIdentity(value) || !!parsePersonIdentity(value);
+/** v8 pattern colors are stored by palette ID; older identities remain unchanged. */
+export function patternColorFromSeed(seed:string): AvatarColor | null {
+  const match=seed.match(/^p([a-z]+)_v8_(\d{1,2})_(\d{1,2})_([A-Za-z0-9_-]{1,48})-0$/);
+  if(!match || Number(match[2])>24 || Number(match[3])>24)return null;
+  return AVATAR_COLORS.find(color=>color.id===match[1])?.id ?? null;
+}
+export function patternColorFromIdentity(value?:string|null, includeLegacy=false): AvatarColor | null {
+  const match=value?.match(LEGACY_AVATAR_PATTERN);if(!match)return null;
+  const exact=patternColorFromSeed(match[2]);if(exact)return exact;
+  if(!includeLegacy)return null;
+  const legacy=match[2].match(/^c(\d{1,3})_v[567]_/);if(!legacy)return null;
+  const hue=Number(legacy[1])%360;
+  return AVATAR_COLORS.reduce((best,color)=>{
+    const distance=(candidate:number)=>Math.abs(((candidate-hue+540)%360)-180);
+    return distance(color.hue)<distance(best.hue)?color:best;
+  }).id;
+}
+export function isAvatarIdentity(value:string) {
+  const legacy=value.match(LEGACY_AVATAR_PATTERN);
+  if(legacy) return !/^p[^_]*_v8(?:_|$)/.test(legacy[2]) || !!patternColorFromSeed(legacy[2]);
+  return !!parseInitialsIdentity(value) || !!parsePersonIdentity(value);
+}

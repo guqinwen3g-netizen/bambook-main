@@ -4,7 +4,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {getByRole,queryByRole} from '@testing-library/dom';
 import {Avatar,MistRoot,ToastProvider} from '../../../../components/mist';
-import {defaultPersonAvatar,personIdentity} from '../../../../lib/avatarIdentity';
+import {AVATAR_COLORS,defaultAvatarColor,defaultPersonAvatar,patternColorFromIdentity,personIdentity} from '../../../../lib/avatarIdentity';
 import {AvatarSettingRow} from './AvatarStudio';
 const update=vi.hoisted(()=>vi.fn());
 const session=vi.hoisted(()=>({user:{id:'u1',email:'a@x.test',displayName:'顾青',avatarUrl:null as string|null}}));
@@ -34,7 +34,7 @@ it('restores the original four-direction DiceBear explorer and saves a deeper ne
  for(const label of ['具象','活泼','抽象','沉静'])expect(getByRole(document.body,'button',{name:label})).toBeTruthy();
  await click('button','开始探索 ↗');
  await settle(()=>expect((getByRole(document.body,'button',{name:'就用这个'}) as HTMLButtonElement).disabled).toBe(false));
- expect(update).not.toHaveBeenCalled();await click('button','就用这个');expect(update.mock.calls[0][0].avatarUrl).toMatch(/^dicebear:v1:[a-z-]+:c\d+_v7_/);
+ expect(update).not.toHaveBeenCalled();await click('button','就用这个');expect(update.mock.calls[0][0].avatarUrl).toMatch(/^dicebear:v1:[a-z-]+:p[a-z]+_v8_/);
 });
 it('accepts a photo draft and crop without updating the profile until final save',async()=>{
  class FakeImage {naturalWidth=400;naturalHeight=300;onload:any;onerror:any;set src(_value:string){queueMicrotask(()=>this.onload?.());}}
@@ -45,4 +45,33 @@ it('accepts a photo draft and crop without updating the profile until final save
 it('renders legacy presets, photos and text initials',async()=>{
  await act(async()=>root.render(<><Avatar name="顾青" src="dicebear:v1:glass:c205_v6_12_12_abc-0:still"/><Avatar name="林" src="data:image/webp;base64,AAAA"/><Avatar name="王"/></>));
  await settle(()=>expect(host.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/svg\+xml/));expect(host.textContent).toBe('王');
+});
+it('shares the exact color and preserves the explored direction when switching modes',async()=>{
+ await open();await click('button','雾蓝');await click('tab','图案');
+ expect(getByRole(document.body,'button',{name:'图案颜色 · 雾蓝'}).getAttribute('aria-pressed')).toBe('true');
+ expect((document.querySelector('.mist-avatar-compass') as HTMLElement).style.backgroundColor).toBe('rgb(180, 209, 241)');
+ await click('button','抽象');
+ await click('tab','姓名');await click('button','薄荷');await click('tab','图案');
+ expect(getByRole(document.body,'button',{name:'抽象'}).getAttribute('aria-pressed')).toBe('true');
+ expect(getByRole(document.body,'button',{name:'图案颜色 · 薄荷'}).getAttribute('aria-pressed')).toBe('true');
+ expect((document.querySelector('.mist-avatar-compass') as HTMLElement).style.backgroundColor).toBe('rgb(167, 218, 207)');
+ expect(update).not.toHaveBeenCalled();
+ await click('tab','姓名');await click('button','自动');await click('tab','图案');
+ const auto=AVATAR_COLORS.find(color=>color.id===defaultAvatarColor('u1'))!;
+ expect(getByRole(document.body,'button',{name:`图案颜色 · ${auto.label}`}).getAttribute('aria-pressed')).toBe('true');
+});
+it('restores a saved pattern color into both modes and keeps copyright out of the editor',async()=>{
+ session.user.avatarUrl='dicebear:v1:glass:pblue_v8_12_12_example-0:still';await open();
+ expect(getByRole(document.body,'button',{name:'图案颜色 · 雾蓝'}).getAttribute('aria-pressed')).toBe('true');
+ expect(document.body.textContent).not.toMatch(/copyright|CC BY|Matt Houser/i);
+ await click('tab','姓名');expect(getByRole(document.body,'button',{name:'雾蓝'}).getAttribute('aria-pressed')).toBe('true');
+});
+
+it('saves the displayed pattern color and restores it on reopening',async()=>{
+ update.mockImplementation(async({avatarUrl})=>{session.user.avatarUrl=avatarUrl;return session.user;});
+ await open();await click('tab','图案');await click('button','图案颜色 · 薄荷');
+ await settle(()=>expect((getByRole(document.body,'button',{name:'就用这个'}) as HTMLButtonElement).disabled).toBe(false));
+ await click('button','就用这个');expect(patternColorFromIdentity(session.user.avatarUrl)).toBe('teal');
+ await click('button','编辑头像');expect(getByRole(document.body,'button',{name:'图案颜色 · 薄荷'}).getAttribute('aria-pressed')).toBe('true');
+ await click('tab','姓名');expect(getByRole(document.body,'button',{name:'薄荷'}).getAttribute('aria-pressed')).toBe('true');
 });

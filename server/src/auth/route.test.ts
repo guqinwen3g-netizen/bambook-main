@@ -89,15 +89,15 @@ describe('auth profile avatar', () => {
 });
 
 describe('editable avatar profile identities',()=>{
-  it.each(['initials:v1:clay','person'])('saves a validated %s avatar on the authenticated account only',async kind=>{
+  it.each(['initials:v1:clay','person','pattern'])('saves a validated %s avatar on the authenticated account only',async kind=>{
     const {defaultPersonAvatar,personIdentity}=await import('../shared/avatarAppearance');
-    const avatarUrl=kind==='person'?personIdentity({...defaultPersonAvatar('u1'),hair:'bun'}):kind;
+    const avatarUrl=kind==='person'?personIdentity({...defaultPersonAvatar('u1'),hair:'bun'}):kind==='pattern'?'dicebear:v1:glass:pblue_v8_12_12_test-0:still':kind;
     const prisma={userAccount:{update:vi.fn().mockImplementation(async({data})=>({id:'u1',displayName:'One',status:'active',email:'one@example.com',roles:[],primaryDeptId:null,primaryDepartment:null,...data}))},auditLog:{create:vi.fn().mockResolvedValue({})},userPermissionOverrides:{findMany:vi.fn().mockResolvedValue([])}};
     const response=await request(makeApp(prisma)).patch('/auth/me').set('Authorization',`Bearer ${authToken()}`).send({avatarUrl,userId:'someone-else'});
     expect(response.status).toBe(200);expect(response.body.user.avatarUrl).toBe(avatarUrl);
     expect(prisma.userAccount.update).toHaveBeenCalledWith(expect.objectContaining({where:{id:'u1'},data:{avatarUrl}}));
   });
-  it.each(['initials:v1:unknown','person:v1:%XX','person:v1:'+encodeURIComponent('{"seed":"test","svg":"<script>"}')])('rejects malformed custom identities: %s',async avatarUrl=>{
+  it.each(['initials:v1:unknown','dicebear:v1:glass:punknown_v8_12_12_test-0:still','person:v1:%XX','person:v1:'+encodeURIComponent('{"seed":"test","svg":"<script>"}')])('rejects malformed custom identities: %s',async avatarUrl=>{
     const prisma={userAccount:{update:vi.fn()},auditLog:{create:vi.fn()}};
     const response=await request(makeApp(prisma)).patch('/auth/me').set('Authorization',`Bearer ${authToken()}`).send({avatarUrl});
     expect(response.status).toBe(400);expect(prisma.userAccount.update).not.toHaveBeenCalled();

@@ -1,4 +1,5 @@
 import { mistPalette } from './avatarColor';
+import { AVATAR_COLORS, patternColorFromSeed } from '../server/src/shared/avatarAppearance';
 import { avatarVariantPreferences } from './avatarVariantPreferences';
 import { Avatar, Style } from '@dicebear/core';
 import definition0 from '@dicebear/styles/blobs.json';
@@ -79,7 +80,10 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   }
   const hue = seed.match(/^c(\d{1,3})_v[567]_/);
   const deeper = /^c\d{1,3}_v7_/.test(seed);
-  const basePalette = hue ? mistPalette(Number(hue[1]) % 360, deeper ? -5 : 0) : palettes[paletteIndex];
+  const sharedId=patternColorFromSeed(seed), shared=AVATAR_COLORS.find(color=>color.id===sharedId);
+  if(/^p[^_]*_v8(?:_|$)/.test(seed) && !shared) throw new Error('未知的头像配色');
+  const blend=(from:string,to:string,amount:number)=>'#'+[1,3,5].map(i=>Math.round(parseInt(from.slice(i,i+2),16)*(1-amount)+parseInt(to.slice(i,i+2),16)*amount).toString(16).padStart(2,'0')).join('');
+  const basePalette = shared ? [blend(shared.value,'#ffffff',.58),shared.value,blend(shared.value,shared.ink,.2),blend(shared.value,shared.ink,.45),shared.ink] : hue ? mistPalette(Number(hue[1]) % 360, deeper ? -5 : 0) : palettes[paletteIndex];
   const adjusted = basePalette.map((hex, index) => {
     if (!tone) return hex;
     const delta = tone * (index === 0 ? 1 : 3);
@@ -87,14 +91,14 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   });
   const [frost, mist, middle, gray, ink] = adjusted;
   const colors = [gray, middle, mist];
-  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}:${deeper ? 'v7' : 'legacy'}`;
+  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}:${shared ? `v8-${shared.id}` : deeper ? 'v7' : 'legacy'}`;
   let style = styles.get(cacheKey);
   if (!style) {
     const definition = definitions[family as keyof typeof definitions];
     if (!definition) throw new Error('未知头像系列');
     const themedColors = Object.fromEntries(Object.entries(definition.colors).map(([name, color]) => {
       let values: string[] = colors;
-      if (name === 'background') values = family === 'glass' ? [gray, middle] : [frost];
+      if (name === 'background') values = shared ? (family === 'glass' ? [shared.value,blend(shared.value,shared.ink,.08)] : [shared.value]) : family === 'glass' ? [gray, middle] : [frost];
       // Line Face draws every facial feature with ink. A background-colored
       // ink choice makes the entire face disappear, so ink must stay dark.
       else if (name === 'ink') values = [ink];
@@ -113,18 +117,26 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   }
   const definition = definitions[family as keyof typeof definitions];
   // v6 uses the unmodified DiceBear component distribution. Legacy avatars retain their appearance.
-  const variants = /^c\d{1,3}_v[67]_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components as Parameters<typeof avatarVariantPreferences>[2]);
-  const shapeSeed = seed.replace(/^c(\d+)_v7_/, 'c$1_v6_').replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
+  const variants = shared || /^c\d{1,3}_v[67]_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components as Parameters<typeof avatarVariantPreferences>[2]);
+  const shapeSeed = seed.replace(/^p[a-z]+_v8_/, 'v6_').replace(/^c(\d+)_v7_/, 'c$1_v6_').replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
   const svg = new Avatar(style, { seed: shapeSeed, size: 256, animationVariant: animated ? 'slow' : 'none', ...variants }).toString();
   // This rule lives inside the SVG so it also applies when rendered as an img.
   const mutedSvg = ['croodles-neutral','dylan','fun-emoji','gaze','pixelbot','rings','stripes','planets','disco'].includes(family)
     ? svg.replace(/#([0-9a-f]{6}|[0-9a-f]{3})(?![0-9a-f])/gi, (match, raw: string) => {
+      if (shared && match.toLowerCase() === shared.value.toLowerCase()) return shared.value;
       const hex = raw.length === 3 ? raw.split('').map((v: string) => v + v).join('') : raw;
       const channels = [0,2,4].map(offset => parseInt(hex.slice(offset, offset + 2),16));
       const lightness = (Math.max(...channels) + Math.min(...channels)) / 510;
       return adjusted[Math.min(4, Math.round((1 - lightness) * 4))];
     }) : svg;
-  const accessibleSvg = mutedSvg.replace('</svg>', '<style>@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}</style></svg>');
+  // v8 includes the same actual palette background in previews and saved avatars.
+  // Glyphs has its own opaque white canvas and tint inside the frame, which
+  // would otherwise cover the chosen background. Keep its mask and artwork.
+  const visibleBackground = shared && family === 'glyphs'
+    ? mutedSvg.replace(/<path fill="white" d="M0 0h72v72H0z"\/><path opacity="\.2" fill="[^"]+" d="M0 0h72v72H0z"\/>/g, '')
+    : mutedSvg;
+  const withBackground = shared ? visibleBackground.replace(/(<svg\b[^>]*>)/, `$1<metadata id="bambook-attribution">Colors and background modified by Bambook. Attribution: https://bambook.sylway.cloud/avatars/dicebear/LICENSE.txt</metadata><rect data-bambook-background="${shared.id}" width="100%" height="100%" fill="${shared.value}"/>`) : visibleBackground;
+  const accessibleSvg = withBackground.replace('</svg>', '<style>@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}</style></svg>');
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(accessibleSvg)}`;
 }
 
