@@ -974,6 +974,8 @@ export function fulfillmentQcSourceBlocker(root: MistState, source: FulfillmentS
     const version = root.versions.find(item => item.id === source.versionId && item.devId === source.devId);
     if (version?.qcDecision?.kind === 'abandon') return '本版已放弃，不能再办理QC';
     if (version?.qcDecision) return '本版已重新打样，请在新一轮版本上办理QC';
+    if (version?.archivedAt) return '本版已留档，请在新版本上办理QC';
+    if (version?.confirmations?.length) return '本版已有需求方确认，请在新版本上办理QC';
     return null;
 }
 

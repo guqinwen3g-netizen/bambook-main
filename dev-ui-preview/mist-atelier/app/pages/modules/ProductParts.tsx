@@ -6,6 +6,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { usePrivateImageResource } from '../../runtime/usePrivateImage';
 import { useNav } from '../../nav';
+import { businessDate } from '../../runtime/businessClock';
 import { PRODUCT_SPEC_FIELDS, type MarketProduct, type MarketQuotation, type MarketState } from '../../../../../server/src/shared/mistMarket';
 
 export const PRODUCT_CATEGORY_LABEL: Record<MarketProduct['category'], string> = { fabric: '面料', garment: '成衣', trimming: '辅料' };
@@ -64,7 +65,7 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
   const specFields = PRODUCT_SPEC_FIELDS[product.category];
   const dev = w.state?.devs.find(d => d.id === product.sourceDevId), version = w.state?.versions.find(v => v.id === product.sourceVersionId);
   const refs = market && w.state ? productReferences(product, market, w.state.orders, w.state.orderLines, go) : [];
-  const canDevelop = session.hasPermission('development:write'), canOrder = session.hasPermission('orders:write'), canQuote = session.hasPermission('quotations:write');
+  const canDevelop = session.hasPermission('products:write'), canOrder = session.hasPermission('orders:write'), canQuote = session.hasPermission('quotations:write');
   const archived = product.status === 'archived';
   const refColumns: Column<Reference>[] = [
     { key: 'kind', header: '类型', width: '64px', render: r => <Pill tone={r.kind === '订单' ? 'accent' : 'neutral'}>{r.kind}</Pill> },
@@ -89,7 +90,7 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
         <li><span>{uiText("开发案")}</span><strong>{dev ? <Mono>{dev.code}</Mono> : '开发案已不存在'}</strong>{dev && <small>{dev.name}</small>}</li>
         <li><span>{uiText("准确版本")}</span><strong>{uiText(version ? version.label : '版本已不存在')}</strong>{version && <small>{version.factory}</small>}</li>
         <li><span>{uiText("QC 结论")}</span><strong>{uiText(version?.qc ? ({ pass: '通过', conditional: '有保留通过 · 需关注', reject: '不通过' } as const)[version.qc.result] : '无记录')}</strong>{version?.qc && <small>{version.qc.reviewer} · {version.qc.report}</small>}{version?.qc?.result === 'conditional' && <small>{uiText("QC 意见：")}{version.qc.opinion || '见 QC 报告'}</small>}</li>
-        <li><span>{uiText("数字档案")}</span><strong><Mono>{product.sku}</Mono></strong><small>{product.createdAt.slice(0, 10)}{uiText(" 建档")}</small></li>
+        <li><span>{uiText("数字档案")}</span><strong><Mono>{product.sku}</Mono></strong><small>{businessDate(product.createdAt)}{uiText(" 建档")}</small></li>
       </ol> : <EmptyState compact title={uiText("手工建档")} description={uiText("此档案未关联开发版本，规格以档案登记为准。")} />}
     </section>
     <section className="mist-product-section" aria-label={uiText("引用记录")}>
