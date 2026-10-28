@@ -111,6 +111,13 @@
 | `--mist-control-h-sm` | `32px` | `同浅色` |
 | `--mist-control-h-lg` | `44px` | `同浅色` |
 
+## avatar
+
+| Token | 浅色 | 深色 |
+|---|---|---|
+| `--mist-avatar-initials-ink` | `#FFFFFF` | `同浅色` |
+| `--mist-avatar-selection-bg` | `#263842` | `同浅色` |
+
 ## side
 
 | Token | 浅色 | 深色 |

@@ -1,3 +1,4 @@
+import { isAvatarIdentity } from '../shared/avatarAppearance';
 import { publicEntryForHost } from '../shared/bambookPublicOrigins';
 import { accountAccessRouter } from './accountAccess';
 import { CompanyAccessError } from './companyAccess';
@@ -31,7 +32,6 @@ type AuthRouterOptions = {
 
 const COOKIE_NAME = 'bambook_token';
 const COOKIE_MAX_AGE = 7 * 24 * 3600 * 1000;
-const AVATAR_PRESET_RE = /^dicebear:v1:(blobs|disco|glass|glyphs|squircles|slice|waves|weave|critters|cameo|line-face|thumbs|landscape|croodles-neutral|dylan|fun-emoji|gaze|pixelbot|rings|stripes|planets):([A-Za-z0-9_-]{1,80}):(animated|still)$/;
 const AVATAR_DATA_URL_RE = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/;
 
 function normalizeEmail(value: unknown): string {
@@ -506,7 +506,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
           return res.status(400).json({ ok: false, error: 'INVALID_AVATAR', message: 'Avatar must be an image, preset identity or null.' });
         }
         if (typeof avatarUrl === 'string') {
-          if ((!AVATAR_DATA_URL_RE.test(avatarUrl) && !AVATAR_PRESET_RE.test(avatarUrl)) || avatarUrl.length > 700_000) {
+          if ((!AVATAR_DATA_URL_RE.test(avatarUrl) && !isAvatarIdentity(avatarUrl)) || avatarUrl.length > 700_000) {
             return res.status(400).json({ ok: false, error: 'INVALID_AVATAR', message: '请选择系统头像或 512KB 以内的图片。' });
           }
         }

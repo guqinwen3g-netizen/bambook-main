@@ -77,6 +77,8 @@
   --mist-control-h: 40px;     /* 默认按钮/输入高度 */
   --mist-control-h-sm: 32px;
   --mist-control-h-lg: 44px;
+  --mist-avatar-initials-ink: #FFFFFF;
+  --mist-avatar-selection-bg: #263842; /* Stable white text on identity-colored avatars. */
   --mist-side-w: 248px;
   --mist-side-w-collapsed: 76px;
   --mist-topbar-h: 64px;

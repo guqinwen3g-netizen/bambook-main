@@ -4,7 +4,8 @@ import type { LucideIcon } from 'lucide-react';
 import { ChevronLeft, ChevronRight, Loader2, Sparkles } from 'lucide-react'; // mist-allow: Button 的 loading 态是唯一允许的 spinner
 import { cx, toneAttr, type Size, type Tone } from './types';
 import { AssistantEyes } from './AssistantEyes';
-import { parseAvatarIdentity } from '../../lib/avatarIdentity';
+import { parseAvatarIdentity, parsePersonIdentity, parseInitialsIdentity, defaultAvatarColor, AVATAR_COLORS } from '../../lib/avatarIdentity';
+import { useAvatarPerson } from './avatarDirectory';
 
 /* ───────────── 长文本 ───────────── */
 /** 取 ReactNode 中的纯文本（用于截断时的 title 完整文本）。 */
@@ -119,37 +120,42 @@ export function Tabs<V extends string>({ options, value, onChange }: { options: 
 /* ───────────── Avatar ───────────── */
 const presetAvatarCache = new Map<string, string>();
 /** 预设头像（dicebear:v1:…）按需加载生成器，转为可直接显示的 SVG 地址；普通图片地址原样返回。 */
-export function useAvatarSource(src?: string | null): string | undefined {
+export function useAvatarSource(src?: string | null, onError?: () => void): string | undefined {
   const identity = src ? parseAvatarIdentity(src) : null;
+  const person = parsePersonIdentity(src);
   const [resolved, setResolved] = React.useState<{ src: string; url: string } | null>(null);
   React.useEffect(() => {
-    if (!src || !identity || presetAvatarCache.has(src)) return;
+    if (!src || (!identity && !person) || presetAvatarCache.has(src)) return;
     let live = true;
-    import('../../lib/avatarPresets').then(({ generateAvatar }) => {
-      const url = generateAvatar(identity.family, identity.seed, identity.animated);
+    const generation = person ? import('../../lib/avatarPerson').then(({generatePersonAvatar}) => generatePersonAvatar(person)) : import('../../lib/avatarPresets').then(({generateAvatar}) => generateAvatar(identity!.family,identity!.seed,identity!.animated));
+    generation.then(url => {
       presetAvatarCache.set(src, url);
       if (presetAvatarCache.size > 64) presetAvatarCache.delete(presetAvatarCache.keys().next().value!);
       if (live) setResolved({ src, url });
-    }).catch(() => undefined);
+    }).catch(() => { if (live) onError?.(); });
     return () => { live = false; };
   }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!src) return undefined;
-  if (!identity) return src;
+  if (!src || parseInitialsIdentity(src)) return undefined;
+  if (!identity && !person) return /^(person|initials):/.test(src) ? undefined : src;
   return presetAvatarCache.get(src) ?? (resolved?.src === src ? resolved.url : undefined);
 }
-export function Avatar({ name, src, tone, size }: { name: string; src?: string | null; tone?: Tone; size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' }) {
+export function Avatar({ name, src, tone, size, identityKey }: { name: string; src?: string | null; tone?: Tone; size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'; identityKey?: string }) {
+  const person = useAvatarPerson(name, identityKey);
+  const source = src === undefined ? person?.src : src;
   const [failedSrc,setFailedSrc]=React.useState<string>();
-  const shown = useAvatarSource(src);
+  const shown = useAvatarSource(source);
+  const counter = name.startsWith('+');
+  const color = AVATAR_COLORS.find(color => color.id === (parseInitialsIdentity(source) ?? defaultAvatarColor(person?.id ?? identityKey ?? name)))!;
   return (
-    <span className="mist-avatar" data-tone={toneAttr(tone)} data-size={size && size !== 'md' ? size : undefined} title={uiText(name)}>
-      {shown && failedSrc!==shown ? <img onError={()=>setFailedSrc(shown)} src={shown} alt="" /> : name.startsWith('+') ? name : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
+    <span className="mist-avatar" data-tone={toneAttr(tone)} data-counter={counter || undefined} data-size={size && size !== 'md' ? size : undefined} title={uiText(name)} style={counter ? undefined : {backgroundColor:color.value,color:'var(--mist-avatar-initials-ink)'}}>
+      {shown && failedSrc!==shown ? <img onError={()=>setFailedSrc(shown)} src={shown} alt="" /> : counter ? name : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
     </span>
   );
 }
-/** overlap：侧栏小组头像串（约 1/3 重叠、每个头像带与侧栏同色描边，悬停轻微展开）。 */
-export function AvatarStack({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string }>; size?: 'xs' | 'sm'; max?: number; overlap?: boolean }) {
+/** overlap：小组头像沿用个人配色，容器同色细线分隔重叠边缘。 */
+export function AvatarStack({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string; identityKey?: string }>; size?: 'xs' | 'sm'; max?: number; overlap?: boolean }) {
   const shown = people.slice(0, max);
-  return <span className="mist-stack" data-overlap={overlap || undefined}>{shown.map((p, i) => <Avatar key={i} {...p} size={size} />)}{people.length > max && <Avatar name={`+${people.length - max}`} size={size} />}</span>;
+  return <span className="mist-stack" data-overlap={overlap || undefined}>{shown.map((p, i) => <Avatar key={p.identityKey ?? i} {...p} size={size} />)}{people.length > max && <Avatar name={`+${people.length - max}`} size={size} />}</span>;
 }
 
 /* ───────────── Card ───────────── */

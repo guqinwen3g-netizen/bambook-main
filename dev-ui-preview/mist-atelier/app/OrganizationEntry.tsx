@@ -10,7 +10,7 @@ import { ALL_TEAMS } from './runtime/teamView';
 import type { OwnTeam, TeamPerson } from './runtime/organizationContext';
 
 type Organization = { name: string; caption: string; teams: OwnTeam[]; error: boolean; loading: boolean; retry: () => void };
-const people = (list: TeamPerson[]) => list.map(person => ({ name: person.name, src: person.avatarUrl }));
+const people = (list: TeamPerson[]) => list.map(person => ({ name: person.name, identityKey: person.id, src: person.avatarUrl }));
 /** “全部”视角：本人所在各组成员去重合并。 */
 export function unionMembers(teams: OwnTeam[]): TeamPerson[] {
   const seen = new Map<string, TeamPerson>();

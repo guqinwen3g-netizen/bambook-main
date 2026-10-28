@@ -13,7 +13,7 @@ import { primaryImageId } from '../../../server/src/shared/mistPrimaryImage';
 import { Bell, ClipboardList, Component, KeyRound, Layers, ListTodo, Moon, Search, Settings2, ShieldCheck, Sparkles, SquareDashed, Users } from 'lucide-react';
 
 import {
-  AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
+  AvatarDirectory, AssistantDrawer, Banner, TaskList, Button, Card, CardHeader, CommandPalette, Drawer, EmptyState, MistAppShell, MistPage, MistRoot, MistSidebarPresentation, MistTopbar, ToastProvider, MistDensityContext, useHotkey, useToast,
   type ChatMessage, type CommandItem, type Crumb, type NavSection, type ThemeMode,
 } from '../../../components/mist';
 import { getModuleByView, getPrimaryNavigationModules, groupPrimaryNavigationModules } from '../../../components/moduleRegistry';
@@ -360,15 +360,15 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const name = (workspace.workspace?.ownerId === user.id ? workspaceProfileName : '') || user.displayName || user.email;
   const roles = platformOnly ? '平台管理员' : platformCompany ? '平台管理' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
   return (
-    <Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
+    <AvatarDirectory people={[...(state?.members ?? []).map(member=>({id:member.userId,name:member.name})),...organization.teams.flatMap(team=>(team.members ?? []).map(person=>({id:person.id,name:person.name,src:person.avatarUrl}))),{id:user.id,name:user.displayName || user.email,src:user.avatarUrl}]}><Nav.Provider value={nav}><MistReviewProvider><MistDensityContext.Provider value={density||'default'}>
       <MistAppShell collapsed={collapsed} scrollKey={scrollPosition.current.key}
         sidebar={<CountedSidebar sections={sections} activeId={base === 'development' ? 'development' : COMPANY_ADMIN_VIEWS.has(base) && !(platformOnly && ['system-settings','settings'].includes(base)) ? 'company-settings' : base}
           onNavigate={navigateModule} collapsed={collapsed} onToggleCollapsed={() => setCollapsed(value => !value)}
-          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
+          workspace={platformOnly ? { symbol: 'S', name: 'Sylway Cloud', caption: '平台运营', onClick:()=>go('platform-admin') } : platformCompany ? { symbol: platformCompany.companyName.slice(0,1), name: platformCompany.companyName, caption: '平台管理', onClick:()=>go('company-settings') } : { ...organizationEntry({ organization:{...organization,teams:organization.teams.map(team=>({...team,members:team.members?.map(person=>person.id===user.id?{...person,avatarUrl:user.avatarUrl ?? undefined}:person)}))}, department: user.department, teamId: teamView.teamId, onSelect: id => { teamView.select(id); setOrganizationOpen(false); },
               onCompanyProfile: session.canAccessView(View.SystemSettings) ? () => { setOrganizationOpen(false); go('company-settings', undefined, { section: 'profile' }); } : undefined,
               onManageTeams: session.hasPermission('hr:write') && session.canAccessView(View.SystemSettings) ? () => { setOrganizationOpen(false); go('company-settings', undefined, { section: 'teams' }); } : undefined }),
             expanded: organizationOpen, onClick:()=>{setOrganizationOpen(value=>!value);if(!organizationOpen)organization.retry();} }}
-          account={{ name, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
+          account={{ name, identityKey:user.id, caption: roles, avatarUrl: user.avatarUrl ?? undefined, onClick: () => go('account') }}
           onSearch={() => setPalette(true)}
           assistant={!canAI ? undefined : { title: '小竹', text: '查询当前公司的进展', onClick: ()=>openAI() }} />}
         topbar={scrolled => <MistTopbar scrolled={scrolled} onBack={backTarget ? goBack : undefined} backLabel={backTarget ? '返回' + backTarget.label : undefined} crumbs={platformOnly && ['system-settings','settings'].includes(route.view) ? [{label:'平台运营'},{label:'平台设置'}] : crumbsFor(route, go, state?.devs.find(d=>d.id===route.id)?.code || state?.orders.find(o=>o.id===route.id)?.code, state?.versions.find(v=>v.id===route.versionId)?.label)}
@@ -392,7 +392,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
         {state?.settings.notifications.digest&&<Card><CardHeader title={uiText("今日工作摘要")} sub={uiText("按当前记录生成 · 不发送邮件")}/><div className="mist-card-body">{dailyDigest.length?dailyDigest.map(item=><p key={item.id}><Button variant="quiet" onClick={()=>go(item.target.view,item.target.id,item.target)}>{uiText(item.label)} · {item.detail}</Button></p>):<p>{uiText("今天没有待处理事项。")}</p>}</div></Card>}
         {visibleNotifications.length?visibleNotifications.slice().reverse().map(n=><Card key={n.id}><CardHeader title={uiText(n.title)} sub={uiText(new Date(n.at).toLocaleString())} tools={<Button variant="quiet" onClick={()=>{void (n.readAt?Promise.resolve():workspace.run({type:'notification.read',payload:{id:n.id}})).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{uiText(n.readAt?'查看':'阅读')}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title={uiText("暂无通知")} />}
       </Drawer>
-    </MistDensityContext.Provider></MistReviewProvider></Nav.Provider>
+    </MistDensityContext.Provider></MistReviewProvider></Nav.Provider></AvatarDirectory>
   );
 }
 

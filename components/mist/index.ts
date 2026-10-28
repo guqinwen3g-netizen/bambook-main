@@ -17,3 +17,5 @@ export * from './shell';
 
 export * from './AssistantEyes';
 export * from './filePreview';
+
+export * from './avatarDirectory';

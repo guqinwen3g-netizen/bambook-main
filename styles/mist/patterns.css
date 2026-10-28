@@ -1015,3 +1015,76 @@
 /* 滚动能力不变，滚动条不显示也不占用内容宽度。 */
 html, body, .mist-root, .mist-root * { scrollbar-width: none; scrollbar-gutter: auto; }
 html::-webkit-scrollbar, body::-webkit-scrollbar, .mist-root::-webkit-scrollbar, .mist-root *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* Avatar studio: one stable stage and visual choices; mobile keeps controls in reach. */
+.mist-dialog:has(.mist-avatar-studio) { height: min(740px, 92dvh); max-height: 92dvh; }
+.mist-dialog:has(.mist-avatar-studio) .mist-dialog-body { display: flex; flex: 1; overflow: hidden; padding: 18px 24px 0; }
+.mist-dialog:has(.mist-avatar-studio) .mist-dialog-h { padding: 24px 24px 0; }
+.mist-avatar-studio { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; }
+.mist-avatar-studio > .mist-tabs { flex: none; }
+.mist-avatar-studio > .mist-tabs button { padding: 12px 18px; }
+.mist-avatar-editor { display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 28px; flex: 1; min-height: 0; }
+.mist-avatar-editor-preview { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 16px; min-width: 0; padding: 28px 0; }
+.mist-avatar-stage-card { display: grid; place-items: center; width: 100%; aspect-ratio: 1; border-radius: 28px; background: var(--mist-fill); }
+.mist-avatar-stage-card > .mist-avatar { width: 242px; height: 242px; font-size: 82px; }
+.mist-avatar-preview-identity { display: flex; align-items: center; gap: 9px; color: var(--mist-ink-2); font-size: var(--mist-text-sm); }
+.mist-avatar-credit { max-width: 100%; text-align: center; color: var(--mist-ink-3); font-size: var(--mist-text-2xs); line-height: 1.6; }
+.mist-avatar-editor-controls { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 18px; padding: 24px 0 14px; overflow-y: auto; }
+.mist-avatar-part-tabs { display: flex; flex: none; align-items: center; gap: 4px; background: var(--mist-fill); border-radius: var(--mist-r-md); padding: 4px; }
+.mist-avatar-part-tabs > button { flex: 1; min-width: 0; padding: 9px 4px; border-radius: 8px; font-size: var(--mist-text-sm); color: var(--mist-ink-3); }
+.mist-avatar-part-tabs > button[aria-selected="true"] { color: var(--mist-ink); background: var(--mist-card); }
+.mist-avatar-choice-panel { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding: 1px 4px 12px 1px; }
+.mist-avatar-control-label { font-size: var(--mist-text-sm); color: var(--mist-ink-2); }
+.mist-avatar-color-field { display: grid; flex: none; gap: 12px; }
+.mist-avatar-swatches { display: flex; flex-wrap: wrap; gap: 11px; padding: 3px; }
+.mist-avatar-swatches > button { width: 32px; height: 32px; border-radius: 50%; flex: none; display: grid; place-items: center; color: var(--mist-avatar-initials-ink); }
+.mist-avatar-swatches > button[aria-pressed="true"] .mist-icon { background: var(--mist-avatar-selection-bg); border-radius: 50%; padding: 1px; }
+.mist-avatar-swatches > button:focus-visible, .mist-avatar-choice:focus-visible, .mist-avatar-part-tabs > button:focus-visible { outline: 2px solid var(--mist-accent-ink); outline-offset: 2px; }
+.mist-avatar-option-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; flex: none; align-content: start; }
+.mist-avatar-choice { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; padding: 8px 6px; border-radius: 16px; background: var(--mist-fill); color: var(--mist-ink-2); font-size: var(--mist-text-xs); }
+.mist-avatar-choice > .mist-avatar { width: 52px; height: 52px; }
+.mist-avatar-choice:hover, .mist-avatar-choice[aria-pressed="true"] { background: var(--mist-accent-tint); }
+.mist-avatar-choice-check { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--mist-accent-ink); color: var(--mist-card); }
+.mist-avatar-color-example { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; font-size: 25px; color: var(--mist-avatar-initials-ink); }
+.mist-avatar-panel-head, .mist-avatar-photo-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.mist-avatar-photo-panel { display: flex; flex-direction: column; gap: 20px; flex: 1; min-height: 0; overflow-y: auto; padding: 24px 0; }
+.mist-avatar-upload { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 16px; min-height: 280px; border-radius: 24px; background: var(--mist-fill); color: var(--mist-ink-2); }
+.mist-avatar-upload > .mist-icon { width: 36px; height: 36px; color: var(--mist-accent-ink); }
+.mist-avatar-upload > strong { font-size: var(--mist-text-lg); font-weight: var(--mist-fw-medium); }
+.mist-avatar-upload > span:last-child { color: var(--mist-ink-3); font-size: var(--mist-text-xs); }
+.mist-avatar-upload:hover { background: var(--mist-accent-tint); }
+.mist-avatar-photo-existing { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+.mist-avatar-photo-existing > .mist-avatar { width: 240px; height: 240px; }
+.mist-avatar-photo-panel .mist-avatar-crop { flex: none; }
+@media(max-width:640px) {
+  .mist-dialog:has(.mist-avatar-studio) { width: 100vw !important; height: 100dvh; max-height: 100dvh; left: 0; top: 0; transform: none; border-radius: 0; animation: mist-fade .15s both; }
+  .mist-dialog:has(.mist-avatar-studio) .mist-dialog-h { padding: max(18px, env(safe-area-inset-top)) 18px 0; }
+  .mist-dialog:has(.mist-avatar-studio) .mist-dialog-body { padding: 10px 18px 0; }
+  .mist-dialog:has(.mist-avatar-studio) .mist-dialog-foot { padding: 14px 18px max(16px, env(safe-area-inset-bottom)); }
+  .mist-avatar-studio > .mist-tabs button { flex: 1; padding: 11px 12px; }
+  .mist-avatar-editor { display: flex; flex-direction: column; gap: 0; }
+  .mist-avatar-editor-preview { flex: none; padding: 14px 0 10px; gap: 7px; }
+  .mist-avatar-stage-card { background: transparent; aspect-ratio: auto; }
+  .mist-avatar-stage-card > .mist-avatar { width: 128px; height: 128px; font-size: 46px; }
+  .mist-avatar-preview-identity { display: none; }
+  .mist-avatar-credit { font-size: 10px; }
+  .mist-avatar-editor-controls { flex: 1; padding: 8px 0; gap: 12px; }
+  .mist-avatar-option-grid { gap: 8px; }
+  .mist-avatar-choice-panel { gap: 16px; }
+  .mist-avatar-color-field { gap: 8px; }
+  .mist-avatar-choice { padding: 10px 5px 9px; gap: 7px; border-radius: 12px; }
+  .mist-avatar-choice > .mist-avatar { width: 52px; height: 52px; }
+  .mist-avatar-color-example { width: 52px; height: 52px; font-size: 22px; }
+  .mist-avatar-photo-panel { padding-top: 18px; }
+  .mist-avatar-photo-panel .mist-avatar-crop-tools input { max-width: 50vw; }
+}
+
+@media(max-height:760px) and (min-width:641px) {
+ .mist-avatar-choice { padding:8px 5px; gap:5px; }
+ .mist-avatar-choice>.mist-avatar { width:48px;height:48px; }
+ .mist-avatar-choice-panel { gap:14px; }
+ .mist-avatar-color-field { gap:8px; }
+ .mist-avatar-editor-controls { padding-top:16px;gap:12px; }
+}
+
+.mist-avatar-crop:focus-visible { outline: 2px solid var(--mist-accent-ink); outline-offset: 4px; }
