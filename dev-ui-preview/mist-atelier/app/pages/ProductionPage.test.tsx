@@ -42,6 +42,18 @@ it('records fabric final quantity without a garment size matrix',async()=>{
 });
 
 describe('Mist production gates, delay and pause',()=>{
+ it.each([90,89.99])('reads a scoped deposit summary of %s without requiring the hidden bank ledger',async amount=>{
+  const s=bridge.state!,g=s.orders[0].governance!;
+  for(const contract of [g.contract,g.approvedSnapshot!.contract])contract.depositPercent=30;
+  s.fulfillment.productionFacts.find(fact=>fact.productionId==='production-b')!.release=undefined;
+  s.receipts=[];
+  s.partialReceipts=[{id:'deposit',code:'RC-1',date:'2026-10-29',payer:'新订单客户',currency:'USD',visibleAllocatedAmount:0,hiddenCount:0}];
+  s.orderFunding.assignments=[{id:'funding',receiptId:'deposit',customerId:'customer-a',orderId,amount,currency:'USD',state:'active',note:'定金',actor:'财务',createdAt:context.now,updatedAt:context.now,history:[]}];
+  await mount({view:'production-board',productionId:'production-b'});
+  const gate=document.querySelector('[data-release-gate]')!;
+  expect(gate.textContent).toContain(amount===90?'定金已覆盖':'定金订单定金尚不足：要求 90，已确认归属 89.99');
+  expect(gate.textContent).not.toContain('到账来源不存在');
+ });
  it('mirrors the server release gate and keeps release disabled until the exact pre-production sample is confirmed',async()=>{
   const f=bridge.state!.fulfillment;f.productionFacts.find(fact=>fact.productionId==='production-b')!.release=undefined;f.samples=f.samples.filter(sample=>sample.source.kind!=='orderLine'||sample.source.productionId!=='production-b');
   await mount({view:'production-board',productionId:'production-b'});

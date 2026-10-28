@@ -1,5 +1,6 @@
 /** 生产分支开产门禁：与服务端放行规则逐项对应，只读核对，最终以服务端为准。 */
-import { assertMistOrderApproved, assertMistOrderDeposit, type MistProduction, type MistState } from '../../../../server/src/shared/mistWorkspace';
+import { assertMistOrderApproved, type MistProduction, type MistState } from '../../../../server/src/shared/mistWorkspace';
+import { orderDepositBlocker } from '../../../../server/src/shared/mistOrderFunding';
 import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
 import { uiText } from '../../../../services/interfaceLanguage';
 import { garmentMaterialBlocker, type InternalFabricContext } from '../../../../server/src/shared/mistInternalFabric';
@@ -11,7 +12,7 @@ export function productionReleaseGate(state: MistState, branch: MistProduction, 
   const f = state.fulfillment, order = state.orders.find(row => row.id === branch.orderId), fabric = order?.type === 'fabric';
   const fact = f?.productionFacts?.find(row => row.productionId === branch.id);
   const approval = message(() => assertMistOrderApproved(state, branch.orderId));
-  const deposit = approval ? '主单批准后核对' : message(() => assertMistOrderDeposit(state, branch.orderId));
+  const deposit = approval ? '主单批准后核对' : orderDepositBlocker(state, branch.orderId);
   const items: GateItem[] = [
     { key: 'approval', label: '主单', ok: !approval, detail: approval || '已批准', target: { view: 'orders/detail', id: branch.orderId } },
     { key: 'deposit', label: '定金', ok: !approval && !deposit, detail: deposit || (order?.governance?.contract.depositPercent === 0 || order?.governance?.contract.kind === 'internal' ? '无需定金' : '已覆盖'), target: { view: 'payment-vouchers' } },
