@@ -18,7 +18,7 @@ export type MistDataScope = { userIds: string[]; teamIds: string[] };
 
 /** 受行级范围裁剪的集合（路径 = 状态内位置）。写入校验也只对这些集合生效。 */
 export const SCOPED_COLLECTIONS = [
-  'crm.opportunities', 'crm.followUps', 'devs', 'versions', 'rounds', 'market.quotations', 'orders', 'orderLines',
+  'crm.opportunities', 'crm.followUps', 'devs', 'drafts', 'versions', 'rounds', 'market.quotations', 'orders', 'orderLines',
   'productions', 'invoices', 'allocations', 'receipts', 'internalFabricAllocations',
   'fulfillment.purchases', 'fulfillment.receipts', 'fulfillment.stock', 'fulfillment.stockMovements', 'fulfillment.returnReceipts', 'fulfillment.receivedRecords', 'fulfillment.documents', 'fulfillment.qcTasks', 'fulfillment.qcReports', 'fulfillment.samples', 'fulfillment.sampleMovements',
   'fulfillment.packing', 'fulfillment.shipments', 'fulfillment.customs', 'fulfillment.shippingTerms', 'fulfillment.productionFacts',
@@ -58,6 +58,7 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   const f: any = state.fulfillment ?? {}, p: any = state.platform ?? {};
   const orders = out.get('orders')!, devs = out.get('devs')!, has = (path: string, id: unknown) => typeof id === 'string' && out.get(path)!.has(id);
   for (const row of state.orderLines ?? []) if (orders.has(row.orderId)) add('orderLines', row.id);
+  for (const draft of state.drafts ?? []) if (users.has(draft.ownerId ?? '') || users.has(draft.values?.requesterId ?? '') || !!draft.values?.sourceDevId && devs.has(draft.values.sourceDevId)) add('drafts', draft.id);
   for (const row of state.versions ?? []) if (devs.has(row.devId)) add('versions', row.id);
   for (const row of state.rounds ?? []) if (devs.has(row.devId)) add('rounds', row.id);
   for (const row of state.allocations ?? []) if (has('invoices', row.invoiceId)) add('allocations', row.id);

@@ -138,3 +138,10 @@ it('does not leak a sensitive unscoped notification without a record target',()=
  const state:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[],orderLines:[],invoices:[],allocations:[],receipts:[],fulfillment:{},platform:{},events:[],tasks:[],calendar:[],notifications:[{id:'n',title:'Other business amount',target:{view:'payment-vouchers'}}]};
  expect(applyDataScope(state,{userIds:['member'],teamIds:[]},'member').notifications).toEqual([]);
 });
+
+it('shows and permits only the actor’s attributed development drafts',()=>{
+ const state:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[],orderLines:[],invoices:[],allocations:[],receipts:[],drafts:[{id:'mine',ownerId:'member',values:{},fileIds:[]},{id:'other',ownerId:'other',values:{},fileIds:[]}],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};
+ const scope={userIds:['member'],teamIds:[]};expect(applyDataScope(state,scope,'member').drafts.map(row=>row.id)).toEqual(['mine']);
+ const other=structuredClone(state);other.drafts[1].values.name='changed';expect(scopedWriteViolation(state,other,scope)).toMatchObject({path:'drafts',id:'other'});
+ const mine=structuredClone(state);mine.drafts[0].values.name='changed';expect(scopedWriteViolation(state,mine,scope)).toBeNull();
+});

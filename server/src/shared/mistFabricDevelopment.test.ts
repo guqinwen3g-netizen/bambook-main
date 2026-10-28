@@ -27,3 +27,4 @@ describe('fabric development entry and exact physical/QC chain',()=>{
 
 
 it('freezes original factory-version targets when later common requirements are edited',()=>{const f=fixture(),ids=f.submit();f.run({type:'development.update',payload:{devId:ids.devId!,patch:{fabricRequirements:{...f.values.fabricRequirements!,weightValue:'280'}}}});expect(f.state.devs[0].values.fabricRequirements?.weightValue).toBe('280');expect(f.state.versions[0].fabricRequirements?.weightValue).toBe('250');});
+it('records and preserves the original creator of a development draft',()=>{const f=fixture();const result=f.run({type:'development.saveDraft',payload:{values:f.values,fileIds:[]}});expect(f.state.drafts[0].ownerId).toBe('test-sales');f.run({type:'development.saveDraft',payload:{draftId:result.id,values:{...f.values,name:'更新草稿'},fileIds:[]}});expect(f.state.drafts[0].ownerId).toBe('test-sales');});

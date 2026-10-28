@@ -68,7 +68,7 @@ export type DevelopmentValues = {
   requester?: string; requesterId?: string; charged?: boolean;
 };
 export type MistFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string; url?: string };
-export type MistDraft = { id: string; values: DevelopmentValues; fileIds: string[]; updatedAt: string };
+export type MistDraft = { id: string; values: DevelopmentValues; fileIds: string[]; updatedAt: string; /** Server-assigned creator; old drafts may not have attribution. */ ownerId?: string };
 export type MistConfirmation = { id: string; result: 'approved' | 'needs_adjustment' | 'rejected'; confirmer: string; organization: string; confirmedAt: string; basis: string; originalText: string; recordedAt: string; recordedBy: string;
   /** BB-DEV-6：面料版本有多条实物时，本次确认针对的准确实物（记录时快照编号与形态）。旧记录没有该字段。 */
   samples?: MistSampleRef[] };
@@ -860,9 +860,10 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   switch(command.type){
     case 'development.saveDraft': {
       const v=values(p.values,false), fileIds=files(state,p.fileIds), id=p.draftId||context.id();
-      if(p.draftId)find(state.drafts,p.draftId,'草稿');
+      const existing = p.draftId ? find(state.drafts,p.draftId,'草稿') : undefined;
+      const ownerId = existing?.ownerId ?? (existing ? undefined : context.actorId);
       state.drafts=state.drafts.filter(d=>d.id!==id);
-      state.drafts.push({id,values:v,fileIds,updatedAt:context.now}); result={id,draftId:id}; break;
+      state.drafts.push({id,values:v,fileIds,updatedAt:context.now,...(ownerId?{ownerId}:{})}); result={id,draftId:id}; break;
     }
     case 'development.submit': {
       const v=values(p.values,true), fileIds=files(state,p.fileIds);
