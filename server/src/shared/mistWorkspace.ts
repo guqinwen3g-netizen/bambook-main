@@ -397,7 +397,7 @@ export type MistWorkspaceMemberLog={id:string;action:'add'|'remove';userId:strin
 /** 服务端按当前账号现有读权限裁剪数据后附带的说明：hidden 为当前账号无权查看、已被隐藏的数据范围。 */
 export type MistWorkspaceAccess={companyLibrary?:boolean;/** Resolved references in the user's own groups, already intersected with module and row permissions. No scope conditions or history. */teamViews?:Record<string,import('./mistTeamScope').TeamScopeRef[]>;role:'owner'|'member';canManageMembers:boolean;/** Present for restricted company sessions: customer records maintainable within current authority. */manageableCustomerIds?:string[];/** 可维护公司设置与业务组划分：公司库看公司用户管理权限，本机空间看是否为所有者。 */canManageCompany?:boolean;hidden:Array<{key:string;label:string;permissions:string[]}>};
 export type MistWorkspaceEnvelope = { id: string; ownerId: string; name: string; revision: number; state: MistState; access?: MistWorkspaceAccess;/** Read-only financial proportions; never persisted in workspace business state. */costMaterialBasis?:import('./mistInternalFabric').InternalFabricCostBasis[] | null };
-export type MistRunReceipt = { requestId: string; revision: number; result: MistCommandResult };
+export type MistRunReceipt = { requestId: string; /** Original request base, including commands safely applied after concurrent updates. */ expectedRevision?: number; revision: number; result: MistCommandResult };
 
 import * as Seed from './mistSeed';
 
