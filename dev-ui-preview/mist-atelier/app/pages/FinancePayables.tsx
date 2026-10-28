@@ -347,7 +347,7 @@ export function FinancePayables() {
         {canRequest && <Button disabled={busy} onClick={() => startRequest()}>{uiText("申请票据付款")}</Button>}</div>} />
       <div className="mist-card-body mist-col">
       {summary.length ? <DataTable ariaLabel={uiText("供应商应付汇总")} rows={summary} rowKey={r => r.supplierId + r.currency} columns={[
-        { key: 's', header: '供应商', render: r => <ObjectCell name={r.supplier} meta={(r.bills ? r.bills + ' 张未付清' + (r.overdue ? ' · ' + r.overdue + ' 张逾期' : '') : r.heldBills ? '无可付应付' : '已全部付清') + (r.heldBills ? ` · ${r.heldBills} 张待关联结算（${apMoney(r.held, r.currency)}）` : '') + (r.aheadOverdue ? ` · ${r.aheadOverdue} 笔付款超 30 天未收票` : '')} /> },
+        { key: 's', header: '供应商', render: r => <ObjectCell name={r.supplier} meta={(r.bills ? r.bills + ' 张未付清' + (r.overdue ? ' · ' + r.overdue + ' 张逾期' : '') : r.heldBills ? '无可付应付' : uiText('无未付票据')) + (r.heldBills ? ` · ${r.heldBills} 张待关联结算（${apMoney(r.held, r.currency)}）` : '') + (r.aheadOverdue ? ` · ${r.aheadOverdue} 笔付款超 30 天未收票` : '')} /> },
         { key: 'open', header: '未付余额', width: '150px', align: 'right', render: r => <span className="mist-col"><span className="mist-note mist-cell-sm-label">{uiText("未付余额")}</span><span className="mist-num">{apMoney(r.open, r.currency)}</span></span> },
         { key: 'paid', header: '已结清', width: '140px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{apMoney((clearedBySupplier.get(JSON.stringify([r.supplierId,r.currency]))||0)/100, r.currency)}</span> },
         { key: 'un', header: '未分配付款', width: '140px', align: 'right', hideOnMobile: true, render: r => r.unallocated > 0 ? <span className="mist-num">{apMoney(r.unallocated, r.currency)}</span> : '—' },
