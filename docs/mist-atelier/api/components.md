@@ -56,7 +56,7 @@
 | `Tabs` | 页面级 Tabs（下划线指示）。用于同一模块内的子视图切换。 | `({ options, value, onChange }: { options: Option<V>[]; value: V; onChange: (v: V) => void })` |
 | `useAvatarSource` | 预设头像（dicebear:v1:…）按需加载生成器，转为可直接显示的 SVG 地址；普通图片地址原样返回。 | `(src?: string \| null, onError?: () => void): string \| undefined` |
 | `Avatar` | — | `({ name, src, tone, size, identityKey }: { name: string; src?: string \| null; tone?: Tone; size?: 'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl'; identityKey?: string })` |
-| `AvatarStack` | overlap：小组头像沿用个人配色，容器同色细线分隔重叠边缘。 | `({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string; identityKey?: string }>; size?: 'xs' \| 'sm'; max?: number; overlap?: boolean })` |
+| `AvatarStack` | overlap：小组头像沿用个人配色，主题框色分隔重叠边缘。 | `({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string; identityKey?: string }>; size?: 'xs' \| 'sm'; max?: number; overlap?: boolean })` |
 | `CardProps` | — | `type CardProps = React.HTMLAttributes<HTMLElement> & { as?: 'article' \| 'section' \| 'div' \| 'aside' \| 'nav'; tone?: 'ai' \| 'accent'; clip?: boolean; interactive?: boolean };` |
 | `Card` | 卡片：纯白/深底面，无描边无阴影。interactive = 整卡可点（悬停变 card-2）。 | `({ as = 'article', tone, clip, interactive, className, children, ...rest }: CardProps)` |
 | `CardButton` | 卡片按钮版（统计卡等整卡可点击的场景） | `({ className, children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>)` |
