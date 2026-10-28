@@ -36,6 +36,9 @@ const palettes = [
   ['#F4EFEB', '#E5D5CA', '#CCB1A0', '#A88A79', '#6A554A'], // clay
 ] as const;
 
+// Artwork accents are more vivid than the soft backgrounds, with varied hues.
+const patternAccents = ['#6D8FC5','#8B80C5','#B57FB9','#D18191','#D58E74','#BE9A69','#A3A25F','#76A179','#5EA69A','#68A2B5'] as const;
+
 const paletteIndexFor = (seed: string) => {
   const explicit = seed.match(/^p([0-5])_/);
   if (explicit) return Number(explicit[1]);
@@ -81,9 +84,12 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   const hue = seed.match(/^c(\d{1,3})_v[567]_/);
   const deeper = /^c\d{1,3}_v7_/.test(seed);
   const sharedId=patternColorFromSeed(seed), shared=AVATAR_COLORS.find(color=>color.id===sharedId);
-  if(/^p[^_]*_v8(?:_|$)/.test(seed) && !shared) throw new Error('未知的头像配色');
+  if(/^p[^_]*_v[89](?:_|$)/.test(seed) && !shared) throw new Error('未知的头像配色');
   const blend=(from:string,to:string,amount:number)=>'#'+[1,3,5].map(i=>Math.round(parseInt(from.slice(i,i+2),16)*(1-amount)+parseInt(to.slice(i,i+2),16)*amount).toString(16).padStart(2,'0')).join('');
-  const basePalette = shared ? [blend(shared.value,'#ffffff',.58),shared.value,blend(shared.value,shared.ink,.2),blend(shared.value,shared.ink,.45),shared.ink] : hue ? mistPalette(Number(hue[1]) % 360, deeper ? -5 : 0) : palettes[paletteIndex];
+  const colorful = !!shared && /^p[a-z]+_v9_/.test(seed);
+  // New designs mix three contrasting families, while retaining the chosen background.
+  const accents = shared && colorful ? [3,5,7].map(offset=>patternAccents[(AVATAR_COLORS.indexOf(shared)+offset)%patternAccents.length]) : [];
+  const basePalette = shared ? colorful ? [blend(shared.value,'#ffffff',.58),...accents,shared.ink] : [blend(shared.value,'#ffffff',.58),shared.value,blend(shared.value,shared.ink,.2),blend(shared.value,shared.ink,.45),shared.ink] : hue ? mistPalette(Number(hue[1]) % 360, deeper ? -5 : 0) : palettes[paletteIndex];
   const adjusted = basePalette.map((hex, index) => {
     if (!tone) return hex;
     const delta = tone * (index === 0 ? 1 : 3);
@@ -91,7 +97,7 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   });
   const [frost, mist, middle, gray, ink] = adjusted;
   const colors = [gray, middle, mist];
-  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}:${shared ? `v8-${shared.id}` : deeper ? 'v7' : 'legacy'}`;
+  const cacheKey = `${family}:${hue ? `h${hue[1]}` : paletteIndex}:${tone}:${shared ? `v${colorful ? 9 : 8}-${shared.id}` : deeper ? 'v7' : 'legacy'}`;
   let style = styles.get(cacheKey);
   if (!style) {
     const definition = definitions[family as keyof typeof definitions];
@@ -118,7 +124,7 @@ export function generateAvatar(family: string, seed: string, animated = false): 
   const definition = definitions[family as keyof typeof definitions];
   // v6 uses the unmodified DiceBear component distribution. Legacy avatars retain their appearance.
   const variants = shared || /^c\d{1,3}_v[67]_/.test(seed) ? {} : avatarVariantPreferences(family, seed, definition.components as Parameters<typeof avatarVariantPreferences>[2]);
-  const shapeSeed = seed.replace(/^p[a-z]+_v8_/, 'v6_').replace(/^c(\d+)_v7_/, 'c$1_v6_').replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
+  const shapeSeed = seed.replace(/^p[a-z]+_v[89]_/, 'v6_').replace(/^c(\d+)_v7_/, 'c$1_v6_').replace(/^p[0-5]_v4_/, 'v4_').replace(/^c\d{1,3}_v([56])_/, 'v$1_');
   const svg = new Avatar(style, { seed: shapeSeed, size: 256, animationVariant: animated ? 'slow' : 'none', ...variants }).toString();
   // This rule lives inside the SVG so it also applies when rendered as an img.
   const mutedSvg = ['croodles-neutral','dylan','fun-emoji','gaze','pixelbot','rings','stripes','planets','disco'].includes(family)
