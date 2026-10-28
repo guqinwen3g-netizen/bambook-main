@@ -1,6 +1,8 @@
-export type UiSoundPreferences = { scroll: boolean; notifications: boolean; operations: boolean; volume: number };
+export type UiSoundStyle = 'classic' | 'bell' | 'soft' | 'single';
+const soundStyles: readonly UiSoundStyle[] = ['classic', 'bell', 'soft', 'single'];
+export type UiSoundPreferences = { scroll: boolean; notifications: boolean; operations: boolean; soundStyle: UiSoundStyle; volume: number };
 const KEY = 'bambook.ui-sound.v1';
-const defaults: UiSoundPreferences = { scroll: true, notifications: true, operations: true, volume: 0.4 };
+const defaults: UiSoundPreferences = { scroll: true, notifications: true, operations: true, soundStyle: 'classic', volume: 0.4 };
 let preferences: UiSoundPreferences | undefined;
 const listeners = new Set<() => void>();
 export function getUiSoundPreferences(): UiSoundPreferences {
@@ -12,6 +14,7 @@ export function getUiSoundPreferences(): UiSoundPreferences {
         scroll: typeof stored.scroll === 'boolean' ? stored.scroll : defaults.scroll,
         notifications: typeof stored.notifications === 'boolean' ? stored.notifications : defaults.notifications,
         operations: typeof stored.operations === 'boolean' ? stored.operations : defaults.operations,
+        soundStyle: soundStyles.includes(stored.soundStyle) ? stored.soundStyle : defaults.soundStyle,
         volume: typeof stored.volume === 'number' && Number.isFinite(stored.volume) ? Math.max(0, Math.min(1, stored.volume)) : defaults.volume,
       };
     } catch { /* Storage is optional. */ }
@@ -20,6 +23,7 @@ export function getUiSoundPreferences(): UiSoundPreferences {
 }
 export function setUiSoundPreferences(patch: Partial<UiSoundPreferences>) {
   preferences = { ...getUiSoundPreferences(), ...patch };
+  if (!soundStyles.includes(preferences.soundStyle)) preferences.soundStyle = defaults.soundStyle;
   preferences.volume = Number.isFinite(preferences.volume) ? Math.max(0, Math.min(1, preferences.volume)) : defaults.volume;
   try { localStorage.setItem(KEY, JSON.stringify(preferences)); } catch { /* In-memory preference still applies. */ }
   if (!preferences.scroll || !preferences.volume) releaseScrollVoice();
@@ -208,8 +212,21 @@ export function playNotificationSound(eventId?: string, preview = false) {
   if (!preview) lastNotification = now;
   try {
     const ctx = context, at = ctx.currentTime;
-    tone(ctx, 698.46, at, 0.28, prefs.volume * 0.085);
-    tone(ctx, 987.77, at + 0.10, 0.34, prefs.volume * 0.055);
+    if (prefs.soundStyle === 'bell') {
+      tone(ctx, 659.25, at, .30, prefs.volume * .070);
+      tone(ctx, 1318.50, at, .13, prefs.volume * .010);
+      tone(ctx, 880, at + .10, .36, prefs.volume * .050);
+      tone(ctx, 1760, at + .10, .14, prefs.volume * .007);
+    } else if (prefs.soundStyle === 'soft') {
+      tone(ctx, 523.25, at, .26, prefs.volume * .065);
+      tone(ctx, 659.25, at + .12, .30, prefs.volume * .045);
+    } else if (prefs.soundStyle === 'single') {
+      tone(ctx, 783.99, at, .26, prefs.volume * .065);
+      tone(ctx, 1567.98, at, .12, prefs.volume * .010);
+    } else {
+      tone(ctx, 698.46, at, 0.28, prefs.volume * 0.085);
+      tone(ctx, 987.77, at + 0.10, 0.34, prefs.volume * 0.055);
+    }
   } catch { /* Sound must not interrupt the underlying operation. */ }
 }
 let lastFeedback = -Infinity;
@@ -222,7 +239,17 @@ export function playFeedbackSound(kind: 'success' | 'failure', preview = false) 
   if (!preview) lastFeedback = now;
   try {
     const at = context.currentTime;
-    if (kind === 'success') {
+    if (prefs.soundStyle === 'single') {
+      tone(context, kind === 'success' ? 659.25 : 392, at, .20, prefs.volume * .055, context.destination, kind === 'failure' ? 369.99 : undefined);
+    } else if (prefs.soundStyle === 'soft') {
+      tone(context, kind === 'success' ? 523.25 : 392, at, .18, prefs.volume * .050);
+      tone(context, kind === 'success' ? 659.25 : 329.63, at + .09, .22, prefs.volume * .035);
+    } else if (prefs.soundStyle === 'bell') {
+      const first = kind === 'success' ? 587.33 : 440, second = kind === 'success' ? 783.99 : 349.23;
+      tone(context, first, at, .19, prefs.volume * .055);
+      tone(context, first * 2, at, .09, prefs.volume * .007);
+      tone(context, second, at + .08, .23, prefs.volume * .040);
+    } else if (kind === 'success') {
       tone(context, 659.25, at, .16, prefs.volume * .055);
       tone(context, 783.99, at + .07, .19, prefs.volume * .035);
     } else {

@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { getByRole } from '@testing-library/dom';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
+import * as uiSounds from '../../../../services/uiSoundService';
 const seam = vi.hoisted(() => ({ section: 'profile', go: vi.fn(), run: vi.fn(), logout: vi.fn() }));
 vi.mock('../runtime/auth', () => ({ useMistSession: () => ({ user: { id: 'sales', displayName: '沈禾', email: 'sales@example.test', department: '面料部' }, logout: seam.logout }) }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => ({ state: { settings: { profileName: '总经理', companyProfile: { legalName: '雾织贸易' } } }, run: seam.run }) }));
@@ -57,4 +58,13 @@ it('offers device-only notification and operation sound controls',()=>{
   act(()=>notifications.click());
   expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!).notifications).toBe(false);
   expect(seam.run).not.toHaveBeenCalled();
+});
+it('lets the user choose and immediately preview a notification tone on this device',()=>{
+  seam.section='appearance';uiSounds.setUiSoundPreferences({notifications:true,volume:.4,soundStyle:'classic'});
+  const preview=vi.spyOn(uiSounds,'previewUiSound').mockResolvedValue();act(paint);
+  const select=getByRole(host,'combobox',{name:'声音风格'}) as HTMLSelectElement;
+  expect([...select.options].map(option=>option.value)).toEqual(['classic','bell','soft','single']);
+  act(()=>{select.value='bell';select.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!).soundStyle).toBe('bell');
+  expect(preview).toHaveBeenCalledWith('notifications');expect(seam.run).not.toHaveBeenCalled();
 });
