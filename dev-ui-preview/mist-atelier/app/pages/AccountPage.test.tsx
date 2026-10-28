@@ -2,7 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getByRole } from '@testing-library/dom';
+import { getByRole, queryByRole } from '@testing-library/dom';
 import { MistRoot, ToastProvider } from '../../../../components/mist';
 const seam = vi.hoisted(() => ({ section: 'profile', go: vi.fn(), run: vi.fn(), logout: vi.fn() }));
 vi.mock('../runtime/auth', () => ({ useMistSession: () => ({ user: { id: 'sales', displayName: '沈禾', email: 'sales@example.test', department: '面料部' }, logout: seam.logout }) }));
@@ -51,9 +51,11 @@ it('offers device-only notification and operation sound controls',()=>{
   const operations=getByRole(host,'switch',{name:'操作反馈音'});
   expect((notifications as HTMLInputElement).checked).toBe(true);
   expect((operations as HTMLInputElement).checked).toBe(true);
-  expect(getByRole(host,'button',{name:'试听通知'})).toBeTruthy();
-  expect(getByRole(host,'button',{name:'试听完成'})).toBeTruthy();
-  expect(getByRole(host,'button',{name:'试听失败'})).toBeTruthy();
+  expect(queryByRole(host,'button',{name:'试听通知'})).toBeNull();
+  expect(queryByRole(host,'button',{name:'试听完成'})).toBeNull();
+  expect(queryByRole(host,'button',{name:'试听失败'})).toBeNull();
+  expect(queryByRole(host,'combobox',{name:'声音风格'})).toBeNull();
+  expect(getByRole(host,'slider',{name:'提示音量'})).toBeTruthy();
   act(()=>notifications.click());
   expect(JSON.parse(localStorage.getItem('bambook.ui-sound.v1')!).notifications).toBe(false);
   expect(seam.run).not.toHaveBeenCalled();

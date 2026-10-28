@@ -208,8 +208,10 @@ export function playNotificationSound(eventId?: string, preview = false) {
   if (!preview) lastNotification = now;
   try {
     const ctx = context, at = ctx.currentTime;
-    tone(ctx, 698.46, at, 0.28, prefs.volume * 0.085);
-    tone(ctx, 987.77, at + 0.10, 0.34, prefs.volume * 0.055);
+    tone(ctx, 659.25, at, .30, prefs.volume * .070);
+    tone(ctx, 1318.50, at, .13, prefs.volume * .010);
+    tone(ctx, 880, at + .10, .36, prefs.volume * .050);
+    tone(ctx, 1760, at + .10, .14, prefs.volume * .007);
   } catch { /* Sound must not interrupt the underlying operation. */ }
 }
 let lastFeedback = -Infinity;
@@ -222,23 +224,11 @@ export function playFeedbackSound(kind: 'success' | 'failure', preview = false) 
   if (!preview) lastFeedback = now;
   try {
     const at = context.currentTime;
-    if (kind === 'success') {
-      tone(context, 659.25, at, .16, prefs.volume * .055);
-      tone(context, 783.99, at + .07, .19, prefs.volume * .035);
-    } else {
-      tone(context, 440, at, .17, prefs.volume * .065);
-      tone(context, 349.23, at + .10, .22, prefs.volume * .045);
-    }
+    const first = kind === 'success' ? 587.33 : 440, second = kind === 'success' ? 783.99 : 349.23;
+    tone(context, first, at, .19, prefs.volume * .055);
+    tone(context, first * 2, at, .09, prefs.volume * .007);
+    tone(context, second, at + .08, .23, prefs.volume * .040);
   } catch { /* Sound must not interrupt the underlying operation. */ }
-}
-export async function previewUiSound(kind: 'scroll' | 'notifications' | 'success' | 'failure') {
-  unlock();
-  try {
-    if (context?.state === 'suspended') await context.resume();
-    if (kind === 'scroll') playScrollTick(0.7);
-    else if (kind === 'notifications') playNotificationSound(undefined, true);
-    else playFeedbackSound(kind, true);
-  } catch { /* Autoplay restrictions or unavailable device. */ }
 }
 /** One tooth per 32px of actual travel; never queue a burst after a large jump. */
 export function createScrollSoundTracker(initialPosition: number, emit = playScrollTick) {

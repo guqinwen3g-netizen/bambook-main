@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '通知提示音': 'Notification sound', '操作反馈音': 'Action sounds', '提示音量': 'Sound volume',
   '请从当前入口操作。': 'Use the current entry point.',
   '请从平台管理入口操作。': 'Use the platform administration entry.',
   '请从公司入口操作。': 'Use the company entry.',
