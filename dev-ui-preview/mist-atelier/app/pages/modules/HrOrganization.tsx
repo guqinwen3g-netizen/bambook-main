@@ -5,6 +5,7 @@ import { Building2, Plus, RefreshCw, UserPlus, Users } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, MistPage, PageHeader, Pill, Select, Tabs, TextArea, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import { EmployeeFile } from './EmployeeFile';
 import { useMistSession } from '../../runtime/auth';
+import { useMistWorkspace } from '../../runtime/workspace';
 import { useNav } from '../../nav';
 import { attributeLabel, BUSINESS_ATTRIBUTES, departmentOptions, EMPLOYMENT_STATUS, organizationApi, ACCOUNT_STATUS, type BusinessAttribute, type EmployeeProfile, type OrgDepartment, type OrgJob, type OrgPerson, type OrgTeam } from '../../runtime/organization';
 
@@ -24,7 +25,7 @@ function AttributePills({ values }: { values?: string[] }) {
 
 export function HrOrganizationPage() {
   const session = useMistSession(), { route, go } = useNav();
-  const tab = route.section === 'people' || route.section === 'positions' || route.id ? 'people' : 'org';
+  const tab = route.section === 'teams' ? 'org' : route.section === 'people' || route.section === 'positions' || route.id ? 'people' : 'org';
   return <MistPage><PageHeader title={uiText("人事管理")} />
     {!session.localMode && <Tabs<'org' | 'people'> value={tab} onChange={next => go('hr', undefined, { section: next })} options={[{ value: 'org', label: '组织架构', icon: Building2 }, { value: 'people', label: '人员', icon: Users }]} />}
     <section className="mist-section"><HrOrganization part={tab} /></section>
@@ -32,7 +33,7 @@ export function HrOrganizationPage() {
 }
 
 export function HrOrganization({ part }: { part: 'org' | 'people' }) {
-  const session = useMistSession(), { route, go } = useNav(), toast = useToast();
+  const session = useMistSession(), workspace = useMistWorkspace(), { route, go } = useNav(), toast = useToast();
   const canRead = session.hasPermission('hr:read') || session.hasPermission('hr:write'), canWrite = session.hasPermission('hr:write');
   const [data, setData] = React.useState<Directory | null>(null), [loading, setLoading] = React.useState(true), [error, setError] = React.useState('');
   const [open, setOpen] = React.useState<Open>(null), [form, setForm] = React.useState<Form | null>(null), [formError, setFormError] = React.useState('');
@@ -54,11 +55,19 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
 
   const linkedPerson = React.useRef<string | undefined>(undefined);
   React.useEffect(() => {
+    if (route.section === 'teams') { linkedPerson.current = undefined; return; }
     if (!route.id) { linkedPerson.current = undefined; return; }
     if (route.id !== linkedPerson.current && data?.people.some(person => person.id === route.id)) {
       linkedPerson.current = route.id; setOpen({ kind: 'person', id: route.id });
     }
-  }, [route.id, data]);
+  }, [route.id, route.section, data]);
+  const linkedTeam = React.useRef<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (route.section !== 'teams' || !route.id) { linkedTeam.current = undefined; return; }
+    if (route.id !== linkedTeam.current && data?.teams.some(team => team.id === route.id)) {
+      linkedTeam.current = route.id; setOpen({ kind: 'team', id: route.id });
+    }
+  }, [route.id, route.section, data]);
   const root = data?.departments.find(d => !d.parentId) ?? null;
   const departments = (data?.departments ?? []).filter(d => d.parentId);
   const person = (userId: string) => data?.people.find(p => p.id === userId);
@@ -66,6 +75,13 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
   const teamOf = (userId: string) => data?.teams.find(t => activeMembers(t).some(m => m.userId === userId)) ?? null;
   const openDept = open?.kind === 'dept' ? departments.find(d => d.id === open.id) ?? null : null;
   const openTeam = open?.kind === 'team' ? data?.teams.find(t => t.id === open.id) ?? null : null;
+  const teamScope = workspace.state?.teamScopes?.find(scope => scope.teamId === openTeam?.id);
+  const scopeConditions = (teamScope?.conditions ?? []).map(condition => [
+    condition.customerId ? workspace.state?.customers.find(customer => customer.id === condition.customerId)?.name ?? uiText('指定客户') : '',
+    condition.line === 'fabric' ? uiText('面料') : condition.line === 'garment' ? uiText('成衣') : '',
+    condition.season ?? '',
+    condition.supplierId ? workspace.state?.market?.suppliers.find(supplier => supplier.id === condition.supplierId)?.name ?? uiText('指定供应商/工厂') : '',
+  ].filter(Boolean).join(' · '));
   const openPerson = open?.kind === 'person' ? person(open.id) ?? null : null;
   const employeeOf = (userId: string) => data?.employees.find(e => e.userId === userId) ?? null;
 
@@ -178,6 +194,13 @@ export function HrOrganization({ part }: { part: 'org' | 'people' }) {
       {openTeam && <>
         {operationError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(operationError)}</Banner>}
         <KeyValue items={[{ label: '所属部门', value: openTeam.department ?? '—' }, { label: '业务属性', value: <AttributePills values={openTeam.businessAttributes} /> }, { label: '说明', value: openTeam.description || '—' }]} />
+        {canWrite && workspace.workspace?.access?.companyLibrary && <>
+          <CardHeader title={uiText('业务范围')} tools={<Button size="sm" variant="quiet" onClick={() => go('company-settings', openTeam.id, { section: 'teams' })}>{uiText('配置业务范围')}</Button>} />
+          {teamScope ? <KeyValue items={[
+            { label: '范围条件', value: scopeConditions.length ? <div className="mist-col">{scopeConditions.map((label, index) => <span key={index}>{label}</span>)}</div> : '无' },
+            { label: '手选业务', value: ui`${teamScope.picks.length} 笔` }, { label: '排除业务', value: ui`${teamScope.exclusions.length} 笔` },
+          ]} /> : <p className="mist-note">{uiText('未设置范围')}</p>}
+        </>}
         <CardHeader title={uiText("成员")} sub={ui`${openTeam.memberCount} 人`} />
         {activeMembers(openTeam).length ? activeMembers(openTeam).map(m => { const p = person(m.userId); return <p key={m.id} className="mist-row"><b>{p?.displayName ?? m.userId}</b><span className="mist-note">{p?.email}</span>{canWrite && <Button size="sm" variant="quiet" disabled={busy} onClick={() => setConfirm({ kind: 'remove', team: openTeam, person: p ?? { id: m.userId, displayName: m.userId } })}>{uiText("移出")}</Button>}</p>; }) : <EmptyState compact title={uiText("还没有成员")} />}
         {canWrite && <div className="mist-section"><Field label={uiText("加入成员")}>

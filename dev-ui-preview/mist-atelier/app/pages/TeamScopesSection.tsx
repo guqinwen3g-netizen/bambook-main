@@ -17,7 +17,7 @@ export const countText = (counts: Record<TeamScopeNodeKind, number> | null | und
 const blank = (): Condition => ({ customerId: '', line: '', season: '', supplierId: '' });
 const compact = (c: Condition) => Object.fromEntries(Object.entries(c).filter(([, value]) => value.trim())) as Partial<Condition>;
 
-export function TeamScopesSection({ canEdit }: { canEdit: boolean }) {
+export function TeamScopesSection({ canEdit, initialTeamId, onReturnToTeam }: { canEdit: boolean; initialTeamId?: string; onReturnToTeam?: (teamId: string) => void }) {
   const workspace = useMistWorkspace(), state = workspace.state, id = workspace.workspace?.id;
   const [rows, setRows] = React.useState<Row[] | null>(null), [error, setError] = React.useState(''), [teamId, setTeamId] = React.useState('');
   const [conditions, setConditions] = React.useState<Condition[]>([]), [picks, setPicks] = React.useState<TeamScopeRef[]>([]), [exclusions, setExclusions] = React.useState<TeamScopeRef[]>([]), [note, setNote] = React.useState('');
@@ -34,6 +34,14 @@ export function TeamScopesSection({ canEdit }: { canEdit: boolean }) {
     setConditions((row.scope?.conditions ?? []).map(c => ({ customerId: c.customerId ?? '', line: c.line ?? '', season: c.season ?? '', supplierId: c.supplierId ?? '' })));
     setPicks(row.scope?.picks ?? []); setExclusions(row.scope?.exclusions ?? []);
   };
+  const linkedTeam = React.useRef('');
+  React.useEffect(() => {
+    const key = initialTeamId && id ? `${id}:${initialTeamId}` : '';
+    if (!key) { linkedTeam.current = ''; return; }
+    if (linkedTeam.current === key || !rows) return;
+    const row = rows.find(item => item.id === initialTeamId);
+    if (row) { linkedTeam.current = key; edit(row); }
+  }, [initialTeamId, id, rows]);
   const input = React.useMemo(() => ({ teamId, conditions: conditions.map(compact), picks, exclusions }), [teamId, conditions, picks, exclusions]);
   // 即时预览：停顿 300ms 后在服务端最新完整数据上匹配（不写库）。
   React.useEffect(() => {
@@ -41,7 +49,7 @@ export function TeamScopesSection({ canEdit }: { canEdit: boolean }) {
     const timer = setTimeout(() => { void mistApiRequest(`/api/mist/workspaces/${encodeURIComponent(id)}/team-scopes/preview`, { method: 'POST', body: JSON.stringify(input) })
       .then(data => { if (live) { setPreview(data.preview); setPreviewError(''); } }).catch(failure => { if (live) { setPreview(null); setPreviewError(failure instanceof Error ? failure.message : '预览失败'); } }); }, 300);
     return () => { live = false; clearTimeout(timer); };
-  }, [id, input]);
+  }, [id, input, workspace.workspace?.revision]);
   if (!state) return null;
   const customers = [{ value: '', label: '不限客户' }, ...state.customers.map(c => ({ value: c.id, label: `${c.code ? c.code + ' · ' : ''}${c.name}` }))];
   const suppliers = [{ value: '', label: '不限供应商/工厂' }, ...(state.market?.suppliers ?? []).map(s => ({ value: s.id, label: `${s.code} · ${s.name}` }))];
@@ -66,6 +74,7 @@ export function TeamScopesSection({ canEdit }: { canEdit: boolean }) {
     finally { setBusy(false); }
   };
   return <>
+    {onReturnToTeam && team && <Button variant="quiet" size="sm" onClick={() => onReturnToTeam(team.id)}>{uiText('返回小组')}</Button>}
     <FormSection title={uiText('小组范围')}>
       {rows === null && <Skeleton height={64} />}
       {error && <Banner tone="bad" title={uiText(error)} actions={<Button size="sm" onClick={() => void load()}>{uiText('重新读取')}</Button>} />}
