@@ -136,6 +136,13 @@ describe('development tab return',()=>{
 });
 describe('fabric exact version detail',()=>{
  const useFabric=()=>{bridge.current.state.devs=[{...record,img:'clay',values:{...record.values,domain:'fabric',category:'斜纹',sizeBase:'',sampleForm:'米样',sampleUnit:'米'}}];bridge.current.state.versions[0]={...bridge.current.state.versions[0],qc:null,returnedAt:null,sample:'',size:''};};
+ it.each([false,true])('shows workbench measurements on the exact fabric version alongside optional fabric facts (%s)',async withFabricFacts=>{
+  useFabric();bridge.current.state.versions[0].qc={result:'reject',reviewer:'面料QC',reviewedAt:'2026-10-29T00:00:00Z',report:'FQ-001',opinion:'经向超差',measurements:[{point:'水洗尺寸变化率·经向（%）',standard:0,actual:4.2,tolerance:3}],...(withFabricFacts?{fabricMeasurements:[{property:'克重',actual:141,unit:'g/m²'}]}:{})};
+  await mount();const panel=host.querySelector('#mist-dev-qc')!;
+  expect(panel.textContent).toContain('水洗尺寸变化率·经向（%）');expect(panel.querySelector('.mist-measure')?.textContent).toContain('4.2');expect(panel.querySelector('.mist-measure')?.textContent).not.toContain('cm');expect(panel.textContent).not.toContain('暂无实测记录');
+  if(withFabricFacts)expect(panel.textContent).toContain('141 g/m²');
+  await click('R2-B-1');expect(panel.textContent).not.toContain('水洗尺寸变化率');expect(panel.textContent).toContain('暂无实测记录');
+ });
  it('records an actual decimal metre sample and shows no garment size or stock photo',async()=>{
   useFabric();await mount();expect(host.textContent).not.toContain('尺码');expect(host.textContent).toContain('暂无图片');expect(host.querySelector('.mist-thumb img')).toBeNull();await click('登记返样');await fill('实物编号','QA-FABRIC-REAL');await fill('数量 / 长度','1.25');await fill('实际位置','样品架A');await click('保存返样');
   expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'development.recordSample',payload:expect.objectContaining({devId:'dev-a',versionId:'va',quantity:1.25,form:'米样',unit:'米',location:'样品架A'})}));
