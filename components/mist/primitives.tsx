@@ -147,7 +147,7 @@ export function Avatar({ name, src, tone, size, identityKey }: { name: string; s
   const counter = name.startsWith('+');
   const color = AVATAR_COLORS.find(color => color.id === (parseInitialsIdentity(source) ?? defaultAvatarColor(person?.id ?? identityKey ?? name)))!;
   return (
-    <span className="mist-avatar" data-tone={toneAttr(tone)} data-counter={counter || undefined} data-size={size && size !== 'md' ? size : undefined} title={uiText(name)} style={counter ? undefined : {backgroundColor:color.value,color:'var(--mist-avatar-initials-ink)'}}>
+    <span className="mist-avatar" data-tone={toneAttr(tone)} data-counter={counter || undefined} data-size={size && size !== 'md' ? size : undefined} title={uiText(name)} style={counter ? undefined : {backgroundColor:color.value,color:color.ink}}>
       {shown && failedSrc!==shown ? <img onError={()=>setFailedSrc(shown)} src={shown} alt="" /> : counter ? name : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
     </span>
   );

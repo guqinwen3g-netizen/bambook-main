@@ -23,8 +23,10 @@ describe('versioned avatar choices',()=>{
   expect(isAvatarIdentity('dicebear:v1:glass:c205_v6_12_12_abc-0:animated')).toBe(true);
   expect(isAvatarIdentity('javascript:alert(1)')).toBe(false);
  });
- it('keeps white initials readable on every default color',()=>{
+ it('keeps tonal initials readable on every mist background',()=>{
   const linear=(x:number)=>x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
-  for(const {value} of AVATAR_COLORS){const rgb=[1,3,5].map(i=>linear(parseInt(value.slice(i,i+2),16)/255));const l=.2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];expect(1.05/(l+.05),value).toBeGreaterThanOrEqual(4.5);}
+  const luminance=(hex:string)=>{const rgb=[1,3,5].map(i=>linear(parseInt(hex.slice(i,i+2),16)/255));return .2126*rgb[0]+.7152*rgb[1]+.0722*rgb[2];};
+  for(const {value,ink} of AVATAR_COLORS){const bg=luminance(value),fg=luminance(ink);expect((Math.max(bg,fg)+.05)/(Math.min(bg,fg)+.05),value).toBeGreaterThanOrEqual(4.5);}
+
  });
 });
