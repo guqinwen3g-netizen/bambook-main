@@ -1,15 +1,15 @@
 import React from 'react';
 import { ImageUp, RotateCw, Undo2 } from 'lucide-react';
-import { Avatar, Banner, Button, Dialog, Icon, Tabs, useAvatarSource, useToast } from '../../../../components/mist';
+import { Avatar, Banner, Button, Dialog, Icon, Tabs, useToast } from '../../../../components/mist';
 import { updateMyProfile } from '../../../../services/authService';
 import { uiText } from '../../../../services/interfaceLanguage';
-import { avatarIdentity, defaultPersonAvatar, initialsIdentity, parseAvatarIdentity, parseInitialsIdentity, parsePersonIdentity, personIdentity, type AvatarColor, type PersonAvatar } from '../../../../lib/avatarIdentity';
+import { initialsIdentity, parseAvatarIdentity, parseInitialsIdentity, parsePersonIdentity, type AvatarColor } from '../../../../lib/avatarIdentity';
 import { useMistSession } from '../runtime/auth';
-import { InitialsChoices, PersonChoices, PatternChoices } from './AvatarChoices';
+import { InitialsChoices } from './AvatarChoices';
+import { AvatarExplorer } from './AvatarExplorer';
 const MAX_AVATAR_CHARS=700_000, CROP_PREVIEW=256, CROP_OUTPUT=256;
-type Mode='initials'|'person'|'pattern'|'photo';
-const modeOf=(value?:string|null):Mode=>parsePersonIdentity(value)?'person':parseAvatarIdentity(value)?'pattern':!value||parseInitialsIdentity(value)?'initials':'photo';
-const randomSeed=()=>globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+type Mode='initials'|'pattern'|'photo';
+const modeOf=(value?:string|null):Mode=>parsePersonIdentity(value)?'pattern':parseAvatarIdentity(value)?'pattern':!value||parseInitialsIdentity(value)?'initials':'photo';
 type CropDraft = { src: string; width: number; height: number; scale: number; rotation: number; offset: { x: number; y: number } };
 const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => { const img = new window.Image(); img.onload = () => resolve(img); img.onerror = () => reject(new Error('图片格式无法识别')); img.src = src; });
 const readFile = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(new Error('读取头像失败')); reader.onload = () => resolve(String(reader.result || '')); reader.readAsDataURL(file); });
@@ -38,30 +38,23 @@ function clampCrop(d:CropDraft,offset=d.offset) {
 export function AvatarStudio({open,onClose}:{open:boolean;onClose:()=>void}) {
   const session=useMistSession(),toast=useToast(),user=session.user;
   const [mode,setMode]=React.useState<Mode>('initials');
-  const [color,setColor]=React.useState<AvatarColor|null>(null),[person,setPerson]=React.useState<PersonAvatar>(()=>defaultPersonAvatar());
-  const [pattern,setPattern]=React.useState(''),[photo,setPhoto]=React.useState<string|null>(null);
+  const [color,setColor]=React.useState<AvatarColor|null>(null),[photo,setPhoto]=React.useState<string|null>(null);
   const [busy,setBusy]=React.useState(false),[photoLoading,setPhotoLoading]=React.useState(false),[error,setError]=React.useState(''),[crop,setCrop]=React.useState<CropDraft|null>(null);
-  const lastPreview=React.useRef<string|undefined>(undefined);
   const file=React.useRef<HTMLInputElement>(null),working=React.useRef(false),loadRevision=React.useRef(0),scope=React.useRef(user?.id);scope.current=user?.id;
   const drag=React.useRef<{id:number;x:number;y:number;start:{x:number;y:number}}|null>(null);
   const reset=()=>{
-    loadRevision.current++;lastPreview.current=undefined;setPhotoLoading(false);
-    const value=user?.avatarUrl;setMode(modeOf(value));setColor(parseInitialsIdentity(value));setPerson(parsePersonIdentity(value)??defaultPersonAvatar(user?.id));
-    setPattern(parseAvatarIdentity(value)?value!:avatarIdentity('glass',`c205_v6_${randomSeed()}`,false));setPhoto(modeOf(value)==='photo'?value!:null);setCrop(null);setError('');
+    loadRevision.current++;setPhotoLoading(false);
+    const current=user?.avatarUrl;setMode(modeOf(current));setColor(parseInitialsIdentity(current));
+    setPhoto(modeOf(current)==='photo'?current!:null);setCrop(null);setError('');
   };
   React.useEffect(()=>{if(open)reset();else loadRevision.current++;return()=>{loadRevision.current++;};},[open,user?.id]);
-  const value=mode==='initials'?(color?initialsIdentity(color):null):mode==='person'?personIdentity(person):mode==='pattern'?pattern:photo;
-  const preview=useAvatarSource(value,()=>setError('头像资源加载失败，请刷新页面后重试'));
-  if(preview)lastPreview.current=preview;
-  const displayed=mode==='person'||mode==='pattern'?preview??lastPreview.current??value:value;
-  const ready=mode==='person'||mode==='pattern'?!!preview:mode==='photo'?!!(photo||crop)&&!photoLoading:true;
-  const [credit,setCredit]=React.useState<{creator:string;url:string}|null>(null);
-  React.useEffect(()=>{let live=true;setCredit(null);const preset=parseAvatarIdentity(value);if(preset)void import('../../../../lib/avatarPresets').then(mod=>{if(live)setCredit(mod.avatarCredit(preset.family));}).catch(()=>{});return()=>{live=false;};},[value]);
-  const save=async()=>{
+  const value=mode==='initials'?(color?initialsIdentity(color):null):mode==='photo'?photo:null;
+  const ready=mode==='photo'?!!(photo||crop)&&!photoLoading:true;
+  const save=async(chosen?:string)=>{
     if(working.current||!user||!ready)return;
     working.current=true;setBusy(true);setError('');const id=user.id;
     try{
-      const next=mode==='photo'&&crop?await renderCircularAvatar(crop):value;
+      const next=chosen ?? (mode==='photo'&&crop?await renderCircularAvatar(crop):value);
       if(next&&next.length>MAX_AVATAR_CHARS)throw Error('头像图片太大，请缩小或换一张图片');
       await updateMyProfile({avatarUrl:next});
       if(scope.current===id){toast('头像已更新');onClose();}
@@ -82,17 +75,17 @@ export function AvatarStudio({open,onClose}:{open:boolean;onClose:()=>void}) {
     try{const src=await readFile(selected);if(loadRevision.current!==revision)return;await loadPhoto(src);}catch(failure){if(loadRevision.current===revision){setPhotoLoading(false);setError(explain(failure,'图片读取失败'));}}
   };
   if(!user)return null;
-  const name=user.displayName||user.email,dirty=!!(mode==='photo'&&crop)||value!==(user.avatarUrl??null);
+  const name=user.displayName||user.email,dirty=mode==='pattern'?false:!!(mode==='photo'&&crop)||value!==(user.avatarUrl??null);
   const [rw,rh]=crop?rotatedSize(crop):[1,1],previewScale=CROP_PREVIEW/Math.min(rw,rh);
   const adjustCrop=(next:CropDraft)=>setCrop(clampCrop(next));
   return <>
     <input ref={file} type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden aria-label={uiText('选择头像图片')} onChange={event=>{void pick(event.target.files?.[0]);event.target.value='';}}/>
     <Dialog open={open} onClose={()=>!busy&&onClose()} title={uiText('编辑头像')} width={940}
-      footer={<><Button variant="quiet" icon={Undo2} disabled={busy||!dirty} onClick={reset}>{uiText('还原')}</Button><span className="mist-spacer"/><Button disabled={busy} onClick={onClose}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy||!dirty||!ready} onClick={()=>void save()}>{uiText('保存头像')}</Button></>}>
+      footer={<>{mode!=='pattern'&&<Button variant="quiet" icon={Undo2} disabled={busy||!dirty} onClick={reset}>{uiText('还原')}</Button>}<span className="mist-spacer"/><Button disabled={busy} onClick={onClose}>{uiText('取消')}</Button>{mode!=='pattern'&&<Button variant="primary" loading={busy} disabled={busy||!dirty||!ready} onClick={()=>void save()}>{uiText('保存头像')}</Button>}</>}>
       <div className="mist-avatar-studio">
         {error&&<Banner tone="bad" title={uiText(error)}/>}
-        <Tabs<Mode> value={mode} onChange={next=>{if(!busy){setMode(next);setError('');}}} options={[{value:'initials',label:'姓名'},{value:'person',label:'人物'},{value:'pattern',label:'图案'},{value:'photo',label:'照片'}]}/>
-        {mode==='photo'?<div className="mist-avatar-photo-panel" onDragOver={event=>event.preventDefault()} onDrop={event=>{event.preventDefault();void pick(event.dataTransfer.files?.[0]);}}>
+        <Tabs<Mode> value={mode} onChange={next=>{if(!busy){setMode(next);setError('');}}} options={[{value:'initials',label:'姓名'},{value:'pattern',label:'图案'},{value:'photo',label:'照片'}]}/>
+        {mode==='pattern'?<div className="mist-avatar-pattern-view"><AvatarExplorer value={user.avatarUrl} disabled={busy} onSelect={identity=>void save(identity)}/></div>:mode==='photo'?<div className="mist-avatar-photo-panel" onDragOver={event=>event.preventDefault()} onDrop={event=>{event.preventDefault();void pick(event.dataTransfer.files?.[0]);}}>
           {!crop&&!photo?<button type="button" className="mist-avatar-upload" disabled={busy||photoLoading} onClick={()=>file.current?.click()}><Icon icon={ImageUp}/><strong>{uiText(photoLoading?'正在读取照片…':'选择或拖入照片')}</strong><span>{uiText('JPG、PNG、WebP、GIF · 12MB 以内')}</span></button>:<>
             <div className="mist-avatar-photo-toolbar"><span className="mist-avatar-control-label">{uiText(crop?'调整裁剪':'照片预览')}</span><Button size="sm" variant="quiet" icon={ImageUp} disabled={busy||photoLoading} onClick={()=>file.current?.click()}>{uiText('更换照片')}</Button></div>
             {crop?<><div className="mist-avatar-crop" tabIndex={0} role="group" aria-label={uiText('拖动或使用方向键调整照片位置')} style={{width:CROP_PREVIEW,height:CROP_PREVIEW}}
@@ -103,15 +96,11 @@ export function AvatarStudio({open,onClose}:{open:boolean;onClose:()=>void}) {
           </>}
         </div>:<div className="mist-avatar-editor" data-mode={mode}>
           <div className="mist-avatar-editor-preview" aria-busy={!ready}>
-            <div className="mist-avatar-stage-card"><Avatar name={name} identityKey={user.id} src={displayed} size="xl"/></div>
-            <div className="mist-avatar-preview-identity"><Avatar name={name} identityKey={user.id} src={displayed} size="xs"/><span>{name}</span></div>
-            {mode==='person'&&<a className="mist-avatar-credit" href="https://www.dicebear.com/styles/toon-head/" target="_blank" rel="noreferrer">ToonHead · Johan Melin · CC BY 4.0</a>}
-            {mode==='pattern'&&credit&&<a className="mist-avatar-credit" href={credit.url} target="_blank" rel="noreferrer">{credit.creator} · CC BY 4.0</a>}
+            <div className="mist-avatar-stage-card"><Avatar name={name} identityKey={user.id} src={value} size="xl"/></div>
+            <div className="mist-avatar-preview-identity"><Avatar name={name} identityKey={user.id} src={value} size="xs"/><span>{name}</span></div>
           </div>
           <div className="mist-avatar-editor-controls">
             {mode==='initials'&&<InitialsChoices name={name} identityKey={user.id} value={color} disabled={busy} onChange={setColor}/>}
-            {mode==='person'&&<PersonChoices value={person} onChange={setPerson} disabled={busy}/>}
-            {mode==='pattern'&&<PatternChoices value={pattern} onChange={setPattern} disabled={busy}/>}
           </div>
         </div>}
       </div>

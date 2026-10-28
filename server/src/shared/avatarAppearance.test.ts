@@ -19,6 +19,24 @@ describe('versioned avatar choices',()=>{
   for(const color of AVATAR_COLORS)expect(parseInitialsIdentity(initialsIdentity(color.id))).toBe(color.id);
   expect(isAvatarIdentity('initials:v1:unknown')).toBe(false);
  });
+ it('spreads ten muted background colors evenly around the perceptual hue wheel',()=>{
+  const linear=(v:number)=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4;
+  const perceptual=(hex:string)=>{const [r,g,b]=[1,3,5].map(i=>linear(parseInt(hex.slice(i,i+2),16)/255));
+    const l=Math.cbrt(.4122214708*r+.5363325363*g+.0514459929*b),m=Math.cbrt(.2119034982*r+.6806995451*g+.1073969566*b),s=Math.cbrt(.0883024619*r+.2817188376*g+.6299787005*b);
+    const a=1.9779984951*l-2.428592205*m+.4505937099*s,bb=.0259040371*l+.7827717662*m-.808675766*s;
+    return {hue:(Math.atan2(bb,a)*180/Math.PI+360)%360, lightness:.2104542553*l+.793617785*m-.0040720468*s, chroma:Math.hypot(a,bb)};};
+  const colors=AVATAR_COLORS.map(color=>perceptual(color.value));
+  const angles=colors.map(color=>color.hue).sort((a,b)=>a-b);
+  expect(Math.max(...colors.map(color=>color.lightness))-Math.min(...colors.map(color=>color.lightness))).toBeLessThan(.008);
+  expect(Math.max(...colors.map(color=>color.chroma))-Math.min(...colors.map(color=>color.chroma))).toBeLessThan(.008);
+  expect(angles).toHaveLength(10);
+  for(let i=0;i<angles.length;i++){const next=angles[(i+1)%angles.length]+(i===angles.length-1?360:0);expect(next-angles[i]).toBeGreaterThan(32);expect(next-angles[i]).toBeLessThan(40);}
+ });
+ it('distributes representative account IDs across all ten colors',()=>{
+  const counts=new Map(AVATAR_COLORS.map(color=>[color.id,0]));
+  for(let index=0;index<10000;index++){const id=defaultAvatarColor(`user-${index}`);counts.set(id,counts.get(id)!+1);}
+  for(const count of counts.values()){expect(count).toBeGreaterThan(850);expect(count).toBeLessThan(1150);}
+ });
  it('keeps legacy generated avatars valid',()=>{
   expect(isAvatarIdentity('dicebear:v1:glass:c205_v6_12_12_abc-0:animated')).toBe(true);
   expect(isAvatarIdentity('javascript:alert(1)')).toBe(false);
