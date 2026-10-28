@@ -114,6 +114,11 @@ describe('管理后台 · 账号', () => {
     await click('创建账号');
     expect(bridge.calls.some(c => c.method === 'POST')).toBe(false);
     expect(document.querySelector('.mist-dialog')?.textContent).toContain('全公司业务与审批权限');
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+    expect(document.querySelector('.mist-dialog')?.textContent).toContain('wang@example.invalid');
+    await click('取消');
+    expect(labelled('姓名').value).toBe('王宁'); expect(labelled('岗位').value).toBe('role-super-admin');
+    await click('创建账号');
     await click('确认指定');
     expect(bridge.calls.find(c => c.method === 'POST')?.body).toMatchObject({ appointInitialGeneralManager: true, roles: ['role-super-admin'] });
     expect(bridge.changeMember).not.toHaveBeenCalled();
