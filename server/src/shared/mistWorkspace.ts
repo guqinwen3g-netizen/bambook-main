@@ -245,7 +245,7 @@ export type MistFinanceReversal = { id: string; kind: 'allocation' | 'payment'; 
   allocation?: MistAllocation; receiptId?: string; invoiceId?: string; voucherId?: string };
 export type MistCustomer = { id: string; name: string; code: string; country: string; city: string; industry: string; owner: string; /** 同 MistOrder.ownerId。 */ ownerId: string; grade: string; currency: string; terms: string; incoterm: string; categories: string; creditLimit: number; since: string };
 export type MistContact = { id: string; customerId: string; name: string; role: string; email: string; phone: string; tone: MistTone };
-export type MistEvent = { id: string; entityType: string; entityId: string; actor: string; at: string; text: string; fileIds: string[] };
+export type MistEvent = { id: string; entityType: string; entityId: string; actor: string; at: string; text: string; fileIds: string[]; businessRef?: { kind: 'opportunity' | 'followUp'; id: string } };
 export type MistTarget = { view: string; id?: string; section?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string };
 /**
  * 工作事项必须写明由谁处理：assigneeIds 为指定账号；permission 为「持有该权限的任何人」（岗位事项，如财务开票、后勤接手）。

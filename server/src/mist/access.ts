@@ -80,7 +80,7 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
   if (!hasScope(actor, 'hr:write')) {
     delete next.teamScopes;
-    next.events = (state.events || []).filter(event => event.entityType !== 'teamScope');
+    next.events = (next.events || []).filter(event => event.entityType !== 'teamScope');
   }
   if (hidden.length) {
     const blank = empty();

@@ -244,6 +244,15 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
     return !path || visible.get(path)!.has(target.id);
   };
   next.events = (state.events ?? []).filter(event => {
+    if (event.entityType === 'customer') {
+      if (event.businessRef) {
+        const path = event.businessRef.kind === 'opportunity' ? 'crm.opportunities' : event.businessRef.kind === 'followUp' ? 'crm.followUps' : undefined;
+        return !!path && hasAny(event.businessRef.id, [path]) && get(state, path).some(row => row.id === event.businessRef!.id && row.customerId === event.entityId);
+      }
+      // Older customer-level activity can contain private opportunity/follow-up details.
+      // Without a concrete source, shared archive access does not prove access to that text.
+      return (state.customers ?? []).some(customer => customer.id === event.entityId && scope.userIds.includes(customer.ownerId));
+    }
     if (event.entityType === 'shipment' && partialShipmentIds.has(event.entityId)) return false;
     if (event.entityType === 'finance') return safeReceiptIds.has(event.entityId) || hasAny(event.entityId, financePaths);
     if (event.entityType === 'payment') return hasAny(event.entityId, ['payments']);
