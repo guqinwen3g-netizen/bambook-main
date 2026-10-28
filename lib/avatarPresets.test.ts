@@ -13,7 +13,7 @@ it('separates simple character body hues from their backgrounds without changing
   const colors=Array.from(new Set(svg.match(/#[0-9a-f]{6}\b/g)||[]));
   const body=colors.filter(hex=>![color.value.toLowerCase(),'#25313a','#fffdf8'].includes(hex));
   expect(body).toHaveLength(1);
-  expect(Math.abs(((hue(body[0])-hue(color.value)+540)%360)-180)).toBeGreaterThan(45);
+  if(!['pearl','charcoal'].includes(color.id))expect(Math.abs(((hue(body[0])-hue(color.value)+540)%360)-180)).toBeGreaterThan(45);
   expect(svg).toContain('#25313a');
   expect(svg.replace(/#[0-9a-f]{6}\b/g,'#color')).toBe(old.replace(/#[0-9a-f]{6}\b/g,'#color'));
  }
@@ -85,7 +85,7 @@ it('assigns color roles according to the drawing rather than randomizing every l
 
 it('uses a coordinated artwork palette with the selected background in new pattern previews',async()=>{
  const {AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
- const accents:Record<string,string[]>={blue:['#4c7098','#c87972','#6d8f80'],indigo:['#7166a0','#c78070','#6d907f'],plum:['#8e6385','#69948d','#c58a68'],rose:['#a36070','#608d88','#ad805b'],clay:['#a86756','#5d8f8b','#a78550'],ochre:['#927046','#628c88','#a86f76'],sage:['#788149','#ad7467','#658c95'],forest:['#5b8667','#ad7772','#7c7fa9'],teal:['#558c83','#ba7a70','#8f78a0'],slate:['#5e8798','#c78372','#87956a']};
+ const accents:Record<string,string[]>={blue:['#4c7098','#c87972','#6d8f80'],indigo:['#7166a0','#c78070','#6d907f'],plum:['#8e6385','#69948d','#c58a68'],rose:['#a36070','#608d88','#ad805b'],clay:['#a86756','#5d8f8b','#a78550'],ochre:['#927046','#628c88','#a86f76'],sage:['#788149','#ad7467','#658c95'],forest:['#5b8667','#ad7772','#7c7fa9'],teal:['#558c83','#ba7a70','#8f78a0'],slate:['#5e8798','#c78372','#87956a'],pearl:['#718392','#9d8172','#7b9283'],charcoal:['#91adb0','#d1ae91','#b5a0c7']};
  for(const color of AVATAR_COLORS){
   const svg=decodeURIComponent(generateAvatar('weave',`p${color.id}_v10_12_12_shared-0`,false).split(',')[1]);
   expect(svg).toContain(`data-bambook-background="${color.id}"`);
@@ -105,7 +105,7 @@ it('writes the exact shared palette background into every explored style while r
 });
 
 it('retains the selected background and introduces distinct artwork colors for new patterns',async()=>{
- const {AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
+ const {CHROMATIC_AVATAR_COLORS:AVATAR_COLORS}=await import('../server/src/shared/avatarAppearance');
  for(const color of AVATAR_COLORS){let changed=0;for(const family of ['glyphs','glass','waves','weave','slice']){
   const svg=decodeURIComponent(generateAvatar(family,`p${color.id}_v9_12_12_shared-0`,false).split(',')[1]);
   expect(svg).toContain(`data-bambook-background="${color.id}"`);

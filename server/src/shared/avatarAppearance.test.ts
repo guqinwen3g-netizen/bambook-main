@@ -1,5 +1,5 @@
 import { describe,expect,it } from 'vitest';
-import { AVATAR_COLORS, defaultAvatarColor, defaultPersonAvatar, initialsIdentity, isAvatarIdentity, parseInitialsIdentity, parsePersonIdentity, personIdentity } from './avatarAppearance';
+import { AVATAR_COLORS, CHROMATIC_AVATAR_COLORS, defaultAvatarColor, defaultPersonAvatar, initialsIdentity, isAvatarIdentity, parseInitialsIdentity, parsePersonIdentity, personIdentity } from './avatarAppearance';
 
 describe('versioned avatar choices',()=>{
  it('retains each editable part through a save/reload round trip',()=>{
@@ -25,7 +25,7 @@ describe('versioned avatar choices',()=>{
     const l=Math.cbrt(.4122214708*r+.5363325363*g+.0514459929*b),m=Math.cbrt(.2119034982*r+.6806995451*g+.1073969566*b),s=Math.cbrt(.0883024619*r+.2817188376*g+.6299787005*b);
     const a=1.9779984951*l-2.428592205*m+.4505937099*s,bb=.0259040371*l+.7827717662*m-.808675766*s;
     return {hue:(Math.atan2(bb,a)*180/Math.PI+360)%360, lightness:.2104542553*l+.793617785*m-.0040720468*s, chroma:Math.hypot(a,bb)};};
-  const colors=AVATAR_COLORS.map(color=>perceptual(color.value));
+  const colors=CHROMATIC_AVATAR_COLORS.map(color=>perceptual(color.value));
   const angles=colors.map(color=>color.hue).sort((a,b)=>a-b);
   expect(Math.max(...colors.map(color=>color.lightness))-Math.min(...colors.map(color=>color.lightness))).toBeLessThan(.008);
   expect(Math.max(...colors.map(color=>color.chroma))-Math.min(...colors.map(color=>color.chroma))).toBeLessThan(.008);
@@ -33,7 +33,7 @@ describe('versioned avatar choices',()=>{
   for(let i=0;i<angles.length;i++){const next=angles[(i+1)%angles.length]+(i===angles.length-1?360:0);expect(next-angles[i]).toBeGreaterThan(32);expect(next-angles[i]).toBeLessThan(40);}
  });
  it('distributes representative account IDs across all ten colors',()=>{
-  const counts=new Map(AVATAR_COLORS.map(color=>[color.id,0]));
+  const counts=new Map(CHROMATIC_AVATAR_COLORS.map(color=>[color.id,0]));
   for(let index=0;index<10000;index++){const id=defaultAvatarColor(`user-${index}`);counts.set(id,counts.get(id)!+1);}
   for(const count of counts.values()){expect(count).toBeGreaterThan(850);expect(count).toBeLessThan(1150);}
  });
