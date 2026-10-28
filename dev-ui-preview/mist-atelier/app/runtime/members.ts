@@ -1,13 +1,15 @@
-/** 负责人 / 经手人选择：只列本公司的所有者与被授权成员，按账号 ID 选择（同名账号以编号区分）。服务端仍逐项校验。 */
+/** 负责人 / 经手人选择：公司库以当前公司名册为准；本机旧空间兼容所有者与被授权成员。服务端仍按账号 ID 校验。 */
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import { accountOwnedObjects, type MistBusinessGroup } from '../../../../server/src/shared/mistAccounts';
 
 export type MistMemberOption = { id: string; name: string; groups: MistBusinessGroup[]; owner: boolean };
-type Envelope = { ownerId?: string } | null | undefined;
+type Envelope = { ownerId?: string; access?: { companyLibrary?: boolean } } | null | undefined;
 type Viewer = { id?: string; displayName?: string } | null | undefined;
 
-/** 所有者显示名：本人即当前账号；否则取业务组登记或已有记录里的快照名，最后退回账号编号。 */
+/** 当前名册优先于登录、业务组及历史单据快照。库创建人的姓名同样来自名册。 */
 function ownerName(state: MistState, ownerId: string, viewer: Viewer): string {
+  const fromRoster = state.members?.find(member => member.userId === ownerId)?.name;
+  if (fromRoster?.trim()) return fromRoster;
   if (viewer?.id === ownerId && viewer.displayName) return viewer.displayName;
   const fromGroups = state.memberGroups?.find(g => g.userId === ownerId)?.name;
   if (fromGroups) return fromGroups;
@@ -18,7 +20,9 @@ export function workspaceMembers(envelope: Envelope, state: MistState | null | u
   if (!state) return [];
   const groups = (id: string) => state.memberGroups?.find(g => g.userId === id)?.groups ?? [];
   const out: MistMemberOption[] = [];
-  if (envelope?.ownerId) out.push({ id: envelope.ownerId, name: ownerName(state, envelope.ownerId, viewer), groups: groups(envelope.ownerId), owner: true });
+  const company = envelope?.access?.companyLibrary === true;
+  // 公司库的创建人没有额外成员身份；已不在公司名册时不能被前端重新加入。
+  if (envelope?.ownerId && (!company || state.members?.some(member => member.userId === envelope.ownerId))) out.push({ id: envelope.ownerId, name: ownerName(state, envelope.ownerId, viewer), groups: groups(envelope.ownerId), owner: !company });
   for (const m of state.members ?? []) if (!out.some(o => o.id === m.userId)) out.push({ id: m.userId, name: m.name, groups: groups(m.userId), owner: false });
   return out;
 }
