@@ -1,5 +1,5 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
-import {businessNow} from '../runtime/businessClock';
+import {businessDate,businessNow,businessToday} from '../runtime/businessClock';
 /** T6 收款核销：保留原 Mist 双栏，对账结果由公司共享数据保存。 */
 import { AccessHiddenNotice } from './AccessHiddenNotice';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
@@ -52,7 +52,7 @@ export function parseMistReceiptCsv(text: string): ImportedReceipt[] {
     return{date,payer:get('payer'),amount,currency:get('currency').toUpperCase(),ref:get('ref')};
   });
 }
-function financeDay(date:Date){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;}
+function financeDay(date:Date){return businessDate(date);}
 export function financeAllocationAmount(input:string,maximum:number):number|null { if(!/^\d+(?:\.\d{1,2})?$/.test(input.trim()))return null;const amount=Number(input);return Number.isFinite(amount)&&amount>0&&Math.round(amount*100)<=Math.round(maximum*100)?amount:null; }
 const cashTotal=(values:number[])=>values.reduce((sum,value)=>sum+Math.round(value*100),0)/100;
 
@@ -81,7 +81,7 @@ export function FinancePage() {
   const [paymentOpen, setPaymentOpen] = useRouteDraft(false);
   const [reversal,setReversal]=useRouteDraft<{kind:'allocation'|'payment';id:string;title:string}|null>(null);
   const [reversalReason,setReversalReason]=useRouteDraft('');
-  const [payment, setPayment] = useRouteDraft({ date: businessNow().toISOString().slice(0, 10), payee: '', amount: '', currency: 'USD', ref: '', accountId: '' });
+  const [payment, setPayment] = useRouteDraft({ date: businessToday(), payee: '', amount: '', currency: 'USD', ref: '', accountId: '' });
   const fileInput = React.useRef<HTMLInputElement>(null);
   const [fundingDialog,setFundingDialog]=useRouteDraft<{receiptId:string;id?:string;release?:boolean}|null>(null);
   const [funding,setFunding]=useRouteDraft({customerId:'',orderId:'',amount:'',note:''});

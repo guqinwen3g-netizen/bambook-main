@@ -88,7 +88,7 @@ function taskSubject(state: MistState, task: FulfillmentQcTask) {
 
 export function QcWorkbenchPage() {
   const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor();
-  const [domain, setDomain] = React.useState<Domain>('garment'), [kind, setKind] = React.useState<Kind>('sample');
+  const [domain, setDomain] = React.useState<Domain>(() => session.hasPermission('qc:fabric_chain:write') && !session.hasPermission('qc:garment_chain:write') ? 'fabric' : 'garment'), [kind, setKind] = React.useState<Kind>('sample');
   const [query, setQuery] = React.useState(''), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [owner, setOwner] = React.useState<Owner>('all'), [mode, setMode] = React.useState<'groups' | 'board'>('groups');
   const [selected, setSelected] = useRouteDraft(route.id || ''), [reportTaskId, setReportTaskId] = useRouteDraft(''), [failure, setFailure] = useRouteDraft('');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [drawer, setDrawer] = React.useState(!!route.id), [collapsed, setCollapsed] = React.useState<string[]>([]), [busy, setBusy] = React.useState(false);

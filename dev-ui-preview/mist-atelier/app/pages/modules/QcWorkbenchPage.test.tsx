@@ -42,6 +42,23 @@ it('opens the correct QC domain when arriving from an explicitly typed developme
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('opens the professional writable fabric domain by default and preserves a manual read-only switch',async()=>{
+  session.denied.add('qc:garment_chain:write');
+  store.state!.fulfillment.qcTasks.push(task('f-own',{domain:'fabric'}),task('g-read'));
+  render();
+  expect(getByRole(host,'tab',{name:/面料QC/}).getAttribute('aria-selected')).toBe('true');
+  expect(host.textContent).toContain('F-OWN');expect(host.textContent).not.toContain('G-READ');
+  await click(getByRole(host,'tab',{name:/成衣QC/}));
+  store.state={...store.state!,fulfillment:{...store.state!.fulfillment,qcTasks:[...store.state!.fulfillment.qcTasks]}};
+  render();
+  expect(getByRole(host,'tab',{name:/成衣QC/}).getAttribute('aria-selected')).toBe('true');
+});
+it('keeps an explicit garment task source visible read-only even for a fabric-only professional',()=>{
+  session.denied.add('qc:garment_chain:write');store.state!.fulfillment.qcTasks.push(task('g-source'));
+  render('g-source','list');
+  expect(getByRole(host,'tab',{name:/成衣QC/}).getAttribute('aria-selected')).toBe('true');
+});
+
 it.each(['fabric','garment'] as const)('shows measurement tolerances with units appropriate to %s QC',domain=>{
   store.state!.fulfillment.qcTasks.push(task('units',{domain,state:'reported',reportIds:['report-units']}));
   store.state!.fulfillment.qcReports.push({id:'report-units',taskId:'units',result:'pass',report:'UNITS',opinion:'',measurements:[{point:domain==='fabric'?'克重（g/m²）':'袖长',standard:300,actual:306,tolerance:15}],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-08T00:18:00Z'});

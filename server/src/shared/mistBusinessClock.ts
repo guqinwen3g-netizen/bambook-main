@@ -1,5 +1,11 @@
 /** Internal scenario metadata. Customer settings commands cannot enable or edit this field. */
 export type MistBusinessClock = { mode: 'fixed'; at: string; timezone: 'Asia/Shanghai' };
+/** Business date only: the same Shanghai day on server and browser, independent of host timezone. */
+export function mistBusinessDate(instant: string | Date): string {
+ const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(instant));
+ const part = (key: string) => parts.find(value => value.type === key)!.value;
+ return `${part('year')}-${part('month')}-${part('day')}`;
+}
 export function mistBusinessInstant(state: {settings?: {businessClock?: MistBusinessClock}} | null | undefined, actual: string): string {
  const clock=state?.settings?.businessClock;
  if(clock?.mode!=='fixed'||clock.timezone!=='Asia/Shanghai'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(clock.at))return actual;
