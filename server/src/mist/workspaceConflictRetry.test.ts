@@ -57,6 +57,8 @@ describe('多人保存冲突自动重试：只在最新状态上重新执行可�
     const first = await repo.execute(owner, id, note('owner-note', 0, '甲'));
     const second = await repo.execute(other, id, note('other-note', 0, '乙'));
     expect(first.receipt.revision).toBe(1); expect(second.receipt.revision).toBe(2); expect(second.replayed).toBe(false);
+    expect(second.receipt).toMatchObject({expectedRevision:0,revision:2});
+    expect(await repo.receipt(other,id,'other-note')).toEqual(second.receipt);
     expect(db.workspaces.get(id).state.notes.map((item: any) => item.text)).toEqual(['甲', '乙']);
     expect(db.receipts.get(`${id}:other-note`)).toMatchObject({ actorId: 'other', expectedRevision: 0, result: { revision: 2 } });
     expect(requestReceiptCount(db)).toBe(3); // 含创建空间回执

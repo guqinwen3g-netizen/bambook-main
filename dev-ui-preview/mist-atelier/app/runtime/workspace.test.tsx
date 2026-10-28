@@ -346,6 +346,43 @@ it('recovers a committed request by receipt and newer snapshot without posting i
   expect(api.state?.settings.profileName).toBe('已经保存'); expect(api.state?.settings.workspaceName).toBe('后续更新'); expect(api.pending).toBeNull();
 });
 
+it.each(['acknowledged','lost'] as const)('accepts an explicitly based concurrent command receipt when the response is %s',async mode=>{
+ await mount();
+ intercept=request=>{
+  if(!request.url.endsWith('/commands'))return;
+  const body=JSON.parse(request.init.body as string),value=clone(stores.get(A)!);
+  value.revision=body.expectedRevision+2;value.state.settings.workspaceName='另一岗位的先行更新';
+  Object.assign(value.state.settings,body.command.payload);stores.set(A,value);
+  const receipt={requestId:body.requestId,expectedRevision:body.expectedRevision,revision:value.revision,result:{}};
+  receipts.set(body.requestId,receipt);
+  return mode==='lost'?Promise.reject(new TypeError('响应丢失')):response({workspace:value,receipt});
+ };
+ await act(async()=>{
+  const result=await capture(api.run(command('本次原请求')));
+  if(mode==='lost')expect(result).toBeInstanceOf(Error);else expect(result).toMatchObject({expectedRevision:0,revision:2});
+ });
+ if(mode==='lost'){
+  const pending=clone(api.pending!);stores.get(A)!.revision=3;
+  await act(async()=>{expect(await api.recover()).toEqual(receipts.get(pending.requestId));});
+ }
+ expect(api.pending).toBeNull();expect(posts()).toHaveLength(1);
+ expect(api.state?.settings).toMatchObject({profileName:'本次原请求',workspaceName:'另一岗位的先行更新'});
+});
+
+it.each([
+ {revision:2},
+ {revision:2,expectedRevision:1},
+ {revision:1,expectedRevision:1},
+ {revision:0,expectedRevision:0},
+ {revision:1.5,expectedRevision:0},
+])('retains a command when its receipt has no valid base/version proof: %j',async proof=>{
+ await mount();intercept=request=>request.url.endsWith('/commands')?Promise.reject(new TypeError('断开')):undefined;
+ await act(async()=>{await capture(api.run(command('待核对')));});const pending=clone(api.pending!);
+ intercept=request=>request.url.includes('/receipts/')?response({receipt:{requestId:pending.requestId,result:{},...proof}}):undefined;
+ await act(async()=>{expect(await capture(api.recover())).toBeInstanceOf(Error);});
+ expect(api.pending).toEqual(pending);expect(api.workspace?.revision).toBe(0);expect(posts()).toHaveLength(1);
+});
+
 it('retains the original intent when replay conflicts or receipt identity is invalid', async () => {
   await mount(); intercept = request => request.url.endsWith('/commands') ? Promise.reject(new TypeError('断开')) : undefined;
   await act(async () => { await capture(api.run(command('待核对'))); }); const original = clone(api.pending!);
@@ -428,6 +465,28 @@ it('restores a persisted operation into its exact workspace before recovery', as
   expect(api.workspace?.id).toBe(B); expect(calls.some(call => call.url === BASE + '/default')).toBe(false);
   await act(async () => { await api.recover(); }); expect(api.workspace?.id).toBe(B); expect(api.state?.settings.profileName).toBe('恢复到乙');
   expect(JSON.parse(posts()[0].init.body as string).requestId).toBe(saved.requestId);
+});
+
+it('accepts a based concurrent upload only with the exact saved attachment',async()=>{
+ await mount();intercept=request=>{
+  if(!request.url.endsWith('/files'))return;
+  const form=request.init.body as FormData,file=form.get('file') as File,value=clone(stores.get(A)!);
+  const saved:MistFile={id:'rebased-file',name:file.name,size:file.size,mimeType:file.type,storageKey:A+'/rebased-file',createdAt:'2026-10-29T00:00:00Z'};
+  value.revision=2;value.state.files.push(saved);stores.set(A,value);
+  return response({workspace:value,receipt:{requestId:String(form.get('requestId')),expectedRevision:Number(form.get('expectedRevision')),revision:2,result:{fileId:saved.id}}});
+ };
+ let saved!:MistFile;await act(async()=>{saved=await api.uploadFile(new File(['evidence'],'sample.pdf',{type:'application/pdf'}));});
+ expect(saved.id).toBe('rebased-file');expect(api.pending).toBeNull();expect(posts()).toHaveLength(1);
+});
+
+it('does not apply command concurrency rules to member access changes',async()=>{
+ stores.get(A)!.access={role:'owner',canManageMembers:true,hidden:[]};await mount();
+ intercept=async request=>{
+  if(!request.url.endsWith('/members'))return;
+  const data=await commitMember(request).json();data.receipt.expectedRevision=0;data.receipt.revision=2;data.workspace.revision=2;return response(data);
+ };
+ await act(async()=>{expect(await capture(api.changeMember!('add','actor-b'))).toBeInstanceOf(Error);});
+ expect(api.pending?.kind).toBe('member');expect(api.workspace?.revision).toBe(0);
 });
 
 it('verifies upload bytes before retry and keeps the original request id for identical bytes', async () => {

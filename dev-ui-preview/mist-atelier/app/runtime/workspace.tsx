@@ -118,7 +118,12 @@ export function shareStructure<T>(previous: unknown, next: T): T {
 }
 function receipt(value: unknown, intent: Pending): MistRunReceipt {
   const candidate = value as MistRunReceipt;
-  if (!candidate || candidate.requestId !== intent.requestId || candidate.revision !== intent.expectedRevision + 1 || !object(candidate.result)) throw new RequestError('操作回执与原请求或版本不一致');
+  if (!candidate || candidate.requestId !== intent.requestId || !Number.isSafeInteger(candidate.revision) || !object(candidate.result)) throw new RequestError('操作回执与原请求或版本不一致');
+  const based = candidate.expectedRevision === intent.expectedRevision;
+  // Only commands/uploads support the server's non-overlapping concurrency
+  // merge. A version gap needs an explicit echo of the immutable request base.
+  const rebased = (intent.kind === 'command' || intent.kind === 'upload') && based && candidate.revision > intent.expectedRevision;
+  if (candidate.expectedRevision !== undefined && !based || candidate.revision !== intent.expectedRevision + 1 && !rebased) throw new RequestError('操作回执与原请求或版本不一致');
   return candidate;
 }
 function validateReceiptState(value: MistWorkspaceEnvelope, acknowledged: MistRunReceipt, intent: Pending) {

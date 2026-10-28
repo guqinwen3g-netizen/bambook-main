@@ -373,7 +373,7 @@ export class MistRepository {
     await this.own(db, prior, workspaceId,null,false,true);
     const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: requestIdentifier(requestId, typeof requestId === 'string' && requestId.startsWith('create:') ? 127 : 120) } } });
     if (!receipt || receipt.actorId !== prior.userId) fail('NOT_FOUND', '请求回执不存在', 404);
-    return { requestId: receipt.requestId, ...receipt.result };
+    return { requestId: receipt.requestId, ...receipt.result, expectedRevision: receipt.expectedRevision };
   }); }
   async execute(prior: TokenPayload, workspaceId: string, input: MistCommandRequest) {
     if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
@@ -396,7 +396,7 @@ export class MistRepository {
         const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
         if (previous) {
           if (previous.actorId !== actor.userId || previous.inputHash !== hash || previous.expectedRevision !== input.expectedRevision) fail('REQUEST_CONFLICT', '此请求编号已用于另一项操作', 409);
-          return { workspace: this.view(row, actor), receipt: { requestId: previous.requestId, ...previous.result }, replayed: true };
+          return { workspace: this.view(row, actor), receipt: { requestId: previous.requestId, ...previous.result, expectedRevision: previous.expectedRevision }, replayed: true };
         }
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
@@ -514,7 +514,7 @@ export class MistRepository {
         await this.markRevision(db, workspaceId, actor.userId, row.revision, nextRevision, changeKeys);
         await this.authorize(db, prior, permission);
         await this.authorizeCompoundCommand(db, prior, input.command);
-        return { workspace: this.view(saved, actor), receipt: { requestId: input.requestId, ...result }, replayed: false };
+        return { workspace: this.view(saved, actor), receipt: { requestId: input.requestId, ...result, expectedRevision: input.expectedRevision }, replayed: false };
       }); } catch (error: any) {
         let blobSettled = true;
         if (stored) {
@@ -542,7 +542,7 @@ export class MistRepository {
           const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
           if (!receipt) return undefined;
           if (receipt.actorId !== prior.userId || receipt.inputHash !== hash) fail('REQUEST_CONFLICT', '此请求编号已用于另一项操作', 409);
-          return { workspace: this.view(row, actor), receipt: { requestId: receipt.requestId, ...receipt.result }, replayed: true };
+          return { workspace: this.view(row, actor), receipt: { requestId: receipt.requestId, ...receipt.result, expectedRevision: receipt.expectedRevision }, replayed: true };
         });
         if (replay) return replay;
         // 文件副作用无法确认已清理时不再重试，避免重复生成或残留。
