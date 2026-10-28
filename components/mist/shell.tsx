@@ -1,5 +1,6 @@
 import { uiText, ui } from '../../services/interfaceLanguage';
 import React from 'react';
+import { createPortal } from 'react-dom';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowLeft, Bell, ChevronDown, ChevronRight, Menu, Moon, PanelLeft, Search, Sun, X } from 'lucide-react';
 import { MistMark, MistWordmark } from './MistMark';
@@ -52,7 +53,8 @@ export type SidebarPresentationProps = {
   onNavigate: (id: string) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  workspace?: { symbol: string; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode };
+  /** lead：替代首字母方块的前置内容（小组头像串或部门图标容器）。 */
+  workspace?: { symbol: string; lead?: React.ReactNode; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode };
   account: { name: string; caption?: string; avatarUrl?: string; onClick?: () => void };
   onSearch?: () => void;
   assistant?: { title: string; text: React.ReactNode; onClick: () => void };
@@ -62,6 +64,38 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
   const [closed, setClosed] = React.useState<Record<string, boolean>>(() => Object.fromEntries(sections.map(s => [s.id, !!s.defaultClosed && !s.items.some(i => i.id === activeId)])));
   const menu = React.useContext(MobileNavCtx), open = !!menu?.open;
   const organizationButton = React.useRef<HTMLButtonElement>(null);
+  const organizationPanel = React.useRef<HTMLDivElement>(null);
+  const portalTarget = useMistPortalTarget();
+  const [organizationPosition, setOrganizationPosition] = React.useState<React.CSSProperties>({});
+  const dismissOrganization = (focus = true) => { if (workspace?.expanded) workspace.onClick?.(); if (focus) organizationButton.current?.focus(); };
+  React.useLayoutEffect(() => {
+    if (!workspace?.expanded || !workspace.disclosure) return;
+    const position = () => {
+      const rect = organizationButton.current?.getBoundingClientRect(); if (!rect) return;
+      const width = Math.min(320, window.innerWidth - 16);
+      const top = Math.min(rect.bottom + 6, Math.max(8, window.innerHeight - 180));
+      setOrganizationPosition({ width, left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)), top, maxHeight: window.innerHeight - top - 8, overflowY: 'auto' });
+    };
+    position();
+    (organizationPanel.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]') ?? organizationPanel.current?.querySelector<HTMLButtonElement>('button'))?.focus();
+    window.addEventListener('resize', position);
+    const outside = (event: PointerEvent) => { if (!organizationPanel.current?.contains(event.target as Node) && !organizationButton.current?.contains(event.target as Node)) dismissOrganization(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => { window.removeEventListener('resize', position); document.removeEventListener('pointerdown', outside); if (organizationPanel.current?.contains(document.activeElement)) organizationButton.current?.focus(); };
+  }, [workspace?.expanded, portalTarget]);
+  const organizationPopup = workspace?.disclosure && workspace.expanded ? <div ref={organizationPanel} id="mist-organization" className="mist-menu mist-organization mist-organization-popover" role="menu" aria-label={uiText('组织与小组')} style={organizationPosition} onKeyDown={event => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismissOrganization(); }
+    else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault(); const items = [...(organizationPanel.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      items[next]?.focus();
+    } else if (event.key === 'Tab') {
+      event.preventDefault(); dismissOrganization(false);
+      const items = [...document.querySelectorAll<HTMLElement>('button:not(:disabled),a[href],input:not(:disabled),[tabindex="0"]')].filter(el => !organizationPanel.current?.contains(el) && el.getClientRects().length);
+      const index = items.indexOf(organizationButton.current!); items[index + (event.shiftKey ? -1 : 1)]?.focus();
+    }
+  }}>{workspace.disclosure}</div> : null;
   const close = () => menu?.setOpen(false);
   React.useEffect(() => { close(); }, [activeId]);
   // 手机导航抽屉：任何一次跳转后都收起；Esc 关闭。
@@ -80,8 +114,8 @@ export function MistSidebarPresentation({ sections, activeId, onNavigate, collap
         <button type="button" className="mist-side-close" aria-label={uiText("关闭菜单")} onClick={close}><Icon icon={X} size="sm" /></button>
       </div>
       {workspace && <>
-        <button ref={organizationButton} type="button" className="mist-ws" aria-expanded={workspace.disclosure ? !!workspace.expanded : undefined} aria-controls={workspace.disclosure ? 'mist-organization' : undefined} onClick={workspace.disclosure ? workspace.onClick : within(workspace.onClick)}><span className="mist-ws-sym">{workspace.symbol}</span><div><b>{workspace.name}</b>{workspace.caption && <small>{uiText(workspace.caption)}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>
-        {workspace.disclosure && <div id="mist-organization" className="mist-organization" hidden={!workspace.expanded} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); workspace.onClick?.(); organizationButton.current?.focus(); } }}>{workspace.disclosure}</div>}
+        <button ref={organizationButton} type="button" className="mist-ws" aria-label={[workspace.name, workspace.caption].filter(Boolean).join(" · ")} title={workspace.name} aria-expanded={workspace.disclosure ? !!workspace.expanded : undefined} aria-controls={workspace.disclosure ? 'mist-organization' : undefined} aria-haspopup={workspace.disclosure ? 'menu' : undefined} onKeyDown={event => { if (workspace.disclosure && ['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); if (!workspace.expanded) workspace.onClick?.(); } }} onClick={workspace.disclosure ? workspace.onClick : within(workspace.onClick)}>{workspace.lead ?? <span className="mist-ws-sym">{workspace.symbol}</span>}<div><b>{workspace.name}</b>{workspace.caption && <small>{uiText(workspace.caption)}</small>}</div><Icon icon={ChevronDown} size="sm" /></button>
+        {organizationPopup && (portalTarget ? createPortal(organizationPopup, portalTarget) : organizationPopup)}
       </>}
       {onSearch && <button type="button" className="mist-side-search" onClick={within(onSearch)} title={uiText("搜索或跳转")}><Icon icon={Search} size="sm" /><span>{uiText("搜索或跳转")}</span><Kbd>⌘K</Kbd></button>}
       <nav className="mist-nav" aria-label={uiText("主导航")}>

@@ -47,12 +47,12 @@ it('flags former accounts that still hold business, and hides nudging without su
   expect(drawer.textContent).toContain('督办需要客户管理主管权限');
 });
 
-it('scopes a group supervisor to members of the same business group',()=>{
+it('shows every member to a line supervisor and names the managed line (P4)',()=>{
   const garmentOnly=members.map(m=>m.id==='demo-reviewer'?{...m,groups:['garment' as const]}:m.id==='demo-buyer'?{...m,groups:['fabric' as const]}:m);
   act(()=>root.render(<MistRoot><ToastProvider><TeamBoard state={state} members={garmentOnly} viewer={{id:'demo-reviewer',owner:false}} can busy={false} run={run} go={go}/></ToastProvider></MistRoot>));
   const table=getByRole(host,'table',{name:'团队在手'});
-  expect(table.textContent).toContain('顾言');expect(table.textContent).not.toContain('沈禾');
-  expect(host.textContent).toContain('与你同业务组（成衣）的成员');
+  expect(table.textContent).toContain('顾言');expect(table.textContent).toContain('沈禾');
+  expect(host.textContent).toContain('全部成员（你管理成衣业务线）');
 });
 
 it('switches to the weekly report, pages back a week and copies the text summary for the supervisor to send',async()=>{

@@ -34,7 +34,7 @@ export function InternalFabricPanel({ order, line, go }: Props) {
   const isSource = order.type === 'fabric' && !!order.governance?.contract.internalSupply;
   const rows = state?.internalFabricAllocations?.filter(row => row.fabricOrderId === order.id && row.fabricLineId === line.id && row.status === 'active') || [];
   const blocked = busy || workspace.loading || workspace.saving || !!workspace.pending || !!workspace.pendingCreate || orderLocked(order) || order.governance?.status === 'pending' || order.governance?.changeDraft?.status === 'pending' || (line as ClosableLine).closure?.status === 'closed' || (line as ClosableLine).closure?.status === 'pending';
-  const canWrite = !!session?.hasPermission('orders:write') && members.some(member => member.id === session?.user?.id && member.groups.includes('garment'));
+  const canWrite = !!session?.hasPermission('orders:write') && members.some(member => member.id === session?.user?.id);
   let candidates: InternalFabricCandidate[] = [], candidateError = '', materialBlocker = '', remaining = '', sourceError = '';
   if (state && isGarment) {
     materialBlocker = garmentMaterialBlocker(state, order.id, line.id, context);

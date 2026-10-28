@@ -109,7 +109,7 @@ it('binds a material issue to the existing processing branch instead of a free-t
   await click(getByRole(dialog,'button',{name:'登记发料',exact:true}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.materials.issue',payload:expect.objectContaining({id:stock.id,targetProductionId:f.productionId,quantity:100.3})}));
 });
-it('keeps an internal fabric stock read-only for a garment-group operator',()=>{
+it('lets a garment-line account handle internal fabric stock (P4: no line restriction)',()=>{
   const f=materialDeliveryFixture();store.state=f.state;store.state.memberGroups!.push({userId:'biz',name:'Business',groups:['garment'],updatedAt:'',updatedBy:'owner'});render(store.state.fulfillment.stock[0].id);
-  expect((getByRole(host,'button',{name:'登记出库',exact:true}) as HTMLButtonElement).disabled).toBe(true);
+  expect((getByRole(host,'button',{name:'登记出库',exact:true}) as HTMLButtonElement).disabled).toBe(false);
 });

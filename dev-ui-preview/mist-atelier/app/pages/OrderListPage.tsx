@@ -1,4 +1,5 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
+import { useTeamOriginLookup } from '../runtime/teamView';
 import {businessNow} from '../runtime/businessClock';
 import {OrderProductThumb} from './OrderProductThumb';
 /**
@@ -69,8 +70,9 @@ export function OrderListPage() {
   const dayStart=businessNow();dayStart.setHours(0,0,0,0);
   const overdue = (state?.invoices ?? []).filter(invoice => family.some(order => order.id === invoice.orderId) && invoice.open > 0 && (mistDate(invoice.due)?.getTime() ?? Infinity) < dayStart.getTime());
   const quantityLabel=(order:MistOrder)=>{const totals=new Map<string,number>();for(const line of state?.orderLines||[])if(line.orderId===order.id)totals.set(line.unit,(totals.get(line.unit)||0)+line.qty);return [...totals].map(([unit,total])=>`${fmt(total)} ${uiText(unit)}`).join(' · ')||'未记录数量';};
+  const teamsOf = useTeamOriginLookup();
   const cols: Column<MistOrder>[] = [
-    { key: 'id', header: '订单', width: 'minmax(220px,2fr)', sortValue: order => order.code, render: order => <ObjectCell thumb={<OrderProductThumb orderId={order.id} category={order.type}/>} name={<Mono>{order.code}</Mono>} meta={`${order.customer} · ${order.season}`} /> },
+    { key: 'id', header: '订单', width: 'minmax(220px,2fr)', sortValue: order => order.code, render: order => <ObjectCell thumb={<OrderProductThumb orderId={order.id} category={order.type}/>} name={<Mono>{order.code}</Mono>} meta={<>{`${order.customer} · ${order.season}`}{teamsOf('order', order.id).length ? <span className="mist-team-origin">{uiText(` · ${teamsOf('order', order.id).join('、')}`)}</span> : null}</>} /> },
     { key: 'qty', header: '数量', width: '90px', align: 'right', hideOnMobile: true, sortValue: order => order.qty, render: order => <><span className="mist-num">{quantityLabel(order)}</span><span className="mist-cell-sub">{order.lines}{uiText(" 个条目")}</span></> },
     { key: 'amt', header: '金额', width: '130px', align: 'right', sortValue: order => order.amount, render: order => <><b className="mist-cell-strong mist-num">{fmt(order.amount, 2)}</b><span className="mist-cell-sub">{order.currency}</span></> },
     { key: 'prog', header: '条目阶段', width: 'minmax(190px,1.6fr)', hideOnMobile: true, render: order => { if (!state) return null;if(orderLocked(order))return <span className="mist-muted">—</span>; const flags = orderLineFlags(state, order), shown = flags.tracks.slice(0, 2); const notes = [flags.business && `待业务动作 ${flags.business}`, flags.nok && `QC NOK ${flags.nok}`, flags.toShip && `待出运 ${flags.toShip}`].filter(Boolean) as string[];

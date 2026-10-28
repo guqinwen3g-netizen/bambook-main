@@ -142,13 +142,14 @@ export function Avatar({ name, src, tone, size }: { name: string; src?: string |
   const shown = useAvatarSource(src);
   return (
     <span className="mist-avatar" data-tone={toneAttr(tone)} data-size={size && size !== 'md' ? size : undefined} title={uiText(name)}>
-      {shown && failedSrc!==shown ? <img onError={()=>setFailedSrc(shown)} src={shown} alt="" /> : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
+      {shown && failedSrc!==shown ? <img onError={()=>setFailedSrc(shown)} src={shown} alt="" /> : name.startsWith('+') ? name : name.slice(0, name.length > 1 && /^[A-Za-z]/.test(name) ? 2 : 1)}
     </span>
   );
 }
-export function AvatarStack({ people, size = 'sm', max = 4 }: { people: Array<{ name: string; tone?: Tone; src?: string }>; size?: 'xs' | 'sm'; max?: number }) {
+/** overlap：侧栏小组头像串（约 1/3 重叠、每个头像带与侧栏同色描边，悬停轻微展开）。 */
+export function AvatarStack({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string }>; size?: 'xs' | 'sm'; max?: number; overlap?: boolean }) {
   const shown = people.slice(0, max);
-  return <span className="mist-stack">{shown.map((p, i) => <Avatar key={i} {...p} size={size} />)}{people.length > max && <Avatar name={`+${people.length - max}`} size={size} />}</span>;
+  return <span className="mist-stack" data-overlap={overlap || undefined}>{shown.map((p, i) => <Avatar key={i} {...p} size={size} />)}{people.length > max && <Avatar name={`+${people.length - max}`} size={size} />}</span>;
 }
 
 /* ───────────── Card ───────────── */

@@ -43,11 +43,10 @@ export function accountOwners(root: MistState): Array<{ id: string; name: string
   for (const s of root.market?.suppliers || []) for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id) ids.add(s.handlers[g]!.id);
   return [...ids].map(id => ({ id, name: snapshotName(root, id), count: accountOwnedObjects(root, id).length }));
 }
-/** 整体交接的阻断项：审批中的订单内容锁定；供应商经手人须属于对应业务组。 */
+/** 整体交接的阻断项：审批中的订单内容锁定（业务员通用，不再按业务组阻断）。 */
 export function accountHandoverBlockers(root: MistState, fromId: string, to?: { id: string; name: string; groups: string[] }) {
   const out: string[] = [];
   for (const o of root.orders) if (o.ownerId === fromId && (o.governance?.status === 'pending' || o.governance?.changeDraft?.status === 'pending' || o.governance?.cancellation?.status === 'pending')) out.push(`订单 ${o.code} 审批中，审批完成后再交接`);
-  if (to) for (const s of root.market?.suppliers || []) for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id === fromId && !to.groups.includes(g)) out.push(`供应商 ${s.code} · ${s.name} 的${MIST_BUSINESS_GROUP_LABEL[g]}经手：${to.name} 不属于${MIST_BUSINESS_GROUP_LABEL[g]}业务组，请先设置业务组`);
   return out;
 }
 export const accountHandovers = (root: MistState) => (root as MistState & { memberHandovers?: MistAccountHandover[] }).memberHandovers || [];

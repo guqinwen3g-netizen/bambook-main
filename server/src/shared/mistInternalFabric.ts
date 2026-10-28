@@ -256,8 +256,6 @@ export function assertMaterialSender(root: MistState, purchaseId: string, ctx: M
   if (!ctx.members) return fail('无法核对发料经办人，请刷新');
   const p = root.fulfillment.purchases.find(p => p.id === purchaseId); if (!p) return fail('来源采购不存在');
   resolveMember(ctx, ctx.actorId, '交付经办人');
-  const actor = ctx.members!.find(m => m.id === ctx.actorId)!;
-  if (actor.groups.length && !actor.groups.includes(p.domain)) fail('当前账号不能办理该业务组的发料', 'FORBIDDEN');
 }
 export function prepareMaterialDelivery(root: MistState, purchaseId: string, productionId: unknown, quantity: number, ctx: MistContext): MaterialDeliveryLink {
   assertMaterialSender(root, purchaseId, ctx);

@@ -13,11 +13,10 @@ function fixture() {
 const dir = [{ id: 'a', name: '甲', groups: ['garment' as const] }, { id: 'b', name: '乙', groups: ['fabric' as const] }, { id: 'boss', name: '主管', groups: ['garment' as const] }, { id: 'c', name: '丙', groups: [] }];
 
 describe('主管团队视角', () => {
-  it('团队范围：所有者或未设业务组看全部，否则看同业务组成员（含本人）', () => {
-    expect(teamMembers(dir, { id: 'boss', owner: false }).map(m => m.id)).toEqual(['a', 'boss']);
+  it('团队范围：全部成员（P4 业务员不分线；本线范围由数据范围决定）', () => {
+    expect(teamMembers(dir, { id: 'boss', owner: false }).map(m => m.id)).toEqual(['a', 'b', 'boss', 'c']);
     expect(teamMembers(dir, { id: 'boss', owner: true }).map(m => m.id)).toEqual(['a', 'b', 'boss', 'c']);
-    expect(teamMembers(dir, { id: 'c', owner: false }).map(m => m.id)).toEqual(['a', 'b', 'boss', 'c']);
-    expect(teamMembers(dir, { id: 'c', owner: false }, 'fabric').map(m => m.id)).toEqual(['b']);
+    expect(teamMembers(dir, { id: 'c', owner: false }, 'fabric').map(m => m.id)).toEqual(['a', 'b', 'boss', 'c']);
   });
   it('每人在手：逾期/临近订单、逾期待办、逾期应收按币种、久未跟进客户，并按关注程度排序', () => {
     const f = fixture(), s = f.state;
@@ -97,8 +96,8 @@ describe('主管团队视角', () => {
     const r = arc('2026-10-12');
     const saved = teamReports(r.state);
     expect(saved).toHaveLength(1);
-    expect(saved[0]).toMatchObject({ weekStart: '2026-10-12', weekEnd: '2026-10-18', generatedBy: '周敏', generatedById: 'demo-reviewer', scope: '面料、成衣业务组' });
-    expect(saved[0].text).toContain('团队周报 · 面料、成衣业务组');
+    expect(saved[0]).toMatchObject({ weekStart: '2026-10-12', weekEnd: '2026-10-18', generatedBy: '周敏', generatedById: 'demo-reviewer', scope: '全部成员（管理业务线：面料、成衣）' });
+    expect(saved[0].text).toContain('团队周报 · 全部成员（管理业务线：面料、成衣）');
     expect(saved[0].report.rows.some(x => x.id === 'demo-sales')).toBe(true);
     expect(pendingWeeklyArchive(r.state, 'demo-reviewer', '2026-10-19')).toBeNull();
     expect(pendingWeeklyArchive(r.state, 'demo-buyer', '2026-10-19')).toBe('2026-10-12');

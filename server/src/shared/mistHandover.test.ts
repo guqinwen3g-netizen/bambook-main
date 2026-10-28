@@ -86,8 +86,9 @@ describe('成员按账号整体交接',()=>{
     const supplier=f.state.market.suppliers.find(x=>Object.values(x.handlers||{}).some(h=>h?.id==='demo-buyer'));
     const pending=f.state.orders.find(o=>o.ownerId==='demo-buyer'&&o.governance?.status==='pending');
     expect(supplier||pending).toBeTruthy();
-    expect(()=>f.run({fromUserId:'demo-buyer',toUserId:'demo-new',reason:'离职'})).toThrow(supplier?'业务组':'审批中');
-    expect(f.state).toEqual(s0);
+    // P4：业务员通用，供应商经手不再按业务组阻断；仅审批中的订单阻止交接。
+    if(pending){expect(()=>f.run({fromUserId:'demo-buyer',toUserId:'demo-new',reason:'离职'})).toThrow('审批中');expect(f.state).toEqual(s0);}
+    else expect(accountHandoverBlockers(f.state,'demo-buyer',{id:'demo-new',name:'林舟',groups:[]})).toEqual([]);
   });
 });
 

@@ -64,7 +64,7 @@ export function OrderCreatePage() {
   const validation = (section: string) => {
     if(customerFrozen)return '客户往来已冻结';
     if (section === 'basic' && ((contract.kind==='external'&&!customer) || !form.season.trim() || !form.currency)) return '请选择客户，并填写季节与币种。';
-    if (section === 'basic' && contract.internalSupply && !members.some(member => member.id === contract.internalSupply?.receiverId && member.groups.includes('garment'))) return '请选择成衣接收负责人';
+    if (section === 'basic' && contract.internalSupply && !members.some(member => member.id === contract.internalSupply?.receiverId)) return '请选择成衣接收负责人';
     if (section === 'items') for (const [lineIndex, line] of lines.entries()) { if (!line.breakdown) continue; try { normalizeOrderBreakdown(form.type, line.breakdown, `条目 ${lineIndex + 1}：`); } catch (problem) { return problem instanceof Error ? problem.message : '分色分码填写有误'; } }
     if (section === 'items' && (!lines.length || lines.some(line => !line.name.trim() || !line.style.trim() || !line.unit.trim() || !Number.isFinite(line.qty) || line.qty <= 0 || !Number.isFinite(line.price) || line.price < 0))) return '每个条目须填写品名、款号、正数数量、单位及有效单价。';
     if (section === 'items' && amounts.error) return amounts.error;

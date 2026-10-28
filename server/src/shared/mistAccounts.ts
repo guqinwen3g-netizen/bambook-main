@@ -32,19 +32,19 @@ export function buildMemberDirectory(input: { ownerId: string; state: Pick<MistS
   });
 }
 /**
- * 按账号 ID 解析成员引用。非成员、已停用、（指定业务组时）不属于该组 → 拒绝。
+ * 按账号 ID 解析成员引用。非成员、已停用 → 拒绝。
  * 返回服务端目录里的当前显示名，作为快照写入业务记录。
  */
-export function resolveMember(context: Pick<MistContext, 'members'> & Partial<Pick<MistContext, 'actorId' | 'actorName'>>, value: unknown, label: string, group?: MistBusinessGroup): MistAccountRef {
+/** 业务员通用（R7，P4）：经手人、负责人不再按面料/成衣校验；`_line` 仅保留调用签名。 */
+export function resolveMember(context: Pick<MistContext, 'members'> & Partial<Pick<MistContext, 'actorId' | 'actorName'>>, value: unknown, label: string, _line?: MistBusinessGroup): MistAccountRef {
   if (typeof value !== 'string' || !value.trim() || value.length > 200) fail(`请按账号选择${label}`);
   const id = (value as string).trim();
-  // 未带成员目录时只接受执行人本人（已由仓储层核验登录与成员身份）且不限业务组；指定他人一律无法核对、拒绝。
-  if (!context.members && !group && context.actorId && id === context.actorId) return { id, name: context.actorName || id };
+  // 未带成员目录时只接受执行人本人（已由仓储层核验登录与成员身份）；指定他人一律无法核对、拒绝。
+  if (!context.members && context.actorId && id === context.actorId) return { id, name: context.actorName || id };
   if (!context.members) fail(`无法核对${label}是否为本公司成员，请刷新后重试`, 'PRECONDITION');
   const entry = context.members!.find(row => row.id === id);
   if (!entry) fail(`${label}须为本公司的成员账号`);
   if (!entry!.active) fail(`${label}（${entry!.name}）的账号已停用，不能指定`);
-  if (group && !entry!.groups.includes(group)) fail(`${label}（${entry!.name}）不属于${MIST_BUSINESS_GROUP_LABEL[group]}业务组`);
   return { id: entry!.id, name: entry!.name };
 }
 /** 负责人变更事件文本，例如“负责人：顾言→沈禾”。 */
@@ -67,9 +67,9 @@ export function accountOwnedObjects(state: MistState, accountId: string): MistOw
 }
 /** 设置成员业务组（所有者在成员管理办理）。 */
 export function setMemberGroups(state: MistState, payload: { userId?: unknown; groups?: unknown }, context: MistContext): { userId: string; groups: MistBusinessGroup[] } {
-  if (!payload || typeof payload !== 'object' || Object.keys(payload).some(key => key !== 'userId' && key !== 'groups')) fail('业务组设置格式无效');
+  if (!payload || typeof payload !== 'object' || Object.keys(payload).some(key => key !== 'userId' && key !== 'groups')) fail('管理业务线设置格式无效');
   if (typeof payload.userId !== 'string' || !payload.userId) fail('请选择成员');
-  if (!Array.isArray(payload.groups) || payload.groups.length > MIST_BUSINESS_GROUPS.length || payload.groups.some(g => !isBusinessGroup(g))) fail('业务组只能选择面料、成衣');
+  if (!Array.isArray(payload.groups) || payload.groups.length > MIST_BUSINESS_GROUPS.length || payload.groups.some(g => !isBusinessGroup(g))) fail('管理业务线只能选择面料、成衣');
   if (!context.members) fail('无法核对成员，请刷新后重试', 'PRECONDITION');
   const entry = context.members!.find(row => row.id === payload.userId);
   if (!entry) fail('该账号不是本公司成员');
@@ -79,7 +79,7 @@ export function setMemberGroups(state: MistState, payload: { userId?: unknown; g
   const rest = (state.memberGroups || []).filter(row => row.userId !== entry!.id);
   state.memberGroups = groups.length ? [...rest, { userId: entry!.id, name: entry!.name, groups, updatedAt: context.now, updatedBy: context.actorName }] : rest;
   const label = (list: MistBusinessGroup[]) => list.length ? list.map(g => MIST_BUSINESS_GROUP_LABEL[g]).join('、') : '无';
-  state.events.unshift({ id: context.id(), entityType: 'workspace', entityId: entry!.id, actor: context.actorName, at: context.now, text: `业务组（${entry!.name}）：${label(before)}→${label(groups)}`, fileIds: [] });
+  state.events.unshift({ id: context.id(), entityType: 'workspace', entityId: entry!.id, actor: context.actorName, at: context.now, text: `管理业务线（${entry!.name}）：${label(before)}→${label(groups)}`, fileIds: [] });
   return { userId: entry!.id, groups };
 }
 /** 演示公司的示例人物（只用于生成示例数据；不是可登录账号，也不会写入成员授权）。 */

@@ -11,7 +11,7 @@
 | `useHotkey` | 全局快捷键：useHotkey('k', open, { meta: true }) → ⌘K / Ctrl+K | `(key: string, handler: (e: KeyboardEvent) => void, opts: { meta?: boolean; shift?: boolean } = {})` |
 | `NavItem` | — | `type NavItem = { id: string; label: string; icon: LucideIcon; count?: number };` |
 | `NavSection` | — | `type NavSection = { id: string; label: string; items: NavItem[]; defaultClosed?: boolean };` |
-| `SidebarPresentationProps` | — | `type SidebarPresentationProps = { sections: NavSection[]; activeId: string; onNavigate: (id: string) => void; collapsed: boolean; onToggleCollapsed: () => void; workspace?: { symbol: string; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode }; account: { name: string; caption?: string; avatarUrl?: string; onClick?: () => void }; onSearch?: () => void; assistant?: { title: string; text: React.ReactNode; onClick: () => void }; };` |
+| `SidebarPresentationProps` | — | `type SidebarPresentationProps = { sections: NavSection[]; activeId: string; onNavigate: (id: string) => void; collapsed: boolean; onToggleCollapsed: () => void; workspace?: { symbol: string; lead?: React.ReactNode; name: string; caption?: string; onClick?: () => void; expanded?: boolean; disclosure?: React.ReactNode }; account: { name: string; caption?: string; avatarUrl?: string; onClick?: () => void }; onSearch?: () => void; assistant?: { title: string; text: React.ReactNode; onClick: () => void }; };` |
 | `MistSidebarPresentation` | 侧栏（纯展示，无数据依赖）。生产环境用 MistSidebar（已接好模块注册表与权限）。 | `({ sections, activeId, onNavigate, collapsed, onToggleCollapsed, workspace, account, onSearch, assistant }: SidebarPresentationProps)` |
 | `Crumb` | — | `type Crumb = { label: React.ReactNode; onClick?: () => void; mono?: boolean; hideOnMobile?: boolean };` |
 | `MistTopbar` | — | `({ crumbs, scrolled, sync, theme, onToggleTheme, onSearch, notifications, onAsk, extra, onBack, backLabel = '返回' }: { crumbs: Crumb[]; scrolled?: boolean; sync?: { state?: 'ok' \| 'syncing' \| 'offline'; text: string }; theme?: ThemeMode; onToggleTheme?: () => void; onSearch?: () => void; notifications?: { unread: boolean; onClick: () => void }; onAsk?: () => void; extra?: React.ReactNode; onBack?: () => void; backLabel?: string; })` |
@@ -56,7 +56,7 @@
 | `Tabs` | 页面级 Tabs（下划线指示）。用于同一模块内的子视图切换。 | `({ options, value, onChange }: { options: Option<V>[]; value: V; onChange: (v: V) => void })` |
 | `useAvatarSource` | 预设头像（dicebear:v1:…）按需加载生成器，转为可直接显示的 SVG 地址；普通图片地址原样返回。 | `(src?: string \| null): string \| undefined` |
 | `Avatar` | — | `({ name, src, tone, size }: { name: string; src?: string \| null; tone?: Tone; size?: 'xs' \| 'sm' \| 'md' \| 'lg' \| 'xl' })` |
-| `AvatarStack` | — | `({ people, size = 'sm', max = 4 }: { people: Array<{ name: string; tone?: Tone; src?: string }>; size?: 'xs' \| 'sm'; max?: number })` |
+| `AvatarStack` | overlap：侧栏小组头像串（约 1/3 重叠、每个头像带与侧栏同色描边，悬停轻微展开）。 | `({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string }>; size?: 'xs' \| 'sm'; max?: number; overlap?: boolean })` |
 | `CardProps` | — | `type CardProps = React.HTMLAttributes<HTMLElement> & { as?: 'article' \| 'section' \| 'div' \| 'aside' \| 'nav'; tone?: 'ai' \| 'accent'; clip?: boolean; interactive?: boolean };` |
 | `Card` | 卡片：纯白/深底面，无描边无阴影。interactive = 整卡可点（悬停变 card-2）。 | `({ as = 'article', tone, clip, interactive, className, children, ...rest }: CardProps)` |
 | `CardButton` | 卡片按钮版（统计卡等整卡可点击的场景） | `({ className, children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>)` |
@@ -86,7 +86,6 @@
 | `PasswordInput` | 密码输入：右侧眼睛按钮切换明文显示。按下按钮不夺走输入焦点，光标位置保持不变。 | `forwardRef<HTMLInputElement, Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> & Omit<InputBase, 'suffix'>>` |
 | `CodeInput` | 分格验证码：逐位输入自动跳格，可整段粘贴，退格回到上一格；填满时触发 onComplete。 | `({ length = 6, value, onChange, onComplete, disabled, autoFocus, ariaLabel = '验证码' }: { length?: number; value: string; onChange: (value: string) => void; onComplete?: (value: string) => void; disabled?: boolean; autoFocus?: boolean; ariaLabel?: string })` |
 | `TextArea` | — | `forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement> & InputBase>` |
-| `Select` | 原生下拉（保证可访问性与移动端体验）。options 可为字符串或 {value,label}。 | `({ icon, options, placeholder, disabled, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & InputBase & { options: Array<string \| { value: string; label: string }>; placeholder?: string })` |
 | `SearchField` | — | `({ value, onChange, placeholder = '搜索', autoFocus, style }: { value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean; style?: React.CSSProperties })` |
 | `Checkbox` | — | `({ checked, onChange, label, tone, disabled }: { checked: boolean; onChange: (v: boolean) => void; label?: React.ReactNode; tone?: 'ok'; disabled?: boolean })` |
 | `Switch` | — | `({ checked, onChange, label, disabled, ariaLabel }: { checked: boolean; onChange: (v: boolean) => void; label?: React.ReactNode; disabled?: boolean; ariaLabel?: string })` |
@@ -193,4 +192,4 @@
 | `cx` | — | `(...parts: Array<string \| false \| null \| undefined>)` |
 
 
-共 135 个导出声明（105 个组件/函数/值，30 个类型）。重导出别名不重复计数。
+共 134 个导出声明（104 个组件/函数/值，30 个类型）。重导出别名不重复计数。
