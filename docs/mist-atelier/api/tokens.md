@@ -111,6 +111,12 @@
 | `--mist-control-h-sm` | `32px` | `同浅色` |
 | `--mist-control-h-lg` | `44px` | `同浅色` |
 
+## slider
+
+| Token | 浅色 | 深色 |
+|---|---|---|
+| `--mist-slider-track-h` | `6px` | `同浅色` |
+
 ## avatar
 
 | Token | 浅色 | 深色 |

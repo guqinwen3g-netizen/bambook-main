@@ -460,7 +460,7 @@
 .mist-setting-row > div:first-child { flex: 1; min-width: 0; }
 .mist-setting-row b { font-weight: var(--mist-fw-medium); font-size: var(--mist-text-md); display: block; }
 .mist-sound-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.mist-sound-controls input[type="range"] { width: min(150px, 32vw); accent-color: var(--mist-accent); }
+.mist-sound-controls .mist-slider { width: clamp(150px, 20vw, 200px); }
 .mist-sound-controls > span { min-width: 35px; text-align: right; color: var(--mist-ink-2); font-size: var(--mist-text-xs); }
 .mist-setting-row small { color: var(--mist-ink-3); font-size: var(--mist-text-xs); }
 @media (max-width: 600px) {
@@ -897,7 +897,7 @@
 .mist-avatar-crop { position: relative; margin: 8px auto; border-radius: 50%; overflow: hidden; background: var(--mist-fill); touch-action: none; cursor: grab; }
 .mist-avatar-crop img { position: absolute; left: 50%; top: 50%; max-width: none; user-select: none; pointer-events: none; }
 .mist-avatar-crop-tools { justify-content: center; flex-wrap: wrap; margin-top: 12px; }
-.mist-avatar-crop-tools input[type="range"] { width: 160px; accent-color: var(--mist-accent); }
+.mist-avatar-crop-tools .mist-slider { width: 180px; }
 @media (max-width: 640px) { .mist-avatar-stage { --avatar-size: 148px; } .mist-avatar-direction { font-size: 15px; } }
 @media (prefers-reduced-motion: reduce) { .mist-avatar-compass, .mist-avatar-guide-progress i { transition: none; } .mist-avatar-compass[data-held] { transform: none; } }
 
