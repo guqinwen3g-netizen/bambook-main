@@ -24,7 +24,7 @@ export const SCOPED_COLLECTIONS = [
   'fulfillment.packing', 'fulfillment.shipments', 'fulfillment.customs', 'fulfillment.shippingTerms', 'fulfillment.productionFacts',
   'platform.pricing', 'platform.risks', 'platform.claims', 'platform.claimGoods', 'platform.credits', 'platform.creditApplications', 'platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts',
   'orderFunding.assignments', 'rfqs', 'letterOfCredits', 'customerStatements',
-  'payments', 'financeReversals', 'fxRecords', 'fxRevaluations', 'exportRebate.claims', 'orderCosts.expenses',
+  'payments', 'financeReversals', 'bankAccounts', 'fxRecords', 'fxRevaluations', 'exportRebate.claims', 'orderCosts.expenses',
   'payables.bills', 'payables.payments', 'payables.allocations', 'payables.plans', 'payables.requests', 'payables.reversals', 'payables.settlements', 'payables.deductions', 'payables.prepaymentMoves',
 ] as const;
 export type ScopedCollection = typeof SCOPED_COLLECTIONS[number];
@@ -279,6 +279,7 @@ function verifiedReplacementSync(before: any, after: any, state: MistState): boo
 export function scopedTargetViolation(state: MistState, scope: MistDataScope, command?: {type?: string;payload?: any}, claimId?: string): {path: string; id: string} | null {
   const type = command?.type ?? '', payload = command?.payload ?? {};
   let path: ScopedCollection | undefined, id: unknown;
+  if (type.startsWith('finance.account.') || type.startsWith('finance.fx.') || type.startsWith('fxrate.')) return {path:'bankAccounts', id:'company-finance'};
   if (claimId) { path='platform.claims'; id=claimId; }
   else if (['order.update','order.checklist','order.handoff'].includes(type) || type.startsWith('order.governance.') && type !== 'order.governance.decide') { path='orders'; id=payload.orderId; }
   else if (type === 'development.saveDraft' || type === 'development.submit') { path='drafts'; id=payload.draftId; }

@@ -154,4 +154,5 @@ it('checks direct business targets before validation while leaving assigned deci
  expect(scopedTargetViolation(state,scope,{type:'development.notice.generate',payload:{devId:'private-dev'}})).toMatchObject({path:'devs'});
  expect(scopedTargetViolation(state,scope,{type:'order.governance.decide',payload:{id:'private-order'}})).toBeNull();
  expect(scopedTargetViolation(state,scope,{type:'development.saveDraft',payload:{}})).toBeNull();
+ expect(scopedTargetViolation(state,scope,{type:'finance.account.save',payload:{name:'new'}})).toMatchObject({path:'bankAccounts'});
 });
