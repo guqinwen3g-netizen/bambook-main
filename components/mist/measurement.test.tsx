@@ -43,6 +43,14 @@ it('labels mixed row tolerances accurately and avoids a false first-row toleranc
   expect(host.querySelectorAll('.mist-tol i')[1].getAttribute('data-tone')).not.toBe('bad');
 });
 
+it('fills from the standard toward the measured deviation without changing its direction', () => {
+  render([{point:'偏低',standard:10,actual:9,tolerance:2},{point:'偏高',standard:10,actual:11,tolerance:2},{point:'准确',standard:10,actual:10,tolerance:2}]);
+  const fills=[...host.querySelectorAll<HTMLElement>('.mist-tol-fill')];
+  expect(fills.map(item=>[item.style.left,item.style.width])).toEqual([['40%','10%'],['50%','10%'],['50%','0%']]);
+  expect([...host.querySelectorAll('.mist-tol')].map(item=>item.hasAttribute('data-centered'))).toEqual([false,false,true]);
+  expect(host.querySelector('[role="slider"]')).toBeNull();
+});
+
 it('retains the original uniform-tolerance header and does not misclassify decimal boundaries', () => {
   render([{ point: '胸围', standard: 112, actual: 112.1, tolerance: 0.1 }]);
   expect(host.querySelector('[data-head]')?.textContent).toContain('公差 ±0.1cm');

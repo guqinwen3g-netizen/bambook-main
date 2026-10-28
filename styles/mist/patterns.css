@@ -323,11 +323,14 @@
 .mist-measure-row { display: grid; grid-template-columns: 80px 60px 60px 1fr 56px; gap: 14px; align-items: center; padding: 11px 0; font-size: var(--mist-text-sm); }
 .mist-measure-row:not(:last-child) { border-bottom: 1px solid var(--mist-line); }
 .mist-measure-row[data-head] { font-size: var(--mist-text-2xs); color: var(--mist-ink-3); padding: 6px 0; }
-.mist-tol { position: relative; height: 6px; border-radius: 6px; background: var(--mist-sunken); }
-.mist-tol::before { content: ""; position: absolute; left: 30%; right: 30%; top: 0; bottom: 0; border-radius: 6px; background: var(--mist-ok-tint); }
-.mist-tol::after { content: ""; position: absolute; left: 50%; top: -3px; bottom: -3px; width: 1px; background: var(--mist-ink-4); }
-.mist-tol i { position: absolute; top: -3px; width: 12px; height: 12px; border-radius: 50%; background: var(--mist-ok); transform: translateX(-50%); z-index: 1; }
-.mist-tol i[data-tone="warn"] { background: var(--mist-warn); } .mist-tol i[data-tone="bad"] { background: var(--mist-bad); }
+.mist-tol { --mist-tol-tone: var(--mist-ok); position: relative; height: var(--mist-slider-track-h); border-radius: var(--mist-r-pill); background: var(--mist-fill-2); overflow: hidden; }
+.mist-tol[data-tone="warn"] { --mist-tol-tone: var(--mist-warn); }
+.mist-tol[data-tone="bad"] { --mist-tol-tone: var(--mist-bad); }
+.mist-tol::before { content: ""; position: absolute; left: 30%; right: 30%; top: 0; bottom: 0; border-radius: inherit; background: var(--mist-ok-tint); }
+.mist-tol::after { content: ""; position: absolute; left: 50%; top: 2px; bottom: 2px; width: 1px; background: var(--mist-ink-4); }
+.mist-tol-fill { position: absolute; top: 0; bottom: 0; border-radius: inherit; background: var(--mist-tol-tone); }
+.mist-tol i { position: absolute; top: 50%; width: 2px; height: var(--mist-space-2); border-radius: var(--mist-r-pill); background: var(--mist-on-accent); transform: translate(-50%, -50%); z-index: 1; }
+.mist-tol[data-centered] i { background: var(--mist-tol-tone); }
 .mist-measure-dv { text-align: right; font-weight: var(--mist-fw-medium); }
 .mist-summary-nums { display: flex; gap: 30px; padding: 16px 22px 4px; flex-wrap: wrap; }
 .mist-summary-nums small { display: block; font-size: var(--mist-text-2xs); color: var(--mist-ink-3); }

@@ -253,7 +253,9 @@ export function DevDetailPage(){
           {!fabricDomain&&<><SummaryNumbers items={[{label:'测量点',value:measurements.length},{label:'公差内',value:measureStats.within},{label:'需关注',value:measureStats.attention,tone:'warn'},{label:'外观缺陷',value:version?.qc?.appearanceDefects??'—'}]} />
           <MeasurementTable rows={measurements} /></>}
           {fabricDomain&&<KeyValue items={(version?.qc?.fabricMeasurements||[]).map(row=>({label:row.property,value:`${row.actual} ${row.unit}`}))}/>}
-          {fabricDomain&&!version?.qc?.fabricMeasurements?.length&&<p className="mist-note">{uiText("暂无实测记录")}</p>}
+          {/* Workbench reports retain generic measurements; do not hide them or assume a garment unit for fabric. */}
+          {fabricDomain&&measurements.length>0&&<MeasurementTable rows={measurements} unit="" />}
+          {fabricDomain&&!version?.qc?.fabricMeasurements?.length&&!measurements.length&&<p className="mist-note">{uiText("暂无实测记录")}</p>}
           {version?.qc?<><KeyValue items={[{label:'报告',value:state?.files.find(file=>file.id===version.qc!.report)?.name||version.qc.report},{label:'评审意见',value:version.qc.opinion||'未记录'}]} />{state?.files.find(file=>file.id===version.qc!.report)&&<CardFooter><FileName file={state.files.find(file=>file.id===version.qc!.report)!} label={uiText("预览本版报告")} /><TextLink icon={Download} onClick={()=>void downloadFile(state.files.find(file=>file.id===version.qc!.report)!).catch(cause=>setFailure(String(cause)))}>{uiText("下载本版报告")}</TextLink></CardFooter>}</>:<CardFooter><span className="mist-note">{uiText("暂无 QC 报告")}</span></CardFooter>}
           {!!version?.qcHistory?.length&&<div className="mist-section"><CardHeader title={uiText("历次 QC")} /><Timeline events={version.qcHistory.slice().reverse().map(item=>({who:item.reviewer,when:new Date(item.reviewedAt).toLocaleString(),text:`${qcLabel[item.result]} · ${item.report}\n${item.opinion||'未记录意见'}${item.decision?`\n处理：${item.decision.kind==='rework'?'整改复检':item.decision.kind==='abandon'?'放弃本版':'重新打样'}${item.decision.note?` · ${item.decision.note}`:''}`:''}`}))} /></div>}
         </Card>
