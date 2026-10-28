@@ -15,11 +15,30 @@ describe('returned quotation handoff',()=>{
  });
  it('keeps the handoff after draft edits and costing until the quote is resubmitted',()=>{
   const state=fixture(),quote=state.market.quotations[0],returned=quote.approval!;quote.approval=null;quote.approvalHistory=[returned];expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-return:quote-return',when:'待重新提交'})]);
-  quote.approval={...returned,id:'resubmission',status:'pending'};expect(mistWorkQueue(state,options)).toEqual([]);quote.approval.status='approved';expect(mistWorkQueue(state,options)).toEqual([]);
+  quote.approval={...returned,id:'resubmission',status:'pending'};expect(mistWorkQueue(state,options)).toEqual([]);quote.approval.status='approved';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-issue:quote-return',when:'待发送'})]);
  });
  it('does not assign the return to another user, a reader, or a completed customer-facing quote',()=>{
   const state=fixture();expect(mistWorkQueue(state,{...options,me:'supervisor'})).toEqual([]);expect(mistWorkQueue(state,{...options,can:()=>false})).toEqual([]);expect(mistWorkQueue(state,{...options,canRead:()=>false})).toEqual([]);
   state.market.quotations[0].status='Sent';expect(mistWorkQueue(state,options)).toEqual([]);state.market.quotations[0].status='Rejected';expect(mistWorkQueue(state,options)).toEqual([]);
+ });
+});
+describe('approved quotation business continuation',()=>{
+ const options={canRead:all,can:(permission:string)=>['quotations:write','orders:write'].includes(permission),me:'sales',today:'2026-10-29'};
+ const fixture=()=>{const state=base();state.customers.push({id:'quote-customer',name:'客户'} as any);state.market.quotations.push({id:'quote-ready',code:'QT-READY',customerId:'quote-customer',status:'Draft',convertedOrderId:null,lines:[{id:'a'},{id:'b'}],updatedAt:'2026-10-28T18:55:00Z',approval:{id:'approved-review',requesterId:'sales',reviewerId:'supervisor',status:'approved',submittedAt:'2026-10-28T18:51:00Z',decidedAt:'2026-10-28T18:55:00Z',note:'同意报价',details:[],fileIds:[]}} as any);return state;};
+ it('hands an approved draft back to its requester for issue and removes it once sent',()=>{
+  const state=fixture(),before=structuredClone(state);expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-issue:quote-ready',module:'quotations',source:'task',sourceLabel:'工作事项',when:'待发送',meta:'客户 · 同意报价',target:{view:'quotations',id:'quote-ready',detail:'full'}})]);expect(state).toEqual(before);state.market.quotations[0].status='Sent';expect(mistWorkQueue(state,options)).toEqual([]);
+ });
+ it('waits for customer acceptance, then retains only genuinely pending conversion lines',()=>{
+  const state=fixture(),quote=state.market.quotations[0];quote.status='Accepted';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-convert:quote-ready',when:'待转订单',meta:'客户 · 2 个待转条目'})]);
+  quote.lines[0].conversion={orderId:'order',orderCode:'SO-1',at:'2026-10-29T00:00:00Z',by:'业务员',byId:'sales'};quote.convertedOrderId='order';expect(mistWorkQueue(state,options)[0].meta).toBe('客户 · 1 个待转条目');
+  quote.lines[1].skipped={reason:'客户取消',at:'2026-10-29T00:00:00Z',by:'业务员',byId:'sales'};expect(mistWorkQueue(state,options)).toEqual([]);
+ });
+ it('does not create a conversion action for an already converted legacy quote',()=>{
+  const state=fixture();state.market.quotations[0].status='Accepted';state.market.quotations[0].convertedOrderId='legacy-order';expect(mistWorkQueue(state,options)).toEqual([]);
+ });
+ it('requires the requester identity and the permission for each actual action',()=>{
+  const state=fixture();expect(mistWorkQueue(state,{...options,me:'supervisor'})).toEqual([]);expect(mistWorkQueue(state,{...options,can:()=>false})).toEqual([]);expect(mistWorkQueue(state,{...options,canRead:()=>false})).toEqual([]);
+  state.market.quotations[0].status='Accepted';expect(mistWorkQueue(state,{...options,can:scope=>scope==='quotations:write'})).toEqual([]);expect(mistWorkQueue(state,{...options,canRead:view=>view!=='orders'})).toEqual([]);expect(mistWorkQueue(state,{...options,can:scope=>scope==='orders:write'})).toHaveLength(1);
  });
 });
 describe('supplier invoice payment request handoff',()=>{

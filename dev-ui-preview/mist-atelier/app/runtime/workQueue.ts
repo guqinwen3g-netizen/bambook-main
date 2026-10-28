@@ -9,6 +9,7 @@ import { developmentVersionSamples } from '../../../../server/src/shared/mistDev
 import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, payableBills, billRequestedUnpaidMinor } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { businessDate } from './businessClock';
+import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
 
 type CanRead = (view: string) => boolean;
 export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
@@ -111,16 +112,24 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       target: { view: 'approvals', id: `${review.workspaceId}|${review.id}`, section: 'mine' } as MistTarget, module: local && canRead(module) ? module : 'approvals' });
   }
   if (!state) return items;
-  if (me && canRead('quotations') && can('quotations:write')) {
+  if (me && canRead('quotations')) {
     for (const quote of state.market?.quotations || []) {
-      if (quote.status !== 'Draft') continue;
-      const returned = quote.approval?.status === 'rejected' ? quote.approval
-        : !quote.approval && quote.requiresApproval ? quote.approvalHistory?.at(-1) : undefined;
-      if (returned?.status !== 'rejected' || returned.requesterId !== me) continue;
-      push({ id: `quote-return:${quote.id}`, source: 'task', title: `${quote.code} 报价`,
-        meta: [state.customers.find(customer => customer.id === quote.customerId)?.name, returned.note].filter(Boolean).join(' · '),
-        when: quote.approval ? '退回修改' : '待重新提交', urgent: true, at: returned.decidedAt || returned.submittedAt,
-        target: { view: 'quotations', id: quote.id, detail: 'full' } });
+      const customer=state.customers.find(row=>row.id===quote.customerId)?.name;
+      if (quote.status === 'Draft' && can('quotations:write')) {
+        const returned = quote.approval?.status === 'rejected' ? quote.approval
+          : !quote.approval && quote.requiresApproval ? quote.approvalHistory?.at(-1) : undefined;
+        if (returned?.status === 'rejected' && returned.requesterId === me) {
+          push({ id: `quote-return:${quote.id}`, source: 'task', title: `${quote.code} 报价`,
+            meta: [customer, returned.note].filter(Boolean).join(' · '),
+            when: quote.approval ? '退回修改' : '待重新提交', urgent: true, at: returned.decidedAt || returned.submittedAt,
+            target: { view: 'quotations', id: quote.id, detail: 'full' } });
+        } else if (quote.approval?.status === 'approved' && quote.approval.requesterId === me) {
+          push({id:`quote-issue:${quote.id}`,source:'task',title:`${quote.code} 报价`,meta:[customer,quote.approval.note].filter(Boolean).join(' · '),when:'待发送',urgent:true,at:quote.approval.decidedAt||quote.approval.submittedAt,target:{view:'quotations',id:quote.id,detail:'full'}});
+        }
+      } else if (quote.status === 'Accepted' && quote.approval?.status === 'approved' && quote.approval.requesterId === me && canRead('orders') && can('orders:write')) {
+        const remaining=quotationPendingLines(quote).length;
+        if(remaining)push({id:`quote-convert:${quote.id}`,source:'task',title:`${quote.code} 报价`,meta:[customer,`${remaining} 个待转条目`].filter(Boolean).join(' · '),when:'待转订单',urgent:true,at:quote.updatedAt,target:{view:'quotations',id:quote.id,detail:'full'}});
+      }
     }
   }
   const f = state.fulfillment;
