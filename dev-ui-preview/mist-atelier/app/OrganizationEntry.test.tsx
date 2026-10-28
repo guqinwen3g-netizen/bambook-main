@@ -20,6 +20,21 @@ it('shows the chosen group with an avatar stack capped at four plus a count', ()
   expect(lead.textContent).toContain('+2');
 });
 
+it.each([3,4,5,6])('shows the last member instead of a +1 for a %s-person group',count=>{
+ const members=Array.from({length:count},(_,i)=>person(String(i+1)));
+ const entry=organizationEntry({organization:org({teams:[{id:'a',name:'测试组',members}]}),department:'面料部',teamId:'a',onSelect:vi.fn()});
+ const lead=show(<>{entry.lead}{entry.disclosure}</>);
+ expect(lead.querySelector('[title="+1"]')).toBeNull();
+ const expanded=lead.querySelector('[data-expanded-only]')!;
+ const collapsed=lead.querySelector('[data-collapsed-only]')!;
+ if(count<=5)expect(expanded.querySelector(`[title="成员${count}"]`)).not.toBeNull();
+ if(count===3)expect(collapsed.querySelector('[title="成员3"]')).not.toBeNull();
+ if(count===6)expect(expanded.querySelector('[title="+2"]')).not.toBeNull();
+ const row=lead.querySelectorAll('.mist-team-row')[1];
+ if(count<=4)expect(row.querySelector(`[title="成员${count}"]`)).not.toBeNull();
+ else expect(row.querySelector(`[title="+${count-3}"]`)).not.toBeNull();
+});
+
 it('merges members across groups for the "all" view and lists every group to switch to', () => {
   expect(unionMembers(teams).map(p => p.id)).toEqual(['1', '2', '3', '4', '5', '6', '7']);
   const onSelect = vi.fn(), onManageTeams = vi.fn();

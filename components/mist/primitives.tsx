@@ -152,10 +152,11 @@ export function Avatar({ name, src, tone, size, identityKey }: { name: string; s
     </span>
   );
 }
-/** overlap：小组头像沿用个人配色，容器同色细线分隔重叠边缘。 */
+/** overlap：小组头像沿用个人配色，主题框色分隔重叠边缘。 */
 export function AvatarStack({ people, size = 'sm', max = 4, overlap = false }: { people: Array<{ name: string; tone?: Tone; src?: string; identityKey?: string }>; size?: 'xs' | 'sm'; max?: number; overlap?: boolean }) {
-  const shown = people.slice(0, max);
-  return <span className="mist-stack" data-overlap={overlap || undefined}>{shown.map((p, i) => <Avatar key={p.identityKey ?? i} {...p} size={size} />)}{people.length > max && <Avatar name={`+${people.length - max}`} size={size} />}</span>;
+  const visibleCount = people.length === max + 1 ? people.length : max;
+  const shown = people.slice(0, visibleCount);
+  return <span className="mist-stack" data-overlap={overlap || undefined}>{shown.map((p, i) => <Avatar key={p.identityKey ?? i} {...p} size={size} />)}{people.length > visibleCount && <Avatar name={`+${people.length - visibleCount}`} size={size} />}</span>;
 }
 
 /* ───────────── Card ───────────── */
