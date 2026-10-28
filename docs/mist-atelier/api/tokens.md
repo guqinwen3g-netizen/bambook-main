@@ -130,7 +130,7 @@
 | `--mist-side-hover` | `rgba(255,255,255,.14)` | `rgba(141,213,222,.07)` |
 | `--mist-side-badge` | `rgba(255,255,255,.92)` | `#8DD5DE` |
 | `--mist-side-badge-ink` | `#275768` | `#101C35` |
-| `--mist-side-halo` | `var(--mist-card)` | `var(--mist-card)` |
+| `--mist-side-halo` | `#FFFFFF` | `#132139` |
 
 ## topbar
 
