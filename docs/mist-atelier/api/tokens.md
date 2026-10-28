@@ -115,7 +115,7 @@
 
 | Token | 浅色 | 深色 |
 |---|---|---|
-| `--mist-slider-track-h` | `6px` | `同浅色` |
+| `--mist-slider-track-h` | `12px` | `同浅色` |
 
 ## avatar
 

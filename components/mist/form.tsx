@@ -81,7 +81,7 @@ export function ChoiceCards<V extends string>({ options, value, onChange, cols =
     <div className="mist-choices" role="radiogroup" aria-label={uiText(ariaLabel)} style={{ ['--mist-choice-cols' as string]: cols }}>
       {options.map(o => (
         <button key={o.value} type="button" disabled={disabled} role="radio" aria-checked={o.value === value} className="mist-choice" onClick={() => onChange(o.value)}>
-          <b>{o.icon && <Icon icon={o.icon} size="sm" />}{uiText(o.title)}<span className="mist-radio" /></b>
+          <b>{o.icon && <Icon icon={o.icon} size="sm" />}{uiText(o.title)}<span className="mist-choice-check" aria-hidden="true"><Icon icon={Check} size="sm" /></span></b>
           {o.description && <small>{uiText(o.description)}</small>}
         </button>
       ))}

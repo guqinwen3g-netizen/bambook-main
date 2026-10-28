@@ -99,7 +99,7 @@
 | 导出 | 说明 | Props / 签名 |
 |---|---|---|
 | `SliderProps` | — | `type SliderProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' \| 'value' \| 'defaultValue' \| 'min' \| 'max'> & { value: number; min?: number; max?: number };` |
-| `Slider` | Mist 滑杆：自定义轨道与胶囊滑块，保留原生触摸、键盘和表单语义。 | `forwardRef<HTMLInputElement, SliderProps>` |
+| `Slider` | Mist 填充滑杆：原生输入负责拖动/键盘，独立轨道与短刻度负责呈现。 | `forwardRef<HTMLInputElement, SliderProps>` |
 
 ## 表单操作栏 · `components/mist/formFooter.tsx`
 
