@@ -31,6 +31,19 @@ describe('Mist production complete range',()=>{
 });
 
 it('parses actual size entries without inventing a default size',()=>{expect(parseProductionSizes('M:4\nL：6')).toEqual([{size:'M',quantity:4},{size:'L',quantity:6}]);expect(parseProductionSizes('')).toEqual([]);expect(()=>parseProductionSizes('M = ten')).toThrow('逐行');});
+it('opens the exact original branch from an approval target id',async()=>{await mount({view:'production-board',id:'production-b'});expect(getByRole(document.body,'dialog',{name:'PROD-B'})).toBeTruthy();});
+
+it('records offline intake through the real editor with unknown progress and returns to its original branch',async()=>{
+ const branch=bridge.state!.productions[1];bridge.state!.fulfillment.productionFacts.find(f=>f.productionId===branch.id)!.release=undefined;
+ await mount({view:'production-board',productionId:branch.id});await click('登记线下在制');
+ expect(getByRole(document.body,'spinbutton',{name:'工厂进度（%）'}).getAttribute('value')).toBe('');
+ await click('下一步');
+ await act(async()=>{const source=getByRole(document.body,'textbox',{name:'资料来源'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(source,'工厂反馈');source.dispatchEvent(new Event('input',{bubbles:true}));const evidence=getByRole(document.body,'textbox',{name:'事实依据'}) as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(evidence,'工厂已开产，当前工序待核');evidence.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('下一步');await click('提交承接');
+ expect(bridge.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.production.intake',payload:expect.objectContaining({productionId:branch.id,percent:null,stage:null,quantity:null,sourceName:'工厂反馈'})}));
+ expect(getByRole(document.body,'dialog',{name:'PROD-B'}).textContent).toContain('进度待核');
+ expect(queryByRole(document.body,'spinbutton',{name:'生产进度（%）'})).toBeNull();
+});
 
 
 it('shows fabric quantities in their source unit and never asks for garment size planning',async()=>{

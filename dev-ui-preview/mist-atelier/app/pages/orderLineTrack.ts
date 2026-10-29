@@ -6,6 +6,7 @@ import { productionSampleRequirements } from '../../../../server/src/shared/mist
 import { materialDeliveryRows } from '../../../../server/src/shared/mistInternalFabric';
 import { fulfillmentProductionQcPassed } from '../../../../server/src/shared/mistFulfillment';
 import type { StepState } from '../../../../components/mist';
+import { productionIntake, productionObservation, observedProductionStages } from '../../../../server/src/shared/mistProductionIntake';
 
 export type LineStageKey = 'pp' | 'material' | 'cut' | 'inspection' | 'completion' | 'shipment';
 export type LineStage = { key: LineStageKey; label: string; state: StepState; caption?: string; reason?: string; target?: { view: string; id?: string } };
@@ -63,6 +64,8 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
     if (!jobs.length) return { ...base, state: 'todo', caption: '未开立生产' };
     const held = jobs.find(job => f?.productionFacts?.some(fact => fact.productionId === job.id && fact.hold));
     if (held) return { ...base, state: 'blocked', caption: '已暂停', target: { view: 'production-board', id: held.id } };
+    const intakeJob=jobs.find(job=>productionIntake(state,job.id));
+    if(intakeJob){const observation=productionObservation(state,intakeJob.id);return {...base,state:'now',caption:'线下在制 · '+(observation?.stage?observedProductionStages(order.type)[observation.stage]:'工序待核'),target:{view:'production-board',id:intakeJob.id}};}
     const waiting = jobs.find(job => !f?.productionFacts?.some(fact => fact.productionId === job.id && fact.release));
     if (waiting) return { ...base, state: 'now', caption: '待放行', target: { view: 'production-board', id: waiting.id } };
     if (jobs.some(job => job.col === 'cut')) return { ...base, state: 'now', caption: `${jobs.filter(job => job.col === 'cut').length} 个分支开裁中`, target: { view: 'production-board', id: jobs.find(job => job.col === 'cut')!.id } };
