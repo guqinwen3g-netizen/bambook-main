@@ -38,6 +38,23 @@ it('shows an internal budget without external collection or shipping actions',()
   expect([...host.querySelectorAll('button')].some(button=>button.textContent==='装箱单草稿')).toBe(false);
 });
 
+it('does not mark full-package procurement complete while another ordered line has no approved coverage',()=>{
+ const a=store.state!.orderLines[0];a.fulfillmentMode='full_package';a.qty=10;
+ store.state!.orderLines.push({...a,id:'full-package-b',qty:5});
+ store.state!.fulfillment.purchases=[{id:'first',orderId,lineId:a.id,kind:'finished',state:'approved',quantity:10,unit:a.unit}] as any;
+ render();const node=getByText(host,'采购').closest('.mist-flow-node')!;
+ expect(node.getAttribute('data-state')).toBe('now');expect(node.textContent).toContain('1/2');
+});
+
+it('requires the full quantity for every full-package line and combines approved partial contracts',()=>{
+ const a=store.state!.orderLines[0];a.fulfillmentMode='full_package';a.qty=10;
+ store.state!.orderLines.push({...a,id:'full-package-b',qty:5});
+ store.state!.fulfillment.purchases=[{id:'first',orderId,lineId:a.id,kind:'finished',state:'approved',quantity:10,unit:a.unit},{id:'second-part',orderId,lineId:'full-package-b',kind:'finished',state:'approved',quantity:2,unit:a.unit},{id:'cancelled',orderId,lineId:'full-package-b',kind:'finished',state:'cancelled',quantity:5,unit:a.unit}] as any;
+ render();expect(getByText(host,'采购').closest('.mist-flow-node')!.getAttribute('data-state')).toBe('now');
+ store.state!.fulfillment.purchases.push({id:'remaining',orderId,lineId:'full-package-b',kind:'finished',state:'approved',quantity:3,unit:a.unit} as any);
+ render();const node=getByText(host,'采购').closest('.mist-flow-node')!;expect(node.getAttribute('data-state')).toBe('done');expect(node.textContent).toContain('2/2');
+});
+
 it('links uploaded originals to the exact order without changing contract confirmation files',async()=>{
  const before=structuredClone(store.state!.orders[0].governance);
  store.uploadFile.mockImplementation(async(file:File)=>{const saved={id:'order-original',name:file.name,mimeType:file.type,size:file.size,storageKey:'fixture/order-original',createdAt:context.now};store.state!.files.push(saved);return saved;});
