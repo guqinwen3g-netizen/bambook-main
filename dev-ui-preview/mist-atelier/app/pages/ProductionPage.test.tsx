@@ -129,6 +129,16 @@ it('retains frozen conditional sample findings after production is released',asy
  await mount({view:'production-board',productionId:'production-b'});
  expect(document.body.textContent).toContain('样品关注项');expect(document.body.textContent).toContain('SMP-STONE');expect(document.body.textContent).not.toContain('卷边须在首批大货复核');await click('查看关注项');expect(document.body.textContent).toContain('卷边须在首批大货复核');
 });
+it('keeps a current conditional production report visible after business continuation without changing its state',async()=>{
+ const state=bridge.state!,branch=state.productions[1],fact=state.fulfillment.productionFacts.find(row=>row.productionId===branch.id)!;
+ state.fulfillment.qcTasks.push({id:'bulk-condition',code:'QC-CONDITION',kind:'production',domain:'garment',source:{kind:'orderLine',orderId:branch.orderId,lineId:branch.lineId,productionId:branch.id},factory:branch.factory,location:'现场',contact:'',due:branch.due,requestedBy:'业务员',assignee:'QC',state:'reported',reportIds:['condition-report'],createdAt:context.now,businessContinued:{reportId:'condition-report',actor:'业务员',at:context.now,note:'保留首批复核要求'}});
+ state.fulfillment.qcReports.push({id:'condition-report',taskId:'bulk-condition',result:'conditional',report:'R-CONDITION',opinion:'首批复核色差',measurements:[],fileIds:[],reviewer:'QC',reviewedAt:context.now,scopeRevision:fact.revision,sizeChecks:[]});
+ const before=structuredClone(state);await mount({view:'production-board',productionId:branch.id});
+ expect(getByRole(document.body,'dialog',{name:'PROD-B'}).textContent).toContain('生产 QC 有保留');await click('查看 QC 结论');expect(go).toHaveBeenCalledWith('qc-workbench','bulk-condition',{productionId:branch.id,orderLineId:branch.lineId,section:'production'});expect(bridge.state).toEqual(before);expect(bridge.run).not.toHaveBeenCalled();
+ await act(async()=>root!.unmount());root=undefined;host.remove();
+ state.fulfillment.qcReports.push({...state.fulfillment.qcReports.at(-1)!,id:'clear-report',result:'pass'});state.fulfillment.qcTasks.at(-1)!.reportIds.push('clear-report');
+ await mount({view:'production-board',productionId:branch.id});expect(getByRole(document.body,'dialog',{name:'PROD-B'}).textContent).not.toContain('生产 QC 有保留');
+});
 
 it('keeps release evidence on demand and omits obsolete implementation notes',async()=>{
  const fact=bridge.state!.fulfillment.productionFacts.find(row=>row.productionId==='production-b')!;
