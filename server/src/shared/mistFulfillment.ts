@@ -1080,7 +1080,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             }
             else if (quantity > s.available) fail('可用样品不足');
             const person = text(p.person, '借用人/收件人', p.kind === 'lend' || p.kind === 'send'), location = text(p.location, '位置', false), note = text(p.note, '备注', false), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
-            if (expectedReturn && expectedReturn < ctx.now.slice(0, 10))
+            if (expectedReturn && expectedReturn < platformBusinessDate(ctx.now))
                 fail('预计归还日不能早于借出日');
             const sendPurpose=p.kind==='send'?sampleSendPurpose(p.sendPurpose,s):undefined;
             if(sendPurpose){const blocker=sampleSendBlocker(root,s,sendPurpose,note,p.sendPurpose!==undefined);if(blocker)fail(blocker,'PRECONDITION');}
@@ -1541,7 +1541,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (purchase.state !== 'approved') fail('仅已批准采购可登记退换', 'PRECONDITION');
             const quantity = qty(p.quantity, '退换数量'), date = day(p.date, '退换日期'), evidence = text(p.evidence, '退换依据');
             if (!['replace', 'noReplace'].includes(p.disposition)) fail('请选择供应商补发或不再补发');
-            if (date > ctx.now.slice(0, 10)) fail('退换日期不得在未来');
+            if (date > platformBusinessDate(ctx.now)) fail('退换日期不得在未来');
             if (date < receipt.date) fail('退换日期不能早于收货日期');
             const left = sum([receipt.rejected, -receiptReturnedQuantity(receipt)]);
             if (quantity > left) fail(`该次收货拒收 ${receipt.rejected} ${purchase.unit}，尚可登记退换 ${left} ${purchase.unit}`);
@@ -1606,7 +1606,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (typeof p.partialAllowed !== 'boolean' || !['sea', 'air'].includes(p.mode))
                 fail('请明确分批与运输条款');
             const row: FulfillmentShippingTerms = { orderId: order.id, consignee: text(p.consignee, '合同收货方'), partialAllowed: p.partialAllowed, mode: p.mode, confirmedAt: day(p.confirmedAt, '条款确认日'), evidence: text(p.evidence, '合同/信用证确认依据') };
-            if (row.confirmedAt > ctx.now.slice(0, 10))
+            if (row.confirmedAt > platformBusinessDate(ctx.now))
                 fail('条款确认日期不能在未来');
             const old = f.shippingTerms.find(t => t.orderId === order.id);
             if (old)
@@ -1633,7 +1633,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('请先建立并选择准确生产分支'); if (order.customerId !== first.customerId || order.type !== first.type)
                 fail('不同客户或业务域不能合票'); const terms = f.shippingTerms.find(t => t.orderId === order.id); if (!terms || terms.consignee !== firstTerms!.consignee || terms.mode !== firstTerms!.mode)
                 fail('合票条目的合同收货方或运输方式不同'); if (!order.handoffAt)
-                fail('订单尚未完成履约交接'); const quantity = qty(l.quantity), reserved = sum(f.shipments.filter(s => s.id !== old?.id && s.state !== 'cancelled').flatMap(s => s.lines.filter(i => i.lineId === line.id).map(i => i.quantity))); if (day(l.factoryConfirmedAt, '工厂可出运确认日') > ctx.now.slice(0, 10))
+                fail('订单尚未完成履约交接'); const quantity = qty(l.quantity), reserved = sum(f.shipments.filter(s => s.id !== old?.id && s.state !== 'cancelled').flatMap(s => s.lines.filter(i => i.lineId === line.id).map(i => i.quantity))); if (day(l.factoryConfirmedAt, '工厂可出运确认日') > platformBusinessDate(ctx.now))
                 fail('工厂确认日期不得在未来'); const allocation: ShipmentLine = { lineId: line.id, orderId: order.id, ...(productionId ? { productionId } : {}), quantity, factoryConfirmedAt: day(l.factoryConfirmedAt, '工厂可出运确认日') }; checkPhysicalReservation(root, allocation, old?.id); return allocation; });
             if (new Set(lines.map(l => `${l.lineId}:${l.productionId || ''}`)).size !== lines.length)
                 fail('同一来源不可重复添加');
@@ -1774,7 +1774,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, declarationNo: text(p.declarationNo, '报关单号', p.status !== 'draft'), broker: text(p.broker, '报关行', p.status !== 'draft'), hsCode: text(p.hsCode, 'HS编码', p.status !== 'draft'), origin: text(p.origin, '原产地', p.status !== 'draft'), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft'), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
             if (row.clearedAt && row.declaredAt && row.clearedAt < row.declaredAt)
                 fail('清关不能早于申报');
-            if (row.clearedAt > ctx.now.slice(0, 10) || row.declaredAt > ctx.now.slice(0, 10))
+            if (row.clearedAt > platformBusinessDate(ctx.now) || row.declaredAt > platformBusinessDate(ctx.now))
                 fail('实际申报/清关日期不得在未来');
             if (old)
                 Object.assign(old, row);

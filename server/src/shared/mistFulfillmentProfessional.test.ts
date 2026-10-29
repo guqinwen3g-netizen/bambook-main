@@ -105,3 +105,28 @@ describe('production completion business date', () => {
   expect(f.state.fulfillment.productionFacts[0].completion?.date).toBe('2026-10-13');
  });
 });
+
+describe('remaining fulfillment business-day boundaries',()=>{
+ it('uses the current business day for confirmed terms and factory shipping readiness',()=>{
+  const f=fixture(),{productionId,purchaseId}=f.released();f.receiveAndComplete(productionId,purchaseId);f.report(f.productionTask(productionId),'pass');
+  f.context.now='2026-10-29T16:30:00.000Z';f.state.orders[0].handoffAt=f.context.now;
+  const terms=(date:string)=>f.run({type:'fulfillment.shipments.sourceTerms',payload:{orderId:f.orderId,consignee:'客户',partialAllowed:false,mode:'sea',confirmedAt:date,evidence:'合同已核实'}});
+  expect(()=>terms('2026-10-31')).toThrow('条款确认日期不能在未来');expect(()=>terms('2026-10-30')).not.toThrow();
+  const ship=(date:string)=>f.run({type:'fulfillment.shipments.save',payload:{consignee:'客户',mode:'sea',portOfLoading:'上海',portOfDischarge:'伦敦',incoterm:'FOB',plannedDate:'',booking:'',lines:[{orderId:f.orderId,lineId:f.state.orderLines[0].id,productionId,quantity:10,factoryConfirmedAt:date}],note:'',fileIds:[]}});
+  expect(()=>ship('2026-10-31')).toThrow('工厂');expect(()=>ship('2026-10-30')).not.toThrow();
+  const customs=(date:string)=>f.run({type:'fulfillment.customs.save',payload:{shipmentId:f.state.fulfillment.shipments[0].id,status:'draft',declarationNo:'',broker:'报关行',hsCode:'620530',origin:'CN',tradeMode:'FOB',declaredAt:date,clearedAt:'',evidence:'申报记录',fileIds:[],note:''}});
+  expect(()=>customs('2026-10-31')).toThrow('未来');expect(()=>customs('2026-10-30')).not.toThrow();
+ });
+ it('uses the current business day for supplier rejection returns',()=>{
+  const f=fixture(),{purchaseId}=f.released();
+  const receipt=f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:9,rejected:1,destination:'supplier',location:'仓库',date:'2026-10-13',evidence:'拒收一件',fileIds:[]}}).id!;
+  f.context.now='2026-10-29T16:30:00.000Z';
+  const returned=(date:string)=>f.run({type:'fulfillment.procurement.return',payload:{receiptId:receipt,quantity:1,date,disposition:'replace',evidence:'已退回待补发',fileIds:[]}});
+  expect(()=>returned('2026-10-31')).toThrow('未来');expect(()=>returned('2026-10-30')).not.toThrow();
+ });
+ it('does not allow yesterday as an expected sample return just after Shanghai midnight',()=>{
+  const f=fixture();f.released();f.context.now='2026-10-29T16:30:00.000Z';
+  const lend=(date:string)=>f.run({type:'fulfillment.samples.move',payload:{id:f.state.fulfillment.samples[0].id,kind:'lend',quantity:1,person:'业务同事',location:'样品室',note:'对样后归还',expectedReturn:date}});
+  expect(()=>lend('2026-10-29')).toThrow('预计归还日不能早于借出日');expect(()=>lend('2026-10-30')).not.toThrow();
+ });
+});
