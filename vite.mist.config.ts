@@ -5,7 +5,11 @@ import { mistDevelopmentProxy } from './scripts/mist-dev-target.mjs';
 // Both Mist ports run the same approved frontend source. Business adapters attach here.
 export default defineConfig(
   mergeConfig(referenceConfig, {
-    define: { 'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('false') },
+    // The runtime CLI must use the same auth/data proxy as the daily dev runner.
+    define: {
+      'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('false'),
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify('/api'),
+    },
     cacheDir: '/tmp/bambook-mist-runtime-cache',
     server: {
       port: 3001,
