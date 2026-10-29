@@ -131,3 +131,9 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 `/assets/` 必须给 `.mjs` 返回 JavaScript MIME。系统默认 `mime.types` 可能只有 `.js`，此时 PDF.js module worker 会因 `application/octet-stream` 被浏览器拒绝。资产 location 先 `include /etc/nginx/mime.types;` 保留 CSS/字体等类型，再加 `types { application/javascript mjs; }`；基线在 `scripts/deploy/bootstrap-dev-server.sh`。变更前保存私有备份，`nginx -t` 通过才 reload，并同时核对 worker 和 CSS 的公开 Content-Type。
 
 `components/mist/filePreview.tsx` 的 worker 地址附加模块版本查询参数，避免已缓存的错误 MIME 响应；模块加载失败不应被误报为 PDF 原件损坏。
+
+## 2026-10-29 · localhost优先与仅后端同步
+
+本轮运行后端为 `86793bb5ca81649f3ae506b152ec3eb5fec2d77b`，公网静态前端继续为 `5d96f39`；两者有意分开。localhost使用最新已提交前端并连接原SaaS，不另建本机业务库。仅后端包复用已校验的现行web文件树及已提交后端源码，沿既有限制接收/激活、健康检查和失败回滚执行；激活前后web摘要完全一致，四个公司库版本及内容摘要不变，无schema操作。实际GUI补录另按授权在指定公司办理并做完整前后比较。
+
+公开 `mist-version.json` 此时只代表保留的静态前端，不能据此判定新后端未同步；后端以激活回执、双API健康及实际接口回读核实。本轮临时独立包、静态备份、库快照与回执均只留私有目录；默认直传脚本仍是完整发布，不因这条记录自动改为仅后端。后续继续遵循用户localhost优先，不为查看界面反复发布公网前端。
