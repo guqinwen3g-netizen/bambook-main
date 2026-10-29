@@ -42,6 +42,12 @@ export function productionNok(state: MistState, branch: MistProduction) {
   return (f?.qcTasks || []).find(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && f.qcReports.find(report => report.id === task.reportIds.at(-1))?.result === 'reject' && !task.businessContinued);
 }
 
+/** Business continuation resolves the pause, not the report's recorded qualifications. */
+export function productionConditionalQc(state: MistState, branch: MistProduction) {
+  const f=state.fulfillment;
+  return (f?.qcTasks||[]).find(task=>task.kind==='production'&&task.source.kind==='orderLine'&&task.source.productionId===branch.id&&f.qcReports.find(report=>report.id===task.reportIds.at(-1))?.result==='conditional');
+}
+
 /** Older generated workflow reminders are progress facts, not business risks. */
 export function productionRiskText(branch: Pick<MistProduction, 'risk'>): string {
   const risk = branch.risk || '';
