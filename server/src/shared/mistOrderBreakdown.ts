@@ -6,7 +6,9 @@ export type GarmentBreakdown={kind:'garment';sizes:string[];rows:Array<{color:st
 export type FabricBreakdown={kind:'fabric';composition:string;width:number|null;weight:number|null;rows:Array<{color:string;quantity:number}>};
 export type OrderLineBreakdown=GarmentBreakdown|FabricBreakdown;
 export const NO_BREAKDOWN='未分色分码';
-const MAX_COLORS=30,MAX_SIZES=20;
+// A multi-length garment assortment can exceed twenty columns. Bound the
+// matrix for input safety without cutting ordinary short/regular/long sizes.
+const MAX_COLORS=30,MAX_SIZES=60;
 const round=(value:number)=>Math.round(value*10000)/10000;
 const n=(value:number)=>String(round(value));
 

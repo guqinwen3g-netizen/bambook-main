@@ -18,6 +18,17 @@ function fixture(){
 const lineOf=(f:ReturnType<typeof fixture>,orderId:string)=>f.state.orderLines.find(l=>l.orderId===orderId) as unknown as {id:string;qty:number;breakdown?:OrderLineBreakdown};
 
 describe('BB-ORD-3 colour × size and fabric spec breakdown',()=>{
+ it('preserves a multi-length assortment larger than twenty sizes in source parsing and order storage',()=>{
+  const sizes=Array.from({length:24},(_,i)=>`Size-${i+1}`),bd=garment([['Blue',sizes.map(()=>2)]],sizes);
+  expect(parseSizeRange(sizes.join(','))).toEqual(sizes);
+  expect(normalizeOrderBreakdown('garment',bd)).toEqual(bd);
+  const f=fixture(),created=f.create('garment',{qty:48,breakdown:bd});expect(lineOf(f,created.orderId!)).toMatchObject({qty:48,breakdown:bd});
+ });
+ it('retains a bounded matrix and rejects mismatched quantities after expanding size capacity',()=>{
+  const sizes=Array.from({length:61},(_,i)=>`Size-${i+1}`);
+  expect(()=>normalizeOrderBreakdown('garment',garment([['Blue',sizes.map(()=>1)]],sizes))).toThrow('尺码不能超过 60 个');
+  expect(()=>normalizeOrderBreakdown('garment',garment([['Blue',[1]]],sizes.slice(0,24)))).toThrow('尺码数量与尺码列不一致');
+ });
  it('creates a 2 colour × 4 size garment line and a 2 colour fabric line; quantity is the server-computed sum and reads back',()=>{
   const f=fixture(),bd=garment([['藏青',[10,20,30,40]],['黑',[5,0,15,0]]]);
   const g=f.create('garment',{qty:120,breakdown:bd});
