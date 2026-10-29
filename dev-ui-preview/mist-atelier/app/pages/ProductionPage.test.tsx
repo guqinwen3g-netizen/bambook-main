@@ -232,3 +232,16 @@ it('moves completed offline production out of the old observation list without r
  await act(async()=>card.click());expect(getByRole(document.body,'dialog',{name:'PROD-B'}).textContent).toContain('上次工厂进度');
  expect(fact.observations[0]).toEqual(observed);expect(bridge.run).not.toHaveBeenCalled();
 });
+
+it('disables final completion during a hold and displays its Shanghai business date consistently',async()=>{
+ const state=bridge.state!,fact=state.fulfillment.productionFacts.find(row=>row.productionId==='production-b')!;
+ const g=state.orders[0].governance!;for(const contract of [g.contract,g.approvedSnapshot!.contract]){contract.quantityBasis='total';contract.quantityBasisNote='客户按总量核验';}
+ fact.hold={at:'2026-10-29T16:30:00Z',actor:'业务员',category:'material',reason:'合格拉链待到厂'};
+ await mount({view:'production-board',productionId:'production-b'});
+ const detail=getByRole(document.body,'dialog',{name:'PROD-B'});
+ const complete=getByRole(detail,'button',{name:'登记最终完工数量'}) as HTMLButtonElement;
+ expect(complete.disabled).toBe(true);expect(complete.title).toContain('暂停');
+ expect(detail.textContent).toContain('2026-10-30');expect(detail.textContent).not.toContain('2026-10-29');
+ await click('恢复生产');expect(getByRole(document.body,'dialog',{name:'恢复生产'}).textContent).toContain('2026-10-30');
+ expect(bridge.run).not.toHaveBeenCalled();
+});
