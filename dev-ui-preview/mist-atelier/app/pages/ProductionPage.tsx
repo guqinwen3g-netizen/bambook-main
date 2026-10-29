@@ -11,7 +11,8 @@ import {businessNow,businessToday} from '../runtime/businessClock';
 import React from 'react';
 import { AlertTriangle, CalendarRange, Factory } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Drawer, Dropdown, EmptyState, Field, FormGrid, Kanban, KeyValue, Meter, MistPage, Mono, ObjectCell, PageHeader, Pill, SearchField, Segmented, SummaryBar, TextArea, TextInput, Thumb, Toolbar, useToast } from '../../../../components/mist';
-import type { MistProduction } from '../../../../server/src/shared/mistWorkspace';
+import type { MistProduction, MistState } from '../../../../server/src/shared/mistWorkspace';
+import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
 import { IMG, PROD_COLUMNS } from '../data';
 import { useNav } from '../nav';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -43,6 +44,22 @@ export function productionWindow(range: ProductionRange, now = businessNow(), it
   const end = new Date(start);
   if (range === 'month') end.setMonth(end.getMonth() + 1); else end.setDate(end.getDate() + 7);
   return { start, end };
+}
+/** Range membership is a read projection; evidence dates must never be written into a missing actual start. */
+export function productionInWindow(state: Pick<MistState,'fulfillment'>|null, item: MistProduction, window: {start:Date;end:Date}): boolean {
+  if(item.closed)return false;
+  const fact=state?.fulfillment.productionFacts?.find(row=>row.productionId===item.id);
+  const intake=state?productionIntake(state,item.id):undefined,observed=state?productionObservation(state,item.id):undefined;
+  const releaseDay=fact?.release&&Number.isFinite(Date.parse(fact.release.at))?platformBusinessDate(fact.release.at):undefined;
+  const firstKnownDay=observed?.startedOn||intake?.snapshot.startedOn||intake?.snapshot.asOf||item.startDate||releaseDay;
+  const start=firstKnownDay?mistDate(firstKnownDay):null;
+  // Only a resolved completed lane ends an active branch; an overdue plan or pending QC stays in hand.
+  const completed=item.col==='done'&&fact?.completion?mistDate(fact.completion.date):null;
+  if(completed)return completed.getTime()>=window.start.getTime()&&(start||completed).getTime()<window.end.getTime();
+  if(start)return start.getTime()<window.end.getTime();
+  if(item.pct>0)return true;
+  const due=mistDate(item.due);
+  return !due||due.getTime()>=window.start.getTime()&&due.getTime()<window.end.getTime();
 }
 export function ProductionPage() {
   const density = useDevice('density');
@@ -85,13 +102,8 @@ export function ProductionPage() {
   React.useEffect(() => { if (selected) setDraft({ pct: selected.pct, risk: productionRiskText(selected), note: '', startDate: selected.startDate ?? '', due: selected.due }); setFailure(''); }, [selected?.id]);
   const matching = items.filter(item => !(orderId !== 'all' && item.orderId !== orderId || q && !`${item.name} ${item.code} ${item.factory} ${item.order}`.toLowerCase().includes(q.toLowerCase())));
   const window = productionWindow(range,businessNow(),matching);
-  const shown = matching.filter(item => {
-    if(range==='all')return true;
-    const due = mistDate(item.due), start = item.startDate ? mistDate(item.startDate) : null;
-    if (!due) return true;
-    if (start) return start.getTime() < window.end.getTime() && due.getTime() >= window.start.getTime();
-    return due.getTime() >= window.start.getTime() && due.getTime() < window.end.getTime();
-  });
+  const shown = matching.filter(item => range==='all'||productionInWindow(state,item,window));
+  const offlineShown=shown.filter(item=>state&&productionIntake(state,item.id)),normalShown=shown.filter(item=>!state||!productionIntake(state,item.id));
   const domains=new Set(shown.map(item=>state?.orders.find(order=>order.id===item.orderId)?.type));
   const domain=domains.size===1?[...domains][0]:undefined;
   const stageTitles:Record<string,string>=domain==='garment'?{done:'已完成'}:domain==='fabric'?{cut:'备货',sew:'加工',finish:'整理',qc:'尾检',done:'已完成'}:{cut:'准备',sew:'制作',finish:'整理',qc:'尾检',done:'已完成'};
@@ -121,12 +133,18 @@ export function ProductionPage() {
       { key: 'schedule', header: '计划时间', width: 'minmax(220px,2fr)', render: item => <><svg width="100%" height="28" viewBox="0 0 100 12" role="img" aria-label={uiText(item.startDate ? `${item.startDate} 至 ${item.due}` : `交期 ${item.due}，未记录开始日`)}>
         {item.startDate ? <line x1={position(item.startDate)} y1="6" x2={position(item.due)} y2="6" stroke="var(--mist-accent)" strokeWidth="3" strokeLinecap="round" /> : <circle cx={position(item.due)} cy="6" r="2" fill="var(--mist-accent)" />}</svg><span className="mist-cell-sub">{uiText(item.startDate ? `${item.startDate} → ` : '交期 ')}{item.due}</span></> },
       { key: 'progress', header: '进度', width: '100px', render: item => uiText(state?productionProgressText(state,item):`${item.pct}%`) },
-    ]} /></Card> : <Kanban columns={[...columns.map(column => ({ ...column, items: shown.filter(item => item.col === column.id&&!productionIntake(state!,item.id)) })),...(shown.some(item=>productionIntake(state!,item.id))?[{id:'intake',title:uiText('线下在制'),color:'var(--mist-accent)',items:shown.filter(item=>productionIntake(state!,item.id))}]:[])]} itemKey={item => item.id}
+    ]} /></Card> : <>{offlineShown.length>0&&<Card className="mist-section"><CardHeader title={uiText('线下在制')} /><DataTable density={density} ariaLabel={uiText('线下在制生产')} rows={offlineShown} rowKey={item=>item.id} onRowClick={item=>setSelectedId(item.id)} columns={[
+      {key:'object',header:'生产单',width:'minmax(140px,1fr)',render:item=><ObjectCell name={item.name} meta={<><Mono>{item.code}</Mono> · {item.qty} {productionUnit(item)}</>}/>},
+      {key:'factory',header:'工厂',width:'140px',hideOnMobile:true,render:item=>item.factory},
+      {key:'observed',header:'工厂进度',width:'120px',render:item=>{const row=productionObservation(state!,item.id);return <>{uiText(productionProgressText(state!,item))}<span className="mist-cell-sub">{uiText(row?.stage?observedProductionStages(state!.orders.find(o=>o.id===item.orderId)?.type)[row.stage]:'工序待核')}</span></>;}},
+      {key:'asOf',header:'截至日',width:'110px',hideOnMobile:true,render:item=>productionObservation(state!,item.id)?.asOf||'—'},
+      {key:'status',header:'状态',width:'100px',render:item=>{const r=productionIntake(state!,item.id),nok=productionNok(state!,item);return <Pill tone={nok?'bad':r?.status==='rejected'?'warn':'neutral'}>{uiText(nok?'QC NOK':r?.status==='pending'?'承接待确认':r?.status==='rejected'?'承接已退回':'承接已确认')}</Pill>;}},
+    ]}/></Card>}{normalShown.length>0&&<Kanban columns={columns.map(column => ({ ...column, items: normalShown.filter(item => item.col === column.id) }))} itemKey={item => item.id}
       onMove={busy||!canPlan ? undefined : (id, col) => { void move(id, col); }} onOpen={item => setSelectedId(item.id)} renderCard={item => <>
         <div className="mist-row"><Thumb src={IMG[item.img]} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={uiText(`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`)}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
         {productionIntake(state!,item.id)?<div className="mist-cell-sub">{uiText(productionProgressText(state!,item))} · {uiText(productionObservation(state!,item.id)?.stage?observedProductionStages(state!.orders.find(o=>o.id===item.orderId)?.type)[productionObservation(state!,item.id)!.stage!]: '工序待核')} · {item.qty} {productionUnit(item)}</div>:<Meter segments={[{ value: item.pct, tone: item.pct === 100 ? 'ok' : 'accent' }]} caption={uiText(`${item.pct}% · ${item.qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${productionUnit(item)}`)} />}
         <div className="mist-kb-card-foot"><Factory className="mist-icon" data-size="xs" />{item.factory}<span className="mist-spacer" />{state&&productionNok(state,item) ? <Pill tone="bad">QC NOK</Pill> : productionRiskText(item) ? <Pill tone="warn">{uiText(productionRiskText(item).length>14?productionRiskText(item).slice(0,14)+'…':productionRiskText(item))}</Pill> : !state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release) ? <Pill tone="neutral">{uiText("待放行")}</Pill> : <span>{item.due}</span>}</div>
-      </>} />}
+      </>} />}</>}
     <Drawer open={!!selected} onClose={() => { if (!busy) setSelectedId(null); }} title={uiText(selected?.code ?? '生产单')} sub={uiText(selected?.name)} size="lg"
       footer={<><Button disabled={busy} onClick={() => selected && go('orders/detail', selected.orderId, { orderLineId: selected.lineId, productionId: selected.id })}>{uiText("打开关联订单")}</Button>{canPlan&&<Button variant="primary" loading={busy} onClick={async () => {
         if (!selected || busy) return; setBusy(true); setFailure('');
