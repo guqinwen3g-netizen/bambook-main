@@ -7,7 +7,7 @@ import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { applyMistCommand, createMistState, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import type {OrderFundingAssignment} from '../../../../server/src/shared/mistOrderFunding';
 import { Nav } from '../nav';
-const store = vi.hoisted(() => ({ state: null as MistState | null, loading: false, error: '', run: vi.fn(), refresh: vi.fn() }));
+const store = vi.hoisted(() => ({ state: null as MistState | null, loading: false, error: '', run: vi.fn(), refresh: vi.fn(), uploadFile: vi.fn(), downloadFile: vi.fn() }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 const permissions=vi.hoisted(()=>({ordersWrite:true,shippingRead:true}));
 vi.mock('../runtime/auth',()=>{const session=()=>({user:{id:'sales',displayName:'业务员甲'},sessionKey:'detail-session',hasPermission:(p:string)=>p==='orders:write'?permissions.ordersWrite:p==='shipments:read'?permissions.shippingRead:true,canAccessView:(view:string)=>view==='shipments'?permissions.shippingRead:true});return{useOptionalMistSession:session,useMistSession:session};});
@@ -22,7 +22,7 @@ function render() {
   act(() => root.render(<MistRoot><ToastProvider><Nav.Provider value={{ route: { view: 'orders/detail', id: orderId }, go, openAI: vi.fn(), theme: 'light', toggleTheme: vi.fn(), openPalette: vi.fn() }}><MistPresentedErrorContext.Provider value={presentedError}><OrderDetailPage /></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));
 }
 beforeEach(() => {
-  sequence = 0;presentedError=undefined;store.error='';permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();
+  sequence = 0;presentedError=undefined;store.error='';permissions.ordersWrite=true;permissions.shippingRead=true;go.mockClear();store.run.mockReset();store.uploadFile.mockReset();store.downloadFile.mockReset();
   const empty = createMistState(context, 'empty');
   empty.customers.push({ id: 'customer-a', code: 'C-A', name: '客户甲', country: '', city: '', industry: '', owner: '业务员甲', grade: 'A', currency: 'USD', terms: '', incoterm: '', categories: '', creditLimit: 0, since: '2026-01-01' });
   const result = applyMistCommand(empty, { type: 'order.create', payload: { type: 'garment', customerId: 'customer-a', season: 'AW28', currency: 'USD', due: '2026-10-30', ownerId:'sales', lines: [{ name: '精确金额条目', style: 'ROUND-01', img: 'coat', fulfillmentMode:'cmt', cmtIncludedItems:[], qty: 1.005, unit: '件', price: 1 }] } }, context);
@@ -36,6 +36,32 @@ it('shows an internal budget without external collection or shipping actions',()
   render();expect(host.textContent).toContain('内部预算');expect(host.textContent).not.toContain('合同待收');
   expect([...host.querySelectorAll('button')].some(button=>button.textContent==='查看收款核销')).toBe(false);
   expect([...host.querySelectorAll('button')].some(button=>button.textContent==='装箱单草稿')).toBe(false);
+});
+
+it('links uploaded originals to the exact order without changing contract confirmation files',async()=>{
+ const before=structuredClone(store.state!.orders[0].governance);
+ store.uploadFile.mockImplementation(async(file:File)=>{const saved={id:'order-original',name:file.name,mimeType:file.type,size:file.size,storageKey:'fixture/order-original',createdAt:context.now};store.state!.files.push(saved);return saved;});
+ store.run.mockImplementation(async command=>{const result=applyMistCommand(store.state!,command,context);store.state=result.state;return result;});
+ render();const card=getByText(host,'订单资料').closest('.mist-card')!;
+ const input=card.querySelector('input[type="file"]')!;
+ Object.defineProperty(input,'files',{value:[new File(['technical'],'factory-original.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})]});
+ await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});render();
+ expect(store.run).toHaveBeenCalledWith({type:'order.files.add',payload:{orderId,fileIds:['order-original']}});
+ expect(store.state!.orders[0].fileIds).toEqual(['order-original']);expect(store.state!.orders[0].governance).toEqual(before);
+ expect(getByRole(host,'button',{name:'factory-original.xlsx'})).toBeTruthy();
+});
+
+it('shows order originals read-only without offering an upload',()=>{
+ store.state!.orders[0].fileIds=['original'];store.state!.files.push({id:'original',name:'factory.pdf',size:1,mimeType:'application/pdf',storageKey:'fixture/original',createdAt:context.now});permissions.ordersWrite=false;
+ render();const card=getByText(host,'订单资料').closest('.mist-card')!;expect(card.textContent).toContain('factory.pdf');expect(card.querySelector('input[type="file"]')).toBeNull();
+});
+
+it('does not link a completed upload after navigating to another order',async()=>{
+ let finish!:(file:any)=>void;store.uploadFile.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));render();
+ const input=getByText(host,'订单资料').closest('.mist-card')!.querySelector('input[type="file"]')!;Object.defineProperty(input,'files',{value:[new File(['x'],'old-order.pdf')]});
+ await act(async()=>{input.dispatchEvent(new Event('change',{bubbles:true}));});
+ const next={...store.state!.orders[0],id:'other-order',code:'O-OTHER'};store.state!.orders.push(next);orderId=next.id;render();
+ await act(async()=>{finish({id:'late-upload',name:'old-order.pdf'});});expect(store.run).not.toHaveBeenCalled();
 });
 
 it('uses canonical line amounts for the table, summary, receipt balance and drawer', async () => {
@@ -86,7 +112,7 @@ it('lets the business attach contract evidence and submit the entire draft for a
   expect(host.textContent).toContain('草稿待补齐');await act(async()=>getByRole(host,'button',{name:'合同与审批资料'}).click());
   const set=(label:string,value:string)=>{const node=getByLabelText(document.body,label) as HTMLInputElement|HTMLTextAreaElement|HTMLSelectElement;act(()=>{if(node instanceof HTMLSelectElement){node.value=value;node.dispatchEvent(new Event('change',{bubbles:true}));return;}Object.getOwnPropertyDescriptor(node.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true}));});};
   set('PO / 合同号','CUSTOMER-PO');set('付款条款','T/T 30% 定金，70% 发货前付清');set('贸易术语','FOB');set('指定地点 / 港口','上海');
-  await act(async()=>{const file=document.body.querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(file,'files',{value:[new File(['purchase order'],'po.pdf',{type:'application/pdf'})],configurable:true});file.dispatchEvent(new Event('change',{bubbles:true}));});
+  await act(async()=>{const file=getByRole(document.body,'dialog',{name:'合同与审批资料'}).querySelector<HTMLInputElement>('input[type="file"]')!;Object.defineProperty(file,'files',{value:[new File(['purchase order'],'po.pdf',{type:'application/pdf'})],configurable:true});file.dispatchEvent(new Event('change',{bubbles:true}));});
   await act(async()=>getByRole(document.body,'button',{name:'保存合同资料'}).click());await act(async()=>getByRole(host,'button',{name:'提交主单审批'}).click());
   expect(store.state!.orders[0].governance?.status).toBe('pending');expect(store.state!.orders[0].governance?.rounds[0].snapshot.lines).toHaveLength(1);expect(store.state!.orders[0].governance?.rounds[0].snapshot.contract.confirmationFileIds).toEqual(['po-evidence']);expect(queryByRoleSafe('交接后勤')).toBeNull();
 });

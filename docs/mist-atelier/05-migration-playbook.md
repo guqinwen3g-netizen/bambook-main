@@ -1,5 +1,11 @@
 # 05 · 在 Mist Atelier 上继续开发
 
+## 订单补充资料与生产跟进（2026-10-29）
+
+- 普通订单原件归 `MistOrder.fileIds`，用 `order.files.add` 追加，入口在订单详情“订单资料”；不改 `governance.contract.confirmationFileIds` 或批准快照，不把工厂资料冒作客户合同。追加需订单写权与当前订单范围，附件沿既有本公司/可读来源校验、订单行级读投影；重复编号不重复追加，不提供原件删除。
+- 页面复用 `RecordFiles` 的上传/原请求恢复/关联重试，按公司、账号及订单重置；页面切到另一个订单后不再把旧上传结果自动关联。原件预览和下载继续使用统一文件组件。
+- `production.update.note` 作为独立生产跟进动态保存作者、实际记录时间和原文；生产详情“跟进与操作记录”回读对应分支动态。记录文字不改变进度或替代开产、定金、样品/QC条件。锚点：`mistWorkspace.ts` 的 `order.files.add` / `production.update`、`OrderDetailPage.tsx`、`ProductionPage.tsx`。
+
 ## 2026-10-23 中英文界面与本机偏好
 
 - AI 交互：抽屉聊天、完整聊天页与报价成本审阅每次用 `X-Bambook-Locale` 请求头携带当前 `locale`（旧服务端可忽略该头，原请求体保持可用）；服务端 `mist/responseLanguage.ts` 严格校验，只用于该请求的系统指令。中文默认，用户明确要求的输出语言优先；不得改写 JSON 键、枚举、编号和金额。回复要求简洁，不追加例行机制说明。

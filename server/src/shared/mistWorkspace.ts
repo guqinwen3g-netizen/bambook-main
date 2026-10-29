@@ -133,6 +133,8 @@ export type MistFabric = { id: string; code: string; name: string; owner: string
 export type MistOrderLine = GarmentFulfillmentFields & { id: string; orderId: string; name: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number };
 export type MistChecklistItem = { id: string; label: string; done: boolean; note: string; actor?: string; at?: string };
 export type MistOrder = {
+  /** Supporting originals, separate from the approved commercial contract snapshot. */
+  fileIds?: string[];
   replacementSource?:ClaimReplacementSource;
   governance?:OrderGovernanceFields;
   id: string; code: string; type: 'garment' | 'fabric'; customerId: string; customer: string;
@@ -341,6 +343,7 @@ export type MistCommand = InternalFabricCommand | FulfillmentCommand | MarketCom
   | { type: 'order.handoff'; payload: { orderId: string; note?: string } }
   | { type: 'production.move'; payload: { id: string; col: MistProduction['col']; note?: string } }
   | { type: 'production.update'; payload: { id: string; pct: number; risk?: string; note?: string; startDate?: string; due?: string } }
+  | { type: 'order.files.add'; payload: { orderId: string; fileIds: string[] } }
   | { type: 'finance.importReceipts'; payload: { accountId?: string; receipts: Array<{ date: string; payer: string; amount: number; currency: string; ref: string }> } }
   | { type: 'finance.receivable.confirm'; payload: { invoiceId: string } }
   | { type: 'finance.receivable.reject'; payload: { invoiceId: string; reason: string } }
@@ -1184,6 +1187,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       event(state,context,'fabric',f.id,p.approved?'确认寻样答复':'退回补充寻样');result={id:f.id};break;
     }
     case 'order.create': {result=createMistOrderRecords(state,p,context);break;}
+    case 'order.files.add': {
+      const order=find(state.orders,p.orderId,'订单'),ids=files(state,p.fileIds),added=ids.filter(id=>!order.fileIds?.includes(id));
+      if(added.length){order.fileIds=[...new Set([...(order.fileIds||[]),...added])];order.updatedAt=context.now;event(state,context,'order',order.id,'补充订单资料');state.events[0].fileIds=added;}
+      result={orderId:order.id,applied:added.length};break;
+    }
     case 'order.update': {
       const o=find(state.orders,p.orderId,'订单');assertOrderWritable(o);
       if((p as Record<string,unknown>).owner!==undefined)throw new MistCommandError('VALIDATION','负责人须按账号选择');
@@ -1209,11 +1217,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'production.update': {
       const job=find(state.productions,p.id,'生产单'),pct=positive(p.pct,'进度',true);if(job.closed)throw new MistCommandError('PRECONDITION',`生产单 ${job.code} 已随合同取消关闭`);if(pct>100)throw new MistCommandError('VALIDATION','进度不得超过100%');
+      const note=text(p.note||'','跟进记录',false,4000);
       assertProductionTransition(state,job,job.col,pct,context);
       job.pct=pct;if(p.risk!==undefined)job.risk=text(p.risk,'风险说明',false);
       if(p.due!==undefined)job.due=date(p.due);if(p.startDate!==undefined&&p.startDate)job.startDate=date(p.startDate);
       if(job.startDate&&job.startDate>job.due)throw new MistCommandError('VALIDATION','开始日期不得晚于交期');
-      event(state,context,'production',job.id,'更新生产进度 '+pct+'%');result={id:job.id,orderId:job.orderId};break;
+      event(state,context,'production',job.id,'更新生产进度 '+pct+'%');if(note)event(state,context,'production',job.id,'生产跟进：'+note);result={id:job.id,orderId:job.orderId};break;
     }
     case 'finance.receivable.confirm':
     case 'finance.receivable.reject': {

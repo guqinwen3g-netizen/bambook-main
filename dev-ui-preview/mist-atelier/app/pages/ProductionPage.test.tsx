@@ -42,6 +42,12 @@ it('records fabric final quantity without a garment size matrix',async()=>{
 });
 
 describe('Mist production gates, delay and pause',()=>{
+ it('reads back saved follow-up text with its author after reopening the same branch',async()=>{
+  await mount({view:'production-board',productionId:'production-b'});
+  const note=getByLabelText(document.body,'跟进记录') as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'工厂排产信息已收，开产日期待核对');note.dispatchEvent(new Event('input',{bubbles:true}));});await click('保存进度');
+  await act(async()=>root!.unmount());root=undefined;host.remove();await mount({view:'production-board',productionId:'production-b'});await click('跟进与操作记录');
+  expect(document.body.textContent).toContain('工厂排产信息已收，开产日期待核对');expect(document.body.textContent).toContain('业务员');
+ });
  it.each([90,89.99])('reads a scoped deposit summary of %s without requiring the hidden bank ledger',async amount=>{
   const s=bridge.state!,g=s.orders[0].governance!;
   for(const contract of [g.contract,g.approvedSnapshot!.contract])contract.depositPercent=30;
