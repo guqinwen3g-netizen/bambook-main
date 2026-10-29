@@ -6,7 +6,7 @@ import {getByLabelText,getByRole,queryByRole,within} from '@testing-library/dom'
 import {MistRoot,ToastProvider} from '../../../../components/mist';
 import {applyMistCommand,createMistState,type MistContext,type MistCommand,type MistState} from '../../../../server/src/shared/mistWorkspace';
 import {Nav,type Route} from '../nav';
-import {ProductionPage,productionWindow,parseProductionSizes} from './ProductionPage';
+import {ProductionPage,productionWindow,productionInWindow,parseProductionSizes} from './ProductionPage';
 
 const bridge=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',run:vi.fn(),refresh:vi.fn(),denied:new Set<string>()}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>bridge}));
@@ -23,7 +23,8 @@ async function fill(label:string,value:string){const field=[...document.querySel
 
 describe('Mist production complete range',()=>{
  it('keeps calendar week and month windows while deriving All from actual dates',()=>{const now=new Date(2026,9,13,12),week=productionWindow('week',now),month=productionWindow('month',now);expect([week.start.getDate(),week.end.getDate()]).toEqual([12,19]);expect([month.start.getMonth(),month.start.getDate(),month.end.getMonth()]).toEqual([9,1,10]);const source=[{due:'2028-07-20'},{startDate:'2028-01-05',due:'2028-02-10'}];const all=productionWindow('all',now,source);expect([all.start.getFullYear(),all.start.getMonth(),all.start.getDate()]).toEqual([2028,0,5]);expect([all.end.getFullYear(),all.end.getMonth(),all.end.getDate()]).toEqual([2028,6,21]);expect(source[0]).not.toHaveProperty('startDate');});
- it('finds future fresh-order jobs from the empty-state All action without inventing start dates',async()=>{await mount();expect(host.textContent).not.toContain('未来分支甲');await range('本月');expect(host.textContent).not.toContain('未来分支甲');await click('查看全部生产单');expect(host.textContent).toContain('未来分支甲');expect(host.textContent).toContain('未来分支乙');expect(bridge.state!.productions.every(job=>job.startDate===undefined)).toBe(true);expect(bridge.run).not.toHaveBeenCalled();});
+ it('finds future fresh-order jobs from the empty-state All action without inventing start dates',async()=>{for(const fact of bridge.state!.fulfillment.productionFacts)fact.release=undefined;await mount();expect(host.textContent).not.toContain('未来分支甲');await range('本月');expect(host.textContent).not.toContain('未来分支甲');await click('查看全部生产单');expect(host.textContent).toContain('未来分支甲');expect(host.textContent).toContain('未来分支乙');expect(bridge.state!.productions.every(job=>job.startDate===undefined)).toBe(true);expect(bridge.run).not.toHaveBeenCalled();});
+ it('keeps already released ongoing production visible this week and month despite a future due date',async()=>{const before=structuredClone(bridge.state);await mount();expect(getByRole(host,'button',{name:/未来分支甲/})).toBeTruthy();expect(getByRole(host,'button',{name:/未来分支乙/})).toBeTruthy();await range('本月');expect(getByRole(host,'button',{name:/未来分支乙/})).toBeTruthy();expect(bridge.state).toEqual(before);expect(bridge.run).not.toHaveBeenCalled();});
  it('edits the exact future production branch and preserves the other branch',async()=>{await mount();await range('全部');await act(async()=>getByRole(host,'button',{name:/未来分支乙/}).click());const drawer=getByRole(document.body,'dialog',{name:'PROD-B'});expect(drawer.textContent).toContain('PROD-B');await fill('生产进度（%）','35');const start=lastDue.slice(0,7)+'-01';await fill('计划开始日',start);await click('保存进度');expect(bridge.run).toHaveBeenCalledWith({type:'production.update',payload:{id:'production-b',pct:35,risk:'',note:'',startDate:start,due:lastDue}});expect(bridge.state!.productions.find(job=>job.id==='production-b')).toMatchObject({pct:35,startDate:start,due:lastDue});expect(bridge.state!.productions.find(job=>job.id==='production-a')).toMatchObject({pct:0,due:firstDue});expect(queryByRole(document.body,'dialog',{name:'PROD-B'})).toBeNull();});
  it('locates route.productionId outside the current month and keeps unknown start empty',async()=>{await mount({view:'production-board',productionId:'production-b'});const group=getByRole(host,'group',{name:'范围'});expect(within(group).getByRole('button',{name:'全部'}).getAttribute('aria-pressed')).toBe('true');expect(getByRole(document.body,'dialog',{name:'PROD-B'})).toBeTruthy();const start=[...document.querySelectorAll('label')].find(item=>item.querySelector('.mist-field-label')?.textContent==='计划开始日')!.querySelector('input')!;expect(start.value).toBe('');await click('打开关联订单');expect(go).toHaveBeenCalledWith('orders/detail',orderId,{orderLineId:bridge.state!.productions[1].lineId,productionId:'production-b'});});
  it('draws unknown starts as distinct due points within the full Gantt date range',async()=>{await mount();await range('全部');await click('甘特图');const first=getByRole(host,'img',{name:`交期 ${firstDue}，未记录开始日`}),last=getByRole(host,'img',{name:`交期 ${lastDue}，未记录开始日`});expect(first.querySelector('line')).toBeNull();expect(last.querySelector('line')).toBeNull();const firstPosition=Number(first.querySelector('circle')!.getAttribute('cx')),lastPosition=Number(last.querySelector('circle')!.getAttribute('cx'));expect(firstPosition).toBeGreaterThanOrEqual(0);expect(lastPosition).toBeLessThan(100);expect(firstPosition).toBeLessThan(lastPosition);});
@@ -31,13 +32,36 @@ describe('Mist production complete range',()=>{
 });
 
 it('parses actual size entries without inventing a default size',()=>{expect(parseProductionSizes('M:4\nL：6')).toEqual([{size:'M',quantity:4},{size:'L',quantity:6}]);expect(parseProductionSizes('')).toEqual([]);expect(()=>parseProductionSizes('M = ten')).toThrow('逐行');});
+it('keeps overdue active work, excludes future starts and uses completion dates only for completed work',()=>{
+ const state=bridge.state!,item=state.productions[1],fact=state.fulfillment.productionFacts.find(f=>f.productionId===item.id)!;
+ const week={start:new Date(2026,9,26),end:new Date(2026,10,2)},month={start:new Date(2026,9,1),end:new Date(2026,10,1)};
+ item.startDate='2026-09-01';item.due='2026-10-20';expect(productionInWindow(state,item,week)).toBe(true);
+ item.startDate='2026-11-10';item.due='2026-11-20';expect(productionInWindow(state,item,week)).toBe(false);expect(productionInWindow(state,item,month)).toBe(false);
+ item.startDate='2026-09-01';item.col='done';fact.completion={id:'done',quantity:item.qty,sizeQuantities:[],date:'2026-10-20',at:'2026-10-20T02:00:00Z',actor:'业务员',evidence:'完工记录',fileIds:[]};
+ expect(productionInWindow(state,item,week)).toBe(false);expect(productionInWindow(state,item,month)).toBe(true);
+ item.col='qc';expect(productionInWindow(state,item,week)).toBe(true);
+});
+it('uses known offline evidence without inventing a start date, including zero-control progress and held work',()=>{
+ const state=bridge.state!,item=state.productions[1],fact=state.fulfillment.productionFacts.find(f=>f.productionId===item.id)!;fact.release=undefined;
+ const before=structuredClone(item),snapshot={id:'obs',asOf:'2026-10-28',stage:null,percent:null,quantity:null,sourceName:'工厂',evidence:'已开产',fileIds:[],recordedAt:'2026-10-29T02:00:00Z',recordedBy:'业务员',recordedById:'sales'};
+ fact.intakes=[{id:'intake',status:'pending',requesterId:'sales',reviewerIds:['reviewer'],submittedAt:snapshot.recordedAt,snapshot,scope:{orderId:item.orderId,lineId:item.lineId,factory:item.factory,quantity:item.qty,unit:'件'}}];
+ const week={start:new Date(2026,9,26),end:new Date(2026,10,2)};fact.hold={at:snapshot.recordedAt,actor:'业务员',category:'quality',reason:'待复验'};
+ expect(productionInWindow(state,item,week)).toBe(true);expect(item).toEqual(before);
+ item.closed={at:snapshot.recordedAt,actor:'业务员',reason:'已关闭'};expect(productionInWindow(state,item,week)).toBe(false);
+});
+it('resolves release day in the company timezone at a month boundary',()=>{
+ const state=bridge.state!,item=state.productions[1],fact=state.fulfillment.productionFacts.find(f=>f.productionId===item.id)!;fact.release!.at='2026-10-31T16:30:00Z';
+ expect(productionInWindow(state,item,{start:new Date(2026,9,1),end:new Date(2026,10,1)})).toBe(false);
+ expect(productionInWindow(state,item,{start:new Date(2026,10,1),end:new Date(2026,11,1)})).toBe(true);
+});
 it('opens the exact original branch from an approval target id',async()=>{await mount({view:'production-board',id:'production-b'});expect(getByRole(document.body,'dialog',{name:'PROD-B'})).toBeTruthy();});
 
 it('records offline intake through the real editor with unknown progress and returns to its original branch',async()=>{
- const branch=bridge.state!.productions[1];bridge.state!.fulfillment.productionFacts.find(f=>f.productionId===branch.id)!.release=undefined;
+ const branch=bridge.state!.productions[1];bridge.state!.fulfillment.productionFacts.find(f=>f.productionId===branch.id)!.release=undefined;bridge.state!.orders[0].fileIds=['contract'];
  await mount({view:'production-board',productionId:branch.id});await click('登记线下在制');
  expect(getByRole(document.body,'spinbutton',{name:'工厂进度（%）'}).getAttribute('value')).toBe('');
  await click('下一步');
+ expect(getByRole(document.body,'checkbox',{name:'contract.pdf',exact:true})).toBeTruthy();expect(document.querySelector('label label')).toBeNull();
  await act(async()=>{const source=getByRole(document.body,'textbox',{name:'资料来源'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(source,'工厂反馈');source.dispatchEvent(new Event('input',{bubbles:true}));const evidence=getByRole(document.body,'textbox',{name:'事实依据'}) as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(evidence,'工厂已开产，当前工序待核');evidence.dispatchEvent(new Event('input',{bubbles:true}));});
  await click('下一步');await click('提交承接');
  expect(bridge.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.production.intake',payload:expect.objectContaining({productionId:branch.id,percent:null,stage:null,quantity:null,sourceName:'工厂反馈'})}));
@@ -156,7 +180,7 @@ it('blocks unknown garment quantity basis and only requests an actual size matri
 
 it('counts genuine production risks without a wall of ordinary workflow reminders',async()=>{
  bridge.state!.productions[0].risk='待合同确认、产前样与业务开产放行';bridge.state!.productions[1].risk='面料复染延期';
- await mount({view:'production-board'});await click('查看全部生产单');expect(host.querySelector('.mist-sumbar')!.textContent).toContain('生产风险1');expect(host.textContent).not.toContain('待合同确认、产前样与业务开产放行');expect(host.textContent).toContain('面料复染延期');
+ await mount({view:'production-board'});await range('全部');expect(host.querySelector('.mist-sumbar')!.textContent).toContain('生产风险1');expect(host.textContent).not.toContain('待合同确认、产前样与业务开产放行');expect(host.textContent).toContain('面料复染延期');
  await click('查看生产单');expect((getByRole(document.body,'textbox',{name:'风险'}) as HTMLInputElement).value).toBe('面料复染延期');
 });
 
