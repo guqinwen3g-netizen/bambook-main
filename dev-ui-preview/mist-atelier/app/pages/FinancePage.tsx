@@ -1,4 +1,5 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
+import { MistPresentedErrorContext } from '../runtime/errorPresentation';
 import {businessDate,businessNow,businessToday} from '../runtime/businessClock';
 /** T6 收款核销：保留原 Mist 双栏，对账结果由公司共享数据保存。 */
 import { AccessHiddenNotice } from './AccessHiddenNotice';
@@ -63,6 +64,7 @@ async function fileText(file: File) {
 export function FinancePage() {
   const density = useDevice('density');
   const { go,route } = useNav(), toast = useToast(), workspace=useMistWorkspace(),session=useMistSession(),routeScope=useRouteScope();
+  const presentedError=React.useContext(MistPresentedErrorContext);
   // 公司银行账户与余额只对登记收付款的财务开放（服务端同样不下发）。
   const canSeeAccounts=session.hasPermission(MIST_FINANCE_SCOPES.voucher)&&!workspace.workspace?.access?.hidden.some(section=>section.key==='bankAccounts'),areaOf=(section?:string)=>{const next=financeArea(section);return next==='accounts'&&!canSeeAccounts?'receivables':next;};
   const [area,setArea]=React.useState<FinanceArea>(()=>areaOf(route.section));
@@ -159,7 +161,7 @@ export function FinancePage() {
     <FinanceEntrances state={state} area={area} onChange={openArea} accounts={canSeeAccounts}/>
     {sourceInvoiceId&&<Banner tone={sourceInvoice?'neutral':'bad'} title={sourceInvoice?sourceInvoice.code:'来源发票不可用'} actions={sourceInvoice?<Button onClick={()=>go('invoices',sourceInvoice.id)}>{uiText('返回发票')}</Button>:undefined}>{sourceInvoice?`${sourceInvoice.customer} · ${isPendingFinanceMistInvoice(sourceInvoice)?uiText('待财务确认'):`${fmt(sourceInvoice.open,2)} ${sourceInvoice.currency}`}`:undefined}</Banner>}
     <input ref={fileInput} hidden type="file" accept=".csv,text/csv" aria-label={uiText("银行流水文件")} disabled={!canVoucher||busy} onChange={async event => { const input=event.target,file=input.files?.[0];if(!file||busy||!canVoucher)return;const bound=scope,sequence=++fileSequence.current;setWorking(true);setFailure('');try{const rows=parseMistReceiptCsv(await fileText(file));if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent()){setImportRows(rows);setFileName(file.name);}}catch(problem){if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent())setFailure(problem instanceof Error?problem.message:'文件读取失败');}finally{input.value='';if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence)setWorking(false);} }} />
-    {(failure || error) && <Banner tone="bad" title={uiText("操作尚未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}
+    {(failure || error) && (failure || error)!==presentedError && !fundingDialog && !reversal && !paymentOpen && !importRows.length && <Banner tone="bad" title={uiText("操作尚未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}
     {sourceOrder&&deposit&&<Banner title={uiText('来源订单 '+sourceOrder.code)} actions={<Button onClick={()=>go('orders/detail',sourceOrder.id)}>{uiText("返回来源订单")}</Button>}>{uiText(deposit.required===null?'合同付款方式或定金比例尚未明确，不能判定定金已满足。':deposit.status==='not_required'?'当前合同付款方式不适用T/T定金门槛。':`合同定金要求 ${fmt(deposit.required,2)} ${sourceOrder.currency} · 已核实归属 ${fmt(deposit.received,2)} ${sourceOrder.currency}`)}</Banner>}
     {unknownTarget&&<Banner tone="warn" title={uiText("未找到目标票据或流水")} actions={<Button onClick={()=>go('payment-vouchers')}>{uiText("返回财务台账")}</Button>}>{uiText("请从本公司重新选择，未自动切换到其他流水。")}</Banner>}
     {pending&&!saving&&<Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button disabled={working||saving} onClick={()=>void resolvePending()}>{uiText("核对原操作结果")}</Button>}>{uiText("核对原请求后再继续操作。")}</Banner>}
@@ -207,7 +209,7 @@ export function FinancePage() {
       </Card>
     </div>}
     </>:area==='records'?<FinanceRecords onReceipt={openReceipt}/>:area==='payables'?<FinancePayables/>:<FinanceAccounts/>}
-    <Dialog open={!!fundingDialog} onClose={()=>{if(!busy)setFundingDialog(null);}} title={uiText(fundingDialog?.release?'释放资金归属':'关联订单定金 / 客户余额')} description={uiText(fundingReceipt?`${fundingReceipt.code} · 原始到账 ${fmt(fundingReceipt.amount,2)} ${fundingReceipt.currency}`:'')} footer={<><Button disabled={busy} onClick={()=>setFundingDialog(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy||!canFund} onClick={()=>{
+    <Dialog open={!!fundingDialog} onClose={()=>{if(!busy){setFundingDialog(null);setFailure('');}}} title={uiText(fundingDialog?.release?'释放资金归属':'关联订单定金 / 客户余额')} description={uiText(fundingReceipt?`${fundingReceipt.code} · 原始到账 ${fmt(fundingReceipt.amount,2)} ${fundingReceipt.currency}`:'')} footer={<><Button disabled={busy} onClick={()=>{setFundingDialog(null);setFailure('');}}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy||!canFund} onClick={()=>{
       if(!fundingDialog||!funding.note.trim())return setFailure('请填写资金归属或释放依据。');
       if(fundingDialog.release){void execute({type:'funding.release',payload:{id:fundingDialog.id!,note:funding.note}},()=>{setFundingDialog(null);toast('资金归属已释放，原到账和核销事实保留');});return;}
       if(!funding.customerId||!Number.isFinite(Number(funding.amount))||Number(funding.amount)<=0)return setFailure('请选择归属客户并填写大于零的归属金额。');
