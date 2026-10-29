@@ -107,8 +107,8 @@ it('selects the receiving garment member by account ID for an internal fabric or
   store.state!.members=[{userId:'garment-owner',name:'成衣负责人',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now},{userId:'fabric-other',name:'面料成员',addedBy:'sales',addedByName:'业务员甲',addedAt:context.now}];
   store.state!.memberGroups=[{userId:'garment-owner',name:'成衣负责人',groups:['garment'],updatedAt:context.now,updatedBy:'sales'},{userId:'fabric-other',name:'面料成员',groups:['fabric'],updatedAt:context.now,updatedBy:'sales'}];
   const select=async(name:string,value:string)=>{const node=getByRole(host,'combobox',{name}) as HTMLSelectElement;await act(async()=>{node.value=value;node.dispatchEvent(new Event('change',{bubbles:true}));});};
-  await select('订单类型','fabric');await select('订单用途','internal');await act(async()=>getByRole(host,'checkbox',{name:'供给成衣组'}).click());
-  const receiver=getByRole(host,'combobox',{name:'成衣接收负责人'});expect(receiver.textContent).toContain('成衣负责人');expect(receiver.textContent).not.toContain('面料成员');
+  await select('订单类型','fabric');await select('订单用途','internal');await act(async()=>getByRole(host,'checkbox',{name:'供给成衣订单'}).click());
+  const receiver=getByRole(host,'combobox',{name:'成衣接收负责人'});expect(receiver.textContent).toContain('成衣负责人');expect(receiver.textContent).toContain('面料成员');
   await select('成衣接收负责人','garment-owner');input('内部用途','成衣用料');await enterLine('100','20');await next();expect(host.textContent).toContain('交接约定');expect(host.textContent).not.toContain('定金比例');input('交期','2026-10-30');await next();await next();
   store.run.mockResolvedValue({result:{orderId:'internal-fabric'}});await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());
   expect(store.run.mock.calls[0][0].payload.governance).toMatchObject({kind:'internal',paymentMethod:'OTHER',depositPercent:0,preShipmentPercent:0,internalSupply:{group:'garment',receiverId:'garment-owner'}});
