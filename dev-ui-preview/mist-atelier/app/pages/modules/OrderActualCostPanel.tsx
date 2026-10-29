@@ -69,7 +69,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
       <DataTable ariaLabel={uiText("费用台账")} rows={expenses} rowKey={e => e.id} columns={expenseColumns} empty={<EmptyState title={uiText("还没有登记费用")} compact />} />
     </Card></section>
     <Drawer open={!!detail} onClose={() => setOpen(null)} size="lg" title={uiText(detail ? `${detail.code} 实际核算` : '实际核算')} sub={detail?[detail.customer,uiText(FX_BASIS_LABEL[basis]),...(detail.estimated?[uiText('含暂估')]:[])].join(' · '):undefined}>
-      {detail && <div data-order-cost-detail={detail.orderId}>
+      {detail && <div className="mist-content-flow" data-order-cost-detail={detail.orderId}>
         {(['revenue', 'purchases', 'expenses'] as const).map(k => <CostBlock key={k} title={uiText({ revenue: '收入', purchases: '采购成本', expenses: '分摊费用' }[k])} rows={detail[k]} />)}
         <Card><CardHeader title={uiText("出口退税")} sub={ui`应退 ${money(detail.rebate.expected)} · 核准 ${money(detail.rebate.approved)} · 已到账 ${money(detail.rebate.received)}`} /></Card>
         <Card><CardBody><Facts items={[

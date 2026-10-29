@@ -164,3 +164,5 @@ v14 装饰配色采用清爽的蓝、青、紫、粉，去除棕黄、灰褐主�
 卡片内普通内容优先使用 CardBody。直接放入 Card 的普通 section、DetailBlock、FormGrid、纵向/横向内容块和 Facts 使用相同的卡片内边距；已在 CardBody 内的区块不重复叠加。CardHeader、表格、时间轴、导航和连续列表仍使用自己的布局。卡片独立包含子块的外边距，显式 grid/flex 配方不变。
 
 FormSection 与普通 mist-section 的相邻内容块沿用共享的 12px 纵向间距，覆盖字段网格之后的分色分码入口、表单区块及上传区。显式 flex/grid 容器继续由自己的 gap 负责，连续的行列表不逐项加空隙。卡片左右/底部留白来自 --mist-card-pad-x / --mist-card-pad-y；不要在页面硬编码第二套间距。
+
+共享普通内容流也覆盖没有自定义布局的语义 section，以及显式 mist-content-flow 容器；Field 虽然渲染为 label，仍按独立内容块参与间距。未使用表单配方的 div 内容区应声明 mist-content-flow，避免依赖某个页面的父层样式。该容器内相邻独立卡片使用 --mist-gap；只有 CardHeader 的摘要卡也保留 --mist-card-pad-y 底部留白。显式 flex/grid、工具栏、导航及连续行使用其自身间距，不被拆散。
