@@ -5,6 +5,7 @@
 - 普通订单原件归 `MistOrder.fileIds`，用 `order.files.add` 追加，入口在订单详情“订单资料”；不改 `governance.contract.confirmationFileIds` 或批准快照，不把工厂资料冒作客户合同。追加需订单写权与当前订单范围，附件沿既有本公司/可读来源校验、订单行级读投影；重复编号不重复追加，不提供原件删除。
 - 页面复用 `RecordFiles` 的上传/原请求恢复/关联重试，按公司、账号及订单重置；页面切到另一个订单后不再把旧上传结果自动关联。原件预览和下载继续使用统一文件组件。
 - `production.update.note` 作为独立生产跟进动态保存作者、实际记录时间和原文；生产详情“跟进与操作记录”回读对应分支动态。记录文字不改变进度或替代开产、定金、样品/QC条件。锚点：`mistWorkspace.ts` 的 `order.files.add` / `production.update`、`OrderDetailPage.tsx`、`ProductionPage.tsx`。
+- 成衣含短/常规/加长长度的尺码组合可超过20列；共享 `mistOrderBreakdown.ts` 的矩阵输入安全上限为60列，来源尺码解析与保存共用。界面继续在分码表自身横向滚动；总量、重复标签、整数/非负及审批快照约束保持。
 
 ## 2026-10-23 中英文界面与本机偏好
 
