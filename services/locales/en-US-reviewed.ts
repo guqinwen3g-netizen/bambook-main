@@ -834,6 +834,7 @@ export const reviewedEnglish: Record<string, string> = {
   '还没有订单资料': 'No order files yet',
   '订单已切换，请重新选择文件': 'Order changed. Select the files again.',
   '跟进与操作记录': 'Follow-ups and activity',
+  '已覆盖 {0}/{1} 条目': '{0}/{1} lines covered',
   '请填写未收票原因': 'Enter the reason the invoice has not arrived',
   '结算净额': 'Net settlement amount',
   '已结清 / 未付': 'Cleared / outstanding',
