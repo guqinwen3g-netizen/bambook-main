@@ -20,6 +20,7 @@ import {createPlatformState,applyPlatformCommand,platformCommandPermission,getPl
 import type {MistCreditDocumentIssue} from './mistCreditDocuments';
 import {DEV_NOTICE_TEMPLATE_VERSION,developmentNoticeBlocker,developmentNoticeContent,developmentNoticeFingerprint,developmentNoticeNo,type DevNoticeArtifact,type DevNoticeRecord,type DevNoticeSnapshot} from './mistDevelopmentNotice';
 import type {MistReviewTask} from './mistReview';
+import { getProductionIntakeReviews } from './mistProductionIntake';
 import {DEVELOPMENT_BILLING_LOCK,billingTotals,developmentBillingSettled,developmentSamplesOf,makingFeeBlocker,unbilledDevelopmentCharges,type MistDevBilling} from './mistDevelopmentBilling';
 import {confirmationNeedsForms,developmentVersionSamples,sampleDispatchBlocker,sampleFormBlocker,sampleRef,type MistSampleDispatch,type MistSampleFee,type MistSampleRef} from './mistDevelopmentSamples';
 import {assertOrderLineSource,type OrderLineSource} from './mistOrderSource';
@@ -1506,7 +1507,7 @@ export function normalizeMistState(state:MistState,context:MistContext):void {
   backfillQuoteLineFamilies(state,state.market);
   recalculate(state);
 }
-export function getMistReviewTasks(state:MistState):MistReviewTask[]{return [...getOrderGovernanceReviews(state),...getFulfillmentReviews(state),...getMarketReviews(state),...getPlatformReviews(state),...getPayableReviews(state)];}
+export function getMistReviewTasks(state:MistState):MistReviewTask[]{return [...getOrderGovernanceReviews(state),...getFulfillmentReviews(state),...getProductionIntakeReviews(state),...getMarketReviews(state),...getPlatformReviews(state),...getPayableReviews(state)];}
 export { renderDemoFile } from './mistDemoFiles';
 
 /** 线索一键转 CRM：选已有客户或按线索公司新建客户（含联系人），可同时建立商机；整个过程在同一次命令内完成，任一步失败都不落库。 */

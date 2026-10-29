@@ -18,7 +18,7 @@ import { ActionBar, DetailBlock, DetailBody, ListDetail } from './modules/pageKi
 export type ApprovalTab = 'mine' | 'sent' | 'done' | 'others';
 type Kind = MistReviewTask['kind'];
 type Row = MistReview & { local?: boolean };
-export const APPROVAL_KIND_LABEL: Record<Kind, string> = { order: '订单审批', quotation: '报价偏差', procurement: '采购审批', payment: '付款申请', claim: '索赔方案', risk: '风险处置' };
+export const APPROVAL_KIND_LABEL: Record<Kind, string> = { order: '订单审批', quotation: '报价偏差', procurement: '采购审批', payment: '付款申请', claim: '索赔方案', risk: '风险处置', productionIntake: '在制承接' };
 const STATUS: Record<MistReviewTask['status'], { tone: Tone; label: string }> = { pending: { tone: 'warn', label: '待审批' }, approved: { tone: 'ok', label: '已批准' }, rejected: { tone: 'bad', label: '已退回' } };
 /** 统一审批尚未覆盖、仍在原业务页按原流程办理的类型（没有服务端放行规则时不在这里假装可审批）。 */
 /** 尚未接入统一审批的事项（说明见页面横幅）。 */

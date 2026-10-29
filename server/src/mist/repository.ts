@@ -11,6 +11,7 @@ const REVIEW_COMMAND_BY_KIND = {
   procurement:'fulfillment.procurement.decide',quotation:'market.quotation.decide',
   claim:'platform.claim.decide',order:'order.governance.decide',
   payment:'payable.request.decide',risk:'platform.risk.decide',
+  productionIntake:'fulfillment.production.intake.decide',
 } as const satisfies Record<MistReviewTask['kind'],MistCommand['type']>;
 const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';

@@ -1,4 +1,5 @@
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
+import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
@@ -39,6 +40,8 @@ export type FulfillmentProductionFact = {
     productionId: string;
     sizes: FulfillmentSizeQuantity[];
     revision: number;
+    intakes?: ProductionIntakeRound[];
+    observations?: ProductionObservation[];
     release?: { at: string; actor: string; note: string; sampleChecks?: ProductionSampleEvidence[] };
     completion?: { quantityBasis?: {scope:'total'|'size';note:string;version:number}; id: string; quantity: number; sizeQuantities: FulfillmentSizeQuantity[]; date: string; at: string; actor: string; evidence: string; fileIds: string[] };
     customerAcceptance?: { at: string; actor: string; note: string; completionId: string };
@@ -391,7 +394,7 @@ export type FulfillmentState = {
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
 type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
 type ShipmentInput = Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
-export type FulfillmentCommand = ReplacementExportCommand | {
+export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | {
     type: 'fulfillment.samples.create';
     payload: SampleInput;
 } | {
@@ -657,6 +660,7 @@ export type FulfillmentCommand = ReplacementExportCommand | {
 export function createFulfillmentState(_context: MistContext, _rootState: unknown): FulfillmentState { return { warehouses:[],returnReceipts:[],receivedRecords:[],productionFacts: [], shippingTerms: [], samples: [], sampleMovements: [], qcTasks: [], qcReports: [], purchases: [], receipts: [], stock: [], stockMovements: [], shipments: [], packing: [], customs: [], customsClassifications: [], documents: [] }; }
 export const FULFILLMENT_CUSTOMS_CLEAR_SCOPE = 'customs:clear';
 export function fulfillmentCommandPermission(command: FulfillmentCommand): string | null {
+    if (command.type === 'fulfillment.production.intake.decide') return 'orders:write';
     if (command.type === 'fulfillment.materials.confirm') return 'orders:write';
     if (command.type === 'fulfillment.materials.issue') return 'inventory:write';
     if (command.type === 'fulfillment.materials.deliver') return 'procurement:write';
@@ -984,6 +988,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     f.shippingTerms ||= [];
     f.productionFacts ||= [];
     fulfillmentCommandPermission(command);
+    if (command.type === 'fulfillment.production.intake' || command.type === 'fulfillment.production.observe' || command.type === 'fulfillment.production.intake.decide') return applyProductionIntake(root, command, ctx);
     if(command.type.startsWith('fulfillment.claimInventory.'))return applyClaimInventoryCommand(root,command as ClaimInventoryCommand,ctx);
     if((CUSTOMS_DECLARATION_COMMANDS as readonly string[]).includes(command.type))return applyCustomsDeclarationCommand(root,command as CustomsDeclarationCommand,ctx);
     const p: any = command.payload;
@@ -1173,7 +1178,12 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const sourceBlocker = fulfillmentQcSourceBlocker(root, t.source); if (sourceBlocker) fail(sourceBlocker);
             if (!ctx.actorId || t.assigneeId !== ctx.actorId)
                 fail('请先由当前QC认领任务');
-            if (t.kind === 'production' && t.source.kind === 'orderLine') requireProductionRelease(root, liveBranch(root, t.source.productionId!), ctx, true);
+            if (t.kind === 'production' && t.source.kind === 'orderLine') {
+                const branch = liveBranch(root, t.source.productionId!);
+                // An inspection documents physical facts; intake never authorizes supply or shipment.
+                if (productionIntake(root, branch.id)) assertMistOrderApproved(root, branch.orderId);
+                else requireProductionRelease(root, branch, ctx, true);
+            }
             if (!['pass', 'conditional', 'reject'].includes(p.result))
                 fail('请选择专业结论');
             const reviewedAt = instant(p.reviewedAt, ctx, '实际检查时间'), opinion = text(p.opinion, '专业意见'), report = text(p.report, '报告编号');
