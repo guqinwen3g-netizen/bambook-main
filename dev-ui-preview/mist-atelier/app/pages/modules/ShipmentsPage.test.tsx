@@ -185,3 +185,19 @@ it.each([
 });
 
 it('shows only scoped shipment lines and no full-document actions for a partial shipment',()=>{store.state!.fulfillment.shipments.push(shipment('partial',{hiddenCount:1,lines:[{orderId:'o',lineId:'l',quantity:3}]}));render('partial');const detail=host.querySelector('[data-shipment-detail=partial]') as HTMLElement;expect(detail.textContent).toContain('部分可见');expect(detail.textContent).toContain('另有 1 笔其他范围业务');expect(detail.textContent).not.toContain('编辑出运请求');expect(detail.textContent).not.toContain('附件');});
+
+it.each(['missing','qc','customer','business','other-shipment','complete'] as const)('shows the exact shipping sample prerequisite before documents-ready: %s',stage=>{
+ const state=store.state!,f=state.fulfillment;
+ f.shipments.push(shipment('s',{booking:'BK'}));f.packing.push(pack('s',10));f.documents.push(doc('pl','s','PL'),doc('ci','s','CI'));
+ state.productions.push({id:'p',orderId:'o',lineId:'l',qty:10,pct:100,col:'qc'} as any);
+ if(stage!=='missing'){
+  f.samples.push({id:'ss',code:'SHIP-SAMPLE',role:'shipping',shipmentId:stage==='other-shipment'?'other':'s',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'},size:'M',color:'Blue',form:'样衣',qualityRevision:1} as any);
+  f.qcTasks.push({id:'sq',kind:'sample',sampleId:'ss',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'p'},state:stage==='qc'?'working':'reported',reportIds:stage==='qc'?[]:['sr'],...(stage==='business'||stage==='complete'?{businessConfirmation:{result:'approved'}}:{}),...(stage==='complete'?{businessContinued:{reportId:'sr'}}:{})} as any);
+  if(stage!=='qc')f.qcReports.push({id:'sr',taskId:'sq',result:'pass',scopeRevision:1} as any);
+ }
+ render('s');const detail=host.querySelector('[data-shipment-detail="s"]') as HTMLElement;
+ const button=getByRole(detail,'button',{name:'完成单证准备'}) as HTMLButtonElement;
+ expect(button.disabled).toBe(stage!=='complete');
+ if(stage!=='complete')expect(detail.textContent).toContain('船样');
+ expect(store.run).not.toHaveBeenCalled();
+});
