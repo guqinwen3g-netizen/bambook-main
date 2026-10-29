@@ -44,7 +44,16 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
     const base = { key: 'material' as const, label: fabric ? '坯布 / 染整' : '面辅料' };
     if (!fabric && line.fulfillmentMode === 'full_package') {
       const packages=state.fulfillment.purchases.filter(p=>p.lineId===line.id&&p.kind==='finished'&&p.state!=='cancelled');
-      if(packages.length)return {...base,state:packages.every(p=>p.state==='approved')?'now':'todo',caption:packages.every(p=>p.state==='approved')?'供应商包工包料':'全包成品采购待批准',target:{view:'procurement',id:packages[0].id}};
+      if(packages.length){
+        const approved=packages.every(p=>p.state==='approved');
+        // Full-package materials are checked at the source branch's production release;
+        // waiting for finished-goods receipt here leaves completed orders at materials.
+        const waiting=packages.find(p=>{
+          const branches=jobs.filter(job=>job.sourcePurchaseId===p.id);
+          return !branches.length||branches.some(job=>!f.productionFacts.some(fact=>fact.productionId===job.id&&fact.release));
+        });
+        return {...base,state:approved?(waiting?'now':'done'):'todo',caption:approved?'供应商包工包料':'全包成品采购待批准',target:{view:'procurement',id:(waiting||packages[0]).id}};
+      }
       if(!state.internalFabricAllocations?.some(a=>a.lineId===line.id&&a.status==='active')&&!state.fulfillment.purchases.some(p=>p.lineId===line.id&&p.kind==='processing'&&p.state!=='cancelled'))return {...base,state:'todo',caption:'待建全包成品采购',target:{view:'procurement'}};
       const allocation = state.internalFabricAllocations?.find(row => row.lineId === line.id && row.status === 'active');
       if (!allocation) return { ...base, state: 'todo', caption: '待分配主料', target: { view: 'orders/detail', id: order.id } };
