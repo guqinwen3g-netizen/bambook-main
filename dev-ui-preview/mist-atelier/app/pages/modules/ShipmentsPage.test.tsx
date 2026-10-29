@@ -201,3 +201,16 @@ it.each(['missing','qc','customer','business','other-shipment','complete'] as co
  if(stage!=='complete')expect(detail.textContent).toContain('船样');
  expect(store.run).not.toHaveBeenCalled();
 });
+
+it('waits for the supplier handover before allowing departure of completed factory goods',()=>{
+ const state=store.state!,s=shipment('handover',{state:'ready',booking:'BK',documentsSentAt:'2026-10-12T08:00:00Z'});
+ state.fulfillment.shipments.push(s);state.fulfillment.customs.push(customs(s.id,'cleared'));
+ state.productions.push({id:'p',sourcePurchaseId:'po',orderId:'o',lineId:'l',qty:10,pct:100,col:'qc'} as any);
+ state.fulfillment.purchases.push({id:'po',code:'PO-HANDOVER',unit:'件',received:4} as any);
+ render(s.id);let detail=host.querySelector('[data-shipment-detail="handover"]') as HTMLElement;
+ expect((getByRole(detail,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(true);
+ expect(detail.textContent).toContain('货物尚未完成交接');
+ state.fulfillment.purchases[0].received=10;store.state={...state};render(s.id);detail=host.querySelector('[data-shipment-detail="handover"]') as HTMLElement;
+ expect((getByRole(detail,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(false);
+ expect(store.run).not.toHaveBeenCalled();
+});

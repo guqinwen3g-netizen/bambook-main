@@ -2,7 +2,7 @@ import {describe,expect,it} from 'vitest';
 import {applyMistCommand,createMistState,type MistCommand,type MistContext} from './mistWorkspace';
 import {productionSampleRequirements} from './mistProductionSamples';
 import {createOrderGovernance} from './mistOrderGovernance';
-import {assertProductionTransition,type FulfillmentSampleRole} from './mistFulfillment';
+import {assertProductionTransition,shipmentHandoverBlocker,type FulfillmentSampleRole} from './mistFulfillment';
 
 function fixture(depositPercent=0){
  let n=0;const context:MistContext={id:()=>`professional-${++n}`,now:'2026-10-13T12:00:00.000Z',actorName:'业务员',actorId:'sales',authority:{supplier:{'supplierCommitment.approvers.processing.garment':{version:1,userIds:['reviewer']}},orderReviewerIds:{garment:['reviewer'],fabric:['reviewer']}}};
@@ -129,4 +129,50 @@ describe('remaining fulfillment business-day boundaries',()=>{
   const lend=(date:string)=>f.run({type:'fulfillment.samples.move',payload:{id:f.state.fulfillment.samples[0].id,kind:'lend',quantity:1,person:'业务同事',location:'样品室',note:'对样后归还',expectedReturn:date}});
   expect(()=>lend('2026-10-29')).toThrow('预计归还日不能早于借出日');expect(()=>lend('2026-10-30')).not.toThrow();
  });
+});
+
+describe('factory completion and physical handover are separate facts',()=>{
+ it('records completion before handover and keeps final QC valid through later partial handovers',()=>{
+  const f=fixture(),{productionId,purchaseId}=f.released();
+  const complete=()=>f.run({type:'fulfillment.production.complete',payload:{productionId,quantity:10,sizeQuantities:[],date:'2026-10-13',evidence:'工厂已完工，待交承运人',fileIds:[]}});
+  expect(()=>complete()).not.toThrow();
+  const fact=f.state.fulfillment.productionFacts[0],completion=structuredClone(fact.completion),revision=fact.revision;
+  expect(f.state.fulfillment.receipts).toEqual([]);expect(f.state.fulfillment.stock).toEqual([]);
+  const task=f.productionTask(productionId);f.report(task,'pass');
+  const receive=(quantity:number)=>f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity,rejected:0,destination:'supplier',location:'承运人提货',date:'2026-10-13',evidence:'实际交接',fileIds:[]}});
+  receive(4);receive(6);
+  expect(f.state.fulfillment.productionFacts[0].completion).toEqual(completion);expect(f.state.fulfillment.productionFacts[0].revision).toBe(revision);
+  expect(f.state.fulfillment.qcTasks.find(row=>row.id===task)?.state).toBe('reported');
+  expect(f.state.productions[0]).toMatchObject({pct:100,col:'qc'});expect(f.state.fulfillment.purchases[0].received).toBe(10);
+  expect(()=>receive(1)).toThrow('完工');expect(f.state.fulfillment.receipts).toHaveLength(2);
+ });
+ it('does not allow departure to use completed goods that have not been handed over',()=>{
+  const f=fixture(),{productionId,purchaseId}=f.released();
+  f.run({type:'fulfillment.production.complete',payload:{productionId,quantity:10,sizeQuantities:[],date:'2026-10-13',evidence:'工厂点数',fileIds:[]}});
+  f.report(f.productionTask(productionId),'pass');
+  for(const contract of [f.state.orders[0].governance!.contract,f.state.orders[0].governance!.approvedSnapshot!.contract])contract.preShipmentPercent=0;
+  const shipmentId=f.shipment(productionId);f.sample(productionId,'shipping','M',shipmentId);
+  f.run({type:'fulfillment.shipments.pack',payload:{id:shipmentId,lines:[{lineId:f.state.orderLines[0].id,productionId,carton:'1',quantity:10,netWeight:9,grossWeight:10,volume:1,note:''}]}});
+  for(const type of ['CI','PL'] as const){const id=f.run({type:'fulfillment.documents.save',payload:{shipmentId,orderId:type==='CI'?f.orderId:'',type,number:type+'-HANDOVER',title:type,dueDate:'2026-11-01',content:'单证',fileIds:['contract']}}).id!;f.run({type:'fulfillment.documents.issue',payload:{id}});}
+  f.run({type:'fulfillment.shipments.ready',payload:{id:shipmentId}});f.run({type:'fulfillment.shipments.sent',payload:{id:shipmentId,at:f.context.now}});
+  f.run({type:'fulfillment.customs.save',payload:{shipmentId,status:'cleared',declarationNo:'DECL',broker:'报关行',hsCode:'6201',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-13',clearedAt:'2026-10-13',evidence:'放行回执',fileIds:[],note:''}},{...f.context,can:()=>true});
+  const depart=()=>f.run({type:'fulfillment.shipments.depart',payload:{id:shipmentId,at:f.context.now,evidence:'离港通知',fileIds:[]}});
+  expect(()=>depart()).toThrow('交接');
+  f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:4,rejected:0,destination:'supplier',location:'承运人',date:'2026-10-13',evidence:'提货4件',fileIds:[]}});
+  expect(()=>depart()).toThrow('交接');
+  f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:6,rejected:0,destination:'supplier',location:'承运人',date:'2026-10-13',evidence:'提货6件',fileIds:[]}});
+  expect(()=>depart()).not.toThrow();expect(f.state.fulfillment.shipments[0].state).toBe('departed');
+ });
+});
+
+
+it('counts already departed quantities against the same supplier handover without consuming future plans',()=>{
+ const f=fixture(),{productionId,purchaseId}=f.released();const branch=f.state.productions.find(row=>row.id===productionId)!;
+ f.state.fulfillment.purchases.find(row=>row.id===purchaseId)!.received=6;
+ const source={orderId:f.orderId,lineId:branch.lineId,productionId,factoryConfirmedAt:'2026-10-13'};
+ f.state.fulfillment.shipments.push({id:'departed',state:'departed',lines:[{...source,quantity:4}]},{id:'future',state:'preparing',lines:[{...source,quantity:2}]} as any);
+ const current={id:'current',state:'ready',lines:[{...source,quantity:4}]} as any;
+ expect(shipmentHandoverBlocker(f.state,current)).toContain('累计需 8');
+ f.state.fulfillment.purchases.find(row=>row.id===purchaseId)!.received=8;
+ expect(shipmentHandoverBlocker(f.state,current)).toBe('');
 });
