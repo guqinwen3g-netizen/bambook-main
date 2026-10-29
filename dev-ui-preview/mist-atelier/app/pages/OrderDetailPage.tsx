@@ -27,7 +27,8 @@ import { OrderBreakdownEditor } from './OrderBreakdownEditor';
 import { OrderChangeImpactList } from './OrderChangeImpactList';
 import { OrderTerminationBanner, OrderTerminationButton, orderLocked } from './OrderTermination';
 import { fulfillmentProductionQcPassed, fulfillmentProductionFact } from '../../../../server/src/shared/mistFulfillment';
-import { lineShipping } from './orderLineTrack';
+import { lineShipping, lineStages } from './orderLineTrack';
+import { productionObservation } from '../../../../server/src/shared/mistProductionIntake';
 import { isLineClosed } from '../../../../server/src/shared/mistOrderClosure';
 import { orderLineFacts } from '../../../../server/src/shared/mistOrderChangeImpact';
 import { toleranceText } from '../../../../server/src/shared/mistOrderClosure';
@@ -199,7 +200,11 @@ export function OrderDetailPage() {
     { key: 'n', header: '款式', width: 'minmax(170px,1.6fr)', render: (line: MistOrderLine) => <ObjectCell thumb={<OrderProductThumb line={line} category={order?.type ?? 'garment'}/>} name={line.name} meta={<><Mono>{line.style}</Mono> · <span data-line-breakdown={line.id}>{uiText(breakdownShort((line as MistOrderLine&{breakdown?:OrderLineBreakdown}).breakdown))}</span></>} /> },
     { key: 'q', header: '数量', width: '80px', align: 'right' as const, hideOnMobile: true, render: (line: MistOrderLine) => <span className="mist-num">{formatOrderQuantity(line.qty)} {uiText(line.unit)}</span> },
     { key: 'p', header: `单价 ${order?.currency ?? ''}`, width: '76px', align: 'right' as const, hideOnMobile: true, render: (line: MistOrderLine) => <span className="mist-num">{amountLabel(lineAmounts.get(line.id) == null ? null : line.price)}</span> },
-    { key: 'g', header: '生产进度', width: 'minmax(110px,1.2fr)', hideOnMobile: true, render: (line: MistOrderLine) => {const progress=lineProgress(line);return <Meter segments={[{ value: progress.qc, tone: 'ok' as const }, { value: Math.max(0, progress.made - progress.qc) }]} caption={ui`${progress.made}% · 已 QC ${progress.qc}%`} />;} },
+    { key: 'g', header: '生产进度', width: 'minmax(110px,1.2fr)', hideOnMobile: true, render: (line: MistOrderLine) => {
+      const observedJobs=state?productions.filter(job=>job.lineId===line.id&&productionObservation(state,job.id)):[];
+      if(state&&order&&observedJobs.length){const inspection=lineStages(state,order,line).find(stage=>stage.key==='inspection');return <>{observedJobs.map(job=>{const observed=productionObservation(state,job.id)!;return <div key={job.id}>{observedJobs.length>1?job.factory+' · ':''}{uiText(observed.percent===null?'进度待核':`工厂进度 ${observed.percent}%`)}</div>;})}<span className="mist-cell-sub"><Pill tone={inspection?.state==='blocked'?'bad':inspection?.state==='done'?'ok':'neutral'}>{uiText(inspection?.caption||'待检验')}</Pill></span></>;}
+      const progress=lineProgress(line);return <Meter segments={[{ value: progress.qc, tone: 'ok' as const }, { value: Math.max(0, progress.made - progress.qc) }]} caption={ui`${progress.made}% · 已 QC ${progress.qc}%`} />;
+    } },
     { key: 's', header: '小计', width: '90px', align: 'right' as const, render: (line: MistOrderLine) => <b className="mist-cell-strong mist-num">{amountLabel(lineAmounts.get(line.id))}</b> },
   ];
   if (!order) return <MistPage><BackLink onClick={() => go('orders')}>{uiText("订单管理")}</BackLink><Banner tone={error ? 'bad' : 'neutral'} title={uiText(loading ? '正在读取订单' : '没有找到此订单')} actions={<Button onClick={() => void refresh()}>{uiText("重新读取")}</Button>}>{error || (loading ? '请稍候' : '订单可能已移除，请返回订单列表。')}</Banner></MistPage>;

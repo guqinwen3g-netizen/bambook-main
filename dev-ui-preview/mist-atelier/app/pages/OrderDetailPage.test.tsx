@@ -503,6 +503,14 @@ function productionProgressFixture(){
  state.fulfillment.qcReports.push({id:'bulk-report',taskId:'bulk-qc',scopeRevision:2,result:'pass',sizeChecks:[{size:'M',inspected:1,result:'pass',evidence:'实检'}]} as any);
  return{state,branch,report:state.fulfillment.qcReports.at(-1)!};
 }
+it.each([null,40])('shows %s external progress on the original order without presenting the unchanged control percentage as a fact',percent=>{
+ const f=productionProgressFixture(),fact=f.state.fulfillment.productionFacts[0];delete fact.completion;(f.branch as {pct:number}).pct=0;
+ const observation={id:'observed',asOf:'2026-10-12',stage:null,percent,quantity:null,sourceName:'工厂反馈',evidence:'已开产，按实际反馈补录',fileIds:[],recordedAt:context.now,recordedBy:'业务员甲',recordedById:'sales'};
+ fact.observations=[observation];fact.intakes=[{id:'intake',status:'pending',requesterId:'sales',reviewerIds:['reviewer'],submittedAt:context.now,snapshot:observation,scope:{orderId,lineId:f.branch.lineId,factory:f.branch.factory,quantity:f.branch.qty,unit:'件'}}];
+ f.report.result='reject';f.state.fulfillment.qcTasks[0].state='blocked';
+ render();const table=getByRole(host,'table',{name:'订单条目'});
+ expect(table.textContent).toContain(percent===null?'进度待核':'工厂进度 40%');expect(table.textContent).toContain('QC NOK');expect(table.textContent).not.toContain('0% · 已 QC 0%');expect(f.branch.pct).toBe(0);expect(fact.release).toBeUndefined();
+});
 const progressNode=(label:string)=>[...host.querySelectorAll('.mist-flow-node')].find(node=>node.querySelector('b')?.textContent===label)!;
 it.each(['stale','missing-size','unfinished'] as const)('does not mark final QC completed for %s evidence',problem=>{
  const f=productionProgressFixture();if(problem==='stale')f.report.scopeRevision=1;if(problem==='missing-size')f.report.sizeChecks=[];if(problem==='unfinished')delete f.state.fulfillment.productionFacts[0].completion;
