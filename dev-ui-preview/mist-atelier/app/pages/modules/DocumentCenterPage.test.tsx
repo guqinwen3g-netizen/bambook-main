@@ -7,20 +7,21 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentShipment,FulfillmentDocument} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
+import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'ops',displayName:'后勤'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:(view:string)=>view!=='system-settings'||!session.denied.has('settings:system:read')}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {DocumentCenterPage,issueBlocker} from './DocumentCenterPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
-let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string,section?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'document-center',id,section},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><DocumentCenterPage/></Nav.Provider></ToastProvider></MistRoot>));}
+let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
+function render(id?:string,section?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'document-center',id,section},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><DocumentCenterPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 async function click(node:HTMLElement){await act(async()=>node.click());}
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const shipment=(id:string,patch:Partial<FulfillmentShipment>={}):FulfillmentShipment=>({id,code:id.toUpperCase(),customerId:'c',customer:'Cedar',domain:'garment',consignee:'Cedar DC',mode:'sea',portOfLoading:'上海',portOfDischarge:'Felixstowe',incoterm:'FOB',plannedDate:'2099-01-01',booking:'',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10,factoryConfirmedAt:'2026-10-09'}],note:'',fileIds:[],state:'preparing',requestedBy:'业务',requesterId:'biz',createdAt:'2026-10-08T08:00:00Z',...patch});
 const doc=(id:string,type:FulfillmentDocument['type'],patch:Partial<FulfillmentDocument>={}):FulfillmentDocument=>({id,shipmentId:'s',orderId:type==='CI'?'o':'',type,number:type+'-'+id,version:1,title:type+' 标题',dueDate:type==='CI'?'2026-11-01':'',content:'正文',fileIds:['file'],status:'draft',createdAt:'2026-10-10T08:00:00Z',actor:'后勤',...patch});
 const pack=(quantity:number)=>({id:'pk'+quantity,shipmentId:'s',lineId:'l',productionId:'p',carton:'1',quantity,netWeight:9,grossWeight:10,volume:0.1,note:''});
-beforeEach(()=>{session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
+beforeEach(()=>{presentedError=undefined;store.error='';session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'后勤'},'empty');
   s.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',customer:'Cedar',currency:'USD'} as any);s.orderLines.push({id:'l',orderId:'o',name:'大衣',style:'COAT-1',img:'coat',qty:10,unit:'件',price:10,made:10,qc:10} as any);
   s.fulfillment.shipments.push(shipment('s'));
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
@@ -131,4 +132,11 @@ it('keeps unrelated factory and booking originals visible as separate current do
 });
 it('shows only the explicit external document family in its version history',()=>{
  const f=store.state!.fulfillment;f.documents.push(doc('factory-v1','OTHER',{number:'PK-1',status:'void',familyId:'factory-v1'}),doc('factory-v2','OTHER',{number:'PK-2',status:'issued',version:2,familyId:'factory-v1'}),doc('booking','OTHER',{number:'BOOK-1',status:'issued',familyId:'booking'}));render('factory-v2');const list=getByRole(host,'table',{name:'单据列表'});expect(list.textContent).toContain('BOOK-1');expect(list.textContent).toContain('PK-2');const history=getByRole(host,'table',{name:'PK-2 版本'});expect(history.textContent).toContain('PK-1');expect(history.textContent).toContain('PK-2');expect(history.textContent).not.toContain('BOOK-1');
+});
+
+it('keeps workspace conflicts in their existing presentation without reporting a failed read',()=>{
+ store.error='公司已被他人更新，请刷新后重新确认';presentedError=store.error;render();
+ expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);
+ presentedError=undefined;render();expect(host.textContent).toContain('单据操作未完成');
+ expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
 });

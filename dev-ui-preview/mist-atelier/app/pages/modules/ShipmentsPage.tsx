@@ -156,10 +156,12 @@ function readyBlocker(root: MistState, s: FulfillmentShipment) {
 }
 
 export function ShipmentsPage() {
+  const presentedError = React.useContext(MistPresentedErrorContext);
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
   const [editing, setEditing] = useRouteDraft<FulfillmentShipment | 'new' | null>(null), [packing, setPacking] = useRouteDraft<FulfillmentShipment | null>(null);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null), [failure, setFailure] = useRouteDraft('');
   const [departure, setDeparture] = useRouteDraft<FulfillmentShipment | null>(null);
+  const visibleFailure = (failure && failure !== presentedError ? failure : '') || (error !== presentedError ? error : '');
   const full = useListDetailRoute();
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
@@ -223,7 +225,7 @@ export function ShipmentsPage() {
       facts: [{ label: '收货方', value: selected.consignee || '未填' }, { label: '贸易术语', value: selected.incoterm || '未填' }, { label: '计划出运', value: selected.plannedDate || '未定' }, { label: '订舱号', value: selected.booking || '未订舱' }, { label: '来源', value: `${orders} 个订单 · ${selected.lines.length} 行` }],
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined }} />;
   })() : null;
-  if (full.active && selected && state) return <ListDetailPage backLabel="货运管理" onBack={full.back} after={<><ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />{departure && <ShipmentDepartureDialog key={departure.id} shipment={departure} onClose={() => setDeparture(null)} />}</>}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title={uiText("出运操作未完成")}>{failure || error}</Banner></div>}{detail}</ListDetailPage>;
+  if (full.active && selected && state) return <ListDetailPage backLabel="货运管理" onBack={full.back} after={<><ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />{departure && <ShipmentDepartureDialog key={departure.id} shipment={departure} onClose={() => setDeparture(null)} />}</>}>{visibleFailure && <div className="mist-card-body"><Banner tone="bad" title={uiText("出运操作未完成")}>{visibleFailure}</Banner></div>}{detail}</ListDetailPage>;
 
   return <MistPage width="wide">
     <PageHeader description={uiText(invalidSource ? '订单来源不匹配' : sourceOrder ? `${sourceOrder.code} · ${sourceOrder.customer}` : undefined)} eyebrow={uiText("订单履约 · 出运")} title={uiText("货运管理")}
@@ -235,7 +237,7 @@ export function ShipmentsPage() {
         {canCreate}
       </>} />
     {!business && !logistics && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有出运业务或后勤权限，可以查看出运与轨迹。")}</Banner></div>}
-    {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("出运操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
+    {visibleFailure && <div className="mist-section"><Banner tone="bad" title={uiText("出运操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{visibleFailure}</Banner></div>}
     {!hasOrderContext && <div className="mist-section"><Segmented<Domain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${scoped.filter(s => s.domain === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${scoped.filter(s => s.domain === 'fabric').length}` }]} /></div>}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索出运号、客户、收货方、港口、订舱号或来源订单")} />

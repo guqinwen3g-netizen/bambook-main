@@ -7,17 +7,18 @@ import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
 import type {FulfillmentSample} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
+import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const write=vi.hoisted(()=>({allowed:true}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'sales',displayName:'业务员'},sessionKey:'s',hasPermission:()=>write.allowed,canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {SamplesPage} from './SamplesPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
-let host:HTMLElement,root:Root;const go=vi.fn();
-function render(id?:string,context:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',id,...context},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><SamplesPage/></Nav.Provider></ToastProvider></MistRoot>));}
+let host:HTMLElement,root:Root;let presentedError:string|undefined;const go=vi.fn();
+function render(id?:string,context:Record<string,string>={}){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'samples',id,...context},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><MistPresentedErrorContext.Provider value={presentedError}><SamplesPage/></MistPresentedErrorContext.Provider></Nav.Provider></ToastProvider></MistRoot>));}
 const version={kind:'version' as const,devId:'dev',versionId:'ver'};
 function fabric(id:string,form:string,unit:string,quantity:number,available:number):FulfillmentSample{return {id,code:id.toUpperCase(),name:'亚麻平纹',category:'面料',form,unit,quantity,available,location:'A-01',size:'',color:'',source:version,fileIds:[],note:'',createdAt:'2026-10-10T08:00:00Z'};}
-beforeEach(()=>{write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
+beforeEach(()=>{presentedError=undefined;store.error='';write.allowed=true;store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'业务员'},'empty');store.run.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
 it.each([{domain:'fabric',category:'羊毛混纺斜纹'},{domain:'garment',category:'面料拼接夹克'}] as const)('sends a returned sample to its explicit $domain QC domain',async({domain,category})=>{
@@ -186,4 +187,11 @@ it('keeps all of a multi-branch shipment selectable while excluding samples outs
   const source=getByRole(host,'combobox',{name:'来源'}) as HTMLSelectElement;
   expect(source.disabled).toBe(false);expect(source.value).toBe('');
   expect([...source.options].filter(option=>option.value).map(option=>option.value)).toEqual(['production:first','production:second']);
+});
+
+it('keeps workspace conflicts in their existing presentation without reporting a failed read',()=>{
+ store.error='公司已被他人更新，请刷新后重新确认';presentedError=store.error;render();
+ expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);
+ presentedError=undefined;render();expect(host.textContent).toContain('样品操作未完成');
+ expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
 });

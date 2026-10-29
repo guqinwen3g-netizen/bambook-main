@@ -1,3 +1,4 @@
+import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {fulfillmentDocumentFamily} from '../../../../../server/src/shared/mistFulfillment';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import { View } from '../../../../../types';
@@ -51,6 +52,7 @@ function voidBlocker(root: MistState, d: FulfillmentDocument) {
 }
 
 export function DocumentCenterPage() {
+  const presentedError = React.useContext(MistPresentedErrorContext);
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const can = session.hasPermission('customs:write'), canInvoices = session.hasPermission('invoices:read');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
@@ -126,7 +128,7 @@ export function DocumentCenterPage() {
         {tab === 'documents' && <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('单据目录', ['编号', '标题', '类型', '版本', '出运', '订单', '状态', '签发时间'], rows.map(d => [d.number, d.title, d.type, d.version, shipmentOf(d)?.code || '', orderCode(d.orderId), documentStatus(d).label, d.issuedAt || '']))}>{uiText("导出")}</Button>}
         {tab === 'documents' && createButton}
       </>} />
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("单据未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {error && error !== presentedError && <div className="mist-section"><Banner tone="bad" title={uiText(state ? "单据操作未完成" : "单据未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: docs.filter(d => d.status !== 'void').length }, { value: 'template', label: '抬头与模板' }]} /></div>}
     {tab === 'template' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
         {profile?.legalName ? <Facts items={[
