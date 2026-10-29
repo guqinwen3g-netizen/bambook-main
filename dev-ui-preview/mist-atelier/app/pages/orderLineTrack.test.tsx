@@ -169,3 +169,18 @@ it('requires current all-size QC for the inspection track, without requiring fin
  expect(inspection().state).not.toBe('done');r.sizeChecks.push({size:'M',inspected:5,result:'pass'});expect(inspection().state).toBe('done');
  r.scopeRevision=1;expect(inspection().state).not.toBe('done');expect(s.fulfillment.productionFacts[0].completion).toBeUndefined();
 });
+
+it('advances supplier full-package materials after every source branch is released', () => {
+  const o=order('garment'),l={...line('garment'),fulfillmentMode:'full_package' as const,cmtIncludedItems:[]};
+  s.orders.push(o);s.orderLines.push(l);
+  const p={...(purchase('garment') as any),id:'full-po',kind:'finished',received:0};
+  s.fulfillment.purchases.push(p);s.productions.push({...job('garment','sew'),sourcePurchaseId:p.id});
+  const material=()=>lineStages(s,o,l).find(stage=>stage.key==='material');
+  expect(material()).toMatchObject({state:'now',caption:'供应商包工包料'});
+  s.fulfillment.productionFacts=[{productionId:'p-garment',sizes:[],revision:1,release:{at:context.now,actor:'业务员甲',note:'确认可生产'}}];
+  expect(material()).toMatchObject({state:'done',caption:'供应商包工包料'});
+  s.fulfillment.purchases.push({...p,id:'full-po-second'});
+  expect(material()).toMatchObject({state:'now'});
+  s.fulfillment.purchases[1].state='cancelled';
+  expect(material()).toMatchObject({state:'done'});
+});
