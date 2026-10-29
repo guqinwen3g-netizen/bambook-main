@@ -945,6 +945,23 @@ function physicalCapacity(root: MistState, line: ShipmentLine): number {
 }
 function checkPhysicalReservation(root: MistState, line: ShipmentLine, excludeShipmentId?: string) { const capacity = physicalCapacity(root, line); const reserved = sum(root.fulfillment.shipments.filter(s => s.id !== excludeShipmentId && s.state !== 'cancelled').flatMap(s => s.lines.filter(l => l.lineId === line.lineId && l.productionId === line.productionId).map(l => l.quantity))); if (sum([reserved, line.quantity]) > capacity)
     fail('本次与已有预留超过该来源分支实际交付数量'); }
+/** A finished factory quantity permits planning and QC; departure needs the actual supplier handover. */
+export function shipmentHandoverBlocker(root: MistState, shipment: FulfillmentShipment): string {
+    const checked = new Set<string>();
+    for (const line of shipment.lines) {
+        const branch = root.productions.find(row => row.id === line.productionId);
+        if (!branch?.sourcePurchaseId || checked.has(branch.id)) continue;
+        checked.add(branch.id);
+        const purchase = root.fulfillment.purchases.find(row => row.id === branch.sourcePurchaseId);
+        const sourceLine = root.orderLines.find(row => row.id === branch.lineId);
+        if (!purchase || !sourceLine) return '来源合同或订单条目不可用';
+        if (purchase.unit !== sourceLine.unit) return '来源合同与出运计量单位不一致';
+        const departed = root.fulfillment.shipments.filter(row => row.id !== shipment.id && row.state === 'departed').flatMap(row => row.lines.filter(item => item.productionId === branch.id).map(item => item.quantity));
+        const required = sum([...departed, ...shipment.lines.filter(item => item.productionId === branch.id).map(item => item.quantity)]);
+        if (purchase.received < required) return `${purchase.code} 货物尚未完成交接：已交接 ${purchase.received}，本次出运后累计需 ${required} ${purchase.unit}`;
+    }
+    return '';
+}
 /** 订单条款可能在排单后经审批更新，准备与离港时仍须按最新上限核对全部有效出运。 */
 function assertCurrentShipmentTolerance(root: MistState, shipment: FulfillmentShipment) {
     for (const lineId of new Set(shipment.lines.map(line => line.lineId))) {
@@ -1332,7 +1349,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (sizeQuantities.some((size: FulfillmentSizeQuantity) => !fact.sizes.some(planned => planned.size === size.size))) fail('完工尺码不属于已确认生产尺码');
             if (branch.sourcePurchaseId) {
                 const purchase = get(f.purchases, branch.sourcePurchaseId, '来源合同'), line = get(root.orderLines, branch.lineId, '订单条目');
-                if (purchase.unit !== line.unit || quantity > purchase.received) fail('完工量不得超过同单位实际回交数量，系统不自动换算');
+                if (purchase.unit !== line.unit) fail('完工与来源合同计量单位不一致，系统不自动换算');
             }
             fact.completion = { quantityBasis:basis!,id: ctx.id(), quantity, sizeQuantities, date, at: ctx.now, actor: ctx.actorName, evidence: text(p.evidence, '最终完工依据'), fileIds: files(root, p.fileIds) };
             fact.revision++;
@@ -1474,9 +1491,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('仅已批准采购可登记履约', 'PRECONDITION');
             if (!purchase.offlineSend || !purchase.supplierConfirmation) fail('请先登记批准合同线下发出和供应商确认');
             const production = root.productions.find(job => job.sourcePurchaseId === purchase.id);
-            if (production && fulfillmentProductionFact(root, production.id)?.completion) fail('最终完工事实已冻结，请勿继续追加交付');
+            const completion = production && fulfillmentProductionFact(root, production.id)?.completion;
             if (production && (purchase.kind === 'processing' || purchase.domain === 'garment' && purchase.kind === 'finished')) requireProductionRelease(root, production, ctx);
             const quantity = qty(p.quantity, '实收数量', true), rejected = qty(p.rejected, '拒收数量', true), location = text(p.location, '实际收货地点'), date = day(p.date, '收货日期'), evidence = text(p.evidence, '交接依据'), fileIds = files(root, p.fileIds);
+            if (completion && sum([purchase.received, quantity]) > completion.quantity) fail('累计实收不能超过已登记的最终完工数量');
             if (sum([quantity, rejected]) <= 0) fail('实收与拒收数量至少有一项大于零');
             if (date > platformBusinessDate(ctx.now))
                 fail('收货日期不得在未来');
@@ -1493,7 +1511,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             f.receipts.push({ id, purchaseId: purchase.id, quantity, rejected, destination: p.destination, location, date, evidence, fileIds, actor: ctx.actorName, createdAt: ctx.now, ...(materialDelivery ? { materialDelivery } : {}) });
             purchase.received = sum([purchase.received, quantity]);
             const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
-            if (branch && quantity > 0) {
+            if (branch && quantity > 0 && !completion) {
                 productionFact(root, branch.id).revision++;
                 branch.pct = Math.min(100, Math.round(purchase.received / purchase.quantity * 100));
                 branch.col = 'qc';
@@ -1723,6 +1741,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('需完成单据准备并由业务登记对客发送');
             if (!f.customs.some(c => c.shipmentId === s.id && c.status === 'cleared'))
                 fail('出口清关尚未完成');
+            const handoverBlocker = shipmentHandoverBlocker(root, s);
+            if (handoverBlocker) fail(handoverBlocker, 'PRECONDITION');
             s.lines.forEach(l => { assertMistOrderApproved(root, l.orderId); assertMistOrderDeposit(root, l.orderId); assertOrderShipmentPaymentCovered(root, l.orderId); sourceQuality(root, l, ctx); requireSampleRole(root, get(root.productions, l.productionId!, '准确生产分支'), 'shipping', s.id); checkPhysicalReservation(root, l, s.id); });
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);

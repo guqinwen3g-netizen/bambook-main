@@ -933,4 +933,6 @@ export const reviewedEnglish: Record<string, string> = {
   '到账待核销': 'Receipts pending reconciliation',
   '到账待核销（按原币）': 'Receipts pending reconciliation (original currency)',
   '待核销金额': 'Amount pending reconciliation',
+  '登记成品交接': 'Record finished-goods handover',
+  '工厂或指定地点交接': 'Handover at factory or agreed location',
 };

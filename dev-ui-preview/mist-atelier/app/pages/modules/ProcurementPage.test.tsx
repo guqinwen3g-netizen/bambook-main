@@ -410,3 +410,12 @@ it('prepares a full-package garment as a finished-goods purchase rather than pro
  expect([...content.options].map(option=>option.value)).toContain('finished');
  expect(content.value).toBe('finished');
 });
+
+it.each(['finished','processing'] as const)('names %s handover paths by the real goods or service',async kind=>{
+ const p=purchase('handover',approved({kind,unit:'件',offlineSend:{at:'2026-10-13T08:00:00Z',actor:'业务',evidence:'已发出',fileIds:[]},supplierConfirmation:{at:'2026-10-13T08:30:00Z',actor:'业务',evidence:'已确认',fileIds:[],confirmedDue:'2026-10-30'}}));
+ store.state!.fulfillment.purchases.push(p);render(p.id);await click(getByRole(host,'button',{name:kind==='processing'?'登记加工回交':'登记本次交付'}));
+ const dialog=getByRole(document.body,'dialog',{name:kind==='finished'?'登记成品交接':'登记加工回交'});
+ const paths=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
+ if(kind==='finished'){expect(paths.textContent).toContain('工厂或指定地点交接');expect(paths.textContent).not.toContain('加工方');}
+ else{expect([...paths.options].some(option=>option.value==='warehouse')).toBe(false);expect(paths.value).toBe('supplier');}
+});
