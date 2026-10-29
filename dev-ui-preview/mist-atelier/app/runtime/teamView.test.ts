@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest';
 import { createMistState } from '../../../../server/src/shared/mistWorkspace';
+import { applyDataScope } from '../../../../server/src/shared/mistDataScope';
+import { orderFundingCoveredAmount } from '../../../../server/src/shared/mistOrderFunding';
 import { ALL_TEAMS, teamOrigins, teamViewState } from './teamView';
 
 // 示例数据：customer-2 名下只有订单 SO-G-2026-012。
@@ -41,4 +43,19 @@ it('preserves server partial financial redactions on a second group projection',
   expect(view.partialLettersOfCredit?.[0]).toMatchObject({orderIds:['SO-G-2026-012'],hiddenCount:4});
   expect(view.partialExpenses?.[0]).toMatchObject({shares:[{orderId:'SO-G-2026-012',amount:10}],hiddenCount:3});
   expect(state.partialLettersOfCredit[0].hiddenCount).toBe(3);
+});
+
+
+it('preserves authorized order deposits when selecting a group before any invoice exists',()=>{
+ const state=demo(),orderId='SO-G-2026-012',customerId=state.orders.find((row:any)=>row.id===orderId).customerId;
+ state.receipts=[{id:'deposit',code:'BR-1',date:'2026-10-30',payer:'Customer',currency:'USD',amount:100,remaining:100,ref:'BANK-PRIVATE',state:'unmatched'}];
+ state.allocations=[];state.invoices=[];state.orderFunding={assignments:[{id:'funding',receiptId:'deposit',customerId,orderId,amount:60,currency:'USD',state:'active',note:'Deposit',createdAt:'2026-10-30',updatedAt:'2026-10-30',actor:'Finance',history:[]}]};
+ const received=applyDataScope(state,{userIds:[],teamIds:['t1']},'demo-sales');
+ expect(received.receipts).toHaveLength(0);expect(received.partialReceipts).toHaveLength(1);expect(orderFundingCoveredAmount(received,orderId)).toBe(60);
+ const group=teamViewState(received,'t1','demo-sales');
+ expect(orderFundingCoveredAmount(group,orderId)).toBe(60);
+ expect(group.partialReceipts).toEqual(received.partialReceipts);expect(group.receipts).toEqual([]);
+ expect(JSON.stringify(group.partialReceipts)).not.toContain('BANK-PRIVATE');expect(group.partialReceipts?.[0]).not.toHaveProperty('amount');expect(group.partialReceipts?.[0]).not.toHaveProperty('remaining');
+ const outside=teamViewState(received,'t2','demo-sales',{t2:[]});
+ expect(outside.partialReceipts).toEqual([]);expect(outside.orderFunding?.assignments).toEqual([]);
 });

@@ -546,3 +546,11 @@ it('counts visible allocations from partially visible receipts without inventing
   store.state!.allocations.push({id:'allocation-part',invoiceId:'invoice-part',receiptId:'receipt-part',amount:0.4,currency:'USD',createdAt:context.now,actor:context.actorName});
   render();expect(getByText(host, '已确认到账').textContent).toContain('0.40');
 });
+
+
+it('shows final completion instead of an earlier offline percentage on the original order',()=>{
+ const f=productionProgressFixture(),fact=f.state.fulfillment.productionFacts[0];
+ fact.observations=[{id:'old-progress',asOf:'2026-10-07',stage:'sew',percent:40,quantity:4,sourceName:'工厂反馈',evidence:'当时进度',fileIds:[],recordedAt:context.now,recordedBy:'业务员',recordedById:'sales'}];
+ const before=structuredClone(fact.observations);render();const table=getByRole(host,'table',{name:'订单条目'});
+ expect(table.textContent).toContain('已完工');expect(table.textContent).not.toContain('工厂进度 40%');expect(fact.observations).toEqual(before);
+});
