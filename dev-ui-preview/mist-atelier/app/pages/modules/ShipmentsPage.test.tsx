@@ -214,3 +214,9 @@ it('waits for the supplier handover before allowing departure of completed facto
  expect((getByRole(detail,'button',{name:'登记实际离港'}) as HTMLButtonElement).disabled).toBe(false);
  expect(store.run).not.toHaveBeenCalled();
 });
+
+it.each([undefined,'conflict-shipment'])('does not duplicate a workspace conflict in shipment list or detail (%s)',id=>{
+ store.state!.fulfillment.shipments.push(shipment('conflict-shipment'));store.error='公司已被他人更新，请刷新后重新确认';presentedError=store.error;render(id);
+ expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);
+ presentedError=undefined;render(id);expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+});

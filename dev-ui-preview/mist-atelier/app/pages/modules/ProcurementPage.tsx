@@ -325,7 +325,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
       {receipts.length ? <DataTable ariaLabel={ui`${p.code} 交付记录`} rows={receipts} rowKey={receipt => receipt.id} columns={[
         { key: 'date', header: '日期', render: receipt => receipt.date },
         { key: 'qty', header: '实收 / 拒收', align: 'right', render: receipt => `${receipt.quantity} / ${receipt.rejected} ${p.unit}` },
-        { key: 'loc', header: '实际地点', hideOnMobile: true, render: receipt => `${receipt.destination === 'warehouse' ? '入库' : processing ? '加工交付' : '直送加工方'} · ${receipt.location}` },
+        { key: 'loc', header: '实际地点', hideOnMobile: true, render: receipt => `${receipt.destination === 'warehouse' ? '入库' : processing ? '加工交付' : p.kind === 'finished' && !materialDeliveryRequired(state, p.id) ? '工厂或指定地点交接' : '直送加工方'} · ${receipt.location}` },
         { key: 'evidence', header: '依据', hideOnMobile: true, render: receipt => <RecordDisclosure title="查看依据">{receipt.evidence}</RecordDisclosure> },
         { key: 'action', header: '操作', render: receipt => { const reason = receiptRejectionBlocker(state, receipt); return receipt.quantity > 0 && receipt.destination === 'warehouse' && can ? <Button size="sm" variant="quiet" disabled={locked || !!reason} title={reason || undefined} onClick={() => onRejectReceived(receipt)}>{uiText('转为拒收')}</Button> : null; } },
       ]} /> : <span className="mist-note">{uiText("还没有")}{uiText(processing ? '回交' : '交付')}{uiText("记录")}</span>}

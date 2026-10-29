@@ -1,3 +1,4 @@
+import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {SAMPLE_SEND_PURPOSES,sampleSendPurpose} from '../../../../../server/src/shared/mistSampleSending';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 样品仓库：面料按档案汇总形态余额，成衣按每件实物；详情卡承接借出、寄出、归还、移位与送检。 */
@@ -66,6 +67,7 @@ const locationSummary = (row: LedgerRow) => {
 };
 
 export function SamplesPage() {
+  const presentedError = React.useContext(MistPresentedErrorContext);
   const { state, loading, error, run, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [syncError, setSyncError] = useRouteDraft(''), [syncing, setSyncing] = React.useState(false);
@@ -224,7 +226,7 @@ export function SamplesPage() {
         {canCreate && !invalidShipment && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button>}
       </>} />
     {syncError && <div className="mist-section"><Banner tone="bad" title={uiText("来源实物同步失败")}>{syncError}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("读取失败")}>{uiText(error)}</Banner></div>}
+    {error && error !== presentedError && <div className="mist-section"><Banner tone="bad" title={uiText(state ? "样品操作未完成" : "读取失败")}>{uiText(error)}</Banner></div>}
     {overdueLoans.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${overdueLoans.length} 笔借出已超过预计归还日`} actions={<Button onClick={() => { const first = overdueLoans[0]; changeShelf(shelfOf(first.sample)); setStatusFilter('overdue'); }}>{uiText("只看逾期")}</Button>}>
       {overdueLoans.slice(0, 3).map(({ loan, sample }) => `${sample.name} · ${loan.person} · 应还 ${loan.expectedReturn}`).join('；')}{uiText(overdueLoans.length > 3 ? ' …' : '')}</Banner></div>}
     <Tabs value={shelf} onChange={value => changeShelf(value as Shelf)} options={[{ value: 'fabric', label: '面料', count: counts.fabric }, { value: 'garment', label: '成衣', count: counts.garment }, { value: 'other', label: '其他类别', count: counts.other }]} />
