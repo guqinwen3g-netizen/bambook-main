@@ -1255,7 +1255,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       for(const row of p.receipts){const amount=positive(row.amount,'到账金额');mistMoneyMinor(amount);const value={date:date(row.date),payer:text(row.payer,'付款方'),amount,currency:text(row.currency,'币种',true,3).toUpperCase(),ref:text(row.ref,'附言',false)};if(!/^[A-Z]{3}$/.test(value.currency))throw new MistCommandError('VALIDATION','币种无效');
         if(into)assertAccountUsable(into,value.currency,value.date);
         if(value.ref&&state.receipts.some(r=>r.date===value.date&&r.payer===value.payer&&r.amount===value.amount&&r.currency===value.currency&&r.ref===value.ref&&(!into||!r.accountId||r.accountId===into.id))){skipped++;continue;}
-        const id=context.id();state.receipts.push({id,code:'BR-'+context.now.slice(0,10).replace(/-/g,'')+'-'+String(state.receipts.length+1).padStart(3,'0'),...value,remaining:amount,state:'unmatched',...(into?{accountId:into.id}:{})});imported++;}
+        const id=context.id();state.receipts.push({id,code:'BR-'+platformBusinessDate(context.now).replace(/-/g,'')+'-'+String(state.receipts.length+1).padStart(3,'0'),...value,remaining:amount,state:'unmatched',...(into?{accountId:into.id}:{})});imported++;}
       event(state,context,'finance','receipts','导入 '+imported+' 笔到账流水'+(into?'（入账 '+into.code+'）':'')+'，跳过 '+skipped+' 笔已存在流水');result={imported,skipped};break;
     }
     case 'finance.reconcile':
