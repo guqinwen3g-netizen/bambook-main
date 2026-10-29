@@ -158,3 +158,9 @@ v14 装饰配色采用清爽的蓝、青、紫、粉，去除棕黄、灰褐主�
 ### 业务日期默认值
 
 `runtime/businessClock.ts` 的 `businessNow()` 保留实际或所选公司固定时钟的瞬时值，`businessDate()` / `businessToday()` 使用与服务端相同的上海业务日投影；共用 `today` / `todayIso` 不截断UTC日期。日期字段的默认值和逾期判断与业务日一致；带时间字段继续保留原时刻，不改写已存事实或内部固定场景配置。
+
+### 内容留白与连续列表（2026-10-29）
+
+卡片内普通内容优先使用 CardBody。直接放入 Card 的普通 section、DetailBlock、FormGrid、纵向/横向内容块和 Facts 使用相同的卡片内边距；已在 CardBody 内的区块不重复叠加。CardHeader、表格、时间轴、导航和连续列表仍使用自己的布局。卡片独立包含子块的外边距，显式 grid/flex 配方不变。
+
+FormSection 与普通 mist-section 的相邻内容块沿用共享的 12px 纵向间距，覆盖字段网格之后的分色分码入口、表单区块及上传区。显式 flex/grid 容器继续由自己的 gap 负责，连续的行列表不逐项加空隙。卡片左右/底部留白来自 --mist-card-pad-x / --mist-card-pad-y；不要在页面硬编码第二套间距。
