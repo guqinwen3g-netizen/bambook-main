@@ -219,3 +219,16 @@ it('places a completed branch with current all-size production QC in the done la
  f.qcReports.push({id:'final-report',taskId:'final',scopeRevision:fact.revision,result:'pass',sizeChecks:[{size:'M',inspected:2,result:'pass',evidence:'实检'}]} as any);
  await mount();await range('全部');const card=getByRole(host,'button',{name:/未来分支乙/});expect(card.closest('.mist-kb-col')?.querySelector('.mist-kb-h')?.textContent).toContain('已完成');expect(branch.col).toBe('qc');
 });
+
+
+it('moves completed offline production out of the old observation list without rewriting its history',async()=>{
+ const state=bridge.state!,branch=state.productions[1],fact=state.fulfillment.productionFacts.find(row=>row.productionId===branch.id)!;
+ const observed={id:'old-progress',asOf:'2026-10-28',stage:'sew' as const,percent:40,quantity:8,sourceName:'工厂反馈',evidence:'当时进度',fileIds:[],recordedAt:context.now,recordedBy:'业务员',recordedById:'sales'};
+ fact.observations=[observed];fact.intakes=[{id:'intake',status:'approved',requesterId:'sales',reviewerIds:['reviewer'],submittedAt:context.now,snapshot:observed,scope:{orderId:branch.orderId,lineId:branch.lineId,factory:branch.factory,quantity:branch.qty,unit:'件'}}];
+ fact.completion={id:'completed',quantity:20,sizeQuantities:[],date:context.now.slice(0,10),at:context.now,actor:'业务员',evidence:'最终点数',fileIds:[]};branch.pct=100;branch.col='qc';
+ await mount();await range('全部');
+ expect(queryByRole(host,'table',{name:'线下在制生产'})).toBeNull();
+ const card=getByRole(host,'button',{name:/未来分支乙/});expect(card.textContent).toContain('已完工');expect(card.textContent).not.toContain('40%');
+ await act(async()=>card.click());expect(getByRole(document.body,'dialog',{name:'PROD-B'}).textContent).toContain('上次工厂进度');
+ expect(fact.observations[0]).toEqual(observed);expect(bridge.run).not.toHaveBeenCalled();
+});

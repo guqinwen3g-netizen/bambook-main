@@ -80,7 +80,11 @@ function preservePartialViews(state: MistState, next: MistState) {
   for (const row of state.partialReceipts ?? []) {
     const visible = next.allocations.filter(item => item.receiptId === row.id && item.currency === row.currency);
     const all = state.allocations.filter(item => item.receiptId === row.id && item.currency === row.currency);
-    if (visible.length) next.partialReceipts!.push({ ...row, visibleAllocatedAmount: visible.reduce((sum, item) => sum + Math.round(item.amount * 100), 0) / 100, hiddenCount: row.hiddenCount + all.length - visible.length });
+    // Deposits can be assigned before an invoice exists. Preserve the already
+    // redacted receipt source for visible assignments, never its bank balance.
+    const allFunding = (state.orderFunding?.assignments ?? []).filter(item => item.receiptId === row.id && item.currency === row.currency && item.state === 'active');
+    const visibleFunding = (next.orderFunding?.assignments ?? []).filter(item => item.receiptId === row.id && item.currency === row.currency && item.state === 'active' && !!item.orderId && orders.has(item.orderId));
+    if (visible.length || visibleFunding.length) next.partialReceipts!.push({ ...row, visibleAllocatedAmount: visible.reduce((sum, item) => sum + Math.round(item.amount * 100), 0) / 100, hiddenCount: row.hiddenCount + all.length - visible.length + allFunding.length - visibleFunding.length });
   }
 }
 
