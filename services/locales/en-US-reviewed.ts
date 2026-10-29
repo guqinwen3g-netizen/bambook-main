@@ -930,4 +930,7 @@ export const reviewedEnglish: Record<string, string> = {
   '月份': 'Month',
   '时间': 'Time',
   '确定': 'Confirm',
+  '到账待核销': 'Receipts pending reconciliation',
+  '到账待核销（按原币）': 'Receipts pending reconciliation (original currency)',
+  '待核销金额': 'Amount pending reconciliation',
 };

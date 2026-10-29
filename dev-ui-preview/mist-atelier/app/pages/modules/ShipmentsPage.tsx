@@ -1,5 +1,6 @@
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {orderShipmentPaymentBlocker} from '../../../../../server/src/shared/mistOrderFunding';
+import {productionSampleRequirements} from '../../../../../server/src/shared/mistProductionSamples';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 货运管理：业务发起出运 → 后勤核实装箱、订舱与单证 → 资料回业务对客发送 → 实际离港；按面料 / 成衣业务组分开。 */
@@ -145,6 +146,12 @@ function readyBlocker(root: MistState, s: FulfillmentShipment) {
   const issued = root.fulfillment.documents.filter(row => row.shipmentId === s.id && row.status === 'issued');
   if (!issued.some(row => row.type === 'PL')) return '请先在单据中心签发本票装箱单';
   if ([...new Set(s.lines.map(line => line.orderId))].some(orderId => !issued.some(row => row.type === 'CI' && row.orderId === orderId))) return '请按原订单分别签发 CI';
+  for (const line of s.lines) {
+    const branch = root.productions.find(row => row.id === line.productionId);
+    if (!branch) return '准确生产分支不存在';
+    const sample = productionSampleRequirements(root, branch, 'shipping', s.id).find(row => !row.ok);
+    if (sample) return `船样${sample.label ? ' · ' + sample.label : ''}：${sample.reason}`;
+  }
   return '';
 }
 
