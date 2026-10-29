@@ -1323,7 +1323,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             requireProductionRelease(root, branch, ctx);
             if (fact.completion) fail('最终完工事实已登记，不得覆盖');
             const quantity = qty(p.quantity, '最终完工数量'), date = day(p.date, '实际完工日');
-            if (date > ctx.now.slice(0, 10)) fail('完工日期不得在未来');
+            if (date > platformBusinessDate(ctx.now)) fail('完工日期不得在未来');
             const basis=productionQuantityBasis(root,branch.orderId)??fail('请先核对并批准订单数量口径','PRECONDITION');
             if(get(root.orders,branch.orderId,'订单').type==='garment'&&!Number.isSafeInteger(quantity))fail('成衣完工件数须为正整数');
             const sizeQuantities = normalizeSizes(p.sizeQuantities, quantity, basis.scope==='size');
@@ -1478,7 +1478,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (production && (purchase.kind === 'processing' || purchase.domain === 'garment' && purchase.kind === 'finished')) requireProductionRelease(root, production, ctx);
             const quantity = qty(p.quantity, '实收数量', true), rejected = qty(p.rejected, '拒收数量', true), location = text(p.location, '实际收货地点'), date = day(p.date, '收货日期'), evidence = text(p.evidence, '交接依据'), fileIds = files(root, p.fileIds);
             if (sum([quantity, rejected]) <= 0) fail('实收与拒收数量至少有一项大于零');
-            if (date > ctx.now.slice(0, 10))
+            if (date > platformBusinessDate(ctx.now))
                 fail('收货日期不得在未来');
             if (!['warehouse', 'supplier'].includes(p.destination))
                 fail('收货路径无效');
