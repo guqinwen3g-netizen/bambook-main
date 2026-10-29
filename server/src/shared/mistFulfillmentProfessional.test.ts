@@ -80,3 +80,28 @@ describe('one factory and shipment sample submission with actual size/count memb
   const x=ready();expect(()=>x.f.run({type:'fulfillment.samples.create',payload:{name:'PP',category:'成衣',form:'样衣',unit:'件',quantity:3,size:'M',sizeQuantities:[{size:'M',quantity:3}],color:'Blue',location:'Sample room',role:'pp',source:{kind:'orderLine',orderId:x.f.orderId,lineId:x.f.state.orderLines[0].id,productionId:x.productionId},fileIds:[],note:''}})).toThrow('仅用于成衣船样');
  });
 });
+
+
+describe('production completion business date', () => {
+ it.each([
+  ['2026-10-29T16:30:00.000Z', '2026-10-30', '2026-10-31'],
+  ['2026-12-31T16:30:00.000Z', '2027-01-01', '2027-01-02'],
+ ])('accepts the Shanghai business day and rejects tomorrow at %s', (now, date, tomorrow) => {
+  const f=fixture(), {productionId,purchaseId}=f.released();
+  f.context.now=now;
+  const receive=(receiptDate:string)=>f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:10,rejected:0,destination:'supplier',location:'仓库',date:receiptDate,evidence:'本地验收实际回交',fileIds:[]}});
+  expect(()=>receive(tomorrow)).toThrow('收货日期不得在未来');
+  expect(f.state.fulfillment.purchases.find(p=>p.id===purchaseId)?.received).toBe(0);
+  receive(date);
+  const complete=(actualDate:string)=>f.run({type:'fulfillment.production.complete',payload:{productionId,quantity:10,sizeQuantities:[],date:actualDate,evidence:'本地验收最终点数',fileIds:[]}});
+  expect(()=>complete(tomorrow)).toThrow('完工日期不得在未来');
+  expect(f.state.fulfillment.productionFacts[0].completion).toBeUndefined();
+  expect(()=>complete(date)).not.toThrow();
+  expect(f.state.fulfillment.productionFacts[0].completion).toMatchObject({date,at:now,quantity:10});
+ });
+ it('preserves an explicitly backfilled completion date',()=>{
+  const f=fixture(),{productionId,purchaseId}=f.released(); f.context.now='2026-10-29T16:30:00.000Z';
+  f.receiveAndComplete(productionId,purchaseId);
+  expect(f.state.fulfillment.productionFacts[0].completion?.date).toBe('2026-10-13');
+ });
+});
