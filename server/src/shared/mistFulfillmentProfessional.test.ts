@@ -176,3 +176,11 @@ it('counts already departed quantities against the same supplier handover withou
  f.state.fulfillment.purchases.find(row=>row.id===purchaseId)!.received=8;
  expect(shipmentHandoverBlocker(f.state,current)).toBe('');
 });
+
+it('keeps an explicit final completion at 100 percent while allowing subsequent follow-up',()=>{
+ const f=fixture(),{productionId,purchaseId}=f.released();f.receiveAndComplete(productionId,purchaseId);
+ const before=structuredClone(f.state.fulfillment.productionFacts[0].completion);
+ expect(()=>f.run({type:'production.update',payload:{id:productionId,pct:90,note:'旧表单'}})).toThrow('完工');
+ expect(f.state.productions[0].pct).toBe(100);expect(f.state.fulfillment.productionFacts[0].completion).toEqual(before);
+ expect(()=>f.run({type:'production.update',payload:{id:productionId,pct:100,note:'等待提货'}})).not.toThrow();
+});

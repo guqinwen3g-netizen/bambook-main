@@ -245,3 +245,13 @@ it('disables final completion during a hold and displays its Shanghai business d
  await click('恢复生产');expect(getByRole(document.body,'dialog',{name:'恢复生产'}).textContent).toContain('2026-10-30');
  expect(bridge.run).not.toHaveBeenCalled();
 });
+
+it('does not resubmit a stale percentage after recording final completion in the same drawer',async()=>{
+ const state=bridge.state!,branch=state.productions[1],g=state.orders[0].governance!;branch.pct=90;
+ for(const contract of [g.contract,g.approvedSnapshot!.contract]){contract.quantityBasis='total';contract.quantityBasisNote='按总量';}
+ await mount({view:'production-board',productionId:branch.id});await click('登记最终完工数量');await act(async()=>{const input=getByRole(document.body,'spinbutton',{name:'最终实际完工数量'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'20');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ await act(async()=>{const input=getByRole(document.body,'textbox',{name:'最终点数及完工依据'}) as HTMLTextAreaElement;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(input,'工厂最终点数20件');input.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('保存');expect(bridge.state!.productions[1].pct).toBe(100);
+ expect(queryByRole(document.body,'spinbutton',{name:'生产进度（%）'})).toBeNull();
+ await click('保存计划与跟进');expect(bridge.run.mock.calls.at(-1)?.[0]).toMatchObject({type:'production.update',payload:{id:branch.id,pct:100}});
+});

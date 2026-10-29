@@ -926,6 +926,7 @@ function requireProductionRelease(root: MistState, branch: MistProduction, conte
 }
 /** Shared core commands call this before mutating a production board position/progress. */
 export function assertProductionTransition(root: MistState, production: MistProduction, target: MistProduction['col'], pct: number, context: InternalFabricContext = {actorName:''}) {
+    if (fulfillmentProductionFact(root, production.id)?.completion && pct !== 100) fail('已登记最终完工，不能改写生产进度');
     const cols = ['cut', 'sew', 'finish', 'qc', 'done'];
     if (pct > production.pct || cols.indexOf(target) > cols.indexOf(production.col) || target === 'done') requireProductionRelease(root, production, context);
     if (target === 'done') { physicalCapacity(root, { orderId: production.orderId, lineId: production.lineId, productionId: production.id, quantity: 0, factoryConfirmedAt: '' }); requireProductionQc(root, production); }
