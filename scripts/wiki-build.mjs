@@ -15,7 +15,7 @@ import path from 'node:path';
 import { marked } from 'marked';
 import { WIKI, SITE, PART_ORDER, STATUS_LABEL, VERDICT_LABEL, snapshot } from './wiki-lib.mjs';
 import { renderManualFigure } from './manual-media.mjs';
-import { renderLesson, lessonStyles, lessonRuntime } from './manual-lesson.mjs';
+import { renderLesson, lessonStyles, lessonRuntime, loadCapture } from './manual-lesson.mjs';
 import { manualNavigationRuntime } from './manual-navigation.mjs';
 
 marked.setOptions({ gfm: true, breaks: false });
@@ -41,6 +41,7 @@ const snap = snapshot();
 const { version, head, branch, chapters, modules, missingModules } = snap;
 const lessons = fs.readdirSync(path.join(WIKI, 'lessons')).filter(f => f.endsWith('.json'))
   .map(f => JSON.parse(fs.readFileSync(path.join(WIKI, 'lessons', f), 'utf8'))).sort((a, b) => a.order - b.order);
+const captures = new Map(lessons.map(l => [l.id, loadCapture(WIKI, l)]));
 for (const l of lessons) if (l.nextLesson && !lessons.some(x => x.id === l.nextLesson.id)) throw new Error(`${l.title}：下一课不存在 ${l.nextLesson.id}`);
 for (const chapter of chapters) {
   for (const match of chapter.body.matchAll(/!\[[^\]]*\]\((assets\/[\w/.-]+\.(?:gif|png|jpg|webp))\)/gi)) {
@@ -186,7 +187,7 @@ ${lessonStyles}
   </nav>
   <main id="content">
     ${start}
-    ${lessons.map(renderLesson).join('\n')}
+    ${lessons.map(l => renderLesson(l, captures.get(l.id))).join('\n')}
     ${sections}
   </main>
 </div>
@@ -198,6 +199,7 @@ ${lessonRuntime}
 </html>`;
 
 fs.mkdirSync(SITE, { recursive: true });
+for (const l of lessons) fs.cpSync(path.join(WIKI, 'assets/lessons', l.capture), path.join(SITE, 'assets/lessons', l.capture), { recursive: true });
 fs.writeFileSync(path.join(SITE, 'index.html'), html);
 // Explicitly withdraw the generator-owned old screenshot collections from employee delivery.
 for(const old of ['production','finance'])fs.rmSync(path.join(SITE,'assets',old),{recursive:true,force:true});

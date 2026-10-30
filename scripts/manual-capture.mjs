@@ -65,7 +65,7 @@ async function capture(name) {
   const executablePath = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
   const browser = await chromium.launch(executablePath ? { executablePath } : {});
   try {
-    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2 });
+    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 2, locale: 'zh-CN', timezoneId: 'Asia/Shanghai' });
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     await page.goto(BASE); await page.waitForTimeout(1500);
     const frames = [];
