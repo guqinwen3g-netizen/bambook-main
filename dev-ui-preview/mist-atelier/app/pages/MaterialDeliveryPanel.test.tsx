@@ -30,18 +30,29 @@ const directDelivery = () => {
   store.state = f.state;
 };
 
+it('allows the designated receiver to record a partial warehouse count', async () => {
+  render(); await act(async () => getByRole(host, 'button', { name: '登记点收' }).click());
+  const dialog = getByRole(document.body, 'dialog', { name: '物料点收' });
+  await fill(getByRole(dialog, 'spinbutton', { name: '接收数量' }) as HTMLInputElement, '10');
+  await fill(getByRole(dialog, 'spinbutton', { name: '拒收数量' }) as HTMLInputElement, '4');
+  await fill(getByRole(dialog, 'textbox', { name: '工厂点收依据' }) as HTMLTextAreaElement, 'Counted at factory');
+  await act(async () => getByRole(dialog, 'button', { name: '保存点收' }).click());
+  expect(store.run).toHaveBeenCalledWith({ type:'fulfillment.materials.confirm', payload:{ id:deliveryId, kind:'issue', acceptedQuantity:10, rejectedQuantity:4, expectedReceivingRevision:0, evidence:'Counted at factory' } });
+});
+
 it('shows the exact destination and lets the designated receiver confirm the actual handover', async () => {
   render(); expect(host.textContent).toContain('20 米'); expect(host.textContent).toContain('待接收');
-  await act(async () => getByRole(host, 'button', { name: '确认接收', exact: true }).click());
-  const dialog = getByRole(document.body, 'dialog', { name: '确认物料接收' });
+  await act(async () => getByRole(host, 'button', { name: '登记点收', exact: true }).click());
+  const dialog = getByRole(document.body, 'dialog', { name: '物料点收' });
+  await fill(getByRole(dialog, 'spinbutton', { name: '接收数量' }) as HTMLInputElement, '20');
   const input = getByRole(dialog, 'textbox', { name: '工厂点收依据' }) as HTMLTextAreaElement;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'Factory counted 20m, no shortage'); input.dispatchEvent(new Event('input', { bubbles: true })); });
-  await act(async () => getByRole(dialog, 'button', { name: '确认接收', exact: true }).click());
-  expect(store.run).toHaveBeenCalledWith({ type: 'fulfillment.materials.confirm', payload: { id: deliveryId, kind: 'issue', evidence: 'Factory counted 20m, no shortage' } });
+  await act(async () => getByRole(dialog, 'button', { name: '保存点收', exact: true }).click());
+  expect(store.run).toHaveBeenCalledWith({ type: 'fulfillment.materials.confirm', payload: { id: deliveryId, kind: 'issue', acceptedQuantity:20, rejectedQuantity:0, expectedReceivingRevision:0, evidence: 'Factory counted 20m, no shortage' } });
 });
 it('is read-only for other people and for users without write permission', () => {
-  auth.user.id = 'owner'; render(); expect(queryByRole(host, 'button', { name: '确认接收', exact: true })).toBeNull();
-  auth.user.id = 'garment'; auth.hasPermission.mockReturnValue(false); render(); expect(queryByRole(host, 'button', { name: '确认接收', exact: true })).toBeNull();
+  auth.user.id = 'owner'; render(); expect(queryByRole(host, 'button', { name: '登记点收', exact: true })).toBeNull();
+  auth.user.id = 'garment'; auth.hasPermission.mockReturnValue(false); render(); expect(queryByRole(host, 'button', { name: '登记点收', exact: true })).toBeNull();
 });
 it('shows net material after a return and preserves the original confirmation evidence', () => {
   f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id: deliveryId, evidence: 'Counted' } }, 'garment');
@@ -51,7 +62,7 @@ it('shows net material after a return and preserves the original confirmation ev
 });
 it('offers receipt to the current order owner after staff responsibility changes',()=>{
   const order=f.state.orders.find(o=>o.id===f.target.orderId)!;order.ownerId='reviewer';order.owner='Leader';auth.user.id='reviewer';store.state=f.state;render();
-  expect(getByRole(host,'button',{name:'确认接收',exact:true})).toBeTruthy();expect(host.textContent).toContain('Leader');
+  expect(getByRole(host,'button',{name:'登记点收',exact:true})).toBeTruthy();expect(host.textContent).toContain('Leader');
 });
 
 it('asks for explicit accepted and rejected quantities on direct delivery and submits the receiving revision', async () => {

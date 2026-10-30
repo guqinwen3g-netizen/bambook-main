@@ -12,6 +12,37 @@ function fixture(quantity = 100.3) {
   return { ...f, get state() { return f.state; }, deliver, receive, returned, recheck };
 }
 
+it('supports partial warehouse receiving, actual return and reissue without changing the original supplier receipt', () => {
+  const f = materialDeliveryFixture(20), id = f.issue(20);
+  const originalReceipt = structuredClone(f.state.fulfillment.receipts);
+  const count = (acceptedQuantity: number, rejectedQuantity: number, expectedReceivingRevision: number) => f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, acceptedQuantity, rejectedQuantity, expectedReceivingRevision, evidence: 'Factory counted' } }, 'garment');
+  count(10, 4, 0);
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({ quantity:'20', accepted:'10', rejected:'4', pending:'6', returned:'0', outstanding:'20' });
+  expect(internalFabricCostShare(f.state, f.purchaseId, f.target.orderId, 136000)).toBe(68000);
+  expect(() => f.issue(1)).toThrow('分配剩余');
+  const before = structuredClone(f.state);
+  expect(() => count(7, 0, 1)).toThrow('超过待接收');
+  expect(() => count(1, 0, 0)).toThrow('记录已变化');
+  expect(() => f.run({ type:'fulfillment.materials.confirm', payload:{kind:'issue',id,evidence:'old caller'} }, 'garment')).toThrow('记录已变化');
+  expect(() => f.run({ type:'fulfillment.materials.confirm', payload:{kind:'issue',id,acceptedQuantity:1,rejectedQuantity:0,expectedReceivingRevision:1,evidence:'wrong person'} }, 'owner')).toThrow('指定接收负责人');
+  expect(() => f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:15,location:'A-01',person:'factory',note:'return'}})).toThrow();
+  expect(f.state).toEqual(before);
+  count(6, 0, 1);
+  f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'A-01',person:'factory',note:'Rejected returned'}});
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({ accepted:'16', rejected:'4', pending:'0', returned:'4', outstanding:'16' });
+  expect(f.state.fulfillment.stock[0].available).toBe(4);
+  expect(f.state.fulfillment.receipts).toEqual(originalReceipt);
+  f.issue(4);
+});
+
+it('keeps a legacy pre-count return eligible for full confirmation and refuses ambiguous partial conversion', () => {
+  const f=materialDeliveryFixture(20), id=f.issue(20);
+  f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'A-01',person:'factory',note:'Legacy return'}});
+  expect(() => f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:10,rejectedQuantity:0,expectedReceivingRevision:0,evidence:'count'}},'garment')).toThrow('旧退回');
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'Counted remaining'}},'garment');
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({accepted:'16',pending:'0',returned:'4'});
+});
+
 it('separates dispatch, accepted, rejected and still uncounted quantities and transfers only accepted cost', () => {
   const f = fixture(), id = f.deliver(20);
   f.receive(id, 10, 4);

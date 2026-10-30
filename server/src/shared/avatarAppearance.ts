@@ -17,11 +17,16 @@ export const AVATAR_COLORS = [
   { id:'charcoal', hue:0, label:'炭灰', value:'#343B43', ink:'#F2F1ED' },
 ] as const;
 export type AvatarColor = typeof AVATAR_COLORS[number]['id'];
+// Retain the old ID for saved identities, but do not offer it to new choices.
+export const SELECTABLE_AVATAR_COLORS = AVATAR_COLORS.filter(color => color.id !== 'ochre');
+const AUTOMATIC_AVATAR_COLORS = CHROMATIC_AVATAR_COLORS.filter(color => color.id !== 'ochre');
 export function defaultAvatarColor(key: string): AvatarColor {
   let hash = 2166136261;
   for (const char of key.normalize('NFC').trim()) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
   // Keep automatic initials stable when adding optional palette choices.
-  return CHROMATIC_AVATAR_COLORS[(hash >>> 0) % CHROMATIC_AVATAR_COLORS.length].id;
+  const unsigned = hash >>> 0;
+  const original = CHROMATIC_AVATAR_COLORS[unsigned % CHROMATIC_AVATAR_COLORS.length];
+  return original.id === 'ochre' ? AUTOMATIC_AVATAR_COLORS[Math.floor(unsigned / CHROMATIC_AVATAR_COLORS.length) % AUTOMATIC_AVATAR_COLORS.length].id : original.id;
 }
 export function initialsIdentity(color: AvatarColor) { return `initials:v1:${color}`; }
 export function parseInitialsIdentity(value?: string | null): AvatarColor | null {

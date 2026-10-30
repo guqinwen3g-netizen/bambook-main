@@ -58,6 +58,12 @@ it('has an empty state when no approved internal supply is available', async () 
   store.state!.orders.find(row => row.id === fabricOrderId)!.governance!.status = 'draft'; render(); await click('分配面料'); expect(host.textContent).toContain('暂无可用内部面料'); expect(queryByRole(host, 'combobox', { name: '内部面料' })).toBeNull(); expect((getByRole(host, 'button', { name: '保存分配' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
+it.each(['cmt', 'trims_cmt'] as const)('offers existing internal fabric to a %s processing order', async mode => {
+  store.state!.orderLines.find(row => row.id === lineId)!.fulfillmentMode = mode;
+  render(); await click('分配面料'); await chooseSource(); await input('20'); await click('保存分配');
+  expect(store.state!.internalFabricAllocations?.[0]).toMatchObject({ orderId, lineId, fabricLineId, metres: '20', status: 'active' });
+});
+
 it('shows source totals and returns to the exact garment line', async () => {
   store.state = applyMistCommand(store.state!, { type: 'order.fabric.allocate', payload: { orderId, lineId, fabricOrderId, fabricLineId, metres: '0.0001', expectedRevision: 0 } }, context).state;
   render(true); expect(getByText(host, '已分配').parentElement?.textContent).toContain('0.0001 米'); expect(getByText(host, '剩余').parentElement?.textContent).toContain('100 米'); await click('查看成衣条目'); expect(go).toHaveBeenCalledWith('orders/detail', orderId, { orderLineId: lineId, section: 'garment' });

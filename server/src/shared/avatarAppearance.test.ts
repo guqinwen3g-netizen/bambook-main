@@ -32,10 +32,13 @@ describe('versioned avatar choices',()=>{
   expect(angles).toHaveLength(10);
   for(let i=0;i<angles.length;i++){const next=angles[(i+1)%angles.length]+(i===angles.length-1?360:0);expect(next-angles[i]).toBeGreaterThan(32);expect(next-angles[i]).toBeLessThan(40);}
  });
- it('distributes representative account IDs across all ten colors',()=>{
-  const counts=new Map(CHROMATIC_AVATAR_COLORS.map(color=>[color.id,0]));
+ it('excludes retired ochre from automatic colors while retaining saved identities',()=>{
+  const counts=new Map(CHROMATIC_AVATAR_COLORS.filter(color=>color.id!=='ochre').map(color=>[color.id,0]));
   for(let index=0;index<10000;index++){const id=defaultAvatarColor(`user-${index}`);counts.set(id,counts.get(id)!+1);}
-  for(const count of counts.values()){expect(count).toBeGreaterThan(850);expect(count).toBeLessThan(1150);}
+  expect(counts.has('ochre')).toBe(false);
+  for(const count of counts.values()){expect(count).toBeGreaterThan(900);expect(count).toBeLessThan(1300);}
+  expect(parseInitialsIdentity('initials:v1:ochre')).toBe('ochre');
+  expect(isAvatarIdentity('dicebear:v1:glass:pochre_v14_12_12_test-0:still')).toBe(true);
  });
  it('keeps legacy generated avatars valid',()=>{
   expect(isAvatarIdentity('dicebear:v1:glass:c205_v6_12_12_abc-0:animated')).toBe(true);

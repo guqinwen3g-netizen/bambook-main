@@ -1613,6 +1613,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 const returned = sum(f.stockMovements.filter(m => m.issueId === issue!.id).map(m => m.quantity));
                 if (quantity > sum([issue.quantity, -returned]))
                     fail('退回超过原出库未还量');
+                if (issue.materialDelivery?.receivingChecks?.length) {
+                    const checked = issue.materialDelivery.receivingChecks.reduce((n, check) => n + Number(check.acceptedQuantity) + Number(check.rejectedQuantity), 0);
+                    if (quantity > sum([checked, -returned])) fail('尚未点收的物料不能登记退回');
+                }
             }
             else if (quantity > stock.available)
                 fail('库存可用量不足');
