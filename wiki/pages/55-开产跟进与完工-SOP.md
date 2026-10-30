@@ -9,15 +9,11 @@ sources:
   - dev-ui-preview/mist-atelier/app/pages/ProductionPage.tsx
   - server/src/shared/mistFulfillment.ts
   - server/src/shared/mistWorkspace.ts
-gifs:
-  - assets/production/release.gif
-  - assets/production/move-stage.gif
-  - assets/production/complete.gif
 ---
 
 从「生产进度」管理工厂分支：先确认具备开产条件，按实际情况放行，再持续登记工序和进度，最后核对完工数量并安排生产检验。
 
-本页的 GIF 使用演示数据，由真实界面的操作画面组成。点击「播放操作演示」逐步观看，也可查看原尺寸。
+本页暂作流程参考，分步教学与培训素材正在重做。
 
 ## SOP：谁负责，做到哪里交接
 
@@ -35,7 +31,6 @@ gifs:
 3. 点击「放行开产」，填写放行依据，点击「保存」。
 4. 保存后确认「开产状态」为「已放行」；需要追溯时展开「放行记录」。
 
-![打开放行开产窗口，填写并保存放行依据](assets/production/release.gif)
 
 ## 二、更新实际进度并交接工序
 
@@ -43,7 +38,6 @@ gifs:
 2. 返回看板，按实际工序将对应卡片拖到下一列。成衣看板可显示「裁剪、车缝、整烫包装、尾期 QC、已完成」等阶段。
 3. 保存后确认卡片已在正确工序，进度和数量仍对应这张生产单。
 
-![将生产卡片从裁剪移至车缝，并核对保存结果](assets/production/move-stage.gif)
 
 ## 三、登记最终实际完工
 
@@ -52,6 +46,5 @@ gifs:
 3. 点击「保存」，核对「完工状态」「完工数量」；过程依据可在「完工记录」中查看。
 4. 点击「本分支生产QC」，从该准确来源发起生产检验并安排检查地点、联系人及日期。
 
-![登记最终完工数量、日期和依据，核对保存后的数量](assets/production/complete.gif)
 
 最终完工数量会成为后续检验、交付的依据。生产进度百分比、完工数量和 QC 结果分别记录，不能互相替代；保存前务必核对实物点数。
