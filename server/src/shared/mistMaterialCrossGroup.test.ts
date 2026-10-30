@@ -1,6 +1,6 @@
 import { expect,it } from 'vitest';
 import { materialDeliveryFixture } from '../mist/__tests__/materialDelivery';
-import { applyDataScope,scopedReferenceViolation,scopedWriteViolation,scopedMaterialIssueTargets } from './mistDataScope';
+import { applyDataScope,scopedFabricAccess,scopedReferenceViolation,scopedWriteViolation,scopedMaterialIssueTargets } from './mistDataScope';
 
 it('exposes only an authorized source stock and exact allocated processing target to the source owner',()=>{
  const f=materialDeliveryFixture(20),scope={userIds:['owner'],teamIds:[]},stock=f.state.fulfillment.stock[0];
@@ -29,4 +29,22 @@ it('allows only the derived source status and receiving fields for a recipient h
  expect(f.state.orders.find(o=>o.id===f.source.orderId)!.tone).not.toBe('bad');
  const bad=structuredClone(f.state);bad.orders.find(o=>o.id===f.source.orderId)!.customer='tampered';expect(scopedWriteViolation(before,bad,scope,allowed)).toMatchObject({path:'orders',id:f.source.orderId});
  const badMovement=structuredClone(f.state);badMovement.fulfillment.stockMovements.find(m=>m.id===id)!.quantity=99;expect(scopedWriteViolation(before,badMovement,scope,allowed)).toMatchObject({path:'fulfillment.stockMovements',id});
+});
+
+it('projects current PP review for the exact recipient without exposing the hidden fabric order',()=>{
+ const f=materialDeliveryFixture(20),scope={userIds:['garment'],teamIds:[]};
+ const sample=f.run({type:'fulfillment.samples.create',payload:{name:'Jacket',category:'成衣',form:'产前样',unit:'件',quantity:1,location:'Sample room',size:'M',color:'Blue',source:{kind:'orderLine',...f.target,productionId:f.productionId},role:'pp',fileIds:[],note:''}},'garment').id!;
+ const source={kind:'orderLine' as const,...f.target,productionId:f.productionId};
+ f.state.fulfillment.qcTasks.push({id:'task-pp',code:'QC-PP',source,sampleId:sample,domain:'garment',kind:'sample',factory:'factory',location:'room',contact:'',due:'2026-10-24',requestedBy:'Garment',assignee:'QC',assigneeId:'qc',state:'reported',reportIds:['report-pp'],createdAt:f.context.now,businessConfirmation:{result:'approved',note:'Accepted',actor:'Garment',at:f.context.now},businessContinued:{reportId:'report-pp',actor:'Garment',at:f.context.now,note:'Continue'}});
+ f.state.fulfillment.qcReports.push({id:'report-pp',taskId:'task-pp',result:'pass',report:'PP-OK',opinion:'Checked',measurements:[],fileIds:[],reviewer:'QC',reviewedAt:f.context.now,scopeRevision:1});
+ expect(applyDataScope(f.state,scope,'garment').orders.some(o=>o.id===f.source.orderId)).toBe(false);
+ expect(scopedFabricAccess(f.state,scope,'garment','Garment')[f.target.lineId].sampleRequirements).toEqual({});
+ const checks=scopedFabricAccess(f.state,scope,'garment','Garment',true)[f.target.lineId].sampleRequirements;
+ expect(checks?.[f.productionId]).toMatchObject([{ok:true,reason:'已确认'}]);
+ expect(JSON.stringify(checks)).not.toContain('PP-OK');
+ expect(scopedFabricAccess(f.state,{userIds:['warehouse'],teamIds:[]},'warehouse','Warehouse')[f.target.lineId]).toBeUndefined();
+ f.state.fulfillment.qcReports.find(r=>r.id==='report-pp')!.result='conditional';
+ expect(scopedFabricAccess(f.state,scope,'garment','Garment',true)[f.target.lineId].sampleRequirements[f.productionId]).toMatchObject([{ok:true,reason:'有保留通过'}]);
+ f.state.orderLines.find(l=>l.id===f.target.lineId)!.cmtIncludedItems=['trims'];
+ expect(scopedFabricAccess(f.state,scope,'garment','Garment',true)[f.target.lineId].sampleRequirements?.[f.productionId]).toMatchObject([{ok:false,reason:'未登记'}]);
 });

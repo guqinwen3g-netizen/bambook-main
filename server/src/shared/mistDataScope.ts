@@ -13,6 +13,7 @@ import type { OrderCostState } from './mistOrderCost';
 import { buildTeamScopeGraph, resolveTeamScope, type MistTeamScope, type TeamScopeRef } from './mistTeamScope';
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
 import { materialDeliveryRequired, materialDeliveryTargets, internalFabricCandidates, garmentMaterialBlocker, materialDeliveryRows, materialReceiverIds, type InternalFabricCandidate, type MaterialDeliveryRow } from './mistInternalFabric';
+import { productionSampleRequirements, type ProductionSampleRequirement } from './mistProductionSamples';
 
 /** 受限账号的数据范围：账号集合为本人 + 部门领导所辖成员；teamIds 为本人所在的在用小组。 */
 export type MistDataScope = { userIds: string[]; teamIds: string[]; lines?: Array<'fabric' | 'garment'> };
@@ -31,16 +32,18 @@ export const SCOPED_COLLECTIONS = [
 export type ScopedCollection = typeof SCOPED_COLLECTIONS[number];
 export type ScopedVisibility = Map<string, Set<string>>;
 export type ScopedMaterialIssueTargets = Record<string,Array<{value:string;label:string;remaining?:string}>>;
-export type ScopedFabricAccess = Record<string,{candidates:InternalFabricCandidate[];blocker:string;deliveries:MaterialDeliveryRow[]}>;
+export type ScopedSampleGate = Pick<ProductionSampleRequirement,'key'|'label'|'ok'|'reason'|'taskId'|'sampleId'>;
+export type ScopedFabricAccess = Record<string,{candidates:InternalFabricCandidate[];blocker:string;deliveries:MaterialDeliveryRow[];sampleRequirements:Record<string,ScopedSampleGate[]>}>;
 
 /** Exact recipient's own garment lines and source records explicitly addressed to them. */
-export function scopedFabricAccess(state:MistState,scope:MistDataScope,actorId:string,actorName:string):ScopedFabricAccess {
+export function scopedFabricAccess(state:MistState,scope:MistDataScope,actorId:string,actorName:string,includeSampleGates=false):ScopedFabricAccess {
   const visible=scopedVisibility(state,scope,false), members=(state.members||[]).map(m=>({id:m.userId,name:m.name,active:true,groups:state.memberGroups?.find(g=>g.userId===m.userId)?.groups||[]}));
   const context={actorId,actorName,members}, result:ScopedFabricAccess={};
   for(const order of state.orders.filter(o=>o.type==='garment'&&o.ownerId===actorId&&visible.get('orders')!.has(o.id)))for(const line of state.orderLines.filter(l=>l.orderId===order.id)){
     let candidates:InternalFabricCandidate[]=[];try{candidates=internalFabricCandidates(state,order.id,line.id,context).filter(c=>state.orders.find(o=>o.id===c.fabricOrderId)?.governance?.contract.internalSupply?.receiverId===actorId);}catch{continue;}
     const deliveries=materialDeliveryRows(state).filter(r=>r.kind==='issue'&&r.delivery.orderId===order.id&&r.delivery.lineId===line.id&&materialReceiverIds(state,r).includes(actorId)).map(r=>({...r,sourcePurchaseCode:state.fulfillment.purchases.find(p=>p.id===r.purchaseId)?.code}));
-    result[line.id]={candidates,blocker:garmentMaterialBlocker(state,order.id,line.id,context),deliveries};
+    const sampleRequirements=includeSampleGates?Object.fromEntries(state.productions.filter(p=>p.orderId===order.id&&p.lineId===line.id&&!p.closed).map(p=>[p.id,productionSampleRequirements(state,p,'pp').map(r=>({key:r.key,label:r.label,ok:r.ok,reason:r.ok&&r.evidence?.result==='conditional'?'有保留通过':r.reason,...(r.taskId&&visible.get('fulfillment.qcTasks')!.has(r.taskId)?{taskId:r.taskId}:{}),...(r.sampleId&&visible.get('fulfillment.samples')!.has(r.sampleId)?{sampleId:r.sampleId}:{})}))])):{};
+    result[line.id]={candidates,blocker:garmentMaterialBlocker(state,order.id,line.id,context),deliveries,sampleRequirements};
   }
   return result;
 }
