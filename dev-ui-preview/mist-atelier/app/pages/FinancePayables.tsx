@@ -443,6 +443,7 @@ export function FinancePayables() {
           <Field label={uiText("收款供应商")} required><Select aria-label={uiText("收款供应商")} value={payDraft.supplierId} options={[{ value: '', label: '请选择供应商' }, ...suppliers]} onChange={e => setPayDraft({ ...payDraft, supplierId: e.target.value, allocations: {} })} /></Field>
           <Field label={uiText("币种")} required><Select aria-label={uiText("币种")} value={payDraft.currency} options={payCurrencies} onChange={e => setPayDraft({ ...payDraft, currency: e.target.value, allocations: {} })} /></Field>
         </FormGrid>}
+        {payDraft.mode === 'request' && state && payDraft.supplierId && <RequestPayee state={state} supplierId={payDraft.supplierId} currency={payDraft.currency} />}
         {payDraft.mode === 'request' && (() => { const pos = new Set(payBills.filter(b => (payDraft.allocations[b.id] || '').trim()).flatMap(b => b.lines.map(l => l.purchaseId))), schedule = plans.filter(x => x.state === 'active' && x.stage !== 'prepayment' && x.supplierId === payDraft.supplierId && x.currency === payDraft.currency && x.available > 0 && pos.has(x.purchaseId)); return schedule.length ? <Field label={uiText("对应付款计划")} hint={uiText("合同约定了进度款 / 尾款时选择，便于跟踪计划已申请和已付")}><Select aria-label={uiText("对应付款计划")} value={payDraft.planId || ''} options={[{ value: '', label: '不对应计划' }, ...schedule.map(x => ({ value: x.id, label: `${x.code} · ${paymentPlanStageLabel(x.stage)} · ${x.purchaseCode} · 可申请 ${apMoney(x.available, x.currency)}` }))]} onChange={e => setPayDraft({ ...payDraft, planId: e.target.value || undefined })} /></Field> : null; })()}
         {payRequest && <FormGrid cols={3}>
           <Field label={uiText("付款金额")}><TextInput aria-label={uiText("付款金额")} readOnly value={apMoney(payRequest.amount, payRequest.currency)} /></Field>
@@ -483,6 +484,7 @@ export function FinancePayables() {
       {preDraft && prePlan && <div className="mist-col">
         {failure && <Banner tone="bad" title={uiText("还不能提交")}>{failure}</Banner>}
         <Facts items={[{ label: '付款触发条件', value: prePlan.trigger }, { label: '合同条款依据', value: prePlan.basis }]} />
+        {state && <RequestPayee state={state} supplierId={prePlan.supplierId} currency={prePlan.currency} />}
         <Field label={uiText("申请金额")} required><TextInput aria-label={uiText("申请金额")} type="number" min="0.01" step="0.01" value={preDraft.amount} onChange={e => setPreDraft({ ...preDraft, amount: e.target.value })} /></Field>
         <Field label={uiText("付款依据")} required><TextArea aria-label={uiText("付款依据")} rows={3} value={preDraft.reason} onChange={e => setPreDraft({ ...preDraft, reason: e.target.value })} /></Field>
         <Field label={uiText("申请附件")}><DraftFiles ids={preDraft.fileIds || []} onChange={fileIds => setPreDraft({ ...preDraft, fileIds })} hint={uiText("上传回签合同等付款依据")} /></Field>
@@ -502,4 +504,11 @@ export function FinancePayables() {
       {reasonDraft && <div className="mist-col">{failure && <Banner tone="bad" title={uiText("未能完成")}>{failure}</Banner>}<Field label={uiText(REASON[reasonDraft.kind].label)} required><TextArea aria-label={uiText(REASON[reasonDraft.kind].label)} rows={3} value={reasonDraft.reason} onChange={e => setReasonDraft({ ...reasonDraft, reason: e.target.value })} /></Field></div>}
     </Dialog>
   </div></PayableDialogRecovery>;
+}
+
+/** 提交申请时冻结的收款账户：申请人提交前即可核对，未登记时提示由财务先登记。 */
+function RequestPayee({ state, supplierId, currency }: { state: MistState; supplierId: string; currency: string }) {
+  const payee = supplierPayee(state, supplierId, currency);
+  return payee ? <Facts items={[{ label: '收款账户', value: payeeText(payee, businessNow().toISOString()) }]} />
+    : <Banner tone="warn" title={uiText('供应商未登记收款账户')}>{uiText('可以先提交；付款前须由财务在供应商档案登记并核实。')}</Banner>;
 }

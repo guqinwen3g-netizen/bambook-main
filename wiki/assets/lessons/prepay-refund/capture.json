@@ -1,0 +1,56 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 810,
+        "width": 485,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 802,
+        "y": 790,
+        "width": 74,
+        "height": 32
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 444,
+        "y": 442,
+        "width": 552,
+        "height": 40
+      },
+      "value": "ICBC20261031-R0279"
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 444,
+        "y": 525,
+        "width": 552,
+        "height": 64
+      },
+      "value": "供应商退回短交 20 米对应的预付款 279.00。"
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 922,
+        "y": 611,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

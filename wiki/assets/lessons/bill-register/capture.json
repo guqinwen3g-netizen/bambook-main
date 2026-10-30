@@ -1,0 +1,102 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 707,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 364,
+        "y": 417,
+        "width": 58,
+        "height": 42
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 471,
+        "y": 766,
+        "width": 68,
+        "height": 32
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 298,
+        "y": 873,
+        "width": 88,
+        "height": 17
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 802,
+        "y": 503,
+        "width": 127,
+        "height": 40
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 739,
+        "y": 156,
+        "width": 306,
+        "height": 40
+      },
+      "value": "增值税专用发票"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 374,
+        "y": 236,
+        "width": 327,
+        "height": 40
+      },
+      "value": "3200261130 08841265"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 617,
+        "y": 558,
+        "width": 169,
+        "height": 40
+      },
+      "value": "2026-11-26"
+    },
+    {
+      "image": "09.webp",
+      "target": {
+        "x": 635,
+        "y": 680,
+        "width": 169,
+        "height": 20
+      }
+    },
+    {
+      "image": "10.webp",
+      "target": {
+        "x": 992,
+        "y": 775,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

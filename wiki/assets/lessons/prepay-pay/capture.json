@@ -1,0 +1,46 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 778,
+        "width": 485,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 802,
+        "y": 782,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 861,
+        "y": 311,
+        "width": 205,
+        "height": 40
+      },
+      "value": "ICBC20261031-0088412"
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 992,
+        "y": 739,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

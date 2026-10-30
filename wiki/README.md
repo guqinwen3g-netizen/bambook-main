@@ -18,7 +18,7 @@ GIF 默认显示静态封面，由读者点击播放或停止。每张动画聚�
 
 ## 教学课程与真实界面采集（2026-10-30）
 
-分步教学课程在 `wiki/lessons/*.json`（按 `order` 排序），每课对应一组真实界面采集 `wiki/assets/lessons/<capture>/`：每步一张 2× 截图和要操作控件的位置（`capture.json`），由 `node scripts/manual-capture.mjs <课程>` 在本地独立 Mist 服务（`npm run dev:mist`，演示种子，不连接公司库或共享服务器）上实际操作录制；重采前先重置本地数据（删除 `server/private/mist-local/store.json` 并重启）。课程 JSON 写每步的操作、填写、完成后、想一想与出错时，步数必须与采集一致，构建时校验。播放器（`scripts/manual-lesson.mjs`）负责推近、压暗、光标点击 / 输入、气泡、连续播放 / 暂停 / 重播本步和亮起处练习，窄屏按可读性推近。
+分步教学课程在 `wiki/lessons/*.json`（按 `order` 排序），每课对应一组真实界面采集 `wiki/assets/lessons/<capture>/`：每步一张 2× 截图和要操作控件的位置（`capture.json`），由 `node scripts/manual-capture.mjs <课程>`（或 `chain` 按业务先后采集整条付款链）在本地独立 Mist 服务（`npm run dev:mist`，演示种子，不连接公司库或共享服务器）上实际操作录制；重采前先重置本地数据（删除 `server/private/mist-local/store.json` 并重启）。课程 JSON 写每步的操作、填写、完成后、想一想与出错时，步数必须与采集一致，构建时校验。播放器（`scripts/manual-lesson.mjs`）负责推近、压暗、光标点击 / 输入、气泡、连续播放 / 暂停 / 重播本步和亮起处练习，窄屏按可读性推近。
 
 ## 更新与检查
 

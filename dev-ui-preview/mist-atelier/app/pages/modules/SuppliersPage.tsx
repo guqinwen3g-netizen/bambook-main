@@ -18,7 +18,7 @@ import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL } from '../../../../../
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { ActionBar, businessDay, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { CAPACITY_UNITS, CERTIFICATES, COUNTRIES } from '../../runtime/tradeOptions';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'blocked';
@@ -246,8 +246,8 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
     <DetailBlock title={uiText(service?"服务内容":"产能与工艺")}><p className="mist-sub" style={{ margin: 0 }}>{s.capabilities}</p>{s.note && <span className="mist-note">{s.note}</span>}</DetailBlock>
     <DetailBlock title={uiText("收款账户")} aside={canBank ? <Button variant="quiet" icon={Plus} disabled={locked} onClick={() => onBank()}>{uiText("登记")}</Button> : undefined}>
       {(s.bankAccounts || []).some(a => a.state === 'active') ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={ui`${s.name} 收款账户`} data-supplier-bank>{(s.bankAccounts || []).filter(a => a.state === 'active').map(a => <div key={a.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
-        <div className="mist-row" style={{ gap: 8 }}><strong>{a.accountName}</strong><span className="mist-spacer" /><Pill tone="neutral">{a.currency}</Pill>{Date.parse(day) - Date.parse(a.addedAt.slice(0, 10)) < PAYEE_RECENT_DAYS * 86400000 && <Pill tone="warn">{uiText('近期变更')}</Pill>}</div>
-        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{a.bankName} · <Mono>{a.accountNo}</Mono>{a.swift ? <> · SWIFT <Mono>{a.swift}</Mono></> : null}{uiText(' · ')}{a.addedBy} {a.addedAt.slice(0, 10)}</small><span className="mist-spacer" />
+        <div className="mist-row" style={{ gap: 8 }}><strong>{a.accountName}</strong><span className="mist-spacer" /><Pill tone="neutral">{a.currency}</Pill>{Date.parse(day) - Date.parse(businessDay(a.addedAt)) < PAYEE_RECENT_DAYS * 86400000 && <Pill tone="warn">{uiText('近期变更')}</Pill>}</div>
+        <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{a.bankName} · <Mono>{a.accountNo}</Mono>{a.swift ? <> · SWIFT <Mono>{a.swift}</Mono></> : null}{uiText(' · ')}{a.addedBy} {businessDay(a.addedAt)}</small><span className="mist-spacer" />
           {canBank && <Button variant="quiet" disabled={locked} onClick={() => onBank(a.currency)}>{uiText('变更')}</Button>}</div>
       </div>)}</div> : <span className="mist-muted">{uiText("未登记收款账户")}</span>}
     </DetailBlock>

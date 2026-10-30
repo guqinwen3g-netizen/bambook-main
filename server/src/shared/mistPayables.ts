@@ -1,5 +1,6 @@
 import {recoveryOtherFulfilledMinor} from './mistClaimRecoveryReceipts';
 import { hasMaterialAtFactory, materialDeliveryRows } from './mistInternalFabric';
+import { receiptReturnedQuantity } from './mistFulfillment';
 /**
  * 供应商票据与应付（公司端财务首轮）。
  * 业务口径：供应商开出增值税发票后，财务登记票据并形成应付；付款是另一件事实，
@@ -356,6 +357,23 @@ export function settlementReceipts(root: Root, purchaseId: string, exceptSettlem
 function assertSettlementReceiptsCounted(root: Root, receiptIds: string[]) {
   if (materialDeliveryRows(root).some(row => row.kind === 'direct' && receiptIds.includes(row.id) && row.pending !== '0')) fail('直送物料仍有待点收数量，请先由接收人完成点收', 'PRECONDITION');
 }
+/** 短交结案前提：已有确认结算、实收全部结算、拒收全部登记退换且没有待供应商补发的数量、累计结算数量小于合同数量。 */
+export function shortClosureBlocker(root: Root, purchaseId: string): string {
+  const po = (root.fulfillment?.purchases || []).find(x => x.id === purchaseId);
+  if (!po) return '来源合同不存在';
+  const confirmed = confirmedSettlements(root, po.id);
+  if (!confirmed.length) return '还没有已确认的结算；未交货的合同请走合同取消';
+  if (confirmed.some(x => x.final)) return '合同已完成最终结算';
+  if (read(root).settlements.some(x => x.purchaseId === po.id && x.state === 'pending')) return '已有待财务复核结算';
+  if (materialDeliveryRows(root).some(row => row.kind === 'direct' && row.purchaseId === po.id && row.pending !== '0')) return '直送物料仍有待点收数量';
+  const receipts = (root.fulfillment?.receipts || []).filter(r => r.purchaseId === po.id);
+  if (receipts.some(r => r.quantity > 0 && !receiptSettled(root, r.id))) return '还有未结算的实收，请勾选这些收货做最终结算';
+  if (receipts.some(r => r.rejected - receiptReturnedQuantity(r) > 0)) return '还有拒收未登记退换，请先在采购详情登记供应商补发或不再补发';
+  if (receipts.some(r => receiptReturnedQuantity(r, 'replace') > 0)) return '有退换登记为供应商补发；补货不再到的，先冲回补发登记、改登不再补发';
+  if (settledQuantity(root, po.id) >= po.quantity) return '累计结算已达合同数量';
+  return '';
+}
+function assertShortClosure(root: Root, po: { id: string }) { const reason = shortClosureBlocker(root, po.id); if (reason) fail(reason, 'PRECONDITION'); }
 function assertFinalSettlementReceipts(root: Root, purchaseId: string, receiptIds: string[], exceptSettlementId = '') {
   const direct = materialDeliveryRows(root).filter(row => row.kind === 'direct' && row.purchaseId === purchaseId);
   if (!direct.length) return;
@@ -842,14 +860,18 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (po.state !== 'approved') fail(`${po.code} 尚未批准，不能结算`, 'PRECONDITION');
       if (confirmedSettlements(root, po.id).some(x => x.final)) fail(`${po.code} 已完成最终结算；如需更正请由财务冲回最终结算`, 'PRECONDITION');
       if (s.settlements.some(x => x.purchaseId === po.id && x.state === 'pending')) fail(`${po.code} 有待财务复核的结算，请等复核或撤回后再提交`, 'CONFLICT');
-      if (!Array.isArray(p.receiptIds) || !p.receiptIds.length || p.receiptIds.length > 100) fail('请选择本次结算对应的实际收货记录');
+      // 短交结案：实收已全部结算、拒收均已登记退换，供应商不再交货时，以零数量最终结算关闭合同，释放剩余预付去退款或转抵。
+      const closing = Array.isArray(p.receiptIds) && !p.receiptIds.length && p.final === true;
+      if (closing) assertShortClosure(root, po);
+      else if (!Array.isArray(p.receiptIds) || !p.receiptIds.length || p.receiptIds.length > 100) fail('请选择本次结算对应的实际收货记录');
       const ids = [...new Set((p.receiptIds as unknown[]).map(v => text(v, '收货记录')))];
       if (ids.length !== p.receiptIds.length) fail('同一条收货记录在本次结算中重复出现');
       const receipts = ids.map(id => (root.fulfillment?.receipts || []).find(r => r.id === id) || fail('收货记录不存在', 'NOT_FOUND'));
       for (const r of receipts) { if (r.purchaseId !== po.id) fail('收货记录不属于该合同'); if (receiptSettled(root, r.id)) fail(`${r.date} 的收货记录已在其他结算中`, 'CONFLICT'); }
       assertSettlementReceiptsCounted(root, ids);
       const quantity = receipts.reduce((n, r) => n + r.quantity, 0), rejected = receipts.reduce((n, r) => n + r.rejected, 0);
-      if (quantity <= 0) fail('所选收货记录没有实收合格数量；拒收数量不计入结算');
+      if (!closing && quantity <= 0) fail('所选收货记录没有实收合格数量；拒收数量不计入结算');
+      if (closing) text(p.note, '结案说明（供应商不再交货的依据）', true, 1000);
       const amount = Math.round(quantity * po.price * 100);
       const live = s.settlements.filter(x => x.purchaseId === po.id && x.state === 'confirmed').reduce((n, x) => n + mistMoneyMinor(x.amount), 0);
       if (live + amount > purchaseContractMinor(po)) fail(`${po.code} 累计结算金额会超过合同金额；超收部分须先走合同变更`);

@@ -1,0 +1,75 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 707,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 364,
+        "y": 417,
+        "width": 58,
+        "height": 42
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1140,
+        "y": 498,
+        "width": 113,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 414,
+        "y": 215,
+        "width": 591,
+        "height": 40
+      },
+      "value": "PO-2026-00001 · 华盛毛纺 · 111,600.00 CNY"
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 414,
+        "y": 379,
+        "width": 251,
+        "height": 40
+      },
+      "value": "2026-11-03"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 414,
+        "y": 463,
+        "width": 591,
+        "height": 40
+      },
+      "value": "合同签订后"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 952,
+        "y": 716,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

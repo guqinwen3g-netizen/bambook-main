@@ -1,0 +1,46 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 870,
+        "width": 485,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 802,
+        "y": 541,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 374,
+        "y": 482,
+        "width": 692,
+        "height": 64
+      },
+      "value": "ST-2026-0001 已确认，专票 110,670.00 已登记，抵扣预付 33,201.00 后申请余款。"
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 992,
+        "y": 739,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}
