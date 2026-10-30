@@ -165,7 +165,7 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 - **入口**：`POST /api/mist/mcp`（JSON-RPC 2.0；`initialize` / `ping` / `tools/list` / `tools/call`，通知回 202，GET 不提供）。实现 `server/src/mist/agentMcp.ts`，路由 `route.ts`。
 - **身份**：`POST /api/mist/agent/delegations` 由本人会话签发委托（2 小时）。`{mode:'read'}`（默认）上限为只读 scope；`{mode:'operate'}` 上限 = 账号现有 scope（`AGENT_OPERATE_CEILING`），永远不超出账号。委托只能调用读取路由和 `/mcp`。
 - **工具**：`bambook_workspaces`、`bambook_query`、`bambook_get`、`bambook_related`（复用 `agentRead.ts`）；`bambook_commands`（命令目录 + payload 结构 + `via`）；`bambook_preview`（`repository.preview`：同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，应用后整笔回滚，返回业务事件说明；生成文件的命令不支持）；`bambook_execute`（`repository.execute`，请求编号幂等：重试沿用原版本号重放，不同命令复用编号被拒）。
-- **分级**：`agentCommandSensitivity()`。`confirm`（资金 / 账务前缀、人员与权限、对外邮件，以及 confirm/approve/decide/void/reverse/cancel/delete/close/issue/send/notify/present/refund/waive/withdraw/transition 等动词）执行时先按 Agent 身份完整预演，通过后记为 Agent 提议（见下条），不直接生效；`payable.settlement.submit` 例外为普通；`files.add` 与 `email.server.*` 不能经接口。
+- **分级**：`agentCommandSensitivity()`。`confirm`（资金 / 账务前缀、人员与权限、供应商收款账户（`market.supplier.bank.*`）、对外邮件，以及 confirm/approve/decide/void/reverse/cancel/delete/close/issue/send/notify/present/refund/waive/withdraw/transition 等动词）执行时先按 Agent 身份完整预演，通过后记为 Agent 提议（见下条），不直接生效；`payable.settlement.submit` 例外为普通；`files.add` 与 `email.server.*` 不能经接口。
 - **命令目录**：`scripts/gen-mist-command-catalog.mjs` 从 `server/src/shared/*.ts` 的 `{ type: '…'; payload: … }` 声明生成 `server/src/mist/agentCommandCatalog.ts`（302 条），`agentMcp.test.ts` 用 `--check` 守住与源码一致。目录外的类型不能执行。
 - **审计**：仓储识别委托身份，在业务事件经办人后标注“（经 Agent）”；账号 id 与权限判断不变。
 - **验证**：`server/src/mist/agentMcp.test.ts`（协议、买手预演→执行→幂等重放、财务确认被拒、超验收开票预演被拒、只读委托与无权岗位）；本地服务真实 HTTP 走查 PO-2026-00002 结算提交与财务确认拒绝。

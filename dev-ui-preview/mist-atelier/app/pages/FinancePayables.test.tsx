@@ -12,7 +12,7 @@ import { Nav } from '../nav';
 const store = vi.hoisted(() => ({ value: null as any }));
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store.value }));
 vi.mock('../runtime/auth', () => { const useMistSession = () => ({ user:{id:store.value?.userId||'finance'}, hasPermission: (scope: string) => store.value?.canWrite !== false && (!store.value?.permissions || store.value.permissions.includes(scope)) }); return { useMistSession, useOptionalMistSession: useMistSession }; });
-import { FinancePayables } from './FinancePayables';
+import { FinancePayables, termsPrepayment } from './FinancePayables';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, route: { view: string; id?: string; section?: string };
 const go = vi.fn(), day = platformBusinessDate(new Date());
@@ -526,3 +526,9 @@ it('locks the bill form while registration is in flight',async()=>{
 });
 
 it('shows only scoped purchase lines for a partially visible supplier invoice',()=>{store.value.state.partialPayableBills=[{id:'part',code:'AP-PART',supplier:'供应商',currency:'USD',lines:[{purchaseId:'p',purchaseCode:'PO-OWN',kind:'finished',amount:40}],hiddenCount:1,voided:false}];render();const list=getByRole(host,'list',{name:'部分可见应付票据'});expect(list.textContent).toContain('AP-PART');expect(list.textContent).toContain('PO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('100.00');});
+it('prefills the prepayment plan from a stated percentage in the contract terms only',()=>{
+ expect(termsPrepayment({quantity:2400,price:46.5,terms:'30% 预付，余款到货验收后 30 天'})).toBe('33480');
+ expect(termsPrepayment({quantity:500,price:452,terms:'定金 20%，出运前付清'})).toBe('45200');
+ expect(termsPrepayment({quantity:6600,price:0.08,terms:'月结 30 天'})).toBe('');
+ expect(termsPrepayment({quantity:10,price:3,terms:'150% 预付'})).toBe('');
+});

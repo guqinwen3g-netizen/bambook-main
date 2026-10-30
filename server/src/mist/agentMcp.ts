@@ -17,7 +17,7 @@ export const MCP_PROTOCOL_VERSION = '2025-06-18';
 type CatalogEntry = { type: string; payload: string; source: string };
 const COMMANDS = new Map<string, CatalogEntry>(MIST_COMMAND_CATALOG.map(entry => [entry.type, entry]));
 
-const CONFIRM_PREFIXES = ['payable.', 'finance.', 'funding.', 'fxrate.', 'lc.', 'rebate.', 'opening.', 'platform.credit.', 'platform.invoice.issue', 'platform.claim.recovery.', 'platform.pricingParams.', 'platform.employee.', 'settings.', 'member.', 'teamScope.', 'handover.', 'email.server.'];
+const CONFIRM_PREFIXES = ['payable.', 'finance.', 'funding.', 'fxrate.', 'lc.', 'rebate.', 'opening.', 'platform.credit.', 'platform.invoice.issue', 'platform.claim.recovery.', 'platform.pricingParams.', 'platform.employee.', 'market.supplier.bank.', 'settings.', 'member.', 'teamScope.', 'handover.', 'email.server.'];
 const CONFIRM_VERB = /(^|\.)(confirm|approve|decide|reject|void|reverse|cancel|delete|remove|close|archive|issue|send|notify|present|refund|waive|withdraw|transition|execute|settle|allocate|assign|release|lock|reconcile|import|restore|purge)/i;
 /** 采购经办提交结算只是交给财务复核，不改应付；其余 payable.* 都须本人确认。 */
 const NORMAL_EXCEPTIONS = new Set(['payable.settlement.submit']);
