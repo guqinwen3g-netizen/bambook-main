@@ -422,6 +422,10 @@ export class MistRepository {
           if (customer && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可交接范围内', 404);
         }
         if (input.command) {
+          if(input.command.type==='order.internal.send'){
+            const required=['orders:read','production:read','procurement:read'] as const;
+            if(required.some(permission=>!hasScope(actor,permission))||input.command.payload.source?.kind==='stockIssue'&&!hasScope(actor,'inventory:read'))fail('FORBIDDEN','内部交付需要读取准确订单、生产及交付来源',403);
+          }
           const known = new Set(row.state.files.map(file => file.id));
           const allowed = new Set(projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state.files.map(file => file.id));
           const check = (value: unknown): void => {
@@ -431,7 +435,7 @@ export class MistRepository {
           };
           check(input.command.payload);
         }
-        if (earlyScope && scopedTargetViolation(row.state, earlyScope, input.command, input.claimId)) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
+        if (earlyScope && scopedTargetViolation(row.state, earlyScope, input.command, input.claimId, actor.userId)) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         const scopeManagement = input.command?.type?.startsWith('teamScope.') || REVIEW_KIND_BY_COMMAND.has(input.command?.type);
         const crossIssue=input.command?.type==='fulfillment.materials.issue'?input.command.payload:undefined;
         const crossTarget=earlyScope&&crossIssue&&scopedMaterialIssueTargets(row.state,earlyScope)[crossIssue.id]?.some(option=>option.value===crossIssue.targetProductionId)?crossIssue.targetProductionId:undefined;
@@ -512,7 +516,8 @@ export class MistRepository {
         const changeKeys = mistChangeKeys(row.state, applied.state);
         // 行级范围写侧：受限岗位不能改看不到的业务，也不能在看不到的业务下新建。
         const incomingSource=incoming&&row.state.fulfillment.purchases.find(p=>p.id===incoming.purchaseId);
-        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope, incoming&&incomingSource?{issueId:incoming.id,sourceOrderId:incomingSource.orderId}:undefined) : null;
+        const internalIncoming=['order.internal.receive','order.internal.reverseCheck'].includes(input.command?.type)?row.state.internalDeliveries?.find(d=>d.id===input.command.payload.id&&d.receiverId===actor.userId):undefined;
+        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope, incoming&&incomingSource?{issueId:incoming.id,sourceOrderId:incomingSource.orderId}:undefined,internalIncoming?{deliveryId:internalIncoming.id,sourceOrderId:internalIncoming.orderId}:undefined) : null;
         if (violation) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         if (concurrent) {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);

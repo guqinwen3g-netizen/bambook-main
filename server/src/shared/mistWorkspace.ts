@@ -1,3 +1,4 @@
+import {applyInternalDeliveryCommand,assertInternalDeliveryIntegrity,internalDeliveryState,type InternalDelivery,type InternalDeliveryCommand} from './mistInternalDelivery';
 import {syncClaimReplacementShipments,type ClaimReplacementSource} from './mistClaimReplacement';
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {applyInternalFabricCommand,internalFabricCommandPermission,normalizeGarmentFulfillment,normalizeInternalSupply,internalFabricDeliveryState,type GarmentFulfillmentFields,type MistInternalFabricAllocation,type InternalFabricCommand} from './mistInternalFabric';
@@ -265,6 +266,7 @@ export type MistCompanyProfile={legalName:string;englishName:string;address:stri
 export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示公司：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
 export type MistState = {
   internalFabricAllocations?: MistInternalFabricAllocation[];
+  internalDeliveries?: InternalDelivery[];
   orderFunding?:OrderFundingState;
   payables?:PayablesState;
   /** Response-only scoped purchase lines from mixed supplier invoices. */
@@ -306,7 +308,7 @@ export type MistState = {
   teamScopes?:MistTeamScope[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = InternalFabricCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -685,11 +687,13 @@ function recalculate(state: MistState) {
     if(quantity) order.progress=Math.round(jobs.reduce((s,p)=>s+p.qty*p.pct,0)/quantity);
     const shipments=(state.fulfillment?.shipments||[]).filter(s=>s.lines.some(line=>line.orderId===order.id)&&s.state!=='cancelled');
     const departed=shipments.filter(s=>s.state==='departed');
+    const internalState=internalDeliveryState(state,order.id);
     if(order.governance&&order.governance.status!=='approved'){
       // BB-ORD-7：已作废 / 已取消为终止状态
       const gs=order.governance.status;order.state=gs==='pending'?'待主单审批':gs==='rejected'?'主单已退回':gs==='void'?'已作废':gs==='cancelled'?'已取消':'订单草稿';order.tone=gs==='pending'?'warn':gs==='rejected'||gs==='cancelled'?'bad':'neutral';
     }else if(order.governance?.contract.internalSupply&&internalFabricDeliveryState(state,order.id)){
       order.state=internalFabricDeliveryState(state,order.id)!;order.tone=order.state==='已交接'?'ok':'accent';
+    }else if(internalState){order.state=internalState;order.tone=order.state==='内部交付完成'?'ok':'accent';
     }else if(departed.length){
       const complete=rows.every(line=>isLineClosed(line)||departed.reduce((sum,s)=>sum+s.lines.filter(item=>item.lineId===line.id).reduce((n,item)=>n+Math.round(item.quantity*10000),0),0)>=Math.round(line.qty*10000));
       const unpaid=state.invoices.some(invoice=>invoice.orderId===order.id&&invoice.open>0);
@@ -699,7 +703,7 @@ function recalculate(state: MistState) {
     // 加工合同批准即建生产分支；放行开产或已有进度前订单仍是"备料中"，不显示"生产中"。
     else if(jobs.some(job=>job.sourcePurchaseId&&((state.fulfillment&&fulfillmentProductionFact(state,job.id)?.release)||job.pct>0))){
       const columns=jobs.map(job=>fulfillmentProductionColumn(state,job));
-      order.state=columns.every(column=>column==='done')?(order.governance?.contract.internalSupply?'待交接':'待出运'):columns.some(column=>column==='qc')?'待终期 QC':'生产中';order.tone='accent';
+      order.state=columns.every(column=>column==='done')?(order.governance?.contract.internalSupply?'待交接':order.governance?.contract.kind==='internal'?'待内部交付':'待出运'):columns.some(column=>column==='qc')?'待终期 QC':'生产中';order.tone='accent';
     }else if(jobs.some(job=>job.sourcePurchaseId)||(state.fulfillment?.purchases||[]).some(p=>p.orderId===order.id&&p.state==='approved')){order.state='备料中';order.tone='neutral';}
     if(order.governance?.status==='approved'&&order.governance.cancellation?.status==='pending'){order.state='取消审批中';order.tone='warn';}
   }
@@ -766,6 +770,7 @@ export function createMistState(context: MistContext, seed: 'demo'|'empty' = 'de
 
 export function getRequiredBusinessNumberPlan(state: MistState, command: MistCommand) { return platformBusinessNumberPlan(state, command); }
 export function mistCommandPermission(command: MistCommand): string | null {
+  if(command.type.startsWith('order.internal.')){if(!['order.internal.send','order.internal.receive','order.internal.reverseCheck','order.internal.returnRejected','order.internal.cancel'].includes(command.type))throw new MistCommandError('VALIDATION','未知内部交付操作');return ['order.internal.receive','order.internal.reverseCheck'].includes(command.type)?'orders:read':'orders:write';}
   if(command.type.startsWith('order.fabric.'))return internalFabricCommandPermission(command as InternalFabricCommand);
   if(command.type.startsWith('order.governance.'))return orderGovernancePermission(command as OrderGovernanceCommand);
   if(command.type.startsWith('funding.'))return orderFundingCommandPermission(command as OrderFundingCommand);
@@ -828,6 +833,7 @@ export function createMistOrderRecords(state:MistState,p:MistOrderInput,context:
 export function applyMistCommand(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
   const result=applyMistCommandUnbound(original, command, context);
   syncClaimReplacementShipments(result.state,context);
+  assertInternalDeliveryIntegrity(result.state);
   return result;
 }
 function applyMistCommandUnbound(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
@@ -836,6 +842,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   mistCommandPermission(command);
   const state: MistState=JSON.parse(JSON.stringify(original));
   normalizeMistState(state,context);
+  if(command.type.startsWith('order.internal.')){const result=applyInternalDeliveryCommand(state,command as InternalDeliveryCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('order.fabric.')){const result=applyInternalFabricCommand(state,command as InternalFabricCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('order.governance.')){const result=applyOrderGovernanceCommand(state,command as OrderGovernanceCommand,context);recalculate(state);assertOrderFundingIntegrity(state);return {state,result};}
   if(command.type.startsWith('funding.')){const result=applyOrderFundingCommand(state,command as OrderFundingCommand,context);recalculate(state);return {state,result};}
