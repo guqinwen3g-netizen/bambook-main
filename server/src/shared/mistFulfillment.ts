@@ -103,7 +103,9 @@ export type FulfillmentQcTask = {
         kind: 'manual';
     }>;
     domain: 'garment' | 'fabric';
-    kind: 'sample' | 'production';
+    kind: 'sample' | 'production' | 'quarantine';
+    /** Exact returned stock movement; never a production or sample QC substitute. */
+    quarantine?: { returnId: string; stockId: string; quantity: number; unit: string; name: string; disposedAt?: string };
     sampleId?: string;
     factory: string;
     location: string;
@@ -266,6 +268,9 @@ export type FulfillmentStockMovement = {
     lockedAfter?: number;
     /** Part of an original issue returned after receiver rejection; not available until disposed. */
     quarantinedQuantity?: number;
+    quarantineTaskId?: string;
+    quarantineDisposition?: { decision: 'release'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string };
+    quarantineReturnId?: string;
 };
 export type ShipmentLine = {
     lineId: string;
@@ -569,6 +574,12 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
         issueId?: string;
         sourceLocation?: string;
     };
+} | {
+    type: 'fulfillment.inventory.quarantine.request';
+    payload: { returnId: string; due: string };
+} | {
+    type: 'fulfillment.inventory.quarantine.dispose';
+    payload: { returnId: string; decision: 'release'; evidence: string };
 } | {
     type: 'fulfillment.materials.confirm';
     payload: { kind: 'issue' | 'direct'; id: string; evidence: string; acceptedQuantity?: number; rejectedQuantity?: number; expectedReceivingRevision?: number };
@@ -1208,6 +1219,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const sourceBlocker = fulfillmentQcSourceBlocker(root, t.source); if (sourceBlocker) fail(sourceBlocker);
             if (!ctx.actorId || t.assigneeId !== ctx.actorId)
                 fail('请先由当前QC认领任务');
+            if (t.kind === 'quarantine') {
+                const held = t.quarantine && get(f.stockMovements, t.quarantine.returnId, '隔离退回记录');
+                if (!held || held.stockId !== t.quarantine!.stockId || held.quarantinedQuantity !== t.quarantine!.quantity || held.quarantineDisposition) fail('隔离退回记录已处置或不一致');
+            }
             if (t.kind === 'production' && t.source.kind === 'orderLine') {
                 const branch = liveBranch(root, t.source.productionId!);
                 // An inspection documents physical facts; intake never authorizes supply or shipment.
@@ -1640,6 +1655,33 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(quarantinedQuantity ? { quarantinedQuantity } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
             audit(root, ctx, 'inventory', stock.id, '登记实际库存交接');
             return { id };
+        }
+        case 'fulfillment.inventory.quarantine.request': {
+            const returned = get(f.stockMovements, p.returnId, '隔离退回记录');
+            const stock = get(f.stock, returned.stockId, '库存批次');
+            if (returned.kind !== 'return' || !returned.quarantinedQuantity || returned.quarantineDisposition || (stock.locked || 0) < returned.quarantinedQuantity) fail('没有待复检的隔离退回');
+            if (returned.quarantineTaskId || f.qcTasks.some(task => task.kind === 'quarantine' && task.quarantine?.returnId === returned.id)) fail('该退回已有复检任务');
+            const order = get(root.orders, stock.orderId, '来源订单'), id = ctx.id();
+            const due = day(p.due, '预计检查日');
+            f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind:'orderLine', orderId:stock.orderId, lineId:stock.lineId }, domain: order.type, kind:'quarantine', quarantine:{ returnId:returned.id, stockId:stock.id, quantity:returned.quarantinedQuantity!, unit:stock.unit, name:stock.name }, factory:'仓库', location:returned.location, contact:returned.person, due, requestedBy:ctx.actorName, assignee:'', state:'pending', reportIds:[], createdAt:ctx.now });
+            returned.quarantineTaskId = id;
+            audit(root,ctx,'qc',id,'隔离料已送复检',{view:'qc-workbench',id});
+            return { id };
+        }
+        case 'fulfillment.inventory.quarantine.dispose': {
+            const returned = get(f.stockMovements, p.returnId, '隔离退回记录'), stock = get(f.stock, returned.stockId, '库存批次');
+            if (returned.kind !== 'return' || !returned.quarantinedQuantity || returned.quarantineDisposition) fail('隔离料已处置或不存在');
+            const task = f.qcTasks.find(task => task.kind === 'quarantine' && task.quarantine?.returnId === returned.id);
+            const report = task && f.qcReports.find(item => item.id === task.reportIds.at(-1));
+            if (p.decision !== 'release' || !task || returned.quarantineTaskId !== task.id || task.state !== 'reported' || !report || report.taskId !== task.id || report.result !== 'pass') fail('请先完成本批隔离料复检并确认通过');
+            if (task!.quarantine?.stockId !== stock.id || task!.quarantine!.quantity !== returned.quarantinedQuantity || (stock.locked || 0) < returned.quarantinedQuantity!) fail('隔离库存不一致');
+            const evidence = text(p.evidence, '处置依据'), movementId = ctx.id(), quantity = returned.quarantinedQuantity!;
+            stock.locked = sum([stock.locked || 0, -quantity]); addAtPosition(stock, quantity, returned.location);
+            f.stockMovements.push({id:movementId,stockId:stock.id,kind:'unlock',quantity,location:returned.location,person:ctx.actorName,note:evidence,at:ctx.now,actor:ctx.actorName,quarantineReturnId:returned.id});
+            returned.quarantineDisposition = {decision:'release',taskId:task!.id,reportId:report!.id,movementId,evidence,actor:ctx.actorName,at:ctx.now};
+            task!.quarantine!.disposedAt = ctx.now;
+            audit(root,ctx,'inventory',stock.id,'隔离料复检通过后恢复可用');
+            return { id:movementId, stockId:stock.id };
         }
         case 'fulfillment.shipments.sourceTerms': {
             const order = get(root.orders, p.orderId, '订单');

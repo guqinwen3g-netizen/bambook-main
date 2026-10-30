@@ -151,6 +151,9 @@ export function InventoryPage() {
   const detail = selected && state
     ? <StockDetail stock={selected} state={state} can={canStockWrite(selected)} locked={locked}
         onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))} onRepair={() => {const spec=repairSpec(selected);if(spec)editor.open(spec);}} onHandback={() => {const spec=repairSpec(selected,true);if(spec)editor.open(spec);}} onDispatch={()=>{const spec=custodySpec(selected);if(spec)editor.open(spec);}} onRepairReturn={()=>{const spec=custodySpec(selected,true);if(spec)editor.open(spec);}}
+        onInspect={returnId => setDialog({title:'隔离料送复检',submitLabel:'发起复检',fields:[field('due','预计检查日','date')],initialValues:{due:today()},submit:v=>run({type:'fulfillment.inventory.quarantine.request',payload:{returnId,due:text(v,'due')}})})}
+        onRelease={returnId => setDialog({title:'恢复可用库存',submitLabel:'确认恢复',fields:[field('evidence','处置依据','textarea')],initialValues:{evidence:''},submit:v=>run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId,decision:'release',evidence:text(v,'evidence')}})})}
+        onQc={id=>go('qc-workbench',id,{section:'quarantine'})} canQc={session.canAccessView(View.QcWorkbench)}
         onPurchase={id => go('procurement', id)} onClaim={(id, section) => section ? go('claims', id, { section }) : go('claims', id)} canClaims={session.canAccessView(View.Claims)} />
     : <EmptyState icon={Boxes} title={uiText(loading ? '正在读取库存' : '未选择批次')} compact />;
 
@@ -195,9 +198,10 @@ export function InventoryPage() {
   </MistPage></Nav.Provider>;
 }
 
-function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, onRepair, onHandback, onDispatch, onRepairReturn, onPurchase, onClaim }: {
+function StockDetail({ stock, state, can, locked, canClaims, canQc, onMove, onScrap, onRepair, onHandback, onDispatch, onRepairReturn, onInspect, onRelease, onQc, onPurchase, onClaim }: {
   stock: FulfillmentStock; state: MistState; can: boolean; locked: boolean; canClaims: boolean;
   onMove: (kind: 'issue' | 'return' | 'move') => void; onScrap: () => void; onRepair:()=>void; onHandback:()=>void; onDispatch:()=>void; onRepairReturn:()=>void; onPurchase: (id: string) => void; onClaim: (id: string, section?: string) => void;
+  onInspect:(id:string)=>void; onRelease:(id:string)=>void; onQc:(id:string)=>void; canQc:boolean;
 }) {
   const f = state.fulfillment, returned = isReturn(stock), current = stockState(state, stock), out = stockOutstanding(state, stock), domain = domainOf(state, stock);
   const purchase = f.purchases.find(row => row.id === stock.purchaseId), receipt = f.receipts.find(row => row.id === stock.receiptId);
@@ -249,6 +253,12 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
       ]} />}
     {receipt?.evidence && !returned && <p className="mist-sub">{uiText("入库依据：")}{receipt.evidence}</p>}
     <PositionSummary row={stock} />
+    {movements.some(m=>m.quarantinedQuantity) && <DetailBlock title={uiText('退料复检')}>
+      {movements.filter(m=>m.quarantinedQuantity).map(m=>{const task=state.fulfillment.qcTasks.find(t=>t.id===m.quarantineTaskId), report=task&&state.fulfillment.qcReports.find(r=>r.id===task.reportIds.at(-1));return <div className="mist-col" key={m.id}>
+        <div className="mist-row"><span>{m.quarantinedQuantity} {stock.unit} · {m.location}</span><Pill tone={m.quarantineDisposition?'ok':report?.result==='reject'?'bad':'warn'}>{m.quarantineDisposition?'已恢复可用':report?.result==='pass'?'复检通过':report?.result==='reject'?'复检未通过':report?.result==='conditional'?'复检有保留':m.quarantineTaskId?'待复检':'待送检'}</Pill></div>
+        <div className="mist-row">{can&&!m.quarantineTaskId&&!m.quarantineDisposition&&<Button disabled={locked} onClick={()=>onInspect(m.id)}>{uiText('送复检')}</Button>}{m.quarantineTaskId&&canQc&&<Button variant="quiet" onClick={()=>onQc(m.quarantineTaskId!)}>{uiText('查看复检')}</Button>}{can&&!m.quarantineDisposition&&report?.result==='pass'&&<Button disabled={locked} onClick={()=>onRelease(m.id)}>{uiText('恢复可用')}</Button>}</div>
+      </div>;})}
+    </DetailBlock>}
     {openIssues.length > 0 && <DetailBlock title={uiText("出库去向 · 可按原出库退回")}>
       <DataTable ariaLabel={uiText("出库去向")} rows={openIssues} rowKey={movement => movement.id} columns={[
         { key: 'who', header: '接收方', render: movement => movement.person },

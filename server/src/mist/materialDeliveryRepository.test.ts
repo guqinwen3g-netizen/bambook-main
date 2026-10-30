@@ -47,3 +47,26 @@ it('uses fresh write permissions and current receiving-account status before tou
   await expect(repo.execute(testActor(), workspaceId, issue('disabled-receiver', 0))).rejects.toThrow('停用');
   expect(state()).toEqual(before);
 });
+
+it('keeps warehouse disposition and independent QC reporting under their respective permissions',async()=>{
+  f.context.members!.push({id:'qc',name:'QC',active:true,groups:[]});
+  const sourceIssue=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id:sourceIssue,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'counted'}},'garment');
+  const ret=f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:sourceIssue,quantity:4,location:'Hold A',person:'factory',note:'Rejected'}}).id!;
+  f.state.memberIds!.push('qc');f.state.members!.push({userId:'qc',name:'QC',addedBy:'owner',addedByName:'Fabric',addedAt:f.context.now});
+  db.workspaces.get(workspaceId).state=structuredClone(f.state);
+  auth.users.set('qc',{active:true,permissions:['qc:read','qc:fabric_chain:write','orders:read']});
+  const request={requestId:'quarantine-request',expectedRevision:0,command:{type:'fulfillment.inventory.quarantine.request' as const,payload:{returnId:ret,due:'2026-10-24'}}};
+  await expect(repo.execute(testActor('qc'),workspaceId,request)).rejects.toMatchObject({status:403});
+  const created=await repo.execute(testActor(),workspaceId,request), taskId=created.receipt.result.id;
+  expect((await repo.execute(testActor(),workspaceId,request)).replayed).toBe(true);
+  const claim={requestId:'quarantine-claim',expectedRevision:1,command:{type:'fulfillment.qc.claim' as const,payload:{id:taskId,domain:'fabric' as const}}};
+  await expect(repo.execute(testActor(),workspaceId,claim)).rejects.toMatchObject({status:403});
+  await repo.execute(testActor('qc'),workspaceId,claim);
+  const report={requestId:'quarantine-report',expectedRevision:2,command:{type:'fulfillment.qc.report' as const,payload:{id:taskId,domain:'fabric' as const,result:'pass' as const,report:'Q-HOLD',opinion:'Checked',location:'Hold A',reviewedAt:f.context.now,measurements:[],fileIds:[]}}};
+  await repo.execute(testActor('qc'),workspaceId,report);
+  const release={requestId:'quarantine-release',expectedRevision:3,command:{type:'fulfillment.inventory.quarantine.dispose' as const,payload:{returnId:ret,decision:'release' as const,evidence:'approved'}}};
+  await expect(repo.execute(testActor('qc'),workspaceId,release)).rejects.toMatchObject({status:403});
+  await repo.execute(testActor(),workspaceId,release);
+  expect(state().fulfillment.stock[0]).toMatchObject({available:84.3,locked:0});
+});

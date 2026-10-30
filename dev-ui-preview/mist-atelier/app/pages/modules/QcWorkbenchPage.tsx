@@ -28,7 +28,7 @@ const QC_STATE_TONE: Record<QcState, Tone> = { pending: 'warn', working: 'neutra
 const RESULT_LABEL: Record<MistQc['result'], string> = { pass: '通过', conditional: '有保留通过', reject: '不通过' };
 const RESULT_TONE: Record<MistQc['result'], Tone> = { pass: 'ok', conditional: 'warn', reject: 'bad' };
 const DOMAIN_LABEL: Record<Domain, string> = { fabric: '面料QC', garment: '成衣QC' };
-const KIND_LABEL: Record<Kind, string> = { sample: '样品评审', production: '生产检验' };
+const KIND_LABEL: Record<Kind, string> = { sample: '样品评审', production: '生产检验', quarantine: '退料复检' };
 const isNok = (task: FulfillmentQcTask) => task.state === 'blocked' || task.state === 'awaiting_business';
 const isOpen = (task: FulfillmentQcTask, state?: MistState) => task.state !== 'reported' && (!state || !fulfillmentQcSourceBlocker(state, task.source));
 const isOverdue = (task: FulfillmentQcTask, day: string) => (task.state === 'pending' || task.state === 'working') && !!task.due && task.due < day;
@@ -53,6 +53,7 @@ function qcGate(task: FulfillmentQcTask): { tone: Tone; title: string; text: str
     case 'blocked': return { tone: 'bad', title: 'QC未通过', text: '' };
     case 'awaiting_business': return { tone: 'warn', title: '待业务恢复', text: '' };
     case 'reported':
+      if (task.kind === 'quarantine') return { tone: 'ok', title: task.quarantine?.disposedAt ? '已处置' : '报告已回传', text: '' };
       if (task.kind === 'production') return { tone: 'ok', title: task.businessContinued ? '已恢复' : '报告已回传', text: '' };
       if (task.source.kind === 'version') return { tone: 'ok', title: '报告已回传', text: '' };
       if (task.businessContinued) return { tone: 'ok', title: '业务已继续', text: '' };
@@ -79,6 +80,7 @@ function groupTasks(tasks: FulfillmentQcTask[], state?: MistState): TaskGroup[] 
 }
 
 function taskSubject(state: MistState, task: FulfillmentQcTask) {
+  if (task.kind === 'quarantine' && task.quarantine) return `${task.quarantine.name} · ${task.quarantine.quantity} ${task.quarantine.unit}`;
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
   if (sample) return [sample.code, sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样', sample.color, sample.size].filter(Boolean).join(' · ');
   if (task.source.kind === 'version') return '开发返样';
@@ -99,7 +101,7 @@ export function QcWorkbenchPage() {
     if (task) { setSelected(task.id); setDomain(task.domain); setKind(task.kind); return; }
     if (route.id) return;
     setSelected('');
-    if (route.section === 'sample' || route.section === 'production') setKind(route.section);
+    if (route.section === 'sample' || route.section === 'production' || route.section === 'quarantine') setKind(route.section);
     if (route.versionId) { const dev = state?.devs.find(d => d.id === state.versions.find(v => v.id === route.versionId)?.devId); if (dev) setDomain(developmentDomain(dev.values)); }
     else if (route.orderLineId) { const orderId = state?.orderLines.find(l => l.id === route.orderLineId)?.orderId; const order = state?.orders.find(o => o.id === orderId); if (order) setDomain(order.type); }
   }, [route.id, route.section, route.versionId, route.orderLineId, route.productionId, state?.fulfillment.qcTasks]);
@@ -128,14 +130,14 @@ export function QcWorkbenchPage() {
       { id: 'site', label: '现场安排', fields: ['factory', 'location', 'contact', 'due'] },
     ],
     fields: [field('source', '送检来源', 'select', true, qcSources.filter(option => !option.value || (option.value.startsWith('version:') ? session.hasPermission('products:write') : session.hasPermission('orders:write')))), field('kind', '任务类别', 'select', true, [{ value: 'sample', label: '样品评审' }, { value: 'production', label: '生产检验' }]), field('factory', '工厂'), field('location', '实际检查地点'), field('contact', '现场联系人', 'text', false), field('due', '预计检查日', 'date')],
-    initialValues: { source: route.productionId ? 'production:' + route.productionId : route.versionId ? 'version:' + route.versionId : route.orderLineId ? 'line:' + route.orderLineId : '', kind, factory: state?.productions.find(p => p.id === route.productionId)?.factory || state?.versions.find(v => v.id === route.versionId)?.factory || '', location: '', contact: '', due: today() },
+    initialValues: { source: route.productionId ? 'production:' + route.productionId : route.versionId ? 'version:' + route.versionId : route.orderLineId ? 'line:' + route.orderLineId : '', kind:kind==='quarantine'?'sample':kind, factory: state?.productions.find(p => p.id === route.productionId)?.factory || state?.versions.find(v => v.id === route.versionId)?.factory || '', location: '', contact: '', due: today() },
     submit: async values => {
       if (!state) return;
       const sample = text(values, 'source').startsWith('sample:') ? state.fulfillment.samples.find(item => item.id === text(values, 'source').slice(7)) : undefined;
       const source = sample ? sample.source : parseSource(state, text(values, 'source'));
       if (source.kind === 'manual') throw new Error('请选择准确系统实物');
       const taskDomain = source.kind === 'version' ? developmentDomain(state.devs.find(d => d.id === source.devId)!.values) : state.orders.find(o => o.id === source.orderId)!.type;
-      const taskKind = text(values, 'kind') as Kind;
+      const taskKind = text(values, 'kind') as 'sample' | 'production';
       const saved = await run({ type: 'fulfillment.qc.request', payload: { source, ...(sample ? { sampleId: sample.id } : {}), domain: taskDomain, kind: taskKind, factory: text(values, 'factory'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } });
       setDomain(taskDomain); setKind(taskKind); setSelected(String(saved.result.id || '')); go('qc-workbench', String(saved.result.id || ''));
     },
@@ -224,7 +226,7 @@ export function QcWorkbenchPage() {
         </span>
       </CardButton>; })}
     </div>
-    <Tabs<Kind> value={kind} onChange={changeKind} options={[{ value: 'sample', label: '样品评审', count: all.filter(t => t.domain === domain && t.kind === 'sample').length }, { value: 'production', label: '生产检验', count: all.filter(t => t.domain === domain && t.kind === 'production').length }]} />
+    <Tabs<Kind> value={kind} onChange={changeKind} options={[{ value: 'sample', label: '样品评审', count: all.filter(t => t.domain === domain && t.kind === 'sample').length }, { value: 'production', label: '生产检验', count: all.filter(t => t.domain === domain && t.kind === 'production').length }, { value: 'quarantine', label: '退料复检', count: all.filter(t => t.domain === domain && t.kind === 'quarantine').length }]} />
     <Toolbar right={<Segmented ariaLabel={uiText("视图")} value={mode} onChange={value => setMode(value as 'groups' | 'board')} options={[{ value: 'groups', icon: List, ariaLabel: '按工厂分组' }, { value: 'board', icon: Columns3, ariaLabel: '看板视图' }]} />}>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索任务号、来源、工厂或检查地点")} />
       <Dropdown<Owner> label={uiText("负责人")} value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部负责人' }, { value: 'mine', label: '我认领的' }, { value: 'unclaimed', label: '待认领' }]} />
@@ -255,7 +257,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
   const sizes = fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [];
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
   const claimReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.assigneeId && !mine ? `已由 ${task.assignee} 认领` : false);
-  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
+  const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.quarantine?.disposedAt ? '本批已处置' : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
   const handoverReason = (verb: string) => !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.state === 'reported' ? `已出结论，不能${verb}；需复验请追加报告` : task.assigneeId && !mine ? `仅当前QC（${task.assignee}）可${verb}` : false);
   const confirmable = task.kind === 'sample' && task.source.kind === 'orderLine' && task.state === 'reported';
   const continuable = task.state === 'awaiting_business' || (task.kind === 'sample' && task.businessConfirmation?.result === 'approved' && !task.businessContinued);
@@ -268,7 +270,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
     <DetailBlock title={uiText("来源与送审实物")}>
       <Facts items={[
         { label: '准确来源', value: <SourceLink source={task.source} /> },
-        { label: task.kind === 'production' ? '生产分支' : '准确实物', value: sample ? taskSubject(state,task) : production ? `${production.code} · ${production.qty} ${line?.unit || ''}`.trim() : task.source.kind === 'version' ? '开发版本返样' : '订单条目' },
+        { label: task.kind === 'production' ? '生产分支' : '准确实物', value: task.kind === 'quarantine' ? taskSubject(state,task) : sample ? taskSubject(state,task) : production ? `${production.code} · ${production.qty} ${line?.unit || ''}`.trim() : task.source.kind === 'version' ? '开发版本返样' : '订单条目' },
         { label: '业务发起人', value: task.requestedBy || '未记录' },
         { label: '发起', value: shortWhen(task.createdAt) },
         ...(task.kind === 'production' && sizes.length ? [{ label: '生产尺码', value: sizes.map(size => `${size.size} ${size.quantity}`).join(' · ') }] : []),
@@ -362,7 +364,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     finally { setBusy(false); }
   };
   const updateSize = (index: number, patch: Partial<SizeCheck>) => setSizeChecks(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
-  const consequence = result === 'reject' ? (task.kind === 'production' ? '不通过将阻断生产，需复验。' : '样品未通过，待复验。') : result === 'conditional' ? '有保留项待确认。' : '';
+  const consequence = result === 'reject' ? (task.kind === 'production' ? '不通过将阻断生产，需复验。' : task.kind === 'quarantine' ? '退料继续隔离。' : '样品未通过，待复验。') : result === 'conditional' ? '有保留项待确认。' : '';
   return <MistPage>
     <BackLink onClick={onClose}>{uiText("返回QC工作台")}</BackLink>
     <PageHeader description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} />

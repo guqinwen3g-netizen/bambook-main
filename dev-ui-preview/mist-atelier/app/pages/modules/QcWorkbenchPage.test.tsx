@@ -42,6 +42,13 @@ it('opens the correct QC domain when arriving from an explicitly typed developme
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('shows the precise returned quantity in an independent quarantine inspection',()=>{
+  store.state!.orders.push({id:'o',code:'SO-F',type:'fabric'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'布',style:'F',unit:'米',qty:20} as any);
+  store.state!.fulfillment.qcTasks.push(task('held',{domain:'fabric',kind:'quarantine',quarantine:{returnId:'return',stockId:'stock',quantity:4,unit:'米',name:'布'},source:{kind:'orderLine',orderId:'o',lineId:'l'}}));
+  render('held');expect(host.textContent).toContain('退料复检');expect(host.textContent).toContain('布 · 4 米');
+  expect(getByRole(host,'button',{name:'认领任务'})).toBeTruthy();
+});
+
 it.each(['resample','abandon','confirmed','archived'] as const)('locks the %s source, retaining history without counting it as open QC work',disposition=>{
   store.state!.devs.push({id:'disposed-d',code:'DEV-OLD',values:{domain:'fabric'}} as any);
   store.state!.versions.push({id:'disposed-v',devId:'disposed-d',label:'R1-A-1',...(disposition==='confirmed'?{confirmations:[{}]}:disposition==='archived'?{archivedAt:'2026-10-29T00:00:00Z'}:{qcDecision:{kind:disposition}})} as any);
