@@ -6,9 +6,10 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {getAllByRole,getByRole,queryByRole} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../../components/mist';
 import {createMistState,type MistState} from '../../../../../server/src/shared/mistWorkspace';
+import {applyDataScope,scopedMaterialIssueTargets} from '../../../../../server/src/shared/mistDataScope';
 import type {FulfillmentStock,FulfillmentStockMovement} from '../../../../../server/src/shared/mistFulfillment';
 import {Nav} from '../../nav';
-const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
+const store=vi.hoisted(()=>({state:null as MistState|null,workspace:null as any,loading:false,error:'',saving:false,pending:null,run:vi.fn(),refresh:vi.fn(),uploadFile:vi.fn(),downloadFile:vi.fn()}));
 const session=vi.hoisted(()=>({denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:'biz',displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
@@ -22,7 +23,7 @@ function choose(select:HTMLSelectElement,value:string){act(()=>{select.value=val
 function typeInto(input:HTMLInputElement|HTMLTextAreaElement,value:string){act(()=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input),'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 const stock=(id:string,patch:Partial<FulfillmentStock>={}):FulfillmentStock=>({id,sourceKind:'purchase',purchaseId:'po',receiptId:'rc',orderId:'og',lineId:'lg',name:'主唛',unit:'个',quantity:100,available:100,location:'A-1',owner:'公司货权',warehouseId:'wh',createdAt:'2026-10-10T08:00:00Z',...patch});
 const movement=(id:string,stockId:string,kind:FulfillmentStockMovement['kind'],quantity:number,patch:Partial<FulfillmentStockMovement>={}):FulfillmentStockMovement=>({id,stockId,kind,quantity,location:'嘉兴厂',person:'江南成衣',note:'供料',at:'2026-10-11T08:00:00Z',actor:'经办人',...patch});
-beforeEach(()=>{session.denied=new Set();const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
+beforeEach(()=>{session.denied=new Set();store.workspace=null;const s=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');
   s.orders.push({id:'og',code:'SO-G',type:'garment',customerId:'c',currency:'USD'} as any,{id:'of',code:'SO-F',type:'fabric',customerId:'c',currency:'USD'} as any);
   s.orderLines.push({id:'lg',orderId:'og',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0},{id:'lf',orderId:'of',name:'府绸',style:'F-1',img:'fabric',qty:500,unit:'米',price:3,made:0,qc:0});
   s.fulfillment.warehouses.push({id:'wh',code:'WH-1',name:'松江仓',address:'上海',active:true});
@@ -133,6 +134,13 @@ it('binds a material issue to the existing processing branch instead of a free-t
   typeInto(getByRole(dialog,'textbox',{name:'交接地点'}) as HTMLInputElement,'Factory');typeInto(getByRole(dialog,'textbox',{name:'交接联系人'}) as HTMLInputElement,'Factory receiver');typeInto(getByRole(dialog,'textbox',{name:'交接依据'}) as HTMLTextAreaElement,'Delivery note');
   await click(getByRole(dialog,'button',{name:'登记发料',exact:true}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.materials.issue',payload:expect.objectContaining({id:stock.id,targetProductionId:f.productionId,quantity:100.3})}));
+});
+it('uses the minimal authorized destination hint when the other team order is hidden',async()=>{
+ const f=materialDeliveryFixture(20),scope={userIds:['owner'],teamIds:[]},stock=f.state.fulfillment.stock[0];
+ store.workspace={materialIssueTargets:scopedMaterialIssueTargets(f.state,scope)};store.state=applyDataScope(f.state,scope,'owner');
+ expect(store.state.orders.some(o=>o.id===f.target.orderId)).toBe(false);
+ render(stock.id);await click(getByRole(host,'button',{name:'登记出库',exact:true}));
+ const dialog=getByRole(document.body,'dialog',{name:'登记发料'});expect((getByRole(dialog,'combobox',{name:'接收加工单'}) as HTMLSelectElement).value).toBe(f.productionId);
 });
 it('lets a garment-line account handle internal fabric stock (P4: no line restriction)',()=>{
   const f=materialDeliveryFixture();store.state=f.state;store.state.memberGroups!.push({userId:'biz',name:'Business',groups:['garment'],updatedAt:'',updatedBy:'owner'});render(store.state.fulfillment.stock[0].id);

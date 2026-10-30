@@ -55,7 +55,7 @@ function UnitLines({ totals, tone }: { totals: Array<[string, number]>; tone?: T
 
 export function InventoryPage() {
   const presentedError=React.useContext(MistPresentedErrorContext);
-  const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), nav = useNav(), { route, go } = nav;
+  const { state, workspace, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), nav = useNav(), { route, go } = nav;
   const f=state?.fulfillment,receipt=f?.returnReceipts?.find(row=>row.id===route.id);
   const explicitClaim=route.section?.startsWith('claim:')===true,hasClaim=explicitClaim||!!receipt,claimId=explicitClaim?route.section!.slice(6):receipt?.claimId;
   const claim=state?.platform.claims.find(row=>row.id===claimId),incomingStock=f?.stock.find(row=>row.id===route.id);
@@ -106,7 +106,7 @@ export function InventoryPage() {
   };
   const moveSpec = (stock: FulfillmentStock, kind: 'issue' | 'return' | 'move'): ModuleEditorSpec => {
     const linked = kind === 'issue' && !!state && materialDeliveryRequired(state, stock.purchaseId || '');
-    const targets = linked ? materialDeliveryTargets(state!, stock.purchaseId || '') : [];
+    const targets = linked ? workspace?.materialIssueTargets?.[stock.id] ?? materialDeliveryTargets(state!, stock.purchaseId || '') : [];
     const quantity = targets.length === 1 && targets[0].remaining ? Math.min(stock.available, Number(targets[0].remaining)) : linked && targets.length !== 1 ? 0 : stock.available;
     return {
       title: ({ issue: linked ? '登记发料' : '登记出库', return: '按原出库退回', move: '登记库存移位' })[kind],

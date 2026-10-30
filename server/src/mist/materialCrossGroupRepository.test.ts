@@ -1,0 +1,35 @@
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {randomUUID} from 'node:crypto';
+import * as contract from '../shared/mistWorkspace';
+import {materialDeliveryFixture} from './__tests__/materialDelivery';
+import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
+import {MistPrivateFiles} from './files';
+import {MistRepository} from './repository';
+vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{}})}));
+let dir:string;beforeEach(async()=>{dir=await mkdtemp(path.join(tmpdir(),'material-scope-'));});afterEach(async()=>{await rm(dir,{recursive:true,force:true});});
+it('allows only an allocated cross-group destination, without granting target order access',async()=>{
+ const company='11111111-1111-4111-8111-111111111111',db=new MemoryMistDatabase(),auth=testAuthority(),f=materialDeliveryFixture(20),wid=randomUUID();
+ const other=f.create('garment'),otherPurchase=f.purchase('processing',other),otherBranch=f.state.productions.find(p=>p.sourcePurchaseId===otherPurchase)!.id;
+ auth.users.set('owner',{active:true,permissions:['inventory:read','inventory:write','orders:read','procurement:read']});auth.users.set('garment',{active:true,permissions:['orders:read','orders:write']});
+ for(const id of ['owner','garment','reviewer','warehouse']){db.companyMembers.push({companyId:company,userId:id,status:'active'});db.accounts.set(id,{status:'active',displayName:id});}
+ db.workspaces.set(wid,{id:wid,ownerId:'boss',companyId:company,slug:`company@${company}`,name:'公司',revision:0,state:structuredClone(f.state),createdAt:new Date(),updatedAt:new Date()});
+ const repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now));
+ const actor={...testActor('owner'),roles:[],companyId:company};const before=await repo.get(actor,wid),stock=f.state.fulfillment.stock[0];
+ expect(before.state.orders.some(o=>o.id===f.target.orderId)).toBe(false);
+ expect(before.materialIssueTargets?.[stock.id]).toEqual([expect.objectContaining({value:f.productionId})]);
+ const sourcePermissions=auth.users.get('owner')!.permissions;auth.users.get('owner')!.permissions=sourcePermissions.filter(p=>p!=='inventory:write');
+ expect((await repo.get(actor,wid)).materialIssueTargets).toBeUndefined();
+ auth.users.get('owner')!.permissions=sourcePermissions;
+ const input={requestId:'cross-issue',expectedRevision:0,command:{type:'fulfillment.materials.issue' as const,payload:{id:stock.id,targetProductionId:f.productionId,quantity:5,location:'factory',person:'receiver',note:'dispatch'}}};
+ await repo.execute(actor,wid,input);
+ const after=await repo.get(actor,wid),movement=after.state.fulfillment.stockMovements.find(m=>m.kind==='issue');
+ expect(movement).toMatchObject({stockId:stock.id,quantity:5});expect(movement?.materialDelivery).toBeUndefined();
+ expect(JSON.stringify(movement)).not.toMatch(/factory|receiver|dispatch/);
+ expect(after.state.orders.some(o=>o.id===f.target.orderId)).toBe(false);
+ expect(after.state.fulfillment.purchases.some(p=>p.id===f.processingId)).toBe(false);
+ await expect(repo.execute(actor,wid,{requestId:'bad-destination',expectedRevision:1,command:{...input.command,payload:{...input.command.payload,targetProductionId:otherBranch}}})).rejects.toMatchObject({status:404});
+ expect((await repo.get(actor,wid)).state.fulfillment.stock.find(s=>s.id===stock.id)?.available).toBe(15);
+});

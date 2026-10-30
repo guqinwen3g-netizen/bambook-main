@@ -12,6 +12,7 @@ import type { MistState } from './mistWorkspace';
 import type { OrderCostState } from './mistOrderCost';
 import { buildTeamScopeGraph, resolveTeamScope, type MistTeamScope, type TeamScopeRef } from './mistTeamScope';
 import { mistInvoiceCustomerId } from './mistOpeningBalance';
+import { materialDeliveryRequired, materialDeliveryTargets } from './mistInternalFabric';
 
 /** 受限账号的数据范围：账号集合为本人 + 部门领导所辖成员；teamIds 为本人所在的在用小组。 */
 export type MistDataScope = { userIds: string[]; teamIds: string[]; lines?: Array<'fabric' | 'garment'> };
@@ -29,6 +30,7 @@ export const SCOPED_COLLECTIONS = [
 ] as const;
 export type ScopedCollection = typeof SCOPED_COLLECTIONS[number];
 export type ScopedVisibility = Map<string, Set<string>>;
+export type ScopedMaterialIssueTargets = Record<string,Array<{value:string;label:string;remaining?:string}>>;
 const HIDDEN_FILES = Symbol('scoped-hidden-files');
 export const scopedHiddenFiles = (state: MistState): Set<string> => (state as any)[HIDDEN_FILES] ?? new Set<string>();
 
@@ -78,7 +80,11 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const row of f.sampleMovements ?? []) if (has('fulfillment.samples', row.sampleId)) add('fulfillment.sampleMovements', row.id);
   for (const row of f.returnReceipts ?? []) if (has('platform.claims', row.claimId)) add('fulfillment.returnReceipts', row.id);
   for (const row of f.receivedRecords ?? []) if (has('platform.claimGoods', row.goodsId)) add('fulfillment.receivedRecords', row.id);
-  for (const row of f.stockMovements ?? []) if (has('fulfillment.stock', row.stockId) && (!row.materialDelivery?.orderId || collaboratingOrders.has(row.materialDelivery.orderId))) add('fulfillment.stockMovements', row.id);
+  for (const row of f.stockMovements ?? []) if (has('fulfillment.stock', row.stockId)) {
+    const stock=(f.stock ?? []).find((item:any)=>item.id===row.stockId),allocation=(state.internalFabricAllocations ?? []).find(item=>item.id===row.materialDelivery?.allocationId);
+    const ownSupply=!!allocation && allocation.fabricOrderId===stock?.orderId && allocation.fabricLineId===stock?.lineId && allocation.orderId===row.materialDelivery?.orderId && allocation.lineId===row.materialDelivery?.lineId;
+    if (!row.materialDelivery?.orderId || collaboratingOrders.has(row.materialDelivery.orderId) || ownSupply) add('fulfillment.stockMovements', row.id);
+  }
   for (const row of (state as MistState & { orderCosts?: OrderCostState }).orderCosts?.expenses ?? []) if (row.shares?.length && row.shares.every(share => collaboratingOrders.has(share.orderId))) add('orderCosts.expenses', row.id);
 
   for (const path of ['platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts'] as const) for (const row of get(state, path)) if (collaboratingOrders.has(row.orderId)) add(path, row.id);
@@ -115,6 +121,17 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   // FX lock and period revaluation facts can cover unrelated orders and have no complete per-order provenance yet.
 
   return out;
+}
+
+/** Only actionable destinations already allocated to writable source stock; no target order or price data. */
+export function scopedMaterialIssueTargets(state:MistState,scope:MistDataScope):ScopedMaterialIssueTargets {
+  const visible=scopedVisibility(state,scope,false).get('fulfillment.stock')!, result:ScopedMaterialIssueTargets={};
+  for(const stock of state.fulfillment?.stock || []) {
+    if(!visible.has(stock.id) || !stock.purchaseId || !materialDeliveryRequired(state,stock.purchaseId))continue;
+    const targets=materialDeliveryTargets(state,stock.purchaseId);
+    if(targets.length)result[stock.id]=targets;
+  }
+  return result;
 }
 
 /** 目标（待办、通知、日历）指向的业务记录；无法对应到受限集合的目标不在此裁剪。 */
@@ -161,6 +178,12 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
     const kept = rows.filter(row => ids.has(rowKey(path, row)));
     if (b) next[a] = { ...next[a], [b]: kept }; else next[a] = kept;
   }
+  // The source owner needs the physical movement, not the other team's full order or private handover notes.
+  next.fulfillment = { ...next.fulfillment, stockMovements:(next.fulfillment?.stockMovements || []).map((row:any)=>{
+    if (!row.materialDelivery?.orderId || writable.get('orders')!.has(row.materialDelivery.orderId)) return row;
+    const { materialDelivery:_private, person:_person, location:_location, note:_note, ...safe }=row;
+    return { ...safe, person:'协作交接', location:'', note:'内部供料交接' };
+  }) };
   next.partialPayableBills = [];
   for (const bill of state.payables?.bills ?? []) {
     const lines = Array.isArray(bill.lines) ? bill.lines : [], shown = lines.filter(line => visible.get('fulfillment.purchases')!.has(line.purchaseId)), hiddenCount = lines.length - shown.length;
@@ -295,7 +318,7 @@ function verifiedReplacementSync(before: any, after: any, state: MistState): boo
 }
 
 /** Existing source ids must already be readable before a command can link them into new visible records. */
-export function scopedReferenceViolation(state: MistState, scope: MistDataScope, payload: unknown, allowProductSourceRefs = false): {path:string;id:string} | null {
+export function scopedReferenceViolation(state: MistState, scope: MistDataScope, payload: unknown, allowProductSourceRefs = false, allowedExtra: ReadonlySet<string> = new Set()): {path:string;id:string} | null {
   const visible = scopedVisibility(state, scope), known = new Map<string,string>(), allowed = new Set<string>();
   for (const path of SCOPED_COLLECTIONS) for (const row of get(state,path)) {
     const id = rowKey(path,row); if (typeof id !== 'string' || !id) continue;
@@ -304,7 +327,7 @@ export function scopedReferenceViolation(state: MistState, scope: MistDataScope,
   let violation: {path:string;id:string} | null = null;
   const walk=(value:unknown):void=>{
     if(violation)return;
-    if(typeof value==='string'&&known.has(value)&&!allowed.has(value))violation={path:known.get(value)!,id:value};
+    if(typeof value==='string'&&known.has(value)&&!allowed.has(value)&&!allowedExtra.has(value))violation={path:known.get(value)!,id:value};
     else if(Array.isArray(value))value.forEach(walk);
     else if(value&&typeof value==='object') {
       const record=value as Record<string,unknown>, productId=record.productId??record.sourceProductId;
