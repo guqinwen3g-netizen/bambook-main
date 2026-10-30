@@ -156,8 +156,15 @@ it('allows an evidence-based correction of a departed link while displaying the 
   store.state!.productions.push({id:'p',sourcePurchaseId:'po',orderId:'og',lineId:'lg'} as any);
   store.state!.fulfillment.shipments.push({id:'s',code:'SHP-1',state:'departed',lines:[{orderId:'og',lineId:'lg',productionId:'p',quantity:100}]} as any);
   render('gone');await click(getByRole(host,'button',{name:'更正'}));const dialog=getByRole(document.body,'dialog',{name:'更正已离港关联'});
+  expect(dialog.textContent).toContain('暂未确认时保留待核对');
   typeInto(getByRole(dialog,'textbox',{name:'更正原因'}) as HTMLTextAreaElement,'补充核对信息');typeInto(getByRole(dialog,'textbox',{name:'核对依据'}) as HTMLTextAreaElement,'复核交接单');await click(getByRole(dialog,'button',{name:'确认更正'}));
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.shipment.correct',payload:{issueId:'m1',shipmentId:'s',reason:'补充核对信息',evidence:'复核交接单'}});
+});
+
+it('distinguishes supplier returns from receiving rejection in the inventory timeline',()=>{
+  store.state!.fulfillment.stock.push(stock('a',{available:0}));
+  store.state!.fulfillment.stockMovements.push(movement('out','a','reject',2,{quarantineReturnId:'ret',note:'供应商已签收'}));
+  render('a');expect(host.textContent).toContain('退供应商 2个');expect(host.textContent).not.toContain('转为拒收 2个');
 });
 
 it('stays readable without inventory authority and says why movements are unavailable',()=>{

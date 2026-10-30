@@ -273,7 +273,7 @@ export type FulfillmentStockMovement = {
     quarantineReturnId?: string;
     /** Explicitly reconciled physical issue; independent of shipment documents. */
     shipmentLink?: { shipmentId: string; productionId: string; evidence: string; actor: string; at: string };
-    shipmentLinkHistory?: Array<{ shipmentId: string; productionId: string; evidence: string; actor: string; at: string; unlinkedAt: string; unlinkedBy: string; unlinkReason: string }>;
+    shipmentLinkHistory?: Array<{ shipmentId: string; productionId: string; evidence: string; actor: string; at: string; unlinkedAt: string; unlinkedBy: string; unlinkReason: string; correctionEvidence?: string; correctedShipmentId?: string }>;
     /** A corrected departure without a replacement is unresolved, not warehouse stock. */
     shipmentCorrectionHold?: { at: string; actor: string; reason: string };
 };
@@ -1698,6 +1698,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (issue.shipmentLink) fail('请选择尚未关联出运的普通出库');
             const { stock, branch, shipment } = shipmentForIssue(root, issue, p.shipmentId, !!issue.shipmentCorrectionHold);
             issue.shipmentLink = { shipmentId: shipment.id, productionId: branch.id, evidence: text(p.evidence, '核对依据'), actor: ctx.actorName, at: ctx.now };
+            // Preserve the first version's pending-correction evidence before clearing its hold.
+            const previous = issue.shipmentLinkHistory?.at(-1);
+            if (issue.shipmentCorrectionHold && previous && !previous.correctionEvidence) previous.correctionEvidence = issue.shipmentCorrectionHold.reason;
             delete issue.shipmentCorrectionHold;
             audit(root, ctx, 'inventory', stock.id, `关联出运 ${shipment.code}`, { view: 'shipments', id: shipment.id });
             return { id: issue.id };
@@ -1720,7 +1723,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (old.state !== 'departed') fail('仅已离港的关联使用更正');
             const reason = text(p.reason, '更正原因'), evidence = text(p.evidence, '核对依据');
             const destination = p.shipmentId ? shipmentForIssue(root, issue, p.shipmentId, true) : undefined;
-            (issue.shipmentLinkHistory ||= []).push({ ...link!, unlinkedAt: ctx.now, unlinkedBy: ctx.actorName, unlinkReason: reason });
+            (issue.shipmentLinkHistory ||= []).push({ ...link!, unlinkedAt: ctx.now, unlinkedBy: ctx.actorName, unlinkReason: reason, correctionEvidence:evidence, ...(destination?{correctedShipmentId:destination.shipment.id}:{}) });
             if (destination) {
                 issue.shipmentLink = { shipmentId: destination.shipment.id, productionId: destination.branch.id, evidence, actor: ctx.actorName, at: ctx.now };
                 delete issue.shipmentCorrectionHold;
