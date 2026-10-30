@@ -422,9 +422,16 @@ export class MistRepository {
           if (customer && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可交接范围内', 404);
         }
         if (input.command) {
+          if(input.command.type.startsWith('order.internal.')&&!hasScope(actor,'orders:read'))fail('FORBIDDEN','内部交付需要订单查看和办理权限',403);
           if(input.command.type==='order.internal.send'){
             const required=['orders:read','production:read','procurement:read'] as const;
             if(required.some(permission=>!hasScope(actor,permission))||input.command.payload.source?.kind==='stockIssue'&&!hasScope(actor,'inventory:read'))fail('FORBIDDEN','内部交付需要读取准确订单、生产及交付来源',403);
+            const receiverId=input.command.payload.receiverId;
+            if(typeof receiverId!=='string'||!receiverId.trim())fail('VALIDATION','请选择本次接收账号',422);
+            const listedReceiver=memberIds(row.state).includes(receiverId)||!companyRow(row)&&receiverId===row.ownerId;
+            if(!listedReceiver)fail('VALIDATION','本次接收账号须为本公司在用成员',422);
+            const receiver=await this.reviewSubject(db,actor,receiverId,'接收账号');
+            if(!hasScope(receiver,'orders:read')||!hasScope(receiver,'orders:write'))fail('PRECONDITION','接收账号缺少订单办理权限，请换人或由管理员调整岗位',422);
           }
           const known = new Set(row.state.files.map(file => file.id));
           const allowed = new Set(projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state.files.map(file => file.id));
@@ -602,13 +609,13 @@ export class MistRepository {
   }
   private reviews(state:MistState):MistReviewTask[]{return this.contract.getMistReviewTasks?.(state)||[];}
   /** Both command and review entry points rebuild routing from the current requester, while the actor remains the decision maker. */
-  private async reviewSubject(db:any,actor:TokenPayload,requesterId:string):Promise<TokenPayload>{
+  private async reviewSubject(db:any,actor:TokenPayload,requesterId:string,label='申请账号'):Promise<TokenPayload>{
     if((actor as any).mistLocal===true && process.env.MIST_LOCAL_WORKSPACE==='1' && process.env.NODE_ENV!=='production'){
-      if(!MIST_LOCAL_PROFILES.some(p=>p.id===requesterId))fail('REQUESTER_UNAVAILABLE','本地申请身份无效',409);
+      if(!MIST_LOCAL_PROFILES.some(p=>p.id===requesterId))fail('REQUESTER_UNAVAILABLE',label==='申请账号'?'本地申请身份无效':`${label}无效`,409);
       const requester=mistLocalPublicUser(requesterId);return {...requester,userId:requester.id,mistLocal:true} as unknown as TokenPayload;
     }
     const requester=await loadUserWithRoles(db,requesterId);
-    if(!requester||requester.status!=='active'||requester.deletedAt)fail('REQUESTER_UNAVAILABLE','申请账号当前不可核验，请联系管理员',409);
+    if(!requester||requester.status!=='active'||requester.deletedAt)fail('REQUESTER_UNAVAILABLE',`${label}当前不可核验，请联系管理员`,409);
     return buildLoadedAuthTokenPayload(db,requester,actor.companyId ?? null);
   }
   async listReviews(prior:TokenPayload){return this.transact(async db=>{

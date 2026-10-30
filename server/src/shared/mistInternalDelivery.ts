@@ -39,6 +39,24 @@ export function internalDeliveryTotals(row:InternalDelivery){
  return {accepted:number(accepted),rejected:number(rejected),returned:number(returned),pending:row.cancelled?0:number(minor(row.quantity)-accepted-rejected),reserved:row.cancelled?0:number(minor(row.quantity)-returned)};
 }
 export const internalDeliveryRevision=(row:InternalDelivery)=>row.checks.length+row.checks.filter(c=>c.reversed).length+row.returns.length+(row.cancelled?1:0);
+export const isInternalDeliveryTask=(task:{kind?:string}|undefined)=>task?.kind==='internal-delivery'||task?.kind==='internal-delivery-followup';
+/** Return rejected-goods follow-up to the current source owner, without broadening the receiver's scope. */
+export function syncInternalDeliveryTasks(root:MistState,ctx:MistContext){
+ const deliveries=root.internalDeliveries||[];if(!deliveries.length)return;
+ const rejectedOrders=new Set<string>(),tasks=new Map(root.tasks.map(task=>[task.id,task]));
+ for(const row of deliveries){
+  const totals=internalDeliveryTotals(row),task=tasks.get('internal-delivery:'+row.id);
+  if(task)task.done=!!row.cancelled||totals.pending===0;
+  if(!row.cancelled&&totals.rejected>totals.returned)rejectedOrders.add(row.orderId);
+ }
+ for(const order of root.orders){
+  const id='internal-delivery-followup:'+order.id,existing=tasks.get(id),needed=rejectedOrders.has(order.id);
+  if(!existing&&!needed)continue;
+  const task:MistState['tasks'][number]=existing||{id,title:`内部拒收待处理 · ${order.code}`,due:platformBusinessDate(ctx.now),done:false,assigneeIds:[] as string[],kind:'internal-delivery-followup',target:{view:'orders/detail',id:order.id},permission:'orders:read'};
+  task.done=!needed;task.assigneeIds=order.ownerId?[order.ownerId]:[];
+  if(!existing)root.tasks.push(task);
+ }
+}
 function current(row:InternalDelivery,revision:unknown){if(revision!==internalDeliveryRevision(row))fail('交接记录已变化，请刷新','CONFLICT');if(row.cancelled)fail('交接已撤回');}
 function deliveryIndex(root:MistState){
  const map=<T extends {id:string}>(rows:T[])=>new Map(rows.map(row=>[row.id,row]));
@@ -61,6 +79,30 @@ function sourceCapacity(row:Pick<InternalDelivery,'orderId'|'lineId'|'production
  const stock=issue&&index.stock.get(issue.stockId);
  if(!issue||issue.kind!=='issue'||!stock||stock.purchaseId!==purchase!.id||stock.orderId!==row.orderId||stock.lineId!==row.lineId||stock.unit!==row.unit||issue.materialDelivery||issue.shipmentLink||issue.shipmentCorrectionHold)fail('请选择该分支未用于其他业务的准确成品出库');
  return number(index.issueRemaining.get(issue!.id)||BigInt(0));
+}
+export type InternalDeliverySource={key:string;productionId:string;productionCode:string;lineId:string;lineName:string;style:string;unit:string;source:InternalDelivery['source'];date:string;location:string;evidence:string;remaining:number};
+/** Choices for the current readable state. Saving always revalidates the complete server state. */
+export function internalDeliverySources(root:MistState,orderId:string):InternalDeliverySource[]{
+ const order=root.orders.find(o=>o.id===orderId);
+ if(order?.governance?.status!=='approved'||order.governance.contract.kind!=='internal'||order.governance.contract.internalSupply)return [];
+ try{assertOrderWritable(order);}catch{return [];}
+ const index=deliveryIndex(root),active=(root.internalDeliveries||[]).filter(d=>!d.cancelled),result:InternalDeliverySource[]=[];
+ for(const branch of root.productions.filter(p=>p.orderId===orderId&&!p.closed)){
+  const fact=index.facts.get(branch.id),line=index.lines.get(branch.lineId);
+  if(!line||!fact?.completion||fact.hold||index.shipped.has(branch.id)||!fulfillmentProductionQcPassed(root,branch))continue;
+  try{assertOrderLineOpen(line);}catch{continue;}
+  const branchRemaining=minor(fact.completion.quantity)-plus(active.filter(d=>d.productionId===branch.id).map(d=>internalDeliveryTotals(d).reserved));
+  const lineRemaining=minor(line.qty)-plus(active.filter(d=>d.lineId===line.id).map(d=>internalDeliveryTotals(d).reserved));
+  const choices=[...root.fulfillment.receipts.filter(r=>r.purchaseId===branch.sourcePurchaseId&&r.destination==='supplier'&&!r.materialDelivery).map(r=>({source:{kind:'receipt' as const,id:r.id},date:r.date,location:r.location,evidence:r.evidence})),...root.fulfillment.stockMovements.filter(m=>m.kind==='issue'&&index.stock.get(m.stockId)?.purchaseId===branch.sourcePurchaseId).map(m=>({source:{kind:'stockIssue' as const,id:m.id},date:m.at.slice(0,10),location:m.location,evidence:m.note}))];
+  for(const choice of choices){
+   const identity={orderId,lineId:line.id,productionId:branch.id,source:choice.source,unit:line.unit};let capacity:number;
+   try{capacity=sourceCapacity(identity,index);}catch{continue;}
+   const sourceRemaining=minor(capacity)-plus(active.filter(d=>d.source.kind===choice.source.kind&&d.source.id===choice.source.id).map(d=>internalDeliveryTotals(d).reserved));
+   const remaining=[branchRemaining,lineRemaining,sourceRemaining].reduce((a,b)=>a<b?a:b);
+   if(remaining>BigInt(0))result.push({key:branch.id+':'+choice.source.kind+':'+choice.source.id,productionId:branch.id,productionCode:branch.code,lineId:line.id,lineName:line.name,style:line.style,unit:line.unit,...choice,remaining:number(remaining)});
+  }
+ }
+ return result;
 }
 /** Protect upstream quantities, returns, contract cancellation and shipment aliasing on every command. */
 export function assertInternalDeliveryIntegrity(root:MistState){
@@ -104,7 +146,7 @@ export function applyInternalDeliveryCommand(root:MistState,command:InternalDeli
   const actualDate=date(p.date,ctx);if(actualDate<fact.completion.date)fail('交付日期不得早于实际完工日');
   const row:InternalDelivery={id:ctx.id(),orderId:order.id,lineId:line.id,productionId:branch.id,orderCode:order.code,lineName:line.name,style:line.style,unit:line.unit,physicalKey:physicalKey(line),productionCode:branch.code,source:{kind:p.source.kind,id:p.source.id},quantity:number(quantity),receiverId:receiver.id,receiver:receiver.name,intendedReceiver:order.governance.contract.receiver,location:text(p.location,'交付地点'),date:actualDate,created:stamp(ctx,text(p.evidence,'交接依据')),checks:[],returns:[]};
   (root.internalDeliveries||=[]).push(row);assertInternalDeliveryIntegrity(root);
-  const target={view:'orders/list',id:row.id,section:'internal-deliveries'};
+  const target={view:'orders',id:row.id,section:'internal-deliveries'};
   root.tasks.push({id:'internal-delivery:'+row.id,title:`内部交付待接收 · ${order.code}`,due:actualDate,done:false,kind:'internal-delivery',target,assigneeIds:[receiver.id],permission:'orders:read'});
   root.events.unshift({id:ctx.id(),entityType:'order',entityId:order.id,actor:operator.name,at:ctx.now,text:`登记内部交付 ${row.quantity} ${row.unit} · ${receiver.name}`,fileIds:[]});
   return{id:row.id,orderId:order.id};
@@ -131,7 +173,6 @@ export function applyInternalDeliveryCommand(root:MistState,command:InternalDeli
   row.cancelled=stamp(ctx,text(command.payload.reason,'撤回原因与实物去向'));
  }
  assertInternalDeliveryIntegrity(root);
- const task=root.tasks.find(t=>t.id==='internal-delivery:'+row.id);if(task)task.done=!!row.cancelled||internalDeliveryTotals(row).pending===0;
  const label=command.type==='order.internal.receive'?`内部点收 · 接收 ${command.payload.accepted} ${row.unit} · 拒收 ${command.payload.rejected} ${row.unit}`:command.type==='order.internal.reverseCheck'?'更正内部点收':command.type==='order.internal.returnRejected'?`登记内部拒收退回 ${command.payload.quantity} ${row.unit}`:'撤回内部交付';
  root.events.unshift({id:ctx.id(),entityType:'order',entityId:row.orderId,actor:operator.name,at:ctx.now,text:label,fileIds:[]});
  return{id:row.id,orderId:row.orderId};

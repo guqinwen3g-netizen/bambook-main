@@ -67,6 +67,14 @@ describe('original Mist Home workspace functionality', () => {
     const state = createMistState(ctx(), 'empty'); seam.value = { ...seam.value, state, workspace: { id: 'workspace-two', name: '空公司' } }; await act(async () => paint());
     expect(host.textContent).not.toContain('完成准确版本事项'); expect(host.querySelector('[role="dialog"]')).toBeNull(); expect(host.textContent).toContain('当前没有待处理事项');
   });
+  it('opens a fact-controlled internal handover instead of allowing manual task completion',async()=>{
+    const task=seam.value.state.tasks[0];Object.assign(task,{kind:'internal-delivery',title:'内部交付待接收',target:{view:'orders',id:'delivery-1',section:'internal-deliveries'}});
+    render();await click(button('管理任务'));const dialog=host.querySelector('[role="dialog"]')!;
+    expect(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
+    expect([...dialog.querySelectorAll('button')].some(item=>item.textContent==='保存状态')).toBe(false);
+    await click(button('打开事项',dialog));
+    expect(go).toHaveBeenCalledWith('orders','delivery-1',task.target);expect(seam.value.run).not.toHaveBeenCalled();
+  });
   it('marks the selected real notification read before navigating to its target', async () => {
     render(); const notification = seam.value.state.notifications[0]; const entry = [...host.querySelectorAll<HTMLButtonElement>('.mist-brief button')].find(item => item.textContent?.includes(notification.title))!;
     await click(entry); expect(seam.value.run).toHaveBeenCalledWith({ type: 'notification.read', payload: { id: notification.id } }); expect(go).toHaveBeenCalledWith(notification.target.view, notification.target.id, notification.target);

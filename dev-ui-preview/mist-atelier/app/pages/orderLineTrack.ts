@@ -5,13 +5,14 @@ import type { MistOrder, MistOrderLine, MistState } from '../../../../server/src
 import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
 import { materialDeliveryRows } from '../../../../server/src/shared/mistInternalFabric';
 import { fulfillmentProductionQcPassed } from '../../../../server/src/shared/mistFulfillment';
+import {internalDeliveryTotals} from '../../../../server/src/shared/mistInternalDelivery';
 import type { StepState } from '../../../../components/mist';
 import { productionIntake, productionObservation, observedProductionStages } from '../../../../server/src/shared/mistProductionIntake';
 
 export type LineStageKey = 'pp' | 'material' | 'cut' | 'inspection' | 'completion' | 'shipment';
 export type LineStage = { key: LineStageKey; label: string; state: StepState; caption?: string; reason?: string; target?: { view: string; id?: string } };
 export const LINE_TRACK_LABEL = { garment: '成衣：产前样 → 面辅料 → 开裁 → 生产检验 → 完工登记 → 出运', fabric: '面料：坯布 / 染整 → 色样确认 → 生产检验 → 完工 → 出运' } as const;
-export const lineTrackLabel = (order: Pick<MistOrder, 'type'>) => order.type === 'fabric' ? LINE_TRACK_LABEL.fabric : LINE_TRACK_LABEL.garment;
+export const lineTrackLabel = (order: Pick<MistOrder, 'type'|'governance'>) => order.governance?.contract.kind==='internal'?(order.type==='fabric'?'面料：坯布 / 染整 → 色样确认 → 生产检验 → 完工 → 内部交付':'成衣：产前样 → 面辅料 → 开裁 → 生产检验 → 完工登记 → 内部交付'):order.type === 'fabric' ? LINE_TRACK_LABEL.fabric : LINE_TRACK_LABEL.garment;
 export type LineShipping = { ordered: number; planned: number; departed: number; variance: number; variancePercent: number | null; shipments: Array<{ id: string; code: string; quantity: number; state: string; plannedDate: string }> };
 
 const num = (value: number) => Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
@@ -111,7 +112,16 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
   const ship = lineShipping(state, line);
   const shipment: LineStage = !ship.planned ? { key: 'shipment', label: '出运', state: 'todo', caption: '未排出运' }
     : { key: 'shipment', label: '出运', state: ship.departed >= line.qty ? 'done' : 'now', caption: `已离港 ${num(ship.departed)} / ${num(line.qty)} ${unit}`, target: { view: 'shipments', id: ship.shipments[0].id } };
-  return fabric ? [material, pp, inspection, completion, shipment] : [pp, material, cut, inspection, completion, shipment];
+  let finalStage=shipment;
+  if(order.governance?.contract.kind==='internal'){
+    const materialRows=order.governance.contract.internalSupply?materialDeliveryRows(state).filter(row=>!!row.delivery.allocationId&&row.outstanding!=='0'&&state.fulfillment.purchases.find(p=>p.id===row.purchaseId)?.lineId===line.id):[];
+    const rows=(state.internalDeliveries||[]).filter(row=>row.lineId===line.id&&!row.cancelled),totals=rows.map(internalDeliveryTotals);
+    const accepted=order.governance.contract.internalSupply?materialRows.reduce((sum,row)=>sum+Number(row.accepted),0):totals.reduce((sum,row)=>sum+row.accepted,0);
+    const pending=order.governance.contract.internalSupply?materialRows.reduce((sum,row)=>sum+Number(row.pending),0):totals.reduce((sum,row)=>sum+row.pending,0);
+    const rejected=order.governance.contract.internalSupply?materialRows.reduce((sum,row)=>sum+Math.max(0,Number(row.rejected)-Number(row.returned)),0):totals.reduce((sum,row)=>sum+row.rejected-row.returned,0);
+    finalStage={key:'shipment',label:'内部交付',state:Math.round(accepted*10000)>=Math.round(line.qty*10000)?'done':rejected>0?'blocked':accepted>0||pending>0?'now':'todo',caption:rejected>0?'待处理拒收':`已接收 ${num(accepted)} / ${num(line.qty)} ${unit}`,target:{view:'orders/detail',id:order.id}};
+  }
+  return fabric ? [material, pp, inspection, completion, finalStage] : [pp, material, cut, inspection, completion, finalStage];
 }
 
 /** 先显示当前受阻；已足量离港显示出运完成，未登记的上游事实保持原状。 */
@@ -127,6 +137,6 @@ export function orderLineFlags(state: MistState, order: MistOrder) {
   const lines = state.orderLines.filter(line => line.orderId === order.id), tracks = lines.map(line => ({ line, stages: lineStages(state, order, line) }));
   const business = (state.fulfillment?.qcTasks || []).filter(task => task.state === 'awaiting_business' && task.source.kind === 'orderLine' && task.source.orderId === order.id).length;
   const nok = tracks.filter(track => track.stages.find(stage => stage.key === 'inspection')?.caption === 'QC NOK').length;
-  const toShip = tracks.filter(track => { const completion = track.stages.find(stage => stage.key === 'completion'), shipment = track.stages.find(stage => stage.key === 'shipment'); return completion?.state !== 'todo' && shipment?.state !== 'done'; }).length;
-  return { tracks, business, nok, toShip };
+  const remaining = tracks.filter(track => { const completion = track.stages.find(stage => stage.key === 'completion'), shipment = track.stages.find(stage => stage.key === 'shipment'); return completion?.state !== 'todo' && shipment?.state !== 'done'; }).length;
+  return { tracks, business, nok, toShip:order.governance?.contract.kind==='internal'?0:remaining,toDeliver:order.governance?.contract.kind==='internal'?remaining:0 };
 }

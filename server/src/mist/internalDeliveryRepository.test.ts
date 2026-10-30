@@ -12,15 +12,29 @@ import {scopedWriteViolation} from '../shared/mistDataScope';
 vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{}})}));
 let dir:string;beforeEach(async()=>{dir=await mkdtemp(path.join(tmpdir(),'internal-delivery-'));});afterEach(async()=>{await rm(dir,{recursive:true,force:true});});
 
-it('allows the exact recipient to count a minimal handover without gaining source order or financial access',async()=>{
+it('requires receiving write authority and exact assignment without granting source order or financial access',async()=>{
  const company='11111111-1111-4111-8111-111111111111',wid=randomUUID(),db=new MemoryMistDatabase(),auth=testAuthority(),f=internalDeliveryFixture();
  auth.users.set('garment',{active:true,permissions:['orders:read','orders:write','production:read','procurement:read']});
  auth.users.set('warehouse',{active:true,permissions:['orders:read']});auth.users.set('reviewer',{active:true,permissions:['orders:read','orders:write']});
  for(const id of ['garment','warehouse','reviewer']){db.companyMembers.push({companyId:company,userId:id,status:'active'});db.accounts.set(id,{status:'active',displayName:id});}
  db.workspaces.set(wid,{id:wid,ownerId:'boss',companyId:company,slug:`company@${company}`,name:'公司',revision:0,state:structuredClone(f.state),createdAt:new Date(),updatedAt:new Date()});
- const repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now));
+ // Load real permission decisions from an entirely in-memory account role tree.
+ let receiverAttributes=['garment_business'];
+ const roleDb={$transaction:(fn:any)=>db.$transaction((tx:any)=>fn({
+  ...tx,
+  userAccount:{...tx.userAccount,findFirst:async({where}:any)=>({
+   id:where.id,status:'active',displayName:where.id,
+   roles:[{roleId:'business@'+company,department:{id:'business-dept',companyId:company,status:'active',parentId:'company',metadata:{businessAttributes:receiverAttributes}},role:{companyId:company,permissions:(auth.users.get(where.id)?.permissions||[]).map(scope=>({permission:{scope}}))}}],
+  })},
+  userPermissionOverrides:{findMany:async()=>[]},
+ }))};
+ const repo=new MistRepository(roleDb,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now));
  const actor=(id:string)=>({...testActor(id),companyId:company,roles:[]});
  const send={requestId:'handover',expectedRevision:0,command:{type:'order.internal.send' as const,payload:{orderId:f.target.orderId,productionId:f.productionId,source:{kind:'receipt' as const,id:'finished-receipt'},quantity:10,receiverId:'warehouse',location:'Sample room',date:'2026-10-30',evidence:'Internal handover',expectedRevision:0}}};
+ await expect(repo.execute(actor('garment'),wid,send)).rejects.toMatchObject({status:422});
+ expect(db.workspaces.get(wid).state.internalDeliveries||[]).toEqual([]);
+ auth.users.set('warehouse',{active:true,permissions:['orders:read','orders:write']});
+ receiverAttributes=[];await expect(repo.execute(actor('garment'),wid,send)).rejects.toMatchObject({status:422});receiverAttributes=['garment_business'];
  const saved=await repo.execute(actor('garment'),wid,send),id=saved.receipt.result.id;
  expect((await repo.execute(actor('garment'),wid,send)).receipt.result.id).toBe(id);
  const view=await repo.get(actor('warehouse'),wid);
@@ -29,13 +43,23 @@ it('allows the exact recipient to count a minimal handover without gaining sourc
  expect(JSON.stringify(view.state.internalDeliveries)).not.toMatch(/price|amount|currency/);
  expect(view.state.tasks.some(t=>t.id==='internal-delivery:'+id)).toBe(true);
  const receive={requestId:'count',expectedRevision:1,command:{type:'order.internal.receive' as const,payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted by receiver'}}};
+ auth.users.set('warehouse',{active:true,permissions:['orders:read']});
+ await expect(repo.execute(actor('warehouse'),wid,receive)).rejects.toMatchObject({status:403});
+ auth.users.set('warehouse',{active:true,permissions:['orders:write']});
+ await expect(repo.execute(actor('warehouse'),wid,receive)).rejects.toMatchObject({status:403});
+ auth.users.set('warehouse',{active:true,permissions:['orders:read','orders:write']});
  await expect(repo.execute(actor('reviewer'),wid,receive)).rejects.toMatchObject({status:404});
  await repo.execute(actor('warehouse'),wid,receive);
  expect(db.workspaces.get(wid).state.orders.find((o:any)=>o.id===f.target.orderId).state).toBe('内部交付完成');
  const read=await repo.get(actor('warehouse'),wid);expect(read.state.orders).toEqual([]);expect(read.state.internalDeliveries?.[0].checks[0]).toMatchObject({accepted:10,actorId:'warehouse'});
+ await repo.execute(actor('warehouse'),wid,{requestId:'reverse-count',expectedRevision:2,command:{type:'order.internal.reverseCheck',payload:{id,checkId:read.state.internalDeliveries![0].checks[0].id,expectedRevision:1,reason:'Wrong original count'}}});
+ await repo.execute(actor('warehouse'),wid,{requestId:'partial-count',expectedRevision:3,command:{type:'order.internal.receive',payload:{id,accepted:6,rejected:4,expectedRevision:2,evidence:'Actual partial acceptance'}}});
+ const followup='internal-delivery-followup:'+f.target.orderId;
+ expect((await repo.get(actor('warehouse'),wid)).state.tasks.some(t=>t.id===followup)).toBe(false);
+ expect((await repo.get(actor('garment'),wid)).state.tasks.find(t=>t.id===followup)).toMatchObject({done:false,assigneeIds:['garment']});
  auth.users.set('warehouse',{active:true,permissions:['products:read']});expect((await repo.get(actor('warehouse'),wid)).state.internalDeliveries).toEqual([]);
  auth.users.set('garment',{active:true,permissions:['orders:read','orders:write']});
- await expect(repo.execute(actor('garment'),wid,{...send,requestId:'without-source-read',expectedRevision:2})).rejects.toMatchObject({status:403});
+ await expect(repo.execute(actor('garment'),wid,{...send,requestId:'without-source-read',expectedRevision:4})).rejects.toMatchObject({status:403});
 });
 
 it('limits the receiving exception to checks on the assigned handover and the exact source status',()=>{

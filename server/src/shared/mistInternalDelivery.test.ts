@@ -1,9 +1,11 @@
 import {expect,it} from 'vitest';
 import {internalDeliveryFixture} from '../mist/__tests__/internalDelivery';
-import {assertInternalDeliveryIntegrity,internalDeliveryTotals,internalDeliveryRevision} from './mistInternalDelivery';
+import {assertInternalDeliveryIntegrity,internalDeliveryTotals,internalDeliveryRevision,internalDeliverySources} from './mistInternalDelivery';
 
 it('finishes only after the explicitly chosen recipient counts the goods, without financial or external shipment side effects',()=>{
  const f=internalDeliveryFixture(),before=structuredClone(f.state),id=f.send();
+ expect(f.state.tasks.find(t=>t.id==='internal-delivery:'+id)?.target).toMatchObject({view:'orders',id,section:'internal-deliveries'});
+ expect(()=>f.run({type:'task.complete',payload:{id:'internal-delivery:'+id,done:true}},'warehouse')).toThrow('内部交付记录');
  expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('待内部接收');
  expect(()=>f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted'}},'reviewer')).toThrow('指定接收账号');
  f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse');
@@ -16,8 +18,12 @@ it('preserves partial counts, rejection return evidence and re-delivery without 
  const f=internalDeliveryFixture(),id=f.send();
  f.run({type:'order.internal.receive',payload:{id,accepted:6,rejected:4,expectedRevision:0,evidence:'Counted'}},'warehouse');
  expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('部分内部交付');
+ expect(f.state.tasks.find(t=>t.id==='internal-delivery-followup:'+f.target.orderId)).toMatchObject({done:false,assigneeIds:['garment'],target:{view:'orders/detail',id:f.target.orderId}});
  expect(()=>f.send(4)).toThrow('超过');
+ expect(internalDeliverySources(f.state,f.target.orderId)).toEqual([]);
  f.run({type:'order.internal.returnRejected',payload:{id,quantity:4,date:'2026-10-30',expectedRevision:1,evidence:'Rejected pieces returned'}});
+ expect(f.state.tasks.find(t=>t.id==='internal-delivery-followup:'+f.target.orderId)?.done).toBe(true);
+ expect(internalDeliverySources(f.state,f.target.orderId)).toMatchObject([{remaining:4,source:{kind:'receipt',id:'finished-receipt'}}]);
  const replacement=f.send(4);f.run({type:'order.internal.receive',payload:{id:replacement,accepted:4,rejected:0,expectedRevision:0,evidence:'Replacement counted'}},'warehouse');
  expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
  const row=f.state.internalDeliveries!.find(r=>r.id===id)!;
@@ -82,4 +88,16 @@ it('records rejection under a new quality hold while refusing acceptance, and va
  expect(()=>f.run({type:'order.internal.receive',payload:{id,accepted:1,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse')).toThrow('不允许接收');
  f.run({type:'order.internal.receive',payload:{id,accepted:0,rejected:10,expectedRevision:0,evidence:'Actual rejection'}},'warehouse');
  expect(internalDeliveryTotals(f.state.internalDeliveries![0])).toMatchObject({accepted:0,rejected:10,reserved:10});
+});
+
+it('distinguishes source handovers by exact evidence and suppresses closed or cancellation-pending choices',()=>{
+ const f=internalDeliveryFixture(),first=f.state.fulfillment.receipts.find(r=>r.id==='finished-receipt')!;first.quantity=6;first.location='Room A';first.evidence='Delivery A';
+ f.state.fulfillment.receipts.push({...first,id:'second-receipt',quantity:4,location:'Room B',evidence:'Delivery B'});
+ expect(internalDeliverySources(f.state,f.target.orderId)).toMatchObject([{remaining:6,location:'Room A',evidence:'Delivery A',source:{id:first.id}},{remaining:4,location:'Room B',evidence:'Delivery B',source:{id:'second-receipt'}}]);
+ const order=f.state.orders.find(o=>o.id===f.target.orderId)!;
+ order.governance!.cancellation={status:'pending'} as never;
+ expect(internalDeliverySources(f.state,f.target.orderId)).toEqual([]);
+ delete order.governance!.cancellation;
+ Object.assign(f.state.orderLines.find(l=>l.id===f.target.lineId)!,{closure:{status:'closed'}});
+ expect(internalDeliverySources(f.state,f.target.orderId)).toEqual([]);
 });
