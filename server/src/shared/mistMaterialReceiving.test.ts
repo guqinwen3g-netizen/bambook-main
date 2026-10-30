@@ -30,9 +30,21 @@ it('supports partial warehouse receiving, actual return and reissue without chan
   count(6, 0, 1);
   f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'A-01',person:'factory',note:'Rejected returned'}});
   expect(materialDeliveryRows(f.state)[0]).toMatchObject({ accepted:'16', rejected:'4', pending:'0', returned:'4', outstanding:'16' });
-  expect(f.state.fulfillment.stock[0].available).toBe(4);
+  expect(f.state.fulfillment.stock[0]).toMatchObject({ available:0, locked:4 });
+  expect(f.state.fulfillment.stockMovements.at(-1)).toMatchObject({kind:'return',quantity:4,quarantinedQuantity:4});
+  expect(internalFabricCostShare(f.state, f.purchaseId, f.target.orderId, 136000)).toBe(108800);
+  expect(internalFabricCostShare(f.state, f.purchaseId, f.source.orderId, 136000)).toBe(27200);
   expect(f.state.fulfillment.receipts).toEqual(originalReceipt);
-  f.issue(4);
+  expect(() => f.issue(4)).toThrow('库存可用量不足');
+});
+
+it('quarantines only returned rejected material and leaves a returned accepted surplus available', () => {
+  const f=materialDeliveryFixture(20),id=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:5,location:'A-01',person:'factory',note:'Rejected and surplus'}});
+  expect(f.state.fulfillment.stock[0]).toMatchObject({available:1,locked:4});
+  expect(f.state.fulfillment.stockMovements.at(-1)).toMatchObject({quarantinedQuantity:4});
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({accepted:'15',rejected:'4',pending:'0',returned:'5',outstanding:'15'});
 });
 
 it('keeps a legacy pre-count return eligible for full confirmation and refuses ambiguous partial conversion', () => {

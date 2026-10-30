@@ -1,7 +1,7 @@
 import {ClaimRepairWork,repairRecordSpec,repairHandbackSpec,repairDispatchSpec,repairReturnSpec} from './ClaimRepairWork';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {latestClaimRepair,pendingRepairDispatch,unrecordedRepairDispatch} from '../../../../../server/src/shared/mistClaimInventory';
-import { materialDeliveryRequired, materialDeliveryTargets } from '../../../../../server/src/shared/mistInternalFabric';
+import { materialDeliveryRequired, materialDeliveryRows, materialDeliveryTargets } from '../../../../../server/src/shared/mistInternalFabric';
 import { stockName } from '../businessNames';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 库存与仓储：面料 / 成衣业务组各自的实物台账；按单位分开汇总，详情为“事实 → 可做的动作 → 流水”。 */
@@ -110,6 +110,7 @@ export function InventoryPage() {
     const quantity = targets.length === 1 && targets[0].remaining ? Math.min(stock.available, Number(targets[0].remaining)) : linked && targets.length !== 1 ? 0 : stock.available;
     return {
       title: ({ issue: linked ? '登记发料' : '登记出库', return: '按原出库退回', move: '登记库存移位' })[kind],
+      ...(kind === 'return' && state && materialDeliveryRows(state).some(row => row.kind === 'issue' && state.fulfillment.stockMovements.some(movement => movement.id === row.id && movement.stockId === stock.id) && Number(row.rejected) > Number(row.returned)) ? { description: '拒收料优先退回并隔离，待处置。' } : {}),
       submitLabel: ({ issue: linked ? '登记发料' : '登记出库', return: '登记退回', move: '登记移位' })[kind],
       fields: [
         ...(linked ? [field('targetProductionId', '接收加工单', 'select', true, [emptyOption, ...targets])] : []),
@@ -211,6 +212,7 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
   const claimOpen = !!sourceClaim && !['Closed', 'Cancelled'].includes(sourceClaim.state);
   const next: { tone: Tone; title: string; text: string } = returned
     ? isRepair ? {tone:record?.releasedRepairId?'ok':repair?.qc?.result==='fail'?'bad':'warn',title:record?.releasedRepairId?'已交还':!repair?'待维修':!repair.qc?'待复检':repair.qc.result==='pass'?'待交还':'复检不合格',text:''} : record && !record.disposal ? { tone: 'warn', title: '退回隔离库存', text: '待按批准去向处置' } : { tone: 'ok', title: '已按批准去向处置', text: record?.disposal ? `${record.disposal.actor} · ${shortWhen(record.disposal.at)} · ${record.disposal.basis}` : '本批没有待处置数量。' }
+    : current === 'isolated' ? { tone: 'warn', title: `隔离待处置 ${stock.locked} ${stock.unit}`, text: '' }
     : current === 'available' ? { tone: 'accent', title: `可用 ${stock.available} ${stock.unit}`, text: '' }
     : out > 0 ? { tone: 'neutral', title: `已全部出库 · ${out} ${stock.unit}`, text: '' }
     : { tone: 'neutral', title: '已出清', text: '' };
@@ -240,6 +242,7 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
         { label: '入库日期', value: receipt?.date || shortWhen(stock.createdAt) },
         { label: '累计入库', value: `${stock.quantity} ${stock.unit}` },
         { label: '当前可用', value: `${stock.available} ${stock.unit}` },
+        ...((stock.locked || 0) > 0 ? [{ label: '隔离待处置', value: `${stock.locked} ${stock.unit}` }] : []),
         { label: '已出库（净）', value: out > 0 ? `${out} ${stock.unit}` : '无' },
         { label: '仓库 / 位置', value: `${warehouse ? `${warehouse.name} · ` : ''}${stock.location || '位置未记录'}` },
         { label: '货权', value: stock.owner },
@@ -257,7 +260,7 @@ function StockDetail({ stock, state, can, locked, canClaims, onMove, onScrap, on
     {record && <DetailBlock title={uiText("收货与处置凭据")}><RecordFiles ids={[...record.fileIds, ...(record.disposal?.fileIds || [])]} /></DetailBlock>}
     {returned && <div className="mist-row mist-module-actions">{sourceClaim && canClaims && <Button onClick={() => onClaim(sourceClaim.id)}>{uiText("查看案件")}</Button>}{disposition?.creditNoteId && sourceClaim && canClaims && <Button onClick={() => onClaim(sourceClaim.id, 'credit:' + disposition.creditNoteId)}>{uiText("查看来源CN")}</Button>}</div>}
     <DetailBlock title={uiText("出入库流水")}>
-      {movements.length ? <Timeline events={movements.slice().reverse().map(movement => ({ who: movement.actor, when: new Date(movement.at).toLocaleString(), text: `${MOVE_LABEL[movement.kind]} ${movement.quantity}${stock.unit} · ${movement.location} · ${movement.note}${movement.onHandBefore === undefined ? '' : ` · 现存 ${movement.onHandBefore}→${movement.onHandAfter} / 隔离 ${movement.lockedBefore}→${movement.lockedAfter}`}` }))} /> : <span className="mist-note">{uiText("还没有流水")}</span>}
+      {movements.length ? <Timeline events={movements.slice().reverse().map(movement => ({ who: movement.actor, when: new Date(movement.at).toLocaleString(), text: `${MOVE_LABEL[movement.kind]} ${movement.quantity}${stock.unit} · ${movement.location} · ${movement.note}${movement.quarantinedQuantity ? ` · 隔离 ${movement.quarantinedQuantity}${stock.unit}` : ''}${movement.onHandBefore === undefined ? '' : ` · 现存 ${movement.onHandBefore}→${movement.onHandAfter} / 隔离 ${movement.lockedBefore}→${movement.lockedAfter}`}` }))} /> : <span className="mist-note">{uiText("还没有流水")}</span>}
     </DetailBlock>
   </DetailBody>;
 }
