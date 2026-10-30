@@ -30,6 +30,7 @@ import {isLineClosed} from './mistOrderClosure';
 import {quotationContract} from './mistTradeTerms';
 import {createOrderGovernance,applyOrderGovernanceCommand,orderGovernancePermission,getOrderGovernanceReviews,assertOrderApproved,assertOrderWritable,assertOrderNotTerminated,type OrderGovernanceFields,type OrderGovernanceCommand,type OrderGovernanceInput} from './mistOrderGovernance';
 import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
+import {applyAgentProposalCommand,agentProposalCommandPermission,type AgentProposal,type AgentProposalCommand} from './mistAgentProposals';
 import {applyCustomerStatementCommand,customerStatementCommandPermission,type CustomerStatementCommand,type CustomerStatementRecord} from './mistCustomerStatement';
 import {applyLcCommand,lcCommandPermission,type LcCommand,type MistLetterOfCredit} from './mistLetterOfCredit';
 import {applyRfqCommand,rfqCommandPermission,type RfqCommand,type MistRfq} from './mistSourcing';
@@ -54,6 +55,8 @@ export type MistContext = {
   /** 服务端按本次执行账号的实时有效权限生成；领域处理内二次校验用，缺省视为无权（失败关闭）。 */
   can?: (scope: string) => boolean;
   consumeBusinessNumber?: (prefix: MistBusinessNumberPrefix) => string;
+  /** 服务端按委托身份设置：本次写入经 Agent 发起；领域处理据此限制 Agent 提议的创建与处理。 */
+  viaAgent?: boolean; agentSessionId?: string;
   creditDocumentIssue?: MistCreditDocumentIssue;
   /** 服务端按本次执行时的所有者、授权成员、账号状态与业务组构建（包 A）；负责人/经手人只能从这里按账号 ID 选，缺省一律拒绝。 */
   members?: MistMemberDirectoryEntry[];
@@ -291,6 +294,8 @@ export type MistState = {
   fxRevaluations?: FxRevaluation[];
   /** 客户对账单归档记录（只追加），见 mistCustomerStatement。 */
   customerStatements?: CustomerStatementRecord[];
+  /** Agent 提议，只给提议所属账号本人看（见 mistAgentProposals.ts）。 */
+  agentProposals?: AgentProposal[];
   /** 信用证台账，见 mistLetterOfCredit。 */
   letterOfCredits?: MistLetterOfCredit[];
   /** Response-only scoped view of a credit shared with hidden orders. */
@@ -308,7 +313,7 @@ export type MistState = {
   teamScopes?:MistTeamScope[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -778,6 +783,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('rebate.'))return exportRebateCommandPermission(command as ExportRebateCommand);
   if(command.type.startsWith('fxrate.'))return fxCommandPermission(command as FxRateCommand);
   if(command.type.startsWith('opening.'))return openingCommandPermission(command as OpeningCommand);
+  if(command.type.startsWith('agent.proposal.'))return agentProposalCommandPermission();
   if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
   if(command.type.startsWith('lc.'))return lcCommandPermission(command as LcCommand);
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.'))return rfqCommandPermission(command as RfqCommand);
@@ -850,6 +856,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('payable.')){const result=applyPayablesCommand(state,command as PayablesCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('fxrate.')){const result=applyFxRateCommand(state,command as FxRateCommand,context);return {state,result};}
   if(command.type.startsWith('opening.')){const result=applyOpeningCommand(state,command as OpeningCommand,context);recalculate(state);return {state,result};}
+  if(command.type.startsWith('agent.proposal.')){const result=applyAgentProposalCommand(state,command as AgentProposalCommand,context);return {state,result};}
   if(command.type==='finance.statement.generate'){const result=applyCustomerStatementCommand(state,command as CustomerStatementCommand,context);return {state,result};}
   if(command.type.startsWith('lc.')){const result=applyLcCommand(state,command as LcCommand,context);return {state,result};}
   if(command.type.startsWith('handover.')){const result=applyHandoverCommand(state,command as HandoverCommand,context);normalizeMistState(state,context);recalculate(state);return {state,result};}

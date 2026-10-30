@@ -3,7 +3,7 @@
  *
  * - 身份：本人会话签发的委托令牌（x-bambook-delegation）；只读委托只能用读取类工具，可办理委托（mode=operate）还能预演与执行。
  * - 写入只走 repository.preview / repository.execute，与页面同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，不另开后门。
- * - 确认 / 删除 / 资金 / 对外发送类命令（agentCommandSensitivity === 'confirm'）一律拒绝执行，须本人在系统中确认（2026-10-30 用户定案）。
+ * - 确认 / 删除 / 资金 / 对外发送类命令（agentCommandSensitivity === 'confirm'）不直接执行：预演通过后记为 Agent 提议，本人确认后才执行（2026-10-30 用户定案）。
  * - 经 Agent 的写入由仓储在业务事件经办人后标注“经 Agent”，与人工操作同处可查。
  */
 import { randomUUID } from 'node:crypto';
@@ -25,7 +25,7 @@ const NEVER_VIA_AGENT = new Set(['files.add']);
 
 /** confirm：须本人在系统中确认；normal：可由可办理委托直接执行；blocked：不能经接口执行。 */
 export function agentCommandSensitivity(type: string): 'normal' | 'confirm' | 'blocked' {
-  if (NEVER_VIA_AGENT.has(type) || type.startsWith('email.server.')) return 'blocked';
+  if (NEVER_VIA_AGENT.has(type) || type.startsWith('email.server.') || type.startsWith('agent.')) return 'blocked';
   if (NORMAL_EXCEPTIONS.has(type)) return 'normal';
   if (CONFIRM_PREFIXES.some(prefix => type.startsWith(prefix)) || CONFIRM_VERB.test(type.slice(type.indexOf('.') + 1))) return 'confirm';
   return 'normal';
@@ -48,7 +48,7 @@ const TOOLS = [
   { name: 'bambook_related', description: '展开一个业务对象的关联对象（如合同的收货、结算、票据）。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, id: str('对象 id') }, required: ['workspaceId', 'type', 'id'] }, annotations: { readOnlyHint: true } },
   { name: 'bambook_commands', description: '列出可用的业务命令、payload 结构，以及是否须本人确认（confirm）。', inputSchema: { type: 'object', properties: { prefix: str('按命令前缀筛选，如 payable. 或 fulfillment.') } }, annotations: { readOnlyHint: true } },
   { name: 'bambook_preview', description: '预演一条命令：执行全部权限与业务校验后回滚，返回将产生的结果和业务事件，不保存任何数据。执行前先预演。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema }, required: ['workspaceId', 'command'] }, annotations: { readOnlyHint: true } },
-  { name: 'bambook_execute', description: '执行一条普通命令（与页面操作同一规则并留审计）。确认 / 删除 / 资金 / 对外发送类命令不能经接口执行，须提示用户在系统中办理。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, requestId: str('幂等请求编号，可选；同一编号重复调用只执行一次') }, required: ['workspaceId', 'command'] }, annotations: { destructiveHint: false, idempotentHint: true } },
+  { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, requestId: str('幂等请求编号，可选；同一编号重复调用只执行一次') }, required: ['workspaceId', 'command'] }, annotations: { destructiveHint: false, idempotentHint: true } },
 ];
 
 class ToolInputError extends Error {}
@@ -77,10 +77,16 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
       if (via === 'blocked') throw new ToolInputError(`${command.type} 不能经接口执行`);
       const { workspace } = await repository.getForAgent(actor, workspaceId);
       if (name === 'bambook_preview') return { via, ...(await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: workspace.revision, command }) as object) };
-      if (via === 'confirm') throw new ToolInputError(`${command.type} 属于确认 / 删除 / 资金 / 对外发送类，须本人在系统中确认办理；可先用 bambook_preview 核对，再提示用户到页面操作`);
       const requestId = typeof args.requestId === 'string' && args.requestId ? `mcp-${args.requestId}` : `mcp-${randomUUID()}`;
       // 重试同一请求编号时沿用原版本号：相同命令按原回执重放，不同命令仍被拒绝。
       const prior = await repository.receipt(actor, workspaceId, requestId).catch(() => null);
+      if (via === 'confirm') {
+        // 高敏感命令：先按 Agent 身份完整预演（不合规的不提交），再记为提议，等本人在「接着完成」里确认执行。
+        const preview = prior ? null : await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: workspace.revision, command }) as { events?: string[] };
+        const summary = preview?.events?.length ? preview.events.slice(0, 10) : [`执行 ${command.type}`];
+        const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : workspace.revision, command: { type: 'agent.proposal.create', payload: { command, summary } } });
+        return { status: 'awaiting_confirmation', message: '已提交给用户确认：用户在「接着完成」里确认后才会执行。', summary, receipt, replayed: !!replayed };
+      }
       const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : workspace.revision, command });
       return { receipt, replayed: !!replayed };
     }
@@ -98,7 +104,7 @@ export async function handleMcpMessage(repository: McpRepository, actor: TokenPa
   if (id === undefined) return null;
   switch (method) {
     case 'initialize': return { jsonrpc: '2.0', id, result: { protocolVersion: typeof params.protocolVersion === 'string' ? params.protocolVersion : MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'bambook-mist', version: '1' },
-      instructions: '先用 bambook_workspaces 取得工作区，再查询；写入前先 bambook_preview。确认、删除、资金、对外发送类命令须提示用户在系统中办理。' } };
+      instructions: '先用 bambook_workspaces 取得工作区，再查询；写入前先 bambook_preview。确认、删除、资金、对外发送类命令执行后只会成为提议，请告诉用户到「接着完成」里确认。' } };
     case 'ping': return { jsonrpc: '2.0', id, result: {} };
     case 'tools/list': return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
     case 'tools/call': {

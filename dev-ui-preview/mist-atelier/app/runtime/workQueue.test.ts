@@ -340,3 +340,11 @@ it('presents an existing customer handover concisely while preserving its source
  expect(shown.title).toBe('接手客户 · Alder & Vale Apparel');expect(shown.target).toEqual(task.target);expect(shown.assigneeIds).toEqual(['me']);expect(shown.due).toBe('2026-10-18');expect(JSON.stringify(task)).toBe(before);
  expect(mistMyTasks(state,{me:'other',canRead:all,can:()=>false}).some(row=>row.id===task.id)).toBe(false);
 });
+it('shows a pending Agent proposal only to its owner, as an urgent item to confirm',()=>{
+ const state=createMistState({id:()=>'id',now:'2026-10-30T08:00:00.000Z',actorName:'系统'} as any,'empty');
+ state.agentProposals=[{id:'p1',ownerId:'finance',owner:'林舒',command:{type:'payable.settlement.confirm',payload:{id:'st'}},summary:['确认 ST-2026-0001 结算','华盛毛纺 · 110,670.00 CNY'],createdAt:'2026-10-30T08:00:00.000Z',state:'pending'},
+  {id:'p2',ownerId:'finance',owner:'林舒',command:{type:'payable.bill.register',payload:{}},summary:['登记票据'],createdAt:'2026-10-30T08:00:00.000Z',state:'rejected'}];
+ const options={canRead:()=>true,can:()=>false,today:'2026-10-30'};
+ expect(mistWorkQueue(state,{...options,me:'finance'}).filter(item=>item.source==='agent')).toMatchObject([{id:'agent-proposal:p1',title:'确认 ST-2026-0001 结算',meta:'华盛毛纺 · 110,670.00 CNY',urgent:true}]);
+ expect(mistWorkQueue(state,{...options,me:'sales'}).filter(item=>item.source==='agent')).toHaveLength(0);
+});

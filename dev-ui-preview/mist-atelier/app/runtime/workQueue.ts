@@ -12,13 +12,13 @@ import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
 
 type CanRead = (view: string) => boolean;
-export type MistWorkSource = 'review' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
+export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
 /**
  * 等我处理的一条事项。module 是它计入的侧栏模块（与模块页「待我处理」同一归属）；
  * 其他公司的审批归到 approvals，只进「我的工作」合计。
  */
 export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; due?: string; target: MistTarget & { detail?: 'full' }; module: string };
-export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项' };
+export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', agent: 'Agent 提议', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项' };
 export type MistWorkOptions = {
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
   /** 当前账号是否持有某项权限；不传时岗位事项（按权限分派）一律不算我的。 */
@@ -112,6 +112,12 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       target: { view: 'approvals', id: `${review.workspaceId}|${review.id}`, section: 'mine' } as MistTarget, module: local && canRead(module) ? module : 'approvals' });
   }
   if (!state) return items;
+  // Agent 提议：只给提议所属账号本人，由本人在首页确认或拒绝。
+  for (const proposal of state.agentProposals || []) {
+    if (proposal.state !== 'pending' || !me || proposal.ownerId !== me) continue;
+    push({ id: `agent-proposal:${proposal.id}`, source: 'agent', title: proposal.summary[0] || proposal.command.type, meta: proposal.summary.slice(1).join(' · '),
+      when: '待确认', urgent: true, at: proposal.createdAt, target: { view: 'cockpit', id: proposal.id, section: 'agent-proposal' } as MistTarget, module: 'cockpit' });
+  }
   if (me && canRead('quotations')) {
     for (const quote of state.market?.quotations || []) {
       const customer=state.customers.find(row=>row.id===quote.customerId)?.name;
