@@ -18,6 +18,18 @@ const run = (s: MistState, command: any) => applyMistCommand(s, command, { ...ct
 const bill = (supplierId: string, lines: Array<{ purchaseId: string; amount: number }>, extra: Record<string, unknown> = {}) => ({ type: 'payable.bill.register', payload: { supplierId, invoiceNo: 'VAT-001', invoiceDate: '2026-10-10', currency: 'CNY', amount: lines.reduce((n, l) => n + l.amount, 0), taxAmount: 0, taxRate: '13%', lines, due: '2026-11-09', dueBasis: '合同：到货验收后 30 天', ...extra } });
 
 describe('供应商票据登记', () => {
+  it('材料合同三单匹配：不关联结算的票额不超过已验收货值，超出须登记“待关联结算”且不能申请付款', () => {
+    const { state, po1 } = demo(); // 到货 2400 米，色差退回 20 米，实收合格 2380 米
+    expect(payableSources(state).find(r => r.purchase.id === po1.id)).toMatchObject({ uninvoiced: 111600, accepted: 110670, acceptedUninvoiced: 110670 });
+    const err = (s: MistState, cmd: any) => { try { run(s, cmd); return ''; } catch (e: any) { return e.message as string; } };
+    expect(err(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 111600 }]))).toContain('已验收货值 110,670.00 CNY');
+    const { state: s1 } = run(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 110670 }]));
+    expect(payableSources(s1).find(r => r.purchase.id === po1.id)).toMatchObject({ uninvoiced: 930, acceptedUninvoiced: 0 });
+    expect(err(s1, { ...bill(po1.supplierId, [{ purchaseId: po1.id, amount: 930 }]), payload: { ...bill(po1.supplierId, [{ purchaseId: po1.id, amount: 930 }]).payload, invoiceNo: 'VAT-002' } })).toContain('待关联结算');
+    const held = bill(po1.supplierId, [{ purchaseId: po1.id, amount: 930 }]); (held.payload.lines[0] as any).awaitingSettlement = true; held.payload.invoiceNo = 'VAT-002';
+    const { state: s2, result } = run(s1, held);
+    expect(payableBills(s2, today).find(x => x.id === result.id)).toMatchObject({ held: true });
+  });
   it('财务权限；已批准合同才能登记，票据形成应付，合同剩余待登记同步减少', () => {
     const { state, po1 } = demo();
     expect(mistCommandPermission(bill(po1.supplierId, []) as any)).toBe('invoices:write');

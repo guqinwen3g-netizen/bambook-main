@@ -1,0 +1,55 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 810,
+        "width": 485,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 802,
+        "y": 643,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 434,
+        "y": 529,
+        "width": 572,
+        "height": 64
+      },
+      "value": "实收 2,380 米与入库记录一致，按合同单价确认。"
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 932,
+        "y": 615,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 802,
+        "y": 781,
+        "width": 127,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

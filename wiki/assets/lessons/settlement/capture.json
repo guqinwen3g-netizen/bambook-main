@@ -1,0 +1,74 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 707,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 364,
+        "y": 415,
+        "width": 58,
+        "height": 42
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1167,
+        "y": 496,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 374,
+        "y": 344,
+        "width": 671,
+        "height": 40
+      },
+      "value": "PO-2026-00001 · 华盛毛纺"
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 362,
+        "y": 360,
+        "width": 20,
+        "height": 20
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 374,
+        "y": 681,
+        "width": 692,
+        "height": 64
+      },
+      "value": "首批到货 2,380 米验收合格，按合同单价结算；色差 20 米已退回，待供应商确认补发。"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 992,
+        "y": 767,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}
