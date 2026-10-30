@@ -30,7 +30,17 @@ export function buildCatalog() {
     const text = fs.readFileSync(path.join(SHARED, file), 'utf8');
     for (const match of text.matchAll(/\{\s*type:\s*'([a-z][\w]*(?:\.[\w]+)+)'\s*;\s*payload\??:\s*/g)) {
       const at = match.index + match[0].length;
-      const payload = text[at] === '{' ? balanced(text, at) : (text.slice(at).match(/^[\w.<>[\]|' ]+/) || [''])[0].trim();
+      let payload = text[at] === '{' ? balanced(text, at) : (text.slice(at).match(/^[\w.<>[\]|' ]+/) || [''])[0].trim();
+      // 联合类型 payload（如 `{ purpose: 'prepayment'… } | { purpose: 'bill'… }`）须收齐全部分支，否则 Agent 只能看到第一种用法。
+      if (payload && text[at] === '{') {
+        for (let end = at + payload.length; ;) {
+          const next = text.slice(end).match(/^\s*\|\s*(?=\{)/);
+          if (!next) break;
+          const variant = balanced(text, end + next[0].length);
+          if (!variant) break;
+          payload += ' | ' + variant; end += next[0].length + variant.length;
+        }
+      }
       if (!payload || found.has(match[1])) continue;
       found.set(match[1], { type: match[1], payload: payload.replace(/\s+/g, ' ').slice(0, 1500), source: `server/src/shared/${file}` });
     }

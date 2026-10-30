@@ -126,6 +126,10 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
 describe('命令目录与敏感分级', () => {
   it('is generated from the current source and classifies money, approval, deletion and outbound commands as confirm', () => {
     expect(() => execFileSync('node', [path.resolve(__dirname, '../../../scripts/gen-mist-command-catalog.mjs'), '--check'], { stdio: 'pipe' })).not.toThrow();
+    const payload = (type: string) => MIST_COMMAND_CATALOG.find(c => c.type === type)?.payload ?? '';
+    // 联合 payload 收齐全部分支：付款申请须能看到预付、结算预付与按票据三种用法。
+    for (const purpose of ['prepayment', 'settlement', 'bill']) expect(payload('payable.request.submit')).toContain(`purpose: '${purpose}'`);
+    expect(payload('email.server.send.begin')).toContain(`mode: 'retry'`);
     const via = (type: string) => agentCommandSensitivity(type);
     for (const type of ['payable.payment.register', 'payable.request.decide', 'payable.bill.register', 'payable.settlement.confirm', 'finance.receivable.confirm', 'funding.release', 'platform.credit.issue', 'order.governance.decide', 'member.groups.set', 'teamScope.save', 'market.quotation.delete'].filter(t => MIST_COMMAND_CATALOG.some(c => c.type === t) || t === 'market.quotation.delete')) expect([type, via(type)]).toEqual([type, 'confirm']);
     for (const type of ['payable.settlement.submit', 'development.saveDraft', 'market.quotation.save', 'fulfillment.procurement.save']) expect([type, via(type)]).toEqual([type, 'normal']);

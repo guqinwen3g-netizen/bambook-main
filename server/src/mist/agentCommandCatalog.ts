@@ -242,7 +242,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "email.server.send.begin",
-  "payload": "{ mode: 'new'; requestKey: string; draftId?: string; input: EmailDraftInput; forwardOfId?: string; messageId: string }",
+  "payload": "{ mode: 'new'; requestKey: string; draftId?: string; input: EmailDraftInput; forwardOfId?: string; messageId: string } | { mode: 'retry'; id: string; confirmUnknown?: boolean }",
   "source": "server/src/shared/mistEmail.ts"
  },
  {
@@ -1217,7 +1217,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "payable.request.submit",
-  "payload": "{ purpose: 'prepayment'; planId: string; amount: number; reason: string; fileIds?: string[] }",
+  "payload": "{ purpose: 'prepayment'; planId: string; amount: number; reason: string; fileIds?: string[] } | { purpose: 'settlement'; settlementId: string; amount: number; reason: string; fileIds?: string[] } | { purpose: 'bill'; supplierId: string; currency: string; lines: Array<{ billId: string; amount: number }>; planId?: string; reason: string; fileIds?: string[] }",
   "source": "server/src/shared/mistPayables.ts"
  },
  {

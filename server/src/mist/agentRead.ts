@@ -24,6 +24,15 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'quotation', label: '报价', scope: 'quotations:read', path: ['market', 'quotations'], view: 'quotations' },
   { type: 'supplier', label: '供应商', scope: 'suppliers:read', path: ['market', 'suppliers'], view: 'suppliers' },
   { type: 'purchase', label: '采购合同', scope: 'procurement:read', path: ['fulfillment', 'purchases'], view: 'procurement' },
+  { type: 'receipt', label: '收货记录', scope: 'procurement:read', path: ['fulfillment', 'receipts'], view: 'procurement', linkId: r => r.purchaseId },
+  // 应付链：结算、票据、预付计划、付款申请、供应商付款、核销分配、预付退款/转抵。行级范围已由仓储投影裁剪（业务员只到本人采购），这里只复核读权限。
+  { type: 'payable_settlement', label: '采购结算', scope: 'invoices:read', path: ['payables', 'settlements'], view: 'payables' },
+  { type: 'payable_bill', label: '供应商票据', scope: 'invoices:read', path: ['payables', 'bills'], view: 'payables' },
+  { type: 'payment_plan', label: '付款计划', scope: 'invoices:read', path: ['payables', 'plans'], view: 'payables' },
+  { type: 'payment_request', label: '付款申请', scope: 'invoices:read', path: ['payables', 'requests'], view: 'payables' },
+  { type: 'supplier_payment', label: '供应商付款', scope: 'invoices:read', path: ['payables', 'payments'], view: 'payables' },
+  { type: 'payment_allocation', label: '付款分配', scope: 'invoices:read', path: ['payables', 'allocations'], view: 'payables' },
+  { type: 'prepayment_move', label: '预付退款/转抵', scope: 'invoices:read', path: ['payables', 'prepaymentMoves'], view: 'payables' },
   { type: 'production', label: '生产', scope: 'production:read', path: ['productions'], view: 'production-board' },
   { type: 'shipment', label: '出运', scope: 'shipments:read', path: ['fulfillment', 'shipments'], view: 'shipments' },
   { type: 'invoice', label: '发票', scope: 'invoices:read', path: ['invoices'], view: 'invoices' },
@@ -122,7 +131,9 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
 export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown) {
   const { type, row } = find(state, actor, typeName, id);
-  const scalarRefs = (r: any) => new Set(Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []));
+  const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
+  // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
+  const scalarRefs = (r: any) => new Set([...idsOf(r), ...Object.values(r).flatMap(v => Array.isArray(v) ? v.filter(x => x && typeof x === 'object' && !Array.isArray(x)).flatMap(idsOf) : [])]);
   const own = scalarRefs(row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;
