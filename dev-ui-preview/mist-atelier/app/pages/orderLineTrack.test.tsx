@@ -7,6 +7,7 @@ import { MistRoot, ToastProvider } from '../../../../components/mist';
 import { createMistState, type MistOrder, type MistOrderLine, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { OrderLineFulfillment } from './OrderLineFulfillment';
 import {garmentMaterialFingerprint} from '../../../../server/src/shared/mistInternalFabric';
+import { materialDeliveryFixture } from '../../../../server/src/mist/__tests__/materialDelivery';
 import { currentLineStage, lineStages, lineTrackLabel, orderLineFlags } from './orderLineTrack';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -144,6 +145,17 @@ it('shows allocated internal fabric as waiting for handover instead of requiring
   s.fulfillment.receipts.push({id:'r',purchaseId:'supply',quantity:3,materialDelivery:{allocationId:'a',allocationRevision:1,confirmation:{actor:'业务员甲'}}} as never);
   expect(stage()).toMatchObject({state:'done',caption:'内供已交接'});
   s.fulfillment.receipts[0].materialDelivery!.allocationRevision=2;expect(stage()).toMatchObject({state:'now',caption:'内供待交接'});
+});
+
+it('uses accepted direct-delivery quantities to finish the material stage after multiple receiving checks',()=>{
+  const f=materialDeliveryFixture(20,false),o=f.state.orders.find(row=>row.id===f.target.orderId)!,l=f.state.orderLines.find(row=>row.id===f.target.lineId)!;
+  const id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:20,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Dispatch',fileIds:[],targetProductionId:f.productionId}}).id!;
+  const stage=()=>lineStages(f.state,o,{...l,cmtIncludedItems:['trims','packaging']}).find(row=>row.key==='material');
+  f.run({type:'fulfillment.materials.confirm',payload:{id,kind:'direct',acceptedQuantity:10,rejectedQuantity:0,expectedReceivingRevision:0,evidence:'First count'}},'garment');
+  expect(stage()).toMatchObject({state:'now',caption:'内供待交接'});
+  f.run({type:'fulfillment.materials.confirm',payload:{id,kind:'direct',acceptedQuantity:10,rejectedQuantity:0,expectedReceivingRevision:1,evidence:'Remaining count'}},'garment');
+  expect(stage()).toMatchObject({state:'done',caption:'内供已交接'});
+  expect(f.state.fulfillment.receipts[0].materialDelivery?.confirmation).toBeUndefined();
 });
 
 it('keeps PP pending after QC until the requester confirms and business continues the current report',()=>{

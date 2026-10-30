@@ -259,6 +259,13 @@ describe('exact material receiving work',()=>{
   const f=materialDeliveryFixture(3,false),id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:3,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Direct delivery',fileIds:[],targetProductionId:f.productionId}}).id!;
   expect(mistWorkQueue(f.state,options)).toEqual([expect.objectContaining({id:'material:direct:'+id,target:expect.objectContaining({id:f.processingId,detail:'full'})})]);
  });
+ it('offers only the uncounted remainder and removes receiving work after a partial rejection is fully counted',()=>{
+  const f=materialDeliveryFixture(3,false),id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:3,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Direct delivery',fileIds:[],targetProductionId:f.productionId}}).id!;
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'direct',id,acceptedQuantity:1,rejectedQuantity:1,expectedReceivingRevision:0,evidence:'First count'}},'garment');
+  expect(mistWorkQueue(f.state,options)).toMatchObject([{id:'material:direct:'+id,meta:expect.stringContaining('1 米')}]);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'direct',id,acceptedQuantity:1,rejectedQuantity:0,expectedReceivingRevision:1,evidence:'Remaining count'}},'garment');
+  expect(mistWorkQueue(f.state,options).filter(row=>row.source==='material')).toEqual([]);
+ });
 });
 
 describe('shipment role continuity',()=>{

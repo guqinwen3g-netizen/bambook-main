@@ -39,6 +39,16 @@ it('keeps generation hidden for read-only procurement access',()=>{
   session.denied.add('procurement:write');store.state!.fulfillment.purchases.push(purchase('readonly',approved({kind:'processing'})));
   render('readonly');expect(queryByRole(host,'button',{name:'生成加工合同'})).toBeNull();
 });
+
+it('recognizes counted direct deliveries while keeping rejected goods awaiting return unresolved',()=>{
+  const f=materialDeliveryFixture(20,false),id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:20,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Dispatch',fileIds:[],targetProductionId:f.productionId}}).id!;
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'direct',id,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted all'}},'garment');
+  store.state=f.state;session.id='garment';render(f.processingId);
+  expect(host.textContent).toContain('0 笔已收 · 0 笔待收 · 1 笔拒收待退');
+  f.run({type:'fulfillment.procurement.return',payload:{receiptId:id,quantity:4,disposition:'replace',date:'2026-10-24',evidence:'Returned to mill'}});
+  store.state=f.state;render(f.processingId);expect(host.textContent).toContain('1 笔已收 · 0 笔待收');
+  expect(host.textContent).not.toContain('1 笔拒收待退');
+});
 beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 

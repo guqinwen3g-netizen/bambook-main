@@ -22,8 +22,12 @@ export type MaterialDeliveryLink = {
   receiverId: string; receiver: string; allocationId?: string; allocationRevision?: number;
   sourceQcReportIds?: string[];
   confirmation?: { at: string; actorId: string; actor: string; evidence: string };
+  /** Added only when the receiver first counts a direct delivery; legacy confirmations stay unchanged. */
+  sentQuantity?: string;
+  receivingChecks?: MaterialReceivingCheck[];
 };
-export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; quantity: string; outstanding: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
+export type MaterialReceivingCheck = { id: string; acceptedQuantity: string; rejectedQuantity: string; previousQuantity: string; previousRejected: string; at: string; actorId: string; actor: string; evidence: string };
+export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
 export const GARMENT_FULFILLMENT_LABELS: Record<GarmentFulfillmentMode, string> = { cmt: '纯 CMT', trims_cmt: '辅料 + CMT', full_package: '全包' };
 export const CMT_INCLUDED_ITEM_LABELS: Record<CmtIncludedItem, string> = { trims: '辅料', packaging: '包装' };
 export const MATERIAL_KIND_LABELS: Record<MistMaterialKind, string> = { fabric: '面料', trims: '辅料', packaging: '包装', other: '其他原料' };
@@ -39,6 +43,11 @@ function metresMinor(value: unknown): bigint {
 }
 function metresText(value: bigint): string { const fraction = String(value % BigInt(10000)).padStart(4, '0').replace(/0+$/, ''); return String(value / BigInt(10000)) + (fraction ? '.' + fraction : ''); }
 export function normalizeInternalMetres(value: unknown): string { return metresText(metresMinor(value)); }
+function quantityMinor(value: unknown): bigint {
+  if ((typeof value !== 'string' && typeof value !== 'number') || !/^\d{1,14}(?:\.\d{1,4})?$/.test(String(value))) fail('数量须为非负数，最多四位小数', 'VALIDATION');
+  const [whole, decimal = ''] = String(value).split('.');
+  return BigInt(whole) * BigInt(10000) + BigInt(decimal.padEnd(4, '0'));
+}
 function lineFor(root: MistState, orderId: string, lineId: string) {
   const order = root.orders.find(row => row.id === orderId), line = root.orderLines.find(row => row.id === lineId && row.orderId === orderId);
   if (!order || !line) fail('订单条目不存在', 'NOT_FOUND');
@@ -211,11 +220,20 @@ export function materialDeliveryRows(root: MistState): MaterialDeliveryRow[] {
     const stock = f.stock.find(stock => stock.id === m.stockId); if (!stock?.purchaseId) continue;
     const returned = f.stockMovements.filter(r => r.kind === 'return' && r.issueId === m.id).reduce((sum, r) => sum + metresMinor(r.quantity), BigInt(0));
     const left = metresMinor(m.quantity) - returned;
-    result.push({ id: m.id, kind: 'issue', purchaseId: stock.purchaseId, quantity: normalizeInternalMetres(m.quantity), outstanding: metresText(left > BigInt(0) ? left : BigInt(0)), unit: stock.unit, at: m.at, location: m.location, evidence: m.note, delivery: m.materialDelivery! });
+    const outstanding = metresText(left > BigInt(0) ? left : BigInt(0));
+    result.push({ id: m.id, kind: 'issue', purchaseId: stock.purchaseId, quantity: normalizeInternalMetres(m.quantity), outstanding, accepted: m.materialDelivery!.confirmation ? outstanding : '0', rejected: '0', pending: m.materialDelivery!.confirmation ? '0' : outstanding, returned: metresText(returned), unit: stock.unit, at: m.at, location: m.location, evidence: m.note, delivery: m.materialDelivery! });
   }
-  for (const r of f.receipts.filter(r => r.materialDelivery && r.quantity > 0)) {
+  for (const r of f.receipts.filter(r => r.materialDelivery && (r.quantity > 0 || r.materialDelivery.sentQuantity))) {
     const p = f.purchases.find(p => p.id === r.purchaseId); if (!p) continue;
-    result.push({ id: r.id, kind: 'direct', purchaseId: p.id, quantity: normalizeInternalMetres(r.quantity), outstanding: normalizeInternalMetres(r.quantity), unit: p.unit, at: r.date, location: r.location, evidence: r.evidence, delivery: r.materialDelivery! });
+    const delivery = r.materialDelivery!, checks = delivery.receivingChecks || [], quantity = quantityMinor(delivery.sentQuantity ?? r.quantity);
+    const rejected = checks.reduce((sum, check) => sum + quantityMinor(check.rejectedQuantity), BigInt(0));
+    const accepted = checks.length ? checks.reduce((sum, check) => sum + quantityMinor(check.acceptedQuantity), BigInt(0)) : delivery.confirmation ? quantity : BigInt(0);
+    // Sender-side rejection never reached the receiver. Allocate physical returns to that pool first.
+    const senderRejected = quantityMinor(r.rejected || 0) - rejected;
+    const allReturned = (r.returns || []).filter(row => !row.reversed).reduce((sum, row) => sum + quantityMinor(row.quantity), BigInt(0));
+    const receiverReturned = allReturned > senderRejected ? allReturned - senderRejected : BigInt(0);
+    const returned = receiverReturned < rejected ? receiverReturned : rejected;
+    result.push({ id: r.id, kind: 'direct', purchaseId: p.id, quantity: metresText(quantity), outstanding: metresText(quantity - returned), accepted: metresText(accepted), rejected: metresText(rejected), pending: metresText(quantity - accepted - rejected), returned: metresText(returned), unit: p.unit, at: r.date, location: r.location, evidence: r.evidence, delivery });
   }
   return result;
 }
@@ -223,8 +241,8 @@ export function internalFabricDeliveryState(root: MistState, orderId: string): '
   const rows = materialDeliveryRows(root).filter(row => row.delivery.allocationId && root.fulfillment.purchases.find(p => p.id === row.purchaseId)?.orderId === orderId && row.outstanding !== '0');
   if (!rows.length) return;
   const lines = root.orderLines.filter(l => l.orderId === orderId);
-  if (lines.length && lines.every(line => rows.filter(row => row.delivery.confirmation && root.fulfillment.purchases.find(p => p.id === row.purchaseId)?.lineId === line.id).reduce((sum, row) => sum + metresMinor(row.outstanding), BigInt(0)) >= metresMinor(line.qty))) return '已交接';
-  return rows.some(row => row.delivery.confirmation) ? '部分交接' : '待接收';
+  if (lines.length && lines.every(line => rows.filter(row => root.fulfillment.purchases.find(p => p.id === row.purchaseId)?.lineId === line.id).reduce((sum, row) => sum + quantityMinor(row.accepted), BigInt(0)) >= metresMinor(line.qty))) return '已交接';
+  return rows.some(row => row.accepted !== '0') ? '部分交接' : '待接收';
 }
 export const hasMaterialAtFactory = (root: MistState, purchaseId: string): boolean => {
   const branch = root.productions.find(p => p.sourcePurchaseId === purchaseId);
@@ -279,16 +297,57 @@ export function prepareMaterialDelivery(root: MistState, purchaseId: string, pro
   const receiver = resolveMember(ctx, receiverId, '接收负责人', 'garment');
   return { productionId: production.id, orderId: target.order.id, lineId: target.line.id, supplierId: contract.supplierId, supplier: contract.supplier, receiverId: receiver.id, receiver: receiver.name, ...(allocation ? { allocationId: allocation.id, allocationRevision: allocation.revision } : {}) };
 }
-export function confirmMaterialDelivery(root: MistState, payload: { kind: unknown; id: unknown; evidence: unknown }, ctx: MistContext): MistCommandResult {
+export function confirmMaterialDelivery(root: MistState, payload: { kind: unknown; id: unknown; evidence: unknown; acceptedQuantity?: unknown; rejectedQuantity?: unknown; expectedReceivingRevision?: unknown }, ctx: MistContext): MistCommandResult {
   const row = materialDeliveryRows(root).find(row => row.id === payload.id && row.kind === payload.kind);
   if (!row || row.outstanding === '0') return fail('没有待接收的物料交接');
   if (!materialReceiverIds(root, row).includes(ctx.actorId || '')) return fail('仅指定接收负责人可确认', 'FORBIDDEN');
   const receiver = resolveMember(ctx, ctx.actorId, '接收负责人', 'garment');
   if (row.delivery.confirmation) return fail('接收已确认，请勿重复登记');
   if (typeof payload.evidence !== 'string' || !payload.evidence.trim() || payload.evidence.length > 1000) return fail('请填写工厂点收依据');
+  const partial = payload.acceptedQuantity !== undefined || payload.rejectedQuantity !== undefined || payload.expectedReceivingRevision !== undefined;
+  if (partial || row.delivery.receivingChecks?.length) {
+    if (row.kind !== 'direct') return fail('仅直送物料支持分批点收');
+    const currentRevision = row.delivery.receivingChecks?.length || 0;
+    if (payload.expectedReceivingRevision !== currentRevision) return fail('点收记录已变化，请刷新', 'CONFLICT');
+    const accepted = quantityMinor(payload.acceptedQuantity), rejected = quantityMinor(payload.rejectedQuantity);
+    if (accepted + rejected <= BigInt(0)) return fail('接收与拒收数量至少有一项大于零');
+    if (accepted + rejected > quantityMinor(row.pending)) return fail('本次点收超过待接收数量');
+    const receipt = root.fulfillment.receipts.find(receipt => receipt.id === row.id)!, purchase = root.fulfillment.purchases.find(p => p.id === receipt.purchaseId)!;
+    if (purchase.state !== 'approved') return fail('仅已批准采购可登记点收');
+    if (rejected > BigInt(0)) {
+      if (root.payables?.settlements?.some(s => s.purchaseId === purchase.id && ['pending', 'confirmed'].includes(s.state) && (s.final || s.receiptIds.includes(receipt.id)))) return fail('请先撤回或冲回对应结算');
+      if (root.payables?.bills.some(bill => bill.state === 'open' && bill.lines.some(line => line.purchaseId === purchase.id))) return fail('请先核对并冲回对应供应商票据');
+      if (rejected > quantityMinor(receipt.quantity) || rejected > quantityMinor(purchase.received)) return fail('收货数量不一致，请核对原记录');
+    }
+    const check: MaterialReceivingCheck = { id: ctx.id(), acceptedQuantity: metresText(accepted), rejectedQuantity: metresText(rejected), previousQuantity: metresText(quantityMinor(receipt.quantity)), previousRejected: metresText(quantityMinor(receipt.rejected)), at: ctx.now, actorId: receiver.id, actor: receiver.name, evidence: payload.evidence.trim() };
+    row.delivery.sentQuantity ??= row.quantity;
+    (row.delivery.receivingChecks ||= []).push(check);
+    receipt.quantity = Number(metresText(quantityMinor(receipt.quantity) - rejected));
+    receipt.rejected = Number(metresText(quantityMinor(receipt.rejected) + rejected));
+    purchase.received = Number(metresText(quantityMinor(purchase.received) - rejected));
+    root.events.unshift({ id: ctx.id(), entityType: 'order', entityId: row.delivery.orderId, actor: ctx.actorName, at: ctx.now, text: `物料点收 · 接收 ${check.acceptedQuantity} ${row.unit} · 拒收 ${check.rejectedQuantity} ${row.unit} · ${row.delivery.supplier}`, fileIds: [] });
+    return { id: row.id, orderId: row.delivery.orderId };
+  }
   row.delivery.confirmation = { at: ctx.now, actorId: receiver.id, actor: receiver.name, evidence: payload.evidence.trim() };
   root.events.unshift({ id: ctx.id(), entityType: 'order', entityId: row.delivery.orderId, actor: ctx.actorName, at: ctx.now, text: `确认物料接收 ${row.outstanding} ${row.unit} · ${row.delivery.supplier}`, fileIds: [] });
   return { id: row.id, orderId: row.delivery.orderId };
+}
+
+/** A return reversal restores physical goods at the original factory and must reserve capacity again. */
+export function assertMaterialReturnReversal(root: MistState, receiptId: string, returnId: string): void {
+  const receipt = root.fulfillment.receipts.find(receipt => receipt.id === receiptId), returned = receipt?.returns?.find(value => value.id === returnId && !value.reversed);
+  if (!receipt?.materialDelivery?.receivingChecks?.length || !returned) return;
+  const rows = materialDeliveryRows(root), row = rows.find(row => row.kind === 'direct' && row.id === receipt.id)!;
+  const senderRejected = quantityMinor(receipt.rejected) - quantityMinor(row.rejected);
+  const remainingReturns = (receipt.returns || []).filter(value => !value.reversed && value.id !== returnId).reduce((sum, value) => sum + quantityMinor(value.quantity), BigInt(0));
+  const receiverReturned = remainingReturns > senderRejected ? remainingReturns - senderRejected : BigInt(0);
+  const afterReturned = receiverReturned < quantityMinor(row.rejected) ? receiverReturned : quantityMinor(row.rejected);
+  const restored = quantityMinor(row.returned) - afterReturned;
+  if (restored <= BigInt(0) || !row.delivery.allocationId) return;
+  const allocation = root.internalFabricAllocations?.find(value => value.id === row.delivery.allocationId && value.status === 'active' && value.revision === row.delivery.allocationRevision);
+  if (!allocation) return fail('原面料分配已变化，不能冲回退换');
+  const used = rows.filter(value => value.delivery.allocationId === allocation.id).reduce((sum, value) => sum + quantityMinor(value.outstanding), BigInt(0));
+  if (used + restored > metresMinor(allocation.metres)) return fail('冲回退换将超过面料分配数量，请先核对后续补发');
 }
 /** Current accountable owners may receive after a recorded staff handover; the original delivery identity stays frozen. */
 export function materialReceiverIds(root: MistState, row: MaterialDeliveryRow): string[] {
@@ -301,10 +360,10 @@ export function materialReceiverIds(root: MistState, row: MaterialDeliveryRow): 
 export type InternalFabricCostBasis={purchaseId:string;weights:Array<{orderId:string;weight:string}>};
 function internalFabricCostWeights(root:MistState,purchaseId:string):Map<string,bigint>|null{
  const p=root.fulfillment.purchases.find(p=>p.id===purchaseId);if(!p||!root.orders.find(o=>o.id===p.orderId)?.governance?.contract.internalSupply)return null;
-  const rows = materialDeliveryRows(root).filter(row => row.purchaseId === p.id && row.delivery.allocationId && row.delivery.confirmation && row.outstanding !== '0');
+  const rows = materialDeliveryRows(root).filter(row => row.purchaseId === p.id && row.delivery.allocationId && row.accepted !== '0');
   if (!rows.length) return new Map([[p.orderId,BigInt(1)]]);
   const weights = new Map<string, bigint>();
-  for (const row of rows) weights.set(row.delivery.orderId, (weights.get(row.delivery.orderId) || BigInt(0)) + metresMinor(row.outstanding));
+  for (const row of rows) weights.set(row.delivery.orderId, (weights.get(row.delivery.orderId) || BigInt(0)) + metresMinor(row.accepted));
   const settled = root.payables?.settlements?.filter(s => s.purchaseId === p.id && s.state === 'confirmed') || [];
   const final = settled.some(s => s.final), settledQuantity = settled.reduce((sum, s) => sum + (s.quantity > 0 ? metresMinor(s.quantity) : BigInt(0)), BigInt(0));
   const allocated = [...weights.values()].reduce((sum, n) => sum + n, BigInt(0));

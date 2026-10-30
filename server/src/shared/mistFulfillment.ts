@@ -1,7 +1,7 @@
 import {packingBreakdownBlocker,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -566,7 +566,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     };
 } | {
     type: 'fulfillment.materials.confirm';
-    payload: { kind: 'issue' | 'direct'; id: string; evidence: string };
+    payload: { kind: 'issue' | 'direct'; id: string; evidence: string; acceptedQuantity?: number; rejectedQuantity?: number; expectedReceivingRevision?: number };
 } | {
     type: 'fulfillment.materials.issue';
     payload: { id: string; targetProductionId: string; quantity: number; location: string; person: string; note: string; sourceLocation?: string };
@@ -1581,6 +1581,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const row = (receipt.returns || []).find(r => r.id === p.returnId) || fail('退换记录不存在', 'NOT_FOUND');
             if (row.reversed) fail('该退换记录已冲回', 'PRECONDITION');
             const reason = text(p.reason, '冲回原因');
+            assertMaterialReturnReversal(root, receipt.id, row.id);
             row.reversed = { at: ctx.now, actor: ctx.actorName, reason };
             audit(root, ctx, 'procurement', purchase.id, `冲回退换登记 ${row.quantity} ${purchase.unit}：${reason}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
             return { id: row.id, purchaseId: purchase.id };

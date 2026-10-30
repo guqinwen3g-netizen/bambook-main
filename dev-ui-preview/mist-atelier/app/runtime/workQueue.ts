@@ -136,13 +136,13 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
   if (me && canRead('procurement') && can('orders:write') && f.stock && f.stockMovements && f.receipts && f.purchases) {
     // Receiving authority follows the same current-owner rule as the server; no manual task completion.
     for (const row of materialDeliveryRows(state)) {
-      if (row.outstanding === '0' || row.delivery.confirmation || !materialReceiverIds(state, row).includes(me)) continue;
+      if (row.pending === '0' || !materialReceiverIds(state, row).includes(me)) continue;
       const branch = state.productions.find(item => item.id === row.delivery.productionId && !item.closed);
       const contract = f.purchases.find(item => item.id === branch?.sourcePurchaseId && item.kind === 'processing' && item.state === 'approved');
       const source = f.purchases.find(item => item.id === row.purchaseId);
       if (!contract || !source) continue;
       push({ id: `material:${row.kind}:${row.id}`, source: 'material', title: `${contract.code} · ${uiText('物料接收')}`,
-        meta: [source.code, `${row.outstanding} ${uiText(row.unit)}`, row.delivery.supplier].join(' · '), when: '待接收', urgent: false, at: row.at,
+        meta: [source.code, `${row.pending} ${uiText(row.unit)}`, row.delivery.supplier].join(' · '), when: '待接收', urgent: false, at: row.at,
         target: { view: 'procurement', id: contract.id, detail: 'full', section: 'order:' + row.delivery.orderId, orderLineId: row.delivery.lineId } });
     }
   }

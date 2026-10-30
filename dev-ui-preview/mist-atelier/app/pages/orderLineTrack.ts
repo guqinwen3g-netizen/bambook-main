@@ -57,7 +57,7 @@ export function lineStages(state: MistState, order: MistOrder, line: MistOrderLi
       if(!state.internalFabricAllocations?.some(a=>a.lineId===line.id&&a.status==='active')&&!state.fulfillment.purchases.some(p=>p.lineId===line.id&&p.kind==='processing'&&p.state!=='cancelled'))return {...base,state:'todo',caption:'待建全包成品采购',target:{view:'procurement'}};
       const allocation = state.internalFabricAllocations?.find(row => row.lineId === line.id && row.status === 'active');
       if (!allocation) return { ...base, state: 'todo', caption: '待分配主料', target: { view: 'orders/detail', id: order.id } };
-      const confirmed = materialDeliveryRows(state).filter(row => row.delivery.allocationId === allocation.id && row.delivery.allocationRevision === allocation.revision && row.delivery.confirmation).reduce((total, row) => total + Number(row.outstanding), 0);
+      const confirmed = materialDeliveryRows(state).filter(row => row.delivery.allocationId === allocation.id && row.delivery.allocationRevision === allocation.revision).reduce((total, row) => total + Number(row.accepted), 0);
       if (Number(confirmed.toFixed(4)) < Number(allocation.metres)) return { ...base, state: 'now', caption: '内供待交接', target: { view: 'orders/detail', id: allocation.fabricOrderId } };
       if (!purchases.length && line.cmtIncludedItems?.includes('trims') && line.cmtIncludedItems.includes('packaging')) return { ...base, state: 'done', caption: '内供已交接' };
     }
