@@ -16,6 +16,13 @@ function fixture(stoneConfirmed=false){
  return {state,branch};
 }
 describe('fabric production gate',()=>{
+ it('uses the recipient-scoped material result when the source order is hidden',()=>{
+  const {state,branch}=fixture();state.orders[0].type='garment';
+  const gate=productionReleaseGate(state,branch,{actorName:''},'').find(item=>item.key==='material');
+  expect(gate).toMatchObject({ok:true,detail:'已确认'});
+  const blocked=productionReleaseGate(state,branch,{actorName:''},'待确认接收').find(item=>item.key==='material');
+  expect(blocked).toMatchObject({ok:false,detail:'待确认接收'});
+ });
  it('shows a missing garment material plan with a return to the exact order',()=>{
   const {state,branch}=fixture();state.orders[0].type='garment';
   const gate=productionReleaseGate(state,branch).find(item=>item.key==='material');
