@@ -391,7 +391,8 @@ export function scopedWriteViolation(before: MistState, after: MistState, scope:
         const partialLc = lc?.orderIds?.some((orderId: string) => !pre!.get('orders')!.has(orderId));
         const derivedOnly = path === 'platform.claims' && verifiedReplacementSync(left.find(row => rowKey(path, row) === id), right.find(row => rowKey(path, row) === id), after);
         const receivingOnly=path==='fulfillment.stockMovements'&&id===incoming?.issueId&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));if(!a?.materialDelivery||!b?.materialDelivery)return false;delete a.materialDelivery.receivingChecks;delete b.materialDelivery.receivingChecks;delete a.materialDelivery.confirmation;delete b.materialDelivery.confirmation;return JSON.stringify(a)===JSON.stringify(b);})();
-        const sourceStateOnly=path==='orders'&&id===incoming?.sourceOrderId&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));if(!a||!b)return false;delete a.state;delete b.state;return JSON.stringify(a)===JSON.stringify(b);})();
+        // Receiving recalculates both the source order's status and its display tone.
+        const sourceStateOnly=path==='orders'&&id===incoming?.sourceOrderId&&(()=>{const a=structuredClone(left.find(row=>rowKey(path,row)===id)),b=structuredClone(right.find(row=>rowKey(path,row)===id));if(!a||!b)return false;delete a.state;delete b.state;delete a.tone;delete b.tone;return JSON.stringify(a)===JSON.stringify(b);})();
         if ((!pre.get(path)!.has(id) && !derivedOnly && !receivingOnly && !sourceStateOnly) || path === 'receipts' && partialReceipt(before, pre, id).partial || partialShipment || partialLc) return { path, id };
       }
       else { post ??= scopedVisibility(after, scope, false); if (!post.get(path)!.has(id)) return { path, id }; }
