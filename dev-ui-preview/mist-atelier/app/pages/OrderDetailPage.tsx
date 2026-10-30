@@ -185,7 +185,15 @@ export function OrderDetailPage() {
   })();
   const purchases=(state?.fulfillment.purchases||[]).filter(purchase=>purchase.orderId===order?.id);
   const fullPackageOrder=order?.type==='garment'&&lines.length>0&&lines.every(line=>line.fulfillmentMode==='full_package');
-  const coveredFullPackageLines=fullPackageOrder?lines.filter(line=>purchases.filter(purchase=>purchase.lineId===line.id&&purchase.kind==='finished'&&purchase.state==='approved'&&purchase.unit===line.unit).reduce((sum,purchase)=>sum+purchase.quantity,0)>=line.qty).length:0;
+  const coveredFullPackageLines=fullPackageOrder?lines.filter(line=>{
+    const approvedQuantity=(kind:'finished'|'processing')=>purchases.filter(purchase=>purchase.lineId===line.id&&purchase.kind===kind&&purchase.state==='approved'&&purchase.unit===line.unit).reduce((sum,purchase)=>sum+purchase.quantity,0);
+    if(approvedQuantity('finished')>=line.qty)return true;
+    if(approvedQuantity('processing')<line.qty)return false;
+    const allocation=state?.internalFabricAllocations?.find(row=>row.orderId===order?.id&&row.lineId===line.id&&row.status==='active');
+    const source=state?.orders.find(row=>row.id===allocation?.fabricOrderId),sourceLine=state?.orderLines.find(row=>row.id===allocation?.fabricLineId&&row.orderId===source?.id);
+    // Internal fabric plus approved processing covers this route; physical receipt stays a separate stage.
+    return !!allocation&&!!sourceLine&&Number(allocation.metres)>0&&Number(allocation.metres)<=sourceLine.qty&&source?.type==='fabric'&&source.governance?.status==='approved'&&source.governance.cancellation?.status!=='pending'&&source.governance.contract.kind==='internal'&&source.governance.contract.internalSupply?.group==='garment';
+  }).length:0;
   const procurementDone=fullPackageOrder?coveredFullPackageLines===lines.length:purchases.length>0&&purchases.every(purchase=>purchase.state==='approved');
   const shipments=(state?.fulfillment.shipments||[]).filter(shipment=>shipment.lines.some(line=>line.orderId===order?.id));
   const productionQc=(productionId:string)=>{const job=productions.find(job=>job.id===productionId);return !!state&&!!job&&!!fulfillmentProductionFact(state,job.id)?.completion&&fulfillmentProductionQcPassed(state,job);};
