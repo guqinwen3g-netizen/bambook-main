@@ -17,6 +17,7 @@ import { useNav } from '../nav';
 import type {OrderGovernanceFields} from '../../../../server/src/shared/mistOrderGovernance';
 import { useMistSession } from '../runtime/auth';
 import { OrderSourceDialog } from './OrderSourceDialog';
+import { InternalDeliveryInbox } from './InternalDeliveryPanel';
 import { currentLineStage, orderLineFlags } from './orderLineTrack';
 import { useDevice } from '../runtime/devicePreferences';
 import { downloadGeneratedBlob, requestGeneratedExport } from '../runtime/exportRequests';
@@ -61,7 +62,7 @@ export function OrderListPage() {
   const rows = family.filter(order => (approvalFilter==='all'?!isTerminatedOrder(order):approvalOf(order)===approvalFilter) && (status === 'all' || order.state === status) && (!q || `${order.code} ${order.customer} ${order.season}`.toLowerCase().includes(q.toLowerCase())));
   React.useEffect(() => setPage(1), [tab, q, status, customerId,approvalFilter]);
   const pages = Math.max(1, Math.ceil(rows.length / 20)), currentPage = Math.min(page, pages);
-  const active = family.filter(order => approvalOf(order)==='approved' && !['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款'].includes(order.state));
+  const active = family.filter(order => approvalOf(order)==='approved' && !['已出运', '履约完成', '已完成', '已取消', '已作废', '待收尾款', '内部交付完成', '已交接'].includes(order.state));
   const amounts = [...new Set(active.map(order => order.currency))].map(currency => ({ currency, amount: active.filter(order => order.currency === currency).reduce((sum, order) => sum + order.amount, 0) }));
   const shipped = family.filter(order => ['已出运', '履约完成', '待收尾款'].includes(order.state));
   const partialShipped = family.filter(order => order.state === '部分出运').length;
@@ -71,21 +72,24 @@ export function OrderListPage() {
   const overdue = (state?.invoices ?? []).filter(invoice => family.some(order => order.id === invoice.orderId) && invoice.open > 0 && (mistDate(invoice.due)?.getTime() ?? Infinity) < dayStart.getTime());
   const quantityLabel=(order:MistOrder)=>{const totals=new Map<string,number>();for(const line of state?.orderLines||[])if(line.orderId===order.id)totals.set(line.unit,(totals.get(line.unit)||0)+line.qty);return [...totals].map(([unit,total])=>`${fmt(total)} ${uiText(unit)}`).join(' · ')||'未记录数量';};
   const teamsOf = useTeamOriginLookup();
+  const incoming=(state?.internalDeliveries||[]).filter(row=>row.receiverId===session.user?.id);
   const cols: Column<MistOrder>[] = [
     { key: 'id', header: '订单', width: 'minmax(220px,2fr)', sortValue: order => order.code, render: order => <ObjectCell thumb={<OrderProductThumb orderId={order.id} category={order.type}/>} name={<Mono>{order.code}</Mono>} meta={<>{`${order.customer} · ${order.season}`}{teamsOf('order', order.id).length ? <span className="mist-team-origin">{uiText(` · ${teamsOf('order', order.id).join('、')}`)}</span> : null}</>} /> },
     { key: 'qty', header: '数量', width: '90px', align: 'right', hideOnMobile: true, sortValue: order => order.qty, render: order => <><span className="mist-num">{quantityLabel(order)}</span><span className="mist-cell-sub">{order.lines}{uiText(" 个条目")}</span></> },
     { key: 'amt', header: '金额', width: '130px', align: 'right', sortValue: order => order.amount, render: order => <><b className="mist-cell-strong mist-num">{fmt(order.amount, 2)}</b><span className="mist-cell-sub">{order.currency}</span></> },
-    { key: 'prog', header: '条目阶段', width: 'minmax(190px,1.6fr)', hideOnMobile: true, render: order => { if (!state) return null;if(orderLocked(order))return <span className="mist-muted">—</span>; const flags = orderLineFlags(state, order), shown = flags.tracks.slice(0, 2); const notes = [flags.business && `待业务动作 ${flags.business}`, flags.nok && `QC NOK ${flags.nok}`, flags.toShip && `待出运 ${flags.toShip}`].filter(Boolean) as string[];
-      return <div className="mist-col" style={{ gap: 4 }} data-order-stages={order.id}><div className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>{shown.map(({ line, stages }) => { const stage = currentLineStage(stages); return <Pill key={line.id} tone={!stage ? 'ok' : stage.state === 'blocked' ? 'bad' : stage.state === 'now' ? 'accent' : 'neutral'}>{line.style} · {uiText(stage ? stage.label : '已出运')}</Pill>; })}{flags.tracks.length > 2 && <span className="mist-muted">+{uiText(flags.tracks.length - 2)}</span>}</div>{notes.length > 0 && <span className={flags.nok ? 'mist-cell-sub mist-tone-bad' : 'mist-cell-sub'}>{notes.join(' · ')}</span>}</div>; } },
+    { key: 'prog', header: '条目阶段', width: 'minmax(190px,1.6fr)', hideOnMobile: true, render: order => { if (!state) return null;if(orderLocked(order))return <span className="mist-muted">—</span>; const flags = orderLineFlags(state, order), shown = flags.tracks.slice(0, 2); const notes = [flags.business && `待业务动作 ${flags.business}`, flags.nok && `QC NOK ${flags.nok}`, flags.toShip && `待出运 ${flags.toShip}`, flags.toDeliver && `待内部交付 ${flags.toDeliver}`].filter(Boolean) as string[];
+      return <div className="mist-col" style={{ gap: 4 }} data-order-stages={order.id}><div className="mist-row" style={{ gap: 4, flexWrap: 'wrap' }}>{shown.map(({ line, stages }) => { const stage = currentLineStage(stages); return <Pill key={line.id} tone={!stage ? 'ok' : stage.state === 'blocked' ? 'bad' : stage.state === 'now' ? 'accent' : 'neutral'}>{line.style} · {uiText(stage ? stage.label : order.governance?.contract.kind==='internal'?'内部交付完成':'已出运')}</Pill>; })}{flags.tracks.length > 2 && <span className="mist-muted">+{uiText(flags.tracks.length - 2)}</span>}</div>{notes.length > 0 && <span className={flags.nok ? 'mist-cell-sub mist-tone-bad' : 'mist-cell-sub'}>{notes.join(' · ')}</span>}</div>; } },
     { key: 'due', header: '交期', width: '70px', hideOnMobile: true, sortValue: order => order.due, render: order => <b className="mist-cell-strong" title={uiText(order.due)}>{order.due.slice(-5).replace('-', '/')}</b> },
     { key: 'owner', header: '负责人', width: '56px', hideOnMobile: true, render: order => <Avatar name={order.owner} identityKey={order.ownerId} size="sm" /> },
     { key: 'state', header: '状态', width: '120px', render: order => <><Pill tone={approvalOf(order)==='approved'||isTerminatedOrder(order)?order.tone:'warn'}>{uiText(approvalOf(order)==='approved'?order.state:approvalLabel(order))}</Pill>{approvalOf(order)==='approved'&&<span className="mist-cell-sub">{uiText("主单已批准")}</span>}</> },
     { key: 'go', header: '', width: '16px', hideOnMobile: true, render: () => <span className="mist-go"><Icon icon={ChevronRight} size="sm" /></span> },
   ];
+  if(route.section==='internal-deliveries')return <InternalDeliveryInbox/>;
   return <MistPage>
     <PageHeader description={uiText(customerId ? state?.customers.find(customer => customer.id === customerId)?.name : undefined)} eyebrow={uiText("订单履约 · 订单")} title={uiText("订单管理")}
       actions={<><Button icon={Download} disabled={!state} onClick={() => { downloadMistCsv('订单台账.csv', ['订单', '客户', '季节', '数量', '币种', '金额', '交期', '负责人', '主单审批', '状态'], rows.map(order => [order.code, order.customer, order.season, quantityLabel(order), order.currency, order.amount, order.due, order.owner, approvalLabel(order), order.state])); }}>{uiText("导出")}</Button>{canWrite&&<Button variant="primary" icon={Plus} onClick={() => setCreateOpen(true)}>{uiText("新建订单")}</Button>}</>} />
     <OrderSourceDialog open={createOpen} onClose={() => setCreateOpen(false)} type={tab} customerId={customerId} canWrite={canWrite} />
+    {incoming.length>0&&<Button onClick={()=>go('orders',undefined,{section:'internal-deliveries'})}>{uiText('内部接收')} · {incoming.filter(row=>!row.cancelled&&row.checks.filter(check=>!check.reversed).reduce((sum,check)=>sum+check.accepted+check.rejected,0)<row.quantity).length}</Button>}
     {error && <Banner tone="bad" title={uiText("订单读取失败")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
     <StatGrid>
       <StatCard icon={ClipboardList} label={uiText("在途订单")} value={active.length} unit={uiText("单")} foot={[...unitTotals].map(([unit, quantity]) => `${fmt(quantity)} ${uiText(unit)}`).join(' · ') || '暂无在途条目'} />

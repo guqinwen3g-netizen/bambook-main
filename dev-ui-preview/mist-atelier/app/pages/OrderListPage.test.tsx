@@ -1,4 +1,6 @@
 import {createMistState as newModuleFixture} from '../../../../server/src/shared/mistWorkspace';
+import {internalDeliveryFixture} from '../../../../server/src/mist/__tests__/internalDelivery';
+import {applyDataScope} from '../../../../server/src/shared/mistDataScope';
 import { createOrderGovernance } from '../../../../server/src/shared/mistOrderGovernance';
 // @vitest-environment jsdom
 import React, { act } from 'react';
@@ -69,6 +71,23 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); localStorage.removeItem('bambook.device.locale'); vi.restoreAllMocks(); vi.useRealTimers(); });
+
+it('finishes internal order stages without a shipment reminder or counting completed goods as in transit',()=>{
+  const f=internalDeliveryFixture(),id=f.send();
+  f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted internally'}},'warehouse');
+  store.state=f.state;render(<OrderListPage/>);
+  expect(host.textContent).toContain('内部交付完成');expect(host.textContent).not.toContain('待出运');
+  expect(host.querySelector('.mist-stat-v')?.textContent).toBe('0单');
+});
+
+it('opens the assigned internal receiving task from the registered orders route with its source hidden',()=>{
+  const f=internalDeliveryFixture();f.context.members!.push({id:'test-user',name:'负责人',active:true,groups:[]});
+  const id=f.send(10,'test-user');store.state=applyDataScope(f.state,{userIds:['test-user'],teamIds:[]},'test-user');
+  expect(store.state.orders).toEqual([]);
+  render(<OrderListPage/>,{view:'orders',id,section:'internal-deliveries'});
+  expect(getByRole(document.body,'dialog',{name:'内部交付'}).textContent).toContain('Jacket');
+  expect(getByRole(document.body,'button',{name:'登记点收'})).toBeTruthy();
+});
 
 it('renders English labels and filters by the original business status without rewriting records', async () => {
   store.state!.orders[0].state = '履约完成';

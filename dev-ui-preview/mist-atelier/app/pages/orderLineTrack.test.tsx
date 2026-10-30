@@ -8,6 +8,7 @@ import { createMistState, type MistOrder, type MistOrderLine, type MistState } f
 import { OrderLineFulfillment } from './OrderLineFulfillment';
 import {garmentMaterialFingerprint} from '../../../../server/src/shared/mistInternalFabric';
 import { materialDeliveryFixture } from '../../../../server/src/mist/__tests__/materialDelivery';
+import { internalDeliveryFixture } from '../../../../server/src/mist/__tests__/internalDelivery';
 import { currentLineStage, lineStages, lineTrackLabel, orderLineFlags } from './orderLineTrack';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -30,6 +31,20 @@ const purchase = (type: 'garment' | 'fabric', state = 'approved', received = 100
 const keys = (type: 'garment' | 'fabric') => lineStages(s, order(type), line(type)).map(stage => [stage.key, stage.state]);
 beforeEach(() => { s = createMistState(context, 'empty'); host = document.createElement('div'); document.body.append(host); root = createRoot(host); });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
+
+it('uses actual internal acceptance as the final stage and never flags it as external shipment work',()=>{
+ const f=internalDeliveryFixture(),id=f.send(),o=f.state.orders.find(row=>row.id===f.target.orderId)!,l=f.state.orderLines.find(row=>row.id===f.target.lineId)!;
+ expect(lineTrackLabel(o)).toContain('内部交付');
+ expect(lineStages(f.state,o,l).at(-1)).toMatchObject({label:'内部交付',state:'now',caption:'已接收 0 / 10 件'});
+ expect(orderLineFlags(f.state,o)).toMatchObject({toShip:0,toDeliver:1});
+ f.run({type:'order.internal.receive',payload:{id,accepted:6,rejected:4,expectedRevision:0,evidence:'Partial count'}},'warehouse');
+ expect(lineStages(f.state,o,l).at(-1)).toMatchObject({state:'blocked',caption:'待处理拒收'});
+ f.run({type:'order.internal.returnRejected',payload:{id,quantity:4,date:'2026-10-30',expectedRevision:1,evidence:'Returned rejected goods'}});
+ expect(lineStages(f.state,o,l).at(-1)).toMatchObject({state:'now',caption:'已接收 6 / 10 件'});
+ const second=f.send(4);f.run({type:'order.internal.receive',payload:{id:second,accepted:4,rejected:0,expectedRevision:0,evidence:'Counted remainder'}},'warehouse');
+ expect(lineStages(f.state,o,l).at(-1)).toMatchObject({state:'done',caption:'已接收 10 / 10 件'});
+ expect(orderLineFlags(f.state,o)).toMatchObject({toShip:0,toDeliver:0});
+});
 
 it('BB-ORD-1 fabric line uses the 5-step track without cutting; garment keeps 6 steps', () => {
   const fabric = lineStages(s, order('fabric'), line('fabric')), garment = lineStages(s, order('garment'), line('garment'));

@@ -1,4 +1,4 @@
-import {applyInternalDeliveryCommand,assertInternalDeliveryIntegrity,internalDeliveryState,type InternalDelivery,type InternalDeliveryCommand} from './mistInternalDelivery';
+import {applyInternalDeliveryCommand,assertInternalDeliveryIntegrity,internalDeliveryState,syncInternalDeliveryTasks,isInternalDeliveryTask,type InternalDelivery,type InternalDeliveryCommand} from './mistInternalDelivery';
 import {syncClaimReplacementShipments,type ClaimReplacementSource} from './mistClaimReplacement';
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {applyInternalFabricCommand,internalFabricCommandPermission,normalizeGarmentFulfillment,normalizeInternalSupply,internalFabricDeliveryState,type GarmentFulfillmentFields,type MistInternalFabricAllocation,type InternalFabricCommand} from './mistInternalFabric';
@@ -770,7 +770,7 @@ export function createMistState(context: MistContext, seed: 'demo'|'empty' = 'de
 
 export function getRequiredBusinessNumberPlan(state: MistState, command: MistCommand) { return platformBusinessNumberPlan(state, command); }
 export function mistCommandPermission(command: MistCommand): string | null {
-  if(command.type.startsWith('order.internal.')){if(!['order.internal.send','order.internal.receive','order.internal.reverseCheck','order.internal.returnRejected','order.internal.cancel'].includes(command.type))throw new MistCommandError('VALIDATION','未知内部交付操作');return ['order.internal.receive','order.internal.reverseCheck'].includes(command.type)?'orders:read':'orders:write';}
+  if(command.type.startsWith('order.internal.')){if(!['order.internal.send','order.internal.receive','order.internal.reverseCheck','order.internal.returnRejected','order.internal.cancel'].includes(command.type))throw new MistCommandError('VALIDATION','未知内部交付操作');return 'orders:write';}
   if(command.type.startsWith('order.fabric.'))return internalFabricCommandPermission(command as InternalFabricCommand);
   if(command.type.startsWith('order.governance.'))return orderGovernancePermission(command as OrderGovernanceCommand);
   if(command.type.startsWith('funding.'))return orderFundingCommandPermission(command as OrderFundingCommand);
@@ -834,6 +834,7 @@ export function applyMistCommand(original: MistState, command: MistCommand, cont
   const result=applyMistCommandUnbound(original, command, context);
   syncClaimReplacementShipments(result.state,context);
   assertInternalDeliveryIntegrity(result.state);
+  syncInternalDeliveryTasks(result.state,context);
   return result;
 }
 function applyMistCommandUnbound(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
@@ -1469,7 +1470,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       state.notifications.forEach(n => { if (!visible || visible.has(n.id)) n.readAt = context.now; });
       result={};break;
     }
-    case 'task.complete': {const task=find(state.tasks,p.id,'事项');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
+    case 'task.complete': {const task=find(state.tasks,p.id,'事项');if(isInternalDeliveryTask(task))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
     case 'calendar.save': {
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
