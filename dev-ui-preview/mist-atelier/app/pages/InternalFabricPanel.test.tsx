@@ -35,7 +35,14 @@ beforeEach(() => {
   store.run.mockImplementation(async command => { const result = applyMistCommand(store.state!, command, context); store.state = result.state; render(); return { requestId: 'request', revision: 1, result: result.result }; });
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
-afterEach(() => { act(() => root.unmount()); host.remove(); });
+afterEach(() => { act(() => root.unmount()); host.remove(); delete (store.workspace as any).scopedFabricAccess; });
+
+it('offers a recipient-only source hint without exposing the underlying order',async()=>{
+ const source=store.state!.orders.find(o=>o.id===fabricOrderId)!;const sourceLine=store.state!.orderLines.find(l=>l.id===fabricLineId)!;
+ (store.workspace as any).scopedFabricAccess={[lineId]:{candidates:[{fabricOrderId,fabricLineId,orderCode:source.code,lineName:`${sourceLine.style} · ${sourceLine.name}`,quantity:'100',allocated:'0',remaining:'100'}],blocker:'',deliveries:[]}};
+ store.state!.orders=store.state!.orders.filter(o=>o.id!==fabricOrderId);store.state!.orderLines=store.state!.orderLines.filter(l=>l.id!==fabricLineId);
+ render();await click('分配面料');expect(getByRole(host,'combobox',{name:'内部面料'}).textContent).toContain(source.code);
+});
 
 it('allocates exact metres, updates the same versioned record and cancels without losing history', async () => {
   render(); await click('分配面料'); await chooseSource(); await input('33.3333'); await click('保存分配');

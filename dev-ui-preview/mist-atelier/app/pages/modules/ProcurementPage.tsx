@@ -53,7 +53,7 @@ function purchaseFlags(purchase: FulfillmentPurchase, day: string) {
 const round = (value: number) => Math.round(value * 10000) / 10000;
 
 export function ProcurementPage() {
-  const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), { go, route } = useNav();
+  const { state, workspace, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), { go, route } = useNav();
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [entryChoice, setEntryChoice] = React.useState<Entry | null>(null);
   const [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const full = useListDetailRoute();
@@ -183,7 +183,7 @@ export function ProcurementPage() {
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的单据")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={entry === 'processing' ? Workflow : ShoppingCart} title={uiText(sourceLine ? `本条目还没有${ENTRY_LABEL[entry]}` : `还没有${domain === 'fabric' ? '面料' : '成衣'}${ENTRY_LABEL[entry]}`)} action={can ? <Button icon={Plus} disabled={locked || !!blockedSource} title={uiText(blockedSource || undefined)} onClick={() => editor.open(purchaseSpec())}>{ui`新建${ENTRY_LABEL[entry]}`}</Button> : undefined} />;
   const detail = selected && state
-    ? <PurchaseDetail purchase={selected} state={state} day={day} me={me} can={can} canApprove={canApprove} inventory={session.hasPermission('inventory:read')} locked={locked}
+    ? <PurchaseDetail purchase={selected} state={state} incoming={Object.values(workspace?.scopedFabricAccess||{}).flatMap(a=>a.deliveries)} day={day} me={me} can={can} canApprove={canApprove} inventory={session.hasPermission('inventory:read')} finance={session.hasPermission('invoices:read')&&session.hasPermission('vouchers:read')} locked={locked}
         onEdit={() => editor.open(purchaseSpec(selected))}
         onSubmit={() => void act(() => run({ type: 'fulfillment.procurement.submit', payload: { id: selected.id } }))}
         onDecide={decision => setDialog(decideSpec(selected, decision))}
@@ -245,8 +245,8 @@ export function ProcurementPage() {
   </MistPage>;
 }
 
-function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, inventory, locked, onEdit, onSubmit, onDecide, onSend, onConfirm, onReceive, onRejectReceived, onReturn, onReturnReverse, onDownload, onAttach, onInventory, onSupplier, onCancel, onTransfer, onOpenPurchase, onPayables }: {
-  purchase: FulfillmentPurchase; state: MistState; day: string; me: string; can: boolean; canApprove: boolean; inventory: boolean; locked: boolean;
+function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove, inventory, finance, locked, onEdit, onSubmit, onDecide, onSend, onConfirm, onReceive, onRejectReceived, onReturn, onReturnReverse, onDownload, onAttach, onInventory, onSupplier, onCancel, onTransfer, onOpenPurchase, onPayables }: {
+  purchase: FulfillmentPurchase; state: MistState; incoming:import('../../../../../server/src/shared/mistInternalFabric').MaterialDeliveryRow[]; day: string; me: string; can: boolean; canApprove: boolean; inventory: boolean; finance: boolean; locked: boolean;
   onEdit: () => void; onSubmit: () => void; onDecide: (decision: 'approved' | 'rejected') => void; onSend: () => void; onConfirm: () => void; onReceive: () => void; onDownload: () => void;
   onRejectReceived: (receipt: FulfillmentReceipt) => void; onReturn: (receipt: FulfillmentReceipt) => void; onReturnReverse: (receipt: FulfillmentReceipt, row: FulfillmentReceiptReturn) => void;
   onAttach: (ids: string[]) => Promise<unknown>; onInventory: () => void; onSupplier: () => void; onCancel: () => void; onTransfer: () => void; onOpenPurchase: (id: string) => void; onPayables: () => void;
@@ -277,7 +277,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, inventor
     : processing && !state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.release) ? { tone: 'accent', title: '待放行', text: '' }
     : processing && state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.hold) ? { tone: 'warn', title: '已暂停', text: '' }
     : { tone: 'accent', title: processing ? '加工中' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
-  const deliveries = materialDeliveryRows(state).filter(row => processing ? state.productions.find(branch => branch.id === row.delivery.productionId)?.sourcePurchaseId === p.id : row.purchaseId === p.id);
+  const deliveries = [...new Map([...materialDeliveryRows(state),...incoming].filter(row => processing ? state.productions.find(branch => branch.id === row.delivery.productionId)?.sourcePurchaseId === p.id : row.purchaseId === p.id).map(row=>[row.id,row])).values()];
   const activeDeliveries = deliveries.filter(row => row.outstanding !== '0');
   const receivedDeliveries = activeDeliveries.filter(row => row.pending === '0' && row.rejected === row.returned && row.accepted !== '0');
   const pendingDeliveries = activeDeliveries.filter(row => row.pending !== '0');
@@ -335,7 +335,7 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, inventor
         { key: 'action', header: '操作', render: receipt => { const reason = receiptRejectionBlocker(state, receipt); return receipt.quantity > 0 && receipt.destination === 'warehouse' && can ? <Button size="sm" variant="quiet" disabled={locked || !!reason} title={reason || undefined} onClick={() => onRejectReceived(receipt)}>{uiText('转为拒收')}</Button> : null; } },
       ]} /> : <span className="mist-note">{uiText("还没有")}{uiText(processing ? '回交' : '交付')}{uiText("记录")}</span>}
     </DetailBlock>
-    {disposed.length>0&&<DetailBlock title={uiText('隔离料处置')}><Timeline events={disposed.map(row=>({who:row.quarantineDisposition!.actor,when:shortWhen(row.quarantineDisposition!.at),text:`${row.quarantineDisposition!.decision==='scrap'?'报废':'退供应商'} ${row.quarantinedQuantity} ${p.unit} · ${row.quarantineDisposition!.evidence} · 采购结算待核对`}))}/></DetailBlock>}
+    {disposed.length>0&&<DetailBlock title={uiText('隔离料处置')}><Timeline events={disposed.map(row=>({who:row.quarantineDisposition!.actor,when:shortWhen(row.quarantineDisposition!.at),text:`${row.quarantineDisposition!.decision==='scrap'?'报废':'退供应商'} ${row.quarantinedQuantity} ${p.unit} · ${row.quarantineDisposition!.evidence}${finance?(row.quarantineDisposition!.financeReviews?.some(r=>!r.reversed)?' · 财务已核对':' · 采购结算待核对'):''}`}))}/></DetailBlock>}
     {receipts.some(r => r.postReceiptRejections?.length) && <DetailBlock title={uiText('收货后拒收记录')}><Timeline events={receipts.flatMap(r => (r.postReceiptRejections || []).map(row => ({ who: row.actor, when: shortWhen(row.at), text: `${row.quantity} ${p.unit} · ${row.location} · ${row.evidence}` })))} /></DetailBlock>}
     {rejectedQty > 0 && <DetailBlock title={uiText("拒收退换")}>{receipts.filter(r => r.rejected > 0).map(r => { const left = round(r.rejected - receiptReturnedQuantity(r)); return <div className="mist-col" key={r.id} data-receipt-returns={r.id} style={{ gap: 4 }}>
       <div className="mist-row mist-module-actions"><span>{r.date}{uiText(" 收货拒收 ")}{r.rejected} {uiText(p.unit)}</span><span className="mist-spacer" />{left > 0 ? <Pill tone="warn">{left} {uiText(p.unit)}{uiText(" 待登记退换")}</Pill> : <Pill tone="ok">{uiText("已登记退换")}</Pill>}{left > 0 && can && !locked && p.state === 'approved' && <Button size="sm" onClick={() => onReturn(r)}>{uiText("登记退货 / 换货")}</Button>}</div>

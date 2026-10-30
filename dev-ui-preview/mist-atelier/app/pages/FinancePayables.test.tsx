@@ -30,6 +30,15 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
+it('requires an explicit no-compensation basis before closing a disposal review',async()=>{
+ store.value.workspace.financialDisposals=[{returnId:'ret',purchaseId:'p',purchaseCode:'PO-1',supplier:'供应商',quantity:2,unit:'米',currency:'CNY',referenceAmount:32,decision:'scrap',disposalEvidence:'实际报废',report:'QC-1',noRecovery:{actor:'主管',evidence:'确认不追偿'}}];
+ store.value.run=vi.fn(async()=>({result:{id:'r'}}));render();await click('核对');
+ const dialog=getByRole(document.body,'dialog',{name:'核对退料财务处理'});expect(dialog.textContent).toContain('原采购成本和结算不变');
+ expect((getByRole(dialog,'button',{name:'确认'}) as HTMLButtonElement).disabled).toBe(true);
+ const area=getByLabelText(dialog,'无补偿核对依据') as HTMLTextAreaElement;act(()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,'核对处理依据');area.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('确认',dialog);expect(store.value.run).toHaveBeenCalledWith({type:'payable.disposal.review',payload:{returnId:'ret',evidence:'核对处理依据'}});
+});
+
 it('opens the purchaser work item at its fixed contract without selecting receipts or final settlement on their behalf',async()=>{
   prepaidWithReceipt();store.value.userId='sales';store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;const before=structuredClone(store.value.state);render();
   const form=getByRole(document.body,'dialog',{name:'提交结算'}),contract=getByLabelText(form,'结算合同') as HTMLSelectElement;

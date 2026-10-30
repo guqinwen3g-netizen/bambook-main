@@ -19,3 +19,11 @@ it('exposes only an authorized source stock and exact allocated processing targe
  const forged=structuredClone(f.state);forged.orders.find(o=>o.id===f.target.orderId)!.customer='secret modified';
  expect(scopedWriteViolation(f.state,forged,scope)).toMatchObject({path:'orders',id:f.target.orderId});
 });
+
+it('allows only the derived source status and receiving fields for a recipient handoff',()=>{
+ const f=materialDeliveryFixture(20),scope={userIds:['garment'],teamIds:[]},id=f.issue(4),before=structuredClone(f.state);
+ f.run({type:'fulfillment.materials.confirm',payload:{id,kind:'issue',acceptedQuantity:4,rejectedQuantity:0,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+ const allowed={issueId:id,sourceOrderId:f.source.orderId};expect(scopedWriteViolation(before,f.state,scope,allowed)).toBeNull();
+ const bad=structuredClone(f.state);bad.orders.find(o=>o.id===f.source.orderId)!.customer='tampered';expect(scopedWriteViolation(before,bad,scope,allowed)).toMatchObject({path:'orders',id:f.source.orderId});
+ const badMovement=structuredClone(f.state);badMovement.fulfillment.stockMovements.find(m=>m.id===id)!.quantity=99;expect(scopedWriteViolation(before,badMovement,scope,allowed)).toMatchObject({path:'fulfillment.stockMovements',id});
+});
