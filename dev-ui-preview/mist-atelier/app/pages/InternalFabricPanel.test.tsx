@@ -10,6 +10,7 @@ const auth = vi.hoisted(() => ({ sessionKey: 'session', user: { id: 'garment-own
 vi.mock('../runtime/workspace', () => ({ useMistWorkspace: () => store }));
 vi.mock('../runtime/auth', () => ({ useOptionalMistSession: () => auth }));
 import { InternalFabricPanel } from './InternalFabricPanel';
+import { materialDeliveryFixture } from '../../../../server/src/mist/__tests__/materialDelivery';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLElement, root: Root, orderId: string, lineId: string, fabricOrderId: string, fabricLineId: string, sequence = 0;
@@ -87,4 +88,16 @@ it('keeps source quantities visible without offering an inaccessible garment lin
  auth.user={id:'fabric-owner',displayName:'面料负责人'};render(true);
  expect(host.textContent).toContain('80 米');expect(host.textContent).toContain('20.0001 米');
  expect(queryByRole(host,'button',{name:'查看成衣条目'})).toBeNull();
+});
+
+it('records the resolved shortage without changing the original allocation',async()=>{
+ const f=materialDeliveryFixture(20),id=f.issue(20);
+ f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+ f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'Hold A',person:'factory',note:'Return'}});
+ store.state=f.state;orderId=f.target.orderId;lineId=f.target.lineId;fabricOrderId=f.source.orderId;fabricLineId=f.source.lineId;auth.user={id:'garment',displayName:'Garment'};
+ store.run.mockImplementation(async command=>{f.run(command,'garment');store.state=f.state;render();return {requestId:'request',revision:1,result:{}};});
+ render();await click('确认短料不补发');const dialog=getByRole(document.body,'dialog',{name:'确认短料不补发'});
+ const area=getByRole(dialog,'textbox',{name:'不补发依据'}) as HTMLTextAreaElement;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,'Confirmed no replacement');area.dispatchEvent(new Event('input',{bubbles:true}));});
+ await click('确认结案');expect(store.run).toHaveBeenCalledWith({type:'order.fabric.shortClose',payload:{id:f.state.internalFabricAllocations![0].id,expectedRevision:1,reason:'Confirmed no replacement'}});
+ expect(host.textContent).toContain('短结不补发');expect(host.textContent).toContain('4 米 · 实收 16 米');
 });
