@@ -15,7 +15,7 @@ import path from 'node:path';
 import { marked } from 'marked';
 import { WIKI, SITE, PART_ORDER, STATUS_LABEL, VERDICT_LABEL, snapshot } from './wiki-lib.mjs';
 import { renderManualFigure } from './manual-media.mjs';
-import { renderLesson, lessonStyles, lessonRuntime } from './manual-lesson.mjs';
+import { renderLesson, lessonStyles, lessonRuntime, loadCapture } from './manual-lesson.mjs';
 import { manualNavigationRuntime } from './manual-navigation.mjs';
 
 marked.setOptions({ gfm: true, breaks: false });
@@ -39,7 +39,10 @@ function polish(html) {
 
 const snap = snapshot();
 const { version, head, branch, chapters, modules, missingModules } = snap;
-const lesson = JSON.parse(fs.readFileSync(path.join(WIKI, 'lessons/settlement.json'), 'utf8'));
+const lessons = fs.readdirSync(path.join(WIKI, 'lessons')).filter(f => f.endsWith('.json'))
+  .map(f => JSON.parse(fs.readFileSync(path.join(WIKI, 'lessons', f), 'utf8'))).sort((a, b) => a.order - b.order);
+const captures = new Map(lessons.map(l => [l.id, loadCapture(WIKI, l)]));
+for (const l of lessons) if (l.nextLesson && !lessons.some(x => x.id === l.nextLesson.id)) throw new Error(`${l.title}：下一课不存在 ${l.nextLesson.id}`);
 for (const chapter of chapters) {
   for (const match of chapter.body.matchAll(/!\[[^\]]*\]\((assets\/[\w/.-]+\.(?:gif|png|jpg|webp))\)/gi)) {
     const file = match[1];
@@ -61,8 +64,8 @@ const referenceNav = byPart
     .map(c => `<a class="nav-item" href="#${esc(c.slug)}" data-target="${esc(c.slug)}">${esc(c.title)}${c.verdict === 'stale' ? '<i class="dot"></i>' : ''}</a>`)
     .join('')}</div>`)
   .join('');
-const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a><a class="nav-item" href="#${esc(lesson.id)}" data-target="${esc(lesson.id)}">${esc(lesson.title)}</a></div><div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
-const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p><a class="learning-card" href="#${esc(lesson.id)}"><span class="learning-card-tag">${esc(lesson.role)} · 分步教学</span><h2>${esc(lesson.title)} <span aria-hidden="true">→</span></h2><p>${lesson.steps.map(s=>esc(s.title)).join(' → ')}</p><span>${lesson.steps.length} 个步骤 · 可看演示，也可自己练</span></a><div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
+const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a>${lessons.map(l => `<a class="nav-item" href="#${esc(l.id)}" data-target="${esc(l.id)}">${esc(l.title)}</a>`).join('')}</div><div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
+const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p>${lessons.map(lesson => `<a class="learning-card" href="#${esc(lesson.id)}"><span class="learning-card-tag">${esc(lesson.role)} · 分步教学</span><h2>${esc(lesson.title)} <span aria-hidden="true">→</span></h2><p>${lesson.steps.map(s=>esc(s.title)).join(' → ')}</p><span>${lesson.steps.length} 个步骤 · 可看演示，也可自己练</span></a>`).join('')}<div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
 
 const sections = chapters
   .map(c => `<section id="${esc(c.slug)}" class="chapter">
@@ -184,7 +187,7 @@ ${lessonStyles}
   </nav>
   <main id="content">
     ${start}
-    ${renderLesson(lesson)}
+    ${lessons.map(l => renderLesson(l, captures.get(l.id))).join('\n')}
     ${sections}
   </main>
 </div>
@@ -196,6 +199,7 @@ ${lessonRuntime}
 </html>`;
 
 fs.mkdirSync(SITE, { recursive: true });
+for (const l of lessons) fs.cpSync(path.join(WIKI, 'assets/lessons', l.capture), path.join(SITE, 'assets/lessons', l.capture), { recursive: true });
 fs.writeFileSync(path.join(SITE, 'index.html'), html);
 // Explicitly withdraw the generator-owned old screenshot collections from employee delivery.
 for(const old of ['production','finance'])fs.rmSync(path.join(SITE,'assets',old),{recursive:true,force:true});

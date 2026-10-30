@@ -77,7 +77,7 @@ it('从待登记来源登记供应商票据：形成应付，合同还没收到�
   expect(row.textContent).toContain('111,600.00 CNY');
   await click('登记票据', row);
   const dialog = getByRole(document.body, 'dialog', { name: '登记供应商票据' });
-  expect((getByLabelText(dialog, po.code + ' 本票金额') as HTMLInputElement).value).toBe('111600');
+  expect((getByLabelText(dialog, po.code + ' 本票金额') as HTMLInputElement).value).toBe('110670'); expect(dialog.textContent).toContain('已验收可开票 110,670.00 CNY'); expect((getByLabelText(dialog, '税额') as HTMLInputElement).value).toBe('12731.95');
   expect(dialog.querySelector('[data-bill-source]')?.classList.contains('mist-module-actions')).toBe(true);
   input(po.code + ' 本票金额', '33480'); input('供应商发票号', 'VAT-HS-01'); input('税额', '3851.68'); input('到期日', day);
   expect((getByLabelText(dialog, '到期日依据') as HTMLInputElement).value).toContain(po.terms);

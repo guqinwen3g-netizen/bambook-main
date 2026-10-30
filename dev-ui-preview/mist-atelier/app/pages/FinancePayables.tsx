@@ -142,7 +142,11 @@ export function FinancePayables() {
   /** 勾选合同时的默认关联：有可开票结算就关联第一笔，金额取结算未开票额。 */
   const lineDefault = (purchaseId: string, uninvoiced: number, settlementId = '') => {
     const options = state ? invoiceableSettlements(state, purchaseId) : [], pick = options.find(o => o.settlement.id === settlementId) || options[0];
-    return pick ? { amount: String(Math.min(uninvoiced, pick.left)), link: pick.settlement.id } : { amount: String(uninvoiced), link: '' };
+    if (pick) return { amount: String(Math.min(uninvoiced, pick.left)), link: pick.settlement.id };
+    // 材料合同不关联结算时只能按已验收货值开票；还没有可开票验收额时默认“待关联结算”。
+    const accepted = sources.find(s => s.purchase.id === purchaseId)?.acceptedUninvoiced;
+    if (accepted !== undefined && accepted < uninvoiced) return accepted > 0 ? { amount: String(accepted), link: '' } : { amount: String(uninvoiced), link: HELD };
+    return { amount: String(uninvoiced), link: '' };
   };
   const startBill = (supplierId = '', purchaseId = '', settlementId = '') => {
     const src = sources.find(s => s.purchase.id === purchaseId), d = src ? lineDefault(src.purchase.id, src.uninvoiced, settlementId) : null;
@@ -164,13 +168,20 @@ export function FinancePayables() {
   const picked = billDraft ? Object.keys(billDraft.lines).filter(id => billSources.some(s => s.purchase.id === id)) : [];
   const billCurrency = picked.length ? sources.find(s => s.purchase.id === picked[0])!.purchase.currency : '';
   const billTotal = billDraft ? picked.reduce((n, id) => n + (cents(billDraft.lines[id]) || 0), 0) : 0;
+  // 税额默认按价税合计与税率倒算（价税合计 ÷ (1+税率) × 税率），可改为票面金额；空着不再按 0 登记。
+  const taxRateValue = billDraft && /^\d+(\.\d+)?%$/.test(billDraft.taxRate) ? Number(billDraft.taxRate.slice(0, -1)) / 100 : billDraft?.taxRate === '免税' ? 0 : null;
+  const suggestedTax = taxRateValue === null ? null : Math.round(billTotal * taxRateValue / (1 + taxRateValue));
+  const shownTax = billDraft ? (billDraft.taxAmount !== '' ? billDraft.taxAmount : suggestedTax !== null && billTotal > 0 ? (suggestedTax / 100).toFixed(2) : '') : '';
+  const taxGap = billDraft && billDraft.taxAmount !== '' && suggestedTax !== null && Math.abs(cents(billDraft.taxAmount) - suggestedTax) > 100;
   const submitBill = () => {
     if (!billDraft) return;
     if (!billDraft.supplierId || !billDraft.invoiceNo.trim() || !billDraft.invoiceDate || !billDraft.due || !billDraft.dueBasis.trim()) return setFailure('请填写供应商、发票号、发票日期、到期日和到期日依据。');
     if (!picked.length) return setFailure('请至少勾选一张来源合同，并写明本票对应金额。');
     if (picked.some(id => !(cents(billDraft.lines[id]) > 0))) return setFailure('每张勾选合同的对应金额都要大于零。');
+    const overAccepted = picked.find(id => { const src = sources.find(s => s.purchase.id === id); return !billDraft.links[id] && src?.acceptedUninvoiced !== undefined && cents(billDraft.lines[id]) > Math.round(src.acceptedUninvoiced * 100); });
+    if (overAccepted) { const src = sources.find(s => s.purchase.id === overAccepted)!; return setFailure(`${src.purchase.code} 本票金额超过已验收未开票货值 ${apMoney(src.acceptedUninvoiced!, src.purchase.currency)}；请核对票面，或选择“待关联结算”。`); }
     if (picked.some(id => needsLink(id) && !billDraft.links[id])) return setFailure('已有已确认结算或已付预付的合同，票据须关联已确认结算；结算还没确认时，可选“待关联结算”先登记。');
-    const tax = billDraft.taxAmount.trim() ? cents(billDraft.taxAmount) : 0; if (Number.isNaN(tax)) return setFailure('税额格式无效。');
+    const tax = shownTax.trim() ? cents(shownTax) : 0; if (Number.isNaN(tax)) return setFailure('税额格式无效。');
     void execute({ type: 'payable.bill.register', payload: { invoiceType:billDraft.invoiceType,supplierId: billDraft.supplierId, invoiceNo: billDraft.invoiceNo, invoiceDate: billDraft.invoiceDate, currency: billCurrency, amount: billTotal / 100, taxAmount: tax / 100, taxRate: billDraft.taxRate, lines: picked.map(id => ({ purchaseId: id, amount: cents(billDraft.lines[id]) / 100, ...(billDraft.links[id] === HELD ? { awaitingSettlement: true } : billDraft.links[id] ? { settlementId: billDraft.links[id] } : {}) })), due: billDraft.due, dueBasis: billDraft.dueBasis, note: billDraft.note, fileIds: billDraft.fileIds || [] } }, r => { const held = picked.some(id => billDraft.links[id] === HELD); setBillDraft(null); setView('bills'); open(String(r.id)); toast(held ? '票据已登记为待关联结算，结算确认后再关联' : '供应商票据已登记，应付已形成'); });
   };
 
@@ -389,16 +400,16 @@ export function FinancePayables() {
         </FormGrid>
         <Field label={uiText("这张票对应哪些合同")} required hint={uiText(billCurrency ? '同一张票只能对应同币种合同（' + billCurrency + '）' : '勾选合同并写明本票对应金额，不能只挂供应商总额')}>
           <div className="mist-col">{billSources.map(s => { const on = s.purchase.id in billDraft.lines, other = !!billCurrency && s.purchase.currency !== billCurrency; return <div className="mist-row mist-module-actions" key={s.purchase.id} data-bill-source={s.purchase.id}>
-            <Checkbox checked={on} disabled={other && !on} onChange={v => { const lines = { ...billDraft.lines }, links = { ...billDraft.links }; if (v) { const d = lineDefault(s.purchase.id, s.uninvoiced); lines[s.purchase.id] = d.amount; if (d.link) links[s.purchase.id] = d.link; } else { delete lines[s.purchase.id]; delete links[s.purchase.id]; } setBillDraft({ ...billDraft, lines, links, dueBasis: billDraft.dueBasis || '合同付款条件：' + (s.purchase.terms || '未填写') }); }} label={<span><Mono>{s.purchase.code}</Mono> · {s.purchase.description}{uiText(" · 还没收到票 ")}{apMoney(s.uninvoiced, s.purchase.currency)}</span>} />
+            <Checkbox checked={on} disabled={other && !on} onChange={v => { const lines = { ...billDraft.lines }, links = { ...billDraft.links }; if (v) { const d = lineDefault(s.purchase.id, s.uninvoiced); lines[s.purchase.id] = d.amount; if (d.link) links[s.purchase.id] = d.link; } else { delete lines[s.purchase.id]; delete links[s.purchase.id]; } setBillDraft({ ...billDraft, lines, links, dueBasis: billDraft.dueBasis || '合同付款条件：' + (s.purchase.terms || '未填写') }); }} label={<span><Mono>{s.purchase.code}</Mono> · {s.purchase.description}{uiText(" · 还没收到票 ")}{apMoney(s.uninvoiced, s.purchase.currency)}{s.acceptedUninvoiced !== undefined && s.acceptedUninvoiced < s.uninvoiced && <span className="mist-note">{uiText(" · 已验收可开票 ")}{apMoney(s.acceptedUninvoiced, s.purchase.currency)}</span>}</span>} />
             <span className="mist-spacer" />{on && <TextInput aria-label={uiText(s.purchase.code + ' 本票金额')} type="number" min="0.01" step="0.01" style={{ width: 140 }} value={billDraft.lines[s.purchase.id]} onChange={e => setBillDraft({ ...billDraft, lines: { ...billDraft.lines, [s.purchase.id]: e.target.value } })} />}
-            {on && state && (() => { const options = invoiceableSettlements(state, s.purchase.id), must = needsLink(s.purchase.id), finalDone = settlementsOf(state, s.purchase.id).some(x => x.state === 'confirmed' && x.final); const choices = [...(must ? (billDraft.links[s.purchase.id] ? [] : [{ value: '', label: '请选择结算' }]) : [{ value: '', label: '不关联结算' }]), ...options.map(o => ({ value: o.settlement.id, label: `${o.settlement.code} · 未开票 ${apMoney(o.left, o.settlement.currency)}${o.settlement.confirmation?.prepaymentApplied ? ' · 含预付抵扣' : ''}` })), ...(finalDone ? [] : [{ value: HELD, label: '待关联结算' }])]; return options.length || must ? <Select aria-label={uiText(s.purchase.code + ' 关联结算')} value={billDraft.links[s.purchase.id] || ''} options={choices} onChange={e => { const o = options.find(x => x.settlement.id === e.target.value); setBillDraft({ ...billDraft, links: { ...billDraft.links, [s.purchase.id]: e.target.value }, lines: o ? { ...billDraft.lines, [s.purchase.id]: String(Math.min(s.uninvoiced, o.left)) } : billDraft.lines }); }} /> : null; })()}
+            {on && state && (() => { const options = invoiceableSettlements(state, s.purchase.id), must = needsLink(s.purchase.id), finalDone = settlementsOf(state, s.purchase.id).some(x => x.state === 'confirmed' && x.final); const choices = [...(must ? (billDraft.links[s.purchase.id] ? [] : [{ value: '', label: '请选择结算' }]) : [{ value: '', label: '不关联结算' }]), ...options.map(o => ({ value: o.settlement.id, label: `${o.settlement.code} · 未开票 ${apMoney(o.left, o.settlement.currency)}${o.settlement.confirmation?.prepaymentApplied ? ' · 含预付抵扣' : ''}` })), ...(finalDone ? [] : [{ value: HELD, label: '待关联结算' }])]; return options.length || must || s.accepted !== undefined ? <Select aria-label={uiText(s.purchase.code + ' 关联结算')} value={billDraft.links[s.purchase.id] || ''} options={choices} onChange={e => { const o = options.find(x => x.settlement.id === e.target.value); setBillDraft({ ...billDraft, links: { ...billDraft.links, [s.purchase.id]: e.target.value }, lines: o ? { ...billDraft.lines, [s.purchase.id]: String(Math.min(s.uninvoiced, o.left)) } : billDraft.lines }); }} /> : null; })()}
           </div>; })}
           {billDraft.supplierId && !billSources.length && <span className="mist-note">{uiText("这家供应商没有还能登记票据的已批准合同。")}</span>}
           {!billDraft.supplierId && <span className="mist-note">{uiText("先选择供应商。")}</span>}</div>
         </Field>
         <FormGrid cols={3}>
           <Field label={uiText("价税合计")}><TextInput aria-label={uiText("价税合计")} readOnly value={picked.length ? apMoney(billTotal / 100, billCurrency) : '—'} /></Field>
-          <Field label={uiText("税额")}><TextInput aria-label={uiText("税额")} type="number" min="0" step="0.01" value={billDraft.taxAmount} onChange={e => setBillDraft({ ...billDraft, taxAmount: e.target.value })} /></Field>
+          <Field label={uiText("税额")}><TextInput aria-label={uiText("税额")} type="number" min="0" step="0.01" value={shownTax} onChange={e => setBillDraft({ ...billDraft, taxAmount: e.target.value })} />{taxGap && <span className="mist-note mist-tone-warn">{ui`按 ${billDraft.taxRate} 应约为 ${apMoney(suggestedTax! / 100, billCurrency)}，请核对票面`}</span>}</Field>
           <Field label={uiText("税率")}><OptionInput ariaLabel="税率" options={VAT_RATES} value={billDraft.taxRate} onChange={taxRate => setBillDraft({ ...billDraft, taxRate })} /></Field>
           <Field label={uiText("发票日期")} required><TextInput aria-label={uiText("发票日期")} type="date" max={day} value={billDraft.invoiceDate} onChange={e => setBillDraft({ ...billDraft, invoiceDate: e.target.value })} /></Field>
           <Field label={uiText("到期日")} required><TextInput aria-label={uiText("到期日")} type="date" value={billDraft.due} onChange={e => setBillDraft({ ...billDraft, due: e.target.value })} /></Field>

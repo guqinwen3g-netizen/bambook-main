@@ -157,3 +157,16 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 3. 本机邮件默认同步近 90 天、收件箱 + 已发送，用户可调整。
 4. 工作助手上线后下线服务端个人订阅接口 `/api/mist/ai/subscriptions*`，个人凭据不再存服务器。
 5. 只接 OpenAI 兼容（Chat Completions / Responses）与 ChatGPT 登录，不接 Anthropic / Gemini 原生格式。
+
+## 14. Mist 标准 MCP 接口（2026-10-30 用户定案后实现）
+
+用户定案修订第 13 节白名单：Agent 可读全部可见数据并执行普通写入，确认 / 删除 / 资金 / 对外发送类仍须本人确认；使用者包括桌面工作助手、外部 MCP 客户端和管理员开设的无人值守 Agent 账号。
+
+- **入口**：`POST /api/mist/mcp`（JSON-RPC 2.0；`initialize` / `ping` / `tools/list` / `tools/call`，通知回 202，GET 不提供）。实现 `server/src/mist/agentMcp.ts`，路由 `route.ts`。
+- **身份**：`POST /api/mist/agent/delegations` 由本人会话签发委托（2 小时）。`{mode:'read'}`（默认）上限为只读 scope；`{mode:'operate'}` 上限 = 账号现有 scope（`AGENT_OPERATE_CEILING`），永远不超出账号。委托只能调用读取路由和 `/mcp`。
+- **工具**：`bambook_workspaces`、`bambook_query`、`bambook_get`、`bambook_related`（复用 `agentRead.ts`）；`bambook_commands`（命令目录 + payload 结构 + `via`）；`bambook_preview`（`repository.preview`：同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，应用后整笔回滚，返回业务事件说明；生成文件的命令不支持）；`bambook_execute`（`repository.execute`，请求编号幂等：重试沿用原版本号重放，不同命令复用编号被拒）。
+- **分级**：`agentCommandSensitivity()`。`confirm`（资金 / 账务前缀、人员与权限、对外邮件，以及 confirm/approve/decide/void/reverse/cancel/delete/close/issue/send/notify/present/refund/waive/withdraw/transition 等动词）只能预演，执行被拒；`payable.settlement.submit` 例外为普通；`files.add` 与 `email.server.*` 不能经接口。
+- **命令目录**：`scripts/gen-mist-command-catalog.mjs` 从 `server/src/shared/*.ts` 的 `{ type: '…'; payload: … }` 声明生成 `server/src/mist/agentCommandCatalog.ts`（302 条），`agentMcp.test.ts` 用 `--check` 守住与源码一致。目录外的类型不能执行。
+- **审计**：仓储识别委托身份，在业务事件经办人后标注“（经 Agent）”；账号 id 与权限判断不变。
+- **验证**：`server/src/mist/agentMcp.test.ts`（协议、买手预演→执行→幂等重放、财务确认被拒、超验收开票预演被拒、只读委托与无权岗位）；本地服务真实 HTTP 走查 PO-2026-00002 结算提交与财务确认拒绝。
+- **未完成**：① 高敏感命令的“Agent 提议 → 本人在「接着完成」确认”队列（现为直接拒绝并提示用户到页面办理）；② 无人值守 Agent 账号与长期 API Key（需正式账号模型，本地模式无此能力）；③ 正式环境部署与外部客户端（如 Claude Code）连接实测。

@@ -209,6 +209,16 @@ const activeAllocations = (root: Root) => read(root).allocations.filter(a => !al
 
 /** 合同金额按 数量 × 单价 原币计算（分），只作为“最多能开多少票”的上限，不是应付余额。 */
 export function purchaseContractMinor(p: { quantity: number; price: number }) { return Math.round(p.quantity * p.price * 100); }
+/**
+ * 材料合同的已验收货值（分）= 实收合格数量（不含拒收、不含待接收人点收）× 合同单价，用于票据三单匹配：
+ * 不关联结算的票据累计不能超过它；超出部分先登记“待关联结算”，由业务员按实收提交结算、财务确认后再付。
+ * 加工合同的完成依据走回交 / 出运，另行核对，这里返回 null。
+ */
+export function purchaseAcceptedMinor(root: Root, purchase: { id: string; kind?: string; price: number }) {
+  if (purchase.kind !== 'material') return null;
+  const quantity = settlementReceipts(root, purchase.id).filter(row => !row.pendingReceiver).reduce((n, row) => n + Math.max(0, row.receipt.quantity), 0);
+  return Math.round(quantity * purchase.price * 100);
+}
 export function purchaseInvoicedMinor(root: Root, purchaseId: string, exceptBillId = '') {
   return read(root).bills.filter(b => b.state === 'open' && b.id !== exceptBillId).flatMap(b => b.lines).filter(l => l.purchaseId === purchaseId).reduce((n, l) => n + mistMoneyMinor(l.amount), 0);
 }
@@ -416,8 +426,9 @@ export function supplierPayableSummary(root: Root, today: string) {
 /** 已批准合同里还没登记票据的部分 = 财务待登记来源（不是应付）。 */
 export function payableSources(root: Root) {
   return (root.fulfillment?.purchases || []).filter(p => p.state === 'approved').map(p => {
-    const contract = purchaseContractMinor(p), invoiced = purchaseInvoicedMinor(root, p.id);
-    return { purchase: p, contract: major(contract), invoiced: major(invoiced), uninvoiced: major(Math.max(0, contract - invoiced)) };
+    const contract = purchaseContractMinor(p), invoiced = purchaseInvoicedMinor(root, p.id), accepted = purchaseAcceptedMinor(root, p);
+    return { purchase: p, contract: major(contract), invoiced: major(invoiced), uninvoiced: major(Math.max(0, contract - invoiced)),
+      ...(accepted === null ? {} : { accepted: major(accepted), acceptedUninvoiced: major(Math.max(0, Math.min(contract, accepted) - invoiced)) }) };
   });
 }
 /** 采购 / 加工页回读：这张合同登记了哪些票据、各自付了多少。 */
@@ -602,6 +613,10 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
           link = { awaitingSettlement: true };
         } else if (row.awaitingSettlement !== undefined && row.awaitingSettlement !== false) fail('暂挂标记无效');
         else if (purchaseRequiresSettlementLink(root, po.id)) fail(`${po.code} 已有已确认结算或已付预付款，票据须关联已确认结算；结算还没确认时可先登记为“待关联结算”`, 'PRECONDITION');
+        else {
+          const accepted = purchaseAcceptedMinor(root, po);
+          if (accepted !== null && m + purchaseInvoicedMinor(root, po.id) > accepted) fail(`${po.code} 已验收货值 ${fx(major(accepted))} ${po.currency}，累计票额会超出；请核对票面，或登记为“待关联结算”，按实收结算确认后再付款`, 'PRECONDITION');
+        }
         sum += m; supplier = po.supplier;
         return { purchaseId: po.id, purchaseCode: po.code, kind: po.kind, amount: major(m), ...link };
       });

@@ -1,332 +1,270 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const money = n => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/** 读取 scripts/manual-capture.mjs 采集的真实界面帧；步骤数必须与课程一致。 */
+export function loadCapture(wikiDir, lesson) {
+  const file = path.join(wikiDir, 'assets/lessons', lesson.capture, 'capture.json');
+  if (!fs.existsSync(file)) throw new Error(`${lesson.title}：缺少界面采集 ${path.relative(wikiDir, file)}（先运行 node scripts/manual-capture.mjs ${lesson.capture}）`);
+  const capture = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (capture.frames.length !== lesson.steps.length) throw new Error(`${lesson.title}：采集 ${capture.frames.length} 帧，课程写了 ${lesson.steps.length} 步`);
+  return capture;
+}
 
 /**
- * 结算教学：左侧步骤说明，右侧按 Mist 实际页面简化重绘的演练窗口。
- * 每步的 after 是该步完成后的界面状态；跳到任意一步时把前面各步的 after 依次合并，
- * 所以“下一步 / 跳步 / 重播”都不依赖读者是否亲手做过前一步。
- * 实际界面依据：HomePage「接着完成」、FinancePayables（应付待办 → 结算）、FinanceSettlements（提交结算弹窗）。
+ * 引导式演示：每步一张真实界面截图，镜头推近到要操作的控件，压暗其余区域，
+ * 光标移入并点击 / 输入，旁边气泡说明。读者可连续播放、暂停、重播本步，或自己点亮起的位置练习。
  */
-export function renderLesson(lesson) {
-  const e = lesson.example, total = e.quantity * e.unitPrice;
-  const n = lesson.steps.length;
+export function renderLesson(lesson, capture) {
+  const n = lesson.steps.length, base = `assets/lessons/${lesson.capture}/`;
+  const { width: W, height: H } = capture.viewport;
+  const frames = capture.frames.map((f, i) => ({ src: base + f.image, x: f.target.x / W, y: f.target.y / H, w: f.target.width / W, h: f.target.height / H, kind: lesson.steps[i].kind || 'click', value: f.value || '', tip: lesson.steps[i].tip || lesson.steps[i].do }));
   const stepPanel = (s, i) => `<div class="lesson-panel" data-step-panel="${i}"${i ? ' hidden' : ''}>
    <p class="lesson-panel-count">第 ${i + 1} 步 / 共 ${n} 步</p>
    <h2 tabindex="-1">${esc(s.title)}</h2>
    <dl class="lesson-facts">
     <dt>操作</dt><dd>${esc(s.do)}</dd>
     ${s.fill ? `<dt>填写</dt><dd><span class="lesson-fill">${esc(s.fill)}</span></dd>` : ''}
-    ${s.kind === 'choice' ? `<dt>选择</dt><dd><div class="lesson-choice" role="group" aria-label="${esc(s.do)}">${s.options.map((o, k) => `<button type="button" data-choice="${k}"${o.correct ? ' data-correct' : ''}>${esc(o.label)}</button>`).join('')}</div><p class="lesson-reply" data-choice-reply aria-live="polite" hidden></p></dd>` : ''}
     <dt>完成后</dt><dd>${esc(s.see)}</dd>
+    ${s.quiz ? `<dt>想一想</dt><dd><p class="lesson-quiz-q">${esc(s.quiz.question)}</p><div class="lesson-choice" role="group" aria-label="${esc(s.quiz.question)}">${s.quiz.options.map((o, k) => `<button type="button" data-choice="${k}"${o.correct ? ' data-correct' : ''} data-reply="${esc(o.reply)}">${esc(o.label)}</button>`).join('')}</div><p class="lesson-reply" data-choice-reply aria-live="polite" hidden></p></dd>` : ''}
    </dl>
-   ${s.failure ? `<details class="lesson-trouble" data-trouble>
-    <summary>${esc(s.failure.title)}</summary><p>${esc(s.failure.text)}</p>
-    ${s.failure.preview ? `<button type="button" class="lesson-link" data-preview>在演练窗口里看看</button>` : ''}
-   </details>` : ''}
+   ${s.failure ? `<details class="lesson-trouble"><summary>${esc(s.failure.title)}</summary><p>${esc(s.failure.text)}</p></details>` : ''}
   </div>`;
-  const choiceReplies = lesson.steps.map(s => s.kind === 'choice' ? s.options.map(o => o.reply) : null);
-  return `<section id="${esc(lesson.id)}" class="chapter lesson" data-lesson data-steps="${esc(JSON.stringify(lesson.steps.map(s => ({ target: s.target, kind: s.kind, do: s.do, input: s.input || '', after: s.after, preview: s.failure?.preview || null, text: s.kind === 'type' ? s.fill : '' }))))}" data-replies="${esc(JSON.stringify(choiceReplies))}" data-unit-price="${e.unitPrice}" data-quantity="${e.quantity}" data-unit="${esc(e.unit)}">
+  return `<section id="${esc(lesson.id)}" class="chapter lesson" data-lesson data-frames="${esc(JSON.stringify(frames))}" data-result="${esc(base + capture.result)}" data-aspect="${H / W}">
  <p class="lesson-kicker">${esc(lesson.role)} · 分步教学</p>
  <h1>${esc(lesson.title)}</h1>
  <div class="lesson-meta">
   <span><small>谁来做</small>${esc(lesson.role)}</span><span><small>接手</small>${esc(lesson.handoff)}</span>
   <span><small>开始前</small>${esc(lesson.prerequisite)}</span><span><small>入口</small>${esc(lesson.entry)}</span>
  </div>
- <ol class="lesson-rail" aria-label="学习步骤">${lesson.steps.map((s, i) => `<li><button type="button" data-step="${i}"${i ? '' : ' aria-current="step"'}><span class="rail-n">${i + 1}</span><span class="rail-t">${esc(s.title)}</span></button></li>`).join('')}</ol>
+ <ol class="lesson-rail" style="--rail-n:${n}" aria-label="学习步骤">${lesson.steps.map((s, i) => `<li><button type="button" data-step="${i}"${i ? '' : ' aria-current="step"'}><span class="rail-n">${i + 1}</span><span class="rail-t">${esc(s.title)}</span></button></li>`).join('')}</ol>
  <div class="lesson-work">
-  <div class="lesson-side">
-   ${lesson.steps.map(stepPanel).join('')}
-   <div class="lesson-player" role="group" aria-label="演示控制">
-    <button type="button" class="lesson-play" data-play aria-pressed="false">▶ 看演示</button>
-    <button type="button" class="lesson-ghost" data-replay>↻ 重播</button>
-    <span class="lesson-player-state" data-player-state aria-live="polite">也可以直接在右侧蓝框处操作</span>
-   </div>
-  </div>
-  <div class="lesson-stage">
-   <div class="mock" data-mock>
-    <div class="mock-label">教学演练 · 演示数据</div>
-    <p class="mock-step" data-mock-step></p>
-    <div class="mock-app">
-     <aside class="mock-side" aria-hidden="true"><b>Bambook</b><span data-nav="home">首页</span><span>订单</span><span>采购与加工</span><span data-nav="finance">财务管理</span></aside>
-     <div class="mock-main">
-      <section data-screen="home">
-       <p class="mock-eyebrow">今天</p><h3>首页</h3>
-       <div class="mock-card"><div class="mock-card-h">接着完成</div>
-        <button type="button" class="mock-row" data-t="queue"><span><b>${esc(e.contract)} · 待结算</b><small>${esc(e.supplier)} · ${e.quantity} ${esc(e.unit)}</small></span><em>待结算</em></button>
-        <div class="mock-row is-static"><span><b>SO-018 · 待确认</b><small>示例客户 · 报价</small></span><em>今天</em></div>
-        <div class="mock-row is-static"><span><b>QC-007 · 待检验</b><small>${esc(e.product)}</small></span><em>明天</em></div>
-       </div>
-      </section>
-      <section data-screen="finance" hidden>
-       <p class="mock-eyebrow">财务与成本 · 财务</p><h3>财务管理</h3>
-       <div class="mock-tabs"><span>应收待办</span><span class="on">应付待办</span><span>收付款记录</span></div>
-       <div class="mock-seg"><span>应付票据 · 0</span><span>付款申请 · 0</span><span class="on">结算 · <i data-settle-count>0</i></span></div>
-       <div class="mock-card">
-        <div class="mock-thead"><span>结算 / 合同</span><span>结算金额</span><span>状态</span></div>
-        <p class="mock-empty" data-settle-empty>还没有结算</p>
-        <button type="button" class="mock-row mock-settle" data-t="result" hidden><span><b>${esc(e.settlement)}</b><small>${esc(e.contract)} · ${esc(e.supplier)} · 实收 ${e.quantity} ${esc(e.unit)}</small></span><span class="mock-num">${money(total)}</span><em class="mock-pill">待财务复核</em></button>
-       </div>
-       <div class="mock-detail" data-settle-detail hidden><b>${esc(e.settlement)} · 待财务复核</b><span>来源合同 ${esc(e.contract)} · ${esc(e.supplier)}</span><span>实收 ${e.quantity} ${esc(e.unit)} × ${money(e.unitPrice)} = ${money(total)} CNY</span><span>下一位：财务复核确认</span></div>
-      </section>
-     </div>
-     <div class="mock-dialog-layer" data-dialog hidden>
-      <div class="mock-dialog" role="group" aria-label="提交结算（演练）">
-       <div class="mock-dialog-h">提交结算</div>
-       <div class="mock-banner bad" data-error hidden><b>还不能提交</b><span data-error-text></span></div>
-       <div class="mock-banner" data-blocked hidden><b data-blocked-text></b></div>
-       <div class="mock-field"><label>来源合同 <i>*</i></label><div class="mock-select is-disabled">${esc(e.contract)} · ${esc(e.supplier)}</div></div>
-       <div class="mock-facts"><span><small>合同数量</small>${e.contractQuantity} ${esc(e.unit)}</span><span><small>合同单价</small>${money(e.unitPrice)} CNY</span><span><small>合同金额</small>${money(e.contractQuantity * e.unitPrice)} CNY</span></div>
-       <div class="mock-field"><label>实际收货记录 <i>*</i></label>
-        <button type="button" role="checkbox" aria-checked="false" class="mock-check" data-t="receipt"><span class="box"></span><span>${esc(e.receiptDate)} · ${esc(e.location)} · 实收 ${e.quantity} ${esc(e.unit)}<em data-receipt-suffix></em></span></button></div>
-       <div class="mock-facts"><span><small>本次实收</small><b data-qty>0 ${esc(e.unit)}</b></span><span><small>结算金额</small><b data-total>0.00 CNY</b></span></div>
-       <button type="button" role="checkbox" aria-checked="false" class="mock-check" data-t="final"><span class="box"></span><span>最终结算</span></button>
-       <div class="mock-field"><label>争议 / 未确认扣款</label><span class="mock-btn sm">添加争议 / 扣款</span></div>
-       <div class="mock-field"><label for="${esc(lesson.id)}-note">结算说明</label><textarea id="${esc(lesson.id)}-note" rows="2" data-t="note" data-note disabled></textarea></div>
-       <div class="mock-dialog-f"><span class="mock-btn">取消</span><button type="button" class="mock-btn primary" data-t="submit">提交复核</button></div>
-      </div>
-     </div>
+  <div class="lesson-side">${lesson.steps.map(stepPanel).join('')}</div>
+  <div class="lesson-stage" data-stage>
+   <p class="lesson-player-state" data-player-state aria-live="polite">也可以直接点亮起的位置练习</p>
+   <div class="shot" data-shot>
+    <div class="shot-camera" data-camera>
+     <img class="shot-img" data-img alt="" decoding="async">
+     <img class="shot-img shot-next" data-img-next alt="" decoding="async" hidden>
+     <div class="shot-spot" data-spot></div>
+     <div class="shot-value" data-value hidden></div>
+     <button type="button" class="shot-hotspot" data-hotspot></button>
+     <div class="shot-cursor" data-cursor hidden></div>
     </div>
-    <div class="mock-cursor" data-cursor aria-hidden="true" hidden></div>
-    <p class="mock-hint" data-hint aria-live="polite" hidden></p>
+    <p class="shot-tip" data-tip hidden></p>
+    <p class="shot-hint" data-hint aria-live="polite" hidden></p>
+    <span class="shot-label">本地演示数据</span>
    </div>
   </div>
  </div>
- <div class="lesson-footer"><button type="button" data-lesson-prev disabled>上一步</button><span data-step-status>第 1 步 / 共 ${n} 步</span><button type="button" data-lesson-next>下一步</button></div>
+ <div class="lesson-footer"><button type="button" data-lesson-prev disabled>上一步</button><div class="lesson-player" role="group" aria-label="演示控制"><button type="button" class="lesson-play" data-play aria-pressed="false" aria-label="播放演示">▶ 播放演示</button><button type="button" class="lesson-ghost" data-replay aria-label="重播本步">↻<span class="lesson-btn-text"> 重播本步</span></button><span data-step-status>第 1 步 / 共 ${n} 步</span></div><button type="button" data-lesson-next>下一步</button></div>
  <div class="lesson-done" data-lesson-done hidden>
-  <h2 tabindex="-1">完成：这笔结算已交给财务</h2><p>${esc(lesson.result)}</p>
-  <ol class="lesson-chain">${lesson.chain.map((c, i) => `<li${i ? '' : ' class="me"'}>${esc(c)}</li>`).join('')}</ol>
+  <h2 tabindex="-1">${esc(lesson.doneTitle)}</h2><p>${esc(lesson.result)}</p>
+  <ol class="lesson-chain">${lesson.chain.map((c, i) => `<li${i === (lesson.chainAt || 0) ? ' class="me"' : ''}>${esc(c)}</li>`).join('')}</ol>
+  ${lesson.nextLesson ? `<a class="lesson-next-link" href="#${esc(lesson.nextLesson.id)}">下一课：${esc(lesson.nextLesson.title)} →</a>` : ''}
   <button type="button" data-lesson-restart>重新学习</button>
  </div>
- <div class="lesson-sop"><h2>SOP 速查</h2><dl>${lesson.sop.map(r => `<dt>${esc(r.title)}</dt><dd>${esc(r.text)}</dd>`).join('')}<dt>其他入口</dt><dd>${esc(lesson.altEntry)}，再选择来源合同。</dd></dl></div>
- <p class="lesson-review-note">演练窗口按 Bambook 实际页面简化重绘；示例公司和数字为演示数据，不连接任何业务库，练习不会提交业务记录。</p>
+ <div class="lesson-sop"><h2>SOP 速查</h2><dl>${lesson.sop.map(r => `<dt>${esc(r.title)}</dt><dd>${esc(r.text)}</dd>`).join('')}</dl></div>
+ <p class="lesson-review-note">画面为 Bambook 实际界面，使用本地演示公司数据录制，不涉及真实客户或资金。</p>
 </section>`;
 }
 
 export const lessonStyles = `
-.lesson{--l-accent:#34768D;--l-accent-ink:#275768;--l-tint:rgba(52,118,141,.09);--l-tint-2:rgba(52,118,141,.16);--l-fill:rgba(16,42,58,.045);--l-ring:#1d7fb0}
+.lesson{--l-accent:#34768D;--l-accent-ink:#275768;--l-tint:rgba(52,118,141,.09);--l-tint-2:rgba(52,118,141,.16);--l-fill:rgba(16,42,58,.045);--l-ring:#2f9bd0}
 .lesson h1{font-size:32px;line-height:1.3;margin:8px 0 14px}.lesson-kicker{font-size:13px;letter-spacing:.06em;color:var(--l-accent);margin:0}
 .lesson-meta{display:flex;flex-wrap:wrap;gap:10px 28px;font-size:14px;color:var(--ink-2);margin:0 0 22px}.lesson-meta small{display:block;font-size:12px;color:var(--ink-3);line-height:1.6}
-.lesson-rail{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;list-style:none;padding:0;margin:0 0 16px}.lesson-rail li{margin:0;padding:0}
+.lesson-rail{display:grid;grid-template-columns:repeat(var(--rail-n,5),minmax(0,1fr));gap:6px;list-style:none;padding:0;margin:0 0 16px}.lesson-rail li{margin:0;padding:0}
 .lesson-rail button{display:flex;align-items:center;gap:8px;width:100%;height:100%;font:inherit;font-size:13px;line-height:1.4;border:0;border-radius:10px;background:var(--l-fill);color:var(--ink-2);padding:10px;text-align:left;cursor:pointer}
 .rail-n{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#fff;flex-shrink:0;font-size:12px}
 .lesson-rail button[aria-current]{background:var(--l-tint-2);color:var(--l-accent-ink);font-weight:500}.lesson-rail button[aria-current] .rail-n{background:var(--l-accent);color:#fff}
-.lesson-rail button.done .rail-n{background:#dcebe3;color:#2f6a4f}.lesson-rail button.done .rail-n::before{content:"✓"}.lesson-rail button.done .rail-n{font-size:0}.lesson-rail button.done .rail-n::before{font-size:12px}
-.lesson-work{display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);gap:0;border-radius:16px;overflow:hidden;background:var(--l-fill)}
-.lesson-side{background:#fff;padding:22px 22px 18px;display:flex;flex-direction:column;gap:16px;border:1px solid var(--line);border-right:0;border-radius:16px 0 0 16px}
+.lesson-rail button.done .rail-n{background:#dcebe3;color:#2f6a4f;font-size:0}.lesson-rail button.done .rail-n::before{content:"✓";font-size:12px}
+.lesson-work{display:grid;grid-template-columns:minmax(230px,280px) minmax(0,1fr);border-radius:16px;overflow:hidden;background:var(--l-fill)}
+.lesson-side{background:#fff;padding:22px;border:1px solid var(--line);border-right:0;border-radius:16px 0 0 16px}
 .lesson-panel-count{font-size:12px;color:var(--ink-3);margin:0}.lesson-panel h2{font-size:20px;margin:2px 0 12px;padding:0}.lesson-panel h2:focus{outline:none}
 .lesson-facts{margin:0;display:grid;gap:4px}.lesson-facts dt{font-size:12px;color:var(--ink-3);margin-top:8px}.lesson-facts dd{margin:0;font-size:14.5px;line-height:1.7;color:var(--ink)}
 .lesson-fill{display:inline-block;background:#fff6d8;border-radius:6px;padding:1px 8px;font-size:14px}
-.lesson-choice{display:flex;gap:8px;margin-top:4px}.lesson-choice button{font:inherit;font-size:14px;border:0;border-radius:9px;padding:8px 16px;background:var(--l-fill);cursor:pointer}.lesson-choice button.right{background:#dcebe3;color:#2f6a4f}.lesson-choice button.wrong{background:#f6e3df;color:#94463a}
+.lesson-quiz-q{margin:0 0 6px}.lesson-choice{display:flex;flex-wrap:wrap;gap:8px}.lesson-choice button{font:inherit;font-size:14px;border:0;border-radius:9px;padding:7px 14px;background:var(--l-fill);cursor:pointer}.lesson-choice button.right{background:#dcebe3;color:#2f6a4f}.lesson-choice button.wrong{background:#f6e3df;color:#94463a}
 .lesson-reply{font-size:13.5px;margin:8px 0 0;color:var(--ink-2)}
-.lesson-trouble{border-radius:10px;background:#faf6ee;padding:10px 14px}.lesson-trouble summary{cursor:pointer;font-size:13.5px;color:#7a5a2c}.lesson-trouble p{font-size:13.5px;margin:8px 0;color:var(--ink-2)}
-.lesson-link{font:inherit;font-size:13px;border:0;background:none;color:var(--l-accent-ink);padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
-.lesson-player{margin-top:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding-top:14px;border-top:1px solid var(--line)}
-.lesson-play,.lesson-ghost{font:inherit;font-size:13.5px;border:0;border-radius:9px;padding:8px 14px;cursor:pointer}.lesson-play{background:var(--l-tint-2);color:var(--l-accent-ink)}.lesson-ghost{background:var(--l-fill);color:var(--ink-2)}
-.lesson-player-state{flex-basis:100%;font-size:12px;color:var(--ink-3);line-height:1.5}
-.lesson-stage{padding:18px;display:flex;align-items:flex-start;justify-content:center;min-width:0}
-.mock{position:relative;width:100%;max-width:640px;font-size:13px;line-height:1.5;color:#0E1A21;user-select:none}
-.mock-label{position:absolute;right:10px;top:-2px;transform:translateY(-100%);font-size:11px;color:var(--ink-3);padding:0 2px 4px}
-.mock-app{position:relative;display:grid;grid-template-columns:118px minmax(0,1fr);min-height:420px;background:#F4F6F5;border-radius:14px;overflow:hidden;box-shadow:0 10px 32px rgba(16,42,58,.08);margin-top:14px}
-.mock-side{display:flex;flex-direction:column;gap:2px;padding:16px 10px;background:rgba(16,42,58,.03);font-size:12.5px;color:rgba(14,26,33,.6)}.mock-side b{font-weight:500;color:#0E1A21;margin:0 6px 12px}.mock-side span{padding:6px 8px;border-radius:7px}.mock-side span.on{background:#fff;color:#275768}
-.mock-main{padding:18px 18px 22px;min-width:0}.mock-eyebrow{font-size:11.5px;color:rgba(14,26,33,.42);margin:0}.mock-main h3{font-size:20px;font-weight:400;margin:0 0 14px;padding:0}
-.mock-card{background:#fff;border-radius:12px;padding:6px 0}.mock-card-h{font-size:13.5px;font-weight:500;padding:8px 14px 6px}
-.mock-row{display:flex;align-items:center;gap:10px;width:100%;font:inherit;text-align:left;background:none;border:0;border-top:1px solid rgba(16,42,58,.075);padding:10px 14px;color:inherit;cursor:pointer}.mock-row:first-of-type{border-top:0}.mock-row>span:first-child{flex:1;min-width:0}.mock-row b{display:block;font-weight:500}.mock-row small{display:block;font-size:11.5px;color:rgba(14,26,33,.5)}.mock-row em{font-style:normal;font-size:11.5px;color:rgba(14,26,33,.5)}.mock-row.is-static{cursor:default}
-.mock-row.is-selected{background:rgba(52,118,141,.08)}
-.mock-tabs,.mock-seg{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;font-size:12.5px;color:rgba(14,26,33,.55)}.mock-tabs span{padding:6px 10px;border-radius:8px}.mock-tabs span.on{background:#fff;color:#0E1A21}.mock-seg span{padding:4px 9px;border-radius:999px;background:rgba(16,42,58,.045)}.mock-seg span.on{background:rgba(52,118,141,.16);color:#275768}.mock-seg i{font-style:normal}
-.mock-thead{display:flex;gap:10px;padding:6px 14px;font-size:11.5px;color:rgba(14,26,33,.42)}.mock-thead span:first-child{flex:1}
-.mock-empty{margin:0;padding:18px 14px;color:rgba(14,26,33,.42);font-size:12.5px}
-.mock-num{font-variant-numeric:tabular-nums;min-width:72px;text-align:right}.mock-pill{background:#f6ecd6;color:#7a5a2c!important;border-radius:999px;padding:2px 8px}
-.mock-detail{display:flex;flex-direction:column;gap:2px;margin-top:10px;background:#fff;border-radius:12px;padding:12px 14px;font-size:12.5px;color:rgba(14,26,33,.65)}.mock-detail b{font-weight:500;color:#0E1A21}
-.mock-side{grid-row:1;grid-column:1}.mock-main{grid-row:1;grid-column:2}.mock-dialog-layer{grid-row:1;grid-column:1/-1;position:relative;z-index:3;background:rgba(14,26,33,.22);display:flex;align-items:flex-start;justify-content:center;padding:18px 14px}
-.mock-dialog{width:100%;max-width:440px;background:#fff;border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:10px;box-shadow:0 16px 40px rgba(14,26,33,.18)}
-.mock-dialog-h{font-size:16px;font-weight:500}
-.mock-field{display:flex;flex-direction:column;gap:4px}.mock-field label{font-size:12px;color:rgba(14,26,33,.6)}.mock-field label i{color:#b4553f;font-style:normal}
-.mock-select{background:rgba(16,42,58,.045);border-radius:8px;padding:7px 10px}.mock-select.is-disabled{color:rgba(14,26,33,.6)}
-.mock-facts{display:flex;flex-wrap:wrap;gap:6px 20px;background:rgba(16,42,58,.03);border-radius:8px;padding:8px 10px}.mock-facts span{display:flex;flex-direction:column;font-variant-numeric:tabular-nums}.mock-facts small{font-size:11px;color:rgba(14,26,33,.45)}.mock-facts b{font-weight:500;transition:background .3s}.mock-facts b.flash{background:#fff1c2;border-radius:4px}
-.mock-check{display:flex;align-items:flex-start;gap:8px;font:inherit;text-align:left;background:none;border:0;padding:4px 2px;color:inherit;cursor:pointer;border-radius:6px}.mock-check .box{width:16px;height:16px;border-radius:4px;background:rgba(16,42,58,.09);flex-shrink:0;margin-top:2px;display:grid;place-items:center;color:#fff;font-size:11px}.mock-check[aria-checked="true"] .box{background:#34768D}.mock-check[aria-checked="true"] .box::before{content:"✓"}.mock-check:disabled{color:rgba(14,26,33,.4);cursor:not-allowed}.mock-check em{font-style:normal}
-.mock-field textarea{font:inherit;font-size:13px;border:0;border-radius:8px;background:rgba(16,42,58,.045);padding:7px 10px;resize:none;color:#0E1A21;width:100%}.mock-field textarea:disabled{opacity:1}
-.mock-dialog-f{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}.mock-btn{font:inherit;font-size:13px;border:0;border-radius:9px;padding:7px 14px;background:rgba(16,42,58,.06);color:#0E1A21;display:inline-block;width:max-content}.mock-btn.sm{font-size:12px;padding:5px 10px}.mock-btn.primary{background:#34768D;color:#fff;cursor:pointer}
-.mock-banner{display:flex;flex-direction:column;border-radius:8px;padding:8px 10px;background:rgba(16,42,58,.05);font-size:12.5px}.mock-banner b{font-weight:500}.mock-banner.bad{background:#f8e5e1;color:#8c3f33}
-.mock .is-target{position:relative;outline:3px solid var(--l-ring);outline-offset:3px;border-radius:8px;animation:lesson-pulse 1.6s ease-in-out infinite;z-index:2}
-.mock .is-target::after{content:attr(data-n);position:absolute;left:-14px;top:-14px;width:22px;height:22px;border-radius:50%;background:var(--l-ring);color:#fff;font-size:12px;font-weight:500;display:grid;place-items:center;line-height:1;font-style:normal}
-@keyframes lesson-pulse{50%{outline-color:rgba(29,127,176,.35)}}
-.mock-cursor{position:absolute;left:0;top:0;width:22px;height:22px;z-index:10;pointer-events:none;transition:transform .7s cubic-bezier(.4,.1,.2,1);background:no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 2l15 11-7 1-4 7z' fill='%230E1A21' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E")}
-.mock-cursor.click::after{content:"";position:absolute;left:-9px;top:-9px;width:22px;height:22px;border-radius:50%;border:2px solid var(--l-ring);animation:lesson-ripple .5s ease-out forwards}
-@keyframes lesson-ripple{from{transform:scale(.4);opacity:1}to{transform:scale(1.6);opacity:0}}
-.mock{scroll-margin-top:76px}.mock-step{display:none}
-.mock-hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);margin:0;background:#0E1A21;color:#fff;font-size:12.5px;padding:6px 12px;border-radius:8px;z-index:11;white-space:nowrap}
-.mock[data-previewing] .mock-app{box-shadow:0 0 0 3px #e3b16a,0 10px 32px rgba(16,42,58,.08)}
+.lesson-trouble{margin-top:16px;border-radius:10px;background:#faf6ee;padding:10px 14px}.lesson-trouble summary{cursor:pointer;font-size:13.5px;color:#7a5a2c}.lesson-trouble p{font-size:13.5px;margin:8px 0 0;color:var(--ink-2)}
+.lesson-stage{padding:14px 16px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;scroll-margin-top:72px}
+.lesson-player{display:flex;align-items:center;gap:8px}
+.lesson-footer .lesson-play{background:var(--l-tint-2);color:var(--l-accent-ink)}.lesson-footer .lesson-ghost{background:var(--l-fill);color:var(--ink-2)}
+.lesson-player-state{font-size:12.5px;color:var(--ink-3);margin:0}
+.shot{position:relative;width:100%;aspect-ratio:16/10;overflow:hidden;border-radius:12px;background:#dfe7ea;box-shadow:0 10px 30px rgba(16,42,58,.12);--px:1px;--inv:1}
+.shot-camera{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:0 0;transition:transform .8s cubic-bezier(.45,.05,.2,1)}
+.shot-img{position:absolute;inset:0;width:100%;height:100%;display:block;transition:opacity .45s ease}.shot-next{opacity:0}
+.shot-spot{position:absolute;border-radius:calc(var(--px)*10);box-shadow:0 0 0 calc(var(--px)*3) var(--l-ring),0 0 0 200vmax rgba(14,26,33,0);transition:box-shadow .5s ease;pointer-events:none}
+.shot[data-dim] .shot-spot{box-shadow:0 0 0 calc(var(--px)*3) var(--l-ring),0 0 0 200vmax rgba(14,26,33,.3)}
+.shot[data-practice] .shot-spot{animation:shot-pulse 1.6s ease-in-out infinite}
+@keyframes shot-pulse{50%{box-shadow:0 0 0 calc(var(--px)*7) rgba(47,155,208,.5),0 0 0 200vmax rgba(14,26,33,.3)}}
+.shot-hotspot{position:absolute;border:0;background:transparent;padding:0;cursor:pointer;border-radius:calc(var(--px)*10);min-width:calc(var(--px)*30);min-height:calc(var(--px)*30)}.shot-hotspot:focus-visible{outline:3px solid #fff;outline-offset:2px}
+.shot-value{position:absolute;display:flex;align-items:center;padding-left:calc(var(--px)*12);font-size:calc(var(--px)*14);color:#0E1A21;white-space:nowrap;overflow:hidden;pointer-events:none;background:rgba(237,240,241,.96);border-radius:calc(var(--px)*10)}
+.shot-value.check{background:none;padding-left:0}.shot-value.check::before{content:"✓";display:grid;place-items:center;width:calc(var(--px)*20);height:calc(var(--px)*20);border-radius:calc(var(--px)*5);background:#34768D;color:#fff;font-size:calc(var(--px)*14)}
+.shot-cursor{position:absolute;width:calc(var(--px)*26);height:calc(var(--px)*26);pointer-events:none;transform:scale(var(--inv));transform-origin:0 0;transition:left .75s cubic-bezier(.45,.05,.2,1),top .75s cubic-bezier(.45,.05,.2,1),transform .8s;background:no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 2l15 11-7 1-4 7z' fill='%230E1A21' stroke='white' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E");z-index:3}
+.shot-cursor.click::after{content:"";position:absolute;left:-40%;top:-40%;width:80%;height:80%;border-radius:50%;border:calc(var(--px)*2.5) solid var(--l-ring);animation:shot-ripple .55s ease-out forwards}
+@keyframes shot-ripple{from{transform:scale(.3);opacity:1}to{transform:scale(1.8);opacity:0}}
+.shot-tip{position:absolute;margin:0;width:max-content;max-width:min(320px,80%);background:#0E1A21;color:#fff;font-size:13.5px;line-height:1.5;padding:9px 13px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.2);z-index:4}
+.shot-hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);margin:0;background:#fff;color:#0E1A21;font-size:12.5px;padding:6px 12px;border-radius:8px;z-index:5;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.shot-label{position:absolute;right:8px;bottom:8px;font-size:11px;color:#fff;background:rgba(14,26,33,.45);padding:2px 8px;border-radius:6px;z-index:4;pointer-events:none}
 .lesson-footer{position:sticky;bottom:0;z-index:5;display:flex;justify-content:space-between;align-items:center;margin:16px 0 0;padding:12px 0;background:#fffffff2;backdrop-filter:blur(10px);border-top:1px solid var(--line)}
 .lesson-footer button,.lesson-done button{font:inherit;border:0;border-radius:9px;padding:10px 18px;cursor:pointer;background:var(--l-fill);color:var(--ink-2)}.lesson-footer [data-lesson-next]{background:var(--l-accent);color:#fff}.lesson-footer button:disabled{opacity:.4;cursor:default}.lesson-footer span{font-size:13px;color:var(--ink-3)}
 .lesson-footer [data-lesson-next].ready{box-shadow:0 0 0 4px var(--l-tint-2)}
 .lesson-done{margin-top:20px;padding:22px 24px;background:#eef5f1;border-radius:14px}.lesson-done h2{margin:0 0 8px;padding:0}.lesson-done h2:focus{outline:none}.lesson-done p{margin:0 0 12px}
 .lesson-chain{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0 0 16px;font-size:13px}.lesson-chain li{margin:0;padding:5px 10px;border-radius:999px;background:#fff;color:#456b58}.lesson-chain li.me{background:#2f6a4f;color:#fff}.lesson-chain li+li::before{content:"→ ";color:#8aa596}
+.lesson-next-link{display:inline-block;margin:0 16px 12px 0;font-weight:500}
 .lesson-sop{margin-top:28px}.lesson-sop h2{font-size:17px;margin:0 0 8px}.lesson-sop dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 20px;margin:0;font-size:14px}.lesson-sop dt{color:var(--ink-3)}.lesson-sop dd{margin:0}
 .lesson-review-note{font-size:12px;color:var(--ink-3);margin-top:24px}
 .lesson button:focus-visible,.lesson summary:focus-visible{outline:3px solid var(--l-ring);outline-offset:3px}
-@media(max-width:1060px){.lesson-work{grid-template-columns:1fr}.lesson-side{border-right:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0}.lesson-player{margin-top:0}}
-@media(max-width:700px){.mock-step{display:flex;gap:8px;margin:18px 0 -4px;font-size:13.5px;line-height:1.5;color:var(--l-accent-ink)}.mock-step{flex-wrap:wrap}.mock-step-choice{display:flex;gap:6px;flex-basis:100%;padding-left:28px}.mock-step-choice button{font:inherit;font-size:13px;border:0;border-radius:8px;padding:5px 12px;background:#fff;color:var(--ink);cursor:pointer}.mock-hint{white-space:normal;width:max-content;max-width:calc(100% - 24px)}.mock-step b{flex-shrink:0;display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--l-ring);color:#fff;font-size:12px;font-weight:500}.lesson h1{font-size:26px}.lesson-meta{gap:8px 20px}.lesson-rail{display:flex;overflow-x:auto;scrollbar-width:none;margin:0 -20px 14px;padding:0 20px}.lesson-rail li{flex:0 0 auto}.lesson-rail button{padding:8px 10px}.lesson-rail button:not([aria-current]) .rail-t{display:none}
-.lesson-work{margin:0 -20px;border-radius:0}.lesson-side{border-radius:0;border-left:0;border-right:0;padding:18px 20px}.lesson-stage{padding:12px 10px 16px}
-.mock-app{grid-template-columns:1fr;min-height:400px}.mock-side{display:none}.mock-main{grid-column:1}.mock-main{padding:14px 12px 18px}.mock-dialog-layer{padding:10px 8px}.mock-dialog{padding:14px}.mock-thead span:nth-child(2),.mock-num{display:none}
+@media(max-width:1060px){.lesson-work{grid-template-columns:1fr}.lesson-side{border-right:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0}}
+@media(max-width:700px){.lesson-footer button{padding:10px 12px}.lesson-footer [data-step-status]{display:none}.lesson-btn-text{display:none}.lesson-footer button{white-space:nowrap}.lesson-footer .lesson-play,.lesson-footer .lesson-ghost{min-width:44px}.lesson-footer .lesson-player{gap:6px}.lesson h1{font-size:26px}.lesson-meta{gap:8px 20px}.lesson-rail{display:flex;overflow-x:auto;scrollbar-width:none;margin:0 -20px 14px;padding:0 20px}.lesson-rail li{flex:0 0 auto}.lesson-rail button{padding:8px 10px}.lesson-rail button:not([aria-current]) .rail-t{display:none}
+.lesson-work{margin:0 -20px;border-radius:0}.lesson-side{border-radius:0;border-left:0;border-right:0;padding:18px 20px}.lesson-stage{padding:12px 10px 16px}.shot{aspect-ratio:1/1;border-radius:10px}.shot-tip{font-size:12.5px;max-width:86%}
 .lesson-sop dl{grid-template-columns:1fr;gap:2px}.lesson-sop dd{margin-bottom:8px}}
-@media(prefers-reduced-motion:reduce){.mock .is-target{animation:none}.mock-cursor{transition:none}}
+@media(prefers-reduced-motion:reduce){.shot-camera,.shot-cursor,.shot-img{transition:none}.shot[data-practice] .shot-spot{animation:none}}
 `;
 
 /**
- * 在浏览器里运行（构建时以源码字符串内联）。不访问网络、不提交表单。
- * 演示与练习共用同一份界面状态；演示只是替读者执行同样的点击和输入。
+ * 在浏览器里运行（构建时以源码字符串内联）。不访问网络、不提交业务。
+ * 坐标以截图比例（0–1）表示。相机宽 = 画框宽、高按截图比例；放大 z 倍后平移，使目标居中且画面不露边。
+ * k = 画框高 / 相机高：画框比截图“高”（窄屏）时 k > 1，至少放大到 k 才能铺满。
  */
 function lessonMain(doc) {
   for (const lesson of doc.querySelectorAll('[data-lesson]')) {
     const $ = s => lesson.querySelector(s), $$ = s => [...lesson.querySelectorAll(s)];
-    const steps = JSON.parse(lesson.dataset.steps), replies = JSON.parse(lesson.dataset.replies);
-    const unit = lesson.dataset.unit, qty = Number(lesson.dataset.quantity), price = Number(lesson.dataset.unitPrice);
-    const mock = $('[data-mock]'), cursor = $('[data-cursor]'), hint = $('[data-hint]'), note = $('[data-note]');
+    const frames = JSON.parse(lesson.dataset.frames), resultSrc = lesson.dataset.result, imgAspect = Number(lesson.dataset.aspect) || .625;
+    const shot = $('[data-shot]'), camera = $('[data-camera]'), img = $('[data-img]'), imgNext = $('[data-img-next]'), spot = $('[data-spot]'), valueBox = $('[data-value]'), hotspot = $('[data-hotspot]'), cursor = $('[data-cursor]'), tip = $('[data-tip]'), hint = $('[data-hint]');
     const panels = $$('[data-step-panel]'), rail = $$('[data-step]'), play = $('[data-play]'), playerState = $('[data-player-state]');
     const next = $('[data-lesson-next]'), prev = $('[data-lesson-prev]'), done = $('[data-lesson-done]');
-    const initial = { screen: 'home', receipt: false, final: false, submitted: false, opened: false, note: '', error: '', blocked: '', queueEmpty: false, receiptBlocked: '' };
     const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let step = 0, state = { ...initial }, completed = new Set(), demo = null, previewing = false, hintTimer = 0;
-    const entryState = i => steps.slice(0, i).reduce((s, x) => ({ ...s, ...x.after }), { ...initial });
-    const fmt = n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-    const render = () => {
-      const view = previewing ? { ...state, ...steps[step].preview } : state;
-      $('[data-screen="home"]').hidden = view.screen !== 'home';
-      $('[data-screen="finance"]').hidden = view.screen === 'home';
-      $('[data-dialog]').hidden = view.screen !== 'dialog';
-      $$('[data-nav]').forEach(n => n.classList.toggle('on', n.dataset.nav === (view.screen === 'home' ? 'home' : 'finance')));
-      $('[data-t="queue"]').hidden = view.queueEmpty || view.submitted;
-      $('[data-t="result"]').hidden = !view.submitted;
-      $('[data-t="result"]').classList.toggle('is-selected', view.opened);
-      $('[data-settle-empty]').hidden = view.submitted;
-      $('[data-settle-count]').textContent = view.submitted ? '1' : '0';
-      $('[data-settle-detail]').hidden = !view.opened;
-      const receipt = $('[data-t="receipt"]');
-      receipt.disabled = !!view.receiptBlocked;
-      receipt.setAttribute('aria-checked', String(view.receipt && !view.receiptBlocked));
-      $('[data-receipt-suffix]').textContent = view.receiptBlocked ? ' · ' + view.receiptBlocked : '';
-      $('[data-t="final"]').setAttribute('aria-checked', String(view.final));
-      const q = view.receipt && !view.receiptBlocked ? qty : 0;
-      $('[data-qty]').textContent = q + ' ' + unit;
-      $('[data-total]').textContent = fmt(q * price) + ' CNY';
-      $('[data-error]').hidden = !view.error;
-      $('[data-error-text]').textContent = view.error;
-      $('[data-blocked]').hidden = !view.blocked;
-      $('[data-blocked-text]').textContent = view.blocked;
-      if (note.value !== view.note) note.value = view.note;
-      note.disabled = previewing || steps[step].input !== 'note';
-      mock.toggleAttribute('data-previewing', previewing);
-      $$('.is-target').forEach(el => { el.classList.remove('is-target'); el.removeAttribute('data-n'); });
-      const target = !previewing && !completed.has(step) && $(`[data-t="${steps[step].target}"]`);
-      if (target && !target.hidden) { target.classList.add('is-target'); target.dataset.n = String(step + 1); }
-    };
-    const flash = () => $$('[data-qty],[data-total]').forEach(b => { b.classList.add('flash'); setTimeout(() => b.classList.remove('flash'), 900); });
-    const say = (text, ms = 2200) => { clearTimeout(hintTimer); hint.textContent = text; hint.hidden = !text; if (text) hintTimer = setTimeout(() => { hint.hidden = true; }, ms); };
-    const setPlayer = (label, pressed, status) => { play.textContent = label; play.setAttribute('aria-pressed', String(pressed)); playerState.textContent = status; };
-    const idlePlayer = () => setPlayer('▶ 看演示', false, completed.has(step) ? '这一步已完成，可以点「下一步」' : '也可以直接在右侧蓝框处操作');
-
-    const complete = () => {
-      state = { ...state, ...steps[step].after, error: '' };
-      completed.add(step);
-      rail[step].classList.add('done');
-      next.classList.add('ready');
-      if (steps[step].target === 'receipt') flash();
-      render(); idlePlayer();
-      if (step === steps.length - 1) finish();
-    };
-    const finish = () => { done.hidden = false; next.disabled = true; const h = done.querySelector('h2'); h.focus({ preventScroll: true }); done.scrollIntoView?.({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' }); };
-    const stopDemo = () => { if (demo) { demo.cancelled = true; demo = null; } cursor.hidden = true; cursor.classList.remove('click'); };
     const narrow = () => typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches;
-    const go = (i, user) => {
-      stopDemo(); previewing = false;
-      step = Math.max(0, Math.min(steps.length - 1, i));
-      state = entryState(step);
+    let step = 0, completed = new Set(), run = null, playing = false, hintTimer = 0, cursorAt = { x: .5, y: .5 }, cam = { z: 1, tx: 0, ty: 0, k: 1 }, target = frames[0];
+
+    const pct = v => (v * 100).toFixed(3) + '%';
+    const place = (el, f) => { el.style.left = pct(f.x); el.style.top = pct(f.y); el.style.width = pct(f.w); el.style.height = pct(f.h); };
+    const setCamera = (z, cx = .5, cy = .5) => {
+      const w = shot.clientWidth || 1000, h = shot.clientHeight || w * imgAspect, k = (h / w) / imgAspect;
+      const zz = Math.max(z, k, 1), clamp = (v, lo) => Math.min(0, Math.max(lo, v));
+      cam = { z: zz, tx: clamp(.5 - cx * zz, 1 - zz), ty: clamp(k / 2 - cy * zz, k - zz), k };
+      shot.style.setProperty('--px', (w / 1440) + 'px'); shot.style.setProperty('--inv', String(1 / zz));
+      camera.style.height = pct(1 / k);
+      camera.style.transform = `translate(${pct(cam.tx)},${pct(cam.ty)}) scale(${zz})`;
+    };
+    // 桌面：推近到能看清文字，并让整个目标留在画面内（目标宽度不超过画框的 92%）。
+    // 手机：截图整体太小，优先可读——固定约 3.2 倍；目标比画框宽时，对准它的起始处（标签和输入内容所在）。
+    const focusZoom = f => narrow() ? 3.2 : Math.max(1, Math.min(1 / Math.max(f.w * 1.25, .38), .92 / Math.max(f.w, .01), 2.6));
+    const zoomTo = f => { const z = focusZoom(f), cx = f.w * z > .9 ? f.x + .45 / z : f.x + f.w / 2; setCamera(z, cx, f.y + f.h / 2); };
+    const onScreen = (x, y) => ({ x: cam.tx + x * cam.z, y: (cam.ty + y * cam.z) / cam.k });
+    const showTip = f => {
+      tip.textContent = f.tip; tip.hidden = false;
+      const bottom = onScreen(f.x + f.w / 2, f.y + f.h), top = onScreen(f.x + f.w / 2, f.y), x = Math.min(.97, Math.max(.03, bottom.x)), below = bottom.y < .7;
+      tip.style.left = pct(x); tip.style.top = pct(below ? bottom.y : top.y);
+      tip.style.transform = `translate(-${Math.round(x * 100)}%, ${below ? '12px' : 'calc(-100% - 12px)'})`;
+    };
+    const say = (text, ms = 2200) => { clearTimeout(hintTimer); hint.textContent = text; hint.hidden = !text; if (text) hintTimer = setTimeout(() => { hint.hidden = true; }, ms); };
+    const setPlayer = (label, pressed, status) => { play.textContent = narrow() ? label.slice(0, 1) : label; play.setAttribute('aria-label', label.slice(2)); play.setAttribute('aria-pressed', String(pressed)); playerState.textContent = status; };
+    const idle = () => { playing = false; setPlayer('▶ 播放演示', false, completed.has(step) ? '这一步已完成，可以点「下一步」' : '也可以直接点亮起的位置练习'); };
+
+    // 暂停时计时停止；每次至少等一个计时周期，逐字输入才看得到。
+    const wait = (r, ms) => new Promise(resolve => { let left = reduced ? Math.min(ms, 150) : ms; const slice = Math.min(50, Math.max(10, left)); const tick = () => { if (r.cancelled) return resolve(false); if (!r.paused) left -= slice; if (left <= 0) return resolve(true); setTimeout(tick, slice); }; setTimeout(tick, slice); });
+    const swap = async (src, r) => {
+      if (img.getAttribute('src') === src) return true;
+      imgNext.src = src; imgNext.hidden = false; void imgNext.offsetWidth; imgNext.style.opacity = '1';
+      const ok = !r || await wait(r, 450); img.src = src; imgNext.style.opacity = '0'; imgNext.hidden = true; return ok;
+    };
+    const showFrame = i => {
+      target = frames[i]; img.src = target.src; place(spot, target); place(hotspot, target); place(valueBox, target);
+      hotspot.setAttribute('aria-label', target.tip); hotspot.hidden = false; spot.hidden = false;
+      valueBox.hidden = true; valueBox.textContent = ''; valueBox.className = 'shot-value'; tip.hidden = true;
+    };
+    const moveCursor = (x, y) => { cursorAt = { x, y }; cursor.style.left = pct(x); cursor.style.top = pct(y); };
+    const perform = async (r, f) => {
+      cursor.hidden = false; moveCursor(f.x + Math.min(f.w * .5, .03), f.y + f.h * .55);
+      if (r && !await wait(r, 850)) return false;
+      cursor.classList.remove('click'); void cursor.offsetWidth; cursor.classList.add('click');
+      if (f.kind === 'check') { valueBox.className = 'shot-value check'; valueBox.hidden = false; }
+      if (f.kind === 'type' || f.kind === 'select') {
+        valueBox.hidden = false; valueBox.textContent = '';
+        if (f.kind === 'select' || !r) valueBox.textContent = f.value;
+        else for (const ch of f.value) { valueBox.textContent += ch; if (!await wait(r, 40)) return false; }
+      }
+      return !r || wait(r, 800);
+    };
+    const markStep = () => {
       panels.forEach((p, k) => { p.hidden = k !== step; });
       rail.forEach((b, k) => { if (k === step) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current'); });
-      rail[step].scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-      $$('[data-trouble]').forEach(d => { d.open = false; });
-      $$('[data-choice]').forEach(b => b.classList.remove('right', 'wrong'));
-      $$('[data-choice-reply]').forEach(p => { p.hidden = true; });
-      completed.delete(step); rail[step].classList.remove('done');
-      prev.disabled = step === 0; next.disabled = false; next.classList.remove('ready');
-      next.textContent = step === steps.length - 1 ? '完成' : '下一步';
-      $('[data-step-status]').textContent = `第 ${step + 1} 步 / 共 ${steps.length} 步`;
-      done.hidden = true; say('');
-      const ms = $('[data-mock-step]'); ms.textContent = ''; const b = doc.createElement('b'); b.textContent = String(step + 1); ms.append(b, steps[step].do);
-      if (steps[step].kind === 'choice') { const g = doc.createElement('span'); g.className = 'mock-step-choice'; $$(`[data-step-panel="${step}"] [data-choice]`).forEach((c, k) => { const x = doc.createElement('button'); x.type = 'button'; x.textContent = c.textContent; x.addEventListener('click', () => { if (!demo && !completed.has(step)) answer(k); }); g.append(x); }); ms.append(g); }
-      render(); idlePlayer();
-      if (user && narrow()) mock.scrollIntoView?.({ block: 'start', behavior: reduced ? 'auto' : 'smooth' });
+      prev.disabled = step === 0; next.disabled = false; next.classList.remove('ready'); next.textContent = '下一步';
+      $('[data-step-status]').textContent = `第 ${step + 1} 步 / 共 ${frames.length} 步`;
     };
-    const answer = k => {
-      const buttons = $$(`[data-step-panel="${step}"] [data-choice]`), reply = $(`[data-step-panel="${step}"] [data-choice-reply]`);
-      const correct = buttons[k].hasAttribute('data-correct');
-      buttons.forEach((b, j) => b.classList.toggle(correct ? 'right' : 'wrong', j === k));
-      reply.hidden = false; reply.textContent = replies[step][k];
-      if (narrow()) say(replies[step][k], 3600);
-      if (correct) complete();
+    const complete = () => { completed.add(step); rail[step].classList.add('done'); next.classList.add('ready'); shot.removeAttribute('data-practice'); if (step === frames.length - 1) next.textContent = '看结果'; };
+    const finish = async r => {
+      shot.removeAttribute('data-dim'); shot.removeAttribute('data-practice'); hotspot.hidden = true; spot.hidden = true; cursor.hidden = true; valueBox.hidden = true; tip.hidden = true;
+      setCamera(1); await swap(resultSrc, r);
+      done.hidden = false; next.disabled = true; done.querySelector('h2').focus({ preventScroll: true });
     };
-    const act = t => {
-      const s = steps[step];
-      if (previewing) { previewing = false; render(); }
-      if (completed.has(step)) return;
-      if (s.kind === 'choice' && t === 'final') return answer(1);
-      if (t === 'note' && s.input === 'note') return;
-      if (t !== s.target) return say('先点击蓝框标出的位置');
-      if (s.kind === 'type') state.note = note.value;
-      complete();
+    const stop = () => { if (run) { run.cancelled = true; run = null; } cursor.classList.remove('click'); };
+    // 练习：先给全局画面，片刻后推近到操作位置并亮起，读者知道这一步在页面的哪里。
+    const go = (i, user) => {
+      stop(); step = Math.max(0, Math.min(frames.length - 1, i)); markStep();
+      done.hidden = true; say(''); completed.delete(step); rail[step].classList.remove('done');
+      showFrame(step); setCamera(1); cursor.hidden = true; shot.setAttribute('data-dim', ''); shot.setAttribute('data-practice', '');
+      const r = run = { cancelled: false, paused: false };
+      wait(r, 550).then(ok => ok && (zoomTo(target), wait(r, 850))).then(ok => { if (ok && run === r) { showTip(target); run = null; } });
+      idle();
+      if (user && narrow()) $('[data-stage]').scrollIntoView?.({ block: 'start' });
     };
-
-    // 演示：移动光标 → 点击 / 输入，读者可随时暂停、继续或重播当前一步。
-    const wait = (run, ms) => new Promise(resolve => { let left = reduced ? Math.min(ms, 120) : ms; const tick = () => { if (run.cancelled) return resolve(false); if (!run.paused) left -= 50; if (left <= 0) return resolve(true); setTimeout(tick, 50); }; tick(); });
-    const pointAt = el => { const m = mock.getBoundingClientRect(), r = el.getBoundingClientRect(); cursor.style.transform = `translate(${r.left - m.left + Math.min(r.width * .5, 60)}px,${r.top - m.top + r.height * .55}px)`; };
-    const tap = async (run, el) => { pointAt(el); if (!await wait(run, 800)) return false; cursor.classList.remove('click'); void cursor.offsetWidth; cursor.classList.add('click'); return wait(run, 350); };
-    const runDemo = async () => {
-      go(step);
-      const s = steps[step], run = demo = { cancelled: false, paused: false };
-      setPlayer('❚❚ 暂停', true, '演示中…');
-      cursor.hidden = false; cursor.style.transform = 'translate(40px,40px)';
-      if (!await wait(run, 300)) return;
-      if (s.kind === 'choice') {
-        if (!await tap(run, $(`[data-t="${s.target}"]`))) return;
-        if (!await wait(run, 600)) return;
-        cursor.hidden = true; answer($$(`[data-step-panel="${step}"] [data-choice]`).findIndex(b => b.hasAttribute('data-correct')));
-      } else {
-        if (s.kind === 'type') {
-          if (!await tap(run, note)) return;
-          for (const ch of s.text) { state.note += ch; render(); if (!await wait(run, 45)) return; }
-        }
-        if (!await tap(run, $(`[data-t="${s.target}"]`))) return;
-        if (s.kind === 'type') state.note = note.value;
-        complete();
-        if (!await wait(run, 900)) return;
-        cursor.hidden = true;
+    const demoStep = async r => {
+      const f = frames[step];
+      showFrame(step); shot.setAttribute('data-dim', ''); shot.removeAttribute('data-practice'); setCamera(1);
+      cursor.hidden = false; moveCursor(cursorAt.x, cursorAt.y);
+      if (!await wait(r, 650)) return false;
+      zoomTo(f); if (!await wait(r, 900)) return false;
+      showTip(f);
+      if (!await perform(r, f)) return false;
+      complete(); return true;
+    };
+    const playAll = async () => {
+      const r = run = { cancelled: false, paused: false }; playing = true; setPlayer('❚❚ 暂停', true, '演示中…');
+      done.hidden = true; completed.delete(step); rail[step].classList.remove('done');
+      for (;;) {
+        if (!await demoStep(r)) return;
+        if (step === frames.length - 1) { await finish(r); break; }
+        if (!await wait(r, 400)) return;
+        tip.hidden = true; setCamera(1); if (!await wait(r, 500)) return;
+        step++; markStep(); completed.delete(step); rail[step].classList.remove('done');
+        if (!await swap(frames[step].src, r)) return;
       }
-      demo = null; idlePlayer();
+      if (run === r) run = null; idle();
     };
 
     play.addEventListener('click', () => {
-      if (!demo) return void runDemo();
-      demo.paused = !demo.paused;
-      setPlayer(demo.paused ? '▶ 继续' : '❚❚ 暂停', !demo.paused, demo.paused ? '已暂停' : '演示中…');
+      if (!playing) { stop(); void playAll(); return; }
+      run.paused = !run.paused;
+      setPlayer(run.paused ? '▶ 继续' : '❚❚ 暂停', true, run.paused ? '已暂停' : '演示中…');
     });
-    $('[data-replay]').addEventListener('click', () => void runDemo());
-    mock.addEventListener('click', event => { if (demo) return; const el = event.target.closest('[data-t]'); if (el) act(el.dataset.t); else if (!previewing && !completed.has(step) && event.target.closest('.mock-app')) say('先点击蓝框标出的位置'); });
-    note.addEventListener('input', () => { state.note = note.value; });
-    $$('[data-choice]').forEach(b => b.addEventListener('click', () => { if (!demo && !completed.has(step)) answer(Number(b.dataset.choice)); }));
-    $$('[data-preview]').forEach(b => b.addEventListener('click', () => {
-      stopDemo(); idlePlayer(); previewing = !previewing; render();
-      b.textContent = previewing ? '恢复正常界面' : '在演练窗口里看看';
-      if (previewing) say('这是出错时的样子', 1800);
+    $('[data-replay]').addEventListener('click', async () => {
+      stop(); done.hidden = true; completed.delete(step); rail[step].classList.remove('done'); markStep();
+      const r = run = { cancelled: false, paused: false }; playing = true; setPlayer('❚❚ 暂停', true, '演示中…');
+      if (await demoStep(r) && run === r) { run = null; idle(); }
+    });
+    hotspot.addEventListener('click', async event => {
+      event.stopPropagation(); if (completed.has(step) || playing) return;
+      stop(); zoomTo(target); showTip(target); await perform(null, target); complete(); idle();
+    });
+    shot.addEventListener('click', () => { if (!completed.has(step) && !playing && done.hidden) say('点击亮起的位置'); });
+    $$('[data-choice]').forEach(b => b.addEventListener('click', () => {
+      const group = b.parentElement, reply = group.parentElement.querySelector('[data-choice-reply]'), right = b.hasAttribute('data-correct');
+      [...group.children].forEach(x => x.classList.remove('right', 'wrong')); b.classList.add(right ? 'right' : 'wrong');
+      reply.hidden = false; reply.textContent = b.dataset.reply;
     }));
-    $$('[data-trouble]').forEach(d => d.addEventListener('toggle', () => { if (!d.open && previewing) { previewing = false; render(); const b = d.querySelector('[data-preview]'); if (b) b.textContent = '在演练窗口里看看'; } }));
     rail.forEach((b, i) => b.addEventListener('click', () => go(i, true)));
     prev.addEventListener('click', () => go(step - 1, true));
     next.addEventListener('click', () => {
-      if (!completed.has(step)) { stopDemo(); previewing = false; complete(); if (step === steps.length - 1) return; }
-      if (step < steps.length - 1) { go(step + 1, true); panels[step].querySelector('h2').focus({ preventScroll: true }); }
+      if (step === frames.length - 1) { stop(); if (!completed.has(step)) complete(); idle(); void finish(null); return; }
+      if (!completed.has(step)) complete();
+      go(step + 1, true); panels[step].querySelector('h2').focus({ preventScroll: true });
     });
     $('[data-lesson-restart]').addEventListener('click', () => { completed.clear(); rail.forEach(b => b.classList.remove('done')); go(0); lesson.scrollIntoView?.({ block: 'start' }); });
+    globalThis.addEventListener?.('resize', () => { if (cam.z > 1 && done.hidden) zoomTo(target); else setCamera(1); });
     go(0);
   }
 }
