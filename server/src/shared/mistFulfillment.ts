@@ -264,6 +264,8 @@ export type FulfillmentStockMovement = {
     onHandAfter?: number;
     lockedBefore?: number;
     lockedAfter?: number;
+    /** Part of an original issue returned after receiver rejection; not available until disposed. */
+    quarantinedQuantity?: number;
 };
 export type ShipmentLine = {
     lineId: string;
@@ -1606,6 +1608,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 materialQualityProof(root, get(f.purchases, sourcePurchaseId, '来源采购'), materialDelivery);
             } else if (p.targetProductionId !== undefined) fail('仅发料出库时指定接收加工单');
             let issue: FulfillmentStockMovement | undefined;
+            let quarantinedQuantity = 0;
             if (p.kind === 'return') {
                 issue = get(f.stockMovements, p.issueId, '原出库');
                 if (issue.stockId !== stock.id || issue.kind !== 'issue')
@@ -1616,12 +1619,17 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (issue.materialDelivery?.receivingChecks?.length) {
                     const checked = issue.materialDelivery.receivingChecks.reduce((n, check) => n + Number(check.acceptedQuantity) + Number(check.rejectedQuantity), 0);
                     if (quantity > sum([checked, -returned])) fail('尚未点收的物料不能登记退回');
+                    const rejected = sum(issue.materialDelivery.receivingChecks.map(check => Number(check.rejectedQuantity)));
+                    quarantinedQuantity = Math.min(quantity, Math.max(0, sum([rejected, -returned])));
                 }
             }
             else if (quantity > stock.available)
                 fail('库存可用量不足');
             let sourceLocation: string | undefined;
-            if (p.kind === 'return') addAtPosition(stock, quantity, location);
+            if (p.kind === 'return') {
+                if (quantity > quarantinedQuantity) addAtPosition(stock, sum([quantity, -quarantinedQuantity]), location);
+                if (quarantinedQuantity) stock.locked = sum([stock.locked || 0, quarantinedQuantity]);
+            }
             else {
                 const position = sourcePosition(stock, p.sourceLocation);
                 if (p.kind === 'move') quantity = position.available;
@@ -1629,7 +1637,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (p.kind === 'move') addAtPosition(stock, quantity, location);
             }
             const id = ctx.id();
-            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
+            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(quarantinedQuantity ? { quarantinedQuantity } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
             audit(root, ctx, 'inventory', stock.id, '登记实际库存交接');
             return { id };
         }

@@ -89,6 +89,20 @@ it('keeps isolated return batches out of generic issue and move actions',()=>{
   expect(detail.textContent).toContain('隔离数量');
 });
 
+it('shows rejected warehouse material as isolated and warns before return',async()=>{
+  const f=materialDeliveryFixture(20),id=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  store.state=f.state;render(store.state.fulfillment.stock[0].id);
+  await click(getByRole(host,'button',{name:'按原出库退回'}));
+  expect(getByRole(document.body,'dialog').textContent).toContain('拒收料优先退回并隔离');
+  await click(getByRole(document.body,'button',{name:'取消'}));
+  f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'A-01',person:'factory',note:'Rejected'}});
+  store.state=f.state;render(store.state.fulfillment.stock[0].id);
+  const detail=host.querySelector('[data-stock-detail]') as HTMLElement;
+  expect(detail.textContent).toContain('隔离待处置 4 米');expect(detail.textContent).toContain('隔离 4米');
+  expect((getByRole(detail,'button',{name:'登记出库'}) as HTMLButtonElement).disabled).toBe(true);
+});
+
 it('stays readable without inventory authority and says why movements are unavailable',()=>{
   session.denied.add('inventory:write');
   store.state!.fulfillment.stock.push(stock('a'));
