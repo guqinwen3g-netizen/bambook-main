@@ -12,6 +12,48 @@ function fixture(){
 const suit={family:'garment',hsCode:'6203.3100.00',declaredName:'男式羊毛西服上衣',brandType:'3',preference:'0',elements:['机织','西服上衣','男式','100%羊毛','Northwind'],styles:['cc-aw27-coat-014']};
 
 describe('报关申报资料',()=>{
+  it('splits one fabric style by recorded package colour and explicit classification',()=>{
+    const f=fixture(),s=f.state,ship=s.fulfillment.shipments[0],line=s.orderLines.find(l=>l.id===ship.lines[0].lineId)!;
+    s.orders.find(o=>o.id===line.orderId)!.type='fabric';Object.assign(line,{style:'FAB-1',unit:'米',price:3.8,qty:10,breakdown:{kind:'fabric',composition:'65%涤纶/35%棉',width:150,weight:141,rows:[{color:'本白',quantity:5},{color:'藏蓝',quantity:5}]}});
+    Object.assign(ship,{domain:'fabric',packingColorVersion:1});ship.lines[0].quantity=10;
+    s.fulfillment.packing=s.fulfillment.packing.filter(r=>r.shipmentId!==ship.id);s.fulfillment.packing.push({id:'white',shipmentId:ship.id,lineId:line.id,productionId:ship.lines[0].productionId,carton:'R1',quantity:5,netWeight:2,grossWeight:3,volume:1,note:'',fabricColor:'本白'},{id:'navy',shipmentId:ship.id,lineId:line.id,productionId:ship.lines[0].productionId,carton:'R2',quantity:5,netWeight:2.5,grossWeight:3,volume:1,note:'',fabricColor:'藏蓝'} as any);
+    const common={family:'fabric',brandType:'0',preference:'0',styles:['FAB-1'],legalUnit:'米',secondUnit:'千克'};
+    f.run('fulfillment.customs.classify.save',{...common,hsCode:'5513110000',declaredName:'漂白涤棉布',elements:['机织','漂白','65%涤纶/35%棉','150cm，141g/m²','无品牌'],colors:['本白']});
+    f.run('fulfillment.customs.classify.save',{...common,hsCode:'5513210000',declaredName:'染色涤棉布',elements:['机织','染色','65%涤纶/35%棉','150cm，141g/m²','无品牌'],colors:['藏蓝']});
+    f.run('fulfillment.customs.items',{id:f.customsId});const c=f.state.fulfillment.customs[0];
+    expect(c.items).toHaveLength(2);expect(c.items).toEqual(expect.arrayContaining([expect.objectContaining({hsCode:'5513110000',quantity:5,secondQty:2,amount:19}),expect.objectContaining({hsCode:'5513210000',quantity:5,secondQty:2.5,amount:19})]));
+    expect(customsItemsStale(f.state,c)).toBe(false);
+    (f.state.fulfillment.packing.find(row=>row.id==='navy') as any).fabricColor='本白';expect(customsItemsStale(f.state,c)).toBe(true);
+  });
+  it('requires disjoint colour scopes for duplicate fabric styles and retains legacy wildcard protection',()=>{
+    const f=fixture(),base={family:'fabric',hsCode:'5513110000',declaredName:'面料',brandType:'0',preference:'0',styles:['FAB-1'],elements:['机织','漂白','65%涤纶/35%棉','150cm','无品牌']};
+    f.run('fulfillment.customs.classify.save',{...base,colors:['本白']});
+    expect(()=>f.run('fulfillment.customs.classify.save',{...base,colors:[' 本白 ']})).toThrow('已在归类');
+    expect(()=>f.run('fulfillment.customs.classify.save',{...base})).toThrow('已在归类');
+    f.run('fulfillment.customs.classify.save',{...base,colors:['藏蓝']});
+    expect(readCustomsClassifications(f.state).map(c=>c.colors)).toEqual([['本白'],['藏蓝']]);
+    const first=readCustomsClassifications(f.state)[0];f.run('fulfillment.customs.classify.save',{...base,id:first.id,declaredName:'更新品名'});expect(readCustomsClassifications(f.state)[0].colors).toEqual(['本白']);
+  });
+  it('does not infer a multi-colour shipment breakdown from the order ratio',()=>{
+    const f=fixture(),s=f.state,ship=s.fulfillment.shipments[0],line=s.orderLines.find(l=>l.id===ship.lines[0].lineId)!;
+    s.orders.find(o=>o.id===line.orderId)!.type='fabric';Object.assign(line,{style:'FAB-2',unit:'米',qty:10,breakdown:{kind:'fabric',composition:'棉',width:150,weight:141,rows:[{color:'本白',quantity:5},{color:'藏蓝',quantity:5}]}});Object.assign(ship,{domain:'fabric',state:'preparing'});
+    f.run('fulfillment.customs.classify.save',{family:'fabric',hsCode:'5513110000',declaredName:'面料',brandType:'0',preference:'0',styles:['FAB-2'],colors:['本白'],elements:['机织','漂白','棉','150cm','无品牌']});
+    expect(()=>f.run('fulfillment.customs.items',{id:f.customsId})).toThrow('请先核对每件面料的颜色');
+  });
+  it('keeps legacy unscoped classifications usable without claiming colour verification',()=>{
+    const f=fixture(),s=f.state,ship=s.fulfillment.shipments[0],line=s.orderLines.find(l=>l.id===ship.lines[0].lineId)!;
+    s.orders.find(o=>o.id===line.orderId)!.type='fabric';Object.assign(line,{style:'FAB-OLD',unit:'米',breakdown:{kind:'fabric',composition:'棉',width:150,weight:141,rows:[{color:'本白',quantity:250},{color:'藏蓝',quantity:250}]}});Object.assign(ship,{domain:'fabric',state:'preparing'});
+    f.run('fulfillment.customs.classify.save',{family:'fabric',hsCode:'5513110000',declaredName:'原面料归类',brandType:'0',preference:'0',styles:['FAB-OLD'],elements:['机织','漂白','棉','150cm','无品牌']});
+    f.run('fulfillment.customs.items',{id:f.customsId});expect(f.state.fulfillment.customs[0].items).toHaveLength(1);expect(f.state.fulfillment.shipments[0].packingColorVersion).toBeUndefined();
+  });
+  it('allocates rounded invoice cents across fabric colours without negative amounts or drift',()=>{
+    const f=fixture(),s=f.state,ship=s.fulfillment.shipments[0],line=s.orderLines.find(l=>l.id===ship.lines[0].lineId)!;const colors=['白','蓝','灰','黑'];
+    s.orders.find(o=>o.id===line.orderId)!.type='fabric';Object.assign(line,{style:'FAB-CENTS',unit:'米',price:.01,qty:2,breakdown:{kind:'fabric',composition:'棉',width:150,weight:141,rows:colors.map(color=>({color,quantity:.5}))}});Object.assign(ship,{domain:'fabric',packingColorVersion:1});ship.lines[0].quantity=2;
+    s.fulfillment.packing=s.fulfillment.packing.filter(r=>r.shipmentId!==ship.id);s.fulfillment.packing.push(...colors.map((color,i)=>({id:'p'+i,shipmentId:ship.id,lineId:line.id,productionId:ship.lines[0].productionId,carton:'R'+i,quantity:.5,netWeight:1,grossWeight:1,volume:1,note:'',fabricColor:color})));
+    for(const color of colors)f.run('fulfillment.customs.classify.save',{family:'fabric',hsCode:'5513110000',declaredName:'面料',brandType:'0',preference:'0',styles:['FAB-CENTS'],colors:[color],elements:['机织','漂白','棉','150cm','无品牌']});
+    f.run('fulfillment.customs.items',{id:f.customsId});const amounts=f.state.fulfillment.customs[0].items!.map(item=>item.amount);
+    expect(amounts.every(amount=>amount>=0)).toBe(true);expect(amounts.reduce((sum,amount)=>sum+amount,0)).toBeCloseTo(.02);expect(amounts.filter(amount=>amount>0)).toHaveLength(2);
+  });
   it('归类与生成都是报关单证写权限；章节、单位默认值与单位别名',()=>{
     expect(mistCommandPermission({type:'fulfillment.customs.classify.save',payload:suit} as MistCommand)).toBe('customs:write');
     expect(mistCommandPermission({type:'fulfillment.customs.items',payload:{id:'x'}} as MistCommand)).toBe('customs:write');

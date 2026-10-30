@@ -1,4 +1,5 @@
 import {replacementDeclaredUnitPrice} from './mistClaimReplacement';
+import {packingBreakdownBlocker,packingFabricSpecification} from './mistPackingBreakdown';
 /**
  * 报关申报资料（2026-10-18 按《中华人民共和国海关进出口货物报关单填制规范》与《规范申报目录》的通行做法确定首版）。
  * - 商品归类库：单证员按款号建立归类档案——10 位商品编号（HS）、申报品名、申报要素（品牌类型、出口享惠情况及按章节的必报要素）、法定第一 / 第二计量单位。
@@ -23,14 +24,14 @@ export const CUSTOMS_BRAND_TYPES = [['0', '无品牌'], ['1', '境内自主品�
 export const CUSTOMS_PREFERENCES = [['0', '出口货物在最终目的国（地区）不享受优惠关税'], ['1', '出口货物在最终目的国（地区）享受优惠关税'], ['2', '出口货物不能确定在最终目的国（地区）享受优惠关税']] as const;
 export const CUSTOMS_MAX_ITEMS = 50;
 
-export type CustomsClassification = { id: string; code: string; family: CustomsFamily; hsCode: string; declaredName: string; brandType: string; preference: string; elements: string[]; legalUnit: string; secondUnit: string; styles: string[]; note: string; createdAt: string; actor: string; updatedAt?: string; voided?: { at: string; actor: string; reason: string } };
+export type CustomsClassification = { id: string; code: string; family: CustomsFamily; hsCode: string; declaredName: string; brandType: string; preference: string; elements: string[]; legalUnit: string; secondUnit: string; styles: string[]; colors?:string[]; note: string; createdAt: string; actor: string; updatedAt?: string; voided?: { at: string; actor: string; reason: string } };
 export type CustomsDeclarationItem = { no: number; classificationId: string; lineKeys: string[]; styles: string[]; hsCode: string; declaredName: string; elements: string; quantity: number; unit: string; legalQty: number; legalUnit: string; secondQty: number | null; secondUnit: string; unitPrice: number; amount: number; currency: string; origin: string; destination: string; generated?: Partial<Pick<CustomsDeclarationItem, CustomsAdjustableField>>; adjusted?: { at: string; actor: string; reason: string; fields: CustomsAdjustableField[] } };
 export const CUSTOMS_ADJUSTABLE_FIELDS = ['declaredName', 'elements', 'legalQty', 'secondQty'] as const;
 export type CustomsAdjustableField = typeof CUSTOMS_ADJUSTABLE_FIELDS[number];
 export const CUSTOMS_FIELD_LABEL: Record<CustomsAdjustableField, string> = { declaredName: '申报品名', elements: '申报要素', legalQty: '法定数量', secondQty: '第二数量' };
 export type CustomsDeclarationDraft = { items: CustomsDeclarationItem[]; blockers: string[]; packages: number; netWeight: number; grossWeight: number; totals: Array<{ currency: string; amount: number }> };
 export type CustomsDeclarationCommand =
-  | { type: 'fulfillment.customs.classify.save'; payload: { id?: string; family: CustomsFamily; hsCode: string; declaredName: string; brandType: string; preference: string; elements: string[]; legalUnit?: string; secondUnit?: string; styles: string[]; note?: string } }
+  | { type: 'fulfillment.customs.classify.save'; payload: { id?: string; family: CustomsFamily; hsCode: string; declaredName: string; brandType: string; preference: string; elements: string[]; legalUnit?: string; secondUnit?: string; styles: string[]; colors?:string[]; note?: string } }
   | { type: 'fulfillment.customs.classify.void'; payload: { id: string; reason: string } }
   | { type: 'fulfillment.customs.items'; payload: { id: string } }
   | { type: 'fulfillment.customs.item.adjust'; payload: { id: string; no: number; declaredName: string; elements: string; legalQty: number; secondQty?: number | null; reason: string } };
@@ -55,7 +56,22 @@ export function defaultLegalUnits(hs: string): { legalUnit: string; secondUnit: 
 const UNIT_ALIASES: Record<string, string> = { pcs: '件', pc: '件', piece: '件', pieces: '件', 件: '件', set: '套', sets: '套', 套: '套', m: '米', meter: '米', meters: '米', 米: '米', yd: '码', yds: '码', yard: '码', yards: '码', 码: '码', kg: '千克', kgs: '千克', 公斤: '千克', 千克: '千克', 条: '条', 双: '双' };
 export const normalizeUnit = (u: string) => UNIT_ALIASES[(u || '').trim().toLowerCase()] || (u || '').trim();
 const styleKey = (s: string) => (s || '').trim().toUpperCase();
-export function classificationForStyle(root: Pick<MistState, 'fulfillment'>, style: string) { const k = styleKey(style); return k ? readCustomsClassifications(root).find(c => !c.voided && c.styles.some(s => styleKey(s) === k)) : undefined; }
+const colorKey = (s:string) => (s || '').normalize('NFC').trim().toLowerCase();
+/** Allocate the original line's rounded cents without negative items or rounding drift. */
+function splitAmountMinor(quantities:number[],price:number,totalQuantity:number):number[]{
+  const unitPrice=BigInt(mistMoneyMinor(price)),denominator=BigInt(10000);
+  const raw=quantities.map(quantity=>BigInt(Math.round(quantity*10000))*unitPrice);
+  const result=raw.map(value=>Number(value/denominator));
+  let remainder=mistMoneyMinor(lineAmount(totalQuantity,price))-result.reduce((sum,value)=>sum+value,0);
+  const order=raw.map((value,index)=>({index,remainder:value%denominator})).sort((a,b)=>a.remainder===b.remainder?a.index-b.index:a.remainder>b.remainder?-1:1);
+  for(const part of order){if(remainder<=0)break;result[part.index]++;remainder--;}
+  if(remainder!==0)fail('分项金额与出运总金额不一致');
+  return result;
+}
+export function classificationForStyle(root: Pick<MistState, 'fulfillment'>, style: string, color?:string) {
+  const k=styleKey(style);if(!k)return undefined;
+  return readCustomsClassifications(root).find(c=>!c.voided&&c.styles.some(s=>styleKey(s)===k)&&(!c.colors?.length || (!!color&&c.colors.some(value=>colorKey(value)===colorKey(color)))));
+}
 export function customsElementsText(c: Pick<CustomsClassification, 'family' | 'brandType' | 'preference' | 'elements'>, styles: string[]) {
   return [c.brandType, c.preference, ...c.elements, ...(c.family === 'garment' ? ['货号' + styles.join('/')] : [])].join('|');
 }
@@ -69,16 +85,28 @@ export function draftCustomsDeclaration(root: MistState, shipment: FulfillmentSh
   for (const line of shipment.lines) {
     const ol = root.orderLines.find(l => l.id === line.lineId), order = root.orders.find(o => o.id === line.orderId);
     if (!ol || !order) { blockers.push('出运明细的订单条目不可用'); continue; }
-    const cls = classificationForStyle(root, ol.style);
-    if (!cls) { blockers.push(`款号 ${ol.style || '（未填写）'} · ${ol.name} 尚未建立商品归类`); continue; }
     const unit = normalizeUnit(ol.unit), key = `${line.lineId}:${line.productionId || ''}`;
-    const net = packing.filter(r => r.lineId === line.lineId && (r.productionId || '') === (line.productionId || '')).reduce((s, r) => s + r.netWeight, 0);
-    const gk = `${cls.id}|${unit}|${order.currency}`;
-    const g = groups.get(gk) || { cls, unit, currency: order.currency, lines: [] };
+    const linePacking=packing.filter(r=>r.lineId===line.lineId&&(r.productionId||'')===(line.productionId||''));
+    const spec=packingFabricSpecification(root,line.lineId);
+    const alreadyFiled=root.fulfillment.customs.some(c=>c.shipmentId===shipment.id&&c.status!=='draft');
+    const hasScopedClass=readCustomsClassifications(root).some(c=>!c.voided&&c.colors?.length&&c.styles.some(style=>styleKey(style)===styleKey(ol.style)));
+    if(spec&&hasScopedClass&&shipment.packingColorVersion!==1&&shipment.state!=='departed'&&!alreadyFiled){blockers.push(`款号 ${ol.style}：请先核对每件面料的颜色`);continue;}
+    const split=!!spec&&shipment.packingColorVersion===1;
+    if(split){
+      const error=packingBreakdownBlocker(root,shipment);
+      if(error){blockers.push(error);continue;}
+      if(round(linePacking.reduce((sum,row)=>sum+row.quantity,0))!==round(line.quantity)){blockers.push(`款号 ${ol.style}：装箱颜色数量与出运数量不一致`);continue;}
+    }
     let price=ol.price;
     if(order.replacementSource){try{price=replacementDeclaredUnitPrice(root,shipment.id,order.id,ol.id)!;}catch(error){if(!(error instanceof MistCommandError))throw error;blockers.push(error.message);continue;}}
-    g.lines.push({ key, style: ol.style, quantity: line.quantity, amountMinor: mistMoneyMinor(lineAmount(line.quantity, price)), net });
-    groups.set(gk, g);
+    const portions=split?spec!.rows.map(color=>({color:color.color,quantity:round(linePacking.filter(row=>colorKey(row.fabricColor||'')===colorKey(color.color)).reduce((sum,row)=>sum+row.quantity,0)),net:round(linePacking.filter(row=>colorKey(row.fabricColor||'')===colorKey(color.color)).reduce((sum,row)=>sum+row.netWeight,0))})).filter(row=>row.quantity>0):[{color:'',quantity:line.quantity,net:linePacking.reduce((sum,row)=>sum+row.netWeight,0)}];
+    const minor=splitAmountMinor(portions.map(row=>row.quantity),price,line.quantity);
+    for(let i=0;i<portions.length;i++){
+      const part=portions[i],cls=classificationForStyle(root,ol.style,part.color);
+      if(!cls){blockers.push(`款号 ${ol.style || '（未填写）'}${part.color?` · ${part.color}`:` · ${ol.name}`} 尚未建立商品归类`);continue;}
+      const gk=`${cls.id}|${unit}|${order.currency}`,g=groups.get(gk)||{cls,unit,currency:order.currency,lines:[]};
+      g.lines.push({key:part.color?`${key}:${colorKey(part.color)}`:key,style:ol.style,quantity:part.quantity,amountMinor:minor[i],net:part.net});groups.set(gk,g);
+    }
   }
   const needsWeight = [...groups.values()].some(g => normalizeUnit(g.cls.legalUnit) === '千克' || g.cls.secondUnit);
   if (needsWeight && !packing.length) blockers.push('尚未装箱：法定数量（千克）须取装箱净重');
@@ -148,8 +176,11 @@ export function applyCustomsDeclarationCommand(root: MistState, command: Customs
     if (secondUnit && secondUnit === legalUnit) fail('法定第二单位不能与第一单位相同');
     const styles = [...new Map((Array.isArray(p.styles) ? p.styles : []).map(s => str(s, '款号', false, 60)).filter(Boolean).map(s => [styleKey(s), s])).values()];
     if (!styles.length) fail('请至少填写一个款号');
-    for (const s of styles) { const other = list.find(c => !c.voided && c.id !== old?.id && c.styles.some(x => styleKey(x) === styleKey(s))); if (other) fail(`款号 ${s} 已在归类 ${other.code}（${other.declaredName}）中`); }
-    const row: CustomsClassification = { id: old?.id || ctx.id(), code: old?.code || `HSC-${String(list.length + 1).padStart(4, '0')}`, family, hsCode: hs, declaredName, brandType, preference, elements, legalUnit, secondUnit, styles, note: str(p.note, '备注', false, 500), createdAt: old?.createdAt || ctx.now, actor: old?.actor || ctx.actorName, ...(old ? { updatedAt: ctx.now } : {}) };
+    const colors=p.colors===undefined?(old?.colors||[]):[...new Map((Array.isArray(p.colors)?p.colors:fail('适用颜色无效')).map(color=>str(color,'颜色',true,60)).map(color=>[colorKey(color),color])).values()];
+    if(colors.length>30)fail('适用颜色不能超过 30 个');
+    if(family!=='fabric'&&colors.length)fail('按颜色限定仅适用于面料归类');
+    for (const s of styles) { const other = list.find(c => !c.voided && c.id !== old?.id && c.styles.some(x => styleKey(x) === styleKey(s)) && (!colors.length || !c.colors?.length || colors.some(color=>c.colors!.some(value=>colorKey(value)===colorKey(color))))); if (other) fail(`款号 ${s} 已在归类 ${other.code}（${other.declaredName}）中`); }
+    const row: CustomsClassification = { id: old?.id || ctx.id(), code: old?.code || `HSC-${String(list.length + 1).padStart(4, '0')}`, family, hsCode: hs, declaredName, brandType, preference, elements, legalUnit, secondUnit, styles, ...(colors.length||old?.colors?.length?{colors}:{}), note: str(p.note, '备注', false, 500), createdAt: old?.createdAt || ctx.now, actor: old?.actor || ctx.actorName, ...(old ? { updatedAt: ctx.now } : {}) };
     if (old) Object.assign(old, row); else list.push(row);
     event(row.id, `${old ? '修改' : '建立'}商品归类 ${row.code}：${hs} ${declaredName}（款号 ${styles.join('、')}）`);
     return { id: row.id };
