@@ -248,7 +248,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
         { key: 'source', header: '准确条目', render: line => <SourceLink source={{ kind: 'orderLine', orderId: line.orderId, lineId: line.lineId, productionId: line.productionId }} /> },
         { key: 'plan', header: '计划 / 已装箱', align: 'right', render: line => { const packed = packedFor(state, s, line); return <span className={packingRows.length && packed !== line.quantity ? 'mist-tone-bad' : undefined}>{line.quantity} / {packed} {unit(line.lineId)}</span>; } },
       ]} /> : <span className="mist-note">{uiText("出运不可用，无法核对装箱。")}</span>}
-      {packingRows.length > 0 ? <Facts cols={4} items={[{ label: '箱数', value: `${cartons} 箱` }, { label: '净重', value: `${net} kg` }, { label: '毛重', value: `${gross} kg` }, { label: '体积', value: `${volume} m³` }]} /> : s && <span className="mist-note">{uiText("后勤尚未装箱；申报数量与重量须以实际装箱为准。")}</span>}
+      {packingRows.length > 0 ? <Facts cols={4} items={[{ label: s?.domain === 'fabric' ? '包件数' : '箱数', value: `${cartons} ${s?.domain === 'fabric' ? '件' : '箱'}` }, { label: '净重', value: `${net} kg` }, { label: '毛重', value: `${gross} kg` }, { label: '体积', value: `${volume} m³` }]} /> : s && <span className="mist-note">{uiText("后勤尚未装箱；申报数量与重量须以实际装箱为准。")}</span>}
     </DetailBlock>
     <DetailBlock title={uiText("本票单据")} aside={s && <TextLink icon={FileText} onClick={onDocuments}>{uiText("处理本票单据")}</TextLink>}>
       {documents.length ? <DataTable ariaLabel={ui`${c.code} 本票单据`} rows={documents} rowKey={row => row.id} columns={[

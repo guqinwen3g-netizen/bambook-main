@@ -35,6 +35,12 @@ beforeEach(()=>{session.denied=new Set();const s=createMistState({id:()=>crypto.
   store.state=s;store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
+it('shows fabric packing as packages without asserting they are cartons',()=>{
+ const f=store.state!.fulfillment;f.shipments.push(shipment('fabric',{domain:'fabric'}));f.packing.push(pack('fabric',10));f.customs.push(customs('fabric','draft'));
+ render('cus-fabric');const detail=host.querySelector('[data-customs-detail="cus-fabric"]') as HTMLElement;
+ expect(detail.textContent).toContain('包件数');expect(detail.textContent).toContain('1 件');expect(detail.textContent).not.toContain('箱数');
+});
+
 it('derives customs reminders and rebate evidence only from recorded shipment, packing and receivable facts',()=>{
   const st=store.state!,f=st.fulfillment;
   f.shipments.push(shipment('a',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}),shipment('b'),shipment('c'),shipment('d',{state:'cancelled'}),shipment('e',{state:'departed'}));
