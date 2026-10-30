@@ -61,8 +61,8 @@ const referenceNav = byPart
     .map(c => `<a class="nav-item" href="#${esc(c.slug)}" data-target="${esc(c.slug)}">${esc(c.title)}${c.verdict === 'stale' ? '<i class="dot"></i>' : ''}</a>`)
     .join('')}</div>`)
   .join('');
-const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a><a class="nav-item" href="#tutorial-settlement" data-target="tutorial-settlement">提交一笔采购结算</a></div><div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
-const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p><a class="learning-card" href="#tutorial-settlement"><span class="learning-card-tag">分步教学样板 · 业务员</span><h2>提交一笔采购结算 <span aria-hidden="true">→</span></h2><p>选择合同 → 核对收货 → 理解金额 → 交给财务</p><span>4 个步骤 · 独立教学练习</span></a><div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
+const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a><a class="nav-item" href="#${esc(lesson.id)}" data-target="${esc(lesson.id)}">${esc(lesson.title)}</a></div><div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
+const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p><a class="learning-card" href="#${esc(lesson.id)}"><span class="learning-card-tag">${esc(lesson.role)} · 分步教学</span><h2>${esc(lesson.title)} <span aria-hidden="true">→</span></h2><p>${lesson.steps.map(s=>esc(s.title)).join(' → ')}</p><span>${lesson.steps.length} 个步骤 · 可看演示，也可自己练</span></a><div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
 
 const sections = chapters
   .map(c => `<section id="${esc(c.slug)}" class="chapter">
@@ -116,7 +116,7 @@ nav.toc{position:sticky;top:64px;height:calc(100vh - 64px);overflow:auto;padding
 .nav-item .dot{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:var(--warn)}
 
 main{padding:36px clamp(24px,3vw,44px) 100px;min-width:0;max-width:996px}
-.chapter{padding-bottom:48px;margin-bottom:40px;border-bottom:1px solid var(--line)}
+.chapter{scroll-margin-top:80px;padding-bottom:48px;margin-bottom:40px;border-bottom:1px solid var(--line)}
 .chapter:last-child{border-bottom:0}
 .chapter-head{display:flex;align-items:center;gap:12px;margin-bottom:8px}
 .chapter-head h1{font-size:clamp(26px,3vw,32px);line-height:1.3;margin:0;letter-spacing:-.02em}
