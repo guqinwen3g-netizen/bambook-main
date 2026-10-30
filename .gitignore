@@ -174,3 +174,9 @@ server/private/
 
 # Local assistant memory and runtime state
 .workbuddy/
+
+# Locally generated employee manual; source chapters remain tracked.
+/wiki/site/
+/wiki/registry.json
+/wiki/目录.md
+/wiki/版本登记.md
