@@ -245,6 +245,19 @@ function prepaidWithReceipt() {
   store.value.state.fulfillment.receipts.push({ id: 'rcpt-ui', purchaseId: po.id, quantity: 1000, rejected: 50, destination: 'warehouse', location: '嘉兴仓', date: day, evidence: '收货单', fileIds: [], actor: '仓库', createdAt: new Date().toISOString() });
 }
 
+it('结算选择能区分同日同地同数量的收货，并只提交选中的批次', async () => {
+  const receipt = { purchaseId: po.id, quantity: 500, rejected: 0, destination: 'warehouse', location: '口岸仓', date: day, fileIds: [], actor: '仓库', createdAt: new Date().toISOString() };
+  store.value.state.fulfillment.receipts.push({ ...receipt, id: 'white-batch', evidence: '本白 5 卷' }, { ...receipt, id: 'navy-batch', evidence: '藏蓝 5 卷' });
+  store.value.userId = 'sales'; store.value.permissions = [SETTLEMENT_SCOPES.submit]; ctx.actorId = 'sales'; ctx.actorName = '业务'; route.id = po.id; render();
+  const form = dialog('提交结算');
+  const white = getByRole(form, 'checkbox', { name: /本白 5 卷/ }) as HTMLInputElement;
+  const navy = getByRole(form, 'checkbox', { name: /藏蓝 5 卷/ }) as HTMLInputElement;
+  await act(async () => navy.click());
+  expect(white.checked).toBe(false); expect(navy.checked).toBe(true);
+  await click('提交复核', form);
+  expect(store.value.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'payable.settlement.submit', payload: expect.objectContaining({ purchaseId: po.id, receiptIds: ['navy-batch'] }) }));
+});
+
 it('发票先到：登记为待关联结算并暂挂，汇总单列；结算确认后在票据详情关联结算，才能申请付款', async () => {
   prepaidWithReceipt(); render();
   await click(/待登记来源/); await click('登记票据', getByRole(host, 'table', { name: '待登记来源合同' }));
