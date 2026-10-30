@@ -54,3 +54,9 @@ it('derives read-only QC and lane values without changing any business facts',()
  const f=fixture(),before=structuredClone(f.state);expect(fulfillmentProductionQcPassed(f.state,f.branch)).toBe(true);expect(fulfillmentProductionColumn(f.state,f.branch)).toBe('done');expect(f.state).toEqual(before);
  f.task.reportIds=['missing'];const incomplete=structuredClone(f.state);expect(fulfillmentProductionQcPassed(f.state,f.branch)).toBe(false);expect(fulfillmentProductionColumn(f.state,f.branch)).toBe('qc');expect(f.state).toEqual(incomplete);
 });
+
+it('does not show ready to ship while another open line has no production branch yet',()=>{
+  const f=fixture();f.state.orderLines.push({id:'line-2',orderId:'order',name:'马甲',style:'VS-01',qty:3,unit:'件',price:20,img:'coat',made:0,qc:0});
+  normalizeMistState(f.state,f.context);
+  expect(f.order.state).toBe('部分条目备料中');
+});

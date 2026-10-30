@@ -708,7 +708,9 @@ function recalculate(state: MistState) {
     // 加工合同批准即建生产分支；放行开产或已有进度前订单仍是"备料中"，不显示"生产中"。
     else if(jobs.some(job=>job.sourcePurchaseId&&((state.fulfillment&&fulfillmentProductionFact(state,job.id)?.release)||job.pct>0))){
       const columns=jobs.map(job=>fulfillmentProductionColumn(state,job));
-      order.state=columns.every(column=>column==='done')?(order.governance?.contract.internalSupply?'待交接':order.governance?.contract.kind==='internal'?'待内部交付':'待出运'):columns.some(column=>column==='qc')?'待终期 QC':'生产中';order.tone='accent';
+      // 仍有未结案条目没有任何生产分支（如第二款还在采购）时，不能因已开产的分支全部完成就显示可出运。
+      const unstarted=rows.some(line=>!isLineClosed(line)&&!jobs.some(job=>job.lineId===line.id));
+      order.state=columns.every(column=>column==='done')&&unstarted?'部分条目备料中':columns.every(column=>column==='done')?(order.governance?.contract.internalSupply?'待交接':order.governance?.contract.kind==='internal'?'待内部交付':'待出运'):columns.some(column=>column==='qc')?'待终期 QC':'生产中';order.tone='accent';
     }else if(jobs.some(job=>job.sourcePurchaseId)||(state.fulfillment?.purchases||[]).some(p=>p.orderId===order.id&&p.state==='approved')){order.state='备料中';order.tone='neutral';}
     if(order.governance?.status==='approved'&&order.governance.cancellation?.status==='pending'){order.state='取消审批中';order.tone='warn';}
   }

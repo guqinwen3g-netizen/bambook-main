@@ -556,6 +556,19 @@ describe('付款收尾：不等票付款、合同取消预付、历史补登', (
     expect(paymentRequests(s).find(r => r.id === req.result.id)!.state).toBe('approved');
   });
 
+  it('未生效的草稿或被退回采购单可直接作废留痕；待审批的须先退回', () => {
+    const { s, po4 } = prepaidFresh();
+    const at = (state: 'draft' | 'rejected' | 'pending') => { const st = structuredClone(s); st.fulfillment.purchases.find(p => p.id === po4.id)!.state = state; return st; };
+    const cancel = (st: MistState) => as('业务-王', st, { type: 'payable.purchase.cancel', payload: { purchaseId: po4.id, reason: '与另一张草稿重复' } });
+    for (const state of ['draft', 'rejected'] as const) {
+      const done = cancel(at(state)).state, po = done.fulfillment.purchases.find(p => p.id === po4.id)!;
+      expect(po).toMatchObject({ state: 'cancelled', cancellation: { reason: '与另一张草稿重复', prepaid: 0, actor: '业务-王' } });
+      expect(done.events[0].text).toContain('作废未生效采购单');
+    }
+    expect(err(() => cancel(at('pending')))).toContain('待审批，请审批人先退回');
+    expect(err(() => as('业务-王', at('draft'), { type: 'payable.purchase.cancel', payload: { purchaseId: po4.id, reason: '' } }))).toContain('作废原因');
+  });
+
   it('合同未执行取消：须无收货 / 结算 / 票据 / 在途申请；已付预付选退款则待退回，到账登记后清零', () => {
     let { s, po4: po1, planId } = prepaidFresh();
     const cancel = (st: MistState, payload: Record<string, unknown>) => as('业务-王', st, { type: 'payable.purchase.cancel', payload: { purchaseId: po1.id, reason: '客户取消订单，工厂未开工', ...payload } });
