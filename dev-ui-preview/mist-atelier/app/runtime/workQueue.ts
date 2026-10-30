@@ -6,7 +6,7 @@ import { shipmentStage } from './shipmentStage';
 import { financeReceiptDisplay } from './financeReceiptDisplay';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
-import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, payableBills, billRequestedUnpaidMinor } from '../../../../server/src/shared/mistPayables';
+import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, payableBills, billRequestedUnpaidMinor, prepaymentPlans } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
@@ -191,6 +191,14 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         const cancelledAt=requests.filter(request=>request.state==='cancelled'&&request.lines.some(line=>line.billId===bill.id)).map(request=>request.cancelled?.at);
         const readyAt=[bill.registeredAt,...linkedAt,...cancelledAt].filter((value):value is string=>!!value).sort().at(-1)||bill.invoiceDate||today;
         push({id:'bill-request:'+bill.id,source:'finance',title:`${bill.code} · ${uiText('待申请付款')}`,meta:[bill.supplier,`${bill.currency} ${(available/100).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`].join(' · '),when:bill.overdue?'已逾期':'待申请',urgent:bill.overdue,at:readyAt,due:bill.due,target:{view:'payment-vouchers',id:bill.id,section:'payables'}});
+      }
+      // 预付款计划待申请：只提醒合同经办人；到计划付款日仍未申请即为逾期，避免供应商因未收到预付而不排产 / 不发货。
+      for(const plan of prepaymentPlans(state)){
+        if(plan.state!=='active'||plan.stage!=='prepayment'||plan.available<=0||contracts.get(plan.purchaseId)?.requesterId!==me)continue;
+        if(requests.some(request=>request.planId===plan.id&&request.state==='pending'))continue;
+        const overdue=!!plan.due&&plan.due<today;
+        push({id:'plan-request:'+plan.id,source:'finance',title:`${plan.code} · ${uiText('待申请预付款')}`,meta:[plan.purchaseCode,plan.supplier,`${plan.currency} ${plan.available.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`].filter(Boolean).join(' · '),
+          when:overdue?'已逾期':'待申请',urgent:overdue,at:plan.registeredAt||plan.due||today,...(plan.due?{due:plan.due}:{}),target:{view:'payment-vouchers',id:plan.id,section:'payables'}});
       }
     }
     const settlementFacts = state.payables?.settlements;

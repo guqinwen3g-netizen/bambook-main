@@ -71,6 +71,28 @@ function approvedPay(st: MistState, supplierId: string, lines: Array<{ billId: s
 }
 
 describe('付款申请与主管审批', () => {
+  it('收款账户：财务登记并核实；申请冻结账户并写入审批快照；批准后账户变更则不能按原申请付款', () => {
+    const { state, po1 } = demo();
+    expect(mistCommandPermission({ type: 'market.supplier.bank.save', payload: {} } as any)).toBe('invoices:write');
+    const bank = (st: MistState, accountNo: string, verification = '致电供应商财务张敏（合同所列电话）确认') => as('财务-林', st, { type: 'market.supplier.bank.save', payload: { supplierId: po1.supplierId, currency: 'CNY', accountName: '华盛毛纺有限公司', bankName: '工商银行嘉兴分行', accountNo, verification } });
+    expect(err(() => bank(state, '12'))).toContain('账号格式');
+    expect(err(() => bank(state, '1204 0012 3456 7788', '已核'))).toContain('核实方式');
+    let s = run(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 30000 }])).state;
+    const a = payableBills(s, today)[0];
+    // 没有收款账户也能申请，但审批快照明确提示未登记。
+    const bare = as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 100 }]));
+    expect(getMistReviewTasks(bare.state).find(t => t.id === 'payment:' + bare.result.id)!.details.find(d => d.label === '收款账户')!.value).toContain('未登记收款账户');
+    s = bank(s, '1204 0012 3456 7788', '致电供应商财务张敏（合同所列电话）确认').state;
+    const req = as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 30000 }]));
+    s = req.state; const id = String(req.result.id);
+    expect(getMistReviewTasks(s).find(t => t.id === 'payment:' + id)!.details.find(d => d.label === '收款账户')!.value).toMatch(/华盛毛纺有限公司 · 工商银行嘉兴分行 · 12040012345677 88|华盛毛纺有限公司 · 工商银行嘉兴分行 · 1204001234567788（30 天内新增或变更/);
+    s = as('主管-周', s, decide(id)).state;
+    const changed = as('财务-林', s, { type: 'market.supplier.bank.save', payload: { supplierId: po1.supplierId, currency: 'CNY', accountName: '华盛毛纺有限公司', bankName: '农业银行嘉兴分行', accountNo: '1900011122233344', verification: '供应商盖章变更函 + 致电张敏核实' } }).state;
+    expect(changed.market.suppliers.find(x => x.id === po1.supplierId)!.bankAccounts!.map(x => x.state)).toEqual(['replaced', 'active']);
+    const pay = (st: MistState) => as('财务-林', st, { type: 'payable.payment.register', payload: { requestId: id, date: '2026-10-14', amount: 30000, reference: 'BANK-1', allocations: [{ billId: a.id, amount: 30000 }] } });
+    expect(err(() => pay(changed))).toContain('收款账户在申请后已变更');
+    expect(() => pay(s)).not.toThrow();
+  });
   it('权限沿用矩阵：申请需付款申请创建权，审批需付款申请审批权；没有已批准申请不能登记任何付款', () => {
     expect(mistCommandPermission({ type: 'payable.request.submit', payload: {} } as any)).toBe('finance:payment_request:create');
     expect(mistCommandPermission({ type: 'payable.request.decide', payload: {} } as any)).toBe('finance:payment_request:approve');

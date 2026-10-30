@@ -1,6 +1,6 @@
 import {PayableDialog as Dialog,PayableDialogRecovery} from './PayableDialog';
 import {SupplierInvoiceTypeDialog} from './SupplierInvoiceTypeDialog';
-import {SUPPLIER_INVOICE_TYPES,billRebateLock,type SupplierInvoiceType} from '../../../../server/src/shared/mistPayables';
+import {SUPPLIER_INVOICE_TYPES,billRebateLock,supplierPayee,payeeText,type SupplierInvoiceType} from '../../../../server/src/shared/mistPayables';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
 /** 应付待办：供应商票据 → 应付余额 → 付款申请（主管审批）→ 实际付款与多票分配。只用已登记事实，不用合同金额猜应付。
@@ -59,6 +59,12 @@ type PreDraft = { planId: string; amount: string; reason: string; fileIds?: stri
 type ReasonKind = 'void' | 'reverse-payment' | 'reverse-allocation' | 'cancel-request' | 'cancel-plan' | 'return-settlement' | 'cancel-settlement' | 'reverse-settlement' | 'reverse-deduction' | 'reverse-prepayment';
 /** 票据行关联选项中的“发票先到、结算确认后再关联”。 */
 const HELD = '__held';
+/** 合同付款条件写明“N% 预付 / 定金 / 订金”时，按合同金额 × N% 预填预付款计划金额（可改）。 */
+export function termsPrepayment(po: { quantity: number; price: number; terms?: string }) {
+  const match = (po.terms || '').match(/(\d+(?:\.\d+)?)\s*%\s*(?:的)?\s*(?:预付|定金|订金)|(?:预付|定金|订金)\s*(\d+(?:\.\d+)?)\s*%/);
+  const pct = match ? Number(match[1] ?? match[2]) : NaN;
+  return pct > 0 && pct <= 100 ? String(Math.round(po.quantity * po.price * pct) / 100) : '';
+}
 const REASON: Record<ReasonKind, { title: string; label: string; action: string; description: string; done: string }> = {
   void: { title: '作废供应商票据', label: '作废原因', action: '确认作废', description: '作废后不再计入应付，合同可重新登记票据；原记录保留，不删除。', done: '票据已作废' },
   'reverse-payment': { title: '付款冲回', label: '冲回原因', action: '确认冲回', description: '原付款记录保留，另记一笔反向记录；分到票据的金额一并冲回，票据恢复未付。对应付款申请回到“已批准待付”。', done: '付款已冲回' },
@@ -426,6 +432,13 @@ export function FinancePayables() {
       footer={<><Button disabled={busy} onClick={() => setPayDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !(existing ? canAllocate : payRequest ? canPay : canRequest)} onClick={submitPay}>{uiText(existing ? '确认分配' : payRequest ? '登记实付' : '提交审批')}</Button></>}>
       {payDraft && <div className="mist-col">
         {failure && <Banner tone="bad" title={uiText("还不能保存")}>{failure}</Banner>}
+        {payRequest && state && (() => {
+          // 按申请冻结的收款账户付款；申请后账户被变更时服务端拒绝，这里先提示。
+          const current = supplierPayee(state, payRequest.supplierId, payRequest.currency), frozen = payRequest.payee;
+          if (!frozen) return <Banner tone="warn" title={uiText('申请未冻结收款账户')}>{uiText(current ? `供应商现有账户：${payeeText(current, businessNow().toISOString())}，付款前请核实。` : '供应商未登记收款账户，请先在供应商档案登记并核实。')}</Banner>;
+          if (current?.accountId !== frozen.accountId) return <Banner tone="bad" title={uiText('收款账户在申请后已变更')}>{uiText('请撤回申请，按新账户重新提交审批。')}</Banner>;
+          return <Facts items={[{ label: '收款账户', value: payeeText(frozen, businessNow().toISOString()) }]} />;
+        })()}
         {payDraft.mode === 'request' && <FormGrid>
           <Field label={uiText("收款供应商")} required><Select aria-label={uiText("收款供应商")} value={payDraft.supplierId} options={[{ value: '', label: '请选择供应商' }, ...suppliers]} onChange={e => setPayDraft({ ...payDraft, supplierId: e.target.value, allocations: {} })} /></Field>
           <Field label={uiText("币种")} required><Select aria-label={uiText("币种")} value={payDraft.currency} options={payCurrencies} onChange={e => setPayDraft({ ...payDraft, currency: e.target.value, allocations: {} })} /></Field>
@@ -453,7 +466,7 @@ export function FinancePayables() {
       footer={<><Button disabled={busy} onClick={() => setPlanDraft(null)}>{uiText("取消")}</Button><Button variant="primary" loading={busy} disabled={busy || !canBill} onClick={submitPlan}>{uiText("登记计划")}</Button></>}>
       {planDraft && <div className="mist-col">
         {failure && <Banner tone="bad" title={uiText("还不能登记")}>{failure}</Banner>}
-        <Field label={uiText("来源合同")} required><Select aria-label={uiText("来源合同")} value={planDraft.purchaseId} options={[{ value: '', label: '请选择已批准合同' }, ...approvedPurchases.map(p => ({ value: p.id, label: `${p.code} · ${p.supplier} · ${apMoney(Math.round(p.quantity * p.price * 100) / 100, p.currency)}` }))]} onChange={e => { const po = approvedPurchases.find(p => p.id === e.target.value); setPlanDraft({ ...planDraft, purchaseId: e.target.value, basis: planDraft.basis || (po ? '合同付款条件：' + (po.terms || '未填写') : '') }); }} /></Field>
+        <Field label={uiText("来源合同")} required><Select aria-label={uiText("来源合同")} value={planDraft.purchaseId} options={[{ value: '', label: '请选择已批准合同' }, ...approvedPurchases.map(p => ({ value: p.id, label: `${p.code} · ${p.supplier} · ${apMoney(Math.round(p.quantity * p.price * 100) / 100, p.currency)}` }))]} onChange={e => { const po = approvedPurchases.find(p => p.id === e.target.value); setPlanDraft({ ...planDraft, purchaseId: e.target.value, basis: planDraft.basis || (po ? '合同付款条件：' + (po.terms || '未填写') : ''), amount: planDraft.amount || (po && (planDraft.stage || 'prepayment') === 'prepayment' ? termsPrepayment(po) : '') }); }} /></Field>
         <FormGrid>
           <Field label={uiText("计划类型")} required><Select aria-label={uiText("计划类型")} value={planDraft.stage} options={(['prepayment', 'progress', 'final'] as const).map(v => ({ value: v, label: paymentPlanStageLabel(v) }))} onChange={e => setPlanDraft({ ...planDraft, stage: e.target.value as PaymentPlanStage })} /></Field>
           <Field label={uiText(paymentPlanStageLabel(planDraft.stage) + '金额')} required><TextInput aria-label={uiText("计划金额")} type="number" min="0.01" step="0.01" value={planDraft.amount} onChange={e => setPlanDraft({ ...planDraft, amount: e.target.value })} /></Field>

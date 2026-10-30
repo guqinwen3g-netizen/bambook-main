@@ -64,10 +64,23 @@ export type PrepaymentPlan = {
   amount: number; trigger: string; basis: string; due: string; note: string; state: 'active' | 'cancelled';
   registeredAt: string; registeredBy: string; cancelled?: { at: string; actor: string; reason: string };
 };
+export type PaymentPayee = { accountId: string; accountName: string; bankName: string; accountNo: string; swift?: string; addedAt: string };
+/** 新增或变更不满 30 天的收款账户，审批与付款时提示按已知电话再次核实。 */
+export const PAYEE_RECENT_DAYS = 30;
+export function supplierPayee(root: { market?: { suppliers?: Array<{ id: string; bankAccounts?: Array<{ id: string; state: string; currency: string; accountName: string; bankName: string; accountNo: string; swift?: string; addedAt: string }> }> } }, supplierId: string, currency: string): PaymentPayee | undefined {
+  const a = root.market?.suppliers?.find(x => x.id === supplierId)?.bankAccounts?.find(x => x.state === 'active' && x.currency === currency);
+  return a ? { accountId: a.id, accountName: a.accountName, bankName: a.bankName, accountNo: a.accountNo, ...(a.swift ? { swift: a.swift } : {}), addedAt: a.addedAt } : undefined;
+}
+export const payeeRecent = (payee: PaymentPayee, now: string) => Date.parse(now) - Date.parse(payee.addedAt) < PAYEE_RECENT_DAYS * 86400000;
+export const payeeText = (payee: PaymentPayee | undefined, now: string) => payee
+  ? `${payee.accountName} · ${payee.bankName} · ${payee.accountNo}${payee.swift ? ' · SWIFT ' + payee.swift : ''}${payeeRecent(payee, now) ? `（${PAYEE_RECENT_DAYS} 天内新增或变更，付款前请按已知电话核实）` : ''}`
+  : '未登记收款账户，付款前须由财务登记并核实';
 export type PaymentRequestLine = { billId: string; billCode: string; invoiceNo: string; amount: number };
 export type PaymentRequest = {
   id: string; code: string; purpose: 'prepayment' | 'bill' | 'settlement'; supplierId: string; supplier: string; currency: string; amount: number;
-  planId?: string; purchaseId?: string; purchaseCode?: string; settlementId?: string; settlementCode?: string; lines: PaymentRequestLine[]; reason: string; fileIds: string[];
+  planId?: string; purchaseId?: string; purchaseCode?: string; settlementId?: string; settlementCode?: string; lines: PaymentRequestLine[];
+  /** 提交时冻结的收款账户；付款登记时供应商当前账户须与此一致。 */
+  payee?: PaymentPayee; reason: string; fileIds: string[];
   requesterId: string; requester: string; submittedAt: string; reviewerIds: string[]; snapshot: Array<{ label: string; value: string }>;
   state: 'pending' | 'approved' | 'rejected' | 'paid' | 'cancelled';
   decision?: { actorId: string; actor: string; at: string; decision: 'approved' | 'rejected'; note: string };
@@ -661,6 +674,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (amount !== mistMoneyMinor(request.amount)) fail('实付金额须与已批准申请一致；金额不同请撤回申请并重新提交审批');
       if (p.currency !== undefined && text(p.currency, '币种', true, 3).toUpperCase() !== request.currency) fail('币种与已批准申请不一致');
       if (p.supplierId !== undefined && text(p.supplierId, '收款供应商') !== request.supplierId) fail('收款供应商与已批准申请不一致');
+      if (request.payee && supplierPayee(root as any, request.supplierId, request.currency)?.accountId !== request.payee.accountId) fail('供应商收款账户在申请后已变更，请撤回申请，按新账户重新提交审批', 'PRECONDITION');
       const reference = text(p.reference, '银行流水号 / 参考号', true, 120);
       if (s.payments.some(x => x.supplierId === request.supplierId && key(x.reference) === key(reference) && !paymentReversed(root, x.id))) fail(`流水号 ${reference} 已登记过这家供应商的付款，请核对是否重复`, 'CONFLICT');
       const input = Array.isArray(p.allocations) ? p.allocations as AllocationInput : [];
@@ -771,6 +785,11 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         ];
         request = { id, code, purpose: 'bill', supplierId, supplier, currency, amount: major(total), lines, ...(plan ? { planId: plan.id, purchaseId: plan.purchaseId, purchaseCode: plan.purchaseCode } : {}), reason, fileIds, requesterId: c.actorId, requester: c.actorName, submittedAt: c.now, reviewerIds, snapshot, state: 'pending', paymentHistory: [] };
       } else return fail('付款申请类型无效');
+      // 冻结收款账户并写入审批快照，审批人看到钱付到哪里。
+      const payee = supplierPayee(root as any, request.supplierId, request.currency);
+      if (payee) request.payee = payee;
+      const at = request.snapshot.findIndex(row => row.label === '供应商');
+      request.snapshot.splice(at < 0 ? request.snapshot.length : at + 1, 0, { label: '收款账户', value: payeeText(payee, c.now) });
       s.requests.push(request);
       event(root, c, id, `提交付款申请 ${code}（${request.supplier} · ${money(mistMoneyMinor(request.amount), request.currency)}）`);
       return { id };

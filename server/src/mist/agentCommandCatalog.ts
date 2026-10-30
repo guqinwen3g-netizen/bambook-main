@@ -936,6 +936,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistMarket.ts"
  },
  {
+  "type": "market.supplier.bank.save",
+  "payload": "{supplierId:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string}",
+  "source": "server/src/shared/mistMarket.ts"
+ },
+ {
   "type": "market.supplier.certificate.delete",
   "payload": "{supplierId:string;id:string}",
   "source": "server/src/shared/mistMarket.ts"

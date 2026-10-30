@@ -23,7 +23,9 @@ export const PRODUCT_SPEC_FIELDS:Record<MarketProduct['category'],Array<{key:str
  trimming:[{key:'trimType',label:'辅料类型'},{key:'size',label:'规格尺寸'},{key:'moq',label:'起订量'}],
 };
 function productSpecs(category:MarketProduct['category'],value:unknown):Record<string,string>{if(value!==undefined&&(typeof value!=='object'||value===null||Array.isArray(value)))fail('规格格式无效');const out:Record<string,string>={};for(const f of PRODUCT_SPEC_FIELDS[category]){const v=(value as Record<string,unknown>|undefined)?.[f.key];if(v===undefined||v==='')continue;if(typeof v!=='string'||v.length>200)fail(f.label+'格式无效');if(v.trim())out[f.key]=v.trim();}if((category==='fabric')&&out.weight&&!/^\d{1,4}(\.\d{1,2})?$/.test(out.weight))fail('克重须为数字（g/m²）');if(category==='fabric'&&out.width&&!/^\d{1,4}(\.\d{1,2})?$/.test(out.width))fail('门幅须为数字（cm）');return out;}
-export type MarketSupplier = RecordBase & { code:string; name:string; type:string; country:string; address:string; capabilities:string; capacity:number; capacityUnit:string; leadDays:number; status:'active'|'paused'|'blocked'; blockReason:string; statusFrom?:string; statusHistory?:SupplierStatusChange[]; certificates?:SupplierCertificate[]; ratings?:SupplierRating[]; /** 包 A / P5：每个业务组一名经手人（账号 ID + 显示名快照），须为本公司有效成员且属于该组。 */ handlers?:Partial<Record<MistBusinessGroup,MistAccountRef>>; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
+export type MarketSupplier = RecordBase & { code:string; name:string; type:string; country:string; address:string; capabilities:string; capacity:number; capacityUnit:string; leadDays:number; status:'active'|'paused'|'blocked'; blockReason:string; statusFrom?:string; statusHistory?:SupplierStatusChange[]; certificates?:SupplierCertificate[]; ratings?:SupplierRating[]; /** 包 A / P5：每个业务组一名经手人（账号 ID + 显示名快照），须为本公司有效成员且属于该组。 */ handlers?:Partial<Record<MistBusinessGroup,MistAccountRef>>; bankAccounts?:SupplierBankAccount[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
+/** 供应商收款账户：财务登记并核实；更换时原账户保留为已替换，付款申请提交时冻结当时的账户。 */
+export type SupplierBankAccount={id:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string;addedAt:string;addedBy:string;state:'active'|'replaced';replacedAt?:string};
 export type RelationHoldChange={action:'freeze'|'release';reason:string;at:string;actor:string};
 export const SUPPLIER_TYPES=['织造','染整','印花','成衣加工','辅料','面料贸易','服务商'] as const;
 export const SUPPLIER_GRADES=['A','B','C','D'] as const;
@@ -55,6 +57,7 @@ export type MarketCommand =
  | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}}
  | {type:'market.supplier.save';payload:{id?:string;input:Pick<MarketSupplier,'name'|'type'>&Partial<Omit<Input<MarketSupplier>,'name'|'type'|'contacts'|'blockReason'|'statusFrom'|'statusHistory'|'certificates'|'ratings'|'handlers'>>&{/** 各业务组经手人账号 ID；省略的组保持不变，空字符串表示清除。 */handlerIds?:Partial<Record<MistBusinessGroup,string>>}}}
  | {type:'market.supplier.status';payload:{id:string;status:MarketSupplier['status'];reason:string;effectiveDate?:string}}
+ | {type:'market.supplier.bank.save';payload:{supplierId:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string}}
  | {type:'market.supplier.certificate.save';payload:{supplierId:string;id?:string;name:string;number:string;issuer:string;validUntil:string;fileIds:string[]}}
  | {type:'market.supplier.certificate.delete';payload:{supplierId:string;id:string}}
  | {type:'market.supplier.rate';payload:{supplierId:string;grade:SupplierRating['grade'];period:string;note:string}}
@@ -99,6 +102,8 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  if(command.type.startsWith('market.quotation.'))return 'quotations:write';
  // 包 A / P6：评级、暂停、停用、恢复须 suppliers:admin（并须填原因）；档案、认证、联系人维护为 suppliers:write。
  if(command.type==='market.supplier.rate'||command.type==='market.supplier.status')return 'suppliers:admin';
+ // 收款账户由财务登记与核实，与供应商档案维护分岗。
+ if(command.type==='market.supplier.bank.save')return 'invoices:write';
  if(command.type.startsWith('market.supplier.'))return 'suppliers:write';
  if(command.type==='market.contact.save'&&command.payload?.kind==='supplier')return 'suppliers:write';
  if(command.type.startsWith('market.relation.')||command.type==='market.contact.save')return 'relations:write';
@@ -322,6 +327,17 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const effectiveDate=status==='active'?today:command.payload.effectiveDate?day(command.payload.effectiveDate,'生效日'):today;if(effectiveDate<today)fail('生效日不能早于今天');if(status===row.status&&(row.statusFrom||today)===effectiveDate&&status==='active')fail('供应商已在使用中');
    row.status=status;row.blockReason=status==='active'?'':reason;row.statusFrom=status==='active'?undefined:effectiveDate;row.statusHistory=[...(row.statusHistory||[]),{status,reason,effectiveDate,at:ctx.now,actor:ctx.actorName}];row.updatedAt=ctx.now;
    history(root,ctx,'supplier',row.id,(status==='active'?'恢复合作':status==='paused'?'暂停合作':'停用')+'（'+effectiveDate+' 生效）'+(reason?'：'+reason:''));result={id:row.id};break;}
+  case 'market.supplier.bank.save':{const i=command.payload,row=find(m.suppliers,i.supplierId,'供应商'),list=row.bankAccounts||[];
+   const currency=str(i.currency,'币种').toUpperCase();if(!/^[A-Z]{3}$/.test(currency))fail('币种无效');
+   const accountName=str(i.accountName,'账户名称'),bankName=str(i.bankName,'开户行'),accountNo=str(i.accountNo,'账号').replace(/\s+/g,'');
+   if(!/^[A-Za-z0-9-]{6,40}$/.test(accountNo))fail('账号格式无效');
+   const swift=str(i.swift??'','SWIFT',false).toUpperCase();if(swift&&!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(swift))fail('SWIFT 代码格式无效');
+   const verification=str(i.verification,'核实记录');if(verification.length<6)fail('请写明核实方式：向谁、通过已知电话或回签函核实');
+   const current=list.find(a=>a.state==='active'&&a.currency===currency);
+   if(current&&current.accountNo===accountNo&&current.bankName===bankName&&current.accountName===accountName)fail('与现有收款账户相同');
+   const account:SupplierBankAccount={id:ctx.id(),currency,accountName,bankName,accountNo,...(swift?{swift}:{}),verification,addedAt:ctx.now,addedBy:ctx.actorName,state:'active'};
+   row.bankAccounts=[...list.map(a=>a===current?{...a,state:'replaced' as const,replacedAt:ctx.now}:a),account];row.updatedAt=ctx.now;
+   history(root,ctx,'supplier',row.id,`${current?'变更':'登记'}收款账户（${currency}）：${accountName} · ${bankName} · 尾号 ${accountNo.slice(-4)}；核实：${verification}`);result={id:account.id};break;}
   case 'market.supplier.certificate.save':{const i=command.payload,row=find(m.suppliers,i.supplierId,'供应商'),list=row.certificates||[],old=i.id?find(list,i.id,'认证'):undefined;
    const cert:SupplierCertificate={id:old?.id||ctx.id(),name:str(i.name,'认证名称'),number:str(i.number,'证书编号',false),issuer:str(i.issuer,'发证机构',false),validUntil:day(i.validUntil,'有效期至'),fileIds:attachmentIds(root,i.fileIds),updatedAt:ctx.now};
    if(list.some(c=>c.id!==cert.id&&c.name.toLowerCase()===cert.name.toLowerCase()&&c.number===cert.number))fail('该认证已登记');row.certificates=old?list.map(c=>c===old?cert:c):[...list,cert];row.updatedAt=ctx.now;history(root,ctx,'supplier',row.id,(old?'更新认证 ':'登记认证 ')+cert.name+'（有效期至 '+cert.validUntil+'）',cert.fileIds);result={id:row.id,certificateId:cert.id};break;}

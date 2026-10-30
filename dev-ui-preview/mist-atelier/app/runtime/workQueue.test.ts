@@ -348,3 +348,13 @@ it('shows a pending Agent proposal only to its owner, as an urgent item to confi
  expect(mistWorkQueue(state,{...options,me:'finance'}).filter(item=>item.source==='agent')).toMatchObject([{id:'agent-proposal:p1',title:'确认 ST-2026-0001 结算',meta:'华盛毛纺 · 110,670.00 CNY',urgent:true}]);
  expect(mistWorkQueue(state,{...options,me:'sales'}).filter(item=>item.source==='agent')).toHaveLength(0);
 });
+it('reminds only the contract handler to request an active prepayment plan, overdue after the planned date, and stops once a request is pending',()=>{
+ const state=createMistState({id:()=>'id',now:'2026-10-30T08:00:00.000Z',actorName:'系统'} as any,'demo');
+ const po=state.fulfillment.purchases.find(p=>p.code==='PO-2026-00001')!;
+ state.payables!.plans=[{id:'plan',code:'PP-2026-0001',stage:'prepayment',purchaseId:po.id,purchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:'CNY',amount:33480,trigger:'合同签订后',basis:'30% 预付',due:'2026-10-20',note:'',state:'active',registeredAt:'2026-10-18T02:00:00.000Z',registeredBy:'林舒'}] as any;
+ const options={canRead:()=>true,can:(scope:string)=>scope==='finance:payment_request:create',today:'2026-10-30'};
+ expect(mistWorkQueue(state,{...options,me:po.requesterId}).filter(i=>i.id==='plan-request:plan')).toMatchObject([{title:'PP-2026-0001 · 待申请预付款',when:'已逾期',urgent:true}]);
+ expect(mistWorkQueue(state,{...options,me:'someone-else'}).filter(i=>i.id==='plan-request:plan')).toHaveLength(0);
+ state.payables!.requests=[{id:'r',purpose:'prepayment',planId:'plan',purchaseId:po.id,state:'pending',amount:33480,currency:'CNY',lines:[]} as any];
+ expect(mistWorkQueue(state,{...options,me:po.requesterId}).filter(i=>i.id==='plan-request:plan')).toHaveLength(0);
+});
