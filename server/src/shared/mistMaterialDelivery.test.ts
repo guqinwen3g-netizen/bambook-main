@@ -1,3 +1,4 @@
+import {scopedWriteViolation} from './mistDataScope';
 import { expect, it } from 'vitest';
 import { materialDeliveryFixture } from '../mist/__tests__/materialDelivery';
 import { internalFabricCostShare, materialDeliveryRows, assertInternalFabricOrderChange } from './mistInternalFabric';
@@ -49,9 +50,8 @@ it('supports supplier direct delivery with no company stock entry and preserves 
   expect(internalFabricCostShare(f.state, f.purchaseId, f.target.orderId, 682040)).toBe(136000);
 });
 
-it('denies another business group and a disabled receiving owner, while allowing authorized central warehouse staff', () => {
+it('rejects a disabled receiving owner while allowing authorized central warehouse staff', () => {
   const f = materialDeliveryFixture();
-  expect(() => f.issue(1, 'garment')).toThrow('业务组');
   f.context.members!.find(m => m.id === 'garment')!.active = false; expect(() => f.issue(1)).toThrow('停用');
   f.context.members!.find(m => m.id === 'garment')!.active = true; f.issue(1, 'warehouse');
   expect(materialDeliveryRows(f.state)).toHaveLength(1);
@@ -84,4 +84,14 @@ it('locks physical source changes after issue but permits an internal budget upd
   const order=f.state.orders.find(o=>o.id===f.source.orderId)!,line=f.state.orderLines.find(l=>l.id===f.source.lineId)!;
   expect(()=>assertInternalFabricOrderChange(f.state,order,[{...line,price:101} as never],order.governance!.contract)).not.toThrow();
   expect(()=>assertInternalFabricOrderChange(f.state,order,[{...line,unit:'m'} as never],order.governance!.contract)).toThrow('面料来源或规格');
+});
+
+it('uses explicit record scope rather than a business-group name for cross-group material writes',()=>{
+ const isolated=materialDeliveryFixture(),before=structuredClone(isolated.state);
+ isolated.issue(1,'garment');
+ expect(scopedWriteViolation(before,isolated.state,{userIds:['garment'],teamIds:[]})).not.toBeNull();
+ const shared=materialDeliveryFixture();
+ shared.state.teamScopes=[{teamId:'material-team',conditions:[],picks:[{kind:'order',id:shared.source.orderId}],exclusions:[],history:[]} as any];
+ const sharedBefore=structuredClone(shared.state);shared.issue(1,'garment');
+ expect(scopedWriteViolation(sharedBefore,shared.state,{userIds:['garment'],teamIds:['material-team']})).toBeNull();
 });

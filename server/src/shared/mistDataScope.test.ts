@@ -224,3 +224,12 @@ it('permits only the exact lineage of a shared product in product-backed inputs'
  expect(scopedReferenceViolation(state,{userIds:['member'],teamIds:[]},payload)).toMatchObject({id:'source'});
  payload.input.lines[0].sourceDevId='other-source';expect(scopedReferenceViolation(state,{userIds:['member'],teamIds:[]},payload,true)).toMatchObject({id:'other-source'});
 });
+
+it('shows a fabric supplier its allocated metres without exposing or granting writes to the garment order',()=>{
+ const state:any={customers:[],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[{id:'fabric',ownerId:'source-owner',type:'fabric'},{id:'garment',ownerId:'other-owner',type:'garment',customer:'private customer'}],orderLines:[{id:'fabric-line',orderId:'fabric',qty:200},{id:'garment-line',orderId:'garment'}],internalFabricAllocations:[{id:'allocation',orderId:'garment',lineId:'garment-line',fabricOrderId:'fabric',fabricLineId:'fabric-line',metres:'180',status:'active',revision:1,history:[]}],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};
+ const scope={userIds:['source-owner'],teamIds:[]},projected=applyDataScope(state,scope,'source-owner');
+ expect(projected.internalFabricAllocations.map(row=>row.id)).toEqual(['allocation']);
+ expect(projected.orders.map(row=>row.id)).toEqual(['fabric']);expect(JSON.stringify(projected)).not.toContain('private customer');
+ const after=structuredClone(state);after.internalFabricAllocations[0].metres='190';
+ expect(scopedWriteViolation(state,after,scope)).toMatchObject({path:'internalFabricAllocations',id:'allocation'});
+});

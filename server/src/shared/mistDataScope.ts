@@ -61,6 +61,9 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   const f: any = state.fulfillment ?? {}, p: any = state.platform ?? {};
   const orders = out.get('orders')!, devs = out.get('devs')!, has = (path: string, id: unknown) => typeof id === 'string' && out.get(path)!.has(id);
   for (const row of state.orderLines ?? []) if (orders.has(row.orderId)) add('orderLines', row.id);
+  // The source team needs its committed metres to avoid allocating them twice.
+  // This is read-only reachability: it must not grant edits to the target allocation/order.
+  if (includeReadonly) for (const row of state.internalFabricAllocations ?? []) if (orders.has(row.fabricOrderId)) add('internalFabricAllocations', row.id);
   for (const draft of state.drafts ?? []) if (users.has(draft.ownerId ?? '') || users.has(draft.values?.requesterId ?? '') || !!draft.values?.sourceDevId && collaboratingDevs.has(draft.values.sourceDevId)) add('drafts', draft.id);
   for (const row of state.versions ?? []) if (devs.has(row.devId)) add('versions', row.id);
   for (const row of state.rounds ?? []) if (devs.has(row.devId)) add('rounds', row.id);

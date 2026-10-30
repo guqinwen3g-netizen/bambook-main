@@ -251,7 +251,7 @@ export function materialDeliveryTargets(root: MistState, purchaseId: string): Ar
     return [{ value: branch.id, label: `${contract.code} · ${contract.supplier}${remaining ? ` · 可发 ${remaining} 米` : ''}`, ...(remaining ? { remaining } : {}) }];
   });
 }
-/** Central warehouse staff have no business-group assignment; group-assigned staff may write only their own line. */
+/** Record/command permissions are enforced by the workspace boundary; verify active operators here. */
 export function assertMaterialSender(root: MistState, purchaseId: string, ctx: MistContext) {
   if (!ctx.members) return fail('无法核对发料经办人，请刷新');
   const p = root.fulfillment.purchases.find(p => p.id === purchaseId); if (!p) return fail('来源采购不存在');
