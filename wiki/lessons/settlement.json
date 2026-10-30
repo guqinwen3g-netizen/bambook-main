@@ -1,12 +1,13 @@
 {
   "id": "tutorial-settlement",
+  "order": 10,
   "title": "提交一笔采购结算",
   "role": "业务员",
   "handoff": "财务",
   "prerequisite": "合同已批准，本批收货已登记",
   "minutes": 3,
   "entry": "首页 → 接着完成 → 待结算",
-  "altEntry": "财务管理 → 应付待办 → 提交结算",
+  "template": "settlementSubmit",
   "example": {
     "contract": "PO-001",
     "supplier": "示例加工厂",
@@ -19,6 +20,23 @@
     "location": "本厂仓库",
     "settlement": "ST-0001",
     "note": "第一批 20 件已验收，按合同单价结算。"
+  },
+  "initial": {
+    "screen": "home",
+    "settleCount": "0",
+    "receipt": false,
+    "final": false,
+    "submitted": false,
+    "opened": false,
+    "note": "",
+    "qtyText": "0 件",
+    "totalText": "0.00 CNY",
+    "error": "",
+    "errorTitle": "还不能提交",
+    "blocked": "",
+    "queueEmpty": false,
+    "receiptBlocked": false,
+    "receiptSuffix": ""
   },
   "steps": [
     {
@@ -46,13 +64,19 @@
       "fill": "只勾本次结算的收货批次",
       "see": "「本次实收」变为 20 件，「结算金额」变为 700.00 CNY（20 × 35.00）。",
       "after": {
-        "receipt": true
+        "receipt": true,
+        "qtyText": "20 件",
+        "totalText": "700.00 CNY"
       },
       "failure": {
         "title": "收货记录是灰色，勾不上",
         "text": "「待接收人点收」要等接收人点收后再结算；「已在结算中」说明已被另一笔结算引用，不要重复结算。拒收数量不计入结算。",
         "preview": {
-          "receiptBlocked": "待接收人点收"
+          "receipt": false,
+          "receiptBlocked": true,
+          "receiptSuffix": " · 待接收人点收",
+          "qtyText": "0 件",
+          "totalText": "0.00 CNY"
         }
       }
     },
@@ -69,7 +93,8 @@
         },
         {
           "label": "勾选",
-          "reply": "不对。最终结算后这张合同不能再结算。只有最后一批，或供应商确认不再补发时才勾。"
+          "reply": "不对。最终结算后这张合同不能再结算。只有最后一批，或供应商确认不再补发时才勾。",
+          "target": "final"
         }
       ],
       "see": "保持不勾选。收齐 50 件的那一笔，系统会自动按最终结算处理。",
@@ -89,13 +114,16 @@
       "see": "窗口关闭，结算列表出现 ST-0001，状态为「待财务复核」。",
       "after": {
         "screen": "finance",
-        "submitted": true
+        "submitted": true,
+        "settleCount": "1"
       },
       "failure": {
         "title": "出现「还不能提交」",
         "text": "按红色提示补齐：没勾收货就回去勾选；争议 / 扣款每条都要有说明和大于零的金额。修正后再点「提交复核」，已填内容不会丢。",
         "preview": {
           "receipt": false,
+          "qtyText": "0 件",
+          "totalText": "0.00 CNY",
           "error": "请至少勾选一条实际收货记录。"
         }
       }
@@ -115,12 +143,16 @@
         "preview": {
           "screen": "dialog",
           "receipt": false,
-          "receiptBlocked": "已在结算中",
+          "receiptBlocked": true,
+          "receiptSuffix": " · 已在结算中",
+          "qtyText": "0 件",
+          "totalText": "0.00 CNY",
           "blocked": "已有待财务复核结算"
         }
       }
     }
   ],
+  "doneTitle": "完成：这笔结算已交给财务",
   "result": "结算已交给财务复核。财务确认后登记供应商票据，再按审批办理付款。",
   "chain": [
     "业务员提交结算",
@@ -129,6 +161,11 @@
     "付款申请与审批",
     "财务登记付款"
   ],
+  "chainAt": 0,
+  "nextLesson": {
+    "id": "tutorial-settlement-confirm",
+    "title": "复核确认一笔结算"
+  },
   "sop": [
     {
       "title": "办理岗位",
@@ -145,6 +182,10 @@
     {
       "title": "被财务退回",
       "text": "打开该结算查看退回原因，按原因修正收货或争议后重新提交。"
+    },
+    {
+      "title": "其他入口",
+      "text": "财务管理 → 应付待办 → 提交结算，再选择来源合同。"
     }
   ]
 }

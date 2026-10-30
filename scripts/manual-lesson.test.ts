@@ -44,3 +44,17 @@ it('has no company library, network form or business submission target',()=>{
  expect(html).not.toMatch(/<form|action=|fetch\(|青屿|qingyu|SO-G-2026-0009|assets\/(?:finance|production)/);
  expect(lessonRuntime).not.toMatch(/fetch|XMLHttpRequest|localStorage/);
 });
+it('teaches finance confirmation: wrong choices do not advance, own submissions cannot be confirmed, confirmation unlocks billing',()=>{
+ const confirm=JSON.parse(readFileSync(new URL('../wiki/lessons/settlement-confirm.json',import.meta.url),'utf8'));
+ const dom=new JSDOM(renderLesson(confirm),{runScripts:'outside-only',pretendToBeVisual:true});dom.window.eval(lessonRuntime);
+ const q=(s:string)=>dom.window.document.querySelector(s) as HTMLElement,click=(s:string)=>q(s).click();
+ click('[data-t="queue"]');click('[data-lesson-next]');
+ click('[data-t="return"]');expect(q('[data-step="1"]').classList.contains('done')).toBe(false);
+ click('[data-step-panel="1"] [data-preview]');expect((q('[data-t="confirm"]') as HTMLButtonElement).disabled).toBe(true);click('[data-step-panel="1"] [data-preview]');
+ click('[data-t="confirm"]');expect(q('[data-dialog]').hidden).toBe(false);
+ click('[data-lesson-next]');click('[data-t="applied"]');expect(q('[data-step="2"]').classList.contains('done')).toBe(false);
+ click('[data-step-panel="2"] [data-choice="0"]');click('[data-lesson-next]');click('[data-t="submit"]');
+ expect(q('.mock-detail-h .mock-pill').textContent).toBe('已确认');expect(q('[data-t="bill"]').hidden).toBe(false);
+ click('[data-lesson-next]');click('[data-t="bill"]');expect(q('[data-lesson-done]').hidden).toBe(false);
+ dom.window.close();
+});
