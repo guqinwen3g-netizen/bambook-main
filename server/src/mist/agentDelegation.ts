@@ -9,6 +9,7 @@ import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { MIST_READ_SECTIONS } from './access';
 import { MistApiError } from './errors';
+import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
 
 export const AGENT_DELEGATION_HEADER = 'x-bambook-delegation';
 export const AGENT_DELEGATION_TTL_MS = 2 * 60 * 60 * 1000;
@@ -18,9 +19,15 @@ const MAX_TOKEN = 4096;
 /** 工作助手上限（首批）：Mist 读投影所用的读取类权限；不含任何写权限，也不含助手草稿。 */
 export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new Set(MIST_READ_SECTIONS.flatMap(s => s.permissions).filter(p => p.endsWith(':read')))].sort());
 
-export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string };
-export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number };
-export type AgentDelegationIssue = { token: string; sessionId: string; expiresAt: string; ceiling: string[] };
+/**
+ * 可办理委托（2026-10-30 用户定案）：上限 = 账号现有权限（不超出），供 MCP 接口读取、预演与执行普通命令；
+ * 确认 / 删除 / 资金 / 对外发送类命令仍须本人在系统中确认，由 MCP 执行入口拒绝（见 agentCommands.ts）。
+ */
+export const AGENT_OPERATE_CEILING: readonly string[] = Object.freeze(Object.keys(PERMISSION_SCOPES).sort());
+export type AgentDelegationMode = 'read' | 'operate';
+export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode };
+export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number; mode?: 'operate' };
+export type AgentDelegationIssue = { token: string; sessionId: string; expiresAt: string; ceiling: string[]; mode: AgentDelegationMode };
 
 export function isAgentActor(actor: unknown): actor is AgentActor {
   return !!actor && typeof actor === 'object' && (actor as { actorKind?: unknown }).actorKind === 'agent';
@@ -32,6 +39,7 @@ function deny(message: string, status = 401, code = 'AGENT_DELEGATION_INVALID'):
 const AGENT_ALLOWED_ROUTES: Array<[string, RegExp]> = [
   ['GET', /^\/workspaces\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/agent\/(query|objects\/[^/]+\/[^/]+(\/related)?)\/?$/],
+  ['POST', /^\/mcp\/?$/],
 ];
 export function agentRouteAllowed(method: string, path: string) {
   return AGENT_ALLOWED_ROUTES.some(([m, pattern]) => m === method.toUpperCase() && pattern.test(path));
@@ -53,15 +61,15 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
   const signature = (data: string) => createHmac('sha256', key()).update(data).digest('base64url');
 
   /** 签发：只接受本人会话（非委托身份）；上限再与会话自身的上限取交集。 */
-  function issue(actor: TokenPayload): AgentDelegationIssue {
+  function issue(actor: TokenPayload, mode: AgentDelegationMode = 'read'): AgentDelegationIssue {
     if (!actor?.userId) deny('请先登录');
     if (isAgentActor(actor)) deny('工作助手不能自行续签委托，请在页面上由本人续签', 403, 'FORBIDDEN');
     const prior = actor.permissionCeiling;
-    const ceil = WORK_ASSISTANT_CEILING.filter(scope => prior === undefined || prior.includes('*') || prior.includes(scope));
+    const ceil = (mode === 'operate' ? AGENT_OPERATE_CEILING : WORK_ASSISTANT_CEILING).filter(scope => prior === undefined || prior.includes('*') || prior.includes(scope));
     const iat = now();
-    const payload: AgentDelegationPayload = { v: 1, kind: 'mist-agent', sub: actor.userId, ...(actor.companyId ? { companyId: actor.companyId } : {}), sid: randomUUID(), ceil, iat, exp: iat + ttl };
+    const payload: AgentDelegationPayload = { v: 1, kind: 'mist-agent', sub: actor.userId, ...(actor.companyId ? { companyId: actor.companyId } : {}), sid: randomUUID(), ceil, iat, exp: iat + ttl, ...(mode === 'operate' ? { mode } : {}) };
     const data = Buffer.from(JSON.stringify(payload)).toString('base64url');
-    return { token: `${data}.${signature(data)}`, sessionId: payload.sid, expiresAt: new Date(payload.exp).toISOString(), ceiling: [...ceil] };
+    return { token: `${data}.${signature(data)}`, sessionId: payload.sid, expiresAt: new Date(payload.exp).toISOString(), ceiling: [...ceil], mode };
   }
 
   function verify(token: unknown): AgentDelegationPayload {
@@ -75,7 +83,8 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     if (!payload! || typeof payload! !== 'object' || Array.isArray(payload!) || payload!.v !== 1 || payload!.kind !== 'mist-agent'
       || (payload!.companyId !== undefined && typeof payload!.companyId !== 'string')
       || typeof payload!.sub !== 'string' || !payload!.sub || payload!.sub.length > 300 || typeof payload!.sid !== 'string' || !payload!.sid
-      || !Array.isArray(payload!.ceil) || payload!.ceil.some(scope => typeof scope !== 'string' || !WORK_ASSISTANT_CEILING.includes(scope))
+      || (payload!.mode !== undefined && payload!.mode !== 'operate')
+      || !Array.isArray(payload!.ceil) || payload!.ceil.some(scope => typeof scope !== 'string' || !(payload!.mode === 'operate' ? AGENT_OPERATE_CEILING : WORK_ASSISTANT_CEILING).includes(scope))
       || !Number.isSafeInteger(payload!.exp) || !Number.isSafeInteger(payload!.iat) || payload!.exp <= payload!.iat
       || payload!.iat > now() + 30_000 || payload!.exp - payload!.iat > ttl) deny('工作助手委托格式无效');
     if (payload!.exp <= now()) deny('工作助手委托已过期，请在页面上续签', 401, 'AGENT_DELEGATION_EXPIRED');
@@ -87,7 +96,7 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     const payload = verify(token);
     const base = await options.resolve(payload.sub);
     if (!base?.userId || base.userId !== payload.sub) deny('工作助手委托对应的账号无效');
-    return { ...base, ...(payload.companyId ? { companyId: payload.companyId } : {}), permissionCeiling: [...payload.ceil], actorKind: 'agent', agentSessionId: payload.sid };
+    return { ...base, ...(payload.companyId ? { companyId: payload.companyId } : {}), permissionCeiling: [...payload.ceil], actorKind: 'agent', agentSessionId: payload.sid, agentMode: payload.mode === 'operate' ? 'operate' : 'read' };
   }
 
   return { issue, verify, authenticate };

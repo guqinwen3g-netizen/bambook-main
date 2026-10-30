@@ -19,6 +19,7 @@ import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projec
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
+import { isAgentActor } from './agentDelegation';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -143,6 +144,10 @@ const scopeOf=(row:MistWorkspaceRow)=>ROW_SCOPE.get(row);
 const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):[row.ownerId,...memberIds(row.state)];
 /** 同一数据库客户端共享的按公司写入队列（多个仓储实例共用一个连接池时也按同一队列排队）。 */
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
+/** 预演结束时用来整笔回滚的信号（不是错误）。 */
+class MistPreviewOutcome extends Error { constructor(readonly preview: { revision: number; result: unknown; events: string[]; changes: unknown }) { super('preview'); } }
+const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate']);
+
 export class MistRepository {
   constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>) {}
   private context(actor: TokenPayload, state?: MistState): MistContext { const auditNow=this.now().toISOString();return { id: randomUUID, now: mistBusinessInstant(state,auditNow), auditNow, actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
@@ -386,7 +391,19 @@ export class MistRepository {
     if (EMAIL_SERVER_COMMAND.test(input.command.type)) fail('INVALID_COMMAND', '收信、发信与连接结果只能由服务端邮件服务写入', 400);
     return this.executeInternal(prior, workspaceId, input, { command: input.command });
   }
-  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput) {
+  /**
+   * 预演：与 execute 走同一事务、同一套账号 / 成员 / 权限 / 范围 / 业务门禁，应用命令后整笔回滚，不留状态、回执或编号。
+   * 返回本应产生的结果与业务事件说明，供工作助手和外部 Agent 在执行前核对。会生成文件的命令不支持预演。
+   */
+  async preview(prior: TokenPayload, workspaceId: string, input: MistCommandRequest) {
+    if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
+    if (input.command.type === 'files.add' || EMAIL_SERVER_COMMAND.test(input.command.type)) fail('INVALID_COMMAND', '该命令只能由服务端写入', 400);
+    if (PREVIEW_UNSUPPORTED.has(input.command.type)) fail('PREVIEW_UNSUPPORTED', '该命令会生成正式文件，不支持预演', 400);
+    try { await this.executeInternal(prior, workspaceId, input, { command: input.command }, undefined, true); }
+    catch (error) { if (error instanceof MistPreviewOutcome) return error.preview; throw error; }
+    fail('PREVIEW_UNSUPPORTED', '预演未完成', 500);
+  }
+  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false) {
     requestIdentifier(input.requestId); revision(input.expectedRevision);
     const hash = createHash('sha256').update(canonical({ actorId: prior.userId, expectedRevision: input.expectedRevision, ...hashPayload })).digest('hex');
     const permissionFor = async (db: any) => upload&&input.claimId!==undefined?'aftersales:write':!input.command&&upload?await this.uploadPermission(db, prior):this.contract.mistCommandPermission(input.command ?? { type: 'files.add', payload: {} });
@@ -455,6 +472,8 @@ export class MistRepository {
         if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),crossRefs)) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
+        // 经 Agent（委托令牌）的写入在业务事件经办人后标注，账号与权限判断不受影响。
+        if (isAgentActor(prior)) context.actorName = `${context.actorName}（经 Agent）`;
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
           const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
           const { type, payload } = input.command;
@@ -530,6 +549,7 @@ export class MistRepository {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
+        if (dryRun) throw new MistPreviewOutcome({ revision: row.revision, result: applied.result, events: (applied.state.events ?? []).filter((event: { id: string }) => !previousEvents.has(event.id)).map((event: { text: string }) => event.text), changes: changeKeys ?? null });
         const nextRevision = row.revision + 1;
         const saved = await db.mistWorkspace.update({ where: { id: workspaceId }, data: { state: applied.state, name: identifier(applied.state.settings.workspaceName, '公司名称'), revision: nextRevision } });
         if (scope) ROW_SCOPE.set(saved, scope);
