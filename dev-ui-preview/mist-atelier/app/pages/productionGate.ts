@@ -1,14 +1,15 @@
 /** 生产分支开产门禁：与服务端放行规则逐项对应，只读核对，最终以服务端为准。 */
 import { assertMistOrderApproved, type MistProduction, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { orderDepositBlocker } from '../../../../server/src/shared/mistOrderFunding';
-import { productionSampleRequirements } from '../../../../server/src/shared/mistProductionSamples';
+import { productionSampleRequirements, type ProductionSampleRequirement } from '../../../../server/src/shared/mistProductionSamples';
 import { uiText } from '../../../../services/interfaceLanguage';
 import { garmentMaterialBlocker, type InternalFabricContext } from '../../../../server/src/shared/mistInternalFabric';
+import type { ScopedSampleGate } from '../../../../server/src/shared/mistDataScope';
 
 export type GateItem = { key: string; label: string; ok: boolean; detail: string; target?: { view: string; id?: string } };
 const message = (check: () => void) => { try { check(); return ''; } catch (problem) { return problem instanceof Error ? problem.message : '未通过'; } };
 
-export function productionReleaseGate(state: MistState, branch: MistProduction, context: InternalFabricContext = { actorName: '' }, scopedMaterialBlocker?: string): GateItem[] {
+export function productionReleaseGate(state: MistState, branch: MistProduction, context: InternalFabricContext = { actorName: '' }, scopedMaterialBlocker?: string, scopedSamples?: ScopedSampleGate[]): GateItem[] {
   const f = state.fulfillment, order = state.orders.find(row => row.id === branch.orderId), fabric = order?.type === 'fabric';
   const fact = f?.productionFacts?.find(row => row.productionId === branch.id);
   const approval = message(() => assertMistOrderApproved(state, branch.orderId));
@@ -29,9 +30,9 @@ export function productionReleaseGate(state: MistState, branch: MistProduction, 
     items.push({ key: 'contract', label: '供应合同', ok, detail, target: purchase ? { view: 'procurement', id: purchase.id } : undefined });
   }
   const role = fabric ? 'pioneer' : 'pp', roleLabel = fabric ? '先锋样' : '产前样';
-  for (const row of productionSampleRequirements(state, branch, role)) {
+  for (const row of scopedSamples ?? productionSampleRequirements(state, branch, role)) {
     items.push({ key: row.key, label: uiText(roleLabel) + (row.label ? ` · ${row.label}` : ''), ok: row.ok,
-      detail: uiText(row.ok && row.evidence?.result === 'conditional' ? '有保留通过' : row.reason),
+      detail: uiText(row.ok && (row as ProductionSampleRequirement).evidence?.result === 'conditional' ? '有保留通过' : row.reason),
       target: row.taskId ? { view: 'qc-workbench', id: row.taskId } : { view: 'samples' } });
   }
   return items;

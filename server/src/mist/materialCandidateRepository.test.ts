@@ -14,6 +14,10 @@ it('lets the exact recipient allocate and receive a hidden source without exposi
  db.workspaces.set(wid,{id:wid,ownerId:'boss',companyId:company,slug:`company@${company}`,name:'公司',revision:0,state:structuredClone(f.state),createdAt:new Date(),updatedAt:new Date()});
  const repo=new MistRepository(db,contract,new MistPrivateFiles(dir),auth.authorize,()=>new Date(f.context.now)),buyer={...testActor('garment'),roles:[],companyId:company},sender={...testActor('owner'),roles:[],companyId:company};
  const before=await repo.get(buyer,wid);expect(before.state.orders.some(o=>o.id===source.orderId)).toBe(false);expect(before.scopedFabricAccess?.[f.target.lineId].candidates).toEqual(expect.arrayContaining([expect.objectContaining({fabricOrderId:source.orderId,fabricLineId:source.lineId})]));
+ expect(before.scopedFabricAccess?.[f.target.lineId].sampleRequirements).toEqual({});
+ auth.users.set('garment',{active:true,permissions:['orders:read','orders:write','procurement:read','production:read','products:read','qc:read']});
+ expect((await repo.get(buyer,wid)).scopedFabricAccess?.[f.target.lineId].sampleRequirements[f.productionId]).toMatchObject([{ok:false,reason:'未登记'}]);
+ auth.users.set('garment',{active:true,permissions:['orders:read','orders:write','procurement:read']});
  expect(before.scopedFabricAccess?.[f.target.lineId].candidates.some(c=>c.fabricOrderId===secret.orderId)).toBe(false);
  const allocation=f.state.internalFabricAllocations![0];await expect(repo.execute(buyer,wid,{requestId:'allocate-forged',expectedRevision:0,command:{type:'order.fabric.allocate',payload:{...f.target,fabricOrderId:secret.orderId,fabricLineId:secret.lineId,metres:'4',expectedRevision:allocation.revision}}})).rejects.toMatchObject({status:404});
  await repo.execute(buyer,wid,{requestId:'allocate-new',expectedRevision:0,command:{type:'order.fabric.allocate',payload:{...f.target,fabricOrderId:source.orderId,fabricLineId:source.lineId,metres:'4',expectedRevision:allocation.revision}}});

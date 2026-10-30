@@ -16,6 +16,12 @@ function fixture(stoneConfirmed=false){
  return {state,branch};
 }
 describe('fabric production gate',()=>{
+ it('shows the scoped PP result for the exact production branch, including pending reviews',()=>{
+  const {state,branch}=fixture();state.orders[0].type='garment';
+  const approved=[{key:'sample:m',label:'M',ok:true,reason:'已确认'}],pending=[{key:'sample:m',label:'M',ok:false,reason:'待需求方确认'}];
+  expect(productionReleaseGate(state,branch,{actorName:''},'',approved).find(row=>row.key==='sample:m')).toMatchObject({ok:true,detail:'已确认'});
+  expect(productionReleaseGate(state,branch,{actorName:''},'',pending).find(row=>row.key==='sample:m')).toMatchObject({ok:false,detail:'待需求方确认'});
+ });
  it('uses the recipient-scoped material result when the source order is hidden',()=>{
   const {state,branch}=fixture();state.orders[0].type='garment';
   const gate=productionReleaseGate(state,branch,{actorName:''},'').find(item=>item.key==='material');
