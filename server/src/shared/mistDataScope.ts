@@ -191,7 +191,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
       hideFiles(row);
       for (const document of state.fulfillment?.documents ?? []) if ((document as any).shipmentId === row.id) hideFiles(document);
       for (const customs of state.fulfillment?.customs ?? []) if ((customs as any).shipmentId === row.id) hideFiles(customs);
-      const { departureEvidence: _evidence, cancelReason: _reason, ...safe } = row;
+      const { departureEvidence: _evidence, cancelReason: _reason, packingDetailEvidence: _packingEvidence, ...safe } = row;
       return { ...safe, lines: visibleLines, hiddenCount, note: '', fileIds: [], documentDispatches: [] };
     });
     next.fulfillment = { ...next.fulfillment, shipments,

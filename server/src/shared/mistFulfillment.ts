@@ -1,3 +1,4 @@
+import {packingBreakdownBlocker,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
@@ -274,6 +275,8 @@ export type ShipmentLine = {
 export type FulfillmentShipment = {
     /** Response-only: number of shipment lines outside the viewer's scope. */
     hiddenCount?: number;
+    packingDetailVersion?: 2;
+    packingDetailEvidence?: {at:string;actor:string;evidence:string;documentIds:string[]};
     id: string;
     code: string;
     customerId: string;
@@ -300,6 +303,7 @@ export type FulfillmentShipment = {
     cancelReason?: string;
 };
 export type FulfillmentPacking = {
+    assortment?: PackingSku[];
     id: string;
     shipmentId: string;
     lineId: string;
@@ -393,7 +397,7 @@ export type FulfillmentState = {
 };
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
 type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
-type ShipmentInput = Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
+type ShipmentInput = {packingDetailVersion?:2} & Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
 export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | {
     type: 'fulfillment.samples.create';
     payload: SampleInput;
@@ -582,6 +586,8 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     payload: {
         id: string;
         lines: Array<Omit<FulfillmentPacking, 'id' | 'shipmentId'>>;
+        packingDetailVersion?:2;
+        supplementEvidence?:string;
     };
 } | {
     type: 'fulfillment.shipments.updateTransport';
@@ -1669,7 +1675,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!['sea', 'air'].includes(p.mode))
                 fail('运输方式仅支持海运或空运');
             const id = old?.id || ctx.id();
-            const row: FulfillmentShipment = { id, code: old?.code || code('SHP', f.shipments, ctx), customerId: first.customerId, customer: first.customer, domain: first.type, consignee: text(p.consignee, '收货方'), mode: p.mode, portOfLoading: text(p.portOfLoading, '起运港'), portOfDischarge: text(p.portOfDischarge, '目的港'), incoterm: text(p.incoterm, '贸易术语'), plannedDate: day(p.plannedDate, '计划出运日', false), booking: text(p.booking, '订舱号', false), lines, note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'preparing', requestedBy: old?.requestedBy || ctx.actorName, requesterId: old?.requesterId || ctx.actorId || '', createdAt: old?.createdAt || ctx.now };
+            if(p.packingDetailVersion!==undefined&&p.packingDetailVersion!==2)fail('装箱明细版本无效');
+            const row: FulfillmentShipment = { ...(old?.packingDetailVersion===2||p.packingDetailVersion===2?{packingDetailVersion:2 as const}:{}), id, code: old?.code || code('SHP', f.shipments, ctx), customerId: first.customerId, customer: first.customer, domain: first.type, consignee: text(p.consignee, '收货方'), mode: p.mode, portOfLoading: text(p.portOfLoading, '起运港'), portOfDischarge: text(p.portOfDischarge, '目的港'), incoterm: text(p.incoterm, '贸易术语'), plannedDate: day(p.plannedDate, '计划出运日', false), booking: text(p.booking, '订舱号', false), lines, note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'preparing', requestedBy: old?.requestedBy || ctx.actorName, requesterId: old?.requesterId || ctx.actorId || '', createdAt: old?.createdAt || ctx.now };
             if (old) {
                 if (f.packing.some(a => a.shipmentId === id) || f.documents.some(d => d.shipmentId === id && d.status === 'issued') || f.customs.some(c => c.shipmentId === id && c.status !== 'draft'))
                     fail('已有装箱/正式单据/申报事实，不能覆盖出运来源');
@@ -1683,19 +1690,35 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.shipments.pack': {
             const s = get(f.shipments, p.id, '出运');
             requireEditableShipment(s);
-            if (f.documents.some(document => document.shipmentId === s.id && document.status === 'issued' && ['CI', 'PL'].includes(document.type))) fail('已有有效CI或装箱单，请先作废原件再修改装箱分配');
+            const signed=f.documents.filter(document=>document.shipmentId===s.id&&document.status==='issued'&&['CI','PL'].includes(document.type));
+            const supplement=p.packingDetailVersion===2&&canSupplementPacking(root,s);
+            if(signed.length&&!supplement)fail('已有有效正式单据，请先作废原件再修改装箱分配');
+            if(p.packingDetailVersion!==undefined&&p.packingDetailVersion!==2)fail('装箱明细版本无效');
             if (f.customs.some(record => record.shipmentId === s.id && record.status !== 'draft')) fail('已有实际申报或清关记录，请先完成外部更正后再处理装箱');
             if (!Array.isArray(p.lines) || !p.lines.length)
                 fail('请登记装箱分配');
             const allocation: FulfillmentPacking[] = p.lines.map((l: any) => { const candidates = s.lines.filter(i => i.lineId === l.lineId), line = candidates.find(i => i.productionId === l.productionId) || (l.productionId === undefined && candidates.length === 1 ? candidates[0] : undefined); if (!line)
                 fail('请选择本票准确条目与生产分支'); const netWeight = qty(l.netWeight, '净重', true), grossWeight = qty(l.grossWeight, '毛重', true); if (grossWeight < netWeight)
-                fail('毛重不能小于净重'); return { id: ctx.id(), shipmentId: s.id, lineId: l.lineId, ...(line!.productionId ? { productionId: line!.productionId } : {}), carton: text(l.carton, '箱号'), quantity: qty(l.quantity), netWeight, grossWeight, volume: qty(l.volume, '体积', true), note: text(l.note, '备注', false) }; });
+                fail('毛重不能小于净重'); return { id: ctx.id(), shipmentId: s.id, lineId: l.lineId, ...(line!.productionId ? { productionId: line!.productionId } : {}), carton: text(l.carton, '箱号'), quantity: qty(l.quantity), netWeight, grossWeight, volume: qty(l.volume, '体积', true), note: text(l.note, '备注', false), ...(l.assortment!==undefined?{assortment:l.assortment}: {}) }; });
             for (const line of s.lines)
                 if (sum(allocation.filter(a => a.lineId === line.lineId && a.productionId === line.productionId).map(a => a.quantity)) !== line.quantity)
                     fail('逐条目装箱数量必须等于本次计划数量');
+            const version=s.packingDetailVersion===2||p.packingDetailVersion===2?2:undefined;
+            for(const row of allocation)if(version===2||row.assortment!==undefined){const error=packingSkuError(root,row.lineId,row.quantity,row.assortment);if(error)fail(error);if(row.assortment)row.assortment=canonicalPackingSkus(root,row.lineId,row.assortment);}
+            if(version===2){
+                const proposed=f.packing.filter(a=>a.shipmentId!==s.id).concat(allocation),error=packingBreakdownBlocker(root,{...s,packingDetailVersion:2},proposed);if(error)fail(error);
+            }
+            if(supplement){
+                const existing=f.packing.filter(row=>row.shipmentId===s.id);
+                if(existing.length!==allocation.length||existing.some((row,i)=>packingPhysicalKey(row)!==packingPhysicalKey(allocation[i])))fail('补充明细不能改变原装箱箱号、来源、数量、重量或体积');
+                const evidence=text(p.supplementEvidence,'原单核对依据');
+                allocation.forEach((row,i)=>row.id=existing[i].id);
+                s.packingDetailEvidence={at:ctx.now,actor:ctx.actorName,evidence,documentIds:signed.map(d=>d.id)};
+            }
+            if(version===2)s.packingDetailVersion=2;
             f.packing = f.packing.filter(a => a.shipmentId !== s.id).concat(allocation);
-            s.state = 'preparing';
-            audit(root, ctx, 'shipment', s.id, '保存数量守恒的装箱分配');
+            if(!supplement)s.state = 'preparing';
+            audit(root, ctx, 'shipment', s.id, supplement?'核对原签发单据并补充分色分码装箱明细':'保存数量守恒的装箱分配');
             return { id: s.id };
         }
         case 'fulfillment.shipments.updateTransport': {
@@ -1719,6 +1742,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (sum(f.packing.filter(a => a.shipmentId === s.id && a.lineId === line.lineId && a.productionId === line.productionId).map(a => a.quantity)) !== line.quantity)
                     fail('装箱数量未匹配计划');
             }
+            {const error=packingBreakdownBlocker(root,s);if(error)fail(error);}
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);
             s.state = 'ready';
@@ -1745,6 +1769,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const handoverBlocker = shipmentHandoverBlocker(root, s);
             if (handoverBlocker) fail(handoverBlocker, 'PRECONDITION');
             s.lines.forEach(l => { assertMistOrderApproved(root, l.orderId); assertMistOrderDeposit(root, l.orderId); assertOrderShipmentPaymentCovered(root, l.orderId); sourceQuality(root, l, ctx); requireSampleRole(root, get(root.productions, l.productionId!, '准确生产分支'), 'shipping', s.id); checkPhysicalReservation(root, l, s.id); });
+            {const error=packingBreakdownBlocker(root,s);if(error)fail(error);}
             assertCurrentShipmentTolerance(root, s);
             requiredShipmentDocuments(root, s);
             const at = instant(p.at, ctx, '实际离港/起飞时间');
@@ -1847,6 +1872,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('请上传核对后的正式单据文件');
             if (f.documents.some(o => o.id !== d.id && o.shipmentId === d.shipmentId && o.orderId === d.orderId && o.type === d.type && o.status === 'issued'))
                 fail('相同来源已有有效签发版本');
+            if(d.type==='PL'){const error=packingBreakdownBlocker(root,s);if(error)fail(error);}
             if (d.type === 'PL' && s.lines.some(l => sum(f.packing.filter(a => a.shipmentId === s.id && a.lineId === l.lineId && a.productionId === l.productionId).map(a => a.quantity)) !== l.quantity))
                 fail('装箱分配未匹配计划');
             if (d.type === 'CI') {

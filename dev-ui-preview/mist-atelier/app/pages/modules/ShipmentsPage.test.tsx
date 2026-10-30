@@ -220,3 +220,37 @@ it.each([undefined,'conflict-shipment'])('does not duplicate a workspace conflic
  expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);
  presentedError=undefined;render(id);expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
 });
+
+it('records each carton colour and size without inferring the ordered ratio',async()=>{
+ const state=store.state!;state.orderLines[0].breakdown={kind:'garment',sizes:['M','L'],rows:[{color:'蓝',quantities:[6,4]}]} as any;
+ state.fulfillment.shipments.push(shipment('sku'));
+ render('sku');await click(getByRole(host,'button',{name:'分配装箱'}));
+ expect((getByRole(host,'button',{name:'保存装箱分配'}) as HTMLButtonElement).disabled).toBe(true);
+ await click(getByRole(host,'button',{name:'分色分码 · 1'}));
+ const dialog=getByRole(document.body,'dialog',{name:'箱 1 · 分色分码'});
+ expect((getByRole(dialog,'spinbutton',{name:'蓝 · M 数量'}) as HTMLInputElement).value).toBe('0');
+ typeInto(getByRole(dialog,'spinbutton',{name:'蓝 · M 数量'}) as HTMLInputElement,'6');typeInto(getByRole(dialog,'spinbutton',{name:'蓝 · L 数量'}) as HTMLInputElement,'4');
+ await click(getByRole(dialog,'button',{name:'确定'}));await click(getByRole(host,'button',{name:'保存装箱分配'}));
+ expect(store.run).toHaveBeenCalledWith({type:'fulfillment.shipments.pack',payload:expect.objectContaining({packingDetailVersion:2,lines:[expect.objectContaining({assortment:[{color:'蓝',size:'M',quantity:6},{color:'蓝',size:'L',quantity:4}]})]})});
+});
+it('locks signed physical packing fields while supplementing missing colour-size details',async()=>{
+ const state=store.state!;state.orderLines[0].breakdown={kind:'garment',sizes:['M'],rows:[{color:'蓝',quantities:[10]}]} as any;
+ state.fulfillment.shipments.push(shipment('signed-sku'));state.fulfillment.packing.push(pack('signed-sku',10));state.fulfillment.documents.push(doc('pl','signed-sku','PL'));
+ render('signed-sku');await click(getByRole(host,'button',{name:'补充分色分码'}));
+ expect((getByRole(host,'textbox',{name:'箱号'}) as HTMLInputElement).disabled).toBe(true);
+ expect((getByRole(host,'spinbutton',{name:'装箱数量'}) as HTMLInputElement).disabled).toBe(true);
+ expect((getByRole(host,'button',{name:'增加装箱行'}) as HTMLButtonElement).disabled).toBe(true);
+ expect(getByRole(host,'textbox',{name:'原单核对依据'})).toBeTruthy();
+ expect((getByRole(host,'button',{name:'补充分色分码'}) as HTMLButtonElement).disabled).toBe(true);
+});
+it('requires legacy garment detail in the current UI before document handoff',()=>{
+ const state=store.state!;state.orderLines[0].breakdown={kind:'garment',sizes:['M'],rows:[{color:'蓝',quantities:[10]}]} as any;
+ state.fulfillment.shipments.push(shipment('legacy'));state.fulfillment.packing.push(pack('legacy',10));state.fulfillment.documents.push(doc('pl','legacy','PL'),doc('ci','legacy','CI'));
+ render('legacy');expect((getByRole(host,'button',{name:'完成单证准备'}) as HTMLButtonElement).disabled).toBe(true);expect(host.textContent).toContain('请填写每箱分色分码数量');
+});
+it('keeps signed carton assortment available to read after editing is frozen',async()=>{
+ const state=store.state!;state.orderLines[0].breakdown={kind:'garment',sizes:['M'],rows:[{color:'蓝',quantities:[10]}]} as any;
+ state.fulfillment.shipments.push(shipment('recorded',{packingDetailVersion:2}));state.fulfillment.packing.push({...pack('recorded',10),assortment:[{color:'蓝',size:'M',quantity:10}]});state.fulfillment.documents.push(doc('pl','recorded','PL'));
+ render('recorded');await click(getByRole(host,'button',{name:'逐箱明细'}));expect(host.textContent).toContain('蓝 · M 10');
+ expect((getByRole(host,'button',{name:'分配装箱'}) as HTMLButtonElement).disabled).toBe(true);
+});

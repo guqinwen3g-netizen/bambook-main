@@ -1,3 +1,5 @@
+import {packingSpecification,packingBreakdownBlocker,canSupplementPacking,type PackingSku} from '../../../../../server/src/shared/mistPackingBreakdown';
+import {PackingAssortmentDialog} from './PackingAssortmentDialog';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {orderShipmentPaymentBlocker} from '../../../../../server/src/shared/mistOrderFunding';
 import {productionSampleRequirements} from '../../../../../server/src/shared/mistProductionSamples';
@@ -72,7 +74,7 @@ function ShipmentEditor({ shipment, onClose }: {
     const save = async () => { if (blocked)
         return; setFailure(''); setBusy(true); try {
         const values = validate();
-        await run({ type: 'fulfillment.shipments.save', payload: { ...(shipment ? { id: shipment.id } : {}), ...form, consignee: terms!.consignee, mode: terms!.mode, lines: values, fileIds: shipment?.fileIds || [] } });
+        await run({ type: 'fulfillment.shipments.save', payload: { ...(shipment ? { id: shipment.id } : {}), ...form, packingDetailVersion:2, consignee: terms!.consignee, mode: terms!.mode, lines: values, fileIds: shipment?.fileIds || [] } });
         onClose();
     }
     catch (e) {
@@ -115,11 +117,20 @@ function PackingEditor({ shipment, onClose }: {
         grossWeight: number;
         volume: number;
         note: string;
+        assortment?:PackingSku[];
     }>>(existing.length ? existing : shipment.lines.map((l, i) => ({ id: String(i), lineId: l.lineId, productionId: l.productionId, carton: String(i + 1), quantity: l.quantity, netWeight: 0, grossWeight: 0, volume: 0, note: '' })));
+    const [assortmentId,setAssortmentId]=React.useState<string|null>(null),[supplementEvidence,setSupplementEvidence]=React.useState('');
+    const signed=!!state?.fulfillment.documents.some(d=>d.shipmentId===shipment.id&&d.status==='issued'&&['CI','PL'].includes(d.type));
+    const declared=!!state?.fulfillment.customs.some(c=>c.shipmentId===shipment.id&&c.status!=='draft');
+    const supplement=!!state&&canSupplementPacking(state,shipment);
+    const physicalLocked=signed||declared,detailsLocked=declared||(signed&&!supplement);
+    const selectedRow=rows.find(row=>row.id===assortmentId),selectedSpec=selectedRow&&state?packingSpecification(state,selectedRow.lineId):undefined;
+    const proposed=state?state.fulfillment.packing.filter(row=>row.shipmentId!==shipment.id).concat(rows.map(row=>({...row,shipmentId:shipment.id}))):[];
+    const detailError=state?packingBreakdownBlocker(state,{...shipment,packingDetailVersion:2},proposed):'';
     const update = (index: number, patch: Partial<typeof rows[number]>) => setRows(all => all.map((r, i) => i === index ? { ...r, ...patch } : r));
     const options = shipment.lines.map(l => ({ value: l.lineId + '::' + (l.productionId || ''), label: state?.orderLines.find(o => o.id === l.lineId)?.name + ' · ' + (state?.productions.find(p => p.id === l.productionId)?.code || state?.orderLines.find(o => o.id === l.lineId)?.style) }));
-    const columns: Column<typeof rows[number]>[] = [{ key: 'source', header: '准确条目', width: 'minmax(190px,2fr)', render: r => <Select aria-label={uiText("装箱来源条目")} value={r.lineId + '::' + (r.productionId || '')} options={options} onChange={e => { const [lineId, productionId] = e.target.value.split('::'); update(rows.indexOf(r), { lineId, productionId: productionId || undefined }); }}/> }, { key: 'carton', header: '箱号', width: '100px', render: r => <TextInput aria-label={uiText("箱号")} value={r.carton} onChange={e => update(rows.indexOf(r), { carton: e.target.value })}/> }, ...(['quantity', 'netWeight', 'grossWeight', 'volume'] as const).map((key, i): Column<typeof rows[number]> => ({ key, header: ['数量', '净重 kg', '毛重 kg', '体积 m³'][i], width: '100px', align: 'right', render: r => <TextInput aria-label={uiText(['装箱数量', '净重', '毛重', '体积'][i])} type="number" min={0} step="0.0001" value={r[key]} onChange={e => update(rows.indexOf(r), { [key]: Number(e.target.value) })}/> })), { key: 'remove', header: '', width: '70px', render: r => <TextLink onClick={() => setRows(all => all.filter(item => item !== r))}>{uiText("移除")}</TextLink> }];
-    return <MistPage><BackLink onClick={onClose}>{uiText("返回出运详情")}</BackLink><PageHeader description={shipment.code} title={uiText("装箱分配")}/>{failure && failure!==presentedError && <Banner tone="bad" title={uiText("装箱未保存")}>{failure}</Banner>}<div className="mist-reconcile"><Card><CardHeader title={uiText("本次计划")}/><KeyValue items={shipment.lines.map(l => ({ label: state?.orderLines.find(o => o.id === l.lineId)?.name || '来源条目', value: `${l.quantity} ${state?.orderLines.find(o => o.id === l.lineId)?.unit || ''}` }))}/></Card><Card><CardHeader title={uiText("实际装箱")} tools={<Button icon={Plus} onClick={() => setRows(all => [...all, { id: crypto.randomUUID(), lineId: shipment.lines[0].lineId, productionId: shipment.lines[0].productionId, carton: String(all.length + 1), quantity: 0, netWeight: 0, grossWeight: 0, volume: 0, note: '' }])}>{uiText("增加装箱行")}</Button>}/><DataTable rows={rows} columns={columns} rowKey={r => r.id}/><Checklist items={shipment.lines.map(l => { const packed = Math.round(rows.filter(r => r.lineId === l.lineId && r.productionId === l.productionId).reduce((n, r) => n + r.quantity, 0) * 10000) / 10000; return { label: `${state?.orderLines.find(o => o.id === l.lineId)?.name}：已分配 ${packed} / ${l.quantity}`, done: packed === l.quantity }; })}/><FormFooter><span className="mist-spacer"/><Button variant="primary" disabled={busy || saving || !!pending} onClick={() => { setBusy(true); setFailure(''); void run({ type: 'fulfillment.shipments.pack', payload: { id: shipment.id, lines: rows.map(({ id, ...row }) => row) } }).then(onClose).catch(e => setFailure(e instanceof Error ? e.message : '装箱分配未保存')).finally(() => setBusy(false)); }}>{uiText("保存装箱分配")}</Button></FormFooter></Card></div></MistPage>;
+    const columns: Column<typeof rows[number]>[] = [{ key: 'source', header: '准确条目', width: 'minmax(190px,2fr)', render: r => <Select disabled={physicalLocked} aria-label={uiText("装箱来源条目")} value={r.lineId + '::' + (r.productionId || '')} options={options} onChange={e => { const [lineId, productionId] = e.target.value.split('::'); update(rows.indexOf(r), { lineId, productionId: productionId || undefined, assortment:undefined }); }}/> }, { key: 'carton', header: '箱号', width: '100px', render: r => <TextInput disabled={physicalLocked} aria-label={uiText("箱号")} value={r.carton} onChange={e => update(rows.indexOf(r), { carton: e.target.value })}/> }, ...(['quantity', 'netWeight', 'grossWeight', 'volume'] as const).map((key, i): Column<typeof rows[number]> => ({ key, header: ['数量', '净重 kg', '毛重 kg', '体积 m³'][i], width: '100px', align: 'right', render: r => <TextInput disabled={physicalLocked} aria-label={uiText(['装箱数量', '净重', '毛重', '体积'][i])} type="number" min={0} step="0.0001" value={r[key]} onChange={e => update(rows.indexOf(r), { [key]: Number(e.target.value) })}/> })), {key:'assortment',header:'分色分码',width:'160px',render:r=>state&&packingSpecification(state,r.lineId)?<Button size="sm" onClick={()=>setAssortmentId(r.id)}>{ui`分色分码 · ${r.carton}`}</Button>:'—'}, { key: 'remove', header: '', width: '70px', render: r => <TextLink disabled={physicalLocked} onClick={() => setRows(all => all.filter(item => item !== r))}>{uiText("移除")}</TextLink> }];
+    return <MistPage><BackLink onClick={onClose}>{uiText("返回出运详情")}</BackLink><PageHeader description={shipment.code} title={uiText("装箱分配")}/>{failure && failure!==presentedError && <Banner tone="bad" title={uiText("装箱未保存")}>{failure}</Banner>}<div className="mist-reconcile"><Card><CardHeader title={uiText("本次计划")}/><KeyValue items={shipment.lines.map(l => ({ label: state?.orderLines.find(o => o.id === l.lineId)?.name || '来源条目', value: `${l.quantity} ${state?.orderLines.find(o => o.id === l.lineId)?.unit || ''}` }))}/></Card><Card><CardHeader title={uiText("实际装箱")} tools={<Button icon={Plus} disabled={physicalLocked} onClick={() => setRows(all => [...all, { id: crypto.randomUUID(), lineId: shipment.lines[0].lineId, productionId: shipment.lines[0].productionId, carton: String(all.length + 1), quantity: 0, netWeight: 0, grossWeight: 0, volume: 0, note: '' }])}>{uiText("增加装箱行")}</Button>}/><DataTable rows={rows} columns={columns} rowKey={r => r.id}/><Checklist items={shipment.lines.map(l => { const packed = Math.round(rows.filter(r => r.lineId === l.lineId && r.productionId === l.productionId).reduce((n, r) => n + r.quantity, 0) * 10000) / 10000; return { label: `${state?.orderLines.find(o => o.id === l.lineId)?.name}：已分配 ${packed} / ${l.quantity}`, done: packed === l.quantity }; })}/>{supplement&&<Field label={uiText('原单核对依据')} required><TextArea aria-label={uiText('原单核对依据')} value={supplementEvidence} onChange={event=>setSupplementEvidence(event.target.value)}/></Field>}{detailError&&<p role="status" className="mist-note">{detailError}</p>}{physicalLocked&&!supplement&&<p className="mist-note">{uiText('已有正式单据或申报，修改装箱须先处理原单。')}</p>}<FormFooter><span className="mist-spacer"/><Button variant="primary" disabled={busy || saving || !!pending || detailsLocked || !!detailError || (supplement&&!supplementEvidence.trim())} onClick={() => { setBusy(true); setFailure(''); void run({ type: 'fulfillment.shipments.pack', payload: { id: shipment.id, packingDetailVersion:2, ...(supplement?{supplementEvidence}:{}), lines: rows.map(({ id, ...row }) => row) } }).then(onClose).catch(e => setFailure(e instanceof Error ? e.message : '装箱分配未保存')).finally(() => setBusy(false)); }}>{uiText(supplement?"补充分色分码":"保存装箱分配")}</Button></FormFooter></Card></div>{selectedRow&&selectedSpec&&<PackingAssortmentDialog key={selectedRow.id} carton={selectedRow.carton} quantity={selectedRow.quantity} spec={selectedSpec} readOnly={detailsLocked} value={selectedRow.assortment} onClose={()=>setAssortmentId(null)} onSave={assortment=>{update(rows.indexOf(selectedRow),{assortment});setAssortmentId(null);}}/>}</MistPage>;
 }
 type Domain = FulfillmentShipment['domain'];
 import { shipmentStage, type ShipmentStage as Stage } from '../../runtime/shipmentStage';
@@ -132,7 +143,8 @@ export const STAGE_TONE: Record<Stage, Tone> = { intake: 'warn', logistics: 'acc
 export const MODE_LABEL: Record<FulfillmentShipment['mode'], string> = { sea: '海运', air: '空运' };
 const round = (value: number) => Math.round(value * 10000) / 10000;
 export const packedFor = (root: MistState, s: FulfillmentShipment, line: FulfillmentShipment['lines'][number]) => round(root.fulfillment.packing.filter(row => row.shipmentId === s.id && row.lineId === line.lineId && row.productionId === line.productionId).reduce((sum, row) => sum + row.quantity, 0));
-export const packingMatched = (root: MistState, s: FulfillmentShipment) => s.lines.length > 0 && s.lines.every(line => packedFor(root, s, line) === line.quantity);
+export const packingClientBlocker = (root:MistState,s:FulfillmentShipment) => packingBreakdownBlocker(root,s.lines.some(l=>packingSpecification(root,l.lineId))?{...s,packingDetailVersion:2}:s);
+export const packingMatched = (root: MistState, s: FulfillmentShipment) => !packingClientBlocker(root,s) && s.lines.length > 0 && s.lines.every(line => packedFor(root, s, line) === line.quantity);
 function shipmentFlags(root: MistState, s: FulfillmentShipment, day: string) {
   if (s.hiddenCount) return [];
   const flags: Array<{ key: 'overdue' | 'packing'; label: string }> = [], stage = shipmentStage(root, s);
@@ -142,6 +154,7 @@ function shipmentFlags(root: MistState, s: FulfillmentShipment, day: string) {
 }
 /** What the backend will refuse when marking documents ready; checked up-front so the reason is visible. */
 function readyBlocker(root: MistState, s: FulfillmentShipment) {
+  const detailError=packingClientBlocker(root,s);if(detailError)return detailError;
   if (!packingMatched(root, s)) return '逐条目装箱数量须等于本次计划数量';
   const issued = root.fulfillment.documents.filter(row => row.shipmentId === s.id && row.status === 'issued');
   if (!issued.some(row => row.type === 'PL')) return '请先在单据中心签发本票装箱单';
@@ -285,10 +298,11 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   const businessReason = business ? false : '需要订单业务权限';
   const editReason = businessReason || (packingRows.length || issued.length || customsFiled ? '已有装箱、有效单据或申报记录，不能再改请求' : false);
   const cancelReason = businessReason || (s.requesterId !== me ? '仅原业务发起人可取消' : shipmentCancelBlockers(state, s).join('；') || false);
-  const packReason = logisticsReason || (issuedCiPl ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
+  const supplement=canSupplementPacking(state,s);
+  const packReason = logisticsReason || (issuedCiPl&&!supplement ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
   const hold = heldShipmentRelease(state as any, s.customerId);
   const paymentBlocker = [...new Set(s.lines.map(line=>line.orderId))].map(orderId=>orderShipmentPaymentBlocker(state,orderId)).find(Boolean);
-  const departReason = logisticsReason || paymentBlocker || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : shipmentHandoverBlocker(state, s) || (hold.held && !hold.risk ? '客户往来已冻结：须先经部门主管批准带风险放行' : false));
+  const departReason = logisticsReason || packingClientBlocker(state,s) || paymentBlocker || (!s.documentsSentAt ? '等待业务登记对客发送 CI / PL' : !cleared ? '出口清关尚未完成' : shipmentHandoverBlocker(state, s) || (hold.held && !hold.risk ? '客户往来已冻结：须先经部门主管批准带风险放行' : false));
   const track = [
     { label: '业务发起', done: true, note: `${s.requestedBy} · ${shortWhen(s.createdAt)}` },
     { label: '逐条目装箱核实', done: matched, note: packingRows.length ? `${cartons} 箱 · ${matched ? '与计划一致' : '与计划不符'}` : '未装箱', noteTone: packingRows.length && !matched ? 'bad' as const : undefined },
@@ -307,7 +321,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
     {stage === 'cancelled' && s.cancelReason && <RecordDisclosure title="取消记录">{s.cancelReason}</RecordDisclosure>}
     {(business || logistics) && <ActionBar busy={locked} actions={[
       ...(logistics ? [
-        { label: '分配装箱', icon: Boxes, onClick: onPack, primary: stage === 'intake' || (stage === 'logistics' && !matched), reason: packReason, hidden: closed },
+        { label: supplement?'补充分色分码':'分配装箱', icon: Boxes, onClick: onPack, primary: stage === 'intake' || (stage === 'logistics' && !matched), reason: packReason, hidden: closed },
         { label: '更新运输安排', icon: Anchor, onClick: onTransport, reason: logisticsReason, hidden: closed },
         { label: '完成单证准备', icon: CheckCircle2, onClick: onReady, primary: stage === 'logistics' && !blocker, reason: logisticsReason || blocker || false, hidden: s.state !== 'preparing' },
         { label: s.mode === 'air' ? '登记实际起飞' : '登记实际离港', icon: s.mode === 'air' ? Plane : Ship, onClick: onDepart, primary: stage === 'departure', reason: departReason, hidden: s.state !== 'ready' },
@@ -336,6 +350,12 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
       ]} />
     </DetailBlock>
     {packingRows.length > 0 && <DetailBlock title={uiText("装箱汇总")}><Facts items={[{ label: '箱数', value: `${cartons} 箱` }, { label: '净重 / 毛重', value: `${net} / ${gross} kg` }, { label: '体积', value: `${volume} m³` }, { label: '装箱行', value: `${packingRows.length} 行` }]} /></DetailBlock>}
+    {packingRows.length>0&&<RecordDisclosure title="逐箱明细"><DataTable ariaLabel={uiText('逐箱装箱明细')} rows={packingRows} rowKey={row=>row.id} columns={[
+      {key:'carton',header:'箱号',render:row=>row.carton},
+      {key:'quantity',header:'数量',align:'right',render:row=>`${row.quantity} ${unit(row.lineId)}`},
+      {key:'assortment',header:'分色分码',render:row=>row.assortment?.length?row.assortment.map(cell=>`${cell.color} · ${cell.size} ${cell.quantity}`).join(' / '):packingSpecification(state,row.lineId)?'待补录':'—'},
+    ]}/></RecordDisclosure>}
+    {s.packingDetailEvidence&&<RecordDisclosure title="分色分码核对记录"><p>{s.packingDetailEvidence.actor} · {businessWhen(s.packingDetailEvidence.at)}</p><p>{s.packingDetailEvidence.evidence}</p></RecordDisclosure>}
     <DetailBlock title={uiText("单证与报关")} aside={<span className="mist-row"><TextLink icon={FileText} onClick={onDocuments}>{uiText("处理本票单据")}</TextLink><TextLink onClick={onCustoms}>{uiText("处理本票报关")}</TextLink></span>}>
       {documents.length ? <DataTable ariaLabel={ui`${s.code} 单据`} rows={documents} rowKey={row => row.id} columns={[
         { key: 'type', header: '类型', render: row => documentTypeLabel(row.type) },

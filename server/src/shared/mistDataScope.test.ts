@@ -80,12 +80,13 @@ it('redacts full documents and hidden lines from a shared shipment', () => {
     customers: [{ id: 'mine', ownerId: 'member' }, { id: 'other', ownerId: 'another' }], crm: { opportunities: [], followUps: [] }, devs: [], market: { quotations: [], suppliers: [] },
     orders: [{ id: 'order-mine', customerId: 'mine', ownerId: 'member', type: 'garment' }, { id: 'order-other', customerId: 'other', ownerId: 'another', type: 'garment' }],
     orderLines: [{ id: 'line-mine', orderId: 'order-mine' }, { id: 'line-other', orderId: 'order-other' }],
-    fulfillment: { shipments: [{ id: 'shipment', lines: [{ orderId: 'order-mine', lineId: 'line-mine', quantity: 5 }, { orderId: 'order-other', lineId: 'line-other', quantity: 10 }], note: 'hidden details', fileIds: ['whole-file'], documentDispatches: [{ documentIds: ['document'] }] }], packing: [{ id: 'packing', lineId: 'line-mine', shipmentId: 'shipment' }], documents: [{ id: 'document', shipmentId: 'shipment', fileIds: ['whole-file'] }], customs: [{ id: 'customs', shipmentId: 'shipment', amount: 1000 }] },
+    fulfillment: { shipments: [{ id: 'shipment', lines: [{ orderId: 'order-mine', lineId: 'line-mine', quantity: 5 }, { orderId: 'order-other', lineId: 'line-other', quantity: 10 }], note: 'hidden details', packingDetailEvidence: {evidence:'private packing text',documentIds:['private-document']}, fileIds: ['whole-file'], documentDispatches: [{ documentIds: ['document'] }] }], packing: [{ id: 'packing', lineId: 'line-mine', shipmentId: 'shipment' }], documents: [{ id: 'document', shipmentId: 'shipment', fileIds: ['whole-file'] }], customs: [{ id: 'customs', shipmentId: 'shipment', amount: 1000 }] },
     platform: {}, events: [], tasks: [], notifications: [], calendar: [],
   };
   const projected: any = applyDataScope(state, { userIds: ['member'], teamIds: [] }, 'member');
   expect(projected.fulfillment.shipments[0].lines.map((row: any) => row.orderId)).toEqual(['order-mine']);
   expect(projected.fulfillment.shipments[0]).toMatchObject({ hiddenCount: 1, note: '', fileIds: [], documentDispatches: [] });
+  expect(projected.fulfillment.shipments[0].packingDetailEvidence).toBeUndefined();
   expect(projected.fulfillment.documents).toEqual([]);
   expect(projected.fulfillment.customs).toEqual([]);
   const after = structuredClone(state); after.fulfillment.shipments[0].note = 'changed';

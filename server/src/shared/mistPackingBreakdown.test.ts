@@ -1,0 +1,31 @@
+import {describe,it,expect} from 'vitest';
+import {createMistState} from './mistWorkspace';
+import {applyFulfillmentCommand} from './mistFulfillment';
+const ctx={id:()=>crypto.randomUUID(),now:'2026-10-30T02:00:00Z',actorName:'后勤',actorId:'logistics',can:()=>true};
+function fixture(){
+ const root=createMistState(ctx,'empty');
+ root.orders.push({id:'o',code:'SO',type:'garment',governance:{contract:{quantityBasis:'size',overPercent:0,shortPercent:0}}} as any);
+ root.orderLines.push({id:'l',orderId:'o',name:'夹克',style:'J',qty:10,unit:'件',breakdown:{kind:'garment',sizes:['M','L'],rows:[{color:'蓝',quantities:[3,2]},{color:'灰',quantities:[3,2]}]}} as any);
+ root.productions.push({id:'p',lineId:'l',orderId:'o',qty:10} as any);
+ root.fulfillment.productionFacts.push({productionId:'p',sizes:[],revision:1,completion:{quantity:10,sizeQuantities:[{size:'M',quantity:6},{size:'L',quantity:4}]}} as any);
+ root.fulfillment.shipments.push({id:'s',code:'SHP',domain:'garment',state:'preparing',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:10}]} as any);
+ const cells=[{color:'蓝',size:'M',quantity:3},{color:'蓝',size:'L',quantity:2},{color:'灰',size:'M',quantity:3},{color:'灰',size:'L',quantity:2}];
+ const row={lineId:'l',productionId:'p',carton:'1',quantity:10,netWeight:5,grossWeight:6,volume:0.1,note:'',assortment:cells};
+ const run=(rows:any[],extra:any={})=>{const next=structuredClone(root);const result=applyFulfillmentCommand(next,{type:'fulfillment.shipments.pack',payload:{id:'s',packingDetailVersion:2,lines:rows,...extra}} as any,ctx);Object.assign(root,next);return result;};
+ return {root,cells,row,run};
+}
+describe('garment packing by colour and size',()=>{
+ it('rejects a carton whose cell sum differs from its quantity',()=>{const f=fixture();expect(()=>f.run([{...f.row,assortment:f.cells.slice(1)}])).toThrow('分色分码合计');expect(f.root.fulfillment.packing).toHaveLength(0);});
+ it('rejects unknown colours even when the carton total is correct',()=>{const f=fixture();expect(()=>f.run([{...f.row,assortment:f.cells.map(c=>({...c,color:'红'}))}])).toThrow('颜色');});
+ it('rejects a colour swap that preserves both the overall and size totals',()=>{const f=fixture();expect(()=>f.run([{...f.row,assortment:[{color:'蓝',size:'M',quantity:6},{color:'蓝',size:'L',quantity:4}]}])).toThrow('蓝');});
+ it('persists validated detail and disallows dropping it later',()=>{const f=fixture();f.run([f.row]);expect(f.root.fulfillment.shipments[0].packingDetailVersion).toBe(2);expect(f.root.fulfillment.packing[0].assortment).toEqual(f.cells);expect(()=>f.run([{...f.row,assortment:undefined}],{packingDetailVersion:undefined})).toThrow('分色分码');});
+ it('supplements a signed legacy carton without changing signed physical facts',()=>{const f=fixture();f.root.fulfillment.packing.push({id:'original',shipmentId:'s',...f.row,assortment:undefined});f.root.fulfillment.documents.push({id:'pl',shipmentId:'s',type:'PL',status:'issued'} as any);f.run([f.row],{supplementEvidence:'按原PL逐箱核对'});expect(f.root.fulfillment.packing[0].id).toBe('original');expect(f.root.fulfillment.documents[0].status).toBe('issued');expect(f.root.fulfillment.shipments[0].packingDetailEvidence?.documentIds).toEqual(['pl']);expect(()=>f.run([{...f.row,carton:'changed'}],{supplementEvidence:'再次修改'})).toThrow('正式');});
+ it('does not permit physical edits during legacy supplementation',()=>{const f=fixture();f.root.fulfillment.packing.push({id:'original',shipmentId:'s',...f.row,assortment:undefined});f.root.fulfillment.documents.push({id:'pl',shipmentId:'s',type:'PL',status:'issued'} as any);expect(()=>f.run([{...f.row,netWeight:4}],{supplementEvidence:'按原PL核对'})).toThrow('原装箱');});
+});
+
+it('limits each size to actual branch completion even when total remains within contract',()=>{const f=fixture();f.root.fulfillment.productionFacts[0].completion!.sizeQuantities=[{size:'M',quantity:5},{size:'L',quantity:5}];expect(()=>f.run([f.row])).toThrow('本分支完工');});
+it('respects a contract based on total quantity rather than imposing colour proportions',()=>{const f=fixture();f.root.orders[0].governance!.contract.quantityBasis='total';expect(()=>f.run([{...f.row,assortment:[{color:'蓝',size:'M',quantity:6},{color:'蓝',size:'L',quantity:4}]}])).not.toThrow();});
+it('checks cumulative colour quantities across partial shipments and releases cancelled reservations',()=>{const f=fixture();f.root.fulfillment.shipments[0].lines[0].quantity=5;f.root.fulfillment.shipments.push({...f.root.fulfillment.shipments[0],id:'other',code:'OTHER',packingDetailVersion:2});f.root.fulfillment.packing.push({...f.row,id:'other-row',shipmentId:'other',quantity:5,assortment:[{color:'蓝',size:'M',quantity:3},{color:'蓝',size:'L',quantity:2}]});const row={...f.row,quantity:5,assortment:[{color:'蓝',size:'M',quantity:3},{color:'蓝',size:'L',quantity:2}]};expect(()=>f.run([row])).toThrow('蓝');f.root.fulfillment.shipments[1].state='cancelled';expect(()=>f.run([row])).not.toThrow();});
+it('keeps legacy clients working without silently claiming detailed verification',()=>{const f=fixture();applyFulfillmentCommand(f.root,{type:'fulfillment.shipments.pack',payload:{id:'s',lines:[{...f.row,assortment:undefined}]}} as any,ctx);expect(f.root.fulfillment.shipments[0].packingDetailVersion).toBeUndefined();});
+it('revalidates saved detailed packing before signing a PL',()=>{const f=fixture();f.run([f.row]);f.root.fulfillment.packing[0].assortment=[{color:'蓝',size:'M',quantity:6},{color:'蓝',size:'L',quantity:4}];f.root.fulfillment.documents.push({id:'pl',shipmentId:'s',type:'PL',status:'draft',fileIds:['original']} as any);expect(()=>applyFulfillmentCommand(f.root,{type:'fulfillment.documents.issue',payload:{id:'pl'}},ctx)).toThrow('蓝');expect(f.root.fulfillment.documents[0].status).toBe('draft');});
+it('preserves a ready legacy shipment and its sent documents when only missing detail is supplemented',()=>{const f=fixture();f.root.fulfillment.shipments[0].state='ready';f.root.fulfillment.shipments[0].documentsSentAt=ctx.now;f.root.fulfillment.packing.push({id:'original',shipmentId:'s',...f.row,assortment:undefined});f.root.fulfillment.documents.push({id:'pl',shipmentId:'s',type:'PL',status:'issued'} as any);f.run([f.row],{supplementEvidence:'按原PL核对'});expect(f.root.fulfillment.shipments[0]).toMatchObject({state:'ready',documentsSentAt:ctx.now});});
