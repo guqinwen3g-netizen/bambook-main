@@ -103,6 +103,17 @@ it('shows rejected warehouse material as isolated and warns before return',async
   expect((getByRole(detail,'button',{name:'登记出库'}) as HTMLButtonElement).disabled).toBe(true);
 });
 
+it('starts inspection for the exact isolated return and requires its passing report for release',async()=>{
+  const f=materialDeliveryFixture(20),id=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  const ret=f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'Hold A',person:'factory',note:'Rejected'}}).id!;
+  store.state=f.state;render(store.state.fulfillment.stock[0].id);
+  await click(getByRole(host,'button',{name:'送复检'}));
+  const dialog=getByRole(document.body,'dialog',{name:'隔离料送复检'});await click(getByRole(dialog,'button',{name:'发起复检'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.quarantine.request',payload:{returnId:ret,due:expect.any(String)}});
+  expect(queryByRole(host,'button',{name:'恢复可用'})).toBeNull();
+});
+
 it('stays readable without inventory authority and says why movements are unavailable',()=>{
   session.denied.add('inventory:write');
   store.state!.fulfillment.stock.push(stock('a'));
