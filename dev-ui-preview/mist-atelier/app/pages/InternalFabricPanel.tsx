@@ -47,7 +47,7 @@ export function InternalFabricPanel({ order, line, go }: Props) {
   if (!state || (!isGarment && !isSource)) return null;
   const deliveries = [...new Map([...materialDeliveryRows(state).filter(row => isSource ? state.fulfillment.purchases.find(p => p.id === row.purchaseId)?.lineId === line.id : row.delivery.lineId === line.id),...(isGarment?workspace.workspace?.scopedFabricAccess?.[line.id]?.deliveries||[]:[])].map(row=>[row.id,row])).values()];
   const physicallyCommitted = deliveries.some(row => row.outstanding !== '0');
-  const allocationDeliveries=deliveries.filter(row=>row.delivery.allocationId===activeAllocation?.id);
+  const allocationDeliveries=deliveries.filter(row=>row.delivery.allocationId===activeAllocation?.id&&row.delivery.allocationRevision===activeAllocation?.revision);
   const accepted = Number(sumMetres(allocationDeliveries.map(row => row.accepted))), shortReady = !!activeAllocation && allocationDeliveries.length > 0 && allocationDeliveries.every(row => row.pending === '0' && row.outstanding === row.accepted) && accepted < Number(activeAllocation.shortClosure?.accepted ?? activeAllocation.metres);
   const selected = candidates.find(row => row.fabricLineId === fabricLineId), sourceOrder = state.orders.find(row => row.id === activeAllocation?.fabricOrderId), sourceLine = state.orderLines.find(row => row.id === activeAllocation?.fabricLineId);
   const sourceHint=candidates.find(row=>row.fabricLineId===activeAllocation?.fabricLineId);
