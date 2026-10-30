@@ -102,8 +102,20 @@ export type PrepaymentMove = {
 /** 反向记录：冲回付款或冲回分配，原记录保留。 */
 export type PayableReversal = { id: string; kind: 'payment' | 'allocation'; targetId: string; parentId?: string; amount: number; currency: string; reason: string; at: string; actor: string };
 export type PayablesState = { bills: SupplierBill[]; payments: SupplierPayment[]; allocations: SupplierPaymentAllocation[]; plans?: PrepaymentPlan[]; requests?: PaymentRequest[]; reversals?: PayableReversal[]; settlements?: SupplierSettlement[]; deductions?: SupplierDeduction[]; prepaymentMoves?: PrepaymentMove[] };
+/** Minimal financial handoff; generated for an authorized reader, never persisted in the response state. */
+export type FinancialDisposalView = {returnId:string;purchaseId:string;purchaseCode:string;supplier:string;quantity:number;unit:string;currency:string;referenceAmount:number;decision:'supplierReturn'|'scrap';disposalEvidence:string;report:string;noRecovery?:{actor:string;evidence:string};review?:{id:string;actor:string;at:string;evidence:string}};
+export function financialDisposalViews(root:MistState, visiblePurchases:ReadonlySet<string>):FinancialDisposalView[] {
+ const f=root.fulfillment;if(!f)return [];
+ return f.stockMovements.flatMap(row=>{const d=row.quarantineDisposition,stock=f.stock.find(x=>x.id===row.stockId),p=stock&&f.purchases.find(x=>x.id===stock.purchaseId);
+  if(!d||d.decision==='release'||!row.quarantinedQuantity||!p||!visiblePurchases.has(p.id))return [];
+  const report=f.qcReports.find(r=>r.id===d.reportId),review=d.financeReviews?.slice().reverse().find(r=>!r.reversed);
+  return [{returnId:row.id,purchaseId:p.id,purchaseCode:p.code,supplier:p.supplier,quantity:row.quarantinedQuantity,unit:stock!.unit,currency:p.currency,referenceAmount:Math.round(row.quarantinedQuantity*p.price*100)/100,decision:d.decision,disposalEvidence:d.evidence,report:report?.report||'',...(d.noRecoveryDecision?{noRecovery:{actor:d.noRecoveryDecision.actor,evidence:d.noRecoveryDecision.evidence}}:{}),...(review?{review:{id:review.id,actor:review.actor,at:review.at,evidence:review.evidence}}:{})}];
+ });
+}
 type AllocationInput = Array<{ billId: string; amount: number }>;
 export type PayablesCommand =
+  | { type:'payable.disposal.review'; payload:{returnId:string;evidence:string} }
+  | { type:'payable.disposal.reverse'; payload:{returnId:string;reviewId:string;reason:string} }
   | { type: 'payable.bill.register'; payload: { invoiceType?:SupplierInvoiceType; supplierId: string; invoiceNo: string; invoiceDate: string; currency: string; amount: number; taxAmount: number; taxRate?: string; lines: Array<{ purchaseId: string; amount: number; settlementId?: string; awaitingSettlement?: boolean }>; due: string; dueBasis: string; fileIds?: string[]; note?: string } }
   | { type:'payable.bill.classify';payload:{id:string;invoiceType:SupplierInvoiceType;fileIds:string[];reason:string} }
   | { type: 'payable.bill.void'; payload: { id: string; reason: string } }
@@ -130,7 +142,7 @@ export type PayablesCommand =
   | { type: 'payable.settlement.confirm'; payload: { id: string; prepaymentApplied: number; adjustReason?: string; note?: string } }
   | { type: 'payable.settlement.return'; payload: { id: string; reason: string } }
   | { type: 'payable.settlement.reverse'; payload: { id: string; reason: string } };
-export const PAYABLE_COMMANDS = ['payable.bill.classify','payable.bill.register', 'payable.bill.void', 'payable.plan.register', 'payable.plan.cancel', 'payable.request.submit', 'payable.request.decide', 'payable.request.cancel', 'payable.payment.register', 'payable.payment.allocate', 'payable.payment.reverse', 'payable.allocation.reverse', 'payable.settlement.submit', 'payable.settlement.cancel', 'payable.settlement.confirm', 'payable.settlement.return', 'payable.settlement.reverse', 'payable.bill.link', 'payable.deduction.register', 'payable.deduction.reverse', 'payable.prepayment.refund', 'payable.prepayment.transfer', 'payable.prepayment.reverse', 'payable.payment.backfill', 'payable.payment.plan', 'payable.purchase.cancel'] as const;
+export const PAYABLE_COMMANDS = ['payable.disposal.review','payable.disposal.reverse','payable.bill.classify','payable.bill.register', 'payable.bill.void', 'payable.plan.register', 'payable.plan.cancel', 'payable.request.submit', 'payable.request.decide', 'payable.request.cancel', 'payable.payment.register', 'payable.payment.allocate', 'payable.payment.reverse', 'payable.allocation.reverse', 'payable.settlement.submit', 'payable.settlement.cancel', 'payable.settlement.confirm', 'payable.settlement.return', 'payable.settlement.reverse', 'payable.bill.link', 'payable.deduction.register', 'payable.deduction.reverse', 'payable.prepayment.refund', 'payable.prepayment.transfer', 'payable.prepayment.reverse', 'payable.payment.backfill', 'payable.payment.plan', 'payable.purchase.cancel'] as const;
 /** 结算提交沿用合同经办权限（业务员）；复核确认、退回与冲回沿用核销权限（财务）。 */
 export const SETTLEMENT_SCOPES = { submit: 'procurement:write', confirm: MIST_FINANCE_SCOPES.reconcile } as const;
 /** 岗位矩阵已有：付款申请创建（业务员、财务）与审批（业务主管）。 */
@@ -155,6 +167,7 @@ const key = (v: string) => v.trim().toLocaleLowerCase();
 
 export const createPayablesState = (_context?: MistContext, _root?: unknown): PayablesState => ({ bills: [], payments: [], allocations: [], plans: [], requests: [], reversals: [], settlements: [], deductions: [], prepaymentMoves: [] });
 export function payablesCommandPermission(command: PayablesCommand) {
+  if (command.type === 'payable.disposal.review' || command.type === 'payable.disposal.reverse') return MIST_FINANCE_SCOPES.reconcile;
   if (command.type === 'payable.bill.classify' || command.type === 'payable.bill.register' || command.type === 'payable.bill.void' || command.type === 'payable.bill.link' || command.type === 'payable.plan.register' || command.type === 'payable.plan.cancel') return MIST_FINANCE_SCOPES.invoice;
   // 索赔扣款减少票据未付，属于核销；退款是资金到账，沿凭证写；转抵是在合同之间核销预付。
   if (command.type === 'payable.deduction.register' || command.type === 'payable.deduction.reverse' || command.type === 'payable.prepayment.transfer') return MIST_FINANCE_SCOPES.reconcile;
@@ -537,6 +550,27 @@ function invoiceOriginals(invoiceType:SupplierInvoiceType|undefined,currency:str
 export function applyPayablesCommand(root: Root, command: PayablesCommand, c: MistContext): { id: string; applied?: number } {
   const today = platformBusinessDate(c.now), s = ledger(root), p = command.payload as any;
   switch (command.type) {
+    case 'payable.disposal.review': {
+      const row=root.fulfillment.stockMovements.find(m=>m.id===text(p.returnId,'隔离退回')) || fail('隔离退回不存在','NOT_FOUND'), d=row.quarantineDisposition;
+      if(!d || d.decision==='release' || !row.quarantinedQuantity)fail('该批次尚无退供或报废记录');
+      if(d!.financeReviews?.some(r=>!r.reversed))fail('该批次已核对','CONFLICT');
+      if(!d!.noRecoveryDecision)fail('请先由负责人确认不追偿');
+      const stock=root.fulfillment.stock.find(x=>x.id===row.stockId), purchase=root.fulfillment.purchases.find(x=>x.id===stock?.purchaseId);
+      if(!purchase||!stock?.receiptId||!s.settlements.some(x=>x.purchaseId===purchase.id&&x.state==='confirmed'&&x.receiptIds.includes(stock.receiptId!)))fail('请先核对该批次对应的已确认结算');
+      if(!c.actorId)fail('缺少财务经办人');
+      if(c.actorId===d!.noRecoveryDecision!.actorId)fail('负责人不能复核自己的不追偿决定','FORBIDDEN');
+      const evidence=text(p.evidence,'无补偿核对依据',true,1000),id=c.id();
+      (d!.financeReviews ||= []).push({id,outcome:'noRecovery',evidence,actorId:c.actorId!,actor:c.actorName,at:c.now});
+      event(root,c,purchase.id,`隔离料财务核对：${d!.decision==='scrap'?'报废':'退供'} ${row.quarantinedQuantity} ${stock!.unit}，确认无补偿；原结算不变`);
+      return {id};
+    }
+    case 'payable.disposal.reverse': {
+      const row=root.fulfillment.stockMovements.find(m=>m.id===text(p.returnId,'隔离退回')) || fail('隔离退回不存在','NOT_FOUND');
+      const review=row.quarantineDisposition?.financeReviews?.find(r=>r.id===text(p.reviewId,'财务核对')) || fail('财务核对不存在','NOT_FOUND');
+      if(review!.reversed)fail('该核对已撤回','CONFLICT');if(!c.actorId)fail('缺少财务经办人');
+      review!.reversed={actorId:c.actorId!,actor:c.actorName,at:c.now,reason:text(p.reason,'撤回原因',true,1000)};
+      event(root,c,row.stockId,'撤回隔离料财务核对');return {id:review!.id};
+    }
     case 'payable.bill.register': {
       const supplierId = text(p.supplierId, '供应商'), invoiceNo = text(p.invoiceNo, '供应商发票号', true, 80), invoiceDate = day(p.invoiceDate, '发票日期');
       if (invoiceDate > today) fail('发票日期不能在未来');

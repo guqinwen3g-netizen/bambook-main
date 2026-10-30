@@ -96,6 +96,14 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     next.notifications = (next.notifications || []).filter(item => visibleTarget(item.target));
     next.calendar = (next.calendar || []).filter(item => visibleTarget(item.target));
   }
+  // Warehouse readers without payable access must not receive financial review evidence.
+  if(hidden.some(section=>section.key==='payables') && next.fulfillment?.stockMovements){
+    next.fulfillment={...next.fulfillment,stockMovements:next.fulfillment.stockMovements.map(row=>{
+      if(!row.quarantineDisposition?.financeReviews)return row;
+      const {financeReviews:_private,...disposition}=row.quarantineDisposition;
+      return {...row,quarantineDisposition:disposition};
+    })};
+  }
   // 邮箱按用户 ID 隔离：个人邮箱只给本人，共享邮箱给本人与授权成员；不可见邮箱的邮件、草稿、发送记录、处理记录与跟进来源一并移除，附件随引用隐藏。
   if (next.email && !hidden.some(section => section.key === 'email')) {
     const scope = emailVisibleScope(next.email, actor.userId), denied = new Set<string>();

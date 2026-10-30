@@ -29,7 +29,7 @@ export type MaterialDeliveryLink = {
   receivingChecks?: MaterialReceivingCheck[];
 };
 export type MaterialReceivingCheck = { id: string; acceptedQuantity: string; rejectedQuantity: string; previousQuantity: string; previousRejected: string; at: string; actorId: string; actor: string; evidence: string };
-export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
+export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; sourcePurchaseCode?:string; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
 export const GARMENT_FULFILLMENT_LABELS: Record<GarmentFulfillmentMode, string> = { cmt: '纯 CMT', trims_cmt: '辅料 + CMT', full_package: '全包' };
 export const CMT_INCLUDED_ITEM_LABELS: Record<CmtIncludedItem, string> = { trims: '辅料', packaging: '包装' };
 export const MATERIAL_KIND_LABELS: Record<MistMaterialKind, string> = { fabric: '面料', trims: '辅料', packaging: '包装', other: '其他原料' };

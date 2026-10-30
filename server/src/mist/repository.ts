@@ -16,10 +16,10 @@ const REVIEW_COMMAND_BY_KIND = {
 const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
-import { payablesCommandPermissions } from '../shared/mistPayables';
+import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
-import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
+import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
@@ -210,7 +210,9 @@ export class MistRepository {
     }
     const access: MistWorkspaceAccess = { role: owner ? 'owner' : 'member', canManageMembers: owner && !company, canManageCompany: company ? canMaintainCompany(actor) : owner, ...(company ? { companyLibrary: true, teamViews } : {}), ...(scopeOf(row) ? {manageableCustomerIds: (row.state.customers??[]).filter(customer=>scopeOf(row)!.userIds.includes(customer.ownerId)).map(customer=>customer.id)} : {}), hidden: projected.hidden.map(s => ({ key: s.key, label: s.label, permissions: [...s.permissions] })) };
     const scope=scopeOf(row), materialIssueTargets=scope&&hasScope(actor,'inventory:read')&&hasScope(actor,'inventory:write')?scopedMaterialIssueTargets(row.state,scope):undefined;
-    return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}) };
+    const financialDisposals=hasScope(actor,'invoices:read')&&hasScope(actor,'vouchers:read')&&hasScope(actor,'procurement:read')?financialDisposalViews(row.state,new Set((projected.state.fulfillment?.purchases||[]).map(p=>p.id))):undefined;
+    const fabricAccess=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,scope,actor.userId,actor.displayName||actor.userId):undefined;
+    return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}) };
   }
   async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
   /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */
@@ -432,7 +434,13 @@ export class MistRepository {
         const scopeManagement = input.command?.type?.startsWith('teamScope.') || REVIEW_KIND_BY_COMMAND.has(input.command?.type);
         const crossIssue=input.command?.type==='fulfillment.materials.issue'?input.command.payload:undefined;
         const crossTarget=earlyScope&&crossIssue&&scopedMaterialIssueTargets(row.state,earlyScope)[crossIssue.id]?.some(option=>option.value===crossIssue.targetProductionId)?crossIssue.targetProductionId:undefined;
-        if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),new Set(crossTarget?[crossTarget]:[]))) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
+        const fabricAccess=earlyScope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,earlyScope,actor.userId,actor.displayName||actor.userId):undefined;
+        const allocating=input.command?.type==='order.fabric.allocate'?input.command.payload:undefined;
+        const fabricCandidate=allocating&&fabricAccess?.[allocating.lineId]?.candidates.find(c=>c.fabricOrderId===allocating.fabricOrderId&&c.fabricLineId===allocating.fabricLineId&&row.state.orderLines.some(l=>l.id===allocating.lineId&&l.orderId===allocating.orderId));
+        const confirming=input.command?.type==='fulfillment.materials.confirm'?input.command.payload:undefined;
+        const incoming=confirming?.kind==='issue'?Object.values(fabricAccess||{}).flatMap(a=>a.deliveries).find(d=>d.id===confirming.id):undefined;
+        const crossRefs=new Set([...(crossTarget?[crossTarget]:[]),...(fabricCandidate?[fabricCandidate.fabricOrderId,fabricCandidate.fabricLineId]:[]),...(incoming?[incoming.id]:[])]);
+        if (earlyScope && !scopeManagement && scopedReferenceViolation(row.state, earlyScope, input.command?.payload, ['market.quotation.save','order.create','order.governance.saveDraft'].includes(input.command?.type),crossRefs)) fail('NOT_FOUND', '来源记录不存在或不在当前账号的业务范围内', 404);
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
@@ -502,7 +510,8 @@ export class MistRepository {
         canonical(applied.state); canonical(applied.result);
         const changeKeys = mistChangeKeys(row.state, applied.state);
         // 行级范围写侧：受限岗位不能改看不到的业务，也不能在看不到的业务下新建。
-        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope) : null;
+        const incomingSource=incoming&&row.state.fulfillment.purchases.find(p=>p.id===incoming.purchaseId);
+        const scope = scopeOf(row), violation = scope ? scopedWriteViolation(row.state, applied.state, scope, incoming&&incomingSource?{issueId:incoming.id,sourceOrderId:incomingSource.orderId}:undefined) : null;
         if (violation) fail('NOT_FOUND', '记录不存在或不在当前账号的业务范围内', 404);
         if (concurrent) {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);

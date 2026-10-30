@@ -85,12 +85,13 @@ export function FinancePayables() {
   const [linkId, setLinkId] = React.useState(''), [deductId, setDeductId] = React.useState(''), [moveDraft, setMoveDraft] = React.useState<{ kind: 'refund' | 'transfer'; purchaseId: string } | null>(null);
   const [advanceId, setAdvanceId] = React.useState(''), [backfillId, setBackfillId] = React.useState(''), [planLinkId, setPlanLinkId] = React.useState('');
   const [invoiceTypeId,setInvoiceTypeId]=React.useState('');
+  const [disposalDraft,setDisposalDraft]=React.useState<{returnId:string;mode:'review'|'reverse';reason:string}|null>(null);
   const [working, setWorking] = React.useState(false), [operationFailure, setFailure] = React.useState(''), [recovering,setRecovering]=React.useState(false);
   const busy = working || loading || saving || !!pending;
   const actionKey=`${session.sessionKey??session.user?.id??''}:${workspace?.id??''}:${route.id??''}`,actionScope=React.useRef(actionKey),mounted=React.useRef(true);actionScope.current=actionKey;
   const unresolved=React.useRef<{scope:string;requestId:string;workspaceId:string;actorId:string;done:(result:Record<string,unknown>)=>void}|null>(null);
   React.useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
-  React.useEffect(()=>{setWorking(false);setRecovering(false);setFailure('');setBillDraft(null);setPayDraft(null);setReasonDraft(null);setPlanDraft(null);setPreDraft(null);setSettleOpen(false);setConfirmId('');setLinkId('');setDeductId('');setMoveDraft(null);setAdvanceId('');setBackfillId('');setPlanLinkId('');setInvoiceTypeId('');},[actionKey]);
+  React.useEffect(()=>{setWorking(false);setRecovering(false);setFailure('');setBillDraft(null);setPayDraft(null);setReasonDraft(null);setPlanDraft(null);setPreDraft(null);setSettleOpen(false);setConfirmId('');setLinkId('');setDeductId('');setMoveDraft(null);setAdvanceId('');setBackfillId('');setPlanLinkId('');setInvoiceTypeId('');setDisposalDraft(null);},[actionKey]);
   const settlementPurchaseId = state?.fulfillment?.purchases?.find(purchase => purchase.id === route.id)?.id;
   React.useEffect(() => {
     if (!settlementPurchaseId) return;
@@ -101,6 +102,7 @@ export function FinancePayables() {
 
   const bills = state ? payableBills(state, day) : [], payments = state ? supplierPayments(state, day) : [], sources = state ? payableSources(state) : [], summary = state ? supplierPayableSummary(state, day) : [];
   const suppliers = payableSupplierOptions(state), requests = state ? paymentRequests(state) : [], plans = state ? prepaymentPlans(state) : [], settlements = state ? supplierSettlements(state) : [];
+  const disposals=workspace?.financialDisposals||[], disposal=disposals.find(d=>d.returnId===disposalDraft?.returnId);
   const clearedBySupplier = new Map<string,number>();
   for (const bill of bills) if (bill.status !== 'void' && !bill.held) { const key=JSON.stringify([bill.supplierId,bill.currency]);clearedBySupplier.set(key,(clearedBySupplier.get(key)||0)+billClearedMinor(bill)); }
   const shownBills = bills.filter(b => filter === 'all' || (filter === 'open' ? b.open > 0 : b.overdue));
@@ -337,7 +339,17 @@ export function FinancePayables() {
     : <DataTable ariaLabel={uiText("供应商付款")} rows={payments} columns={paymentColumns} loading={loading} rowKey={p => p.id} selectedKey={selected} onRowClick={p => open(p.id)} empty={<EmptyState title={uiText("还没有供应商付款")} description={uiText("实际付款后在这里登记，并分配到一张或多张票据。")} />} />;
 
   return <PayableDialogRecovery value={{pending:pendingPayable&&(!saving||recovering),failure:operationFailure,busy:working||saving||loading,recover:()=>void recoverPayable()}}><div className="mist-col" data-finance-payables>
-    {failure && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId && <Banner tone="bad" title={uiText("操作没有完成")}>{failure}</Banner>}
+    {failure && !disposalDraft && !billDraft && !payDraft && !reasonDraft && !planDraft && !preDraft && !settleOpen && !confirmId && !linkId && !deductId && !moveDraft && !advanceId && !backfillId && !planLinkId && <Banner tone="bad" title={uiText("操作没有完成")}>{failure}</Banner>}
+    {disposals.length>0&&<Card><CardHeader title={uiText('退料财务核对')}/><div className="mist-card-body"><DataTable ariaLabel={uiText('退料财务核对')} rows={disposals} rowKey={d=>d.returnId} columns={[
+      {key:'purchase',header:'来源采购',render:d=>`${d.purchaseCode} · ${d.supplier}`},
+      {key:'decision',header:'处置',render:d=>`${d.decision==='scrap'?'报废':'退供应商'} ${d.quantity} ${d.unit}`},
+      {key:'value',header:'参考货值',align:'right',render:d=>apMoney(d.referenceAmount,d.currency)},
+      {key:'status',header:'状态',render:d=>d.review?'已核对 · 无补偿':d.noRecovery?'待财务核对':'待负责人决定'},
+      {key:'action',header:'操作',render:d=>canConfirm?<Button size="sm" disabled={busy||!d.noRecovery} onClick={()=>{setFailure('');setDisposalDraft({returnId:d.returnId,mode:d.review?'reverse':'review',reason:''});}}>{d.review?'撤回核对':'核对'}</Button>:null},
+    ]}/></div></Card>}
+    <Dialog open={!!disposalDraft} onClose={()=>{if(!busy)setDisposalDraft(null);}} title={uiText(disposalDraft?.mode==='reverse'?'撤回财务核对':'核对退料财务处理')} footer={<><Button disabled={busy} onClick={()=>setDisposalDraft(null)}>{uiText('取消')}</Button><Button variant="primary" loading={busy} disabled={busy||!canConfirm||!disposalDraft?.reason.trim()} onClick={()=>{if(!disposalDraft||!disposal)return;const command:PayablesCommand=disposalDraft.mode==='reverse'?{type:'payable.disposal.reverse',payload:{returnId:disposal.returnId,reviewId:disposal.review!.id,reason:disposalDraft.reason}}:{type:'payable.disposal.review',payload:{returnId:disposal.returnId,evidence:disposalDraft.reason}};void execute(command,()=>{setDisposalDraft(null);toast('财务核对已保存');});}}>{uiText('确认')}</Button></>}>
+      {disposal&&disposalDraft&&<div className="mist-col">{failure&&<Banner tone="bad" title={uiText('核对未保存')}>{failure}</Banner>}<Facts items={[{label:'来源采购',value:disposal.purchaseCode},{label:'处置',value:`${disposal.decision==='scrap'?'报废':'退供应商'} ${disposal.quantity} ${disposal.unit}`},{label:'参考货值',value:apMoney(disposal.referenceAmount,disposal.currency)},{label:'复检报告',value:disposal.report},{label:'处置依据',value:disposal.disposalEvidence},{label:'负责人决定',value:disposal.noRecovery?`${disposal.noRecovery.actor} · ${disposal.noRecovery.evidence}`:'未决定'}]}/>{disposalDraft.mode==='review'&&<p>{uiText('确认无补偿；原采购成本和结算不变。')}</p>}<Field label={uiText(disposalDraft.mode==='review'?'无补偿核对依据':'撤回原因')} required><TextArea aria-label={uiText(disposalDraft.mode==='review'?'无补偿核对依据':'撤回原因')} value={disposalDraft.reason} onChange={e=>setDisposalDraft({...disposalDraft,reason:e.target.value})}/></Field></div>}
+    </Dialog>
     <Card>
       <CardHeader title={uiText(state?.partialPayableBills?.length ? "完整可见票据汇总（按原币）" : "供应商应付（按原币）")} tools={<div className="mist-row" style={{ flexWrap: 'wrap' }}>
         {canBill && <Button disabled={busy} onClick={() => startBill()}>{uiText("登记供应商票据")}</Button>}

@@ -93,7 +93,7 @@ const OwnTeams = React.createContext<{teams: OwnTeam[]; state?: MistState | null
 export function TeamViewScope({ teamId, actorId, teams = [], children }: { teamId: string; actorId: string | undefined; teams?: OwnTeam[]; children: React.ReactNode }) {
   const workspace = useMistWorkspace();
   const state = workspace.state && actorId ? teamViewState(workspace.state, teamId, actorId, workspace.workspace?.access?.teamViews) : workspace.state;
-  const value = React.useMemo(() => state === workspace.state ? workspace : { ...workspace, state, workspace: workspace.workspace ? {...workspace.workspace, state: state!, costMaterialBasis: null} : null }, [workspace, state]);
+  const value = React.useMemo(() => state === workspace.state ? workspace : { ...workspace, state, workspace: workspace.workspace ? {...workspace.workspace, state: state!, costMaterialBasis: null, financialDisposals:workspace.workspace.financialDisposals?.filter(row=>state?.fulfillment?.purchases?.some(p=>p.id===row.purchaseId)),scopedFabricAccess:workspace.workspace.scopedFabricAccess&&Object.fromEntries(Object.entries(workspace.workspace.scopedFabricAccess).filter(([lineId])=>state?.orderLines.some(line=>line.id===lineId)))} : null }, [workspace, state]);
   return <OwnTeams.Provider value={{teams, state: workspace.state, views: workspace.workspace?.access?.teamViews}}>{state === workspace.state ? children : <MistWorkspaceScope value={value}>{children}</MistWorkspaceScope>}</OwnTeams.Provider>;
 }
 /** 列表 / 详情用：这条记录经本人哪些小组共享而来（小组名）。 */
