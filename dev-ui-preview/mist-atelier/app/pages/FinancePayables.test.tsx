@@ -42,6 +42,17 @@ it('does not open a settlement write form from a contract URL without submit per
   prepaidWithReceipt();store.value.permissions=[MIST_FINANCE_SCOPES.invoice];route.id=po.id;render();expect(queryByRole(document.body,'dialog',{name:'提交结算'})).toBeNull();expect(queryByRole(host,'button',{name:'提交结算'})).toBeNull();
 });
 
+it('keeps a supplier-direct receipt unavailable for settlement while the recipient still has uncounted goods',()=>{
+  prepaidWithReceipt(); const receipt=store.value.state.fulfillment.receipts.find((row:any)=>row.id==='rcpt-2') || store.value.state.fulfillment.receipts.at(-1);
+  receipt.destination='supplier'; receipt.materialDelivery={productionId:'target-production',orderId:'target-order',lineId:'target-line',supplierId:'factory',supplier:'Factory',receiverId:'receiver',receiver:'Receiver'};
+  store.value.userId='sales';store.value.permissions=[SETTLEMENT_SCOPES.submit];route.id=po.id;render();
+  const form=getByRole(document.body,'dialog',{name:'提交结算'});
+  const row=form.querySelector(`[data-settle-receipt="${receipt.id}"]`)!;
+  expect((getByRole(row as HTMLElement,'checkbox') as HTMLInputElement).disabled).toBe(true);
+  expect(row.textContent).toContain('待接收人点收');
+  expect(store.value.run).not.toHaveBeenCalled();
+});
+
 it('does not replace an unavailable work-item contract with another approved contract',()=>{
   prepaidWithReceipt();store.value.permissions=[SETTLEMENT_SCOPES.submit];store.value.state.fulfillment.purchases.find((p:any)=>p.id===po.id).state='cancelled';route.id=po.id;render();
   const form=getByRole(document.body,'dialog',{name:'提交结算'});expect(form.textContent).toContain('来源合同已不可用');expect((getByRole(form,'button',{name:'提交复核'}) as HTMLButtonElement).disabled).toBe(true);expect(store.value.run).not.toHaveBeenCalled();

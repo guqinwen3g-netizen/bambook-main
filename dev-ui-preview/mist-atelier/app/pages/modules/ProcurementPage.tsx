@@ -277,12 +277,15 @@ function PurchaseDetail({ purchase: p, state, day, me, can, canApprove, locked, 
     : { tone: 'accent', title: processing ? '加工中' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
   const deliveries = materialDeliveryRows(state).filter(row => processing ? state.productions.find(branch => branch.id === row.delivery.productionId)?.sourcePurchaseId === p.id : row.purchaseId === p.id);
   const activeDeliveries = deliveries.filter(row => row.outstanding !== '0');
+  const receivedDeliveries = activeDeliveries.filter(row => row.pending === '0' && row.rejected === row.returned && row.accepted !== '0');
+  const pendingDeliveries = activeDeliveries.filter(row => row.pending !== '0');
+  const rejectedDeliveries = activeDeliveries.filter(row => Number(row.rejected) > Number(row.returned));
   const track = [
     { label: '提交审批', done: !!p.submittedAt || stage !== 'draft', note: p.submittedAt ? shortWhen(p.submittedAt) : '未提交' },
     { label: '审批', done: p.state === 'approved', note: p.decision ? `${p.decision.actor} · ${p.decision.decision === 'approved' ? '批准' : '退回'} · ${shortWhen(p.decision.at)}` : '待审批', noteTone: p.state === 'rejected' ? 'bad' as const : undefined },
     { label: '合同线下发出', done: !!p.offlineSend, note: p.offlineSend ? `${p.offlineSend.actor} · ${shortWhen(p.offlineSend.at)}` : '未登记' },
     { label: '供应商确认', done: !!p.supplierConfirmation, note: p.supplierConfirmation ? `承诺 ${p.supplierConfirmation.confirmedDue}` : '未登记' },
-    ...(processing ? [{ label: '物料接收', done: activeDeliveries.length > 0 && activeDeliveries.every(row => !!row.delivery.confirmation), note: activeDeliveries.length ? `${activeDeliveries.filter(row => row.delivery.confirmation).length} 笔已收 · ${activeDeliveries.filter(row => !row.delivery.confirmation).length} 笔待收` : '待交接' }] : []),
+    ...(processing ? [{ label: '物料接收', done: receivedDeliveries.length > 0 && receivedDeliveries.length === activeDeliveries.length, note: activeDeliveries.length ? `${receivedDeliveries.length} 笔已收 · ${pendingDeliveries.length} 笔待收${rejectedDeliveries.length ? ` · ${rejectedDeliveries.length} 笔拒收待退` : ''}` : '待交接' }] : []),
     { label: processing ? '分批回交' : '分批交付', done: stage === 'done', note: `${p.received} / ${p.quantity} ${p.unit}` },
     { label: '拒收退换', done: rejectedQty > 0 && openRejected <= 0, note: rejectedQty ? `已拒收 ${rejectedQty} ${p.unit}${replaceQty ? ` · 供应商补发 ${replaceQty}` : ''}${noReplaceQty ? ` · 不再补发 ${noReplaceQty}` : ''}${openRejected > 0 ? ` · ${openRejected} 待登记退换` : ''}` : '没有拒收', noteTone: openRejected > 0 ? 'bad' as const : undefined },
     ...(prepay.plans.length || prepay.transferredIn ? [{ label: '合同预付款', done: prepay.paid >= prepay.planned && prepay.available <= 0, note: `计划 ${amt(prepay.planned)} · 已付 ${amt(prepay.paid)}${prepay.transferredIn ? ` · 转入 ${amt(prepay.transferredIn)}` : ''} · 已抵扣 ${amt(prepay.applied)}${prepay.refunded ? ` · 已退款 ${amt(prepay.refunded)}` : ''}${prepay.transferredOut ? ` · 已转出 ${amt(prepay.transferredOut)}` : ''} ${p.currency}${prepay.residualAfterFinal > 0 ? ` · 最终结算后剩余 ${amt(prepay.residualAfterFinal)} 待退款或转抵（财务在结算详情登记）` : prepay.available > 0 ? ` · 待抵扣 ${amt(prepay.available)}` : ''}`, noteTone: prepay.residualAfterFinal > 0 ? 'bad' as const : undefined }] : []),

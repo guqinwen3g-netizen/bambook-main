@@ -1,5 +1,5 @@
 import {recoveryOtherFulfilledMinor} from './mistClaimRecoveryReceipts';
-import { hasMaterialAtFactory } from './mistInternalFabric';
+import { hasMaterialAtFactory, materialDeliveryRows } from './mistInternalFabric';
 /**
  * 供应商票据与应付（公司端财务首轮）。
  * 业务口径：供应商开出增值税发票后，财务登记票据并形成应付；付款是另一件事实，
@@ -313,7 +313,11 @@ export function settlementSuggestedPrepaymentMinor(root: Root, settlement: Pick<
   return Math.max(0, Math.min(last ? available : proportional, available, mistMoneyMinor(settlement.amount)));
 }
 export function settlementReceipts(root: Root, purchaseId: string, exceptSettlementId = '') {
-  return (root.fulfillment?.receipts || []).filter(r => r.purchaseId === purchaseId).map(r => ({ receipt: r, settled: receiptSettled(root, r.id, exceptSettlementId) }));
+  const pending = new Set(materialDeliveryRows(root).filter(row => row.kind === 'direct' && row.pending !== '0').map(row => row.id));
+  return (root.fulfillment?.receipts || []).filter(r => r.purchaseId === purchaseId).map(r => ({ receipt: r, settled: receiptSettled(root, r.id, exceptSettlementId), pendingReceiver: pending.has(r.id) }));
+}
+function assertSettlementReceiptsCounted(root: Root, receiptIds: string[]) {
+  if (materialDeliveryRows(root).some(row => row.kind === 'direct' && receiptIds.includes(row.id) && row.pending !== '0')) fail('直送物料仍有待点收数量，请先由接收人完成点收', 'PRECONDITION');
 }
 /** 未分配 = 可以再分配到票据的钱；已冲回付款和预付款（等结算抵扣）都不算。 */
 export function supplierPaymentUnallocatedMinor(root: Root, payment: SupplierPayment) {
@@ -768,6 +772,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (ids.length !== p.receiptIds.length) fail('同一条收货记录在本次结算中重复出现');
       const receipts = ids.map(id => (root.fulfillment?.receipts || []).find(r => r.id === id) || fail('收货记录不存在', 'NOT_FOUND'));
       for (const r of receipts) { if (r.purchaseId !== po.id) fail('收货记录不属于该合同'); if (receiptSettled(root, r.id)) fail(`${r.date} 的收货记录已在其他结算中`, 'CONFLICT'); }
+      assertSettlementReceiptsCounted(root, ids);
       const quantity = receipts.reduce((n, r) => n + r.quantity, 0), rejected = receipts.reduce((n, r) => n + r.rejected, 0);
       if (quantity <= 0) fail('所选收货记录没有实收合格数量；拒收数量不计入结算');
       const amount = Math.round(quantity * po.price * 100);
@@ -803,6 +808,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (!c.actorId || st.submitterId === c.actorId) fail('不能复核本人提交的结算', 'FORBIDDEN');
       if (st.final && confirmedSettlements(root, st.purchaseId).some(x => x.final)) fail(`${st.purchaseCode} 已有最终结算`, 'CONFLICT');
       const po = (root.fulfillment?.purchases || []).find(x => x.id === st.purchaseId) || fail('来源合同不存在', 'NOT_FOUND');
+      assertSettlementReceiptsCounted(root, st.receiptIds);
       const live = confirmedSettlements(root, po.id).reduce((n, x) => n + mistMoneyMinor(x.amount), 0);
       if (live + mistMoneyMinor(st.amount) > purchaseContractMinor(po)) fail(`${po.code} 累计结算金额会超过合同金额；超收部分须先走合同变更`);
       const suggested = settlementSuggestedPrepaymentMinor(root, st), applied = minor(p.prepaymentApplied, '本次预付抵扣', true);

@@ -88,13 +88,13 @@ export function SettlementSubmitDialog({ open, state, initialPurchaseId, busy, c
   const unavailable = !!initialPurchaseId && !purchases.some(purchase => purchase.id === initialPurchaseId);
   const po = purchases.find(p => p.id === draft.purchaseId);
   const rows = state && po ? settlementReceipts(state, po.id) : [];
-  const chosen = rows.filter(r => draft.receipts[r.receipt.id] && !r.settled);
+  const chosen = rows.filter(r => draft.receipts[r.receipt.id] && !r.settled && !r.pendingReceiver);
   const qty = chosen.reduce((n, r) => n + r.receipt.quantity, 0), amount = po ? Math.round(qty * po.price * 100) : 0;
   const prepay = state && po ? purchasePrepaymentReadback(state, po.id) : null;
   const priorSettlements=(state?.payables?.settlements||[]).filter(row=>row.purchaseId===po?.id);
   const settledQty=priorSettlements.filter(row=>row.state==='confirmed').reduce((sum,row)=>sum+row.quantity,0);
   const automaticFinal=!!po&&qty>0&&settledQty+qty>=po.quantity,final=draft.final||automaticFinal;
-  const blocked=po?(priorSettlements.some(row=>row.state==='confirmed'&&row.final)?'合同已完成最终结算':priorSettlements.some(row=>row.state==='pending')?'已有待财务复核结算':!rows.some(row=>!row.settled&&row.receipt.quantity>0)?'暂无可结算实收':''):'';
+  const blocked=po?(priorSettlements.some(row=>row.state==='confirmed'&&row.final)?'合同已完成最终结算':priorSettlements.some(row=>row.state==='pending')?'已有待财务复核结算':!rows.some(row=>!row.settled&&!row.pendingReceiver&&row.receipt.quantity>0)?'暂无可结算实收':''):'';
   const suggested = state && po && qty > 0 ? settlementSuggestedPrepaymentMinor(state, { id: '', purchaseId: po.id, quantity: qty, amount: amount / 100, final }) : 0;
   const submit = () => {
     if (!po) return setLocal('请选择合同。');
@@ -117,8 +117,8 @@ export function SettlementSubmitDialog({ open, state, initialPurchaseId, busy, c
       <Field label={uiText("来源合同")} required><Select aria-label={uiText("结算合同")} disabled={!!initialPurchaseId} value={draft.purchaseId} options={[{ value: '', label: '请选择已批准合同' }, ...purchases.map(p => ({ value: p.id, label: `${p.code} · ${p.supplier}` }))]} onChange={e => setDraft({ ...draft, purchaseId: e.target.value, receipts: {} })} /></Field>
       {po && <Facts items={[{label:'合同数量',value:`${po.quantity} ${po.unit}`},{label:'合同单价',value:money(po.price,po.currency)},{label:'合同金额',value:money(purchaseContractMinor(po)/100,po.currency)}]}/>}
       {po && <FieldGroup label={uiText("实际收货记录")} required>
-        <div className="mist-col">{rows.map(({ receipt: r, settled }) => <div className="mist-row mist-module-actions" key={r.id} data-settle-receipt={r.id}>
-          <Checkbox checked={!!draft.receipts[r.id] && !settled} disabled={settled || r.quantity <= 0} onChange={v => setDraft({ ...draft, receipts: { ...draft.receipts, [r.id]: v } })} label={<span>{r.date} · {r.location}{uiText(" · 实收 ")}{r.quantity}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(po.unit)}{uiText(settled ? ' · 已在结算中' : r.quantity <= 0 ? ' · 无实收' : '')}</span>} /></div>)}
+        <div className="mist-col">{rows.map(({ receipt: r, settled, pendingReceiver }) => <div className="mist-row mist-module-actions" key={r.id} data-settle-receipt={r.id}>
+          <Checkbox checked={!!draft.receipts[r.id] && !settled && !pendingReceiver} disabled={settled || pendingReceiver || r.quantity <= 0} onChange={v => setDraft({ ...draft, receipts: { ...draft.receipts, [r.id]: v } })} label={<span>{r.date} · {r.location}{uiText(" · 实收 ")}{r.quantity}{uiText(r.rejected ? ` · 拒收 ${r.rejected}` : '')} {uiText(po.unit)}{uiText(settled ? ' · 已在结算中' : pendingReceiver ? ' · 待接收人点收' : r.quantity <= 0 ? ' · 无实收' : '')}</span>} /></div>)}
           {!rows.length && <span className="mist-note">{uiText("这张合同还没有实际收货记录；先在采购详情登记收货。")}</span>}</div>
       </FieldGroup>}
       {po && (() => { const all = state ? state.fulfillment.receipts.filter(r => r.purchaseId === po.id) : [], noReplace = all.reduce((n, r) => n + receiptReturnedQuantity(r, 'noReplace'), 0), open = all.reduce((n, r) => n + r.rejected - receiptReturnedQuantity(r), 0); return noReplace > 0 || open > 0 ? <Banner tone={open > 0 ? 'warn' : undefined} title={uiText("拒收与退换")}>{uiText(noReplace > 0 ? `供应商已确认不再补发 ${Math.round(noReplace * 10000) / 10000} ${po.unit}；如本合同不再交货，可勾选最终结算。` : '')}{uiText(open > 0 ? `还有 ${Math.round(open * 10000) / 10000} ${po.unit} 拒收未登记退换，请先在采购详情登记供应商补发或不再补发。` : '')}</Banner> : null; })()}
