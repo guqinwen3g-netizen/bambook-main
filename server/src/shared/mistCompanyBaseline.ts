@@ -1,4 +1,4 @@
-import {MIST_COMPANY_IDENTITY,mistCompanyDisplayName,renameMistCompanyIdentity} from './mistCompanyIdentity';
+import {MIST_COMPANY_IDENTITY,MIST_COMPANY_PROFILE,mistCompanyDisplayName,renameMistCompanyIdentity} from './mistCompanyIdentity';
 import {applyMistCommand,createMistState,getMistReviewTasks,type MistCommand,type MistContext,type MistState} from './mistWorkspace';
 import {seedCompanyHistory} from './mistCompanyHistory';
 import {demoFileRecord} from './mistDemoFiles';
@@ -14,14 +14,7 @@ export type MistCompanyRosterKey='owner'|'fabricManager'|'garmentManager'|'fabri
 export type MistCompanyRoster=Record<MistCompanyRosterKey,MistAccountRef>;
 export type MistCompanyBaselineFailure={step:string;message:string};
 
-export const MIST_COMPANY_PROFILE={
- legalName:MIST_COMPANY_IDENTITY.legalName,
- englishName:MIST_COMPANY_IDENTITY.englishName,
- address:'上海市虹口区东大名路 1089 号北外滩商务中心 12 层',
- englishAddress:'12F, North Bund Business Center, 1089 Dongdaming Road, Hongkou, Shanghai 200080, China',
- phone:'+86 21 6168 7720',email:'operations@mistweave-textile.com',taxId:'91310109MA7K4T9R6X',customsCode:'3122260C8M',
- bankName:'浦东商业银行上海外滩支行',bankAccount:'3100668890201175426',swift:'PDSBCNSH',defaultCurrency:'CNY',
-} as const;
+export {MIST_COMPANY_PROFILE};
 
 const DAY=86400000;
 const DEMO_ACCOUNT_MAP:Record<string,MistCompanyRosterKey>={

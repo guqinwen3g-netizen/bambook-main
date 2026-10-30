@@ -7,6 +7,16 @@ export const MIST_COMPANY_IDENTITY={
  legalName:'雾织国际贸易（上海）有限公司',englishName:'Mistweave Textile & Apparel Trading (Shanghai) Co., Ltd.',domain:'mistweave-textile.com',
 } as const;
 
+/** 虚构公司的公司资料（抬头、地址、税号、银行），公司基线与本机演示公司共用，报价单 / 合同等正式单据据此生成。 */
+export const MIST_COMPANY_PROFILE={
+ legalName:MIST_COMPANY_IDENTITY.legalName,
+ englishName:MIST_COMPANY_IDENTITY.englishName,
+ address:'上海市虹口区东大名路 1089 号北外滩商务中心 12 层',
+ englishAddress:'12F, North Bund Business Center, 1089 Dongdaming Road, Hongkou, Shanghai 200080, China',
+ phone:'+86 21 6168 7720',email:'operations@mistweave-textile.com',taxId:'91310109MA7K4T9R6X',customsCode:'3122260C8M',
+ bankName:'浦东商业银行上海外滩支行',bankAccount:'3100668890201175426',swift:'PDSBCNSH',defaultCurrency:'CNY',
+} as const;
+
 const RENAMES:ReadonlyArray<readonly[string,string]>=[
  ['澄岳纺织服装贸易（上海）有限公司',MIST_COMPANY_IDENTITY.legalName],
  ['Claridge Peak Textile & Apparel Trading (Shanghai) Co., Ltd.',MIST_COMPANY_IDENTITY.englishName],

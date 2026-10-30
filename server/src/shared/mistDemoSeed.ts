@@ -13,8 +13,9 @@ import { demoFileRecord, type DemoFileTemplate } from './mistDemoFiles';
 import { riskSignals } from './mistRisk';
 import { MIST_DEMO_ACCOUNTS } from './mistAccounts';
 import { platformBusinessDate } from './mistPlatform';
+import { MIST_COMPANY_PROFILE } from './mistCompanyIdentity';
 
-export const DEMO_SEED_VERSION = 22;
+export const DEMO_SEED_VERSION = 23;
 export type DemoSeedFailure = { step: string; message: string };
 
 const DAY = 86400000;
@@ -46,6 +47,9 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
 
   const [c0, c1, c2] = state.customers;
   if (!c0 || !c1 || !c2) return { state, failures: [{ step: 'customers', message: '演示客户不足' }] };
+
+  // 公司资料：报价单、合同等正式单据的抬头与收款信息；未维护时报价单无法生成，演示公司须与正式公司一样可走完报价 → 订单。
+  run('company profile', { type: 'settings.update', payload: { companyProfile: { ...MIST_COMPANY_PROFILE } } }, reviewer);
 
   /* ───────── 订单主单审批：演示订单按真实流程提交并批准，之后才能进入采购与履约 ───────── */
   const approveOrder = (orderId: string, po: string, depositPercent: number) => {
@@ -146,13 +150,14 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
     const converted = run('quote fabric convert', { type: 'market.quotation.convert', payload: { id: fabricQuote, type: 'fabric', due: day(55), ownerId: 'demo-sales' } });
     if (id(converted, 'orderId')) approveOrder(id(converted, 'orderId'), 'CC-F-PO-0912', 30);
   }
-  const coatQuote = quote('quote coat', c1.id, 'USD', 21, [{ productId: coatProduct, qty: '800', price: '72.50' }, { productId: vest, qty: '600', price: '29.50' }], '补单报价，含两款。');
+  const coatQuote = quote('quote coat', c0.id, 'USD', 21, [{ productId: coatProduct, qty: '800', price: '72.50' }, { productId: vest, qty: '600', price: '29.50' }], '补单报价，含两款。');
   if (coatQuote) run('quote coat sent', { type: 'market.quotation.status', payload: { id: coatQuote, status: 'Sent', evidence: '视频会议后发送报价单' } });
   quote('quote draft', c2.id, 'USD', 40, [{ productId: nylon, qty: '5000', price: '1.90' }], '待确认门幅后发送。');
+  // 大衣来自 Cedar & Crown 的开发案，补单报价也开给同一客户（订单条目来源须属于订单客户）。
   // 版本链：大衣报价 V1 客户还价未接受 → V2 马甲降到成本以下，提交业务审批（待审批）。
   if (coatQuote) {
     run('quote coat rejected', { type: 'market.quotation.status', payload: { id: coatQuote, status: 'Rejected', evidence: '客户回复：马甲目标价 USD 27.00，大衣可接受' } });
-    const v2 = run('quote coat v2', { type: 'market.quotation.save', payload: { input: { previousId: coatQuote, customerId: c1.id, currency: 'USD', season: 'AW27', validUntil: day(18), deliveryTerms: 'FOB 上海', paymentTerms: 'T/T 30% 定金，70% 见提单副本', lines: (state.market.quotations.find(q => q.id === coatQuote)?.lines || []).map(l => ({ productId: l.productId, sourceDevId: l.sourceDevId, sourceVersionId: l.sourceVersionId, name: l.name, style: l.style, specification: l.specification, qty: l.qty, unit: l.unit, price: l.productId === vest ? '20.50' : l.price, cost: l.cost })), fileIds: [], note: '按客户还价调整马甲单价，低于成本，需审批。' } } });
+    const v2 = run('quote coat v2', { type: 'market.quotation.save', payload: { input: { previousId: coatQuote, customerId: c0.id, currency: 'USD', season: 'AW27', validUntil: day(18), deliveryTerms: 'FOB 上海', paymentTerms: 'T/T 30% 定金，70% 见提单副本', lines: (state.market.quotations.find(q => q.id === coatQuote)?.lines || []).map(l => ({ productId: l.productId, sourceDevId: l.sourceDevId, sourceVersionId: l.sourceVersionId, name: l.name, style: l.style, specification: l.specification, qty: l.qty, unit: l.unit, price: l.productId === vest ? '20.50' : l.price, cost: l.cost })), fileIds: [], note: '按客户还价调整马甲单价，低于成本，需审批。' } } });
     if (id(v2)) run('quote coat v2 submit', { type: 'market.quotation.submit', payload: { id: id(v2) } });
   }
   // 临期：已发送、4 天后到期。
@@ -196,13 +201,13 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   /* ───────── 客户关系：商机与跟进 ───────── */
   const fabricOrder = state.market.quotations.find(q => q.id === fabricQuote)?.convertedOrderId || '';
   const opp = (step: string, input: { customerId: string; title: string; domain: 'garment' | 'fabric'; amount: string; currency: string; expectedDate: string; note: string; devIds?: string[]; quotationIds?: string[]; orderIds?: string[] }) => id(run(step, { type: 'crm.opportunity.save', payload: { input: { ownerId: 'demo-sales', devIds: [], quotationIds: [], orderIds: [], ...input } } }));
-  const oppCoat = opp('opp coat', { customerId: c1.id, title: 'AW27 大衣与马甲补单', domain: 'garment', amount: '75700.00', currency: 'USD', expectedDate: day(20), note: '客户希望 2 月中旬到港', quotationIds: coatQuote ? [coatQuote] : [] });
+  const oppCoat = opp('opp coat', { customerId: c0.id, title: 'AW27 大衣与马甲补单', domain: 'garment', amount: '75700.00', currency: 'USD', expectedDate: day(20), note: '客户希望 2 月中旬到港', quotationIds: coatQuote ? [coatQuote] : [] });
   if (oppCoat) { run('opp coat sampling', { type: 'crm.opportunity.stage', payload: { id: oppCoat, stage: 'sampling', note: '确认用现款版型' } }); if (coatQuote) run('opp coat quoting', { type: 'crm.opportunity.stage', payload: { id: oppCoat, stage: 'quoting', note: '已发送补单报价' } }); }
   const oppFabric = opp('opp fabric', { customerId: c0.id, title: '双面呢面料 3,600 米', domain: 'fabric', amount: '28080.00', currency: 'EUR', expectedDate: day(-2), note: '', devIds: fabricDevId ? [fabricDevId] : [], quotationIds: fabricQuote ? [fabricQuote] : [], orderIds: fabricOrder ? [fabricOrder] : [] });
   if (oppFabric) for (const stage of ['sampling', 'quoting', 'won'] as const) run('opp fabric ' + stage, { type: 'crm.opportunity.stage', payload: { id: oppFabric, stage, note: stage === 'won' ? '报价已转面料订单' : stage === 'quoting' ? '报价已交付客户' : '米样寄出' } });
   const oppLost = opp('opp lost', { customerId: c2.id, title: 'SS27 亚麻衬衫', domain: 'garment', amount: '18000.00', currency: 'USD', expectedDate: day(-10), note: '' });
   if (oppLost) run('opp lost stage', { type: 'crm.opportunity.stage', payload: { id: oppLost, stage: 'lost', note: '客户转向本地供应商，交期无法满足' } });
-  run('follow-up 1', { type: 'crm.followUp.save', payload: { customerId: c1.id, method: 'meeting', content: '视频会议确认大衣补单意向：约 800 件，另加马甲 600 件，希望 2 月中旬到港。', at: at(-1, 6), nextDate: day(3), link: oppCoat ? { kind: 'opportunity', id: oppCoat } : null } });
+  run('follow-up 1', { type: 'crm.followUp.save', payload: { customerId: c0.id, method: 'meeting', content: '视频会议确认大衣补单意向：约 800 件，另加马甲 600 件，希望 2 月中旬到港。', at: at(-1, 6), nextDate: day(3), link: oppCoat ? { kind: 'opportunity', id: oppCoat } : null } });
   run('follow-up 2', { type: 'crm.followUp.save', payload: { customerId: c0.id, method: 'email', content: '回复首样评审意见：袖长按 QC 报告修正，三轮样下周寄出。', at: at(-3, 3), nextDate: '', link: { kind: 'development', id: 'DEV-G-2026-021' } } });
   run('follow-up 3', { type: 'crm.followUp.save', payload: { customerId: c2.id, method: 'call', content: '电话沟通 SS27 亚麻衬衫，客户已决定转本地供应商。', at: at(-10, 8), nextDate: '', link: oppLost ? { kind: 'opportunity', id: oppLost } : null } });
 
@@ -314,7 +319,9 @@ export function seedDemoModules(initial: MistState, context: MistContext): { sta
   if (midQc) { run('plan PO-L-0412', { type: 'fulfillment.production.plan', payload: { productionId: midQc.id, sizes: sizeSplit(midQc.qty) } }, sales); sampleQc('PO-L-0412', 'pp', 'reject'); }
   const pendingJob = productionOf('PO-L-0419');
   if (pendingJob) run('qc pending', { type: 'fulfillment.qc.request', payload: { source: { kind: 'orderLine', orderId: pendingJob.orderId, lineId: pendingJob.lineId, productionId: pendingJob.id }, kind: 'production', domain: 'garment', factory: pendingJob.factory, location: pendingJob.factory + ' 车间', contact: '李慧', due: day(2) } }, sales);
-  if (fabricDevId) run('qc fabric pending', { type: 'fulfillment.qc.request', payload: { source: { kind: 'version', devId: fabricDevId, versionId: fabricVersionId }, kind: 'sample', domain: 'fabric', factory: '华盛毛纺', location: '面料架 B-2', contact: '赵琳', due: day(1) } }, sales);
+  // 面料版本已经客户确认，不能在已确认版本上再开样品 QC；待办的面料 QC 改为该面料订单的大货验货。
+  const fabricQcOrder = state.orders.find(o => o.id === fabricOrder), fabricQcJob = fabricQcOrder && state.productions.find(j => j.orderId === fabricQcOrder.id);
+  if (fabricQcOrder && fabricQcJob) run('qc fabric pending', { type: 'fulfillment.qc.request', payload: { source: { kind: 'orderLine', orderId: fabricQcOrder.id, lineId: fabricQcJob.lineId, productionId: fabricQcJob.id }, kind: 'production', domain: 'fabric', factory: '华盛毛纺', location: '面料架 B-2', contact: '赵琳', due: day(1) } }, sales);
 
   /* ───────── 出运：SO-G-2026-017 第一批已离港（生产 QC、船样、装箱、报关、CI/PL 齐全），第二批待安排 ───────── */
   const order017 = state.orders.find(o => o.code === 'SO-G-2026-017'), job017 = productionOf('PO-L-0411');
