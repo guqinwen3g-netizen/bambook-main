@@ -4,7 +4,7 @@ import { ArrowUpRight, Check, MousePointer2 } from 'lucide-react';
 import { Banner, Icon } from '../../../../components/mist';
 import { interfaceLocale, uiText } from '../../../../services/interfaceLanguage';
 import { avatarDirections, exploreAvatarAt } from '../../../../lib/avatarExploration';
-import { ANIMATED_AVATAR_FAMILIES, AVATAR_COLORS, avatarIdentity, type AvatarColor } from '../../../../lib/avatarIdentity';
+import { ANIMATED_AVATAR_FAMILIES, AVATAR_COLORS, SELECTABLE_AVATAR_COLORS, avatarIdentity, type AvatarColor } from '../../../../lib/avatarIdentity';
 const GUIDE = ['找到，属于你的样子', '按住头像，让颜色流转', '保持按住，拖动探索不同风格', '松开，留下喜欢的这一刻'];
 const randomSeed = () => (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
 /** 只接受本地生成器产出的 SVG：持久 SVG 树换色只改属性，换形状 220ms 淡入淡出。 */
@@ -78,12 +78,12 @@ export function AvatarExplorer({ value, disabled, active=true, palette, onPalett
   },[]);
   const startColor=(id:number|'keyboard')=>{
     if(disabled||!active||gesture.current)return;
-    const index=Math.max(0,AVATAR_COLORS.findIndex(color=>color.id===paletteRef.current));
+    const index=Math.max(0,SELECTABLE_AVATAR_COLORS.findIndex(color=>color.id===paletteRef.current));
     gesture.current={id,index,last:index,started:performance.now()};setHeld(true);
     const tick=(now:number)=>{
       const current=gesture.current;if(!current)return;
-      const next=(current.index+Math.floor((now-current.started)/500))%AVATAR_COLORS.length;
-      if(next!==current.last){current.last=next;changeRef.current(AVATAR_COLORS[next].id);}
+      const next=(current.index+Math.floor((now-current.started)/500))%SELECTABLE_AVATAR_COLORS.length;
+      if(next!==current.last){current.last=next;changeRef.current(SELECTABLE_AVATAR_COLORS[next].id);}
       frame.current=window.requestAnimationFrame(tick);
     };
     frame.current=window.requestAnimationFrame(tick);
@@ -177,7 +177,7 @@ export function AvatarExplorer({ value, disabled, active=true, palette, onPalett
       </motion.div>}</AnimatePresence>
     </div>
     <div className="mist-avatar-explorer-palette" role="group" aria-label={uiText('图案颜色')}>
-      {AVATAR_COLORS.map(color=><button key={color.id} type="button" disabled={disabled} data-color={color.id} aria-label={uiText(`图案颜色 · ${color.label}`)} aria-pressed={palette===color.id} title={uiText(color.label)} style={{backgroundColor:color.value}} onClick={()=>{setShowGuide(false);onPaletteChange(color.id);}}>{palette===color.id&&<Icon icon={Check} size="xs"/>}</button>)}
+      {SELECTABLE_AVATAR_COLORS.map(color=><button key={color.id} type="button" disabled={disabled} data-color={color.id} aria-label={uiText(`图案颜色 · ${color.label}`)} aria-pressed={palette===color.id} title={uiText(color.label)} style={{backgroundColor:color.value}} onClick={()=>{setShowGuide(false);onPaletteChange(color.id);}}>{palette===color.id&&<Icon icon={Check} size="xs"/>}</button>)}
     </div>
     <div id="mist-avatar-mood" className="mist-sr-only" aria-live="polite">{uiText(result.label === '自由探索' ? result.label : `${result.label}倾向`)}</div>
     <div className="mist-avatar-explore-foot">

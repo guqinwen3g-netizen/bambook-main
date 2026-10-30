@@ -26,6 +26,12 @@ it('changes initials color only on save and can return to automatic color',async
  update.mockImplementation(async({avatarUrl})=>{session.user.avatarUrl=avatarUrl;return session.user;});await open();await click('button','浅陶');expect(update).not.toHaveBeenCalled();await click('button','保存头像');expect(update).toHaveBeenLastCalledWith({avatarUrl:'initials:v1:clay'});
  await click('button','编辑头像');await click('button','自动');await click('button','保存头像');expect(update).toHaveBeenLastCalledWith({avatarUrl:null});
 });
+it('removes warm apricot from both pickers without changing a saved legacy avatar',async()=>{
+ session.user.avatarUrl='initials:v1:ochre';await open();
+ expect(queryByRole(document.body,'button',{name:'暖杏'})).toBeNull();
+ await click('tab','图案');expect(queryByRole(document.body,'button',{name:'图案颜色 · 暖杏'})).toBeNull();
+ await click('button','取消');expect(update).not.toHaveBeenCalled();expect(session.user.avatarUrl).toBe('initials:v1:ochre');
+});
 it('keeps cancelled changes local and keeps a failed save open for retry',async()=>{
  await open();await click('button','柔绿');await click('button','取消');expect(update).not.toHaveBeenCalled();await click('button','编辑头像');await click('button','浅陶');update.mockRejectedValue(new Error('服务连接失败'));await click('button','保存头像');expect(getByRole(document.body,'dialog',{name:'编辑头像'})).toBeTruthy();expect(document.body.textContent).toContain('服务连接失败');
 });

@@ -17,6 +17,16 @@ it('binds warehouse issue to the exact allocation and processing branch, then tr
   expect(() => f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, evidence: 'Again' } }, 'garment')).toThrow('请勿重复');
 });
 
+it.each(['cmt', 'trims_cmt'] as const)('dispatches allocated internal fabric to a %s processing branch', mode => {
+  const f = materialDeliveryFixture();
+  f.state.orderLines.find(line => line.id === f.target.lineId)!.fulfillmentMode = mode;
+  f.state.orders.find(order => order.id === f.target.orderId)!.governance!.approvedSnapshot!.lines.find(line => line.id === f.target.lineId)!.fulfillmentMode = mode;
+  const id = f.issue(20);
+  f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, evidence: 'Factory counted' } }, 'garment');
+  expect(materialDeliveryRows(f.state)[0]).toMatchObject({ accepted: '20', pending: '0' });
+  expect(internalFabricCostShare(f.state, f.purchaseId, f.target.orderId, 682040)).toBe(136000);
+});
+
 it('refuses an unlinked, wrong-branch, over-allocation or stale-QC issue without changing inventory', () => {
   const f = materialDeliveryFixture(), before = structuredClone(f.state);
   const payload = { id: f.state.fulfillment.stock[0].id, kind: 'issue' as const, quantity: 1, location: 'Factory', person: 'factory', note: 'Sent' };
