@@ -55,6 +55,27 @@ it('requires the full quantity for every full-package line and combines approved
  render();const node=getByText(host,'采购').closest('.mist-flow-node')!;expect(node.getAttribute('data-state')).toBe('done');expect(node.textContent).toContain('2/2');
 });
 
+it('counts an approved internal fabric allocation and full processing commitment as garment procurement coverage',()=>{
+ const line=store.state!.orderLines[0];line.fulfillmentMode='full_package';line.qty=10;
+ store.state!.orders.push({id:'fabric-source',type:'fabric',governance:{status:'approved',contract:{kind:'internal',internalSupply:{group:'garment',receiverId:'sales'}}}} as any);
+ store.state!.orderLines.push({id:'fabric-line',orderId:'fabric-source',qty:20,unit:'米'} as any);
+ store.state!.internalFabricAllocations=[{id:'allocation',orderId,lineId:line.id,fabricOrderId:'fabric-source',fabricLineId:'fabric-line',metres:'20',status:'active',revision:1,history:[]} as any];
+ store.state!.fulfillment.purchases=[{id:'processing',orderId,lineId:line.id,kind:'processing',state:'approved',quantity:10,unit:'件'} as any];
+ render();const node=getByText(host,'采购').closest('.mist-flow-node')!;expect(node.getAttribute('data-state')).toBe('done');expect(node.textContent).toContain('1/1');
+ store.state!.fulfillment.purchases[0].quantity=9;render();expect(getByText(host,'采购').closest('.mist-flow-node')!.getAttribute('data-state')).toBe('now');
+ store.state!.fulfillment.purchases[0].quantity=10;store.state!.internalFabricAllocations[0].status='cancelled';render();expect(getByText(host,'采购').closest('.mist-flow-node')!.getAttribute('data-state')).toBe('now');
+});
+
+it('does not count internal processing coverage when the material source is unapproved or mismatched',()=>{
+ const line=store.state!.orderLines[0];line.fulfillmentMode='full_package';line.qty=10;
+ store.state!.orders.push({id:'fabric-source',type:'fabric',governance:{status:'draft',contract:{kind:'internal',internalSupply:{group:'garment',receiverId:'sales'}}}} as any);
+ store.state!.orderLines.push({id:'fabric-line',orderId:'fabric-source',qty:20,unit:'米'} as any);
+ store.state!.internalFabricAllocations=[{id:'allocation',orderId,lineId:line.id,fabricOrderId:'fabric-source',fabricLineId:'fabric-line',metres:'20',status:'active',revision:1,history:[]} as any];
+ store.state!.fulfillment.purchases=[{id:'processing',orderId,lineId:line.id,kind:'processing',state:'approved',quantity:10,unit:'件'} as any];
+ render();expect(getByText(host,'采购').closest('.mist-flow-node')!.getAttribute('data-state')).toBe('now');
+ store.state!.orders.at(-1)!.governance!.status='approved';store.state!.internalFabricAllocations[0].fabricLineId='unknown';render();expect(getByText(host,'采购').closest('.mist-flow-node')!.getAttribute('data-state')).toBe('now');
+});
+
 it('links uploaded originals to the exact order without changing contract confirmation files',async()=>{
  const before=structuredClone(store.state!.orders[0].governance);
  store.uploadFile.mockImplementation(async(file:File)=>{const saved={id:'order-original',name:file.name,mimeType:file.type,size:file.size,storageKey:'fixture/order-original',createdAt:context.now};store.state!.files.push(saved);return saved;});
