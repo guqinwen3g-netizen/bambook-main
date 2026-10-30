@@ -82,3 +82,17 @@ it('requires the current garment owner and replays an approved short close once'
   expect((await repo.execute(testActor('garment'),workspaceId,command)).replayed).toBe(true);
   expect(state().internalFabricAllocations![0].shortClosure).toMatchObject({quantity:'4',accepted:'16',actorId:'garment'});
 });
+
+it('requires current warehouse authority and replays a failed quarantine disposal once',async()=>{
+  f.context.members!.push({id:'qc',name:'QC',active:true,groups:[]});const sent=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id:sent,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  const ret=f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:sent,quantity:4,location:'Hold A',person:'factory',note:'Rejected'}}).id!;
+  const task=f.run({type:'fulfillment.inventory.quarantine.request',payload:{returnId:ret,due:'2026-10-24'}}).id!;
+  f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'fabric'}},'qc');
+  f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'fabric',result:'reject',report:'Q-FAIL',opinion:'Defective',location:'Hold A',reviewedAt:f.context.now,measurements:[],fileIds:[]}},'qc');
+  db.workspaces.get(workspaceId).state=structuredClone(f.state);
+  const command={requestId:'quarantine-scrap',expectedRevision:0,command:{type:'fulfillment.inventory.quarantine.dispose' as const,payload:{returnId:ret,decision:'scrap' as const,evidence:'Confirmed disposal'}}};
+  await expect(repo.execute(testActor('warehouse'),workspaceId,command)).rejects.toMatchObject({status:403});
+  await repo.execute(testActor(),workspaceId,command);expect((await repo.execute(testActor(),workspaceId,command)).replayed).toBe(true);
+  expect(state().fulfillment.stockMovements.filter(m=>m.quarantineReturnId===ret&&m.kind==='scrap')).toHaveLength(1);
+});

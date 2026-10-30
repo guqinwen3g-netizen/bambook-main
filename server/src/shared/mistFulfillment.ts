@@ -269,11 +269,13 @@ export type FulfillmentStockMovement = {
     /** Part of an original issue returned after receiver rejection; not available until disposed. */
     quarantinedQuantity?: number;
     quarantineTaskId?: string;
-    quarantineDisposition?: { decision: 'release'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string };
+    quarantineDisposition?: { decision: 'release' | 'supplierReturn' | 'scrap'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string };
     quarantineReturnId?: string;
     /** Explicitly reconciled physical issue; independent of shipment documents. */
     shipmentLink?: { shipmentId: string; productionId: string; evidence: string; actor: string; at: string };
     shipmentLinkHistory?: Array<{ shipmentId: string; productionId: string; evidence: string; actor: string; at: string; unlinkedAt: string; unlinkedBy: string; unlinkReason: string }>;
+    /** A corrected departure without a replacement is unresolved, not warehouse stock. */
+    shipmentCorrectionHold?: { at: string; actor: string; reason: string };
 };
 export type ShipmentLine = {
     lineId: string;
@@ -584,11 +586,14 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     type: 'fulfillment.inventory.shipment.unlink';
     payload: { issueId: string; reason: string };
 } | {
+    type: 'fulfillment.inventory.shipment.correct';
+    payload: { issueId: string; shipmentId: string; evidence: string; reason: string };
+} | {
     type: 'fulfillment.inventory.quarantine.request';
     payload: { returnId: string; due: string };
 } | {
     type: 'fulfillment.inventory.quarantine.dispose';
-    payload: { returnId: string; decision: 'release'; evidence: string };
+    payload: { returnId: string; decision: 'release' | 'supplierReturn' | 'scrap'; evidence: string };
 } | {
     type: 'fulfillment.materials.confirm';
     payload: { kind: 'issue' | 'direct'; id: string; evidence: string; acceptedQuantity?: number; rejectedQuantity?: number; expectedReceivingRevision?: number };
@@ -835,6 +840,27 @@ export function sampleLoanRemaining(root: MistState, id: string) {
 export function stockIssueRemaining(root: MistState, id: string) {
     const issue = root.fulfillment.stockMovements.find(movement => movement.id === id && movement.kind === 'issue');
     return issue ? sum([issue.quantity, -sum(root.fulfillment.stockMovements.filter(movement => movement.kind === 'return' && movement.issueId === id).map(movement => movement.quantity))]) : 0;
+}
+/** Validate against the immutable physical issue and exact purchase branch, never free text. */
+function shipmentForIssue(root: MistState, issue: FulfillmentStockMovement, shipmentId: string, departedOnly = false) {
+    const f = root.fulfillment;
+    if (issue.kind !== 'issue' || issue.materialDelivery) fail('请选择普通出库');
+    const stock = get(f.stock, issue.stockId, '库存批次');
+    if (stock.sourceKind === 'claimReturn' || !stock.purchaseId) fail('该库存不能关联销售出运');
+    const purchase = get(f.purchases, stock.purchaseId!, '来源采购');
+    if (purchase.orderId !== stock.orderId || purchase.lineId !== stock.lineId || purchase.unit !== stock.unit) fail('库存与来源采购不一致');
+    if (purchase.kind === 'material' || get(root.orders, stock.orderId, '订单').governance?.contract.kind === 'internal') fail('供料或内部订单不能关联销售出运');
+    const branches = root.productions.filter(row => row.sourcePurchaseId === stock.purchaseId && row.orderId === stock.orderId && row.lineId === stock.lineId);
+    const branch = branches.length === 1 ? branches[0] : undefined, shipment = get(f.shipments, shipmentId, '出运');
+    if (shipment.state === 'cancelled' || !branch || (departedOnly && shipment.state !== 'departed')) fail('出运或准确生产分支不可用');
+    const matches = shipment.lines.filter(row => row.orderId === stock.orderId && row.lineId === stock.lineId && row.productionId === branch!.id);
+    if (matches.length !== 1) fail('出库与出运的订单条目或生产分支不一致');
+    if (get(root.orderLines, stock.lineId, '订单条目').unit !== stock.unit) fail('库存与出运的单位不一致');
+    const remaining = stockIssueRemaining(root, issue.id);
+    if (remaining <= 0) fail('该出库没有可关联的数量');
+    const linked = sum(f.stockMovements.filter(row => row.id !== issue.id && row.shipmentLink?.shipmentId === shipment.id && row.shipmentLink.productionId === branch!.id).map(row => stockIssueRemaining(root, row.id)));
+    if (sum([linked, remaining]) > matches[0].quantity) fail('关联数量超过本次出运数量');
+    return { stock, branch: branch!, shipment };
 }
 function purchaseSnapshot(purchase: FulfillmentPurchase): FulfillmentPurchaseRevision['snapshot'] {
     const { orderId, lineId, kind, materialKind, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
@@ -1638,7 +1664,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 issue = get(f.stockMovements, p.issueId, '原出库');
                 if (issue.stockId !== stock.id || issue.kind !== 'issue')
                     fail('退回须关联原批次出库');
-                if (issue.shipmentLink) fail('该出库已关联出运；出运前请先解除关联，已出运请按售后流程处理');
+                if (issue.shipmentLink || issue.shipmentCorrectionHold) fail('该出库已关联出运；出运前请先解除关联，已出运请按售后流程处理');
                 const returned = sum(f.stockMovements.filter(m => m.issueId === issue!.id).map(m => m.quantity));
                 if (quantity > sum([issue.quantity, -returned]))
                     fail('退回超过原出库未还量');
@@ -1669,25 +1695,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.inventory.shipment.link': {
             const issue = get(f.stockMovements, p.issueId, '出库记录');
-            if (issue.kind !== 'issue' || issue.materialDelivery || issue.shipmentLink) fail('请选择尚未关联出运的普通出库');
-            const stock = get(f.stock, issue.stockId, '库存批次');
-            if (stock.sourceKind === 'claimReturn' || !stock.purchaseId) fail('该库存不能关联销售出运');
-            const purchase = get(f.purchases, stock.purchaseId!, '来源采购');
-            if (purchase.orderId !== stock.orderId || purchase.lineId !== stock.lineId || purchase.unit !== stock.unit) fail('库存与来源采购不一致');
-            if (purchase.kind === 'material' || get(root.orders, stock.orderId, '订单').governance?.contract.kind === 'internal') fail('供料或内部订单不能关联销售出运');
-            const branches = root.productions.filter(row => row.sourcePurchaseId === stock.purchaseId && row.orderId === stock.orderId && row.lineId === stock.lineId);
-            const branch = branches.length === 1 ? branches[0] : undefined;
-            const shipment = get(f.shipments, p.shipmentId, '出运');
-            if (shipment.state === 'cancelled' || !branch) fail('出运或准确生产分支不可用');
-            const matches = shipment.lines.filter(row => row.orderId === stock.orderId && row.lineId === stock.lineId && row.productionId === branch!.id);
-            if (matches.length !== 1) fail('出库与出运的订单条目或生产分支不一致');
-            const line = get(root.orderLines, stock.lineId, '订单条目');
-            if (line.unit !== stock.unit) fail('库存与出运的单位不一致');
-            const remaining = stockIssueRemaining(root, issue.id);
-            if (remaining <= 0) fail('该出库没有可关联的数量');
-            const linked = sum(f.stockMovements.filter(row => row.shipmentLink?.shipmentId === shipment.id && row.shipmentLink.productionId === branch!.id).map(row => stockIssueRemaining(root, row.id)));
-            if (sum([linked, remaining]) > matches[0].quantity) fail('关联数量超过本次出运数量');
-            issue.shipmentLink = { shipmentId: shipment.id, productionId: branch!.id, evidence: text(p.evidence, '核对依据'), actor: ctx.actorName, at: ctx.now };
+            if (issue.shipmentLink) fail('请选择尚未关联出运的普通出库');
+            const { stock, branch, shipment } = shipmentForIssue(root, issue, p.shipmentId, !!issue.shipmentCorrectionHold);
+            issue.shipmentLink = { shipmentId: shipment.id, productionId: branch.id, evidence: text(p.evidence, '核对依据'), actor: ctx.actorName, at: ctx.now };
+            delete issue.shipmentCorrectionHold;
             audit(root, ctx, 'inventory', stock.id, `关联出运 ${shipment.code}`, { view: 'shipments', id: shipment.id });
             return { id: issue.id };
         }
@@ -1700,6 +1711,24 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             (issue.shipmentLinkHistory ||= []).push({ ...link!, unlinkedAt: ctx.now, unlinkedBy: ctx.actorName, unlinkReason: reason });
             delete issue.shipmentLink;
             audit(root, ctx, 'inventory', issue.stockId, `解除出运 ${shipment.code} 关联：${reason}`);
+            return { id: issue.id };
+        }
+        case 'fulfillment.inventory.shipment.correct': {
+            const issue = get(f.stockMovements, p.issueId, '出库记录'), link = issue.shipmentLink;
+            if (issue.kind !== 'issue' || !link) fail('出库尚未关联出运');
+            const old = get(f.shipments, link!.shipmentId, '原出运');
+            if (old.state !== 'departed') fail('仅已离港的关联使用更正');
+            const reason = text(p.reason, '更正原因'), evidence = text(p.evidence, '核对依据');
+            const destination = p.shipmentId ? shipmentForIssue(root, issue, p.shipmentId, true) : undefined;
+            (issue.shipmentLinkHistory ||= []).push({ ...link!, unlinkedAt: ctx.now, unlinkedBy: ctx.actorName, unlinkReason: reason });
+            if (destination) {
+                issue.shipmentLink = { shipmentId: destination.shipment.id, productionId: destination.branch.id, evidence, actor: ctx.actorName, at: ctx.now };
+                delete issue.shipmentCorrectionHold;
+            } else {
+                delete issue.shipmentLink;
+                issue.shipmentCorrectionHold = { at: ctx.now, actor: ctx.actorName, reason: `${reason} · ${evidence}` };
+            }
+            audit(root, ctx, 'inventory', issue.stockId, `更正已离港关联 ${old.code}${destination ? ` → ${destination.shipment.code}` : ' → 待核对'}：${reason}`);
             return { id: issue.id };
         }
         case 'fulfillment.inventory.quarantine.request': {
@@ -1719,14 +1748,21 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (returned.kind !== 'return' || !returned.quarantinedQuantity || returned.quarantineDisposition) fail('隔离料已处置或不存在');
             const task = f.qcTasks.find(task => task.kind === 'quarantine' && task.quarantine?.returnId === returned.id);
             const report = task && f.qcReports.find(item => item.id === task.reportIds.at(-1));
-            if (p.decision !== 'release' || !task || returned.quarantineTaskId !== task.id || task.state !== 'reported' || !report || report.taskId !== task.id || report.result !== 'pass') fail('请先完成本批隔离料复检并确认通过');
+            if (!['release','supplierReturn','scrap'].includes(p.decision) || !task || returned.quarantineTaskId !== task.id || !report || report.taskId !== task.id) fail('请先完成本批隔离料复检');
+            if (p.decision === 'release' ? task!.state !== 'reported' || report!.result !== 'pass' : task!.state !== 'blocked' || report!.result !== 'reject') fail(p.decision === 'release' ? '请先完成本批隔离料复检并确认通过' : '退供应商或报废须有本批最新的不合格复检报告');
             if (task!.quarantine?.stockId !== stock.id || task!.quarantine!.quantity !== returned.quarantinedQuantity || (stock.locked || 0) < returned.quarantinedQuantity!) fail('隔离库存不一致');
             const evidence = text(p.evidence, '处置依据'), movementId = ctx.id(), quantity = returned.quarantinedQuantity!;
-            stock.locked = sum([stock.locked || 0, -quantity]); addAtPosition(stock, quantity, returned.location);
-            f.stockMovements.push({id:movementId,stockId:stock.id,kind:'unlock',quantity,location:returned.location,person:ctx.actorName,note:evidence,at:ctx.now,actor:ctx.actorName,quarantineReturnId:returned.id});
-            returned.quarantineDisposition = {decision:'release',taskId:task!.id,reportId:report!.id,movementId,evidence,actor:ctx.actorName,at:ctx.now};
+            const purchase = p.decision === 'supplierReturn' ? get(f.purchases, stock.purchaseId || '', '来源采购') : undefined;
+            if (p.decision !== 'release' && stock.onHand !== undefined && stock.onHand < quantity) fail('隔离库存现存数量不一致');
+            stock.locked = sum([stock.locked || 0, -quantity]);
+            if (p.decision === 'release') addAtPosition(stock, quantity, returned.location);
+            else if (stock.onHand !== undefined) stock.onHand = sum([stock.onHand, -quantity]);
+            f.stockMovements.push({id:movementId,stockId:stock.id,kind:p.decision==='release'?'unlock':p.decision==='scrap'?'scrap':'reject',quantity,location:returned.location,person:purchase?.supplier || ctx.actorName,note:evidence,at:ctx.now,actor:ctx.actorName,quarantineReturnId:returned.id});
+            returned.quarantineDisposition = {decision:p.decision,taskId:task!.id,reportId:report!.id,movementId,evidence,actor:ctx.actorName,at:ctx.now};
             task!.quarantine!.disposedAt = ctx.now;
-            audit(root,ctx,'inventory',stock.id,'隔离料复检通过后恢复可用');
+            // The failed report remains intact, but a physically disposed batch is no longer awaiting QC work.
+            task!.state = 'reported';
+            audit(root,ctx,'inventory',stock.id, p.decision==='release'?'隔离料复检通过后恢复可用':p.decision==='scrap'?'不合格隔离料已报废':'不合格隔离料已退供应商');
             return { id:movementId, stockId:stock.id };
         }
         case 'fulfillment.shipments.sourceTerms': {

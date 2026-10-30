@@ -57,6 +57,28 @@ describe('explicit stock issue and shipment reconciliation', () => {
     expect(() => f.run({ type: 'fulfillment.inventory.move', payload: { id: 'a', kind: 'return', issueId: 'ia', quantity: 1, location: '仓库', person: '后勤', note: '退回' } })).toThrow('售后');
     expect(fulfillmentCommandPermission({ type: 'fulfillment.inventory.shipment.link', payload: { issueId: 'ia', shipmentId: 's', evidence: 'x' } })).toBe('inventory:write');
   });
+  it('corrects an already departed link atomically, preserving shipment, packing, documents and history', () => {
+    const f=fixture(); f.link('ia');
+    f.root.fulfillment.shipments.push({...structuredClone(f.root.fulfillment.shipments[0]),id:'s2',code:'SHP-2'});
+    const before=structuredClone(f.root.fulfillment);
+    expect(()=>f.run({type:'fulfillment.inventory.shipment.correct',payload:{issueId:'ia',shipmentId:'s2',reason:'',evidence:'核对'}})).toThrow('更正原因');
+    f.run({type:'fulfillment.inventory.shipment.correct',payload:{issueId:'ia',shipmentId:'s2',reason:'对照实际交接更正',evidence:'核对出库单和装箱单'}});
+    const issue=f.root.fulfillment.stockMovements[0];expect(issue.shipmentLink).toMatchObject({shipmentId:'s2',evidence:'核对出库单和装箱单'});
+    expect(issue.shipmentLinkHistory?.[0]).toMatchObject({shipmentId:'s',unlinkReason:'对照实际交接更正'});
+    expect(f.root.fulfillment.stock).toEqual(before.stock);expect(f.root.fulfillment.shipments).toEqual(before.shipments);expect(f.root.fulfillment.packing).toEqual(before.packing);expect(f.root.fulfillment.documents).toEqual(before.documents);
+  });
+  it('keeps an unassigned correction on hold and cannot convert shipped goods into an ordinary return',()=>{
+    const f=fixture();f.link('ia');f.run({type:'fulfillment.inventory.shipment.correct',payload:{issueId:'ia',shipmentId:'',reason:'原关联错误',evidence:'待核对原单'}});
+    expect(f.root.fulfillment.stockMovements[0]).toMatchObject({shipmentCorrectionHold:{reason:'原关联错误 · 待核对原单'}});
+    expect(()=>f.run({type:'fulfillment.inventory.move',payload:{id:'a',kind:'return',issueId:'ia',quantity:1,location:'仓库',person:'后勤',note:'退回'}})).toThrow('售后');
+    f.root.fulfillment.shipments[0].state='preparing';expect(()=>f.link('ia')).toThrow('不可用');
+    f.root.fulfillment.shipments[0].state='departed';f.link('ia');expect(f.root.fulfillment.stockMovements[0].shipmentCorrectionHold).toBeUndefined();
+  });
+  it('rejects a correction whose destination does not match or has insufficient capacity',()=>{
+    const f=fixture();f.link('ia');f.root.fulfillment.shipments.push({...structuredClone(f.root.fulfillment.shipments[0]),id:'s2',lines:[{orderId:'o',lineId:'l',productionId:'wrong',quantity:5000}]} as any);
+    expect(()=>f.run({type:'fulfillment.inventory.shipment.correct',payload:{issueId:'ia',shipmentId:'s2',reason:'更正',evidence:'核对'}})).toThrow('生产分支');
+    expect(f.root.fulfillment.stockMovements[0].shipmentLink?.shipmentId).toBe('s');expect(f.root.fulfillment.stockMovements[0].shipmentLinkHistory).toBeUndefined();
+  });
   it('requires visibility of the source issue and destination shipment in the caller scope', () => {
     const f = fixture(); f.root.orders[0].ownerId = 'sales';
     const own = { userIds: ['sales'], teamIds: [] }, outsider = { userIds: ['other'], teamIds: [] };

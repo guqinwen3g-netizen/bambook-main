@@ -33,4 +33,11 @@ it('enforces current inventory permission and source visibility when linking an 
   auth.users.get('owner')!.permissions.push('inventory:write');
   await repo.execute(actor, wid, input);
   expect((await repo.get(actor, wid)).state.fulfillment.stockMovements.find(m => m.id === 'issue-test')?.shipmentLink).toMatchObject({ shipmentId: 'shipment-test' });
+  const correct={requestId:'correct-1',expectedRevision:1,command:{type:'fulfillment.inventory.shipment.correct' as const,payload:{issueId:'issue-test',shipmentId:'shipment-test',reason:'修正核对',evidence:'复核装箱单'}}};
+  await expect(repo.execute(outsider,wid,{...correct,requestId:'correct-outside'})).rejects.toMatchObject({status:404});
+  auth.users.get('owner')!.permissions=auth.users.get('owner')!.permissions.filter(p=>p!=='inventory:write');
+  await expect(repo.execute(actor,wid,correct)).rejects.toMatchObject({status:403});
+  auth.users.get('owner')!.permissions.push('inventory:write');await repo.execute(actor,wid,correct);
+  expect((await repo.execute(actor,wid,correct)).replayed).toBe(true);
+  expect((await repo.get(actor,wid)).state.fulfillment.stockMovements.find(m=>m.id==='issue-test')?.shipmentLinkHistory).toHaveLength(1);
 });
