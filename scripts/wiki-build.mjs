@@ -15,6 +15,8 @@ import path from 'node:path';
 import { marked } from 'marked';
 import { WIKI, SITE, PART_ORDER, STATUS_LABEL, VERDICT_LABEL, snapshot } from './wiki-lib.mjs';
 import { renderManualFigure } from './manual-media.mjs';
+import { renderLesson, lessonStyles, lessonRuntime } from './manual-lesson.mjs';
+import { manualNavigationRuntime } from './manual-navigation.mjs';
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -24,7 +26,8 @@ const slugify = s => s.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-').replac
 /** 图片 → figure + 图注；标题 → 可跳转锚点。 */
 function polish(html) {
   return html
-    .replace(/<p>\s*<img([^>]*?)>\s*<\/p>/g, (_m, attrs) => renderManualFigure(attrs))
+    // Old company-run GIFs are retained as internal material, not presented in the employee edition.
+    .replace(/<p>\s*<img([^>]*?)>\s*<\/p>/g, (_m, attrs) => /src="[^"]+\.gif"/i.test(attrs) ? '' : renderManualFigure(attrs))
     .replace(/<img(?![^>]*loading=)([^>]*?)>/g, '<img$1 loading="lazy" decoding="async">')
     .replace(/<h([23])>(.*?)<\/h\1>/g, (_m, level, inner) => {
       const id = slugify(inner.replace(/<[^>]+>/g, ''));
@@ -36,6 +39,7 @@ function polish(html) {
 
 const snap = snapshot();
 const { version, head, branch, chapters, modules, missingModules } = snap;
+const lesson = JSON.parse(fs.readFileSync(path.join(WIKI, 'lessons/settlement.json'), 'utf8'));
 for (const chapter of chapters) {
   for (const match of chapter.body.matchAll(/!\[[^\]]*\]\((assets\/[\w/.-]+\.(?:gif|png|jpg|webp))\)/gi)) {
     const file = match[1];
@@ -52,11 +56,13 @@ const byPart = PART_ORDER.map(part => ({ part, items: chapters.filter(c => c.par
   .concat([{ part: '其他', items: chapters.filter(c => !PART_ORDER.includes(c.part)) }])
   .filter(g => g.items.length);
 
-const nav = byPart
+const referenceNav = byPart
   .map(g => `<div class="nav-part"><div class="nav-part-title">${esc(g.part)}</div>${g.items
     .map(c => `<a class="nav-item" href="#${esc(c.slug)}" data-target="${esc(c.slug)}">${esc(c.title)}${c.verdict === 'stale' ? '<i class="dot"></i>' : ''}</a>`)
     .join('')}</div>`)
   .join('');
+const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a><a class="nav-item" href="#tutorial-settlement" data-target="tutorial-settlement">提交一笔采购结算</a></div><div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
+const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p><a class="learning-card" href="#tutorial-settlement"><span class="learning-card-tag">分步教学样板 · 业务员</span><h2>提交一笔采购结算 <span aria-hidden="true">→</span></h2><p>选择合同 → 核对收货 → 理解金额 → 交给财务</p><span>4 个步骤 · 独立教学练习</span></a><div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
 
 const sections = chapters
   .map(c => `<section id="${esc(c.slug)}" class="chapter">
@@ -82,6 +88,7 @@ const html = `<!doctype html>
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{scroll-behavior:smooth}
 body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);font-size:15.5px;line-height:1.85;-webkit-font-smoothing:antialiased}
 a{color:var(--accent);text-decoration:none}
@@ -108,7 +115,7 @@ nav.toc{position:sticky;top:64px;height:calc(100vh - 64px);overflow:auto;padding
 .nav-item.active{background:#edf2f4;color:#34566b;font-weight:600}
 .nav-item .dot{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:var(--warn)}
 
-main{padding:48px clamp(28px,5vw,76px) 120px;min-width:0;max-width:900px}
+main{padding:36px clamp(24px,3vw,44px) 100px;min-width:0;max-width:996px}
 .chapter{padding-bottom:48px;margin-bottom:40px;border-bottom:1px solid var(--line)}
 .chapter:last-child{border-bottom:0}
 .chapter-head{display:flex;align-items:center;gap:12px;margin-bottom:8px}
@@ -139,6 +146,8 @@ tbody tr:last-child td{border-bottom:0}
 tbody th{background:var(--bg-2);width:180px;font-weight:600;color:var(--ink-2)}
 .empty{color:var(--ink-3);padding:24px 0}
 mark{background:#fff3b0;padding:0 2px}
+${lessonStyles}
+.nav-reference-label{font-size:11px;color:var(--ink-3);margin:24px 8px 14px;border-top:1px solid var(--line);padding-top:20px}.manual-start h1{font-size:36px;line-height:1.3;margin:10px 0 16px}.start-intro{font-size:17px;color:var(--ink-2);max-width:650px}.learning-card{display:block;margin:28px 0 36px;padding:28px;border-radius:16px;background:#eaf2f5;color:var(--ink)}.learning-card-tag{font-size:12px;color:#4f7689}.learning-card h2{margin:12px 0;padding:0;font-size:24px}.learning-card h2 span{float:right;font-weight:400}.learning-card p{color:var(--ink-2);font-size:15px}.learning-card>span:last-child{font-size:12px;color:#5d7c8c}.start-standard{margin:32px 0}.start-standard h2{font-size:18px}.start-standard>div{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;font-size:14px;color:var(--ink-2)}.start-standard b{color:#7895a5;font-size:12px;margin-right:10px;font-weight:400}.reference-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.reference-cards a{display:flex;flex-direction:column;gap:8px;background:#f5f7f9;border-radius:12px;padding:18px;color:var(--ink)}.reference-cards span,.reference-cards small{font-size:12px;color:var(--ink-3)}.reference-cards strong{font-size:15px;font-weight:500}
 .mobile-nav{display:none}
 
 @media (max-width:900px){
@@ -150,6 +159,7 @@ mark{background:#fff3b0;padding:0 2px}
   main{padding:28px 20px 80px}
   .topbar{padding:0 16px;gap:8px}
   .topbar .search{width:min(36vw,180px)}
+  .reference-cards{grid-template-columns:1fr}
 }
 @media print{
   .topbar,nav.toc{display:none}
@@ -173,60 +183,22 @@ mark{background:#fff3b0;padding:0 2px}
     ${nav}
   </nav>
   <main id="content">
+    ${start}
+    ${renderLesson(lesson)}
     ${sections}
   </main>
 </div>
 <script>
-const q = document.getElementById('q');
-const items = [...document.querySelectorAll('.nav-item')];
-const sections = [...document.querySelectorAll('.chapter')];
-for (const button of document.querySelectorAll('[data-demo-toggle]')) {
-  button.addEventListener('click', () => {
-    const picture = button.closest('figure').querySelector('img');
-    const playing = button.getAttribute('aria-pressed') === 'true';
-    picture.src = playing ? picture.dataset.still : picture.dataset.animation;
-    button.setAttribute('aria-pressed', String(!playing));
-    button.textContent = playing ? '播放操作演示' : '停止演示';
-  });
-}
-q.addEventListener('input', () => {
-  const term = q.value.trim().toLowerCase();
-  let hits = 0;
-  for (const s of sections) {
-    const hit = !term || s.textContent.toLowerCase().includes(term);
-    s.hidden = !hit;
-    if (hit) hits++;
-  }
-  for (const a of items) {
-    const s = document.getElementById(a.dataset.target);
-    a.hidden = !!(term && s && s.hidden);
-  }
-  for (const g of document.querySelectorAll('.nav-part')) {
-    g.hidden = ![...g.querySelectorAll('.nav-item')].some(a => !a.hidden);
-  }
-  if (term && !hits) {
-    if (!document.getElementById('no-hit')) {
-      const p = document.createElement('p');
-      p.id = 'no-hit'; p.className = 'empty'; p.textContent = '没有匹配的章节。试试更短的关键词，或用界面上的按钮名称搜索。';
-      document.getElementById('content').prepend(p);
-    }
-  } else document.getElementById('no-hit')?.remove();
-});
-const spy = new IntersectionObserver(entries => {
-  for (const e of entries) {
-    if (!e.isIntersecting) continue;
-    for (const a of items) a.classList.toggle('active', a.dataset.target === e.target.id);
-  }
-}, { rootMargin: '-64px 0px -70% 0px' });
-for (const s of sections) spy.observe(s);
+${manualNavigationRuntime}
+${lessonRuntime}
 </script>
 </body>
 </html>`;
 
 fs.mkdirSync(SITE, { recursive: true });
 fs.writeFileSync(path.join(SITE, 'index.html'), html);
-const assets = path.join(WIKI, 'assets');
-if (fs.existsSync(assets)) fs.cpSync(assets, path.join(SITE, 'assets'), { recursive: true });
+// Explicitly withdraw the generator-owned old screenshot collections from employee delivery.
+for(const old of ['production','finance'])fs.rmSync(path.join(SITE,'assets',old),{recursive:true,force:true});
 
 const kb = (fs.statSync(path.join(SITE, 'index.html')).size / 1024).toFixed(0);
 console.log(`✓ wiki/site/index.html（${kb} KB · ${chapters.length} 章 · ${missingModules.length} 个页面未登记）`);

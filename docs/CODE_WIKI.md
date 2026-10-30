@@ -4,6 +4,8 @@
 
 本节面向维护者及 Agent；员工操作说明见 [`wiki/pages/`](../wiki/pages/)。操作手册描述岗位任务和界面，技术 Wiki 记录调用链、权限、状态约束、测试与已知缺口；两者随业务改动分别更新，不把模拟走查日志放入员工正文。下文未提到的历史章节须重新核验，不代表当前实现。
 
+**教学源限制（2026-10-30 最新）**：用户已禁止继续使用青屿小组/库，历史实测仅作历史证据，不代表继续操作许可；旧库截图/GIF 已从员工版撤下。手册先用 `wiki/lessons/settlement.json` 的独立教学案例和 `scripts/manual-lesson.mjs` 的无后端演练，清楚标明简化控件。未来实际业务验证与真实培训录制需采用合适的已授权场景，不能自动恢复被禁用的青屿库。
+
 ### 内部面料分配与交接
 
 - 当前页面入口为 `dev-ui-preview/mist-atelier/app/main.tsx` → `ReferenceApp.tsx`；分配与点收界面分别在 `pages/InternalFabricPanel.tsx`、`pages/MaterialDeliveryPanel.tsx`，库存入口在 `pages/modules/InventoryPage.tsx`，开产核对在 `pages/productionGate.ts`。
