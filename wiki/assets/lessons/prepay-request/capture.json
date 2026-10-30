@@ -1,0 +1,46 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 870,
+        "width": 485,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 802,
+        "y": 782,
+        "width": 100,
+        "height": 40
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 454,
+        "y": 469,
+        "width": 532,
+        "height": 81
+      },
+      "value": "合同已回签，按付款条件 30% 预付，供应商安排投产。"
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 912,
+        "y": 743,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

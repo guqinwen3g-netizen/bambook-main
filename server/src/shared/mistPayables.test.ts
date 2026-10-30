@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistContext, type MistState } from './mistWorkspace';
-import { supplierSettlements, invoiceableSettlements, payablesCommandPermission, payableBills, payableSources, supplierPayableSummary, supplierPayments, purchasePayableReadback, prepaymentPlans, paymentRequests, purchasePrepaymentReadback, getPayableReviews, payablesCommandPermissions, supplierDeductions, deductibleRecoveries, prepaymentMoves, prepaymentTransferTargets } from './mistPayables';
+import { shortClosureBlocker, supplierSettlements, invoiceableSettlements, payablesCommandPermission, payableBills, payableSources, supplierPayableSummary, supplierPayments, purchasePayableReadback, prepaymentPlans, paymentRequests, purchasePrepaymentReadback, getPayableReviews, payablesCommandPermissions, supplierDeductions, deductibleRecoveries, prepaymentMoves, prepaymentTransferTargets } from './mistPayables';
 import { getMistReviewTasks } from './mistWorkspace';
 
 function ctx(actorName = '财务-林', now = '2026-10-14T02:00:00.000Z'): MistContext { let n = 0; return { id: () => `ap-${actorName}-${++n}`, now, actorName, actorId: actorName } as MistContext; }
@@ -362,6 +362,34 @@ describe('结算确认、预付抵扣与票据关联', () => {
     expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ refunded: 0, transferredOut: 0, available: 10230 });
     expect(err(() => as('财务-林', s, { type: 'payable.prepayment.reverse', payload: { id: ref.result.id, reason: '再冲' } }))).toContain('已冲回');
   });
+  it('短交结案：实收已全部结算、供应商不再补发时，以零数量最终结算关闭合同并释放剩余预付', () => {
+    let { s, po1 } = prepaid();
+    const seeded = s.fulfillment.receipts.find(r => r.purchaseId === po1.id && r.quantity > 0)!; // 实收 2380、拒收 20
+    const closeOut = (st: MistState, note = '供应商书面确认 20 米不再补发，按实收结案') => submit(st, po1.id, [], { final: true, note });
+    expect(err(() => closeOut(s))).toContain('还没有已确认的结算');
+    const first = submit(s, po1.id, [seeded.id]); s = first.state; s = confirm(s, String(first.result.id), 33201).state;
+    expect(err(() => closeOut(s))).toContain('拒收未登记退换');
+    expect(err(() => submit(s, po1.id, [], { note: 'x' }))).toContain('请选择本次结算对应的实际收货记录');
+    const receipt = s.fulfillment.receipts.find(r => r.id === seeded.id)!;
+    receipt.returns = [{ id: 'ret-1', quantity: 20, disposition: 'replace', date: '2026-10-13', evidence: '退货单', actor: '业务-王', at: '2026-10-13T02:00:00.000Z' }];
+    expect(err(() => closeOut(s))).toContain('供应商补发');
+    receipt.returns = [{ id: 'ret-1', quantity: 20, disposition: 'noReplace', date: '2026-10-13', evidence: '供应商邮件', actor: '业务-王', at: '2026-10-13T02:00:00.000Z' }];
+    expect(shortClosureBlocker(s, po1.id)).toBe('');
+    expect(err(() => closeOut(s, ''))).toContain('结案说明');
+    const late = receive(s, po1.id, 5);
+    expect(err(() => closeOut(s))).toContain('未结算的实收');
+    s.fulfillment.receipts = s.fulfillment.receipts.filter(r => r.id !== late);
+    const fin = closeOut(s); s = fin.state;
+    const view = supplierSettlements(s).find(x => x.id === fin.result.id)!;
+    expect(view).toMatchObject({ final: true, quantity: 0, amount: 0, suggested: 0 });
+    expect(err(() => as('财务-林', s, { type: 'payable.prepayment.refund', payload: { purchaseId: po1.id, amount: 279, date: today, reference: 'TT-279', reason: '退回' } }))).toContain('最终结算');
+    s = confirm(s, view.id, 0).state;
+    expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ applied: 33201, available: 279, residualAfterFinal: 279 });
+    expect(err(() => closeOut(s))).toContain('已完成最终结算');
+    s = as('财务-林', s, { type: 'payable.prepayment.refund', payload: { purchaseId: po1.id, amount: 279, date: today, reference: 'TT-279', reason: '供应商退回短交 20 米对应预付' } }).state;
+    expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ refunded: 279, available: 0, residualAfterFinal: 0 });
+  });
+
   it('进度款 / 尾款计划只记录安排：不能按计划直接申请，须随票据申请并占用计划额度', () => {
     const { state, po1 } = demo();
     let s = run(state, { type: 'payable.plan.register', payload: { purchaseId: po1.id, stage: 'final', amount: 11160, trigger: '验收合格后 30 天', basis: '合同第 5 条：尾款 10%' } }).state;

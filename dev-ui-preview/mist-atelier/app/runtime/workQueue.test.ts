@@ -358,3 +358,21 @@ it('reminds only the contract handler to request an active prepayment plan, over
  state.payables!.requests=[{id:'r',purpose:'prepayment',planId:'plan',purchaseId:po.id,state:'pending',amount:33480,currency:'CNY',lines:[]} as any];
  expect(mistWorkQueue(state,{...options,me:po.requesterId}).filter(i=>i.id==='plan-request:plan')).toHaveLength(0);
 });
+it('short-closes a contract: reminds the purchaser to submit the final settlement once the supplier will not resupply, then reminds finance about the residual prepayment',()=>{
+ let k=0;const state=createMistState({id:()=>'sc-'+(++k),now:'2026-10-30T08:00:00.000Z',actorName:'系统'} as any,'demo');
+ const po=state.fulfillment.purchases.find(p=>p.code==='PO-2026-00001')!, receipt=state.fulfillment.receipts.find(r=>r.purchaseId===po.id&&r.quantity>0)!;
+ state.payables!.payments.push({id:'adv',code:'PAY-1',supplierId:po.supplierId,supplier:po.supplier,purchaseId:po.id,purpose:'prepayment',amount:33480,currency:'CNY',date:'2026-10-20',reference:'B'} as any);
+ const confirmed=(id:string,receiptIds:string[],final:boolean,applied:number,quantity:number,amount:number)=>({id,code:id,purchaseId:po.id,purchaseCode:po.code,supplierId:po.supplierId,supplier:po.supplier,currency:'CNY',unit:po.unit,price:po.price,receiptIds,quantity,rejected:0,amount,final,disputes:[],note:'',fileIds:[],submitterId:'x',submittedBy:'x',submittedAt:'2026-10-28T00:00:00Z',state:'confirmed',confirmation:{actorId:'f',actor:'林舒',at:'2026-10-29T00:00:00Z',suggestedPrepayment:applied,prepaymentApplied:applied,adjustReason:'',note:''}});
+ state.payables!.settlements=[confirmed('ST-1',[receipt.id],false,33201,2380,110670)] as any;
+ const buyer={canRead:()=>true,can:(scope:string)=>scope==='procurement:write',me:po.requesterId,today:'2026-10-30'};
+ const finance={canRead:()=>true,can:(scope:string)=>scope==='invoices:reconcile',me:'finance',today:'2026-10-30'};
+ const close=()=>mistWorkQueue(state,buyer).filter(i=>i.id==='settlement-close:'+po.id), residual=()=>mistWorkQueue(state,finance).filter(i=>i.id==='prepayment-residual:'+po.id);
+ expect(close()).toHaveLength(0);
+ receipt.returns=[{id:'ret',quantity:receipt.rejected,disposition:'noReplace',date:'2026-10-29',evidence:'供应商邮件',actor:'沈禾',at:'2026-10-29T00:00:00Z'}];
+ expect(close()).toMatchObject([{title:'PO-2026-00001 · 待最终结算',target:{view:'payment-vouchers',id:po.id,section:'payables'}}]);
+ expect(mistWorkQueue(state,buyer).filter(i=>i.id==='settlement-submit:'+po.id)).toHaveLength(0);
+ expect(residual()).toHaveLength(0);
+ state.payables!.settlements.push(confirmed('ST-2',[],true,0,0,0) as any);
+ expect(close()).toHaveLength(0);
+ expect(residual()).toMatchObject([{title:'PO-2026-00001 · 剩余预付待处理',meta:expect.stringContaining('CNY 279.00'),target:{id:'ST-2'}}]);
+});

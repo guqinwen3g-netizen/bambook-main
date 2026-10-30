@@ -1,0 +1,46 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 870,
+        "width": 485,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 362,
+        "y": 536,
+        "width": 20,
+        "height": 20
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 374,
+        "y": 689,
+        "width": 692,
+        "height": 64
+      },
+      "value": "供应商邮件确认色差 20 米不再补发，合同按实收 2,380 米结案。"
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 992,
+        "y": 775,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

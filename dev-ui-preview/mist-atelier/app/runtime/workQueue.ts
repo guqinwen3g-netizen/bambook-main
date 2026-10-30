@@ -6,7 +6,7 @@ import { shipmentStage } from './shipmentStage';
 import { financeReceiptDisplay } from './financeReceiptDisplay';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
-import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, payableBills, billRequestedUnpaidMinor, prepaymentPlans } from '../../../../server/src/shared/mistPayables';
+import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchaseRequiresSettlementLink, shortClosureBlocker, purchasePrepaymentReadback, payableBills, billRequestedUnpaidMinor, prepaymentPlans } from '../../../../server/src/shared/mistPayables';
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
@@ -210,6 +210,13 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         if(!purchaseRequiresSettlementLink(state,purchase.id)&&!heldInvoice&&!formalFollowup)continue;
         if (settlementFacts.some(row => row.purchaseId === purchase.id && (row.state === 'pending' || row.state === 'confirmed' && row.final))) continue;
         const receipts = settlementReceipts(state, purchase.id).filter(row => !row.settled && row.receipt.quantity > 0);
+        // 供应商已确认不再补发、实收已全部结算：提醒经办人提交最终结算结案，否则剩余预付无法退款或转抵。
+        if (!receipts.length && f.receipts.some(row => row.purchaseId === purchase.id && (row.returns || []).some(back => !back.reversed && back.disposition === 'noReplace')) && !shortClosureBlocker(state, purchase.id)) {
+          push({ id: 'settlement-close:' + purchase.id, source: 'finance', title: `${purchase.code} · ${uiText('待最终结算')}`, meta: [purchase.supplier, uiText('供应商不再补发')].join(' · '),
+            when: '待结算', urgent: false, at: f.receipts.filter(row => row.purchaseId === purchase.id).flatMap(row => (row.returns || []).map(back => back.date)).sort().at(-1) || '',
+            target: { view: 'payment-vouchers', id: purchase.id, section: 'payables' } });
+          continue;
+        }
         if (!receipts.length) continue;
         const quantity = receipts.reduce((sum, row) => sum + row.receipt.quantity, 0);
         // Reuse the current receipt/settlement facts; this reminder never marks
@@ -219,6 +226,15 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
           when: '待结算', urgent: false, at: receipts.map(row => row.receipt.date).sort().at(-1) || '',
           target: { view: 'payment-vouchers', id: purchase.id, section: 'payables' } });
       }
+    }
+    // 最终结算后仍有剩余预付（短交、结案）：提醒财务与供应商确认退款或转抵到其他合同。
+    if (can('invoices:reconcile')) for (const settlement of state.payables?.settlements ?? []) {
+      if (settlement.state !== 'confirmed' || !settlement.final) continue;
+      const residual = purchasePrepaymentReadback(state, settlement.purchaseId);
+      if (!(residual.residualAfterFinal > 0)) continue;
+      push({ id: 'prepayment-residual:' + settlement.purchaseId, source: 'finance', title: `${settlement.purchaseCode} · ${uiText('剩余预付待处理')}`,
+        meta: [settlement.supplier, `${settlement.currency} ${residual.residualAfterFinal.toLocaleString('en-US', {minimumFractionDigits:2,maximumFractionDigits:2})}`].join(' · '),
+        when: '待处理', urgent: false, at: settlement.confirmation?.at || settlement.submittedAt, target: {view:'payment-vouchers',id:settlement.id,section:'payables'} });
     }
     if (can(SETTLEMENT_SCOPES.confirm)) for (const settlement of state.payables?.settlements ?? []) {
       if (settlement.state !== 'pending') continue;

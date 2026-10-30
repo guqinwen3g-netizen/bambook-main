@@ -1,0 +1,83 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 652,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 378,
+        "y": 190,
+        "width": 93,
+        "height": 32
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 298,
+        "y": 510,
+        "width": 89,
+        "height": 15
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 1078,
+        "y": 812,
+        "width": 300,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 1268,
+        "y": 542,
+        "width": 110,
+        "height": 32
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 739,
+        "y": 335,
+        "width": 306,
+        "height": 40
+      },
+      "value": "不再补发"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 374,
+        "y": 494,
+        "width": 692,
+        "height": 81
+      },
+      "value": "华盛毛纺赵琳邮件确认：色差 20 米退回，不再补发。"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 992,
+        "y": 596,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

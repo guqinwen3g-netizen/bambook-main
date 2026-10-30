@@ -45,7 +45,7 @@
       "image": "05.webp",
       "target": {
         "x": 362,
-        "y": 360,
+        "y": 352,
         "width": 20,
         "height": 20
       }
@@ -54,7 +54,7 @@
       "image": "06.webp",
       "target": {
         "x": 374,
-        "y": 681,
+        "y": 689,
         "width": 692,
         "height": 64
       },
@@ -64,7 +64,7 @@
       "image": "07.webp",
       "target": {
         "x": 992,
-        "y": 767,
+        "y": 775,
         "width": 86,
         "height": 40
       }

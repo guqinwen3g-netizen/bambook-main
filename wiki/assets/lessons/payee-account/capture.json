@@ -1,0 +1,84 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 466,
+        "width": 68,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 298,
+        "y": 643,
+        "width": 80,
+        "height": 22
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1078,
+        "y": 737,
+        "width": 300,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 1308,
+        "y": 791,
+        "width": 70,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 374,
+        "y": 363,
+        "width": 327,
+        "height": 40
+      },
+      "value": "中国工商银行张家港塘桥支行"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 739,
+        "y": 363,
+        "width": 327,
+        "height": 40
+      },
+      "value": "1102025609001234567"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 374,
+        "y": 522,
+        "width": 692,
+        "height": 81
+      },
+      "value": "按合同所载电话 0512-5868 2203 回拨赵琳，核实账户名称、开户行与账号一致。"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 1019,
+        "y": 648,
+        "width": 59,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}
