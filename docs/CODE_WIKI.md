@@ -10,12 +10,19 @@
 - 业务真源在 `server/src/shared/mistInternalFabric.ts`。成衣订单条目使用有效分配指向面料订单；仓库发料记录与接收点收保留独立历史，旧分配版本的交接不得用于新版本的发料限额或短结判断。
 - 行级范围按 `server/src/shared/mistDataScope.ts` 与 `server/src/mist/repository.ts` 执行。指定接收人通过响应中的 `scopedFabricAccess` 获取目标条目的最小候选、门禁和交接摘要；隐藏来源订单的商业信息不因此公开。接收动作在服务端重新核对身份、来源、状态和写入范围。生产页展示该条目的服务端门禁摘要，放行仍以服务端校验为准。
 - 针对性回归入口：`server/src/mist/materialCandidateRepository.test.ts`、`server/src/shared/mistMaterialCrossGroup.test.ts`、`server/src/shared/mistMaterialShortClose.test.ts`、`dev-ui-preview/mist-atelier/app/pages/productionGate.test.ts`。
+- **产前样跨组门禁（2026-10-30）**：`productionSampleRequirements` 比对产前样与当前物料计划；接收人看不到面料来源时，不能在裁剪状态里重新计算指纹并据此声称“未登记”。`scopedFabricAccess` 在接收人具有订单读写、生产/产品/QC 读取权限时，按该接收人的订单条目和生产分支返回最小样品门禁状态；来源商业资料和报告正文不包含在摘要中，任务与样品 ID 只在相应行可见时返回。开产仍以服务端完整状态核验，物料计划修改后旧样品不能用于放行。青屿模拟通过报告、需求方采用及业务接续后，原生产页回读产前样已确认；此为 M 码样品的模拟评审，不代表生产已放行或全部实物已检验。
 
 ### 隔离处置与无补偿财务核对
 
 - 隔离退料从库存批次送复检，报告和处置保留来源；仓库实物退供/报废不自动改写原采购结算或形成退款。库存交互见 `pages/modules/InventoryPage.tsx`，财务界面见 `pages/FinancePayables.tsx`，规则与响应投影见 `server/src/shared/mistPayables.ts`。
 - 已实现路径为负责人记录不追偿决定，具有相应权限的另一财务人员核对无补偿并可撤回；参考货值不是新付款或自动损失凭证。供应商补偿、退款、红字发票等其他分支不能据此假定已实现或已验收。
 - 模拟实页证据：2026-10-30 青屿公司的两笔各 2 米退供、报废及无补偿核对；4 米重新采购后跨组点收。该证据覆盖这些具体分支，不代表全部场景验收。测试入口为 `server/src/mist/financialDisposalRepository.test.ts` 和 `server/src/shared/mistFinancialDisposalReview.test.ts`。
+
+### 采购结算、供应商票据与付款
+
+- 员工实际步骤见 `wiki/pages/70-采购结算票据与付款.md`；业务入口在 `pages/FinancePayables.tsx`，账户归属与流水入口在 `pages/FinancePage.tsx`，结算、票据、付款申请及分配规则见 `server/src/shared/mistPayables.ts`，公司银行账户处理见 `server/src/shared/mistAccounts.ts`。
+- 结算由业务提交、财务复核；按结算登记应付后，业务申请付款、主管审批、财务登记实际付款及票据分配。付款流水未归属账户时不计入银行账户余额，须按实际凭据归属；`登记实付`记录已发生付款，不连接银行发起转账。
+- 青屿模拟仅验证本次收货 4 米、单价 16 元的完整结算及模拟普通发票、付款审批、实付分配与模拟账户归属；原采购结算与其他租户保持不变。其他税种、争议扣款、冲回和真实银行凭据不属于此次验收。
 
 > **查阅方式（2026-10-08 整理）**：本页用于按章节定位代码，不是每次开工的全文必读材料。下文版本、HEAD、能力计数及测试成绩分别对应所标日期，不能当作当前状态或继承的验收结果；当前入口按相关源码核验，业务要求按 `docs/README.md` 指向的有效规则与最新决策判断。
 
