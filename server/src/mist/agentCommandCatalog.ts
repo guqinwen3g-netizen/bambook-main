@@ -1,6 +1,21 @@
 // 由 scripts/gen-mist-command-catalog.mjs 生成，请勿手改。
 export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string; source: string }> = [
  {
+  "type": "agent.proposal.confirm",
+  "payload": "{ id: string }",
+  "source": "server/src/shared/mistAgentProposals.ts"
+ },
+ {
+  "type": "agent.proposal.create",
+  "payload": "{ command: AgentProposalCommandBody; summary: string[] }",
+  "source": "server/src/shared/mistAgentProposals.ts"
+ },
+ {
+  "type": "agent.proposal.reject",
+  "payload": "{ id: string; note?: string }",
+  "source": "server/src/shared/mistAgentProposals.ts"
+ },
+ {
   "type": "calendar.save",
   "payload": "{ id?: string; title: string; date: string; time: string; note: string; target?: MistTarget }",
   "source": "server/src/shared/mistWorkspace.ts"

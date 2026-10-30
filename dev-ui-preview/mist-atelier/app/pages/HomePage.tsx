@@ -15,6 +15,7 @@ import { useMyDisplayName } from '../runtime/me';
 import {mistActivityTitle} from '../runtime/activityLabels';
 import { visibleMistNotifications } from '../runtime/notificationPreferences';
 import { useOptionalMistReviews } from '../runtime/reviews';
+import { AgentProposalDialog } from './AgentProposalDialog';
 import { mistWorkQueue, mistMyTasks, mistEmailFollowUpTaskIds, type MistWorkOptions } from '../runtime/workQueue';
 import type { View } from '../../../../types';
 import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
@@ -29,6 +30,7 @@ const money = (value: number) => value.toLocaleString(interfaceLocale(), { minim
 export function HomePage() {
   const { go, openAI } = useNav(), toast = useToast(), session = useMistSession(), workspace = useMistWorkspace(), myName = useMyDisplayName(workspace.workspace, workspace.state);
   const canAI=session.hasPermission('ai:chat');
+  const [proposalId, setProposalId] = React.useState('');
   const { state, loading, saving, pending } = workspace;
   const [range, setRange] = React.useState<'today' | 'week'>('today');
   const [today, setToday] = React.useState(() => dateKey(businessNow()));
@@ -60,7 +62,8 @@ export function HomePage() {
   const focusImageFile=state&&dev?(firstWorkspaceImage(state.files,version?.fileIds)||firstWorkspaceImage(state.files,dev.fileIds)):undefined;
   const focusImage=useWorkspaceImage(focusImageFile,'cutout-display');
   const report = state?.versions.find(item => item.id === reportVersion);
-  const openTarget = (target: MistTarget) => { if (!busy) go(target.view, target.id, target); };
+  // Agent 提议在首页弹窗确认，不跳转页面；队列行与当前焦点都走这里。
+  const openTarget = (target: MistTarget) => { if (busy) return; if (target.section === 'agent-proposal' && target.id) { setProposalId(target.id); return; } go(target.view, target.id, target); };
   const run = async (work: () => Promise<unknown>, success?: string) => {
     if (busy || operation.current) return;
     operation.current = true; const current = scope; setError('');
@@ -125,6 +128,7 @@ export function HomePage() {
           {!loading && !state?.calendar.some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
         </Card>
       </section>
+      <AgentProposalDialog proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={command => workspace.run(command)} onDone={message => toast(uiText(message))} />
       <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button>{taskControlled?<Button variant="primary" disabled={busy||!chosenTask?.target} onClick={()=>{setTaskDialog(false);if(chosenTask?.target)openTarget(chosenTask.target);}}>{uiText("打开事项")}</Button>:<Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button>}</>}>
         <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={(chosenTask && !allTasks.some(task=>task.id===chosenTask.id) ? [chosenTask, ...allTasks] : allTasks).map(task => ({ value: task.id, label: task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>
       </Dialog>

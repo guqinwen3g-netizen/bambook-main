@@ -65,24 +65,47 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect(after.state.events.find((e: any) => e.entityId === after.state.payables.settlements[0].id).actor).toBe('沈禾（经 Agent）');
   });
 
-  it('finance agent may preview a confirmation but cannot execute confirm / money commands; business errors come back as tool errors', async () => {
+  it('finance agent turns a confirmation into a proposal that only the owner can confirm or reject in the app; confirming runs the real command', async () => {
     const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
     const buyer = await as(app, 'demo-buyer');
     const po = purchase(buyer.workspace, 'PO-2026-00001'), receipt = buyer.workspace.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
     await buyer.tool('bambook_execute', { workspaceId: buyer.workspace.id, command: { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id] } } });
     const finance = await as(app, 'demo-finance');
-    const settlement = (await finance.client.get('/api/mist/workspaces/' + finance.workspace.id).expect(200)).body.workspace.state.payables.settlements[0];
+    const read = async (client: any) => (await client.get('/api/mist/workspaces/' + finance.workspace.id).expect(200)).body.workspace;
+    const settlement = (await read(finance.client)).state.payables.settlements[0];
     const confirm = { type: 'payable.settlement.confirm', payload: { id: settlement.id, prepaymentApplied: 0, note: '核对一致' } };
-    const preview = (await finance.tool('bambook_preview', { workspaceId: finance.workspace.id, command: confirm })).structuredContent;
-    expect(preview.via).toBe('confirm');
-    const refused = await finance.tool('bambook_execute', { workspaceId: finance.workspace.id, command: confirm });
-    expect(refused.isError).toBe(true);
-    expect(refused.content[0].text).toContain('须本人在系统中确认');
-    expect((await finance.client.get('/api/mist/workspaces/' + finance.workspace.id).expect(200)).body.workspace.state.payables.settlements[0].state).toBe('pending');
+    expect((await finance.tool('bambook_preview', { workspaceId: finance.workspace.id, command: confirm })).structuredContent.via).toBe('confirm');
+    const proposed = (await finance.tool('bambook_execute', { workspaceId: finance.workspace.id, command: confirm })).structuredContent;
+    expect(proposed).toMatchObject({ status: 'awaiting_confirmation' });
+    expect(proposed.summary.join('')).toContain('ST-2026-0001');
+    let state = (await read(finance.client)).state;
+    expect(state.payables.settlements[0].state).toBe('pending');
+    const proposal = state.agentProposals.find((p: any) => p.state === 'pending');
+    expect(proposal).toMatchObject({ ownerId: 'demo-finance', command: confirm });
+    // 只给本人看；Agent 不能直接确认或拒绝，也不能用命令接口绕过。
+    expect((await read(buyer.client)).state.agentProposals ?? []).toHaveLength(0);
+    expect((await finance.tool('bambook_execute', { workspaceId: finance.workspace.id, command: { type: 'agent.proposal.confirm', payload: { id: proposal.id } } })).content[0].text).toContain('不能经接口执行');
+    await request(app).post('/api/mist/workspaces/' + finance.workspace.id + '/commands').set(HEADER, finance.token).send({ requestId: 'x', expectedRevision: 0, command: { type: 'agent.proposal.confirm', payload: { id: proposal.id } } }).expect(403);
+    const run = async (client: any, command: any) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command }); };
+    await (await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).ok;
+    expect((await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(404);
+    expect((await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(200);
+    state = (await read(finance.client)).state;
+    expect(state.payables.settlements[0].state).toBe('confirmed');
+    expect(state.agentProposals.find((p: any) => p.id === proposal.id).state).toBe('confirmed');
+    expect((await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(404);
+    // 第二个提议被本人拒绝：业务不变。
     const overInvoice = { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'VAT-1', invoiceDate: '2026-10-10', currency: 'CNY', amount: 111600, taxAmount: 0, lines: [{ purchaseId: po.id, amount: 111600 }], due: '2026-11-30', dueBasis: '合同' } };
-    const blocked = await finance.tool('bambook_preview', { workspaceId: finance.workspace.id, command: overInvoice });
+    const blocked = await finance.tool('bambook_execute', { workspaceId: finance.workspace.id, command: overInvoice });
     expect(blocked.isError).toBe(true);
     expect(blocked.content[0].text).toContain('待关联结算');
+    const bill = { ...overInvoice, payload: { ...overInvoice.payload, amount: 110670, lines: [{ purchaseId: po.id, amount: 110670, settlementId: settlement.id }] } };
+    expect((await finance.tool('bambook_execute', { workspaceId: finance.workspace.id, command: bill })).structuredContent.status).toBe('awaiting_confirmation');
+    const second = (await read(finance.client)).state.agentProposals.find((p: any) => p.state === 'pending');
+    expect((await run(finance.client, { type: 'agent.proposal.reject', payload: { id: second.id, note: '发票还没收到' } })).status).toBe(200);
+    state = (await read(finance.client)).state;
+    expect(state.payables.bills.filter((b: any) => b.lines.some((l: any) => l.purchaseId === po.id))).toHaveLength(0);
+    expect(state.agentProposals.find((p: any) => p.id === second.id)).toMatchObject({ state: 'rejected', note: '发票还没收到' });
   });
 
   it('read-only delegation and non-finance roles stay within their limits', async () => {
@@ -108,5 +131,6 @@ describe('命令目录与敏感分级', () => {
     for (const type of ['payable.settlement.submit', 'development.saveDraft', 'market.quotation.save', 'fulfillment.procurement.save']) expect([type, via(type)]).toEqual([type, 'normal']);
     expect(via('files.add')).toBe('blocked');
     expect(via('email.server.sync')).toBe('blocked');
+    expect(via('agent.proposal.confirm')).toBe('blocked');
   });
 });

@@ -20,6 +20,7 @@ import { payablesCommandPermissions, financialDisposalViews } from '../shared/mi
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor } from './agentDelegation';
+import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
@@ -389,6 +390,15 @@ export class MistRepository {
     if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
     if (input.command.type === 'files.add') fail('INVALID_COMMAND', '附件只能通过真实上传接口添加', 400);
     if (EMAIL_SERVER_COMMAND.test(input.command.type)) fail('INVALID_COMMAND', '收信、发信与连接结果只能由服务端邮件服务写入', 400);
+    if (input.command.type === 'agent.proposal.confirm') {
+      // 本人确认 Agent 提议：换成提议里的原命令，按本人身份走完整门禁；同一事务内再核对提议未变后记为已确认。
+      if (isAgentActor(prior)) fail('FORBIDDEN', 'Agent 不能确认提议，须本人在系统中确认', 403);
+      const id = typeof input.command.payload.id === 'string' ? input.command.payload.id : '';
+      const { workspace } = await this.getForAgent(prior, workspaceId);
+      const proposal = workspace.state.agentProposals?.find((p: { id: string; state: string }) => p.id === id && p.state === 'pending');
+      if (!proposal) fail('NOT_FOUND', '提议不存在、已处理或不属于当前账号', 404);
+      return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command }, undefined, false, id);
+    }
     return this.executeInternal(prior, workspaceId, input, { command: input.command });
   }
   /**
@@ -403,7 +413,7 @@ export class MistRepository {
     catch (error) { if (error instanceof MistPreviewOutcome) return error.preview; throw error; }
     fail('PREVIEW_UNSUPPORTED', '预演未完成', 500);
   }
-  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false) {
+  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false, confirmProposalId = '') {
     requestIdentifier(input.requestId); revision(input.expectedRevision);
     const hash = createHash('sha256').update(canonical({ actorId: prior.userId, expectedRevision: input.expectedRevision, ...hashPayload })).digest('hex');
     const permissionFor = async (db: any) => upload&&input.claimId!==undefined?'aftersales:write':!input.command&&upload?await this.uploadPermission(db, prior):this.contract.mistCommandPermission(input.command ?? { type: 'files.add', payload: {} });
@@ -473,7 +483,7 @@ export class MistRepository {
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         // 经 Agent（委托令牌）的写入在业务事件经办人后标注，账号与权限判断不受影响。
-        if (isAgentActor(prior)) context.actorName = `${context.actorName}（经 Agent）`;
+        if (isAgentActor(prior)) Object.assign(context, { actorName: `${context.actorName}（经 Agent）`, viaAgent: true, agentSessionId: prior.agentSessionId });
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
           const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
           const { type, payload } = input.command;
@@ -534,6 +544,7 @@ export class MistRepository {
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
         numbers.assertConsumed();
+        if (confirmProposalId) markAgentProposalConfirmed(applied.state, confirmProposalId, command, actor.userId, context.now);
         const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
         for(const event of applied.state.events??[])if(!previousEvents.has(event.id))event.at=context.auditNow ?? context.now;
         if(upload&&input.claimId!==undefined)applied.result={...applied.result,claimId:input.claimId};

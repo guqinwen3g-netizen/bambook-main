@@ -78,6 +78,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.
+  // Agent 提议含待执行命令，只给提议所属账号本人。
+  if (next.agentProposals) next.agentProposals = next.agentProposals.filter(proposal => proposal.ownerId === actor.userId);
   if (!hasScope(actor, 'hr:write')) {
     delete next.teamScopes;
     next.events = (next.events || []).filter(event => event.entityType !== 'teamScope');
