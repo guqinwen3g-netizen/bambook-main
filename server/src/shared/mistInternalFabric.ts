@@ -195,7 +195,7 @@ export function applyInternalFabricCommand(root: MistState, command: InternalFab
     if (target.order.ownerId!==context.actorId) fail('仅当前成衣负责人可确认不补发','FORBIDDEN');
     if (target.order.governance?.status==='pending' || target.order.governance?.changeDraft?.status==='pending') fail('审批中不能短结');
     if (row!.revision!==revision(command.payload.expectedRevision)) fail('分配已变化，请刷新','CONFLICT');
-    const deliveries=materialDeliveryRows(root).filter(item=>item.delivery.allocationId===row!.id);
+    const deliveries=materialDeliveryRows(root).filter(item=>item.delivery.allocationId===row!.id&&item.delivery.allocationRevision===row!.revision);
     if (!deliveries.length || deliveries.some(item=>item.pending!=='0' || quantityMinor(item.outstanding)!==quantityMinor(item.accepted))) fail('请先完成全部点收并实际退回拒收料');
     const accepted=deliveries.reduce((sum,item)=>sum+quantityMinor(item.accepted),BigInt(0)), short=metresMinor(row!.metres)-accepted;
     if(short<=BigInt(0)) fail('没有需要短结的数量');
@@ -299,7 +299,7 @@ export function materialDeliveryTargets(root: MistState, purchaseId: string): Ar
     if (internal) {
       const allocation = root.internalFabricAllocations?.find(a => a.status === 'active' && a.orderId === branch.orderId && a.lineId === branch.lineId && a.fabricOrderId === p.orderId && a.fabricLineId === p.lineId);
       if (!allocation || allocation.shortClosure) return [];
-      const used = materialDeliveryRows(root).filter(r => r.delivery.allocationId === allocation.id && r.outstanding !== '0').reduce((sum, r) => sum + metresMinor(r.outstanding), BigInt(0));
+      const used = materialDeliveryRows(root).filter(r => r.delivery.allocationId === allocation.id && r.delivery.allocationRevision===allocation.revision && r.outstanding !== '0').reduce((sum, r) => sum + metresMinor(r.outstanding), BigInt(0));
       const available = metresMinor(allocation.metres) - used; if (available <= BigInt(0)) return [];
       remaining = metresText(available);
     } else if (p.domain !== 'garment' || p.kind !== 'material' || branch.orderId !== p.orderId || branch.lineId !== p.lineId) return [];
@@ -329,7 +329,7 @@ export function prepareMaterialDelivery(root: MistState, purchaseId: string, pro
     if (allocation.shortClosure) return fail('本批内部面料已短结，不再补发');
     normalizeGarmentFulfillment(target.line);
     if (!['米', 'm', 'metre', 'metres', 'meter', 'meters'].includes(p.unit.trim().toLowerCase())) return fail('供料须按米数登记');
-    const delivered = materialDeliveryRows(root).filter(row => row.delivery.allocationId === allocation!.id).reduce((sum, row) => sum + (row.outstanding === '0' ? BigInt(0) : metresMinor(row.outstanding)), BigInt(0));
+    const delivered = materialDeliveryRows(root).filter(row => row.delivery.allocationId === allocation!.id && row.delivery.allocationRevision===allocation!.revision).reduce((sum, row) => sum + (row.outstanding === '0' ? BigInt(0) : metresMinor(row.outstanding)), BigInt(0));
     if (delivered + metresMinor(quantity) > metresMinor(allocation.metres)) return fail('本次发料超过分配剩余米数');
   } else if (p.domain !== 'garment' || p.kind !== 'material' || p.orderId !== target.order.id || p.lineId !== target.line.id) return fail('物料与接收加工条目不一致');
   const receiverId = source.order.governance?.contract.internalSupply?.receiverId || target.order.ownerId;
@@ -392,7 +392,7 @@ export function assertMaterialReturnReversal(root: MistState, receiptId: string,
   const allocation = root.internalFabricAllocations?.find(value => value.id === row.delivery.allocationId && value.status === 'active' && value.revision === row.delivery.allocationRevision);
   if (!allocation) return fail('原面料分配已变化，不能冲回退换');
   if (allocation.shortClosure) return fail('原面料已短结，不能冲回退换');
-  const used = rows.filter(value => value.delivery.allocationId === allocation.id).reduce((sum, value) => sum + quantityMinor(value.outstanding), BigInt(0));
+  const used = rows.filter(value => value.delivery.allocationId === allocation.id && value.delivery.allocationRevision===allocation.revision).reduce((sum, value) => sum + quantityMinor(value.outstanding), BigInt(0));
   if (used + restored > metresMinor(allocation.metres)) return fail('冲回退换将超过面料分配数量，请先核对后续补发');
 }
 /** Current accountable owners may receive after a recorded staff handover; the original delivery identity stays frozen. */

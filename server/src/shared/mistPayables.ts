@@ -190,6 +190,7 @@ export function payablesCommandPermission(command: PayablesCommand) {
 /** 登记付款和核销是两个已有权限；一次提交同时办理时必须两项都具备。 */
 export function payablesCommandPermissions(command: PayablesCommand): string[] {
   const permissions: string[] = [payablesCommandPermission(command)];
+  if(command.type==='payable.disposal.review'||command.type==='payable.disposal.reverse')permissions.push('invoices:read','vouchers:read','procurement:read');
   if (command.type === 'payable.payment.register' && Array.isArray(command.payload.allocations) && command.payload.allocations.length) permissions.push(MIST_FINANCE_SCOPES.reconcile);
   if (command.type === 'payable.payment.backfill' && command.payload.billId) permissions.push(MIST_FINANCE_SCOPES.reconcile);
   // 冲回付款会连带冲回其分配，始终同时需要核销权。

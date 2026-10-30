@@ -108,3 +108,12 @@ it('records the resolved shortage without changing the original allocation',asyn
  await click('确认结案');expect(store.run).toHaveBeenCalledWith({type:'order.fabric.shortClose',payload:{id:f.state.internalFabricAllocations![0].id,expectedRevision:1,reason:'Confirmed no replacement'}});
  expect(host.textContent).toContain('短结不补发');expect(host.textContent).toContain('4 米 · 实收 16 米');
 });
+
+it('does not offer shortage closure from returned deliveries of the previous allocation',()=>{
+ const f=materialDeliveryFixture(20),id=f.issue(4);
+ f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:0,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Rejected'}},'garment');
+ f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'Hold',person:'factory',note:'Returned'}});
+ const replacement=f.create('fabric');f.run({type:'order.fabric.allocate',payload:{...f.target,fabricOrderId:replacement.orderId,fabricLineId:replacement.lineId,metres:'4',expectedRevision:1}},'garment');
+ store.state=f.state;orderId=f.target.orderId;lineId=f.target.lineId;auth.user={id:'garment',displayName:'Garment'};render();
+ expect(queryByRole(host,'button',{name:'确认短料不补发'})).toBeNull();
+});

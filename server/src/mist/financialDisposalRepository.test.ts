@@ -26,4 +26,5 @@ it('shares a minimal financial handoff without warehouse access and checks curre
  auth.users.get('owner')!.permissions.push('inventory:read');const warehouse=await repo.get({...testActor(),roles:[]},wid);
  expect(warehouse.state.fulfillment.stockMovements.find(m=>m.id===returned)?.quarantineDisposition?.financeReviews).toBeUndefined();
  auth.users.get('finance')!.permissions=auth.users.get('finance')!.permissions.filter(p=>p!=='vouchers:read');expect((await repo.get(a,wid)).financialDisposals).toBeUndefined();
+ await expect(repo.execute(a,wid,{requestId:'blind-review',expectedRevision:1,command:{type:'payable.disposal.review',payload:{returnId:returned,evidence:'blind'}}})).rejects.toMatchObject({status:403});
 });
