@@ -74,3 +74,11 @@ it('ignores an old request failure after account switching', async () => {
   auth.sessionKey = 'next-session'; auth.user = { id: 'fabric-owner', displayName: '面料负责人' }; render(); await act(async () => reject(new Error('旧账号失败')));
   expect(host.textContent).not.toContain('旧账号失败'); expect(queryByRole(host, 'spinbutton', { name: '分配米数' })).toBeNull();
 });
+
+it('keeps source quantities visible without offering an inaccessible garment link',()=>{
+ store.state=applyMistCommand(store.state!,{type:'order.fabric.allocate',payload:{orderId,lineId,fabricOrderId,fabricLineId,metres:'80',expectedRevision:0}},context).state;
+ store.state.orders=store.state.orders.filter(row=>row.id===fabricOrderId);store.state.orderLines=store.state.orderLines.filter(row=>row.orderId===fabricOrderId);
+ auth.user={id:'fabric-owner',displayName:'面料负责人'};render(true);
+ expect(host.textContent).toContain('80 米');expect(host.textContent).toContain('20.0001 米');
+ expect(queryByRole(host,'button',{name:'查看成衣条目'})).toBeNull();
+});
