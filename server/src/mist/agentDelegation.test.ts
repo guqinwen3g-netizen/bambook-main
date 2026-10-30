@@ -209,3 +209,20 @@ it('bounds text, image and result sizes without losing stable object links; rela
   expect(related.related.map(r => r.id)).toEqual(['c1']);
   expect(() => agentQuery(state, owner, { q: [] })).toThrow(/查询文字/);
 });
+
+it('exposes receipts and the payable chain so an Agent can find ids for settlement, payment and refund commands', () => {
+  const state = {
+    fulfillment: { purchases: [{ id: 'po1', code: 'PO-1', supplierId: 's1' }], receipts: [{ id: 'rc1', purchaseId: 'po1', quantity: 2380, rejected: 20 }] },
+    market: { suppliers: [{ id: 's1', code: 'SUP-1' }] },
+    payables: { settlements: [{ id: 'st1', code: 'ST-1', purchaseId: 'po1' }], bills: [{ id: 'b1', code: 'AP-1', supplierId: 's1', lines: [{ purchaseId: 'po1', settlementId: 'st1', amount: 1 }] }], plans: [{ id: 'pl1', code: 'PP-1', purchaseId: 'po1' }],
+      requests: [{ id: 'r1', code: 'PR-1', purpose: 'bill', lines: [{ billId: 'b1', amount: 1 }] }], payments: [{ id: 'p1', code: 'PAY-1' }], allocations: [], prepaymentMoves: [{ id: 'm1', code: 'PM-1', purchaseId: 'po1' }] },
+  } as any;
+  const owner = actor();
+  for (const type of ['receipt', 'payable_settlement', 'payable_bill', 'payment_plan', 'payment_request', 'supplier_payment', 'prepayment_move']) expect(agentQuery(state, owner, { type }).total, type).toBe(1);
+  expect(agentGet(state, owner, 'receipt', 'rc1').link).toBe('bambook://open?view=procurement&id=po1');
+  // 票据通过明细行引用采购合同；付款申请通过明细行引用票据。
+  expect(agentRelated(state, owner, 'purchase', 'po1').related.map(r => r.label).sort()).toEqual(['AP-1', 'PM-1', 'PP-1', 'ST-1', 'SUP-1', 'rc1'].sort());
+  expect(agentRelated(state, owner, 'payable_bill', 'b1').related.map(r => r.label).sort()).toEqual(['PO-1', 'PR-1', 'ST-1', 'SUP-1'].sort());
+  // 无应付读权限的岗位不能按类型读取。
+  expect(() => agentQuery(state, actor('local-qc'), { type: 'payable_bill' })).toThrow(/无权读取/);
+});
