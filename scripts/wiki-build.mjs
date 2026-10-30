@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { marked } from 'marked';
 import { WIKI, SITE, PART_ORDER, STATUS_LABEL, VERDICT_LABEL, snapshot } from './wiki-lib.mjs';
+import { renderManualFigure } from './manual-media.mjs';
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -23,10 +24,7 @@ const slugify = s => s.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-').replac
 /** 图片 → figure + 图注；标题 → 可跳转锚点。 */
 function polish(html) {
   return html
-    .replace(/<p>\s*<img([^>]*?)>\s*<\/p>/g, (_m, attrs) => {
-      const alt = /alt="([^"]*)"/.exec(attrs)?.[1] || '';
-      return `<figure><img${attrs} loading="lazy" decoding="async">${alt ? `<figcaption>${alt}</figcaption>` : ''}</figure>`;
-    })
+    .replace(/<p>\s*<img([^>]*?)>\s*<\/p>/g, (_m, attrs) => renderManualFigure(attrs))
     .replace(/<img(?![^>]*loading=)([^>]*?)>/g, '<img$1 loading="lazy" decoding="async">')
     .replace(/<h([23])>(.*?)<\/h\1>/g, (_m, level, inner) => {
       const id = slugify(inner.replace(/<[^>]+>/g, ''));
@@ -38,6 +36,13 @@ function polish(html) {
 
 const snap = snapshot();
 const { version, head, branch, chapters, modules, missingModules } = snap;
+for (const chapter of chapters) {
+  for (const match of chapter.body.matchAll(/!\[[^\]]*\]\((assets\/[\w/.-]+\.(?:gif|png|jpg|webp))\)/gi)) {
+    const file = match[1];
+    if (!fs.existsSync(path.join(WIKI, file))) throw new Error(`${chapter.title}：素材不存在 ${file}`);
+    if (/\.gif$/i.test(file) && !fs.existsSync(path.join(WIKI, file.replace(/\.gif$/i, '-poster.png')))) throw new Error(`${chapter.title}：演示缺少静态封面 ${file}`);
+  }
+}
 const generatedAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
 const tally = chapters.reduce((acc, c) => ({ ...acc, [c.verdict]: (acc[c.verdict] || 0) + 1 }), {});
 
@@ -122,6 +127,10 @@ blockquote{margin:14px 0;padding:8px 16px;border-left:3px solid var(--line);colo
 figure{margin:18px 0;text-align:center}
 figure img{max-width:100%;border:1px solid var(--line);border-radius:var(--radius);display:block;margin:0 auto}
 figcaption{font-size:12.5px;color:var(--ink-3);margin-top:8px}
+.demo figcaption{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;flex-wrap:wrap}
+.demo-controls{display:inline-flex;align-items:center;gap:14px;white-space:nowrap}
+.demo-controls button{font:inherit;color:var(--accent);background:#edf2f4;border:0;border-radius:8px;padding:7px 12px;cursor:pointer}
+.demo-controls button:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .table-wrap{overflow:auto;margin:18px 0;border:1px solid var(--line);border-radius:var(--radius)}
 table{border-collapse:collapse;width:100%;font-size:13.5px}
 th,td{padding:12px 16px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
@@ -171,6 +180,15 @@ mark{background:#fff3b0;padding:0 2px}
 const q = document.getElementById('q');
 const items = [...document.querySelectorAll('.nav-item')];
 const sections = [...document.querySelectorAll('.chapter')];
+for (const button of document.querySelectorAll('[data-demo-toggle]')) {
+  button.addEventListener('click', () => {
+    const picture = button.closest('figure').querySelector('img');
+    const playing = button.getAttribute('aria-pressed') === 'true';
+    picture.src = playing ? picture.dataset.still : picture.dataset.animation;
+    button.setAttribute('aria-pressed', String(!playing));
+    button.textContent = playing ? '播放操作演示' : '停止演示';
+  });
+}
 q.addEventListener('input', () => {
   const term = q.value.trim().toLowerCase();
   let hits = 0;
