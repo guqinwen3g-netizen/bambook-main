@@ -69,6 +69,7 @@ export function OrderCreatePage() {
     if (section === 'items' && (!lines.length || lines.some(line => !line.name.trim() || !line.style.trim() || !line.unit.trim() || !Number.isFinite(line.qty) || line.qty <= 0 || !Number.isFinite(line.price) || line.price < 0))) return '每个条目须填写品名、款号、正数数量、单位及有效单价。';
     if (section === 'items' && amounts.error) return amounts.error;
     if (section === 'plan' && (!form.due || !form.ownerId)) return '请填写交期和负责人。';
+    if (section === 'plan' && form.type === 'garment' && contract.quantityBasis && !contract.quantityBasisNote?.trim()) return '请填写数量依据';
     return '';
   };
   const totalLabel = amounts.total === null ? '—' : fmt(amounts.total, 2);
