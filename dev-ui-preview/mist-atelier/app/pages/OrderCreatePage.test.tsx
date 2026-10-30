@@ -115,6 +115,20 @@ it('selects the receiving garment member by account ID for an internal fabric or
   expect(store.run.mock.calls[0][0].payload.lines[0]).not.toHaveProperty('fulfillmentMode');
 });
 
+it('shows and requires quantity evidence after choosing size basis for an internal garment order',async()=>{
+  input('订单用途','internal');input('内部用途','衬衫样衣留用');
+  await enterLine('10','0');await next();input('交期','2026-11-20');
+  await act(async()=>getByRole(host,'combobox',{name:'数量口径'}).click());
+  await act(async()=>getByRole(getByRole(document.body,'listbox'),'option',{name:'按尺码'}).click());
+  expect(getByRole(host,'textbox',{name:'数量依据'})).toBeTruthy();
+  await next();expect(host.textContent).toContain('请填写数量依据');expect(store.run).not.toHaveBeenCalled();
+  input('数量依据','M 码 10 件，内部留样计划');await next();await next();
+  expect(amount('数量口径')).toBe('按尺码');expect(amount('数量依据')).toBe('M 码 10 件，内部留样计划');
+  await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());
+  expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.create',payload:expect.objectContaining({governance:expect.objectContaining({kind:'internal',quantityBasis:'size',quantityBasisNote:'M 码 10 件，内部留样计划'})})}));
+  expect(store.state!.orders[0].governance?.contract.quantityBasisNote).toBe('M 码 10 件，内部留样计划');
+});
+
 it('captures TT cumulative pre-shipment payment in creation and review without default teaching notes',async()=>{
  await enterLine('100','69.8');await next();input('交期','2026-11-20');input('定金比例（%）','30');input('出运前累计收款（%）','100');expect(host.textContent).not.toContain('未填表示尚未配置');expect(host.textContent).not.toContain('可以先保存草稿');await next();await next();expect(amount('出运前累计收款')).toBe('100%');await act(async()=>getByRole(host,'button',{name:'创建订单草稿'}).click());expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'order.create',payload:expect.objectContaining({governance:expect.objectContaining({depositPercent:30,preShipmentPercent:100})})}));
 });
