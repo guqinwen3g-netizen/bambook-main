@@ -319,6 +319,12 @@ export function settlementReceipts(root: Root, purchaseId: string, exceptSettlem
 function assertSettlementReceiptsCounted(root: Root, receiptIds: string[]) {
   if (materialDeliveryRows(root).some(row => row.kind === 'direct' && receiptIds.includes(row.id) && row.pending !== '0')) fail('直送物料仍有待点收数量，请先由接收人完成点收', 'PRECONDITION');
 }
+function assertFinalSettlementReceipts(root: Root, purchaseId: string, receiptIds: string[], exceptSettlementId = '') {
+  const direct = materialDeliveryRows(root).filter(row => row.kind === 'direct' && row.purchaseId === purchaseId);
+  if (!direct.length) return;
+  if (direct.some(row => row.pending !== '0')) fail('直送物料仍有待点收数量，不能最终结算', 'PRECONDITION');
+  if (root.fulfillment.receipts.some(row => row.purchaseId === purchaseId && row.quantity > 0 && !receiptIds.includes(row.id) && !receiptSettled(root, row.id, exceptSettlementId))) fail('仍有未纳入结算的实收记录，不能最终结算', 'PRECONDITION');
+}
 /** 未分配 = 可以再分配到票据的钱；已冲回付款和预付款（等结算抵扣）都不算。 */
 export function supplierPaymentUnallocatedMinor(root: Root, payment: SupplierPayment) {
   if (paymentReversed(root, payment.id) || payment.purpose === 'prepayment' || payment.purpose === 'settlement') return 0;
@@ -779,10 +785,12 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const live = s.settlements.filter(x => x.purchaseId === po.id && x.state === 'confirmed').reduce((n, x) => n + mistMoneyMinor(x.amount), 0);
       if (live + amount > purchaseContractMinor(po)) fail(`${po.code} 累计结算金额会超过合同金额；超收部分须先走合同变更`);
       if (p.final !== undefined && typeof p.final !== 'boolean') fail('最终结算标记无效');
+      const final = !!p.final || settledQuantity(root, po.id) + quantity >= po.quantity;
+      if (final) assertFinalSettlementReceipts(root, po.id, ids);
       if (p.disputes !== undefined && (!Array.isArray(p.disputes) || p.disputes.length > 20)) fail('争议 / 扣款格式无效');
       const disputes = ((p.disputes || []) as SettlementDispute[]).map(d => ({ description: text(d?.description, '争议 / 扣款说明', true, 500), amount: major(minor(d?.amount, '争议 / 扣款金额')) }));
       const id = c.id(), code = nextCode('ST', s.settlements, c.now);
-      s.settlements.push({ id, code, purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, currency: po.currency, unit: po.unit, price: po.price, receiptIds: ids, quantity, rejected, amount: major(amount), final: !!p.final || settledQuantity(root, po.id) + quantity >= po.quantity, disputes, note: text(p.note, '结算说明', false, 1000), fileIds: files(root, p.fileIds), state: 'pending', submitterId: c.actorId, submittedBy: c.actorName, submittedAt: c.now });
+      s.settlements.push({ id, code, purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, currency: po.currency, unit: po.unit, price: po.price, receiptIds: ids, quantity, rejected, amount: major(amount), final, disputes, note: text(p.note, '结算说明', false, 1000), fileIds: files(root, p.fileIds), state: 'pending', submitterId: c.actorId, submittedBy: c.actorName, submittedAt: c.now });
       event(root, c, id, `提交 ${po.code} 结算 ${code}（实收 ${quantity} ${po.unit} · ${fx(major(amount))} ${po.currency}），待财务复核`);
       return { id };
     }
@@ -809,6 +817,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       if (st.final && confirmedSettlements(root, st.purchaseId).some(x => x.final)) fail(`${st.purchaseCode} 已有最终结算`, 'CONFLICT');
       const po = (root.fulfillment?.purchases || []).find(x => x.id === st.purchaseId) || fail('来源合同不存在', 'NOT_FOUND');
       assertSettlementReceiptsCounted(root, st.receiptIds);
+      if (st.final) assertFinalSettlementReceipts(root, po.id, st.receiptIds, st.id);
       const live = confirmedSettlements(root, po.id).reduce((n, x) => n + mistMoneyMinor(x.amount), 0);
       if (live + mistMoneyMinor(st.amount) > purchaseContractMinor(po)) fail(`${po.code} 累计结算金额会超过合同金额；超收部分须先走合同变更`);
       const suggested = settlementSuggestedPrepaymentMinor(root, st), applied = minor(p.prepaymentApplied, '本次预付抵扣', true);
