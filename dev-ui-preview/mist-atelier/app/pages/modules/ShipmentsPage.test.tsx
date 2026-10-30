@@ -31,6 +31,21 @@ it('shows actual air departure states without sea-only labels or a duplicate ins
  const s=shipment('air',{mode:'air',state:'ready',documentsSentAt:'2026-10-13T08:00:00Z'});store.state!.fulfillment.shipments.push(s);render('air');expect(host.textContent).toContain('待起飞');expect(host.textContent).not.toContain('等待离港');expect(host.textContent).not.toContain('业务已对客发送；出口清关完成后才能登记实际离港。');s.state='departed';s.departedAt='2026-10-13T09:00:00Z';store.state={...store.state!};render('air');expect(host.textContent).toContain('已起飞');expect(host.textContent).not.toContain('已离港');
 });
 
+it('uses neutral package labels for fabric while keeping carton labels for garments', async () => {
+ const f=store.state!.fulfillment;
+ f.shipments.push(shipment('fabric',{domain:'fabric',booking:'BK-F'}),shipment('garment',{booking:'BK-G'}));
+ f.packing.push(pack('fabric',10),pack('garment',10));
+ render('fabric');
+ expect(host.textContent).toContain('包件数');
+ expect(host.textContent).toContain('1 件');
+ expect(host.textContent).not.toContain('箱数');
+ await click(getByRole(host,'button',{name:'分配装箱'}));
+ expect(getByRole(host,'textbox',{name:'包件号'})).toBeTruthy();
+ render('garment');
+ expect(host.textContent).toContain('箱数');
+ expect(host.textContent).toContain('1 箱');
+});
+
 it('derives the logistics stage only from recorded packing, booking, documents, dispatch and departure',()=>{
   const f=store.state!.fulfillment;
   f.shipments.push(shipment('a'),shipment('b',{booking:'BK'}),shipment('c',{state:'ready'}),shipment('d',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}),shipment('e',{state:'departed',departedAt:'2026-10-13T08:00:00Z'}),shipment('f',{state:'cancelled'}),shipment('g'));
