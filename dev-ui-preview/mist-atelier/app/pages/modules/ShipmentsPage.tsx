@@ -11,7 +11,7 @@ import { Anchor, Boxes, CheckCircle2, Download, FileText, Pencil, Plane, Plus, S
 import { FormFooter, BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, TextArea, TextInput, TextLink, Timeline, Toolbar, VerticalSteps, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
-import { fulfillmentSourceLabel, shipmentCancelBlockers, shipmentHandoverBlocker } from '../../../../../server/src/shared/mistFulfillment';
+import { fulfillmentSourceLabel, shipmentCancelBlockers, shipmentHandoverBlocker, stockIssueRemaining } from '../../../../../server/src/shared/mistFulfillment';
 import { heldShipmentRelease } from '../../../../../server/src/shared/mistRelationHold';
 import { OVER_SHIP_REQUIRED, SHORT_SHIP_HINT, pendingOverShip, shipmentToleranceCheck } from '../../../../../server/src/shared/mistOrderClosure';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -230,7 +230,7 @@ export function ShipmentsPage() {
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的出运")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Ship} title={uiText(invalidSource ? '来源不匹配' : sourceOrder ? '本订单还没有出运' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运`)} description={uiText(invalidSource ? '请返回来源订单重新进入。' : '出运由业务员从完工的生产分支发起：先核对合同收货与分批条款，再填写本次计划数量；后勤接手装箱、订舱与单证。')} action={canCreate && !invalidSource ? <Button icon={Plus} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined} />;
   const detail = selected && state
-    ? <ShipmentDetail shipment={selected} state={state} day={day} me={me} business={business} logistics={logistics} locked={locked}
+    ? <ShipmentDetail shipment={selected} state={state} day={day} me={me} business={business} logistics={logistics} inventory={session.hasPermission('inventory:read')} locked={locked}
         onEdit={() => setEditing(selected)} onPack={() => setPacking(selected)} onTransport={() => setDialog(transportSpec(selected))}
         onReady={() => void act(() => run({ type: 'fulfillment.shipments.ready', payload: { id: selected.id } }))}
         onSent={() => setDialog(sentSpec(selected))} onDepart={() => setDeparture(selected)} onCancel={() => setDialog(cancelSpec(selected))}
@@ -280,8 +280,8 @@ export function ShipmentsPage() {
   </MistPage>;
 }
 
-function ShipmentDetail({ shipment: s, state, day, me, business, logistics, locked, onEdit, onPack, onTransport, onReady, onSent, onDepart, onCancel, onCustoms, onDocuments, onSamples }: {
-  shipment: FulfillmentShipment; state: MistState; day: string; me: string; business: boolean; logistics: boolean; locked: boolean;
+function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inventory, locked, onEdit, onPack, onTransport, onReady, onSent, onDepart, onCancel, onCustoms, onDocuments, onSamples }: {
+  shipment: FulfillmentShipment; state: MistState; day: string; me: string; business: boolean; logistics: boolean; inventory: boolean; locked: boolean;
   onEdit: () => void; onPack: () => void; onTransport: () => void; onReady: () => void; onSent: () => void; onDepart: () => void; onCancel: () => void; onCustoms: () => void; onDocuments: () => void; onSamples: () => void;
 }) {
   if (s.hiddenCount) return <DetailBody data-shipment-detail={s.id} heading={<div><span className="mist-mono mist-muted">{s.code}</span><div className="mist-h2">{s.customer}</div></div>}>
@@ -303,7 +303,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
   const cartons = new Set(packingRows.map(row => row.carton)).size, net = round(packingRows.reduce((sum, row) => sum + row.netWeight, 0)), gross = round(packingRows.reduce((sum, row) => sum + row.grossWeight, 0)), volume = round(packingRows.reduce((sum, row) => sum + row.volume, 0));
   const logisticsReason = logistics ? false : '需要后勤出运权限';
   const businessReason = business ? false : '需要订单业务权限';
-  const editReason = businessReason || (packingRows.length || issued.length || customsFiled ? '已有装箱、有效单据或申报记录，不能再改请求' : false);
+  const editReason = businessReason || (f.stockMovements.some(m=>m.shipmentLink?.shipmentId===s.id) ? '已有库存出库关联，请先解除关联' : packingRows.length || issued.length || customsFiled ? '已有装箱、有效单据或申报记录，不能再改请求' : false);
   const cancelReason = businessReason || (s.requesterId !== me ? '仅原业务发起人可取消' : shipmentCancelBlockers(state, s).join('；') || false);
   const supplement=canSupplementPacking(state,s);
   const packReason = logisticsReason || (issuedCiPl&&!supplement ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
@@ -356,6 +356,11 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, lock
         { key: 'factory', header: '工厂确认', hideOnMobile: true, render: line => line.factoryConfirmedAt },
       ]} />
     </DetailBlock>
+    {inventory && f.stockMovements.some(m=>m.shipmentLink?.shipmentId===s.id) && <DetailBlock title={uiText('关联库存出库')}><DataTable ariaLabel={uiText('关联库存出库')} rows={f.stockMovements.filter(m=>m.shipmentLink?.shipmentId===s.id)} rowKey={m=>m.id} columns={[
+      {key:'stock',header:'库存批次',render:m=>{const stock=f.stock.find(row=>row.id===m.stockId);return stock ? `${stock.name}${stock.batchNumber ? ` · ${stock.batchNumber}` : ''}` : '库存不可见';}},
+      {key:'quantity',header:'出库数量',align:'right',render:m=>`${stockIssueRemaining(state,m.id)} ${f.stock.find(row=>row.id===m.stockId)?.unit||''}`},
+      {key:'evidence',header:'核对依据',render:m=>m.shipmentLink?.evidence||''},
+    ]}/></DetailBlock>}
     {packingRows.length > 0 && <DetailBlock title={uiText("装箱汇总")}><Facts items={[{ label: s.domain === 'fabric' ? '包件数' : '箱数', value: `${cartons} ${s.domain === 'fabric' ? '件' : '箱'}` }, { label: '净重 / 毛重', value: `${net} / ${gross} kg` }, { label: '体积', value: `${volume} m³` }, { label: '装箱行', value: `${packingRows.length} 行` }]} /></DetailBlock>}
     {packingRows.length>0&&<RecordDisclosure title={s.domain === 'fabric' ? '逐件明细' : '逐箱明细'}><DataTable ariaLabel={uiText(s.domain === 'fabric' ? '逐件装箱明细' : '逐箱装箱明细')} rows={packingRows} rowKey={row=>row.id} columns={[
       {key:'carton',header:s.domain === 'fabric' ? '包件号' : '箱号',render:row=>row.carton},

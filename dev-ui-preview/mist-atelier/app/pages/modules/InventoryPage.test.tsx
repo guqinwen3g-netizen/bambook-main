@@ -79,6 +79,19 @@ it('explains blocked movements and records a return against the original issue i
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.move',payload:expect.objectContaining({id:'gone',kind:'return',quantity:20,issueId:'m1',note:'工厂退回余料实点'})});
 });
 
+it('links an existing stock issue to its exact shipment with a required evidence field',async()=>{
+  store.state!.fulfillment.stock.push(stock('gone',{available:0}));
+  store.state!.fulfillment.stockMovements.push(movement('m1','gone','issue',100));
+  store.state!.productions.push({id:'p',sourcePurchaseId:'po',orderId:'og',lineId:'lg'} as any);
+  store.state!.fulfillment.shipments.push({id:'s',code:'SHP-1',state:'departed',lines:[{orderId:'og',lineId:'lg',productionId:'p',quantity:100}]} as any);
+  render('gone'); await click(getByRole(host,'button',{name:'关联出运'}));
+  const dialog=getByRole(document.body,'dialog',{name:'关联出运'});
+  expect((getByRole(dialog,'combobox',{name:'出运单'}) as HTMLSelectElement).value).toBe('s');
+  typeInto(getByRole(dialog,'textbox',{name:'核对依据'}) as HTMLTextAreaElement,'对照原出库单和装箱单');
+  await click(getByRole(dialog,'button',{name:'确认关联'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.shipment.link',payload:{issueId:'m1',shipmentId:'s',evidence:'对照原出库单和装箱单'}});
+});
+
 it('keeps isolated return batches out of generic issue and move actions',()=>{
   store.state!.fulfillment.stock.push(stock('ret',{sourceKind:'claimReturn',purchaseId:undefined,receiptId:undefined,name:'退回大衣',unit:'件',quantity:2,available:0,onHand:2,locked:2,batchNumber:'RET-1'}));
   store.state!.fulfillment.receivedRecords.push({id:'rr',returnReceiptId:'rt',goodsId:'g',stockId:'ret',source:{shipmentId:'x'} as any,quantity:2,unit:'件',warehouseId:'wh',batchNumber:'RET-1',location:'R-1',ownership:'Owned',ownershipDate:'2026-10-12',ownershipEvidence:'确认',receivedAt:'2026-10-12',basis:'实点',fileIds:[],at:'2026-10-12T08:00:00Z',actorId:'biz',actor:'经办人',inboundMovementId:'i',holdMovementId:'h'});
