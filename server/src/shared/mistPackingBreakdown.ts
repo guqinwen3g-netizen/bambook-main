@@ -1,7 +1,7 @@
 import type {MistState} from './mistWorkspace';
 import type {FulfillmentPacking,FulfillmentShipment} from './mistFulfillment';
 import {lineShipLimit,toleranceOf} from './mistOrderClosure';
-import type {GarmentBreakdown,OrderLineBreakdown} from './mistOrderBreakdown';
+import type {FabricBreakdown,GarmentBreakdown,OrderLineBreakdown} from './mistOrderBreakdown';
 
 export type PackingSku={color:string;size:string;quantity:number};
 const label=(s:string)=>s.normalize('NFC').trim().toLowerCase();
@@ -10,6 +10,36 @@ export function packingSpecification(root:MistState,lineId:string):GarmentBreakd
  const line=root.orderLines.find(l=>l.id===lineId);
  const breakdown=(line as typeof line & {breakdown?:OrderLineBreakdown})?.breakdown;
  return breakdown?.kind==='garment'?breakdown:undefined;
+}
+export function packingFabricSpecification(root:MistState,lineId:string):FabricBreakdown|undefined{
+ const line=root.orderLines.find(l=>l.id===lineId);
+ const breakdown=(line as typeof line & {breakdown?:OrderLineBreakdown})?.breakdown;
+ return breakdown?.kind==='fabric'?breakdown:undefined;
+}
+/** A package row represents one actual fabric colour; an unrecorded colour is never inferred. */
+export function packingFabricColorError(root:MistState,lineId:string,color:unknown):string{
+ const spec=packingFabricSpecification(root,lineId);
+ if(!spec)return color===undefined||color===''?'':'当前条目没有可核对的面料颜色';
+ if(typeof color!=='string'||!color.trim())return '请填写每件面料的颜色';
+ return spec.rows.some(row=>label(row.color)===label(color))?'':'装箱颜色不在当前订单中';
+}
+function fabricColorBlocker(root:MistState,shipment:FulfillmentShipment,packing:FulfillmentPacking[]):string{
+ if(shipment.packingColorVersion!==1)return '';
+ for(const source of shipment.lines){
+  const spec=packingFabricSpecification(root,source.lineId),line=root.orderLines.find(l=>l.id===source.lineId);if(!spec||!line)continue;
+  const relevant=packing.filter(row=>row.lineId===line.id&&root.fulfillment.shipments.some(s=>s.id===row.shipmentId&&s.state!=='cancelled'));
+  for(const row of relevant){const error=packingFabricColorError(root,row.lineId,row.fabricColor);if(error)return `${row.carton}：${error}`;}
+  const order=root.orders.find(o=>o.id===line.orderId),contract=order?.governance?.contract;
+  const tolerance=toleranceOf(contract),limit=lineShipLimit(line,contract),extra=Math.max(0,limit.approved-limit.max);
+  let excess=0,first='';
+  for(const row of spec.rows){
+   const actual=Math.round(relevant.filter(r=>label(r.fabricColor||'')===label(row.color)).reduce((sum,r)=>sum+r.quantity,0)*10000)/10000;
+   const max=Math.round(row.quantity*(1+tolerance.over/100)*10000)/10000;
+   if(actual>max){excess+=actual-max;first ||= `${row.color} 累计装箱 ${actual} 超出合同上限 ${max}`;}
+  }
+  if(Math.round(excess*10000)>Math.round(extra*10000))return first;
+ }
+ return '';
 }
 /** Returns a validation message; never infers an assortment from the ordered ratio. */
 export function packingSkuError(root:MistState,lineId:string,quantity:number,raw:unknown):string{
@@ -29,6 +59,7 @@ export function packingSkuError(root:MistState,lineId:string,quantity:number,raw
 }
 /** Versioned detailed packing leaves old issued consignments intact until explicitly supplemented. */
 export function packingBreakdownBlocker(root:MistState,shipment:FulfillmentShipment,packing=root.fulfillment.packing):string{
+ const fabricError=fabricColorBlocker(root,shipment,packing);if(fabricError)return fabricError;
  if(shipment.packingDetailVersion!==2)return '';
  const rows=packing.filter(r=>r.shipmentId===shipment.id);
  for(const row of rows){const error=packingSkuError(root,row.lineId,row.quantity,row.assortment);if(error)return `${row.carton}：${error}`;}
@@ -64,8 +95,9 @@ export function canonicalPackingSkus(root:MistState,lineId:string,cells:PackingS
  return cells.filter(cell=>cell.quantity>0).map(cell=>({color:spec.rows.find(row=>label(row.color)===label(cell.color))!.color,size:spec.sizes.find(size=>label(size)===label(cell.size))!,quantity:cell.quantity}));
 }
 export function canSupplementPacking(root:MistState,shipment:FulfillmentShipment){
- return shipment.packingDetailVersion!==2&&shipment.state!=='departed'&&shipment.state!=='cancelled'
-  &&shipment.lines.some(line=>!!packingSpecification(root,line.lineId))
+ const needsGarment=shipment.packingDetailVersion!==2&&shipment.lines.some(line=>!!packingSpecification(root,line.lineId));
+ const needsFabric=shipment.domain==='fabric'&&shipment.packingColorVersion!==1&&shipment.lines.some(line=>!!packingFabricSpecification(root,line.lineId));
+ return (needsGarment||needsFabric)&&shipment.state!=='departed'&&shipment.state!=='cancelled'
   &&root.fulfillment.documents.some(d=>d.shipmentId===shipment.id&&d.status==='issued'&&['CI','PL'].includes(d.type))
   &&!root.fulfillment.customs.some(c=>c.shipmentId===shipment.id&&c.status!=='draft');
 }

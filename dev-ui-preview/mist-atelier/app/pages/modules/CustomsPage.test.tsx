@@ -261,6 +261,17 @@ it('lists missing classifications instead of guessing, and creates a style class
   expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.classify.save',payload:expect.objectContaining({family:'garment',hsCode:'6202.9300.00',declaredName:'女式化纤制大衣',styles:['COAT-1'],brandType:'0',preference:'0',elements:['机织','大衣','女式','100%涤纶','无品牌'],secondUnit:'千克'})});
 });
 
+it('lets logistics explicitly scope a fabric classification to its recorded colours',async()=>{
+ const st=store.state!,f=st.fulfillment;st.orders[0].type='fabric';Object.assign(st.orderLines[0],{unit:'米',breakdown:{kind:'fabric',composition:'棉',width:150,weight:141,rows:[{color:'本白',quantity:5},{color:'藏蓝',quantity:5}]}});
+ f.shipments.push(shipment('s',{domain:'fabric',packingColorVersion:1}));f.packing.push({...pack('s',10),fabricColor:'本白'});f.customs.push(customs('s','draft'));
+ render('cus-s');const detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;await click(getByRole(detail,'button',{name:'维护商品归类'}));await click(getByRole(host,'button',{name:'新建归类'}));
+ const form=getByRole(document.body,'dialog');
+ for(const [name,value] of [['商品编号（10 位）','5513110000'],['申报品名','漂白面料'],['适用款号','COAT-1'],['适用颜色','本白'],['成分含量','100%棉'],['规格（幅宽、克重）','150cm / 141g']])typeInto(getByRole(form,'textbox',{name}) as HTMLInputElement,value);
+ for(const [name,value] of [['织造方法','机织'],['染整方法','漂白']])choose(getByRole(form,'combobox',{name}) as HTMLSelectElement,value);
+ await click(getByRole(form,'button',{name:'建立归类'}));
+ expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.customs.classify.save',payload:expect.objectContaining({family:'fabric',styles:['COAT-1'],colors:['本白'],elements:['机织','漂白','100%棉','150cm / 141g','无品牌']})});
+});
+
 it('generates declaration items on the server once every shipped style is classified',async()=>{
   const st=store.state!,f=st.fulfillment;f.shipments.push(shipment('s',{state:'ready'}));f.packing.push(pack('s',10));f.customs.push(customs('s','draft'));
   f.customsClassifications=[{id:'hs1',code:'HSC-0001',family:'garment',hsCode:'6202930000',declaredName:'女式化纤制大衣',brandType:'0',preference:'0',elements:['机织','大衣','女式','100%涤纶','无品牌'],legalUnit:'件',secondUnit:'千克',styles:['COAT-1'],note:'',createdAt:'2026-10-12T08:00:00Z',actor:'后勤'}];

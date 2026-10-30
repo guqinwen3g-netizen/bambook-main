@@ -23,6 +23,7 @@ export function classificationSpec(family: CustomsFamily, run: (c: MistCommand) 
       field('hsCode', '商品编号（10 位）'),
       field('declaredName', '申报品名'),
       { ...field('styles', '适用款号'), hint: '多个款号用逗号分隔' },
+      ...(family==='fabric'?[{...field('colors','适用颜色','text',false),hint:'留空适用全部颜色；多个颜色用逗号分隔'}]:[]),
       field('brandType', '品牌类型', 'select', true, CUSTOMS_BRAND_TYPES.map(([v, l]) => ({ value: v, label: `${v} ${l}` }))),
       field('preference', '出口享惠情况', 'select', true, CUSTOMS_PREFERENCES.map(([v, l]) => ({ value: v, label: `${v} ${l}` }))),
       ...labels.map((label, i) => CUSTOMS_ELEMENT_OPTIONS[label] ? field(elementKey(i), label, 'choice', true, CUSTOMS_ELEMENT_OPTIONS[label]) : field(elementKey(i), label)),
@@ -30,22 +31,22 @@ export function classificationSpec(family: CustomsFamily, run: (c: MistCommand) 
       { ...field('secondUnit', '法定第二单位', 'choice', false, CUSTOMS_UNITS), strict: true, hint: `默认${defaults.secondUnit || '无'}` },
       field('note', '备注', 'textarea', false),
     ],
-    initialValues: { hsCode: old?.hsCode || '', declaredName: old?.declaredName || '', styles: old?.styles.join(', ') || '', brandType: old?.brandType || '0', preference: old?.preference || '0', ...Object.fromEntries(labels.map((_, i) => [elementKey(i), old?.elements[i] || (labels[i] === '品牌' ? '无品牌' : '')])), legalUnit: old?.legalUnit || '', secondUnit: old ? old.secondUnit : defaults.secondUnit, note: old?.note || '' },
-    submit: (v: ModuleValues) => run({ type: 'fulfillment.customs.classify.save', payload: { ...(old ? { id: old.id } : {}), family, hsCode: text(v, 'hsCode'), declaredName: text(v, 'declaredName'), styles: text(v, 'styles').split(/[,，、\s]+/).filter(Boolean), brandType: text(v, 'brandType'), preference: text(v, 'preference'), elements: labels.map((_, i) => text(v, elementKey(i))), legalUnit: text(v, 'legalUnit'), secondUnit: text(v, 'secondUnit'), note: text(v, 'note') } } as MistCommand),
+    initialValues: { hsCode: old?.hsCode || '', declaredName: old?.declaredName || '', styles: old?.styles.join(', ') || '', colors:old?.colors?.join(', ')||'', brandType: old?.brandType || '0', preference: old?.preference || '0', ...Object.fromEntries(labels.map((_, i) => [elementKey(i), old?.elements[i] || (labels[i] === '品牌' ? '无品牌' : '')])), legalUnit: old?.legalUnit || '', secondUnit: old ? old.secondUnit : defaults.secondUnit, note: old?.note || '' },
+    submit: (v: ModuleValues) => run({ type: 'fulfillment.customs.classify.save', payload: { ...(old ? { id: old.id } : {}), family, hsCode: text(v, 'hsCode'), declaredName: text(v, 'declaredName'), styles: text(v, 'styles').split(/[,，、\s]+/).filter(Boolean), ...(family==='fabric'?{colors:text(v,'colors').split(/[,，、]/).map(value=>value.trim()).filter(Boolean)}:{}), brandType: text(v, 'brandType'), preference: text(v, 'preference'), elements: labels.map((_, i) => text(v, elementKey(i))), legalUnit: text(v, 'legalUnit'), secondUnit: text(v, 'secondUnit'), note: text(v, 'note') } } as MistCommand),
   };
 }
 
 export function CustomsClassificationLedger({ state, domain, needle, can, locked, open, run }: { state: MistState; domain: CustomsFamily; needle: string; can: boolean; locked: boolean; open: (spec: ModuleEditorSpec) => void; run: (c: MistCommand) => Promise<unknown> }) {
   const [showVoided, setShowVoided] = React.useState(false);
   const all = readCustomsClassifications(state).filter(c => c.family === domain);
-  const rows = all.filter(c => (showVoided || !c.voided) && (!needle || `${c.code} ${c.hsCode} ${c.declaredName} ${c.styles.join(' ')}`.toLowerCase().includes(needle)));
+  const rows = all.filter(c => (showVoided || !c.voided) && (!needle || `${c.code} ${c.hsCode} ${c.declaredName} ${c.styles.join(' ')} ${(c.colors||[]).join(' ')}`.toLowerCase().includes(needle)));
   const voidSpec = (c: CustomsClassification): ModuleEditorSpec => ({ title: `作废商品归类 ${c.code}`, submitLabel: '作废', description: '作废后不再用于新生成的申报商品项；已生成的保留原样。', fields: [field('reason', '作废原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.customs.classify.void', payload: { id: c.id, reason: text(v, 'reason') } } as MistCommand) });
   const columns: Column<CustomsClassification>[] = [
     { key: 'code', header: '归类 / 商品编号', width: 'minmax(150px,1fr)', render: c => <div className="mist-col" style={{ gap: 2 }}><Mono>{hsText(c.hsCode)}</Mono><small className="mist-muted">{c.code}{uiText(c.voided ? ' · 已作废' : '')}</small></div> },
     { key: 'name', header: '申报品名', width: 'minmax(140px,1.2fr)', render: c => c.declaredName },
     { key: 'elements', header: '申报要素', hideOnMobile: true, render: c => <small>{[c.brandType, c.preference, ...c.elements].join('|')}</small> },
     { key: 'unit', header: '法定单位', width: '100px', hideOnMobile: true, render: c => c.secondUnit ? `${c.legalUnit} / ${c.secondUnit}` : c.legalUnit },
-    { key: 'styles', header: '适用款号', width: 'minmax(120px,1fr)', render: c => c.styles.join('、') },
+    { key: 'styles', header: '适用款号', width: 'minmax(120px,1fr)', render: c => c.styles.join('、')+(c.family==='fabric'?` · ${c.colors?.length?c.colors.join('、'):'全部颜色'}`:'') },
     ...(can ? [{ key: 'act', header: '', width: '150px', align: 'right' as const, render: (c: CustomsClassification) => c.voided ? <span className="mist-muted">{c.voided.reason}</span> : <span className="mist-row"><Button size="sm" icon={Pencil} disabled={locked} aria-label={ui`修改 ${c.code}`} onClick={() => open(classificationSpec(c.family, run, c))}>{uiText("修改")}</Button><Button size="sm" icon={Ban} disabled={locked} aria-label={ui`作废 ${c.code}`} onClick={() => open(voidSpec(c))}>{uiText("作废")}</Button></span> }] : []),
   ];
   return <div className="mist-section"><Card data-customs-classifications>

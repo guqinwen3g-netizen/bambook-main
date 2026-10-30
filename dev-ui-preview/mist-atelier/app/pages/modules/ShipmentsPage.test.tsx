@@ -46,6 +46,18 @@ it('uses neutral package labels for fabric while keeping carton labels for garme
  expect(host.textContent).toContain('1 箱');
 });
 
+it('supplements signed fabric package colours without permitting physical edits',async()=>{
+ const st=store.state!,f=st.fulfillment;st.orders[0].type='fabric';Object.assign(st.orderLines[0],{unit:'米',breakdown:{kind:'fabric',composition:'棉',width:150,weight:141,rows:[{color:'本白',quantity:5},{color:'藏蓝',quantity:5}]}});
+ f.shipments.push(shipment('fab',{domain:'fabric',booking:'BK',packingDetailVersion:2}));f.packing.push({...pack('fab',5),id:'p1',carton:'R1'},{...pack('fab',5),id:'p2',carton:'R2'});f.documents.push(doc('pl','fab','PL'));
+ render('fab');expect(host.textContent).toContain('请先核对每件面料的颜色');expect(host.textContent).toContain('装箱明细待核对');expect(host.textContent).not.toContain('装箱与计划不符');await click(getByRole(host,'button',{name:'补充颜色明细'}));
+ expect((getAllByRole(host,'textbox',{name:'包件号'})[0] as HTMLInputElement).disabled).toBe(true);
+ const white=getByRole(host,'combobox',{name:'颜色 · R1'}) as HTMLSelectElement,navy=getByRole(host,'combobox',{name:'颜色 · R2'}) as HTMLSelectElement;
+ act(()=>{fireEvent.change(white,{target:{value:'本白'}});fireEvent.change(navy,{target:{value:'藏蓝'}});});
+ typeInto(getByRole(host,'textbox',{name:'原单核对依据'}) as HTMLTextAreaElement,'按已签装箱单逐件核对');
+ await click(getByRole(host,'button',{name:'补充颜色明细'}));
+ expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.shipments.pack',payload:expect.objectContaining({id:'fab',packingColorVersion:1,supplementEvidence:'按已签装箱单逐件核对',lines:expect.arrayContaining([expect.objectContaining({carton:'R1',fabricColor:'本白'}),expect.objectContaining({carton:'R2',fabricColor:'藏蓝'})])})}));
+});
+
 it('derives the logistics stage only from recorded packing, booking, documents, dispatch and departure',()=>{
   const f=store.state!.fulfillment;
   f.shipments.push(shipment('a'),shipment('b',{booking:'BK'}),shipment('c',{state:'ready'}),shipment('d',{state:'ready',documentsSentAt:'2026-10-12T08:00:00Z'}),shipment('e',{state:'departed',departedAt:'2026-10-13T08:00:00Z'}),shipment('f',{state:'cancelled'}),shipment('g'));
