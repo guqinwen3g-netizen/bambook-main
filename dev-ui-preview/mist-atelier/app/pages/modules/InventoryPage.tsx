@@ -115,7 +115,7 @@ export function InventoryPage() {
       fields: [
         ...(linked ? [field('targetProductionId', '接收加工单', 'select', true, [emptyOption, ...targets])] : []),
         ...(kind !== 'return' && fulfillmentPositions(stock).length > 1 ? [field('sourceLocation', kind === 'move' ? '移出位置' : '本次出库位置', 'select', true, [{ value: '__choose__', label: '请选择位置' }, ...fulfillmentPositions(stock).map(position => ({ value: position.location, label: `${position.location || '位置未记录'} · ${position.available}${stock.unit}` }))])] : []),
-        ...(kind === 'return' ? [field('issueId', '原出库', 'select', true, [emptyOption, ...(f?.stockMovements || []).filter(movement => movement.stockId === stock.id && movement.kind === 'issue' && stockIssueRemaining(state!, movement.id) > 0).map(movement => ({ value: movement.id, label: `${movement.person} · 可退回 ${stockIssueRemaining(state!, movement.id)}${stock.unit} · ${movement.location}` }))])] : []),
+        ...(kind === 'return' ? [field('issueId', '原出库', 'select', true, [emptyOption, ...(f?.stockMovements || []).filter(movement => movement.stockId === stock.id && movement.kind === 'issue' && !movement.shipmentLink && stockIssueRemaining(state!, movement.id) > 0).map(movement => ({ value: movement.id, label: `${movement.person} · 可退回 ${stockIssueRemaining(state!, movement.id)}${stock.unit} · ${movement.location}` }))])] : []),
         ...(kind !== 'move' ? [field('quantity', `数量（${stock.unit}）`, 'number')] : []),
         field('location', kind === 'move' ? '移入位置' : '交接地点'), field('person', linked ? '交接联系人' : kind === 'issue' ? '接收方（工厂 / 出运 / 人员）' : '接收 / 交付方'), field('note', '交接依据', 'textarea'),
       ],
@@ -153,6 +153,8 @@ export function InventoryPage() {
         onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))} onRepair={() => {const spec=repairSpec(selected);if(spec)editor.open(spec);}} onHandback={() => {const spec=repairSpec(selected,true);if(spec)editor.open(spec);}} onDispatch={()=>{const spec=custodySpec(selected);if(spec)editor.open(spec);}} onRepairReturn={()=>{const spec=custodySpec(selected,true);if(spec)editor.open(spec);}}
         onInspect={returnId => setDialog({title:'隔离料送复检',submitLabel:'发起复检',fields:[field('due','预计检查日','date')],initialValues:{due:today()},submit:v=>run({type:'fulfillment.inventory.quarantine.request',payload:{returnId,due:text(v,'due')}})})}
         onRelease={returnId => setDialog({title:'恢复可用库存',submitLabel:'确认恢复',fields:[field('evidence','处置依据','textarea')],initialValues:{evidence:''},submit:v=>run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId,decision:'release',evidence:text(v,'evidence')}})})}
+        onLinkShipment={issueId => { const branch=state.productions.find(p=>p.sourcePurchaseId===selected.purchaseId&&p.orderId===selected.orderId&&p.lineId===selected.lineId); const options=state.fulfillment.shipments.filter(s=>s.state!=='cancelled'&&s.lines.some(l=>l.orderId===selected.orderId&&l.lineId===selected.lineId&&l.productionId===branch?.id)).map(s=>({value:s.id,label:s.code})); setDialog({title:'关联出运',submitLabel:'确认关联',fields:[{...field('issue','本次出库'),readonly:true},field('shipmentId','出运单','select',true,[emptyOption,...options]),field('evidence','核对依据','textarea')],initialValues:{issue:`${selected.name} · ${stockIssueRemaining(state,issueId)} ${selected.unit}`,shipmentId:options.length===1?options[0].value:'',evidence:''},submit:v=>run({type:'fulfillment.inventory.shipment.link',payload:{issueId,shipmentId:text(v,'shipmentId'),evidence:text(v,'evidence')}})}); }}
+        onUnlinkShipment={issueId => setDialog({title:'解除出运关联',submitLabel:'确认解除',fields:[field('reason','解除原因','textarea')],initialValues:{reason:''},submit:v=>run({type:'fulfillment.inventory.shipment.unlink',payload:{issueId,reason:text(v,'reason')}})})}
         onQc={id=>go('qc-workbench',id,{section:'quarantine'})} canQc={session.canAccessView(View.QcWorkbench)}
         onPurchase={id => go('procurement', id)} onClaim={(id, section) => section ? go('claims', id, { section }) : go('claims', id)} canClaims={session.canAccessView(View.Claims)} />
     : <EmptyState icon={Boxes} title={uiText(loading ? '正在读取库存' : '未选择批次')} compact />;
@@ -198,10 +200,11 @@ export function InventoryPage() {
   </MistPage></Nav.Provider>;
 }
 
-function StockDetail({ stock, state, can, locked, canClaims, canQc, onMove, onScrap, onRepair, onHandback, onDispatch, onRepairReturn, onInspect, onRelease, onQc, onPurchase, onClaim }: {
+function StockDetail({ stock, state, can, locked, canClaims, canQc, onMove, onScrap, onRepair, onHandback, onDispatch, onRepairReturn, onInspect, onRelease, onQc, onPurchase, onClaim, onLinkShipment, onUnlinkShipment }: {
   stock: FulfillmentStock; state: MistState; can: boolean; locked: boolean; canClaims: boolean;
   onMove: (kind: 'issue' | 'return' | 'move') => void; onScrap: () => void; onRepair:()=>void; onHandback:()=>void; onDispatch:()=>void; onRepairReturn:()=>void; onPurchase: (id: string) => void; onClaim: (id: string, section?: string) => void;
   onInspect:(id:string)=>void; onRelease:(id:string)=>void; onQc:(id:string)=>void; canQc:boolean;
+  onLinkShipment:(id:string)=>void; onUnlinkShipment:(id:string)=>void;
 }) {
   const f = state.fulfillment, returned = isReturn(stock), current = stockState(state, stock), out = stockOutstanding(state, stock), domain = domainOf(state, stock);
   const purchase = f.purchases.find(row => row.id === stock.purchaseId), receipt = f.receipts.find(row => row.id === stock.receiptId);
@@ -229,7 +232,7 @@ function StockDetail({ stock, state, can, locked, canClaims, canQc, onMove, onSc
     {(!isRepair||!repair&&!dispatch&&!unrecorded)&&<Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>}
     <ActionBar busy={locked} actions={[
       { label: '登记出库', icon: PackageMinus, onClick: () => onMove('issue'), primary: !returned && stock.available > 0, reason: writeReason || (returned ? returnedReason : stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
-      { label: '按原出库退回', icon: Undo2, onClick: () => onMove('return'), primary: !returned && stock.available <= 0 && openIssues.length > 0, reason: writeReason || (!openIssues.length ? '没有未归还的出库' : false), hidden: returned },
+      { label: '按原出库退回', icon: Undo2, onClick: () => onMove('return'), primary: !returned && stock.available <= 0 && openIssues.some(m=>!m.shipmentLink), reason: writeReason || (!openIssues.some(m=>!m.shipmentLink) ? '没有可退回的出库' : false), hidden: returned },
       { label: '登记移位', icon: ArrowRightLeft, onClick: () => onMove('move'), reason: writeReason || (stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
       {label:'外送维修',onClick:onDispatch,hidden:!isRepair||!record||!!record.releasedRepairId||!!dispatch||!!unrecorded||!!repair&&!repair.qc||!can,reason:!claimOpen?'来源案件已结束':false},
       {label:'送修返库',onClick:onRepairReturn,primary:true,hidden:!isRepair||!record||!dispatch||!can,reason:!claimOpen?'来源案件已结束':false},
@@ -259,12 +262,13 @@ function StockDetail({ stock, state, can, locked, canClaims, canQc, onMove, onSc
         <div className="mist-row">{can&&!m.quarantineTaskId&&!m.quarantineDisposition&&<Button disabled={locked} onClick={()=>onInspect(m.id)}>{uiText('送复检')}</Button>}{m.quarantineTaskId&&canQc&&<Button variant="quiet" onClick={()=>onQc(m.quarantineTaskId!)}>{uiText('查看复检')}</Button>}{can&&!m.quarantineDisposition&&report?.result==='pass'&&<Button disabled={locked} onClick={()=>onRelease(m.id)}>{uiText('恢复可用')}</Button>}</div>
       </div>;})}
     </DetailBlock>}
-    {openIssues.length > 0 && <DetailBlock title={uiText("出库去向 · 可按原出库退回")}>
+    {openIssues.length > 0 && <DetailBlock title={uiText("出库去向")}>
       <DataTable ariaLabel={uiText("出库去向")} rows={openIssues} rowKey={movement => movement.id} columns={[
         { key: 'who', header: '接收方', render: movement => movement.person },
         { key: 'where', header: '交接地点', hideOnMobile: true, render: movement => movement.location },
         { key: 'when', header: '出库日', hideOnMobile: true, render: movement => shortWhen(movement.at) },
-        { key: 'left', header: '可退回', align: 'right', render: movement => `${stockIssueRemaining(state, movement.id)} ${stock.unit}` },
+        { key: 'left', header: '出库净量', align: 'right', render: movement => `${stockIssueRemaining(state, movement.id)} ${stock.unit}` },
+        { key: 'shipment', header: '出运', render: movement => {const ship=f.shipments.find(s=>s.id===movement.shipmentLink?.shipmentId);return movement.shipmentLink ? <span>{ship?.code||'已关联出运'}{can&&ship&&ship.state!=='departed'&&ship.state!=='cancelled'&&<Button size="sm" disabled={locked} onClick={()=>onUnlinkShipment(movement.id)}>{uiText('解除')}</Button>}</span> : !movement.materialDelivery&&!returned&&can&&state.productions.some(p=>p.sourcePurchaseId===stock.purchaseId&&p.orderId===stock.orderId&&p.lineId===stock.lineId)&&f.shipments.some(s=>s.state!=='cancelled'&&s.lines.some(l=>l.orderId===stock.orderId&&l.lineId===stock.lineId&&state.productions.some(p=>p.id===l.productionId&&p.sourcePurchaseId===stock.purchaseId))) ? <Button size="sm" disabled={locked} onClick={()=>onLinkShipment(movement.id)}>{uiText('关联出运')}</Button> : '—'; } },
       ]} />
     </DetailBlock>}
     {record && <DetailBlock title={uiText("收货与处置凭据")}><RecordFiles ids={[...record.fileIds, ...(record.disposal?.fileIds || [])]} /></DetailBlock>}
