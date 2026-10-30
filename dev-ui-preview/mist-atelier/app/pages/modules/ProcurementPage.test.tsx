@@ -52,6 +52,14 @@ it('recognizes counted direct deliveries while keeping rejected goods awaiting r
 beforeEach(()=>{session.id='buyer';session.denied=new Set();store.state=createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T10:00:00Z',actorName:'经办人'},'empty');store.state.orders.push({id:'o',code:'SO-1',type:'garment',customerId:'c',currency:'USD'} as any);store.state.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',img:'coat',qty:100,unit:'件',price:10,made:0,qc:0});store.run.mockReset();store.run.mockResolvedValue({result:{}});go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();vi.useRealTimers();});
 
+it('shows isolated stock disposal on its source purchase only to an inventory reader',()=>{
+  store.state!.fulfillment.purchases.push(purchase('p1',approved()));
+  store.state!.fulfillment.stock.push({id:'lot',purchaseId:'p1',orderId:'o',lineId:'l'} as any);
+  store.state!.fulfillment.stockMovements.push({id:'ret',stockId:'lot',kind:'return',quarantinedQuantity:2,quarantineDisposition:{decision:'supplierReturn',actor:'仓库',at:'2026-10-13',evidence:'供应商已签收'}} as any);
+  render('p1');expect(host.textContent).toContain('退供应商 2 个');expect(host.textContent).toContain('供应商已签收');expect(host.textContent).toContain('采购结算待核对');
+  session.denied.add('inventory:read');render('p1');expect(host.textContent).not.toContain('供应商已签收');
+});
+
 it('offers garment supplies and processing without a fabric purchase shortcut',async()=>{
   store.state!.orders.push({id:'fabric-order',code:'SO-F',type:'fabric',currency:'CNY'} as any);
   store.state!.orderLines.push({id:'fabric-line',orderId:'fabric-order',name:'斜纹',style:'FB',qty:100,unit:'米',price:10} as any);

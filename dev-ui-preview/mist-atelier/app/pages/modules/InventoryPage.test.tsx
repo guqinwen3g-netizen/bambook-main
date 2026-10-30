@@ -79,6 +79,15 @@ it('explains blocked movements and records a return against the original issue i
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.move',payload:expect.objectContaining({id:'gone',kind:'return',quantity:20,issueId:'m1',note:'工厂退回余料实点'})});
 });
 
+it('distinguishes same-person same-quantity issues by their recorded handover evidence',async()=>{
+  store.state!.fulfillment.stock.push(stock('gone',{available:0}));
+  store.state!.fulfillment.stockMovements.push(movement('a','gone','issue',2,{note:'批次 A',at:'2026-10-11T08:00:00Z'}),movement('b','gone','issue',2,{note:'批次 B',at:'2026-10-11T08:01:00Z'}));
+  render('gone');await click(getByRole(host,'button',{name:'按原出库退回'}));
+  const select=getByRole(document.body,'combobox',{name:'原出库'}) as HTMLSelectElement;
+  expect([...select.options].find(o=>o.value==='a')?.textContent).toContain('批次 A');
+  expect([...select.options].find(o=>o.value==='b')?.textContent).toContain('批次 B');
+});
+
 it('links an existing stock issue to its exact shipment with a required evidence field',async()=>{
   store.state!.fulfillment.stock.push(stock('gone',{available:0}));
   store.state!.fulfillment.stockMovements.push(movement('m1','gone','issue',100));
@@ -126,6 +135,29 @@ it('starts inspection for the exact isolated return and requires its passing rep
   const dialog=getByRole(document.body,'dialog',{name:'隔离料送复检'});await click(getByRole(dialog,'button',{name:'发起复检'}));
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.quarantine.request',payload:{returnId:ret,due:expect.any(String)}});
   expect(queryByRole(host,'button',{name:'恢复可用'})).toBeNull();
+});
+
+it('shows failed quarantine disposal choices and records their evidence on the exact return',async()=>{
+  const f=materialDeliveryFixture(20); f.context.members!.push({id:'qc',name:'QC',active:true,groups:[]});const id=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  const ret=f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:4,location:'Hold A',person:'factory',note:'Rejected'}}).id!;
+  const task=f.run({type:'fulfillment.inventory.quarantine.request',payload:{returnId:ret,due:'2026-10-24'}}).id!;
+  f.run({type:'fulfillment.qc.claim',payload:{id:task,domain:'fabric'}},'qc');
+  f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'fabric',result:'reject',report:'FAIL-1',opinion:'Defect',location:'Hold A',reviewedAt:f.context.now,measurements:[],fileIds:[]}},'qc');
+  store.state=f.state;render(f.state.fulfillment.stock[0].id);
+  expect(getByRole(host,'button',{name:'报废'})).toBeTruthy();await click(getByRole(host,'button',{name:'退供应商'}));
+  const dialog=getByRole(document.body,'dialog',{name:'登记退供应商'});typeInto(getByRole(dialog,'textbox',{name:'供应商接收依据'}) as HTMLTextAreaElement,'模拟供应商确认收回');await click(getByRole(dialog,'button',{name:'确认登记'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:ret,decision:'supplierReturn',evidence:'模拟供应商确认收回'}});
+});
+
+it('allows an evidence-based correction of a departed link while displaying the original record',async()=>{
+  store.state!.fulfillment.stock.push(stock('gone',{available:0}));
+  store.state!.fulfillment.stockMovements.push(movement('m1','gone','issue',100,{shipmentLink:{shipmentId:'s',productionId:'p',evidence:'原依据',actor:'经办人',at:'2026-10-12'}}));
+  store.state!.productions.push({id:'p',sourcePurchaseId:'po',orderId:'og',lineId:'lg'} as any);
+  store.state!.fulfillment.shipments.push({id:'s',code:'SHP-1',state:'departed',lines:[{orderId:'og',lineId:'lg',productionId:'p',quantity:100}]} as any);
+  render('gone');await click(getByRole(host,'button',{name:'更正'}));const dialog=getByRole(document.body,'dialog',{name:'更正已离港关联'});
+  typeInto(getByRole(dialog,'textbox',{name:'更正原因'}) as HTMLTextAreaElement,'补充核对信息');typeInto(getByRole(dialog,'textbox',{name:'核对依据'}) as HTMLTextAreaElement,'复核交接单');await click(getByRole(dialog,'button',{name:'确认更正'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.shipment.correct',payload:{issueId:'m1',shipmentId:'s',reason:'补充核对信息',evidence:'复核交接单'}});
 });
 
 it('stays readable without inventory authority and says why movements are unavailable',()=>{
