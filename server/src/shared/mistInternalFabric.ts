@@ -11,10 +11,12 @@ export type GarmentFulfillmentFields = { fulfillmentMode?: GarmentFulfillmentMod
 export type InternalSupply = { group: 'garment'; receiverId: string };
 export type InternalFabricContext = Pick<MistContext, 'members' | 'actorId' | 'actorName'>;
 type AllocationFact = { fabricOrderId: string; fabricLineId: string; metres: string; status: 'active' | 'cancelled'; revision: number; updatedAt: string; updatedBy: string; updatedByName: string };
-export type MistInternalFabricAllocation = AllocationFact & { id: string; orderId: string; lineId: string; history: AllocationFact[] };
+type InternalShortClosure = { quantity:string; accepted:string; reason:string; at:string; actorId:string; actor:string };
+export type MistInternalFabricAllocation = AllocationFact & { id: string; orderId: string; lineId: string; history: AllocationFact[]; shortClosure?:InternalShortClosure; shortHistory?:InternalShortClosure[] };
 export type InternalFabricCommand =
   | { type: 'order.fabric.allocate'; payload: { orderId: string; lineId: string; fabricOrderId: string; fabricLineId: string; metres: string; expectedRevision: number } }
-  | { type: 'order.fabric.cancel'; payload: { id: string; expectedRevision: number } };
+  | { type: 'order.fabric.cancel'; payload: { id: string; expectedRevision: number } }
+  | { type: 'order.fabric.shortClose'; payload: { id:string; expectedRevision:number; reason:string } };
 export type InternalFabricCandidate = { fabricOrderId: string; fabricLineId: string; orderCode: string; lineName: string; quantity: string; allocated: string; remaining: string };
 /** A physical delivery keeps its destination and allocation revision even when master data changes later. */
 export type MaterialDeliveryLink = {
@@ -48,6 +50,11 @@ function quantityMinor(value: unknown): bigint {
   const [whole, decimal = ''] = String(value).split('.');
   return BigInt(whole) * BigInt(10000) + BigInt(decimal.padEnd(4, '0'));
 }
+export function effectiveInternalMetres(row: MistInternalFabricAllocation): string {
+  const effective=metresMinor(row.metres)-quantityMinor(row.shortClosure?.quantity || 0);
+  if(effective<BigInt(0)) fail('短结数量超过原分配');
+  return metresText(effective);
+}
 function lineFor(root: MistState, orderId: string, lineId: string) {
   const order = root.orders.find(row => row.id === orderId), line = root.orderLines.find(row => row.id === lineId && row.orderId === orderId);
   if (!order || !line) fail('订单条目不存在', 'NOT_FOUND');
@@ -69,7 +76,7 @@ export function normalizeInternalSupply(contract: OrderGovernanceInput, order: P
   return { ...contract, internalSupply: { group: 'garment', receiverId: receiver.id }, receiver: `成衣 / ${receiver.name}` };
 }
 function allocatedMinor(root: MistState, fabricLineId: string, excludeTargetLineId?: string) {
-  return (root.internalFabricAllocations || []).filter(row => row.status === 'active' && row.fabricLineId === fabricLineId && row.lineId !== excludeTargetLineId).reduce((sum, row) => sum + metresMinor(row.metres), BigInt(0));
+  return (root.internalFabricAllocations || []).filter(row => row.status === 'active' && row.fabricLineId === fabricLineId && row.lineId !== excludeTargetLineId).reduce((sum, row) => sum + quantityMinor(effectiveInternalMetres(row)), BigInt(0));
 }
 export function internalFabricRemaining(root: MistState, fabricLineId: string, excludeTargetLineId?: string): string {
   const line = root.orderLines.find(row => row.id === fabricLineId); if (!line) fail('面料条目不存在', 'NOT_FOUND');
@@ -108,7 +115,7 @@ export function assertGarmentMaterial(root: MistState, orderId: string, lineId: 
   if(finished.length){if(!finished.some(p=>p.state==='approved'))fail('全包成品采购尚未批准');return;}
   resolveMember(context, order.ownerId, '成衣负责人', 'garment');
   if (rows.length !== 1 || rows[0].orderId !== orderId) fail(mode.fulfillmentMode === 'full_package' ? '全包条目须先分配内部面料' : '请先分配内部面料');
-  const row = rows[0]; supplyFor(root, row.fabricOrderId, row.fabricLineId, context); metresMinor(row.metres);
+  const row = rows[0]; supplyFor(root, row.fabricOrderId, row.fabricLineId, context); if (metresMinor(row.metres) - quantityMinor(row.shortClosure?.quantity || 0) <= BigInt(0)) fail('内部面料已短结，暂无实收');
 }
 /** A PP sample records the approved material plan it was made against; later changes cannot reuse that proof. */
 export function garmentMaterialFingerprint(root: MistState, orderId: string, lineId: string): string {
@@ -123,7 +130,7 @@ export function garmentMaterialFingerprint(root: MistState, orderId: string, lin
   const fabric = source.line as MistOrderLine & Partial<OrderGovernanceLine>;
   // Price, payment and source capacity changes do not alter the physical sample.
   // Fresh approval, membership and remaining capacity are checked separately at every gate.
-  return JSON.stringify({mode:line.fulfillmentMode,included:line.cmtIncludedItems,allocationId:allocation!.id,revision:allocation!.revision,metres:allocation!.metres,sourceOrderId:source.order.id,sourceLineId:source.line.id,fabric:{name:fabric.name,style:fabric.style,unit:fabric.unit,sourceProductId:fabric.sourceProductId,sourceDevId:fabric.sourceDevId,sourceVersionId:fabric.sourceVersionId,breakdown:fabric.breakdown}});
+  return JSON.stringify({mode:line.fulfillmentMode,included:line.cmtIncludedItems,allocationId:allocation!.id,revision:allocation!.revision,metres:allocation!.metres,...(allocation!.shortClosure?{shortClosed:allocation!.shortClosure.quantity}:{}),sourceOrderId:source.order.id,sourceLineId:source.line.id,fabric:{name:fabric.name,style:fabric.style,unit:fabric.unit,sourceProductId:fabric.sourceProductId,sourceDevId:fabric.sourceDevId,sourceVersionId:fabric.sourceVersionId,breakdown:fabric.breakdown}});
 }
 export function garmentMaterialBlocker(root: MistState, orderId: string, lineId: string, context: InternalFabricContext): string {
   try { assertGarmentMaterial(root, orderId, lineId, context); return ''; } catch (error) { if (error instanceof MistCommandError) return error.message; throw error; }
@@ -175,15 +182,35 @@ export function assertInternalFabricOrderChange(root: MistState, order: MistOrde
   }
 }
 export function internalFabricCommandPermission(command: InternalFabricCommand) {
-  if (command.type !== 'order.fabric.allocate' && command.type !== 'order.fabric.cancel') fail('未知面料分配操作', 'VALIDATION');
+  if (command.type !== 'order.fabric.allocate' && command.type !== 'order.fabric.cancel' && command.type !== 'order.fabric.shortClose') fail('未知面料分配操作', 'VALIDATION');
   return 'orders:write';
 }
 export function applyInternalFabricCommand(root: MistState, command: InternalFabricCommand, context: MistContext): MistCommandResult {
   internalFabricCommandPermission(command); actorGroup(context, 'garment');
   const rows = root.internalFabricAllocations || (root.internalFabricAllocations = []);
+  if (command.type === 'order.fabric.shortClose') {
+    const row=rows.find(value=>value.id===identity(command.payload.id,'面料分配'));
+    if (!row || row.status!=='active') fail('有效面料分配不存在');
+    const target=lineFor(root,row!.orderId,row!.lineId);assertOrderWritable(target.order);assertOrderLineOpen(target.line);
+    if (target.order.ownerId!==context.actorId) fail('仅当前成衣负责人可确认不补发','FORBIDDEN');
+    if (target.order.governance?.status==='pending' || target.order.governance?.changeDraft?.status==='pending') fail('审批中不能短结');
+    if (row!.revision!==revision(command.payload.expectedRevision)) fail('分配已变化，请刷新','CONFLICT');
+    const deliveries=materialDeliveryRows(root).filter(item=>item.delivery.allocationId===row!.id);
+    if (!deliveries.length || deliveries.some(item=>item.pending!=='0' || quantityMinor(item.outstanding)!==quantityMinor(item.accepted))) fail('请先完成全部点收并实际退回拒收料');
+    const accepted=deliveries.reduce((sum,item)=>sum+quantityMinor(item.accepted),BigInt(0)), short=metresMinor(row!.metres)-accepted;
+    if(short<=BigInt(0)) fail('没有需要短结的数量');
+    if(row!.shortClosure && short<=quantityMinor(row!.shortClosure.quantity)) fail('没有新增待短结数量');
+    const reason=typeof command.payload.reason==='string'?command.payload.reason.trim():'';
+    if(!reason || reason.length>1000) fail('请填写不补发依据','VALIDATION');
+    if(row!.shortClosure)(row!.shortHistory ||= []).push(row!.shortClosure);
+    row!.shortClosure={quantity:metresText(short),accepted:metresText(accepted),reason,at:context.now,actorId:context.actorId!,actor:context.actorName};
+    root.events.unshift({id:context.id(),entityType:'order',entityId:target.order.id,actor:context.actorName,at:context.now,text:`内部面料短结 ${metresText(short)} 米：${reason}`,fileIds:[]});
+    return {id:row!.id,orderId:row!.orderId,lineId:row!.lineId};
+  }
   if (command.type === 'order.fabric.cancel') {
     const input = command.payload, row = rows.find(value => value.id === identity(input.id, '面料分配'));
     if (!row || row.status !== 'active') fail('有效分配不存在', 'NOT_FOUND');
+    if (row!.shortClosure) fail('已短结的分配不能取消');
     if (materialDeliveryRows(root).some(item => item.delivery.allocationId === row!.id && item.outstanding !== '0')) fail('面料已实际交接，请先按原交接退回');
     const target = lineFor(root, row!.orderId, row!.lineId); assertOrderWritable(target.order); assertOrderLineOpen(target.line);
     if (target.order.governance?.status === 'pending' || target.order.governance?.changeDraft?.status === 'pending') fail('审批中不能调整面料分配');
@@ -204,6 +231,7 @@ export function applyInternalFabricCommand(root: MistState, command: InternalFab
   const found = rows.filter(row => row.lineId === target.line.id); if (found.length > 1) fail('分配记录冲突');
   if (typeof input.metres !== 'string') fail('米数须按十进制填写', 'VALIDATION');
   const row = found[0], expected = revision(input.expectedRevision), metres = normalizeInternalMetres(input.metres);
+  if (row?.shortClosure) fail('已短结的分配不能改配');
   if (row && materialDeliveryRows(root).some(item => item.delivery.allocationId === row.id && item.outstanding !== '0')) fail('面料已实际交接，不能改配');
   if ((row?.revision || 0) !== expected) fail('分配已变化，请刷新', 'CONFLICT');
   if (allocatedMinor(root, supply.line.id, target.line.id) + metresMinor(metres) > metresMinor(supply.line.qty)) fail('分配米数超过可用余量');
@@ -270,7 +298,7 @@ export function materialDeliveryTargets(root: MistState, purchaseId: string): Ar
     let remaining: string | undefined;
     if (internal) {
       const allocation = root.internalFabricAllocations?.find(a => a.status === 'active' && a.orderId === branch.orderId && a.lineId === branch.lineId && a.fabricOrderId === p.orderId && a.fabricLineId === p.lineId);
-      if (!allocation) return [];
+      if (!allocation || allocation.shortClosure) return [];
       const used = materialDeliveryRows(root).filter(r => r.delivery.allocationId === allocation.id && r.outstanding !== '0').reduce((sum, r) => sum + metresMinor(r.outstanding), BigInt(0));
       const available = metresMinor(allocation.metres) - used; if (available <= BigInt(0)) return [];
       remaining = metresText(available);
@@ -298,6 +326,7 @@ export function prepareMaterialDelivery(root: MistState, purchaseId: string, pro
     supplyFor(root, source.order.id, source.line.id, ctx);
     allocation = root.internalFabricAllocations?.find(a => a.status === 'active' && a.orderId === target.order.id && a.lineId === target.line.id && a.fabricOrderId === source.order.id && a.fabricLineId === source.line.id);
     if (!allocation) return fail('加工分支与内部面料分配不一致');
+    if (allocation.shortClosure) return fail('本批内部面料已短结，不再补发');
     normalizeGarmentFulfillment(target.line);
     if (!['米', 'm', 'metre', 'metres', 'meter', 'meters'].includes(p.unit.trim().toLowerCase())) return fail('供料须按米数登记');
     const delivered = materialDeliveryRows(root).filter(row => row.delivery.allocationId === allocation!.id).reduce((sum, row) => sum + (row.outstanding === '0' ? BigInt(0) : metresMinor(row.outstanding)), BigInt(0));
@@ -362,6 +391,7 @@ export function assertMaterialReturnReversal(root: MistState, receiptId: string,
   if (restored <= BigInt(0) || !row.delivery.allocationId) return;
   const allocation = root.internalFabricAllocations?.find(value => value.id === row.delivery.allocationId && value.status === 'active' && value.revision === row.delivery.allocationRevision);
   if (!allocation) return fail('原面料分配已变化，不能冲回退换');
+  if (allocation.shortClosure) return fail('原面料已短结，不能冲回退换');
   const used = rows.filter(value => value.delivery.allocationId === allocation.id).reduce((sum, value) => sum + quantityMinor(value.outstanding), BigInt(0));
   if (used + restored > metresMinor(allocation.metres)) return fail('冲回退换将超过面料分配数量，请先核对后续补发');
 }

@@ -70,3 +70,15 @@ it('keeps warehouse disposition and independent QC reporting under their respect
   await repo.execute(testActor(),workspaceId,release);
   expect(state().fulfillment.stock[0]).toMatchObject({available:84.3,locked:0});
 });
+
+it('requires the current garment owner and replays an approved short close once',async()=>{
+  f=materialDeliveryFixture(20);const sent=f.issue(20);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id:sent,acceptedQuantity:16,rejectedQuantity:4,expectedReceivingRevision:0,evidence:'Counted'}},'garment');
+  f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:sent,quantity:4,location:'Hold A',person:'factory',note:'Returned'}});
+  db.workspaces.get(workspaceId).state=structuredClone(f.state);
+  const command={requestId:'short-close',expectedRevision:0,command:{type:'order.fabric.shortClose' as const,payload:{id:f.state.internalFabricAllocations![0].id,expectedRevision:1,reason:'No replacement'}}};
+  await expect(repo.execute(testActor('warehouse'),workspaceId,command)).rejects.toMatchObject({status:403});
+  await repo.execute(testActor('garment'),workspaceId,command);
+  expect((await repo.execute(testActor('garment'),workspaceId,command)).replayed).toBe(true);
+  expect(state().internalFabricAllocations![0].shortClosure).toMatchObject({quantity:'4',accepted:'16',actorId:'garment'});
+});
