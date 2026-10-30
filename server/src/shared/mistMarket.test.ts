@@ -126,6 +126,9 @@ describe('market action audit regressions',()=>{
   expect(s.market.quotations[0].lines[0]).toMatchObject({sourceDevId:v.devId,sourceVersionId:v.id});
   run(s,{type:'market.quotation.submit',payload:{id}},ctx);run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'已核对'}},{...ctx,actorId:'leader'});run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'已交付'}},ctx);run(s,{type:'market.quotation.status',payload:{id,status:'Accepted',evidence:'已接受'}},ctx);
   expect(()=>run(s,{type:'market.quotation.convert',payload:{id,type:'fabric',due:'2026-12-01',ownerId:'sales'}},ctx)).toThrow(/类型与报价来源/);
+  expect(()=>run(s,{type:'market.quotation.convert',payload:{id,type:'garment',due:'2026-12-01',ownerId:'sales'}},ctx)).toThrow(/尚无需求方确认|尚未获得需求方认可/);
+  s.devs.find(d=>d.id===v.devId)!.customerId=s.market.quotations[0].customerId; // 来源开发案须属于订单客户
+  v.confirmations=[{id:'cf',result:'approved',confirmer:'客户',organization:'',confirmedAt:ctx.now,basis:'邮件',originalText:'',recordedAt:ctx.now,recordedBy:'业务员'}];
   const order=run(s,{type:'market.quotation.convert',payload:{id,type:'garment',due:'2026-12-01',ownerId:'sales'}},ctx);expect(s.orderLines.find(l=>l.orderId===order.orderId)).toMatchObject({sourceVersionId:v.id,sourceDevId:v.devId});
  });
  it('does not rebind a linked customer relation to a different customer',()=>{

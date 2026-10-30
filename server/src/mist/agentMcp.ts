@@ -14,7 +14,7 @@ import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_OBJECT_TYPES, agentGet, agentQuery, agentRelated } from './agentRead';
 
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
-type CatalogEntry = { type: string; payload: string; source: string };
+type CatalogEntry = (typeof MIST_COMMAND_CATALOG)[number];
 const COMMANDS = new Map<string, CatalogEntry>(MIST_COMMAND_CATALOG.map(entry => [entry.type, entry]));
 
 const CONFIRM_PREFIXES = ['payable.', 'finance.', 'funding.', 'fxrate.', 'lc.', 'rebate.', 'opening.', 'platform.credit.', 'platform.invoice.issue', 'platform.claim.recovery.', 'platform.pricingParams.', 'platform.employee.', 'market.supplier.bank.', 'settings.', 'member.', 'teamScope.', 'handover.', 'email.server.'];
@@ -46,7 +46,7 @@ const TOOLS = [
   { name: 'bambook_query', description: '按对象类型和关键词查找业务对象（客户、订单、采购合同、出运等），结果已按当前账号权限和数据范围裁剪。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, q: str('关键词，可选'), limit: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['workspaceId'] }, annotations: { readOnlyHint: true } },
   { name: 'bambook_get', description: '读取一个业务对象的详情。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, id: str('对象 id') }, required: ['workspaceId', 'type', 'id'] }, annotations: { readOnlyHint: true } },
   { name: 'bambook_related', description: '展开一个业务对象的关联对象（如合同的收货、结算、票据）。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, id: str('对象 id') }, required: ['workspaceId', 'type', 'id'] }, annotations: { readOnlyHint: true } },
-  { name: 'bambook_commands', description: '列出可用的业务命令、payload 结构，以及是否须本人确认（confirm）。', inputSchema: { type: 'object', properties: { prefix: str('按命令前缀筛选，如 payable. 或 fulfillment.') } }, annotations: { readOnlyHint: true } },
+  { name: 'bambook_commands', description: '列出可用的业务命令、payload 结构，以及是否须本人确认（confirm）。', inputSchema: { type: 'object', properties: { prefix: str('按命令前缀筛选，如 payable. 或 fulfillment.；带前缀时附上 payload 引用的类型定义（types）') } }, annotations: { readOnlyHint: true } },
   { name: 'bambook_preview', description: '预演一条命令：执行全部权限与业务校验后回滚，返回将产生的结果和业务事件，不保存任何数据。执行前先预演。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema }, required: ['workspaceId', 'command'] }, annotations: { readOnlyHint: true } },
   { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, requestId: str('幂等请求编号，可选；同一编号重复调用只执行一次') }, required: ['workspaceId', 'command'] }, annotations: { destructiveHint: false, idempotentHint: true } },
 ];
@@ -69,7 +69,7 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
     case 'bambook_related': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { object: agentRelated(workspace.state, current, args.type, args.id) }; }
     case 'bambook_commands': {
       const prefix = typeof args.prefix === 'string' ? args.prefix : '';
-      return { commands: [...COMMANDS.values()].filter(c => c.type.startsWith(prefix)).map(c => ({ type: c.type, payload: c.payload, via: agentCommandSensitivity(c.type) })) };
+      return { commands: [...COMMANDS.values()].filter(c => c.type.startsWith(prefix)).map(c => ({ type: c.type, payload: c.payload, ...(prefix && c.types ? { types: c.types } : {}), via: agentCommandSensitivity(c.type) })) };
     }
     case 'bambook_preview': case 'bambook_execute': {
       if (!canOperate(actor)) throw new ToolInputError('当前是只读委托；预演和执行需要用户在页面上签发“可办理”委托');

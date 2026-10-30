@@ -36,6 +36,21 @@ describe('BB-QUO-4 转订单须开发版本已获需求方认可',()=>{
   const detail=s.market.quotations.find(q=>q.id===id)!.approval!.details.find(d=>d.label.startsWith(dev.name))!;
   expect(detail.value).toContain(`来源 开发 ${dev.code} / ${v.label}`);expect(detail.value).not.toContain(v.id);
  });
+ it('product archive lines sourced from an unconfirmed version are blocked like the order submit check',()=>{
+  const {ctx,s}=setup(),v=s.versions.find(x=>!x.archivedAt)!,dev=s.devs.find(d=>d.id===v.devId)!,fabric=developmentDomain(dev.values)==='fabric';v.confirmations=[];
+  const p=run(s,{type:'market.product.save',payload:{input:{sku:'P-Q4S',name:dev.name,category:fabric?'fabric':'garment',season:'AW26',supplierId:'',supplierCode:'',composition:'棉',specification:'规格',color:'蓝',unit:fabric?'米':'件',cost:'1.00',currency:'USD',sourceDevId:dev.id,sourceVersionId:v.id}}},ctx).id!;
+  const customerId=dev.customerId||s.customers[0].id;const id=run(s,{type:'market.quotation.save',payload:{input:{customerId,currency:'USD',season:'AW26',validUntil:'2026-11-01',deliveryTerms:'FOB',paymentTerms:'T/T',lines:[{productId:p,sourceDevId:'',sourceVersionId:'',name:dev.name,style:'P-Q4S',specification:'规格',qty:'3',unit:fabric?'米':'件',price:'2.00',cost:'1.00'}]}}},ctx).id!;
+  run(s,{type:'market.quotation.submit',payload:{id}},ctx);if(s.market.quotations.find(q=>q.id===id)!.approval?.status==='pending')run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'ok'}},{...ctx,actorId:'leader'});
+  run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'交付'}},ctx);run(s,{type:'market.quotation.status',payload:{id,status:'Accepted',evidence:'接受'}},ctx);
+  expect(()=>convert(s,ctx,id,fabric?'fabric':'garment')).toThrow(new RegExp(`${v.label}.*尚无需求方确认`));
+ });
+ it('rejects converting a line whose source development belongs to another customer, before an order is created',()=>{
+  const {ctx,s}=setup(),v=s.versions.find(x=>!x.archivedAt)!,dev=s.devs.find(d=>d.id===v.devId)!;
+  v.confirmations=[{id:'cf',result:'approved',confirmer:'客户',organization:'',confirmedAt:ctx.now,basis:'邮件',originalText:'',recordedAt:ctx.now,recordedBy:'业务员'}];
+  const {id,type}=acceptedVersionQuote(s,ctx,v.id);dev.customerId='someone-else';const orders=s.orders.length;
+  expect(()=>convert(s,ctx,id,type)).toThrow(/属于其他客户.*不能转订单/);
+  expect(s.orders).toHaveLength(orders);
+ });
  it('does not restrict product archive lines',()=>{
   const {ctx,s}=setup();const p=run(s,{type:'market.product.save',payload:{input:{sku:'P-Q4',name:'面料',category:'fabric',season:'AW26',supplierId:'',supplierCode:'',composition:'棉',specification:'150cm',color:'蓝',unit:'米',cost:'1.00',currency:'USD',sourceDevId:'',sourceVersionId:''}}},ctx).id!;
   const customerId=s.customers[0].id;const id=run(s,{type:'market.quotation.save',payload:{input:{customerId,currency:'USD',season:'AW26',validUntil:'2026-11-01',deliveryTerms:'FOB',paymentTerms:'T/T',lines:[{productId:p,sourceDevId:'',sourceVersionId:'',name:'面料',style:'P-Q4',specification:'150cm',qty:'3',unit:'米',price:'2.00',cost:'1.00'}]}}},ctx).id!;

@@ -49,6 +49,9 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const commands = (await tool('bambook_commands', { prefix: 'payable.settlement.' })).structuredContent.commands;
     expect(commands.find((c: any) => c.type === 'payable.settlement.submit')).toMatchObject({ via: 'normal' });
     expect(commands.find((c: any) => c.type === 'payable.settlement.confirm')).toMatchObject({ via: 'confirm' });
+    const governance = (await tool('bambook_commands', { prefix: 'order.governance.saveDraft' })).structuredContent.commands[0];
+    expect(governance.types?.OrderGovernanceInput).toContain('quantityBasisNote');
+    expect((await tool('bambook_commands', {})).structuredContent.commands.some((c: any) => c.types)).toBe(false);
     const command = { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id], note: '首批实收结算' } };
     const preview = (await tool('bambook_preview', { workspaceId: workspace.id, command })).structuredContent;
     expect(preview.events.join('')).toContain('实收 2380 米 · 110,670.00 CNY');
