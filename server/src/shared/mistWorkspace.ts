@@ -56,7 +56,7 @@ export type MistContext = {
   can?: (scope: string) => boolean;
   consumeBusinessNumber?: (prefix: MistBusinessNumberPrefix) => string;
   /** 服务端按委托身份设置：本次写入经 Agent 发起；领域处理据此限制 Agent 提议的创建与处理。 */
-  viaAgent?: boolean; agentSessionId?: string;
+  viaAgent?: boolean; agentSessionId?: string; agentIdentity?:{id:string;name:string};
   creditDocumentIssue?: MistCreditDocumentIssue;
   /** 服务端按本次执行时的所有者、授权成员、账号状态与业务组构建（包 A）；负责人/经手人只能从这里按账号 ID 选，缺省一律拒绝。 */
   members?: MistMemberDirectoryEntry[];

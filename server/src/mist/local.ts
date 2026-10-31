@@ -48,7 +48,7 @@ export class MistLocalDatabase{
       findUnique:async({where}:any)=>{const pair=where.workspaceId_requestId;if(!pair)invalid('本地回执查询无效',500);return clone(store.receipts[JSON.stringify([pair.workspaceId,pair.requestId])]??null);},
       findMany:async(args:any)=>{if(typeof args.where?.workspaceId!=='string')invalid('本地回执查询无效',500);return queryMistReceipts(Object.values(store.receipts),args);},
       create:async({data}:any)=>{const key=JSON.stringify([data.workspaceId,data.requestId]);if(store.receipts[key]||Object.values(store.receipts).some(row=>row.id===data.id))duplicate();store.receipts[key]=clone(data);return clone(data);},
-      updateMany:async({where,data}:any)=>{let count=0;for(const [key,row] of Object.entries(store.receipts))if(queryMistReceipts([row],{where}).length){if(!row.requestId.startsWith('mist-revision:agent-connection:'))invalid('业务回执不可修改',500);store.receipts[key]={...row,...clone(data)};count++;}return{count};},
+      updateMany:async({where,data}:any)=>{let count=0;for(const [key,row] of Object.entries(store.receipts))if(queryMistReceipts([row],{where}).length){if(!['mist-revision:agent-connection:','mist-revision:agent-identity:'].some(prefix=>row.requestId.startsWith(prefix)))invalid('业务回执不可修改',500);store.receipts[key]={...row,...clone(data)};count++;}return{count};},
     },
     businessSequence:{
       findUnique:async({where,select}:any)=>selected(store.businessSequences[where.id]??null,select),
@@ -81,6 +81,7 @@ export const MIST_LOCAL_PROFILES=[
   {id:'demo-sales',name:'顾言',roleId:SYSTEM_ROLE_IDS.SALES,title:'业务员',department:'服装部'},
   {id:'demo-buyer',name:'沈禾',roleId:SYSTEM_ROLE_IDS.SALES,title:'业务员',department:'面料部'},
   {id:'demo-reviewer',name:'周敏',roleId:SYSTEM_ROLE_IDS.SALES_MANAGER,title:'业务主管',department:'服装部'},
+  {id:'demo-admin',name:'陆衡',roleId:SYSTEM_ROLE_IDS.ADMIN,title:'公司管理员',department:'管理部'},
   {id:'demo-qc',name:'许言',roleId:SYSTEM_ROLE_IDS.QC,title:'QC',department:'质检'},
   {id:'demo-warehouse',name:'陈晓',roleId:SYSTEM_ROLE_IDS.LOGISTICS,title:'后勤单证',department:'储运'},
   {id:'demo-finance',name:'林舒',roleId:SYSTEM_ROLE_IDS.FINANCE,title:'财务',department:'财务部'},

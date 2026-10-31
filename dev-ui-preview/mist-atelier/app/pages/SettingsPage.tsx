@@ -5,7 +5,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
  * 旧地址（system-settings / admin-panel 及其分区）仍打开本页对应分区；各分区按本人权限出现，服务端照常复核。
  */
 import React from 'react';
-import { Bell, Briefcase, History, Landmark, Laptop, RefreshCw, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
+import { Bell,Bot, Briefcase, History, Landmark, Laptop, RefreshCw, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
 import { Banner, Button, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { View } from '../../../../types';
@@ -19,12 +19,13 @@ import { AdminAccounts, AdminAuditLog, AdminRoles } from './modules/AdminAccount
 import { AdminApprovalAuthorities } from './modules/AdminApprovalAuthorities';
 import { LocalAdminPanel } from './modules/LocalAdminPanel';
 import { ExporterProfilePanel } from './modules/ExporterProfilePanel';
+import {AgentIdentities} from './AgentIdentities';
 
 type TextKey = 'workspaceName';
 type TextValues = Pick<MistSettings, TextKey>;
 type SettingsPatch = Partial<Omit<MistSettings, 'companyProfile'>> & { companyProfile?: Partial<MistCompanyProfile> };
-export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local';
-const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'access', 'teams', 'notify', 'activity', 'audit', 'local'];
+export type CompanySection = 'accounts' | 'jobs' | 'approvals' | 'profile' | 'access' | 'teams' | 'notify' | 'activity' | 'audit' | 'local'|'agents';
+const SECTIONS: CompanySection[] = ['accounts', 'jobs', 'approvals', 'profile', 'access', 'teams', 'notify', 'activity', 'audit', 'local','agents'];
 /** 旧页面与分区地址 → 公司管理分区。 */
 export function companySection(view: string, section?: string, id?: string): CompanySection | undefined {
   if (section && (SECTIONS as string[]).includes(section)) return section as CompanySection;
@@ -102,6 +103,7 @@ export function SettingsPage() {
     settingsAccess && { id: 'profile', label: '公司资料', icon: Landmark },
     settingsAccess && !platformCompany && { id: 'access', label: '数据访问', icon: ShieldCheck },
     settingsAccess && !platformCompany && !local && session.hasPermission('hr:write') && { id: 'teams', label: '小组范围', icon: UsersRound },
+    (session.hasPermission('users:write')||local&&access?.role==='owner')&&{id:'agents',label:'Agent服务',icon:Bot},
     settingsAccess && { id: 'notify', label: '通知', icon: Bell },
     settingsAccess && !member && { id: 'activity', label: '设置记录', icon: History },
     manager && !scoped && { id: 'audit', label: '审计日志', icon: ScrollText },
@@ -122,6 +124,7 @@ export function SettingsPage() {
         <div className="mist-col" style={{ minWidth: 0 }}>
           {sec === 'accounts' && <AdminAccounts />}
           {sec === 'jobs' && <AdminRoles />}
+          {sec==='agents'&&<Card><FormSection title={uiText('Agent服务身份')}><AgentIdentities management/></FormSection></Card>}
           {sec === 'approvals' && <AdminApprovalAuthorities />}
           {sec === 'audit' && <AdminAuditLog />}
           {sec === 'local' && <LocalAdminPanel embedded />}

@@ -28,7 +28,7 @@ export function AgentProposalDialog({ proposal, onClose, run, onDone }: {
     <div className="mist-col">
       {failure && <Banner tone="bad" title={uiText('没有执行')}>{failure}</Banner>}
       <div className="mist-col" data-agent-proposal-summary>{proposal.summary.map((line, i) => <span key={i}>{line}</span>)}</div>
-      <KeyValue items={[{ label: uiText('提出'), value: `Agent · ${businessDate(proposal.createdAt)}` }, { label: uiText('执行身份'), value: proposal.owner }]} />
+      <KeyValue items={[{ label: uiText('提出'), value: `${proposal.agentIdentity?.name || 'Agent'} · ${businessDate(proposal.createdAt)}` }, { label: uiText('执行身份'), value: proposal.owner }]} />
       <Field label={uiText('拒绝原因')}><TextArea aria-label={uiText('拒绝原因')} rows={2} value={note} onChange={event => setNote(event.target.value)} /></Field>
     </div>
   </Dialog>;

@@ -32,6 +32,7 @@ export type AgentAuditQuery = { scope?: 'mine' | 'company'; actorId?: string; so
 export type AgentAuditEntry = {
   requestId: string; at: string; actor: { id: string; name: string }; source: AgentAuditSource; phase: AgentAuditPhase;
   commandType: string; requestedCommandType: string; label: string; agentSessionId: string | null; proposalId?: string;
+  agentIdentity?:{id:string;name:string};
   requestedRevision: number; baseRevision: number; committedRevision: number;
 };
 export type AgentAuditPage = { items: AgentAuditEntry[]; nextCursor: string | null; canReadCompany: boolean; unavailableCount:number };

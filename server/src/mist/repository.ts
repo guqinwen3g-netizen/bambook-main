@@ -21,6 +21,7 @@ import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
+import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit } from './agentAuditRead';
 import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
@@ -180,6 +181,7 @@ export class MistRepository {
     if (!row || !(companyRow(row) || isOwner(row, actor) || (!ownerOnly && isMember(row, actor)))) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
     if(archived(row)&&!allowArchived)fail('NOT_FOUND','公司已移入回收站，请先恢复',404);
     if(isAgentActor(prior)&&prior.agentLease)await assertConnection(db,actor,prior.agentLease,Date.now());
+    if(isAgentActor(prior)&&prior.agentServiceLease)await assertServiceLease(db,actor,prior.agentServiceLease,Date.now());
     if (lock && captureAuditBefore) ORIGINAL_WRITE_STATE.set(row, structuredClone(row.state));
     if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
@@ -301,12 +303,26 @@ export class MistRepository {
   }
   /** 当前真实执行者（事务内重新加载账号与授权，保留会话自身的权限上限）。 */
   async currentActor(prior:TokenPayload,permission?:string|null){return this.transact(db=>this.authorize(db,prior,permission));}
-  async authorizeAgentConnection(actor:AgentActor){if(!actor.agentWorkspaceId||!actor.agentLease)fail('UNAUTHORIZED','连接登记无效',401);await this.transact(db=>this.own(db,actor,actor.agentWorkspaceId!,'ai:chat'));}
+  async authorizeAgentConnection(actor:AgentActor){if(!actor.agentWorkspaceId||!actor.agentLease&&!actor.agentServiceLease)fail('UNAUTHORIZED','连接登记无效',401);await this.transact(db=>this.own(db,actor,actor.agentWorkspaceId!,'ai:chat'));}
   private async connectionTransaction<T>(run:(db:any)=>Promise<T>):Promise<T>{for(let n=0;;n++){try{return await this.transact(run);}catch(error){if(n>=2||!retryableTransaction(error))throw error;}}}
   async agentConnections(prior:TokenPayload,workspaceId:string,cursor:unknown,now=Date.now()){return this.transact(async db=>{const {actor}=await this.own(db,prior,workspaceId);return listConnections(db,actor,workspaceId,cursor,now);});}
   async agentConnection(prior:TokenPayload,workspaceId:string,id:string,now=Date.now()){return this.transact(async db=>{const {actor}=await this.own(db,prior,workspaceId);return getConnection(db,actor,workspaceId,id,now);});}
   async createAgentConnection(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeAgentLease,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','须由本人连接',403);return this.connectionTransaction(async db=>{const {actor}=await this.own(db,prior,workspaceId,'ai:chat');return createConnection(db,actor,workspaceId,input,make,now);});}
   async changeAgentConnection(prior:TokenPayload,workspaceId:string,id:string,action:'renew'|'revoke',input:Record<string,unknown>,make:MakeAgentLease,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','须由本人操作连接',403);return this.connectionTransaction(async db=>{const {actor}=await this.own(db,prior,workspaceId,action==='renew'?'ai:chat':undefined);return changeConnection(db,actor,workspaceId,id,action,input,make,now);});}
+  private async identityOwners(db:any,row:MistWorkspaceRow,actor:TokenPayload){
+    const directory=await this.memberDirectory(db,row,actor);
+    if(!row.companyId)return directory;
+    const memberships=await db.companyMember.findMany({where:{companyId:row.companyId,status:'active'},select:{userId:true}}),active=new Set(memberships.map((m:any)=>m.userId));
+    return directory.map(m=>({...m,active:m.active&&active.has(m.id)}));
+  }
+  private identityManager(actor:TokenPayload,row:MistWorkspaceRow):TokenPayload{return localMode(actor)&&!companyRow(row)&&isOwner(row,actor)?{...actor,serviceIdentityAdmin:true} as TokenPayload:actor;}
+  async agentIdentities(prior:TokenPayload,workspaceId:string,now=Date.now(),scope:unknown='mine',cursor?:unknown){return this.transact(async db=>{const{row,actor}=await this.own(db,prior,workspaceId);return listIdentities(db,this.identityManager(actor,row),workspaceId,now,await this.identityOwners(db,row,actor),scope,cursor);});}
+  async createAgentIdentity(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能开设服务身份',403);return this.connectionTransaction(async db=>{const{row,actor}=await this.own(db,prior,workspaceId);const manager=this.identityManager(actor,row);if(!serviceCanManage(manager))fail('FORBIDDEN','没有Agent身份管理权限',403);const owner=(await this.identityOwners(db,row,actor)).find(m=>m.id===input.ownerId&&m.active);if(!owner)fail('INVALID_INPUT','请选择在职责任人',422);return createIdentity(db,manager,workspaceId,input,owner!,now,row.companyId??undefined);});}
+  async configureAgentIdentity(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能配置服务身份',403);return this.connectionTransaction(async db=>{const{row,actor}=await this.own(db,prior,workspaceId);const manager=this.identityManager(actor,row);if(!serviceCanManage(manager))fail('FORBIDDEN','没有Agent身份管理权限',403);let owner=(await this.identityOwners(db,row,actor)).find(m=>m.id===input.ownerId&&m.active);if(!owner&&input.enabled===false){const c=(await identityRecord(db,workspaceId,id)).value;if(input.ownerId===c.ownerId)owner={id:c.ownerId,name:c.ownerName,active:false,groups:[]};}if(!owner)fail('INVALID_INPUT','请选择在职责任人',422);return configureIdentity(db,manager,workspaceId,id,input,owner!,now);});}
+  async issueAgentServiceKey(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,make:MakeServiceCredential,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能启用长期凭据',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return issueServiceKey(db,actor,workspaceId,id,input,make,now);});}
+  async revokeAgentServiceKey(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能管理长期凭据',403);return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId);return revokeServiceKey(db,this.identityManager(actor,row),workspaceId,id,input,now);});}
+  async resolveAgentServiceKey(token:unknown){return this.transact(db=>resolveServiceCredential(db,token));}
+  async agentIdentityHistory(prior:TokenPayload,workspaceId:string,id:string,cursor?:unknown){return this.transact(async db=>{const{row,actor}=await this.own(db,prior,workspaceId);return identityHistory(db,this.identityManager(actor,row),workspaceId,id,cursor);});}
   /** 工作助手读取：与 get 相同的进入与投影规则，同时返回重新加载后的执行者供逐类型复核。 */
   async getForAgent(prior:TokenPayload,id:string){return this.transact(async db=>{const {row,actor}=await this.own(db,prior,id);return {workspace:this.view(row,actor),actor};});}
   async getForAssistant(prior:TokenPayload,id:string){return this.transact(async db=>{const {row,actor}=await this.own(db,prior,id,'ai:chat');return {workspace:this.view(row,actor),actor};});}
@@ -542,7 +558,7 @@ export class MistRepository {
         if(upload&&input.claimId!==undefined)activeUploadClaim(row.state,input.claimId);
         const context = this.context(actor, input.command?.type?.startsWith('email.') ? undefined : row.state);
         // 经 Agent（委托令牌）的写入在业务事件经办人后标注，账号与权限判断不受影响。
-        if (isAgentActor(prior)) Object.assign(context, { actorName: `${context.actorName}（经 Agent）`, viaAgent: true, agentSessionId: prior.agentSessionId });
+        if (isAgentActor(prior)) Object.assign(context, { actorName: `${context.actorName}（经 Agent）`, viaAgent: true, agentSessionId: prior.agentSessionId,...(prior.agentIdentity?{agentIdentity:prior.agentIdentity}:{}) });
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
           const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
           const { type, payload } = input.command;
@@ -633,6 +649,7 @@ export class MistRepository {
           actor: { id: actor.userId, name: actor.displayName || actor.userId },
           source: agent ? 'agent' : confirmProposalId ? 'human_confirmation' : 'human_rejection',
           agentSessionId: agent ? prior.agentSessionId : proposal?.agentSessionId ?? null,
+          ...((agent?prior.agentIdentity:proposal?.agentIdentity)?{agentIdentity:agent?prior.agentIdentity:proposal?.agentIdentity}:{}),
           ...(proposalId ? { proposalId } : input.command?.type === 'agent.proposal.create' ? { proposalId: String(applied.result.id) } : {}),
           phase: agent ? input.command?.type === 'agent.proposal.create' ? 'proposed' : 'executed' : confirmProposalId ? 'confirmed' : 'rejected',
           command, ...(confirmProposalId ? { trigger: input.command ? hashPayload.command : undefined } : {}),

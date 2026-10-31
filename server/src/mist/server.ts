@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import path from 'node:path';
 import { createMistRouter } from './route';
+import {SERVICE_KEY_HEADER} from './agentIdentities';
 import {createMistLocalRuntime,mistLocalRequested,assertMistLocalMode,type MistLocalRuntime} from './local';
 import {MistRepository,type MistContract} from './repository';
 import {MistPrivateFiles} from './files';
@@ -33,7 +34,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.locals.mistLocal=local;
     // 本地会话入口在 Mist router 之前；同样不能把委托头当本人登录 / 切换身份。
     app.all('/api/mist/session',(req,res,next)=>{
-      if(req.headers[AGENT_DELEGATION_HEADER]===undefined){next();return;}
+      if(req.headers[AGENT_DELEGATION_HEADER]===undefined&&req.headers[SERVICE_KEY_HEADER]===undefined){next();return;}
       res.status(403).set('Cache-Control','private, no-store').json({ok:false,error:{code:'AGENT_FORBIDDEN',message:'工作助手委托不能操作本人登录会话'}});
     });
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
