@@ -1,0 +1,150 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 576,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 280,
+        "y": 576,
+        "width": 1118,
+        "height": 68
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 348,
+        "y": 512,
+        "width": 116,
+        "height": 22
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 888,
+        "y": 772,
+        "width": 524,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 592,
+        "y": 680,
+        "width": 136,
+        "height": 40
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 574,
+        "y": 357,
+        "width": 354,
+        "height": 40
+      },
+      "value": "江南成衣"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 987,
+        "y": 357,
+        "width": 375,
+        "height": 40
+      },
+      "value": "双面羊毛城市大衣 GA-2711 成衣（全包）"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 1303,
+        "y": 836,
+        "width": 96,
+        "height": 40
+      }
+    },
+    {
+      "image": "09.webp",
+      "target": {
+        "x": 574,
+        "y": 357,
+        "width": 375,
+        "height": 40
+      },
+      "value": "410"
+    },
+    {
+      "image": "10.webp",
+      "target": {
+        "x": 1303,
+        "y": 836,
+        "width": 96,
+        "height": 40
+      }
+    },
+    {
+      "image": "11.webp",
+      "target": {
+        "x": 987,
+        "y": 277,
+        "width": 354,
+        "height": 40
+      },
+      "value": "预付 30%，余款发货前付清"
+    },
+    {
+      "image": "12.webp",
+      "target": {
+        "x": 574,
+        "y": 357,
+        "width": 375,
+        "height": 40
+      },
+      "value": "上海浦东指定货代仓库（按订舱通知送货）"
+    },
+    {
+      "image": "13.webp",
+      "target": {
+        "x": 574,
+        "y": 436,
+        "width": 788,
+        "height": 81
+      },
+      "value": "按 R2-A-2 确认样与客户 PO CC-PO-2026-1188；面辅料由工厂采购；含 13% 增值税专票。"
+    },
+    {
+      "image": "14.webp",
+      "target": {
+        "x": 1303,
+        "y": 836,
+        "width": 96,
+        "height": 40
+      }
+    },
+    {
+      "image": "15.webp",
+      "target": {
+        "x": 1299,
+        "y": 836,
+        "width": 100,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

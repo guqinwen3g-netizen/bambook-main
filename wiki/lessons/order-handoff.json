@@ -103,5 +103,9 @@
       "title": "交接后",
       "text": "后勤负责订舱与单证；业务员继续推进采购、产前样和生产。"
     }
-  ]
+  ],
+  "nextLesson": {
+    "id": "tutorial-purchase-draft",
+    "title": "准备成品采购草稿"
+  }
 }
