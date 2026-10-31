@@ -13,12 +13,12 @@ type Row={uid:number;raw:Buffer;seen:boolean;starred:boolean};
 class Mailbox {
   boxes:Record<string,Row[]>={INBOX:[],Archive:[],Trash:[],Sent:[]};
   next:Record<string,number>={INBOX:1,Archive:1,Trash:1,Sent:1};
-  validity=7;moves=0;flags=0;moveSupported=true;dropReply=false;failBeforeMove=false;failFlag=false;
+  validity=7;moves=0;flags=0;moveSupported=true;dropReply=false;failBeforeMove=false;failFlag=false;failLogin=false;logins=0;
   gate?:Promise<void>;
   put(){const row={uid:this.next.INBOX++,raw:Buffer.from(`From: Buyer <buyer@example.test>\r\nTo: staff@example.test\r\nSubject: Incoming\r\nMessage-ID: <${randomUUID()}@example.test>\r\nDate: Sun, 1 Nov 2026 01:00:00 +0000\r\n\r\nOrder update`),seen:false,starred:false};this.boxes.INBOX.push(row);return row;}
   relocate(from:string,uid:number,to:string){const row=this.boxes[from].find(r=>r.uid===uid)!;this.boxes[from]=this.boxes[from].filter(r=>r!==row);const copy={...row,uid:this.next[to]++};this.boxes[to].push(copy);return copy.uid;}
   transport:MailTransport={
-    imap:async()=>{let folder='INBOX';return{
+    imap:async()=>{this.logins++;if(this.failLogin)throw Object.assign(Error('authentication invalid'),{code:'EAUTH'});let folder='INBOX';return{
       folders:async()=>Object.keys(this.boxes).map(p=>({path:p,attribs:p==='INBOX'?[]:['\\'+p]})),
       open:async p=>{folder=p;return{uidValidity:this.validity,uidNext:this.next[p]};},
       uidsAfter:async after=>this.boxes[folder].filter(r=>r.uid>after).map(r=>r.uid),
@@ -129,6 +129,11 @@ describe('Durable bidirectional mailbox state',()=>{
     let allowed=true;const f=await fixture(new Mailbox(),local=>{const original=local.authorize;local.authorize=async(db,actor,p)=>{if(!allowed&&(actor as any).mailStateWorker)throw new MistApiError('FORBIDDEN','Withdrawn',403);return original(db,actor,p);};});
     const m=await f.message();await f.command('email.flag',{id:m.id,flag:'starred',value:true});allowed=false;await f.worker.tick();expect(f.box.flags).toBe(0);
     const states=await f.states();expect(states[0].state).toBe('blocked');expect(JSON.stringify(states)).not.toMatch(/authority|credentialVersion|permissionCeiling|synthetic/);
+  });
+  it('pauses revoked mailbox credentials instead of retrying them as a network failure',async()=>{
+    const f=await fixture(),m=await f.message();f.box.failLogin=true;await f.command('email.flag',{id:m.id,flag:'starred',value:true});await f.worker.tick();
+    expect((await f.states())[0].state).toBe('blocked');const attempts=f.box.logins;vi.setSystemTime(Date.now()+31*60_000);await f.worker.tick();expect(f.box.logins).toBe(attempts);expect(f.box.flags).toBe(0);
+    f.box.failLogin=false;await f.command('email.state.retry',{id:m.id});await f.worker.tick();expect(await f.states()).toEqual([]);expect(f.box.boxes.INBOX[0].starred).toBe(true);
   });
   it('keeps missing original mail as a local copy instead of deleting it',async()=>{
     const f=await fixture(),m=await f.message();f.box.boxes.INBOX=[];await f.client.post(`${f.base}/accounts/${f.accountId}/sync`).send({}).expect(200);expect(await f.message()).toMatchObject({id:m.id,remoteMissing:true,body:m.body});

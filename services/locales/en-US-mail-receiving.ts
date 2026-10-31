@@ -1,4 +1,5 @@
 export const mailReceivingEnglish: Record<string, string> = {
+  '邮箱登录已失效，请接入人重新绑定凭据后重试': 'Mailbox login expired. The account owner must reconnect credentials before retrying',
   '原邮箱未返回完整状态，请稍后核对': 'Mailbox returned incomplete state. Check again later',
   '邮件标识无效，请在原邮箱核对': 'Invalid message identity. Check the original mailbox',
   '原邮箱编号无效，请先核对': 'Invalid mailbox identifiers. Check the mailbox first',
