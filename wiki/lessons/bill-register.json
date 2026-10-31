@@ -134,5 +134,13 @@
       "title": "完成标准",
       "text": "应付票据有这张票，未付金额 = 票额 − 预付抵扣。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:09:02.778Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "0936874e34c5400c35395a3f3766e22465b25280de5c2e8bf7bb9b8d1a19dee6"
+    }
+  }
 }

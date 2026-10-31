@@ -108,5 +108,13 @@
       "title": "完成标准",
       "text": "收货记录的拒收数量已登记处理结果。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:11:37.299Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "3c9a614d48b23d790408269bfa776027e74bb76f2ca085c3c78648c8e5b5eaba"
+    }
+  }
 }

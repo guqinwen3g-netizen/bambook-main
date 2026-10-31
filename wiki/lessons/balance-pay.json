@@ -64,5 +64,13 @@
       "title": "完成标准",
       "text": "付款已分配到票据，票据未付为 0。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:07:29.470Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "1dcbc9775752b828ca1e343022740da2c2641633e164088fa6e2fbb0caa7f543"
+    }
+  }
 }

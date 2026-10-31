@@ -130,5 +130,13 @@
       "title": "归属错了",
       "text": "在流水详情点「调整归属」或「释放归属」，写明原因，不要删除流水。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:09:58.466Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "5520663ee88066bb139f359ba17839b3e1bd094763cf84e4a6d8b17ac4404bc7"
+    }
+  }
 }
