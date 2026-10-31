@@ -167,7 +167,9 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 - **工具**：`bambook_workspaces`、`bambook_query`、`bambook_get`、`bambook_related`（复用 `agentRead.ts`）；`bambook_commands`（命令目录 + payload 结构 + `via`）；`bambook_preview`（`repository.preview`：同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，应用后整笔回滚，返回业务事件说明；生成文件的命令不支持）；`bambook_execute`（`repository.execute`，请求编号幂等：重试沿用原版本号重放，不同命令复用编号被拒）。
 - **分级**：`agentCommandSensitivity()`。`confirm`（资金 / 账务前缀、人员与权限、供应商收款账户（`market.supplier.bank.*`）、对外邮件，以及 confirm/approve/decide/void/reverse/cancel/delete/close/issue/send/notify/present/refund/waive/withdraw/transition 等动词）执行时先按 Agent 身份完整预演，通过后记为 Agent 提议（见下条），不直接生效；`payable.settlement.submit` 例外为普通；`files.add` 与 `email.server.*` 不能经接口。
 - **命令目录**：`scripts/gen-mist-command-catalog.mjs` 从 `server/src/shared/*.ts` 的 `{ type: '…'; payload: … }` 声明生成 `server/src/mist/agentCommandCatalog.ts`（308 条），`agentMcp.test.ts` 用 `--check` 守住与源码一致。目录外的类型不能执行。
-- **审计现状与缺口**：仓储识别委托身份，在业务事件经办人后标注“（经 Agent）”；账号id与权限判断不变。原命令及会话可在敏感提议中保留；普通Agent写入尚缺独立持久化的完整命令/会话/变更审计，不能把事件姓名标注当作完整审计已完成。
+- **审计落盘（2026-10-31）**：`agentAudit.ts` 与 `repository.ts#executeInternal` 在 `MistCommandReceipt` 追加单独的内部审计回执，内部 `result.__agentAudit` 保存版本化证据；与业务状态/编号/原业务回执同事务提交。内部编号为 `mist-revision:agent-audit:<原请求编号>`，沿用旧版本已拒绝公开读取/占用的服务端命名空间；普通业务回执本身不增加私有字段，回退到上一版本也不附带泄漏。普通委托命令及提议创建记录当前账号、Agent会话、原命令、实际前后差异、请求版本/实际起止版本和真实审计时间；本人确认或拒绝记录真实人工身份，并关联原提议及原Agent会话。旧提议未记录会话时保留null，不伪造或倒填历史。普通人工命令没有因此自动变成Agent操作。
+- **审计安全与准确性**：按记录id定位字段，保留新增/删除/null及数组顺序差异，包含本次真正提交的名册/规范化变化；并发重试仅保留最终实际提交的审计，另一会话抢先提交时沿用其原审计。预演、失败回滚和幂等回放不新增审计。命令及变化递归遮蔽密码、密钥、令牌和内嵌二进制；普通写入、回执读取、审批回执旁路和重放响应都移除内部证据，不把旧商业数据作为附带回执交给客户端。MCP预演/办理必须使用本人签发的operate委托，普通登录Cookie不能冒充Agent办理。
+- **审计仍未完成的交付**：当前只有持久化基础与公开回执隔离；按当前公司/岗位/行级权限查询、筛选与详情页面/MCP工具仍未开放，也不覆盖所有普通人工写入。不能把姓名“经Agent”标注、私有落盘验证或内部JSON字段当作员工已经能查询完整审计。后续读取必须重新核对当前权限，不能把内部证据直接展开给前端。
 - **验证**：`server/src/mist/agentMcp.test.ts`（协议、买手预演→执行→幂等重放、财务敏感操作转本人提议、他人/Agent不能确认、超验收开票预演被拒、只读委托与无权岗位）；本地服务真实 HTTP 走查 PO-2026-00002 结算提交与财务确认拒绝。
 - **Agent 提议**（`server/src/shared/mistAgentProposals.ts`）：`agent.proposal.create` 只能经委托创建，存原命令与预演得到的业务说明，读投影只给 `ownerId` 本人；首页「接着完成」与当前焦点显示“Agent 提议 · 待确认”，`AgentProposalDialog` 由本人确认或拒绝（可写原因）。确认发送 `agent.proposal.confirm {id}`，仓储换成原命令按本人身份走完整门禁，同一事务内核对提议仍待确认、属于本人、命令未变后记为已确认；失败则提议保持待确认。Agent 与委托身份不能确认或拒绝。
 - **可读对象（2026-10-31 补应付链，当前24类显式登记）**：在原 16 类外新增 `receipt`（收货，`procurement:read`）及 `payable_settlement`、`payable_bill`、`payment_plan`、`payment_request`、`supplier_payment`、`payment_allocation`、`prepayment_move`（`invoices:read`；行级范围仍由仓储投影裁剪）。`bambook_related` 同时展开明细行一层的引用（票据 `lines[].purchaseId`、付款申请 `lines[].billId`），采购合同可直接列出收货、结算、票据、计划、申请、付款与退款。命令目录生成器收齐联合 payload 全部分支（如 `payable.request.submit` 的 prepayment / settlement / bill 三种用法），此前只显示第一种。
@@ -179,7 +181,7 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 - **已知限制**：增值税专票等须上传原件的票据，Agent 不能上传文件，预演即被拒（“请上传增值税专票原件”），须本人登记。
 - **外部客户端互通（2026-10-31）**：`mcpClient.test.ts` 用官方 `@modelcontextprotocol/client@2.4.0` 与 `StreamableHTTPClientTransport` 建立真实loopback HTTP连接，覆盖默认初始化、自动探测后回退、工具发现、只读拒写、预演和一次性写入/重试。另在独立本地Mist经同一SDK提交采购结算，再经财务委托创建提议；真实页面切到财务本人确认，SDK读回已确认且仅一条结算。没有据此宣称所有第三方桌面客户端或全部业务链均已验收。
 - **执行重试契约**：`bambook_execute` 必填 `requestId`（1–116字、无首尾空格）。新业务操作用新编号，同一操作超时/重连重试沿用原编号与原参数；不可因网络失败直接换编号。普通写入和敏感提议都回放原回执；提议重试沿用原说明及请求版本，已经本人确认后也不会再次办理。复用编号提交另一条命令或不同参数会被拒绝。`bambook_preview` 不要求编号且不落库。
-- **部署与未完成**：MCP已包含在SaaS应用；每次修订是否发布看相应提交的deployment状态。无人值守Agent账号与长期API Key、自助连接/续签体验、更多实际客户端、普通Agent写入完整审计和更多对象读取仍需收口。顶层工具采用JSON Schema；命令目录内payload/types为TypeScript结构文本，能列出命令不等于当前岗位有权执行。这里只验证了短期本人委托和上述单链交接。
+- **部署与未完成**：MCP已包含在SaaS应用；每次修订是否发布看相应提交的deployment状态。无人值守Agent账号与长期API Key、自助连接/续签体验、更多实际客户端、Agent审计安全查询/页面及更多对象读取仍需收口。顶层工具采用JSON Schema；命令目录内payload/types为TypeScript结构文本，能列出命令不等于当前岗位有权执行。这里只验证了短期本人委托和上述单链交接。
 
 外部客户端需要本人授权签发的短期委托；令牌不写入仓库或日志，不作为普通登录凭据。已有令牌时的连接形状如下（不是自动签发或扩大权限）：
 

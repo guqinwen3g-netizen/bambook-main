@@ -84,7 +84,8 @@ describe.skipIf(!url)('真实 PostgreSQL 负载：多人同时提交混合命令
   async function assertLedger(id: string, successes: number) {
     const row: any = await prisma.mistWorkspace.findUniqueOrThrow({ where: { id } });
     const receipts = await prisma.mistCommandReceipt.findMany({ where: { workspaceId: id }, select: { requestId: true, result: true } });
-    const markers = receipts.filter(r => r.requestId.startsWith('mist-revision:')).map(r => Number(r.requestId.slice('mist-revision:'.length))).sort((a, b) => a - b);
+    // Other server-internal receipts share the reserved namespace but are not numeric version markers.
+    const markers = receipts.filter(r => /^mist-revision:\d+$/.test(r.requestId)).map(r => Number(r.requestId.slice('mist-revision:'.length))).sort((a, b) => a - b);
     const requestRevisions = receipts.filter(r => !r.requestId.startsWith('mist-revision:') && (r.result as any).revision > 0).map(r => (r.result as any).revision).sort((a, b) => a - b);
     // revision 连续：最终版本 = 成功请求数；版本标记 1..N 各一条；每条业务回执占用一个不重复的版本号。
     expect(row.revision).toBe(successes);
