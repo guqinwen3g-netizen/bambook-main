@@ -56,6 +56,7 @@ try {
     for (let i = 0; i < steps; i++) {
       await root.locator(`[data-step="${i}"]`).click();
       const src = await waitImage(root);
+      await page.waitForTimeout(1500); // 等镜头推近动画结束再量热点
       const hot = await root.locator('[data-hotspot]').boundingBox(), shot = await root.locator('[data-shot]').boundingBox();
       const inside = hot && shot && hot.x >= shot.x - 1 && hot.y >= shot.y - 1 && hot.x + hot.width <= shot.x + shot.width + 1 && hot.y + hot.height <= shot.y + shot.height + 1;
       check(`宽屏 · 第 ${i + 1} 步画面加载且热点在画面内`, src?.includes(`/${String(i + 1).padStart(2, '0')}.webp`) && inside, src || '图片未加载');
