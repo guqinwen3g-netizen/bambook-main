@@ -163,5 +163,13 @@
   "nextLesson": {
     "id": "tutorial-purchase-submit",
     "title": "提交采购审批"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:49:08.206Z",
+      "softwareCommit": "2a87184f91cfba0153a5bc9ad2e9b92b340a0e02",
+      "contentSha256": "db141c45c3827c7c37bc3fa597dda6e3d122b85c88845e2538c4cf9594fee6f9"
+    }
   }
 }

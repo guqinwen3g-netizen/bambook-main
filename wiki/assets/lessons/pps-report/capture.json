@@ -1,0 +1,146 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 724,
+        "width": 492,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 1078,
+        "y": 554,
+        "width": 300,
+        "height": 40
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 300,
+        "y": 528,
+        "width": 109,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 300,
+        "y": 528,
+        "width": 174,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 314,
+        "y": 147,
+        "width": 316,
+        "height": 40
+      },
+      "value": "通过"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 689,
+        "y": 147,
+        "width": 337,
+        "height": 40
+      },
+      "value": "PPS-GA2711-M-01"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 314,
+        "y": 306,
+        "width": 712,
+        "height": 81
+      },
+      "value": "M 码产前样面料、颜色与确认样一致；做工、辅料与尺寸符合工艺单，可按此大货生产。"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 929,
+        "y": 445,
+        "width": 110,
+        "height": 32
+      }
+    },
+    {
+      "image": "09.webp",
+      "target": {
+        "x": 314,
+        "y": 516,
+        "width": 337,
+        "height": 40
+      },
+      "value": "后中衣长 (cm)"
+    },
+    {
+      "image": "10.webp",
+      "target": {
+        "x": 689,
+        "y": 516,
+        "width": 337,
+        "height": 40
+      },
+      "value": "98"
+    },
+    {
+      "image": "11.webp",
+      "target": {
+        "x": 314,
+        "y": 596,
+        "width": 337,
+        "height": 40
+      },
+      "value": "98.5"
+    },
+    {
+      "image": "12.webp",
+      "target": {
+        "x": 689,
+        "y": 596,
+        "width": 337,
+        "height": 40
+      },
+      "value": "1"
+    },
+    {
+      "image": "13.webp",
+      "target": {
+        "x": 1312,
+        "y": 836,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "14.webp",
+      "target": {
+        "x": 872,
+        "y": 529,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "27c0a670a8a8386f463a4fef599bfa9a2ef4a72d",
+    "capturedAt": "2026-10-31T13:03:43.107Z"
+  }
+}

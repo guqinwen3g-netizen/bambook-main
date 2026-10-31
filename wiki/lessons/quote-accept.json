@@ -80,5 +80,13 @@
   "nextLesson": {
     "id": "tutorial-dev-confirm",
     "title": "记录需求方认可"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:35:12.339Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "8f65bf2c620ad078386898ebba44fb602b05ab21db53479c97f71ef5565e3234"
+    }
   }
 }

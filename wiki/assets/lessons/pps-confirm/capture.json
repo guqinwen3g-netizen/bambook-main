@@ -1,0 +1,97 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 569,
+        "width": 492,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 1078,
+        "y": 554,
+        "width": 300,
+        "height": 40
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 300,
+        "y": 405,
+        "width": 127,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 374,
+        "y": 375,
+        "width": 306,
+        "height": 40
+      },
+      "value": "确认采用"
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 374,
+        "y": 454,
+        "width": 692,
+        "height": 81
+      },
+      "value": "Cedar & Crown 买手 Olivia Grant 邮件确认 M 码产前样，同意按此生产。"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 992,
+        "y": 556,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 437,
+        "y": 518,
+        "width": 113,
+        "height": 40
+      }
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 374,
+        "y": 414,
+        "width": 692,
+        "height": 81
+      },
+      "value": "需求方已确认采用，按 M 码产前样安排大货生产。"
+    },
+    {
+      "image": "09.webp",
+      "target": {
+        "x": 992,
+        "y": 516,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "27c0a670a8a8386f463a4fef599bfa9a2ef4a72d",
+    "capturedAt": "2026-10-31T13:04:24.591Z"
+  }
+}

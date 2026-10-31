@@ -60,5 +60,13 @@
   "nextLesson": {
     "id": "tutorial-order-approve",
     "title": "审批订单"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:29:57.189Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "c2f3645a88a03030ef7bf27cf9a55c65017da73250ce0442ff55e11b22396b0f"
+    }
   }
 }

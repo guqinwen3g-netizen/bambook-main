@@ -87,5 +87,13 @@
       "title": "完成标准",
       "text": "财务确认后合同已最终结算，剩余预付显示待处理。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:39:28.987Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "a301379473194e4b1d8f6d3b21f57a3ef265a6659b2ca09fa1fe94000ed61ba4"
+    }
+  }
 }

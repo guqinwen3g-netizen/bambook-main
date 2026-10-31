@@ -103,5 +103,17 @@
       "title": "之后",
       "text": "登记产前样、收定金后放行生产。"
     }
-  ]
+  ],
+  "nextLesson": {
+    "id": "tutorial-deposit-link",
+    "title": "登记定金到账并归属订单"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:33:41.112Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "96e1b3054f7cbe7e6c7fd7a12f5ca73e9784b4e24785ec56ef63a17b1405b731"
+    }
+  }
 }

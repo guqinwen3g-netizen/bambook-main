@@ -5,6 +5,7 @@
  *   npm run dev:mist                     # 先启动本地独立服务（演示种子，不连公司库或共享服务器）
  *   node scripts/manual-capture.mjs chain        # 整条付款链（需先重置本地数据），或逐课：settlement 等
  *   node scripts/manual-capture.mjs order-chain  # 报价 → 订单（需先重置本地数据）
+ *   node scripts/manual-capture.mjs order-chain production-chain  # 再接定金 → 产前样 → 放行 → 完工
  *
  * 产物：wiki/assets/lessons/<课程>/NN.webp + capture.json（入库，供 wiki:build 生成引导式演示）。
  * 只允许连接 127.0.0.1 的本地服务；采集会在本地工作区真实执行一遍操作，重采前先重置本地数据。
@@ -14,12 +15,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'http://127.0.0.1:3001';
 const VIEWPORT = { width: 1440, height: 900 };
+/** 采集版本：运行中的界面与服务源码必须与该提交一致，否则不登记版本（不能把本机未提交改动记成某个提交）。 */
+const APP_SOURCES = ['dev-ui-preview/mist-atelier/app', 'components', 'styles', 'services', 'server/src', 'types.ts'];
+function softwareCommit() {
+  const git = args => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
+  const dirty = git(['status', '--porcelain', '--', ...APP_SOURCES]);
+  if (dirty) { console.warn('⚠ 应用源码有未提交改动，本次采集不登记软件版本：\n' + dirty); return null; }
+  return git(['rev-parse', 'HEAD']);
+}
+const COMMIT = softwareCommit();
 
 async function session(page, profileId) {
   const res = await page.evaluate(async id => (await fetch('/api/mist/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ profileId: id }) })).json(), profileId);
@@ -42,6 +53,23 @@ const NO_RESUPPLY = '华盛毛纺赵琳邮件确认：色差 20 米退回，不�
 const CLOSE_NOTE = '供应商邮件确认色差 20 米不再补发，合同按实收 2,380 米结案。';
 const REFUND_NOTE = '供应商退回短交 20 米对应的预付款 279.00。';
 let invoiceFile = '', poFile = '';
+const DEPOSIT_BASIS = '客户邮件确认此笔为 SO-G-2026-0009 合同 30% 定金，金额与合同一致。';
+const SIZES = 'S:160\nM:280\nL:240\nXL:120';
+const PPS_CONTACT = '江南成衣 · 周工', PPS_REPORT_NO = 'PPS-GA2711-M-01';
+const PPS_OPINION = 'M 码产前样面料、颜色与确认样一致；做工、辅料与尺寸符合工艺单，可按此大货生产。';
+const PPS_BUYER = 'Cedar & Crown 买手 Olivia Grant 邮件确认 M 码产前样，同意按此生产。';
+const PPS_CONTINUE = '需求方已确认采用，按 M 码产前样安排大货生产。';
+const RELEASE_BASIS = '主单、定金、用料、尺码、供应合同和 M 码产前样均已确认，通知江南成衣开裁。';
+const PROGRESS_NOTE = '江南成衣回报：已裁 800 件，车缝完成约六成。';
+const COMPLETE_BASIS = '江南成衣完工清点 800 件（S160/M280/L240/XL120），附点数单。';
+const openBranch = profile => [
+  { profile, target: p => nav(p, '订单履约', '生产进度'), act: l => l.click() },
+  { target: p => p.locator('main').getByText('全部', { exact: true }).first(), act: l => l.click() },
+  { target: p => p.locator('main').getByText('FUL-PO-2026-00006').first(), act: l => l.click() },
+];
+let statementFile = '';
+function demoStatement() { return statementFile; }
+
 const QUOTE_SENT = '邮件发送正式报价单 PDF 给 Cedar & Crown 采购 Olivia Grant';
 const QUOTE_ACCEPTED = 'Olivia Grant 10-31 邮件确认接受 V2 报价，PO 随后下发。';
 const DEV_CONFIRMER = 'Olivia Grant（Cedar & Crown 采购）', DEV_BASIS = '客户 10-31 邮件确认 R2-A-2 大货样，可按此生产。';
@@ -292,6 +320,88 @@ const LESSONS = {
     { target: p => p.getByRole('dialog').getByLabel('退款说明'), act: l => l.fill(REFUND_NOTE), value: REFUND_NOTE },
     { target: p => p.getByRole('dialog').getByRole('button', { name: '登记退款' }), act: l => l.click() },
   ],
+
+  /* ── 开产与生产：SO-G-2026-0009 大衣（接在 order-chain 之后） ── */
+  'deposit-link': [
+    { profile: 'demo-finance', target: p => nav(p, '财务与成本', '财务管理'), act: l => l.click() },
+    { target: p => p.getByRole('button', { name: '导入流水' }).first(), act: (l, p) => p.locator('input[type=file][aria-label="银行流水文件"]').setInputFiles(demoStatement()) },
+    { target: p => p.getByRole('button', { name: '确认导入 1 笔' }), act: l => l.click() },
+    { target: p => p.locator('main').getByText('DEPOSIT SO-G-2026-0009').first(), act: l => l.click() },
+    { target: p => p.getByRole('button', { name: '关联订单定金 / 客户余额' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('归属客户'), act: l => l.selectOption({ label: 'Cedar & Crown' }), value: 'Cedar & Crown' },
+    { target: p => p.getByRole('dialog').last().getByLabel('归属订单'), act: l => l.selectOption({ label: 'SO-G-2026-0009' }), value: 'SO-G-2026-0009' },
+    { target: p => p.getByRole('dialog').last().getByLabel('资金归属依据'), act: l => l.fill(DEPOSIT_BASIS), value: DEPOSIT_BASIS },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '保存资金归属' }), act: l => l.click() },
+  ],
+  'production-sizes': [
+    ...openBranch('demo-sales'),
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '登记生产尺码' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().locator('textarea'), act: l => l.fill(SIZES), value: SIZES.replace(/\n/g, '  ') },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '保存' }), act: l => l.click() },
+  ],
+  'pps-send': [
+    ...openBranch('demo-sales'),
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '准备本分支样品' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '新建样品' }).first(), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '下一步' }), act: l => l.click() },
+    { target: p => p.locator('main').getByLabel('形态'), act: l => l.selectOption({ label: '产前样' }), value: '产前样' },
+    { target: p => p.locator('main').getByRole('button', { name: '下一步' }), act: l => l.click() },
+    { target: p => p.locator('main').getByLabel('尺码'), act: l => l.fill('M'), value: 'M' },
+    { target: p => p.locator('main').getByLabel('颜色'), act: l => l.fill('燕麦色'), value: '燕麦色' },
+    { target: p => p.locator('main').getByLabel('存放位置'), act: l => l.fill('样品室 B-02'), value: '样品室 B-02' },
+    { target: p => p.locator('main').getByRole('button', { name: '下一步' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '登记样品' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '查看 / 发起本样品QC' }), act: l => l.click() },
+    { target: p => p.locator('main').getByLabel('现场联系人'), act: l => l.fill(PPS_CONTACT), value: PPS_CONTACT },
+    { target: p => p.locator('main').getByRole('button', { name: '下一步' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '发起送检' }), act: l => l.click() },
+  ],
+  'pps-report': [
+    { profile: 'demo-qc', target: p => p.locator('main').getByText('QC-2026-00007 · 待认领').first(), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '打开QC任务' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '认领任务' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '提交 / 追加复验报告' }), act: l => l.click() },
+    { target: p => p.locator('main').getByLabel('本次结论'), act: l => l.selectOption({ label: '通过' }), value: '通过' },
+    { target: p => p.locator('main').getByLabel('报告编号'), act: l => l.fill(PPS_REPORT_NO), value: PPS_REPORT_NO },
+    { target: p => p.locator('main').getByLabel('专业意见与影响范围'), act: l => l.fill(PPS_OPINION), value: PPS_OPINION },
+    { target: p => p.locator('main').getByRole('button', { name: '增加测量点' }), act: l => l.click() },
+    { target: p => p.locator('main').getByLabel('测量点 1'), act: l => l.fill('后中衣长 (cm)'), value: '后中衣长 (cm)' },
+    { target: p => p.locator('main').getByLabel('标准 1'), act: l => l.fill('98'), value: '98' },
+    { target: p => p.locator('main').getByLabel('实测 1'), act: l => l.fill('98.5'), value: '98.5' },
+    { target: p => p.locator('main').getByLabel('容差 1'), act: l => l.fill('1'), value: '1' },
+    { target: p => p.locator('main').getByRole('button', { name: '提交报告' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '确认提交' }), act: l => l.click() },
+  ],
+  'pps-confirm': [
+    { profile: 'demo-sales', target: p => p.locator('main').getByText('QC-2026-00007 · 待需求方确认').first(), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '打开QC任务' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '记录需求方确认' }).first(), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('需求方决定'), act: l => l.selectOption({ label: '确认采用' }), value: '确认采用' },
+    { target: p => p.getByRole('dialog').last().getByLabel('需求方确认依据'), act: l => l.fill(PPS_BUYER), value: PPS_BUYER },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '记录确认' }), act: l => l.click() },
+    { target: p => p.locator('main').getByRole('button', { name: '业务确认继续' }).first(), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('业务处理与恢复依据'), act: l => l.fill(PPS_CONTINUE), value: PPS_CONTINUE },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '确认继续' }), act: l => l.click() },
+  ],
+  'production-release': [
+    ...openBranch('demo-sales'),
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '放行供货' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('放行依据'), act: l => l.fill(RELEASE_BASIS), value: RELEASE_BASIS },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '保存' }), act: l => l.click() },
+  ],
+  'production-progress': [
+    ...openBranch('demo-sales'),
+    { target: p => p.getByRole('dialog').last().getByLabel('生产进度（%）'), act: l => l.fill('60'), value: '60' },
+    { target: p => p.getByRole('dialog').last().getByLabel('跟进记录'), act: l => l.fill(PROGRESS_NOTE), value: PROGRESS_NOTE },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '保存进度' }), act: l => l.click() },
+  ],
+  'production-complete': [
+    ...openBranch('demo-sales'),
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '登记最终完工数量' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('最终实际完工数量'), act: l => l.fill('800'), value: '800' },
+    { target: p => p.getByRole('dialog').last().getByLabel('最终点数及完工依据'), act: l => l.fill(COMPLETE_BASIS), value: COMPLETE_BASIS },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '保存' }), act: l => l.click() },
+  ],
 };
 /** 采集全链（按业务先后，重置本地数据后依次执行）。 */
 const CHAIN = ['payee-account', 'payment-plan', 'prepay-request', 'payment-approve', 'prepay-pay', 'settlement', 'settlement-confirm', 'bill-register', 'balance-request', '_balance-approve', 'balance-pay', 'no-resupply', 'short-close', '_close-confirm', 'prepay-refund'];
@@ -318,7 +428,12 @@ async function capture(browser, name) {
     for (const [i, step] of steps.entries()) {
       if (step.profile) await session(page, step.profile);
       const target = await step.target(page); await target.waitFor({ state: 'visible', timeout: 10000 });
-      await target.scrollIntoViewIfNeeded(); await page.mouse.move(0, 0); await page.waitForTimeout(400);
+      await target.scrollIntoViewIfNeeded();
+      // 目标贴近视口上下边缘时滚到中间，避免截图里控件被截断、热点越出画面。
+      await target.evaluate(el => { const r = el.getBoundingClientRect(); if (r.top < 80 || r.bottom > innerHeight - 80) el.scrollIntoView({ block: 'center' }); });
+      // 等加载遮罩消失：目标中心点确实点得到目标本身再截图。
+      for (let t = 0; t < 40 && !(await target.evaluate(el => { const r = el.getBoundingClientRect(), hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!hit && (hit === el || el.contains(hit) || !!hit.closest('label')?.contains(el)); })); t++) await page.waitForTimeout(250);
+      await page.mouse.move(0, 0); await page.waitForTimeout(400);
       const box = await target.boundingBox(); if (!box) throw new Error(`${name} 第 ${i + 1} 步找不到目标控件`);
       if (!setup) {
         const image = String(i + 1).padStart(2, '0'); await shot(page, path.join(out, image));
@@ -330,7 +445,7 @@ async function capture(browser, name) {
     if (errors.length) throw new Error('页面脚本错误：' + errors.join('；'));
     if (!setup) {
       await shot(page, path.join(out, 'result'));
-      fs.writeFileSync(path.join(out, 'capture.json'), JSON.stringify({ viewport: VIEWPORT, frames, result: 'result.webp' }, null, 2) + '\n');
+      fs.writeFileSync(path.join(out, 'capture.json'), JSON.stringify({ viewport: VIEWPORT, frames, result: 'result.webp', ...(COMMIT ? { provenance: { softwareCommit: COMMIT, capturedAt: new Date().toISOString() } } : {}) }, null, 2) + '\n');
     }
     console.log(`✓ ${name}：${setup ? '准备步骤已办理' : `${frames.length} 步 → ${path.relative(ROOT, out)}`}`);
     await page.close();
@@ -339,7 +454,9 @@ async function capture(browser, name) {
 
 /** 主干第一段：报价 → 订单（重置本地数据后依次执行）。 */
 const ORDER_CHAIN = ['quote-approve', 'quote-send', 'quote-accept', 'dev-confirm', 'quote-convert', 'order-contract', 'order-lines', '_order-lines-2', 'order-submit', 'order-approve', 'order-handoff', 'purchase-draft', 'purchase-submit', 'purchase-approve', 'purchase-send'];
-const names = process.argv.slice(2).flatMap(n => n === 'chain' ? CHAIN : n === 'order-chain' ? ORDER_CHAIN : [n]);
+/** 开产与生产：须在 order-chain 之后（同一份本地数据）执行。 */
+const PRODUCTION_CHAIN = ['deposit-link', 'production-sizes', 'pps-send', 'pps-report', 'pps-confirm', 'production-release', 'production-progress', 'production-complete'];
+const names = process.argv.slice(2).flatMap(n => n === 'chain' ? CHAIN : n === 'order-chain' ? ORDER_CHAIN : n === 'production-chain' ? PRODUCTION_CHAIN : [n]);
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 const browser = await chromium.launch(executablePath ? { executablePath } : {});
 try {
@@ -352,6 +469,12 @@ try {
     const tmp = await browser.newPage(); poFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bambook-')), 'demo-customer-po.pdf');
     await tmp.setContent('<body style="font-family:sans-serif;padding:48px"><h2>PURCHASE ORDER (teaching demo, not a real order)</h2><p>Buyer: Cedar &amp; Crown (demo)</p><p>PO No.: ' + CUSTOMER_PO + '</p><p>Double-face wool city coat GA-2711 · 800 pcs × USD 72.50</p><p>Lightweight padded vest GA-2712 · 600 pcs × USD 20.50</p><p>FOB Shanghai · T/T 30% deposit, 70% against B/L copy · Delivery 2026-12-20</p></body>');
     await tmp.pdf({ path: poFile, format: 'A5' }); await tmp.close();
+  }
+  if (names.includes('deposit-link')) {
+    // 教学演示用银行流水：日期取采集当天（北京时间），付款方为演示客户。
+    const day = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai' }).format(new Date());
+    statementFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bambook-')), 'demo-bank-statement.csv');
+    fs.writeFileSync(statementFile, `日期,付款方,金额,币种,附言\n${day},CEDAR & CROWN LTD,"21,090.00",USD,DEPOSIT SO-G-2026-0009 PO CC-PO-2026-1188\n`);
   }
   for (const name of names) await capture(browser, name);
 } finally { await browser.close(); }

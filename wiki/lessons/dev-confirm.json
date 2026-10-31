@@ -113,5 +113,13 @@
   "nextLesson": {
     "id": "tutorial-quote-convert",
     "title": "报价转订单"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:10:48.824Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "1d21d5ec3b7c895e218b9811a37674ad47da0400bca53ff759d1cd64d0d6a7b5"
+    }
   }
 }

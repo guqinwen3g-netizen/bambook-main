@@ -108,5 +108,13 @@
       "title": "完成标准",
       "text": "付款计划列表有这笔计划，金额、日期、触发条件与合同一致，状态「待申请」。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:17:30.233Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "1237bd6fd52ffe82c9e479bee949d8d2b1a9fc87fb687d4ef0eef0ca08cac086"
+    }
+  }
 }

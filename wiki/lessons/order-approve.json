@@ -66,5 +66,13 @@
   "nextLesson": {
     "id": "tutorial-order-handoff",
     "title": "交接后勤"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:12:02.886Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "1c06e49594cee7d906c99a79a42e4a99212c25eed39354115f95b1bb0903ac93"
+    }
   }
 }

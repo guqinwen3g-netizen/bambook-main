@@ -76,5 +76,13 @@
       "title": "驳回",
       "text": "有疑问驳回并写明原因，业务员修正后重新提交。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:16:05.731Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "172d39b1ca113d06a218979db1a38a90d051bf64109fadf2855f15a2da0422ca"
+    }
+  }
 }
