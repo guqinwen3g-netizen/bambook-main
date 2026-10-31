@@ -22,6 +22,7 @@
     "mist:docs": "node scripts/gen-mist-docs.mjs",
     "wiki:check": "node scripts/wiki-check.mjs",
     "wiki:build": "node scripts/wiki-build.mjs",
+    "manual:coverage": "node scripts/manual-coverage.mjs --check",
     "mist:shots": "node scripts/mist-shots.mjs",
     "mist:overflow": "node scripts/mist-overflow/scan.mjs",
     "mist:overflow:quick": "node scripts/mist-overflow/scan.mjs --quick",
