@@ -67,3 +67,18 @@ it('allows stopping an enabled registration while the receive service is unavail
   act(paint); await flush(); expect(getByRole(host, 'switch').hasAttribute('disabled')).toBe(false);
   await act(async () => getByRole(host, 'switch').click()); await flush(); expect((getByRole(host, 'switch') as HTMLInputElement).checked).toBe(false);
 });
+it('keeps a rejected setting visible after a successful status recheck', async () => {
+  seam.api.mockImplementation(async (_url: string, init: any) => {
+    if (init?.method === 'PUT') throw Object.assign(new Error('当前授权已失效'), { status: 403 });
+    return { serviceAvailable: true, items: [row()] };
+  });
+  act(paint); await flush(); await act(async () => getByRole(host, 'switch').click()); await flush();
+  expect(queryByText(host, '当前授权已失效')).not.toBeNull();
+  expect((getByRole(host, 'switch') as HTMLInputElement).checked).toBe(false);
+});
+it('clears a failed status read when the user successfully checks again', async () => {
+  seam.api.mockRejectedValueOnce(Error('收件状态读取失败')).mockResolvedValue({ serviceAvailable: true, items: [row()] });
+  act(paint); await flush(); expect(queryByText(host, '收件状态读取失败')).not.toBeNull();
+  await act(async () => getByRole(host, 'button', { name: '核对状态' }).click()); await flush();
+  expect(queryByText(host, '收件状态读取失败')).toBeNull();
+});
