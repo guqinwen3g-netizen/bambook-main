@@ -17,7 +17,7 @@ export type ReceiveAuthority = {
 };
 export type MailSyncLease = {
   id: string; workspaceId: string; accountId: string; actorId: string;
-  sourceHash: string; background: boolean; expiresAt: number;
+  sourceHash: string; background: boolean; expiresAt: number; kind?: 'receive' | 'state'; stateOperationId?: string; stateCursor?: number;
 };
 export type MailSyncActor = TokenPayload & { mailSyncLease?: MailSyncLease };
 export type ReceivingRecord = {
@@ -25,7 +25,7 @@ export type ReceivingRecord = {
   sourceHash: string; version: number; enabled: boolean; createdAt: string;
   authority?: ReceiveAuthority; lease?: MailSyncLease;
   nextRunAt: number; failures: number; pending: number;
-  lastAttemptAt?: number; lastSuccessAt?: number;
+  lastAttemptAt?: number; lastSuccessAt?: number; stateCursor?: number;
   blocked?: Problem; error?: Problem;
   lastRequestId?: string; lastExpectedVersion?: number; lastEnabled?: boolean; lastSourceGeneration?: number;
 };
@@ -67,7 +67,7 @@ export function receivingView(value: ReceivingRecord | null, account: EmailAccou
   const problem = !validSource ? changed : value?.blocked ?? null;
   const enabled = !!value?.enabled && validSource && ready;
   return { accountId: account.id, version: value?.version ?? 0, enabled,
-    state: problem ? 'blocked' : !enabled ? 'off' : value?.lease && value.lease.expiresAt > now ? 'running' : value?.error ? 'retrying' : 'waiting',
+    state: problem ? 'blocked' : !enabled ? 'off' : value?.lease && value.lease.kind !== 'state' && value.lease.expiresAt > now ? 'running' : value?.error ? 'retrying' : 'waiting',
     canEnable: ready && actor.userId === account.ownerId && hasScope(actor, 'emails:write'),
     canDisable: actor.userId === account.ownerId && hasScope(actor, 'emails:write'),
     lastAttemptAt: value?.lastAttemptAt ? new Date(value.lastAttemptAt).toISOString() : null,
@@ -103,14 +103,14 @@ export async function setReceiving(db: any, actor: TokenPayload, workspaceId: st
   await save(db, row, value, next);
   return receivingView(next, account, actor, now);
 }
-export async function claimReceiving(db: any, actor: TokenPayload, workspaceId: string, account: EmailAccount, now: number, background: boolean, leaseMs: number, expected?: ReceivingJob) {
+export async function claimReceiving(db: any, actor: TokenPayload, workspaceId: string, account: EmailAccount, now: number, background: boolean, leaseMs: number, expected?: ReceivingJob, kind: 'receive' | 'state' = 'receive') {
   if (account.example || !account.ownerId || !account.transport || !account.credentialSet) fail('MAIL_CREDENTIAL_MISSING', '请先绑定邮箱凭据', 422);
   const { row, value } = await receivingRecord(db, workspaceId, account.id), c = value ?? base(workspaceId, account, now), sourceHash = receiveSource(account);
   const sameSource = c.ownerId === account.ownerId && c.sourceHash === sourceHash;
   if (background && (!sameSource || !c.enabled || !c.authority || c.authority.ownerId !== actor.userId || expected?.version !== c.version || c.nextRunAt > now)) fail('MAIL_RECEIVING_CHANGED', '自动收件授权已变化', 409);
   if (sameSource && c.lease && c.lease.expiresAt > now) fail('MAIL_BUSY', '该邮箱正在同步，请稍后核对', 409);
-  const lease: MailSyncLease = { id: randomUUID(), workspaceId, accountId: account.id, actorId: actor.userId, sourceHash, background, expiresAt: now + leaseMs };
-  const next: ReceivingRecord = { ...c, ...(!sameSource ? { enabled: false, authority: undefined, blocked: changed, sourceHash, ownerId: account.ownerId } : {}), version: c.version + 1, lease, lastAttemptAt: now, nextRunAt: c.enabled && sameSource ? lease.expiresAt : 0 };
+  const lease: MailSyncLease = { id: randomUUID(), workspaceId, accountId: account.id, actorId: actor.userId, sourceHash, background, expiresAt: now + leaseMs, kind, stateCursor: c.stateCursor || 0 };
+  const next: ReceivingRecord = { ...c, ...(!sameSource ? { enabled: false, authority: undefined, blocked: changed, sourceHash, ownerId: account.ownerId } : {}), version: c.version + 1, lease, ...(kind === 'receive' ? {lastAttemptAt:now,nextRunAt:c.enabled && sameSource ? lease.expiresAt : 0} : {}) };
   await save(db, row, value, next); return lease;
 }
 /** Called under the business workspace lock before commit; touching the registry row fences a concurrent stop. */
@@ -123,12 +123,13 @@ export async function assertReceivingLease(db: any, actor: TokenPayload, lease: 
     if (touched.count !== 1) fail('MAIL_SYNC_STOPPED', '收件操作已停止，请核对邮箱状态', 409);
   }
 }
-export async function finishReceiving(db: any, lease: MailSyncLease, outcome: { ok: boolean; pending?: number; error?: Problem; block?: boolean }, now: number, intervalMs: number) {
+export async function finishReceiving(db: any, lease: MailSyncLease, outcome: { ok: boolean; pending?: number; error?: Problem; block?: boolean; stateCursor?: number }, now: number, intervalMs: number) {
   const { row, value: c } = await receivingRecord(db, lease.workspaceId, lease.accountId);
   if (!c || c.lease?.id !== lease.id) return;
+  if (lease.kind === 'state') { await save(db, row, c, {...c,version:c.version+1,lease:undefined}); return; }
   const failures = outcome.ok ? 0 : c.failures + 1;
   const delay = outcome.ok ? outcome.pending ? Math.min(intervalMs, 5000) : intervalMs : Math.min(30 * 60_000, intervalMs * 2 ** Math.min(failures - 1, 6));
-  const next: ReceivingRecord = { ...c, version: c.version + 1, lease: undefined, failures, pending: outcome.pending ?? 0, ...(outcome.ok ? { lastSuccessAt: now, error: undefined } : { error: outcome.error ?? { code: 'MAIL_RECEIVE_FAILED', message: '暂时无法收信，将自动重试' } }),
+  const next: ReceivingRecord = { ...c, version: c.version + 1, lease: undefined, failures, ...(outcome.stateCursor !== undefined ? {stateCursor:outcome.stateCursor} : {}), pending: outcome.pending ?? 0, ...(outcome.ok ? { lastSuccessAt: now, error: undefined } : { error: outcome.error ?? { code: 'MAIL_RECEIVE_FAILED', message: '暂时无法收信，将自动重试' } }),
     ...(outcome.block ? { enabled: false, authority: undefined, blocked: outcome.error ?? { code: 'MAIL_AUTH_CHANGED', message: '邮箱授权已失效，请重新绑定并开启自动收件' } } : {}), nextRunAt: c.enabled && !outcome.block ? now + delay : 0 };
   if (outcome.block && c.enabled) await event(db, next, c.ownerId, 'blocked', lease.id, now);
   await save(db, row, c, next);

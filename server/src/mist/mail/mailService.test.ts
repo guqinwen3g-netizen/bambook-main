@@ -116,7 +116,7 @@ describe('智能邮箱真实收发（服务端）', () => {
     let ws = first.body.workspace, rows = realMessages(ws, id);
     expect(rows.map((m: any) => [m.folder, m.subject, m.example]).sort()).toEqual([['inbox', 'PO 确认', false], ['sent', '样品寄出', false]]);
     const po = rows.find((m: any) => m.subject === 'PO 确认');
-    expect(po.remote).toEqual({ folder: 'INBOX', uid: 1, uidValidity: 7 });
+    expect(po.remote).toEqual({ folder: 'INBOX', uid: 1, uidValidity: 7, hash:expect.stringMatching(/^[a-f0-9]{64}$/) });
     expect(po.attachments[0]).toMatchObject({ name: 'po.txt', fileId: expect.any(String) });
     const download = await t.owner.get(W + ws.id + '/files/' + po.attachments[0].fileId).buffer(true).expect(200);
     expect(Buffer.from(download.body).toString('utf8')).toBe('PO-88231 内容');

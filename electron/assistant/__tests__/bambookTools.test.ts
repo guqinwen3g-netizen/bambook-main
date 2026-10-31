@@ -10,6 +10,12 @@ const ctx = () => ({ signal: new AbortController().signal, sessionId: 's1', now:
 const result = { workspace: { id: 'workspace-one', revision: 4, name: '测试工作区' }, results: [{ type: 'order', id: 'o1', link: 'bambook://open?view=orders%2Fdetail&id=o1' }] };
 
 describe('业务工具的委托边界', () => {
+  it('reads an authorized email through the same pinned workspace endpoint', async () => {
+    const f=scriptedFetch(()=>json({...result,object:{type:'email',id:'mail-one',data:{subject:'Order update',body:'Read-only mail content'}}}));
+    const tool=bambookTools({fetch:f.fetch,delegation:()=>delegation,needed:vi.fn()}).find(t=>t.name==='bambook_get')!;
+    const value=await tool.run({type:'email',id:'mail-one'},ctx());expect(value).toMatchObject({object:{type:'email',id:'mail-one'}});
+    expect(f.calls[0].url).toBe('https://bambook.example/api/mist/workspaces/workspace-one/agent/objects/email/mail-one');
+  });
   it('exposes only read tools and pins every request to the supplied workspace origin without cookies or redirects', async () => {
     const f = scriptedFetch(() => json(result));
     const needed = vi.fn();

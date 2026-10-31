@@ -1,3 +1,4 @@
+import { MailStateStatus } from './MailStateStatus';
 import {useMailReceiving,MailReceivingControl,MailReceivingNotice} from './MailReceiving';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 智能邮箱：三栏收件箱（邮箱与文件夹 / 邮件列表 / 阅读区）。真实邮箱经 IMAP 增量同步、SMTP 发送；发送结果分为已接受 / 失败 / 不确定，不确定时不自动重发。示例邮箱只用合成数据。 */
@@ -104,7 +105,7 @@ export function EmailsPage() {
   React.useEffect(() => {
     if (!route.id || !state) return;
     const m = state.email?.messages.find(row => row.id === route.id);
-    if (m) { setScope({ kind: 'folder', value: m.folder }); setAccountId('all'); } else if (state.email?.drafts.some(row => row.id === route.id)) setScope({ kind: 'folder', value: 'drafts' });
+    if (m) { setScope({ kind: 'folder', value: m.folder }); setAccountId(current => current === 'all' || current === m.accountId ? current : 'all'); } else if (state.email?.drafts.some(row => row.id === route.id)) setScope({ kind: 'folder', value: 'drafts' });
     else if (state.email?.sends?.some(row => row.id === route.id)) setScope({ kind: 'folder', value: 'outbox' });
     setPicked(route.id); setDrawer(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,7 +136,7 @@ export function EmailsPage() {
     const sent = (email.sends || []).find(row => row.id === id); return sent ? { kind: 'send', id: sent.id, send: sent } : undefined;
   };
   const selected = rows.find(row => row.id === picked) || find(picked);
-  const exec: Exec = async (command, done) => { setFailure(''); try { const receipt = await run(command); if (done) toast(done); return receipt; } catch (problem) { setFailure(problemText(problem, '操作未保存，请重试')); return null; } };
+  const exec: Exec = async (command, done) => { setFailure(''); try { const receipt = await run(command); if (done) toast(receipt.result?.remoteQueued ? '已保存，待同步原邮箱' : done); return receipt; } catch (problem) { setFailure(problemText(problem, '操作未保存，请重试')); return null; } };
   const pick = (row: Row) => {
     setPicked(row.id); setDrawer(true); go('emails', row.id, undefined, { keepScroll: true });
     if (row.kind === 'message' && !row.message.read && can && !locked) void exec({ type: 'email.flag', payload: { id: row.id, flag: 'read', value: true } });
@@ -335,7 +336,7 @@ export function EmailsPage() {
         </div>
         {failedAccounts.length > 0 && <div className="mist-mail-inline-warn" role="status"><AlertTriangle size={14} /><span><b>{uiText(scopeFailed ? `${scopeLabel}同步失败` : '部分文件夹同步失败')}</b> · {failedAccounts.map(a => `${a.displayName}：${a.failedFolders.join('、')}未能同步，显示的是上次同步结果`).join('；')}。</span></div>}
         {list}
-        {accounts.some(a => a.example) && <p className="mist-note mist-mail-listfoot">{uiText("示例邮箱：演示公司的合成邮件，不连接邮件服务器、不能发送；标记、关联、跟进与草稿会真实保存。")}</p>}
+        {messages.some(m => m.example) && <p className="mist-note mist-mail-listfoot">{uiText("示例邮箱：演示公司的合成邮件，不连接邮件服务器、不能发送；标记、关联、跟进与草稿会真实保存。")}</p>}
       </section>
       {!compact && <section className="mist-mail-reader" aria-label={uiText("阅读邮件")}>{detail}</section>}
       {compact && <Drawer open={drawer && !!selected} onClose={() => setDrawer(false)} title={uiText(selectedTitle)} sub={uiText(selectedSub)} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
@@ -383,9 +384,10 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
       {can && <div className="mist-row mist-mail-flags" aria-label={uiText("邮件标记")}>
         <Button size="sm" variant="quiet" icon={MailOpen} disabled={locked} aria-label={uiText(m.read ? '标为未读' : '标为已读')} title={uiText(m.read ? '标为未读' : '标为已读')} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'read', value: !m.read } })} />
         <Button size="sm" variant="quiet" icon={Star} disabled={locked} aria-pressed={m.starred} aria-label={uiText(m.starred ? '取消星标' : '星标')} title={uiText(m.starred ? '取消星标' : '星标')} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'starred', value: !m.starred } })} />
-        <Button size="sm" variant="quiet" icon={AlertTriangle} disabled={locked} aria-pressed={m.important} aria-label={uiText(m.important ? '取消重要' : '标为重要')} title={uiText(m.important ? '取消重要' : '标为重要')} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'important', value: !m.important } })} />
+        <Button size="sm" variant="quiet" icon={AlertTriangle} disabled={locked} aria-pressed={m.important} aria-label={uiText(m.important ? '取消重要' : '标为重要')} title={uiText(m.important ? '取消重要（仅本系统）' : '标为重要（仅本系统）')} onClick={() => void exec({ type: 'email.flag', payload: { id: m.id, flag: 'important', value: !m.important } })} />
       </div>}
     </div>
+    <MailStateStatus message={m} locked={locked} retry={acceptRemote => exec({type:'email.state.retry',payload:{id:m.id,acceptRemote}})} />
     <header className="mist-mail-read-head">
       <h2 className="mist-mail-read-subject">{m.subject || '（无主题）'}</h2>
       <div className="mist-row" style={{ flexWrap: 'wrap', gap: 6 }}>

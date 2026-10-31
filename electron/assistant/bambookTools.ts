@@ -9,8 +9,7 @@ export type BambookDelegation = { token: string; expiresAt: string; workspaceId:
 export type DelegationReason = 'missing' | 'expired' | 'rejected';
 
 export const BAMBOOK_OBJECT_TYPES = [
-  'customer', 'contact', 'order', 'order_line', 'development', 'dev_version', 'product', 'sample',
-  'quotation', 'supplier', 'purchase', 'production', 'shipment', 'invoice', 'risk', 'claim',
+  'email', 'customer', 'contact', 'order', 'order_line', 'development', 'dev_version', 'product', 'sample', 'quotation', 'supplier', 'purchase', 'receipt', 'payable_settlement', 'payable_bill', 'payment_plan', 'payment_request', 'supplier_payment', 'payment_allocation', 'prepayment_move', 'production', 'shipment', 'invoice', 'risk', 'claim'
 ] as const;
 
 const typeSchema = { type: 'string', enum: [...BAMBOOK_OBJECT_TYPES], description: '业务对象类型；以服务端实际允许的可读类型为准。' };
@@ -110,6 +109,6 @@ export function bambookTools(options: {
       parameters: details,
       run: async (args, ctx) => request(`objects/${objectType(args.type)}/${encodeURIComponent(objectId(args.id))}/related`, ctx.signal, ctx.now()),
     },
-    { ...common,name:'bambook_mail_receiving',description:'读取本人可见邮箱的自动收件授权、最近执行和下次计划。只读，不返回凭据，不代替本人开启任务。',parameters:{type:'object',properties:{},additionalProperties:false},run:async(args,ctx)=>{if(Object.keys(args).length)invalid('此工具不接受参数');return request('mail-receiving',ctx.signal,ctx.now());} },
+    { ...common,name:'bambook_mail_receiving',description:'读取本人可见邮箱的自动收件、标记和移动同步状态、最近执行及下次计划。只读，不返回凭据，不代替本人开启任务。',parameters:{type:'object',properties:{},additionalProperties:false},run:async(args,ctx)=>{if(Object.keys(args).length)invalid('此工具不接受参数');return request('mail-receiving',ctx.signal,ctx.now());} },
   ];
 }

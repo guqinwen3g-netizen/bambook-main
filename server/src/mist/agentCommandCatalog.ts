@@ -338,17 +338,34 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistEmail.ts"
  },
  {
+  "type": "email.server.state",
+  "payload": "{ accountId: string; source: number; operationId: string; attemptId: string; observation: MailStateObservation }",
+  "types": {
+   "MailStateObservation": "{ id: string; expected: MailRemoteRef; remote?: MailRemoteRef; folder?: EmailMessageFolder; read?: boolean; starred?: boolean; missing?: boolean; }",
+   "MailRemoteRef": "{ folder: string; uid: number; uidValidity: number; hash?: string }",
+   "EmailMessageFolder": "'inbox' | 'sent' | 'archive' | 'trash'"
+  },
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
   "type": "email.server.sync",
-  "payload": "{ accountId: string; source?: number; at: string; folders: EmailFolderSync[]; messages: EmailSyncedMessage[]; files: StoredFile[]; lastError: EmailProblem | null }",
+  "payload": "{ accountId: string; source?: number; at: string; folders: EmailFolderSync[]; messages: EmailSyncedMessage[]; files: StoredFile[]; lastError: EmailProblem | null; observations?: MailStateObservation[] }",
   "types": {
    "EmailFolderSync": "{ remote: string; folder: EmailMessageFolder; uidValidity: number; lastUid: number; lastSyncAt: string | null; error?: string }",
    "EmailMessageFolder": "'inbox' | 'sent' | 'archive' | 'trash'",
-   "EmailSyncedMessage": "{ remote: { folder: string; uid: number; uidValidity: number }; folder: EmailMessageFolder; messageId: string; inReplyTo: string; references: string[]; from: EmailAddress; to: EmailAddress[]; cc: EmailAddress[]; subject: string; body: string; at: string; read: boolean; attachments: EmailAttachment[]; }",
+   "EmailSyncedMessage": "{ remote: { folder: string; uid: number; uidValidity: number }; folder: EmailMessageFolder; messageId: string; inReplyTo: string; references: string[]; from: EmailAddress; to: EmailAddress[]; cc: EmailAddress[]; subject: string; body: string; at: string; read: boolean; starred?: boolean; hash?: string; attachments: EmailAttachment[]; }",
    "EmailAddress": "{ name: string; address: string }",
    "EmailAttachment": "{ id: string; name: string; size: number; contentType: string; fileId?: string; omitted?: string }",
    "StoredFile": "{ id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string }",
-   "EmailProblem": "{ code: string; message: string; at: string }"
+   "EmailProblem": "{ code: string; message: string; at: string }",
+   "MailStateObservation": "{ id: string; expected: MailRemoteRef; remote?: MailRemoteRef; folder?: EmailMessageFolder; read?: boolean; starred?: boolean; missing?: boolean; }",
+   "MailRemoteRef": "{ folder: string; uid: number; uidValidity: number; hash?: string }"
   },
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
+  "type": "email.state.retry",
+  "payload": "{ id: string; acceptRemote?: boolean }",
   "source": "server/src/shared/mistEmail.ts"
  },
  {

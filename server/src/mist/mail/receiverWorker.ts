@@ -6,7 +6,7 @@ import type { ReceiveAuthority, ReceivingJob } from './receiverRegistry';
 export type MailReceiverOptions = {
   tickMs?: number; concurrency?: number; now?: () => number;
   localActor?: (ownerId: string) => Promise<TokenPayload>;
-  onError?: (code: string) => void;
+  onError?: (code: string) => void; stateWorker?: {start():void;stop():Promise<void>};
 };
 
 /** Only the canonical Mist application starts this loop. Registrations remain opt-in and durable. */
@@ -24,7 +24,7 @@ export class MistMailReceiver {
   get running() { return this.enabled; }
   start(initialDelayMs=1000) {
     if (this.enabled) return;
-    this.enabled = true;
+    this.enabled = true; this.options.stateWorker?.start();
     this.timer = setInterval(() => { void this.tick(); }, this.options.tickMs ?? 15_000);
     this.first = setTimeout(() => { void this.tick(); }, initialDelayMs);
     this.timer.unref?.(); this.first.unref?.();
@@ -32,6 +32,7 @@ export class MistMailReceiver {
   async stop() {
     this.enabled = false; clearInterval(this.timer); clearTimeout(this.first);
     for (const run of this.runs.values()) run.controller.abort();
+    await this.options.stateWorker?.stop();
     await this.scanDone;
     await Promise.allSettled([...this.runs.values()].map(run => run.done));
   }

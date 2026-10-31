@@ -34,6 +34,29 @@ function connection(sizes: Record<number, number>, chunks = 1) {
 }
 beforeEach(() => connect.mockReset());
 describe('IMAP raw receive resource budget', () => {
+  it('does not treat an incomplete metadata response as a deleted message', async () => {
+    const imap={fetch:()=>{const f=new EventEmitter();queueMicrotask(()=>{f.emit('message',new EventEmitter());f.emit('end');});return f;}};
+    connect.mockResolvedValue({imap});const session=await imapSmtpTransport.imap(config,{password:'test'} as any,false);
+    await expect(session.metadata!([1])).rejects.toMatchObject({code:'MAIL_STATE_METADATA_INVALID'});
+  });
+  it('rejects control characters before issuing a Message-ID search', async () => {
+    const search=vi.fn();connect.mockResolvedValue({imap:{search}});const session=await imapSmtpTransport.imap(config,{password:'test'} as any,false);
+    await expect(session.searchMessageId!('mail\r\nUID MOVE')).rejects.toMatchObject({code:'MAIL_STATE_AMBIGUOUS'});expect(search).not.toHaveBeenCalled();
+  });
+  it('refuses unsafe fallback when MOVE is not advertised', async () => {
+    const imap = Object.assign(new EventEmitter(), { serverSupports: () => false, move: vi.fn() });
+    connect.mockResolvedValue({ imap });
+    const session = await imapSmtpTransport.imap(config, { password: 'test' } as any, false);
+    await expect(session.move!(1,'Archive')).rejects.toMatchObject({code:'MAIL_MOVE_UNSUPPORTED'});
+    expect(imap.move).not.toHaveBeenCalled();
+  });
+  it('rejects a disconnected MOVE whose callback never arrives instead of leaving it pending', async () => {
+    const imap = Object.assign(new EventEmitter(), { serverSupports: () => true, move: () => queueMicrotask(() => imap.emit('end')) });
+    connect.mockResolvedValue({ imap });
+    const session = await imapSmtpTransport.imap(config, { password: 'test' } as any, false);
+    await expect(session.move!(1,'Archive')).rejects.toMatchObject({code:'ECONNRESET'});
+    expect(imap.listenerCount('end')).toBe(0);expect(imap.listenerCount('close')).toBe(0);
+  });
   it('rejects an oversized advertised message before fetching its body', async () => {
     const f = connection({ 1: MAIL_FETCH_MAX_BYTES + 1 });
     const session = await imapSmtpTransport.imap(config, { password: 'test' } as any, false);
