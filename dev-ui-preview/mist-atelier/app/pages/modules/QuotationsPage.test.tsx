@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MARKET_PAGES } from './MarketPages';
-import { quotationDomain, quotationFlags, quotationStage } from './QuotationsPage';
+import { quotationDomain, quotationFlags, quotationStage, quotationStageLabel } from './QuotationsPage';
 import { Nav } from '../../nav';
 import { createMistState, type MistContext, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 
@@ -94,4 +94,10 @@ describe('报价管理', () => {
     await click('客户接受');
     expect(document.body.textContent).toContain('登记客户接受 QT-2026-0005');
   });
+});
+it('labels an approved draft as ready to send instead of a plain draft', () => {
+  const base = { status: 'Draft', lines: [] } as any;
+  expect(quotationStageLabel(base)).toBe('草稿');
+  expect(quotationStageLabel({ ...base, approval: { status: 'approved' } })).toBe('已批准待发送');
+  expect(quotationStageLabel({ ...base, approval: { status: 'rejected' } })).toBe('草稿');
 });

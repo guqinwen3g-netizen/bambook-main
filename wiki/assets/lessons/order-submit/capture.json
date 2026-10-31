@@ -1,0 +1,36 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 576,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 280,
+        "y": 506,
+        "width": 1118,
+        "height": 68
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1166,
+        "y": 183,
+        "width": 113,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

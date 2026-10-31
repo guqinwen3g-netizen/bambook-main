@@ -63,7 +63,8 @@ export function quotationFlags(all: MarketQuotation[], q: MarketQuotation, day: 
 }
 const margin = (price: string, cost: string) => { const p = Number(price), c = Number(cost); return cost && p > 0 && c > 0 && Number.isFinite(c) ? Math.round((p - c) / p * 1000) / 10 : null; };
 const version = (q: MarketQuotation) => 'V' + (q.revision || 1);
-export const quotationStageLabel = (q: MarketQuotation) => { const s = quotationStage(q); return s === 'closed' ? (q.status === 'Expired' ? '已失效' : '客户未接受') : QUOTE_STAGE_LABEL[s]; };
+// 审批通过后报价回到草稿等待发送；列表与详情一致标明“已批准待发送”，避免业务员误以为仍需审批。
+export const quotationStageLabel = (q: MarketQuotation) => { const s = quotationStage(q); return s === 'closed' ? (q.status === 'Expired' ? '已失效' : '客户未接受') : s === 'draft' && q.approval?.status === 'approved' ? '已批准待发送' : QUOTE_STAGE_LABEL[s]; };
 
 export type QuotationWorkbenchProps = {
   onCreate: () => void;
@@ -127,7 +128,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
       title: `从 ${q.code} 创建订单`, submitLabel: '创建订单草稿',
       initialValues: { type: domain, due: '', ownerId: defaultMemberId(members, session.user?.id), ...Object.fromEntries(choices.map(c => ['line:' + c.line.id, !c.blocked && (!c.family || c.family === domain)])) },
       fields: [
-        ...choices.map(c => ({ key: 'line:' + c.line.id, label: `转入：${c.line.name} · ${c.line.qty} ${c.line.unit} × ${c.line.price}`, type: 'checkbox' as const, readonly: !!c.blocked, hint: c.blocked || undefined })),
+        ...choices.map(c => ({ key: 'line:' + c.line.id, label: `${c.blocked ? '暂不能转' : '转入'}：${c.line.name} · ${c.line.qty} ${c.line.unit} × ${c.line.price}`, type: 'checkbox' as const, readonly: !!c.blocked, hint: c.blocked || undefined })),
         { key: 'type', label: '订单类型', type: 'select', required: true, options: [{ value: 'garment', label: '成衣订单' }, { value: 'fabric', label: '面料订单' }] },
         { key: 'due', label: '本次订单交期', type: 'date', required: true },
         { key: 'ownerId', label: '业务负责人', type: 'select', required: true, options: memberSelectOptions(members) },
@@ -166,7 +167,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
     { key: 'lines', header: '条目', width: 'minmax(110px,1fr)', hideOnMobile: true, render: q => <span className="mist-col" style={{ gap: 2 }}><span>{q.lines[0]?.name || '—'}</span><small className="mist-muted">{uiText(q.lines.length > 1 ? `等 ${q.lines.length} 项` : q.lines[0] ? `${q.lines[0].qty} ${q.lines[0].unit}` : '')}</small></span> },
     { key: 'total', header: '金额 / 术语', width: '118px', align: 'right', render: q => <span className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span className="mist-num" style={{ whiteSpace: 'nowrap' }}>{q.currency} {quoteMoney(q.total)}</span><small className="mist-muted">{q.deliveryTerms}</small></span> },
     { key: 'valid', header: '有效期', width: '96px', render: q => { const f = quotationFlags(all, q, day).find(x => x.key === 'overdue' || x.key === 'expiring'); return <span className="mist-col" style={{ gap: 2 }}><span className="mist-num">{q.validUntil}</span>{f && <small className={f.tone === 'bad' ? 'mist-tone-bad' : 'mist-tone-warn'}>{uiText(f.label)}</small>}</span>; } },
-    { key: 'stage', header: '状态', width: '92px', render: q => { const s = quotationStage(q), superseded = all.some(x => x.previousId === q.id); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STAGE_TONE[s]}>{quotationStageLabel(q)}</Pill>{superseded && <small className="mist-muted">{uiText("已出新版本")}</small>}</span>; } },
+    { key: 'stage', header: '状态', width: '112px', render: q => { const s = quotationStage(q), superseded = all.some(x => x.previousId === q.id); return <span className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={s === 'draft' && q.approval?.status === 'approved' ? 'accent' : STAGE_TONE[s]}>{quotationStageLabel(q)}</Pill>{superseded && <small className="mist-muted">{uiText("已出新版本")}</small>}</span>; } },
   ];
   const empty = domainRows.length
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的报价")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
@@ -260,7 +261,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       {flags.filter(f => f.key !== 'returned' && f.key !== 'superseded').map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}
     </div>
     <Banner tone={banner.tone} title={uiText(banner.title)}>{banner.text}</Banner>
-    {blockers.length > 0 && <Banner tone="warn" title={uiText(allBlocked ? '开发版本未获需求方认可 · 暂不能转订单' : '部分条目的开发版本未获需求方认可 · 这些条目暂不能转')}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}{uiText("请先在开发模块记录需求方认可后再转单；产品档案条目不受此限制。")}</span></Banner>}
+    {blockers.length > 0 && <Banner tone="warn" title={uiText(allBlocked ? '开发版本未获需求方认可 · 暂不能转订单' : '部分条目的开发版本未获需求方认可 · 这些条目暂不能转')}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}{uiText("请先在开发模块记录需求方认可后再转单；没有开发来源的产品档案条目不受此限制。")}</span></Banner>}
     <ActionBar busy={locked} actions={[
       { label: '编辑草稿', icon: Pencil, onClick: onEdit, reason: writeReason, hidden: stage !== 'draft' },
       { label: '提交业务审批', icon: Send, onClick: onSubmit, primary: needsApproval && !approved, reason: writeReason, hidden: stage !== 'draft' || approved },

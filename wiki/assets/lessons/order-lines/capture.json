@@ -1,0 +1,64 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 576,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 280,
+        "y": 506,
+        "width": 1118,
+        "height": 68
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 348,
+        "y": 512,
+        "width": 116,
+        "height": 22
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 888,
+        "y": 566,
+        "width": 524,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 494,
+        "y": 460,
+        "width": 186,
+        "height": 40
+      },
+      "value": "全包"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 872,
+        "y": 593,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

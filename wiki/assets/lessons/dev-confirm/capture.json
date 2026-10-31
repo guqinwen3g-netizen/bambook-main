@@ -1,0 +1,83 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 462,
+        "width": 68,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 360,
+        "y": 554,
+        "width": 226,
+        "height": 18
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1078,
+        "y": 763,
+        "width": 300,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 614,
+        "y": 458,
+        "width": 142,
+        "height": 49
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 649,
+        "y": 550,
+        "width": 169,
+        "height": 40
+      },
+      "value": "Olivia Grant（Cedar & Crown 采购）"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 879,
+        "y": 630,
+        "width": 169,
+        "height": 40
+      },
+      "value": "客户 10-31 邮件确认 R2-A-2 大货样，可按此生产。"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 953,
+        "y": 812,
+        "width": 109,
+        "height": 40
+      }
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 872,
+        "y": 554,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

@@ -24,3 +24,7 @@ describe('current company member names', () => {
     expect(workspaceMembers({ ownerId: 'creator' }, state([{ userId: 'creator', name: '姓名' }]), null)).toHaveLength(1);
   });
 });
+it('names a local workspace owner from the owner profile instead of showing the account id', () => {
+  const source = state([{ userId: 'sales', name: '顾言' }]); (source as any).settings = { ...(source as any).settings, profileName: '周敏' };
+  expect(workspaceMembers({ ownerId: 'demo-reviewer' }, source, { id: 'sales', displayName: '顾言' }).find(m => m.id === 'demo-reviewer')?.name).toBe('周敏');
+});

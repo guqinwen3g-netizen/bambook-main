@@ -4,6 +4,7 @@
  *
  *   npm run dev:mist                     # 先启动本地独立服务（演示种子，不连公司库或共享服务器）
  *   node scripts/manual-capture.mjs chain        # 整条付款链（需先重置本地数据），或逐课：settlement 等
+ *   node scripts/manual-capture.mjs order-chain  # 报价 → 订单（需先重置本地数据）
  *
  * 产物：wiki/assets/lessons/<课程>/NN.webp + capture.json（入库，供 wiki:build 生成引导式演示）。
  * 只允许连接 127.0.0.1 的本地服务；采集会在本地工作区真实执行一遍操作，重采前先重置本地数据。
@@ -40,7 +41,27 @@ const BALANCE_REASON = 'ST-2026-0001 已确认，专票 110,670.00 已登记，�
 const NO_RESUPPLY = '华盛毛纺赵琳邮件确认：色差 20 米退回，不再补发。';
 const CLOSE_NOTE = '供应商邮件确认色差 20 米不再补发，合同按实收 2,380 米结案。';
 const REFUND_NOTE = '供应商退回短交 20 米对应的预付款 279.00。';
-let invoiceFile = '';
+let invoiceFile = '', poFile = '';
+const QUOTE_SENT = '邮件发送正式报价单 PDF 给 Cedar & Crown 采购 Olivia Grant';
+const QUOTE_ACCEPTED = 'Olivia Grant 10-31 邮件确认接受 V2 报价，PO 随后下发。';
+const DEV_CONFIRMER = 'Olivia Grant（Cedar & Crown 采购）', DEV_BASIS = '客户 10-31 邮件确认 R2-A-2 大货样，可按此生产。';
+const ORDER_DUE = '2026-12-20', CUSTOMER_PO = 'CC-PO-2026-1188';
+const QTY_BASIS = '客户 PO CC-PO-2026-1188 按款号总量下单：大衣 800 件、马甲 600 件，分色分码后补。';
+const openQuote = [
+  { target: p => nav(p, '订单履约', '报价管理'), act: l => l.click() },
+  { target: p => p.locator('[role=row]', { hasText: 'V2' }).first(), act: l => l.click() },
+  { target: p => p.getByRole('button', { name: '打开报价单' }), act: l => l.click() },
+];
+const openOrder = [
+  { target: p => nav(p, '订单履约', '订单管理'), act: l => l.click() },
+  { target: p => p.locator('[role=row]', { hasText: 'SO-G-2026-0009' }).first(), act: l => l.click() },
+];
+const lineMode = (name, mode) => [
+  { target: p => p.getByRole('button', { name: new RegExp(name) }).first().or(p.getByText(name).first()), act: l => l.click() },
+  { target: p => p.getByRole('dialog').last().getByRole('button', { name: '编辑条目' }), act: l => l.click() },
+  { target: p => p.getByRole('dialog').last().getByLabel('履约模式'), act: l => l.selectOption({ label: mode }), value: mode },
+  { target: p => p.getByRole('dialog').last().getByRole('button', { name: '保存条目' }), act: l => l.click() },
+];
 /** 演示专票原件：采集时现生成，明确标注演示样张。 */
 function demoInvoice() { return invoiceFile; }
 
@@ -137,6 +158,68 @@ const LESSONS = {
     { target: p => p.getByRole('dialog').getByLabel('退货单 / 供应商确认依据'), act: l => l.fill(NO_RESUPPLY), value: NO_RESUPPLY },
     { target: p => p.getByRole('dialog').getByRole('button', { name: '登记退换' }), act: l => l.click() },
   ],
+  'quote-approve': [
+    { profile: 'demo-reviewer', target: p => p.getByText(/QT-2026-0003-V2 报价审批/).last(), act: l => l.click() },
+    { target: p => p.locator('textarea').last(), act: l => l.fill('马甲按客户还价让利，整单毛利可接受，同意。'), value: '马甲按客户还价让利，整单毛利可接受，同意。' },
+    { target: p => p.getByRole('button', { name: '批准' }), act: l => l.click() },
+  ],
+  'quote-send': [
+    { profile: 'demo-sales', ...openQuote[0] }, openQuote[1], openQuote[2],
+    { target: p => p.getByRole('button', { name: '生成正式报价单' }), act: async (l, p) => { await l.click(); await p.getByText(/QT-2026-0003-V2-01\.pdf/).first().waitFor({ timeout: 20000 }); } },
+    { target: p => p.getByRole('button', { name: '登记已发送' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('发送方式与对象'), act: l => l.fill(QUOTE_SENT), value: QUOTE_SENT },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '登记' }), act: l => l.click() },
+  ],
+  'quote-accept': [
+    { profile: 'demo-sales', ...openQuote[0] }, openQuote[1], openQuote[2],
+    { target: p => p.getByRole('button', { name: '客户接受' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('客户反馈或依据'), act: l => l.fill(QUOTE_ACCEPTED), value: QUOTE_ACCEPTED },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '登记' }), act: l => l.click() },
+  ],
+  'dev-confirm': [
+    { profile: 'demo-sales', target: p => nav(p, '订单履约', '开发与寻样'), act: l => l.click() },
+    { target: p => p.getByText('DEV-G-2026-031').first(), act: l => l.click() },
+    { target: p => p.getByRole('button', { name: /打开/ }).first(), act: l => l.click() },
+    { target: p => p.getByRole('radio', { name: '认可' }), act: l => l.check({ force: true }) },
+    { target: p => p.getByLabel('实际确认人'), act: l => l.fill(DEV_CONFIRMER), value: DEV_CONFIRMER },
+    { target: p => p.getByLabel('确认依据'), act: l => l.fill(DEV_BASIS), value: DEV_BASIS },
+    { target: p => p.getByRole('button', { name: '保存确认' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '确认提交' }), act: l => l.click() },
+  ],
+  'quote-convert': [
+    { profile: 'demo-sales', ...openQuote[0] }, openQuote[1], openQuote[2],
+    { target: p => p.getByRole('button', { name: '核对并转订单' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('本次订单交期'), act: l => l.fill(ORDER_DUE), value: ORDER_DUE },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '创建订单草稿' }), act: l => l.click() },
+  ],
+  'order-contract': [
+    { profile: 'demo-sales', ...openOrder[0] }, openOrder[1],
+    { target: p => p.getByRole('button', { name: '合同与审批资料' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('PO / 合同号'), act: l => l.fill(CUSTOMER_PO), value: CUSTOMER_PO },
+    { target: p => p.getByRole('dialog').last().getByLabel('数量口径'), act: l => l.selectOption({ label: '按总量' }), value: '按总量' },
+    { target: p => p.getByRole('dialog').last().getByLabel('数量依据'), act: l => l.fill(QTY_BASIS), value: QTY_BASIS },
+    { target: p => p.getByRole('dialog').last().getByLabel('溢装上限 %'), act: l => l.fill('3'), value: '3' },
+    { target: p => p.getByRole('dialog').last().getByLabel('短装下限 %'), act: l => l.fill('3'), value: '3' },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '上传文件' }), act: (l, p) => p.getByRole('dialog').last().locator('input[type=file]').setInputFiles(poFile) },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '保存合同资料' }), act: l => l.click() },
+  ],
+  'order-lines': [
+    { profile: 'demo-sales', ...openOrder[0] }, openOrder[1],
+    ...lineMode('双面羊毛城市大衣', '全包'),
+  ],
+  '_order-lines-2': [
+    { profile: 'demo-sales', ...openOrder[0] }, openOrder[1],
+    ...lineMode('轻量填充马甲', '全包'),
+  ],
+  'order-submit': [
+    { profile: 'demo-sales', ...openOrder[0] }, openOrder[1],
+    { target: p => p.getByRole('button', { name: '提交主单审批' }), act: l => l.click() },
+  ],
+  'order-approve': [
+    { profile: 'demo-reviewer', target: p => p.getByText(/SO-G-2026-0009/).last(), act: l => l.click() },
+    { target: p => p.locator('textarea').last(), act: l => l.fill('PO、价格、交期与付款条件已核对，同意。'), value: 'PO、价格、交期与付款条件已核对，同意。' },
+    { target: p => p.getByRole('button', { name: '批准' }), act: l => l.click() },
+  ],
   'short-close': [
     { profile: 'demo-buyer', target: p => p.getByText('PO-2026-00001 · 待最终结算').first(), act: l => l.click() },
     { target: p => dialog(p, '提交结算').getByRole('checkbox', { name: '最终结算' }), act: l => l.check({ force: true }) },
@@ -201,7 +284,9 @@ async function capture(browser, name) {
   }
 }
 
-const names = process.argv.slice(2).flatMap(n => n === 'chain' ? CHAIN : [n]);
+/** 主干第一段：报价 → 订单（重置本地数据后依次执行）。 */
+const ORDER_CHAIN = ['quote-approve', 'quote-send', 'quote-accept', 'dev-confirm', 'quote-convert', 'order-contract', 'order-lines', '_order-lines-2', 'order-submit', 'order-approve'];
+const names = process.argv.slice(2).flatMap(n => n === 'chain' ? CHAIN : n === 'order-chain' ? ORDER_CHAIN : [n]);
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 const browser = await chromium.launch(executablePath ? { executablePath } : {});
 try {
@@ -209,6 +294,11 @@ try {
     const tmp = await browser.newPage(); invoiceFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bambook-')), 'demo-vat-invoice.pdf');
     await tmp.setContent('<body style="font-family:sans-serif;padding:48px"><h2>增值税专用发票（教学演示样张，非真实票据）</h2><p>销售方：华盛毛纺（演示）</p><p>发票号码：' + INVOICE_NO + '</p><p>燕麦色双面呢 2380 米 · 价税合计 110,670.00 · 税率 13%</p><p style="color:#b00">DEMO</p></body>');
     await tmp.pdf({ path: invoiceFile, format: 'A5' }); await tmp.close();
+  }
+  if (names.includes('order-contract')) {
+    const tmp = await browser.newPage(); poFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bambook-')), 'demo-customer-po.pdf');
+    await tmp.setContent('<body style="font-family:sans-serif;padding:48px"><h2>PURCHASE ORDER (teaching demo, not a real order)</h2><p>Buyer: Cedar &amp; Crown (demo)</p><p>PO No.: ' + CUSTOMER_PO + '</p><p>Double-face wool city coat GA-2711 · 800 pcs × USD 72.50</p><p>Lightweight padded vest GA-2712 · 600 pcs × USD 20.50</p><p>FOB Shanghai · T/T 30% deposit, 70% against B/L copy · Delivery 2026-12-20</p></body>');
+    await tmp.pdf({ path: poFile, format: 'A5' }); await tmp.close();
   }
   for (const name of names) await capture(browser, name);
 } finally { await browser.close(); }

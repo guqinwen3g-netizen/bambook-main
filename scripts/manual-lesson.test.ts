@@ -30,7 +30,7 @@ it('practice: a click outside the highlighted control only hints; the highlighte
 it('demo: types the captured value, pauses without progress, resumes and finishes on the result frame',async()=>{
  vi.useFakeTimers();const {dom,q,click}=make();
  try{
-  click('[data-step="5"]');click('[data-replay]');await vi.advanceTimersByTimeAsync(3300);
+  click('[data-step="5"]');click('[data-replay]');await vi.advanceTimersByTimeAsync(2000);
   click('[data-play]');expect(q('[data-play]').textContent).toBe('▶ 继续');const typed=q('[data-value]').textContent;
   expect(typed!.length).toBeGreaterThan(0);await vi.advanceTimersByTimeAsync(3000);expect(q('[data-value]').textContent).toBe(typed);
   click('[data-play]');await vi.advanceTimersByTimeAsync(6000);expect(q('[data-value]').textContent).toBe(settlement.steps[5].fill);expect(q('[data-step="5"]').classList.contains('done')).toBe(true);

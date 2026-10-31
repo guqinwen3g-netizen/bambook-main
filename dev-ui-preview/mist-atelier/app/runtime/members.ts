@@ -14,7 +14,8 @@ function ownerName(state: MistState, ownerId: string, viewer: Viewer): string {
   const fromGroups = state.memberGroups?.find(g => g.userId === ownerId)?.name;
   if (fromGroups) return fromGroups;
   const snapshot = [...(state.customers || []), ...(state.orders || []), ...(state.devs || []), ...(state.fabrics || [])].find(row => row.ownerId === ownerId)?.owner;
-  return snapshot || ownerId;
+  // 空间设置里的姓名属于空间所有者本人；名册和单据都没有时用它，不显示账号 ID。
+  return snapshot || state.settings?.profileName?.trim() || ownerId;
 }
 export function workspaceMembers(envelope: Envelope, state: MistState | null | undefined, viewer: Viewer): MistMemberOption[] {
   if (!state) return [];

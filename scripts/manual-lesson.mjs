@@ -179,15 +179,15 @@ function lessonMain(doc) {
     const moveCursor = (x, y) => { cursorAt = { x, y }; cursor.style.left = pct(x); cursor.style.top = pct(y); };
     const perform = async (r, f) => {
       cursor.hidden = false; moveCursor(f.x + Math.min(f.w * .5, .03), f.y + f.h * .55);
-      if (r && !await wait(r, 850)) return false;
+      if (r && !await wait(r, 600)) return false;
       cursor.classList.remove('click'); void cursor.offsetWidth; cursor.classList.add('click');
       if (f.kind === 'check') { valueBox.className = 'shot-value check'; valueBox.hidden = false; }
       if (f.kind === 'type' || f.kind === 'select') {
         valueBox.hidden = false; valueBox.textContent = '';
         if (f.kind === 'select' || !r) valueBox.textContent = f.value;
-        else for (const ch of f.value) { valueBox.textContent += ch; if (!await wait(r, 40)) return false; }
+        else { const per = Math.max(10, Math.min(40, Math.floor(900 / Math.max(1, f.value.length)))); for (const ch of f.value) { valueBox.textContent += ch; if (!await wait(r, per)) return false; } }
       }
-      return !r || wait(r, 800);
+      return !r || wait(r, 450);
     };
     const markStep = () => {
       panels.forEach((p, k) => { p.hidden = k !== step; });
@@ -216,8 +216,8 @@ function lessonMain(doc) {
       const f = frames[step];
       showFrame(step); shot.setAttribute('data-dim', ''); shot.removeAttribute('data-practice'); setCamera(1);
       cursor.hidden = false; moveCursor(cursorAt.x, cursorAt.y);
-      if (!await wait(r, 650)) return false;
-      zoomTo(f); if (!await wait(r, 900)) return false;
+      if (!await wait(r, 350)) return false;
+      zoomTo(f); if (!await wait(r, 650)) return false;
       showTip(f);
       if (!await perform(r, f)) return false;
       complete(); return true;
@@ -228,8 +228,8 @@ function lessonMain(doc) {
       for (;;) {
         if (!await demoStep(r)) return;
         if (step === frames.length - 1) { await finish(r); break; }
-        if (!await wait(r, 400)) return;
-        tip.hidden = true; setCamera(1); if (!await wait(r, 500)) return;
+        if (!await wait(r, 250)) return;
+        tip.hidden = true; setCamera(1); if (!await wait(r, 350)) return;
         step++; markStep(); completed.delete(step); rail[step].classList.remove('done');
         if (!await swap(frames[step].src, r)) return;
       }
