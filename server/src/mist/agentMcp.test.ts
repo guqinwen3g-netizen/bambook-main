@@ -10,6 +10,7 @@ import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
 import { agentCommandSensitivity } from './agentMcp';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_AUDIT_FIELD, agentAuditReceiptId } from './agentAudit';
+import {randomUUID} from 'node:crypto';
 
 let directory: string;
 beforeEach(async () => { directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mist-mcp-')); vi.stubEnv('MIST_LOCAL_WORKSPACE', '1'); vi.stubEnv('NODE_ENV', 'test'); });
@@ -20,7 +21,7 @@ async function as(app: any, profileId: string, mode: 'read' | 'operate' = 'opera
   await client.get('/api/mist/session').expect(200);
   await client.post('/api/mist/session').send({ profileId }).expect(200);
   const workspace = (await client.get('/api/mist/workspaces/default').expect(200)).body.workspace;
-  const issued = (await client.post('/api/mist/agent/delegations').send({ mode }).expect(201)).body.delegation;
+  const issued = (await client.post('/api/mist/agent/delegations').send({ mode,workspaceId:workspace.id,id:randomUUID() }).expect(201)).body.delegation;
   const token = issued.token as string;
   let id = 0;
   const rpc = async (method: string, params: Record<string, unknown> = {}) => (await request(app).post('/api/mist/mcp').set(HEADER, token).send({ jsonrpc: '2.0', id: ++id, method, params }).expect(200)).body;

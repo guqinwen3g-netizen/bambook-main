@@ -8,6 +8,7 @@ import request from 'supertest';
 import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER } from './agentDelegation';
+import {randomUUID} from 'node:crypto';
 
 let directory: string;
 const clients: Client[] = [], servers: Server[] = [];
@@ -30,7 +31,7 @@ async function fixture(profileId = 'demo-buyer', mode: 'read' | 'operate' = 'ope
   await human.get('/api/mist/session').expect(200);
   await human.post('/api/mist/session').send({ profileId }).expect(200);
   const workspace = (await human.get('/api/mist/workspaces/default').expect(200)).body.workspace;
-  const issued = (await human.post('/api/mist/agent/delegations').send({ mode }).expect(201)).body.delegation;
+  const issued = (await human.post('/api/mist/agent/delegations').send({ mode,workspaceId:workspace.id,id:randomUUID() }).expect(201)).body.delegation;
   const server = app.listen(0, '127.0.0.1'); servers.push(server);
   await new Promise<void>(resolve => server.once('listening', resolve));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing loopback address');

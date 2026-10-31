@@ -2255,12 +2255,12 @@
    "commands": [],
    "impl": "source",
    "lessons": [],
-   "note": "#574 已合入 main（账号页「Agent操作记录」、REST 与 bambook_audit）；实施 Agent 已在本地真实界面核验；发布前不得写成员工当前可用"
+   "note": "#574 已合入并发布（运行提交 a9a78ee8）：账号页「Agent操作记录」、REST 与 bambook_audit；尚无员工课程"
   },
   {
    "id": "agent-self-connect",
    "stage": "AI 与 Agent",
-   "task": "员工自助连接、续期与长值守 Agent",
+   "task": "员工在账号页自助创建、续签与撤销 Agent 连接",
    "roles": [
     "全部岗位"
    ],
@@ -2271,9 +2271,27 @@
     "account"
    ],
    "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "#577/#578 已合入 main，发布前复验发现签发问题已回退，修复后尚待发布；发布前不得写成员工可用"
+  },
+  {
+   "id": "agent-long-running",
+   "stage": "AI 与 Agent",
+   "task": "长值守 Agent 与无人值守账号",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "account"
+   ],
+   "commands": [],
    "impl": "missing",
    "lessons": [],
-   "note": "自助连接、续期、长期凭据、长值守循环尚未交付"
+   "note": "长期运行循环与无人值守账号尚未交付"
   }
  ]
 }

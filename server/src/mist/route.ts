@@ -51,7 +51,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     void (async () => {
       options.delegationGuard?.(req);
       if (typeof header !== 'string') fail('AGENT_DELEGATION_INVALID', '工作助手委托无效', 401);
-      const agent = await delegation.authenticate(header);
+      const agent = await delegation.authenticate(header, agent=>repository.authorizeAgentConnection(agent),true);
       if (!agentRouteAllowed(req.method, req.path)) fail('AGENT_FORBIDDEN', '工作助手委托只能读取业务数据，不能调用此接口', 403);
       (req as Request & { actor: TokenPayload }).actor = agent;
       res.setHeader('Cache-Control', 'private, no-store');
@@ -134,14 +134,20 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.post('/ai/subscriptions/chatgpt/login', subscriptionCall(async (req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(personalSubject(a.userId)) }); }));
   router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall((req, res) => { const a = aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
   router.post('/ai/subscriptions/chatgpt/disconnect', subscriptionCall((req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.json({ chatgpt: subscriptions().disconnect(personalSubject(a.userId)) }); }));
-  // 工作助手：本人会话签发短期委托；委托身份只读，权限 = 账号权限 ∩ 工作助手上限。
+  const connectionReply=(result:any)=>({...result,payload:undefined,...(result.payload?{delegation:delegation.signManaged(result.payload),readable:agentCatalog({userId:result.payload.sub,roles:[],permissions:result.payload.ceil,departmentIds:[],permissionCeiling:result.payload.ceil,authorizationLoaded:true})}:{} )});
+  router.get('/workspaces/:id/agent-connections',run(async(req,res)=>{const query=exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentConnections(actor(req),req.params.id,query.cursor,delegation.timestamp()));}));
+  router.get('/workspaces/:id/agent-connections/:connectionId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentConnection(actor(req),req.params.id,req.params.connectionId,delegation.timestamp()));}));
+  router.post('/workspaces/:id/agent-connections',run(async(req,res)=>{const input=exactBody(req.body??{},['id','name','mode']);const result=await repository.createAgentConnection(actor(req),req.params.id,input,delegation.prepareManaged,delegation.timestamp());res.setHeader('Cache-Control','private, no-store');res.status(201).json(connectionReply(result));}));
+  for(const action of ['renew','revoke'] as const)router.post('/workspaces/:id/agent-connections/:connectionId/'+action,run(async(req,res)=>{const input=exactBody(req.body??{},['requestId','version']);const result=await repository.changeAgentConnection(actor(req),req.params.id,req.params.connectionId,action,input,delegation.prepareManaged,delegation.timestamp());res.setHeader('Cache-Control','private, no-store');res.json(connectionReply(result));}));
+  // Compatibility entry for the desktop bridge: all newly issued credentials are registered v2.
   router.post('/agent/delegations', run(async (req, res) => {
-    const body = exactBody(req.body ?? {}, ['mode']);
+    const body = exactBody(req.body ?? {}, ['mode','workspaceId','id']);
     if (body.mode !== undefined && body.mode !== 'read' && body.mode !== 'operate') fail('INVALID_INPUT', '委托类型无效', 400);
     const current = await repository.currentActor(actor(req), 'ai:chat');
-    const issued = delegation.issue(current, body.mode === 'operate' ? 'operate' : 'read');
+    if(typeof body.workspaceId!=='string'||typeof body.id!=='string')fail('CONNECTION_UPGRADE_REQUIRED','请更新客户端后重新连接',400);
+    const result=await repository.createAgentConnection(actor(req),body.workspaceId,{id:body.id,name:'桌面工作助手',mode:body.mode==='operate'?'operate':'read'},delegation.prepareManaged,delegation.timestamp());
     res.setHeader('Cache-Control', 'private, no-store');
-    res.status(201).json({ delegation: issued, readable: agentCatalog({ ...current, permissionCeiling: issued.ceiling }) });
+    res.status(201).json({...connectionReply(result),readable:agentCatalog({...current,permissionCeiling:result.payload.ceil})});
   }));
   // 标准 MCP 接口（JSON-RPC）：读取、命令目录、预演与执行普通命令；高敏感命令须本人在系统中确认。
   const checkMcpProtocol = (req: Request, res: Response) => {
