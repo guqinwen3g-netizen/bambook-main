@@ -95,11 +95,11 @@ export function AuditHistoryView({workspaceId,members=[]}:{workspaceId:string;me
     {unavailable>0&&<Banner tone="warn" title={uiText('有操作记录暂不可读取')}/>}
     <DataTable ariaLabel={uiText('Agent 操作记录')} loading={loading&&!items.length} rows={items} rowKey={r=>r.requestId} onRowClick={open} minWidth={300} columns={[
       {key:'action',header:uiText('操作'),width:'minmax(170px,2fr)',render:r=><div><div>{action(r)}</div><span className="mist-note">{uuid(r.actor.name)?uiText('未命名账号'):r.actor.name} · {when(r.at)}</span></div>},
-      {key:'source',header:uiText('来源'),width:'110px',render:r=><Pill>{uiText(source(r))}</Pill>},
+      {key:'source',header:uiText('来源'),width:'110px',render:r=><div><Pill>{uiText(source(r))}</Pill>{r.agentIdentity&&<div className="mist-note">{r.agentIdentity.name}</div>}</div>},
     ]} empty={<EmptyState title={uiText(unavailable?'记录暂不可用':phase||person||related?'没有符合条件的操作':'暂无 Agent 操作记录')} action={phase||person||related?<Button onClick={()=>{setPhase('');setPerson('');setRelated(null);}}>{uiText('清除筛选')}</Button>:undefined}/>} footer={cursor?<Button disabled={loading} loading={loading} onClick={()=>void load(cursor)}>{uiText('加载更多')}</Button>:undefined}/>
     <Dialog open={!!selected} onClose={()=>setSelected(null)} title={selected?action(selected):uiText('操作详情')} width={860} footer={<><Button onClick={()=>setSelected(null)}>{uiText('关闭')}</Button>{detail?.nextOffset!==null&&detail?.nextOffset!==undefined&&<Button loading={detailBusy} onClick={()=>setOffset(detail.nextOffset!)}>{uiText('更多变更')}</Button>}{detail?.targets?.[0]&&<Button variant="primary" disabled={!nav||detailBusy} onClick={()=>openTarget(detail.targets[0])}>{uiText('打开原单')}</Button>}</>}>
       <div className="mist-col">
-        {selected&&<div className="mist-row" data-wrap>{detail?.targets?.[0]&&<Mono>{detail.targets[0].label}</Mono>}<span>{uuid(selected.actor.name)?uiText('未命名账号'):selected.actor.name}</span><Pill>{uiText(source(selected))}</Pill><span className="mist-note">{when(selected.at)}</span></div>}
+        {selected&&<div className="mist-row" data-wrap>{detail?.targets?.[0]&&<Mono>{detail.targets[0].label}</Mono>}<span>{uuid(selected.actor.name)?uiText('未命名账号'):selected.actor.name}</span><Pill>{uiText(source(selected))}</Pill>{selected.agentIdentity&&<span>{selected.agentIdentity.name}</span>}<span className="mist-note">{when(selected.at)}</span></div>}
         {detailError&&<Banner tone="bad" title={uiText('操作详情读取失败')}>{uiText(detailError)} <Button onClick={()=>{setOffset(0);setDetailReload(v=>v+1);}}>{uiText('重新读取')}</Button></Banner>}
         {detailBusy&&!detail&&<Skeleton height={80}/>}
         {detail&&(detail.detailsRestricted||detail.commandRestricted)&&<Banner tone="warn" title={uiText('部分明细受当前权限限制')}/>}

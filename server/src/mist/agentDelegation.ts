@@ -9,6 +9,7 @@ import { MIST_READ_SECTIONS } from './access';
 import { MistApiError } from './errors';
 import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
 import {hasScope} from '../auth/permissionService';
+import type {AgentServiceLease} from './agentIdentities';
 
 export const AGENT_DELEGATION_HEADER = 'x-bambook-delegation';
 export const AGENT_DELEGATION_TTL_MS = 2 * 60 * 60 * 1000;
@@ -25,7 +26,7 @@ export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new S
  */
 export const AGENT_OPERATE_CEILING: readonly string[] = Object.freeze(Object.keys(PERMISSION_SCOPES).sort());
 export type AgentDelegationMode = 'read' | 'operate';
-export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode; agentWorkspaceId?:string; agentLease?:ManagedAgentPayload };
+export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode; agentWorkspaceId?:string; agentLease?:ManagedAgentPayload;agentServiceLease?:AgentServiceLease;agentIdentity?:{id:string;name:string} };
 export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number; mode?: 'operate'; credentialVersion?:string };
 export type ManagedAgentPayload=Omit<AgentDelegationPayload,'v'|'kind'>&{v:2;kind:'mist-agent-connection';wid:string;generation:string};
 export type AgentDelegationIssue = { token: string; sessionId: string; expiresAt: string; ceiling: string[]; mode: AgentDelegationMode };
@@ -117,6 +118,12 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     return actor;
   }
 
-  return { issue, verify, authenticate,prepareManaged,signManaged,timestamp:now };
+  function makeServiceCredential(workspaceId:string,id:string,generation:string){
+    const serviceRoot=createHmac('sha256',options.rootSecret()).update('bambook-mist-service-key/v1').digest();
+    const secret=createHmac('sha256',serviceRoot).update(JSON.stringify([workspaceId,id,generation])).digest('base64url');
+    return `bma1_${workspaceId}_${id}_${secret}`;
+  }
+  const hydrateServiceActor=async(raw:AgentActor):Promise<AgentActor>=>({...await options.resolve(raw.userId),...raw});
+  return { issue, verify, authenticate,prepareManaged,signManaged,makeServiceCredential,hydrateServiceActor,timestamp:now };
 }
 export type AgentDelegation = ReturnType<typeof createAgentDelegation>;

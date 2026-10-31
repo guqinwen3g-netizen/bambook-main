@@ -71,7 +71,7 @@ export function auditFromReceipt(row: any, workspaceId: string): AgentCommandAud
 export function auditMatchesParent(a:AgentCommandAudit,parent:any){return parent?.workspaceId===a.workspaceId&&parent.requestId===a.requestId&&parent.actorId===a.actor.id&&parent.expectedRevision===a.requestedRevision&&parent.result?.revision===a.committedRevision;}
 export function auditEntry(a: AgentCommandAudit): AgentAuditEntry {
   const type = bodyOf(a).type;
-  return { requestId:a.requestId,at:a.at,actor:a.actor,source:a.source,phase:a.phase,commandType:a.command.type,requestedCommandType:type,label:agentAuditLabel(type),agentSessionId:a.agentSessionId, ...(a.proposalId ? {proposalId:a.proposalId}:{}),requestedRevision:a.requestedRevision,baseRevision:a.baseRevision,committedRevision:a.committedRevision };
+  return { requestId:a.requestId,at:a.at,actor:a.actor,source:a.source,phase:a.phase,commandType:a.command.type,requestedCommandType:type,label:agentAuditLabel(type),agentSessionId:a.agentSessionId,...(a.agentIdentity?{agentIdentity:a.agentIdentity}:{}), ...(a.proposalId ? {proposalId:a.proposalId}:{}),requestedRevision:a.requestedRevision,baseRevision:a.baseRevision,committedRevision:a.committedRevision };
 }
 function read(root: any, path: string[]): any {
   let value = root;

@@ -1,4 +1,10 @@
 export const connectionEnglish:Record<string,string>={
+ '身份启用':'Identity enabled','身份停用':'Identity disabled',
+ '长期Agent':'Long-term Agents','Agent服务':'Agent services','Agent服务身份':'Agent service identities','Agent身份':'Agent identity','Agent名称':'Agent name','责任人':'Responsible person','新建Agent身份':'New Agent identity','配置Agent身份':'Configure Agent identity',
+ '待责任人启用':'Awaiting owner activation','凭据有效':'Credential active','启用凭据':'Activate credential','轮换密钥':'Rotate key','撤销密钥':'Revoke key','签发密钥':'Issue key','长期Agent凭据':'Long-term Agent credential','长期密钥':'Long-term key','启用长期凭据':'Activate long-term credential','生成长期密钥':'Generate long-term key','启用Agent身份':'Enable Agent identity',
+ '旧密钥将立即失效，新密钥有效期90天。':'The previous key will stop working immediately. The new key expires in 90 days.','密钥有效期90天。':'The key expires in 90 days.','此密钥将立即失效。':'This key will stop working immediately.','更换责任人、调整权限或停用后，旧密钥立即失效。':'Changing the owner or access level, or disabling the identity, immediately invalidates the previous key.',
+ '暂无Agent服务身份':'No Agent service identities','暂无分配给你的Agent身份':'No Agent identities assigned to you','Agent身份读取失败':'Could not load Agent identities','请填写Agent名称并选择责任人':'Enter an Agent name and select a responsible person','Agent身份已保存':'Agent identity saved','密钥已撤销':'Key revoked','长期凭据响应无效':'Invalid long-term credential response','操作未完成，请重试':'Could not complete the operation. Try again.',
+ 'Agent身份操作记录':'Agent identity history','操作记录读取失败':'Could not load operation history','暂无操作记录':'No operation history',
  '请在公司网页中管理连接':'Manage connections from the company website.',
  'Agent 连接':'Agent connections','新建连接':'New connection','连接读取失败':'Could not load connections','暂无 Agent 连接':'No Agent connections yet','连接名称':'Connection name','新建 Agent 连接':'New Agent connection','创建连接':'Create connection',
  '续签':'Renew','续签连接':'Renew connection','确认续签':'Renew connection','撤销连接':'Revoke connection','确认撤销':'Revoke connection','旧凭据将立即失效。':'The previous credential will stop working immediately.','此连接将立即失效。':'This connection will stop working immediately.',

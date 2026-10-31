@@ -1,0 +1,90 @@
+import {afterEach,beforeEach,describe,it,expect,vi} from 'vitest';
+import request from 'supertest';import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import path from 'node:path';import {randomUUID} from 'node:crypto';
+import {createMistLocalRuntime} from './local';import {createMistServer} from './server';import {SERVICE_KEY_HEADER} from './agentIdentities';
+let directory:string;
+beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'mist-service-agent-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
+afterEach(async()=>{vi.useRealTimers();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
+async function human(app:any,profileId:string){const client=request.agent(app);await client.get('/api/mist/session').expect(200);await client.post('/api/mist/session').send({profileId}).expect(200);const workspace=(await client.get('/api/mist/workspaces/default').expect(200)).body.workspace;return{client,workspace,base:'/api/mist/workspaces/'+workspace.id+'/agent-identities'};}
+const initialize=(app:any,key:string)=>request(app).post('/api/mist/mcp').set(SERVICE_KEY_HEADER,key).send({jsonrpc:'2.0',id:1,method:'initialize',params:{}});
+const tool=async(app:any,key:string,name:string,args:any)=>(await request(app).post('/api/mist/mcp').set(SERVICE_KEY_HEADER,key).send({jsonrpc:'2.0',id:2,method:'tools/call',params:{name,arguments:args}}).expect(200)).body.result;
+describe('Administrator managed service identity with owner-only long credentials',()=>{
+ it('keeps administrators from taking another owners key, survives a browser session expiry and rotates/revokes durably',async()=>{
+  vi.useFakeTimers({toFake:['Date']});const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local}),admin=await human(app,'demo-admin'),finance=await human(app,'demo-finance'),buyer=await human(app,'demo-buyer'),id=randomUUID();
+  await buyer.client.post(admin.base).send({id,name:'财务值守',ownerId:'demo-finance',mode:'read'}).expect(403);
+  const created=(await admin.client.post(admin.base).send({id,name:'财务值守',ownerId:'demo-finance',mode:'read'}).expect(201)).body;expect(created.state).toBe('pending');
+  const plan={requestId:randomUUID(),version:1};await admin.client.post(admin.base+'/'+id+'/issue').send(plan).expect(403);
+  expect((await buyer.client.get(admin.base).expect(200)).body.items).toHaveLength(0);
+  const issued=(await finance.client.post(admin.base+'/'+id+'/issue').send(plan).expect(200)).body;expect(issued.token).toMatch(/^bma1_/);expect(issued.identity.state).toBe('active');
+  expect((await finance.client.post(admin.base+'/'+id+'/issue').send(plan).expect(200)).body.token).toBe(issued.token);
+  const rows=await local.database.mistCommandReceipt.findMany({where:{workspaceId:admin.workspace.id}});expect(JSON.stringify(rows)).not.toContain(issued.token);expect(JSON.stringify((await admin.client.get(admin.base).expect(200)).body)).not.toContain(issued.token);
+  await initialize(app,issued.token).expect(200);
+  const workspaces=await tool(app,issued.token,'bambook_workspaces',{});expect(workspaces.structuredContent.workspaces).toHaveLength(1);expect(workspaces.structuredContent.workspaces[0].id).toBe(admin.workspace.id);
+  await request(app).get('/api/mist/session').set(SERVICE_KEY_HEADER,issued.token).expect(403);
+  await request(app).post(admin.base+'/'+id+'/issue').set(SERVICE_KEY_HEADER,issued.token).send({requestId:randomUUID(),version:2}).expect(403);
+  vi.setSystemTime(Date.now()+8*24*60*60*1000);await initialize(app,issued.token).expect(200);
+  const loggedIn=await human(app,'demo-finance');const rotated=(await loggedIn.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:2}).expect(200)).body;expect(rotated.token).not.toBe(issued.token);await initialize(app,issued.token).expect(401);await initialize(app,rotated.token).expect(200);
+  await loggedIn.client.post(admin.base+'/'+id+'/revoke').send({requestId:randomUUID()}).expect(200);await initialize(app,rotated.token).expect(401);
+  const restarted=createMistServer(undefined,{local:createMistLocalRuntime({directory})});await initialize(restarted,rotated.token).expect(401);
+  const history=(await loggedIn.client.get(admin.base+'/'+id+'/history').expect(200)).body;
+  expect(history.items.map((e:any)=>e.action).sort()).toEqual(['created','issued','issued','revoked']);
+  expect(history.items.find((e:any)=>e.action==='created').actor.id).toBe('demo-admin');
+  expect(history.items.filter((e:any)=>e.action==='issued').every((e:any)=>e.actor.id==='demo-finance')).toBe(true);
+  expect(JSON.stringify(history)).not.toMatch(/bma1_|credentialVersion|generation|ceiling/);
+  await (await human(app,'demo-buyer')).client.get(admin.base+'/'+id+'/history').expect(404);
+ });
+ it('uses the real responsible human for sensitive confirmation and retains the independent Agent identity in the audit',async()=>{
+  const app=createMistServer(undefined,{local:createMistLocalRuntime({directory})}),admin=await human(app,'demo-admin'),finance=await human(app,'demo-finance'),id=randomUUID();
+  await admin.client.post(admin.base).send({id,name:'财务核对',ownerId:'demo-finance',mode:'operate'}).expect(201);
+  const issued=(await finance.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
+  const proposed=await tool(app,issued.token,'bambook_execute',{workspaceId:admin.workspace.id,requestId:randomUUID(),command:{type:'finance.account.save',payload:{name:'模拟美元账户',bankName:'模拟银行',accountNo:'SIM-001',currency:'USD',openingDate:'2026-10-30',openingBalance:0}}});
+  expect(proposed.isError).not.toBe(true);expect(proposed.structuredContent.status).toBe('awaiting_confirmation');
+  let ws=(await finance.client.get('/api/mist/workspaces/default').expect(200)).body.workspace;expect((ws.state.bankAccounts??[]).some((a:any)=>a.accountNo==='SIM-001')).toBe(false);
+  const proposal=ws.state.agentProposals.find((p:any)=>p.agentSessionId===id);expect(proposal.ownerId).toBe('demo-finance');expect(proposal.agentIdentity).toEqual({id,name:'财务核对'});
+  expect((await tool(app,issued.token,'bambook_execute',{workspaceId:ws.id,requestId:randomUUID(),command:{type:'agent.proposal.confirm',payload:{id:proposal.id}}})).isError).toBe(true);
+  await admin.client.post('/api/mist/workspaces/'+ws.id+'/commands').send({requestId:randomUUID(),expectedRevision:ws.revision,command:{type:'agent.proposal.confirm',payload:{id:proposal.id}}}).expect(404);
+  await finance.client.post('/api/mist/workspaces/'+ws.id+'/commands').send({requestId:randomUUID(),expectedRevision:ws.revision,command:{type:'agent.proposal.confirm',payload:{id:proposal.id}}}).expect(200);
+  ws=(await finance.client.get('/api/mist/workspaces/default').expect(200)).body.workspace;expect(ws.state.bankAccounts.some((a:any)=>a.accountNo==='SIM-001')).toBe(true);
+  const history=(await finance.client.get('/api/mist/workspaces/'+ws.id+'/agent-audits').expect(200)).body;expect(history.items.filter((a:any)=>a.agentSessionId===id).every((a:any)=>a.agentIdentity?.name==='财务核对')).toBe(true);
+ });
+ it('invalidates keys on configuration changes and never reactivates them by enabling an identity again',async()=>{
+  const app=createMistServer(undefined,{local:createMistLocalRuntime({directory})}),admin=await human(app,'demo-admin'),owner=await human(app,'demo-finance'),id=randomUUID();
+  await admin.client.post(admin.base).send({id,name:'只读检查',ownerId:'demo-finance',mode:'read'}).expect(201);const issued=(await owner.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
+  const disabled=(await admin.client.post(admin.base+'/'+id+'/configure').send({requestId:randomUUID(),version:2,name:'只读检查',ownerId:'demo-finance',mode:'read',enabled:false}).expect(200)).body;expect(disabled.state).toBe('disabled');await initialize(app,issued.token).expect(401);
+  const enabled=(await admin.client.post(admin.base+'/'+id+'/configure').send({requestId:randomUUID(),version:3,name:'只读检查',ownerId:'demo-finance',mode:'read',enabled:true}).expect(200)).body;expect(enabled.state).toBe('pending');await initialize(app,issued.token).expect(401);
+ });
+ it('rejects ambiguous credentials and prevents read-only keys from managing identities or making changes',async()=>{
+  const app=createMistServer(undefined,{local:createMistLocalRuntime({directory})}),admin=await human(app,'demo-admin'),owner=await human(app,'demo-finance'),id=randomUUID();
+  await admin.client.post(admin.base).send({id,name:'只读核对',ownerId:'demo-finance',mode:'read'}).expect(201);
+  const issued=(await owner.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
+  expect((await tool(app,issued.token,'bambook_execute',{workspaceId:admin.workspace.id,requestId:randomUUID(),command:{type:'finance.account.save',payload:{name:'不应生成'}}})).isError).toBe(true);
+  await request(app).get(admin.base).set(SERVICE_KEY_HEADER,issued.token).expect(403);
+  await request(app).get(admin.base+'/'+id+'/history').set(SERVICE_KEY_HEADER,issued.token).expect(403);
+  await owner.client.get(admin.base).set(SERVICE_KEY_HEADER,'invalid').expect(401);
+  await request(app).post('/api/mist/mcp').set(SERVICE_KEY_HEADER,issued.token).set('x-bambook-delegation','invalid').send({jsonrpc:'2.0',id:1,method:'initialize',params:{}}).expect(401);
+ });
+ it('invalidates the previous owners key and requires the new responsible human to activate a replacement',async()=>{
+  const app=createMistServer(undefined,{local:createMistLocalRuntime({directory})}),admin=await human(app,'demo-admin'),finance=await human(app,'demo-finance'),buyer=await human(app,'demo-buyer'),id=randomUUID();
+  await admin.client.post(admin.base).send({id,name:'采购核对',ownerId:'demo-finance',mode:'read'}).expect(201);
+  const old=(await finance.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
+  const change={requestId:randomUUID(),version:2,name:'采购核对',ownerId:'demo-buyer',mode:'read',enabled:true};
+  expect((await admin.client.post(admin.base+'/'+id+'/configure').send(change).expect(200)).body.state).toBe('pending');
+  await admin.client.post(admin.base+'/'+id+'/configure').send(change).expect(200);
+  await initialize(app,old.token).expect(401);await finance.client.get(admin.base+'/'+id+'/history').expect(404);
+  await finance.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:3}).expect(403);
+  const next=(await buyer.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:3}).expect(200)).body;await initialize(app,next.token).expect(200);
+  await admin.client.post(admin.base+'/'+id+'/configure').send({...change,version:4}).expect(409);
+  expect((await buyer.client.get(admin.base+'/'+id+'/history').expect(200)).body.items).toHaveLength(4);
+ });
+ it('expires independently of browser login and permits managers to stop a departed owners identity',async()=>{
+  vi.useFakeTimers({toFake:['Date']});const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local}),admin=await human(app,'demo-admin'),finance=await human(app,'demo-finance'),id=randomUUID();
+  await admin.client.post(admin.base).send({id,name:'账务核对',ownerId:'demo-finance',mode:'read'}).expect(201);
+  const issued=(await finance.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
+  vi.setSystemTime(Date.now()+90*86400000);await initialize(app,issued.token).expect(401);
+  const fresh=await human(app,'demo-finance');expect((await fresh.client.get(admin.base).expect(200)).body.items[0].state).toBe('expired');
+  const next=(await fresh.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:2}).expect(200)).body;await initialize(app,next.token).expect(200);
+  const ws=await local.database.mistWorkspace.findUnique({where:{id:admin.workspace.id}});await local.database.mistWorkspace.update({where:{id:ws.id},data:{state:{...ws.state,memberIds:ws.state.memberIds.filter((id:string)=>id!=='demo-finance'),members:ws.state.members.filter((m:any)=>m.userId!=='demo-finance')}}});
+  await initialize(app,next.token).expect(404);
+  const manager=await human(app,'demo-admin');expect((await manager.client.get(admin.base+'?scope=company').expect(200)).body.items[0].state).toBe('invalid');
+  await manager.client.post(admin.base+'/'+id+'/configure').send({requestId:randomUUID(),version:3,name:'账务核对',ownerId:'demo-finance',mode:'read',enabled:false}).expect(200);
+ });
+});

@@ -22,6 +22,7 @@ export type AgentCommandAudit = {
   source: 'agent' | 'human_confirmation' | 'human_rejection';
   /** null only for a historical proposal whose originating session was never recorded. */
   agentSessionId: string | null;
+  agentIdentity?:{id:string;name:string};
   proposalId?: string;
   phase: 'executed' | 'proposed' | 'confirmed' | 'rejected';
   command: { type: string; payload: Record<string, unknown> };

@@ -21,6 +21,7 @@ import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, type McpRepository } from './agentMcp';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
+import {SERVICE_KEY_HEADER} from './agentIdentities';
 import { MistMailService } from './mail/service';
 import { MistMailCredentials } from './mail/credentials';
 import type { MailTransport } from './mail/transport';
@@ -47,11 +48,14 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   // 带委托头的请求一律按工作助手身份处理（比本人会话更窄），且只放行工作助手读取接口。
   router.use((req, res, next) => {
     const header = req.headers[AGENT_DELEGATION_HEADER];
-    if (header === undefined) { authenticate(req, res, next); return; }
+    const serviceKey=req.headers[SERVICE_KEY_HEADER];
+    if (header === undefined&&serviceKey===undefined) { authenticate(req, res, next); return; }
     void (async () => {
       options.delegationGuard?.(req);
-      if (typeof header !== 'string') fail('AGENT_DELEGATION_INVALID', '工作助手委托无效', 401);
-      const agent = await delegation.authenticate(header, agent=>repository.authorizeAgentConnection(agent),true);
+      if(header!==undefined&&serviceKey!==undefined)fail('AGENT_KEY_INVALID','请只使用一种Agent凭据',401);
+      let agent;
+      if(serviceKey!==undefined){agent=await delegation.hydrateServiceActor(await repository.resolveAgentServiceKey(serviceKey));await repository.authorizeAgentConnection(agent);}
+      else {if (typeof header !== 'string') fail('AGENT_DELEGATION_INVALID', '工作助手委托无效', 401);agent=await delegation.authenticate(header, actor=>repository.authorizeAgentConnection(actor),true);}
       if (!agentRouteAllowed(req.method, req.path)) fail('AGENT_FORBIDDEN', '工作助手委托只能读取业务数据，不能调用此接口', 403);
       (req as Request & { actor: TokenPayload }).actor = agent;
       res.setHeader('Cache-Control', 'private, no-store');
@@ -135,6 +139,12 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall((req, res) => { const a = aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
   router.post('/ai/subscriptions/chatgpt/disconnect', subscriptionCall((req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.json({ chatgpt: subscriptions().disconnect(personalSubject(a.userId)) }); }));
   const connectionReply=(result:any)=>({...result,payload:undefined,...(result.payload?{delegation:delegation.signManaged(result.payload),readable:agentCatalog({userId:result.payload.sub,roles:[],permissions:result.payload.ceil,departmentIds:[],permissionCeiling:result.payload.ceil,authorizationLoaded:true})}:{} )});
+  router.get('/workspaces/:id/agent-identities',run(async(req,res)=>{const query=exactBody(req.query,['scope','cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentIdentities(actor(req),req.params.id,delegation.timestamp(),query.scope??'mine',query.cursor));}));
+  router.post('/workspaces/:id/agent-identities',run(async(req,res)=>{const body=exactBody(req.body??{},['id','name','ownerId','mode']);res.setHeader('Cache-Control','private, no-store');res.status(201).json(await repository.createAgentIdentity(actor(req),req.params.id,body,delegation.timestamp()));}));
+  router.post('/workspaces/:id/agent-identities/:identityId/configure',run(async(req,res)=>{const body=exactBody(req.body??{},['requestId','version','name','ownerId','mode','enabled']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.configureAgentIdentity(actor(req),req.params.id,req.params.identityId,body,delegation.timestamp()));}));
+  router.post('/workspaces/:id/agent-identities/:identityId/issue',run(async(req,res)=>{const body=exactBody(req.body??{},['requestId','version']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.issueAgentServiceKey(actor(req),req.params.id,req.params.identityId,body,delegation.makeServiceCredential,delegation.timestamp()));}));
+  router.post('/workspaces/:id/agent-identities/:identityId/revoke',run(async(req,res)=>{const body=exactBody(req.body??{},['requestId']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.revokeAgentServiceKey(actor(req),req.params.id,req.params.identityId,body,delegation.timestamp()));}));
+  router.get('/workspaces/:id/agent-identities/:identityId/history',run(async(req,res)=>{const query=exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentIdentityHistory(actor(req),req.params.id,req.params.identityId,query.cursor));}));
   router.get('/workspaces/:id/agent-connections',run(async(req,res)=>{const query=exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentConnections(actor(req),req.params.id,query.cursor,delegation.timestamp()));}));
   router.get('/workspaces/:id/agent-connections/:connectionId',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentConnection(actor(req),req.params.id,req.params.connectionId,delegation.timestamp()));}));
   router.post('/workspaces/:id/agent-connections',run(async(req,res)=>{const input=exactBody(req.body??{},['id','name','mode']);const result=await repository.createAgentConnection(actor(req),req.params.id,input,delegation.prepareManaged,delegation.timestamp());res.setHeader('Cache-Control','private, no-store');res.status(201).json(connectionReply(result));}));
