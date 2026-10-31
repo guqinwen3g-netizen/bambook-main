@@ -19,6 +19,7 @@ export function useMailReceiving(accounts: EmailAccount[]) {
   const [pending, setPending] = React.useState<Plan | null>(null), [busy, setBusy] = React.useState(false);
   const live = React.useRef(scope), mounted = React.useRef(false), reads = React.useRef(0), writes = React.useRef(0);
   const readAbort = React.useRef<AbortController | null>(null), writeAbort = React.useRef<AbortController | null>(null), pendingRef = React.useRef(pending);
+  const readFailure = React.useRef(false);
   live.current = scope; pendingRef.current = pending;
   const load = React.useCallback(async () => {
     if (!workspaceId) return;
@@ -29,10 +30,10 @@ export function useMailReceiving(accounts: EmailAccount[]) {
       if (!mounted.current || live.current !== scope || serial !== reads.current) return;
       setPage(result);
       const plan = pendingRef.current;
-      if (!plan) setError('');
+      if (!plan && readFailure.current) { readFailure.current = false; setError(''); }
       if (plan && result.items.some((item: MailReceivingView) => item.accountId === plan.accountId && item.lastChangeId === plan.requestId)) { setPending(null); setError(''); }
     } catch (failure) {
-      if (mounted.current && live.current === scope && serial === reads.current && !abort.signal.aborted) setError(failure instanceof Error ? failure.message : '收件状态读取失败');
+      if (mounted.current && live.current === scope && serial === reads.current && !abort.signal.aborted) { readFailure.current = true; setError(failure instanceof Error ? failure.message : '收件状态读取失败'); }
     }
   }, [scope, workspaceId]);
   React.useEffect(() => {
@@ -43,7 +44,7 @@ export function useMailReceiving(accounts: EmailAccount[]) {
   const submit = async (plan: Plan) => {
     if (!workspaceId || busy) return;
     const serial = ++writes.current, abort = new AbortController(); writeAbort.current = abort;
-    setPending(plan); setBusy(true); setError('');
+    readFailure.current = false; setPending(plan); setBusy(true); setError('');
     try {
       const result = await mistApiRequest(`/api/mist/workspaces/${encodeURIComponent(workspaceId)}/email/accounts/${encodeURIComponent(plan.accountId)}/receiving`, { method: 'PUT', signal: abort.signal, body: JSON.stringify({ enabled: plan.enabled, version: plan.version, sourceGeneration: plan.sourceGeneration, requestId: plan.requestId }) });
       if (result.item?.accountId !== plan.accountId || result.item?.lastChangeId !== plan.requestId) throw new Error('收件设置响应无效，请核对状态');
