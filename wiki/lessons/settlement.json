@@ -135,5 +135,13 @@
       "title": "被退回",
       "text": "打开结算看退回原因，修正后重新提交。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T12:08:55.579Z",
+      "softwareCommit": "988d6efe635022b16766e58d207c5ac30fdd7e63",
+      "contentSha256": "0ca053773ecb1c46ca968232ba7e71a19ab993a0bd99af1a9c2625fe96443f52"
+    }
+  }
 }
