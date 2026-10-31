@@ -160,6 +160,8 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 
 ## 14. Mist 标准 MCP 接口（2026-10-30 用户定案后实现）
 
+2026-11-01 持久任务增量：当前源码标准10工具（新增`bambook_task`），任务专用HTTP连接9工具、公司与任务服务端绑定。本人创建任务并签发任务控制连接，标准客户端自动领取短执行租约，支持持久检查点、等待人工确认、暂停/恢复/重连/停止及额度；长期根密钥和临时执行凭据不进入模型结果。资源、权限、并发、邮件延迟执行与发布状态详见[Code Wiki6.3](../CODE_WIKI.md#63-持久-agent-任务与标准任务连接2026-11-01)及[员工文字SOP](../../wiki/sop/agent-tasks.md)。该控制链不是平台自主模型循环，后者仍未交付。下文带日期的9工具记录为当时邮件增量，不覆盖本段当前口径。
+
 2026-11-01 邮件整理增量：平台主动按单封邮件整理正文，严格原文证据、人工复核、新复核编号与交接快照分开保存；正式业务不自动改写。`email.extraction.review/resolve` 经Agent一律confirm，确认窗口显示具体值与依据；标准读取保留结构化分析，仍9工具/25类。详见Code Wiki6.1.3及邮箱文字SOP。附件抽取与通用持久值守未交付。
 
 2026-11-01 邮箱增量：当前25类读取对象（含`email`）；邮件正文最多10000字符并标识截断，仍受个人/共享邮箱可见性约束。`bambook_mail_receiving`的`stateResults`读回标记与移动的队列状态；`email.move`和`email.state.retry {id,acceptRemote?}`进入真人确认，普通已读/星标意图保留原Agent连接租约并在实际执行时复核。详细回程见Code Wiki第6.1.2节。
@@ -172,7 +174,7 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 - **身份**：`POST /api/mist/agent/delegations` 由本人会话签发委托（2 小时）。`{mode:'read'}`（默认）上限为只读 scope；`{mode:'operate'}` 上限 = 账号现有 scope（`AGENT_OPERATE_CEILING`），永远不超出账号。委托只能调用读取路由和 `/mcp`。
 - **工具**：`bambook_workspaces`、`bambook_query`、`bambook_get`、`bambook_related`（复用 `agentRead.ts`）；`bambook_commands`（命令目录 + payload 结构 + `via`）；`bambook_preview`（`repository.preview`：同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，应用后整笔回滚，返回业务事件说明；生成文件的命令不支持）；`bambook_execute`（`repository.execute`，请求编号幂等：重试沿用原版本号重放，不同命令复用编号被拒）。
 - **分级**：`agentCommandSensitivity()`。`confirm`（资金 / 账务前缀、人员与权限、供应商收款账户（`market.supplier.bank.*`）、对外邮件，以及 confirm/approve/decide/void/reverse/cancel/delete/close/issue/send/notify/present/refund/waive/withdraw/transition 等动词）执行时先按 Agent 身份完整预演，通过后记为 Agent 提议（见下条），不直接生效；`payable.settlement.submit` 例外为普通；`files.add` 与 `email.server.*` 不能经接口。
-- **命令目录**：`scripts/gen-mist-command-catalog.mjs` 从 `server/src/shared/*.ts` 的 `{ type: '…'; payload: … }` 声明生成 `server/src/mist/agentCommandCatalog.ts`（当前313条），`agentMcp.test.ts` 用 `--check` 守住与源码一致。目录外的类型不能执行。
+- **命令目录**：`scripts/gen-mist-command-catalog.mjs` 从 `server/src/shared/*.ts` 的 `{ type: '…'; payload: … }` 声明生成 `server/src/mist/agentCommandCatalog.ts`（当前314条），`agentMcp.test.ts` 用 `--check` 守住与源码一致。目录外的类型不能执行。
 - **审计落盘（2026-10-31）**：`agentAudit.ts` 与 `repository.ts#executeInternal` 在 `MistCommandReceipt` 追加单独的内部审计回执，内部 `result.__agentAudit` 保存版本化证据；与业务状态/编号/原业务回执同事务提交。内部编号为 `mist-revision:agent-audit:<原请求编号>`，沿用旧版本已拒绝公开读取/占用的服务端命名空间；普通业务回执本身不增加私有字段，回退到上一版本也不附带泄漏。普通委托命令及提议创建记录当前账号、Agent会话、原命令、实际前后差异、请求版本/实际起止版本和真实审计时间；本人确认或拒绝记录真实人工身份，并关联原提议及原Agent会话。旧提议未记录会话时保留null，不伪造或倒填历史。普通人工命令没有因此自动变成Agent操作。
 - **审计安全与准确性**：按记录id定位字段，保留新增/删除/null及数组顺序差异，包含本次真正提交的名册/规范化变化；并发重试仅保留最终实际提交的审计，另一会话抢先提交时沿用其原审计。预演、失败回滚和幂等回放不新增审计。命令及变化递归遮蔽密码、密钥、令牌和内嵌二进制；普通写入、回执读取、审批回执旁路和重放响应都移除内部证据，不把旧商业数据作为附带回执交给客户端。MCP预演/办理必须使用本人签发的operate委托，普通登录Cookie不能冒充Agent办理。
 - **审计当前交付**：#574已接入账号页Agent操作记录、当前权限裁剪的查询与详情，以及只读`bambook_audit`；复核当前公司/岗位/行级范围，不展开内部授权。仍不覆盖所有普通人工写入，旧历史不倒填。完整源码锚点及验收边界见Code Wiki6节。

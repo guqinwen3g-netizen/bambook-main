@@ -10,7 +10,10 @@ export type AgentProposalCommandBody = { type: string; payload: Record<string, u
 export type AgentProposal = {
   id: string; ownerId: string; owner: string; agentSessionId?: string;agentIdentity?:{id:string;name:string};
   command: AgentProposalCommandBody; summary: string[]; createdAt: string;
-  state: 'pending' | 'confirmed' | 'rejected'; decidedAt?: string; note?: string;
+  state: 'pending' | 'confirmed' | 'rejected'; decidedAt?: string; note?: string; taskId?: string;
+  /** Response-only access state; never accepted as a client authority claim. */
+  unavailable?: boolean; taskBlocked?: string;
+  sourceRevision?: number;
 };
 export type AgentProposalCommand =
   | { type: 'agent.proposal.create'; payload: { command: AgentProposalCommandBody; summary: string[] } }
@@ -37,7 +40,7 @@ export function applyAgentProposalCommand(state: MistState, command: AgentPropos
     if (!Array.isArray(summary) || !summary.length || summary.length > 10 || summary.some(line => typeof line !== 'string' || !line.trim() || line.length > 500)) fail('提议须附 1–10 行业务说明');
     if (list.filter(p => p.ownerId === context.actorId && p.state === 'pending').length >= AGENT_PROPOSAL_MAX_PENDING) fail('待确认的 Agent 提议过多，请先处理已有提议', 'PRECONDITION');
     const id = context.id();
-    list.push({ id, ownerId: context.actorId!, owner: plainOwner(context.actorName), ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}),...(context.agentIdentity?{agentIdentity:context.agentIdentity}:{}), command: { type: body.type, payload: JSON.parse(JSON.stringify(body.payload)) }, summary: summary.map(line => line.trim()), createdAt: context.now, state: 'pending' });
+    list.push({ id, ownerId: context.actorId!, owner: plainOwner(context.actorName), ...(context.agentSessionId ? { agentSessionId: context.agentSessionId } : {}),...(context.agentIdentity?{agentIdentity:context.agentIdentity}:{}), ...(context.agentTaskId ? {taskId:context.agentTaskId,sourceRevision:context.agentTaskSourceRevision} : {}), command: { type: body.type, payload: JSON.parse(JSON.stringify(body.payload)) }, summary: summary.map(line => line.trim()), createdAt: context.now, state: 'pending' });
     return { id };
   }
   if (command.type === 'agent.proposal.reject') {

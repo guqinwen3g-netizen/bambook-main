@@ -10,6 +10,7 @@ import { MistApiError } from './errors';
 import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
 import {hasScope} from '../auth/permissionService';
 import type {AgentServiceLease} from './agentIdentities';
+import type { AgentTaskLease, AgentTaskControlLease } from './agentTasks';
 
 export const AGENT_DELEGATION_HEADER = 'x-bambook-delegation';
 export const AGENT_DELEGATION_TTL_MS = 2 * 60 * 60 * 1000;
@@ -26,7 +27,7 @@ export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new S
  */
 export const AGENT_OPERATE_CEILING: readonly string[] = Object.freeze(Object.keys(PERMISSION_SCOPES).sort());
 export type AgentDelegationMode = 'read' | 'operate';
-export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode; agentWorkspaceId?:string; agentLease?:ManagedAgentPayload;agentServiceLease?:AgentServiceLease;agentIdentity?:{id:string;name:string} };
+export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode; agentWorkspaceId?:string; agentLease?:ManagedAgentPayload;agentServiceLease?:AgentServiceLease;agentIdentity?:{id:string;name:string}; agentTaskLease?: AgentTaskLease; agentTaskControlLease?:AgentTaskControlLease; agentTaskWorkerId?:string; agentTaskOperation?: string; agentTaskSourceRevision?:number };
 export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number; mode?: 'operate'; credentialVersion?:string };
 export type ManagedAgentPayload=Omit<AgentDelegationPayload,'v'|'kind'>&{v:2;kind:'mist-agent-connection';wid:string;generation:string};
 export type AgentDelegationIssue = { token: string; sessionId: string; expiresAt: string; ceiling: string[]; mode: AgentDelegationMode };
@@ -43,6 +44,8 @@ const AGENT_ALLOWED_ROUTES: Array<[string, RegExp]> = [
   ['GET', /^\/workspaces\/[^/]+\/agent\/(query|objects\/[^/]+\/[^/]+(\/related)?)\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/email\/(?:receiving|states)\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/agent\/mail-receiving\/?$/],
+  ['GET', /^\/workspaces\/[^/]+\/agent-tasks(?:\/[^/]+)?\/?$/],
+  ['POST', /^\/workspaces\/[^/]+\/agent-tasks\/[^/]+\/(?:claim|heartbeat|checkpoint|finish)\/?$/],
   ['POST', /^\/mcp\/?$/],
   // 无 SSE 流时返回标准 405；不能在委托路由层先误判成越权。
   ['GET', /^\/mcp\/?$/],
@@ -125,7 +128,15 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     const secret=createHmac('sha256',serviceRoot).update(JSON.stringify([workspaceId,id,generation])).digest('base64url');
     return `bma1_${workspaceId}_${id}_${secret}`;
   }
+  function makeTaskCredential(workspaceId: string, taskId: string, runId: string, nonce: string) {
+    const root = createHmac('sha256', options.rootSecret()).update('bambook-mist-task-grant/v1').digest();
+    const secret = createHmac('sha256', root).update(JSON.stringify([workspaceId, taskId, runId, nonce])).digest('base64url');
+    return `bmt1_${workspaceId}_${taskId}_${runId}_${secret}`;
+  }
+  function makeTaskControl(workspaceId:string,taskId:string,generation:string){const root=createHmac('sha256',options.rootSecret()).update('bambook-task-control/v1').digest();const secret=createHmac('sha256',root).update(JSON.stringify([workspaceId,taskId,generation])).digest('base64url');return `bmc1_${workspaceId}_${taskId}_${secret}`;}
+  function taskSession(taskId:string,controlHash:string,nonce:string=randomUUID()){const root=createHmac('sha256',options.rootSecret()).update('bambook-task-session/v1').digest();const secret=createHmac('sha256',root).update(JSON.stringify([taskId,controlHash,nonce])).digest('base64url');return `bms1_${nonce}_${secret}`;}
+  function verifyTaskSession(taskId:string,controlHash:string,session:unknown){if(typeof session!=='string'||session.length>160)deny('任务会话无效，请重新连接',400,'AGENT_TASK_SESSION_INVALID');const match=/^bms1_([0-9a-f-]{36})_([A-Za-z0-9_-]{43})$/.exec(session as string);if(!match)deny('任务会话无效，请重新连接',400,'AGENT_TASK_SESSION_INVALID');const expected=taskSession(taskId,controlHash,match![1]);if(expected.length!==(session as string).length||!timingSafeEqual(Buffer.from(expected),Buffer.from(session as string)))deny('任务会话无效，请重新连接',400,'AGENT_TASK_SESSION_INVALID');return createHmac('sha256',options.rootSecret()).update(session as string).digest('hex');}
   const hydrateServiceActor=async(raw:AgentActor):Promise<AgentActor>=>({...await options.resolve(raw.userId),...raw});
-  return { issue, verify, authenticate,prepareManaged,signManaged,makeServiceCredential,hydrateServiceActor,timestamp:now };
+  return { issue, verify, authenticate,prepareManaged,signManaged,makeServiceCredential,makeTaskCredential,makeTaskControl,taskSession,verifyTaskSession,hydrateServiceActor,timestamp:now };
 }
 export type AgentDelegation = ReturnType<typeof createAgentDelegation>;

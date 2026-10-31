@@ -29,7 +29,7 @@ const authority = (actor: TokenPayload, prior: TokenPayload) => {
     ...((prior as any).iat !== undefined ? { iat: (prior as any).iat } : {}),
     ...(actor.credentialVersion ? { credentialVersion: actor.credentialVersion } : {}),
     permissionCeiling: ['emails:read', 'emails:write'].filter(p => hasScope(actor, p as any)) };
-  for (const k of ['actorKind', 'agentSessionId', 'agentMode', 'agentWorkspaceId', 'agentLease', 'agentServiceLease', 'agentIdentity']) if ((prior as any)[k] !== undefined) out[k] = structuredClone((prior as any)[k]);
+  for (const k of ['actorKind', 'agentSessionId', 'agentMode', 'agentWorkspaceId', 'agentLease', 'agentServiceLease', 'agentIdentity', 'agentTaskLease', 'agentTaskOperation']) if ((prior as any)[k] !== undefined) out[k] = structuredClone((prior as any)[k]);
   return out as TokenPayload;
 };
 function value(row: any): MailStateRecord {
@@ -51,6 +51,9 @@ async function save(db: any, row: any, r: MailStateRecord, patch: Partial<MailSt
 export async function mailStateRecords(db: any, workspaceId: string): Promise<MailStateRecord[]> {
   const rows = await db.mistCommandReceipt.findMany({ where: { workspaceId, inputHash: MAIL_STATE_HASH, requestId: { startsWith: MAIL_STATE_PREFIX }, OR: ['pending','running','failed','unknown','blocked'].map(phase=>({result:{path:[MAIL_STATE_FIELD,'phase'],equals:phase}})) }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
   return rows.map(value).filter(active);
+}
+export async function taskHasPendingMail(db:any,workspaceId:string,taskId:string){
+  const rows=await db.mistCommandReceipt.findMany({where:{workspaceId,inputHash:MAIL_STATE_HASH,AND:[{result:{path:[MAIL_STATE_FIELD,'authority','agentTaskLease','taskId'],equals:taskId}},{OR:['pending','running','failed','unknown','blocked'].map(phase=>({result:{path:[MAIL_STATE_FIELD,'phase'],equals:phase}}))}]},take:1});return rows.length>0;
 }
 export async function pendingMailFields(db: any, workspaceId: string, exclude?: string) {
   const out: Record<string, MailStateField[]> = {};

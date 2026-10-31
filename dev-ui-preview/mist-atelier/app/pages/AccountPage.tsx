@@ -12,7 +12,7 @@ import { DeviceAppearance } from './DeviceAppearance';
 import { ManualLink } from './ManualLink';
 import { AgentAuditHistory } from './AgentAuditHistory';
 import {AgentConnections} from './AgentConnections';
-import {AgentIdentities} from './AgentIdentities';
+import {LongAgentWorkspace} from './AgentTasks';
 
 export function AccountPage() {
   const session = useMistSession(), { state,workspace } = useMistWorkspace(), organization = useOrganizationContext(), nav = useNav(), toast = useToast();
@@ -46,7 +46,7 @@ export function AccountPage() {
         {section === 'appearance' && <FormSection title={uiText('外观与语言')}><DeviceAppearance /></FormSection>}
         {section==='activity'&&<FormSection title={uiText('Agent 操作记录')}><AgentAuditHistory/></FormSection>}
         {section==='connections'&&<FormSection title={uiText('Agent 连接')}><AgentConnections/></FormSection>}
-        {section==='agents'&&<FormSection title={uiText('长期Agent')}><AgentIdentities/></FormSection>}
+        {section==='agents'&&<FormSection title={uiText('长期Agent')}><LongAgentWorkspace/></FormSection>}
         {section === 'security' && <FormSection title={uiText('安全')}>
           {!session.localMode && <><ChangePasswordRow /><LogoutAllRow />
             <SettingRow title={uiText('当前设备')} control={<Button icon={LogOut} loading={session.signingOut} onClick={() => void session.logout().catch(failure => toast(failure instanceof Error ? failure.message : '退出失败', 'bad'))}>{uiText('退出登录')}</Button>} />

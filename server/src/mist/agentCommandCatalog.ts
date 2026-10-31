@@ -19,6 +19,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistAgentProposals.ts"
  },
  {
+  "type": "agent.task.cancel",
+  "payload": "{ id: string; version: number }",
+  "source": "server/src/shared/mistAgentTasks.ts"
+ },
+ {
   "type": "calendar.save",
   "payload": "{ id?: string; title: string; date: string; time: string; note: string; target?: MistTarget }",
   "types": {
