@@ -19,7 +19,8 @@ import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projec
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
-import { isAgentActor } from './agentDelegation';
+import { isAgentActor, type AgentActor } from './agentDelegation';
+import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit } from './agentAuditRead';
 import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
@@ -167,6 +168,7 @@ export class MistRepository {
   }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
+    if(isAgentActor(prior)&&prior.agentWorkspaceId&&prior.agentWorkspaceId!==id)fail('NOT_FOUND','公司不存在或当前账号无权访问',404);
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) fail('INVALID_INPUT', '公司编号无效', 400);
     const actor = await this.authorize(db, prior, permission);
     if (lock) await db.$queryRawUnsafe('SELECT "id" FROM "MistWorkspace" WHERE "id" = $1::uuid FOR UPDATE', id);
@@ -177,6 +179,7 @@ export class MistRepository {
     if (row && companyRow(row) && ownerOnly) singleLibrary();
     if (!row || !(companyRow(row) || isOwner(row, actor) || (!ownerOnly && isMember(row, actor)))) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
     if(archived(row)&&!allowArchived)fail('NOT_FOUND','公司已移入回收站，请先恢复',404);
+    if(isAgentActor(prior)&&prior.agentLease)await assertConnection(db,actor,prior.agentLease,Date.now());
     if (lock && captureAuditBefore) ORIGINAL_WRITE_STATE.set(row, structuredClone(row.state));
     if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
@@ -226,12 +229,13 @@ export class MistRepository {
     const fabricAccess=scope&&hasScope(actor,'orders:read')&&hasScope(actor,'orders:write')?scopedFabricAccess(row.state,scope,actor.userId,actor.displayName||actor.userId,hasScope(actor,'production:read')&&hasScope(actor,'products:read')&&hasScope(actor,'qc:read')):undefined;
     return { ...publicWorkspace({ ...row, state: projected.state }), access,...(projected.costMaterialBasis!==undefined?{costMaterialBasis:projected.costMaterialBasis}:{}),...(materialIssueTargets?{materialIssueTargets}:{}),...(financialDisposals?{financialDisposals}:{}),...(fabricAccess?{scopedFabricAccess:fabricAccess}:{}) };
   }
-  async list(prior: TokenPayload) { return this.transact(async db => { const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
+  async list(prior: TokenPayload) { return this.transact(async db => { if(isAgentActor(prior)&&prior.agentWorkspaceId){const {row,actor}=await this.own(db,prior,prior.agentWorkspaceId);return[this.view(row,actor)];}const actor = await this.authorize(db, prior); const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({ where: this.accessibleWhere(actor), orderBy: { updatedAt: 'desc' } }); const out = []; for (const row of rows.filter(row=>this.accessible(row,actor))) { if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); } this.contract.normalizeMistState?.(row.state,this.context(actor)); out.push(this.view(row,actor)); } return out; }); }
   /** 公司会话只看本公司唯一的库；本机空间看自己拥有或被授权的。 */
   private accessibleWhere(actor: TokenPayload) { return companyLibrary(actor) ? { companyId: actor.companyId } : { ...(actor.companyId ? { companyId: actor.companyId } : {}), OR: [{ ownerId: actor.userId }, { state: { path: ['memberIds'], array_contains: [actor.userId] } }] }; }
   private accessible(row: MistWorkspaceRow, actor: TokenPayload) { return !archived(row) && (companyLibrary(actor) ? row.companyId === actor.companyId : isOwner(row, actor) || isMember(row, actor)); }
   /** Navigation needs identities only, never the full business snapshots of every company workspace. */
   async listSummaries(prior: TokenPayload) { return this.transact(async db => {
+    if(isAgentActor(prior)&&prior.agentWorkspaceId){const {row}=await this.own(db,prior,prior.agentWorkspaceId);return[{id:row.id,name:row.name,ownerId:row.ownerId,revision:row.revision,access:{role:'member'}}];}
     const actor = await this.authorize(db, prior);
     const rows: MistWorkspaceRow[] = await db.mistWorkspace.findMany({where: this.accessibleWhere(actor), orderBy: {updatedAt: 'desc'}});
     return rows.filter(row => this.accessible(row, actor))
@@ -297,6 +301,12 @@ export class MistRepository {
   }
   /** 当前真实执行者（事务内重新加载账号与授权，保留会话自身的权限上限）。 */
   async currentActor(prior:TokenPayload,permission?:string|null){return this.transact(db=>this.authorize(db,prior,permission));}
+  async authorizeAgentConnection(actor:AgentActor){if(!actor.agentWorkspaceId||!actor.agentLease)fail('UNAUTHORIZED','连接登记无效',401);await this.transact(db=>this.own(db,actor,actor.agentWorkspaceId!,'ai:chat'));}
+  private async connectionTransaction<T>(run:(db:any)=>Promise<T>):Promise<T>{for(let n=0;;n++){try{return await this.transact(run);}catch(error){if(n>=2||!retryableTransaction(error))throw error;}}}
+  async agentConnections(prior:TokenPayload,workspaceId:string,cursor:unknown,now=Date.now()){return this.transact(async db=>{const {actor}=await this.own(db,prior,workspaceId);return listConnections(db,actor,workspaceId,cursor,now);});}
+  async agentConnection(prior:TokenPayload,workspaceId:string,id:string,now=Date.now()){return this.transact(async db=>{const {actor}=await this.own(db,prior,workspaceId);return getConnection(db,actor,workspaceId,id,now);});}
+  async createAgentConnection(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeAgentLease,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','须由本人连接',403);return this.connectionTransaction(async db=>{const {actor}=await this.own(db,prior,workspaceId,'ai:chat');return createConnection(db,actor,workspaceId,input,make,now);});}
+  async changeAgentConnection(prior:TokenPayload,workspaceId:string,id:string,action:'renew'|'revoke',input:Record<string,unknown>,make:MakeAgentLease,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','须由本人操作连接',403);return this.connectionTransaction(async db=>{const {actor}=await this.own(db,prior,workspaceId,action==='renew'?'ai:chat':undefined);return changeConnection(db,actor,workspaceId,id,action,input,make,now);});}
   /** 工作助手读取：与 get 相同的进入与投影规则，同时返回重新加载后的执行者供逐类型复核。 */
   async getForAgent(prior:TokenPayload,id:string){return this.transact(async db=>{const {row,actor}=await this.own(db,prior,id);return {workspace:this.view(row,actor),actor};});}
   async getForAssistant(prior:TokenPayload,id:string){return this.transact(async db=>{const {row,actor}=await this.own(db,prior,id,'ai:chat');return {workspace:this.view(row,actor),actor};});}

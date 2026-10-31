@@ -3,13 +3,14 @@ import request from 'supertest';
 import {promises as fs} from 'node:fs';
 import os from 'node:os';import path from 'node:path';
 import {createMistLocalRuntime} from './local';import {createMistServer} from './server';
+import {randomUUID} from 'node:crypto';
 let directory:string;
 beforeEach(async()=>{directory=await fs.mkdtemp(path.join(os.tmpdir(),'mist-audit-query-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{vi.unstubAllEnvs();await fs.rm(directory,{recursive:true,force:true});});
 async function as(app:any,profileId:string,mode='operate'){
   const human=request.agent(app);await human.get('/api/mist/session').expect(200);await human.post('/api/mist/session').send({profileId}).expect(200);
   const workspace=(await human.get('/api/mist/workspaces/default')).body.workspace;
-  const token=(await human.post('/api/mist/agent/delegations').send({mode})).body.delegation.token;
+  const token=(await human.post('/api/mist/agent/delegations').send({mode,workspaceId:workspace.id,id:randomUUID()})).body.delegation.token;
   let id=0;const tool=async(name:string,args:any)=>(await request(app).post('/api/mist/mcp').set('x-bambook-delegation',token).send({jsonrpc:'2.0',id:++id,method:'tools/call',params:{name,arguments:args}}).expect(200)).body.result;
   return {human,workspace,tool};
 }

@@ -30,14 +30,22 @@ const base: Handler = (method, params) => method === 'session.delegation' ? dele
 const later = () => new Date(Date.now() + 2 * 3600_000).toISOString();
 const grant = (token = 'dlg-1', expiresAt = later()) => new Response(JSON.stringify({ delegation: { token, expiresAt }, readable: [{ type: 'order', label: '订单' }, { type: 'customer', label: '客户' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
 let fetchMock: ReturnType<typeof vi.fn>;
-const delegationPosts = () => fetchMock.mock.calls.filter(c => c[0] === '/api/mist/agent/delegations');
+const desktopConnections=new Map<string,any>();
+const delegationPosts = () => fetchMock.mock.calls.filter(c => c[0] === '/api/mist/agent/delegations'||String(c[0]).endsWith('/renew'));
 const binds = () => calls.filter(c => c[0] === 'session.delegation' && !c[1].clear).map(c => c[1]);
 const clears = () => calls.filter(c => c[0] === 'session.delegation' && c[1].clear);
 
 beforeEach(() => {
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true; calls.length = 0; go.mockReset();
   ctx.user = { id: 'u-1', displayName: '业务员甲' }; ctx.sessionKey = 's'; ctx.canChat = true; ctx.workspace = { id: 'w-1', name: '甲公司' };
-  fetchMock = vi.fn(async () => grant()); vi.stubGlobal('fetch', fetchMock);
+  sessionStorage.clear();desktopConnections.clear();fetchMock = vi.fn(async () => grant());
+  vi.stubGlobal('fetch',async(url:string,init:any)=>{
+    if(init.method==='GET'){const id=url.split('/').at(-1)!;return new Response(JSON.stringify(desktopConnections.get(id)??{error:{message:'连接不存在'}}),{status:desktopConnections.has(id)?200:404});}
+    const body=JSON.parse(init.body),id=url.endsWith('/renew')?url.split('/').at(-2)!:body.id;
+    const response=await fetchMock(url,init);if(!response.ok)return response;
+    const result=await response.clone().json(),connection={id,version:(desktopConnections.get(id)?.version??0)+1,state:'active'};desktopConnections.set(id,connection);
+    return new Response(JSON.stringify({...result,connection}),{status:response.status,headers:{'Content-Type':'application/json'}});
+  });
 });
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); delete (window as any).bambookAssistant; vi.unstubAllGlobals(); vi.useRealTimers(); });
 const page = () => <Nav.Provider value={{ route: { view: 'assistant' }, go, theme: 'light', toggleTheme: () => undefined, openPalette: () => undefined, openAI: () => undefined }}><WorkAssistantPage tabs={<span data-render={++renders} />} /></Nav.Provider>;
@@ -172,11 +180,13 @@ it('renews before expiry on its own and dedupes reconnect requests from the host
   // 同一时刻多次 delegation_needed 只发起一次签发；其他公司的事件忽略。
   const gate = deferred<Response>();
   fetchMock.mockImplementationOnce(() => gate.promise);
-  await act(async () => { emit({ type: 'delegation_needed', workspaceId: 'w-1', reason: 'expired' }); emit({ type: 'delegation_needed', workspaceId: 'w-1', reason: 'rejected' }); emit({ type: 'delegation_needed', workspaceId: 'w-other', reason: 'missing' }); await vi.advanceTimersByTimeAsync(0); });
+  await act(async () => { emit({ type: 'delegation_needed', workspaceId: 'w-1', reason: 'expired' }); emit({ type: 'delegation_needed', workspaceId: 'w-1', reason: 'expired' }); emit({ type: 'delegation_needed', workspaceId: 'w-other', reason: 'missing' }); await vi.advanceTimersByTimeAsync(0); });
   expect(delegationPosts()).toHaveLength(3);
   await act(async () => { gate.resolve(grant('dlg-2')); await vi.advanceTimersByTimeAsync(0); });
   for (let i = 0; i < 3; i++) await act(async () => { await vi.advanceTimersByTimeAsync(0); });
   expect(binds().map(b => b.token)).toEqual(['dlg-1', 'dlg-1', 'dlg-2']);
+  await act(async()=>{emit({type:'delegation_needed',workspaceId:'w-1',reason:'rejected'});await vi.advanceTimersByTimeAsync(60_000);});
+  expect(delegationPosts()).toHaveLength(3);expect(button('发送')!.disabled).toBe(true);expect(host.textContent).toContain('业务连接已失效');
 });
 
 it('shows failures and lets the user retry; accounts without ai:chat never request a delegation', async () => {

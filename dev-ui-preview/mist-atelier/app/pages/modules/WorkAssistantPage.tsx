@@ -269,7 +269,7 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
         if (event.status?.state === 'restarting' || event.status?.state === 'failed') { setReady(false); setLive(null); liveRef.current = null; }
         return;
       }
-      if (event?.type === 'delegation_needed') { if (!event.workspaceId || event.workspaceId === workspaceId) void delegation.renew(); return; }
+      if (event?.type === 'delegation_needed') { if (!event.workspaceId || event.workspaceId === workspaceId) delegation.handleNeeded(event.reason); return; }
       const current = liveRef.current;
       if (!current || event?.runId !== current.runId) return;
       if (event.type === 'run') {
@@ -293,7 +293,7 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
         void call<SessionMeta[]>(bridge, 'sessions.list').then(rows => { if (currentScope.current === scope) setSessions(rows); }).catch(() => undefined);
       }
     });
-  }, [bridge, loadSession, workspaceId, delegation.renew, scope]);
+  }, [bridge, loadSession, workspaceId, delegation.handleNeeded, scope]);
 
   const open = (id: string | null) => {
     const bound = scope;
