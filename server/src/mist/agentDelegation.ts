@@ -16,8 +16,9 @@ export const AGENT_DELEGATION_TTL_MS = 2 * 60 * 60 * 1000;
 const PURPOSE = 'bambook-mist-agent-delegation/v1';
 const MAX_TOKEN = 4096;
 
-/** 工作助手上限（首批）：Mist 读投影所用的读取类权限；不含任何写权限，也不含助手草稿。 */
-export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new Set(MIST_READ_SECTIONS.flatMap(s => s.permissions).filter(p => p.endsWith(':read')))].sort());
+/** Read authority follows actual read projections (bank accounts/team settings use write/admin-named
+ * scopes). Read mode and route/tool guards still forbid ALL writes, including proposals/preview. */
+export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new Set([...MIST_READ_SECTIONS.flatMap(s => s.permissions), 'audit:read','settings:system:read','hr:write'])].sort());
 
 /**
  * 可办理委托（2026-10-30 用户定案）：上限 = 账号现有权限（不超出），供 MCP 接口读取、预演与执行普通命令；

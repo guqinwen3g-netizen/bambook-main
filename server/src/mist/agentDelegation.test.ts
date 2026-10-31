@@ -36,8 +36,9 @@ describe('短期委托的签名、上限和身份隔离', () => {
     const payload = d.verify(issued.token);
     expect(payload).toMatchObject({ v: 1, kind: 'mist-agent', sub: 'local-operator', sid: issued.sessionId, iat: now, exp: now + AGENT_DELEGATION_TTL_MS });
     expect(issued.ceiling).toEqual(WORK_ASSISTANT_CEILING);
-    expect(issued.ceiling.every(p => p.endsWith(':read'))).toBe(true);
-    expect(issued.ceiling).not.toContain('*'); expect(issued.ceiling).not.toContain('ai:chat');
+    expect(issued.ceiling).toContain('vouchers:write'); // Existing bank-account read boundary, not permission to execute.
+    expect(issued.mode).toBe('read');
+    expect(issued.ceiling).not.toContain('*'); expect(issued.ceiling).toContain('ai:chat'); // Read projection for assistant drafts; mode/route guards still reject execution.
     const agent = await d.authenticate(issued.token);
     expect(agent).toMatchObject({ actorKind: 'agent', agentSessionId: issued.sessionId, permissionCeiling: issued.ceiling });
     expect(hasScope(agent, 'products:read')).toBe(true); expect(hasScope(agent, 'products:write')).toBe(false);
@@ -220,6 +221,10 @@ it('exposes receipts and the payable chain so an Agent can find ids for settleme
   const owner = actor();
   for (const type of ['receipt', 'payable_settlement', 'payable_bill', 'payment_plan', 'payment_request', 'supplier_payment', 'prepayment_move']) expect(agentQuery(state, owner, { type }).total, type).toBe(1);
   expect(agentGet(state, owner, 'receipt', 'rc1').link).toBe('bambook://open?view=procurement&id=po1');
+  for(const [type,id] of [['payable_settlement','st1'],['payable_bill','b1'],['payment_plan','pl1'],['payment_request','r1'],['supplier_payment','p1']]){
+    const link=new URL(agentGet(state,owner,type,id).link!);expect(link.searchParams.get('view')).toBe('payment-vouchers');expect(link.searchParams.get('section')).toBe('payables');expect(link.searchParams.get('id')).toBe(id);
+  }
+  expect(agentGet(state,owner,'prepayment_move','m1').link).toBe('bambook://open?view=procurement&id=po1');
   // 票据通过明细行引用采购合同；付款申请通过明细行引用票据。
   expect(agentRelated(state, owner, 'purchase', 'po1').related.map(r => r.label).sort()).toEqual(['AP-1', 'PM-1', 'PP-1', 'ST-1', 'SUP-1', 'rc1'].sort());
   expect(agentRelated(state, owner, 'payable_bill', 'b1').related.map(r => r.label).sort()).toEqual(['PO-1', 'PR-1', 'ST-1', 'SUP-1'].sort());

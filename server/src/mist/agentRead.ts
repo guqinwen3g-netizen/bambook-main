@@ -9,7 +9,7 @@ import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
 import { MistApiError } from './errors';
 
-type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; linkId?: (row: any) => string | undefined };
+type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined };
 
 /** 首批可读对象。view 与前端路由一致，链接由页面用 go(view, id) 打开。 */
 export const AGENT_OBJECT_TYPES: ObjectType[] = [
@@ -26,13 +26,13 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'purchase', label: '采购合同', scope: 'procurement:read', path: ['fulfillment', 'purchases'], view: 'procurement' },
   { type: 'receipt', label: '收货记录', scope: 'procurement:read', path: ['fulfillment', 'receipts'], view: 'procurement', linkId: r => r.purchaseId },
   // 应付链：结算、票据、预付计划、付款申请、供应商付款、核销分配、预付退款/转抵。行级范围已由仓储投影裁剪（业务员只到本人采购），这里只复核读权限。
-  { type: 'payable_settlement', label: '采购结算', scope: 'invoices:read', path: ['payables', 'settlements'], view: 'payables' },
-  { type: 'payable_bill', label: '供应商票据', scope: 'invoices:read', path: ['payables', 'bills'], view: 'payables' },
-  { type: 'payment_plan', label: '付款计划', scope: 'invoices:read', path: ['payables', 'plans'], view: 'payables' },
-  { type: 'payment_request', label: '付款申请', scope: 'invoices:read', path: ['payables', 'requests'], view: 'payables' },
-  { type: 'supplier_payment', label: '供应商付款', scope: 'invoices:read', path: ['payables', 'payments'], view: 'payables' },
-  { type: 'payment_allocation', label: '付款分配', scope: 'invoices:read', path: ['payables', 'allocations'], view: 'payables' },
-  { type: 'prepayment_move', label: '预付退款/转抵', scope: 'invoices:read', path: ['payables', 'prepaymentMoves'], view: 'payables' },
+  { type: 'payable_settlement', label: '采购结算', scope: 'invoices:read', path: ['payables', 'settlements'], view: 'payment-vouchers', section: 'payables' },
+  { type: 'payable_bill', label: '供应商票据', scope: 'invoices:read', path: ['payables', 'bills'], view: 'payment-vouchers', section: 'payables' },
+  { type: 'payment_plan', label: '付款计划', scope: 'invoices:read', path: ['payables', 'plans'], view: 'payment-vouchers', section: 'payables' },
+  { type: 'payment_request', label: '付款申请', scope: 'invoices:read', path: ['payables', 'requests'], view: 'payment-vouchers', section: 'payables' },
+  { type: 'supplier_payment', label: '供应商付款', scope: 'invoices:read', path: ['payables', 'payments'], view: 'payment-vouchers', section: 'payables' },
+  { type: 'payment_allocation', label: '付款分配', scope: 'invoices:read', path: ['payables', 'allocations'], view: 'payment-vouchers', section: 'payables', linkId: r=>r.supplierPaymentId },
+  { type: 'prepayment_move', label: '预付退款/转抵', scope: 'invoices:read', path: ['payables', 'prepaymentMoves'], view: 'procurement', linkId: r=>r.purchaseId },
   { type: 'production', label: '生产', scope: 'production:read', path: ['productions'], view: 'production-board' },
   { type: 'shipment', label: '出运', scope: 'shipments:read', path: ['fulfillment', 'shipments'], view: 'shipments' },
   { type: 'invoice', label: '发票', scope: 'invoices:read', path: ['invoices'], view: 'invoices' },
@@ -78,7 +78,7 @@ function summary(row: any) {
 }
 function link(type: ObjectType, row: any) {
   const id = type.linkId ? type.linkId(row) : row.id;
-  return typeof id === 'string' && id ? `bambook://open?view=${encodeURIComponent(type.view)}&id=${encodeURIComponent(id)}` : null;
+  return typeof id === 'string' && id ? `bambook://open?${new URLSearchParams({view:type.view,id,...(type.section?{section:type.section}:{})})}` : null;
 }
 function ref(type: ObjectType, row: any) { return { type: type.type, id: row.id as string, label: labelOf(row), link: link(type, row) }; }
 
