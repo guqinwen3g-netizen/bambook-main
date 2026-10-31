@@ -39,8 +39,13 @@ function polish(html) {
 
 const snap = snapshot();
 const { version, head, branch, chapters, modules, missingModules } = snap;
+const TRACKS = ['报价到订单', '采购结算与付款'];
+const trackOf = lesson => lesson.track || '采购结算与付款';
+const trackIndex = lesson => { const i = TRACKS.indexOf(trackOf(lesson)); return i < 0 ? TRACKS.length : i; };
 const lessons = fs.readdirSync(path.join(WIKI, 'lessons')).filter(f => f.endsWith('.json'))
-  .map(f => JSON.parse(fs.readFileSync(path.join(WIKI, 'lessons', f), 'utf8'))).sort((a, b) => a.order - b.order);
+  .map(f => JSON.parse(fs.readFileSync(path.join(WIKI, 'lessons', f), 'utf8'))).sort((a, b) => trackIndex(a) - trackIndex(b) || a.order - b.order);
+/** 课程按业务链分组：主干先于采购付款；未写 track 的旧课程属于采购结算与付款。 */
+const lessonTracks = [...new Set(lessons.map(trackOf))];
 const captures = new Map(lessons.map(l => [l.id, loadCapture(WIKI, l)]));
 for (const l of lessons) if (l.nextLesson && !lessons.some(x => x.id === l.nextLesson.id)) throw new Error(`${l.title}：下一课不存在 ${l.nextLesson.id}`);
 for (const chapter of chapters) {
@@ -64,8 +69,8 @@ const referenceNav = byPart
     .map(c => `<a class="nav-item" href="#${esc(c.slug)}" data-target="${esc(c.slug)}">${esc(c.title)}${c.verdict === 'stale' ? '<i class="dot"></i>' : ''}</a>`)
     .join('')}</div>`)
   .join('');
-const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a>${lessons.map(l => `<a class="nav-item" href="#${esc(l.id)}" data-target="${esc(l.id)}">${esc(l.title)}</a>`).join('')}</div><div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
-const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p>${lessons.map(lesson => `<a class="learning-card" href="#${esc(lesson.id)}"><span class="learning-card-tag">${esc(lesson.role)} · 分步教学</span><h2>${esc(lesson.title)} <span aria-hidden="true">→</span></h2><p>${lesson.steps.map(s=>esc(s.title)).join(' → ')}</p><span>${lesson.steps.length} 个步骤 · 可看演示，也可自己练</span></a>`).join('')}<div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
+const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a></div>${lessonTracks.map(t => `<div class="nav-part"><div class="nav-part-title">${esc(t)}</div>${lessons.filter(l => trackOf(l) === t).map(l => `<a class="nav-item" href="#${esc(l.id)}" data-target="${esc(l.id)}">${esc(l.title)}</a>`).join('')}</div>`).join('')}<div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
+const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p>${lessonTracks.map(t => `<h2 class="learning-track">${esc(t)}</h2><div class="learning-grid">${lessons.filter(l => trackOf(l) === t).map(lesson => `<a class="learning-card" href="#${esc(lesson.id)}"><span class="learning-card-tag">${esc(lesson.role)}</span><h2>${esc(lesson.title)} <span aria-hidden="true">→</span></h2><p>${lesson.steps.map(s=>esc(s.title)).join(' → ')}</p><span>${lesson.steps.length} 个步骤</span></a>`).join('')}</div>`).join('')}<div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
 
 const sections = chapters
   .map(c => `<section id="${esc(c.slug)}" class="chapter">
@@ -150,7 +155,7 @@ tbody th{background:var(--bg-2);width:180px;font-weight:600;color:var(--ink-2)}
 .empty{color:var(--ink-3);padding:24px 0}
 mark{background:#fff3b0;padding:0 2px}
 ${lessonStyles}
-.nav-reference-label{font-size:11px;color:var(--ink-3);margin:24px 8px 14px;border-top:1px solid var(--line);padding-top:20px}.manual-start h1{font-size:36px;line-height:1.3;margin:10px 0 16px}.start-intro{font-size:17px;color:var(--ink-2);max-width:650px}.learning-card{display:block;margin:28px 0 36px;padding:28px;border-radius:16px;background:#eaf2f5;color:var(--ink)}.learning-card-tag{font-size:12px;color:#4f7689}.learning-card h2{margin:12px 0;padding:0;font-size:24px}.learning-card h2 span{float:right;font-weight:400}.learning-card p{color:var(--ink-2);font-size:15px}.learning-card>span:last-child{font-size:12px;color:#5d7c8c}.start-standard{margin:32px 0}.start-standard h2{font-size:18px}.start-standard>div{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;font-size:14px;color:var(--ink-2)}.start-standard b{color:#7895a5;font-size:12px;margin-right:10px;font-weight:400}.reference-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.reference-cards a{display:flex;flex-direction:column;gap:8px;background:#f5f7f9;border-radius:12px;padding:18px;color:var(--ink)}.reference-cards span,.reference-cards small{font-size:12px;color:var(--ink-3)}.reference-cards strong{font-size:15px;font-weight:500}
+.nav-reference-label{font-size:11px;color:var(--ink-3);margin:24px 8px 14px;border-top:1px solid var(--line);padding-top:20px}.manual-start h1{font-size:36px;line-height:1.3;margin:10px 0 16px}.start-intro{font-size:17px;color:var(--ink-2);max-width:650px}.learning-track{font-size:18px;margin:32px 0 12px}.learning-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.learning-card{display:block;padding:18px 20px;border-radius:14px;background:#eaf2f5;color:var(--ink)}.learning-card-tag{font-size:12px;color:#4f7689}.learning-card h2{margin:6px 0 8px;padding:0;font-size:17px;line-height:1.4}.learning-card h2 span{float:right;font-weight:400}.learning-card p{color:var(--ink-2);font-size:13px;margin:0 0 8px;line-height:1.6}.learning-card>span:last-child{font-size:12px;color:#5d7c8c}.start-standard{margin:32px 0}.start-standard h2{font-size:18px}.start-standard>div{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;font-size:14px;color:var(--ink-2)}.start-standard b{color:#7895a5;font-size:12px;margin-right:10px;font-weight:400}.reference-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.reference-cards a{display:flex;flex-direction:column;gap:8px;background:#f5f7f9;border-radius:12px;padding:18px;color:var(--ink)}.reference-cards span,.reference-cards small{font-size:12px;color:var(--ink-3)}.reference-cards strong{font-size:15px;font-weight:500}
 .mobile-nav{display:none}
 
 @media (max-width:900px){
@@ -162,7 +167,7 @@ ${lessonStyles}
   main{padding:28px 20px 80px}
   .topbar{padding:0 16px;gap:8px}
   .topbar .search{width:min(36vw,180px)}
-  .reference-cards{grid-template-columns:1fr}
+  .reference-cards,.learning-grid{grid-template-columns:1fr}
 }
 @media print{
   .topbar,nav.toc{display:none}

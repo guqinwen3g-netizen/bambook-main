@@ -7,7 +7,7 @@ import { MIST_FINANCE_WRITE_PERMISSIONS } from '../../../../../server/src/shared
 import React from 'react';
 import { Download, RefreshCw, ArrowLeft, Receipt, Clock, FileText, ArrowUpRight, ShieldCheck } from 'lucide-react';
 import { Banner, Button, Card, DataTable, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, SearchField, Segmented, Select, StatCard, StatGrid, Tabs, Toolbar, type Column } from '../../../../../components/mist';
-import { isActiveMistInvoice, isPendingFinanceMistInvoice, type MistState, type MistInvoice } from '../../../../../server/src/shared/mistWorkspace';
+import { MIST_BANK_CHARGE_LIMIT, isActiveMistInvoice, isPendingFinanceMistInvoice, type MistState, type MistInvoice } from '../../../../../server/src/shared/mistWorkspace';
 import { CRM_COLLECTION_LEVEL_LABEL, CRM_METHOD_LABEL, invoiceCollectionStatus, type CrmCollectionLevel, type CrmFollowUp } from '../../../../../server/src/shared/mistCrm';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
@@ -50,7 +50,9 @@ export function invoiceFinancialFacts(state: MistState | null, row: InvoiceLedge
   const allocations = (state?.allocations || []).filter(a => a.invoiceId === row.id), credits = (state?.platform?.creditApplications || []).filter(a => a.invoiceId === row.id);
   const sum = (rows: Array<{ amount: number; currency?: string }>) => rows.reduce((n, r) => n + Math.round(r.amount * 100), 0) / 100;
   const cash = sum(allocations.filter(a => a.currency === row.currency)), credit = sum(credits);
-  return { allocations, credits, cash, credit, unexplained: row.draft || row.state === 'void' || row.state === 'pending' ? 0 : (Math.round(row.amount * 100) - Math.round(cash * 100) - Math.round(credit * 100) - Math.round(row.open * 100)) / 100 };
+  // 收汇银行扣费（中间行 / 收款行扣费）已减少发票未收，计入已解释的差额。
+  const bankCharges = state?.invoices.find(i => i.id === row.id)?.bankCharges || [], charged = sum(bankCharges.filter(c => !c.reversed));
+  return { allocations, credits, cash, credit, bankCharges, charged, unexplained: row.draft || row.state === 'void' || row.state === 'pending' ? 0 : (Math.round(row.amount * 100) - Math.round(cash * 100) - Math.round(credit * 100) - Math.round(charged * 100) - Math.round(row.open * 100)) / 100 };
 }
 const PROMISE_LABEL = { pending: '待兑现', kept: '已兑现', broken: '承诺未兑现' } as const;
 const localNow = () => { const d = businessNow(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 16); };
@@ -68,7 +70,7 @@ export function InvoicePage() {
   const [fileError, setFileError] = useRouteDraft('');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   // CI 签发只形成待确认应收；确认 / 驳回由财务应收写权限执行，服务端同样校验。
-  const canConfirm = session.hasPermission('invoices:write' as any);
+  const canConfirm = session.hasPermission('invoices:write' as any), canReconcile = session.hasPermission('invoices:reconcile' as any);
   const workspaceId=w.workspace?.id||'',activeWorkspace=React.useRef(workspaceId);activeWorkspace.current=workspaceId;
   React.useEffect(()=>setFileError(''),[workspaceId]);
   React.useEffect(() => { setSelected(route.id || ''); if (route.id) setTab('ar'); }, [route.id, w.workspace?.id]);
@@ -101,6 +103,19 @@ export function InvoicePage() {
   const canCollect = session.hasPermission('relations:write' as any), customerId = current ? invoiceCustomerId(w.state, current) : undefined;
   const collection = current && w.state ? invoiceCollectionStatus(w.state, current.id, today) : null;
   const collectionRows: CrmFollowUp[] = current ? (w.state?.crm?.followUps || []).filter(f => f.link?.kind === 'invoice' && f.link.id === current.id).sort((a, b) => b.at.localeCompare(a.at)) : [];
+  // 收汇银行扣费：客户汇款被中间行 / 收款行扣费造成的小额短收，须已把该笔到账核销到本票；单票累计不超过上限，更大的短收走贷项或索赔。
+  const chargeSpec = (row: InvoiceLedgerRow, receipts: Array<{ id: string; label: string }>, left: number): ModuleEditorSpec => ({
+    title: `登记银行扣费 · ${row.code}`, submitLabel: '登记扣费', description: `未收 ${money(row.open, row.currency)} · 本票还可登记扣费 ${money(left, row.currency)}`,
+    initialValues: { receiptId: receipts[0]?.id || '', amount: String(Math.min(row.open, left)), reason: '' },
+    fields: [{ key: 'receiptId', label: '被扣费的到账', type: 'select', required: true, options: receipts.map(x => ({ value: x.id, label: x.label })) }, { key: 'amount', label: `扣费金额（${row.currency}）`, type: 'number', min: 0.01, step: '0.01', required: true },
+      { key: 'reason', label: '扣费依据', type: 'textarea', required: true, hint: '如：中转行扣费 30 USD，见银行入账通知' }],
+    submit: v => w.run({ type: 'finance.receivable.bankCharge', payload: { invoiceId: row.id, receiptId: String(v.receiptId ?? ''), amount: Number(v.amount), reason: String(v.reason ?? '') } }),
+  });
+  const reverseChargeSpec = (row: InvoiceLedgerRow, chargeId: string): ModuleEditorSpec => ({
+    title: `冲回银行扣费 · ${row.code}`, submitLabel: '冲回', submitVariant: 'danger', description: '原记录保留，发票未收按冲回金额恢复。',
+    initialValues: { reason: '' }, fields: [{ key: 'reason', label: '冲回原因', type: 'textarea', required: true }],
+    submit: v => w.run({ type: 'finance.receivable.bankCharge.reverse', payload: { invoiceId: row.id, chargeId, reason: String(v.reason ?? '') } }),
+  });
   const collectSpec = (row: InvoiceLedgerRow): ModuleEditorSpec => { const days = invoiceAge(row.due, today).days || 0; return { title: `登记催收 · ${row.code}`, submitLabel: '保存催收', description: `${row.customer} · 未收 ${money(row.open, row.currency)}${days ? ` · 已逾期 ${days} 天` : ' · 未逾期'}`,
     fields: [{ key: 'level', label: '催收级别', type: 'select', required: true, options: ([1, 2, 3] as CrmCollectionLevel[]).map(l => ({ value: String(l), label: CRM_COLLECTION_LEVEL_LABEL[l] })) },
       { key: 'method', label: '方式', type: 'select', required: true, options: Object.entries(CRM_METHOD_LABEL).map(([value, label]) => ({ value, label })) },
@@ -135,6 +150,17 @@ export function InvoicePage() {
       </div></Card>
       {document && <Card><div className="mist-card-body mist-col"><DetailBlock title={uiText("准确 CI 来源与原件")}><Facts items={[{ label: 'CI 号', value: document.number }, { label: '单据状态', value: document.status === 'issued' ? '已签发' : document.status === 'void' ? '已作废' : '草稿' }, { label: '签发时间', value: invoiceWhen(document.issuedAt) }, { label: '来源出运', value: shipment?.code || '来源出运未找到' }]} /><p className="mist-note">{document.content || '正文未记录'}</p>{fileError && <Banner tone="bad" title={uiText("原件读取失败")}>{fileError}</Banner>}<div className="mist-row mist-module-actions">{document.fileIds.map(id => { const file = w.state?.files.find(f => f.id === id); return file ? <span key={id} className="mist-file-row"><FileName file={file} files={document.fileIds.map(x => w.state?.files.find(f => f.id === x))} /><Button variant="quiet" onClick={() => { setFileError(''); void w.downloadFile(file).catch(e => { if (scope.isCurrent() && activeWorkspace.current===workspaceId) setFileError(e instanceof Error ? e.message : '原件读取失败'); }); }}>{uiText("下载")}</Button></span> : <span className="mist-note" key={id}>{uiText("原件不可见：")}{id}</span>; })}</div></DetailBlock></div></Card>}
       <Card><div className="mist-card-body mist-col"><DetailBlock title={uiText("到账核销记录")}>{facts.allocations.length ? facts.allocations.map(a => { const receipt = w.state?.receipts.find(r => r.id === a.receiptId); return <div className="mist-col" key={a.id}><div className="mist-row mist-module-actions"><Mono>{receipt?.code || '来源到账未找到'}</Mono><span>{money(a.amount, a.currency)}</span><Button disabled={!receipt} onClick={() => go('payment-vouchers', a.receiptId, { section: 'records' })}>{uiText("查看到账流水")}</Button></div><span className="mist-note">{invoiceWhen(a.createdAt)} · {a.actor}{uiText(a.payerBasis ? ` · ${a.payerBasis}` : '')}</span></div>; }) : <EmptyState compact title={uiText("尚无到账核销")} />}</DetailBlock></div></Card>
+      {(facts.bankCharges.length > 0 || (current.state === 'open' && facts.allocations.length > 0)) && (() => {
+        const receipts = facts.allocations.map(a => w.state?.receipts.find(r => r.id === a.receiptId)).filter((r): r is NonNullable<typeof r> => !!r && r.currency === current.currency)
+          .filter((r, i, all) => all.findIndex(x => x.id === r.id) === i).map(r => ({ id: r.id, label: `${r.code || r.ref} · ${money(r.amount, r.currency)}` }));
+        const left = Math.max(0, (Math.round(MIST_BANK_CHARGE_LIMIT * 100) - Math.round(facts.charged * 100)) / 100);
+        return <Card><div className="mist-card-body mist-col"><DetailBlock title={uiText("银行扣费")}>
+          {facts.bankCharges.length ? facts.bankCharges.map(c => { const receipt = w.state?.receipts.find(r => r.id === c.receiptId); return <div className="mist-col" key={c.id} data-bank-charge={c.id}>
+            <div className="mist-row mist-module-actions"><Mono>{receipt?.code || receipt?.ref || '来源到账未找到'}</Mono><span>{money(c.amount, c.currency)}</span>{c.reversed ? <Pill tone="neutral">{uiText('已冲回')}</Pill> : canReconcile && <Button onClick={() => setDialog(reverseChargeSpec(current, c.id))}>{uiText('冲回')}</Button>}</div>
+            <span className="mist-note">{invoiceWhen(c.at)} · {c.actor} · {c.reason}{c.reversed ? ` · 冲回：${c.reversed.reason}` : ''}</span></div>; }) : <EmptyState compact title={uiText("尚无银行扣费")} />}
+          {current.state === 'open' && <ActionBar actions={[{ label: '登记银行扣费', onClick: () => setDialog(chargeSpec(current, receipts, left)), reason: !canReconcile ? '需要核销权限（财务）' : !receipts.length ? '先把到账核销到本票' : left <= 0 ? `本票银行扣费已达 ${MIST_BANK_CHARGE_LIMIT} ${current.currency} 上限` : undefined }]} />}
+        </DetailBlock></div></Card>;
+      })()}
       <Card><div className="mist-card-body mist-col"><DetailBlock title={uiText("贷项抵扣记录")}>{facts.credits.length ? facts.credits.map(a => { const credit = w.state?.platform?.credits.find(c => c.id === a.creditId); return <div className="mist-col" key={a.id}><div className="mist-row mist-module-actions"><Mono>{credit?.code || '贷项来源未找到'}</Mono><span>{money(a.amount, current.currency)}</span><Button disabled={!credit || !w.state?.platform?.claims.some(c=>c.id===credit.claimId)} onClick={() => go('claims', credit?.claimId, {section:'credit:'+a.creditId})}>{uiText("查看贷项来源案件")}</Button></div><span className="mist-note">{invoiceWhen(a.at)} · {a.actor}</span></div>; }) : <EmptyState compact title={uiText("尚无贷项抵扣")} />}</DetailBlock></div></Card>
       {current.state === 'open' || collectionRows.length ? <Card><div className="mist-card-body mist-col"><DetailBlock title={ui`催收记录${collection?.count ? ` · ${collection.count} 次` : ''}`}>
         {collection?.promise && <Banner tone={collection.promise.state === 'broken' ? 'bad' : collection.promise.state === 'kept' ? 'ok' : 'accent'} title={ui`客户承诺 ${collection.promise.date} 付 ${collection.promise.amount} ${collection.promise.currency} · ${PROMISE_LABEL[collection.promise.state]}`}>{uiText("承诺之后已核销 ")}{money(collection.promise.paidSince, collection.promise.currency)}。</Banner>}

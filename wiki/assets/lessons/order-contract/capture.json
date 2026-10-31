@@ -1,0 +1,104 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 576,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 280,
+        "y": 506,
+        "width": 1118,
+        "height": 68
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1030,
+        "y": 183,
+        "width": 127,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 739,
+        "y": 156,
+        "width": 357,
+        "height": 40
+      },
+      "value": "CC-PO-2026-1188"
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 739,
+        "y": 476,
+        "width": 336,
+        "height": 40
+      },
+      "value": "按总量"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 344,
+        "y": 556,
+        "width": 357,
+        "height": 40
+      },
+      "value": "客户 PO CC-PO-2026-1188 按款号总量下单：大衣 800 件、马甲 600 件，分色分码后补。"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 739,
+        "y": 556,
+        "width": 357,
+        "height": 40
+      },
+      "value": "3"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 344,
+        "y": 636,
+        "width": 357,
+        "height": 40
+      },
+      "value": "3"
+    },
+    {
+      "image": "09.webp",
+      "target": {
+        "x": 332,
+        "y": 655,
+        "width": 776,
+        "height": 102
+      }
+    },
+    {
+      "image": "10.webp",
+      "target": {
+        "x": 995,
+        "y": 775,
+        "width": 113,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

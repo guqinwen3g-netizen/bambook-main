@@ -1,0 +1,64 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 538,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 280,
+        "y": 515,
+        "width": 760,
+        "height": 78
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1078,
+        "y": 689,
+        "width": 300,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 300,
+        "y": 295,
+        "width": 109,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 374,
+        "y": 414,
+        "width": 692,
+        "height": 81
+      },
+      "value": "Olivia Grant 10-31 邮件确认接受 V2 报价，PO 随后下发。"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 1019,
+        "y": 516,
+        "width": 59,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

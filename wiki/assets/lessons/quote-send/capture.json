@@ -1,0 +1,73 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 538,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 280,
+        "y": 506,
+        "width": 760,
+        "height": 78
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1078,
+        "y": 689,
+        "width": 300,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 552,
+        "y": 295,
+        "width": 150,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 419,
+        "y": 295,
+        "width": 123,
+        "height": 40
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 374,
+        "y": 414,
+        "width": 692,
+        "height": 81
+      },
+      "value": "邮件发送正式报价单 PDF 给 Cedar & Crown 采购 Olivia Grant"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 1019,
+        "y": 516,
+        "width": 59,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

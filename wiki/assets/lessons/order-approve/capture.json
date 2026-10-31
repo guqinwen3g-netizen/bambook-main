@@ -1,0 +1,37 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 810,
+        "width": 461,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 814,
+        "y": 687,
+        "width": 552,
+        "height": 81
+      },
+      "value": "PO、价格、交期与付款条件已核对，同意。"
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 802,
+        "y": 782,
+        "width": 82,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}
