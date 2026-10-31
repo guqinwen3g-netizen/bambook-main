@@ -205,6 +205,9 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   const expenses: OrderCostLine[] = [];
   for (const e of activeExpenses(root)) for (const s of e.shares.filter(s => s.orderId === orderId))
     expenses.push(line('exp:' + e.id, `${e.code} ${EXPENSE_CATEGORIES[e.category]}${e.shipmentCode ? ` · ${e.shipmentCode}` : ''}（${ALLOCATION_BASES[e.basis]}）`, e.currency, mistMoneyMinor(s.amount), { note: e.vendor }));
+  // 客户汇款被银行扣费的短收：收入仍按发票，扣费计入本单费用。
+  for (const i of invoices) for (const c of (i.bankCharges || []).filter(c => !c.reversed))
+    expenses.push(line('bank:' + c.id, `${i.code} 客户汇款银行扣费`, c.currency, mistMoneyMinor(c.amount), { note: c.reason }));
   const rebateRaw = orderRebate(root as never, orderId), used = rebateRaw.approved || rebateRaw.expected;
   const sum = (rows: OrderCostLine[]) => rows.some(r => r.cny === null) ? null : Math.round(rows.reduce((n, r) => n + mistMoneyMinor(r.cny!), 0));
   const rv = sum(revenue), pc = sum(purchases), ex = sum(expenses);

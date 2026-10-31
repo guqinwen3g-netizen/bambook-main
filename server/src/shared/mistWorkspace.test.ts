@@ -90,6 +90,21 @@ it('requires explicit payer relationship evidence for a different customer name'
  expect(()=>f.run({type:'finance.reconcile',payload:{receiptId,invoiceId}})).toThrow('付款方关系依据');
  f.run({type:'finance.reconcile',payload:{receiptId,invoiceId,payerBasis:'客户书面确认由母公司代付'}});expect(f.state.allocations[0].payerBasis).toBe('客户书面确认由母公司代付');
 });
+it('records a bank charge on a short-paid remittance as an order expense, within a small cap, and can reverse it',()=>{
+ const f=approvedOrderFixture(1000),draft=f.run({type:'platform.invoice.save',payload:{orderId:f.orderId,due:'2026-10-13',amount:1000,note:'CI'}}).id!;
+ const invoiceId=f.run({type:'platform.invoice.issue',payload:{id:draft}}).invoiceId!,invoice=()=>f.state.invoices.find(i=>i.id===invoiceId)!;
+ f.run({type:'finance.importReceipts',payload:{receipts:[{date:'2026-10-13',payer:'客户公司',amount:850,currency:'USD',ref:'SHORT'}]}});const receiptId=f.state.receipts[0].id;
+ const charge=(amount:number)=>f.run({type:'finance.receivable.bankCharge',payload:{invoiceId,receiptId,amount,reason:'中间行扣费，见银行水单'}});
+ expect(()=>charge(30)).toThrow('请先把这笔到账核销到该发票');
+ f.run({type:'finance.reconcile',payload:{receiptId,invoiceId}});expect(invoice().open).toBe(150);
+ expect(()=>charge(120)).toThrow('累计银行扣费不超过 100');
+ const id=charge(30).id!;expect(invoice().open).toBe(120);expect(invoice().bankCharges).toMatchObject([{id,amount:30,currency:'USD',reason:'中间行扣费，见银行水单'}]);
+ expect(()=>charge(80)).toThrow('累计银行扣费不超过 100');
+ expect(()=>f.run({type:'finance.receivable.bankCharge',payload:{invoiceId,receiptId,amount:5,reason:''}})).toThrow('扣费依据');
+ expect(mistCommandPermission({type:'finance.receivable.bankCharge',payload:{invoiceId,receiptId,amount:1,reason:'x'}} as MistCommand)).toBe('invoices:reconcile');
+ f.run({type:'finance.receivable.bankCharge.reverse',payload:{invoiceId,chargeId:id,reason:'银行退回扣费'}});expect(invoice().open).toBe(150);expect(invoice().bankCharges![0].reversed?.reason).toBe('银行退回扣费');
+ expect(()=>f.run({type:'finance.receivable.bankCharge.reverse',payload:{invoiceId,chargeId:id,reason:'再次'}})).toThrow('已冲回');
+});
 it('does not silently discard identical amounts when no bank reference exists',()=>{const ctx=context(),state=createMistState(ctx,'empty'),row={date:'2026-10-13',payer:'客户',amount:10,currency:'USD',ref:''};const result=applyMistCommand(state,{type:'finance.importReceipts',payload:{receipts:[row,row]}},ctx);expect(result.result).toEqual({imported:2,skipped:0});expect(result.state.receipts).toHaveLength(2);});
 describe('finance reversals keep the original fact and recompute balances',()=>{
  const setup=()=>{const f=approvedOrderFixture(10),draft=f.run({type:'platform.invoice.save',payload:{orderId:f.orderId,due:'2026-10-13',amount:10,note:'实际合同票据'}}).id!;
