@@ -35,11 +35,13 @@ export function isAgentActor(actor: unknown): actor is AgentActor {
 
 function deny(message: string, status = 401, code = 'AGENT_DELEGATION_INVALID'): never { throw new MistApiError(code, message, status); }
 
-/** 委托身份可调用的接口：只读，且只限公司列表与工作助手读取接口。 */
+/** 委托身份可调用的接口；MCP 写入仍由 mode、实时权限与命令门禁限制。 */
 const AGENT_ALLOWED_ROUTES: Array<[string, RegExp]> = [
   ['GET', /^\/workspaces\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/agent\/(query|objects\/[^/]+\/[^/]+(\/related)?)\/?$/],
   ['POST', /^\/mcp\/?$/],
+  // 无 SSE 流时返回标准 405；不能在委托路由层先误判成越权。
+  ['GET', /^\/mcp\/?$/],
 ];
 export function agentRouteAllowed(method: string, path: string) {
   return AGENT_ALLOWED_ROUTES.some(([m, pattern]) => m === method.toUpperCase() && pattern.test(path));

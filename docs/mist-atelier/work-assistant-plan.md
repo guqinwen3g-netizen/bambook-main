@@ -162,7 +162,7 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 
 用户定案修订第 13 节白名单：Agent 可读全部可见数据并执行普通写入，确认 / 删除 / 资金 / 对外发送类仍须本人确认；使用者包括桌面工作助手、外部 MCP 客户端和管理员开设的无人值守 Agent 账号。
 
-- **入口**：`POST /api/mist/mcp`（JSON-RPC 2.0；`initialize` / `ping` / `tools/list` / `tools/call`，通知回 202，GET 不提供）。实现 `server/src/mist/agentMcp.ts`，路由 `route.ts`。
+- **入口**：`POST /api/mist/mcp`（JSON-RPC 2.0；`initialize` / `ping` / `tools/list` / `tools/call`，通知回202）。当前实现 `2025-06-18`、`2025-03-26`；初始化遇到不支持的版本返回 `2025-06-18`，后续显式携带不支持的 `MCP-Protocol-Version` 则回400。不提供SSE，已认证GET回405及`Allow: POST`，不是越权403。实现 `agentMcp.ts`、`route.ts`；来源检查及委托限制保留。
 - **身份**：`POST /api/mist/agent/delegations` 由本人会话签发委托（2 小时）。`{mode:'read'}`（默认）上限为只读 scope；`{mode:'operate'}` 上限 = 账号现有 scope（`AGENT_OPERATE_CEILING`），永远不超出账号。委托只能调用读取路由和 `/mcp`。
 - **工具**：`bambook_workspaces`、`bambook_query`、`bambook_get`、`bambook_related`（复用 `agentRead.ts`）；`bambook_commands`（命令目录 + payload 结构 + `via`）；`bambook_preview`（`repository.preview`：同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，应用后整笔回滚，返回业务事件说明；生成文件的命令不支持）；`bambook_execute`（`repository.execute`，请求编号幂等：重试沿用原版本号重放，不同命令复用编号被拒）。
 - **分级**：`agentCommandSensitivity()`。`confirm`（资金 / 账务前缀、人员与权限、供应商收款账户（`market.supplier.bank.*`）、对外邮件，以及 confirm/approve/decide/void/reverse/cancel/delete/close/issue/send/notify/present/refund/waive/withdraw/transition 等动词）执行时先按 Agent 身份完整预演，通过后记为 Agent 提议（见下条），不直接生效；`payable.settlement.submit` 例外为普通；`files.add` 与 `email.server.*` 不能经接口。
@@ -177,4 +177,23 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 - **收汇银行扣费**：客户汇款被中转行扣费导致发票余小额时，财务可经 Agent 办理 `finance.receivable.bankCharge`（invoiceId、receiptId、amount、reason；单票累计 ≤ 100，须该到账已核销到本票），冲正用 `finance.receivable.bankCharge.reverse`。
 - **结汇校验**：`finance.fx.settle` 卖出金额不能超过卖出账户当前余额（到账须先 `finance.account.assign` 归户）；带 `lockId` 时 `localAmount` 须等于原币 × 锁定汇率，否则须在 `note` 写明原因。
 - **已知限制**：增值税专票等须上传原件的票据，Agent 不能上传文件，预演即被拒（“请上传增值税专票原件”），须本人登记。
-- **部署与未完成**：MCP已包含在当前SaaS应用发布中；未登录请求拒绝已核对，但没有据此认定外部客户端已实连。无人值守Agent账号与长期API Key、外部客户端完整连接/办理验证、普通Agent写入完整审计和更多对象读取仍需收口。顶层工具采用JSON Schema；命令目录内payload/types为TypeScript结构文本，能列出命令不等于当前岗位有权执行。
+- **外部客户端互通（2026-10-31）**：`mcpClient.test.ts` 用官方 `@modelcontextprotocol/client@2.4.0` 与 `StreamableHTTPClientTransport` 建立真实loopback HTTP连接，覆盖默认初始化、自动探测后回退、工具发现、只读拒写、预演和一次性写入/重试。另在独立本地Mist经同一SDK提交采购结算，再经财务委托创建提议；真实页面切到财务本人确认，SDK读回已确认且仅一条结算。没有据此宣称所有第三方桌面客户端或全部业务链均已验收。
+- **执行重试契约**：`bambook_execute` 必填 `requestId`（1–116字、无首尾空格）。新业务操作用新编号，同一操作超时/重连重试沿用原编号与原参数；不可因网络失败直接换编号。普通写入和敏感提议都回放原回执；提议重试沿用原说明及请求版本，已经本人确认后也不会再次办理。复用编号提交另一条命令或不同参数会被拒绝。`bambook_preview` 不要求编号且不落库。
+- **部署与未完成**：MCP已包含在SaaS应用；每次修订是否发布看相应提交的deployment状态。无人值守Agent账号与长期API Key、自助连接/续签体验、更多实际客户端、普通Agent写入完整审计和更多对象读取仍需收口。顶层工具采用JSON Schema；命令目录内payload/types为TypeScript结构文本，能列出命令不等于当前岗位有权执行。这里只验证了短期本人委托和上述单链交接。
+
+外部客户端需要本人授权签发的短期委托；令牌不写入仓库或日志，不作为普通登录凭据。已有令牌时的连接形状如下（不是自动签发或扩大权限）：
+
+```ts
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+const client = new Client({ name: 'company-assistant', version: '1' });
+await client.connect(new StreamableHTTPClientTransport(new URL(endpoint), {
+  requestInit: { headers: { 'x-bambook-delegation': delegationToken }, redirect: 'error' },
+}));
+// operationId 在本项操作开始时生成并保存；网络重试沿用它。
+await client.callTool({ name: 'bambook_execute', arguments: {
+  workspaceId, requestId: operationId, command,
+} });
+await client.close();
+```
+
+协议依据：[Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)、[版本协商](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)。不宣称支持尚未实现的2026协议或OAuth自助接入。
