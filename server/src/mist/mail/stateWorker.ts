@@ -67,7 +67,7 @@ export class MistMailStateWorker {
           if(box.uidValidity!==m.remote!.uidValidity||metadata.length!==1)throw problem('MAIL_STATE_MISSING','原邮箱位置已变化，请核对');
           result={id:m.id,expected:m.remote!,remote:m.remote!,folder:m.remoteState?.folder||m.folder,read:metadata[0].seen,starred:metadata[0].starred};
         }
-      }else if(job.attempt?.issued&&job.operation.kind==='move'||job.acceptRemote){
+      }else if((job.attempt?.issued&&!job.attempt.confirmedNotApplied&&job.operation.kind==='move')||job.acceptRemote){
         const attempt=job.attempt;
         const origin=job.acceptRemote?m.remote!:(attempt?.origin||m.remote!);
         const box=await wait(session.open(origin.folder));
@@ -76,7 +76,11 @@ export class MistMailStateWorker {
         else if(attempt){
           const matches=await wait(locateMail(session,attempt,folders,check));
           if(!source.length&&matches.length===1&&(job.acceptRemote||matches[0].remote.folder===attempt.target?.path))result={id:m.id,expected:m.remote!,...matches[0]};
-          else if(source.length===1&&matches.filter(r=>r.remote.folder===attempt.target?.path).length===0)throw problem('MAIL_MOVE_NOT_APPLIED','原移动未完成，请重试或以原邮箱为准');
+          else if(source.length===1&&matches.filter(r=>r.remote.folder===attempt.target?.path).length===0){
+            const verifiedBox=await wait(session.open(origin.folder)),raw=await wait(session.fetch([origin.uid]));
+            if(verifiedBox.uidValidity===origin.uidValidity&&raw.length===1&&rawMailHash(raw[0].raw)===attempt.hash)throw problem('MAIL_MOVE_NOT_APPLIED','原移动未完成，请重试或以原邮箱为准');
+            throw problem('MAIL_STATE_AMBIGUOUS','原邮箱位置或副本不明确，请先人工核对');
+          }
           else throw problem('MAIL_STATE_AMBIGUOUS','原邮箱位置或副本不明确，请先人工核对');
         }else throw problem('MAIL_STATE_MISSING','原邮箱中未找到邮件，请先核对');
       }else{
@@ -121,10 +125,10 @@ export class MistMailStateWorker {
     }catch(e:any){
       if(['MAIL_BUSY','MAIL_STATE_CHANGED'].includes(e?.code))return;
       const permission=[401,403,404].includes(e?.status)||['MAIL_SOURCE_CHANGED','MAIL_STATE_EXPIRED','MAIL_CREDENTIAL_MISSING'].includes(e?.code);
-      const uncertain=job.operation.kind==='move'&&!!job.attempt?.issued;
+      const uncertain=job.operation.kind==='move'&&!!job.attempt?.issued&&!job.attempt.confirmedNotApplied;
       const phase=permission?'blocked':e?.code==='MAIL_MOVE_NOT_APPLIED'?'failed':uncertain?'unknown':['MAIL_MOVE_UNSUPPORTED','MAIL_TARGET_MISSING','MAIL_STATE_UNSUPPORTED','MAIL_STATE_SOURCE_CHANGED','MAIL_STATE_MISSING'].includes(e?.code)?'failed':'pending';
       const message=permission?'账号或邮箱授权已变化，请重新核对后重试':typeof e?.code==='string'&&e.code.startsWith('MAIL_')?e.message:'原邮箱暂时无法连接，稍后重试';
-      if(actor)await this.repository.failMailState(job,phase,message).catch(()=>this.options.onError?.('MAIL_STATE_SAVE_FAILED'));
+      if(actor)await this.repository.failMailState(job,phase,message,Date.now(),e?.code==='MAIL_MOVE_NOT_APPLIED').catch(()=>this.options.onError?.('MAIL_STATE_SAVE_FAILED'));
       else await this.repository.blockUnclaimedMailState(job,message).catch(()=>this.options.onError?.('MAIL_STATE_BLOCK_FAILED'));
     }finally{
       clearTimeout(timeout);clearInterval(guard);parent.removeEventListener('abort',abort);signal.removeEventListener('abort',close);

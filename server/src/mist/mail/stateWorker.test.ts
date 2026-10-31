@@ -13,7 +13,7 @@ type Row={uid:number;raw:Buffer;seen:boolean;starred:boolean};
 class Mailbox {
   boxes:Record<string,Row[]>={INBOX:[],Archive:[],Trash:[],Sent:[]};
   next:Record<string,number>={INBOX:1,Archive:1,Trash:1,Sent:1};
-  validity=7;moves=0;flags=0;moveSupported=true;dropReply=false;failFlag=false;
+  validity=7;moves=0;flags=0;moveSupported=true;dropReply=false;failBeforeMove=false;failFlag=false;
   gate?:Promise<void>;
   put(){const row={uid:this.next.INBOX++,raw:Buffer.from(`From: Buyer <buyer@example.test>\r\nTo: staff@example.test\r\nSubject: Incoming\r\nMessage-ID: <${randomUUID()}@example.test>\r\nDate: Sun, 1 Nov 2026 01:00:00 +0000\r\n\r\nOrder update`),seen:false,starred:false};this.boxes.INBOX.push(row);return row;}
   relocate(from:string,uid:number,to:string){const row=this.boxes[from].find(r=>r.uid===uid)!;this.boxes[from]=this.boxes[from].filter(r=>r!==row);const copy={...row,uid:this.next[to]++};this.boxes[to].push(copy);return copy.uid;}
@@ -26,7 +26,7 @@ class Mailbox {
       metadata:async ids=>this.boxes[folder].filter(r=>ids.includes(r.uid)).map(r=>({uid:r.uid,seen:r.seen,starred:r.starred})),
       updateFlag:async(uid,flag,value)=>{this.flags++;if(this.gate)await this.gate;if(this.failFlag)throw Object.assign(Error('offline'),{code:'ECONNRESET'});const row=this.boxes[folder].find(r=>r.uid===uid)!;row[flag==='read'?'seen':'starred']=value;},
       canMove:()=>this.moveSupported,
-      move:async(uid,to)=>{this.moves++;if(this.gate)await this.gate;const id=this.relocate(folder,uid,to);if(this.dropReply){this.dropReply=false;throw Object.assign(Error('reply lost'),{code:'ECONNRESET'});}return id;},
+      move:async(uid,to)=>{this.moves++;if(this.gate)await this.gate;if(this.failBeforeMove){this.failBeforeMove=false;throw Object.assign(Error('connection lost before move'),{code:'ECONNRESET'});}const id=this.relocate(folder,uid,to);if(this.dropReply){this.dropReply=false;throw Object.assign(Error('reply lost'),{code:'ECONNRESET'});}return id;},
       searchMessageId:async id=>this.boxes[folder].filter(r=>r.raw.includes(id)).map(r=>r.uid),
       hasMessageId:async id=>this.boxes[folder].some(r=>r.raw.includes(id)),append:async()=>{},close:async()=>{},
     };},smtpVerify:async()=>{},smtpSend:async()=>{throw Error('No outbound mail');},
@@ -90,6 +90,12 @@ describe('Durable bidirectional mailbox state',()=>{
     expect((await f.states())[0].state).toBe('unknown');expect(f.box.moves).toBe(1);
     await f.command('email.move',{id:m.id,folder:'trash'},409);
     await f.command('email.state.retry',{id:m.id});await f.worker.tick();expect(f.box.moves).toBe(1);expect(await f.states()).toEqual([]);expect((await f.message()).remote.folder).toBe('Archive');
+  });
+  it('permits a fresh explicit attempt only after a lost MOVE is proven not to have happened',async()=>{
+    const f=await fixture(),m=await f.message();f.box.failBeforeMove=true;
+    await f.command('email.move',{id:m.id,folder:'archive'});await f.worker.tick();expect((await f.states())[0].state).toBe('unknown');expect(f.box.moves).toBe(1);
+    await f.command('email.state.retry',{id:m.id});await f.worker.tick();expect((await f.states())[0].state).toBe('failed');expect(f.box.moves).toBe(1);
+    await f.command('email.state.retry',{id:m.id});await f.worker.tick();expect(await f.states()).toEqual([]);expect(f.box.moves).toBe(2);expect((await f.message()).remote.folder).toBe('Archive');
   });
   it('never enters unsafe COPY/EXPUNGE fallback and lets the employee retain original mailbox state',async()=>{
     const f=await fixture(),m=await f.message();f.box.moveSupported=false;await f.command('email.move',{id:m.id,folder:'archive'});await f.worker.tick();

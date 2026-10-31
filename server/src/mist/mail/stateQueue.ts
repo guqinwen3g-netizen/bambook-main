@@ -12,7 +12,7 @@ export const MAIL_STATE_PREFIX = 'mist-revision:mail-state:';
 export const MAIL_STATE_HASH = 'mist-mail-state:v1';
 export const MAIL_STATE_FIELD = '__mailState';
 export type MailStateOperation = { kind: 'flag'; flag: 'read' | 'starred'; value: boolean } | { kind: 'move'; folder: EmailMessageFolder };
-export type MailStateAttempt = { id: string; origin: MailRemoteRef; target?: { path: string; folder: EmailMessageFolder; uidValidity: number; uidNext: number }; messageId: string; hash?: string; issued: boolean; result?: MailStateObservation };
+export type MailStateAttempt = { id: string; origin: MailRemoteRef; target?: { path: string; folder: EmailMessageFolder; uidValidity: number; uidNext: number }; messageId: string; hash?: string; issued: boolean; confirmedNotApplied?: boolean; result?: MailStateObservation };
 export type MailStateRecord = {
   schemaVersion: 1; id: string; workspaceId: string; accountId: string; messageId: string; source: number; sourceHash: string;
   initiatorId: string; authority: TokenPayload; authorizedAt: number; operation: MailStateOperation;
@@ -82,7 +82,7 @@ export async function enqueueMailState(db: any, workspace: { id: string; state: 
   for (const candidate of rows.filter(r => mailStateField(r) === field)) {
     const current = await readMailState(db, workspace.id, candidate.id), old = current.record;
     if (!active(old)) continue;
-    if (field === 'folder' && (old.phase === 'running' || old.phase === 'unknown' || old.attempt?.issued || old.attempt?.result)) fail('MAIL_STATE_PENDING', '先核对上一项移动的结果，再继续移动', 409);
+    if (field === 'folder' && (old.phase === 'running' || old.phase === 'unknown' || (old.attempt?.issued && !old.attempt.confirmedNotApplied) || old.attempt?.result)) fail('MAIL_STATE_PENDING', '先核对上一项移动的结果，再继续移动', 409);
     await save(db, current.row, current.record, { phase: 'superseded', nextRunAt: 0 });
   }
   if (records.filter(r=>r.accountId===a.id).length >= 500 && !rows.length) fail('MAIL_STATE_LIMIT', '待同步操作过多，请先处理同步异常', 409);
@@ -122,11 +122,11 @@ export async function rememberMailState(db: any, job: MailStateRecord, observati
   if (!record.attempt?.issued || record.attempt.id !== job.attempt?.id || !active(record)) return;
   return save(db, row, record, { attempt: { ...record.attempt, result: observation } });
 }
-export async function failMailState(db: any, job: MailStateRecord, phase: 'pending' | 'failed' | 'unknown' | 'blocked', error: string, now: number) {
+export async function failMailState(db: any, job: MailStateRecord, phase: 'pending' | 'failed' | 'unknown' | 'blocked', error: string, now: number, confirmedNotApplied = false) {
   const { row, record } = await readMailState(db, job.workspaceId, job.id);
   if (!active(record) || record.leaseId !== job.leaseId) return;
   const failures = record.failures + 1;
-  return save(db, row, record, { phase, error, failures, leaseId: undefined, nextRunAt: phase === 'pending' ? now + Math.min(30 * 60_000, 5 * 60_000 * 2 ** Math.min(failures - 1, 3)) : 0 });
+  return save(db, row, record, { phase, error, failures, ...(confirmedNotApplied && record.attempt ? {attempt:{...record.attempt,confirmedNotApplied:true}} : {}), leaseId: undefined, nextRunAt: phase === 'pending' ? now + Math.min(30 * 60_000, 5 * 60_000 * 2 ** Math.min(failures - 1, 3)) : 0 });
 }
 export async function completeMailState(db: any, workspaceId: string, operationId: string, attemptId: string, observation: MailStateObservation, leaseId: string) {
   const { row, record } = await readMailState(db, workspaceId, operationId);

@@ -857,7 +857,7 @@ export class MistRepository {
   }
   async planMailState(job:MailStateRecord,attempt:MailStateAttempt){return this.connectionTransaction(db=>planMailState(db,job,attempt));}
   async rememberMailState(job:MailStateRecord,o:MailStateObservation){return this.connectionTransaction(db=>rememberMailState(db,job,o));}
-  async failMailState(job:MailStateRecord,phase:'pending'|'failed'|'unknown'|'blocked',error:string,now=Date.now()){return this.connectionTransaction(db=>failMailState(db,job,phase,error,now));}
+  async failMailState(job:MailStateRecord,phase:'pending'|'failed'|'unknown'|'blocked',error:string,now=Date.now(),confirmedNotApplied=false){return this.connectionTransaction(db=>failMailState(db,job,phase,error,now,confirmedNotApplied));}
   async blockUnclaimedMailState(job:MailStateRecord,error:string){return this.connectionTransaction(async db=>{const current=await readMailState(db,job.workspaceId,job.id);if(current.record.version!==job.version)return;return failMailState(db,current.record,'blocked',error,Date.now());});}
   async mailReceivingViews(prior:TokenPayload,workspaceId:string,now=Date.now()) {
     return this.transact(async db=>{
