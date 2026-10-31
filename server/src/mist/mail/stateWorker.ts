@@ -7,6 +7,7 @@ import type { MistMailService } from './service';
 import type { MailSyncActor } from './receiverRegistry';
 import type { MailStateRecord, MailStateAttempt } from './stateQueue';
 import type { MailImapSession } from './transport';
+import { describeMailError } from './transport';
 import { stateFolders, locateMail, rawMailHash } from './stateProtocol';
 
 const problem = (code:string,message:string) => Object.assign(new Error(message),{code});
@@ -124,10 +125,11 @@ export class MistMailStateWorker {
       await this.repository.executeMail(actor,job.workspaceId,{type:'email.server.state',payload:{accountId:job.accountId,source:job.source,operationId:job.id,attemptId:job.attempt!.id,observation:result!}});
     }catch(e:any){
       if(['MAIL_BUSY','MAIL_STATE_CHANGED'].includes(e?.code))return;
-      const permission=[401,403,404].includes(e?.status)||['MAIL_SOURCE_CHANGED','MAIL_STATE_EXPIRED','MAIL_CREDENTIAL_MISSING'].includes(e?.code);
+      const mailboxAuth=describeMailError(e,'imap').code==='MAIL_AUTH_FAILED';
+      const permission=mailboxAuth||[401,403,404].includes(e?.status)||['MAIL_SOURCE_CHANGED','MAIL_STATE_EXPIRED','MAIL_CREDENTIAL_MISSING'].includes(e?.code);
       const uncertain=job.operation.kind==='move'&&!!job.attempt?.issued&&!job.attempt.confirmedNotApplied;
       const phase=permission?'blocked':e?.code==='MAIL_MOVE_NOT_APPLIED'?'failed':uncertain?'unknown':['MAIL_MOVE_UNSUPPORTED','MAIL_TARGET_MISSING','MAIL_STATE_UNSUPPORTED','MAIL_STATE_SOURCE_CHANGED','MAIL_STATE_MISSING'].includes(e?.code)?'failed':'pending';
-      const message=permission?'账号或邮箱授权已变化，请重新核对后重试':typeof e?.code==='string'&&e.code.startsWith('MAIL_')?e.message:'原邮箱暂时无法连接，稍后重试';
+      const message=mailboxAuth?'邮箱登录已失效，请接入人重新绑定凭据后重试':permission?'账号或邮箱授权已变化，请重新核对后重试':typeof e?.code==='string'&&e.code.startsWith('MAIL_')?e.message:'原邮箱暂时无法连接，稍后重试';
       if(actor)await this.repository.failMailState(job,phase,message,Date.now(),e?.code==='MAIL_MOVE_NOT_APPLIED').catch(()=>this.options.onError?.('MAIL_STATE_SAVE_FAILED'));
       else await this.repository.blockUnclaimedMailState(job,message).catch(()=>this.options.onError?.('MAIL_STATE_BLOCK_FAILED'));
     }finally{
