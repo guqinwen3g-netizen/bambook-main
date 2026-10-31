@@ -77,7 +77,11 @@ try {
     await root.locator('[data-lesson-restart]').click().catch(() => root.locator('[data-step="0"]').click());
     await root.locator('[data-step="0"]').click(); await waitImage(root);
     const box = await root.locator('[data-shot]').boundingBox();
-    await page.mouse.click(box.x + 4, box.y + box.height - 4);
+    await page.waitForTimeout(1500);
+    const hot0 = await root.locator('[data-hotspot]').boundingBox();
+    const corners = [[box.x + 6, box.y + 6], [box.x + box.width - 6, box.y + 6], [box.x + 6, box.y + box.height - 6], [box.x + box.width - 6, box.y + box.height - 6]];
+    const far = corners.sort((a, b) => Math.hypot(b[0] - hot0.x, b[1] - hot0.y) - Math.hypot(a[0] - hot0.x, a[1] - hot0.y))[0];
+    await page.mouse.click(far[0], far[1]);
     check('练习 · 点错位置只提示', (await root.locator('[data-hint]').textContent())?.includes('点击亮起的位置') && !(await root.locator('[data-step="0"]').evaluate(el => el.classList.contains('done'))));
     for (let i = 0; i < steps; i++) {
       await root.locator(`[data-step="${i}"]`).click(); await waitImage(root);
