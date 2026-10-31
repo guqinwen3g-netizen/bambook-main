@@ -374,7 +374,7 @@ export function scopedTargetViolation(state: MistState, scope: MistDataScope, co
   else if (['production.move','production.update'].includes(type)) { path='productions'; id=payload.id; }
   else if (['fulfillment.production.intake','fulfillment.production.observe'].includes(type)) { path='productions'; id=payload.productionId; }
   else if (type.startsWith('market.quotation.') && type !== 'market.quotation.decide') { path='market.quotations'; id=payload.quotationId ?? payload.id; }
-  else if (['finance.receivable.confirm','finance.receivable.reject'].includes(type)) { path='invoices'; id=payload.invoiceId; }
+  else if (['finance.receivable.confirm','finance.receivable.reject','finance.receivable.bankCharge','finance.receivable.bankCharge.reverse'].includes(type)) { path='invoices'; id=payload.invoiceId; }
   else if (type === 'platform.credit.issue') { path='platform.credits'; id=payload.creditId; }
   else if (type === 'fulfillment.procurement.document') { path='fulfillment.purchases'; id=payload.id; }
   if (!path || typeof id !== 'string' || !id) return null;

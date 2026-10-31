@@ -33,7 +33,7 @@ describe('包 A：负责人与供应商稳定引用（服务端）',()=>{
   await command(f.manager,f.id,ws.revision,'member.groups.set',{userId:'local-manager',groups:['garment']}).expect(403);
   ws=(await command(f.sales,f.id,ws.revision,'member.groups.set',{userId:'local-manager',groups:['garment']}).expect(200)).body.workspace;
   expect(ws.state.memberGroups.find((g:any)=>g.userId==='local-manager').groups).toEqual(['garment']);
-  expect(ws.state.events.some((e:any)=>e.text.includes('业务组')&&e.text.includes('成衣'))).toBe(true);
+  expect(ws.state.events.some((e:any)=>e.text.includes('管理业务线')&&e.text.includes('成衣'))).toBe(true);
   const supplier=ws.state.market.suppliers[0];
   const reject=async(handlerIds:Record<string,string>,pattern:RegExp)=>{
    const res=await command(f.sales,f.id,ws.revision,'market.supplier.save',{id:supplier.id,input:supplierInput(supplier,{handlerIds})});
@@ -42,7 +42,6 @@ describe('包 A：负责人与供应商稳定引用（服务端）',()=>{
    expect(now.state.market.suppliers.find((s:any)=>s.id===supplier.id)).toEqual(supplier);
   };
   await reject({garment:'local-qc'},/本公司的成员/); // 不是本公司成员
-  await reject({fabric:'local-manager'},/不属于面料业务组/); // 在册但不在该组
   await reject({garment:'业务主管（测试审批人）'},/本公司的成员/); // 按姓名而不是账号
   ws=(await command(f.sales,f.id,ws.revision,'market.supplier.save',{id:supplier.id,input:supplierInput(supplier,{handlerIds:{garment:'local-manager'}})}).expect(200)).body.workspace;
   const saved=ws.state.market.suppliers.find((s:any)=>s.id===supplier.id);

@@ -228,6 +228,8 @@ export function assertAccountUsable(account: MistBankAccount, currency: string, 
 export type MistInvoice = { id: string; code: string; orderId: string; order: string; customer: string; due: string; amount: number; open: number; currency: string;
   /** 开票业务日（YYYY-MM-DD，上海时区）；期末调汇按此判断截至月末的应收。 */
   issuedAt?: string; voidedAt?: string; voidReason?: string; voidedBy?: string; voidedById?: string; voidSourceDocumentId?: string;
+  /** 客户汇款被中间行 / 收款行扣费造成的短收：财务凭已核销的到账登记，计入订单费用而非冲减收入。 */
+  bankCharges?: MistInvoiceBankCharge[];
   /** BB-DEV-9：开发费用应收票据回链来源开发案（这类票据没有订单，orderId 为空）。 */
   devId?: string;
   developmentChargeIds?: string[]; fileIds?: string[];
@@ -243,6 +245,10 @@ export function isActiveMistInvoice(invoice: Pick<MistInvoice, 'voidedAt'>): boo
 /** 已作废之外，CI 应收待财务确认或已驳回时也不计入余额、账龄、报表、催收与核销。 */
 export function isRecognizedMistInvoice(invoice: Pick<MistInvoice, 'voidedAt' | 'financeStatus'>): boolean { return isActiveMistInvoice(invoice) && invoice.financeStatus !== 'pending' && invoice.financeStatus !== 'rejected'; }
 export function isPendingFinanceMistInvoice(invoice: Pick<MistInvoice, 'voidedAt' | 'financeStatus'>): boolean { return isActiveMistInvoice(invoice) && invoice.financeStatus === 'pending'; }
+export type MistInvoiceBankCharge = { id: string; receiptId: string; amount: number; currency: string; reason: string; at: string; actor: string; actorId?: string; reversed?: { at: string; actor: string; reason: string } };
+/** 单张发票累计银行扣费上限（发票币种）：超出说明不是扣费，须走贷项通知或索赔。 */
+export const MIST_BANK_CHARGE_LIMIT = 100;
+export const mistInvoiceBankChargeMinor = (invoice: Pick<MistInvoice, 'bankCharges'>) => (invoice.bankCharges || []).filter(c => !c.reversed).reduce((n, c) => n + mistMoneyMinor(c.amount), 0);
 export type MistAllocation = { id: string; receiptId: string; invoiceId: string; amount: number; currency: string; createdAt: string; actor: string; payerBasis?:string };
 /**
  * 核销 / 付款冲回记录。原记录不删除不改写：核销冲回后原核销整条快照保存在 allocation 中、
@@ -356,6 +362,8 @@ export type MistCommand = AgentProposalCommand | InternalFabricCommand | Interna
   | { type: 'finance.receivable.confirm'; payload: { invoiceId: string } }
   | { type: 'finance.receivable.reject'; payload: { invoiceId: string; reason: string } }
   | { type: 'finance.reconcile'; payload: { receiptId: string; invoiceId: string; amount?: number; payerBasis?:string } }
+  | { type: 'finance.receivable.bankCharge'; payload: { invoiceId: string; receiptId: string; amount: number; reason: string } }
+  | { type: 'finance.receivable.bankCharge.reverse'; payload: { invoiceId: string; chargeId: string; reason: string } }
   | { type: 'finance.acceptSuggestions'; payload: { receiptIds: string[] } }
   | { type: 'finance.payment.save'; payload: { date: string; payee: string; amount: number; currency: string; ref: string; accountId?: string } }
   | { type: 'finance.allocation.reverse'; payload: { allocationId: string; reason: string } }
@@ -678,7 +686,7 @@ function updateDev(state: MistState, dev: MistDev, context: MistContext) {
   else {dev.stage=0;dev.state='开发计划';dev.tone='neutral';}
 }
 function recalculate(state: MistState) {
-  for(const invoice of state.invoices) invoice.open=isRecognizedMistInvoice(invoice)?major(Math.max(0,mistMoneyMinor(invoice.amount)-state.allocations.filter(a=>a.invoiceId===invoice.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-platformCreditAppliedMinor(state,invoice.id))):0;
+  for(const invoice of state.invoices) invoice.open=isRecognizedMistInvoice(invoice)?major(Math.max(0,mistMoneyMinor(invoice.amount)-state.allocations.filter(a=>a.invoiceId===invoice.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-platformCreditAppliedMinor(state,invoice.id)-mistInvoiceBankChargeMinor(invoice))):0;
   for(const receipt of state.receipts){
     // 退税到账勾稽同样占用流水余额。
     receipt.remaining=major(Math.max(0,mistMoneyMinor(receipt.amount)-state.allocations.filter(a=>a.receiptId===receipt.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-rebateReceiptUsedMinor(state,receipt.id)-claimRecoveryReceiptUsedMinor(state,receipt.id)));
@@ -804,7 +812,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type==='finance.developmentInvoice.issue')return MIST_FINANCE_SCOPES.invoice;
   if(command.type==='finance.receivable.confirm'||command.type==='finance.receivable.reject')return MIST_FINANCE_SCOPES.invoice;
   if(command.type==='finance.importReceipts'||command.type==='finance.payment.save'||command.type==='finance.payment.reverse'||command.type==='finance.account.save'||command.type==='finance.account.assign'||command.type==='finance.account.close'||command.type==='finance.account.reopen'||command.type.startsWith('finance.fx.'))return MIST_FINANCE_SCOPES.voucher;
-  if(command.type==='finance.reconcile'||command.type==='finance.acceptSuggestions'||command.type==='finance.allocation.reverse')return MIST_FINANCE_SCOPES.reconcile;
+  if(command.type==='finance.reconcile'||command.type==='finance.acceptSuggestions'||command.type==='finance.allocation.reverse'||command.type==='finance.receivable.bankCharge'||command.type==='finance.receivable.bankCharge.reverse')return MIST_FINANCE_SCOPES.reconcile;
   if(command.type.startsWith('finance.'))throw new MistCommandError('VALIDATION','未知财务操作');
   if(command.type.startsWith('customer.')||command.type.startsWith('contact.'))return 'relations:write';
   // member.groups.set：权限 null 由仓储层限定为公司所有者（与成员授权一致）。
@@ -1288,6 +1296,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         if(i.currency!==r.currency)throw new MistCommandError('VALIDATION','到账和发票币种不同');
         const samePayer=mistPayerMatchesInvoice(state,i,r.payer);
         if(command.type==='finance.acceptSuggestions'&&!samePayer)continue;
+        if(!samePayer&&(typeof pair.payerBasis!=='string'||!pair.payerBasis.trim()))throw new MistCommandError('VALIDATION',`到账付款方「${r.payer}」与发票客户「${i.customer||'客户'}」不一致，请填写付款方关系依据（如代付说明、母子公司关系）`);
         const payerBasis=samePayer?(pair.payerBasis?text(pair.payerBasis,'付款方关系依据',true,2000):''):text(pair.payerBasis,'付款方关系依据',true,2000);
         const amount=pair.amount===undefined?major(Math.min(mistMoneyMinor(r.remaining),mistMoneyMinor(i.open))):positive(pair.amount,'核销金额');
         const cents=mistMoneyMinor(amount);if(cents<=0||cents>mistMoneyMinor(r.remaining)||cents>mistMoneyMinor(i.open))throw new MistCommandError('VALIDATION','核销金额超出可分配余额');
@@ -1303,6 +1312,27 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(from)assertAccountUsable(from,currency,payDay);
       state.payments.push({id,code:'PAY-'+context.now.slice(0,4)+'-'+String(state.payments.length+1).padStart(4,'0'),date:payDay,payee:text(p.payee,'收款方'),amount,currency,ref:text(p.ref,'备注',false),origin:'finance',...(from?{accountId:from.id}:{})});
       event(state,context,'payment',id,'登记付款凭证'+(from?'（付出 '+from.code+'）':''));result={id};break;
+    }
+    case 'finance.receivable.bankCharge': {
+      const i=find(state.invoices,text(p.invoiceId,'应收'),'应收'),r=find(state.receipts,text(p.receiptId,'到账流水'),'到账流水');
+      if(!isRecognizedMistInvoice(i))throw new MistCommandError('PRECONDITION','仅财务已确认的有效应收可登记银行扣费');
+      if(r.currency!==i.currency)throw new MistCommandError('VALIDATION','到账和发票币种不同');
+      if(!state.allocations.some(a=>a.receiptId===r.id&&a.invoiceId===i.id))throw new MistCommandError('PRECONDITION','请先把这笔到账核销到该发票，再登记其被扣的银行费用');
+      const amount=positive(p.amount,'扣费金额'),minor=mistMoneyMinor(amount),reason=text(p.reason,'扣费依据',true,500);
+      if(minor>mistMoneyMinor(i.open))throw new MistCommandError('VALIDATION',`扣费 ${amount} 超出发票未收 ${i.open} ${i.currency}`);
+      if(mistInvoiceBankChargeMinor(i)+minor>mistMoneyMinor(MIST_BANK_CHARGE_LIMIT))throw new MistCommandError('PRECONDITION',`单张发票累计银行扣费不超过 ${MIST_BANK_CHARGE_LIMIT} ${i.currency}；更大的短收请走贷项通知或索赔`);
+      const id=context.id();i.bankCharges=[...(i.bankCharges||[]),{id,receiptId:r.id,amount,currency:i.currency,reason,at:context.now,actor:context.actorName,...(context.actorId?{actorId:context.actorId}:{})}];
+      recalculate(state);
+      event(state,context,'invoice',i.id,`登记银行扣费 ${amount} ${i.currency}（${r.code||r.ref}）：${reason}`,{view:'invoices',id:i.id});
+      result={id,invoiceId:i.id};break;
+    }
+    case 'finance.receivable.bankCharge.reverse': {
+      const i=find(state.invoices,text(p.invoiceId,'应收'),'应收'),charge=(i.bankCharges||[]).find(c=>c.id===text(p.chargeId,'银行扣费'));
+      if(!charge)throw new MistCommandError('NOT_FOUND','银行扣费记录不存在',404);
+      if(charge.reversed)throw new MistCommandError('PRECONDITION','该银行扣费已冲回');
+      const reason=text(p.reason,'冲回原因',true,500);charge.reversed={at:context.now,actor:context.actorName,reason};recalculate(state);
+      event(state,context,'invoice',i.id,`冲回银行扣费 ${charge.amount} ${charge.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id});
+      result={id:charge.id,invoiceId:i.id};break;
     }
     case 'finance.allocation.reverse': {
       const a=find(state.allocations,text(p.allocationId,'核销记录'),'核销记录'),reason=text(p.reason,'冲回原因',true,500);

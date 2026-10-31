@@ -463,6 +463,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "finance.receivable.bankCharge",
+  "payload": "{ invoiceId: string; receiptId: string; amount: number; reason: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "finance.receivable.bankCharge.reverse",
+  "payload": "{ invoiceId: string; chargeId: string; reason: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
   "type": "finance.receivable.confirm",
   "payload": "{ invoiceId: string }",
   "source": "server/src/shared/mistWorkspace.ts"

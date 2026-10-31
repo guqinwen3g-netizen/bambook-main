@@ -44,7 +44,7 @@ function fabricColorBlocker(root:MistState,shipment:FulfillmentShipment,packing:
 /** Returns a validation message; never infers an assortment from the ordered ratio. */
 export function packingSkuError(root:MistState,lineId:string,quantity:number,raw:unknown):string{
  const spec=packingSpecification(root,lineId);
- if(!spec)return raw===undefined||Array.isArray(raw)&&!raw.length?'':'当前条目没有可核对的成衣分色分码';
+ if(!spec)return raw===undefined||Array.isArray(raw)&&!raw.length?'':'该订单条目未登记分色分码，无法核对本箱颜色尺码：装箱请不填分色分码，或先在订单条目补登分色分码';
  if(!Array.isArray(raw)||!raw.length)return '请填写每箱分色分码数量';
  if(raw.length>1800)return '每箱分色分码明细过多';
  const seen=new Set<string>();let total=0;
