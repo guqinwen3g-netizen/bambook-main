@@ -71,5 +71,5 @@ it('does not publish unvalidated private strings as optional review metadata',()
 it('validates all currently delivered courses and preserves their undeclared verification state',()=>{
   const c=readLessonCatalog({git:false});expect(c.issues).toEqual([]);expect(c.totals).toEqual({lessons:27,steps:164,images:191});
   expect(c.tracks.map(t=>[t.name,t.lessons])).toEqual([['报价到订单',10],['采购与生产',4],['采购结算与付款',13]]);
-  expect(c.verification.provenanceUnknown).toBe(27);expect(c.verification.employee.accepted).toBe(0);
+  expect(c.verification.provenanceUnknown).toBe(0);expect(c.lessons.every(l=>/^[0-9a-f]{40}$/.test(l.provenance.softwareCommit!)&&!!l.provenance.capturedAt)).toBe(true);expect(c.verification.employee.accepted).toBe(0);
 });

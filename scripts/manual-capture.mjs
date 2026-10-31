@@ -14,12 +14,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASE = 'http://127.0.0.1:3001';
 const VIEWPORT = { width: 1440, height: 900 };
+/** 采集版本：运行中的界面与服务源码必须与该提交一致，否则不登记版本（不能把本机未提交改动记成某个提交）。 */
+const APP_SOURCES = ['dev-ui-preview/mist-atelier/app', 'components', 'styles', 'services', 'server/src', 'types.ts'];
+function softwareCommit() {
+  const git = args => execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
+  const dirty = git(['status', '--porcelain', '--', ...APP_SOURCES]);
+  if (dirty) { console.warn('⚠ 应用源码有未提交改动，本次采集不登记软件版本：\n' + dirty); return null; }
+  return git(['rev-parse', 'HEAD']);
+}
+const COMMIT = softwareCommit();
 
 async function session(page, profileId) {
   const res = await page.evaluate(async id => (await fetch('/api/mist/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ profileId: id }) })).json(), profileId);
@@ -330,7 +340,7 @@ async function capture(browser, name) {
     if (errors.length) throw new Error('页面脚本错误：' + errors.join('；'));
     if (!setup) {
       await shot(page, path.join(out, 'result'));
-      fs.writeFileSync(path.join(out, 'capture.json'), JSON.stringify({ viewport: VIEWPORT, frames, result: 'result.webp' }, null, 2) + '\n');
+      fs.writeFileSync(path.join(out, 'capture.json'), JSON.stringify({ viewport: VIEWPORT, frames, result: 'result.webp', ...(COMMIT ? { provenance: { softwareCommit: COMMIT, capturedAt: new Date().toISOString() } } : {}) }, null, 2) + '\n');
     }
     console.log(`✓ ${name}：${setup ? '准备步骤已办理' : `${frames.length} 步 → ${path.relative(ROOT, out)}`}`);
     await page.close();

@@ -8,7 +8,7 @@
       "image": "01.webp",
       "target": {
         "x": 388,
-        "y": 870,
+        "y": 708,
         "width": 485,
         "height": 20
       }
@@ -42,5 +42,9 @@
       }
     }
   ],
-  "result": "result.webp"
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "82d0a2da960ebd158dbcadf79111c221972de253",
+    "capturedAt": "2026-10-31T11:49:50.703Z"
+  }
 }
