@@ -87,3 +87,12 @@ it('hands collection to the exact invoice reconciliation context rather than a p
 });
 
 it('shows only visible statement lines when the archived statement spans hidden business',()=>{const s=store.value.state;s.customers=[{id:'customer',name:'客户',code:'C-1'}];s.partialStatements=[{id:'st-part',customerId:'customer',statementNo:'SOA-PART',asOf:'2026-10-13',hiddenCount:1,sections:[{currency:'USD',lines:[{invoiceId:'a',code:'CI-A',open:'70.00'}],hiddenCount:1}]}];render();const list=getByRole(host,'list',{name:'已生成的客户对账单'});expect(list.textContent).toContain('SOA-PART');expect(list.textContent).toContain('CI-A');expect(list.textContent).toContain('70.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('净欠');expect(getAllByRole(list,'listitem')[0].querySelector('button')).toBeNull();});
+it('records a remittance bank charge on the receivable detail and explains it in the balance',async()=>{
+ const a=store.value.state.invoices.find((i:any)=>i.id==='a');a.open=65;a.bankCharges=[{id:'c1',receiptId:'r',amount:5,currency:'USD',reason:'中转行扣费，见入账通知',at:'2026-10-02T02:00:00.000Z',actor:'实际财务'}];
+ const row=invoiceLedgerRows(store.value.state).find(r=>r.id==='a')!;expect(invoiceFinancialFacts(store.value.state,row)).toMatchObject({charged:5,unexplained:0});
+ route.id='a';render();const block=[...host.querySelectorAll('[data-bank-charge]')];expect(block).toHaveLength(1);expect(block[0].textContent).toContain('5.00 USD');expect(block[0].textContent).toContain('中转行扣费');
+ await click('登记银行扣费');getByRole(document.body,'dialog',{name:'登记银行扣费 · CI-A'});await click('登记扣费');
+ expect(store.value.run).toHaveBeenCalledWith(expect.objectContaining({type:'finance.receivable.bankCharge',payload:expect.objectContaining({invoiceId:'a',reason:'金额与合同不符'})}));
+ await click('冲回');const reverse=getByRole(document.body,'dialog',{name:'冲回银行扣费 · CI-A'});await act(async()=>getAllByRole(reverse,'button',{name:'冲回'})[0].click());
+ expect(store.value.run).toHaveBeenCalledWith({type:'finance.receivable.bankCharge.reverse',payload:{invoiceId:'a',chargeId:'c1',reason:'金额与合同不符'}});
+});
