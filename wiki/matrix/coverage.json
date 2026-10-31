@@ -1,0 +1,2251 @@
+{
+ "schemaVersion": 1,
+ "note": "员工教学覆盖矩阵（工程用，不进入员工正文）。impl 只登记有证据的事实：walked=已在当前 Mist 界面实际走通（课程采集即证据，采集提交号见课程登记）；source=源码有对应页面与命令，尚未在界面走查；missing=尚未交付；unchecked=未核对。教学状态由 scripts/manual-coverage.mjs 结合课程核验登记推导，不在此手填。",
+ "modes": {
+  "all": "通用",
+  "fabric": "面料",
+  "garment": "成衣全包",
+  "cmt": "自供料加工",
+  "internal": "内部业务",
+  "cross": "跨组协作"
+ },
+ "tasks": [
+  {
+   "id": "home-tasks",
+   "stage": "日常与协作",
+   "task": "从首页「接着完成」处理本人待办",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "task.complete"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-quote-approve",
+    "tutorial-order-handoff",
+    "tutorial-prepay-pay"
+   ],
+   "note": "多课从首页待办进入；未单独成课讲待办分类与排序"
+  },
+  {
+   "id": "approvals",
+   "stage": "日常与协作",
+   "task": "在审批页查看与处理待我审批",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "approvals"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "notifications",
+   "stage": "日常与协作",
+   "task": "查看通知并标记已读",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "notifications"
+   ],
+   "commands": [
+    "notification.read",
+    "notification.readAll"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "search",
+   "stage": "日常与协作",
+   "task": "全局搜索单据与对象",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "search"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "attachments",
+   "stage": "日常与协作",
+   "task": "上传与查看业务附件",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "files.add",
+    "order.files.add"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "calendar",
+   "stage": "日常与协作",
+   "task": "登记日程并关联业务对象",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "calendar"
+   ],
+   "commands": [
+    "calendar.save"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "team-nudge",
+   "stage": "日常与协作",
+   "task": "主管催办与周报归档",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "team.nudge",
+    "team.weekly.archive"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "email-workspace",
+   "stage": "日常与协作",
+   "task": "在智能邮箱整理邮件、关联业务、起草回复",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "emails"
+   ],
+   "commands": [
+    "email.draft.save",
+    "email.link",
+    "email.flag",
+    "email.followUp"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "仅本地工作空间能力；示例邮件不是真实收发"
+  },
+  {
+   "id": "email-real-send",
+   "stage": "日常与协作",
+   "task": "真实邮箱账户收发邮件",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "emails"
+   ],
+   "commands": [
+    "email.server.send.begin",
+    "email.server.sync"
+   ],
+   "impl": "missing",
+   "lessons": [],
+   "note": "服务端收发接口已有（server/src/mist/mail），真实收发服务尚未接通，不得写成可用"
+  },
+  {
+   "id": "org-members",
+   "stage": "公司与权限",
+   "task": "维护成员岗位与所属小组",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "system-settings"
+   ],
+   "commands": [
+    "member.groups.set"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "教学只在本地演示公司演示，不在共享环境改账号权限"
+  },
+  {
+   "id": "org-team-scope",
+   "stage": "公司与权限",
+   "task": "设置小组数据范围",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "cross"
+   ],
+   "views": [
+    "system-settings"
+   ],
+   "commands": [
+    "teamScope.save"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "org-settings",
+   "stage": "公司与权限",
+   "task": "维护公司资料与抬头",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "system-settings"
+   ],
+   "commands": [
+    "settings.update"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "handover",
+   "stage": "公司与权限",
+   "task": "员工离岗时移交客户与账户",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "system-settings"
+   ],
+   "commands": [
+    "handover.customer",
+    "handover.account"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "account-page",
+   "stage": "公司与权限",
+   "task": "在账号页查看本人资料与打开使用手册",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "account"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "customer-profile",
+   "stage": "客户与供应商",
+   "task": "建立与维护客户档案",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "crm"
+   ],
+   "commands": [
+    "market.customer.create",
+    "market.customer.update",
+    "customer.update"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "customer-contacts",
+   "stage": "客户与供应商",
+   "task": "维护客户联系人与跟进",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "crm"
+   ],
+   "commands": [
+    "contact.save",
+    "crm.followUp.save",
+    "crm.opportunity.save"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "supplier-profile",
+   "stage": "客户与供应商",
+   "task": "建立供应商档案与资质证书",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "suppliers"
+   ],
+   "commands": [
+    "market.supplier.save",
+    "market.supplier.certificate.save",
+    "market.supplier.status"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "supplier-bank",
+   "stage": "客户与供应商",
+   "task": "登记供应商收款账户",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "suppliers"
+   ],
+   "commands": [
+    "market.supplier.bank.save"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-payee-account"
+   ]
+  },
+  {
+   "id": "supplier-rate",
+   "stage": "客户与供应商",
+   "task": "供应商评级",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "suppliers"
+   ],
+   "commands": [
+    "market.supplier.rate"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "dev-create",
+   "stage": "开发与样品",
+   "task": "建立开发案并提交需求",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "development",
+    "development/new"
+   ],
+   "commands": [
+    "development.saveDraft",
+    "development.submit"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "dev-rounds",
+   "stage": "开发与样品",
+   "task": "开发轮次、打样与寄样",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "development/detail"
+   ],
+   "commands": [
+    "development.round.create",
+    "development.recordSample",
+    "development.sample.dispatch"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "dev-qc",
+   "stage": "开发与样品",
+   "task": "开发样 QC 检验与判定",
+   "roles": [
+    "QC"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "development/detail"
+   ],
+   "commands": [
+    "development.recordQc",
+    "development.qc.decide"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "dev-confirm",
+   "stage": "开发与样品",
+   "task": "记录需求方认可开发样",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "garment"
+   ],
+   "views": [
+    "development/detail"
+   ],
+   "commands": [
+    "development.confirm"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-dev-confirm"
+   ]
+  },
+  {
+   "id": "dev-billing",
+   "stage": "开发与样品",
+   "task": "开发费用与打样费请款",
+   "roles": [
+    "业务员",
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "development/detail"
+   ],
+   "commands": [
+    "development.billing.request",
+    "development.billing.issue",
+    "development.charge.add"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "sample-library",
+   "stage": "开发与样品",
+   "task": "样品入库、移库与借用",
+   "roles": [
+    "业务员",
+    "仓库"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "samples"
+   ],
+   "commands": [
+    "fulfillment.samples.create",
+    "fulfillment.samples.move"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "fabric-sourcing",
+   "stage": "开发与样品",
+   "task": "面料寻样与供应商询价",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "development"
+   ],
+   "commands": [
+    "fabric.create",
+    "fabric.answer",
+    "fabric.confirm",
+    "rfq.save",
+    "rfq.invite",
+    "rfq.quote",
+    "rfq.award"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "quote-build",
+   "stage": "报价",
+   "task": "建立报价与成本核算",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "quotations"
+   ],
+   "commands": [
+    "market.quotation.save",
+    "market.quotation.costing.save"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "现有课程从已提交审批的报价开始，未覆盖新建与核价"
+  },
+  {
+   "id": "quote-submit",
+   "stage": "报价",
+   "task": "提交报价审批",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "quotations"
+   ],
+   "commands": [
+    "market.quotation.submit"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "quote-approve",
+   "stage": "报价",
+   "task": "审批报价",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "cockpit",
+    "approvals"
+   ],
+   "commands": [
+    "market.quotation.decide"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-quote-approve"
+   ]
+  },
+  {
+   "id": "quote-return",
+   "stage": "报价",
+   "task": "报价被退回后修改重提",
+   "kind": "branch",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "quotations"
+   ],
+   "commands": [
+    "market.quotation.decide",
+    "market.quotation.save"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "quote-send",
+   "stage": "报价",
+   "task": "生成并发送正式报价单",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "quotations"
+   ],
+   "commands": [
+    "market.quotation.document",
+    "market.quotation.status"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-quote-send"
+   ],
+   "note": "发送为登记已发出，不代表真实邮件已发"
+  },
+  {
+   "id": "quote-accept",
+   "stage": "报价",
+   "task": "登记客户接受或反馈",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "quotations"
+   ],
+   "commands": [
+    "market.quotation.status",
+    "market.quotation.feedback.add"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-quote-accept"
+   ]
+  },
+  {
+   "id": "quote-convert",
+   "stage": "报价",
+   "task": "报价转订单",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "quotations"
+   ],
+   "commands": [
+    "market.quotation.convert"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-quote-convert"
+   ]
+  },
+  {
+   "id": "order-contract",
+   "stage": "订单与审批",
+   "task": "补齐合同与审批资料",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.update",
+    "order.governance.saveDraft"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-order-contract"
+   ]
+  },
+  {
+   "id": "order-lines",
+   "stage": "订单与审批",
+   "task": "选择条目履约模式",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "garment",
+    "cmt",
+    "internal"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.governance.saveDraft"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-order-lines"
+   ]
+  },
+  {
+   "id": "order-submit",
+   "stage": "订单与审批",
+   "task": "提交主单审批",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.governance.submit"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-order-submit"
+   ]
+  },
+  {
+   "id": "order-approve",
+   "stage": "订单与审批",
+   "task": "审批订单",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "cockpit",
+    "approvals"
+   ],
+   "commands": [
+    "order.governance.decide"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-order-approve"
+   ]
+  },
+  {
+   "id": "order-handoff",
+   "stage": "订单与审批",
+   "task": "订单交接后勤",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "cockpit",
+    "orders/detail"
+   ],
+   "commands": [
+    "order.handoff"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-order-handoff"
+   ]
+  },
+  {
+   "id": "order-change",
+   "stage": "订单与审批",
+   "task": "订单变更（数量、价格、交期）送审",
+   "kind": "branch",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.governance.saveDraft",
+    "order.governance.submit",
+    "order.governance.discardChange"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "order-cancel",
+   "stage": "订单与审批",
+   "task": "取消订单或关闭条目",
+   "kind": "branch",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.governance.requestCancel",
+    "order.governance.closeLine",
+    "order.governance.void"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "order-overship",
+   "stage": "订单与审批",
+   "task": "申请溢装",
+   "kind": "branch",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.governance.requestOverShip"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "order-deposit",
+   "stage": "订单与审批",
+   "task": "客户定金到账核对与分配",
+   "roles": [
+    "财务",
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "finance.reconcile",
+    "funding.assign",
+    "funding.release"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+  },
+  {
+   "id": "purchase-draft",
+   "stage": "采购合同",
+   "task": "从订单条目准备成品采购草稿",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "garment"
+   ],
+   "views": [
+    "orders/detail",
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.save"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-purchase-draft"
+   ]
+  },
+  {
+   "id": "purchase-submit",
+   "stage": "采购合同",
+   "task": "提交采购审批",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.submit"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-purchase-submit"
+   ]
+  },
+  {
+   "id": "purchase-approve",
+   "stage": "采购合同",
+   "task": "审批采购",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "cockpit",
+    "approvals"
+   ],
+   "commands": [
+    "fulfillment.procurement.decide"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-purchase-approve"
+   ]
+  },
+  {
+   "id": "purchase-send",
+   "stage": "采购合同",
+   "task": "发出合同并登记供应商确认",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.document",
+    "fulfillment.procurement.send",
+    "fulfillment.procurement.confirm"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-purchase-send"
+   ]
+  },
+  {
+   "id": "purchase-fabric",
+   "stage": "采购合同",
+   "task": "面料订单的面料采购",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "fabric"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.save",
+    "fulfillment.procurement.submit"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "现有采购课程只走成衣全包"
+  },
+  {
+   "id": "purchase-cmt",
+   "stage": "采购合同",
+   "task": "自供料加工合同（主料内供）",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "cmt"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.save"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "purchase-cancel",
+   "stage": "采购合同",
+   "task": "取消采购合同",
+   "kind": "branch",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "payable.purchase.cancel"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "receive",
+   "stage": "收货",
+   "task": "登记供应商到货（含部分到货）",
+   "roles": [
+    "仓库",
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.receive"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "结算课程以已登记到货为前提，到货登记本身未成课"
+  },
+  {
+   "id": "receive-reject",
+   "stage": "收货",
+   "task": "到货拒收",
+   "kind": "branch",
+   "roles": [
+    "仓库",
+    "QC"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.rejectReceived"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "receive-return",
+   "stage": "收货",
+   "task": "退货给供应商与冲回",
+   "kind": "branch",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.return",
+    "fulfillment.procurement.return.reverse"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "65-退料处置与财务核对.md"
+   ]
+  },
+  {
+   "id": "no-resupply",
+   "stage": "收货",
+   "task": "登记供应商不再补发",
+   "kind": "branch",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "fulfillment.procurement.return"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-no-resupply"
+   ]
+  },
+  {
+   "id": "payment-plan",
+   "stage": "结算、票据及付款",
+   "task": "登记预付款计划",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.payment.plan",
+    "payable.plan.register"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-payment-plan"
+   ]
+  },
+  {
+   "id": "prepay-request",
+   "stage": "结算、票据及付款",
+   "task": "申请预付款",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "payable.request.submit"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-prepay-request"
+   ]
+  },
+  {
+   "id": "payment-approve",
+   "stage": "结算、票据及付款",
+   "task": "审批付款申请",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit",
+    "approvals"
+   ],
+   "commands": [
+    "payable.request.decide"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-payment-approve"
+   ]
+  },
+  {
+   "id": "prepay-pay",
+   "stage": "结算、票据及付款",
+   "task": "登记预付款实付",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit",
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.payment.register"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-prepay-pay"
+   ],
+   "note": "只登记已在银行完成的付款，系统不发起真实转账"
+  },
+  {
+   "id": "settlement",
+   "stage": "结算、票据及付款",
+   "task": "提交采购结算",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.settlement.submit"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-settlement"
+   ],
+   "pages": [
+    "70-采购结算票据与付款.md"
+   ]
+  },
+  {
+   "id": "settlement-confirm",
+   "stage": "结算、票据及付款",
+   "task": "财务复核确认结算",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit",
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.settlement.confirm"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-settlement-confirm"
+   ],
+   "pages": [
+    "70-采购结算票据与付款.md"
+   ]
+  },
+  {
+   "id": "settlement-return",
+   "stage": "结算、票据及付款",
+   "task": "结算被财务退回后修改重提",
+   "kind": "branch",
+   "roles": [
+    "财务",
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.settlement.return",
+    "payable.settlement.cancel"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "settlement-deduction",
+   "stage": "结算、票据及付款",
+   "task": "质量扣款与争议登记",
+   "kind": "branch",
+   "roles": [
+    "业务员（采购经办）",
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.deduction.register",
+    "payable.deduction.reverse"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "bill-register",
+   "stage": "结算、票据及付款",
+   "task": "按结算登记供应商票据",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.bill.register",
+    "payable.bill.link"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-bill-register"
+   ]
+  },
+  {
+   "id": "balance-request",
+   "stage": "结算、票据及付款",
+   "task": "申请票据余款",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "payable.request.submit"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-balance-request"
+   ]
+  },
+  {
+   "id": "balance-pay",
+   "stage": "结算、票据及付款",
+   "task": "登记余款实付",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "payable.payment.register"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-balance-pay"
+   ]
+  },
+  {
+   "id": "short-close",
+   "stage": "结算、票据及付款",
+   "task": "短交结案（最终结算）",
+   "kind": "branch",
+   "roles": [
+    "业务员（采购经办）"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "payable.settlement.submit"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-short-close"
+   ]
+  },
+  {
+   "id": "prepay-refund",
+   "stage": "结算、票据及付款",
+   "task": "登记剩余预付退款",
+   "kind": "branch",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "payable.prepayment.refund"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-prepay-refund"
+   ]
+  },
+  {
+   "id": "payable-reverse",
+   "stage": "结算、票据及付款",
+   "task": "付款、结算与核销的冲正",
+   "kind": "branch",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "payable.payment.reverse",
+    "payable.settlement.reverse",
+    "payable.allocation.reverse"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "expense",
+   "stage": "结算、票据及付款",
+   "task": "登记费用并转应付",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "cost.expense.register",
+    "cost.expense.payable",
+    "cost.expense.void"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "pps",
+   "stage": "产前样与放行",
+   "task": "产前样送检、评审与需求方确认",
+   "roles": [
+    "业务员",
+    "QC"
+   ],
+   "modes": [
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "samples",
+    "qc-workbench"
+   ],
+   "commands": [
+    "fulfillment.samples.create",
+    "fulfillment.qc.request",
+    "fulfillment.qc.report",
+    "fulfillment.qc.confirm"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "52-产前样送检与确认.md"
+   ],
+   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+  },
+  {
+   "id": "production-release",
+   "stage": "产前样与放行",
+   "task": "核对条件并放行开产",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "production-board"
+   ],
+   "commands": [
+    "fulfillment.production.plan",
+    "fulfillment.production.release"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "55-开产跟进与完工-SOP.md"
+   ],
+   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+  },
+  {
+   "id": "production-track",
+   "stage": "生产与 QC",
+   "task": "更新工序进度、暂停与恢复",
+   "roles": [
+    "业务员",
+    "跟单"
+   ],
+   "modes": [
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "production-board"
+   ],
+   "commands": [
+    "production.update",
+    "production.move",
+    "fulfillment.production.hold",
+    "fulfillment.production.resume"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "55-开产跟进与完工-SOP.md"
+   ]
+  },
+  {
+   "id": "production-complete",
+   "stage": "生产与 QC",
+   "task": "登记实际完工并验收",
+   "roles": [
+    "业务员",
+    "跟单"
+   ],
+   "modes": [
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "production-board"
+   ],
+   "commands": [
+    "fulfillment.production.complete",
+    "fulfillment.production.acceptCompletion"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "55-开产跟进与完工-SOP.md"
+   ],
+   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+  },
+  {
+   "id": "qc-inspection",
+   "stage": "生产与 QC",
+   "task": "大货 QC：认领、报告、业务确认",
+   "roles": [
+    "QC",
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "qc-workbench"
+   ],
+   "commands": [
+    "fulfillment.qc.request",
+    "fulfillment.qc.claim",
+    "fulfillment.qc.report",
+    "fulfillment.qc.confirm"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+  },
+  {
+   "id": "qc-nok",
+   "stage": "生产与 QC",
+   "task": "QC 不合格后整改与复验",
+   "kind": "branch",
+   "roles": [
+    "QC",
+    "业务员"
+   ],
+   "modes": [
+    "fabric",
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "qc-workbench"
+   ],
+   "commands": [
+    "fulfillment.qc.report",
+    "fulfillment.qc.continue"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "fabric-allocate",
+   "stage": "库存发料及回交",
+   "task": "为成衣订单分配内部面料",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "cmt",
+    "internal"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.fabric.allocate",
+    "order.fabric.cancel"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "45-内部面料发料与点收.md"
+   ]
+  },
+  {
+   "id": "fabric-issue",
+   "stage": "库存发料及回交",
+   "task": "仓库发料与工厂点收",
+   "roles": [
+    "仓库",
+    "业务员"
+   ],
+   "modes": [
+    "cmt",
+    "internal"
+   ],
+   "views": [
+    "inventory",
+    "orders/detail"
+   ],
+   "commands": [
+    "order.internal.send",
+    "order.internal.receive",
+    "fulfillment.materials.issue",
+    "fulfillment.materials.confirm"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "45-内部面料发料与点收.md"
+   ]
+  },
+  {
+   "id": "fabric-shortclose",
+   "stage": "库存发料及回交",
+   "task": "面料短料结案",
+   "kind": "branch",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "cmt",
+    "internal"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.fabric.shortClose"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "fabric-return",
+   "stage": "库存发料及回交",
+   "task": "工厂退回物料、复检与处置",
+   "kind": "branch",
+   "roles": [
+    "仓库",
+    "QC",
+    "财务"
+   ],
+   "modes": [
+    "cmt",
+    "internal"
+   ],
+   "views": [
+    "inventory"
+   ],
+   "commands": [
+    "order.internal.returnRejected",
+    "fulfillment.inventory.quarantine.request",
+    "fulfillment.inventory.quarantine.dispose"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "65-退料处置与财务核对.md"
+   ]
+  },
+  {
+   "id": "scrap-norecovery",
+   "stage": "库存发料及回交",
+   "task": "报废与确认不追偿",
+   "kind": "branch",
+   "roles": [
+    "仓库",
+    "财务"
+   ],
+   "modes": [
+    "cmt",
+    "internal"
+   ],
+   "views": [
+    "inventory"
+   ],
+   "commands": [
+    "fulfillment.inventory.quarantine.noRecovery",
+    "payable.disposal.review"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "65-退料处置与财务核对.md"
+   ]
+  },
+  {
+   "id": "inventory-move",
+   "stage": "库存发料及回交",
+   "task": "库存移库与出运关联修正",
+   "kind": "branch",
+   "roles": [
+    "仓库"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "inventory"
+   ],
+   "commands": [
+    "fulfillment.inventory.move",
+    "fulfillment.inventory.shipment.correct"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "packing",
+   "stage": "装箱与出运",
+   "task": "建立出运并装箱",
+   "roles": [
+    "后勤/单证"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "shipments"
+   ],
+   "commands": [
+    "fulfillment.shipments.save",
+    "fulfillment.shipments.pack"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "shipping-docs",
+   "stage": "装箱与出运",
+   "task": "出具 CI / PL 等出运单据",
+   "roles": [
+    "后勤/单证"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "shipments",
+    "document-center"
+   ],
+   "commands": [
+    "fulfillment.documents.save",
+    "fulfillment.documents.issue",
+    "fulfillment.documents.void"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "customs",
+   "stage": "装箱与出运",
+   "task": "报关资料与清关登记",
+   "roles": [
+    "后勤/单证"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "customs"
+   ],
+   "commands": [
+    "fulfillment.customs.save",
+    "fulfillment.customs.items",
+    "fulfillment.customs.classify.save"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "depart",
+   "stage": "装箱与出运",
+   "task": "登记实际离港",
+   "roles": [
+    "后勤/单证"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "shipments"
+   ],
+   "commands": [
+    "fulfillment.shipments.ready",
+    "fulfillment.shipments.sent",
+    "fulfillment.shipments.depart"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "shipment-cancel",
+   "stage": "装箱与出运",
+   "task": "取消未离港出运",
+   "kind": "branch",
+   "roles": [
+    "后勤/单证"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "shipments"
+   ],
+   "commands": [
+    "fulfillment.shipments.cancel"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "lc-present",
+   "stage": "交单与收汇",
+   "task": "信用证登记、改证与交单",
+   "roles": [
+    "后勤/单证",
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "customs"
+   ],
+   "commands": [
+    "lc.save",
+    "lc.amend",
+    "lc.present",
+    "lc.presentation.result"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "receivable-confirm",
+   "stage": "交单与收汇",
+   "task": "确认应收并发票",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "payment-vouchers",
+    "invoices"
+   ],
+   "commands": [
+    "finance.receivable.confirm",
+    "platform.invoice.issue"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "receipt-reconcile",
+   "stage": "交单与收汇",
+   "task": "导入到账并核销收汇",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "finance.importReceipts",
+    "finance.reconcile",
+    "finance.receivable.bankCharge"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "fx-settle",
+   "stage": "交单与收汇",
+   "task": "结汇与锁汇",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "finance.fx.lock",
+    "finance.fx.settle",
+    "finance.fx.reverse"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "rebate",
+   "stage": "交单与收汇",
+   "task": "出口退税申报与到账",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "pricing"
+   ],
+   "commands": [
+    "rebate.claim.file",
+    "rebate.claim.approve",
+    "rebate.claim.receive"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "receivable-reverse",
+   "stage": "交单与收汇",
+   "task": "收汇核销冲正",
+   "kind": "branch",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "payment-vouchers"
+   ],
+   "commands": [
+    "finance.allocation.reverse",
+    "finance.payment.reverse"
+   ],
+   "impl": "source",
+   "lessons": []
+  },
+  {
+   "id": "cost-profit",
+   "stage": "成本利润",
+   "task": "成本核算与订单利润",
+   "roles": [
+    "业务员",
+    "财务",
+    "主管"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "bom",
+    "pricing"
+   ],
+   "commands": [
+    "platform.bom.save",
+    "platform.pricing.save"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "claims",
+   "stage": "成本利润",
+   "task": "售后索赔登记、判定与追偿",
+   "kind": "branch",
+   "roles": [
+    "业务员",
+    "主管",
+    "财务"
+   ],
+   "modes": [
+    "fabric",
+    "garment"
+   ],
+   "views": [
+    "claims"
+   ],
+   "commands": [
+    "platform.claim.create",
+    "platform.claim.decide",
+    "platform.claim.recovery.open"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "internal-fabric-order",
+   "stage": "跨组与内部业务",
+   "task": "内部面料订单：成衣组向面料组要料",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "internal",
+    "cross"
+   ],
+   "views": [
+    "orders/detail"
+   ],
+   "commands": [
+    "order.internal.send",
+    "order.internal.receive",
+    "order.internal.cancel"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "pages": [
+    "45-内部面料发料与点收.md"
+   ]
+  },
+  {
+   "id": "sourcing-transfer",
+   "stage": "跨组与内部业务",
+   "task": "跨组转交采购",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "cross"
+   ],
+   "views": [
+    "procurement"
+   ],
+   "commands": [
+    "sourcing.purchase.transfer"
+   ],
+   "impl": "unchecked",
+   "lessons": []
+  },
+  {
+   "id": "ai-assistant",
+   "stage": "AI 与 Agent",
+   "task": "平台 AI「小竹」业务问答（只读）",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "assistant"
+   ],
+   "commands": [
+    "platform.assistant.saveDraft"
+   ],
+   "impl": "unchecked",
+   "lessons": [],
+   "note": "模型可用性须按部署环境核对"
+  },
+  {
+   "id": "work-assistant",
+   "stage": "AI 与 Agent",
+   "task": "桌面工作助手（本机 Agent）对话与委托办理",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "assistant"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "仅 Electron 桌面端；敏感操作转本人确认"
+  },
+  {
+   "id": "agent-proposal",
+   "stage": "AI 与 Agent",
+   "task": "工作 Agent 提议，本人在 Bambook 确认",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "cockpit"
+   ],
+   "commands": [
+    "agent.proposal.create",
+    "agent.proposal.confirm",
+    "agent.proposal.reject"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "实施 Agent 已用官方 MCP 客户端走通“采购结算 → 财务提议 → 本人确认 → 读取结果”一条链；其他客户端与业务未验收"
+  },
+  {
+   "id": "mcp-connect",
+   "stage": "AI 与 Agent",
+   "task": "外部 MCP 客户端读取与发起操作",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "account"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "7 个工具、308 条命令、24 类读取对象；委托令牌需人工签发"
+  },
+  {
+   "id": "agent-audit-query",
+   "stage": "AI 与 Agent",
+   "task": "在账号页查看 Agent 操作记录",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "account"
+   ],
+   "commands": [],
+   "impl": "missing",
+   "lessons": [],
+   "note": "审计持久化已合入（#573）；查询、第 8 个 MCP 工具、账号页记录未发布"
+  },
+  {
+   "id": "agent-self-connect",
+   "stage": "AI 与 Agent",
+   "task": "员工自助连接、续期与长值守 Agent",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "account"
+   ],
+   "commands": [],
+   "impl": "missing",
+   "lessons": [],
+   "note": "自助连接、续期、长期凭据、长值守循环尚未交付"
+  }
+ ]
+}
