@@ -246,23 +246,23 @@ it('routes a repair inspection to its own QC business line without inventory acc
 describe('exact material receiving work',()=>{
  const options={canRead:all,can:(p:string)=>p==='orders:write',me:'garment',today:'2026-10-24'};
  it('routes the receiver to the exact processing detail and disappears after real confirmation',()=>{
-  const f=materialDeliveryFixture(3),id=f.issue();const before=structuredClone(f.state),items=mistWorkQueue(f.state,options);expect(items).toHaveLength(1);expect(items[0]).toMatchObject({id:'material:issue:'+id,source:'material',module:'procurement',when:'待接收',target:{view:'procurement',id:f.processingId,detail:'full',orderLineId:f.target.lineId}});expect(items[0].meta).toContain('3 米');expect(f.state).toEqual(before);
-  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'实际点收三米'}},'garment');expect(mistWorkQueue(f.state,options)).toEqual([]);
+  const f=materialDeliveryFixture(3),id=f.issue();const before=structuredClone(f.state),items=mistWorkQueue(f.state,options).filter(row=>!row.id.startsWith('order-handoff:'));expect(items).toHaveLength(1);expect(items[0]).toMatchObject({id:'material:issue:'+id,source:'material',module:'procurement',when:'待接收',target:{view:'procurement',id:f.processingId,detail:'full',orderLineId:f.target.lineId}});expect(items[0].meta).toContain('3 米');expect(f.state).toEqual(before);
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'实际点收三米'}},'garment');expect(mistWorkQueue(f.state,options).filter(row=>!row.id.startsWith('order-handoff:'))).toEqual([]);
  });
  it('never assigns receipt to another employee, a read-only receiver, or an account without procurement access',()=>{
-  const f=materialDeliveryFixture(3);f.issue();expect(mistWorkQueue(f.state,{...options,me:'owner'})).toEqual([]);expect(mistWorkQueue(f.state,{...options,can:()=>false})).toEqual([]);expect(mistWorkQueue(f.state,{...options,canRead:view=>view!=='procurement'})).toEqual([]);
+  const f=materialDeliveryFixture(3);f.issue();expect(mistWorkQueue(f.state,{...options,me:'owner'}).filter(row=>!row.id.startsWith('order-handoff:'))).toEqual([]);expect(mistWorkQueue(f.state,{...options,can:()=>false}).filter(row=>!row.id.startsWith('order-handoff:'))).toEqual([]);expect(mistWorkQueue(f.state,{...options,canRead:view=>view!=='procurement'}).filter(row=>!row.id.startsWith('order-handoff:'))).toEqual([]);
  });
  it('does not leave a receipt task after the whole delivery is returned',()=>{
-  const f=materialDeliveryFixture(3),id=f.issue();f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:3,location:'A-01',person:'factory',note:'整批退回'}});expect(mistWorkQueue(f.state,options)).toEqual([]);
+  const f=materialDeliveryFixture(3),id=f.issue();f.run({type:'fulfillment.inventory.move',payload:{id:f.state.fulfillment.stock[0].id,kind:'return',issueId:id,quantity:3,location:'A-01',person:'factory',note:'整批退回'}});expect(mistWorkQueue(f.state,options).filter(row=>!row.id.startsWith('order-handoff:'))).toEqual([]);
  });
  it('includes direct supplier deliveries and uses their original receipt identity',()=>{
   const f=materialDeliveryFixture(3,false),id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:3,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Direct delivery',fileIds:[],targetProductionId:f.productionId}}).id!;
-  expect(mistWorkQueue(f.state,options)).toEqual([expect.objectContaining({id:'material:direct:'+id,target:expect.objectContaining({id:f.processingId,detail:'full'})})]);
+  expect(mistWorkQueue(f.state,options).filter(row=>!row.id.startsWith('order-handoff:'))).toEqual([expect.objectContaining({id:'material:direct:'+id,target:expect.objectContaining({id:f.processingId,detail:'full'})})]);
  });
  it('offers only the uncounted remainder and removes receiving work after a partial rejection is fully counted',()=>{
   const f=materialDeliveryFixture(3,false),id=f.run({type:'fulfillment.materials.deliver',payload:{id:f.purchaseId,quantity:3,rejected:0,location:'Factory',date:'2026-10-24',evidence:'Direct delivery',fileIds:[],targetProductionId:f.productionId}}).id!;
   f.run({type:'fulfillment.materials.confirm',payload:{kind:'direct',id,acceptedQuantity:1,rejectedQuantity:1,expectedReceivingRevision:0,evidence:'First count'}},'garment');
-  expect(mistWorkQueue(f.state,options)).toMatchObject([{id:'material:direct:'+id,meta:expect.stringContaining('1 米')}]);
+  expect(mistWorkQueue(f.state,options).filter(row=>!row.id.startsWith('order-handoff:'))).toMatchObject([{id:'material:direct:'+id,meta:expect.stringContaining('1 米')}]);
   f.run({type:'fulfillment.materials.confirm',payload:{kind:'direct',id,acceptedQuantity:1,rejectedQuantity:0,expectedReceivingRevision:1,evidence:'Remaining count'}},'garment');
   expect(mistWorkQueue(f.state,options).filter(row=>row.source==='material')).toEqual([]);
  });
@@ -375,4 +375,13 @@ it('short-closes a contract: reminds the purchaser to submit the final settlemen
  state.payables!.settlements.push(confirmed('ST-2',[],true,0,0,0) as any);
  expect(close()).toHaveLength(0);
  expect(residual()).toMatchObject([{title:'PO-2026-00001 · 剩余预付待处理',meta:expect.stringContaining('CNY 279.00'),target:{id:'ST-2'}}]);
+});
+it('reminds the order owner to hand an approved order to logistics until it is handed off',()=>{
+ const state=createMistState({id:()=>'id',now:'2026-10-30T08:00:00.000Z',actorName:'系统'} as any,'empty');
+ state.orders=[{id:'o',code:'SO-G-2026-0009',customer:'Cedar & Crown',ownerId:'sales',due:'2026-12-20',checklist:[{id:'a',label:'拟发范围确认',done:true},{id:'b',label:'收货与贸易条款确认',done:false},{id:'c',label:'收款条件核对',done:false}],governance:{status:'approved',approvedSnapshot:{},decidedAt:'2026-10-31T02:00:00.000Z'}} as any];
+ const options={canRead:()=>true,can:(s:string)=>s==='orders:write',today:'2026-10-31'};
+ expect(mistWorkQueue(state,{...options,me:'sales'}).filter(i=>i.id==='order-handoff:o')).toMatchObject([{title:'SO-G-2026-0009 · 待交接后勤',meta:'Cedar & Crown · 出运准备 1 / 3'}]);
+ expect(mistWorkQueue(state,{...options,me:'other'}).filter(i=>i.id==='order-handoff:o')).toHaveLength(0);
+ (state.orders[0] as any).handoffAt='2026-11-01T00:00:00.000Z';expect(mistWorkQueue(state,{...options,me:'sales'}).filter(i=>i.id==='order-handoff:o')).toHaveLength(0);
+ (state.orders[0] as any).handoffAt=undefined;(state.orders[0] as any).governance.status='submitted';expect(mistWorkQueue(state,{...options,me:'sales'}).filter(i=>i.id==='order-handoff:o')).toHaveLength(0);
 });

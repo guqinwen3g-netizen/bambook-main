@@ -138,6 +138,15 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
       }
     }
   }
+  // 主单已批准、尚未交接后勤：提醒订单负责人完成出运准备三项核对并交接，否则后勤看不到这张订单。
+  if (me && canRead('orders') && can('orders:write')) for (const order of state.orders || []) {
+    const governance = (order as { governance?: { status?: string; approvedSnapshot?: unknown; decidedAt?: string } }).governance;
+    if (order.ownerId !== me || order.handoffAt || governance?.status !== 'approved' || !governance.approvedSnapshot) continue;
+    if ((state.fulfillment?.shipments || []).some(shipment => shipment.lines?.some(line => line.orderId === order.id))) continue;
+    const ready = order.checklist.filter(item => item.done).length;
+    push({ id: `order-handoff:${order.id}`, source: 'task', title: `${order.code} · ${uiText('待交接后勤')}`, meta: [order.customer, `${uiText('出运准备')} ${ready} / ${order.checklist.length}`].filter(Boolean).join(' · '),
+      when: '待交接', urgent: !!order.due && Date.parse(order.due) - Date.parse(today) <= 30 * 86400000, at: governance.decidedAt || order.due || today, target: { view: 'orders/detail', id: order.id } });
+  }
   const f = state.fulfillment;
   if (me && canRead('procurement') && can('orders:write') && f.stock && f.stockMovements && f.receipts && f.purchases) {
     // Receiving authority follows the same current-owner rule as the server; no manual task completion.

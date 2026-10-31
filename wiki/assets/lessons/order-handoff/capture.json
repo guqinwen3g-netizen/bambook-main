@@ -1,0 +1,73 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 810,
+        "width": 461,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 1059,
+        "y": 476,
+        "width": 22,
+        "height": 22
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1059,
+        "y": 521,
+        "width": 22,
+        "height": 22
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 1059,
+        "y": 566,
+        "width": 22,
+        "height": 22
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 1143,
+        "y": 183,
+        "width": 109,
+        "height": 40
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 494,
+        "y": 423,
+        "width": 452,
+        "height": 81
+      },
+      "value": "两款整单出运，FOB 上海，收货人与通知方按 PO；定金 30% 到账后安排订舱。"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 872,
+        "y": 526,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}
