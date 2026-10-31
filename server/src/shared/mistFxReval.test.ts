@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistCommand, type MistContext, type MistState } from './mistWorkspace';
-import { fxCnyMinor, fxRevaluationPreview, readFxRevaluations } from './mistFxRates';
+import { fxCnyMinor, fxPrevMonth, fxRevaluationPreview, readFxRevaluations } from './mistFxRates';
 
 function setup(now = '2026-10-17T04:00:00Z') {
   let n = 0; const ctx: MistContext = { id: () => `rv-${++n}`, now, actorName: '林舒', actorId: 'demo-finance' };
@@ -28,6 +28,27 @@ function seed(s: MistState) {
 const rate = (f: ReturnType<typeof setup>, month: string, r: string) => f.run({ type: 'fxrate.period.save', payload: { month, currency: 'USD', rate: r, source: '人民银行月末中间价' } });
 
 describe('期末调汇（汇兑损益）', () => {
+  it.each([
+    {month:'2026-10',at:'2026-10-31T15:59:59.999Z',expected:0},
+    {month:'2026-10',at:'2026-10-31T16:00:00.000Z',expected:30},
+    {month:'2026-10',at:'2026-11-01T00:30:00+08:00',expected:30},
+    {month:'2026-10',at:'2026-10-31T23:30:00+08:00',expected:0},
+    {month:'2026-12',at:'2026-12-31T15:59:59.999Z',expected:0},
+    {month:'2026-12',at:'2026-12-31T16:00:00.000Z',expected:30},
+    {month:'2026-10',at:'2026-10-30T02:00:00Z',reversedAt:'2026-10-31T15:59:59.999Z',expected:30},
+    {month:'2026-10',at:'2026-10-30T02:00:00Z',reversedAt:'2026-10-31T16:00:00.000Z',expected:0},
+    {month:'2026-12',at:'2026-12-30T02:00:00Z',reversedAt:'2026-12-31T16:00:00.000Z',expected:0},
+  ])('银行扣费按北京时间归属月末：$month / $at / $reversedAt',({month,at,reversedAt,expected})=>{
+    const f=setup('2027-01-02T02:00:00Z');rate(f,fxPrevMonth(month),'7.0');rate(f,month,'7.1');
+    f.state.invoices=[{id:'invoice',code:'CI-CHECK',orderId:'order',order:'SO-CHECK',customer:'Synthetic',due:'2027-02-01',amount:1000,open:0,currency:'USD',issuedAt:month+'-01',bankCharges:[{id:'fee',receiptId:'receipt',amount:30,currency:'USD',reason:'银行水单扣费',at,actor:'财务',...(reversedAt?{reversed:{at:reversedAt,actor:'财务',reason:'水单更正'}}:{})}]}];
+    f.state.receipts=[{id:'receipt',code:'R-CHECK',date:month+'-02',payer:'Synthetic',amount:970,remaining:0,currency:'USD',ref:'CHECK',state:'matched'}];
+    f.state.allocations=[{id:'allocation',receiptId:'receipt',invoiceId:'invoice',amount:970,currency:'USD',createdAt:month+'-02T02:00:00Z',actor:'财务'}];
+    const before=structuredClone(f.state),preview=fxRevaluationPreview(f.state,month,'2027-01-02');
+    expect(preview.missing).toEqual([]);
+    expect(preview.lines.find(line=>line.kind==='receivable')?.amount??0).toBe(expected);
+    expect(f.state).toEqual(before);
+  });
+
   it('按月初汇率记账、月末汇率重估：银行按流水日、应收按开票日与到账日截止，结汇差额为已实现损益', () => {
     const f = setup(); seed(f.state); rate(f, '2026-08', '7.100000'); rate(f, '2026-09', '7.150000');
     const v = fxRevaluationPreview(f.state, '2026-09', '2026-10-17');

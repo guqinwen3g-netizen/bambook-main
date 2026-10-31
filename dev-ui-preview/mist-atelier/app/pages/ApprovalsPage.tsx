@@ -38,7 +38,9 @@ export function ApprovalsPage() {
   const reviews = useMistReviews(), workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav();
   const me = session.user?.id ?? '', state = workspace.state, current = workspace.workspace;
   const tab: ApprovalTab = (['mine', 'sent', 'done', 'others'] as const).find(t => t === route.section) ?? 'mine';
-  const [kind, setKind] = React.useState<'all' | Kind>('all'), [query, setQuery] = React.useState(''), [drawer, setDrawer] = React.useState(false);
+  const [kind, setKind] = React.useState<'all' | Kind>('all'), [query, setQuery] = React.useState('');
+  // The shell remounts this page when a review link changes; keep the compact detail reachable.
+  const [drawer, setDrawer] = React.useState(() => !!route.id);
   const [note, setNote] = React.useState(''), [local, setLocal] = React.useState('');
   /** 服务端只返回我是所有者或审批人的空间；我在本公司提交、但不是审批人的事项从本公司状态补齐（只读）。 */
   const all = React.useMemo<Row[]>(() => {

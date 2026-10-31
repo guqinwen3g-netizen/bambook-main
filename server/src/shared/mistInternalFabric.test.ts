@@ -30,7 +30,7 @@ function fixture(sourceQty = 100.3) {
     const order = state.orders.find(row => row.id === which.orderId)!;
     return run({ type: 'order.governance.saveDraft', payload: { orderId: order.id, input: governance || order.governance!.contract, reason: '调整计划', lines: state.orderLines.filter(line => line.orderId === order.id).map(line => ({ ...line, ...patch })) } }, actor);
   };
-  const purchase = (kind: 'processing' | 'material' | 'finished' = 'processing', materialKind?: 'fabric' | 'trims' | 'packaging' | 'other') => run({ type: 'fulfillment.procurement.save', payload: { ...target, kind, ...(materialKind ? { materialKind } : {}), supplierId: 'factory', supplier: 'factory', description: '衬衫加工', quantity: 10, unit: '件', price: 2, currency: 'USD', due: '2026-11-20', terms: '验收后结算', destination: '工厂', note: '', fileIds: ['po'] } }).id!;
+  const purchase = (kind: 'processing' | 'material' | 'finished' = 'processing', materialKind?: 'fabric' | 'trims' | 'packaging' | 'other') => run({ type: 'fulfillment.procurement.save', payload: { ...target, kind, ...(materialKind ? { materialKind } : {}), supplierId: 'factory', supplier: 'factory', description: '衬衫加工', quantity: 10, unit: '件', price: 2, currency: 'CNY', due: '2026-11-20', terms: '验收后结算', destination: '工厂', note: '', fileIds: ['po'] } }).id!;
   const production = () => {
     const id = purchase(); run({ type: 'fulfillment.procurement.submit', payload: { id } }); run({ type: 'fulfillment.procurement.decide', payload: { id, decision: 'approved', note: '核准' } }, leader);
     run({ type: 'fulfillment.procurement.send', payload: { id, at: context.now, evidence: '线下发出', fileIds: ['po'] } }); run({ type: 'fulfillment.procurement.confirm', payload: { id, at: context.now, confirmedDue: '2026-11-20', evidence: '工厂确认', fileIds: ['po'] } });
@@ -171,9 +171,9 @@ describe('current Mist internal fabric contract', () => {
     expect(f.state.fulfillment.samples.find(sample=>sample.id===sampleId)!.materialPlan).toBe(original);
   });
   it('keeps material RFQ classification through award and rejects a forbidden CMT material inquiry', () => {
-    const f=fixture(),input={...f.target,kind:'material' as const,materialKind:'packaging' as const,description:'包装箱',quantity:10,unit:'件',currency:'USD',due:'2026-11-20',destination:'工厂',deadline:'2026-11-01',supplierIds:['factory','alternate']};
+    const f=fixture(),input={...f.target,kind:'material' as const,materialKind:'packaging' as const,description:'包装箱',quantity:10,unit:'件',currency:'CNY',due:'2026-11-20',destination:'工厂',deadline:'2026-11-01',supplierIds:['factory','alternate']};
     const id=f.run({type:'rfq.save',payload:{input}}).id!;
-    const quoteId=f.run({type:'rfq.quote',payload:{id,supplierId:'factory',price:2,currency:'USD',moq:1,promisedDue:'2026-11-20',terms:'验收结算',validUntil:'2026-11-15'}}).quoteId!;
+    const quoteId=f.run({type:'rfq.quote',payload:{id,supplierId:'factory',price:2,currency:'CNY',moq:1,promisedDue:'2026-11-20',terms:'验收结算',validUntil:'2026-11-15'}}).quoteId!;
     const purchaseId=f.run({type:'rfq.award',payload:{id,quoteId,reason:'另一家未报价'}}).purchaseId!;
     expect(f.state.fulfillment.purchases.find(p=>p.id===purchaseId)!.materialKind).toBe('packaging');
     const cmt=f.create('garment','cmt');
@@ -181,7 +181,7 @@ describe('current Mist internal fabric contract', () => {
   });
   it('preserves classification when transferring a material contract to a new supplier', () => {
     const f = fixture(), id = f.purchase('material', 'packaging'); f.run({ type: 'fulfillment.procurement.submit', payload: { id } }); f.run({ type: 'fulfillment.procurement.decide', payload: { id, decision: 'approved', note: '批准' } }, f.leader);
-    const transferred = f.run({ type: 'sourcing.purchase.transfer', payload: { purchaseId: id, supplierId: 'alternate', price: 3, currency: 'USD', due: '2026-11-20', reason: '调整供应商' } });
+    const transferred = f.run({ type: 'sourcing.purchase.transfer', payload: { purchaseId: id, supplierId: 'alternate', price: 3, currency: 'CNY', due: '2026-11-20', reason: '调整供应商' } });
     const purchase = f.state.fulfillment.purchases.find(row => row.id === transferred.purchaseId)!;
     expect(purchase.materialKind).toBe('packaging'); expect(purchase.state).toBe('draft');
   });

@@ -17,6 +17,7 @@ import { resolveMember } from './mistAccounts';
 import type { MistState, MistContext, MistCommandResult, MistQc, MistTarget, MistProduction } from './mistWorkspace';
 import type { MistReviewTask } from './mistReview';
 import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
+import {procurementCurrencyProblem} from './mistProcurementCurrency';
 import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
 import { assertOrderLineOpen, assertShipmentWithinTolerance } from './mistOrderClosure';
 import {applyCustomsDeclarationCommand,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
@@ -1495,6 +1496,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const id = existing?.id || ctx.id();
             const currency = text(p.currency, '币种').toUpperCase();
             if (!/^[A-Z]{3}$/.test(currency)) fail('采购币种须为三位英文字母');
+            const currencyProblem = procurementCurrencyProblem(supplierRecord, currency);
+            if (currencyProblem) fail(currencyProblem);
             const record: FulfillmentPurchase = { id, code: existing?.code || code('PO', f.purchases, ctx), orderId: order.id, lineId: s.kind === 'orderLine' ? s.lineId : '', kind: p.kind, ...(materialKind?{materialKind}:{}), domain: order.type, supplierId, supplier, description: text(p.description, '采购内容'), quantity, unit: text(p.unit, '单位'), price, currency, due: day(p.due, '交期'), terms: text(p.terms, '付款条件'), destination: text(p.destination, '交付地点'), note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'draft', requesterId: ctx.actorId || '', createdBy: existing?.createdBy || ctx.actorName, createdAt: existing?.createdAt || ctx.now, reviewerIds: [], configVersions: {}, received: existing?.received || 0 };
             if (existing) {
                 Object.assign(existing, record);
@@ -1512,6 +1515,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             assertMistOrderApproved(root, purchase.orderId);
             if (purchase.state !== 'draft')
                 fail('仅草稿可以提交');
+            const currencyProblem = procurementCurrencyProblem(get(root.market.suppliers, purchase.supplierId, '供应商'), purchase.currency);
+            if (currencyProblem) fail(currencyProblem);
             const actorId = ctx.actorId;
             if (!actorId)
                 return fail('审批需要当前真实账号');
@@ -1540,6 +1545,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!ctx.actorId || !purchase.reviewerIds.includes(ctx.actorId) || !config?.userIds.includes(ctx.actorId))
                 fail('当前账号不在提交时及当前有效供应商审批名单', 'FORBIDDEN');
             const note = text(p.note, '审批意见');
+            if (p.decision === 'approved') {
+                const currencyProblem = procurementCurrencyProblem(get(root.market.suppliers, purchase.supplierId, '供应商'), purchase.currency);
+                if (currencyProblem) fail(currencyProblem);
+            }
             purchase.state = p.decision;
             purchase.decision = { actorId: ctx.actorId!, actor: ctx.actorName, at: ctx.now, decision: p.decision, note };
             if (!purchase.revisionHistory?.length) purchase.revisionHistory = [{ revision: 1, submittedAt: purchase.submittedAt || ctx.now, requesterId: purchase.requesterId, reviewerIds: [...purchase.reviewerIds], configVersions: { ...purchase.configVersions }, snapshot: purchaseSnapshot(purchase) }];

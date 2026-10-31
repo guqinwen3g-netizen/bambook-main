@@ -82,6 +82,9 @@ describe('供应商询价比价',()=>{
     expect(()=>f.run(transfer({reason:' '}))).toThrow('转移原因');
     const received=f.state.fulfillment.purchases.find(p=>p.code==='PO-2026-00001')!;
     expect(()=>f.run(transfer({purchaseId:received.id}))).toThrow('已有收货，不能整单转移');
+    const beforeCurrencyFailure=structuredClone(f.state);
+    expect(()=>f.run(transfer({currency:'USD'}))).toThrow('人民币');
+    expect(f.state).toEqual(beforeCurrencyFailure);
     const {id}=f.run(transfer());
     const next=f.state.fulfillment.purchases.find(p=>p.id===id)!, old=po();
     expect(old).toMatchObject({state:'cancelled',transferredTo:{purchaseId:id,purchaseCode:next.code,supplier:'江南成衣'}});
