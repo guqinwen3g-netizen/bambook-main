@@ -76,7 +76,7 @@
 |---|---|---|---|
 | 平台 AI「小竹 · 业务问答」 | `modules/PlatformPages.tsx#AssistantPage` → `POST /workspaces/:id/assistant` → `mist/assistant.ts`；只读，来源限当前授权的订单、发票、风险。公司成员使用仓储校验后的访问投影，不以库创建人代替权限判断 | 普通成员、跨公司拒绝、权限收回已覆盖；独立模拟财务/业务员从真实界面通过实际平台模型回答，引用发票金额/币种及来源往返已核对。发布以GO-LIVE与固定提交部署状态为准 | 更多业务来源、完整岗位链及真实员工验收；问答不办理业务命令 |
 | 报价成本 AI 审阅 | `POST /workspaces/:id/quotation-cost-advisor` → `mist/quoteCostAdvisor.ts`，使用 `quote-review` 模型档位；成本/价格公式仍由服务器计算，模型仅给依据、风险、问题与待审策略 | 当前调用链已接入平台模型，单元验证使用替身网络；共享问答执行层的所有者判断须一并复核 | 各岗位真实界面与实际模型完整验收；不得把建议写成审批或客户接受 |
-| 平台模型与固定流程 | `ai/platformProviders.ts`、`ai/codexSubscription.ts`、`ai/llmProviders.ts`；平台管理员配置API/订阅、排序回退，个人订阅不参与平台AI | `platformModel.ts` 的 `summary` / `reconciliation` 是模型档位配置 | 档位名称不代表自动汇总、邮件识别、财务对账等业务流程已经接线；须按当前Mist入口逐项核验 |
+| 平台模型与固定流程 | `ai/platformProviders.ts`、`ai/codexSubscription.ts`、`ai/llmProviders.ts`；平台管理员配置API/订阅、排序回退，个人订阅不参与平台AI | `platformModel.ts` 的 `summary` / `reconciliation` 是模型档位配置 | 档位名称本身不代表业务流程已接线；主动邮件整理已接入summary（6.1.3），自动汇总与财务对账仍须逐项核验 |
 | 桌面工作助手（本机 Agent） | `assistant?section=work`（`modules/WorkAssistantPage.tsx`），仅 Electron 桌面端；运行在 `electron/assistant/`（`host.ts`、`harness.ts`、`bambookTools.ts`），页面用本人会话续签短期委托（`useAssistantDelegation.ts`） | — | 员工上手教学待能力验收后补 |
 | 外部 MCP / 本地 Agent API | `POST /api/mist/mcp`（`server/src/mist/agentMcp.ts`）；9个工具与25类读取对象；契约见 [`work-assistant-plan.md` §14](mist-atelier/work-assistant-plan.md)。支持登记的短期委托头 `x-bambook-delegation` 和长期密钥头 `x-bambook-agent-key`，不可混用 | 官方客户端2.4.0在独立模拟环境完成业务提议、真人确认、结果/审计回读及凭据轮换、撤销、重启拒绝；#578/#580已发布。不代表所有客户端、业务或公网带授权写入均已验收 | 持久值守任务与更多客户端、业务分支 |
 | 委托身份 | 本人短期连接登记于 `mist/agentConnections.ts`；2小时v2凭据绑定账号、公司、工作区、签发权限上限。桌面签发入口须提供工作区与稳定连接编号，旧v1 HTTP授权拒绝 | 续签轮换、撤销持久化、权限不扩大及密码/全设备退出约束已核验 | 原生桌面打包后的完整模型操作链仍须验收 |
