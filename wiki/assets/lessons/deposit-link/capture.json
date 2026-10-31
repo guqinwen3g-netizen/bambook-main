@@ -1,0 +1,97 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 707,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 1128,
+        "y": 193,
+        "width": 109,
+        "height": 40
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 1018,
+        "y": 578,
+        "width": 110,
+        "height": 40
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 408,
+        "y": 587,
+        "width": 249,
+        "height": 14
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 1157,
+        "y": 306,
+        "width": 178,
+        "height": 40
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 494,
+        "y": 363,
+        "width": 186,
+        "height": 40
+      },
+      "value": "Cedar & Crown"
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 739,
+        "y": 363,
+        "width": 186,
+        "height": 40
+      },
+      "value": "SO-G-2026-0009"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 494,
+        "y": 523,
+        "width": 452,
+        "height": 40
+      },
+      "value": "客户邮件确认此笔为 SO-G-2026-0009 合同 30% 定金，金额与合同一致。"
+    },
+    {
+      "image": "09.webp",
+      "target": {
+        "x": 845,
+        "y": 586,
+        "width": 113,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "27c0a670a8a8386f463a4fef599bfa9a2ef4a72d",
+    "capturedAt": "2026-10-31T13:01:16.759Z"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 614,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 1238,
+        "y": 127,
+        "width": 52,
+        "height": 32
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 860,
+        "y": 715,
+        "width": 103,
+        "height": 14
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 1011,
+        "y": 648,
+        "width": 113,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 374,
+        "y": 414,
+        "width": 692,
+        "height": 81
+      },
+      "value": "S:160  M:280  L:240  XL:120"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 1019,
+        "y": 516,
+        "width": 59,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "27c0a670a8a8386f463a4fef599bfa9a2ef4a72d",
+    "capturedAt": "2026-10-31T13:01:48.906Z"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 614,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 1238,
+        "y": 127,
+        "width": 52,
+        "height": 32
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 860,
+        "y": 715,
+        "width": 103,
+        "height": 14
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 900,
+        "y": 503,
+        "width": 231,
+        "height": 40
+      },
+      "value": "60"
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 900,
+        "y": 662,
+        "width": 500,
+        "height": 81
+      },
+      "value": "江南成衣回报：已裁 800 件，车缝完成约六成。"
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 1326,
+        "y": 832,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "27c0a670a8a8386f463a4fef599bfa9a2ef4a72d",
+    "capturedAt": "2026-10-31T13:05:27.135Z"
+  }
+}
