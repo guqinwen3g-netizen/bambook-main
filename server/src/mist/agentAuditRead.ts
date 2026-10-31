@@ -203,7 +203,8 @@ export function projectAgentAudit(a: AgentCommandAudit, input: { actor:TokenPayl
   const targets:AgentAuditDetail['targets']=[],targetKeys=new Set<string>(),targetRecords:any[]=[];
   const target=(type:string,id:unknown)=>{
     if(typeof id!=='string')return;const definition=AGENT_OBJECT_TYPES.find(t=>t.type===type);if(!definition||!hasScope(actor,definition.scope))return;
-    const rows=read(visible,definition.path.map(k=>'k:'+k));const record=Array.isArray(rows)?rows.find(r=>r.id===id):undefined;if(!record)return;
+    // Partial ledger aliases support delta comparison, not navigation into a full-record view.
+    const rows=read(input.visible,definition.path.map(k=>'k:'+k));const record=Array.isArray(rows)?rows.find(r=>r.id===id):undefined;if(!record)return;
     const linkId=definition.linkId?definition.linkId(record):record.id,key=definition.view+':'+(definition.section??'')+':'+linkId;if(typeof linkId!=='string'||targetKeys.has(key))return;
     targetKeys.add(key);const label=(['supplier','customer','contact'].includes(type)?[record.name,record.code,record.title]:[record.code,record.name,record.title,record.style]).find(v=>typeof v==='string'&&v.trim())??definition.label;
     targets.push({label:label.slice(0,120),view:definition.view,id:linkId,...(definition.section?{section:definition.section}:{})});targetRecords.push(record);
