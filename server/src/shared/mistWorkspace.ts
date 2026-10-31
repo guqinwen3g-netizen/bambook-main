@@ -1435,7 +1435,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
           if(lock.currency!==from.currency||lock.localCurrency!==to.currency)throw new MistCommandError('VALIDATION','币种与锁汇合同不一致');
           if(day<lock.date)throw new MistCommandError('VALIDATION','结汇日期早于锁汇日期');
           if(amountMinor>Math.round(mistFxLockUsage(state,lock.id).remaining*100))throw new MistCommandError('PRECONDITION','超过锁汇合同剩余可交割金额');
+          const lockedMinor=mistFxLocalMinor(amountMinor,lock.rate);
+          if(Math.abs(mistMoneyMinor(localAmount)-lockedMinor)>1&&!note)throw new MistCommandError('VALIDATION','按锁汇 '+lock.code+' 交割，锁定汇率应入账 '+(lockedMinor/100).toFixed(2)+' '+to.currency+'（'+amount+' × '+lock.rate+'）；与水单不符时请在备注写明原因（如提前交割、展期点差）');
           lockId=lock.id;}
+        const fromBalance=mistBankAccountBalances(state).accounts.find(x=>x.account.id===from.id)?.balance??0;
+        if(amountMinor>Math.round(fromBalance*100))throw new MistCommandError('PRECONDITION','账户 '+from.code+' 余额只有 '+fromBalance.toFixed(2)+' '+from.currency+'，不能卖出 '+amount+' '+from.currency+'；请先把对应到账归属到该账户');
         const links=p.receipts===undefined?[]:settlementLinks(state,from,day,p.receipts,amountMinor,[]);
         records.push({...base,kind:'settlement',bankName:from.bankName,currency:from.currency,localCurrency:to.currency,localAmount,rate:mistFxRate(amount,localAmount),fromAccountId:from.id,toAccountId:to.id,...(lockId?{lockId}:{}),...(links.length?{receipts:links}:{})});
         event(state,context,'finance',id,'登记结汇 '+code+'：'+from.code+' 卖出 '+amount+' '+from.currency+' → '+to.code+' 入账 '+localAmount+' '+to.currency+(lockId?'（交割锁汇 '+records.find(r=>r.id===lockId)!.code+'）':'')+(links.length?'，对应到账 '+links.map(l=>state.receipts.find(x=>x.id===l.receiptId)!.code).join('、'):''));

@@ -93,4 +93,13 @@ describe('订单核算 · 实际结汇口径', () => {
  it('retains the reversed original while allowing a corrected bank slip, and scopes daily slip numbers to the debit account and date',()=>{
   const f=setup();const first=settle(f,{amount:1000,localAmount:7100});f.run({type:'finance.fx.reverse',payload:{id:first.id,reason:'水单金额录入错误'}});settle(f,{amount:2000,localAmount:14240});expect(f.s.fxRecords!.find(r=>r.id===first.id)?.reversed?.reason).toBe('水单金额录入错误');
   expect(()=>settle(f,{date:'2026-10-11',amount:1000,localAmount:7100})).not.toThrow();expect(()=>settle(f,{fromAccountId:f.r3.accountId,amount:100,localAmount:710})).not.toThrow();
+  });
+ it('cannot sell more than the debit account holds, and a forward delivery must credit the locked-rate amount',()=>{
+  const f=setup();
+  expect(()=>settle(f,{amount:7000.01,localAmount:49700.07})).toThrow('余额只有 7000.00 USD');
+  const lock=f.run({type:'finance.fx.lock',payload:{date:'2026-10-09',bankName:'中行',currency:'USD',amount:6000,rate:'7.1000',localCurrency:'CNY',settleBy:'2026-11-30',ref:'FWD-1'}} as MistCommand).id;
+  expect(()=>settle(f,{lockId:lock,localAmount:42540})).toThrow('锁定汇率应入账 42600.00 CNY');
+  expect(()=>settle(f,{lockId:lock,amount:100,localAmount:709,ref:'BK-EARLY',note:'提前交割，银行按点差调整'})).not.toThrow();
+  expect(()=>settle(f,{lockId:lock,amount:5900,localAmount:41890})).not.toThrow();
+  expect(()=>settle(f,{ref:'BK-2',amount:1000.01,localAmount:7100.07})).toThrow('余额只有 1000.00 USD');
  });

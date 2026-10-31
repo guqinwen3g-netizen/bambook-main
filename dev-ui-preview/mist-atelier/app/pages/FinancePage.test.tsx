@@ -122,14 +122,14 @@ it('records an FX lock and a settlement against it, moving both account balances
  route={view:'payment-vouchers',section:'accounts'};render();
  await click('登记锁汇');input('锁汇合同号','FW-9');input('原币金额','1000');input('锁定汇率','7.1');input('交割截止日','2099-12-31');await click('保存锁汇');
  expect(store.value.state.fxRecords[0]).toMatchObject({kind:'lock',localAmount:7100,rate:'7.1',currency:'USD',localCurrency:'CNY'});
- await click('交割');input('银行水单号','BK-1');input('卖出原币金额','400');input('入账本币金额','2841.2');expect(document.body.textContent).toContain('成交汇率 7.103000');await click('保存结汇');
+ await click('交割');input('银行水单号','BK-1');input('卖出原币金额','400');input('入账本币金额','2841.2');expect(document.body.textContent).toContain('成交汇率 7.103000');input('备注','提前交割点差');await click('保存结汇');
  expect(store.value.run).toHaveBeenLastCalledWith(expect.objectContaining({type:'finance.fx.settle',payload:expect.objectContaining({amount:400,localAmount:2841.2,lockId:store.value.state.fxRecords[0].id})}));
  const table=getByRole(host,'table',{name:'公司银行账户'});expect(table.textContent).toContain('4,600.00 USD');expect(table.textContent).toContain('2,841.20 CNY');
  expect(getByRole(host,'table',{name:'锁汇与结汇记录'}).textContent).toContain('剩余 600.00 USD');
 });
 it('links a settlement to receipts in the selling account so order margins can use the actual rate; the unlinked rest stays flagged',async()=>{
  let serial=200;const ctx={id:()=>`fl-${++serial}`,actorName:'财务',now:new Date().toISOString()};
- for(const [name,no,currency] of [['美元户','1111','USD'],['人民币户','2222','CNY']])store.value.state=applyMistCommand(store.value.state,{type:'finance.account.save',payload:{name,bankName:'中国银行',accountNo:no,currency,openingDate:'2026-01-01',openingBalance:0}},ctx).state;
+ for(const [name,no,currency] of [['美元户','1111','USD'],['人民币户','2222','CNY']])store.value.state=applyMistCommand(store.value.state,{type:'finance.account.save',payload:{name,bankName:'中国银行',accountNo:no,currency,openingDate:'2026-01-01',openingBalance:currency==='USD'?100:0}},ctx).state;
  const usd=store.value.state.bankAccounts.find((a:any)=>a.currency==='USD');
  store.value.state=applyMistCommand(store.value.state,{type:'finance.importReceipts',payload:{accountId:usd.id,receipts:[{date:today(),payer:'Nordic',amount:300,currency:'USD',ref:'TT-77'}]}},ctx).state;
  const receipt=store.value.state.receipts.find((r:any)=>r.ref==='TT-77');
