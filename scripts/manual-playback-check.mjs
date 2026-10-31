@@ -76,13 +76,16 @@ try {
     // 3. 练习：画面外点击只提示；点热点完成并前进
     await root.locator('[data-lesson-restart]').click().catch(() => root.locator('[data-step="0"]').click());
     await root.locator('[data-step="0"]').click(); await waitImage(root);
+    await root.locator('[data-shot]').scrollIntoViewIfNeeded(); await page.waitForTimeout(1500);
     const box = await root.locator('[data-shot]').boundingBox();
-    await page.waitForTimeout(1500);
     const hot0 = await root.locator('[data-hotspot]').boundingBox();
     const corners = [[box.x + 6, box.y + 6], [box.x + box.width - 6, box.y + 6], [box.x + 6, box.y + box.height - 6], [box.x + box.width - 6, box.y + box.height - 6]];
-    const far = corners.sort((a, b) => Math.hypot(b[0] - hot0.x, b[1] - hot0.y) - Math.hypot(a[0] - hot0.x, a[1] - hot0.y))[0];
+    const onShot = [];
+    for (const point of corners) if (await page.evaluate(([x, y]) => { const hit = document.elementFromPoint(x, y); return !!hit?.closest('[data-shot]') && !hit.closest('[data-hotspot]'); }, point)) onShot.push(point);
+    const far = onShot.sort((a, b) => Math.hypot(b[0] - hot0.x, b[1] - hot0.y) - Math.hypot(a[0] - hot0.x, a[1] - hot0.y))[0] || corners[3];
     await page.mouse.click(far[0], far[1]);
-    check('练习 · 点错位置只提示', (await root.locator('[data-hint]').textContent())?.includes('点击亮起的位置') && !(await root.locator('[data-step="0"]').evaluate(el => el.classList.contains('done'))));
+    const hint = await root.locator('[data-hint]').textContent(), step0 = await root.locator('[data-step="0"]').getAttribute('class');
+    check('练习 · 点错位置只提示', hint?.includes('点击亮起的位置') && !step0?.split(' ').includes('done'), `${hint} · ${step0}`);
     for (let i = 0; i < steps; i++) {
       await root.locator(`[data-step="${i}"]`).click(); await waitImage(root);
       await root.locator('[data-hotspot]').click(); await page.waitForTimeout(150);
