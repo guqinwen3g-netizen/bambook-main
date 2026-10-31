@@ -22,6 +22,7 @@ import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, type McpRepository } from './a
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
 import {SERVICE_KEY_HEADER} from './agentIdentities';
+import type { MistMailReceiver } from './mail/receiverWorker';
 import { MistMailService } from './mail/service';
 import { MistMailCredentials } from './mail/credentials';
 import type { MailTransport } from './mail/transport';
@@ -40,7 +41,7 @@ function publicError(res: Response, error: any) {
   const known = error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500);
   res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '公司操作未完成，请查询原请求回执或稍后重试' } });
 }
-export function createMistRouter(options: { prisma?: any; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
+export function createMistRouter(options: { prisma?: any; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
   const router = Router();
   const authenticate = options.authenticate ?? requireAuth;
@@ -217,6 +218,9 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   // 智能邮箱真实收发：凭据只写入服务端，响应只含公司投影与操作结果。
   const mail = options.mail ?? new MistMailService(repository, new MistMailCredentials(options.mailCredentialsRoot ?? process.env.MIST_MAIL_CREDENTIAL_DIR ?? path.resolve(__dirname, '../../private/mist-mail-credentials')), options.mailTransport);
   const mailCall = (handler: (req: Request) => Promise<any>) => run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-store'); const result = await handler(req); res.json({ workspace: result.workspace, receipt: result.receipt, ...(result.sync ? { sync: result.sync } : {}), ...(result.send ? { send: result.send } : {}) }); });
+  router.get('/workspaces/:id/agent/mail-receiving',run(async(req,res)=>{exactBody(req.query,[]);const items=await mail.receivingViews(actor(req),req.params.id);const {workspace}=await repository.getForAgent(actor(req),req.params.id);res.setHeader('Cache-Control','private, no-store');res.json({workspace:{id:workspace.id,revision:workspace.revision},results:items,serviceAvailable:options.mailReceiver?.running===true});}));
+  router.get('/workspaces/:id/email/receiving',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json({serviceAvailable:options.mailReceiver?.running===true,items:await mail.receivingViews(actor(req),req.params.id)});}));
+  router.put('/workspaces/:id/email/accounts/:accountId/receiving',run(async(req,res)=>{const body=exactBody(req.body??{},['enabled','requestId','version','sourceGeneration']);if(body.enabled===true&&!options.mailReceiver?.running)fail('MAIL_RECEIVER_UNAVAILABLE','自动收件服务未运行，请稍后重试',503);res.setHeader('Cache-Control','private, no-store');res.json({item:await mail.setReceiving(actor(req),req.params.id,req.params.accountId,body)});}));
   router.put('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.bindCredential(actor(req), req.params.id, req.params.accountId, exactBody(req.body, ['password']).password)));
   router.delete('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.disconnect(actor(req), req.params.id, req.params.accountId)));
   router.post('/workspaces/:id/email/accounts/:accountId/sync', mailCall(req => { exactBody(req.body ?? {}, []); return mail.sync(actor(req), req.params.id, req.params.accountId); }));

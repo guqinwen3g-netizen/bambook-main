@@ -160,6 +160,8 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 
 ## 14. Mist 标准 MCP 接口（2026-10-30 用户定案后实现）
 
+2026-11-01 当前增量：工具共9个，新增只读`bambook_mail_receiving({workspaceId})`，返回当前可见邮箱的后台收件状态、时间与重试信息，不返回凭据或内部授权，Agent不能启停后台收件。桌面同名工具走`/agent/mail-receiving`。`email.account.save`一律人工确认。当前能力与历史停点冲突时以 [Code Wiki第6节](../CODE_WIKI.md#6-ai-与-agent-能力边界2026-10-31) 和本文件后续交付记录为准。
+
 用户定案修订第 13 节白名单：Agent 可读全部可见数据并执行普通写入，确认 / 删除 / 资金 / 对外发送类仍须本人确认；使用者包括桌面工作助手、外部 MCP 客户端和管理员开设的无人值守 Agent 账号。
 
 - **入口**：`POST /api/mist/mcp`（JSON-RPC 2.0；`initialize` / `ping` / `tools/list` / `tools/call`，通知回202）。当前实现 `2025-06-18`、`2025-03-26`；初始化遇到不支持的版本返回 `2025-06-18`，后续显式携带不支持的 `MCP-Protocol-Version` 则回400。不提供SSE，已认证GET回405及`Allow: POST`，不是越权403。实现 `agentMcp.ts`、`route.ts`；来源检查及委托限制保留。

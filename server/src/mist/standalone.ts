@@ -20,8 +20,10 @@ async function main() {
     const {PrismaClient}=await import('@prisma/client');const prisma=new PrismaClient();
     app=createMistServer(prisma,{host});disconnect=()=>prisma.$disconnect();
   }
+  if(process.env.MIST_MAIL_RECEIVER_ENABLED!=='0')app.locals.mailReceiver.start();
   const server = app.listen(port, host, () => { console.log(`[mist] ${mistLocalRequested()?'local-file workspace':'workspace server'} listening on ${host}:${port}`); });
-  const stop = () => server.close(() => { void disconnect().finally(() => process.exit(0)); });
+  let stopping=false;
+  const stop = () => {if(stopping)return;stopping=true;void app.locals.mailReceiver.stop().finally(()=>server.close(()=>{void disconnect().finally(()=>process.exit(0));}));};
   process.once('SIGINT', stop); process.once('SIGTERM', stop);
 }
 void main().catch(() => { console.error('[mist] startup failed; check the local server configuration'); process.exitCode = 1; });

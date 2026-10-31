@@ -1,0 +1,16 @@
+export const mailReceivingEnglish: Record<string, string> = {
+  '立即同步已连接的邮箱': 'Sync connected mailboxes now',
+  '自动收件': 'Automatic receiving', '已关闭': 'Off', '等待收件': 'Waiting', '收件中': 'Receiving',
+  '稍后重试': 'Retry scheduled', '需要重新开启': 'Reactivation required', '核对状态': 'Check status',
+  '待核对': 'Check required', '正在读取': 'Loading', '收件服务未运行': 'Receiver unavailable',
+  '最近收件': 'Last received', '待收取': 'Pending', '请先绑定邮箱凭据': 'Connect mailbox credentials first',
+  '收件状态响应无效': 'Invalid receiving status response', '收件状态读取失败': 'Could not load receiving status',
+  '收件设置响应无效，请核对状态': 'Could not verify the setting. Check status',
+  '自动收件设置结果待核对': 'Check whether the receiving setting was saved',
+  '邮箱设置已变更，请重新开启自动收件': 'Mailbox settings changed. Enable automatic receiving again',
+  '接入人或邮箱授权已失效，请本人重新开启自动收件': 'Owner or mailbox access expired. The owner must enable receiving again',
+  '邮箱授权已失效，请重新绑定并开启自动收件': 'Mailbox access expired. Reconnect and enable receiving',
+  '暂时无法收信，将自动重试': 'Could not receive mail. A retry is scheduled',
+  '邮件原件超过64MB上限，请在原邮箱处理后再同步': 'Message exceeds 64MB. Handle it in the original mailbox before syncing',
+  '收信服务器未提供邮件大小，请联系维护人员': 'The mail server did not provide message sizes. Contact support',
+};

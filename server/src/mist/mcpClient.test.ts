@@ -45,11 +45,25 @@ async function fixture(profileId = 'demo-buyer', mode: 'read' | 'operate' = 'ope
 }
 
 describe('Official MCP client over a real loopback HTTP connection', () => {
+  it.each(['read', 'operate'] as const)('reads mailbox receiving status in %s mode but cannot grant background access', async mode => {
+    const { app, human, workspace, headers, tool } = await fixture('demo-sales', mode);
+    const created = await human.post(`/api/mist/workspaces/${workspace.id}/commands`).send({ requestId: randomUUID(), expectedRevision: workspace.revision, command: { type: 'email.account.save', payload: { input: { address: 'qa@example.test', displayName: 'QA', kind: 'personal', memberIds: [], aliases: [], signature: '', transport: { imapHost: 'mail.example.test', imapPort: 993, imapSecure: true, smtpHost: 'mail.example.test', smtpPort: 465, smtpSecure: true, username: 'qa@example.test' } } } } }).expect(200);
+    const id = created.body.receipt.result.id;
+    const status = await tool('bambook_mail_receiving', { workspaceId: workspace.id });
+    expect(status.isError).not.toBe(true);
+    expect(status.structuredContent).toMatchObject({ items: [{ accountId: id, enabled: false, canEnable: false, canDisable: false }] });
+    expect(JSON.stringify(status)).not.toMatch(/password|authority|sourceHash|credentialVersion/);
+    const canonical = await request(app).get(`/api/mist/workspaces/${workspace.id}/email/receiving`).set(headers).expect(200);
+    expect(canonical.body.items[0].accountId).toBe(id);
+    await request(app).put(`/api/mist/workspaces/${workspace.id}/email/accounts/${id}/receiving`).set(headers).send({ enabled: true, version: 0, sourceGeneration: 1, requestId: randomUUID() }).expect(403);
+    const commands = await tool('bambook_commands', { prefix: 'email.account.save' });
+    expect(commands.structuredContent).toMatchObject({ commands: [{ type: 'email.account.save', via: 'confirm' }] });
+  });
   it('negotiates an implemented protocol and exposes its tools to the external SDK', async () => {
     const { app, headers, client, tool, endpoint } = await fixture();
     expect(client.getServerVersion()?.name).toBe('bambook-mist');
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(8);
+    expect(tools).toHaveLength(9);
     expect(tools.find(item => item.name === 'bambook_execute')?.inputSchema.required).toContain('requestId');
     const workspaces = await tool('bambook_workspaces');
     expect(workspaces.isError).not.toBe(true);

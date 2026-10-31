@@ -4,7 +4,7 @@ export function queryMistReceipts(rows: any[], args: any): any[] {
   const match=(row:any,where:any):boolean=>Object.entries(where??{}).every(([key,value]:[string,any])=>{
     if(key==='AND')return value.every((part:any)=>match(row,part));
     if(key==='OR')return value.some((part:any)=>match(row,part));
-    if(key==='result'){let found=row.result;for(const part of value.path??[])found=found?.[part];return found===value.equals;}
+    if(key==='result'){let found=row.result;for(const part of value.path??[])found=found?.[part];if(Object.prototype.hasOwnProperty.call(value,'equals'))return found===value.equals;if(value.lte!==undefined)return typeof found==='number'&&found<=value.lte;return false;}
     const actual=key==='createdAt'?stamp(row).getTime():row[key];
     if(key==='createdAt'&&(value instanceof Date||typeof value==='string'))return actual===new Date(value).getTime();
     if(value&&typeof value==='object'&&!Array.isArray(value))return Object.entries(value).every(([op,bound]:[string,any])=>{

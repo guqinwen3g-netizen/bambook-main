@@ -15,7 +15,7 @@ export interface MailImapSession {
   fetch(uids: number[]): Promise<MailFetched[]>;
   hasMessageId(messageId: string): Promise<boolean>;
   append(path: string, raw: Buffer): Promise<void>;
-  close(): Promise<void>;
+  close(force?:boolean): Promise<void>;
 }
 /** rejected 为服务器明确拒收的收件人及其回复原文（部分拒收时正文仍会提交给已接收的收件人）。 */
 export type MailSendResult = { response: string; accepted: string[]; rejected: string[]; rejectedReplies?: Array<{ address: string; reply: string }> };
@@ -55,6 +55,7 @@ function flatten(boxes: Record<string, any>, prefix = '', out: MailFolderInfo[] 
   }
   return out;
 }
+export const MAIL_FETCH_MAX_BYTES=64*1024*1024;
 const SEEN = '\\Seen';
 
 class ImapSimpleSession implements MailImapSession {
@@ -64,29 +65,48 @@ class ImapSimpleSession implements MailImapSession {
   uidsAfter(afterUid: number): Promise<number[]> {
     return new Promise((resolve, reject) => this.connection.imap.search([['UID', `${afterUid + 1}:*`]], (error: Error | null, uids: number[]) => error ? reject(error) : resolve((uids || []).map(Number).filter(uid => uid > afterUid).sort((a, b) => a - b))));
   }
-  /** 直接用底层 node-imap 流按字节收集原始邮件，避免按文本拼接损坏 8bit 内容。 */
-  fetch(uids: number[]): Promise<MailFetched[]> {
-    if (!uids.length) return Promise.resolve([]);
-    return new Promise((resolve, reject) => {
-      const rows: MailFetched[] = [], pending: Promise<void>[] = [];
-      const fetch = this.connection.imap.fetch(uids, { bodies: '', markSeen: false });
-      fetch.on('message', (message: any) => {
-        const chunks: Buffer[] = []; let uid = 0, flags: string[] = [];
-        pending.push(new Promise<void>(done => {
-          message.on('body', (stream: any) => stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk))));
-          message.once('attributes', (attrs: any) => { uid = Number(attrs?.uid); flags = Array.isArray(attrs?.flags) ? attrs.flags : []; });
-          message.once('end', () => { if (Number.isSafeInteger(uid) && uid > 0 && chunks.length) rows.push({ uid, seen: flags.includes(SEEN), raw: Buffer.concat(chunks) }); done(); });
+  /** Query sizes first, then fetch only a UID prefix within the per-request raw-byte budget. */
+  async fetch(uids:number[]):Promise<MailFetched[]> {
+    if(!uids.length)return[];
+    const sizes=await new Promise<Map<number,number>>((resolve,reject)=>{
+      const result=new Map<number,number>(),fetch=this.connection.imap.fetch(uids,{size:true,markSeen:false});let messages=0;
+      fetch.on('message',(message:any)=>{messages++;message.once('attributes',(attrs:any)=>{if(Number.isSafeInteger(attrs?.uid))result.set(attrs.uid,attrs.size);});});
+      fetch.once('error',reject);fetch.once('end',()=>{if(messages!==result.size)reject(Object.assign(new Error('Incomplete IMAP size metadata'),{code:'MAIL_MESSAGE_SIZE_UNKNOWN'}));else resolve(result);});
+    });
+    const chosen:number[]=[];let planned=0;
+    for(const uid of uids){
+      if(!sizes.has(uid))continue; // A concurrently deleted UID has no body to import.
+      const size=sizes.get(uid)!;
+      if(!Number.isSafeInteger(size)||size<0)throw Object.assign(new Error('Missing RFC822.SIZE'),{code:'MAIL_MESSAGE_SIZE_UNKNOWN'});
+      if(!chosen.length&&size>MAIL_FETCH_MAX_BYTES)throw Object.assign(new Error('Raw message exceeds64MiB'),{code:'MAIL_MESSAGE_TOO_LARGE'});
+      if(planned+size>MAIL_FETCH_MAX_BYTES)break;
+      chosen.push(uid);planned+=size;
+    }
+    if(!chosen.length)return[];
+    return new Promise((resolve,reject)=>{
+      const rows:MailFetched[]=[],pending:Promise<void>[]=[],buffers:Buffer[][]=[];let received=0,failed=false;
+      const stop=(error:unknown)=>{if(failed)return;failed=true;for(const chunks of buffers)chunks.length=0;rows.length=0;this.connection.imap.destroy();reject(error);};
+      const fetch=this.connection.imap.fetch(chosen,{bodies:'',markSeen:false});
+      fetch.on('message',(message:any)=>{
+        const chunks:Buffer[]=[];buffers.push(chunks);let uid=0,flags:string[]=[];
+        pending.push(new Promise<void>(done=>{
+          message.on('body',(stream:any)=>stream.on('data',(chunk:Buffer)=>{
+            if(failed)return;received+=chunk.length;
+            if(received>MAIL_FETCH_MAX_BYTES){stop(Object.assign(new Error('Raw fetch budget exceeded'),{code:'MAIL_MESSAGE_TOO_LARGE'}));return;}
+            chunks.push(Buffer.from(chunk));
+          }));
+          message.once('attributes',(attrs:any)=>{uid=Number(attrs?.uid);flags=Array.isArray(attrs?.flags)?attrs.flags:[];});
+          message.once('end',()=>{if(!failed&&Number.isSafeInteger(uid)&&uid>0&&chunks.length)rows.push({uid,seen:flags.includes(SEEN),raw:Buffer.concat(chunks)});done();});
         }));
       });
-      fetch.once('error', reject);
-      fetch.once('end', () => { void Promise.all(pending).then(() => resolve(rows.sort((a, b) => a.uid - b.uid))); });
+      fetch.once('error',stop);fetch.once('end',()=>{void Promise.all(pending).then(()=>{if(!failed)resolve(rows.sort((a,b)=>a.uid-b.uid));});});
     });
   }
   hasMessageId(messageId: string): Promise<boolean> {
     return new Promise((resolve, reject) => this.connection.imap.search([['HEADER', 'MESSAGE-ID', messageId]], (error: Error | null, uids: number[]) => error ? reject(error) : resolve((uids || []).length > 0)));
   }
   async append(path: string, raw: Buffer) { await this.connection.append(raw, { mailbox: path, flags: [SEEN] }); }
-  async close() { try { this.connection.end(); } catch { /* already closed */ } }
+  async close(force=false) { try { if(force)this.connection.imap.destroy();else this.connection.end(); } catch { /* already closed */ } }
 }
 
 const tls = (host: string, insecureTls: boolean) => ({ servername: /^\d+\.\d+\.\d+\.\d+$/.test(host) ? undefined : host, rejectUnauthorized: !insecureTls, minVersion: 'TLSv1.2' as const });
@@ -127,7 +147,7 @@ export const imapSmtpTransport: MailTransport = {
   async imap(config, secret, insecureTls) {
     const connection = await imaps.connect({ imap: {
       user: secret.username, password: secret.password, host: config.imapHost, port: config.imapPort, tls: config.imapSecure, autotls: config.imapSecure ? 'never' : 'required',
-      authTimeout: 15000, connTimeout: 15000, tlsOptions: tls(config.imapHost, insecureTls),
+      authTimeout: 15000, connTimeout: 15000, socketTimeout:60000,tlsOptions: tls(config.imapHost, insecureTls),
     } } as any);
     // 断线等异步错误不能让进程退出；当前操作会因连接失效而得到明确错误。
     (connection as any).on?.('error', () => undefined);
@@ -147,6 +167,8 @@ export function classifySmtpError(error: any): 'failed' | 'unknown' {
 /** 把底层协议错误转为可展示的中文原因；不包含凭据。 */
 export function describeMailError(error: any, stage: 'imap' | 'smtp'): { code: string; message: string } {
   const code = String(error?.code || ''), text = String(error?.textCode || error?.source || ''), detail = String(error?.message || ''), label = stage === 'imap' ? '收信服务器' : '发信服务器';
+  if(code==='MAIL_MESSAGE_TOO_LARGE')return{code,message:'邮件原件超过64MB上限，请在原邮箱处理后再同步'};
+  if(code==='MAIL_MESSAGE_SIZE_UNKNOWN')return{code,message:'收信服务器未提供邮件大小，请联系维护人员'};
   if (code === 'EAUTH' || /AUTHENTICATIONFAILED|authentication/i.test(text) || /auth/i.test(detail) && /fail|invalid/i.test(detail)) return { code: 'MAIL_AUTH_FAILED', message: `${label}拒绝登录：用户名或密码不正确` };
   if (/SELF_SIGNED|CERT|UNABLE_TO_VERIFY|DEPTH_ZERO/i.test(code + ' ' + detail)) return { code: 'MAIL_TLS_UNTRUSTED', message: `${label}证书不受信任，连接已中止` };
   if (code === 'ETIMEDOUT' || /timeout/i.test(text + ' ' + detail)) return { code: 'MAIL_TIMEOUT', message: `${label}连接超时` };
