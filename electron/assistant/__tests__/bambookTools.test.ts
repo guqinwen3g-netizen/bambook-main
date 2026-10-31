@@ -10,16 +10,18 @@ const ctx = () => ({ signal: new AbortController().signal, sessionId: 's1', now:
 const result = { workspace: { id: 'workspace-one', revision: 4, name: '测试工作区' }, results: [{ type: 'order', id: 'o1', link: 'bambook://open?view=orders%2Fdetail&id=o1' }] };
 
 describe('业务工具的委托边界', () => {
-  it('exposes only three read tools and pins every request to the supplied workspace origin without cookies or redirects', async () => {
+  it('exposes only read tools and pins every request to the supplied workspace origin without cookies or redirects', async () => {
     const f = scriptedFetch(() => json(result));
     const needed = vi.fn();
     const tools = bambookTools({ fetch: f.fetch, delegation: () => delegation, needed });
-    expect(tools.map(t => t.name)).toEqual(['bambook_query', 'bambook_get', 'bambook_expand']);
+    expect(tools.map(t => t.name)).toEqual(['bambook_query', 'bambook_get', 'bambook_expand', 'bambook_mail_receiving']);
     expect(tools.every(t => t.risk === 'read' && t.confirm === 'never')).toBe(true);
     const query = await tools[0].run({ type: 'order', q: '客户 / FB', limit: 2 }, ctx());
     expect(query).toEqual(result);
     await tools[1].run({ type: 'order', id: 'o/1?x' }, ctx());
     await tools[2].run({ type: 'order', id: 'o1' }, ctx());
+    await tools[3].run({}, ctx());
+    expect(f.calls[3].url).toBe('https://bambook.example/api/mist/workspaces/workspace-one/agent/mail-receiving');
     expect(new URL(f.calls[0].url).searchParams.get('q')).toBe('客户 / FB');
     expect(f.calls[1].url).toBe('https://bambook.example/api/mist/workspaces/workspace-one/agent/objects/order/o%2F1%3Fx');
     expect(f.calls[2].url).toContain('/objects/order/o1/related');

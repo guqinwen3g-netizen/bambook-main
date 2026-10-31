@@ -59,7 +59,7 @@ export class MemoryMistDatabase {
         findUnique: async ({ where }: any) => receipts.get(`${where.workspaceId_requestId.workspaceId}:${where.workspaceId_requestId.requestId}`) ?? null,
         findMany: async (args: any) => queryMistReceipts([...receipts.values()],args),
         create: async ({ data }: any) => { if (this.failReceipt) throw new Error('transaction failed'); receipts.set(`${data.workspaceId}:${data.requestId}`, data); return data; },
-        updateMany:async({where,data}:any)=>{let count=0;for(const [key,row] of receipts)if(queryMistReceipts([row],{where}).length){if(!['mist-revision:agent-connection:','mist-revision:agent-identity:'].some(prefix=>row.requestId.startsWith(prefix)))throw new Error('Business receipts are immutable');receipts.set(key,{...row,...structuredClone(data)});count++;}return{count};},
+        updateMany:async({where,data}:any)=>{let count=0;for(const [key,row] of receipts)if(queryMistReceipts([row],{where}).length){if(!['mist-revision:agent-connection:','mist-revision:agent-identity:','mist-revision:mail-receiving:'].some(prefix=>row.requestId.startsWith(prefix)))throw new Error('Business receipts are immutable');receipts.set(key,{...row,...structuredClone(data)});count++;}return{count};},
       },
       businessSequence: {
         upsert: async ({where,create}:any) => { if(!businessSequences.has(where.id))businessSequences.set(where.id,structuredClone(create));return structuredClone(businessSequences.get(where.id)); },

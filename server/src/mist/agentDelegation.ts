@@ -41,6 +41,8 @@ function deny(message: string, status = 401, code = 'AGENT_DELEGATION_INVALID'):
 const AGENT_ALLOWED_ROUTES: Array<[string, RegExp]> = [
   ['GET', /^\/workspaces\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/agent\/(query|objects\/[^/]+\/[^/]+(\/related)?)\/?$/],
+  ['GET', /^\/workspaces\/[^/]+\/email\/receiving\/?$/],
+  ['GET', /^\/workspaces\/[^/]+\/agent\/mail-receiving\/?$/],
   ['POST', /^\/mcp\/?$/],
   // 无 SSE 流时返回标准 405；不能在委托路由层先误判成越权。
   ['GET', /^\/mcp\/?$/],

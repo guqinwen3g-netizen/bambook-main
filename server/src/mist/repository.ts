@@ -1,5 +1,5 @@
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
-import { EMAIL_SERVER_COMMAND } from '../shared/mistEmail';
+import { EMAIL_SERVER_COMMAND, emailAccountAccessible } from '../shared/mistEmail';
 import { createHash, randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
@@ -22,6 +22,7 @@ import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, comp
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
+import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob } from './mail/receiverRegistry';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit } from './agentAuditRead';
 import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
@@ -182,6 +183,7 @@ export class MistRepository {
     if(archived(row)&&!allowArchived)fail('NOT_FOUND','公司已移入回收站，请先恢复',404);
     if(isAgentActor(prior)&&prior.agentLease)await assertConnection(db,actor,prior.agentLease,Date.now());
     if(isAgentActor(prior)&&prior.agentServiceLease)await assertServiceLease(db,actor,prior.agentServiceLease,Date.now());
+    if((prior as MailSyncActor).mailSyncLease)await assertReceivingLease(db,actor,(prior as MailSyncActor).mailSyncLease!,row,Date.now(),lock);
     if (lock && captureAuditBefore) ORIGINAL_WRITE_STATE.set(row, structuredClone(row.state));
     if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
@@ -498,6 +500,7 @@ export class MistRepository {
       try { return await this.writeTransact(workspaceId, async db => {
         const permission = await permissionFor(db);
         const { actor, row } = await this.own(db, prior, workspaceId, permission, true, false, false, isAgentActor(prior) || !!confirmProposalId || input.command?.type === 'agent.proposal.reject');
+        if(input.command?.type==='email.account.save'){const existing=row.state.email?.accounts.find(a=>a.id===input.command.payload?.id);if(existing?.kind==='shared'&&emailAccountAccessible(existing,actor.userId))await this.authorize(db,prior,'emails:admin');}
         await this.authorizeCompoundCommand(db, prior, input.command);
         if (permission === null && !MEMBER_PERSONAL_COMMANDS.includes(input.command?.type) && !(companyRow(row) ? canMaintainCompany(actor) : isOwner(row, actor))) fail('FORBIDDEN', companyRow(row) ? '公司设置只能由公司管理员修改' : '公司设置只能由所有者修改', 403);
         const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
@@ -823,9 +826,43 @@ export class MistRepository {
       return { actor, revision: row.revision as number, state: projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state };
     });
   }
+  async mailReceivingViews(prior:TokenPayload,workspaceId:string,now=Date.now()) {
+    return this.transact(async db=>{
+      const {actor,row}=await this.own(db,prior,workspaceId,'emails:read');
+      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      return Promise.all((state.email?.accounts??[]).filter(a=>!a.example).map(async account=>{const view=receivingView((await receivingRecord(db,workspaceId,account.id)).value,account,actor,now);return isAgentActor(prior)?{...view,canEnable:false,canDisable:false}:view;}));
+    });
+  }
+  async setMailReceiving(prior:TokenPayload,workspaceId:string,accountId:string,input:Record<string,unknown>,now=Date.now()) {
+    if(isAgentActor(prior)||(prior as MailSyncActor).mailSyncLease||(prior as any).mailReceivingWorker)fail('FORBIDDEN','自动收件须由邮箱接入人本人设置',403);
+    return this.connectionTransaction(async db=>{
+      const {actor,row}=await this.own(db,prior,workspaceId,'emails:write');
+      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      const account=state.email?.accounts.find(a=>a.id===accountId);if(!account)fail('NOT_FOUND','邮箱不存在或无权查看',404);
+      return setReceiving(db,actor,workspaceId,account!,input,now,row.companyId??undefined);
+    });
+  }
+  async claimMailSync(prior:TokenPayload,workspaceId:string,accountId:string,background=false,job?:ReceivingJob,leaseMs=RECEIVE_LEASE_MS,now=Date.now()):Promise<MailSyncActor> {
+    return this.connectionTransaction(async db=>{
+      const {actor,row}=await this.own(db,prior,workspaceId,'emails:write');
+      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      const account=state.email?.accounts.find(a=>a.id===accountId);if(!account)fail('NOT_FOUND','邮箱不存在或无权查看',404);
+      const lease=await claimReceiving(db,actor,workspaceId,account!,now,background,leaseMs,job);
+      return {...prior,mailSyncLease:lease};
+    });
+  }
+  async assertMailSync(prior:MailSyncActor,workspaceId:string){await this.transact(db=>this.own(db,prior,workspaceId,'emails:write'));}
+  async finishMailSync(lease:MailSyncLease,outcome:Parameters<typeof finishReceiving>[2],intervalMs=RECEIVE_INTERVAL_MS,now=Date.now()) {return this.connectionTransaction(db=>finishReceiving(db,lease,outcome,now,intervalMs));}
+  async dueMailReceiving(now=Date.now(),take=2){return this.transact(db=>dueReceiving(db,now,take));}
+  async blockMailReceiving(job:ReceivingJob,problem:{code:string;message:string},now=Date.now()){return this.connectionTransaction(db=>blockReceiving(db,job,problem,now));}
+  async invalidateMailReceiving(prior:TokenPayload,workspaceId:string,accountId:string,now=Date.now()) {
+    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'emails:write');const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;const a=state.email?.accounts.find(a=>a.id===accountId);if(!a||a.ownerId!==actor.userId)fail('FORBIDDEN','只有邮箱接入人可以断开',403);await invalidateReceiving(db,workspaceId,accountId,now);});
+  }
   /** 邮件服务写回真实收发结果：每次读取最新版本作为基线，经同一命令事务（权限、成员、邮箱归属复核）落库。 */
   async executeMail(prior: TokenPayload, workspaceId: string, command: { type: string; payload: Record<string, unknown> }) {
     if (!EMAIL_SERVER_COMMAND.test(command.type) && command.type !== 'email.draft.save') fail('INVALID_COMMAND', '邮件服务命令无效', 400);
+    const lease=(prior as MailSyncActor).mailSyncLease;
+    if(command.type==='email.server.sync'&&(!lease||command.payload.accountId!==lease.accountId)||lease&&command.type!=='email.server.sync')fail('INVALID_COMMAND','收件结果须使用当前同步授权',400);
     for (let attempt = 1; ; attempt++) {
       const { revision: current } = await this.mailSnapshot(prior, workspaceId);
       try { return await this.executeInternal(prior, workspaceId, { requestId: `mail-${randomUUID()}`, expectedRevision: current, command }, { command }); }

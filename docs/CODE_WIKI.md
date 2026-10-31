@@ -82,7 +82,7 @@
 | 委托身份 | 本人短期连接登记于 `mist/agentConnections.ts`；2小时v2凭据绑定账号、公司、工作区、签发权限上限。桌面签发入口须提供工作区与稳定连接编号，旧v1 HTTP授权拒绝 | 续签轮换、撤销持久化、权限不扩大及密码/全设备退出约束已核验 | 原生桌面打包后的完整模型操作链仍须验收 |
 | 敏感操作人工确认 | `agentMcp.ts#agentCommandSensitivity`：资金/账务、人员权限、收款账户、对外发送及 confirm/approve/decide/void/reverse/cancel… 类动词 → 先预演，再记为 Agent 提议；`email.server.*`、`agent.*` 禁止 Agent 直接调用 | 同上 | — |
 | Agent 提议 | `server/src/shared/mistAgentProposals.ts`；首页显示“Agent 提议 · 待确认”，`pages/AgentProposalDialog.tsx` 由本人确认或拒绝 | 同上 | — |
-| Agent 审计 | 落盘：`server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`，与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏。查询（#574）：`agentAuditRead.ts` 按本人/公司审计权限及当前岗位、行级范围裁剪；REST `GET /workspaces/:id/agent-audits[/:requestId]`；MCP 第 8 个工具 `bambook_audit`；账号页「Agent操作记录」`pages/AgentAuditHistory.tsx` | 实施 Agent 在独立本地真实界面切财务/业务员核验本人、公司记录、原始填写与原单回程 | #574 已发布（运行提交 a9a78ee8）。不覆盖所有普通人工写入；历史不倒填 |
+| Agent 审计 | 落盘：`server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`，与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏。查询（#574）：`agentAuditRead.ts` 按本人/公司审计权限及当前岗位、行级范围裁剪；REST `GET /workspaces/:id/agent-audits[/:requestId]`；MCP工具 `bambook_audit`；账号页「Agent操作记录」`pages/AgentAuditHistory.tsx` | 实施 Agent 在独立本地真实界面切财务/业务员核验本人、公司记录、原始填写与原单回程 | #574 已发布（运行提交 a9a78ee8）。不覆盖所有普通人工写入；历史不倒填 |
 | 员工自助连接 | 我的账号 → Agent连接；创建、复制配置、续签、撤销本人连接（`pages/AgentConnections.tsx`） | #578已修复并发布，独立真实界面及官方客户端完整生命周期通过；#577错误版本保持禁发 | 更多实际客户端与原生桌面验收 |
 | 长期Agent服务身份 | 公司管理 → Agent服务，由管理员配置在职责任人；我的账号 → 长期Agent，由责任人本人签发90天密钥。实现：`mist/agentIdentities.ts`、`pages/AgentIdentities.tsx` | #580已发布；权限取签发上限与责任人当前授权交集。换人/改模式/停用使旧密钥失效；轮换、撤销与密码/全设备退出约束已核验。敏感提议交真实责任人确认，服务身份单独留痕 | 该身份不等于已经启动值守进程；不继承或扩大真人权限 |
 | 长值守 Agent | — | — | 长期运行循环未交付 |
@@ -94,10 +94,21 @@
 |---|---|---|
 | 真实收发 | `mist/mail/service.ts`、`transport.ts`：IMAP增量收信、SMTP发信、附件、已发送副本；`credentials.ts`私有保存授权码/密码。页面：`modules/EmailsPage.tsx` | 本次未发送真实客户邮件；真实账号与实际投递须单独验收。示例邮箱不能发真实邮件 |
 | 发送确认与恢复 | 新信、回复、转发先核对；区分服务器接受、明确失败、不确定、部分拒收；同一发送请求幂等，不确定不自动重发 | SMTP接受不等于收件人已读或最终送达；外部退信、实际网络异常仍须按真实服务验收 |
-| 自动收信 | 邮箱页挂载且前台可见时，每分钟检查、达到5分钟间隔后同步 | 尚无独立于网页的持久后台收信任务，关闭/隐藏页面后不能按持续收信宣称可用 |
+| 自动收信 | `mail/receiverRegistry.ts`持久登记、`receiverWorker.ts`后台执行；邮箱接入人本人显式开启，离页/关闭浏览器不停止，正常约5分钟检查；重启续跑、停止与过期租约隔离 | 独立本地TLS协议服务与真实界面已验证离页收件和重启补收；真实客户邮箱、长期运行与更多服务商仍须专项验收 |
 | 邮件状态 | 已读、星标、归档、删除/恢复保存在当前Mist状态；`email.flag` / `email.move` | 当前IMAP传输接口没有远端标记/移动写入，也不回查旧UID的状态变化；双向状态同步未交付 |
 | 智能分类与资料抽取 | 真实新邮件初始 `category.source='none'`、`extracted=[]`；已有资料可经 `email.submitExtraction`转人工复核待办，不直接改正式订单 | 当前Mist收信链没有调用模型分类/抽取。种子中的“AI分类”与抽取结果为预置演示，旧邮件服务实现不能替代当前入口接线 |
 | 登录方式 | 当前 `EmailTransport` 为服务器地址、端口、用户名，凭据接口绑定密码/授权码 | OAuth授权与相应提供方完整接入尚未实现 |
+
+### 6.1.1 自动收件契约（2026-11-01）
+
+- **入口与授权**：`EmailsPage.tsx#AccountsDrawer` → `MailReceiving.tsx` → GET `/workspaces/:id/email/receiving` / PUT `/workspaces/:id/email/accounts/:accountId/receiving`。GET只返回当前可见的非示例邮箱；PUT需要当前`emails:write`和实际接入人，严格接收`enabled/version/sourceGeneration/requestId`。共享设置另需既有`emails:admin`，与历史补录`emails:maintenance:write`不同，不新增默认岗位授权。
+- **持久状态**：在现有`MistCommandReceipt`受保护编号空间`mist-revision:mail-receiving:`保存授权、版本、调度及租约；启停/阻断另有不可变事件回执。没有Schema变更。只扫描收件登记，不遍历未授权工作区的业务JSON。普通业务查询不能读取内部登记或授权原件。UI仅轮询状态，不再承担收信任务。
+- **执行身份**：只由`mist/standalone.ts`启动后台循环；`MIST_MAIL_RECEIVER_ENABLED=0`可停用该进程的调度。每次按原接入人、公司和安全代次重新加载在职/公司/岗位权限，与邮件读取/办理签发上限取交集。普通浏览器会话结束不撤销登记；安全代次变化、接入人失效、权限丢失会阻断，须本人重新开启。断开凭据会停止任务。服务不自动开启既有邮箱。
+- **并发与回程**：手动/后台共用每邮箱持久租约（默认120秒），操作超时90秒；旧进程、已停止或变更来源的任务不能提交。同步提交在业务事务内再次锁定登记并校验当前权限、来源代次和租约。进程重启或崩溃后，未过期租约保留；过期后新进程可续收，旧结果仍被拒绝。
+- **范围与资源**：后台仅补收INBOX，每轮1个UID；积压≤5秒后续，空闲5分钟，临时故障5/10/20/30分钟退避，登录失败阻断。手动同步保留既有文件夹范围。先核对RFC822.SIZE再取有限UID前缀，单次原件总量与实际流均限64MiB，超限关闭连接；不因单封超限跳过游标。空轮询只更新登记，不制造业务版本、事件或邮件重复记录。
+- **幂等与启停**：开启使用当前登记版本和邮箱来源代次；停止允许工作进度已更新的版本。稳定`requestId`与不可变事件防止旧停止请求重放覆盖后来重新开启；响应丢失先GET核对`lastChangeId`，重试原请求。来源/账号切换会丢弃旧界面的响应，不在关闭抽屉时撤销授权。
+- **Agent**：标准MCP新增只读`bambook_mail_receiving({workspaceId})`；桌面同名工具走只读`/agent/mail-receiving`，不返回凭据/内部授权，不能代本人启停。邮箱账号设置命令`email.account.save`始终进入人工确认。官方MCP客户端read/operate两种模式的状态读取、启用拒绝和敏感分级已针对性验证。
+- **SOP文字真源**：[邮箱接入与自动收件](../wiki/sop/mail-receiving.md)。不把本段内部租约细节搬入员工操作界面。双向状态、OAuth与新邮件AI分类/抽取仍未交付。
 
 ### 6.2 平台模型调用与问答回程
 
@@ -126,13 +137,13 @@
 
 ### 当前 MCP 与员工教学入口（2026-10-31）
 
-- Mist标准MCP以 `docs/mist-atelier/work-assistant-plan.md` 第14节和 `server/src/mist/agentMcp.ts` 为准，旧Agent运行时和历史白名单不是当前接口口径。当前7个工具、308条类型化命令目录、24类显式读取对象；预演和执行共用账号权限、行级范围与业务门禁，敏感动作进入本人提议确认。
+- Mist标准MCP以 `docs/mist-atelier/work-assistant-plan.md` 第14节和 `server/src/mist/agentMcp.ts` 为准，旧Agent运行时和历史白名单不是当前接口口径。当前9个工具（含审计与自动收件状态）、类型化命令目录、24类显式读取对象；预演和执行共用账号权限、行级范围与业务门禁，敏感动作进入本人提议确认。
 - 员工从顶栏或账号页「使用手册」打开 `/manual/`。真实界面引导课是 `wiki/lessons/*.json` 与对应采集帧，现有三组27课；`wiki/pages/` 六篇参考说明单列。课程素材齐全、播放器核验、业务流程核验和员工认可分别记录，不互相代替。
 - `scripts/manual-catalog.mjs` 校验结构、坐标、素材与交接引用，并给课程内容摘要。`wiki:check --strict-lessons` 只守结构；课程播放/员工验收及实际采集版本保持独立声明。当前未记录的27课采集软件版本仍为未知。构建输出 `manual-version.json`，实际采集提交与素材Git变更不混用。
 - `scripts/manual-site.ts` 在开发按需提供独立页面，生产把同一快照输出到 `dist/manual/`，不把图片导入业务主脚本。播放器只初始化可见课程，离开后停止动画；图片按课程摘要分版本目录，等待实际加载后播放，失败提供重载，不展示虚假的完成。
 - MCP外部互通：官方客户端2.4.0已在独立本地HTTP和真实Mist界面完成结算提交→财务提议→本人确认→MCP读回。执行必填稳定`requestId`，重试不换编号；敏感提议复用原说明回放，确认后不再次执行。协议只协商已实现版本，认证GET无SSE时回405；具体契约与未覆盖客户端见工作助手方案第14节。
 - Agent审计基础：`agentAudit.ts` 生成脱敏原命令及实际字段差异，`repository.ts` 与原请求同事务追加独立内部审计回执。`mist-revision:agent-audit:<原请求编号>` 沿用旧版已保护的服务端编号空间，普通业务回执不增私有字段，回退也不附带泄漏。普通委托办理及本人确认/拒绝保留来源会话；失败/预演/幂等重放不重复。公开回执防御性剥离 `__agentAudit`，内部编号禁止公开读取或占用；旧记录不补造，查询不能直接返回内部JSON。
-- 未完成：长期API Key/无人值守账号、自助连接/续签与更多实际客户端、Agent审计的当前权限裁剪/查询/页面、后续生产到退税的界面课程、视频导出与员工上手验收。以上缺口由当前接手Agent继续推进，不默认等待其他会话。
+- 当前自助连接/续签/撤销、长期服务身份与密钥、Agent审计查询/页面已分别交付，见第6节。仍待：长期Agent任务执行循环、更多实际客户端、后续业务教学覆盖、视频导出与员工上手验收。HTML教学设计制作由另一Agent负责，Code Wiki与SOP文字由本聊天维护。
 
 ### 发布边界核验：采购币种与扣费月末归属（2026-10-31）
 

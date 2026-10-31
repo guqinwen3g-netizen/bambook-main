@@ -12,13 +12,23 @@ import {createMistLocalRuntime,mistLocalRequested,assertMistLocalMode,type MistL
 import {MistRepository,type MistContract} from './repository';
 import {MistPrivateFiles} from './files';
 import type {MailTransport} from './mail/transport';
+import { MistMailService } from './mail/service';
+import { MistMailCredentials } from './mail/credentials';
+import { MistMailReceiver, type MailReceiverOptions } from './mail/receiverWorker';
 import * as mistContract from '../shared/mistWorkspace';
 import { AGENT_DELEGATION_HEADER } from './agentDelegation';
-export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport}={}) {
+export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number}}={}) {
   const app = express(); app.disable('x-powered-by');
   const host=options.host??process.env.MIST_HOST??'127.0.0.1';
   const local=options.local??(mistLocalRequested()?createMistLocalRuntime({host}):undefined);
   if(local)assertMistLocalMode(host);
+  const mailRuntime=(repository:MistRepository)=>{
+    const credentials=new MistMailCredentials(process.env.MIST_MAIL_CREDENTIAL_DIR||(local?path.join(local.database.directory,'mail-credentials'):path.resolve(__dirname,'../../private/mist-mail-credentials')));
+    const mail=new MistMailService(repository,credentials,options.mailTransport,process.env,()=>new Date(),options.mailReceive);
+    const mailReceiver=new MistMailReceiver(repository,mail,{...options.mailReceive,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-receiver]',code)});
+    app.locals.mailReceiver=mailReceiver;
+    return{mail,mailReceiver};
+  };
   const configured = new Set((local?'':process.env.MIST_CORS_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
   app.use((req, res, next) => cors({ credentials: true, origin(origin, callback) {
     const requestHost = String(req.headers.host ?? '');
@@ -39,7 +49,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     });
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
     const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize);
-    app.use('/api/mist',createMistRouter({repository,mailTransport:options.mailTransport,mailCredentialsRoot:process.env.MIST_MAIL_CREDENTIAL_DIR||path.join(local.database.directory,'mail-credentials'),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
+    app.use('/api/mist',createMistRouter({repository,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
@@ -47,7 +57,9 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     // The local-identity session exists only in local mode. Answer 404 before authentication so the web app
     // detects server-account mode and shows sign-in (a 401 here made it fall back to the local-workspace screen).
     app.all('/api/mist/session', (_req, res) => { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Local workspace session is not available on this server' } }); });
-    app.use('/api/mist', createMistRouter({ prisma,mailTransport:options.mailTransport,contract:mistContract as MistContract, filesRoot: process.env.MIST_FILES_DIR || path.resolve(__dirname, '../../private/mist-files') }));
+    const filesRoot=process.env.MIST_FILES_DIR||path.resolve(__dirname,'../../private/mist-files');
+    const repository=new MistRepository(prisma,mistContract as MistContract,new MistPrivateFiles(filesRoot));
+    app.use('/api/mist', createMistRouter({ prisma,repository,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
   }
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const tooLarge = error?.type === 'entity.too.large';

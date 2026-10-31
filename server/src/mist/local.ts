@@ -1,3 +1,4 @@
+import { RECEIVING_PREFIX, RECEIVING_HASH } from './mail/receiverRegistry';
 import {constants,promises as fs} from 'node:fs';
 import path from 'node:path';
 import {createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
@@ -46,9 +47,9 @@ export class MistLocalDatabase{
     },
     mistCommandReceipt:{
       findUnique:async({where}:any)=>{const pair=where.workspaceId_requestId;if(!pair)invalid('本地回执查询无效',500);return clone(store.receipts[JSON.stringify([pair.workspaceId,pair.requestId])]??null);},
-      findMany:async(args:any)=>{if(typeof args.where?.workspaceId!=='string')invalid('本地回执查询无效',500);return queryMistReceipts(Object.values(store.receipts),args);},
+      findMany:async(args:any)=>{if(typeof args.where?.workspaceId!=='string'&&!(args.where?.inputHash===RECEIVING_HASH&&args.where?.requestId?.startsWith===RECEIVING_PREFIX))invalid('本地回执查询无效',500);return queryMistReceipts(Object.values(store.receipts),args);},
       create:async({data}:any)=>{const key=JSON.stringify([data.workspaceId,data.requestId]);if(store.receipts[key]||Object.values(store.receipts).some(row=>row.id===data.id))duplicate();store.receipts[key]=clone(data);return clone(data);},
-      updateMany:async({where,data}:any)=>{let count=0;for(const [key,row] of Object.entries(store.receipts))if(queryMistReceipts([row],{where}).length){if(!['mist-revision:agent-connection:','mist-revision:agent-identity:'].some(prefix=>row.requestId.startsWith(prefix)))invalid('业务回执不可修改',500);store.receipts[key]={...row,...clone(data)};count++;}return{count};},
+      updateMany:async({where,data}:any)=>{let count=0;for(const [key,row] of Object.entries(store.receipts))if(queryMistReceipts([row],{where}).length){if(!['mist-revision:agent-connection:','mist-revision:agent-identity:',RECEIVING_PREFIX].some(prefix=>row.requestId.startsWith(prefix)))invalid('业务回执不可修改',500);store.receipts[key]={...row,...clone(data)};count++;}return{count};},
     },
     businessSequence:{
       findUnique:async({where,select}:any)=>selected(store.businessSequences[where.id]??null,select),
