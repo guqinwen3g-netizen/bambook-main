@@ -108,5 +108,13 @@
   "nextLesson": {
     "id": "tutorial-bill-register",
     "title": "按结算登记供应商票据"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:37:57.360Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "9a9ae2bdcfcf5885854920fd8f300dd0453618388ee762ca105de39d46ffdc93"
+    }
   }
 }

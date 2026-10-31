@@ -80,5 +80,13 @@
   "nextLesson": {
     "id": "tutorial-quote-send",
     "title": "生成并发送正式报价单"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:35:40.940Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "8ecb930a0339b2e86e3d8e9a369c6fbe38122a314a10c140009e6bfbebd38b48"
+    }
   }
 }

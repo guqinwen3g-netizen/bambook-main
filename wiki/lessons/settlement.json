@@ -139,9 +139,9 @@
   "verification": {
     "playback": {
       "status": "passed",
-      "checkedAt": "2026-10-31T12:08:55.579Z",
-      "softwareCommit": "988d6efe635022b16766e58d207c5ac30fdd7e63",
-      "contentSha256": "0ca053773ecb1c46ca968232ba7e71a19ab993a0bd99af1a9c2625fe96443f52"
+      "checkedAt": "2026-10-31T13:38:53.702Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "7f0423230174099b9c4e6e91c84f371776f012ae70a0e5cfaa494397ae1d241a"
     }
   }
 }
