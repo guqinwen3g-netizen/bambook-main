@@ -76,11 +76,11 @@
 |---|---|---|---|
 | 平台 AI「小竹 · 业务问答」 | `assistant` 页平台分区（`modules/PlatformPages.tsx#AssistantPage`）；`POST /workspaces/:id/assistant`，只读，需 owner 与 `ai:chat`；模型配置见 `server/src/mist/README.md` | 未在本页登记员工可用的实测结果；2026-10-13 实测模型端点因订阅到期报错（已改为明确错误） | 模型可用性须按部署环境核对，不能写成员工当前可用 |
 | 桌面工作助手（本机 Agent） | `assistant?section=work`（`modules/WorkAssistantPage.tsx`），仅 Electron 桌面端；运行在 `electron/assistant/`（`host.ts`、`harness.ts`、`bambookTools.ts`），页面用本人会话续签短期委托（`useAssistantDelegation.ts`） | — | 员工上手教学待能力验收后补 |
-| 外部 MCP / 本地 Agent API | `POST /api/mist/mcp`（`server/src/mist/agentMcp.ts`）；7 个工具 `bambook_workspaces/query/get/related/commands/preview/execute`；24 类读取对象（`agentRead.ts`）；契约见 [`work-assistant-plan.md` §14](mist-atelier/work-assistant-plan.md) | 实施 Agent 用官方 MCP 客户端 2.4.0 在独立本地演示走通“采购结算提交 → 财务提议 → 本人确认 → 读取结果”，并经委托走通报价→订单、订单→生产/QC、付款链（本地演示种子）。不代表所有客户端或业务已验收 | 长期 API Key、无人值守账号、自助连接与续签、更多实际客户端 |
+| 外部 MCP / 本地 Agent API | `POST /api/mist/mcp`（`server/src/mist/agentMcp.ts`）；8 个工具 `bambook_workspaces/query/get/related/commands/preview/execute/audit`（`bambook_audit` 随 #574 合入）；24 类读取对象（`agentRead.ts`）；契约见 [`work-assistant-plan.md` §14](mist-atelier/work-assistant-plan.md) | 实施 Agent 用官方 MCP 客户端 2.4.0 在独立本地演示走通“采购结算提交 → 财务提议 → 本人确认 → 读取结果”，并经委托走通报价→订单、订单→生产/QC、付款链（本地演示种子）。不代表所有客户端或业务已验收 | 长期 API Key、无人值守账号、自助连接与续签、更多实际客户端 |
 | 委托身份 | `POST /api/mist/agent/delegations`（`agentDelegation.ts`）：本人会话签发 2 小时委托；`read` 只读，`operate` 上限 = 账号现有权限（`AGENT_OPERATE_CEILING`），不超出账号 | 同上 | — |
 | 敏感操作人工确认 | `agentMcp.ts#agentCommandSensitivity`：资金/账务、人员权限、收款账户、对外发送及 confirm/approve/decide/void/reverse/cancel… 类动词 → 先预演，再记为 Agent 提议；`email.server.*`、`agent.*` 禁止 Agent 直接调用 | 同上 | — |
 | Agent 提议 | `server/src/shared/mistAgentProposals.ts`；首页显示“Agent 提议 · 待确认”，`pages/AgentProposalDialog.tsx` 由本人确认或拒绝 | 同上 | — |
-| Agent 审计 | `server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`：与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏 | 持久化基础已合入（#573） | 按当前权限查询、第 8 个 MCP 工具、账号页操作记录**未发布**，不得写成员工可查 |
+| Agent 审计 | 落盘：`server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`，与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏。查询（#574）：`agentAuditRead.ts` 按本人/公司审计权限及当前岗位、行级范围裁剪；REST `GET /workspaces/:id/agent-audits[/:requestId]`；MCP 第 8 个工具 `bambook_audit`；账号页「Agent操作记录」`pages/AgentAuditHistory.tsx` | 实施 Agent 在独立本地真实界面切财务/业务员核验本人、公司记录、原始填写与原单回程 | #574 合入时尚未部署发布；未发布前不写成员工可用。不覆盖所有普通人工写入；历史不倒填 |
 | 长值守 Agent | — | — | 长期运行循环未交付 |
 | 文件类操作 | 须上传原件的票据（如增值税专票）Agent 不能上传，预演即被拒 | 同上 | — |
 

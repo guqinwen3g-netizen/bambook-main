@@ -2209,7 +2209,7 @@
    "commands": [],
    "impl": "source",
    "lessons": [],
-   "note": "7 个工具、308 条命令、24 类读取对象；委托令牌需人工签发"
+   "note": "合入后 8 个工具（新增 bambook_audit）、308 条命令、24 类读取对象；委托令牌需本人签发"
   },
   {
    "id": "agent-audit-query",
@@ -2225,9 +2225,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "missing",
+   "impl": "source",
    "lessons": [],
-   "note": "审计持久化已合入（#573）；查询、第 8 个 MCP 工具、账号页记录未发布"
+   "note": "#574 已合入 main（账号页「Agent操作记录」、REST 与 bambook_audit）；实施 Agent 已在本地真实界面核验；发布前不得写成员工当前可用"
   },
   {
    "id": "agent-self-connect",

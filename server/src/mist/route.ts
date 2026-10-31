@@ -208,6 +208,8 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.post('/workspaces/:id/email/sends/:sendId/retry', mailCall(req => mail.retry(actor(req), req.params.id, req.params.sendId, exactBody(req.body ?? {}, ['confirmUnknown']).confirmUnknown)));
   router.post('/workspaces/:id/email/sends/:sendId/verify', mailCall(req => { exactBody(req.body ?? {}, []); return mail.verify(actor(req), req.params.id, req.params.sendId); }));
   router.get('/workspaces/:id/receipts/:requestId', run(async (req, res) => { res.json({ receipt: await repository.receipt(actor(req), req.params.id, req.params.requestId) }); }));
+  router.get('/workspaces/:id/agent-audits', run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentAudits(actor(req),req.params.id,req.query as any));}));
+  router.get('/workspaces/:id/agent-audits/:requestId', run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentAudit(actor(req),req.params.id,req.params.requestId,req.query as any));}));
   router.get('/workspaces/:id/credits/:creditId/versions/:versionId/preview.pdf', run(async (req, res) => {
     const document = await repository.previewCreditDocument(actor(req), req.params.id, req.params.creditId, req.params.versionId);
     res.setHeader('Cache-Control', 'private, no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');

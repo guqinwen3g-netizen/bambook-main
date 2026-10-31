@@ -274,4 +274,6 @@ it('renders only whitelisted business references as links back to the original r
   for (const bad of ['bambook://open?view=crm&id=1&x=2', 'bambook://open?view=crm&view=orders/detail&id=1', 'bambook://evil?view=crm&id=1', 'bambook://open/x?view=crm&id=1', 'bambook://open?view=crm&id=%0a1', 'bambook://open?view=crm&id=+'])
     expect(parseBusinessLink(bad)).toBeNull();
   expect(parseBusinessLink('bambook://open?view=crm&id=c-9')).toEqual({ view: 'crm', id: 'c-9' });
+  expect(parseBusinessLink('bambook://open?view=payment-vouchers&id=st-1&section=payables')).toEqual({view:'payment-vouchers',id:'st-1',section:'payables'});
+  for(const invalid of ['bambook://open?view=payment-vouchers&id=st-1','bambook://open?view=payment-vouchers&id=st-1&section=accounts','bambook://open?view=payment-vouchers&id=st-1&section=payables&section=payables','bambook://open?view=crm&id=c-9&section=payables'])expect(parseBusinessLink(invalid)).toBeNull();
 });
