@@ -74,7 +74,7 @@
 
 | 能力 | 当前实现 | 已验证范围 | 未完成 |
 |---|---|---|---|
-| 平台 AI「小竹 · 业务问答」 | `modules/PlatformPages.tsx#AssistantPage` → `POST /workspaces/:id/assistant` → `mist/assistant.ts`；只读，业务来源限当前权限下的订单、发票、风险；无业务写工具 | 模型配置与实际回答分别核实：2026-10-31同部署启动配置的空业务模型调用返回502，尚未通过可用性复核。公司成员及 `ai:chat` 在仓储先校验，但执行函数仍检查库所有者，独立财务成员提问403已复现 | 恢复实际模型调用、修复普通成员门禁；补足业务来源与跨岗位验收。保存授权或配置存在不等于可用 |
+| 平台 AI「小竹 · 业务问答」 | `modules/PlatformPages.tsx#AssistantPage` → `POST /workspaces/:id/assistant` → `mist/assistant.ts`；只读，来源限当前授权的订单、发票、风险。公司成员使用仓储校验后的访问投影，不以库创建人代替权限判断 | 普通成员、跨公司拒绝、权限收回已覆盖；独立模拟财务/业务员从真实界面通过实际平台模型回答，引用发票金额/币种及来源往返已核对。发布以GO-LIVE与固定提交部署状态为准 | 更多业务来源、完整岗位链及真实员工验收；问答不办理业务命令 |
 | 报价成本 AI 审阅 | `POST /workspaces/:id/quotation-cost-advisor` → `mist/quoteCostAdvisor.ts`，使用 `quote-review` 模型档位；成本/价格公式仍由服务器计算，模型仅给依据、风险、问题与待审策略 | 当前调用链已接入平台模型，单元验证使用替身网络；共享问答执行层的所有者判断须一并复核 | 各岗位真实界面与实际模型完整验收；不得把建议写成审批或客户接受 |
 | 平台模型与固定流程 | `ai/platformProviders.ts`、`ai/codexSubscription.ts`、`ai/llmProviders.ts`；平台管理员配置API/订阅、排序回退，个人订阅不参与平台AI | `platformModel.ts` 的 `summary` / `reconciliation` 是模型档位配置 | 档位名称不代表自动汇总、邮件识别、财务对账等业务流程已经接线；须按当前Mist入口逐项核验 |
 | 桌面工作助手（本机 Agent） | `assistant?section=work`（`modules/WorkAssistantPage.tsx`），仅 Electron 桌面端；运行在 `electron/assistant/`（`host.ts`、`harness.ts`、`bambookTools.ts`），页面用本人会话续签短期委托（`useAssistantDelegation.ts`） | — | 员工上手教学待能力验收后补 |
@@ -98,6 +98,14 @@
 | 邮件状态 | 已读、星标、归档、删除/恢复保存在当前Mist状态；`email.flag` / `email.move` | 当前IMAP传输接口没有远端标记/移动写入，也不回查旧UID的状态变化；双向状态同步未交付 |
 | 智能分类与资料抽取 | 真实新邮件初始 `category.source='none'`、`extracted=[]`；已有资料可经 `email.submitExtraction`转人工复核待办，不直接改正式订单 | 当前Mist收信链没有调用模型分类/抽取。种子中的“AI分类”与抽取结果为预置演示，旧邮件服务实现不能替代当前入口接线 |
 | 登录方式 | 当前 `EmailTransport` 为服务器地址、端口、用户名，凭据接口绑定密码/授权码 | OAuth授权与相应提供方完整接入尚未实现 |
+
+### 6.2 平台模型调用与问答回程
+
+- **授权链**：`repository.ts#getForAssistant` 在当前事务重新校验公司成员与 `ai:chat`，并复用岗位和行级数据投影。`runMistAssistant` 接收这个服务端视图；HTTP请求只能提供问题、有限历史和来源编号，不能提供执行身份或访问说明。无服务端访问投影的独立调用保留所有者校验。报价成本审阅继续保留其管理授权条件，不随问答修复扩权。
+- **401与刷新**：`ai/outboundProxy.ts#aiFetch` 使用显式Authorization并设置 `credentials:'omit'`，不进入浏览器凭据协商。当前固定Undici版本在默认凭据模式下会把401挑战变成无原因网络错误；保留原401后，`codexSubscription.ts#complete/fresh`才能执行既有授权刷新。真实HTTP CONNECT回归验证响应与Bearer头，不能仅用替身fetch判断此层正确。
+- **对话边界**：`runtime/assistantConversation.tsx` 由 `MistWorkspaceProvider` 托管当前会话和公司内存；来源导航不再丢失回答、引用与未发送问题，切换会话或公司立即清空。最多保留40条消息，不写浏览器持久存储；停止、失败或离开页面仍取消在途请求，迟到回答不得进入新身份。
+- **运维验证**：模型探测使用实际服务UID/GID与相同启动配置，输入独立合成资料，不查询公司业务库。会触发授权刷新的程序不能用root身份直接运行，避免原子写入生成服务账号不可读的凭据；凭据文件保持服务账号归属与0600，目录0700。只回传结果、错误分类和耗时，不回传令牌或完整上游错误。
+- **员工文字入口**：[小竹业务问答SOP](../wiki/sop/platform-ai.md)。HTML教学制作据已核实的步骤和范围呈现，不把其他AI流程当成问答已经具备的能力。
 
 ## 7. 员工教学体系
 

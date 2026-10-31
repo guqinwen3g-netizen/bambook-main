@@ -139,6 +139,17 @@ function fixture() {
 }
 afterEach(() => vi.unstubAllGlobals());
 describe("quote cost AI advisory boundary", () => {
+  it("allows an authorized company manager without requiring the storage creator identity", async () => {
+    const f = fixture();
+    f.actor.userId = "company-manager";
+    f.workspace.access = { role: "member", canManageMembers: false, canManageCompany: true, hidden: [] };
+    const before = JSON.stringify(f.workspace.state);
+    const result = await runQuoteCostAdvisor(f, f.deps);
+    expect(result.mode).toBe("read_only");
+    expect(f.complete).toHaveBeenCalledOnce();
+    expect(JSON.stringify(f.workspace.state)).toBe(before);
+  });
+
   it("recomputes price deterministically and never mutates business state", async () => {
     const f = fixture(),
       before = JSON.stringify(f.workspace);

@@ -1,3 +1,4 @@
+import { AssistantConversationProvider } from '../../runtime/assistantConversation';
 // @vitest-environment jsdom
 import React, {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
@@ -10,8 +11,28 @@ vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>mock.workspace}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({sessionKey:mock.sessionKey,user:{id:'actor'},hasPermission:(scope:string)=>scope!=='orders:read'||mock.readOrders}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 vi.mock('../../../../../services/apiService',()=>({apiService:{getAuthHeaders:()=>({'X-Test-Auth':'authenticated'})}}));
 let root:Root|undefined,host:HTMLDivElement;const go=vi.fn();
-const view=()=> <Nav.Provider value={{route:{view:'assistant'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantPage/></Nav.Provider>;
+const view=(active=true)=> <Nav.Provider value={{route:{view:'assistant'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><AssistantConversationProvider scope={mock.sessionKey+':'+(mock.workspace.workspace?.id??'')}>{active?<AssistantPage/>:<div>Source record</div>}</AssistantConversationProvider></Nav.Provider>;
 const response=(body:unknown,ok=true)=>({ok,json:async()=>body});
+
+it('retains the answer, references and an unfinished question when returning from a source page',async()=>{
+  mock.fetch.mockImplementation(async(url:string)=>response(url.endsWith('/status')?{configured:true,models:['test-model']}:{text:'Answer to retain',mode:'read_only',revision:1,sources:[{id:'orders:order',label:'SO-SELECTED',view:'orders/detail',entityId:'order'}]}));
+  await mount(); await click('引用业务记录'); await click('加入问题'); await question('First question'); await click('发送');
+  await question('Unfinished follow-up');
+  await act(async()=>root!.render(view(false)));
+  await act(async()=>root!.render(view(true)));
+  expect(host.textContent).toContain('Answer to retain');
+  expect(host.textContent).toContain('SO-SELECTED');
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Unfinished follow-up');
+});
+
+it('clears retained conversation when the authenticated session changes outside the assistant page',async()=>{
+  mock.fetch.mockResolvedValue(response({configured:true,models:['test-model']}));
+  await mount(); await question('Private account-A question');
+  await act(async()=>root!.render(view(false))); mock.sessionKey='session-b';
+  await act(async()=>root!.render(view(false))); await act(async()=>root!.render(view(true)));
+  expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
+  expect(host.textContent).not.toContain('Private account-A question');
+});
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;let i=0;const state=createMistState({id:()=>`assistant-ui-${++i}`,now:'2026-10-13T00:00:00Z',actorName:'Test'},'empty');state.orders.push({id:'order',code:'SO-SELECTED',customer:'Fixture',state:'Open',amount:10,currency:'USD'} as any);mock.workspace={state,workspace:{id:'workspace',name:'Test workspace',revision:1},error:'',loading:false,saving:false,pending:null,refresh:vi.fn(),run:vi.fn()};mock.sessionKey='session-a';mock.readOrders=true;go.mockReset();mock.fetch.mockReset();vi.stubGlobal('fetch',mock.fetch);});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;host?.remove();vi.unstubAllGlobals();});
 async function mount(){host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(view()));}

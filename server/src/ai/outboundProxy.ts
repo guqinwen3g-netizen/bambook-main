@@ -32,6 +32,10 @@ function agentFor(proxy: string): ProxyAgent {
 export function aiFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
   const proxy = aiProxyUrl();
-  if (!proxy || !needsAiProxy(url)) return fetch(input, init);
-  return undiciFetch(url, { ...(init as any), dispatcher: agentFor(proxy) }) as unknown as Promise<Response>;
+  // Server-side providers use explicit Authorization headers, never browser credentials.
+  // Undici7 otherwise turns a401 challenge into an opaque network error, preventing
+  // the subscription client from observing401 and refreshing its access token.
+  const request: RequestInit = { ...init, credentials: 'omit' };
+  if (!proxy || !needsAiProxy(url)) return fetch(input, request);
+  return undiciFetch(url, { ...(request as any), dispatcher: agentFor(proxy) }) as unknown as Promise<Response>;
 }
