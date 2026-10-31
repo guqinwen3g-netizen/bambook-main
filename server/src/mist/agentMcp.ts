@@ -14,6 +14,7 @@ import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_OBJECT_TYPES, agentGet, agentQuery, agentRelated } from './agentRead';
 
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
+export const MCP_PROTOCOL_VERSIONS: readonly string[] = ['2025-06-18', '2025-03-26'];
 type CatalogEntry = (typeof MIST_COMMAND_CATALOG)[number];
 const COMMANDS = new Map<string, CatalogEntry>(MIST_COMMAND_CATALOG.map(entry => [entry.type, entry]));
 
@@ -36,7 +37,7 @@ export type McpRepository = {
   getForAgent(actor: TokenPayload, id: string): Promise<{ workspace: { id: string; name: string; revision: number; state: MistState }; actor: TokenPayload }>;
   preview(actor: TokenPayload, id: string, input: { requestId: string; expectedRevision: number; command: { type: string; payload: Record<string, unknown> } }): Promise<unknown>;
   execute(actor: TokenPayload, id: string, input: { requestId: string; expectedRevision: number; command: { type: string; payload: Record<string, unknown> } }): Promise<{ receipt: unknown; replayed?: boolean }>;
-  receipt(actor: TokenPayload, id: string, requestId: string): Promise<{ expectedRevision: number }>;
+  receipt(actor: TokenPayload, id: string, requestId: string): Promise<{ expectedRevision: number; result?: { id?: unknown } }>;
 };
 
 const str = (description: string) => ({ type: 'string', description });
@@ -48,7 +49,7 @@ const TOOLS = [
   { name: 'bambook_related', description: '展开一个业务对象的关联对象（如合同的收货、结算、票据）。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, id: str('对象 id') }, required: ['workspaceId', 'type', 'id'] }, annotations: { readOnlyHint: true } },
   { name: 'bambook_commands', description: '列出可用的业务命令、payload 结构，以及是否须本人确认（confirm）。', inputSchema: { type: 'object', properties: { prefix: str('按命令前缀筛选，如 payable. 或 fulfillment.；带前缀时附上 payload 引用的类型定义（types）') } }, annotations: { readOnlyHint: true } },
   { name: 'bambook_preview', description: '预演一条命令：执行全部权限与业务校验后回滚，返回将产生的结果和业务事件，不保存任何数据。执行前先预演。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema }, required: ['workspaceId', 'command'] }, annotations: { readOnlyHint: true } },
-  { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, requestId: str('幂等请求编号，可选；同一编号重复调用只执行一次') }, required: ['workspaceId', 'command'] }, annotations: { destructiveHint: false, idempotentHint: true } },
+  { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。每项操作生成一个 requestId，超时重试沿用原编号。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, requestId: { ...str('幂等请求编号；同一操作重试必须沿用，新的操作须用新编号'), minLength: 1, maxLength: 116 } }, required: ['workspaceId', 'command', 'requestId'] }, annotations: { destructiveHint: true, idempotentHint: true } },
 ];
 
 class ToolInputError extends Error {}
@@ -77,15 +78,23 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
       if (via === 'blocked') throw new ToolInputError(`${command.type} 不能经接口执行`);
       const { workspace } = await repository.getForAgent(actor, workspaceId);
       if (name === 'bambook_preview') return { via, ...(await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: workspace.revision, command }) as object) };
-      const requestId = typeof args.requestId === 'string' && args.requestId ? `mcp-${args.requestId}` : `mcp-${randomUUID()}`;
+      const operationId = args.requestId;
+      if (typeof operationId !== 'string' || !operationId.trim() || operationId !== operationId.trim() || operationId.length > 116) throw new ToolInputError('执行需要 1–116 字的 requestId；同一操作重试请沿用原编号');
+      const requestId = `mcp-${operationId}`;
       // 重试同一请求编号时沿用原版本号：相同命令按原回执重放，不同命令仍被拒绝。
       const prior = await repository.receipt(actor, workspaceId, requestId).catch(() => null);
       if (via === 'confirm') {
         // 高敏感命令：先按 Agent 身份完整预演（不合规的不提交），再记为提议，等本人在「接着完成」里确认执行。
         const preview = prior ? null : await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: workspace.revision, command }) as { events?: string[] };
-        const summary = preview?.events?.length ? preview.events.slice(0, 10) : [`执行 ${command.type}`];
+        // 重试必须沿用原提议说明；换成通用文字会改变请求哈希，让同一编号误报冲突。
+        // 仅在当前本人可见的提议中查找，不因重试重新提交或再次执行已确认的业务。
+        const original = prior ? workspace.state.agentProposals?.find(item => item.id === prior.result?.id && item.ownerId === actor.userId) : undefined;
+        if (prior && !original) throw new ToolInputError('请求编号已用于另一项操作，不能重复使用');
+        const summary = original ? original.summary : preview?.events?.length ? preview.events.slice(0, 10) : [`执行 ${command.type}`];
         const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : workspace.revision, command: { type: 'agent.proposal.create', payload: { command, summary } } });
-        return { status: 'awaiting_confirmation', message: '已提交给用户确认：用户在「接着完成」里确认后才会执行。', summary, receipt, replayed: !!replayed };
+        const status = original?.state === 'confirmed' ? 'confirmed' : original?.state === 'rejected' ? 'rejected' : 'awaiting_confirmation';
+        const message = status === 'confirmed' ? '此提议已由本人确认执行，本次只回放原回执。' : status === 'rejected' ? '此提议已被本人拒绝，本次没有执行。' : '已提交给用户确认：用户在「接着完成」里确认后才会执行。';
+        return { status, message, summary, receipt, replayed: !!replayed };
       }
       const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : workspace.revision, command });
       return { receipt, replayed: !!replayed };
@@ -103,7 +112,7 @@ export async function handleMcpMessage(repository: McpRepository, actor: TokenPa
   const { id, method } = message, params = (message.params && typeof message.params === 'object' ? message.params : {}) as Record<string, unknown>;
   if (id === undefined) return null;
   switch (method) {
-    case 'initialize': return { jsonrpc: '2.0', id, result: { protocolVersion: typeof params.protocolVersion === 'string' ? params.protocolVersion : MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'bambook-mist', version: '1' },
+    case 'initialize': return { jsonrpc: '2.0', id, result: { protocolVersion: typeof params.protocolVersion === 'string' && MCP_PROTOCOL_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'bambook-mist', version: '1' },
       instructions: '先用 bambook_workspaces 取得工作区，再查询；写入前先 bambook_preview。确认、删除、资金、对外发送类命令执行后只会成为提议，请告诉用户到「接着完成」里确认。' } };
     case 'ping': return { jsonrpc: '2.0', id, result: {} };
     case 'tools/list': return { jsonrpc: '2.0', id, result: { tools: TOOLS } };

@@ -18,7 +18,7 @@ import { platformProfileList } from '../ai/platformModel';
 import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
 import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
-import { handleMcpMessage, type McpRepository } from './agentMcp';
+import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, type McpRepository } from './agentMcp';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
 import { MistMailService } from './mail/service';
@@ -144,13 +144,19 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     res.status(201).json({ delegation: issued, readable: agentCatalog({ ...current, permissionCeiling: issued.ceiling }) });
   }));
   // 标准 MCP 接口（JSON-RPC）：读取、命令目录、预演与执行普通命令；高敏感命令须本人在系统中确认。
+  const checkMcpProtocol = (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'private, no-store');
+    const protocol = req.headers['mcp-protocol-version'];
+    if (protocol !== undefined && (typeof protocol !== 'string' || !MCP_PROTOCOL_VERSIONS.includes(protocol))) fail('MCP_PROTOCOL_UNSUPPORTED', '不支持该 MCP 协议版本，请重新连接', 400);
+  };
   router.post('/mcp', run(async (req, res) => {
+    checkMcpProtocol(req, res);
     const describe = (error: any) => error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500) ? String(error.message) : '操作未完成，请稍后重试';
     const reply = await handleMcpMessage(repository as unknown as McpRepository, actor(req), req.body, describe);
     if (reply === null) { res.status(202).end(); return; }
     res.json(reply);
   }));
-  router.get('/mcp', (_req, res) => { res.status(405).set('Allow', 'POST').end(); });
+  router.get('/mcp', run(async (req, res) => { checkMcpProtocol(req, res); res.status(405).set('Allow', 'POST').end(); }));
   router.get('/workspaces/:id/agent/query', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
     res.json({ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, ...agentQuery(workspace.state, current, { type: req.query.type, q: req.query.q, limit: req.query.limit }) });

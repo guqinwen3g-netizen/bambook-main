@@ -22,7 +22,7 @@ async function as(app: any, profileId: string, mode: 'read' | 'operate' = 'opera
   const token = (await client.post('/api/mist/agent/delegations').send({ mode }).expect(201)).body.delegation.token as string;
   let id = 0;
   const rpc = async (method: string, params: Record<string, unknown> = {}) => (await request(app).post('/api/mist/mcp').set(HEADER, token).send({ jsonrpc: '2.0', id: ++id, method, params }).expect(200)).body;
-  const tool = async (name: string, args: Record<string, unknown> = {}) => (await rpc('tools/call', { name, arguments: args })).result;
+  const tool = async (name: string, args: Record<string, unknown> = {}) => (await rpc('tools/call', { name, arguments: name === 'bambook_execute' ? { requestId: `test-${++id}`, ...args } : args })).result;
   return { client, workspace, token, rpc, tool };
 }
 const purchase = (ws: any, code: string) => ws.state.fulfillment.purchases.find((p: any) => p.code === code);
@@ -37,7 +37,25 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     await request(app).post('/api/mist/mcp').set(HEADER, token).send({ jsonrpc: '2.0', method: 'notifications/initialized' }).expect(202);
     expect((await rpc('resources/list')).error.code).toBe(-32601);
     await request(app).post('/api/mist/mcp').send({ jsonrpc: '2.0', id: 1, method: 'ping' }).expect(401);
-    await request(app).get('/api/mist/mcp').set(HEADER, token).expect(403);
+    await request(app).get('/api/mist/mcp').set(HEADER, token).expect(405);
+  });
+
+  it('rejects missing or invalid operation IDs before writing and rejects reusing an ID for different input', async () => {
+    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const { client, workspace, rpc, tool } = await as(app, 'demo-buyer');
+    const po = purchase(workspace, 'PO-2026-00001'), receipt = workspace.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
+    const command = { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id] } };
+    for (const requestId of [undefined, '', ' padded ', 'x'.repeat(117), 1]) {
+      const result = (await rpc('tools/call', { name: 'bambook_execute', arguments: { workspaceId: workspace.id, command, requestId } })).result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('requestId');
+    }
+    expect((await client.get('/api/mist/workspaces/' + workspace.id)).body.workspace.revision).toBe(workspace.revision);
+    expect((await tool('bambook_execute', { workspaceId: workspace.id, command, requestId: 'once' })).isError).not.toBe(true);
+    const conflict = await tool('bambook_execute', { workspaceId: workspace.id, requestId: 'once', command: { ...command, payload: { ...command.payload, note: 'different operation' } } });
+    expect(conflict.isError).toBe(true);
+    expect(conflict.content[0].text).toContain('请求编号');
+    expect((await client.get('/api/mist/workspaces/' + workspace.id)).body.workspace.state.payables.settlements).toHaveLength(1);
   });
 
   it('buyer agent previews then submits a settlement on actual receipts; the write is audited as via Agent and replays idempotently', async () => {
@@ -78,9 +96,13 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const settlement = (await read(finance.client)).state.payables.settlements[0];
     const confirm = { type: 'payable.settlement.confirm', payload: { id: settlement.id, prepaymentApplied: 0, note: '核对一致' } };
     expect((await finance.tool('bambook_preview', { workspaceId: finance.workspace.id, command: confirm })).structuredContent.via).toBe('confirm');
-    const proposed = (await finance.tool('bambook_execute', { workspaceId: finance.workspace.id, command: confirm })).structuredContent;
+    const confirmArgs = { workspaceId: finance.workspace.id, command: confirm, requestId: 'finance-confirm-once' };
+    const proposed = (await finance.tool('bambook_execute', confirmArgs)).structuredContent;
     expect(proposed).toMatchObject({ status: 'awaiting_confirmation' });
     expect(proposed.summary.join('')).toContain('ST-2026-0001');
+    const retriedProposal = await finance.tool('bambook_execute', confirmArgs);
+    expect(retriedProposal.isError).not.toBe(true);
+    expect(retriedProposal.structuredContent).toMatchObject({ replayed: true, summary: proposed.summary });
     let state = (await read(finance.client)).state;
     expect(state.payables.settlements[0].state).toBe('pending');
     const proposal = state.agentProposals.find((p: any) => p.state === 'pending');
@@ -96,6 +118,7 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     state = (await read(finance.client)).state;
     expect(state.payables.settlements[0].state).toBe('confirmed');
     expect(state.agentProposals.find((p: any) => p.id === proposal.id).state).toBe('confirmed');
+    expect((await finance.tool('bambook_execute', confirmArgs)).structuredContent).toMatchObject({ status: 'confirmed', replayed: true, summary: proposed.summary });
     expect((await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(404);
     // 第二个提议被本人拒绝：业务不变。
     const overInvoice = { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'VAT-1', invoiceDate: '2026-10-10', currency: 'CNY', amount: 111600, taxAmount: 0, lines: [{ purchaseId: po.id, amount: 111600 }], due: '2026-11-30', dueBasis: '合同' } };
@@ -103,12 +126,14 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect(blocked.isError).toBe(true);
     expect(blocked.content[0].text).toContain('待关联结算');
     const bill = { ...overInvoice, payload: { ...overInvoice.payload, amount: 110670, lines: [{ purchaseId: po.id, amount: 110670, settlementId: settlement.id }] } };
-    expect((await finance.tool('bambook_execute', { workspaceId: finance.workspace.id, command: bill })).structuredContent.status).toBe('awaiting_confirmation');
+    const billArgs = { workspaceId: finance.workspace.id, command: bill, requestId: 'finance-bill-once' };
+    expect((await finance.tool('bambook_execute', billArgs)).structuredContent.status).toBe('awaiting_confirmation');
     const second = (await read(finance.client)).state.agentProposals.find((p: any) => p.state === 'pending');
     expect((await run(finance.client, { type: 'agent.proposal.reject', payload: { id: second.id, note: '发票还没收到' } })).status).toBe(200);
     state = (await read(finance.client)).state;
     expect(state.payables.bills.filter((b: any) => b.lines.some((l: any) => l.purchaseId === po.id))).toHaveLength(0);
     expect(state.agentProposals.find((p: any) => p.id === second.id)).toMatchObject({ state: 'rejected', note: '发票还没收到' });
+    expect((await finance.tool('bambook_execute', billArgs)).structuredContent).toMatchObject({ status: 'rejected', replayed: true });
   });
 
   it('read-only delegation and non-finance roles stay within their limits', async () => {
