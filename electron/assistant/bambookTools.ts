@@ -9,8 +9,7 @@ export type BambookDelegation = { token: string; expiresAt: string; workspaceId:
 export type DelegationReason = 'missing' | 'expired' | 'rejected';
 
 export const BAMBOOK_OBJECT_TYPES = [
-  'customer', 'contact', 'order', 'order_line', 'development', 'dev_version', 'product', 'sample',
-  'quotation', 'supplier', 'purchase', 'production', 'shipment', 'invoice', 'risk', 'claim',
+  'email', 'customer', 'contact', 'order', 'order_line', 'development', 'dev_version', 'product', 'sample', 'quotation', 'supplier', 'purchase', 'receipt', 'payable_settlement', 'payable_bill', 'payment_plan', 'payment_request', 'supplier_payment', 'payment_allocation', 'prepayment_move', 'production', 'shipment', 'invoice', 'risk', 'claim'
 ] as const;
 
 const typeSchema = { type: 'string', enum: [...BAMBOOK_OBJECT_TYPES], description: '业务对象类型；以服务端实际允许的可读类型为准。' };

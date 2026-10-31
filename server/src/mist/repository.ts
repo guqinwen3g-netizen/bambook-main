@@ -22,7 +22,9 @@ import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, comp
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
-import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob } from './mail/receiverRegistry';
+import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
+import { enqueueMailState, mailStateViews, pendingMailFields, dueMailState, readMailState, claimMailState, planMailState, rememberMailState, failMailState, completeMailState, type MailStateRecord, type MailStateAttempt } from './mail/stateQueue';
+import type { MailStateObservation } from '../shared/mistMailState';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit } from './agentAuditRead';
 import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
@@ -116,7 +118,9 @@ export function mistChangeKeys(before: unknown, after: unknown): string[][] | nu
       if (left && right) {
         for (const id of new Set([...left.keys(), ...right.keys()])) {
           const x = left.get(id), y = right.get(id);
-          if (x === undefined || y === undefined || canonical(x) !== canonical(y)) add([...path, 'i:' + id]);
+            if (x === undefined || y === undefined) add([...path, 'i:' + id]);
+            else if (path.length === 2 && path[0] === 'k:email' && path[1] === 'k:messages') walk(x, y, [...path, 'i:' + id]);
+            else if (canonical(x) !== canonical(y)) add([...path, 'i:' + id]);
         }
         return;
       }
@@ -157,6 +161,8 @@ class MistPreviewOutcome extends Error { constructor(readonly preview: { revisio
 const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate']);
 
 export class MistRepository {
+  private mailStateWake?: () => void;
+  setMailStateWake(wake: () => void) { this.mailStateWake = wake; }
   constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>) {}
   private context(actor: TokenPayload, state?: MistState): MistContext { const auditNow=this.now().toISOString();return { id: randomUUID, now: mistBusinessInstant(state,auditNow), auditNow, actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
   /** 普通附件上传：只落私有文件、不改业务记录；持有任一业务写入权限即可（后勤的 CI/PL、财务的水单、质检的报告都要先上传再关联）。关联到哪条记录仍由各自业务命令按权限校验。 */
@@ -497,7 +503,7 @@ export class MistRepository {
     // 每次尝试都是一笔全新事务：重新读取最新状态并重新核验账号、成员、权限与业务门禁；不复用旧整份状态。
     for (let attempt = 1; ; attempt++) {
       let stored: MistStoredFile | undefined;
-      try { return await this.writeTransact(workspaceId, async db => {
+      try { const response = await this.writeTransact(workspaceId, async db => {
         const permission = await permissionFor(db);
         const { actor, row } = await this.own(db, prior, workspaceId, permission, true, false, false, isAgentActor(prior) || !!confirmProposalId || input.command?.type === 'agent.proposal.reject');
         if(input.command?.type==='email.account.save'){const existing=row.state.email?.accounts.find(a=>a.id===input.command.payload?.id);if(existing?.kind==='shared'&&emailAccountAccessible(existing,actor.userId))await this.authorize(db,prior,'emails:admin');}
@@ -620,7 +626,11 @@ export class MistRepository {
           (context as typeof context & { customerStatement?: unknown }).customerStatement = bindCustomerStatement(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
         }
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
+        if (command?.type === 'email.server.sync' || command?.type === 'email.server.state') Object.assign(context, {mailPendingFields:await pendingMailFields(db,workspaceId,command.type === 'email.server.state' ? command.payload.operationId : undefined)});
         const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
+        const remoteQueued = await enqueueMailState(db, row, applied.state, command, actor, prior, Date.now());
+        if (remoteQueued) applied.result = {...applied.result, remoteQueued:true};
+        if (command?.type === 'email.server.state') await completeMailState(db,workspaceId,command.payload.operationId,command.payload.attemptId,command.payload.observation,(prior as MailSyncActor).mailSyncLease!.id);
         numbers.assertConsumed();
         if (confirmProposalId) markAgentProposalConfirmed(applied.state, confirmProposalId, command, actor.userId, context.now);
         const previousEvents=new Set((row.state.events??[]).map((event:{id:string})=>event.id));
@@ -668,7 +678,10 @@ export class MistRepository {
         await this.authorize(db, prior, permission);
         await this.authorizeCompoundCommand(db, prior, input.command);
         return { workspace: this.view(saved, actor), receipt: { requestId: input.requestId, ...result, expectedRevision: input.expectedRevision }, replayed: false };
-      }); } catch (error: any) {
+      });
+        if (input.command?.type && ['email.flag','email.move','email.state.retry'].includes(input.command.type)) this.mailStateWake?.();
+        return response;
+      } catch (error: any) {
         let blobSettled = true;
         if (stored) {
           blobSettled = false;
@@ -826,6 +839,26 @@ export class MistRepository {
       return { actor, revision: row.revision as number, state: projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state };
     });
   }
+  async mailStateViews(prior:TokenPayload,workspaceId:string) { return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'emails:read');const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;const items=await mailStateViews(db,workspaceId,state,actor);return isAgentActor(prior)?items.map(item=>({...item,canRetry:false})):items;}); }
+  async dueMailState(now=Date.now(),take=2) {return this.transact(db=>dueMailState(db,now,take));}
+  async claimMailState(prior:TokenPayload,job:MailStateRecord,now=Date.now()) {
+    return this.connectionTransaction(async db=>{
+      const{actor,row}=await this.own(db,prior,job.workspaceId,'emails:write');
+      const state=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+      const m=state.email.messages.find(m=>m.id===job.messageId),a=state.email.accounts.find(a=>a.id===job.accountId);
+      if(!m||!a||!m.remote)fail('NOT_FOUND','邮件不存在或无权使用',404);
+      if((a!.sourceGeneration||1)!==job.source||receiveSource(a!)!==job.sourceHash||(m!.source||1)!==job.source)fail('MAIL_SOURCE_CHANGED','邮箱来源已变化，请在原邮箱核对',409);
+      if(now-job.authorizedAt>24*60*60_000)fail('MAIL_STATE_EXPIRED','同步操作已过期，请重试',409);
+      const lease=await claimReceiving(db,actor,job.workspaceId,a!,now,false,RECEIVE_LEASE_MS,undefined,'state');
+      lease.stateOperationId=job.id;
+      const next=await claimMailState(db,job,lease.id,lease.expiresAt,now);
+      return{job:next,actor:{...prior,mailSyncLease:lease} as MailSyncActor};
+    });
+  }
+  async planMailState(job:MailStateRecord,attempt:MailStateAttempt){return this.connectionTransaction(db=>planMailState(db,job,attempt));}
+  async rememberMailState(job:MailStateRecord,o:MailStateObservation){return this.connectionTransaction(db=>rememberMailState(db,job,o));}
+  async failMailState(job:MailStateRecord,phase:'pending'|'failed'|'unknown'|'blocked',error:string,now=Date.now()){return this.connectionTransaction(db=>failMailState(db,job,phase,error,now));}
+  async blockUnclaimedMailState(job:MailStateRecord,error:string){return this.connectionTransaction(async db=>{const current=await readMailState(db,job.workspaceId,job.id);if(current.record.version!==job.version)return;return failMailState(db,current.record,'blocked',error,Date.now());});}
   async mailReceivingViews(prior:TokenPayload,workspaceId:string,now=Date.now()) {
     return this.transact(async db=>{
       const {actor,row}=await this.own(db,prior,workspaceId,'emails:read');
@@ -862,7 +895,7 @@ export class MistRepository {
   async executeMail(prior: TokenPayload, workspaceId: string, command: { type: string; payload: Record<string, unknown> }) {
     if (!EMAIL_SERVER_COMMAND.test(command.type) && command.type !== 'email.draft.save') fail('INVALID_COMMAND', '邮件服务命令无效', 400);
     const lease=(prior as MailSyncActor).mailSyncLease;
-    if(command.type==='email.server.sync'&&(!lease||command.payload.accountId!==lease.accountId)||lease&&command.type!=='email.server.sync')fail('INVALID_COMMAND','收件结果须使用当前同步授权',400);
+    if(command.type==='email.server.sync'&&(!lease||lease.kind==='state'||command.payload.accountId!==lease.accountId)||command.type==='email.server.state'&&(!lease||lease.kind!=='state'||command.payload.operationId!==lease.stateOperationId)||lease&&command.type!==(lease.kind==='state'?'email.server.state':'email.server.sync'))fail('INVALID_COMMAND','收件结果须使用当前同步授权',400);
     for (let attempt = 1; ; attempt++) {
       const { revision: current } = await this.mailSnapshot(prior, workspaceId);
       try { return await this.executeInternal(prior, workspaceId, { requestId: `mail-${randomUUID()}`, expectedRevision: current, command }, { command }); }

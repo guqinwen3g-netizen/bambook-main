@@ -27,7 +27,7 @@ const NEVER_VIA_AGENT = new Set(['files.add']);
 /** confirm：须本人在系统中确认；normal：可由可办理委托直接执行；blocked：不能经接口执行。 */
 export function agentCommandSensitivity(type: string): 'normal' | 'confirm' | 'blocked' {
   if (NEVER_VIA_AGENT.has(type) || type.startsWith('email.server.') || type.startsWith('agent.')) return 'blocked';
-  if(type==='email.account.save')return 'confirm';
+  if(type==='email.account.save'||type==='email.move'||type==='email.state.retry')return 'confirm';
   if (NORMAL_EXCEPTIONS.has(type)) return 'normal';
   if (CONFIRM_PREFIXES.some(prefix => type.startsWith(prefix)) || CONFIRM_VERB.test(type.slice(type.indexOf('.') + 1))) return 'confirm';
   return 'normal';
@@ -40,6 +40,7 @@ export type McpRepository = {
   execute(actor: TokenPayload, id: string, input: { requestId: string; expectedRevision: number; command: { type: string; payload: Record<string, unknown> } }): Promise<{ receipt: unknown; replayed?: boolean }>;
   receipt(actor: TokenPayload, id: string, requestId: string): Promise<{ expectedRevision: number; result?: { id?: unknown } }>;
   mailReceivingViews(actor:TokenPayload,id:string,now?:number):Promise<unknown>;
+  mailStateViews(actor:TokenPayload,id:string):Promise<unknown>;
   agentAudits(actor:TokenPayload,id:string,input?:Record<string,unknown>):Promise<unknown>;
   agentAudit(actor:TokenPayload,id:string,requestId:string,input?:Record<string,unknown>):Promise<unknown>;
 };
@@ -53,7 +54,7 @@ const TOOLS = [
   { name: 'bambook_related', description: '展开一个业务对象的关联对象（如合同的收货、结算、票据）。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), type: { type: 'string', enum: AGENT_OBJECT_TYPES.map(t => t.type) }, id: str('对象 id') }, required: ['workspaceId', 'type', 'id'] }, annotations: { readOnlyHint: true } },
   { name: 'bambook_commands', description: '列出可用的业务命令、payload 结构，以及是否须本人确认（confirm）。', inputSchema: { type: 'object', properties: { prefix: str('按命令前缀筛选，如 payable. 或 fulfillment.；带前缀时附上 payload 引用的类型定义（types）') } }, annotations: { readOnlyHint: true } },
   {name:'bambook_audit',description:'查看本人的Agent操作记录；有审计权限时可查当前公司。提供requestId读取按当前权限裁剪的变更详情，offset/limit翻页；includeCommand显式请求可见的原始命令。历史不能恢复已经失去的业务访问权。',inputSchema:{type:'object',properties:{workspaceId:str('工作区id'),requestId:str('原业务请求编号；不提供时列出记录'),scope:{type:'string',enum:['mine','company']},actorId:str('公司范围内按经办账号筛选'),proposalId:str('同一提议的操作'),agentSessionId:str('同一Agent会话的操作'),source:{type:'string',enum:['agent','human_confirmation','human_rejection']},phase:{type:'string',enum:['executed','proposed','confirmed','rejected']},since:str('起始ISO时间'),until:str('截止ISO时间'),cursor:str('列表下一页游标'),offset:{type:'integer',minimum:0},limit:{type:'integer',minimum:1,maximum:50},includeCommand:{type:'boolean'}},required:['workspaceId']},annotations:{readOnlyHint:true}},
-  {name:'bambook_mail_receiving',description:'读取当前账号可见邮箱的自动收件状态、最近成功与待重试信息。不返回邮箱凭据，也不能替本人开启后台授权。',inputSchema:{type:'object',properties:{workspaceId:str('工作区id')},required:['workspaceId']},annotations:{readOnlyHint:true}},
+  {name:'bambook_mail_receiving',description:'读取当前账号可见邮箱的自动收件及已读、星标、移动同步状态、最近成功与待重试信息。不返回邮箱凭据，也不能替本人开启后台授权。',inputSchema:{type:'object',properties:{workspaceId:str('工作区id')},required:['workspaceId']},annotations:{readOnlyHint:true}},
   { name: 'bambook_preview', description: '预演一条命令：执行全部权限与业务校验后回滚，返回将产生的结果和业务事件，不保存任何数据。执行前先预演。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema }, required: ['workspaceId', 'command'] }, annotations: { readOnlyHint: true } },
   { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。每项操作生成一个 requestId，超时重试沿用原编号。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, requestId: { ...str('幂等请求编号；同一操作重试必须沿用，新的操作须用新编号'), minLength: 1, maxLength: 116 } }, required: ['workspaceId', 'command', 'requestId'] }, annotations: { destructiveHint: true, idempotentHint: true } },
 ];
@@ -70,7 +71,7 @@ const canOperate = (actor: TokenPayload) => isAgentActor(actor) && actor.agentMo
 
 async function callTool(repository: McpRepository, actor: TokenPayload, name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
-    case 'bambook_mail_receiving': { if(Object.keys(args).some(k=>k!=='workspaceId'))throw new ToolInputError('只接受workspaceId');return {items:await repository.mailReceivingViews(actor,need(args,'workspaceId'))}; }
+    case 'bambook_mail_receiving': { if(Object.keys(args).some(k=>k!=='workspaceId'))throw new ToolInputError('只接受workspaceId');return {items:await repository.mailReceivingViews(actor,need(args,'workspaceId')),stateResults:await repository.mailStateViews(actor,need(args,'workspaceId'))}; }
     case 'bambook_workspaces': return { workspaces: (await repository.list(actor)).map(w => ({ id: w.id, name: w.name, revision: w.revision })) };
     case 'bambook_query': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { revision: workspace.revision, ...agentQuery(workspace.state, current, { type: args.type, q: args.q, limit: args.limit }) }; }
     case 'bambook_get': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { object: agentGet(workspace.state, current, args.type, args.id) }; }

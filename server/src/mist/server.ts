@@ -1,3 +1,4 @@
+import { MistMailStateWorker } from './mail/stateWorker';
 import { samePublicOrigin, publicOriginAllowed } from '../shared/bambookPublicOrigins';
 import { createAuthRouter } from '../auth/route';
 import { createDbVerificationStore } from '../auth/verificationDb';
@@ -25,7 +26,9 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
   const mailRuntime=(repository:MistRepository)=>{
     const credentials=new MistMailCredentials(process.env.MIST_MAIL_CREDENTIAL_DIR||(local?path.join(local.database.directory,'mail-credentials'):path.resolve(__dirname,'../../private/mist-mail-credentials')));
     const mail=new MistMailService(repository,credentials,options.mailTransport,process.env,()=>new Date(),options.mailReceive);
-    const mailReceiver=new MistMailReceiver(repository,mail,{...options.mailReceive,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-receiver]',code)});
+    const stateWorker=new MistMailStateWorker(repository,mail,{tickMs:options.mailReceive?.tickMs,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-state]',code)});
+    app.locals.mailStateWorker=stateWorker;repository.setMailStateWake(()=>stateWorker.wake());
+    const mailReceiver=new MistMailReceiver(repository,mail,{...options.mailReceive,stateWorker,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-receiver]',code)});
     app.locals.mailReceiver=mailReceiver;
     return{mail,mailReceiver};
   };

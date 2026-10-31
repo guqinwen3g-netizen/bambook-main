@@ -6,16 +6,22 @@ import type { MistMailSecret } from './credentials';
 
 /** 远端文件夹与 IMAP 会话；接口刻意很小，测试可注入假实现，生产走 imap-simple / nodemailer。 */
 export type MailFolderInfo = { path: string; attribs: string[] };
-export type MailFetched = { uid: number; seen: boolean; raw: Buffer };
+export type MailFetched = { uid: number; seen: boolean; starred?: boolean; raw: Buffer };
+export type MailMetadata = { uid: number; seen: boolean; starred: boolean };
 export interface MailImapSession {
   folders(): Promise<MailFolderInfo[]>;
-  open(path: string): Promise<{ uidValidity: number; uidNext: number }>;
+  open(path: string, writable?: boolean): Promise<{ uidValidity: number; uidNext: number }>;
   /** 当前打开文件夹中 UID 大于 afterUid 的邮件编号（升序）。 */
   uidsAfter(afterUid: number): Promise<number[]>;
   fetch(uids: number[]): Promise<MailFetched[]>;
   hasMessageId(messageId: string): Promise<boolean>;
   append(path: string, raw: Buffer): Promise<void>;
   close(force?:boolean): Promise<void>;
+  metadata?(uids: number[]): Promise<MailMetadata[]>;
+  updateFlag?(uid: number, flag: 'read' | 'starred', value: boolean): Promise<void>;
+  canMove?(): boolean;
+  move?(uid: number, path: string): Promise<number | undefined>;
+  searchMessageId?(messageId: string): Promise<number[]>;
 }
 /** rejected 为服务器明确拒收的收件人及其回复原文（部分拒收时正文仍会提交给已接收的收件人）。 */
 export type MailSendResult = { response: string; accepted: string[]; rejected: string[]; rejectedReplies?: Array<{ address: string; reply: string }> };
@@ -60,8 +66,48 @@ const SEEN = '\\Seen';
 
 class ImapSimpleSession implements MailImapSession {
   constructor(private readonly connection: any) {}
+  private operation<T>(start: (finish: (error?: unknown, value?: T) => void) => void): Promise<T> {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const closed = () => finish(Object.assign(new Error('IMAP connection closed before acknowledgement'), {code:'ECONNRESET'}));
+      const finish = (error?: unknown, value?: T) => {
+        if (settled) return; settled = true;
+        this.connection.imap.removeListener('end', closed); this.connection.imap.removeListener('close', closed); this.connection.imap.removeListener('error', finish);
+        if (error) reject(error); else resolve(value as T);
+      };
+      this.connection.imap.once('end', closed); this.connection.imap.once('close', closed); this.connection.imap.once('error', finish);
+      try { start(finish); } catch (error) { finish(error); }
+    });
+  }
   async folders() { return flatten(await this.connection.getBoxes()); }
-  async open(path: string) { const box = await this.connection.openBox(path, true); return { uidValidity: Number(box?.uidvalidity) || 0, uidNext: Number(box?.uidnext) || 0 }; }
+  async open(path: string, writable = false) { const box = await this.connection.openBox(path, !writable); return { uidValidity: Number(box?.uidvalidity) || 0, uidNext: Number(box?.uidnext) || 0 }; }
+  metadata(uids: number[]): Promise<MailMetadata[]> {
+    if (!uids.length) return Promise.resolve([]);
+    return new Promise((resolve, reject) => {
+      const rows: MailMetadata[] = [], fetch = this.connection.imap.fetch(uids, { markSeen: false }); let messages = 0;
+      fetch.on('message', (message: any) => { messages++; message.once('attributes', (attrs: any) => {
+        if (Number.isSafeInteger(attrs.uid) && Array.isArray(attrs.flags)) rows.push({ uid: attrs.uid, seen: attrs.flags.includes(SEEN), starred: attrs.flags.includes('\\Flagged') });
+      }); });
+      fetch.once('error', reject); fetch.once('end', () => messages === rows.length ? resolve(rows) : reject(Object.assign(new Error('原邮箱未返回完整状态，请稍后核对'), {code:'MAIL_STATE_METADATA_INVALID'})));
+    });
+  }
+  updateFlag(uid: number, flag: 'read' | 'starred', value: boolean): Promise<void> {
+    return this.operation<void>(finish => this.connection.imap[value ? 'addFlags' : 'delFlags'](uid, flag === 'read' ? SEEN : '\\Flagged', finish));
+  }
+  canMove() { return this.connection.imap.serverSupports('MOVE'); }
+  move(uid: number, path: string): Promise<number | undefined> {
+    // Never enter node-imap's COPY/STORE/EXPUNGE fallback: it may affect another client's deleted mail.
+    if (!this.canMove()) return Promise.reject(Object.assign(new Error('Safe IMAP MOVE unavailable'), { code: 'MAIL_MOVE_UNSUPPORTED' }));
+    return this.operation<number | undefined>(finish => this.connection.imap.move(uid, path, (error: unknown, ids: unknown) => {
+      if (error) return finish(error);
+      const id = Number(Array.isArray(ids) && ids.length === 1 ? ids[0] : ids);
+      finish(undefined, Number.isSafeInteger(id) && id > 0 ? id : undefined);
+    }));
+  }
+  searchMessageId(messageId: string): Promise<number[]> {
+    if (!messageId || messageId.length > 300 || /[\r\n\0]/.test(messageId)) return Promise.reject(Object.assign(new Error('邮件标识无效，请在原邮箱核对'), {code:'MAIL_STATE_AMBIGUOUS'}));
+    return new Promise((resolve, reject) => this.connection.imap.search([['HEADER', 'MESSAGE-ID', messageId]], (error: unknown, ids: number[]) => error ? reject(error) : resolve((ids || []).map(Number))));
+  }
   uidsAfter(afterUid: number): Promise<number[]> {
     return new Promise((resolve, reject) => this.connection.imap.search([['UID', `${afterUid + 1}:*`]], (error: Error | null, uids: number[]) => error ? reject(error) : resolve((uids || []).map(Number).filter(uid => uid > afterUid).sort((a, b) => a - b))));
   }
@@ -96,7 +142,7 @@ class ImapSimpleSession implements MailImapSession {
             chunks.push(Buffer.from(chunk));
           }));
           message.once('attributes',(attrs:any)=>{uid=Number(attrs?.uid);flags=Array.isArray(attrs?.flags)?attrs.flags:[];});
-          message.once('end',()=>{if(!failed&&Number.isSafeInteger(uid)&&uid>0&&chunks.length)rows.push({uid,seen:flags.includes(SEEN),raw:Buffer.concat(chunks)});done();});
+          message.once('end',()=>{if(!failed&&Number.isSafeInteger(uid)&&uid>0&&chunks.length)rows.push({uid,seen:flags.includes(SEEN),starred:flags.includes('\\Flagged'),raw:Buffer.concat(chunks)});done();});
         }));
       });
       fetch.once('error',stop);fetch.once('end',()=>{void Promise.all(pending).then(()=>{if(!failed)resolve(rows.sort((a,b)=>a.uid-b.uid));});});

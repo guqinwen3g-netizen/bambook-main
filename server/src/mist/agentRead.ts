@@ -13,6 +13,7 @@ type ObjectType = { type: string; label: string; scope: PermissionScope; path: s
 
 /** 首批可读对象。view 与前端路由一致，链接由页面用 go(view, id) 打开。 */
 export const AGENT_OBJECT_TYPES: ObjectType[] = [
+  { type: 'email', label: '邮件', scope: 'emails:read', path: ['email', 'messages'], view: 'emails' },
   { type: 'customer', label: '客户', scope: 'relations:read', path: ['customers'], view: 'crm' },
   { type: 'contact', label: '联系人', scope: 'relations:read', path: ['contacts'], view: 'crm', linkId: r => r.customerId },
   { type: 'order', label: '订单', scope: 'orders:read', path: ['orders'], view: 'orders/detail' },
@@ -40,7 +41,7 @@ export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'claim', label: '售后案件', scope: 'aftersales:read', path: ['platform', 'claims'], view: 'claims' },
 ];
 
-const LABEL_FIELDS = ['code', 'sku', 'name', 'title', 'label', 'style'];
+const LABEL_FIELDS = ['code', 'sku', 'name', 'title', 'label', 'style', 'subject'];
 const TEXT_LIMIT = 300;
 const GET_LIMIT = 16_000;
 export const QUERY_LIMIT_MAX = 20;
@@ -121,8 +122,9 @@ function find(state: MistState, actor: TokenPayload, typeName: unknown, id: unkn
 export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown) {
   const { type, row } = find(state, actor, typeName, id);
   let data = compact(row, 3) as Record<string, unknown>;
+  if(type.type==='email'&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
   let text = JSON.stringify(data);
-  let truncated = false;
+  let truncated = type.type==='email'&&typeof row.body==='string'&&row.body.length>10_000;
   if (text.length > GET_LIMIT) { data = compact(row, 1) as Record<string, unknown>; text = JSON.stringify(data); truncated = true; }
   if (text.length > GET_LIMIT) { data = summary(row); truncated = true; }
   return { ...ref(type, row), data, truncated };

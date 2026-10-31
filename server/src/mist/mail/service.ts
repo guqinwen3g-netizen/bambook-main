@@ -1,3 +1,4 @@
+import { observeMailState, observationChanged, stateFolders, rawMailHash } from './stateProtocol';
 import { randomUUID } from 'node:crypto';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import type { TokenPayload } from '../../auth/service';
@@ -104,6 +105,13 @@ export class MistMailService {
     return this.write(prior, workspaceId, 'email.server.account', { id: accountId, credentialSet: false, lastError: null });
   }
 
+  /** Internal protocol access; callers must hold and revalidate a current account I/O lease. */
+  async openStateSession(prior:MailSyncActor,workspaceId:string,accountId:string) {
+    await this.repository.assertMailSync(prior,workspaceId);
+    const snapshot=await this.account(prior,workspaceId,accountId);this.checkHosts(snapshot.account);
+    const session=await this.imap(snapshot.account,await this.secret(workspaceId,snapshot.account));
+    return {...snapshot,session};
+  }
   async receivingViews(prior:TokenPayload,workspaceId:string) {return this.repository.mailReceivingViews(prior,workspaceId,this.now().getTime());}
   async setReceiving(prior:TokenPayload,workspaceId:string,accountId:string,input:Record<string,unknown>) {
     const result=await this.repository.setMailReceiving(prior,workspaceId,accountId,input,this.now().getTime());
@@ -116,7 +124,7 @@ export class MistMailService {
     return this.exclusive(key,'该邮箱的同步',async()=>{
       const op=await this.repository.claimMailSync(prior,workspaceId,accountId,background,options.job,this.receiveOptions.leaseMs??RECEIVE_LEASE_MS,this.now().getTime());
       const lease=op.mailSyncLease!,controller=new AbortController(),signal=controller.signal;
-      let timedOut=false,authorityError:unknown,outcome:{ok:boolean;pending?:number;error?:{code:string;message:string};block?:boolean}={ok:false};
+      let timedOut=false,authorityError:unknown,outcome:{ok:boolean;pending?:number;stateCursor?:number;error?:{code:string;message:string};block?:boolean}={ok:false};
       const stopped=()=>new MistApiError(timedOut?'MAIL_SYNC_TIMEOUT':'MAIL_SYNC_STOPPED',timedOut?'收件超时，将稍后重试':'收件操作已停止',409);
       const check=()=>{if(signal.aborted)throw authorityError??stopped();};
       const wait=<T>(promise:Promise<T>):Promise<T>=>new Promise((resolve,reject)=>{
@@ -134,12 +142,13 @@ export class MistMailService {
       let session:MailImapSession|undefined;
       const close=()=>{void session?.close(true).catch(()=>undefined);};signal.addEventListener('abort',close,{once:true});
       try {
-        const {account}=await this.account(op,workspaceId,accountId);this.checkHosts(account);const secret=await this.secret(workspaceId,account);
-        const folders:EmailFolderSync[]=[],messages:EmailSyncedMessage[]=[];let lastError:EmailProblem|null=null,remaining=0;
+        const {account,state}=await this.account(op,workspaceId,accountId);this.checkHosts(account);const secret=await this.secret(workspaceId,account);
+        const folders:EmailFolderSync[]=[],messages:EmailSyncedMessage[]=[];let observations:import('../../shared/mistMailState').MailStateObservation[]=[],stateCursor=lease.stateCursor||0;let lastError:EmailProblem|null=null,remaining=0;
         try{const connecting=this.imap(account,secret);void connecting.then(value=>{if(signal.aborted)void value.close(true).catch(()=>undefined);},()=>undefined);session=await wait(connecting);}catch(error){check();const reason=describeMailError(error,'imap');lastError=problem(reason.code,reason.message);}
         if(session){
           let targets:Array<{remote:string;folder:EmailMessageFolder}>=[];
-          try{targets=pickMailFolders(await wait(session.folders())).filter(t=>!background||t.folder==='inbox');}catch(error){check();const reason=describeMailError(error,'imap');lastError=problem(reason.code,reason.message);}
+          try{const listed=await wait(session.folders());targets=pickMailFolders(listed).filter(t=>!background||t.folder==='inbox');
+            const checked=await wait(observeMailState(session,state.email.messages.filter(m=>m.accountId===accountId&&(m.source||1)===(account.sourceGeneration||1)),stateFolders(listed),stateCursor,assertCurrent));observations=checked.observations.filter(o=>{const m=state.email.messages.find(m=>m.id===o.id);return m&&observationChanged(m,o);});stateCursor=checked.cursor;}catch(error){check();const reason=describeMailError(error,'imap');lastError=problem(reason.code,reason.message);}
           for(const target of targets){
             const known=account.folders?.find(f=>f.remote===target.remote),at=this.now().toISOString();
             try{
@@ -147,18 +156,18 @@ export class MistMailService {
               const after=known&&known.uidValidity===box.uidValidity?known.lastUid:0;
               const uids=await wait(session.uidsAfter(after)),rows=await wait(session.fetch(uids.slice(0,background?1:MAIL_SYNC_BATCH)));
               remaining+=uids.length-rows.length;await assertCurrent();let lastUid=after;
-              for(const row of rows){check();messages.push(await this.parse(workspaceId,row.raw,row.uid,row.seen,target,box.uidValidity,files));check();lastUid=Math.max(lastUid,row.uid);}
+              for(const row of rows){check();messages.push(await this.parse(workspaceId,row.raw,row.uid,row.seen,target,box.uidValidity,files,row.starred));check();lastUid=Math.max(lastUid,row.uid);}
               folders.push({remote:target.remote,folder:target.folder,uidValidity:box.uidValidity,lastUid,lastSyncAt:at});
             }catch(error){check();const reason=describeMailError(error,'imap');folders.push({remote:target.remote,folder:target.folder,uidValidity:known?.uidValidity||0,lastUid:known?.lastUid||0,lastSyncAt:known?.lastSyncAt||null,error:reason.message});}
           }
           if(!targets.length&&!lastError)lastError=problem('MAIL_NO_FOLDERS','收信服务器没有可同步的收件箱');
         }
         await assertCurrent();const failedFolders=folders.filter(f=>f.error).map(f=>f.remote);
-        const significant=messages.length>0||files.length>0||account.connection==='syncing'||!!account.syncStartedAt||JSON.stringify([account.lastError?.code,account.lastError?.message])!==JSON.stringify([lastError?.code,lastError?.message])||folders.some(f=>{const old=account.folders?.find(k=>k.remote===f.remote);return !old||old.uidValidity!==f.uidValidity||old.lastUid!==f.lastUid||old.error!==f.error;});
+        const significant=observations.length>0||messages.length>0||files.length>0||account.connection==='syncing'||!!account.syncStartedAt||JSON.stringify([account.lastError?.code,account.lastError?.message])!==JSON.stringify([lastError?.code,lastError?.message])||folders.some(f=>{const old=account.folders?.find(k=>k.remote===f.remote);return !old||old.uidValidity!==f.uidValidity||old.lastUid!==f.lastUid||old.error!==f.error;});
         const blocked=['MAIL_AUTH_FAILED','MAIL_CREDENTIAL_MISSING'].includes(lastError?.code||'');
-        outcome={ok:!lastError&&!failedFolders.length,pending:remaining,...(lastError||failedFolders.length?{error:{code:lastError?.code||'MAIL_FOLDER_FAILED',message:blocked?'邮箱授权已失效，请重新绑定并开启自动收件':'暂时无法收信，将自动重试'}}:{}),block:blocked};
+        outcome={ok:!lastError&&!failedFolders.length,stateCursor,pending:remaining,...(lastError||failedFolders.length?{error:{code:lastError?.code||'MAIL_FOLDER_FAILED',message:blocked?'邮箱授权已失效，请重新绑定并开启自动收件':'暂时无法收信，将自动重试'}}:{}),block:blocked};
         if(background&&!significant)return {workspace:undefined,receipt:undefined,sync:{added:0,merged:0,skipped:0,remaining,failedFolders,error:lastError?.message||null,errorCode:lastError?.code||null,background:true}};
-        const result=await this.write(op,workspaceId,'email.server.sync',{accountId,source:account.sourceGeneration||1,at:this.now().toISOString(),folders,messages,files,lastError});
+        const result=await this.write(op,workspaceId,'email.server.sync',{accountId,source:account.sourceGeneration||1,at:this.now().toISOString(),folders,messages,files,lastError,observations});
         await cleanup(new Set(((result.receipt as any)?.result?.fileIds||[]) as string[]));
         return {...result,sync:{...(result.receipt as any)?.result,remaining,failedFolders,error:lastError?.message||null,errorCode:lastError?.code||null,background}};
       }catch(error){
@@ -172,10 +181,10 @@ export class MistMailService {
       }
     });
   }
-  private async parse(workspaceId: string, raw: Buffer, uid: number, seen: boolean, target: { remote: string; folder: EmailMessageFolder }, uidValidity: number, files: MistStoredFile[]): Promise<EmailSyncedMessage> {
+  private async parse(workspaceId: string, raw: Buffer, uid: number, seen: boolean, target: { remote: string; folder: EmailMessageFolder }, uidValidity: number, files: MistStoredFile[], starred=false): Promise<EmailSyncedMessage> {
     let mail: ParsedMail | undefined;
     try { mail = await simpleParser(raw, { skipHtmlToText: false, skipTextLinks: true }); } catch { mail = undefined; }
-    const base = { remote: { folder: target.remote, uid, uidValidity }, folder: target.folder, read: seen };
+    const base = { remote: { folder: target.remote, uid, uidValidity }, folder: target.folder, read: seen, starred, hash:rawMailHash(raw) };
     if (!mail) return { ...base, messageId: '', inReplyTo: '', references: [], from: { name: '', address: '' }, to: [], cc: [], subject: '（邮件无法解析）', body: '这封邮件的内容无法解析，请在原邮箱中查看。', at: this.now().toISOString(), attachments: [] };
     const attachments: EmailSyncedMessage['attachments'] = [];
     for (const item of mail.attachments || []) {

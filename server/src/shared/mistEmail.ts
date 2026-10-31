@@ -5,6 +5,7 @@
  * - 示例邮箱（example）始终标注示例，不能发信，也不冒充真实收件。
  */
 import { MistCommandError, type MistContext, type MistState } from './mistWorkspace';
+import type { MailRemoteRef, MailStateObservation, MailStateField } from './mistMailState';
 
 export type EmailAddress = { name: string; address: string };
 export type EmailFolder = 'inbox' | 'drafts' | 'outbox' | 'sent' | 'archive' | 'trash';
@@ -37,7 +38,9 @@ export type EmailMessage = {
   read: boolean; starred: boolean; important: boolean; category: EmailCategory; extracted: Array<{ field: string; value: string }>;
   links: EmailLink[]; followUpTaskIds: string[]; submissions: Array<{ at: string; actor: string; link: EmailLink; taskId: string }>; example: boolean;
   /** 已同步邮件的远端身份（去重键 = 账号 + 收信来源代际 + 文件夹 + UIDVALIDITY + UID）。 */
-  remote?: { folder: string; uid: number; uidValidity: number }; messageId?: string;
+  remote?: MailRemoteRef; messageId?: string;
+  remoteState?: { folder: EmailMessageFolder; read: boolean; starred: boolean };
+  remoteMissing?: boolean;
   /** 真实邮件所属的收信来源代际（同步入库或本系统发出时的账号代际），缺省按 1。 */
   source?: number; inReplyTo?: string; sendId?: string; forwardOfId?: string;
 };
@@ -68,12 +71,13 @@ export type EmailState = { accounts: EmailAccount[]; messages: EmailMessage[]; d
 export type EmailAccountInput = { address: string; displayName: string; kind: 'personal' | 'shared'; memberIds: string[]; aliases: string[]; signature: string; transport: EmailTransport };
 export type EmailSyncedMessage = {
   remote: { folder: string; uid: number; uidValidity: number }; folder: EmailMessageFolder; messageId: string; inReplyTo: string; references: string[];
-  from: EmailAddress; to: EmailAddress[]; cc: EmailAddress[]; subject: string; body: string; at: string; read: boolean; attachments: EmailAttachment[];
+  from: EmailAddress; to: EmailAddress[]; cc: EmailAddress[]; subject: string; body: string; at: string; read: boolean; starred?: boolean; hash?: string; attachments: EmailAttachment[];
 };
 type StoredFile = { id: string; name: string; mimeType: string; size: number; storageKey: string; createdAt: string; uploadedBy?: string };
 export type EmailCommand =
   | { type: 'email.flag'; payload: { id: string; flag: 'read' | 'starred' | 'important'; value: boolean } }
   | { type: 'email.move'; payload: { id: string; folder: 'inbox' | 'archive' | 'trash' | 'restore' } }
+  | { type: 'email.state.retry'; payload: { id: string; acceptRemote?: boolean } }
   | { type: 'email.link'; payload: { id: string; link: EmailLink } }
   | { type: 'email.unlink'; payload: { id: string; link: EmailLink } }
   | { type: 'email.followUp'; payload: { id: string; owner: string; due: string; note: string } }
@@ -83,7 +87,8 @@ export type EmailCommand =
   | { type: 'email.account.save'; payload: { id?: string; input: EmailAccountInput } }
   // 以下 email.server.* 只能由服务端邮件服务在真实 IMAP / SMTP 操作后提交。
   | { type: 'email.server.account'; payload: { id: string; connection?: EmailConnection; credentialSet?: boolean; lastError?: EmailProblem | null; syncStartedAt?: string | null } }
-  | { type: 'email.server.sync'; payload: { accountId: string; source?: number; at: string; folders: EmailFolderSync[]; messages: EmailSyncedMessage[]; files: StoredFile[]; lastError: EmailProblem | null } }
+  | { type: 'email.server.sync'; payload: { accountId: string; source?: number; at: string; folders: EmailFolderSync[]; messages: EmailSyncedMessage[]; files: StoredFile[]; lastError: EmailProblem | null; observations?: MailStateObservation[] } }
+  | { type: 'email.server.state'; payload: { accountId: string; source: number; operationId: string; attemptId: string; observation: MailStateObservation } }
   | { type: 'email.server.send.begin'; payload: { mode: 'new'; requestKey: string; draftId?: string; input: EmailDraftInput; forwardOfId?: string; messageId: string } | { mode: 'retry'; id: string; confirmUnknown?: boolean } }
   | { type: 'email.server.send.finish'; payload: { id: string; outcome: 'accepted' | 'failed' | 'unknown' | 'verified' | 'not_found'; code: string; message: string; response?: string; accepted?: string[]; rejected?: Array<{ address: string; reply: string }>; foundIn?: EmailMessageFolder[] } };
 export const EMAIL_SERVER_COMMAND = /^email\.server\./;
@@ -239,8 +244,13 @@ const storedFingerprint = (row: EmailSend) => row.fingerprint || emailSendFinger
 export function applyEmailCommand(root: MistState, command: EmailCommand, context: MistContext): { id: string } & Record<string, unknown> {
   const p = command.payload as Record<string, unknown>;
   switch (command.type) {
+    case 'email.state.retry': {
+      if (p.acceptRemote !== undefined && typeof p.acceptRemote !== 'boolean') fail('核对方式无效');
+      return { id: message(root, String(p.id), context).id };
+    }
     case 'email.flag': {
       const row = message(root, String(p.id), context); const flag = command.payload.flag; if (!['read', 'starred', 'important'].includes(flag)) fail('标记类型无效');
+      if (typeof command.payload.value !== 'boolean') fail('标记值无效');
       row[flag] = !!command.payload.value; return { id: row.id };
     }
     case 'email.move': {
@@ -305,6 +315,12 @@ export function applyEmailCommand(root: MistState, command: EmailCommand, contex
       return { id: row.id };
     }
     case 'email.server.sync': return applySync(root, command.payload, context);
+    case 'email.server.state': {
+      const a = account(root, command.payload.accountId, context);
+      if ((a.sourceGeneration || 1) !== command.payload.source) fail('邮箱来源已变化', 'CONFLICT');
+      applyMailObservation(root, a.id, command.payload.observation, context);
+      return { id: command.payload.observation.id };
+    }
     case 'email.server.send.begin': return beginSend(root, command.payload, context);
     case 'email.server.send.finish': return finishSend(root, command.payload, context);
   }
@@ -407,11 +423,38 @@ function saveAccount(root: MistState, payload: { id?: string; input: EmailAccoun
   return { id };
 }
 
+/** Only server observations enter here. Pending user intent is supplied from the protected outbox under the write lock. */
+export function applyMailObservation(root: MistState, accountId: string, o: MailStateObservation, context: MistContext) {
+  const row = root.email.messages.find(m => m.id === o.id && m.accountId === accountId);
+  const a = root.email.accounts.find(a => a.id === accountId);
+  if (!row || !a || sourceOf(row) !== (a.sourceGeneration || 1) || !row.remote || !sameRemote(row.remote, o.expected)) return;
+  if (o.missing) { row.remoteMissing = true; return; }
+  if (!o.remote || !['inbox', 'sent', 'archive', 'trash'].includes(o.folder || '') || typeof o.read !== 'boolean' || typeof o.starred !== 'boolean') fail('远端状态无效');
+  validateMailRemote(o.remote!);
+  const pending = ((context as MistContext & {mailPendingFields?: Record<string, MailStateField[]>}).mailPendingFields || {})[row.id] || [];
+  const oldFolder = row.remoteState?.folder || row.folder;
+  row.remote = { ...o.remote! }; row.remoteMissing = false;
+  row.remoteState = { read: o.read!, starred: o.starred!, folder: o.folder! };
+  if (!pending.includes('read')) row.read = o.read!;
+  if (!pending.includes('starred')) row.starred = o.starred!;
+  if (!pending.includes('folder')) {
+    if (o.folder === 'trash' && oldFolder !== 'trash') row.previousFolder = oldFolder;
+    else if (o.folder !== 'trash') delete row.previousFolder;
+    row.folder = o.folder!;
+  }
+}
+export const sameRemote = (a: MailRemoteRef, b: MailRemoteRef) => a.folder === b.folder && a.uid === b.uid && a.uidValidity === b.uidValidity;
+function validateMailRemote(r: MailRemoteRef) {
+  text(r?.folder, '远端文件夹', true, 200);
+  if (!Number.isSafeInteger(r.uid) || r.uid < 1 || !Number.isSafeInteger(r.uidValidity) || r.uidValidity < 0 || r.hash !== undefined && !/^[a-f0-9]{64}$/.test(r.hash)) fail('远端邮件编号无效');
+}
+
 function applySync(root: MistState, payload: Extract<EmailCommand, { type: 'email.server.sync' }>['payload'], context: MistContext) {
   const owner = account(root, payload?.accountId, context); if (owner.example) fail('示例邮箱不能同步', 'PRECONDITION');
   // 同步开始后邮箱改了收信来源：本次拉到的是旧来源的数据，整体作废，避免写进新代际。
   const generation = owner.sourceGeneration || 1;
   if (payload.source !== undefined && Number(payload.source) !== generation) fail('邮箱收信设置已在同步期间修改，本次同步结果作废，请重新同步', 'CONFLICT');
+  for (const observation of payload.observations || []) applyMailObservation(root, owner.id, observation, context);
   const folders = Array.isArray(payload.folders) ? payload.folders : [], incoming = Array.isArray(payload.messages) ? payload.messages : [], files = Array.isArray(payload.files) ? payload.files : [];
   if (incoming.length > 500 || files.length > 1000) fail('单次同步数量超过上限');
   const fileById = new Map<string, StoredFile>();
@@ -432,11 +475,13 @@ function applySync(root: MistState, payload: Extract<EmailCommand, { type: 'emai
     if (!(['inbox', 'sent', 'archive', 'trash'] as string[]).includes(m.folder)) fail('邮件文件夹无效');
     if (seen.has(key(remote))) { skipped++; continue; }
     seen.add(key(remote));
+    if (m.hash && !/^[a-f0-9]{64}$/.test(m.hash)) fail('邮件原件校验值无效');
+    if (m.hash) Object.assign(remote, { hash: m.hash });
     const messageId = clip(m.messageId, 300).trim();
     // 同一封邮件（Message-ID 相同）已在本邮箱同一文件夹中：补上远端身份，不重复入库（例如本系统发出后又在已发送中同步到）。
     // UIDVALIDITY 变化后同一远端文件夹重新编号：按 Message-ID 认回原记录，只更新远端身份。
-    const twin = messageId ? mine.find(row => row.messageId === messageId && (row.remote ? row.remote.folder === remote.folder && row.remote.uidValidity !== remote.uidValidity : row.folder === m.folder || row.previousFolder === m.folder)) : undefined;
-    if (twin) { twin.remote = remote; merged++; continue; }
+    const twin = messageId ? mine.find(row => row.messageId === messageId && (row.remote ? row.remote.folder === remote.folder && row.remote.uidValidity !== remote.uidValidity && !!row.remote.hash && row.remote.hash === m.hash : row.folder === m.folder || row.previousFolder === m.folder)) : undefined;
+    if (twin) { applyMailObservation(root, owner.id, {id:twin.id,expected:twin.remote || remote,remote,folder:m.folder,read:!!m.read,starred:!!m.starred},context); twin.remote=remote; twin.remoteState={folder:m.folder,read:!!m.read,starred:!!m.starred}; merged++; continue; }
     const refs = [clip(m.inReplyTo, 300), ...(Array.isArray(m.references) ? m.references.map(item => clip(item, 300)) : [])].filter(Boolean);
     const parent = refs.length ? mine.find(row => row.messageId && refs.includes(row.messageId)) : undefined;
     const id = context.id();
@@ -447,7 +492,7 @@ function applySync(root: MistState, payload: Extract<EmailCommand, { type: 'emai
     });
     const row: EmailMessage = {
       id, accountId: owner.id, folder: m.folder, threadId: parent?.threadId || id, from: addressRow(m.from), to: (Array.isArray(m.to) ? m.to : []).slice(0, 100).map(addressRow), cc: (Array.isArray(m.cc) ? m.cc : []).slice(0, 100).map(addressRow),
-      subject: clip(m.subject, 300) || '（无主题）', body: clip(m.body, 100000), at: isoAt(m.at, context.now), attachments, read: m.folder === 'sent' ? true : !!m.read, starred: false, important: false,
+      subject: clip(m.subject, 300) || '（无主题）', body: clip(m.body, 100000), at: isoAt(m.at, context.now), attachments, read: m.folder === 'sent' ? true : !!m.read, starred: !!m.starred, important: false, remoteState: {folder:m.folder,read:m.folder === 'sent' || !!m.read,starred:!!m.starred},
       category: { label: '', source: 'none', detail: '未配置分类规则' }, extracted: [], links: [], followUpTaskIds: [], submissions: [], example: false, remote, source: generation, ...(messageId ? { messageId } : {}), ...(m.inReplyTo ? { inReplyTo: clip(m.inReplyTo, 300) } : {}),
     };
     root.email.messages.push(row); mine.push(row); added++;
