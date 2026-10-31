@@ -74,16 +74,30 @@
 
 | 能力 | 当前实现 | 已验证范围 | 未完成 |
 |---|---|---|---|
-| 平台 AI「小竹 · 业务问答」 | `assistant` 页平台分区（`modules/PlatformPages.tsx#AssistantPage`）；`POST /workspaces/:id/assistant`，只读，需 owner 与 `ai:chat`；模型配置见 `server/src/mist/README.md` | 未在本页登记员工可用的实测结果；2026-10-13 实测模型端点因订阅到期报错（已改为明确错误） | 模型可用性须按部署环境核对，不能写成员工当前可用 |
+| 平台 AI「小竹 · 业务问答」 | `modules/PlatformPages.tsx#AssistantPage` → `POST /workspaces/:id/assistant` → `mist/assistant.ts`；只读，业务来源限当前权限下的订单、发票、风险；无业务写工具 | 模型配置与实际回答分别核实：2026-10-31同部署启动配置的空业务模型调用返回502，尚未通过可用性复核。公司成员及 `ai:chat` 在仓储先校验，但执行函数仍检查库所有者，独立财务成员提问403已复现 | 恢复实际模型调用、修复普通成员门禁；补足业务来源与跨岗位验收。保存授权或配置存在不等于可用 |
+| 报价成本 AI 审阅 | `POST /workspaces/:id/quotation-cost-advisor` → `mist/quoteCostAdvisor.ts`，使用 `quote-review` 模型档位；成本/价格公式仍由服务器计算，模型仅给依据、风险、问题与待审策略 | 当前调用链已接入平台模型，单元验证使用替身网络；共享问答执行层的所有者判断须一并复核 | 各岗位真实界面与实际模型完整验收；不得把建议写成审批或客户接受 |
+| 平台模型与固定流程 | `ai/platformProviders.ts`、`ai/codexSubscription.ts`、`ai/llmProviders.ts`；平台管理员配置API/订阅、排序回退，个人订阅不参与平台AI | `platformModel.ts` 的 `summary` / `reconciliation` 是模型档位配置 | 档位名称不代表自动汇总、邮件识别、财务对账等业务流程已经接线；须按当前Mist入口逐项核验 |
 | 桌面工作助手（本机 Agent） | `assistant?section=work`（`modules/WorkAssistantPage.tsx`），仅 Electron 桌面端；运行在 `electron/assistant/`（`host.ts`、`harness.ts`、`bambookTools.ts`），页面用本人会话续签短期委托（`useAssistantDelegation.ts`） | — | 员工上手教学待能力验收后补 |
-| 外部 MCP / 本地 Agent API | `POST /api/mist/mcp`（`server/src/mist/agentMcp.ts`）；8 个工具 `bambook_workspaces/query/get/related/commands/preview/execute/audit`（`bambook_audit` 随 #574 合入）；24 类读取对象（`agentRead.ts`）；契约见 [`work-assistant-plan.md` §14](mist-atelier/work-assistant-plan.md) | 实施 Agent 用官方 MCP 客户端 2.4.0 在独立本地演示走通“采购结算提交 → 财务提议 → 本人确认 → 读取结果”，并经委托走通报价→订单、订单→生产/QC、付款链（本地演示种子）。不代表所有客户端或业务已验收 | 长期 API Key、无人值守账号、自助连接与续签、更多实际客户端 |
-| 委托身份 | `POST /api/mist/agent/delegations`（`agentDelegation.ts`）：本人会话签发 2 小时委托；`read` 只读，`operate` 上限 = 账号现有权限（`AGENT_OPERATE_CEILING`），不超出账号 | 同上 | — |
+| 外部 MCP / 本地 Agent API | `POST /api/mist/mcp`（`server/src/mist/agentMcp.ts`）；8个工具与24类读取对象；契约见 [`work-assistant-plan.md` §14](mist-atelier/work-assistant-plan.md)。支持登记的短期委托头 `x-bambook-delegation` 和长期密钥头 `x-bambook-agent-key`，不可混用 | 官方客户端2.4.0在独立模拟环境完成业务提议、真人确认、结果/审计回读及凭据轮换、撤销、重启拒绝；#578/#580已发布。不代表所有客户端、业务或公网带授权写入均已验收 | 持久值守任务与更多客户端、业务分支 |
+| 委托身份 | 本人短期连接登记于 `mist/agentConnections.ts`；2小时v2凭据绑定账号、公司、工作区、签发权限上限。桌面签发入口须提供工作区与稳定连接编号，旧v1 HTTP授权拒绝 | 续签轮换、撤销持久化、权限不扩大及密码/全设备退出约束已核验 | 原生桌面打包后的完整模型操作链仍须验收 |
 | 敏感操作人工确认 | `agentMcp.ts#agentCommandSensitivity`：资金/账务、人员权限、收款账户、对外发送及 confirm/approve/decide/void/reverse/cancel… 类动词 → 先预演，再记为 Agent 提议；`email.server.*`、`agent.*` 禁止 Agent 直接调用 | 同上 | — |
 | Agent 提议 | `server/src/shared/mistAgentProposals.ts`；首页显示“Agent 提议 · 待确认”，`pages/AgentProposalDialog.tsx` 由本人确认或拒绝 | 同上 | — |
 | Agent 审计 | 落盘：`server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`，与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏。查询（#574）：`agentAuditRead.ts` 按本人/公司审计权限及当前岗位、行级范围裁剪；REST `GET /workspaces/:id/agent-audits[/:requestId]`；MCP 第 8 个工具 `bambook_audit`；账号页「Agent操作记录」`pages/AgentAuditHistory.tsx` | 实施 Agent 在独立本地真实界面切财务/业务员核验本人、公司记录、原始填写与原单回程 | #574 已发布（运行提交 a9a78ee8）。不覆盖所有普通人工写入；历史不倒填 |
-| 员工自助连接 | 账号页创建、复制配置、续签、撤销本人 Agent 连接；凭据绑定账号/公司/工作区与签发时权限，续签不扩权（#577、#578） | 实施 Agent 在独立本地真实界面走查；首次发布复验发现签发错误已回退 | 修复已合入，尚待重新发布；发布前不写成员工可用 |
+| 员工自助连接 | 我的账号 → Agent连接；创建、复制配置、续签、撤销本人连接（`pages/AgentConnections.tsx`） | #578已修复并发布，独立真实界面及官方客户端完整生命周期通过；#577错误版本保持禁发 | 更多实际客户端与原生桌面验收 |
+| 长期Agent服务身份 | 公司管理 → Agent服务，由管理员配置在职责任人；我的账号 → 长期Agent，由责任人本人签发90天密钥。实现：`mist/agentIdentities.ts`、`pages/AgentIdentities.tsx` | #580已发布；权限取签发上限与责任人当前授权交集。换人/改模式/停用使旧密钥失效；轮换、撤销与密码/全设备退出约束已核验。敏感提议交真实责任人确认，服务身份单独留痕 | 该身份不等于已经启动值守进程；不继承或扩大真人权限 |
 | 长值守 Agent | — | — | 长期运行循环未交付 |
 | 文件类操作 | 须上传原件的票据（如增值税专票）Agent 不能上传，预演即被拒 | 同上 | — |
+
+### 6.1 当前 Mist 邮箱边界
+
+| 能力 | 当前实现与真源 | 尚缺的闭环 |
+|---|---|---|
+| 真实收发 | `mist/mail/service.ts`、`transport.ts`：IMAP增量收信、SMTP发信、附件、已发送副本；`credentials.ts`私有保存授权码/密码。页面：`modules/EmailsPage.tsx` | 本次未发送真实客户邮件；真实账号与实际投递须单独验收。示例邮箱不能发真实邮件 |
+| 发送确认与恢复 | 新信、回复、转发先核对；区分服务器接受、明确失败、不确定、部分拒收；同一发送请求幂等，不确定不自动重发 | SMTP接受不等于收件人已读或最终送达；外部退信、实际网络异常仍须按真实服务验收 |
+| 自动收信 | 邮箱页挂载且前台可见时，每分钟检查、达到5分钟间隔后同步 | 尚无独立于网页的持久后台收信任务，关闭/隐藏页面后不能按持续收信宣称可用 |
+| 邮件状态 | 已读、星标、归档、删除/恢复保存在当前Mist状态；`email.flag` / `email.move` | 当前IMAP传输接口没有远端标记/移动写入，也不回查旧UID的状态变化；双向状态同步未交付 |
+| 智能分类与资料抽取 | 真实新邮件初始 `category.source='none'`、`extracted=[]`；已有资料可经 `email.submitExtraction`转人工复核待办，不直接改正式订单 | 当前Mist收信链没有调用模型分类/抽取。种子中的“AI分类”与抽取结果为预置演示，旧邮件服务实现不能替代当前入口接线 |
+| 登录方式 | 当前 `EmailTransport` 为服务器地址、端口、用户名，凭据接口绑定密码/授权码 | OAuth授权与相应提供方完整接入尚未实现 |
 
 ## 7. 员工教学体系
 
