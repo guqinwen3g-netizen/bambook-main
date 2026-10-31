@@ -60,7 +60,7 @@ export function renderLesson(lesson, capture, { assetVersion = '' } = {}) {
    </div>
   </div>
  </div>
- <div class="lesson-footer"><button type="button" data-lesson-prev disabled>上一步</button><div class="lesson-player" role="group" aria-label="演示控制"><button type="button" class="lesson-play" data-play aria-pressed="false" aria-label="播放演示">▶ 播放演示</button><button type="button" class="lesson-ghost" data-replay aria-label="重播本步">↻<span class="lesson-btn-text"> 重播本步</span></button><span data-step-status>第 1 步 / 共 ${n} 步</span></div><button type="button" data-lesson-next>下一步</button></div>
+ <div class="lesson-footer"><button type="button" data-lesson-prev disabled>上一步</button><div class="lesson-player" role="group" aria-label="演示控制"><button type="button" class="lesson-play" data-play aria-label="播放演示">▶ 播放演示</button><button type="button" class="lesson-ghost" data-replay aria-label="重播本步">↻<span class="lesson-btn-text"> 重播本步</span></button><span data-step-status>第 1 步 / 共 ${n} 步</span></div><button type="button" data-lesson-next>下一步</button></div>
  <div class="lesson-done" data-lesson-done hidden>
   <h2 tabindex="-1">${esc(lesson.doneTitle)}</h2><p>${esc(lesson.result)}</p>
   <ol class="lesson-chain">${lesson.chain.map((c, i) => `<li${i === (lesson.chainAt || 0) ? ' class="me"' : ''}>${esc(c)}</li>`).join('')}</ol>
@@ -167,7 +167,7 @@ function lessonMain(doc) {
       tip.style.transform = `translate(-${Math.round(x * 100)}%, ${below ? '12px' : 'calc(-100% - 12px)'})`;
     };
     const say = (text, ms = 2200) => { clearTimeout(hintTimer); hint.textContent = text; hint.hidden = !text; if (text) hintTimer = setTimeout(() => { hint.hidden = true; }, ms); };
-    const setPlayer = (label, pressed, status) => { play.textContent = narrow() ? label.slice(0, 1) : label; play.setAttribute('aria-label', label.slice(2)); play.setAttribute('aria-pressed', String(pressed)); playerState.textContent = status; };
+    const setPlayer = (label, pressed, status) => { play.textContent = narrow() ? label.slice(0, 1) : label; play.setAttribute('aria-label', label.slice(2).trim()); play.dataset.state = pressed ? 'playing' : 'idle'; playerState.textContent = status; };
     const mediaControls = () => { play.disabled = mediaFailed || (mediaLoading && !playing); replay.disabled = hotspot.disabled = mediaFailed || mediaLoading; next.disabled = mediaFailed || mediaLoading || !done.hidden; };
     const idle = () => { playing = false; mediaControls(); setPlayer('▶ 播放演示', false, mediaFailed ? '画面未能加载' : mediaLoading ? '正在加载画面…' : !done.hidden ? '本课已完成，可查看下方交接' : completed.has(step) ? '这一步已完成，可以点「下一步」' : '也可以直接点亮起的位置练习'); };
     const loadImage = (element, src, r) => new Promise(resolve => {
