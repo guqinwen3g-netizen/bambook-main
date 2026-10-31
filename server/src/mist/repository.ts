@@ -1,5 +1,6 @@
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
-import { EMAIL_SERVER_COMMAND, emailAccountAccessible } from '../shared/mistEmail';
+import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner } from '../shared/mistEmail';
+import { emailAnalysisHash } from './mail/intelligence';
 import { createHash, randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
@@ -171,6 +172,8 @@ export class MistRepository {
     return MIST_UPLOAD_SCOPES.find(scope => hasScope(actor, scope as any)) ?? MIST_UPLOAD_SCOPES[0];
   }
   private async authorizeCompoundCommand(db: any, prior: TokenPayload, command?: MistCommand) {
+    if (command?.type === 'email.server.analysis') await this.authorize(db, prior, 'ai:chat');
+    if (command?.type === 'email.server.analysis' || command?.type.startsWith('email.extraction.')) await this.authorize(db, prior, 'emails:read');
     if(command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
   }
@@ -508,6 +511,13 @@ export class MistRepository {
         const { actor, row } = await this.own(db, prior, workspaceId, permission, true, false, false, isAgentActor(prior) || !!confirmProposalId || input.command?.type === 'agent.proposal.reject');
         if(input.command?.type==='email.account.save'){const existing=row.state.email?.accounts.find(a=>a.id===input.command.payload?.id);if(existing?.kind==='shared'&&emailAccountAccessible(existing,actor.userId))await this.authorize(db,prior,'emails:admin');}
         await this.authorizeCompoundCommand(db, prior, input.command);
+        if (input.command?.type === 'email.server.analysis' || input.command?.type === 'email.extraction.review') {
+          const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
+          const message = visible.email.messages.find(m => m.id === input.command!.payload.id);
+          if (!message) fail('NOT_FOUND', '邮件不存在或当前账号不可见', 404);
+          const expected = input.command.type === 'email.server.analysis' ? input.command.payload.analysis.sourceHash : message!.analysis?.sourceHash;
+          if (!expected || emailAnalysisHash(message!) !== expected) fail('CONFLICT', '邮件原文已变化，请重新整理', 409);
+        }
         if (permission === null && !MEMBER_PERSONAL_COMMANDS.includes(input.command?.type) && !(companyRow(row) ? canMaintainCompany(actor) : isOwner(row, actor))) fail('FORBIDDEN', companyRow(row) ? '公司设置只能由公司管理员修改' : '公司设置只能由所有者修改', 403);
         const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
         if (previous) {
@@ -533,6 +543,13 @@ export class MistRepository {
           if (customer && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可交接范围内', 404);
         }
         if (input.command) {
+          if (input.command.type === 'email.submitExtraction') {
+            const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state;
+            const ownerId = emailBusinessOwner(visible, input.command.payload.link);
+            if (!ownerId || !candidateIds(row).includes(ownerId)) fail('PRECONDITION', '请先核对业务负责人及其公司成员资格', 422);
+            const recipient = await this.reviewSubject(db, actor, ownerId!, '业务负责人');
+            if (!hasScope(recipient, 'emails:read') || !hasScope(recipient, 'emails:write')) fail('PRECONDITION', '业务负责人缺少邮件办理权限，请先核对岗位', 422);
+          }
           if(input.command.type.startsWith('order.internal.')&&!hasScope(actor,'orders:read'))fail('FORBIDDEN','内部交付需要订单查看和办理权限',403);
           if(input.command.type==='order.internal.send'){
             const required=['orders:read','production:read','procurement:read'] as const;

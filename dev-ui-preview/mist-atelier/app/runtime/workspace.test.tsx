@@ -27,6 +27,26 @@ const response = (data: any, status = 200): ResponseData => ({ ok: status >= 200
 const command = (name: string): MistCommand => ({ type: 'settings.update', payload: { profileName: name } });
 const failure = (status: number, code = 'ERROR') => response({ error: { code, message: '请求被拒绝' } }, status);
 function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
+
+it('keeps other work available during mail inference and never replaces a newer workspace with its late draft response', async () => {
+  await mount(); const wait = deferred<ResponseData>(), original = clone(stores.get(A)!);
+  intercept = request => request.url.endsWith('/email/messages/mail/analyze') ? wait.promise : undefined;
+  let pending!: Promise<unknown>; await act(async () => { pending = api.mail!({ kind: 'analyze', messageId: 'mail', consent: true }); });
+  expect(api.saving).toBe(false);
+  await act(async () => { await api.run(command('并行保存')); });
+  expect(api.workspace!.state.settings.profileName).toBe('并行保存');
+  await act(async () => { wait.resolve(response({ workspace: original, receipt: {} })); await pending; });
+  expect(api.workspace!.state.settings.profileName).toBe('并行保存'); expect(api.workspace!.revision).toBe(1);
+});
+
+it('does not switch back to the old company when a mail analysis returns after company navigation', async () => {
+  await mount(); const wait = deferred<ResponseData>();
+  intercept = request => request.url.endsWith('/email/messages/mail/analyze') ? wait.promise : undefined;
+  let pending!: Promise<unknown>; await act(async () => { pending = capture(api.mail!({ kind: 'analyze', messageId: 'mail', consent: true })); });
+  await act(async () => { await api.switchWorkspace(B); });
+  await act(async () => { wait.resolve(response({ workspace: clone(stores.get(A)!), receipt: {} })); await pending; });
+  expect(api.workspace!.id).toBe(B); expect(api.saving).toBe(false);
+});
 function state(): MistState {
   return {
     ...newModuleFixture({actorName:'测试',now:'2026-10-13T00:00:00.000Z',id:()=>crypto.randomUUID()},'empty'),schemaVersion: 1, devs: [], versions: [], drafts: [], fabrics: [], orders: [], orderLines: [], productions: [], receipts: [], invoices: [], allocations: [], payments: [], customers: [], contacts: [], files: [], events: [], tasks: [], notifications: [], calendar: [],

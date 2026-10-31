@@ -1513,7 +1513,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       state.notifications.forEach(n => { if (!visible || visible.has(n.id)) n.readAt = context.now; });
       result={};break;
     }
-    case 'task.complete': {const task=find(state.tasks,p.id,'事项');if(isInternalDeliveryTask(task))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
+    case 'task.complete': {const task=find(state.tasks,p.id,'事项');if(task.kind==='email-extraction-review')throw new MistCommandError('PRECONDITION','请在原邮件中记录处理结果');if(isInternalDeliveryTask(task))throw new MistCommandError('PRECONDITION','请在内部交付记录中办理');task.done=!!p.done;if(task.done){task.doneAt=context.now;task.doneBy=context.actorName;}else{delete task.doneAt;delete task.doneBy;}result={id:p.id};break;}
     case 'calendar.save': {
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');

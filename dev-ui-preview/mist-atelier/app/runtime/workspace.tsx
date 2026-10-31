@@ -51,6 +51,7 @@ export type MistMailAction =
   | { kind: 'bind'; accountId: string; password: string }
   | { kind: 'disconnect'; accountId: string }
   | { kind: 'sync'; accountId: string }
+  | { kind: 'analyze'; messageId: string; consent: true }
   | { kind: 'send'; requestKey: string; draftId?: string; input?: Record<string, unknown>; forwardOfId?: string }
   | { kind: 'retry'; sendId: string; confirmUnknown?: boolean }
   | { kind: 'verify'; sendId: string };
@@ -485,11 +486,13 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     const call:{path:string;method:string;body?:unknown}=action.kind==='bind'?{path:'accounts/'+id(action.accountId)+'/credential',method:'PUT',body:{password:action.password}}
       :action.kind==='disconnect'?{path:'accounts/'+id(action.accountId)+'/credential',method:'DELETE'}
       :action.kind==='sync'?{path:'accounts/'+id(action.accountId)+'/sync',method:'POST',body:{}}
+      :action.kind==='analyze'?{path:'messages/'+id(action.messageId)+'/analyze',method:'POST',body:{consent:action.consent}}
       :action.kind==='send'?{path:'sends',method:'POST',body:{requestKey:action.requestKey,...(action.draftId?{draftId:action.draftId}:{}),...(action.input?{input:action.input}:{}),...(action.forwardOfId?{forwardOfId:action.forwardOfId}:{})}}
       :action.kind==='retry'?{path:'sends/'+id(action.sendId)+'/retry',method:'POST',body:action.confirmUnknown?{confirmUnknown:true}:{}}
       :{path:'sends/'+id(action.sendId)+'/verify',method:'POST',body:{}};
     if(action.kind==='send'&&(!mailRequestKey(action.requestKey)||!object(action.input)||!nonempty(action.input.accountId)))throw new RequestError('发送内容不完整，请重新核对后发送');
-    const token=lock();
+    // Model inference holds no client-wide mutation lock; the server commits a source-bound draft atomically.
+    const token=action.kind==='analyze'?null:lock();
     // 只有发送意图会存本机（收件人/正文属于本人待发内容）；绑定密码等凭据动作从不持久。
     const intent:Pending|null=action.kind==='send'?{workspaceId:boundWorkspaceId!,requestId:action.requestKey,expectedRevision:snapshot.current!.revision,actorId:authority.userId,kind:'mail-send',mail:JSON.parse(JSON.stringify({requestKey:action.requestKey,...(action.draftId?{draftId:action.draftId}:{}),...(action.forwardOfId?{forwardOfId:action.forwardOfId}:{}),input:action.input}))}:null;
     try{
@@ -501,13 +504,13 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       return {...(data.sync?{sync:data.sync}:{}),...(data.send?{send:data.send}:{})};
     }catch(failure){
       if(intent&&(pendingRef.current as Pending|null)?.requestId===intent.requestId&&mounted.current&&live.current.key===authority.key&&live.current.userId===authority.userId){
-        if(mailReviewCode(failure)){holdForReview(intent,(failure as Error).message,authority);if(live.current.key===authority.key)await load(authority,boundWorkspaceId).catch(()=>undefined);throw failure;}
+        if(mailReviewCode(failure)){holdForReview(intent,(failure as Error).message,authority);if(live.current.key===authority.key&&scopeEpoch.current===boundEpoch&&snapshot.current?.id===boundWorkspaceId)await load(authority,boundWorkspaceId).catch(()=>undefined);throw failure;}
         if(mailSendSettled(failure))clearPending(authority);
-        else{const message=(failure instanceof Error?failure.message:'发送未完成');const unsure=message.includes('发送结果尚未确认')?message:message+'；发送结果尚未确认，请核对原请求';if(live.current.key===authority.key)await load(authority,boundWorkspaceId).catch(()=>undefined);throw new RequestError(unsure,failure instanceof RequestError?failure.status:0,failure instanceof RequestError?failure.code:undefined);}
+        else{const message=(failure instanceof Error?failure.message:'发送未完成');const unsure=message.includes('发送结果尚未确认')?message:message+'；发送结果尚未确认，请核对原请求';if(live.current.key===authority.key&&scopeEpoch.current===boundEpoch&&snapshot.current?.id===boundWorkspaceId)await load(authority,boundWorkspaceId).catch(()=>undefined);throw new RequestError(unsure,failure instanceof RequestError?failure.status:0,failure instanceof RequestError?failure.code:undefined);}
       }
-      if(live.current.key===authority.key)await load(authority,boundWorkspaceId).catch(()=>undefined);
+      if(live.current.key===authority.key&&scopeEpoch.current===boundEpoch&&snapshot.current?.id===boundWorkspaceId)await load(authority,boundWorkspaceId).catch(()=>undefined);
       throw failure;
-    }finally{unlock(token,authority);}
+    }finally{if(token)unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,assertSource,lock,load,put,unlock,persist,clearPending,holdForReview]);
   const run = React.useCallback(async (command: MistCommand) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);

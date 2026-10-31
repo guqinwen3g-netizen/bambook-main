@@ -288,6 +288,19 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistEmail.ts"
  },
  {
+  "type": "email.extraction.resolve",
+  "payload": "{ id: string; taskId: string; outcome: 'handled' | 'not_applicable'; note: string }",
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
+  "type": "email.extraction.review",
+  "payload": "EmailReviewInput",
+  "types": {
+   "EmailReviewInput": "{ id: string; analysisId: string; category: string; fields: Array<{ id: string; value: string }>; note?: string }"
+  },
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
   "type": "email.flag",
   "payload": "{ id: string; flag: 'read' | 'starred' | 'important'; value: boolean }",
   "source": "server/src/shared/mistEmail.ts"
@@ -317,6 +330,15 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "EmailConnection": "'not_connected' | 'example' | 'connected' | 'syncing' | 'partial' | 'error'",
    "EmailProblem": "{ code: string; message: string; at: string }"
+  },
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
+  "type": "email.server.analysis",
+  "payload": "{ id: string; analysis: EmailAnalysis }",
+  "types": {
+   "EmailAnalysis": "{ id: string; at: string; actor: string; sourceHash: string; category: string; summary: string; fields: EmailAnalysisField[]; warnings: string[]; truncated: boolean; attachmentCount: number; }",
+   "EmailAnalysisField": "{ id: string; field: string; value: string; source: 'subject' | 'body'; quote: string }"
   },
   "source": "server/src/shared/mistEmail.ts"
  },

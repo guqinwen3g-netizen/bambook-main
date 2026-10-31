@@ -1,3 +1,4 @@
+import { MailReviewPanel } from './MailReviewPanel';
 import { MailStateStatus } from './MailStateStatus';
 import {useMailReceiving,MailReceivingControl,MailReceivingNotice} from './MailReceiving';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -358,13 +359,13 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
   const record = m.sendId ? (state.email.sends || []).find(row => row.id === m.sendId) : undefined;
   const account = state.email.accounts.find(a => a.id === m.accountId), suggestion = contactSuggestion(state, m), source = SOURCE_LABEL[m.category.source];
   const noWrite = can ? false : '需要邮件编辑权限';
-  const [kind, setKind] = React.useState<EmailLinkKind>('order'), [target, setTarget] = React.useState(''), [submitTo, setSubmitTo] = React.useState('');
-  React.useEffect(() => { setTarget(''); setSubmitTo(''); }, [m.id]);
+  const [kind, setKind] = React.useState<EmailLinkKind>('order'), [target, setTarget] = React.useState('');
+  React.useEffect(() => { setTarget(''); }, [m.id]);
   const options: Record<EmailLinkKind, Array<{ value: string; label: string }>> = {
     customer: state.customers.map(row => ({ value: row.id, label: row.name })), development: state.devs.map(row => ({ value: row.id, label: `${row.code} · ${row.name}` })),
     order: state.orders.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` })), invoice: state.invoices.filter(row => !row.voidedAt).map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` })),
   };
-  const submittable = m.links.filter(link => !m.submissions.some(s => linkKey(s.link) === linkKey(link)) && emailLinkTarget(state, link));
+
   const tasks = m.followUpTaskIds.map(id => state.tasks.find(task => task.id === id)).filter((task): task is MistState['tasks'][number] => !!task);
   const actions: ReasonedAction[] = [
     { label: '回复', icon: Reply, onClick: () => onRespond('reply'), primary: true, reason: noWrite, hidden: m.folder === 'trash' },
@@ -376,7 +377,7 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
     { label: '恢复', icon: RotateCcw, onClick: () => void exec({ type: 'email.move', payload: { id: m.id, folder: 'restore' } }, '邮件已恢复'), primary: true, reason: noWrite, hidden: m.folder !== 'trash' },
   ];
   const link = async (value: EmailLink, done: string) => { if (await exec({ type: 'email.link', payload: { id: m.id, link: value } }, done)) setTarget(''); };
-  const submit = async () => { const value = submittable.find(row => linkKey(row) === submitTo); if (value && await exec({ type: 'email.submitExtraction', payload: { id: m.id, link: value } }, '已提交，等待业务对象负责人复核')) setSubmitTo(''); };
+
   const sender = m.from.name || m.from.address;
   return <DetailBody data-email-detail={m.id}>
     <div className="mist-mail-tools">
@@ -436,16 +437,7 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
         <Button icon={Link2} disabled={locked || !target} onClick={() => void link({ kind, id: target }, '已关联')}>{uiText("关联")}</Button>
       </div>}
     </DetailBlock>
-    <DetailBlock title={uiText("分类与抽取")} aside={<Pill tone={source.tone}>{uiText(source.label)}</Pill>}>
-      <span className="mist-sub">{uiText(m.category.label ? `${m.category.label} · ` : '')}{m.category.detail}</span>
-      {m.extracted.length ? <Facts items={m.extracted.map(item => ({ label: item.field, value: item.value }))} /> : <span className="mist-note">{uiText("没有抽取到结构化资料。")}</span>}
-      {m.extracted.length > 0 && can && <div className="mist-row mist-mail-picker">
-        <Select aria-label={uiText("提交到业务对象")} value={submitTo} onChange={event => setSubmitTo(event.target.value)} placeholder={uiText(submittable.length ? '选择已关联对象' : m.links.length ? '已全部提交' : '请先关联业务对象')} options={submittable.map(row => ({ value: linkKey(row), label: `${EMAIL_LINK_LABEL[row.kind]} · ${emailLinkTarget(state, row)!.label}` }))} />
-        <Button icon={Sparkles} disabled={locked || !submitTo} onClick={() => void submit()}>{uiText("提交到业务对象")}</Button>
-      </div>}
-      {m.extracted.length > 0 && <span className="mist-note">{uiText("提交只生成复核待办，不直接改写客户、订单或发票数据。")}</span>}
-      {m.submissions.map(s => <span key={s.taskId} className="mist-note">{shortWhen(s.at)} {s.actor}{uiText(" 提交到")}{EMAIL_LINK_LABEL[s.link.kind]} {emailLinkTarget(state, s.link)?.label || '对象已不可用'} · {uiText(state.tasks.find(task => task.id === s.taskId)?.done ? '已复核' : '待复核')}</span>)}
-    </DetailBlock>
+    <MailReviewPanel key={m.id} message={m} state={state} can={can} locked={locked} exec={exec} onOpen={onOpen} />
     <DetailBlock title={uiText("跟进")} aside={can ? <Button size="sm" icon={CalendarPlus} disabled={locked || m.folder === 'trash'} title={uiText(m.folder === 'trash' ? '已删除的邮件不能生成跟进' : undefined)} onClick={onFollowUp}>{uiText("生成跟进")}</Button> : undefined}>
       {tasks.length ? tasks.map(task => <div key={task.id} className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={task.done ? 'ok' : 'accent'}>{uiText(task.done ? '已完成' : '待跟进')}</Pill><span>{task.title}</span><span className="mist-spacer" /><small className="mist-muted">{uiText("截止 ")}{task.due}</small></div>) : <span className="mist-note">{uiText("还没有跟进待办。")}</span>}
     </DetailBlock>

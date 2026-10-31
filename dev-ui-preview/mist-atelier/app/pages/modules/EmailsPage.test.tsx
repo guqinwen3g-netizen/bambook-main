@@ -15,9 +15,26 @@ let host:HTMLElement,root:Root;const go=vi.fn();let n=0;
 const ctx={id:()=>'id-'+(++n),now:'2026-10-14T02:00:00Z',actorName:'顾言'} as any;
 function render(id?:string){act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'emails',id},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><EmailsPage/></Nav.Provider></ToastProvider></MistRoot>));}
 const button=(label:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent?.trim()===label) as HTMLButtonElement|undefined;
+function analysisMail() { const m=store.state!.email.messages[0];m.example=false;m.analysis={id:'analysis-1',at:ctx.now,actor:'顾言',sourceHash:'test',category:'订单往来',summary:'待确认的订单需求',fields:[{id:'field-1',field:'数量',value:'1,200 件',source:'body',quote:'双面羊毛城市大衣 1,200 件'}],warnings:[],truncated:false,attachmentCount:1};return m; }
 async function click(node:HTMLElement){await act(async()=>node.click());}
 beforeEach(()=>{session.denied=new Set();store.state=createMistState(ctx,'demo');store.run.mockReset();store.run.mockResolvedValue({result:{}});store.mail.mockReset();store.recover.mockReset();store.closeMailReview.mockReset();store.pending=null;store.saving=false;store.downloadFile.mockReset();go.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+
+it('requires explicit AI consent and does not call the model when cancelled',async()=>{
+  const m=store.state!.email.messages[0];m.example=false;render(m.id);await click(button('AI 整理')!);
+  expect(store.mail).not.toHaveBeenCalled();expect(document.body.textContent).toContain('附件不参与');await click(button('取消')!);expect(store.mail).not.toHaveBeenCalled();
+  await click(button('AI 整理')!);await click(button('开始整理')!);expect(store.mail).toHaveBeenCalledWith({kind:'analyze',messageId:m.id,consent:true});
+});
+it('displays evidence and attachment limits and only submits a human review of the opened draft',async()=>{
+  const m=analysisMail();render(m.id);expect(document.body.textContent).toContain('附件未参与整理');expect(button('提交到业务对象')).toBeUndefined();
+  await click(button('复核资料')!);expect(document.body.textContent).toContain('原文依据');
+  m.analysis={...m.analysis!,id:'analysis-2'};render(m.id);await click(button('保存复核')!);
+  expect(store.run).toHaveBeenLastCalledWith({type:'email.extraction.review',payload:{id:m.id,analysisId:'analysis-1',category:'订单往来',fields:[{id:'field-1',value:'1,200 件'}],note:''}});
+});
+it('shows safe model failure without manufacturing a category or formal submission',async()=>{
+  const m=store.state!.email.messages[0];m.example=false;store.mail.mockRejectedValue(new Error('模型响应超时，请稍后重试'));render(m.id);await click(button('AI 整理')!);await click(button('开始整理')!);
+  expect(document.body.textContent).toContain('模型响应超时');expect(button('复核资料')).toBeUndefined();expect(button('提交到业务对象')).toBeUndefined();
+});
 
 it('shows an honest empty state when no mailbox is connected',()=>{
   store.state=createMistState(ctx,'empty');render();
