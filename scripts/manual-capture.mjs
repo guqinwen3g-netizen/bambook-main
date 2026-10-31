@@ -47,6 +47,14 @@ const QUOTE_ACCEPTED = 'Olivia Grant 10-31 邮件确认接受 V2 报价，PO 随
 const DEV_CONFIRMER = 'Olivia Grant（Cedar & Crown 采购）', DEV_BASIS = '客户 10-31 邮件确认 R2-A-2 大货样，可按此生产。';
 const ORDER_DUE = '2026-12-20', CUSTOMER_PO = 'CC-PO-2026-1188';
 const HANDOFF_NOTE = '两款整单出运，FOB 上海，收货人与通知方按 PO；定金 30% 到账后安排订舱。';
+const PO_NAME = '双面羊毛城市大衣 GA-2711 成衣（全包）', PO_PLACE = '上海浦东指定货代仓库（按订舱通知送货）';
+const PO_SPEC = '按 R2-A-2 确认样与客户 PO CC-PO-2026-1188；面辅料由工厂采购；含 13% 增值税专票。';
+const PO_SENT = '邮件发送 PO-2026-00006 采购单 PDF 给江南成衣王经理', PO_CONFIRM = '江南成衣盖章回签采购单，确认 12-10 交货。';
+const openPurchase = [
+  { target: p => nav(p, '订单履约', '采购管理'), act: l => l.click() },
+  { target: p => p.locator('[role=row]', { hasText: 'PO-2026-00006' }).first(), act: l => l.click() },
+  { target: p => p.getByRole('button', { name: '打开采购订单' }), act: l => l.click() },
+];
 const QTY_BASIS = '客户 PO CC-PO-2026-1188 按款号总量下单：大衣 800 件、马甲 600 件，分色分码后补。';
 const openQuote = [
   { target: p => nav(p, '订单履约', '报价管理'), act: l => l.click() },
@@ -230,6 +238,41 @@ const LESSONS = {
     { target: p => p.getByRole('dialog').last().getByLabel('交接说明'), act: l => l.fill(HANDOFF_NOTE), value: HANDOFF_NOTE },
     { target: p => p.getByRole('dialog').last().getByRole('button', { name: '确认交接' }), act: l => l.click() },
   ],
+  'purchase-draft': [
+    { profile: 'demo-sales', ...openOrder[0] }, openOrder[1],
+    { target: p => p.getByText('双面羊毛城市大衣').first(), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '准备采购草稿' }), act: l => l.click() },
+    { target: p => p.getByRole('button', { name: '新建采购订单' }).last(), act: l => l.click() },
+    { target: p => p.getByLabel('供应商'), act: l => l.selectOption({ label: '江南成衣' }), value: '江南成衣' },
+    { target: p => p.getByLabel('采购品名'), act: l => l.fill(PO_NAME), value: PO_NAME },
+    { target: p => p.getByRole('button', { name: '下一步' }), act: l => l.click() },
+    { target: p => p.getByLabel('含税 / 约定单价'), act: l => l.fill('410'), value: '410' },
+    { target: p => p.getByRole('button', { name: '下一步' }), act: l => l.click() },
+    { target: p => p.getByLabel('付款条件'), act: l => l.selectOption({ label: '预付 30%，余款发货前付清' }), value: '预付 30%，余款发货前付清' },
+    { target: p => p.getByLabel('主要交付地点'), act: l => l.fill(PO_PLACE), value: PO_PLACE },
+    { target: p => p.getByLabel('规格与交付要求'), act: l => l.fill(PO_SPEC), value: PO_SPEC },
+    { target: p => p.getByRole('button', { name: '下一步' }), act: l => l.click() },
+    { target: p => p.getByRole('button', { name: '保存为草稿' }), act: l => l.click() },
+  ],
+  'purchase-submit': [
+    { profile: 'demo-sales', ...openPurchase[0] }, openPurchase[1], openPurchase[2],
+    { target: p => p.getByRole('button', { name: '提交审批' }), act: l => l.click() },
+  ],
+  'purchase-approve': [
+    { profile: 'demo-reviewer', target: p => p.getByText(/PO-2026-00006 · 江南成衣/).last(), act: l => l.click() },
+    { target: p => p.locator('textarea').last(), act: l => l.fill('单价低于订单售价，交期早于订单交期 10 天，同意下单。'), value: '单价低于订单售价，交期早于订单交期 10 天，同意下单。' },
+    { target: p => p.getByRole('button', { name: '批准' }), act: l => l.click() },
+  ],
+  'purchase-send': [
+    { profile: 'demo-sales', ...openPurchase[0] }, openPurchase[1], openPurchase[2],
+    { target: p => p.getByRole('button', { name: '生成采购单' }), act: async (l, p) => { await l.click(); await p.getByText(/PO-2026-00006-V1-01\.pdf/).first().waitFor({ timeout: 20000 }); } },
+    { target: p => p.getByRole('button', { name: '登记合同线下发出' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('发出方式与依据'), act: l => l.fill(PO_SENT), value: PO_SENT },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '登记发出' }), act: l => l.click() },
+    { target: p => p.getByRole('button', { name: '登记供应商确认' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('供应商确认依据'), act: l => l.fill(PO_CONFIRM), value: PO_CONFIRM },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '登记确认' }), act: l => l.click() },
+  ],
   'short-close': [
     { profile: 'demo-buyer', target: p => p.getByText('PO-2026-00001 · 待最终结算').first(), act: l => l.click() },
     { target: p => dialog(p, '提交结算').getByRole('checkbox', { name: '最终结算' }), act: l => l.check({ force: true }) },
@@ -295,7 +338,7 @@ async function capture(browser, name) {
 }
 
 /** 主干第一段：报价 → 订单（重置本地数据后依次执行）。 */
-const ORDER_CHAIN = ['quote-approve', 'quote-send', 'quote-accept', 'dev-confirm', 'quote-convert', 'order-contract', 'order-lines', '_order-lines-2', 'order-submit', 'order-approve', 'order-handoff'];
+const ORDER_CHAIN = ['quote-approve', 'quote-send', 'quote-accept', 'dev-confirm', 'quote-convert', 'order-contract', 'order-lines', '_order-lines-2', 'order-submit', 'order-approve', 'order-handoff', 'purchase-draft', 'purchase-submit', 'purchase-approve', 'purchase-send'];
 const names = process.argv.slice(2).flatMap(n => n === 'chain' ? CHAIN : n === 'order-chain' ? ORDER_CHAIN : [n]);
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 const browser = await chromium.launch(executablePath ? { executablePath } : {});

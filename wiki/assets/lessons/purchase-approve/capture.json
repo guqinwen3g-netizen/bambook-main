@@ -1,0 +1,37 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 388,
+        "y": 810,
+        "width": 461,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 814,
+        "y": 687,
+        "width": 552,
+        "height": 81
+      },
+      "value": "单价低于订单售价，交期早于订单交期 10 天，同意下单。"
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 802,
+        "y": 782,
+        "width": 82,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp"
+}

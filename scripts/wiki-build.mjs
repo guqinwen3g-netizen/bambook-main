@@ -39,7 +39,7 @@ function polish(html) {
 
 const snap = snapshot();
 const { version, head, branch, chapters, modules, missingModules } = snap;
-const TRACKS = ['报价到订单', '采购结算与付款'];
+const TRACKS = ['报价到订单', '采购与生产', '采购结算与付款'];
 const trackOf = lesson => lesson.track || '采购结算与付款';
 const trackIndex = lesson => { const i = TRACKS.indexOf(trackOf(lesson)); return i < 0 ? TRACKS.length : i; };
 const lessons = fs.readdirSync(path.join(WIKI, 'lessons')).filter(f => f.endsWith('.json'))

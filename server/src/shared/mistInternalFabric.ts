@@ -114,7 +114,7 @@ export function assertGarmentMaterial(root: MistState, orderId: string, lineId: 
   const finished=garmentFinishedPurchases(root,orderId,lineId);
   if(finished.length){if(!finished.some(p=>p.state==='approved'))fail('全包成品采购尚未批准');return;}
   resolveMember(context, order.ownerId, '成衣负责人', 'garment');
-  if (rows.length !== 1 || rows[0].orderId !== orderId) fail(mode.fulfillmentMode === 'full_package' ? '全包条目须先分配内部面料' : '请先分配内部面料');
+  if (rows.length !== 1 || rows[0].orderId !== orderId) fail(mode.fulfillmentMode === 'full_package' ? '全包条目须先建成品采购（工厂包工包料）并获批准，或分配内部面料' : '请先分配内部面料');
   const row = rows[0]; supplyFor(root, row.fabricOrderId, row.fabricLineId, context); if (metresMinor(row.metres) - quantityMinor(row.shortClosure?.quantity || 0) <= BigInt(0)) fail('内部面料已短结，暂无实收');
 }
 /** A PP sample records the approved material plan it was made against; later changes cannot reuse that proof. */
@@ -125,7 +125,7 @@ export function garmentMaterialFingerprint(root: MistState, orderId: string, lin
   if(finished.length)return JSON.stringify({mode:'supplier_full_package',contracts:finished.map(p=>({id:p.id,supplierId:p.supplierId,description:p.description,note:p.note,fileIds:[...p.fileIds].sort()})).sort((a,b)=>a.id.localeCompare(b.id))});
   const allocation=(root.internalFabricAllocations||[]).find(row=>row.orderId===orderId&&row.lineId===lineId&&row.status==='active');
   if(!allocation && line.fulfillmentMode!=='full_package')return '';
-  if(!allocation)fail('全包条目须先分配内部面料');
+  if(!allocation)fail('全包条目须先建成品采购（工厂包工包料）并获批准，或分配内部面料');
   const source=lineFor(root,allocation!.fabricOrderId,allocation!.fabricLineId);
   const fabric = source.line as MistOrderLine & Partial<OrderGovernanceLine>;
   // Price, payment and source capacity changes do not alter the physical sample.

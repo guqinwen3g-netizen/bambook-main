@@ -121,16 +121,16 @@ describe('current Mist internal fabric contract', () => {
   });
   it('blocks full-package PP creation before allocation but accepts an approved plan before physical fabric production', () => {
     const f = fixture(), { productionId } = f.production(), before = JSON.stringify(f.state);
-    expect(() => f.pp(productionId)).toThrow('先分配内部面料'); expect(JSON.stringify(f.state)).toBe(before);
+    expect(() => f.pp(productionId)).toThrow('或分配内部面料'); expect(JSON.stringify(f.state)).toBe(before);
     f.allocate(); expect(f.pp(productionId)).toBeTruthy();
     expect(f.state.fulfillment.purchases.every(row => row.orderId !== f.source.orderId)).toBe(true); expect(f.state.fulfillment.stock).toHaveLength(0);
   });
   it('uses the same fresh gate on PP, release and continued production after a cancelled allocation', () => {
     const f = fixture(), { productionId } = f.production(), id = f.allocate().id!; f.pp(productionId);
     f.run({ type: 'order.fabric.cancel', payload: { id, expectedRevision: 1 } });
-    expect(() => f.run({ type: 'fulfillment.production.release', payload: { productionId, note: '拟开产' } })).toThrow('先分配内部面料');
-    expect(() => f.run({ type: 'production.move', payload: { id: productionId, col: 'sew' } })).toThrow('先分配内部面料');
-    expect(() => f.run({ type: 'production.update', payload: { id: productionId, pct: 10 } })).toThrow('先分配内部面料');
+    expect(() => f.run({ type: 'fulfillment.production.release', payload: { productionId, note: '拟开产' } })).toThrow('或分配内部面料');
+    expect(() => f.run({ type: 'production.move', payload: { id: productionId, col: 'sew' } })).toThrow('或分配内部面料');
+    expect(() => f.run({ type: 'production.update', payload: { id: productionId, pct: 10 } })).toThrow('或分配内部面料');
   });
   it('revoked receiver membership, invalid source approval and over-allocation block the gate without changing evidence', () => {
     const f = fixture(); f.allocate(); const stale = { ...f.context, members: f.context.members!.map(member => member.id === 'garment' ? { ...member, active: false } : member) };

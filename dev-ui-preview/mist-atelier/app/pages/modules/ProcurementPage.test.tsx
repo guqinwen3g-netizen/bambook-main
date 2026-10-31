@@ -12,7 +12,7 @@ const store=vi.hoisted(()=>({state:null as MistState|null,loading:false,error:''
 const session=vi.hoisted(()=>({id:'buyer',denied:new Set<string>()}));
 vi.mock('../../runtime/workspace',()=>({useMistWorkspace:()=>store}));
 vi.mock('../../runtime/auth', () => { const useMistSession = ()=>({user:{id:session.id,displayName:'经办人'},sessionKey:'s',hasPermission:(p:string)=>!session.denied.has(p),canAccessView:()=>true}); return { useMistSession, useOptionalMistSession: useMistSession }; });
-import {ProcurementPage} from './ProcurementPage';
+import {ProcurementPage,factoryDueFor,isDomesticSupplier} from './ProcurementPage';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
 let host:HTMLElement,root:Root;const go=vi.fn();
 function render(id?:string,mode:'full'|'list'=id?'full':'list',scope:Record<string,string>={}){const detail=mode==='full'?mode:undefined;act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement',id,detail,...scope},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));}
@@ -436,4 +436,11 @@ it.each(['finished','processing'] as const)('names %s handover paths by the real
  const paths=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
  if(kind==='finished'){expect(paths.textContent).toContain('工厂或指定地点交接');expect(paths.textContent).not.toContain('加工方');}
  else{expect([...paths.options].some(option=>option.value==='warehouse')).toBe(false);expect(paths.value).toBe('supplier');}
+});
+it('defaults a new purchase due date before the order delivery and treats mainland suppliers as domestic',()=>{
+ expect(factoryDueFor('2026-12-20','2026-10-31')).toBe('2026-12-10');
+ expect(factoryDueFor('2026-11-03','2026-10-31')).toBe('2026-10-31');
+ expect(factoryDueFor(undefined,'2026-10-31')).toBe('2026-10-31');
+ expect(isDomesticSupplier({country:'中国'})).toBe(true);expect(isDomesticSupplier({country:'China'})).toBe(true);
+ expect(isDomesticSupplier({country:'中国香港'})).toBe(false);expect(isDomesticSupplier({country:'Vietnam'})).toBe(false);
 });

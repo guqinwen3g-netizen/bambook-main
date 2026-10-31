@@ -36,6 +36,14 @@ const STAGE_LABEL: Record<Stage, string> = { draft: '需求草稿', pending: '�
 const STAGE_TONE: Record<Stage, Tone> = { draft: 'neutral', pending: 'warn', supplier: 'accent', fulfilling: 'accent', done: 'ok' };
 const entryOf = (purchase: FulfillmentPurchase): Entry => purchase.kind === 'processing' ? 'processing' : 'purchase';
 /** Approval state plus real offline facts; never infers supplier progress that was not recorded. */
+/** 新采购的要求交期默认取订单交期前 10 天（留出尾期检验与订舱出运），且不早于今天；可改。 */
+export function factoryDueFor(orderDue: string | undefined, today: string) {
+  if (!orderDue || !/^\d{4}-\d{2}-\d{2}$/.test(orderDue)) return today;
+  const due = new Date(Date.parse(orderDue + 'T00:00:00Z') - 10 * 86400000).toISOString().slice(0, 10);
+  return due > today ? due : today;
+}
+/** 供应商国家为中国（大陆）即视为境内供应商；港澳台与境外供应商不在此列。 */
+export const isDomesticSupplier = (supplier: { country?: string }) => /^(中国|中国大陆|China|CN|PRC)$/i.test((supplier.country || '').trim());
 export function purchaseStage(purchase: FulfillmentPurchase): Stage {
   if (purchase.state === 'draft' || purchase.state === 'rejected') return 'draft';
   if (purchase.state === 'pending') return 'pending';
@@ -106,13 +114,15 @@ export function ProcurementPage() {
       { id: 'delivery', label: '交付约定', fields: ['due', 'terms', 'destination', 'note'] },
     ],
     fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), choiceField('unit', '计量单位', UNITS), field('price', '含税 / 约定单价', 'number'), choiceField('currency', '币种', CURRENCIES, true, true), field('due', '交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
-    initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : sourceLine?.fulfillmentMode === 'full_package' && domain === 'garment' ? 'finished' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', price: p?.price || 0, currency: p?.currency || sourceOrder?.currency || 'USD', due: p?.due || today(), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
+    initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : sourceLine?.fulfillmentMode === 'full_package' && domain === 'garment' ? 'finished' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', price: p?.price || 0, currency: p?.currency || 'CNY', due: p?.due || factoryDueFor(sourceOrder?.due, today()), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
     submit: async values => {
       if (!state) return;
       const source = parseSource(state, text(values, 'source'));
       if (source.kind !== 'orderLine') throw new Error('采购必须关联订单条目');
       const supplier = state.market.suppliers.find(s => s.id === text(values, 'supplierId'));
       if (!supplier) throw new Error('请选择当前供应商');
+      // 境内供应商的交易按人民币计价结算（外汇管理要求），不沿用销售订单的外币。
+      if (isDomesticSupplier(supplier) && text(values, 'currency') !== 'CNY') throw new Error(`${supplier.name} 是境内供应商，采购合同须以人民币（CNY）计价结算`);
       const choice = text(values, 'kind');
       const { kind, materialKind } = parsePurchaseContent(choice, domain);
       const saved = await run({ type: 'fulfillment.procurement.save', payload: { ...(p ? { id: p.id } : {}), orderId: source.orderId, lineId: source.lineId, kind, ...(kind === 'material' ? { materialKind } : {}), supplierId: supplier.id, supplier: supplier.name, description: text(values, 'description'), quantity: number(values, 'quantity'), unit: text(values, 'unit'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), destination: text(values, 'destination'), note: text(values, 'note'), fileIds: p?.fileIds || [] } });
