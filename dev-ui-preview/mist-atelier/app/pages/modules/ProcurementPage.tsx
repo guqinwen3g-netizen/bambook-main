@@ -1,4 +1,6 @@
 import { MaterialDeliveryPanel } from '../MaterialDeliveryPanel';
+import {isDomesticSupplier, procurementCurrencyProblem} from '../../../../../server/src/shared/mistProcurementCurrency';
+export {isDomesticSupplier} from '../../../../../server/src/shared/mistProcurementCurrency';
 import { hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
 import { purchaseName } from '../businessNames';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -42,8 +44,6 @@ export function factoryDueFor(orderDue: string | undefined, today: string) {
   const due = new Date(Date.parse(orderDue + 'T00:00:00Z') - 10 * 86400000).toISOString().slice(0, 10);
   return due > today ? due : today;
 }
-/** 供应商国家为中国（大陆）即视为境内供应商；港澳台与境外供应商不在此列。 */
-export const isDomesticSupplier = (supplier: { country?: string }) => /^(中国|中国大陆|China|CN|PRC)$/i.test((supplier.country || '').trim());
 export function purchaseStage(purchase: FulfillmentPurchase): Stage {
   if (purchase.state === 'draft' || purchase.state === 'rejected') return 'draft';
   if (purchase.state === 'pending') return 'pending';
@@ -121,8 +121,8 @@ export function ProcurementPage() {
       if (source.kind !== 'orderLine') throw new Error('采购必须关联订单条目');
       const supplier = state.market.suppliers.find(s => s.id === text(values, 'supplierId'));
       if (!supplier) throw new Error('请选择当前供应商');
-      // 境内供应商的交易按人民币计价结算（外汇管理要求），不沿用销售订单的外币。
-      if (isDomesticSupplier(supplier) && text(values, 'currency') !== 'CNY') throw new Error(`${supplier.name} 是境内供应商，采购合同须以人民币（CNY）计价结算`);
+      const currencyProblem = procurementCurrencyProblem(supplier, text(values, 'currency'));
+      if (currencyProblem) throw new Error(currencyProblem);
       const choice = text(values, 'kind');
       const { kind, materialKind } = parsePurchaseContent(choice, domain);
       const saved = await run({ type: 'fulfillment.procurement.save', payload: { ...(p ? { id: p.id } : {}), orderId: source.orderId, lineId: source.lineId, kind, ...(kind === 'material' ? { materialKind } : {}), supplierId: supplier.id, supplier: supplier.name, description: text(values, 'description'), quantity: number(values, 'quantity'), unit: text(values, 'unit'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), destination: text(values, 'destination'), note: text(values, 'note'), fileIds: p?.fileIds || [] } });

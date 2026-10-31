@@ -122,6 +122,7 @@ it('keeps purchase orders and outsourced processing as separate entries inside e
 });
 
 it('derives stages only from recorded facts and puts exceptions first',()=>{
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-13T10:00:00Z'));
   store.state!.fulfillment.purchases.push(
     purchase('a-draft'),purchase('b-pending',{state:'pending',submittedAt:'2026-10-02T08:00:00Z'}),
     purchase('c-unsent',approved({due:'2026-11-20'})),

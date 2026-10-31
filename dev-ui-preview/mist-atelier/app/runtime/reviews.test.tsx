@@ -26,7 +26,7 @@ function publish(){bridge.version++;bridge.listeners.forEach(listener=>listener(
 function Probe(){const workspace=useMistWorkspace();return <p data-testid="business-state">{workspace.workspace?.id}:{(workspace.state as any).orderStatus}</p>;}
 let route:Route={view:'approvals'};const go=vi.fn();
 function Harness(){const [current,setCurrent]=React.useState<Route>(route);route=current;go.mockImplementation((view:string,id?:string,target={})=>setCurrent({view,id,...target}));
- return <Nav.Provider value={{route:current,go,theme:'light',toggleTheme:vi.fn(),openAI:vi.fn(),openPalette:vi.fn()} as any}><MistReviewProvider><Probe/><MistReviewButton/>{current.view==='approvals'&&<ApprovalsPage/>}</MistReviewProvider></Nav.Provider>;}
+ return <Nav.Provider value={{route:current,go,theme:'light',toggleTheme:vi.fn(),openAI:vi.fn(),openPalette:vi.fn()} as any}><MistReviewProvider><Probe/><MistReviewButton/>{current.view==='approvals'&&<ApprovalsPage key={JSON.stringify(current)}/>}</MistReviewProvider></Nav.Provider>;}
 async function render(){await act(async()=>root.render(<MistRoot><ToastProvider><Harness/></ToastProvider></MistRoot>));}
 async function click(name:string|RegExp){await act(async()=>getByRole(document.body,'button',{name}).click());}
 function tableRows(){return [...host.querySelectorAll<HTMLElement>('[aria-label="审批事项"] [role="row"][tabindex]')];}
@@ -133,4 +133,16 @@ it('routes the top-bar entry to the approvals page and announces how many items 
  const button=getByRole(document.body,'button',{name:'审批与放行（1 项待我审批）'});
  await act(async()=>button.click());expect(go).toHaveBeenLastCalledWith('approvals');
  expect(tableRows().length).toBe(1);
+});
+
+it('opens and reopens a compact approval after navigation remounts its page', async () => {
+ vi.stubGlobal('matchMedia',(query:string)=>({matches:true,media:query,addEventListener(){},removeEventListener(){}}));
+ await render();await openRow();
+ expect(getByRole(document.body,'dialog',{name:'SO-ONE 主单审批'})).toBeTruthy();
+ expect(getByRole(document.body,'button',{name:'批准'})).toBeTruthy();
+ await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
+ expect(queryByRole(document.body,'dialog',{name:'SO-ONE 主单审批'})).toBeNull();
+ await openRow();
+ expect(getByRole(document.body,'dialog',{name:'SO-ONE 主单审批'})).toBeTruthy();
+ expect(postCount).toBe(0);
 });
