@@ -90,5 +90,13 @@
   "nextLesson": {
     "id": "tutorial-quote-accept",
     "title": "登记客户接受"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:37:18.655Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "9d8edc6dbb7bbe81fb4be5e8d2a1b6f7bfad8d7aee91b7e49b7cf7ca8b9c1b80"
+    }
   }
 }

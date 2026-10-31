@@ -70,5 +70,9 @@
       }
     }
   ],
-  "result": "result.webp"
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "51ccc0a7aa10d4b7026bd21356525761c6b8a70c",
+    "capturedAt": "2026-10-31T12:48:37.957Z"
+  }
 }

@@ -69,5 +69,13 @@
   "nextLesson": {
     "id": "tutorial-purchase-send",
     "title": "发出合同并登记供应商确认"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:30:38.789Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "6f0d67d5bf24f36c9023fb6e20bca9a2af381235c9415494b8fea413b124e59f"
+    }
   }
 }

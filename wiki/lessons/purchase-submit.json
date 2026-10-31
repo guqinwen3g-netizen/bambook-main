@@ -55,5 +55,13 @@
   "nextLesson": {
     "id": "tutorial-purchase-approve",
     "title": "审批采购"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:34:19.729Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "7a7d86d790a425595a5de0645b937baae8b5c3f29c9ba9d13b9394f5e3924e4a"
+    }
   }
 }

@@ -126,5 +126,13 @@
       "title": "完成标准",
       "text": "档案「收款账户」有这条账户，开户行、账号与确认件一致。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:15:40.850Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "91795ff37d47eac3cf0b7c4a6f38d8395a212402575504c420928afd2341a32e"
+    }
+  }
 }

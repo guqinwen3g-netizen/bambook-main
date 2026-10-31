@@ -96,6 +96,8 @@ const sections = chapters
 const html = `<!doctype html>
 <html lang="zh-CN">
 <head>
+<meta name="color-scheme" content="light dark">
+<script>/* 跟随应用里本机选择的深浅色（bambook.device.theme），未选时跟随系统。 */(()=>{const root=document.documentElement,media=matchMedia('(prefers-color-scheme: dark)');const pick=()=>{let theme='system';try{theme=JSON.parse(localStorage.getItem('bambook.device.theme')||'"system"');}catch{}root.dataset.theme=theme==='dark'||(theme!=='light'&&media.matches)?'dark':'light';};pick();media.addEventListener('change',pick);addEventListener('storage',event=>{if(event.key==='bambook.device.theme')pick();});})();</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bambook 员工使用手册 · v${esc(version)}</title>
@@ -170,6 +172,34 @@ tbody th{background:var(--bg-2);width:180px;font-weight:600;color:var(--ink-2)}
 mark{background:#fff3b0;padding:0 2px}
 ${lessonStyles}
 .nav-reference-label{font-size:11px;color:var(--ink-3);margin:24px 8px 14px;border-top:1px solid var(--line);padding-top:20px}.manual-start h1{font-size:36px;line-height:1.3;margin:10px 0 16px}.start-intro{font-size:17px;color:var(--ink-2);max-width:650px}.learning-track{font-size:18px;margin:32px 0 12px}.learning-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.learning-card{display:block;padding:18px 20px;border-radius:14px;background:#eaf2f5;color:var(--ink)}.learning-card-tag{font-size:12px;color:#4f7689}.learning-card h2{margin:6px 0 8px;padding:0;font-size:17px;line-height:1.4}.learning-card h2 span{float:right;font-weight:400}.learning-card p{color:var(--ink-2);font-size:13px;margin:0 0 8px;line-height:1.6}.learning-card>span:last-child{font-size:12px;color:#5d7c8c}.start-standard{margin:32px 0}.start-standard h2{font-size:18px}.start-standard>div{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;font-size:14px;color:var(--ink-2)}.start-standard b{color:#7895a5;font-size:12px;margin-right:10px;font-weight:400}.reference-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.reference-cards a{display:flex;flex-direction:column;gap:8px;background:#f5f7f9;border-radius:12px;padding:18px;color:var(--ink)}.reference-cards span,.reference-cards small{font-size:12px;color:var(--ink-3)}.reference-cards strong{font-size:15px;font-weight:500}
+
+/* 深色：画面截图保持应用浅色原样，只调整手册外框与说明。 */
+:root[data-theme=dark]{color-scheme:dark;--ink:#e6eaee;--ink-2:#b4bec8;--ink-3:#8b97a3;--line:#2c353d;--bg:#14191d;--bg-2:#1c2328;--accent:#8fb3cb;--ok:#7cc29e;--warn:#d9b36f}
+:root[data-theme=dark] code{color:var(--ink)}
+:root[data-theme=dark] .topbar{background:rgba(20,25,29,.92)}
+:root[data-theme=dark] .topbar .search:focus{background:var(--bg)}
+:root[data-theme=dark] .nav-item.active{background:#22303a;color:#cfe1ec}
+:root[data-theme=dark] .badge.ok{border-color:#2f5a44;background:#1a2a22}
+:root[data-theme=dark] .badge.warn{border-color:#5a4a2c;background:#2a2419}
+:root[data-theme=dark] mark{background:#5a4d1e;color:var(--ink)}
+:root[data-theme=dark] .demo-controls button{background:#22303a}
+:root[data-theme=dark] .learning-card{background:#1d2a31}
+:root[data-theme=dark] .learning-card-tag,:root[data-theme=dark] .learning-card>span:last-child{color:#9dbccd}
+:root[data-theme=dark] .start-standard b{color:#9dbccd}
+:root[data-theme=dark] .reference-cards a{background:var(--bg-2)}
+:root[data-theme=dark] .lesson{--l-accent:#5aa3bd;--l-accent-ink:#a9d3e2;--l-tint:rgba(90,163,189,.14);--l-tint-2:rgba(90,163,189,.24);--l-fill:rgba(255,255,255,.05)}
+:root[data-theme=dark] .rail-n{background:var(--bg-2)}
+:root[data-theme=dark] .lesson-rail button.done .rail-n,:root[data-theme=dark] .lesson-choice button.right{background:#1f3a2c;color:#9fd8b7}
+:root[data-theme=dark] .lesson-choice button.wrong{background:#3a2420;color:#f0b3a6}
+:root[data-theme=dark] .lesson-side{background:var(--bg-2)}
+:root[data-theme=dark] .lesson-fill{background:#4a3f1c;color:var(--ink)}
+:root[data-theme=dark] .lesson-trouble{background:#2a2419}
+:root[data-theme=dark] .lesson-trouble summary{color:#e2c38c}
+:root[data-theme=dark] .shot{background:#2a3338;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+:root[data-theme=dark] .lesson-footer{background:rgba(20,25,29,.94)}
+:root[data-theme=dark] .lesson-done{background:#18271f}
+:root[data-theme=dark] .lesson-chain li{background:var(--bg-2);color:#9fd8b7}
+:root[data-theme=dark] .lesson-chain li.me{background:#2f6a4f;color:#fff}
 .mobile-nav{display:none}
 
 @media (max-width:900px){

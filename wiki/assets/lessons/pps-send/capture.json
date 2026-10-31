@@ -1,0 +1,171 @@
+{
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "frames": [
+    {
+      "image": "01.webp",
+      "target": {
+        "x": 55,
+        "y": 614,
+        "width": 54,
+        "height": 20
+      }
+    },
+    {
+      "image": "02.webp",
+      "target": {
+        "x": 1238,
+        "y": 127,
+        "width": 52,
+        "height": 32
+      }
+    },
+    {
+      "image": "03.webp",
+      "target": {
+        "x": 860,
+        "y": 715,
+        "width": 103,
+        "height": 14
+      }
+    },
+    {
+      "image": "04.webp",
+      "target": {
+        "x": 888,
+        "y": 698,
+        "width": 127,
+        "height": 40
+      }
+    },
+    {
+      "image": "05.webp",
+      "target": {
+        "x": 1289,
+        "y": 152,
+        "width": 109,
+        "height": 40
+      }
+    },
+    {
+      "image": "06.webp",
+      "target": {
+        "x": 1303,
+        "y": 836,
+        "width": 96,
+        "height": 40
+      }
+    },
+    {
+      "image": "07.webp",
+      "target": {
+        "x": 574,
+        "y": 277,
+        "width": 354,
+        "height": 40
+      },
+      "value": "产前样"
+    },
+    {
+      "image": "08.webp",
+      "target": {
+        "x": 1303,
+        "y": 836,
+        "width": 96,
+        "height": 40
+      }
+    },
+    {
+      "image": "09.webp",
+      "target": {
+        "x": 574,
+        "y": 277,
+        "width": 375,
+        "height": 40
+      },
+      "value": "M"
+    },
+    {
+      "image": "10.webp",
+      "target": {
+        "x": 987,
+        "y": 277,
+        "width": 375,
+        "height": 40
+      },
+      "value": "燕麦色"
+    },
+    {
+      "image": "11.webp",
+      "target": {
+        "x": 574,
+        "y": 357,
+        "width": 375,
+        "height": 40
+      },
+      "value": "样品室 B-02"
+    },
+    {
+      "image": "12.webp",
+      "target": {
+        "x": 1303,
+        "y": 836,
+        "width": 96,
+        "height": 40
+      }
+    },
+    {
+      "image": "13.webp",
+      "target": {
+        "x": 1312,
+        "y": 836,
+        "width": 86,
+        "height": 40
+      }
+    },
+    {
+      "image": "14.webp",
+      "target": {
+        "x": 802,
+        "y": 462,
+        "width": 576,
+        "height": 40
+      }
+    },
+    {
+      "image": "15.webp",
+      "target": {
+        "x": 574,
+        "y": 357,
+        "width": 375,
+        "height": 40
+      },
+      "value": "江南成衣 · 周工"
+    },
+    {
+      "image": "16.webp",
+      "target": {
+        "x": 1303,
+        "y": 836,
+        "width": 96,
+        "height": 40
+      }
+    },
+    {
+      "image": "17.webp",
+      "target": {
+        "x": 1312,
+        "y": 836,
+        "width": 86,
+        "height": 40
+      }
+    }
+  ],
+  "result": "result.webp",
+  "provenance": {
+    "softwareCommit": "27c0a670a8a8386f463a4fef599bfa9a2ef4a72d",
+    "capturedAt": "2026-10-31T13:02:50.591Z"
+  }
+}

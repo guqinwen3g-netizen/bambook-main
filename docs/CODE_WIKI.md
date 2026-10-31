@@ -80,7 +80,8 @@
 | 委托身份 | `POST /api/mist/agent/delegations`（`agentDelegation.ts`）：本人会话签发 2 小时委托；`read` 只读，`operate` 上限 = 账号现有权限（`AGENT_OPERATE_CEILING`），不超出账号 | 同上 | — |
 | 敏感操作人工确认 | `agentMcp.ts#agentCommandSensitivity`：资金/账务、人员权限、收款账户、对外发送及 confirm/approve/decide/void/reverse/cancel… 类动词 → 先预演，再记为 Agent 提议；`email.server.*`、`agent.*` 禁止 Agent 直接调用 | 同上 | — |
 | Agent 提议 | `server/src/shared/mistAgentProposals.ts`；首页显示“Agent 提议 · 待确认”，`pages/AgentProposalDialog.tsx` 由本人确认或拒绝 | 同上 | — |
-| Agent 审计 | 落盘：`server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`，与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏。查询（#574）：`agentAuditRead.ts` 按本人/公司审计权限及当前岗位、行级范围裁剪；REST `GET /workspaces/:id/agent-audits[/:requestId]`；MCP 第 8 个工具 `bambook_audit`；账号页「Agent操作记录」`pages/AgentAuditHistory.tsx` | 实施 Agent 在独立本地真实界面切财务/业务员核验本人、公司记录、原始填写与原单回程 | #574 合入时尚未部署发布；未发布前不写成员工可用。不覆盖所有普通人工写入；历史不倒填 |
+| Agent 审计 | 落盘：`server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`，与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏。查询（#574）：`agentAuditRead.ts` 按本人/公司审计权限及当前岗位、行级范围裁剪；REST `GET /workspaces/:id/agent-audits[/:requestId]`；MCP 第 8 个工具 `bambook_audit`；账号页「Agent操作记录」`pages/AgentAuditHistory.tsx` | 实施 Agent 在独立本地真实界面切财务/业务员核验本人、公司记录、原始填写与原单回程 | #574 已发布（运行提交 a9a78ee8）。不覆盖所有普通人工写入；历史不倒填 |
+| 员工自助连接 | 账号页创建、复制配置、续签、撤销本人 Agent 连接；凭据绑定账号/公司/工作区与签发时权限，续签不扩权（#577、#578） | 实施 Agent 在独立本地真实界面走查；首次发布复验发现签发错误已回退 | 修复已合入，尚待重新发布；发布前不写成员工可用 |
 | 长值守 Agent | — | — | 长期运行循环未交付 |
 | 文件类操作 | 须上传原件的票据（如增值税专票）Agent 不能上传，预演即被拒 | 同上 | — |
 
@@ -89,6 +90,7 @@
 - **课程源**：`wiki/lessons/*.json`（步骤、问答、失败恢复、SOP、链路位置、下一课）+ `wiki/assets/lessons/<capture>/`（真实界面帧与 `capture.json` 目标框）。采集脚本 `scripts/manual-capture.mjs` 在独立本地 Mist 演示种子上用正确岗位实际操作；不直接改数据库制造状态。
 - **播放器**：`scripts/manual-lesson.mjs`（聚光、推近、光标与输入、暂停/上一步/下一步/重播、热点练习——练习是预设动作，不提交业务）。站点 `scripts/wiki-build.mjs`、`scripts/manual-site.ts`（开发 `/manual/`，构建 `dist/manual/`）。
 - **登记与核验**：`scripts/manual-catalog.mjs#readLessonCatalog` 校验结构与素材，计算内容摘要 `contentSha256`；采集提交号（`capture.json#provenance`）、播放核验与员工验收（课程 `verification`）分别登记，内容变化后自动变为需复核。`npm run wiki:check -- --strict-lessons` 只守结构，不代表教学通过。
+- **播放核验**：`scripts/manual-playback-check.mjs <课程ID> [--register]` 在本机 `/manual/` 用真实 Chromium 核验画面、热点、演示、练习、键盘、链接与搜索、窄屏与深色、图片失败重载；`--register` 仅在全部通过且源码已提交时写回 `verification.playback`。采集脚本 `manual-capture.mjs` 在应用源码与提交一致时写 `capture.json#provenance`。
 - **覆盖矩阵**：`wiki/matrix/coverage.json`（业务任务 × 岗位 × 业务模式 × 页面 × 命令 × 课程 × 文字章节）+ `scripts/manual-coverage.mjs` 校验页面与命令仍存在、课程全部登记，并按证据推导教学状态（待实现 / 未核对 / 待录制 / 播放待验 / 员工待验 / 变更后待复核 / 已验证），生成 [`docs/manual-coverage.md`](manual-coverage.md)。改业务后运行 `npm run manual:coverage`。
 - **素材禁令**：不使用青屿公司、小组、业务库及其旧截图/GIF，不使用 Panda 真实业务资料；素材不得含密钥、真实客户或资金资料、本机私有路径及开发账号选择器。
 

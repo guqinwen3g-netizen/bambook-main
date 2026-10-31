@@ -78,5 +78,13 @@
       "title": "完成标准",
       "text": "付款申请「待审批」，关联本张票据。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:08:03.846Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "36ddcab5bea3d10ad82fc9c338bd0135b2a094a55a40c126c7ec87ec85c57786"
+    }
+  }
 }

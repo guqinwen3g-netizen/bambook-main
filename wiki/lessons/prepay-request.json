@@ -76,5 +76,13 @@
       "title": "完成标准",
       "text": "付款申请「待审批」，收款账户与档案一致。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:24:07.372Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "c6f356ca7109d9fb5bfb04437b647a42c6dbdf507941d13b2f901026eda080d7"
+    }
+  }
 }

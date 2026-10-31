@@ -107,5 +107,13 @@
   "nextLesson": {
     "id": "tutorial-purchase-draft",
     "title": "准备成品采购草稿"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:13:48.375Z",
+      "softwareCommit": "a03bb5ffb305668488369a38597d640023aedcf1",
+      "contentSha256": "d4571fa037063d7edb4fb34b9565937052d026539c0759649d9ad02213e62b4d"
+    }
   }
 }

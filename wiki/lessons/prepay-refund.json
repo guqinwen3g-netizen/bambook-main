@@ -76,5 +76,13 @@
       "title": "完成标准",
       "text": "合同剩余预付为 0，退款流水与银行回单一致。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:23:32.174Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "4e40a45353d3332907676d331c56826bcf8490904cdb71637c2a79994319aa6d"
+    }
+  }
 }

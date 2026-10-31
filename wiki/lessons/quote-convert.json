@@ -80,5 +80,13 @@
   "nextLesson": {
     "id": "tutorial-order-contract",
     "title": "补齐合同与审批资料"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:36:28.668Z",
+      "softwareCommit": "95973c03d38576dbd01ff3a692951da4d1a14edd",
+      "contentSha256": "d937ae53fec28227d8f5620d775f72ec88eb9b701a376e2d310af243148cbc44"
+    }
   }
 }

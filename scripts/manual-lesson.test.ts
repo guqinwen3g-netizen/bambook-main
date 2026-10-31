@@ -51,7 +51,7 @@ it('does not initialize hidden courses and stops their animation when navigation
   expect(first.querySelector('[data-img]')?.getAttribute('src')).toContain('01.webp');expect(second.querySelector('[data-img]')?.getAttribute('src')).toBeNull();
   (first.querySelector('[data-play]') as HTMLButtonElement).click();await vi.advanceTimersByTimeAsync(600);
   first.hidden=true;second.hidden=false;dom.window.dispatchEvent(new dom.window.Event('hashchange'));
-  const before=first.querySelector('[data-step-status]')?.textContent;expect(first.querySelector('[data-play]')?.getAttribute('aria-pressed')).toBe('false');
+  const before=first.querySelector('[data-step-status]')?.textContent;expect(first.querySelector('[data-play]')?.getAttribute('data-state')).toBe('idle');expect(first.querySelector('[data-play]')?.getAttribute('aria-label')).toBe('播放演示');
   await vi.advanceTimersByTimeAsync(10000);expect(first.querySelector('[data-step-status]')?.textContent).toBe(before);expect(second.querySelector('[data-img]')?.getAttribute('src')).toContain('01.webp');
  }finally{dom.window.close();vi.useRealTimers();}
 });
