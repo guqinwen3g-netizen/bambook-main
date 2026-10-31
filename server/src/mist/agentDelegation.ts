@@ -3,6 +3,7 @@
  * account/company/workspace and revalidated on every request and business transaction.
  * The v1 codec remains for upgrade/rejection tests; it is never issued by HTTP routes.
  */
+import {createHmac,randomUUID,timingSafeEqual} from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { MIST_READ_SECTIONS } from './access';
 import { MistApiError } from './errors';
