@@ -22,14 +22,14 @@ import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, advanceTaskSources, changeTask, checkpointTask, claimTask, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord } from './agentTasks';
-import { collectTaskSources, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
+import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
 import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields, dueMailState, readMailState, claimMailState, planMailState, rememberMailState, failMailState, completeMailState, type MailStateRecord, type MailStateAttempt } from './mail/stateQueue';
 import type { MailStateObservation } from '../shared/mistMailState';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
-import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit } from './agentAuditRead';
+import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
 import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
@@ -248,10 +248,11 @@ export class MistRepository {
   /** 返回给当前账号的公司：按其现有读权限裁剪，并附带访问说明。 */
   private view(row: MistWorkspaceRow, actor: TokenPayload) {
     const projected = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)), owner = isOwner(row, actor), company = companyRow(row);
+    const proposalSources=projected.state.agentProposals?.some(p=>!p.taskId)?knownCommandSourcesVisible(row.state,projected.state):undefined;
     if(projected.state.agentProposals)projected.state.agentProposals=projected.state.agentProposals.map(p=>{
-      if(!p.taskId)return p;const access=TASK_PROPOSAL_ACCESS.get(row)?.get(p.id);
-      if(access?.visible)return {...p,...(access.blocked?{taskBlocked:access.blocked}:{})};
-      return {id:p.id,ownerId:p.ownerId,owner:p.owner,createdAt:p.createdAt,state:p.state,taskId:p.taskId,command:{type:'unavailable',payload:{}},summary:['提议来源已不可见'],unavailable:true,taskBlocked:'请停止任务或拒绝此提议'};
+      const access=p.taskId?TASK_PROPOSAL_ACCESS.get(row)?.get(p.id):undefined;
+      if(readableCommand(p.command,actor,this.contract.mistCommandPermission)&&(p.taskId?access?.visible:proposalSources?.(p.command)))return {...p,...(access?.blocked?{taskBlocked:access.blocked}:{})};
+      return {id:p.id,ownerId:p.ownerId,owner:p.owner,createdAt:p.createdAt,state:p.state,...(p.taskId?{taskId:p.taskId}:{}),command:{type:'unavailable',payload:{}},summary:['提议来源已不可见'],unavailable:true,taskBlocked:p.taskId?'请停止任务或拒绝此提议':'请拒绝此提议后重新核对'};
     });
     // Ship only already-authorized record references for the user's own groups.
     // Conditions, exclusions and management history remain behind hr:write.
@@ -591,7 +592,7 @@ export class MistRepository {
       const { workspace } = await this.getForAgent(prior, workspaceId);
       const proposal = workspace.state.agentProposals?.find((p: { id: string; state: string }) => p.id === id && p.state === 'pending');
       if (!proposal) fail('NOT_FOUND', '提议不存在、已处理或不属于当前账号', 404);
-      if(proposal!.unavailable||proposal!.taskBlocked)fail('AGENT_TASK_SCOPE_CHANGED',proposal!.taskBlocked||'提议来源已不可见',409);
+      if(proposal!.unavailable||proposal!.taskBlocked)fail(proposal!.taskId?'AGENT_TASK_SCOPE_CHANGED':'AGENT_PROPOSAL_UNAVAILABLE',proposal!.taskBlocked||'提议来源已不可见',409);
       return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command }, undefined, false, id);
     }
     return this.executeInternal(prior, workspaceId, input, { command: input.command });
@@ -641,6 +642,7 @@ export class MistRepository {
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&input.command?.type==='agent.proposal.create'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
         const humanTaskProposal=confirmProposalId?row.state.agentProposals?.find(p=>p.id===confirmProposalId):undefined;
+        if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;if(!readableCommand(humanTaskProposal.command,actor,this.contract.mistCommandPermission)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
         if(humanTaskProposal?.taskId){this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,humanTaskProposal.taskId)).value);await assertHumanTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,Date.now());}
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
