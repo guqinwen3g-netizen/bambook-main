@@ -1,7 +1,9 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 import { auditEnglish } from './en-US-audit';
+import {connectionEnglish} from './en-US-connections';
 export const reviewedEnglish: Record<string, string> = {
   ...auditEnglish,
+  ...connectionEnglish,
   '使用手册': 'User manual', '打开手册': 'Open manual',
   '内部拒收待处理 · {0}': 'Internal rejection requires action · {0}',
   '内部交付': 'Internal handover', '内部接收': 'Internal receiving',

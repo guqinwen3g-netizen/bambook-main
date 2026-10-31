@@ -48,6 +48,7 @@ export class MistLocalDatabase{
       findUnique:async({where}:any)=>{const pair=where.workspaceId_requestId;if(!pair)invalid('本地回执查询无效',500);return clone(store.receipts[JSON.stringify([pair.workspaceId,pair.requestId])]??null);},
       findMany:async(args:any)=>{if(typeof args.where?.workspaceId!=='string')invalid('本地回执查询无效',500);return queryMistReceipts(Object.values(store.receipts),args);},
       create:async({data}:any)=>{const key=JSON.stringify([data.workspaceId,data.requestId]);if(store.receipts[key]||Object.values(store.receipts).some(row=>row.id===data.id))duplicate();store.receipts[key]=clone(data);return clone(data);},
+      updateMany:async({where,data}:any)=>{let count=0;for(const [key,row] of Object.entries(store.receipts))if(queryMistReceipts([row],{where}).length){if(!row.requestId.startsWith('mist-revision:agent-connection:'))invalid('业务回执不可修改',500);store.receipts[key]={...row,...clone(data)};count++;}return{count};},
     },
     businessSequence:{
       findUnique:async({where,select}:any)=>selected(store.businessSequences[where.id]??null,select),

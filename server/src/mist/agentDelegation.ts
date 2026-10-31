@@ -1,15 +1,13 @@
 /**
- * 工作助手委托令牌（决策总账第二十三节 · 工作助手方案第 7 节）。
- * - 由用户本人会话签发，短期（2 小时，可由本人会话续签），只给本机工作助手用；
- * - 权限上限 = 账号现有权限 ∩ 工作助手上限（首批只含读取类权限）；服务端 hasScope 已遵守 permissionCeiling；
- * - 签名密钥与登录会话分开派生，委托令牌不能当作登录会话使用，也不能再签发新的委托令牌；
- * - 委托身份只能调用工作助手读取接口（见 AGENT_ALLOWED_ROUTES），其余接口一律拒绝。
+ * Two-hour Agent credentials. HTTP accepts only registered v2 leases, bound to the real
+ * account/company/workspace and revalidated on every request and business transaction.
+ * The v1 codec remains for upgrade/rejection tests; it is never issued by HTTP routes.
  */
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { MIST_READ_SECTIONS } from './access';
 import { MistApiError } from './errors';
 import { PERMISSION_SCOPES } from '../_shared/rolePermissionMatrix';
+import {hasScope} from '../auth/permissionService';
 
 export const AGENT_DELEGATION_HEADER = 'x-bambook-delegation';
 export const AGENT_DELEGATION_TTL_MS = 2 * 60 * 60 * 1000;
@@ -26,8 +24,9 @@ export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new S
  */
 export const AGENT_OPERATE_CEILING: readonly string[] = Object.freeze(Object.keys(PERMISSION_SCOPES).sort());
 export type AgentDelegationMode = 'read' | 'operate';
-export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode };
-export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number; mode?: 'operate' };
+export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode; agentWorkspaceId?:string; agentLease?:ManagedAgentPayload };
+export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number; mode?: 'operate'; credentialVersion?:string };
+export type ManagedAgentPayload=Omit<AgentDelegationPayload,'v'|'kind'>&{v:2;kind:'mist-agent-connection';wid:string;generation:string};
 export type AgentDelegationIssue = { token: string; sessionId: string; expiresAt: string; ceiling: string[]; mode: AgentDelegationMode };
 
 export function isAgentActor(actor: unknown): actor is AgentActor {
@@ -75,33 +74,48 @@ export function createAgentDelegation(options: AgentDelegationOptions) {
     return { token: `${data}.${signature(data)}`, sessionId: payload.sid, expiresAt: new Date(payload.exp).toISOString(), ceiling: [...ceil], mode };
   }
 
-  function verify(token: unknown): AgentDelegationPayload {
+  function prepareManaged(actor:TokenPayload,id:string,workspaceId:string,mode:AgentDelegationMode,priorCeiling?:string[]):ManagedAgentPayload {
+    if(!actor?.userId||isAgentActor(actor))deny('须由本人连接',403,'FORBIDDEN');
+    const allowed=mode==='operate'?AGENT_OPERATE_CEILING:WORK_ASSISTANT_CEILING,ceil=allowed.filter(scope=>(!priorCeiling||priorCeiling.includes(scope))&&hasScope(actor,scope as any)),iat=now();
+    return{v:2,kind:'mist-agent-connection',sub:actor.userId,...(actor.companyId?{companyId:actor.companyId}:{}),sid:id,wid:workspaceId,generation:randomUUID(),ceil,iat,exp:iat+ttl,...(mode==='operate'?{mode}:{}),...(actor.credentialVersion?{credentialVersion:actor.credentialVersion}:{})};
+  }
+  function signManaged(payload:ManagedAgentPayload):AgentDelegationIssue {
+    // JSON persistence can reorder object keys. A retry must reproduce the same credential.
+    const sorted=(v:any):any=>Array.isArray(v)?v.map(sorted):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,sorted(v[k])])):v;
+    const data=Buffer.from(JSON.stringify(sorted(payload))).toString('base64url');return{token:`${data}.${signature(data)}`,sessionId:payload.sid,expiresAt:new Date(payload.exp).toISOString(),ceiling:[...payload.ceil],mode:payload.mode==='operate'?'operate':'read'};
+  }
+  function verify(token: unknown): AgentDelegationPayload|ManagedAgentPayload {
     if (typeof token !== 'string' || !token || token.length > MAX_TOKEN) deny('工作助手委托无效，请在页面上重新连接');
     const parts = token.split('.');
     if (parts.length !== 2 || !parts.every(p => /^[A-Za-z0-9_-]+$/.test(p))) deny('工作助手委托签名无效');
     const expected = signature(parts[0]);
     if (parts[1].length !== expected.length || !timingSafeEqual(Buffer.from(parts[1]), Buffer.from(expected))) deny('工作助手委托签名无效');
-    let payload: AgentDelegationPayload;
+    let payload: AgentDelegationPayload|ManagedAgentPayload;
     try { payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')); } catch { deny('工作助手委托格式无效'); }
-    if (!payload! || typeof payload! !== 'object' || Array.isArray(payload!) || payload!.v !== 1 || payload!.kind !== 'mist-agent'
+    if (!payload! || typeof payload! !== 'object' || Array.isArray(payload!) || !(payload!.v===1&&payload!.kind==='mist-agent'||payload!.v===2&&payload!.kind==='mist-agent-connection')
       || (payload!.companyId !== undefined && typeof payload!.companyId !== 'string')
       || typeof payload!.sub !== 'string' || !payload!.sub || payload!.sub.length > 300 || typeof payload!.sid !== 'string' || !payload!.sid
       || (payload!.mode !== undefined && payload!.mode !== 'operate')
       || !Array.isArray(payload!.ceil) || payload!.ceil.some(scope => typeof scope !== 'string' || !(payload!.mode === 'operate' ? AGENT_OPERATE_CEILING : WORK_ASSISTANT_CEILING).includes(scope))
       || !Number.isSafeInteger(payload!.exp) || !Number.isSafeInteger(payload!.iat) || payload!.exp <= payload!.iat
+      || payload!.credentialVersion!==undefined&&typeof payload!.credentialVersion!=='string'
+      || payload!.v===2&&(typeof payload!.wid!=='string'||!payload!.wid||typeof payload!.generation!=='string'||!payload!.generation)
       || payload!.iat > now() + 30_000 || payload!.exp - payload!.iat > ttl) deny('工作助手委托格式无效');
     if (payload!.exp <= now()) deny('工作助手委托已过期，请在页面上续签', 401, 'AGENT_DELEGATION_EXPIRED');
     return payload!;
   }
 
   /** 还原委托身份：permissionCeiling 只来自签名内容，且不含 '*'。 */
-  async function authenticate(token: unknown): Promise<AgentActor> {
+  async function authenticate(token: unknown,authorizeManaged?:(actor:AgentActor,payload:ManagedAgentPayload)=>Promise<void>,requireManaged=false): Promise<AgentActor> {
     const payload = verify(token);
+    if(requireManaged&&payload.v!==2)deny('授权已更新，请重新连接',401,'AGENT_CONNECTION_UPGRADE_REQUIRED');
     const base = await options.resolve(payload.sub);
     if (!base?.userId || base.userId !== payload.sub) deny('工作助手委托对应的账号无效');
-    return { ...base, ...(payload.companyId ? { companyId: payload.companyId } : {}), permissionCeiling: [...payload.ceil], actorKind: 'agent', agentSessionId: payload.sid, agentMode: payload.mode === 'operate' ? 'operate' : 'read' };
+    const actor:AgentActor={ ...base, ...(payload.companyId ? { companyId: payload.companyId } : {}),credentialVersion:payload.credentialVersion,iat:Math.floor(payload.iat/1000), permissionCeiling: [...payload.ceil], actorKind: 'agent', agentSessionId: payload.sid, agentMode: payload.mode === 'operate' ? 'operate' : 'read',...(payload.v===2?{agentWorkspaceId:payload.wid,agentLease:payload}:{}) } as AgentActor;
+    if(payload.v===2){if(!authorizeManaged)deny('连接登记校验不可用',503);await authorizeManaged!(actor,payload);}
+    return actor;
   }
 
-  return { issue, verify, authenticate };
+  return { issue, verify, authenticate,prepareManaged,signManaged,timestamp:now };
 }
 export type AgentDelegation = ReturnType<typeof createAgentDelegation>;

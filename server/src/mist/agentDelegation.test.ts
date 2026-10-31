@@ -3,7 +3,7 @@ import request from 'supertest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHmac } from 'node:crypto';
+import { createHmac,randomUUID } from 'node:crypto';
 import { createMistLocalRuntime, mistLocalPublicUser } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER, AGENT_DELEGATION_TTL_MS, WORK_ASSISTANT_CEILING, agentRouteAllowed, createAgentDelegation } from './agentDelegation';
@@ -26,9 +26,14 @@ async function clientFor(app: any, profileId = 'local-sales') {
   await client.post('/api/mist/session').send({ profileId }).expect(200);
   return { client, cookieName: initial.headers['set-cookie'][0].split('=')[0] };
 }
-async function issue(client: any) { return (await client.post('/api/mist/agent/delegations').send({}).expect(201)).body; }
+async function issue(client: any,workspaceId?:string) { const id=workspaceId??(await client.get(W+'default').expect(200)).body.workspace.id;return (await client.post('/api/mist/agent/delegations').send({workspaceId:id,id:randomUUID()}).expect(201)).body; }
 
 describe('短期委托的签名、上限和身份隔离', () => {
+  it('reproduces a registered credential when JSON persistence reorders its keys',()=>{
+    const d=createAgentDelegation({rootSecret:()=> 'canonical-test-secret',resolve:id=>actor(id)}),payload=d.prepareManaged(actor(),randomUUID(),randomUUID(),'read');
+    const reordered=Object.fromEntries(Object.entries(payload).reverse()) as typeof payload;
+    expect(d.signManaged(reordered).token).toBe(d.signManaged(payload).token);
+  });
   it('uses a purpose-derived key, a two-hour lifetime and read-only ceiling even for a wildcard owner', async () => {
     let now = 1_800_000_000_000;
     const d = createAgentDelegation({ rootSecret: () => 'root-secret', resolve: id => actor(id), now: () => now });
@@ -182,6 +187,7 @@ describe('工作助手读取接口（现有岗位与公司权限）', () => {
     const app = createMistServer(undefined, { local: runtime });
     const sales = (await clientFor(app)).client, qc = (await clientFor(app, 'local-qc')).client;
     let ws = (await sales.get(W + 'default').expect(200)).body.workspace;
+    await qc.get(W+'default').expect(200);
     const salesToken = (await issue(sales)).delegation.token, qcToken = (await issue(qc)).delegation.token;
     const endpoint = W + ws.id + '/agent/query';
     await request(app).get(endpoint + '?type=invoice').set(HEADER, salesToken).expect(200);
@@ -190,9 +196,11 @@ describe('工作助手读取接口（现有岗位与公司权限）', () => {
     await request(app).get(endpoint).set(HEADER, qcToken).expect(404);
     const membership = (action: string, requestId: string) => sales.post(W + ws.id + '/members').send({ action, requestId, expectedRevision: ws.revision, account: 'local-qc' });
     ws = (await membership('add', 'add-qc').expect(200)).body.workspace;
-    await request(app).get(endpoint + '?type=order').set(HEADER, qcToken).expect(200);
+    await request(app).get(endpoint + '?type=order').set(HEADER, qcToken).expect(404);
+    const sharedToken=(await issue(qc,ws.id)).delegation.token;
+    await request(app).get(endpoint + '?type=order').set(HEADER, sharedToken).expect(200);
     ws = (await membership('remove', 'remove-qc').expect(200)).body.workspace;
-    await request(app).get(endpoint).set(HEADER, qcToken).expect(404);
+    await request(app).get(endpoint).set(HEADER, sharedToken).expect(404);
   });
 });
 
