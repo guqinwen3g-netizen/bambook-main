@@ -5,6 +5,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { mistVersionPlugin } from '../../../scripts/mist-version';
 import { mobileIconsPlugin } from '../../../scripts/mobile-icons';
+import { manualSitePlugin } from '../../../scripts/manual-site';
 
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(appRoot, '../../..');
@@ -20,7 +21,7 @@ export default defineConfig({
   define: { 'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('true') },
   root: appRoot,
   publicDir: path.join(repoRoot, 'public'),
-  plugins: [react(), mistVersionPlugin(repoRoot), mobileIconsPlugin(repoRoot)],
+  plugins: [react(), mistVersionPlugin(repoRoot), mobileIconsPlugin(repoRoot), manualSitePlugin(repoRoot)],
   resolve: { alias: { '@': repoRoot } },
   cacheDir: '/tmp/bambook-mist-vite-cache',
   server: {

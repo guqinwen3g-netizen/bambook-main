@@ -9,6 +9,7 @@ import { useNav } from '../nav';
 import { AvatarSettingRow } from './AvatarStudio';
 import { ChangePasswordRow, LogoutAllRow } from './ChangePassword';
 import { DeviceAppearance } from './DeviceAppearance';
+import { ManualLink } from './ManualLink';
 
 export function AccountPage() {
   const session = useMistSession(), { state } = useMistWorkspace(), organization = useOrganizationContext(), nav = useNav(), toast = useToast();
@@ -33,6 +34,7 @@ export function AccountPage() {
             ]),
           ]} />
           {organization.error && <Button onClick={organization.retry}>{uiText('重新读取')}</Button>}
+          <SettingRow title={uiText('使用手册')} control={<ManualLink variant="button" />} />
           {session.localMode && <div className="mist-row" data-wrap>{session.localProfiles?.map(profile => <Button key={profile.id} aria-pressed={profile.id === user.id} disabled={session.signingIn} onClick={() => void session.selectLocalProfile?.(profile.id).catch(failure => toast(failure instanceof Error ? failure.message : '身份切换未完成', 'bad'))}>{profile.title ? `${profile.name} · ${profile.title}` : profile.name}</Button>)}</div>}
         </FormSection>}
         {section === 'appearance' && <FormSection title={uiText('外观与语言')}><DeviceAppearance /></FormSection>}

@@ -12,10 +12,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { WIKI, STATUS_LABEL, VERDICT_LABEL, snapshot } from './wiki-lib.mjs';
+import { readLessonCatalog, publicManualCatalog } from './manual-catalog.mjs';
 
 const argv = process.argv.slice(2);
 const WRITE = argv.includes('--write');
 const STRICT = argv.includes('--strict');
+const STRICT_LESSONS = argv.includes('--strict-lessons');
+const courses = readLessonCatalog();
 
 const snap = snapshot();
 const { version, head, branch, modules, chapters, covered, missingModules, orphans, badMedia } = snap;
@@ -25,6 +28,13 @@ const stale = chapters.filter(c => c.verdict === 'stale');
 
 console.log('Bambook 员工使用手册 · 版本体检');
 console.log(`  主线 ${branch} @ ${head} · 产品版本 ${version}`);
+console.log(`  引导课程 ${courses.totals.lessons} 课 · ${courses.totals.steps} 步 · ${courses.totals.images} 张图片`);
+for (const track of courses.tracks) console.log(`    ${track.name}：${track.lessons} 课 / ${track.steps} 步`);
+console.log(`  采集软件版本：已登记 ${courses.verification.provenanceRegistered || 0} · 未登记 ${courses.verification.provenanceUnknown || 0}`);
+console.log(`  播放核验声明：通过 ${courses.verification.playback?.passed || 0} · 待核验/未知 ${(courses.verification.playback?.pending || 0) + (courses.verification.playback?.unknown || 0)} · 未通过 ${courses.verification.playback?.failed || 0} · 需复核 ${courses.verification.playback?.stale || 0}`);
+console.log(`  员工验收声明：已认可 ${courses.verification.employee?.accepted || 0} · 待验收/未知 ${(courses.verification.employee?.pending || 0) + (courses.verification.employee?.unknown || 0)} · 需改进 ${courses.verification.employee?.['changes-requested'] || 0} · 需复核 ${courses.verification.employee?.stale || 0}`);
+for (const issue of courses.issues) console.log(`  [课程结构错误] ${issue.lessonId} · ${issue.message} · ${issue.file}`);
+console.log('\n旧 Markdown 参考章节登记（不统计上述引导课程，不代表新版课程完成率）：');
 console.log(`  模块入口清单 ${modules.length} 个 · 已登记 ${covered.size} · 未登记 ${missingModules.length}`);
 console.log(`  章节 ${chapters.length} 篇 · ` + Object.entries(VERDICT_LABEL).map(([k, v]) => `${v} ${tally[k] || 0}`).join(' · '));
 
@@ -50,6 +60,7 @@ if (badMedia.length) {
 }
 
 if (WRITE) {
+  if (courses.issues.length) throw new Error('课程结构异常，未更新手册登记文件；修正后再运行 --write');
   const generatedAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const registry = {
     product: 'Bambook',
@@ -60,6 +71,7 @@ if (WRITE) {
     generatedBy: 'scripts/wiki-check.mjs',
     sourceOfTruth: 'components/moduleRegistry.ts#BAMBOOK_MODULES',
     coverage: { modules: modules.length, registered: covered.size, chapters: chapters.length },
+    teaching: publicManualCatalog(courses, { commit: head, productVersion: version, generatedAt }),
     modules: modules.map(m => {
       const c = chapters.find(x => x.module === m.id);
       return {
@@ -131,10 +143,17 @@ if (WRITE) {
 }
 
 if (STRICT) {
-  const problems = missingModules.length + orphans.length + stale.length + unverified.length + badMedia.length;
+  const problems = missingModules.length + orphans.length + stale.length + unverified.length + badMedia.length + courses.issues.length;
   if (problems) {
     console.log(`\n[strict] ${problems} 项未收口，退出码 1。`);
     process.exit(1);
   }
   console.log('\n[strict] 全部收口。');
+}
+
+if (STRICT_LESSONS) {
+  if (courses.issues.length) {
+    console.log(`\n[strict-lessons] ${courses.issues.length} 项课程结构错误，退出码 1。`);
+    process.exitCode = 1;
+  } else console.log('\n[strict-lessons] 课程结构完整；播放核验和员工验收声明仍按上方单列，不自动认定通过。');
 }

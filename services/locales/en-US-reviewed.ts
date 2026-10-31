@@ -1,5 +1,6 @@
 /** Reviewed product terminology. These override the initial catalogue translations. */
 export const reviewedEnglish: Record<string, string> = {
+  '使用手册': 'User manual', '打开手册': 'Open manual',
   '内部拒收待处理 · {0}': 'Internal rejection requires action · {0}',
   '内部交付': 'Internal handover', '内部接收': 'Internal receiving',
   '交接依据': 'Handover evidence', '保存点收': 'Save count', '已拒收': 'Rejected',

@@ -41,7 +41,7 @@
 .mist-tone-ok { color: var(--mist-ok-ink); } .mist-tone-warn { color: var(--mist-warn-ink); } .mist-tone-bad { color: var(--mist-bad-ink); } .mist-tone-accent { color: var(--mist-accent-ink); } .mist-tone-ai { color: var(--mist-ai-ink); }
 
 /* ── 按钮 ── */
-.mist-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--mist-control-h); padding: 0 16px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); font-weight: var(--mist-fw-medium); white-space: nowrap; transition: background var(--mist-dur), color var(--mist-dur), transform var(--mist-dur-fast); background: var(--mist-fill); color: var(--mist-ink); }
+.mist-btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--mist-control-h); padding: 0 16px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); font-weight: var(--mist-fw-medium); white-space: nowrap; transition: background var(--mist-dur), color var(--mist-dur), transform var(--mist-dur-fast); background: var(--mist-fill); color: var(--mist-ink); }
 .mist-btn:hover { background: var(--mist-fill-2); }
 .mist-btn:active { transform: scale(.98); }
 .mist-btn[data-variant="primary"] { background: var(--mist-accent); color: var(--mist-on-accent); }
@@ -61,7 +61,7 @@
 .mist-btn .mist-spin { animation: mist-spin 1s linear infinite; }
 @keyframes mist-spin { to { transform: rotate(360deg); } }
 
-.mist-icon-btn { width: 38px; height: 38px; border-radius: var(--mist-r-md); display: inline-grid; place-items: center; color: var(--mist-ink-2); position: relative; transition: background var(--mist-dur), color var(--mist-dur); flex: none; }
+.mist-icon-btn { text-decoration: none; width: 38px; height: 38px; border-radius: var(--mist-r-md); display: inline-grid; place-items: center; color: var(--mist-ink-2); position: relative; transition: background var(--mist-dur), color var(--mist-dur); flex: none; }
 .mist-icon-btn:hover { background: var(--mist-fill); color: var(--mist-ink); }
 .mist-icon-btn[data-size="sm"] { width: 30px; height: 30px; border-radius: var(--mist-r-sm); }
 .mist-pip { position: absolute; top: 9px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--mist-bad); }
