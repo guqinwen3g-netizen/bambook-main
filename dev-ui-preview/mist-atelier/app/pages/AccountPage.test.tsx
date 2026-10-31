@@ -22,6 +22,7 @@ it('shows the authenticated employee and organization without company-owner alia
   expect(host.textContent).toContain('沈禾'); expect(host.textContent).toContain('sales@example.test'); expect(host.textContent).toContain('面料一组');
   for (const absent of ['总经理', '分支', '代码版本', '提交时间', '数据类型', '公司内显示名']) expect(host.textContent).not.toContain(absent);
   expect(host.querySelector('[role="dialog"]')).toBeNull(); expect(seam.run).not.toHaveBeenCalled();
+  const manual=getByRole(host,'link',{name:'使用手册'}) as HTMLAnchorElement;expect(new URL(manual.href).pathname).toBe('/manual/');expect(manual.target).toBe('_blank');expect(manual.rel).toContain('noopener');
 });
 it('keeps appearance settings local and navigates between page sections', () => {
   seam.section = 'appearance'; act(paint);

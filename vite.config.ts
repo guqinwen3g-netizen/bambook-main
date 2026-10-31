@@ -5,6 +5,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { mistVersionPlugin } from './scripts/mist-version';
 import { mobileIconsPlugin } from './scripts/mobile-icons';
+import { manualSitePlugin } from './scripts/manual-site';
 
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 
@@ -94,7 +95,7 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       proxy
     },
-    plugins: [react(), mistVersionPlugin(repoRoot), mobileIconsPlugin(repoRoot)],
+    plugins: [react(), mistVersionPlugin(repoRoot), mobileIconsPlugin(repoRoot), manualSitePlugin(repoRoot)],
     define: {
       'import.meta.env.VITE_MIST_REFERENCE': JSON.stringify('false'),
       'import.meta.env.VITE_UI_MODE': JSON.stringify(uiMode)

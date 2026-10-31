@@ -12,11 +12,22 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { parseArgs } from 'node:util';
 import { marked } from 'marked';
-import { WIKI, SITE, PART_ORDER, STATUS_LABEL, VERDICT_LABEL, snapshot } from './wiki-lib.mjs';
+import { root, WIKI, SITE as DEFAULT_SITE, PART_ORDER, STATUS_LABEL, VERDICT_LABEL, snapshot } from './wiki-lib.mjs';
 import { renderManualFigure } from './manual-media.mjs';
-import { renderLesson, lessonStyles, lessonRuntime, loadCapture } from './manual-lesson.mjs';
+import { renderLesson, lessonStyles, lessonRuntime } from './manual-lesson.mjs';
 import { manualNavigationRuntime } from './manual-navigation.mjs';
+import { readLessonCatalog, publicManualCatalog, requireTrackedLessonSources } from './manual-catalog.mjs';
+
+const { values } = parseArgs({ options: { 'out-dir': { type: 'string' }, 'require-tracked': { type: 'boolean', default: false } } });
+const SITE = values['out-dir'] ? path.resolve(values['out-dir']) : DEFAULT_SITE;
+if (SITE !== DEFAULT_SITE && fs.existsSync(SITE) && fs.readdirSync(SITE).length) {
+  let owned = false;
+  try { owned = JSON.parse(fs.readFileSync(path.join(SITE, 'manual-version.json'), 'utf8')).siteKind === 'bambook-employee-manual'; } catch {}
+  if (!owned) throw new Error('输出目录已有其他文件，请使用空目录或已生成的教学目录');
+}
 
 marked.setOptions({ gfm: true, breaks: false });
 
@@ -39,14 +50,14 @@ function polish(html) {
 
 const snap = snapshot();
 const { version, head, branch, chapters, modules, missingModules } = snap;
-const TRACKS = ['报价到订单', '采购与生产', '采购结算与付款'];
 const trackOf = lesson => lesson.track || '采购结算与付款';
-const trackIndex = lesson => { const i = TRACKS.indexOf(trackOf(lesson)); return i < 0 ? TRACKS.length : i; };
-const lessons = fs.readdirSync(path.join(WIKI, 'lessons')).filter(f => f.endsWith('.json'))
-  .map(f => JSON.parse(fs.readFileSync(path.join(WIKI, 'lessons', f), 'utf8'))).sort((a, b) => trackIndex(a) - trackIndex(b) || a.order - b.order);
+const catalog = readLessonCatalog();
+if (catalog.issues.length) throw new Error(catalog.issues.map(issue => `${issue.lessonId}：${issue.message}`).join('\n'));
+if (values['require-tracked']) requireTrackedLessonSources(catalog);
+const lessons = catalog.lessons.map(row => row.lesson);
 /** 课程按业务链分组：主干先于采购付款；未写 track 的旧课程属于采购结算与付款。 */
 const lessonTracks = [...new Set(lessons.map(trackOf))];
-const captures = new Map(lessons.map(l => [l.id, loadCapture(WIKI, l)]));
+const captures = new Map(catalog.lessons.map(row => [row.id, row.capture]));
 for (const l of lessons) if (l.nextLesson && !lessons.some(x => x.id === l.nextLesson.id)) throw new Error(`${l.title}：下一课不存在 ${l.nextLesson.id}`);
 for (const chapter of chapters) {
   for (const match of chapter.body.matchAll(/!\[[^\]]*\]\((assets\/[\w/.-]+\.(?:gif|png|jpg|webp))\)/gi)) {
@@ -96,6 +107,9 @@ const html = `<!doctype html>
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
 }
 *{box-sizing:border-box}
+/* Keep scrolling without reserving a scrollbar gutter, matching the business client. */
+*{scrollbar-width:none;scrollbar-gutter:auto}
+*::-webkit-scrollbar{display:none;width:0;height:0}
 [hidden]{display:none!important}
 html{scroll-behavior:smooth}
 body{margin:0;font-family:var(--sans);color:var(--ink);background:var(--bg);font-size:15.5px;line-height:1.85;-webkit-font-smoothing:antialiased}
@@ -192,7 +206,7 @@ ${lessonStyles}
   </nav>
   <main id="content">
     ${start}
-    ${lessons.map(l => renderLesson(l, captures.get(l.id))).join('\n')}
+    ${catalog.lessons.map(row => renderLesson(row.lesson, row.capture, { assetVersion: row.contentSha256 })).join('\n')}
     ${sections}
   </main>
 </div>
@@ -204,11 +218,20 @@ ${lessonRuntime}
 </html>`;
 
 fs.mkdirSync(SITE, { recursive: true });
-for (const l of lessons) fs.cpSync(path.join(WIKI, 'assets/lessons', l.capture), path.join(SITE, 'assets/lessons', l.capture), { recursive: true });
+// Publish only referenced, validated images. Do not copy arbitrary local files beside captures.
+for (const row of catalog.lessons) {
+  const destination = path.join(SITE, 'assets/lessons', row.lesson.capture, row.contentSha256);
+  fs.mkdirSync(destination, { recursive: true });
+  for (const file of row.imageFiles) fs.copyFileSync(path.join(root, file), path.join(destination, path.basename(file)));
+}
 fs.writeFileSync(path.join(SITE, 'index.html'), html);
+const git = (...args) => { try { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; } };
+const manifest = publicManualCatalog(catalog, { productVersion: version, commit: git('rev-parse', 'HEAD') || 'unknown', localChanges: git('status', '--porcelain', '--untracked-files=normal').split('\n').filter(Boolean).length, generatedAt: new Date().toISOString() });
+fs.writeFileSync(path.join(SITE, 'manual-version.json'), JSON.stringify({ siteKind: 'bambook-employee-manual', ...manifest }, null, 2) + '\n');
 // Explicitly withdraw the generator-owned old screenshot collections from employee delivery.
 for(const old of ['production','finance'])fs.rmSync(path.join(SITE,'assets',old),{recursive:true,force:true});
 
 const kb = (fs.statSync(path.join(SITE, 'index.html')).size / 1024).toFixed(0);
-console.log(`✓ wiki/site/index.html（${kb} KB · ${chapters.length} 章 · ${missingModules.length} 个页面未登记）`);
+console.log(`✓ ${path.relative(root, path.join(SITE, 'index.html'))}（${kb} KB · ${catalog.totals.lessons} 课 / ${catalog.totals.steps} 步 / ${catalog.totals.images} 张图）`);
+console.log(`  旧参考章节 ${chapters.length} 篇，旧模块登记缺口 ${missingModules.length} 项；不代表新版课程覆盖率。`);
 console.log(`  版本 v${version} · ${branch}@${head} · 生成于 ${generatedAt}`);

@@ -16,10 +16,11 @@ export function loadCapture(wikiDir, lesson) {
  * 引导式演示：每步一张真实界面截图，镜头推近到要操作的控件，压暗其余区域，
  * 光标移入并点击 / 输入，旁边气泡说明。读者可连续播放、暂停、重播本步，或自己点亮起的位置练习。
  */
-export function renderLesson(lesson, capture) {
+export function renderLesson(lesson, capture, { assetVersion = '' } = {}) {
   const n = lesson.steps.length, base = `assets/lessons/${lesson.capture}/`;
+  const source = image => base + (assetVersion ? `${encodeURIComponent(assetVersion)}/` : '') + image;
   const { width: W, height: H } = capture.viewport;
-  const frames = capture.frames.map((f, i) => ({ src: base + f.image, x: f.target.x / W, y: f.target.y / H, w: f.target.width / W, h: f.target.height / H, kind: lesson.steps[i].kind || 'click', value: f.value || '', tip: lesson.steps[i].tip || lesson.steps[i].do }));
+  const frames = capture.frames.map((f, i) => ({ src: source(f.image), x: f.target.x / W, y: f.target.y / H, w: f.target.width / W, h: f.target.height / H, kind: lesson.steps[i].kind || 'click', value: f.value || '', tip: lesson.steps[i].tip || lesson.steps[i].do }));
   const stepPanel = (s, i) => `<div class="lesson-panel" data-step-panel="${i}"${i ? ' hidden' : ''}>
    <p class="lesson-panel-count">第 ${i + 1} 步 / 共 ${n} 步</p>
    <h2 tabindex="-1">${esc(s.title)}</h2>
@@ -31,18 +32,19 @@ export function renderLesson(lesson, capture) {
    </dl>
    ${s.failure ? `<details class="lesson-trouble"><summary>${esc(s.failure.title)}</summary><p>${esc(s.failure.text)}</p></details>` : ''}
   </div>`;
-  return `<section id="${esc(lesson.id)}" class="chapter lesson" data-lesson data-frames="${esc(JSON.stringify(frames))}" data-result="${esc(base + capture.result)}" data-aspect="${H / W}">
+  return `<section id="${esc(lesson.id)}" class="chapter lesson" data-lesson data-frames="${esc(JSON.stringify(frames))}" data-result="${esc(source(capture.result))}" data-aspect="${H / W}">
  <p class="lesson-kicker">${esc(lesson.role)} · 分步教学</p>
  <h1>${esc(lesson.title)}</h1>
  <div class="lesson-meta">
   <span><small>谁来做</small>${esc(lesson.role)}</span><span><small>接手</small>${esc(lesson.handoff)}</span>
   <span><small>开始前</small>${esc(lesson.prerequisite)}</span><span><small>入口</small>${esc(lesson.entry)}</span>
  </div>
- <ol class="lesson-rail" style="--rail-n:${n}" aria-label="学习步骤">${lesson.steps.map((s, i) => `<li><button type="button" data-step="${i}"${i ? '' : ' aria-current="step"'}><span class="rail-n">${i + 1}</span><span class="rail-t">${esc(s.title)}</span></button></li>`).join('')}</ol>
+ <ol class="lesson-rail" style="--rail-n:${n}" aria-label="学习步骤">${lesson.steps.map((s, i) => `<li><button type="button" data-step="${i}" aria-label="${esc(`第${i + 1}步：${s.title}`)}"${i ? '' : ' aria-current="step"'}><span class="rail-n">${i + 1}</span><span class="rail-t">${esc(s.title)}</span></button></li>`).join('')}</ol>
  <div class="lesson-work">
   <div class="lesson-side">${lesson.steps.map(stepPanel).join('')}</div>
   <div class="lesson-stage" data-stage>
    <p class="lesson-player-state" data-player-state aria-live="polite">也可以直接点亮起的位置练习</p>
+   <div class="lesson-media-error" data-media-error role="alert" hidden><p>画面未能加载，请重新加载课程。</p><button type="button" data-media-reload>重新加载课程</button></div>
    <div class="shot" data-shot>
     <div class="shot-camera" data-camera>
      <img class="shot-img" data-img alt="" decoding="async">
@@ -108,7 +110,8 @@ export const lessonStyles = `
 .shot-hint{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);margin:0;background:#fff;color:#0E1A21;font-size:12.5px;padding:6px 12px;border-radius:8px;z-index:5;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,.15)}
 .shot-label{position:absolute;right:8px;bottom:8px;font-size:11px;color:#fff;background:rgba(14,26,33,.45);padding:2px 8px;border-radius:6px;z-index:4;pointer-events:none}
 .lesson-footer{position:sticky;bottom:0;z-index:5;display:flex;justify-content:space-between;align-items:center;margin:16px 0 0;padding:12px 0;background:#fffffff2;backdrop-filter:blur(10px);border-top:1px solid var(--line)}
-.lesson-footer button,.lesson-done button{font:inherit;border:0;border-radius:9px;padding:10px 18px;cursor:pointer;background:var(--l-fill);color:var(--ink-2)}.lesson-footer [data-lesson-next]{background:var(--l-accent);color:#fff}.lesson-footer button:disabled{opacity:.4;cursor:default}.lesson-footer span{font-size:13px;color:var(--ink-3)}
+.lesson-footer button,.lesson-done button,.lesson-media-error button{font:inherit;border:0;border-radius:9px;padding:10px 18px;cursor:pointer;background:var(--l-fill);color:var(--ink-2)}.lesson-footer [data-lesson-next]{background:var(--l-accent);color:#fff}.lesson-footer button:disabled{opacity:.4;cursor:default}.lesson-footer span{font-size:13px;color:var(--ink-3)}
+.lesson-media-error{padding:12px;border-radius:10px;background:var(--bg);color:var(--ink-2)}.lesson-media-error p{margin:0 0 8px}
 .lesson-footer [data-lesson-next].ready{box-shadow:0 0 0 4px var(--l-tint-2)}
 .lesson-done{margin-top:20px;padding:22px 24px;background:#eef5f1;border-radius:14px}.lesson-done h2{margin:0 0 8px;padding:0}.lesson-done h2:focus{outline:none}.lesson-done p{margin:0 0 12px}
 .lesson-chain{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0 0 16px;font-size:13px}.lesson-chain li{margin:0;padding:5px 10px;border-radius:999px;background:#fff;color:#456b58}.lesson-chain li.me{background:#2f6a4f;color:#fff}.lesson-chain li+li::before{content:"→ ";color:#8aa596}
@@ -129,15 +132,18 @@ export const lessonStyles = `
  * k = 画框高 / 相机高：画框比截图“高”（窄屏）时 k > 1，至少放大到 k 才能铺满。
  */
 function lessonMain(doc) {
-  for (const lesson of doc.querySelectorAll('[data-lesson]')) {
+  const lessons = [...doc.querySelectorAll('[data-lesson]')], controllers = new Map();
+  const mount = lesson => {
+    if (controllers.has(lesson)) return;
     const $ = s => lesson.querySelector(s), $$ = s => [...lesson.querySelectorAll(s)];
     const frames = JSON.parse(lesson.dataset.frames), resultSrc = lesson.dataset.result, imgAspect = Number(lesson.dataset.aspect) || .625;
     const shot = $('[data-shot]'), camera = $('[data-camera]'), img = $('[data-img]'), imgNext = $('[data-img-next]'), spot = $('[data-spot]'), valueBox = $('[data-value]'), hotspot = $('[data-hotspot]'), cursor = $('[data-cursor]'), tip = $('[data-tip]'), hint = $('[data-hint]');
     const panels = $$('[data-step-panel]'), rail = $$('[data-step]'), play = $('[data-play]'), playerState = $('[data-player-state]');
     const next = $('[data-lesson-next]'), prev = $('[data-lesson-prev]'), done = $('[data-lesson-done]');
+    const mediaError = $('[data-media-error]'), replay = $('[data-replay]');
     const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     const narrow = () => typeof matchMedia === 'function' && matchMedia('(max-width: 700px)').matches;
-    let step = 0, completed = new Set(), run = null, playing = false, hintTimer = 0, cursorAt = { x: .5, y: .5 }, cam = { z: 1, tx: 0, ty: 0, k: 1 }, target = frames[0];
+    let step = 0, completed = new Set(), run = null, playing = false, hintTimer = 0, cursorAt = { x: .5, y: .5 }, cam = { z: 1, tx: 0, ty: 0, k: 1 }, target = frames[0], loadEpoch = 0, mediaLoading = false, mediaFailed = false;
 
     const pct = v => (v * 100).toFixed(3) + '%';
     const place = (el, f) => { el.style.left = pct(f.x); el.style.top = pct(f.y); el.style.width = pct(f.w); el.style.height = pct(f.h); };
@@ -162,19 +168,42 @@ function lessonMain(doc) {
     };
     const say = (text, ms = 2200) => { clearTimeout(hintTimer); hint.textContent = text; hint.hidden = !text; if (text) hintTimer = setTimeout(() => { hint.hidden = true; }, ms); };
     const setPlayer = (label, pressed, status) => { play.textContent = narrow() ? label.slice(0, 1) : label; play.setAttribute('aria-label', label.slice(2)); play.setAttribute('aria-pressed', String(pressed)); playerState.textContent = status; };
-    const idle = () => { playing = false; setPlayer('▶ 播放演示', false, completed.has(step) ? '这一步已完成，可以点「下一步」' : '也可以直接点亮起的位置练习'); };
+    const mediaControls = () => { play.disabled = mediaFailed || (mediaLoading && !playing); replay.disabled = hotspot.disabled = mediaFailed || mediaLoading; next.disabled = mediaFailed || mediaLoading || !done.hidden; };
+    const idle = () => { playing = false; mediaControls(); setPlayer('▶ 播放演示', false, mediaFailed ? '画面未能加载' : mediaLoading ? '正在加载画面…' : !done.hidden ? '本课已完成，可查看下方交接' : completed.has(step) ? '这一步已完成，可以点「下一步」' : '也可以直接点亮起的位置练习'); };
+    const loadImage = (element, src, r) => new Promise(resolve => {
+      const epoch = loadEpoch, started = Date.now(); mediaLoading = true; mediaFailed = false; mediaError.hidden = true; mediaControls();
+      if (!r?.paused) playerState.textContent = '正在加载画面…';
+      if (element.getAttribute('src') !== src) element.src = src;
+      const check = () => {
+        if (epoch !== loadEpoch || r?.cancelled || element.getAttribute('src') !== src) { resolve(false); return; }
+        if (element.complete || Date.now() - started >= 15000) {
+          mediaLoading = false;
+          const ok = element.complete && element.naturalWidth > 0;
+          if (!ok) { stop(); playing = false; mediaFailed = true; mediaError.hidden = false; hotspot.hidden = spot.hidden = cursor.hidden = tip.hidden = true; }
+          mediaControls();
+          if (!playing) idle(); else playerState.textContent = r?.paused ? '已暂停' : '演示中…';
+          resolve(ok); return;
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
 
     // 暂停时计时停止；每次至少等一个计时周期，逐字输入才看得到。
     const wait = (r, ms) => new Promise(resolve => { let left = reduced ? Math.min(ms, 150) : ms; const slice = Math.min(50, Math.max(10, left)); const tick = () => { if (r.cancelled) return resolve(false); if (!r.paused) left -= slice; if (left <= 0) return resolve(true); setTimeout(tick, slice); }; setTimeout(tick, slice); });
     const swap = async (src, r) => {
-      if (img.getAttribute('src') === src) return true;
-      imgNext.src = src; imgNext.hidden = false; void imgNext.offsetWidth; imgNext.style.opacity = '1';
-      const ok = !r || await wait(r, 450); img.src = src; imgNext.style.opacity = '0'; imgNext.hidden = true; return ok;
+      const epoch = loadEpoch;
+      if (img.getAttribute('src') === src && img.complete && img.naturalWidth > 0) return true;
+      if (!await loadImage(imgNext, src, r) || epoch !== loadEpoch) return false;
+      imgNext.hidden = false; void imgNext.offsetWidth; imgNext.style.opacity = '1';
+      const ok = !r || await wait(r, 450); if (!ok || epoch !== loadEpoch) return false;
+      img.src = src; imgNext.style.opacity = '0'; imgNext.hidden = true; return true;
     };
-    const showFrame = i => {
-      target = frames[i]; img.src = target.src; place(spot, target); place(hotspot, target); place(valueBox, target);
+    const showFrame = (i, r) => {
+      target = frames[i]; place(spot, target); place(hotspot, target); place(valueBox, target);
       hotspot.setAttribute('aria-label', target.tip); hotspot.hidden = false; spot.hidden = false;
       valueBox.hidden = true; valueBox.textContent = ''; valueBox.className = 'shot-value'; tip.hidden = true;
+      return loadImage(img, target.src, r);
     };
     const moveCursor = (x, y) => { cursorAt = { x, y }; cursor.style.left = pct(x); cursor.style.top = pct(y); };
     const perform = async (r, f) => {
@@ -198,23 +227,24 @@ function lessonMain(doc) {
     const complete = () => { completed.add(step); rail[step].classList.add('done'); next.classList.add('ready'); shot.removeAttribute('data-practice'); if (step === frames.length - 1) next.textContent = '看结果'; };
     const finish = async r => {
       shot.removeAttribute('data-dim'); shot.removeAttribute('data-practice'); hotspot.hidden = true; spot.hidden = true; cursor.hidden = true; valueBox.hidden = true; tip.hidden = true;
-      setCamera(1); await swap(resultSrc, r);
-      done.hidden = false; next.disabled = true; done.querySelector('h2').focus({ preventScroll: true });
+      setCamera(1); if (!await swap(resultSrc, r)) return;
+      done.hidden = false; next.disabled = true; next.textContent = '已完成'; playerState.textContent = '本课已完成，可查看下方交接'; done.querySelector('h2').focus({ preventScroll: true });
     };
-    const stop = () => { if (run) { run.cancelled = true; run = null; } cursor.classList.remove('click'); };
+    const stop = () => { loadEpoch++; mediaLoading = false; if (run) { run.cancelled = true; run = null; } imgNext.hidden = true; cursor.classList.remove('click'); };
     // 练习：先给全局画面，片刻后推近到操作位置并亮起，读者知道这一步在页面的哪里。
     const go = (i, user) => {
       stop(); step = Math.max(0, Math.min(frames.length - 1, i)); markStep();
       done.hidden = true; say(''); completed.delete(step); rail[step].classList.remove('done');
-      showFrame(step); setCamera(1); cursor.hidden = true; shot.setAttribute('data-dim', ''); shot.setAttribute('data-practice', '');
+      setCamera(1); cursor.hidden = true; shot.setAttribute('data-dim', ''); shot.setAttribute('data-practice', '');
       const r = run = { cancelled: false, paused: false };
-      wait(r, 550).then(ok => ok && (zoomTo(target), wait(r, 850))).then(ok => { if (ok && run === r) { showTip(target); run = null; } });
+      showFrame(step, r).then(ok => ok && wait(r, 550)).then(ok => ok && (zoomTo(target), wait(r, 850))).then(ok => { if (ok && run === r) { showTip(target); run = null; } });
       idle();
       if (user && narrow()) $('[data-stage]').scrollIntoView?.({ block: 'start' });
     };
     const demoStep = async r => {
       const f = frames[step];
-      showFrame(step); shot.setAttribute('data-dim', ''); shot.removeAttribute('data-practice'); setCamera(1);
+      if (!await showFrame(step, r)) return false;
+      shot.setAttribute('data-dim', ''); shot.removeAttribute('data-practice'); setCamera(1);
       cursor.hidden = false; moveCursor(cursorAt.x, cursorAt.y);
       if (!await wait(r, 350)) return false;
       zoomTo(f); if (!await wait(r, 650)) return false;
@@ -264,9 +294,35 @@ function lessonMain(doc) {
       go(step + 1, true); panels[step].querySelector('h2').focus({ preventScroll: true });
     });
     $('[data-lesson-restart]').addEventListener('click', () => { completed.clear(); rail.forEach(b => b.classList.remove('done')); go(0); lesson.scrollIntoView?.({ block: 'start' }); });
-    globalThis.addEventListener?.('resize', () => { if (cam.z > 1 && done.hidden) zoomTo(target); else setCamera(1); });
+    $('[data-media-reload]').addEventListener('click', () => globalThis.location.reload());
+    const refresh = () => {
+      if (!mediaFailed && !mediaLoading && (!img.complete || !img.naturalWidth)) {
+        const r = run = { cancelled: false, paused: false };
+        void showFrame(step, r).then(ok => { if (ok && run === r) { zoomTo(target); showTip(target); run = null; } });
+      } else if (cam.z > 1 && done.hidden) zoomTo(target); else setCamera(1);
+    };
+    globalThis.addEventListener?.('resize', () => { if (!lesson.hidden) refresh(); });
+    controllers.set(lesson, { pause: () => { stop(); clearTimeout(hintTimer); idle(); }, refresh });
     go(0);
-  }
+  };
+  // Hidden courses must not load images or run animations. Search can expose several courses;
+  // use the viewport observer so only the one being read is initialized.
+  const observer = typeof IntersectionObserver === 'function' ? new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      if (entry.isIntersecting && !entry.target.hidden) { mount(entry.target); controllers.get(entry.target)?.refresh(); }
+      else controllers.get(entry.target)?.pause();
+    }
+  }) : null;
+  for (const lesson of lessons) observer?.observe(lesson);
+  const changed = () => {
+    for (const lesson of lessons) {
+      if (lesson.hidden) controllers.get(lesson)?.pause();
+      else if (!observer) { mount(lesson); controllers.get(lesson)?.refresh(); }
+    }
+  };
+  globalThis.addEventListener?.('hashchange', changed);
+  doc.getElementById('q')?.addEventListener('input', changed);
+  changed();
 }
 
 export const lessonRuntime = `(${lessonMain.toString()})(document);`;

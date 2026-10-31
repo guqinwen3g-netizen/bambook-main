@@ -207,6 +207,14 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
         try_files $uri =404;
     }
+    location = /manual {
+        return 308 /manual/;
+    }
+    location ^~ /manual/ {
+        include /etc/nginx/mime.types;
+        add_header Cache-Control "no-cache, no-transform" always;
+        try_files $uri $uri/ =404;
+    }
     location / {
         add_header Cache-Control "no-cache";
         try_files $uri /index.html;
