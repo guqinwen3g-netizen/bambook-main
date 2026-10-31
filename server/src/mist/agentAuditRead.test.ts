@@ -37,6 +37,7 @@ describe('Audit deltas use current section, field and row visibility',()=>{
     const result=view(audit(before,after,{type:'payable.bill.link',payload:{id:'bill'}},'other'),after,user,scope);
     expect(JSON.stringify(result.changes)).toContain('PO-1');expect(JSON.stringify(result.changes)).toContain('45');
     expect(JSON.stringify(result.changes)).not.toContain('PO-2');expect(JSON.stringify(result.changes)).not.toContain('105');expect(result.detailsRestricted).toBe(true);
+    expect(result.targets.some(target=>target.id==='bill')).toBe(false);
   });
   it('shows actual finance changes and the owner command, but hides both when voucher access is revoked',()=>{
     const before=empty();before.payables.settlements=[{id:'settlement',state:'pending',amount:110670,note:'supplier-private'} as any];
