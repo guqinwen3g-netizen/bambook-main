@@ -102,8 +102,8 @@ try {
     const missing = await page.evaluate(ids => ids.filter(id => !document.getElementById(id)), [...new Set(anchors)]);
     check('目录 · 页内链接都有目标', missing.length === 0, missing.join('、'));
     const title = (await root.locator('h1, h2').first().textContent())?.trim();
-    await page.fill('#q', '结算说明'); await page.waitForTimeout(200);
-    check('搜索 · 按字段名能找到本课', await root.isVisible());
+    await page.fill('#q', title); await page.waitForTimeout(200);
+    check('搜索 · 按课程名能找到本课', await root.isVisible(), title);
     await page.fill('#q', '这串不会出现的词zzz'); await page.waitForTimeout(200);
     check('搜索 · 无结果时给出提示', await page.locator('#no-hit').isVisible());
     await page.fill('#q', ''); await page.waitForTimeout(200);

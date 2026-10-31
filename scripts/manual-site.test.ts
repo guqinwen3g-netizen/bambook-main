@@ -59,14 +59,14 @@ it('fails the manual route closed when generation fails and rejects symlinked pu
  try{expect((await request('/manual/assets/linked.webp')).status).toBe(404);}finally{port=original;await linked.close();}
 });
 
-it('builds all 27 real courses with matching standalone version metadata and versioned image URLs',()=>{
+it('builds all 35 real courses with matching standalone version metadata and versioned image URLs',()=>{
  const output=path.join(root,'actual-manual');fs.mkdirSync(output);
  execFileSync(process.execPath,[path.join(repo,'scripts/wiki-build.mjs'),'--out-dir',output],{cwd:repo,stdio:'pipe'});
  const manifest=JSON.parse(fs.readFileSync(path.join(output,'manual-version.json'),'utf8'));
- expect(manifest.totals).toEqual({lessons:27,steps:164,images:191});expect(manifest.build.commit).toMatch(/^[a-f0-9]{40}$/);expect(manifest.courses.every((c:any)=>c.provenance.status==='registered'&&/^[a-f0-9]{40}$/.test(c.provenance.softwareCommit))).toBe(true);
- const html=fs.readFileSync(path.join(output,'index.html'),'utf8');expect(html.match(/data-lesson data-frames=/g)).toHaveLength(27);expect(html).toMatch(/\/[a-f0-9]{64}\/01\.webp/);
+ expect(manifest.totals).toEqual({lessons:35,steps:238,images:273});expect(manifest.build.commit).toMatch(/^[a-f0-9]{40}$/);expect(manifest.courses.every((c:any)=>c.provenance.status==='registered'&&/^[a-f0-9]{40}$/.test(c.provenance.softwareCommit))).toBe(true);
+ const html=fs.readFileSync(path.join(output,'index.html'),'utf8');expect(html.match(/data-lesson data-frames=/g)).toHaveLength(35);expect(html).toMatch(/\/[a-f0-9]{64}\/01\.webp/);
  const files=(directory:string):string[]=>fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>entry.isDirectory()?files(path.join(directory,entry.name)):[path.join(directory,entry.name)]);
- expect(files(output).filter(file=>file.endsWith('.webp'))).toHaveLength(191);expect(files(output).some(file=>file.endsWith('capture.json'))).toBe(false);
+ expect(files(output).filter(file=>file.endsWith('.webp'))).toHaveLength(273);expect(files(output).some(file=>file.endsWith('capture.json'))).toBe(false);
  const protectedDir=path.join(root,'other-files');fs.mkdirSync(protectedDir);fs.writeFileSync(path.join(protectedDir,'important.txt'),'keep');
  const rejected=spawnSync(process.execPath,[path.join(repo,'scripts/wiki-build.mjs'),'--out-dir',protectedDir],{cwd:repo,encoding:'utf8'});expect(rejected.status).not.toBe(0);expect(fs.readFileSync(path.join(protectedDir,'important.txt'),'utf8')).toBe('keep');expect(fs.existsSync(path.join(protectedDir,'index.html'))).toBe(false);
 },15000);

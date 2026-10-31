@@ -103,5 +103,9 @@
       "title": "之后",
       "text": "登记产前样、收定金后放行生产。"
     }
-  ]
+  ],
+  "nextLesson": {
+    "id": "tutorial-deposit-link",
+    "title": "登记定金到账并归属订单"
+  }
 }

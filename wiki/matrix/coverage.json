@@ -889,7 +889,7 @@
   {
    "id": "order-deposit",
    "stage": "订单与审批",
-   "task": "客户定金到账核对与分配",
+   "task": "客户定金到账：导入流水并归属订单",
    "roles": [
     "财务",
     "业务员"
@@ -906,9 +906,10 @@
     "funding.assign",
     "funding.release"
    ],
-   "impl": "source",
-   "lessons": [],
-   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+   "impl": "walked",
+   "lessons": [
+    "tutorial-deposit-link"
+   ]
   },
   {
    "id": "purchase-draft",
@@ -1513,12 +1514,37 @@
     "fulfillment.qc.report",
     "fulfillment.qc.confirm"
    ],
-   "impl": "source",
-   "lessons": [],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-pps-send",
+    "tutorial-pps-report",
+    "tutorial-pps-confirm"
+   ],
    "pages": [
     "52-产前样送检与确认.md"
+   ]
+  },
+  {
+   "id": "production-sizes",
+   "stage": "产前样与放行",
+   "task": "登记生产分支尺码",
+   "roles": [
+    "业务员"
    ],
-   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+   "modes": [
+    "garment",
+    "cmt"
+   ],
+   "views": [
+    "production-board"
+   ],
+   "commands": [
+    "fulfillment.production.plan"
+   ],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-production-sizes"
+   ]
   },
   {
    "id": "production-release",
@@ -1536,15 +1562,15 @@
     "production-board"
    ],
    "commands": [
-    "fulfillment.production.plan",
     "fulfillment.production.release"
    ],
-   "impl": "source",
-   "lessons": [],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-production-release"
+   ],
    "pages": [
     "55-开产跟进与完工-SOP.md"
-   ],
-   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+   ]
   },
   {
    "id": "production-track",
@@ -1567,8 +1593,10 @@
     "fulfillment.production.hold",
     "fulfillment.production.resume"
    ],
-   "impl": "source",
-   "lessons": [],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-production-progress"
+   ],
    "pages": [
     "55-开产跟进与完工-SOP.md"
    ]
@@ -1589,15 +1617,15 @@
     "production-board"
    ],
    "commands": [
-    "fulfillment.production.complete",
-    "fulfillment.production.acceptCompletion"
+    "fulfillment.production.complete"
    ],
-   "impl": "source",
-   "lessons": [],
+   "impl": "walked",
+   "lessons": [
+    "tutorial-production-complete"
+   ],
    "pages": [
     "55-开产跟进与完工-SOP.md"
-   ],
-   "note": "实施 Agent 已经 MCP 委托在本地演示种子走通，界面未走查"
+   ]
   },
   {
    "id": "qc-inspection",
