@@ -4,7 +4,7 @@ import {getByRole,getAllByRole,getByLabelText,getByText,queryByRole} from '@test
 const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),identity:'A',userId:'A'}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
 vi.mock('../runtime/workspace',()=>({mistApiRequest:(...args:any[])=>seam.api(...args),useMistWorkspace:()=>({workspace:{id:'workspace'}})}));
-import {AgentConnections} from './AgentConnections';
+import {AgentConnections,agentConnectionEndpoint} from './AgentConnections';
 let host:HTMLDivElement,root:Root;
 const row=(version=1,state='active')=>({id:'connection',name:'采购助手',mode:'read',state,version,createdAt:new Date().toISOString(),expiresAt:new Date(Date.now()+7200000).toISOString()});
 const page=()=>({items:[row()],canConnect:true,nextCursor:null});
@@ -12,6 +12,9 @@ const paint=()=>root.render(<MistRoot><AgentConnections/></MistRoot>);
 const flush=async()=>{await act(async()=>{await Promise.resolve();await Promise.resolve();});};
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;vi.clearAllMocks();seam.identity='A';seam.userId='A';localStorage.clear();sessionStorage.clear();Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:seam.copy.mockResolvedValue(undefined)}});host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
+it('only copies HTTP business endpoints and does not invent a destination for packaged file origins',()=>{
+ expect(agentConnectionEndpoint('null')).toBeNull();expect(agentConnectionEndpoint('file:///app/index.html')).toBeNull();expect(agentConnectionEndpoint('https://company.example/path')).toBeNull();expect(agentConnectionEndpoint('https://company.example')).toBe('https://company.example/api/mist/mcp');
+});
 it('creates through the real API contract, masks credentials and copies a usable remote MCP configuration',async()=>{
  seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{connection:row(),delegation:{token:'private-test-token',expiresAt:row().expiresAt}}:page()));
  act(paint);await flush();await act(async()=>getByRole(host,'button',{name:'新建连接'}).click());

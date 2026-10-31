@@ -8,13 +8,13 @@ import type {AgentConnectionView,AgentConnectionPage} from '../../../../server/s
 const stamp=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 type Action={kind:'create';id:string;name:string;mode:'read'|'operate'}|{kind:'renew'|'revoke';row:AgentConnectionView;requestId:string};
 type Issued={connection:AgentConnectionView;delegation:{token:string;expiresAt:string}};
-export function AgentConnections(){const s=useMistSession(),w=useMistWorkspace();return w.workspace?<ConnectionList key={JSON.stringify([s.sessionKey,s.user?.id,w.workspace.id])} workspaceId={w.workspace.id}/>:<EmptyState title={uiText('尚未进入公司')}/>;}
-export function ConnectionList({workspaceId}:{workspaceId:string}){
+export function agentConnectionEndpoint(origin:string):string|null{try{const url=new URL(origin);return ['http:','https:'].includes(url.protocol)&&url.origin===origin?new URL('/api/mist/mcp',origin).href:null;}catch{return null;}}
+export function AgentConnections(){const s=useMistSession(),w=useMistWorkspace(),endpoint=agentConnectionEndpoint(location.origin);if(!endpoint)return <EmptyState title={uiText('请在公司网页中管理连接')}/>;return w.workspace?<ConnectionList key={JSON.stringify([s.sessionKey,s.user?.id,w.workspace.id])} workspaceId={w.workspace.id} endpoint={endpoint}/>:<EmptyState title={uiText('尚未进入公司')}/>;}
+export function ConnectionList({workspaceId,endpoint}:{workspaceId:string;endpoint:string}){
  const base='/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-connections',toast=useToast();
  const [rows,setRows]=React.useState<AgentConnectionView[]>([]),[cursor,setCursor]=React.useState<string|null>(null),[canConnect,setCanConnect]=React.useState(false),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
  const [action,setAction]=React.useState<Action|null>(null),[issued,setIssued]=React.useState<Issued|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState(''),[attempted,setAttempted]=React.useState(false),[clock,setClock]=React.useState(Date.now());
  const alive=React.useRef(true),sequence=React.useRef(0),operation=React.useRef(0),readAbort=React.useRef<AbortController|null>(null),writeAbort=React.useRef<AbortController|null>(null);
- const endpoint=new URL('/api/mist/mcp',location.origin).href;
  const load=React.useCallback(async(after:string|null=null)=>{const serial=++sequence.current;readAbort.current?.abort();const abort=new AbortController();readAbort.current=abort;setLoading(true);setError('');if(!after){setRows([]);setCursor(null);}
   try{const page:AgentConnectionPage=await mistApiRequest(base+(after?'?cursor='+encodeURIComponent(after):''),{signal:abort.signal});if(!alive.current||serial!==sequence.current)return;setRows(old=>after?[...old,...page.items.filter(item=>!old.some(r=>r.id===item.id))]:page.items);setCursor(page.nextCursor);setCanConnect(page.canConnect);}
   catch(e){if(!alive.current||abort.signal.aborted||serial!==sequence.current)return;setError(e instanceof Error?e.message:'连接读取失败');if([401,403,404].includes((e as any)?.status)){setRows([]);setCanConnect(false);setIssued(null);setAction(null);}}

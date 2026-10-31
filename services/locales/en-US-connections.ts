@@ -1,4 +1,5 @@
 export const connectionEnglish:Record<string,string>={
+ '请在公司网页中管理连接':'Manage connections from the company website.',
  'Agent 连接':'Agent connections','新建连接':'New connection','连接读取失败':'Could not load connections','暂无 Agent 连接':'No Agent connections yet','连接名称':'Connection name','新建 Agent 连接':'New Agent connection','创建连接':'Create connection',
  '续签':'Renew','续签连接':'Renew connection','确认续签':'Renew connection','撤销连接':'Revoke connection','确认撤销':'Revoke connection','旧凭据将立即失效。':'The previous credential will stop working immediately.','此连接将立即失效。':'This connection will stop working immediately.',
  '连接凭据':'Connection credential','连接地址':'Connection URL','凭据':'Credential','复制配置':'Copy configuration','复制凭据':'Copy credential','凭据已过期，请续签':'This credential has expired. Renew the connection.','可办理':'Can operate','有效':'Active','已撤销':'Revoked','到期时间':'Expires at',
