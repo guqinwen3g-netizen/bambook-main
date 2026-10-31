@@ -78,14 +78,14 @@
 | 报价成本 AI 审阅 | `POST /workspaces/:id/quotation-cost-advisor` → `mist/quoteCostAdvisor.ts`，使用 `quote-review` 模型档位；成本/价格公式仍由服务器计算，模型仅给依据、风险、问题与待审策略 | 当前调用链已接入平台模型，单元验证使用替身网络；共享问答执行层的所有者判断须一并复核 | 各岗位真实界面与实际模型完整验收；不得把建议写成审批或客户接受 |
 | 平台模型与固定流程 | `ai/platformProviders.ts`、`ai/codexSubscription.ts`、`ai/llmProviders.ts`；平台管理员配置API/订阅、排序回退，个人订阅不参与平台AI | `platformModel.ts` 的 `summary` / `reconciliation` 是模型档位配置 | 档位名称本身不代表业务流程已接线；主动邮件整理已接入summary（6.1.3），自动汇总与财务对账仍须逐项核验 |
 | 桌面工作助手（本机 Agent） | `assistant?section=work`（`modules/WorkAssistantPage.tsx`），仅 Electron 桌面端；运行在 `electron/assistant/`（`host.ts`、`harness.ts`、`bambookTools.ts`），页面用本人会话续签短期委托（`useAssistantDelegation.ts`） | — | 员工上手教学待能力验收后补 |
-| 外部 MCP / 本地 Agent API | `POST /api/mist/mcp`（`server/src/mist/agentMcp.ts`）；9个工具与25类读取对象；契约见 [`work-assistant-plan.md` §14](mist-atelier/work-assistant-plan.md)。支持登记的短期委托头 `x-bambook-delegation` 和长期密钥头 `x-bambook-agent-key`，不可混用 | 官方客户端2.4.0在独立模拟环境完成业务提议、真人确认、结果/审计回读及凭据轮换、撤销、重启拒绝；#578/#580已发布。不代表所有客户端、业务或公网带授权写入均已验收 | 持久值守任务与更多客户端、业务分支 |
+| 外部 MCP / 本地 Agent API | `POST /api/mist/mcp`（`server/src/mist/agentMcp.ts`）；10个工具与25类读取对象；契约见 [`work-assistant-plan.md` §14](mist-atelier/work-assistant-plan.md)。支持登记的短期委托头 `x-bambook-delegation` 和长期密钥头 `x-bambook-agent-key`，不可混用 | 官方客户端2.4.0在独立模拟环境完成业务提议、真人确认、结果/审计回读及凭据轮换、撤销、重启拒绝；#578/#580已发布。不代表所有客户端、业务或公网带授权写入均已验收 | 更多客户端、业务分支及平台自主驱动 |
 | 委托身份 | 本人短期连接登记于 `mist/agentConnections.ts`；2小时v2凭据绑定账号、公司、工作区、签发权限上限。桌面签发入口须提供工作区与稳定连接编号，旧v1 HTTP授权拒绝 | 续签轮换、撤销持久化、权限不扩大及密码/全设备退出约束已核验 | 原生桌面打包后的完整模型操作链仍须验收 |
 | 敏感操作人工确认 | `agentMcp.ts#agentCommandSensitivity`：资金/账务、人员权限、收款账户、对外发送及 confirm/approve/decide/void/reverse/cancel… 类动词 → 先预演，再记为 Agent 提议；`email.server.*`、`agent.*` 禁止 Agent 直接调用 | 同上 | — |
 | Agent 提议 | `server/src/shared/mistAgentProposals.ts`；首页显示“Agent 提议 · 待确认”，`pages/AgentProposalDialog.tsx` 由本人确认或拒绝 | 同上 | — |
 | Agent 审计 | 落盘：`server/src/mist/agentAudit.ts` + `repository.ts#executeInternal`，与原请求同事务写内部审计回执 `mist-revision:agent-audit:<requestId>`，脱敏。查询（#574）：`agentAuditRead.ts` 按本人/公司审计权限及当前岗位、行级范围裁剪；REST `GET /workspaces/:id/agent-audits[/:requestId]`；MCP工具 `bambook_audit`；账号页「Agent操作记录」`pages/AgentAuditHistory.tsx` | 实施 Agent 在独立本地真实界面切财务/业务员核验本人、公司记录、原始填写与原单回程 | #574 已发布（运行提交 a9a78ee8）。不覆盖所有普通人工写入；历史不倒填 |
 | 员工自助连接 | 我的账号 → Agent连接；创建、复制配置、续签、撤销本人连接（`pages/AgentConnections.tsx`） | #578已修复并发布，独立真实界面及官方客户端完整生命周期通过；#577错误版本保持禁发 | 更多实际客户端与原生桌面验收 |
 | 长期Agent服务身份 | 公司管理 → Agent服务，由管理员配置在职责任人；我的账号 → 长期Agent，由责任人本人签发90天密钥。实现：`mist/agentIdentities.ts`、`pages/AgentIdentities.tsx` | #580已发布；权限取签发上限与责任人当前授权交集。换人/改模式/停用使旧密钥失效；轮换、撤销与密码/全设备退出约束已核验。敏感提议交真实责任人确认，服务身份单独留痕 | 该身份不等于已经启动值守进程；不继承或扩大真人权限 |
-| 长值守 Agent | — | — | 长期运行循环未交付 |
+| 持久任务与长值守 | 任务专用HTTP MCP连接、持久检查点、短执行租约、人工等待、暂停/恢复/停止及限额，见6.3 | 独立真实Mist界面及官方客户端完成邮件读回、确认归档、重连和停止；当前源码，发布见GO-LIVE | 平台自主模型驱动、自动巡检/通知和长期运行验收未交付 |
 | 文件类操作 | 须上传原件的票据（如增值税专票）Agent 不能上传，预演即被拒 | 同上 | — |
 
 ### 6.1 当前 Mist 邮箱边界
@@ -136,6 +136,17 @@
 - **运维验证**：模型探测使用实际服务UID/GID与相同启动配置，输入独立合成资料，不查询公司业务库。会触发授权刷新的程序不能用root身份直接运行，避免原子写入生成服务账号不可读的凭据；凭据文件保持服务账号归属与0600，目录0700。只回传结果、错误分类和耗时，不回传令牌或完整上游错误。
 - **员工文字入口**：[小竹业务问答SOP](../wiki/sop/platform-ai.md)。HTML教学制作据已核实的步骤和范围呈现，不把其他AI流程当成问答已经具备的能力。
 
+### 6.3 持久 Agent 任务与标准任务连接（2026-11-01）
+
+- **入口与真源**：本人「我的账号 → 长期Agent」分任务/连接；`pages/AgentTasks.tsx`使用现有Mist设置、表格、Drawer/Dialog。管理员仍在公司Agent服务配置责任人，责任人本人启用服务凭据后可安排任务。`mistAgentTasks.ts`是公开DTO；`agentTasks.ts`在`MistCommandReceipt`的受保护`mist-revision:agent-task:`保存任务，事件另用不可变`agent-task-event:`。只该任务登记可更新，普通业务回执与事件仍不可修改；不增Schema或默认岗位授权。
+- **三层凭据**：长期服务`bma1`只供受信执行器管理；本人在任务界面签发`bmc1`任务专用控制凭据，标准HTTP MCP初始化返回签名`Mcp-Session-Id`。业务调用按真实会话自动领取90秒`bmt1`执行租约，心跳保持占用；临时租约与长期服务密钥不进入模型工具结果。无需CLI中转或把根密钥放进任务说明。四种认证头互斥；控制连接只准`/mcp`、绑定准确公司和任务。标准目录10工具，任务连接9工具，移除公司选择并隐藏/服务端注入公司与任务参数；显式越界仍拒绝。
+- **生命周期与并发**：任务新建仅queued，不制造执行中。单执行器领取、单调心跳、持久检查点；控制版本与进度版本分离，后台心跳不使暂停按钮失效。暂停/恢复/连接轮换使旧执行租约无效；同一任务停止通过真人专用`agent.task.cancel`命令原子拒绝待确认提议，保留已办业务。敏感提议与waiting_human在同一事务提交；确认/拒绝后允许新租约接续，旧租约不复活。每次业务事务前后锁定任务并复核权限/租约，防止迟到写入越过停止。
+- **权限与来源**：签发上限与责任人当前权限、在职公司资格、安全代次、小组/行级范围持续校验。`agentTaskVisibility.ts`保存已读来源及完整/截断、部分财务覆盖；失去访问后隐藏任务内容/检查点/报告及提议载荷。执行凭据撤销不抹去本人已结束任务的历史，终态历史仍按本人当前权限、安全代次和来源范围裁剪；执行器不能因此恢复访问。非法内部任务登记不能变成公开数据。完整对象读取记住实际版本，查询列表或偶然引用不刷新旧完整读基线；业务预演/办理结合来源版本，邮件自身写入只推进其字段基线，后台回执不能掩盖他人修改。本人确认仍复核原提议读取后的实际业务变化，系统任务/事件记账不制造虚假冲突。
+- **延迟邮件与结案**：状态同步意图只保存任务授权事实及原操作编号，不保存Bearer。后台重核原任务完整权限与执行资格，实际邮件执行仍保持邮件权限上限；停止或连接失效后不继续远端I/O。已有远端请求无法物理追回，未知结果只核对，当前有权员工可明确重试接续。任务自己的未完成邮件意图阻止转人工等待及成功结案，不能把本地保存当作原邮箱完成。
+- **资源与幂等**：每人最多10个未结束任务，每任务24小时、40次业务工具调用、30分钟累计有效执行；暂停/重连不清零。状态/心跳/检查点是控制操作，不算业务成功。稳定requestId、不可变操作事件、CAS及行锁保护重试；旧暂停请求不能暂停后来恢复的任务；旧签发请求不能复活轮换前连接。连接重试只在短恢复窗口返回相同代次。当前命令目录314，其中task.cancel仅本人；目录不授予业务权限。
+- **契约与验证**：REST为`/workspaces/:id/agent-tasks`及单项history/issue/pause/resume/cancel，执行层claim/heartbeat/checkpoint/finish；标准`bambook_task`提供status/checkpoint/finish及受信管理领取。独立本地真实界面与官方MCP客户端验证检查点、暂停拒绝、恢复、本人确认归档、原邮箱唯一移动、连接轮换与停止后零远端写入；合成数据，不是所有客户/原生桌面验收。测试入口`agentTasks.test.ts`、`agentTaskVisibility.test.ts`、`agentTaskProtocol.test.ts`、`mail/stateWorker.test.ts`及`pages/AgentTasks.test.tsx`。部署与固定版本看GO-LIVE。
+- **未交付**：外部客户端负责实际思考与执行；本功能不是服务器自动启动的模型循环。平台内部自主执行器、周期计划、异常主动通知、更多客户端/业务分支与长时间值守仍待。员工步骤见[长期Agent任务SOP](../wiki/sop/agent-tasks.md)，HTML教学由另行分工制作，不替其登记已完成。
+
 ## 7. 员工教学体系
 
 - **课程源**：`wiki/lessons/*.json`（步骤、问答、失败恢复、SOP、链路位置、下一课）+ `wiki/assets/lessons/<capture>/`（真实界面帧与 `capture.json` 目标框）。采集脚本 `scripts/manual-capture.mjs` 在独立本地 Mist 演示种子上用正确岗位实际操作；不直接改数据库制造状态。
@@ -155,13 +166,13 @@
 
 ### MCP 与员工教学入口（2026-10-31建档，2026-11-01对齐）
 
-- Mist标准MCP以 `docs/mist-atelier/work-assistant-plan.md` 第14节和 `server/src/mist/agentMcp.ts` 为准，旧Agent运行时和历史白名单不是当前接口口径。当前9个工具（含审计与自动收件状态）、类型化命令目录、25类显式读取对象；预演和执行共用账号权限、行级范围与业务门禁，敏感动作进入本人提议确认。
+- Mist标准MCP以 `docs/mist-atelier/work-assistant-plan.md` 第14节和 `server/src/mist/agentMcp.ts` 为准，旧Agent运行时和历史白名单不是当前接口口径。当前10个工具（含审计、自动收件状态与任务控制）、类型化命令目录、25类显式读取对象；预演和执行共用账号权限、行级范围与业务门禁，敏感动作进入本人提议确认。
 - 员工从顶栏或账号页「使用手册」打开 `/manual/`。真实界面引导课是 `wiki/lessons/*.json` 与对应采集帧，当前35课、238步、273张图；`wiki/pages/` 六篇参考说明单列。课程素材齐全、播放器核验、业务流程核验和员工认可分别记录，不互相代替。
 - `scripts/manual-catalog.mjs` 校验结构、坐标、素材与交接引用，并给课程内容摘要。`wiki:check --strict-lessons` 只守结构；课程播放/员工验收及实际采集版本保持独立声明。现有35课采集版本已登记：13课为51ccc0a7、22课为27c0a670；播放核验登记为通过，业务与员工验收须分别核对。构建输出 `manual-version.json`，实际采集提交与素材Git变更不混用。
 - `scripts/manual-site.ts` 在开发按需提供独立页面，生产把同一快照输出到 `dist/manual/`，不把图片导入业务主脚本。播放器只初始化可见课程，离开后停止动画；图片按课程摘要分版本目录，等待实际加载后播放，失败提供重载，不展示虚假的完成。
 - MCP外部互通：官方客户端2.4.0已在独立本地HTTP和真实Mist界面完成结算提交→财务提议→本人确认→MCP读回。执行必填稳定`requestId`，重试不换编号；敏感提议复用原说明回放，确认后不再次执行。协议只协商已实现版本，认证GET无SSE时回405；具体契约与未覆盖客户端见工作助手方案第14节。
 - Agent审计基础：`agentAudit.ts` 生成脱敏原命令及实际字段差异，`repository.ts` 与原请求同事务追加独立内部审计回执。`mist-revision:agent-audit:<原请求编号>` 沿用旧版已保护的服务端编号空间，普通业务回执不增私有字段，回退也不附带泄漏。普通委托办理及本人确认/拒绝保留来源会话；失败/预演/幂等重放不重复。公开回执防御性剥离 `__agentAudit`，内部编号禁止公开读取或占用；旧记录不补造，查询不能直接返回内部JSON。
-- 当前自助连接/续签/撤销、长期服务身份与密钥、Agent审计查询/页面已分别交付，见第6节。仍待：长期Agent任务执行循环、更多实际客户端、后续业务教学覆盖、视频导出与员工上手验收。HTML教学设计制作由另一Agent负责，Code Wiki与SOP文字由本聊天维护。
+- 当前自助连接/续签/撤销、长期服务身份与密钥、Agent审计查询/页面已分别交付，见第6节。持久任务控制见6.3；仍待：平台自主模型执行循环、更多实际客户端、后续业务教学覆盖、视频导出与员工上手验收。HTML教学设计制作由另一Agent负责，Code Wiki与SOP文字由本聊天维护。
 
 ### 发布边界核验：采购币种与扣费月末归属（2026-10-31）
 

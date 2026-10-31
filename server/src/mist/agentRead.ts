@@ -75,12 +75,12 @@ function compact(value: unknown, depth: number): unknown {
   return Object.fromEntries(Object.entries(value).filter(([k]) => k !== 'img').map(([k, v]) => [k, compact(v, depth - 1)]));
 }
 /** Mail evidence may be nested more deeply than ordinary object summaries. Mark every omitted part. */
-function mailDetailsTruncated(value: unknown, depth = 5, root = true): boolean {
+function detailsTruncated(value: unknown, depth: number, root = true, skipBody = false): boolean {
   if (typeof value === 'string') return value.length > TEXT_LIMIT || value.startsWith('data:');
   if (!value || typeof value !== 'object') return false;
   if (depth <= 0) return true;
-  if (Array.isArray(value)) return value.length > 20 || value.slice(0, 20).some(v => mailDetailsTruncated(v, depth - 1, false));
-  return Object.entries(value).some(([key, v]) => key !== 'img' && !(root && key === 'body') && mailDetailsTruncated(v, depth - 1, false));
+  if (Array.isArray(value)) return value.length > 20 || value.slice(0, 20).some(v => detailsTruncated(v, depth - 1, false));
+  return Object.entries(value).some(([key, v]) => key !== 'img' && !(root && skipBody && key === 'body') && detailsTruncated(v, depth - 1, false));
 }
 function summary(row: any) {
   return Object.fromEntries(Object.entries(row).filter(([k, v]) => k !== 'img' && (v === null || ['string', 'number', 'boolean'].includes(typeof v))).slice(0, 14).map(([k, v]) => [k, compact(v, 0)]));
@@ -132,7 +132,7 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
   let data = compact(row, type.type === 'email' ? 5 : 3) as Record<string, unknown>;
   if(type.type==='email'&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
   let text = JSON.stringify(data);
-  let truncated = type.type==='email' && (typeof row.body==='string'&&row.body.length>10_000 || mailDetailsTruncated(row));
+  let truncated = (type.type==='email'&&typeof row.body==='string'&&row.body.length>10_000) || detailsTruncated(row,type.type==='email'?5:3,true,type.type==='email');
   if (text.length > GET_LIMIT) { data = compact(row, 1) as Record<string, unknown>; text = JSON.stringify(data); truncated = true; }
   if (text.length > GET_LIMIT) { data = summary(row); truncated = true; }
   return { ...ref(type, row), data, truncated };

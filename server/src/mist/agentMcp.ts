@@ -43,6 +43,10 @@ export type McpRepository = {
   mailStateViews(actor:TokenPayload,id:string):Promise<unknown>;
   agentAudits(actor:TokenPayload,id:string,input?:Record<string,unknown>):Promise<unknown>;
   agentAudit(actor:TokenPayload,id:string,requestId:string,input?:Record<string,unknown>):Promise<unknown>;
+  getAgentTask?(actor:TokenPayload,id:string,taskId:string):Promise<unknown>;
+  agentTaskRuntime?(actor:TokenPayload,id:string,action:'heartbeat'|'checkpoint'|'finish',input:Record<string,unknown>):Promise<unknown>;
+  agentTaskExpectedRevision?(actor:TokenPayload,id:string,command:{type:string;payload:Record<string,unknown>}):Promise<number|undefined>;
+  finishAgentTaskSession?(actor:TokenPayload,id:string,input:Record<string,unknown>):Promise<unknown>;
 };
 
 const str = (description: string) => ({ type: 'string', description });
@@ -55,8 +59,9 @@ const TOOLS = [
   { name: 'bambook_commands', description: '列出可用的业务命令、payload 结构，以及是否须本人确认（confirm）。', inputSchema: { type: 'object', properties: { prefix: str('按命令前缀筛选，如 payable. 或 fulfillment.；带前缀时附上 payload 引用的类型定义（types）') } }, annotations: { readOnlyHint: true } },
   {name:'bambook_audit',description:'查看本人的Agent操作记录；有审计权限时可查当前公司。提供requestId读取按当前权限裁剪的变更详情，offset/limit翻页；includeCommand显式请求可见的原始命令。历史不能恢复已经失去的业务访问权。',inputSchema:{type:'object',properties:{workspaceId:str('工作区id'),requestId:str('原业务请求编号；不提供时列出记录'),scope:{type:'string',enum:['mine','company']},actorId:str('公司范围内按经办账号筛选'),proposalId:str('同一提议的操作'),agentSessionId:str('同一Agent会话的操作'),source:{type:'string',enum:['agent','human_confirmation','human_rejection']},phase:{type:'string',enum:['executed','proposed','confirmed','rejected']},since:str('起始ISO时间'),until:str('截止ISO时间'),cursor:str('列表下一页游标'),offset:{type:'integer',minimum:0},limit:{type:'integer',minimum:1,maximum:50},includeCommand:{type:'boolean'}},required:['workspaceId']},annotations:{readOnlyHint:true}},
   {name:'bambook_mail_receiving',description:'读取当前账号可见邮箱的自动收件及已读、星标、移动同步状态、最近成功与待重试信息。不返回邮箱凭据，也不能替本人开启后台授权。',inputSchema:{type:'object',properties:{workspaceId:str('工作区id')},required:['workspaceId']},annotations:{readOnlyHint:true}},
-  { name: 'bambook_preview', description: '预演一条命令：执行全部权限与业务校验后回滚，返回将产生的结果和业务事件，不保存任何数据。执行前先预演。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema }, required: ['workspaceId', 'command'] }, annotations: { readOnlyHint: true } },
-  { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。每项操作生成一个 requestId，超时重试沿用原编号。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, requestId: { ...str('幂等请求编号；同一操作重试必须沿用，新的操作须用新编号'), minLength: 1, maxLength: 116 } }, required: ['workspaceId', 'command', 'requestId'] }, annotations: { destructiveHint: true, idempotentHint: true } },
+  {name:'bambook_task',description:'查看当前长期任务、保存检查点或结束执行。任务连接才能保存检查点与结果，不能代本人开始、恢复或停止任务；等待本人确认时停止业务操作。此工具不签发或返回任何连接凭据。',inputSchema:{type:'object',properties:{workspaceId:str('公司id'),taskId:str('任务id；执行连接可省略'),action:{type:'string',enum:['status','checkpoint','finish']},requestId:str('检查点或结果的稳定请求编号'),summary:str('检查点摘要'),outcome:{type:'string',enum:['succeeded','failed']},result:str('执行结论；不代表正式业务审批完成')},required:['workspaceId','action']},annotations:{idempotentHint:true}},
+  { name: 'bambook_preview', description: '预演一条命令：执行全部权限与业务校验后回滚，返回将产生的结果和业务事件，不保存任何数据。执行前先预演。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, expectedRevision:{type:'integer',minimum:0,description:'已读取来源的版本，提供后防止覆盖期间更新'} }, required: ['workspaceId', 'command'] }, annotations: { readOnlyHint: true } },
+  { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。每项操作生成一个 requestId，超时重试沿用原编号。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, expectedRevision:{type:'integer',minimum:0,description:'已读取来源的版本'}, requestId: { ...str('幂等请求编号；同一操作重试必须沿用，新的操作须用新编号'), minLength: 1, maxLength: 116 } }, required: ['workspaceId', 'command', 'requestId'] }, annotations: { destructiveHint: true, idempotentHint: true } },
 ];
 
 class ToolInputError extends Error {}
@@ -71,11 +76,22 @@ const canOperate = (actor: TokenPayload) => isAgentActor(actor) && actor.agentMo
 
 async function callTool(repository: McpRepository, actor: TokenPayload, name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
+    case 'bambook_task': {
+      if(Object.keys(args).some(k=>!['workspaceId','taskId','action','requestId','summary','outcome','result'].includes(k)))throw new ToolInputError('任务请求字段无效');
+      const workspaceId=need(args,'workspaceId'),taskId=typeof args.taskId==='string'?args.taskId:isAgentActor(actor)?actor.agentTaskLease?.taskId??actor.agentTaskControlLease?.taskId:undefined;
+      if(!taskId||!repository.getAgentTask)throw new ToolInputError('请提供任务编号或使用任务执行连接');
+      if(args.action==='status')return{item:await repository.getAgentTask(actor,workspaceId,taskId)};
+      if(args.action==='finish'&&isAgentActor(actor)&&actor.agentTaskControlLease?.taskId===taskId&&repository.finishAgentTaskSession)return{item:await repository.finishAgentTaskSession(actor,workspaceId,{requestId:args.requestId,outcome:args.outcome,result:args.result})};
+      if(!isAgentActor(actor)||actor.agentTaskLease?.taskId!==taskId||!repository.agentTaskRuntime)throw new ToolInputError('请使用本任务执行连接');
+      if(args.action==='checkpoint')return{item:await repository.agentTaskRuntime(actor,workspaceId,'checkpoint',{requestId:args.requestId,summary:args.summary})};
+      if(args.action==='finish')return{item:await repository.agentTaskRuntime(actor,workspaceId,'finish',{requestId:args.requestId,outcome:args.outcome,result:args.result})};
+      throw new ToolInputError('任务操作无效');
+    }
     case 'bambook_mail_receiving': { if(Object.keys(args).some(k=>k!=='workspaceId'))throw new ToolInputError('只接受workspaceId');return {items:await repository.mailReceivingViews(actor,need(args,'workspaceId')),stateResults:await repository.mailStateViews(actor,need(args,'workspaceId'))}; }
     case 'bambook_workspaces': return { workspaces: (await repository.list(actor)).map(w => ({ id: w.id, name: w.name, revision: w.revision })) };
     case 'bambook_query': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { revision: workspace.revision, ...agentQuery(workspace.state, current, { type: args.type, q: args.q, limit: args.limit }) }; }
-    case 'bambook_get': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { object: agentGet(workspace.state, current, args.type, args.id) }; }
-    case 'bambook_related': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { object: agentRelated(workspace.state, current, args.type, args.id) }; }
+    case 'bambook_get': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { revision:workspace.revision,object: agentGet(workspace.state, current, args.type, args.id) }; }
+    case 'bambook_related': { const { workspace, actor: current } = await repository.getForAgent(actor, need(args, 'workspaceId')); return { revision:workspace.revision,object: agentRelated(workspace.state, current, args.type, args.id) }; }
     case 'bambook_commands': {
       const prefix = typeof args.prefix === 'string' ? args.prefix : '';
       return { commands: [...COMMANDS.values()].filter(c => c.type.startsWith(prefix)).map(c => ({ type: c.type, payload: c.payload, ...(prefix && c.types ? { types: c.types } : {}), via: agentCommandSensitivity(c.type) })) };
@@ -91,7 +107,12 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
       const workspaceId = need(args, 'workspaceId'), command = commandOf(args), via = agentCommandSensitivity(command.type);
       if (via === 'blocked') throw new ToolInputError(`${command.type} 不能经接口执行`);
       const { workspace } = await repository.getForAgent(actor, workspaceId);
-      if (name === 'bambook_preview') return { via, ...(await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: workspace.revision, command }) as object) };
+      if(args.expectedRevision!==undefined&&(!Number.isSafeInteger(args.expectedRevision)||Number(args.expectedRevision)<0||Number(args.expectedRevision)>workspace.revision))throw new ToolInputError('expectedRevision须为已读取的有效版本');
+      const observed=await repository.agentTaskExpectedRevision?.(actor,workspaceId,command);
+      const explicit=typeof args.expectedRevision==='number'?args.expectedRevision:workspace.revision;
+      const expected=observed===undefined?explicit:Math.min(observed,explicit);
+      if(isAgentActor(actor)&&actor.agentTaskLease)actor.agentTaskSourceRevision=expected;
+      if (name === 'bambook_preview') return { via, ...(await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: expected, command }) as object) };
       const operationId = args.requestId;
       if (typeof operationId !== 'string' || !operationId.trim() || operationId !== operationId.trim() || operationId.length > 116) throw new ToolInputError('执行需要 1–116 字的 requestId；同一操作重试请沿用原编号');
       const requestId = `mcp-${operationId}`;
@@ -99,7 +120,7 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
       const prior = await repository.receipt(actor, workspaceId, requestId).catch(() => null);
       if (via === 'confirm') {
         // 高敏感命令：先按 Agent 身份完整预演（不合规的不提交），再记为提议，等本人在「接着完成」里确认执行。
-        const preview = prior ? null : await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: workspace.revision, command }) as { events?: string[] };
+        const preview = prior ? null : await repository.preview(actor, workspaceId, { requestId: `mcp-preview-${randomUUID()}`, expectedRevision: expected, command }) as { events?: string[] };
         // 重试必须沿用原提议说明；换成通用文字会改变请求哈希，让同一编号误报冲突。
         // 仅在当前本人可见的提议中查找，不因重试重新提交或再次执行已确认的业务。
         const original = prior ? workspace.state.agentProposals?.find(item => item.id === prior.result?.id && item.ownerId === actor.userId) : undefined;
@@ -110,7 +131,7 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
         const message = status === 'confirmed' ? '此提议已由本人确认执行，本次只回放原回执。' : status === 'rejected' ? '此提议已被本人拒绝，本次没有执行。' : '已提交给用户确认：用户在「接着完成」里确认后才会执行。';
         return { status, message, summary, receipt, replayed: !!replayed };
       }
-      const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : workspace.revision, command });
+      const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : expected, command });
       return { receipt, replayed: !!replayed };
     }
     default: throw new ToolInputError(`未知工具 ${name}`);

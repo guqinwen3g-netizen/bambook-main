@@ -126,10 +126,11 @@ export class MistMailStateWorker {
     }catch(e:any){
       if(['MAIL_BUSY','MAIL_STATE_CHANGED'].includes(e?.code))return;
       const mailboxAuth=describeMailError(e,'imap').code==='MAIL_AUTH_FAILED';
-      const permission=mailboxAuth||[401,403,404].includes(e?.status)||['MAIL_SOURCE_CHANGED','MAIL_STATE_EXPIRED','MAIL_CREDENTIAL_MISSING'].includes(e?.code);
+      const taskStopped=typeof e?.code==='string'&&e.code.startsWith('AGENT_TASK_');
+      const permission=taskStopped||mailboxAuth||[401,403,404].includes(e?.status)||['MAIL_SOURCE_CHANGED','MAIL_STATE_EXPIRED','MAIL_CREDENTIAL_MISSING'].includes(e?.code);
       const uncertain=job.operation.kind==='move'&&!!job.attempt?.issued&&!job.attempt.confirmedNotApplied;
       const phase=permission?'blocked':e?.code==='MAIL_MOVE_NOT_APPLIED'?'failed':uncertain?'unknown':['MAIL_MOVE_UNSUPPORTED','MAIL_TARGET_MISSING','MAIL_STATE_UNSUPPORTED','MAIL_STATE_SOURCE_CHANGED','MAIL_STATE_MISSING'].includes(e?.code)?'failed':'pending';
-      const message=mailboxAuth?'邮箱登录已失效，请接入人重新绑定凭据后重试':permission?'账号或邮箱授权已变化，请重新核对后重试':typeof e?.code==='string'&&e.code.startsWith('MAIL_')?e.message:'原邮箱暂时无法连接，稍后重试';
+      const message=taskStopped?'原Agent任务不可继续，请本人核对后重试':mailboxAuth?'邮箱登录已失效，请接入人重新绑定凭据后重试':permission?'账号或邮箱授权已变化，请重新核对后重试':typeof e?.code==='string'&&e.code.startsWith('MAIL_')?e.message:'原邮箱暂时无法连接，稍后重试';
       if(actor)await this.repository.failMailState(job,phase,message,Date.now(),e?.code==='MAIL_MOVE_NOT_APPLIED').catch(()=>this.options.onError?.('MAIL_STATE_SAVE_FAILED'));
       else await this.repository.blockUnclaimedMailState(job,message).catch(()=>this.options.onError?.('MAIL_STATE_BLOCK_FAILED'));
     }finally{

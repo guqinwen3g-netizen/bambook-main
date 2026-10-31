@@ -3,7 +3,7 @@ import { withResponseLocale } from './responseLanguage';
 import { Router, type Request, type Response, type NextFunction, type RequestHandler } from 'express';
 import multer from 'multer';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { requireAuth } from '../auth/middleware';
 import type { TokenPayload } from '../auth/service';
 import { MistRepository, type MistContract } from './repository';
@@ -23,6 +23,7 @@ import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, type McpRepository } from './a
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
 import {SERVICE_KEY_HEADER} from './agentIdentities';
+import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
 import type { MistMailReceiver } from './mail/receiverWorker';
 import { MistMailService } from './mail/service';
 import { MistMailCredentials } from './mail/credentials';
@@ -51,14 +52,47 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.use((req, res, next) => {
     const header = req.headers[AGENT_DELEGATION_HEADER];
     const serviceKey=req.headers[SERVICE_KEY_HEADER];
-    if (header === undefined&&serviceKey===undefined) { authenticate(req, res, next); return; }
+    const taskKey=req.headers[TASK_HEADER];
+    const controlKey=req.headers[TASK_CONTROL_HEADER];
+    if (header === undefined&&serviceKey===undefined&&taskKey===undefined&&controlKey===undefined) { authenticate(req, res, next); return; }
     void (async () => {
       options.delegationGuard?.(req);
-      if(header!==undefined&&serviceKey!==undefined)fail('AGENT_KEY_INVALID','请只使用一种Agent凭据',401);
+      if([header,serviceKey,taskKey,controlKey].filter(v=>v!==undefined).length!==1)fail('AGENT_KEY_INVALID','请只使用一种Agent凭据',401);
       let agent;
-      if(serviceKey!==undefined){agent=await delegation.hydrateServiceActor(await repository.resolveAgentServiceKey(serviceKey));await repository.authorizeAgentConnection(agent);}
+      if(controlKey!==undefined){
+        if(!/^\/mcp\/?$/.test(req.path))fail('AGENT_FORBIDDEN','任务连接只供MCP使用',403);
+        agent=await delegation.hydrateServiceActor(await repository.resolveAgentTaskControl(controlKey));await repository.authorizeTaskControlConnection(agent);
+        const control=agent.agentTaskControlLease!;
+        if(req.method==='GET'&&!req.get('Mcp-Session-Id')){res.status(405).set('Allow','POST').end();return;}
+        if(req.body?.method==='initialize'){
+          if(req.get('Mcp-Session-Id'))fail('AGENT_TASK_SESSION_INVALID','请重新初始化任务连接',400);
+          (req as any).taskSession=delegation.taskSession(control.taskId,control.hash);
+        }else{
+          const workerId=delegation.verifyTaskSession(control.taskId,control.hash,req.get('Mcp-Session-Id'));agent.agentTaskWorkerId=workerId;
+          (req as any).taskSession=req.get('Mcp-Session-Id');
+          if(req.body?.method==='tools/call'&&req.body?.id!==undefined){
+            const params=req.body.params,args=params?.arguments??{};
+            if(!args||typeof args!=='object'||Array.isArray(args)||params.name==='bambook_workspaces')fail('AGENT_FORBIDDEN','任务连接已绑定公司和任务',403);
+            if(args.workspaceId!==undefined&&args.workspaceId!==control.workspaceId||params.name==='bambook_task'&&args.taskId!==undefined&&args.taskId!==control.taskId)fail('AGENT_FORBIDDEN','任务连接不能切换公司或任务',403);
+            req.body={...req.body,params:{...params,arguments:{...args,...(params.name!=='bambook_commands'?{workspaceId:control.workspaceId}:{}),...(params.name==='bambook_task'?{taskId:control.taskId}:{})}}};
+            if(params.name!=='bambook_task'||!['status','finish'].includes(args.action)){
+              agent=await delegation.hydrateServiceActor(await repository.taskSessionActor(agent,workerId,delegation.makeTaskCredential));agent.agentTaskWorkerId=workerId;
+              req.headers['x-bambook-task-operation']='session_'+createHash('sha256').update(workerId+':'+JSON.stringify(req.body.id)).digest('hex');
+            }else await repository.pulseTaskSession(agent,workerId);
+          }else await repository.pulseTaskSession(agent,workerId);
+        }
+      }
+      else if(taskKey!==undefined){agent=await delegation.hydrateServiceActor(await repository.resolveAgentTaskCredential(taskKey));await repository.authorizeAgentTaskConnection(agent);}
+      else if(serviceKey!==undefined){agent=await delegation.hydrateServiceActor(await repository.resolveAgentServiceKey(serviceKey));if(req.path.includes('/agent-tasks')||req.body?.params?.name==='bambook_task')await repository.authorizeAgentTaskConnection(agent);else await repository.authorizeAgentConnection(agent);}
       else {if (typeof header !== 'string') fail('AGENT_DELEGATION_INVALID', '工作助手委托无效', 401);agent=await delegation.authenticate(header, actor=>repository.authorizeAgentConnection(actor),true);}
       if (!agentRouteAllowed(req.method, req.path)) fail('AGENT_FORBIDDEN', '工作助手委托只能读取业务数据，不能调用此接口', 403);
+      if(agent.agentTaskLease&&(req.method==='GET'&&!/^\/mcp\/?$/.test(req.path)||req.body?.method==='tools/call'&&req.body?.params?.name!=='bambook_task')){
+        const operation=req.get('X-Bambook-Task-Operation');
+        if(!operation||!/^[A-Za-z0-9_-]{8,116}$/.test(operation))fail('INVALID_INPUT','任务请求缺少有效操作编号',400);
+        const fresh=await repository.reserveAgentTaskRequest(agent,operation,{method:req.method,path:req.path,input:req.body?.params??req.query});
+        if(!fresh&&req.body?.params?.name!=='bambook_execute')fail('AGENT_TASK_READ_REPLAY','此读取已处理，请使用新的操作编号',409);
+        agent.agentTaskOperation=operation;
+      }
       (req as Request & { actor: TokenPayload }).actor = agent;
       res.setHeader('Cache-Control', 'private, no-store');
       next();
@@ -67,6 +101,15 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.use(createPublicEntryHostGuard('mist'));
   const actor = (req: Request) => (req as Request & { actor: TokenPayload }).actor;
   const run = (handler: (req: Request, res: Response) => Promise<void>): RequestHandler => (req, res) => { void handler(req, res).catch(error => publicError(res, error)); };
+  router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
+  router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
+  router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
+  router.post('/workspaces/:id/agent-tasks',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.createAgentTask(actor(req),req.params.id,exactBody(req.body,['requestId','identityId','name','instructions']))});}));
+  router.post('/workspaces/:id/agent-tasks/:taskId/claim',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.claimAgentTask(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','workerId']),delegation.makeTaskCredential));}));
+  router.post('/workspaces/:id/agent-tasks/:taskId/issue',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.issueAgentTaskControl(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version']),delegation.makeTaskControl));}));
+  for(const action of ['pause','resume'] as const)router.post('/workspaces/:id/agent-tasks/:taskId/'+action,run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.changeAgentTask(actor(req),req.params.id,req.params.taskId,action,exactBody(req.body,['requestId','version']))});}));
+  router.post('/workspaces/:id/agent-tasks/:taskId/cancel',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');await repository.cancelAgentTask(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version']));res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId)});}));
+  for(const action of ['heartbeat','checkpoint','finish'] as const)router.post('/workspaces/:id/agent-tasks/:taskId/'+action,run(async(req,res)=>{if(!isAgentActor(actor(req))||(actor(req) as any).agentTaskLease?.taskId!==req.params.taskId)fail('FORBIDDEN','请使用本任务执行连接',403);const body=exactBody(req.body,action==='heartbeat'?['sequence']:action==='checkpoint'?['requestId','summary']:['requestId','outcome','result']);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.agentTaskRuntime(actor(req),req.params.id,action,body)});}));
   // ChatGPT 订阅连接：凭据只留在服务器，响应只含连接状态与设备验证码。
   //   - 平台连接（管理员）：平台 AI 固定流程共用；测试期为管理员个人订阅，生产期改企业 API。
   //   - 个人连接（ai:chat）：仅供后续本机工作助手使用，不参与平台 AI。
@@ -172,20 +215,27 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     const describe = (error: any) => error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500) ? String(error.message) : '操作未完成，请稍后重试';
     const reply = await handleMcpMessage(repository as unknown as McpRepository, actor(req), req.body, describe);
     if (reply === null) { res.status(202).end(); return; }
+    if((req as any).taskSession){
+      const response=(reply as any).result;
+      if(req.body?.method==='initialize'&&response?.protocolVersion){res.set('Mcp-Session-Id',(req as any).taskSession);res.append('Access-Control-Expose-Headers','Mcp-Session-Id');response.instructions='此连接仅处理已绑定的公司任务。先用bambook_task的status读取任务内容，再查询当前业务；不必选择公司或填写任务编号。等待本人确认时停止业务操作，确认后重新读取结果再续办。任务结束报告不代替正式业务审批或收付款结果。';}
+      if(req.body?.method==='tools/list'&&Array.isArray(response?.tools))response.tools=response.tools.filter((t:any)=>t.name!=='bambook_workspaces').map((t:any)=>{const properties={...t.inputSchema.properties};delete properties.workspaceId;delete properties.taskId;return{...t,inputSchema:{...t.inputSchema,properties,required:(t.inputSchema.required??[]).filter((k:string)=>!['workspaceId','taskId'].includes(k)),additionalProperties:false}};});
+    }
+    const current=actor(req),tool=req.body?.params?.name,result=(reply as any).result;
+    if(isAgentActor(current)&&current.agentTaskLease&&req.body?.method==='tools/call'&&!['bambook_execute','bambook_task'].includes(tool)&&!result?.isError&&result?.structuredContent!==undefined)await repository.recordAgentTaskRead(current,current.agentTaskLease.workspaceId,result.structuredContent);
     res.json(reply);
   }));
   router.get('/mcp', run(async (req, res) => { checkMcpProtocol(req, res); res.status(405).set('Allow', 'POST').end(); }));
   router.get('/workspaces/:id/agent/query', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
-    res.json({ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, ...agentQuery(workspace.state, current, { type: req.query.type, q: req.query.q, limit: req.query.limit }) });
+    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, ...agentQuery(workspace.state, current, { type: req.query.type, q: req.query.q, limit: req.query.limit }) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
   }));
   router.get('/workspaces/:id/agent/objects/:type/:objectId', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
-    res.json({ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentGet(workspace.state, current, req.params.type, req.params.objectId) });
+    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentGet(workspace.state, current, req.params.type, req.params.objectId) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
   }));
   router.get('/workspaces/:id/agent/objects/:type/:objectId/related', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
-    res.json({ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentRelated(workspace.state, current, req.params.type, req.params.objectId) });
+    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentRelated(workspace.state, current, req.params.type, req.params.objectId) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
   }));
   router.get('/reviews', run(async (req,res)=>{res.json({reviews:await repository.listReviews(actor(req))});}));
   router.get('/reviews/:workspaceId/receipts/:requestId', run(async (req,res)=>{res.json({receipt:await repository.reviewReceipt(actor(req),req.params.workspaceId,req.params.requestId)});}));

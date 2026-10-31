@@ -118,8 +118,12 @@ export async function resolveServiceCredential(db:any,token:unknown){
   const parsed=parseServiceCredential(token);let c:AgentIdentity;
   try{c=(await identityRecord(db,parsed.workspaceId,parsed.id)).value;}catch(error){if((error as any)?.status!==404)throw error;fail('AGENT_KEY_INVALID','Agent密钥无效或已失效',401);}
   if(!c!.enabled||!c!.key||c!.key.revokedAt||c!.key.expiresAt<=Date.now()||!equal(c!.key.hash,parsed.hash))fail('AGENT_KEY_INVALID','Agent密钥无效或已失效',401);
-  const key=c!.key!;
-  return{userId:c!.ownerId,companyId:c!.companyId,roles:[],permissions:[],departmentIds:[],authorizationLoaded:true,permissionCeiling:[...key.ceiling],credentialVersion:key.credentialVersion,iat:Math.floor(key.issuedAt/1000),actorKind:'agent',agentMode:key.mode,agentSessionId:c!.id,agentWorkspaceId:c!.workspaceId,agentIdentity:{id:c!.id,name:c!.name},agentServiceLease:{...parsed,ownerId:c!.ownerId,issuedAt:key.issuedAt,expiresAt:key.expiresAt}} as AgentActor;
+  return serviceActorFromIdentity(c!,parsed.hash);
+}
+/** Caller must validate the protected identity/key first; never accepts client-supplied identity data. */
+export function serviceActorFromIdentity(c: AgentIdentity, keyHash: string): AgentActor {
+  const key = c.key!;
+  return { userId:c.ownerId,companyId:c.companyId,roles:[],permissions:[],departmentIds:[],authorizationLoaded:true,permissionCeiling:[...key.ceiling],credentialVersion:key.credentialVersion,iat:Math.floor(key.issuedAt/1000),actorKind:'agent',agentMode:key.mode,agentSessionId:c.id,agentWorkspaceId:c.workspaceId,agentIdentity:{id:c.id,name:c.name},agentServiceLease:{id:c.id,workspaceId:c.workspaceId,hash:keyHash,ownerId:c.ownerId,issuedAt:key.issuedAt,expiresAt:key.expiresAt} } as AgentActor;
 }
 export async function assertServiceLease(db:any,actor:TokenPayload,lease:AgentServiceLease,now:number){
   const {value:c}=await identityRecord(db,lease.workspaceId,lease.id),key=c.key;
