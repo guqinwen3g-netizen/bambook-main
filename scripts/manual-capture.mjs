@@ -46,6 +46,7 @@ const QUOTE_SENT = '邮件发送正式报价单 PDF 给 Cedar & Crown 采购 Oli
 const QUOTE_ACCEPTED = 'Olivia Grant 10-31 邮件确认接受 V2 报价，PO 随后下发。';
 const DEV_CONFIRMER = 'Olivia Grant（Cedar & Crown 采购）', DEV_BASIS = '客户 10-31 邮件确认 R2-A-2 大货样，可按此生产。';
 const ORDER_DUE = '2026-12-20', CUSTOMER_PO = 'CC-PO-2026-1188';
+const HANDOFF_NOTE = '两款整单出运，FOB 上海，收货人与通知方按 PO；定金 30% 到账后安排订舱。';
 const QTY_BASIS = '客户 PO CC-PO-2026-1188 按款号总量下单：大衣 800 件、马甲 600 件，分色分码后补。';
 const openQuote = [
   { target: p => nav(p, '订单履约', '报价管理'), act: l => l.click() },
@@ -220,6 +221,15 @@ const LESSONS = {
     { target: p => p.locator('textarea').last(), act: l => l.fill('PO、价格、交期与付款条件已核对，同意。'), value: 'PO、价格、交期与付款条件已核对，同意。' },
     { target: p => p.getByRole('button', { name: '批准' }), act: l => l.click() },
   ],
+  'order-handoff': [
+    { profile: 'demo-sales', target: p => p.getByText('SO-G-2026-0009 · 待交接后勤').last(), act: l => l.click() },
+    { target: p => p.getByRole('checkbox', { name: '拟发范围确认' }), act: l => l.click() },
+    { target: p => p.getByRole('checkbox', { name: '收货与贸易条款确认' }), act: l => l.click() },
+    { target: p => p.getByRole('checkbox', { name: '收款条件核对' }), act: l => l.click() },
+    { target: p => p.getByRole('button', { name: '交接后勤' }), act: l => l.click() },
+    { target: p => p.getByRole('dialog').last().getByLabel('交接说明'), act: l => l.fill(HANDOFF_NOTE), value: HANDOFF_NOTE },
+    { target: p => p.getByRole('dialog').last().getByRole('button', { name: '确认交接' }), act: l => l.click() },
+  ],
   'short-close': [
     { profile: 'demo-buyer', target: p => p.getByText('PO-2026-00001 · 待最终结算').first(), act: l => l.click() },
     { target: p => dialog(p, '提交结算').getByRole('checkbox', { name: '最终结算' }), act: l => l.check({ force: true }) },
@@ -285,7 +295,7 @@ async function capture(browser, name) {
 }
 
 /** 主干第一段：报价 → 订单（重置本地数据后依次执行）。 */
-const ORDER_CHAIN = ['quote-approve', 'quote-send', 'quote-accept', 'dev-confirm', 'quote-convert', 'order-contract', 'order-lines', '_order-lines-2', 'order-submit', 'order-approve'];
+const ORDER_CHAIN = ['quote-approve', 'quote-send', 'quote-accept', 'dev-confirm', 'quote-convert', 'order-contract', 'order-lines', '_order-lines-2', 'order-submit', 'order-approve', 'order-handoff'];
 const names = process.argv.slice(2).flatMap(n => n === 'chain' ? CHAIN : n === 'order-chain' ? ORDER_CHAIN : [n]);
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM || (fs.existsSync('/opt/pw-browsers/chromium') ? '/opt/pw-browsers/chromium' : undefined);
 const browser = await chromium.launch(executablePath ? { executablePath } : {});
