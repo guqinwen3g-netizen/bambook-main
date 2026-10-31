@@ -72,5 +72,13 @@
       "title": "完成标准",
       "text": "付款记录有这笔实付；预付在合同上「待抵扣」。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:22:49.503Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "563231279c6b889389dc89ffca45b7e73bbec7560f82561a2a178141e81ac7fc"
+    }
+  }
 }

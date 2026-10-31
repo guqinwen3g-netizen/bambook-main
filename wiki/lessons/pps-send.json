@@ -160,5 +160,13 @@
       "title": "实物",
       "text": "样品放到登记的位置，并通知 QC。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:22:14.470Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "ffbc3b2bfcd60a44aa215bdc515720c6afecc21e88dd076aaee2413122739e84"
+    }
+  }
 }

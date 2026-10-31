@@ -168,5 +168,13 @@
       "title": "完成标准",
       "text": "报告已回传，任务「待需求方确认」。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:20:06.957Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "758e7bcfa7af9908f64ea79957395f3897850e34bb6a02c0f9e2e7c98b02f252"
+    }
+  }
 }

@@ -104,5 +104,13 @@
       "title": "完成标准",
       "text": "供货状态「已放行」，放行记录有依据。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:26:39.647Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "4dfea4edc90ba60217ef8cf9371cd6a9f39d81bcf79ed02657ceb82655344e05"
+    }
+  }
 }

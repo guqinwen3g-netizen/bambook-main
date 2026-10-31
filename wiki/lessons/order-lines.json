@@ -94,5 +94,13 @@
   "nextLesson": {
     "id": "tutorial-order-submit",
     "title": "提交主单审批"
+  },
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:29:25.410Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "3a4f605eb1aa4427553328ee0b6dee34dc32d185440dfcc7e6b7584f097cbb51"
+    }
   }
 }

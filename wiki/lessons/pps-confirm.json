@@ -114,5 +114,13 @@
       "title": "完成标准",
       "text": "生产分支「产前样」显示「已确认」。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:18:38.697Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "c75b0eca76ad02d46876b08f61a53a30711ac7945944b11c30608ad332e20a78"
+    }
+  }
 }

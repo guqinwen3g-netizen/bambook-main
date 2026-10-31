@@ -88,5 +88,13 @@
       "title": "风险",
       "text": "面料、工期等异常写进跟进记录，并在「风险」栏标出。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:25:51.347Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "be08a51e1efa73627dbb1ae30f8727abf30662566528ee0e6a5845d79583f341"
+    }
+  }
 }

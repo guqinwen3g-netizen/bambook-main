@@ -96,5 +96,13 @@
       "title": "变更",
       "text": "客户改码时重新登记，并通知工厂按新尺码执行。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:27:29.547Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "f673a9fd65f617d777b908540daaf8b5ff80b7650e8f7e45187d01597c6004e0"
+    }
+  }
 }

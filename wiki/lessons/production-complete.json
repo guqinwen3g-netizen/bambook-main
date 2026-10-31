@@ -100,5 +100,13 @@
       "title": "完成标准",
       "text": "完工状态「已完工」，数量与点数单一致。"
     }
-  ]
+  ],
+  "verification": {
+    "playback": {
+      "status": "passed",
+      "checkedAt": "2026-10-31T13:25:03.001Z",
+      "softwareCommit": "2e8f4bed1cf54b2931a9d05248903245dbbaa734",
+      "contentSha256": "c8cf75755ee52479bd5b9cac7140a52722df15531ea4edb252d67e716f8e7021"
+    }
+  }
 }
