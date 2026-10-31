@@ -35,10 +35,10 @@ it('revalidates a long service key against the owners current grants and origina
  const actor=await d.hydrateServiceActor(await db.$transaction(tx=>resolveServiceCredential(tx,issued.token)));
  expect(actor.credentialVersion).toBe('before');expect(actor.iat).toBe(Math.floor(now/1000));
  source.load.mockResolvedValue({id:'owner',status:'active',deletedAt:null,metadata:{credentialVersion:'before'}});
- source.build.mockResolvedValue({...testActor(),permissions:['ai:chat','products:read','finance:write'],authorizationLoaded:true});
+ source.build.mockResolvedValue({...testActor(),roles:[],permissions:['ai:chat','products:read','finance:write'],authorizationLoaded:true});
  await expect(freshMistAuthority({},actor,'products:read')).resolves.toMatchObject({permissionCeiling:expect.arrayContaining(['products:read'])});
  await expect(freshMistAuthority({},actor,'finance:write')).rejects.toMatchObject({status:403});
- source.build.mockResolvedValue({...testActor(),permissions:['ai:chat'],authorizationLoaded:true});
+ source.build.mockResolvedValue({...testActor(),roles:[],permissions:['ai:chat'],authorizationLoaded:true});
  await expect(freshMistAuthority({},actor,'products:read')).rejects.toMatchObject({status:403});
  source.load.mockResolvedValue({id:'owner',status:'active',deletedAt:null,metadata:{credentialVersion:'after'}});
  await expect(freshMistAuthority({},actor)).rejects.toMatchObject({status:401});
