@@ -9,6 +9,7 @@ import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
 import { agentCommandSensitivity } from './agentMcp';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
+import { AGENT_AUDIT_FIELD, agentAuditReceiptId } from './agentAudit';
 
 let directory: string;
 beforeEach(async () => { directory = await fs.mkdtemp(path.join(os.tmpdir(), 'mist-mcp-')); vi.stubEnv('MIST_LOCAL_WORKSPACE', '1'); vi.stubEnv('NODE_ENV', 'test'); });
@@ -19,11 +20,12 @@ async function as(app: any, profileId: string, mode: 'read' | 'operate' = 'opera
   await client.get('/api/mist/session').expect(200);
   await client.post('/api/mist/session').send({ profileId }).expect(200);
   const workspace = (await client.get('/api/mist/workspaces/default').expect(200)).body.workspace;
-  const token = (await client.post('/api/mist/agent/delegations').send({ mode }).expect(201)).body.delegation.token as string;
+  const issued = (await client.post('/api/mist/agent/delegations').send({ mode }).expect(201)).body.delegation;
+  const token = issued.token as string;
   let id = 0;
   const rpc = async (method: string, params: Record<string, unknown> = {}) => (await request(app).post('/api/mist/mcp').set(HEADER, token).send({ jsonrpc: '2.0', id: ++id, method, params }).expect(200)).body;
   const tool = async (name: string, args: Record<string, unknown> = {}) => (await rpc('tools/call', { name, arguments: name === 'bambook_execute' ? { requestId: `test-${++id}`, ...args } : args })).result;
-  return { client, workspace, token, rpc, tool };
+  return { client, workspace, token, sessionId: issued.sessionId as string, rpc, tool };
 }
 const purchase = (ws: any, code: string) => ws.state.fulfillment.purchases.find((p: any) => p.code === code);
 
@@ -58,6 +60,17 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect((await client.get('/api/mist/workspaces/' + workspace.id)).body.workspace.state.payables.settlements).toHaveLength(1);
   });
 
+  it('requires an actual operate delegation for MCP writes instead of treating a human cookie as an Agent session', async () => {
+    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const { client, workspace } = await as(app, 'demo-buyer');
+    for (const name of ['bambook_preview', 'bambook_execute']) {
+      const result = (await client.post('/api/mist/mcp').send({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: { workspaceId: workspace.id, requestId: 'cookie-write', command: { type: 'payable.settlement.submit', payload: {} } } } }).expect(200)).body.result;
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('可办理委托');
+    }
+    expect((await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace.revision).toBe(workspace.revision);
+  });
+
   it('buyer agent previews then submits a settlement on actual receipts; the write is audited as via Agent and replays idempotently', async () => {
     const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
     const { client, workspace, tool } = await as(app, 'demo-buyer');
@@ -87,7 +100,8 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
   });
 
   it('finance agent turns a confirmation into a proposal that only the owner can confirm or reject in the app; confirming runs the real command', async () => {
-    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
+    const local = createMistLocalRuntime({ directory });
+    const app = createMistServer(undefined, { local });
     const buyer = await as(app, 'demo-buyer');
     const po = purchase(buyer.workspace, 'PO-2026-00001'), receipt = buyer.workspace.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
     await buyer.tool('bambook_execute', { workspaceId: buyer.workspace.id, command: { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id] } } });
@@ -100,6 +114,9 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const proposed = (await finance.tool('bambook_execute', confirmArgs)).structuredContent;
     expect(proposed).toMatchObject({ status: 'awaiting_confirmation' });
     expect(proposed.summary.join('')).toContain('ST-2026-0001');
+    const proposalReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: finance.workspace.id, requestId: agentAuditReceiptId('mcp-finance-confirm-once') } } });
+    expect(proposalReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ actor: { id: 'demo-finance' }, source: 'agent', phase: 'proposed', agentSessionId: finance.sessionId, proposalId: proposed.receipt.result.id, command: { type: 'agent.proposal.create' } });
+    expect(JSON.stringify(proposed)).not.toContain(AGENT_AUDIT_FIELD);
     const retriedProposal = await finance.tool('bambook_execute', confirmArgs);
     expect(retriedProposal.isError).not.toBe(true);
     expect(retriedProposal.structuredContent).toMatchObject({ replayed: true, summary: proposed.summary });
@@ -114,7 +131,12 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const run = async (client: any, command: any) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command }); };
     await (await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).ok;
     expect((await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(404);
-    expect((await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(200);
+    const confirmed = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
+    expect(confirmed.status).toBe(200);
+    const confirmationReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: finance.workspace.id, requestId: agentAuditReceiptId(confirmed.body.receipt.requestId) } } });
+    expect(confirmationReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ actor: { id: 'demo-finance' }, source: 'human_confirmation', phase: 'confirmed', agentSessionId: finance.sessionId, proposalId: proposal.id, command: confirm, trigger: { type: 'agent.proposal.confirm', payload: { id: proposal.id } } });
+    expect(confirmationReceipt.result[AGENT_AUDIT_FIELD].changes).toContainEqual({ path: ['k:payables', 'k:settlements', 'i:' + settlement.id, 'k:state'], operation: 'replace', before: 'pending', after: 'confirmed' });
+    expect(JSON.stringify(confirmed.body)).not.toContain(AGENT_AUDIT_FIELD);
     state = (await read(finance.client)).state;
     expect(state.payables.settlements[0].state).toBe('confirmed');
     expect(state.agentProposals.find((p: any) => p.id === proposal.id).state).toBe('confirmed');
@@ -129,7 +151,11 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const billArgs = { workspaceId: finance.workspace.id, command: bill, requestId: 'finance-bill-once' };
     expect((await finance.tool('bambook_execute', billArgs)).structuredContent.status).toBe('awaiting_confirmation');
     const second = (await read(finance.client)).state.agentProposals.find((p: any) => p.state === 'pending');
-    expect((await run(finance.client, { type: 'agent.proposal.reject', payload: { id: second.id, note: '发票还没收到' } })).status).toBe(200);
+    const rejected = await run(finance.client, { type: 'agent.proposal.reject', payload: { id: second.id, note: '发票还没收到' } });
+    expect(rejected.status).toBe(200);
+    const rejectionReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: finance.workspace.id, requestId: agentAuditReceiptId(rejected.body.receipt.requestId) } } });
+    expect(rejectionReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ source: 'human_rejection', phase: 'rejected', agentSessionId: finance.sessionId, proposalId: second.id, command: { type: 'agent.proposal.reject' } });
+    expect(JSON.stringify(rejected.body)).not.toContain(AGENT_AUDIT_FIELD);
     state = (await read(finance.client)).state;
     expect(state.payables.bills.filter((b: any) => b.lines.some((l: any) => l.purchaseId === po.id))).toHaveLength(0);
     expect(state.agentProposals.find((p: any) => p.id === second.id)).toMatchObject({ state: 'rejected', note: '发票还没收到' });

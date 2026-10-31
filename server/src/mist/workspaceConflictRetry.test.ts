@@ -8,6 +8,7 @@ import { MistPrivateFiles } from './files';
 import { MistLocalDatabase } from './local';
 import { MIST_MAX_REBASE_GAP, MIST_MAX_SAVE_ATTEMPTS, MistRepository, mistChangeKeys, type MistContract } from './repository';
 import { MemoryMistDatabase, requestReceiptCount, testActor, testAuthority, testContract } from './__tests__/support';
+import { AGENT_AUDIT_FIELD } from './agentAudit';
 
 /** 业务门禁与需重新确认的命令：只用于本回归，验证自动合并在最新状态上重新执行规则。 */
 const gatedContract: MistContract = {
@@ -52,6 +53,34 @@ beforeEach(async () => { root = await mkdtemp(path.join(tmpdir(), 'mist-conflict
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
 describe('多人保存冲突自动重试：只在最新状态上重新执行可证明互不覆盖的命令', () => {
+  it('Agent事务重试仅保留最后一次实际提交的审计，公开回执不携带内部差异', async () => {
+    const database = new FlakyDatabase(), repo = repoFor(database), id = await sharedWorkspace(repo, database);
+    database.failures = 2;
+    const result = await repo.execute({ ...owner, actorKind: 'agent', agentMode: 'operate', agentSessionId: 'retry-session' } as any, id, note('agent-retry', 0));
+    const saved = [...database.receipts.values()].filter(row => row.result[AGENT_AUDIT_FIELD]);
+    expect(saved).toHaveLength(1);
+    expect(database.workspaces.get(id).state.notes).toHaveLength(1);
+    expect(saved[0].result[AGENT_AUDIT_FIELD]).toMatchObject({ agentSessionId: 'retry-session', baseRevision: 0, committedRevision: 1 });
+    expect(saved[0].result[AGENT_AUDIT_FIELD].changes).toContainEqual({ path: ['k:notes', 'i:' + result.receipt.result.id], operation: 'add', after: { id: result.receipt.result.id, text: 'agent-retry' }, afterIndex: 0 });
+    expect(JSON.stringify(result)).not.toContain(AGENT_AUDIT_FIELD);
+  });
+
+  it('另一会话抢先提交同编号时回放原回执，只保留实际提交会话的审计且不泄漏', async () => {
+    const database = new FlakyDatabase(), repo = repoFor(database), id = await sharedWorkspace(repo, database);
+    const actor = { ...owner, actorKind: 'agent', agentMode: 'operate', agentSessionId: 'first-session' } as any;
+    database.failures = 1;
+    // Separate client/connection pool: a competitor must not wait on this request's in-process write queue.
+    const competitor = repoFor(new Proxy(database, {}));
+    database.beforeFailure = async () => { await competitor.execute({ ...actor, agentSessionId: 'committed-session' }, id, note('same-operation', 0)); };
+    const result = await repo.execute(actor, id, note('same-operation', 0));
+    expect(result.replayed).toBe(true);
+    const saved = [...database.receipts.values()].filter(row => row.result[AGENT_AUDIT_FIELD]);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].result[AGENT_AUDIT_FIELD].agentSessionId).toBe('committed-session');
+    expect(database.workspaces.get(id).state.notes).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain(AGENT_AUDIT_FIELD);
+  });
+
   it('两人基于同一版本各自新增记录，两条都保留，回执保持各自原始请求', async () => {
     const repo = repoFor(db), id = await sharedWorkspace(repo);
     const first = await repo.execute(owner, id, note('owner-note', 0, '甲'));

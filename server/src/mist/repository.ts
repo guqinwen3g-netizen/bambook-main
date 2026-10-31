@@ -20,6 +20,7 @@ import { payablesCommandPermissions, financialDisposalViews } from '../shared/mi
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor } from './agentDelegation';
+import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
@@ -66,7 +67,7 @@ function identifier(value: unknown, label: string, maxLength = 120): string {
   return value;
 }
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 0) fail('INVALID_INPUT', '公司版本无效', 400); return Number(value); }
-/** 服务端版本标记占用的请求编号前缀；客户端请求编号不得使用，避免伪造或占用版本标记。 */
+/** 服务端内部回执前缀：数字版本标记与私有Agent审计；客户端不得使用。 */
 const REVISION_MARKER_PREFIX = 'mist-revision:';
 const REVISION_MARKER_HASH = 'mist-revision-change-keys:v1';
 /**
@@ -140,6 +141,8 @@ const fileOwner=(row:MistWorkspaceRow)=>companyRow(row)?undefined:row.ownerId;
 /** 审批候选与成员目录：公司库只取公司在职成员名册（已覆盖到 memberIds），不含已离职的库创建人。 */
 /** 本次读取时为该行解析的受限范围（undefined = 不裁剪）；随行对象存活，不写入状态。 */
 const ROW_SCOPE=new WeakMap<object,MistDataScope>();
+/** Exact state loaded under the write lock, before roster/normalization changes. Never serialized. */
+const ORIGINAL_WRITE_STATE = new WeakMap<object, MistState>();
 const OWN_TEAMS = new WeakMap<object, string[]>();
 const scopeOf=(row:MistWorkspaceRow)=>ROW_SCOPE.get(row);
 const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):[row.ownerId,...memberIds(row.state)];
@@ -162,7 +165,7 @@ export class MistRepository {
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
   }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
-  private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
+  private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) fail('INVALID_INPUT', '公司编号无效', 400);
     const actor = await this.authorize(db, prior, permission);
     if (lock) await db.$queryRawUnsafe('SELECT "id" FROM "MistWorkspace" WHERE "id" = $1::uuid FOR UPDATE', id);
@@ -173,6 +176,7 @@ export class MistRepository {
     if (row && companyRow(row) && ownerOnly) singleLibrary();
     if (!row || !(companyRow(row) || isOwner(row, actor) || (!ownerOnly && isMember(row, actor)))) fail('NOT_FOUND', '公司不存在或当前账号无权访问', 404);
     if(archived(row)&&!allowArchived)fail('NOT_FOUND','公司已移入回收站，请先恢复',404);
+    if (lock && captureAuditBefore) ORIGINAL_WRITE_STATE.set(row, structuredClone(row.state));
     if (companyRow(row)) { applyRoster(row.state, await companyRoster(db, row.companyId!)); const scope = await companyDataScope(db, row, actor); if (scope) ROW_SCOPE.set(row, scope); OWN_TEAMS.set(row, scope?.teamIds ?? await companyTeamIds(db, row.companyId!, actor.userId)); }
     this.contract.normalizeMistState?.(row.state,this.context(actor));
     return { actor, row };
@@ -237,7 +241,7 @@ export class MistRepository {
   async changeArchive(prior:TokenPayload,workspaceId:string,input:{requestId:string;expectedRevision:number},action:'archive'|'restore'){
     requestIdentifier(input.requestId);revision(input.expectedRevision);const hash=createHash('sha256').update(canonical({actorId:prior.userId,action,expectedRevision:input.expectedRevision})).digest('hex');
     return this.writeTransact(workspaceId,async db=>{const{actor,row}=await this.own(db,prior,workspaceId,null,true,true,true);const previous=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:input.requestId}}});
-      if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','请求编号已用于另一项操作',409);const active=await this.activeWorkspace(db,actor,previous.result.result.activeWorkspaceId);return{workspace:this.view(active,actor),receipt:{requestId:previous.requestId,...previous.result},replayed:true};}
+      if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','请求编号已用于另一项操作',409);const active=await this.activeWorkspace(db,actor,previous.result.result.activeWorkspaceId);return{workspace:this.view(active,actor),receipt:{requestId:previous.requestId,...publicCommandReceiptResult(previous.result)},replayed:true};}
       if(row.revision!==input.expectedRevision)fail('REVISION_CONFLICT','公司已更新，请刷新后重试',409);
       if(action==='archive'&&archived(row)||action==='restore'&&!archived(row))fail('WORKSPACE_STATE_CONFLICT',action==='archive'?'公司已在回收站':'公司已恢复',409);
       if(action==='archive'&&this.reviews(row.state).some(task=>task.status==='pending'&&!demoOnlyReview(task)))fail('PENDING_REVIEWS','请先处理或撤销公司中的待审批事项，再移入回收站',409);
@@ -257,7 +261,7 @@ export class MistRepository {
     return this.writeTransact(workspaceId,async db=>{
       const{actor,row}=await this.own(db,prior,workspaceId,null,true,false,true);
       const previous=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:input.requestId}}});
-      if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','请求编号已用于另一项操作',409);return{workspace:this.view(row,actor),receipt:{requestId:previous.requestId,...previous.result},replayed:true};}
+      if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','请求编号已用于另一项操作',409);return{workspace:this.view(row,actor),receipt:{requestId:previous.requestId,...publicCommandReceiptResult(previous.result)},replayed:true};}
       if(row.revision!==input.expectedRevision)fail('REVISION_CONFLICT','公司已更新，请刷新后重试',409);
       let target:{id:string;name:string};
       const existingMember=input.action==='remove'?members(row.state).find(m=>m.userId===account):undefined;
@@ -384,7 +388,7 @@ export class MistRepository {
     await this.own(db, prior, workspaceId,null,false,true);
     const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: requestIdentifier(requestId, typeof requestId === 'string' && requestId.startsWith('create:') ? 127 : 120) } } });
     if (!receipt || receipt.actorId !== prior.userId) fail('NOT_FOUND', '请求回执不存在', 404);
-    return { requestId: receipt.requestId, ...receipt.result, expectedRevision: receipt.expectedRevision };
+    return { requestId: receipt.requestId, ...publicCommandReceiptResult(receipt.result), expectedRevision: receipt.expectedRevision };
   }); }
   async execute(prior: TokenPayload, workspaceId: string, input: MistCommandRequest) {
     if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
@@ -414,6 +418,7 @@ export class MistRepository {
     fail('PREVIEW_UNSUPPORTED', '预演未完成', 500);
   }
   private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false, confirmProposalId = '') {
+    if (isAgentActor(prior)) identifier(prior.agentSessionId, 'Agent会话编号');
     requestIdentifier(input.requestId); revision(input.expectedRevision);
     const hash = createHash('sha256').update(canonical({ actorId: prior.userId, expectedRevision: input.expectedRevision, ...hashPayload })).digest('hex');
     const permissionFor = async (db: any) => upload&&input.claimId!==undefined?'aftersales:write':!input.command&&upload?await this.uploadPermission(db, prior):this.contract.mistCommandPermission(input.command ?? { type: 'files.add', payload: {} });
@@ -422,13 +427,13 @@ export class MistRepository {
       let stored: MistStoredFile | undefined;
       try { return await this.writeTransact(workspaceId, async db => {
         const permission = await permissionFor(db);
-        const { actor, row } = await this.own(db, prior, workspaceId, permission, true);
+        const { actor, row } = await this.own(db, prior, workspaceId, permission, true, false, false, isAgentActor(prior) || !!confirmProposalId || input.command?.type === 'agent.proposal.reject');
         await this.authorizeCompoundCommand(db, prior, input.command);
         if (permission === null && !MEMBER_PERSONAL_COMMANDS.includes(input.command?.type) && !(companyRow(row) ? canMaintainCompany(actor) : isOwner(row, actor))) fail('FORBIDDEN', companyRow(row) ? '公司设置只能由公司管理员修改' : '公司设置只能由所有者修改', 403);
         const previous = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
         if (previous) {
           if (previous.actorId !== actor.userId || previous.inputHash !== hash || previous.expectedRevision !== input.expectedRevision) fail('REQUEST_CONFLICT', '此请求编号已用于另一项操作', 409);
-          return { workspace: this.view(row, actor), receipt: { requestId: previous.requestId, ...previous.result, expectedRevision: previous.expectedRevision }, replayed: true };
+          return { workspace: this.view(row, actor), receipt: { requestId: previous.requestId, ...publicCommandReceiptResult(previous.result), expectedRevision: previous.expectedRevision }, replayed: true };
         }
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
@@ -566,7 +571,24 @@ export class MistRepository {
         if (scope) ROW_SCOPE.set(saved, scope);
         OWN_TEAMS.set(saved, OWN_TEAMS.get(row) ?? []);
         const result = { revision: nextRevision, result: applied.result };
+        const proposalId = confirmProposalId || (input.command?.type === 'agent.proposal.reject' ? input.command.payload.id : undefined);
+        const proposal = proposalId ? row.state.agentProposals?.find(item => item.id === proposalId) : undefined;
+        const agent = isAgentActor(prior);
+        const audit = agent || proposal ? createAgentCommandAudit({
+          workspaceId, requestId: input.requestId, at: context.auditNow ?? context.now,
+          actor: { id: actor.userId, name: actor.displayName || actor.userId },
+          source: agent ? 'agent' : confirmProposalId ? 'human_confirmation' : 'human_rejection',
+          agentSessionId: agent ? prior.agentSessionId : proposal?.agentSessionId ?? null,
+          ...(proposalId ? { proposalId } : input.command?.type === 'agent.proposal.create' ? { proposalId: String(applied.result.id) } : {}),
+          phase: agent ? input.command?.type === 'agent.proposal.create' ? 'proposed' : 'executed' : confirmProposalId ? 'confirmed' : 'rejected',
+          command, ...(confirmProposalId ? { trigger: input.command ? hashPayload.command : undefined } : {}),
+          requestedRevision: input.expectedRevision, baseRevision: row.revision, committedRevision: nextRevision,
+          before: ORIGINAL_WRITE_STATE.get(row) ?? row.state, after: applied.state,
+        }) : undefined;
         await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: input.requestId, actorId: actor.userId, inputHash: hash, expectedRevision: input.expectedRevision, result } });
+        // A separate internal receipt keeps ordinary receipts byte-compatible even on rollback:
+        // previous releases also reject mist-revision:* before reading any stored receipt.
+        if (audit) await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId, requestId: agentAuditReceiptId(input.requestId), actorId: actor.userId, inputHash: AGENT_AUDIT_HASH, expectedRevision: input.expectedRevision, result: { revision: nextRevision, [AGENT_AUDIT_FIELD]: audit } } });
         // 同事务记下本版本写入的位置，供之后落后版本的保存判断能否安全合并；原请求回执保持原样。
         await this.markRevision(db, workspaceId, actor.userId, row.revision, nextRevision, changeKeys);
         await this.authorize(db, prior, permission);
@@ -599,7 +621,7 @@ export class MistRepository {
           const receipt = await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId, requestId: input.requestId } } });
           if (!receipt) return undefined;
           if (receipt.actorId !== prior.userId || receipt.inputHash !== hash) fail('REQUEST_CONFLICT', '此请求编号已用于另一项操作', 409);
-          return { workspace: this.view(row, actor), receipt: { requestId: receipt.requestId, ...receipt.result, expectedRevision: receipt.expectedRevision }, replayed: true };
+          return { workspace: this.view(row, actor), receipt: { requestId: receipt.requestId, ...publicCommandReceiptResult(receipt.result), expectedRevision: receipt.expectedRevision }, replayed: true };
         });
         if (replay) return replay;
         // 文件副作用无法确认已清理时不再重试，避免重复生成或残留。
@@ -668,7 +690,7 @@ export class MistRepository {
     const actor=await this.authorize(db,prior);requestIdentifier(requestId);
     const item=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId}}});
     if(!item||item.actorId!==actor.userId)fail('NOT_FOUND','原审批回执不存在',404);
-    return {requestId:item.requestId,...item.result};
+    return {requestId:item.requestId,...publicCommandReceiptResult(item.result)};
   });}
   async decideReview(prior:TokenPayload,workspaceId:string,reviewId:string,input:{requestId:string;expectedRevision:number;decision:'approved'|'rejected';note:string}){
     if(!/^[0-9a-f-]{36}$/i.test(workspaceId))fail('INVALID_INPUT','公司编号无效',400);
@@ -680,7 +702,7 @@ export class MistRepository {
       await db.$queryRawUnsafe('SELECT "id" FROM "MistWorkspace" WHERE "id" = $1::uuid FOR UPDATE',workspaceId);
       const row=await db.mistWorkspace.findFirst({where:{id:workspaceId}});if(row&&(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','审批对象不存在',404);if(!row||archived(row))fail('NOT_FOUND','审批对象不存在',404);if(companyRow(row))applyRoster(row.state,await companyRoster(db,row.companyId));
       const previous=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId:input.requestId}}});
-      if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','原请求编号用于另一项决定',409);return {receipt:{requestId:previous.requestId,...previous.result},replayed:true};}
+      if(previous){if(previous.actorId!==actor.userId||previous.inputHash!==hash)fail('REQUEST_CONFLICT','原请求编号用于另一项决定',409);return {receipt:{requestId:previous.requestId,...publicCommandReceiptResult(previous.result)},replayed:true};}
       const task=this.reviews(row.state).find(t=>t.id===reviewId);
       if(!task||!task.reviewerIds.includes(actor.userId))fail('NOT_FOUND','该审批不属于当前账号',404);
       await this.authorize(db,prior,task.requiredPermission);

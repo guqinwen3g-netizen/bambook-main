@@ -60,7 +60,7 @@ function commandOf(args: Record<string, unknown>) {
   if (!COMMANDS.has(command.type)) throw new ToolInputError(`未知命令 ${command.type}，请先用 bambook_commands 查询`);
   return { type: command.type, payload: command.payload as Record<string, unknown> };
 }
-const canOperate = (actor: TokenPayload) => !isAgentActor(actor) || actor.agentMode === 'operate';
+const canOperate = (actor: TokenPayload) => isAgentActor(actor) && actor.agentMode === 'operate';
 
 async function callTool(repository: McpRepository, actor: TokenPayload, name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
@@ -73,6 +73,7 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
       return { commands: [...COMMANDS.values()].filter(c => c.type.startsWith(prefix)).map(c => ({ type: c.type, payload: c.payload, ...(prefix && c.types ? { types: c.types } : {}), via: agentCommandSensitivity(c.type) })) };
     }
     case 'bambook_preview': case 'bambook_execute': {
+      if (!isAgentActor(actor)) throw new ToolInputError('MCP 办理需要本人签发的可办理委托');
       if (!canOperate(actor)) throw new ToolInputError('当前是只读委托；预演和执行需要用户在页面上签发“可办理”委托');
       const workspaceId = need(args, 'workspaceId'), command = commandOf(args), via = agentCommandSensitivity(command.type);
       if (via === 'blocked') throw new ToolInputError(`${command.type} 不能经接口执行`);
