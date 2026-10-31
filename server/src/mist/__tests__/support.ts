@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { TokenPayload } from '../../auth/service';
 import { MistApiError } from '../errors';
 import type { MistContract } from '../repository';
+import { queryMistReceipts } from '../receiptQuery';
 /** 最小的 Prisma where 子集：字段相等、OR、state JSON 数组包含。 */
 function matches(row: any, where: any): boolean {
   if (!where) return true;
@@ -56,7 +57,7 @@ export class MemoryMistDatabase {
       },
       mistCommandReceipt: {
         findUnique: async ({ where }: any) => receipts.get(`${where.workspaceId_requestId.workspaceId}:${where.workspaceId_requestId.requestId}`) ?? null,
-        findMany: async ({ where }: any) => ((where?.requestId?.in ?? []) as string[]).flatMap(requestId => { const row = receipts.get(`${where.workspaceId}:${requestId}`); return row ? [row] : []; }),
+        findMany: async (args: any) => queryMistReceipts([...receipts.values()],args),
         create: async ({ data }: any) => { if (this.failReceipt) throw new Error('transaction failed'); receipts.set(`${data.workspaceId}:${data.requestId}`, data); return data; },
       },
       businessSequence: {

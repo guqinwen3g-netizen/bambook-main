@@ -159,18 +159,19 @@ function SettingsDialog({ open, onClose, bridge, providers, setProviders, chatgp
 
 // ── 对话 ───────────────────────────────────────────────────────────
 
-const LINK_VIEWS = new Set(['crm', 'orders/detail', 'development/detail', 'products', 'samples', 'quotations', 'suppliers', 'procurement', 'production-board', 'shipments', 'invoices', 'risks', 'claims']);
-export function parseBusinessLink(link: string): { view: string; id: string } | null {
+const LINK_VIEWS = new Set(['crm', 'orders/detail', 'development/detail', 'products', 'samples', 'quotations', 'suppliers', 'procurement', 'production-board', 'shipments', 'invoices', 'risks', 'claims','payment-vouchers']);
+export function parseBusinessLink(link: string): { view: string; id: string; section?:string } | null {
   try {
     const url = new URL(link);
     if (url.protocol !== 'bambook:' || url.hostname !== 'open' || url.port || url.username || url.password || url.pathname || url.hash
-      || [...url.searchParams.keys()].some(k => !['view', 'id'].includes(k)) || url.searchParams.getAll('view').length !== 1 || url.searchParams.getAll('id').length !== 1) return null;
-    const view = url.searchParams.get('view') ?? '', id = url.searchParams.get('id') ?? '';
-    return LINK_VIEWS.has(view) && !!id.trim() && id.length <= 200 && !/[\u0000-\u001f\u007f]/.test(id) ? { view, id } : null;
+      || [...url.searchParams.keys()].some(k => !['view', 'id','section'].includes(k)) || url.searchParams.getAll('view').length !== 1 || url.searchParams.getAll('id').length !== 1 || url.searchParams.getAll('section').length>1) return null;
+    const view = url.searchParams.get('view') ?? '', id = url.searchParams.get('id') ?? '',section=url.searchParams.get('section');
+    if(view==='payment-vouchers'?section!=='payables':section!==null)return null;
+    return LINK_VIEWS.has(view) && !!id.trim() && id.length <= 200 && !/[\u0000-\u001f\u007f]/.test(id) ? { view, id,...(section?{section}:{}) } : null;
   } catch { return null; }
 }
 
-function BusinessText({ text, onOpen }: { text: string; onOpen: (view: string, id: string) => void }) {
+function BusinessText({ text, onOpen }: { text: string; onOpen: (view: string, id: string,target?:{section:string}) => void }) {
   const pieces: React.ReactNode[] = [];
   const pattern = /\[([^\]\n]{1,160})\]\((bambook:\/\/[^\s)]+)\)/g;
   let from = 0;
@@ -178,7 +179,7 @@ function BusinessText({ text, onOpen }: { text: string; onOpen: (view: string, i
     const at = match.index!, target = parseBusinessLink(match[2]);
     if (!target) continue;
     pieces.push(text.slice(from, at));
-    pieces.push(<TextLink key={at} title={uiText("打开业务原记录")} onClick={() => onOpen(target.view, target.id)}>{match[1]}</TextLink>);
+    pieces.push(<TextLink key={at} title={uiText("打开业务原记录")} onClick={() => target.section?onOpen(target.view,target.id,{section:target.section}):onOpen(target.view, target.id)}>{match[1]}</TextLink>);
     from = at + match[0].length;
   }
   pieces.push(text.slice(from));

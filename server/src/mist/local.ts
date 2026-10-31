@@ -8,6 +8,7 @@ import {MistApiError} from './errors';
 import {hasScope} from '../auth/permissionService';
 import {getDefaultScopeListForRole,SYSTEM_ROLE_IDS} from '../_shared/rolePermissionMatrix';
 import {createAgentDelegation} from './agentDelegation';
+import {queryMistReceipts} from './receiptQuery';
 
 const COOKIE='bambook_mist_local';
 const SESSION_LIFETIME=7*24*60*60*1000;
@@ -45,7 +46,7 @@ export class MistLocalDatabase{
     },
     mistCommandReceipt:{
       findUnique:async({where}:any)=>{const pair=where.workspaceId_requestId;if(!pair)invalid('本地回执查询无效',500);return clone(store.receipts[JSON.stringify([pair.workspaceId,pair.requestId])]??null);},
-      findMany:async({where}:any)=>{const ids=where?.requestId?.in;if(typeof where?.workspaceId!=='string'||!Array.isArray(ids))invalid('本地回执查询无效',500);return ids.flatMap((requestId:string)=>{const row=store.receipts[JSON.stringify([where.workspaceId,requestId])];return row?[clone(row)]:[];});},
+      findMany:async(args:any)=>{if(typeof args.where?.workspaceId!=='string')invalid('本地回执查询无效',500);return queryMistReceipts(Object.values(store.receipts),args);},
       create:async({data}:any)=>{const key=JSON.stringify([data.workspaceId,data.requestId]);if(store.receipts[key]||Object.values(store.receipts).some(row=>row.id===data.id))duplicate();store.receipts[key]=clone(data);return clone(data);},
     },
     businessSequence:{

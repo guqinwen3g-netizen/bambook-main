@@ -20,7 +20,8 @@ import { payablesCommandPermissions, financialDisposalViews } from '../shared/mi
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor } from './agentDelegation';
-import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
+import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
+import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit } from './agentAuditRead';
 import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
@@ -390,6 +391,49 @@ export class MistRepository {
     if (!receipt || receipt.actorId !== prior.userId) fail('NOT_FOUND', '请求回执不存在', 404);
     return { requestId: receipt.requestId, ...publicCommandReceiptResult(receipt.result), expectedRevision: receipt.expectedRevision };
   }); }
+  async agentAudits(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>={}) {return this.transact(async db=>{
+    const {actor}=await this.own(db,prior,workspaceId);
+    const allowed=['scope','actorId','source','phase','proposalId','agentSessionId','since','until','cursor','limit'];
+    if(Object.keys(input).some(k=>!allowed.includes(k)))fail('INVALID_INPUT','查询参数无效',400);
+    const company=input.scope==='company';if(input.scope!==undefined&&!['mine','company'].includes(String(input.scope)))fail('INVALID_INPUT','查询范围无效',400);
+    const canReadCompany=hasScope(actor,'audit:read');if(company&&!canReadCompany)fail('FORBIDDEN','没有公司审计查看权限',403);
+    const number=(v:unknown,fallback:number)=>{if(v===undefined)return fallback;if((typeof v!=='number'&&typeof v!=='string')||!/^\d+$/.test(String(v))||Number(v)<1||Number(v)>50)fail('INVALID_INPUT','每页条数须为1至50',400);return Number(v);};
+    const limit=number(input.limit,20),where:any={workspaceId,inputHash:AGENT_AUDIT_HASH,requestId:{startsWith:AGENT_AUDIT_PREFIX}};
+    if(!company)where.actorId=actor.userId;
+    if(input.actorId!==undefined){const id=identifier(input.actorId,'经办账号');if(!company&&id!==actor.userId)fail('FORBIDDEN','只能查看本人操作',403);where.actorId=id;}
+    const and:any[]=[];
+    for(const key of ['proposalId','agentSessionId'])if(input[key]!==undefined)and.push({result:{path:[AGENT_AUDIT_FIELD,key],equals:identifier(input[key],'关联编号')}});
+    for(const [key,values] of [['source',['agent','human_confirmation','human_rejection']],['phase',['executed','proposed','confirmed','rejected']]] as const)if(input[key]!==undefined){if(!values.includes(input[key] as never))fail('INVALID_INPUT','操作类型无效',400);and.push({result:{path:[AGENT_AUDIT_FIELD,key],equals:input[key]}});}
+    for(const [key,op] of [['since','gte'],['until','lte']] as const)if(input[key]!==undefined){const date=input[key];if(typeof date!=='string'||!/^\d{4}-\d\d-\d\dT/.test(date)||!Number.isFinite(Date.parse(date)))fail('INVALID_INPUT','查询时间无效',400);(where.createdAt??={})[op]=new Date(date as string);}
+    if(input.cursor!==undefined){
+      if(typeof input.cursor!=='string'||input.cursor.length>500||!/^[A-Za-z0-9_-]+$/.test(input.cursor))fail('INVALID_INPUT','翻页位置无效',400);
+      let c:any;try{c=JSON.parse(Buffer.from(input.cursor as string,'base64url').toString());}catch{fail('INVALID_INPUT','翻页位置无效',400);}
+      if(!c||typeof c.at!=='string'||!Number.isFinite(Date.parse(c.at))||typeof c.id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(c.id))fail('INVALID_INPUT','翻页位置无效',400);
+      and.push({OR:[{createdAt:{lt:new Date(c.at)}},{createdAt:new Date(c.at),id:{lt:c.id}}]});
+    }
+    if(and.length)where.AND=and;
+    const rows=await db.mistCommandReceipt.findMany({where,orderBy:[{createdAt:'desc'},{id:'desc'}],take:limit+1});
+    const page=rows.slice(0,limit),last=page.at(-1),nextCursor=rows.length>limit&&last?Buffer.from(JSON.stringify({at:new Date(last.createdAt??last.result?.[AGENT_AUDIT_FIELD]?.at??0).toISOString(),id:last.id})).toString('base64url'):null;
+    const audits=page.flatMap((r:any)=>{const a=auditFromReceipt(r,workspaceId);return a?[a]:[];});
+    const parents=audits.length?await db.mistCommandReceipt.findMany({where:{workspaceId,requestId:{in:audits.map((a:any)=>a.requestId)}}}):[];
+    const byRequest=new Map(parents.map((p:any)=>[p.requestId,p]));
+    const items=audits.filter((a:any)=>auditMatchesParent(a,byRequest.get(a.requestId))).map(auditEntry);
+    return {items,nextCursor,canReadCompany,unavailableCount:page.length-items.length};
+  });}
+  async agentAudit(prior:TokenPayload,workspaceId:string,requestId:string,input:Record<string,unknown>={}) {return this.transact(async db=>{
+    requestIdentifier(requestId);
+    if(Object.keys(input).some(k=>!['offset','limit','includeCommand'].includes(k)))fail('INVALID_INPUT','查询参数无效',400);
+    const {actor,row}=await this.own(db,prior,workspaceId);
+    const pair=await db.mistCommandReceipt.findMany({where:{workspaceId,requestId:{in:[agentAuditReceiptId(requestId),requestId]}}});
+    const receipt=pair.find((r:any)=>r.requestId===agentAuditReceiptId(requestId));
+    const audit=auditFromReceipt(receipt,workspaceId);if(!audit||(audit.actor.id!==actor.userId&&!hasScope(actor,'audit:read')))fail('NOT_FOUND','操作记录不存在或无权查看',404);
+    const parent=pair.find((r:any)=>r.requestId===requestId);
+    if(!auditMatchesParent(audit!,parent))fail('NOT_FOUND','操作记录不存在或无权查看',404);
+    const integer=(value:unknown,fallback:number,min:number,max:number)=>{if(value===undefined)return fallback;if((typeof value!=='string'&&typeof value!=='number')||!/^\d+$/.test(String(value))||Number(value)<min||Number(value)>max)fail('INVALID_INPUT','明细翻页参数无效',400);return Number(value);};
+    if(input.includeCommand!==undefined&&![true,false,'true','false'].includes(input.includeCommand as any))fail('INVALID_INPUT','查询参数无效',400);
+    const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;
+    return projectAgentAudit(audit!,{actor,current:row.state,visible,project:s=>projectState(s,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state,permission:c=>this.contract.mistCommandPermission(c),unrestricted:!scopeOf(row),offset:integer(input.offset,0,0,1000000),limit:integer(input.limit,25,1,50),includeCommand:input.includeCommand===true||input.includeCommand==='true'});
+  });}
   async execute(prior: TokenPayload, workspaceId: string, input: MistCommandRequest) {
     if (!input.command || typeof input.command.type !== 'string' || !input.command.payload || typeof input.command.payload !== 'object' || Array.isArray(input.command.payload)) fail('INVALID_COMMAND', '业务命令格式无效', 400);
     if (input.command.type === 'files.add') fail('INVALID_COMMAND', '附件只能通过真实上传接口添加', 400);
