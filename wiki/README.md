@@ -12,6 +12,7 @@
 
 `sop/` 存放按当前业务行为维护的岗位操作文字，由软件实施 Agent 与 Code Wiki 一起更新；教学 HTML 的设计和制作由另行分工的 Agent 负责。文字需写清岗位、开始条件、步骤、结果、交接和异常，HTML 呈现不得把未实现能力补写成可用功能。
 
+- [Agent连接与提议确认 SOP](sop/agent-connections.md)：本人连接、续签撤销、敏感提议、失去来源权限及失败恢复。
 - [长期Agent任务 SOP](sop/agent-tasks.md)：安排与连接、人工确认、暂停恢复、停止和异常交接。
 - [小竹业务问答 SOP](sop/platform-ai.md)：当前可引用的记录、提问、人工核对与失败恢复。
 

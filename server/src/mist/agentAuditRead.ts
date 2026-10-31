@@ -135,7 +135,7 @@ function referencesVisible(value: any, known: Set<string>, visible: Set<string>,
   if(plain(value))return Object.entries(value).every(([k,v])=>referencesVisible(v,known,visible,hidden,k));
   return true;
 }
-function readableCommand(command: AgentCommandAudit['command'], actor: TokenPayload, permission: (c: any)=>string|null) {
+export function readableCommand(command: AgentCommandAudit['command'], actor: TokenPayload, permission: (c: any)=>string|null) {
   if(command.type.startsWith('teamScope.'))return hasScope(actor,'hr:write');
   if(command.type.startsWith('settings.'))return hasScope(actor,'settings:system:read');
   if(['finance.account.save','finance.account.close','finance.account.reopen'].includes(command.type))return hasScope(actor,'vouchers:write');

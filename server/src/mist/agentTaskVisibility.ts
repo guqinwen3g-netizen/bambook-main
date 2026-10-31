@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 import type { MistState } from '../shared/mistWorkspace';
 import { SCOPED_COLLECTIONS, type MistDataScope } from '../shared/mistDataScope';
 import { AGENT_OBJECT_TYPES } from './agentRead';
+import { MIST_READ_SECTIONS } from './access';
 import { fail } from './errors';
 
 export type TaskSourceRef = { path: string; id: string; partial: boolean; coverage: string[]; observedRevision?:number; fieldRevisions?:Record<string,number> };
-const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS, 'customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages'])];
+const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS,...MIST_READ_SECTIONS.flatMap(section=>section.paths.filter(path=>!path.some(key=>key.startsWith('partial'))).map(path=>path.join('.'))), 'customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages'])];
 const PARTIAL: Record<string,string> = { 'orderCosts.expenses':'partialExpenses','payables.bills':'partialPayableBills','receipts':'partialReceipts','customerStatements':'partialStatements','letterOfCredits':'partialLettersOfCredit' };
 const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function ordered(v: any): any { return Array.isArray(v) ? v.map(ordered) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k=>[k,ordered(v[k])])) : v; }
@@ -29,6 +30,23 @@ function index(state: MistState) {
   const byPath = new Map<string,Map<string,any>>(), byId = new Map<string,string[]>();
   for(const path of PATHS){const map=new Map<string,any>();for(const item of rows(state,path)){map.set(item.row.id,item);byId.set(item.row.id,[...byId.get(item.row.id)??[],path]);}byPath.set(path,map);}
   return {byPath,byId};
+}
+/** Existing business references cannot gain visibility from a proposal or a same-ID record in another collection. */
+export function knownCommandSourcesVisible(raw:MistState,current:MistState){
+  const source=index(raw),visible=index(current);
+  return (command:unknown)=>{
+    const visit=(value:any):boolean=>{
+      if(typeof value==='string')return(source.byId.get(value)??[]).every(path=>{
+        const before=source.byPath.get(path)?.get(value),shown=visible.byPath.get(path)?.get(value);
+        if(!shown||!before.partial&&shown.partial)return false;
+        if(!shown.partial)return true;const allowed=new Set(coverage(shown.row));return coverage(before.row).every(id=>allowed.has(id));
+      });
+      if(Array.isArray(value))return value.every(visit);
+      if(value&&typeof value==='object')return Object.entries(value).every(([key,child])=>visit(key)&&visit(child));
+      return true;
+    };
+    return visit(command);
+  };
 }
 export function taskSourcesVisible(refs: TaskSourceRef[], scopeHash: string, current: MistState, raw: MistState, scope?: MistDataScope) {
   if(scopeHash!==taskScopeHash(scope,raw))return false;
