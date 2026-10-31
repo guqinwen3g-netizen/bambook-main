@@ -11,6 +11,7 @@ import { MistPrivateFiles, MIST_FILE_MAX_BYTES } from './files';
 import type { ImagePreviewMode } from './imagePreview';
 import { MistApiError, fail } from './errors';
 import {getMistAssistantStatus,runMistAssistant} from './assistant';
+import { analyzeEmail } from './mail/intelligence';
 import {runQuoteCostAdvisor} from './quoteCostAdvisor';
 import { hasScope } from '../auth/permissionService';
 import { codexSubscriptions, CodexSubscriptionError, PLATFORM_SUBJECT, personalSubject, type CodexSubscriptionService } from '../ai/codexSubscription';
@@ -225,6 +226,10 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.put('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.bindCredential(actor(req), req.params.id, req.params.accountId, exactBody(req.body, ['password']).password)));
   router.delete('/workspaces/:id/email/accounts/:accountId/credential', mailCall(req => mail.disconnect(actor(req), req.params.id, req.params.accountId)));
   router.post('/workspaces/:id/email/accounts/:accountId/sync', mailCall(req => { exactBody(req.body ?? {}, []); return mail.sync(actor(req), req.params.id, req.params.accountId); }));
+  router.post('/workspaces/:id/email/messages/:messageId/analyze', mailCall(req => {
+    const controller = new AbortController(); req.res!.once('close', () => { if (!req.res!.writableEnded) controller.abort(); });
+    return analyzeEmail(repository, actor(req), req.params.id, req.params.messageId, withResponseLocale(req.body, req.get('X-Bambook-Locale')), controller.signal);
+  }));
   router.post('/workspaces/:id/email/sends', mailCall(req => mail.send(actor(req), req.params.id, exactBody(req.body, ['requestKey', 'draftId', 'input', 'forwardOfId']))));
   router.post('/workspaces/:id/email/sends/:sendId/retry', mailCall(req => mail.retry(actor(req), req.params.id, req.params.sendId, exactBody(req.body ?? {}, ['confirmUnknown']).confirmUnknown)));
   router.post('/workspaces/:id/email/sends/:sendId/verify', mailCall(req => { exactBody(req.body ?? {}, []); return mail.verify(actor(req), req.params.id, req.params.sendId); }));

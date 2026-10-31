@@ -160,6 +160,8 @@ assistant-host（utilityProcess，独立进程，有内存/并发上限）
 
 ## 14. Mist 标准 MCP 接口（2026-10-30 用户定案后实现）
 
+2026-11-01 邮件整理增量：平台主动按单封邮件整理正文，严格原文证据、人工复核、新复核编号与交接快照分开保存；正式业务不自动改写。`email.extraction.review/resolve` 经Agent一律confirm，确认窗口显示具体值与依据；标准读取保留结构化分析，仍9工具/25类。详见Code Wiki6.1.3及邮箱文字SOP。附件抽取与通用持久值守未交付。
+
 2026-11-01 邮箱增量：当前25类读取对象（含`email`）；邮件正文最多10000字符并标识截断，仍受个人/共享邮箱可见性约束。`bambook_mail_receiving`的`stateResults`读回标记与移动的队列状态；`email.move`和`email.state.retry {id,acceptRemote?}`进入真人确认，普通已读/星标意图保留原Agent连接租约并在实际执行时复核。详细回程见Code Wiki第6.1.2节。
 
 2026-11-01 当前增量：工具共9个，新增只读`bambook_mail_receiving({workspaceId})`，返回当前可见邮箱的后台收件状态、时间与重试信息，不返回凭据或内部授权，Agent不能启停后台收件。桌面同名工具走`/agent/mail-receiving`。`email.account.save`一律人工确认。当前能力与历史停点冲突时以 [Code Wiki第6节](../CODE_WIKI.md#6-ai-与-agent-能力边界2026-10-31) 和本文件后续交付记录为准。

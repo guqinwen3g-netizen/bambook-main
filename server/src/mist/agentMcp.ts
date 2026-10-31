@@ -27,7 +27,7 @@ const NEVER_VIA_AGENT = new Set(['files.add']);
 /** confirm：须本人在系统中确认；normal：可由可办理委托直接执行；blocked：不能经接口执行。 */
 export function agentCommandSensitivity(type: string): 'normal' | 'confirm' | 'blocked' {
   if (NEVER_VIA_AGENT.has(type) || type.startsWith('email.server.') || type.startsWith('agent.')) return 'blocked';
-  if(type==='email.account.save'||type==='email.move'||type==='email.state.retry')return 'confirm';
+  if(type==='email.account.save'||type==='email.move'||type==='email.state.retry'||type.startsWith('email.extraction.'))return 'confirm';
   if (NORMAL_EXCEPTIONS.has(type)) return 'normal';
   if (CONFIRM_PREFIXES.some(prefix => type.startsWith(prefix)) || CONFIRM_VERB.test(type.slice(type.indexOf('.') + 1))) return 'confirm';
   return 'normal';
