@@ -72,6 +72,14 @@ describe('Durable bidirectional mailbox state',()=>{
     const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local,mailTransport:f.box.transport,mailReceive:{tickMs:3_600_000}}),worker=app.locals.mailStateWorker;workers.push(worker);vi.spyOn(worker,'wake').mockImplementation(()=>{});worker.start();await worker.tick();
     expect(f.box.flags).toBe(1);expect(f.box.boxes.INBOX[0].starred).toBe(false);expect(await f.states()).toEqual([]);
   });
+  it('lets a newer mark supersede an in-flight flag without publishing a stale acknowledgement',async()=>{
+    const f=await fixture(),m=await f.message();let release!:()=>void;f.box.gate=new Promise(resolve=>release=resolve);
+    await f.command('email.flag',{id:m.id,flag:'read',value:true});const running=f.worker.tick();
+    for(let n=0;n<100&&!f.box.flags;n++)await new Promise(resolve=>setTimeout(resolve,5));expect(f.box.flags).toBe(1);
+    await f.command('email.flag',{id:m.id,flag:'read',value:false});f.box.gate=undefined;release();await running;
+    expect((await f.message()).read).toBe(false);expect((await f.states())[0].state).toBe('pending');
+    await f.worker.tick();expect(await f.states()).toEqual([]);expect(f.box.boxes.INBOX[0].seen).toBe(false);
+  });
   it('moves through archive, trash and restore with exact UID replacement while retaining local links and files',async()=>{
     const f=await fixture(),m=await f.message();
     for(const target of ['archive','trash','restore']){await f.command('email.move',{id:m.id,folder:target});await f.worker.tick();}

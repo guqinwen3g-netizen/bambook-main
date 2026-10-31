@@ -109,6 +109,6 @@ export function bambookTools(options: {
       parameters: details,
       run: async (args, ctx) => request(`objects/${objectType(args.type)}/${encodeURIComponent(objectId(args.id))}/related`, ctx.signal, ctx.now()),
     },
-    { ...common,name:'bambook_mail_receiving',description:'读取本人可见邮箱的自动收件授权、最近执行和下次计划。只读，不返回凭据，不代替本人开启任务。',parameters:{type:'object',properties:{},additionalProperties:false},run:async(args,ctx)=>{if(Object.keys(args).length)invalid('此工具不接受参数');return request('mail-receiving',ctx.signal,ctx.now());} },
+    { ...common,name:'bambook_mail_receiving',description:'读取本人可见邮箱的自动收件、标记和移动同步状态、最近执行及下次计划。只读，不返回凭据，不代替本人开启任务。',parameters:{type:'object',properties:{},additionalProperties:false},run:async(args,ctx)=>{if(Object.keys(args).length)invalid('此工具不接受参数');return request('mail-receiving',ctx.signal,ctx.now());} },
   ];
 }

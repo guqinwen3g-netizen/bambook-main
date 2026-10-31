@@ -83,7 +83,6 @@ export async function enqueueMailState(db: any, workspace: { id: string; state: 
     const current = await readMailState(db, workspace.id, candidate.id), old = current.record;
     if (!active(old)) continue;
     if (field === 'folder' && (old.phase === 'running' || old.phase === 'unknown' || old.attempt?.issued || old.attempt?.result)) fail('MAIL_STATE_PENDING', '先核对上一项移动的结果，再继续移动', 409);
-    if (old.phase === 'running') continue;
     await save(db, current.row, current.record, { phase: 'superseded', nextRunAt: 0 });
   }
   if (records.filter(r=>r.accountId===a.id).length >= 500 && !rows.length) fail('MAIL_STATE_LIMIT', '待同步操作过多，请先处理同步异常', 409);
