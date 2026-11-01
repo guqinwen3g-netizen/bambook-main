@@ -1,6 +1,10 @@
 import {describe,it,expect} from 'vitest';
 import {createMistState} from '../../../../server/src/shared/mistWorkspace';
 import {mistDailyDigest,visibleMistNotifications} from './notificationPreferences';
+it('uses the canonical personal-account permission for task reminders while retaining the exact Mist route',()=>{
+ const state=fixture();state.notifications=[];const notice={id:'agent-task:task:key',title:'Agent待补充资料',detail:'核对交期',at:'2026-11-01T00:00:00Z',readAt:null,target:{view:'account',id:'task',section:'agents'}};
+ expect(visibleMistNotifications(state,view=>view==='account-settings',[notice])).toEqual([notice]);expect(visibleMistNotifications(state,()=>false,[notice])).toEqual([]);expect(notice.target.view).toBe('account');
+});
 const fixture=()=>createMistState({id:()=>crypto.randomUUID(),now:'2026-10-13T00:00:00Z',actorName:'测试'},'empty');
 describe('workspace notification preferences',()=>{
  it('filters disabled categories and unreadable targets without deleting stored facts',()=>{

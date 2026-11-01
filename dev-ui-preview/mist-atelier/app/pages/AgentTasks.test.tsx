@@ -4,10 +4,10 @@ import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {getByRole,getByLabelText,getByText,queryByRole,fireEvent} from '@testing-library/dom';
 import {MistRoot,ToastProvider} from '../../../../components/mist';
-const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales'}));
+const seam=vi.hoisted(()=>({api:vi.fn(),copy:vi.fn(),refresh:vi.fn(),go:vi.fn(),identity:'A',userId:'sales',routeId:''}));
 vi.mock('../runtime/auth',()=>({useMistSession:()=>({sessionKey:seam.identity,user:{id:seam.userId}})}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>({workspace:{id:'workspace'},refresh:seam.refresh}),mistApiRequest:(...args:any[])=>seam.api(...args)}));
-vi.mock('../nav',()=>({useNav:()=>({go:seam.go})}));
+vi.mock('../nav',()=>({useNav:()=>({go:seam.go,route:{view:'account',section:'agents',id:seam.routeId||undefined}})}));
 import {AgentTasks} from './AgentTasks';
 let host:HTMLDivElement,root:Root;
 const row=()=>({id:'task',identityId:'identity',identityName:'邮件助理',name:'核对邮件',ownerId:'sales',ownerName:'顾言',mode:'operate',instructions:'核对本人来信，移动前交本人确认。',state:'queued',version:3,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z',expiresAt:'2026-11-02T00:00:00Z',stepsUsed:0,stepLimit:40,runtimeUsedMs:0,runtimeLimitMs:1800000,lastHeartbeatAt:null,checkpoint:'',result:'',waitingProposalIds:[],canControl:true});
@@ -15,7 +15,11 @@ const identity=()=>({id:'identity',name:'邮件助理',mode:'operate',state:'act
 const paint=()=>root.render(<MistRoot><ToastProvider><AgentTasks onConnections={()=>{}}/></ToastProvider></MistRoot>);
 const flush=async()=>{await act(async()=>{await Promise.resolve();await Promise.resolve();});};
 const click=async(node:HTMLElement)=>{await act(async()=>node.click());await flush();};
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;vi.clearAllMocks();seam.identity='A';seam.userId='sales';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:seam.copy.mockResolvedValue(undefined)}});host=document.createElement('div');document.body.append(host);root=createRoot(host);seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{item:row()}:url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:row()}:{items:[row()],nextCursor:null}));});
+it('opens the exact notification task even when it is absent from the first list page',async()=>{
+ seam.routeId='older-task';seam.api.mockImplementation((url:string)=>Promise.resolve(url.endsWith('/older-task')?{item:{...row(),id:'older-task',name:'核对旧交接',state:'waiting_human',questions:[{id:'q',question:'请提供书面交期。',askedAt:'2026-11-01T00:00:00Z'}]}}:url.includes('/history')?{items:[],nextCursor:null}:url.includes('agent-identities')?{items:[identity()]}:{items:[],nextCursor:null}));
+ act(paint);await flush();const dialog=getByRole(document.body,'dialog',{name:'核对旧交接'});expect(dialog.textContent).toContain('请提供书面交期。');expect(getByRole(dialog,'button',{name:'补充资料'})).toBeTruthy();expect(seam.api.mock.calls.some(([,init])=>init?.method==='POST')).toBe(false);
+});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;vi.clearAllMocks();seam.identity='A';seam.userId='sales';seam.routeId='';Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:seam.copy.mockResolvedValue(undefined)}});host=document.createElement('div');document.body.append(host);root=createRoot(host);seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{item:row()}:url.includes('agent-identities')?{items:[identity()],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:row()}:{items:[row()],nextCursor:null}));});
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 it('shows idle tasks honestly and creates only a queued task without claiming or issuing a connection',async()=>{
  act(paint);await flush();expect(getByText(host,'待领取')).toBeTruthy();expect(host.textContent).not.toContain('执行中');

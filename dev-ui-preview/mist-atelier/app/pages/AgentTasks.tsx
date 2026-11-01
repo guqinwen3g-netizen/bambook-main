@@ -1,6 +1,6 @@
 import React from 'react';
 import { Bot, Copy, Plus, RefreshCw } from 'lucide-react';
-import { Banner, Button, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Segmented, Select, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
+import { Banner, Button, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Pill, Segmented, Select, Skeleton, TextArea, TextInput, useToast, type Column, type Tone } from '../../../../components/mist';
 import type { AgentTaskEvent, AgentTaskPage, AgentTaskView } from '../../../../server/src/shared/mistAgentTasks';
 import type { AgentIdentityView } from '../../../../server/src/shared/mistAgentIdentities';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
@@ -32,6 +32,7 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
  const [page,setPage]=React.useState<AgentTaskPage>({items:[],nextCursor:null}),[identities,setIdentities]=React.useState<AgentIdentityView[]>([]),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
  const [plan,setPlan]=React.useState<Plan|null>(null),[busy,setBusy]=React.useState(false),[failure,setFailure]=React.useState(''),[uncertain,setUncertain]=React.useState(false),[credential,setCredential]=React.useState<{item:AgentTaskView;token:string}|null>(null);
  const [detail,setDetail]=React.useState<AgentTaskView|null>(null),[history,setHistory]=React.useState<{items:AgentTaskEvent[];nextCursor:string|null}>({items:[],nextCursor:null}),[detailError,setDetailError]=React.useState('');
+ const [opening,setOpening]=React.useState(false);
  const detailRef=React.useRef(detail);detailRef.current=detail;
  const alive=React.useRef(false),readGeneration=React.useRef(0),writeGeneration=React.useRef(0),detailGeneration=React.useRef(0),readAbort=React.useRef<AbortController|null>(null),writeAbort=React.useRef<AbortController|null>(null);
  const load=React.useCallback(async(append=false)=>{
@@ -47,7 +48,9 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
  },[base,workspaceId,page.nextCursor]);
  const currentLoad=React.useRef(load);currentLoad.current=load;
  React.useEffect(()=>{alive.current=true;void currentLoad.current();const timer=setInterval(()=>void currentLoad.current(),10_000);return()=>{alive.current=false;readGeneration.current++;writeGeneration.current++;detailGeneration.current++;clearInterval(timer);readAbort.current?.abort();writeAbort.current?.abort();};},[base]);
- const openDetail=async(row:AgentTaskView,appendHistory=false)=>{const epoch=++detailGeneration.current;if(detailRef.current?.id!==row.id)setHistory({items:[],nextCursor:null});setDetail(row);setDetailError('');try{const [result,events]=await Promise.all([mistApiRequest(base+'/'+encodeURIComponent(row.id)),mistApiRequest(base+'/'+encodeURIComponent(row.id)+'/history'+(appendHistory&&history.nextCursor?'?cursor='+encodeURIComponent(history.nextCursor):''))]);if(!alive.current||epoch!==detailGeneration.current)return;setDetail(result.item);setHistory(previous=>appendHistory?{...events,items:[...previous.items,...events.items]}:events);}catch(e){if(alive.current&&epoch===detailGeneration.current){setDetailError(e instanceof Error?e.message:'任务读取失败');setDetail(null);}}};
+ const openDetail=async(row:Pick<AgentTaskView,'id'>,appendHistory=false)=>{const epoch=++detailGeneration.current;if(detailRef.current?.id!==row.id)setHistory({items:[],nextCursor:null});if('name'in row)setDetail(row as AgentTaskView);else setDetail(null);setOpening(true);setDetailError('');try{const [result,events]=await Promise.all([mistApiRequest(base+'/'+encodeURIComponent(row.id)),mistApiRequest(base+'/'+encodeURIComponent(row.id)+'/history'+(appendHistory&&history.nextCursor?'?cursor='+encodeURIComponent(history.nextCursor):''))]);if(!alive.current||epoch!==detailGeneration.current)return;setDetail(result.item);setHistory(previous=>appendHistory?{...events,items:[...previous.items,...events.items]}:events);}catch(e){if(alive.current&&epoch===detailGeneration.current){setDetailError(e instanceof Error?e.message:'任务读取失败');setDetail(null);}}finally{if(alive.current&&epoch===detailGeneration.current)setOpening(false);}};
+ const routeTaskId=nav?.route?.section==='agents'?nav.route.id:undefined;
+ React.useEffect(()=>{if(routeTaskId)void openDetail({id:routeTaskId});},[routeTaskId,base]);
  const begin=(next:Plan)=>{setFailure('');setUncertain(false);setCredential(null);setPlan(next);};
  const closePlan=()=>{if(busy)return;writeGeneration.current++;writeAbort.current?.abort();setPlan(null);setCredential(null);setFailure('');setUncertain(false);};
  const submit=async()=>{
@@ -56,7 +59,7 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
   const body=plan.kind==='create'?{requestId:plan.requestId,identityId:plan.identityId,name:plan.name,instructions:plan.instructions,...(plan.executor==='platform'?{executor:'platform',locale:interfaceLocale()}:{})}:plan.kind==='answer'?{requestId:plan.requestId,version:plan.row.version,questionId:plan.questionId,answer:plan.answer}:{requestId:plan.requestId,version:plan.row.version};
   try{const result=await mistApiRequest(url,{method:'POST',body:JSON.stringify(body),signal:abort.signal});if(!alive.current||epoch!==writeGeneration.current)return;
    if(plan.kind==='issue'){if(typeof result.token!=='string'||!result.item?.id)throw new Error('任务连接响应无效');setCredential(result);}else toast(uiText(plan.kind==='answer'?'资料已补充':plan.kind==='create'&&result.item.state==='queued'?'任务已安排':LABEL[result.item.state as AgentTaskView['state']]??'已核对当前任务状态'),'ok');
-   setPlan(null);setUncertain(false);if(detail?.id===result.item?.id)setDetail(result.item);void currentLoad.current();if(plan.kind==='cancel')void w.refresh();
+   setPlan(null);setUncertain(false);if(detail?.id===result.item?.id)setDetail(result.item);void currentLoad.current();window.dispatchEvent(new Event('bambook:agent-task-update'));if(plan.kind==='cancel')void w.refresh();
   }catch(e){if(alive.current&&!abort.signal.aborted&&epoch===writeGeneration.current){setFailure(e instanceof Error?e.message:'操作未完成，请重试');setUncertain(!(e as any)?.status||(e as any).status>=500);}}
   finally{if(alive.current&&epoch===writeGeneration.current)setBusy(false);}
  };
@@ -74,7 +77,8 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
   {error&&<Banner tone="bad" title={error}/>}<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r)} empty={<EmptyState icon={Bot} title={uiText(active.length?'暂无任务':'暂无可用的Agent连接')} action={!active.length?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />
   {page.nextCursor&&<Button onClick={()=>void load(true)}>{uiText('加载更多')}</Button>}
   {detailError&&<Banner tone="bad" title={detailError}/>}
-  <Drawer open={!!detail} onClose={()=>{detailGeneration.current++;setDetail(null);}} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
+  <Drawer open={!!detail||opening} onClose={()=>{detailGeneration.current++;setDetail(null);setOpening(false);if(routeTaskId)nav.go('account',undefined,{section:'agents'});}} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
+   {opening&&!detail&&<Skeleton/>}
    {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill></div>
     <KeyValue items={[{label:uiText('执行方式'),value:uiText(detail.executor==='platform'?'平台执行':'外部客户端')},{label:uiText('Agent连接'),value:detail.identityName},{label:uiText('办理权限'),value:uiText(detail.mode==='read'?'只读':'可办理')},{label:uiText('负责人'),value:detail.ownerName},{label:uiText('有效期至'),value:time(detail.expiresAt)},{label:uiText('最近心跳'),value:time(detail.lastHeartbeatAt)},{label:uiText('业务操作'),value:`${detail.stepsUsed} / ${detail.stepLimit}`},{label:uiText('累计执行 / 上限'),value:`${duration(detail.runtimeUsedMs)} / ${duration(detail.runtimeLimitMs)}`}]} />
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}

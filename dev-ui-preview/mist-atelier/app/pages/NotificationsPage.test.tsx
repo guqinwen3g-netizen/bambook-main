@@ -23,6 +23,9 @@ const notes = () => [
   { id: 'n-ship', category: 'shipping', title: '出运准备提醒', detail: '本周出运', at: '2026-10-14T07:00:00Z', readAt: null, target: { view: 'shipments', id: 'sh-1' } },
   { id: 'n-old', category: 'general', title: '已读的工作通知', detail: '订单已确认', at: '2026-10-13T07:00:00Z', readAt: '2026-10-13T08:00:00Z', target: { view: 'orders/detail', id: 'o-1' } },
 ];
+it('opens a personal Agent reminder through its own read state and accurate task link',async()=>{
+ const notice={id:'agent-task:task:key',taskId:'task',key:'a'.repeat(64),title:'Agent待补充资料',detail:'核对交期',at:'2026-11-01T00:00:00Z',readAt:null,category:'general',target:{view:'account',id:'task',section:'agents'}},read=vi.fn(async()=>{});seam.value.agentTaskNotices={items:[notice],read};render();const row=[...host.querySelectorAll('[role=row]')].find(r=>r.textContent?.includes('Agent待补充资料'))!;expect(row).toBeTruthy();await click(row.querySelector('button')!);expect(read).toHaveBeenCalledWith([notice]);expect(seam.value.run).not.toHaveBeenCalled();expect(go).toHaveBeenCalledWith('account','task',notice.target);
+});
 beforeEach(() => {
   vi.clearAllMocks(); count = 0; seam.route = { view: 'notifications' };
   seam.session = { sessionKey: 'one', user: { id: 'owner', displayName: '当前员工' }, hasPermission: () => true, canAccessView: () => true };

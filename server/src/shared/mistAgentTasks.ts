@@ -16,3 +16,5 @@ export type AgentTaskView = {
 export type AgentTaskPage = { items: AgentTaskView[]; nextCursor: string | null };
 export type AgentTaskEvent = { action: string; at: string; actorId: string; actorName: string; version: number; state: AgentTaskState };
 export type AgentTaskCommand = { type: 'agent.task.cancel'; payload: { id: string; version: number } };
+/** Personal attention metadata; never carries questions, reports, credentials or business payloads. */
+export type AgentTaskNotice = {id:string;taskId:string;key:string;title:string;detail:string;at:string;readAt:string|null;category:'general';target:{view:'account';id:string;section:'agents'}};
