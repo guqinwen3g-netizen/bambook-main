@@ -19,7 +19,7 @@ import { platformProfileList } from '../ai/platformModel';
 import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
 import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
-import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, type McpRepository } from './agentMcp';
+import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, MCP_SOURCE_RULES, type McpRepository } from './agentMcp';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
 import {SERVICE_KEY_HEADER} from './agentIdentities';
@@ -101,6 +101,8 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.use(createPublicEntryHostGuard('mist'));
   const actor = (req: Request) => (req as Request & { actor: TokenPayload }).actor;
   const run = (handler: (req: Request, res: Response) => Promise<void>): RequestHandler => (req, res) => { void handler(req, res).catch(error => publicError(res, error)); };
+  // Older native clients have a closed type enum. Keep broad REST results compatible until explicit opt-in.
+  const mailRecordReadOptions=(req:Request)=>{if(req.query.includeMailRecords!==undefined&&req.query.includeMailRecords!=='1')fail('INVALID_INPUT','邮件读取能力参数无效',400);return{excludeTypes:req.query.includeMailRecords==='1'?[]:['email_draft','email_send']};};
   router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
   router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
@@ -217,7 +219,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     if (reply === null) { res.status(202).end(); return; }
     if((req as any).taskSession){
       const response=(reply as any).result;
-      if(req.body?.method==='initialize'&&response?.protocolVersion){res.set('Mcp-Session-Id',(req as any).taskSession);res.append('Access-Control-Expose-Headers','Mcp-Session-Id');response.instructions='此连接仅处理已绑定的公司任务。先用bambook_task的status读取任务内容，再查询当前业务；不必选择公司或填写任务编号。等待本人确认时停止业务操作，确认后重新读取结果再续办。任务结束报告不代替正式业务审批或收付款结果。';}
+      if(req.body?.method==='initialize'&&response?.protocolVersion){res.set('Mcp-Session-Id',(req as any).taskSession);res.append('Access-Control-Expose-Headers','Mcp-Session-Id');response.instructions='此连接仅处理已绑定的公司任务。先用bambook_task的status读取任务内容，再查询当前业务；不必选择公司或填写任务编号。等待本人确认时停止业务操作，确认后重新读取结果再续办。任务结束报告不代替正式业务审批或收付款结果。'+MCP_SOURCE_RULES;}
       if(req.body?.method==='tools/list'&&Array.isArray(response?.tools))response.tools=response.tools.filter((t:any)=>t.name!=='bambook_workspaces').map((t:any)=>{const properties={...t.inputSchema.properties};delete properties.workspaceId;delete properties.taskId;return{...t,inputSchema:{...t.inputSchema,properties,required:(t.inputSchema.required??[]).filter((k:string)=>!['workspaceId','taskId'].includes(k)),additionalProperties:false}};});
     }
     const current=actor(req),tool=req.body?.params?.name,result=(reply as any).result;
@@ -227,7 +229,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.get('/mcp', run(async (req, res) => { checkMcpProtocol(req, res); res.status(405).set('Allow', 'POST').end(); }));
   router.get('/workspaces/:id/agent/query', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
-    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, ...agentQuery(workspace.state, current, { type: req.query.type, q: req.query.q, limit: req.query.limit }) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
+    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, ...agentQuery(workspace.state, current, { type: req.query.type, q: req.query.q, limit: req.query.limit },mailRecordReadOptions(req)) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
   }));
   router.get('/workspaces/:id/agent/objects/:type/:objectId', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
@@ -235,7 +237,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   }));
   router.get('/workspaces/:id/agent/objects/:type/:objectId/related', run(async (req, res) => {
     const { workspace, actor: current } = await repository.getForAgent(actor(req), req.params.id);
-    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentRelated(workspace.state, current, req.params.type, req.params.objectId) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
+    const result={ workspace: { id: workspace.id, name: workspace.name, revision: workspace.revision }, object: agentRelated(workspace.state, current, req.params.type, req.params.objectId,mailRecordReadOptions(req)) };await repository.recordAgentTaskRead(actor(req),req.params.id,result);res.json(result);
   }));
   router.get('/reviews', run(async (req,res)=>{res.json({reviews:await repository.listReviews(actor(req))});}));
   router.get('/reviews/:workspaceId/receipts/:requestId', run(async (req,res)=>{res.json({receipt:await repository.reviewReceipt(actor(req),req.params.workspaceId,req.params.requestId)});}));

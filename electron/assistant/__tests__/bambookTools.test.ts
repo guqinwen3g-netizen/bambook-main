@@ -10,6 +10,18 @@ const ctx = () => ({ signal: new AbortController().signal, sessionId: 's1', now:
 const result = { workspace: { id: 'workspace-one', revision: 4, name: '测试工作区' }, results: [{ type: 'order', id: 'o1', link: 'bambook://open?view=orders%2Fdetail&id=o1' }] };
 
 describe('业务工具的委托边界', () => {
+  it('explicitly opts into the draft/send catalog for broad queries and related records',async()=>{
+    const f=scriptedFetch(()=>json(result)),tools=bambookTools({fetch:f.fetch,delegation:()=>delegation,needed:vi.fn()});
+    await tools.find(t=>t.name==='bambook_query')!.run({},ctx());await tools.find(t=>t.name==='bambook_expand')!.run({type:'email',id:'mail'},ctx());
+    expect(new URL(f.calls[0].url).searchParams.get('includeMailRecords')).toBe('1');expect(new URL(f.calls[1].url).searchParams.get('includeMailRecords')).toBe('1');
+  });
+
+  it.each(['email_draft','email_send'])('reads %s through the existing pinned read endpoint without introducing a write tool',async type=>{
+    const f=scriptedFetch(()=>json({...result,object:{type,id:'mail-record',data:{subject:'Reply',status:'sent'}}}));
+    const tool=bambookTools({fetch:f.fetch,delegation:()=>delegation,needed:vi.fn()}).find(t=>t.name==='bambook_get')!;
+    await tool.run({type,id:'mail-record'},ctx());expect(f.calls[0].url).toBe('https://bambook.example/api/mist/workspaces/workspace-one/agent/objects/'+type+'/mail-record');expect(f.calls[0].init).toMatchObject({method:'GET',credentials:'omit',redirect:'error'});
+  });
+
   it('reads an authorized email through the same pinned workspace endpoint', async () => {
     const f=scriptedFetch(()=>json({...result,object:{type:'email',id:'mail-one',data:{subject:'Order update',body:'Read-only mail content'}}}));
     const tool=bambookTools({fetch:f.fetch,delegation:()=>delegation,needed:vi.fn()}).find(t=>t.name==='bambook_get')!;

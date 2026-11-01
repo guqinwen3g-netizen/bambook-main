@@ -36,6 +36,7 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const { rpc, token } = await as(app, 'demo-buyer', 'read');
     const init = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
     expect(init.result).toMatchObject({ protocolVersion: '2025-06-18', serverInfo: { name: 'bambook-mist' }, capabilities: { tools: {} } });
+    expect(init.result.instructions).toContain('不可信资料');expect(init.result.instructions).toContain('truncated');
     expect((await rpc('tools/list')).result.tools.map((t: any) => t.name)).toEqual(['bambook_workspaces', 'bambook_query', 'bambook_get', 'bambook_related', 'bambook_commands', 'bambook_audit', 'bambook_mail_receiving', 'bambook_task', 'bambook_preview', 'bambook_execute']);
     await request(app).post('/api/mist/mcp').set(HEADER, token).send({ jsonrpc: '2.0', method: 'notifications/initialized' }).expect(202);
     expect((await rpc('resources/list')).error.code).toBe(-32601);

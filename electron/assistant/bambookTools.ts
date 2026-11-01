@@ -9,7 +9,7 @@ export type BambookDelegation = { token: string; expiresAt: string; workspaceId:
 export type DelegationReason = 'missing' | 'expired' | 'rejected';
 
 export const BAMBOOK_OBJECT_TYPES = [
-  'email', 'customer', 'contact', 'order', 'order_line', 'development', 'dev_version', 'product', 'sample', 'quotation', 'supplier', 'purchase', 'receipt', 'payable_settlement', 'payable_bill', 'payment_plan', 'payment_request', 'supplier_payment', 'payment_allocation', 'prepayment_move', 'production', 'shipment', 'invoice', 'risk', 'claim'
+  'email', 'email_draft', 'email_send', 'customer', 'contact', 'order', 'order_line', 'development', 'dev_version', 'product', 'sample', 'quotation', 'supplier', 'purchase', 'receipt', 'payable_settlement', 'payable_bill', 'payment_plan', 'payment_request', 'supplier_payment', 'payment_allocation', 'prepayment_move', 'production', 'shipment', 'invoice', 'risk', 'claim'
 ] as const;
 
 const typeSchema = { type: 'string', enum: [...BAMBOOK_OBJECT_TYPES], description: '业务对象类型；以服务端实际允许的可读类型为准。' };
@@ -84,7 +84,7 @@ export function bambookTools(options: {
       description: '在当前工作区按本人权限查询业务对象。可用 type 限定类型，q 按编号/名称/摘要搜索，limit 默认 10、最多 20。省略 type 可查询当前全部可读类型；无权限会明确拒绝。返回 id、摘要、原样引用的 link、工作区版本，结果截短时请缩小范围。',
       parameters: { type: 'object', properties: { type: typeSchema, q: { type: 'string', maxLength: 200 }, limit: { type: 'integer', minimum: 1, maximum: 20 } }, additionalProperties: false },
       run: async (args, ctx) => {
-        const query = new URLSearchParams();
+        const query = new URLSearchParams({includeMailRecords:'1'});
         if (args.type !== undefined) query.set('type', objectType(args.type));
         if (args.q !== undefined) {
           if (typeof args.q !== 'string' || args.q.length > 200) invalid('q 须为不超过 200 字的查询文字');
@@ -99,7 +99,7 @@ export function bambookTools(options: {
     },
     {
       ...common, name: 'bambook_get',
-      description: '按 type 和准确 id/编号读取单个业务对象的详情。先 query 获取 id；大字段截短、图片和附件内容不返回。引用时原样使用返回的 link。',
+      description: '按 type 和准确 id/编号读取单个业务对象的详情。先 query 获取 id；大字段截短、图片和附件内容不返回。truncated为true时不能宣称读全或据此覆盖完整字段；发送记录结合effectiveStatus和各收件人结果核对。引用时原样使用返回的 link。',
       parameters: details,
       run: async (args, ctx) => request(`objects/${objectType(args.type)}/${encodeURIComponent(objectId(args.id))}`, ctx.signal, ctx.now()),
     },
@@ -107,7 +107,7 @@ export function bambookTools(options: {
       ...common, name: 'bambook_expand',
       description: '展开对象的直接关联（它引用的对象 / 引用了它的对象），只返回当前账号可读且可见的对象，最多 30 项；需要详情再用 bambook_get。',
       parameters: details,
-      run: async (args, ctx) => request(`objects/${objectType(args.type)}/${encodeURIComponent(objectId(args.id))}/related`, ctx.signal, ctx.now()),
+      run: async (args, ctx) => request(`objects/${objectType(args.type)}/${encodeURIComponent(objectId(args.id))}/related?includeMailRecords=1`, ctx.signal, ctx.now()),
     },
     { ...common,name:'bambook_mail_receiving',description:'读取本人可见邮箱的自动收件、标记和移动同步状态、最近执行及下次计划。只读，不返回凭据，不代替本人开启任务。',parameters:{type:'object',properties:{},additionalProperties:false},run:async(args,ctx)=>{if(Object.keys(args).length)invalid('此工具不接受参数');return request('mail-receiving',ctx.signal,ctx.now());} },
   ];

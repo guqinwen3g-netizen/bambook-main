@@ -26,7 +26,7 @@
 | 员工教学覆盖到哪里、缺什么 | [`docs/manual-coverage.md`](manual-coverage.md)（由 `wiki/matrix/coverage.json` 生成） | 业务任务 × 岗位 × 模式 × 页面 × 命令 × 课程；状态按证据推导，`npm run manual:coverage` 校验 |
 | 员工怎样完成业务操作 | [`wiki/README.md`](../wiki/README.md) + [`wiki/lessons/`](../wiki/lessons/) | 当前35课按任务分组，系统「使用手册」打开随应用构建的 `/manual/`；`wiki/site/` 是离线阅读版。旧6篇 `wiki/pages/` 仅作待完善参考，不代表新版课程统计 |
 | 员工SOP文字与概念由谁维护 | [`wiki/sop/`](../wiki/sop/) + [`wiki/README.md`](../wiki/README.md) | 软件实施Agent维护业务规则与岗位SOP文字；另一Agent负责教学HTML设计制作。文字必须与已验证操作一致，不能用演示结果补齐尚未实现的步骤 |
-| Agent 如何读取、预演及办理业务 | [`Mist 标准 MCP · 第14节`](mist-atelier/work-assistant-plan.md) + [Code Wiki第6节](CODE_WIKI.md#6-ai-与-agent-能力边界2026-10-31) | 当前源码10个工具与25类读取对象，任务专用连接9工具；自助连接、长期服务身份、持久任务及真人确认，发布状态见GO-LIVE；平台自主模型执行器尚未交付 |
+| Agent 如何读取、预演及办理业务 | [`Mist 标准 MCP · 第14节`](mist-atelier/work-assistant-plan.md) + [Code Wiki第6节](CODE_WIKI.md#6-ai-与-agent-能力边界2026-10-31) | 当前源码10个工具与27类读取对象，任务专用连接9工具；自助连接、长期服务身份、持久任务及真人确认，发布状态见GO-LIVE；平台自主模型执行器尚未交付 |
 | 邮箱与平台AI实际做到哪里 | [Code Wiki第6节及6.1](CODE_WIKI.md#6-ai-与-agent-能力边界2026-10-31) | 区分真实收发传输、持久收件授权、模型配置、业务调用链与实际验收；不把示例分类、模型档位或旧模块当作当前可用功能 |
 | 员工怎样接入邮箱、开启或暂停收件 | [邮箱接入与自动收件SOP](../wiki/sop/mail-receiving.md) | 接入人、共享成员、后台启停、重连、双向状态、AI草稿/人工复核/负责人交接与处理结论；文字真源，HTML制作另行接续 |
 | 开发与设计讨论如何共同推进 | [业务驱动的设计协作原则](design/global/2026-10-06/08-2026-10-06-对话设计决策总账.md#business-driven-design) | 从真实角色登录首页到完成业务，联动操作、信息、数据、状态、权限、交接和回程；先核实依据，再形成方案 |

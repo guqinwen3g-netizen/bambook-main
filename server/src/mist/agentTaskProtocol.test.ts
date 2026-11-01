@@ -96,7 +96,7 @@ it('issues a task-only connection, binds and rotates standard MCP sessions witho
  expect(issued.token).toMatch(/^bmc1_/);expect(issued.token).not.toBe(f.key);
  await request(f.app).get(f.base).set(TASK_CONTROL_HEADER,issued.token).expect(403);
  const init=await request(f.app).post('/api/mist/mcp').set(TASK_CONTROL_HEADER,issued.token).send({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'task-client',version:'1'}}}).expect(200);
- const session=init.headers['mcp-session-id'];expect(session).toMatch(/^bms1_/);expect(JSON.stringify(init.body)).not.toMatch(/bma1_|bmt1_|bmc1_/);
+ const session=init.headers['mcp-session-id'];expect(session).toMatch(/^bms1_/);expect(init.body.result.instructions).toContain('不可信资料');expect(JSON.stringify(init.body)).not.toMatch(/bma1_|bmt1_|bmc1_/);
  const call=async(name:string,args:any={},status=200)=>request(f.app).post('/api/mist/mcp').set(TASK_CONTROL_HEADER,issued.token).set('Mcp-Session-Id',session).send({jsonrpc:'2.0',id:randomUUID(),method:name==='tools/list'?name:'tools/call',params:name==='tools/list'?{}:{name,arguments:args}}).expect(status);
  const tools=(await call('tools/list')).body.result.tools;expect(tools).toHaveLength(9);expect(tools.some((t:any)=>t.name==='bambook_workspaces')).toBe(false);expect(tools.every((t:any)=>!t.inputSchema.properties.workspaceId)).toBe(true);
  await call('bambook_query',{workspaceId:randomUUID(),type:'email'},403);
@@ -126,4 +126,24 @@ it('retains a human owner’s closed-task history after key revocation without r
  await f.human.post(f.base+'/agent-identities/'+f.id+'/revoke').send({requestId:randomUUID()}).expect(200);
  expect(await f.current()).toMatchObject({state:'succeeded',name:'整理来信',result:'当前核对结果保留。'});
  await f.tool(token,'bambook_task',{workspaceId:f.workspace.id,action:'status'},401);
+});
+it('does not overwrite a human edit to a draft after the task read its current draft object',async()=>{
+ const f=await setup(),account=f.workspace.state.email.accounts[0],input={accountId:account.id,from:account.address,to:'buyer@example.test',cc:'',bcc:'',subject:'Draft review',body:'Agent version',template:'',links:[],fileIds:[]};
+ const created=await f.command('email.draft.save',{input}),id=created.body.receipt.result.id,token=await f.claim();
+ const read=await f.tool(token,'bambook_get',{workspaceId:f.workspace.id,type:'email_draft',id});expect(read.structuredContent.object.data.body).toBe('Agent version');
+ await f.command('email.draft.save',{id,input:{...input,body:'Human corrected version'}});
+ const attempt=await f.tool(token,'bambook_execute',{workspaceId:f.workspace.id,requestId:randomUUID(),command:{type:'email.draft.save',payload:{id,input}}});expect(attempt.isError).toBe(true);
+ const current=(await f.human.get(f.base).expect(200)).body.workspace;expect(current.state.email.drafts.find((d:any)=>d.id===id).body).toBe('Human corrected version');
+});
+it('keeps legacy REST query and related results within their old type set until the client opts in',async()=>{
+ const f=await setup('read'),account=f.workspace.state.email.accounts[0],original=f.workspace.state.email.messages.find((m:any)=>m.accountId===account.id)!;
+ const input={accountId:account.id,from:account.address,to:'buyer@example.test',cc:'',bcc:'',subject:'Capability draft',body:'Current draft',template:'',links:[],fileIds:[],replyToId:original.id};
+ const created=await f.command('email.draft.save',{input}),id=created.body.receipt.result.id;
+ const legacy=(await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({q:'Capability draft'}).expect(200)).body;
+ expect(legacy.readableTypes).not.toContain('email_draft');expect(legacy.readableTypes).not.toContain('email_send');expect(legacy.results).toEqual([]);
+ const current=(await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({q:'Capability draft',includeMailRecords:'1'}).expect(200)).body;expect(current.results).toContainEqual(expect.objectContaining({id,type:'email_draft'}));
+ const explicit=(await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({type:'email_draft',q:'Capability draft'}).expect(200)).body;expect(explicit.results).toHaveLength(1);
+ const related=f.base+'/agent/objects/email/'+input.replyToId+'/related';const oldRelated=(await request(f.app).get(related).set(SERVICE_KEY_HEADER,f.key).expect(200)).body;expect(oldRelated.object.related.some((r:any)=>r.type==='email_draft')).toBe(false);
+ const newRelated=(await request(f.app).get(related).set(SERVICE_KEY_HEADER,f.key).query({includeMailRecords:'1'}).expect(200)).body;expect(newRelated.object.related).toContainEqual(expect.objectContaining({type:'email_draft',id}));
+ await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({includeMailRecords:'invalid'}).expect(400);
 });
