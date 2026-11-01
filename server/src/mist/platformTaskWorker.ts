@@ -51,9 +51,20 @@ export class MistPlatformTaskWorker{
     if(!this.enabled||this.scanning)return;this.scanning=true;
     let end!:()=>void;this.scanDone=new Promise<void>(resolve=>{end=resolve;});
     try{
-      const room=(this.options.concurrency??2)-this.runs.size;if(room<=0)return;
-      const jobs=await this.repository.duePlatformTasks(Date.now(),room);
-      for(const job of jobs){if(!this.enabled)break;const key=job.workspaceId+':'+job.taskId;if(this.runs.has(key))continue;const abort=new AbortController(),run={abort,done:Promise.resolve()};this.runs.set(key,run);run.done=this.perform(job,abort).finally(()=>this.runs.delete(key));}
+      const capacity=this.options.concurrency??2;let startsLeft=capacity-this.runs.size;if(startsLeft<=0)return;
+      const seen=new Set<string>();
+      // Keep both metadata work and actual starts bounded. Spent grants consume
+      // neither a model call nor a run slot, and cannot bury newer queued work.
+      for(let scan=0;scan<50&&startsLeft>0&&this.enabled;scan++){
+        const room=Math.min(startsLeft,capacity-this.runs.size);if(room<=0)break;
+        const jobs=await this.repository.duePlatformTasks(Date.now(),room);let progressed=false;
+        for(const job of jobs){
+          if(!this.enabled)break;const key=job.workspaceId+':'+job.taskId;if(this.runs.has(key)||seen.has(key))continue;seen.add(key);
+          if(job.exhausted){await this.repository.deferPlatformTaskJob(job);progressed=true;continue;}
+          const abort=new AbortController(),run={abort,done:Promise.resolve()};this.runs.set(key,run);startsLeft--;progressed=true;run.done=this.perform(job,abort).finally(()=>this.runs.delete(key));
+        }
+        if(!jobs.length||!progressed)break;
+      }
     }catch{this.options.onError?.('PLATFORM_TASK_SCAN_FAILED');}finally{this.scanning=false;end();}
   }
   private async model(input:Omit<LlmCompletionInput,'signal'>,signal:AbortSignal){
