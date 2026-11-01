@@ -7,7 +7,7 @@ const ended=['succeeded','failed','cancelled'];
 export async function taskNoticeCandidates(db:any,workspaceId:string,ownerId:string,now:number):Promise<TaskRecord[]>{
   const base={workspaceId,actorId:ownerId,inputHash:TASK_HASH},at=(key:string,value:unknown)=>({result:{path:['__agentTask',key],...value as object}});
   const [active,recent]=await Promise.all([
-    db.mistCommandReceipt.findMany({where:{...base,AND:[{OR:['queued','running','waiting_human','paused'].map(state=>at('state',{equals:state}))},at('expiresAt',{gte:now})]},orderBy:[{createdAt:'desc'},{id:'desc'}],take:10}),
+    db.mistCommandReceipt.findMany({where:{...base,AND:[{OR:['queued','running','waiting_time','waiting_human','paused'].map(state=>at('state',{equals:state}))},at('expiresAt',{gte:now})]},orderBy:[{createdAt:'desc'},{id:'desc'}],take:10}),
     db.mistCommandReceipt.findMany({where:{...base,OR:[...ended.map(state=>at('state',{equals:state})),at('expiresAt',{lte:now-1})]},orderBy:[{createdAt:'desc'},{id:'desc'}],take:20})
   ]);
   return [...new Map([...active,...recent].map(row=>{const c=readTaskRecord(row,workspaceId);return[c.id,c];})).values()];

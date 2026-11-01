@@ -67,6 +67,8 @@ async function taskConnection(f:Awaited<ReturnType<typeof fixture>>){
 describe('Durable bidirectional mailbox state',()=>{
   it('retains task observers when a human replaces an unissued flag intent with a newer value',async()=>{
     const f=await fixture(),m=await f.message(),task=await taskConnection(f);await task.tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.flag',payload:{id:m.id,flag:'read',value:true}}});await f.command('email.flag',{id:m.id,flag:'read',value:false});
+    const waiting=await task.tool('bambook_task',{action:'wait',requestId:randomUUID(),delaySeconds:60,summary:'等待约定时间再核对。'});expect(waiting.isError).toBe(true);expect(JSON.stringify(waiting)).toContain('请先核对待同步的邮箱操作');
+    expect((await f.client.get(task.base+'/agent-tasks/'+task.task.id).expect(200)).body.item.state).toBe('running');
     expect((await task.tool('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已核对。'})).isError).toBe(true);const records=await f.local.database.mistCommandReceipt.findMany({where:{workspaceId:f.workspaceId}}),intent=records.map((r:any)=>r.result?.__mailState).find((r:any)=>r?.phase==='pending');expect(intent.sourceTasks[task.task.id]).toBe(true);expect(intent.authority.agentTaskLease).toBeUndefined();await f.worker.tick();expect(await f.states()).toEqual([]);
   });
   it('keeps human-approved mail work linked for task completion without retaining Agent authority',async()=>{

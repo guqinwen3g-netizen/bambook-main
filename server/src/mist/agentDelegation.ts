@@ -45,7 +45,7 @@ const AGENT_ALLOWED_ROUTES: Array<[string, RegExp]> = [
   ['GET', /^\/workspaces\/[^/]+\/email\/(?:receiving|states)\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/agent\/mail-receiving\/?$/],
   ['GET', /^\/workspaces\/[^/]+\/agent-tasks(?:\/[^/]+)?\/?$/],
-  ['POST', /^\/workspaces\/[^/]+\/agent-tasks\/[^/]+\/(?:claim|heartbeat|checkpoint|finish)\/?$/],
+  ['POST', /^\/workspaces\/[^/]+\/agent-tasks\/[^/]+\/(?:claim|heartbeat|checkpoint|wait|finish)\/?$/],
   ['POST', /^\/mcp\/?$/],
   // 无 SSE 流时返回标准 405；不能在委托路由层先误判成越权。
   ['GET', /^\/mcp\/?$/],
