@@ -9,6 +9,11 @@ function audit(before:any,after:any,command:any,owner='finance') {return createA
 function view(a:any,current:MistState,user:any,scope?:any,projectOverride?:(s:MistState)=>MistState){const project=projectOverride??((s:MistState)=>projectState(s,user,empty,undefined,scope).state);return projectAgentAudit(a,{actor:user,current,visible:project(current),project,permission:c=>mistCommandPermission(c),unrestricted:!scope,offset:0,limit:50,includeCommand:true});}
 
 describe('Audit deltas use current section, field and row visibility',()=>{
+  it('uses the current visible mail subject for references and source navigation without naming a hidden mailbox record',()=>{
+    const before=empty();before.email.accounts=[{id:'account',ownerId:'reader',kind:'personal',address:'staff@example.test',displayName:'业务',memberIds:[],example:true} as any];before.email.messages=[{id:'mail',accountId:'account',subject:'PO-MAIL-1042',folder:'archive',example:true} as any];const after=structuredClone(before);after.email.messages[0].folder='inbox';const record=audit(before,after,{type:'email.move',payload:{id:'mail',folder:'inbox'}},'reader');
+    const allowed=view(record,after,actor(['emails:read'],'reader'));expect(allowed.references.mail).toBe('PO-MAIL-1042');expect(allowed.targets).toContainEqual(expect.objectContaining({view:'emails',id:'mail',label:'PO-MAIL-1042'}));expect(allowed.changes[0].label).toBe('文件夹');
+    const hidden=view(record,after,actor(['emails:read','audit:read'],'other'));expect(hidden.targets).toEqual([]);expect(JSON.stringify(hidden)).not.toContain('PO-MAIL-1042');
+  });
   it('lets another authorized actor inspect proved settlement input while omitting ignored request fields',()=>{
     const before=empty();before.fulfillment.purchases=[{id:'purchase',code:'PO-1'} as any];
     const after=structuredClone(before);after.payables.settlements=[{id:'settlement',purchaseId:'purchase',receiptIds:[],state:'pending',note:'实收已核对',amount:110670} as any];

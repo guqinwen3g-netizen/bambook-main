@@ -59,11 +59,28 @@ async function taskConnection(f:Awaited<ReturnType<typeof fixture>>){
   await admin.post(base+'/agent-identities').send({id,name:'邮件助理',ownerId:'demo-sales',mode:'operate'}).expect(201);
   const key=(await f.client.post(base+'/agent-identities/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body.token;
   const task=(await f.client.post(base+'/agent-tasks').send({requestId:randomUUID(),identityId:id,name:'核对来信',instructions:'核对本人邮箱的来信并保存准确状态。'}).expect(201)).body.item;
-  const grant=(await request(f.app).post(base+'/agent-tasks/'+task.id+'/claim').set(SERVICE_KEY_HEADER,key).send({requestId:randomUUID(),workerId:'mail-client'}).expect(200)).body.token;
+  let grant=(await request(f.app).post(base+'/agent-tasks/'+task.id+'/claim').set(SERVICE_KEY_HEADER,key).send({requestId:randomUUID(),workerId:'mail-client'}).expect(200)).body.token;
+  const reclaim=async()=>{grant=(await request(f.app).post(base+'/agent-tasks/'+task.id+'/claim').set(SERVICE_KEY_HEADER,key).send({requestId:randomUUID(),workerId:'mail-client'}).expect(200)).body.token;};
   const tool=async(name:string,args:any)=>{const r=await request(f.app).post('/api/mist/mcp').set(TASK_HEADER,grant).set('X-Bambook-Task-Operation',randomUUID()).send({jsonrpc:'2.0',id:randomUUID(),method:'tools/call',params:{name,arguments:{workspaceId:f.workspaceId,...args}}}).expect(200);return r.body.result;};
-  return{base,task,grant,tool};
+  return{base,task,grant,tool,reclaim};
 }
 describe('Durable bidirectional mailbox state',()=>{
+  it('retains task observers when a human replaces an unissued flag intent with a newer value',async()=>{
+    const f=await fixture(),m=await f.message(),task=await taskConnection(f);await task.tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.flag',payload:{id:m.id,flag:'read',value:true}}});await f.command('email.flag',{id:m.id,flag:'read',value:false});
+    expect((await task.tool('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已核对。'})).isError).toBe(true);const records=await f.local.database.mistCommandReceipt.findMany({where:{workspaceId:f.workspaceId}}),intent=records.map((r:any)=>r.result?.__mailState).find((r:any)=>r?.phase==='pending');expect(intent.sourceTasks[task.task.id]).toBe(true);expect(intent.authority.agentTaskLease).toBeUndefined();await f.worker.tick();expect(await f.states()).toEqual([]);
+  });
+  it('keeps human-approved mail work linked for task completion without retaining Agent authority',async()=>{
+    const f=await fixture(),m=await f.message(),task=await taskConnection(f),proposal=await task.tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.move',payload:{id:m.id,folder:'archive'}}});
+    await f.command('agent.proposal.confirm',{id:proposal.structuredContent.receipt.result.id});await task.reclaim();
+    const premature=await task.tool('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'Done'});expect(premature.isError).toBe(true);
+    const records=await f.local.database.mistCommandReceipt.findMany({where:{workspaceId:f.workspaceId}}),intent=records.map((r:any)=>r.result?.__mailState).find((r:any)=>r?.sourceTaskId===task.task.id);expect(intent).toBeTruthy();expect(intent.authority.agentTaskLease).toBeUndefined();
+    await f.worker.tick();expect(f.box.moves).toBe(1);expect(await f.states()).toEqual([]);const ended=await task.tool('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'原邮箱移动已核对。'});expect(ended.structuredContent.item.state).toBe('succeeded');
+  });
+  it('does not cancel a separate human-approved mail move when its originating Agent task is stopped',async()=>{
+    const f=await fixture(),m=await f.message(),task=await taskConnection(f),proposal=await task.tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.move',payload:{id:m.id,folder:'archive'}}});
+    await f.command('agent.proposal.confirm',{id:proposal.structuredContent.receipt.result.id});const current=(await f.client.get(task.base+'/agent-tasks/'+task.task.id).expect(200)).body.item;await f.client.post(task.base+'/agent-tasks/'+task.task.id+'/cancel').send({requestId:randomUUID(),version:current.version}).expect(200);
+    await f.worker.tick();expect(f.box.moves).toBe(1);expect(await f.states()).toEqual([]);
+  });
   it('keeps a task mail intent within its original task grant and waits for remote completion before human-wait or success',async()=>{
     const f=await fixture(),m=await f.message(),task=await taskConnection(f);
     const queued=await task.tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.flag',payload:{id:m.id,flag:'read',value:true}}});expect(queued.structuredContent.receipt.result.remoteQueued).toBe(true);

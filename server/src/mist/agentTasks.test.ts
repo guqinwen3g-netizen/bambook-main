@@ -74,6 +74,9 @@ it('creates an idle task without pretending an executor exists, and never expose
   expect(view).toMatchObject({ state: 'queued', lastHeartbeatAt: null, stepsUsed: 0 });
   expect(JSON.stringify(view)).not.toMatch(/grantHash|nonce|authority|test-key/);
 });
+it('normalizes explicit external execution to the legacy create request without changing its identity',async()=>{
+ const input={requestId:randomUUID(),identityId,name:'核对资料',instructions:'读取当前授权资料。'},first=await tx(d=>createTask(d,actor,workspaceId,input,now)),replay=await tx(d=>createTask(d,actor,workspaceId,{...input,executor:'external'},now));expect(replay.id).toBe(first.id);expect(replay.executor).toBe('external');
+});
 it('only one executor can claim, identical claim replays its grant, and different task identity cannot claim', async () => {
   const requestId = randomUUID(), first = await claim(requestId);
   const repeated = await tx(d => claimTask(d, service, workspaceId, taskId, { requestId, workerId: 'worker' }, make, now, [])); expect(repeated.token).toBe(first.result.token);

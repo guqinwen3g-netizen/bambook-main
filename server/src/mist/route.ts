@@ -19,7 +19,7 @@ import { platformProfileList } from '../ai/platformModel';
 import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
 import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
-import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, MCP_SOURCE_RULES, type McpRepository } from './agentMcp';
+import { handleMcpMessage, taskMcpTools, MCP_PROTOCOL_VERSIONS, MCP_SOURCE_RULES, type McpRepository } from './agentMcp';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
 import {SERVICE_KEY_HEADER} from './agentIdentities';
@@ -106,7 +106,8 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.get('/workspaces/:id/agent-tasks',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.listAgentTasks(actor(req),req.params.id,req.query.cursor));}));
   router.get('/workspaces/:id/agent-tasks/:taskId',run(async(req,res)=>{exactBody(req.query,['summary']);if(req.query.summary!==undefined&&req.query.summary!=='1')fail('INVALID_INPUT','任务查询字段无效',400);res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.getAgentTask(actor(req),req.params.id,req.params.taskId,req.query.summary==='1')});}));
   router.get('/workspaces/:id/agent-tasks/:taskId/history',run(async(req,res)=>{exactBody(req.query,['cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentTaskHistory(actor(req),req.params.id,req.params.taskId,req.query.cursor));}));
-  router.post('/workspaces/:id/agent-tasks',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.createAgentTask(actor(req),req.params.id,exactBody(req.body,['requestId','identityId','name','instructions']))});}));
+  router.get('/workspaces/:id/agent-task-capabilities',run(async(req,res)=>{exactBody(req.query,[]);res.setHeader('Cache-Control','private, no-store');res.json(await repository.platformTaskCapabilities(actor(req),req.params.id));}));
+  router.post('/workspaces/:id/agent-tasks',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.status(201).json({item:await repository.createAgentTask(actor(req),req.params.id,exactBody(req.body,['requestId','identityId','name','instructions','executor','locale']))});}));
   router.post('/workspaces/:id/agent-tasks/:taskId/claim',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.claimAgentTask(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','workerId']),delegation.makeTaskCredential));}));
   router.post('/workspaces/:id/agent-tasks/:taskId/issue',run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json(await repository.issueAgentTaskControl(actor(req),req.params.id,req.params.taskId,exactBody(req.body,['requestId','version']),delegation.makeTaskControl));}));
   for(const action of ['pause','resume'] as const)router.post('/workspaces/:id/agent-tasks/:taskId/'+action,run(async(req,res)=>{res.setHeader('Cache-Control','private, no-store');res.json({item:await repository.changeAgentTask(actor(req),req.params.id,req.params.taskId,action,exactBody(req.body,['requestId','version']))});}));
@@ -221,7 +222,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     if((req as any).taskSession){
       const response=(reply as any).result;
       if(req.body?.method==='initialize'&&response?.protocolVersion){res.set('Mcp-Session-Id',(req as any).taskSession);res.append('Access-Control-Expose-Headers','Mcp-Session-Id');response.instructions='此连接仅处理已绑定的公司任务。先用bambook_task的status读取任务内容，再查询当前业务；不必选择公司或填写任务编号。等待本人确认时停止业务操作，确认后重新读取结果再续办。任务结束报告不代替正式业务审批或收付款结果。'+MCP_SOURCE_RULES;}
-      if(req.body?.method==='tools/list'&&Array.isArray(response?.tools))response.tools=response.tools.filter((t:any)=>t.name!=='bambook_workspaces').map((t:any)=>{const properties={...t.inputSchema.properties};delete properties.workspaceId;delete properties.taskId;return{...t,inputSchema:{...t.inputSchema,properties,required:(t.inputSchema.required??[]).filter((k:string)=>!['workspaceId','taskId'].includes(k)),additionalProperties:false}};});
+      if(req.body?.method==='tools/list'&&Array.isArray(response?.tools))response.tools=taskMcpTools();
     }
     const current=actor(req),tool=req.body?.params?.name,result=(reply as any).result;
     if(isAgentActor(current)&&current.agentTaskLease&&req.body?.method==='tools/call'&&!['bambook_execute','bambook_task'].includes(tool)&&!result?.isError&&result?.structuredContent!==undefined)await repository.recordAgentTaskRead(current,current.agentTaskLease.workspaceId,result.structuredContent);

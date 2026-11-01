@@ -10,6 +10,7 @@ import { CODEX_REASONING_EFFORTS, type CodexReasoningEffort } from './codexSubsc
 export const PLATFORM_AI_PROFILES = {
   'quote-review': { label: '报价 AI 审阅', reasoning: 'max' },
   'assistant-chat': { label: '业务问答（小竹）', reasoning: 'medium' },
+  'agent-task': { label: 'Agent任务', reasoning: 'high' },
   summary: { label: '自动汇总与需求识别', reasoning: 'medium' },
   reconciliation: { label: '财务对账', reasoning: 'high' },
 } as const satisfies Record<string, { label: string; reasoning: CodexReasoningEffort }>;

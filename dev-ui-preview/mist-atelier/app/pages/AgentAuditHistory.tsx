@@ -1,6 +1,6 @@
 import React from 'react';
-import { RefreshCw } from 'lucide-react';
-import { Banner, Button, DataTable, Dialog, EmptyState, Facts, Field, Mono, Pill, Select, Skeleton } from '../../../../components/mist';
+import { Copy, RefreshCw } from 'lucide-react';
+import { Banner, Button, DataTable, Dialog, EmptyState, Facts, Field, Mono, Pill, Select, Skeleton, TextInput } from '../../../../components/mist';
 import { DetailBlock } from './modules/pageKit';
 import { uiText, interfaceLocale } from '../../../../services/interfaceLanguage';
 import { useMistSession } from '../runtime/auth';
@@ -15,6 +15,7 @@ const action=(r:AgentAuditEntry)=>agentAuditActionLabel(r.requestedCommandType,i
 const states:Record<string,string>={pending:'待处理',confirmed:'已确认',returned:'已退回',reversed:'已冲回',cancelled:'已撤销',approved:'已批准',rejected:'已拒绝',draft:'草稿',active:'在用',closed:'已关闭',garment:'成衣',fabric:'面料'};
 const settlementStates:Record<string,string>={pending:'待财务复核',confirmed:'已确认',returned:'已退回',reversed:'已冲回',cancelled:'已撤销'};
 const kinds:Record<string,string>={garment:'成衣',fabric:'面料',finished:'成品采购',material:'材料采购',process:'加工服务'};
+const mailFolders:Record<string,string>={inbox:'收件箱',archive:'已归档',trash:'已删除',sent:'已发送',drafts:'草稿'};
 const pairedNames:Record<string,string>={actorId:'actor',ownerId:'owner',supplierId:'supplier',customerId:'customer',submitterId:'submittedBy',createdById:'createdBy'};
 const domainOf=(path:string[])=>{const index=path.findIndex(p=>p.startsWith('i:'));return(index<0?path:path.slice(0,index)).map(p=>p.slice(2)).join('.');};
 const uuid=(v:string)=>/^(?:usr_)?[0-9a-f-]{32,}$/i.test(v);
@@ -28,7 +29,7 @@ function AuditValue({value,references,field='',domain='',restricted=false}:{valu
   if(typeof value==='number')return <>{value.toLocaleString(interfaceLocale(),{minimumFractionDigits:monetaryFields.has(field)?2:0,maximumFractionDigits:20})}</>;
   if(typeof value==='string'){
     if(!value)return <span className="mist-note">{uiText('无')}</span>;
-    const state=['state','status'].includes(field)?(domain==='payables.settlements'?settlementStates[value]??states[value]:states[value]):['type','kind'].includes(field)?kinds[value]:undefined;
+    const state=field==='folder'&&domain==='email.messages'?mailFolders[value]:['state','status'].includes(field)?(domain==='payables.settlements'?settlementStates[value]??states[value]:states[value]):['type','kind'].includes(field)?kinds[value]:undefined;
     return <>{value==='[redacted]'||value==='[inline binary redacted]'?uiText('已隐藏敏感内容'):references[value]??(referenceFields.has(field)&&uuid(value)?uiText('关联记录'):state?uiText(state):/(?:At|^at)$/.test(field)&&Number.isFinite(Date.parse(value))?when(value):value)}</>;
   }
   if(Array.isArray(value))return <div className="mist-col">{value.length?value.map((v,index)=><div key={index}><AuditValue value={v} references={references} field={field} domain={domain}/></div>):<span className="mist-note">{uiText('无')}</span>}</div>;
@@ -53,6 +54,7 @@ export function AuditHistoryView({workspaceId,members=[]}:{workspaceId:string;me
   const [unavailable,setUnavailable]=React.useState(0);
   const [selected,setSelected]=React.useState<AgentAuditEntry|null>(null),[detail,setDetail]=React.useState<AgentAuditDetail|null>(null),[offset,setOffset]=React.useState(0),[detailBusy,setDetailBusy]=React.useState(false),[detailError,setDetailError]=React.useState('');
   const [showInput,setShowInput]=React.useState(false),inputRequested=React.useRef(false);
+  const [copyState,setCopyState]=React.useState<{id:string;ok:boolean}|null>(null);
   const listSeq=React.useRef(0),detailSeq=React.useRef(0),listAbort=React.useRef<AbortController|null>(null),detailAbort=React.useRef<AbortController|null>(null);
   const currentDetail=React.useRef(detail);currentDetail.current=detail;
   const base='/api/mist/workspaces/'+encodeURIComponent(workspaceId)+'/agent-audits';
@@ -81,7 +83,8 @@ export function AuditHistoryView({workspaceId,members=[]}:{workspaceId:string;me
   const people=new Map(members.map(m=>[m.id,m.name]));items.forEach(r=>{if(!people.has(r.actor.id))people.set(r.actor.id,r.actor.name);});
   const nameCounts=new Map<string,number>();for(const name of people.values())nameCounts.set(name,(nameCounts.get(name)??0)+1);
   const personLabel=(id:string,name:string)=>{const label=uuid(name)?uiText('未命名账号'):name;return (nameCounts.get(name)??0)>1?`${label} · ${id.slice(-4)}`:label;};
-  const open=(row:AgentAuditEntry)=>{inputRequested.current=false;setShowInput(false);setOffset(0);setDetail(null);setDetailError('');setSelected(row);};
+  const open=(row:AgentAuditEntry)=>{inputRequested.current=false;setShowInput(false);setOffset(0);setDetail(null);setDetailError('');setCopyState(null);setSelected(row);};
+  const copyOperation=async()=>{if(!selected)return;const id=selected.requestId,serial=listSeq.current;try{await navigator.clipboard.writeText(id);if(serial===listSeq.current)setCopyState({id,ok:true});}catch{if(serial===listSeq.current)setCopyState({id,ok:false});}};
   const openTarget=(target:AgentAuditDetail['targets'][number])=>{setSelected(null);if(target.section)nav?.go(target.view,target.id,{section:target.section});else nav?.go(target.view,target.id);};
   return <div className="mist-col">
     <div className="mist-row" data-wrap>
@@ -112,7 +115,8 @@ export function AuditHistoryView({workspaceId,members=[]}:{workspaceId:string;me
           const structured=[c.before,c.after].some(value=>value!==null&&typeof value==='object');
           return <DetailBlock key={JSON.stringify(c.path)} title={[...names,uiText(c.label)].join(' · ')}>{structured?<div className="mist-col">{values.map(item=><DetailBlock key={item.label} title={item.label}>{item.value}</DetailBlock>)}</div>:<Facts items={values}/>}</DetailBlock>;
         }):<EmptyState title={uiText(detail.detailsRestricted?'当前权限下没有可显示的变更':detail.phase==='proposed'?'此次仅提交提议':'未改变业务内容')}/>}</section>}
-        {selected&&<div className="mist-row" data-wrap>{detail&&<Button disabled={!(detail.commandAvailable??!detail.commandRestricted)||detailBusy} onClick={()=>{if(showInput)setShowInput(false);else{inputRequested.current=true;setShowInput(false);setOffset(0);setDetailReload(v=>v+1);}}}>{uiText(showInput?'隐藏原始填写':'原始填写')}</Button>}{selected.proposalId&&<Button onClick={()=>{setPhase('');setPerson('');setRelated({key:'proposalId',value:selected.proposalId!});setSelected(null);}}>{uiText('同一提议的操作')}</Button>}{selected.agentSessionId&&<Button onClick={()=>{setPhase('');setPerson('');setRelated({key:'agentSessionId',value:selected.agentSessionId!});setSelected(null);}}>{uiText('同一会话的操作')}</Button>}</div>}
+        {selected&&<div className="mist-row" data-wrap><Button variant="quiet" icon={Copy} onClick={()=>void copyOperation()}>{uiText(copyState?.id===selected.requestId?(copyState.ok?'已复制':'复制失败，请重试'):'复制操作编号')}</Button>{detail&&<Button disabled={!(detail.commandAvailable??!detail.commandRestricted)||detailBusy} onClick={()=>{if(showInput)setShowInput(false);else{inputRequested.current=true;setShowInput(false);setOffset(0);setDetailReload(v=>v+1);}}}>{uiText(showInput?'隐藏原始填写':'原始填写')}</Button>}{selected.proposalId&&<Button onClick={()=>{setPhase('');setPerson('');setRelated({key:'proposalId',value:selected.proposalId!});setSelected(null);}}>{uiText('同一提议的操作')}</Button>}{selected.agentSessionId&&<Button onClick={()=>{setPhase('');setPerson('');setRelated({key:'agentSessionId',value:selected.agentSessionId!});setSelected(null);}}>{uiText('同一会话的操作')}</Button>}</div>}
+        {selected&&copyState?.id===selected.requestId&&<Field label={uiText('操作编号')}><TextInput readOnly value={selected.requestId} onFocus={e=>e.currentTarget.select()}/></Field>}
         {detail&&showInput&&detail.command.payload&&<DetailBlock title={uiText('原始填写')}><AuditValue value={detail.command.type==='agent.proposal.create'?(detail.command.payload.command as any)?.payload:detail.command.payload} references={detail.references} restricted={detail.commandRestricted}/></DetailBlock>}
         {detail&&detail.targets?.length>1&&<DetailBlock title={uiText('相关来源')}><div className="mist-row" data-wrap>{detail.targets.slice(1).map(target=><Button key={target.view+':'+target.id} disabled={!nav} onClick={()=>openTarget(target)}>{target.label}</Button>)}</div></DetailBlock>}
       </div>
