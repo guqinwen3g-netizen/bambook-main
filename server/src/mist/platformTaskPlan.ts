@@ -17,7 +17,7 @@ export function parsePlatformTaskPlan(text:string):PlatformTaskPlan{
   try{value=JSON.parse(raw);}catch{throw Error('MODEL_PLAN_INVALID');}
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!['name','arguments'].includes(k))||!names.has(value.name)||!value.arguments||typeof value.arguments!=='object'||Array.isArray(value.arguments))throw Error('MODEL_PLAN_INVALID');
   if('workspaceId'in value.arguments||'taskId'in value.arguments)throw Error('MODEL_PLAN_SCOPE');
-  if(value.name==='bambook_task'&&!['status','checkpoint','question','finish'].includes(value.arguments.action))throw Error('MODEL_PLAN_INVALID');
+  if(value.name==='bambook_task'&&!['status','checkpoint','question','wait','finish'].includes(value.arguments.action))throw Error('MODEL_PLAN_INVALID');
   // Idempotency belongs to the persisted server turn, not to text proposed by a model.
   const args={...value.arguments};if(value.name==='bambook_execute'||value.name==='bambook_task'&&args.action!=='status')delete args.requestId;return{name:value.name,arguments:args};
 }

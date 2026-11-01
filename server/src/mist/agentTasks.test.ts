@@ -2,7 +2,7 @@ import { beforeEach, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { MemoryMistDatabase } from './__tests__/support';
 import { createIdentity, identityRecord, identityView, issueServiceKey, revokeServiceKey } from './agentIdentities';
-import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, type AgentTaskLease } from './agentTasks';
+import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, waitTaskUntil, type AgentTaskLease } from './agentTasks';
 import type { AgentActor } from './agentDelegation';
 import type { TokenPayload } from '../auth/service';
 
@@ -25,6 +25,23 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
+it('releases a durable timed wait without charging its elapsed wall time or issuing an early lease',async()=>{
+ const first=await claim(),original=(await tx(d=>taskRecord(d,workspaceId,taskId))).value;now+=5000;const waiting=await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:60,summary:'到约定时间再核对。'},now));expect(waiting.state).toBe('waiting_time');expect(waiting.runtimeUsedMs).toBe(5000);expect(waiting.expiresAt).toBe(new Date(original.expiresAt).toISOString());
+ await expect(tx(d=>assertTaskLease(d,service,first.lease,now))).rejects.toMatchObject({code:'AGENT_TASK_LEASE_INVALID'});now+=59000;await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});expect(taskView((await tx(d=>taskRecord(d,workspaceId,taskId))).value,actor,now).runtimeUsedMs).toBe(5000);
+ now+=1000;const next=await claim();expect(next.lease.runId).not.toBe(first.lease.runId);expect(next.result.item.state).toBe('running');expect(next.result.item.resumeAt).toBeNull();expect(next.result.item.runtimeUsedMs).toBe(5000);
+});
+it('retains the original scheduled time across pause, resume and control rotation without reviving a stopped wait',async()=>{
+ const first=await claim(),waiting=await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:600,summary:'等待约定时间。'},now));
+ const paused=await tx(d=>changeTask(d,actor,workspaceId,taskId,'pause',{requestId:randomUUID(),version:waiting.version},now,[]));now+=1000;const resumed=await tx(d=>changeTask(d,actor,workspaceId,taskId,'resume',{requestId:randomUUID(),version:paused.version},now,[]));expect(resumed).toMatchObject({state:'waiting_time',resumeAt:waiting.resumeAt});
+ const rotated=await tx(d=>issueTaskControl(d,actor,workspaceId,taskId,{requestId:randomUUID(),version:resumed.version},(w,t,g)=>[w,t,g].join('.'),now,[]));expect(rotated.item).toMatchObject({state:'waiting_time',resumeAt:waiting.resumeAt});await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});
+ const stopped=await tx(d=>changeTask(d,actor,workspaceId,taskId,'cancel',{requestId:randomUUID(),version:rotated.item.version},now,[]));expect(stopped.resumeAt).toBeNull();now+=600000;await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});
+});
+it('validates timed-wait bounds, exact inputs and current authority before changing any registration',async()=>{
+ const first=await claim(),original=(await tx(d=>taskRecord(d,workspaceId,taskId))).value;
+ for(const time of[{delaySeconds:0},{delaySeconds:1.5},{delaySeconds:86400},{until:'2026-11-01'},{delaySeconds:60,until:new Date(now+60000).toISOString()}])await expect(tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),summary:'等待',...time},now))).rejects.toMatchObject({status:400});
+ await expect(tx(d=>waitTaskUntil(d,actor,first.lease,{requestId:randomUUID(),delaySeconds:60,summary:'等待'},now))).rejects.toMatchObject({status:403});await expect(tx(d=>waitTaskUntil(d,{...service,userId:'other'},first.lease,{requestId:randomUUID(),delaySeconds:60,summary:'等待'},now))).rejects.toMatchObject({status:404});expect((await tx(d=>taskRecord(d,workspaceId,taskId))).value).toEqual(original);
+ const waiting=await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),until:new Date(now+60000).toISOString(),summary:'等待原定时间。'},now));expect(waiting.state).toBe('waiting_time');expect(taskView((await tx(d=>taskRecord(d,workspaceId,taskId))).value,{...actor,permissionCeiling:[]},now).resumeAt).toBeNull();
+});
 it('waits durably for missing facts, fences execution and resumes only after the owner answers',async()=>{
   const {lease}=await claim(),requestId=randomUUID();
   const waiting=await tx(d=>askTaskQuestion(d,service,lease,{requestId,question:'请提供准确工厂交期及依据。'},now));

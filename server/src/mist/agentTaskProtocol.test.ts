@@ -120,6 +120,16 @@ it('works with an actual standard MCP client over HTTP through waiting and resum
  const read=await client.callTool({name:'bambook_get',arguments:{type:'email',id}});expect((read.structuredContent as any).object.data.folder).toBe('archive');
  const finished=await client.callTool({name:'bambook_task',arguments:{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已从当前记录核对归档。'}});expect((finished.structuredContent as any).item.state).toBe('succeeded');
 });
+it('uses the official client to wait without a live execution lease, then reclaims without resetting runtime or replaying the wait',async()=>{
+ const clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);
+ try{
+  const f=await setup('read'),issued=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body,server=f.app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('Missing loopback port');
+  const client=new Client({name:'timed-task-client',version:'1'},{versionNegotiation:{mode:'auto'}});clients.push(client);await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/api/mist/mcp`),{requestInit:{headers:{[TASK_CONTROL_HEADER]:issued.token}}}));const call=(name:string,args:any)=>client.callTool({name,arguments:args});
+  await call('bambook_query',{type:'email'});const requestId=randomUUID(),waiting=await call('bambook_task',{action:'wait',requestId,delaySeconds:60,summary:'到约定时间再核对。'});expect(waiting.isError,JSON.stringify(waiting.content)).not.toBe(true);const item=(waiting.structuredContent as any).item;expect(item.state).toBe('waiting_time');expect(item.resumeAt).toBe(new Date(clock+60000).toISOString());
+  expect(((await call('bambook_task',{action:'status'})).structuredContent as any).item.state).toBe('waiting_time');await expect(call('bambook_query',{type:'email'})).rejects.toThrow();expect((await call('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'未到时间不能结束。'})).isError).toBe(true);
+  now.mockReturnValue(clock+60001);await call('bambook_query',{type:'email'});const replay=await call('bambook_task',{action:'wait',requestId,delaySeconds:60,summary:'到约定时间再核对。'});expect((replay.structuredContent as any).item).toMatchObject({state:'running',resumeAt:null,runtimeUsedMs:item.runtimeUsedMs});expect((await call('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已重新核对原资料。'})).isError).not.toBe(true);expect((await f.current()).state).toBe('succeeded');
+ }finally{now.mockRestore();}
+});
 it('asks for missing facts through the official client, accepts only the owner answer, and keeps approval separate',async()=>{
  const ceiling:{value:string[]|null}={value:null},f=await setup('operate',ceiling),issued=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
  const server=f.app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('Missing loopback port');

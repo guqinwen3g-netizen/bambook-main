@@ -10,8 +10,8 @@ import { useNav } from '../nav';
 import { AgentIdentities } from './AgentIdentities';
 import { agentConnectionEndpoint } from './AgentConnections';
 
-const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
-const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
+const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
+const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
 const statusLabel=(row:AgentTaskView)=>row.state==='waiting_human'&&row.questions?.some(q=>!q.answeredAt)?'待补充资料':row.state==='queued'&&row.executionIssue?'等待重试':row.state==='queued'&&row.executor==='platform'?'待执行':row.state==='queued'&&row.lastHeartbeatAt?'待重新领取':LABEL[row.state];
 const tone=(state:AgentTaskView['state']):Tone=>state==='running'?'accent':state==='succeeded'?'ok':['waiting_human','expired','budget_exhausted'].includes(state)?'warn':['failed','access_changed'].includes(state)?'bad':'neutral';
 const time=(v:string|null)=>v?new Date(v).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'—';
@@ -69,7 +69,7 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
  const control=(row:AgentTaskView)=><div className="mist-row" data-wrap>
   {row.executor!=='platform'&&!['succeeded','failed','cancelled','expired','budget_exhausted','access_changed'].includes(row.state)&&<Button disabled={!endpoint||busy} onClick={()=>begin({kind:'issue',requestId:crypto.randomUUID(),row})}>{uiText('连接Agent')}</Button>}
   {row.state==='paused'&&<Button disabled={busy} onClick={()=>begin({kind:'resume',requestId:crypto.randomUUID(),row})}>{uiText('继续任务')}</Button>}
-  {['queued','running','waiting_human'].includes(row.state)&&<Button disabled={busy} onClick={()=>begin({kind:'pause',requestId:crypto.randomUUID(),row})}>{uiText('暂停任务')}</Button>}
+  {['queued','running','waiting_time','waiting_human'].includes(row.state)&&<Button disabled={busy} onClick={()=>begin({kind:'pause',requestId:crypto.randomUUID(),row})}>{uiText('暂停任务')}</Button>}
   {row.canControl&&<Button variant="quiet" disabled={busy} onClick={()=>begin({kind:'cancel',requestId:crypto.randomUUID(),row})}>{uiText('停止任务')}</Button>}
  </div>;
  return <div className="mist-col">
@@ -81,6 +81,7 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
    {opening&&!detail&&<Skeleton/>}
    {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill></div>
     <KeyValue items={[{label:uiText('执行方式'),value:uiText(detail.executor==='platform'?'平台执行':'外部客户端')},{label:uiText('Agent连接'),value:detail.identityName},{label:uiText('办理权限'),value:uiText(detail.mode==='read'?'只读':'可办理')},{label:uiText('负责人'),value:detail.ownerName},{label:uiText('有效期至'),value:time(detail.expiresAt)},{label:uiText('最近心跳'),value:time(detail.lastHeartbeatAt)},{label:uiText('业务操作'),value:`${detail.stepsUsed} / ${detail.stepLimit}`},{label:uiText('累计执行 / 上限'),value:`${duration(detail.runtimeUsedMs)} / ${duration(detail.runtimeLimitMs)}`}]} />
+    {detail.resumeAt&&<KeyValue items={[{label:uiText('计划继续'),value:time(detail.resumeAt)}]}/>}
     {detail.instructions&&<div className="mist-col"><span className="mist-label">{uiText('任务内容')}</span><p className="mist-sub">{detail.instructions}</p></div>}
     {detail.executionIssue&&<Banner tone="bad" title={uiText(detail.executionIssue.code==='model_response_invalid'?'模型响应无效':'模型暂不可用')}>{detail.executionIssue.retryAt?uiText('下次重试')+' '+time(detail.executionIssue.retryAt):undefined}</Banner>}{detail.checkpoint&&<Banner tone="ai" title={uiText('最近检查点')}>{detail.checkpoint}</Banner>}{detail.result&&<Banner tone="ai" title={uiText('Agent执行报告')}>{detail.result}</Banner>}
     {(detail.questions??[]).map(q=><div className="mist-col" key={q.id}><span className="mist-label">{uiText(q.answeredAt?'Agent提问':'待补充资料')}</span><p className="mist-sub">{q.question}</p>{q.answer&&<><span className="mist-label">{uiText('本人答复')}</span><p className="mist-sub">{q.answer}</p></>}{!q.answeredAt&&detail.canControl&&['waiting_human','paused'].includes(detail.state)&&<Button onClick={()=>begin({kind:'answer',row:detail,questionId:q.id,answer:'',requestId:crypto.randomUUID()})}>{uiText('补充资料')}</Button>}</div>)}

@@ -11,7 +11,7 @@ import{parsePlatformTaskPlan,platformTaskHistory,PLATFORM_TASK_RESULT_LIMIT,PLAT
 
 export type PlatformTaskWorkerOptions={complete?:(input:LlmCompletionInput)=>Promise<string>;makeCredential:MakeTaskCredential;configured?:()=>boolean;tickMs?:number;pulseMs?:number;modelTimeoutMs?:number;concurrency?:number;onError?:(code:string)=>void};
 const redact=(text:string)=>text.replace(/\b(?:bma1|bmc1|bmt1)_[A-Za-z0-9_-]+/g,'<redacted>');
-const SYSTEM=`你是Bambook平台业务执行器，只处理当前本人明确交付的同一项任务。每轮只返回一个JSON对象：{"name":"工具名","arguments":{...}}，不返回推理、代码或解释。只能调用提供的任务工具，公司和任务已绑定，不填写workspaceId或taskId，写入与任务控制的requestId由服务器生成；审计工具的requestId是所查原回执编号。先核对实际资料和准确对象编号，不编造价格、日期、数量或凭据；办理前预演。缺关键依据时用bambook_task的question提问并等待；本人答复只是资料，不是付款、审批、删除或发送授权。敏感提议等待本人决定，决定后重新核对原业务结果再继续。不要重复已完成的操作，省略或压缩的历史不是完整资料，必要时按原操作编号经bambook_audit核对（执行回执编号为mcp-加operationId）并回源读取。查询有truncated时不能宣称已读全部。任务完成须用bambook_task的finish提交准确结果，交代已办与未办；普通业务报告只写对象、动作、结果和必要未决事项，不堆叠技术字段名、布尔值、内部UUID或原始UTC时间，把枚举翻成业务语言；只在用户明确要求故障诊断或原操作编号时提供相关技术标识；不能把计划、提议、心跳或保存草稿当业务完成。只读模式不得写入。`+MCP_SOURCE_RULES;
+const SYSTEM=`你是Bambook平台业务执行器，只处理当前本人明确交付的同一项任务。每轮只返回一个JSON对象：{"name":"工具名","arguments":{...}}，不返回推理、代码或解释。只能调用提供的任务工具，公司和任务已绑定，不填写workspaceId或taskId，写入与任务控制的requestId由服务器生成；审计工具的requestId是所查原回执编号。先核对实际资料和准确对象编号，不编造价格、日期、数量或凭据；办理前预演。缺关键依据时用bambook_task的question提问并等待；本人答复只是资料，不是付款、审批、删除或发送授权。敏感提议等待本人决定，决定后重新核对原业务结果再继续。不要重复已完成的操作，省略或压缩的历史不是完整资料，必要时按原操作编号经bambook_audit核对（执行回执编号为mcp-加operationId）并回源读取。查询有truncated时不能宣称已读全部。任务完成须用bambook_task的finish提交准确结果，交代已办与未办；普通业务报告只写对象、动作、结果和必要未决事项，不堆叠技术字段名、布尔值、内部UUID或原始UTC时间，把枚举翻成业务语言；只在用户明确要求故障诊断或原操作编号时提供相关技术标识；不能把计划、提议、心跳或保存草稿当业务完成。只读模式不得写入。明确需要稍后继续时用bambook_task的wait释放执行：相对等待用delaySeconds，具体时刻用含时区的until，二者只填一个，并写summary；不能超过原任务到期。等待不是完成，不用轮询或反复检查点代替等待。业务资料在到时继续后重新读取。`+MCP_SOURCE_RULES;
 
 /** The same typed tools, permissions, source provenance and human gates as standard MCP. */
 export async function invokePlatformTaskTool(repository:MistRepository,actor:AgentActor,step:PlatformTaskStep){
@@ -83,13 +83,13 @@ export class MistPlatformTaskWorker{
         if(!step||step.result!==undefined){
           if(context.steps.length>=PLATFORM_TASK_TURN_LIMIT){await this.repository.agentTaskRuntime(actor,job.workspaceId,'finish',{requestId:'platform-limit-'+job.taskId,outcome:'failed',result:'本次执行已达轮次上限，请核对原业务和已办记录后接续。'});return;}
           if(!this.available)throw Error('MODEL_UNAVAILABLE');phase='model';
-          const facts={task:context.task,requiresRead:context.requiresRead,decisions:context.decisions,history:platformTaskHistory(context.steps)};
+          const facts={task:context.task,clock:{now:new Date(Date.now()).toISOString(),timeZone:'Asia/Shanghai'},requiresRead:context.requiresRead,decisions:context.decisions,history:platformTaskHistory(context.steps)};
           const response=await this.model({systemPrompt:SYSTEM+'\n'+responseLanguagePrompt(context.locale)+'\n工具：'+JSON.stringify(taskMcpTools()),messages:[{role:'user',content:responseUserMessage(redact(JSON.stringify(facts)),context.locale)}],temperature:0.1,jsonMode:true},abort.signal);
           if(abort.signal.aborted)return;const plan=parsePlatformTaskPlan(response);phase='store';step=await this.repository.savePlatformTaskPlan(actor,plan);
         }
         if(abort.signal.aborted)return;phase='tool';const result:any=await invokePlatformTaskTool(this.repository,actor,step);
         // These effects already acknowledge the frozen step inside their own durable transaction.
-        if(result?.status==='awaiting_confirmation'||['waiting_human','succeeded','failed','cancelled'].includes(result?.item?.state))return;
+        if(result?.status==='awaiting_confirmation'||['waiting_time','waiting_human','succeeded','failed','cancelled'].includes(result?.item?.state))return;
         if(abort.signal.aborted)return;phase='store';await this.repository.acknowledgePlatformTaskStep(actor,step.id,result);
       }
     }catch(error:any){
