@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { renderLessonSop } from './manual-sop.mjs';
 
 const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -67,7 +68,7 @@ export function renderLesson(lesson, capture, { assetVersion = '' } = {}) {
   ${lesson.nextLesson ? `<a class="lesson-next-link" href="#${esc(lesson.nextLesson.id)}">下一课：${esc(lesson.nextLesson.title)} →</a>` : ''}
   <button type="button" data-lesson-restart>重新学习</button>
  </div>
- <div class="lesson-sop"><h2>SOP 速查</h2><dl>${lesson.sop.map(r => `<dt>${esc(r.title)}</dt><dd>${esc(r.text)}</dd>`).join('')}</dl></div>
+ ${renderLessonSop(lesson)}
  <p class="lesson-review-note">画面为 Bambook 实际界面，使用本地演示公司数据录制，不涉及真实客户或资金。</p>
 </section>`;
 }
@@ -116,13 +117,11 @@ export const lessonStyles = `
 .lesson-done{margin-top:20px;padding:22px 24px;background:#eef5f1;border-radius:14px}.lesson-done h2{margin:0 0 8px;padding:0}.lesson-done h2:focus{outline:none}.lesson-done p{margin:0 0 12px}
 .lesson-chain{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0 0 16px;font-size:13px}.lesson-chain li{margin:0;padding:5px 10px;border-radius:999px;background:#fff;color:#456b58}.lesson-chain li.me{background:#2f6a4f;color:#fff}.lesson-chain li+li::before{content:"→ ";color:#8aa596}
 .lesson-next-link{display:inline-block;margin:0 16px 12px 0;font-weight:500}
-.lesson-sop{margin-top:28px}.lesson-sop h2{font-size:17px;margin:0 0 8px}.lesson-sop dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 20px;margin:0;font-size:14px}.lesson-sop dt{color:var(--ink-3)}.lesson-sop dd{margin:0}
 .lesson-review-note{font-size:12px;color:var(--ink-3);margin-top:24px}
 .lesson button:focus-visible,.lesson summary:focus-visible{outline:3px solid var(--l-ring);outline-offset:3px}
 @media(max-width:1060px){.lesson-work{grid-template-columns:1fr}.lesson-side{border-right:1px solid var(--line);border-bottom:0;border-radius:16px 16px 0 0}}
 @media(max-width:700px){.lesson-footer button{padding:10px 12px}.lesson-footer [data-step-status]{display:none}.lesson-btn-text{display:none}.lesson-footer button{white-space:nowrap}.lesson-footer .lesson-play,.lesson-footer .lesson-ghost{min-width:44px}.lesson-footer .lesson-player{gap:6px}.lesson h1{font-size:26px}.lesson-meta{gap:8px 20px}.lesson-rail{display:flex;overflow-x:auto;scrollbar-width:none;margin:0 -20px 14px;padding:0 20px}.lesson-rail li{flex:0 0 auto}.lesson-rail button{padding:8px 10px}.lesson-rail button:not([aria-current]) .rail-t{display:none}
-.lesson-work{margin:0 -20px;border-radius:0}.lesson-side{border-radius:0;border-left:0;border-right:0;padding:18px 20px}.lesson-stage{padding:12px 10px 16px}.shot{aspect-ratio:1/1;border-radius:10px}.shot-tip{font-size:12.5px;max-width:86%}
-.lesson-sop dl{grid-template-columns:1fr;gap:2px}.lesson-sop dd{margin-bottom:8px}}
+.lesson-work{margin:0 -20px;border-radius:0}.lesson-side{border-radius:0;border-left:0;border-right:0;padding:18px 20px}.lesson-stage{padding:12px 10px 16px}.shot{aspect-ratio:1/1;border-radius:10px}.shot-tip{font-size:12.5px;max-width:86%}}
 @media(prefers-reduced-motion:reduce){.shot-camera,.shot-cursor,.shot-img{transition:none}.shot[data-practice] .shot-spot{animation:none}}
 `;
 
