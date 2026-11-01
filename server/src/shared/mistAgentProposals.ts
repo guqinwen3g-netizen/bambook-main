@@ -23,8 +23,8 @@ export type AgentProposalCommand =
 export const AGENT_PROPOSAL_MAX_PENDING = 50;
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
 
-/** 提议本身不改业务；创建、确认、拒绝都只需对话助手权限，被提议命令的权限在确认执行时按本人重新校验。 */
-export const agentProposalCommandPermission = () => 'ai:chat';
+/** 拒绝本人旧提议只是撤销待办，不依赖继续使用 AI 的权限；确认的原业务权限仍在仓储重新校验。 */
+export const agentProposalCommandPermission = (type?: string): string|null => type==='agent.proposal.reject'?null:'ai:chat';
 
 const plainOwner = (name: string) => name.replace(/（经 Agent）$/, '');
 const stable = (value: unknown): string => Array.isArray(value) ? `[${value.map(stable).join(',')}]`

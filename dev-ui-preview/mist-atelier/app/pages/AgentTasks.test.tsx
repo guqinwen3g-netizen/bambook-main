@@ -49,3 +49,9 @@ it('includes active owner connections beyond the first page',async()=>{
  seam.api.mockImplementation((url:string)=>Promise.resolve(url.includes('agent-identities')?url.includes('cursor=next')?{items:[identity()],nextCursor:null}:{items:[],nextCursor:'next'}:{items:[],nextCursor:null}));
  act(paint);await flush();await click(getByRole(host,'button',{name:'新建任务'}));expect(getByRole(document.body,'option',{name:'邮件助理 · 可办理'})).toBeTruthy();
 });
+it('keeps the owner stop action reachable for a masked task without offering new execution',async()=>{
+ const masked={...row(),name:'Agent任务',state:'access_changed',instructions:'',canControl:true};
+ seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{item:{...masked,state:'cancelled',canControl:false}}:url.includes('agent-identities')?{items:[{...identity(),state:'invalid',canIssue:false,canRevoke:true}],nextCursor:null}:url.includes('/history')?{items:[],nextCursor:null}:url.endsWith('/task')?{item:masked}:{items:[masked],nextCursor:null}));
+ act(paint);await flush();expect((getByRole(host,'button',{name:'新建任务'}) as HTMLButtonElement).disabled).toBe(true);expect(getByRole(host,'button',{name:'新建任务'}).title).toBe('当前无AI使用权限');await click(getByText(host,'Agent任务'));expect(queryByRole(document.body,'button',{name:'连接Agent',exact:true})).toBeNull();expect(queryByRole(document.body,'button',{name:'继续任务'})).toBeNull();
+ await click(getByRole(document.body,'button',{name:'停止任务',exact:true}));await click(getByRole(document.body,'button',{name:'确认',exact:true}));const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(1);expect(writes[0][0]).toMatch(/\/task\/cancel$/);expect(JSON.parse(writes[0][1].body).version).toBe(masked.version);
+});
