@@ -97,6 +97,8 @@ export class MistMailService {
     const { account } = await this.account(prior, workspaceId, accountId);
     if (account.ownerId !== prior.userId) fail('FORBIDDEN', '只有接入该邮箱的本人可以绑定凭据', 403);
     await this.checkHosts(account);
+    const storeProblem = MistMailCredentials.productionProblem(this.env);
+    if (storeProblem) fail('MAIL_CREDENTIAL_STORE_UNAVAILABLE', '服务器暂不能保存邮箱凭据，请联系平台管理员', 409);
     const secret = { username: account.transport!.username, password: password as string };
     return this.exclusive(`${workspaceId}:${accountId}`, '该邮箱的连接操作', async () => {
       let stage: 'imap' | 'smtp' = 'imap';
@@ -110,7 +112,8 @@ export class MistMailService {
         await this.write(prior, workspaceId, 'email.server.account', { id: accountId, lastError: problem(reason.code, reason.message), ...(account.credentialSet ? {} : { connection: 'error' }) });
         fail(reason.code, `${reason.message}；凭据未保存`, 422);
       }
-      await this.credentials.save(workspaceId, accountId, secret);
+      try { await this.credentials.save(workspaceId, accountId, secret); }
+      catch (error: any) { if (error?.code === 'MAIL_CREDENTIAL_STORE_UNAVAILABLE') fail('MAIL_CREDENTIAL_STORE_UNAVAILABLE', '服务器暂不能保存邮箱凭据，请联系平台管理员', 409); throw error; }
       return this.write(prior, workspaceId, 'email.server.account', { id: accountId, credentialSet: true, connection: 'connected', lastError: null });
     });
   }

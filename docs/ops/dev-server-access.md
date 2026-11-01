@@ -111,6 +111,12 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 本机自建的 `mail.sylway.cloud`（Postfix/Dovecot，只听 127.0.0.1，见 `scripts/deploy/bootstrap-dev-mail.sh`）用于验收走查时，须同时登记：`MIST_MAIL_ALLOWED_HOSTS` 加入 `mail.sylway.cloud`，`MIST_MAIL_INSECURE_TLS_HOSTS` 加入同名（自签证书），并在 `/etc/hosts` 将其指向 127.0.0.1。该服务不对外投递；`MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS` 可限定收件域。改 `backend.env` 时保留原属主与 0640 权限。
 
+## 邮箱凭据存储（2026-11-02）
+
+公司在智能邮箱绑定的密码/授权码只存服务器私有目录。生产（`NODE_ENV=production`）必须同时配置：`MIST_MAIL_CREDENTIAL_DIR`（发布目录之外、服务可写的持久位置，当前为 `/srv/bambook-dev/shared/mist-mail-credentials`，0700）与 `MIST_MAIL_CREDENTIAL_KEY`（≥32 位随机串，AES-256-GCM 加密落盘）。缺任一项时绑定直接返回 `MAIL_CREDENTIAL_STORE_UNAVAILABLE`（409），不再写出可逆的明文副本，也不会写进每次发布都会替换的 `current/server/private`。保存失败只在日志记录文件系统错误码。
+
+密钥一旦更换，已存凭据无法解密，相关邮箱需本人重新绑定。密钥只存在 `backend.env`（root:bambook-deploy 0640），不进入仓库或备份说明；日常备份会打包凭据目录，但其中为密文。
+
 ## 每日备份（cron.daily）
 
 `/etc/cron.daily/bambook-dev-backup`（root）每天写入 `/var/backups/bambook-dev`（目录 0700、文件 0600），各保留 7 天：

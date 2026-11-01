@@ -9,7 +9,7 @@ const ID = /^[A-Za-z0-9-]{1,120}$/;
 export class MistMailCredentials {
   readonly root: string;
   /** key 可选：配置 MIST_MAIL_CREDENTIAL_KEY 时以 AES-256-GCM 加密落盘。 */
-  constructor(root: string, private readonly key = process.env.MIST_MAIL_CREDENTIAL_KEY) { this.root = path.resolve(root); }
+  constructor(root: string, private readonly key = process.env.MIST_MAIL_CREDENTIAL_KEY, private readonly env: NodeJS.ProcessEnv = process.env) { this.root = path.resolve(root); }
   private file(workspaceId: string, accountId: string) {
     if (!ID.test(workspaceId) || !ID.test(accountId)) throw new Error('邮箱凭据编号无效');
     return { dir: path.join(this.root, workspaceId), file: path.join(this.root, workspaceId, `${accountId}.json`) };
@@ -34,13 +34,28 @@ export class MistMailCredentials {
     const parsed = JSON.parse(plain.toString('utf8'));
     return typeof parsed.username === 'string' && typeof parsed.password === 'string' ? { username: parsed.username, password: parsed.password } : null;
   }
+  /** Production must not keep a reversible plain copy, nor store passwords inside a release directory that each deploy replaces. */
+  static productionProblem(env: NodeJS.ProcessEnv = process.env): string | null {
+    if (env.NODE_ENV !== 'production') return null;
+    if (!env.MIST_MAIL_CREDENTIAL_KEY || env.MIST_MAIL_CREDENTIAL_KEY.length < 32) return '服务器未配置邮箱凭据加密密钥（MIST_MAIL_CREDENTIAL_KEY，至少 32 位）';
+    if (!env.MIST_MAIL_CREDENTIAL_DIR) return '服务器未配置邮箱凭据持久目录（MIST_MAIL_CREDENTIAL_DIR）';
+    return null;
+  }
   async save(workspaceId: string, accountId: string, secret: MistMailSecret) {
+    const problem = MistMailCredentials.productionProblem(this.env);
+    if (problem) { console.error('[mail-credentials]', problem); throw Object.assign(new Error(problem), { code: 'MAIL_CREDENTIAL_STORE_UNAVAILABLE' }); }
     const { dir, file } = this.file(workspaceId, accountId);
+    try {
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     const temporary = path.join(dir, `.${randomUUID()}.tmp`);
     const handle = await fs.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { await handle.writeFile(this.seal(secret)); await handle.sync(); } finally { await handle.close(); }
     await fs.rename(temporary, file);
+    } catch (error: any) {
+      // Log only the filesystem code; the path and secret never leave the server process.
+      console.error('[mail-credentials] save failed', error?.code || 'UNKNOWN');
+      throw Object.assign(new Error('邮箱凭据无法保存，请联系平台管理员'), { code: 'MAIL_CREDENTIAL_STORE_UNAVAILABLE' });
+    }
   }
   async load(workspaceId: string, accountId: string): Promise<MistMailSecret | null> {
     const { file } = this.file(workspaceId, accountId);
