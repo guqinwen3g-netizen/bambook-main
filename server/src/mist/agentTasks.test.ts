@@ -2,7 +2,7 @@ import { beforeEach, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { MemoryMistDatabase } from './__tests__/support';
 import { createIdentity, identityRecord, identityView, issueServiceKey, revokeServiceKey } from './agentIdentities';
-import { assertTaskLease, changeTask, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, reserveTaskStep, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, type AgentTaskLease } from './agentTasks';
+import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, type AgentTaskLease } from './agentTasks';
 import type { AgentActor } from './agentDelegation';
 import type { TokenPayload } from '../auth/service';
 
@@ -25,6 +25,50 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
+it('waits durably for missing facts, fences execution and resumes only after the owner answers',async()=>{
+  const {lease}=await claim(),requestId=randomUUID();
+  const waiting=await tx(d=>askTaskQuestion(d,service,lease,{requestId,question:'请提供准确工厂交期及依据。'},now));
+  expect(waiting.state).toBe('waiting_human');expect(waiting.questions).toHaveLength(1);
+  await expect(tx(d=>assertTaskLease(d,actor,lease,now))).rejects.toMatchObject({code:'AGENT_TASK_LEASE_INVALID'});
+  const question=waiting.questions![0];expect(question).toMatchObject({question:'请提供准确工厂交期及依据。'});
+  const answer={requestId:randomUUID(),version:waiting.version,questionId:question.id,answer:'工厂确认11月25日，按本次书面确认继续核对。'};
+  const before=(await tx(d=>taskRecord(d,workspaceId,taskId))).value;
+  await expect(tx(d=>answerTaskQuestion(d,{...actor,userId:'other'},workspaceId,taskId,answer,now))).rejects.toMatchObject({status:404});
+  await expect(tx(d=>answerTaskQuestion(d,service,workspaceId,taskId,answer,now))).rejects.toMatchObject({status:403});
+  const answered=await tx(d=>answerTaskQuestion(d,actor,workspaceId,taskId,answer,now));expect(answered.state).toBe('queued');expect(answered.questions![0].answer).toBe(answer.answer);
+  const replay=await tx(d=>answerTaskQuestion(d,actor,workspaceId,taskId,answer,now));expect(replay.questions).toEqual(answered.questions);
+  await expect(tx(d=>answerTaskQuestion(d,actor,workspaceId,taskId,{...answer,answer:'改为其他日期'},now))).rejects.toMatchObject({code:'CONFLICT'});
+  const after=(await tx(d=>taskRecord(d,workspaceId,taskId))).value;expect(after.stepsUsed).toBe(before.stepsUsed);expect(after.runtimeUsedMs).toBe(before.runtimeUsedMs);expect(after.questions).toHaveLength(1);
+  const nextRun=await claim();expect(nextRun.lease.runId).not.toBe(lease.runId);expect(nextRun.result.item.questions![0].answer).toBe(answer.answer);
+});
+it('keeps a paused question paused after answering and hides questions when authority is lost',async()=>{
+  const {lease}=await claim(),waiting=await tx(d=>askTaskQuestion(d,service,lease,{requestId:randomUUID(),question:'请补充报价原件。'},now));
+  const paused=await tx(d=>changeTask(d,actor,workspaceId,taskId,'pause',{requestId:randomUUID(),version:waiting.version},now,[]));
+  const resumed=await tx(d=>changeTask(d,actor,workspaceId,taskId,'resume',{requestId:randomUUID(),version:paused.version},now,[]));expect(resumed.state).toBe('waiting_human');
+  const again=await tx(d=>changeTask(d,actor,workspaceId,taskId,'pause',{requestId:randomUUID(),version:resumed.version},now,[]));
+  const answered=await tx(d=>answerTaskQuestion(d,actor,workspaceId,taskId,{requestId:randomUUID(),version:again.version,questionId:waiting.questions![0].id,answer:'原件尚未收到，请继续等待。'},now));expect(answered.state).toBe('paused');
+  const c=(await tx(d=>taskRecord(d,workspaceId,taskId))).value;expect(taskView(c,{...actor,permissionCeiling:[]},now).questions).toEqual([]);
+});
+it('does not accept answers after stop or silently replace a pending question',async()=>{
+  const {lease}=await claim(),waiting=await tx(d=>askTaskQuestion(d,service,lease,{requestId:randomUUID(),question:'请确认本次缺少的资料。'},now));
+  await expect(tx(d=>askTaskQuestion(d,service,lease,{requestId:randomUUID(),question:'换一个问题'},now))).rejects.toMatchObject({code:'AGENT_TASK_LEASE_INVALID'});
+  const stopped=await tx(d=>changeTask(d,actor,workspaceId,taskId,'cancel',{requestId:randomUUID(),version:waiting.version},now,[]));
+  await expect(tx(d=>answerTaskQuestion(d,actor,workspaceId,taskId,{requestId:randomUUID(),version:stopped.version,questionId:waiting.questions![0].id,answer:'补充答案'},now))).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});
+});
+it('keeps a missing-facts wait across connection rotation and prevents reclaim before an answer',async()=>{
+  const {lease}=await claim(),waiting=await tx(d=>askTaskQuestion(d,service,lease,{requestId:randomUUID(),question:'请补充准确依据。'},now));
+  const issued=await tx(d=>issueTaskControl(d,actor,workspaceId,taskId,{requestId:randomUUID(),version:waiting.version},(w,t,g)=>[w,t,g].join('.'),now,[]));
+  expect(issued.item.state).toBe('waiting_human');expect(issued.item.questions).toEqual(waiting.questions);await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});
+});
+it('bounds persistent questions and validates their length without consuming execution on an invalid question',async()=>{
+  let run=await claim();await expect(tx(d=>askTaskQuestion(d,service,run.lease,{requestId:randomUUID(),question:'x'.repeat(2001)},now))).rejects.toMatchObject({status:400});
+  for(let i=0;i<10;i++){
+    const waiting=await tx(d=>askTaskQuestion(d,service,run.lease,{requestId:randomUUID(),question:'缺少依据 '+i},now));
+    const q=waiting.questions!.at(-1)!;await tx(d=>answerTaskQuestion(d,actor,workspaceId,taskId,{requestId:randomUUID(),version:waiting.version,questionId:q.id,answer:'继续核对，保留原值。'},now));run=await claim();
+  }
+  await expect(tx(d=>askTaskQuestion(d,service,run.lease,{requestId:randomUUID(),question:'再次提问'},now))).rejects.toMatchObject({code:'AGENT_TASK_LIMIT'});
+  expect((await tx(d=>taskRecord(d,workspaceId,taskId))).value.questions).toHaveLength(10);
+});
 it('creates an idle task without pretending an executor exists, and never exposes credentials in a view', async () => {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value, view = taskView(c, actor, now);
   expect(view).toMatchObject({ state: 'queued', lastHeartbeatAt: null, stepsUsed: 0 });

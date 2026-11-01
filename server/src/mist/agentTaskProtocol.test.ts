@@ -120,6 +120,22 @@ it('works with an actual standard MCP client over HTTP through waiting and resum
  const read=await client.callTool({name:'bambook_get',arguments:{type:'email',id}});expect((read.structuredContent as any).object.data.folder).toBe('archive');
  const finished=await client.callTool({name:'bambook_task',arguments:{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已从当前记录核对归档。'}});expect((finished.structuredContent as any).item.state).toBe('succeeded');
 });
+it('asks for missing facts through the official client, accepts only the owner answer, and keeps approval separate',async()=>{
+ const ceiling:{value:string[]|null}={value:null},f=await setup('operate',ceiling),issued=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
+ const server=f.app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('Missing loopback port');
+ const client=new Client({name:'task-human-input-client',version:'1'},{versionNegotiation:{mode:'auto'}});clients.push(client);await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/api/mist/mcp`),{requestInit:{headers:{[TASK_CONTROL_HEADER]:issued.token}}}));
+ const tool=(name:string,args:any)=>client.callTool({name,arguments:args});
+ const question=await tool('bambook_task',{action:'question',requestId:randomUUID(),question:'请提供准确交期及书面依据。'});expect(question.isError).not.toBe(true);
+ const waiting=(question.structuredContent as any).item;expect(waiting.state).toBe('waiting_human');expect(waiting.questions).toHaveLength(1);expect(waiting.waitingProposalIds).toEqual([]);
+ expect((await f.human.get(f.base+'/agent-tasks/'+f.task.id+'?summary=1').expect(200)).body.item.questions).toEqual([]);
+ const answer={requestId:randomUUID(),version:waiting.version,questionId:waiting.questions[0].id,answer:'请按11月25日核对；任何修改仍交本人确认。'};
+ await request(f.app).post(f.base+'/agent-tasks/'+f.task.id+'/answer').set(TASK_CONTROL_HEADER,issued.token).send(answer).expect(403);
+ ceiling.value=[];expect((await f.current()).questions).toEqual([]);await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/answer').send(answer).expect(403);ceiling.value=null;
+ const answered=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/answer').send(answer).expect(200)).body.item;expect(answered.state).toBe('queued');await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/answer').send(answer).expect(200);
+ const state=(await tool('bambook_task',{action:'status'})).structuredContent as any;expect(state.item.questions[0].answer).toBe(answer.answer);
+ const id=f.workspace.state.email.messages[0].id,proposed=await tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.move',payload:{id,folder:'archive'}}});expect((proposed.structuredContent as any).status).toBe('awaiting_confirmation');
+ expect((await f.current()).waitingProposalIds).toHaveLength(1);expect(JSON.stringify(question)).not.toMatch(/bma1_|bmc1_|bmt1_/);
+});
 
 it('retains a human owner’s closed-task history after key revocation without restoring executor access',async()=>{
  const f=await setup(),token=await f.claim();

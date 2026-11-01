@@ -21,7 +21,7 @@ import { payablesCommandPermissions, financialDisposalViews } from '../shared/mi
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
-import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, advanceTaskSources, changeTask, checkpointTask, claimTask, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord } from './agentTasks';
+import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
@@ -411,7 +411,7 @@ export class MistRepository {
   }
   async getAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,summaryOnly=false){
     if(isAgentActor(prior)&&prior.agentTaskLease&&prior.agentTaskLease.taskId!==taskId)fail('NOT_FOUND','任务不存在或无权访问',404);
-    if(summaryOnly)return this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined),c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=true;try{await assertTaskViewAuthority(db,actor,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return {...taskView(c,actor,Date.now(),valid),name:'Agent任务',instructions:'',checkpoint:'',result:''};});
+    if(summaryOnly)return this.transact(async db=>{const actor=await this.taskAccess(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined),c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=true;try{await assertTaskViewAuthority(db,actor,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return {...taskView(c,actor,Date.now(),valid),name:'Agent任务',instructions:'',checkpoint:'',result:'',questions:[]};});
     return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined),c=(await taskRecord(db,workspaceId,taskId)).value;if(isAgentActor(prior)&&prior.agentIdentity?.id!==c.identityId)fail('NOT_FOUND','任务不存在或无权访问',404);let valid=this.taskSourcesAllowed(row,actor,c);try{await assertTaskViewAuthority(db,actor,c,Date.now());}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}return taskView(c,actor,Date.now(),valid);});
   }
   async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>){
@@ -426,14 +426,18 @@ export class MistRepository {
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人管理',403);
     return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,action==='resume'?'ai:chat':undefined);if(action==='resume')this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,taskId)).value);const pending=(row.state.agentProposals??[]).filter(p=>p.taskId===taskId&&p.ownerId===actor.userId&&p.state==='pending').map(p=>p.id);return changeTask(db,actor,workspaceId,taskId,action,input,Date.now(),pending);});
   }
+  async answerAgentTaskQuestion(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>){
+    if(isAgentActor(prior))fail('FORBIDDEN','资料须由本人补充',403);
+    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,taskId)).value);return answerTaskQuestion(db,actor,workspaceId,taskId,input,Date.now());});
+  }
   async cancelAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人停止',403);
     const previous=await this.receipt(prior,workspaceId,input.requestId as string).catch((e:any)=>{if(['NOT_FOUND','RECEIPT_NOT_FOUND'].includes(e.code))return null;throw e;});
     for(let n=0;;n++){const ws=await this.get(prior,workspaceId);try{return await this.execute(prior,workspaceId,{requestId:input.requestId as string,expectedRevision:previous?.expectedRevision??ws.revision,command:{type:'agent.task.cancel',payload:{id:taskId,version:input.version as number}}});}catch(e:any){if(e.code!=='REVISION_CONFLICT'||n>=2||previous)throw e;}}
   }
-  async agentTaskRuntime(prior:TokenPayload,workspaceId:string,action:'heartbeat'|'checkpoint'|'finish',input:Record<string,unknown>){
+  async agentTaskRuntime(prior:TokenPayload,workspaceId:string,action:'heartbeat'|'checkpoint'|'question'|'finish',input:Record<string,unknown>){
     if(!isAgentActor(prior)||!prior.agentTaskLease||prior.agentTaskLease.workspaceId!==workspaceId)fail('FORBIDDEN','请使用本任务执行连接',403);
-    return this.connectionTransaction(async db=>{const actor=action==='heartbeat'?await this.taskAccess(db,prior,workspaceId):(await this.own(db,prior,workspaceId)).actor;if(action==='finish'&&input.outcome==='succeeded'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease!.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);return action==='heartbeat'?heartbeatTask(db,actor,prior.agentTaskLease!,input.sequence,Date.now()):action==='checkpoint'?checkpointTask(db,actor,prior.agentTaskLease!,input,Date.now()):finishTask(db,actor,prior.agentTaskLease!,input,Date.now());});
+    return this.connectionTransaction(async db=>{const actor=action==='heartbeat'?await this.taskAccess(db,prior,workspaceId):(await this.own(db,prior,workspaceId)).actor;if((action==='question'||action==='finish'&&input.outcome==='succeeded')&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease!.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);return action==='question'?askTaskQuestion(db,actor,prior.agentTaskLease!,input,Date.now()):action==='heartbeat'?heartbeatTask(db,actor,prior.agentTaskLease!,input.sequence,Date.now()):action==='checkpoint'?checkpointTask(db,actor,prior.agentTaskLease!,input,Date.now()):finishTask(db,actor,prior.agentTaskLease!,input,Date.now());});
   }
   async reserveAgentTaskRequest(prior:AgentActor,requestId:string,input:unknown){
     if(!prior.agentTaskLease)return;

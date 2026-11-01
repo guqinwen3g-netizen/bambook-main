@@ -68,6 +68,7 @@ describe('Durable bidirectional mailbox state',()=>{
     const f=await fixture(),m=await f.message(),task=await taskConnection(f);
     const queued=await task.tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.flag',payload:{id:m.id,flag:'read',value:true}}});expect(queued.structuredContent.receipt.result.remoteQueued).toBe(true);
     expect((await task.tool('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'Done'})).isError).toBe(true);
+    expect((await task.tool('bambook_task',{action:'question',requestId:randomUUID(),question:'请补充准确资料。'})).isError).toBe(true);
     expect((await task.tool('bambook_execute',{requestId:randomUUID(),command:{type:'email.move',payload:{id:m.id,folder:'archive'}}})).isError).toBe(true);
     await f.worker.tick();expect(f.box.flags).toBe(1);expect(f.box.boxes.INBOX[0].seen).toBe(true);expect(await f.states()).toEqual([]);
     const ended=await task.tool('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'原邮箱状态已核对。'});expect(ended.structuredContent.item.state).toBe('succeeded');
