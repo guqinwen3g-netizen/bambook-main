@@ -11,12 +11,12 @@ import{parsePlatformTaskPlan,platformTaskHistory,PLATFORM_TASK_RESULT_LIMIT,PLAT
 
 export type PlatformTaskWorkerOptions={complete?:(input:LlmCompletionInput)=>Promise<string>;makeCredential:MakeTaskCredential;configured?:()=>boolean;tickMs?:number;pulseMs?:number;modelTimeoutMs?:number;concurrency?:number;onError?:(code:string)=>void};
 const redact=(text:string)=>text.replace(/\b(?:bma1|bmc1|bmt1)_[A-Za-z0-9_-]+/g,'<redacted>');
-const SYSTEM=`你是Bambook平台业务执行器，只处理当前本人明确交付的同一项任务。每轮只返回一个JSON对象：{"name":"工具名","arguments":{...}}，不返回推理、代码或解释，也不拼接多个对象或后续步骤；工具的真实结果由下一轮回传，不能预先编写。只能调用提供的任务工具，公司和任务已绑定，不填写workspaceId或taskId，写入与任务控制的requestId由服务器生成；审计工具的requestId是所查原回执编号。先核对实际资料和准确对象编号，不编造价格、日期、数量或凭据；办理前预演。缺关键依据时用bambook_task的question提问并等待；本人答复只是资料，不是付款、审批、删除或发送授权。敏感提议等待本人决定，决定后重新核对原业务结果再继续。不要重复已完成的操作，省略或压缩的历史不是完整资料，必要时按原操作编号经bambook_audit核对（执行回执编号为mcp-加operationId）并回源读取。查询有truncated时不能宣称已读全部。任务完成须用bambook_task的finish提交准确结果，交代已办与未办；普通业务报告只写对象、动作、结果和必要未决事项，不堆叠技术字段名、布尔值、内部UUID或原始UTC时间，把枚举翻成业务语言；只在用户明确要求故障诊断或原操作编号时提供相关技术标识；不能把计划、提议、心跳或保存草稿当业务完成。只读模式不得写入。明确需要稍后继续时用bambook_task的wait释放执行：相对等待用delaySeconds，具体时刻用含时区的until，二者只填一个，并写summary；不能超过原任务到期。等待不是完成，不用轮询或反复检查点代替等待。业务资料在到时继续后重新读取。当前上下文task已包含实时任务状态及本人答复，平台执行不需另查status；requiresRead为true时下一步使用业务读取工具核对原资料，不能以状态查询、检查点或预写报告代替。`+MCP_SOURCE_RULES;
+const SYSTEM=`你是Bambook平台业务执行器，只处理当前本人明确交付的同一项任务。每轮只返回一个JSON对象：{"name":"工具名","arguments":{...}}，不返回推理、代码或解释，也不拼接多个对象或后续步骤；工具的真实结果由下一轮回传，不能预先编写。只能调用提供的任务工具，公司和任务已绑定，不填写workspaceId或taskId，写入与任务控制的requestId由服务器生成；审计工具的requestId是所查原回执编号。先核对实际资料和准确对象编号，不编造价格、日期、数量或凭据；办理前预演。缺关键依据时用bambook_task的question提问并等待；本人答复只是资料，不是付款、审批、删除或发送授权。敏感提议等待本人决定，决定后重新核对原业务结果再继续。不要重复已完成的操作，省略或压缩的历史不是完整资料，必要时按原操作编号经bambook_audit核对（执行回执编号为mcp-加operationId）并回源读取。查询有truncated时不能宣称已读全部。任务完成须用bambook_task的finish提交准确结果，交代已办与未办；普通业务报告只写对象、动作、结果和必要未决事项，不堆叠技术字段名、布尔值、内部UUID或原始UTC时间，把枚举翻成业务语言；只在用户明确要求故障诊断或原操作编号时提供相关技术标识；不能把计划、提议、心跳或保存草稿当业务完成。只读模式不得写入。等待原记录变化时，先完整读取准确原件，再用wait的condition指定type/id，并用delaySeconds或until设定最晚继续时间。条件等待不消耗模型运行；变化或最晚时间唤醒后必须重新完整读取同一原件，wakeReason为deadline不代表业务条件已满足。明确需要稍后继续时用bambook_task的wait释放执行：相对等待用delaySeconds，具体时刻用含时区的until，二者只填一个，并写summary；不能超过原任务到期。等待不是完成，不用轮询或反复检查点代替等待。业务资料在到时继续后重新读取。当前上下文task已包含实时任务状态及本人答复，平台执行不需另查status；requiresRead为true时下一步使用业务读取工具核对原资料，不能以状态查询、检查点或预写报告代替。`+MCP_SOURCE_RULES;
 
 /** The same typed tools, permissions, source provenance and human gates as standard MCP. */
 export async function invokePlatformTaskTool(repository:MistRepository,actor:AgentActor,step:PlatformTaskStep){
   const lease=actor.agentTaskLease!,context=await repository.platformTaskContext(actor);
-  if(context.requiresRead&&(step.plan.name==='bambook_execute'||step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'))return{error:true,message:'本人决定或等待结束后，请先回源读取当前业务，再办理或报告结果。'};
+  if(context.requiresRead&&(step.plan.name==='bambook_execute'||step.plan.name==='bambook_task'&&step.plan.arguments.action==='finish'&&step.plan.arguments.outcome==='succeeded'))return{error:true,message:'本人决定或等待结束后，请先回源读取当前业务，再办理或报告结果。'};
   // The platform turn already includes current status/answers; it needs fresh business facts.
   if(step.plan.name==='bambook_task'&&step.plan.arguments.action==='status')return{error:true,message:context.requiresRead?'当前任务状态已在上下文提供；请用业务读取工具重新核对原资料，任务状态不算回源读取。':'当前任务状态已在上下文提供，不要重复查询任务自身状态；未核对的业务请读取原资料，已核对则用finish提交准确报告。'};
   const args={...step.plan.arguments,...(step.plan.name!=='bambook_commands'?{workspaceId:lease.workspaceId}:{}),...(step.plan.name==='bambook_task'?{taskId:lease.taskId}:{})};
@@ -43,6 +43,7 @@ export async function invokePlatformTaskTool(repository:MistRepository,actor:Age
 export class MistPlatformTaskWorker{
   private enabled=false;private timer?:ReturnType<typeof setInterval>;private initial?:ReturnType<typeof setTimeout>;private scanning=false;private scanDone:Promise<void>=Promise.resolve();
   private runs=new Map<string,{abort:AbortController;done:Promise<void>}>();private readonly complete:(input:LlmCompletionInput)=>Promise<string>;private readonly id='platform-'+randomUUID();
+  private conditionCursor?:{createdAt:string;id:string};
   constructor(private readonly repository:MistRepository,private readonly options:PlatformTaskWorkerOptions){this.complete=options.complete??createLlmCompleter({platformProfile:'agent-task'});}
   get running(){return this.enabled;}
   get available(){return this.enabled&&(this.options.configured?.()??(this.options.complete?true:getMistAssistantStatus().configured));}
@@ -53,6 +54,15 @@ export class MistPlatformTaskWorker{
     if(!this.enabled||this.scanning)return;this.scanning=true;
     let end!:()=>void;this.scanDone=new Promise<void>(resolve=>{end=resolve;});
     try{
+      // Scheduling checks remain live even when every model slot is busy. A cyclic
+      // keyset scan prevents frequently due early records from burying later tenants.
+      let conditions=await this.repository.duePlatformTaskConditions(Date.now(),50,this.conditionCursor);
+      if(!conditions.length&&this.conditionCursor){this.conditionCursor=undefined;conditions=await this.repository.duePlatformTaskConditions(Date.now(),50);}
+      for(const job of conditions){
+        if(!this.enabled)break;this.conditionCursor=job.scanCursor;
+        if(job.exhausted)await this.repository.deferPlatformTaskJob(job);
+        else await this.repository.checkPlatformTaskCondition(job).catch(()=>this.repository.deferPlatformTaskJob(job));
+      }
       const capacity=this.options.concurrency??2;let startsLeft=capacity-this.runs.size;if(startsLeft<=0)return;
       const seen=new Set<string>();
       // Keep both metadata work and actual starts bounded. Spent grants consume
@@ -63,6 +73,7 @@ export class MistPlatformTaskWorker{
         for(const job of jobs){
           if(!this.enabled)break;const key=job.workspaceId+':'+job.taskId;if(this.runs.has(key)||seen.has(key))continue;seen.add(key);
           if(job.exhausted){await this.repository.deferPlatformTaskJob(job);progressed=true;continue;}
+          if(job.waitingCondition){await this.repository.checkPlatformTaskCondition(job).catch(()=>this.repository.deferPlatformTaskJob(job));progressed=true;continue;}
           const abort=new AbortController(),run={abort,done:Promise.resolve()};this.runs.set(key,run);startsLeft--;progressed=true;run.done=this.perform(job,abort).finally(()=>this.runs.delete(key));
         }
         if(!jobs.length||!progressed)break;
@@ -91,7 +102,7 @@ export class MistPlatformTaskWorker{
         }
         if(abort.signal.aborted)return;phase='tool';const result:any=await invokePlatformTaskTool(this.repository,actor,step);
         // These effects already acknowledge the frozen step inside their own durable transaction.
-        if(result?.status==='awaiting_confirmation'||['waiting_time','waiting_human','succeeded','failed','cancelled'].includes(result?.item?.state))return;
+        if(result?.status==='awaiting_confirmation'||['waiting_time','waiting_condition','waiting_human','succeeded','failed','cancelled'].includes(result?.item?.state))return;
         if(abort.signal.aborted)return;phase='store';await this.repository.acknowledgePlatformTaskStep(actor,step.id,result);
       }
     }catch(error:any){

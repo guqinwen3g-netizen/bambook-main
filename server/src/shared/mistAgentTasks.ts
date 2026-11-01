@@ -1,5 +1,5 @@
 /** Public task views contain no service credential or execution lease secret. */
-export type AgentTaskState = 'queued' | 'running' | 'waiting_time' | 'waiting_human' | 'paused' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'budget_exhausted' | 'access_changed';
+export type AgentTaskState = 'queued' | 'running' | 'waiting_time' | 'waiting_condition' | 'waiting_human' | 'paused' | 'succeeded' | 'failed' | 'cancelled' | 'expired' | 'budget_exhausted' | 'access_changed';
 export type AgentTaskQuestion = {id:string;question:string;askedAt:string;answer?:string;answeredAt?:string};
 export type AgentTaskView = {
   id: string; identityId: string; identityName: string; name: string; ownerId: string; ownerName: string;
@@ -13,6 +13,10 @@ export type AgentTaskView = {
   /** Absent in older servers; questions and answers use the task's existing content visibility. */
   questions?:AgentTaskQuestion[];
   resumeAt?:string|null;
+  waitingFor?:{type:string;id:string;label:string;link?:string}|null;
+  nextCheckAt?:string|null;
+  wakeReason?:'changed'|'deadline';
+  requiredRead?:{type:string;id:string}|null;
 };
 export type AgentTaskPage = { items: AgentTaskView[]; nextCursor: string | null };
 export type AgentTaskEvent = { action: string; at: string; actorId: string; actorName: string; version: number; state: AgentTaskState };

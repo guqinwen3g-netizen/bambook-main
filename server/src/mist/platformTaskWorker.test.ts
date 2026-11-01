@@ -43,7 +43,7 @@ it('recognizes runtime consumed by an expired lease and preserves a read limit r
 });
 it('does not spin or invoke the model when a concurrent metadata change leaves the same spent candidate visible',async()=>{
  const complete=vi.fn(async()=>''),job={workspaceId:randomUUID(),taskId:randomUUID(),ownerId:'owner',version:1,exhausted:true},due=vi.fn(async()=>[job]),defer=vi.fn(async()=>{});
- const {MistPlatformTaskWorker}=await import('./platformTaskWorker');const worker=new MistPlatformTaskWorker({duePlatformTasks:due,deferPlatformTaskJob:defer}as unknown as MistRepository,{complete,makeCredential:()=>'',tickMs:3_600_000});workers.push(worker);worker.start(3_600_000);await worker.tick();await worker.settled();expect(due.mock.calls.length).toBeLessThanOrEqual(2);expect(defer).toHaveBeenCalledTimes(1);expect(complete).not.toHaveBeenCalled();
+ const {MistPlatformTaskWorker}=await import('./platformTaskWorker');const worker=new MistPlatformTaskWorker({duePlatformTasks:due,duePlatformTaskConditions:async()=>[],deferPlatformTaskJob:defer}as unknown as MistRepository,{complete,makeCredential:()=>'',tickMs:3_600_000});workers.push(worker);worker.start(3_600_000);await worker.tick();await worker.settled();expect(due.mock.calls.length).toBeLessThanOrEqual(2);expect(defer).toHaveBeenCalledTimes(1);expect(complete).not.toHaveBeenCalled();
 });
 it('releases timed waits for other work, wakes on the same budget and requires fresh business facts before completion',async()=>{
  let count=0,mail='';const replies=()=>[tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'wait',delaySeconds:60,summary:'到约定时间重新核对。'}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'其他任务已核对。'}),tool('bambook_task',{action:'status'}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'旧上下文不能直接结束。'}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已按当前原件核对。'})];const complete=vi.fn(async()=>replies()[count++]);
@@ -54,6 +54,43 @@ it('does not take over external tasks and does not promise unavailable platform 
  const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对结束。'})),f=await fixture(complete);
  await f.human.post(f.base+'/agent-tasks').send({requestId:randomUUID(),identityId:f.id,name:'平台任务',instructions:'核对资料。',executor:'platform'}).expect(503);
  const external=await f.create();f.worker.start(3_600_000);expect((await f.human.get(f.base+'/agent-task-capabilities').expect(200)).body.platformAvailable).toBe(true);await f.drain();expect(complete).not.toHaveBeenCalled();expect((await f.current(external.id)).state).toBe('queued');
+});
+it('checks unchanged conditions without spending a model slot, then rereads the exact changed original before reporting',async()=>{
+ let count=0,mail='',other='';const replies=()=>[
+  tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'wait',delaySeconds:120,condition:{type:'email',id:mail},summary:'等待原邮件变化。'}),
+  tool('bambook_get',{type:'email',id:other}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'其他任务已核对。'}),
+  tool('bambook_task',{action:'status'}),tool('bambook_get',{type:'email',id:other}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'另一封邮件不能代替原件。'}),
+  tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已重读变化后的原邮件。'})];
+ const complete=vi.fn(async()=>replies()[count++]),f=await fixture(complete,{concurrency:1});mail=f.workspace.state.email.messages[0].id;other=f.workspace.state.email.messages[1].id;const starred=f.workspace.state.email.messages[0].starred,clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);f.worker.start(3_600_000);
+ const watched=await f.create('platform');await f.drain();const waiting=await f.current(watched.id);expect(waiting.state).toBe('waiting_condition');expect(complete).toHaveBeenCalledTimes(2);
+ now.mockReturnValue(clock+30001);const later=await f.create('platform');await f.drain();expect(complete).toHaveBeenCalledTimes(4);expect((await f.current(later.id)).state).toBe('succeeded');expect((await f.current(watched.id)).state).toBe('waiting_condition');
+ now.mockReturnValue(clock+59000);await f.command('email.flag',{id:mail,flag:'starred',value:!starred});const business=(await f.human.get(f.base).expect(200)).body.workspace;now.mockReturnValue(clock+60002);
+ await f.drain();expect(complete).toHaveBeenCalledTimes(9);const ended=await f.current(watched.id);expect(ended).toMatchObject({state:'succeeded',requiredRead:null,runtimeUsedMs:waiting.runtimeUsedMs,expiresAt:waiting.expiresAt});
+ const record=(await taskRecord(f.local.database,f.workspace.id,watched.id)).value;expect(record.platform!.steps[2].result).toMatchObject({error:true});expect(record.platform!.steps[4].result).toMatchObject({error:true});expect((record.platform!.steps[5].result as any).object.data.starred).toBe(!starred);expect((await f.human.get(f.base).expect(200)).body.workspace).toEqual(business);
+});
+it('does not inspect or resume a waiting condition under lost scope or a revoked original service credential',async()=>{
+ let mail='',calls=0;const ceiling:{value:string[]|null}={value:null},complete=vi.fn(async()=>++calls===1?tool('bambook_get',{type:'email',id:mail}):tool('bambook_task',{action:'wait',delaySeconds:600,condition:{type:'email',id:mail},summary:'等待原邮件变化。'}));
+ const f=await fixture(complete,{ceiling});mail=f.workspace.state.email.messages[0].id;const clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();expect(complete).toHaveBeenCalledTimes(2);
+ ceiling.value=['ai:chat'];now.mockReturnValue(clock+30001);await f.drain();const hidden=await f.current(task.id);expect(hidden).toMatchObject({state:'access_changed',instructions:'',waitingFor:null,requiredRead:null});expect(complete).toHaveBeenCalledTimes(2);
+ ceiling.value=null;await f.human.post(f.base+'/agent-identities/'+f.id+'/revoke').send({requestId:randomUUID()}).expect(200);now.mockReturnValue(clock+340000);await f.drain();expect(complete).toHaveBeenCalledTimes(2);const revoked=await f.current(task.id);expect(revoked.state).toBe('access_changed');
+ await f.human.post(f.base+'/agent-tasks/'+task.id+'/cancel').send({requestId:randomUUID(),version:revoked.version}).expect(200);expect((await f.current(task.id))).toMatchObject({state:'cancelled',waitingFor:null,resumeAt:null});
+});
+it('checks a due condition while the only model slot is genuinely busy, without starting another model run',async()=>{
+ let mail='',other='',calls=0,release!:(value:string)=>void;const held=new Promise<string>(resolve=>{release=resolve;});
+ const complete=vi.fn(async()=>{calls++;if(calls===1||calls===5)return tool('bambook_get',{type:'email',id:mail});if(calls===2)return tool('bambook_task',{action:'wait',delaySeconds:120,condition:{type:'email',id:mail},summary:'等待原邮件变化。'});if(calls===3)return tool('bambook_get',{type:'email',id:other});if(calls===4)return held;return tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已重读原件。'});});
+ const f=await fixture(complete,{concurrency:1});mail=f.workspace.state.email.messages[0].id;other=f.workspace.state.email.messages[1].id;const starred=f.workspace.state.email.messages[0].starred,clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);f.worker.start(3_600_000);
+ const watched=await f.create('platform');await f.drain();const busy=await f.create('platform');await f.worker.tick();await vi.waitFor(()=>expect(complete).toHaveBeenCalledTimes(4));expect((await taskRecord(f.local.database,f.workspace.id,busy.id)).value.state).toBe('running');
+ await f.command('email.flag',{id:mail,flag:'starred',value:!starred});now.mockReturnValue(clock+30001);await f.worker.tick();
+ // Read the registry directly: a GET/detail refresh must not be what wakes this test task.
+ expect((await taskRecord(f.local.database,f.workspace.id,watched.id)).value).toMatchObject({state:'queued',wakeReason:'changed',requiredRead:{type:'email',id:mail}});expect(complete).toHaveBeenCalledTimes(4);
+ release(tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对另一原件。'}));await f.worker.settled();await f.drain();expect((await f.current(watched.id)).state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(6);
+});
+it('keyset-scans later due conditions even when the oldest registration is already due again',async()=>{
+ let mail='',calls=0;const complete=vi.fn(async()=>++calls%2?tool('bambook_get',{type:'email',id:mail}):tool('bambook_task',{action:'wait',delaySeconds:600,condition:{type:'email',id:mail},summary:'等待原邮件变化。'})),f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;
+ const clock=Date.now();vi.spyOn(Date,'now').mockReturnValue(clock);f.worker.start(3_600_000);for(let i=0;i<3;i++){await f.create('platform');await f.drain();}
+ const first=(await f.repository.duePlatformTaskConditions(clock+30001,1))[0];expect(first.scanCursor).toBeTruthy();
+ expect((await f.repository.duePlatformTaskConditions(clock+90001,1))[0].taskId).toBe(first.taskId);
+ const second=(await f.repository.duePlatformTaskConditions(clock+90001,1,first.scanCursor))[0],third=(await f.repository.duePlatformTaskConditions(clock+90001,1,second.scanCursor))[0];expect(new Set([first.taskId,second.taskId,third.taskId]).size).toBe(3);expect(await f.repository.duePlatformTaskConditions(clock+90001,1,third.scanCursor)).toEqual([]);
 });
 it('runs actual typed MCP tools, durably asks the owner, preserves pause and waits for a separate business approval',async()=>{
  let index=0,mail='';const complete=vi.fn(async()=>[

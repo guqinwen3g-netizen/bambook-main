@@ -120,6 +120,37 @@ it('works with an actual standard MCP client over HTTP through waiting and resum
  const read=await client.callTool({name:'bambook_get',arguments:{type:'email',id}});expect((read.structuredContent as any).object.data.folder).toBe('archive');
  const finished=await client.callTool({name:'bambook_task',arguments:{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已从当前记录核对归档。'}});expect((finished.structuredContent as any).item.state).toBe('succeeded');
 });
+it('uses the official client for a full-read condition, preserves pause, and cannot substitute a summary or another record on wake',async()=>{
+ const clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);
+ try{
+  const f=await setup(),id=f.workspace.state.email.messages[0].id,other=f.workspace.state.email.messages[1].id,starred=f.workspace.state.email.messages[0].starred;
+  const issued=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body,server=f.app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('Missing loopback port');
+  const client=new Client({name:'condition-task-client',version:'1'},{versionNegotiation:{mode:'auto'}});clients.push(client);await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/api/mist/mcp`),{requestInit:{headers:{[TASK_CONTROL_HEADER]:issued.token}}}));const call=(name:string,args:any)=>client.callTool({name,arguments:args});
+  const input={action:'wait',requestId:randomUUID(),delaySeconds:120,condition:{type:'email',id},summary:'等待原邮件变化。'};
+  await call('bambook_query',{type:'email'});expect((await call('bambook_task',input)).isError).toBe(true);
+  await call('bambook_get',{type:'email',id});await f.command('email.flag',{id,flag:'starred',value:!starred});expect((await call('bambook_task',input)).isError).toBe(true);
+  await call('bambook_get',{type:'email',id});const waiting=await call('bambook_task',input);expect(waiting.isError,JSON.stringify(waiting.content)).not.toBe(true);const item=(waiting.structuredContent as any).item;expect(item.state).toBe('waiting_condition');expect(JSON.stringify(waiting)).not.toMatch(/fullReadHash|"hash"|bma1_|bmt1_|bmc1_/);
+  const summary=(await f.human.get(f.base+'/agent-tasks/'+f.task.id+'?summary=1').expect(200)).body.item;expect(summary.waitingFor).toBeNull();expect(JSON.stringify(summary)).not.toContain(id);
+  await f.command('email.flag',{id:other,flag:'read',value:!f.workspace.state.email.messages[1].read});now.mockReturnValue(clock+30001);expect(((await call('bambook_task',{action:'status'})).structuredContent as any).item.state).toBe('waiting_condition');
+  const paused=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/pause').send({requestId:randomUUID(),version:item.version}).expect(200)).body.item;await f.command('email.flag',{id,flag:'starred',value:starred});now.mockReturnValue(clock+60002);
+  expect(((await call('bambook_task',{action:'status'})).structuredContent as any).item.state).toBe('paused');
+  const resumed=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/resume').send({requestId:randomUUID(),version:paused.version}).expect(200)).body.item;expect(resumed).toMatchObject({state:'queued',wakeReason:'changed',requiredRead:{type:'email',id},runtimeUsedMs:item.runtimeUsedMs});
+  const finish=()=>call('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'重新核对后再报告。'});expect((await finish()).isError).toBe(true);
+  await call('bambook_query',{type:'email'});await call('bambook_get',{type:'email',id:other});expect((await finish()).isError).toBe(true);
+  const proposed=await call('bambook_execute',{requestId:randomUUID(),command:{type:'email.move',payload:{id,folder:'archive'}}});expect(proposed.isError).toBe(true);expect((await f.human.get(f.base).expect(200)).body.workspace.state.agentProposals??[]).toHaveLength(0);
+  await call('bambook_get',{type:'email',id});const replay=await call('bambook_task',input);expect((replay.structuredContent as any).item).toMatchObject({state:'running',resumeAt:null,requiredRead:null});expect((await finish()).isError).not.toBe(true);expect((await f.current()).state).toBe('succeeded');
+ }finally{now.mockRestore();}
+});
+it('distinguishes an unchanged condition deadline from a change and permits an honest failed handoff without a false successful read',async()=>{
+ const clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);
+ try{
+  const f=await setup('read'),token=await f.claim(),id=f.workspace.state.email.messages[0].id;
+  await f.tool(token,'bambook_get',{workspaceId:f.workspace.id,type:'email',id});const waiting=await request(f.app).post(f.base+'/agent-tasks/'+f.task.id+'/wait').set(TASK_HEADER,token).send({requestId:randomUUID(),delaySeconds:30,condition:{type:'email',id},summary:'最晚时间再核对。'}).expect(200);expect(waiting.body.item.state).toBe('waiting_condition');
+  now.mockReturnValue(clock+30001);const ready=await f.current();expect(ready).toMatchObject({state:'queued',wakeReason:'deadline',requiredRead:{type:'email',id}});const next=await f.claim();
+  expect((await f.tool(next,'bambook_task',{workspaceId:f.workspace.id,taskId:f.task.id,action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'不能当成条件已满足。'})).isError).toBe(true);
+  expect((await f.tool(next,'bambook_task',{workspaceId:f.workspace.id,taskId:f.task.id,action:'finish',requestId:randomUUID(),outcome:'failed',result:'最晚时间已到，原业务条件尚未核实，未继续办理。'})).isError).not.toBe(true);expect((await f.current()).state).toBe('failed');
+ }finally{now.mockRestore();}
+});
 it('uses the official client to wait without a live execution lease, then reclaims without resetting runtime or replaying the wait',async()=>{
  const clock=Date.now(),now=vi.spyOn(Date,'now').mockReturnValue(clock);
  try{

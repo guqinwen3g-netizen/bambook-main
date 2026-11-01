@@ -2,7 +2,7 @@ import { beforeEach, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { MemoryMistDatabase } from './__tests__/support';
 import { createIdentity, identityRecord, identityView, issueServiceKey, revokeServiceKey } from './agentIdentities';
-import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, waitTaskUntil, type AgentTaskLease } from './agentTasks';
+import { answerTaskQuestion, askTaskQuestion, assertTaskLease, changeTask, checkTaskCondition, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, issueTaskControl, reserveTaskStep, saveTaskSources, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, waitTaskUntil, type AgentTaskLease } from './agentTasks';
 import type { AgentActor } from './agentDelegation';
 import type { TokenPayload } from '../auth/service';
 
@@ -25,6 +25,36 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
+const conditionTarget={type:'order',id:'source-order'},preparedCondition=()=>({...conditionTarget,label:'SO-1',hash:'server-full-read-hash'});
+it('checks a condition on a bounded cadence without a lease or runtime charge, then requires the exact original full read',async()=>{
+ const first=await claim();now+=5000;const requestId=randomUUID(),input={requestId,delaySeconds:120,condition:conditionTarget,summary:'等待原订单变化。'};
+ const waiting=await tx(d=>waitTaskUntil(d,service,first.lease,input,now,preparedCondition));expect(waiting).toMatchObject({state:'waiting_condition',runtimeUsedMs:5000,waitingFor:{...conditionTarget,label:'SO-1'}});
+ let checks=0;now+=29999;expect((await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>{checks++;return false;}))).state).toBe('waiting_condition');expect(checks).toBe(0);
+ now++;const unchanged=await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>{checks++;return false;}));expect(unchanged.condition!.nextCheckAt).toBe(now+30000);expect(unchanged.runtimeUsedMs).toBe(5000);expect(unchanged.lease).toBeUndefined();
+ now+=30000;const ready=await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>true));expect(ready).toMatchObject({state:'queued',wakeReason:'changed',requiredRead:conditionTarget,runtimeUsedMs:5000});expect(ready.expiresAt).toBe(unchanged.expiresAt);expect(ready.condition).toBeUndefined();
+ const run=await claim();await expect(tx(d=>finishTask(d,actor,run.lease,{requestId:randomUUID(),outcome:'succeeded',result:'旧资料不算已核对。'},now))).rejects.toMatchObject({code:'AGENT_TASK_READ_REQUIRED'});
+ await tx(d=>saveTaskSources(d,actor,run.lease,[],now,{type:'order',id:'another-order'}));expect((await tx(d=>taskRecord(d,workspaceId,taskId))).value.requiredRead).toEqual(conditionTarget);
+ await tx(d=>saveTaskSources(d,actor,run.lease,[],now,conditionTarget));
+ const replay=await tx(d=>waitTaskUntil(d,service,run.lease,input,now,()=>{throw Error('The old baseline must not be rearmed');}));expect(replay).toMatchObject({state:'running',resumeAt:null,requiredRead:null});
+ const ended=await tx(d=>finishTask(d,actor,run.lease,{requestId:randomUUID(),outcome:'succeeded',result:'已重新核对原订单。'},now));expect(ended.state).toBe('succeeded');
+});
+it('keeps condition and deadline through pause and control rotation, and treats a deadline as a reason to reread rather than a satisfied condition',async()=>{
+ const first=await claim(),waiting=await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:60,condition:conditionTarget,summary:'等待原订单变化。'},now,preparedCondition));
+ const rotated=await tx(d=>issueTaskControl(d,actor,workspaceId,taskId,{requestId:randomUUID(),version:waiting.version},(w,t,g)=>[w,t,g].join('.'),now,[]));expect(rotated.item).toMatchObject({state:'waiting_condition',resumeAt:waiting.resumeAt});
+ const paused=await tx(d=>changeTask(d,actor,workspaceId,taskId,'pause',{requestId:randomUUID(),version:rotated.item.version},now,[]));now+=61000;let checks=0;expect((await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>{checks++;return true;}))).state).toBe('paused');
+ const resumed=await tx(d=>changeTask(d,actor,workspaceId,taskId,'resume',{requestId:randomUUID(),version:paused.version},now,[]));expect(resumed.resumeAt).toBe(waiting.resumeAt);
+ const expiredCondition=await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>{checks++;return true;}));expect(expiredCondition).toMatchObject({state:'queued',wakeReason:'deadline',requiredRead:conditionTarget});expect(checks).toBe(0);
+ const hidden=taskView(expiredCondition,{...actor,permissionCeiling:[]},now);expect(hidden.requiredRead).toBeNull();expect(hidden.waitingFor).toBeNull();expect(hidden.wakeReason).toBeUndefined();
+});
+it('stopping a condition permanently clears its schedule and never calls the business predicate afterward',async()=>{
+ const first=await claim(),waiting=await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:60,condition:conditionTarget,summary:'等待原订单变化。'},now,preparedCondition));
+ const stopped=await tx(d=>changeTask(d,actor,workspaceId,taskId,'cancel',{requestId:randomUUID(),version:waiting.version},now,[]));expect(stopped).toMatchObject({state:'cancelled',waitingFor:null,resumeAt:null});now+=61000;
+ expect((await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>{throw Error('Stopped wait must not inspect business');}))).state).toBe('cancelled');await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});
+});
+it('can return a failed outcome when the changed original cannot be fully reread, without manufacturing a successful business result',async()=>{
+ const first=await claim();await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:60,condition:conditionTarget,summary:'等待原订单变化。'},now,preparedCondition));now+=30000;await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>true));const run=await claim();
+ const failed=await tx(d=>finishTask(d,actor,run.lease,{requestId:randomUUID(),outcome:'failed',result:'原资料无法完整读取，未继续办理。'},now));expect(failed.state).toBe('failed');expect(failed.requiredRead).toEqual(conditionTarget);
+});
 it.each([
   ['2026-11-30T23:59:00Z', '2026-11-31T00:01:00Z'],
   ['2027-02-28T23:59:00Z', '2027-02-29T00:01:00Z'],

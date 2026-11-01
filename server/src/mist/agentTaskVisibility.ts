@@ -5,11 +5,13 @@ import { AGENT_OBJECT_TYPES } from './agentRead';
 import { MIST_READ_SECTIONS } from './access';
 import { fail } from './errors';
 
-export type TaskSourceRef = { path: string; id: string; partial: boolean; coverage: string[]; observedRevision?:number; fieldRevisions?:Record<string,number> };
+export type TaskSourceRef = { path: string; id: string; partial: boolean; coverage: string[]; observedRevision?:number; fieldRevisions?:Record<string,number>; fullReadHash?:string };
 const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS,...MIST_READ_SECTIONS.flatMap(section=>section.paths.filter(path=>!path.some(key=>key.startsWith('partial'))).map(path=>path.join('.'))), 'customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages','email.drafts','email.sends'])];
 const PARTIAL: Record<string,string> = { 'orderCosts.expenses':'partialExpenses','payables.bills':'partialPayableBills','receipts':'partialReceipts','customerStatements':'partialStatements','letterOfCredits':'partialLettersOfCredit' };
 const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function ordered(v: any): any { return Array.isArray(v) ? v.map(ordered) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k=>[k,ordered(v[k])])) : v; }
+/** Only exact model-visible full-read data is a baseline; transport/private row fields are excluded. */
+export const taskReadHash = (data:unknown) => hash(ordered(data));
 export function taskScopeHash(scope?: MistDataScope, state?: MistState) {
   return hash(ordered({ scope: scope ? { users:[...scope.userIds].sort(),teams:[...scope.teamIds].sort(),lines:[...(scope.lines??[])].sort() } : null, configurations: scope ? (state?.teamScopes??[]).filter(s=>scope.teamIds.includes(s.teamId)).map(s=>({teamId:s.teamId,conditions:s.conditions,picks:s.picks,exclusions:s.exclusions})).sort((a,b)=>a.teamId.localeCompare(b.teamId)) : [] }));
 }
@@ -58,7 +60,7 @@ export function collectTaskSources(data: unknown, current: MistState, previous: 
   const visible=index(current), found=new Map(previous.map(r=>[r.path+'\0'+r.id,r]));
   const envelope=data as any,revision=Number.isSafeInteger(envelope?.revision)?envelope.revision:Number.isSafeInteger(envelope?.workspace?.revision)?envelope.workspace.revision:undefined;
   const full=envelope?.object?.data&&!envelope.object.truncated?envelope.object:null;
-  const add=(path:string,id:string,required=false,type?:string)=>{const item=visible.byPath.get(path)?.get(id);if(!item){if(required)fail('AGENT_TASK_SCOPE_CHANGED','任务来源已不可见，请重新安排任务',403);return;}const prior=found.get(path+'\0'+id),freshFull=required&&revision!==undefined&&full?.id===id&&full?.type===type,observed=required&&revision!==undefined&&(prior?.observedRevision===undefined||freshFull)?revision:prior?.observedRevision;const ref:TaskSourceRef={path,id,partial:item.partial,coverage:item.partial?coverage(item.row):[],...(observed!==undefined?{observedRevision:observed}:{}),...(!freshFull&&prior?.fieldRevisions?{fieldRevisions:prior.fieldRevisions}:{})};found.set(path+'\0'+id,ref);};
+  const add=(path:string,id:string,required=false,type?:string)=>{const item=visible.byPath.get(path)?.get(id);if(!item){if(required)fail('AGENT_TASK_SCOPE_CHANGED','任务来源已不可见，请重新安排任务',403);return;}const prior=found.get(path+'\0'+id),freshFull=required&&revision!==undefined&&full?.id===id&&full?.type===type,observed=required&&revision!==undefined&&(prior?.observedRevision===undefined||freshFull)?revision:prior?.observedRevision;const fullReadHash=freshFull&&full.truncated===false?taskReadHash(full.data):prior?.fullReadHash;const ref:TaskSourceRef={path,id,partial:item.partial,coverage:item.partial?coverage(item.row):[],...(observed!==undefined?{observedRevision:observed}:{}),...(fullReadHash?{fullReadHash}:{}),...(!freshFull&&prior?.fieldRevisions?{fieldRevisions:prior.fieldRevisions}:{})};found.set(path+'\0'+id,ref);};
   const walk=(v:any)=>{
     if(typeof v==='string'){const id=v.startsWith('i:')?v.slice(2):v;for(const path of visible.byId.get(id)??[])add(path,id);return;}
     if(Array.isArray(v)){v.forEach(walk);return;}
