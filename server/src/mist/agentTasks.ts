@@ -1,7 +1,7 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
-import type { AgentTaskEvent, AgentTaskView } from '../shared/mistAgentTasks';
+import type { AgentTaskEvent, AgentTaskQuestion, AgentTaskView } from '../shared/mistAgentTasks';
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { identityRecord, assertServiceLease, serviceActorFromIdentity, type AgentServiceLease } from './agentIdentities';
 import { fail, MistApiError } from './errors';
@@ -41,6 +41,7 @@ export type TaskRecord = {
   lastHeartbeatAt?:number;
   control?:{generation:string;hash:string;issuedAt:number};
   stepsUsed: number; runtimeUsedMs: number; checkpoint: string; result: string; waitingProposalIds: string[];
+  questions?:AgentTaskQuestion[];
   lease?: { id: string; nonce: string; grantHash: string; startedAt: number; expiresAt: number; heartbeatAt: number; sequence: number; claimRequestId: string; workerId: string };
   operations: Array<{ requestId: string; inputHash: string }>;
   lastRequestId: string; lastAction: string; lastInputHash: string;
@@ -60,10 +61,11 @@ export async function lockTaskRecord(db: any, workspaceId: string, taskId: unkno
 function owner(actor: TokenPayload, c: TaskRecord) { if (actor.userId !== c.ownerId) fail('NOT_FOUND', '任务不存在或无权访问', 404); }
 const usedRuntime = (c: TaskRecord, now: number) => c.runtimeUsedMs + (c.lease ? Math.max(0, Math.min(now, c.lease.expiresAt) - c.lease.startedAt) : 0);
 const canReadContents = (c: TaskRecord, actor: TokenPayload) => c.ceiling.every(scope => hasScope(actor, scope as any));
+const hasUnansweredQuestion=(c:TaskRecord)=>(c.questions??[]).some(q=>!q.answeredAt);
 export function taskView(c: TaskRecord, actor: TokenPayload, now: number, authorityValid = true): AgentTaskView {
   owner(actor, c); const readable = authorityValid && canReadContents(c, actor) && c.credentialVersion === actor.credentialVersion, ended = ['succeeded', 'failed', 'cancelled'].includes(c.state);
   const state = ended ? c.state : !readable ? 'access_changed' : now >= c.expiresAt ? 'expired' : (usedRuntime(c, now) >= RUNTIME_LIMIT || c.stepsUsed >= STEP_LIMIT && (!c.lease||c.lease.expiresAt<=now)) ? 'budget_exhausted' : c.state === 'running' && (!c.lease || c.lease.expiresAt <= now) ? 'queued' : c.state;
-  return { id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? c.instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended };
+  return { id: c.id, identityId: c.identityId, identityName: c.identityName, name: readable ? c.name : 'Agent任务', ownerId: c.ownerId, ownerName: c.ownerName, instructions: readable ? c.instructions : '', mode:c.mode, state, version: c.controlVersion, createdAt: c.createdAt, updatedAt: c.updatedAt, expiresAt: new Date(c.expiresAt).toISOString(), stepsUsed: c.stepsUsed, stepLimit: STEP_LIMIT, runtimeUsedMs: usedRuntime(c, now), runtimeLimitMs: RUNTIME_LIMIT, lastHeartbeatAt: c.lastHeartbeatAt ? new Date(c.lastHeartbeatAt).toISOString() : c.lease ? new Date(c.lease.heartbeatAt).toISOString() : null, checkpoint: readable ? c.checkpoint : '', result: readable ? c.result : '', waitingProposalIds: readable ? c.waitingProposalIds : [], canControl: !ended, questions:readable?c.questions??[]:[] };
 }
 async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
   const changed = await db.mistCommandReceipt.updateMany({ where: { id: row.id, workspaceId: before.workspaceId, inputHash: TASK_HASH, result: { path: [TASK_FIELD, 'version'], equals: before.version } }, data: { result: { revision: 0, [TASK_FIELD]: next } } });
@@ -72,7 +74,7 @@ async function save(db: any, row: any, before: TaskRecord, next: TaskRecord) {
 async function event(db: any, c: TaskRecord, actor: TokenPayload, action: string, requestId: string, now: number) {
   const request = EVENT_PREFIX + c.id + ':' + hash(requestId).slice(0, 32);
   if (await db.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: c.workspaceId, requestId: request } } })) fail('CONFLICT', '操作编号已使用，请核对原结果', 409);
-  const value: AgentTaskEvent = { action, at: new Date(now).toISOString(), actorId: actor.userId,actorName:['claimed','checkpoint','waiting_human','finished'].includes(action)?c.identityName:actor.displayName||'本人', version: c.version, state: c.state };
+  const value: AgentTaskEvent = { action, at: new Date(now).toISOString(), actorId: actor.userId,actorName:['claimed','checkpoint','waiting_human','question','finished'].includes(action)?c.identityName:actor.displayName||'本人', version: c.version, state: c.state };
   await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId: c.workspaceId, requestId: request, actorId: actor.userId, inputHash: EVENT_HASH, expectedRevision: 0, result: { revision: 0, taskId: c.id, event: value, operation: { action, inputHash: c.lastInputHash,...(action==='connected'?{controlGeneration:c.control?.generation}:{}) } }, createdAt: new Date(now) } });
 }
 function next(c: TaskRecord, now: number, action: string, requestId: string, input: unknown): TaskRecord {
@@ -121,7 +123,7 @@ export async function issueTaskControl(db:any,actor:TokenPayload,workspaceId:str
   if(c.controlVersion!==input.version)fail('AGENT_TASK_CHANGED','任务设置已更新，请核对状态',409);
   const generation=randomUUID(),token=make(workspaceId,c.id,generation),n=next(c,now,'connected',requestId,[input.version]);
   n.controlVersion++;n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;n.control={generation,hash:hash(token),issuedAt:now};n.waitingProposalIds=pendingProposalIds;
-  if(n.state!=='paused')n.state=pendingProposalIds.length?'waiting_human':'queued';
+  if(n.state!=='paused')n.state=pendingProposalIds.length||hasUnansweredQuestion(c)?'waiting_human':'queued';
   await save(db,row,c,n);await event(db,n,actor,'connected',requestId,now);return{item:taskView(n,actor,now),token};
 }
 export async function assertTaskControl(db:any,actor:TokenPayload,lease:AgentTaskControlLease,now:number){
@@ -205,9 +207,34 @@ export async function changeTask(db: any, actor: TokenPayload, workspaceId: stri
   if (['succeeded','failed','cancelled'].includes(c.state)) fail('AGENT_TASK_NOT_READY', '任务已结束', 409);
   if (action === 'resume') { await assertTaskAuthority(db, actor, c, now); if (c.expiresAt <= now || c.stepsUsed >= STEP_LIMIT || usedRuntime(c, now) >= RUNTIME_LIMIT) fail('AGENT_TASK_BUDGET', '任务已达到执行限额', 409); }
   const n = next(c, now, action, requestId, values); n.controlVersion++; n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;
-  n.state = action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : pendingProposalIds.length ? 'waiting_human' : 'queued';
+  n.state = action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : pendingProposalIds.length||hasUnansweredQuestion(c) ? 'waiting_human' : 'queued';
   n.waitingProposalIds = action === 'cancel' ? [] : pendingProposalIds;
   await save(db, row, c, n); await event(db, n, actor, action, requestId, now); return taskView(n, actor, now);
+}
+/** Missing facts suspend the same durable task; an answer is data, never business approval. */
+export async function askTaskQuestion(db:any,actor:TokenPayload,lease:AgentTaskLease,input:Record<string,unknown>,now:number){
+  if(Object.keys(input).some(k=>!['requestId','question'].includes(k)))fail('INVALID_INPUT','提问字段无效',400);
+  const requestId=rid(input.requestId),question=plain(input.question,2000,'需要补充的资料');
+  await lockTaskRecord(db,lease.workspaceId,lease.taskId);
+  const {row,value:c}=await assertTaskLease(db,actor,lease,now);
+  if((c.questions??[]).length>=10)fail('AGENT_TASK_LIMIT','任务提问已达上限，请结束后重新安排',422);
+  const n=next(c,now,'question',requestId,[question]);n.controlVersion++;n.state='waiting_human';n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;
+  n.questions=[...(c.questions??[]),{id:randomUUID(),question,askedAt:new Date(now).toISOString()}];n.checkpoint='等待本人补充资料。';
+  await save(db,row,c,n);await event(db,n,actor,'question',requestId,now);return taskView(n,actor,now);
+}
+export async function answerTaskQuestion(db:any,actor:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,now:number){
+  if(isAgentActor(actor))fail('FORBIDDEN','资料须由本人补充',403);
+  if(Object.keys(input).some(k=>!['requestId','version','questionId','answer'].includes(k))||!Number.isSafeInteger(input.version))fail('INVALID_INPUT','补充资料请求无效',400);
+  const requestId=rid(input.requestId),questionId=id(input.questionId),answer=plain(input.answer,4000,'补充资料');
+  await lockTaskRecord(db,workspaceId,taskId);const{row,value:c}=await taskRecord(db,workspaceId,taskId);owner(actor,c);await assertTaskAuthority(db,actor,c,now);
+  const values=[input.version,questionId,answer];if(await pastOperation(db,c,requestId,'answered',values))return taskView(c,actor,now);
+  if(c.controlVersion!==input.version)fail('AGENT_TASK_CHANGED','任务设置已更新，请核对状态',409);
+  if(!['waiting_human','paused'].includes(c.state))fail('AGENT_TASK_NOT_READY','任务当前不等待补充资料',409);
+  if(c.expiresAt<=now||c.stepsUsed>=STEP_LIMIT||usedRuntime(c,now)>=RUNTIME_LIMIT)fail('AGENT_TASK_BUDGET','任务已达到执行限额',409);
+  const question=c.questions?.find(q=>q.id===questionId&&!q.answeredAt);if(!question)fail('AGENT_TASK_CHANGED','问题已处理，请刷新核对',409);
+  const n=next(c,now,'answered',requestId,values);n.controlVersion++;n.lease=undefined;n.questions=c.questions!.map(q=>q.id===questionId?{...q,answer,answeredAt:new Date(now).toISOString()}:q);
+  n.state=c.state==='paused'?'paused':n.waitingProposalIds.length||hasUnansweredQuestion(n)?'waiting_human':'queued';n.checkpoint='本人已补充资料；续办前核对原问题与答案。';
+  await save(db,row,c,n);await event(db,n,actor,'answered',requestId,now);return taskView(n,actor,now);
 }
 /** In the SAME transaction as proposal creation: a model cannot continue after requesting approval. */
 export async function waitTaskForProposal(db: any, actor: TokenPayload, lease: AgentTaskLease, proposalId: string, requestId: string, now: number) {
@@ -223,7 +250,7 @@ export async function settleTaskProposal(db: any, actor: TokenPayload, workspace
   if (outcome === 'confirmed') await assertTaskAuthority(db, actor, c, now);
   if ((outcome === 'confirmed' && c.expiresAt <= now) || !c.waitingProposalIds.includes(proposalId)) fail('AGENT_TASK_NOT_READY', '所属任务或提议已失效', 409);
   const n = next(c, now, outcome, requestId, [proposalId]); n.waitingProposalIds = c.waitingProposalIds.filter(p => p !== proposalId); n.lease = undefined;
-  if (c.state !== 'paused') n.state = n.waitingProposalIds.length ? 'waiting_human' : 'queued';
+  if (c.state !== 'paused') n.state = n.waitingProposalIds.length||hasUnansweredQuestion(c) ? 'waiting_human' : 'queued';
   n.checkpoint = outcome === 'confirmed' ? '本人已确认上一步提议；续办前核对业务结果。' : '本人已拒绝上一步提议；续办前查看拒绝原因。';
   await save(db, row, c, n); await event(db, n, actor, outcome, requestId, now);
 }

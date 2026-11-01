@@ -1,4 +1,5 @@
 export const connectionEnglish:Record<string,string>={
+ '待补充资料':'Awaiting information','请求补充资料':'Information requested','本人补充资料':'Information provided by owner','Agent提问':'Agent question','本人答复':'Your answer','补充资料':'Provide information','答复':'Answer','提交答复':'Submit answer','资料已补充':'Information provided',
  '身份启用':'Identity enabled','身份停用':'Identity disabled',
  '长期Agent':'Long-term Agents','Agent服务':'Agent services','Agent服务身份':'Agent service identities','Agent身份':'Agent identity','Agent名称':'Agent name','责任人':'Responsible person','新建Agent身份':'New Agent identity','配置Agent身份':'Configure Agent identity',
  '待责任人启用':'Awaiting owner activation','凭据有效':'Credential active','启用凭据':'Activate credential','轮换密钥':'Rotate key','撤销密钥':'Revoke key','签发密钥':'Issue key','长期Agent凭据':'Long-term Agent credential','长期密钥':'Long-term key','启用长期凭据':'Activate long-term credential','生成长期密钥':'Generate long-term key','启用Agent身份':'Enable Agent identity',
