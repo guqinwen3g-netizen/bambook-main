@@ -49,3 +49,16 @@ it('keeps company bank details hidden from a row-scoped reader even when voucher
  const row=db.workspaces.get(workspaceId);row.state.bankAccounts=[{id:'bank',code:'BANK-SECRET',currency:'CNY'}];row.state.agentProposals[0].command={type:'finance.account.close',payload:{id:'bank',reason:'private bank sentinel'}};row.state.agentProposals[0].summary=['BANK-SECRET'];auth.users.get('sales')!.permissions=['ai:chat','vouchers:read','vouchers:write'];
  const result=await repo.get(actor,workspaceId);expect(result.state.bankAccounts).toEqual([]);expect(result.state.agentProposals![0].unavailable).toBe(true);expect(JSON.stringify(result.state.agentProposals)).not.toContain('private bank sentinel');
 });
+it('hides a sending proposal after the draft mailbox is no longer shared with its owner',async()=>{
+ const row=db.workspaces.get(workspaceId);row.state.email.accounts=[{id:'mailbox',ownerId:'other',memberIds:[],address:'other@example.test',kind:'personal',example:false}];row.state.email.drafts=[{id:'draft',accountId:'mailbox',body:'private draft sentinel'}];row.state.agentProposals[0].command={type:'email.send',payload:{draftId:'draft'}};row.state.agentProposals[0].summary=['private draft sentinel'];auth.users.get('sales')!.permissions=['ai:chat','emails:read','emails:write'];
+ const result=await repo.get(actor,workspaceId);expect(result.state.email.drafts).toEqual([]);expect(result.state.agentProposals![0].unavailable).toBe(true);expect(JSON.stringify(result.state.agentProposals)).not.toContain('private draft sentinel');
+});
+it('keeps the current company administrator’s valid member grouping proposal available without inventing users:read',async()=>{
+ const row=db.workspaces.get(workspaceId);row.ownerId='sales';row.state.agentProposals[0].command={type:'member.groups.set',payload:{userId:'sales',groups:['garment']}};row.state.agentProposals[0].summary=['Set business groups'];auth.users.get('sales')!.permissions=['ai:chat','users:write'];
+ const result=await repo.get(actor,workspaceId);expect(result.state.agentProposals![0].unavailable).not.toBe(true);expect(result.state.agentProposals![0].command.type).toBe('member.groups.set');
+});
+
+it('does not treat being a company library creator as current member-management authority',async()=>{
+ const row=db.workspaces.get(workspaceId);row.ownerId='sales';row.state.agentProposals[0].command={type:'member.groups.set',payload:{userId:'sales',groups:['garment']}};
+ expect((await repo.get(actor,workspaceId)).state.agentProposals![0].unavailable).toBe(true);
+});

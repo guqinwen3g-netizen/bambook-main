@@ -233,6 +233,11 @@ export class MistRepository {
   }
   private taskSourcesAllowed(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord,visible?:MistState){return c.ownerId===actor.userId&&c.ceiling.every(scope=>hasScope(actor,scope as any))&&taskSourcesVisible(c.sources,c.scopeHash,visible??projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state,row.state,scopeOf(row));}
   private assertTaskSources(row:MistWorkspaceRow,actor:TokenPayload,c:TaskRecord){if(!this.taskSourcesAllowed(row,actor,c))fail('AGENT_TASK_SCOPE_CHANGED','任务可见范围已变化，请重新安排任务',403);}
+  private proposalReadable(row:MistWorkspaceRow,actor:TokenPayload,command:{type:string;payload:Record<string,unknown>}){
+    // This owner/admin-only command has no module read scope. Reuse its real maintenance gate.
+    if(command.type==='member.groups.set')return companyRow(row)?canMaintainCompany(actor):isOwner(row,actor);
+    return readableCommand(command,actor,this.contract.mistCommandPermission);
+  }
   private async prepareTaskProposalAccess(db:any,row:MistWorkspaceRow,actor:TokenPayload){
     const proposals=(row.state.agentProposals??[]).filter(p=>p.taskId&&p.ownerId===actor.userId),access=new Map<string,{visible:boolean;blocked?:string}>();
     TASK_PROPOSAL_ACCESS.set(row,access);if(!proposals.length)return;
@@ -251,7 +256,7 @@ export class MistRepository {
     const proposalSources=projected.state.agentProposals?.some(p=>!p.taskId)?knownCommandSourcesVisible(row.state,projected.state):undefined;
     if(projected.state.agentProposals)projected.state.agentProposals=projected.state.agentProposals.map(p=>{
       const access=p.taskId?TASK_PROPOSAL_ACCESS.get(row)?.get(p.id):undefined;
-      if(readableCommand(p.command,actor,this.contract.mistCommandPermission)&&(p.taskId?access?.visible:proposalSources?.(p.command)))return {...p,...(access?.blocked?{taskBlocked:access.blocked}:{})};
+      if(this.proposalReadable(row,actor,p.command)&&(p.taskId?access?.visible:proposalSources?.(p.command)))return {...p,...(access?.blocked?{taskBlocked:access.blocked}:{})};
       return {id:p.id,ownerId:p.ownerId,owner:p.owner,createdAt:p.createdAt,state:p.state,...(p.taskId?{taskId:p.taskId}:{}),command:{type:'unavailable',payload:{}},summary:['提议来源已不可见'],unavailable:true,taskBlocked:p.taskId?'请停止任务或拒绝此提议':'请拒绝此提议后重新核对'};
     });
     // Ship only already-authorized record references for the user's own groups.
@@ -642,7 +647,7 @@ export class MistRepository {
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&input.command?.type==='agent.proposal.create'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
         const humanTaskProposal=confirmProposalId?row.state.agentProposals?.find(p=>p.id===confirmProposalId):undefined;
-        if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;if(!readableCommand(humanTaskProposal.command,actor,this.contract.mistCommandPermission)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
+        if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;if(!this.proposalReadable(row,actor,humanTaskProposal.command)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
         if(humanTaskProposal?.taskId){this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,humanTaskProposal.taskId)).value);await assertHumanTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,Date.now());}
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。
         const concurrent = row.revision === input.expectedRevision ? undefined : await this.concurrentChanges(db, workspaceId, row.revision, input.expectedRevision, upload ? 'files.add' : input.command?.type);
