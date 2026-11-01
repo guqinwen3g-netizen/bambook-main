@@ -6,7 +6,7 @@ import { MIST_READ_SECTIONS } from './access';
 import { fail } from './errors';
 
 export type TaskSourceRef = { path: string; id: string; partial: boolean; coverage: string[]; observedRevision?:number; fieldRevisions?:Record<string,number> };
-const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS,...MIST_READ_SECTIONS.flatMap(section=>section.paths.filter(path=>!path.some(key=>key.startsWith('partial'))).map(path=>path.join('.'))), 'customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages'])];
+const PATHS = [...new Set<string>([...SCOPED_COLLECTIONS,...MIST_READ_SECTIONS.flatMap(section=>section.paths.filter(path=>!path.some(key=>key.startsWith('partial'))).map(path=>path.join('.'))), 'customers','contacts','fabrics','files','market.products','market.suppliers','market.relations','email.accounts','email.messages','email.drafts','email.sends'])];
 const PARTIAL: Record<string,string> = { 'orderCosts.expenses':'partialExpenses','payables.bills':'partialPayableBills','receipts':'partialReceipts','customerStatements':'partialStatements','letterOfCredits':'partialLettersOfCredit' };
 const hash = (v: unknown) => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 function ordered(v: any): any { return Array.isArray(v) ? v.map(ordered) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map(k=>[k,ordered(v[k])])) : v; }
