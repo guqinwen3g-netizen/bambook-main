@@ -105,6 +105,8 @@
 | 智能分类与资料抽取 | 真实新邮件初始未分类；经办人主动 `POST email/messages/:id/analyze` → 平台 summary 模型 → 带原文证据的草稿 → `email.extraction.review` 人工复核 → 负责人交接及结果登记 | 本轮实现与独立协议/真实界面/MCP验收见6.1.3；不后台自动调用模型、不读取附件，不改正式业务字段。种子预置结果仍是示例 |
 | 登录方式 | 当前 `EmailTransport` 为服务器地址、端口、用户名，凭据接口绑定密码/授权码 | OAuth授权与相应提供方完整接入尚未实现 |
 
+**阅读上下文（2026-11-01）**：`ReferenceApp.tsx`让邮箱列表和详情共用同一页面身份，账号会话/公司变化仍清空原实例；其他需要按对象重置的页面不改。`EmailsPage.tsx`在当前列表点选时保留邮箱、文件夹/视图、分类及搜索，返回无邮件编号的列表时关闭阅读状态；显式切换邮箱/文件夹清除旧详情路由。记录`pickedFromList`，避免“未读”邮件刚标为已读、离开筛选后，被误当外部深链而跳回收件箱；外部入口中不在当前列表的目标仍按原件定位。真实与示例来源按账号及单封邮件标记呈现，发送门禁仍由原账号/服务端决定；删除覆盖混合列表的笼统示例说明，不改收发、正文、资料抽取或资金。真实独立界面已核对同一已读来信打开/返回后邮箱与检索保留，整体业务与远端写计数保持；发布状态见GO-LIVE，不因本地通过记为已上线。
+
 ### 6.1.1 自动收件契约（2026-11-01）
 
 - **入口与授权**：`EmailsPage.tsx#AccountsDrawer` → `MailReceiving.tsx` → GET `/workspaces/:id/email/receiving` / PUT `/workspaces/:id/email/accounts/:accountId/receiving`。GET只返回当前可见的非示例邮箱；PUT需要当前`emails:write`和实际接入人，严格接收`enabled/version/sourceGeneration/requestId`。共享设置另需既有`emails:admin`，与历史补录`emails:maintenance:write`不同，不新增默认岗位授权。

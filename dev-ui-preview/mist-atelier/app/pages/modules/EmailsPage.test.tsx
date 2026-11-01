@@ -99,6 +99,16 @@ function realState(owner='sales'){
   return s as MistState;
 }
 function type(label:string,value:string){const el=document.querySelector(`[aria-label="${label}"]`) as HTMLInputElement;const proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:el instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;act(()=>{Object.getOwnPropertyDescriptor(proto,'value')!.set!.call(el,value);el.dispatchEvent(new Event(el instanceof HTMLSelectElement?'change':'input',{bubbles:true}));});}
+it('retains a starred mailbox search while opening a listed message and closes its reader on return to the list',async()=>{
+ store.state=realState();const m=store.state.email.messages[0];m.starred=true;render();const nav=(label:string)=>[...document.querySelectorAll<HTMLButtonElement>('.mist-mail-navitem')].find(b=>b.querySelector('.mist-mail-navlabel')?.textContent?.startsWith(label))!;
+ await click(nav('业务邮箱'));await click(nav('星标'));const search=document.querySelector<HTMLInputElement>('input[placeholder^="搜索主题"]')!;act(()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,m.subject);search.dispatchEvent(new Event('input',{bubbles:true}));});const heading=host.querySelector('.mist-mail-listtitle')!.textContent;
+ await click(host.querySelector<HTMLElement>('[data-mail-row="'+m.id+'"]')!);render(m.id);expect(host.querySelector('.mist-mail-listtitle')!.textContent).toBe(heading);expect(search.value).toBe(m.subject);expect(nav('业务邮箱').getAttribute('data-active')).toBe('true');expect(store.run).not.toHaveBeenCalled();expect(store.mail).not.toHaveBeenCalled();
+ render();expect(host.querySelector('[aria-label="阅读邮件"]')?.textContent).not.toContain(m.subject);expect(host.querySelector('.mist-mail-listtitle')!.textContent).toBe(heading);expect(search.value).toBe(m.subject);
+});
+it('keeps the unread view when marking the picked message read removes it before the route update',async()=>{
+ store.state=realState();const m=store.state.email.messages[0];m.read=false;store.run.mockImplementation(async(command)=>{if(command.type==='email.flag')m.read=true;return{result:{}};});render();const nav=[...host.querySelectorAll<HTMLButtonElement>('.mist-mail-navitem')].find(b=>b.querySelector('.mist-mail-navlabel')?.textContent==='未读')!;await click(nav);const heading=host.querySelector('.mist-mail-listtitle')!.textContent;
+ await click(host.querySelector<HTMLElement>('[data-mail-row="'+m.id+'"]')!);render(m.id);expect(m.read).toBe(true);expect(host.querySelector('.mist-mail-listtitle')!.textContent).toBe(heading);expect(host.querySelector('[aria-label="阅读邮件"]')?.textContent).toContain(m.subject);expect(store.run).toHaveBeenCalledTimes(1);expect(store.run).toHaveBeenCalledWith({type:'email.flag',payload:{id:m.id,flag:'read',value:true}});expect(store.mail).not.toHaveBeenCalled();
+});
 
 it('does not create a second browser-owned receive loop',async()=>{
   vi.useFakeTimers({toFake:['setTimeout','setInterval','clearTimeout','clearInterval','Date']});

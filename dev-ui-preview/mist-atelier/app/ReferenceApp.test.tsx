@@ -385,6 +385,14 @@ describe('one Mist entry with real authentication and workspace state', () => {
     history.replaceState(null, '', '/?intro=0&theme=light&view=emails'); await mount();
     await waitFor(() => expect(host!.textContent).toContain('没有查看权限'));
   });
+  it('keeps the chosen mailbox and search when a listed email changes the route',async()=>{
+    await signIn('mail-context',['emails:read']);const value=currentContext('mail-context'),seed=newModuleFixture({actorName:'业务员',now:'2026-11-01T00:00:00Z',id:()=>crypto.randomUUID()},'demo');value.state!.email=seed.email;
+    const account=seed.email.accounts[0],message=seed.email.messages.find(m=>m.accountId===account.id&&m.folder==='inbox')!;account.displayName='业务收件';account.example=false;account.connection='connected';message.example=false;message.read=true;message.subject='Mail view context proof';
+    history.replaceState(null,'','/?intro=0&theme=light&view=emails');await mount();await waitFor(()=>expect(host!.querySelector('.mist-mail-listpane')).toBeTruthy());
+    await click([...host!.querySelectorAll<HTMLButtonElement>('.mist-mail-navitem')].find(b=>b.textContent?.includes('业务收件'))!);input(host!.querySelector<HTMLInputElement>('input[placeholder^="搜索主题"]')!,message.subject);
+    expect(host!.querySelector('input[placeholder^="搜索主题"]')).toHaveProperty('value',message.subject);await click(getByRole(host!,'option',{name:/Mail view context proof/}));
+    await waitFor(()=>expect(new URLSearchParams(location.search).get('id')).toBe(message.id));expect(host!.querySelector('input[placeholder^="搜索主题"]')).toHaveProperty('value',message.subject);expect([...host!.querySelectorAll('.mist-mail-navitem[data-active]')].some(b=>b.textContent?.includes('业务收件'))).toBe(true);
+  });
   it('opens approvals outside the menu from global search and restores it from a direct link', async () => {
     await signIn(); await mount(); await waitFor(() => expect(probes.home).toHaveBeenCalled());
     await openSearch(); input(searchInput(), '审批与放行');

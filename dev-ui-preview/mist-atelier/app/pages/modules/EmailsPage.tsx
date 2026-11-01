@@ -102,15 +102,8 @@ export function EmailsPage() {
   const [accountsOpen, setAccountsOpen] = React.useState(false), [confirmResend, setConfirmResend] = React.useState<EmailSend | null>(null);
   /** 发送确认：新建 / 回复 / 转发 / 草稿发送都先在这里核对收件人与附件，确认后才投递；取消不发送、不关闭写信、不丢草稿。 */
   const [pendingSend, setPendingSend] = React.useState<PendingSend | null>(null);
+  const pickedFromList = React.useRef<string | null>(null);
   const ready = !!state, compact = useCompactLayout(MAIL_COMPACT_QUERY);
-  React.useEffect(() => {
-    if (!route.id || !state) return;
-    const m = state.email?.messages.find(row => row.id === route.id);
-    if (m) { setScope({ kind: 'folder', value: m.folder }); setAccountId(current => current === 'all' || current === m.accountId ? current : 'all'); } else if (state.email?.drafts.some(row => row.id === route.id)) setScope({ kind: 'folder', value: 'drafts' });
-    else if (state.email?.sends?.some(row => row.id === route.id)) setScope({ kind: 'folder', value: 'outbox' });
-    setPicked(route.id); setDrawer(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.id, ready]);
   const accounts = email.accounts, inAccount = (id: string) => accountId === 'all' || id === accountId;
   const messages = email.messages.filter(m => inAccount(m.accountId)), drafts = email.drafts.filter(d => inAccount(d.accountId));
   // 被新发送取代的失败记录只保留在历史中，不在待发送重复出现。
@@ -130,6 +123,22 @@ export function EmailsPage() {
     if (category !== 'all' && (category === 'none' ? !!m.category.label : m.category.label !== category)) return false;
     return !needle || `${m.subject} ${m.from.name} ${m.from.address} ${addressText(m.to)} ${m.body} ${m.attachments.map(item => item.name).join(' ')} ${m.extracted.map(item => item.value).join(' ')}`.toLowerCase().includes(needle);
   }).sort((a, b) => stamp(b).localeCompare(stamp(a)));
+  React.useEffect(() => {
+    if (!state) return;
+    if (!route.id) { setPicked(null); setDrawer(false); pickedFromList.current = null; return; }
+    const fromList = pickedFromList.current === route.id; pickedFromList.current = null;
+    // Reading can immediately remove an unread item from its list. Keep the user's
+    // mailbox/search context for an explicit list pick, including that fast read race.
+    if (!fromList && !rows.some(row => row.id === route.id)) {
+      const m = state.email.messages.find(row => row.id === route.id);
+      if (m) { setScope({ kind: 'folder', value: m.folder }); setAccountId(current => current === 'all' || current === m.accountId ? current : m.accountId); }
+      else if (state.email.drafts.some(row => row.id === route.id)) setScope({ kind: 'folder', value: 'drafts' });
+      else if (state.email.sends?.some(row => row.id === route.id)) setScope({ kind: 'folder', value: 'outbox' });
+    }
+    setPicked(route.id); setDrawer(true);
+    // The route is the trigger; live mail updates must not reset a reading context.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.id, ready]);
   const find = (id: string | null): Row | undefined => {
     if (!id) return undefined;
     const m = email.messages.find(row => row.id === id); if (m) return { kind: 'message', id: m.id, message: m };
@@ -139,11 +148,11 @@ export function EmailsPage() {
   const selected = rows.find(row => row.id === picked) || find(picked);
   const exec: Exec = async (command, done) => { setFailure(''); try { const receipt = await run(command); if (done) toast(receipt.result?.remoteQueued ? '已保存，待同步原邮箱' : done); return receipt; } catch (problem) { setFailure(problemText(problem, '操作未保存，请重试')); return null; } };
   const pick = (row: Row) => {
-    setPicked(row.id); setDrawer(true); go('emails', row.id, undefined, { keepScroll: true });
+    pickedFromList.current = row.id; setPicked(row.id); setDrawer(true); go('emails', row.id, undefined, { keepScroll: true });
     if (row.kind === 'message' && !row.message.read && can && !locked) void exec({ type: 'email.flag', payload: { id: row.id, flag: 'read', value: true } });
   };
-  const changeScope = (next: MailScope) => { setScope(next); setPicked(null); setDrawer(false); setCategory('all'); };
-  const changeAccount = (id: string) => { setAccountId(id); setPicked(null); setDrawer(false); };
+  const changeScope = (next: MailScope) => { setScope(next); setPicked(null); setDrawer(false); setCategory('all'); if (route.id) go('emails', undefined, undefined, { keepScroll: true }); };
+  const changeAccount = (id: string) => { setAccountId(id); setPicked(null); setDrawer(false); if (route.id) go('emails', undefined, undefined, { keepScroll: true }); };
   /** 调用收发服务：服务端错误原样提示；返回结果供调用方区分已发送 / 失败 / 不确定。 */
   const callMail = async (action: MistMailAction): Promise<MistMailResult | null> => { setFailure(''); try { return await mail(action); } catch (problem) { setFailure(problemText(problem, '操作未完成，请重试')); return null; } };
   const reportSend = (result: MistMailResult | null, again = false) => {
@@ -337,7 +346,6 @@ export function EmailsPage() {
         </div>
         {failedAccounts.length > 0 && <div className="mist-mail-inline-warn" role="status"><AlertTriangle size={14} /><span><b>{uiText(scopeFailed ? `${scopeLabel}同步失败` : '部分文件夹同步失败')}</b> · {failedAccounts.map(a => `${a.displayName}：${a.failedFolders.join('、')}未能同步，显示的是上次同步结果`).join('；')}。</span></div>}
         {list}
-        {messages.some(m => m.example) && <p className="mist-note mist-mail-listfoot">{uiText("示例邮箱：演示公司的合成邮件，不连接邮件服务器、不能发送；标记、关联、跟进与草稿会真实保存。")}</p>}
       </section>
       {!compact && <section className="mist-mail-reader" aria-label={uiText("阅读邮件")}>{detail}</section>}
       {compact && <Drawer open={drawer && !!selected} onClose={() => setDrawer(false)} title={uiText(selectedTitle)} sub={uiText(selectedSub)} size="lg"><DetailSurface.Provider value="drawer">{detail}</DetailSurface.Provider></Drawer>}
