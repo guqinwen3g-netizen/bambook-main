@@ -43,6 +43,15 @@ it('rejects invented values and evidence, oversized structures and unknown keys'
   f.complete.mockResolvedValueOnce('not json'); await expect(f.analyze()).rejects.toMatchObject({ code: 'MAIL_ANALYSIS_INVALID' });
   expect((await f.repo.get(f.actor, f.ws.id)).state.email.messages[0].analysis).toBeUndefined();
 });
+it('keeps verified fields and drops only an unverifiable one, telling the reviewer which was dropped', async () => {
+  const f = await fixture();
+  // The model lower-cased one value on a real RFQ; the others were verbatim.
+  const mixed = { ...f.answer, fields: [f.answer.fields[0], { field: '产品', value: '城市大衣', source: 'body', quote: '双面羊毛城市大衣' }, { field: '交期', value: 'march 2027', source: 'body', quote: '双面羊毛城市大衣' }] };
+  const parsed = parseEmailAnalysis(JSON.stringify(mixed), f.m);
+  expect(parsed.fields.map(x => x.field)).toEqual(['数量', '产品']);
+  expect(parsed.warnings.at(-1)).toContain('交期');
+  expect(parsed.warnings).toContain('附件需另行核对');
+});
 it('requires consent and scoped mail permission, and rejects a message trashed during analysis', async () => {
   const f = await fixture();
   await expect(analyzeEmail(f.repo, f.actor, f.ws.id, f.m.id, {}, undefined, f.deps)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
