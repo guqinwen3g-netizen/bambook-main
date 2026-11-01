@@ -51,6 +51,11 @@ it('stopping a condition permanently clears its schedule and never calls the bus
  const stopped=await tx(d=>changeTask(d,actor,workspaceId,taskId,'cancel',{requestId:randomUUID(),version:waiting.version},now,[]));expect(stopped).toMatchObject({state:'cancelled',waitingFor:null,resumeAt:null});now+=61000;
  expect((await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>{throw Error('Stopped wait must not inspect business');}))).state).toBe('cancelled');await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});
 });
+it('an explicit early resume refreshes the check cadence without rearming the baseline or maximum deadline',async()=>{
+ const first=await claim(),waiting=await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:120,condition:conditionTarget,summary:'等待原订单变化。'},now,preparedCondition));
+ const paused=await tx(d=>changeTask(d,actor,workspaceId,taskId,'pause',{requestId:randomUUID(),version:waiting.version},now,[]));now+=1000;const resumed=await tx(d=>changeTask(d,actor,workspaceId,taskId,'resume',{requestId:randomUUID(),version:paused.version},now,[]));expect(resumed).toMatchObject({state:'waiting_condition',resumeAt:waiting.resumeAt,nextCheckAt:new Date(now).toISOString()});
+ const checked=await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>false));expect(checked.condition).toMatchObject({hash:'server-full-read-hash',nextCheckAt:now+30000});expect(new Date(checked.resumeAt!).toISOString()).toBe(waiting.resumeAt);
+});
 it('can return a failed outcome when the changed original cannot be fully reread, without manufacturing a successful business result',async()=>{
  const first=await claim();await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:60,condition:conditionTarget,summary:'等待原订单变化。'},now,preparedCondition));now+=30000;await tx(d=>checkTaskCondition(d,actor,workspaceId,taskId,now,()=>true));const run=await claim();
  const failed=await tx(d=>finishTask(d,actor,run.lease,{requestId:randomUUID(),outcome:'failed',result:'原资料无法完整读取，未继续办理。'},now));expect(failed.state).toBe('failed');expect(failed.requiredRead).toEqual(conditionTarget);

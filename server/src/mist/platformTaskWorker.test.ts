@@ -5,6 +5,7 @@ import{tmpdir}from'node:os';import path from'node:path';import{randomUUID}from'n
 import{createMistLocalRuntime}from'./local';import{createMistServer}from'./server';
 import{SERVICE_KEY_HEADER}from'./agentIdentities';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
+import {platformTaskClock}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
 import type{LlmCompletionInput}from'../ai/llmProviders';
 import{taskRecord}from'./agentTasks';
@@ -25,6 +26,9 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
  return{local,app,human,workspace,base,id,key,worker,repository,create,current,command,drain};
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
+it('provides a real offset-qualified business clock across a UTC month boundary without changing the instant',()=>{
+ const now=Date.parse('2026-10-31T16:00:00Z'),clock=platformTaskClock(now);expect(clock).toEqual({now:'2026-11-01T00:00:00.000+08:00',utc:'2026-10-31T16:00:00.000Z',timeZone:'Asia/Shanghai'});expect(Date.parse(clock.now)).toBe(now);expect(Date.parse(clock.utc)).toBe(now);
+});
 async function usedBudget(f:Awaited<ReturnType<typeof fixture>>,id:string,milliseconds:number){
  await f.local.database.$transaction(async db=>{const{row,value:c}=await taskRecord(db,f.workspace.id,id);await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{revision:0,__agentTask:{...c,version:c.version+1,runtimeUsedMs:milliseconds}}}});});
 }

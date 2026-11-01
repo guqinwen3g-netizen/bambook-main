@@ -319,6 +319,7 @@ export async function changeTask(db: any, actor: TokenPayload, workspaceId: stri
   const n = next(c, now, action, requestId, values); n.controlVersion++; n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;
   n.state = action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : pendingProposalIds.length||hasUnansweredQuestion(c) ? 'waiting_human' : c.condition?'waiting_condition':c.resumeAt!==undefined&&c.resumeAt>now?'waiting_time':'queued';
   if(action==='cancel'||n.state==='queued'){n.resumeAt=undefined;n.condition=undefined;}
+  if(action==='resume'&&n.state==='waiting_condition')n.condition={...n.condition!,nextCheckAt:Math.min(n.condition!.nextCheckAt,now)};
   n.waitingProposalIds = action === 'cancel' ? [] : pendingProposalIds;
   if(n.platform){if(n.platform.checkpointBeforeIssue!==undefined)n.checkpoint=n.platform.checkpointBeforeIssue;n.platform={...n.platform,nextRunAt:n.state==='waiting_time'?n.resumeAt!:n.state==='waiting_condition'?Math.min(n.condition!.nextCheckAt,now):0,retryAt:undefined,issue:undefined,checkpointBeforeIssue:undefined};}
   await save(db, row, c, n); await event(db, n, actor, action, requestId, now); return taskView(n, actor, now);
