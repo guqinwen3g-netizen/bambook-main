@@ -77,12 +77,15 @@ describe('关系智库', () => {
     expect(dialog.textContent).toContain('当前负责人 顾言');
     const owner = dialog.querySelector('select') as HTMLSelectElement;
     expect([...owner.options].map(o => o.value)).toEqual(['', 'demo-new']);
-    expect([...dialog.querySelectorAll('input[type="checkbox"]')].map(c => (c as HTMLInputElement).checked)).toEqual([true, true, true]);
+    // f8247e8d moved the open AW27 opportunity to Cedar & Crown (same customer as its development), so it is offered and preselected too.
+    const openOpportunities = state.crm.opportunities.filter(o => o.customerId === named('Cedar').customerId && o.stage !== 'won' && o.stage !== 'lost');
+    expect(openOpportunities.length).toBeGreaterThan(0);
+    expect([...dialog.querySelectorAll('input[type="checkbox"]')].map(c => (c as HTMLInputElement).checked)).toEqual(Array(3 + openOpportunities.length).fill(true));
     await act(async () => { owner.value = 'demo-new'; owner.dispatchEvent(new Event('change', { bubbles: true })); });
     const reason = dialog.querySelector('textarea') as HTMLTextAreaElement;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(reason, '顾言调岗'); reason.dispatchEvent(new Event('input', { bubbles: true })); });
     await click('确认交接');
-    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'handover.customer', payload: expect.objectContaining({ customerId: named('Cedar').customerId, toUserId: 'demo-new', reason: '顾言调岗', orderIds: state.orders.filter(o => o.customerId === named('Cedar').customerId && o.state !== '履约完成').map(o => o.id), opportunityIds: [] }) }));
+    expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({ type: 'handover.customer', payload: expect.objectContaining({ customerId: named('Cedar').customerId, toUserId: 'demo-new', reason: '顾言调岗', orderIds: state.orders.filter(o => o.customerId === named('Cedar').customerId && o.state !== '履约完成').map(o => o.id), opportunityIds: openOpportunities.map(o => o.id) }) }));
     bridge.current.run.mockClear();
     await click('冻结往来');
     expect(document.body.textContent).toContain('出运须逐票批准');expect(document.body.textContent).not.toContain('不受影响，继续执行');

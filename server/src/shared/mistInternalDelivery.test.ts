@@ -101,3 +101,18 @@ it('distinguishes source handovers by exact evidence and suppresses closed or ca
  Object.assign(f.state.orderLines.find(l=>l.id===f.target.lineId)!,{closure:{status:'closed'}});
  expect(internalDeliverySources(f.state,f.target.orderId)).toEqual([]);
 });
+
+it('moves an open delivery to the successor on a staff handover, keeps the original receiver on record and leaves finished ones alone',()=>{
+ const f=internalDeliveryFixture(),open=f.send(6),done=f.send(4);
+ f.run({type:'order.internal.receive',payload:{id:done,accepted:4,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse');
+ f.run({type:'handover.account',payload:{fromUserId:'warehouse',toUserId:'reviewer',reason:'Warehouse clerk left'}},'reviewer');
+ const openRow=f.state.internalDeliveries!.find(r=>r.id===open)!,doneRow=f.state.internalDeliveries!.find(r=>r.id===done)!;
+ expect(openRow).toMatchObject({receiverId:'reviewer',receiver:'Leader',reassignments:[{fromId:'warehouse',from:'Warehouse',toId:'reviewer',to:'Leader',reason:'Warehouse clerk left'}]});
+ expect(doneRow.receiverId).toBe('warehouse');expect(doneRow.reassignments).toBeUndefined();
+ expect(f.state.tasks.find(t=>t.id==='internal-delivery:'+open)?.assigneeIds).toEqual(['reviewer']);
+ // The former receiver can no longer count the goods; the successor can.
+ expect(()=>f.run({type:'order.internal.receive',payload:{id:open,accepted:6,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse')).toThrow('指定接收账号');
+ f.run({type:'order.internal.receive',payload:{id:open,accepted:6,rejected:0,expectedRevision:0,evidence:'Counted'}},'reviewer');
+ expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
+ expect(f.state.events.some(e=>e.text.startsWith('内部交付接收人：Warehouse→Leader'))).toBe(true);
+});

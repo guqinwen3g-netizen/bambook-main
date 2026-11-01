@@ -83,3 +83,19 @@ it('opens the order it was sent for',()=>{
 });
 
 it('shows only visible expense shares when full cost basis is unavailable',()=>{state.partialExpenses=[{id:'e',code:'EX-P',category:'freight',date:'2026-10-18',currency:'USD',shares:[{orderId:'o',orderCode:'SO-OWN',basisValue:1,amount:40}],hiddenCount:1,voided:false}];act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite={false} busy={false} run={run} materialCostBasis={null}/></ToastProvider></MistRoot>));const list=getByRole(host,'list',{name:'部分可见费用'});expect(list.textContent).toContain('SO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('100.00');});
+it('shows an internal order as cost only and keeps it out of the business revenue and margin totals',async()=>{
+  render();const external=getStatValue();expect(external).toContain('实际毛利');
+  state=structuredClone(state);
+  state.orders.push({id:'int-order',code:'INT-2026-0001',customer:'成衣组',currency:'CNY',amount:500,state:'备料',governance:{status:'approved',contract:{kind:'internal'}}} as any);
+  (state as any).orderCosts={expenses:[...((state as any).orderCosts?.expenses||[]),{id:'int-exp',code:'FY-INT',category:'trucking',currency:'CNY',amount:134,shares:[{orderId:'int-order',orderCode:'INT-2026-0001',basisValue:1,amount:134}],scope:'orders',basis:'manual',vendor:'内部'}]};
+  act(()=>root.unmount());root=createRoot(host);render();
+  const row=[...getByRole(host,'table',{name:'订单实际核算'}).querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('INT-2026-0001'))!;
+  expect(row.textContent).toContain('内部订单');expect(row.textContent).toContain('134.00');expect(row.textContent).not.toContain('-134');
+  const internalCount=state.orders.filter(o=>(o as any).governance?.contract?.kind==='internal'&&(!o.governance||o.governance.status==='approved')).length;
+  expect(internalCount).toBeGreaterThan(1);expect(host.textContent).toContain(`内部订单成本 · ${internalCount} 单`);
+  expect(getStatValue()).toBe(external);
+  await click(row);
+  const detail=document.querySelector('[data-order-cost-detail="int-order"]') as HTMLElement;
+  expect(queryByRole(detail,'table',{name:'收入'})).toBeNull();expect(detail.textContent).not.toContain('出口退税');expect(detail.textContent).not.toContain('毛利');expect(detail.textContent).toContain('实际成本');
+  function getStatValue(){return [...host.querySelectorAll('.mist-stat')].find(n=>n.textContent?.includes('实际毛利'))?.textContent;}
+});

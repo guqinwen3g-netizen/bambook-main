@@ -8,6 +8,7 @@
  */
 import { MistCommandError, type MistContext, type MistCustomer, type MistState } from './mistWorkspace';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, accountOwnedObjects, resolveMember, type MistOwnedObject } from './mistAccounts';
+import { reassignInternalDeliveryReceiver } from './mistInternalDelivery';
 
 export type MistCustomerHandover = { id: string; at: string; actor: string; fromId: string; from: string; toId: string; to: string; reason: string; orders: string[]; opportunities: string[]; tasks: number };
 /** 成员离职 / 调岗：按账号把名下全部负责对象一次交给新负责人（所有者在成员管理办理）。 */
@@ -75,6 +76,8 @@ function applyAccountHandover(root: MistState, p: Extract<HandoverCommand, { typ
   for (const r of root.crm?.opportunities || []) if (r.ownerId === fromId) { r.ownerId = to.id; r.owner = to.name; }
   for (const s of root.market?.suppliers || []) { let changed = false; for (const g of MIST_BUSINESS_GROUPS) if (s.handlers?.[g]?.id === fromId) { s.handlers[g] = { id: to.id, name: to.name }; changed = true; } if (changed) event('supplier', s.id); }
   for (const t of pendingTasks) t.assigneeIds = [...new Set(t.assigneeIds.map(id => id === fromId ? to.id : id))];
+  // Internal deliveries name one exact receiver; reassign the still-open ones so the goods are not stranded.
+  for (const moved of reassignInternalDeliveryReceiver(root, fromId, to, { at: c.now, actor: c.actorName, reason })) root.events.unshift({ id: c.id(), entityType: 'order', entityId: moved.orderId, actor: c.actorName, at: c.now, text: `内部交付接收人：${moved.from}→${to.name}：${reason}`, fileIds: [] });
   const counts: MistAccountHandover['counts'] = {};
   for (const o of owned) counts[o.kind] = (counts[o.kind] || 0) + 1;
   const record: MistAccountHandover = { id: c.id(), at: c.now, actor: c.actorName, fromId, from, toId: to.id, to: to.name, reason, counts, objects: owned.map(o => `${o.role} ${o.label}`), tasks: pendingTasks.length };

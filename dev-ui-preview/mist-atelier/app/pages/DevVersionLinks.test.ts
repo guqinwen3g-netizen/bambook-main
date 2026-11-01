@@ -15,6 +15,8 @@ function fixture() {
   const lines = [a, b].map((version, index) => {
     run({ type: 'development.recordSample', payload: { devId, versionId: version.id, sample: `S-${index}`, quantity: 1, returnedAt: ctx.now } });
     run({ type: 'development.recordQc', payload: { devId, versionId: version.id, qc: { result: 'pass', reviewer: 'QC', reviewedAt: ctx.now, report: `QC-${index}`, opinion: '通过', measurements: [] } } });
+    // f8247e8d: an order line from a product file is still gated on its development version's latest customer approval.
+    run({ type: 'development.confirm', payload: { devId, versionId: version.id, result: 'approved', confirmer: '客户', organization: '测试客户', confirmedAt: ctx.now, basis: '邮件', originalText: '认可' } });
     const productId = run({ type: 'market.product.fromVersion', payload: { devId, versionId: version.id, sku: `GA-DL-${index}` } }).id as string;
     return { productId, sourceDevId: devId, sourceVersionId: version.id, name: `大衣${version.label}`, style: `GA-DL-${index}`, specification: '', qty: '10', unit: '件', price: '50.00', cost: '30.00' };
   });
