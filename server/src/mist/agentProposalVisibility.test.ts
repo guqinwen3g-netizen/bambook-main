@@ -3,6 +3,7 @@ import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';impor
 import {createMistState,applyMistCommand,mistCommandPermission} from '../shared/mistWorkspace';
 import {SYSTEM_ROLE_IDS,getDefaultScopeListForRole} from '../_shared/rolePermissionMatrix';
 import {MemoryMistDatabase,testAuthority} from './__tests__/support';
+import {MIST_COMMAND_CATALOG} from './agentCommandCatalog';
 import {MistRepository} from './repository';import {MistPrivateFiles} from './files';
 let directory:string,db:MemoryMistDatabase,repo:MistRepository,auth:ReturnType<typeof testAuthority>,workspaceId:string;
 const company='11111111-1111-4111-8111-111111111111';
@@ -49,8 +50,8 @@ it('keeps company bank details hidden from a row-scoped reader even when voucher
  const row=db.workspaces.get(workspaceId);row.state.bankAccounts=[{id:'bank',code:'BANK-SECRET',currency:'CNY'}];row.state.agentProposals[0].command={type:'finance.account.close',payload:{id:'bank',reason:'private bank sentinel'}};row.state.agentProposals[0].summary=['BANK-SECRET'];auth.users.get('sales')!.permissions=['ai:chat','vouchers:read','vouchers:write'];
  const result=await repo.get(actor,workspaceId);expect(result.state.bankAccounts).toEqual([]);expect(result.state.agentProposals![0].unavailable).toBe(true);expect(JSON.stringify(result.state.agentProposals)).not.toContain('private bank sentinel');
 });
-it('hides a sending proposal after the draft mailbox is no longer shared with its owner',async()=>{
- const row=db.workspaces.get(workspaceId);row.state.email.accounts=[{id:'mailbox',ownerId:'other',memberIds:[],address:'other@example.test',kind:'personal',example:false}];row.state.email.drafts=[{id:'draft',accountId:'mailbox',body:'private draft sentinel'}];row.state.agentProposals[0].command={type:'email.send',payload:{draftId:'draft'}};row.state.agentProposals[0].summary=['private draft sentinel'];auth.users.get('sales')!.permissions=['ai:chat','emails:read','emails:write'];
+it('hides a supported draft-deletion proposal after mailbox sharing is withdrawn',async()=>{
+ const row=db.workspaces.get(workspaceId);row.state.email.accounts=[{id:'mailbox',ownerId:'other',memberIds:[],address:'other@example.test',kind:'personal',example:false}];row.state.email.drafts=[{id:'draft',accountId:'mailbox',body:'private draft sentinel'}];row.state.agentProposals[0].command={type:'email.draft.delete',payload:{id:'draft'}};row.state.agentProposals[0].summary=['private draft sentinel'];expect(MIST_COMMAND_CATALOG.some(c=>c.type===row.state.agentProposals[0].command.type)).toBe(true);auth.users.get('sales')!.permissions=['ai:chat','emails:read','emails:write'];
  const result=await repo.get(actor,workspaceId);expect(result.state.email.drafts).toEqual([]);expect(result.state.agentProposals![0].unavailable).toBe(true);expect(JSON.stringify(result.state.agentProposals)).not.toContain('private draft sentinel');
 });
 it('keeps the current company administrator’s valid member grouping proposal available without inventing users:read',async()=>{
