@@ -2292,6 +2292,1319 @@
    "impl": "missing",
    "lessons": [],
    "note": "长期运行循环与无人值守账号尚未交付"
+  },
+  {
+   "id": "order-list-browse",
+   "stage": "订单与审批",
+   "task": "在订单管理按成衣/面料、主单审批与状态筛选订单并打开详情",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "orders"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；OrderListPage.tsx:47-104"
+  },
+  {
+   "id": "order-list-export",
+   "stage": "订单与审批",
+   "task": "导出当前筛选的订单台账",
+   "roles": [
+    "业务员",
+    "主管",
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "orders"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；本地生成 CSV（OrderListPage.tsx:90）"
+  },
+  {
+   "id": "order-from-quotation",
+   "stage": "订单与审批",
+   "task": "从已接受报价选条目新建订单",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "orders"
+   ],
+   "commands": [
+    "market.quotation.convert"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "OrderSourceDialog.tsx:71；与 quote-convert 同命令，入口不同"
+  },
+  {
+   "id": "order-internal-inbox",
+   "stage": "跨组与内部业务",
+   "task": "在订单管理「内部接收」点收、拒收或撤销内部交付",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "internal",
+    "cross"
+   ],
+   "views": [
+    "orders"
+   ],
+   "commands": [
+    "order.internal.receive",
+    "order.internal.reverseCheck",
+    "order.internal.returnRejected",
+    "order.internal.cancel"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "InternalDeliveryPanel.tsx:57-61，经 OrderListPage.tsx:87 进入"
+  },
+  {
+   "id": "order-overdue-jump",
+   "stage": "交单与收汇",
+   "task": "从订单统计卡查看逾期收款并跳转财务跟进",
+   "roles": [
+    "业务员",
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "orders"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；OrderListPage.tsx:98"
+  },
+  {
+   "id": "risk-register",
+   "stage": "跨组与内部业务",
+   "task": "登记订单风险或把系统预警转为风险",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "risks"
+   ],
+   "commands": [
+    "platform.risk.save"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RisksPage.tsx:93"
+  },
+  {
+   "id": "risk-acknowledge-plan",
+   "stage": "跨组与内部业务",
+   "task": "接手风险并制定处置方案与计划完成日",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "risks"
+   ],
+   "commands": [
+    "platform.risk.transition",
+    "platform.risk.plan"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RisksPage.tsx:97-98"
+  },
+  {
+   "id": "risk-escalate",
+   "stage": "跨组与内部业务",
+   "task": "就风险提交审批申请或撤回申请",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "risks"
+   ],
+   "commands": [
+    "platform.risk.escalate",
+    "platform.risk.withdraw"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RisksPage.tsx:104,106"
+  },
+  {
+   "id": "risk-close",
+   "stage": "跨组与内部业务",
+   "task": "填写关闭依据关闭风险",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "risks"
+   ],
+   "commands": [
+    "platform.risk.transition"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RisksPage.tsx:107（state=Resolved）"
+  },
+  {
+   "id": "relation-profile",
+   "stage": "客户与供应商",
+   "task": "在关系智库建立与编辑往来组织档案",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "relations"
+   ],
+   "commands": [
+    "market.relation.save",
+    "market.relation.status"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RelationsPage.tsx:87,135"
+  },
+  {
+   "id": "relation-contacts",
+   "stage": "客户与供应商",
+   "task": "维护往来组织联系人",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "relations"
+   ],
+   "commands": [
+    "market.contact.save"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RelationsPage.tsx:104"
+  },
+  {
+   "id": "relation-hold",
+   "stage": "客户与供应商",
+   "task": "冻结或解冻往来组织",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "relations"
+   ],
+   "commands": [
+    "market.relation.hold"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RelationsPage.tsx:92-93，adminOnly"
+  },
+  {
+   "id": "relation-link-supplier",
+   "stage": "客户与供应商",
+   "task": "把往来组织关联到供应商档案",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "relations"
+   ],
+   "commands": [
+    "market.relation.linkSupplier"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RelationsPage.tsx:99"
+  },
+  {
+   "id": "relation-handover",
+   "stage": "公司与权限",
+   "task": "把客户及其订单、商机移交给其他业务员",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "relations"
+   ],
+   "commands": [
+    "handover.customer"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "RelationsPage.tsx:118"
+  },
+  {
+   "id": "relation-attachments",
+   "stage": "客户与供应商",
+   "task": "上传往来组织附件并查看变更历史",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "relations"
+   ],
+   "commands": [
+    "market.attachment.set"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:56-61,113"
+  },
+  {
+   "id": "season-plan",
+   "stage": "市场与资料",
+   "task": "建立季节计划与里程碑并复核",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "seasons"
+   ],
+   "commands": [
+    "market.season.save",
+    "market.season.review"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "SeasonsPage.tsx:90,153"
+  },
+  {
+   "id": "season-trend",
+   "stage": "市场与资料",
+   "task": "登记流行趋势并关联产品档案",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "seasons"
+   ],
+   "commands": [
+    "market.trend.save"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "SeasonsPage.tsx:100；MarketPages.tsx:89"
+  },
+  {
+   "id": "season-show",
+   "stage": "市场与资料",
+   "task": "登记展会信息与费用",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "seasons"
+   ],
+   "commands": [
+    "market.show.save"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "SeasonsPage.tsx:108"
+  },
+  {
+   "id": "season-show-lead",
+   "stage": "市场与资料",
+   "task": "录入展会线索并记录跟进或流失",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "seasons"
+   ],
+   "commands": [
+    "market.showLead.save",
+    "market.showLead.transition"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "SeasonsPage.tsx:115,128"
+  },
+  {
+   "id": "season-lead-to-crm",
+   "stage": "客户与供应商",
+   "task": "把展会线索转入客户关系并可同时建立商机",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "seasons"
+   ],
+   "commands": [
+    "market.lead.convertToCrm"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "SeasonsPage.tsx:126"
+  },
+  {
+   "id": "marketing-campaign",
+   "stage": "市场与资料",
+   "task": "创建营销活动并推进活动状态",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "marketing"
+   ],
+   "commands": [
+    "market.campaign.save",
+    "market.campaign.status"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:144；MarketingPage.tsx:54"
+  },
+  {
+   "id": "marketing-campaign-lead",
+   "stage": "市场与资料",
+   "task": "登记营销活动线索、记录跟进并转入客户关系",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "marketing"
+   ],
+   "commands": [
+    "market.lead.save",
+    "market.lead.transition",
+    "market.lead.convertToCrm"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:115-127"
+  },
+  {
+   "id": "marketing-lookbook",
+   "stage": "市场与资料",
+   "task": "制作产品画册、准备资料并导出产品资料 CSV",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "marketing"
+   ],
+   "commands": [
+    "market.lookbook.save",
+    "market.lookbook.status"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:145,148"
+  },
+  {
+   "id": "marketing-attachments",
+   "stage": "市场与资料",
+   "task": "为营销活动挂接主推产品与附件",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "marketing"
+   ],
+   "commands": [
+    "market.campaign.save",
+    "market.attachment.set"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:85-91,149"
+  },
+  {
+   "id": "marketing-email-send",
+   "stage": "市场与资料",
+   "task": "向目标客户发送推广邮件",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "marketing"
+   ],
+   "commands": [],
+   "impl": "missing",
+   "lessons": [],
+   "note": "MarketingPage.tsx:73 按钮禁用：“尚未接入外部推广发送服务”"
+  },
+  {
+   "id": "marketing-lookbook-pdf",
+   "stage": "市场与资料",
+   "task": "导出排版好的产品画册 PDF",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "marketing"
+   ],
+   "commands": [],
+   "impl": "missing",
+   "lessons": [],
+   "note": "MarketPages.tsx:148 “PDF 排版导出服务尚未接入”"
+  },
+  {
+   "id": "product-archive-create",
+   "stage": "市场与资料",
+   "task": "在数字档案新建面料/成衣/辅料档案并维护规格与成本",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "products"
+   ],
+   "commands": [
+    "market.product.save"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:106"
+  },
+  {
+   "id": "product-from-version",
+   "stage": "开发与样品",
+   "task": "从 QC 通过的开发版本建立产品档案",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "products"
+   ],
+   "commands": [
+    "market.product.fromVersion"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:107"
+  },
+  {
+   "id": "product-status",
+   "stage": "市场与资料",
+   "task": "归档或恢复产品档案",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "products"
+   ],
+   "commands": [
+    "market.product.status"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:109"
+  },
+  {
+   "id": "product-customer-codes",
+   "stage": "市场与资料",
+   "task": "为产品维护各客户的客户编码",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "products"
+   ],
+   "commands": [
+    "market.product.save"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "ProductParts.tsx:118"
+  },
+  {
+   "id": "product-import",
+   "stage": "市场与资料",
+   "task": "批量导入产品档案",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "products"
+   ],
+   "commands": [
+    "market.import"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "BaseDataImport.tsx:61（kind=product）"
+  },
+  {
+   "id": "product-attachments",
+   "stage": "市场与资料",
+   "task": "上传产品图片与附件、设定主图",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "products"
+   ],
+   "commands": [
+    "market.attachment.set"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "MarketPages.tsx:56-61"
+  },
+  {
+   "id": "product-to-dev-order",
+   "stage": "订单与审批",
+   "task": "从产品档案发起同类开发或下单",
+   "roles": [
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "products"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "仅跳转 development/new、orders/new（ProductParts.tsx:101-102）；辅料开发与辅料订单按钮禁用“尚未接入”"
+  },
+  {
+   "id": "dashboard-overview",
+   "stage": "报表与数据",
+   "task": "在业务全景查看在途/逾期订单、逾期发票、风险与客诉",
+   "roles": [
+    "主管",
+    "总经理"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "dashboard"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；PlatformPages.tsx:121"
+  },
+  {
+   "id": "dashboard-team",
+   "stage": "日常与协作",
+   "task": "在团队页查看成员负载并催办",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "dashboard"
+   ],
+   "commands": [
+    "team.nudge"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "TeamBoard.tsx:33，经 PlatformPages.tsx:119"
+  },
+  {
+   "id": "dashboard-weekly",
+   "stage": "日常与协作",
+   "task": "生成并存档团队周报",
+   "roles": [
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "dashboard"
+   ],
+   "commands": [
+    "team.weekly.archive"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "TeamBoard.tsx:147"
+  },
+  {
+   "id": "report-sales",
+   "stage": "报表与数据",
+   "task": "按期间与币种查看并导出客户销售额",
+   "roles": [
+    "主管",
+    "财务",
+    "总经理"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "reports"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；PlatformReports.tsx:207"
+  },
+  {
+   "id": "report-margin",
+   "stage": "成本利润",
+   "task": "查看并导出订单毛利",
+   "roles": [
+    "主管",
+    "财务",
+    "总经理"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "reports"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；需毛利可见权限，PlatformReports.tsx:207"
+  },
+  {
+   "id": "report-actual-cost",
+   "stage": "成本利润",
+   "task": "在订单核算登记实际费用并转应付",
+   "roles": [
+    "财务"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "reports"
+   ],
+   "commands": [
+    "cost.expense.register",
+    "cost.expense.payable",
+    "cost.expense.void"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "OrderActualCostPanel.tsx，经 PlatformReports.tsx:235"
+  },
+  {
+   "id": "report-aging",
+   "stage": "交单与收汇",
+   "task": "查看应收账龄",
+   "roles": [
+    "财务",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "reports"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读"
+  },
+  {
+   "id": "report-order-progress",
+   "stage": "报表与数据",
+   "task": "查看订单进度与逾期",
+   "roles": [
+    "主管",
+    "业务员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "reports"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读"
+  },
+  {
+   "id": "data-center-overview",
+   "stage": "报表与数据",
+   "task": "在数据中心查看各类业务记录数并跳到来源模块",
+   "roles": [
+    "公司管理员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "data-center"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；PlatformPages.tsx:123"
+  },
+  {
+   "id": "data-center-issues",
+   "stage": "报表与数据",
+   "task": "核对数据关联问题（如孤立订单条目）",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "data-center"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；platformDataIssues PlatformPages.tsx:122"
+  },
+  {
+   "id": "hr-departments",
+   "stage": "公司与权限",
+   "task": "在人事管理新建、调整与裁撤部门",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "hr"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；走 REST organizationApi /hr/departments（HrOrganization.tsx:125）"
+  },
+  {
+   "id": "hr-teams",
+   "stage": "公司与权限",
+   "task": "建立小组、增减成员与解散小组",
+   "roles": [
+    "公司管理员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "hr"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST /hr/teams（HrOrganization.tsx:126-127,208）"
+  },
+  {
+   "id": "hr-personnel",
+   "stage": "公司与权限",
+   "task": "按部门、小组查询人员",
+   "roles": [
+    "公司管理员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "hr"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；REST /hr/personnel"
+  },
+  {
+   "id": "hr-employee-file",
+   "stage": "公司与权限",
+   "task": "维护员工档案（入职、转正、合同）",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "hr"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST PUT /hr/employees（EmployeeFile.tsx:61）"
+  },
+  {
+   "id": "hr-employment-event",
+   "stage": "公司与权限",
+   "task": "登记调岗、调部门等在职变动",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "hr"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST POST /hr/employment-events（EmployeeFile.tsx）"
+  },
+  {
+   "id": "tools-length",
+   "stage": "日常与协作",
+   "task": "换算米、码、厘米、英寸长度",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "business-tools"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；本地计算不写入（PlatformPages.tsx:124）"
+  },
+  {
+   "id": "tools-calculators",
+   "stage": "日常与协作",
+   "task": "计算装箱体积与面料克重换算",
+   "roles": [
+    "全部岗位"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "business-tools"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；BusinessCalculators.tsx"
+  },
+  {
+   "id": "admin-accounts",
+   "stage": "公司与权限",
+   "task": "在公司管理开通账号、调整资料与岗位、审批注册",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "admin-panel"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST /admin/users（AdminAccounts.tsx:87）"
+  },
+  {
+   "id": "admin-account-security",
+   "stage": "公司与权限",
+   "task": "停用账号或重置密码",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "admin-panel"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST /admin/users/:id disable/reset-password"
+  },
+  {
+   "id": "admin-roles",
+   "stage": "公司与权限",
+   "task": "新建、编辑与删除岗位及其权限",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "admin-panel"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST /admin/roles（AdminAccounts.tsx:235）"
+  },
+  {
+   "id": "admin-approval-authority",
+   "stage": "公司与权限",
+   "task": "设置订单与采购合同的审批资格人",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "admin-panel"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST /admin/order-approval-authorities、/v1/procurement/contracts/approval-authority"
+  },
+  {
+   "id": "admin-audit-log",
+   "stage": "公司与权限",
+   "task": "查看公司审计日志",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "admin-panel"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；REST auditLogs"
+  },
+  {
+   "id": "settings-basic",
+   "stage": "公司与权限",
+   "task": "修改公司显示名称与默认币种",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "settings"
+   ],
+   "commands": [
+    "settings.update"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "SettingsPage.tsx:76,135"
+  },
+  {
+   "id": "settings-notify",
+   "stage": "公司与权限",
+   "task": "开关公司通知（QC 回传、出运提醒、每日摘要等）",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "settings"
+   ],
+   "commands": [
+    "settings.update"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "SettingsPage.tsx:141-146"
+  },
+  {
+   "id": "settings-member-handover",
+   "stage": "公司与权限",
+   "task": "在数据访问分区移交离岗成员账户",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "settings"
+   ],
+   "commands": [
+    "handover.account",
+    "member.groups.set"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "WorkspaceMembers.tsx:31；MemberHandover.tsx:29"
+  },
+  {
+   "id": "settings-activity",
+   "stage": "公司与权限",
+   "task": "查看公司设置变更记录",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "settings"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；SettingsPage.tsx:138"
+  },
+  {
+   "id": "settings-agent-identity",
+   "stage": "AI 与 Agent",
+   "task": "管理公司 Agent 服务身份",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "settings"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST /agent-identities（AgentIdentities.tsx）"
+  },
+  {
+   "id": "settings-local",
+   "stage": "公司与权限",
+   "task": "本机演示公司维护本地身份与公司资料",
+   "roles": [
+    "公司管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "settings"
+   ],
+   "commands": [
+    "settings.update"
+   ],
+   "impl": "source",
+   "lessons": [],
+   "note": "仅本地开发模式；LocalAdminPanel.tsx:103"
+  },
+  {
+   "id": "mes-history",
+   "stage": "生产与 QC",
+   "task": "在历史加工记录按加工方、年份查看加工合同履行与实际交付",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "mes"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；LocalMesPage.tsx（MesHistoryPage.tsx 仅转出）"
+  },
+  {
+   "id": "mes-export",
+   "stage": "生产与 QC",
+   "task": "导出加工记录",
+   "roles": [
+    "业务员",
+    "主管"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "mes"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；本地 CSV"
+  },
+  {
+   "id": "platform-company-open",
+   "stage": "平台管理",
+   "task": "开通新公司并生成公司管理员初始账号",
+   "roles": [
+    "平台管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "platform-admin"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST platformAdminApi.create（SaasAdminPage.tsx:43）"
+  },
+  {
+   "id": "platform-company-service",
+   "stage": "平台管理",
+   "task": "调整公司服务状态、方案与席位上限",
+   "roles": [
+    "平台管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "platform-admin"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST platformAdminApi.update（SaasAdminPage.tsx:46,58）"
+  },
+  {
+   "id": "platform-company-members",
+   "stage": "平台管理",
+   "task": "为公司添加、移出成员并重发邀请邮件",
+   "roles": [
+    "平台管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "platform-admin"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "未找到写入命令；REST addMember/removeMember/resendMember（SaasAdminPage.tsx:59-60,74）"
+  },
+  {
+   "id": "platform-company-list",
+   "stage": "平台管理",
+   "task": "搜索公司列表并查看公司资料",
+   "roles": [
+    "平台管理员"
+   ],
+   "modes": [
+    "all"
+   ],
+   "views": [
+    "platform-admin"
+   ],
+   "commands": [],
+   "impl": "source",
+   "lessons": [],
+   "note": "只读；REST list/companySettings（SaasAdminPage.tsx:33-34）"
   }
  ]
 }
