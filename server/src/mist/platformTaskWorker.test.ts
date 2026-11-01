@@ -7,12 +7,13 @@ import{SERVICE_KEY_HEADER}from'./agentIdentities';
 import type{MistPlatformTaskWorker}from'./platformTaskWorker';
 import type{MistRepository}from'./repository';
 import type{LlmCompletionInput}from'../ai/llmProviders';
+import{taskRecord}from'./agentTasks';
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'platform-agent-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.restoreAllMocks();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
-async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate'}={}){
+async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,options:{ceiling?:{value:string[]|null};mode?:'read'|'operate';concurrency?:number}={}){
  const local=createMistLocalRuntime({directory});if(options.ceiling){const authorize=local.authorize;local.authorize=(db,prior,permission)=>authorize(db,options.ceiling!.value===null?prior:{...prior,permissionCeiling:options.ceiling!.value},permission);}
- const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
+ const app=createMistServer(undefined,{local,agentTasks:{complete,tickMs:3_600_000,pulseMs:20,concurrency:options.concurrency}}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
  const workspace=(await human.get('/api/mist/workspaces/default').expect(200)).body.workspace,base='/api/mist/workspaces/'+workspace.id,id=randomUUID();
  await human.post(base+'/agent-identities').send({id,name:'业务助理',ownerId:'local-operator',mode:options.mode??'operate'}).expect(201);
  const key=(await human.post(base+'/agent-identities/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body.token;
@@ -24,6 +25,26 @@ async function fixture(complete:(input:LlmCompletionInput)=>Promise<string>,opti
  return{local,app,human,workspace,base,id,key,worker,repository,create,current,command,drain};
 }
 const tool=(name:string,args:Record<string,unknown>)=>JSON.stringify({name,arguments:args});
+async function usedBudget(f:Awaited<ReturnType<typeof fixture>>,id:string,milliseconds:number){
+ await f.local.database.$transaction(async db=>{const{row,value:c}=await taskRecord(db,f.workspace.id,id);await db.mistCommandReceipt.updateMany({where:{id:row.id},data:{result:{revision:0,__agentTask:{...c,version:c.version+1,runtimeUsedMs:milliseconds}}}});});
+}
+it('continues queued work behind exhausted runtime records without resetting their budgets or business data',async()=>{
+ let count=0,mail='';const complete=vi.fn(async()=>++count===1?tool('bambook_get',{type:'email',id:mail}):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已只读核对。'})),f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);
+ const first=await f.create('platform'),second=await f.create('platform');await usedBudget(f,first.id,first.runtimeLimitMs);await usedBudget(f,second.id,second.runtimeLimitMs);const later=await f.create('platform'),before=(await f.human.get(f.base).expect(200)).body.workspace;
+ await f.drain();expect((await f.current(later.id)).state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(2);
+ for(const task of[first,second]){const c=(await taskRecord(f.local.database,f.workspace.id,task.id)).value;expect(c.runtimeUsedMs).toBe(task.runtimeLimitMs);expect(c.platform!.nextRunAt).toBeGreaterThanOrEqual(c.expiresAt);expect((await f.current(task.id)).state).toBe('budget_exhausted');}
+ expect((await f.human.get(f.base).expect(200)).body.workspace).toEqual(before);
+});
+it('recognizes runtime consumed by an expired lease and preserves a read limit reminder while advancing the queue',async()=>{
+ const clock=Date.now();vi.spyOn(Date,'now').mockReturnValue(clock);let count=0,mail='';const complete=vi.fn(async()=>++count===1?tool('bambook_get',{type:'email',id:mail}):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已只读核对。'})),f=await fixture(complete,{concurrency:1});mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);
+ const old=await f.create('platform');await usedBudget(f,old.id,old.runtimeLimitMs-1000);const job=(await f.repository.duePlatformTasks())[0];await f.repository.claimPlatformTask(job,'expired-run',f.local.agentDelegation.makeTaskCredential);vi.spyOn(Date,'now').mockReturnValue(clock+1001);
+ const later=await f.create('platform'),notice=(await f.human.get(f.base+'/agent-task-notices').expect(200)).body.items.find((n:any)=>n.taskId===old.id);expect(notice.title).toBe('Agent任务达到限额');await f.human.post(f.base+'/agent-task-notices/read').send({items:[{taskId:notice.taskId,key:notice.key}]}).expect(200);
+ const before=(await f.human.get(f.base).expect(200)).body.workspace;await f.drain();expect((await f.current(later.id)).state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(2);const kept=(await f.human.get(f.base+'/agent-task-notices').expect(200)).body.items.find((n:any)=>n.taskId===old.id);expect(kept.id).toBe(notice.id);expect(kept.readAt).toBeTruthy();expect((await f.current(old.id)).runtimeUsedMs).toBe(old.runtimeLimitMs);expect((await f.human.get(f.base).expect(200)).body.workspace).toEqual(before);
+});
+it('does not spin or invoke the model when a concurrent metadata change leaves the same spent candidate visible',async()=>{
+ const complete=vi.fn(async()=>''),job={workspaceId:randomUUID(),taskId:randomUUID(),ownerId:'owner',version:1,exhausted:true},due=vi.fn(async()=>[job]),defer=vi.fn(async()=>{});
+ const {MistPlatformTaskWorker}=await import('./platformTaskWorker');const worker=new MistPlatformTaskWorker({duePlatformTasks:due,deferPlatformTaskJob:defer}as unknown as MistRepository,{complete,makeCredential:()=>'',tickMs:3_600_000});workers.push(worker);worker.start(3_600_000);await worker.tick();await worker.settled();expect(due.mock.calls.length).toBeLessThanOrEqual(2);expect(defer).toHaveBeenCalledTimes(1);expect(complete).not.toHaveBeenCalled();
+});
 it('does not take over external tasks and does not promise unavailable platform execution',async()=>{
  const complete=vi.fn(async()=>tool('bambook_task',{action:'finish',outcome:'succeeded',result:'核对结束。'})),f=await fixture(complete);
  await f.human.post(f.base+'/agent-tasks').send({requestId:randomUUID(),identityId:f.id,name:'平台任务',instructions:'核对资料。',executor:'platform'}).expect(503);

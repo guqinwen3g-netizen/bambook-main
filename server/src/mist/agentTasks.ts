@@ -181,11 +181,13 @@ function platformEffect(c:TaskRecord,requestId:string,result:unknown){
   const pending=c.platform?.steps.at(-1);if(!pending||pending.result!==undefined||![pending.id,'mcp-'+pending.id].includes(requestId))return;
   c.platform={...c.platform!,steps:compactPlatformTaskSteps(c.platform!.steps.map(s=>s.id===pending.id?{...s,result}:s)),nextRunAt:0,issue:undefined,retryAt:undefined,failures:0};
 }
-export type PlatformTaskJob={workspaceId:string;taskId:string;ownerId:string;version:number};
+export type PlatformTaskJob={workspaceId:string;taskId:string;ownerId:string;version:number;exhausted?:boolean};
 /** Metadata-only scheduler scan; task contents are not released before fresh owner/scope checks. */
 export async function duePlatformTasks(db:any,now:number,take=2):Promise<PlatformTaskJob[]>{
   const rows=await db.mistCommandReceipt.findMany({where:{inputHash:TASK_HASH,requestId:{startsWith:TASK_PREFIX},AND:[{result:{path:[TASK_FIELD,'executor'],equals:'platform'}},{OR:['queued','running'].map(state=>({result:{path:[TASK_FIELD,'state'],equals:state}}))},{result:{path:[TASK_FIELD,'expiresAt'],gte:now+1}},{result:{path:[TASK_FIELD,'stepsUsed'],lte:STEP_LIMIT-1}},{result:{path:[TASK_FIELD,'platform','nextRunAt'],lte:now}}]},orderBy:[{createdAt:'asc'},{id:'asc'}],take});
-  return rows.flatMap((row:any)=>{let c:TaskRecord;try{c=record(row,row.workspaceId);}catch{return[];}if(c.executor!=='platform'||!c.platform||!Array.isArray(c.platform.steps)||usedRuntime(c,now)>=RUNTIME_LIMIT)return[];return[{workspaceId:c.workspaceId,taskId:c.id,ownerId:c.ownerId,version:c.version}];});
+  // Return spent grants as metadata work: filtering them after `take` can hide every
+  // later runnable task forever. They must be parked before the next bounded scan.
+  return rows.flatMap((row:any)=>{let c:TaskRecord;try{c=record(row,row.workspaceId);}catch{return[];}if(c.executor!=='platform'||!c.platform||!Array.isArray(c.platform.steps))return[];return[{workspaceId:c.workspaceId,taskId:c.id,ownerId:c.ownerId,version:c.version,...(usedRuntime(c,now)>=RUNTIME_LIMIT?{exhausted:true}:{})}];});
 }
 export async function savePlatformPlan(db:any,actor:AgentActor,lease:AgentTaskLease,plan:PlatformTaskPlan,now:number){
   await lockTaskRecord(db,lease.workspaceId,lease.taskId);const{row,value:c}=await assertTaskLease(db,actor,lease,now);
@@ -215,11 +217,12 @@ export async function releasePlatformTask(db:any,actor:AgentActor,lease:AgentTas
   if(issue)n.platform.checkpointBeforeIssue=c.platform.checkpointBeforeIssue??c.checkpoint;
   await save(db,row,c,n);await event(db,n,actor,action,requestId,now);
 }
-/** An unavailable owner may defer metadata, never authorize or revive execution. */
+/** Deferring metadata never authorizes execution. A spent grant cannot regain its budget. */
 export async function deferPlatformJob(db:any,job:PlatformTaskJob,now:number){
   await lockTaskRecord(db,job.workspaceId,job.taskId);const{row,value:c}=await taskRecord(db,job.workspaceId,job.taskId);
   if(c.executor!=='platform'||!c.platform||c.ownerId!==job.ownerId||c.version!==job.version||!['queued','running'].includes(c.state))return;
-  await save(db,row,c,{...c,version:c.version+1,platform:{...c.platform,nextRunAt:now+300_000}});
+  const exhausted=usedRuntime(c,now)>=RUNTIME_LIMIT||c.stepsUsed>=STEP_LIMIT;
+  await save(db,row,c,{...c,version:c.version+1,platform:{...c.platform,nextRunAt:exhausted?c.expiresAt:now+300_000}});
 }
 async function pastOperation(db: any, c: TaskRecord, requestId: string, action: string, input: unknown) {
   if (replay(c, action, requestId, input)) return true;
