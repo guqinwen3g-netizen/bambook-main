@@ -7,6 +7,7 @@ import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
 import type { PermissionScope } from '../_shared/rolePermissionMatrix';
 import type { MistState } from '../shared/mistWorkspace';
+import { emailSendEffectiveStatus, emailSendRecipients } from '../shared/mistEmail';
 import { MistApiError } from './errors';
 
 type ObjectType = { type: string; label: string; scope: PermissionScope; path: string[]; view: string; section?: string; linkId?: (row: any) => string | undefined };
@@ -14,6 +15,8 @@ type ObjectType = { type: string; label: string; scope: PermissionScope; path: s
 /** 首批可读对象。view 与前端路由一致，链接由页面用 go(view, id) 打开。 */
 export const AGENT_OBJECT_TYPES: ObjectType[] = [
   { type: 'email', label: '邮件', scope: 'emails:read', path: ['email', 'messages'], view: 'emails' },
+  { type: 'email_draft', label: '邮件草稿', scope: 'emails:read', path: ['email', 'drafts'], view: 'emails' },
+  { type: 'email_send', label: '邮件发送记录', scope: 'emails:read', path: ['email', 'sends'], view: 'emails', linkId:r=>r.supersededById?undefined:r.status==='sent'?r.sentMessageId:r.id },
   { type: 'customer', label: '客户', scope: 'relations:read', path: ['customers'], view: 'crm' },
   { type: 'contact', label: '联系人', scope: 'relations:read', path: ['contacts'], view: 'crm', linkId: r => r.customerId },
   { type: 'order', label: '订单', scope: 'orders:read', path: ['orders'], view: 'orders/detail' },
@@ -53,7 +56,17 @@ function deny(code: string, message: string, status = 400): never { throw new Mi
 function rows(state: MistState, type: ObjectType): any[] {
   let value: any = state;
   for (const key of type.path) value = value?.[key];
-  return Array.isArray(value) ? value.filter(r => r && typeof r === 'object' && typeof r.id === 'string') : [];
+  return Array.isArray(value) ? value.filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(row=>mailReadRecord(type.type,row)) : [];
+}
+/** Only the public mail record is model-visible; request keys and raw transport replies stay internal. */
+function mailReadRecord(type:string,row:any){
+  if(!['email_draft','email_send'].includes(type))return row;
+  const common={id:row.id,subject:row.subject,accountId:row.accountId,...(type==='email_send'?{status:row.status,effectiveStatus:emailSendEffectiveStatus(row)}:{}),from:row.from,to:row.to,cc:row.cc,bcc:row.bcc,createdAt:row.createdAt,updatedAt:row.updatedAt,body:row.body,replyToId:row.replyToId};
+  if(type==='email_draft')return{...common,updatedBy:row.updatedBy,template:row.template,links:row.links,fileIds:row.fileIds};
+  const recipients=emailSendRecipients(row),recipientCounts={pending:0,accepted:0,rejected:0,failed:0,unknown:0};
+  for(const recipient of recipients){const status=Object.prototype.hasOwnProperty.call(recipientCounts,recipient.status)?recipient.status:'unknown';recipientCounts[status]++;}
+  const attempts=(row.attempts??[]).map((a:any)=>({at:a.at,actor:a.actor,outcome:a.outcome,code:a.code,message:a.message,recipients:a.recipients}));
+  return{...common,draftId:row.draftId,sentMessageId:row.sentMessageId,forwardOfId:row.forwardOfId,supersededById:row.supersededById,createdBy:row.createdBy,createdById:row.createdById,recipients:recipients.map(r=>({address:r.address,role:r.role,status:r.status,reply:r.reply,at:r.at})),recipientCounts,attemptCount:attempts.length,latestAttempt:attempts.at(-1)??null,attempts,links:row.links,fileIds:row.fileIds};
 }
 function readable(actor: TokenPayload) { return AGENT_OBJECT_TYPES.filter(t => hasScope(actor, t.scope)); }
 function typeOf(name: unknown, actor: TokenPayload): ObjectType {
@@ -129,12 +142,17 @@ function find(state: MistState, actor: TokenPayload, typeName: unknown, id: unkn
 
 export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown) {
   const { type, row } = find(state, actor, typeName, id);
-  let data = compact(row, type.type === 'email' ? 5 : 3) as Record<string, unknown>;
-  if(type.type==='email'&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
+  const mail=['email','email_draft','email_send'].includes(type.type);
+  let data = compact(row, mail ? 5 : 3) as Record<string, unknown>;
+  if(mail&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
   let text = JSON.stringify(data);
-  let truncated = (type.type==='email'&&typeof row.body==='string'&&row.body.length>10_000) || detailsTruncated(row,type.type==='email'?5:3,true,type.type==='email');
-  if (text.length > GET_LIMIT) { data = compact(row, 1) as Record<string, unknown>; text = JSON.stringify(data); truncated = true; }
-  if (text.length > GET_LIMIT) { data = summary(row); truncated = true; }
+  let truncated = (mail&&typeof row.body==='string'&&row.body.length>10_000) || detailsTruncated(row,mail?5:3,true,mail);
+  if (text.length > GET_LIMIT) {
+    data = compact(row, 1) as Record<string, unknown>;
+    if(type.type==='email_send'){Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)});data.recipients=compact(row.recipients,3);}
+    text = JSON.stringify(data); truncated = true;
+  }
+  if (text.length > GET_LIMIT) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)});truncated = true; }
   return { ...ref(type, row), data, truncated };
 }
 

@@ -127,3 +127,11 @@ it('retains a human owner’s closed-task history after key revocation without r
  expect(await f.current()).toMatchObject({state:'succeeded',name:'整理来信',result:'当前核对结果保留。'});
  await f.tool(token,'bambook_task',{workspaceId:f.workspace.id,action:'status'},401);
 });
+it('does not overwrite a human edit to a draft after the task read its current draft object',async()=>{
+ const f=await setup(),account=f.workspace.state.email.accounts[0],input={accountId:account.id,from:account.address,to:'buyer@example.test',cc:'',bcc:'',subject:'Draft review',body:'Agent version',template:'',links:[],fileIds:[]};
+ const created=await f.command('email.draft.save',{input}),id=created.body.receipt.result.id,token=await f.claim();
+ const read=await f.tool(token,'bambook_get',{workspaceId:f.workspace.id,type:'email_draft',id});expect(read.structuredContent.object.data.body).toBe('Agent version');
+ await f.command('email.draft.save',{id,input:{...input,body:'Human corrected version'}});
+ const attempt=await f.tool(token,'bambook_execute',{workspaceId:f.workspace.id,requestId:randomUUID(),command:{type:'email.draft.save',payload:{id,input}}});expect(attempt.isError).toBe(true);
+ const current=(await f.human.get(f.base).expect(200)).body.workspace;expect(current.state.email.drafts.find((d:any)=>d.id===id).body).toBe('Human corrected version');
+});
