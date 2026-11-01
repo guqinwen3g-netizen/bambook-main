@@ -57,6 +57,8 @@ const REGISTRY_ONLY_FILES = new Set([
   'server/src/auth/permissionGuard.ts',
   'components/AdminPanel.tsx',
   'services/authService.ts',
+  // Grant list for company administrators (4cdadcfb); listing a scope here is not an enforcement point.
+  'server/src/auth/companyAdministration.ts',
 ]);
 
 const SKIP_DIRS = new Set([
@@ -94,13 +96,12 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'tax:write', reason: 'module-absent', note: '无 tax 域模块目录' },
   { scope: 'tax:approve', reason: 'module-absent', note: '无 tax 域模块目录（退税审批实际走别处，未用本码）' },
   { scope: 'fx:lock', reason: 'module-absent', note: '无 fx 域模块目录（锁汇功能未实现）' },
-  { scope: 'settings:account', reason: 'module-absent', note: '无 settings 域模块目录' },
+  { scope: 'settings:account', reason: 'module-absent', note: '公司管理员授权清单含此码（companyAdministration），但无页面或接口按它判定' },
   { scope: 'sensitive:tax_base', reason: 'module-absent', note: '敏感掩码域只有 bom/dashboard/finance/pricing，无 tax_base 掩码' },
 
   // ── 功能存在，但无 scope 强制点 ──
-  { scope: 'dashboard:read', reason: 'no-scope-enforcement', note: 'dashboard 路由实际用 cockpit:read（VIEW_TO_MAIN_SCOPES[View.Cockpit] 对齐）' },
-  { scope: 'users:read', reason: 'no-scope-enforcement', note: '后台管理走 requireRole（admin/route.ts），非 scope 门' },
-  { scope: 'users:write', reason: 'no-scope-enforcement', note: '同上（创建/编辑/角色分配走 requireRole）' },
+  { scope: 'dashboard:read', reason: 'no-scope-enforcement', note: '首页按 cockpit:read 判定；公司管理员授权清单中的 dashboard:read 无判定点' },
+  { scope: 'users:read', reason: 'no-scope-enforcement', note: '后台管理走 requireRole（admin/route.ts）；公司管理员授权清单中的 users:read 无判定点' },
   { scope: 'knowledge:admin', reason: 'no-scope-enforcement', note: '数据中心管理未按本码把关' },
   { scope: 'audit:export', reason: 'no-scope-enforcement', note: '审计导出未按本码把关' },
   { scope: 'moq:capsule_exemption:write', reason: 'no-scope-enforcement', note: 'moq 模块存在，胶囊豁免写未按本码把关（另有 settings:moq:write / moq:line_override 已接通）' },
