@@ -15,8 +15,9 @@ let directory:string;
 const clients:Client[]=[],servers:Server[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'agent-task-protocol-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
 afterEach(async()=>{await Promise.all(clients.splice(0).map(c=>c.close()));await Promise.all(servers.splice(0).map(s=>new Promise<void>(resolve=>{s.close(()=>resolve());s.closeAllConnections();})));vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
-async function setup(mode:'read'|'operate'='operate'){
- const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
+async function setup(mode:'read'|'operate'='operate',ceiling?:{value:string[]|null}){
+ const local=createMistLocalRuntime({directory});if(ceiling){const authorize=local.authorize;local.authorize=(db,prior,permission)=>authorize(db,ceiling.value===null?prior:{...prior,permissionCeiling:ceiling.value},permission);}
+ const app=createMistServer(undefined,{local}),human=request.agent(app);await human.get('/api/mist/session').expect(200);
  let workspace=(await human.get('/api/mist/workspaces/default').expect(200)).body.workspace;
  const base='/api/mist/workspaces/'+workspace.id,id=randomUUID();
  await human.post(base+'/agent-identities').send({id,name:'订单助理',ownerId:'local-operator',mode}).expect(201);
@@ -146,4 +147,29 @@ it('keeps legacy REST query and related results within their old type set until 
  const related=f.base+'/agent/objects/email/'+input.replyToId+'/related';const oldRelated=(await request(f.app).get(related).set(SERVICE_KEY_HEADER,f.key).expect(200)).body;expect(oldRelated.object.related.some((r:any)=>r.type==='email_draft')).toBe(false);
  const newRelated=(await request(f.app).get(related).set(SERVICE_KEY_HEADER,f.key).query({includeMailRecords:'1'}).expect(200)).body;expect(newRelated.object.related).toContainEqual(expect.objectContaining({type:'email_draft',id}));
  await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({includeMailRecords:'invalid'}).expect(400);
+});
+
+it('allows an authenticated owner to stop an existing task after AI use permission is removed, without restoring its content or execution',async()=>{
+ const ceiling:{value:string[]|null}={value:null},f=await setup('operate',ceiling),token=await f.claim();ceiling.value=[];
+ const list=(await f.human.get(f.base+'/agent-tasks').expect(200)).body;expect(list.items).toContainEqual(expect.objectContaining({id:f.task.id,state:'access_changed',instructions:'',result:''}));
+ const current=await f.current();expect(current.instructions).toBe('');expect(current.canControl).toBe(true);
+ await f.human.get(f.base+'/agent-tasks/'+f.task.id+'/history').expect(200);
+ await f.human.post(f.base+'/agent-tasks').send({requestId:randomUUID(),identityId:f.id,name:'New task',instructions:'Not authorized'}).expect(403);
+ await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:current.version}).expect(403);
+ const identities=(await f.human.get(f.base+'/agent-identities').query({scope:'mine'}).expect(200)).body;expect(identities.items.find((i:any)=>i.id===f.id)).toMatchObject({canIssue:false,canRevoke:true});
+ const paused=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/pause').send({requestId:randomUUID(),version:current.version}).expect(200)).body.item;
+ await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/resume').send({requestId:randomUUID(),version:paused.version}).expect(403);
+ const cancelId=randomUUID(),cancelBody={requestId:cancelId,version:paused.version};const cancelled=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/cancel').send(cancelBody).expect(200)).body.item;expect(cancelled.state).toBe('cancelled');
+ await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/cancel').send(cancelBody).expect(200);
+ await f.human.post(f.base+'/agent-identities/'+f.id+'/revoke').send({requestId:randomUUID()}).expect(200);
+ ceiling.value=null;await f.tool(token,'bambook_query',{workspaceId:f.workspace.id,type:'email'},401);
+});
+it('permits owner rejection of an old task proposal after AI permission loss and keeps underlying mail unchanged',async()=>{
+ const ceiling:{value:string[]|null}={value:null},f=await setup('operate',ceiling),token=await f.claim(),id=f.workspace.state.email.messages[0].id;
+ const proposed=await f.tool(token,'bambook_execute',{workspaceId:f.workspace.id,requestId:randomUUID(),command:{type:'email.move',payload:{id,folder:'archive'}}}),proposalId=proposed.structuredContent.receipt.result.id;
+ const before=await f.local.database.mistWorkspace.findFirst({where:{id:f.workspace.id}}),originalFolder=before.state.email.messages.find((m:any)=>m.id===id).folder;ceiling.value=[];
+ const visible=(await f.human.get(f.base).expect(200)).body.workspace;expect(visible.state.agentProposals.find((p:any)=>p.id===proposalId).unavailable).toBe(true);
+ await f.command('agent.proposal.reject',{id:proposalId,note:'Stop this suggestion'});
+ const after=await f.local.database.mistWorkspace.findFirst({where:{id:f.workspace.id}});expect(after.state.email.messages.find((m:any)=>m.id===id).folder).toBe(originalFolder);expect(after.state.agentProposals.find((p:any)=>p.id===proposalId).state).toBe('rejected');
+ await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/resume').send({requestId:randomUUID(),version:(await f.current()).version}).expect(403);
 });

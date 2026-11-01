@@ -794,8 +794,8 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('rebate.'))return exportRebateCommandPermission(command as ExportRebateCommand);
   if(command.type.startsWith('fxrate.'))return fxCommandPermission(command as FxRateCommand);
   if(command.type.startsWith('opening.'))return openingCommandPermission(command as OpeningCommand);
-  if(command.type.startsWith('agent.proposal.'))return agentProposalCommandPermission();
-  if(command.type==='agent.task.cancel')return 'ai:chat';
+  if(command.type.startsWith('agent.proposal.'))return agentProposalCommandPermission(command.type);
+  if(command.type==='agent.task.cancel')return null;
   if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
   if(command.type.startsWith('lc.'))return lcCommandPermission(command as LcCommand);
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.'))return rfqCommandPermission(command as RfqCommand);

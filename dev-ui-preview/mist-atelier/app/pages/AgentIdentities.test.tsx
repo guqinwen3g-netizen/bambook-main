@@ -36,3 +36,10 @@ it('shows lifecycle history without implying that a revoked key is enabled',asyn
  act(()=>paint());await flush();await act(async()=>getByRole(host,'button',{name:'操作记录',exact:true}).click());await flush();
  const dialog=getByRole(document.body,'dialog',{name:'操作记录'});expect(getByText(dialog,'撤销密钥 · 林舒')).toBeTruthy();expect(dialog.textContent).not.toContain('身份启用');expect(dialog.textContent).not.toContain('长期密钥');
 });
+it('lets the owner revoke an issued key after AI access is lost without exposing issuance',async()=>{
+ const lost={...row(),state:'invalid',canManage:false,canIssue:false,canRevoke:true,activatedAt:'2026-11-01T00:00:00Z',expiresAt:'2027-01-30T00:00:00Z'};
+ seam.api.mockImplementation((url:string,init:any)=>Promise.resolve(init?.method==='POST'?{identity:{...lost,state:'revoked',canRevoke:false}}:{...page(),items:[lost]}));
+ act(()=>paint());await flush();expect(queryByRole(host,'button',{name:'轮换密钥'})).toBeNull();expect(queryByRole(host,'button',{name:'启用凭据'})).toBeNull();
+ await act(async()=>getByRole(host,'button',{name:'撤销',exact:true}).click());await flush();await act(async()=>getByRole(document.body,'button',{name:'确认撤销'}).click());await flush();
+ const writes=seam.api.mock.calls.filter(([,init])=>init?.method==='POST');expect(writes).toHaveLength(1);expect(writes[0][0]).toMatch(/\/agent-identities\/identity\/revoke$/);expect(JSON.parse(writes[0][1].body)).toEqual({requestId:expect.any(String)});
+});

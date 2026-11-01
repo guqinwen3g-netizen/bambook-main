@@ -63,3 +63,12 @@ it('does not treat being a company library creator as current member-management 
  const row=db.workspaces.get(workspaceId);row.ownerId='sales';row.state.agentProposals[0].command={type:'member.groups.set',payload:{userId:'sales',groups:['garment']}};
  expect((await repo.get(actor,workspaceId)).state.agentProposals![0].unavailable).toBe(true);
 });
+it('lets an active company member reject only their own stale suggestion when all AI/business permissions are removed',async()=>{
+ auth.users.get('sales')!.permissions=[];const before=JSON.stringify(db.workspaces.get(workspaceId).state.orders);
+ await repo.execute(actor,workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'agent.proposal.reject',payload:{id:'proposal'}}});
+ expect(db.workspaces.get(workspaceId).state.agentProposals[0].state).toBe('rejected');expect(JSON.stringify(db.workspaces.get(workspaceId).state.orders)).toBe(before);
+});
+it('does not turn company library ownership into permission to reject another person’s proposal',async()=>{
+ const row=db.workspaces.get(workspaceId);row.ownerId='sales';row.state.agentProposals[0].ownerId='other';auth.users.get('sales')!.permissions=[];
+ await expect(repo.execute(actor,workspaceId,{requestId:randomUUID(),expectedRevision:0,command:{type:'agent.proposal.reject',payload:{id:'proposal'}}})).rejects.toMatchObject({code:'NOT_FOUND'});expect(db.workspaces.get(workspaceId).state.agentProposals[0].state).toBe('pending');
+});

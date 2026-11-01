@@ -38,7 +38,7 @@ export async function identityRecord(db:any,workspaceId:string,id:string){const 
 export function identityView(c:AgentIdentity,actor:TokenPayload,now:number,ownerActive=true,ownerName=c.ownerName):AgentIdentityView{
   const key=c.key,own=c.ownerId===actor.userId;
   const state=!c.enabled?'disabled':!ownerActive?'invalid':!key?'pending':key.revokedAt?'revoked':key.expiresAt<=now?'expired':own&&(!hasScope(actor,'ai:chat')||key.credentialVersion!==actor.credentialVersion)?'invalid':'active';
-  return{id:c.id,name:c.name,ownerId:c.ownerId,ownerName,mode:c.mode,version:c.version,state,createdAt:c.createdAt,...(key?{expiresAt:new Date(key.expiresAt).toISOString(),activatedAt:new Date(key.issuedAt).toISOString()}:{}),canManage:serviceCanManage(actor),canIssue:own&&c.enabled&&hasScope(actor,'ai:chat')};
+  return{id:c.id,name:c.name,ownerId:c.ownerId,ownerName,mode:c.mode,version:c.version,state,createdAt:c.createdAt,...(key?{expiresAt:new Date(key.expiresAt).toISOString(),activatedAt:new Date(key.issuedAt).toISOString()}:{}),canManage:serviceCanManage(actor),canIssue:own&&c.enabled&&hasScope(actor,'ai:chat'),canRevoke:(own||serviceCanManage(actor))&&!!key&&!key.revokedAt};
 }
 async function save(db:any,row:any,c:AgentIdentity,next:AgentIdentity){
   const updated=await db.mistCommandReceipt.updateMany({where:{id:row.id,workspaceId:c.workspaceId,inputHash:SERVICE_HASH,result:{path:[SERVICE_FIELD,'version'],equals:c.version}},data:{actorId:next.ownerId,result:{revision:0,[SERVICE_FIELD]:next}}});

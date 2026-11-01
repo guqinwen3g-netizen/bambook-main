@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from 'vitest';
 import { createHash, randomUUID } from 'node:crypto';
 import { MemoryMistDatabase } from './__tests__/support';
-import { createIdentity, issueServiceKey, revokeServiceKey } from './agentIdentities';
+import { createIdentity, identityRecord, identityView, issueServiceKey, revokeServiceKey } from './agentIdentities';
 import { assertTaskLease, changeTask, checkpointTask, claimTask, createTask, finishTask, heartbeatTask, reserveTaskStep, settleTaskProposal, taskRecord, taskView, waitTaskForProposal, type AgentTaskLease } from './agentTasks';
 import type { AgentActor } from './agentDelegation';
 import type { TokenPayload } from '../auth/service';
@@ -96,4 +96,13 @@ it('accumulates runtime across pause/resume and refuses renewal beyond the total
   for (let n=1;n<89;n++) { now+=20_000; await tx(d => heartbeatTask(d, actor, second.lease, n, now)); }
   now+=20_000; await expect(tx(d => heartbeatTask(d, actor, second.lease, 89, now))).rejects.toMatchObject({ code:'AGENT_TASK_LEASE_INVALID' });
   expect(taskView((await tx(d => taskRecord(d,workspaceId,taskId))).value,actor,now).state).toBe('budget_exhausted');
+});
+
+it('keeps owner cleanup available without AI but never gives another user the same personal controls',async()=>{
+ const c=(await tx(d=>taskRecord(d,workspaceId,taskId))).value,limited={...actor,permissions:[],permissionCeiling:[]},other={...limited,userId:'other'};
+ expect(taskView(c,limited,now)).toMatchObject({state:'access_changed',instructions:'',canControl:true});expect(()=>taskView(c,other,now)).toThrow();
+ await expect(tx(d=>changeTask(d,other,workspaceId,taskId,'cancel',{requestId:'other-stop',version:c.controlVersion},now,[]))).rejects.toMatchObject({code:'NOT_FOUND'});
+ const identity=(await tx(d=>identityRecord(d,workspaceId,identityId))).value;expect(identityView(identity,limited,now)).toMatchObject({canManage:false,canIssue:false,canRevoke:true});expect(identityView(identity,other,now).canRevoke).toBe(false);
+ await expect(tx(d=>revokeServiceKey(d,other,workspaceId,identityId,{requestId:'other-revoke'},now))).rejects.toMatchObject({status:403});
+ await tx(d=>revokeServiceKey(d,limited,workspaceId,identityId,{requestId:'owner-revoke'},now));expect(identityView((await tx(d=>identityRecord(d,workspaceId,identityId))).value,limited,now).canRevoke).toBe(false);
 });

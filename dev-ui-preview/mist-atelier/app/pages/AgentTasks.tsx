@@ -59,7 +59,7 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
   finally{if(alive.current&&epoch===writeGeneration.current)setBusy(false);}
  };
  const copy=async(text:string)=>{try{await navigator.clipboard.writeText(text);if(alive.current)toast(uiText('已复制'),'ok');}catch{if(alive.current)setError('复制失败，请重试');}};
- const active=identities.filter(i=>i.state==='active'),create=plan?.kind==='create'?plan:null;
+ const active=identities.filter(i=>i.state==='active'),aiUnavailable=identities.some(i=>i.state==='invalid'&&i.canIssue===false),create=plan?.kind==='create'?plan:null;
  const columns:Column<AgentTaskView>[]=[{key:'name',header:uiText('任务'),render:r=><div className="mist-col"><span className="mist-cell-strong">{r.name}</span><span className="mist-cell-sub">{r.identityName}</span></div>},{key:'state',header:uiText('状态'),width:'118px',render:r=><Pill tone={tone(r.state)}>{uiText(r.state==='queued'&&r.lastHeartbeatAt?'待重新领取':LABEL[r.state])}</Pill>},{key:'usage',header:uiText('业务操作'),width:'90px',render:r=><span>{r.stepsUsed} / {r.stepLimit}</span>,hideOnMobile:true}];
  const control=(row:AgentTaskView)=><div className="mist-row" data-wrap>
   {!['succeeded','failed','cancelled','expired','budget_exhausted','access_changed'].includes(row.state)&&<Button disabled={!endpoint||busy} onClick={()=>begin({kind:'issue',requestId:crypto.randomUUID(),row})}>{uiText('连接Agent')}</Button>}
@@ -68,7 +68,7 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
   {row.canControl&&<Button variant="quiet" disabled={busy} onClick={()=>begin({kind:'cancel',requestId:crypto.randomUUID(),row})}>{uiText('停止任务')}</Button>}
  </div>;
  return <div className="mist-col">
-  <div className="mist-row"><span className="mist-spacer"/><Button icon={RefreshCw} disabled={loading||busy} onClick={()=>void currentLoad.current()}>{uiText('刷新')}</Button><Button variant="primary" icon={Plus} disabled={busy||loading||!active.length} title={uiText(!active.length?'请先启用Agent连接':undefined)} onClick={()=>begin({kind:'create',requestId:crypto.randomUUID(),identityId:'',name:'',instructions:''})}>{uiText('新建任务')}</Button></div>
+  <div className="mist-row"><span className="mist-spacer"/><Button icon={RefreshCw} disabled={loading||busy} onClick={()=>void currentLoad.current()}>{uiText('刷新')}</Button><Button variant="primary" icon={Plus} disabled={busy||loading||!active.length} title={uiText(aiUnavailable?'当前无AI使用权限':!active.length?'请先启用Agent连接':undefined)} onClick={()=>begin({kind:'create',requestId:crypto.randomUUID(),identityId:'',name:'',instructions:''})}>{uiText('新建任务')}</Button></div>
   {error&&<Banner tone="bad" title={error}/>}<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r)} empty={<EmptyState icon={Bot} title={uiText(active.length?'暂无任务':'暂无可用的Agent连接')} action={!active.length?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />
   {page.nextCursor&&<Button onClick={()=>void load(true)}>{uiText('加载更多')}</Button>}
   {detailError&&<Banner tone="bad" title={detailError}/>}
