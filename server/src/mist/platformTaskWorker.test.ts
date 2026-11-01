@@ -71,7 +71,7 @@ it('pauses repeated invalid model output and allows explicit owner recovery on t
  let valid=false,mail='',read=false;const complete=vi.fn(async()=>!valid?'not a tool decision':!read?(read=true,tool('bambook_get',{type:'email',id:mail})):tool('bambook_task',{action:'finish',outcome:'succeeded',result:'已核对原邮件。'}));
  const f=await fixture(complete);mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform');let clock=Date.now();vi.spyOn(Date,'now').mockImplementation(()=>clock);
  for(let i=0;i<3;i++){await f.drain();clock+=300_001;}let state=await f.current(task.id);expect(state.state).toBe('paused');expect(state.executionIssue).toEqual({code:'model_response_invalid'});await f.drain();expect(complete).toHaveBeenCalledTimes(3);valid=true;
- await f.human.post(f.base+'/agent-tasks/'+task.id+'/resume').send({requestId:randomUUID(),version:state.version}).expect(200);await f.drain();expect((await f.current(task.id)).state).toBe('succeeded');
+ const resumed=await f.human.post(f.base+'/agent-tasks/'+task.id+'/resume').send({requestId:randomUUID(),version:state.version}).expect(200);expect(resumed.body.item).toMatchObject({state:'queued',checkpoint:''});await f.drain();expect((await f.current(task.id)).state).toBe('succeeded');
 });
 it('rechecks authority before saving a late model decision and retains owner cleanup after AI loss',async()=>{
  const ceiling:{value:string[]|null}={value:null};let resolve!:(text:string)=>void;const complete=vi.fn(()=>new Promise<string>(done=>{resolve=done;})),f=await fixture(complete,{ceiling});f.worker.start(3_600_000);const task=await f.create('platform'),before=f.workspace.state.email;

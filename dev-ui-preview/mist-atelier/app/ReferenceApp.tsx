@@ -42,6 +42,7 @@ import { workspaceSearchRecords } from './runtime/search';
 import { apiService } from '../../../services/apiService';
 import { platformBusinessDate } from '../../../server/src/shared/mistPlatform';
 import { visibleMistNotifications, mistDailyDigest } from './runtime/notificationPreferences';
+import {readAllMistNotices,readMistNotice} from './runtime/agentTaskNotices';
 import { DEVELOPMENT_LIST_TABS, developmentCreateTarget, developmentListTab, developmentListTarget, type DevelopmentListTab } from './developmentEntry';
 const SEARCH_ICONS: Record<string, typeof Layers> = { 开发案: Layers, 订单: ClipboardList };
 // Only the separate reference preview enables developer showcase pages.
@@ -153,7 +154,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const [exitingSupport, setExitingSupport] = React.useState(false);
   const organization = useOrganizationContext(), teamView = useTeamView(session.user?.id ? `${session.user.companyId ?? 'local'}:${session.user.id}` : undefined, organization.teams);
   const [organizationOpen, setOrganizationOpen] = React.useState(false);
-  const visibleNotifications=visibleMistNotifications(state,view=>session.canAccessView(view as View));
+  const visibleNotifications=visibleMistNotifications(state,view=>session.canAccessView(view as View),workspace.agentTaskNotices?.items);
   const dailyDigest=mistDailyDigest(state,platformBusinessDate(businessNow()),view=>session.canAccessView(view as View));
   const canDevelopment=session.canAccessView('development' as View), canOrders=session.canAccessView('orders' as View), canCustomers=session.canAccessView('crm' as View), canProduction=session.canAccessView('production-board' as View);
   const [route, setRoute] = React.useState<Route>(readMistRoute);
@@ -389,9 +390,10 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
       <CommandPalette open={palette} onClose={() => setPalette(false)} query={query} onQueryChange={setQuery} items={commands} />
       <AssistantDrawer key={aiScope} open={ai} onClose={() => setAI(false)} messages={[overview(),...msgs,...(aiBusy?[{role:'typing'} as ChatMessage]:[])]} onSend={question=>void send(question)} sub={uiText(aiBusy?'正在生成':undefined)} suggestions={aiBusy?[]:['根据当前事实建议下一步','哪些信息还需要核实']} />
       <Drawer open={notifications} onClose={()=>setNotifications(false)} title={uiText("通知")} sub={uiText("来自当前公司的操作记录")}
-        footer={<><Button variant="quiet" onClick={()=>{setNotifications(false);go('notifications');}}>{uiText("查看全部通知")}</Button><Button disabled={!visibleNotifications.some(n=>!n.readAt)} loading={workspace.saving} onClick={()=>void workspace.run({type:'notification.readAll',payload:{}}).catch(report)}>{uiText("全部标为已读")}</Button></>}>
+        footer={<><Button variant="quiet" onClick={()=>{setNotifications(false);go('notifications');}}>{uiText("查看全部通知")}</Button><Button disabled={!visibleNotifications.some(n=>!n.readAt)} loading={workspace.saving||workspace.agentTaskNotices?.reading} onClick={()=>void readAllMistNotices(workspace,visibleNotifications).catch(report)}>{uiText("全部标为已读")}</Button></>}>
+        {workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
         {state?.settings.notifications.digest&&<Card><CardHeader title={uiText("今日工作摘要")} sub={uiText("按当前记录生成 · 不发送邮件")}/><div className="mist-card-body">{dailyDigest.length?dailyDigest.map(item=><p key={item.id}><Button variant="quiet" onClick={()=>go(item.target.view,item.target.id,item.target)}>{uiText(item.label)} · {item.detail}</Button></p>):<p>{uiText("今天没有待处理事项。")}</p>}</div></Card>}
-        {visibleNotifications.length?visibleNotifications.slice().reverse().map(n=><Card key={n.id}><CardHeader title={uiText(n.title)} sub={uiText(new Date(n.at).toLocaleString())} tools={<Button variant="quiet" onClick={()=>{void (n.readAt?Promise.resolve():workspace.run({type:'notification.read',payload:{id:n.id}})).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{uiText(n.readAt?'查看':'阅读')}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title={uiText("暂无通知")} />}
+        {visibleNotifications.length?visibleNotifications.map(n=><Card key={n.id}><CardHeader title={uiText(n.title)} sub={uiText(new Date(n.at).toLocaleString())} tools={<Button variant="quiet" disabled={workspace.agentTaskNotices?.reading} onClick={()=>{void readMistNotice(workspace,n).then(()=>{if(n.target)go(n.target.view,n.target.id,n.target);}).catch(report);}}>{uiText(n.readAt?'查看':'阅读')}</Button>} /><p className="mist-card-body">{n.detail}</p></Card>):<EmptyState title={uiText("暂无通知")} />}
       </Drawer>
     </MistDensityContext.Provider></MistReviewProvider></Nav.Provider></AvatarDirectory>
   );

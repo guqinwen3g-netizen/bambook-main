@@ -23,6 +23,8 @@ import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, comp
 import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
+import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
+import {markTaskNoticeRead} from './agentTasks';
 import type {PlatformTaskContext,PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
 import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
@@ -436,6 +438,26 @@ export class MistRepository {
   async listAgentTasks(prior:TokenPayload,workspaceId:string,cursor?:unknown){
     if(isAgentActor(prior)&&(!prior.agentServiceLease||prior.agentTaskLease))fail('FORBIDDEN','请使用执行器管理连接',403);
     return this.transact(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,isAgentActor(prior)?'ai:chat':undefined);const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;return listTasks(db,{...prior,...actor},workspaceId,cursor,Date.now(),c=>this.taskSourcesAllowed(row,actor,c,visible));});
+  }
+  async listAgentTaskNotices(prior:TokenPayload,workspaceId:string){
+    if(isAgentActor(prior))fail('FORBIDDEN','提醒只供本人查看',403);
+    return this.transact(async db=>{
+      const metadataActor=await this.taskAccess(db,prior,workspaceId),now=Date.now(),records=await taskNoticeCandidates(db,workspaceId,metadataActor.userId,now);
+      if(!records.length)return{items:[]};
+      const{actor,row}=await this.own(db,prior,workspaceId),visible=this.view(row,actor).state,items=[];
+      for(const c of records){let valid=this.taskSourcesAllowed(row,actor,c,visible);try{await assertTaskViewAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}const notice=taskNotice(c,taskView(c,actor,now,valid));if(notice)items.push(notice);}
+      return{items:items.sort((a,b)=>b.at.localeCompare(a.at))};
+    });
+  }
+  async readAgentTaskNotices(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>){
+    if(isAgentActor(prior))fail('FORBIDDEN','提醒只供本人管理',403);
+    if(Object.keys(input).some(k=>k!=='items')||!Array.isArray(input.items)||input.items.length>30||input.items.some(i=>!i||typeof i!=='object'||Object.keys(i).some(k=>!['taskId','key'].includes(k))||typeof i.taskId!=='string'||typeof i.key!=='string'))fail('INVALID_INPUT','提醒字段无效',400);
+    return this.connectionTransaction(async db=>{
+      const{actor,row}=await this.own(db,prior,workspaceId),now=Date.now(),visible=this.view(row,actor).state,pending=new Map<string,{key:string;version:number}>();
+      for(const i of input.items as Array<{taskId:string;key:string}>){const c=(await taskRecord(db,workspaceId,i.taskId)).value;let valid=this.taskSourcesAllowed(row,actor,c,visible);try{await assertTaskViewAuthority(db,actor,c,now);}catch(e){if(!(e instanceof MistApiError))throw e;valid=false;}const notice=taskNotice(c,taskView(c,actor,now,valid));if(!notice||notice.key!==i.key)fail('AGENT_TASK_CHANGED','任务已更新，请刷新核对',409);pending.set(c.id,{key:i.key,version:c.version});}
+      for(const[id,value]of pending)await markTaskNoticeRead(db,actor,workspaceId,id,value.key,value.version,now);
+      return{read:true};
+    });
   }
   async getAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,summaryOnly=false){
     if(isAgentActor(prior)&&prior.agentTaskLease&&prior.agentTaskLease.taskId!==taskId)fail('NOT_FOUND','任务不存在或无权访问',404);

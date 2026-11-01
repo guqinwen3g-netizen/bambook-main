@@ -47,6 +47,7 @@ export type TaskRecord = {
   executor?:'platform';
   locale?:ResponseLocale;
   platform?:PlatformTaskProgress;
+  noticeRead?:{key:string;at:string};
   lease?: { id: string; nonce: string; grantHash: string; startedAt: number; expiresAt: number; heartbeatAt: number; sequence: number; claimRequestId: string; workerId: string };
   operations: Array<{ requestId: string; inputHash: string }>;
   lastRequestId: string; lastAction: string; lastInputHash: string;
@@ -263,7 +264,7 @@ export async function changeTask(db: any, actor: TokenPayload, workspaceId: stri
   const n = next(c, now, action, requestId, values); n.controlVersion++; n.runtimeUsedMs = usedRuntime(c, now); n.lease = undefined;
   n.state = action === 'cancel' ? 'cancelled' : action === 'pause' ? 'paused' : pendingProposalIds.length||hasUnansweredQuestion(c) ? 'waiting_human' : 'queued';
   n.waitingProposalIds = action === 'cancel' ? [] : pendingProposalIds;
-  if(n.platform)n.platform={...n.platform,nextRunAt:0,retryAt:undefined,issue:undefined};
+  if(n.platform){if(n.platform.checkpointBeforeIssue!==undefined)n.checkpoint=n.platform.checkpointBeforeIssue;n.platform={...n.platform,nextRunAt:0,retryAt:undefined,issue:undefined,checkpointBeforeIssue:undefined};}
   await save(db, row, c, n); await event(db, n, actor, action, requestId, now); return taskView(n, actor, now);
 }
 /** Missing facts suspend the same durable task; an answer is data, never business approval. */
@@ -376,6 +377,15 @@ export async function advanceTaskSources(db:any,actor:TokenPayload,workspaceId:s
   if(changed)await save(db,row,c,{...c,version:c.version+1,sources});
 }
 export function readTaskRecord(row:any,workspaceId:string){return record(row,workspaceId);}
+/** Reading a personal reminder changes neither the business state nor the task control version. */
+export async function markTaskNoticeRead(db:any,actor:TokenPayload,workspaceId:string,taskId:string,key:string,version:number,now:number){
+  if(isAgentActor(actor))fail('FORBIDDEN','提醒只供本人管理',403);
+  const{row,value:c}=await taskRecord(db,workspaceId,taskId);owner(actor,c);
+  if(c.version!==version)fail('AGENT_TASK_CHANGED','任务已更新，请刷新核对',409);
+  if(!/^[a-f0-9]{64}$/.test(key))fail('INVALID_INPUT','提醒编号无效',400);
+  if(c.noticeRead?.key===key)return;
+  await save(db,row,c,{...c,version:c.version+1,noticeRead:{key,at:new Date(now).toISOString()}});
+}
 export async function taskHistory(db:any,actor:TokenPayload,workspaceId:string,taskId:string,cursor:unknown){
   const c=(await taskRecord(db,workspaceId,taskId)).value;owner(actor,c);
   const where:any={workspaceId,actorId:c.ownerId,inputHash:EVENT_HASH,requestId:{startsWith:EVENT_PREFIX+c.id+':'}};

@@ -10,7 +10,8 @@ import type { View } from '../../../../types';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
-import { visibleMistNotifications } from '../runtime/notificationPreferences';
+import { notificationPermissionView,visibleMistNotifications } from '../runtime/notificationPreferences';
+import {readAllMistNotices,readMistNotice} from '../runtime/agentTaskNotices';
 
 export type NotificationTab = 'unread' | 'all';
 type Category = NonNullable<MistNotification['category']>;
@@ -29,20 +30,20 @@ export function NotificationsPage() {
   const workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), toast = useToast(), state = workspace.state;
   const tab: NotificationTab = route.section === 'all' ? 'all' : 'unread';
   const [kind, setKind] = React.useState<'all' | Category>('all'), [query, setQuery] = React.useState(''), [error, setError] = React.useState('');
-  const visible = visibleMistNotifications(state, view => session.canAccessView(view as View));
+  const visible = visibleMistNotifications(state, view => session.canAccessView(view as View),workspace.agentTaskNotices?.items);
   const unread = visible.filter(n => !n.readAt).length;
   const shown = notificationRows(visible, tab, kind, query);
   const kinds = (Object.keys(NOTIFICATION_CATEGORY_LABEL) as Category[]).filter(c => visible.some(n => category(n) === c));
   const prefs = state?.settings.notifications, off = prefs ? [!prefs.qc && 'QC 报告回传', !prefs.shipping && '出运准备提醒', !prefs.suggestions && '小竹主动建议'].filter(Boolean) as string[] : [];
-  const busy = workspace.saving || !!workspace.pending;
+  const busy = workspace.saving || !!workspace.pending || !!workspace.agentTaskNotices?.reading;
   const report = (failure: unknown) => { const message = failure instanceof Error ? failure.message : '操作未完成，请重试'; setError(message); toast(message, 'bad'); };
-  const canOpen = (n: MistNotification) => !!n.target?.view && session.canAccessView(n.target.view.split('/')[0] as View);
+  const canOpen = (n: MistNotification) => !!n.target?.view && session.canAccessView(notificationPermissionView(n.target.view) as View);
   const open = (n: MistNotification) => {
     if (busy) return;
-    void (n.readAt ? Promise.resolve() : workspace.run({ type: 'notification.read', payload: { id: n.id } }))
+    void readMistNotice(workspace,n)
       .then(() => { if (canOpen(n)) go(n.target.view, n.target.id, n.target); }).catch(report);
   };
-  const readAll = () => { setError(''); void workspace.run({ type: 'notification.readAll', payload: {} }).then(() => toast('已全部标为已读')).catch(report); };
+  const readAll = () => { setError(''); void readAllMistNotices(workspace,visible).then(() => toast('已全部标为已读')).catch(report); };
   const columns: Column<MistNotification>[] = [
     { key: 'title', header: '通知', width: 'minmax(240px,3fr)', render: n => <ObjectCell name={n.readAt ? n.title : <strong>{n.title}</strong>} meta={n.detail} /> },
     { key: 'kind', header: '类型', width: '104px', hideOnMobile: true, render: n => <Pill tone={TONE[category(n)]}>{NOTIFICATION_CATEGORY_LABEL[category(n)]}</Pill> },
@@ -55,6 +56,7 @@ export function NotificationsPage() {
       actions={<><Button icon={Settings2} onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("通知订阅")}</Button>
         <Button variant="primary" icon={CheckCheck} disabled={busy || !unread} loading={workspace.saving} onClick={readAll}>{uiText("全部标为已读")}</Button></>} />
     {error && <Banner tone="bad" title={uiText(error)} actions={<Button size="sm" onClick={() => setError('')}>{uiText("知道了")}</Button>} />}
+    {!error&&workspace.agentTaskNotices?.error&&<Banner tone="bad" title={uiText(workspace.agentTaskNotices.error)} actions={<Button onClick={()=>void workspace.agentTaskNotices?.refresh()}>{uiText('重新加载')}</Button>}/>}
     {!!off.length && <Banner tone="neutral" title={ui`已关闭：${off.join('、')}`} actions={<Button size="sm" onClick={() => go('settings', undefined, { section: 'notify' })}>{uiText("去设置")}</Button>}>{uiText("这些类别的通知不在这里显示，重新开启后会恢复显示。")}</Banner>}
     <Tabs<NotificationTab> value={tab} onChange={next => go('notifications', undefined, { section: next })} options={[{ value: 'unread', label: '未读', count: unread }, { value: 'all', label: '全部', count: visible.length }]} />
     <Toolbar right={kinds.length > 1 ? <Segmented<'all' | Category> ariaLabel={uiText("通知类型")} value={kind} onChange={setKind} options={[{ value: 'all', label: '全部' }, ...kinds.map(c => ({ value: c, label: NOTIFICATION_CATEGORY_LABEL[c] }))]} /> : undefined}>

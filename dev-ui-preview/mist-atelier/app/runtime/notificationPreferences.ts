@@ -1,13 +1,15 @@
 import {mistActivityTitle} from './activityLabels';
-import type {MistState,MistTarget} from '../../../../server/src/shared/mistWorkspace';
+import type {MistNotification,MistState,MistTarget} from '../../../../server/src/shared/mistWorkspace';
 
 type CanRead=(view:string)=>boolean;
-export function visibleMistNotifications(state:MistState|null|undefined,canRead:CanRead){
-  return (state?.notifications??[]).filter(item=>{
-    if(!canRead(item.target.view.split('/')[0]))return false;
+/** Mist's personal-account route uses a different name from the canonical permission view. */
+export const notificationPermissionView=(view:string)=>view==='account'?'account-settings':view.split('/')[0];
+export function visibleMistNotifications(state:MistState|null|undefined,canRead:CanRead,personal:MistNotification[]=[]){
+  return (state?[...state.notifications,...personal]:[]).filter(item=>{
+    if(!canRead(notificationPermissionView(item.target.view)))return false;
     const category=item.category??'general',prefs=state!.settings.notifications;
     return category==='qc'?prefs.qc:category==='shipping'?prefs.shipping:category==='suggestion'?prefs.suggestions:true;
-  }).map(item=>{
+  }).sort((a,b)=>b.at.localeCompare(a.at)).map(item=>{
     let title=mistActivityTitle(state,item.title,item.target),detail=item.detail;
     // Compact the old generated notice in presentation; keep stored communication facts untouched.
     if(item.target.view==='claims'){
