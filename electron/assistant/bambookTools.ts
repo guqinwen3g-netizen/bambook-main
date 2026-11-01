@@ -99,7 +99,7 @@ export function bambookTools(options: {
     },
     {
       ...common, name: 'bambook_get',
-      description: '按 type 和准确 id/编号读取单个业务对象的详情。先 query 获取 id；大字段截短、图片和附件内容不返回。引用时原样使用返回的 link。',
+      description: '按 type 和准确 id/编号读取单个业务对象的详情。先 query 获取 id；大字段截短、图片和附件内容不返回。truncated为true时不能宣称读全或据此覆盖完整字段；发送记录结合effectiveStatus和各收件人结果核对。引用时原样使用返回的 link。',
       parameters: details,
       run: async (args, ctx) => request(`objects/${objectType(args.type)}/${encodeURIComponent(objectId(args.id))}`, ctx.signal, ctx.now()),
     },

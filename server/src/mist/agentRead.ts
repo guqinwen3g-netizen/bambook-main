@@ -58,7 +58,7 @@ function rows(state: MistState, type: ObjectType): any[] {
   for (const key of type.path) value = value?.[key];
   return Array.isArray(value) ? value.filter(r => r && typeof r === 'object' && typeof r.id === 'string').map(row=>mailReadRecord(type.type,row)) : [];
 }
-/** Only the public mail record is model-visible; request keys and raw transport replies stay internal. */
+/** Only public mail facts are model-visible; request keys and the record-level transport response stay internal. */
 function mailReadRecord(type:string,row:any){
   if(!['email_draft','email_send'].includes(type))return row;
   const common={id:row.id,subject:row.subject,accountId:row.accountId,...(type==='email_send'?{status:row.status,effectiveStatus:emailSendEffectiveStatus(row)}:{}),from:row.from,to:row.to,cc:row.cc,bcc:row.bcc,createdAt:row.createdAt,updatedAt:row.updatedAt,body:row.body,replyToId:row.replyToId};

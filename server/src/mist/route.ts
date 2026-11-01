@@ -19,7 +19,7 @@ import { platformProfileList } from '../ai/platformModel';
 import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
 import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
-import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, type McpRepository } from './agentMcp';
+import { handleMcpMessage, MCP_PROTOCOL_VERSIONS, MCP_SOURCE_RULES, type McpRepository } from './agentMcp';
 import { AGENT_DELEGATION_HEADER, agentRouteAllowed, createAgentDelegation, isAgentActor, type AgentDelegation } from './agentDelegation';
 import { agentCatalog, agentGet, agentQuery, agentRelated } from './agentRead';
 import {SERVICE_KEY_HEADER} from './agentIdentities';
@@ -217,7 +217,7 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     if (reply === null) { res.status(202).end(); return; }
     if((req as any).taskSession){
       const response=(reply as any).result;
-      if(req.body?.method==='initialize'&&response?.protocolVersion){res.set('Mcp-Session-Id',(req as any).taskSession);res.append('Access-Control-Expose-Headers','Mcp-Session-Id');response.instructions='此连接仅处理已绑定的公司任务。先用bambook_task的status读取任务内容，再查询当前业务；不必选择公司或填写任务编号。等待本人确认时停止业务操作，确认后重新读取结果再续办。任务结束报告不代替正式业务审批或收付款结果。';}
+      if(req.body?.method==='initialize'&&response?.protocolVersion){res.set('Mcp-Session-Id',(req as any).taskSession);res.append('Access-Control-Expose-Headers','Mcp-Session-Id');response.instructions='此连接仅处理已绑定的公司任务。先用bambook_task的status读取任务内容，再查询当前业务；不必选择公司或填写任务编号。等待本人确认时停止业务操作，确认后重新读取结果再续办。任务结束报告不代替正式业务审批或收付款结果。'+MCP_SOURCE_RULES;}
       if(req.body?.method==='tools/list'&&Array.isArray(response?.tools))response.tools=response.tools.filter((t:any)=>t.name!=='bambook_workspaces').map((t:any)=>{const properties={...t.inputSchema.properties};delete properties.workspaceId;delete properties.taskId;return{...t,inputSchema:{...t.inputSchema,properties,required:(t.inputSchema.required??[]).filter((k:string)=>!['workspaceId','taskId'].includes(k)),additionalProperties:false}};});
     }
     const current=actor(req),tool=req.body?.params?.name,result=(reply as any).result;

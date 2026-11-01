@@ -96,7 +96,7 @@ it('issues a task-only connection, binds and rotates standard MCP sessions witho
  expect(issued.token).toMatch(/^bmc1_/);expect(issued.token).not.toBe(f.key);
  await request(f.app).get(f.base).set(TASK_CONTROL_HEADER,issued.token).expect(403);
  const init=await request(f.app).post('/api/mist/mcp').set(TASK_CONTROL_HEADER,issued.token).send({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'task-client',version:'1'}}}).expect(200);
- const session=init.headers['mcp-session-id'];expect(session).toMatch(/^bms1_/);expect(JSON.stringify(init.body)).not.toMatch(/bma1_|bmt1_|bmc1_/);
+ const session=init.headers['mcp-session-id'];expect(session).toMatch(/^bms1_/);expect(init.body.result.instructions).toContain('不可信资料');expect(JSON.stringify(init.body)).not.toMatch(/bma1_|bmt1_|bmc1_/);
  const call=async(name:string,args:any={},status=200)=>request(f.app).post('/api/mist/mcp').set(TASK_CONTROL_HEADER,issued.token).set('Mcp-Session-Id',session).send({jsonrpc:'2.0',id:randomUUID(),method:name==='tools/list'?name:'tools/call',params:name==='tools/list'?{}:{name,arguments:args}}).expect(status);
  const tools=(await call('tools/list')).body.result.tools;expect(tools).toHaveLength(9);expect(tools.some((t:any)=>t.name==='bambook_workspaces')).toBe(false);expect(tools.every((t:any)=>!t.inputSchema.properties.workspaceId)).toBe(true);
  await call('bambook_query',{workspaceId:randomUUID(),type:'email'},403);
