@@ -11,7 +11,7 @@ export function queryMistReceipts(rows: any[], args: any): any[] {
       const target=key==='createdAt'?new Date(bound).getTime():bound;
       if(op==='in')return bound.includes(actual);
       if(op==='startsWith')return typeof actual==='string'&&actual.startsWith(bound);
-      if(op==='lt')return actual<target;if(op==='lte')return actual<=target;if(op==='gte')return actual>=target;
+      if(op==='lt')return actual<target;if(op==='lte')return actual<=target;if(op==='gt')return actual>target;if(op==='gte')return actual>=target;
       return false;
     });
     return actual===value;

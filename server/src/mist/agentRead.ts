@@ -1,7 +1,7 @@
 /**
  * 工作助手业务读取（bambook_query / bambook_get / bambook_expand）。
  * 只在“按当前执行者权限裁剪后的公司状态”上运行：仓储先按账号权限 ∩ 委托上限投影，这里再按对象类型的读权限复核一次。
- * 结果只含业务字段摘要与站内链接；大字段（图片数据、长文本、嵌套明细）截短，不返回附件内容。
+ * 列表返回摘要；单对象在响应预算内返回完整结构，超限明确标记不完整。不返回图片/附件字节。
  */
 import type { TokenPayload } from '../auth/service';
 import { hasScope } from '../auth/permissionService';
@@ -87,13 +87,35 @@ function compact(value: unknown, depth: number): unknown {
   if (Array.isArray(value)) { const head = value.slice(0, 20).map(v => compact(v, depth - 1)); return value.length > 20 ? [...head, `…另有 ${value.length - 20} 项`] : head; }
   return Object.fromEntries(Object.entries(value).filter(([k]) => k !== 'img').map(([k, v]) => [k, compact(v, depth - 1)]));
 }
-/** Mail evidence may be nested more deeply than ordinary object summaries. Mark every omitted part. */
-function detailsTruncated(value: unknown, depth: number, root = true, skipBody = false): boolean {
-  if (typeof value === 'string') return value.length > TEXT_LIMIT || value.startsWith('data:');
-  if (!value || typeof value !== 'object') return false;
-  if (depth <= 0) return true;
-  if (Array.isArray(value)) return value.length > 20 || value.slice(0, 20).some(v => detailsTruncated(v, depth - 1, false));
-  return Object.entries(value).some(([key, v]) => key !== 'img' && !(root && skipBody && key === 'body') && detailsTruncated(v, depth - 1, false));
+/** A small record must not lose facts merely because its review history is deeply nested. */
+function completeDataWithinLimit(row:unknown):Record<string,unknown>|undefined{
+  let remaining=GET_LIMIT,nodes=0,complete=true;
+  const read=(value:any,depth:number):any=>{
+    if(!complete)return;
+    if(++nodes>10_000||depth>32){complete=false;return;}
+    if(typeof value==='string'){
+      if(value.startsWith('data:')||value.length>remaining){complete=false;return;}
+      remaining-=JSON.stringify(value).length;
+      if(remaining<0){complete=false;return;}return value;
+    }
+    if(value===null||typeof value==='number'||typeof value==='boolean'){remaining-=JSON.stringify(value).length;if(remaining<0)complete=false;return value;}
+    if(value===undefined)return;
+    if(typeof value!=='object'){complete=false;return;}
+    remaining-=2;
+    if(Array.isArray(value)){
+      if(value.length>10_000){complete=false;return;}
+      const result=[];for(const item of value){if(result.length)remaining--;result.push(read(item,depth+1));if(!complete)break;}return result;
+    }
+    const entries:Array<[string,unknown]>=[];
+    for(const key of Object.keys(value)){
+      // Binary image content is outside the business-record read contract, as in compact().
+      if(key==='img'||value[key]===undefined)continue;
+      remaining-=JSON.stringify(key).length+1+(entries.length?1:0);
+      if(remaining<0){complete=false;break;}entries.push([key,read(value[key],depth+1)]);if(!complete)break;
+    }
+    return Object.fromEntries(entries);
+  };
+  const data=read(row,0);return complete&&data&&JSON.stringify(data).length<=GET_LIMIT?data:undefined;
 }
 function summary(row: any) {
   return Object.fromEntries(Object.entries(row).filter(([k, v]) => k !== 'img' && (v === null || ['string', 'number', 'boolean'].includes(typeof v))).slice(0, 14).map(([k, v]) => [k, compact(v, 0)]));
@@ -140,20 +162,21 @@ function find(state: MistState, actor: TokenPayload, typeName: unknown, id: unkn
   return { type, row };
 }
 
-export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown) {
+export function agentGet(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown):ReturnType<typeof ref>&{data:Record<string,unknown>;truncated:boolean;readHint?:string} {
   const { type, row } = find(state, actor, typeName, id);
+  const complete=completeDataWithinLimit(row);
+  if(complete)return{...ref(type,row),data:complete,truncated:false};
   const mail=['email','email_draft','email_send'].includes(type.type);
   let data = compact(row, mail ? 5 : 3) as Record<string, unknown>;
   if(mail&&typeof row.body==='string')data.body=row.body.slice(0,10_000);
   let text = JSON.stringify(data);
-  let truncated = (mail&&typeof row.body==='string'&&row.body.length>10_000) || detailsTruncated(row,mail?5:3,true,mail);
   if (text.length > GET_LIMIT) {
     data = compact(row, 1) as Record<string, unknown>;
     if(type.type==='email_send'){Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)});data.recipients=compact(row.recipients,3);}
-    text = JSON.stringify(data); truncated = true;
+    text = JSON.stringify(data);
   }
-  if (text.length > GET_LIMIT) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)});truncated = true; }
-  return { ...ref(type, row), data, truncated };
+  if (text.length > GET_LIMIT) { data = summary(row);if(type.type==='email_send')Object.assign(data,{recipientCounts:row.recipientCounts,attemptCount:row.attemptCount,latestAttempt:compact(row.latestAttempt,3)}); }
+  return { ...ref(type, row), data, truncated:true,readHint:'超出单次读取范围；当前结果不完整，请读取关联明细或交本人核对。' };
 }
 
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
