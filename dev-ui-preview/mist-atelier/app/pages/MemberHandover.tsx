@@ -4,6 +4,7 @@ import React from 'react';
 import { Banner, Button, Field, FormSection, Select, TextArea } from '../../../../components/mist';
 import { accountOwnedObjects } from '../../../../server/src/shared/mistAccounts';
 import { MIST_OWNED_KIND_LABEL, accountHandoverBlockers, accountHandovers, accountOwners } from '../../../../server/src/shared/mistHandover';
+import { internalDeliveryTotals } from '../../../../server/src/shared/mistInternalDelivery';
 import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import type { MistMemberOption } from '../runtime/members';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -18,6 +19,7 @@ export function MemberHandover({ state, directory, busy: outerBusy }: { state: M
   const member = (id: string) => directory.find(m => m.id === id);
   const owned = fromId ? accountOwnedObjects(state, fromId) : [];
   const tasks = fromId ? state.tasks.filter(t => !t.done && t.assigneeIds.includes(fromId)).length : 0;
+  const deliveries = fromId ? (state.internalDeliveries || []).filter(row => row.receiverId === fromId && !row.cancelled && internalDeliveryTotals(row).pending > 0).length : 0;
   const to = member(toId);
   const blockers = fromId ? accountHandoverBlockers(state, fromId, to ? { id: to.id, name: to.name, groups: to.groups } : undefined) : [];
   const counts = owned.reduce<Record<string, number>>((m, o) => { m[o.kind] = (m[o.kind] || 0) + 1; return m; }, {});
@@ -37,7 +39,7 @@ export function MemberHandover({ state, directory, busy: outerBusy }: { state: M
       <Field label={uiText("新负责人")} hint={uiText("须为在用成员")}><Select aria-label={uiText("交接新负责人")} value={toId} disabled={busy} placeholder={uiText("选择成员")} options={directory.filter(m => m.id !== fromId).map(m => ({ value: m.id, label: m.name }))} onChange={e => setToId(e.target.value)} /></Field>
     </div>
     {fromId && <div className="mist-col" data-handover-preview>
-      <span className="mist-note">{uiText("将交接：")}{Object.entries(counts).map(([k, n]) => `${MIST_OWNED_KIND_LABEL[k as keyof typeof MIST_OWNED_KIND_LABEL]} ${n}`).join('、') || '无负责对象'}{uiText("；未完成待办 ")}{tasks}{uiText(" 条")}</span>
+      <span className="mist-note">{uiText("将交接：")}{Object.entries(counts).map(([k, n]) => `${MIST_OWNED_KIND_LABEL[k as keyof typeof MIST_OWNED_KIND_LABEL]} ${n}`).join('、') || '无负责对象'}{uiText("；未完成待办 ")}{tasks}{uiText(" 条")}{deliveries > 0 && ui`；待接收内部交付 ${deliveries} 笔`}</span>
       {owned.slice(0, 12).map(o => <small key={o.kind + o.id + o.role}>{o.role} · {uiText(o.label)}</small>)}
       {owned.length > 12 && <small>{uiText("…另有 ")}{uiText(owned.length - 12)}{uiText(" 项")}</small>}
       {blockers.length > 0 && <Banner tone="warn" title={uiText("须先处理")}>{blockers.join("；")}</Banner>}

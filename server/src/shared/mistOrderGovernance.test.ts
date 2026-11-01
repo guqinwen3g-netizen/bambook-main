@@ -96,7 +96,7 @@ it.each(['amount','currency'] as const)('atomically refuses a funded order %s ch
 
 it('allows preparation of a procurement draft but blocks commitment and production until the main order is approved',()=>{
  const f=fixture();f.state.market.suppliers.push({id:'supplier',code:'S1',name:'真实供应商',type:'成衣加工',country:'CN',address:'上海',capabilities:'成衣加工',capacity:10,capacityUnit:'件',leadDays:3,status:'active',blockReason:'',contacts:[],fileIds:[],note:'',createdAt:f.c.now,updatedAt:f.c.now});
- const command={type:'fulfillment.procurement.save',payload:{orderId:'order',lineId:'line',kind:'processing',supplierId:'supplier',supplier:'真实供应商',description:'成衣加工',quantity:10,unit:'件',price:5,currency:'USD',due:'2026-11-01',terms:'按合同',destination:'上海',note:'',fileIds:[]}} as const;
+ const command={type:'fulfillment.procurement.save',payload:{orderId:'order',lineId:'line',kind:'processing',supplierId:'supplier',supplier:'真实供应商',description:'成衣加工',quantity:10,unit:'件',price:5,currency:'CNY',due:'2026-11-01',terms:'按合同',destination:'上海',note:'',fileIds:[]}} as const;
  const prepared=applyMistCommand(f.state,command as any,f.c);let state=prepared.state;const purchaseId=prepared.result.id!;
  const context={...f.c,authority:{...f.c.authority!,supplier:{'supplierCommitment.approvers.processing.garment':{version:1,userIds:['leader']}}}};
  expect(state.fulfillment.purchases[0].state).toBe('draft');

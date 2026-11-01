@@ -15,6 +15,8 @@ export type InternalDelivery={
  id:string;orderId:string;lineId:string;productionId:string;orderCode:string;lineName:string;style:string;unit:string;physicalKey:string;productionCode:string;
  source:{kind:'receipt'|'stockIssue';id:string};quantity:number;receiverId:string;receiver:string;intendedReceiver:string;location:string;date:string;
  created:Audit;checks:InternalDeliveryCheck[];returns:InternalDeliveryReturn[];cancelled?:Audit;
+ /** Receiver changes from a recorded staff handover; the original receiver stays in the first entry. */
+ reassignments?:Array<{at:string;actor:string;fromId:string;from:string;toId:string;to:string;reason:string}>;
 };
 export type InternalDeliveryCommand=
  |{type:'order.internal.send';payload:{orderId:string;productionId:string;source:{kind:'receipt'|'stockIssue';id:string};quantity:number;receiverId:string;location:string;date:string;evidence:string;expectedRevision:number}}
@@ -56,6 +58,17 @@ export function syncInternalDeliveryTasks(root:MistState,ctx:MistContext){
   task.done=!needed;task.assigneeIds=order.ownerId?[order.ownerId]:[];
   if(!existing)root.tasks.push(task);
  }
+}
+/** Staff handover: move still-open deliveries addressed to a departing receiver, keeping the original receiver on record. */
+export function reassignInternalDeliveryReceiver(root:MistState,fromId:string,to:{id:string;name:string},audit:{at:string;actor:string;reason:string}):Array<{orderId:string;from:string}>{
+ const moved:Array<{orderId:string;from:string}>=[];
+ for(const row of root.internalDeliveries||[]){
+  if(row.receiverId!==fromId||row.cancelled||internalDeliveryTotals(row).pending===0)continue;
+  (row.reassignments||=[]).push({at:audit.at,actor:audit.actor,fromId:row.receiverId,from:row.receiver,toId:to.id,to:to.name,reason:audit.reason});
+  moved.push({orderId:row.orderId,from:row.receiver});row.receiverId=to.id;row.receiver=to.name;
+  const task=root.tasks.find(t=>t.id==='internal-delivery:'+row.id);if(task&&!task.done)task.assigneeIds=[to.id];
+ }
+ return moved;
 }
 function current(row:InternalDelivery,revision:unknown){if(revision!==internalDeliveryRevision(row))fail('交接记录已变化，请刷新','CONFLICT');if(row.cancelled)fail('交接已撤回');}
 function deliveryIndex(root:MistState){

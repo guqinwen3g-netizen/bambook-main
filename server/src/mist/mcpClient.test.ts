@@ -63,7 +63,7 @@ describe('Official MCP client over a real loopback HTTP connection', () => {
     const { app, headers, client, tool, endpoint } = await fixture();
     expect(client.getServerVersion()?.name).toBe('bambook-mist');
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(9);
+    expect(tools.map(item => item.name).sort()).toEqual(['bambook_audit', 'bambook_commands', 'bambook_execute', 'bambook_get', 'bambook_mail_receiving', 'bambook_preview', 'bambook_query', 'bambook_related', 'bambook_task', 'bambook_workspaces']);
     expect(tools.find(item => item.name === 'bambook_execute')?.inputSchema.required).toContain('requestId');
     const workspaces = await tool('bambook_workspaces');
     expect(workspaces.isError).not.toBe(true);

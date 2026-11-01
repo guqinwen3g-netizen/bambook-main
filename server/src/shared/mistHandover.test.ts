@@ -6,7 +6,8 @@ function fixture(){
   let id=0;const ctx={id:()=>`ho-${++id}`,now:'2026-10-18T02:00:00Z',actorId:'demo-sales',actorName:'顾言',members:[{id:'demo-sales',name:'顾言',active:true,groups:['garment']},{id:'demo-buyer',name:'沈禾',active:true,groups:['garment']},{id:'demo-new',name:'林舟',active:true,groups:['garment']},{id:'gone',name:'已离职',active:false,groups:[]}]} as unknown as MistContext;
   let state=createMistState(ctx,'demo');
   const run=(payload:Record<string,unknown>)=>{const r=applyMistCommand(state,{type:'handover.customer',payload} as MistCommand,ctx);state=r.state;return r.result as {id:string};};
-  return {run,get state(){return state as MistState;}};
+  const command=(cmd:MistCommand)=>{const r=applyMistCommand(state,cmd,ctx);state=r.state;return r.result as {id:string};};
+  return {run,command,get state(){return state as MistState;}};
 }
 const order=(s:MistState,code:string)=>s.orders.find(o=>o.code===code)!;
 
@@ -19,8 +20,12 @@ describe('客户在手业务交接',()=>{
     expect(()=>f.run({...base,toUserId:'nobody'})).toThrow('须为本公司的成员账号');
     expect(()=>f.run({...base,reason:' '})).toThrow('交接原因');
     expect(()=>f.run({...base,orderIds:[order(f.state,'SO-G-2026-018').id]})).toThrow('不属于该客户');
-    const opp=f.state.crm.opportunities.find(o=>o.customerId==='customer-1')!;
-    const followUp=f.state.tasks.find(t=>!t.done&&t.kind==='crm-follow-up'&&t.assigneeIds.includes('demo-sales'))!;
+    // The shared demo seed no longer gives customer-1 an open opportunity; create this case's own via the real commands.
+    const oppId=f.command({type:'crm.opportunity.save',payload:{input:{customerId:'customer-1',ownerId:'demo-sales',title:'AW27 大衣与马甲补单',domain:'garment',amount:'75700.00',currency:'USD',expectedDate:'2026-11-07',note:'',devIds:[],quotationIds:[],orderIds:[]}}} as unknown as MistCommand).id;
+    f.command({type:'crm.followUp.save',payload:{customerId:'customer-1',method:'meeting',content:'确认补单意向',at:'2026-10-17T08:00:00Z',nextDate:'2026-10-21',link:{kind:'opportunity',id:oppId}}} as unknown as MistCommand);
+    const opp=f.state.crm.opportunities.find(o=>o.id===oppId)!;
+    const followUp=f.state.tasks.find(t=>!t.done&&t.kind==='crm-follow-up'&&t.target?.id==='customer-1')!;
+    expect(followUp).toBeDefined();
     f.run({...base,orderIds:[order(f.state,'SO-G-2026-017').id,order(f.state,'SO-G-2026-009').id],opportunityIds:[opp.id]});
     const s=f.state, c=s.customers.find(x=>x.id==='customer-1')!;
     expect(c).toMatchObject({ownerId:'demo-new',owner:'林舟'});

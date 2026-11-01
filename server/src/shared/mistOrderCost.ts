@@ -164,6 +164,8 @@ export type OrderActualCost = {
   revenue: OrderCostLine[]; purchases: OrderCostLine[]; expenses: OrderCostLine[]; rebate: { expected: number; approved: number; received: number; used: number };
   revenueCny: number | null; purchaseCny: number | null; expenseCny: number | null; marginEx: number | null; marginIn: number | null; rateIn: number | null;
   estimated: boolean; missing: string[]; status: 'ok' | 'norate';
+  /** 内部订单：金额是预算，不计对外收入、毛利或出口退税；只核算实际成本（costCny）。 */
+  internal: boolean; costCny: number | null;
 };
 /** 单个订单的实际核算；金额单位为元，人民币按 basis 口径折算。 */
 export function orderActualCost(root: MistState, orderId: string, basis: FxBasis, month: string, asOf: string,materialCostBasis?:ReadonlyArray<InternalFabricCostBasis>|null): OrderActualCost {
@@ -208,13 +210,16 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
   // 客户汇款被银行扣费的短收：收入仍按发票，扣费计入本单费用。
   for (const i of invoices) for (const c of (i.bankCharges || []).filter(c => !c.reversed))
     expenses.push(line('bank:' + c.id, `${i.code} 客户汇款银行扣费`, c.currency, mistMoneyMinor(c.amount), { note: c.reason }));
-  const rebateRaw = orderRebate(root as never, orderId), used = rebateRaw.approved || rebateRaw.expected;
+  // 内部订单没有出口销售，不计退税（其采购票据的退税不归属本单）。
+  const rebateRaw = internal ? { expected: 0, approved: 0, received: 0 } : orderRebate(root as never, orderId), used = rebateRaw.approved || rebateRaw.expected;
   const sum = (rows: OrderCostLine[]) => rows.some(r => r.cny === null) ? null : Math.round(rows.reduce((n, r) => n + mistMoneyMinor(r.cny!), 0));
   const rv = sum(revenue), pc = sum(purchases), ex = sum(expenses);
   const missing = [...rates.entries()].filter(([, r]) => !r).map(([cur]) => cur), status: OrderActualCost['status'] = missing.length ? 'norate' : 'ok';
-  const marginEx = status === 'ok' && rv !== null && pc !== null && ex !== null ? rv - pc - ex : null, marginIn = marginEx === null ? null : marginEx + mistMoneyMinor(used);
+  const cost = status === 'ok' && pc !== null && ex !== null ? pc + ex : null;
+  const marginEx = internal ? null : status === 'ok' && rv !== null && cost !== null ? rv - cost : null, marginIn = marginEx === null ? null : marginEx + mistMoneyMinor(used);
   return { orderId, code: o.code, customer: o.customer, currency: o.currency, revenue, purchases, expenses, rebate: { ...rebateRaw, used },
     revenueCny: rv === null ? null : major(rv), purchaseCny: pc === null ? null : major(pc), expenseCny: ex === null ? null : major(ex),
     marginEx: marginEx === null ? null : major(marginEx), marginIn: marginIn === null ? null : major(marginIn), rateIn: marginIn === null || !rv ? null : marginIn / rv,
-    estimated: [...revenue, ...purchases].some(r => r.estimated) || [...rates.values()].some(r => r?.estimated), missing, status };
+    estimated: [...revenue, ...purchases].some(r => r.estimated) || [...rates.values()].some(r => r?.estimated), missing, status,
+    internal, costCny: cost === null ? null : major(cost) };
 }

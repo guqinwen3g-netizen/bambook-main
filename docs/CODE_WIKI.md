@@ -308,7 +308,8 @@ flowchart LR
 - Mist 页面为 `pages/InternalDeliveryPanel.tsx`：订单详情提供内部交付记录和独立分步登记表；`orders?section=internal-deliveries` 处理本账号被指定的接收，携带准确交付 ID 打开详情。实际导航目标使用已登记的 `orders`，不能发出未登记的 `orders/list` 页面。点收/更正/退回保留原请求版本及失败输入，切换账号、工作区或交付记录关闭旧表单；选择来源保留地点和原始依据，避免同日同量记录无法辨认。
 - 交付待收任务由实际点收派生完成，拒收未退部分交回当前订单负责人跟进。`HomePage` 对这些任务只提供打开业务记录，`task.complete` 也拒绝手工改完成状态，不能绕过实物点收。`orderLineTrack.ts` 按实际内部接收显示末阶段，内部已交付不继续计入在途或提醒外贸出运；外部订单保留出运口径。
 - 针对性入口：`server/src/shared/mistInternalDelivery.test.ts`、`server/src/mist/internalDeliveryRepository.test.ts`、`pages/InternalDeliveryPanel.test.tsx` 及相关订单/首页测试，完全使用独立内存资料，不读取任何公司库或备份。仍待实际分岗验收、视觉验看及教学素材；若接收人员离职或需要交付后换人，不能冒用原账号，应先补明确的接收改派规则与留痕流程。
-- `CostPage` 与 `OrderActualCostPanel` 对无销售收入的内部订单仍展示毛利及出口退税。当前 134 CNY 成本数字有来源，但内部预算/成本与外部销售利润的展示和汇总边界需一并核对，不能用改文案掩盖不适用的口径。
+- 内部订单核算口径（2026-11-01 已修）：`orderActualCost` 对 `governance.contract.kind==='internal'` 返回 `internal:true` 与 `costCny`（采购+费用），`marginEx/marginIn` 为 null、退税为 0，即使其采购票据进了退税申报也不归属本单。`OrderActualCostPanel` 与 `CostPage` 对内部订单只显示实际成本；毛利、收入汇总只含对外订单，内部订单成本单独列示，CSV 增加“类型”列。测试：`mistOrderCost.test.ts`、`OrderActualCostPanel.test.tsx`、`CostPage.test.tsx`。
+- 离职/调岗交接改派内部交付（2026-11-01）：`handover.account` 调 `reassignInternalDeliveryReceiver`，把原接收人名下未撤回且仍有待接收数量的内部交付改给新负责人，同步待接收任务，`reassignments` 留原接收人、时间与原因；已点收完的不动。点收权按当前 `receiverId` 校验，原接收人随之失去点收权。测试：`mistInternalDelivery.test.ts`、`MemberHandover.test.tsx`。
 
 #### 生产跟进与教学素材
 

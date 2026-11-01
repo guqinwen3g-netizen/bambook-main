@@ -32,7 +32,18 @@ describe('订单实际成本与费用分摊', () => {
     state.orders.push({id:'internal',code:'INT-1',customer:'Production team',currency:'CNY',amount:500,governance:{contract:{kind:'internal'}}} as any);
     state.orderCosts={expenses:[{id:'expense',code:'EXP-1',category:'trucking',currency:'CNY',amount:50,shares:[{orderId:'internal',orderCode:'INT-1',basisValue:1,amount:50}],scope:'orders',basis:'manual',vendor:'Carrier'} as any]};
     const result=orderActualCost(state,'internal','period','2026-10','2026-10-24');
-    expect(result.revenue).toEqual([]);expect(result.revenueCny).toBe(0);expect(result.expenseCny).toBe(50);expect(result.marginEx).toBe(-50);expect(result.rateIn).toBeNull();
+    expect(result.revenue).toEqual([]);expect(result.revenueCny).toBe(0);expect(result.expenseCny).toBe(50);expect(result.rateIn).toBeNull();
+    // An internal budget has no sale: no margin and no export rebate, only its actual cost.
+    expect(result).toMatchObject({internal:true,costCny:50,marginEx:null,marginIn:null,rebate:{expected:0,approved:0,received:0,used:0}});
+  });
+  it('does not attribute an export rebate to an internal order even when its purchase bill is in a rebate claim',()=>{
+    const ctx={id:()=>'',now:'2026-10-24T00:00:00Z',actorName:'Finance'},state=createMistState(ctx,'empty') as MistState & Record<string,any>;
+    state.orders.push({id:'internal',code:'INT-1',customer:'Production team',currency:'CNY',amount:500,governance:{contract:{kind:'internal'}}} as any);
+    state.fulfillment.purchases.push({id:'po',orderId:'internal',currency:'CNY',amount:100} as any);
+    state.payables={...(state.payables||{}),bills:[{id:'bill',amount:100,currency:'CNY',lines:[{purchaseId:'po',amount:100}]}]} as any;
+    state.exportRebate={claims:[{id:'claim',state:'filed',expected:13,lines:[{billId:'bill',rebate:13}]}]} as any;
+    const result=orderActualCost(state,'internal','period','2026-10','2026-10-24');
+    expect(result.rebate.used).toBe(0);expect(result.marginIn).toBeNull();
   });
   it('费用转应付票据：按票付款，不重复计成本；已转的费用须先作废票据', () => {
     const f = fixture();
