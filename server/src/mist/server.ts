@@ -22,14 +22,14 @@ import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
 import{MistPlatformTaskWorker,type PlatformTaskWorkerOptions}from'./platformTaskWorker';
 import{defaultAgentDelegation}from'./route';
 import type{AgentDelegation}from'./agentDelegation';
-export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>}={}) {
+export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailResolve?:(host:string)=>Promise<string[]>;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>}={}) {
   const app = express(); app.disable('x-powered-by');
   const host=options.host??process.env.MIST_HOST??'127.0.0.1';
   const local=options.local??(mistLocalRequested()?createMistLocalRuntime({host}):undefined);
   if(local)assertMistLocalMode(host);
   const mailRuntime=(repository:MistRepository)=>{
     const credentials=new MistMailCredentials(process.env.MIST_MAIL_CREDENTIAL_DIR||(local?path.join(local.database.directory,'mail-credentials'):path.resolve(__dirname,'../../private/mist-mail-credentials')));
-    const mail=new MistMailService(repository,credentials,options.mailTransport,process.env,()=>new Date(),options.mailReceive);
+    const mail=new MistMailService(repository,credentials,options.mailTransport,process.env,()=>new Date(),options.mailReceive,options.mailResolve);
     const stateWorker=new MistMailStateWorker(repository,mail,{tickMs:options.mailReceive?.tickMs,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-state]',code)});
     app.locals.mailStateWorker=stateWorker;repository.setMailStateWake(()=>stateWorker.wake());
     const mailReceiver=new MistMailReceiver(repository,mail,{...options.mailReceive,stateWorker,...(local?{localActor:local.actorForProfile}:{}),onError:code=>console.error('[mail-receiver]',code)});

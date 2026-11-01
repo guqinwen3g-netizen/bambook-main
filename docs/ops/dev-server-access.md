@@ -105,6 +105,12 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 服务器直连不到 `chatgpt.com` / `api.openai.com`。平台 ChatGPT 套餐（登录、令牌刷新、模型调用）及 OpenAI API 服务经出站代理访问：服务器本机 `sing-box.service` 提供 mixed 入站 `127.0.0.1:7890`，`backend.env` 设 `BAMBOOK_AI_HTTPS_PROXY=http://127.0.0.1:7890`。代码只对 `*.openai.com`、`*.chatgpt.com` 走代理（`server/src/ai/outboundProxy.ts`），国内模型接口仍直连；未设置该变量时行为不变。Node 内置 fetch 不读取 `HTTPS_PROXY`，不要用它代替。
 
+## 智能邮箱服务器地址限制（2026-11-02）
+
+公司在智能邮箱接入时填写的 IMAP/SMTP 地址，服务端会先解析：解析结果含回环、私网、链路本地（含云元数据 169.254.169.254）、CGNAT、基准测试（198.18/15）、组播或 IPv6 唯一本地/链路本地地址时一律拒绝（`MAIL_HOST_NOT_ALLOWED`），解析失败返回 `MAIL_HOST_UNRESOLVED`。只有运维在 `backend.env` 的 `MIST_MAIL_ALLOWED_HOSTS` 中显式登记的主机名才可指向内部地址，登记后其他主机仍须为允许端口（143/465/587/993）。
+
+本机自建的 `mail.sylway.cloud`（Postfix/Dovecot，只听 127.0.0.1，见 `scripts/deploy/bootstrap-dev-mail.sh`）用于验收走查时，须同时登记：`MIST_MAIL_ALLOWED_HOSTS` 加入 `mail.sylway.cloud`，`MIST_MAIL_INSECURE_TLS_HOSTS` 加入同名（自签证书），并在 `/etc/hosts` 将其指向 127.0.0.1。该服务不对外投递；`MIST_MAIL_ALLOWED_RECIPIENT_DOMAINS` 可限定收件域。改 `backend.env` 时保留原属主与 0640 权限。
+
 ## 每日备份（cron.daily）
 
 `/etc/cron.daily/bambook-dev-backup`（root）每天写入 `/var/backups/bambook-dev`（目录 0700、文件 0600），各保留 7 天：

@@ -10,6 +10,8 @@ import { MistApiError } from '../errors';
 import type { MailTransport } from './transport';
 import {SERVICE_KEY_HEADER} from '../agentIdentities';
 import {TASK_HEADER} from '../agentTasks';
+/** Test mail hosts are fakes behind a stub transport; resolve them to a documentation-range public address. */
+const publicMailHost = async () => ['203.0.113.10'];
 
 type Row={uid:number;raw:Buffer;seen:boolean;starred:boolean};
 class Mailbox {
@@ -40,7 +42,7 @@ beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'mist-mail-state
 afterEach(async()=>{await Promise.all(workers.splice(0).map(w=>w.stop()));vi.useRealTimers();vi.unstubAllEnvs();await rm(directory,{recursive:true,force:true});});
 async function fixture(box=new Mailbox(),customize?:(local:ReturnType<typeof createMistLocalRuntime>)=>void){
   const local=createMistLocalRuntime({directory});customize?.(local);
-  const app=createMistServer(undefined,{local,mailTransport:box.transport,mailReceive:{tickMs:3_600_000}}),client=request.agent(app);
+  const app=createMistServer(undefined,{local,mailResolve:publicMailHost,mailTransport:box.transport,mailReceive:{tickMs:3_600_000}}),client=request.agent(app);
   const worker=app.locals.mailStateWorker;workers.push(worker);vi.spyOn(worker,'wake').mockImplementation(()=>{});worker.start();
   await client.get('/api/mist/session');await client.post('/api/mist/session').send({profileId:'demo-sales'}).expect(200);
   const read=async()=>(await client.get('/api/mist/workspaces/default').expect(200)).body.workspace;
@@ -118,7 +120,7 @@ describe('Durable bidirectional mailbox state',()=>{
   });
   it('coalesces superseded flags and resumes queued work in a fresh process without an open page',async()=>{
     const f=await fixture(),m=await f.message();await f.command('email.flag',{id:m.id,flag:'starred',value:true});await f.command('email.flag',{id:m.id,flag:'starred',value:false});await f.worker.stop();
-    const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local,mailTransport:f.box.transport,mailReceive:{tickMs:3_600_000}}),worker=app.locals.mailStateWorker;workers.push(worker);vi.spyOn(worker,'wake').mockImplementation(()=>{});worker.start();await worker.tick();
+    const local=createMistLocalRuntime({directory}),app=createMistServer(undefined,{local,mailResolve:publicMailHost,mailTransport:f.box.transport,mailReceive:{tickMs:3_600_000}}),worker=app.locals.mailStateWorker;workers.push(worker);vi.spyOn(worker,'wake').mockImplementation(()=>{});worker.start();await worker.tick();
     expect(f.box.flags).toBe(1);expect(f.box.boxes.INBOX[0].starred).toBe(false);expect(await f.states()).toEqual([]);
   });
   it('lets a newer mark supersede an in-flight flag without publishing a stale acknowledgement',async()=>{
