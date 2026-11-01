@@ -152,7 +152,9 @@ describe('工作助手读取接口（现有岗位与公司权限）', () => {
     const allowed = agentCatalog(actor(profileId)).map(t => t.type);
     expect(readable.map((t: any) => t.type)).toEqual(allowed);
     if (profileId === 'local-qc') { expect(allowed).not.toContain('invoice'); expect(allowed).not.toContain('risk'); }
-    const all = (await request(app).get(endpoint + 'query').query({ limit: 20 }).set(HEADER, d.token).expect(200)).body;
+    const legacy = (await request(app).get(endpoint + 'query').query({ limit: 20 }).set(HEADER, d.token).expect(200)).body;
+    expect(legacy.readableTypes).toEqual(allowed.filter(type=>!['email_draft','email_send'].includes(type)));
+    const all = (await request(app).get(endpoint + 'query').query({ limit: 20, includeMailRecords:'1' }).set(HEADER, d.token).expect(200)).body;
     expect(all.workspace).toEqual({ id: ws.id, name: ws.name, revision: ws.revision });
     expect(all.readableTypes).toEqual(allowed);
     expect(all.results.every((r: any) => allowed.includes(r.type))).toBe(true);

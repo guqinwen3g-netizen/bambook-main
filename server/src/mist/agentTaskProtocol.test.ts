@@ -135,3 +135,15 @@ it('does not overwrite a human edit to a draft after the task read its current d
  const attempt=await f.tool(token,'bambook_execute',{workspaceId:f.workspace.id,requestId:randomUUID(),command:{type:'email.draft.save',payload:{id,input}}});expect(attempt.isError).toBe(true);
  const current=(await f.human.get(f.base).expect(200)).body.workspace;expect(current.state.email.drafts.find((d:any)=>d.id===id).body).toBe('Human corrected version');
 });
+it('keeps legacy REST query and related results within their old type set until the client opts in',async()=>{
+ const f=await setup('read'),account=f.workspace.state.email.accounts[0],original=f.workspace.state.email.messages.find((m:any)=>m.accountId===account.id)!;
+ const input={accountId:account.id,from:account.address,to:'buyer@example.test',cc:'',bcc:'',subject:'Capability draft',body:'Current draft',template:'',links:[],fileIds:[],replyToId:original.id};
+ const created=await f.command('email.draft.save',{input}),id=created.body.receipt.result.id;
+ const legacy=(await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({q:'Capability draft'}).expect(200)).body;
+ expect(legacy.readableTypes).not.toContain('email_draft');expect(legacy.readableTypes).not.toContain('email_send');expect(legacy.results).toEqual([]);
+ const current=(await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({q:'Capability draft',includeMailRecords:'1'}).expect(200)).body;expect(current.results).toContainEqual(expect.objectContaining({id,type:'email_draft'}));
+ const explicit=(await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({type:'email_draft',q:'Capability draft'}).expect(200)).body;expect(explicit.results).toHaveLength(1);
+ const related=f.base+'/agent/objects/email/'+input.replyToId+'/related';const oldRelated=(await request(f.app).get(related).set(SERVICE_KEY_HEADER,f.key).expect(200)).body;expect(oldRelated.object.related.some((r:any)=>r.type==='email_draft')).toBe(false);
+ const newRelated=(await request(f.app).get(related).set(SERVICE_KEY_HEADER,f.key).query({includeMailRecords:'1'}).expect(200)).body;expect(newRelated.object.related).toContainEqual(expect.objectContaining({type:'email_draft',id}));
+ await request(f.app).get(f.base+'/agent/query').set(SERVICE_KEY_HEADER,f.key).query({includeMailRecords:'invalid'}).expect(400);
+});

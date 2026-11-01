@@ -68,7 +68,7 @@ function mailReadRecord(type:string,row:any){
   const attempts=(row.attempts??[]).map((a:any)=>({at:a.at,actor:a.actor,outcome:a.outcome,code:a.code,message:a.message,recipients:a.recipients}));
   return{...common,draftId:row.draftId,sentMessageId:row.sentMessageId,forwardOfId:row.forwardOfId,supersededById:row.supersededById,createdBy:row.createdBy,createdById:row.createdById,recipients:recipients.map(r=>({address:r.address,role:r.role,status:r.status,reply:r.reply,at:r.at})),recipientCounts,attemptCount:attempts.length,latestAttempt:attempts.at(-1)??null,attempts,links:row.links,fileIds:row.fileIds};
 }
-function readable(actor: TokenPayload) { return AGENT_OBJECT_TYPES.filter(t => hasScope(actor, t.scope)); }
+function readable(actor: TokenPayload,excludeTypes:readonly string[] = []) { return AGENT_OBJECT_TYPES.filter(t => hasScope(actor, t.scope)&&!excludeTypes.includes(t.type)); }
 function typeOf(name: unknown, actor: TokenPayload): ObjectType {
   const type = AGENT_OBJECT_TYPES.find(t => t.type === name);
   if (!type) deny('INVALID_INPUT', `不支持的对象类型；可用：${AGENT_OBJECT_TYPES.map(t => t.type).join(', ')}`);
@@ -108,13 +108,13 @@ export function agentCatalog(actor: TokenPayload) {
   return readable(actor).map(t => ({ type: t.type, label: t.label }));
 }
 
-export function agentQuery(state: MistState, actor: TokenPayload, input: { type?: unknown; q?: unknown; limit?: unknown }) {
+export function agentQuery(state: MistState, actor: TokenPayload, input: { type?: unknown; q?: unknown; limit?: unknown },options:{excludeTypes?:readonly string[]}={}) {
   if (input.q !== undefined && typeof input.q !== 'string') deny('INVALID_INPUT', 'q 须为查询文字');
   const q = typeof input.q === 'string' ? input.q.trim().toLowerCase().slice(0, 200) : '';
   const limitRaw = input.limit === undefined ? 10 : Number(input.limit);
   if (!Number.isInteger(limitRaw) || limitRaw < 1) deny('INVALID_INPUT', 'limit 须为正整数');
   const limit = Math.min(limitRaw, QUERY_LIMIT_MAX);
-  const types = input.type === undefined || input.type === '' ? readable(actor) : [typeOf(input.type, actor)];
+  const types = input.type === undefined || input.type === '' ? readable(actor,options.excludeTypes) : [typeOf(input.type, actor)];
   const terms = q.split(/\s+/).filter(Boolean);
   const matches: Array<ReturnType<typeof ref> & { summary: Record<string, unknown> }> = [];
   let total = 0, size = 0;
@@ -157,7 +157,7 @@ export function agentGet(state: MistState, actor: TokenPayload, typeName: unknow
 }
 
 /** 关联对象：本对象字段直接引用的对象，以及字段引用了本对象的其它对象（均限当前可读类型）。 */
-export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown) {
+export function agentRelated(state: MistState, actor: TokenPayload, typeName: unknown, id: unknown,options:{excludeTypes?:readonly string[]}={}) {
   const { type, row } = find(state, actor, typeName, id);
   const idsOf = (r: any): string[] => Object.entries(r).flatMap(([k, v]) => !/(Id|Ids)$/.test(k) ? [] : typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
   // 明细行里的引用也算（如票据 lines[].purchaseId、付款申请 lines[].billId），只展开一层。
@@ -165,7 +165,7 @@ export function agentRelated(state: MistState, actor: TokenPayload, typeName: un
   const own = scalarRefs(row);
   const results: Array<ReturnType<typeof ref> & { relation: 'references' | 'referenced_by' }> = [];
   let total = 0;
-  for (const other of readable(actor)) for (const candidate of rows(state, other)) {
+  for (const other of readable(actor,options.excludeTypes)) for (const candidate of rows(state, other)) {
     if (other === type && candidate.id === row.id) continue;
     const relation = own.has(candidate.id) ? 'references' : scalarRefs(candidate).has(row.id) ? 'referenced_by' : null;
     if (!relation) continue;
