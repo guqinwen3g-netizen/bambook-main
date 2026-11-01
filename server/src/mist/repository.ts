@@ -21,10 +21,11 @@ import { payablesCommandPermissions, financialDisposalViews } from '../shared/mi
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
-import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord } from './agentTasks';
+import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
+import type {PlatformTaskContext,PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
-import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
+import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
 import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields, dueMailState, readMailState, claimMailState, planMailState, rememberMailState, failMailState, completeMailState, type MailStateRecord, type MailStateAttempt } from './mail/stateQueue';
 import type { MailStateObservation } from '../shared/mistMailState';
@@ -165,6 +166,33 @@ class MistPreviewOutcome extends Error { constructor(readonly preview: { revisio
 const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate']);
 
 export class MistRepository {
+  private platformRuntimeAvailable:()=>boolean=()=>false;
+  private platformActor:(actor:AgentActor)=>Promise<AgentActor>=async actor=>actor;
+  setPlatformTaskRuntime(available:()=>boolean,hydrate?:(actor:AgentActor)=>Promise<AgentActor>){this.platformRuntimeAvailable=available;if(hydrate)this.platformActor=hydrate;}
+  async platformTaskCapabilities(prior:TokenPayload,workspaceId:string){return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId);return{platformAvailable:!isAgentActor(prior)&&hasScope(actor,'ai:chat')&&this.platformRuntimeAvailable()};});}
+  async duePlatformTasks(now=Date.now(),take=2){return this.transact(db=>duePlatformTasks(db,now,take));}
+  async deferPlatformTaskJob(job:PlatformTaskJob){return this.connectionTransaction(db=>deferPlatformJob(db,job,Date.now()));}
+  async claimPlatformTask(job:PlatformTaskJob,workerId:string,make:MakeTaskCredential):Promise<AgentActor|null>{
+    return this.connectionTransaction(async db=>{
+      const c=(await taskRecord(db,job.workspaceId,job.taskId)).value;if(c.executor!=='platform'||c.ownerId!==job.ownerId)fail('NOT_FOUND','平台任务不存在',404);
+      const identity=(await identityRecord(db,c.workspaceId,c.identityId)).value;if(!identity.key)fail('AGENT_KEY_INVALID','Agent密钥已失效',401);const prior=await this.platformActor(serviceActorFromIdentity(identity,c.authority.hash));prior.permissionCeiling=[...c.ceiling];prior.agentExecutor='platform';
+      const{actor,row}=await this.own(db,prior,c.workspaceId,'ai:chat');this.assertTaskSources(row,actor,c);
+      const pending=(row.state.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId&&p.state==='pending').map(p=>p.id);
+      const result=await claimTask(db,{...prior,...actor,agentExecutor:'platform'},c.workspaceId,c.id,{requestId:randomUUID(),workerId},make,Date.now(),pending);
+      if(!result.token)return null;const execution=await this.platformActor(await resolveTaskCredential(db,result.token,Date.now()));execution.agentExecutor='platform';execution.agentTaskWorkerId=workerId;return execution;
+    });
+  }
+  async platformTaskContext(prior:AgentActor):Promise<PlatformTaskContext>{
+    if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
+    return this.transact(async db=>{const{actor,row}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,row.id,prior.agentTaskLease!.taskId)).value;const visible=this.view(row,actor).state;return{task:taskView(c,actor,Date.now()),locale:c.locale??'zh-CN',requiresRead:c.platform?.requiresRead===true,steps:structuredClone(c.platform?.steps??[]),decisions:(visible.agentProposals??[]).filter(p=>p.taskId===c.id&&p.ownerId===actor.userId).map(p=>({id:p.id,state:p.state,...(p.note?{note:p.note}:{})}))};});
+  }
+  async pulsePlatformTask(prior:AgentActor){
+    if(prior.agentExecutor!=='platform'||!prior.agentTaskLease)fail('FORBIDDEN','请使用平台任务执行器',403);
+    return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat'),c=(await taskRecord(db,prior.agentTaskLease!.workspaceId,prior.agentTaskLease!.taskId)).value;return heartbeatTask(db,actor,prior.agentTaskLease!,c.lease!.sequence+1,Date.now());});
+  }
+  async savePlatformTaskPlan(prior:AgentActor,plan:PlatformTaskPlan){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat');return savePlatformPlan(db,{...prior,...actor},prior.agentTaskLease!,plan,Date.now());});}
+  async acknowledgePlatformTaskStep(prior:AgentActor,id:string,result:unknown){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId,'ai:chat');return acknowledgePlatformStep(db,{...prior,...actor},prior.agentTaskLease!,id,result,Date.now());});}
+  async releasePlatformTask(prior:AgentActor,issue?:'model_unavailable'|'model_response_invalid'){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);return releasePlatformTask(db,{...prior,...actor},prior.agentTaskLease!,issue,Date.now());});}
   private mailStateWake?: () => void;
   setMailStateWake(wake: () => void) { this.mailStateWake = wake; }
   constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>) {}
@@ -416,7 +444,7 @@ export class MistRepository {
   }
   async createAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>){
     if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
-    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');const result=await createTask(db,actor,workspaceId,input,Date.now(),taskScopeHash(scopeOf(row),row.state));const c=(await taskRecord(db,workspaceId,result.id)).value;return taskView(c,actor,Date.now(),result.state!=='access_changed'&&this.taskSourcesAllowed(row,actor,c));});
+    return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');if(input.executor==='platform'&&!this.platformRuntimeAvailable())fail('PRECONDITION','平台执行器或模型暂不可用',503);const result=await createTask(db,actor,workspaceId,input,Date.now(),taskScopeHash(scopeOf(row),row.state));const c=(await taskRecord(db,workspaceId,result.id)).value;return taskView(c,actor,Date.now(),result.state!=='access_changed'&&this.taskSourcesAllowed(row,actor,c));});
   }
   async claimAgentTask(prior:TokenPayload,workspaceId:string,taskId:string,input:Record<string,unknown>,make:MakeTaskCredential){
     if(!isAgentActor(prior)||!prior.agentServiceLease||prior.agentTaskLease)fail('FORBIDDEN','请使用执行器管理连接领取任务',403);
@@ -774,7 +802,7 @@ export class MistRepository {
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         if (command?.type === 'email.server.sync' || command?.type === 'email.server.state') Object.assign(context, {mailPendingFields:await pendingMailFields(db,workspaceId,command.type === 'email.server.state' ? command.payload.operationId : undefined)});
         const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
-        const remoteQueued = await enqueueMailState(db, row, applied.state, command, actor, prior, Date.now());
+        const remoteQueued = await enqueueMailState(db, row, applied.state, command, actor, prior, Date.now(),humanTaskProposal?.taskId);
         if (remoteQueued) applied.result = {...applied.result, remoteQueued:true};
         if (command?.type === 'email.server.state') await completeMailState(db,workspaceId,command.payload.operationId,command.payload.attemptId,command.payload.observation,(prior as MailSyncActor).mailSyncLease!.id);
         numbers.assertConsumed();

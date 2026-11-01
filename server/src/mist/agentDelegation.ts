@@ -27,7 +27,7 @@ export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new S
  */
 export const AGENT_OPERATE_CEILING: readonly string[] = Object.freeze(Object.keys(PERMISSION_SCOPES).sort());
 export type AgentDelegationMode = 'read' | 'operate';
-export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode; agentWorkspaceId?:string; agentLease?:ManagedAgentPayload;agentServiceLease?:AgentServiceLease;agentIdentity?:{id:string;name:string}; agentTaskLease?: AgentTaskLease; agentTaskControlLease?:AgentTaskControlLease; agentTaskWorkerId?:string; agentTaskOperation?: string; agentTaskSourceRevision?:number };
+export type AgentActor = TokenPayload & { actorKind: 'agent'; agentSessionId: string; agentMode: AgentDelegationMode; agentWorkspaceId?:string; agentLease?:ManagedAgentPayload;agentServiceLease?:AgentServiceLease;agentIdentity?:{id:string;name:string}; agentTaskLease?: AgentTaskLease; agentTaskControlLease?:AgentTaskControlLease; agentTaskWorkerId?:string; agentTaskOperation?: string; agentTaskSourceRevision?:number;agentExecutor?:'platform' };
 export type AgentDelegationPayload = { v: 1; kind: 'mist-agent'; sub: string; companyId?: string; sid: string; ceil: string[]; iat: number; exp: number; mode?: 'operate'; credentialVersion?:string };
 export type ManagedAgentPayload=Omit<AgentDelegationPayload,'v'|'kind'>&{v:2;kind:'mist-agent-connection';wid:string;generation:string};
 export type AgentDelegationIssue = { token: string; sessionId: string; expiresAt: string; ceiling: string[]; mode: AgentDelegationMode };

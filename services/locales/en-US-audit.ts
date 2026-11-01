@@ -1,5 +1,6 @@
 /** Employee audit viewer terminology; existing reviewed terms retain precedence. */
 export const auditEnglish:Record<string,string>={
+  '复制操作编号':'Copy operation ID','操作编号':'Operation ID','已复制':'Copied','Agent 提议':'Agent proposal','文件夹':'Folder',
   '有操作记录暂不可读取':'Some activity records are temporarily unavailable',
   '记录暂不可用':'Records temporarily unavailable',
   '人工确认':'Human confirmation','人工拒绝':'Human rejection',

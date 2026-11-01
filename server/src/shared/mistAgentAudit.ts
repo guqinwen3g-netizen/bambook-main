@@ -8,12 +8,14 @@ const AUDIT_DOMAINS:Array<[string,string,string]>=[
 ];
 const AUDIT_VERBS:Record<string,[string,string]>={submit:['提交','Submit'],confirm:['确认','Confirm'],reverse:['冲回','Reverse'],reject:['拒绝','Reject'],cancel:['撤销','Cancel'],approve:['批准','Approve'],decide:['审批','Review'],save:['保存','Save'],update:['更新','Update'],create:['新建','Create'],register:['登记','Register'],add:['新增','Add'],remove:['移除','Remove'],delete:['删除','Delete'],saveDraft:['保存草稿','Save draft for'],assign:['分配','Assign'],release:['放行','Release'],close:['关闭','Close'],send:['发送','Send'],issue:['签发','Issue'],allocate:['分配','Allocate'],settle:['办理','Settle'],move:['调整','Move'],return:['退回','Return'],recordQc:['登记','Record'],recordSample:['登记','Record']};
 export function agentAuditActionLabel(type:string,locale='zh-CN'){
+  if(type==='agent.proposal.reject')return locale.startsWith('en')?'Reject Agent proposal':'拒绝Agent提议';
   const english=locale.startsWith('en'),domain=AUDIT_DOMAINS.find(([prefix])=>type.startsWith(prefix));
   const words=type.split('.'),verb=[...words].reverse().find(word=>AUDIT_VERBS[word]);
   const action=verb?AUDIT_VERBS[verb]:['办理','Process'];
   return english?`${action[1]} ${domain?.[2]??'business record'}`:`${action[0]}${domain?.[1]??'业务'}`;
 }
 export const AGENT_AUDIT_FIELD_LABELS:Record<string,string>={
+  folder:'文件夹',
   state:'状态',status:'状态',amount:'金额',quantity:'数量',qty:'数量',note:'说明',reason:'原因',name:'名称',title:'标题',code:'编号',unitPrice:'单价',currency:'币种',date:'日期',due:'到期日',time:'时间',
   ownerId:'负责人',supplierId:'供应商',customerId:'客户',orderId:'订单',orderLineId:'订单条目',lineId:'订单条目',purchaseId:'采购合同',receiptIds:'收货记录',receiptId:'收货记录',settlementId:'结算',
   prepaymentApplied:'预付抵扣',confirmed:'确认记录',reversed:'冲回记录',returned:'退回记录',total:'合计',email:'邮箱',phone:'电话',address:'地址',country:'国家',taxAmount:'税额',invoiceNo:'发票号码',

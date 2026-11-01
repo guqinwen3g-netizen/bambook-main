@@ -23,6 +23,14 @@ it('reads the real API list/details without writing, and lets employees inspect 
   const dialog=getByRole(document.body,'dialog',{name:'保存日程'});expect(dialog.textContent).toContain('修改前');expect(dialog.textContent).toContain('原安排');expect(dialog.textContent).toContain('CONFIDENTIAL');
   for(const [url,init] of seam.api.mock.calls){expect(url).toContain('/agent-audits');expect(init?.method).toBeUndefined();}
 });
+it('copies the exact authorized operation ID and displays mail folder values as business labels',async()=>{
+  const copy=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:copy}});
+  seam.api.mockImplementation((url:string)=>Promise.resolve(url.includes('/one?')?detail('mail',[{path:['k:email','k:messages','i:mail','k:folder'],label:'文件夹',operation:'replace',before:'archive',after:'inbox'}]):{items:[entry()],nextCursor:null,canReadCompany:false}));
+  act(paint);await flush();await act(async()=>getByText(host,'保存日程').click());await flush();expect(document.body.textContent).toContain('已归档');expect(document.body.textContent).toContain('收件箱');await act(async()=>getByRole(document.body,'button',{name:'复制操作编号'}).click());await flush();expect(copy).toHaveBeenCalledWith('one');expect(getByRole(document.body,'button',{name:'已复制'})).toBeTruthy();expect(seam.api.mock.calls.every(([,init])=>!init?.method)).toBe(true);
+});
+it('labels rejection of an Agent proposal without implying that the underlying business record was rejected',async()=>{
+  seam.api.mockResolvedValue({items:[{...entry(),requestedCommandType:'agent.proposal.reject',phase:'rejected',source:'human_rejection'}],nextCursor:null,canReadCompany:false});act(paint);await flush();expect(getByText(host,'拒绝Agent提议')).toBeTruthy();
+});
 it('discards a delayed response after switching accounts',async()=>{
   let resolveOld!:(value:any)=>void;const old=new Promise(resolve=>{resolveOld=resolve;});
   seam.api.mockImplementationOnce(()=>old).mockResolvedValue({items:[entry('two','财务乙','B')],nextCursor:null,canReadCompany:false});
@@ -58,8 +66,9 @@ it('revalidates original input on demand and opens only the source supplied by t
 });
 it('offers readable English labels without translating employee-entered business values',async()=>{
   localStorage.setItem('bambook.device.locale','"en-US"');
-  seam.api.mockResolvedValue({items:[entry()],nextCursor:null,canReadCompany:false});
+  const copy=vi.fn().mockResolvedValue(undefined);Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:copy}});seam.api.mockImplementation((url:string)=>Promise.resolve(url.includes('/one?')?detail():{items:[entry()],nextCursor:null,canReadCompany:false}));
   act(paint);await flush();expect(getByRole(host,'table',{name:'Agent activity'})).toBeTruthy();expect(host.textContent).toContain('Save calendar event');expect(host.textContent).toContain('财务甲');
+  await act(async()=>getByText(host,'Save calendar event').click());await flush();await act(async()=>getByRole(document.body,'button',{name:'Copy operation ID'}).click());await flush();expect(getByRole(document.body,'button',{name:'Copied'})).toBeTruthy();expect((getByRole(document.body,'textbox',{name:'Operation ID'}) as HTMLInputElement).value).toBe('one');
 });
 it('preserves the payable section when navigating back to a settlement',async()=>{
   seam.api.mockImplementation((url:string)=>Promise.resolve(url.includes('/one?')?{...detail(),targets:[{view:'payment-vouchers',id:'settlement',section:'payables',label:'ST-1'}]}:{items:[entry()],nextCursor:null,canReadCompany:false}));

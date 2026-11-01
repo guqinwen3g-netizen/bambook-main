@@ -19,7 +19,10 @@ import { MistMailReceiver, type MailReceiverOptions } from './mail/receiverWorke
 import * as mistContract from '../shared/mistWorkspace';
 import { AGENT_DELEGATION_HEADER } from './agentDelegation';
 import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
-export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number}}={}) {
+import{MistPlatformTaskWorker,type PlatformTaskWorkerOptions}from'./platformTaskWorker';
+import{defaultAgentDelegation}from'./route';
+import type{AgentDelegation}from'./agentDelegation';
+export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>}={}) {
   const app = express(); app.disable('x-powered-by');
   const host=options.host??process.env.MIST_HOST??'127.0.0.1';
   const local=options.local??(mistLocalRequested()?createMistLocalRuntime({host}):undefined);
@@ -33,6 +36,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.locals.mailReceiver=mailReceiver;
     return{mail,mailReceiver};
   };
+  const agentRuntime=(repository:MistRepository,delegation:AgentDelegation)=>{const worker=new MistPlatformTaskWorker(repository,{onError:code=>console.error('[platform-agent]',code),...options.agentTasks,makeCredential:delegation.makeTaskCredential});app.locals.platformTaskWorker=worker;app.locals.mistRepository=repository;repository.setPlatformTaskRuntime(()=>worker.available,delegation.hydrateServiceActor);};
   const configured = new Set((local?'':process.env.MIST_CORS_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
   app.use((req, res, next) => cors({ credentials: true, origin(origin, callback) {
     const requestHost = String(req.headers.host ?? '');
@@ -53,6 +57,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     });
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
     const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize);
+    agentRuntime(repository,local.agentDelegation);
     app.use('/api/mist',createMistRouter({repository,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
@@ -63,6 +68,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.all('/api/mist/session', (_req, res) => { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Local workspace session is not available on this server' } }); });
     const filesRoot=process.env.MIST_FILES_DIR||path.resolve(__dirname,'../../private/mist-files');
     const repository=new MistRepository(prisma,mistContract as MistContract,new MistPrivateFiles(filesRoot));
+    agentRuntime(repository,defaultAgentDelegation());
     app.use('/api/mist', createMistRouter({ prisma,repository,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
   }
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

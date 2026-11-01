@@ -123,7 +123,7 @@ function ids(state: MistState, output = new Set<string>(), labels?:Map<string,st
     // Only authoritative collection records establish visibility. A proposal payload or frozen
     // snapshot mentioning an id must not grant access to the record bearing that id.
     const id=typeof root.id==='string'?root.id:typeof root.userId==='string'?root.userId:undefined;
-    if(id){output.add(id);locations?.set(JSON.stringify([...path,'i:'+id]),id);const label=[root.code,root.name,root.title,root.displayName].find(v=>typeof v==='string'&&v.trim());if(label&&labels){const text=label.slice(0,120);if(!labels.has(id))labels.set(id,text);else if(labels.get(id)!==text)labels.set(id,'');}return;}
+    if(id){output.add(id);locations?.set(JSON.stringify([...path,'i:'+id]),id);const label=[root.code,root.name,root.title,root.subject,root.displayName].find(v=>typeof v==='string'&&v.trim());if(label&&labels){const text=label.slice(0,120);if(!labels.has(id))labels.set(id,text);else if(labels.get(id)!==text)labels.set(id,'');}return;}
     for(const [key,value] of Object.entries(root))rows(value,[...path,'k:'+key]);
   };
   for(const path of [...MIST_READ_SECTIONS.flatMap(s=>s.paths),['files'],['calendar'],['members']]){const segments=path.map(k=>'k:'+k);rows(read(state,segments),segments);}
@@ -206,7 +206,7 @@ export function projectAgentAudit(a: AgentCommandAudit, input: { actor:TokenPayl
     // Partial ledger aliases support delta comparison, not navigation into a full-record view.
     const rows=read(input.visible,definition.path.map(k=>'k:'+k));const record=Array.isArray(rows)?rows.find(r=>r.id===id):undefined;if(!record)return;
     const linkId=definition.linkId?definition.linkId(record):record.id,key=definition.view+':'+(definition.section??'')+':'+linkId;if(typeof linkId!=='string'||targetKeys.has(key))return;
-    targetKeys.add(key);const label=(['supplier','customer','contact'].includes(type)?[record.name,record.code,record.title]:[record.code,record.name,record.title,record.style]).find(v=>typeof v==='string'&&v.trim())??definition.label;
+    targetKeys.add(key);const label=(['supplier','customer','contact'].includes(type)?[record.name,record.code,record.title]:[record.code,record.name,record.title,record.subject,record.style]).find(v=>typeof v==='string'&&v.trim())??definition.label;
     targets.push({label:label.slice(0,120),view:definition.view,id:linkId,...(definition.section?{section:definition.section}:{})});targetRecords.push(record);
   };
   for(const change of allowed)for(const definition of AGENT_OBJECT_TYPES){const prefix=definition.path.map(k=>'k:'+k);if(prefix.every((p,i)=>change.path[i]===p)&&change.path[prefix.length]?.startsWith('i:'))target(definition.type,change.path[prefix.length].slice(2));}

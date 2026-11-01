@@ -1,4 +1,7 @@
 export const connectionEnglish:Record<string,string>={
+ 'Agent连接':'Agent connection',
+ '模型重试':'Model retry','模型已暂停':'Model paused','等待接续':'Awaiting recovery',
+ '执行方式':'Execution','平台执行':'Platform Agent','外部客户端':'External client','待执行':'Queued','等待重试':'Waiting to retry','平台执行暂不可用':'Platform execution is unavailable','模型暂不可用':'Model unavailable','模型响应无效':'Invalid model response','下次重试':'Next retry',
  '待补充资料':'Awaiting information','请求补充资料':'Information requested','本人补充资料':'Information provided by owner','Agent提问':'Agent question','本人答复':'Your answer','补充资料':'Provide information','答复':'Answer','提交答复':'Submit answer','资料已补充':'Information provided',
  '身份启用':'Identity enabled','身份停用':'Identity disabled',
  '长期Agent':'Long-term Agents','Agent服务':'Agent services','Agent服务身份':'Agent service identities','Agent身份':'Agent identity','Agent名称':'Agent name','责任人':'Responsible person','新建Agent身份':'New Agent identity','配置Agent身份':'Configure Agent identity',

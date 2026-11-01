@@ -7,6 +7,7 @@ import type { MailRemoteRef, MailStateField, MailStateObservation, MailStateView
 import type { EmailMessageFolder } from '../../shared/mistEmail';
 import { fail } from '../errors';
 import { receiveSource } from './receiverRegistry';
+import type{AgentActor}from'../agentDelegation';
 
 export const MAIL_STATE_PREFIX = 'mist-revision:mail-state:';
 export const MAIL_STATE_HASH = 'mist-mail-state:v1';
@@ -16,6 +17,9 @@ export type MailStateAttempt = { id: string; origin: MailRemoteRef; target?: { p
 export type MailStateRecord = {
   schemaVersion: 1; id: string; workspaceId: string; accountId: string; messageId: string; source: number; sourceHash: string;
   initiatorId: string; authority: TokenPayload; authorizedAt: number; operation: MailStateOperation;
+  /** Observation link only: human-confirmed work keeps human authority after an Agent stops. */
+  sourceTaskId?:string;
+  sourceTasks?:Record<string,true>;
   phase: 'pending' | 'running' | 'failed' | 'unknown' | 'blocked' | 'done' | 'superseded';
   version: number; createdAt: string; nextRunAt: number; failures: number; error?: string;
   leaseId?: string; attempt?: MailStateAttempt; acceptRemote?: boolean; retries?: Array<{ actorId: string; at: number }>;
@@ -53,7 +57,13 @@ export async function mailStateRecords(db: any, workspaceId: string): Promise<Ma
   return rows.map(value).filter(active);
 }
 export async function taskHasPendingMail(db:any,workspaceId:string,taskId:string){
-  const rows=await db.mistCommandReceipt.findMany({where:{workspaceId,inputHash:MAIL_STATE_HASH,AND:[{result:{path:[MAIL_STATE_FIELD,'authority','agentTaskLease','taskId'],equals:taskId}},{OR:['pending','running','failed','unknown','blocked'].map(phase=>({result:{path:[MAIL_STATE_FIELD,'phase'],equals:phase}}))}]},take:1});return rows.length>0;
+  const rows=await db.mistCommandReceipt.findMany({where:{workspaceId,inputHash:MAIL_STATE_HASH,AND:[{OR:[{result:{path:[MAIL_STATE_FIELD,'sourceTasks',taskId],equals:true}},{result:{path:[MAIL_STATE_FIELD,'sourceTaskId'],equals:taskId}},{result:{path:[MAIL_STATE_FIELD,'authority','agentTaskLease','taskId'],equals:taskId}}]},{OR:['pending','running','failed','unknown','blocked'].map(phase=>({result:{path:[MAIL_STATE_FIELD,'phase'],equals:phase}}))}]},take:1});return rows.length>0;
+}
+function taskObservers(taskId:string|undefined,previous:MailStateRecord[]=[]){
+  const ids=new Set<string>(taskId?[taskId]:[]);
+  for(const r of previous){for(const id of Object.keys(r.sourceTasks??{}))ids.add(id);if(r.sourceTaskId)ids.add(r.sourceTaskId);const legacy=(r.authority as AgentActor).agentTaskLease?.taskId;if(legacy)ids.add(legacy);}
+  if(ids.size>64)fail('MAIL_STATE_LIMIT','关联任务过多，请先核对原邮箱操作',409);
+  return{sourceTaskId:previous.find(r=>r.sourceTaskId)?.sourceTaskId??taskId,sourceTasks:ids.size?Object.fromEntries([...ids].map(id=>[id,true as const])):undefined};
 }
 export async function pendingMailFields(db: any, workspaceId: string, exclude?: string) {
   const out: Record<string, MailStateField[]> = {};
@@ -63,8 +73,9 @@ export async function pendingMailFields(db: any, workspaceId: string, exclude?: 
   }
   return out;
 }
-export async function enqueueMailState(db: any, workspace: { id: string; state: MistState }, after: MistState, command: any, actor: TokenPayload, prior: TokenPayload, now: number) {
+export async function enqueueMailState(db: any, workspace: { id: string; state: MistState }, after: MistState, command: any, actor: TokenPayload, prior: TokenPayload, now: number,originTaskId?:string) {
   if (!['email.flag', 'email.move', 'email.state.retry'].includes(command?.type)) return false;
+  const observedTaskId=originTaskId??(prior as AgentActor).agentTaskLease?.taskId;
   const m = after.email.messages.find(m => m.id === command.payload.id), a = m && after.email.accounts.find(a => a.id === m.accountId);
   if (!m || !a || m.example || a.example || !m.remote) return false;
   const records = await mailStateRecords(db, workspace.id);
@@ -76,22 +87,23 @@ export async function enqueueMailState(db: any, workspace: { id: string; state: 
     if (!a.credentialSet) fail('MAIL_CREDENTIAL_MISSING', '请先重新连接邮箱', 422);
     const current = await readMailState(db, workspace.id, retry.id);
     if (current.record.phase === 'running' || !active(current.record)) return false;
-    await save(db, current.row, current.record, { phase: 'pending', acceptRemote:command.payload.acceptRemote===true, authority: authority(actor, prior), authorizedAt: now, nextRunAt: now, error: undefined, retries: [...(retry.retries || []), { actorId: actor.userId, at: now }].slice(-20) });
+    await save(db, current.row, current.record, { phase: 'pending', acceptRemote:command.payload.acceptRemote===true, authority: authority(actor, prior), authorizedAt: now,...taskObservers(observedTaskId,[current.record]), nextRunAt: now, error: undefined, retries: [...(retry.retries || []), { actorId: actor.userId, at: now }].slice(-20) });
     return true;
   }
   if (command.type === 'email.flag' && command.payload.flag === 'important') return false;
   const operation: MailStateOperation = command.type === 'email.flag' ? { kind: 'flag', flag: command.payload.flag, value: !!command.payload.value } : { kind: 'move', folder: m.folder };
   const field = operation.kind === 'move' ? 'folder' : operation.flag;
+  const superseded:MailStateRecord[]=[];
   for (const candidate of rows.filter(r => mailStateField(r) === field)) {
     const current = await readMailState(db, workspace.id, candidate.id), old = current.record;
     if (!active(old)) continue;
     if (field === 'folder' && (old.phase === 'running' || old.phase === 'unknown' || (old.attempt?.issued && !old.attempt.confirmedNotApplied) || old.attempt?.result)) fail('MAIL_STATE_PENDING', '先核对上一项移动的结果，再继续移动', 409);
-    await save(db, current.row, current.record, { phase: 'superseded', nextRunAt: 0 });
+    superseded.push(old);await save(db, current.row, current.record, { phase: 'superseded', nextRunAt: 0 });
   }
   if (records.filter(r=>r.accountId===a.id).length >= 500 && !rows.length) fail('MAIL_STATE_LIMIT', '待同步操作过多，请先处理同步异常', 409);
   const id = randomUUID(), source = m.source || 1, valid = source === (a.sourceGeneration || 1) && a.credentialSet;
   const r: MailStateRecord = { schemaVersion: 1, id, workspaceId: workspace.id, accountId: a.id, messageId: m.id, source, sourceHash: receiveSource(a), initiatorId: actor.userId,
-    authority: authority(actor, prior), authorizedAt: now, operation, phase: valid ? 'pending' : 'blocked', version: 1, createdAt: new Date(now).toISOString(), nextRunAt: valid ? now : 0, failures: 0,
+    authority: authority(actor, prior), authorizedAt: now,...taskObservers(observedTaskId,superseded), operation, phase: valid ? 'pending' : 'blocked', version: 1, createdAt: new Date(now).toISOString(), nextRunAt: valid ? now : 0, failures: 0,
     ...(!valid ? { error: source !== (a.sourceGeneration || 1) ? '这是旧来源邮件，请在原邮箱处理' : '邮箱未连接，请重新绑定凭据' } : {}) };
   await db.mistCommandReceipt.create({ data: { id: randomUUID(), workspaceId: workspace.id, requestId: MAIL_STATE_PREFIX + id, actorId: r.initiatorId, inputHash: MAIL_STATE_HASH, expectedRevision: 0, createdAt: new Date(r.createdAt), result: { revision: 0, [MAIL_STATE_FIELD]: r } } });
   return true;
