@@ -9,6 +9,8 @@ import { createMistServer } from '../server';
 import { MistApiError } from '../errors';
 import { isTokenRevoked } from '../../auth/sessionRevocation';
 import type { MailTransport } from './transport';
+/** Test mail hosts are fakes behind a stub transport; resolve them to a documentation-range public address. */
+const publicMailHost = async () => ['203.0.113.10'];
 
 const password = 'synthetic-mail-password';
 let directory: string;
@@ -42,7 +44,7 @@ beforeEach(async () => {
 afterEach(async () => { await Promise.all(workers.splice(0).map(w => w.stop())); vi.useRealTimers(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true }); });
 function runtime(box: Mailbox, folder = directory) {
   const local = createMistLocalRuntime({ directory: folder });
-  const app = createMistServer(undefined, { local, mailTransport: box.transport, mailReceive: { tickMs: 3_600_000, intervalMs: 1000, leaseMs: 20_000, timeoutMs: 5000 } });
+  const app = createMistServer(undefined, { local, mailResolve:publicMailHost, mailTransport: box.transport, mailReceive: { tickMs: 3_600_000, intervalMs: 1000, leaseMs: 20_000, timeoutMs: 5000 } });
   workers.push(app.locals.mailReceiver); app.locals.mailReceiver.start(3_600_000);
   return { app, local, worker: app.locals.mailReceiver };
 }
@@ -124,7 +126,7 @@ describe('Durable opt-in background inbox receiver', () => {
       if (!allowed && (actor as any).mailReceivingWorker) throw new MistApiError('ACCOUNT_DISABLED', '账号已停用', 401);
       return check(db, actor, permission);
     };
-    const app = createMistServer(undefined, { local, mailTransport: box.transport, mailReceive: { tickMs: 3_600_000, intervalMs: 1000 } });
+    const app = createMistServer(undefined, { local, mailResolve:publicMailHost, mailTransport: box.transport, mailReceive: { tickMs: 3_600_000, intervalMs: 1000 } });
     workers.push(app.locals.mailReceiver); app.locals.mailReceiver.start(3_600_000);
     const owner = await account(app); await enable(owner); allowed = false; box.put(); await app.locals.mailReceiver.tick();
     const state = await status(owner); expect(state.enabled).toBe(false); expect(state.state).toBe('blocked'); expect(box.opens).toEqual([]);
@@ -165,7 +167,7 @@ describe('Durable opt-in background inbox receiver', () => {
       if((actor as any).mailReceivingWorker&&isTokenRevoked({credentialVersion:version},(actor as any).iat,actor.credentialVersion))throw new MistApiError('SESSION_REVOKED','授权已撤销',401);
       return {...await original(db,actor,permission),credentialVersion:version};
     };
-    const app=createMistServer(undefined,{local,mailTransport:box.transport,mailReceive:{tickMs:3_600_000,intervalMs:1000}});workers.push(app.locals.mailReceiver);app.locals.mailReceiver.start(3_600_000);
+    const app=createMistServer(undefined,{local,mailResolve:publicMailHost,mailTransport:box.transport,mailReceive:{tickMs:3_600_000,intervalMs:1000}});workers.push(app.locals.mailReceiver);app.locals.mailReceiver.start(3_600_000);
     const owner=await account(app);await enable(owner);vi.setSystemTime(Date.now()+8*24*60*60_000);box.put();await app.locals.mailReceiver.tick();
     const stored=await local.database.mistWorkspace.findUnique({where:{id:owner.workspace.id}});expect(stored.state.email.messages.filter((m:any)=>m.accountId===owner.id)).toHaveLength(1);
     version='v2';vi.setSystemTime(Date.now()+1001);const count=box.connections;await app.locals.mailReceiver.tick();expect(box.connections).toBe(count);

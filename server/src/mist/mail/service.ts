@@ -1,5 +1,7 @@
 import { observeMailState, observationChanged, stateFolders, rawMailHash } from './stateProtocol';
 import { randomUUID } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { simpleParser, type AddressObject, type ParsedMail } from 'mailparser';
 import type { TokenPayload } from '../../auth/service';
 import { fail, MistApiError } from '../errors';
@@ -32,6 +34,17 @@ export function pickMailFolders(folders: MailFolderInfo[]): Array<{ remote: stri
   const archive = folders.find(f => has(f, '\\Archive')) || folders.find(f => ['archive', 'archives', '归档', '已归档'].includes(leaf(f)));
   return [...(inbox ? [{ remote: inbox.path, folder: 'inbox' as const }] : []), ...(sent ? [{ remote: sent.path, folder: 'sent' as const }] : []), ...(archive && archive !== sent ? [{ remote: archive.path, folder: 'archive' as const }] : [])];
 }
+/** Loopback, private, link-local, CGNAT, unique-local and unspecified ranges (IPv4, IPv6 and IPv4-mapped IPv6). */
+export function isInternalAddress(address: string): boolean {
+  let ip = address.trim().toLowerCase();
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip); if (mapped) ip = mapped[1];
+  if (isIP(ip) === 4) {
+    const [a, b] = ip.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 198 && (b === 18 || b === 19)) || a >= 224;
+  }
+  if (isIP(ip) === 6) return ip === '::' || ip === '::1' || /^f[cd]/.test(ip) || /^fe[89ab]/.test(ip) || /^ff/.test(ip);
+  return true;
+}
 const addresses = (value: AddressObject | AddressObject[] | undefined): EmailAddress[] => (Array.isArray(value) ? value : value ? [value] : []).flatMap(item => item.value).filter(item => item.address).map(item => ({ name: item.name || '', address: String(item.address).toLowerCase() }));
 const problem = (code: string, message: string): EmailProblem => ({ code, message, at: new Date().toISOString() });
 const domainOf = (address: string) => address.split('@').pop()!.toLowerCase();
@@ -41,7 +54,7 @@ const recipients = (value: string, label = '收件人') => emailAddresses(value 
 export class MistMailService {
   private readonly busy = new Map<string, true>();
   private readonly receiving = new Map<string,{controller:AbortController;background:boolean}>();
-  constructor(private readonly repository: MistRepository, private readonly credentials: MistMailCredentials, private readonly transport: MailTransport = imapSmtpTransport, private readonly env: NodeJS.ProcessEnv = process.env, private readonly now = () => new Date(), private readonly receiveOptions: {intervalMs?:number;leaseMs?:number;timeoutMs?:number} = {}) {}
+  constructor(private readonly repository: MistRepository, private readonly credentials: MistMailCredentials, private readonly transport: MailTransport = imapSmtpTransport, private readonly env: NodeJS.ProcessEnv = process.env, private readonly now = () => new Date(), private readonly receiveOptions: {intervalMs?:number;leaseMs?:number;timeoutMs?:number} = {}, private readonly resolveHost: (host: string) => Promise<string[]> = async host => (await lookup(host, { all: true, verbatim: true })).map(row => row.address)) {}
 
   private policy() { return mailPolicy(this.env); }
   private exclusive<T>(key: string, label: string, run: () => Promise<T>): Promise<T> {
@@ -57,10 +70,15 @@ export class MistMailService {
     if (account!.example || !account!.transport) fail('PRECONDITION', '示例邮箱没有真实收发服务', 422);
     return { ...snapshot, account: account! };
   }
-  private checkHosts(account: EmailAccount) {
+  /** A company may only point mail at public servers; internal hosts need an explicit operator allow-list entry. */
+  private async checkHosts(account: EmailAccount) {
     const policy = this.policy(), t = account.transport!;
     for (const [host, port, label] of [[t.imapHost, t.imapPort, '收信'], [t.smtpHost, t.smtpPort, '发信']] as const) {
-      if (policy.allowedHosts.length ? !policy.allowedHosts.includes(host) : !MAIL_PORTS.has(port)) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host}:${port} 不在允许范围内`, 422);
+      const name = host.trim().toLowerCase();
+      if (policy.allowedHosts.length ? !policy.allowedHosts.includes(name) : !MAIL_PORTS.has(port)) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host}:${port} 不在允许范围内`, 422);
+      if (policy.allowedHosts.includes(name)) continue;
+      const addresses = isIP(name) ? [name] : await this.resolveHost(name).catch(() => fail('MAIL_HOST_UNRESOLVED', `${label}服务器 ${host} 无法解析，请核对地址`, 422));
+      if (!addresses.length || addresses.some(isInternalAddress)) fail('MAIL_HOST_NOT_ALLOWED', `${label}服务器 ${host} 指向内部网络，不能使用`, 422);
     }
   }
   private insecure(host: string) { return this.policy().insecureTlsHosts.includes(host.toLowerCase()); }
@@ -78,7 +96,7 @@ export class MistMailService {
     if (typeof password !== 'string' || !password || password.length > 1024) fail('INVALID_INPUT', '请填写邮箱密码或授权码', 400);
     const { account } = await this.account(prior, workspaceId, accountId);
     if (account.ownerId !== prior.userId) fail('FORBIDDEN', '只有接入该邮箱的本人可以绑定凭据', 403);
-    this.checkHosts(account);
+    await this.checkHosts(account);
     const secret = { username: account.transport!.username, password: password as string };
     return this.exclusive(`${workspaceId}:${accountId}`, '该邮箱的连接操作', async () => {
       let stage: 'imap' | 'smtp' = 'imap';
@@ -108,7 +126,7 @@ export class MistMailService {
   /** Internal protocol access; callers must hold and revalidate a current account I/O lease. */
   async openStateSession(prior:MailSyncActor,workspaceId:string,accountId:string) {
     await this.repository.assertMailSync(prior,workspaceId);
-    const snapshot=await this.account(prior,workspaceId,accountId);this.checkHosts(snapshot.account);
+    const snapshot=await this.account(prior,workspaceId,accountId);await this.checkHosts(snapshot.account);
     const session=await this.imap(snapshot.account,await this.secret(workspaceId,snapshot.account));
     return {...snapshot,session};
   }
@@ -142,7 +160,7 @@ export class MistMailService {
       let session:MailImapSession|undefined;
       const close=()=>{void session?.close(true).catch(()=>undefined);};signal.addEventListener('abort',close,{once:true});
       try {
-        const {account,state}=await this.account(op,workspaceId,accountId);this.checkHosts(account);const secret=await this.secret(workspaceId,account);
+        const {account,state}=await this.account(op,workspaceId,accountId);await this.checkHosts(account);const secret=await this.secret(workspaceId,account);
         const folders:EmailFolderSync[]=[],messages:EmailSyncedMessage[]=[];let observations:import('../../shared/mistMailState').MailStateObservation[]=[],stateCursor=lease.stateCursor||0;let lastError:EmailProblem|null=null,remaining=0;
         try{const connecting=this.imap(account,secret);void connecting.then(value=>{if(signal.aborted)void value.close(true).catch(()=>undefined);},()=>undefined);session=await wait(connecting);}catch(error){check();const reason=describeMailError(error,'imap');lastError=problem(reason.code,reason.message);}
         if(session){
@@ -210,7 +228,7 @@ export class MistMailService {
   async send(prior: TokenPayload, workspaceId: string, body: { requestKey?: unknown; draftId?: unknown; input?: unknown; forwardOfId?: unknown }) {
     const input = (body.input && typeof body.input === 'object' ? body.input : {}) as EmailDraftInput;
     const { account } = await this.account(prior, workspaceId, String(input.accountId || ''));
-    this.checkHosts(account); this.checkRecipients({ to: String(input.to || ''), cc: String(input.cc || ''), bcc: String(input.bcc || '') });
+    await this.checkHosts(account); this.checkRecipients({ to: String(input.to || ''), cc: String(input.cc || ''), bcc: String(input.bcc || '') });
     const begun = await this.write(prior, workspaceId, 'email.server.send.begin', { mode: 'new', requestKey: body.requestKey, ...(body.draftId ? { draftId: String(body.draftId) } : {}), input, ...(body.forwardOfId ? { forwardOfId: String(body.forwardOfId) } : {}), messageId: `<${randomUUID()}@${domainOf(account.address)}>` });
     const started = (begun.receipt as any).result as { id: string; status: string; existing: boolean; recovered?: boolean; recoveredFor?: string };
     // 同一意图重放或同草稿/同内容的未决发送：返回原记录，不再投递；recoveredFor 表示服务端已把本次 requestKey 登记为原记录的别名。
@@ -221,7 +239,7 @@ export class MistMailService {
     const snapshot = await this.repository.mailSnapshot(prior, workspaceId), record = snapshot.state.email.sends.find(row => row.id === sendId);
     if (!record) fail('NOT_FOUND', '发送记录不存在', 404);
     const account = snapshot.state.email.accounts.find(row => row.id === record!.accountId)!;
-    this.checkHosts(account); this.checkRecipients(record!); await this.secret(workspaceId, account);
+    await this.checkHosts(account); this.checkRecipients(record!); await this.secret(workspaceId, account);
     await this.write(prior, workspaceId, 'email.server.send.begin', { mode: 'retry', id: sendId, confirmUnknown: confirmUnknown === true });
     return this.deliver(prior, workspaceId, sendId);
   }
