@@ -130,6 +130,23 @@ it('uses the official client to wait without a live execution lease, then reclai
   now.mockReturnValue(clock+60001);await call('bambook_query',{type:'email'});const replay=await call('bambook_task',{action:'wait',requestId,delaySeconds:60,summary:'到约定时间再核对。'});expect((replay.structuredContent as any).item).toMatchObject({state:'running',resumeAt:null,runtimeUsedMs:item.runtimeUsedMs});expect((await call('bambook_task',{action:'finish',requestId:randomUUID(),outcome:'succeeded',result:'已重新核对原资料。'})).isError).not.toBe(true);expect((await f.current()).state).toBe('succeeded');
  }finally{now.mockRestore();}
 });
+it('uses the local task API to wait with exact fields and current task credentials only', async () => {
+ const f=await setup('read'),token=await f.claim(),url=f.base+'/agent-tasks/'+f.task.id+'/wait',input={requestId:randomUUID(),delaySeconds:60,summary:'到约定时间再核对。'};
+ const before=await f.current();
+ await f.human.post(url).send(input).expect(403);
+ await request(f.app).post(url).set(SERVICE_KEY_HEADER,f.key).send(input).expect(403);
+ await request(f.app).post(url).set(TASK_HEADER,token).send({...input,version:1}).expect(400);
+ await request(f.app).post(url).set(TASK_HEADER,token).send({...input,delaySeconds:'60'}).expect(400);
+ const unchanged=await f.current();expect(unchanged).toEqual({...before,runtimeUsedMs:unchanged.runtimeUsedMs});
+ const waiting=await request(f.app).post(url).set(TASK_HEADER,token).send(input).expect(200);
+ expect(waiting.headers['cache-control']).toBe('private, no-store');expect(waiting.body.item.state).toBe('waiting_time');
+ await request(f.app).post(url).set(TASK_HEADER,token).send({...input,requestId:randomUUID()}).expect(401);
+ const paused=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/pause').send({requestId:randomUUID(),version:waiting.body.item.version}).expect(200)).body.item;
+ const resumed=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/resume').send({requestId:randomUUID(),version:paused.version}).expect(200)).body.item;
+ expect(resumed).toMatchObject({state:'waiting_time',resumeAt:waiting.body.item.resumeAt,runtimeUsedMs:waiting.body.item.runtimeUsedMs});
+ await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/cancel').send({requestId:randomUUID(),version:resumed.version}).expect(200);
+ expect((await f.current()).resumeAt).toBeNull();
+});
 it('asks for missing facts through the official client, accepts only the owner answer, and keeps approval separate',async()=>{
  const ceiling:{value:string[]|null}={value:null},f=await setup('operate',ceiling),issued=(await f.human.post(f.base+'/agent-tasks/'+f.task.id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
  const server=f.app.listen(0,'127.0.0.1');servers.push(server);await new Promise<void>(resolve=>server.once('listening',resolve));const address=server.address();if(!address||typeof address==='string')throw Error('Missing loopback port');

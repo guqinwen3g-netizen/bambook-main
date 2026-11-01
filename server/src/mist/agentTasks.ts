@@ -29,6 +29,17 @@ const plain = (v: unknown, max: number, label: string, optional = false) => {
 };
 const rid = (v: unknown) => plain(v, 116, '操作编号');
 const id = (v: unknown) => { if (!uuid(v)) fail('INVALID_INPUT', '任务编号无效', 400); return v as string; };
+/** Date.parse normalizes impossible civil dates (e.g. November 31); never schedule from that guess. */
+function absoluteWaitTime(value: unknown): number {
+  const parts = typeof value === 'string' && /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|([+-])(\d{2}):(\d{2}))$/.exec(value);
+  if (!parts) fail('INVALID_INPUT', '等待时间需包含完整日期和时区', 400);
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, , offsetHour, offsetMinute] = parts;
+  const year = Number(yearText), month = Number(monthText), day = Number(dayText);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || Number(hourText) > 23 || Number(minuteText) > 59 || Number(secondText) > 59 || Number(offsetHour ?? 0) > 23 || Number(offsetMinute ?? 0) > 59) fail('INVALID_INPUT', '等待时间的日期或时区无效', 400);
+  return Date.parse(value as string);
+}
 export type AgentTaskLease = { workspaceId: string; taskId: string; runId: string; grantHash: string; serviceLease: AgentServiceLease };
 export type AgentTaskControlLease = { workspaceId:string; taskId:string; hash:string };
 export type MakeTaskCredential = (workspaceId: string, taskId: string, runId: string, nonce: string) => string;
@@ -260,7 +271,7 @@ export async function waitTaskUntil(db:any,actor:TokenPayload,lease:AgentTaskLea
   if(await pastOperation(db,c,requestId,'waiting_time',values))return taskView(c,actor,now);
   let resumeAt:number;
   if(input.delaySeconds!==undefined){if(!Number.isSafeInteger(input.delaySeconds)||(input.delaySeconds as number)<30||(input.delaySeconds as number)>86400)fail('INVALID_INPUT','等待时长需为30秒至24小时',400);resumeAt=now+(input.delaySeconds as number)*1000;}
-  else{if(typeof input.until!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/.test(input.until))fail('INVALID_INPUT','等待时间需包含完整日期和时区',400);resumeAt=Date.parse(input.until as string);}
+  else resumeAt=absoluteWaitTime(input.until);
   if(!Number.isFinite(resumeAt)||resumeAt<now+30_000||resumeAt>=c.expiresAt)fail('INVALID_INPUT','等待时间需在30秒后且早于任务到期',400);
   if(c.waitingProposalIds.length||hasUnansweredQuestion(c))fail('AGENT_TASK_NOT_READY','请先处理待本人确认或补充的事项',409);
   const n=next(c,now,'waiting_time',requestId,values);n.state='waiting_time';n.resumeAt=resumeAt;n.runtimeUsedMs=usedRuntime(c,now);n.lease=undefined;n.checkpoint=summary;

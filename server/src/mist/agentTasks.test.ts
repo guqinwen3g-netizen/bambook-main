@@ -25,6 +25,45 @@ async function claim(requestId = randomUUID(), workerId = 'worker') {
   const c = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
   return { result, lease: { taskId, workspaceId, runId: c.lease!.id, grantHash: digest(result.token!), serviceLease: c.authority } as AgentTaskLease };
 }
+it.each([
+  ['2026-11-30T23:59:00Z', '2026-11-31T00:01:00Z'],
+  ['2027-02-28T23:59:00Z', '2027-02-29T00:01:00Z'],
+  ['2028-02-29T23:59:00Z', '2028-02-30T00:01:00Z'],
+])('rejects an impossible civil date near %s without silently scheduling its normalized successor', async (clock, until) => {
+  now = Date.parse(clock);
+  const identity = (await tx(d => identityRecord(d, workspaceId, identityId))).value;
+  await tx(d => issueServiceKey(d, actor, workspaceId, identityId, { requestId: randomUUID(), version: identity.version }, (_w, _i, g) => 'new-key-' + g, now));
+  const created = await tx(d => createTask(d, actor, workspaceId, { requestId: randomUUID(), identityId, name: '约定核对', instructions: '按约定时间核对。' }, now)); taskId = created.id;
+  service.agentServiceLease = (await tx(d => taskRecord(d, workspaceId, taskId))).value.authority;
+  const first = await claim(), original = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
+  // These normalize to a valid time inside the task TTL, so the ordinary TTL check cannot catch them.
+  expect(Date.parse(until)).toBeGreaterThan(now + 30_000);
+  expect(Date.parse(until)).toBeLessThan(original.expiresAt);
+  await expect(tx(d => waitTaskUntil(d, service, first.lease, { requestId: randomUUID(), until, summary: '等待约定时间。' }, now))).rejects.toMatchObject({ code: 'INVALID_INPUT', message: '等待时间的日期或时区无效' });
+  expect((await tx(d => taskRecord(d, workspaceId, taskId))).value).toEqual(original);
+});
+it('accepts an explicit offset and rejects invalid clock, offset and conflicting repeated waits', async () => {
+  const first = await claim(), original = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
+  for (const until of ['2026-11-01T24:01:00Z', '2026-11-01T00:61:00Z', '2026-11-01T00:01:60Z', '2026-11-01T08:01:00+24:00', '2026-11-01T08:01:00+08:60']) {
+    await expect(tx(d => waitTaskUntil(d, service, first.lease, { requestId: randomUUID(), until, summary: '等待' }, now))).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+  }
+  expect((await tx(d => taskRecord(d, workspaceId, taskId))).value).toEqual(original);
+  const requestId = randomUUID(), waiting = await tx(d => waitTaskUntil(d, service, first.lease, { requestId, until: '2026-11-01T08:01:00.123+08:00', summary: '等待约定时间。' }, now));
+  expect(waiting.resumeAt).toBe('2026-11-01T00:01:00.123Z');
+  now += 60_124; const next = await claim();
+  await expect(tx(d => waitTaskUntil(d, service, next.lease, { requestId, until: '2026-11-01T08:02:00+08:00', summary: '等待约定时间。' }, now))).rejects.toMatchObject({ code: 'CONFLICT' });
+  expect((await tx(d => taskRecord(d, workspaceId, taskId))).value.resumeAt).toBeUndefined();
+});
+it('does not renew authority or the task lifetime when a scheduled wait becomes due', async () => {
+  const first = await claim();
+  await tx(d => waitTaskUntil(d, service, first.lease, { requestId: randomUUID(), delaySeconds: 60, summary: '等待约定时间。' }, now));
+  const waiting = (await tx(d => taskRecord(d, workspaceId, taskId))).value;
+  await tx(d => revokeServiceKey(d, actor, workspaceId, identityId, { requestId: randomUUID() }, now));
+  now += 60_000; await expect(claim()).rejects.toMatchObject({ code: 'AGENT_KEY_INVALID' });
+  expect((await tx(d => taskRecord(d, workspaceId, taskId))).value).toEqual(waiting);
+  now = waiting.expiresAt;
+  expect(taskView(waiting, actor, now).state).toBe('expired');
+});
 it('releases a durable timed wait without charging its elapsed wall time or issuing an early lease',async()=>{
  const first=await claim(),original=(await tx(d=>taskRecord(d,workspaceId,taskId))).value;now+=5000;const waiting=await tx(d=>waitTaskUntil(d,service,first.lease,{requestId:randomUUID(),delaySeconds:60,summary:'到约定时间再核对。'},now));expect(waiting.state).toBe('waiting_time');expect(waiting.runtimeUsedMs).toBe(5000);expect(waiting.expiresAt).toBe(new Date(original.expiresAt).toISOString());
  await expect(tx(d=>assertTaskLease(d,service,first.lease,now))).rejects.toMatchObject({code:'AGENT_TASK_LEASE_INVALID'});now+=59000;await expect(claim()).rejects.toMatchObject({code:'AGENT_TASK_NOT_READY'});expect(taskView((await tx(d=>taskRecord(d,workspaceId,taskId))).value,actor,now).runtimeUsedMs).toBe(5000);
