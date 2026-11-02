@@ -6,7 +6,7 @@ import type { FulfillmentProductionFact } from './mistFulfillment';
 
 export const OBSERVED_PRODUCTION_STAGES = { cut: '裁剪', sew: '车缝', finish: '整烫包装', qc: '待检验' } as const;
 export function observedProductionStages(domain: 'fabric'|'garment'|undefined): Record<keyof typeof OBSERVED_PRODUCTION_STAGES,string> {
-  return domain==='fabric'?{cut:'备货',sew:'加工',finish:'整理',qc:'待检验'}:OBSERVED_PRODUCTION_STAGES;
+  return domain==='fabric'?{cut:'坯布',sew:'染整',finish:'后整理',qc:'待检验'}:OBSERVED_PRODUCTION_STAGES;
 }
 export type ProductionObservationInput = {
   productionId: string; asOf: string; startedOn?: string; sourceName: string; evidence: string; fileIds: string[];

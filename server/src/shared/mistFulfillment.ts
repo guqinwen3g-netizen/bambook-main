@@ -1,5 +1,6 @@
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
+import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
@@ -148,6 +149,8 @@ export type FulfillmentPurchase = {
     lineId: string;
     kind: 'material' | 'finished' | 'processing';
     materialKind?: MistMaterialKind;
+    /** Fabric staged outsourcing: greige bought by weight states its kilograms per metre; the dyeing contract states its agreed processing loss. */
+    stageTerms?: FabricStageTerms;
     domain: 'garment' | 'fabric';
     supplierId: string;
     supplier: string;
@@ -192,7 +195,7 @@ export type FulfillmentPurchaseRevision = {
     requesterId: string;
     reviewerIds: string[];
     configVersions: Record<string, number>;
-    snapshot: Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
+    snapshot: Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'stageTerms' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
     decision?: FulfillmentPurchase['decision'];
 };
 export type FulfillmentReceipt = {
@@ -411,7 +414,7 @@ export type FulfillmentState = {
     customsClassifications: CustomsClassification[];
     documents: FulfillmentDocument[];
 };
-type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
+type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'stageTerms' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
 type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
 type ShipmentInput = {packingDetailVersion?:2;packingColorVersion?:1} & Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
 export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | {
@@ -871,8 +874,8 @@ function shipmentForIssue(root: MistState, issue: FulfillmentStockMovement, ship
     return { stock, branch: branch!, shipment };
 }
 function purchaseSnapshot(purchase: FulfillmentPurchase): FulfillmentPurchaseRevision['snapshot'] {
-    const { orderId, lineId, kind, materialKind, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
-    return { orderId, lineId, kind, ...(materialKind?{materialKind}:{}), supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds: [...fileIds] };
+    const { orderId, lineId, kind, materialKind, stageTerms, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
+    return { orderId, lineId, kind, ...(materialKind?{materialKind}:{}), ...(stageTerms?{stageTerms:{...stageTerms}}:{}), supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds: [...fileIds] };
 }
 function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
     const f = root.fulfillment, s = source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
@@ -1063,7 +1066,7 @@ function purchaseSaleReference(root: MistState, p: { orderId: string; lineId: st
   if (!order || !line || !(line.price > 0)) return [];
   return [{ label: '订单售价参考', value: `${line.qty} ${line.unit} × ${line.price} = ${reviewMoney(lineAmount(line.qty, line.price))} ${order.currency}` }];
 }
-export function getFulfillmentReviews(root: MistState): MistReviewTask[] { return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => ({ id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id, title: `${p.code} · ${p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds, status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected', submittedAt: p.submittedAt!, requiredPermission: 'procurement:approve', fileIds: [...p.fileIds], target: { view: 'procurement', id: p.id }, details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '采购内容', value: p.description }, { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` }, { label: '金额', value: `${p.quantity} × ${p.price} = ${reviewMoney(lineAmount(p.quantity, p.price))} ${p.currency}` }, ...purchaseSaleReference(root, p), { label: '付款条件', value: p.terms }, { label: '交付地点', value: p.destination }, { label: '交期', value: p.due }, ...((p.revisionHistory?.at(-1)?.snapshot.note ?? p.note).trim() ? [{ label: '规格与交付要求', value: p.revisionHistory?.at(-1)?.snapshot.note ?? p.note }] : [])] })); }
+export function getFulfillmentReviews(root: MistState): MistReviewTask[] { return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => ({ id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id, title: `${p.code} · ${p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds, status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected', submittedAt: p.submittedAt!, requiredPermission: 'procurement:approve', fileIds: [...p.fileIds], target: { view: 'procurement', id: p.id }, details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '采购内容', value: p.description }, { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` }, { label: '金额', value: `${p.quantity} × ${p.price} = ${reviewMoney(lineAmount(p.quantity, p.price))} ${p.currency}` }, ...purchaseSaleReference(root, p), { label: '付款条件', value: p.terms }, { label: '交付地点', value: p.destination }, { label: '交期', value: p.due }, ...(fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) ? [{ label: '工序约定', value: fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) }] : []), ...((p.revisionHistory?.at(-1)?.snapshot.note ?? p.note).trim() ? [{ label: '规格与交付要求', value: p.revisionHistory?.at(-1)?.snapshot.note ?? p.note }] : [])] })); }
 /** Called only on the aggregate's transaction clone; throws before its snapshot is committed. */
 /** A disposed development version keeps its original report; further inspection belongs to the successor. */
 export function fulfillmentQcSourceBlocker(root: MistState, source: FulfillmentSource): string | null {
@@ -1499,10 +1502,12 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!/^[A-Z]{3}$/.test(currency)) fail('采购币种须为三位英文字母');
             const currencyProblem = procurementCurrencyProblem(supplierRecord, currency);
             if (currencyProblem) fail(currencyProblem);
-            const record: FulfillmentPurchase = { id, code: existing?.code || code('PO', f.purchases, ctx), orderId: order.id, lineId: s.kind === 'orderLine' ? s.lineId : '', kind: p.kind, ...(materialKind?{materialKind}:{}), domain: order.type, supplierId, supplier, description: text(p.description, '采购内容'), quantity, unit: text(p.unit, '单位'), price, currency, due: day(p.due, '交期'), terms: text(p.terms, '付款条件'), destination: text(p.destination, '交付地点'), note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'draft', requesterId: ctx.actorId || '', createdBy: existing?.createdBy || ctx.actorName, createdAt: existing?.createdAt || ctx.now, reviewerIds: [], configVersions: {}, received: existing?.received || 0 };
+            const stageTerms = normalizeFabricStageTerms({ domain: order.type, kind: p.kind, materialKind, unit: text(p.unit, '单位') }, p.stageTerms);
+            const record: FulfillmentPurchase = { id, code: existing?.code || code('PO', f.purchases, ctx), orderId: order.id, lineId: s.kind === 'orderLine' ? s.lineId : '', kind: p.kind, ...(materialKind?{materialKind}:{}), ...(stageTerms?{stageTerms}:{}), domain: order.type, supplierId, supplier, description: text(p.description, '采购内容'), quantity, unit: text(p.unit, '单位'), price, currency, due: day(p.due, '交期'), terms: text(p.terms, '付款条件'), destination: text(p.destination, '交付地点'), note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'draft', requesterId: ctx.actorId || '', createdBy: existing?.createdBy || ctx.actorName, createdAt: existing?.createdAt || ctx.now, reviewerIds: [], configVersions: {}, received: existing?.received || 0 };
             if (existing) {
                 Object.assign(existing, record);
                 if (!materialKind) delete existing.materialKind;
+                if (!stageTerms) delete existing.stageTerms;
                 delete existing.submittedAt;
                 delete existing.decision;
             }
@@ -1516,6 +1521,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             assertMistOrderApproved(root, purchase.orderId);
             if (purchase.state !== 'draft')
                 fail('仅草稿可以提交');
+            const stageProblem = fabricStageSubmitProblem(purchase);
+            if (stageProblem) fail(stageProblem);
             const currencyProblem = procurementCurrencyProblem(get(root.market.suppliers, purchase.supplierId, '供应商'), purchase.currency);
             if (currencyProblem) fail(currencyProblem);
             const actorId = ctx.actorId;

@@ -203,7 +203,7 @@ it('labels finished-fabric purchase release as supply while preserving the relea
 it('labels a completed fabric supply as complete and uses fabric stages without shipment wording',async()=>{
  bridge.state!.orders[0].type='fabric';const state=bridge.state!,branch=state.productions[0],fact=state.fulfillment.productionFacts.find(row=>row.productionId===branch.id)!;branch.col='done';branch.pct=100;fact.completion={id:'fabric-final',quantity:branch.qty,sizeQuantities:[],date:context.now.slice(0,10),at:context.now,actor:'业务员',evidence:'完工单',fileIds:[]};state.fulfillment.qcTasks.push({id:'fabric-qc',kind:'production',source:{kind:'orderLine',orderId,lineId:branch.lineId,productionId:branch.id},state:'reported',reportIds:['fabric-report']} as any);state.fulfillment.qcReports.push({id:'fabric-report',taskId:'fabric-qc',result:'pass',scopeRevision:fact.revision} as any);
  await mount();await range('全部');
- expect(host.textContent).toContain('备货');expect(host.textContent).toContain('加工');expect(host.textContent).not.toContain('裁剪');expect(host.textContent).not.toContain('车缝');expect(host.textContent).not.toContain('待出运');
+ expect(host.textContent).toContain('坯布');expect(host.textContent).toContain('后整理');expect(host.textContent).not.toContain('裁剪');expect(host.textContent).not.toContain('车缝');expect(host.textContent).not.toContain('待出运');
  expect(host.querySelector('.mist-sumbar')!.textContent).toContain('已完成1');expect(host.textContent).toContain('已完成');expect(bridge.run).not.toHaveBeenCalled();
 });
 it('keeps a read-only production user out of editing and drag actions while retaining records and return navigation',async()=>{
