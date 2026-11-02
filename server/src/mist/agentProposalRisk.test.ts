@@ -44,6 +44,8 @@ describe('AI 提议三级确认',()=>{
    ['high',['fulfillment.qc.confirm','fabric.confirm','development.confirm'],'审批 / 放行类确认'],
    ['high',['platform.claim.disposition','platform.claim.execute','platform.claim.verify'],'索赔核定、赔付方案与执行'],
    ['high',['fulfillment.inventory.quarantine.dispose','fulfillment.claimInventory.scrap'],'库存报废处置'],
+   ['high',['fulfillment.inventory.quarantine.noRecovery'],'放弃追偿属减免'],
+   ['high',['email.account.save'],'修改邮箱成员与发信凭据属权限类'],
    ['medium',['rfq.award','market.quotation.convert','cost.expense.register','development.charge.add','development.expense.add','development.sample.dispatchFee','development.billing.request','development.billing.withdraw','platform.pricing.save','market.quotation.costing.save','order.governance.requestCancel','order.governance.requestOverShip','fulfillment.documents.issue','fulfillment.shipments.sent','market.import'],'普通业务写入，后续仍有审批或财务环节'],
   ];
   for(const [risk,types,reason] of cases)for(const type of types){expect([type,known.has(type)]).toEqual([type,true]);expect([type,reason,agentCommandRisk(type)]).toEqual([type,reason,risk]);}
@@ -120,7 +122,7 @@ describe('AI 提议三级确认',()=>{
    propose(HIGH);
    for(let i=0;i<5;i++)await expect(confirmLimited({password:'wrong-'+i})).rejects.toMatchObject({code:'REAUTH_FAILED',status:403});
    expect(checked).toHaveLength(5);
-   await expect(confirmLimited({password:PASSWORD})).rejects.toMatchObject({code:'REAUTH_LOCKED',status:429,message:expect.stringContaining('分钟后再试')});
+   await expect(confirmLimited({password:PASSWORD})).rejects.toMatchObject({code:'REAUTH_LOCKED',status:403,message:expect.stringContaining('分钟后再试')});
    expect(checked).toHaveLength(5);expect(proposalState()).toBe('pending');
    clock+=15*60*1000+1;
    await confirmLimited({password:PASSWORD});expect(checked).toHaveLength(6);expect(proposalState()).toBe('confirmed');

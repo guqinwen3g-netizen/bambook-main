@@ -182,6 +182,9 @@ function mailSendAcknowledged(data: any, value: MistWorkspaceEnvelope, intent: P
   if (String(row.body ?? '').trim() !== String(input.body ?? '').trim()) stop('正文不一致');
   return { workspaceId: intent.workspaceId, requestKey: intent.requestId, sendId: id, accountId: String(input.accountId), closedAt: new Date().toISOString(), ...(alias ? { alias: true } : {}) } as MailClaim;
 }
+/** 高风险提议的密码复验被拒（缺密码、密码错误、错误次数过多锁定）：服务端未执行任何写入，属确定拒绝，恢复时重发也不会带密码。 */
+const REAUTH_REJECTIONS = new Set(['REAUTH_REQUIRED', 'REAUTH_FAILED', 'REAUTH_LOCKED']);
+const reauthRejected = (failure: unknown) => failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && REAUTH_REJECTIONS.has(failure.code ?? '');
 const mailReviewCode = (failure: unknown) => failure instanceof RequestError && (failure.code === MAIL_REVIEW || failure.code === MAIL_MANUAL);
 const mailSendBody = (intent: Pending) => JSON.stringify({ requestKey: intent.mail!.requestKey, ...(intent.mail!.draftId ? { draftId: intent.mail!.draftId } : {}), input: intent.mail!.input, ...(intent.mail!.forwardOfId ? { forwardOfId: intent.mail!.forwardOfId } : {}) });
 const mailSendSettled = (failure: unknown) => failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && ![408, 429].includes(failure.status) && failure.code !== 'MAIL_BUSY' && !mailReviewCode(failure);
@@ -433,7 +436,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       put(value, bound); clearPending(bound); return acknowledged;
     } catch (failure) {
       if (mounted.current && live.current.key === bound.key && live.current.userId === bound.userId && live.current.status === 'authenticated') {
-        const known = !restoring && failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && ![408, 429].includes(failure.status) && failure.code !== 'REQUEST_CONFLICT';
+        const known = reauthRejected(failure) || !restoring && failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && ![408, 429].includes(failure.status) && failure.code !== 'REQUEST_CONFLICT';
         if (known) clearPending(bound);
         const message = (failure instanceof Error ? failure.message : '保存失败') + (known ? '' : '；结果尚未确认，请核对原请求');
         const refreshConflict = known && failure instanceof RequestError && failure.status === 409 && failure.code === 'REVISION_CONFLICT'

@@ -707,7 +707,7 @@ export class MistRepository {
     try { await this.authorize(db, prior, AI_WRITE_SCOPES[risk]); } catch (error) { if (error instanceof MistApiError && error.status === 403) fail('FORBIDDEN', `确认${AGENT_RISK_LABEL[risk]}的 AI 提议需要「${AI_WRITE_SCOPES[risk]}」权限`, 403); throw error; }
   }
   /**
-   * 高风险提议的本人密码复验（锁外执行）。先核 ai:write:high，再查限流：锁定期间不做密码比对，直接返回 429 REAUTH_LOCKED（与登录限流同语义）。
+   * 高风险提议的本人密码复验（锁外执行）。先核 ai:write:high，再查限流：锁定期间不做密码比对，直接返回 403 REAUTH_LOCKED（确定拒绝，提示几分钟后再试）。
    * 失败计数，成功清零。返回的凭证只绑定本提议编号与命令内容。
    */
   private async reauthenticate(prior: TokenPayload, workspaceId: string, proposalId: string, command: unknown, reauth?: { password: string }): Promise<ReauthGrant> {
@@ -717,7 +717,8 @@ export class MistRepository {
     if (typeof password !== 'string' || !password) fail('REAUTH_REQUIRED', '确认高风险 AI 提议须输入本人当前登录密码', 403);
     const limiter = this.reauthLimiter ??= createReauthRateLimiter(), key = `reauth|${actor.userId}`;
     const verdict = limiter.check(key);
-    if (verdict.blocked) fail('REAUTH_LOCKED', `密码错误次数过多，请 ${Math.max(1, Math.ceil(verdict.retryAfterMs / 60000))} 分钟后再试`, 429);
+    // 403 而非 429：这是确定的拒绝（未执行），前端据此清掉待核对记录；429 在前端表示结果未知。
+    if (verdict.blocked) fail('REAUTH_LOCKED', `密码错误次数过多，请 ${Math.max(1, Math.ceil(verdict.retryAfterMs / 60000))} 分钟后再试`, 403);
     if (password!.length > 256 || !await this.verifyPassword(this.prisma, actor.userId, password!)) { limiter.recordFailure(key); fail('REAUTH_FAILED', '登录密码不正确，提议未执行', 403); }
     limiter.reset(key);
     return { proposalId, command: canonical(command) };
@@ -768,7 +769,7 @@ export class MistRepository {
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&input.command?.type==='agent.proposal.create'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
         const humanTaskProposal=confirmProposalId?row.state.agentProposals?.find(p=>p.id===confirmProposalId):undefined;
-        // AI 写入三级确认：确认人须持有该命令风险等级对应的 ai:write:* 码（未登记按高）；高风险的密码复验已在取锁前完成（reauthenticate），
+        // AI 写入三级确认：确认人须持有该命令风险等级对应的 ai:write:* 码（等级按 agentCommandRisk 规则，未登记的普通写入为中）；高风险的密码复验已在取锁前完成（reauthenticate），
         // 这里按锁内最新提议与将执行的命令再判风险：任一为高时，复验凭证必须属于同一提议、同一份命令，否则拒绝。
         // 原命令本身的业务权限已在上面按原命令重新校验，不能借 AI 越权。
         if(confirmProposalId){
