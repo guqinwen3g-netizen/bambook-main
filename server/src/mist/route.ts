@@ -10,6 +10,7 @@ import { MistRepository, type MistContract } from './repository';
 import { MistPrivateFiles, MIST_FILE_MAX_BYTES } from './files';
 import type { ImagePreviewMode } from './imagePreview';
 import { MistApiError, fail } from './errors';
+import { assertCurrentAccount } from './authority';
 import {getMistAssistantStatus,runMistAssistant} from './assistant';
 import { analyzeEmail } from './mail/intelligence';
 import {runQuoteCostAdvisor} from './quoteCostAdvisor';
@@ -120,8 +121,9 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   //   - 平台连接（管理员）：平台 AI 固定流程共用；测试期为管理员个人订阅，生产期改企业 API。
   //   - 个人连接（ai:chat）：仅供后续本机工作助手使用，不参与平台 AI。
   const subscriptions = () => options.subscriptions ?? codexSubscriptions();
-  const aiActor = (req: Request) => { const a = actor(req); if (!a?.userId || !hasScope(a, 'ai:chat')) fail('FORBIDDEN', '当前账号无助手使用权限', 403); return a; };
-  const platformAdmin = async (req: Request) => { const a = actor(req); if (options.prisma) { const current = a?.userId ? await options.prisma.userAccount.findUnique({ where: { id: a.userId }, select: { platformRole: true, status: true, deletedAt: true } }) : null; if (!current || current.status !== 'active' || current.deletedAt || current.platformRole !== 'platform_admin') fail('FORBIDDEN', '仅平台管理员可配置平台模型', 403); } else if (!a?.userId || !(a.roles ?? []).some(role => role === 'owner' || role === (SYSTEM_ROLE_IDS.SUPER_ADMIN as unknown))) fail('FORBIDDEN', '仅管理员可配置平台模型', 403); return a; };
+  // 个人订阅与其他 Mist 路由同一实时授权：重载账号，拒绝停用、已撤销、待改密的会话，再按当前权限判定 ai:chat。
+  const aiActor = async (req: Request) => { const a = actor(req); if (!a?.userId || isAgentActor(a)) fail('FORBIDDEN', '当前账号无助手使用权限', 403); return repository.currentActor(a, 'ai:chat'); };
+  const platformAdmin = async (req: Request) => { const a = actor(req); if (options.prisma) { if (!a?.userId || isAgentActor(a)) fail('FORBIDDEN', '仅平台管理员可配置平台模型', 403); const current = await options.prisma.userAccount.findUnique({ where: { id: a.userId }, select: { platformRole: true, status: true, deletedAt: true, metadata: true } }); assertCurrentAccount(current, a); if (current.platformRole !== 'platform_admin') fail('FORBIDDEN', '仅平台管理员可配置平台模型', 403); } else if (!a?.userId || !(a.roles ?? []).some(role => role === 'owner' || role === (SYSTEM_ROLE_IDS.SUPER_ADMIN as unknown))) fail('FORBIDDEN', '仅管理员可配置平台模型', 403); return a; };
   const subscriptionCall = (handler: (req: Request, res: Response) => Promise<void> | void) => run(async (req, res) => {
     res.setHeader('Cache-Control', 'private, no-store');
     try { await handler(req, res); } catch (error) {
@@ -185,10 +187,10 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
       res.json({ ok: false, error: message || '连接失败' });
     } finally { clearTimeout(timer); }
   }));
-  router.get('/ai/subscriptions', subscriptionCall((req, res) => { res.json({ chatgpt: subscriptions().status(personalSubject(aiActor(req).userId)) }); }));
-  router.post('/ai/subscriptions/chatgpt/login', subscriptionCall(async (req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(personalSubject(a.userId)) }); }));
-  router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall((req, res) => { const a = aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
-  router.post('/ai/subscriptions/chatgpt/disconnect', subscriptionCall((req, res) => { const a = aiActor(req); exactBody(req.body ?? {}, []); res.json({ chatgpt: subscriptions().disconnect(personalSubject(a.userId)) }); }));
+  router.get('/ai/subscriptions', subscriptionCall(async (req, res) => { res.json({ chatgpt: subscriptions().status(personalSubject((await aiActor(req)).userId)) }); }));
+  router.post('/ai/subscriptions/chatgpt/login', subscriptionCall(async (req, res) => { const a = await aiActor(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(personalSubject(a.userId)) }); }));
+  router.get('/ai/subscriptions/chatgpt/login/:loginId', subscriptionCall(async (req, res) => { const a = await aiActor(req); res.json({ login: subscriptions().getLogin(personalSubject(a.userId), req.params.loginId), chatgpt: subscriptions().status(personalSubject(a.userId)) }); }));
+  router.post('/ai/subscriptions/chatgpt/disconnect', subscriptionCall(async (req, res) => { const a = await aiActor(req); exactBody(req.body ?? {}, []); res.json({ chatgpt: subscriptions().disconnect(personalSubject(a.userId)) }); }));
   const connectionReply=(result:any)=>({...result,payload:undefined,...(result.payload?{delegation:delegation.signManaged(result.payload),readable:agentCatalog({userId:result.payload.sub,roles:[],permissions:result.payload.ceil,departmentIds:[],permissionCeiling:result.payload.ceil,authorizationLoaded:true})}:{} )});
   router.get('/workspaces/:id/agent-identities',run(async(req,res)=>{const query=exactBody(req.query,['scope','cursor']);res.setHeader('Cache-Control','private, no-store');res.json(await repository.agentIdentities(actor(req),req.params.id,delegation.timestamp(),query.scope??'mine',query.cursor));}));
   router.post('/workspaces/:id/agent-identities',run(async(req,res)=>{const body=exactBody(req.body??{},['id','name','ownerId','mode']);res.setHeader('Cache-Control','private, no-store');res.status(201).json(await repository.createAgentIdentity(actor(req),req.params.id,body,delegation.timestamp()));}));
