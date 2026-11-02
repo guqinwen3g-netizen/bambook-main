@@ -62,6 +62,14 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect(conflict.isError).toBe(true);
     expect(conflict.content[0].text).toContain('请求编号');
     expect((await client.get('/api/mist/workspaces/' + workspace.id)).body.workspace.state.calendar).toHaveLength(calendarCount + 1);
+    // 低风险且产生业务事件的命令直接执行：经办人标注“经 Agent”。
+    const customer = workspace.state.customers[0];
+    const followUp = await tool('bambook_execute', { workspaceId: workspace.id, requestId: 'follow-up-direct', command: { type: 'crm.followUp.save', payload: { customerId: customer.id, method: 'call', content: '电话确认交期', at: new Date(Date.now() - 3600000).toISOString(), nextDate: '', link: null } } });
+    expect(followUp.isError).not.toBe(true); expect(followUp.structuredContent.status).toBeUndefined();
+    const after = (await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace;
+    const id = followUp.structuredContent.receipt.result.id;
+    expect(after.state.crm.followUps.find((f: any) => f.id === id)).toMatchObject({ actor: '沈禾（经 Agent）' });
+    expect(after.state.events.find((e: any) => e.entityId === customer.id && e.businessRef?.id === id).actor).toBe('沈禾（经 Agent）');
   });
 
   it('requires an actual operate delegation for MCP writes instead of treating a human cookie as an Agent session', async () => {

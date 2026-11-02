@@ -49,7 +49,7 @@ export function AgentProposalDialog({ proposal, state, onClose, run, onDone }: {
   React.useEffect(() => { setNote(''); setFailure(''); setPassword(''); }, [proposal?.id]);
   if (!proposal) return null;
   const mail = mailProposalDetails(proposal, state);
-  // 风险等级与服务端同一张登记表；未登记按高。服务端仍会独立校验档位、密码与原业务权限。
+  // 风险等级与服务端共用 agentCommandRisk：未登记的普通写入按中风险，付款、核销、审批等按高风险须输入密码。服务端仍会独立校验档位、密码与原业务权限。
   const risk = agentCommandRisk(proposal.command.type), changes = risk === 'medium' && !mail ? proposalFieldChanges(proposal.command) : [];
   const decide = async (command: MistCommand, message: string, reauth?: { password: string }) => {
     if (busy) return; setBusy(true); setFailure('');
