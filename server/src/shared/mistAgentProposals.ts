@@ -46,7 +46,8 @@ const MEDIUM_RISK = ['email.move', 'email.state.retry', 'email.draft.delete', 'e
   // 资金前缀或动词规则的例外（2026-11-02 复核裁定）：只生成文件、登记资料、提交复核、排计划或撤回本人申请，不付款、不核销、不审批。
   'finance.statement.generate', 'finance.importReceipts', 'lc.files', 'lc.save', 'rebate.claim.file', 'rebate.rate.save',
   'payable.request.submit', 'payable.payment.plan', 'payable.plan.register', 'payable.bill.classify', 'payable.bill.link',
-  'payable.plan.cancel', 'payable.purchase.cancel', 'payable.request.cancel', 'payable.settlement.cancel', 'platform.invoice.save',
+  'payable.plan.cancel', 'payable.purchase.cancel', 'payable.request.cancel', 'payable.settlement.cancel',
+  // platform.invoice.save / issue 不在 Agent 命令目录（gen-mist-command-catalog.mjs#AGENT_EXCLUDED_COMMANDS），不再登记风险档；若被调用按前缀规则为高。
   'order.internal.reverseCheck', 'fulfillment.procurement.rejectReceived', 'fulfillment.procurement.return.reverse', 'fulfillment.customs.classify.void'];
 export const AGENT_COMMAND_RISK: Readonly<Record<string, AgentCommandRisk>> = Object.freeze({ ...Object.fromEntries(LOW_RISK.map(t => [t, 'low' as const])), ...Object.fromEntries(MEDIUM_RISK.map(t => [t, 'medium' as const])) });
 /** 资金、账务、收款账户（付款 / 收款 / 开票 / 信用证 / 退税 / 汇率 / 期初）及权限、组织、价格参数类。 */
