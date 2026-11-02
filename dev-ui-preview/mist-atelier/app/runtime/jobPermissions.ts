@@ -74,6 +74,14 @@ export function setModuleLevel(module: JobModule, granted: readonly string[], le
   return [...new Set([...granted.filter(scope => !main.has(scope)), ...scopesUpTo(module, level)])];
 }
 
+/**
+ * 只作能力标签的审批权限码（口径 B1）：勾选不会让该岗位成为审批人，审批人由审批规则（部门主管路由、审批配置）决定。
+ * 与 server/src/auth/__tests__/danglingScopeConsumption.test.ts 中 reason='ui-label-only' 的登记一致。
+ */
+export const APPROVAL_LABEL_ONLY_SCOPES: readonly string[] = ['orders:approve:change_delivery', 'orders:approve:change_qty', 'orders:approve:change_price', 'orders:approve:cancel', 'shipments:approve', 'knowledge:approve', 'invoices:approve:writeoff'];
+export const APPROVAL_LABEL_ONLY_NOTE = '该权限不控制审批人，审批人由审批规则决定';
+export const labelOnlyApprovals = (module: JobModule) => module.approve.filter(scope => APPROVAL_LABEL_ONLY_SCOPES.includes(scope));
+
 /** 写权限还要求任职部门具备相应业务属性（与服务端 departmentAuthorization 同口径）。 */
 export const DEPARTMENT_GATES: Array<{ scopes: string[]; attributes: string[]; label: string }> = [
   { scopes: ['orders:write', 'orders:delete', 'products:write'], attributes: ['fabric_business', 'garment_business'], label: '面料业务或成衣业务' },

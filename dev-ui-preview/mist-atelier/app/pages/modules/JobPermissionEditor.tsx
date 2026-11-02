@@ -3,7 +3,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import React from 'react';
 import { CardHeader, Checkbox, Pill, Segmented, TextLink } from '../../../../../components/mist';
 import { permissionLabel } from '../../runtime/permissionLabels';
-import { JOB_AREAS, levelsOf, moduleGate, moduleLevel, setModuleLevel, type JobLevel, type JobModule } from '../../runtime/jobPermissions';
+import { APPROVAL_LABEL_ONLY_NOTE, JOB_AREAS, labelOnlyApprovals, levelsOf, moduleGate, moduleLevel, setModuleLevel, type JobLevel, type JobModule } from '../../runtime/jobPermissions';
 
 const LEVEL_LABEL: Record<JobLevel | 'partial', string> = { none: '不可用', read: '查看', write: '办理', approve: '审批', partial: '自定义' };
 
@@ -19,7 +19,7 @@ function ModuleRow({ module, value, onChange, available, readOnly }: { module: J
   const held = extras.filter(scope => value.includes(scope)).length;
   const [open, setOpen] = React.useState(held > 0 && !module.read.length);
   const gate = moduleGate(module, value);
-  const levels = levelsOf(module);
+  const levels = levelsOf(module), labelOnly = labelOnlyApprovals(module);
   return <div className="mist-col" style={{ gap: 6 }}>
     <div className="mist-row" data-wrap>
       <span style={{ flex: 1, minWidth: 140 }}>{uiText(module.label)}</span>
@@ -31,6 +31,7 @@ function ModuleRow({ module, value, onChange, available, readOnly }: { module: J
       <span style={{ width: 76, display: 'inline-flex', justifyContent: 'flex-end' }}>{extras.length > 0 && <TextLink onClick={() => setOpen(!open)}>{uiText(`专项 ${held}/${extras.length}`)}</TextLink>}</span>
     </div>
     {gate && <span className="mist-note">{uiText(`办理需任职部门含「${gate}」`)}</span>}
+    {labelOnly.length > 0 && <span className="mist-note" data-approval-label-only={module.key}>{uiText(`审批档中的「${labelOnly.map(permissionLabel).join('」「')}」：${APPROVAL_LABEL_ONLY_NOTE}`)}</span>}
     {open && extras.length > 0 && <div className="mist-col" style={{ gap: 4, paddingLeft: 12 }}>
       {extras.map(scope => <Checkbox key={scope} label={uiText(permissionLabel(scope))} checked={value.includes(scope)} disabled={readOnly}
         onChange={on => onChange(on ? [...value, scope] : value.filter(item => item !== scope))} />)}
