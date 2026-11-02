@@ -3,7 +3,7 @@ import React from 'react';
 import {
   canAccessView as authCanAccessView, checkAuth, getAuthApiBase, getAuthState,
   hasPermission as authHasPermission, hasRole as authHasRole,
-  login as authLogin, logout as authLogout, mapAuthErrorMessage, subscribe,
+  login as authLogin, logout as authLogout, mapAuthErrorMessage, renewSessionIfDue, subscribe,
   type AgentRole, type AuthState, type AuthUser,
 } from '../../../../services/authService';
 import type { View } from '../../../../types';
@@ -40,16 +40,23 @@ const AUTH_TOKEN_KEY = 'bambook_auth_token';
 // Treating its writes/removals as credential changes makes signed-in and guest
 // tabs revalidate each other indefinitely and retires an in-progress login.
 const SESSION_STORAGE_KEYS = new Set([AUTH_TOKEN_KEY, 'panda_system_config', 'cloudEndpoint']);
+/** 使用中续期的检查间隔；只有令牌已用过约一天时才真正请求换发。 */
+const RENEW_CHECK_MS = 10 * 60 * 1000;
 
-function storedToken() {
-  try { return localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY) || ''; }
+/** 同一登录会话的标识（服务端 sessionId；旧令牌退回令牌本身）。续期换发令牌不算换了身份。 */
+function storedSession() {
+  let token = '';
+  try { token = localStorage.getItem(AUTH_TOKEN_KEY) || sessionStorage.getItem(AUTH_TOKEN_KEY) || ''; }
   catch { return ''; }
+  try { const claims = JSON.parse(atob((token.split('.')[1] || '').replace(/-/g, '+').replace(/_/g, '/'))); if (typeof claims?.sessionId === 'string' && claims.sessionId) return 'session:' + claims.sessionId + ':' + claims.userId; }
+  catch { /* opaque or legacy token */ }
+  return token;
 }
 /** Used only inside this adapter. The public session key is a local revision. */
 function identityOf(state: AuthState) {
   const user = state.isAuthenticated ? state.user : null;
   return JSON.stringify([
-    getAuthApiBase(), storedToken(), state.isAuthenticated, user?.id, user?.platformRole,
+    getAuthApiBase(), storedSession(), state.isAuthenticated, user?.id, user?.platformRole,
     [...(user?.roles ?? [])].sort(), [...(user?.roleIds ?? [])].sort(),
     [...(user?.permissions ?? [])].sort(), user?.permissionCeiling === undefined ? null : [...user.permissionCeiling].sort(),
     [...(user?.departmentIds ?? [])].sort(), user?.globalBusinessScope, [...(user?.businessAttributes ?? [])].sort(),
@@ -130,13 +137,19 @@ function ProductionMistSessionProvider({ children }: { children: React.ReactNode
     };
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', onFocus);
+    // 使用中续期：页面打开期间定时检查，回到页面时也检查；页面关闭后不续期，空闲会话按原有效期到期。
+    const renew = () => { if (document.visibilityState !== 'hidden') void renewSessionIfDue(); };
+    const timer = window.setInterval(renew, RENEW_CHECK_MS);
+    window.addEventListener('focus', renew);
     return () => {
       mounted.current = false;
       refreshSequence.current += 1;
       commandSequence.current += 1;
       unsubscribe();
+      window.clearInterval(timer);
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', renew);
     };
   }, [publish, revalidate]);
 
@@ -146,14 +159,10 @@ function ProductionMistSessionProvider({ children }: { children: React.ReactNode
     const sequence = ++commandSequence.current;
     setError(''); setSigningIn(true); setSigningOut(false);
     try {
-      const user = await authLogin(identifier.trim(), password, options.companyId, options.entry ?? 'company');
+      // 保持登录：服务端签发 30 天令牌与持久 Cookie；不勾选：会话 Cookie，令牌只存本次浏览器会话。
+      const user = await authLogin(identifier.trim(), password, options.companyId, options.entry ?? 'company', options.remember !== false);
       if (!user || typeof user.id !== 'string' || !user.id.trim()) throw new Error('登录响应未包含有效账号，请重新登录');
       if (!mounted.current || sequence !== commandSequence.current) throw new Error('登录操作已被新的会话操作替代');
-      // The existing service writes both stores. Unchecked keeps the same token
-      // only for this browser session; checked retains the service default.
-      if (options.remember === false) {
-        try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch { /* Storage restrictions do not turn a valid login into a failure. */ }
-      }
       refreshSequence.current += 1; setInitializing(false); setRefreshing(false);
       publish(getAuthState());
       return user;

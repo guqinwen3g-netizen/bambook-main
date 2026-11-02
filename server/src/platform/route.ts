@@ -14,6 +14,7 @@ import { logger } from '../lib/logger';
 import { CompanyAccessError } from '../auth/companyAccess';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles, serializeAuthUser, platformCompanyUser } from '../auth/tokenHelpers';
 import { createPlatformCompanySettings } from './companySettings';
+import { sessionOf, writeSession } from '../auth/sessionLifetime';
 
 type PlatformRouterOptions = AccountAccessOptions & {
   prisma: PrismaClient;
@@ -87,7 +88,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
   });
 
   // 平台身份选择公司范围，不成为该公司成员，也不依赖公司的角色配置。
-  const managementCookie = (res: Response, token: string) => res.cookie('bambook_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 7 * 24 * 3600 * 1000, path: '/' });
+  // 进出公司后台沿用本次登录会话（保持登录与否、90 天上限不变）。
+  const managementSession = (req: Request, res: Response, payload: Parameters<typeof auth.signToken>[0]) => writeSession(res, auth, payload, sessionOf(auth.verifyToken(pickRequestToken(req)!)));
   router.post('/companies/:id/management-session', async (req: Request, res: Response, next) => {
     try {
       const admin = await requirePlatformAdmin(req, res);
@@ -101,9 +103,8 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       let current;
       try { current = await buildLoadedAuthTokenPayload(options.prisma, user, company.id, platformCompany); }
       catch (error) { if (error instanceof CompanyAccessError) return res.status(error.status).json({ ok: false, error: error.code, message: error.message }); throw error; }
-      const token = auth.signToken(current);
+      const token = managementSession(req, res, current);
       await audit(admin.userId, 'platform_company_enter', company.id, {});
-      managementCookie(res, token);
       const acting = await platformCompanyUser(options.prisma, user, platformCompany, company.id);
       return res.json({ ok: true, token, company, platformCompany, user: { ...serializeAuthUser(acting, current.roles, current.permissions, current.departmentIds, { companyId: company.id, newRoleIds: current.roleIds, authorizationLoaded: true }), platformCompany } });
     } catch (error) { next(error); }
@@ -118,8 +119,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       const user = await loadUserWithRoles(options.prisma, admin.userId);
       if (!user) return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: '账号不可用。' });
       const current = await buildLoadedAuthTokenPayload(options.prisma, user, null);
-      const token = auth.signToken(current);
-      managementCookie(res, token);
+      const token = managementSession(req, res, current);
       return res.json({ ok: true, token, user: serializeAuthUser(user, current.roles, current.permissions, current.departmentIds, { companyId: null, newRoleIds: current.roleIds, authorizationLoaded: true }) });
     } catch (error) { next(error); }
   });
