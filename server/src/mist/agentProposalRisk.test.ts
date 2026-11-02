@@ -4,7 +4,7 @@ import {createMistState,applyMistCommand,mistCommandPermission} from '../shared/
 import {agentCommandRisk,AGENT_COMMAND_RISK} from '../shared/mistAgentProposals';
 import {MemoryMistDatabase,testAuthority} from './__tests__/support';
 import {MIST_COMMAND_CATALOG} from './agentCommandCatalog';
-import {MistRepository} from './repository';import {MistPrivateFiles} from './files';
+import {MistRepository} from './repository';import {createLoginRateLimiter} from '../auth/loginRateLimiter';import {MistPrivateFiles} from './files';
 /** AI 写入三级确认：确认人须有该风险档的 ai:write:* 码；高风险须复验登录密码；原命令业务权限照常校验；未登记按高。 */
 let directory:string,db:MemoryMistDatabase,repo:MistRepository,auth:ReturnType<typeof testAuthority>,workspaceId:string,checked:string[];
 // 本人自己的空间：没有公司行级范围，只看权限码。
@@ -69,5 +69,54 @@ describe('AI 提议三级确认',()=>{
  it('密码复验只用于确认提议：普通命令附带 reauth 不会被当作授权',async()=>{
   propose(HIGH);auth.users.get('staff')!.permissions=['ai:chat','vouchers:read','vouchers:write'];
   await expect(confirm({password:PASSWORD})).rejects.toMatchObject({code:'FORBIDDEN'});
+ });
+
+ describe('高风险密码复验限流与加锁顺序',()=>{
+  let clock:number,order:string[],limited:MistRepository;
+  beforeEach(()=>{
+   clock=Date.parse('2026-11-02T08:00:00Z');order=[];
+   // 包一层事务：记录工作区行锁（FOR UPDATE）的时刻，与密码比对的时刻对照。
+   const wrapped:any=Object.create(db);wrapped.$transaction=(run:any)=>db.$transaction((tx:any)=>run({...tx,$queryRawUnsafe:async(sql:string)=>{if(/FOR UPDATE/.test(sql))order.push('lock');return [];}}));
+   limited=new MistRepository(wrapped,{createMistState,applyMistCommand,mistCommandPermission},new MistPrivateFiles(directory),auth.authorize,undefined,undefined,undefined,async(_db,userId,password)=>{checked.push(userId);order.push('verify');return userId==='staff'&&password===PASSWORD;},createLoginRateLimiter({now:()=>clock}));
+  });
+  const confirmLimited=(reauth?:{password:string})=>limited.execute(actor,workspaceId,{requestId:randomUUID(),expectedRevision:db.workspaces.get(workspaceId).revision,command:{type:'agent.proposal.confirm',payload:{id:'proposal'}} as any,...(reauth?{reauth}:{})});
+  it('15 分钟内 5 次错误后锁定：第 6 次不比对密码直接拒绝，窗口过后可再试',async()=>{
+   propose(HIGH);
+   for(let i=0;i<5;i++)await expect(confirmLimited({password:'wrong-'+i})).rejects.toMatchObject({code:'REAUTH_FAILED',status:403});
+   expect(checked).toHaveLength(5);
+   await expect(confirmLimited({password:PASSWORD})).rejects.toMatchObject({code:'REAUTH_LOCKED',status:429,message:expect.stringContaining('分钟后再试')});
+   expect(checked).toHaveLength(5);expect(proposalState()).toBe('pending');
+   clock+=15*60*1000+1;
+   await confirmLimited({password:PASSWORD});expect(checked).toHaveLength(6);expect(proposalState()).toBe('confirmed');
+  });
+  it('成功复验清零失败计数',async()=>{
+   propose(HIGH);
+   for(let i=0;i<4;i++)await expect(confirmLimited({password:'wrong-'+i})).rejects.toMatchObject({code:'REAUTH_FAILED'});
+   await confirmLimited({password:PASSWORD});expect(proposalState()).toBe('confirmed');
+   propose(HIGH);db.workspaces.get(workspaceId).state.bankAccounts=[];
+   for(let i=0;i<4;i++)await expect(confirmLimited({password:'again-'+i})).rejects.toMatchObject({code:'REAUTH_FAILED'});
+   const before=checked.length;await confirmLimited({password:PASSWORD});expect(checked.length).toBe(before+1);expect(proposalState()).toBe('confirmed');
+  });
+  it('密码比对发生在取工作区行锁之前，失败时不取锁',async()=>{
+   propose(HIGH);
+   await expect(confirmLimited({password:'wrong'})).rejects.toMatchObject({code:'REAUTH_FAILED'});expect(order).toEqual(['verify']);
+   order.length=0;await confirmLimited({password:PASSWORD});
+   expect(order[0]).toBe('verify');expect(order).toContain('lock');expect(order.indexOf('verify')).toBeLessThan(order.indexOf('lock'));expect(order.filter(x=>x==='verify')).toHaveLength(1);
+  });
+  it('锁外复验的是低风险提议、锁内已换成高风险命令时拒绝执行',async()=>{
+   propose(LOW);
+   // 锁外读到低风险（不复验），进入锁前提议被换成高风险命令：锁内按最新状态判为高，没有同一提议的复验凭证即拒绝。
+   const original=(limited as any).executeInternal.bind(limited);
+   (limited as any).executeInternal=(...args:any[])=>{db.workspaces.get(workspaceId).state.agentProposals[0].command=HIGH;args[2]={...args[2],command:HIGH};return original(...args);};
+   await expect(confirmLimited({password:PASSWORD})).rejects.toMatchObject({code:'REAUTH_REQUIRED'});
+   expect(checked).toEqual([]);expect(proposalState()).toBe('pending');expect(db.workspaces.get(workspaceId).state.bankAccounts??[]).toHaveLength(0);
+  });
+  it('复验凭证只对同一提议的同一份命令有效',async()=>{
+   propose(HIGH);
+   const original=(limited as any).executeInternal.bind(limited);
+   (limited as any).executeInternal=(...args:any[])=>{const changed={...HIGH,payload:{...HIGH.payload,accountNo:'ACC-999'}};db.workspaces.get(workspaceId).state.agentProposals[0].command=changed;args[2]={...args[2],command:changed};return original(...args);};
+   await expect(confirmLimited({password:PASSWORD})).rejects.toMatchObject({code:'REAUTH_REQUIRED'});
+   expect(proposalState()).toBe('pending');expect(db.workspaces.get(workspaceId).state.bankAccounts??[]).toHaveLength(0);
+  });
  });
 });
