@@ -176,11 +176,12 @@ export type RiskCommand =
   | { type: 'platform.risk.decide'; payload: { id: string; escalationId: string; decision: 'approved' | 'rejected'; note: string } };
 
 /**
- * 入口门槛：答复只经统一审批中心（审批人需 risk:write，按冻结的部门主管核验），直接命令须 risk:admin 作为兜底门槛；
+ * 入口门槛：答复与统一审批中心同一门槛（RISK_REVIEW_PERMISSION），命令内再只认冻结且此刻仍有效的部门主管、不能自审；
+ * 本人在审批页办理、或确认 Agent 提议后经命令办理，校验完全一致。
  * 其余命令以风险读权限进入，再在命令内按来源负责人与服务端重建的岗位权限核验处理权。
  */
-export function riskCommandPermission(command: RiskCommand) { return command.type === 'platform.risk.decide' ? 'risk:admin' : 'risk:read'; }
 export const RISK_REVIEW_PERMISSION = 'risk:write';
+export function riskCommandPermission(command: RiskCommand) { return command.type === 'platform.risk.decide' ? RISK_REVIEW_PERMISSION : 'risk:read'; }
 
 /** 统一审批：只给提交时冻结的申请快照；撤回的申请不再出现。 */
 export function getRiskReviews(root: MistState): MistReviewTask[] {

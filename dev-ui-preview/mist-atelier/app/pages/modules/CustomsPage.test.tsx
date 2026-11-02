@@ -206,7 +206,10 @@ it('lets finance match VAT special invoices to a departed declaration and file t
   typeInto(getByRole(dialog,'textbox',{name:'申报批次号 / 受理回执号'}) as HTMLInputElement,'202610-01');
   await click(getByRole(dialog,'button',{name:'登记申报'}));
   expect(store.run).toHaveBeenLastCalledWith({type:'rebate.claim.file',payload:expect.objectContaining({customsId:'cus-s',billIds:['b1'],batchRef:'202610-01'})});
+  // 2026-11 改码：退税申报按 tax:write 判定，开票权 invoices:write 不再决定退税入口。
   session.denied.add('invoices:write');render();
+  expect(queryByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记退税申报'})).not.toBeNull();
+  session.denied.add('tax:write');render();
   expect(queryByRole(host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement,'button',{name:'登记退税申报'})).toBeNull();
 });
 
@@ -312,3 +315,29 @@ it('requires usance days only for a usance credit and closes a page editor when 
 });
 
 it('shows partially visible credit without the full bank amount or original file',async()=>{store.state!.partialLettersOfCredit=[{id:'partial-lc',code:'LC-P',lcNo:'LC-PARTIAL',customerId:'c',customer:'Cedar',currency:'USD',orderIds:['o'],hiddenCount:1,cancelled:false}];render();await click(getByRole(host,'tab',{name:/信用证/}));const list=getByRole(host,'list',{name:'部分可见信用证'});expect(list.textContent).toContain('LC-PARTIAL');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('1000');});
+
+it('shows the rebate claim as not viewable without tax:read',async()=>{
+  const st=store.state!,f=st.fulfillment;session.denied.add('tax:read');
+  f.shipments.push(shipment('m',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('m','cleared',{hsCode:'6202.1300'}));
+  render();await click(getByRole(host,'tab',{name:/退税/}));
+  const table=getByRole(host,'table',{name:'退税资料核对'});
+  expect(table.textContent).toContain('无权查看');expect(table.textContent).not.toContain('预计');
+});
+it('shows the rebate taxable base and expected refund as hidden when the server masked them',async()=>{
+  const st=store.state!,f=st.fulfillment;
+  f.shipments.push(shipment('m',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('m','cleared',{hsCode:'6202.1300'}));
+  (st as any).exportRebate={rates:[],claims:[{id:'rc-m',code:'RC-M',customsId:'cus-m',customsCode:'CUS-M',declarationNo:'D-m',shipmentId:'s-m',shipmentCode:'S-M',orderIds:[],hsCode:'6202.13',exportDate:'2026-10-13',rateId:'rt',rate:'13',lines:[{billId:'b',billCode:'AP-1',invoiceNo:'0451009',supplier:'嘉兴制衣',invoiceDate:'2026-10-10',taxable:0,rebate:0}],taxable:0,expected:0,taxMasked:true,filedAt:'2026-10-14',batchRef:'B-1',fileIds:[],note:'',state:'filed',receipts:[],createdAt:'2026-10-14T00:00:00Z',actor:'财务'}]};
+  render();await click(getByRole(host,'tab',{name:/退税/}));
+  const table=getByRole(host,'table',{name:'退税资料核对'});
+  expect(table.textContent).toContain('应退 已隐藏');expect(table.textContent).not.toContain('0.00 CNY');
+});
+
+it('hides the tax approval and receipt matching actions when the rebate amounts are masked',async()=>{
+  const st=store.state!,f=st.fulfillment;
+  f.shipments.push(shipment('m',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('m','cleared',{hsCode:'6202.1300'}));
+  st.receipts.push({id:'r-cny',code:'BR-1',date:'2026-10-14',payer:'国家金库',amount:100,remaining:100,currency:'CNY',ref:'',state:'unmatched'});
+  const claim=(masked:boolean,state:string)=>({id:'rc-m',code:'RC-M',customsId:'cus-m',customsCode:'CUS-M',declarationNo:'D-m',shipmentId:'s-m',shipmentCode:'S-M',orderIds:[],hsCode:'6202.13',exportDate:'2026-10-13',rateId:'rt',rate:'13',lines:[],taxable:masked?0:100,expected:masked?0:13,...(masked?{taxMasked:true}:{}),...(state==='approved'?{approved:{date:'2026-10-14',amount:masked?0:13,ref:'A',reason:'',at:'',actor:''}}:{}),filedAt:'2026-10-14',batchRef:'B-1',fileIds:[],note:'',state,receipts:[],createdAt:'2026-10-14T00:00:00Z',actor:'财务'});
+  const actions=async(masked:boolean,state:string)=>{(st as any).exportRebate={rates:[],claims:[claim(masked,state)]};store.state={...st};act(()=>root.unmount());root=createRoot(host);render('cus-m');const detail=host.querySelector('[data-customs-detail="cus-m"]') as HTMLElement;return {approve:!!queryByRole(detail,'button',{name:'登记税务核准'}),receive:!!queryByRole(detail,'button',{name:'勾稽到账'})};};
+  expect((await actions(false,'filed')).approve).toBe(true);expect((await actions(false,'approved')).receive).toBe(true);
+  expect(await actions(true,'filed')).toEqual({approve:false,receive:false});expect(await actions(true,'approved')).toEqual({approve:false,receive:false});
+});

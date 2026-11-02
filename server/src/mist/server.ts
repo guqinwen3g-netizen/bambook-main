@@ -56,15 +56,17 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
       res.status(403).set('Cache-Control','private, no-store').json({ok:false,error:{code:'AGENT_FORBIDDEN',message:'工作助手委托不能操作本人登录会话'}});
     });
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
-    const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize);
+    const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize,undefined,undefined,undefined,(db,userId,password)=>local.verifyPassword(db,userId,password));
     agentRuntime(repository,local.agentDelegation);
     app.use('/api/mist',createMistRouter({repository,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
     app.use('/api/auth', createAuthRouter({ prisma, email: createEmailService(), verification: createDbVerificationStore({ prisma }), requireEmailVerification }));
-    // The local-identity session exists only in local mode. Answer 404 before authentication so the web app
-    // detects server-account mode and shows sign-in (a 401 here made it fall back to the local-workspace screen).
+    // The local-identity session exists only in local mode. Clients that send X-Mist-Session-Probe: 2 get an explicit
+    // non-error answer, so the web app shows account sign-in without a console 404. Older clients (cached pages,
+    // desktop builds) read any 200 as a local session, so without the header they keep the legacy 404.
+    app.get('/api/mist/session', (req, res, next) => { if (req.get('X-Mist-Session-Probe') !== '2') { next(); return; } res.set('Cache-Control', 'private, no-store').json({ ok: true, mode: 'remote' }); });
     app.all('/api/mist/session', (_req, res) => { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Local workspace session is not available on this server' } }); });
     const filesRoot=process.env.MIST_FILES_DIR||path.resolve(__dirname,'../../private/mist-files');
     const repository=new MistRepository(prisma,mistContract as MistContract,new MistPrivateFiles(filesRoot));

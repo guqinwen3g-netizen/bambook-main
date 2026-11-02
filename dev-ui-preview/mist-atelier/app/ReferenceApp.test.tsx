@@ -2,7 +2,7 @@ import {createMistState as newModuleFixture} from '../../../server/src/shared/mi
 // @vitest-environment jsdom
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getByRole, queryByRole, queryAllByRole } from '@testing-library/dom';
 import * as auth from '../../../services/authService';
 import type { MistState } from '../../../server/src/shared/mistWorkspace';
@@ -61,6 +61,13 @@ vi.mock('./pages/StatesPage', () => ({ StatesPage: () => null }));
 vi.mock('./pages/DesignSystemPage', () => ({ DesignSystemPage: () => null }));
 vi.mock('./pages/ModuleTemplatePage', () => ({ ModuleTemplatePage: () => null }));
 import { ReferenceApp } from './ReferenceApp';
+
+// Pages that these tests render for real are lazy chunks. A cold first import (MarketPages alone takes
+// ~1.5 s here, longer in a loaded full run) raced the short polling in waitFor, so whichever test reached
+// a page first failed depending on run order. Load the real page modules once before any test.
+beforeAll(async () => {
+  await Promise.all([import('./pages/modules/EmailsPage'), import('./pages/modules/MarketPages'), import('./pages/ApprovalsPage'), import('./pages/NotificationsPage'), import('./pages/AccountPage')]);
+}, 60000);
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 const user = (id: string, permissions = ['products:read', 'orders:read', 'crm:read']): auth.AuthUser => ({ id, displayName: id, email: `${id}@example.com`, roles: ['sales'], roleIds: ['sales-role'], permissions, permissionCeiling: permissions, departmentIds: ['team-a'], department: 'Team A' });

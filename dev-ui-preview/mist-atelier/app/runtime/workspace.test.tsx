@@ -455,6 +455,26 @@ it('does not refresh on other definitive validation or permission rejections',as
   expect(calls.filter(call=>call.method==='GET')).toHaveLength(initial);expect(posts()).toHaveLength(2);expect(api.workspace?.revision).toBe(0);
 });
 
+it('treats reauth rejections, including the lockout, as definitive so later writes on this browser still work',async()=>{
+  await mount();const confirm:MistCommand={type:'agent.proposal.confirm',payload:{id:'proposal-1'}} as any;
+  for(const code of ['REAUTH_FAILED','REAUTH_FAILED','REAUTH_REQUIRED','REAUTH_LOCKED']){
+    intercept=request=>request.url.endsWith('/commands')?response({error:{code,message:code==='REAUTH_LOCKED'?'密码错误次数过多，请 15 分钟后再试':'登录密码不正确，提议未执行'}},403):undefined;
+    let error!:Error;await act(async()=>{error=await capture(api.run(confirm,{reauth:{password:'wrong'}})) as Error;});
+    expect(error.message).not.toContain('尚未确认');expect(api.pending).toBeNull();expect(api.error).not.toContain('尚未确认');
+    expect(localStorage.getItem('bambook.mist.pending:actor-a')).toBeNull();
+  }
+  expect(api.error).toBe('密码错误次数过多，请 15 分钟后再试');
+  // 结果未知后恢复：重发不带密码，服务端回 REAUTH_REQUIRED；须清掉待核对记录，不能卡住本机后续写入。
+  intercept=request=>request.url.endsWith('/commands')?Promise.reject(new TypeError('连接断开')):undefined;
+  await act(async()=>{await capture(api.run(confirm,{reauth:{password:'Secret-1'}}));});expect(api.pending?.command?.type).toBe('agent.proposal.confirm');
+  expect(JSON.stringify(api.pending)).not.toContain('Secret-1');
+  intercept=request=>request.url.endsWith('/commands')?response({error:{code:'REAUTH_REQUIRED',message:'确认高风险 AI 提议须输入本人当前登录密码'}},403):undefined;
+  let recovered!:Error;await act(async()=>{recovered=await capture(api.recover()) as Error;});
+  expect(recovered.message).toBe('确认高风险 AI 提议须输入本人当前登录密码');expect(api.pending).toBeNull();expect(localStorage.getItem('bambook.mist.pending:actor-a')).toBeNull();
+  intercept=undefined;let receipt!:MistRunReceipt;await act(async()=>{receipt=await api.run(command('锁定后照常保存'));});
+  expect(receipt.requestId).toBeTruthy();expect(api.state?.settings.profileName).toBe('锁定后照常保存');expect(api.pending).toBeNull();
+});
+
 it('does not publish a conflict refresh after the account has changed',async()=>{
   await mount();const delayed=deferred<ResponseData>();intercept=request=>request.url.endsWith('/commands')?failure(409,'REVISION_CONFLICT'):request.method==='GET'&&request.url===BASE+'/'+A?delayed.promise:undefined;
   let writing!:Promise<MistRunReceipt|Error>;await act(async()=>{writing=capture(api.run(command('旧身份输入')));});await waitFor(()=>calls.some(call=>call.url===BASE+'/'+A));

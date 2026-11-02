@@ -89,7 +89,10 @@ function paymentFixture(reconcile = false) {
   state.fulfillment.purchases.push({ id: 'purchase', supplierId: 'supplier', supplier: '隔离供应商', state: 'approved', kind: 'material', currency: 'CNY', amount: 1000, terms: '合同付款条件', lines: [] });
   state.payables.bills.push({ id: 'bill', code: 'AP-TEST', supplierId: 'supplier', supplier: '隔离供应商', invoiceNo: 'VAT-TEST', invoiceDate: '2026-10-13', currency: 'CNY', amount: 1000, taxAmount: 0, taxRate: '', lines: [], terms: [], due: '2026-11-14', dueBasis: '合同付款条件', fileIds: [], note: '', state: 'open', registeredAt: now, registeredBy: 'owner' });
   // 所有付款须先有主管已批准的付款申请：票据付款申请带分配，预付款申请不带。
-  const approved = { reviewerIds: ['manager'], requesterId: 'sales', requester: '业务', submittedAt: '2026-10-12T01:00:00.000Z', reason: '按合同付款', fileIds: [], snapshot: [], state: 'approved', paymentHistory: [], decision: { actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' } };
+  const approved = { reviewerIds: ['manager'], requesterId: 'sales', requester: '业务', submittedAt: '2026-10-12T01:00:00.000Z', reason: '按合同付款', fileIds: [], snapshot: [], state: 'approved', paymentHistory: [], decision: { actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' },
+    // 分档规则（M4）下已批准申请须带提交时冻结的档位：600 元、该供应商首笔付款 → ≤5 万元级 + 新供应商首笔级，两级由不同人签。
+    tier: { cnyAmount: 600, cumulativeCnyAmount: 600, rate: '1', rateSource: '人民币', firstPayment: true, levels: [{ level: 'pay_lt5', reviewerIds: ['manager'] }, { level: 'pay_new_supplier', reviewerIds: ['owner'] }] },
+    approvals: [{ level: 'pay_lt5', actorId: 'manager', actor: '主管', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' }, { level: 'pay_new_supplier', actorId: 'owner', actor: '总经理', at: '2026-10-12T02:00:00.000Z', decision: 'approved', note: '同意' }] };
   state.payables.requests = [
     { id: 'req-bill', code: 'PR-TEST-1', purpose: 'bill', supplierId: 'supplier', supplier: '隔离供应商', currency: 'CNY', amount: 600, lines: [{ billId: 'bill', billCode: 'AP-TEST', invoiceNo: 'VAT-TEST', amount: 600 }], ...approved },
     { id: 'req-pre', code: 'PR-TEST-2', purpose: 'prepayment', supplierId: 'supplier', supplier: '隔离供应商', currency: 'CNY', amount: 600, planId: 'plan', purchaseId: 'purchase', purchaseCode: 'PO-TEST', lines: [], ...approved },

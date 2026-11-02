@@ -491,7 +491,6 @@
     "development/detail"
    ],
    "commands": [
-    "development.billing.request",
     "development.billing.issue",
     "development.charge.add"
    ],
@@ -1975,7 +1974,7 @@
    ],
    "commands": [
     "finance.receivable.confirm",
-    "platform.invoice.issue"
+    "finance.receivable.reject"
    ],
    "impl": "source",
    "lessons": []

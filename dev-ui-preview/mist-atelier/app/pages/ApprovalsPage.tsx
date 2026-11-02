@@ -34,6 +34,9 @@ export function approvalRows(rows: Row[], tab: ApprovalTab, me: string) {
   return rows.filter(r => r.status === 'pending' && !r.canDecide && r.requesterId !== me);
 }
 
+/** 付款申请：服务端在审批快照里给出需要哪一档、已签哪一级、还差哪一级。 */
+const tierNote = (r: Pick<Row, 'details'>) => ['审批档位', '审批进度'].map(label => r.details.find(d => d.label === label)?.value).filter(Boolean).join('。');
+
 export function ApprovalsPage() {
   const reviews = useMistReviews(), workspace = useMistWorkspace(), session = useMistSession(), { route, go } = useNav();
   const me = session.user?.id ?? '', state = workspace.state, current = workspace.workspace;
@@ -81,6 +84,7 @@ export function ApprovalsPage() {
   const detail = selected ? <DetailBody data-approval={selected.id} heading={<h2 className="mist-h2">{localizedPageTitle(selected.title)}</h2>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{uiText(STATUS[selected.status].label)}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill></div>
     <Facts items={[{ label: '发起人', value: requester(selected) }, { label: '提交时间', value: day(selected.submittedAt) }, { label: '审批人', value: selected.reviewerIds.includes(me) ? (selected.reviewerIds.length > 1 ? `我及另外 ${selected.reviewerIds.length - 1} 人` : '我') : `${selected.reviewerIds.length} 人` }]} />
+    {selected.kind === 'payment' && tierNote(selected) && <Banner tone={selected.status === 'pending' ? 'warn' : 'neutral'} title={uiText('付款审批档位')}><span data-payment-tier>{tierNote(selected)}</span></Banner>}
     <DetailBlock title={uiText("审批内容")}>{selected.details.length ? <KeyValue items={selected.details.map(item=>['处置方式','退回去向','审批内容','订单用途','客户收款','溢短装','数量口径'].includes(item.label)?{...item,value:uiText(item.value)}:item)} /> : <span className="mist-note">{uiText("缺少审批内容")}</span>}
       </DetailBlock>
     {!!selected.files?.length && <DetailBlock title={uiText("随附依据")}>{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}

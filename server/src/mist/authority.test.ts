@@ -43,3 +43,8 @@ it('revalidates a long service key against the owners current grants and origina
  source.load.mockResolvedValue({id:'owner',status:'active',deletedAt:null,metadata:{credentialVersion:'after'}});
  await expect(freshMistAuthority({},actor)).rejects.toMatchObject({status:401});
 });
+it('refuses business access until a forced password change is completed',async()=>{
+ source.load.mockResolvedValue({id:'owner',status:'active',deletedAt:null,metadata:{forceChangePassword:true,forceChangeReason:'initial'}});
+ await expect(freshMistAuthority({},testActor())).rejects.toMatchObject({status:403,code:'PASSWORD_CHANGE_REQUIRED'});
+ expect(source.build).not.toHaveBeenCalled();
+});

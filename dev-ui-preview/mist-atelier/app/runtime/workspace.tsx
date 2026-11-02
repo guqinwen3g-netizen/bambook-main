@@ -26,7 +26,8 @@ export interface MistWorkspaceContext {
   loading: boolean; saving: boolean; error: string; pending: Pending | null;
   pendingCreate?: MistPendingCreate | null;
   commandRecovery?:MistCommandRecovery|null;
-  run: (command: MistCommand) => Promise<MistRunReceipt>;
+  /** reauth：只在确认高风险 Agent 提议时随本次请求发送，不写入本机待核对记录。 */
+  run: (command: MistCommand, options?: { reauth?: { password: string } }) => Promise<MistRunReceipt>;
   uploadFile: (file: File, options?:MistUploadOptions) => Promise<MistFile>;
   downloadFile: (file: MistFile) => Promise<void>;
   /** 读取附件原件（带登录凭据），供在线预览使用；不会触发下载。 */
@@ -181,6 +182,9 @@ function mailSendAcknowledged(data: any, value: MistWorkspaceEnvelope, intent: P
   if (String(row.body ?? '').trim() !== String(input.body ?? '').trim()) stop('正文不一致');
   return { workspaceId: intent.workspaceId, requestKey: intent.requestId, sendId: id, accountId: String(input.accountId), closedAt: new Date().toISOString(), ...(alias ? { alias: true } : {}) } as MailClaim;
 }
+/** 高风险提议的密码复验被拒（缺密码、密码错误、错误次数过多锁定）：服务端未执行任何写入，属确定拒绝，恢复时重发也不会带密码。 */
+const REAUTH_REJECTIONS = new Set(['REAUTH_REQUIRED', 'REAUTH_FAILED', 'REAUTH_LOCKED']);
+const reauthRejected = (failure: unknown) => failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && REAUTH_REJECTIONS.has(failure.code ?? '');
 const mailReviewCode = (failure: unknown) => failure instanceof RequestError && (failure.code === MAIL_REVIEW || failure.code === MAIL_MANUAL);
 const mailSendBody = (intent: Pending) => JSON.stringify({ requestKey: intent.mail!.requestKey, ...(intent.mail!.draftId ? { draftId: intent.mail!.draftId } : {}), input: intent.mail!.input, ...(intent.mail!.forwardOfId ? { forwardOfId: intent.mail!.forwardOfId } : {}) });
 const mailSendSettled = (failure: unknown) => failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && ![408, 429].includes(failure.status) && failure.code !== 'MAIL_BUSY' && !mailReviewCode(failure);
@@ -338,7 +342,8 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     mounted.current = true; scopeEpoch.current++; readEpoch.current++; readController.current?.abort();
     snapshot.current = null; latest.current.clear(); wanted.current = undefined; navigating.current = false; mutation.current = null;
     setCurrent(null); setWorkspaces([]); setArchivedWorkspaces([]); setError(''); setSaving(false); publishPending(null); publishCreate(null);
-    if (authority.status === 'authenticated' && authority.userId && !(session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length) && !session.user?.platformCompany) {
+    // 首次登录 / 重置后须先改密：改密前服务端拒绝业务接口，改密完成（mustChangePassword 变化）后再读取公司。
+    if (authority.status === 'authenticated' && authority.userId && !(session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length) && !session.user?.platformCompany && !session.user?.mustChangePassword) {
       let restored: Pending | null = null;
       let selected: string | undefined;
       let recoveryError = '';
@@ -361,7 +366,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       });
     } else setLoading(authority.status === 'loading');
     return () => { mounted.current = false; scopeEpoch.current++; readEpoch.current++; readController.current?.abort(); mutation.current = null; };
-  }, [authority.key, authority.userId, authority.status, load, publishPending, publishCreate, forgetSelection]);
+  }, [authority.key, authority.userId, authority.status, session.user?.mustChangePassword, load, publishPending, publishCreate, forgetSelection]);
 
   /**
    * 后台同步：前台每 15 秒查版本，后台最多每分钟查一次；有更新才静默读取完整内容。
@@ -432,7 +437,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       put(value, bound); clearPending(bound); return acknowledged;
     } catch (failure) {
       if (mounted.current && live.current.key === bound.key && live.current.userId === bound.userId && live.current.status === 'authenticated') {
-        const known = !restoring && failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && ![408, 429].includes(failure.status) && failure.code !== 'REQUEST_CONFLICT';
+        const known = reauthRejected(failure) || !restoring && failure instanceof RequestError && failure.status >= 400 && failure.status < 500 && ![408, 429].includes(failure.status) && failure.code !== 'REQUEST_CONFLICT';
         if (known) clearPending(bound);
         const message = (failure instanceof Error ? failure.message : '保存失败') + (known ? '' : '；结果尚未确认，请核对原请求');
         const refreshConflict = known && failure instanceof RequestError && failure.status === 409 && failure.code === 'REVISION_CONFLICT'
@@ -514,7 +519,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       throw failure;
     }finally{if(token)unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,assertSource,lock,load,put,unlock,persist,clearPending,holdForReview]);
-  const run = React.useCallback(async (command: MistCommand) => {
+  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string } }) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);
     if (pendingCreateRef.current) throw new RequestError(createNotice(pendingCreateRef.current));
     if (pendingRef.current) throw new RequestError('存在待核对的操作，请先核对原请求结果');
@@ -522,7 +527,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     try {
       const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)) };
       const audible = !['settings.update','notification.read','notification.readAll','email.flag','email.move'].includes(command.type);
-      try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority); if(audible)playFeedbackSound('success');return result;}
+      try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(options?.reauth && command.type === 'agent.proposal.confirm' ? { reauth: { password: options.reauth.password } } : {}) }), authority); if(audible)playFeedbackSound('success');return result;}
       catch(failure){
         if(audible)playFeedbackSound('failure');
         // Forms retain the exact unresolved command identity, even if React batches away the saving frame.

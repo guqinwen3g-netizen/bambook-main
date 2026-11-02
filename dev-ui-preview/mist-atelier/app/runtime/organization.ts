@@ -17,6 +17,8 @@ export const EMPLOYMENT_STATUS: Record<string, string> = { Probation: '试用期
 export const CONTRACT_TYPES = [{ value: 'FixedTerm', label: '固定期限' }, { value: 'OpenEnded', label: '无固定期限' }, { value: 'PartTime', label: '非全日制' }, { value: 'Intern', label: '实习' }];
 
 export interface OrgDepartment { id: string; name: string; parentId: string | null; status?: string; businessAttributes?: BusinessAttribute[] }
+/** 邀请邮件发送结果；只有 sent 表示已提交给邮件服务，不代表对方已收到。 */
+export type AccountInvitation = { status: 'sent' | 'unconfirmed' | 'unavailable' | 'cooldown'; message: string };
 export interface AdminAccount { id: string; displayName: string; email: string; status: string; roles: string[]; roleIds: string[]; departmentId: string | null; department: string | null; lastLoginAt: string | null; createdAt: string; metadata?: Record<string, unknown> | null; identityEditable?: boolean }
 export interface AdminRole { id: string; name: string; description: string | null; isSystem: boolean; permissions: string[] }
 export interface AuditLogRow { id: string; actorId: string; action: string; targetType: string; targetId: string | null; createdAt: string; ip?: string | null }
@@ -75,7 +77,7 @@ export const organizationApi = {
   updateRole: (roleId: string, body: { name: string; description: string }) => call<{ ok: true }>('/admin/roles/' + id(roleId), { method: 'PATCH', body }),
   deleteRole: (roleId: string) => call<{ ok: true }>('/admin/roles/' + id(roleId), { method: 'DELETE' }),
   updateRolePermissions: (roleId: string, body: { addPermissions: string[]; removePermissions: string[] }) => call<{ ok: true }>('/admin/roles/' + id(roleId) + '/permissions', { method: 'PATCH', body }),
-  createAccount: (body: { displayName: string; email: string; password: string; roles: string[]; departmentId: string; appointInitialGeneralManager?: boolean }) => call<{ userId: string; reactivated: boolean }>('/admin/users', { method: 'POST', body }),
+  createAccount: (body: { displayName: string; email: string; deliveryMode: 'password' | 'invite'; password?: string; roles: string[]; departmentId: string; appointInitialGeneralManager?: boolean }) => call<{ userId: string; reactivated: boolean; invitation?: AccountInvitation }>('/admin/users', { method: 'POST', body }),
   updateAccount: (userId: string, body: { displayName?: string; email?: string; departmentId?: string; status?: string }) => call<{ ok: true }>('/admin/users/' + id(userId), { method: 'PATCH', body }),
   setRoles: (userId: string, roles: string[], departmentId: string | null) => call<{ ok: true }>('/admin/users/' + id(userId) + '/roles', { method: 'PATCH', body: { roles, departmentId } }),
   saveAccountAssignment: (userId: string, body: { roles: string[]; departmentId: string | null; displayName?: string; email?: string }) => call<{ ok: true }>('/admin/users/' + id(userId) + '/roles', { method: 'PATCH', body }),
@@ -91,6 +93,13 @@ export const organizationApi = {
   auditLogs: (query: { limit?: number; offset?: number; action?: string; targetType?: string }) => {
     const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
     return call<{ logs: AuditLogRow[]; total: number }>('/admin/audit-logs' + (q.size ? '?' + q : ''));
+  },
+  /** 审计日志导出（audit:export）：服务端按同一筛选返回 CSV。 */
+  exportAuditLogs: async (query: { targetType?: string }) => {
+    const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
+    const response = await fetch('/api/admin/audit-logs/export' + (q.size ? '?' + q : ''), { credentials: 'include', cache: 'no-store', headers: { ...apiService.getAuthHeaders() } });
+    if (!response.ok) throw new Error(response.status === 403 ? '当前账号没有导出审计日志的权限' : '审计日志导出未完成，请重试');
+    return response.blob();
   },
   // 人事（hr:read / hr:write）
   personnel: () => call<{ personnel: OrgPerson[]; departments: OrgDepartment[]; jobs: OrgJob[]; positionNames: Record<string, string> }>('/hr/personnel'),

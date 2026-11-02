@@ -146,3 +146,10 @@ it('opens and reopens a compact approval after navigation remounts its page', as
  expect(getByRole(document.body,'dialog',{name:'SO-ONE 主单审批'})).toBeTruthy();
  expect(postCount).toBe(0);
 });
+
+it('shows the payment approval tier and the level still missing on the approval detail',async()=>{
+ rows=[row({id:'payment:pr-1',kind:'payment',entityId:'pr-1',title:'PR-2026-0001 · 华盛毛纺 · 1,000.00 CNY',requiredPermission:'finance:payment_request:approve',target:{view:'payment-vouchers',id:'pr-1'},details:[{label:'本次申请金额',value:'1,000.00 CNY'},{label:'审批档位',value:'申请金额 1,000.00 CNY；需 5 万元及以下档 + 首笔付款加签（总经理级）（该供应商首笔付款）'},{label:'审批进度',value:'已批：5 万元及以下档（财务主管）；还差：首笔付款加签（总经理级）'}]})];
+ await render();await openRow('PR-2026-0001');
+ const note=host.querySelector('[data-payment-tier]')?.textContent||'';
+ expect(note).toContain('需 5 万元及以下档 + 首笔付款加签');expect(note).toContain('还差：首笔付款加签（总经理级）');
+});

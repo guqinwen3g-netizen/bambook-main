@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAuthRouter } from '../route';
 import { createAuthService, type TokenPayload } from '../service';
 import { createPermissionService, hasScope } from '../permissionService';
-import { buildAuthTokenPayload, buildLoadedAuthTokenPayload } from '../tokenHelpers';
+import { buildAuthTokenPayload, buildLoadedAuthTokenPayload, serializeAuthUser } from '../tokenHelpers';
 import { createAuthorizationSnapshotGuard } from '../authorizationSnapshotGuard';
 import { createCurrentWriteActor } from '../currentWriteActor';
 import { createModuleAuthGuard } from '../moduleGuard';
@@ -310,6 +310,31 @@ describe('current effective authorization: actual login/me/refresh HTTP with sto
     const header: unknown = response.headers['set-cookie'];
     const cookies = Array.isArray(header) ? header.map(String) : typeof header === 'string' ? [header] : [];
     expect(cookies.some(cookie => cookie.startsWith('bambook_token=;'))).toBe(true);
+  });
+
+  it.each([['empty', []], ['subset', ['orders:read']], ['absent', undefined]] as Array<[string, string[] | undefined]>)(
+    'refresh and profile update keep the signed %s credential ceiling', async (_label, ceiling) => {
+      const fixture = database('role-sales', ['orders:read']);
+      const prior = createAuthService().signToken({ userId: fixture.user.id, displayName: fixture.user.displayName, roles: ['sales'], roleIds: ['role-sales'],
+        permissions: ['orders:read'], departmentIds: ['company'], authorizationLoaded: true, ...(ceiling === undefined ? {} : { permissionCeiling: ceiling }) });
+      const refreshed = await request(host(fixture.prisma)).post('/auth/refresh').set('Authorization', `Bearer ${prior}`);
+      expect(refreshed.status).toBe(200);
+      const renewed = renewedPayload(refreshed);
+      expect(renewed.permissionCeiling).toEqual(ceiling); expect(refreshed.body.user.permissionCeiling).toEqual(ceiling);
+      expect(hasScope(renewed, 'orders:read')).toBe(ceiling === undefined || ceiling.includes('orders:read'));
+      const profile = await request(host(fixture.prisma)).patch('/auth/me').set('Authorization', `Bearer ${prior}`)
+        .send({ displayName: 'Renamed', permissionCeiling: ['*'], permissions: ['*'] });
+      expect(profile.status).toBe(200);
+      expect(Object.hasOwn(profile.body.user, 'permissionCeiling')).toBe(ceiling !== undefined);
+      expect(profile.body.user.permissionCeiling).toEqual(ceiling);
+    });
+
+  it('serializer copies a provided ceiling and keeps an absent ceiling distinct from an empty one', () => {
+    const { user } = database(); const ceiling = ['orders:read'];
+    const dto = serializeAuthUser(user, ['sales'], ['orders:read'], ['company'], { permissionCeiling: ceiling }); ceiling.push('orders:write');
+    expect(dto.permissionCeiling).toEqual(['orders:read']);
+    expect(serializeAuthUser(user, ['sales'], ['orders:read'], ['company'], { permissionCeiling: [] }).permissionCeiling).toEqual([]);
+    expect(Object.hasOwn(serializeAuthUser(user, ['sales'], ['orders:read'], ['company']), 'permissionCeiling')).toBe(false);
   });
 
   it('login rejects an unreadable current grant set without returning or issuing a session token', async () => {

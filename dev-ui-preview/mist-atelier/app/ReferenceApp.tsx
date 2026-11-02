@@ -225,7 +225,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   }, [platformOnly, platformCompany, session.status, go]);
   React.useEffect(() => {
     if (publicEntryForHost(location.host) === 'platform' && platformOnly && !personalSection
-      && !['platform-admin','system-settings','settings','platform-login','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
+      && !['platform-admin','system-settings','settings','platform-login','account-recovery','platform-recovery','account-access'].includes(route.view)) go('platform-admin');
   }, [platformOnly, personalSection, route.view, go]);
   // 公司管理会话保持在当前公司的管理页面。
   React.useEffect(() => { if (platformCompany && !personalSection && !COMPANY_MANAGEMENT_VIEWS.includes(route.view.split('/')[0])) go('company-settings'); }, [platformCompany, personalSection, route.view, go]);
@@ -336,7 +336,8 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     go(target.view, target.id, target.target);
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };
-  if (['account-access','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
+  // 找回密码：公司员工与平台人员同一页面；platform-recovery 仅为兼容旧链接。
+  if (['account-access','account-recovery','platform-recovery'].includes(route.view)) return <Nav.Provider value={nav}><AccountAccessPage key={route.view}/></Nav.Provider>;
   if (route.view === 'register' && publicEntryForHost(location.host) !== 'platform') return <Nav.Provider value={nav}><RegisterPage/></Nav.Provider>;
   if (session.status === 'loading') return null;
   if (session.status === 'anonymous' && (session.localMode || session.connectionModeUnverified)) return <MistPage width="narrow"><Card><CardHeader title={uiText("公司连接待核对")} sub={uiText(session.localMode?'本地工作身份由本机服务提供，无需输入旧账号密码。':'暂时无法确认当前公司，请重新连接后继续。')}/><div className="mist-card-body"><p>{session.error||'暂时无法读取公司会话，请重新连接。'}</p><Button variant="primary" loading={session.refreshing} onClick={()=>void session.refresh()}>{uiText(session.localMode?'重新进入本地身份':'重新连接公司')}</Button></div></Card></MistPage>;

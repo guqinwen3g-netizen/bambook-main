@@ -93,5 +93,20 @@ it('keeps customer-only balances out of another customer and development invoice
 
 it('reserves tax-refund receipt usage instead of allowing the same money to become a customer deposit',()=>{
  const f=setup();f.state.receipts[0].currency='CNY';f.state.orders.forEach(o=>o.currency='CNY');f.state.exportRebate!.claims.push({receipts:[{receiptId:'r',amount:20}]} as any);
+ // 退税到账流水的归属只对持有计税依据的财务开放（2026-11 M1）；这里核对占用额本身，按持码人办理。
+ f.context.can=(scope:string)=>scope==='sensitive:tax_base';
  expect(()=>f.assign(31,'r',null)).toThrow('超出到账金额');
+});
+
+describe('退税到账流水与计税依据',()=>{
+ const withRebate=()=>{const f=setup();f.state.receipts[0].currency='CNY';(f.state.orders[0] as any).currency='CNY';(f.state as any).exportRebate={rates:[],claims:[{id:'rc',code:'RC',state:'approved',expected:40,approved:{amount:40},receipts:[{id:'e',receiptId:'r',receiptCode:'R',amount:40,date:'2026-10-13',at:'',actor:''}],lines:[]}]};return f;};
+ it('refuses to attribute a treasury refund receipt without sensitive:tax_base and names no amount',()=>{
+  const f=withRebate();let message='';
+  try{applyOrderFundingCommand(f.state,{type:'funding.assign',payload:{receiptId:'r',customerId:'c',orderId:'o',amount:30,note:'归属'}},{...f.context,can:()=>false});}catch(e:any){message=e.message;}
+  expect(message).toBe('该到账不能用于客户资金归属');expect(f.state.orderFunding!.assignments).toHaveLength(0);
+ });
+ it('keeps the original over-receipt check for tax base holders',()=>{
+  const f=withRebate();
+  expect(()=>applyOrderFundingCommand(f.state,{type:'funding.assign',payload:{receiptId:'r',customerId:'c',orderId:'o',amount:30,note:'归属'}},{...f.context,can:(s:string)=>s==='sensitive:tax_base'})).toThrow('此到账金额 50.00 CNY');
+ });
 });

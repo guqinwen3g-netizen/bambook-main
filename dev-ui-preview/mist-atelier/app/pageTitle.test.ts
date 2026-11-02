@@ -10,6 +10,7 @@ describe('application page titles', () => {
     expect(pageDocumentTitle(View.Orders, { anonymous: true })).toBe('Bambook · 登录');
     expect(pageDocumentTitle('login')).toBe('Bambook · 登录');
     expect(pageDocumentTitle('register', { anonymous: true })).toBe('Bambook · 账户开通');
+    expect(pageDocumentTitle('account-recovery', { anonymous: true })).toBe('Bambook · 找回密码');
     expect(pageDocumentTitle('account-access', { anonymous: true, invitation: true })).toBe('Bambook · 设置登录密码');
   });
   it('distinguishes platform and company settings and mandatory password changes', () => {

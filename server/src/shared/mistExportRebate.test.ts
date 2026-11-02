@@ -66,8 +66,8 @@ describe('出口退税', () => {
     expect(bills.map(b => [b.amount, b.taxAmount])).toEqual([[226000, 26000]]);
     expect(rebateRateFor(state, customs.hsCode, '2026-10-13')?.rate).toBe('13');
   });
-  it('财务权限：登记与申报用开票权，到账勾稽用核销权', () => {
-    expect(mistCommandPermission({ type: 'rebate.rate.save', payload: { hsCode: '620331', rate: '13', effectiveFrom: '2020-03-20', basis: 'x' } })).toBe('invoices:write');
+  it('退税权限：登记与申报用 tax:write（2026-11 改码），到账勾稽用核销权', () => {
+    expect(mistCommandPermission({ type: 'rebate.rate.save', payload: { hsCode: '620331', rate: '13', effectiveFrom: '2020-03-20', basis: 'x' } })).toBe('tax:write');
     expect(mistCommandPermission({ type: 'rebate.claim.receive', payload: { id: 'x', receiptId: 'y', amount: 1 } })).toBe('invoices:reconcile');
   });
 

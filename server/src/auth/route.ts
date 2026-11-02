@@ -5,6 +5,7 @@ import { CompanyAccessError } from './companyAccess';
 import { selfRegistrationRouter } from './selfRegistration';
 import { passwordProblem } from './passwordPolicy';
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { createAuthService } from './service';
 import { AgentRole } from '../agent/types';
@@ -16,6 +17,8 @@ import { buildLoadedAuthTokenPayload, platformCompanyUser, loadUserWithRoles, se
 import { createLoginRateLimiter } from './loginRateLimiter';
 import { pickRequestToken } from './middleware';
 import { invalidateAccountStatusCache } from './accountStatusGuard';
+import { isTokenRevoked } from './sessionRevocation';
+import { newSession, sessionOf, writeSession, type SessionClaims } from './sessionLifetime';
 
 type AuthRouterOptions = {
   prisma: PrismaClient;
@@ -31,7 +34,6 @@ type AuthRouterOptions = {
 };
 
 const COOKIE_NAME = 'bambook_token';
-const COOKIE_MAX_AGE = 7 * 24 * 3600 * 1000;
 const AVATAR_DATA_URL_RE = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/;
 
 function normalizeEmail(value: unknown): string {
@@ -176,10 +178,10 @@ export function createAuthRouter(options: AuthRouterOptions) {
     const entryCompany = requestedCompanyId
       ? activeCompanies.find((m) => m.companyId === requestedCompanyId)!.company
       : activeCompanies[0]?.company ?? null;
-    return issueSession(req, res, user, {}, entryCompany ? { id: entryCompany.id, name: entryCompany.name, slug: entryCompany.slug } : null);
+    return issueSession(req, res, user, newSession(req.body?.remember === true), entryCompany ? { id: entryCompany.id, name: entryCompany.name, slug: entryCompany.slug } : null);
   });
 
-  async function issueSession(req: Request, res: Response, user: any, extra: Record<string, unknown> = {}, company: { id: string; name: string; slug: string } | null = null) {
+  async function issueSession(req: Request, res: Response, user: any, session: SessionClaims, company: { id: string; name: string; slug: string } | null = null) {
     let tokenPayload;
     try {
       tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, company?.id ?? null);
@@ -190,7 +192,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
     }
     const { roles, permissions, departmentIds, roleIds: newRoleIds } = tokenPayload;
 
-    const token = auth.signToken(tokenPayload);
+    const token = writeSession(res, auth, tokenPayload, session);
 
     await options.prisma.userAccount.update({
       where: { id: user.id },
@@ -201,20 +203,11 @@ export function createAuthRouter(options: AuthRouterOptions) {
       data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: user.id, action: 'login', ip: req.ip },
     }).catch(() => undefined);
 
-    res.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: COOKIE_MAX_AGE,
-      path: '/',
-    });
-
     return res.json({
       ok: true,
       user: serializeAuthUser(user, roles, permissions, departmentIds, { companyId: tokenPayload.companyId, newRoleIds, authorizationLoaded: tokenPayload.authorizationLoaded }),
       token,
       ...(company ? { company } : {}),
-      ...extra,
     });
   }
 
@@ -379,6 +372,10 @@ export function createAuthRouter(options: AuthRouterOptions) {
         res.clearCookie(COOKIE_NAME, { path: '/' });
         return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Account disabled.' });
       }
+      if (isTokenRevoked(user.metadata, (payload as any).iat, payload.credentialVersion)) {
+        res.clearCookie(COOKIE_NAME, { path: '/' });
+        return res.status(401).json({ ok: false, error: 'SESSION_REVOKED', message: '登录已失效，请重新登录。' });
+      }
       const tokenPayload = await buildLoadedAuthTokenPayload(options.prisma, user, payload.companyId ?? null, payload.platformCompany);
       const { roles, permissions, departmentIds, roleIds: newRoleIds } = tokenPayload;
       const shownUser = tokenPayload.platformCompany ? await platformCompanyUser(options.prisma, user, tokenPayload.platformCompany, tokenPayload.platformCompany.companyId) : user;
@@ -446,8 +443,10 @@ export function createAuthRouter(options: AuthRouterOptions) {
     if ((user as any).platformRole) return res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '平台人员不能切换进入客户公司业务。' });
     const current = await buildLoadedAuthTokenPayload(options.prisma, user, companyId);
     if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
-    const next = auth.signToken(current);
-    res.cookie(COOKIE_NAME, next, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: COOKIE_MAX_AGE, path: '/' });
+    if (isTokenRevoked(user.metadata, (prior as any).iat, prior.credentialVersion)) return res.status(401).json({ ok: false, error: 'SESSION_REVOKED', message: '登录已失效，请重新登录。' });
+    let next: string;
+    try { next = writeSession(res, auth, current, sessionOf(prior)); }
+    catch { res.clearCookie(COOKIE_NAME, { path: '/' }); return res.status(401).json({ ok: false, error: 'SESSION_EXPIRED', message: '登录已超过 90 天，请重新登录。' }); }
     return res.json({
       ok: true,
       token: next,
@@ -542,20 +541,18 @@ export function createAuthRouter(options: AuthRouterOptions) {
         res.clearCookie(COOKIE_NAME, { path: '/' });
         return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Account disabled.' });
       }
+      // 续期不能复活已失效的凭据：改密、重置、退出所有设备后的旧令牌一律拒绝。
+      if (isTokenRevoked(user.metadata, (prior as any).iat, prior.credentialVersion)) {
+        res.clearCookie(COOKIE_NAME, { path: '/' });
+        return res.status(401).json({ ok: false, error: 'SESSION_REVOKED', message: '登录已失效，请重新登录。' });
+      }
       // Re-authentication boundary: never re-sign stale role/grant claims from
       // the old JWT, even if every current role permission has been revoked.
       const current = await buildLoadedAuthTokenPayload(options.prisma, user, prior.companyId ?? null, prior.platformCompany);
       if (prior.permissionCeiling !== undefined) current.permissionCeiling = [...prior.permissionCeiling];
-      const refreshed = auth.signToken(current);
-      res.cookie(COOKIE_NAME, refreshed, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: COOKIE_MAX_AGE,
-        path: '/',
-      });
+      const refreshed = writeSession(res, auth, current, sessionOf(prior));
       const payload = auth.verifyToken(refreshed);
-      return res.json({ ok: true, user: payload });
+      return res.json({ ok: true, user: payload, token: refreshed });
     } catch {
       res.clearCookie(COOKIE_NAME, { path: '/' });
       return res.status(401).json({ ok: false, error: 'UNAUTHORIZED', message: 'Token expired or invalid.' });
@@ -589,9 +586,10 @@ export function createAuthRouter(options: AuthRouterOptions) {
       const newHash = await auth.hashPassword(newPassword);
       // 管理员重置密码时在 metadata 标了 forceChangePassword；本人改密后清除该标记。
       // 改密同时让其他设备上的旧会话失效（sessionsRevokedAt），当前设备随即换发新令牌继续使用。
-      const metadata = (user.metadata && typeof user.metadata === 'object' && !Array.isArray(user.metadata)) ? user.metadata as Record<string, unknown> : {};
+      const { forceChangeReason: _reason, ...metadata } = (user.metadata && typeof user.metadata === 'object' && !Array.isArray(user.metadata)) ? user.metadata as Record<string, unknown> : {};
       const at = new Date().toISOString();
-      await options.prisma.userAccount.update({ where: { id: payload.userId }, data: { passwordHash: newHash, metadata: { ...metadata, ...(metadata.forceChangePassword ? { forceChangePassword: false } : {}), passwordChangedAt: at, sessionsRevokedAt: at } as any } });
+      // 新凭据代次：其他设备上的旧令牌（含同一秒签发的）全部失效，也不能续期复活。
+      await options.prisma.userAccount.update({ where: { id: payload.userId }, data: { passwordHash: newHash, metadata: { ...metadata, ...(metadata.forceChangePassword ? { forceChangePassword: false } : {}), credentialVersion: randomUUID(), passwordChangedAt: at, sessionsRevokedAt: at } as any } });
       invalidateAccountStatusCache(payload.userId);
       let token: string | undefined;
       try {
@@ -599,8 +597,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
         if (loaded) {
           const current = await buildLoadedAuthTokenPayload(options.prisma, loaded, payload.companyId ?? null, payload.platformCompany);
           if (payload.permissionCeiling !== undefined) current.permissionCeiling = [...payload.permissionCeiling];
-          token = auth.signToken(current);
-          res.cookie(COOKIE_NAME, token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: COOKIE_MAX_AGE, path: '/' });
+          token = writeSession(res, auth, current, sessionOf(payload));
         }
       } catch (err) {
         logger.error('[auth] change-password token reissue failed', { userId: payload.userId, error: (err as Error).message });

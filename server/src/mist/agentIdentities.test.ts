@@ -33,7 +33,9 @@ describe('Administrator managed service identity with owner-only long credential
   await (await human(app,'demo-buyer')).client.get(admin.base+'/'+id+'/history').expect(404);
  });
  it('uses the real responsible human for sensitive confirmation and retains the independent Agent identity in the audit',async()=>{
-  const app=createMistServer(undefined,{local:createMistLocalRuntime({directory})}),admin=await human(app,'demo-admin'),finance=await human(app,'demo-finance'),id=randomUUID();
+  // 开设银行账户属高风险：财务须持有 ai:write:high 并复验本人登录密码。
+  const local=createMistLocalRuntime({directory}),authorize=local.authorize;local.authorize=async(db,prior,permission)=>authorize(db,prior,permission==='ai:write:high'?undefined:permission);vi.stubEnv('MIST_LOCAL_REAUTH_PASSWORD','local-reauth-secret');
+  const app=createMistServer(undefined,{local}),admin=await human(app,'demo-admin'),finance=await human(app,'demo-finance'),id=randomUUID();
   await admin.client.post(admin.base).send({id,name:'财务核对',ownerId:'demo-finance',mode:'operate'}).expect(201);
   const issued=(await finance.client.post(admin.base+'/'+id+'/issue').send({requestId:randomUUID(),version:1}).expect(200)).body;
   const proposed=await tool(app,issued.token,'bambook_execute',{workspaceId:admin.workspace.id,requestId:randomUUID(),command:{type:'finance.account.save',payload:{name:'模拟美元账户',bankName:'模拟银行',accountNo:'SIM-001',currency:'USD',openingDate:'2026-10-30',openingBalance:0}}});
@@ -42,7 +44,7 @@ describe('Administrator managed service identity with owner-only long credential
   const proposal=ws.state.agentProposals.find((p:any)=>p.agentSessionId===id);expect(proposal.ownerId).toBe('demo-finance');expect(proposal.agentIdentity).toEqual({id,name:'财务核对'});
   expect((await tool(app,issued.token,'bambook_execute',{workspaceId:ws.id,requestId:randomUUID(),command:{type:'agent.proposal.confirm',payload:{id:proposal.id}}})).isError).toBe(true);
   await admin.client.post('/api/mist/workspaces/'+ws.id+'/commands').send({requestId:randomUUID(),expectedRevision:ws.revision,command:{type:'agent.proposal.confirm',payload:{id:proposal.id}}}).expect(404);
-  await finance.client.post('/api/mist/workspaces/'+ws.id+'/commands').send({requestId:randomUUID(),expectedRevision:ws.revision,command:{type:'agent.proposal.confirm',payload:{id:proposal.id}}}).expect(200);
+  await finance.client.post('/api/mist/workspaces/'+ws.id+'/commands').send({requestId:randomUUID(),expectedRevision:ws.revision,command:{type:'agent.proposal.confirm',payload:{id:proposal.id}},reauth:{password:'local-reauth-secret'}}).expect(200);
   ws=(await finance.client.get('/api/mist/workspaces/default').expect(200)).body.workspace;expect(ws.state.bankAccounts.some((a:any)=>a.accountNo==='SIM-001')).toBe(true);
   const history=(await finance.client.get('/api/mist/workspaces/'+ws.id+'/agent-audits').expect(200)).body;expect(history.items.filter((a:any)=>a.agentSessionId===id).every((a:any)=>a.agentIdentity?.name==='财务核对')).toBe(true);
  });

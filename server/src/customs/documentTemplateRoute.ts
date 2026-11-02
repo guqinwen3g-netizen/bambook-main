@@ -14,6 +14,7 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { createModuleAuthGuard, requireJwtForWrite } from '../auth/moduleGuard';
+import { requirePermission } from '../auth/permissionGuard';
 import { actorIdFromRequest } from '../audit/routeAudit';
 import { logger } from '../lib/logger';
 import { serializeValue } from '../lib/serializeValue';
@@ -36,7 +37,9 @@ export function createDocumentTemplateRouter(options: DocumentTemplateRouterOpti
   const templates = createDocumentTemplateService(prisma);
 
   router.use(createModuleAuthGuard({ requireAuth, apiKeys }));
-  const requireWrite = requireJwtForWrite({ requireAuth, apiKeys });
+  // 模板与公司抬头配置写入按单证管理权 customs:admin 判定（2026-11 补判定点；读取仍沿用模块守卫）。
+  const jwtWrite = requireJwtForWrite({ requireAuth, apiKeys }), adminWrite = requirePermission('customs:admin');
+  const requireWrite = (req: Request, res: Response, next: () => void) => jwtWrite(req, res, () => requireAuth ? adminWrite(req, res, next) : next());
   const notify = (action: string, ids?: string[]) => onDataChange?.({ entity: 'documentTemplate', action, ids });
 
   const handleError = (res: Response, e: any, code: string) => {

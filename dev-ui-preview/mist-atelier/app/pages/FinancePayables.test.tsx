@@ -22,7 +22,7 @@ function input(label: string, value: string) { const c = getByLabelText(document
 function select(label: string, value: string) { const c = getByLabelText(document.body, label) as HTMLSelectElement; act(() => { c.value = value; c.dispatchEvent(new Event('change', { bubbles: true })); }); }
 let po: any, ctx: any;
 beforeEach(() => {
-  let serial = 0; const context = ctx = { id: () => `ui-${++serial}`, actorName: '财务', actorId: 'finance', now: new Date().toISOString(), authority: { supplier: {}, paymentReviewerIds: ['manager'] } };
+  let serial = 0; const context = ctx = { id: () => `ui-${++serial}`, actorName: '财务', actorId: 'finance', now: new Date().toISOString(), authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } };
   const state = createMistState(context, 'demo'); state.payables!.bills = []; /* 演示自带出口退税专票；本组从没有票据开始 */ po = state.fulfillment.purchases.find(p => p.code === 'PO-2026-00001');
   store.value = { state, workspace: { id: 'space' }, loading: false, saving: false, pending: null, run: vi.fn(async (command: any) => { const r = applyMistCommand(store.value.state, command, context); store.value.state = r.state; render(); return { requestId: 'req', revision: 1, result: r.result }; }) };
   go.mockReset(); route = { view: 'payment-vouchers', section: 'payables' };
@@ -101,7 +101,7 @@ it('有付款的票据不能作废，按钮写明原因；没有付款的作废�
 function text(label: string, value: string, scope: HTMLElement = document.body) { const t = getByLabelText(scope, label) as HTMLTextAreaElement; act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(t, value); t.dispatchEvent(new Event('input', { bubbles: true })); }); }
 const reg = (no: string, amount: number) => { let n = 0; store.value.state = applyMistCommand(store.value.state, { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: no, invoiceDate: day, currency: 'CNY', amount, taxAmount: 0, lines: [{ purchaseId: po.id, amount }], due: day, dueBasis: '测试' } } as any, { id: () => no + '-' + (++n), now: new Date().toISOString(), actorName: '财务' } as any).state; };
 /** 主管在审批收件箱批准（服务端审批入口，界面外）。 */
-const approve = (id: string) => { store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.decide', payload: { id, decision: 'approved', note: '核对后同意' } } as any, { id: () => 'decide-' + id, now: new Date().toISOString(), actorName: '主管', actorId: 'manager', authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any).state; };
+const approve = (id: string) => { for (let level = 0; level < 3 && store.value.state.payables?.requests?.find((r: any) => r.id === id)?.state === 'pending'; level++) { const r: any = store.value.state.payables.requests.find((x: any) => x.id === id), signed = (r.approvals || []).map((a: any) => a.actorId), who = r.tier.levels.find((l: any) => !(r.approvals || []).some((a: any) => a.level === l.level)).reviewerIds.find((x: string) => !signed.includes(x)); store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.decide', payload: { id, decision: 'approved', note: '核对后同意' } } as any, { id: () => 'decide-' + level + '-' + id, now: new Date().toISOString(), actorName: who === 'director' ? '总经理' : '主管', actorId: who, authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any).state; } };
 const dialog = (name: string) => getByRole(document.body, 'dialog', { name });
 
 it('票据付款：先申请并经主管批准，再按批准登记实付；分配错误可冲回后重新分配', async () => {
@@ -120,7 +120,7 @@ it('票据付款：先申请并经主管批准，再按批准登记实付；分�
   text('付款依据', '两张票均已到期，按合同 30 天付款');
   await click('提交审批', dialog('申请票据付款'));
   const req = store.value.state.payables.requests[0];
-  expect(req).toMatchObject({ state: 'pending', amount: 400, reviewerIds: ['manager'] });
+  expect(req).toMatchObject({ state: 'pending', amount: 400, reviewerIds: ['manager', 'director'] });
   route = { view: 'payment-vouchers', section: 'payables', id: req.id }; render();
   expect(host.textContent).toContain('等待主管审批'); expect(queryAllByRole(host, 'button', { name: '登记实付' })).toHaveLength(0);
   approve(req.id); render();
@@ -180,7 +180,7 @@ it('没有财务写权限：保留查看，隐藏登记和申请入口', async (
 
 function approvedBillRequest() {
   reg('PERMISSION-VAT', 100); const bill = store.value.state.payables.bills[0];
-  store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: po.supplierId, currency: 'CNY', lines: [{ billId: bill.id, amount: 100 }], reason: '到期' } } as any, { id: () => 'perm-req', now: new Date().toISOString(), actorName: '业务', actorId: 'sales', authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any).state;
+  store.value.state = applyMistCommand(store.value.state, { type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: po.supplierId, currency: 'CNY', lines: [{ billId: bill.id, amount: 100 }], reason: '到期' } } as any, { id: () => 'perm-req', now: new Date().toISOString(), actorName: '业务', actorId: 'sales', authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any).state;
   approve('perm-req'); return { bill, request: store.value.state.payables.requests[0] };
 }
 it('只有付款登记权限、没有核销权时，隐藏票据复合付款入口', async () => {
@@ -200,7 +200,7 @@ it('打开登记实付后失去核销权限，不能提交附带分配的复合�
   expect(document.body.textContent).toContain('没有办理此项财务动作的权限');
 });
 
-const as = (actorId: string, actorName: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${command.type}-${++n}-${Math.random()}`, now: new Date().toISOString(), actorName, actorId, authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any); store.value.state = r.state; return r.result; };
+const as = (actorId: string, actorName: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${command.type}-${++n}-${Math.random()}`, now: new Date().toISOString(), actorName, actorId, authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any); store.value.state = r.state; return r.result; };
 
 it('结算：业务员按收货提交，财务确认预付抵扣（与建议不同须写原因），再按结算登记票据，应付扣除预付', async () => {
   as('finance', '财务', { type: 'payable.plan.register', payload: { purchaseId: po.id, amount: 33480, trigger: '合同签订后 7 天内', basis: '合同第 5 条' } });
@@ -352,7 +352,7 @@ it('短交最终结算后剩余预付：在结算详情登记退款，可冲回'
   expect(store.value.state.payables.prepaymentMoves[0].reversed).toMatchObject({ reason: '流水录错' });
 });
 
-const actAs = (actorId: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${Date.now()}-${++n}`, now: new Date().toISOString(), actorName: actorId, actorId, authority: { supplier: {}, paymentReviewerIds: ['manager'] } } as any); store.value.state = r.state; return r.result as any; };
+const actAs = (actorId: string, command: any) => { let n = 0; const r = applyMistCommand(store.value.state, command, { id: () => `${actorId}-${Date.now()}-${++n}`, now: new Date().toISOString(), actorName: actorId, actorId, authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as any); store.value.state = r.state; return r.result as any; };
 
 it('不等票付款：已确认结算可写明未收票原因申请先付，经批准登记后显示已付未收票', async () => {
   const receipt = store.value.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
@@ -531,4 +531,11 @@ it('prefills the prepayment plan from a stated percentage in the contract terms 
  expect(termsPrepayment({quantity:500,price:452,terms:'定金 20%，出运前付清'})).toBe('45200');
  expect(termsPrepayment({quantity:6600,price:0.08,terms:'月结 30 天'})).toBe('');
  expect(termsPrepayment({quantity:10,price:3,terms:'150% 预付'})).toBe('');
+});
+
+it('税基被掩码时票据详情的税额与税率都显示“已隐藏”，价税合计照常', () => {
+ const added = applyMistCommand(store.value.state, { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'MASK-01', invoiceDate: day, currency: 'CNY', amount: 1130, taxAmount: 130, taxRate: '13%', lines: [{ purchaseId: po.id, amount: 1130 }], due: day, dueBasis: '按合同' } } as any, ctx);
+ store.value.state = { ...added.state, payables: { ...added.state.payables, bills: added.state.payables.bills.map((b: any) => ({ ...b, taxAmount: 0, taxRate: '', taxMasked: true })) } };
+ route.id = added.result.id!; render();
+ expect(host.textContent).toContain('已隐藏'); expect(host.textContent).not.toContain('13%'); expect(host.textContent).not.toContain('未填写');
 });

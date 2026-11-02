@@ -11,7 +11,8 @@ const m = (key: string, label: string, read: string[], write: string[] = [], app
 export const JOB_AREAS: JobArea[] = [
   { label: '基础', modules: [
     m('workspace', '首页与个人设置', ['cockpit:read', 'dashboard:read', 'settings:account'], [], [], ['tools:execute']),
-    m('ai', 'AI 助手', ['ai:chat'], ['ai:write:low', 'ai:write:medium'], ['ai:write:high', 'agent:approvals:approve']),
+    // ai:write:high（高风险写入，付款/核销/审批，须复验密码）作专项：财务岗位可单独附加，不连带 Agent 审批权。
+    m('ai', 'AI 助手', ['ai:chat'], ['ai:write:low', 'ai:write:medium'], ['agent:approvals:approve'], ['ai:write:high']),
   ] },
   { label: '客户与市场', modules: [
     m('relations', '客户与联系人', ['relations:read'], ['relations:write', 'relations:delete'], ['relations:admin']),
@@ -74,6 +75,14 @@ export function setModuleLevel(module: JobModule, granted: readonly string[], le
   return [...new Set([...granted.filter(scope => !main.has(scope)), ...scopesUpTo(module, level)])];
 }
 
+/**
+ * 只作能力标签的审批权限码（口径 B1）：勾选不会让该岗位成为审批人，审批人由审批规则（部门主管路由、审批配置）决定。
+ * 与 server/src/auth/__tests__/danglingScopeConsumption.test.ts 中 reason='ui-label-only' 的登记一致。
+ */
+export const APPROVAL_LABEL_ONLY_SCOPES: readonly string[] = ['orders:approve:change_delivery', 'orders:approve:change_qty', 'orders:approve:change_price', 'orders:approve:cancel', 'shipments:approve', 'knowledge:approve', 'invoices:approve:writeoff'];
+export const APPROVAL_LABEL_ONLY_NOTE = '该权限不控制审批人，审批人由审批规则决定';
+export const labelOnlyApprovals = (module: JobModule) => module.approve.filter(scope => APPROVAL_LABEL_ONLY_SCOPES.includes(scope));
+
 /** 写权限还要求任职部门具备相应业务属性（与服务端 departmentAuthorization 同口径）。 */
 export const DEPARTMENT_GATES: Array<{ scopes: string[]; attributes: string[]; label: string }> = [
   { scopes: ['orders:write', 'orders:delete', 'products:write'], attributes: ['fabric_business', 'garment_business'], label: '面料业务或成衣业务' },
@@ -89,12 +98,15 @@ const build = (levels: Levels, extra: string[] = []) => [...new Set([...JOB_MODU
 const BASICS: Levels = { workspace: 'read', ai: 'read' };
 const VIEW_ALL: Levels = Object.fromEntries(JOB_MODULES.filter(module => module.read.length && !['hr', 'users', 'settings', 'audit'].includes(module.key)).map(module => [module.key, 'read']));
 
-/** 新建岗位时可参照的外贸服装公司常见岗位；只是起点，保存的是勾选后的权限。 */
+/**
+ * 新建岗位时可参照的外贸服装公司常见岗位；只是起点，保存的是勾选后的权限。
+ * 出纳、会计附加 sensitive:tax_base：没有它时，存在退税到账流水的公司会对其隐藏银行账户与国库到账（见 server/src/mist/access.ts maskTaxBase），且会计办理退税申报本就需要计税依据。
+ */
 export const JOB_TEMPLATES: Array<{ id: string; name: string; permissions: string[] }> = [
-  { id: 'merchandiser', name: '跟单员', permissions: build({ ...BASICS, relations: 'read', crm: 'read', suppliers: 'read', emails: 'write', products: 'write', quotations: 'read', orders: 'write', procurement: 'write', production: 'write', qc: 'read', inventory: 'write', shipments: 'read', customs: 'read', finance: 'read', aftersales: 'write', knowledge: 'read' }, ['order:change_request:create', 'finance:payment_request:create']) },
-  { id: 'documents', name: '单证报关', permissions: build({ ...BASICS, relations: 'read', suppliers: 'read', emails: 'write', orders: 'read', procurement: 'read', production: 'read', inventory: 'read', shipments: 'write', customs: 'write', finance: 'read', tax: 'read', knowledge: 'read' }, ['logistics:handle', 'customs:clear']) },
-  { id: 'cashier', name: '出纳', permissions: build({ ...BASICS, relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', finance: 'write', tax: 'read' }) },
-  { id: 'accountant', name: '会计', permissions: build({ ...BASICS, relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', shipments: 'read', customs: 'read', finance: 'write', tax: 'write', bom: 'read', reports: 'read' }, ['fx:lock']) },
+  { id: 'merchandiser', name: '跟单员', permissions: build({ ...BASICS, ai: 'write', relations: 'read', crm: 'read', suppliers: 'read', emails: 'write', products: 'write', quotations: 'read', orders: 'write', procurement: 'write', production: 'write', qc: 'read', inventory: 'write', shipments: 'read', customs: 'read', finance: 'read', aftersales: 'write', knowledge: 'read' }, ['order:change_request:create', 'finance:payment_request:create']) },
+  { id: 'documents', name: '单证报关', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', emails: 'write', orders: 'read', procurement: 'read', production: 'read', inventory: 'read', shipments: 'write', customs: 'write', finance: 'read', tax: 'read', knowledge: 'read' }, ['logistics:handle', 'customs:clear']) },
+  { id: 'cashier', name: '出纳', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', finance: 'write', tax: 'read' }, ['ai:write:high', 'sensitive:tax_base']) },
+  { id: 'accountant', name: '会计', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', shipments: 'read', customs: 'read', finance: 'write', tax: 'write', bom: 'read', reports: 'read' }, ['fx:lock', 'ai:write:high', 'sensitive:tax_base']) },
   { id: 'hr-admin', name: '人事行政', permissions: build({ ...BASICS, emails: 'write', hr: 'write', users: 'read', knowledge: 'read' }) },
   { id: 'viewer', name: '只读查看', permissions: build({ ...VIEW_ALL }) },
 ];

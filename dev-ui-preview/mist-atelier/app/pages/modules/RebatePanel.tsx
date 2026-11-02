@@ -14,6 +14,15 @@ import { EXPORT_REBATE_RATES } from '../../runtime/tradeOptions';
 
 type Run = (command: MistCommand) => Promise<unknown>;
 const cny = (value: number) => `${fmt(value, 2)} CNY`;
+/** 无 sensitive:tax_base 的账号：服务端已把计税金额与税额置零，这里显示“已隐藏”，不显示 0。 */
+const MASKED = '已隐藏';
+/** 退税金额可读程度：无 tax:read 整段不下发（无权查看）；无 sensitive:tax_base 时金额被服务端置零（已隐藏）。 */
+export type RebateAccess = 'full' | 'masked' | 'denied';
+export const REBATE_ACCESS_TEXT: Record<Exclude<RebateAccess, 'full'>, string> = { masked: MASKED, denied: '无权查看' };
+export function rebateAccess(state: MistState, hidden?: ReadonlyArray<{ key: string }>): RebateAccess {
+  if (hidden?.some(section => section.key === 'exportRebate')) return 'denied';
+  return state.exportRebate?.claims?.some(c => c.taxMasked) || state.payables?.bills?.some(b => b.taxMasked) ? 'masked' : 'full';
+}
 export const REBATE_TONE: Record<RebateClaim['state'], Tone> = { filed: 'accent', approved: 'warn', received: 'ok', withdrawn: 'neutral' };
 
 /** 列表用的一行摘要：已申报显示状态与应退额；未申报显示可配专票数。 */
@@ -49,14 +58,16 @@ export function RebateRatesCard({ state, canWrite, locked, open, run }: { state:
   </Card>;
 }
 
-export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, locked, open, run, onBill, onReceipt }: {
-  state: MistState; customs: FulfillmentCustoms; canWrite: boolean; canReconcile: boolean; locked: boolean; open: (spec: ModuleEditorSpec) => void; run: Run; onBill?: (id: string) => void; onReceipt?: (id: string) => void;
+export function RebateClaimBlock({ state, customs: c, canWrite, canApprove = false, canReconcile, locked, open, run, onBill, onReceipt }: {
+  state: MistState; customs: FulfillmentCustoms; canWrite: boolean; canApprove?: boolean; canReconcile: boolean; locked: boolean; open: (spec: ModuleEditorSpec) => void; run: Run; onBill?: (id: string) => void; onReceipt?: (id: string) => void;
 }) {
   const { claim, candidates, exportDate, rate, plan, byItems, preview } = rebateSummary(state, c);
   const billPlan = (id: string) => plan?.bills.find(r => r.bill.id === id);
   const rateText = byItems ? (plan?.rates.length ? `按商品项：${[...new Set(plan.rates.map(r => r.rate + '%'))].join(' / ')}` : '按商品项（待登记）') : rate ? `${rate.rate}% · ${rate.effectiveFrom} 起` : '未登记';
   if (!claim) {
-    const reason = !canWrite ? '需要财务开票权限' : c.status !== 'cleared' ? '报关单尚未海关放行' : !exportDate ? '出运尚未登记实际离港（出口日期）' : !candidates.length ? '暂无可配专票，请先核对供应商票据' : plan?.blockers.length ? plan.blockers[0] : false;
+    // 专票税额已按 sensitive:tax_base 隐藏时无法核对计税金额，不提供配单入口（服务端同样按完整数据重新计算）。
+    const masked = !!state.payables?.bills?.some(b => b.taxMasked);
+    const reason = !canWrite ? '需要退税申报权限' : masked ? '需要「税基查看」权限才能核对专票计税金额' : c.status !== 'cleared' ? '报关单尚未海关放行' : !exportDate ? '出运尚未登记实际离港（出口日期）' : !candidates.length ? '暂无可配专票，请先核对供应商票据' : plan?.blockers.length ? plan.blockers[0] : false;
     const fileSpec: ModuleEditorSpec = { title: '登记退税申报', submitLabel: '登记申报',
       description: `${c.declarationNo} · ${cny(preview)}`,
       fields: [...candidates.map(b => { const r = billPlan(b.id); return { ...field('bill:' + b.id, `${b.invoiceNo} · ${b.supplier} · 计税 ${cny((r?.taxable ?? rebateBillTaxableMinor(b)) / 100)} → 退 ${cny((r?.rebate ?? 0) / 100)}${r?.excluded ? `（${cny(r.excluded / 100)} 不在商品项中不计）` : ''}`, 'checkbox', false) }; }),
@@ -81,16 +92,16 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
       <ActionBar busy={locked} actions={[{ label: '登记退税申报', icon: Receipt, primary: true, onClick: () => open(fileSpec), hidden:!canWrite, reason: reason }] as ReasonedAction[]} />
     </DetailBlock>;
   }
-  const totals = rebateClaimTotals(claim), live = claim.receipts.filter(r => !r.reversed);
+  const totals = rebateClaimTotals(claim), live = claim.receipts.filter(r => !r.reversed), masked = !!claim.taxMasked, amount = (value: number) => masked ? MASKED : cny(value);
   const receipts = state.receipts.filter(r => r.currency === 'CNY' && r.remaining > 0);
-  const approveSpec: ModuleEditorSpec = { title: '登记税务核准', submitLabel: '登记核准', description: `${claim.code} · 应退 ${cny(claim.expected)}`,
+  const approveSpec: ModuleEditorSpec = { title: '登记税务核准', submitLabel: '登记核准', description: `${claim.code} · 应退 ${amount(claim.expected)}`,
     fields: [field('date', '核准日', 'date'), field('amount', '核准退税额（CNY）', 'number'), field('ref', '审核通知 / 批复文号'), field('reason', '差异原因（核准额不同时必填）', 'textarea', false)],
-    initialValues: { date: today(), amount: claim.expected, ref: '', reason: '' },
+    initialValues: { date: today(), amount: masked ? '' : claim.expected, ref: '', reason: '' },
     submit: v => run({ type: 'rebate.claim.approve', payload: { id: claim.id, date: text(v, 'date'), amount: number(v, 'amount'), ref: text(v, 'ref'), reason: text(v, 'reason') } }) };
-  const receiveSpec: ModuleEditorSpec = { title: '退税到账勾稽', submitLabel: '勾稽到账', description: `${claim.code} · 待到账 ${cny(totals.open)}`,
+  const receiveSpec: ModuleEditorSpec = { title: '退税到账勾稽', submitLabel: '勾稽到账', description: `${claim.code} · 待到账 ${amount(totals.open)}`,
     fields: [field('receiptId', '到账流水（人民币）', 'select', true, [emptyOption, ...receipts.map(r => ({ value: r.id, label: `${r.code} · ${r.date.slice(0, 10)} · ${r.payer} · 余 ${cny(r.remaining)}` }))]), field('amount', '勾稽金额（CNY）', 'number'),
       { ...field('settle', '少收也按本次结清', 'checkbox', false), hint: '税务机关扣抵等原因到账少于核准额时勾选，并写明原因。' }, field('reason', '少收原因', 'textarea', false)],
-    initialValues: { receiptId: '', amount: totals.open, settle: false, reason: '' },
+    initialValues: { receiptId: '', amount: masked ? '' : totals.open, settle: false, reason: '' },
     submit: v => run({ type: 'rebate.claim.receive', payload: { id: claim.id, receiptId: text(v, 'receiptId'), amount: number(v, 'amount'), settle: v.settle === true, ...(text(v, 'reason') ? { reason: text(v, 'reason') } : {}) } }) };
   const withdrawSpec: ModuleEditorSpec = { title: '撤回退税申报', submitLabel: '撤回', description: `${claim.code} · 释放专票与报关单`, fields: [field('reason', '撤回原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'rebate.claim.withdraw', payload: { id: claim.id, reason: text(v, 'reason') } }) };
@@ -102,31 +113,32 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canReconcile, lo
       { label: '申报', value: `${claim.code} · ${claim.batchRef}` },
       { label: '申报日 / 出口日期', value: `${claim.filedAt} / ${claim.exportDate}` },
       { label: '文库退税率', value: claim.byItems ? `按商品项 ${claim.rate}%（HS ${claim.hsCode}）` : `${claim.rate}%（HS ${claim.hsCode}）` },
-      { label: '计税金额', value: cny(claim.taxable) },
-      { label: '应退税额', value: cny(claim.expected) },
-      { label: '核准退税额', value: claim.approved ? `${cny(claim.approved.amount)} · ${claim.approved.ref}` : '待税务审核' },
-      { label: '已到账', value: cny(totals.received) },
-      { label: '待到账', value: done ? '已结清' : cny(totals.open) },
+      { label: '计税金额', value: amount(claim.taxable) },
+      { label: '应退税额', value: amount(claim.expected) },
+      { label: '核准退税额', value: claim.approved ? `${amount(claim.approved.amount)} · ${claim.approved.ref}` : '待税务审核' },
+      { label: '已到账', value: amount(totals.received) },
+      { label: '待到账', value: done ? '已结清' : amount(totals.open) },
     ]} />
     {claim.approved?.reason && <p className="mist-sub">{uiText("核准差异：")}{claim.approved.reason}</p>}
-    {claim.settled && <p className="mist-sub">{uiText("少收结清：")}{claim.settled.reason}{uiText("（较应退 ")}{cny(totals.difference)}）</p>}
+    {claim.settled && <p className="mist-sub">{uiText("少收结清：")}{claim.settled.reason}{masked ? null : <>{uiText("（较应退 ")}{cny(totals.difference)}）</>}</p>}
     <DataTable ariaLabel={ui`${claim.code} 配单专票`} rows={claim.lines} rowKey={l => l.billId} columns={[
       { key: 'no', header: '专票', render: l => onBill ? <TextLink onClick={() => onBill(l.billId)}>{l.invoiceNo}</TextLink> : <Mono>{l.invoiceNo}</Mono> },
       { key: 'supplier', header: '供应商', hideOnMobile: true, render: l => l.supplier },
-      { key: 'taxable', header: '计税金额', align: 'right', render: l => cny(l.taxable) },
+      { key: 'taxable', header: '计税金额', align: 'right', render: l => claim.taxMasked ? MASKED : cny(l.taxable) },
       {key:'inputTax',header:'对应进项税额',align:'right',hideOnMobile:true,render:l=>l.inputTaxCap===undefined?'—':cny(l.inputTaxCap)},
-      {key:'rebate',header:'申报税额',align:'right',render:l=><span className="mist-col">{cny(l.rebate)}{l.taxLimited&&<Pill>{uiText('进项封顶')}</Pill>}</span>},
+      {key:'rebate',header:'申报税额',align:'right',render:l=><span className="mist-col">{claim.taxMasked ? MASKED : cny(l.rebate)}{l.taxLimited&&<Pill>{uiText('进项封顶')}</Pill>}</span>},
       ...(claim.byItems ? [{ key: 'parts', header: '商品项明细', render: (l: typeof claim.lines[number]) => <span className="mist-sub">{(l.parts || []).map(x => `第 ${x.itemNo} 项 ${x.hsCode} · ${x.rate}% · 计税 ${fmt(x.taxable, 2)} → ${fmt(x.rebate, 2)}`).join('；')}{uiText(l.excluded ? `；不在商品项 ${fmt(l.excluded, 2)} 不计` : '')}</span> }] : []),
     ]} />
     {claim.receipts.length > 0 && <DataTable ariaLabel={ui`${claim.code} 到账勾稽`} rows={claim.receipts} rowKey={r => r.id} columns={[
-      { key: 'receipt', header: '到账流水', render: r => onReceipt ? <TextLink onClick={() => onReceipt(r.receiptId)}>{r.receiptCode}</TextLink> : <Mono>{r.receiptCode}</Mono> },
+      { key: 'receipt', header: '到账流水', render: r => onReceipt && r.receiptId ? <TextLink onClick={() => onReceipt(r.receiptId)}>{r.receiptCode}</TextLink> : <Mono>{r.receiptCode}</Mono> },
       { key: 'date', header: '到账日', render: r => r.date },
-      { key: 'amount', header: '金额', align: 'right', render: r => r.reversed ? <span className="mist-muted"><s>{cny(r.amount)}</s>{uiText(" 已冲回")}</span> : cny(r.amount) },
+      { key: 'amount', header: '金额', align: 'right', render: r => r.reversed ? <span className="mist-muted"><s>{amount(r.amount)}</s>{uiText(" 已冲回")}</span> : amount(r.amount) },
       ...(canReconcile ? [{ key: 'act', header: '', width: '72px', align: 'right' as const, render: (r: RebateClaim['receipts'][number]) => !r.reversed ? <TextLink icon={RotateCcw} onClick={() => { if (!locked) open(reverseSpec(r.id, r.receiptCode)); }}>{uiText("冲回")}</TextLink> : null }] : []),
     ]} />}
     {claim.state !== 'withdrawn' && <ActionBar busy={locked} actions={[
-      { label: '登记税务核准', icon: BadgeCheck, primary: claim.state === 'filed', onClick: () => open(approveSpec), reason: false, hidden: !canWrite||claim.state !== 'filed' },
-      { label: '勾稽到账', icon: Landmark, primary: claim.state === 'approved', onClick: () => open(receiveSpec), reason: !receipts.length ? '没有未分配的人民币到账流水，请先导入退税到账水单' : false, hidden: !canReconcile||done },
+      // 计税依据被隐藏时服务端拒绝核准与勾稽（须 sensitive:tax_base），与申报入口一致不提供入口。
+      { label: '登记税务核准', icon: BadgeCheck, primary: claim.state === 'filed', onClick: () => open(approveSpec), reason: false, hidden: masked||!canApprove||claim.state !== 'filed' },
+      { label: '勾稽到账', icon: Landmark, primary: claim.state === 'approved', onClick: () => open(receiveSpec), reason: !receipts.length ? '没有未分配的人民币到账流水，请先导入退税到账水单' : false, hidden: masked||!canReconcile||done },
       { label: '撤回申报', icon: Undo2, onClick: () => open(withdrawSpec), reason: live.length ? '已有到账勾稽，请先冲回' : false, hidden: !canWrite||done },
     ] as ReasonedAction[]} />}
     {claim.withdrawn && <span className="mist-note">{uiText("已撤回：")}{claim.withdrawn.reason}</span>}

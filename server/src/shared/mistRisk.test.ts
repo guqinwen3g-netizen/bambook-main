@@ -175,8 +175,8 @@ describe('高风险关闭、豁免、带风险放行走部门主管审批，结�
 });
 
 describe('权限', () => {
-  it('直接答复命令须 risk:admin 兜底（正常经统一审批中心）；其余命令以风险读权限进入，处理权在命令内核验', () => {
-    expect(platformCommandPermission({ type: 'platform.risk.decide', payload: { id: 'x', escalationId: 'e', decision: 'approved', note: 'n' } } as any)).toBe('risk:admin');
+  it('答复命令与统一审批中心同一门槛 risk:write；其余命令以风险读权限进入，处理权在命令内核验', () => {
+    expect(platformCommandPermission({ type: 'platform.risk.decide', payload: { id: 'x', escalationId: 'e', decision: 'approved', note: 'n' } } as any)).toBe('risk:write');
     for (const type of ['platform.risk.save', 'platform.risk.transition', 'platform.risk.plan', 'platform.risk.escalate', 'platform.risk.withdraw']) expect(platformCommandPermission({ type, payload: {} } as any)).toBe('risk:read');
   });
   it('没有服务端重建的处理权时一律拒绝', () => {

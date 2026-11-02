@@ -21,14 +21,14 @@ export const accountLabel = (a: MistBankAccount) => `${a.name} · ${a.bankName} 
 export function useBankAccountCommand() {
   const { run, loading, saving, pending } = useMistWorkspace(), session = useMistSession();
   const [working, setWorking] = React.useState(false), [failure, setFailure] = React.useState('');
-  const busy = working || loading || saving || !!pending, canWrite = session.hasPermission(MIST_FINANCE_SCOPES.voucher);
+  const busy = working || loading || saving || !!pending, canWrite = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canLock = session.hasPermission('fx:lock');
   const execute = async (command: MistCommand, done: () => void) => {
     const permission = mistCommandPermission(command);
     if (permission && !session.hasPermission(permission as any)) { setFailure('没有办理此项财务动作的权限。'); return; }
     if (busy) return; setWorking(true); setFailure('');
     try { await run(command); done(); } catch (problem) { setFailure(problem instanceof Error ? problem.message : '操作失败，请重试'); } finally { setWorking(false); }
   };
-  return { execute, busy, failure, setFailure, canWrite };
+  return { execute, busy, failure, setFailure, canWrite, canLock };
 }
 
 type AccountDraft = { id?: string; name: string; bankName: string; accountNo: string; currency: string; openingDate: string; openingBalance: string };
@@ -102,7 +102,8 @@ const amountOk = (v: string) => /^\d+(\.\d{1,2})?$/.test(v.trim()) && Number(v) 
 
 /** 锁汇：登记银行远期合同；结汇：按银行水单登记卖出原币与入账本币，汇率由实际金额得出。 */
 export function FxDialog({ state, draft, onClose }: { state: MistState; draft: FxDraft; onClose: () => void }) {
-  const { execute, busy, failure, canWrite } = useBankAccountCommand(), toast = useToast();
+  const { execute, busy, failure, canWrite: canVoucher, canLock } = useBankAccountCommand(), toast = useToast();
+  const canWrite = draft.kind === 'lock' ? canLock : canVoucher;
   const [form, setForm] = React.useState(draft), [local, setLocal] = React.useState(''), [links, setLinks] = React.useState<Links>({});
   const set = (key: keyof FxDraft) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [key]: e.target.value });
   const accounts = state.bankAccounts || [], from = accounts.find(a => a.id === form.fromAccountId), to = accounts.find(a => a.id === form.toAccountId);

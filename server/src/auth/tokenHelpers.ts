@@ -70,7 +70,7 @@ export function serializeAuthUser(user: any, roles: AgentRole[], permissions: st
     departmentIds: departmentIds.length ? departmentIds : [user.primaryDeptId || 'company'],
     department: user.primaryDepartment?.name || null,
     // 管理员重置密码后，本人改密前前端须先引导修改（标记由 /auth/change-password 清除）。
-    ...((user.metadata as any)?.forceChangePassword === true ? { mustChangePassword: true } : {}),
+    ...((user.metadata as any)?.forceChangePassword === true ? { mustChangePassword: true, passwordChangeReason: ['initial', 'invite'].includes((user.metadata as any)?.forceChangeReason) ? 'initial' : 'reset' } : {}),
     ...departmentAuthorization(user, extra?.newRoleIds || [], permissions),
   };
 }

@@ -22,8 +22,10 @@ export interface AuthUser {
   permissionCeiling?: string[];
   departmentIds: string[];
   department: string | null;
-  /** 管理员重置密码后为 true：须先修改密码才能继续使用。 */
+  /** 首次登录（初始密码）或管理员重置密码后为 true：须先修改密码才能继续使用。 */
   mustChangePassword?: boolean;
+  /** 强制改密的原因：initial = 首次登录，reset = 管理员重置。 */
+  passwordChangeReason?: 'initial' | 'reset';
   /** 平台管理员当前选择的公司。 */
   platformCompany?: { companyId: string; companyName: string; startedAt: string };
 }
@@ -341,7 +343,16 @@ export async function registerJoinCompany(input: SelfRegistrationAccount & ({ co
   return { company: data.company, email: data.email };
 }
 
-export async function login(identifier: string, password: string, companyId?: string, entry: 'company' | 'platform' = 'company'): Promise<AuthUser> {
+/**
+ * 保存服务端签发的令牌：保持登录写 localStorage（跨浏览器重启），否则只写 sessionStorage（关闭浏览器即清除）。
+ * 与服务端 Cookie 的持久 / 会话属性一一对应。
+ */
+function storeAuthToken(token: string, remember: boolean): void {
+  try { if (remember) localStorage.setItem(AUTH_TOKEN_KEY, token); else localStorage.removeItem(AUTH_TOKEN_KEY); } catch { /* storage restrictions */ }
+  try { sessionStorage.setItem(AUTH_TOKEN_KEY, token); } catch { /* storage restrictions */ }
+}
+
+export async function login(identifier: string, password: string, companyId?: string, entry: 'company' | 'platform' = 'company', remember = true): Promise<AuthUser> {
   const epoch = ++authMutationEpoch;
   const base = getAuthApiBase();
   const initialToken = getStoredAuthToken();
@@ -354,7 +365,7 @@ export async function login(identifier: string, password: string, companyId?: st
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email: identifier, identifier, password, entry, ...(companyId ? { companyId } : {}) }),
+      body: JSON.stringify({ email: identifier, identifier, password, entry, remember, ...(companyId ? { companyId } : {}) }),
     }, { fallbackToOmitCredentials: true });
     data = await readJsonResponse(res);
   } catch (error) {
@@ -377,10 +388,7 @@ export async function login(identifier: string, password: string, companyId?: st
     throw err;
   }
   if (data.mfaRequired) throw new Error('登录服务版本未更新，请刷新页面后重试或联系管理员');
-  if (data.token) {
-    localStorage.setItem(AUTH_TOKEN_KEY, data.token);
-    sessionStorage.setItem(AUTH_TOKEN_KEY, data.token);
-  }
+  if (data.token) storeAuthToken(data.token, remember);
   const user = normalizeAuthUser(data.user);
   currentState = { user, isLoading: false, isAuthenticated: true };
   cacheAuthUser(user);
@@ -463,10 +471,45 @@ export async function changePassword(currentPassword: string, newPassword: strin
   // 服务器改密后让其他设备的旧会话失效，并为当前设备换发新令牌：沿用原来的存放位置（“保持登录”与否不变）。
   if (typeof data.token === 'string' && data.token) {
     authMutationEpoch += 1;
-    let remembered = false;
-    try { remembered = !!localStorage.getItem(AUTH_TOKEN_KEY); if (remembered) localStorage.setItem(AUTH_TOKEN_KEY, data.token); } catch { /* storage restrictions */ }
-    try { sessionStorage.setItem(AUTH_TOKEN_KEY, data.token); } catch { /* storage restrictions */ }
+    storeAuthToken(data.token, tokenIsRemembered());
   }
+}
+
+function tokenIsRemembered(): boolean {
+  try { return !!localStorage.getItem(AUTH_TOKEN_KEY); } catch { return false; }
+}
+function tokenClaims(token: string): { iat?: number; exp?: number } | null {
+  try {
+    const part = token.split('.')[1]; if (!part) return null;
+    const value = JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+    return value && typeof value === 'object' ? value : null;
+  } catch { return null; }
+}
+let renewal: Promise<boolean> | null = null;
+/**
+ * 使用中滑动续期：令牌已用过约一天（或会话令牌用过一半）时向服务端换发，最多每次请求一个。
+ * 服务端重新核验账号状态与凭据代次，续期不能复活已停用 / 改密 / 重置后的旧令牌；被拒时按会话失效处理。
+ * 换发只替换同一会话的令牌，不改变当前账号与权限，因此页面状态保持不变。
+ */
+export function renewSessionIfDue(): Promise<boolean> {
+  if (renewal) return renewal;
+  const token = getStoredAuthToken(), claims = token ? tokenClaims(token) : null;
+  if (!currentState.isAuthenticated || !claims || typeof claims.iat !== 'number' || typeof claims.exp !== 'number') return Promise.resolve(false);
+  const now = Date.now() / 1000, lifetime = claims.exp - claims.iat;
+  if (now - claims.iat < Math.min(24 * 3600, lifetime / 2)) return Promise.resolve(false);
+  const epoch = authMutationEpoch, base = getAuthApiBase(), remember = tokenIsRemembered();
+  renewal = (async () => {
+    try {
+      const res = await fetchAuth('/auth/refresh', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, credentials: 'include' }, { fallbackToOmitCredentials: true });
+      if (epoch !== authMutationEpoch || base !== getAuthApiBase() || token !== getStoredAuthToken()) return false;
+      const data = await readJsonResponse(res).catch(() => ({}));
+      if (res.ok && typeof data.token === 'string' && data.token) { storeAuthToken(data.token, remember); return true; }
+      if (res.status === 401) await checkAuth();
+      return false;
+    } catch { return false; }
+    finally { renewal = null; }
+  })();
+  return renewal;
 }
 
 /** 退出所有设备：服务器使此前签发的全部令牌失效（含当前会话），随后需重新登录。 */
