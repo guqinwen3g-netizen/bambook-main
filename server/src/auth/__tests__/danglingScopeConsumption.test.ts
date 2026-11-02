@@ -90,25 +90,14 @@ const REASONS: readonly Reason[] = ['module-absent', 'no-scope-enforcement', 'ui
  */
 const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   // ── 功能整体未实现（无对应模块目录）──
-  { scope: 'tax:read', reason: 'module-absent', note: '无 tax 域模块目录' },
   // Approval UI capability labels may be consumed by conditional rendering;
   // that still does not replace the native approval policy gate.
-  { scope: 'tax:write', reason: 'module-absent', note: '无 tax 域模块目录' },
-  { scope: 'tax:approve', reason: 'module-absent', note: '无 tax 域模块目录（退税审批实际走别处，未用本码）' },
-  { scope: 'fx:lock', reason: 'module-absent', note: '无 fx 域模块目录（锁汇功能未实现）' },
   { scope: 'settings:account', reason: 'module-absent', note: '公司管理员授权清单含此码（companyAdministration），但无页面或接口按它判定' },
-  { scope: 'sensitive:tax_base', reason: 'module-absent', note: '敏感掩码域只有 bom/dashboard/finance/pricing，无 tax_base 掩码' },
 
   // ── 功能存在，但无 scope 强制点 ──
   { scope: 'dashboard:read', reason: 'no-scope-enforcement', note: '首页按 cockpit:read 判定；公司管理员授权清单中的 dashboard:read 无判定点' },
-  { scope: 'users:read', reason: 'no-scope-enforcement', note: '后台管理走 requireRole（admin/route.ts）；公司管理员授权清单中的 users:read 无判定点' },
-  { scope: 'knowledge:admin', reason: 'no-scope-enforcement', note: '数据中心管理未按本码把关' },
-  { scope: 'audit:export', reason: 'no-scope-enforcement', note: '审计导出未按本码把关' },
-  { scope: 'moq:capsule_exemption:write', reason: 'no-scope-enforcement', note: 'moq 模块存在，胶囊豁免写未按本码把关（另有 settings:moq:write / moq:line_override 已接通）' },
-  { scope: 'quotations:convert', reason: 'no-scope-enforcement', note: '报价转订单未按本码把关' },
 
   // ── *:admin 系列：只出现在 permissionGuard 的 WRITE_SCOPE_EXACT 高危分类集 ──
-  { scope: 'customs:admin', reason: 'no-scope-enforcement', note: '同上（单证模板/签章配置实际未按本码把关）' },
 
   // ── 审批类：设计上走审批策略内核（approvals/），未用 scope 门 ──
   { scope: 'orders:approve:change_delivery', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
@@ -428,6 +417,19 @@ describe('★ 专项：Mist 平台命令门禁消费的码', () => {
     ['ai:write:low', 'shared/mistAgentProposals.ts', "low: 'ai:write:low'"],
     ['ai:write:medium', 'shared/mistAgentProposals.ts', "medium: 'ai:write:medium'"],
     ['ai:write:high', 'shared/mistAgentProposals.ts', "high: 'ai:write:high'"],
+    // 2026-11 改码：退税命令改用 tax:*，锁汇改用 fx:lock（迁移说明见 docs/权限码迁移-退税与锁汇-2026-11.md）。
+    ['tax:read', 'mist/access.ts', "permissions: ['tax:read']"],
+    ['tax:write', 'shared/mistExportRebate.ts', "write: 'tax:write'"],
+    ['tax:approve', 'shared/mistExportRebate.ts', "approve: 'tax:approve'"],
+    // 2026-11 补判定点：后台只读、审计导出、知识库 ACL、报价转单、单证模板与印章、胶囊豁免。
+    ['users:read', 'admin/route.ts', "requirePermission(['users:read', 'users:admin'])"],
+    ['audit:export', 'admin/route.ts', "requirePermission('audit:export')"],
+    ['knowledge:admin', 'admin/route.ts', "requirePermission('knowledge:admin')"],
+    ['quotations:convert', 'shared/mistMarket.ts', "QUOTATION_CONVERT_SCOPE='quotations:convert'"],
+    ['customs:admin', 'customs/documentTemplateRoute.ts', "requirePermission('customs:admin')"],
+    ['moq:capsule_exemption:write', 'orders/orderServiceV2.ts', "hasScope(writeActor, 'moq:capsule_exemption:write')"],
+    ['sensitive:tax_base', 'mist/access.ts', "if (!hasScope(actor, 'sensitive:tax_base' as PermissionScope)) maskTaxBase(next);"],
+    ['fx:lock', 'shared/mistWorkspace.ts', "command.type==='finance.fx.lock'?'fx:lock'"],
     ['vouchers:approve:pay_lt5', 'shared/mistPayables.ts', "pay_lt5: 'vouchers:approve:pay_lt5'"],
     ['vouchers:approve:pay_gt5', 'shared/mistPayables.ts', "pay_gt5: 'vouchers:approve:pay_gt5'"],
     ['vouchers:approve:pay_new_supplier', 'shared/mistPayables.ts', "pay_new_supplier: 'vouchers:approve:pay_new_supplier'"],

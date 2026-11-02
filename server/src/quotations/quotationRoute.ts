@@ -691,7 +691,8 @@ export function createQuotationRouter(options: QuotationRouterOptions): Router {
   });
 
   // ── POST /:id/convert-to-order — 转为正式订单（Accepted → Order） ──
-  router.post('/:id/convert-to-order', requireWrite, requireQuotationWrite, async (req: Request, res: Response) => {
+  // 报价转订单另需报价转化权 quotations:convert（2026-11 补判定点；建单本身仍由转单服务按订单写权限把关）。
+  router.post('/:id/convert-to-order', requireWrite, requireQuotationWrite, requirePermission('quotations:convert'), async (req: Request, res: Response) => {
     try {
       const actor = (req as any).actor;
       // ★ A19（§9 B51）：`paymentInstrument` 也要能由转单界面覆盖 —— 不加进这里，

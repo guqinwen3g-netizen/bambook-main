@@ -665,6 +665,8 @@ const ADMIN_BASE: RolePermissionMatrix = {
   'customs:read': true,
   // 领导可代为登记清关完成（与后勤/单证同列；部门门禁仍要求后勤部门或总经理）
   'customs:clear': true,
+  // 2026-11 印章 / 签章配置写入改按 customs:admin 判定：管理员原本就能管理印章，补授本码保持原能力。
+  'customs:admin': true,
   'qc:read': true,
   'aftersales:read': true,
   'procurement:read': true,

@@ -90,6 +90,9 @@ export type MarketCommand =
  | {type:'market.lookbook.status';payload:{id:string;status:MarketLookbook['status']}};
 
 export function createMarketState(_context:MistContext,_rootState:Partial<MistState>):MarketState { return {products:[],suppliers:[],relations:[],seasons:[],trends:[],shows:[],campaigns:[],leads:[],quotations:[],lookbooks:[]}; }
+/** 报价转订单：建订单需 orders:write（主门禁），还须持有报价转化权 quotations:convert（2026-11 补判定点）。 */
+export const QUOTATION_CONVERT_SCOPE='quotations:convert';
+export const marketCommandExtraPermissions=(command:{type:string}):string[]=>command.type==='market.quotation.convert'?[QUOTATION_CONVERT_SCOPE]:[];
 export function marketCommandPermission(command:MarketCommand):string|null {
  // Restoring a hold must not let an archive editor bypass controlled shipment release.
  if(command.type==='market.relation.hold')return 'relations:admin';

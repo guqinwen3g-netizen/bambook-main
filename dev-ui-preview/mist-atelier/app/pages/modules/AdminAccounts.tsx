@@ -4,7 +4,7 @@ import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 管理后台 · 账号：公司成员身份只在这里新建或经注册审批产生（2026-10-08 决定）；岗位即权限角色，每人一个岗位，岗位权限仅老板可调整（2026-10-16 起），审计只读。 */
 import React from 'react';
-import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { Download, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Mono, Pill, Select, TextArea, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -306,10 +306,18 @@ export function AdminAuditLog() {
     finally { if (run === serial.current) setLoading(false); }
   }, [page, targetType]);
   React.useEffect(() => { void load(); return () => { serial.current++; }; }, [load, session.sessionKey]);
+  const [exporting, setExporting] = React.useState(false);
+  const exportCsv = async () => {
+    setExporting(true); setError('');
+    try { const blob = await organizationApi.exportAuditLogs({ targetType }); const url = URL.createObjectURL(blob), link = document.createElement('a'); link.href = url; link.download = `审计日志-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); }
+    catch (e) { setError(message(e, '审计日志导出未完成')); }
+    finally { setExporting(false); }
+  };
   return <>
     {error && <Banner tone="bad" title={uiText("审计日志读取失败")} actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
     <Toolbar right={<span className="mist-note">{uiText("共 ")}{total}{uiText(" 条 · 第 ")}{uiText(page + 1)} / {Math.max(1, Math.ceil(total / size))}{uiText(" 页")}</span>}>
       <Field label={uiText("对象")}><Select aria-label={uiText("审计对象")} value={targetType} onChange={e => { setPage(0); setTargetType(e.target.value); }} options={[{ value: '', label: '全部对象' }, ...Object.entries(AUDIT_TARGETS).map(([value, label]) => ({ value, label }))]} /></Field>
+      {session.hasPermission('audit:export') && <Button icon={Download} loading={exporting} disabled={loading || exporting} onClick={() => void exportCsv()}>{uiText("导出 CSV")}</Button>}
       <Button disabled={loading || page === 0} onClick={() => setPage(page - 1)}>{uiText("上一页")}</Button><Button disabled={loading || (page + 1) * size >= total} onClick={() => setPage(page + 1)}>{uiText("下一页")}</Button>
     </Toolbar>
     <Card><DataTable ariaLabel={uiText("审计日志")} rows={rows} rowKey={r => r.id} loading={loading} columns={[

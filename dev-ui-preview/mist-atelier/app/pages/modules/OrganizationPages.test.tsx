@@ -77,6 +77,20 @@ describe('管理后台 · 账号', () => {
     expect(table).toContain('ghost');
     expect(table).toContain('新建岗位');
   });
+  it('shows the audit CSV export only to audit:export holders and downloads from the export endpoint', async () => {
+    bridge.routes['GET /api/admin/audit-logs?limit=50&offset=0'] = () => ({ ok: true, total: 0, logs: [] });
+    bridge.perms = ['users:admin', 'audit:read'];
+    await render(CompanyAdminPage, 'admin-panel', 'audit');
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect([...document.querySelectorAll('button')].some(b => b.textContent === '导出 CSV')).toBe(false);
+    bridge.perms = ['users:admin', 'audit:read', 'audit:export'];
+    await render(CompanyAdminPage, 'admin-panel', 'audit');
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    const fetchMock = globalThis.fetch as any; fetchMock.mockImplementationOnce(async (url: string) => { bridge.calls.push({ method: 'GET', url, body: undefined }); return { ok: true, status: 200, blob: async () => new Blob(['csv']) }; });
+    (URL as any).createObjectURL = vi.fn(() => 'blob:x'); (URL as any).revokeObjectURL = vi.fn();
+    await click('导出 CSV');
+    expect(bridge.calls.some(c => c.url === '/api/admin/audit-logs/export')).toBe(true);
+  });
   it('keeps an account action failure visible inside its confirmation dialog', async () => {
     bridge.routes['GET /api/admin/users'] = () => ({ ok: true, departments, users: [{ id: 'u1', displayName: '张三', email: 'z@x.test', status: 'disabled', roles: ['业务员'], roleIds: ['role-sales'], departmentId: 'd1', department: '面料业务部', lastLoginAt: null, createdAt: '' }] });
     bridge.routes['PATCH /api/admin/users/u1'] = () => { throw new Error('请在人事管理中办理复职或返聘。'); };

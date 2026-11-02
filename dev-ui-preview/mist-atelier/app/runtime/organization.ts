@@ -92,6 +92,13 @@ export const organizationApi = {
     const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
     return call<{ logs: AuditLogRow[]; total: number }>('/admin/audit-logs' + (q.size ? '?' + q : ''));
   },
+  /** 审计日志导出（audit:export）：服务端按同一筛选返回 CSV。 */
+  exportAuditLogs: async (query: { targetType?: string }) => {
+    const q = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined && v !== '').map(([k, v]) => [k, String(v)]));
+    const response = await fetch('/api/admin/audit-logs/export' + (q.size ? '?' + q : ''), { credentials: 'include', cache: 'no-store', headers: { ...apiService.getAuthHeaders() } });
+    if (!response.ok) throw new Error(response.status === 403 ? '当前账号没有导出审计日志的权限' : '审计日志导出未完成，请重试');
+    return response.blob();
+  },
   // 人事（hr:read / hr:write）
   personnel: () => call<{ personnel: OrgPerson[]; departments: OrgDepartment[]; jobs: OrgJob[]; positionNames: Record<string, string> }>('/hr/personnel'),
   teams: () => call<{ teams: OrgTeam[] }>('/hr/teams'),

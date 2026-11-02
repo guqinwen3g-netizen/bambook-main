@@ -19,6 +19,7 @@ const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.ent
 import { hasScope } from '../auth/permissionService';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
+import { marketCommandExtraPermissions } from '../shared/mistMarket';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
@@ -230,6 +231,7 @@ export class MistRepository {
     if (command?.type === 'email.server.analysis' || command?.type.startsWith('email.extraction.')) await this.authorize(db, prior, 'emails:read');
     if(command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
+    if (command?.type.startsWith('market.')) for (const scope of marketCommandExtraPermissions(command)) await this.authorize(db, prior, scope);
   }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
