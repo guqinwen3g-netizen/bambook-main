@@ -127,7 +127,7 @@ export function financeCustomerReceivables(state: MistState | null) {
 }
 export function FinanceAccounts() {
   const { state, loading } = useMistWorkspace(), { go } = useNav(); const customers = financeCustomerReceivables(state);
-  const { canWrite } = useBankAccountCommand(), [editing, setEditing] = React.useState<ReturnType<typeof newAccountDraft> | null>(null);
+  const { canWrite, canLock } = useBankAccountCommand(), [editing, setEditing] = React.useState<ReturnType<typeof newAccountDraft> | null>(null);
   const [fx, setFx] = React.useState<ReturnType<typeof newFxDraft> | null>(null), [reversing, setReversing] = React.useState<MistFxRecord | null>(null), [linking, setLinking] = React.useState<MistFxRecord | null>(null);
   const fxRows = [...(state?.fxRecords || [])].sort((a, b) => b.date.localeCompare(a.date) || b.code.localeCompare(a.code)), accountCode = (id?: string) => (state?.bankAccounts || []).find(a => a.id === id)?.code || '';
   const currencies = new Set((state?.bankAccounts || []).map(a => a.currency)), canSettle = currencies.size >= 2;
@@ -136,7 +136,7 @@ export function FinanceAccounts() {
   return <div className="mist-col">
     {!bank.accounts.length ? <Banner tone="warn" title={uiText("还没有登记公司银行账户")} />
       : unassigned > 0 ? <Banner tone="warn" title={ui`待归属 · ${unassigned}`}>{uiText("余额未含待归属流水")}</Banner> : null}
-    <ActionBar actions={[{ label: '新增账户', onClick: () => setEditing(newAccountDraft()), hidden:!canWrite }, { label: '查看未归属流水', onClick: () => go('payment-vouchers', undefined, { section: 'records:unassigned' }), hidden: !unassigned }, { label: '登记锁汇', onClick: () => setFx(newFxDraft('lock', state)), hidden:!canWrite }, { label: '登记结汇', onClick: () => setFx(newFxDraft('settlement', state)), hidden:!canWrite, reason:canSettle ? undefined : '先登记原币和本币两个不同币种的账户' }]} />
+    <ActionBar actions={[{ label: '新增账户', onClick: () => setEditing(newAccountDraft()), hidden:!canWrite }, { label: '查看未归属流水', onClick: () => go('payment-vouchers', undefined, { section: 'records:unassigned' }), hidden: !unassigned }, { label: '登记锁汇', onClick: () => setFx(newFxDraft('lock', state)), hidden:!canLock }, { label: '登记结汇', onClick: () => setFx(newFxDraft('settlement', state)), hidden:!canWrite, reason:canSettle ? undefined : '先登记原币和本币两个不同币种的账户' }]} />
     <Card><DataTable ariaLabel={uiText("公司银行账户")} rows={bank.accounts} rowKey={r => r.account.id} loading={loading} onRowClick={r => { if (canWrite) setEditing(editAccountDraft(r.account)); }} columns={[
       { key: 'account', header: '账户', width: 'minmax(200px,1.6fr)', render: r => <ObjectCell name={<><Mono>{r.account.code}</Mono> {r.account.name}</>} meta={`${r.account.bankName} · ${r.account.accountNo} · 期初日 ${r.account.openingDate}`} /> },
       { key: 'opening', header: '期初', width: '150px', align: 'right', hideOnMobile: true, render: r => <span className="mist-num">{money(r.account.openingBalance, r.account.currency)}</span> },

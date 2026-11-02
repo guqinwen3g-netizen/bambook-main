@@ -65,7 +65,7 @@ const openText = (open: Array<{ currency: string; amount: number }>) => open.map
 export function CustomsPage() {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const can = session.hasPermission('customs:write'), canClear = session.hasPermission('customs:clear'), canInvoices = session.hasPermission('invoices:read');
-  const canRebate = session.hasPermission('invoices:write'), canReconcile = session.hasPermission('invoices:reconcile');
+  const canRebate = session.hasPermission('tax:write'), canRebateApprove = session.hasPermission('tax:approve'), canTaxRead = session.hasPermission('tax:read'), canReconcile = session.hasPermission('invoices:reconcile');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [tabChoice, setTab] = React.useState<Tab>('declarations'), [domainChoice, setDomainChoice] = React.useState<Domain | null>(null);
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
@@ -131,7 +131,7 @@ export function CustomsPage() {
     { key: 'release', header: '报关单放行', width: '120px', render: c => c.status === 'cleared' ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone="ok">{uiText("已放行")}</Pill><small className="mist-muted">{c.clearedAt}</small></div> : <Pill tone="warn">{uiText("待放行")}</Pill> },
     { key: 'collect', header: '收汇', width: 'minmax(130px,1.1fr)', render: c => { const e = rebateEvidence(state!, c); return e.replacement?<Pill>{uiText("无需收款")}</Pill>:e.collected ? <Pill tone="ok">{uiText("已全部收汇")}</Pill> : !e.cis.length ? <span className="mist-muted">{uiText("未签发 CI")}</span> : e.open.length ? <span className="mist-tone-bad">{uiText("未收 ")}{openText(e.open)}</span> : <span className="mist-muted">{uiText("CI 应收不可用")}</span>; } },
     { key: 'vat', header: '增值税专票', width: '110px', hideOnMobile: true, render: c => { const v = rebateEvidence(state!, c).vat; return v.claim ? `已配 ${v.claim.lines.length} 张` : v.candidates.length ? `可配 ${v.candidates.length} 张` : <span className="mist-muted">{uiText("未登记")}</span>; } },
-    { key: 'claim', header: '退税申报', width: 'minmax(130px,1.1fr)', render: c => { const v = rebateEvidence(state!, c).vat; return v.claim ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={REBATE_TONE[v.claim.state]}>{REBATE_STATE_LABEL[v.claim.state]}</Pill><small className="mist-muted">{uiText("应退 ")}{fmt(v.claim.expected, 2)} CNY</small></div> : v.rate && v.candidates.length ? <div className="mist-col" style={{ gap: 2 }}><span className="mist-muted">{uiText("未申报")}</span><small className="mist-muted">{uiText("预计 ")}{fmt(v.preview, 2)} CNY</small></div> : <span className="mist-muted">{uiText(v.rate ? '未申报' : '缺退税率')}</span>; } },
+    { key: 'claim', header: '退税申报', width: 'minmax(130px,1.1fr)', render: c => { const v = rebateEvidence(state!, c).vat; return v.claim ? <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={REBATE_TONE[v.claim.state]}>{REBATE_STATE_LABEL[v.claim.state]}</Pill><small className="mist-muted">{uiText("应退 ")}{v.claim.taxMasked ? uiText('已隐藏') : `${fmt(v.claim.expected, 2)} CNY`}</small></div> : v.rate && v.candidates.length ? <div className="mist-col" style={{ gap: 2 }}><span className="mist-muted">{uiText("未申报")}</span><small className="mist-muted">{uiText("预计 ")}{fmt(v.preview, 2)} CNY</small></div> : <span className="mist-muted">{uiText(v.rate ? '未申报' : '缺退税率')}</span>; } },
     { key: 'ready', header: '资料', width: '90px', align: 'right', hideOnMobile: true, render: c => `${rebateEvidence(state!, c).ready} / 3` },
   ];
 
@@ -144,7 +144,7 @@ export function CustomsPage() {
       ? <EmptyState icon={Receipt} title={uiText("还没有可核对的退税资料")} description={uiText("报关单登记为已申报或已放行后，会在这里核对放行、本票 CI 收汇与增值税专票，并由财务登记退税申报。")} />
       : <EmptyState icon={Stamp} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有报关记录' : `还没有${domain === 'fabric' ? '面料' : '成衣'}报关记录`)} description={invalidContext ? uiText('来源出运不可用') : undefined} action={createButton && !invalidContext && eligible.length ? <Button icon={Plus} onClick={() => setDialog(createSpec())}>{uiText("建立报关记录")}</Button> : undefined} />;
   const detail = selected && state
-    ? <CustomsDetail record={selected} state={state} can={can} canClear={canClear} canInvoices={canInvoices} canRebate={canRebate} canReconcile={canReconcile} locked={locked} open={setDialog} run={run}
+    ? <CustomsDetail record={selected} state={state} can={can} canClear={canClear} canInvoices={canInvoices&&canTaxRead} canRebate={canRebate} canRebateApprove={canRebateApprove} canReconcile={canReconcile} locked={locked} open={setDialog} run={run}
         onBill={id => go('payment-vouchers', id, { section: 'payables' })} onReceipt={id => go('payment-vouchers', id)}
         onEdit={() => setDialog(editSpec(selected))} onDeclare={() => setDialog(declareSpec(selected, selected.status === 'submitted'))} onRelease={() => { if (canClear) setDialog(releaseSpec(selected)); }}
         onAttach={ids => run({ type: 'fulfillment.customs.save', payload: payload(selected, { fileIds: ids }) })}
@@ -201,8 +201,8 @@ export function CustomsPage() {
   </MistPage>;
 }
 
-function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onClassify, onShipment, onDocuments, onInvoice }: {
-  record: FulfillmentCustoms; state: MistState; can: boolean; canClear: boolean; canInvoices: boolean; canRebate: boolean; canReconcile: boolean; locked: boolean;
+function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate, canRebateApprove = false, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onClassify, onShipment, onDocuments, onInvoice }: {
+  record: FulfillmentCustoms; state: MistState; can: boolean; canClear: boolean; canInvoices: boolean; canRebate: boolean; canRebateApprove?: boolean; canReconcile: boolean; locked: boolean;
   open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onBill: (id: string) => void; onReceipt: (id: string) => void;
   onEdit: () => void; onDeclare: () => void; onRelease: () => void; onAttach: (ids: string[]) => Promise<unknown>; onClassify: () => void; onShipment: () => void; onDocuments: () => void; onInvoice: (id: string) => void;
 }) {
@@ -265,7 +265,7 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
       ]} />
       {canInvoices && evidence.invoices.length > 0 && <div className="mist-row" style={{ flexWrap: 'wrap' }}>{evidence.invoices.map((invoice: MistInvoice) => <TextLink key={invoice.id} icon={Receipt} onClick={() => onInvoice(invoice.id)}>{uiText("查看应收 ")}{invoice.code}</TextLink>)}</div>}
     </DetailBlock>}
-    {c.status !== 'draft'&&!evidence.replacement && canInvoices && <RebateClaimBlock state={state} customs={c} canWrite={canRebate} canReconcile={canReconcile} locked={locked} open={open} run={run} onBill={onBill} onReceipt={onReceipt} />}
+    {c.status !== 'draft'&&!evidence.replacement && canInvoices && <RebateClaimBlock state={state} customs={c} canWrite={canRebate} canApprove={canRebateApprove} canReconcile={canReconcile} locked={locked} open={open} run={run} onBill={onBill} onReceipt={onReceipt} />}
     <DetailBlock title={uiText("附件")}><RecordFiles key={c.id} ids={c.fileIds} onAttach={can && c.status !== 'cleared' && !closed ? onAttach : undefined} /></DetailBlock>
     <DetailBlock title={uiText("处理记录")}><Events entity="customs" id={c.id} /></DetailBlock>
   </DetailBody>;

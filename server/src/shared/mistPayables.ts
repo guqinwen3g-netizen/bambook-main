@@ -45,6 +45,8 @@ export type SupplierBill = {
   opening?: { originalAmount: number };
   /** 由费用台账转入（货代、报关等费用）；无来源合同。 */
   expenseId?: string;
+  /** 仅读投影：当前账号没有 sensitive:tax_base，税额已隐藏（taxAmount 为 0）。 */
+  taxMasked?: boolean;
 };
 export type SupplierPayment = {
   id: string; paymentId: string; code: string; supplierId: string; supplier: string; date: string;

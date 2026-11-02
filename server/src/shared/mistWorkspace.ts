@@ -813,7 +813,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('order.')||command.type.startsWith('production.'))return 'orders:write';
   if(command.type==='finance.developmentInvoice.issue')return MIST_FINANCE_SCOPES.invoice;
   if(command.type==='finance.receivable.confirm'||command.type==='finance.receivable.reject')return MIST_FINANCE_SCOPES.invoice;
-  if(command.type==='finance.importReceipts'||command.type==='finance.payment.save'||command.type==='finance.payment.reverse'||command.type==='finance.account.save'||command.type==='finance.account.assign'||command.type==='finance.account.close'||command.type==='finance.account.reopen'||command.type.startsWith('finance.fx.'))return MIST_FINANCE_SCOPES.voucher;
+  if(command.type==='finance.importReceipts'||command.type==='finance.payment.save'||command.type==='finance.payment.reverse'||command.type==='finance.account.save'||command.type==='finance.account.assign'||command.type==='finance.account.close'||command.type==='finance.account.reopen'||command.type.startsWith('finance.fx.'))return command.type==='finance.fx.lock'?'fx:lock':MIST_FINANCE_SCOPES.voucher;
   if(command.type==='finance.reconcile'||command.type==='finance.acceptSuggestions'||command.type==='finance.allocation.reverse'||command.type==='finance.receivable.bankCharge'||command.type==='finance.receivable.bankCharge.reverse')return MIST_FINANCE_SCOPES.reconcile;
   if(command.type.startsWith('finance.'))throw new MistCommandError('VALIDATION','未知财务操作');
   if(command.type.startsWith('customer.')||command.type.startsWith('contact.'))return 'relations:write';
