@@ -295,7 +295,7 @@ export function applyExportRebateCommand(root: Root, command: ExportRebateComman
       if (receipt.currency !== 'CNY') fail('退税款为人民币，请选择人民币到账流水');
       const amount = minor(p.amount, '勾稽金额');
       if (amount > mistMoneyMinor(receipt.remaining)) fail(`流水 ${receipt.code} 未分配余额不足`);
-      const open = mistMoneyMinor(rebateClaimTotals(claim).open); if (amount > open) fail(`超过本申报待到账金额 ${major(open).toFixed(2)} CNY；如到账多于核准额请先核对`);
+      const open = mistMoneyMinor(rebateClaimTotals(claim).open); if (amount > open) fail(c.can?.('sensitive:tax_base') ? `超过本申报待到账金额 ${major(open).toFixed(2)} CNY；如到账多于核准额请先核对` : '超过本申报待到账金额；如到账多于核准额请先核对');
       if (p.settle !== undefined && typeof p.settle !== 'boolean') fail('结清标记无效');
       const reason = p.settle === true && amount < open ? text(p.reason, '少收原因', true, 500) : '';
       const entry: RebateClaimReceipt = { id: c.id(), receiptId: receipt.id, receiptCode: receipt.code, amount: major(amount), date: receipt.date.slice(0, 10), at: c.now, actor: c.actorName };

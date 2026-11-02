@@ -8,6 +8,7 @@ import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
 import { agentCommandSensitivity } from './agentMcp';
+import { MistApiError } from './errors';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_AUDIT_FIELD, agentAuditReceiptId } from './agentAudit';
 import {randomUUID} from 'node:crypto';
@@ -103,9 +104,9 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
 
   it('finance agent turns a confirmation into a proposal that only the owner can confirm or reject in the app; confirming runs the real command', async () => {
     const local = createMistLocalRuntime({ directory });
-    // 财务岗默认只有 ai:write:low/medium；本用例先验证缺高风险档被拒，再授予该档并复验密码。
+    // 2026-11 财务岗默认持有 ai:write:high；本用例先撤去该码验证缺高风险档被拒，再恢复并复验密码。
     let grantHigh = false; const authorize = local.authorize;
-    local.authorize = async (db, prior, permission) => authorize(db, prior, permission === 'ai:write:high' && grantHigh ? undefined : permission);
+    local.authorize = async (db, prior, permission) => { if (permission === 'ai:write:high' && !grantHigh) throw new MistApiError('FORBIDDEN', '当前账号没有执行此操作的权限', 403); return authorize(db, prior, permission); };
     vi.stubEnv('MIST_LOCAL_REAUTH_PASSWORD', 'local-reauth-secret');
     const app = createMistServer(undefined, { local });
     const buyer = await as(app, 'demo-buyer');
