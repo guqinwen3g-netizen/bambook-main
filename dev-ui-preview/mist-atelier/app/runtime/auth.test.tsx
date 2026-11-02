@@ -71,6 +71,15 @@ describe('Mist session adapter with production auth service', () => {
     expect(session.sessionKey).not.toContain('token-cached-user'); expect(session.sessionKey).not.toContain('cached-user');
     expect(requests.map(request => request.path)).toEqual(['/api/mist/session','/api/auth/me']);
   });
+  it('keeps the signed permission ceiling after a profile update', async () => {
+    await auth.login('profile-user', 'password'); actor = { ...user('profile-user'), permissions: ['*'], permissionCeiling: ['orders:read'] };
+    await mount(); await waitFor(() => expect(session.status).toBe('authenticated'));
+    override = (url, init) => url.pathname.endsWith('/auth/me') && init.method === 'PATCH' ? Promise.resolve(json({ ok: true, user: { ...actor!, displayName: 'Renamed' } })) : null;
+    await act(async () => { await auth.updateMyProfile({ displayName: 'Renamed' }); });
+    expect(session.user?.displayName).toBe('Renamed'); expect(session.user?.permissionCeiling).toEqual(['orders:read']);
+    expect(session.hasPermission('orders:read')).toBe(true); expect(session.hasPermission('finance:write')).toBe(false);
+    expect(JSON.parse(localStorage.getItem('bambook_auth_user')!).permissionCeiling).toEqual(['orders:read']);
+  });
   it('drops the exposed user and advances session identity on a server 401', async () => {
     await auth.login('first', 'password'); await mount(); await waitFor(() => expect(session.status).toBe('authenticated')); const key = session.sessionKey;
     actor = null; await act(async () => session.refresh());
