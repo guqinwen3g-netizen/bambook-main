@@ -174,7 +174,7 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       const reason = text(p.reason, '转移原因', true, 1000), due = day(p.due, '新供应商交期');
       const prepaid = purchasePrepaymentAvailableMinor(root, po.id);
       applyPayablesCommand(root, { type: 'payable.purchase.cancel', payload: { purchaseId: po.id, reason: `转给 ${target.name}：${reason}`, ...(prepaid > 0 ? { prepayment: 'refund' as const } : {}) } }, c);
-      const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: po.orderId, lineId: po.lineId, kind: po.kind, ...(po.materialKind?{materialKind:po.materialKind}:{}), supplierId: target.id, supplier: target.name, description: po.description, quantity: po.quantity, unit: po.unit, price: positive(p.price, '新单价'), currency: currencyOf(p.currency), due, terms: text(p.terms, '付款条件', false, 200) || po.terms, destination: po.destination,
+      const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: po.orderId, lineId: po.lineId, kind: po.kind, ...(po.materialKind?{materialKind:po.materialKind}:{}), ...(po.stageTerms?{stageTerms:{...po.stageTerms}}:{}), supplierId: target.id, supplier: target.name, description: po.description, quantity: po.quantity, unit: po.unit, price: positive(p.price, '新单价'), currency: currencyOf(p.currency), due, terms: text(p.terms, '付款条件', false, 200) || po.terms, destination: po.destination,
         note: `由 ${po.code}（${po.supplier}）转入：${reason}`, fileIds: [] } }, c) as { id: string };
       const next = root.fulfillment.purchases.find(x => x.id === saved.id)!;
       next.transferredFrom = { purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, reason };

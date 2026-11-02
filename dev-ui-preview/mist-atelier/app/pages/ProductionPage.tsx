@@ -108,7 +108,7 @@ export function ProductionPage() {
   const offlineShown=shown.filter(isOfflineInProgress),normalShown=shown.filter(item=>!isOfflineInProgress(item));
   const domains=new Set(shown.map(item=>state?.orders.find(order=>order.id===item.orderId)?.type));
   const domain=domains.size===1?[...domains][0]:undefined;
-  const stageTitles:Record<string,string>=domain==='garment'?{done:'已完成'}:domain==='fabric'?{cut:'备货',sew:'加工',finish:'整理',qc:'尾检',done:'已完成'}:{cut:'准备',sew:'制作',finish:'整理',qc:'尾检',done:'已完成'};
+  const stageTitles:Record<string,string>=domain==='garment'?{done:'已完成'}:domain==='fabric'?{cut:'坯布',sew:'染整',finish:'后整理',qc:'尾检',done:'已完成'}:{cut:'准备',sew:'制作',finish:'整理',qc:'尾检',done:'已完成'};
   const columns=PROD_COLUMNS.map(column=>({...column,title:stageTitles[column.id]||column.title}));
   const risks = shown.filter(item => productionRiskText(item));
   const move = async (id: string, col: string) => {

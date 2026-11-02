@@ -45,7 +45,8 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 物料类别 `greige`（坯布 / 纱线）只用于面料条目的物料采购。`isFabricStageMaterial` 判定后，`materialDeliveryTargets` / `prepareMaterialDelivery` 只接受**同一订单条目**、已批准且已线下发出并取得供应商确认的面料加工单；不走内部面料分配、不做成衣 QC 放行证明（`materialQualityProof` 跳过）。原有 `fabric`（成品面料）采购和内部供料到成衣厂的路径不变。
 - 点收人只取目标订单负责人（`materialReceiverIds`），不再加内部供料的成衣接收人。直送与仓库发料两条路径沿用 `fulfillment.materials.deliver` / `fulfillment.materials.issue` / `fulfillment.materials.confirm`，交接留在 `materialDeliveryRows`，坯布在染厂期间加工单不能取消或转厂（`hasMaterialAtFactory`）。
 - 面料加工单回交允许 `destination='warehouse'` 入库，批次名取订单条目品名；成衣加工回交仍不能入库。
-- 未做：单位换算、投入产出与损耗、多道工序链计划、开发打样的分段模式、分工序成本。设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`；测试 `server/src/shared/mistFabricStaged.test.ts`。
+- 第二块（`server/src/shared/mistFabricStage.ts`）：采购单可带 `stageTerms`——按公斤采购的坯布须有 `kgPerMetre`（提交时校验），面料加工单可选 `lossPercent`（0–50%）；不属于该合同类型的字段直接拒绝。`stageTerms` 进入审批快照、审批详情「工序约定」和加工合同 PDF，转供应商时沿用。`fabricStageBalance` 只读汇总：投入 = 目标加工单上坯布交接的已点收合格数（拒收、待点收不计），按坯布单单位换算到加工单单位（米/码互换，公斤用 `kgPerMetre`）；产出 = 加工单 `received`；回交多于投入时不出损耗率并提示。订单核算的采购行按 `坯布` / `染整加工` 开头标注。面料看板与线下进度工序名改为 坯布 / 染整 / 后整理。
+- 未做：多道工序链计划、开发打样的分段模式、损耗成本金额与超耗扣款、收货方结构化字段。设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`；测试 `server/src/shared/mistFabricStaged.test.ts`。
 
 ## 当前 Mist 后勤交接显示
 

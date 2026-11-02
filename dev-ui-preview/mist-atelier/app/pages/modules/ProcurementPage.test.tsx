@@ -355,6 +355,30 @@ it('sends greige straight to the same item\'s dyeing contract and lets the dyed 
   dialog=getByRole(document.body,'dialog',{name:'登记加工回交'});const paths=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
   expect(paths.value).toBe('warehouse');expect([...paths.options].filter(o=>o.value).map(o=>o.textContent)).toEqual(['入我方仓库','加工厂直送客户或指定地点']);
 });
+it('shows counted greige against returned fabric and the agreed loss on the dyeing contract',()=>{
+  const f=fabricStagedFixture({lossPercent:5}),id=f.deliver();
+  f.run({type:'fulfillment.materials.confirm',payload:{kind:'direct',id,acceptedQuantity:3800,rejectedQuantity:0,expectedReceivingRevision:0,evidence:'染厂验坯'}});
+  f.release();f.run({type:'fulfillment.procurement.receive',payload:{id:f.dyeing,quantity:3550,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'码单',fileIds:[]}});
+  store.state=f.state;session.id='sales';render(f.dyeing);
+  const text=host.textContent!;
+  expect(text).toContain('投入与产出');expect(text).toContain('3800 米');expect(text).toContain('3550 米');expect(text).toContain('6.58%');
+  expect(text).toContain('损耗超出约定');expect(text).toContain('约定加工损耗 5%');
+  render(f.greige);expect(host.textContent).not.toContain('投入与产出');
+});
+it('asks for the weight per metre only on greige bought by kilogram, and the loss only on fabric processing',async()=>{
+  const f=fabricStagedFixture();store.state=f.state;session.id='sales';
+  render(undefined,'list',{orderLineId:f.lineId,section:'order:'+f.orderId});
+  await click(getAllByRole(host,'button',{name:/^新建(采购订单|委外加工单)$/})[0]);
+  const pick=(name:string|RegExp,value:string)=>{const el=getByRole(host,'combobox',{name}) as HTMLSelectElement;act(()=>{el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));});};
+  pick('来源条目','line:'+f.lineId);pick('采购内容','material:greige');pick(/供应商/,'weaver');
+  typeInto(getByRole(host,'textbox',{name:'采购品名'}) as HTMLInputElement,'CT-2103 坯布');
+  await click(getByRole(host,'button',{name:'下一步',exact:true}));
+  const unit=getByRole(host,'combobox',{name:'计量单位'}) as HTMLSelectElement;
+  expect(queryByRole(host,'spinbutton',{name:'每米重量（公斤/米）'})).toBeNull();
+  act(()=>{unit.value='公斤';unit.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect(getByRole(host,'spinbutton',{name:'每米重量（公斤/米）'})).toBeTruthy();
+  expect(queryByRole(host,'spinbutton',{name:'约定加工损耗（%）'})).toBeNull();
+});
 it('does not call confirmed processing started until the exact production branch has a release',()=>{
   store.state!.fulfillment.purchases.push(purchase('start',approved({kind:'processing',offlineSend:{at:'2026-10-04T08:00:00Z',actor:'经办人',evidence:'交厂',fileIds:[],revision:1},supplierConfirmation:{at:'2026-10-05T08:00:00Z',actor:'经办人',evidence:'回函',confirmedDue:'2026-10-30',fileIds:[],revision:1}})));
   store.state!.productions.push({id:'branch',sourcePurchaseId:'start',orderId:'o',lineId:'l',col:'cut',pct:0} as any);
