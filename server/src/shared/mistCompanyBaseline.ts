@@ -46,8 +46,20 @@ function rewriteSeed(value:unknown,roster:MistCompanyRoster,key=''):unknown{
 }
 
 /**
- * 付款分档审批人（与服务端按申请人重建的路由同形）：金额档（≤5 万、>5 万）由申请人所在事业部经理审批，
- * 公司为两位事业部经理授予 >5 万档；新供应商首笔付款加签由总经理审批。两级由不同的人分别签。
+ * 付款审批的岗位授权：事业部经理（业务主管岗）按岗位只有 ≤5 万档；公司另以个人授权授予两位事业部经理
+ * >5 万档，他们即本公司的“总监”级审批人。种子脚本（scripts/seed-mist-company-baseline.ts）按此写入个人授权，
+ * 并在写入前核对每位签字人的实际权限。
+ */
+export const MIST_COMPANY_PAYMENT_GRANTS:Partial<Record<MistCompanyRosterKey,readonly string[]>>={fabricManager:['vouchers:approve:pay_gt5'],garmentManager:['vouchers:approve:pay_gt5']};
+/** 种子里各签字人须当前持有的付款审批权限（审批权 + 所签档位）。 */
+export const MIST_COMPANY_PAYMENT_SIGNER_SCOPES:Partial<Record<MistCompanyRosterKey,readonly string[]>>={
+ owner:['finance:payment_request:approve','vouchers:approve:pay_new_supplier'],
+ fabricManager:['finance:payment_request:approve','vouchers:approve:pay_lt5','vouchers:approve:pay_gt5'],
+ garmentManager:['finance:payment_request:approve','vouchers:approve:pay_lt5','vouchers:approve:pay_gt5'],
+};
+/**
+ * 付款分档审批人（与服务端 mistApprovalAuthority 按申请人重建的结果一致）：金额档由申请人所在事业部经理审批
+ * （≤5 万按岗位、>5 万按上面的个人授权）；新供应商首笔付款加签由总经理（公司管理员）审批。两级由不同的人分别签。
  */
 function paymentTierReviewers(roster:MistCompanyRoster,requester:MistCompanyRosterKey){
  const head=requester==='fabricSales'?roster.fabricManager.id:requester==='garmentSales'?roster.garmentManager.id:roster.owner.id;

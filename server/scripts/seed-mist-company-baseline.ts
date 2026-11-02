@@ -17,7 +17,7 @@ import {PrismaClient} from '@prisma/client';
 import {MistPrivateFiles} from '../src/mist/files';
 import {prepareMistBusinessNumbers} from '../src/mist/businessNumbers';
 import {isDemoFile,renderDemoFile} from '../src/shared/mistDemoFiles';
-import {createMistCompanyBaseline,mistCompanyBaselineMetrics,mistCompanyVisibleTextIssues,MIST_COMPANY_BASELINE_VERSION,MIST_COMPANY_BASELINE_AS_OF,MIST_COMPANY_DATASET,MIST_COMPANY_WORKSPACE_NAME,type MistCompanyRoster,type MistCompanyRosterKey} from '../src/shared/mistCompanyBaseline';
+import {createMistCompanyBaseline,mistCompanyBaselineMetrics,mistCompanyVisibleTextIssues,MIST_COMPANY_BASELINE_VERSION,MIST_COMPANY_BASELINE_AS_OF,MIST_COMPANY_DATASET,MIST_COMPANY_WORKSPACE_NAME,MIST_COMPANY_PAYMENT_GRANTS,MIST_COMPANY_PAYMENT_SIGNER_SCOPES,type MistCompanyRoster,type MistCompanyRosterKey} from '../src/shared/mistCompanyBaseline';
 
 const SERVER_ROOT=path.resolve(__dirname,'..');
 dotenv.config({path:path.join(SERVER_ROOT,'.env.local')});dotenv.config({path:path.join(SERVER_ROOT,'.env')});
@@ -50,11 +50,18 @@ const filesRoot=path.resolve(process.env.MIST_FILES_DIR||path.join(SERVER_ROOT,'
 const slug=`claridge-peak-company-v${MIST_COMPANY_BASELINE_VERSION}`;
 
 async function main(){
- const sources=await prisma.userAccount.findMany({where:{id:{in:ACCOUNT_SPECS.map(row=>sourcePrefix+row.suffix)},deletedAt:null},include:{roles:true,employeeProfiles:{where:{companyId:null}}}});
+ const sources=await prisma.userAccount.findMany({where:{id:{in:ACCOUNT_SPECS.map(row=>sourcePrefix+row.suffix)},deletedAt:null},include:{roles:{include:{role:{include:{permissions:{include:{permission:true}}}}}},employeeProfiles:{where:{companyId:null}}}});
  const sourceById=new Map(sources.map(row=>[row.id,row]));
  const missing=ACCOUNT_SPECS.filter(row=>!sourceById.has(sourcePrefix+row.suffix)).map(row=>row.suffix);
  if(missing.length)throw new Error('缺少源开发账号：'+missing.join('、'));
  const roster=Object.fromEntries(ACCOUNT_SPECS.map(row=>[row.key,{id:row.id,name:row.name}])) as MistCompanyRoster;
+ // 历史付款的每一级签字人须在写入后的实际权限下持有该级档位（岗位权限 + 个人授权；总经理另加 role-admin），
+ // 否则服务端按真实权限重建的审批人会与历史签字对不上：写入前核对，不符即拒绝。
+ const adminScopes=(await prisma.rolePermission.findMany({where:{roleId:'role-admin'},include:{permission:true}})).map(row=>row.permission.scope);
+ const paymentGaps=ACCOUNT_SPECS.flatMap(spec=>{const need=MIST_COMPANY_PAYMENT_SIGNER_SCOPES[spec.key];if(!need)return[];
+  const held=new Set([...sourceById.get(sourcePrefix+spec.suffix)!.roles.flatMap(row=>row.role.permissions.map(p=>p.permission.scope)),...(MIST_COMPANY_PAYMENT_GRANTS[spec.key]||[]),...(spec.key==='owner'?adminScopes:[])]);
+  const missing=need.filter(scope=>!held.has(scope));return missing.length?[`${spec.name}：${missing.join('、')}`]:[];});
+ if(paymentGaps.length)throw new Error('付款审批签字人缺少档位权限，拒绝写入：'+paymentGaps.join('；'));
  const claimReviewerId=roster.owner.id;
  let failures:Array<{step:string;message:string}>=[];
  const now=new Date().toISOString();let state=createMistCompanyBaseline({id:()=>randomUUID(),now:MIST_COMPANY_BASELINE_AS_OF,actorId:roster.owner.id,actorName:roster.owner.name},roster,rows=>{failures=rows;},{claimReviewerId});
@@ -82,6 +89,8 @@ async function main(){
     await tx.userRole.deleteMany({where:{userId:spec.id}});if(source.roles.length)await tx.userRole.createMany({data:source.roles.map(role=>({id:randomUUID(),userId:spec.id,roleId:role.roleId,departmentId:role.departmentId})),skipDuplicates:true});
     if(source.employeeProfiles[0]){const profile=source.employeeProfiles[0];const previous=await tx.employeeProfile.findFirst({where:{userId:spec.id,companyId:null}});await tx.employeeProfile.upsert({where:{id:previous?.id??randomUUID()},create:{id:randomUUID(),userId:spec.id,employeeNo:spec.employeeNo,positionId:profile.positionId,hireDate:profile.hireDate,regularDate:profile.regularDate,contractType:profile.contractType,contractEnd:profile.contractEnd,employmentStatus:'Regular',phone:profile.phone,emergencyContact:profile.emergencyContact,workLocation:profile.workLocation,notes:'雾织贸易经营基线人员档案'},update:{employeeNo:spec.employeeNo,positionId:profile.positionId,hireDate:profile.hireDate,regularDate:profile.regularDate,contractType:profile.contractType,contractEnd:profile.contractEnd,employmentStatus:'Regular',phone:profile.phone,emergencyContact:profile.emergencyContact,workLocation:profile.workLocation,notes:'雾织贸易经营基线人员档案',deletedAt:null}});}
    }
+   // 两位事业部经理的 >5 万档个人授权（总监级审批人），由总经理授予。
+   for(const spec of ACCOUNT_SPECS)for(const scope of MIST_COMPANY_PAYMENT_GRANTS[spec.key]||[])await tx.userPermissionOverrides.upsert({where:{userId_scope:{userId:spec.id,scope}},create:{id:`UPO__${randomUUID()}`,userId:spec.id,scope,grantedBy:roster.owner.id,reason:'事业部经理兼任 5 万元以上付款审批（总监级）',isActive:true},update:{isActive:true,deletedAt:null,expiresAt:null,companyId:null}});
    // The company owner also performs the configured general-leader duty for claims.
    if(!await tx.userRole.findFirst({where:{userId:roster.owner.id,roleId:'role-admin'}}))await tx.userRole.create({data:{id:randomUUID(),userId:roster.owner.id,roleId:'role-admin',departmentId:sourceById.get(sourcePrefix+'owner')!.primaryDeptId}});
    await tx.userAccount.updateMany({where:{id:{startsWith:'usr_demo_'},status:'active'},data:{status:'inactive'}});
