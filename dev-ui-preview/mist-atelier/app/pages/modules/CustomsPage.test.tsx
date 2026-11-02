@@ -331,3 +331,13 @@ it('shows the rebate taxable base and expected refund as hidden when the server 
   const table=getByRole(host,'table',{name:'退税资料核对'});
   expect(table.textContent).toContain('应退 已隐藏');expect(table.textContent).not.toContain('0.00 CNY');
 });
+
+it('hides the tax approval and receipt matching actions when the rebate amounts are masked',async()=>{
+  const st=store.state!,f=st.fulfillment;
+  f.shipments.push(shipment('m',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('m','cleared',{hsCode:'6202.1300'}));
+  st.receipts.push({id:'r-cny',code:'BR-1',date:'2026-10-14',payer:'国家金库',amount:100,remaining:100,currency:'CNY',ref:'',state:'unmatched'});
+  const claim=(masked:boolean,state:string)=>({id:'rc-m',code:'RC-M',customsId:'cus-m',customsCode:'CUS-M',declarationNo:'D-m',shipmentId:'s-m',shipmentCode:'S-M',orderIds:[],hsCode:'6202.13',exportDate:'2026-10-13',rateId:'rt',rate:'13',lines:[],taxable:masked?0:100,expected:masked?0:13,...(masked?{taxMasked:true}:{}),...(state==='approved'?{approved:{date:'2026-10-14',amount:masked?0:13,ref:'A',reason:'',at:'',actor:''}}:{}),filedAt:'2026-10-14',batchRef:'B-1',fileIds:[],note:'',state,receipts:[],createdAt:'2026-10-14T00:00:00Z',actor:'财务'});
+  const actions=async(masked:boolean,state:string)=>{(st as any).exportRebate={rates:[],claims:[claim(masked,state)]};store.state={...st};act(()=>root.unmount());root=createRoot(host);render('cus-m');const detail=host.querySelector('[data-customs-detail="cus-m"]') as HTMLElement;return {approve:!!queryByRole(detail,'button',{name:'登记税务核准'}),receive:!!queryByRole(detail,'button',{name:'勾稽到账'})};};
+  expect((await actions(false,'filed')).approve).toBe(true);expect((await actions(false,'approved')).receive).toBe(true);
+  expect(await actions(true,'filed')).toEqual({approve:false,receive:false});expect(await actions(true,'approved')).toEqual({approve:false,receive:false});
+});

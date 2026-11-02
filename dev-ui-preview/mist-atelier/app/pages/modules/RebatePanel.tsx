@@ -130,14 +130,15 @@ export function RebateClaimBlock({ state, customs: c, canWrite, canApprove = fal
       ...(claim.byItems ? [{ key: 'parts', header: '商品项明细', render: (l: typeof claim.lines[number]) => <span className="mist-sub">{(l.parts || []).map(x => `第 ${x.itemNo} 项 ${x.hsCode} · ${x.rate}% · 计税 ${fmt(x.taxable, 2)} → ${fmt(x.rebate, 2)}`).join('；')}{uiText(l.excluded ? `；不在商品项 ${fmt(l.excluded, 2)} 不计` : '')}</span> }] : []),
     ]} />
     {claim.receipts.length > 0 && <DataTable ariaLabel={ui`${claim.code} 到账勾稽`} rows={claim.receipts} rowKey={r => r.id} columns={[
-      { key: 'receipt', header: '到账流水', render: r => onReceipt ? <TextLink onClick={() => onReceipt(r.receiptId)}>{r.receiptCode}</TextLink> : <Mono>{r.receiptCode}</Mono> },
+      { key: 'receipt', header: '到账流水', render: r => onReceipt && r.receiptId ? <TextLink onClick={() => onReceipt(r.receiptId)}>{r.receiptCode}</TextLink> : <Mono>{r.receiptCode}</Mono> },
       { key: 'date', header: '到账日', render: r => r.date },
       { key: 'amount', header: '金额', align: 'right', render: r => r.reversed ? <span className="mist-muted"><s>{amount(r.amount)}</s>{uiText(" 已冲回")}</span> : amount(r.amount) },
       ...(canReconcile ? [{ key: 'act', header: '', width: '72px', align: 'right' as const, render: (r: RebateClaim['receipts'][number]) => !r.reversed ? <TextLink icon={RotateCcw} onClick={() => { if (!locked) open(reverseSpec(r.id, r.receiptCode)); }}>{uiText("冲回")}</TextLink> : null }] : []),
     ]} />}
     {claim.state !== 'withdrawn' && <ActionBar busy={locked} actions={[
-      { label: '登记税务核准', icon: BadgeCheck, primary: claim.state === 'filed', onClick: () => open(approveSpec), reason: false, hidden: !canApprove||claim.state !== 'filed' },
-      { label: '勾稽到账', icon: Landmark, primary: claim.state === 'approved', onClick: () => open(receiveSpec), reason: !receipts.length ? '没有未分配的人民币到账流水，请先导入退税到账水单' : false, hidden: !canReconcile||done },
+      // 计税依据被隐藏时服务端拒绝核准与勾稽（须 sensitive:tax_base），与申报入口一致不提供入口。
+      { label: '登记税务核准', icon: BadgeCheck, primary: claim.state === 'filed', onClick: () => open(approveSpec), reason: false, hidden: masked||!canApprove||claim.state !== 'filed' },
+      { label: '勾稽到账', icon: Landmark, primary: claim.state === 'approved', onClick: () => open(receiveSpec), reason: !receipts.length ? '没有未分配的人民币到账流水，请先导入退税到账水单' : false, hidden: masked||!canReconcile||done },
       { label: '撤回申报', icon: Undo2, onClick: () => open(withdrawSpec), reason: live.length ? '已有到账勾稽，请先冲回' : false, hidden: !canWrite||done },
     ] as ReasonedAction[]} />}
     {claim.withdrawn && <span className="mist-note">{uiText("已撤回：")}{claim.withdrawn.reason}</span>}
