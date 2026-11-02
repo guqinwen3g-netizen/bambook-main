@@ -23,6 +23,24 @@ export type AgentProposalCommand =
 export const AGENT_PROPOSAL_MAX_PENDING = 50;
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
 
+/**
+ * AI 写入三级确认（2026-11 用户定案）：每类可被提议的命令登记风险等级，确认人须持有对应 ai:write:* 码。
+ * - 低：记跟进、加标签、标记已读等，不改单据内容；
+ * - 中：修改单据、整理邮件、移动邮件等，确认界面列出将要改动的字段；
+ * - 高：付款、核销、审批、作废等资金或不可逆操作，确认请求须带本人当前登录密码，由服务端复验。
+ * 没有在此登记的命令一律按高处理。无论哪一级，确认人自己仍须持有该命令本身的业务权限（仓储按原命令重新校验）。
+ */
+export type AgentCommandRisk = 'low' | 'medium' | 'high';
+export const AI_WRITE_SCOPES: Record<AgentCommandRisk, string> = { low: 'ai:write:low', medium: 'ai:write:medium', high: 'ai:write:high' };
+export const AGENT_RISK_LABEL: Record<AgentCommandRisk, string> = { low: '低风险', medium: '中风险', high: '高风险' };
+const LOW_RISK = ['crm.followUp.save', 'email.flag', 'email.link', 'email.unlink', 'email.followUp', 'email.draft.save', 'notification.read', 'notification.readAll', 'task.complete', 'calendar.save', 'market.quotation.feedback.add', 'platform.assistant.saveDraft'];
+const MEDIUM_RISK = ['email.move', 'email.state.retry', 'email.draft.delete', 'email.account.save', 'email.submitExtraction', 'email.extraction.review', 'email.extraction.resolve',
+  'customer.update', 'contact.save', 'market.customer.update', 'market.contact.save', 'market.relation.save', 'market.lead.save', 'market.supplier.save', 'market.product.save', 'market.quotation.save',
+  'crm.opportunity.save', 'crm.opportunity.stage', 'development.saveDraft', 'development.update', 'order.update', 'order.checklist', 'production.update',
+  'fulfillment.procurement.save', 'fulfillment.shipments.save', 'fulfillment.documents.save', 'fulfillment.samples.create', 'fulfillment.samples.edit', 'payable.settlement.submit'];
+export const AGENT_COMMAND_RISK: Readonly<Record<string, AgentCommandRisk>> = Object.freeze({ ...Object.fromEntries(LOW_RISK.map(t => [t, 'low' as const])), ...Object.fromEntries(MEDIUM_RISK.map(t => [t, 'medium' as const])) });
+export const agentCommandRisk = (type: string): AgentCommandRisk => AGENT_COMMAND_RISK[type] ?? 'high';
+
 /** 拒绝本人旧提议只是撤销待办，不依赖继续使用 AI 的权限；确认的原业务权限仍在仓储重新校验。 */
 export const agentProposalCommandPermission = (type?: string): string|null => type==='agent.proposal.reject'?null:'ai:chat';
 

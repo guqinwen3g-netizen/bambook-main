@@ -106,9 +106,6 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'audit:export', reason: 'no-scope-enforcement', note: '审计导出未按本码把关' },
   { scope: 'moq:capsule_exemption:write', reason: 'no-scope-enforcement', note: 'moq 模块存在，胶囊豁免写未按本码把关（另有 settings:moq:write / moq:line_override 已接通）' },
   { scope: 'quotations:convert', reason: 'no-scope-enforcement', note: '报价转订单未按本码把关' },
-  { scope: 'ai:write:low', reason: 'no-scope-enforcement', note: 'AI 写权限分级未按本码把关（ai:chat / ai:agent 已接通）' },
-  { scope: 'ai:write:medium', reason: 'no-scope-enforcement', note: '同上' },
-  { scope: 'ai:write:high', reason: 'no-scope-enforcement', note: '同上' },
 
   // ── *:admin 系列：只出现在 permissionGuard 的 WRITE_SCOPE_EXACT 高危分类集 ──
   { scope: 'customs:admin', reason: 'no-scope-enforcement', note: '同上（单证模板/签章配置实际未按本码把关）' },
@@ -427,6 +424,10 @@ describe('★ 专项：Mist 平台命令门禁消费的码', () => {
     ['finance:payment_request:approve', 'shared/mistPayables.ts', "approve: 'finance:payment_request:approve'"],
     ['bom:admin', 'shared/mistPlatform.ts', "command.type==='platform.bom.transition'?'bom:admin':'bom:write'"],
     // 2026-11 用户定案：付款审批按金额分档、首笔付款加签，审批人须当前持有对应档位码。
+    // 2026-11 用户定案：AI 提议确认按命令风险等级要求 ai:write:low/medium/high，高风险须复验密码。
+    ['ai:write:low', 'shared/mistAgentProposals.ts', "low: 'ai:write:low'"],
+    ['ai:write:medium', 'shared/mistAgentProposals.ts', "medium: 'ai:write:medium'"],
+    ['ai:write:high', 'shared/mistAgentProposals.ts', "high: 'ai:write:high'"],
     ['vouchers:approve:pay_lt5', 'shared/mistPayables.ts', "pay_lt5: 'vouchers:approve:pay_lt5'"],
     ['vouchers:approve:pay_gt5', 'shared/mistPayables.ts', "pay_gt5: 'vouchers:approve:pay_gt5'"],
     ['vouchers:approve:pay_new_supplier', 'shared/mistPayables.ts', "pay_new_supplier: 'vouchers:approve:pay_new_supplier'"],

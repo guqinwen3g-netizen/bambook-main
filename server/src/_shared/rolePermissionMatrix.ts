@@ -414,7 +414,7 @@ const SALES_BASE: RolePermissionMatrix = {
   'reports:write': true,
   'ai:chat': true,
   'ai:write:low': true,    // AI-1选C：低风险写（登记跟进/加标签）无确认
-  'ai:write:medium': true, // 中风险需要确认框的（前端UI再弹窗），后端有scope就允许执行（确认框是前端UX）
+  'ai:write:medium': true, // 中风险：确认 Agent 提议时服务端校验本码，界面列出将改动的字段（mistAgentProposals.ts 风险登记）
   // 客户市场
   'relations:read': true,
   'relations:write': true,

@@ -26,7 +26,8 @@ export interface MistWorkspaceContext {
   loading: boolean; saving: boolean; error: string; pending: Pending | null;
   pendingCreate?: MistPendingCreate | null;
   commandRecovery?:MistCommandRecovery|null;
-  run: (command: MistCommand) => Promise<MistRunReceipt>;
+  /** reauth：只在确认高风险 Agent 提议时随本次请求发送，不写入本机待核对记录。 */
+  run: (command: MistCommand, options?: { reauth?: { password: string } }) => Promise<MistRunReceipt>;
   uploadFile: (file: File, options?:MistUploadOptions) => Promise<MistFile>;
   downloadFile: (file: MistFile) => Promise<void>;
   /** 读取附件原件（带登录凭据），供在线预览使用；不会触发下载。 */
@@ -514,7 +515,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       throw failure;
     }finally{if(token)unlock(token,authority);}
   },[authority.key,authority.userId,authority.status,boundEpoch,boundWorkspaceId,assertSource,lock,load,put,unlock,persist,clearPending,holdForReview]);
-  const run = React.useCallback(async (command: MistCommand) => {
+  const run = React.useCallback(async (command: MistCommand, options?: { reauth?: { password: string } }) => {
     assertSource(authority, boundEpoch, boundWorkspaceId);
     if (pendingCreateRef.current) throw new RequestError(createNotice(pendingCreateRef.current));
     if (pendingRef.current) throw new RequestError('存在待核对的操作，请先核对原请求结果');
@@ -522,7 +523,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     try {
       const intent: Pending = { workspaceId: boundWorkspaceId!, requestId: crypto.randomUUID(), expectedRevision: snapshot.current!.revision, actorId: authority.userId, kind: 'command', command: JSON.parse(JSON.stringify(command)) };
       const audible = !['settings.update','notification.read','notification.readAll','email.flag','email.move'].includes(command.type);
-      try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command }), authority); if(audible)playFeedbackSound('success');return result;}
+      try{const result=await perform(intent, JSON.stringify({ requestId: intent.requestId, expectedRevision: intent.expectedRevision, command: intent.command, ...(options?.reauth && command.type === 'agent.proposal.confirm' ? { reauth: { password: options.reauth.password } } : {}) }), authority); if(audible)playFeedbackSound('success');return result;}
       catch(failure){
         if(audible)playFeedbackSound('failure');
         // Forms retain the exact unresolved command identity, even if React batches away the saving frame.

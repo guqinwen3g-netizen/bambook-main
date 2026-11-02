@@ -103,6 +103,10 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
 
   it('finance agent turns a confirmation into a proposal that only the owner can confirm or reject in the app; confirming runs the real command', async () => {
     const local = createMistLocalRuntime({ directory });
+    // 财务岗默认只有 ai:write:low/medium；本用例先验证缺高风险档被拒，再授予该档并复验密码。
+    let grantHigh = false; const authorize = local.authorize;
+    local.authorize = async (db, prior, permission) => authorize(db, prior, permission === 'ai:write:high' && grantHigh ? undefined : permission);
+    vi.stubEnv('MIST_LOCAL_REAUTH_PASSWORD', 'local-reauth-secret');
     const app = createMistServer(undefined, { local });
     const buyer = await as(app, 'demo-buyer');
     const po = purchase(buyer.workspace, 'PO-2026-00001'), receipt = buyer.workspace.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
@@ -133,8 +137,18 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const run = async (client: any, command: any) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command }); };
     await (await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).ok;
     expect((await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(404);
-    const confirmed = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
+    const noTier = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
+    expect(noTier.status).toBe(403); expect(noTier.body.error.message).toContain('ai:write:high');
+    grantHigh = true;
+    const noPassword = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
+    expect(noPassword.status).toBe(403); expect(noPassword.body.error.code).toBe('REAUTH_REQUIRED');
+    const runWith = async (client: any, command: any, password: string) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command, reauth: { password } }); };
+    const wrong = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'not-the-password');
+    expect(wrong.status).toBe(403); expect(wrong.body.error.code).toBe('REAUTH_FAILED');
+    expect((await read(finance.client)).state.payables.settlements[0].state).toBe('pending');
+    const confirmed = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'local-reauth-secret');
     expect(confirmed.status).toBe(200);
+    expect(JSON.stringify(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: finance.workspace.id } }))).not.toContain('local-reauth-secret');
     const confirmationReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: finance.workspace.id, requestId: agentAuditReceiptId(confirmed.body.receipt.requestId) } } });
     expect(confirmationReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ actor: { id: 'demo-finance' }, source: 'human_confirmation', phase: 'confirmed', agentSessionId: finance.sessionId, proposalId: proposal.id, command: confirm, trigger: { type: 'agent.proposal.confirm', payload: { id: proposal.id } } });
     expect(confirmationReceipt.result[AGENT_AUDIT_FIELD].changes).toContainEqual({ path: ['k:payables', 'k:settlements', 'i:' + settlement.id, 'k:state'], operation: 'replace', before: 'pending', after: 'confirmed' });
