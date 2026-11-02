@@ -45,7 +45,9 @@ it('shows the risk tier; medium lists fields to change, high requires the login 
     await act(async () => confirmButton().click());
     expect(run).toHaveBeenCalledWith({ type: 'agent.proposal.confirm', payload: { id: 'p2' } }, { reauth: { password: 'Secret-1' } });
 
+    // 目录外的普通写入按规则为中风险（用户 2026-11-02 定案：只有付款、核销、审批类为高风险），不要求密码。
     run.mockClear(); show({ ...base, id: 'p3', command: { type: 'unregistered.command', payload: {} } });
-    expect(document.querySelector('[data-agent-proposal-risk]')?.getAttribute('data-agent-proposal-risk')).toBe('high');
+    expect(document.querySelector('[data-agent-proposal-risk]')?.getAttribute('data-agent-proposal-risk')).toBe('medium');
+    expect(document.querySelector('input[type="password"]')).toBeNull();
   } finally { act(() => root.unmount()); host.remove(); }
 });
