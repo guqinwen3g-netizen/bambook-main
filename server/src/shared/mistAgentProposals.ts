@@ -37,7 +37,7 @@ export type AgentCommandRisk = 'low' | 'medium' | 'high';
 export const AI_WRITE_SCOPES: Record<AgentCommandRisk, string> = { low: 'ai:write:low', medium: 'ai:write:medium', high: 'ai:write:high' };
 export const AGENT_RISK_LABEL: Record<AgentCommandRisk, string> = { low: '低风险', medium: '中风险', high: '高风险' };
 const LOW_RISK = ['crm.followUp.save', 'email.flag', 'email.link', 'email.unlink', 'email.followUp', 'email.draft.save', 'notification.read', 'notification.readAll', 'task.complete', 'calendar.save', 'market.quotation.feedback.add', 'platform.assistant.saveDraft'];
-const MEDIUM_RISK = ['email.move', 'email.state.retry', 'email.draft.delete', 'email.account.save', 'email.submitExtraction', 'email.extraction.review', 'email.extraction.resolve',
+const MEDIUM_RISK = ['email.move', 'email.state.retry', 'email.draft.delete', 'email.submitExtraction', 'email.extraction.review', 'email.extraction.resolve',
   'customer.update', 'contact.save', 'market.customer.update', 'market.contact.save', 'market.relation.save', 'market.lead.save', 'market.supplier.save', 'market.product.save', 'market.quotation.save',
   'crm.opportunity.save', 'crm.opportunity.stage', 'development.saveDraft', 'development.update', 'order.update', 'order.checklist', 'production.update',
   'fulfillment.procurement.save', 'fulfillment.shipments.save', 'fulfillment.documents.save', 'fulfillment.samples.create', 'fulfillment.samples.edit', 'payable.settlement.submit',
@@ -54,11 +54,13 @@ export const HIGH_RISK_PREFIXES: readonly string[] = ['payable.', 'finance.', 'f
   'settings.', 'member.', 'teamScope.', 'handover.', 'platform.employee.', 'platform.pricingParams.'];
 /**
  * 规则前缀与动词以外的高风险命令：费用转应付、开发费对客开票、报价最低毛利率；
- * 以及审批 / 放行类确认与索赔赔付、报废处置（2026-11-02 复核裁定）。
+ * 以及审批 / 放行类确认与索赔赔付、报废处置、放弃追偿、邮箱成员与发信凭据（2026-11-02 复核裁定）。
  */
 export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.payable', 'development.billing.issue', 'market.marginFloor.set',
   'fulfillment.qc.confirm', 'fabric.confirm', 'development.confirm', 'platform.claim.disposition', 'platform.claim.execute', 'platform.claim.verify',
-  'fulfillment.inventory.quarantine.dispose', 'fulfillment.claimInventory.scrap']);
+  'fulfillment.inventory.quarantine.dispose', 'fulfillment.claimInventory.scrap',
+  // 放弃追偿属减免；修改邮箱成员与发信凭据属权限类（2026-11-02 复核补充）。
+  'fulfillment.inventory.quarantine.noRecovery', 'email.account.save']);
 /** 审批、决定、驳回、减免、核销、放行、冲销、作废、退款、结清、分配、对账、清除。 */
 export const HIGH_RISK_VERB = /(^|\.)(approve|decide|reject|waive|writeoff|release|reverse|void|refund|settle|allocate|reconcile|purge)/i;
 export const agentCommandRisk = (type: string | undefined): AgentCommandRisk => {
