@@ -99,3 +99,24 @@ it('shows an internal order as cost only and keeps it out of the business revenu
   expect(queryByRole(detail,'table',{name:'收入'})).toBeNull();expect(detail.textContent).not.toContain('出口退税');expect(detail.textContent).not.toContain('毛利');expect(detail.textContent).toContain('实际成本');
   function getStatValue(){return [...host.querySelectorAll('.mist-stat')].find(n=>n.textContent?.includes('实际毛利'))?.textContent;}
 });
+
+it('hides the export rebate and the rebate-inclusive margin when the rebate amounts are masked or not readable',async()=>{
+  let n=0;const c={...ctx,id:()=>'rbm-'+(++n)};
+  const customs=state.fulfillment.customs.find(x=>state.fulfillment.shipments.find(s=>s.id===x.shipmentId)?.state==='departed')!;
+  const {rebateCandidateBills}=await import('../../../../../server/src/shared/mistExportRebate');
+  state=applyMistCommand(state,{type:'rebate.claim.file',payload:{customsId:customs.id,billIds:rebateCandidateBills(state,customs).map(b=>b.id),filedAt:'2026-10-16',batchRef:'B-1'}} as MistCommand,c).state;
+  render();const rebateText=()=>{const table=getByRole(host,'table',{name:'订单实际核算'}),headers=[...table.querySelectorAll('[role="columnheader"]')].map(h=>h.textContent),row=[...table.querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('SO-G-2026-017'))!;return row.querySelectorAll('[role="cell"],[role="gridcell"]')[headers.indexOf('退税')]!.textContent!;};
+  expect(rebateText()).toBe('26,000.00');
+  // 服务端按 sensitive:tax_base 掩码后的投影：金额为 0 并标 taxMasked
+  state=structuredClone(state);state.exportRebate!.claims=state.exportRebate!.claims.map(x=>({...x,taxable:0,expected:0,taxMasked:true,lines:x.lines.map(l=>({...l,taxable:0,rebate:0}))}));
+  act(()=>root.unmount());root=createRoot(host);render();
+  expect(rebateText()).toContain('已隐藏');expect(rebateText()).not.toContain('26,000.00');
+  expect(host.textContent).toContain('实际毛利（不含退税）');expect(host.textContent).not.toContain('实际毛利 · 含退税');
+  const row=[...getByRole(host,'table',{name:'订单实际核算'}).querySelectorAll('[role="row"]')].find(r=>r.textContent?.includes('SO-G-2026-017'))!;await click(row);
+  const detail=document.querySelector('[data-order-cost-detail]') as HTMLElement;
+  expect(detail.textContent).toContain('已隐藏');expect(detail.textContent).not.toMatch(/应退 [\d,]+/);
+  // 整段退税不可读（无 tax:read）
+  act(()=>root.unmount());root=createRoot(host);
+  act(()=>root.render(<MistRoot><ToastProvider><OrderActualCostPanel state={state} asOf="2026-10-18" canWrite={false} busy={false} run={run} rebate="denied"/></ToastProvider></MistRoot>));
+  expect(rebateText()).toContain('无权查看');
+});

@@ -316,6 +316,13 @@ it('requires usance days only for a usance credit and closes a page editor when 
 
 it('shows partially visible credit without the full bank amount or original file',async()=>{store.state!.partialLettersOfCredit=[{id:'partial-lc',code:'LC-P',lcNo:'LC-PARTIAL',customerId:'c',customer:'Cedar',currency:'USD',orderIds:['o'],hiddenCount:1,cancelled:false}];render();await click(getByRole(host,'tab',{name:/信用证/}));const list=getByRole(host,'list',{name:'部分可见信用证'});expect(list.textContent).toContain('LC-PARTIAL');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('1000');});
 
+it('shows the rebate claim as not viewable without tax:read',async()=>{
+  const st=store.state!,f=st.fulfillment;session.denied.add('tax:read');
+  f.shipments.push(shipment('m',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('m','cleared',{hsCode:'6202.1300'}));
+  render();await click(getByRole(host,'tab',{name:/退税/}));
+  const table=getByRole(host,'table',{name:'退税资料核对'});
+  expect(table.textContent).toContain('无权查看');expect(table.textContent).not.toContain('预计');
+});
 it('shows the rebate taxable base and expected refund as hidden when the server masked them',async()=>{
   const st=store.state!,f=st.fulfillment;
   f.shipments.push(shipment('m',{state:'departed',departedAt:'2026-10-13T02:00:00Z'} as any));f.customs.push(customs('m','cleared',{hsCode:'6202.1300'}));
