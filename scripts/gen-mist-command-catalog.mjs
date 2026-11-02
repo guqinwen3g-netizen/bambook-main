@@ -69,7 +69,8 @@ export function buildCatalog() {
   const found = new Map();
   for (const file of fs.readdirSync(SHARED).filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts')).sort()) {
     const text = fs.readFileSync(path.join(SHARED, file), 'utf8');
-    for (const match of text.matchAll(/\{\s*type:\s*'([a-z][\w]*(?:\.[\w]+)+)'\s*;\s*payload\??:\s*/g)) {
+    // `{` 与 type 之间允许注释；type 可写成字面量联合（`type: 'a' | 'b'; payload: …`），联合中每个类型共用同一 payload。
+    for (const match of text.matchAll(/\{\s*(?:\/\*(?:[^*]|\*(?!\/))*\*\/\s*|\/\/[^\n]*\n\s*)*type:\s*('[a-z][\w]*(?:\.[\w]+)+'(?:\s*\|\s*'[a-z][\w]*(?:\.[\w]+)+')*)\s*;\s*payload\??:\s*/g)) {
       const at = match.index + match[0].length;
       let payload = text[at] === '{' ? balanced(text, at) : (text.slice(at).match(/^[\w.<>[\]|' ]+/) || [''])[0].trim();
       // 联合类型 payload（如 `{ purpose: 'prepayment'… } | { purpose: 'bill'… }`）须收齐全部分支，否则 Agent 只能看到第一种用法。
@@ -82,9 +83,11 @@ export function buildCatalog() {
           payload += ' | ' + variant; end += next[0].length + variant.length;
         }
       }
-      if (!payload || found.has(match[1])) continue;
+      if (!payload) continue;
       const flat = payload.replace(/\s+/g, ' ').slice(0, 1500), refs = referenced(flat, types);
-      found.set(match[1], { type: match[1], payload: flat, ...(refs.size ? { types: Object.fromEntries([...refs].slice(0, 12)) } : {}), source: `server/src/shared/${file}` });
+      for (const [, type] of match[1].matchAll(/'([^']+)'/g)) {
+        if (!found.has(type)) found.set(type, { type, payload: flat, ...(refs.size ? { types: Object.fromEntries([...refs].slice(0, 12)) } : {}), source: `server/src/shared/${file}` });
+      }
     }
   }
   return [...found.values()].sort((a, b) => a.type.localeCompare(b.type));

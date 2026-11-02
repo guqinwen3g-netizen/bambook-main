@@ -768,8 +768,24 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
+  "type": "fulfillment.production.intake",
+  "payload": "ProductionObservationInput",
+  "types": {
+   "ProductionObservationInput": "{ productionId: string; asOf: string; startedOn?: string; sourceName: string; evidence: string; fileIds: string[]; stage: keyof typeof OBSERVED_PRODUCTION_STAGES | null; percent: number | null; quantity: number | null; }"
+  },
+  "source": "server/src/shared/mistProductionIntake.ts"
+ },
+ {
   "type": "fulfillment.production.intake.decide",
   "payload": "{ id: string; decision: 'approved' | 'rejected'; note: string }",
+  "source": "server/src/shared/mistProductionIntake.ts"
+ },
+ {
+  "type": "fulfillment.production.observe",
+  "payload": "ProductionObservationInput",
+  "types": {
+   "ProductionObservationInput": "{ productionId: string; asOf: string; startedOn?: string; sourceName: string; evidence: string; fileIds: string[]; stage: keyof typeof OBSERVED_PRODUCTION_STAGES | null; percent: number | null; quantity: number | null; }"
+  },
   "source": "server/src/shared/mistProductionIntake.ts"
  },
  {
@@ -820,6 +836,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "FulfillmentSource": "{ kind: 'version'; devId: string; versionId: string; } | { kind: 'orderLine'; orderId: string; lineId: string; productionId?: string; } | { kind: 'manual'; description: string; }"
   },
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.qc.reschedule",
+  "payload": "{ id: string; domain: 'garment' | 'fabric'; due: string; reason: string }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.qc.transfer",
+  "payload": "{ id: string; domain: 'garment' | 'fabric'; assigneeId: string; reason: string }",
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
