@@ -75,7 +75,8 @@ export function seedCompanyHistory(initial:MistState,contexts:{sales:MistContext
  const vatFile=proof('vat-invoice',purchaseId,`${order.code} 供应商专票.pdf`,26);
  const billId=run({type:'payable.bill.register',payload:{invoiceType:'vat-special',supplierId:supplier.id,invoiceNo:`310026${month}${family==='fabric'?'01':'02'}8264`,invoiceDate:date(26),currency:'CNY',amount:payAmount,taxAmount:Number((payAmount*13/113).toFixed(2)),taxRate:'13%',lines:[{purchaseId,amount:payAmount,settlementId}],due:date(28),dueBasis:'本批交付验收后付清',fileIds:[vatFile]}},'finance',26).id!;
  const requestId=run({type:'payable.request.submit',payload:{purpose:'bill',supplierId:supplier.id,currency:'CNY',lines:[{billId,amount:payAmount}],reason:'本批结算与供应商发票均已确认',fileIds:[vatFile]}},'sales',27).id!;
- run({type:'payable.request.decide',payload:{id:requestId,decision:'approved',note:'批准按已确认票据付款'}},'reviewer',27);
+ // 首笔付款或大额付款需要两级审批：每一级各签一次。
+ for(let level=0;level<3&&state.payables?.requests?.find(r=>r.id===requestId)?.state==='pending';level++)run({type:'payable.request.decide',payload:{id:requestId,decision:'approved',note:'批准按已确认票据付款'}},'reviewer',27);
  const reference=`PAY-${order.code}`;
  run({type:'payable.payment.register',payload:{requestId,date:date(28),amount:payAmount,reference,allocations:[{billId,amount:payAmount}],fileIds:[vatFile],note:'银行付款回单核对入账'}},'finance',28);
  const payment=state.payments.find(p=>p.ref===reference)!;

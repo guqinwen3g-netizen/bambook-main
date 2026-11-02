@@ -77,12 +77,27 @@ export const payeeText = (payee: PaymentPayee | undefined, now: string) => payee
   ? `${payee.accountName} · ${payee.bankName} · ${payee.accountNo}${payee.swift ? ' · SWIFT ' + payee.swift : ''}${payeeRecent(payee, now) ? `（${PAYEE_RECENT_DAYS} 天内新增或变更，付款前请按已知电话核实）` : ''}`
   : '未登记收款账户，付款前须由财务登记并核实';
 export type PaymentRequestLine = { billId: string; billCode: string; invoiceNo: string; amount: number };
+/**
+ * 付款审批分档（2026-11 用户定案）：申请金额折合人民币 ≤5 万元由 pay_lt5 档审批，>5 万元由 pay_gt5 档审批；
+ * 收款供应商此前没有任何有效付款（首笔付款）时，不论金额再加 pay_new_supplier（总经理级）一级，两级都批准才放行。
+ * 外币按申请日的记账汇率折算：取上月末财务登记的月末汇率（与期末调汇的记账汇率同源）；没有该汇率时拒绝，不猜汇率。
+ * 每一级由服务端按申请人重建的审批人名单决定，审批人须当前同时持有付款申请审批权与该档权限；一次决定只签一级。
+ */
+export type PaymentApprovalLevel = 'pay_lt5' | 'pay_gt5' | 'pay_new_supplier';
+export const PAYMENT_APPROVAL_SCOPES: Record<PaymentApprovalLevel, string> = { pay_lt5: 'vouchers:approve:pay_lt5', pay_gt5: 'vouchers:approve:pay_gt5', pay_new_supplier: 'vouchers:approve:pay_new_supplier' };
+export const PAYMENT_APPROVAL_LABEL: Record<PaymentApprovalLevel, string> = { pay_lt5: '5 万元及以下档', pay_gt5: '5 万元以上档', pay_new_supplier: '首笔付款加签（总经理级）' };
+/** 5 万元人民币（分）。 */
+export const PAYMENT_TIER_LIMIT_CNY_MINOR = 5_000_000;
+export type PaymentTier = { cnyAmount: number; rate: string; rateSource: string; firstPayment: boolean; levels: Array<{ level: PaymentApprovalLevel; reviewerIds: string[] }> };
+export type PaymentLevelDecision = { level: PaymentApprovalLevel; actorId: string; actor: string; at: string; decision: 'approved' | 'rejected'; note: string };
 export type PaymentRequest = {
   id: string; code: string; purpose: 'prepayment' | 'bill' | 'settlement'; supplierId: string; supplier: string; currency: string; amount: number;
   planId?: string; purchaseId?: string; purchaseCode?: string; settlementId?: string; settlementCode?: string; lines: PaymentRequestLine[];
   /** 提交时冻结的收款账户；付款登记时供应商当前账户须与此一致。 */
   payee?: PaymentPayee; reason: string; fileIds: string[];
   requesterId: string; requester: string; submittedAt: string; reviewerIds: string[]; snapshot: Array<{ label: string; value: string }>;
+  /** 提交时按金额与是否首笔付款冻结的审批档位；旧申请没有此字段，审批时按当前规则补算。 */
+  tier?: PaymentTier; approvals?: PaymentLevelDecision[];
   state: 'pending' | 'approved' | 'rejected' | 'paid' | 'cancelled';
   decision?: { actorId: string; actor: string; at: string; decision: 'approved' | 'rejected'; note: string };
   cancelled?: { at: string; actor: string; reason: string };
@@ -534,11 +549,53 @@ export function invoiceableSettlements(root: Root, purchaseId: string, exceptBil
 export function purchaseRequiresSettlementLink(root: Root, purchaseId: string) { return confirmedSettlements(root, purchaseId).length > 0 || purchasePrepaidMinor(root, purchaseId) > 0; }
 /** 主管审批收件箱：只给提交时冻结的申请快照和附件。撤回且未决定的申请不再出现。 */
 export function getPayableReviews(root: Root): MistReviewTask[] {
-  return read(root).requests.filter(r => !(r.state === 'cancelled' && !r.decision)).map(r => ({
-    id: 'payment:' + r.id, kind: 'payment' as const, entityId: r.id, title: `${r.code} · ${r.supplier} · ${fx(major(mistMoneyMinor(r.amount)))} ${r.currency}`,
-    requesterId: r.requesterId, reviewerIds: r.reviewerIds, status: r.state === 'pending' ? 'pending' as const : r.decision?.decision === 'rejected' ? 'rejected' as const : 'approved' as const,
-    submittedAt: r.submittedAt, requiredPermission: PAYMENT_REQUEST_SCOPES.approve, fileIds: [...r.fileIds], target: { view: 'payment-vouchers', id: r.id }, details: r.snapshot.map(d => ({ ...d })),
-  }));
+  return read(root).requests.filter(r => !(r.state === 'cancelled' && !r.decision)).map(r => {
+    const pending = r.state === 'pending' && r.tier ? pendingLevels(r) : [];
+    return {
+      id: 'payment:' + r.id, kind: 'payment' as const, entityId: r.id, title: `${r.code} · ${r.supplier} · ${fx(major(mistMoneyMinor(r.amount)))} ${r.currency}`,
+      // 待审批时只列还差的那一级的审批人，已签完的人不再显示为可决定。
+      requesterId: r.requesterId, reviewerIds: pending.length ? [...new Set(pending.flatMap(l => l.reviewerIds))] : r.reviewerIds, status: r.state === 'pending' ? 'pending' as const : r.decision?.decision === 'rejected' ? 'rejected' as const : 'approved' as const,
+      submittedAt: r.submittedAt, requiredPermission: PAYMENT_REQUEST_SCOPES.approve, fileIds: [...r.fileIds], target: { view: 'payment-vouchers', id: r.id }, details: [...r.snapshot.map(d => ({ ...d })), ...paymentTierDetails(r)],
+    };
+  });
+}
+const pendingLevels = (r: PaymentRequest) => (r.tier?.levels || []).filter(l => !(r.approvals || []).some(a => a.level === l.level && a.decision === 'approved'));
+/** 审批页展示：需要哪一档、已签哪一级、还差哪一级。 */
+export function paymentTierDetails(r: PaymentRequest): Array<{ label: string; value: string }> {
+  if (!r.tier) return [];
+  const t = r.tier, cny = fx(t.cnyAmount) + ' CNY';
+  const basis = r.currency === 'CNY' ? `申请金额 ${cny}` : `折合 ${cny}（${fx(mistMoneyMinor(r.amount) / 100)} ${r.currency} × ${t.rate}，${t.rateSource}）`;
+  const done = (r.approvals || []).filter(a => a.decision === 'approved'), left = r.state === 'pending' ? pendingLevels(r) : [];
+  return [
+    { label: '审批档位', value: `${basis}；需 ${t.levels.map(l => PAYMENT_APPROVAL_LABEL[l.level]).join(' + ')}${t.firstPayment ? '（该供应商首笔付款）' : ''}` },
+    { label: '审批进度', value: [done.length ? '已批：' + done.map(a => `${PAYMENT_APPROVAL_LABEL[a.level]}（${a.actor}）`).join('、') : '', left.length ? '还差：' + left.map(l => PAYMENT_APPROVAL_LABEL[l.level]).join('、') : r.state === 'pending' ? '' : '审批已结束'].filter(Boolean).join('；') || '尚未审批' },
+  ];
+}
+/** 外币（分）× 汇率字符串 → 人民币（分），四舍五入。 */
+function cnyMinorAt(amountMinor: number, rate: string) {
+  const [w, f = ''] = rate.split('.'), scaled = BigInt(w) * BigInt(1000000) + BigInt(f.padEnd(6, '0').slice(0, 6));
+  return Number((BigInt(amountMinor) * scaled + BigInt(500000)) / BigInt(1000000));
+}
+const previousMonth = (month: string) => { const [y, m] = month.split('-').map(Number); return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`; };
+/** 申请日的记账汇率：上月末登记的有效月末汇率；没有就拒绝，不改用更早或其他口径的汇率。 */
+export function paymentRequestRate(root: Root, currency: string, date: string): { rate: string; source: string } {
+  if (currency === 'CNY') return { rate: '1', source: '人民币' };
+  const month = previousMonth(date.slice(0, 7));
+  const row = (root.fxPeriodRates || []).find(r => !r.voided && r.currency === currency && r.month === month);
+  if (!row || !/^\d+(\.\d{1,6})?$/.test(row.rate) || !(Number(row.rate) > 0)) fail(`缺少 ${month} 的 ${currency} 月末汇率（申请日 ${date} 的记账汇率），无法判定付款审批档位；请财务先登记月末汇率`, 'PRECONDITION');
+  return { rate: row!.rate, source: `${month} 月末汇率` };
+}
+/** 按申请金额与该供应商是否已有有效付款，计算需要的审批级别与每级审批人。 */
+function paymentTier(root: Root, request: Pick<PaymentRequest, 'amount' | 'currency' | 'supplierId' | 'requesterId'>, date: string, c: MistContext): PaymentTier {
+  const amount = mistMoneyMinor(request.amount), rate = paymentRequestRate(root, request.currency, date);
+  const cny = request.currency === 'CNY' ? amount : cnyMinorAt(amount, rate.rate);
+  const firstPayment = !read(root).payments.some(p => p.supplierId === request.supplierId && !paymentReversed(root, p.id));
+  const levels: PaymentApprovalLevel[] = [cny > PAYMENT_TIER_LIMIT_CNY_MINOR ? 'pay_gt5' : 'pay_lt5', ...(firstPayment ? ['pay_new_supplier' as const] : [])];
+  return { cnyAmount: major(cny), rate: rate.rate, rateSource: rate.source, firstPayment, levels: levels.map(level => {
+    const reviewerIds = [...new Set((c.authority?.paymentTierReviewerIds?.[level] || []).filter(id => id !== request.requesterId))];
+    if (!reviewerIds.length) fail(`当前没有可审批「${PAYMENT_APPROVAL_LABEL[level]}」的审批人，请联系管理员配置部门主管或授予该档审批权限`, 'PRECONDITION');
+    return { level, reviewerIds };
+  }) };
 }
 
 function event(root: Root, c: MistContext, entityId: string, message: string) {
@@ -735,8 +792,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
     case 'payable.request.submit': {
       if (!c.actorId) fail('无法识别申请人', 'FORBIDDEN');
       const reason = text(p.reason, '申请说明', true, 1000), fileIds = files(root, p.fileIds), money = (m: number, cur: string) => fx(major(m)) + ' ' + cur;
-      const reviewerIds = [...new Set((c.authority?.paymentReviewerIds || []).filter(id => id !== c.actorId))];
-      if (!reviewerIds.length) fail('当前没有可审批付款申请的主管，请联系管理员配置部门主管', 'PRECONDITION');
+      const reviewerIds: string[] = [];
       const id = c.id(), code = nextCode('PR', s.requests, c.now);
       let request: PaymentRequest;
       if (p.purpose === 'prepayment') {
@@ -803,6 +859,9 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         ];
         request = { id, code, purpose: 'bill', supplierId, supplier, currency, amount: major(total), lines, ...(plan ? { planId: plan.id, purchaseId: plan.purchaseId, purchaseCode: plan.purchaseCode } : {}), reason, fileIds, requesterId: c.actorId, requester: c.actorName, submittedAt: c.now, reviewerIds, snapshot, state: 'pending', paymentHistory: [] };
       } else return fail('付款申请类型无效');
+      // 按折合人民币金额与是否首笔付款冻结审批档位；每级审批人由服务端按申请人重建。
+      request.tier = paymentTier(root, request, today, c); request.approvals = [];
+      request.reviewerIds = [...new Set(request.tier.levels.flatMap(l => l.reviewerIds))];
       // 冻结收款账户并写入审批快照，审批人看到钱付到哪里。
       const payee = supplierPayee(root as any, request.supplierId, request.currency);
       if (payee) request.payee = payee;
@@ -816,10 +875,18 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const request = s.requests.find(r => r.id === text(p.id, '付款申请')) || fail('付款申请不存在', 'NOT_FOUND');
       if (request.state !== 'pending') fail('付款申请已处理或已撤回', 'CONFLICT');
       if (!['approved', 'rejected'].includes(p.decision)) fail('审批决定无效');
-      if (!c.actorId || c.actorId === request.requesterId || !request.reviewerIds.includes(c.actorId) || !(c.authority?.paymentReviewerIds || []).includes(c.actorId)) fail('当前账号不是本次付款申请的有效审批主管', 'FORBIDDEN');
+      if (!c.actorId || c.actorId === request.requesterId) fail('当前账号不是本次付款申请的有效审批主管', 'FORBIDDEN');
+      // 分档规则前提交的申请没有冻结档位：按提交日汇率与当前审批人名单补算，同样缺汇率即拒绝。
+      if (!request.tier) { request.tier = paymentTier(root, request, platformBusinessDate(request.submittedAt), c); request.approvals = []; }
+      const current = c.authority?.paymentTierReviewerIds || {}, left = pendingLevels(request);
+      // 审批人须在提交时冻结的该级名单里，且此刻仍按当前岗位权限被重建为该级审批人（撤权、改派即失效）。
+      const level = left.find(l => l.reviewerIds.includes(c.actorId!) && (current[l.level] || []).includes(c.actorId!));
+      if (!level) fail(`当前账号不是本次付款申请的有效审批主管；还差：${left.map(l => PAYMENT_APPROVAL_LABEL[l.level]).join('、')}`, 'FORBIDDEN');
       const note = text(p.note, '审批意见', true, 4000);
-      request.state = p.decision; request.decision = { actorId: c.actorId, actor: c.actorName, at: c.now, decision: p.decision, note };
-      event(root, c, request.id, `付款申请 ${request.code} ${p.decision === 'approved' ? '已批准' : '已退回'}：${note}`);
+      (request.approvals ||= []).push({ level: level!.level, actorId: c.actorId, actor: c.actorName, at: c.now, decision: p.decision, note });
+      const finished = p.decision === 'rejected' || left.length === 1;
+      if (finished) { request.state = p.decision; request.decision = { actorId: c.actorId, actor: c.actorName, at: c.now, decision: p.decision, note }; }
+      event(root, c, request.id, `付款申请 ${request.code} ${PAYMENT_APPROVAL_LABEL[level!.level]}${p.decision === 'approved' ? '已批准' : '已退回'}${finished ? '' : `，还差 ${left.filter(l => l !== level).map(l => PAYMENT_APPROVAL_LABEL[l.level]).join('、')}`}：${note}`);
       return { id: request.id };
     }
     case 'payable.request.cancel': {

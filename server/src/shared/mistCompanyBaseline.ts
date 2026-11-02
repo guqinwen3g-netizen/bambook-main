@@ -49,7 +49,7 @@ function contextFor(base:MistContext,roster:MistCompanyRoster,key:MistCompanyRos
  const members=memberDirectory(roster),reviewer=roster.owner.id;
  return{...base,actorId:roster[key].id,actorName:roster[key].name,members,can:()=>true,consumeBusinessNumber:()=>number(),authority:{
   supplier:Object.fromEntries(['purchase','processing','finished','material'].flatMap(kind=>['garment','fabric'].map(domain=>[`supplierCommitment.approvers.${kind}.${domain}`,{version:1,userIds:[reviewer]}]))),
-  businessReviewerId:reviewer,claimReviewerId:reviewer,orderReviewerIds:{garment:[reviewer],fabric:[reviewer]},paymentReviewerIds:[reviewer],risk:{all:true,orders:true,customers:true},riskReviewerIds:[reviewer],
+  businessReviewerId:reviewer,claimReviewerId:reviewer,orderReviewerIds:{garment:[reviewer],fabric:[reviewer]},paymentTierReviewerIds:{pay_lt5:[reviewer],pay_gt5:[reviewer],pay_new_supplier:[reviewer]},risk:{all:true,orders:true,customers:true},riskReviewerIds:[reviewer],
  }};
 }
 

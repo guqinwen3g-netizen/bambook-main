@@ -121,9 +121,6 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'shipments:approve', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'knowledge:approve', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'invoices:approve:writeoff', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
-  { scope: 'vouchers:approve:pay_lt5', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
-  { scope: 'vouchers:approve:pay_gt5', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
-  { scope: 'vouchers:approve:pay_new_supplier', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
 ];
 
 /** 已知被强制的码 —— 用于**阳性对照**，防止扫描逻辑退化成恒真/恒假 */
@@ -382,14 +379,11 @@ describe('★ 专项：审批权限码 = UI 能力标签（口径 B1）', () => 
     'shipments:approve',
     'knowledge:approve',
     'invoices:approve:writeoff',
-    'vouchers:approve:pay_lt5',
-    'vouchers:approve:pay_gt5',
-    'vouchers:approve:pay_new_supplier',
   ];
 
-  it('清单为 10 个（防漏列/误删）—— ⚠️ 不含 aftersales:approve（它由 A 组模块按其专项单独钉）；procurement:approve / finance:payment_request:approve 已由 Mist 平台命令门禁消费，见下方专项', () => {
-    expect(UI_LABEL_APPROVE_CODES).toHaveLength(10);
-    expect(new Set(UI_LABEL_APPROVE_CODES).size).toBe(10);
+  it('清单为 7 个（防漏列/误删）—— ⚠️ 不含 aftersales:approve（它由 A 组模块按其专项单独钉）；procurement:approve / finance:payment_request:approve / vouchers:approve:pay_* 已由 Mist 平台命令门禁消费，见下方专项', () => {
+    expect(UI_LABEL_APPROVE_CODES).toHaveLength(7);
+    expect(new Set(UI_LABEL_APPROVE_CODES).size).toBe(7);
   });
 
   it.each(UI_LABEL_APPROVE_CODES)('%s 在册且 reason=ui-label-only', (scope) => {
@@ -432,6 +426,10 @@ describe('★ 专项：Mist 平台命令门禁消费的码', () => {
     ['procurement:approve', 'shared/mistFulfillment.ts', "return 'procurement:approve';"],
     ['finance:payment_request:approve', 'shared/mistPayables.ts', "approve: 'finance:payment_request:approve'"],
     ['bom:admin', 'shared/mistPlatform.ts', "command.type==='platform.bom.transition'?'bom:admin':'bom:write'"],
+    // 2026-11 用户定案：付款审批按金额分档、首笔付款加签，审批人须当前持有对应档位码。
+    ['vouchers:approve:pay_lt5', 'shared/mistPayables.ts', "pay_lt5: 'vouchers:approve:pay_lt5'"],
+    ['vouchers:approve:pay_gt5', 'shared/mistPayables.ts', "pay_gt5: 'vouchers:approve:pay_gt5'"],
+    ['vouchers:approve:pay_new_supplier', 'shared/mistPayables.ts', "pay_new_supplier: 'vouchers:approve:pay_new_supplier'"],
   ];
   it.each(GATES)('%s 不在豁免表且有真实门禁（%s）', (scope, file, needle) => {
     expect(EXEMPT.find((e) => e.scope === scope)).toBeUndefined();

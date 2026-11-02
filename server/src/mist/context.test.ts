@@ -34,16 +34,22 @@ describe('company leadership fallback for order governance',()=>{
  });
 });
 describe('Mist payment request reviewer authority',()=>{
- it('local identities use the sales-manager test profile',async()=>{vi.stubEnv('MIST_LOCAL_WORKSPACE','1');expect((await mistApprovalAuthority({},{...actor,mistLocal:true},'payable.request.submit')).paymentReviewerIds).toEqual(['local-manager','local-reviewer']);});
- it('uses the requester department head only while that account still holds payment-request approval',async()=>{
-  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve']});
-  expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentReviewerIds).toEqual(['head']);
-  mocks.users.set('head',{id:'head',status:'active',permissions:['procurement:approve']});
-  expect((await mistApprovalAuthority({},actor,'payable.request.decide')).paymentReviewerIds).toEqual([]);
-  mocks.dept.mockResolvedValue({reviewerId:'owner'});mocks.users.set('owner',{id:'owner',status:'active',permissions:['finance:payment_request:approve']});
-  expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentReviewerIds).toEqual([]);
+ const ALL=['finance:payment_request:approve','vouchers:approve:pay_lt5','vouchers:approve:pay_gt5','vouchers:approve:pay_new_supplier'];
+ it('local identities: sales managers hold the ≤50k tier, the full-permission reviewer holds the larger and first-payment tiers',async()=>{vi.stubEnv('MIST_LOCAL_WORKSPACE','1');expect((await mistApprovalAuthority({},{...actor,mistLocal:true},'payable.request.submit')).paymentTierReviewerIds).toEqual({pay_lt5:['local-manager','local-reviewer'],pay_gt5:['local-reviewer'],pay_new_supplier:['local-reviewer']});});
+ it('uses the requester department head per tier only while that account still holds payment-request approval and the tier scope',async()=>{
+  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});
+  expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:[],pay_new_supplier:[]});
+  mocks.users.set('head',{id:'head',status:'active',permissions:['vouchers:approve:pay_lt5']});
+  expect((await mistApprovalAuthority({},actor,'payable.request.decide')).paymentTierReviewerIds).toEqual({pay_lt5:[],pay_gt5:[],pay_new_supplier:[]});
+  mocks.dept.mockResolvedValue({reviewerId:'owner'});mocks.users.set('owner',{id:'owner',status:'active',permissions:ALL});
+  expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentTierReviewerIds).toEqual({pay_lt5:[],pay_gt5:[],pay_new_supplier:[]});
   mocks.dept.mockRejectedValue(Object.assign(new Error('none'),{code:'NO_REVIEWER_RESOLVED'}));
-  expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentReviewerIds).toEqual([]);
+  expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentTierReviewerIds).toEqual({pay_lt5:[],pay_gt5:[],pay_new_supplier:[]});
+ });
+ it('escalates tiers the department head does not hold to the company leader',async()=>{
+  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});
+  mocks.claim.mockResolvedValue({reviewerId:'boss'});mocks.users.set('boss',{id:'boss',status:'active',permissions:ALL});
+  expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:['boss'],pay_new_supplier:['boss']});
  });
 });
 describe('Mist risk handling and reviewer authority',()=>{

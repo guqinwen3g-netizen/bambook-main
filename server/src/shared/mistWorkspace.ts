@@ -61,7 +61,7 @@ export type MistContext = {
   creditDocumentIssue?: MistCreditDocumentIssue;
   /** 服务端按本次执行时的所有者、授权成员、账号状态与业务组构建（包 A）；负责人/经手人只能从这里按账号 ID 选，缺省一律拒绝。 */
   members?: MistMemberDirectoryEntry[];
-  authority?: { supplier: Record<string,{version:number;userIds:string[]}>; claimReviewerId?:string; businessReviewerId?:string; orderReviewerIds?:{garment:string[];fabric:string[]}; paymentReviewerIds?:string[]; /** 风险处理与审批：服务端按当前账号岗位权限与部门主管路由重建，不接受 payload。 */ risk?:{ all:boolean; orders:boolean; customers:boolean }; riskReviewerIds?:string[] };
+  authority?: { supplier: Record<string,{version:number;userIds:string[]}>; claimReviewerId?:string; businessReviewerId?:string; orderReviewerIds?:{garment:string[];fabric:string[]}; /** 付款申请分档审批人：服务端按申请人与各档权限重建（见 mistPayables 付款审批分档）。 */ paymentTierReviewerIds?:Partial<Record<'pay_lt5'|'pay_gt5'|'pay_new_supplier',string[]>>; /** 风险处理与审批：服务端按当前账号岗位权限与部门主管路由重建，不接受 payload。 */ risk?:{ all:boolean; orders:boolean; customers:boolean }; riskReviewerIds?:string[] };
 };
 export type DevelopmentValues = {
   domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements;

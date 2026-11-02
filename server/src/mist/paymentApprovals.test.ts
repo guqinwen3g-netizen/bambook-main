@@ -6,10 +6,10 @@ import {MistRepository} from './repository';
 import {MistPrivateFiles} from './files';
 import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
 import * as contract from '../shared/mistWorkspace';
-const env=vi.hoisted(()=>({routes:new Map<string,string>(),users:null as null|Map<string,{active:boolean;permissions:string[]}>}));
+const env=vi.hoisted(()=>({leader:'' as string,routes:new Map<string,string>(),users:null as null|Map<string,{active:boolean;permissions:string[]}>}));
 vi.mock('../approvals/approvalRoutingService',()=>({createApprovalRoutingService:()=>({
  resolveReviewerByDepartment:async(id:string)=>{const reviewerId=env.routes.get(id);if(!reviewerId)throw Object.assign(new Error('missing'),{code:'NO_REVIEWER_RESOLVED'});return{reviewerId};},
- resolveClaimLeader:async()=>{throw Object.assign(new Error('missing'),{code:'NO_REVIEWER_RESOLVED'});},
+ resolveClaimLeader:async(id:string)=>{if(!env.leader||env.leader===id)throw Object.assign(new Error('missing'),{code:'NO_REVIEWER_RESOLVED'});return{reviewerId:env.leader};},
 })}));
 vi.mock('../auth/tokenHelpers',()=>({
  loadUserWithRoles:async(_db:unknown,id:string)=>{const user=env.users?.get(id);return user?{id,status:user.active?'active':'disabled',deletedAt:null}:null;},
@@ -18,21 +18,23 @@ vi.mock('../auth/tokenHelpers',()=>({
 let root:string,repo:MistRepository,db:MemoryMistDatabase,auth:ReturnType<typeof testAuthority>;
 const actor=(id='owner')=>({...testActor(id),roles:[]});
 beforeEach(async()=>{
- root=await mkdtemp(path.join(tmpdir(),'mist-payment-approval-'));db=new MemoryMistDatabase();auth=testAuthority();env.users=auth.users;env.routes.clear();
+ root=await mkdtemp(path.join(tmpdir(),'mist-payment-approval-'));db=new MemoryMistDatabase();auth=testAuthority();env.users=auth.users;env.routes.clear();env.leader='';
  auth.users.get('owner')!.permissions.push('products:read','procurement:read','procurement:write','invoices:read','inventory:read','finance:read','orders:read','orders:write','relations:read','relations:write','finance:payment_request:create');
- for(const id of ['manager','manager2'])auth.users.set(id,{active:true,permissions:['finance:read','finance:payment_request:approve','orders:read','products:read']});
+ for(const id of ['manager','manager2'])auth.users.set(id,{active:true,permissions:['finance:read','finance:payment_request:approve','vouchers:approve:pay_lt5','orders:read','products:read']});
  env.routes.set('owner','manager');env.routes.set('manager','manager');env.routes.set('manager2','manager2');
  repo=new MistRepository(db,contract,new MistPrivateFiles(root),auth.authorize,()=>new Date('2026-10-19T08:00:00Z'));
 });
 afterEach(async()=>{await rm(root,{recursive:true,force:true});vi.unstubAllEnvs();});
-async function fixture(){
+async function fixture(first=false){
  const w=await repo.create(actor(),{name:'Payment approval',seed:'demo'});let revision=w.revision,sequence=0;
  const run=async(command:any)=>{const next=await repo.execute(actor(),w.id,{requestId:'setup-'+(++sequence),expectedRevision:revision,command});revision=next.workspace.revision;return next;};
- const row=db.workspaces.get(w.id)!;row.state.memberIds=['manager','manager2'];row.state.members=['manager','manager2'].map(userId=>({userId,name:userId,addedBy:'owner',addedByName:'owner',addedAt:'2026-10-19T08:00:00Z'}));row.state.memberGroups=['manager','manager2'].map(userId=>({userId,groups:['fabric','garment']}));
+ const row=db.workspaces.get(w.id)!;const ids=['manager','manager2','boss'];row.state.memberIds=ids;row.state.members=ids.map(userId=>({userId,name:userId,addedBy:'owner',addedByName:'owner',addedAt:'2026-10-19T08:00:00Z'}));row.state.memberGroups=ids.map(userId=>({userId,groups:['fabric','garment']}));
  const state=(await repo.get(actor(),w.id)).state,po=state.fulfillment.purchases.find(p=>p.code==='PO-2026-00001')!;
+ // 默认该供应商已有历史付款（非首笔），只走金额档一级。
+ if(!first)db.workspaces.get(w.id)!.state.payables!.payments.push({id:'old-pay',paymentId:'old-v',code:'SP-OLD',supplierId:po.supplierId,supplier:po.supplier,date:'2026-09-01',amount:1,currency:po.currency,reference:'OLD',fileIds:[],note:'',createdAt:'2026-09-01T00:00:00Z',actor:'财务',backfill:true});
  const bill=(await run({type:'payable.bill.register',payload:{supplierId:po.supplierId,invoiceNo:'AP-PERMISSION',invoiceDate:'2026-10-19',currency:po.currency,amount:100,taxAmount:0,lines:[{purchaseId:po.id,amount:100}],due:'2026-11-30',dueBasis:'模拟合同'}})).receipt.result.id as string;
  const submitted=await run({type:'payable.request.submit',payload:{purpose:'bill',supplierId:po.supplierId,currency:po.currency,lines:[{billId:bill,amount:100}],reason:'核对供应商票据后申请付款'}}),id=submitted.receipt.result.id as string;
- const task=contract.getMistReviewTasks(db.workspaces.get(w.id)!.state).find(t=>t.kind==='payment'&&t.entityId===id)!;expect(task.reviewerIds).toEqual(['manager']);
+ const task=contract.getMistReviewTasks(db.workspaces.get(w.id)!.state).find(t=>t.kind==='payment'&&t.entityId===id)!;if(!first)expect(task.reviewerIds).toEqual(['manager']);
  return{workspaceId:w.id,id,task,revision:submitted.workspace.revision};
 }
 for(const endpoint of ['command','review'] as const)describe(`付款审批：${endpoint} 入口`,()=>{
@@ -82,5 +84,28 @@ describe('付款申请撤回：本人和当前权限',()=>{
   await expect(repo.execute(stale,f.workspaceId,input as any)).rejects.toMatchObject({code:'FORBIDDEN',status:403});expect(db.workspaces.get(f.workspaceId)).toEqual(before);
   auth.users.get('owner')!.permissions.push('finance:payment_request:create');await repo.execute(stale,f.workspaceId,input as any);
   expect(db.workspaces.get(f.workspaceId)!.state.payables.requests.find((r:any)=>r.id===f.id).state).toBe('cancelled');
+ });
+});
+
+describe('付款审批分档：服务端按当前权限重建每一级审批人',()=>{
+ it('部门主管没有首笔付款加签权时上抬到总领导；两级都批准才放行，审批页按级显示审批人',async()=>{
+  auth.users.set('boss',{active:true,permissions:['finance:read','finance:payment_request:approve','vouchers:approve:pay_lt5','vouchers:approve:pay_gt5','vouchers:approve:pay_new_supplier','orders:read','products:read']});
+  env.leader='boss';
+  const f=await fixture(true);const row=db.workspaces.get(f.workspaceId)!;
+  const request=row.state.payables!.requests!.find((r:any)=>r.id===f.id)!;
+  expect(request.tier!.levels).toEqual([{level:'pay_lt5',reviewerIds:['manager']},{level:'pay_new_supplier',reviewerIds:['boss']}]);
+  expect(f.task.reviewerIds).toEqual(['manager','boss']);
+  const first=await repo.execute(actor('manager'),f.workspaceId,{requestId:'lvl-1',expectedRevision:f.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'金额档核对通过'}}});
+  expect(db.workspaces.get(f.workspaceId)!.state.payables!.requests!.find((r:any)=>r.id===f.id)!.state).toBe('pending');
+  const after=contract.getMistReviewTasks(db.workspaces.get(f.workspaceId)!.state).find(t=>t.id===f.task.id)!;
+  expect(after.reviewerIds).toEqual(['boss']);expect(after.details.find(d=>d.label==='审批进度')!.value).toContain('还差：首笔付款加签');
+  await expect(repo.execute(actor('manager'),f.workspaceId,{requestId:'lvl-dup',expectedRevision:first.workspace.revision,command:{type:'payable.request.decide',payload:{id:f.id,decision:'approved',note:'再批一次'}}})).rejects.toMatchObject({code:'FORBIDDEN'});
+  await repo.decideReview(actor('boss'),f.workspaceId,f.task.id,{requestId:'lvl-2',expectedRevision:first.workspace.revision,decision:'approved',note:'新供应商资质已核'});
+  expect(db.workspaces.get(f.workspaceId)!.state.payables!.requests!.find((r:any)=>r.id===f.id)!.state).toBe('approved');
+ });
+ it('总领导失去首笔付款加签权后不能签该级',async()=>{
+  auth.users.set('boss',{active:true,permissions:['finance:payment_request:approve','vouchers:approve:pay_new_supplier']});env.leader='boss';
+  const f=await fixture(true);auth.users.get('boss')!.permissions=['finance:payment_request:approve'];
+  await expect(repo.decideReview(actor('boss'),f.workspaceId,f.task.id,{requestId:'lvl-x',expectedRevision:f.revision,decision:'approved',note:'同意'})).rejects.toMatchObject({code:'FORBIDDEN'});
  });
 });
