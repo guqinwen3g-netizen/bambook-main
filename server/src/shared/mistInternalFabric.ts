@@ -6,7 +6,7 @@ import { assertOrderLineOpen } from './mistOrderClosure';
 
 export type GarmentFulfillmentMode = 'cmt' | 'trims_cmt' | 'full_package';
 export type CmtIncludedItem = 'trims' | 'packaging';
-export type MistMaterialKind = 'fabric' | 'trims' | 'packaging' | 'other';
+export type MistMaterialKind = 'fabric' | 'greige' | 'trims' | 'packaging' | 'other';
 export type GarmentFulfillmentFields = { fulfillmentMode?: GarmentFulfillmentMode; cmtIncludedItems?: CmtIncludedItem[] };
 export type InternalSupply = { group: 'garment'; receiverId: string };
 export type InternalFabricContext = Pick<MistContext, 'members' | 'actorId' | 'actorName'>;
@@ -32,7 +32,7 @@ export type MaterialReceivingCheck = { id: string; acceptedQuantity: string; rej
 export type MaterialDeliveryRow = { id: string; kind: 'issue' | 'direct'; purchaseId: string; sourcePurchaseCode?:string; quantity: string; outstanding: string; accepted: string; rejected: string; pending: string; returned: string; unit: string; at: string; location: string; evidence: string; delivery: MaterialDeliveryLink };
 export const GARMENT_FULFILLMENT_LABELS: Record<GarmentFulfillmentMode, string> = { cmt: '纯 CMT', trims_cmt: '辅料 + CMT', full_package: '全包' };
 export const CMT_INCLUDED_ITEM_LABELS: Record<CmtIncludedItem, string> = { trims: '辅料', packaging: '包装' };
-export const MATERIAL_KIND_LABELS: Record<MistMaterialKind, string> = { fabric: '面料', trims: '辅料', packaging: '包装', other: '其他原料' };
+export const MATERIAL_KIND_LABELS: Record<MistMaterialKind, string> = { fabric: '面料', greige: '坯布 / 纱线', trims: '辅料', packaging: '包装', other: '其他原料' };
 const fail = (message: string, code = 'PRECONDITION'): never => { throw new MistCommandError(code, message, code === 'FORBIDDEN' ? 403 : 422); };
 const identity = (value: unknown, label: string): string => typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 200 ? value : fail(`请选择${label}`, 'VALIDATION');
 function revision(value: unknown) { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) fail('分配版本无效', 'VALIDATION'); return value as number; }
@@ -150,7 +150,7 @@ export function assertGarmentProcurement(order: Pick<MistOrder, 'type'> & {id?:s
     if (order.type === 'garment') normalizeGarmentFulfillment(line);
     return undefined;
   }
-  if (!['fabric', 'trims', 'packaging', 'other'].includes(String(materialKind))) fail('请选择物料类别', 'VALIDATION');
+  if (!['fabric', 'greige', 'trims', 'packaging', 'other'].includes(String(materialKind))) fail('请选择物料类别', 'VALIDATION');
   if (order.type === 'garment') {
     const mode = normalizeGarmentFulfillment(line);
     if (materialKind !== 'trims' && materialKind !== 'packaging') fail('成衣面料须由面料组供给');
@@ -285,16 +285,20 @@ export const hasMaterialAtFactory = (root: MistState, purchaseId: string): boole
   const branch = root.productions.find(p => p.sourcePurchaseId === purchaseId);
   return !!branch && materialDeliveryRows(root).some(row => row.delivery.productionId === branch.id && row.outstanding !== '0');
 };
+/** Greige or yarn bought for a fabric item feeds that item's own processing contract (weaving, dyeing, finishing). */
+export const isFabricStageMaterial = (p: Pick<FulfillmentPurchaseLike, 'domain' | 'kind' | 'materialKind'> | undefined): boolean => p?.domain === 'fabric' && p.kind === 'material' && p.materialKind === 'greige';
+type FulfillmentPurchaseLike = MistState['fulfillment']['purchases'][number];
 export function materialDeliveryRequired(root: MistState, purchaseId: string): boolean {
   const p = root.fulfillment.purchases.find(p => p.id === purchaseId), o = root.orders.find(o => o.id === p?.orderId);
-  return !!o?.governance?.contract.internalSupply || p?.domain === 'garment' && p.kind === 'material';
+  return !!o?.governance?.contract.internalSupply || p?.domain === 'garment' && p.kind === 'material' || isFabricStageMaterial(p);
 }
 export function materialDeliveryTargets(root: MistState, purchaseId: string): Array<{ value: string; label: string; remaining?: string }> {
   const p = root.fulfillment.purchases.find(p => p.id === purchaseId); if (!p) return [];
-  const internal = !!root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply;
+  const stage = isFabricStageMaterial(p), internal = !!root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply;
   return root.productions.flatMap(branch => {
     const order = root.orders.find(o => o.id === branch.orderId), contract = root.fulfillment.purchases.find(p => p.id === branch.sourcePurchaseId);
-    if (branch.closed || order?.type !== 'garment' || order.governance?.status !== 'approved' || contract?.kind !== 'processing' || contract.state !== 'approved' || !contract.offlineSend || !contract.supplierConfirmation) return [];
+    if (branch.closed || order?.type !== (stage ? 'fabric' : 'garment') || order.governance?.status !== 'approved' || contract?.kind !== 'processing' || contract.state !== 'approved' || !contract.offlineSend || !contract.supplierConfirmation) return [];
+    if (stage) return branch.orderId === p.orderId && branch.lineId === p.lineId ? [{ value: branch.id, label: `${contract.code} · ${contract.supplier}` }] : [];
     let remaining: string | undefined;
     if (internal) {
       const allocation = root.internalFabricAllocations?.find(a => a.status === 'active' && a.orderId === branch.orderId && a.lineId === branch.lineId && a.fabricOrderId === p.orderId && a.fabricLineId === p.lineId);
@@ -319,10 +323,14 @@ export function prepareMaterialDelivery(root: MistState, purchaseId: string, pro
   const production = root.productions.find(row => row.id === identity(productionId, '接收加工单'));
   const target = production && lineFor(root, production.orderId, production.lineId);
   const contract = production && root.fulfillment.purchases.find(p => p.id === production.sourcePurchaseId);
-  if (!production || production.closed || !target || target.order.type !== 'garment' || contract?.kind !== 'processing' || contract.state !== 'approved' || !contract.offlineSend || !contract.supplierConfirmation) return fail('请选择已接单的成衣加工分支');
+  const stage = isFabricStageMaterial(p);
+  if (!production || production.closed || !target || target.order.type !== (stage ? 'fabric' : 'garment') || contract?.kind !== 'processing' || contract.state !== 'approved' || !contract.offlineSend || !contract.supplierConfirmation) return fail(stage ? '请选择本条目已接单的面料加工单' : '请选择已接单的成衣加工分支');
   assertOrderApproved(root, target.order.id); assertOrderLineOpen(target.line);
   let allocation: MistInternalFabricAllocation | undefined;
-  if (source.order.governance?.contract.internalSupply) {
+  if (stage) {
+    // Greige/yarn goes to the same item's next process; quantities stay in the purchase unit, no conversion.
+    if (p.orderId !== target.order.id || p.lineId !== target.line.id) return fail('坯布只能交给本条目的面料加工单');
+  } else if (source.order.governance?.contract.internalSupply) {
     supplyFor(root, source.order.id, source.line.id, ctx);
     allocation = root.internalFabricAllocations?.find(a => a.status === 'active' && a.orderId === target.order.id && a.lineId === target.line.id && a.fabricOrderId === source.order.id && a.fabricLineId === source.line.id);
     if (!allocation) return fail('加工分支与内部面料分配不一致');
@@ -332,8 +340,8 @@ export function prepareMaterialDelivery(root: MistState, purchaseId: string, pro
     const delivered = materialDeliveryRows(root).filter(row => row.delivery.allocationId === allocation!.id && row.delivery.allocationRevision===allocation!.revision).reduce((sum, row) => sum + (row.outstanding === '0' ? BigInt(0) : metresMinor(row.outstanding)), BigInt(0));
     if (delivered + metresMinor(quantity) > metresMinor(allocation.metres)) return fail('本次发料超过分配剩余米数');
   } else if (p.domain !== 'garment' || p.kind !== 'material' || p.orderId !== target.order.id || p.lineId !== target.line.id) return fail('物料与接收加工条目不一致');
-  const receiverId = source.order.governance?.contract.internalSupply?.receiverId || target.order.ownerId;
-  const receiver = resolveMember(ctx, receiverId, '接收负责人', 'garment');
+  const receiverId = (!stage && source.order.governance?.contract.internalSupply?.receiverId) || target.order.ownerId;
+  const receiver = resolveMember(ctx, receiverId, '接收负责人', stage ? 'fabric' : 'garment');
   return { productionId: production.id, orderId: target.order.id, lineId: target.line.id, supplierId: contract.supplierId, supplier: contract.supplier, receiverId: receiver.id, receiver: receiver.name, ...(allocation ? { allocationId: allocation.id, allocationRevision: allocation.revision } : {}) };
 }
 export function confirmMaterialDelivery(root: MistState, payload: { kind: unknown; id: unknown; evidence: unknown; acceptedQuantity?: unknown; rejectedQuantity?: unknown; expectedReceivingRevision?: unknown }, ctx: MistContext): MistCommandResult {
@@ -399,6 +407,8 @@ export function assertMaterialReturnReversal(root: MistState, receiptId: string,
 export function materialReceiverIds(root: MistState, row: MaterialDeliveryRow): string[] {
   const target = root.orders.find(o => o.id === row.delivery.orderId), purchase = root.fulfillment.purchases.find(p => p.id === row.purchaseId);
   const source = root.orders.find(o => o.id === purchase?.orderId);
+  // Greige at the next mill is counted for the fabric owner; the garment receiver only takes finished internal fabric.
+  if (isFabricStageMaterial(purchase)) return target?.ownerId ? [target.ownerId] : [];
   return [...new Set([target?.ownerId, source?.governance?.contract.internalSupply?.receiverId].filter((id): id is string => !!id))];
 }
 
