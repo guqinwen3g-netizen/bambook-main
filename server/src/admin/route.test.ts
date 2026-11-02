@@ -161,6 +161,7 @@ describe('admin user status management', () => {
   it('does not tombstone users when status is changed to disabled', async () => {
     const prisma = {
       userAccount: {
+        findUnique: vi.fn().mockResolvedValue({ status: 'active', metadata: { keep: 1 } }),
         update: vi.fn().mockResolvedValue({}),
       },
       auditLog: {
@@ -174,10 +175,9 @@ describe('admin user status management', () => {
       .send({ status: 'disabled' });
 
     expect(res.status).toBe(200);
-    expect(prisma.userAccount.update).toHaveBeenCalledWith({
-      where: { id: 'user-1' },
-      data: { status: 'disabled' },
-    });
+    const { data } = prisma.userAccount.update.mock.calls[0][0];
+    expect(data).not.toHaveProperty('deletedAt');
+    expect(data).toMatchObject({ status: 'disabled', metadata: { keep: 1, credentialVersion: expect.any(String), sessionsRevokedAt: expect.any(String) } });
   });
 
   it('disables accounts without deleting roles, password, or email occupancy', async () => {

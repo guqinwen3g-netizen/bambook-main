@@ -108,6 +108,8 @@ describe('会话撤销与强制改密', () => {
     a.get('/probe', (_req, res) => res.json({ ok: true }));
     a.post('/api/orders', (_req, res) => res.json({ ok: true }));
     a.post('/api/auth/change-password', (_req, res) => res.json({ ok: true }));
+    a.get('/api/auth/me', (_req, res) => res.json({ ok: true }));
+    a.get('/bambook/api/hr/teams/mine', (_req, res) => res.json({ ok: true }));
     return a;
   };
   const tokenAt = (iat: number) => jwt.sign({ userId: 'u1', roles: ['owner'], iat }, SECRET);
@@ -122,12 +124,24 @@ describe('会话撤销与强制改密', () => {
     expect(fresh.status).toBe(200);
   });
 
-  it('待强制改密：可读、可走 /api/auth/*，其它写操作 403 PASSWORD_CHANGE_REQUIRED', async () => {
+  it('待强制改密：只能走 /api/auth/*，业务接口的读写都 403 PASSWORD_CHANGE_REQUIRED', async () => {
     const a = app({ forceChangePassword: true });
     const t = tokenOf('u1');
     expect((await request(a).get('/probe').set(auth(t))).status).toBe(200);
     const write = await request(a).post('/api/orders').set(auth(t));
     expect(write.status).toBe(403); expect(write.body.error).toBe('PASSWORD_CHANGE_REQUIRED');
+    const read = await request(a).get('/bambook/api/hr/teams/mine').set(auth(t));
+    expect(read.status).toBe(403); expect(read.body.error).toBe('PASSWORD_CHANGE_REQUIRED');
+    expect((await request(a).get('/api/auth/me').set(auth(t))).status).toBe(200);
     expect((await request(a).post('/api/auth/change-password').set(auth(t))).status).toBe(200);
+  });
+
+  it('强制改密提示按原因区分首次登录与管理员重置', async () => {
+    const t = tokenOf('u1');
+    const first = await request(app({ forceChangePassword: true, forceChangeReason: 'initial' })).post('/api/orders').set(auth(t));
+    expect(first.body.message).toBe('首次登录请先修改初始密码。');
+    invalidateAccountStatusCache('u1');
+    const reset = await request(app({ forceChangePassword: true })).post('/api/orders').set(auth(t));
+    expect(reset.body.message).toBe('管理员已重置你的密码，请先修改登录密码。');
   });
 });

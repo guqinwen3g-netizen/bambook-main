@@ -12,6 +12,7 @@
 import { PrismaClient } from '@prisma/client';
 import { writeRouteAuditLog } from '../audit/routeAudit';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
+import { revokeAllSessions } from '../auth/sessionRevocation';
 import { logger } from '../lib/logger';
 
 export type HandoverResult<T = any> =
@@ -180,7 +181,7 @@ export function createHandoverService(prisma: PrismaClient) {
             data: {
               status: 'disabled',
               metadata: {
-                ...((from.metadata as any) || {}),
+                ...revokeAllSessions(from.metadata),
                 disabledAt: new Date().toISOString(),
                 disabledBy: actorId || 'system',
                 handoverId,

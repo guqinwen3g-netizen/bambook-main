@@ -338,7 +338,8 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
     mounted.current = true; scopeEpoch.current++; readEpoch.current++; readController.current?.abort();
     snapshot.current = null; latest.current.clear(); wanted.current = undefined; navigating.current = false; mutation.current = null;
     setCurrent(null); setWorkspaces([]); setArchivedWorkspaces([]); setError(''); setSaving(false); publishPending(null); publishCreate(null);
-    if (authority.status === 'authenticated' && authority.userId && !(session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length) && !session.user?.platformCompany) {
+    // 首次登录 / 重置后须先改密：改密前服务端拒绝业务接口，改密完成（mustChangePassword 变化）后再读取公司。
+    if (authority.status === 'authenticated' && authority.userId && !(session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length) && !session.user?.platformCompany && !session.user?.mustChangePassword) {
       let restored: Pending | null = null;
       let selected: string | undefined;
       let recoveryError = '';
@@ -361,7 +362,7 @@ export function MistWorkspaceProvider({ children }: { children: React.ReactNode 
       });
     } else setLoading(authority.status === 'loading');
     return () => { mounted.current = false; scopeEpoch.current++; readEpoch.current++; readController.current?.abort(); mutation.current = null; };
-  }, [authority.key, authority.userId, authority.status, load, publishPending, publishCreate, forgetSelection]);
+  }, [authority.key, authority.userId, authority.status, session.user?.mustChangePassword, load, publishPending, publishCreate, forgetSelection]);
 
   /**
    * 后台同步：前台每 15 秒查版本，后台最多每分钟查一次；有更新才静默读取完整内容。

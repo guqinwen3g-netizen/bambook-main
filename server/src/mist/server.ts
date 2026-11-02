@@ -63,8 +63,10 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
     app.use('/api/auth', createAuthRouter({ prisma, email: createEmailService(), verification: createDbVerificationStore({ prisma }), requireEmailVerification }));
-    // The local-identity session exists only in local mode. Answer 404 before authentication so the web app
-    // detects server-account mode and shows sign-in (a 401 here made it fall back to the local-workspace screen).
+    // The local-identity session exists only in local mode. Clients that send X-Mist-Session-Probe: 2 get an explicit
+    // non-error answer, so the web app shows account sign-in without a console 404. Older clients (cached pages,
+    // desktop builds) read any 200 as a local session, so without the header they keep the legacy 404.
+    app.get('/api/mist/session', (req, res, next) => { if (req.get('X-Mist-Session-Probe') !== '2') { next(); return; } res.set('Cache-Control', 'private, no-store').json({ ok: true, mode: 'remote' }); });
     app.all('/api/mist/session', (_req, res) => { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Local workspace session is not available on this server' } }); });
     const filesRoot=process.env.MIST_FILES_DIR||path.resolve(__dirname,'../../private/mist-files');
     const repository=new MistRepository(prisma,mistContract as MistContract,new MistPrivateFiles(filesRoot));

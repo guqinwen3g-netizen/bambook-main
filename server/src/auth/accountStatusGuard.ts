@@ -23,13 +23,21 @@ import { logger } from '../lib/logger';
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_ENTRIES = 5_000;
 
-type CacheEntry = { credentialVersion?:string; blocked: boolean; revokedBeforeSec: number; mustChangePassword: boolean; checkedAt: number };
+type CacheEntry = { credentialVersion?:string; blocked: boolean; revokedBeforeSec: number; mustChangePassword: boolean; passwordChangeReason?: string; checkedAt: number };
 type AccountGate = Omit<CacheEntry, 'checkedAt'>;
 const OPEN: AccountGate = { blocked: false, revokedBeforeSec: 0, mustChangePassword: false };
 
-/** 待强制改密的账号仍可读与使用 /auth/*（登录、改密、退出），其它写操作须先改密。 */
-const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const AUTH_PATH = /^(?:\/bambook)?\/api\/auth(?:\/|$)/;
+/** 待强制改密（首次登录 / 管理员重置）的账号只能使用 /auth/*（读取本人、改密、退出），业务接口的读写都须先改密。 */
+/** Express 路由与 app.use('/api') 默认大小写不敏感、容忍重复斜杠，守卫须按同一口径归一化后再判定，否则 /API/orders 可越过拦截。 */
+function normalizedPath(url: string): string {
+  return (url.split('?')[0] || '/').toLowerCase().replace(/\/{2,}/g, '/').replace(/^\/bambook(?=\/api(?:\/|$))/, '');
+}
+const API_PATH = /^\/api(?:\/|$)/;
+/** 待改密时 /api 下默认拒绝，仅放行 /api/auth/* 与 /api/health；/api 以外只有静态资源与 SPA。 */
+const PASSWORD_CHANGE_ALLOWED = /^\/api\/(?:auth(?:\/|$)|health\/?$)/;
+export function passwordChangeRequiredMessage(reason: unknown): string {
+  return reason === 'initial' || reason === 'invite' ? '首次登录请先修改初始密码。' : '管理员已重置你的密码，请先修改登录密码。';
+}
 const statusCache = new Map<string, CacheEntry>();
 
 /** 停用/软删/交接路径调用：同进程缓存即时失效（跨进程由 30s TTL 兜底） */
@@ -54,6 +62,7 @@ async function accountGate(prisma: PrismaClient, userId: string): Promise<Accoun
       blocked: user.status === 'disabled' || user.deletedAt != null,
       revokedBeforeSec: sessionRevokedBeforeSec((user as any).metadata),
       mustChangePassword: (user as any).metadata?.forceChangePassword === true,
+      passwordChangeReason: (user as any).metadata?.forceChangeReason,
     };
   } catch (e) {
     logger.warn('[accountStatusGuard] status query failed (fail-open)', { error: (e as Error).message });
@@ -88,8 +97,9 @@ export function createAccountStatusGuard(prisma: PrismaClient) {
           return res.status(401).json({ error: 'SESSION_REVOKED', message: '登录已在所有设备退出，请重新登录。' });
         }
       }
-      if (gate.mustChangePassword && WRITE_METHODS.has(req.method) && !AUTH_PATH.test(req.originalUrl || req.url || '')) {
-        return res.status(403).json({ error: 'PASSWORD_CHANGE_REQUIRED', message: '管理员已重置你的密码，请先修改登录密码。' });
+      const path = normalizedPath(req.originalUrl || req.url || '');
+      if (gate.mustChangePassword && API_PATH.test(path) && !PASSWORD_CHANGE_ALLOWED.test(path)) {
+        return res.status(403).json({ error: 'PASSWORD_CHANGE_REQUIRED', message: passwordChangeRequiredMessage(gate.passwordChangeReason) });
       }
       return next();
     } catch {

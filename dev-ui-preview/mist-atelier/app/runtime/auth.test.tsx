@@ -8,6 +8,7 @@ import { MistSessionProvider, useMistSession, type MistSession } from './auth';
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 const user = (id: string): auth.AuthUser => ({ id, displayName: id, email: `${id}@example.com`, roles: ['sales'], roleIds: ['sales-role'], permissions: ['orders:read'], permissionCeiling: ['orders:read'], departmentIds: ['team-a'], department: 'Team A' });
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+const jwtLike = (claims: Record<string, unknown>) => ['e30', btoa(JSON.stringify(claims)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_'), 'sig'].join('.');
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 let actor: auth.AuthUser | null, root: Root | undefined, host: HTMLElement | undefined, session: MistSession;
 let override: ((url: URL, init: RequestInit) => Promise<Response> | null) | undefined;
@@ -39,6 +40,19 @@ describe('Mist session adapter with production auth service', () => {
     override=undefined;await act(async()=>session.refresh());await waitFor(()=>expect(session.connectionModeUnverified).not.toBe(true));
     expect(session.localMode).not.toBe(true);expect(session.status).toBe('anonymous');expect(requests.some(r=>r.path==='/api/auth/me')).toBe(true);
     await act(async()=>session.login('reconnected-staff','password'));await waitFor(()=>expect(session.user?.id).toBe('reconnected-staff'));expect(session.localMode).not.toBe(true);
+  });
+  it('declares the session probe protocol so remote servers answer 200 only to new clients', async () => {
+    const probes: Array<string | null> = [];
+    override = (url, init) => { if (url.pathname !== '/api/mist/session') return null; probes.push(new Headers(init.headers).get('X-Mist-Session-Probe')); return Promise.resolve(json({ ok: true, mode: 'remote' })); };
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    expect(probes).toEqual(['2']); expect(session.localMode).not.toBe(true); expect(session.connectionModeUnverified).not.toBe(true);
+  });
+  it('treats an explicit remote-mode answer like the legacy 404 and continues with account sign-in', async () => {
+    override = url => url.pathname === '/api/mist/session' ? Promise.resolve(json({ ok: true, mode: 'remote' })) : null;
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    expect(session.localMode).not.toBe(true); expect(session.connectionModeUnverified).not.toBe(true);
+    expect(requests.map(r => r.path)).toEqual(['/api/mist/session', '/api/auth/me']);
+    await act(async () => session.login('remote-staff', 'password')); expect(session.user?.id).toBe('remote-staff');
   });
   it('initializes only through real /me and never automatically logs into a development identity', async () => {
     const response = deferred<Response>(); override = url => url.pathname.endsWith('/auth/me') ? response.promise : null;
@@ -90,6 +104,52 @@ describe('Mist session adapter with production auth service', () => {
     await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
     await act(async () => session.login('session-only', 'password', { remember: false }));
     expect(localStorage.getItem('bambook_auth_token')).toBeNull(); expect(sessionStorage.getItem('bambook_auth_token')).toBe('token-session-only'); expect(session.user?.id).toBe('session-only');
+  });
+  it('sends the keep-login choice to the server and stores the token to match it', async () => {
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    await act(async () => session.login('kept', 'password', { remember: true }));
+    expect(requests.find(r => r.path.endsWith('/auth/login'))?.body).toMatchObject({ remember: true });
+    expect(localStorage.getItem('bambook_auth_token')).toBe('token-kept');
+    await act(async () => session.logout()); requests = [];
+    await act(async () => session.login('browser-only', 'password', { remember: false }));
+    expect(requests.find(r => r.path.endsWith('/auth/login'))?.body).toMatchObject({ remember: false });
+    expect(localStorage.getItem('bambook_auth_token')).toBeNull(); expect(sessionStorage.getItem('bambook_auth_token')).toBe('token-browser-only');
+  });
+  it('renews an aging session token in place without resetting the page session', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const old = jwtLike({ userId: 'renewing', sessionId: 's1', iat: now - 2 * 86400, exp: now + 28 * 86400 });
+    const renewed = jwtLike({ userId: 'renewing', sessionId: 's1', iat: now, exp: now + 30 * 86400 });
+    override = url => url.pathname.endsWith('/auth/login') ? (actor = user('renewing'), Promise.resolve(json({ user: actor, token: old })))
+      : url.pathname.endsWith('/auth/refresh') ? Promise.resolve(json({ ok: true, token: renewed })) : null;
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    await act(async () => session.login('renewing', 'password', { remember: true })); const key = session.sessionKey;
+    await act(async () => { expect(await auth.renewSessionIfDue()).toBe(true); });
+    expect(requests.filter(r => r.path.endsWith('/auth/refresh'))).toHaveLength(1);
+    expect(localStorage.getItem('bambook_auth_token')).toBe(renewed); expect(sessionStorage.getItem('bambook_auth_token')).toBe(renewed);
+    expect(session.sessionKey).toBe(key); expect(session.status).toBe('authenticated');
+    await act(async () => { expect(await auth.renewSessionIfDue()).toBe(false); });
+    expect(requests.filter(r => r.path.endsWith('/auth/refresh'))).toHaveLength(1);
+  });
+  it('keeps a browser-only session out of persistent storage when renewing', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const old = jwtLike({ userId: 'tab', sessionId: 's2', iat: now - 7 * 3600, exp: now + 5 * 3600 });
+    const renewed = jwtLike({ userId: 'tab', sessionId: 's2', iat: now, exp: now + 12 * 3600 });
+    override = url => url.pathname.endsWith('/auth/login') ? (actor = user('tab'), Promise.resolve(json({ user: actor, token: old })))
+      : url.pathname.endsWith('/auth/refresh') ? Promise.resolve(json({ ok: true, token: renewed })) : null;
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    await act(async () => session.login('tab', 'password', { remember: false }));
+    await act(async () => { expect(await auth.renewSessionIfDue()).toBe(true); });
+    expect(localStorage.getItem('bambook_auth_token')).toBeNull(); expect(sessionStorage.getItem('bambook_auth_token')).toBe(renewed);
+  });
+  it('ends the session when the server refuses to renew a revoked credential', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const old = jwtLike({ userId: 'revoked', sessionId: 's3', iat: now - 2 * 86400, exp: now + 28 * 86400 });
+    override = url => url.pathname.endsWith('/auth/login') ? (actor = user('revoked'), Promise.resolve(json({ user: actor, token: old })))
+      : url.pathname.endsWith('/auth/refresh') ? (actor = null, Promise.resolve(json({ ok: false, error: 'SESSION_REVOKED' }, 401))) : null;
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    await act(async () => session.login('revoked', 'password', { remember: true }));
+    await act(async () => { expect(await auth.renewSessionIfDue()).toBe(false); });
+    await waitFor(() => expect(session.status).toBe('anonymous')); expect(session.user).toBeNull();
   });
   it('does not reuse an old cached actor after endpoint change fails to revalidate', async () => {
     await auth.login('old-server-user', 'password'); await mount(); await waitFor(() => expect(session.status).toBe('authenticated')); const key = session.sessionKey;

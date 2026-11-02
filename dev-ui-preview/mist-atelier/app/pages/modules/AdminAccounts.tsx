@@ -8,7 +8,7 @@ import { KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus } from
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Mono, Pill, Select, TextArea, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
-import { ACCOUNT_STATUS, departmentOptions, organizationApi, type AdminAccount, type AdminRole, type AuditLogRow, type OrgDepartment } from '../../runtime/organization';
+import { ACCOUNT_STATUS, departmentOptions, organizationApi, type AccountInvitation, type AdminAccount, type AdminRole, type AuditLogRow, type OrgDepartment } from '../../runtime/organization';
 import { passwordOk } from '../../runtime/passwordRule';
 import { JOB_TEMPLATES } from '../../runtime/jobPermissions';
 import { JobPermissionEditor, jobSummary } from './JobPermissionEditor';
@@ -39,8 +39,8 @@ function JobSelect({ roles, value, onChange, owner, disabled }: { roles: AdminRo
   return <Select aria-label={uiText("岗位")} value={value[0] ?? ''} disabled={disabled} placeholder={uiText("选择岗位")} onChange={e => onChange(e.target.value ? [e.target.value] : [])} options={options} />;
 }
 
-type Form = { mode: 'create' | 'approve' | 'edit'; account?: AdminAccount; displayName: string; email: string; password: string; departmentId: string; roles: string[]; grant: boolean };
-function blank(): Form { return { mode: 'create', displayName: '', email: '', password: '', departmentId: '', roles: [], grant: true }; }
+type Form = { mode: 'create' | 'approve' | 'edit'; account?: AdminAccount; displayName: string; email: string; deliveryMode: 'password' | 'invite'; password: string; departmentId: string; roles: string[]; grant: boolean };
+function blank(): Form { return { mode: 'create', displayName: '', email: '', deliveryMode: 'password', password: '', departmentId: '', roles: [], grant: true }; }
 
 export function AdminAccounts() {
   const session = useMistSession(), workspace = useMistWorkspace(), toast = useToast(), { route, go } = useNav();
@@ -54,6 +54,7 @@ export function AdminAccounts() {
   const [decisionError, setDecisionError] = React.useState('');
   React.useEffect(() => { setDecisionError(''); }, [confirm?.kind, confirm?.account.id]);
   const [temporary, setTemporary] = React.useState<{ name: string; password: string } | null>(null);
+  const [invited, setInvited] = React.useState<{ name: string; email: string; invitation: AccountInvitation } | null>(null);
   const [confirmInitialManager, setConfirmInitialManager] = React.useState(false);
   React.useEffect(() => { setForm(null); setConfirmInitialManager(false); }, [session.sessionKey]);
   const companyMode = !!session.user?.companyId;
@@ -74,14 +75,19 @@ export function AdminAccounts() {
     const f = form;
     if (f.mode !== 'edit' && !f.departmentId) return setFormError('请选择任职部门（不能直接归属公司）');
     if (f.mode !== 'edit' && !f.roles.length) return setFormError('请选择岗位');
-    if (f.mode === 'create' && (!f.displayName.trim() || !f.email.trim() || !passwordOk(f.password))) return setFormError('请填写姓名、邮箱，初始密码须包含字母和数字且至少 8 位');
+    if (f.mode === 'create' && !f.displayName.trim()) return setFormError('请填写姓名');
+    if (f.mode === 'create' && !f.email.trim()) return setFormError('请填写登录邮箱');
+    if (f.mode === 'create' && f.deliveryMode === 'password' && !passwordOk(f.password)) return setFormError('初始密码须包含字母和数字，且至少 8 位');
     const initialAppointment = f.mode === 'create' && !owner && data?.canAppointInitialGeneralManager === true &&
       data.roles.some(role => f.roles.includes(role.id) && isSuperAdmin(role));
     if (initialAppointment && !initialManagerConfirmed) { setConfirmInitialManager(true); return; }
     setBusy(true); setFormError('');
     try {
-      let userId = f.account?.id ?? '';
-      if (f.mode === 'create') userId = (await organizationApi.createAccount({ displayName: f.displayName.trim(), email: f.email.trim(), password: f.password, roles: f.roles, departmentId: f.departmentId, ...(initialAppointment ? { appointInitialGeneralManager: true } : {}) })).userId;
+      let userId = f.account?.id ?? '', invitation: AccountInvitation | undefined;
+      if (f.mode === 'create') {
+        const created = await organizationApi.createAccount({ displayName: f.displayName.trim(), email: f.email.trim(), deliveryMode: f.deliveryMode, ...(f.deliveryMode === 'password' ? { password: f.password } : {}), roles: f.roles, departmentId: f.departmentId, ...(initialAppointment ? { appointInitialGeneralManager: true } : {}) });
+        userId = created.userId; invitation = created.invitation;
+      }
       else if (f.mode === 'approve') await organizationApi.approve(userId, f.roles, f.departmentId);
       else if (session.user?.companyId) {
         await organizationApi.saveAccountAssignment(userId, { displayName: f.displayName.trim(), email: f.email.trim(), departmentId: f.departmentId || null, roles: f.roles });
@@ -90,7 +96,8 @@ export function AdminAccounts() {
         await organizationApi.setRoles(userId, f.roles, f.departmentId || null);
       }
       const granted = f.mode !== 'edit' && f.grant && canGrant ? await grant(userId, f.displayName) : false;
-      toast(f.mode === 'create' ? (granted ? `账号已创建并授权进入「${envelope?.name}」` : '账号已创建') : f.mode === 'approve' ? (granted ? `已通过审批并授权进入「${envelope?.name}」` : '已通过注册审批') : '账号已更新');
+      if (invitation) setInvited({ name: f.displayName.trim(), email: f.email.trim(), invitation });
+      else toast(f.mode === 'create' ? `${granted ? `账号已创建并授权进入「${envelope?.name}」` : '账号已创建'}；对方首次登录须先修改初始密码` : f.mode === 'approve' ? (granted ? `已通过审批并授权进入「${envelope?.name}」` : '已通过注册审批') : '账号已更新');
       setConfirmInitialManager(false); setForm(null); setSelected(userId); await load();
     } catch (e) { setConfirmInitialManager(false); setFormError(message(e, '保存未完成')); }
     finally { setBusy(false); }
@@ -147,9 +154,10 @@ export function AdminAccounts() {
       {form && data && <>
         {formError && <Banner tone="bad" title={uiText("未保存")}>{formError}</Banner>}
         <FormGrid>
-          <Field label={uiText("姓名")} required><TextInput value={form.displayName} disabled={busy || form.mode === 'approve' || form.account?.identityEditable === false} onChange={e => setForm({ ...form, displayName: e.target.value })} /></Field>
-          <Field label={uiText("登录邮箱")} required><TextInput type="email" value={form.email} disabled={busy || form.mode === 'approve' || form.account?.identityEditable === false} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
-          {form.mode === 'create' && <Field label={uiText("初始密码")} required hint={uiText("至少 8 位，含字母和数字")}><TextInput type="password" autoComplete="new-password" value={form.password} disabled={busy} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
+          <Field label={uiText("姓名")} required><TextInput aria-label={uiText("姓名")} value={form.displayName} disabled={busy || form.mode === 'approve' || form.account?.identityEditable === false} onChange={e => setForm({ ...form, displayName: e.target.value })} /></Field>
+          <Field label={uiText("登录邮箱")} required><TextInput aria-label={uiText("登录邮箱")} type="email" value={form.email} disabled={busy || form.mode === 'approve' || form.account?.identityEditable === false} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>
+          {form.mode === 'create' && <Field label={uiText("账号开通方式")} required hint={uiText(form.deliveryMode === 'invite' ? '员工通过邮件链接自己设置密码，链接 48 小时内有效。' : '员工首次登录后须先修改初始密码。')}><Select aria-label={uiText("账号开通方式")} value={form.deliveryMode} disabled={busy} onChange={e => setForm({ ...form, deliveryMode: e.target.value === 'invite' ? 'invite' : 'password', password: '' })} options={[{ value: 'password', label: '设置初始密码' }, { value: 'invite', label: '发送邀请邮件' }]} /></Field>}
+          {form.mode === 'create' && form.deliveryMode === 'password' && <Field label={uiText("初始密码")} required hint={uiText("至少 8 位，含字母和数字")}><TextInput aria-label={uiText("初始密码")} type="password" autoComplete="new-password" value={form.password} disabled={busy} onChange={e => setForm({ ...form, password: e.target.value })} /></Field>}
           <Field label={uiText("任职部门")} required><Select aria-label={uiText("任职部门")} value={form.departmentId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, departmentId: e.target.value })} options={departments} /></Field>
           <Field label={uiText("岗位")} required><JobSelect roles={data.roles} value={form.roles} owner={owner || (form.mode === 'create' && data.canAppointInitialGeneralManager)} disabled={busy} onChange={roles => setForm({ ...form, roles })} /></Field>
           {!companyMode && form.mode !== 'edit' && envelope && <Field label={uiText("公司")} full>{canGrant ? <Checkbox checked={form.grant} disabled={busy} onChange={grant => setForm({ ...form, grant })} label={ui`同时授权进入「${envelope.name}」`} /> : <span className="mist-note">{uiText("你不是「")}{envelope.name}{uiText("」的所有者；账号生效后请所有者授权。")}</span>}</Field>}
@@ -167,6 +175,9 @@ export function AdminAccounts() {
       footer={<div className="mist-row"><Button variant="primary" loading={busy} disabled={confirm?.kind === 'reject' && !reason.trim()} onClick={() => void decide()}>{uiText("确认")}</Button><Button disabled={busy} onClick={() => setConfirm(null)}>{uiText("取消")}</Button></div>}>
       {decisionError && <Banner tone="bad" title={uiText("操作未完成")}>{uiText(decisionError)}</Banner>}
       {confirm?.kind === 'reject' && <Field label={uiText("拒绝原因")} required><TextArea value={reason} onChange={e => setReason(e.target.value)} /></Field>}
+    </Dialog>
+    <Dialog open={!!invited} onClose={() => setInvited(null)} tone={invited?.invitation.status === 'sent' ? undefined : 'warn'} title={uiText(invited?.invitation.status === 'sent' ? '邀请邮件已提交发送' : '账号已创建，邀请邮件未发出')} description={uiText(invited?.invitation.message)} footer={<Button variant="primary" onClick={() => setInvited(null)}>{uiText("知道了")}</Button>}>
+      <KeyValue items={[{ label: '账号', value: invited ? `${invited.name} · ${invited.email}` : '' }, { label: '邮件状态', value: invited?.invitation.status === 'sent' ? '已提交给邮件服务，请对方查收（含垃圾邮件）' : invited?.invitation.status === 'cooldown' ? '发送过于频繁，稍后可重发' : '未确认发出；可改用“重置密码”生成临时密码当面转交' }]} />
     </Dialog>
     <Dialog open={!!temporary} onClose={() => setTemporary(null)} title={uiText("临时密码")} description={ui`请转交 ${temporary?.name ?? ''}；对方用它登录后会被要求先设置新密码。关闭后不再显示。`} footer={<Button variant="primary" onClick={() => setTemporary(null)}>{uiText("已转交")}</Button>}>
       <Mono>{temporary?.password}</Mono>

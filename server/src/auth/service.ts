@@ -31,6 +31,10 @@ export type TokenPayload = {
   departmentIds: string[];
   /** 平台管理员所选公司；仅由平台入口签发，不属于公司角色授权。 */
   platformCompany?: PlatformCompanyContext;
+  /** 登录会话（见 sessionLifetime.ts）：是否保持登录、会话标识、本次密码登录时间（秒）。 */
+  remember?: boolean;
+  sessionId?: string;
+  authTime?: number;
 };
 
 export function createAuthService(options: AuthServiceOptions = {}) {
@@ -64,8 +68,8 @@ export function createAuthService(options: AuthServiceOptions = {}) {
     return bcrypt.compare(password, hash);
   }
 
-  function signToken(payload: TokenPayload): string {
-    return jwt.sign(payload as object, jwtSecret, { expiresIn: jwtExpiresIn as any });
+  function signToken(payload: TokenPayload, signOptions: { expiresInSec?: number } = {}): string {
+    return jwt.sign(payload as object, jwtSecret, { expiresIn: (signOptions.expiresInSec ?? jwtExpiresIn) as any });
   }
 
   function verifyToken(token: string): TokenPayload {
