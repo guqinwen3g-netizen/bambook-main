@@ -59,5 +59,8 @@ it('lets business and finance templates confirm AI writes at their risk level', 
   // 高风险写入作专项附加，不连带 Agent 审批权
   for (const id of ['cashier', 'accountant']) { expect(t(id)).toContain('ai:write:high'); expect(t(id)).not.toContain('agent:approvals:approve'); }
   for (const id of ['hr-admin', 'viewer']) expect(t(id).filter(scope => scope.startsWith('ai:write'))).toEqual([]);
+  // 出纳、会计持 vouchers:write，须同时持计税依据，否则有退税到账时看不到银行账户；其他模板不附加。
+  for (const id of ['cashier', 'accountant']) expect(t(id)).toEqual(expect.arrayContaining(['vouchers:write', 'sensitive:tax_base']));
+  for (const id of ['merchandiser', 'documents', 'hr-admin', 'viewer']) expect(t(id)).not.toContain('sensitive:tax_base');
   expect(ai.extra).toEqual(['ai:write:high']);
 });

@@ -98,12 +98,15 @@ const build = (levels: Levels, extra: string[] = []) => [...new Set([...JOB_MODU
 const BASICS: Levels = { workspace: 'read', ai: 'read' };
 const VIEW_ALL: Levels = Object.fromEntries(JOB_MODULES.filter(module => module.read.length && !['hr', 'users', 'settings', 'audit'].includes(module.key)).map(module => [module.key, 'read']));
 
-/** 新建岗位时可参照的外贸服装公司常见岗位；只是起点，保存的是勾选后的权限。 */
+/**
+ * 新建岗位时可参照的外贸服装公司常见岗位；只是起点，保存的是勾选后的权限。
+ * 出纳、会计附加 sensitive:tax_base：没有它时，存在退税到账流水的公司会对其隐藏银行账户与国库到账（见 server/src/mist/access.ts maskTaxBase），且会计办理退税申报本就需要计税依据。
+ */
 export const JOB_TEMPLATES: Array<{ id: string; name: string; permissions: string[] }> = [
   { id: 'merchandiser', name: '跟单员', permissions: build({ ...BASICS, ai: 'write', relations: 'read', crm: 'read', suppliers: 'read', emails: 'write', products: 'write', quotations: 'read', orders: 'write', procurement: 'write', production: 'write', qc: 'read', inventory: 'write', shipments: 'read', customs: 'read', finance: 'read', aftersales: 'write', knowledge: 'read' }, ['order:change_request:create', 'finance:payment_request:create']) },
   { id: 'documents', name: '单证报关', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', emails: 'write', orders: 'read', procurement: 'read', production: 'read', inventory: 'read', shipments: 'write', customs: 'write', finance: 'read', tax: 'read', knowledge: 'read' }, ['logistics:handle', 'customs:clear']) },
-  { id: 'cashier', name: '出纳', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', finance: 'write', tax: 'read' }, ['ai:write:high']) },
-  { id: 'accountant', name: '会计', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', shipments: 'read', customs: 'read', finance: 'write', tax: 'write', bom: 'read', reports: 'read' }, ['fx:lock', 'ai:write:high']) },
+  { id: 'cashier', name: '出纳', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', finance: 'write', tax: 'read' }, ['ai:write:high', 'sensitive:tax_base']) },
+  { id: 'accountant', name: '会计', permissions: build({ ...BASICS, ai: 'write', relations: 'read', suppliers: 'read', orders: 'read', procurement: 'read', shipments: 'read', customs: 'read', finance: 'write', tax: 'write', bom: 'read', reports: 'read' }, ['fx:lock', 'ai:write:high', 'sensitive:tax_base']) },
   { id: 'hr-admin', name: '人事行政', permissions: build({ ...BASICS, emails: 'write', hr: 'write', users: 'read', knowledge: 'read' }) },
   { id: 'viewer', name: '只读查看', permissions: build({ ...VIEW_ALL }) },
 ];
