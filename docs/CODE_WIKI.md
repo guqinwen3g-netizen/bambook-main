@@ -61,7 +61,7 @@
 | 邮箱 | `modules/EmailsPage.tsx` | `mistEmail.ts`；服务端收发 `server/src/mist/mail/` |
 | 公司、成员、交接 | `SettingsPage.tsx`、`WorkspaceMembers.tsx`、`MemberHandover.tsx` | `mistCompanyIdentity.ts`、`mistTeamScope.ts`、`mistHandover.ts` |
 
-命令全集以生成目录 `server/src/mist/agentCommandCatalog.ts` 为准（由 `scripts/gen-mist-command-catalog.mjs` 从上述 `server/src/shared/*.ts` 生成，当前 308 条）。
+命令全集以生成目录 `server/src/mist/agentCommandCatalog.ts` 为准（由 `scripts/gen-mist-command-catalog.mjs` 从上述 `server/src/shared/*.ts` 生成，当前 313 条；`agentCommandCatalogGuard.test.ts` 守住声明、处理分支与权限映射不漂移）。
 
 ## 5. 跨模块交接（主线）
 
@@ -87,6 +87,7 @@
 | 长期Agent服务身份 | 公司管理 → Agent服务，由管理员配置在职责任人；我的账号 → 长期Agent，由责任人本人签发90天密钥。实现：`mist/agentIdentities.ts`、`pages/AgentIdentities.tsx` | #580已发布；权限取签发上限与责任人当前授权交集。换人/改模式/停用使旧密钥失效；轮换、撤销与密码/全设备退出约束已核验。敏感提议交真实责任人确认，服务身份单独留痕 | 该身份不等于已经启动值守进程；不继承或扩大真人权限 |
 | 持久任务与长值守 | 任务专用HTTP MCP连接、持久检查点、短执行租约、人工等待、暂停/恢复/停止及限额，见6.3 | 独立真实Mist界面及官方客户端完成邮件读回、确认归档、重连和停止；当前源码，发布见GO-LIVE | 平台执行及现有限额见6.4，本人界面提醒见6.5；周期关注、系统推送和长期运行验收仍待 |
 | 文件类操作 | 须上传原件的票据（如增值税专票）Agent 不能上传，预演即被拒 | 同上 | — |
+| 公司管理（不经 Agent） | 账号、岗位与权限、部门、小组、员工档案、审批资格人、Agent 服务身份走 `/admin/*`、`/hr/*`、`/agent-identities` REST，不在命令目录，Agent 无法读写；须公司管理员本人在页面办理（[work-assistant-plan.md §14](mist-atelier/work-assistant-plan.md)） | 设计如此 | — |
 
 ### 6.0.1 普通提议的当前可见性
 
