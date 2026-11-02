@@ -212,7 +212,7 @@ function localEnvelope(value:unknown):LocalEnvelope {
 }
 function localIdentity(data:LocalEnvelope){return JSON.stringify([data.user.id,data.user.displayName,data.user.email,[...data.user.permissions].sort(),data.user.permissionCeiling&&[...data.user.permissionCeiling].sort(),[...data.user.roles].sort(),data.user.departmentIds,[...data.profiles].sort((a,b)=>a.id.localeCompare(b.id))]);}
 
-/** Local mode is enabled only by an explicit same-origin server response; 404 retains production auth. */
+/** Local mode is enabled only by an explicit same-origin server response; `mode: 'remote'` (or a legacy 404) retains production auth. */
 export function MistSessionProvider({children}:{children:React.ReactNode}) {
  const instanceId=React.useId();
  const [mode,setMode]=React.useState<'probing'|'local'|'remote'|'error'>('probing');
@@ -235,6 +235,7 @@ export function MistSessionProvider({children}:{children:React.ReactNode}) {
    if(!mounted.current||sequence!==generation.current)throw new Error('会话操作已被新的请求替代');
    if(discovery&&response.status===404){setMode('remote');setStatus('anonymous');return;}
    const body=await response.json().catch(()=>null);
+   if(discovery&&response.ok&&body?.mode==='remote'){setMode('remote');setStatus('anonymous');return;}
    if(!response.ok)throw new Error(body?.error?.message||body?.message||'公司会话无法核验，请重新连接');
    const next=localEnvelope(body);
    if(profileId!==undefined&&next.user.id!==profileId)throw new Error('返回的工作身份与选择不一致，请重新核对');

@@ -7,9 +7,11 @@ import { accountAccessApi } from '../runtime/accountAccess';
 import { PASSWORD_HINT, passwordOk } from '../runtime/passwordRule';
 import { useRecoveryCooldown } from '../runtime/recoveryCooldown';
 
-/** GET never consumes a link. A request acknowledgement is not proof of email delivery. */
+/** 找回密码对公司员工与平台人员通用（同一 /auth/account-access 链路；邮件链接按账号类型指向各自入口）。
+ * GET never consumes a link. A request acknowledgement is not proof of email delivery. */
+export const ACCOUNT_RECOVERY_VIEWS=['account-recovery','platform-recovery'];
 export function AccountAccessPage(){
- const nav=useNav(),query=new URLSearchParams(location.search),requestMode=nav.route.view==='platform-recovery';
+ const nav=useNav(),query=new URLSearchParams(location.search),requestMode=ACCOUNT_RECOVERY_VIEWS.includes(nav.route.view);
  const kind=query.get('kind')==='invite'?'invite':'recovery';
  const [email,setEmail]=React.useState(query.get('email')||''),[password,setPassword]=React.useState(''),[confirm,setConfirm]=React.useState('');
  const token=React.useRef(location.hash.slice(1)),inFlight=React.useRef(false),heading=React.useRef<HTMLHeadingElement>(null);
@@ -45,7 +47,7 @@ export function AccountAccessPage(){
  return <div className="mist-auth"><div className="mist-auth-brand"><MistMark className="mist-hero-ring"/><div className="mist-brand" style={{padding:0}}><MistMark/><MistWordmark/></div><div className="mist-auth-brand-copy"><h1 className="mist-h1">{BAMBOOK_BRAND.headline[0]}<br/>{BAMBOOK_BRAND.headline[1]}</h1><p>{BAMBOOK_BRAND.name} · {BAMBOOK_BRAND.description}</p></div></div><div className="mist-auth-panel"><form className="mist-auth-form" aria-label={uiText(title)} onSubmit={submit} aria-busy={busy}>
   <h2 ref={heading} tabIndex={-1} className="mist-h1 mist-auth-title">{uiText(title)}</h2>
   {done?<Button variant="primary" onClick={returnToLogin}>{uiText("返回登录")}</Button>
-   :linkInvalid?<><p className="mist-sub">{uiText(kind==='invite'?'请联系管理员重新发送邀请。':'请重新申请重置邮件。')}</p>{kind==='recovery'&&<Button variant="primary" onClick={()=>nav.go('platform-recovery')}>{uiText("重新申请")}</Button>}<TextLink onClick={returnToLogin}>{uiText("返回登录")}</TextLink></>
+   :linkInvalid?<><p className="mist-sub">{uiText(kind==='invite'?'请联系管理员重新发送邀请。':'请重新申请重置邮件。')}</p>{kind==='recovery'&&<Button variant="primary" onClick={()=>nav.go('account-recovery')}>{uiText("重新申请")}</Button>}<TextLink onClick={returnToLogin}>{uiText("返回登录")}</TextLink></>
    :<>
     {error&&<Banner tone="bad" title={uiText(error)}/>}
     <Field label={uiText("工作邮箱")}><TextInput aria-label={uiText("工作邮箱")} type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={busy||!requestMode} value={email} onChange={e=>{setEmail(e.target.value);setNotice('');setAccepted(false);}}/></Field>

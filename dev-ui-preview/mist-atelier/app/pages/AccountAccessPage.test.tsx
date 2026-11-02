@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import React,{act}from'react';import{createRoot,type Root}from'react-dom/client';import{beforeEach,afterEach,it,expect,vi}from'vitest';
-const m=vi.hoisted(()=>({nav:{route:{view:'platform-recovery'},go:vi.fn()},api:{requestRecovery:vi.fn(),complete:vi.fn()}}));vi.mock('../nav',()=>({useNav:()=>m.nav}));vi.mock('../runtime/accountAccess',()=>({accountAccessApi:m.api}));import{AccountAccessPage}from'./AccountAccessPage';
+const m=vi.hoisted(()=>({nav:{route:{view:'account-recovery'},go:vi.fn()},api:{requestRecovery:vi.fn(),complete:vi.fn()}}));vi.mock('../nav',()=>({useNav:()=>m.nav}));vi.mock('../runtime/accountAccess',()=>({accountAccessApi:m.api}));import{AccountAccessPage}from'./AccountAccessPage';
 let root:Root,host:HTMLDivElement;
 const fill=(name:string,value:string)=>{const field=host.querySelector(`[aria-label="${name}"]`)as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));};
 const submit=()=>act(async()=>host.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
 const render=()=>act(async()=>root.render(<AccountAccessPage/>));
-beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;vi.clearAllMocks();sessionStorage.clear();history.replaceState({},'','/?view=platform-recovery');m.nav.route.view='platform-recovery';host=document.createElement('div');document.body.append(host);root=createRoot(host);});afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.useRealTimers();});
+beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;vi.clearAllMocks();sessionStorage.clear();history.replaceState({},'','/?view=account-recovery');m.nav.route.view='account-recovery';host=document.createElement('div');document.body.append(host);root=createRoot(host);});afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.useRealTimers();});
 it('submits the employee recovery address without claiming that an account exists',async()=>{m.api.requestRecovery.mockResolvedValue({message:'申请已处理，请检查邮箱'});await render();await act(async()=>fill('工作邮箱','ops@example.invalid'));await submit();expect(m.api.requestRecovery).toHaveBeenCalledWith('ops@example.invalid');expect(host.textContent).toContain('申请已提交');expect(host.querySelector('h2')?.textContent).toBe('找回密码');expect(host.querySelector('details')).toBeNull();});
 it('rejects mismatched passwords and never renders the link secret',async()=>{m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=invite&email=ops@example.invalid#private-link-secret');await render();await act(async()=>{fill('新密码','CorrectPassword42!');fill('确认新密码','different');});await submit();expect(m.api.complete).not.toHaveBeenCalled();expect(host.textContent).toContain('两次输入');expect(host.textContent).not.toContain('private-link-secret');});
 it('sends the token only on explicit submission and clears it after success',async()=>{m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=invite&email=ops@example.invalid#private-link-secret');m.api.complete.mockResolvedValue({platform:true});await render();expect(m.api.complete).not.toHaveBeenCalled();await act(async()=>{fill('新密码','CorrectPassword42!');fill('确认新密码','CorrectPassword42!');});await submit();expect(m.api.complete).toHaveBeenCalledWith(expect.objectContaining({kind:'invite',token:'private-link-secret'}));expect(location.hash).toBe('');expect(host.textContent).toContain('密码已设置');await act(async()=>host.querySelector('button')!.click());expect(m.nav.go).toHaveBeenCalledWith('login');});
@@ -39,7 +39,7 @@ it('uses the server retry interval without showing a success screen on rate limi
 });
 it('provides a recovery path for incomplete and expired links',async()=>{
  m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=recovery');await render();expect(host.textContent).toContain('链接已失效');expect(host.querySelector('input')).toBeNull();
- await act(async()=>host.querySelector('button')!.click());expect(m.nav.go).toHaveBeenCalledWith('platform-recovery');
+ await act(async()=>host.querySelector('button')!.click());expect(m.nav.go).toHaveBeenCalledWith('account-recovery');
 });
 it('replaces an expired link form with an explicit reapplication action',async()=>{
  m.nav.route.view='account-access';history.replaceState({},'','/?view=account-access&kind=recovery&email=staff@example.invalid#private-link-secret');m.api.complete.mockRejectedValue(Object.assign(new Error('链接已失效'),{code:'ACCESS_LINK_INVALID'}));
@@ -54,3 +54,4 @@ it('keeps an in-memory countdown when browser storage is unavailable',async()=>{
  const storage=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new Error('blocked');});
  try{m.api.requestRecovery.mockResolvedValue({retryAfterSeconds:60});await render();await act(async()=>fill('工作邮箱','staff@example.invalid'));await submit();expect(host.textContent).toContain('重新发送（01:00）');await submit();expect(m.api.requestRecovery).toHaveBeenCalledTimes(1);}finally{storage.mockRestore();}
 });
+it('still opens the request form from an older platform-recovery link',async()=>{m.nav.route.view='platform-recovery';history.replaceState({},'','/?view=platform-recovery');await render();expect(host.textContent).toContain('发送重置链接');expect(host.querySelector('[aria-label="工作邮箱"]')).not.toBeNull();});
