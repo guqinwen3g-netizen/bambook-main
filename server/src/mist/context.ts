@@ -3,6 +3,7 @@ import type { MistContext } from '../shared/mistWorkspace';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { hasScope } from '../auth/permissionService';
 import { createApprovalRoutingService } from '../approvals/approvalRoutingService';
+import type { PaymentTierAuthority } from '../shared/mistPayables';
 /** Approval authority is rebuilt in the same DB transaction as the business command. */
 export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:string,eligibleReviewerIds?:readonly string[]):Promise<NonNullable<MistContext['authority']>>{
   const authority:NonNullable<MistContext['authority']>={supplier:{}};
@@ -17,6 +18,11 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     // 付款申请分档：业务主管岗只有 5 万元及以下档；5 万元以上与首笔付款加签由全权限审批员 / 公司管理员（总领导）办理。
     const leaders=demo?['demo-admin']:['local-reviewer'];
     authority.paymentTierReviewerIds={pay_lt5:[...managers],pay_gt5:leaders,pay_new_supplier:leaders};
+    // 两级须不同的人签（H1）：本地测试身份里本地操作员同为全权限，作为 5 万元以上档与首笔加签的第二位审批人
+    // （本地操作员自己提交 5 万元以上的首笔付款时没有第二位，提交被拒绝）。
+    // 演示公司按岗位只有公司管理员陆衡持有 5 万元以上档与首笔加签（周敏是业务主管，只有 5 万元及以下档），
+    // 没有第二位合格的人：演示中 5 万元及以下的首笔付款由周敏 + 陆衡各签一级；5 万元以上的首笔付款提交即被拒绝。
+    if(!demo)(authority as PaymentTierAuthority).paymentTierAlternateIds={pay_lt5:[],pay_gt5:['local-operator'],pay_new_supplier:['local-operator']};
     // 风险申请：业务主管按岗位持有 risk:write；申请人本人由命令排除。
     if(kind.startsWith('platform.risk.'))authority.riskReviewerIds=[...managers];
     return authority;
@@ -107,6 +113,21 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
       if(await qualified(head)){authority.paymentTierReviewerIds[level]=[head!];continue;}
       if(leader===null)leader=await resolve(()=>routing.resolveClaimLeader(actor.userId));
       authority.paymentTierReviewerIds[level]=await qualified(leader??undefined)?[leader!]:[];
+    }
+    // H1：首笔付款的金额档与首笔加签须由不同的人签。原路由让两级落到同一人时（主管没有该档、上抬到同一位总领导，
+    // 或申请人本人就是主管），另给出本空间成员中当前合格持有该档权限的其他人（申请人已由 fresh 排除）；
+    // 只在本次申请的两级确实冲突时由 mistPayables 并入该级名单，无冲突时原路由不变。决定时按原申请人重建，结果一致。
+    const routed=authority.paymentTierReviewerIds,same=(a:string[]=[],b:string[]=[])=>a.length>0&&b.length>0&&new Set([...a,...b]).size<2;
+    if(eligibleReviewerIds&&(same(routed.pay_lt5,routed.pay_new_supplier)||same(routed.pay_gt5,routed.pay_new_supplier))){
+      const alternates:Partial<Record<keyof typeof tiers,string[]>>={};
+      for(const [level,scope] of Object.entries(tiers) as Array<[keyof typeof tiers,string]>){
+        alternates[level]=[];
+        for(const id of eligibleReviewerIds){
+          if((routed[level]||[]).includes(id))continue;
+          const p=await fresh(id);if(p&&hasScope(p,'finance:payment_request:approve' as any)&&hasScope(p,scope as any))alternates[level]!.push(id);
+        }
+      }
+      (authority as PaymentTierAuthority).paymentTierAlternateIds=alternates;
     }
   }
   // 风险关闭/豁免/带风险放行申请：由申请人所在部门主管审批；主管须当前在职、仍持有风险处理权，且不能是申请人本人。

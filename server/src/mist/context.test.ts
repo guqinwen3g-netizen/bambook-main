@@ -51,6 +51,26 @@ describe('Mist payment request reviewer authority',()=>{
   mocks.claim.mockResolvedValue({reviewerId:'boss'});mocks.users.set('boss',{id:'boss',status:'active',permissions:ALL});
   expect((await mistApprovalAuthority({},actor,'payable.request.submit')).paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:['boss'],pay_new_supplier:['boss']});
  });
+ it('local identities give a second, different reviewer for the larger and first-payment tiers',async()=>{
+  vi.stubEnv('MIST_LOCAL_WORKSPACE','1');
+  expect((await mistApprovalAuthority({},{...actor,mistLocal:true},'payable.request.submit') as any).paymentTierAlternateIds).toEqual({pay_lt5:[],pay_gt5:['local-operator'],pay_new_supplier:['local-operator']});
+ });
+ it('when both levels route to the same leader, nominates other current members holding that tier; none when there is no conflict',async()=>{
+  mocks.dept.mockResolvedValue({reviewerId:'head'});mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5']});
+  mocks.claim.mockResolvedValue({reviewerId:'boss'});mocks.users.set('boss',{id:'boss',status:'active',permissions:ALL});
+  mocks.users.set('director',{id:'director',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_gt5']});
+  mocks.users.set('revoked',{id:'revoked',status:'active',permissions:['vouchers:approve:pay_gt5','vouchers:approve:pay_new_supplier']});
+  mocks.users.set('gone',{id:'gone',status:'disabled',permissions:ALL});mocks.users.set('owner',{id:'owner',status:'active',permissions:ALL});
+  const members=['owner','head','boss','director','revoked','gone'];
+  const value=await mistApprovalAuthority({},actor,'payable.request.submit',members) as any;
+  expect(value.paymentTierReviewerIds).toEqual({pay_lt5:['head'],pay_gt5:['boss'],pay_new_supplier:['boss']});
+  expect(value.paymentTierAlternateIds).toEqual({pay_lt5:['boss'],pay_gt5:['director'],pay_new_supplier:[]});
+  // 决定时按原申请人重建，结果一致。
+  expect((await mistApprovalAuthority({},actor,'payable.request.decide',members) as any).paymentTierAlternateIds).toEqual(value.paymentTierAlternateIds);
+  // 主管持有两个金额档、总领导持首笔加签：两级不会落到同一人，不另给审批人。
+  mocks.users.set('head',{id:'head',status:'active',permissions:['finance:payment_request:approve','vouchers:approve:pay_lt5','vouchers:approve:pay_gt5']});
+  expect((await mistApprovalAuthority({},actor,'payable.request.submit',members) as any).paymentTierAlternateIds).toBeUndefined();
+ });
 });
 describe('Mist risk handling and reviewer authority',()=>{
  it('rebuilds handling capability from the current account permissions only for risk commands',async()=>{
