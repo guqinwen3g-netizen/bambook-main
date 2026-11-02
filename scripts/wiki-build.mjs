@@ -20,6 +20,7 @@ import { renderManualFigure } from './manual-media.mjs';
 import { renderLesson, lessonStyles, lessonRuntime } from './manual-lesson.mjs';
 import { manualNavigationRuntime } from './manual-navigation.mjs';
 import { readLessonCatalog, publicManualCatalog, requireTrackedLessonSources } from './manual-catalog.mjs';
+import { renderSopOverview, readTextSops, linkTextSops, sopStyles } from './manual-sop.mjs';
 
 const { values } = parseArgs({ options: { 'out-dir': { type: 'string' }, 'require-tracked': { type: 'boolean', default: false } } });
 const SITE = values['out-dir'] ? path.resolve(values['out-dir']) : DEFAULT_SITE;
@@ -35,13 +36,13 @@ const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(
 const slugify = s => s.toLowerCase().replace(/[^\w\u4e00-\u9fa5]+/g, '-').replace(/^-|-$/g, '');
 
 /** 图片 → figure + 图注；标题 → 可跳转锚点。 */
-function polish(html) {
+function polish(html, idPrefix = '') {
   return html
     // Old company-run GIFs are retained as internal material, not presented in the employee edition.
     .replace(/<p>\s*<img([^>]*?)>\s*<\/p>/g, (_m, attrs) => /src="[^"]+\.gif"/i.test(attrs) ? '' : renderManualFigure(attrs))
     .replace(/<img(?![^>]*loading=)([^>]*?)>/g, '<img$1 loading="lazy" decoding="async">')
     .replace(/<h([23])>(.*?)<\/h\1>/g, (_m, level, inner) => {
-      const id = slugify(inner.replace(/<[^>]+>/g, ''));
+      const id = idPrefix + slugify(inner.replace(/<[^>]+>/g, ''));
       return `<h${level} id="${id}">${inner}<a class="anchor" href="#${id}" aria-label="本节链接">#</a></h${level}>`;
     })
     .replace(/<table>/g, '<div class="table-wrap"><table>')
@@ -55,6 +56,13 @@ const catalog = readLessonCatalog();
 if (catalog.issues.length) throw new Error(catalog.issues.map(issue => `${issue.lessonId}：${issue.message}`).join('\n'));
 if (values['require-tracked']) requireTrackedLessonSources(catalog);
 const lessons = catalog.lessons.map(row => row.lesson);
+/** 软件实施 Agent 维护的文字 SOP；正式构建同样要求已纳入 Git。 */
+const textSops = readTextSops(WIKI);
+if (values['require-tracked']) {
+  const trackedSops = new Set(execFileSync('git', ['ls-files', '--', 'wiki/sop'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean));
+  const untracked = textSops.filter(sop => !trackedSops.has(sop.file));
+  if (untracked.length) throw new Error(`正式教学构建需要已纳入Git的文字SOP：${untracked.map(sop => sop.file).join('、')}`);
+}
 /** 课程按业务链分组：主干先于采购付款；未写 track 的旧课程属于采购结算与付款。 */
 const lessonTracks = [...new Set(lessons.map(trackOf))];
 const captures = new Map(catalog.lessons.map(row => [row.id, row.capture]));
@@ -80,8 +88,8 @@ const referenceNav = byPart
     .map(c => `<a class="nav-item" href="#${esc(c.slug)}" data-target="${esc(c.slug)}">${esc(c.title)}${c.verdict === 'stale' ? '<i class="dot"></i>' : ''}</a>`)
     .join('')}</div>`)
   .join('');
-const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a></div>${lessonTracks.map(t => `<div class="nav-part"><div class="nav-part-title">${esc(t)}</div>${lessons.filter(l => trackOf(l) === t).map(l => `<a class="nav-item" href="#${esc(l.id)}" data-target="${esc(l.id)}">${esc(l.title)}</a>`).join('')}</div>`).join('')}<div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
-const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p>${lessonTracks.map(t => `<h2 class="learning-track">${esc(t)}</h2><div class="learning-grid">${lessons.filter(l => trackOf(l) === t).map(lesson => `<a class="learning-card" href="#${esc(lesson.id)}"><span class="learning-card-tag">${esc(lesson.role)}</span><h2>${esc(lesson.title)} <span aria-hidden="true">→</span></h2><p>${lesson.steps.map(s=>esc(s.title)).join(' → ')}</p><span>${lesson.steps.length} 个步骤</span></a>`).join('')}</div>`).join('')}<div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
+const nav = `<div class="nav-part"><div class="nav-part-title">开始学习</div><a class="nav-item" href="#start" data-target="start">学习首页</a></div>${lessonTracks.map(t => `<div class="nav-part"><div class="nav-part-title">${esc(t)}</div>${lessons.filter(l => trackOf(l) === t).map(l => `<a class="nav-item" href="#${esc(l.id)}" data-target="${esc(l.id)}">${esc(l.title)}</a>`).join('')}</div>`).join('')}<div class="nav-part"><div class="nav-part-title">岗位 SOP</div><a class="nav-item" href="#sop-overview" data-target="sop-overview">岗位 SOP 总览</a>${textSops.map(sop => `<a class="nav-item" href="#${esc(sop.id)}" data-target="${esc(sop.id)}">${esc(sop.title)}</a>`).join('')}</div><div class="nav-reference-label">参考说明 · 待完善</div>${referenceNav}`;
+const start = `<section id="start" class="chapter manual-start"><p class="lesson-kicker">Bambook · 使用手册</p><h1>从一件具体工作开始</h1><p class="start-intro">看清当前要做什么，跟着引导操作，再核对结果和下一位接手人。</p>${lessonTracks.map(t => `<h2 class="learning-track">${esc(t)}</h2><div class="learning-grid">${lessons.filter(l => trackOf(l) === t).map(lesson => `<a class="learning-card" href="#${esc(lesson.id)}"><span class="learning-card-tag">${esc(lesson.role)}</span><h2>${esc(lesson.title)} <span aria-hidden="true">→</span></h2><p>${lesson.steps.map(s=>esc(s.title)).join(' → ')}</p><span>${lesson.steps.length} 个步骤</span></a>`).join('')}</div>`).join('')}<h2 class="learning-track">按岗位查 SOP</h2><div class="reference-cards sop-cards"><a href="#sop-overview"><span>全部岗位</span><strong>岗位 SOP 总览</strong><small>按业务链看先后与交接，按岗位看自己负责的事项</small></a>${textSops.map(sop => `<a href="#${esc(sop.id)}"><span>文字 SOP</span><strong>${esc(sop.title)}</strong><small>暂无分步演示，按文字步骤办理</small></a>`).join('')}</div><div class="start-standard"><h2>每节教学，回答四个问题</h2><div><span><b>01</b> 从哪里进入</span><span><b>02</b> 具体点哪里</span><span><b>03</b> 结果怎样核对</span><span><b>04</b> 交给谁继续</span></div></div><h2>按工作查说明</h2><div class="reference-cards">${chapters.filter(c=>c.slug!=='00-阅读指引').map(c=>`<a href="#${esc(c.slug)}"><span>${esc(c.part)}</span><strong>${esc(c.title)}</strong><small>参考说明 · 教学演示待重做</small></a>`).join('')}</div><p class="lesson-review-note">本版为教学结构样板，尚未完成全站内容和员工培训验收。</p></section>`;
 
 const sections = chapters
   .map(c => `<section id="${esc(c.slug)}" class="chapter">
@@ -92,6 +100,15 @@ const sections = chapters
   ${polish(marked.parse(c.body))}
 </section>`)
   .join('\n');
+
+const sopSections = [
+  renderSopOverview(lessons, trackOf, textSops),
+  ...textSops.map(sop => `<section id="${esc(sop.id)}" class="chapter sop-text">
+  <p class="sop-kicker">岗位 SOP · 文字版</p>
+  <div class="chapter-head"><h1>${esc(sop.title)}</h1></div>
+  ${linkTextSops(polish(marked.parse(sop.body), `${sop.id}-`), textSops)}
+</section>`),
+].join('\n');
 
 const html = `<!doctype html>
 <html lang="zh-CN">
@@ -171,6 +188,7 @@ tbody th{background:var(--bg-2);width:180px;font-weight:600;color:var(--ink-2)}
 .empty{color:var(--ink-3);padding:24px 0}
 mark{background:#fff3b0;padding:0 2px}
 ${lessonStyles}
+${sopStyles}
 .nav-reference-label{font-size:11px;color:var(--ink-3);margin:24px 8px 14px;border-top:1px solid var(--line);padding-top:20px}.manual-start h1{font-size:36px;line-height:1.3;margin:10px 0 16px}.start-intro{font-size:17px;color:var(--ink-2);max-width:650px}.learning-track{font-size:18px;margin:32px 0 12px}.learning-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.learning-card{display:block;padding:18px 20px;border-radius:14px;background:#eaf2f5;color:var(--ink)}.learning-card-tag{font-size:12px;color:#4f7689}.learning-card h2{margin:6px 0 8px;padding:0;font-size:17px;line-height:1.4}.learning-card h2 span{float:right;font-weight:400}.learning-card p{color:var(--ink-2);font-size:13px;margin:0 0 8px;line-height:1.6}.learning-card>span:last-child{font-size:12px;color:#5d7c8c}.start-standard{margin:32px 0}.start-standard h2{font-size:18px}.start-standard>div{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;font-size:14px;color:var(--ink-2)}.start-standard b{color:#7895a5;font-size:12px;margin-right:10px;font-weight:400}.reference-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.reference-cards a{display:flex;flex-direction:column;gap:8px;background:#f5f7f9;border-radius:12px;padding:18px;color:var(--ink)}.reference-cards span,.reference-cards small{font-size:12px;color:var(--ink-3)}.reference-cards strong{font-size:15px;font-weight:500}
 
 /* 深色：画面截图保持应用浅色原样，只调整手册外框与说明。 */
@@ -237,6 +255,7 @@ ${lessonStyles}
   <main id="content">
     ${start}
     ${catalog.lessons.map(row => renderLesson(row.lesson, row.capture, { assetVersion: row.contentSha256 })).join('\n')}
+    ${sopSections}
     ${sections}
   </main>
 </div>
@@ -263,5 +282,6 @@ for(const old of ['production','finance'])fs.rmSync(path.join(SITE,'assets',old)
 
 const kb = (fs.statSync(path.join(SITE, 'index.html')).size / 1024).toFixed(0);
 console.log(`✓ ${path.relative(root, path.join(SITE, 'index.html'))}（${kb} KB · ${catalog.totals.lessons} 课 / ${catalog.totals.steps} 步 / ${catalog.totals.images} 张图）`);
+console.log(`  岗位 SOP：总览 1 页（按 ${lessons.length} 课汇总）· 文字 SOP ${textSops.length} 篇`);
 console.log(`  旧参考章节 ${chapters.length} 篇，旧模块登记缺口 ${missingModules.length} 项；不代表新版课程覆盖率。`);
 console.log(`  版本 v${version} · ${branch}@${head} · 生成于 ${generatedAt}`);
