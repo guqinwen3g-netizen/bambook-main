@@ -57,14 +57,14 @@ describe('供应商票据登记', () => {
 });
 
 // 角色：业务员申请、主管审批、财务付款；审批名单由服务端按申请人解析后放入上下文。
-// 分档审批人由服务端按申请人与各档权限重建；本组用例让同一位主管持有三档，首笔付款须分两次签。
-const REVIEWERS = { paymentTierReviewerIds: { pay_lt5: ['主管-周'], pay_gt5: ['主管-周'], pay_new_supplier: ['主管-周'] } };
+// 分档审批人由服务端按申请人与各档权限重建；本组用例由主管持有金额档，首笔付款加签由总经理另签（两级须不同的人）。
+const REVIEWERS = { paymentTierReviewerIds: { pay_lt5: ['主管-周'], pay_gt5: ['主管-周'], pay_new_supplier: ['总经理-沈'] } };
 const as = (actor: string, st: MistState, command: any, now = '2026-10-14T02:00:00.000Z') => applyMistCommand(st, command, { ...ctx(actor, now), id: () => `ap-${actor}-${++seq}`, authority: { supplier: {}, ...REVIEWERS } } as MistContext);
 const err = (fn: () => unknown) => { try { fn(); return ''; } catch (e: any) { return e.message as string; } };
 const billRequest = (supplierId: string, lines: Array<{ billId: string; amount: number }>, reason = '到期付款') => ({ type: 'payable.request.submit', payload: { purpose: 'bill', supplierId, currency: 'CNY', lines, reason } });
 const decide = (id: string, decision: 'approved' | 'rejected' = 'approved', note = '核对合同与票据，同意') => ({ type: 'payable.request.decide', payload: { id, decision, note } });
 /** 主管逐级签完所有档位（首笔付款为两级）。 */
-const review = (st: MistState, id: string, decision: 'approved' | 'rejected' = 'approved', note?: string) => { let r = as('主管-周', st, decide(id, decision, note)); while (r.state.payables!.requests!.find(x => x.id === id)!.state === 'pending') r = as('主管-周', r.state, decide(id, decision, note)); return r; };
+const review = (st: MistState, id: string, decision: 'approved' | 'rejected' = 'approved', note?: string) => { let r = { state: st } as ReturnType<typeof as>; do { const who = getPayableReviews(r.state).find(t => t.entityId === id)!.reviewerIds[0]; r = as(who, r.state, decide(id, decision, note)); } while (r.state.payables!.requests!.find(x => x.id === id)!.state === 'pending'); return r; };
 /** 申请 → 主管批准 → 财务按申请登记实付。 */
 function approvedPay(st: MistState, supplierId: string, lines: Array<{ billId: string; amount: number }>, reference: string) {
   const req = as('业务-王', st, billRequest(supplierId, lines)); const ok = review(req.state, String(req.result.id));
@@ -113,7 +113,7 @@ describe('付款申请与主管审批', () => {
     const req = as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 30000 }, { billId: b.id, amount: 10000 }]));
     s = req.state; const id = String(req.result.id);
     const task = getMistReviewTasks(s).find(t => t.id === 'payment:' + id)!;
-    expect(task).toMatchObject({ kind: 'payment', status: 'pending', reviewerIds: ['主管-周'], requesterId: '业务-王', requiredPermission: 'finance:payment_request:approve' });
+    expect(task).toMatchObject({ kind: 'payment', status: 'pending', reviewerIds: ['主管-周', '总经理-沈'], requesterId: '业务-王', requiredPermission: 'finance:payment_request:approve' });
     expect(task.details.find(d => d.label === '本次申请金额')!.value).toBe('40,000.00 CNY');
     // 同一张票不能被第二份未付申请重复占用
     expect(err(() => as('业务-王', s, billRequest(po1.supplierId, [{ billId: a.id, amount: 1 }])))).toContain('可申请金额');
@@ -747,6 +747,25 @@ describe('付款审批分档：金额档、首笔付款加签、外币折算', (
     const f = setup({ currency: 'USD', amount: 1000 });
     f.s.fxPeriodRates = f.s.fxPeriodRates!.filter(r => !(r.currency === 'USD' && r.month === '2026-09'));
     expect(err(() => submit(f, 100))).toContain('缺少 2026-09 的 USD 月末汇率');
+  });
+  it('两级须由不同的人签：同一人签过一级后不能再签另一级', () => {
+    const auth = tiers(['主管'], ['总经理'], ['总经理', '副总']);
+    const f = setup({ paid: false }), r = submit(f, 60000, auth), id = String(r.result.id);
+    expect(levels(r.state, id)).toEqual(['pay_gt5', 'pay_new_supplier']);
+    let s = asWith('总经理', auth, r.state, decide(id)).state;
+    // 总经理签了只有他能签的金额档，首笔付款加签留给副总。
+    expect(s.payables!.requests!.find(x => x.id === id)!.approvals!.map(a => a.level)).toEqual(['pay_gt5']);
+    expect(getMistReviewTasks(s).find(t => t.id === 'payment:' + id)!.reviewerIds).toEqual(['副总']);
+    expect(err(() => asWith('总经理', auth, s, decide(id, 'approved', '再签')))).toContain('已签过');
+    expect(s.payables!.requests!.find(x => x.id === id)!.state).toBe('pending');
+    s = asWith('副总', auth, s, decide(id)).state;
+    expect(s.payables!.requests!.find(x => x.id === id)!.state).toBe('approved');
+  });
+  it('两级只有同一位可审批人时拒绝提交，提示配置第二位审批人', () => {
+    const f = setup({ paid: false });
+    expect(err(() => submit(f, 60000, tiers(['主管'], ['总经理'], ['总经理'])))).toContain('第二位审批人');
+    // 申请人本人不算审批人：去掉申请人后只剩一人，同样拒绝。
+    expect(err(() => submit(f, 1000, tiers(['业务-王', '主管'], [], ['主管'])))).toContain('第二位审批人');
   });
   it('权限不足：没有对应档位的审批人时拒绝提交；审批人当前已失去该档时拒绝决定', () => {
     const f = setup();

@@ -561,7 +561,9 @@ export function getPayableReviews(root: Root): MistReviewTask[] {
     };
   });
 }
-const pendingLevels = (r: PaymentRequest) => (r.tier?.levels || []).filter(l => !(r.approvals || []).some(a => a.level === l.level && a.decision === 'approved'));
+const signerIds = (r: PaymentRequest) => new Set((r.approvals || []).map(a => a.actorId));
+/** 还没签的级别；每级名单去掉已在本申请签过任一级的人（两级须由不同的人签）。 */
+const pendingLevels = (r: PaymentRequest) => { const signed = signerIds(r); return (r.tier?.levels || []).filter(l => !(r.approvals || []).some(a => a.level === l.level && a.decision === 'approved')).map(l => ({ ...l, reviewerIds: l.reviewerIds.filter(id => !signed.has(id)) })); };
 /** 审批页展示：需要哪一档、已签哪一级、还差哪一级。 */
 export function paymentTierDetails(r: PaymentRequest): Array<{ label: string; value: string }> {
   if (!r.tier) return [];
@@ -598,6 +600,12 @@ function paymentTier(root: Root, request: Pick<PaymentRequest, 'amount' | 'curre
     if (!reviewerIds.length) fail(`当前没有可审批「${PAYMENT_APPROVAL_LABEL[level]}」的审批人，请联系管理员配置部门主管或授予该档审批权限`, 'PRECONDITION');
     return { level, reviewerIds };
   }) };
+}
+/** 多级审批须能由不同的人各签一级（申请人已排除）：两级合起来只有一位可审批人时拒绝提交。 */
+function assertDistinctReviewers(tier: PaymentTier) {
+  if (tier.levels.length < 2) return;
+  const everyone = new Set(tier.levels.flatMap(l => l.reviewerIds));
+  if (everyone.size < tier.levels.length) fail(`本次付款需要 ${tier.levels.map(l => PAYMENT_APPROVAL_LABEL[l.level]).join(' + ')} 两级审批，须由不同的人各签一级；当前两级都只能由 ${[...everyone].join('、')} 一人审批。请联系管理员配置第二位审批人（为部门主管或另一位领导授予对应档位权限）`, 'PRECONDITION');
 }
 
 function event(root: Root, c: MistContext, entityId: string, message: string) {
@@ -862,7 +870,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
         request = { id, code, purpose: 'bill', supplierId, supplier, currency, amount: major(total), lines, ...(plan ? { planId: plan.id, purchaseId: plan.purchaseId, purchaseCode: plan.purchaseCode } : {}), reason, fileIds, requesterId: c.actorId, requester: c.actorName, submittedAt: c.now, reviewerIds, snapshot, state: 'pending', paymentHistory: [] };
       } else return fail('付款申请类型无效');
       // 按折合人民币金额与是否首笔付款冻结审批档位；每级审批人由服务端按申请人重建。
-      request.tier = paymentTier(root, request, today, c); request.approvals = [];
+      request.tier = paymentTier(root, request, today, c); request.approvals = []; assertDistinctReviewers(request.tier);
       request.reviewerIds = [...new Set(request.tier.levels.flatMap(l => l.reviewerIds))];
       // 冻结收款账户并写入审批快照，审批人看到钱付到哪里。
       const payee = supplierPayee(root as any, request.supplierId, request.currency);
@@ -881,8 +889,11 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       // 分档规则前提交的申请没有冻结档位：按提交日汇率与当前审批人名单补算，同样缺汇率即拒绝。
       if (!request.tier) { request.tier = paymentTier(root, request, platformBusinessDate(request.submittedAt), c); request.approvals = []; }
       const current = c.authority?.paymentTierReviewerIds || {}, left = pendingLevels(request);
+      if (signerIds(request).has(c.actorId)) fail(`你已签过本次付款申请的一级审批，另一级须由其他审批人签；还差：${left.map(l => PAYMENT_APPROVAL_LABEL[l.level]).join('、')}`, 'FORBIDDEN');
       // 审批人须在提交时冻结的该级名单里，且此刻仍按当前岗位权限被重建为该级审批人（撤权、改派即失效）。
-      const level = left.find(l => l.reviewerIds.includes(c.actorId!) && (current[l.level] || []).includes(c.actorId!));
+      const eligible = left.filter(l => l.reviewerIds.includes(c.actorId!) && (current[l.level] || []).includes(c.actorId!));
+      // 同一人可签多级时，先签其他人签不了的那一级，把另一级留给别人。
+      const level = eligible.find(l => left.filter(o => o !== l).every(o => o.reviewerIds.some(id => id !== c.actorId))) ?? eligible[0];
       if (!level) fail(`当前账号不是本次付款申请的有效审批主管；还差：${left.map(l => PAYMENT_APPROVAL_LABEL[l.level]).join('、')}`, 'FORBIDDEN');
       const note = text(p.note, '审批意见', true, 4000);
       (request.approvals ||= []).push({ level: level!.level, actorId: c.actorId, actor: c.actorName, at: c.now, decision: p.decision, note });
