@@ -24,7 +24,7 @@ import { isBusinessError, businessError } from '../shared/errorCodes';
  */
 import type { PrismaClient } from '@prisma/client';
 import type { TokenPayload } from '../auth/service';
-import { createPermissionService } from '../auth/permissionService';
+import { createPermissionService, hasScope } from '../auth/permissionService';
 import { createSequenceService } from '../sequence/sequenceService';
 import { getDataDictionaryService } from '../dictionaries/dataDictionaryService';
 import { getSystemConfigService } from '../config/systemConfigService';
@@ -440,7 +440,12 @@ export function createOrderServiceV2(prisma: PrismaClient) {
 
       // 配置默认值
       const withDefaults = await applyConfigDefaults(input);
-      Object.assign(withDefaults, await normalizeInternalOrderInput(prisma, await currentOrderLineWriteActor(prisma, actor, 'create'), withDefaults));
+      const writeActor = await currentOrderLineWriteActor(prisma, actor, 'create');
+      // 胶囊豁免是 MOQ 的业务例外：勾选须持有 moq:capsule_exemption:write（2026-11 补判定点），按实时权限判定。
+      if (withDefaults.capsuleExemption === true && !hasScope(writeActor, 'moq:capsule_exemption:write')) {
+        return { ok: false, error: { code: 'FORBIDDEN', message: '勾选 Capsule 豁免需要「MOQ Capsule 档豁免」权限' } };
+      }
+      Object.assign(withDefaults, await normalizeInternalOrderInput(prisma, writeActor, withDefaults));
 
       // v2.2（DR-042 §6.2 T-21）：以客户名义新建订单需为「宿主客户跟进人」（ownerId ∨ salesRepIds）
       // 或真全权角色；小组共享（read / read+followup）不开放下单——防越权（此前 createOrder
@@ -672,6 +677,10 @@ export function createOrderServiceV2(prisma: PrismaClient) {
       // ── Capsule 豁免切换（DR-003）：仅成衣订单；勾选/取消均重记操作者与时间 ──
       if (input.capsuleExemption !== undefined) {
         const wantCapsule = input.capsuleExemption === true;
+        // 勾选或取消豁免都改变 MOQ 例外，须持有 moq:capsule_exemption:write；值未变化时不要求。
+        if (wantCapsule !== (existing.capsuleExemption === true) && !hasScope(currentActor, 'moq:capsule_exemption:write')) {
+          return { ok: false, error: { code: 'FORBIDDEN', message: '变更 Capsule 豁免需要「MOQ Capsule 档豁免」权限' } };
+        }
         if (wantCapsule && !isCapsuleEligible({
           type: (input.type as string) ?? existing.type,
           businessLine: (input.businessLine as string) ?? existing.businessLine,

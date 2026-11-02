@@ -23,7 +23,7 @@ export const WORK_ASSISTANT_CEILING: readonly string[] = Object.freeze([...new S
 
 /**
  * 可办理委托（2026-10-30 用户定案）：上限 = 账号现有权限（不超出），供 MCP 接口读取、预演与执行普通命令；
- * 确认 / 删除 / 资金 / 对外发送类命令仍须本人在系统中确认，由 MCP 执行入口拒绝（见 agentCommands.ts）。
+ * 只有低风险命令可直接执行；其余命令（未登记的普通写入按中风险）只能建提议，由本人在系统中确认，高风险确认还须输入登录密码（见 agentMcp.ts#agentCommandSensitivity）。
  */
 export const AGENT_OPERATE_CEILING: readonly string[] = Object.freeze(Object.keys(PERMISSION_SCOPES).sort());
 export type AgentDelegationMode = 'read' | 'operate';

@@ -126,6 +126,13 @@ describe('公司成员与岗位权限（服务端）',()=>{
   await sales.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'self-approve',expectedRevision:r.body.workspace.revision,decision:'approved',note:'自批'}).expect(404);
   await manager.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'pay-approve',expectedRevision:r.body.workspace.revision,decision:'approved',note:'核对票据与合同，同意付款'}).expect(200);
   await manager.get(W+id).expect(404);
+  // 该供应商首笔付款：业务主管只签了 5 万元及以下档，还须总经理级加签后才能付款。
+  let pendingRev=(await finance.get(W+id).expect(200)).body.workspace.revision;
+  await command(finance,id,pendingRev,'payable.payment.register',{requestId:payReq,date:today,amount:600,reference:'BANK-MEMBER-1',allocations:[{billId,amount:600}]}).expect(422);
+  const reviewer=await agent(app,'local-reviewer');
+  const second=(await reviewer.get('/api/mist/reviews').expect(200)).body.reviews.find((t:any)=>t.id==='payment:'+payReq);
+  expect(second).toMatchObject({canDecide:true,status:'pending'});expect(second.details.find((d:any)=>d.label==='审批进度').value).toContain('还差：首笔付款加签');
+  await reviewer.post('/api/mist/reviews/'+id+'/payment:'+payReq).send({requestId:'pay-approve-first',expectedRevision:pendingRev,decision:'approved',note:'新供应商资质已核'}).expect(200);
   const approvedRev=(await finance.get(W+id).expect(200)).body.workspace.revision;
   r=await command(finance,id,approvedRev,'payable.payment.register',{requestId:payReq,date:today,amount:600,reference:'BANK-MEMBER-1',allocations:[{billId,amount:600}]}).expect(200);
   expect(r.body.workspace.state.payables.requests.find((q:any)=>q.id===payReq)).toMatchObject({state:'paid'});

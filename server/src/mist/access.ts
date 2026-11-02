@@ -26,7 +26,7 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'treasury', label: '锁汇结汇', permissions: ['vouchers:read'], paths: [['fxRecords'], ['fxRevaluations']], entityTypes: [], views: [] },
   // 月末汇率是公开牌价（人民银行中间价等），报表折算用，不按财务权限隐藏。
   { key: 'fxPeriodRates', label: '月末汇率', permissions: [], paths: [['fxPeriodRates']], entityTypes: [], views: [] },
-  { key: 'exportRebate', label: '出口退税', permissions: ['invoices:read'], paths: [['exportRebate']], entityTypes: ['rebate'], views: [] },
+  { key: 'exportRebate', label: '出口退税', permissions: ['tax:read'], paths: [['exportRebate']], entityTypes: ['rebate'], views: [] },
   { key: 'funding', label: '订单资金归属', permissions: ['finance:read', 'invoices:read', 'vouchers:read'], paths: [['orderFunding']], entityTypes: ['orderFunding'], views: ['funding'] },
   { key: 'relations', label: '客户与联系人', permissions: ['relations:read'], paths: [['customers'], ['contacts'], ['market', 'relations']], entityTypes: ['customer', 'relation'], views: ['customers', 'relations'] },
   { key: 'teamReports', label: '团队周报存档', permissions: ['relations:admin'], paths: [['teamReports']], entityTypes: [], views: [] },
@@ -52,6 +52,13 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'orders', label: '订单', permissions: ['orders:read'], paths: [['orders'], ['orderLines'], ['internalFabricAllocations'], ['internalDeliveries']], entityTypes: ['order'], views: ['orders', 'orders/detail', 'orders/list', 'orders/new'] },
   { key: 'production', label: '生产', permissions: ['production:read'], paths: [['productions'], ['fulfillment', 'productionFacts']], entityTypes: ['production'], views: ['production-board'] },
 ];
+/** 掩码退税计税依据：供应商票据税额、退税申报计税金额 / 应退税额 / 明细。只改投影副本，不动原状态。 */
+export function maskTaxBase(next: MistState) {
+  if (next.payables?.bills?.length) next.payables = { ...next.payables, bills: next.payables.bills.map(b => ({ ...b, taxAmount: 0, taxMasked: true })) };
+  const rebate = next.exportRebate;
+  if (rebate?.claims?.length) next.exportRebate = { ...rebate, claims: rebate.claims.map(c => ({ ...c, taxable: 0, expected: 0, taxMasked: true,
+    lines: c.lines.map(({ parts: _parts, inputTaxCap: _cap, excluded: _excluded, ...l }) => ({ ...l, taxable: 0, rebate: 0 })) })) };
+}
 export const memberIds = (state: MistState): string[] => Array.isArray(state.memberIds) ? state.memberIds.filter((id: unknown) => typeof id === 'string') : [];
 export const members = (state: MistState): MistMemberRecord[] => Array.isArray(state.members) ? state.members : [];
 export const isOwner = (row: { ownerId: string }, actor: TokenPayload) => row.ownerId === actor.userId;
@@ -98,6 +105,8 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
     next.notifications = (next.notifications || []).filter(item => visibleTarget(item.target));
     next.calendar = (next.calendar || []).filter(item => visibleTarget(item.target));
   }
+  // 敏感字段 sensitive:tax_base：退税计税金额与供应商专票税额只给持码人；其余人按 0 返回并标 taxMasked，界面显示“已隐藏”。
+  if (!hasScope(actor, 'sensitive:tax_base' as PermissionScope)) maskTaxBase(next);
   // Warehouse readers without payable access must not receive financial review evidence.
   if(hidden.some(section=>section.key==='payables') && next.fulfillment?.stockMovements){
     next.fulfillment={...next.fulfillment,stockMovements:next.fulfillment.stockMovements.map(row=>{

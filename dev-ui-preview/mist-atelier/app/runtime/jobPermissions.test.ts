@@ -35,3 +35,15 @@ it('describes the same department requirements the server enforces', () => {
     }
   }
 });
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { APPROVAL_LABEL_ONLY_SCOPES, labelOnlyApprovals } from './jobPermissions';
+it('marks approval codes that do not choose reviewers, matching the server registry of ui-label-only codes', () => {
+  const registry = fs.readFileSync(path.resolve(__dirname, '../../../../server/src/auth/__tests__/danglingScopeConsumption.test.ts'), 'utf8');
+  const serverLabels = [...registry.matchAll(/\{ scope: '([^']+)', reason: 'ui-label-only'/g)].map(m => m[1]).sort();
+  expect([...APPROVAL_LABEL_ONLY_SCOPES].sort()).toEqual(serverLabels);
+  expect(labelOnlyApprovals(JOB_MODULES.find(m => m.key === 'orders')!)).toEqual(['orders:approve:change_delivery', 'orders:approve:change_qty', 'orders:approve:change_price', 'orders:approve:cancel']);
+  // 付款分档码已由服务端判定，不再标为“不控制审批人”。
+  expect(labelOnlyApprovals(JOB_MODULES.find(m => m.key === 'finance')!)).toEqual(['invoices:approve:writeoff']);
+});

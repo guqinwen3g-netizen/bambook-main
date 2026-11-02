@@ -16,6 +16,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { createModuleAuthGuard, requireJwtForWrite } from '../auth/moduleGuard';
+import { requirePermission } from '../auth/permissionGuard';
 import { actorIdFromRequest } from '../audit/routeAudit';
 import { logger } from '../lib/logger';
 import { createSealService, SealInput, SealValidationError, SYSTEM_ROLE_IDS } from './sealService';
@@ -39,6 +40,8 @@ function serializeBigInts<T>(value: T): T {
   return value;
 }
 
+/** 印章与签章配置写入另须单证管理权 customs:admin（2026-11 补判定点），管理员角色本身不再足够。 */
+const requireCustomsAdmin = requirePermission('customs:admin');
 function requireAdmin(req: Request, res: Response, next: NextFunction) {
   // JWT.roles 装 legacy 名（owner/admin/…），roleIds 才是系统角色 id——两套都要认。
   // 空库彩排实测：bootstrap 管理员（roles=['owner','admin']）也 403，印章根本传不上、电子签瘫痪。
@@ -102,7 +105,7 @@ export function createSealRouter(options: SealRouterOptions): Router {
     }
   });
 
-  router.post('/', requireAdmin, requireWrite, async (req: Request, res: Response) => {
+  router.post('/', requireAdmin, requireWrite, requireCustomsAdmin, async (req: Request, res: Response) => {
     try {
       const row = await seals.createSeal(req.body as SealInput, actorIdFromRequest(req));
       notify('create_seal', [row.id]);
@@ -121,7 +124,7 @@ export function createSealRouter(options: SealRouterOptions): Router {
     }
   });
 
-  router.patch('/:id', requireAdmin, requireWrite, async (req: Request, res: Response) => {
+  router.patch('/:id', requireAdmin, requireWrite, requireCustomsAdmin, async (req: Request, res: Response) => {
     try {
       const row = await seals.updateSeal(req.params.id, (req.body ?? {}) as Partial<SealInput>, actorIdFromRequest(req));
       notify('update_seal', [row.id]);
@@ -131,7 +134,7 @@ export function createSealRouter(options: SealRouterOptions): Router {
     }
   });
 
-  router.delete('/:id', requireAdmin, requireWrite, async (req: Request, res: Response) => {
+  router.delete('/:id', requireAdmin, requireWrite, requireCustomsAdmin, async (req: Request, res: Response) => {
     try {
       await seals.deleteSeal(req.params.id, actorIdFromRequest(req));
       notify('delete_seal', [req.params.id]);

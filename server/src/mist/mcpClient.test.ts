@@ -85,17 +85,16 @@ describe('Official MCP client over a real loopback HTTP connection', () => {
 
   it('previews, commits and retries one normal command without duplicate business records', async () => {
     const { human, workspace, tool } = await fixture();
-    const po = workspace.state.fulfillment.purchases.find((item: any) => item.code === 'PO-2026-00001');
-    const receipt = workspace.state.fulfillment.receipts.find((item: any) => item.purchaseId === po.id);
-    const command = { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id], note: '实收到货结算' } };
-    const args = { workspaceId: workspace.id, command, requestId: 'settlement-http-once' };
+    // 只有低风险命令可直接执行。
+    const command = { type: 'calendar.save', payload: { title: '收货复核', date: '2026-11-02', time: '09:00', note: '实收到货核对' } };
+    const args = { workspaceId: workspace.id, command, requestId: 'calendar-http-once' };
     expect((await tool('bambook_preview', args)).isError).not.toBe(true);
     expect((await human.get(`/api/mist/workspaces/${workspace.id}`)).body.workspace.revision).toBe(workspace.revision);
     expect((await tool('bambook_execute', args)).isError).not.toBe(true);
     const replay = await tool('bambook_execute', args);
     expect(replay.structuredContent).toMatchObject({ replayed: true });
     const after = (await human.get(`/api/mist/workspaces/${workspace.id}`).expect(200)).body.workspace;
-    expect(after.state.payables.settlements).toHaveLength(1);
+    expect(after.state.calendar).toHaveLength(workspace.state.calendar.length + 1);
     expect(after.revision).toBe(workspace.revision + 1);
   });
 

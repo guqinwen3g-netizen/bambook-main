@@ -8,6 +8,7 @@ import { createMistLocalRuntime } from './local';
 import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
 import { agentCommandSensitivity } from './agentMcp';
+import { agentCommandRisk } from '../shared/mistAgentProposals';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_AUDIT_FIELD, agentAuditReceiptId } from './agentAudit';
 import {randomUUID} from 'node:crypto';
@@ -47,8 +48,9 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
   it('rejects missing or invalid operation IDs before writing and rejects reusing an ID for different input', async () => {
     const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
     const { client, workspace, rpc, tool } = await as(app, 'demo-buyer');
-    const po = purchase(workspace, 'PO-2026-00001'), receipt = workspace.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
-    const command = { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id] } };
+    // 只有低风险命令可直接执行；用日程验证请求编号校验与同号异参冲突。
+    const command = { type: 'calendar.save', payload: { title: '收货复核', date: '2026-11-02', time: '09:00', note: '' } };
+    const calendarCount = workspace.state.calendar.length;
     for (const requestId of [undefined, '', ' padded ', 'x'.repeat(117), 1]) {
       const result = (await rpc('tools/call', { name: 'bambook_execute', arguments: { workspaceId: workspace.id, command, requestId } })).result;
       expect(result.isError).toBe(true);
@@ -59,7 +61,15 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const conflict = await tool('bambook_execute', { workspaceId: workspace.id, requestId: 'once', command: { ...command, payload: { ...command.payload, note: 'different operation' } } });
     expect(conflict.isError).toBe(true);
     expect(conflict.content[0].text).toContain('请求编号');
-    expect((await client.get('/api/mist/workspaces/' + workspace.id)).body.workspace.state.payables.settlements).toHaveLength(1);
+    expect((await client.get('/api/mist/workspaces/' + workspace.id)).body.workspace.state.calendar).toHaveLength(calendarCount + 1);
+    // 低风险且产生业务事件的命令直接执行：经办人标注“经 Agent”。
+    const customer = workspace.state.customers[0];
+    const followUp = await tool('bambook_execute', { workspaceId: workspace.id, requestId: 'follow-up-direct', command: { type: 'crm.followUp.save', payload: { customerId: customer.id, method: 'call', content: '电话确认交期', at: new Date(Date.now() - 3600000).toISOString(), nextDate: '', link: null } } });
+    expect(followUp.isError).not.toBe(true); expect(followUp.structuredContent.status).toBeUndefined();
+    const after = (await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace;
+    const id = followUp.structuredContent.receipt.result.id;
+    expect(after.state.crm.followUps.find((f: any) => f.id === id)).toMatchObject({ actor: '沈禾（经 Agent）' });
+    expect(after.state.events.find((e: any) => e.entityId === customer.id && e.businessRef?.id === id).actor).toBe('沈禾（经 Agent）');
   });
 
   it('requires an actual operate delegation for MCP writes instead of treating a human cookie as an Agent session', async () => {
@@ -73,40 +83,58 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     expect((await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace.revision).toBe(workspace.revision);
   });
 
-  it('buyer agent previews then submits a settlement on actual receipts; the write is audited as via Agent and replays idempotently', async () => {
-    const app = createMistServer(undefined, { local: createMistLocalRuntime({ directory }) });
-    const { client, workspace, tool } = await as(app, 'demo-buyer');
+  it('buyer agent previews a medium-risk settlement submission; it becomes a proposal the buyer confirms in the app, audited as via Agent and replayed idempotently', async () => {
+    const local = createMistLocalRuntime({ directory });
+    const app = createMistServer(undefined, { local });
+    const { client, workspace, tool, sessionId } = await as(app, 'demo-buyer');
     const po = purchase(workspace, 'PO-2026-00001'), receipt = workspace.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
     const found = (await tool('bambook_query', { workspaceId: workspace.id, type: 'purchase', q: 'PO-2026-00001' })).structuredContent;
     expect(JSON.stringify(found.results)).toContain('PO-2026-00001');
     const commands = (await tool('bambook_commands', { prefix: 'payable.settlement.' })).structuredContent.commands;
-    expect(commands.find((c: any) => c.type === 'payable.settlement.submit')).toMatchObject({ via: 'normal' });
+    // 提交结算属中风险：委托只能建提议，本人确认后执行。
+    expect(commands.find((c: any) => c.type === 'payable.settlement.submit')).toMatchObject({ via: 'confirm' });
     expect(commands.find((c: any) => c.type === 'payable.settlement.confirm')).toMatchObject({ via: 'confirm' });
     const governance = (await tool('bambook_commands', { prefix: 'order.governance.saveDraft' })).structuredContent.commands[0];
     expect(governance.types?.OrderGovernanceInput).toContain('quantityBasisNote');
     expect((await tool('bambook_commands', {})).structuredContent.commands.some((c: any) => c.types)).toBe(false);
     const command = { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id], note: '首批实收结算' } };
     const preview = (await tool('bambook_preview', { workspaceId: workspace.id, command })).structuredContent;
+    expect(preview.via).toBe('confirm');
     expect(preview.events.join('')).toContain('实收 2380 米 · 110,670.00 CNY');
     const untouched = (await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace;
     expect(untouched.revision).toBe(workspace.revision);
     expect(untouched.state.payables.settlements).toHaveLength(0);
     const first = await tool('bambook_execute', { workspaceId: workspace.id, command, requestId: 'settle-po1' });
     expect(first.isError).toBeUndefined();
+    expect(first.structuredContent).toMatchObject({ status: 'awaiting_confirmation' });
     const again = await tool('bambook_execute', { workspaceId: workspace.id, command, requestId: 'settle-po1' });
-    expect(again.structuredContent).toMatchObject({ replayed: true });
+    expect(again.structuredContent).toMatchObject({ replayed: true, status: 'awaiting_confirmation' });
+    let state = (await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace;
+    expect(state.state.payables.settlements).toHaveLength(0);
+    const proposals = state.state.agentProposals.filter((p: any) => p.state === 'pending');
+    expect(proposals).toHaveLength(1); expect(proposals[0]).toMatchObject({ ownerId: 'demo-buyer', command });
+    const proposalReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: workspace.id, requestId: agentAuditReceiptId('mcp-settle-po1') } } });
+    expect(proposalReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ actor: { id: 'demo-buyer' }, source: 'agent', phase: 'proposed', agentSessionId: sessionId });
+    const confirmed = await client.post('/api/mist/workspaces/' + workspace.id + '/commands').send({ requestId: randomUUID(), expectedRevision: state.revision, command: { type: 'agent.proposal.confirm', payload: { id: proposals[0].id } } });
+    expect(confirmed.status).toBe(200);
     const after = (await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace;
     expect(after.state.payables.settlements).toHaveLength(1);
     expect(after.state.payables.settlements[0]).toMatchObject({ state: 'pending', quantity: 2380, amount: 110670 });
-    expect(after.state.events.find((e: any) => e.entityId === after.state.payables.settlements[0].id).actor).toBe('沈禾（经 Agent）');
+    expect((await tool('bambook_execute', { workspaceId: workspace.id, command, requestId: 'settle-po1' })).structuredContent).toMatchObject({ status: 'confirmed', replayed: true });
+    expect((await client.get('/api/mist/workspaces/' + workspace.id).expect(200)).body.workspace.state.payables.settlements).toHaveLength(1);
   });
 
   it('finance agent turns a confirmation into a proposal that only the owner can confirm or reject in the app; confirming runs the real command', async () => {
     const local = createMistLocalRuntime({ directory });
+    // 财务岗默认只有 ai:write:low/medium；本用例先验证缺高风险档被拒，再授予该档并复验密码。
+    let grantHigh = false; const authorize = local.authorize;
+    local.authorize = async (db, prior, permission) => authorize(db, prior, permission === 'ai:write:high' && grantHigh ? undefined : permission);
+    vi.stubEnv('MIST_LOCAL_REAUTH_PASSWORD', 'local-reauth-secret');
     const app = createMistServer(undefined, { local });
     const buyer = await as(app, 'demo-buyer');
     const po = purchase(buyer.workspace, 'PO-2026-00001'), receipt = buyer.workspace.state.fulfillment.receipts.find((r: any) => r.purchaseId === po.id);
-    await buyer.tool('bambook_execute', { workspaceId: buyer.workspace.id, command: { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id] } } });
+    // 结算由采购本人在页面提交（Agent 提交结算属中风险，须本人确认，另见上一用例）。
+    await buyer.client.post('/api/mist/workspaces/' + buyer.workspace.id + '/commands').send({ requestId: randomUUID(), expectedRevision: buyer.workspace.revision, command: { type: 'payable.settlement.submit', payload: { purchaseId: po.id, receiptIds: [receipt.id] } } }).expect(200);
     const finance = await as(app, 'demo-finance');
     const read = async (client: any) => (await client.get('/api/mist/workspaces/' + finance.workspace.id).expect(200)).body.workspace;
     const settlement = (await read(finance.client)).state.payables.settlements[0];
@@ -133,8 +161,18 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
     const run = async (client: any, command: any) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command }); };
     await (await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).ok;
     expect((await run(buyer.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } })).status).toBe(404);
-    const confirmed = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
+    const noTier = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
+    expect(noTier.status).toBe(403); expect(noTier.body.error.message).toContain('ai:write:high');
+    grantHigh = true;
+    const noPassword = await run(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } });
+    expect(noPassword.status).toBe(403); expect(noPassword.body.error.code).toBe('REAUTH_REQUIRED');
+    const runWith = async (client: any, command: any, password: string) => { const ws = await read(client); return client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + Math.random().toString(36).slice(2), expectedRevision: ws.revision, command, reauth: { password } }); };
+    const wrong = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'not-the-password');
+    expect(wrong.status).toBe(403); expect(wrong.body.error.code).toBe('REAUTH_FAILED');
+    expect((await read(finance.client)).state.payables.settlements[0].state).toBe('pending');
+    const confirmed = await runWith(finance.client, { type: 'agent.proposal.confirm', payload: { id: proposal.id } }, 'local-reauth-secret');
     expect(confirmed.status).toBe(200);
+    expect(JSON.stringify(await local.database.mistCommandReceipt.findMany({ where: { workspaceId: finance.workspace.id } }))).not.toContain('local-reauth-secret');
     const confirmationReceipt = await local.database.mistCommandReceipt.findUnique({ where: { workspaceId_requestId: { workspaceId: finance.workspace.id, requestId: agentAuditReceiptId(confirmed.body.receipt.requestId) } } });
     expect(confirmationReceipt.result[AGENT_AUDIT_FIELD]).toMatchObject({ actor: { id: 'demo-finance' }, source: 'human_confirmation', phase: 'confirmed', agentSessionId: finance.sessionId, proposalId: proposal.id, command: confirm, trigger: { type: 'agent.proposal.confirm', payload: { id: proposal.id } } });
     expect(confirmationReceipt.result[AGENT_AUDIT_FIELD].changes).toContainEqual({ path: ['k:payables', 'k:settlements', 'i:' + settlement.id, 'k:state'], operation: 'replace', before: 'pending', after: 'confirmed' });
@@ -188,7 +226,10 @@ describe('命令目录与敏感分级', () => {
     expect(payload('email.server.send.begin')).toContain(`mode: 'retry'`);
     const via = (type: string) => agentCommandSensitivity(type);
     for (const type of ['payable.payment.register', 'payable.request.decide', 'payable.bill.register', 'payable.settlement.confirm', 'finance.receivable.confirm', 'funding.release', 'platform.credit.issue', 'order.governance.decide', 'member.groups.set', 'teamScope.save', 'market.quotation.delete'].filter(t => MIST_COMMAND_CATALOG.some(c => c.type === t) || t === 'market.quotation.delete')) expect([type, via(type)]).toEqual([type, 'confirm']);
-    for (const type of ['payable.settlement.submit', 'development.saveDraft', 'market.quotation.save', 'fulfillment.procurement.save']) expect([type, via(type)]).toEqual([type, 'normal']);
+    // 中风险与未登记（按高）命令只能建提议；只有低风险可直接执行。
+    for (const type of ['payable.settlement.submit', 'development.saveDraft', 'market.quotation.save', 'fulfillment.procurement.save', 'customer.update', 'order.create', 'market.quotation.convert']) expect([type, via(type)]).toEqual([type, 'confirm']);
+    for (const type of ['calendar.save', 'crm.followUp.save', 'email.flag', 'task.complete', 'market.quotation.feedback.add']) expect([type, via(type)]).toEqual([type, 'normal']);
+    for (const entry of MIST_COMMAND_CATALOG) if (via(entry.type) === 'normal') expect([entry.type, agentCommandRisk(entry.type)]).toEqual([entry.type, 'low']);
     expect(via('files.add')).toBe('blocked');
     expect(via('email.server.sync')).toBe('blocked');
     expect(via('agent.proposal.confirm')).toBe('blocked');

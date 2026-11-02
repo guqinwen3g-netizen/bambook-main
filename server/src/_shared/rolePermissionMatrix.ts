@@ -414,7 +414,7 @@ const SALES_BASE: RolePermissionMatrix = {
   'reports:write': true,
   'ai:chat': true,
   'ai:write:low': true,    // AI-1选C：低风险写（登记跟进/加标签）无确认
-  'ai:write:medium': true, // 中风险需要确认框的（前端UI再弹窗），后端有scope就允许执行（确认框是前端UX）
+  'ai:write:medium': true, // 中风险：确认 Agent 提议时服务端校验本码，界面列出将改动的字段（mistAgentProposals.ts 风险登记）
   // 客户市场
   'relations:read': true,
   'relations:write': true,
@@ -665,6 +665,8 @@ const ADMIN_BASE: RolePermissionMatrix = {
   'customs:read': true,
   // 领导可代为登记清关完成（与后勤/单证同列；部门门禁仍要求后勤部门或总经理）
   'customs:clear': true,
+  // 2026-11 印章 / 签章配置写入改按 customs:admin 判定：管理员原本就能管理印章，补授本码保持原能力。
+  'customs:admin': true,
   'qc:read': true,
   'aftersales:read': true,
   'procurement:read': true,

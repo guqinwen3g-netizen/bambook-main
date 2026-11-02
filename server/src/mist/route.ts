@@ -270,8 +270,9 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
   router.get('/workspaces/:id/team-scopes', run(async (req, res) => { res.json(await repository.teamScopes(actor(req), req.params.id)); }));
   router.post('/workspaces/:id/team-scopes/preview', run(async (req, res) => { res.json(await repository.previewTeamScope(actor(req), req.params.id, exactBody(req.body, ['teamId', 'conditions', 'picks', 'exclusions', 'note']))); }));
   router.post('/workspaces/:id/commands', run(async (req, res) => {
-    const body = exactBody(req.body, ['requestId', 'expectedRevision', 'command']);
+    const body = exactBody(req.body, ['requestId', 'expectedRevision', 'command', 'reauth']);
     exactBody(body.command, ['type', 'payload']);
+    if (body.reauth !== undefined && (body.command?.type !== 'agent.proposal.confirm' || typeof exactBody(body.reauth, ['password']).password !== 'string')) fail('INVALID_INPUT', '只有确认 Agent 提议时可附带登录密码复验', 400);
     res.json(await repository.execute(actor(req), req.params.id, body as any));
   }));
   // 智能邮箱真实收发：凭据只写入服务端，响应只含公司投影与操作结果。

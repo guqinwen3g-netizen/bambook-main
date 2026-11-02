@@ -9,7 +9,7 @@ import {platformBusinessDate} from '../../../../server/src/shared/mistPlatform';
 import {Nav} from '../nav';
 const store=vi.hoisted(()=>({value:null as any}));
 vi.mock('../runtime/workspace',()=>({useMistWorkspace:()=>store.value}));
-vi.mock('../runtime/auth', () => { const useMistSession = ()=>({hasPermission:()=>store.value?.canWrite!==false}); return { useMistSession, useOptionalMistSession: useMistSession }; });
+vi.mock('../runtime/auth', () => { const useMistSession = ()=>({hasPermission:(p:string)=>store.value?.canWrite!==false&&!store.value?.denied?.has(p)}); return { useMistSession, useOptionalMistSession: useMistSession }; });
 import {FinancePage,parseMistReceiptCsv,financeAllocationAmount} from './FinancePage';
 import {MistPresentedErrorContext} from '../runtime/errorPresentation';
 let host:HTMLElement,root:Root,route:{view:string;id?:string;section?:string;customerId?:string;detail?:string};const go=vi.fn();
@@ -185,6 +185,11 @@ it('opens the unassigned bank worklist, includes missing account references and 
  await click('USD');table=getByRole(host,'table',{name:'收付款记录'});expect(table.textContent).toContain('P-UNASSIGNED');expect(table.textContent).not.toContain('R-UNASSIGNED');
  await click('全部币种');await click('全部 · 5');expect(go).toHaveBeenLastCalledWith('payment-vouchers',undefined,{section:'records'},{keepScroll:true});table=getByRole(host,'table',{name:'收付款记录'});expect(table.textContent).toContain('R-EUR');expect(table.textContent).toContain('P-ASSIGNED');
  expect(JSON.stringify(st)).toBe(before);expect(store.value.run).not.toHaveBeenCalled();
+});
+it('shows the lock entrance only to fx:lock holders; voucher writers without it can still settle',async()=>{
+ store.value.denied=new Set(['fx:lock']);route.section='accounts';render();
+ expect(queryByRole(host,'button',{name:'登记锁汇'})).toBeNull();expect(queryByRole(host,'button',{name:'登记结汇'})).not.toBeNull();
+ store.value.denied=new Set();render();expect(queryByRole(host,'button',{name:'登记锁汇'})).not.toBeNull();
 });
 it('keeps company bank accounts with finance staff and transaction facts readable without write entrances',async()=>{
  store.value.canWrite=false;route.section='accounts';render();for(const name of ['新增账户','登记锁汇','登记结汇'])expect(queryByRole(host,'button',{name})).toBeNull();

@@ -2,6 +2,7 @@ import {mistBusinessInstant} from '../shared/mistBusinessClock';
 import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner } from '../shared/mistEmail';
 import { emailAnalysisHash } from './mail/intelligence';
 import { createHash, randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import type { TokenPayload } from '../auth/service';
 import type { MistState, MistCommand, MistContext } from '../shared/mistWorkspace';
 import { freshMistAuthority, type FreshAuthority } from './authority';
@@ -18,6 +19,7 @@ const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.ent
 import { hasScope } from '../auth/permissionService';
 import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
+import { marketCommandExtraPermissions } from '../shared/mistMarket';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
@@ -35,11 +37,12 @@ import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields
 import type { MailStateObservation } from '../shared/mistMailState';
 import { AGENT_AUDIT_FIELD, AGENT_AUDIT_HASH, AGENT_AUDIT_PREFIX, agentAuditReceiptId, createAgentCommandAudit, publicCommandReceiptResult } from './agentAudit';
 import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, readableCommand } from './agentAuditRead';
-import { markAgentProposalConfirmed } from '../shared/mistAgentProposals';
+import { markAgentProposalConfirmed, agentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
 import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
+import { createLoginRateLimiter, type LoginRateLimiter } from '../auth/loginRateLimiter';
 import { primaryImageIds } from '../shared/mistPrimaryImage';
 import { MistPrivateFiles, validateFileInput, type MistFileInput, type MistStoredFile } from './files';
 import type { ImagePreviewMode } from './imagePreview';
@@ -65,7 +68,21 @@ export type MistContract = {
   getRequiredBusinessNumberPlan?: (state: MistState, command: MistCommand) => MistBusinessNumberNeed[];
 };
 export type MistWorkspaceRow = { id: string; ownerId: string; companyId?: string | null; slug: string; name: string; revision: number; state: MistState; createdAt: Date; updatedAt: Date };
-export type MistCommandRequest = { requestId: string; expectedRevision: number; command: MistCommand };
+/** reauth 只用于确认高风险 Agent 提议时复验本人登录密码；不参与请求摘要，也不写入回执或操作记录。 */
+export type MistCommandRequest = { requestId: string; expectedRevision: number; command: MistCommand; reauth?: { password: string } };
+/** 复验本人当前登录密码；账号没有密码时返回 false。 */
+export type MistPasswordVerifier = (db: any, userId: string, password: string) => Promise<boolean>;
+export const verifyAccountPassword: MistPasswordVerifier = async (db, userId, password) => {
+  const user = await db.userAccount?.findUnique?.({ where: { id: userId }, select: { passwordHash: true, status: true, deletedAt: true } });
+  if (!user?.passwordHash || user.status !== 'active' || user.deletedAt) return false;
+  return bcrypt.compare(password, user.passwordHash);
+};
+/**
+ * 高风险提议的密码复验限流：与登录同一套滑动窗口（默认 15 分钟 5 次失败即锁定），键为 `reauth|<userId>`。
+ * 计数在本进程内存中；多个后端进程各自计数。窗口与次数可用 BAMBOOK_REAUTH_RATE_LIMIT_WINDOW_MS / _MAX_FAILURES 调整（同登录限流的开关做法），不提供关闭开关。
+ */
+export const createReauthRateLimiter = () => createLoginRateLimiter({ windowMs: Number(process.env.BAMBOOK_REAUTH_RATE_LIMIT_WINDOW_MS) || undefined, maxFailures: Number(process.env.BAMBOOK_REAUTH_RATE_LIMIT_MAX_FAILURES) || undefined });
+type ReauthGrant = { proposalId: string; command: string };
 export type MistUploadRequest = { requestId: string; expectedRevision: number; claimId?: string };
 const MIST_UPLOAD_SCOPES = ['products:write', 'orders:write', 'procurement:write', 'shipments:write', 'customs:write', 'invoices:write', 'vouchers:write', 'qc:fabric_chain:write', 'qc:garment_chain:write', 'relations:write', 'aftersales:write'] as const;
 function canonical(value: any, depth = 0): string {
@@ -209,7 +226,7 @@ export class MistRepository {
   async releasePlatformTask(prior:AgentActor,issue?:'model_unavailable'|'model_response_invalid'){return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,prior.agentTaskLease!.workspaceId);return releasePlatformTask(db,{...prior,...actor},prior.agentTaskLease!,issue,Date.now());});}
   private mailStateWake?: () => void;
   setMailStateWake(wake: () => void) { this.mailStateWake = wake; }
-  constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>) {}
+  constructor(private readonly prisma: any, private readonly contract: MistContract, private readonly files: MistPrivateFiles, private readonly authorize: FreshAuthority = freshMistAuthority, private readonly now = () => new Date(), private readonly creditArchiveBuilder: (snapshot: MistCreditPrintSnapshot, options?: {draft?: boolean}) => Promise<PreparedCreditIssueArchive> = buildIssueArchive, private readonly quotationPdfRenderer?: (html: string) => Promise<PdfRenderResult>, private readonly verifyPassword: MistPasswordVerifier = verifyAccountPassword, private reauthLimiter?: LoginRateLimiter) {}
   private context(actor: TokenPayload, state?: MistState): MistContext { const auditNow=this.now().toISOString();return { id: randomUUID, now: mistBusinessInstant(state,auditNow), auditNow, actorName: actor.displayName || actor.userId, actorId:actor.userId, can: scope => hasScope(actor, scope as any) }; }
   /** 普通附件上传：只落私有文件、不改业务记录；持有任一业务写入权限即可（后勤的 CI/PL、财务的水单、质检的报告都要先上传再关联）。关联到哪条记录仍由各自业务命令按权限校验。 */
   private async uploadPermission(db: any, prior: TokenPayload) {
@@ -221,6 +238,7 @@ export class MistRepository {
     if (command?.type === 'email.server.analysis' || command?.type.startsWith('email.extraction.')) await this.authorize(db, prior, 'emails:read');
     if(command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
+    if (command?.type.startsWith('market.')) for (const scope of marketCommandExtraPermissions(command)) await this.authorize(db, prior, scope);
   }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
@@ -682,9 +700,31 @@ export class MistRepository {
       const proposal = workspace.state.agentProposals?.find((p: { id: string; state: string }) => p.id === id && p.state === 'pending');
       if (!proposal) fail('NOT_FOUND', '提议不存在、已处理或不属于当前账号', 404);
       if(proposal!.unavailable||proposal!.taskBlocked)fail(proposal!.taskId?'AGENT_TASK_SCOPE_CHANGED':'AGENT_PROPOSAL_UNAVAILABLE',proposal!.taskBlocked||'提议来源已不可见',409);
-      return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command }, undefined, false, id);
+      // 高风险：在取工作区行锁之前复验密码（bcrypt 不占用锁）；复验只对这一条提议的这一份命令有效，锁内按最新状态再核。
+      const grant = agentCommandRisk(proposal!.command.type) === 'high' ? await this.reauthenticate(prior, workspaceId, id, proposal!.command, input.reauth) : undefined;
+      return this.executeInternal(prior, workspaceId, { ...input, command: proposal!.command }, { command: input.command }, undefined, false, id, grant);
     }
     return this.executeInternal(prior, workspaceId, input, { command: input.command });
+  }
+  private async authorizeAiWrite(db: any, prior: TokenPayload, risk: ReturnType<typeof agentCommandRisk>) {
+    try { await this.authorize(db, prior, AI_WRITE_SCOPES[risk]); } catch (error) { if (error instanceof MistApiError && error.status === 403) fail('FORBIDDEN', `确认${AGENT_RISK_LABEL[risk]}的 AI 提议需要「${AI_WRITE_SCOPES[risk]}」权限`, 403); throw error; }
+  }
+  /**
+   * 高风险提议的本人密码复验（锁外执行）。先核 ai:write:high，再查限流：锁定期间不做密码比对，直接返回 403 REAUTH_LOCKED（确定拒绝，提示几分钟后再试）。
+   * 失败计数，成功清零。返回的凭证只绑定本提议编号与命令内容。
+   */
+  private async reauthenticate(prior: TokenPayload, workspaceId: string, proposalId: string, command: unknown, reauth?: { password: string }): Promise<ReauthGrant> {
+    // 不加锁读取：先核原命令业务权限与 ai:write:high，缺权限的人不进入密码比对。
+    const actor = await this.transact(async db => { const { actor } = await this.own(db, prior, workspaceId, this.contract.mistCommandPermission(command as MistCommand)); await this.authorizeCompoundCommand(db, prior, command as MistCommand); await this.authorizeAiWrite(db, prior, 'high'); return actor; });
+    const password = reauth?.password;
+    if (typeof password !== 'string' || !password) fail('REAUTH_REQUIRED', '确认高风险 AI 提议须输入本人当前登录密码', 403);
+    const limiter = this.reauthLimiter ??= createReauthRateLimiter(), key = `reauth|${actor.userId}`;
+    const verdict = limiter.check(key);
+    // 403 而非 429：这是确定的拒绝（未执行），前端据此清掉待核对记录；429 在前端表示结果未知。
+    if (verdict.blocked) fail('REAUTH_LOCKED', `密码错误次数过多，请 ${Math.max(1, Math.ceil(verdict.retryAfterMs / 60000))} 分钟后再试`, 403);
+    if (password!.length > 256 || !await this.verifyPassword(this.prisma, actor.userId, password!)) { limiter.recordFailure(key); fail('REAUTH_FAILED', '登录密码不正确，提议未执行', 403); }
+    limiter.reset(key);
+    return { proposalId, command: canonical(command) };
   }
   /**
    * 预演：与 execute 走同一事务、同一套账号 / 成员 / 权限 / 范围 / 业务门禁，应用命令后整笔回滚，不留状态、回执或编号。
@@ -698,7 +738,7 @@ export class MistRepository {
     catch (error) { if (error instanceof MistPreviewOutcome) return error.preview; throw error; }
     fail('PREVIEW_UNSUPPORTED', '预演未完成', 500);
   }
-  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false, confirmProposalId = '') {
+  private async executeInternal(prior: TokenPayload, workspaceId: string, input: Omit<MistCommandRequest, 'command'> & { command?: any; claimId?: string }, hashPayload: any, upload?: MistFileInput, dryRun = false, confirmProposalId = '', reauthGrant?: ReauthGrant) {
     if(isAgentActor(prior)&&prior.agentTaskLease&&!prior.agentTaskOperation)fail('FORBIDDEN','任务业务请求缺少操作编号',403);
     if (isAgentActor(prior)) identifier(prior.agentSessionId, 'Agent会话编号');
     requestIdentifier(input.requestId); revision(input.expectedRevision);
@@ -732,6 +772,16 @@ export class MistRepository {
         }
         if(isAgentActor(prior)&&prior.agentTaskLease&&input.command?.type==='agent.proposal.create'&&await taskHasPendingMail(db,workspaceId,prior.agentTaskLease.taskId))fail('PRECONDITION','请先核对待同步的邮箱操作',422);
         const humanTaskProposal=confirmProposalId?row.state.agentProposals?.find(p=>p.id===confirmProposalId):undefined;
+        // AI 写入三级确认：确认人须持有该命令风险等级对应的 ai:write:* 码（等级按 agentCommandRisk 规则，未登记的普通写入为中）；高风险的密码复验已在取锁前完成（reauthenticate），
+        // 这里按锁内最新提议与将执行的命令再判风险：任一为高时，复验凭证必须属于同一提议、同一份命令，否则拒绝。
+        // 原命令本身的业务权限已在上面按原命令重新校验，不能借 AI 越权。
+        if(confirmProposalId){
+          const locked=row.state.agentProposals?.find(p=>p.id===confirmProposalId)?.command;
+          const high=agentCommandRisk(input.command?.type)==='high'||(!!locked&&agentCommandRisk(locked.type)==='high');
+          const risk=high?'high':agentCommandRisk(input.command?.type);
+          await this.authorizeAiWrite(db,prior,risk);
+          if(high&&(!reauthGrant||reauthGrant.proposalId!==confirmProposalId||reauthGrant.command!==canonical(input.command)||(!!locked&&reauthGrant.command!==canonical(locked))))fail('REAUTH_REQUIRED','确认高风险 AI 提议须输入本人当前登录密码',403);
+        }
         if(humanTaskProposal&&!humanTaskProposal.taskId){const visible=projectState(row.state,actor,this.emptyState(actor),fileOwner(row),scopeOf(row)).state;if(!this.proposalReadable(row,actor,humanTaskProposal.command)||!knownCommandSourcesVisible(row.state,visible)(humanTaskProposal.command))fail('FORBIDDEN','提议来源已不可见，请拒绝后重新核对',403);}
         if(humanTaskProposal?.taskId){this.assertTaskSources(row,actor,(await taskRecord(db,workspaceId,humanTaskProposal.taskId)).value);await assertHumanTaskProposal(db,actor,workspaceId,humanTaskProposal.taskId,humanTaskProposal.id,Date.now());}
         // 版本落后时只在能证明安全时把本命令重新应用到最新状态；否则照旧明确拒绝。

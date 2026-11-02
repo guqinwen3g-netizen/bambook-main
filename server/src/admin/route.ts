@@ -10,6 +10,7 @@ import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
 import { revokeAllSessions } from '../auth/sessionRevocation';
 import { createModuleAuthGuard } from '../auth/moduleGuard';
 import { buildAuditLogQuery } from '../audit/entityQuery';
+import { buildEntityAuditCsv } from '../audit/entityCsv';
 import { AgentRole } from '../agent/types';
 import { EmailService, buildApprovalApprovedEmail, createEmailService } from '../auth/email';
 import { SYSTEM_ROLE_IDS, systemRoleCode } from '../_shared/rolePermissionMatrix';
@@ -214,8 +215,17 @@ export function createAdminRouter(options: AdminRouterOptions) {
 
   // 所有 admin 路由要求 users:admin 权限点（原 owner/admin 角色组；写类 scope，API-Key 不足以通过；
   // API-Key 即使通过 moduleGuard 也会因无 actor 在此处被挡 → 401）
+  // 2026-11：后台只读账号列表按 users:read 判定，便于给 HR 只读权限；其余后台接口仍要求 users:admin。
+  // 审计日志导出按 audit:export 单独把关（导出不等于后台管理权）。
+  const READ_ONLY_ADMIN_PATHS = new Set(['/users']);
   if (requireAuth) {
-    router.use(requirePermission('users:admin'));
+    router.use((req: Request, res: Response, next) => {
+      if (req.method === 'GET' && READ_ONLY_ADMIN_PATHS.has(req.path)) return requirePermission(['users:read', 'users:admin'])(req, res, next);
+      if (req.method === 'GET' && req.path === '/audit-logs/export') return requirePermission('audit:export')(req, res, next);
+      // 知识库访问控制（全库 ACL）的写入另须知识库管理权 knowledge:admin（2026-11 补判定点）。
+      if (req.method !== 'GET' && req.path.startsWith('/knowledge-acl')) return requirePermission('users:admin')(req, res, () => requirePermission('knowledge:admin')(req, res, next));
+      return requirePermission('users:admin')(req, res, next);
+    });
   }
 
   /**
@@ -951,6 +961,27 @@ export function createAdminRouter(options: AdminRouterOptions) {
       options.prisma.auditLog.count({ where: built.where }),
     ]);
     res.json({ ok: true, logs, total });
+  }));
+
+  // 审计日志导出（CSV）：与列表同一套筛选与校验，按 audit:export 把关；只读，单次最多 5000 条，到顶显式写截断行。
+  router.get('/audit-logs/export', withRouteErrorGuard(async (req: Request, res: Response) => {
+    const PAGE = 500, MAX = 5000;
+    const rows: any[] = [];
+    let truncated = false;
+    for (let offset = 0; ; offset += PAGE) {
+      const built = buildAuditLogQuery({ ...(req.query as any), limit: String(PAGE), offset: String(offset) });
+      if (!built.ok) return res.status(built.status).json({ ok: false, error: built.error, message: built.message });
+      const page = await options.prisma.auditLog.findMany({ where: built.where, orderBy: { createdAt: 'desc' }, take: PAGE, skip: offset, include: { actor: { select: { id: true, displayName: true, email: true } } } });
+      rows.push(...page);
+      if (page.length < PAGE) break;
+      if (rows.length > MAX) { truncated = true; break; }
+    }
+    if (rows.length > MAX) { rows.length = MAX; truncated = true; }
+    const name = `审计日志-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Disposition', `attachment; filename="audit-log.csv"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    res.send(buildEntityAuditCsv(rows, { truncated, maxRows: MAX }));
   }));
 
   // ---- Knowledge ACL ----

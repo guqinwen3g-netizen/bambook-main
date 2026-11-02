@@ -36,6 +36,8 @@ export type RebateClaim = {
   approved?: { date: string; amount: number; ref: string; reason: string; at: string; actor: string };
   receipts: RebateClaimReceipt[]; settled?: { at: string; actor: string; reason: string };
   withdrawn?: { at: string; actor: string; reason: string }; createdAt: string; actor: string;
+  /** 仅读投影：当前账号没有 sensitive:tax_base，计税金额与应退税额已隐藏。 */
+  taxMasked?: boolean;
 };
 export type ExportRebateState = { rates: RebateRate[]; claims: RebateClaim[] };
 export type ExportRebateCommand =
@@ -73,9 +75,12 @@ export const createExportRebateState = (): ExportRebateState => ({ rates: [], cl
 export const readRebate = (root: Pick<Root, 'exportRebate'>): ExportRebateState => ({ rates: root.exportRebate?.rates || [], claims: root.exportRebate?.claims || [] });
 const ledger = (root: Root): ExportRebateState => { root.exportRebate ||= createExportRebateState(); root.exportRebate.rates ||= []; root.exportRebate.claims ||= []; return root.exportRebate; };
 
+/** 退税权限（2026-11 改码）：读 tax:read，登记退税率 / 申报 / 撤回 tax:write，税务核准 tax:approve；到账勾稽是收款核销。 */
+export const REBATE_SCOPES = { read: 'tax:read', write: 'tax:write', approve: 'tax:approve' } as const;
 export function exportRebateCommandPermission(command: ExportRebateCommand): string {
   if (command.type === 'rebate.claim.receive' || command.type === 'rebate.claim.reverseReceipt') return MIST_FINANCE_SCOPES.reconcile;
-  if ((REBATE_COMMANDS as readonly string[]).includes(command.type)) return MIST_FINANCE_SCOPES.invoice;
+  if (command.type === 'rebate.claim.approve') return REBATE_SCOPES.approve;
+  if ((REBATE_COMMANDS as readonly string[]).includes(command.type)) return REBATE_SCOPES.write;
   return fail('未知退税操作');
 }
 
