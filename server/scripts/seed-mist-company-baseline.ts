@@ -1,11 +1,14 @@
 /**
  * 将开发 / 验收环境收口到一套版本化 Mist 公司经营基线。
  *
- * 默认只做 dry-run。实际写入必须同时满足：
+ * 只能在用户指定的测试租户上运行；不得用于正式环境、真实公司或未经用户指定的租户。
+ *
+ * 默认只做 dry-run（输出将写入的目标公司 id / slug / 名称）。实际写入必须同时满足：
  *   1. 数据库名明确是 dev/local/test/acceptance；
  *   2. --apply；
  *   3. --backup-confirmed=<本次备份标识>；
- *   4. --source-prefix=<旧开发账号共同前缀>。
+ *   4. --source-prefix=<旧开发账号共同前缀>；
+ *   5. --company-id=<目标公司 uuid>，须与按源账号推断出的目标公司一致（核对 dry-run 输出），不一致或缺少时不写入任何数据。
  *
  * 旧工作区只归档并改成中性留档名，旧账号停用并清除外显邮箱；不会删除历史证据。
  */
@@ -17,7 +20,7 @@ import {PrismaClient} from '@prisma/client';
 import {MistPrivateFiles} from '../src/mist/files';
 import {prepareMistBusinessNumbers} from '../src/mist/businessNumbers';
 import {isDemoFile,renderDemoFile} from '../src/shared/mistDemoFiles';
-import {companyBaselinePaymentSignerGaps,companyBaselineTargetCompany,writeCompanyBaselinePaymentGrants} from '../src/mist/companyBaselineGrants';
+import {assertCompanyBaselineApplyTarget,companyBaselinePaymentSignerGaps,companyBaselineTargetCompany,writeCompanyBaselinePaymentGrants} from '../src/mist/companyBaselineGrants';
 import {createMistCompanyBaseline,mistCompanyBaselineMetrics,mistCompanyVisibleTextIssues,MIST_COMPANY_BASELINE_VERSION,MIST_COMPANY_BASELINE_AS_OF,MIST_COMPANY_DATASET,MIST_COMPANY_WORKSPACE_NAME,type MistCompanyRoster,type MistCompanyRosterKey} from '../src/shared/mistCompanyBaseline';
 
 const SERVER_ROOT=path.resolve(__dirname,'..');
@@ -25,7 +28,7 @@ dotenv.config({path:path.join(SERVER_ROOT,'.env.local')});dotenv.config({path:pa
 
 const rawArgs=process.argv.slice(2),apply=rawArgs.includes('--apply');
 const option=(name:string)=>rawArgs.find(value=>value.startsWith(`--${name}=`))?.slice(name.length+3)||process.env[`MIST_COMPANY_${name.replace(/-/g,'_').toUpperCase()}`]||'';
-const sourcePrefix=option('source-prefix'),backupConfirmed=option('backup-confirmed');
+const sourcePrefix=option('source-prefix'),backupConfirmed=option('backup-confirmed'),confirmedCompanyId=option('company-id');
 const databaseUrl=process.env.DATABASE_URL||'';
 const databaseName=(()=>{try{return new URL(databaseUrl).pathname.replace(/^\//,'').split('?')[0];}catch{return'';}})();
 const allowedDatabase=/(?:^|_)(?:dev|local|test|acceptance)(?:_|$)/i.test(databaseName);
@@ -58,14 +61,18 @@ async function main(){
  const roster=Object.fromEntries(ACCOUNT_SPECS.map(row=>[row.key,{id:row.id,name:row.name}])) as MistCompanyRoster;
  // 目标公司：源账号角色所属公司；没有公司（旧库）时为 null。个人授权与公司成员资格都写到这家公司。
  const companyId=companyBaselineTargetCompany(sources);
+ const targetCompany=companyId?await prisma.company.findUnique({where:{id:companyId},select:{id:true,slug:true,name:true,status:true}}):null;
+ if(companyId&&!targetCompany)throw new Error(`源账号角色所属公司 ${companyId} 不存在`);
  const claimReviewerId=roster.owner.id;
  let failures:Array<{step:string;message:string}>=[];
  const now=new Date().toISOString();let state=createMistCompanyBaseline({id:()=>randomUUID(),now:MIST_COMPANY_BASELINE_AS_OF,actorId:roster.owner.id,actorName:roster.owner.name},roster,rows=>{failures=rows;},{claimReviewerId});
  const metrics=mistCompanyBaselineMetrics(state),visibleIssues=mistCompanyVisibleTextIssues(state);
  const existing=await prisma.mistWorkspace.findUnique({where:{ownerId_slug:{ownerId:roster.owner.id,slug}}});
- console.log(JSON.stringify({mode:apply?'apply':'dry-run',database:databaseName,workspace:MIST_COMPANY_WORKSPACE_NAME,baselineVersion:MIST_COMPANY_BASELINE_VERSION,dataset:MIST_COMPANY_DATASET,sourceAccounts:sources.length,targetAccounts:ACCOUNT_SPECS.length,metrics,seedFailures:failures,visibleIssues,existingBaseline:existing?{id:existing.id,revision:existing.revision,archived:!!(existing.state as any)?.workspaceArchive}:null},null,2));
+ console.log(JSON.stringify({mode:apply?'apply':'dry-run',database:databaseName,targetCompany:targetCompany??null,workspace:MIST_COMPANY_WORKSPACE_NAME,baselineVersion:MIST_COMPANY_BASELINE_VERSION,dataset:MIST_COMPANY_DATASET,sourceAccounts:sources.length,targetAccounts:ACCOUNT_SPECS.length,metrics,seedFailures:failures,visibleIssues,existingBaseline:existing?{id:existing.id,revision:existing.revision,archived:!!(existing.state as any)?.workspaceArchive}:null},null,2));
  if(failures.length||visibleIssues.length)throw new Error('公司基线未通过完整性或外显内容检查，拒绝写入');
  if(!apply){console.log('dry-run 完成；没有写入账号、工作区或附件。');return;}
+ // 显式公司确认：在下面任何写入（编号、附件、事务）之前。
+ assertCompanyBaselineApplyTarget(confirmedCompanyId,companyId);
  if(existing&&!(existing.state as any)?.workspaceArchive&&(existing.state as any)?.settings?.companyBaseline?.version===MIST_COMPANY_BASELINE_VERSION){console.log(`基线已存在：${existing.id}；幂等退出。`);return;}
  if(existing)throw new Error(`工作区标识 ${slug} 已存在但不是当前有效基线；请人工核对，脚本不会覆盖`);
 
