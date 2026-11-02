@@ -8,6 +8,7 @@ import { developmentDomain, type DevelopmentDomain } from './mistDevelopmentDoma
 import { developmentClosure, factoryTaskSync } from './mistDevelopmentRounds';
 import { creditDocumentFingerprint } from './mistCreditDocuments';
 
+import { devStageChainText } from './mistDevelopmentStages';
 export const DEV_NOTICE_TEMPLATE_VERSION = 3 as const;
 export type DevNoticeContent = {
   domain: DevelopmentDomain; title: string; factory: string;
@@ -15,6 +16,8 @@ export type DevNoticeContent = {
   style: string; category: string; season: string; color: string; fabric: string; sizeBase: string;
   fabricRequirements: Array<{ label: string; value: string }>;
   commonRequirements: string; extraRequirements: string; sampleForm: string; sampleQuantity: number; sampleUnit: string; dueDate: string;
+  /** Staged outsourcing only: the full chain, so the output mill knows where the greige sample comes from. */
+  stageChain?: string;
   attachments: Array<{ fileId: string; name: string }>;
   issuer: Pick<MistCompanyProfile, 'legalName' | 'englishName' | 'address' | 'phone' | 'email'>;
 };
@@ -63,6 +66,7 @@ export function developmentNoticeContent(state: MistState, dev: MistDev, version
     devId: dev.id, devCode: dev.code, devName: dev.name, versionId: version.id, versionLabel: version.label, roundNumber: round.number, roundTargetDate: round.targetDate,
     style: v.style || '', category: v.category || '', season: v.season || '', color: v.color || '', fabric: domain === 'fabric' ? '' : (version.fabric || v.fabric || ''), sizeBase: domain === 'fabric' ? '' : (version.size || v.sizeBase || ''),
     fabricRequirements,
+    ...(version.stages?.length ? { stageChain: devStageChainText(version.stages) } : {}),
     commonRequirements: task.commonRequirements, extraRequirements: task.extraRequirements, sampleForm: task.sampleForm, sampleQuantity: task.sampleQuantity, sampleUnit: task.sampleUnit, dueDate: task.dueDate,
     attachments: fileIds.map(id => ({ fileId: id, name: state.files.find(file => file.id === id)?.name || '已不可用的附件' })),
     issuer: { legalName: issuer.legalName, englishName: issuer.englishName || '', address: issuer.address || '', phone: issuer.phone || '', email: issuer.email || '' },

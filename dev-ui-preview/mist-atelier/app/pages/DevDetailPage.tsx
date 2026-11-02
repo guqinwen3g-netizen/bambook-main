@@ -1,6 +1,8 @@
 import {useOptionalMistSession} from '../runtime/auth';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
+import { DevStageChainCard } from './DevStageChain';
+import { devStagePendingHandovers } from '../../../../server/src/shared/mistDevelopmentStages';
 /** T4: the original three-column Mist detail; every action targets an exact saved version. */
 import React from 'react';
 import {developmentCharged,developmentDomain,developmentInitiator,developmentInitiatorLabel,validFabricSample} from '../../../../server/src/shared/mistDevelopmentDomain';
@@ -163,6 +165,11 @@ export function DevDetailPage(){
     try{await run({type:'development.version.syncRequirements',payload:{devId:dev.id,versionId:target.id}});if(live.current)toast(`${target.label} 已同步共同要求`);}
     catch(cause){if(live.current)toast(cause instanceof Error?cause.message:`${target.label} 尚未同步`);}finally{busyRef.current=false;if(live.current)setBusy(false);}
   };
+  const recordHandover=async(input:{stageIndex:number;quantity:number;unit:string;date:string;note:string})=>{
+    if(!dev||!version||busyRef.current)return;busyRef.current=true;setBusy(true);
+    try{await run({type:'development.stage.handover',payload:{devId:dev.id,versionId:version.id,...input}});if(live.current)toast('前道交接已登记');}
+    finally{busyRef.current=false;if(live.current)setBusy(false);}
+  };
   const generateNotice=async()=>{
     if(!dev||!version||busyRef.current)return;busyRef.current=true;setBusy(true);setFailure('');
     try{await run({type:'development.notice.generate',payload:{devId:dev.id,versionId:version.id}});if(live.current)toast(`${version.label} 通知单已生成，旧版保留`);}
@@ -199,8 +206,9 @@ export function DevDetailPage(){
   const resampleRound=version?.qcDecision?.roundId?state?.rounds?.find(round=>round.id===version.qcDecision!.roundId):undefined;
   const roundBlocker=developmentRoundBlocker(state!,dev);
   const parentVersion=version&&state?minorParent(state,version):undefined,childMinors=version&&state?minorVersions(state,version):[],minorBlocker=version&&state?minorVersionBlocker(state,dev,version):'请先选择版本';
-  const sampleBlocker=version?.minor?`小版本沿用 ${parentVersion?.label||'大版本'} 实物，不登记新实物`:dev.billing?.request?DEVELOPMENT_BILLING_LOCK:undefined,qcBlocker=version?.minor?`小版本沿用 ${parentVersion?.label||'大版本'} QC 结论`:childMinors.length?`已有小版本 ${childMinors.map(item=>item.label).join('、')} 沿用本版 QC 结论，不能改写`:undefined;
-  const openResample=()=>{if(!version?.qc)return;setFailure('');setRoundInitial({factories:[version.factoryId],referenceVersionIds:[version.id],requirements:`QC 意见（${version.label}）：${version.qc.opinion||'见 QC 报告'}`,targetDate:dev.due||'',fileIds:[],resampleFromVersionId:version.id});setDialog('round');};
+  const stagePending=version?devStagePendingHandovers(version):[];
+  const sampleBlocker=stagePending.length&&version?.stages?`请先登记前道交接：${stagePending.map(i=>`${version.stages![i].factory} → ${version.stages![i+1].factory}`).join('、')}`:version?.minor?`小版本沿用 ${parentVersion?.label||'大版本'} 实物，不登记新实物`:dev.billing?.request?DEVELOPMENT_BILLING_LOCK:undefined,qcBlocker=version?.minor?`小版本沿用 ${parentVersion?.label||'大版本'} QC 结论`:childMinors.length?`已有小版本 ${childMinors.map(item=>item.label).join('、')} 沿用本版 QC 结论，不能改写`:undefined;
+  const openResample=()=>{if(!version?.qc)return;setFailure('');const chain=version.stages?.map(({factoryId,process})=>({factoryId,process}));setRoundInitial({factories:chain?chain.map(row=>row.factoryId):[version.factoryId],...(chain?{stages:chain}:{}),referenceVersionIds:[version.id],requirements:`QC 意见（${version.label}）：${version.qc.opinion||'见 QC 报告'}`,targetDate:dev.due||'',fileIds:[],resampleFromVersionId:version.id});setDialog('round');};
   const openDecision=(kind:'rework'|'abandon')=>{setDecision({kind,note:''});setFailure('');setDialog('qcDecide');};
   const qcGate=!version?null:version.qcDecision?.kind==='abandon'?<Banner tone="bad" title={uiText("本版已放弃 · 不采用")}>{version.qcDecision.note||'未填写原因'}{uiText("；其他版本不受影响。")}</Banner>
     :version.qcDecision?.kind==='resample'?<Banner tone="neutral" title={uiText("本版 QC 不通过 · 已重新打样")}>{uiText(resampleRound?`已开第 ${resampleRound.number} 轮，请在新版本上记录 QC 与确认。`:'已开新一轮。')}</Banner>
@@ -225,6 +233,7 @@ export function DevDetailPage(){
           <div className="mist-vers" role="group" aria-label={uiText("版本")}>{versions.map(item=><button key={item.id} type="button" aria-pressed={version?.id===item.id} disabled={busy} onClick={()=>chooseVersion(item.id)}>{uiText(item.label)}{(flag=>flag&&<> <Pill tone={flag.tone}>{uiText(flag.label)}</Pill></>)(versionQcFlag(item))}</button>)}</div>
           {state&&version&&(source=><div className="mist-row" data-selection={version.label} style={{padding:'10px 22px 0',gap:8,flexWrap:'wrap',fontSize:12.5}}><span className="mist-muted">{uiText("正在查看")}</span><span>{source.roundLabel} · {source.factory} · <Mono>{uiText(version.label)}</Mono></span><span className="mist-spacer" /><TextLink onClick={()=>locateInTimeline(version.label)}>{uiText("在时间线中定位")}</TextLink></div>)(versionSource(state,dev,version))}
           <KeyValue items={[{label:'工厂',value:version?.factory||'待安排'},{label:'样品',value:version?`${version.sample||'未登记'} · ${version.sampleQuantity} ${fabricDomain?version.sampleUnit||dev.values.sampleUnit||'单位待登记':(!version.returnedAt&&version.task?.sampleUnit)||'件'}`:'未建立版本'},...(fabricDomain?[{label:'实物形态',value:version?.sampleForm||dev.values.sampleForm||'待登记'}]:[{label:'尺码',value:version?.size||dev.values.sizeBase}]),{label:'面料',value:version?.fabric||dev.fabric}]} />
+          {version&&<DevStageChainCard version={version} today={localConfirmationTime().slice(0,10)} canWrite={qcSession?.hasPermission('products:write')!==false} busy={busy} onHandover={recordHandover}/>}
           <CardFooter><span className="mist-spacer" /><Button size="sm" disabled={!version||busy||!!sampleBlocker} title={uiText(sampleBlocker)} icon={PackageCheck} onClick={()=>setDialog('sample')}>{uiText("登记返样")}</Button></CardFooter>
           {version?.minor&&<div className="mist-section" data-minor={version.label}><Banner tone="neutral" title={ui`小版本 · 沿用 ${parentVersion?.label||'大版本'} 实物与 QC 结论`}>{uiText("本次调整：")}{version.minor.change}{uiText("。需求方确认须对 ")}{uiText(version.label)}{uiText(" 单独记录，不继承 ")}{parentVersion?.label||'大版本'}{uiText(" 的确认。")}</Banner></div>}
           {!!childMinors.length&&<p className="mist-note" style={{padding:'0 22px 12px'}}>{uiText("本版小调整：")}{childMinors.map(item=>`${item.label}（${item.minor!.change}）`).join('；')}</p>}

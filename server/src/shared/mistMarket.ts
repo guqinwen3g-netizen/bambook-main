@@ -464,7 +464,7 @@ function supplierHandlers(row:MarketSupplier,old:MarketSupplier|undefined,raw:un
 }
 /** 供应商改名：开发引用按供应商 ID 不变，只同步显示名（工厂名、版本工厂名）；已生成的通知单等快照不改。 */
 function renameDevelopmentFactory(root:MistState,row:MarketSupplier){
- for(const v of root.versions||[])if(v.factoryId===row.id)v.factory=row.name;
+ for(const v of root.versions||[]){if(v.factoryId===row.id)v.factory=row.name;for(const stage of v.stages||[])if(stage.factoryId===row.id)stage.factory=row.name;}
  for(const d of root.devs||[]){if(!d.values.factories.includes(row.id))continue;const current=(root.versions||[]).find(v=>v.id===d.currentVersionId);d.factory=current?.factory||(d.values.factories[0]===row.id?row.name:d.factory);}
 }
 export function supplierGrade(s:MarketSupplier){return s.ratings?.length?s.ratings[s.ratings.length-1]:undefined;}
