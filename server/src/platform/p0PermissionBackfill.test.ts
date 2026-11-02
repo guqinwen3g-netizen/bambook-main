@@ -12,6 +12,8 @@ const company = (): BackfillCompany => ({ id: C, slug: 'demo-co', roles: [
   sys(SYSTEM_ROLE_IDS.FINANCE), sys(SYSTEM_ROLE_IDS.QC), sys(SYSTEM_ROLE_IDS.LOGISTICS),
   { id: 'custom-docs', code: null, isSystem: false, scopes: ['invoices:read', 'customs:write', 'vouchers:write'] },
   { id: 'custom-ok', code: null, isSystem: false, scopes: ['invoices:read', 'tax:read'] },
+  { id: 'custom-tax', code: null, isSystem: false, scopes: ['tax:read', 'tax:write', 'tax:approve', 'invoices:reconcile'] },
+  { id: 'custom-tax-ok', code: null, isSystem: false, scopes: ['tax:read', 'tax:write', 'tax:approve', 'invoices:reconcile', 'sensitive:tax_base'] },
 ] });
 
 describe('P0 权限码补授计划', () => {
@@ -32,6 +34,9 @@ describe('P0 权限码补授计划', () => {
       { roleId: 'custom-docs', held: 'invoices:read', missing: 'tax:read' },
       { roleId: 'custom-docs', held: 'vouchers:write', missing: 'fx:lock' },
       { roleId: 'custom-docs', held: 'customs:write', missing: 'customs:admin' },
+      { roleId: 'custom-tax', held: 'tax:write', missing: 'sensitive:tax_base' },
+      { roleId: 'custom-tax', held: 'tax:approve', missing: 'sensitive:tax_base' },
+      { roleId: 'custom-tax', held: 'invoices:reconcile', missing: 'sensitive:tax_base' },
     ]);
   });
 
@@ -50,7 +55,7 @@ describe('P0 权限码补授计划', () => {
 
   it('输出只含公司标识、岗位码与权限码', () => {
     const lines = formatP0Plan(planP0Backfill(company()));
-    expect(lines[0]).toBe('[demo-co] 补授 8 项，需人工核对 3 项');
+    expect(lines[0]).toBe('[demo-co] 补授 8 项，需人工核对 6 项');
     expect(lines).toContain(`  + role-admin@${C} customs:admin`);
     expect(lines).toContain('  ? custom-docs 持 customs:write 无 customs:admin');
   });

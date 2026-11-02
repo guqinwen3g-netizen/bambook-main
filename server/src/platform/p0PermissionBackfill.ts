@@ -20,6 +20,10 @@ export const P0_REVIEW_PAIRS: ReadonlyArray<readonly [held: string, missing: str
   ['invoices:write', 'tax:write'],
   ['vouchers:write', 'fx:lock'],
   ['customs:write', 'customs:admin'],
+  // 退税申报、核准、到账勾稽另须计税依据（sensitive:tax_base）。
+  ['tax:write', 'sensitive:tax_base'],
+  ['tax:approve', 'sensitive:tax_base'],
+  ['invoices:reconcile', 'sensitive:tax_base'],
 ];
 
 export type BackfillRole = { id: string; code: string | null; isSystem: boolean; scopes: readonly string[] };
