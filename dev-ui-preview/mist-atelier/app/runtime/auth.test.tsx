@@ -41,6 +41,12 @@ describe('Mist session adapter with production auth service', () => {
     expect(session.localMode).not.toBe(true);expect(session.status).toBe('anonymous');expect(requests.some(r=>r.path==='/api/auth/me')).toBe(true);
     await act(async()=>session.login('reconnected-staff','password'));await waitFor(()=>expect(session.user?.id).toBe('reconnected-staff'));expect(session.localMode).not.toBe(true);
   });
+  it('declares the session probe protocol so remote servers answer 200 only to new clients', async () => {
+    const probes: Array<string | null> = [];
+    override = (url, init) => { if (url.pathname !== '/api/mist/session') return null; probes.push(new Headers(init.headers).get('X-Mist-Session-Probe')); return Promise.resolve(json({ ok: true, mode: 'remote' })); };
+    await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));
+    expect(probes).toEqual(['2']); expect(session.localMode).not.toBe(true); expect(session.connectionModeUnverified).not.toBe(true);
+  });
   it('treats an explicit remote-mode answer like the legacy 404 and continues with account sign-in', async () => {
     override = url => url.pathname === '/api/mist/session' ? Promise.resolve(json({ ok: true, mode: 'remote' })) : null;
     await mount(); await waitFor(() => expect(session.status).toBe('anonymous'));

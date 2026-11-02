@@ -43,6 +43,8 @@ const SESSION_STORAGE_KEYS = new Set([AUTH_TOKEN_KEY, 'panda_system_config', 'cl
 /** 使用中续期的检查间隔；只有令牌已用过约一天时才真正请求换发。 */
 const RENEW_CHECK_MS = 10 * 60 * 1000;
 
+/** 声明新探测协议：远端服务据此回答 200 {mode:'remote'}；未声明时服务端保持旧的 404（旧版页面会把 200 当本地会话）。 */
+const SESSION_PROBE_HEADER='X-Mist-Session-Probe';
 /** 同一登录会话的标识（服务端 sessionId；旧令牌退回令牌本身）。续期换发令牌不算换了身份。 */
 function storedSession() {
   let token = '';
@@ -231,7 +233,7 @@ export function MistSessionProvider({children}:{children:React.ReactNode}) {
   if(blocking){setStatus('loading');setRevision(v=>v+1);}setRefreshing(true);setError('');
   const timeout=window.setTimeout(()=>requestController.abort(),8000);
   try{
-   const response=await fetch('/api/mist/session',{method:profileId===undefined?'GET':'POST',credentials:'include',cache:'no-store',signal:requestController.signal,...(profileId===undefined?{}:{headers:{'Content-Type':'application/json'},body:JSON.stringify({profileId})})});
+   const response=await fetch('/api/mist/session',{method:profileId===undefined?'GET':'POST',credentials:'include',cache:'no-store',signal:requestController.signal,...(profileId===undefined?{headers:{[SESSION_PROBE_HEADER]:'2'}}:{headers:{'Content-Type':'application/json'},body:JSON.stringify({profileId})})});
    if(!mounted.current||sequence!==generation.current)throw new Error('会话操作已被新的请求替代');
    if(discovery&&response.status===404){setMode('remote');setStatus('anonymous');return;}
    const body=await response.json().catch(()=>null);

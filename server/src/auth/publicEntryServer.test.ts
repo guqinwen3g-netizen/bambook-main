@@ -7,7 +7,7 @@ describe('public domains on the running Mist server', () => {
   const db:any = { $queryRawUnsafe: vi.fn(async()=>[]), userAccount: { findUnique: vi.fn(async()=>null) } };
   it('answers remote-session discovery on both entry hosts without an error status', async()=>{
     for(const host of ['bambook.sylway.cloud','bambook-admin.sylway.cloud']) {
-      const res=await request(createMistServer(db)).get('/api/mist/session').set('Host',host);
+      const res=await request(createMistServer(db)).get('/api/mist/session').set('Host',host).set('X-Mist-Session-Probe','2');
       expect(res.status).toBe(200);expect(res.body).toEqual({ok:true,mode:'remote'});expect(res.headers['cache-control']).toContain('no-store');
       expect((await request(createMistServer(db)).post('/api/mist/session').set('Host',host).send({profileId:'x'})).status).toBe(404);
     }
