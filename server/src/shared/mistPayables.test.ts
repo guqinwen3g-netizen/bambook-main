@@ -723,7 +723,8 @@ describe('付款审批分档：金额档、首笔付款加签、外币折算', (
     const task = getMistReviewTasks(s).find(t => t.id === 'payment:' + id)!;
     expect(task.reviewerIds).toEqual(['总经理']);
     expect(task.details.find(d => d.label === '审批进度')!.value).toBe('已批：5 万元及以下档（财务-林）；还差：首笔付款加签（总经理级）'.replace('财务-林', '财务主管'));
-    expect(err(() => asWith('财务主管', AUTH, s, decide(id)))).toContain('有效审批主管');
+    // 同一人不能再签另一级（H1）：提示已签过，而不是泛泛的“不是有效审批主管”。
+    expect(err(() => asWith('财务主管', AUTH, s, decide(id)))).toContain('你已签过本次付款申请的一级审批');
     expect(err(() => as('财务-林', s, { type: 'payable.payment.register', payload: { requestId: id, date: today, amount: 1000, reference: 'B-1', allocations: [{ billId: f.billId, amount: 1000 }] } }))).toContain('尚未经主管批准');
     s = asWith('总经理', AUTH, s, decide(id)).state;
     expect(s.payables!.requests!.find(x => x.id === id)).toMatchObject({ state: 'approved', approvals: [{ level: 'pay_lt5', actor: '财务主管' }, { level: 'pay_new_supplier', actor: '总经理' }] });
@@ -766,6 +767,75 @@ describe('付款审批分档：金额档、首笔付款加签、外币折算', (
     expect(err(() => submit(f, 60000, tiers(['主管'], ['总经理'], ['总经理'])))).toContain('第二位审批人');
     // 申请人本人不算审批人：去掉申请人后只剩一人，同样拒绝。
     expect(err(() => submit(f, 1000, tiers(['业务-王', '主管'], [], ['主管'])))).toContain('第二位审批人');
+  });
+  it('两级按原路由落到同一人时，并入其他合格审批人；无冲突时不改原路由', () => {
+    const conflict = { ...tiers(['主管'], ['总经理'], ['总经理']), paymentTierAlternateIds: { pay_lt5: [], pay_gt5: ['副总'], pay_new_supplier: ['副总'] } };
+    const f = setup({ paid: false }), r = submit(f, 60000, conflict), id = String(r.result.id);
+    expect(r.state.payables!.requests!.find(x => x.id === id)!.tier!.levels).toEqual([{ level: 'pay_gt5', reviewerIds: ['总经理', '副总'] }, { level: 'pay_new_supplier', reviewerIds: ['总经理', '副总'] }]);
+    let s = asWith('副总', conflict, r.state, decide(id)).state;
+    expect(err(() => asWith('副总', conflict, s, decide(id, 'approved', '再签')))).toContain('已签过');
+    expect(s.payables!.requests!.find(x => x.id === id)!.state).toBe('pending');
+    s = asWith('总经理', conflict, s, decide(id)).state;
+    expect(s.payables!.requests!.find(x => x.id === id)!.approvals!.map(a => a.actorId).sort()).toEqual(['总经理', '副总'].sort());
+    expect(s.payables!.requests!.find(x => x.id === id)!.state).toBe('approved');
+    // 无冲突：原路由主管 + 总经理，不并入副总。
+    const plain = { ...tiers(['主管'], ['总经理'], ['总经理']), paymentTierAlternateIds: { pay_lt5: ['副总'], pay_gt5: ['副总'], pay_new_supplier: ['副总'] } };
+    const small = submit(f, 1000, plain);
+    expect(small.state.payables!.requests!.find(x => x.id === small.result.id)!.tier!.levels).toEqual([{ level: 'pay_lt5', reviewerIds: ['主管'] }, { level: 'pay_new_supplier', reviewerIds: ['总经理'] }]);
+  });
+  it('仍只有同一人能签全部级别时拒绝提交，写明缺哪一级', () => {
+    const f = setup({ paid: false });
+    const msg = err(() => submit(f, 60000, { ...tiers(['主管'], ['总经理'], ['总经理']), paymentTierAlternateIds: { pay_lt5: ['副总'], pay_gt5: [], pay_new_supplier: [] } }));
+    expect(msg).toContain('缺少第二位审批人');
+    expect(msg).toContain('请联系管理员为另一位领导授予「5 万元以上档」或「首笔付款加签（总经理级）」审批权限');
+  });
+  it('分档规则前批准、没有冻结档位的申请不能登记付款；申请人撤回后重新提交得到正确档位', () => {
+    const f = setup({ paid: false }), r = submit(f, 60000, tiers(['主管'], ['总监'], ['总经理'])), id = String(r.result.id);
+    const s0 = structuredClone(r.state), old = s0.payables!.requests!.find(x => x.id === id)!;
+    delete old.tier; delete old.approvals; old.state = 'approved'; old.decision = { actorId: '主管', actor: '主管', at: '2026-10-13T02:00:00.000Z', decision: 'approved', note: '旧规则批准' };
+    const pay = { type: 'payable.payment.register', payload: { requestId: id, date: today, amount: 60000, reference: 'B-OLD', allocations: [{ billId: f.billId, amount: 60000 }] } };
+    expect(err(() => as('财务-林', s0, pay))).toContain('在付款审批分档规则生效前批准，须由申请人撤回后重新提交审批');
+    expect(s0.payables!.requests!.find(x => x.id === id)!.state).toBe('approved');
+    const s1 = as('业务-王', s0, { type: 'payable.request.cancel', payload: { id, reason: '按分档规则重新审批' } }).state;
+    const again = submit({ ...f, s: s1 }, 60000, tiers(['主管'], ['总监'], ['总经理']));
+    expect(levels(again.state, String(again.result.id))).toEqual(['pay_gt5', 'pay_new_supplier']);
+  });
+  describe('拆单防范：同一供应商近 30 天累计定档', () => {
+    const twoBills = (opts: { currency?: string } = {}) => { const f = setup({ amount: 60000, ...opts }); const s = run(f.s, { ...bill(f.po1.supplierId, [{ purchaseId: f.po1.id, amount: 40000 }], { currency: f.po1.currency }), payload: { ...bill(f.po1.supplierId, [{ purchaseId: f.po1.id, amount: 40000 }], { currency: f.po1.currency }).payload, invoiceNo: 'VAT-002' } }).state; const ids = payableBills(s, today).map(b => b.id); return { ...f, s, ids }; };
+    const req = (f: ReturnType<typeof twoBills>, s: MistState, billId: string, amount: number, now = '2026-10-14T02:00:00.000Z') => applyMistCommand(s, { ...billRequest(f.po1.supplierId, [{ billId, amount }]), payload: { ...billRequest(f.po1.supplierId, [{ billId, amount }]).payload, currency: f.po1.currency } } as any, { ...ctx('业务-王', now), id: () => `split-${++seq}`, authority: { supplier: {}, ...AUTH } } as MistContext);
+    const lv = (r: ReturnType<typeof req>) => levels(r.state, String(r.result.id));
+    it('两笔各 3 万元同供应商 30 天内：第二笔需 5 万元以上档，审批详情写明累计', () => {
+      const f = twoBills(), a = req(f, f.s, f.ids[0], 30000, '2026-09-20T02:00:00.000Z'), b = req(f, a.state, f.ids[1], 30000);
+      expect(levels(a.state, String(a.result.id))).toEqual(['pay_lt5']);
+      expect(levels(b.state, String(b.result.id))).toEqual(['pay_gt5']);
+      expect(b.state.payables!.requests!.find(x => x.id === b.result.id)!.tier).toMatchObject({ cnyAmount: 30000, cumulativeCnyAmount: 60000 });
+      expect(getMistReviewTasks(b.state).find(t => t.id === 'payment:' + b.result.id)!.details.find(d => d.label === '审批档位')!.value).toContain('近 30 天同一供应商累计 60,000.00 CNY（含本次）');
+      // 已批准未付、已付同样计入。
+      const paid = structuredClone(a.state); paid.payables!.requests!.find(x => x.id === a.result.id)!.state = 'paid';
+      expect(lv(req(f, paid, f.ids[1], 30000))).toEqual(['pay_gt5']);
+    });
+    it('超过 30 天或前一笔已撤回、退回：不累计', () => {
+      const f = twoBills(), a = req(f, f.s, f.ids[0], 30000, '2026-09-14T02:00:00.000Z');
+      expect(lv(req(f, a.state, f.ids[1], 30000))).toEqual(['pay_lt5']);
+      const inside = req(f, f.s, f.ids[0], 30000, '2026-09-15T02:00:00.000Z');
+      expect(lv(req(f, inside.state, f.ids[1], 30000))).toEqual(['pay_gt5']);
+      const cancelled = applyMistCommand(inside.state, { type: 'payable.request.cancel', payload: { id: inside.result.id, reason: '重报' } } as any, ctx('业务-王')).state;
+      expect(lv(req(f, cancelled, f.ids[1], 30000))).toEqual(['pay_lt5']);
+      const rejected = structuredClone(inside.state); rejected.payables!.requests!.find(x => x.id === inside.result.id)!.state = 'rejected';
+      expect(lv(req(f, rejected, f.ids[1], 30000))).toEqual(['pay_lt5']);
+    });
+    it('外币：已冻结的用冻结折算额，没有冻结的按提交日记账汇率折算；缺汇率明确拒绝', () => {
+      const f = twoBills({ currency: 'USD' }), a = req(f, f.s, f.ids[0], 4000);
+      const b = req(f, a.state, f.ids[1], 4000); // 2 × 4000 × 7.1180 = 56,944
+      expect(b.state.payables!.requests!.find(x => x.id === b.result.id)!.tier).toMatchObject({ cnyAmount: 28472, cumulativeCnyAmount: 56944 });
+      expect(levels(b.state, String(b.result.id))).toEqual(['pay_gt5']);
+      // 前一笔没有冻结档位且提交日缺汇率：不静默少算，拒绝提交。
+      const legacy = structuredClone(a.state); delete legacy.payables!.requests!.find(x => x.id === a.result.id)!.tier;
+      expect(lv(req(f, legacy, f.ids[1], 4000))).toEqual(['pay_gt5']);
+      legacy.fxPeriodRates = legacy.fxPeriodRates!.filter(r => !(r.currency === 'USD' && r.month === '2026-08'));
+      legacy.payables!.requests!.find(x => x.id === a.result.id)!.submittedAt = '2026-09-20T02:00:00.000Z';
+      expect(err(() => req(f, legacy, f.ids[1], 4000))).toContain('缺少 2026-08 的 USD 月末汇率');
+    });
   });
   it('权限不足：没有对应档位的审批人时拒绝提交；审批人当前已失去该档时拒绝决定', () => {
     const f = setup();

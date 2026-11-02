@@ -15,20 +15,32 @@ const AUTH = { authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['�
 const as = (actor: string, s: MistState, command: any) => applyMistCommand(s, command, ctx(actor, AUTH));
 
 describe('付款两级审批', () => {
-  it('首笔大额付款：两级应由不同的人签，不能由同一人连签两次放行', () => {
+  // 生产默认岗位下总领导同时是 pay_gt5 / pay_new_supplier 的原路由审批人（context.ts 上抬逻辑）；
+  // 有第二位合格领导时 context.ts 以 paymentTierAlternateIds 给出。两种情况都不能由同一人连签两级放行。
+  const setup = () => {
     const state = createMistState(ctx('财务'), 'demo'); state.payables!.bills = []; state.payables!.payments = [];
     const po = state.fulfillment.purchases.find(p => p.code === 'PO-2026-00001')!;
-    let s = applyMistCommand(state, { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'VAT-9', invoiceDate: '2026-10-10', currency: 'CNY', amount: 60000, taxAmount: 0, lines: [{ purchaseId: po.id, amount: 60000 }], due: '2026-10-30', dueBasis: '验收后' } } as any, ctx('财务')).state;
-    const bill = payableBills(s, '2026-10-14')[0];
-    const req = as('业务', s, { type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: po.supplierId, currency: 'CNY', lines: [{ billId: bill.id, amount: 60000 }], reason: '付款' } });
-    const id = String(req.result.id); s = req.state;
+    const s = applyMistCommand(state, { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'VAT-9', invoiceDate: '2026-10-10', currency: 'CNY', amount: 60000, taxAmount: 0, lines: [{ purchaseId: po.id, amount: 60000 }], due: '2026-10-30', dueBasis: '验收后' } } as any, ctx('财务')).state;
+    return { s, po, bill: payableBills(s, '2026-10-14')[0] };
+  };
+  const submit = (f: ReturnType<typeof setup>, auth: object) => applyMistCommand(f.s, { type: 'payable.request.submit', payload: { purpose: 'bill', supplierId: f.po.supplierId, currency: 'CNY', lines: [{ billId: f.bill.id, amount: 60000 }], reason: '付款' } } as any, ctx('业务', auth));
+  const tryRun = (fn: () => unknown) => { try { fn(); return ''; } catch (e: any) { return e.message as string; } };
+  it('首笔大额付款：两级只能由同一人签时提交被拒绝', () => {
+    expect(tryRun(() => submit(setup(), AUTH))).toContain('缺少第二位审批人');
+  });
+  it('首笔大额付款：有第二位合格审批人时，同一人第二次签被拒绝、申请保持 pending，另一人签后才 approved', () => {
+    const auth = { authority: { ...AUTH.authority, paymentTierAlternateIds: { pay_lt5: [], pay_gt5: ['总监'], pay_new_supplier: [] } } };
+    const req = submit(setup(), auth), id = String(req.result.id);
+    let s = req.state;
     expect(s.payables!.requests!.find(r => r.id === id)!.tier!.levels.map(l => l.level)).toEqual(['pay_gt5', 'pay_new_supplier']);
-    s = as('总经理', s, { type: 'payable.request.decide', payload: { id, decision: 'approved', note: '同意' } }).state;
-    let second = '';
-    try { s = as('总经理', s, { type: 'payable.request.decide', payload: { id, decision: 'approved', note: '再签' } }).state; } catch (e: any) { second = e.message; }
-    // 期望：第二级被拒绝（同一人已签过一级）。实际：同一人签完两级，申请变成 approved。
+    const decide = (who: string, st: MistState, note: string) => applyMistCommand(st, { type: 'payable.request.decide', payload: { id, decision: 'approved', note } } as any, ctx(who, auth));
+    s = decide('总经理', s, '同意').state;
+    const second = tryRun(() => { s = decide('总经理', s, '再签').state; });
     expect(second).not.toBe('');
     expect(s.payables!.requests!.find(r => r.id === id)!.state).toBe('pending');
+    s = decide('总监', s, '同意').state;
+    expect(s.payables!.requests!.find(r => r.id === id)!.state).toBe('approved');
+    expect(new Set(s.payables!.requests!.find(r => r.id === id)!.approvals!.map(a => a.actorId)).size).toBe(2);
   });
 });
 
