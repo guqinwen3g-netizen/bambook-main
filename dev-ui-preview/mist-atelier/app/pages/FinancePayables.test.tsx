@@ -532,3 +532,10 @@ it('prefills the prepayment plan from a stated percentage in the contract terms 
  expect(termsPrepayment({quantity:6600,price:0.08,terms:'月结 30 天'})).toBe('');
  expect(termsPrepayment({quantity:10,price:3,terms:'150% 预付'})).toBe('');
 });
+
+it('税基被掩码时票据详情的税额与税率都显示“已隐藏”，价税合计照常', () => {
+ const added = applyMistCommand(store.value.state, { type: 'payable.bill.register', payload: { supplierId: po.supplierId, invoiceNo: 'MASK-01', invoiceDate: day, currency: 'CNY', amount: 1130, taxAmount: 130, taxRate: '13%', lines: [{ purchaseId: po.id, amount: 1130 }], due: day, dueBasis: '按合同' } } as any, ctx);
+ store.value.state = { ...added.state, payables: { ...added.state.payables, bills: added.state.payables.bills.map((b: any) => ({ ...b, taxAmount: 0, taxRate: '', taxMasked: true })) } };
+ route.id = added.result.id!; render();
+ expect(host.textContent).toContain('已隐藏'); expect(host.textContent).not.toContain('13%'); expect(host.textContent).not.toContain('未填写');
+});

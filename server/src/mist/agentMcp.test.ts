@@ -9,6 +9,7 @@ import { createMistServer } from './server';
 import { AGENT_DELEGATION_HEADER as HEADER } from './agentDelegation';
 import { agentCommandSensitivity } from './agentMcp';
 import { agentCommandRisk } from '../shared/mistAgentProposals';
+import { MistApiError } from './errors';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_AUDIT_FIELD, agentAuditReceiptId } from './agentAudit';
 import {randomUUID} from 'node:crypto';
@@ -126,9 +127,9 @@ describe('MCP 接口：与页面同一套命令、权限与业务规则', () => 
 
   it('finance agent turns a confirmation into a proposal that only the owner can confirm or reject in the app; confirming runs the real command', async () => {
     const local = createMistLocalRuntime({ directory });
-    // 财务岗默认只有 ai:write:low/medium；本用例先验证缺高风险档被拒，再授予该档并复验密码。
+    // 2026-11 财务岗默认持有 ai:write:high；本用例先撤去该码验证缺高风险档被拒，再恢复并复验密码。
     let grantHigh = false; const authorize = local.authorize;
-    local.authorize = async (db, prior, permission) => authorize(db, prior, permission === 'ai:write:high' && grantHigh ? undefined : permission);
+    local.authorize = async (db, prior, permission) => { if (permission === 'ai:write:high' && !grantHigh) throw new MistApiError('FORBIDDEN', '当前账号没有执行此操作的权限', 403); return authorize(db, prior, permission); };
     vi.stubEnv('MIST_LOCAL_REAUTH_PASSWORD', 'local-reauth-secret');
     const app = createMistServer(undefined, { local });
     const buyer = await as(app, 'demo-buyer');
@@ -233,5 +234,60 @@ describe('命令目录与敏感分级', () => {
     expect(via('files.add')).toBe('blocked');
     expect(via('email.server.sync')).toBe('blocked');
     expect(via('agent.proposal.confirm')).toBe('blocked');
+  });
+});
+
+describe('M1 计税依据：退税预演与提议说明', () => {
+  it('without sensitive:tax_base: filing / approving / receiving are refused, and previews, proposal summaries and audit input of other rebate commands hide amounts', async () => {
+    const local = createMistLocalRuntime({ directory });
+    // 本用例以财务身份办理，再撤去 sensitive:tax_base 复现“有退税办理权、无计税依据”的账号。
+    let strip = false; const authorize = local.authorize;
+    local.authorize = async (db, prior, permission) => {
+      if (strip && permission === 'sensitive:tax_base') throw new MistApiError('FORBIDDEN', '当前账号没有执行此操作的权限', 403);
+      const current = await authorize(db, prior, permission);
+      return strip ? { ...current, permissions: (current.permissions || []).filter(scope => scope !== 'sensitive:tax_base') } : current;
+    };
+    const app = createMistServer(undefined, { local });
+    const finance = await as(app, 'demo-finance');
+    const read = async () => (await finance.client.get('/api/mist/workspaces/' + finance.workspace.id).expect(200)).body.workspace;
+    const run = async (command: any) => { const ws = await read(); return finance.client.post('/api/mist/workspaces/' + ws.id + '/commands').send({ requestId: 'r-' + randomUUID(), expectedRevision: ws.revision, command }); };
+    const ws = await read();
+    const customs = ws.state.fulfillment.customs.find((c: any) => ws.state.fulfillment.shipments.find((s: any) => s.id === c.shipmentId)?.state === 'departed');
+    const { rebateCandidateBills } = await import('../shared/mistExportRebate'), { platformBusinessDate } = await import('../shared/mistPlatform'), today = platformBusinessDate(new Date().toISOString());
+    const file = { type: 'rebate.claim.file', payload: { customsId: customs.id, billIds: rebateCandidateBills(ws.state, customs).map((b: any) => b.id), filedAt: today, batchRef: 'SB-PREVIEW' } };
+    const leaked = (value: unknown) => /\d[\d,]*\.\d{2} CNY/.test(JSON.stringify(value));
+    const first = await finance.tool('bambook_preview', { workspaceId: ws.id, command: file }); if (!first.structuredContent) throw new Error(first.content?.[0]?.text);
+    // 持码人的预演含金额（对照）
+    expect(leaked((await finance.tool('bambook_preview', { workspaceId: ws.id, command: file })).structuredContent.events)).toBe(true);
+    strip = true;
+    // 1. 申报 / 核准 / 勾稽另须 sensitive:tax_base：预演与页面命令都拒绝
+    const filePreview = await finance.tool('bambook_preview', { workspaceId: ws.id, command: file });
+    expect(filePreview.isError).toBe(true); expect(filePreview.content[0].text).toContain('计税依据'); expect(leaked(filePreview)).toBe(false);
+    expect((await run(file)).status).toBe(403);
+    strip = false;
+    expect((await run(file)).status).toBe(200);
+    const claim = (await read()).state.exportRebate.claims.find((c: any) => c.batchRef === 'SB-PREVIEW');
+    expect((await run({ type: 'finance.importReceipts', payload: { receipts: [{ date: today, payer: '国家金库', amount: 26000, currency: 'CNY', ref: '退税' }] } })).status).toBe(200);
+    const receipt = (await read()).state.receipts.find((r: any) => r.payer === '国家金库');
+    expect((await run({ type: 'rebate.claim.approve', payload: { id: claim.id, date: today, amount: claim.expected, ref: '核准' } })).status).toBe(200);
+    expect((await run({ type: 'rebate.claim.receive', payload: { id: claim.id, receiptId: receipt.id, amount: 1000 } })).status).toBe(200);
+    const entry = (await read()).state.exportRebate.claims.find((c: any) => c.id === claim.id).receipts[0];
+    strip = true;
+    for (const command of [{ type: 'rebate.claim.approve', payload: { id: claim.id, date: today, amount: 1, ref: 'x' } }, { type: 'rebate.claim.receive', payload: { id: claim.id, receiptId: receipt.id, amount: 1 } }]) {
+      const res = await run(command); expect(res.status).toBe(403); expect(leaked(res.body)).toBe(false);
+    }
+    // 2. 未加门槛的退税命令（冲回勾稽）：预演事件、提议说明、Agent 审计原始填写都脱敏
+    const reverse = { type: 'rebate.claim.reverseReceipt', payload: { id: claim.id, entryId: entry.id, reason: '勾错流水' } };
+    const preview = (await finance.tool('bambook_preview', { workspaceId: ws.id, command: reverse })).structuredContent;
+    expect(preview.events.join('')).toContain('已隐藏'); expect(leaked(preview)).toBe(false);
+    const proposed = (await finance.tool('bambook_execute', { workspaceId: ws.id, command: reverse, requestId: 'reverse-once' })).structuredContent;
+    expect(proposed.status).toBe('awaiting_confirmation'); expect(leaked(proposed.summary)).toBe(false);
+    const proposal = (await read()).state.agentProposals.find((p: any) => p.command.type === 'rebate.claim.reverseReceipt');
+    expect(proposal.summary.join('')).toContain('已隐藏'); expect(leaked(proposal)).toBe(false);
+    const auditCall = await finance.tool('bambook_audit', { workspaceId: ws.id, requestId: 'mcp-reverse-once', includeCommand: true }); if (!auditCall.structuredContent) throw new Error(auditCall.content?.[0]?.text); const audit = auditCall.structuredContent;
+    expect(leaked(audit)).toBe(false);
+    // 说明在不持码人预演时生成，入库的就是脱敏文字，持码人也看不到原金额（不会再从库里带出）。
+    strip = false;
+    expect((await read()).state.agentProposals.find((p: any) => p.id === proposal.id).summary.join('')).toContain('已隐藏');
   });
 });

@@ -131,6 +131,8 @@ export function applyOrderFundingCommand(root:Root,command:OrderFundingCommand,c
  const assignments=structuredClone(root.orderFunding?.assignments||[]);let row:OrderFundingAssignment;
  if(command.type==='funding.assign'){
   const p=command.payload,receipt=root.receipts.find(r=>r.id===p.receiptId);if(!receipt)fail('到账来源不存在','NOT_FOUND');
+  // 已勾稽到退税申报的国库到账：金额即退税到账额。不持计税依据时返回不带金额的通用错误，不能借超额提示取数。
+  if(!context.can?.('sensitive:tax_base')&&rebateReceiptUsedMinor(root,receipt!.id)>0)fail('该到账不能用于客户资金归属','PRECONDITION');
   if(!root.customers.some(c=>c.id===p.customerId))fail('归属客户不存在','NOT_FOUND');cents(p.amount);const note=text(p.note,'资金归属依据');
   const orderId=p.orderId||null,order=orderId?root.orders.find(o=>o.id===orderId):null;if(orderId&&(!order||order.customerId!==p.customerId||order.currency!==receipt!.currency))fail('请选择同客户同币种订单');
   const old=p.id?assignments.find(r=>r.id===p.id):undefined;if(p.id&&!old)fail('资金归属记录不存在','NOT_FOUND');if(old?.state==='released')fail('已释放的归属不能覆盖，请另建记录');if(old&&old.receiptId!==p.receiptId)fail('不能更换原到账来源');

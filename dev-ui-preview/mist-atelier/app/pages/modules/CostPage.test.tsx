@@ -48,3 +48,9 @@ it('uses the financial material proportions when inventory is hidden and otherwi
  store.w.workspace.costMaterialBasis=undefined;render();expect(host.textContent).toContain('暂不能核算');expect(host.textContent).not.toContain('¥-20.00');
 });
 it('keeps order margin behind report permission for a local role profile',()=>{store.write=false;store.local=true;render();expect(host.textContent).toContain('需报表管理权限查看');store.local=undefined;});
+it('shows the rebate-inclusive margin as hidden and gives the margin without rebate when rebate amounts are masked or unreadable',()=>{
+ route.section='period';store.w.state.exportRebate={rates:[],claims:[{id:'rc',code:'RC-1',orderIds:['order'],lines:[],receipts:[],taxable:0,expected:0,taxMasked:true,state:'filed'}]};render();
+ expect(host.textContent).toContain('毛利（不含退税）');expect(host.textContent).toContain('毛利（含退税）已隐藏');
+ store.w.state={...store.w.state,exportRebate:{rates:[],claims:[]}};store.w.workspace={...(store.w.workspace||{}),access:{hidden:[{key:'exportRebate'}]}};render();
+ expect(host.textContent).toContain('毛利（含退税）无权查看');
+});

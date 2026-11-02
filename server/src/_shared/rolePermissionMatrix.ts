@@ -456,6 +456,8 @@ const SALES_BASE: RolePermissionMatrix = {
   'finance:read': true,
   'invoices:read': true,
   'vouchers:read': true,
+  // 2026-11 退税记录改按 tax:read 判定：业务员原凭 invoices:read 能看退税，补授保持原能力；计税依据仍按 sensitive:tax_base 掩码。
+  'tax:read': true,
   'pricing:read': true,
   'pricing:write': true, // 业务员按单做报价核算（换汇成本/退税/利润试算）；利润底线与佣金规则仍为 pricing:admin
   'risk:read': true,
@@ -483,6 +485,8 @@ const SALES_MANAGER_BASE: RolePermissionMatrix = {
   'business:delete': true,
   'emails:maintenance:write': true,
   'agent:approvals:approve': true,
+  // 2026-11 AI 高风险写入（付款、核销、审批）须持本码并复验密码；销售主管本身有审批权，补授保持确认 Agent 审批提议的能力。
+  'ai:write:high': true,
   // 额外：变更审批（SM 级审批权）
   'orders:approve:change_delivery': true,
   'orders:approve:change_qty': true,
@@ -530,6 +534,8 @@ const FINANCE_BASE: RolePermissionMatrix = {
   'ai:chat': true,
   'ai:write:low': true,
   'ai:write:medium': true,
+  // 2026-11 AI 高风险写入（付款、核销）须持本码并复验密码；财务本身登记收付款与核销，补授保持原能力。
+  'ai:write:high': true,
   // 敏感字段：财务可见成本/利润/税基/佣金（做账发薪必需；GAP-R11 FinMan 位移）
   'sensitive:cost': true,
   'sensitive:profit': true,
@@ -714,6 +720,8 @@ const QC_BASE: RolePermissionMatrix = {
   'reports:read': true,
   'ai:chat': true,
   'ai:write:low': true,
+  // 2026-11 AI 写入按风险分级确认：中风险须持本码，补授保持 QC 原有的 Agent 确认能力。
+  'ai:write:medium': true,
   // 客户市场（只读）
   'relations:read': true,
   'suppliers:read': true,
@@ -756,6 +764,8 @@ const LOGISTICS_BASE: RolePermissionMatrix = {
   'reports:read': true,
   'ai:chat': true,
   'ai:write:low': true,
+  // 2026-11 AI 写入按风险分级确认：中风险须持本码，补授保持后勤原有的 Agent 确认能力。
+  'ai:write:medium': true,
   // 客户市场（只读）
   'relations:read': true,
   'crm:read': true,
@@ -793,6 +803,8 @@ const LOGISTICS_BASE: RolePermissionMatrix = {
   'finance:read': true,
   'invoices:read': true,
   'vouchers:read': true,
+  // 2026-11 退税记录改按 tax:read 判定：后勤原凭 invoices:read 能看退税，补授保持原能力；计税依据仍按 sensitive:tax_base 掩码。
+  'tax:read': true,
   // 平台域
   'knowledge:read': true,
   'knowledge:write': true,

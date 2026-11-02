@@ -74,3 +74,14 @@ describe('报表中心', () => {
     expect(eur.status).toBe('norate');
   });
 });
+
+import { rebateAccess } from './RebatePanel';
+describe('退税金额可读程度', () => {
+  it('无 tax:read 为无权查看；被 sensitive:tax_base 掩码为已隐藏；否则完整', () => {
+    const s = createMistState({ id: () => 'x', now: '2026-10-17T04:00:00Z', actorName: 't' }, 'empty');
+    expect(rebateAccess(s)).toBe('full');
+    expect(rebateAccess(s, [{ key: 'exportRebate' }])).toBe('denied');
+    s.exportRebate = { rates: [], claims: [{ taxMasked: true } as any] };
+    expect(rebateAccess(s)).toBe('masked');
+  });
+});

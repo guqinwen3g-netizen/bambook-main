@@ -280,7 +280,7 @@ export function FinancePayables() {
   const detail = bill ? <DetailBody data-payable-bill={bill.id} heading={<h2 className="mist-h2">{bill.code}</h2>}>
     <Facts items={[
       { label: '发票类型',value:bill.invoiceType?uiText(SUPPLIER_INVOICE_TYPES[bill.invoiceType]):uiText('待核对')},{ label: '供应商', value: bill.supplier }, { label: '供应商发票号', value: <Mono>{bill.invoiceNo}</Mono> }, { label: '发票日期', value: bill.invoiceDate },
-      { label: '价税合计', value: apMoney(bill.amount, bill.currency) }, { label: '税额 / 税率', value: (bill.taxMasked ? '已隐藏' : apMoney(bill.taxAmount, bill.currency)) + ' · ' + (bill.taxRate || '未填写') },
+      { label: '价税合计', value: apMoney(bill.amount, bill.currency) }, { label: '税额 / 税率', value: bill.taxMasked ? '已隐藏' : apMoney(bill.taxAmount, bill.currency) + ' · ' + (bill.taxRate || '未填写') },
       ...(bill.prepaymentCredit > 0 ? [{ label: '预付抵扣（来自结算）', value: apMoney(bill.prepaymentCredit, bill.currency) }] : []),
       ...(bill.advanceCredit > 0 ? [{ label: '先付抵扣（不等票付款）', value: apMoney(bill.advanceCredit, bill.currency) }] : []),
       ...(bill.deducted > 0 ? [{ label: '索赔扣款', value: apMoney(bill.deducted, bill.currency) }] : []),

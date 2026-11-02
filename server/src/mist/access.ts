@@ -52,12 +52,50 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'orders', label: '订单', permissions: ['orders:read'], paths: [['orders'], ['orderLines'], ['internalFabricAllocations'], ['internalDeliveries']], entityTypes: ['order'], views: ['orders', 'orders/detail', 'orders/list', 'orders/new'] },
   { key: 'production', label: '生产', permissions: ['production:read'], paths: [['productions'], ['fulfillment', 'productionFacts']], entityTypes: ['production'], views: ['production-board'] },
 ];
-/** 掩码退税计税依据：供应商票据税额、退税申报计税金额 / 应退税额 / 明细。只改投影副本，不动原状态。 */
+/** 退税文字里的金额（应退 / 核准 / 到账 X CNY）；历史事件已入库，只能在读投影时脱敏。 */
+const REBATE_EVENT_AMOUNT = /-?\d[\d,]*(?:\.\d+)?\s*CNY/g;
+export const TAX_BASE_MASKED_TEXT = '已隐藏';
+/**
+ * 不持有 sensitive:tax_base 时统一的文字脱敏规则：退税事件、预演事件、提议说明、错误提示里的人民币金额替换为“已隐藏”。
+ * 只对退税命令（rebate.*）及其事件使用；payable.* 事件不含税额（已核对 mistPayables / mistOrderCost / mistOpeningBalance），不纳入。
+ */
+export const maskTaxBaseText = (text: string) => text.replace(REBATE_EVENT_AMOUNT, TAX_BASE_MASKED_TEXT);
+export const isTaxBaseCommand = (type?: string) => typeof type === 'string' && type.startsWith('rebate.');
+/** 命令输入里属于计税依据的字段：专票税额、税率；退税核准额与到账勾稽额。 */
+const TAX_INPUT_KEYS = new Set(['taxAmount', 'taxRate']);
+export function maskTaxBaseInput(type: string, payload: Record<string, unknown>): Record<string, unknown> {
+  const rebateAmounts = type.startsWith('rebate.claim.');
+  const strip = (value: unknown): unknown => typeof value === 'string' ? (isTaxBaseCommand(type) ? maskTaxBaseText(value) : value) : Array.isArray(value) ? value.map(strip)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !TAX_INPUT_KEYS.has(key) && !(rebateAmounts && (key === 'amount' || key === 'receiptId'))).map(([key, item]) => [key, strip(item)])) : value;
+  return strip(payload) as Record<string, unknown>;
+}
+/** 被退税到账勾稽占用的到账流水：金额即国库退税到账额。 */
+export function rebateReceiptIds(state: MistState): Set<string> {
+  return new Set((state.exportRebate?.claims || []).flatMap(claim => (claim.receipts || []).filter(r => !r.reversed).map(r => r.receiptId)));
+}
+/**
+ * 掩码退税计税依据（sensitive:tax_base）。只改投影副本，不动原状态。
+ * - 供应商票据：保留价税合计（付款需要），税额置 0、税率清空，避免用价税合计 × 税率还原税额；
+ * - 退税申报：计税金额、应退、核准、到账勾稽金额与明细置 0；
+ * - 退税事件文字中的金额替换为“已隐藏”（覆盖已入库的历史事件）；
+ * - 被退税勾稽占用的银行到账流水整笔不下发（其金额就是退税到账额）。
+ */
 export function maskTaxBase(next: MistState) {
-  if (next.payables?.bills?.length) next.payables = { ...next.payables, bills: next.payables.bills.map(b => ({ ...b, taxAmount: 0, taxMasked: true })) };
+  if (next.payables?.bills?.length) next.payables = { ...next.payables, bills: next.payables.bills.map(b => ({ ...b, taxAmount: 0, taxRate: '', taxMasked: true })) };
   const rebate = next.exportRebate;
+  const refundReceipts = rebateReceiptIds(next);
   if (rebate?.claims?.length) next.exportRebate = { ...rebate, claims: rebate.claims.map(c => ({ ...c, taxable: 0, expected: 0, taxMasked: true,
-    lines: c.lines.map(({ parts: _parts, inputTaxCap: _cap, excluded: _excluded, ...l }) => ({ ...l, taxable: 0, rebate: 0 })) })) };
+    ...(c.approved ? { approved: { ...c.approved, amount: 0 } } : {}),
+    // 去掉到账流水 id：否则可凭 id 经资金归属等命令的提示拿到到账金额；勾稽编号与日期保留。
+    receipts: (c.receipts || []).map(({ receiptId: _receipt, ...r }) => ({ ...r, receiptId: '', amount: 0 })),
+    lines: (c.lines || []).map(({ parts: _parts, inputTaxCap: _cap, excluded: _excluded, taxLimited: _limited, ...l }) => ({ ...l, taxable: 0, rebate: 0 })) })) };
+  if (next.events?.some(e => e.entityType === 'rebate')) next.events = next.events.map(e => e.entityType === 'rebate' ? { ...e, text: maskTaxBaseText(e.text) } : e);
+  // Agent 提议说明来自预演事件或调用方填写，历史提议已入库：退税命令的说明按同一规则脱敏。
+  if (next.agentProposals?.some(p => isTaxBaseCommand(p.command?.type))) next.agentProposals = next.agentProposals.map(p => isTaxBaseCommand(p.command?.type) ? { ...p, summary: p.summary.map(maskTaxBaseText) } : p);
+  if (refundReceipts.size) {
+    if (next.receipts?.some(r => refundReceipts.has(r.id))) next.receipts = next.receipts.filter(r => !refundReceipts.has(r.id));
+    if (next.partialReceipts?.some(r => refundReceipts.has(r.id))) next.partialReceipts = next.partialReceipts.filter(r => !refundReceipts.has(r.id));
+  }
 }
 export const memberIds = (state: MistState): string[] => Array.isArray(state.memberIds) ? state.memberIds.filter((id: unknown) => typeof id === 'string') : [];
 export const members = (state: MistState): MistMemberRecord[] => Array.isArray(state.members) ? state.members : [];
@@ -82,6 +120,9 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
   const hidden = hiddenSections(actor), next: MistState = scope ? applyDataScope(state, scope, actor.userId) : { ...state };
   // Account balances require the complete company ledger; a row-scoped projection cannot compute them safely.
   if (scope && !hidden.some(section => section.key === 'bankAccounts')) hidden.push(MIST_READ_SECTIONS.find(section => section.key === 'bankAccounts')!);
+  // 无 sensitive:tax_base 时退税到账流水不下发；账户余额须完整流水，同时隐藏公司银行账户。
+  const taxBaseHidden = !hasScope(actor, 'sensitive:tax_base' as PermissionScope);
+  if (taxBaseHidden && !hidden.some(section => section.key === 'bankAccounts') && (state.receipts || []).some(r => rebateReceiptIds(state).has(r.id))) hidden.push(MIST_READ_SECTIONS.find(section => section.key === 'bankAccounts')!);
   // Financial read metadata belongs to the response envelope, never to restorable business state.
   delete (next as MistState&{costMaterialBasis?:unknown}).costMaterialBasis;
   // Group scope conditions and notes may reference company-wide business; match the management API's permission boundary.

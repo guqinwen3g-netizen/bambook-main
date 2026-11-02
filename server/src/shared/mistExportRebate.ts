@@ -77,6 +77,13 @@ const ledger = (root: Root): ExportRebateState => { root.exportRebate ||= create
 
 /** 退税权限（2026-11 改码）：读 tax:read，登记退税率 / 申报 / 撤回 tax:write，税务核准 tax:approve；到账勾稽是收款核销。 */
 export const REBATE_SCOPES = { read: 'tax:read', write: 'tax:write', approve: 'tax:approve' } as const;
+/**
+ * 申报、核准、到账勾稽的输入与结果直接含应退 / 核准 / 到账金额（预演事件、提议说明、错误提示都会带出），
+ * 另须持有计税依据查看权（sensitive:tax_base），防止不持码账号预演取数或用错误提示二分逼近金额。
+ */
+export const REBATE_TAX_BASE_SCOPE = 'sensitive:tax_base';
+export const REBATE_TAX_BASE_COMMANDS: readonly string[] = ['rebate.claim.file', 'rebate.claim.approve', 'rebate.claim.receive'];
+export const exportRebateExtraPermissions = (command: { type: string }): string[] => REBATE_TAX_BASE_COMMANDS.includes(command.type) ? [REBATE_TAX_BASE_SCOPE] : [];
 export function exportRebateCommandPermission(command: ExportRebateCommand): string {
   if (command.type === 'rebate.claim.receive' || command.type === 'rebate.claim.reverseReceipt') return MIST_FINANCE_SCOPES.reconcile;
   if (command.type === 'rebate.claim.approve') return REBATE_SCOPES.approve;
@@ -295,7 +302,7 @@ export function applyExportRebateCommand(root: Root, command: ExportRebateComman
       if (receipt.currency !== 'CNY') fail('退税款为人民币，请选择人民币到账流水');
       const amount = minor(p.amount, '勾稽金额');
       if (amount > mistMoneyMinor(receipt.remaining)) fail(`流水 ${receipt.code} 未分配余额不足`);
-      const open = mistMoneyMinor(rebateClaimTotals(claim).open); if (amount > open) fail(`超过本申报待到账金额 ${major(open).toFixed(2)} CNY；如到账多于核准额请先核对`);
+      const open = mistMoneyMinor(rebateClaimTotals(claim).open); if (amount > open) fail(c.can?.('sensitive:tax_base') ? `超过本申报待到账金额 ${major(open).toFixed(2)} CNY；如到账多于核准额请先核对` : '超过本申报待到账金额；如到账多于核准额请先核对');
       if (p.settle !== undefined && typeof p.settle !== 'boolean') fail('结清标记无效');
       const reason = p.settle === true && amount < open ? text(p.reason, '少收原因', true, 500) : '';
       const entry: RebateClaimReceipt = { id: c.id(), receiptId: receipt.id, receiptCode: receipt.code, amount: major(amount), date: receipt.date.slice(0, 10), at: c.now, actor: c.actorName };

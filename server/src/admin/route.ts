@@ -216,12 +216,13 @@ export function createAdminRouter(options: AdminRouterOptions) {
   // 所有 admin 路由要求 users:admin 权限点（原 owner/admin 角色组；写类 scope，API-Key 不足以通过；
   // API-Key 即使通过 moduleGuard 也会因无 actor 在此处被挡 → 401）
   // 2026-11：后台只读账号列表按 users:read 判定，便于给 HR 只读权限；其余后台接口仍要求 users:admin。
-  // 审计日志导出按 audit:export 单独把关（导出不等于后台管理权）。
+  // 审计日志导出在后台管理权之上另须 audit:export（有后台管理权不等于能导出）。
   const READ_ONLY_ADMIN_PATHS = new Set(['/users']);
   if (requireAuth) {
     router.use((req: Request, res: Response, next) => {
       if (req.method === 'GET' && READ_ONLY_ADMIN_PATHS.has(req.path)) return requirePermission(['users:read', 'users:admin'])(req, res, next);
-      if (req.method === 'GET' && req.path === '/audit-logs/export') return requirePermission('audit:export')(req, res, next);
+      // 审计日志导出是后台管理动作，须同时持有 users:admin 与 audit:export（只持 audit:export 不能绕过后台管理权）。
+      if (req.method === 'GET' && req.path === '/audit-logs/export') return requirePermission('users:admin')(req, res, () => requirePermission('audit:export')(req, res, next));
       // 知识库访问控制（全库 ACL）的写入另须知识库管理权 knowledge:admin（2026-11 补判定点）。
       if (req.method !== 'GET' && req.path.startsWith('/knowledge-acl')) return requirePermission('users:admin')(req, res, () => requirePermission('knowledge:admin')(req, res, next));
       return requirePermission('users:admin')(req, res, next);
