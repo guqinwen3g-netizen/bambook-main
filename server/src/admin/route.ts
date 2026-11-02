@@ -18,6 +18,7 @@ import { createApprovalDecisionService, type OnApprovalDecided } from '../approv
 import { createOrderMainApprovalService, OrderMainApprovalError } from '../orders/orderMainApprovalService';
 import { passwordProblem } from '../auth/passwordPolicy';
 import { initialGeneralManagerEligibility } from './initialGeneralManager';
+import { createAccountAccessService, type Delivery } from '../auth/accountAccess';
 
 type AdminRouterOptions = {
   prisma: PrismaClient;
@@ -27,6 +28,8 @@ type AdminRouterOptions = {
   requireAuth?: boolean;
   /** 允许的 API-Key 集合（默认空集——admin 不接受 API-Key，仅 JWT）。 */
   apiKeys?: Set<string>;
+  /** 邀请邮件发送（默认复用平台开户的账号访问链接服务；测试可替换）。 */
+  accountAccess?: { deliver: (userId: string, kind: 'invite', actorId?: string, companyName?: string) => Promise<Delivery> };
 };
 
 function auditId(): string {
@@ -158,6 +161,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
   const decisions = createApprovalDecisionService(options.prisma, { onDecided: options.onDecided });
   const orderMainApprovals = createOrderMainApprovalService(options.prisma);
   const email = options.email || createEmailService();
+  const accountAccess = options.accountAccess ?? createAccountAccessService(options.prisma, { email });
 
   /**
    * 老板账号防线：管理员（非老板）不得修改、停用老板账号，也不得重置其密码或两步验证——
@@ -304,12 +308,19 @@ export function createAdminRouter(options: AdminRouterOptions) {
   }));
 
   router.post('/users', withRouteErrorGuard(async (req: Request, res: Response) => {
-    const { displayName, email, password, roles, departmentId, appointInitialGeneralManager } = req.body || {};
-    if (!displayName || !email || !password) {
-      return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: 'displayName, email, password are required.' });
-    }
+    const { roles, departmentId, appointInitialGeneralManager } = req.body || {};
+    const displayName = typeof req.body?.displayName === 'string' ? req.body.displayName.trim() : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+    const deliveryMode = req.body?.deliveryMode ?? 'password';
+    if (deliveryMode !== 'password' && deliveryMode !== 'invite') return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', field: 'deliveryMode', message: '请选择账号开通方式。' });
+    if (!displayName) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', field: 'displayName', message: '请填写姓名。' });
+    if (!email) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', field: 'email', message: '请填写登录邮箱。' });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return res.status(400).json({ ok: false, error: 'INVALID_EMAIL', field: 'email', message: '登录邮箱格式不正确。' });
+    // 邀请方式由员工经邮件链接自设密码；账号先持有不外泄的随机密码，不能用于登录。
+    const password = deliveryMode === 'invite' ? crypto.randomBytes(32).toString('base64url') : req.body?.password;
+    if (!password) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', field: 'password', message: '请设置初始密码，或改用邀请邮件。' });
     const weak = passwordProblem(password);
-    if (weak) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', message: weak });
+    if (weak) return res.status(400).json({ ok: false, error: 'WEAK_PASSWORD', field: 'password', message: weak });
     const companyId = actorCompanyId(req);
     if (!(await departmentExists(options.prisma, departmentId, companyId))) {
       return res.status(400).json({ ok: false, error: 'INVALID_DEPARTMENT', message: `部门不存在或已停用：${departmentId}` });
@@ -318,7 +329,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (appointInitialGeneralManager === true && existing) return res.status(409).json({ ok: false, error: 'ACCOUNT_EXISTS', message: '请为首位总经理新建独立账号。' });
     if (existing?.platformRole) return res.status(403).json({ ok: false, error: 'PLATFORM_IDENTITY_ONLY', message: '平台人员不能作为公司账号使用。' });
     if (existing && existing.status !== 'disabled' && existing.deletedAt === null) {
-      return res.status(409).json({ ok: false, error: 'DUPLICATE', message: 'Email already in use.' });
+      return res.status(409).json({ ok: false, error: 'DUPLICATE', field: 'email', message: existing.status === 'pending' ? '该邮箱已有待审批的注册申请，请在账号列表中审批。' : '该邮箱已被在用账号使用，请换一个邮箱。' });
     }
     const requestedRoles = [...new Set<string>(Array.isArray(roles) ? roles : (typeof roles === 'string' && roles ? [roles] : []))];
     if (actorCompanyId(req) && requestedRoles.length > 1) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: '每个账号只设一个岗位。' });
@@ -343,6 +354,8 @@ export function createAdminRouter(options: AdminRouterOptions) {
     const initialAppointment = appointInitialGeneralManager === true;
     if (initialAppointment && (!companyId || resolvedRoles.length !== 1 || systemRoleCode(resolvedRoles[0].id) !== SYSTEM_ROLE_IDS.SUPER_ADMIN)) return res.status(400).json({ ok: false, error: 'INVALID_ROLE', message: '首位总经理须选择总经理岗位。' });
 
+    // 管理员知道初始密码；邀请账号尚无本人密码。两种方式都须本人设好密码后才能使用业务。
+    const firstLogin = { forceChangePassword: true, forceChangeReason: deliveryMode === 'invite' ? 'invite' : 'initial' };
     const reactivatedMetadata = existing ? { ...((existing.metadata as any) || {}) } : {};
     delete reactivatedMetadata.deletedAt;
     delete reactivatedMetadata.deletedBy;
@@ -368,12 +381,13 @@ export function createAdminRouter(options: AdminRouterOptions) {
           deletedAt: null,
           metadata: {
             ...reactivatedMetadata,
+            ...firstLogin,
             reactivatedAt: new Date().toISOString(),
           },
         },
       })
       : await tx.userAccount.create({
-        data: { id: await generateUserAccountId(options.prisma, email, displayName), displayName, email, passwordHash, primaryDeptId: departmentId || null },
+        data: { id: await generateUserAccountId(options.prisma, email, displayName), displayName, email, passwordHash, primaryDeptId: departmentId || null, metadata: firstLogin },
       });
       await tx.userRole.deleteMany({ where: { userId: created.id } });
       for (const role of resolvedRoles) await tx.userRole.create({ data: { id: `ur_${created.id}_${role.id}`, userId: created.id, roleId: role.id, departmentId: departmentId || null } });
@@ -397,7 +411,15 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (!initialAppointment) await options.prisma.auditLog.create({
       data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: actor?.userId || 'system', action: existing ? 'reactivate_user' : 'create_user', targetType: 'UserAccount', targetId: user.id, ip: req.ip },
     });
-    res.json({ ok: true, userId: user.id, reactivated: Boolean(existing) });
+    if (existing) invalidateAccountStatusCache(user.id);
+    let invitation: Delivery | undefined;
+    if (deliveryMode === 'invite') {
+      const company = companyId ? await options.prisma.company.findUnique({ where: { id: companyId }, select: { name: true } }).catch(() => null) : null;
+      // 发送失败不回滚账号：如实返回结果，管理员可稍后重发。
+      invitation = await accountAccess.deliver(user.id, 'invite', actor?.userId, company?.name ?? undefined)
+        .catch((): Delivery => ({ status: 'unconfirmed', message: '账号已创建，邀请邮件发送结果未确认，请稍后重发。' }));
+    }
+    res.json({ ok: true, userId: user.id, reactivated: Boolean(existing), ...(invitation ? { invitation } : {}) });
   }));
 
   router.patch('/users/:id', withRouteErrorGuard(async (req: Request, res: Response) => {
