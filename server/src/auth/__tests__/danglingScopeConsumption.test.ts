@@ -423,7 +423,8 @@ describe('★ 专项：Mist 平台命令门禁消费的码', () => {
     ['tax:approve', 'shared/mistExportRebate.ts', "approve: 'tax:approve'"],
     // 2026-11 补判定点：后台只读、审计导出、知识库 ACL、报价转单、单证模板与印章、胶囊豁免。
     ['users:read', 'admin/route.ts', "requirePermission(['users:read', 'users:admin'])"],
-    ['audit:export', 'admin/route.ts', "requirePermission('audit:export')"],
+    // 2026-11 审计日志导出须同时持有 users:admin 与 audit:export（L1）。
+    ['audit:export', 'admin/route.ts', "requirePermission('users:admin')(req, res, () => requirePermission('audit:export')(req, res, next))"],
     ['knowledge:admin', 'admin/route.ts', "requirePermission('knowledge:admin')"],
     ['quotations:convert', 'shared/mistMarket.ts', "QUOTATION_CONVERT_SCOPE='quotations:convert'"],
     ['customs:admin', 'customs/documentTemplateRoute.ts', "requirePermission('customs:admin')"],
