@@ -17,9 +17,10 @@ const REVIEW_COMMAND_BY_KIND = {
 } as const satisfies Record<MistReviewTask['kind'],MistCommand['type']>;
 const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';
-import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, type MistWorkspaceAccess, type MistMemberLog } from './access';
+import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
 import { marketCommandExtraPermissions } from '../shared/mistMarket';
+import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
 import { MIST_LOCAL_PROFILES, mistLocalPublicUser } from './local';
 import { applyRoster, canMaintainCompany, companyDataScope, companyTeamIds, companyLibrary, companyRoster, companyRow, companySlug, companyTeams, localMode, singleLibrary } from './companyLibrary';
 import { isAgentActor, type AgentActor } from './agentDelegation';
@@ -232,6 +233,9 @@ export class MistRepository {
     if(command?.type==='fulfillment.inventory.quarantine.noRecovery'||command?.type==='fulfillment.inventory.quarantine.noRecovery.revoke')await this.authorize(db,prior,'inventory:read');
     if (command?.type.startsWith('payable.')) for (const scope of payablesCommandPermissions(command as any).slice(1)) await this.authorize(db, prior, scope);
     if (command?.type.startsWith('market.')) for (const scope of marketCommandExtraPermissions(command)) await this.authorize(db, prior, scope);
+    if (command?.type.startsWith('rebate.')) for (const scope of exportRebateExtraPermissions(command)) {
+      try { await this.authorize(db, prior, scope); } catch (error) { if (error instanceof MistApiError && error.status === 403) fail('FORBIDDEN', '退税申报、核准与到账勾稽需要「计税依据查看」权限', 403); throw error; }
+    }
   }
   /** 公司库：当前公司在职成员即可进入（R2），ownerOnly 的动作（回收站、成员授权）一律不适用。非公司（本机）空间：所有者或被明确授权的成员可进入，ownerOnly 只限所有者。 */
   private async own(db: any, prior: TokenPayload, id: string, permission?: string | null, lock = false, allowArchived = false, ownerOnly = false, captureAuditBefore = false): Promise<{ actor: TokenPayload; row: MistWorkspaceRow }> {
@@ -873,7 +877,11 @@ export class MistRepository {
         }
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         if (command?.type === 'email.server.sync' || command?.type === 'email.server.state') Object.assign(context, {mailPendingFields:await pendingMailFields(db,workspaceId,command.type === 'email.server.state' ? command.payload.operationId : undefined)});
-        const applied = this.contract.applyMistCommand(structuredClone(row.state), command, context);
+        // 不持有计税依据时，退税命令的错误提示按读投影同一规则脱敏金额。
+        const taxBaseHidden = isTaxBaseCommand(command?.type) && !hasScope(actor, 'sensitive:tax_base' as any);
+        let applied: ReturnType<MistContract['applyMistCommand']>;
+        try { applied = this.contract.applyMistCommand(structuredClone(row.state), command, context); }
+        catch (error) { if (taxBaseHidden && error instanceof Error && typeof error.message === 'string') error.message = maskTaxBaseText(error.message); throw error; }
         const remoteQueued = await enqueueMailState(db, row, applied.state, command, actor, prior, Date.now(),humanTaskProposal?.taskId);
         if (remoteQueued) applied.result = {...applied.result, remoteQueued:true};
         if (command?.type === 'email.server.state') await completeMailState(db,workspaceId,command.payload.operationId,command.payload.attemptId,command.payload.observation,(prior as MailSyncActor).mailSyncLease!.id);
@@ -899,7 +907,7 @@ export class MistRepository {
           if (!changeKeys) fail('REVISION_CONFLICT', '公司已被他人更新，本次修改范围过大无法自动合并，请刷新后重试', 409);
           if (changeKeys!.some(key => concurrent.some(other => overlapping(key, other)))) fail('REVISION_CONFLICT', '其他人已修改同一记录，为避免覆盖对方的更新未自动合并，请刷新核对后重试', 409);
         }
-        if (dryRun) throw new MistPreviewOutcome({ revision: row.revision, result: applied.result, events: (applied.state.events ?? []).filter((event: { id: string }) => !previousEvents.has(event.id)).map((event: { text: string }) => event.text), changes: changeKeys ?? null });
+        if (dryRun) throw new MistPreviewOutcome({ revision: row.revision, result: applied.result, events: (applied.state.events ?? []).filter((event: { id: string }) => !previousEvents.has(event.id)).map((event: { text: string }) => taxBaseHidden ? maskTaxBaseText(event.text) : event.text), changes: changeKeys ?? null });
         const nextRevision = row.revision + 1;
         const sourceTask=isAgentActor(prior)?prior.agentTaskLease?.taskId:humanTaskProposal?.taskId;
         if(sourceTask&&!EMAIL_SERVER_COMMAND.test(command?.type??''))await advanceTaskSources(db,actor,workspaceId,sourceTask,changeKeys,nextRevision);

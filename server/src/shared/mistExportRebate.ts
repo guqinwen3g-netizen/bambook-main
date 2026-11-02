@@ -77,6 +77,13 @@ const ledger = (root: Root): ExportRebateState => { root.exportRebate ||= create
 
 /** 退税权限（2026-11 改码）：读 tax:read，登记退税率 / 申报 / 撤回 tax:write，税务核准 tax:approve；到账勾稽是收款核销。 */
 export const REBATE_SCOPES = { read: 'tax:read', write: 'tax:write', approve: 'tax:approve' } as const;
+/**
+ * 申报、核准、到账勾稽的输入与结果直接含应退 / 核准 / 到账金额（预演事件、提议说明、错误提示都会带出），
+ * 另须持有计税依据查看权（sensitive:tax_base），防止不持码账号预演取数或用错误提示二分逼近金额。
+ */
+export const REBATE_TAX_BASE_SCOPE = 'sensitive:tax_base';
+export const REBATE_TAX_BASE_COMMANDS: readonly string[] = ['rebate.claim.file', 'rebate.claim.approve', 'rebate.claim.receive'];
+export const exportRebateExtraPermissions = (command: { type: string }): string[] => REBATE_TAX_BASE_COMMANDS.includes(command.type) ? [REBATE_TAX_BASE_SCOPE] : [];
 export function exportRebateCommandPermission(command: ExportRebateCommand): string {
   if (command.type === 'rebate.claim.receive' || command.type === 'rebate.claim.reverseReceipt') return MIST_FINANCE_SCOPES.reconcile;
   if (command.type === 'rebate.claim.approve') return REBATE_SCOPES.approve;

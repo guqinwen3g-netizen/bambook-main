@@ -84,7 +84,7 @@ describe('M1 计税依据掩码：逐条出口', () => {
     expect(leaks(agentQuery(masked, reader, { type: 'payable_bill' }))).toEqual([]);
   });
 
-  it('Agent 操作审计：原始填写中的税额、税率与核准额不回传；差异按掩码后的投影比对', () => {
+  it('Agent 操作审计：原始填写中的税额、税率与核准额不回传；差异按掩码后的投影比对', async () => {
     const before = structuredClone(state), after = structuredClone(state);
     after.payables!.bills[0].note = '已核对';
     const register = createAgentCommandAudit({ workspaceId: 'w', requestId: 'op', at: '2026-10-17T04:00:00Z', actor: { id: 'reader', name: 'reader' }, source: 'agent', agentSessionId: 's', phase: 'executed',
@@ -97,6 +97,13 @@ describe('M1 计税依据掩码：逐条出口', () => {
     const approve = createAgentCommandAudit({ workspaceId: 'w', requestId: 'op2', at: '2026-10-17T04:00:00Z', actor: { id: 'reader', name: 'reader' }, source: 'agent', agentSessionId: 's', phase: 'proposed',
       command: { type: 'agent.proposal.create', payload: { command: { type: 'rebate.claim.approve', payload: { id, amount: 12000, ref: '核准 01' } } } }, requestedRevision: 0, baseRevision: 0, committedRevision: 1, before: approveBefore, after: approveAfter });
     expect(leaks(view(approve))).toEqual([]);
+    // 提议说明（来自预演事件）随原始填写回传时按同一规则脱敏
+    const reverse = createAgentCommandAudit({ workspaceId: 'w', requestId: 'op3', at: '2026-10-17T04:00:00Z', actor: { id: 'reader', name: 'reader' }, source: 'agent', agentSessionId: 's', phase: 'proposed',
+      command: { type: 'agent.proposal.create', payload: { command: { type: 'rebate.claim.reverseReceipt', payload: { id, entryId: 'e', reason: '勾错' } }, summary: ['冲回退税到账勾稽 RC：流水 BR · 11800.00 CNY（勾错）'] } }, requestedRevision: 0, baseRevision: 0, committedRevision: 1, before: approveBefore, after: approveAfter });
+    expect(leaks(view(reverse))).toEqual([]);
+    const { maskTaxBaseInput } = await import('./access');
+    expect(maskTaxBaseInput('agent.proposal.create', { command: { type: 'payable.x' }, summary: ['11800.00 CNY'] })).toEqual({ command: { type: 'payable.x' }, summary: ['11800.00 CNY'] });
+    expect(maskTaxBaseInput('rebate.claim.reverseReceipt', { summary: ['冲回 11800.00 CNY'], amount: 11800, reason: 'x' })).toEqual({ summary: ['冲回 已隐藏'], reason: 'x' });
     // 持码人仍可看到原始填写
     const holder = actor([...FIN, 'sensitive:tax_base']), holderProject = (s: MistState) => projectState(s, holder, empty).state;
     const holderView = projectAgentAudit(register, { actor: holder, current: after, visible: holderProject(after), project: holderProject, permission: c => mistCommandPermission(c), unrestricted: true, offset: 0, limit: 50, includeCommand: true });
@@ -110,6 +117,23 @@ describe('M1 计税依据掩码：逐条出口', () => {
     const attempt = (can: string[]) => { try { applyMistCommand(structuredClone(s0), { type: 'rebate.claim.receive', payload: { id: claim.id, receiptId: 'r-tax', amount: 50000 } } as MistCommand, ctx(can)); return ''; } catch (e: any) { return String(e.message); } };
     expect(attempt([])).toContain('超过本申报待到账金额'); expect(leaks(attempt([]))).toEqual([]);
     expect(attempt(['sensitive:tax_base'])).toContain('12000.00 CNY');
+  });
+
+  it('读投影中已入库的退税提议说明脱敏，其他提议不动', () => {
+    const s1 = structuredClone(state);
+    s1.agentProposals = [{ id: 'p1', ownerId: 'reader', state: 'pending', command: { type: 'rebate.claim.reverseReceipt', payload: {} }, summary: ['冲回退税到账勾稽：11800.00 CNY'] } as any, { id: 'p2', ownerId: 'reader', state: 'pending', command: { type: 'payable.settlement.confirm', payload: {} }, summary: ['确认结算 110670.00 CNY'] } as any];
+    const out = projectState(s1, actor(FIN), empty).state.agentProposals!;
+    expect(out.find(p => p.id === 'p1')!.summary).toEqual(['冲回退税到账勾稽：已隐藏']);
+    expect(out.find(p => p.id === 'p2')!.summary).toEqual(['确认结算 110670.00 CNY']);
+    expect(projectState(s1, actor([...FIN, 'sensitive:tax_base']), empty).state.agentProposals!.find(p => p.id === 'p1')!.summary[0]).toContain('11800.00 CNY');
+  });
+
+  it('默认岗位中能申报、核准或勾稽退税的岗位都持有 sensitive:tax_base', async () => {
+    const { DEFAULT_ROLE_PERMISSION_MATRIX } = await import('../_shared/rolePermissionMatrix');
+    for (const [role, matrix] of Object.entries(DEFAULT_ROLE_PERMISSION_MATRIX)) {
+      const m = matrix as Record<string, boolean>;
+      if (m['tax:write'] || m['tax:approve'] || (m['invoices:reconcile'] && m['tax:read'])) expect([role, m['sensitive:tax_base']]).toEqual([role, true]);
+    }
   });
 
   it('通知与待办：退税命令不产生含金额的通知或待办', () => {

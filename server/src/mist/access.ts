@@ -52,14 +52,20 @@ export const MIST_READ_SECTIONS: Section[] = [
   { key: 'orders', label: '订单', permissions: ['orders:read'], paths: [['orders'], ['orderLines'], ['internalFabricAllocations'], ['internalDeliveries']], entityTypes: ['order'], views: ['orders', 'orders/detail', 'orders/list', 'orders/new'] },
   { key: 'production', label: '生产', permissions: ['production:read'], paths: [['productions'], ['fulfillment', 'productionFacts']], entityTypes: ['production'], views: ['production-board'] },
 ];
-/** 退税事件文字里的金额（应退 / 核准 / 到账 X CNY）；历史事件已入库，只能在读投影时脱敏。 */
+/** 退税文字里的金额（应退 / 核准 / 到账 X CNY）；历史事件已入库，只能在读投影时脱敏。 */
 const REBATE_EVENT_AMOUNT = /-?\d[\d,]*(?:\.\d+)?\s*CNY/g;
 export const TAX_BASE_MASKED_TEXT = '已隐藏';
+/**
+ * 不持有 sensitive:tax_base 时统一的文字脱敏规则：退税事件、预演事件、提议说明、错误提示里的人民币金额替换为“已隐藏”。
+ * 只对退税命令（rebate.*）及其事件使用；payable.* 事件不含税额（已核对 mistPayables / mistOrderCost / mistOpeningBalance），不纳入。
+ */
+export const maskTaxBaseText = (text: string) => text.replace(REBATE_EVENT_AMOUNT, TAX_BASE_MASKED_TEXT);
+export const isTaxBaseCommand = (type?: string) => typeof type === 'string' && type.startsWith('rebate.');
 /** 命令输入里属于计税依据的字段：专票税额、税率；退税核准额与到账勾稽额。 */
 const TAX_INPUT_KEYS = new Set(['taxAmount', 'taxRate']);
 export function maskTaxBaseInput(type: string, payload: Record<string, unknown>): Record<string, unknown> {
   const rebateAmounts = type.startsWith('rebate.claim.');
-  const strip = (value: unknown): unknown => Array.isArray(value) ? value.map(strip)
+  const strip = (value: unknown): unknown => typeof value === 'string' ? (isTaxBaseCommand(type) ? maskTaxBaseText(value) : value) : Array.isArray(value) ? value.map(strip)
     : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !TAX_INPUT_KEYS.has(key) && !(rebateAmounts && key === 'amount')).map(([key, item]) => [key, strip(item)])) : value;
   return strip(payload) as Record<string, unknown>;
 }
@@ -82,7 +88,9 @@ export function maskTaxBase(next: MistState) {
     ...(c.approved ? { approved: { ...c.approved, amount: 0 } } : {}),
     receipts: (c.receipts || []).map(r => ({ ...r, amount: 0 })),
     lines: (c.lines || []).map(({ parts: _parts, inputTaxCap: _cap, excluded: _excluded, taxLimited: _limited, ...l }) => ({ ...l, taxable: 0, rebate: 0 })) })) };
-  if (next.events?.some(e => e.entityType === 'rebate')) next.events = next.events.map(e => e.entityType === 'rebate' ? { ...e, text: e.text.replace(REBATE_EVENT_AMOUNT, TAX_BASE_MASKED_TEXT) } : e);
+  if (next.events?.some(e => e.entityType === 'rebate')) next.events = next.events.map(e => e.entityType === 'rebate' ? { ...e, text: maskTaxBaseText(e.text) } : e);
+  // Agent 提议说明来自预演事件或调用方填写，历史提议已入库：退税命令的说明按同一规则脱敏。
+  if (next.agentProposals?.some(p => isTaxBaseCommand(p.command?.type))) next.agentProposals = next.agentProposals.map(p => isTaxBaseCommand(p.command?.type) ? { ...p, summary: p.summary.map(maskTaxBaseText) } : p);
   if (refundReceipts.size) {
     if (next.receipts?.some(r => refundReceipts.has(r.id))) next.receipts = next.receipts.filter(r => !refundReceipts.has(r.id));
     if (next.partialReceipts?.some(r => refundReceipts.has(r.id))) next.partialReceipts = next.partialReceipts.filter(r => !refundReceipts.has(r.id));
