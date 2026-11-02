@@ -1,5 +1,5 @@
 /**
- * Agent 提议（2026-10-30 用户定案）：确认 / 删除 / 资金 / 对外发送类命令，Agent 只能提交提议，
+ * Agent 提议（2026-10-30、2026-11-02 用户定案）：除低风险命令外（见 agentCommandRisk），Agent 只能提交提议，
  * 由账号本人在「接着完成」里确认后，按本人身份走完整的命令门禁执行；Agent 不能确认或拒绝。
  * 提议只给本人看（读投影按 ownerId 过滤）；确认时由仓储把 agent.proposal.confirm 换成原命令执行，
  * 并在同一事务里用 markAgentProposalConfirmed 核对命令未变、提议仍待确认后记为已确认。

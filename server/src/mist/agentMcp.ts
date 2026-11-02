@@ -3,7 +3,9 @@
  *
  * - 身份：本人会话签发的委托令牌（x-bambook-delegation）；只读委托只能用读取类工具，可办理委托（mode=operate）还能预演与执行。
  * - 写入只走 repository.preview / repository.execute，与页面同一事务、同一套账号 / 成员 / 权限 / 数据范围 / 业务门禁，不另开后门。
- * - 确认 / 删除 / 资金 / 对外发送类命令（agentCommandSensitivity === 'confirm'）不直接执行：预演通过后记为 Agent 提议，本人确认后才执行（2026-10-30 用户定案）。
+ * - 只有低风险命令（agentCommandRisk === 'low'，且不属于确认 / 删除 / 资金 / 对外发送类）可由可办理委托直接执行；
+ *   中风险、高风险及未登记风险的命令（agentCommandSensitivity === 'confirm'）只能预演后记为 Agent 提议，本人在「接着完成」确认后才执行，
+ *   高风险确认须本人重新输入登录密码（2026-10-30、2026-11-02 用户定案）。
  * - 经 Agent 的写入由仓储在业务事件经办人后标注“经 Agent”，与人工操作同处可查。
  */
 import { randomUUID } from 'node:crypto';
@@ -12,6 +14,7 @@ import type { MistState } from '../shared/mistWorkspace';
 import { isAgentActor } from './agentDelegation';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { AGENT_OBJECT_TYPES, agentGet, agentQuery, agentRelated } from './agentRead';
+import { agentCommandRisk } from '../shared/mistAgentProposals';
 
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 export const MCP_PROTOCOL_VERSIONS: readonly string[] = ['2025-06-18', '2025-03-26'];
@@ -21,15 +24,14 @@ const COMMANDS = new Map<string, CatalogEntry>(MIST_COMMAND_CATALOG.map(entry =>
 
 const CONFIRM_PREFIXES = ['payable.', 'finance.', 'funding.', 'fxrate.', 'lc.', 'rebate.', 'opening.', 'platform.credit.', 'platform.invoice.issue', 'platform.claim.recovery.', 'platform.pricingParams.', 'platform.employee.', 'market.supplier.bank.', 'settings.', 'member.', 'teamScope.', 'handover.', 'email.server.'];
 const CONFIRM_VERB = /(^|\.)(confirm|approve|decide|reject|void|reverse|cancel|delete|remove|close|archive|issue|send|notify|present|refund|waive|withdraw|transition|execute|settle|allocate|assign|release|lock|reconcile|import|restore|purge)/i;
-/** 采购经办提交结算只是交给财务复核，不改应付；其余 payable.* 都须本人确认。 */
-const NORMAL_EXCEPTIONS = new Set(['payable.settlement.submit']);
 const NEVER_VIA_AGENT = new Set(['files.add']);
 
-/** confirm：须本人在系统中确认；normal：可由可办理委托直接执行；blocked：不能经接口执行。 */
+/** confirm：须本人在系统中确认；normal：仅低风险命令，可由可办理委托直接执行；blocked：不能经接口执行。 */
 export function agentCommandSensitivity(type: string): 'normal' | 'confirm' | 'blocked' {
   if (NEVER_VIA_AGENT.has(type) || type.startsWith('email.server.') || type.startsWith('agent.')) return 'blocked';
   if(type==='email.account.save'||type==='email.move'||type==='email.state.retry'||type.startsWith('email.extraction.'))return 'confirm';
-  if (NORMAL_EXCEPTIONS.has(type)) return 'normal';
+  // 中 / 高 / 未登记风险一律须本人确认，不能借委托绕过 ai:write:* 与高风险密码复验。
+  if (agentCommandRisk(type) !== 'low') return 'confirm';
   if (CONFIRM_PREFIXES.some(prefix => type.startsWith(prefix)) || CONFIRM_VERB.test(type.slice(type.indexOf('.') + 1))) return 'confirm';
   return 'normal';
 }
@@ -62,7 +64,7 @@ const TOOLS = [
   {name:'bambook_mail_receiving',description:'读取当前账号可见邮箱的自动收件及已读、星标、移动同步状态、最近成功与待重试信息。不返回邮箱凭据，也不能替本人开启后台授权。',inputSchema:{type:'object',properties:{workspaceId:str('工作区id')},required:['workspaceId']},annotations:{readOnlyHint:true}},
   {name:'bambook_task',description:'查看当前长期任务、保存检查点、缺资料时提问、等到明确时间再继续或结束执行。wait使用delaySeconds或含时区的until二选一，并填写summary；释放执行租约但不延长原到期或重置额度。可选condition指定已完整读过的准确type/id，等待原资料变化或到达最晚时间；等待期间按nextCheckAt再查status，不频繁轮询。唤醒后先重新完整读取requiredRead指定的同一原件再办理或成功报告；最晚时间到不表示业务条件已满足。超时先核对原等待，不能重复延后。question暂停办理并等待本人补充，不能编造价格、日期或依据；先交代准确对象和缺什么。本人补充只是资料，不替代业务审批或发送确认。等待期间停止业务操作，回答后先读status核对。此工具不能代本人开始、恢复或停止任务，不签发或返回连接凭据。超时先读status核对问题，不重复提问。',inputSchema:{type:'object',properties:{workspaceId:str('公司id'),taskId:str('任务id；执行连接可省略'),action:{type:'string',enum:['status','checkpoint','question','wait','finish']},requestId:str('检查点、问题或结果的稳定请求编号'),summary:str('检查点摘要'),delaySeconds:{type:'integer',minimum:30,maximum:86400,description:'等待时长，单位秒；与until二选一'},until:str('包含时区的完整ISO时间；与delaySeconds二选一'),condition:{type:'object',properties:{type:str('已完整读取的业务对象类型'),id:str('原对象准确id')},required:['type','id'],additionalProperties:false,description:'可选：等待此原资料变化，delaySeconds或until作为最晚继续时间；每30秒核对，不能用列表/截断读取代替完整读取。'},question:{...str('需要本人补充的准确问题，最多2000字'),maxLength:2000},outcome:{type:'string',enum:['succeeded','failed']},result:str('执行结论；不代表正式业务审批完成')},required:['workspaceId','action']},annotations:{idempotentHint:true}},
   { name: 'bambook_preview', description: '预演一条命令：执行全部权限与业务校验后回滚，返回将产生的结果和业务事件，不保存任何数据。执行前先预演。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, expectedRevision:{type:'integer',minimum:0,description:'已读取来源的版本，提供后防止覆盖期间更新'} }, required: ['workspaceId', 'command'] }, annotations: { readOnlyHint: true } },
-  { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。每项操作生成一个 requestId，超时重试沿用原编号。确认 / 删除 / 资金 / 对外发送类命令不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, expectedRevision:{type:'integer',minimum:0,description:'已读取来源的版本'}, requestId: { ...str('幂等请求编号；同一操作重试必须沿用，新的操作须用新编号'), minLength: 1, maxLength: 116 } }, required: ['workspaceId', 'command', 'requestId'] }, annotations: { destructiveHint: true, idempotentHint: true } },
+  { name: 'bambook_execute', description: '执行一条命令（与页面操作同一规则并留审计）。每项操作生成一个 requestId，超时重试沿用原编号。只有低风险命令（via 为 normal）直接执行；其余命令（via 为 confirm）不会直接执行：预演通过后记为提议，用户在「接着完成」里确认后才生效，请告知用户去确认。', inputSchema: { type: 'object', properties: { workspaceId: str('工作区 id'), command: commandSchema, expectedRevision:{type:'integer',minimum:0,description:'已读取来源的版本'}, requestId: { ...str('幂等请求编号；同一操作重试必须沿用，新的操作须用新编号'), minLength: 1, maxLength: 116 } }, required: ['workspaceId', 'command', 'requestId'] }, annotations: { destructiveHint: true, idempotentHint: true } },
 ];
 
 class ToolInputError extends Error {}
@@ -153,7 +155,7 @@ export async function handleMcpMessage(repository: McpRepository, actor: TokenPa
   if (id === undefined) return null;
   switch (method) {
     case 'initialize': return { jsonrpc: '2.0', id, result: { protocolVersion: typeof params.protocolVersion === 'string' && MCP_PROTOCOL_VERSIONS.includes(params.protocolVersion) ? params.protocolVersion : MCP_PROTOCOL_VERSION, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'bambook-mist', version: '1' },
-      instructions: '先用 bambook_workspaces 取得工作区，再查询；写入前先 bambook_preview。确认、删除、资金、对外发送类命令执行后只会成为提议，请告诉用户到「接着完成」里确认。'+MCP_SOURCE_RULES } };
+      instructions: '先用 bambook_workspaces 取得工作区，再查询；写入前先 bambook_preview。只有低风险命令（bambook_commands 中 via 为 normal）会直接执行；其余命令执行后只会成为提议，请告诉用户到「接着完成」里确认。'+MCP_SOURCE_RULES } };
     case 'ping': return { jsonrpc: '2.0', id, result: {} };
     case 'tools/list': return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
     case 'tools/call': {

@@ -149,3 +149,15 @@ it('retains read-only service ceilings when the platform model asks to write',as
  let index=0,mail='';const complete=vi.fn(async()=>[tool('bambook_execute',{command:{type:'email.flag',payload:{id:mail,flag:'starred',value:true}}}),tool('bambook_get',{type:'email',id:mail}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'只读权限，未修改邮件。'})][index++]);
  const f=await fixture(complete,{mode:'read'});mail=f.workspace.state.email.messages[0].id;f.worker.start(3_600_000);const task=await f.create('platform');await f.drain();expect((await f.current(task.id)).state).toBe('succeeded');expect((await f.human.get(f.base).expect(200)).body.workspace.state.email).toEqual(f.workspace.state.email);
 });
+it('turns a business command the model executes into an owner proposal, waits for confirmation and then continues',async()=>{
+ // customer.update 属中风险：平台执行器经 bambook_execute 只能得到 awaiting_confirmation 提议，本人确认后任务继续，不能直接改客户。
+ let index=0,customer='';const complete=vi.fn(async()=>[
+  tool('bambook_get',{type:'customer',id:customer}),tool('bambook_execute',{command:{type:'customer.update',payload:{id:customer,patch:{terms:'T/T 30% 预付'}}}}),tool('bambook_get',{type:'customer',id:customer}),tool('bambook_task',{action:'finish',outcome:'succeeded',result:'本人确认后已核对付款条件。'})
+ ][index++]);
+ const f=await fixture(complete);customer=f.workspace.state.customers[0].id;const original=f.workspace.state.customers[0].terms;f.worker.start(3_600_000);const task=await f.create('platform');
+ await f.drain();let state=await f.current(task.id);expect(state.state).toBe('waiting_human');expect(state.waitingProposalIds).toHaveLength(1);expect(complete).toHaveBeenCalledTimes(2);
+ let ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe(original);
+ expect(ws.agentProposals.find((p:any)=>p.id===state.waitingProposalIds[0])).toMatchObject({state:'pending',taskId:task.id,command:{type:'customer.update'}});
+ await f.command('agent.proposal.confirm',{id:state.waitingProposalIds[0]});await f.drain();state=await f.current(task.id);expect(state.state).toBe('succeeded');expect(complete).toHaveBeenCalledTimes(4);
+ ws=(await f.human.get(f.base).expect(200)).body.workspace.state;expect(ws.customers.find((c:any)=>c.id===customer).terms).toBe('T/T 30% 预付');
+});
