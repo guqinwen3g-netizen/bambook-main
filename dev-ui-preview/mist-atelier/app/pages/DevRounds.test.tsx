@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DevDetailPage } from './DevDetailPage';
-import { newRoundError, previewRoundLabels } from './DevRounds';
+import { newRoundError, previewRoundLabels, roundTasks } from './DevRounds';
 import { applyMistCommand, createMistState, type MistCommand, type MistContext, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { Nav } from '../nav';
 import { developmentNoticeContent, developmentNoticeFingerprint } from '../../../../server/src/shared/mistDevelopmentNotice';
@@ -236,3 +236,15 @@ describe('BB-DEV-11 round timeline and multi-version comparison',()=>{
     expect(document.querySelector('#mist-dev-compare')!.textContent).not.toContain('另一案');
   });
 });
+
+describe('staged fabric new round',()=>{
+  it('validates a staged round on the chain, sends one output task and previews one version',()=>{
+    const fabricDev={values:{domain:'fabric',sampleForm:'米样',sampleUnit:'米',sampleQuantity:3},id:'d'} as any;
+    const base={factories:['w','d'],requirements:'拉毛加重',fileIds:[],referenceVersionIds:[],targetDate:'2026-11-20'};
+    expect(newRoundError({...base,stages:[{factoryId:'w',process:'织造'},{factoryId:'',process:'染整'}]},fabricDev,1)).toBe('请为每道工序选择工厂');
+    expect(newRoundError({...base,stages:[{factoryId:'w',process:'染整'},{factoryId:'d',process:'织造'}]},fabricDev,1)).toContain('不能是织造');
+    expect(newRoundError({...base,stages:[{factoryId:'w',process:'织造'},{factoryId:'d',process:'染整'}],factoryTasks:roundTasks(fabricDev,{...base,stages:[{factoryId:'w',process:'织造'},{factoryId:'d',process:'染整'}]},{})},fabricDev)).toBeNull();
+    expect(roundTasks(fabricDev,{...base,stages:[{factoryId:'w',process:'织造'},{factoryId:'d',process:'染整'}]},{}).map(task=>task.factory)).toEqual(['d']);
+  });
+});
+

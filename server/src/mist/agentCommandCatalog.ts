@@ -176,8 +176,10 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "development.round.create",
-  "payload": "{ devId: string; factories: string[]; requirements: string; fileIds?: string[]; referenceVersionIds?: string[]; targetDate: string; /** QC 不通过后“重新打样”：记录来源版本的处理决定 */ resampleFromVersionId?: string; /** 逐厂差异要求、样品形态、数量和单位、要求日期；缺省按开发案计划样品与本轮目标日期 */ factoryTasks?: Array<Partial<FactoryTaskInput> & { factory: string }> }",
+  "payload": "{ devId: string; factories: string[]; requirements: string; fileIds?: string[]; referenceVersionIds?: string[]; targetDate: string; /** QC 不通过后“重新打样”：记录来源版本的处理决定 */ resampleFromVersionId?: string; /** 面料分段委外的工序链；给出时 factories 须与工序链工厂一致，本轮只出一个版本 */ stages?: DevStagePlan[]; /** 逐厂差异要求、样品形态、数量和单位、要求日期；缺省按开发案计划样品与本轮目标日期 */ factoryTasks?: Array<Partial<FactoryTaskInput> & { factory: string }> }",
   "types": {
+   "DevStagePlan": "{ factoryId: string; process: DevStageProcess }",
+   "DevStageProcess": "typeof DEV_STAGE_PROCESSES[number]",
    "FactoryTaskInput": "{ factory: string; extraRequirements: string; sampleForm: string; sampleQuantity: number; sampleUnit: string; dueDate: string }"
   },
   "source": "server/src/shared/mistWorkspace.ts"
@@ -217,23 +219,30 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "development.saveDraft",
   "payload": "{ draftId?: string; values: DevelopmentValues; fileIds: string[] }",
   "types": {
-   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; }",
+   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
    "DevelopmentDomain": "'garment' | 'fabric'",
    "FabricDevelopmentRequirements": "{composition:string;weightValue:string;weightUnit:string;widthValue:string;widthUnit:string;yarn:string;weave:string;usage:string;handle:string;finish:string;performance:string}",
    "DevelopmentInitiator": "'customer' | 'internal'",
-   "DevelopmentRequestType": "'replicate' | 'design' | 'other'"
+   "DevelopmentRequestType": "'replicate' | 'design' | 'other'",
+   "DevStagePlan": "{ factoryId: string; process: DevStageProcess }"
   },
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "development.stage.handover",
+  "payload": "{ devId: string; versionId: string; stageIndex: number; quantity: number; unit: string; date: string; note: string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
   "type": "development.submit",
   "payload": "{ draftId?: string; values: DevelopmentValues; fileIds: string[] }",
   "types": {
-   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; }",
+   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
    "DevelopmentDomain": "'garment' | 'fabric'",
    "FabricDevelopmentRequirements": "{composition:string;weightValue:string;weightUnit:string;widthValue:string;widthUnit:string;yarn:string;weave:string;usage:string;handle:string;finish:string;performance:string}",
    "DevelopmentInitiator": "'customer' | 'internal'",
-   "DevelopmentRequestType": "'replicate' | 'design' | 'other'"
+   "DevelopmentRequestType": "'replicate' | 'design' | 'other'",
+   "DevStagePlan": "{ factoryId: string; process: DevStageProcess }"
   },
   "source": "server/src/shared/mistWorkspace.ts"
  },
@@ -241,11 +250,12 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "development.update",
   "payload": "{ devId: string; patch: Partial<DevelopmentValues> }",
   "types": {
-   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; }",
+   "DevelopmentValues": "{ domain?:DevelopmentDomain; sampleForm?:string; sampleUnit?:string; targetCurrency?:string; targetUnit?:string; fabricRequirements?:FabricDevelopmentRequirements; name: string; customer: string; style: string; season: string; category: string; kind: 'new' | 'rev' | 'copy'; fabric: string; color: string; target: string; sizeBase: string; goal: string; factories: string[]; due: string; collaborators: string[]; sampleQuantity: number; sourceDevId?: string; sourceVersionId?: string; initiator?: DevelopmentInitiator; requestType?: DevelopmentRequestType; requestNote?: string; requester?: string; requesterId?: string; charged?: boolean; stages?: DevStagePlan[]; }",
    "DevelopmentDomain": "'garment' | 'fabric'",
    "FabricDevelopmentRequirements": "{composition:string;weightValue:string;weightUnit:string;widthValue:string;widthUnit:string;yarn:string;weave:string;usage:string;handle:string;finish:string;performance:string}",
    "DevelopmentInitiator": "'customer' | 'internal'",
-   "DevelopmentRequestType": "'replicate' | 'design' | 'other'"
+   "DevelopmentRequestType": "'replicate' | 'design' | 'other'",
+   "DevStagePlan": "{ factoryId: string; process: DevStageProcess }"
   },
   "source": "server/src/shared/mistWorkspace.ts"
  },

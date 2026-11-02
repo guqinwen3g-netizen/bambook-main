@@ -11,9 +11,11 @@ import { ImageRoleTag, imageRole, imageUploadTitle } from './modules/PrimaryImag
 import { versionTimelineStatus } from '../../../../server/src/shared/mistDevelopmentCompare';
 import { FileName } from '../runtime/files';
 import { OptionInput } from './OptionInput';
+import { DevSampleModeChoice, DevStageChainEditor, emptyStagePlan } from './DevStageChain';
+import { devStageChainText, devStagePlanError, type DevStagePlan } from '../../../../server/src/shared/mistDevelopmentStages';
 import { FABRIC_SAMPLE_FORMS, GARMENT_SAMPLE_FORMS, SAMPLE_UNITS, sampleFormUnit } from '../runtime/tradeOptions';
 
-export type NewRoundInput = { factories: string[]; requirements: string; fileIds: string[]; referenceVersionIds: string[]; targetDate: string; resampleFromVersionId?: string; factoryTasks?: FactoryTaskInput[] };
+export type NewRoundInput = { factories: string[]; requirements: string; fileIds: string[]; referenceVersionIds: string[]; targetDate: string; resampleFromVersionId?: string; factoryTasks?: FactoryTaskInput[]; stages?: DevStagePlan[] };
 export const NEW_ROUND_STEPS = ['参考版本', '参与工厂', '共同要求', '逐厂要求'] as const;
 
 /** 版本 QC 标记：有保留通过显示“需关注”，不通过及其处理结果分别标出。 */
@@ -40,7 +42,10 @@ export function previewRoundLabels(state: MistState, dev: MistDev, factories: st
 }
 /** 分步校验：返回第 step 步（0 起）之前及本步的第一个问题；不传 step 时校验全部。 */
 export function newRoundError(input: NewRoundInput, dev?: MistDev, step = NEW_ROUND_STEPS.length - 1, nameOf: (id: string) => string = id => id): string | null {
-  if (step >= 1) {
+  if (step >= 1 && input.stages) {
+    const problem = input.stages.some(row => !row.factoryId) ? '请为每道工序选择工厂' : devStagePlanError(input.stages);
+    if (problem) return problem;
+  } else if (step >= 1) {
     if (!input.factories.length) return '请至少选择一家参与工厂';
     const duplicated = duplicateRoundFactories(input.factories);
     if (duplicated.length) return `同一轮内工厂不能重复：${duplicated.map(nameOf).join('、')}`;
@@ -53,8 +58,10 @@ export function newRoundError(input: NewRoundInput, dev?: MistDev, step = NEW_RO
   return null;
 }
 /** 本轮各工厂任务：已填写的沿用，未填写的按开发案计划样品与本轮目标日期。 */
-export function roundTasks(dev: MistDev, form: Pick<NewRoundInput, 'factories' | 'targetDate'>, edited: Record<string, FactoryTaskInput>): FactoryTaskInput[] {
-  return form.factories.map(factory => edited[factory] || defaultFactoryTask(dev, factory, form.targetDate));
+export function roundTasks(dev: MistDev, form: Pick<NewRoundInput, 'factories' | 'targetDate' | 'stages'>, edited: Record<string, FactoryTaskInput>): FactoryTaskInput[] {
+  // A staged round sends the sample task only to the last mill.
+  const outputs = form.stages?.length ? [form.stages[form.stages.length - 1].factoryId].filter(Boolean) : form.factories;
+  return outputs.map(factory => edited[factory] || defaultFactoryTask(dev, factory, form.targetDate));
 }
 const taskSummary = (task: NonNullable<MistVersion['task']>) => `${task.sampleForm} ${task.sampleQuantity} ${task.sampleUnit} · 要求 ${task.dueDate}`;
 
@@ -74,7 +81,7 @@ export function DevRoundsCard({ state, dev, versionId, busy, onSelect, onCreate,
         const status = versionTimelineStatus(version), current = versionId === version.id;
         return <div key={version.id} role="listitem" className="mist-rtl-card" data-version={version.label} aria-current={current || undefined}>
           <button type="button" className="mist-rtl-open" aria-pressed={current} disabled={busy} onClick={() => onSelect(version.id)}>
-            <Mono>{uiText(version.label)}</Mono><span className="mist-rtl-factory" title={uiText(version.factory)}>{version.factory || '待安排工厂'}</span>
+            <Mono>{uiText(version.label)}</Mono><span className="mist-rtl-factory" title={uiText(version.stages ? devStageChainText(version.stages) : version.factory)}>{version.stages ? version.stages.map(stage => stage.factory).join(' → ') : version.factory || '待安排工厂'}</span>
             <span className="mist-rtl-tags"><Pill tone={status.tone}>{uiText(status.label)}</Pill>{status.flags.map(flag => <Pill key={flag.label} tone={flag.tone}>{uiText(flag.label)}</Pill>)}</span>
           </button>
           {onToggleCompare && <Checkbox checked={compareIds.includes(version.id)} disabled={busy} onChange={checked => onToggleCompare(version.id, checked)} label={<span aria-label={ui`对比 ${version.label}`}>{uiText("对比")}</span>} />}
@@ -113,10 +120,10 @@ export function NewRoundDialog({ open, state, dev, busy, failure, factoryOptions
   const toggle = (key: 'factories' | 'referenceVersionIds', value: string, checked: boolean) => setForm(previous => ({ ...previous, [key]: checked ? [...previous[key], value] : previous[key].filter(item => item !== value) }));
   const tasks = roundTasks(dev, form, edited), input: NewRoundInput = { ...form, factoryTasks: tasks };
   const setTask = (task: FactoryTaskInput, patch: Partial<FactoryTaskInput>) => setEdited(previous => ({ ...previous, [task.factory]: { ...task, ...patch } }));
-  const blocker = developmentRoundBlocker(state, dev), preview = previewRoundLabels(state, dev, form.factories);
+  const blocker = developmentRoundBlocker(state, dev), preview = previewRoundLabels(state, dev, form.stages?.length ? [form.stages[form.stages.length - 1].factoryId].filter(Boolean) : form.factories);
   const stepError = (index: number) => blocker || newRoundError(input, dev, index, id => factoryLabel(state, id)), error = stepError(step), last = step === NEW_ROUND_STEPS.length - 1;
   const reachable = (index: number) => index <= step || NEW_ROUND_STEPS.slice(0, index).every((_, previous) => !stepError(previous));
-  return <Dialog open={open} onClose={() => !busy && onClose()} width={760} icon={Layers} title={ui`开启第 ${nextRoundNumber(state, dev)} 轮`} description={uiText("每家参与工厂在本轮形成一个版本；之前各轮记录保持不变。")} footer={<>
+  return <Dialog open={open} onClose={() => !busy && onClose()} width={760} icon={Layers} title={ui`开启第 ${nextRoundNumber(state, dev)} 轮`} description={uiText(form.stages ? '工序链只由末道工厂出一个版本；之前各轮记录保持不变。' : '每家参与工厂在本轮形成一个版本；之前各轮记录保持不变。')} footer={<>
     <Button variant="quiet" disabled={busy} onClick={onClose}>{uiText("取消")}</Button>
     {step > 0 && <Button disabled={busy} onClick={() => setStep(step - 1)}>{uiText("上一步")}</Button>}
     {last ? <Button variant="primary" loading={busy} disabled={!!error} onClick={() => onSubmit(input)}>{uiText(error ? error : `建立 ${preview.join('、')}`)}</Button>
@@ -129,7 +136,12 @@ export function NewRoundDialog({ open, state, dev, busy, failure, factoryOptions
         {versions.map(version => <Checkbox key={version!.id} checked={form.referenceVersionIds.includes(version!.id)} label={uiText(`${version!.label} · ${version!.factory}`)} onChange={checked => toggle('referenceVersionIds', version!.id, checked)} />)}
         {!versions.length && <p className="mist-note">{uiText("本案尚无可参考版本。")}</p>}</div>
     </FormGrid>}
-    {step === 1 && <FormGrid>
+    {step === 1 && fabric && <Field label={uiText('打样方式')} full><DevSampleModeChoice value={form.stages ? 'staged' : 'parallel'} disabled={!!form.resampleFromVersionId} onChange={mode => setForm(previous => { const next = { ...previous, factories: [] as string[] }; if (mode === 'staged') next.stages = previous.stages || emptyStagePlan(); else delete next.stages; return next; })} /></Field>}
+    {step === 1 && form.stages && <FormGrid>
+      <Field label={uiText('工序链')} full><DevStageChainEditor state={state} value={form.stages} options={factoryOptions} onChange={stages => setForm(previous => ({ ...previous, stages, factories: stages.map(row => row.factoryId).filter(Boolean) }))} /></Field>
+      <Field label={uiText("将建立的版本")}><p className="mist-note">{uiText(preview.length ? preview.join('、') : '选择工厂后显示')}</p></Field>
+    </FormGrid>}
+    {step === 1 && !form.stages && <FormGrid>
       <div className="mist-field" data-full="true" role="group" aria-label={uiText("参与工厂")}><span className="mist-field-label">{uiText("参与工厂（可留用、可新增）")}</span>
         {factoryOptions.map(factory => { const letter = caseFactoryLetters(state, dev)[factory.id]; return <Checkbox key={factory.id} checked={form.factories.includes(factory.id)} disabled={factory.unavailable && !form.factories.includes(factory.id)} label={uiText(`${factory.name}${letter ? ` · 字母 ${letter}` : ' · 首次参与'}${factory.unavailable ? ' · 当前不可用' : ''}`)} onChange={checked => toggle('factories', factory.id, checked)} />; })}
         {!factoryOptions.length && <p className="mist-note">{uiText("尚无实际工厂，请先添加。")}</p>}<Button onClick={onAddFactory}>{uiText("新增工厂")}</Button></div>

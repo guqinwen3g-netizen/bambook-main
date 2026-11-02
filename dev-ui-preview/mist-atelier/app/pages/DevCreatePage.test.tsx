@@ -126,6 +126,24 @@ describe('explicit fabric development form',()=>{
   expect(host.textContent).toContain('1.25 米 / 工厂');expect(host.textContent).toContain('2.50 EUR / 码');await click('创建开发案');
   expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'development.submit',payload:expect.objectContaining({values:expect.objectContaining({domain:'fabric',category:'原始斜纹分类',style:'',sizeBase:'',sampleForm:'米样',sampleUnit:'米',sampleQuantity:1.25,targetCurrency:'EUR',targetUnit:'码',factories:['fabric-factory'],fabricRequirements:expect.objectContaining({weightValue:'250',weightUnit:'g/m²'})})})}));
  });
+ it('creates a staged fabric plan whose chain decides the factories and the output mill',async()=>{
+  bridge.current.state.market.suppliers.push({id:'weaver',name:'吴江织造',type:'织造',capabilities:'梭织',status:'active'},{id:'dyer',name:'盛泽染整',type:'染整',capabilities:'匹染',status:'active'});
+  await mount(undefined,'customer-a','fabric');await fill('开发对象名称','棉弹斜纹拉毛');await fill('面料分类','梭织');await pickType();await click('下一步');await click('下一步');
+  const radio=(title:string)=>[...host.querySelectorAll('[role="radio"]')].find(item=>item.textContent?.startsWith(title)) as HTMLElement;
+  await act(async()=>radio('分段委外').click());
+  const pick=async(name:string,value:string)=>{const select=host.querySelector(`select[aria-label="${name}"]`) as HTMLSelectElement;expect(select,name).toBeTruthy();await act(async()=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));});return select;};
+  await pick('第 1 道工厂','weaver');await pick('第 2 道工厂','dyer');
+  expect((host.querySelector('select[aria-label="第 1 道工序"]') as HTMLSelectElement).value).toBe('织造');
+  expect((host.querySelector('select[aria-label="第 2 道工序"]') as HTMLSelectElement).value).toBe('染整');
+  await fill('首样数量','3');await fill('目标日期','2026-11-01');await click('下一步');await click('下一步');
+  expect(host.textContent).toContain('吴江织造（织造） → 盛泽染整（染整 · 出样）');await click('创建开发案');
+  expect(bridge.current.run).toHaveBeenCalledWith(expect.objectContaining({type:'development.submit',payload:expect.objectContaining({values:expect.objectContaining({factories:['weaver','dyer'],stages:[{factoryId:'weaver',process:'织造'},{factoryId:'dyer',process:'染整'}]})})}));
+ });
+ it('blocks a staged plan with a missing mill or a weaving output stage',()=>{
+  const base={...values(),domain:'fabric' as const,sampleForm:'米样',sampleUnit:'米'};
+  expect(developmentFormErrors({...base,stages:[{factoryId:'a',process:'织造'},{factoryId:'',process:'染整'}]} as any,'plan').factories).toBe('请为每道工序选择工厂');
+  expect(developmentFormErrors({...base,stages:[{factoryId:'a',process:'染整'},{factoryId:'b',process:'织造'}]} as any,'plan').factories).toContain('不能是织造');
+ });
  it('preserves fabric draft domain and requirements even when re-entering without a route selector',async()=>{
   const fv={...savedValues(),domain:'fabric',category:'原始分类',sampleForm:'色样',sampleUnit:'份',fabricRequirements:{composition:'待工厂分析',weightValue:'',weightUnit:'',widthValue:'',widthUnit:'',yarn:'待工厂分析',weave:'平纹',usage:'',handle:'',finish:'',performance:''}};
   bridge.current.state.drafts=[{id:'fabric-draft',values:fv,fileIds:[]}];await mount('fabric-draft');expect(host.textContent).toContain('面料开发');await click('下一步');expect(host.textContent).toContain('面料目标与规格');expect(host.textContent).not.toContain('尺码基准');
