@@ -344,8 +344,6 @@ export type MistCommand = AgentTaskCommand | AgentProposalCommand | InternalFabr
   | { type: 'development.charge.void'; payload: { devId: string; chargeId: string; reason: string } }
   | { type: 'development.billing.withdraw'; payload: { devId: string; reason: string } }
   | { type: 'development.billing.issue'; payload: { devId: string; chargeIds: string[]; number: string; due: string; fileIds: string[] } }
-  | { type: 'development.billing.request'; payload: { devId: string } }
-  | { type: 'finance.developmentInvoice.issue'; payload: { devId: string; requestId: string; due: string } }
   | { type: 'development.version.recordMinor'; payload: { devId: string; versionId: string; change: string } }
   | { type: 'development.close'; payload: { devId: string; kind: 'archived' | 'cancelled'; reason: string } }
   | { type: 'development.qc.decide'; payload: { devId: string; versionId: string; decision: 'rework' | 'abandon'; note: string } }
@@ -811,7 +809,6 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type==='development.recordQc')return command.payload.domain==='fabric'?'qc:fabric_chain:write':'qc:garment_chain:write';
   if(command.type.startsWith('development.')||command.type.startsWith('fabric.')||command.type==='files.add')return 'products:write';
   if(command.type.startsWith('order.')||command.type.startsWith('production.'))return 'orders:write';
-  if(command.type==='finance.developmentInvoice.issue')return MIST_FINANCE_SCOPES.invoice;
   if(command.type==='finance.receivable.confirm'||command.type==='finance.receivable.reject')return MIST_FINANCE_SCOPES.invoice;
   if(command.type==='finance.importReceipts'||command.type==='finance.payment.save'||command.type==='finance.payment.reverse'||command.type==='finance.account.save'||command.type==='finance.account.assign'||command.type==='finance.account.close'||command.type==='finance.account.reopen'||command.type.startsWith('finance.fx.'))return MIST_FINANCE_SCOPES.voucher;
   if(command.type==='finance.reconcile'||command.type==='finance.acceptSuggestions'||command.type==='finance.allocation.reverse'||command.type==='finance.receivable.bankCharge'||command.type==='finance.receivable.bankCharge.reverse')return MIST_FINANCE_SCOPES.reconcile;
@@ -1181,10 +1178,6 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       dev.updatedAt=context.now;event(state,context,'development',dev.id,'开具开发发票 '+number,{view:'development/detail',id:dev.id});
       result={id,devId:dev.id};break;
     }
-    case 'development.billing.request':
-      throw new MistCommandError('PRECONDITION','公司支出不能直接发起开票，请按客户收费项开具发票');
-    case 'finance.developmentInvoice.issue':
-      throw new MistCommandError('PRECONDITION','开发发票由业务员开具，财务只确认应收');
     case 'development.version.recordMinor': {
       const [dev,parent]=versionOf(state,p.devId,p.versionId), blocked=minorVersionBlocker(state,dev,parent);
       if(blocked)throw new MistCommandError('PRECONDITION',blocked);
@@ -1542,6 +1535,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
 /** Read-time additive defaults preserve existing records; the next command persists them. */
 export function normalizeMistState(state:MistState,context:MistContext):void {
   state.internalFabricAllocations ||= [];
+  // 旧事件曾直接记命令类型，这里只把历史事件文字翻成中文；market.quotation.send / respond 已无对应命令，保留仅为旧事件显示。
   const eventLabels:Record<string,string>={
     'market.import':'批量导入基础资料','opening.receivable.import':'导入期初应收','opening.receivable.void':'作废期初应收','opening.payable.import':'导入期初应付','market.supplier.save':'保存供应商档案','market.supplier.status':'更新供应商合作状态',
     'market.relation.save':'保存关系档案','market.contact.save':'保存联系人',

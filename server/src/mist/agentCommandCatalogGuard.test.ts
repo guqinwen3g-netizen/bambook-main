@@ -4,6 +4,7 @@ import path from 'node:path';
 import ts from 'typescript';
 import { MIST_COMMAND_CATALOG } from './agentCommandCatalog';
 import { mistCommandPermission, type MistCommand } from '../shared/mistWorkspace';
+import { AGENT_EXCLUDED_COMMANDS } from '../../../scripts/gen-mist-command-catalog.mjs';
 
 /**
  * 命令目录守卫：目录与 server/src/shared 的命令声明、处理分支、权限映射三者不得漂移。
@@ -64,7 +65,7 @@ const PERMISSION_PAYLOAD: Record<string, Record<string, unknown>> = {
 describe('命令目录守卫', () => {
   it('目录与 shared 中声明的命令完全一致（包括 type 联合写法）', () => {
     const declared = declaredCommandTypes();
-    expect([...declared].filter(t => !catalogTypes.includes(t)).sort()).toEqual([]);
+    expect([...declared].filter(t => !catalogTypes.includes(t) && !Object.hasOwn(AGENT_EXCLUDED_COMMANDS, t)).sort()).toEqual([]);
     expect(catalogTypes.filter(t => !declared.has(t))).toEqual([]);
   });
   it('目录中每个命令在 shared 都有处理分支', () => {
@@ -83,5 +84,11 @@ describe('命令目录守卫', () => {
     }
     expect(problems).toEqual([]);
     expect(Object.keys(NULL_PERMISSION_ALLOWLIST).filter(t => !catalogTypes.includes(t))).toEqual([]);
+  });
+  it('永远失败或已停用的命令不进入目录', () => {
+    for (const retired of ['development.billing.request', 'finance.developmentInvoice.issue', 'platform.goods.transition', 'market.quotation.send', 'market.quotation.respond']) expect(catalogTypes).not.toContain(retired);
+  });
+  it('源码保留但不登记的命令写明原因，且确实不在目录', () => {
+    for (const [type, reason] of Object.entries(AGENT_EXCLUDED_COMMANDS)) { expect(declaredCommandTypes().has(type)).toBe(true); expect(String(reason).length).toBeGreaterThan(10); expect(catalogTypes).not.toContain(type); }
   });
 });

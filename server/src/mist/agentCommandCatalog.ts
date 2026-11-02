@@ -102,11 +102,6 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
-  "type": "development.billing.request",
-  "payload": "{ devId: string }",
-  "source": "server/src/shared/mistWorkspace.ts"
- },
- {
   "type": "development.billing.withdraw",
   "payload": "{ devId: string; reason: string }",
   "source": "server/src/shared/mistWorkspace.ts"
@@ -464,11 +459,6 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  {
   "type": "finance.allocation.reverse",
   "payload": "{ allocationId: string; reason: string }",
-  "source": "server/src/shared/mistWorkspace.ts"
- },
- {
-  "type": "finance.developmentInvoice.issue",
-  "payload": "{ devId: string; requestId: string; due: string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
@@ -1826,27 +1816,6 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  {
   "type": "platform.employee.save",
   "payload": "{id?:string;name:string;department:string;position:string;contact:string;startDate:string;note:string;active:boolean}",
-  "source": "server/src/shared/mistPlatform.ts"
- },
- {
-  "type": "platform.goods.transition",
-  "payload": "{id:string;state:PlatformClaimGoods['state'];basis:string;fileIds:string[]}",
-  "types": {
-   "PlatformClaimGoods": "{id:string;claimId:string;dispositionId:string;orderId:string;quantity:number;unit:string;destination:'Scrap'|'Replace'|'Repair';source?:PlatformClaimGoodsSource;returnReceiptId?:string;receivedQuantity?:number;repairs?:ClaimRepairJob[];repairDispatches?:ClaimRepairDispatch[];state:'AwaitingReturn'|'PartiallyReceived'|'Received'|'Scrapped'|'Repairing'|'Ready'|'Dispatched'|'HandedBack';events:Array<{at:string;actor:string;action:string;basis:string;fileIds:string[]}>}",
-   "PlatformClaimGoodsSource": "{schemaVersion:1;claimId:string;dispositionId:string;invoiceId:string;documentId:string;orderId:string;lineId:string;shipmentId:string;productionId:string;customerId:string;currency:string;name:string;style:string;unit:string;quantity:number;unitPrice:number;sourceQuantity:number;sourceAmount:number;orderApprovedVersion:number}",
-   "ClaimRepairJob": "RepairActor&{id:string;receivedEventId:string;stockId:string;batchNumber:string;quantity:number;unit:string;domain:'fabric'|'garment';warehouseId:string;place:string;supplierId:string;supplierName:string;externalDispatchId?:string;technician:string;completedAt:string;basis:string;fileIds:string[];qc?:RepairActor&{id:string;result:'pass'|'fail';checkedAt:string;basis:string;fileIds:string[]};handback?:RepairActor&{id:string;date:string;customerId:string;recipient:string;reference:string;basis:string;fileIds:string[];unlockMovementId:string;outboundMovementId:string}}",
-   "ClaimRepairDispatch": "RepairActor&{id:string;receivedEventId:string;stockId:string;batchNumber:string;originWarehouseId:string;originWarehouseName:string;originLocation:string;quantity:number;unit:string;supplierId:string;supplierName:string;warehouseId:string;warehouseName:string;address:string;location:string;date:string;recipient:string;reference:string;basis:string;fileIds:string[];movementId:string;returned?:RepairActor&{id:string;date:string;warehouseId:string;warehouseName:string;location:string;recipient:string;reference:string;basis:string;fileIds:string[];movementId:string}}"
-  },
-  "source": "server/src/shared/mistPlatform.ts"
- },
- {
-  "type": "platform.invoice.issue",
-  "payload": "{id:string}",
-  "source": "server/src/shared/mistPlatform.ts"
- },
- {
-  "type": "platform.invoice.save",
-  "payload": "{id?:string;orderId:string;due:string;amount:number;note:string}",
   "source": "server/src/shared/mistPlatform.ts"
  },
  {

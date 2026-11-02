@@ -80,7 +80,7 @@ describe('professional Claims source, common CN and return integration',()=>{
  });
  it.each([true,false])('refuses status-only fulfillment with accurateSource=%s and preserves saved history',hasSource=>{
   const f=fixture(),d=f.disposition(15,1);f.approve(d);f.execute(d);const goods=f.state.platform.claimGoods[0];if(!hasSource)delete goods.source;const original=structuredClone(f.state);
-  for(const state of ['Received','PartiallyReceived','Scrapped','Repairing','Ready','Dispatched'] as const)expect(()=>f.run({type:'platform.goods.transition',payload:{id:goods.id,state,basis:'备注不能制造仓储或放行事实',fileIds:['po']}})).toThrow(hasSource?/实际库存/:/历史实物来源尚未核实/);
+  for(const state of ['Received','PartiallyReceived','Scrapped','Repairing','Ready','Dispatched'] as const)expect(()=>f.run({type:'platform.goods.transition',payload:{id:goods.id,state,basis:'备注不能制造仓储或放行事实',fileIds:['po']}} as any)).toThrow(/未知平台操作/);
   expect(f.state).toEqual(original);expect(f.state.fulfillment.stock).toEqual([]);expect(f.state.payments).toEqual([]);
  });
  it('keeps an oversized unsubmitted draft, corrects the same ID and only then freezes the approved quantity',()=>{

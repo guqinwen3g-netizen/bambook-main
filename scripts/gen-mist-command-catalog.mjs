@@ -12,6 +12,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * 源码保留、但不向 Agent 登记的命令（目录外的类型 MCP 一律拒绝执行）。逐条写明原因；agentCommandCatalogGuard.test.ts 同样认这份名单。
+ */
+export const AGENT_EXCLUDED_COMMANDS = {
+  'platform.invoice.save': '旧独立 CI 草稿：职责已改为业务/后勤经单据签发（fulfillment.documents.issue）、财务登记核销，发票页只读展示历史草稿；后端保留供历史草稿与既有校验测试使用，不再交给 Agent',
+  'platform.invoice.issue': '同 platform.invoice.save：财务不直接签发商业发票，页面无入口',
+};
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SHARED = path.join(ROOT, 'server/src/shared');
 export const CATALOG = path.join(ROOT, 'server/src/mist/agentCommandCatalog.ts');
@@ -86,7 +94,7 @@ export function buildCatalog() {
       if (!payload) continue;
       const flat = payload.replace(/\s+/g, ' ').slice(0, 1500), refs = referenced(flat, types);
       for (const [, type] of match[1].matchAll(/'([^']+)'/g)) {
-        if (!found.has(type)) found.set(type, { type, payload: flat, ...(refs.size ? { types: Object.fromEntries([...refs].slice(0, 12)) } : {}), source: `server/src/shared/${file}` });
+        if (!found.has(type) && !Object.hasOwn(AGENT_EXCLUDED_COMMANDS, type)) found.set(type, { type, payload: flat, ...(refs.size ? { types: Object.fromEntries([...refs].slice(0, 12)) } : {}), source: `server/src/shared/${file}` });
       }
     }
   }
