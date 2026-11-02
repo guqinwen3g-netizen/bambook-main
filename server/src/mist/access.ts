@@ -66,7 +66,7 @@ const TAX_INPUT_KEYS = new Set(['taxAmount', 'taxRate']);
 export function maskTaxBaseInput(type: string, payload: Record<string, unknown>): Record<string, unknown> {
   const rebateAmounts = type.startsWith('rebate.claim.');
   const strip = (value: unknown): unknown => typeof value === 'string' ? (isTaxBaseCommand(type) ? maskTaxBaseText(value) : value) : Array.isArray(value) ? value.map(strip)
-    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !TAX_INPUT_KEYS.has(key) && !(rebateAmounts && key === 'amount')).map(([key, item]) => [key, strip(item)])) : value;
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => !TAX_INPUT_KEYS.has(key) && !(rebateAmounts && (key === 'amount' || key === 'receiptId'))).map(([key, item]) => [key, strip(item)])) : value;
   return strip(payload) as Record<string, unknown>;
 }
 /** 被退税到账勾稽占用的到账流水：金额即国库退税到账额。 */
@@ -86,7 +86,8 @@ export function maskTaxBase(next: MistState) {
   const refundReceipts = rebateReceiptIds(next);
   if (rebate?.claims?.length) next.exportRebate = { ...rebate, claims: rebate.claims.map(c => ({ ...c, taxable: 0, expected: 0, taxMasked: true,
     ...(c.approved ? { approved: { ...c.approved, amount: 0 } } : {}),
-    receipts: (c.receipts || []).map(r => ({ ...r, amount: 0 })),
+    // 去掉到账流水 id：否则可凭 id 经资金归属等命令的提示拿到到账金额；勾稽编号与日期保留。
+    receipts: (c.receipts || []).map(({ receiptId: _receipt, ...r }) => ({ ...r, receiptId: '', amount: 0 })),
     lines: (c.lines || []).map(({ parts: _parts, inputTaxCap: _cap, excluded: _excluded, taxLimited: _limited, ...l }) => ({ ...l, taxable: 0, rebate: 0 })) })) };
   if (next.events?.some(e => e.entityType === 'rebate')) next.events = next.events.map(e => e.entityType === 'rebate' ? { ...e, text: maskTaxBaseText(e.text) } : e);
   // Agent 提议说明来自预演事件或调用方填写，历史提议已入库：退税命令的说明按同一规则脱敏。

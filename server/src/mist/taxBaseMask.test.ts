@@ -46,7 +46,9 @@ describe('M1 计税依据掩码：逐条出口', () => {
     expect(masked.payables!.bills[0]).toMatchObject({ amount: 113000, taxAmount: 0, taxRate: '', taxMasked: true });
     const claim = masked.exportRebate!.claims.find(c => c.id === id)!;
     expect(claim).toMatchObject({ taxable: 0, expected: 0, taxMasked: true, approved: { amount: 0, ref: '核准 01' } });
-    expect(claim.receipts.every(r => r.amount === 0)).toBe(true);
+    expect(claim.receipts.every(r => r.amount === 0 && r.receiptId === '')).toBe(true);
+    expect(JSON.stringify(masked.exportRebate)).not.toContain('r-tax');
+    expect(full.exportRebate!.claims.find(c => c.id === id)!.receipts[0].receiptId).toBe('r-tax');
     expect(leaks(masked.payables)).toEqual([]); expect(leaks(masked.exportRebate)).toEqual([]);
     // 原状态不被改动；持码人看到原值
     expect(state.exportRebate!.claims.find(c => c.id === id)!.approved!.amount).toBe(12000);
