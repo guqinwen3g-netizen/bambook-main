@@ -31,7 +31,7 @@ function ModuleRow({ module, value, onChange, available, readOnly }: { module: J
       <span style={{ width: 76, display: 'inline-flex', justifyContent: 'flex-end' }}>{extras.length > 0 && <TextLink onClick={() => setOpen(!open)}>{uiText(`专项 ${held}/${extras.length}`)}</TextLink>}</span>
     </div>
     {gate && <span className="mist-note">{uiText(`办理需任职部门含「${gate}」`)}</span>}
-    {labelOnly.length > 0 && <span className="mist-note" data-approval-label-only={module.key}>{uiText(`审批档中的「${labelOnly.map(permissionLabel).join('」「')}」：${APPROVAL_LABEL_ONLY_NOTE}`)}</span>}
+    {labelOnly.length > 0 && <span className="mist-note" data-approval-label-only={module.key}>{uiText(`审批档中的「${labelOnly.map(scope => permissionLabel(scope)).join('」「')}」：${APPROVAL_LABEL_ONLY_NOTE}`)}</span>}
     {open && extras.length > 0 && <div className="mist-col" style={{ gap: 4, paddingLeft: 12 }}>
       {extras.map(scope => <Checkbox key={scope} label={uiText(permissionLabel(scope))} checked={value.includes(scope)} disabled={readOnly}
         onChange={on => onChange(on ? [...value, scope] : value.filter(item => item !== scope))} />)}
