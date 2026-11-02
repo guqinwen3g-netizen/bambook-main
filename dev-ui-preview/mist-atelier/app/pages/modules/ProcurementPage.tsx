@@ -1,7 +1,7 @@
 import { MaterialDeliveryPanel } from '../MaterialDeliveryPanel';
 import {isDomesticSupplier, procurementCurrencyProblem} from '../../../../../server/src/shared/mistProcurementCurrency';
 export {isDomesticSupplier} from '../../../../../server/src/shared/mistProcurementCurrency';
-import { hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
+import { deliveryContractId, hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
 import { purchaseName } from '../businessNames';
 import { fabricStageBalance, fabricStageTermsText, type FabricStageBalance } from '../../../../../server/src/shared/mistFabricStage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -19,7 +19,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
-import { choiceField, emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
+import { choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
@@ -111,11 +111,11 @@ export function ProcurementPage() {
     title: p ? `修订${ENTRY_LABEL[entryOf(p)]}草稿` : `新建${ENTRY_LABEL[entry]}`, submitLabel: p ? '保存草稿' : '保存为草稿',
     sections: [
       { id: 'source', label: '来源与供应商', fields: ['source', 'kind', 'supplierId', 'description'] },
-      { id: 'commercial', label: '数量与费用', fields: ['quantity', 'unit', 'kgPerMetre', 'lossPercent', 'price', 'currency'] },
+      { id: 'commercial', label: '数量与费用', fields: ['quantity', 'unit', 'kgPerMetre', 'lossPercent', 'intermediate', 'price', 'currency'] },
       { id: 'delivery', label: '交付约定', fields: ['due', 'terms', 'destination', 'note'] },
     ],
-    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), choiceField('unit', '计量单位', UNITS), ...(domain === 'fabric' ? [{ ...field('kgPerMetre', '每米重量（公斤/米）', 'number'), when: [{ key: 'kind', values: ['material:greige'] }, { key: 'unit', values: ['公斤', '千克', 'kg', 'KG', 'kgs'] }] }, { ...field('lossPercent', '约定加工损耗（%）', 'number', false), when: { key: 'kind', values: ['processing'] } }] : []), field('price', '含税 / 约定单价', 'number'), choiceField('currency', '币种', CURRENCIES, true, true), field('due', '交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
-    initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : sourceLine?.fulfillmentMode === 'full_package' && domain === 'garment' ? 'finished' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', kgPerMetre: p?.stageTerms?.kgPerMetre ?? '', lossPercent: p?.stageTerms?.lossPercent ?? '', price: p?.price || 0, currency: p?.currency || 'CNY', due: p?.due || factoryDueFor(sourceOrder?.due, today()), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
+    fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), choiceField('unit', '计量单位', UNITS), ...(domain === 'fabric' ? [{ ...field('kgPerMetre', '每米重量（公斤/米）', 'number'), when: [{ key: 'kind', values: ['material:greige'] }, { key: 'unit', values: ['公斤', '千克', 'kg', 'KG', 'kgs'] }] }, { ...field('lossPercent', '约定加工损耗（%）', 'number', false), when: { key: 'kind', values: ['processing'] } }, { ...field('intermediate', '前道加工（成品交下一道加工厂）', 'checkbox', false), when: { key: 'kind', values: ['processing'] } }] : []), field('price', '含税 / 约定单价', 'number'), choiceField('currency', '币种', CURRENCIES, true, true), field('due', '交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), field('destination', '主要交付地点'), field('note', '规格与交付要求', 'textarea', false)],
+    initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : sourceLine?.fulfillmentMode === 'full_package' && domain === 'garment' ? 'finished' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', kgPerMetre: p?.stageTerms?.kgPerMetre ?? '', lossPercent: p?.stageTerms?.lossPercent ?? '', intermediate: !!p?.stageTerms?.intermediate, price: p?.price || 0, currency: p?.currency || 'CNY', due: p?.due || factoryDueFor(sourceOrder?.due, today()), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
     submit: async values => {
       if (!state) return;
       const source = parseSource(state, text(values, 'source'));
@@ -128,7 +128,7 @@ export function ProcurementPage() {
       const { kind, materialKind } = parsePurchaseContent(choice, domain);
       const optional = (key: string) => values[key] === '' || values[key] === undefined ? undefined : number(values, key);
       const kgPerMetre = optional('kgPerMetre'), lossPercent = optional('lossPercent');
-      const stageTerms = { ...(kgPerMetre !== undefined ? { kgPerMetre } : {}), ...(lossPercent !== undefined ? { lossPercent } : {}) };
+      const stageTerms = { ...(kgPerMetre !== undefined ? { kgPerMetre } : {}), ...(lossPercent !== undefined ? { lossPercent } : {}), ...(values.intermediate === true ? { intermediate: true } : {}) };
       const saved = await run({ type: 'fulfillment.procurement.save', payload: { ...(p ? { id: p.id } : {}), orderId: source.orderId, lineId: source.lineId, kind, ...(kind === 'material' ? { materialKind } : {}), ...(Object.keys(stageTerms).length ? { stageTerms } : {}), supplierId: supplier.id, supplier: supplier.name, description: text(values, 'description'), quantity: number(values, 'quantity'), unit: text(values, 'unit'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), destination: text(values, 'destination'), note: text(values, 'note'), fileIds: p?.fileIds || [] } });
       const id = String(saved?.result?.id || p?.id || '');
       if (id) { setPicked(id); setEntryChoice(text(values, 'kind') === 'processing' ? 'processing' : 'purchase'); }
@@ -140,7 +140,7 @@ export function ProcurementPage() {
     const linked = !!state && materialDeliveryRequired(state, p.id), targets = linked ? materialDeliveryTargets(state!, p.id) : [];
     // Dyed/finished fabric is physical goods: it can enter our warehouse or go straight on; garment processing stays a service handover.
     const fabricProcessing = p.kind === 'processing' && p.domain === 'fabric';
-    const destinations = p.kind === 'processing' && !fabricProcessing ? [{ value: 'supplier', label: '加工服务交付' }] : [{ value: 'warehouse', label: '入我方仓库' }, { value: 'supplier', label: fabricProcessing && !linked ? '加工厂直送客户或指定地点' : p.kind === 'finished' && !linked ? '工厂或指定地点交接' : '供应商直送加工方' }];
+    const destinations = p.kind === 'processing' && !fabricProcessing ? [{ value: 'supplier', label: '加工服务交付' }] : [{ value: 'warehouse', label: '入我方仓库' }, { value: 'supplier', label: fabricProcessing && !linked ? '加工厂直送客户或指定地点' : p.kind === 'finished' && !linked ? '工厂或指定地点交接' : fabricProcessing ? '直送下一道加工厂' : '供应商直送加工方' }];
     return { title: p.kind === 'processing' ? '登记加工回交' : p.kind === 'finished' && !linked ? '登记成品交接' : '登记收料', submitLabel: '登记本次交付',
       fields: [field('quantity', `接收数量（${p.unit}）`, 'number'), field('rejected', `拒收数量（${p.unit}）`, 'number'), field('destination', '交付路径', 'select', true, destinations), ...(linked ? [field('targetProductionId', '直送加工单', 'select', false, [emptyOption, ...targets])] : []), field('location', '实际交接地点'), field('date', '实际交付日', 'date'), field('evidence', '点数与交接依据', 'textarea')],
       initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' && !fabricProcessing ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', targetProductionId: targets.length === 1 ? targets[0].value : '' },
@@ -148,7 +148,7 @@ export function ProcurementPage() {
         const quantity = number(values, 'quantity'), destination = text(values, 'destination') as 'warehouse' | 'supplier';
         if (linked && destination === 'supplier' && quantity > 0 && !text(values, 'targetProductionId')) throw new Error('请选择直送加工单');
         const payload = { id: p.id, quantity, rejected: number(values, 'rejected'), location: text(values, 'location'), date: text(values, 'date'), evidence: text(values, 'evidence'), fileIds: [] };
-        return linked && destination === 'supplier' && quantity > 0 ? run({ type: 'fulfillment.materials.deliver', payload: { ...payload, targetProductionId: text(values, 'targetProductionId') } }) : run({ type: 'fulfillment.procurement.receive', payload: { ...payload, destination } });
+        return linked && destination === 'supplier' && quantity > 0 ? run({ type: 'fulfillment.materials.deliver', payload: { ...payload, ...deliveryTargetPayload(text(values, 'targetProductionId')) } }) : run({ type: 'fulfillment.procurement.receive', payload: { ...payload, destination } });
       },
     };
   };
@@ -266,18 +266,18 @@ function FabricStageBalancePanel({ balance: b }: { balance: FabricStageBalance }
   const qty = (n: number | null) => n === null ? '—' : `${n} ${b.unit}`;
   const loss = b.lossPercent === null ? '—' : `${b.lossPercent}%`;
   return <DetailBlock title={uiText('投入与产出')}>
-    {b.input === null && <Banner tone="warn" title={ui`坯布数量无法折算为${b.unit}`}>{uiText('坯布单须按米、码或公斤计量')}</Banner>}
-    {b.outputExceedsInput && <Banner tone="warn" title={uiText('回交多于投入坯布')}>{uiText('核对点收和回交数量')}</Banner>}
+    {b.input === null && <Banner tone="warn" title={ui`来料数量无法折算为${b.unit}`}>{uiText('来料单须按米、码或公斤计量')}</Banner>}
+    {b.outputExceedsInput && <Banner tone="warn" title={uiText('回交多于投入来料')}>{uiText('核对点收和回交数量')}</Banner>}
     {b.overAllowance && <Banner tone="warn" title={uiText('损耗超出约定')}>{ui`实际 ${loss}，约定 ${b.agreedLossPercent}%`}</Banner>}
     <Facts cols={2} items={[
-      { label: '投入坯布', value: qty(b.input) },
+      { label: '投入来料', value: qty(b.input) },
       { label: '回交成品', value: qty(b.output) },
       { label: '实际损耗', value: loss },
       { label: '约定损耗', value: b.agreedLossPercent === undefined ? '未约定' : `${b.agreedLossPercent}%` },
-      ...(b.plannedInput !== null ? [{ label: '按约定应投坯布', value: qty(b.plannedInput) }] : []),
+      ...(b.plannedInput !== null ? [{ label: '按约定应投来料', value: qty(b.plannedInput) }] : []),
     ]} />
-    {b.inputs.length > 0 && <DataTable ariaLabel={uiText('投入坯布')} rows={b.inputs} rowKey={row => row.purchaseId} columns={[
-      { key: 'code', header: '坯布单', render: row => <Mono>{row.code}</Mono> },
+    {b.inputs.length > 0 && <DataTable ariaLabel={uiText('投入来料')} rows={b.inputs} rowKey={row => row.purchaseId} columns={[
+      { key: 'code', header: '来料单', render: row => <Mono>{row.code}</Mono> },
       { key: 'supplier', header: '供应商', hideOnMobile: true, render: row => row.supplier },
       { key: 'accepted', header: '已点收', align: 'right', render: row => `${row.accepted} ${uiText(row.unit)}` },
       { key: 'converted', header: ui`折合${b.unit}`, align: 'right', render: row => row.converted === null ? '—' : `${row.converted} ${uiText(b.unit)}` },
@@ -313,11 +313,12 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
     : !p.supplierConfirmation ? { tone: 'accent', title: '合同已发出 · 待供应商确认', text: '' }
     : p.received > p.quantity ? { tone: 'warn', title: '数量待核对', text: '' }
     : stage === 'done' ? { tone: 'ok', title: processing ? '已全部回交' : '已全部交付', text: `${p.received} / ${p.quantity} ${p.unit}` }
-    : processing && !state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.release) ? { tone: 'accent', title: '待放行', text: '' }
+    : processing && !p.stageTerms?.intermediate && !state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.release) ? { tone: 'accent', title: '待放行', text: '' }
     : processing && state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.hold) ? { tone: 'warn', title: '已暂停', text: '' }
     : { tone: 'accent', title: processing ? '加工中' : '供应履约中', text: `供应商承诺 ${p.supplierConfirmation.confirmedDue}；已${processing ? '回交' : '交付'} ${p.received} / ${p.quantity} ${p.unit}。` };
   const stageBalance = fabricStageBalance(state, p.id);
-  const deliveries = [...new Map([...materialDeliveryRows(state),...incoming].filter(row => processing ? state.productions.find(branch => branch.id === row.delivery.productionId)?.sourcePurchaseId === p.id : row.purchaseId === p.id).map(row=>[row.id,row])).values()];
+  // A fabric intermediate contract both receives (from the previous step) and sends (to the next step).
+  const deliveries = [...new Map([...materialDeliveryRows(state),...incoming].filter(row => processing ? deliveryContractId(state, row.delivery) === p.id || p.stageTerms?.intermediate && row.purchaseId === p.id : row.purchaseId === p.id).map(row=>[row.id,row])).values()];
   const activeDeliveries = deliveries.filter(row => row.outstanding !== '0');
   const receivedDeliveries = activeDeliveries.filter(row => row.pending === '0' && row.rejected === row.returned && row.accepted !== '0');
   const pendingDeliveries = activeDeliveries.filter(row => row.pending !== '0');

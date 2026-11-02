@@ -152,8 +152,9 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     // Receiving authority follows the same current-owner rule as the server; no manual task completion.
     for (const row of materialDeliveryRows(state)) {
       if (row.pending === '0' || !materialReceiverIds(state, row).includes(me)) continue;
-      const branch = state.productions.find(item => item.id === row.delivery.productionId && !item.closed);
-      const contract = f.purchases.find(item => item.id === branch?.sourcePurchaseId && item.kind === 'processing' && item.state === 'approved');
+      const branch = row.delivery.productionId ? state.productions.find(item => item.id === row.delivery.productionId && !item.closed) : undefined;
+      const contractId = row.delivery.contractId ?? branch?.sourcePurchaseId;
+      const contract = f.purchases.find(item => item.id === contractId && item.kind === 'processing' && item.state === 'approved');
       const source = f.purchases.find(item => item.id === row.purchaseId);
       if (!contract || !source) continue;
       push({ id: `material:${row.kind}:${row.id}`, source: 'material', title: `${contract.code} · ${uiText('物料接收')}`,

@@ -25,6 +25,8 @@ export const choiceField = (key: string, label: string, options: ModuleField['op
 export const emptyOption = { value: '', label: '请选择' };
 export const text = (v: ModuleValues, key: string) => String(v[key] ?? '');
 export const number = (v: ModuleValues, key: string) => Number(v[key]);
+/** A delivery target select holds a production branch id, or `contract:<id>` for an intermediate fabric processing contract. */
+export const deliveryTargetPayload = (value: string): { targetProductionId: string } | { targetPurchaseId: string } => value.startsWith('contract:') ? { targetPurchaseId: value.slice('contract:'.length) } : { targetProductionId: value };
 export function useEditor() { const [spec, set] = useRouteDraft<ModuleEditorSpec | null>(null); return { open: set, view: spec ? (spec.fields.length > 3 ? <ModuleEditorPage spec={spec} onClose={() => set(null)}/> : <ModuleEditorDialog spec={spec} onClose={() => set(null)}/>) : null, spec }; }
 export function sourceOptions(s: MistState | null, versions = true) { return [emptyOption, ...(versions ? s?.versions.filter(v => v.returnedAt).map(v => ({ value: 'version:' + v.id, label: `${s.devs.find(d => d.id === v.devId)?.code} · ${v.label} · ${v.factory}` })) || [] : []), ...(s?.orderLines.map(l => ({ value: 'line:' + l.id, label: `${s.orders.find(o => o.id === l.orderId)?.code} · ${l.style} · ${l.name}` })) || []), ...(s?.productions.filter(p => !p.closed).map(p => ({ value: 'production:' + p.id, label: `${p.order} · ${p.code} · ${p.factory}` })) || [])]; }
 export function parseSource(s: MistState, value: string): Exclude<FulfillmentSource, {

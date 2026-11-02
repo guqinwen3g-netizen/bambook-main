@@ -2,7 +2,7 @@ import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorErr
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -529,6 +529,8 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     payload: {
         id: string;
         targetProductionId?: string;
+        /** Intermediate fabric processing contract receiving the goods (it has no production branch). */
+        targetPurchaseId?: string;
         quantity: number;
         rejected: number;
         destination: 'warehouse' | 'supplier';
@@ -575,6 +577,8 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     payload: {
         id: string;
         targetProductionId?: string;
+        /** Intermediate fabric processing contract receiving the goods (it has no production branch). */
+        targetPurchaseId?: string;
         kind: 'issue' | 'return' | 'move';
         quantity: number;
         location: string;
@@ -609,10 +613,10 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     payload: { kind: 'issue' | 'direct'; id: string; evidence: string; acceptedQuantity?: number; rejectedQuantity?: number; expectedReceivingRevision?: number };
 } | {
     type: 'fulfillment.materials.issue';
-    payload: { id: string; targetProductionId: string; quantity: number; location: string; person: string; note: string; sourceLocation?: string };
+    payload: { id: string; targetProductionId?: string; targetPurchaseId?: string; quantity: number; location: string; person: string; note: string; sourceLocation?: string };
 } | {
     type: 'fulfillment.materials.deliver';
-    payload: { id: string; targetProductionId: string; quantity: number; rejected: number; location: string; date: string; evidence: string; fileIds: string[] };
+    payload: { id: string; targetProductionId?: string; targetPurchaseId?: string; quantity: number; rejected: number; location: string; date: string; evidence: string; fileIds: string[] };
 } | {
     type: 'fulfillment.shipments.sourceTerms';
     payload: FulfillmentShippingTerms;
@@ -974,7 +978,7 @@ export function fulfillmentProductionColumn(root: MistState, branch: MistProduct
 }
 function materialQualityProof(root: MistState, purchase: FulfillmentPurchase, delivery: MaterialDeliveryLink) {
     // Greige going to the next mill is counted there; release QC applies to the finished internal fabric only.
-    if (isFabricStageMaterial(purchase) || !root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
+    if (isFabricStageSource(purchase) || !root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
     const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
     if (!branch) fail('来源面料缺少准确生产分支');
     requireProductionQc(root, branch!);
@@ -1561,7 +1565,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             purchase.decision = { actorId: ctx.actorId!, actor: ctx.actorName, at: ctx.now, decision: p.decision, note };
             if (!purchase.revisionHistory?.length) purchase.revisionHistory = [{ revision: 1, submittedAt: purchase.submittedAt || ctx.now, requesterId: purchase.requesterId, reviewerIds: [...purchase.reviewerIds], configVersions: { ...purchase.configVersions }, snapshot: purchaseSnapshot(purchase) }];
             purchase.revisionHistory.at(-1)!.decision = { ...purchase.decision };
-            if (p.decision === 'approved' && purchase.kind !== 'material' && !root.productions.some(job => job.sourcePurchaseId === purchase.id)) {
+            // An intermediate fabric process (e.g. weaving before dyeing) passes its output on and never becomes the shippable branch.
+            if (p.decision === 'approved' && purchase.kind !== 'material' && !isFabricIntermediateProcessing(purchase) && !root.productions.some(job => job.sourcePurchaseId === purchase.id)) {
                 const order = get(root.orders, purchase.orderId, '来源订单'), line = get(root.orderLines, purchase.lineId, '来源条目');
                 // Fabric has one full-item factory branch, not garment-style capacity splitting.
                 // Raw-material purchases are independent costs and must not count as production branches.
@@ -1570,7 +1575,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     if (purchase.unit !== line.unit) fail('面料履约单位须与订单条目一致，不能按相同数字自动换算');
                     if (purchase.quantity !== line.qty) fail('面料单工厂分支须覆盖完整订单条目数量；分次交付在原单登记');
                 }
-                const other = f.purchases.filter(item => item.id !== purchase.id && item.lineId === line.id && item.state === 'approved' && item.kind !== 'material');
+                const other = f.purchases.filter(item => item.id !== purchase.id && item.lineId === line.id && item.state === 'approved' && item.kind !== 'material' && !isFabricIntermediateProcessing(item));
                 if (other.some(item => item.kind !== purchase.kind)) fail('同一订单条目不得混用加工与成品履约模式');
                 if (sum([...other.map(item => item.quantity), purchase.quantity]) > line.qty) fail('批准的生产分配总量超过订单条目数量');
                 const productionId = ctx.id();
@@ -1587,6 +1592,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!purchase.offlineSend || !purchase.supplierConfirmation) fail('请先登记批准合同线下发出和供应商确认');
             const production = root.productions.find(job => job.sourcePurchaseId === purchase.id);
             const completion = production && fulfillmentProductionFact(root, production.id)?.completion;
+            const intermediate = isFabricIntermediateProcessing(purchase);
             if (production && (purchase.kind === 'processing' || purchase.domain === 'garment' && purchase.kind === 'finished')) requireProductionRelease(root, production, ctx);
             const quantity = qty(p.quantity, '实收数量', true), rejected = qty(p.rejected, '拒收数量', true), location = text(p.location, '实际收货地点'), date = day(p.date, '收货日期'), evidence = text(p.evidence, '交接依据'), fileIds = files(root, p.fileIds);
             if (completion && sum([purchase.received, quantity]) > completion.quantity) fail('累计实收不能超过已登记的最终完工数量');
@@ -1600,9 +1606,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('加工服务交付不能作为物料入库');
             let materialDelivery: MaterialDeliveryLink | undefined;
             if (quantity > 0 && p.destination === 'supplier' && materialDeliveryRequired(root, purchase.id)) {
-                materialDelivery = prepareMaterialDelivery(root, purchase.id, p.targetProductionId, quantity, ctx);
+                materialDelivery = prepareMaterialDelivery(root, purchase.id, p.targetProductionId, quantity, ctx, p.targetPurchaseId);
                 materialQualityProof(root, purchase, materialDelivery);
-            } else if (p.targetProductionId !== undefined) fail('仅直送加工方时指定接收加工单');
+            } else if (p.targetProductionId !== undefined || p.targetPurchaseId !== undefined) fail('仅直送加工方时指定接收加工单');
             const id = ctx.id();
             f.receipts.push({ id, purchaseId: purchase.id, quantity, rejected, destination: p.destination, location, date, evidence, fileIds, actor: ctx.actorName, createdAt: ctx.now, ...(materialDelivery ? { materialDelivery } : {}) });
             purchase.received = sum([purchase.received, quantity]);
@@ -1616,7 +1622,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (p.destination === 'warehouse' && quantity > 0) {
                 const stockId = ctx.id();
                 // A processing return is the processed fabric itself, not the service description.
-                const stockName = purchase.kind === 'processing' ? get(root.orderLines, purchase.lineId, '订单条目').name : purchase.description;
+                const stockName = purchase.kind === 'processing' && !intermediate ? get(root.orderLines, purchase.lineId, '订单条目').name : purchase.description;
                 f.stock.push({ id: stockId, purchaseId: purchase.id, receiptId: id, orderId: purchase.orderId, lineId: purchase.lineId, name: stockName, unit: purchase.unit, quantity, available: quantity, location, owner: '公司', createdAt: ctx.now });
                 f.stockMovements.push({ id: ctx.id(), stockId, kind: 'receive', quantity, location, person: purchase.supplier, note: evidence, at: ctx.now, actor: ctx.actorName });
             }
@@ -1689,9 +1695,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             let materialDelivery: MaterialDeliveryLink | undefined;
             if (linkedMaterial) assertMaterialSender(root, sourcePurchaseId, ctx);
             if (p.kind === 'issue' && linkedMaterial) {
-                materialDelivery = prepareMaterialDelivery(root, sourcePurchaseId, p.targetProductionId, quantity, ctx);
+                materialDelivery = prepareMaterialDelivery(root, sourcePurchaseId, p.targetProductionId, quantity, ctx, p.targetPurchaseId);
                 materialQualityProof(root, get(f.purchases, sourcePurchaseId, '来源采购'), materialDelivery);
-            } else if (p.targetProductionId !== undefined) fail('仅发料出库时指定接收加工单');
+            } else if (p.targetProductionId !== undefined || p.targetPurchaseId !== undefined) fail('仅发料出库时指定接收加工单');
             let issue: FulfillmentStockMovement | undefined;
             let quarantinedQuantity = 0;
             if (p.kind === 'return') {

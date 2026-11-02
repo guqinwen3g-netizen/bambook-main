@@ -17,7 +17,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { Nav, useNav } from '../../nav';
 import { ModuleEditorDialog, ModuleWorkbench, type ModuleEditorSpec } from './ModuleWorkbench';
-import { emptyOption, exportRecords, field, number, PositionSummary, RecordFiles, SourceLink, text, today, useEditor } from './fulfillmentKit';
+import { deliveryTargetPayload, emptyOption, exportRecords, field, number, PositionSummary, RecordFiles, SourceLink, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 
@@ -122,7 +122,7 @@ export function InventoryPage() {
       initialValues: { quantity: kind === 'return' ? 0 : quantity, location: kind === 'return' || stock.location === '多个位置' ? '' : stock.location, person: '', note: '', issueId: '', sourceLocation: '__choose__', targetProductionId: targets.length === 1 ? targets[0].value : '' },
       submit: v => {
         const payload = { id: stock.id, quantity: kind === 'move' ? 0 : number(v, 'quantity'), location: text(v, 'location'), person: text(v, 'person'), note: text(v, 'note'), ...(text(v, 'sourceLocation') !== '__choose__' ? { sourceLocation: text(v, 'sourceLocation') } : {}) };
-        return linked ? run({ type: 'fulfillment.materials.issue', payload: { ...payload, targetProductionId: text(v, 'targetProductionId') } }) : run({ type: 'fulfillment.inventory.move', payload: { ...payload, kind, ...(text(v, 'issueId') ? { issueId: text(v, 'issueId') } : {}) } });
+        return linked ? run({ type: 'fulfillment.materials.issue', payload: { ...payload, ...deliveryTargetPayload(text(v, 'targetProductionId')) } }) : run({ type: 'fulfillment.inventory.move', payload: { ...payload, kind, ...(text(v, 'issueId') ? { issueId: text(v, 'issueId') } : {}) } });
       },
     };
   };

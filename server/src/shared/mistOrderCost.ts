@@ -200,7 +200,7 @@ export function orderActualCost(root: MistState, orderId: string, basis: FxBasis
     const finalInternal = root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply && settlements.some(s => s.final);
     const contract = finalInternal ? settlements.reduce((sum, s) => sum + mistMoneyMinor(s.amount), 0) : Math.max(0, Math.round(p.quantity * p.price * 100));
     // Staged fabric costs read as 坯布 + 染整 on the same item, so both stages are named on their cost lines.
-    const stage = p.domain === 'fabric' ? p.kind === 'processing' ? '染整加工 ' : p.materialKind === 'greige' ? '坯布 ' : '' : '';
+    const stage = p.domain === 'fabric' ? p.kind === 'processing' ? p.stageTerms?.intermediate ? '前道加工 ' : '染整加工 ' : p.materialKind === 'greige' ? '坯布 ' : '' : '';
     const unbilled = Math.max(0, contract - billed), share = (minor: number) => internalFabricCostShare(root, p.id, orderId, minor,materialCostBasis), suffix = p.orderId === orderId ? '' : ' 内部面料';
     if (share(billed)) purchases.push(line('pur:' + p.id, `${stage}${p.code} ${p.supplier}${suffix} 已到票`, p.currency, share(billed)));
     if (share(deducted)) purchases.push(line('ded:' + p.id, `${p.code}${suffix} 供应商索赔扣款`, p.currency, -share(deducted)));

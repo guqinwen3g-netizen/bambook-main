@@ -47,7 +47,8 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 面料加工单回交允许 `destination='warehouse'` 入库，批次名取订单条目品名；成衣加工回交仍不能入库。
 - 第二块（`server/src/shared/mistFabricStage.ts`）：采购单可带 `stageTerms`——按公斤采购的坯布须有 `kgPerMetre`（提交时校验），面料加工单可选 `lossPercent`（0–50%）；不属于该合同类型的字段直接拒绝。`stageTerms` 进入审批快照、审批详情「工序约定」和加工合同 PDF，转供应商时沿用。`fabricStageBalance` 只读汇总：投入 = 目标加工单上坯布交接的已点收合格数（拒收、待点收不计），按坯布单单位换算到加工单单位（米/码互换，公斤用 `kgPerMetre`）；产出 = 加工单 `received`；回交多于投入时不出损耗率并提示。订单核算的采购行按 `坯布` / `染整加工` 开头标注。面料看板与线下进度工序名改为 坯布 / 染整 / 后整理。
 - 第三块（`server/src/shared/mistDevelopmentStages.ts`）：面料开发可设 `DevelopmentValues.stages`（工序链，2–6 道，末道不能织造、工厂不重复）。`createRound` 收到 `stages` 时只给末道工厂建一个版本、分配字母和工厂任务，`MistRound.stages` 与 `MistVersion.stages`（含工厂名，供应商改名同步）记录整条链；没有 `stages` 仍为并行比样。`development.stage.handover` 登记前道交接（日期按北京业务日校验），`development.recordSample` 在前道交接未齐时拒绝；`updateDev` 显示「前道打样中」。改版、重新打样沿用工序链。试样通知单内容带 `stageChain`。草稿可存未填完的工序链，提交时完整校验。
-- 未做：大货多张加工单前后衔接（`sup7`/`ord2`）、损耗成本金额与超耗扣款、收货方结构化字段。设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`；测试 `server/src/shared/mistFabricStaged.test.ts`。
+- 第四块：面料加工单 `stageTerms.intermediate=true` 为前道加工——审批不生成生产分支（`fulfillment.procurement.decide`），也不计入同条目履约数量；回交可直送下一道或入库。`MaterialDeliveryLink` 新增 `contractId`（接收方为前道加工单，此时无 `productionId`）；`deliveryContractId` 统一解析接收加工单，`hasMaterialAtFactory`、`fabricStageBalance`、物料接收待办与交接面板都按它取。`materialDeliveryTargets` 对面料工序来源（坯布、前道加工）列出本条目已接单的前道加工单（选项值 `contract:<id>`）和最后一道的生产分支，排除自身和已向本单交货的加工单；`fulfillment.materials.deliver/issue` 与 `procurement.receive` 用 `targetPurchaseId` 指向前道加工单。订单核算标「前道加工」。
+- 未做：损耗成本金额与超耗扣款、收货方结构化字段。受限范围账号从库存发料的跨范围白名单（`repository.ts` `crossTarget`）仍只认 `targetProductionId`，发给前道加工单会被拒（不放宽权限）；面料负责人本人范围内办理不受影响。设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`；测试 `server/src/shared/mistFabricStaged.test.ts`。
 
 ## 当前 Mist 后勤交接显示
 
