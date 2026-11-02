@@ -12,10 +12,9 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
-import { quotationStage } from './QuotationsPage';
-import { supplierPerformance } from './SuppliersPage';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { customerHandoverScope, customerHandovers } from '../../../../../server/src/shared/mistHandover';
+import { relationBusiness } from '../../../../../server/src/shared/mistRelationBusiness';
 import { COUNTRIES } from '../../runtime/tradeOptions';
 
 type Identity = 'all' | 'customer' | 'supplier' | 'agent' | 'partner' | 'other';
@@ -30,17 +29,8 @@ export function relationIdentities(r: MarketRelation): Exclude<Identity, 'all'>[
   if (!ids.length) ids.push(r.category === 'Agent' ? 'agent' : r.category === 'Partner' ? 'partner' : 'other');
   return ids;
 }
-/** 在手业务：客户侧（进行中订单、未关闭报价、进行中商机、未收发票按币种），供应商侧（未到齐采购单）。 */
-export function relationBusiness(state: MistState | null, r: MarketRelation) {
-  const orders = state&&r.customerId ? customerHandoverScope(state,r.customerId).orders : [];
-  const quotations = r.customerId ? (state?.market.quotations || []).filter(q => q.customerId === r.customerId && ['draft', 'pending', 'sent', 'accepted'].includes(quotationStage(q))) : [];
-  const opportunities = r.customerId ? (state?.crm.opportunities || []).filter(o => o.customerId === r.customerId && o.stage !== 'won' && o.stage !== 'lost') : [];
-  const orderIds = new Set((state?.orders || []).filter(o => o.customerId === r.customerId).map(o => o.id));
-  const receivable = new Map<string, number>();
-  if (r.customerId) for (const inv of state?.invoices || []) if (!inv.voidedAt && orderIds.has(inv.orderId) && inv.open > 0) receivable.set(inv.currency, Math.round(((receivable.get(inv.currency) || 0) + inv.open) * 100) / 100);
-  const purchases = r.supplierId ? supplierPerformance(state, r.supplierId).open : [];
-  return { orders, quotations, opportunities, receivable: [...receivable.entries()], purchases, total: orders.length + quotations.length + opportunities.length + purchases.length };
-}
+/** 在手业务与服务端归档拦截同一口径（server/src/shared/mistRelationBusiness.ts）。 */
+export { relationBusiness };
 
 /** 客户身份的联系人以客户档案为准（客户页与关系智库共用），主联系人标记取自关系档案。 */
 export function relationContacts(state: MistState | null, r: MarketRelation): MarketRelation['contacts'] {

@@ -13,6 +13,7 @@ import { MistCommandError, type MistState, type MistContext, type MistCommandRes
 import type { MistReviewTask } from './mistReview';
 import { supplierBusinessDay, productionSupplierUnavailableReason, isServiceSupplier } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
+import { relationBusiness } from './mistRelationBusiness';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL, ownerChangeText, resolveMember, type MistAccountRef, type MistBusinessGroup } from './mistAccounts';
 
 type RecordBase = { id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string };
@@ -350,7 +351,11 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
   case 'market.relation.save':{const {id,input}=command.payload,old=id?find(m.relations,id,'关系档案'):undefined,category=one(input.category,['Customer','Supplier','Agent','Partner','Government','Internal','Other'],'关系类别');const customerId=category==='Customer'?find(root.customers,input.customerId,'现有客户').id:'',supplierId=category==='Supplier'?supplierRef(m,input.supplierId,false):category==='Customer'&&old?.customerId&&old.supplierId?old.supplierId:'';if(category==='Supplier'&&!supplierId)fail('供应商关系须引用现有供应商');if(m.relations.some(r=>r.id!==id&&((customerId&&r.customerId===customerId)||(supplierId&&r.supplierId===supplierId))))fail('该组织已有关联关系档案');
    if(old&&(old.customerId||old.supplierId)&&(old.customerId!==customerId||old.supplierId!==supplierId||old.category!==category))fail('已关联组织身份不可改绑，请创建独立关系档案');
    const supplier=supplierId&&!customerId?find(m.suppliers,supplierId,'供应商'):undefined;const row:MarketRelation={...base(root,ctx,input,old),hold:old?.hold,holdHistory:old?.holdHistory,mergedRelationIds:old?.mergedRelationIds,category,customerId,supplierId,name:customerId?find(root.customers,customerId,'客户').name:supplier?.name||str(input.name,'组织名称'),country:supplier?.country||str(input.country,'国家地区',false),address:supplier?.address||str(input.address,'地址',false),aliases:arr(input.aliases||[],'组织别名'),status:old?.status||'active',contacts:old?.contacts||supplier?.contacts||[]};put(m.relations,row,old);result={id:row.id};break;}
-  case 'market.relation.status':{const r=find(m.relations,command.payload.id,'关系档案');r.status=one(command.payload.status,['active','archived'],'关系状态');r.updatedAt=ctx.now;result={id:r.id};break;}
+  case 'market.relation.status':{const r=find(m.relations,command.payload.id,'关系档案'),next=one(command.payload.status,['active','archived'],'关系状态') as MarketRelation['status'];
+    if(next===r.status)fail(next==='archived'?'该关系档案已归档':'该关系档案已在使用中','CONFLICT');
+    // 还有在手业务（订单、报价、商机、未到齐采购）时不能归档，与关系智库页面同一口径；智能体或接口同样受限。
+    if(next==='archived'){const b=relationBusiness(root,r);if(b.total)fail(`还有在手业务 ${b.total} 项（订单 ${b.orders.length}、报价 ${b.quotations.length}、商机 ${b.opportunities.length}、采购 ${b.purchases.length}），完成或交接后再归档`,'PRECONDITION');}
+    r.status=next;r.updatedAt=ctx.now;history(root,ctx,'relation',r.id,(next==='archived'?'归档关系档案 ':'恢复关系档案 ')+r.name);result={id:r.id};break;}
   case 'market.relation.hold':{const r=find(m.relations,command.payload.id,'关系档案'),frozen=command.payload.frozen===true,reason=str(command.payload.reason,frozen?'冻结原因':'解冻说明');if(frozen===!!r.hold)fail(frozen?'该往来已冻结':'该往来未冻结');
    r.hold=frozen?{reason,at:ctx.now,actor:ctx.actorName}:null;r.holdHistory=[...(r.holdHistory||[]),{action:frozen?'freeze':'release',reason,at:ctx.now,actor:ctx.actorName}];r.updatedAt=ctx.now;history(root,ctx,'relation',r.id,(frozen?'冻结往来：':'解冻往来：')+reason);result={id:r.id};break;}
   case 'market.relation.linkSupplier':{const r=find(m.relations,command.payload.id,'关系档案');if(!r.customerId)fail('只有客户关系档案可以关联供应商身份');if(r.supplierId)fail('该组织已关联供应商身份');const supplier=find(m.suppliers,command.payload.supplierId,'供应商');
