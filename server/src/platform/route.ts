@@ -211,7 +211,7 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
 
       const result = await options.prisma.$transaction(async (tx) => {
         if (!ownerUserId) {
-          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active', metadata: { forceChangePassword: deliveryMode !== 'password' } } });
+          const account = await tx.userAccount.create({ data: { id: `usr_${randomUUID()}`, displayName: ownerName || ownerEmail.split('@')[0], email: ownerEmail, passwordHash: passwordHash!, status: 'active', metadata: { forceChangePassword: true, forceChangeReason: deliveryMode === 'password' ? 'initial' : 'invite' } } });
           ownerUserId = account.id;
         }
         const defaults = await readCompanyDefaults(tx);

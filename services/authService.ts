@@ -22,8 +22,10 @@ export interface AuthUser {
   permissionCeiling?: string[];
   departmentIds: string[];
   department: string | null;
-  /** 管理员重置密码后为 true：须先修改密码才能继续使用。 */
+  /** 首次登录（初始密码）或管理员重置密码后为 true：须先修改密码才能继续使用。 */
   mustChangePassword?: boolean;
+  /** 强制改密的原因：initial = 首次登录，reset = 管理员重置。 */
+  passwordChangeReason?: 'initial' | 'reset';
   /** 平台管理员当前选择的公司。 */
   platformCompany?: { companyId: string; companyName: string; startedAt: string };
 }

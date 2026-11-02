@@ -589,7 +589,7 @@ export function createAuthRouter(options: AuthRouterOptions) {
       const newHash = await auth.hashPassword(newPassword);
       // 管理员重置密码时在 metadata 标了 forceChangePassword；本人改密后清除该标记。
       // 改密同时让其他设备上的旧会话失效（sessionsRevokedAt），当前设备随即换发新令牌继续使用。
-      const metadata = (user.metadata && typeof user.metadata === 'object' && !Array.isArray(user.metadata)) ? user.metadata as Record<string, unknown> : {};
+      const { forceChangeReason: _reason, ...metadata } = (user.metadata && typeof user.metadata === 'object' && !Array.isArray(user.metadata)) ? user.metadata as Record<string, unknown> : {};
       const at = new Date().toISOString();
       await options.prisma.userAccount.update({ where: { id: payload.userId }, data: { passwordHash: newHash, metadata: { ...metadata, ...(metadata.forceChangePassword ? { forceChangePassword: false } : {}), passwordChangedAt: at, sessionsRevokedAt: at } as any } });
       invalidateAccountStatusCache(payload.userId);

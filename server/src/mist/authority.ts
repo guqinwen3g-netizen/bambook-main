@@ -10,6 +10,8 @@ export const freshMistAuthority: FreshAuthority = async (db, prior, permission) 
   const user = await loadUserWithRoles(db, prior.userId);
   if (!user || user.status !== 'active' || user.deletedAt != null) fail('ACCOUNT_DISABLED', '账号已失效，请重新登录', 401);
   if (isTokenRevoked((user as any).metadata, (prior as any).iat, prior.credentialVersion)) fail('SESSION_REVOKED', '登录已在所有设备退出，请重新登录', 401);
+  // 首次登录 / 管理员重置后须本人先改密：初始或临时密码他人知道，不能凭它办理业务。
+  if ((user as any).metadata?.forceChangePassword === true) fail('PASSWORD_CHANGE_REQUIRED', ['initial', 'invite'].includes((user as any).metadata?.forceChangeReason) ? '首次登录请先修改初始密码。' : '管理员已重置你的密码，请先修改登录密码。', 403);
   if ((user as any).platformRole === 'platform_admin') fail('COMPANY_SELECTION_REQUIRED', '请先选择公司再进入业务。', 403);
   // 必须沿用会话所属公司：否则重新加载会把该账号在别家公司的角色也算进来。
   const current = await buildLoadedAuthTokenPayload(db, user, prior.companyId ?? null);

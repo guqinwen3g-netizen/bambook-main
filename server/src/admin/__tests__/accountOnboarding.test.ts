@@ -86,3 +86,15 @@ describe('公司新建账号 · 中文校验提示', () => {
     expect(res.status).toBe(409); expect(res.body.message).toBe('该邮箱已有待审批的注册申请，请在账号列表中审批。');
   });
 });
+
+describe('管理员重置密码', () => {
+  it('标记原因为管理员重置，并让该账号所有会话失效', async () => {
+    const f = fixture();
+    f.prisma.userRole = { findMany: vi.fn().mockResolvedValue([]) };
+    f.prisma.userAccount.findUnique.mockResolvedValue({ metadata: { note: 'keep' } });
+    f.prisma.userAccount.update = vi.fn();
+    const res = await request(f.app).post('/admin/users/u1/reset-password').set('Authorization', `Bearer ${token}`).send({});
+    expect(res.status).toBe(200);
+    expect(f.prisma.userAccount.update.mock.calls[0][0].data.metadata).toMatchObject({ note: 'keep', forceChangePassword: true, forceChangeReason: 'reset', sessionsRevokedAt: expect.any(String), credentialVersion: expect.any(String) });
+  });
+});

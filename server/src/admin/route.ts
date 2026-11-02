@@ -476,7 +476,10 @@ export function createAdminRouter(options: AdminRouterOptions) {
         metadata: {
           ...(target.metadata as any || {}),
           forceChangePassword: true,
+          forceChangeReason: 'reset',
           passwordResetAt: new Date().toISOString(),
+          // 新凭据代次：重置前签发的所有令牌（含同一秒签发的）一律失效。
+          credentialVersion: crypto.randomUUID(),
           // 重置即视为账号可能外泄：该账号已登录的所有会话随之失效。
           sessionsRevokedAt: new Date().toISOString(),
         },
