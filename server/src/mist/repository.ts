@@ -538,7 +538,10 @@ export class MistRepository {
     const name = identifier(input.name, '公司名称'), slug = defaultOnly ? 'default' : identifier(input.slug || randomUUID(), '公司标识');
     if (input.seed !== undefined && !['demo', 'empty'].includes(input.seed)) fail('INVALID_INPUT', '公司初始方式无效', 400);
     // 正式账号首次进入的默认公司一律空白，示例数据只在本机演示模式或显式新建演示公司时出现。
-    const seed = defaultOnly && !localMode(prior) ? 'empty' : input.seed ?? 'demo', requestId = `create:${slug}`;
+    // 生产服务器上任何账号都不生成演示种子：显式请求拒绝，缺省一律空白。
+    const demoAllowed = process.env.NODE_ENV !== 'production';
+    if (!demoAllowed && !defaultOnly && input.seed === 'demo' && !companyLibrary(prior)) fail('DEMO_SEED_DISABLED', '正式环境不提供演示公司', 403);
+    const seed = !demoAllowed || (defaultOnly && !localMode(prior)) ? 'empty' : input.seed ?? 'demo', requestId = `create:${slug}`;
     const inputHash = createHash('sha256').update(canonical({ type: 'workspace.create', actorId: prior.userId, name, seed })).digest('hex');
     const create = () => this.transact(async db => {
       const actor = await this.authorize(db, prior);
