@@ -3,7 +3,7 @@ import express from 'express';
 import request from 'supertest';
 import { createAuthService } from '../../auth/service';
 import { createAdminRouter } from '../route';
-/** 2026-11：后台账号只读按 users:read；审计日志导出按 audit:export；其余后台接口仍要 users:admin。 */
+/** 2026-11：后台账号只读按 users:read；审计日志导出须 users:admin 加 audit:export；其余后台接口仍要 users:admin。 */
 const token = (permissions: string[]) => createAuthService().signToken({ userId: 'u-1', displayName: 'U', roles: [], permissions, departmentIds: [] } as any);
 function app() {
   const prisma: any = {
@@ -25,16 +25,18 @@ describe('后台权限码判定点', () => {
     const { a } = app();
     expect((await request(a).get('/admin/users').set('Authorization', `Bearer ${token(['orders:read'])}`)).status).toBe(403);
   });
-  it('audit:export 可以导出审计日志 CSV；只有 users:admin 不能导出', async () => {
+  it('导出审计日志须同时持有 users:admin 与 audit:export；只有其一都不能导出', async () => {
     const { a, prisma } = app();
-    const ok = await request(a).get('/admin/audit-logs/export?targetType=UserAccount').set('Authorization', `Bearer ${token(['audit:export'])}`);
+    expect((await request(a).get('/admin/audit-logs/export').set('Authorization', `Bearer ${token(['audit:export'])}`)).status).toBe(403);
+    expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
+    const ok = await request(a).get('/admin/audit-logs/export?targetType=UserAccount').set('Authorization', `Bearer ${token(['users:admin', 'audit:export'])}`);
     expect(ok.status).toBe(200); expect(ok.headers['content-type']).toContain('text/csv'); expect(ok.text).toContain('林舒');
     expect(prisma.auditLog.findMany.mock.calls[0][0].where).toMatchObject({ targetType: 'UserAccount' });
     expect((await request(a).get('/admin/audit-logs/export').set('Authorization', `Bearer ${token(['users:admin'])}`)).status).toBe(403);
   });
   it('导出筛选参数非法时 400，不查库', async () => {
     const { a, prisma } = app();
-    expect((await request(a).get('/admin/audit-logs/export?createdFrom=abc').set('Authorization', `Bearer ${token(['audit:export'])}`)).status).toBe(400);
+    expect((await request(a).get('/admin/audit-logs/export?createdFrom=abc').set('Authorization', `Bearer ${token(['users:admin', 'audit:export'])}`)).status).toBe(400);
     expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
   });
   it('知识库 ACL 写入需要 knowledge:admin；只有 users:admin 不能改', async () => {
