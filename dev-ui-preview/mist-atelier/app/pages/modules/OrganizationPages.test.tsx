@@ -77,9 +77,14 @@ describe('管理后台 · 账号', () => {
     expect(table).toContain('ghost');
     expect(table).toContain('新建岗位');
   });
-  it('shows the audit CSV export only to audit:export holders and downloads from the export endpoint', async () => {
+  it('shows the audit CSV export only to holders of both users:admin and audit:export and downloads from the export endpoint', async () => {
     bridge.routes['GET /api/admin/audit-logs?limit=50&offset=0'] = () => ({ ok: true, total: 0, logs: [] });
     bridge.perms = ['users:admin', 'audit:read'];
+    await render(CompanyAdminPage, 'admin-panel', 'audit');
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect([...document.querySelectorAll('button')].some(b => b.textContent === '导出 CSV')).toBe(false);
+    // 只有 audit:export、没有 users:admin：服务端会拒绝导出，入口也不显示。
+    bridge.perms = ['audit:read', 'audit:export'];
     await render(CompanyAdminPage, 'admin-panel', 'audit');
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     expect([...document.querySelectorAll('button')].some(b => b.textContent === '导出 CSV')).toBe(false);

@@ -317,7 +317,7 @@ export function AdminAuditLog() {
     {error && <Banner tone="bad" title={uiText("审计日志读取失败")} actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
     <Toolbar right={<span className="mist-note">{uiText("共 ")}{total}{uiText(" 条 · 第 ")}{uiText(page + 1)} / {Math.max(1, Math.ceil(total / size))}{uiText(" 页")}</span>}>
       <Field label={uiText("对象")}><Select aria-label={uiText("审计对象")} value={targetType} onChange={e => { setPage(0); setTargetType(e.target.value); }} options={[{ value: '', label: '全部对象' }, ...Object.entries(AUDIT_TARGETS).map(([value, label]) => ({ value, label }))]} /></Field>
-      {session.hasPermission('audit:export') && <Button icon={Download} loading={exporting} disabled={loading || exporting} onClick={() => void exportCsv()}>{uiText("导出 CSV")}</Button>}
+      {session.hasPermission('users:admin') && session.hasPermission('audit:export') && <Button icon={Download} loading={exporting} disabled={loading || exporting} onClick={() => void exportCsv()}>{uiText("导出 CSV")}</Button>}
       <Button disabled={loading || page === 0} onClick={() => setPage(page - 1)}>{uiText("上一页")}</Button><Button disabled={loading || (page + 1) * size >= total} onClick={() => setPage(page + 1)}>{uiText("下一页")}</Button>
     </Toolbar>
     <Card><DataTable ariaLabel={uiText("审计日志")} rows={rows} rowKey={r => r.id} loading={loading} columns={[
