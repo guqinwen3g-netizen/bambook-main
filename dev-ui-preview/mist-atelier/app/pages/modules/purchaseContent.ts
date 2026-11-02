@@ -3,7 +3,7 @@ import { assertOrderNotTerminated } from '../../../../../server/src/shared/mistO
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 
 const KIND_LABEL = { material: '材料', finished: '成品', processing: '加工服务' };
-const MATERIAL_LABEL = { fabric: '面料', trims: '辅料', packaging: '包装', other: '其他材料' };
+const MATERIAL_LABEL = { fabric: '面料', greige: '坯布 / 纱线', trims: '辅料', packaging: '包装', other: '其他材料' };
 
 export function purchaseContent(p: Pick<FulfillmentPurchase, 'kind' | 'materialKind'>) {
   return p.kind === 'material' && p.materialKind ? MATERIAL_LABEL[p.materialKind] : KIND_LABEL[p.kind];

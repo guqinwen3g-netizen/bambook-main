@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {materialDeliveryFixture} from '../../../../../server/src/mist/__tests__/materialDelivery';
+import {fabricStagedFixture} from '../../../../../server/src/mist/__tests__/fabricStaged';
 import React,{act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
@@ -341,6 +342,19 @@ it.each(['warehouse','supplier'] as const)('records the processing target only o
   const command=store.run.mock.calls.at(-1)![0],payload=command.payload;expect(command.type).toBe(destination==='supplier'?'fulfillment.materials.deliver':'fulfillment.procurement.receive');expect(payload.destination).toBe(destination==='warehouse'?'warehouse':undefined);expect(payload.targetProductionId).toBe(destination==='supplier'?f.productionId:undefined);
 });
 
+it('sends greige straight to the same item\'s dyeing contract and lets the dyed fabric enter stock',async()=>{
+  const f=fabricStagedFixture();store.state=f.state;session.id='sales';render(f.greige);
+  await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));
+  let dialog=getByRole(document.body,'dialog',{name:'登记收料'});const path=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
+  act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));});
+  expect((getByRole(dialog,'combobox',{name:'直送加工单'}) as HTMLSelectElement).value).toBe(f.branch.id);
+  typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'织厂送货单 WJ-1013');
+  await click(getByRole(dialog,'button',{name:'登记本次交付',exact:true}));
+  expect(store.run.mock.calls.at(-1)![0]).toMatchObject({type:'fulfillment.materials.deliver',payload:{id:f.greige,targetProductionId:f.branch.id,quantity:3800}});
+  render(f.dyeing);await click(getByRole(host,'button',{name:'登记加工回交'}));
+  dialog=getByRole(document.body,'dialog',{name:'登记加工回交'});const paths=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;
+  expect(paths.value).toBe('warehouse');expect([...paths.options].filter(o=>o.value).map(o=>o.textContent)).toEqual(['入我方仓库','加工厂直送客户或指定地点']);
+});
 it('does not call confirmed processing started until the exact production branch has a release',()=>{
   store.state!.fulfillment.purchases.push(purchase('start',approved({kind:'processing',offlineSend:{at:'2026-10-04T08:00:00Z',actor:'经办人',evidence:'交厂',fileIds:[],revision:1},supplierConfirmation:{at:'2026-10-05T08:00:00Z',actor:'经办人',evidence:'回函',confirmedDue:'2026-10-30',fileIds:[],revision:1}})));
   store.state!.productions.push({id:'branch',sourcePurchaseId:'start',orderId:'o',lineId:'l',col:'cut',pct:0} as any);

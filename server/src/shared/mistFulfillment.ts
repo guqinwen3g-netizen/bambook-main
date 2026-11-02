@@ -1,7 +1,7 @@
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -970,7 +970,8 @@ export function fulfillmentProductionColumn(root: MistState, branch: MistProduct
     return branch.col === 'done' ? 'qc' : branch.col;
 }
 function materialQualityProof(root: MistState, purchase: FulfillmentPurchase, delivery: MaterialDeliveryLink) {
-    if (!root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
+    // Greige going to the next mill is counted there; release QC applies to the finished internal fabric only.
+    if (isFabricStageMaterial(purchase) || !root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
     const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
     if (!branch) fail('来源面料缺少准确生产分支');
     requireProductionQc(root, branch!);
@@ -1587,7 +1588,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 fail('收货日期不得在未来');
             if (!['warehouse', 'supplier'].includes(p.destination))
                 fail('收货路径无效');
-            if (purchase.kind === 'processing' && p.destination === 'warehouse')
+            // Dyed/finished fabric is physical goods and may enter stock; garment processing returns stay a service handover.
+            if (purchase.kind === 'processing' && purchase.domain !== 'fabric' && p.destination === 'warehouse')
                 fail('加工服务交付不能作为物料入库');
             let materialDelivery: MaterialDeliveryLink | undefined;
             if (quantity > 0 && p.destination === 'supplier' && materialDeliveryRequired(root, purchase.id)) {
@@ -1606,7 +1608,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             }
             if (p.destination === 'warehouse' && quantity > 0) {
                 const stockId = ctx.id();
-                f.stock.push({ id: stockId, purchaseId: purchase.id, receiptId: id, orderId: purchase.orderId, lineId: purchase.lineId, name: purchase.description, unit: purchase.unit, quantity, available: quantity, location, owner: '公司', createdAt: ctx.now });
+                // A processing return is the processed fabric itself, not the service description.
+                const stockName = purchase.kind === 'processing' ? get(root.orderLines, purchase.lineId, '订单条目').name : purchase.description;
+                f.stock.push({ id: stockId, purchaseId: purchase.id, receiptId: id, orderId: purchase.orderId, lineId: purchase.lineId, name: stockName, unit: purchase.unit, quantity, available: quantity, location, owner: '公司', createdAt: ctx.now });
                 f.stockMovements.push({ id: ctx.id(), stockId, kind: 'receive', quantity, location, person: purchase.supplier, note: evidence, at: ctx.now, actor: ctx.actorName });
             }
             audit(root, ctx, 'procurement', purchase.id, `登记真实交付 ${quantity} ${purchase.unit}${purchase.received !== purchase.quantity ? ' · 数量差异待处理' : ''}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });

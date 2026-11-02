@@ -40,6 +40,13 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 未确认且仍有交接余量时，首页/侧栏给当前有效接收人同一条事项，直接打开准确加工合同详情。真实确认接收或整笔退回后自动消失，不创建可手工勾完的替代任务。
 - 源码：`runtime/workQueue.ts::mistWorkQueue` → `MaterialDeliveryPanel` → `fulfillment.materials.confirm`。仓库发料和供应商直送沿用原交接ID、数量、分配版本与QC来源。
 
+## 当前 Mist 面料分段委外交接（P1-1 第一块）
+
+- 物料类别 `greige`（坯布 / 纱线）只用于面料条目的物料采购。`isFabricStageMaterial` 判定后，`materialDeliveryTargets` / `prepareMaterialDelivery` 只接受**同一订单条目**、已批准且已线下发出并取得供应商确认的面料加工单；不走内部面料分配、不做成衣 QC 放行证明（`materialQualityProof` 跳过）。原有 `fabric`（成品面料）采购和内部供料到成衣厂的路径不变。
+- 点收人只取目标订单负责人（`materialReceiverIds`），不再加内部供料的成衣接收人。直送与仓库发料两条路径沿用 `fulfillment.materials.deliver` / `fulfillment.materials.issue` / `fulfillment.materials.confirm`，交接留在 `materialDeliveryRows`，坯布在染厂期间加工单不能取消或转厂（`hasMaterialAtFactory`）。
+- 面料加工单回交允许 `destination='warehouse'` 入库，批次名取订单条目品名；成衣加工回交仍不能入库。
+- 未做：单位换算、投入产出与损耗、多道工序链计划、开发打样的分段模式、分工序成本。设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`；测试 `server/src/shared/mistFabricStaged.test.ts`。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。
