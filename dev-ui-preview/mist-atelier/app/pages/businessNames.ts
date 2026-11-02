@@ -16,7 +16,7 @@ export function productionName(state: MistState, production: MistProduction): st
 }
 export function stockName(state: MistState, stock: FulfillmentStock): string {
   const purchase = state.fulfillment.purchases.find(row => row.id === stock.purchaseId);
-  if (purchase?.kind === 'processing') return itemName(state, purchase.orderId, purchase.lineId) || stock.name;
+  if (purchase?.kind === 'processing' && !purchase.stageTerms?.intermediate) return itemName(state, purchase.orderId, purchase.lineId) || stock.name;
   return (purchase && purchaseName(state, purchase)) || stock.name;
 }
 

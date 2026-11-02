@@ -639,7 +639,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.inventory.move",
-  "payload": "{ id: string; targetProductionId?: string; kind: 'issue' | 'return' | 'move'; quantity: number; location: string; person: string; note: string; issueId?: string; sourceLocation?: string; }",
+  "payload": "{ id: string; targetProductionId?: string; /** Intermediate fabric processing contract receiving the goods (it has no production branch). */ targetPurchaseId?: string; kind: 'issue' | 'return' | 'move'; quantity: number; location: string; person: string; note: string; issueId?: string; sourceLocation?: string; }",
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
@@ -684,12 +684,12 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.materials.deliver",
-  "payload": "{ id: string; targetProductionId: string; quantity: number; rejected: number; location: string; date: string; evidence: string; fileIds: string[] }",
+  "payload": "{ id: string; targetProductionId?: string; targetPurchaseId?: string; quantity: number; rejected: number; location: string; date: string; evidence: string; fileIds: string[] }",
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
   "type": "fulfillment.materials.issue",
-  "payload": "{ id: string; targetProductionId: string; quantity: number; location: string; person: string; note: string; sourceLocation?: string }",
+  "payload": "{ id: string; targetProductionId?: string; targetPurchaseId?: string; quantity: number; location: string; person: string; note: string; sourceLocation?: string }",
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
@@ -709,7 +709,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.procurement.receive",
-  "payload": "{ id: string; targetProductionId?: string; quantity: number; rejected: number; destination: 'warehouse' | 'supplier'; location: string; date: string; evidence: string; fileIds: string[]; }",
+  "payload": "{ id: string; targetProductionId?: string; /** Intermediate fabric processing contract receiving the goods (it has no production branch). */ targetPurchaseId?: string; quantity: number; rejected: number; destination: 'warehouse' | 'supplier'; location: string; date: string; evidence: string; fileIds: string[]; }",
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {

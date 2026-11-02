@@ -7,9 +7,10 @@
  */
 import { MistCommandError, type MistState } from './mistWorkspace';
 import type { FulfillmentPurchase } from './mistFulfillment';
-import { isFabricStageMaterial, materialDeliveryRows } from './mistInternalFabric';
+import { deliveryContractId, isFabricStageMaterial, isFabricStageSource, materialDeliveryRows } from './mistInternalFabric';
 
-export type FabricStageTerms = { kgPerMetre?: number; lossPercent?: number };
+/** intermediate: this processing step (e.g. weaving or dyeing before finishing) hands its output to the next processing contract. */
+export type FabricStageTerms = { kgPerMetre?: number; lossPercent?: number; intermediate?: boolean };
 type StagePurchase = Pick<FulfillmentPurchase, 'domain' | 'kind' | 'materialKind' | 'unit'>;
 
 const fail = (message: string): never => { throw new MistCommandError('VALIDATION', message, 422); };
@@ -26,7 +27,7 @@ export const fabricStageWeighed = (p: StagePurchase) => isFabricStageMaterial(p)
 /** Only the terms that belong to this kind of contract are kept; anything else is a client error, not silently dropped. */
 export function normalizeFabricStageTerms(p: StagePurchase, input: unknown): FabricStageTerms | undefined {
   if (input === undefined || input === null) return undefined;
-  if (typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'kgPerMetre' && key !== 'lossPercent')) fail('工序约定格式无效');
+  if (typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'kgPerMetre' && key !== 'lossPercent' && key !== 'intermediate')) fail('工序约定格式无效');
   const value = input as Record<string, unknown>, terms: FabricStageTerms = {};
   if (value.kgPerMetre !== undefined) {
     if (!fabricStageWeighed(p)) fail('仅按公斤采购的坯布填写每米重量');
@@ -36,12 +37,16 @@ export function normalizeFabricStageTerms(p: StagePurchase, input: unknown): Fab
     if (!isFabricProcessing(p)) fail('仅面料加工单填写约定加工损耗');
     terms.lossPercent = decimal(value.lossPercent, '约定加工损耗', 0, 50, 2);
   }
+  if (value.intermediate !== undefined) {
+    if (typeof value.intermediate !== 'boolean') fail('前道加工标记格式无效');
+    if (value.intermediate) { if (!isFabricProcessing(p)) fail('仅面料加工单可作为前道加工'); terms.intermediate = true; }
+  }
   return Object.keys(terms).length ? terms : undefined;
 }
 /** One line for reviews and contract documents, e.g. "每米重量 0.72 公斤" or "约定加工损耗 5%". */
 export function fabricStageTermsText(p: { stageTerms?: FabricStageTerms }): string {
   const t = p.stageTerms; if (!t) return '';
-  return [t.kgPerMetre !== undefined && `每米重量 ${t.kgPerMetre} 公斤`, t.lossPercent !== undefined && `约定加工损耗 ${t.lossPercent}%（按出缸米数计费）`].filter(Boolean).join('；');
+  return [t.intermediate && '前道加工，成品交下一道加工厂', t.kgPerMetre !== undefined && `每米重量 ${t.kgPerMetre} 公斤`, t.lossPercent !== undefined && `约定加工损耗 ${t.lossPercent}%（按出缸米数计费）`].filter(Boolean).join('；');
 }
 /** Submission gate: a weighed greige contract cannot be compared with dyed metres without its weight per metre. */
 export function fabricStageSubmitProblem(p: FulfillmentPurchase): string {
@@ -68,12 +73,11 @@ export type FabricStageBalance = {
 export function fabricStageBalance(root: MistState, processingId: string): FabricStageBalance | null {
   const contract = root.fulfillment?.purchases.find(p => p.id === processingId);
   if (!contract || !isFabricProcessing(contract)) return null;
-  const branch = root.productions.find(job => job.sourcePurchaseId === contract.id);
   const totals = new Map<string, number>();
-  if (branch) for (const row of materialDeliveryRows(root)) {
-    if (row.delivery.productionId !== branch.id) continue;
+  for (const row of materialDeliveryRows(root)) {
+    if (deliveryContractId(root, row.delivery) !== contract.id) continue;
     const source = root.fulfillment.purchases.find(p => p.id === row.purchaseId);
-    if (!isFabricStageMaterial(source)) continue;
+    if (!isFabricStageSource(source)) continue;
     totals.set(source!.id, round((totals.get(source!.id) || 0) + Number(row.accepted)));
   }
   const inputs: FabricStageInput[] = [...totals].map(([id, accepted]) => {

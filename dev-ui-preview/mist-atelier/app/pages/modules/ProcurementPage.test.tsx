@@ -379,6 +379,24 @@ it('asks for the weight per metre only on greige bought by kilogram, and the los
   expect(getByRole(host,'spinbutton',{name:'每米重量（公斤/米）'})).toBeTruthy();
   expect(queryByRole(host,'spinbutton',{name:'约定加工损耗（%）'})).toBeNull();
 });
+it('lets greige go to an intermediate dyeing contract and the dyed fabric on to the finishing contract',async()=>{
+  const f=fabricStagedFixture({intermediateDyeing:true}),finishing=f.contract('processing',3600,'米',{lossPercent:3},'finisher');
+  const finishBranch=f.state.productions.find(p=>p.sourcePurchaseId===finishing)!;
+  store.state=f.state;session.id='sales';render(f.greige);
+  await click(getByRole(host,'button',{name:'登记本次交付',exact:true}));
+  let dialog=getByRole(document.body,'dialog',{name:'登记收料'});
+  const path=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;act(()=>{path.value='supplier';path.dispatchEvent(new Event('change',{bubbles:true}));});
+  const target=getByRole(dialog,'combobox',{name:'直送加工单'}) as HTMLSelectElement;
+  expect([...target.options].filter(o=>o.value).map(o=>o.value)).toEqual(['contract:'+f.dyeing,finishBranch.id]);
+  act(()=>{target.value='contract:'+f.dyeing;target.dispatchEvent(new Event('change',{bubbles:true}));});
+  typeInto(getByRole(dialog,'textbox',{name:'点数与交接依据'}) as HTMLTextAreaElement,'织厂送货单');
+  await click(getByRole(dialog,'button',{name:'登记本次交付',exact:true}));
+  const sent=store.run.mock.calls.at(-1)![0];expect(sent).toMatchObject({type:'fulfillment.materials.deliver',payload:{id:f.greige,targetPurchaseId:f.dyeing}});expect(sent.payload.targetProductionId).toBeUndefined();
+  render(f.dyeing);expect(host.textContent).not.toContain('待放行');expect(host.textContent).toContain('前道加工，成品交下一道加工厂');
+  await click(getByRole(host,'button',{name:'登记加工回交'}));
+  dialog=getByRole(document.body,'dialog',{name:'登记加工回交'});
+  const paths=getByRole(dialog,'combobox',{name:'交付路径'}) as HTMLSelectElement;expect([...paths.options].filter(o=>o.value).map(o=>o.textContent)).toEqual(['入我方仓库','直送下一道加工厂']);
+});
 it('does not call confirmed processing started until the exact production branch has a release',()=>{
   store.state!.fulfillment.purchases.push(purchase('start',approved({kind:'processing',offlineSend:{at:'2026-10-04T08:00:00Z',actor:'经办人',evidence:'交厂',fileIds:[],revision:1},supplierConfirmation:{at:'2026-10-05T08:00:00Z',actor:'经办人',evidence:'回函',confirmedDue:'2026-10-30',fileIds:[],revision:1}})));
   store.state!.productions.push({id:'branch',sourcePurchaseId:'start',orderId:'o',lineId:'l',col:'cut',pct:0} as any);

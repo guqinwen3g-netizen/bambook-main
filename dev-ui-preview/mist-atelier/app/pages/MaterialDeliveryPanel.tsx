@@ -18,8 +18,8 @@ export function MaterialDeliveryPanel({ rows }: { rows: MaterialDeliveryRow[] })
     <CardHeader title={uiText('物料交接')} />
     {rows.slice().reverse().map(row => {
       const purchase = workspace.state?.fulfillment.purchases.find(p => p.id === row.purchaseId);
-      const production = workspace.state?.productions.find(p => p.id === row.delivery.productionId);
-      const contract = workspace.state?.fulfillment.purchases.find(p => p.id === production?.sourcePurchaseId);
+      const production = row.delivery.productionId ? workspace.state?.productions.find(p => p.id === row.delivery.productionId) : undefined;
+      const contract = workspace.state?.fulfillment.purchases.find(p => p.id === (row.delivery.contractId ?? production?.sourcePurchaseId));
       const currentOwner = workspace.state?.orders.find(o => o.id === row.delivery.orderId);
       const receiver = row.delivery.receivingChecks?.at(-1)?.actor || row.delivery.confirmation?.actor || currentOwner?.owner || row.delivery.receiver;
       const canReceive = row.pending !== '0' && !row.delivery.confirmation && !!workspace.state && materialReceiverIds(workspace.state, row).includes(session?.user?.id || '') && !!session?.hasPermission('orders:write');
