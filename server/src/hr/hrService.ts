@@ -17,6 +17,7 @@
 import { PrismaClient } from '@prisma/client';
 import { publishBusinessEvent } from '../events/businessEventBus';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
+import { revokeAllSessions } from '../auth/sessionRevocation';
 import { logger } from '../lib/logger';
 // ★ 口径 C1：服务端工作日源（副本，真源 = utils/chinaHolidays.ts，同步守卫在 __tests__/chinaHolidaysSync）
 import { countWorkdaysInclusive, listWorkdaysInclusive } from '../_shared/chinaHolidays';
@@ -568,7 +569,7 @@ export function createHrService(prisma: PrismaClient) {
         data: {
           status: 'disabled',
           metadata: {
-            ...((user.metadata as any) || {}),
+            ...revokeAllSessions(user.metadata),
             disabledAt: new Date().toISOString(),
             disabledBy: actorId || 'system',
             disabledReason: input.type === 'Resign' ? 'resignation' : 'termination',
@@ -594,7 +595,7 @@ export function createHrService(prisma: PrismaClient) {
         data: {
           status: 'active',
           metadata: {
-            ...((user.metadata as any) || {}),
+            ...revokeAllSessions(user.metadata),
             rehiredAt: new Date().toISOString(),
             rehiredBy: actorId || 'system',
             rehiredFromStatus: fromStatus,

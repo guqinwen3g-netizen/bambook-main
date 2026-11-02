@@ -5,6 +5,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { createAuthService } from '../auth/service';
 import { pickRequestToken } from '../auth/middleware';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
+import { revokeAllSessions } from '../auth/sessionRevocation';
 import { createCompany, companyRoleId, COMPANY_SYSTEM_ROLE_CODES } from './companyProvisioning';
 import { companyAdministratorIds } from '../auth/companyAdministration';
 import { passwordProblem } from '../auth/passwordPolicy';
@@ -357,9 +358,12 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
         const membership = await tx.companyMember.findUnique({ where: { companyId_userId: { companyId, userId: user.id } } });
         if (membership?.status !== 'active' && current.seatLimit !== null && await tx.companyMember.count({ where: { companyId, status: 'active', user: { status: 'active', deletedAt: null } } }) >= current.seatLimit) return 'full';
         await tx.companyMember.upsert({ where: { companyId_userId: { companyId, userId: user.id } }, update: { status: 'active' }, create: { id: randomUUID(), companyId, userId: user.id, status: 'active', joinedAt: new Date(), invitedBy: admin.userId } });
+        // 移除后重新加入：作废移除前签发的令牌，避免旧的本公司会话复活。
+        if (membership && membership.status !== 'active') { const row = await tx.userAccount.findUniqueOrThrow({ where: { id: user.id }, select: { metadata: true } }); await tx.userAccount.update({ where: { id: user.id }, data: { metadata: revokeAllSessions(row.metadata) as any } }); }
         return 'joined';
       });
       if (joined !== 'joined') return res.status(409).json({ ok: false, error: joined === 'full' ? 'SEAT_LIMIT_REACHED' : 'COMPANY_UNAVAILABLE', message: joined === 'full' ? '公司席位已用完，请先增加席位。' : '公司未启用，不能添加成员。' });
+      invalidateAccountStatusCache(user.id);
       await audit(admin.userId, 'platform.company.member.add', companyId, { userId: user.id, email });
       return res.json({ ok: true, member: { userId: user.id, displayName: user.displayName, email } });
     } catch (error) {

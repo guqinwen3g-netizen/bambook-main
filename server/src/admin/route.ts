@@ -7,6 +7,7 @@ import { createAuthService } from '../auth/service';
 import { extractActorFromRequest } from '../auth/middleware';
 import { requirePermission } from '../auth/permissionGuard';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
+import { revokeAllSessions } from '../auth/sessionRevocation';
 import { createModuleAuthGuard } from '../auth/moduleGuard';
 import { buildAuditLogQuery } from '../audit/entityQuery';
 import { AgentRole } from '../agent/types';
@@ -380,7 +381,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
           primaryDeptId: departmentId || null,
           deletedAt: null,
           metadata: {
-            ...reactivatedMetadata,
+            ...revokeAllSessions(reactivatedMetadata),
             ...firstLogin,
             reactivatedAt: new Date().toISOString(),
           },
@@ -445,7 +446,13 @@ export function createAdminRouter(options: AdminRouterOptions) {
     if (status !== undefined) data.status = status;
     if (departmentId !== undefined) data.primaryDeptId = departmentId;
     if (status === 'active') data.deletedAt = null;
+    if (status !== undefined) {
+      const target = await options.prisma.userAccount.findUnique({ where: { id }, select: { status: true, metadata: true } });
+      if (!target) return res.status(404).json({ ok: false, error: 'NOT_FOUND', message: '用户不存在。' });
+      if (target.status !== status) data.metadata = revokeAllSessions(target.metadata);
+    }
     await options.prisma.userAccount.update({ where: { id }, data });
+    if (status !== undefined) invalidateAccountStatusCache(id);
     const actor = (req as any).actor;
     await options.prisma.auditLog.create({
       data: { id: `alog_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, actorId: actor?.userId || 'system', action: 'update_user', targetType: 'UserAccount', targetId: id, ip: req.ip },
@@ -525,7 +532,7 @@ export function createAdminRouter(options: AdminRouterOptions) {
       data: {
         status: 'disabled',
         metadata: {
-          ...(target.metadata as any || {}),
+          ...revokeAllSessions(target.metadata),
           disabledAt: new Date().toISOString(),
           disabledBy: actor?.userId || 'system',
         },

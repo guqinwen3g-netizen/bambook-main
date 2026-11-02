@@ -4,6 +4,7 @@ import type { PrismaClient, Prisma } from '@prisma/client';
 import { createAuthService } from '../auth/service';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { invalidateAccountStatusCache } from '../auth/accountStatusGuard';
+import { revokeAllSessions } from '../auth/sessionRevocation';
 
 const CONFIG_ID = 'platform::company-defaults';
 export const COMPANY_DEFAULTS = { plan: 'standard', seatLimit: null as number | null };
@@ -85,7 +86,7 @@ export function platformSettingsRouter(db: PrismaClient, authorize: (req: Reques
         const account = await tx.userAccount.findFirst({ where: { ...where, id: req.params.id } });
         if (!account) return 'missing';
         if (status !== 'active' && await tx.userAccount.count({ where: { ...where, status: 'active' } }) <= 1) return 'last';
-        await tx.userAccount.update({ where: { id: account.id }, data: { status } });
+        await tx.userAccount.update({ where: { id: account.id }, data: account.status === status ? { status } : { status, metadata: revokeAllSessions(account.metadata) as any } });
         await tx.auditLog.create({ data: { id: randomUUID(), actorId: actor.userId, action: 'platform.staff.update', targetType: 'UserAccount', targetId: account.id, detail: { before: account.status, after: status } } });
         return 'ok';
       });
