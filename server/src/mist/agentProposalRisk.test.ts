@@ -6,6 +6,7 @@ import {MemoryMistDatabase,testAuthority} from './__tests__/support';
 import {MIST_COMMAND_CATALOG} from './agentCommandCatalog';
 import {MistRepository} from './repository';import {createLoginRateLimiter} from '../auth/loginRateLimiter';import {MistPrivateFiles} from './files';
 /** AI 写入三级确认：确认人须有该风险档的 ai:write:* 码；高风险须复验登录密码；原命令业务权限照常校验；等级按规则判定（见 mistAgentProposals.ts）。 */
+const REVIEWED_MEDIUM_BY_EXCEPTION=['finance.statement.generate','finance.importReceipts','lc.files','lc.save','rebate.claim.file','rebate.rate.save','payable.request.submit','payable.payment.plan','payable.plan.register','payable.bill.classify','payable.bill.link','payable.plan.cancel','payable.purchase.cancel','payable.request.cancel','payable.settlement.cancel','platform.invoice.save','order.internal.reverseCheck','fulfillment.procurement.rejectReceived','fulfillment.procurement.return.reverse','fulfillment.customs.classify.void'];
 let directory:string,db:MemoryMistDatabase,repo:MistRepository,auth:ReturnType<typeof testAuthority>,workspaceId:string,checked:string[];
 // 本人自己的空间：没有公司行级范围，只看权限码。
 const actor:any={userId:'staff',displayName:'Staff',roles:[],authorizationLoaded:true};
@@ -33,9 +34,25 @@ describe('AI 提议三级确认',()=>{
   expect(agentCommandRisk('brand.new.approve')).toBe('high');expect(agentCommandRisk('payable.anything')).toBe('high');
   const known=new Set(MIST_COMMAND_CATALOG.map(c=>c.type));for(const type of Object.keys(AGENT_COMMAND_RISK))expect([type,known.has(type)]).toEqual([type,true]);
  });
+ it('2026-11-02 复核裁定：逐条断言',()=>{
+  const known=new Set(MIST_COMMAND_CATALOG.map(c=>c.type));
+  const cases:Array<[AgentCommandRisk,string[],string]>=[
+   ['medium',REVIEWED_MEDIUM_BY_EXCEPTION,'资金前缀或动词下只登记资料、排计划、提交申请或撤回，不付款、核销、审批'],
+   ['high',['fxrate.period.save'],'月末汇率影响付款审批档位折算'],
+   ['high',['development.charge.void','development.qc.decide','platform.risk.decide'],'作废收费项、审批决定'],
+   ['high',['handover.customer','handover.account'],'负责人变更'],
+   ['high',['fulfillment.qc.confirm','fabric.confirm','development.confirm'],'审批 / 放行类确认'],
+   ['high',['platform.claim.disposition','platform.claim.execute','platform.claim.verify'],'索赔核定、赔付方案与执行'],
+   ['high',['fulfillment.inventory.quarantine.dispose','fulfillment.claimInventory.scrap'],'库存报废处置'],
+   ['medium',['rfq.award','market.quotation.convert','cost.expense.register','development.charge.add','development.expense.add','development.sample.dispatchFee','development.billing.request','development.billing.withdraw','platform.pricing.save','market.quotation.costing.save','order.governance.requestCancel','order.governance.requestOverShip','fulfillment.documents.issue','fulfillment.shipments.sent','market.import'],'普通业务写入，后续仍有审批或财务环节'],
+  ];
+  for(const [risk,types,reason] of cases)for(const type of types){expect([type,known.has(type)]).toEqual([type,true]);expect([type,reason,agentCommandRisk(type)]).toEqual([type,reason,risk]);}
+  for(const type of MIST_COMMAND_CATALOG.map(c=>c.type).filter(t=>/^payable\..*\.cancel$/.test(t)))expect([type,agentCommandRisk(type)]).toEqual([type,'medium']);
+ });
  it('守卫：命令目录逐条按规则分级，资金 / 审批 / 核销命令一律为高',()=>{
   // 显式登记优先于规则；登记里与规则冲突的只有下面两条中风险例外（原因见 mistAgentProposals.ts）。
-  const exceptions:Record<string,AgentCommandRisk>={'payable.settlement.submit':'medium','order.fabric.allocate':'medium'};
+  // payable.settlement.submit 只交财务复核；order.fabric.allocate 是物料分配；其余为 2026-11-02 复核裁定：只登记资料、排计划、提交申请或撤回，不付款、核销、审批。
+  const exceptions:Record<string,AgentCommandRisk>=Object.fromEntries(['payable.settlement.submit','order.fabric.allocate',...REVIEWED_MEDIUM_BY_EXCEPTION].map(t=>[t,'medium' as const]));
   const rule=(type:string):AgentCommandRisk=>HIGH_RISK_COMMANDS.has(type)||HIGH_RISK_PREFIXES.some(p=>type.startsWith(p))||HIGH_RISK_VERB.test(type)?'high':'medium';
   for(const {type} of MIST_COMMAND_CATALOG){
    const registered=AGENT_COMMAND_RISK[type];
@@ -44,11 +61,11 @@ describe('AI 提议三级确认',()=>{
   }
   for(const [type,risk] of Object.entries(exceptions))expect([type,agentCommandRisk(type)]).toEqual([type,risk]);
   const money=['payable.payment.register','payable.request.decide','payable.bill.register','payable.prepayment.refund','finance.receivable.confirm','finance.reconcile','finance.payment.save','funding.release','fxrate.period.save','lc.present','rebate.claim.approve','opening.payable.import','platform.credit.issue','platform.invoice.issue','platform.claim.recovery.waive','platform.claim.recovery.settle','market.supplier.bank.save','cost.expense.payable','development.billing.issue','market.marginFloor.set'];
-  const approval=['order.governance.decide','market.quotation.decide','platform.claim.decide','platform.risk.decide','development.qc.decide','fulfillment.procurement.decide','fulfillment.production.intake.decide','fulfillment.production.release','fulfillment.documents.void','order.governance.void','cost.expense.void','payable.settlement.reverse','finance.payment.reverse','order.internal.reverseCheck'];
+  const approval=['order.governance.decide','market.quotation.decide','platform.claim.decide','platform.risk.decide','development.qc.decide','fulfillment.procurement.decide','fulfillment.production.intake.decide','fulfillment.production.release','fulfillment.documents.void','order.governance.void','cost.expense.void','payable.settlement.reverse','finance.payment.reverse','fulfillment.qc.confirm','platform.claim.execute'];
   const authority=['settings.update','member.groups.set','teamScope.save','handover.customer','handover.account','platform.employee.save','platform.pricingParams.set'];
   const known=new Set(MIST_COMMAND_CATALOG.map(c=>c.type));
   for(const type of [...money,...approval,...authority]){expect([type,known.has(type)]).toEqual([type,true]);expect([type,agentCommandRisk(type)]).toEqual([type,'high']);}
-  for(const type of ['order.create','market.quotation.convert','market.quotation.submit','development.submit','fulfillment.procurement.submit','fulfillment.shipments.depart','platform.claim.create','contact.delete','rfq.award'])expect([type,agentCommandRisk(type)]).toEqual([type,'medium']);
+  for(const type of ['order.create','market.quotation.convert','market.quotation.submit','development.submit','fulfillment.procurement.submit','fulfillment.shipments.depart','platform.claim.create','contact.delete','rfq.award','order.internal.reverseCheck'])expect([type,agentCommandRisk(type)]).toEqual([type,'medium']);
  });
  it('缺少该风险档的 ai:write 码时拒绝确认，提议保持待确认',async()=>{
   propose(LOW);auth.users.get('staff')!.permissions=['ai:chat','ai:write:medium','ai:write:high'];

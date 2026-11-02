@@ -30,7 +30,8 @@ const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCo
  * - 低：LOW_RISK 显式清单（记跟进、加标签、标记已读等，不改单据内容）；
  * - 高：资金类前缀、权限与组织类前缀、生成应付或对客开票的命令，以及审批 / 决定 / 核销 / 冲销 / 作废 / 放款 / 分配类动词（命令任一段开头）；
  * - 中：其余写入命令（新建、修改、保存、提交、删除、发送、取消、关闭等）。
- * MEDIUM_RISK 显式登记优先于规则：payable.settlement.submit 只是把实收结算交财务复核、不改应付；order.fabric.allocate 是物料分配；二者按中风险。
+ * MEDIUM_RISK 显式登记优先于规则：payable.settlement.submit 只是把实收结算交财务复核、不改应付；order.fabric.allocate 是物料分配；
+ * 另有一批资金前缀下只登记资料、排计划或撤回本人申请的命令（2026-11-02 复核裁定），均按中风险。
  */
 export type AgentCommandRisk = 'low' | 'medium' | 'high';
 export const AI_WRITE_SCOPES: Record<AgentCommandRisk, string> = { low: 'ai:write:low', medium: 'ai:write:medium', high: 'ai:write:high' };
@@ -41,13 +42,23 @@ const MEDIUM_RISK = ['email.move', 'email.state.retry', 'email.draft.delete', 'e
   'crm.opportunity.save', 'crm.opportunity.stage', 'development.saveDraft', 'development.update', 'order.update', 'order.checklist', 'production.update',
   'fulfillment.procurement.save', 'fulfillment.shipments.save', 'fulfillment.documents.save', 'fulfillment.samples.create', 'fulfillment.samples.edit', 'payable.settlement.submit',
   // 动词规则的例外：把现有面料批次分配给订单行，是物料分配，不涉资金。
-  'order.fabric.allocate'];
+  'order.fabric.allocate',
+  // 资金前缀或动词规则的例外（2026-11-02 复核裁定）：只生成文件、登记资料、提交复核、排计划或撤回本人申请，不付款、不核销、不审批。
+  'finance.statement.generate', 'finance.importReceipts', 'lc.files', 'lc.save', 'rebate.claim.file', 'rebate.rate.save',
+  'payable.request.submit', 'payable.payment.plan', 'payable.plan.register', 'payable.bill.classify', 'payable.bill.link',
+  'payable.plan.cancel', 'payable.purchase.cancel', 'payable.request.cancel', 'payable.settlement.cancel', 'platform.invoice.save',
+  'order.internal.reverseCheck', 'fulfillment.procurement.rejectReceived', 'fulfillment.procurement.return.reverse', 'fulfillment.customs.classify.void'];
 export const AGENT_COMMAND_RISK: Readonly<Record<string, AgentCommandRisk>> = Object.freeze({ ...Object.fromEntries(LOW_RISK.map(t => [t, 'low' as const])), ...Object.fromEntries(MEDIUM_RISK.map(t => [t, 'medium' as const])) });
 /** 资金、账务、收款账户（付款 / 收款 / 开票 / 信用证 / 退税 / 汇率 / 期初）及权限、组织、价格参数类。 */
 export const HIGH_RISK_PREFIXES: readonly string[] = ['payable.', 'finance.', 'funding.', 'fxrate.', 'lc.', 'rebate.', 'opening.', 'platform.credit.', 'platform.invoice.', 'platform.claim.recovery.', 'market.supplier.bank.',
   'settings.', 'member.', 'teamScope.', 'handover.', 'platform.employee.', 'platform.pricingParams.'];
-/** 规则前缀以外的资金 / 价格底线命令：费用转应付、开发费对客开票、报价最低毛利率。 */
-export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.payable', 'development.billing.issue', 'market.marginFloor.set']);
+/**
+ * 规则前缀与动词以外的高风险命令：费用转应付、开发费对客开票、报价最低毛利率；
+ * 以及审批 / 放行类确认与索赔赔付、报废处置（2026-11-02 复核裁定）。
+ */
+export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.payable', 'development.billing.issue', 'market.marginFloor.set',
+  'fulfillment.qc.confirm', 'fabric.confirm', 'development.confirm', 'platform.claim.disposition', 'platform.claim.execute', 'platform.claim.verify',
+  'fulfillment.inventory.quarantine.dispose', 'fulfillment.claimInventory.scrap']);
 /** 审批、决定、驳回、减免、核销、放行、冲销、作废、退款、结清、分配、对账、清除。 */
 export const HIGH_RISK_VERB = /(^|\.)(approve|decide|reject|waive|writeoff|release|reverse|void|refund|settle|allocate|reconcile|purge)/i;
 export const agentCommandRisk = (type: string | undefined): AgentCommandRisk => {

@@ -47,8 +47,8 @@ describe('计税金额掩码', () => {
 
 describe('Agent 直接执行', () => {
   it('中 / 高风险命令不应能经 MCP 可办理委托直接执行而绕过 ai:write:* 与高风险密码复验', () => {
-    // 等级依据用户 2026-11-02 定案：付款、核销、审批为高风险（cost.expense.payable 生成应付）；其余普通业务写入为中风险。
-    const expected: Record<string, string> = { 'order.create': 'medium', 'cost.expense.payable': 'high', 'market.quotation.convert': 'medium', 'fulfillment.inventory.quarantine.dispose': 'medium', 'platform.claim.create': 'medium' };
+    // 等级依据用户 2026-11-02 定案：付款、核销、审批为高风险（cost.expense.payable 生成应付；隔离料报废处置按复核裁定为高）；其余普通业务写入为中风险。
+    const expected: Record<string, string> = { 'order.create': 'medium', 'cost.expense.payable': 'high', 'market.quotation.convert': 'medium', 'fulfillment.inventory.quarantine.dispose': 'high', 'platform.claim.create': 'medium' };
     for (const [type, risk] of Object.entries(expected)) {
       expect([type, agentCommandRisk(type)]).toEqual([type, risk]);
       expect(agentCommandSensitivity(type)).toBe('confirm');
