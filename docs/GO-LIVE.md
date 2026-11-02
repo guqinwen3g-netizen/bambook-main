@@ -128,7 +128,31 @@
 - **环境（用户 2026-11-02 定案）**：在平台管理新开一家干净的模拟公司，从开户、建部门、建岗位账号起步，五条主线都从客户开发开始；在公网 `bambook.sylway.cloud` 用真实浏览器实操，每步截图存本机私有目录。青屿不是彻底停用（10/30 的顾虑只针对拿它做 HTML 教学素材），本轮不用它。不碰 Panda 及其他真实租户。
 - **验收台账**：`wiki/matrix/coverage.json` 已从 103 项扩到 170 项，补齐此前一项都没登记的 14 个模块（orders、risks、relations、seasons、marketing、products、dashboard、reports、data-center、hr、business-tools、admin-panel、settings、mes）及平台管理，共 67 项，命令名与页面均经 `manual-coverage --check` 核对真实源码。当前实现状态：界面已走通 34、只有源码 123、未核对 9、未交付 4（真实邮箱收发、长任务无人值守、营销推广邮件发送、画册 PDF 导出）。hr、公司管理、平台管理及设置中的 Agent 服务身份走 REST 接口而非命令，台账中 commands 为空并注明端点。
 
-**P0 规则（用户 2026-11-02 07:40 定案）**：①付款审批分档：≤5 万元财务主管、>5 万元总监；新供应商首笔付款不论金额再加总经理一级；外币按当天汇率折人民币比较。②AI/Agent 写入按风险三级确认：低风险确认即执行；中风险确认时列出具体改动；高风险（付款、核销、审批）须本人重新输入登录密码；一律不超过确认人本人权限。③“保持登录”：勾选 30 天且使用中自动续期，不勾选关闭浏览器即退出；改密或停用后所有设备立即退出。
+**交接（2026-11-02 15:00，用户要求 handoff）——P0 四个包已实现、未合入 main、未部署。接手人从这里继续。**
+
+- **分支与工作树**（都已推送到 origin；工作树在本机 `~/.codex/worktrees/<名>`，node_modules 为指向主目录的符号链接）：
+  - `codex/p0-demo`（1 提交，完成）：生产环境禁止无公司账号建演示空间；公司空间恒为空数据。服务器只读核查：有公司的工作区 0 处演示数据；4 个无公司的演示空间（“平台AI连通测试”“Mist 工作区”×3）待用户决定是否清理。
+  - `codex/p0-catalog`（7 提交，完成）：命令目录 313 条与后端一致；补登记 4 条、移除 5 条永远失败或无入口的命令；platform.risk.decide 与审批页统一为 risk:write；新增 agentCommandCatalogGuard 守卫；覆盖脚本测试加 30s 超时。
+  - `codex/p0-auth`（8 提交，完成，含审查修复）：首次登录与重置后强制改密（改密前业务接口一律 403）、公司管理员可发邀请邮件开通、保持登录 30 天滑动续期／不勾选为会话 Cookie 与 12 小时令牌／距密码登录 90 天强制重登、错误提示中文。独立审查发现的 3 项已修：大小写路径绕过强制改密（290f3e4c）、重新启用账号使旧令牌复活（5e2e4f4c）、Mist AI 订阅与平台模型路由不复核账号（d066c813）；另旧版前端兼容（0e6657f1，探测需带 `X-Mist-Session-Probe: 2` 才返回 200）。定向测试通过；**合入前须在合并后的代码上重跑全量**。
+  - `codex/p0-security`（10 提交，**未完成**）：付款按人民币金额分档＋首笔付款加签、AI 提议按风险三级确认（低 12、中 29 条命令，其余按高；高风险服务端复验本人密码）、退税改 tax:*、锁汇改 fx:lock、计税金额掩码、补 users:read／audit:export／knowledge:admin／quotations:convert／customs:admin／胶囊豁免判定、关系归档后端拦截。独立审查（2026-11-02）发现 **3 高 5 中 1 低**，修复只做到 H1 一半（24c6430e，WIP：两级须不同人签；`mistPayables.test.ts:726` 一条旧断言待改为新提示）。审查失败用例已入库 `server/src/shared/securityReviewFindings.test.ts`（05d764ff，修好前 3 条应失败）。
+  - `codex/p0-integration`：四个分支合并（main f9f48ac0 之上，无冲突），**不含**上面 p0-auth 的 4 个审查修复和 p0-security 的后 2 个提交，需重建。此前在它上面跑：命令目录检查、两套 tsc 通过；test:mist 1895、test:access 942 全过；前端 `npm test` 2 文件失败（ReferenceApp.test.tsx 供应商搜索 1 条、AvatarStudio.test.tsx 1 条，是否 main 原有未核实完）；`mist:check` 4 错，全是 `AgentProposalDialog.test.tsx:36-45` 局部函数名 `confirm` 被 no-alert 规则误报，改名即可。
+- **p0-security 待修清单**（审查原文要点；每项先写失败测试）：
+  - H1 首笔付款两级由同一人连签放行（`mistPayables.ts` 决定处、`context.ts:105-109` 两档都上抬给同一位总领导）——已改一半，补完并修旧断言。
+  - H2 高风险密码复验无次数限制，且 bcrypt 在持有工作区 FOR UPDATE 锁的事务里执行（`repository.ts:751` 附近）——复用登录限流，按 userId 15 分钟 5 次失败锁定；复验移到取锁之前。
+  - H3 未登记（按高风险）的命令经 MCP 可办理委托直接执行，绕过 ai:write:high 与密码复验（`agentMcp.ts:29-34`，123 条判为 normal）——medium/high 一律只能建提议由人确认。
+  - M1 计税金额掩码可还原：账单保留 amount 与 taxRate；claim.approved.amount、receipts 未掩码；退税事件文本含“应退 X CNY”（`mistExportRebate.ts:276/288`）；前端 OrderActualCostPanel、PlatformReports 显示核准额。
+  - M2 已存在公司的岗位副本（`<code>@companyId`）不会同步新权限码（`companyProvisioning.ts:20-26`），老公司管理员拿不到 customs:admin，失去印章增改删——写幂等数据迁移脚本（只写不执行），改正迁移说明。
+  - M3 现有岗位因改用新码丢能力：业务员／销售主管／后勤无 tax:read，订单成本里退税静默变 0（应显示“无权查看”）；业务员／销售主管失去单证模板写入（`documentTemplateRoute.ts:41`）；除管理员外没有岗位有 ai:write:high，财务确认不了任何 payable.*／finance.* 提议。默认值建议：业务、跟单、QC、后勤 low+medium；财务、财务主管、销售主管、总经理 low+medium+high。两份 rolePermissionMatrix 同步并纳入 M2 迁移。
+  - M4 分档上线前已批准未付款的旧申请可不经分档直接登记付款（`mistPayables.ts:747`）——无 tier 的申请登记付款前退回 pending 按新规则重审。
+  - M5 拆单规避高档：判定档位时累计同一供应商 30 天内已提交未付和已付金额，审批详情写明累计数。
+  - L1 `/audit-logs/export`（`admin/route.ts:219`）只要求 audit:export、不再要求 users:admin——保留两者都要。
+  - 低（不阻断）：中风险确认界面只列出提议字段、未与当前值对比；有 fxrate 写权限者可作废重登月末汇率影响档位。
+- **合入步骤**（P0 全部修完后）：按 p0-demo → p0-catalog → p0-auth → p0-security 顺序在最新 main 上重建集成分支 → `npm test`、`cd server && npm run test:mist && npm run test:access`、两套 tsc、`npm run mist:check`、`node scripts/gen-mist-command-catalog.mjs --check` 全过 → 逐个开 PR 以 merge commit 合入 → `npm run dev:deploy`（部署脚本的构建会被 WorkBuddy 批量删除保护拦住：先单独运行 `python3 scripts/deploy/direct-dev.py verify`，再把 `dist/` 移到 `~/.workbuddy/backups/` 后运行 `npm run dev:deploy`）→ 在服务器执行 M2 迁移脚本。上线后员工可见变化：所有人需重新登录一次；不勾选保持登录时关浏览器即退出、新标签页需重登；超过 5 万元与新供应商首笔付款走对应审批级；AI 提议中涉及资金的操作确认时须输入密码。
+- **之后**：P1 分三线并行（按文件重叠分析）：①供应链线依次 P1-1 面料分段委外（设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`，沿用旧 MES 层 DR-047）→ P1-4 QC → P1-5 库存 → P1-3 单据；②P1-2 邮件打通；③P1-8 定价＋P1-6 财务后端。再做 P2、P3。走查（澄川模拟公司）停在 QC-2026-00001，软件补齐后从那里续走。
+- **补充待办**（未进清单）：①管理员能否停止他人的 Agent 任务（现只有创建人能停），设计长值守 Agent 时问用户；②测试卫生：`ReferenceApp.test.tsx` 单独运行 3 条失败、全量通过（依赖其他文件的加载顺序），`services/authService.permissionCeilingLifecycle.test.tsx` 不在任何测试脚本里且无法导入；③4 个无公司演示空间是否清理待用户定。
+- **私有材料**（不入库）：四份排查原文、走查记录与截图、工序链调查、服务器核查在 `~/.codex/private/bambook-acceptance/20261102-production-walk/`；测试日志在 `~/.codex/private/bambook-acceptance/logs/`。`/tmp/bb` 会在会话重启时清空，不要再把成果放那里。
+
+**P0 规则（用户 2026-11-02 07:40 定案）**：①付款审批分档：≤5 万元财务主管、>5 万元总监；新供应商首笔付款不论金额再加总经理一级；外币按上月末财务登记的月末记账汇率折人民币比较（用户 2026-11-02 13:2x 改定；没有登记则不能提交外币付款申请）。②AI/Agent 写入按风险三级确认：低风险确认即执行；中风险确认时列出具体改动；高风险（付款、核销、审批）须本人重新输入登录密码；一律不超过确认人本人权限。③“保持登录”：勾选 30 天且使用中自动续期，不勾选关闭浏览器即退出；改密或停用后所有设备立即退出。
 
 **完善范围（用户 2026-11-02 07:30 定案）**：`COMPLETENESS-BACKLOG.md` 23 个工作包全做，按 P0→P1→P2→P3。人事维持 10/15 范围（组织、档案、离职交接；不做考勤、请假、薪资、绩效、培训）。**跨组供布按内部价分开核算**：面料组给成衣组供布时，面料组按自己的成本加上本组利润（例如 10%–15%）定出内部价，这笔收入和利润记在面料组；成衣组把这个内部价当作自己的面料成本，只算成衣组自己的利润。两组利润分别核算，不合并为一组。软件已有内部订单与内部交付，需补：内部价（含面料组加成）、面料组的内部收入与成衣组的内部成本、两组之间的对账。
 
