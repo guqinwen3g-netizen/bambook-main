@@ -115,7 +115,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
         ...scope.opportunities.map(o => ({ key: 'opp:' + o.id, label: `商机 ${o.title} · 负责人 ${o.owner || '未指定'}`, type: 'checkbox' as const })),
         { key: 'reason', label: '交接原因', type: 'textarea', required: true },
       ],
-      submit: v => run({ type: 'handover.customer', payload: { customerId: c.id, toUserId: String(v.toUserId ?? ''), reason: String(v.reason ?? ''), orderIds: movable.filter(o => v['order:' + o.id]).map(o => o.id), opportunityIds: scope.opportunities.filter(o => v['opp:' + o.id]).map(o => o.id) } } as any) };
+      submit: v => run({ type: 'handover.customer', payload: { customerId: c.id, toUserId: String(v.toUserId ?? ''), reason: String(v.reason ?? ''), orderIds: movable.filter(o => v['order:' + o.id]).map(o => o.id), opportunityIds: scope.opportunities.filter(o => v['opp:' + o.id]).map(o => o.id) } }) };
   };
   const identityPills = (r: MarketRelation) => <>{r.customerId && <Pill tone="accent">{uiText("客户")}</Pill>}{r.supplierId && <Pill tone="ok">{uiText("供应商")}</Pill>}{!r.customerId && !r.supplierId && <Pill>{CATEGORY_LABEL[r.category]}</Pill>}</>;
   const columns: Column<MarketRelation>[] = [
