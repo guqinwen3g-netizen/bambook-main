@@ -105,3 +105,16 @@ it('uses explicit record scope rather than a business-group name for cross-group
  const sharedBefore=structuredClone(shared.state);shared.issue(1,'garment');
  expect(scopedWriteViolation(sharedBefore,shared.state,{userIds:['garment'],teamIds:['material-team']})).toBeNull();
 });
+
+it('prices internal fabric at cost plus the agreed markup: garment cost includes it, the fabric order books internal revenue and profit', () => {
+  const f = materialDeliveryFixture(), id = f.issue();
+  f.run({ type: 'fulfillment.materials.confirm', payload: { kind: 'issue', id, evidence: 'Counted at factory' } }, 'garment');
+  const plain = orderActualCost(f.state, f.target.orderId, 'period', '2026-10', '2026-10-24');
+  expect(plain.purchaseCny).toBe(6840.4);
+  f.state.orders.find(o => o.id === f.source.orderId)!.governance!.contract.internalSupply!.markupPercent = 10;
+  const garment = orderActualCost(f.state, f.target.orderId, 'period', '2026-10', '2026-10-24');
+  expect(garment.purchases.find(r => r.key.startsWith('mk:'))).toMatchObject({ amount: 682.04 });
+  expect(garment.purchaseCny).toBe(7522.44);
+  const fabric = orderActualCost(f.state, f.source.orderId, 'period', '2026-10', '2026-10-24');
+  expect(fabric.internalSale).toEqual({ revenueCny: 7502.44, profitCny: 682.04, markupPercent: 10 });
+});

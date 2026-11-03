@@ -27,6 +27,8 @@ export type MistWorkOptions = {
   workspaceId?: string;
 };
 const FINANCE_RETURN_DAYS = 30;
+const QUOTE_EXPIRY_NOTICE_DAYS = 7;
+const addDays = (day: string, n: number) => new Date(Date.parse(day + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 /** 不在主导航里的视图归到同组的主模块，保证侧栏数字加起来等于合计。 */
 const MODULE_ALIAS: Record<string, string> = { invoices: 'payment-vouchers' };
 export const mistWorkModule = (view: string | undefined) => { const base = (view || '').split('/')[0] || 'cockpit'; return MODULE_ALIAS[base] ?? base; };
@@ -132,6 +134,10 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         } else if (quote.approval?.status === 'approved' && quote.approval.requesterId === me) {
           push({id:`quote-issue:${quote.id}`,source:'task',title:`${quote.code} 报价`,meta:[customer,quote.approval.note].filter(Boolean).join(' · '),when:'待发送',urgent:true,at:quote.approval.decidedAt||quote.approval.submittedAt,target:{view:'quotations',id:quote.id,detail:'full'}});
         }
+      } else if (quote.status === 'Sent' && can('quotations:write') && (quote.approval?.requesterId || state.customers.find(row => row.id === quote.customerId)?.ownerId) === me && !!quote.validUntil && quote.validUntil <= addDays(options.today, QUOTE_EXPIRY_NOTICE_DAYS)) {
+        // ord25：已发送报价到期前 7 天提醒负责人跟进客户；过期后提醒登记失效或出新版本。
+        const expired = quote.validUntil < options.today;
+        push({ id: `quote-expiry:${quote.id}`, source: 'task', title: `${quote.code} 报价`, meta: [customer, `有效期至 ${quote.validUntil}`].filter(Boolean).join(' · '), when: expired ? '已过有效期' : '即将到期', urgent: expired, at: quote.updatedAt, due: quote.validUntil, target: { view: 'quotations', id: quote.id, detail: 'full' } });
       } else if (quote.status === 'Accepted' && quote.approval?.status === 'approved' && quote.approval.requesterId === me && canRead('orders') && can('orders:write')) {
         const remaining=quotationPendingLines(quote).length;
         if(remaining)push({id:`quote-convert:${quote.id}`,source:'task',title:`${quote.code} 报价`,meta:[customer,`${remaining} 个待转条目`].filter(Boolean).join(' · '),when:'待转订单',urgent:true,at:quote.updatedAt,target:{view:'quotations',id:quote.id,detail:'full'}});

@@ -79,3 +79,29 @@ describe('BB-QUO-5 报价按条目转订单',()=>{
   const line=s.market.quotations.find(x=>x.id===id)!.lines[0];expect(line.conversion).toBeUndefined();expect(line.skipped).toBeUndefined();
  });
 });
+
+describe('ord20 new version for the lines left after a partial conversion',()=>{
+ it('copies only pending lines, marks them handed over on the old version, and refuses once everything is handled',()=>{
+  const {ctx,s}=setup(),{id,q}=accepted(s,ctx);const [l1,l2,l3]=q().lines;
+  convert(s,ctx,id,[l1.id]);
+  const strip=({id:_,amount:__,conversion:___,skipped:____,...rest}:any)=>({...rest,price:'2.20'});
+  const v2=run(s,{type:'market.quotation.save',payload:{input:{previousId:id,customerId:q().customerId,currency:'USD',season:'AW26',validUntil:'2026-11-20',deliveryTerms:'FOB',paymentTerms:'T/T',lines:[l2,l3].map(strip)}}},ctx).id!;
+  const next=s.market.quotations.find(x=>x.id===v2)!;
+  expect(next).toMatchObject({revision:2,previousId:id,status:'Draft'});expect(next.lines.map(l=>l.name)).toEqual(['面料2','面料3']);
+  expect(q().lines.map(l=>quoteLineConversionStatus(q(),l).state)).toEqual(['converted','skipped','skipped']);
+  expect(quotationConversionComplete(q())).toBe(true);
+  expect(()=>run(s,{type:'market.quotation.save',payload:{input:{previousId:id,customerId:q().customerId,currency:'USD',season:'AW26',validUntil:'2026-11-20',deliveryTerms:'FOB',paymentTerms:'T/T',lines:[l2].map(strip)}}},ctx)).toThrow(/已有新版本|全部转订单/);
+ });
+});
+
+describe('ord22 partial acceptance',()=>{
+ it('accepts only the ticked lines and records the rest as not accepted',()=>{
+  const {ctx,s}=setup();let n=0;const lines=Array.from({length:2},(_,i)=>{const p=run(s,{type:'market.product.save',payload:{input:{sku:`P-PA-${i}`,name:`面料${i+1}`,category:'fabric',season:'AW26',supplierId:'',supplierCode:'',composition:'棉',specification:'150cm',color:'蓝',unit:'米',cost:'1.00',currency:'USD',sourceDevId:'',sourceVersionId:''}}},ctx).id!;n++;return {productId:p,sourceDevId:'',sourceVersionId:'',name:`面料${i+1}`,style:`P-PA-${i}`,specification:'150cm',qty:'10',unit:'米',price:'2.50',cost:'1.00'};});
+  const id=run(s,{type:'market.quotation.save',payload:{input:{customerId:s.customers[0].id,currency:'USD',season:'AW26',validUntil:'2026-11-01',deliveryTerms:'FOB',paymentTerms:'T/T',lines}}},ctx).id!;
+  run(s,{type:'market.quotation.submit',payload:{id}},ctx);const q=()=>s.market.quotations.find(x=>x.id===id)!;if(q().approval?.status==='pending')run(s,{type:'market.quotation.decide',payload:{id,decision:'approved',note:'ok'}},{...ctx,actorId:'leader'});
+  run(s,{type:'market.quotation.status',payload:{id,status:'Sent',evidence:'交付'}},ctx);
+  run(s,{type:'market.quotation.status',payload:{id,status:'Accepted',evidence:'客户只要第一款',acceptLineIds:[q().lines[0].id]}},ctx);
+  expect(quotationPendingLines(q()).map(l=>l.name)).toEqual(['面料1']);
+  expect(quoteLineConversionStatus(q(),q().lines[1])).toMatchObject({state:'skipped',reason:'客户未接受（客户只要第一款）'});
+ });
+});

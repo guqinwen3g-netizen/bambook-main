@@ -168,7 +168,10 @@ it('dragging a production card waits for persistence and re-renders the acknowle
   await act(async () => card.dispatchEvent(new Event('dragstart', { bubbles: true })));
   await act(async () => destination.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true })));
   await act(async () => destination.dispatchEvent(new Event('drop', { bubbles: true, cancelable: true })));
-  expect(store.run).toHaveBeenCalledWith({ type: 'production.move', payload: { id: 'production-a', col: 'cut' } });
+  // ord42：拖动后先确认，确认前不写入。
+  expect(store.run).not.toHaveBeenCalled();
+  await click(getByRole(document.body, 'button', { name: '确认移动' }));
+  expect(store.run).toHaveBeenCalledWith({ type: 'production.move', payload: { id: 'production-a', col: 'cut', note: '' } });
   expect(destination.querySelector('.mist-kb-card')).toBeNull();
   store.state = { ...store.state!, productions: store.state!.productions.map(item => ({ ...item, col: 'cut' })) };
   await act(async () => pending.resolve({ requestId: 'r2', revision: 2, result: {} })); render(<ProductionPage />, { view: 'production-board' });

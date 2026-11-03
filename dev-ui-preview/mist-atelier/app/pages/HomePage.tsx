@@ -114,7 +114,7 @@ export function HomePage() {
       </StatGrid>}
 
       <section className="mist-grid">
-        <HeroFocus className="mist-col-8" meta={focus ? dev ? [<span className="mist-mono">{dev.code}</span>,dev.customer] : [('sourceLabel' in focus ? focus.sourceLabel : '工作事项')] : []} media={dev ? { src: focusImage.src||IMG[dev.img], alt: dev.name } : undefined}
+        <HeroFocus className="mist-col-8" meta={focus ? dev ? [<span className="mist-mono">{dev.code}</span>,dev.customer] : [('sourceLabel' in focus ? focus.sourceLabel : '工作事项')] : []} media={dev ? { src: focusImage.src||IMG[dev.img]||IMG.coat!, alt: dev.name } : undefined}
           title={loading ? '正在读取当前焦点' : focus ? dev ? <>{dev.name}<br />{uiText(version ? `${version.label} · ${dev.state}` : dev.state)}</> : focus.title : '当前没有待处理事项'} description={uiText(dev?.goal)}
           steps={dev ? STAGES.map((label, index) => ({ label, state: index < dev.stage ? 'done' : index === dev.stage ? 'now' : 'todo' })) : undefined}
           actions={<><Button variant="white" disabled={busy || !focus} iconRight={ArrowRight} onClick={() => focus && openTarget(focus.target)}>{uiText("打开事项")}</Button>{version?.qc&&<Button variant="glass" disabled={busy} icon={FileText} onClick={() => setReportVersion(version.id)}>{uiText("QC 报告")}</Button>}</>} />

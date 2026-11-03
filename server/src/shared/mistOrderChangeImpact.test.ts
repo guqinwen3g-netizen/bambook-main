@@ -56,8 +56,16 @@ describe('BB-ORD-4 quantity change after work has started',()=>{
   change(f,[line(10,{price:11}),{id:'new',fulfillmentMode:'cmt',cmtIncludedItems:[],name:'马甲',style:'B',img:'coat',qty:3,unit:'件',price:8}],{orderPatch:{due:'2026-12-20'}});
   f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},leader(f));
   expect(f.state.orderLines.filter(l=>l.orderId==='order').map(l=>[l.style,l.qty,l.price])).toEqual([['A',10,11],['B',3,8]]);expect(f.order.due).toBe('2026-12-20');
-  // 数量未变：不生成核对待办
-  expect(f.state.tasks.some(t=>t.kind.startsWith('order-change-review:'))).toBe(false);
+  // 数量未变：不发采购 / 生产数量核对；新增条目、交期变化分别提醒（ord31 / ord32）。
+  const kinds=f.state.tasks.filter(t=>!t.done&&(t.kind.startsWith('order-change-review:')||t.kind.startsWith('order-change-due:'))).map(t=>t.kind).sort();
+  expect(kinds).toEqual(['order-change-due:order:production:job','order-change-due:order:purchase:po','order-change-due:order:shipment:sh','order-change-review:order:lines']);
+  expect(f.state.tasks.find(t=>t.kind==='order-change-due:order:shipment:sh')).toMatchObject({permission:'logistics:handle',title:expect.stringContaining('→ 2026-12-20')});
+  expect(f.state.fulfillment.purchases[0].due).toBe('2026-11-01');
+ });
+ it('asks finance to recheck issued invoices when the unit price changes',()=>{
+  const f=started(true);change(f,[line(10,{price:12})]);
+  f.run({type:'order.governance.submit',payload:{orderId:'order'}});f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},leader(f));
+  expect(f.state.tasks.find(t=>t.kind==='order-change-review:order:invoice')).toMatchObject({permission:'invoices:write',title:expect.stringContaining('A 10 → 12')});
  });
  it('still forbids a currency change once an invoice exists, but allows it with only production facts',()=>{
   const f=started(true);

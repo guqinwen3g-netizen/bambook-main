@@ -9,7 +9,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow,businessToday} from '../runtime/businessClock';
 /** T8 生产看板：沿用原 Mist 卡片和布局，拖动保存到公司共享数据。 */
 import React from 'react';
-import { AlertTriangle, CalendarRange, Factory } from 'lucide-react';
+import { AlertTriangle, CalendarRange, Factory, Layers } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checklist, DataTable, Drawer, Dropdown, EmptyState, Field, FormGrid, Kanban, KeyValue, Meter, MistPage, Mono, ObjectCell, PageHeader, Pill, SearchField, Segmented, SummaryBar, TextArea, TextInput, Thumb, Toolbar, useToast } from '../../../../components/mist';
 import type { MistProduction, MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
@@ -115,9 +115,10 @@ export function ProductionPage() {
     if (busy || !canPlan || !PROD_COLUMNS.some(column => column.id === col)) return;
     const item = items.find(item => item.id === id); if (!item || item.col === col) return;
     if(state&&productionIntake(state,item.id)){setFailure('请通过登记实际进度记录线下工序');return;}
-    setBusy(true); setFailure('');
-    try { await run({ type: 'production.move', payload: { id, col: col as MistProduction['col'] } }); toast(`${item.code} 已移至${columns.find(column => column.id === col)?.title}`); }
-    catch (problem) { setFailure(problem instanceof Error ? problem.message : '工序未保存，请重试'); } finally { setBusy(false); }
+    // ord42：拖动后先确认，可填写备注；取消即不改动。
+    const title = columns.find(column => column.id === col)?.title;
+    setOperation({ title: `${item.code} 移至${title}`, fields: [{ key: 'note', label: '备注', type: 'textarea', required: false }], initialValues: { note: '' }, submitLabel: '确认移动',
+      submit: async values => { await run({ type: 'production.move', payload: { id, col: col as MistProduction['col'], note: String(values.note || '').trim() } }); toast(`${item.code} 已移至${title}`); } });
   };
   const position = (date: string) => Math.max(0, Math.min(100, ((mistDate(date)?.getTime() ?? window.start.getTime()) - window.start.getTime()) / (window.end.getTime() - window.start.getTime()) * 100));
   if(intakeMode&&selected)return <ProductionIntakeEditor key={`${workspace?.id}|${session.user?.id}|${selected.id}|${intakeMode}`} productionId={selected.id} initial={intakeMode==='initial'} onClose={()=>setIntakeMode(null)}/>;
@@ -143,7 +144,7 @@ export function ProductionPage() {
       {key:'status',header:'状态',width:'100px',render:item=>{const r=productionIntake(state!,item.id),nok=productionNok(state!,item),conditional=productionConditionalQc(state!,item);return <Pill tone={nok?'bad':conditional||r?.status==='rejected'?'warn':'neutral'}>{uiText(nok?'QC NOK':conditional?conditional.state==='awaiting_business'?'待业务确认':'QC 有保留':r?.status==='pending'?'承接待确认':r?.status==='rejected'?'承接已退回':'承接已确认')}</Pill>;}},
     ]}/></Card>}{normalShown.length>0&&<Kanban columns={columns.map(column => ({ ...column, items: normalShown.filter(item => item.col === column.id) }))} itemKey={item => item.id}
       onMove={busy||!canPlan ? undefined : (id, col) => { void move(id, col); }} onOpen={item => setSelectedId(item.id)} renderCard={item => <>
-        <div className="mist-row"><Thumb src={IMG[item.img]} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={uiText(`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`)}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
+        <div className="mist-row"><Thumb src={IMG[item.img]} icon={Layers} size="sm" /><div style={{ minWidth: 0 }}><b>{item.name}</b><div className="mist-obj-meta" title={uiText(`${item.code} · ${item.order} · ${state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}`)}><Mono>{item.code}</Mono> · {item.order} · {state?.orderLines.find(line=>line.id===item.lineId)?.style||'条目不可用'}</div></div></div>
         {fulfillmentProductionFact(state!,item.id)?.completion?<div className="mist-cell-sub">{uiText('已完工')} · {fulfillmentProductionFact(state!,item.id)!.completion!.quantity} {productionUnit(item)}</div>:productionIntake(state!,item.id)?<div className="mist-cell-sub">{uiText(productionProgressText(state!,item))} · {uiText(productionObservation(state!,item.id)?.stage?observedProductionStages(state!.orders.find(o=>o.id===item.orderId)?.type)[productionObservation(state!,item.id)!.stage!]: '工序待核')} · {item.qty} {productionUnit(item)}</div>:<Meter segments={[{ value: item.pct, tone: item.pct === 100 ? 'ok' : 'accent' }]} caption={uiText(`${item.pct}% · ${item.qty.toLocaleString(interfaceLocale(), { maximumFractionDigits: 4 })} ${productionUnit(item)}`)} />}
         <div className="mist-kb-card-foot"><Factory className="mist-icon" data-size="xs" />{item.factory}<span className="mist-spacer" />{state&&productionNok(state,item) ? <Pill tone="bad">QC NOK</Pill> : state&&productionConditionalQc(state,item) ? <Pill tone="warn">{uiText("QC 有保留")}</Pill> : productionRiskText(item) ? <Pill tone="warn">{uiText(productionRiskText(item).length>14?productionRiskText(item).slice(0,14)+'…':productionRiskText(item))}</Pill> : !state?.fulfillment.productionFacts?.some(fact=>fact.productionId===item.id&&fact.release) ? <Pill tone="neutral">{uiText("待放行")}</Pill> : <span>{item.due}</span>}</div>
       </>} />}</>}

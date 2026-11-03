@@ -50,11 +50,14 @@ function Record({
   corrected,
   canCorrect,
   onCorrect,
+  onRevise,
 }: {
   r: QuoteFeedbackRecord;
   corrected: boolean;
   canCorrect: boolean;
   onCorrect: () => void;
+  /** ord21：客户还价且报价可出新版本时，按还价单价 / 数量预填新版本。 */
+  onRevise?: () => void;
 }) {
   return (
     <Card>
@@ -63,7 +66,12 @@ function Record({
         sub={uiText(r.input.receivedOn + " · " + r.input.contact)}
         tools={
           canCorrect && !corrected ? (
-            <Button onClick={onCorrect}>{uiText("追加更正")}</Button>
+            <span className="mist-row">
+              {onRevise && r.input.kind === "counteroffer" && r.input.lines.some((l) => l.price || l.quantity) && (
+                <Button variant="primary" onClick={onRevise}>{uiText("按还价建新版本")}</Button>
+              )}
+              <Button onClick={onCorrect}>{uiText("追加更正")}</Button>
+            </span>
           ) : undefined
         }
       />
@@ -770,6 +778,11 @@ export function QuotationFeedbackPage() {
               canCorrect={can && !frozen && !w.pending && !w.saving}
               onCorrect={() =>
                 go("quotations", q.id, { section: "feedback-correct:" + r.id })
+              }
+              onRevise={
+                q.status === "Sent" && !w.state?.market.quotations.some((x) => x.previousId === q.id)
+                  ? () => go("quotations", q.id, { section: "revise-from:" + r.id })
+                  : undefined
               }
             />
           ))}

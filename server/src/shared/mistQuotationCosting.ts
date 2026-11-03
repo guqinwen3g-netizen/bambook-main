@@ -3,10 +3,15 @@ import type { MarketQuotation, MarketQuoteLine } from "./mistMarket";
 export const QUOTE_COST_MODEL_VERSION = "quote-cost-v3";
 export const QUOTE_COST_ALLOCATION_VERSION = "quote-cost-line-allocation-v3";
 export function quoteCostModelVersion(input: QuoteCostInput) {
-  return input.components.some((r) => r.scope === "per_line")
+  return (input.components.some((r) => r.scope === "per_line")
     ? QUOTE_COST_ALLOCATION_VERSION
-    : QUOTE_COST_MODEL_VERSION;
+    : QUOTE_COST_MODEL_VERSION) + (input.conversion ? "+fx" : "");
 }
+/** Currency and unit the cost result is expressed in: the quote line's when a conversion is given, else the source's. */
+export const quoteCostTarget = (input: Pick<QuoteCostInput, "currency" | "unit" | "conversion">) => ({
+  currency: input.conversion?.currency ?? input.currency,
+  unit: input.conversion?.unit ?? input.unit,
+});
 export const QUOTE_COST_KINDS = [
   "yarn",
   "weaving",
@@ -37,6 +42,11 @@ export type QuoteCostComponent = {
   outsideSupplierPrice: boolean;
 };
 export type QuoteCostInput = {
+  /**
+   * ord26: source cost in another currency / unit. rate = quote-currency amount per 1 source currency;
+   * unitFactor = source units per 1 quote unit (e.g. 0.9144 metres per yard). The result is in the quote currency and unit.
+   */
+  conversion?: { currency: string; unit: string; rate: string; unitFactor: string; basis: string };
   /** Required only for explicit per-line fees, and verified against the exact quote line. */
   allocationQuantity?: string;
   mode: "supplier" | "breakdown";
@@ -265,6 +275,19 @@ export function calculateQuoteCosting(raw: QuoteCostInput): {
     ? round(lineFees * BigInt(10000), allocationQty)
     : BigInt(0);
   total += allocatedUnitCost;
+  if (raw.conversion !== undefined) {
+    const c = raw.conversion;
+    const target = required(c?.currency, "报价币种", 3).toUpperCase(), targetUnit = required(c?.unit, "报价计价单位", 40);
+    if (!/^[A-Z]{3}$/.test(target)) throw Error("报价币种须为三个英文字母");
+    const rate = quoteCostDecimal(c.rate, "折算汇率", 6), factor = quoteCostDecimal(c.unitFactor, "单位换算系数", 6);
+    if (rate <= BigInt(0) || factor <= BigInt(0)) throw Error("折算汇率与单位换算系数必须大于0");
+    if (target === input.currency && targetUnit === input.unit) throw Error("币种与单位都相同，无需折算");
+    if (target === input.currency && rate !== BigInt(1000000)) throw Error("币种相同时折算汇率须为 1");
+    if (targetUnit === input.unit && factor !== BigInt(1000000)) throw Error("单位相同时换算系数须为 1");
+    input.conversion = { currency: target, unit: targetUnit, rate: show(rate, 6), unitFactor: show(factor, 6), basis: required(c.basis, "折算依据（汇率来源与日期、单位换算）") };
+    // cost per quote unit = cost per source unit × source units per quote unit × quote currency per source currency
+    total = round(total * factor * rate, BigInt(1000000000000));
+  }
   if (total <= BigInt(0)) throw Error("单位参考成本必须大于0");
   input.components = components.map(({ amount, lineAmount, ...r }) => r);
   const rate = quoteCostDecimal(input.targetPercent, "目标百分比");
@@ -363,8 +386,8 @@ export function activeQuoteCostSnapshots(
       t.deliveryTerms === q.deliveryTerms &&
       t.paymentTerms === q.paymentTerms &&
       t.validUntil === q.validUntil &&
-      snapshot.input.unit === line.unit &&
-      snapshot.input.currency === q.currency &&
+      quoteCostTarget(snapshot.input).unit === line.unit &&
+      quoteCostTarget(snapshot.input).currency === q.currency &&
       line.cost === snapshot.result.approvalCost &&
       line.price ===
         (snapshot.appliedPrice ? snapshot.result.proposedPrice : old.price) &&

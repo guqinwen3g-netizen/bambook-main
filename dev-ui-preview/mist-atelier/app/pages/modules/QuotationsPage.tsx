@@ -105,9 +105,14 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const evidenceSpec = (q: MarketQuotation, next: MarketQuotation['status']): ModuleEditorSpec => ({
     title: next === 'Sent' ? `登记 ${q.code} 已发送给客户` : next === 'Accepted' ? `登记客户接受 ${q.code}` : next === 'Rejected' ? `登记客户未接受 ${q.code}` : `标记 ${q.code} 已失效`,
     submitLabel: '登记',
-    initialValues: { evidence: '' },
-    fields: [{ key: 'evidence', label: next === 'Sent' ? '发送方式与对象' : '客户反馈或依据', type: 'textarea', required: true }],
-    submit: v => run({ type: 'market.quotation.status', payload: { id: q.id, status: next, evidence: String(v.evidence ?? '') } }),
+    // ord22：多条目报价登记客户接受时逐条勾选，未勾选的条目记为客户未接受。
+    initialValues: { evidence: '', ...(next === 'Accepted' && q.lines.length > 1 ? Object.fromEntries(q.lines.map(l => ['accept:' + l.id, true])) : {}) },
+    fields: [...(next === 'Accepted' && q.lines.length > 1 ? q.lines.map(l => ({ key: 'accept:' + l.id, label: `${l.name} · ${l.qty} ${l.unit} × ${l.price}`, type: 'checkbox' as const })) : []), { key: 'evidence', label: next === 'Sent' ? '发送方式与对象' : '客户反馈或依据', type: 'textarea' as const, required: true }],
+    submit: v => {
+      const picked = next === 'Accepted' && q.lines.length > 1 ? q.lines.filter(l => v['accept:' + l.id] === true).map(l => l.id) : undefined;
+      if (picked && !picked.length) throw new Error('请至少勾选一个客户接受的条目');
+      return run({ type: 'market.quotation.status', payload: { id: q.id, status: next, evidence: String(v.evidence ?? ''), ...(picked && picked.length < q.lines.length ? { acceptLineIds: picked } : {}) } });
+    },
   });
   const decideSpec = (q: MarketQuotation, decision: 'approved' | 'rejected'): ModuleEditorSpec => ({
     title: decision === 'approved' ? `批准报价 ${q.code}` : `退回报价 ${q.code}`, submitLabel: decision === 'approved' ? '批准' : '退回',
@@ -238,7 +243,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
   const missingIssuer = !state.settings.companyProfile?.legalName;
   const formalDocReason = docBase || quotationFormalDocumentBlocker(q, needsApproval) || false;
   const documents = quotationDocuments(q);
-  const reviseReason = writeReason || (next ? `已有新版本 ${next.code}，请在最新版本上修改` : q.convertedOrderId ? '已转订单的报价不再出新版本' : false);
+  const reviseReason = writeReason || (next ? `已有新版本 ${next.code}，请在最新版本上修改` : started && !pending.length ? '条目已全部处理，不再出新版本' : false);
   const banner: { tone: Tone; title: string; text?: string } =
     stage === 'pending' ? { tone: 'warn', title: '待业务审批' }
     : stage === 'draft' ? (q.approval?.status === 'rejected' ? { tone: 'bad', title: '审批已退回', text: q.approval.note }

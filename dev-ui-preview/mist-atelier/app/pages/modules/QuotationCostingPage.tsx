@@ -27,6 +27,7 @@ import { FormFooter,
 import type { PlatformBom } from "../../../../../server/src/shared/mistPlatform";
 import {
   calculateQuoteCosting,
+  quoteCostTarget,
   quotationCostingTarget,
   QUOTE_COST_KINDS,
   type QuoteCostComponent,
@@ -156,19 +157,19 @@ function Snapshot({ r }: { r: QuoteCostSnapshot }) {
             { label: "本次适用规格", value: r.input.sourceSpecification },
             {
               label: "币种 / 单位",
-              value: r.input.currency + " / " + r.input.unit,
+              value: r.input.currency + " / " + r.input.unit + (r.input.conversion ? ` → ${r.input.conversion.currency} / ${r.input.conversion.unit}（汇率 ${r.input.conversion.rate}，单位系数 ${r.input.conversion.unitFactor}；${r.input.conversion.basis}）` : ""),
             },
             {
               label: "单位参考成本",
-              value: r.result.cost + " " + r.input.currency,
+              value: r.result.cost + " " + quoteCostTarget(r.input).currency,
             },
             {
               label: "建议报价",
-              value: r.result.suggestedQuotePrice + " " + r.input.currency,
+              value: r.result.suggestedQuotePrice + " " + quoteCostTarget(r.input).currency,
             },
             {
               label: "人工拟报价",
-              value: r.input.proposedPrice + " " + r.input.currency,
+              value: r.input.proposedPrice + " " + quoteCostTarget(r.input).currency,
             },
             {
               label: "是否写入报价",
@@ -350,10 +351,17 @@ export function QuotationCostingPage() {
         i === index ? { ...r, ...patch } : r,
       ),
     }));
+  // ord26：成本币种或单位与报价行不同时，带上折算（汇率、单位换算与依据）后按报价币种与单位出结果。
+  const needsConversion = !!q && !!line && (input.currency.trim().toUpperCase() !== q.currency || input.unit.trim() !== line.unit);
+  const conv = input.conversion ?? { currency: q?.currency || "", unit: line?.unit || "", rate: "", unitFactor: "", basis: "" };
+  const patchConv = (patch: Partial<NonNullable<QuoteCostInput["conversion"]>>) => patch && setInput((x) => ({ ...x, conversion: { ...conv, ...x.conversion, ...patch, currency: q?.currency || "", unit: line?.unit || "" } }));
+  const effective: QuoteCostInput = needsConversion
+    ? { ...input, conversion: { ...conv, currency: q!.currency, unit: line!.unit, rate: input.currency.trim().toUpperCase() === q!.currency ? "1" : conv.rate, unitFactor: input.unit.trim() === line!.unit ? "1" : conv.unitFactor } }
+    : (({ conversion: _, ...rest }) => rest)(input);
   let calculation: ReturnType<typeof calculateQuoteCosting> | null = null,
     problem = "";
   try {
-    calculation = calculateQuoteCosting(input);
+    calculation = calculateQuoteCosting(effective);
   } catch (e) {
     problem = e instanceof Error ? e.message : "待补齐核算输入";
   }
@@ -517,8 +525,6 @@ export function QuotationCostingPage() {
         type={field === 'sourceDate' || field === 'sourceValidUntil' ? 'date' : 'text'}
         value={String(input[field])}
         disabled={disabled}
-        // 服务端要求成本币种、计价单位与本报价行一致，不换算，因此只读展示。
-        readOnly={field === 'currency' || field === 'unit'}
         onChange={(e) => patch(field, e.target.value)}
       />
     </Field>
@@ -615,6 +621,23 @@ export function QuotationCostingPage() {
                     </Field>
                     {inputField("currency", "成本币种")}
                     {inputField("unit", "成本计价单位")}
+                    {needsConversion && q && line && (
+                      <>
+                        {input.currency.trim().toUpperCase() !== q.currency && (
+                          <Field label={ui`折算汇率（1 ${input.currency.trim().toUpperCase()} = ? ${q.currency}）`} required>
+                            <TextInput aria-label={uiText("折算汇率")} disabled={disabled} value={conv.rate} onChange={(e) => patchConv({ rate: e.target.value })} />
+                          </Field>
+                        )}
+                        {input.unit.trim() !== line.unit && (
+                          <Field label={ui`单位换算（1 ${line.unit} = ? ${input.unit.trim()}）`} required>
+                            <TextInput aria-label={uiText("单位换算系数")} disabled={disabled} value={conv.unitFactor} onChange={(e) => patchConv({ unitFactor: e.target.value })} />
+                          </Field>
+                        )}
+                        <Field label={uiText("折算依据")} required>
+                          <TextInput aria-label={uiText("折算依据")} disabled={disabled} value={conv.basis} onChange={(e) => patchConv({ basis: e.target.value })} />
+                        </Field>
+                      </>
+                    )}
                     {inputField("sourceSpecification", "适用规格")}
                     {inputField("sourceDate", "来源日期")}
                     {inputField("sourceValidUntil", "来源有效期", false)}
@@ -917,25 +940,25 @@ export function QuotationCostingPage() {
                     items={[
                       {
                         label: "单位参考成本",
-                        value: calculation?.result.cost + " " + input.currency,
+                        value: calculation?.result.cost + " " + (q?.currency || input.currency),
                       },
                       {
                         label: "建议报价",
                         value:
                           calculation?.result.suggestedQuotePrice +
                           " " +
-                          input.currency,
+                          (q?.currency || input.currency),
                       },
                       {
                         label: "人工拟报价",
-                        value: input.proposedPrice + " " + input.currency,
+                        value: input.proposedPrice + " " + (q?.currency || input.currency),
                       },
                       {
                         label: "预计单位价差",
                         value:
                           calculation?.result.unitDifference +
                           " " +
-                          input.currency,
+                          (q?.currency || input.currency),
                       },
                       {
                         label: "拟报价毛利参考",
@@ -1019,7 +1042,7 @@ export function QuotationCostingPage() {
                     if (step === 0) {
                       try {
                         calculateQuoteCosting({
-                          ...input,
+                          ...effective,
                           targetPercent: "0",
                           strategyBasis: "仅校验成本来源，未记录策略",
                         });

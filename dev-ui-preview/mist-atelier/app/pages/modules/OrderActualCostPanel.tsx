@@ -76,7 +76,7 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     <Drawer open={!!detail} onClose={() => setOpen(null)} size="lg" title={uiText(detail ? `${detail.code} 实际核算` : '实际核算')} sub={detail?[detail.customer,uiText(FX_BASIS_LABEL[basis]),...(detail.estimated?[uiText('含暂估')]:[])].join(' · '):undefined}>
       {detail && <div className="mist-content-flow" data-order-cost-detail={detail.orderId}>
         {(detail.internal ? (['purchases', 'expenses'] as const) : (['revenue', 'purchases', 'expenses'] as const)).map(k => <CostBlock key={k} title={uiText({ revenue: '收入', purchases: '采购成本', expenses: '分摊费用' }[k])} rows={detail[k]} />)}
-        {detail.internal ? <Card><CardBody><Facts items={[{label:uiText('实际成本'),value:cnyCell(detail.costCny)}]}/></CardBody></Card> : <>
+        {detail.internal ? <Card><CardBody><Facts items={[{label:uiText('实际成本'),value:cnyCell(detail.costCny)},...(detail.internalSale?[{label:ui`内部收入（加成 ${detail.internalSale.markupPercent}%）`,value:cnyCell(detail.internalSale.revenueCny)},{label:uiText('内部利润'),value:cnyCell(detail.internalSale.profitCny)}]:[])]}/></CardBody></Card> : <>
         <Card><CardHeader title={uiText("出口退税")} sub={shown ? ui`应退 ${money(detail.rebate.expected)} · 核准 ${money(detail.rebate.approved)} · 已到账 ${money(detail.rebate.received)}` : uiText(hiddenText)} /></Card>
         <Card><CardBody><Facts items={[
           {label:uiText('毛利 · 不含退税'),value:detail.marginEx===null?'—':money(detail.marginEx)},

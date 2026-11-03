@@ -51,7 +51,11 @@ import {createPayablesState,applyPayablesCommand,payablesCommandPermission,getPa
 
 /** Mist's typed business workspace. Shared by its API and the approved frontend. */
 export type MistTone = 'neutral' | 'accent' | 'ok' | 'warn' | 'bad' | 'ai';
-export type MistImage = 'coat' | 'blazer' | 'suit' | 'clay';
+/** Placeholder picture keys; 'fabric' has no garment picture and renders as a fabric icon. */
+export type MistImage = 'coat' | 'blazer' | 'suit' | 'clay' | 'fabric';
+export const mistPlaceholderImage = (type: 'garment' | 'fabric' | string): MistImage => type === 'fabric' ? 'fabric' : 'coat';
+/** Default order readiness checklist shared by manual orders and quotation conversions (ord28). */
+export const MIST_ORDER_CHECKLIST = ['拟发范围确认', '收货与贸易条款确认', '收款条件核对'] as const;
 export type MistBusinessNumberPrefix = 'CLM' | 'RT' | 'PV';
 export type MistContext = {
   id: () => string; now: string; actorName: string; actorId?: string; auditNow?: string;
@@ -891,10 +895,10 @@ export function createMistOrderRecords(state:MistState,p:MistOrderInput,context:
       governance.contract=normalizeInternalSupply(governance.contract,{type:p.type,ownerId:orderOwner.id},context);
       const id=context.id(),code='SO-'+(p.type==='fabric'?'F':'G')+'-'+context.now.slice(0,4)+'-'+String(state.orders.length+1).padStart(4,'0'),currency=text(p.currency,'币种',true,3).toUpperCase();
       if(!/^[A-Z]{3}$/.test(currency))throw new MistCommandError('VALIDATION','币种格式无效');
-      const order:MistOrder={id,code,type:p.type,customerId:c?.id||'',customer:c?.name||governance.contract.receiver||'内部接收方待填写',governance,season:text(p.season,'季节'),lines:0,qty:0,amount:0,currency,due:date(p.due),progress:0,state:'订单草稿',tone:'neutral',owner:orderOwner.name,ownerId:orderOwner.id,img:p.lines[0].img||'coat',checklist:['拟发范围确认','收货与贸易条款确认','收款条件核对'].map((label,index)=>({id:id+'-check-'+index,label,done:false,note:''})),handoffAt:null,createdAt:context.now,updatedAt:context.now};
+      const order:MistOrder={id,code,type:p.type,customerId:c?.id||'',customer:c?.name||governance.contract.receiver||'内部接收方待填写',governance,season:text(p.season,'季节'),lines:0,qty:0,amount:0,currency,due:date(p.due),progress:0,state:'订单草稿',tone:'neutral',owner:orderOwner.name,ownerId:orderOwner.id,img:p.type==='fabric'?'fabric':p.lines[0].img||'coat',checklist:MIST_ORDER_CHECKLIST.map((label,index)=>({id:id+'-check-'+index,label,done:false,note:''})),handoffAt:null,createdAt:context.now,updatedAt:context.now};
       // BB-ORD-2：来源与条目同一命令写入，先全部校验再落库，任何一条不合规整单拒绝
       const scope={type:p.type,customerId:c?.id||'',internal:governance.contract.kind==='internal'};
-      const rows=(p.lines as MistOrderInput['lines']).map((row,index)=>{const name=text(row.name,'品名'),fromBreakdown=lineQuantityFromBreakdown(p.type,row,`条目「${name||index+1}」`),qty=fromBreakdown.qty??positive(row.qty,'数量'),price=positive(row.price,'单价',true);lineAmount(qty,price);return {...(p.type==='garment'?normalizeGarmentFulfillment(row,false):{}),...(fromBreakdown.breakdown?{breakdown:fromBreakdown.breakdown}:{}),name,style:text(row.style,'款号'),img:['coat','blazer','suit','clay'].includes(row.img)?row.img:'coat' as MistImage,qty,unit:text(row.unit,'单位',true,20),price,source:assertOrderLineSource(state,scope,row,name||String(index+1))};});
+      const rows=(p.lines as MistOrderInput['lines']).map((row,index)=>{const name=text(row.name,'品名'),fromBreakdown=lineQuantityFromBreakdown(p.type,row,`条目「${name||index+1}」`),qty=fromBreakdown.qty??positive(row.qty,'数量'),price=positive(row.price,'单价',true);lineAmount(qty,price);return {...(p.type==='garment'?normalizeGarmentFulfillment(row,false):{}),...(fromBreakdown.breakdown?{breakdown:fromBreakdown.breakdown}:{}),name,style:text(row.style,'款号'),img:p.type==='fabric'?'fabric':['coat','blazer','suit','clay'].includes(row.img)?row.img:'coat' as MistImage,qty,unit:text(row.unit,'单位',true,20),price,source:assertOrderLineSource(state,scope,row,name||String(index+1))};});
       state.orders.unshift(order);
       for(const {source,...row} of rows)state.orderLines.push({id:context.id(),orderId:id,...row,made:0,qc:0,...source} as MistOrderLine);
       event(state,context,'order',id,'创建订单 '+code,{view:'orders/detail',id});return{id,orderId:id};
@@ -1315,8 +1319,8 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(to<0||to>from+1)throw new MistCommandError('PRECONDITION','请按相邻工序推进');
       assertProductionTransition(state,job,p.col,job.pct,context);
       if(p.col==='done'&&job.pct<100)throw new MistCommandError('PRECONDITION','完成进度达到100%并完成尾期QC后才能待出运');
-      job.col=p.col;
-      event(state,context,'production',job.id,'更新工序为 '+p.col,{view:'production-board',id:job.id,productionId:job.id});result={id:job.id,orderId:job.orderId};break;
+      job.col=p.col;const moveNote=text(p.note||'','工序备注',false,1000);
+      event(state,context,'production',job.id,'更新工序为 '+p.col+(moveNote?'：'+moveNote:''),{view:'production-board',id:job.id,productionId:job.id});result={id:job.id,orderId:job.orderId};break;
     }
     case 'production.update': {
       const job=find(state.productions,p.id,'生产单'),pct=positive(p.pct,'进度',true);if(job.closed)throw new MistCommandError('PRECONDITION',`生产单 ${job.code} 已随合同取消关闭`);if(pct>100)throw new MistCommandError('VALIDATION','进度不得超过100%');
@@ -1325,6 +1329,8 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       job.pct=pct;if(p.risk!==undefined)job.risk=text(p.risk,'风险说明',false);
       if(p.due!==undefined)job.due=date(p.due);if(p.startDate!==undefined&&p.startDate)job.startDate=date(p.startDate);
       if(job.startDate&&job.startDate>job.due)throw new MistCommandError('VALIDATION','开始日期不得晚于交期');
+      // ord40：生产交期晚于订单交期时，提醒订单负责人发起订单交期变更并告知客户。
+      {const order=state.orders.find(o=>o.id===job.orderId),kind=`production-late:${job.id}`;if(order&&job.due>order.due){state.tasks=state.tasks.filter(t=>!(t.kind===kind&&!t.done));state.tasks.unshift({id:context.id(),title:`生产 ${job.code} 交期 ${job.due} 晚于订单 ${order.code} 交期 ${order.due}，请发起订单交期变更`,due:order.due,done:false,kind,target:{view:'orders/detail',id:order.id,orderLineId:job.lineId},assigneeIds:mistOrderOwnerIds(state,order.id)});}else state.tasks.filter(t=>t.kind===kind&&!t.done).forEach(t=>t.done=true);}
       event(state,context,'production',job.id,'更新生产进度 '+pct+'%');if(note)event(state,context,'production',job.id,'生产跟进：'+note);result={id:job.id,orderId:job.orderId};break;
     }
     case 'finance.receivable.confirm':

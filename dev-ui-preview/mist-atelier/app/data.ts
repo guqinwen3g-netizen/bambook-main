@@ -9,7 +9,7 @@ import suit from './assets/suit.webp';
 import clay from './assets/clay.webp';
 import type { Tone } from '../../../components/mist';
 
-export const IMG = { coat, blazer, suit, clay } as const;
+export const IMG: Partial<Record<'coat' | 'blazer' | 'suit' | 'clay' | 'fabric', string>> = { coat, blazer, suit, clay };
 export type ImgKey = keyof typeof IMG;
 
 export const STAGES = ['需求与计划', '工厂与实物', 'QC 评审', '需求方确认', '成果留档'] as const;
