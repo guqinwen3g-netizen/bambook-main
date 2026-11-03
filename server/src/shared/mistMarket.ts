@@ -40,7 +40,9 @@ export const SUPPLIER_GRADES=['A','B','C','D'] as const;
 export type SupplierCertificate={id:string;name:string;number:string;issuer:string;validUntil:string;fileIds:string[];updatedAt:string};
 export type SupplierRating={id:string;grade:typeof SUPPLIER_GRADES[number];period:string;note:string;at:string;actor:string};
 export type SupplierStatusChange={status:MarketSupplier['status'];reason:string;effectiveDate:string;at:string;actor:string};
-export type MarketRelation = RecordBase & { name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; /** 合并来源的关系 ID；历史事件保留原归属，由服务端维护。 */ mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
+/** fin40：合规筛查记录（制裁名单、出口管制等）；结论与依据由人工登记，到复查日进风险预警。 */
+export type RelationScreening = { id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string };
+export type MarketRelation = RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; /** 合并来源的关系 ID；历史事件保留原归属，由服务端维护。 */ mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
 export type MarketSeason = RecordBase & { code:string; name:string; startDate:string; endDate:string; status:'Planning'|'Active'|'Closed'; milestones:Array<{label:string;date:string}>; review?:{at:string;orderCount:number;developmentCount:number;productCount:number;amounts:Array<{currency:string;amount:string}>} };
 export type MarketTrend = RecordBase & { name:string; type:'fabric'|'color'|'craft'|'composition'; seasonId:string; source:string; productIds:string[] };
 export type MarketShow = RecordBase & { name:string; location:string; seasonId:string; startDate:string; endDate:string; booth:string; attendees:string; cost:string; currency:string; status:'Planned'|'Ongoing'|'Completed'|'Cancelled' };
@@ -77,6 +79,7 @@ export type MarketCommand =
  | {type:'market.contact.save';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id?:string;name:string;role:string;email:string;phone:string;primary:boolean}}
  | {type:'market.season.save';payload:{id?:string;input:Input<MarketSeason>&{status:MarketSeason['status']}}}
  | {type:'market.season.void';payload:{kind:'season'|'trend'|'show';id:string;reason:string}}
+ | {type:'market.relation.screening';payload:{id:string;kind:RelationScreening['kind'];result:RelationScreening['result'];basis:string;screenedOn:string;nextReview:string;fileIds?:string[]}}
  | {type:'market.season.review';payload:{id:string}}
  | {type:'market.trend.save';payload:{id?:string;input:Input<MarketTrend>}}
  | {type:'market.show.save';payload:{id?:string;input:Input<MarketShow>&{status:MarketShow['status']}}}
@@ -374,6 +377,12 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
   case 'market.contact.save':{const i=command.payload;if(!['customer','supplier','relation'].includes(i.kind))fail('联系人所属类型无效');const parent=i.kind==='customer'?customerRelation(root,m,i.parentId,ctx):i.kind==='supplier'?find(m.suppliers,i.parentId,'供应商'):find(m.relations,i.parentId,'关系档案');if(i.kind==='relation'&&(parent as MarketRelation).customerId)customerRelation(root,m,(parent as MarketRelation).customerId,ctx);const email=str(i.email,'邮箱',false);if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))fail('邮箱格式无效');const old=i.id?find(parent.contacts,i.id,'联系人'):undefined;
    const row={id:old?.id||ctx.id(),name:str(i.name,'联系人姓名'),role:str(i.role,'岗位',false),email,phone:str(i.phone,'电话',false),primary:!!i.primary};if(row.primary)parent.contacts.forEach(c=>c.primary=false);if(old)parent.contacts[parent.contacts.indexOf(old)]=row;else parent.contacts.push(row);parent.updatedAt=ctx.now;
    if(i.kind==='supplier'){const related=m.relations.find(r=>r.supplierId===parent.id&&!r.customerId);if(related)related.contacts=parent.contacts.map(c=>({...c}));}else{const relation=parent as MarketRelation;if(relation.supplierId&&!relation.customerId)find(m.suppliers,relation.supplierId,'供应商').contacts=parent.contacts.map(c=>({...c}));if(relation.customerId){const existing=root.contacts.find(c=>c.id===row.id);const saved={id:row.id,customerId:relation.customerId,name:row.name,role:row.role,email:row.email,phone:row.phone,tone:'neutral' as const};if(existing)Object.assign(existing,saved);else root.contacts.push(saved);}}const linked=parent as MarketRelation;history(root,ctx,linked.customerId?'customer':'relation',linked.customerId||linked.supplierId||parent.id,'保存联系人 '+row.name);result={id:parent.id,contactId:row.id};break;}
+  case 'market.relation.screening':{
+   const p=command.payload,r=find(m.relations,p.id,'关系档案'),kind=one(p.kind,['sanctions','export_control','annual','other'],'筛查类型') as RelationScreening['kind'],outcome=one(p.result,['clear','hit','review'],'筛查结论') as RelationScreening['result'];
+   const screenedOn=day(p.screenedOn,'筛查日期'),nextReview=day(p.nextReview,'下次复查日');if(nextReview<=screenedOn)fail('下次复查日须晚于筛查日期');if(screenedOn>marketBusinessDate(ctx.now))fail('筛查日期不能在未来');
+   const row:RelationScreening={id:ctx.id(),kind,result:outcome,basis:str(p.basis,'筛查依据（名单来源、查询结果）'),screenedOn,nextReview,fileIds:attachmentIds(root,p.fileIds||[]),at:ctx.now,actor:ctx.actorName};
+   r.screenings=[...(r.screenings||[]),row];r.updatedAt=ctx.now;history(root,ctx,'relation',r.id,`登记合规筛查：${({sanctions:'制裁名单',export_control:'出口管制',annual:'年度合规检查',other:'其他'})[kind]} · ${({clear:'未命中',hit:'命中',review:'待人工复核'})[outcome]}`,row.fileIds);
+   result={id:row.id};break;}
   case 'market.season.void':{
    // mar49：录错的季节、趋势、展会在没有被引用时作废（从列表移除并留历史）；已被订单、报价、活动、线索或趋势引用的不能作废。
    const {kind,id}=command.payload,reason=str(command.payload.reason,'作废原因');

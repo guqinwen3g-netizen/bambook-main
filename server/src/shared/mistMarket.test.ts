@@ -173,3 +173,14 @@ it('skips occupied automatic supplier codes and still rejects missing identity o
   const before=s.market.suppliers.length;expect(()=>run(s,{type:'market.supplier.save',payload:{input}},ctx)).toThrow();expect(s.market.suppliers).toHaveLength(before);
  }
 });
+
+describe('fin40 compliance screening',()=>{
+ it('records a screening on a relation and raises a due re-check and a hit as risk signals',async()=>{
+  const {riskSignals}=await import('./mistRisk');const {ctx,s}=setup();run(s,{type:'market.customer.create',payload:{input:{name:'筛查客户',country:'US',city:'',industry:'',ownerId:'sales',grade:'',currency:'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:''}}} as never,ctx);const r=s.market.relations.find(x=>x.name==='筛查客户')!;
+  expect(()=>run(s,{type:'market.relation.screening',payload:{id:r.id,kind:'sanctions',result:'clear',basis:'OFAC SDN',screenedOn:'2026-10-01',nextReview:'2026-09-01'}},ctx)).toThrow(/晚于/);
+  run(s,{type:'market.relation.screening',payload:{id:r.id,kind:'sanctions',result:'clear',basis:'OFAC SDN 无命中',screenedOn:'2026-10-01',nextReview:'2026-10-10'}},ctx);
+  expect(riskSignals(s,'2026-10-12').some(x=>x.key===`screening-due:${r.id}:sanctions`)).toBe(true);
+  run(s,{type:'market.relation.screening',payload:{id:r.id,kind:'export_control',result:'hit',basis:'实体清单疑似同名',screenedOn:'2026-10-12',nextReview:'2027-10-12'}},ctx);
+  expect(riskSignals(s,'2026-10-12').find(x=>x.key===`screening-hit:${r.id}:export_control`)).toMatchObject({level:'critical',type:'compliance'});
+ });
+});

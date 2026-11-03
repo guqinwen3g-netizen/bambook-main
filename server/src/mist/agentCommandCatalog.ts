@@ -1436,8 +1436,17 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketRelation": "RecordBase & { name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
+   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
+   "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }",
    "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}"
+  },
+  "source": "server/src/shared/mistMarket.ts"
+ },
+ {
+  "type": "market.relation.screening",
+  "payload": "{id:string;kind:RelationScreening['kind'];result:RelationScreening['result'];basis:string;screenedOn:string;nextReview:string;fileIds?:string[]}",
+  "types": {
+   "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1445,8 +1454,9 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.relation.status",
   "payload": "{id:string;status:MarketRelation['status']}",
   "types": {
-   "MarketRelation": "RecordBase & { name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
+   "MarketRelation": "RecordBase & { screenings?:RelationScreening[]; name:string; category:'Customer'|'Supplier'|'Agent'|'Partner'|'Government'|'Internal'|'Other'; customerId:string; supplierId:string; country:string; address:string; aliases:string[]; status:'active'|'archived'; hold?:{reason:string;at:string;actor:string}|null; holdHistory?:RelationHoldChange[]; mergedRelationIds?:string[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
+   "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }",
    "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}"
   },
   "source": "server/src/shared/mistMarket.ts"
