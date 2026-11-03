@@ -19,7 +19,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
-import { choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
+import { choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseRolls, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { RfqLedger } from './SourcingRequests';
@@ -140,15 +140,21 @@ export function ProcurementPage() {
     const linked = !!state && materialDeliveryRequired(state, p.id), targets = linked ? materialDeliveryTargets(state!, p.id) : [];
     // Dyed/finished fabric is physical goods: it can enter our warehouse or go straight on; garment processing stays a service handover.
     const fabricProcessing = p.kind === 'processing' && p.domain === 'fabric';
+    const warehouses = (state?.fulfillment.warehouses || []).filter(w => w.active).map(w => ({ value: w.id, label: `${w.code} · ${w.name}` })), inWarehouse = { key: 'destination', values: ['warehouse'] };
     const destinations = p.kind === 'processing' && !fabricProcessing ? [{ value: 'supplier', label: '加工服务交付' }] : [{ value: 'warehouse', label: '入我方仓库' }, { value: 'supplier', label: fabricProcessing && !linked ? '加工厂直送客户或指定地点' : p.kind === 'finished' && !linked ? '工厂或指定地点交接' : fabricProcessing ? '直送下一道加工厂' : '供应商直送加工方' }];
     return { title: p.kind === 'processing' ? '登记加工回交' : p.kind === 'finished' && !linked ? '登记成品交接' : '登记收料', submitLabel: '登记本次交付',
-      fields: [field('quantity', `接收数量（${p.unit}）`, 'number'), field('rejected', `拒收数量（${p.unit}）`, 'number'), field('destination', '交付路径', 'select', true, destinations), ...(linked ? [field('targetProductionId', '直送加工单', 'select', false, [emptyOption, ...targets])] : []), field('location', '实际交接地点'), field('date', '实际交付日', 'date'), field('evidence', '点数与交接依据', 'textarea')],
-      initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' && !fabricProcessing ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', targetProductionId: targets.length === 1 ? targets[0].value : '' },
+      fields: [field('quantity', `接收数量（${p.unit}）`, 'number'), field('rejected', `拒收数量（${p.unit}）`, 'number'), field('destination', '交付路径', 'select', true, destinations), ...(linked ? [field('targetProductionId', '直送加工单', 'select', false, [emptyOption, ...targets])] : []),
+        ...(warehouses.length ? [{ ...field('warehouseId', '入库仓库', 'select', true, [emptyOption, ...warehouses]), when: inWarehouse }] : []), field('location', '实际交接地点'), field('date', '实际交付日', 'date'),
+        ...(p.domain === 'fabric' ? [{ ...field('dyeLot', '缸号', 'text', false), when: inWarehouse }, { ...field('shade', '色号', 'text', false), when: inWarehouse }, { ...field('rolls', '码单（卷号 数量 公斤）', 'textarea', false), when: inWarehouse }] : []),
+        field('evidence', '点数与交接依据', 'textarea')],
+      initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' && !fabricProcessing ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', targetProductionId: targets.length === 1 ? targets[0].value : '', warehouseId: warehouses.length === 1 ? warehouses[0].value : '', dyeLot: '', shade: '', rolls: '' },
       submit: values => {
         const quantity = number(values, 'quantity'), destination = text(values, 'destination') as 'warehouse' | 'supplier';
         if (linked && destination === 'supplier' && quantity > 0 && !text(values, 'targetProductionId')) throw new Error('请选择直送加工单');
         const payload = { id: p.id, quantity, rejected: number(values, 'rejected'), location: text(values, 'location'), date: text(values, 'date'), evidence: text(values, 'evidence'), fileIds: [] };
-        return linked && destination === 'supplier' && quantity > 0 ? run({ type: 'fulfillment.materials.deliver', payload: { ...payload, ...deliveryTargetPayload(text(values, 'targetProductionId')) } }) : run({ type: 'fulfillment.procurement.receive', payload: { ...payload, destination } });
+        const rolls = destination === 'warehouse' ? parseRolls(text(values, 'rolls')) : undefined;
+        const lot = destination !== 'warehouse' ? {} : { ...(text(values, 'warehouseId') ? { warehouseId: text(values, 'warehouseId') } : {}), ...(text(values, 'dyeLot').trim() ? { dyeLot: text(values, 'dyeLot').trim() } : {}), ...(text(values, 'shade').trim() ? { shade: text(values, 'shade').trim() } : {}), ...(rolls ? { rolls } : {}) };
+        return linked && destination === 'supplier' && quantity > 0 ? run({ type: 'fulfillment.materials.deliver', payload: { ...payload, ...deliveryTargetPayload(text(values, 'targetProductionId')) } }) : run({ type: 'fulfillment.procurement.receive', payload: { ...payload, destination, ...lot } });
       },
     };
   };

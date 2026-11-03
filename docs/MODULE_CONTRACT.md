@@ -71,6 +71,16 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 巡检：`fulfillment.qc.patrol`（`qc:inspect`）由 QC 在已放行生产分支上自建 `kind:'patrol'` 任务并自动认领；巡检不替代正式生产检验，但不通过同样暂停该分支，并可走不合格处置。
 - Agent 风险：`fulfillment.qc.incoming.close` 高风险。
 
+## 当前 Mist 库存批次与仓储操作（P1-5）
+
+- 批次字段（`FulfillmentStock`）：`warehouseId`、`dyeLot`、`shade`、`rolls`（码单，合计须等于入库数量）、`reservations`、`sourceKind:'other'` + `otherReceipt`。`fulfillment.procurement.receive` 仅在 `destination:'warehouse'` 时接受仓库、缸号与码单（`receiptLot`）。
+- `server/src/shared/mistStockOperations.ts`：其他入库 `fulfillment.stock.receiveOther`；预留 / 释放 `fulfillment.stock.reserve|release`（`orders:write`）；调拨 `fulfillment.stock.transfer` → `transfer.receive`（`fulfillment.stockTransfers`，在途数量不在 `positions` 内，见 `stockInTransit`；整批到仓才改批次 `warehouseId`，未到齐前新仓位置名带仓库前缀）；盘点 `fulfillment.stock.count` → `count.decide`（`fulfillment.stockCounts`；有差异须由订单审批人批准，审批类型 `stockCount`，批准时账面已变则拒绝，写 `adjust` 流水带 `countId`）。
+- 可用量：`freeQuantity = available − 有效预留`。出库、调拨、预留按此校验；`consumeReservations` 让给本条目的发料 / 离港先使用本条目预留。
+- 离港自动出库：`fulfillment.shipments.depart` 调 `autoIssueForDeparture`，按条目对应生产分支的来源采购批次（非物料、非内部订单）先进先出写 `issue` 流水并带 `shipmentLink`；已手工关联本票的数量先扣除，其他条目的预留不动。没有我方仓库库存的出运不受影响。
+- 库龄与金额：`stockAgeDays`（北京业务日）、`stockUnitCost`（采购单价，加工合同不计；其他入库按填写成本）。界面仅对 `procurement:read` 显示金额。
+- 数据范围：`fulfillment.stockCounts` / `stockTransfers` 随所涉批次可见。Agent 风险：`stock.release`、`stock.count.decide` 按动词规则为高风险，其余为中风险。
+- 装箱箱号段 / 码单录入只在前端展开为逐箱行（`PackingRangeDialog`），`fulfillment.shipments.pack` 契约不变。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

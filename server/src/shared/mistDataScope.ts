@@ -22,7 +22,7 @@ export type MistDataScope = { userIds: string[]; teamIds: string[]; lines?: Arra
 export const SCOPED_COLLECTIONS = [
   'crm.opportunities', 'crm.followUps', 'devs', 'drafts', 'versions', 'rounds', 'market.quotations', 'orders', 'orderLines',
   'productions', 'invoices', 'allocations', 'receipts', 'internalFabricAllocations', 'internalDeliveries',
-  'fulfillment.purchases', 'fulfillment.receipts', 'fulfillment.stock', 'fulfillment.stockMovements', 'fulfillment.returnReceipts', 'fulfillment.receivedRecords', 'fulfillment.documents', 'fulfillment.qcTasks', 'fulfillment.qcReports', 'fulfillment.samples', 'fulfillment.sampleMovements',
+  'fulfillment.purchases', 'fulfillment.receipts', 'fulfillment.stock', 'fulfillment.stockMovements', 'fulfillment.stockCounts', 'fulfillment.stockTransfers', 'fulfillment.returnReceipts', 'fulfillment.receivedRecords', 'fulfillment.documents', 'fulfillment.qcTasks', 'fulfillment.qcReports', 'fulfillment.samples', 'fulfillment.sampleMovements',
   'fulfillment.packing', 'fulfillment.shipments', 'fulfillment.customs', 'fulfillment.shippingTerms', 'fulfillment.productionFacts',
   'platform.pricing', 'platform.risks', 'platform.claims', 'platform.claimGoods', 'platform.credits', 'platform.creditApplications', 'platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts',
   'orderFunding.assignments', 'rfqs', 'letterOfCredits', 'customerStatements',
@@ -102,6 +102,9 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
     const ownSupply=!!allocation && allocation.fabricOrderId===stock?.orderId && allocation.fabricLineId===stock?.lineId && allocation.orderId===row.materialDelivery?.orderId && allocation.lineId===row.materialDelivery?.lineId;
     if (!row.materialDelivery?.orderId || collaboratingOrders.has(row.materialDelivery.orderId) || ownSupply) add('fulfillment.stockMovements', row.id);
   }
+  // Counts and transfers are visible only when every lot they touch is visible.
+  for (const row of f.stockCounts ?? []) if (row.lines?.length && row.lines.every((line: any) => has('fulfillment.stock', line.stockId))) add('fulfillment.stockCounts', row.id);
+  for (const row of f.stockTransfers ?? []) if (has('fulfillment.stock', row.stockId)) add('fulfillment.stockTransfers', row.id);
   for (const row of (state as MistState & { orderCosts?: OrderCostState }).orderCosts?.expenses ?? []) if (row.shares?.length && row.shares.every(share => collaboratingOrders.has(share.orderId))) add('orderCosts.expenses', row.id);
 
   for (const path of ['platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts'] as const) for (const row of get(state, path)) if (collaboratingOrders.has(row.orderId)) add(path, row.id);

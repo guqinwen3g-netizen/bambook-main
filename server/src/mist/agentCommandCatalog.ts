@@ -709,7 +709,10 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.procurement.receive",
-  "payload": "{ id: string; targetProductionId?: string; /** Intermediate fabric processing contract receiving the goods (it has no production branch). */ targetPurchaseId?: string; quantity: number; rejected: number; destination: 'warehouse' | 'supplier'; location: string; date: string; evidence: string; fileIds: string[]; }",
+  "payload": "{ id: string; /** Warehouse receipt: the warehouse, and for fabric the dye lot, shade and roll list. */ warehouseId?: string; dyeLot?: string; shade?: string; rolls?: StockRoll[]; targetProductionId?: string; /** Intermediate fabric processing contract receiving the goods (it has no production branch). */ targetPurchaseId?: string; quantity: number; rejected: number; destination: 'warehouse' | 'supplier'; location: string; date: string; evidence: string; fileIds: string[]; }",
+  "types": {
+   "StockRoll": "{ roll: string; quantity: number; weightKg?: number }"
+  },
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
@@ -952,6 +955,48 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "fulfillment.shipments.updateTransport",
   "payload": "{ id: string; booking: string; plannedDate: string; note: string }",
   "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.stock.count",
+  "payload": "{ warehouseId?: string; lines: StockCountLine[]; note: string }",
+  "types": {
+   "StockCountLine": "{ stockId: string; location: string; counted: number }"
+  },
+  "source": "server/src/shared/mistStockOperations.ts"
+ },
+ {
+  "type": "fulfillment.stock.count.decide",
+  "payload": "{ id: string; decision: 'approved' | 'rejected'; note: string }",
+  "source": "server/src/shared/mistStockOperations.ts"
+ },
+ {
+  "type": "fulfillment.stock.receiveOther",
+  "payload": "{ orderId: string; lineId: string; reason: OtherReceiptReason; source: string; name: string; unit: string; quantity: number; warehouseId?: string; location: string; evidence: string; unitCost?: number; currency?: string; dyeLot?: string; shade?: string; rolls?: StockRoll[] }",
+  "types": {
+   "OtherReceiptReason": "keyof typeof OTHER_RECEIPT_REASONS",
+   "StockRoll": "{ roll: string; quantity: number; weightKg?: number }"
+  },
+  "source": "server/src/shared/mistStockOperations.ts"
+ },
+ {
+  "type": "fulfillment.stock.release",
+  "payload": "{ stockId: string; reservationId: string; reason: string }",
+  "source": "server/src/shared/mistStockOperations.ts"
+ },
+ {
+  "type": "fulfillment.stock.reserve",
+  "payload": "{ stockId: string; orderId: string; lineId: string; quantity: number; purpose: string }",
+  "source": "server/src/shared/mistStockOperations.ts"
+ },
+ {
+  "type": "fulfillment.stock.transfer",
+  "payload": "{ stockId: string; quantity: number; sourceLocation?: string; toWarehouseId: string; toLocation: string; carrier: string; note: string }",
+  "source": "server/src/shared/mistStockOperations.ts"
+ },
+ {
+  "type": "fulfillment.stock.transfer.receive",
+  "payload": "{ id: string; note: string }",
+  "source": "server/src/shared/mistStockOperations.ts"
  },
  {
   "type": "funding.assign",

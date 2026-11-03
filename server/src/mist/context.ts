@@ -28,7 +28,7 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
     return authority;
   }
   const routing=createApprovalRoutingService({prisma:db,companyId:actor.companyId??null,eligibleReviewerIds});
-  if(kind.startsWith('order.governance.') || kind.startsWith('fulfillment.production.intake') || kind==='fulfillment.qc.dispose' || kind==='fulfillment.qc.concession.decide'){
+  if(kind.startsWith('order.governance.') || kind.startsWith('fulfillment.production.intake') || kind==='fulfillment.qc.dispose' || kind==='fulfillment.qc.concession.decide' || kind==='fulfillment.stock.count' || kind==='fulfillment.stock.count.decide'){
     const {createOrderMainApprovalService}=await import('../orders/orderMainApprovalService');
     const service=createOrderMainApprovalService(db);authority.orderReviewerIds={garment:[],fabric:[]};
     for(const domain of ['garment','fabric'] as const){

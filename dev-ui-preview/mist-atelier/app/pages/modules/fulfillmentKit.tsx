@@ -5,7 +5,7 @@ import React from 'react';
 import { Download } from 'lucide-react';
 import { Banner, Button, DataTable, Pill, TextLink, Timeline, UploadZone } from '../../../../../components/mist';
 import type { MistState, MistFile } from '../../../../../server/src/shared/mistWorkspace';
-import type { FulfillmentDocument, FulfillmentSource, FulfillmentSample, FulfillmentShipment, FulfillmentStock } from '../../../../../server/src/shared/mistFulfillment';
+import type { FulfillmentDocument, FulfillmentSource, FulfillmentSample, FulfillmentShipment, FulfillmentStock, StockRoll } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentSourceLabel, fulfillmentPositions } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useUploadRecoveryClaim } from '../../runtime/errorPresentation';
@@ -25,6 +25,17 @@ export const choiceField = (key: string, label: string, options: ModuleField['op
 export const emptyOption = { value: '', label: '请选择' };
 export const text = (v: ModuleValues, key: string) => String(v[key] ?? '');
 export const number = (v: ModuleValues, key: string) => Number(v[key]);
+/** Packing list as typed or pasted from a spreadsheet: one roll per line, "roll quantity [kg]" split by spaces, tabs or commas. */
+export function parseRolls(raw: string): StockRoll[] | undefined {
+  const lines = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) return undefined;
+  return lines.map((line, i) => {
+    const [roll, quantity, weight, ...rest] = line.split(/[\s,，\t]+/);
+    const q = Number(quantity), w = weight === undefined ? undefined : Number(weight);
+    if (!roll || !Number.isFinite(q) || q <= 0 || rest.length || (w !== undefined && (!Number.isFinite(w) || w <= 0))) throw new Error(`码单第 ${i + 1} 行格式无效`);
+    return { roll, quantity: q, ...(w !== undefined ? { weightKg: w } : {}) };
+  });
+}
 /** A delivery target select holds a production branch id, or `contract:<id>` for an intermediate fabric processing contract. */
 export const deliveryTargetPayload = (value: string): { targetProductionId: string } | { targetPurchaseId: string } => value.startsWith('contract:') ? { targetPurchaseId: value.slice('contract:'.length) } : { targetProductionId: value };
 export function useEditor() { const [spec, set] = useRouteDraft<ModuleEditorSpec | null>(null); return { open: set, view: spec ? (spec.fields.length > 3 ? <ModuleEditorPage spec={spec} onClose={() => set(null)}/> : <ModuleEditorDialog spec={spec} onClose={() => set(null)}/>) : null, spec }; }
