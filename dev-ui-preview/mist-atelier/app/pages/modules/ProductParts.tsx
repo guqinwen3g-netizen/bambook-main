@@ -66,7 +66,7 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
   const specFields = PRODUCT_SPEC_FIELDS[product.category];
   const dev = w.state?.devs.find(d => d.id === product.sourceDevId), version = w.state?.versions.find(v => v.id === product.sourceVersionId);
   const refs = market && w.state ? productReferences(product, market, w.state.orders, w.state.orderLines, go) : [];
-  const canDevelop = session.hasPermission('products:write'), canOrder = session.hasPermission('orders:write'), canQuote = session.hasPermission('quotations:write');
+  const canDevelop = session.hasPermission('products:write'), canOrder = session.hasPermission('orders:write'), canQuote = session.hasPermission('quotations:write'), canProcure = session.hasPermission('procurement:write');
   const archived = product.status === 'archived';
   const refColumns: Column<Reference>[] = [
     { key: 'kind', header: '类型', width: '64px', render: r => <Pill tone={r.kind === '订单' ? 'accent' : 'neutral'}>{r.kind}</Pill> },
@@ -100,8 +100,13 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
       {refs.length ? <DataTable ariaLabel={uiText("产品引用记录")} rows={refs} rowKey={r => r.key} columns={refColumns} onRowClick={r => r.open()} density="compact" /> : <EmptyState compact title={uiText("暂无报价或订单引用")} />}
     </section>
     <div className="mist-row mist-product-actions">
-      <Button icon={FlaskConical} disabled={archived || !canDevelop || product.category === 'trimming'} title={uiText(product.category === 'trimming' ? '辅料开发尚未接入' : !canDevelop ? '需要开发编辑权限' : archived ? '归档产品须先恢复' : '新建同类开发案；规格请在开发表单中核对填写')} onClick={() => go('development/new', undefined, { section: product.category === 'fabric' ? 'fabric' : 'garment', ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>{uiText("再次开发")}</Button>
-      <Button icon={ShoppingCart} disabled={archived || !canOrder || product.category === 'trimming'} title={uiText(product.category === 'trimming' ? '辅料订单尚未接入' : !canOrder ? '需要订单编辑权限' : archived ? '归档产品须先恢复' : '以本档案为来源创建订单')} onClick={() => go('orders/new', 'product:' + product.id, { section: product.category, ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>{uiText("复购下单")}</Button>
+      {product.category === 'trimming' && <>
+        {/* ord12 / mar55：辅料按成衣订单采购（采购内容为辅料），打样向辅料供应商询价。 */}
+        <Button icon={ShoppingCart} disabled={archived || !canProcure} title={uiText(!canProcure ? '需要采购编辑权限' : archived ? '归档产品须先恢复' : undefined)} onClick={() => go('procurement', undefined, { section: 'trim:' + product.id })}>{uiText('采购下单')}</Button>
+        <Button icon={FlaskConical} disabled={archived || !canProcure || !product.supplierId} title={uiText(!canProcure ? '需要采购编辑权限' : !product.supplierId ? '请先指定供应商' : archived ? '归档产品须先恢复' : undefined)} onClick={() => go('procurement', undefined, { section: 'rfq:' + product.supplierId })}>{uiText('询价打样')}</Button>
+      </>}
+      {product.category !== 'trimming' && <Button icon={FlaskConical} disabled={archived || !canDevelop} title={uiText(!canDevelop ? '需要开发编辑权限' : archived ? '归档产品须先恢复' : '新建同类开发案；规格请在开发表单中核对填写')} onClick={() => go('development/new', undefined, { section: product.category === 'fabric' ? 'fabric' : 'garment', ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>{uiText("再次开发")}</Button>}
+      {product.category !== 'trimming' && <Button icon={ShoppingCart} disabled={archived || !canOrder} title={uiText(!canOrder ? '需要订单编辑权限' : archived ? '归档产品须先恢复' : '以本档案为来源创建订单')} onClick={() => go('orders/new', 'product:' + product.id, { section: product.category, ...(product.customerCodes?.[0] ? { customerId: product.customerCodes[0].customerId } : {}) })}>{uiText("复购下单")}</Button>}
       <Button icon={FileText} disabled={archived || !canQuote} title={uiText(!canQuote ? '需要报价编辑权限' : archived ? '归档产品须先恢复' : '新建报价并带入本档案')} onClick={() => go('quotations', undefined, { section: 'product:' + product.id })}>{uiText("加入报价")}</Button>
     </div>
     {editing && <CustomerCodeDialog product={product} onClose={() => setEditing(false)} />}

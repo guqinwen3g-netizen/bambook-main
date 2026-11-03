@@ -98,6 +98,10 @@ export function ProcurementPage() {
   const dialogApproval = dialog?.approvalFor ? all.find(p=>p.id===dialog.approvalFor) : undefined;
   const canDialog = dialog?.approvalFor ? canApprove && !!dialogApproval && dialogApproval.state==='pending' && dialogApproval.reviewerIds.includes(me) : can;
   React.useEffect(()=>{if(!can)editor.open(null);if(dialog&&!canDialog)setDialog(null);},[can,canDialog,dialog]);
+  // ord12：从辅料档案「采购下单」进入时，按档案预填辅料采购（来源订单条目由采购选择）。
+  const trimId = route.section?.startsWith('trim:') ? route.section.slice(5) : '', trimOpened = React.useRef('');
+  React.useEffect(() => { const prod = trimId && state ? state.market.products.find(x => x.id === trimId && x.category === 'trimming') : undefined; if (!prod || !can || trimOpened.current === trimId) return; trimOpened.current = trimId;
+    const base = purchaseSpec(); editor.open({ ...base, initialValues: { ...base.initialValues, kind: 'material:trims', supplierId: prod.supplierId, description: `${prod.sku} ${prod.name}${prod.color ? ' · ' + prod.color : ''}`, unit: prod.unit, price: Number(prod.refPrice || prod.cost) || 0, currency: prod.currency } }); }, [trimId, state, can]);
   if (editor.spec && can) return editor.view;
   if (dialog?.sections?.length && canDialog) return <ModuleEditorPage spec={dialog} onClose={()=>setDialog(null)}/>;
 
