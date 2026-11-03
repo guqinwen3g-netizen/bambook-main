@@ -107,8 +107,10 @@ export const UNITS: TradeOption[] = plain(['件', '套', '条', '双', '打', '�
 export const FABRIC_SAMPLE_FORMS: TradeOption[] = plain(['米样', '色样', '手织样', '剪样', '布样']);
 export const GARMENT_SAMPLE_FORMS: TradeOption[] = plain(['头样', '修改样', '尺码样', '销售样', '照相样', '测试样', '产前样', '船样']);
 export const sampleFormUnit = (form: string) => form.trim() === '米样' ? '米' : '份';
+/** 可选单位与是否允许小数，与服务端 sampleUnitsFor / sampleUnitAllowsDecimal 同一份规则。 */
+export { sampleUnitsFor, sampleUnitAllowsDecimal } from '../../../../server/src/shared/mistDevelopmentDomain';
 export const SAMPLE_FORMS: TradeOption[] = [...FABRIC_SAMPLE_FORMS, ...GARMENT_SAMPLE_FORMS];
-export const SAMPLE_UNITS = { fabric: plain(['米', '份']), garment: plain(['件', '套', '份']) };
+export const SAMPLE_UNITS = { fabric: plain(['米', '码', '公斤', '份', '张', '个', '色位', '卡']), garment: plain(['件', '套', '份']) };
 
 /** 面料规格常用写法。克重、幅宽只有 g/m² 与 cm 会带入报价和产品档案。 */
 export const WEAVES: TradeOption[] = plain(['平纹', '斜纹', '缎纹', '提花', '府绸', '牛津纺', '灯芯绒', '双面呢', '汗布', '罗纹', '珠地', '毛圈', '摇粒绒', '经编', '网眼']);

@@ -15,6 +15,8 @@ export type MistSampleDispatch = {
   id: string; sampleId: string; sampleCode: string; form: string; unit: string; quantity: number;
   purpose?:SampleSendPurpose;recipient: string; trackingNo: string; fee: MistSampleFee | null; note: string; movementId: string;
   recordedAt: string; recordedBy: string; feeRecordedAt?: string; feeRecordedBy?: string;
+  /** ord14：客户签收与对样品的意见（签收后登记，原寄出记录不改）。 */
+  receipt?: { date: string; feedback: string; at: string; actor: string };
 };
 type VersionSample = MistState['fulfillment']['samples'][number];
 

@@ -118,7 +118,7 @@ export function defaultFactoryTask(dev: MistDev, factory: string, targetDate: st
 /** 逐厂任务校验（页面与服务端共用）；通过返回 null。 */
 export function factoryTaskError(dev: MistDev, task: Pick<FactoryTaskInput, 'factory' | 'sampleForm' | 'sampleQuantity' | 'sampleUnit' | 'dueDate'>): string | null {
   const name = task.factory;
-  if (developmentDomain(dev.values) === 'fabric') { if (!validFabricSample(task.sampleQuantity, task.sampleForm, task.sampleUnit)) return `${name}：面料样品须写明形态与单位，米样按米，其他剪片类按整数份`; }
+  if (developmentDomain(dev.values) === 'fabric') { if (!validFabricSample(task.sampleQuantity, task.sampleForm, task.sampleUnit)) return `${name}：面料样品须写明形态与单位，米样按米或码，按份 / 张 / 个 / 色位计须为整数`; }
   else {
     if (!String(task.sampleForm || '').trim()) return `${name}：请填写样品形态`;
     if (!Number.isInteger(task.sampleQuantity) || task.sampleQuantity <= 0) return `${name}：样品数量须为正整数`;

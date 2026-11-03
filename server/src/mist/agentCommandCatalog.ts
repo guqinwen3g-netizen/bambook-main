@@ -207,6 +207,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "development.sample.dispatchReceived",
+  "payload": "{ devId: string; versionId: string; dispatchId: string; date: string; feedback?: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
   "type": "development.saveConfirmationDraft",
   "payload": "{ devId: string; versionId: string; draft: Omit<MistConfirmation, 'id' | 'recordedAt' | 'recordedBy'> }",
   "types": {
@@ -444,17 +449,30 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fabric.answer",
-  "payload": "{ id: string; answer: string; fileIds: string[] }",
+  "payload": "{ id: string; answer: string; fileIds: string[]; candidates?: Array<Omit<MistFabricCandidate, 'id' | 'supplier'>> }",
+  "types": {
+   "MistFabricCandidate": "{ id: string; supplierId: string; supplier: string; productId?: string; article: string; price: string; currency: string; moq: string; leadDays: string; note: string }"
+  },
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "fabric.cancel",
+  "payload": "{ id: string; reason: string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
   "type": "fabric.confirm",
-  "payload": "{ id: string; approved: boolean; note: string }",
+  "payload": "{ id: string; approved: boolean; note: string; candidateId?: string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
   "type": "fabric.create",
   "payload": "{ name: string; request: string; ownerId: string; due: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "fabric.update",
+  "payload": "{ id: string; name: string; request: string; ownerId: string; due: string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
@@ -761,11 +779,6 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
-  "type": "fulfillment.procurement.confirm",
-  "payload": "{ id: string; at: string; evidence: string; confirmedDue: string; fileIds: string[] }",
-  "source": "server/src/shared/mistFulfillment.ts"
- },
- {
   "type": "fulfillment.procurement.decide",
   "payload": "{ id: string; decision: 'approved' | 'rejected'; note: string; }",
   "source": "server/src/shared/mistFulfillment.ts"
@@ -962,7 +975,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.samples.move",
-  "payload": "{ id: string; kind: 'lend' | 'return' | 'send' | 'move'; sendPurpose?:SampleSendPurpose; quantity: number; person: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
+  "payload": "{ id: string; kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory'; sendPurpose?:SampleSendPurpose; trackingNo?: string; carrier?: string; destination?: string; fee?: { amount: number; currency: string }; quantity: number; person: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
   "types": {
    "SampleSendPurpose": "'confirmation'|'testing'|'rework'|'other'"
   },

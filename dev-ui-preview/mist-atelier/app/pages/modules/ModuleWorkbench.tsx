@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** Shared T2/T3 lists and T4 editors. Domain pages own fields, transitions and authority. */
 import React from 'react';
 import { ArrowLeft, ArrowRight, Download, Edit3, Plus } from 'lucide-react';
-import { FormFooter, BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
+import { UploadZone, FormFooter, BackLink, Banner, Button, Card, Checkbox, DataTable, Dialog, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pagination, SearchField, Select, TextArea, TextInput, Toolbar, VerticalSteps, useToast, type Column } from '../../../../../components/mist';
 import { useMistWorkspace,type MistWorkspaceContext,type MistCommandRecovery } from '../../runtime/workspace';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import { useNav } from '../../nav';
@@ -10,9 +10,11 @@ import { PreviewSummary, useCompactLayout, type PreviewSummaryData } from './pag
 import { IncotermPlaceInput, OptionInput } from '../OptionInput';
 import { downloadGeneratedBlob, requestGeneratedExport } from '../../runtime/exportRequests';
 export type ModuleValue = string | number | boolean;
+export const moduleFileIds = (value: ModuleValue | undefined): string[] => typeof value === 'string' && value ? value.split(',').filter(Boolean) : [];
 export type ModuleValues = Record<string, ModuleValue>;
 type ModuleFieldCondition = {key:string;values:string[]};
-export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'month'|'datetime-local'|'select'|'choice'|'incoterm'|'textarea'|'checkbox';options?:Array<{value:string;label:string}>;/** choice：常用选项 + 手动填写；strict 时只能选列表内的值。 */strict?:boolean;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:ModuleFieldCondition|ModuleFieldCondition[]};
+/** files：上传后的附件 ID 以逗号分隔存入取值，用 moduleFileIds 读取。 */
+export type ModuleField = {key:string;label:string;type?:'text'|'number'|'date'|'month'|'datetime-local'|'select'|'choice'|'incoterm'|'textarea'|'checkbox'|'files';options?:Array<{value:string;label:string}>;/** choice：常用选项 + 手动填写；strict 时只能选列表内的值。 */strict?:boolean;required?:boolean;hint?:string;readonly?:boolean;min?:number;step?:number|string;when?:ModuleFieldCondition|ModuleFieldCondition[]};
 export type ModuleEditorSection = {id:string;label:string;description?:string;fields:string[]};
 export type ModuleEditorSpec = {title:string;description?:string;sections?:ModuleEditorSection[];fields:ModuleField[];initialValues:ModuleValues;submit:(values:ModuleValues)=>Promise<unknown>;submitLabel?:string;submitVariant?:'primary'|'danger'};
 /** Domain-owned sections preserve the Mist T9 geometry without arbitrary six-field business boundaries.
@@ -53,6 +55,12 @@ function useRecoveredModuleCommand(spec:ModuleEditorSpec|null,workspace:MistWork
   // Derive immediately as well as latch, so clearing pending cannot briefly re-enable Save.
   return {completed:!!spec&&(matched||completedForm===spec&&attempt?.key.workspaceId===workspace.workspace?.id&&attempt?.key.actorId===acknowledgement?.actorId),failed};
 }
+function ModuleFilesInput({label,ids,disabled,onChange,onError}:{label:string;ids:string[];disabled:boolean;onChange:(ids:string[])=>void;onError:(message:string)=>void}){
+  const {state,uploadFile}=useMistWorkspace(),[busy,setBusy]=React.useState(false);
+  const add=async(files:File[])=>{setBusy(true);onError('');const next=[...ids];try{for(const file of files)next.push((await uploadFile(file)).id);onChange(next);}catch(e){onError(e instanceof Error?e.message:'附件上传失败');onChange(next);}finally{setBusy(false);}};
+  return <div className="mist-col">{!disabled&&!busy&&<UploadZone title={uiText(label)} onFiles={files=>void add(files)} />}{busy&&<span className="mist-note">{uiText('上传中…')}</span>}
+    {ids.map(id=><div key={id} className="mist-row"><span>{state?.files.find(f=>f.id===id)?.name||id}</span><span className="mist-spacer" />{!disabled&&<Button size="sm" variant="quiet" onClick={()=>onChange(ids.filter(x=>x!==id))}>{uiText('移除')}</Button>}</div>)}</div>;
+}
 export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec|null;onClose:()=>void;onSaved?:()=>void}){
   const workspace=useMistWorkspace(),{saving,pending,pendingCreate}=workspace,toast=useToast(),recovery=useRecoveredModuleCommand(spec,workspace);
   const [values,setValues]=React.useState<ModuleValues>({}),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false);
@@ -79,12 +87,13 @@ export function ModuleEditorDialog({spec,onClose,onSaved}:{spec:ModuleEditorSpec
     {spec?.description&&<p className="mist-sub" style={{margin:'0 0 12px'}}>{uiText(spec.description)}</p>}
     {recovery.completed?<Banner tone="ok" title={uiText("原操作已保存")}/>:error&&<Banner tone="bad" title={uiText("未能保存")}>{uiText(error)}</Banner>}
     {(pending||pendingCreate)&&!saving&&<Banner tone="warn" title={uiText("请先核对上次操作的结果")}>{uiText("输入会保留；使用页面上的原请求核对入口后继续。")}</Banner>}
-    <FormGrid>{visible.map(f=><Field key={f.key} label={f.type==='checkbox'?undefined:uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'}>
+    <FormGrid>{visible.map(f=><Field key={f.key} label={f.type==='checkbox'?undefined:uiText(f.label)} required={f.required} hint={uiText(f.hint)} full={f.type==='textarea'||f.type==='files'}>
       {f.type==='choice'?<OptionInput ariaLabel={f.label} options={f.options||[]} strict={f.strict} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={v=>change(f.key,v)} />
       :f.type==='incoterm'?<IncotermPlaceInput ariaLabel={f.label} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={v=>change(f.key,v)} />
       :f.type==='select'?<Select aria-label={uiText(f.label)} placeholder={uiText(f.options?.some(option=>option.value==='')?undefined:'请选择')} value={selectValue(f,values[f.key])} options={f.options||[]} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />
       :f.type==='textarea'?<TextArea aria-label={uiText(f.label)} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />
       :f.type==='checkbox'?<Checkbox label={uiText(f.label)} checked={!!values[f.key]} disabled={disabled||f.readonly} onChange={v=>change(f.key,v)} />
+      :f.type==='files'?<ModuleFilesInput label={f.label} ids={moduleFileIds(values[f.key])} disabled={disabled||!!f.readonly} onChange={ids=>change(f.key,ids.join(','))} onError={setError} />
       :<TextInput aria-label={uiText(f.label)} type={f.type||'text'} min={f.min} step={f.step} value={String(values[f.key]??'')} disabled={disabled||f.readonly} onChange={e=>change(f.key,e.target.value)} />}
     </Field>)}</FormGrid>
   </Dialog>;

@@ -1,3 +1,4 @@
+import { sampleUnitAllowsDecimal } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import {MistPresentedErrorContext} from '../../runtime/errorPresentation';
 import {SAMPLE_SEND_PURPOSES,sampleSendPurpose} from '../../../../../server/src/shared/mistSampleSending';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -21,11 +22,11 @@ import { SAMPLE_FORMS } from '../../runtime/tradeOptions';
 
 type Shelf = 'fabric' | 'garment' | 'other';
 type StatusFilter = 'all' | 'available' | 'lent' | 'overdue' | 'empty';
-type MoveKind = 'lend' | 'return' | 'send' | 'move';
+type MoveKind = 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory';
 /** One ledger row: a fabric archive with its forms, or one garment / other physical sample. */
 type LedgerRow = { id: string; shelf: Shelf; name: string; samples: FulfillmentSample[]; primary: FulfillmentSample };
 
-const MOVE_LABEL: Record<SampleMovement['kind'], string> = { receive: '入库', lend: '借出', return: '归还', send: '寄出', move: '移位' };
+const MOVE_LABEL: Record<SampleMovement['kind'], string> = { receive: '入库', lend: '借出', return: '归还', send: '寄出', move: '移位', scrap: '报废', returnFactory: '退还工厂' };
 const shelfOf = (sample: FulfillmentSample): Shelf => sample.category === '面料' ? 'fabric' : sample.category === '成衣' ? 'garment' : 'other';
 const archiveKey = (sample: FulfillmentSample) => sample.source.kind === 'version' ? 'v:' + sample.source.versionId
   : sample.source.kind === 'orderLine' ? `l:${sample.source.lineId}:${sample.source.productionId || ''}` : `m:${sample.name}|${sample.source.description}`;
@@ -133,14 +134,14 @@ export function SamplesPage() {
     title: shippingGarment?'登记船样':'新建样品',
     sections: [
       { id: 'identity', label: '类别与来源', fields: ['category', 'categoryCustom', 'name', 'source', 'sourceText', 'role', 'shipmentId'] },
-      { id: 'form', label: '形态与数量', fields: shippingGarment?['form','sizeQuantities','unit']:['form', 'quantity', 'unit'] },
+      { id: 'form', label: '形态与数量', fields: shippingGarment?['form','sizeQuantities','unit']:['form', 'quantity', 'sizeQuantities', 'unit'] },
       { id: 'place', label: '规格与位置', fields: shippingGarment?['color','location','note']:['size', 'color', 'location', 'note'] },
     ],
     fields: [{...field('category', '大类', 'select', true, choices(['面料', '成衣', '其他'])),readonly:!!contextShelf}, {...field('categoryCustom', '其他类别', 'text', false),when:{key:'category',values:['其他']}}, field('name', '名称'),
       { ...field('source', '来源', 'select', true, sampleSources), readonly:hasProductionContext, hint: sourceHint }, {...field('sourceText', '来源说明', 'text', false),when:{key:'source',values:['manual']}},
       { ...field('role', '样品用途', 'select', true, roleOptions), readonly: hasShipmentContext, when:{key:'source',values:productionSources} },
       { ...field('shipmentId', '出运批次', 'select', true, shipmentOptions), readonly: hasShipmentContext, when:[{key:'source',values:productionSources},{key:'role',values:['shipping']}] },
-      choiceField('form', '形态', SAMPLE_FORMS), ...(shippingGarment?[field('sizeQuantities','尺码与件数','textarea')]:[field('quantity', '数量 / 长度', 'number')]), {...field('unit', '单位', 'select', true, choices(['米', '码', '公斤', '份', '件'])),readonly:shippingGarment},
+      choiceField('form', '形态', SAMPLE_FORMS), ...(shippingGarment?[field('sizeQuantities','尺码与件数','textarea')]:[field('quantity', '数量 / 长度', 'number'), { ...field('sizeQuantities', '多件按尺码（每行 M:2）', 'textarea', false), when: { key: 'category', values: ['成衣'] } }]), {...field('unit', '单位', 'select', true, choices(['米', '码', '公斤', '份', '张', '个', '色位', '卡', '件', '套'])),readonly:shippingGarment},
       ...(!shippingGarment?[field('size', '尺码', 'text', false)]:[]), field('color', '颜色', 'text', false), field('location', '存放位置', 'text', false), field('note', '备注', 'textarea', false)],
     initialValues: { category: defaultCategory, categoryCustom: '', name: contextLine?.name || '', source: hasShipmentContext ? (sourceProduction ? 'production:' + sourceProduction.id : '') : contextProduction ? 'production:' + contextProduction.id : 'manual', sourceText: '',
       role: hasShipmentContext ? 'shipping' : route.productionId ? (state?.orders.find(order => order.id === state.productions.find(branch => branch.id === route.productionId)?.orderId)?.type === 'fabric' ? 'pioneer' : 'pp') : '',
@@ -150,8 +151,9 @@ export function SamplesPage() {
       if (!state) return; if (invalidShipment || invalidProduction || hasProductionContext && contextProduction?.closed) throw new Error('生产来源已不可用');
       const category = text(values, 'category') === '其他' ? text(values, 'categoryCustom') : text(values, 'category');
       if (!category) throw new Error('请填写其他类别');
-      const sizeQuantities=shippingGarment?parseShippingSampleSizes(text(values,'sizeQuantities')):undefined,actualQuantity=sizeQuantities?sizeQuantities.reduce((total,row)=>total+row.quantity,0):number(values,'quantity');
-      if (category !== '面料' && !Number.isInteger(number(values, 'quantity'))) throw new Error('件或份类样品必须按整数登记');
+      const grouped=shippingGarment||(category==='成衣'&&!!text(values,'sizeQuantities').trim());
+      const sizeQuantities=grouped?parseShippingSampleSizes(text(values,'sizeQuantities')):undefined,actualQuantity=sizeQuantities?sizeQuantities.reduce((total,row)=>total+row.quantity,0):number(values,'quantity');
+      if (!sampleUnitAllowsDecimal(text(values, 'unit')) && !Number.isInteger(actualQuantity)) throw new Error(`按${text(values, 'unit')}计的样品须按整数登记`);
       await run({ type: 'fulfillment.samples.create', payload: { name: text(values, 'name'), category, form: text(values, 'form'), unit: text(values, 'unit'), quantity: actualQuantity,...(sizeQuantities?{sizeQuantities}:{}),location: text(values, 'location'), size: text(values, 'size'), color: text(values, 'color'), note: text(values, 'note'), fileIds: [],
         ...(text(values, 'role') ? { role: text(values, 'role') as FulfillmentSample['role'] } : {}), ...(text(values, 'shipmentId') ? { shipmentId: text(values, 'shipmentId') } : {}),
         source: text(values, 'source') === 'manual' ? { kind: 'manual', description: text(values, 'sourceText') } : parseSource(state, text(values, 'source')) } });
@@ -164,15 +166,17 @@ export function SamplesPage() {
     if (!state) return;
     const loans = state.fulfillment.sampleMovements.filter(item => item.sampleId === sample.id && item.kind === 'lend' && sampleLoanRemaining(state, item.id) > 0);
     const positions = fulfillmentPositions(sample);
-    setDialog({ title: ({ lend: '登记借出', return: '登记分次归还', send: '登记永久寄出', move: '登记移位' })[kind] + ` · ${sample.form}`,
+    setDialog({ title: ({ lend: '登记借出', return: '登记分次归还', send: '登记永久寄出', move: '登记移位', scrap: '登记报废', returnFactory: '登记退还工厂' })[kind] + ` · ${sample.form}`,
       fields: [...(kind==='send'?[field('sendPurpose','寄送用途','select',true,Object.entries(SAMPLE_SEND_PURPOSES).map(([value,label])=>({value,label})))]:[]),...(kind !== 'return' && positions.length > 1 ? [field('sourceLocation', '本次出库位置', 'select', true, [{ value: '__choose__', label: '请选择位置' }, ...positions.map(position => ({ value: position.location, label: `${position.location || '位置未记录'} · ${position.available}${sample.unit}` }))])] : []),
         ...(kind === 'return' ? [field('loanId', '原借出', 'select', true, [emptyOption, ...loans.map(loan => ({ value: loan.id, label: `${loan.person} · 未还 ${sampleLoanRemaining(state, loan.id)}${sample.unit} · ${loan.at.slice(0, 10)}` }))])] : []),
         ...(kind !== 'move' ? [field('quantity', `本次数量（${sample.unit}）`, 'number')] : []),
-        field('person', kind === 'send' ? '收件人 / 公司' : kind === 'lend' ? '借用人' : '经手人', 'text', kind === 'lend' || kind === 'send'),
-        field('location', kind === 'send' ? '寄送去向 / 运单号' : '新位置', 'text', false), ...(kind === 'lend' ? [field('expectedReturn', '预计归还日', 'date', false)] : []), field('note', '交接说明', 'textarea', false)],
-      initialValues: {sendPurpose:sample.source.kind==='manual'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
+        ...(kind !== 'scrap' ? [field('person', kind === 'send' ? '收件人 / 公司' : kind === 'lend' ? '借用人' : kind === 'returnFactory' ? '退回工厂' : '经手人', 'text', kind === 'lend' || kind === 'send' || kind === 'returnFactory')] : []),
+        ...(kind === 'send' ? [field('destination', '寄送去向', 'text', false), field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), { ...field('feeAmount', '寄样费', 'number', false), min: 0 }, field('feeCurrency', '寄样费币种', 'select', false, ['CNY', 'USD', 'EUR'].map(c => ({ value: c, label: c })))] : kind === 'move' || kind === 'return' ? [field('location', '新位置', 'text', false)] : []),
+        ...(kind === 'lend' ? [field('expectedReturn', '预计归还日', 'date', false)] : []), field('note', kind === 'scrap' || kind === 'returnFactory' ? '原因' : '交接说明', 'textarea', kind === 'scrap' || kind === 'returnFactory')],
+      initialValues: {sendPurpose:sample.source.kind==='manual'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', destination: '', carrier: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
       submitLabel: '保存流转',
       submit: values => run({ type: 'fulfillment.samples.move', payload: { id: sample.id, kind,...(kind==='send'?{sendPurpose:sampleSendPurpose(text(values,'sendPurpose'),sample)}:{}),quantity: kind === 'move' ? 0 : number(values, 'quantity'), person: text(values, 'person'), location: text(values, 'location'), note: text(values, 'note'),
+        ...(kind === 'send' ? { destination: text(values, 'destination'), carrier: text(values, 'carrier'), trackingNo: text(values, 'trackingNo'), ...(Number(values.feeAmount) > 0 ? { fee: { amount: Number(values.feeAmount), currency: text(values, 'feeCurrency') || 'CNY' } } : {}) } : {}),
         ...(text(values, 'loanId') ? { loanId: text(values, 'loanId') } : {}), ...(text(values, 'expectedReturn') ? { expectedReturn: text(values, 'expectedReturn') } : {}), ...(text(values, 'sourceLocation') !== '__choose__' ? { sourceLocation: text(values, 'sourceLocation') } : {}) } }) });
   };
   const openSampleQc = (sample: FulfillmentSample) => {
@@ -290,6 +294,8 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
           { label: '寄出', icon: Send, onClick: () => onMove(sample, 'send'), hidden: !!why(sample, 'send') },
           { label: '归还', icon: Undo2, onClick: () => onMove(sample, 'return'), hidden: !!why(sample, 'return') },
           { label: '移位', onClick: () => onMove(sample, 'move'), hidden: !!why(sample, 'move') },
+          { label: '退还工厂', onClick: () => onMove(sample, 'returnFactory'), hidden: !!why(sample, 'returnFactory') },
+          { label: '报废', onClick: () => onMove(sample, 'scrap'), hidden: !!why(sample, 'scrap') },
         ]} />}
         {sample.source.kind !== 'manual' && (state.fulfillment.qcTasks.some(task=>task.sampleId===sample.id) || session.hasPermission(sample.source.kind==='version'?'products:write':'orders:write')) && <Button onClick={() => onQc(sample)}>{uiText("查看 / 发起本样品QC")}</Button>}
       </div>; })}
@@ -303,7 +309,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
       {row.samples.slice(1).filter(sample => sample.fileIds.length).map(sample => <RecordFiles key={sample.id} ids={sample.fileIds} />)}
     </DetailBlock>
     <DetailBlock title={uiText("流转记录")}>
-      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}`, link = movement.development; return ({ who: movement.actor, when: new Date(movement.at).toLocaleString(), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
+      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.destination ? ' · ' + movement.destination : ''}${movement.carrier || movement.trackingNo ? ` · ${[movement.carrier, movement.trackingNo].filter(Boolean).join(' ')}` : ''}${movement.fee ? ` · 寄样费 ${movement.fee.amount} ${movement.fee.currency}` : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}`, link = movement.development; return ({ who: movement.actor, when: new Date(movement.at).toLocaleString(), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
         : <span className="mist-note">{uiText("还没有流转记录")}</span>}
     </DetailBlock>
   </DetailBody>;

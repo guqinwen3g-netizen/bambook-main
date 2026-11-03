@@ -209,8 +209,11 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
     return preloadPagesWhenIdle(pages);
   }, [sections, session.status, session.sessionKey, session.user?.mustChangePassword, session.canAccessView, session.hasPermission, session.user?.platformRole, platformOnly, !!platformCompany, workspace.loading]);
   // 侧栏「开发与寻样」回到本次会话最近查看的页签；未查看过时为「成衣开发」。
-  const lastDevelopmentTab = React.useRef<DevelopmentListTab>('garment');
+  const lastDevelopmentTab = React.useRef<DevelopmentListTab | null>(null);
   if (route.view === 'development') lastDevelopmentTab.current = developmentListTab(route.section);
+  // ord7：未查看过时按本人所在业务线落页签：只属面料组的员工默认「面料开发」。
+  const myGroups = workspace.state?.memberGroups?.find(g => g.userId === session.user?.id)?.groups ?? [];
+  const defaultDevelopmentTab: DevelopmentListTab = myGroups.includes('fabric') && !myGroups.includes('garment') ? 'fabric' : 'garment';
   const go = React.useCallback((view: string, id?: string, target: RouteTarget = {}, options: GoOptions = {}) => {
     const next = { view, id, ...target }, list = isListState(next, options);
     scrollPosition.current = { key: nextScrollKey(scrollPosition.current, next, list), route: next, list };
@@ -332,7 +335,7 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   ];
   function navigateModule(id: string) {
     if (id !== 'development') { go(id); return; }
-    const target = developmentListTarget(lastDevelopmentTab.current);
+    const target = developmentListTarget(lastDevelopmentTab.current ?? defaultDevelopmentTab);
     go(target.view, target.id, target.target);
   }
   const nav = { route, go, theme, toggleTheme, openPalette: () => setPalette(true), openAI };

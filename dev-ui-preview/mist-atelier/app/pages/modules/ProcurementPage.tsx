@@ -9,7 +9,7 @@ import {businessNow} from '../../runtime/businessClock';
 /** 采购管理：面料 / 成衣业务组下分“采购订单”“委外加工单”两个入口；阶段流水线 + 单据详情轨迹，所有对外动作都登记真实依据。 */
 import React from 'react';
 import { CheckCircle2, Download, FileSignature, PackageCheck, Pencil, Plus, SearchX, Send, ShoppingCart, Undo2, Workflow } from 'lucide-react';
-import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
+import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Timeline, Toolbar, useToast, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentPurchase, FulfillmentReceipt, FulfillmentReceiptReturn } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentPositions, fulfillmentSourceLabel, receiptRejectionBlocker, receiptReturnedQuantity } from '../../../../../server/src/shared/mistFulfillment';
@@ -18,7 +18,7 @@ import { supplierBusinessDay, productionSupplierUnavailableReason } from '../../
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
 import { choiceField, deliveryTargetPayload, emptyOption, Events, exportRecords, field, localNow, number, parseRolls, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
@@ -103,7 +103,9 @@ export function ProcurementPage() {
   const pick = (purchase: FulfillmentPurchase) => { setPicked(purchase.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, purchase.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setEntryChoice(null); setStageFilter('all'); setPicked(null); };
   const changeEntry = (value: Entry) => { setEntryChoice(value); setStageFilter('all'); setPicked(null); };
-  const act = async (work: () => Promise<unknown>) => { setFailure(''); try { await work(); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
+  // sup16：直接动作成功后给出提示。
+  const toast = useToast();
+  const act = async (work: () => Promise<unknown>, done?: string) => { setFailure(''); try { await work(); if (done) toast(done); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
   const supplierOptions = (currentId?: string) => (state?.market.suppliers || [])
     .filter(s => s.id === currentId || !productionSupplierUnavailableReason(s, day))
     .map(s => { const reason = productionSupplierUnavailableReason(s, day); return { value: s.id, label: reason ? `${s.name} · 原供应商（${reason}）` : s.name }; });
@@ -135,8 +137,8 @@ export function ProcurementPage() {
       if (id) { setPicked(id); setEntryChoice(text(values, 'kind') === 'processing' ? 'processing' : 'purchase'); }
     },
   });
-  const sendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记批准合同线下发出', submitLabel: '登记发出', fields: [field('at', '实际发出时间', 'datetime-local'), field('evidence', '发出方式与依据', 'textarea')], initialValues: { at: localNow(), evidence: '' }, submit: values => run({ type: 'fulfillment.procurement.send', payload: { id: p.id, at: new Date(text(values, 'at')).toISOString(), evidence: text(values, 'evidence'), fileIds: [] } }) });
-  const confirmSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记供应商线下确认', submitLabel: '登记确认', fields: [field('at', '实际确认时间', 'datetime-local'), field('confirmedDue', '确认交期', 'date'), field('evidence', '供应商确认依据', 'textarea')], initialValues: { at: localNow(), confirmedDue: p.due, evidence: '' }, submit: values => run({ type: 'fulfillment.procurement.confirm', payload: { id: p.id, at: new Date(text(values, 'at')).toISOString(), confirmedDue: text(values, 'confirmedDue'), evidence: text(values, 'evidence'), fileIds: [] } }) });
+  const sendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记批准合同线下发出', submitLabel: '登记发出', fields: [field('at', '实际发出时间', 'datetime-local'), field('evidence', '发出方式与依据', 'textarea'), field('files', '发出的合同 / 回签件', 'files', false)], initialValues: { at: localNow(), evidence: '', files: '' }, submit: values => run({ type: 'fulfillment.procurement.send', payload: { id: p.id, at: new Date(text(values, 'at')).toISOString(), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) } }) });
+  const confirmSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: '登记供应商线下确认', submitLabel: '登记确认', fields: [field('at', '实际确认时间', 'datetime-local'), field('confirmedDue', '确认交期', 'date'), field('evidence', '供应商确认依据', 'textarea'), { ...field('dueChangeReason', '交期变更原因', 'textarea', false), hint: '确认交期与合同不同时填写' }, field('files', '供应商回签 / 确认件', 'files', false)], initialValues: { at: localNow(), confirmedDue: p.due, evidence: '', dueChangeReason: '', files: '' }, submit: values => run({ type: 'fulfillment.procurement.confirm', payload: { id: p.id, at: new Date(text(values, 'at')).toISOString(), confirmedDue: text(values, 'confirmedDue'), evidence: text(values, 'evidence'), ...(text(values, 'confirmedDue') !== p.due ? { dueChangeReason: text(values, 'dueChangeReason') } : {}), fileIds: moduleFileIds(values.files) } }) });
   const receiveSpec = (p: FulfillmentPurchase): ModuleEditorSpec => {
     const linked = !!state && materialDeliveryRequired(state, p.id), targets = linked ? materialDeliveryTargets(state!, p.id) : [];
     // Dyed/finished fabric is physical goods: it can enter our warehouse or go straight on; garment processing stays a service handover.
@@ -147,12 +149,12 @@ export function ProcurementPage() {
       fields: [field('quantity', `接收数量（${p.unit}）`, 'number'), field('rejected', `拒收数量（${p.unit}）`, 'number'), field('destination', '交付路径', 'select', true, destinations), ...(linked ? [field('targetProductionId', '直送加工单', 'select', false, [emptyOption, ...targets])] : []),
         ...(warehouses.length ? [{ ...field('warehouseId', '入库仓库', 'select', true, [emptyOption, ...warehouses]), when: inWarehouse }] : []), field('location', '实际交接地点'), field('date', '实际交付日', 'date'),
         ...(p.domain === 'fabric' ? [{ ...field('dyeLot', '缸号', 'text', false), when: inWarehouse }, { ...field('shade', '色号', 'text', false), when: inWarehouse }, { ...field('rolls', '码单（卷号 数量 公斤）', 'textarea', false), when: inWarehouse }] : []),
-        field('evidence', '点数与交接依据', 'textarea')],
-      initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' && !fabricProcessing ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', targetProductionId: targets.length === 1 ? targets[0].value : '', warehouseId: warehouses.length === 1 ? warehouses[0].value : '', dyeLot: '', shade: '', rolls: '' },
+        field('evidence', '点数与交接依据', 'textarea'), field('files', '送货单 / 码单', 'files', false)],
+      initialValues: { quantity: Math.max(0, round(p.quantity - p.received)), rejected: 0, destination: p.kind === 'processing' && !fabricProcessing ? 'supplier' : 'warehouse', location: p.destination, date: today(), evidence: '', files: '', targetProductionId: targets.length === 1 ? targets[0].value : '', warehouseId: warehouses.length === 1 ? warehouses[0].value : '', dyeLot: '', shade: '', rolls: '' },
       submit: values => {
         const quantity = number(values, 'quantity'), destination = text(values, 'destination') as 'warehouse' | 'supplier';
         if (linked && destination === 'supplier' && quantity > 0 && !text(values, 'targetProductionId')) throw new Error('请选择直送加工单');
-        const payload = { id: p.id, quantity, rejected: number(values, 'rejected'), location: text(values, 'location'), date: text(values, 'date'), evidence: text(values, 'evidence'), fileIds: [] };
+        const payload = { id: p.id, quantity, rejected: number(values, 'rejected'), location: text(values, 'location'), date: text(values, 'date'), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) };
         const rolls = destination === 'warehouse' ? parseRolls(text(values, 'rolls')) : undefined;
         const lot = destination !== 'warehouse' ? {} : { ...(text(values, 'warehouseId') ? { warehouseId: text(values, 'warehouseId') } : {}), ...(text(values, 'dyeLot').trim() ? { dyeLot: text(values, 'dyeLot').trim() } : {}), ...(text(values, 'shade').trim() ? { shade: text(values, 'shade').trim() } : {}), ...(rolls ? { rolls } : {}) };
         return linked && destination === 'supplier' && quantity > 0 ? run({ type: 'fulfillment.materials.deliver', payload: { ...payload, ...deliveryTargetPayload(text(values, 'targetProductionId')) } }) : run({ type: 'fulfillment.procurement.receive', payload: { ...payload, destination, ...lot } });
@@ -208,11 +210,11 @@ export function ProcurementPage() {
   const detail = selected && state
     ? <PurchaseDetail purchase={selected} state={state} incoming={Object.values(workspace?.scopedFabricAccess||{}).flatMap(a=>a.deliveries)} day={day} me={me} can={can} canApprove={canApprove} inventory={session.hasPermission('inventory:read')} finance={session.hasPermission('invoices:read')&&session.hasPermission('vouchers:read')} locked={locked}
         onEdit={() => editor.open(purchaseSpec(selected))}
-        onSubmit={() => void act(() => run({ type: 'fulfillment.procurement.submit', payload: { id: selected.id } }))}
+        onSubmit={() => void act(() => run({ type: 'fulfillment.procurement.submit', payload: { id: selected.id } }), '已提交审批')}
         onDecide={decision => setDialog(decideSpec(selected, decision))}
         onSend={() => setDialog(sendSpec(selected))} onConfirm={() => setDialog(confirmSpec(selected))} onReceive={() => setDialog(receiveSpec(selected))} onRejectReceived={r => setDialog(rejectReceivedSpec(selected, r))}
         onReturn={r => setDialog(returnSpec(selected, r))} onReturnReverse={(r, row) => setDialog(returnReverseSpec(selected, r, row))}
-        onDownload={() => void act(async () => { const receipt = await run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }); const fileId = receipt.result.fileId; if (typeof fileId === 'string') await downloadFile({ id: fileId, name: `${selected.code}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }); })}
+        onDownload={() => void act(async () => { const receipt = await run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }); const fileId = receipt.result.fileId; if (typeof fileId === 'string') await downloadFile({ id: fileId, name: `${selected.code}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }); }, '采购单已生成')}
         onAttach={ids => run({ type: 'fulfillment.procurement.save', payload: { ...selected, fileIds: ids } })}
         onInventory={() => go('inventory', undefined, { section: selected.id })} onSupplier={() => go('suppliers', selected.supplierId)}
         onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }} />
@@ -229,7 +231,7 @@ export function ProcurementPage() {
       ],
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div> : undefined,
     }} />; })() : null;
-  const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("")}</Banner></div> : null;
+  const readOnlyBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")} /></div> : null;
   if (full.active && selected && state) return <ListDetailPage backLabel="采购管理" onBack={full.back} before={readOnlyBanner} after={<ModuleEditorDialog spec={canDialog ? dialog : null} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
     <PageHeader description={uiText(sourceHint || (sourceLine && sourceOrder ? `${sourceOrder.code} · ${sourceLine.style}` : undefined))} eyebrow={uiText("订单履约 · 采购与委外")} title={uiText("采购管理")}
@@ -318,7 +320,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
     : stage === 'pending' ? { tone: 'warn', title: '等待审批', text: p.submittedAt ? shortWhen(p.submittedAt) : '' }
     : !p.offlineSend ? { tone: 'accent', title: '已批准 · 待线下发出', text: '' }
     : !p.supplierConfirmation ? { tone: 'accent', title: '合同已发出 · 待供应商确认', text: '' }
-    : p.received > p.quantity ? { tone: 'warn', title: '数量待核对', text: '' }
+    : p.received > p.quantity ? { tone: 'warn', title: `超收 ${round(p.received - p.quantity)} ${p.unit}`, text: '不接受的部分在收货记录上转为拒收并登记退回；接受的须先变更合同数量，结算以合同金额为上限。' }
     : stage === 'done' ? { tone: 'ok', title: processing ? '已全部回交' : '已全部交付', text: `${p.received} / ${p.quantity} ${p.unit}` }
     : processing && !p.stageTerms?.intermediate && !state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.release) ? { tone: 'accent', title: '待放行', text: '' }
     : processing && state.fulfillment.productionFacts?.some(fact => state.productions.some(branch => branch.id === fact.productionId && branch.sourcePurchaseId === p.id) && fact.hold) ? { tone: 'warn', title: '已暂停', text: '' }

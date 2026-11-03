@@ -17,8 +17,8 @@ import { DEVELOPMENT_BILLING_LOCK } from './mistDevelopmentBilling';
 import { normalizeShippingSampleSizes } from './mistShippingSample';
 import { productionQuantityBasis } from './mistProductionQuantity';
 import { productionSampleRequirements, type ProductionSampleEvidence } from './mistProductionSamples';
-import {developmentDomain} from './mistDevelopmentDomain';
-import { MistCommandError, lineAmount, mistMoneyMinor, assertMistOrderApproved, assertMistOrderDeposit, assertMistOrderOpen, isActiveMistInvoice, isRecognizedMistInvoice } from './mistWorkspace';
+import {developmentDomain,sampleUnitAllowsDecimal} from './mistDevelopmentDomain';
+import { MistCommandError, lineAmount, mistMoneyMinor, mistOrderOwnerIds, assertMistOrderApproved, assertMistOrderDeposit, assertMistOrderOpen, isActiveMistInvoice, isRecognizedMistInvoice } from './mistWorkspace';
 import { platformBusinessDate } from './mistPlatform';
 import { resolveMember } from './mistAccounts';
 import type { MistState, MistContext, MistCommandResult, MistQc, MistTarget, MistProduction } from './mistWorkspace';
@@ -89,7 +89,8 @@ export type FulfillmentSample = {
 export type SampleMovement = {
     id: string;
     sampleId: string;
-    kind: 'receive' | 'lend' | 'return' | 'send' | 'move';
+    /** scrap：报废 / 销毁；returnFactory：退还工厂。两者都是永久出库，须写原因。 */
+    kind: 'receive' | 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory';
     quantity: number;
     person: string;
     location: string;
@@ -102,6 +103,11 @@ export type SampleMovement = {
     /** BB-DEV-8：由开发案版本详情寄样生成的寄出流水，回链准确开发案、版本与寄样记录。 */
     development?: { devId: string; versionId: string; dispatchId: string };
     trackingNo?: string;
+    /** ord15：寄出的快递公司与去向，与运单号分开记录。 */
+    carrier?: string;
+    destination?: string;
+    /** ord17：寄出登记的寄样费，同时记入订单费用台账（expenseId）。 */
+    fee?: { amount: number; currency: string; expenseId?: string };
     sendPurpose?:SampleSendPurpose;
 };
 export type FulfillmentQcTask = {
@@ -204,6 +210,8 @@ export type FulfillmentPurchase = {
     revisionHistory?: FulfillmentPurchaseRevision[];
     offlineSend?: { at: string; actor: string; evidence: string; fileIds: string[]; revision: number };
     supplierConfirmation?: { at: string; actor: string; evidence: string; confirmedDue: string; fileIds: string[]; revision: number };
+    /** 供应商确认时改写的合同交期（原交期保留）。 */
+    dueChanges?: { from: string; to: string; reason: string; at: string; actor: string }[];
 };
 export type FulfillmentPurchaseRevision = {
     revision: number;
@@ -479,8 +487,12 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     type: 'fulfillment.samples.move';
     payload: {
         id: string;
-        kind: 'lend' | 'return' | 'send' | 'move';
+        kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory';
         sendPurpose?:SampleSendPurpose;
+        trackingNo?: string;
+        carrier?: string;
+        destination?: string;
+        fee?: { amount: number; currency: string };
         quantity: number;
         person: string;
         location: string;
@@ -608,7 +620,8 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     payload: { id: string; at: string; evidence: string; fileIds: string[] };
 } | {
     type: 'fulfillment.procurement.confirm';
-    payload: { id: string; at: string; evidence: string; confirmedDue: string; fileIds: string[] };
+    /** sup11：供应商回复交期不同时填 dueChangeReason，按供应商确认交期改写合同交期并留痕。 */
+    payload: { id: string; at: string; evidence: string; confirmedDue: string; fileIds: string[]; dueChangeReason?: string };
 } | {
     type: 'fulfillment.production.plan';
     payload: { productionId: string; sizes: FulfillmentSizeQuantity[] };
@@ -973,10 +986,15 @@ function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
     const f = root.fulfillment, s = source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
     if (s.kind === 'version' && get(root.devs, s.devId, '来源开发案').billing?.request) fail(DEVELOPMENT_BILLING_LOCK, 'PRECONDITION');
     const groupedShipping=input.sizeQuantities!==undefined;
-    if(groupedShipping&&(category!=='成衣'||input.role!=='shipping'||s.kind!=='orderLine'))fail('尺码件数组合仅用于成衣船样');
+    if(groupedShipping&&category!=='成衣')fail('尺码件数组合仅用于成衣样品');
     const sizeQuantities=groupedShipping?normalizeShippingSampleSizes(input.sizeQuantities,quantity):undefined;
-    if (category === '成衣' && ((!groupedShipping&&quantity !== 1) || unit !== '件')) fail('成衣必须逐件建档，数量为1件');
-    if (unit !== '米' && !Number.isInteger(quantity)) fail('非米样数量须为整数');
+    // ord6：成衣样品可一档多件（按尺码逐码登记件数）或一档一套（数量 1 套）；单件仍可直接登记 1 件。
+    if (category === '成衣') {
+        if (!['件', '套'].includes(unit)) fail('成衣样品按件或套登记');
+        if (unit === '套' && quantity !== 1) fail('成衣成套样品每档登记 1 套，多套请分别建档');
+        if (unit === '件' && quantity !== 1 && !groupedShipping) fail('多件成衣样品请逐码登记件数，如 M:2');
+    }
+    if (!sampleUnitAllowsDecimal(unit) && !Number.isInteger(quantity)) fail(`按${unit}计的样品数量须为整数`);
     if (s.kind === 'orderLine') {
         if (!s.productionId) fail('订单样品必须关联准确生产分支');
         assertGarmentMaterial(root, s.orderId, s.lineId, ctx);
@@ -1285,10 +1303,10 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.samples.move': {
             const s = get(f.samples, p.id, '样品');
             let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
-            if(s.sizeQuantities&&p.kind!=='move'&&quantity!==s.quantity)fail('本批船样须按整组流转');
-            if (s.unit !== '米' && !Number.isInteger(quantity)) fail('件或份类样品必须按整数流转');
+            if(s.sizeQuantities&&p.kind!=='move'&&quantity!==s.quantity)fail('按尺码登记的成组样品须整组流转');
+            if (!sampleUnitAllowsDecimal(s.unit) && !Number.isInteger(quantity)) fail(`按${s.unit}计的样品须按整数流转`);
             let loan: SampleMovement | undefined;
-            if (!['lend', 'return', 'send', 'move'].includes(p.kind))
+            if (!['lend', 'return', 'send', 'move', 'scrap', 'returnFactory'].includes(p.kind))
                 fail('样品流转类型无效');
             if (p.kind === 'return') {
                 loan = get(f.sampleMovements, p.loanId, '原借出');
@@ -1299,7 +1317,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     fail('归还量超过未还量');
             }
             else if (quantity > s.available) fail('可用样品不足');
-            const person = text(p.person, '借用人/收件人', p.kind === 'lend' || p.kind === 'send'), location = text(p.location, '位置', false), note = text(p.note, '备注', false), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
+            const person = text(p.person, p.kind === 'returnFactory' ? '退回工厂' : '借用人/收件人', p.kind === 'lend' || p.kind === 'send' || p.kind === 'returnFactory'), location = text(p.location, '位置', false), note = text(p.note, p.kind === 'scrap' || p.kind === 'returnFactory' ? '原因' : '备注', p.kind === 'scrap' || p.kind === 'returnFactory'), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
             if (expectedReturn && expectedReturn < platformBusinessDate(ctx.now))
                 fail('预计归还日不能早于借出日');
             const sendPurpose=p.kind==='send'?sampleSendPurpose(p.sendPurpose,s):undefined;
@@ -1313,8 +1331,22 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (p.kind === 'move') addAtPosition(s, quantity, location);
             }
             const id = ctx.id();
-            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
-            audit(root, ctx, 'sample', s.id, `样品${({ lend: '借出', return: '归还', send: '寄出', move: '移位' } as Record<string, string>)[p.kind]}${sendPurpose?' · '+SAMPLE_SEND_PURPOSES[sendPurpose]:''}`);
+            const shipping = p.kind === 'send' ? { ...(p.trackingNo?.trim() ? { trackingNo: text(p.trackingNo, '运单号', false) } : {}), ...(p.carrier?.trim() ? { carrier: text(p.carrier, '快递公司', false) } : {}), ...(p.destination?.trim() ? { destination: text(p.destination, '寄送去向', false) } : {}) } : {};
+            let fee: SampleMovement['fee'];
+            if (p.kind === 'send' && p.fee && p.fee.amount) {
+                const amount = qty(p.fee.amount, '寄样费'), currency = text(p.fee.currency, '寄样费币种').toUpperCase();
+                if (!/^[A-Z]{3}$/.test(currency)) fail('寄样费币种须为三位英文字母');
+                fee = { amount: Math.round(amount * 100) / 100, currency };
+            }
+            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
+            // ord17：订单样品的寄样费记入该订单费用台账，客户样品等无订单来源的只记在流水上。
+            if (fee && s.source.kind === 'orderLine') {
+                const order = get(root.orders, s.source.orderId, '订单'), costs = ((root as MistState & { orderCosts?: { expenses: unknown[] } }).orderCosts ||= { expenses: [] }) as { expenses: Array<Record<string, unknown>> };
+                const expenseId = ctx.id(), n = costs.expenses.filter(e => String(e.code || '').startsWith('EX-' + ctx.now.slice(0, 4))).length + 1;
+                costs.expenses.push({ id: expenseId, code: `EX-${ctx.now.slice(0, 4)}-${String(n).padStart(4, '0')}`, category: 'courier', vendor: shipping.carrier || '', ref: shipping.trackingNo || '', date: platformBusinessDate(ctx.now), currency: fee.currency, amount: fee.amount, note: `寄样 ${s.code}`, scope: 'orders', basis: 'manual', shares: [{ orderId: order.id, orderCode: order.code, basisValue: fee.amount, amount: fee.amount }], createdAt: ctx.now, createdBy: ctx.actorName, createdById: ctx.actorId || '' });
+                f.sampleMovements.at(-1)!.fee = { ...fee, expenseId };
+            }
+            audit(root, ctx, 'sample', s.id, `样品${({ lend: '借出', return: '归还', send: '寄出', move: '移位', scrap: '报废', returnFactory: '退还工厂' } as Record<string, string>)[p.kind]}${sendPurpose?' · '+SAMPLE_SEND_PURPOSES[sendPurpose]:''}`);
             return { id };
         }
         case 'fulfillment.qc.request': {
@@ -1635,8 +1667,15 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (purchase.state !== 'approved' || !purchase.offlineSend || purchase.supplierConfirmation) fail('请先登记批准合同线下发出，且不得覆盖已有确认');
             const at = instant(p.at, ctx, '供应商确认时间'), confirmedDue = day(p.confirmedDue, '供应商确认交期');
             if (at < purchase.offlineSend!.at) fail('供应商确认不得早于合同发出');
-            if (confirmedDue !== purchase.due) fail('供应商反馈交期与批准合同不同，需先处理商业变更，不得覆盖已批交期');
+            // sup11：交期不同按供应商确认改写合同交期，须写原因并保留原交期；数量、单价变化仍走取消重下或转单。
+            const dueChange = confirmedDue !== purchase.due ? { from: purchase.due, to: confirmedDue, reason: text(p.dueChangeReason, '交期变更原因（供应商回复与原合同不同）'), at: ctx.now, actor: ctx.actorName } : undefined;
+            if (dueChange) { (purchase.dueChanges ||= []).push(dueChange); purchase.due = confirmedDue; }
             purchase.supplierConfirmation = { at, confirmedDue, actor: ctx.actorName, evidence: text(p.evidence, '供应商确认依据'), fileIds: files(root, p.fileIds), revision: purchase.offlineSend!.revision };
+            if (dueChange) {
+                audit(root, ctx, 'procurement', purchase.id, `合同交期 ${dueChange.from} → ${dueChange.to}：${dueChange.reason}`);
+                const order = root.orders.find(o => o.id === purchase.orderId);
+                if (order && confirmedDue > order.due) root.tasks.unshift({ id: ctx.id(), title: `采购 ${purchase.code} 供应商确认交期 ${confirmedDue} 晚于订单 ${order.code} 交期 ${order.due}，请核对订单交期`, due: order.due, done: false, kind: `purchase-late:${purchase.id}`, target: { view: 'orders/detail', id: order.id, orderLineId: purchase.lineId }, assigneeIds: mistOrderOwnerIds(root, order.id) });
+            }
             audit(root, ctx, 'procurement', purchase.id, '已登记供应商线下确认');
             return { id: purchase.id };
         }
