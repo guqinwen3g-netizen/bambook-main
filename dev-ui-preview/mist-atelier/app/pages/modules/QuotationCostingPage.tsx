@@ -24,6 +24,7 @@ import { FormFooter,
   TextInput,
   VerticalSteps,
 } from "../../../../../components/mist";
+import type { PlatformBom } from "../../../../../server/src/shared/mistPlatform";
 import {
   calculateQuoteCosting,
   quotationCostingTarget,
@@ -76,6 +77,15 @@ const blankComponent = (): QuoteCostComponent => ({
   basis: "",
   outsideSupplierPrice: false,
 });
+/** A confirmed reference cost becomes cost lines (materials with loss, labour, overhead), each citing the reference code. */
+function referenceComponents(b: PlatformBom): QuoteCostComponent[] {
+  const cite = `参考成本 ${b.code}`;
+  return [
+    ...b.lines.map((l) => ({ ...blankComponent(), kind: "fabric" as const, description: l.description, quantity: String(l.quantity), unit: l.unit, lossPercent: String(l.wastagePercent), unitPrice: String(l.unitCost), basis: cite })),
+    ...(b.labor > 0 ? [{ ...blankComponent(), kind: "cmt" as const, description: "加工费", unitPrice: String(b.labor), unit: b.unit || "", basis: cite }] : []),
+    ...(b.overhead > 0 ? [{ ...blankComponent(), kind: "other" as const, description: "其他费用", unitPrice: String(b.overhead), unit: b.unit || "", basis: cite }] : []),
+  ];
+}
 function AllocationSummary({
   allocation,
   unit,
@@ -347,6 +357,8 @@ export function QuotationCostingPage() {
   } catch (e) {
     problem = e instanceof Error ? e.message : "待补齐核算输入";
   }
+  // Confirmed reference costs that fit this exact line: same product or development version, or the line's unit and the quote currency.
+  const references = (w.state?.platform.boms || []).filter((b) => b.state === "Confirmed" && b.currency === input.currency && (!b.unit || b.unit === input.unit) && (b.productId ? b.productId === line?.productId : b.versionId ? b.versionId === line?.sourceVersionId : true));
   const back = () => go("quotations", q?.id || route.id, { detail: "full" });
   const begin = () => {
     if (!q || !line || disabled) return;
@@ -666,6 +678,17 @@ export function QuotationCostingPage() {
                       : "成本明细")
                   }
                   tools={
+                    <span className="mist-row">
+                    {input.mode === "breakdown" && references.length > 0 && (
+                      <Select
+                        aria-label={uiText("引用参考成本")}
+                        value=""
+                        disabled={disabled}
+                        placeholder={uiText("引用参考成本")}
+                        options={references.map((b) => ({ value: b.id, label: `${b.code} · ${b.description.slice(0, 30)} · ${b.total} ${b.currency}` }))}
+                        onChange={(e) => { const b = references.find((x) => x.id === e.target.value); if (b) patch("components", [...input.components, ...referenceComponents(b)]); }}
+                      />
+                    )}
                     <Button
                       disabled={disabled || input.components.length >= 100}
                       onClick={() =>
@@ -675,6 +698,7 @@ export function QuotationCostingPage() {
                         ])
                       }
                     >{uiText("增加成本项")}</Button>
+                    </span>
                   }
                 />
                 {input.components.some((r) => r.scope === "per_line") && (

@@ -1,3 +1,4 @@
+import { marketLineAmount, marketSum } from './mistMarket';
 import {createClaimReplacementOrder,assertClaimReplacementShipped,type ClaimReplacementOrderCommand} from './mistClaimReplacement';
 import {mistBusinessDate} from './mistBusinessClock';
 import type {ClaimRepairJob,ClaimRepairDispatch} from './mistClaimInventory';
@@ -17,8 +18,10 @@ export type PlatformCreditSourceVersion={id:string;version:number;previousVersio
 export type MistBusinessNumberNeed={kind:'newCase'|'newCommonCN'|'newGoods'|'refundPV';prefix:'CLM'|'RT'|'PV'};
 export type PlatformInvoiceDraft={id:string;orderId:string;due:string;amount:number;note:string;state:'Draft'|'Issued';invoiceId?:string;createdAt:string};
 export type PlatformBomLine={description:string;quantity:number;unit:string;wastagePercent:number;unitCost:number};
-export type PlatformBom={id:string;code:string;orderId:string;description:string;currency:string;lines:PlatformBomLine[];labor:number;overhead:number;total:number;state:'Draft'|'Confirmed'|'Archived';createdAt:string};
-export type PlatformPricing={id:string;orderId:string;purchaseCostCny:number;refundRate:number;exchangeRate:number;profitMargin:number;commissionRate:number;basis:string;netUsdCost:number;profitAmount:number;commissionAmount:number;finalUnitPrice:number;createdAt:string;
+/** Reference cost for one finished unit. Anchored to an order line, a product file or a development version (P1-8); old records only have orderId. */
+export type PlatformBom={id:string;code:string;orderId:string;lineId?:string;productId?:string;devId?:string;versionId?:string;unit?:string;description:string;currency:string;lines:PlatformBomLine[];labor:number;overhead:number;total:number;state:'Draft'|'Confirmed'|'Archived';createdAt:string};
+/** Pricing trial. Source is an order or one quotation line; price is in `currency` (default USD) at `exchangeRate` CNY per unit of it. */
+export type PlatformPricing={id:string;orderId:string;quotationId?:string;lineId?:string;currency?:string;appliedAt?:string;appliedBy?:string;purchaseCostCny:number;refundRate:number;exchangeRate:number;profitMargin:number;commissionRate:number;basis:string;netUsdCost:number;profitAmount:number;commissionAmount:number;finalUnitPrice:number;createdAt:string;
  /** 保存当天按订单类型适用的标准参数版本（冻结）；未设置标准参数时没有。 */
  params?:FrozenPricingParams;
  /** 成本加成率低于标准时必填的偏离理由。 */
@@ -38,9 +41,10 @@ export type PlatformCommand=
  |ClaimReplacementOrderCommand
  |{type:'platform.invoice.save';payload:{id?:string;orderId:string;due:string;amount:number;note:string}}
  |{type:'platform.invoice.issue';payload:{id:string}}
- |{type:'platform.bom.save';payload:{id?:string;orderId:string;description:string;currency:string;lines:PlatformBomLine[];labor:number;overhead:number}}
+ |{type:'platform.bom.save';payload:{id?:string;orderId?:string;lineId?:string;productId?:string;devId?:string;versionId?:string;unit?:string;description:string;currency:string;lines:PlatformBomLine[];labor:number;overhead:number}}
  |{type:'platform.bom.transition';payload:{id:string;state:'Confirmed'|'Archived'}}
- |{type:'platform.pricing.save';payload:{orderId:string;purchaseCostCny:number;refundRate:number;exchangeRate:number;profitMargin:number;commissionRate:number;basis:string;deviationReason?:string}}
+ |{type:'platform.pricing.save';payload:{orderId?:string;quotationId?:string;lineId?:string;currency?:string;purchaseCostCny:number;refundRate:number;exchangeRate:number;profitMargin:number;commissionRate:number;basis:string;deviationReason?:string}}
+ |{type:'platform.pricing.apply';payload:{id:string;note:string}}
  |{type:'platform.pricingParams.set';payload:{family:'garment'|'fabric';profitMargin:number|string;commissionRate:number|string;effectiveFrom:string;reason:string}}
  |RiskCommand
  |{type:'platform.employee.save';payload:{id?:string;name:string;department:string;position:string;contact:string;startDate:string;note:string;active:boolean}}
@@ -154,9 +158,44 @@ export function applyPlatformCommand(root:Root,command:PlatformCommand,c:MistCon
 // 旧独立 CI 草稿 / 签发：页面已停用、不向 Agent 登记（scripts/gen-mist-command-catalog.mjs#AGENT_EXCLUDED_COMMANDS），保留以兼容历史草稿与既有开票校验。
 case'platform.invoice.save':{const v=command.payload;const owner=source(root,v.orderId);if(owner.replacementSource)fail('补发订单不生成客户应收');if(owner.governance?.contract.kind==='internal')fail('内部订单不生成销售发票');const row=v.id?item(p.invoiceDrafts,v.id,'发票草稿'):undefined;if(row?.state==='Issued')fail('已签发发票不可修改');const value={id:row?.id??c.id(),orderId:v.orderId,due:day(v.due),amount:money(v.amount,true),note:text(v.note,'说明',false),state:'Draft' as const,createdAt:row?.createdAt??c.now};if(row)Object.assign(row,value);else p.invoiceDrafts.unshift(value);return{id:value.id};}
 case'platform.invoice.issue':{const draft=item(p.invoiceDrafts,command.payload.id,'发票草稿');if(draft.state!=='Draft')fail('草稿已签发，请勿重复开票','CONFLICT');if(source(root,draft.orderId).replacementSource)fail('补发订单不生成客户应收');if(source(root,draft.orderId).governance?.contract.kind==='internal')fail('内部订单不生成销售发票');const order=assertMistOrderApproved(root,draft.orderId);const issued=root.invoices.filter(i=>i.orderId===order.id&&isActiveMistInvoice(i)).reduce((sum,i)=>sum+mistMoneyMinor(i.amount),0);if(issued+mistMoneyMinor(draft.amount)>mistMoneyMinor(order.amount))fail('开票金额超过订单尚未开票金额');const id=c.id(),code='CI-'+c.now.slice(0,4)+'-'+id;root.invoices.push({id,code,orderId:order.id,order:order.code,customer:order.customer,due:draft.due,amount:draft.amount,open:draft.amount,currency:order.currency,issuedAt:platformBusinessDate(c.now)});draft.state='Issued';draft.invoiceId=id;emit(root,c,'invoice',id,'签发商业发票 '+code);return{id,invoiceId:id};}
-case'platform.bom.save':{const v=command.payload,order=source(root,v.orderId);const old=v.id?item(p.boms,v.id,'BOM'):undefined;if(old&&old.state!=='Draft')fail('只有草稿BOM可以修改');const currency=text(v.currency,'币种').toUpperCase();if(currency!==order.currency&&currency!=='CNY')fail('成本币种须为订单币种或CNY，不自动假定换算汇率');const total=calculatePlatformBom(v.lines,v.labor,v.overhead);const row:PlatformBom={id:old?.id??c.id(),code:old?.code??'BOM-'+c.now.slice(0,4)+'-'+c.id(),orderId:order.id,description:text(v.description,'BOM说明'),currency,lines:v.lines.map(l=>({...l})),labor:v.labor,overhead:v.overhead,total,state:'Draft',createdAt:old?.createdAt??c.now};if(old)Object.assign(old,row);else p.boms.unshift(row);return{id:row.id};}
+case'platform.bom.save':{const v=command.payload;const old=v.id?item(p.boms,v.id,'BOM'):undefined;if(old&&old.state!=='Draft')fail('只有草稿BOM可以修改');
+ // Anchor: an order (optionally one of its lines), a product file, or a development version. At least one is required.
+ const order=v.orderId?source(root,v.orderId):undefined,line=v.lineId?(root.orderLines.find(l=>l.id===v.lineId&&l.orderId===order?.id)||fail('订单条目不属于来源订单')):undefined;
+ const product=v.productId?item(root.market.products,v.productId,'产品档案'):undefined,version=v.versionId?(root.versions.find(x=>x.id===v.versionId&&(!v.devId||x.devId===v.devId))||fail('开发版本不存在')):undefined;
+ if(!order&&!product&&!version)fail('请选择来源订单条目、产品档案或开发版本');
+ const currency=text(v.currency,'币种').toUpperCase();if(!/^[A-Z]{3}$/.test(currency))fail('币种须为三位字母');if(order&&currency!==order.currency&&currency!=='CNY')fail('成本币种须为订单币种或CNY，不自动假定换算汇率');
+ const unit=v.unit!==undefined?text(v.unit,'成品计价单位',true,20):line?.unit||product?.unit||undefined;
+ const total=calculatePlatformBom(v.lines,v.labor,v.overhead);
+ const row:PlatformBom={id:old?.id??c.id(),code:old?.code??'BOM-'+c.now.slice(0,4)+'-'+c.id(),orderId:order?.id||'',...(line?{lineId:line.id}:{}),...(product?{productId:product.id}:{}),...(version?{devId:version.devId,versionId:version.id}:{}),...(unit?{unit}:{}),description:text(v.description,'BOM说明'),currency,lines:v.lines.map(l=>({...l})),labor:v.labor,overhead:v.overhead,total,state:'Draft',createdAt:old?.createdAt??c.now};
+ if(old)Object.assign(old,row);else p.boms.unshift(row);return{id:row.id};}
 case'platform.bom.transition':{const v=command.payload,row=item(p.boms,v.id,'BOM');enumValue(v.state,['Confirmed','Archived'],'BOM状态');if(row.state==='Archived'||(v.state==='Confirmed'&&row.state!=='Draft'))fail('BOM状态转换无效');row.state=v.state;emit(root,c,'bom',row.id,'BOM状态 '+v.state);return{id:row.id};}
-case'platform.pricing.save':{const v=command.payload,order=source(root,v.orderId),calc=calculatePlatformPricing(v),current=applicablePricingParams(p.pricingParams,order.type,platformBusinessDate(c.now)),params=current?freezePricingParams(current):undefined,deviation=text(v.deviationReason??'','偏离理由',false,1000);if(markupBelowStandard(v.profitMargin,params)&&!deviation)fail(`成本加成率 ${v.profitMargin}% 低于${PRICING_PARAM_FAMILY_LABEL[order.type]}标准 ${params!.profitMargin}%（V${params!.version}），请填写偏离理由`);const row:PlatformPricing={orderId:v.orderId,purchaseCostCny:v.purchaseCostCny,refundRate:v.refundRate,exchangeRate:v.exchangeRate,profitMargin:v.profitMargin,commissionRate:v.commissionRate,id:c.id(),basis:text(v.basis,'汇率及退税依据'),...calc,createdAt:c.now,...(params?{params}:{}),...(markupBelowStandard(v.profitMargin,params)?{deviationReason:deviation}:{})};p.pricing.unshift(row);if(row.deviationReason)emit(root,c,'pricing',row.id,`定价试算 ${order.code} 成本加成 ${v.profitMargin}% 低于标准 ${params!.profitMargin}%（V${params!.version}）；理由：${row.deviationReason}`);return{id:row.id};}
+case'platform.pricing.save':{const v=command.payload;
+ // Source: exactly one approved order or one quotation line. The quotation's family gives the standard parameters.
+ const quote=v.quotationId?item(root.market.quotations,v.quotationId,'来源报价'):undefined,qline=quote?(quote.lines.find(l=>l.id===v.lineId)||fail('报价条目不存在')):undefined;
+ if(!!v.orderId===!!quote)fail('请选择来源订单或来源报价条目之一');
+ const order=v.orderId?source(root,v.orderId):undefined,family:'garment'|'fabric'=order?order.type:(qline!.family==='fabric'?'fabric':'garment');
+ const currency=(v.currency?text(v.currency,'报价币种',true,3):quote?.currency||'USD').toUpperCase();if(!/^[A-Z]{3}$/.test(currency)||currency==='CNY')fail('试算币种须为外币三位代码');
+ if(quote&&currency!==quote.currency)fail(`报价币种为 ${quote.currency}，试算须按同一币种`);
+ const calc=calculatePlatformPricing(v),current=applicablePricingParams(p.pricingParams,family,platformBusinessDate(c.now)),params=current?freezePricingParams(current):undefined,deviation=text(v.deviationReason??'','偏离理由',false,1000);
+ if(markupBelowStandard(v.profitMargin,params)&&!deviation)fail(`成本加成率 ${v.profitMargin}% 低于${PRICING_PARAM_FAMILY_LABEL[family]}标准 ${params!.profitMargin}%（V${params!.version}），请填写偏离理由`);
+ const row:PlatformPricing={orderId:order?.id||'',...(quote?{quotationId:quote.id,lineId:qline!.id}:{}),...(currency!=='USD'?{currency}:{}),purchaseCostCny:v.purchaseCostCny,refundRate:v.refundRate,exchangeRate:v.exchangeRate,profitMargin:v.profitMargin,commissionRate:v.commissionRate,id:c.id(),basis:text(v.basis,'汇率及退税依据'),...calc,createdAt:c.now,...(params?{params}:{}),...(markupBelowStandard(v.profitMargin,params)?{deviationReason:deviation}:{})};
+ p.pricing.unshift(row);
+ const sourceCode=order?.code||`${quote!.code} · ${qline!.style||qline!.name}`;
+ if(row.deviationReason)emit(root,c,'pricing',row.id,`定价试算 ${sourceCode} 成本加成 ${v.profitMargin}% 低于标准 ${params!.profitMargin}%（V${params!.version}）；理由：${row.deviationReason}`);
+ return{id:row.id};}
+case'platform.pricing.apply':{
+ // Write a quote-line trial back as the line's proposed price. Like costing, this resets approval on the draft.
+ const row=item(p.pricing,command.payload.id,'定价记录');if(!row.quotationId||!row.lineId)fail('只有来源为报价条目的试算可以带回报价');
+ const q=item(root.market.quotations,row.quotationId,'来源报价'),line=q.lines.find(l=>l.id===row.lineId)||fail('报价条目不存在');
+ if(q.status!=='Draft'||q.approval?.status==='pending'||q.convertedOrderId)fail('仅未提交的报价草稿可写入价格','PRECONDITION');
+ if((row.currency||'USD')!==q.currency)fail('试算币种与报价不一致','CONFLICT');
+ // Quote prices carry two decimals; the trial's four-decimal price is rounded half up.
+ const price=(Math.round(row.finalUnitPrice*100)/100).toFixed(2);
+ line.price=price;line.amount=marketLineAmount(line.qty,line.price);q.total=marketSum(q.lines.map(l=>l.amount));
+ if(q.approval){q.approvalHistory=[...(q.approvalHistory||[]),q.approval];q.approval=null;}q.requiresApproval=true;q.updatedAt=c.now;
+ row.appliedAt=c.now;row.appliedBy=c.actorName;
+ emit(root,c,'quotation',q.id,`按定价试算写入 ${line.style||line.name} 单价 ${price} ${q.currency}：${text(command.payload.note,'写入说明',true,500)}`);
+ return{id:q.id};}
 case'platform.pricingParams.set':{const v=command.payload,family=enumValue(v.family,['garment','fabric'] as const,'板块'),profitMargin=normalizePricingPercent(v.profitMargin,PRICING_PARAM_MAX.profitMargin),commissionRate=normalizePricingPercent(v.commissionRate,PRICING_PARAM_MAX.commissionRate);if(profitMargin===null)fail(`标准成本加成率须为 0–${PRICING_PARAM_MAX.profitMargin} 之间的数字，最多两位小数`);if(commissionRate===null)fail(`标准佣金率须为 0–${PRICING_PARAM_MAX.commissionRate} 之间的数字，最多两位小数`);const effectiveFrom=day(v.effectiveFrom);if(effectiveFrom<platformBusinessDate(c.now))fail('生效日不能早于今天；参数不追溯已保存的定价记录');const reason=text(v.reason,'调整原因',true,1000);const version=p.pricingParams.filter(r=>r.family===family).length+1;const row:PricingParamVersion={id:c.id(),family,version,profitMargin,commissionRate,effectiveFrom,reason,createdAt:c.now,createdBy:c.actorName,createdById:c.actorId||''};p.pricingParams.push(row);emit(root,c,'pricing',row.id,`设置${PRICING_PARAM_FAMILY_LABEL[family]}定价标准参数 V${version}：成本加成 ${profitMargin}%、佣金 ${commissionRate}%，${effectiveFrom} 起生效；原因：${reason}`);return{id:row.id};}
 case'platform.claim.notify':case'platform.claim.verify':case'platform.claim.recovery.open':case'platform.claim.recovery.agree':case'platform.claim.recovery.method':case'platform.claim.recovery.settle':case'platform.claim.recovery.receipt.allocate':case'platform.claim.recovery.settlement.reverse':case'platform.claim.recovery.waive':return applyClaimCoordinationCommand(root,p.claims,command,c);
 case'platform.risk.save':case'platform.risk.transition':case'platform.risk.plan':case'platform.risk.escalate':case'platform.risk.withdraw':case'platform.risk.decide':return applyRiskCommand(root,p.risks,command,c);

@@ -10,7 +10,7 @@ import { isActiveMistInvoice, isRecognizedMistInvoice, mistMoneyMinor, type Mist
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { downloadModuleCsv } from './ModuleWorkbench';
+import { downloadModuleCsv, downloadModuleXlsx } from './ModuleWorkbench';
 import { OrderActualCostPanel } from './OrderActualCostPanel';
 import { REBATE_ACCESS_TEXT, rebateAccess } from './RebatePanel';
 import { FX_BASIS_LABEL, fxOrderActual, fxRateFor, fxUnallocatedSettlements, type FxBasis, type FxResolved } from '../../../../../server/src/shared/mistFxRates';
@@ -196,16 +196,17 @@ export function PlatformReportsPage() {
     { key: 'status', header: '交期状态', width: '120px', render: r => <Pill tone={PROGRESS_STATUS[r.status].tone}>{uiText(PROGRESS_STATUS[r.status].label)}{uiText(r.status === 'overdue' ? ` ${r.lateDays} 天` : '')}</Pill> },
     { key: 'state', header: '当前环节', render: r => r.state },
   ];
-  const exportCurrent = () => {
-    if (tab === 'sales') downloadModuleCsv('客户销售额.csv', ['客户', '币种', '订单数', '订单金额', '已开票', '已收', '未收'], sales.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open]));
-    else if (tab === 'margin' && view !== 'none') downloadModuleCsv(`订单毛利-人民币-${FX_BASIS_LABEL[view]}.csv`, ['订单', '客户', '币种', '原币收入', '汇率口径', '汇率', '暂估', '收入CNY', '采购成本CNY', '毛利不含退税', '毛利率不含退税%', '退税核准或应退', '退税应退', '退税到账', '毛利含退税', '毛利率含退税%', '说明'], cny.map(r => [r.code, r.customer, r.currency, r.revenue, FX_BASIS_LABEL[view], r.fx ? Math.round(r.fx.rate * 1e6) / 1e6 : '', r.estimated ? '是' : '', r.revenueCny ?? '', r.costCny ?? '', r.marginEx ?? '', r.rateEx === null ? '' : Math.round(r.rateEx * 1000) / 10, ...(rebateShown ? [r.rebate.approved, r.rebate.expected, r.rebate.received, r.marginIn ?? '', r.rateIn === null ? '' : Math.round(r.rateIn * 1000) / 10] : Array(5).fill(rebateHidden)), CNY_STATUS[r.status].label + (r.missing.length ? ' ' + r.missing.join('/') : '')]));
-    else if (tab === 'margin') downloadModuleCsv('订单毛利.csv', ['订单', '客户', '币种', '销售收入', '采购成本', '毛利', '毛利率%', '已到票', '说明', '异币种采购', '未批准采购数'], margin.map(r => [r.code, r.customer, r.currency, r.revenue, r.purchases ? r.cost : '', r.margin ?? '', r.rate === null ? '' : Math.round(r.rate * 1000) / 10, r.billed, MARGIN_STATUS[r.status].label, r.foreign, r.pending]));
-    else if (tab === 'aging') downloadModuleCsv(`应收账龄-${asOf}.csv`, ['客户', '币种', ...AGING_BUCKETS.map(b => b.label), '未收合计'], aging.map(r => [r.customer, r.currency, ...AGING_BUCKETS.map(b => r[b.key]), r.total]));
-    else downloadModuleCsv(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
+  const exportCurrent = (format: 'csv' | 'xlsx' = 'csv') => {
+    const out = (name: string, headers: string[], rows: unknown[][]) => format === 'xlsx' ? downloadModuleXlsx(name.replace(/\.csv$/, '.xlsx'), [{ name: name.replace(/\.csv$/, ''), headers, rows }]) : downloadModuleCsv(name, headers, rows);
+    if (tab === 'sales') out('客户销售额.csv', ['客户', '币种', '订单数', '订单金额', '已开票', '已收', '未收'], sales.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open]));
+    else if (tab === 'margin' && view !== 'none') out(`订单毛利-人民币-${FX_BASIS_LABEL[view]}.csv`, ['订单', '客户', '币种', '原币收入', '汇率口径', '汇率', '暂估', '收入CNY', '采购成本CNY', '毛利不含退税', '毛利率不含退税%', '退税核准或应退', '退税应退', '退税到账', '毛利含退税', '毛利率含退税%', '说明'], cny.map(r => [r.code, r.customer, r.currency, r.revenue, FX_BASIS_LABEL[view], r.fx ? Math.round(r.fx.rate * 1e6) / 1e6 : '', r.estimated ? '是' : '', r.revenueCny ?? '', r.costCny ?? '', r.marginEx ?? '', r.rateEx === null ? '' : Math.round(r.rateEx * 1000) / 10, ...(rebateShown ? [r.rebate.approved, r.rebate.expected, r.rebate.received, r.marginIn ?? '', r.rateIn === null ? '' : Math.round(r.rateIn * 1000) / 10] : Array(5).fill(rebateHidden)), CNY_STATUS[r.status].label + (r.missing.length ? ' ' + r.missing.join('/') : '')]));
+    else if (tab === 'margin') out('订单毛利.csv', ['订单', '客户', '币种', '销售收入', '采购成本', '毛利', '毛利率%', '已到票', '说明', '异币种采购', '未批准采购数'], margin.map(r => [r.code, r.customer, r.currency, r.revenue, r.purchases ? r.cost : '', r.margin ?? '', r.rate === null ? '' : Math.round(r.rate * 1000) / 10, r.billed, MARGIN_STATUS[r.status].label, r.foreign, r.pending]));
+    else if (tab === 'aging') out(`应收账龄-${asOf}.csv`, ['客户', '币种', ...AGING_BUCKETS.map(b => b.label), '未收合计'], aging.map(r => [r.customer, r.currency, ...AGING_BUCKETS.map(b => r[b.key]), r.total]));
+    else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
   };
 
   return <MistPage>
-    <PageHeader title={uiText("报表中心")} actions={<Button icon={Download} disabled={!state || tab === 'actual' || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={exportCurrent}>{uiText("导出当前报表")}</Button>} />
+    <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
     {workspace.error && <Banner tone="bad" title={uiText("读取失败")}>{workspace.error}</Banner>}
     <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
     <section className="mist-section">{tab === 'sales' ? <>

@@ -148,6 +148,16 @@ export function downloadModuleCsv(filename:string,headers:string[],rows:Array<Ar
   requestGeneratedExport({filename,rowCount:rows.length,run:()=>downloadGeneratedBlob(new Blob([data],{type:'text/csv;charset=utf-8'}),filename)});
 }
 
+/** Excel workbook export (one or more sheets). Text that a spreadsheet would run as a formula is kept as text. */
+export function downloadModuleXlsx(filename:string,sheets:Array<{name:string;headers:string[];rows:Array<Array<unknown>>}>){
+  const cell=(input:unknown)=>{if(input==null)return '';if(typeof input==='number')return Number.isFinite(input)?input:'';const value=String(input);return /^[=+@\t\r]/.test(value)||(/^-/.test(value)&&!/^-[\d.]+$/.test(value))?"'"+value:value;};
+  requestGeneratedExport({filename,rowCount:sheets.reduce((n,s)=>n+s.rows.length,0),run:async()=>{
+    const XLSX=await import('xlsx'),book=XLSX.utils.book_new();
+    for(const sheet of sheets)XLSX.utils.book_append_sheet(book,XLSX.utils.aoa_to_sheet([sheet.headers,...sheet.rows.map(row=>row.map(cell))]),sheet.name.replace(/[\\/?*[\]:]/g,'_').slice(0,31)||'Sheet1');
+    const bytes=XLSX.write(book,{type:'array',bookType:'xlsx'});
+    downloadGeneratedBlob(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),filename);
+  }});
+}
 export function ModuleEditorPage({spec,onClose}:{spec:ModuleEditorSpec;onClose:()=>void}){
   const presentedError=React.useContext(MistPresentedErrorContext);
   const workspace=useMistWorkspace(),toast=useToast(),recovery=useRecoveredModuleCommand(spec,workspace);

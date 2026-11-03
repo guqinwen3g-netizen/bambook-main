@@ -7,10 +7,11 @@ import React from 'react';
 import { AlertTriangle, Archive, ArchiveRestore, CalendarPlus, Download, Forward, Inbox, KeyRound, Link2, Mail, MailOpen, Paperclip, PenLine, Plus, Reply, ReplyAll, RotateCcw, SearchCheck, SearchX, Send, Settings2, Sparkles, Star, Trash2, Unlink, Upload, X } from 'lucide-react';
 import { Banner, Button, Card, Checkbox, DataTable, Dialog, Drawer, Dropdown, EmptyState, Facts, Field, FormGrid, MistPage, PageHeader, Pill, SearchField, Select, TextArea, TextInput, TextLink, Toolbar, useToast, type Column, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
-import { EMAIL_LINK_LABEL, emailAddresses, emailLinkTarget, emailSendEffectiveStatus, emailSendRecipients, emailSendRetryTargets, type EmailRecipientStatus, type EmailAccount, type EmailAccountInput, type EmailDraft, type EmailDraftInput, type EmailLink, type EmailLinkKind, type EmailMessage, type EmailSend, type EmailSendStatus } from '../../../../../server/src/shared/mistEmail';
+import { EMAIL_LINK_LABEL, fillEmailTemplate, emailAddresses, emailLinkTarget, emailSendEffectiveStatus, emailSendRecipients, emailSendRetryTargets, type EmailRecipientStatus, type EmailAccount, type EmailAccountInput, type EmailDraft, type EmailDraftInput, type EmailLink, type EmailLinkKind, type EmailMessage, type EmailSend, type EmailSendStatus } from '../../../../../server/src/shared/mistEmail';
 import { useMistWorkspace, type MistMailAction, type MistMailResult } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
+import { takeComposeIntent } from '../../runtime/composeIntent';
 import { Events } from './fulfillmentKit';
 import { ActionBar, DetailBlock, DetailBody, DetailSurface, shortWhen, todayIso, useCompactLayout, type ReasonedAction } from './pageKit';
 import { FileName } from '../../runtime/files';
@@ -65,15 +66,19 @@ const addressText = (rows: Array<{ name: string; address: string }>) => rows.map
 const initialOf = (name: string) => (name.trim().match(/[\p{L}\p{N}]/u)?.[0] || '?').toUpperCase();
 const when = (at: string) => { const date = new Date(at); return Number.isFinite(date.getTime()) ? `${shortWhen(at)} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : '—'; };
 const sizeText = (bytes: number) => bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-const problemText = (problem: unknown, fallback: string) => problem instanceof Error ? problem.message : fallback;
+/** Server and network problems carry their reason; anything else still says what to do next. */
+const problemText = (problem: unknown, fallback: string) => problem instanceof Error ? problem.message : typeof problem === 'string' && problem.trim() ? problem : problem && typeof problem === 'object' && typeof (problem as { message?: unknown }).message === 'string' ? (problem as { message: string }).message : fallback;
 const linkKey = (link: EmailLink) => `${link.kind}:${link.id}`;
 
 /** 发件人与已有联系人邮箱完全一致、且尚未关联该客户时，给出需人工确认的关联建议。 */
 export function contactSuggestion(state: MistState, m: EmailMessage) {
   const address = m.from.address.toLowerCase(), contact = state.contacts.find(row => row.email && row.email.toLowerCase() === address);
   const customer = contact && state.customers.find(row => row.id === contact.customerId);
-  if (!contact || !customer || m.links.some(link => link.kind === 'customer' && link.id === customer.id)) return null;
-  return { contact, customer };
+  if (contact && customer && !m.links.some(link => link.kind === 'customer' && link.id === customer.id)) return { contact, customer, kind: 'customer' as const, id: customer.id, name: customer.name };
+  // Factory and mill correspondence: a supplier contact's address suggests the supplier.
+  const supplier = state.market.suppliers.find(row => row.contacts.some(c => c.email && c.email.toLowerCase() === address));
+  if (supplier && !m.links.some(link => link.kind === 'supplier' && link.id === supplier.id)) return { contact: supplier.contacts.find(c => c.email.toLowerCase() === address)!, customer: undefined, kind: 'supplier' as const, id: supplier.id, name: supplier.name };
+  return null;
 }
 export function mailMatches(state: MistState, m: EmailMessage, scope: MailScope) {
   if (scope.kind === 'folder') return m.folder === scope.value;
@@ -98,6 +103,7 @@ export function EmailsPage() {
   const [query, setQuery] = React.useState(''), [category, setCategory] = React.useState('all');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [compose, setCompose] = React.useState<Compose | null>(null), [followUp, setFollowUp] = React.useState<EmailMessage | null>(null);
+  const [selecting, setSelecting] = React.useState(false), [chosen, setChosen] = React.useState<string[]>([]), [purging, setPurging] = React.useState(false);
   const [failure, setFailure] = React.useState(''), [notice, setNotice] = React.useState<{ tone: Tone; title: string; text: string } | null>(null);
   const [accountsOpen, setAccountsOpen] = React.useState(false), [confirmResend, setConfirmResend] = React.useState<EmailSend | null>(null);
   /** 发送确认：新建 / 回复 / 转发 / 草稿发送都先在这里核对收件人与附件，确认后才投递；取消不发送、不关闭写信、不丢草稿。 */
@@ -237,6 +243,13 @@ export function EmailsPage() {
   const downloadAttachment = async (fileId: string) => { const file = state?.files.find(row => row.id === fileId); if (!file) { setFailure('附件文件不可用，请重新同步'); return; } setFailure(''); try { await downloadFile(file); } catch (problem) { setFailure(problemText(problem, '附件下载失败，请重试')); } };
   const blankInput = (account?: EmailAccount): EmailDraftInput => ({ accountId: account?.id || '', from: account?.address || '', to: '', cc: '', bcc: '', subject: '', body: account?.signature ? `\n\n--\n${account.signature}` : '', template: '', links: [], fileIds: [] });
   const defaultAccount = accounts.find(a => a.id === accountId) || accounts.find(a => a.kind === 'personal') || accounts[0];
+  // A business page asked to send something (quote, lookbook, statement): start one draft from it.
+  React.useEffect(() => {
+    if (!state || !can || compose) return;
+    const intent = takeComposeIntent(); if (!intent) return;
+    const base = blankInput(defaultAccount);
+    setCompose({ input: { ...base, to: intent.to || '', bcc: intent.bcc || '', subject: intent.subject, body: (intent.body || '') + base.body, fileIds: (intent.fileIds || []).filter(id => state.files.some(f => f.id === id)), links: intent.links || [] } });
+  }, [!!state, can]);
   const respond = (m: EmailMessage, mode: 'reply' | 'all' | 'forward') => {
     const account = accounts.find(a => a.id === m.accountId) || defaultAccount;
     const mine = new Set([account?.address || '', ...(account?.aliases || [])].filter(Boolean).map(value => value.toLowerCase()));
@@ -277,6 +290,7 @@ export function EmailsPage() {
   const list = <div ref={listRef} className="mist-mail-list" role="listbox" aria-label={ui`${scopeLabel}邮件`} onKeyDown={moveSelection}>
     {loading && !rows.length ? <div className="mist-mail-list-empty"><span className="mist-note">{uiText("正在读取邮箱…")}</span></div>
       : rows.length ? rows.map(row => { const item = itemOf(row), active = selected?.id === row.id;
+        if (selecting && row.kind === 'message') return <div key={row.id} className="mist-mail-item" data-mail-row={row.id} data-active={chosen.includes(row.id) || undefined}><Checkbox checked={chosen.includes(row.id)} onChange={on => setChosen(list => on ? [...list, row.id] : list.filter(x => x !== row.id))} label={<span className="mist-mail-item-main"><span className="mist-mail-item-top"><span className="mist-mail-who">{item.who}</span><time className="mist-mail-time">{when(stamp(row))}</time></span><span className="mist-mail-item-subject"><span className="mist-mail-ellipsis">{item.subject}</span></span></span>} /></div>;
         return <button key={row.id} type="button" role="option" aria-selected={active} tabIndex={active || (!selected && row === rows[0]) ? 0 : -1} className="mist-mail-item" data-mail-row={row.id} data-unread={item.unread || undefined} data-active={active || undefined} onClick={() => pick(row)}>
           <span className="mist-mail-avatar" aria-hidden="true">{initialOf(item.who.replace(/^致 /, ''))}</span>
           <span className="mist-mail-item-main">
@@ -309,7 +323,9 @@ export function EmailsPage() {
   </nav>;
 
   const editDraft = (d: EmailDraft) => { const { id, createdAt: _c, updatedAt: _u, updatedBy: _b, ...input } = d; setCompose({ id, input }); };
-  const deleteDraft = async (id: string) => { if (await exec({ type: 'email.draft.delete', payload: { id } }, '草稿已删除')) { setPicked(null); setDrawer(false); } };
+  const [draftDeleting, setDraftDeleting] = React.useState<string | null>(null);
+  const deleteDraft = async (id: string) => setDraftDeleting(id);
+  const confirmDeleteDraft = async () => { const id = draftDeleting; if (!id) return; setDraftDeleting(null); if (await exec({ type: 'email.draft.delete', payload: { id } }, '草稿已删除')) { setPicked(null); setDrawer(false); } };
   const detail = selected && state
     ? selected.kind === 'draft'
       ? <DraftDetail draft={selected.draft} state={state} can={can} locked={locked} onEdit={() => editDraft(selected.draft)} onDelete={() => void deleteDraft(selected.id)} onSend={() => sendDraft(selected.draft)} />
@@ -319,7 +335,7 @@ export function EmailsPage() {
     : <div className="mist-mail-read-empty"><EmptyState icon={MailOpen} title={uiText(rows.length ? '选择一封邮件阅读' : '没有可阅读的邮件')} description={uiText(loading ? '正在读取邮箱' : '↑ ↓ 键可在列表中切换邮件')} compact /></div>;
   const sendCompose = async (input: EmailDraftInput, requestKey: string) => { if (compose) setPendingSend({ input, requestKey, ...(compose.id ? { draftId: compose.id } : {}), ...(compose.forwardOfId ? { forwardOfId: compose.forwardOfId } : {}), source: 'compose' }); };
   const saveDraft = async (input: EmailDraftInput, id?: string) => { const receipt = await exec({ type: 'email.draft.save', payload: { ...(id ? { id } : {}), input } }, '草稿已保存'); if (receipt) setCompose(null); };
-  const createFollowUp = async (owner: string, due: string, note: string) => { if (followUp && await exec({ type: 'email.followUp', payload: { id: followUp.id, owner, due, note } }, '已生成跟进待办，并写入日历')) setFollowUp(null); };
+  const createFollowUp = async (ownerId: string, due: string, note: string) => { if (followUp && await exec({ type: 'email.followUp', payload: { id: followUp.id, ownerId, due, note } }, '已生成跟进待办，并写入日历')) setFollowUp(null); };
   const selectedTitle = selected ? (selected.kind === 'draft' ? selected.draft.subject || '（无主题草稿）' : selected.kind === 'send' ? selected.send.subject : selected.message.subject) : '邮件';
   const selectedSub = selected?.kind === 'message' ? addressText([selected.message.from]) : selected?.kind === 'send' ? '待发送' : selected ? '草稿' : undefined;
 
@@ -338,12 +354,26 @@ export function EmailsPage() {
       <section className="mist-mail-listpane" aria-label={uiText("邮件列表")}>
         <div className="mist-mail-listhead">
           <h2 className="mist-mail-listtitle">{scopeLabel}</h2><small className="mist-muted">{rows.length}{uiText(" 封")}</small><span className="mist-spacer" />
+          {can && !isDrafts && !isOutbox && <Button size="sm" variant="quiet" onClick={() => { setSelecting(on => !on); setChosen([]); }}>{uiText(selecting ? '完成' : '多选')}</Button>}
           <Button size="sm" variant="quiet" icon={RotateCcw} disabled={!can || locked || !syncable.length} title={uiText(!syncable.length ? '没有已绑定凭据的真实邮箱可同步' : '立即同步已连接的邮箱')} onClick={() => void syncNow()}>{uiText("同步")}</Button>
         </div>
         <div className="mist-mail-search">
           <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索主题、发件人、正文、附件名或抽取资料")} />
           {!isDrafts && !isOutbox && <Dropdown<string> label={uiText("分类")} value={category} onChange={setCategory} options={[{ value: 'all', label: '全部' }, ...categories.map(value => ({ value, label: value })), { value: 'none', label: '未分类' }]} />}
         </div>
+        {selecting && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 6 }} data-mail-bulk>
+          <Checkbox checked={chosen.length > 0 && chosen.length === rows.filter(r => r.kind === 'message').length} onChange={on => setChosen(on ? rows.filter(r => r.kind === 'message').map(r => r.id) : [])} label={ui`已选 ${chosen.length}`} />
+          <span className="mist-spacer" />
+          {(scope.kind !== 'folder' || scope.value !== 'trash') ? <>
+            <Button size="sm" disabled={!chosen.length || locked} onClick={() => void exec({ type: 'email.bulk', payload: { ids: chosen, action: 'read' } }, '已标为已读').then(r => { if (r) setChosen([]); })}>{uiText('标为已读')}</Button>
+            <Button size="sm" disabled={!chosen.length || locked} onClick={() => void exec({ type: 'email.bulk', payload: { ids: chosen, action: 'unread' } }, '已标为未读').then(r => { if (r) setChosen([]); })}>{uiText('标为未读')}</Button>
+            <Button size="sm" disabled={!chosen.length || locked} onClick={() => void exec({ type: 'email.bulk', payload: { ids: chosen, action: 'archive' } }, '已归档').then(r => { if (r) setChosen([]); })}>{uiText('归档')}</Button>
+            <Button size="sm" disabled={!chosen.length || locked} onClick={() => void exec({ type: 'email.bulk', payload: { ids: chosen, action: 'trash' } }, '已移到已删除').then(r => { if (r) setChosen([]); })}>{uiText('删除')}</Button>
+          </> : <>
+            <Button size="sm" disabled={!chosen.length || locked} onClick={() => void exec({ type: 'email.bulk', payload: { ids: chosen, action: 'restore' } }, '已恢复').then(r => { if (r) setChosen([]); })}>{uiText('恢复')}</Button>
+            <Button size="sm" variant="danger" disabled={!chosen.length || locked} onClick={() => setPurging(true)}>{uiText('彻底删除')}</Button>
+          </>}
+        </div>}
         {failedAccounts.length > 0 && <div className="mist-mail-inline-warn" role="status"><AlertTriangle size={14} /><span><b>{uiText(scopeFailed ? `${scopeLabel}同步失败` : '部分文件夹同步失败')}</b> · {failedAccounts.map(a => `${a.displayName}：${a.failedFolders.join('、')}未能同步，显示的是上次同步结果`).join('；')}。</span></div>}
         {list}
       </section>
@@ -356,8 +386,10 @@ export function EmailsPage() {
       footer={<><Button onClick={() => setConfirmResend(null)}>{uiText("取消")}</Button><Button variant="primary" disabled={locked} onClick={() => void retrySend(confirmResend, true)}>{uiText("确认未送达，重新发送")}</Button></>}>
       <p className="mist-sub">{uiText("请先点“核对”在本邮箱的已发送中查找，或向收件人确认未收到。只会发给尚未被服务器接受的收件人（")}{emailSendRetryTargets(confirmResend).map(item => item.address).join('、')}{uiText("）；若对方其实已收到，会收到两封相同邮件。")}</p>
     </Dialog>}
+    <Dialog open={!!draftDeleting} title={uiText('删除草稿')} onClose={() => setDraftDeleting(null)} footer={<><Button onClick={() => setDraftDeleting(null)}>{uiText('取消')}</Button><Button variant="danger" disabled={locked} onClick={() => void confirmDeleteDraft()}>{uiText('删除')}</Button></>}>{uiText('草稿删除后不能恢复。')}</Dialog>
+    <Dialog open={purging} title={uiText('彻底删除')} onClose={() => setPurging(false)} footer={<><Button onClick={() => setPurging(false)}>{uiText('取消')}</Button><Button variant="danger" disabled={locked} onClick={() => void exec({ type: 'email.purge', payload: { ids: chosen } }, '已彻底删除').then(r => { setPurging(false); if (r) setChosen([]); })}>{uiText(`彻底删除 ${chosen.length} 封`)}</Button></>}>{uiText('删除后不能恢复。')}</Dialog>
     {pendingSend && state && <SendConfirmDialog pending={pendingSend} state={state} locked={locked} onCancel={() => setPendingSend(null)} onConfirm={() => void confirmSend()} />}
-    {followUp && <FollowUpDialog message={uiText(followUp)} owner={session.user?.displayName || state?.settings.profileName || ''} locked={locked} onClose={() => setFollowUp(null)} onSubmit={createFollowUp} />}
+    {followUp && state && <FollowUpDialog message={uiText(followUp)} me={me} members={(state.members || []).filter(m => { const a = state.email.accounts.find(x => x.id === followUp.accountId); return !a?.ownerId || a.ownerId === m.userId || (a.memberIds || []).includes(m.userId); }).map(m => ({ value: m.userId, label: m.name }))} locked={locked} onClose={() => setFollowUp(null)} onSubmit={createFollowUp} />}
   </div>;
 }
 
@@ -372,6 +404,8 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
   const options: Record<EmailLinkKind, Array<{ value: string; label: string }>> = {
     customer: state.customers.map(row => ({ value: row.id, label: row.name })), development: state.devs.map(row => ({ value: row.id, label: `${row.code} · ${row.name}` })),
     order: state.orders.map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` })), invoice: state.invoices.filter(row => !row.voidedAt).map(row => ({ value: row.id, label: `${row.code} · ${row.customer}` })),
+    supplier: state.market.suppliers.map(row => ({ value: row.id, label: row.name })), purchase: state.fulfillment.purchases.map(row => ({ value: row.id, label: `${row.code} · ${row.supplier}` })),
+    quotation: state.market.quotations.map(row => ({ value: row.id, label: `${row.code} · ${state.customers.find(c => c.id === row.customerId)?.name || ''}` })), rfq: ((state as MistState & { rfqs?: Array<{ id: string; code: string; description: string }> }).rfqs || []).map(row => ({ value: row.id, label: `${row.code} · ${row.description}` })),
   };
 
   const tasks = m.followUpTaskIds.map(id => state.tasks.find(task => task.id === id)).filter((task): task is MistState['tasks'][number] => !!task);
@@ -431,7 +465,7 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
     </DetailBlock>}
     <div className="mist-mail-assist-title"><Sparkles size={14} />{uiText("业务关联与智能整理")}</div>
     <DetailBlock title={uiText("业务关联")}>
-      {suggestion && <Banner tone="accent" icon={Link2} title={uiText("建议关联客户")} actions={can ? <Button size="sm" disabled={locked} onClick={() => void link({ kind: 'customer', id: suggestion.customer.id }, `已关联客户 ${suggestion.customer.name}`)}>{uiText("确认关联")}</Button> : undefined}>{uiText("发件人 ")}{m.from.address}{uiText(" 是 ")}{suggestion.customer.name}{uiText(" 的联系人 ")}{suggestion.contact.name}{uiText("。确认后才会关联。")}</Banner>}
+      {suggestion && <Banner tone="accent" icon={Link2} title={uiText(`建议关联${EMAIL_LINK_LABEL[suggestion.kind]}`)} actions={can ? <Button size="sm" disabled={locked} onClick={() => void link({ kind: suggestion.kind, id: suggestion.id }, `已关联${EMAIL_LINK_LABEL[suggestion.kind]} ${suggestion.name}`)}>{uiText("确认关联")}</Button> : undefined}>{uiText("发件人 ")}{m.from.address}{uiText(" 是 ")}{suggestion.name}{uiText(" 的联系人 ")}{suggestion.contact.name}</Banner>}
       {m.links.length ? <div className="mist-col" style={{ gap: 6 }}>{m.links.map(row => {
         const t = emailLinkTarget(state, row), submitted = m.submissions.some(s => linkKey(s.link) === linkKey(row));
         return <div key={linkKey(row)} className="mist-row mist-mail-link">
@@ -512,16 +546,20 @@ function ComposePane({ state, initial, locked, onClose, onSave, onSend }: { stat
   const set = <K extends keyof EmailDraftInput>(key: K, value: EmailDraftInput[K]) => setV(prev => ({ ...prev, [key]: value }));
   const account = state.email.accounts.find(a => a.id === v.accountId);
   const senders = state.email.accounts.flatMap(a => [a.address, ...a.aliases].map(address => ({ value: `${a.id}\n${address}`, label: `${a.displayName} <${address}>` })));
-  const contacts = state.contacts.filter(c => c.email).map(c => ({ email: c.email, label: `${c.name} · ${state.customers.find(row => row.id === c.customerId)?.name || ''}` }));
+  const contacts = [...state.contacts.filter(c => c.email).map(c => ({ email: c.email, label: `${c.name} · ${state.customers.find(row => row.id === c.customerId)?.name || ''}` })), ...state.market.suppliers.flatMap(sup => sup.contacts.filter(c => c.email).map(c => ({ email: c.email, label: `${c.name} · ${sup.name}` })))].filter((c, i, all) => all.findIndex(x => x.email.toLowerCase() === c.email.toLowerCase()) === i);
+  const templates = [...(state.email.templates || []).filter(t => !t.archived).map(t => ({ value: 'c:' + t.id, label: t.name, subject: fillEmailTemplate(state, t.subject, v.links), body: fillEmailTemplate(state, t.body, v.links) })), ...EMAIL_TEMPLATES];
+  const { uploadFile } = useMistWorkspace(), [uploading, setUploading] = React.useState(''), uploadRef = React.useRef<HTMLInputElement>(null);
+  const upload = async (list: FileList | null) => { if (!list?.length) return; setUploading('…'); try { const added: string[] = []; for (const file of Array.from(list)) added.push((await uploadFile(file)).id); setV(prev => ({ ...prev, fileIds: [...new Set([...prev.fileIds, ...added])] })); setUploading(''); } catch (problem) { setUploading(problemText(problem, '附件上传未完成')); } finally { if (uploadRef.current) uploadRef.current.value = ''; } };
   const applyTemplate = (value: string) => {
-    const t = EMAIL_TEMPLATES.find(row => row.value === value);
+    const t = templates.find(row => row.value === value);
     if (!t) { set('template', ''); return; }
     setV(prev => { const quote = prev.body.indexOf('\n\n——— 原邮件'); return { ...prev, template: value, subject: prev.subject || t.subject, body: `${t.body}${account?.signature ? `\n\n--\n${account.signature}` : ''}${quote >= 0 ? prev.body.slice(quote) : ''}` }; });
   };
   const toggleFile = (id: string, on: boolean) => set('fileIds', on ? [...v.fileIds, id] : v.fileIds.filter(row => row !== id));
   const title = initial.id ? '编辑草稿' : initial.forwardOfId ? '转发' : v.replyToId ? '回复' : '写邮件';
   const blocked = sendBlocked(account) || (!v.to.trim() && !v.cc.trim() && !v.bcc.trim() ? '请填写收件人' : false);
-  const files = [...state.files.filter(file => v.fileIds.includes(file.id)), ...state.files.filter(file => !v.fileIds.includes(file.id)).slice(0, 30)];
+  const [fileQuery, setFileQuery] = React.useState('');
+  const files = [...state.files.filter(file => v.fileIds.includes(file.id)), ...state.files.filter(file => !v.fileIds.includes(file.id) && (!fileQuery.trim() || file.name.toLowerCase().includes(fileQuery.trim().toLowerCase()))).slice(0, 60)];
   return <section className="mist-mail-composer" aria-label={uiText(title)}>
     <header className="mist-mail-composer-head"><h2 className="mist-mail-listtitle">{uiText(title)}</h2>{account && <small className="mist-muted">{account.displayName}</small>}<span className="mist-spacer" /><Button size="sm" variant="quiet" onClick={onClose}>{uiText("关闭")}</Button></header>
     <div className="mist-mail-composer-body">
@@ -539,6 +577,7 @@ function ComposePane({ state, initial, locked, onClose, onSave, onSend }: { stat
     {v.fileIds.length > 0 && <div className="mist-mail-cchips" aria-label={uiText("已添加的附件")}>{state.files.filter(file => v.fileIds.includes(file.id)).map(file => <span key={file.id} className="mist-mail-cchip"><Paperclip size={13} aria-hidden="true" /><span>{file.name}</span><button type="button" aria-label={ui`移除附件 ${file.name}`} onClick={() => toggleFile(file.id, false)}><X size={13} /></button></span>)}</div>}
     {picking && <div className="mist-mail-cpicker mist-mail-cfiles">
       <div className="mist-row"><span className="mist-eyebrow">{uiText("从公司文件添加附件")}{uiText(v.fileIds.length ? ` · 已选 ${v.fileIds.length}` : '')}</span><span className="mist-spacer" /><TextLink onClick={() => setPicking(false)}>{uiText("完成")}</TextLink></div>
+      <SearchField value={fileQuery} onChange={setFileQuery} placeholder={uiText('搜索文件名')} />
       {files.length ? <div className="mist-col mist-mail-files">{files.map(file => <Checkbox key={file.id} checked={v.fileIds.includes(file.id)} onChange={on => toggleFile(file.id, on)} label={uiText(file.name)} />)}</div> : <span className="mist-note">{uiText("公司还没有文件；请先在业务对象中上传。")}</span>}
     </div>}
     {v.links.length > 0 && <div className="mist-col" style={{ gap: 6, marginTop: 16 }}>
@@ -548,9 +587,11 @@ function ComposePane({ state, initial, locked, onClose, onSave, onSend }: { stat
     </div>
     <footer className="mist-mail-composer-foot">
       <div className="mist-mail-cbar"><Button variant="primary" icon={Send} disabled={locked || !!blocked} title={uiText(blocked || undefined)} onClick={() => void onSend(v, requestKey)}>{uiText("发送")}</Button><Button icon={PenLine} disabled={locked || !account} onClick={() => void onSave(v, initial.id)}>{uiText("保存草稿")}</Button>
-        <Button variant="quiet" icon={Paperclip} aria-expanded={picking} onClick={() => setPicking(open => !open)}>{uiText(v.fileIds.length ? `附件 ${v.fileIds.length}` : '添加附件')}</Button>
-        <Select aria-label={uiText("模板")} title={uiText("【】处替换为实际内容；签名取自邮箱账号设置")} value={v.template} onChange={event => applyTemplate(event.target.value)} placeholder={uiText("不使用模板")} options={EMAIL_TEMPLATES.map(t => ({ value: t.value, label: t.label }))} />
+        <Button variant="quiet" icon={Paperclip} aria-expanded={picking} onClick={() => setPicking(open => !open)}>{uiText(v.fileIds.length ? `附件 ${v.fileIds.length}` : '公司文件')}</Button>
+        <Button variant="quiet" icon={Upload} disabled={locked || uploading === '…'} onClick={() => uploadRef.current?.click()}>{uiText('上传附件')}</Button><input ref={uploadRef} type="file" multiple hidden aria-label={uiText('上传附件')} onChange={event => void upload(event.target.files)} />
+        <Select aria-label={uiText("模板")} title={uiText("【】处替换为实际内容；签名取自邮箱账号设置")} value={v.template} onChange={event => applyTemplate(event.target.value)} placeholder={uiText("不使用模板")} options={templates.map(t => ({ value: t.value, label: t.label }))} />
         <span className="mist-spacer" /><Button variant="quiet" onClick={onClose}>{uiText("取消")}</Button></div>
+      {uploading && uploading !== '…' && <span className="mist-note mist-tone-bad">{uiText(uploading)}</span>}
       <span className="mist-note">{uiText(blocked ? `发送：${blocked}` : '发送后由发件服务器投递；结果不确定时会留在待发送，不会自动重发。')}</span>
     </footer>
   </section>;
@@ -564,6 +605,7 @@ const accountForm = (a: EmailAccount): AccountForm => ({ address: a.address, dis
 /** 邮箱账号：本人接入个人邮箱、有权限者接入共享邮箱并选择成员；密码只提交给服务端校验并加密保存，不回显、不进入公司数据。 */
 function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, onClose }: { state: MistState; me: string; can: boolean; canAdmin: boolean; locked: boolean; run: (command: MistCommand) => Promise<{ result: { id?: string } }>; mail: Mail; onClose: () => void }) {
   const toast = useToast(), [editing, setEditing] = React.useState<{ id?: string; form: AccountForm } | null>(null), [problem, setProblem] = React.useState(''), [binding, setBinding] = React.useState<{ id: string; password: string } | null>(null);
+  const [confirming, setConfirming] = React.useState<{ kind: 'disconnect' | 'remove'; id: string; name: string } | null>(null), [removeReason, setRemoveReason] = React.useState('');
   const receiving=useMailReceiving(state.email.accounts);
   const members = ((state as MistState & { members?: Array<{ userId: string; name: string }> }).members || []).filter(row => row.userId !== me);
   const attempt = async (work: () => Promise<unknown>, done: string) => { setProblem(''); try { await work(); toast(done); return true; } catch (failure) { setProblem(problemText(failure, '操作未完成，请重试')); return false; } };
@@ -609,22 +651,44 @@ function AccountsDrawer({ state, me, can, canAdmin, locked, run, mail, onClose }
           : <div className="mist-row" style={{ flexWrap: 'wrap' }}>
             <Button size="sm" icon={Settings2} disabled={locked||a.kind==='shared'&&!canAdmin} title={uiText(a.kind==='shared'&&!canAdmin?'需要邮件账户管理权限':undefined)} onClick={() => { setProblem(''); setEditing({ id: a.id, form: accountForm(a) }); }}>{uiText("修改设置")}</Button>
             <Button size="sm" icon={KeyRound} disabled={locked || !a.transport} onClick={() => setBinding({ id: a.id, password: '' })}>{uiText(a.credentialSet ? '重新绑定凭据' : '绑定凭据')}</Button>
-            {a.credentialSet && <Button size="sm" icon={Unlink} disabled={locked} onClick={() => void attempt(() => mail({ kind: 'disconnect', accountId: a.id }), '已断开，凭据已删除')}>{uiText("断开")}</Button>}
+            {a.credentialSet && <Button size="sm" icon={Unlink} disabled={locked} onClick={() => setConfirming({ kind: 'disconnect', id: a.id, name: a.address })}>{uiText("断开")}</Button>}
+            {!a.credentialSet && !a.example && <Button size="sm" variant="quiet" disabled={locked} onClick={() => setConfirming({ kind: 'remove', id: a.id, name: a.address })}>{uiText("移除邮箱")}</Button>}
           </div>)}
         {!owner && !a.example && <span className="mist-note">{uiText("由 ")}{a.ownerName}{uiText(" 接入；只有接入人可以修改设置或凭据。")}</span>}
       </Card>; })}</div>
     : <EmptyState icon={Mail} title={uiText("还没有邮箱")} description={uiText(can ? '接入个人邮箱后可以真实收发邮件。' : '你的账号没有邮件编辑权限，不能接入邮箱。')} compact />}
+    {canAdmin && !editing && <TemplateManager state={state} locked={locked} run={run} />}
+    <Dialog open={!!confirming} title={uiText(confirming?.kind === 'remove' ? '移除邮箱' : '断开邮箱')} onClose={() => setConfirming(null)} footer={<><Button onClick={() => setConfirming(null)}>{uiText('取消')}</Button><Button variant="danger" disabled={locked || confirming?.kind === 'remove' && !removeReason.trim()} onClick={() => { const c = confirming!; setConfirming(null); void (c.kind === 'disconnect' ? attempt(() => mail({ kind: 'disconnect', accountId: c.id }), '已断开，凭据已删除') : attempt(() => run({ type: 'email.account.remove', payload: { id: c.id, reason: removeReason.trim() } }), '邮箱已移除')); setRemoveReason(''); }}>{uiText(confirming?.kind === 'remove' ? '移除' : '断开')}</Button></>}>
+      {confirming?.kind === 'remove' ? <><p className="mist-sub">{uiText(`${confirming.name} 移除后不再收发，已有邮件保留。`)}</p><Field label={uiText('移除原因')} required><TextInput aria-label={uiText('移除原因')} value={removeReason} onChange={e => setRemoveReason(e.target.value)} /></Field></> : <p className="mist-sub">{uiText(`${confirming?.name || ''} 断开后立即停止同步与发信，需重新绑定凭据。`)}</p>}
+    </Dialog>
   </Drawer>;
 }
 
-function FollowUpDialog({ message: m, owner: initialOwner, locked, onClose, onSubmit }: { message: EmailMessage; owner: string; locked: boolean; onClose: () => void; onSubmit: (owner: string, due: string, note: string) => Promise<void> }) {
-  const [owner, setOwner] = React.useState(initialOwner), [due, setDue] = React.useState(todayIso()), [note, setNote] = React.useState('');
+/** Company mail templates (emails:admin). Placeholders: {客户} {订单号} {款号} {交期} {报价号} {出运号}. */
+function TemplateManager({ state, locked, run }: { state: MistState; locked: boolean; run: (command: MistCommand) => Promise<{ result: { id?: string } }> }) {
+  const toast = useToast(), [edit, setEdit] = React.useState<{ id?: string; name: string; subject: string; body: string } | null>(null), [problem, setProblem] = React.useState('');
+  const list = (state.email.templates || []).filter(t => !t.archived);
+  const save = async (archived = false) => { if (!edit) return; setProblem(''); try { await run({ type: 'email.template.save', payload: { ...(edit.id ? { id: edit.id } : {}), name: edit.name, subject: edit.subject, body: edit.body, ...(archived ? { archived: true } : {}) } }); toast(archived ? '模板已停用' : '模板已保存'); setEdit(null); } catch (e) { setProblem(problemText(e, '模板未保存')); } };
+  return <Card className="mist-col" style={{ gap: 8, marginTop: 12 }} data-mail-templates>
+    <div className="mist-row"><b>{uiText('公司邮件模板')}</b><span className="mist-spacer" />{!edit && <Button size="sm" icon={Plus} disabled={locked} onClick={() => setEdit({ name: '', subject: '', body: '' })}>{uiText('新增模板')}</Button>}</div>
+    {problem && <Banner tone="bad" title={uiText('未能保存')}>{uiText(problem)}</Banner>}
+    {edit ? <FormGrid cols={1}>
+      <Field label={uiText('模板名称')} required><TextInput aria-label={uiText('模板名称')} value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
+      <Field label={uiText('主题')}><TextInput aria-label={uiText('模板主题')} value={edit.subject} onChange={e => setEdit({ ...edit, subject: e.target.value })} /></Field>
+      <Field label={uiText('正文')} required hint={uiText('{客户} {订单号} {款号} {交期} {报价号} {出运号}')}><TextArea aria-label={uiText('模板正文')} rows={8} value={edit.body} onChange={e => setEdit({ ...edit, body: e.target.value })} /></Field>
+      <div className="mist-row"><Button onClick={() => setEdit(null)}>{uiText('取消')}</Button>{edit.id && <Button variant="quiet" disabled={locked} onClick={() => void save(true)}>{uiText('停用')}</Button>}<span className="mist-spacer" /><Button variant="primary" disabled={locked || !edit.name.trim() || !edit.body.trim()} onClick={() => void save()}>{uiText('保存')}</Button></div>
+    </FormGrid> : list.length ? list.map(t => <div key={t.id} className="mist-row"><span>{t.name}</span><small className="mist-muted">{t.updatedBy}</small><span className="mist-spacer" /><Button size="sm" variant="quiet" disabled={locked} onClick={() => setEdit({ id: t.id, name: t.name, subject: t.subject, body: t.body })}>{uiText('编辑')}</Button></div>) : <span className="mist-muted">{uiText('还没有公司模板。')}</span>}
+  </Card>;
+}
+function FollowUpDialog({ message: m, me, members, locked, onClose, onSubmit }: { message: EmailMessage; me: string; members: Array<{ value: string; label: string }>; locked: boolean; onClose: () => void; onSubmit: (ownerId: string, due: string, note: string) => Promise<void> }) {
+  const options = members.some(x => x.value === me) || !me ? members : [{ value: me, label: '我' }, ...members];
+  const [owner, setOwner] = React.useState(me || options[0]?.value || ''), [due, setDue] = React.useState(todayIso()), [note, setNote] = React.useState('');
   return <Dialog open onClose={onClose} title={uiText("生成跟进")} description={ui`为「${m.subject}」建立待办，同时写入日历。`} icon={CalendarPlus}
     footer={<><Button onClick={onClose}>{uiText("取消")}</Button><Button variant="primary" disabled={locked || !owner.trim() || !due} onClick={() => void onSubmit(owner.trim(), due, note.trim())}>{uiText("生成跟进")}</Button></>}>
     <FormGrid cols={1}>
-      <Field label={uiText("负责人")} required><TextInput aria-label={uiText("负责人")} value={owner} onChange={event => setOwner(event.target.value)} /></Field>
+      <Field label={uiText("负责人")} required><Select aria-label={uiText("负责人")} value={owner} options={options} onChange={event => setOwner(event.target.value)} /></Field>
       <Field label={uiText("截止日")} required><TextInput aria-label={uiText("截止日")} type="date" value={due} onChange={event => setDue(event.target.value)} /></Field>
-      <Field label={uiText("说明")}><TextArea aria-label={uiText("跟进说明")} value={note} onChange={event => setNote(event.target.value)} placeholder={uiText("例如：确认三轮样寄出日期")} /></Field>
+      <Field label={uiText("说明")}><TextArea aria-label={uiText("说明")} value={note} onChange={event => setNote(event.target.value)} placeholder={uiText("例如：确认三轮样寄出日期")} /></Field>
     </FormGrid>
   </Dialog>;
 }

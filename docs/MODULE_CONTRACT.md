@@ -81,6 +81,27 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 数据范围：`fulfillment.stockCounts` / `stockTransfers` 随所涉批次可见。Agent 风险：`stock.release`、`stock.count.decide` 按动词规则为高风险，其余为中风险。
 - 装箱箱号段 / 码单录入只在前端展开为逐箱行（`PackingRangeDialog`），`fulfillment.shipments.pack` 契约不变。
 
+## 当前 Mist 单据生成（P1-3）
+
+- `server/src/shared/mistDocumentTypes.ts`：我方单据 CI、PL、SO 订舱委托、SI 补料、DN 出货通知、SA 装船通知、BC 受益人证明、DFT 汇票、CD 报关单草稿、CDA 报关委托书；外部单据 BL、CO、INS、IC、OTHER 只归档原件。SA/BC/DFT 离港后仍可出具；离港门禁仍只看 CI/PL，作废 SO/SI 等不让出运退回准备。
+- `mistDocumentGeneration.ts` + `mistGeneratedDocument.ts` + `templates/generatedDocument.ts`：同一冻结快照结构和一个中英双语模板。`fulfillment.documents.generate`（`customs:write`）建 / 刷新草稿并挂生成文件（重新生成只替换上次生成的文件），CI/PL 仍走 `documents.issue` 的应收规则；`order.document.generate`（`orders:write`）只读批准快照出 PI / SC，内容未变拒绝重复；`market.lookbook.document`（`marketing:write`）只对已准备画册；`fulfillment.documents.bl` 登记提单号、放货方式、正本份数、补料、草稿核对与电放。
+- 仓储层 `GENERATING_COMMANDS` 先渲染、写私有文件、绑定 `generatedDocument` 产物，命令按同一快照指纹核对；不支持预演；客户端带内容一律拒绝。
+- 前端去智能邮箱：`runtime/composeIntent.ts` 只在本标签页内存交接收件人、主题、附件和关联，邮箱打开后建一次草稿，发送仍由用户在邮箱完成。
+- 报表 Excel：`downloadModuleXlsx`（懒加载 `xlsx`，公式样文本前置单引号）。
+
+## 当前 Mist 邮件与业务打通（P1-2）
+
+- `EmailLinkKind` 增加 supplier / purchase / quotation / rfq；`emailBusinessOwner`（提交资料的接收人）与 `emailLinkCustomerId`（写入客户动态与跟进记录）。提交资料同时写业务对象事件和所属客户事件；关联客户的邮件跟进写一条 `crm.followUps`（method=email，nextTaskId 指向跟进待办）。
+- `email.followUp` 改为 `ownerId`（本公司成员且可见该邮箱），旧 `owner` 文本不再作派单依据。
+- `email.bulk`（≤200 封：已读 / 未读 / 归档 / 删除 / 恢复 / 关联）、`email.purge`（只限已删除、未提交过资料的邮件，同时清掉无人引用的附件文件，高风险）、`email.account.remove`（须先断开，开通人办理，`removed` 后历史保留、禁止新草稿 / 凭据 / 同步，高风险）、`email.template.save`（`emails:admin`，`fillEmailTemplate` 按关联订单 / 报价 / 客户填 {客户}{订单号}{款号}{交期}{报价号}{出运号}）。
+- 业务页发信统一经 `runtime/composeIntent.ts` 打开智能邮箱草稿：客户、供应商、报价（附正式报价单）、询价函、画册、营销推广（线索密送）。发送仍由用户在邮箱确认。
+
+## 当前 Mist 定价、参考成本与市场参考（P1-8）
+
+- `platform.pricing.save`：来源为订单（`orderId`）或报价条目（`quotationId`+`lineId`）二选一；`currency` 默认 USD，报价来源必须等于报价币种；标准参数按订单类型或报价条目 `family`。`platform.pricing.apply`（`pricing:write`）把报价来源试算的单价四舍五入到两位写回草稿条目，归档原审批、`requiresApproval=true`。
+- `platform.bom.save`：锚点为订单（可含 `lineId`）、`productId` 或 `devId`+`versionId`，至少一个；`unit` 取订单条目或产品档案。数据范围：报价来源试算随报价可见，开发版本参考成本随开发案可见。报价分项核算只列同币种、同单位、同产品 / 版本（或未限定）的已确认参考成本，引用时逐项写入并在依据中注明参考成本编号。
+- 平台市场参考 `server/src/ai/marketQuotes.ts`：`MarketQuoteWorker` 每北京日 10 点后取一次（`BAMBOOK_MARKET_FETCH=0` 关闭），经 Exa MCP（`https://mcp.exa.ai/mcp`，JSON-RPC `web_fetch_exa` / `web_search_exa`，可选 `EXA_API_KEY`）。汇率只取中国银行外汇牌价现汇买入价（每 100 外币折 1 外币存），中行折算价仅对照；原料只取标明日期与“元/吨”成交价的现货页面（7 天内），否则记为缺失。结果存平台私有文件 `BAMBOOK_MARKET_DIR`（本地模式在数据目录 `market/`），`GET /api/mist/market/quotes` 供登录账号读取。只用于定价试算一键填入与参考展示，不写入月末汇率或任何账务。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

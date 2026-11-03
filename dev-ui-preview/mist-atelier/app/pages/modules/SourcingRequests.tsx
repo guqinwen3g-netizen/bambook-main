@@ -1,13 +1,15 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 采购管理 · 询价比价：按订单条目向多家供应商询价，逐家登记报价或谢绝，按折人民币单价比价并定标；定标生成采购草稿，仍走采购审批。 */
 import React from 'react';
-import { Award, Ban, MessageSquareQuote, Plus, Scale, SearchX, UserPlus, XCircle } from 'lucide-react';
+import { Award, Ban, Download, MessageSquareQuote, Plus, Scale, SearchX, Send, UserPlus, XCircle } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Facts, Mono, Pill, TextLink, type Column, type Tone } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { fulfillmentSourceLabel, type FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 import { RFQ_STATE_LABEL, readRfqs, rfqAwardFlags, rfqComparison, rfqCurrentQuotes, type MistRfq, type RfqComparisonRow } from '../../../../../server/src/shared/mistSourcing';
 import { productionSupplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
-import type { ModuleEditorSpec } from './ModuleWorkbench';
+import { downloadModuleXlsx, type ModuleEditorSpec } from './ModuleWorkbench';
+import { setComposeIntent } from '../../runtime/composeIntent';
+import { useNav } from '../../nav';
 import { choiceField, emptyOption, Events, field, parseSource, sourceOptions, text, today } from './fulfillmentKit';
 import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
@@ -92,6 +94,7 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
   rfq: MistRfq; state: MistState; day: string; can: boolean; locked: boolean; label: string; canInvite: boolean;
   onQuote: () => void; onDecline: () => void; onInvite: () => void; onAward: (row: RfqComparisonRow) => void; onCancel: () => void; onPurchase: (id: string) => void; onSupplier: (id: string) => void;
 }) {
+  const { go } = useNav();
   const cmp = rfqComparison(state, r, day), isOpen = r.state === 'open', history = r.quotes.filter(q => q.supersededAt);
   const pendingSuppliers = r.supplierIds.filter(id => !rfqCurrentQuotes(r).some(q => q.supplierId === id)).map(id => state.market.suppliers.find(s => s.id === id)?.name || id);
   const closedReason = isOpen ? false : `询价单${RFQ_STATE_LABEL[r.state]}`;
@@ -123,6 +126,10 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
         ...(can && isOpen ? [{ key: 'act', header: '', align: 'right' as const, render: (x: RfqComparisonRow) => x.valid ? <Button size="sm" icon={Award} disabled={locked} aria-label={ui`定标 ${x.quote.supplier}`} onClick={() => onAward(x)}>{uiText("定标")}</Button> : null }] : []),
       ]} /> : <span className="mist-note">{uiText("还没有报价。")}</span>}
       {isOpen && pendingSuppliers.length > 0 && <span className="mist-note">{uiText("待报价：")}{pendingSuppliers.join('、')}</span>}
+      <ActionBar busy={locked} actions={[
+        { label: '导出比价表', icon: Download, onClick: () => downloadModuleXlsx(`${r.code}-比价.xlsx`, [{ name: '比价', headers: ['供应商', '评级', '单价', '币种', '折人民币', 'MOQ', '承诺交期', '付款条件', '有效期', '排名', '备注'], rows: cmp.rows.map(x => [x.quote.supplier, x.grade, x.quote.declined ? '' : x.quote.price, x.quote.currency, x.cnyUnit ?? '', x.quote.moq || '', x.quote.promisedDue, x.quote.terms, x.quote.validUntil, x.lowest ? '最低价' : x.rank ?? '', x.quote.declined ? '谢绝：' + x.quote.declineReason : [x.late ? '晚于需求交期' : '', x.moqOver ? 'MOQ 超出需求' : '', x.valid ? '' : '报价已过期'].filter(Boolean).join('；')]) }, { name: '需求', headers: ['项目', '内容'], rows: [['询价单', r.code], ['来源条目', label], ['需求', `${r.quantity} ${r.unit} · ${r.description}`], ['需求交期', r.due], ['交付地点', r.destination], ['报价截止', r.deadline]] }]), reason: !cmp.rows.length ? '还没有报价' : false },
+        { label: '用邮箱发询价函', icon: Send, onClick: () => { const pending = r.supplierIds.filter(id => !rfqCurrentQuotes(r).some(q => q.supplierId === id)).map(id => state.market.suppliers.find(x => x.id === id)).filter(Boolean); setComposeIntent({ to: pending.map(x => x!.contacts.find(c => c.primary && c.email)?.email || x!.contacts.find(c => c.email)?.email).filter(Boolean).join(', '), subject: `询价 ${r.code} · ${r.description}`, body: `您好，\n\n请就以下需求报价：\n品名 / 规格：${r.description}\n数量：${r.quantity} ${r.unit}\n需求交期：${r.due}\n交付地点：${r.destination}\n报价币种：${r.currency}\n请于 ${r.deadline} 前回复单价、MOQ、交期与付款条件。${r.note ? '\n\n' + r.note : ''}\n`, links: [{ kind: 'rfq', id: r.id }] }); go('emails'); }, reason: !isOpen ? `询价单${RFQ_STATE_LABEL[r.state]}` : false, hidden: !can },
+      ] as ReasonedAction[]} />
     </DetailBlock>
     {history.length > 0 && <DetailBlock title={ui`历史报价 · ${history.length}`}><div className="mist-col">{history.map(q => <small key={q.id} className="mist-muted">{q.supplier} · {uiText(q.declined ? `谢绝：${q.declineReason}` : `${price(q.price)} ${q.currency} · 交期 ${q.promisedDue}`)} · {shortWhen(q.at)}，{shortWhen(q.supersededAt!)}{uiText(" 更新")}</small>)}</div></DetailBlock>}
     <DetailBlock title={uiText("记录")}><Events entity="procurement" id={r.id} /></DetailBlock>

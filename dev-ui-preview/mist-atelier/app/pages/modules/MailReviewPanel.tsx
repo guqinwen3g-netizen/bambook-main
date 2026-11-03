@@ -65,16 +65,16 @@ export function MailReviewPanel({ message: m, state, can, locked, exec, onOpen }
       <p className="mist-sub">{uiText('将此邮件的主题和正文交给平台配置的模型。附件不参与；结果须复核后才能提交业务。')}</p>
     </Dialog>
     <Drawer open={editing} title={uiText('复核邮件资料')} onClose={() => setEditing(false)} footer={<><Button onClick={() => setEditing(false)}>{uiText('取消')}</Button><Button variant="primary" disabled={disabled || picked.some(id => !values[id]?.trim())} onClick={() => void save()}>{uiText('保存复核')}</Button></>}>
-      <FormGrid><Field label={uiText('分类')} full><Select value={category} onChange={e => setCategory(e.target.value)} options={EMAIL_CATEGORIES.map(c => ({ value: c, label: uiText(c) }))} /></Field></FormGrid>
+      <FormGrid><Field label={uiText('分类')} full><Select aria-label={uiText('分类')} value={category} onChange={e => setCategory(e.target.value)} options={EMAIL_CATEGORIES.map(c => ({ value: c, label: uiText(c) }))} /></Field></FormGrid>
       {editingAnalysis?.fields.map(f => <div className="mist-col" key={f.id}>
         <Checkbox label={f.field} checked={picked.includes(f.id)} onChange={checked => setPicked(ids => checked ? [...ids, f.id] : ids.filter(id => id !== f.id))} />
         <TextInput aria-label={f.field} value={values[f.id] || ''} disabled={!picked.includes(f.id)} onChange={e => setValues(v => ({ ...v, [f.id]: e.target.value }))} />
         <span className="mist-sub">{uiText('原文依据')} · {f.quote}</span>
       </div>)}
-      <Field label={uiText('复核备注')}><TextArea value={note} onChange={e => setNote(e.target.value)} maxLength={1000} /></Field>
+      <Field label={uiText('复核备注')}><TextArea aria-label={uiText('复核备注')} value={note} onChange={e => setNote(e.target.value)} maxLength={1000} /></Field>
     </Drawer>
     <Dialog open={!!handling} title={uiText('记录处理结果')} onClose={() => setHandling(null)} footer={<><Button onClick={() => setHandling(null)}>{uiText('取消')}</Button><Button disabled={disabled || !handlingNote.trim()} onClick={() => void resolve()}>{uiText('保存结果')}</Button></>}>
-      <FormGrid><Field label={uiText('处理结果')} full><Select value={outcome} onChange={e => setOutcome(e.target.value as typeof outcome)} options={[{ value: 'handled', label: uiText('已处理') }, { value: 'not_applicable', label: uiText('不适用') }]} /></Field><Field label={uiText('处理说明')} required full><TextArea value={handlingNote} onChange={e => setHandlingNote(e.target.value)} maxLength={1000} /></Field></FormGrid>
+      <FormGrid><Field label={uiText('处理结果')} full><Select aria-label={uiText('处理结果')} value={outcome} onChange={e => setOutcome(e.target.value as typeof outcome)} options={[{ value: 'handled', label: uiText('已处理') }, { value: 'not_applicable', label: uiText('不适用') }]} /></Field><Field label={uiText('处理说明')} required full><TextArea aria-label={uiText('处理说明')} value={handlingNote} onChange={e => setHandlingNote(e.target.value)} maxLength={1000} /></Field></FormGrid>
     </Dialog>
   </DetailBlock>;
 }

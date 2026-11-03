@@ -108,6 +108,9 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
   for (const row of (state as MistState & { orderCosts?: OrderCostState }).orderCosts?.expenses ?? []) if (row.shares?.length && row.shares.every(share => collaboratingOrders.has(share.orderId))) add('orderCosts.expenses', row.id);
 
   for (const path of ['platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts'] as const) for (const row of get(state, path)) if (collaboratingOrders.has(row.orderId)) add(path, row.id);
+  // Pricing trials on a quotation line and reference costs on a development version follow that quotation / development.
+  for (const row of get(state, 'platform.pricing')) if (row.quotationId && out.get('market.quotations')!.has(row.quotationId)) add('platform.pricing', row.id);
+  for (const row of get(state, 'platform.boms')) if (!row.orderId && row.devId && devs.has(row.devId)) add('platform.boms', row.id);
   // 客户跟进与对账单：本人跟进的客户，或可见业务所属的客户。
   const customers = new Set(ownedCustomers);
   for (const path of ['crm.opportunities', 'devs', 'market.quotations', 'orders'] as const) for (const row of get(state, path)) if (out.get(path)!.has(row.id) && row.customerId) customers.add(row.customerId);

@@ -37,7 +37,7 @@ export type AgentCommandRisk = 'low' | 'medium' | 'high';
 export const AI_WRITE_SCOPES: Record<AgentCommandRisk, string> = { low: 'ai:write:low', medium: 'ai:write:medium', high: 'ai:write:high' };
 export const AGENT_RISK_LABEL: Record<AgentCommandRisk, string> = { low: '低风险', medium: '中风险', high: '高风险' };
 const LOW_RISK = ['crm.followUp.save', 'email.flag', 'email.link', 'email.unlink', 'email.followUp', 'email.draft.save', 'notification.read', 'notification.readAll', 'task.complete', 'calendar.save', 'market.quotation.feedback.add', 'platform.assistant.saveDraft'];
-const MEDIUM_RISK = ['email.move', 'email.state.retry', 'email.draft.delete', 'email.submitExtraction', 'email.extraction.review', 'email.extraction.resolve',
+const MEDIUM_RISK = ['email.move', 'email.bulk', 'email.template.save', 'email.state.retry', 'email.draft.delete', 'email.submitExtraction', 'email.extraction.review', 'email.extraction.resolve',
   'customer.update', 'contact.save', 'market.customer.update', 'market.contact.save', 'market.relation.save', 'market.lead.save', 'market.supplier.save', 'market.product.save', 'market.quotation.save',
   'crm.opportunity.save', 'crm.opportunity.stage', 'development.saveDraft', 'development.update', 'order.update', 'order.checklist', 'production.update',
   'fulfillment.procurement.save', 'fulfillment.shipments.save', 'fulfillment.documents.save', 'fulfillment.samples.create', 'fulfillment.samples.edit', 'payable.settlement.submit',
@@ -65,7 +65,11 @@ export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.pa
   // 生产QC不合格处置：工厂扣款进入应付结算、让步接收放行有缺陷的大货（2026-11-03）。
   'fulfillment.qc.dispose',
   // 来料检验后放行或拒收库存（2026-11-03）。
-  'fulfillment.qc.incoming.close']);
+  'fulfillment.qc.incoming.close',
+  // 彻底删除邮件与移除邮箱不可撤销（2026-11-03）。
+  'email.purge', 'email.account.remove',
+  // 按定价试算改写报价单价（2026-11-03）。
+  'platform.pricing.apply']);
 /** 审批、决定、驳回、减免、核销、放行、冲销、作废、退款、结清、分配、对账、清除。 */
 export const HIGH_RISK_VERB = /(^|\.)(approve|decide|reject|waive|writeoff|release|reverse|void|refund|settle|allocate|reconcile|purge)/i;
 export const agentCommandRisk = (type: string | undefined): AgentCommandRisk => {

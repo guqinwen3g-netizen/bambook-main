@@ -56,6 +56,8 @@ import { buildPurchaseDocument, bindPurchaseDocument } from './purchasePrint';
 import { preparePurchaseDocumentSnapshot } from '../shared/mistPurchaseDocument';
 import { bindDevelopmentNotice, buildDevelopmentNotice, prepareDevelopmentNoticeSnapshot } from './developmentNoticePrint';
 import { bindCustomerStatement, buildCustomerStatement, prepareCustomerStatementSnapshot } from './customerStatementPrint';
+import { bindGeneratedDocument, buildGeneratedDocument } from './generatedDocumentPrint';
+import { GENERATING_COMMANDS, prepareGeneratedSnapshot } from '../shared/mistDocumentGeneration';
 import type { PdfRenderResult } from '../templates/pdf';
 import { canonicalCreditDocument, creditDocumentFingerprint, creditSourceFingerprint, type MistBusinessNumberNeed, type MistCreditPrintSnapshot } from '../shared/mistCreditDocuments';
 /** 演示公司里指派给演示成员（demo-*）的审批无人能处理，不阻止移入回收站。 */
@@ -187,7 +189,7 @@ const candidateIds=(row:MistWorkspaceRow)=>companyRow(row)?memberIds(row.state):
 const WRITE_QUEUES = new WeakMap<object, Map<string, Promise<void>>>();
 /** 预演结束时用来整笔回滚的信号（不是错误）。 */
 class MistPreviewOutcome extends Error { constructor(readonly preview: { revision: number; result: unknown; events: string[]; changes: unknown }) { super('preview'); } }
-const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate']);
+const PREVIEW_UNSUPPORTED = new Set(['platform.credit.issue', 'fulfillment.procurement.document', 'market.quotation.document', 'development.notice.generate', 'finance.statement.generate', ...GENERATING_COMMANDS]);
 
 export class MistRepository {
   private platformRuntimeAvailable:()=>boolean=()=>false;
@@ -907,6 +909,12 @@ export class MistRepository {
           const prepared = await buildCustomerStatement(snapshot, { renderPdf: this.quotationPdfRenderer });
           stored = await this.files.write(workspaceId, prepared.file, context.now);
           (context as typeof context & { customerStatement?: unknown }).customerStatement = bindCustomerStatement(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
+        }
+        if (input.command && GENERATING_COMMANDS.has(input.command.type)) {
+          const snapshot = prepareGeneratedSnapshot(row.state, input.command, context);
+          const prepared = await buildGeneratedDocument(snapshot, this.quotationPdfRenderer);
+          stored = await this.files.write(workspaceId, prepared.file, context.now);
+          (context as typeof context & { generatedDocument?: unknown }).generatedDocument = bindGeneratedDocument(prepared, stored, { id: context.id, workspaceId, requestId: input.requestId });
         }
         const command = upload ? { type: 'files.add', payload: { file: stored } } : input.command;
         if (command?.type === 'email.server.sync' || command?.type === 'email.server.state') Object.assign(context, {mailPendingFields:await pendingMailFields(db,workspaceId,command.type === 'email.server.state' ? command.payload.operationId : undefined)});

@@ -35,7 +35,7 @@ it('shows an internal budget without external collection or shipping actions',()
   const order=store.state!.orders[0];order.governance!.contract={...order.governance!.contract,kind:'internal',internalPurpose:'Production supply',receiver:'Garment team'};
   render();expect(host.textContent).toContain('内部预算');expect(host.textContent).not.toContain('合同待收');
   expect([...host.querySelectorAll('button')].some(button=>button.textContent==='查看收款核销')).toBe(false);
-  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='装箱单草稿')).toBe(false);
+  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='客户单据')).toBe(false);
 });
 
 it('does not mark full-package procurement complete while another ordered line has no approved coverage',()=>{
@@ -141,7 +141,7 @@ it('does not render a misleading percentage when a received amount is invalid', 
   expect(host.querySelector('.mist-donut')).toBeNull();
 });
 it('retains the current order editor when an older order save completes',async()=>{render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());let finish!:(value:unknown)=>void;store.run.mockReturnValue(new Promise(resolve=>finish=resolve));await act(async()=>getByRole(document.body,'button',{name:'保存'}).click());store.state!.orders.push({...store.state!.orders[0],id:'other',code:'OTHER',season:'NEW-SEASON'});orderId='other';render();await act(async()=>getByRole(host,'button',{name:'编辑'}).click());await act(async()=>finish({result:{orderId:'old'}}));expect(getByRole(document.body,'dialog',{name:'编辑订单'})).toBeTruthy();expect((getByLabelText(document.body,'季节（手动填写）') as HTMLInputElement).value).toBe('NEW-SEASON');});
-it('labels the order quantity document as a draft and links the real shipment separately',async()=>{store.state!.fulfillment.shipments.push({id:'ship',code:'SHIP-ACTUAL',lines:[{orderId,lineId:store.state!.orderLines[0].id,quantity:1}],state:'preparing'} as any);render();await act(async()=>getByRole(host,'button',{name:'装箱单草稿'}).click());expect(document.body.textContent).toContain('正式装箱与原件以具体出运为准');await act(async()=>getByRole(document.body,'button',{name:'打开正式出运 SHIP-ACTUAL'}).click());expect(go).toHaveBeenCalledWith('shipments','ship');});
+it('offers PI and sales contract from the approved order and links each shipment\'s documents',async()=>{store.state!.fulfillment.shipments.push({id:'ship',code:'SHIP-ACTUAL',lines:[{orderId,lineId:store.state!.orderLines[0].id,quantity:1}],state:'preparing'} as any);render();await act(async()=>getByRole(host,'button',{name:'客户单据'}).click());const dialog=getByRole(document.body,'dialog',{name:/客户单据/});expect(dialog.textContent).toContain('形式发票');expect(dialog.textContent).toContain('销售合同');await act(async()=>getByRole(document.body,'button',{name:'出运单据 SHIP-ACTUAL'}).click());expect(go).toHaveBeenCalledWith('document-center',undefined,{section:'ship'});});
 
 it('lets the business attach contract evidence and submit the entire draft for approval',async()=>{
   const ctx={...context,actorId:'sales',authority:{supplier:{},orderReviewerIds:{garment:['leader'],fabric:[]}}};

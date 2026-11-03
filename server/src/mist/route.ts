@@ -18,6 +18,7 @@ import { hasScope } from '../auth/permissionService';
 import { codexSubscriptions, CodexSubscriptionError, PLATFORM_SUBJECT, personalSubject, type CodexSubscriptionService } from '../ai/codexSubscription';
 import { platformProfileList } from '../ai/platformModel';
 import { platformProviders, type PlatformProviderStore } from '../ai/platformProviders';
+import type { MarketStore } from '../ai/marketQuotes';
 import { resolveEnvProviderChain, testLlmProvider } from '../ai/llmProviders';
 import { SYSTEM_ROLE_IDS } from '../_shared/rolePermissionMatrix';
 import { handleMcpMessage, taskMcpTools, MCP_PROTOCOL_VERSIONS, MCP_SOURCE_RULES, type McpRepository } from './agentMcp';
@@ -44,7 +45,7 @@ function publicError(res: Response, error: any) {
   const known = error instanceof MistApiError || (typeof error?.code === 'string' && Number(error?.status) >= 400 && Number(error?.status) < 500);
   res.status(known ? Number(error.status) : 500).json({ ok: false, error: { code: known ? error.code : 'MIST_REQUEST_FAILED', message: known ? error.message : '公司操作未完成，请查询原请求回执或稍后重试' } });
 }
-export function createMistRouter(options: { prisma?: any; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
+export function createMistRouter(options: { prisma?: any; marketStore?: MarketStore; platformProviders?: PlatformProviderStore; filesRoot?: string; repository?: MistRepository; contract?: MistContract; authenticate?: RequestHandler; subscriptions?: CodexSubscriptionService; mail?: MistMailService; mailReceiver?: MistMailReceiver; mailTransport?: MailTransport; mailCredentialsRoot?: string; delegation?: AgentDelegation; delegationGuard?: (req: Request) => void }) {
   const repository = options.repository ?? new MistRepository(options.prisma, options.contract ?? require('../shared/mistWorkspace') as MistContract, new MistPrivateFiles(options.filesRoot ?? path.resolve(__dirname, '../../private/mist-files')));
   const router = Router();
   const authenticate = options.authenticate ?? requireAuth;
@@ -141,6 +142,8 @@ export function createMistRouter(options: { prisma?: any; platformProviders?: Pl
     await options.prisma.auditLog.create({ data: { id: randomUUID(), actorId: actor(req).userId, action, targetType: 'PlatformAiProvider', targetId, detail } });
   };
   const brief = (p: { name: string; baseUrl: string; model: string; enabled: boolean }) => ({ name: p.name, host: hostOf(p.baseUrl), model: p.model, enabled: p.enabled });
+  // Platform market reference quotes: readable by any signed-in account; values are references with source and time.
+  router.get('/market/quotes', run(async (req, res) => { if (!actor(req)?.userId) fail('UNAUTHENTICATED', '请先登录', 401); const store = options.marketStore; res.set('Cache-Control', 'private, max-age=300').json({ latest: store?.latest() ?? null, history: (store?.history(30) ?? []).map(s => ({ fetchedAt: s.fetchedAt, fx: s.fx.map(q => ({ currency: q.currency, settlementBuy: q.settlementBuy })), materials: s.materials.map(m => ({ key: m.key, price: m.price, date: m.date })) })) }); }));
   router.get('/ai/platform-model', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json(platformView()); }));
   router.post('/ai/platform-model/chatgpt/login', subscriptionCall(async (req, res) => { await platformAdmin(req); exactBody(req.body ?? {}, []); res.status(201).json({ login: await subscriptions().startLogin(PLATFORM_SUBJECT) }); }));
   router.get('/ai/platform-model/chatgpt/login/:loginId', subscriptionCall(async (req, res) => { await platformAdmin(req); res.json({ login: subscriptions().getLogin(PLATFORM_SUBJECT, req.params.loginId), ...platformView() }); }));

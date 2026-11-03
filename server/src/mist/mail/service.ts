@@ -83,6 +83,7 @@ export class MistMailService {
   }
   private insecure(host: string) { return this.policy().insecureTlsHosts.includes(host.toLowerCase()); }
   private async secret(workspaceId: string, account: EmailAccount): Promise<MistMailSecret> {
+    if (account.removed) fail('PRECONDITION', '该邮箱已移除', 422);
     if (!account.credentialSet) fail('MAIL_CREDENTIAL_MISSING', '该邮箱尚未完成凭据绑定', 422);
     const secret = await this.credentials.load(workspaceId, account.id);
     if (!secret || secret.username !== account.transport!.username) fail('MAIL_CREDENTIAL_MISSING', '服务器上没有该邮箱的有效凭据，请重新绑定', 422);
@@ -96,6 +97,7 @@ export class MistMailService {
     if (typeof password !== 'string' || !password || password.length > 1024) fail('INVALID_INPUT', '请填写邮箱密码或授权码', 400);
     const { account } = await this.account(prior, workspaceId, accountId);
     if (account.ownerId !== prior.userId) fail('FORBIDDEN', '只有接入该邮箱的本人可以绑定凭据', 403);
+    if (account.removed) fail('PRECONDITION', '该邮箱已移除', 422);
     await this.checkHosts(account);
     const storeProblem = MistMailCredentials.productionProblem(this.env);
     if (storeProblem) fail('MAIL_CREDENTIAL_STORE_UNAVAILABLE', '服务器暂不能保存邮箱凭据，请联系平台管理员', 409);

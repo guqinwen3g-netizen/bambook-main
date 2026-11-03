@@ -16,6 +16,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { defaultMemberId, memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { useNav } from '../../nav';
+import { setComposeIntent } from '../../runtime/composeIntent';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
@@ -221,6 +222,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
   onDocument: (draft: boolean) => void; onDownloadDocument: (fileId: string) => void; onPrintDocument: (fileId: string) => void;
   onOpen: (view: string, id?: string, extra?: Record<string, string | undefined>) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
+  const { go } = useNav();
   const stage = quotationStage(q), flags = quotationFlags(all, q, day), versions = quotationVersions(state.market, q), next = all.find(x => x.previousId === q.id);
   const needsApproval = quotationNeedsApproval(q), approved = q.approval?.status === 'approved', expired = q.validUntil < day;
   const writeReason = !can ? '没有报价写权限' : false;
@@ -267,7 +269,8 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       { label: '提交业务审批', icon: Send, onClick: onSubmit, primary: needsApproval && !approved, reason: writeReason, hidden: stage !== 'draft' || approved },
       { label: '批准', icon: CheckCircle2, onClick: () => onDecide('approved'), primary: true, reason: decideReason, hidden: stage !== 'pending' },
       { label: '退回修改', icon: Undo2, onClick: () => onDecide('rejected'), reason: decideReason, hidden: stage !== 'pending' },
-      { label: '登记已发送', icon: Send, onClick: () => onStatus('Sent'), primary: !needsApproval || approved, reason: sendReason, hidden: stage !== 'draft' },
+      { label: '用邮箱发送', icon: Send, onClick: () => { const formal = documents.filter(d => !d.draft).at(-1), contact = state.contacts.find(c => c.customerId === q.customerId && c.email); setComposeIntent({ to: contact?.email || '', subject: `Quotation ${q.code}${customer ? ' · ' + customer : ''}`, fileIds: formal ? [formal.fileId] : [], links: [{ kind: 'quotation', id: q.id }, ...(q.customerId ? [{ kind: 'customer' as const, id: q.customerId }] : [])] }); go('emails'); }, primary: !needsApproval || approved, reason: sendReason || (!documents.some(d => !d.draft) ? '请先生成正式报价单' : false), hidden: stage !== 'draft' && stage !== 'sent' },
+      { label: '登记已发送', icon: Send, onClick: () => onStatus('Sent'), reason: sendReason, hidden: stage !== 'draft' },
       { label: '客户接受', icon: ThumbsUp, onClick: () => onStatus('Accepted'), primary: true, reason: writeReason, hidden: stage !== 'sent' },
       { label: '客户未接受', icon: ThumbsDown, onClick: () => onStatus('Rejected'), reason: writeReason, hidden: stage !== 'sent' },
       { label: '标记已失效', icon: TimerOff, onClick: () => onStatus('Expired'), reason: writeReason || (!expired ? `有效期至 ${q.validUntil}，到期后才能标记` : false), hidden: stage !== 'sent' },

@@ -4,8 +4,8 @@ import {businessNow} from '../../runtime/businessClock';
 /** 供应商管理：类型 / 合作状态筛选，档案含产能工艺、认证有效期、评级历史、在手业务与交付表现；暂停 / 停用按生效日阻止新增业务。 */
 import { BaseDataImportButton } from './BaseDataImport';
 import React from 'react';
-import { Award, Ban, Building2, Download, FileBadge, Pause, Pencil, Play, Plus, Scale, SearchX, UserPlus } from 'lucide-react';
-import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
+import { Award, Ban, Building2, Download, FileBadge, Mail, Pause, Pencil, Play, Plus, Scale, SearchX, UserPlus } from 'lucide-react';
+import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, TextLink, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentPurchase } from '../../../../../server/src/shared/mistFulfillment';
 import { SUPPLIER_GRADES, SUPPLIER_TYPES, marketBusinessDate, supplierGrade, type MarketSupplier, type SupplierCertificate } from '../../../../../server/src/shared/mistMarket';
@@ -16,6 +16,7 @@ import { useMistSession } from '../../runtime/auth';
 import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL } from '../../../../../server/src/shared/mistAccounts';
 import { useNav } from '../../nav';
+import { setComposeIntent } from '../../runtime/composeIntent';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, businessDay, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
@@ -203,6 +204,16 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   </MistPage>;
 }
 
+/** Correspondence with this supplier: messages linked to it or exchanged with its contacts, and a mailbox draft addressed to them. */
+function SupplierMail({ s, state }: { s: MarketSupplier; state: MistState }) {
+  const { go } = useNav(), session = useMistSession();
+  const emails = new Set(s.contacts.filter(c => c.email).map(c => c.email.toLowerCase()));
+  const rows = (state.email?.messages || []).filter(m => m.folder !== 'trash' && (m.links.some(l => l.kind === 'supplier' && l.id === s.id) || emails.has(m.from.address.toLowerCase()) || m.to.some(t => emails.has(t.address.toLowerCase())))).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 20);
+  const primary = s.contacts.find(c => c.primary && c.email) || s.contacts.find(c => c.email);
+  return <DetailBlock title={ui`邮件 · ${rows.length}`} aside={session.hasPermission('emails:write') && (state.email?.accounts || []).some(a => !a.removed) ? <Button variant="quiet" icon={Mail} onClick={() => { setComposeIntent({ to: primary?.email || '', subject: '', links: [{ kind: 'supplier', id: s.id }] }); go('emails'); }}>{uiText('写邮件')}</Button> : undefined}>
+    {rows.length ? <div className="mist-col" style={{ gap: 4 }}>{rows.map(m => <TextLink key={m.id} onClick={() => go('emails', m.id)}>{m.subject || '（无主题）'} · {m.folder === 'sent' ? m.to.map(t => t.name || t.address).join('、') : m.from.name || m.from.address} · {m.at.slice(0, 10)}</TextLink>)}</div> : <span className="mist-muted">{uiText('还没有往来邮件。')}</span>}
+  </DetailBlock>;
+}
 function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onOpen, attachments, history }: {
   s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; canBank: boolean; onBank: (currency?: string) => void; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
   onEdit: () => void; onRate: () => void; onCert: (c?: SupplierCertificate) => void; onDeleteCert: (c: SupplierCertificate) => void; onStatus: (s: MarketSupplier['status']) => void;
@@ -274,6 +285,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
         <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{uiText(c.role ? ' · ' + c.role : '')}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>{uiText("主联系人")}</Pill>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContact(c)}>{uiText("编辑")}</Button>}
       </div>)}</div> : <span className="mist-muted">{uiText("未登记联系人。")}</span>}
     </DetailBlock>
+    <SupplierMail s={s} state={state} />
     {!!products.length && <DetailBlock title={ui`引用档案 · ${products.length}`}>
       <div className="mist-row" style={{ gap: 6, flexWrap: 'wrap' }}>{products.map(p => <Button key={p.id} variant="quiet" onClick={() => onOpen('products', p.id)}><Mono>{p.sku}</Mono> {p.name}{uiText(p.supplierCode ? ` · ${p.supplierCode}` : '')}</Button>)}</div>
     </DetailBlock>}

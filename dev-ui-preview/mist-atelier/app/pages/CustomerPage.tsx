@@ -10,6 +10,7 @@ import { Avatar, Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, Em
 import type { MistContact, MistCustomer } from '../../../../server/src/shared/mistWorkspace';
 import { IMG, STAGES, fmt } from '../data';
 import { useNav } from '../nav';
+import { setComposeIntent } from '../runtime/composeIntent';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { defaultMemberId, memberSelectOptions, workspaceMembers } from '../runtime/members';
@@ -80,7 +81,8 @@ export function CustomerPage() {
   if(creating&&canCreate)return <ModuleEditorPage spec={createSpec} onClose={()=>setCreating(false)}/>;
   const emailValid = (email?:string):email is string => !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const customerEmail = contacts.find(item=>emailValid(item.email))?.email;
-  const writeMail = (email?: string) => { if (!emailValid(email)) { setFailure('请先为联系人填写有效邮箱'); return; } window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(customer?.name ?? '')}`; };
+  // Mail goes out through the smart mailbox so it stays with the customer; the mailbox opens a draft linked to this customer.
+  const writeMail = (email?: string) => { if (!emailValid(email)) { setFailure('请先为联系人填写有效邮箱'); return; } setComposeIntent({ to: email!, subject: '', links: customer ? [{ kind: 'customer', id: customer.id }] : [] }); go('emails'); };
   if (!customer) return <MistPage><PageHeader title={uiText("客户管理")} actions={customerActions}/><EmptyState title={uiText(loading ? '正在读取客户' : requestedId ? '没有找到指定客户' : '还没有客户档案')} description={uiText(error || (requestedId ? '请选择本公司已有客户，或新建客户。' : '创建首个客户后，即可发起开发、报价与订单。'))} action={<Button onClick={() => void refresh()}>{uiText("重新读取")}</Button>} /></MistPage>;
   const currencyOrders = orders.filter(order => order.currency === customer.currency && !['已作废', '已取消'].includes(order.state)), currencyInvoices = invoices.filter(invoice => invoice.currency === customer.currency);
   const start = new Date(customer.since).getTime(), years = Number.isFinite(start) ? Math.max(0, (businessNow().getTime() - start) / (365.25 * 24 * 3600 * 1000)).toFixed(1) : '—';

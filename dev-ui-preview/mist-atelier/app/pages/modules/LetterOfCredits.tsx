@@ -1,3 +1,4 @@
+import { DOCUMENT_TYPE_LABEL } from '../../../../../server/src/shared/mistDocumentTypes';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 信用证台账（外贸与报关 · 信用证页签）：单证员按来证登记条款、修改书、交单与银行审单结果。系统按条款提示迟装 / 迟交单 / 过期 / 分批不符点，不代替银行审单。 */
 import React from 'react';
@@ -77,7 +78,8 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
   const presentSpec = (lc: MistLetterOfCredit): ModuleEditorSpec => ({
     title: '登记交单', submitLabel: '登记交单', description: `${lc.lcNo} · 可用余额 ${money(lcAvailableMinor(lc) / 100, lc.currency)}`,
     fields: [field('shipmentId', '出运', 'select', true, [emptyOption, ...presentable(lc).map(s => ({ value: s.id, label: `${s.code} · ${s.portOfLoading} → ${s.portOfDischarge}` }))]), field('shipmentDate', '装运日（运输单据日）', 'date'), field('presentedAt', '交单日', 'date'), field('amount', `交单金额（${lc.currency}）`, 'number'), field('documents', '提交单据', 'textarea'), field('discrepancies', '已知不符点', 'textarea', false)],
-    initialValues: { shipmentId: '', shipmentDate: day, presentedAt: day, amount: '', documents: lc.documentsRequired, discrepancies: '' },
+    initialValues: (() => { const only = presentable(lc).length === 1 ? presentable(lc)[0] : undefined, issued = only ? (state?.fulfillment.documents || []).filter(d => d.shipmentId === only.id && d.status === 'issued') : [];
+      return { shipmentId: only?.id || '', shipmentDate: day, presentedAt: day, amount: '', documents: issued.length ? issued.map(d => `${DOCUMENT_TYPE_LABEL[d.type]} ${d.number}`).join('\n') + (lc.documentsRequired ? `\n—\n${lc.documentsRequired}` : '') : lc.documentsRequired, discrepancies: '' }; })(),
     submit: v => run({ type: 'lc.present', payload: { id: lc.id, shipmentId: text(v, 'shipmentId'), shipmentDate: text(v, 'shipmentDate'), presentedAt: text(v, 'presentedAt'), amount: num(v, 'amount'), documents: text(v, 'documents'), discrepancies: text(v, 'discrepancies') } }) });
   const resultSpec = (lc: MistLetterOfCredit, p: MistLcPresentation): ModuleEditorSpec => ({
     title: `登记第 ${p.no} 次交单审单结果`, submitLabel: '登记结果', description: `${p.shipmentCode} · ${money(p.amount, lc.currency)} · 交单日 ${p.presentedAt} · 承付或拒付后不可修改`,

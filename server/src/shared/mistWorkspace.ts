@@ -19,6 +19,7 @@ import {seedDemoModules,DEMO_SEED_VERSION} from './mistDemoSeed';
 import {mistBusinessDate} from './mistBusinessClock';
 import {getQcConcessionReviews} from './mistQcDisposition';
 import {getStockCountReviews} from './mistStockOperations';
+import {applyDocumentGeneration,documentGenerationPermission,type DocumentGenerationCommand} from './mistDocumentGeneration';
 import {devStageHandoverBlocker,devStagePendingHandovers,devStagePlanError,devStagesOf,normalizeDevStagePlan,type DevStage,type DevStageHandover,type DevStagePlan} from './mistDevelopmentStages';
 import {createEmailState,applyEmailCommand,emailCommandPermission,seedEmailExamples,type EmailState,type EmailCommand} from './mistEmail';
 import {createPlatformState,applyPlatformCommand,platformCommandPermission,getPlatformReviews,platformCreditAppliedMinor,getRequiredBusinessNumberPlan as platformBusinessNumberPlan,platformBusinessDate,type PlatformState,type PlatformCommand} from './mistPlatform';
@@ -331,7 +332,7 @@ export type MistState = {
   teamScopes?:MistTeamScope[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -823,6 +824,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('agent.proposal.'))return agentProposalCommandPermission(command.type);
   if(command.type==='agent.task.cancel')return null;
   if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
+  if(command.type==='order.document.generate'||command.type==='market.lookbook.document')return documentGenerationPermission(command as DocumentGenerationCommand);
   if(command.type.startsWith('lc.'))return lcCommandPermission(command as LcCommand);
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.'))return rfqCommandPermission(command as RfqCommand);
   if(command.type.startsWith('handover.'))return handoverCommandPermission(command as HandoverCommand);
@@ -900,6 +902,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     return {state,result:{id:command.payload.id}};
   }
   if(command.type==='finance.statement.generate'){const result=applyCustomerStatementCommand(state,command as CustomerStatementCommand,context);return {state,result};}
+  if(command.type==='order.document.generate'||command.type==='market.lookbook.document'){const result=applyDocumentGeneration(state,command as DocumentGenerationCommand,context);return {state,result};}
   if(command.type.startsWith('lc.')){const result=applyLcCommand(state,command as LcCommand,context);return {state,result};}
   if(command.type.startsWith('handover.')){const result=applyHandoverCommand(state,command as HandoverCommand,context);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('team.')){const result=applyTeamCommand(state,command as TeamCommand,context);return {state,result};}
