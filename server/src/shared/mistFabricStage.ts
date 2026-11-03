@@ -10,7 +10,8 @@ import type { FulfillmentPurchase } from './mistFulfillment';
 import { deliveryContractId, isFabricStageMaterial, isFabricStageSource, materialDeliveryRows } from './mistInternalFabric';
 
 /** intermediate: this processing step (e.g. weaving or dyeing before finishing) hands its output to the next processing contract. */
-export type FabricStageTerms = { kgPerMetre?: number; lossPercent?: number; intermediate?: boolean };
+/** deliverTo: the processing supplier (dyer, finisher) that receives this greige or intermediate output (sup1). */
+export type FabricStageTerms = { kgPerMetre?: number; lossPercent?: number; intermediate?: boolean; deliverToSupplierId?: string; deliverToSupplier?: string };
 type StagePurchase = Pick<FulfillmentPurchase, 'domain' | 'kind' | 'materialKind' | 'unit'>;
 
 const fail = (message: string): never => { throw new MistCommandError('VALIDATION', message, 422); };
@@ -25,9 +26,9 @@ export const isFabricProcessing = (p: Pick<FulfillmentPurchase, 'domain' | 'kind
 export const fabricStageWeighed = (p: StagePurchase) => isFabricStageMaterial(p) && unitKind(p.unit) === 'kilo';
 
 /** Only the terms that belong to this kind of contract are kept; anything else is a client error, not silently dropped. */
-export function normalizeFabricStageTerms(p: StagePurchase, input: unknown): FabricStageTerms | undefined {
+export function normalizeFabricStageTerms(p: StagePurchase, input: unknown, suppliers?: Array<{ id: string; name: string }>): FabricStageTerms | undefined {
   if (input === undefined || input === null) return undefined;
-  if (typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'kgPerMetre' && key !== 'lossPercent' && key !== 'intermediate')) fail('工序约定格式无效');
+  if (typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['kgPerMetre', 'lossPercent', 'intermediate', 'deliverToSupplierId'].includes(key))) fail('工序约定格式无效');
   const value = input as Record<string, unknown>, terms: FabricStageTerms = {};
   if (value.kgPerMetre !== undefined) {
     if (!fabricStageWeighed(p)) fail('仅按公斤采购的坯布填写每米重量');
@@ -41,12 +42,19 @@ export function normalizeFabricStageTerms(p: StagePurchase, input: unknown): Fab
     if (typeof value.intermediate !== 'boolean') fail('前道加工标记格式无效');
     if (value.intermediate) { if (!isFabricProcessing(p)) fail('仅面料加工单可作为前道加工'); terms.intermediate = true; }
   }
+  if (value.deliverToSupplierId !== undefined && value.deliverToSupplierId !== '') {
+    if (!isFabricStageMaterial(p) && !terms.intermediate) fail('仅坯布采购或前道加工单指定收货加工厂');
+    if (typeof value.deliverToSupplierId !== 'string') fail('收货加工厂无效');
+    const supplier = suppliers?.find(s => s.id === value.deliverToSupplierId);
+    if (!supplier) fail('收货加工厂不在供应商档案');
+    terms.deliverToSupplierId = supplier!.id; terms.deliverToSupplier = supplier!.name;
+  }
   return Object.keys(terms).length ? terms : undefined;
 }
 /** One line for reviews and contract documents, e.g. "每米重量 0.72 公斤" or "约定加工损耗 5%". */
 export function fabricStageTermsText(p: { stageTerms?: FabricStageTerms }): string {
   const t = p.stageTerms; if (!t) return '';
-  return [t.intermediate && '前道加工，成品交下一道加工厂', t.kgPerMetre !== undefined && `每米重量 ${t.kgPerMetre} 公斤`, t.lossPercent !== undefined && `约定加工损耗 ${t.lossPercent}%（按出缸米数计费）`].filter(Boolean).join('；');
+  return [t.intermediate && '前道加工，成品交下一道加工厂', t.kgPerMetre !== undefined && `每米重量 ${t.kgPerMetre} 公斤`, t.lossPercent !== undefined && `约定加工损耗 ${t.lossPercent}%（按出缸米数计费）`, t.deliverToSupplier && `交 ${t.deliverToSupplier} 收货加工`].filter(Boolean).join('；');
 }
 /** Submission gate: a weighed greige contract cannot be compared with dyed metres without its weight per metre. */
 export function fabricStageSubmitProblem(p: FulfillmentPurchase): string {
@@ -91,4 +99,18 @@ export function fabricStageBalance(root: MistState, processingId: string): Fabri
   const plannedInput = agreed !== undefined && agreed < 100 && unitKind(contract.unit) ? round(contract.quantity / (1 - agreed / 100), 2) : null;
   return { unit: contract.unit, inputs, input, output, lossPercent, ...(agreed !== undefined ? { agreedLossPercent: agreed } : {}),
     overAllowance: lossPercent !== null && agreed !== undefined && lossPercent > agreed, outputExceedsInput: input !== null && output > input, plannedInput };
+}
+
+/**
+ * Both directions of the greige → processing link (sup2): for a greige or intermediate contract, the processing contracts it
+ * feeds (named receiver, or actually delivered to); for a processing contract, the greige / intermediate contracts feeding it.
+ */
+export function fabricStageLinks(root: MistState, purchaseId: string): { feeds: FulfillmentPurchase[]; fedBy: FulfillmentPurchase[] } {
+  const all = root.fulfillment?.purchases || [], p = all.find(x => x.id === purchaseId);
+  if (!p) return { feeds: [], fedBy: [] };
+  const delivered = (from: string, to: string) => materialDeliveryRows(root).some(r => r.purchaseId === from && deliveryContractId(root, r.delivery) === to);
+  const sameLine = (x: FulfillmentPurchase) => x.orderId === p.orderId && x.lineId === p.lineId && x.state !== 'cancelled' && x.id !== p.id;
+  const feeds = isFabricStageSource(p) ? all.filter(x => sameLine(x) && isFabricProcessing(x) && (delivered(p.id, x.id) || !!p.stageTerms?.deliverToSupplierId && x.supplierId === p.stageTerms.deliverToSupplierId)) : [];
+  const fedBy = isFabricProcessing(p) ? all.filter(x => sameLine(x) && isFabricStageSource(x) && (delivered(x.id, p.id) || x.stageTerms?.deliverToSupplierId === p.supplierId)) : [];
+  return { feeds, fedBy };
 }

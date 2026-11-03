@@ -1664,7 +1664,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (!/^[A-Z]{3}$/.test(currency)) fail('采购币种须为三位英文字母');
             const currencyProblem = procurementCurrencyProblem(supplierRecord, currency);
             if (currencyProblem) fail(currencyProblem);
-            const stageTerms = normalizeFabricStageTerms({ domain: order.type, kind: p.kind, materialKind, unit: text(p.unit, '单位') }, p.stageTerms);
+            const stageTerms = normalizeFabricStageTerms({ domain: order.type, kind: p.kind, materialKind, unit: text(p.unit, '单位') }, p.stageTerms, root.market.suppliers);
             if (p.iqcRequired !== undefined && typeof p.iqcRequired !== 'boolean') fail('来料检验标记无效');
             if (p.iqcRequired && p.kind !== 'material') fail('只有物料采购设置来料检验');
             const record: FulfillmentPurchase = { id, code: existing?.code || code('PO', f.purchases, ctx), orderId: order.id, lineId: s.kind === 'orderLine' ? s.lineId : '', kind: p.kind, ...(materialKind?{materialKind}:{}), ...(stageTerms?{stageTerms}:{}), ...(p.iqcRequired?{iqcRequired:true}:{}), domain: order.type, supplierId, supplier, description: text(p.description, '采购内容'), quantity, unit: text(p.unit, '单位'), price, currency, due: day(p.due, '交期'), terms: text(p.terms, '付款条件'), destination: text(p.destination, '交付地点'), note: text(p.note, '备注', false), fileIds: files(root, p.fileIds), state: 'draft', requesterId: ctx.actorId || '', createdBy: existing?.createdBy || ctx.actorName, createdAt: existing?.createdAt || ctx.now, reviewerIds: [], configVersions: {}, received: existing?.received || 0 };
