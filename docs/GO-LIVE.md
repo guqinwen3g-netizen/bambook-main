@@ -161,7 +161,7 @@
 - **P1-7（2026-11-04，PR #644，7013af0a，已部署开发服务器）· 报价与订单**：部分接受、部分转单后出新版本、按还价建新版本、到期提醒、核算币种 / 单位折算、变更与取消的下游提醒和冻结、跨组内部供布加成核算、生产延期提醒、看板拖动确认、订单详情关联入口。`ord23`、`ord30` 拆合单留第二版。合入与部署状态见进度记录。
 - **P1-6（2026-11-04，PR #641，b7e58c30）· 财务与结算**：多票核销、跨币种核销与汇兑差、预收冲抵、尾差 / 坏账 / 红冲更正、按月结账与重开、建议凭证导出、供应商对账单、付款计划总览、应付账龄、资金月报、销售额口径切换、信用证不符点处理、退税申报期限与缺失单证、退货扣款带入结算、银行账户先看详情。`fin31`/`fin34`/`fin37` 为走查台账，待岗位走查。合入与部署状态见进度记录。
 - **停点（2026-11-03 晚，用户下班断网）**：PR #640（P1-3 单据、P1-2 邮件、P1-8 定价、平台市场参考、P1-1 `sup1`/`sup2`）已合入 main（be6e981f），后台完整验证对同一树通过（888468b5）。复工后已在干净 main 上 `npm run dev:deploy`，开发服务器版本 be6e981f（公网未实走）。P1-6 财务在工作树分支 `codex/p16-finance` 刚开始，只读过核销代码、未改动：第一块计划为一笔到账核销多张发票（fin11）、跨币种核销与汇兑损益（fin12/13）、预收冲抵（fin14）、尾差 / 坏账核销（fin15，权限 `invoices:approve:writeoff`）、确认类二次确认（fin19/20/25）。
-- **下一步（用户 2026-11-03 要求“全部完善到软件整体交付”）**：P2-1 到 P2-3 收口后做 P2-4 到 P2-10，再做 P3；P1-1 剩余损耗成本金额与超耗扣款（`sup1`/`sup2` 已补）。正式环境部署仍需用户单独授权。
+- **下一步（用户 2026-11-03 要求“全部完善到软件整体交付”）**：清单代码部分已完成；剩余为岗位走查台账（fin31/34/37/44/51/68/81）与需用户定的政策项（AI 第 0.3 节、平台收费续费）；P1-1 剩余损耗成本金额与超耗扣款（`sup1`/`sup2` 已补）。正式环境部署仍需用户单独授权。
 - **既有失败（与本轮无关，未修）**：`server/src/templates` 下 3 个旧模板测试文件 5 项失败（`documentDecimalStringControls`、`pdfErrorOrigin`、`outwardNoInternalPkB271`），main 上不带本轮改动同样失败；不在 `test:mist` 范围内，待查。
 
 **上一停点（2026-11-02 夜）**：P0 四个包（演示空间、命令目录、登录、权限与付款安全）及安全审查 H1–H3、M1–M5、L1 已修复并经独立复核，PR #623 已合入 main（ff93ae77）并完整部署到开发服务器；已按 M2 脚本给全部 7 家公司的系统岗位补授新权限码 56 条（只增不删，先备份、先预演，重跑计划为空）。自定义岗位人工核对清单为空，记录在私有回执中。
@@ -657,6 +657,8 @@
 - 开发服务器访问：`docs/ops/dev-server-access.md`（默认本机验证、直接发布；GitHub 自动部署已取消，正式环境不在范围）。
 
 ## 7. 进度记录
+
+- 2026-11-04：P2-1 至 P2-10、P3-1、P1-1 损耗成本（分支 `codex/p2-batch1`）后台完整验证 125436e2 通过（前端 2106、test:mist、test:access、tooling、build、双端 tsc、mist:check）。浏览器实走：客户列表与商机总览、日历月视图、全部线索、数据中心、纱线换算、首页新建待办。待用户决定：AI 第 0.3 节政策、平台收费与续费规则。
 
 - 2026-11-04：P1-6（#641）、权限码登记修正（#642 服务端、#643 前端）已部署开发服务器（fe7206d2）；P1-7（#644，7013af0a）已部署开发服务器。公网未实走。
 - 2026-11-04：P2-1/P2-2/P2-3（分支 `codex/p2-batch1`）。新命令 `development.sample.dispatchReceived`、`fabric.update`、`fabric.cancel`、`fulfillment.shipments.arrive/deliver`、`fulfillment.customs.amend`、`crm.followUp.void`、`crm.opportunity.reopen`、`rfq.update/unaward/reopen`、`market.season.void`、`calendar.delete`、`task.save`、`market.relation.screening`；样品单位规则 `sampleUnitsFor` / `sampleUnitAllowsDecimal`（mistDevelopmentDomain）；ModuleEditorDialog 增加 `files` 字段类型（`moduleFileIds`）。
