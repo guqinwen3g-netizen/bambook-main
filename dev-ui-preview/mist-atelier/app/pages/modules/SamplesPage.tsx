@@ -19,8 +19,11 @@ import { choiceField, choices, emptyOption, exportRecords, field, number, parseS
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 import { SAMPLE_FORMS } from '../../runtime/tradeOptions';
+import { SampleRequests } from './SampleRequests';
+import { readSampleRequests } from '../../../../../server/src/shared/mistSampleRequests';
 
 type Shelf = 'fabric' | 'garment' | 'other';
+type SampleTab = Shelf | 'requests';
 type StatusFilter = 'all' | 'available' | 'lent' | 'overdue' | 'empty';
 type MoveKind = 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory';
 /** One ledger row: a fabric archive with its forms, or one garment / other physical sample. */
@@ -86,6 +89,8 @@ export function SamplesPage() {
   const sourceProduction = route.productionId ? shipmentProductions.find(branch => branch.id === route.productionId) : uniqueProduction;
   const contextProduction = hasShipmentContext ? sourceProduction : state?.productions.find(branch => branch.id === route.productionId);
   const hasProductionContext = !!route.productionId && !hasShipmentContext;
+  const requestsTab = route.section === 'requests' && !hasShipmentContext && !hasProductionContext;
+  const openRequests = state ? readSampleRequests(state).filter(r => r.state === 'open').length : 0;
   const invalidProduction = hasProductionContext && !!state && !contextProduction;
   const canCreate = can && !invalidProduction && !(hasProductionContext && contextProduction?.closed);
   const contextLine = state?.orderLines.find(line => line.id === contextProduction?.lineId && line.orderId === contextProduction.orderId);
@@ -233,7 +238,8 @@ export function SamplesPage() {
     {error && error !== presentedError && <div className="mist-section"><Banner tone="bad" title={uiText(state ? "样品操作未完成" : "读取失败")}>{uiText(error)}</Banner></div>}
     {overdueLoans.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${overdueLoans.length} 笔借出已超过预计归还日`} actions={<Button onClick={() => { const first = overdueLoans[0]; changeShelf(shelfOf(first.sample)); setStatusFilter('overdue'); }}>{uiText("只看逾期")}</Button>}>
       {overdueLoans.slice(0, 3).map(({ loan, sample }) => `${sample.name} · ${loan.person} · 应还 ${loan.expectedReturn}`).join('；')}{uiText(overdueLoans.length > 3 ? ' …' : '')}</Banner></div>}
-    <Tabs value={shelf} onChange={value => changeShelf(value as Shelf)} options={[{ value: 'fabric', label: '面料', count: counts.fabric }, { value: 'garment', label: '成衣', count: counts.garment }, { value: 'other', label: '其他类别', count: counts.other }]} />
+    <Tabs<SampleTab> value={requestsTab ? 'requests' : shelf} onChange={value => { if (value === 'requests') { go('samples', undefined, { section: 'requests' }); return; } if (requestsTab) go('samples'); changeShelf(value); }} options={[{ value: 'fabric', label: '面料', count: counts.fabric }, { value: 'garment', label: '成衣', count: counts.garment }, { value: 'other', label: '其他类别', count: counts.other }, ...(hasShipmentContext || hasProductionContext ? [] : [{ value: 'requests' as const, label: '索样申请', count: openRequests }])]} />
+    {requestsTab ? <SampleRequests /> : <>
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索档案号、名称、来源或位置")} />
       <Dropdown label={uiText("形态")} value={form} onChange={setForm} options={[{ value: 'all', label: '全部形态' }, ...forms.map(value => ({ value, label: value }))]} />
@@ -253,6 +259,7 @@ export function SamplesPage() {
           : <EmptyState icon={shelf === 'garment' ? Shirt : Layers} title={uiText(hasShipmentContext ? '本票还没有船样' : '还没有样品档案')}  action={canCreate && !invalidShipment ? <Button icon={Plus} disabled={locked} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button> : undefined} />}
         footer={pages > 1 ? <Pagination page={currentPage} pages={pages} onChange={setPage} /> : undefined} /></Card>}
       detail={detail} />
+    </>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </MistPage>;
 }

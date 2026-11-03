@@ -45,6 +45,7 @@ import {applyHandoverCommand,handoverCommandPermission,type HandoverCommand} fro
 import {applyTeamCommand,teamCommandPermission,type TeamCommand} from './mistTeam';
 import {applyTeamScopeCommand,teamScopeCommandPermission,type MistTeamScope,type TeamScopeCommand,type TeamScopeTeam} from './mistTeamScope';
 import {applyOrderCostCommand,orderCostCommandPermission,type OrderCostCommand} from './mistOrderCost';
+import {applySampleRequestCommand,sampleRequestPermission,type SampleRequestCommand,type MistSampleRequest} from './mistSampleRequests';
 import {applyFxRateCommand,fxCommandPermission,type FxPeriodRate,type FxRateCommand,type FxRevaluation} from './mistFxRates';
 import {createExportRebateState,applyExportRebateCommand,exportRebateCommandPermission,rebateReceiptUsedMinor,type ExportRebateState,type ExportRebateCommand} from './mistExportRebate';
 import {createPayablesState,applyPayablesCommand,payablesCommandPermission,getPayableReviews,type PayablesState,type PayablesCommand} from './mistPayables';
@@ -254,6 +255,8 @@ export type MistInvoice = { id: string; code: string; orderId: string; order: st
   writeoffs?: MistInvoiceWriteoff[];
   /** BB-DEV-9：开发费用应收票据回链来源开发案（这类票据没有订单，orderId 为空）。 */
   devId?: string;
+  /** ord18：样品费发票回链索样申请（无订单）。 */
+  sampleRequestId?: string;
   developmentChargeIds?: string[]; fileIds?: string[];
   /** 期初未结应收：没有系统内订单，直接归属客户（见 mistOpeningBalance）。 */
   customerId?: string; opening?: { originalAmount: number; note: string; registeredAt: string; registeredBy: string; registeredById?: string };
@@ -344,6 +347,8 @@ export type MistState = {
   partialLettersOfCredit?: Array<{id:string;code:string;lcNo:string;customerId:string;customer:string;currency:string;orderIds:string[];hiddenCount:number;cancelled:boolean}>;
   /** 供应商询价比价，见 mistSourcing。 */
   rfqs?: MistRfq[];
+  /** ord19 客户索样申请，见 mistSampleRequests。 */
+  sampleRequests?: MistSampleRequest[];
   customers: MistCustomer[]; contacts: MistContact[]; files: MistFile[];
   events: MistEvent[]; tasks: MistTask[]; notifications: MistNotification[]; calendar: MistCalendarEvent[];
   settings: MistSettings; fulfillment:FulfillmentState; market:MarketState; platform:PlatformState; email:EmailState; crm:CrmState; reviewerIds?:string[];
@@ -355,7 +360,7 @@ export type MistState = {
   teamScopes?:MistTeamScope[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | SampleRequestCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -866,6 +871,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('team.'))return teamCommandPermission(command as TeamCommand);
   if(command.type.startsWith('teamScope.'))return teamScopeCommandPermission(command as TeamScopeCommand);
   if(command.type.startsWith('cost.'))return orderCostCommandPermission(command as OrderCostCommand);
+  if(command.type.startsWith('sample.request.'))return sampleRequestPermission(command as SampleRequestCommand);
   if(command.type.startsWith('fulfillment.'))return fulfillmentCommandPermission(command as FulfillmentCommand);
   if(command.type.startsWith('market.'))return marketCommandPermission(command as MarketCommand);
   if(command.type.startsWith('platform.'))return platformCommandPermission(command as PlatformCommand);
@@ -949,6 +955,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('team.')){const result=applyTeamCommand(state,command as TeamCommand,context);return {state,result};}
   if(command.type.startsWith('teamScope.')){const result=applyTeamScopeCommand(state,command as TeamScopeCommand,context);return {state,result};}
   if(command.type.startsWith('cost.')){const result=applyOrderCostCommand(state,command as OrderCostCommand,context);return {state,result};}
+  if(command.type.startsWith('sample.request.')){const result=applySampleRequestCommand(state,command as SampleRequestCommand,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.')){const result=applyRfqCommand(state,command as RfqCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);assertOrderFundingIntegrity(state);return {state,result};}
   if(command.type.startsWith('fulfillment.')){const result=applyFulfillmentCommand(state,command as FulfillmentCommand,context);
@@ -1377,6 +1384,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
         event(state,context,'invoice',i.id,'财务确认应收 '+i.code+'，计入应收余额',{view:'invoices',id:i.id});result={id:i.id};break;
       }
       const reason=text(p.reason,'驳回原因',true,500),f=state.fulfillment;
+      if(i.sampleRequestId){
+        Object.assign(i,{financeStatus:'rejected',financeRejectedAt:context.now,financeRejectedBy:context.actorName,financeRejectReason:reason,voidedAt:context.now,voidReason:'财务驳回：'+reason,voidedBy:context.actorName,open:0},context.actorId?{financeRejectedById:context.actorId,voidedById:context.actorId}:{});
+        const request=(state.sampleRequests||[]).find(r=>r.id===i.sampleRequestId);if(request?.fee?.invoiceId===i.id){delete request.fee.invoiceId;delete request.fee.invoiceCode;}
+        event(state,context,'invoice',i.id,'财务驳回样品费 '+i.code+'：'+reason,{view:'samples',section:'requests',id:i.sampleRequestId});result={id:i.id};break;
+      }
       if(i.devId&&i.developmentChargeIds?.length){
         Object.assign(i,{financeStatus:'rejected',financeRejectedAt:context.now,financeRejectedBy:context.actorName,financeRejectReason:reason,voidedAt:context.now,voidReason:'财务驳回：'+reason,voidedBy:context.actorName,open:0},context.actorId?{financeRejectedById:context.actorId,voidedById:context.actorId}:{});
         event(state,context,'invoice',i.id,'财务驳回开发应收 '+i.code+'：'+reason,{view:'development/detail',id:i.devId});result={id:i.id,devId:i.devId};break;

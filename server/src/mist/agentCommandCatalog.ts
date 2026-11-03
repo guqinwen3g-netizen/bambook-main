@@ -802,6 +802,21 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
+  "type": "fulfillment.procurement.amend",
+  "payload": "{ id: string; quantity: number; price: number; due: string; reason: string; evidence: string; fileIds: string[] }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.procurement.amend.decide",
+  "payload": "{ id: string; decision: 'approved' | 'rejected'; note: string }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.procurement.amend.withdraw",
+  "payload": "{ id: string }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
   "type": "fulfillment.procurement.confirm",
   "payload": "{ id: string; at: string; evidence: string; confirmedDue: string; fileIds: string[]; dueChangeReason?: string }",
   "source": "server/src/shared/mistFulfillment.ts"
@@ -1522,6 +1537,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistMarket.ts"
  },
  {
+  "type": "market.supplier.bank.disable",
+  "payload": "{supplierId:string;accountId:string;reason:string}",
+  "source": "server/src/shared/mistMarket.ts"
+ },
+ {
   "type": "market.supplier.bank.save",
   "payload": "{supplierId:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string}",
   "source": "server/src/shared/mistMarket.ts"
@@ -1555,7 +1575,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "SupplierRating": "{id:string;grade:typeof SUPPLIER_GRADES[number];period:string;note:string;at:string;actor:string}",
    "MistBusinessGroup": "'fabric' | 'garment'",
    "MistAccountRef": "{ id: string; name: string }",
-   "SupplierBankAccount": "{id:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string;addedAt:string;addedBy:string;state:'active'|'replaced';replacedAt?:string}",
+   "SupplierBankAccount": "{id:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string;addedAt:string;addedBy:string;state:'active'|'replaced'|'disabled';replacedAt?:string;disabledAt?:string;disabledBy?:string;disableReason?:string}",
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}"
   },
   "source": "server/src/shared/mistMarket.ts"
@@ -1571,7 +1591,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "SupplierRating": "{id:string;grade:typeof SUPPLIER_GRADES[number];period:string;note:string;at:string;actor:string}",
    "MistBusinessGroup": "'fabric' | 'garment'",
    "MistAccountRef": "{ id: string; name: string }",
-   "SupplierBankAccount": "{id:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string;addedAt:string;addedBy:string;state:'active'|'replaced';replacedAt?:string}"
+   "SupplierBankAccount": "{id:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string;addedAt:string;addedBy:string;state:'active'|'replaced'|'disabled';replacedAt?:string;disabledAt?:string;disabledBy?:string;disableReason?:string}"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -2205,6 +2225,26 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "rfq.update",
   "payload": "{ id: string; quantity: string | number; due: string; deadline: string; reason: string }",
   "source": "server/src/shared/mistSourcing.ts"
+ },
+ {
+  "type": "sample.request.cancel",
+  "payload": "{ id: string; reason: string }",
+  "source": "server/src/shared/mistSampleRequests.ts"
+ },
+ {
+  "type": "sample.request.fulfill",
+  "payload": "{ id: string; sampleId: string; quantity: number; carrier?: string; trackingNo?: string; sourceLocation?: string; complete: boolean }",
+  "source": "server/src/shared/mistSampleRequests.ts"
+ },
+ {
+  "type": "sample.request.invoice",
+  "payload": "{ id: string; number: string; due: string; fileIds: string[] }",
+  "source": "server/src/shared/mistSampleRequests.ts"
+ },
+ {
+  "type": "sample.request.save",
+  "payload": "{ id?: string; customerId: string; orderId?: string; description: string; quantity: number; unit: string; recipient: string; address: string; neededBy: string; note?: string; feeAmount?: number; feeCurrency?: string }",
+  "source": "server/src/shared/mistSampleRequests.ts"
  },
  {
   "type": "settings.update",

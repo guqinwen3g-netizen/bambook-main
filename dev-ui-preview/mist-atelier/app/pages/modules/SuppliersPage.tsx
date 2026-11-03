@@ -128,6 +128,12 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
         { key: 'accountNo', label: '账号', required: true }, { key: 'swift', label: 'SWIFT（境外）' }, { key: 'verification', label: '核实记录', type: 'textarea', required: true, hint: '向谁、通过合同或既有记录中的电话核实，或盖章变更函' }],
       submit: v => run({ type: 'market.supplier.bank.save', payload: { supplierId: s.id, currency: String(v.currency ?? 'CNY'), accountName: String(v.accountName ?? ''), bankName: String(v.bankName ?? ''), accountNo: String(v.accountNo ?? ''), swift: String(v.swift ?? ''), verification: String(v.verification ?? '') } }) };
   };
+  const bankDisableSpec = (s: MarketSupplier, a: NonNullable<MarketSupplier['bankAccounts']>[number]): ModuleEditorSpec => ({
+    title: `停用收款账户 ${a.currency} · 尾号 ${a.accountNo.slice(-4)}`, submitLabel: '停用', submitVariant: 'danger',
+    description: '按该账户提交的付款申请需撤回，按新账户重新审批。', initialValues: { reason: '' },
+    fields: [{ key: 'reason', label: '停用原因', type: 'textarea', required: true }],
+    submit: v => run({ type: 'market.supplier.bank.disable', payload: { supplierId: s.id, accountId: a.id, reason: String(v.reason ?? '') } }),
+  });
   const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅在登记错误时删除；过期认证请保留，以便追溯。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });
   const rateSpec = (s: MarketSupplier): ModuleEditorSpec => ({
     title: `评级 ${s.name}`, submitLabel: '保存评级', description: '每次评级单独记录，历史评级保留。',
@@ -161,7 +167,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的供应商")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStatusFilter('all'); setTypeFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Building2} title={uiText("还没有供应商")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button> : undefined} />;
   const detail = selected && state
-    ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} canBank={session.hasPermission('invoices:write')} onBank={currency => setDialog(bankSpec(selected, currency))} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
+    ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} canBank={session.hasPermission('invoices:write')} onBank={currency => setDialog(bankSpec(selected, currency))} onBankDisable={a => setDialog(bankDisableSpec(selected, a))} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
         onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onContactDelete={c => setDialog({ title: `删除联系人 ${c.name}`, submitLabel: '删除', submitVariant: 'danger', fields: [], initialValues: {}, submit: () => run({ type: 'market.contact.delete', payload: { kind: 'supplier', parentId: selected.id, id: c.id } }) })} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
@@ -220,8 +226,8 @@ function SupplierMail({ s, state }: { s: MarketSupplier; state: MistState }) {
     {rows.length ? <div className="mist-col" style={{ gap: 4 }}>{rows.map(m => <TextLink key={m.id} onClick={() => go('emails', m.id)}>{m.subject || '（无主题）'} · {m.folder === 'sent' ? m.to.map(t => t.name || t.address).join('、') : m.from.name || m.from.address} · {m.at.slice(0, 10)}</TextLink>)}</div> : <span className="mist-muted">{uiText('还没有往来邮件。')}</span>}
   </DetailBlock>;
 }
-function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onContactDelete, onOpen, attachments, history }: {
-  s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; canBank: boolean; onBank: (currency?: string) => void; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
+function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onBankDisable, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onContactDelete, onOpen, attachments, history }: {
+  s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; canBank: boolean; onBank: (currency?: string) => void; onBankDisable: (a: NonNullable<MarketSupplier['bankAccounts']>[number]) => void; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
   onEdit: () => void; onRate: () => void; onCert: (c?: SupplierCertificate) => void; onDeleteCert: (c: SupplierCertificate) => void; onStatus: (s: MarketSupplier['status']) => void;
   onContact: (c?: MarketSupplier['contacts'][number]) => void; onContactDelete: (c: MarketSupplier['contacts'][number]) => void; onOpen: (view: string, id?: string) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
@@ -265,7 +271,7 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
       {(s.bankAccounts || []).some(a => a.state === 'active') ? <div className="mist-col" style={{ gap: 0 }} role="list" aria-label={ui`${s.name} 收款账户`} data-supplier-bank>{(s.bankAccounts || []).filter(a => a.state === 'active').map(a => <div key={a.id} role="listitem" className="mist-col mist-quote-line" style={{ gap: 4, padding: '10px 0' }}>
         <div className="mist-row" style={{ gap: 8 }}><strong>{a.accountName}</strong><span className="mist-spacer" /><Pill tone="neutral">{a.currency}</Pill>{Date.parse(day) - Date.parse(businessDay(a.addedAt)) < PAYEE_RECENT_DAYS * 86400000 && <Pill tone="warn">{uiText('近期变更')}</Pill>}</div>
         <div className="mist-row" style={{ gap: 8, flexWrap: 'wrap' }}><small className="mist-muted">{a.bankName} · <Mono>{a.accountNo}</Mono>{a.swift ? <> · SWIFT <Mono>{a.swift}</Mono></> : null}{uiText(' · ')}{a.addedBy} {businessDay(a.addedAt)}</small><span className="mist-spacer" />
-          {canBank && <Button variant="quiet" disabled={locked} onClick={() => onBank(a.currency)}>{uiText('变更')}</Button>}</div>
+          {canBank && <><Button variant="quiet" disabled={locked} onClick={() => onBank(a.currency)}>{uiText('变更')}</Button><Button variant="quiet" disabled={locked} onClick={() => onBankDisable(a)}>{uiText('停用')}</Button></>}</div>
       </div>)}</div> : <span className="mist-muted">{uiText("未登记收款账户")}</span>}
     </DetailBlock>
     <DetailBlock title={ui`认证 · ${certs.length}`} aside={can ? <Button variant="quiet" icon={Plus} disabled={locked} onClick={() => onCert()}>{uiText("登记")}</Button> : undefined}>

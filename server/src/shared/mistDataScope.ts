@@ -25,7 +25,7 @@ export const SCOPED_COLLECTIONS = [
   'fulfillment.purchases', 'fulfillment.receipts', 'fulfillment.stock', 'fulfillment.stockMovements', 'fulfillment.stockCounts', 'fulfillment.stockTransfers', 'fulfillment.returnReceipts', 'fulfillment.receivedRecords', 'fulfillment.documents', 'fulfillment.qcTasks', 'fulfillment.qcReports', 'fulfillment.samples', 'fulfillment.sampleMovements',
   'fulfillment.packing', 'fulfillment.shipments', 'fulfillment.customs', 'fulfillment.shippingTerms', 'fulfillment.productionFacts',
   'platform.pricing', 'platform.risks', 'platform.claims', 'platform.claimGoods', 'platform.credits', 'platform.creditApplications', 'platform.boms', 'platform.invoiceDrafts', 'platform.assistantDrafts',
-  'orderFunding.assignments', 'rfqs', 'letterOfCredits', 'customerStatements',
+  'orderFunding.assignments', 'rfqs', 'sampleRequests', 'letterOfCredits', 'customerStatements',
   'payments', 'financeReversals', 'bankAccounts', 'fxRecords', 'fxRevaluations', 'exportRebate.claims', 'orderCosts.expenses',
   'payables.bills', 'payables.payments', 'payables.allocations', 'payables.plans', 'payables.requests', 'payables.reversals', 'payables.settlements', 'payables.deductions', 'payables.prepaymentMoves',
 ] as const;
@@ -120,6 +120,9 @@ export function scopedVisibility(state: MistState, scope: MistDataScope, include
     if (row.link?.id ? !!path && has(path, row.link.id) : ownedCustomers.has(row.customerId) || users.has((row as any).ownerId)) add('crm.followUps', row.id);
   }
   for (const row of get(state, 'customerStatements')) if (customers.has(row.customerId)) add('customerStatements', row.id);
+  // ord19：索样申请随跟进的客户或可见订单；样品费发票随申请。
+  for (const row of get(state, 'sampleRequests')) if (ownedCustomers.has(row.customerId) || users.has(row.requesterId) || row.orderId && orders.has(row.orderId)) add('sampleRequests', row.id);
+  for (const row of state.invoices ?? []) if (row.sampleRequestId && has('sampleRequests', row.sampleRequestId)) add('invoices', row.id);
   // Financial source facts must be provably linked to visible business; mixed bills remain hidden until a safe partial view exists.
   const purchases = out.get('fulfillment.purchases')!, payables: any = state.payables ?? {};
   for (const bill of payables.bills ?? []) if (Array.isArray(bill.lines) && bill.lines.length && bill.lines.every((line: any) => purchases.has(line.purchaseId))) add('payables.bills', bill.id);
@@ -310,6 +313,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
     if (event.entityType === 'document') return actualDocuments.has(event.entityId);
     if (event.entityType === 'customs') return actualCustoms.has(event.entityId);
     if (event.entityType === 'sample') return hasAny(event.entityId, ['fulfillment.samples']);
+    if (event.entityType === 'sampleRequest') return hasAny(event.entityId, ['sampleRequests']);
     if (event.entityType === 'inventory') return hasAny(event.entityId, ['fulfillment.stock']);
     if (event.entityType === 'orderFunding') return hasAny(event.entityId, ['orderFunding.assignments']);
     if (event.entityType === 'rebate') return hasAny(event.entityId, ['exportRebate.claims']) || (state.exportRebate?.rates ?? []).some(row => row.id === event.entityId);

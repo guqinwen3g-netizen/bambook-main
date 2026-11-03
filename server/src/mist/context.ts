@@ -67,7 +67,7 @@ export async function mistApprovalAuthority(db:any,actor:TokenPayload,kind:strin
   }
   // Only submission/decision consumes approval authority. Drafts, documents and
   // receipt records must not reload unrelated global reviewer accounts.
-  if(['fulfillment.procurement.submit','fulfillment.procurement.decide'].includes(kind)){
+  if(['fulfillment.procurement.submit','fulfillment.procurement.decide','fulfillment.procurement.amend','fulfillment.procurement.amend.decide'].includes(kind)){
     const current=async(id:string,family:string,strictDomain=false)=>{
       if(eligibleReviewerIds&&!eligibleReviewerIds.includes(id))return false;
       if(actor.companyId&&db.companyMember?.findFirst&&!await db.companyMember.findFirst({where:{companyId:actor.companyId,userId:id,status:'active'}}))return false;
