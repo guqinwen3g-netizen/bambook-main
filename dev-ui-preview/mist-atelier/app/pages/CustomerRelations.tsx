@@ -37,6 +37,8 @@ function linkOptions(state: MistState, customerId: string, withOpportunity = tru
     ...state.devs.filter(row => row.customerId === customerId).map(row => ({ value: `development:${row.id}`, label: `开发案 · ${row.code} ${row.name}` })),
     ...state.market.quotations.filter(row => row.customerId === customerId).map(row => ({ value: `quotation:${row.id}`, label: `报价 · ${row.code}` })),
     ...state.orders.filter(row => row.customerId === customerId).map(row => ({ value: `order:${row.id}`, label: `订单 · ${row.code}` })),
+    // Receivables of this customer, so collection calls can be recorded here too.
+    ...state.invoices.filter(row => !row.voidedAt && row.financeStatus !== 'pending' && row.open > 0 && state.orders.some(o => o.id === row.orderId && o.customerId === customerId)).map(row => ({ value: `invoice:${row.id}`, label: `应收 · ${row.code} · ${row.open} ${row.currency}` })),
   ];
 }
 

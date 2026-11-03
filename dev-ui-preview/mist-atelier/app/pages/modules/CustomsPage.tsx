@@ -17,7 +17,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { CustomsClassificationLedger, CustomsItemsBlock } from './CustomsDeclarationPanel';
 import { readCustomsClassifications } from '../../../../../server/src/shared/mistCustomsDeclaration';
-import { REBATE_TONE, RebateClaimBlock, RebateRatesCard, rebateSummary } from './RebatePanel';
+import { REBATE_TONE, RebateClaimBlock, RebateDeadlinesCard, RebateRatesCard, rebateSummary } from './RebatePanel';
 import { REBATE_STATE_LABEL } from '../../../../../server/src/shared/mistExportRebate';
 import { LetterOfCreditLedger, lcOrderDomain } from './LetterOfCredits';
 import { readLetterOfCredits } from '../../../../../server/src/shared/mistLetterOfCredit';
@@ -188,6 +188,7 @@ export function CustomsPage() {
         { value: 'cleared', label: '已放行', count: statusCount('cleared'), color: 'var(--mist-ok)' },
       ]} />
     </>}
+    {tab === 'rebate' && state && <div className="mist-section"><RebateDeadlinesCard state={state} today={today()} /></div>}
     {tab === 'rebate' && state && <div className="mist-section"><RebateRatesCard state={state} canWrite={canRebate} locked={locked} open={setDialog} run={run} /></div>}
     {tab === 'lc'
       ? <>

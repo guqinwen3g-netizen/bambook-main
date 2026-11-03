@@ -11,6 +11,7 @@ import type { ModuleEditorSpec } from './ModuleWorkbench';
 import { emptyOption, field, number, text, today } from './fulfillmentKit';
 import { ActionBar, DetailBlock, type ReasonedAction } from './pageKit';
 import { EXPORT_REBATE_RATES } from '../../runtime/tradeOptions';
+import { rebateDeadlines, type RebateDeadlineRow } from '../../../../../server/src/shared/mistRebateDeadlines';
 
 type Run = (command: MistCommand) => Promise<unknown>;
 const cny = (value: number) => `${fmt(value, 2)} CNY`;
@@ -33,6 +34,25 @@ export function rebateSummary(state: MistState, c: FulfillmentCustoms) {
   const rate = byItems ? undefined : exportDate ? rebateRateFor(state, c.hsCode, exportDate) : undefined;
   const preview = plan && !plan.blockers.length ? plan.rebate / 100 : 0;
   return { claim, candidates, exportDate, rate, plan, byItems, preview, vatReady: !!claim || candidates.length > 0 };
+}
+
+const DEADLINE_TONE: Record<RebateDeadlineRow['state'], Tone> = { ready: 'ok', missing: 'warn', due: 'warn', overdue: 'bad' };
+const DEADLINE_LABEL: Record<RebateDeadlineRow['state'], string> = { ready: '可申报', missing: '缺单证', due: '临近期限', overdue: '已过期限' };
+/** fin32：已出口未申报的报关单，按申报期限排序并列出缺失单证。 */
+export function RebateDeadlinesCard({ state, today: day }: { state: MistState; today: string }) {
+  const rows = rebateDeadlines(state, day);
+  if (!rows.length) return null;
+  return <Card>
+    <CardHeader title={ui`待申报退税 · ${rows.length}`} />
+    <DataTable ariaLabel={uiText("待申报退税")} rows={rows} rowKey={r => r.customsId} columns={[
+      { key: 'code', header: '报关记录', width: '130px', render: r => <Mono>{r.code}</Mono> },
+      { key: 'ship', header: '出运', width: '120px', hideOnMobile: true, render: r => r.shipment },
+      { key: 'exp', header: '出口日期', width: '110px', render: r => r.exportDate },
+      { key: 'dl', header: '申报期限', width: '130px', render: r => <span>{r.deadline}<small className="mist-muted">{r.daysLeft >= 0 ? ui` · 剩 ${r.daysLeft} 天` : ui` · 超 ${-r.daysLeft} 天`}</small></span> },
+      { key: 'miss', header: '缺失单证', width: 'minmax(160px,2fr)', render: r => r.missing.length ? r.missing.join('、') : '—' },
+      { key: 'st', header: '状态', width: '96px', render: r => <Pill tone={DEADLINE_TONE[r.state]}>{uiText(DEADLINE_LABEL[r.state])}</Pill> },
+    ]} />
+  </Card>;
 }
 
 export function RebateRatesCard({ state, canWrite, locked, open, run }: { state: MistState; canWrite: boolean; locked: boolean; open: (spec: ModuleEditorSpec) => void; run: Run }) {

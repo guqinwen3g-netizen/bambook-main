@@ -222,8 +222,8 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   next.receipts = (next.receipts ?? []).filter((receipt: any) => {
     const partial = partialReceipt(state, visible, receipt.id);
     if (!partial.partial) return true;
-    const visibleAllocations = partial.allocations.filter(row => visible.get('invoices')!.has(row.invoiceId) && row.currency === receipt.currency);
-    const cents = visibleAllocations.reduce((sum, row) => sum + Math.round(row.amount * 100), 0);
+    const visibleAllocations = partial.allocations.filter(row => visible.get('invoices')!.has(row.invoiceId) && (row.receiptCurrency ?? row.currency) === receipt.currency);
+    const cents = visibleAllocations.reduce((sum, row) => sum + Math.round((row.receiptAmount ?? row.amount) * 100), 0);
     if (Number.isSafeInteger(cents)) next.partialReceipts.push({ id: receipt.id, code: receipt.code, date: receipt.date, payer: receipt.payer, currency: receipt.currency, visibleAllocatedAmount: cents / 100, hiddenCount: partial.hiddenCount });
     return false;
   });
