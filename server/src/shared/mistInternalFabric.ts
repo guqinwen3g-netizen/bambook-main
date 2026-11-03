@@ -8,7 +8,8 @@ export type GarmentFulfillmentMode = 'cmt' | 'trims_cmt' | 'full_package';
 export type CmtIncludedItem = 'trims' | 'packaging';
 export type MistMaterialKind = 'fabric' | 'greige' | 'trims' | 'packaging' | 'other';
 export type GarmentFulfillmentFields = { fulfillmentMode?: GarmentFulfillmentMode; cmtIncludedItems?: CmtIncludedItem[] };
-export type InternalSupply = { group: 'garment'; receiverId: string };
+/** ord39: markupPercent is the fabric group's agreed profit on internal supply (internal price = cost × (1 + markup)); absent = at cost. */
+export type InternalSupply = { group: 'garment'; receiverId: string; markupPercent?: number };
 export type InternalFabricContext = Pick<MistContext, 'members' | 'actorId' | 'actorName'>;
 type AllocationFact = { fabricOrderId: string; fabricLineId: string; metres: string; status: 'active' | 'cancelled'; revision: number; updatedAt: string; updatedBy: string; updatedByName: string };
 type InternalShortClosure = { quantity:string; accepted:string; reason:string; at:string; actorId:string; actor:string };
@@ -77,7 +78,7 @@ export function normalizeInternalSupply(contract: OrderGovernanceInput, order: P
   if (checkActor) actorGroup(context, 'fabric');
   resolveMember(context, order.ownerId, '面料负责人', 'fabric');
   const receiver = resolveMember(context, identity(contract.internalSupply.receiverId, '接收负责人'), '接收负责人', 'garment');
-  return { ...contract, internalSupply: { group: 'garment', receiverId: receiver.id }, receiver: `成衣 / ${receiver.name}` };
+  return { ...contract, internalSupply: { group: 'garment', receiverId: receiver.id, ...(contract.internalSupply.markupPercent != null ? { markupPercent: contract.internalSupply.markupPercent } : {}) }, receiver: `成衣 / ${receiver.name}` };
 }
 function allocatedMinor(root: MistState, fabricLineId: string, excludeTargetLineId?: string) {
   return (root.internalFabricAllocations || []).filter(row => row.status === 'active' && row.fabricLineId === fabricLineId && row.lineId !== excludeTargetLineId).reduce((sum, row) => sum + quantityMinor(effectiveInternalMetres(row)), BigInt(0));
