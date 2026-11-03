@@ -49,7 +49,10 @@ it('queues a CI receivable as pending finance confirmation outside open balance,
   expect(host.textContent).not.toContain('票款明细待核对');
   const collect=getByRole(host,'button',{name:'收款与核销'}) as HTMLButtonElement;
   expect(collect.disabled).toBe(true);
-  await click('确认应收');
+  await act(async()=>getAllByRole(document.body,'button',{name:'确认应收',exact:true}).find(b=>!b.closest('[role=dialog]'))!.click());
+  expect(store.value.run).not.toHaveBeenCalledWith({type:'finance.receivable.confirm',payload:{invoiceId:'p'}});
+  expect(getByRole(document.body,'dialog',{name:'确认应收 · CI-P'})).toBeTruthy();
+  await act(async()=>getByRole(getByRole(document.body,'dialog',{name:/确认应收/}),'button',{name:'确认应收'}).click());
   expect(store.value.run).toHaveBeenLastCalledWith({type:'finance.receivable.confirm',payload:{invoiceId:'p'}});
   await click('驳回 CI');
   await act(async()=>getByRole(getByRole(document.body,'dialog',{name:'驳回 CI 应收'}),'button',{name:'驳回并退回更正'}).click());

@@ -78,7 +78,7 @@ export function fxOrderActual(root: Root, order: { id: string; currency: string;
   const invoices = new Set((root.invoices || []).filter(i => i.orderId === order.id && i.currency === order.currency && isRecognizedMistInvoice(i)).map(i => i.id));
   let settled = 0, settledCny = 0;
   for (const a of root.allocations || []) {
-    const r = receipts.get(a.receiptId); if (!invoices.has(a.invoiceId) || !r || r.date > asOf) continue;
+    const r = receipts.get(a.receiptId); if (!invoices.has(a.invoiceId) || !r || r.date > asOf || r.currency !== order.currency) continue;
     const am = minor(a.amount);
     let sf = 0, sc = 0; for (const s of settlements) for (const l of s.receipts || []) if (l.receiptId === r.id) { const x = minor(l.amount); sf += x; sc += x * minor(s.localAmount) / minor(s.amount); }
     const total = minor(r.amount); if (!sf || !total) continue;
@@ -166,7 +166,7 @@ export function fxRevaluationPreview(root: Root, month: string, today: string): 
   }
   for (const r of receipts) {
     if (cur(r.currency) === 'CNY' || r.date > monthEnd) continue;
-    const applied = (root.allocations || []).filter(x => x.receiptId === r.id && invoiceIssued.get(x.invoiceId)).reduce((n, x) => n + minor(x.amount), 0);
+    const applied = (root.allocations || []).filter(x => x.receiptId === r.id && invoiceIssued.get(x.invoiceId)).reduce((n, x) => n + minor(x.receiptAmount ?? x.amount), 0);
     const left = minor(r.amount) - applied;
     if (left > 0) raw.push({ kind: 'unapplied', refId: r.id, ref: `${r.code} · ${r.payer}`, currency: cur(r.currency), amount: -left / 100 });
   }

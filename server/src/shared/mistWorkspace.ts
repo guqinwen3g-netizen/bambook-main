@@ -34,7 +34,7 @@ import {lineQuantityFromBreakdown,type OrderLineBreakdown} from './mistOrderBrea
 import {isLineClosed} from './mistOrderClosure';
 import {quotationContract} from './mistTradeTerms';
 import {createOrderGovernance,applyOrderGovernanceCommand,orderGovernancePermission,getOrderGovernanceReviews,assertOrderApproved,assertOrderWritable,assertOrderNotTerminated,type OrderGovernanceFields,type OrderGovernanceCommand,type OrderGovernanceInput} from './mistOrderGovernance';
-import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
+import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,advanceBalances,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
 import {applyAgentProposalCommand,agentProposalCommandPermission,type AgentProposal,type AgentProposalCommand} from './mistAgentProposals';
 import type { AgentTaskCommand } from './mistAgentTasks';
 import {applyCustomerStatementCommand,customerStatementCommandPermission,type CustomerStatementCommand,type CustomerStatementRecord} from './mistCustomerStatement';
@@ -243,6 +243,7 @@ export type MistInvoice = { id: string; code: string; orderId: string; order: st
   issuedAt?: string; voidedAt?: string; voidReason?: string; voidedBy?: string; voidedById?: string; voidSourceDocumentId?: string;
   /** 客户汇款被中间行 / 收款行扣费造成的短收：财务凭已核销的到账登记，计入订单费用而非冲减收入。 */
   bankCharges?: MistInvoiceBankCharge[];
+  writeoffs?: MistInvoiceWriteoff[];
   /** BB-DEV-9：开发费用应收票据回链来源开发案（这类票据没有订单，orderId 为空）。 */
   devId?: string;
   developmentChargeIds?: string[]; fileIds?: string[];
@@ -262,7 +263,17 @@ export type MistInvoiceBankCharge = { id: string; receiptId: string; amount: num
 /** 单张发票累计银行扣费上限（发票币种）：超出说明不是扣费，须走贷项通知或索赔。 */
 export const MIST_BANK_CHARGE_LIMIT = 100;
 export const mistInvoiceBankChargeMinor = (invoice: Pick<MistInvoice, 'bankCharges'>) => (invoice.bankCharges || []).filter(c => !c.reversed).reduce((n, c) => n + mistMoneyMinor(c.amount), 0);
-export type MistAllocation = { id: string; receiptId: string; invoiceId: string; amount: number; currency: string; createdAt: string; actor: string; payerBasis?:string };
+/**
+ * Receipt → invoice allocation. amount / currency are in the invoice currency. A cross-currency allocation (customer paid a USD
+ * invoice in EUR) also records receiptAmount in the receipt currency and the agreed rate (invoice currency per 1 receipt
+ * currency) with its evidence; receipt-side balances use receiptAmount (see mistAllocationReceiptMinor).
+ */
+export type MistAllocation = { id: string; receiptId: string; invoiceId: string; amount: number; currency: string; createdAt: string; actor: string; payerBasis?:string; receiptAmount?: number; receiptCurrency?: string; rate?: string; rateBasis?: string };
+export const mistAllocationReceiptMinor = (a: Pick<MistAllocation, 'amount' | 'receiptAmount'>) => mistMoneyMinor(a.receiptAmount ?? a.amount);
+/** Small difference (尾差) or bad debt written off on an invoice; reduces the open balance, reversible with a reason. */
+export type MistInvoiceWriteoff = { id: string; kind: 'difference' | 'badDebt'; amount: number; currency: string; reason: string; at: string; actor: string; actorId?: string; reversed?: { at: string; actor: string; reason: string } };
+export const MIST_WRITEOFF_DIFFERENCE_LIMIT = 50;
+export const mistInvoiceWriteoffMinor = (invoice: { writeoffs?: MistInvoiceWriteoff[] }) => (invoice.writeoffs || []).filter(w => !w.reversed).reduce((n, w) => n + mistMoneyMinor(w.amount), 0);
 /**
  * 核销 / 付款冲回记录。原记录不删除不改写：核销冲回后原核销整条快照保存在 allocation 中、
  * 退出当前核销集合（流水余额与发票未收按剩余有效核销回算）；付款冲回另记一张负额反向凭证（voucherId）。
@@ -374,7 +385,13 @@ export type MistCommand = Extract<DocumentGenerationCommand, { type: 'order.docu
   | { type: 'finance.importReceipts'; payload: { accountId?: string; receipts: Array<{ date: string; payer: string; amount: number; currency: string; ref: string }> } }
   | { type: 'finance.receivable.confirm'; payload: { invoiceId: string } }
   | { type: 'finance.receivable.reject'; payload: { invoiceId: string; reason: string } }
-  | { type: 'finance.reconcile'; payload: { receiptId: string; invoiceId: string; amount?: number; payerBasis?:string } }
+  /** Single invoice, or `lines` to spread one receipt over several invoices in one step. rate/rateBasis are required when the
+   *  invoice currency differs from the receipt (rate = invoice currency per 1 receipt currency, amount in invoice currency). */
+  | { type: 'finance.reconcile'; payload: { receiptId: string; invoiceId?: string; amount?: number; payerBasis?:string; rate?: string; rateBasis?: string; lines?: Array<{ invoiceId: string; amount: number; rate?: string }> } }
+  /** Apply an order's earmarked advance to its open invoices, oldest due first. */
+  | { type: 'finance.advance.apply'; payload: { assignmentId: string } }
+  | { type: 'finance.receivable.writeoff'; payload: { invoiceId: string; kind: 'difference' | 'badDebt'; amount: number; reason: string } }
+  | { type: 'finance.receivable.writeoff.reverse'; payload: { invoiceId: string; writeoffId: string; reason: string } }
   | { type: 'finance.receivable.bankCharge'; payload: { invoiceId: string; receiptId: string; amount: number; reason: string } }
   | { type: 'finance.receivable.bankCharge.reverse'; payload: { invoiceId: string; chargeId: string; reason: string } }
   | { type: 'finance.acceptSuggestions'; payload: { receiptIds: string[] } }
@@ -714,10 +731,10 @@ function updateDev(state: MistState, dev: MistDev, context: MistContext) {
   else {dev.stage=0;dev.state='开发计划';dev.tone='neutral';}
 }
 function recalculate(state: MistState) {
-  for(const invoice of state.invoices) invoice.open=isRecognizedMistInvoice(invoice)?major(Math.max(0,mistMoneyMinor(invoice.amount)-state.allocations.filter(a=>a.invoiceId===invoice.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-platformCreditAppliedMinor(state,invoice.id)-mistInvoiceBankChargeMinor(invoice))):0;
+  for(const invoice of state.invoices) invoice.open=isRecognizedMistInvoice(invoice)?major(Math.max(0,mistMoneyMinor(invoice.amount)-state.allocations.filter(a=>a.invoiceId===invoice.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-platformCreditAppliedMinor(state,invoice.id)-mistInvoiceBankChargeMinor(invoice)-mistInvoiceWriteoffMinor(invoice))):0;
   for(const receipt of state.receipts){
     // 退税到账勾稽同样占用流水余额。
-    receipt.remaining=major(Math.max(0,mistMoneyMinor(receipt.amount)-state.allocations.filter(a=>a.receiptId===receipt.id).reduce((s,a)=>s+mistMoneyMinor(a.amount),0)-rebateReceiptUsedMinor(state,receipt.id)-claimRecoveryReceiptUsedMinor(state,receipt.id)));
+    receipt.remaining=major(Math.max(0,mistMoneyMinor(receipt.amount)-state.allocations.filter(a=>a.receiptId===receipt.id).reduce((s,a)=>s+mistAllocationReceiptMinor(a),0)-rebateReceiptUsedMinor(state,receipt.id)-claimRecoveryReceiptUsedMinor(state,receipt.id)));
     if(receipt.remaining===0) receipt.state='matched';else if(receipt.state==='matched')receipt.state=receipt.suggest?'suggested':'unmatched';
   }
   for(const order of state.orders){
@@ -841,6 +858,9 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('order.')||command.type.startsWith('production.'))return 'orders:write';
   if(command.type==='finance.receivable.confirm'||command.type==='finance.receivable.reject')return MIST_FINANCE_SCOPES.invoice;
   if(command.type==='finance.importReceipts'||command.type==='finance.payment.save'||command.type==='finance.payment.reverse'||command.type==='finance.account.save'||command.type==='finance.account.assign'||command.type==='finance.account.close'||command.type==='finance.account.reopen'||command.type.startsWith('finance.fx.'))return command.type==='finance.fx.lock'?'fx:lock':MIST_FINANCE_SCOPES.voucher;
+  if(command.type==='finance.advance.apply')return MIST_FINANCE_SCOPES.reconcile;
+  if(command.type==='finance.receivable.writeoff')return command.payload?.kind==='badDebt'?'invoices:approve:writeoff':MIST_FINANCE_SCOPES.reconcile;
+  if(command.type==='finance.receivable.writeoff.reverse')return 'invoices:approve:writeoff';
   if(command.type==='finance.reconcile'||command.type==='finance.acceptSuggestions'||command.type==='finance.allocation.reverse'||command.type==='finance.receivable.bankCharge'||command.type==='finance.receivable.bankCharge.reverse')return MIST_FINANCE_SCOPES.reconcile;
   if(command.type.startsWith('finance.'))throw new MistCommandError('VALIDATION','未知财务操作');
   if(command.type.startsWith('customer.')||command.type.startsWith('contact.'))return 'relations:write';
@@ -1334,23 +1354,36 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'finance.reconcile':
     case 'finance.acceptSuggestions': {
-      const pairs=command.type==='finance.reconcile'?[{receiptId:p.receiptId,invoiceId:p.invoiceId,amount:p.amount,payerBasis:p.payerBasis}]:strings(p.receiptIds,'到账流水').map(id=>({receiptId:id,invoiceId:state.receipts.find(r=>r.id===id)?.suggest,amount:undefined,payerBasis:undefined}));
+      const many=command.type==='finance.reconcile'&&Array.isArray(p.lines);
+      if(many&&(!p.lines.length||p.lines.length>50))throw new MistCommandError('VALIDATION','一次最多核销 50 张发票');
+      if(many&&new Set(p.lines.map((l:{invoiceId:string})=>l.invoiceId)).size!==p.lines.length)throw new MistCommandError('VALIDATION','同一张发票只能列一次');
+      const pairs=command.type==='finance.reconcile'?(many?p.lines.map((l:{invoiceId:string;amount:number;rate?:string})=>({receiptId:p.receiptId,invoiceId:l.invoiceId,amount:l.amount,rate:l.rate??p.rate,payerBasis:p.payerBasis})):[{receiptId:p.receiptId,invoiceId:p.invoiceId,amount:p.amount,rate:p.rate,payerBasis:p.payerBasis}]):strings(p.receiptIds,'到账流水').map(id=>({receiptId:id,invoiceId:state.receipts.find(r=>r.id===id)?.suggest,amount:undefined,rate:undefined,payerBasis:undefined}));
       let applied=0;
       for(const pair of pairs){
         const r=find(state.receipts,pair.receiptId,'到账流水'),i=state.invoices.find(v=>v.id===pair.invoiceId||v.code===pair.invoiceId);
-        if(command.type==='finance.acceptSuggestions'&&(!i||!isRecognizedMistInvoice(i)||(r.confidence||0)<80||r.remaining<=0||i.open<=0))continue;
+        if(command.type==='finance.acceptSuggestions'&&(!i||!isRecognizedMistInvoice(i)||(r.confidence||0)<80||r.remaining<=0||i.open<=0||i.currency!==r.currency))continue;
         if(!i)throw new MistCommandError('VALIDATION','请选择发票');
         if(!isActiveMistInvoice(i))throw new MistCommandError('PRECONDITION','已作废发票不能核销');
         if(isPendingFinanceMistInvoice(i))throw new MistCommandError('PRECONDITION','应收待财务确认，确认前不能登记收款核销');
-        if(i.currency!==r.currency)throw new MistCommandError('VALIDATION','到账和发票币种不同');
+        // Cross-currency: the agreed conversion turns receipt money into invoice money; the receipt is reduced by its own currency.
+        const cross=i.currency!==r.currency;
+        let rate:string|undefined,rateBasis='';
+        if(cross){
+          const given=typeof pair.rate==='string'?pair.rate.trim():'';rate=given;
+          if(!/^\d{1,6}(\.\d{1,6})?$/.test(given)||!(Number(given)>0))throw new MistCommandError('VALIDATION',`到账为 ${r.currency}、发票为 ${i.currency}，请填写核销汇率（1 ${r.currency} = ? ${i.currency}，最多六位小数）`);
+          rateBasis=text(p.rateBasis,'核销汇率依据（银行水单或客户确认）',true,500);
+        }
         const samePayer=mistPayerMatchesInvoice(state,i,r.payer);
         if(command.type==='finance.acceptSuggestions'&&!samePayer)continue;
         if(!samePayer&&(typeof pair.payerBasis!=='string'||!pair.payerBasis.trim()))throw new MistCommandError('VALIDATION',`到账付款方「${r.payer}」与发票客户「${i.customer||'客户'}」不一致，请填写付款方关系依据（如代付说明、母子公司关系）`);
         const payerBasis=samePayer?(pair.payerBasis?text(pair.payerBasis,'付款方关系依据',true,2000):''):text(pair.payerBasis,'付款方关系依据',true,2000);
-        const amount=pair.amount===undefined?major(Math.min(mistMoneyMinor(r.remaining),mistMoneyMinor(i.open))):positive(pair.amount,'核销金额');
-        const cents=mistMoneyMinor(amount);if(cents<=0||cents>mistMoneyMinor(r.remaining)||cents>mistMoneyMinor(i.open))throw new MistCommandError('VALIDATION','核销金额超出可分配余额');
-        state.allocations.push({id:context.id(),receiptId:r.id,invoiceId:i.id,amount,currency:r.currency,createdAt:context.now,actor:context.actorName,...(payerBasis?{payerBasis}:{})});applied++;recalculate(state);
-        event(state,context,'invoice',i.id,'核销 '+r.code+' → '+i.code,{view:'payment-vouchers',id:i.id});
+        // Receipt side in receipt currency: invoice amount ÷ rate, rounded to cents.
+        const toReceipt=(invoiceMinor:number)=>cross?Math.round(invoiceMinor/Number(rate)):invoiceMinor,toInvoice=(receiptMinor:number)=>cross?Math.floor(receiptMinor*Number(rate)):receiptMinor;
+        const amount=pair.amount===undefined?major(Math.min(toInvoice(mistMoneyMinor(r.remaining)),mistMoneyMinor(i.open))):positive(pair.amount,'核销金额');
+        const cents=mistMoneyMinor(amount),receiptCents=toReceipt(cents);
+        if(cents<=0||cents>mistMoneyMinor(i.open)||receiptCents<=0||receiptCents>mistMoneyMinor(r.remaining))throw new MistCommandError('VALIDATION',`${i.code} 核销金额超出可分配余额`);
+        state.allocations.push({id:context.id(),receiptId:r.id,invoiceId:i.id,amount,currency:i.currency,createdAt:context.now,actor:context.actorName,...(payerBasis?{payerBasis}:{}),...(cross?{receiptAmount:major(receiptCents),receiptCurrency:r.currency,rate,rateBasis}:{})});applied++;recalculate(state);
+        event(state,context,'invoice',i.id,'核销 '+r.code+' → '+i.code+(cross?`（${major(receiptCents)} ${r.currency} @${rate} = ${amount} ${i.currency}）`:''),{view:'payment-vouchers',id:i.id});
       }
       assertOrderFundingIntegrity(state);result={applied};break;
     }
@@ -1382,6 +1415,44 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const reason=text(p.reason,'冲回原因',true,500);charge.reversed={at:context.now,actor:context.actorName,reason};recalculate(state);
       event(state,context,'invoice',i.id,`冲回银行扣费 ${charge.amount} ${charge.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id});
       result={id:charge.id,invoiceId:i.id};break;
+    }
+    case 'finance.advance.apply': {
+      const balance=advanceBalances(state).find(b=>b.assignmentId===text(p.assignmentId,'预收记录'));
+      if(!balance)throw new MistCommandError('NOT_FOUND','没有可冲抵的预收余额',404);
+      if(!balance.orderId)throw new MistCommandError('PRECONDITION','预收只归属到客户，请先归属到准确订单');
+      const receipt=find(state.receipts,balance.receiptId,'到账流水');
+      let left=Math.min(mistMoneyMinor(balance.remaining),mistMoneyMinor(receipt.remaining)),applied=0;
+      const invoices=state.invoices.filter(i=>i.orderId===balance.orderId&&isRecognizedMistInvoice(i)&&i.open>0&&i.currency===receipt.currency).sort((a,b)=>(a.due||'9999').localeCompare(b.due||'9999')||a.code.localeCompare(b.code));
+      if(!invoices.length)throw new MistCommandError('PRECONDITION','该订单没有已确认的同币种未收发票');
+      for(const i of invoices){
+        if(left<=0)break;const take=Math.min(left,mistMoneyMinor(i.open));
+        state.allocations.push({id:context.id(),receiptId:receipt.id,invoiceId:i.id,amount:major(take),currency:i.currency,createdAt:context.now,actor:context.actorName});
+        left-=take;applied++;recalculate(state);
+        event(state,context,'invoice',i.id,`预收冲抵 ${receipt.code} → ${i.code}（${major(take)} ${i.currency}）`,{view:'payment-vouchers',id:i.id});
+      }
+      assertOrderFundingIntegrity(state);result={applied};break;
+    }
+    case 'finance.receivable.writeoff': {
+      // 尾差 (small rounding / unexplained difference) and 坏账 (uncollectible) close an invoice's open balance without cash.
+      const i=find(state.invoices,text(p.invoiceId,'应收'),'应收');
+      if(!isRecognizedMistInvoice(i))throw new MistCommandError('PRECONDITION','仅财务已确认的有效应收可核销');
+      if(p.kind!=='difference'&&p.kind!=='badDebt')throw new MistCommandError('VALIDATION','请选择尾差或坏账');
+      const amount=positive(p.amount,'核销金额'),minor=mistMoneyMinor(amount),reason=text(p.reason,p.kind==='badDebt'?'坏账依据（催收记录、破产或诉讼文件）':'尾差说明',true,1000);
+      if(minor>mistMoneyMinor(i.open))throw new MistCommandError('VALIDATION',`核销 ${amount} 超出发票未收 ${i.open} ${i.currency}`);
+      if(p.kind==='difference'&&mistInvoiceWriteoffMinor({writeoffs:(i.writeoffs||[]).filter(w=>w.kind==='difference')})+minor>mistMoneyMinor(MIST_WRITEOFF_DIFFERENCE_LIMIT))throw new MistCommandError('PRECONDITION',`单张发票尾差累计不超过 ${MIST_WRITEOFF_DIFFERENCE_LIMIT} ${i.currency}；更大的短收请按坏账或索赔处理`);
+      if(p.kind==='badDebt'&&!state.allocations.some(a=>a.invoiceId===i.id)&&!state.crm?.followUps.some(f=>f.link?.kind==='invoice'&&f.link.id===i.id&&f.collection))throw new MistCommandError('PRECONDITION','坏账核销前须有催收记录或已收部分款项');
+      const id=context.id();i.writeoffs=[...(i.writeoffs||[]),{id,kind:p.kind,amount,currency:i.currency,reason,at:context.now,actor:context.actorName,...(context.actorId?{actorId:context.actorId}:{})}];
+      recalculate(state);
+      event(state,context,'invoice',i.id,`${p.kind==='badDebt'?'坏账核销':'尾差核销'} ${amount} ${i.currency}：${reason}`,{view:'invoices',id:i.id});
+      result={id,invoiceId:i.id};break;
+    }
+    case 'finance.receivable.writeoff.reverse': {
+      const i=find(state.invoices,text(p.invoiceId,'应收'),'应收'),w=(i.writeoffs||[]).find(x=>x.id===text(p.writeoffId,'核销记录'));
+      if(!w)throw new MistCommandError('NOT_FOUND','核销记录不存在',404);
+      if(w.reversed)throw new MistCommandError('PRECONDITION','该核销已冲回');
+      const reason=text(p.reason,'冲回原因',true,500);w.reversed={at:context.now,actor:context.actorName,reason};recalculate(state);
+      event(state,context,'invoice',i.id,`冲回${w.kind==='badDebt'?'坏账':'尾差'}核销 ${w.amount} ${w.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id});
+      result={id:w.id,invoiceId:i.id};break;
     }
     case 'finance.allocation.reverse': {
       const a=find(state.allocations,text(p.allocationId,'核销记录'),'核销记录'),reason=text(p.reason,'冲回原因',true,500);

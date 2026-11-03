@@ -1,7 +1,7 @@
 import {claimRecoveryReceiptUsedMinor} from './mistClaimRecoveryReceipts';
 import {rebateReceiptUsedMinor} from './mistExportRebate';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
-import { MistCommandError, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
+import { MistCommandError, mistAllocationReceiptMinor, mistMoneyMinor, type MistState, type MistContext, type MistCommandResult } from './mistWorkspace';
 
 export type OrderFundingAssignment = {
   id:string; receiptId:string; customerId:string; orderId:string|null; amount:number; currency:string;
@@ -32,7 +32,8 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   let development=0;
   for(const allocation of root.allocations.filter(a=>a.receiptId===receipt.id)){
    const invoice=root.invoices.find(i=>i.id===allocation.invoiceId);
-   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {opening?:unknown}).opening)){if(invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistMoneyMinor(allocation.amount);continue;}
+   const crossCurrency=allocation.receiptAmount!==undefined&&allocation.receiptCurrency===receipt.currency;
+   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {opening?:unknown}).opening||crossCurrency)){if(invoice.currency!==allocation.currency||!crossCurrency&&allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistAllocationReceiptMinor(allocation);continue;}
    const order=root.orders.find(o=>o.id===invoice?.orderId);
    if(!invoice||!order||invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');
    orderBucket(order.customerId,order.id).allocated+=mistMoneyMinor(allocation.amount);
@@ -143,4 +144,19 @@ export function applyOrderFundingCommand(root:Root,command:OrderFundingCommand,c
  const next={...root,orderFunding:{assignments}};assertOrderFundingIntegrity(next);root.orderFunding=next.orderFunding;
  root.events.unshift({id:context.id(),entityType:'orderFunding',entityId:row.id,actor:context.actorName,at:context.now,text:row.state==='released'?'释放资金归属：'+row.note:'登记资金归属：'+row.note,fileIds:[]});
  return{id:row.id,orderId:row.orderId??undefined};
+}
+
+/**
+ * Advance (预收) ledger: money earmarked to a customer or order that has not yet been applied to its invoices.
+ * remaining = earmarked − already allocated to that order's invoices from the same receipt. Read-only; applying goes through
+ * finance.reconcile (finance.advance.apply picks the order's oldest open invoices).
+ */
+export type AdvanceBalance = { assignmentId: string; receiptId: string; receiptCode: string; customerId: string; orderId: string | null; currency: string; earmarked: number; applied: number; remaining: number };
+export function advanceBalances(root: Root): AdvanceBalance[] {
+ return active(root).map(row => {
+  const receipt = root.receipts.find(r => r.id === row.receiptId);
+  const applied = row.orderId ? root.allocations.filter(a => a.receiptId === row.receiptId && root.invoices.some(i => i.id === a.invoiceId && i.orderId === row.orderId)).reduce((n, a) => n + mistAllocationReceiptMinor(a), 0) : 0;
+  const earmarked = mistMoneyMinor(row.amount);
+  return { assignmentId: row.id, receiptId: row.receiptId, receiptCode: receipt?.code || '', customerId: row.customerId, orderId: row.orderId, currency: row.currency, earmarked: earmarked / 100, applied: Math.min(applied, earmarked) / 100, remaining: Math.max(0, earmarked - applied) / 100 };
+ }).filter(b => b.remaining > 0);
 }

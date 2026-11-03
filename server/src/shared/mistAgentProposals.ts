@@ -69,7 +69,9 @@ export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.pa
   // 彻底删除邮件与移除邮箱不可撤销（2026-11-03）。
   'email.purge', 'email.account.remove',
   // 按定价试算改写报价单价（2026-11-03）。
-  'platform.pricing.apply']);
+  'platform.pricing.apply',
+  // 坏账 / 尾差核销与预收冲抵改变应收余额（2026-11-03）。
+  'finance.receivable.writeoff', 'finance.advance.apply']);
 /** 审批、决定、驳回、减免、核销、放行、冲销、作废、退款、结清、分配、对账、清除。 */
 export const HIGH_RISK_VERB = /(^|\.)(approve|decide|reject|waive|writeoff|release|reverse|void|refund|settle|allocate|reconcile|purge)/i;
 export const agentCommandRisk = (type: string | undefined): AgentCommandRisk => {

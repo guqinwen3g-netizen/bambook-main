@@ -491,6 +491,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "finance.advance.apply",
+  "payload": "{ assignmentId: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
   "type": "finance.allocation.reverse",
   "payload": "{ allocationId: string; reason: string }",
   "source": "server/src/shared/mistWorkspace.ts"
@@ -551,8 +556,18 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "finance.receivable.writeoff",
+  "payload": "{ invoiceId: string; kind: 'difference' | 'badDebt'; amount: number; reason: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "finance.receivable.writeoff.reverse",
+  "payload": "{ invoiceId: string; writeoffId: string; reason: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
   "type": "finance.reconcile",
-  "payload": "{ receiptId: string; invoiceId: string; amount?: number; payerBasis?:string }",
+  "payload": "{ receiptId: string; invoiceId?: string; amount?: number; payerBasis?:string; rate?: string; rateBasis?: string; lines?: Array<{ invoiceId: string; amount: number; rate?: string }> }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
@@ -1095,6 +1110,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistLetterOfCredit.ts"
  },
  {
+  "type": "lc.discrepancy.action",
+  "payload": "{ id: string; presentationId: string; kind: 'waiverRequested' | 'corrected' | 'collection'; date: string; note: string }",
+  "source": "server/src/shared/mistLetterOfCredit.ts"
+ },
+ {
   "type": "lc.files",
   "payload": "{ id: string; fileIds: string[] }",
   "source": "server/src/shared/mistLetterOfCredit.ts"
@@ -1110,6 +1130,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "LcPresentationResult": "'pending' | 'complying' | 'discrepant' | 'honoured' | 'refused'"
   },
+  "source": "server/src/shared/mistLetterOfCredit.ts"
+ },
+ {
+  "type": "lc.receipt.link",
+  "payload": "{ id: string; presentationId: string; receiptId: string }",
   "source": "server/src/shared/mistLetterOfCredit.ts"
  },
  {

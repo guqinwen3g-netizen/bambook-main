@@ -1,3 +1,4 @@
+import { isRecognizedMistInvoice } from '../../../../server/src/shared/mistWorkspace';
 import {isInternalDeliveryTask} from '../../../../server/src/shared/mistInternalDelivery';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
@@ -78,7 +79,7 @@ export function HomePage() {
     title: task.title, meta: [emailTasks.has(task.id) ? '邮件跟进' : task.kind === 'development' ? '开发事项' : task.kind === 'supervision' ? `主管督办${(task as { nudge?: { by: string } }).nudge?.by ? ' · ' + (task as { nudge?: { by: string } }).nudge!.by : ''}` : '工作事项', state?.devs.find(dev=>dev.id===task.target.id)?.code||state?.orders.find(order=>order.id===task.target.id)?.code, task.target.versionId ? state?.versions.find(v => v.id === task.target.versionId)?.label : undefined].filter(Boolean).join(' · '),
     status: { tone: task.due && task.due < today ? 'warn' : 'accent', label: task.due && task.due < today ? '已逾期' : '待处理' } as TaskItem['status'] }))];
   const outstanding = new Map<string, number>();
-  state?.invoices.forEach(invoice => { if (invoice.open > 0) outstanding.set(invoice.currency, (outstanding.get(invoice.currency) ?? 0) + invoice.open); });
+  state?.invoices.forEach(invoice => { if (isRecognizedMistInvoice(invoice) && invoice.open > 0) outstanding.set(invoice.currency, (outstanding.get(invoice.currency) ?? 0) + invoice.open); });
   const currencies = [...outstanding.entries()].sort(([a], [b]) => a.localeCompare(b));
   const preferredCurrency=state?.settings.companyProfile?.defaultCurrency;
   const mainCurrency = currencies.find(([currency]) => currency===preferredCurrency) ?? currencies.find(([currency]) => currency === 'USD') ?? currencies[0];
@@ -109,7 +110,7 @@ export function HomePage() {
         {!hiddenStats.development&&<StatCard icon={Layers} label={uiText("在途开发案")} value={state ? activeDevs.length : '—'} unit={uiText('个')} onClick={() => setStatView('development')} />}
         {!hiddenStats.qc&&<StatCard icon={BadgeCheck} label={uiText("待 QC 评审")} value={state ? qcTasks.length+qcVersions.length : '—'} unit={uiText('项')} onClick={() => setStatView('qc')} />}
         {!hiddenStats.shipping&&<StatCard icon={Ship} label={uiText("本周出运")} value={state ? weekShipments.length : '—'} unit={uiText('票')} onClick={() => setStatView('shipping')} />}
-        {!hiddenStats.invoices&&<StatCard icon={Wallet} label={uiText("应收待核销")} value={state ? money(mainCurrency?.[1] ?? 0) : '—'} unit={uiText(mainCurrency?.[0] ?? '')} foot={currencies.length > 1 ? currencies.filter(([currency]) => currency !== mainCurrency?.[0]).map(([currency, value]) => `${currency} ${money(value)}`).join(' · ') : (state ? `${state.invoices.filter(item => item.open > 0).length} 张未结发票` : '等待公司业务数据')} onClick={() => setStatView('invoices')} />}
+        {!hiddenStats.invoices&&<StatCard icon={Wallet} label={uiText("应收待核销")} value={state ? money(mainCurrency?.[1] ?? 0) : '—'} unit={uiText(mainCurrency?.[0] ?? '')} foot={currencies.length > 1 ? currencies.filter(([currency]) => currency !== mainCurrency?.[0]).map(([currency, value]) => `${currency} ${money(value)}`).join(' · ') : (state ? `${state.invoices.filter(item => isRecognizedMistInvoice(item) && item.open > 0).length} 张未结发票` : '等待公司业务数据')} onClick={() => setStatView('invoices')} />}
       </StatGrid>}
 
       <section className="mist-grid">

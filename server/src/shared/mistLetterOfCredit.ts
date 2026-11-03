@@ -18,7 +18,11 @@ export const LC_AMEND_LABEL: Record<LcAmendField, string> = { amount: '金额', 
 export type MistLcAmendment = { no: number; date: string; changes: LcAmendChange[]; note: string; at: string; actor: string };
 export type MistLcPresentation = {
   id: string; no: number; shipmentId: string; shipmentCode: string; shipmentDate: string; presentedAt: string; deadline: string; amount: number; documents: string;
-  autoDiscrepancies: string[]; discrepancies: string; result: LcPresentationResult; resultAt?: string; resultNote?: string; honouredAmount?: number; history: Array<{ at: string; actor: string; result: LcPresentationResult; date: string; note: string }>;
+  autoDiscrepancies: string[]; discrepancies: string; result: LcPresentationResult;
+  /** After a discrepancy notice: applicant waiver, corrected documents re-presented, or switched to documentary collection. */
+  discrepancyAction?: { kind: 'waiverRequested' | 'corrected' | 'collection'; at: string; actor: string; note: string; date: string };
+  /** Bank receipt(s) that carry the honoured proceeds. */
+  receiptIds?: string[]; resultAt?: string; resultNote?: string; honouredAmount?: number; history: Array<{ at: string; actor: string; result: LcPresentationResult; date: string; note: string }>;
   createdAt: string; actor: string;
 };
 export type MistLetterOfCredit = {
@@ -34,7 +38,9 @@ export type LcCommand =
   | { type: 'lc.present'; payload: { id: string; shipmentId: string; shipmentDate: string; presentedAt: string; amount: string | number; documents: string; discrepancies?: string } }
   | { type: 'lc.presentation.result'; payload: { id: string; presentationId: string; result: Exclude<LcPresentationResult, 'pending'>; date: string; note?: string; discrepancies?: string; honouredAmount?: string | number } }
   | { type: 'lc.cancel'; payload: { id: string; date: string; reason: string } }
-  | { type: 'lc.files'; payload: { id: string; fileIds: string[] } };
+  | { type: 'lc.files'; payload: { id: string; fileIds: string[] } }
+  | { type: 'lc.discrepancy.action'; payload: { id: string; presentationId: string; kind: 'waiverRequested' | 'corrected' | 'collection'; date: string; note: string } }
+  | { type: 'lc.receipt.link'; payload: { id: string; presentationId: string; receiptId: string } };
 type Root = MistState & { letterOfCredits?: MistLetterOfCredit[] };
 
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message, code === 'NOT_FOUND' ? 404 : code === 'CONFLICT' ? 409 : 422); };
@@ -85,7 +91,7 @@ export function lcAutoDiscrepancies(lc: MistLetterOfCredit, shipmentDate: string
   return out;
 }
 
-export function lcCommandPermission(_command: LcCommand) { return 'customs:write'; }
+export function lcCommandPermission(command: LcCommand) { return command.type === 'lc.receipt.link' ? 'invoices:reconcile' : 'customs:write'; }
 
 function orderSet(root: Root, raw: unknown, currency: string) {
   if (!Array.isArray(raw) || !raw.length) fail('请选择信用证对应的订单');
@@ -178,6 +184,29 @@ export function applyLcCommand(root: Root, command: LcCommand, c: MistContext): 
       }
       row.result = result; row.resultAt = date; row.resultNote = note; row.history.push({ at: c.now, actor: c.actorName, result, date, note });
       event(root, c, lc, `信用证 ${lc.lcNo} 第 ${row.no} 次交单：${LC_RESULT_LABEL[result]}${result === 'honoured' ? ` ${fmt(row.honouredAmount!)} ${lc.currency}` : ''}${note ? `（${note}）` : ''}`);
+      return { id: lc.id, presentationId: row.id };
+    }
+    case 'lc.discrepancy.action': {
+      // UCP 600 art. 16: on a discrepancy notice the beneficiary may ask the applicant to waive, re-present corrected documents
+      // within expiry, or let the documents go forward as a collection outside the credit.
+      const lc = find(root, p.id), row = lc.presentations.find(x => x.id === p.presentationId) || fail('交单记录不存在', 'NOT_FOUND');
+      if (row.result !== 'discrepant') fail('只有存在不符点的交单可以登记后续处理', 'PRECONDITION');
+      const kind = p.kind as 'waiverRequested' | 'corrected' | 'collection'; if (!['waiverRequested', 'corrected', 'collection'].includes(kind)) fail('处理方式无效');
+      const date = day(p.date, '处理日'); if (date > today) fail('处理日不能晚于今天');
+      if (kind === 'corrected' && date > lc.expiryDate) fail('信用证已过有效期，不能重新交单');
+      row.discrepancyAction = { kind, date, at: c.now, actor: c.actorName, note: text(p.note, '处理说明', true, 2000) };
+      row.history.push({ at: c.now, actor: c.actorName, result: row.result, date, note: `${{ waiverRequested: '请申请人接受不符点', corrected: '更正单据重新交单', collection: '改为托收' }[kind]}：${row.discrepancyAction.note}` });
+      event(root, c, lc, `信用证 ${lc.lcNo} 第 ${row.no} 次交单不符点：${{ waiverRequested: '已请申请人接受', corrected: '已更正单据重新交单', collection: '改为托收' }[kind]}`);
+      return { id: lc.id, presentationId: row.id };
+    }
+    case 'lc.receipt.link': {
+      const lc = find(root, p.id), row = lc.presentations.find(x => x.id === p.presentationId) || fail('交单记录不存在', 'NOT_FOUND');
+      if (row.result !== 'honoured') fail('承付后才能关联到账', 'PRECONDITION');
+      const receipt = root.receipts.find(r => r.id === p.receiptId) || fail('到账流水不存在', 'NOT_FOUND');
+      if (receipt.currency !== lc.currency) fail('到账币种与信用证不同');
+      if ((row.receiptIds || []).includes(receipt.id)) return { id: lc.id, presentationId: row.id };
+      row.receiptIds = [...(row.receiptIds || []), receipt.id];
+      event(root, c, lc, `信用证 ${lc.lcNo} 第 ${row.no} 次交单关联到账 ${receipt.code}（${fmt(receipt.amount)} ${receipt.currency}）`);
       return { id: lc.id, presentationId: row.id };
     }
     case 'lc.files': {

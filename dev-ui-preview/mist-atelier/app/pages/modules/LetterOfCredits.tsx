@@ -99,7 +99,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
     { key: 'status', header: '状态', width: 'minmax(130px,1.2fr)', render: lc => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATUS_TONE[lcStatus(lc, day)]}>{LC_STATUS_LABEL[lcStatus(lc, day)]}</Pill>{lcAlerts(lc, day).map(a => <small key={a} className="mist-tone-bad">{uiText(a)}</small>)}</div> },
   ];
   const detail = selected && state ? <LcDetail lc={selected} state={state} day={day} can={can} locked={locked} run={run} onShipment={onShipment}
-      onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} presentable={presentable(selected).length} />
+      onAmend={() => open(amendSpec(selected))} onPresent={() => open(presentSpec(selected))} onResult={p => open(resultSpec(selected, p))} onCancel={() => open(cancelSpec(selected))} onAction={p => open({ title: `第 ${p.no} 次交单 · 不符点处理`, submitLabel: '登记', fields: [field('kind', '处理方式', 'select', true, [{ value: 'waiverRequested', label: '请申请人接受不符点' }, { value: 'corrected', label: '更正单据重新交单' }, { value: 'collection', label: '改为托收' }]), field('date', '处理日', 'date'), field('note', '处理说明', 'textarea')], initialValues: { kind: p.discrepancyAction?.kind || 'waiverRequested', date: day, note: '' }, submit: v => run({ type: 'lc.discrepancy.action', payload: { id: selected.id, presentationId: p.id, kind: text(v, 'kind') as 'waiverRequested' | 'corrected' | 'collection', date: text(v, 'date'), note: text(v, 'note') } }) })} onLink={p => open({ title: `第 ${p.no} 次交单 · 关联到账`, submitLabel: '关联', fields: [field('receiptId', '到账流水', 'select', true, [emptyOption, ...(state?.receipts || []).filter(r => r.currency === selected.currency && !(p.receiptIds || []).includes(r.id)).map(r => ({ value: r.id, label: `${r.code} · ${r.payer} · ${r.amount} ${r.currency} · ${r.date}` }))])], initialValues: { receiptId: '' }, submit: v => run({ type: 'lc.receipt.link', payload: { id: selected.id, presentationId: p.id, receiptId: text(v, 'receiptId') } }) })} presentable={presentable(selected).length} />
     : <EmptyState icon={Landmark} title={uiText("选择信用证")} compact />;
   const partials = (state?.partialLettersOfCredit ?? []).filter(lc => lc.orderIds.some(id => state?.orders.some(order => order.id === id && order.type === domain)) && (!needle || `${lc.code} ${lc.lcNo} ${lc.customer}`.toLowerCase().includes(needle)));
   const covered = (o: MistOrder) => [...all, ...partials].filter(lc => !lc.cancelled && lc.orderIds.includes(o.id));
@@ -132,9 +132,9 @@ function ExportedOrders({ orders, covered, onOrder }: { orders: MistOrder[]; cov
   </Card></div>;
 }
 
-function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, onAmend, onPresent, onResult, onCancel }: {
+function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, onAmend, onPresent, onResult, onCancel, onAction, onLink }: {
   lc: MistLetterOfCredit; state: MistState; day: string; can: boolean; locked: boolean; run: (command: MistCommand) => Promise<unknown>; presentable: number;
-  onShipment: (id: string) => void; onAmend: () => void; onPresent: () => void; onResult: (p: MistLcPresentation) => void; onCancel: () => void;
+  onShipment: (id: string) => void; onAmend: () => void; onPresent: () => void; onResult: (p: MistLcPresentation) => void; onCancel: () => void; onAction: (p: MistLcPresentation) => void; onLink: (p: MistLcPresentation) => void;
 }) {
   const status = lcStatus(lc, day), alerts = lcAlerts(lc, day), available = lcAvailableMinor(lc) / 100, cancelled = !!lc.cancelled;
   const openPresentations = lc.presentations.some(p => !final(p));
@@ -168,7 +168,12 @@ function LcDetail({ lc, state, day, can, locked, run, presentable, onShipment, o
         { key: 'no', header: '交单', render: p => <div className="mist-col" style={{ gap: 2 }}><TextLink onClick={() => onShipment(p.shipmentId)}>{uiText("第 ")}{p.no}{uiText(" 次 · ")}{p.shipmentCode}</TextLink><small className="mist-muted">{uiText("装运 ")}{p.shipmentDate}{uiText(" · 交单 ")}{p.presentedAt}{uiText("（截止 ")}{p.deadline}）</small></div> },
         { key: 'amount', header: '金额', align: 'right', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-end' }}><span>{money(p.amount, lc.currency)}</span>{p.honouredAmount !== undefined && <small className="mist-muted">{uiText("承付 ")}{money(p.honouredAmount, lc.currency)}</small>}</div> },
         { key: 'result', header: '结果', render: p => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={RESULT_TONE[p.result]}>{LC_RESULT_LABEL[p.result]}</Pill>{p.autoDiscrepancies.map(d => <small key={d} className="mist-tone-bad">{d}</small>)}{p.discrepancies && <small className="mist-muted">{uiText("不符点：")}{p.discrepancies}</small>}{p.resultNote && <small className="mist-muted">{p.resultNote}</small>}</div> },
-        ...(can ? [{ key: 'act', header: '', align: 'right' as const, render: (p: MistLcPresentation) => final(p) ? null : <Button size="sm" icon={Stamp} disabled={locked} aria-label={ui`登记第 ${p.no} 次交单审单结果`} onClick={() => onResult(p)}>{uiText("审单结果")}</Button> }] : []),
+        ...(can ? [{ key: 'act', header: '', align: 'right' as const, render: (p: MistLcPresentation) => <span className="mist-row" style={{ justifyContent: 'flex-end' }}>
+          {!final(p) && <Button size="sm" icon={Stamp} disabled={locked} aria-label={ui`登记第 ${p.no} 次交单审单结果`} onClick={() => onResult(p)}>{uiText("审单结果")}</Button>}
+          {p.result === 'discrepant' && <Button size="sm" disabled={locked} onClick={() => onAction(p)}>{uiText(p.discrepancyAction ? '更新处理' : '不符点处理')}</Button>}
+          {p.result === 'honoured' && <Button size="sm" disabled={locked} onClick={() => onLink(p)}>{uiText('关联到账')}</Button>}
+        </span> }] : []),
+        { key: 'follow', header: '后续', hideOnMobile: true, render: (p: MistLcPresentation) => p.discrepancyAction ? <small>{uiText({ waiverRequested: '已请申请人接受', corrected: '已更正重交', collection: '改为托收' }[p.discrepancyAction.kind])} · {p.discrepancyAction.date}</small> : p.receiptIds?.length ? <small>{p.receiptIds.map(id => state.receipts.find(r => r.id === id)?.code || id).join('、')}</small> : null },
       ]} /> : <span className="mist-note">{uiText("尚未交单")}</span>}
     </DetailBlock>
     <DetailBlock title={ui`修改记录 · ${lc.amendments.length}`}>
