@@ -8,6 +8,7 @@ import { usePrivateImageResource } from '../../runtime/usePrivateImage';
 import { useNav } from '../../nav';
 import { businessDate } from '../../runtime/businessClock';
 import { PRODUCT_SPEC_FIELDS, type MarketProduct, type MarketQuotation, type MarketState } from '../../../../../server/src/shared/mistMarket';
+import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 
 export const PRODUCT_CATEGORY_LABEL: Record<MarketProduct['category'], string> = { fabric: '面料', garment: '成衣', trimming: '辅料' };
 
@@ -84,6 +85,7 @@ export function ProductProfile({ product }: { product: MarketProduct }) {
       <CardHeader title={uiText("客户编码表")} tools={canWrite ? <Button size="sm" onClick={() => setEditing(true)}>{uiText("编辑")}</Button> : undefined} />
       {product.customerCodes?.length ? <KeyValue items={product.customerCodes.map(c => ({ label: w.state?.customers.find(x => x.id === c.customerId)?.name || '客户已不存在', value: c.code, mono: true }))} /> : <EmptyState compact title={uiText("未登记客户编码")} description={uiText("客户使用自有编码下单时，在这里登记对照。")} />}
     </section>
+    <ProductSources product={product} canWrite={canWrite} />
     <section className="mist-product-section" aria-label={uiText("来源链")}>
       <CardHeader title={uiText("来源链")} />
       {product.sourceVersionId ? <ol className="mist-product-chain">
@@ -132,3 +134,34 @@ function CustomerCodeDialog({ product, onClose }: { product: MarketProduct; onCl
     </div>
   </Dialog>;
 }
+
+/** mar56：一个档案可有多家供应工厂，各自登记报价、MOQ 与交期；价格变动留历史，采购与询价成交价另在各自记录中。 */
+function ProductSources({ product, canWrite }: { product: MarketProduct; canWrite: boolean }) {
+  const w = useMistWorkspace(), { go } = useNav();
+  const market = (w.state as (typeof w.state & { market?: MarketState }) | null)?.market;
+  const [editing, setEditing] = React.useState<ModuleEditorSpec | null>(null);
+  const name = (id: string) => market?.suppliers.find(s => s.id === id)?.name || '供应商已不存在';
+  const sources = product.sources || [];
+  const purchases = (w.state?.fulfillment.purchases || []).filter(p => p.state === 'approved' && (sources.some(s => s.supplierId === p.supplierId) || p.supplierId === product.supplierId) && product.sku && p.description.toLowerCase().includes(product.sku.toLowerCase()));
+  const spec = (src?: NonNullable<MarketProduct['sources']>[number]): ModuleEditorSpec => ({ title: src ? `更新 ${name(src.supplierId)} 报价` : '添加供应来源', submitLabel: '保存',
+    initialValues: { supplierId: src?.supplierId || '', supplierCode: src?.supplierCode || '', price: src?.price || '', currency: src?.currency || product.currency, moq: src?.moq || '', leadDays: src?.leadDays || '', note: '' },
+    fields: [{ key: 'supplierId', label: '供应商', type: 'select', required: true, readonly: !!src, options: [{ value: '', label: '请选择' }, ...(market?.suppliers || []).filter(s => s.status === 'active' || s.id === src?.supplierId).filter(s => !!src || !sources.some(x => x.supplierId === s.id)).map(s => ({ value: s.id, label: s.name }))] },
+      { key: 'supplierCode', label: '供应商编码' }, { key: 'price', label: `报价（每${product.unit}）`, type: 'number', required: true, min: 0 }, { key: 'currency', label: '币种', required: true },
+      { key: 'moq', label: `MOQ（${product.unit}）`, type: 'number', min: 0 }, { key: 'leadDays', label: '交期（天）', type: 'number', min: 0, step: 1 }, { key: 'note', label: '说明', type: 'textarea' }],
+    submit: v => w.run({ type: 'market.product.source.save', payload: { productId: product.id, supplierId: String(v.supplierId ?? ''), supplierCode: String(v.supplierCode ?? ''), price: String(v.price ?? ''), currency: String(v.currency ?? ''), moq: String(v.moq ?? ''), leadDays: Number(v.leadDays) || 0, note: String(v.note ?? '') } }) });
+  const removeSpec = (src: NonNullable<MarketProduct['sources']>[number]): ModuleEditorSpec => ({ title: `移除 ${name(src.supplierId)}`, submitLabel: '移除', submitVariant: 'danger', initialValues: { reason: '' }, fields: [{ key: 'reason', label: '移除原因', type: 'textarea', required: true }],
+    submit: v => w.run({ type: 'market.product.source.remove', payload: { productId: product.id, supplierId: src.supplierId, reason: String(v.reason ?? '') } }) });
+  return <section className="mist-product-section" aria-label={uiText('供应来源')}>
+    <CardHeader title={uiText('供应来源')} tools={canWrite ? <Button size="sm" icon={Plus} onClick={() => setEditing(spec())}>{uiText('添加')}</Button> : undefined} />
+    {sources.length ? <DataTable ariaLabel={uiText('供应来源')} rows={sources} rowKey={r => r.supplierId} density="compact" columns={[
+      { key: 'supplier', header: '供应商', width: 'minmax(140px,1fr)', render: r => <span>{name(r.supplierId)}{r.supplierCode ? <small className="mist-cell-sub">{r.supplierCode}</small> : null}</span> },
+      { key: 'price', header: '报价', width: '120px', align: 'right', render: r => <span className="mist-num">{r.currency} {r.price}</span> },
+      { key: 'terms', header: 'MOQ / 交期', width: '120px', render: r => [r.moq && `${r.moq} ${uiText(product.unit)}`, r.leadDays ? `${r.leadDays} 天` : ''].filter(Boolean).join(' · ') || '—' },
+      { key: 'act', header: '', width: '140px', render: r => canWrite ? <span className="mist-row"><Button size="sm" variant="quiet" onClick={() => setEditing(spec(r))}>{uiText('更新报价')}</Button><Button size="sm" variant="quiet" onClick={() => setEditing(removeSpec(r))}>{uiText('移除')}</Button></span> : null },
+    ]} /> : <EmptyState compact title={uiText('未登记其他供应来源')} />}
+    {!!product.priceHistory?.length && <KeyValue items={product.priceHistory.slice().reverse().slice(0, 8).map(h => ({ label: `${businessDate(h.at)} · ${name(h.supplierId)}`, value: h.from ? `${h.from} → ${h.to}` : h.to }))} />}
+    {!!purchases.length && <div className="mist-row" style={{ flexWrap: 'wrap', gap: 6 }}>{purchases.slice(0, 6).map(p => <Button key={p.id} size="sm" variant="quiet" onClick={() => go('procurement', p.id)}>{p.code} · {p.supplier} · {p.price} {p.currency}</Button>)}</div>}
+    <ModuleEditorDialog spec={editing} onClose={() => setEditing(null)} />
+  </section>;
+}
+

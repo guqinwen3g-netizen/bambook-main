@@ -23,7 +23,9 @@ function quoteLineImage(root: MistState, m: { products: Array<{ id: string; sour
  const devId = line.sourceDevId || m.products.find(p => p.id === line.productId)?.sourceDevId;
  return (devId && root.devs.find(d => d.id === devId)?.img) || mistPlaceholderImage(type);
 }
-export type MarketProduct = RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string };
+export type MarketProduct = RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; /** mar56：同一档案的其他可供工厂与各自报价；价格变动留历史。 */ sources?:ProductSource[]; priceHistory?:ProductPriceChange[] };
+export type ProductSource={supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string};
+export type ProductPriceChange={supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string};
 /** 数字档案按板块的结构化规格；面料不预设“件”，单位以实际计价单位为准。 */
 export const PRODUCT_SPEC_FIELDS:Record<MarketProduct['category'],Array<{key:string;label:string;unit?:string}>>={
  fabric:[{key:'weight',label:'克重',unit:'g/m²'},{key:'width',label:'门幅',unit:'cm'},{key:'weave',label:'组织'},{key:'yarn',label:'纱支 / 原料'},{key:'finish',label:'后整理'}],
@@ -64,6 +66,8 @@ export type MarketCommand =
  | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']}
  | {type:'market.showLead.transition';payload:Extract<MarketCommand,{type:'market.lead.transition'}>['payload']}
  | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}}
+ | {type:'market.product.source.save';payload:{productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}}
+ | {type:'market.product.source.remove';payload:{productId:string;supplierId:string;reason:string}}
  | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}}
  | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}}
  | {type:'market.supplier.save';payload:{id?:string;input:Pick<MarketSupplier,'name'|'type'>&Partial<Omit<Input<MarketSupplier>,'name'|'type'|'contacts'|'blockReason'|'statusFrom'|'statusHistory'|'certificates'|'ratings'|'handlers'>>&{/** 各业务组经手人账号 ID；省略的组保持不变，空字符串表示清除。 */handlerIds?:Partial<Record<MistBusinessGroup,string>>}}}
@@ -325,7 +329,19 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const specs=productSpecs(row.category,input.specs===undefined?(old?.category===row.category?old?.specs:undefined):input.specs);if(Object.keys(specs).length)row.specs=specs;
    if(input.customerCodes!==undefined){if(!Array.isArray(input.customerCodes)||input.customerCodes.length>50)fail('客户编码表格式无效');const seen=new Set<string>();const codes:Array<{customerId:string;code:string}>=[];for(const c of input.customerCodes as unknown[]){const r=c as {customerId?:unknown;code?:unknown};if(!r||typeof r.customerId!=='string'||!root.customers.some(x=>x.id===r.customerId))fail('客户编码引用的客户不存在');if(seen.has(r.customerId as string))fail('同一客户只能登记一个客户编码');seen.add(r.customerId as string);codes.push({customerId:r.customerId as string,code:str(r.code,'客户编码',true,80)});}if(codes.length)row.customerCodes=codes;}else if(old?.customerCodes)row.customerCodes=old.customerCodes.map(c=>({...c}));
    const refPrice=input.refPrice===undefined?(old?.refPrice||''):String(input.refPrice).trim();if(refPrice)row.refPrice=decimal(refPrice,'参考价').text;
+   if(old?.sources)row.sources=old.sources.map(x=>({...x}));if(old?.priceHistory)row.priceHistory=old.priceHistory.map(x=>({...x}));
    put(m.products,row,old);result={id:row.id};break;}
+  case 'market.product.source.save':{const i=command.payload,p=find(m.products,i.productId,'数字档案');if(p.status==='archived')fail('归档产品须先恢复再编辑');
+   const supplierId=supplierRef(m,str(i.supplierId,'供应商'),ctx.now);const price=decimal(i.price,'报价').text;if(!(Number(price)>0))fail('报价须大于零');const cur=currency(i.currency);
+   const moq=i.moq===undefined||i.moq===''?'':decimal(i.moq,'MOQ').text;const lead=i.leadDays===undefined?0:Number(i.leadDays);if(!Number.isInteger(lead)||lead<0||lead>365)fail('交期天数无效');
+   const list=p.sources||[],old=list.find(x=>x.supplierId===supplierId);
+   const row:ProductSource={supplierId,supplierCode:str(i.supplierCode||'','供应商编码',false,80),price,currency:cur,moq,leadDays:lead,note:str(i.note||'','备注',false,500),updatedAt:ctx.now,updatedBy:ctx.actorName};
+   if(old&&(old.price!==price||old.currency!==cur))p.priceHistory=[...(p.priceHistory||[]),{supplierId,from:`${old.price} ${old.currency}`,to:`${price} ${cur}`,currency:cur,at:ctx.now,actor:ctx.actorName,note:row.note}];
+   if(!old)p.priceHistory=[...(p.priceHistory||[]),{supplierId,from:'',to:`${price} ${cur}`,currency:cur,at:ctx.now,actor:ctx.actorName,note:row.note}];
+   p.sources=old?list.map(x=>x===old?row:x):[...list,row];p.updatedAt=ctx.now;
+   const sup=find(m.suppliers,supplierId,'供应商');history(root,ctx,'product',p.id,`${old?'更新':'登记'}供应来源 ${sup.name}：${price} ${cur}/${p.unit}${moq?` · MOQ ${moq}`:''}${lead?` · ${lead} 天`:''}`);result={id:p.id};break;}
+  case 'market.product.source.remove':{const i=command.payload,p=find(m.products,i.productId,'数字档案');const old=(p.sources||[]).find(x=>x.supplierId===i.supplierId)||fail('该供应来源不存在');const reason=str(i.reason,'移除原因');
+   p.sources=(p.sources||[]).filter(x=>x!==old);p.updatedAt=ctx.now;history(root,ctx,'product',p.id,`移除供应来源 ${find(m.suppliers,old!.supplierId,'供应商').name}：${reason}`);result={id:p.id};break;}
   case 'market.product.fromVersion':{const {devId,versionId}=command.payload;validateSource(root,devId,versionId,true);const previous=m.products.find(x=>x.sourceVersionId===versionId);if(previous)return {id:previous.id,devId,versionId};const d=find(root.devs,devId,'开发案'),v=find(root.versions,versionId,'版本');
    const isFabric=developmentDomain(d.values)==='fabric',fr=v.fabricRequirements||d.values.fabricRequirements,known=(x:string|undefined)=>x&&x!=='待工厂分析'?x:'';
    const specs:Record<string,string>=isFabric?{weight:fr&&(!fr.weightUnit||fr.weightUnit==='g/m²')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.weightValue)?fr.weightValue:'',width:fr&&(!fr.widthUnit||fr.widthUnit==='cm')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.widthValue)?fr.widthValue:'',weave:known(fr?.weave),yarn:known(fr?.yarn),finish:known(fr?.finish)}:{style:d.values.style||'',garmentCategory:d.values.category||'',sizeRange:v.size||'',mainFabric:v.fabric||''};
