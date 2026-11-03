@@ -18,7 +18,7 @@ export function QcDispositionPanel({ task, state, canDispose, locked }: { task: 
   const latest = state.fulfillment.qcReports.find(report => report.id === task.reportIds.at(-1));
   const production = task.source.kind === 'orderLine' ? state.productions.find(job => job.id === (task.source as { productionId?: string }).productionId) : undefined;
   const contract = state.fulfillment.purchases.find(p => p.id === production?.sourcePurchaseId);
-  const open = task.kind === 'production' && task.state === 'blocked' && latest?.result === 'reject';
+  const open = (task.kind === 'production' || task.kind === 'patrol') && task.state === 'blocked' && latest?.result === 'reject';
   const chosen = current && current.status !== 'rejected' && current.kind !== 'chargeback';
   const [form, setForm] = React.useState<null | { kind: QcDispositionKind; note: string; factory: string; due: string; scope: string; customerEvidence: string; amount: string; fileIds: string[] }>(null);
   const [error, setError] = React.useState(''), [busy, setBusy] = React.useState(false);

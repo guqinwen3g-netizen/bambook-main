@@ -64,6 +64,13 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 工厂扣款不直接生成应付：`payable.settlement.submit` 自动把 `openQcChargebacks` 追加为 `disputes`（带 `qcDispositionId`），结算撤回或退回后会重新出现在下一次结算。已最终结算的合同拒绝新扣款。
 - Agent 风险：`fulfillment.qc.dispose` 登记为高风险，`concession.decide` 按动词规则为高风险。
 
+## 当前 Mist QC 抽样、来料检验与巡检（P1-4 第三块）
+
+- `server/src/shared/mistQcInspection.ts`：成衣 AQL（ISO 2859-1 / GB/T 2828.1 一般水平 II、正常一次抽样，严重与轻微缺陷各自 AQL，致命零容忍）；面料四分制（ASTM D5430，分/100 平方码，逐卷与整批）及色差、缩率、色牢度。`fulfillment.qc.report` 可选带 `aql` / `fabricInspection`，服务端算判定并存 `outcome`；抽样拒收时结论不能报通过（`assertConclusionMatches`）。抽样记录可选，旧报告不受影响。
+- 来料检验：物料采购 `iqcRequired=true` 时，入我方仓库的批次全部锁定（`available:0`、`locked`），自动建 `kind:'incoming'` 任务；QC 报告后由有库存写权限的人 `fulfillment.qc.incoming.close`：通过则解锁可用，不通过则转为该次收货的拒收数量（`receipt.rejected`、`purchase.received` 回减），再走原退换流程。默认不开启，现有采购不变。
+- 巡检：`fulfillment.qc.patrol`（`qc:inspect`）由 QC 在已放行生产分支上自建 `kind:'patrol'` 任务并自动认领；巡检不替代正式生产检验，但不通过同样暂停该分支，并可走不合格处置。
+- Agent 风险：`fulfillment.qc.incoming.close` 高风险。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

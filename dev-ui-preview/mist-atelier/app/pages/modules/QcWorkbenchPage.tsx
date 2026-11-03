@@ -17,6 +17,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { ProductionSampleNotes } from '../ProductionSampleNotes';
 import { QcDispositionPanel } from './QcDispositionPanel';
+import { AqlCard, FabricInspectionCard, aqlFromDraft, emptyAql, emptyFabric, fabricFromDraft, type AqlDraft, type FabricDraft } from './QcSampling';
 
 type Domain = FulfillmentQcTask['domain'];
 type Kind = FulfillmentQcTask['kind'];
@@ -29,7 +30,7 @@ const QC_STATE_TONE: Record<QcState, Tone> = { pending: 'warn', working: 'neutra
 const RESULT_LABEL: Record<MistQc['result'], string> = { pass: '通过', conditional: '有保留通过', reject: '不通过' };
 const RESULT_TONE: Record<MistQc['result'], Tone> = { pass: 'ok', conditional: 'warn', reject: 'bad' };
 const DOMAIN_LABEL: Record<Domain, string> = { fabric: '面料QC', garment: '成衣QC' };
-const KIND_LABEL: Record<Kind, string> = { sample: '样品评审', production: '生产检验', quarantine: '退料复检' };
+const KIND_LABEL: Record<Kind, string> = { sample: '样品评审', production: '生产检验', quarantine: '退料复检', incoming: '来料检验', patrol: '巡检' };
 const isNok = (task: FulfillmentQcTask) => task.state === 'blocked' || task.state === 'awaiting_business';
 const isOpen = (task: FulfillmentQcTask, state?: MistState) => task.state !== 'reported' && (!state || !fulfillmentQcSourceBlocker(state, task.source));
 const isOverdue = (task: FulfillmentQcTask, day: string) => (task.state === 'pending' || task.state === 'working') && !!task.due && task.due < day;
@@ -55,6 +56,8 @@ function qcGate(task: FulfillmentQcTask): { tone: Tone; title: string; text: str
     case 'awaiting_business': return { tone: 'warn', title: '待业务恢复', text: '' };
     case 'reported':
       if (task.kind === 'quarantine') return { tone: 'ok', title: task.quarantine?.disposedAt ? '已处置' : '报告已回传', text: '' };
+      if (task.kind === 'incoming') return { tone: task.incoming?.releasedAt ? 'ok' : 'accent', title: task.incoming?.releasedAt ? '已放行入库' : '待仓库放行', text: '' };
+      if (task.kind === 'patrol') return { tone: 'ok', title: '报告已回传', text: '' };
       if (task.kind === 'production') return { tone: 'ok', title: task.businessContinued ? '已恢复' : '报告已回传', text: '' };
       if (task.source.kind === 'version') return { tone: 'ok', title: '报告已回传', text: '' };
       if (task.businessContinued) return { tone: 'ok', title: '业务已继续', text: '' };
@@ -82,6 +85,7 @@ function groupTasks(tasks: FulfillmentQcTask[], state?: MistState): TaskGroup[] 
 
 function taskSubject(state: MistState, task: FulfillmentQcTask) {
   if (task.kind === 'quarantine' && task.quarantine) return `${task.quarantine.name} · ${task.quarantine.quantity} ${task.quarantine.unit}`;
+  if (task.kind === 'incoming' && task.incoming) return `${task.incoming.name} · ${task.incoming.quantity} ${task.incoming.unit}`;
   const sample = state.fulfillment.samples.find(item => item.id === task.sampleId);
   if (sample) return [sample.code, sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样', sample.color, sample.size].filter(Boolean).join(' · ');
   if (task.source.kind === 'version') return '开发返样';
@@ -102,7 +106,7 @@ export function QcWorkbenchPage() {
     if (task) { setSelected(task.id); setDomain(task.domain); setKind(task.kind); return; }
     if (route.id) return;
     setSelected('');
-    if (route.section === 'sample' || route.section === 'production' || route.section === 'quarantine') setKind(route.section);
+    if (route.section === 'sample' || route.section === 'production' || route.section === 'quarantine' || route.section === 'incoming' || route.section === 'patrol') setKind(route.section);
     if (route.versionId) { const dev = state?.devs.find(d => d.id === state.versions.find(v => v.id === route.versionId)?.devId); if (dev) setDomain(developmentDomain(dev.values)); }
     else if (route.orderLineId) { const orderId = state?.orderLines.find(l => l.id === route.orderLineId)?.orderId; const order = state?.orders.find(o => o.id === orderId); if (order) setDomain(order.type); }
   }, [route.id, route.section, route.versionId, route.orderLineId, route.productionId, state?.fulfillment.qcTasks]);
@@ -114,6 +118,7 @@ export function QcWorkbenchPage() {
   const current = all.find(t => t.id === selected);
   const canQc = (d: Domain) => session.hasPermission(`qc:${d}_chain:write`);
   const canRequest = session.hasPermission('orders:write') || session.hasPermission('products:write');
+  const canPatrol = session.hasPermission('qc:inspect') && canQc(domain);
   const locked = busy || saving || !!pending;
   const reportTask = all.find(t => t.id === reportTaskId);
   if (reportTask) return <QcReportEditor task={reportTask} onClose={() => setReportTaskId('')} />;
@@ -146,6 +151,10 @@ export function QcWorkbenchPage() {
   const confirmSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: '记录需求方样品确认', submitLabel: '记录确认', fields: [field('result', '需求方决定', 'select', true, [emptyOption, { value: 'approved', label: '确认采用' }, { value: 'rejected', label: '不采用' }]), field('note', '需求方确认依据', 'textarea')], initialValues: { result: '', note: '' }, submit: values => run({ type: 'fulfillment.qc.confirm', payload: { id: task.id, result: text(values, 'result') as 'approved' | 'rejected', note: text(values, 'note') } }) });
   const transferSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `转交 ${task.code}`, submitLabel: '转交', fields: [field('assigneeId', '接收QC', 'select', true, [emptyOption, ...memberSelectOptions(workspaceMembers(workspace, state, session.user)).filter(option => option.value !== task.assigneeId)]), field('reason', '转交原因', 'textarea')], initialValues: { assigneeId: '', reason: '' }, submit: values => run({ type: 'fulfillment.qc.transfer', payload: { id: task.id, domain: task.domain, assigneeId: text(values, 'assigneeId'), reason: text(values, 'reason') } }) });
   const rescheduleSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: `改期 ${task.code}`, submitLabel: '改期', description: task.due ? `原检查日 ${task.due}` : undefined, fields: [field('due', '新检查日', 'date'), field('reason', '改期原因', 'textarea')], initialValues: { due: task.due && task.due >= today() ? task.due : today(), reason: '' }, submit: values => run({ type: 'fulfillment.qc.reschedule', payload: { id: task.id, domain: task.domain, due: text(values, 'due'), reason: text(values, 'reason') } }) });
+  const releaseSpec = (task: FulfillmentQcTask): ModuleEditorSpec => { const rejected = state?.fulfillment.qcReports.find(r => r.id === task.reportIds.at(-1))?.result === 'reject'; return { title: rejected ? '登记来料拒收' : '放行入库', submitLabel: rejected ? '登记拒收' : '放行', fields: [field('evidence', rejected ? '拒收依据' : '放行依据', 'textarea')], initialValues: { evidence: '' }, submit: values => run({ type: 'fulfillment.qc.incoming.close', payload: { id: task.id, evidence: text(values, 'evidence') } }) }; };
+  // QC opens its own patrol / final inspection on a released branch of this business line.
+  const patrolSpec = (): ModuleEditorSpec => ({ title: '新建巡检', submitLabel: '新建巡检', fields: [field('productionId', '生产分支', 'select', true, [emptyOption, ...(state?.productions || []).filter(job => !job.closed && state?.orders.find(o => o.id === job.orderId)?.type === domain && state.fulfillment.productionFacts?.some(fact => fact.productionId === job.id && fact.release)).map(job => ({ value: job.id, label: `${job.code} · ${job.factory}` }))]), field('purpose', '巡检目的', 'select', true, [emptyOption, ...['中期巡检', '尾期检验', '复查整改', '首件确认'].map(value => ({ value, label: value }))]), field('location', '检查地点'), field('contact', '现场联系人', 'text', false), field('due', '预计检查日', 'date')], initialValues: { productionId: '', purpose: '', location: '', contact: '', due: today() },
+    submit: async values => { const saved = await run({ type: 'fulfillment.qc.patrol', payload: { productionId: text(values, 'productionId'), purpose: text(values, 'purpose'), location: text(values, 'location'), contact: text(values, 'contact'), due: text(values, 'due') } }); setKind('patrol'); setSelected(String(saved.result.id || '')); } });
   const continueSpec = (task: FulfillmentQcTask): ModuleEditorSpec => ({ title: task.kind === 'production' ? '确认继续生产' : '业务确认继续', submitLabel: task.kind === 'production' ? '确认继续生产' : '确认继续', fields: [field('note', '业务处理与恢复依据', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.qc.continue', payload: { id: task.id, note: text(values, 'note') } }) });
 
   const metrics = { fabric: qcDomainMetrics(all, 'fabric', state || undefined), garment: qcDomainMetrics(all, 'garment', state || undefined) };
@@ -192,6 +201,8 @@ export function QcWorkbenchPage() {
         onContinue={() => setDialog(continueSpec(current))}
         onTransfer={() => setDialog(transferSpec(current))}
         onReschedule={() => setDialog(rescheduleSpec(current))}
+        canRelease={session.hasPermission('inventory:write')}
+        onRelease={() => setDialog(releaseSpec(current))}
         onBack={sourceSample ? () => go('samples', sourceSample.id, sourceSample.role === 'shipping' && sourceSample.shipmentId ? { section: 'shipment:' + sourceSample.shipmentId, productionId: sourceSample.source.kind === 'orderLine' ? sourceSample.source.productionId : undefined } : sourceSample.source.kind === 'orderLine' ? {productionId:sourceSample.source.productionId} : {}) : undefined}
         backLabel={sourceSample?.role === 'shipping' ? '返回本票船样' : '返回实物样品'} />
     : <EmptyState icon={ClipboardCheck} title={uiText("任务详情")} compact />;
@@ -214,6 +225,7 @@ export function QcWorkbenchPage() {
     <PageHeader eyebrow={uiText("订单履约 · 专业检验")} title={uiText("QC 工作台")}
       actions={<>
         <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>{uiText("刷新")}</Button>
+        {canPatrol && <Button icon={Plus} onClick={() => setDialog(patrolSpec())}>{uiText('新建巡检')}</Button>}
         {canRequest ? <Button variant="primary" icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
       </>} />
     {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("QC操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
@@ -227,7 +239,7 @@ export function QcWorkbenchPage() {
         </span>
       </CardButton>; })}
     </div>
-    <Tabs<Kind> value={kind} onChange={changeKind} options={[{ value: 'sample', label: '样品评审', count: all.filter(t => t.domain === domain && t.kind === 'sample').length }, { value: 'production', label: '生产检验', count: all.filter(t => t.domain === domain && t.kind === 'production').length }, { value: 'quarantine', label: '退料复检', count: all.filter(t => t.domain === domain && t.kind === 'quarantine').length }]} />
+    <Tabs<Kind> value={kind} onChange={changeKind} options={[{ value: 'sample', label: '样品评审', count: all.filter(t => t.domain === domain && t.kind === 'sample').length }, { value: 'production', label: '生产检验', count: all.filter(t => t.domain === domain && t.kind === 'production').length }, { value: 'quarantine', label: '退料复检', count: all.filter(t => t.domain === domain && t.kind === 'quarantine').length }, { value: 'incoming', label: '来料检验', count: all.filter(t => t.domain === domain && t.kind === 'incoming').length }, { value: 'patrol', label: '巡检', count: all.filter(t => t.domain === domain && t.kind === 'patrol').length }]} />
     <Toolbar right={<Segmented ariaLabel={uiText("视图")} value={mode} onChange={value => setMode(value as 'groups' | 'board')} options={[{ value: 'groups', icon: List, ariaLabel: '按工厂分组' }, { value: 'board', icon: Columns3, ariaLabel: '看板视图' }]} />}>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索任务号、来源、工厂或检查地点")} />
       <Dropdown<Owner> label={uiText("负责人")} value={owner} onChange={setOwner} options={[{ value: 'all', label: '全部负责人' }, { value: 'mine', label: '我认领的' }, { value: 'unclaimed', label: '待认领' }]} />
@@ -245,8 +257,8 @@ export function QcWorkbenchPage() {
   </MistPage>;
 }
 
-function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, onReport, onConfirm, onContinue, onTransfer, onReschedule, onBack, backLabel }: {
-  task: FulfillmentQcTask; state: MistState; me: string; canQc: boolean; canBusiness: boolean; locked: boolean;
+function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked, onClaim, onReport, onConfirm, onContinue, onTransfer, onReschedule, onRelease, onBack, backLabel }: {
+  task: FulfillmentQcTask; state: MistState; me: string; canQc: boolean; canBusiness: boolean; canRelease?: boolean; locked: boolean; onRelease?: () => void;
   onClaim: () => void; onReport: () => void; onConfirm: () => void; onContinue: () => void; onTransfer: () => void; onReschedule: () => void; onBack?: () => void; backLabel: string;
 }) {
   const reports = state.fulfillment.qcReports.filter(report => report.taskId === task.id).slice().reverse();
@@ -305,6 +317,10 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         { label: task.kind === 'production' ? '确认继续生产' : '业务确认继续', onClick: onContinue, reason: canBusiness ? false : '由业务员确认恢复', hidden: !continuable, primary: true },
       ]} />
     </DetailBlock>}
+    {task.kind === 'incoming' && task.incoming && <DetailBlock title={uiText('来料放行')}>
+      <Facts items={[{ label: '待检批次', value: `${task.incoming.name} · ${task.incoming.quantity} ${task.incoming.unit}` }, { label: '状态', value: task.incoming.releasedAt ? (task.incoming.rejectedQuantity ? `已拒收 ${task.incoming.rejectedQuantity} ${task.incoming.unit}` : '已放行入库') : '待检锁定' }]} />
+      {canRelease && !task.incoming.releasedAt && <ActionBar busy={locked} actions={[{ label: reports[0]?.result === 'reject' ? '登记来料拒收' : '放行入库', onClick: onRelease!, primary: true, reason: !reports.length || !['reported', 'blocked'].includes(task.state) ? '请先完成来料检验报告' : false }]} />}
+    </DetailBlock>}
     <QcDispositionPanel task={task} state={state} canDispose={canBusiness && (!ownerId || ownerId === me)} locked={locked} />
     <DetailBlock title={uiText(task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`)}>
       {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("暂无报告")}</span>}
@@ -319,6 +335,8 @@ function QcReportCard({ report, domain, production, latest }: { report: Fulfillm
     {report.location && <div className="mist-row"><span>{uiText("检查地点")}</span><span>{report.location}</span></div>}
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
     {(production||!!report.sizeChecks?.length) && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}
+    {report.aql && <Facts cols={2} items={[{ label: 'AQL 抽样', value: `批量 ${report.aql.lotSize} · 抽检 ${report.aql.inspected} 件（应抽 ${report.aql.outcome.sampleSize}）` }, { label: '缺陷', value: `致命 ${report.aql.critical} · 严重 ${report.aql.major}（Ac ${report.aql.outcome.major.accept}）· 轻微 ${report.aql.minor}（Ac ${report.aql.outcome.minor.accept}）` }, { label: '抽样判定', value: report.aql.outcome.result === 'pass' ? '允收' : '拒收' }, ...(report.aql.defects ? [{ label: '缺陷内容', value: report.aql.defects }] : [])]} />}
+    {report.fabricInspection && <Facts cols={2} items={[{ label: '四分制', value: `${report.fabricInspection.rolls.length} 卷 · ${report.fabricInspection.outcome.totalYards} 码 · ${report.fabricInspection.outcome.pointsPer100} 分/100 平方码（允收 ${report.fabricInspection.limit}）` }, { label: '验布判定', value: report.fabricInspection.outcome.result === 'pass' ? '允收' : `拒收${report.fabricInspection.outcome.rejectedRolls.length ? ' · 超分卷 ' + report.fabricInspection.outcome.rejectedRolls.join('、') : ''}` }, ...Object.entries({ 色差: report.fabricInspection.lab.shade, 经向缩率: report.fabricInspection.lab.shrinkageWarp !== undefined ? report.fabricInspection.lab.shrinkageWarp + '%' : undefined, 纬向缩率: report.fabricInspection.lab.shrinkageWeft !== undefined ? report.fabricInspection.lab.shrinkageWeft + '%' : undefined, 色牢度: report.fabricInspection.lab.colourfastness }).filter(([, v]) => v !== undefined).map(([label, v]) => ({ label, value: String(v) }))]} />}
     {report.measurements.length > 0 && <MeasurementTable rows={report.measurements} unit={domain === 'fabric' ? '' : 'cm'} />}
     <RecordFiles key={report.id} ids={report.fileIds} />
   </div>;
@@ -331,6 +349,10 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   const { state, run, uploadFile, pending, saving } = useMistWorkspace();
   const [location, setLocation] = React.useState(task.location);
   const [result, setResult] = React.useState<MistQc['result'] | ''>(''), [report, setReport] = React.useState(''), [opinion, setOpinion] = React.useState(''), [at, setAt] = React.useState(localNow());
+  const sampling = task.kind === 'production' || task.kind === 'patrol' || task.kind === 'incoming';
+  const productionQty = task.source.kind === 'orderLine' ? state?.productions.find(job => job.id === (task.source as { productionId?: string }).productionId)?.qty : undefined;
+  const [aql, setAql] = React.useState<AqlDraft>(() => emptyAql(task.incoming?.quantity || productionQty || 0)), [fabricCheck, setFabricCheck] = React.useState<FabricDraft>(emptyFabric);
+  const useAql = sampling && task.domain === 'garment', useFabric = sampling && task.domain === 'fabric';
   const [measurements, setMeasurements] = React.useState<Measurement[]>([]), [ids, setIds] = React.useState<string[]>([]), [failure, setFailure] = useRouteDraft(''), [busy, setBusy] = React.useState(false), [confirming, setConfirming] = React.useState(false);
   const fact = state?.fulfillment.productionFacts?.find(item => task.source.kind === 'orderLine' && item.productionId === task.source.productionId);
   const sampleConcerns = task.kind === 'production' ? fact?.release?.sampleChecks?.filter(sample => sample.result === 'conditional') || [] : [];
@@ -361,7 +383,8 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
     if (!result) return;
     setBusy(true); setFailure('');
     try {
-      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: new Date(at).toISOString(), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })) } });
+      const aqlInput = useAql ? aqlFromDraft(aql) : null, fabricInput = useFabric ? fabricFromDraft(fabricCheck) : null;
+      await run({ type: 'fulfillment.qc.report', payload: { id: task.id, domain: task.domain, result, report, opinion, location, reviewedAt: new Date(at).toISOString(), measurements, fileIds: ids, sizeChecks: sizeChecks.filter(check => check.result).map(check => ({ ...check, result: check.result as 'pass' | 'reject' })), ...(aqlInput ? { aql: aqlInput } : {}), ...(fabricInput ? { fabricInspection: fabricInput } : {}) } });
       onClose();
     } catch (e) { setFailure(e instanceof Error ? e.message : '报告未保存'); setConfirming(false); }
     finally { setBusy(false); }
@@ -385,6 +408,8 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
             <Field label={uiText("专业意见与影响范围")} full required><TextArea aria-label={uiText("专业意见与影响范围")} value={opinion} onChange={e => setOpinion(e.target.value)} /></Field>
           </FormGrid></CardBody>
         </Card>
+        {useAql && <AqlCard value={aql} onChange={setAql} />}
+        {useFabric && <FabricInspectionCard value={fabricCheck} onChange={setFabricCheck} />}
         {garmentProduction && sizeChecks.length > 0 && <Card>
           <CardHeader title={uiText("本次实际尺码检查")} />
           <CardBody><div className="mist-col">{sizeChecks.map((check, index) => <FormGrid key={check.size}>

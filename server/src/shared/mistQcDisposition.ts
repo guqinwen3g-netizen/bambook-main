@@ -71,7 +71,7 @@ export function applyQcDispositionCommand(root: MistState, command: QcDispositio
   }
   const p = command.payload, task = f.qcTasks.find(t => t.id === p.id);
   if (!task) return fail('QC任务不存在', 'NOT_FOUND');
-  if (task.kind !== 'production' || task.source.kind !== 'orderLine') return fail('只有生产检验不通过后才能选择处置方式');
+  if ((task.kind !== 'production' && task.kind !== 'patrol') || task.source.kind !== 'orderLine') return fail('只有生产检验或巡检不通过后才能选择处置方式');
   const source = task.source;
   assertMistOrderOpen(root, source.orderId);
   const report = f.qcReports.find(r => r.id === task.reportIds.at(-1));

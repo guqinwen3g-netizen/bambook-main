@@ -168,9 +168,11 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     const open = qcRole && task.state === 'pending', working = qcRole && task.state === 'working' && !!me && task.assigneeId === me;
     const sampleBack = business && task.kind === 'sample' && task.state === 'reported' && !sampleBusinessFinished(state, task)
       && (task.source.kind !== 'version' || canRead('development'));
-    const productionBack = business && task.kind === 'production' && (task.state === 'awaiting_business' || task.state === 'blocked');
-    if (!open && !working && !sampleBack && !productionBack) continue;
-    const what = open ? '待认领' : working ? '检验中' : task.kind === 'sample' ? task.source.kind === 'orderLine' && task.businessConfirmation?.result === 'approved' ? '待业务确认' : '待需求方确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
+    const productionBack = business && (task.kind === 'production' || task.kind === 'patrol') && (task.state === 'awaiting_business' || task.state === 'blocked');
+    // A reported incoming lot waits for the warehouse to release or reject it.
+    const incomingBack = can('inventory:write') && task.kind === 'incoming' && !!task.incoming && !task.incoming.releasedAt && (task.state === 'reported' || task.state === 'blocked');
+    if (!open && !working && !sampleBack && !productionBack && !incomingBack) continue;
+    const what = open ? '待认领' : working ? '检验中' : incomingBack ? (task.state === 'blocked' ? '来料不合格，待登记拒收' : '来料待放行入库') : task.kind === 'sample' ? task.source.kind === 'orderLine' && task.businessConfirmation?.result === 'approved' ? '待业务确认' : '待需求方确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
     push({ id: 'qc:' + task.id, source: 'qc', title: `${task.code} · ${uiText(what)}`, meta: [task.factory, task.requestedBy && uiText('发起人') + ' ' + task.requestedBy].filter(Boolean).join(' · '),
       when: task.state === 'blocked' ? '已阻断' : open ? '待认领' : working ? '处理中' : '待确认', urgent: task.state === 'blocked' || (!!task.due && task.due <= today), at: task.due || task.createdAt, due: task.due || undefined,
       target: sampleBack && task.source.kind === 'version' ? { view: 'development/detail', id: task.source.devId, versionId: task.source.versionId } : { view: 'qc-workbench', id: task.id } });

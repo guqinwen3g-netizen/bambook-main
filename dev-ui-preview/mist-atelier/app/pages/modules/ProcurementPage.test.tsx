@@ -378,6 +378,9 @@ it('asks for the weight per metre only on greige bought by kilogram, and the los
   act(()=>{unit.value='公斤';unit.dispatchEvent(new Event('change',{bubbles:true}));});
   expect(getByRole(host,'spinbutton',{name:'每米重量（公斤/米）'})).toBeTruthy();
   expect(queryByRole(host,'spinbutton',{name:'约定加工损耗（%）'})).toBeNull();
+  typeInto(getByRole(host,'spinbutton',{name:'每米重量（公斤/米）'}) as HTMLInputElement,'0.72');
+  await click(getByRole(host,'button',{name:'下一步',exact:true}));
+  expect(host.textContent).toContain('入库前来料检验');
 });
 it('lets greige go to an intermediate dyeing contract and the dyed fabric on to the finishing contract',async()=>{
   const f=fabricStagedFixture({intermediateDyeing:true}),finishing=f.contract('processing',3600,'米',{lossPercent:3},'finisher');
