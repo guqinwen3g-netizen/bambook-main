@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** QC 工作台：先选面料 / 成衣专业板块，再分样品评审 / 生产检验；任务按工厂与检查地点分组，详情承接报告、门禁与业务恢复。 */
 import React from 'react';
 import { CalendarClock, ChevronDown, ChevronRight, ClipboardCheck, Columns3, Layers, List, Plus, RefreshCw, Repeat2, SearchX, Shirt, UserRoundCheck } from 'lucide-react';
-import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, type Tone } from '../../../../../components/mist';
+import { FormFooter, BackLink, Banner, Button, Card, CardBody, CardButton, CardHeader, DataTable, Dialog, Dropdown, EmptyState, Facts, Field, FormGrid, Icon, Kanban, MeasurementTable, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, Tabs, TextArea, TextInput, Tile, Toolbar, UploadZone, useToast, type Tone } from '../../../../../components/mist';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import type { MistQc, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCommand, FulfillmentQcReport, FulfillmentQcTask } from '../../../../../server/src/shared/mistFulfillment';
@@ -89,7 +89,7 @@ function taskSubject(state: MistState, task: FulfillmentQcTask) {
 }
 
 export function QcWorkbenchPage() {
-  const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor();
+  const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { route, go } = useNav(), editor = useEditor(), toast = useToast();
   const [domain, setDomain] = React.useState<Domain>(() => session.hasPermission('qc:fabric_chain:write') && !session.hasPermission('qc:garment_chain:write') ? 'fabric' : 'garment'), [kind, setKind] = React.useState<Kind>('sample');
   const [query, setQuery] = React.useState(''), [stateFilter, setStateFilter] = React.useState<StateFilter>('all'), [owner, setOwner] = React.useState<Owner>('all'), [mode, setMode] = React.useState<'groups' | 'board'>('groups');
   const [selected, setSelected] = useRouteDraft(route.id || ''), [reportTaskId, setReportTaskId] = useRouteDraft(''), [failure, setFailure] = useRouteDraft('');
@@ -121,7 +121,7 @@ export function QcWorkbenchPage() {
   const pick = (task: FulfillmentQcTask) => { setSelected(task.id); setDrawer(true); go('qc-workbench', task.id, { section: task.kind }, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomain(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: kind }); };
   const changeKind = (value: Kind) => { setKind(value); setSelected(''); setStateFilter('all'); go('qc-workbench', undefined, { section: value }); };
-  const act = async (command: FulfillmentCommand) => { setFailure(''); setBusy(true); try { await run(command); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };
+  const act = async (command: FulfillmentCommand, done?: string) => { setFailure(''); setBusy(true); try { await run(command); if (done) toast(done); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); } };
   const qcSources = [emptyOption, ...(state?.fulfillment.samples || []).filter(sample => sample.source.kind !== 'manual').map(sample => ({ value: 'sample:' + sample.id, label: `${sample.code} · ${sample.name} · ${sample.role ? fulfillmentSampleRoleLabel(sample.role) : '开发样'} · ${sample.size}` })), ...sourceOptions(state).filter(option => option.value.startsWith('version:') || option.value.startsWith('production:'))];
   const request = () => editor.open({
     title: '从准确来源发起QC', submitLabel: '发起QC',
@@ -185,7 +185,7 @@ export function QcWorkbenchPage() {
 
   const detail = current && state
     ? <QcTaskDetail task={current} state={state} me={session.user?.id || ''} canQc={canQc(current.domain)} canBusiness={session.hasPermission('orders:write')} locked={locked}
-        onClaim={() => void act({ type: 'fulfillment.qc.claim', payload: { id: current.id, domain: current.domain } })}
+        onClaim={() => void act({ type: 'fulfillment.qc.claim', payload: { id: current.id, domain: current.domain } }, `已认领 ${current.code}`)}
         onReport={() => setReportTaskId(current.id)}
         onConfirm={() => setDialog(confirmSpec(current))}
         onContinue={() => setDialog(continueSpec(current))}
@@ -213,7 +213,7 @@ export function QcWorkbenchPage() {
     <PageHeader eyebrow={uiText("订单履约 · 专业检验")} title={uiText("QC 工作台")}
       actions={<>
         <Button icon={RefreshCw} disabled={loading} onClick={() => void refresh()}>{uiText("刷新")}</Button>
-        <Button variant="primary" icon={Plus} disabled={!canRequest} title={uiText(canRequest ? undefined : '送检由业务员在准确来源发起')} onClick={request}>{uiText("从来源发起QC")}</Button>
+        {canRequest ? <Button variant="primary" icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
       </>} />
     {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("QC操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
     <div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")}>

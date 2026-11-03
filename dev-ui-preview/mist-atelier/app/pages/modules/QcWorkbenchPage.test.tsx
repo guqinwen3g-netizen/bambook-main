@@ -42,11 +42,13 @@ it('opens the correct QC domain when arriving from an explicitly typed developme
 });
 afterEach(()=>{act(()=>root.unmount());host.remove();});
 
-it('shows the precise returned quantity in an independent quarantine inspection',()=>{
+it('shows the precise returned quantity in an independent quarantine inspection',async()=>{
   store.state!.orders.push({id:'o',code:'SO-F',type:'fabric'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'布',style:'F',unit:'米',qty:20} as any);
   store.state!.fulfillment.qcTasks.push(task('held',{domain:'fabric',kind:'quarantine',quarantine:{returnId:'return',stockId:'stock',quantity:4,unit:'米',name:'布'},source:{kind:'orderLine',orderId:'o',lineId:'l'}}));
   render('held');expect(host.textContent).toContain('退料复检');expect(host.textContent).toContain('布 · 4 米');
   expect(getByRole(host,'button',{name:'认领任务'})).toBeTruthy();
+  await click(getByRole(host,'button',{name:'认领任务'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.claim',payload:{id:'held',domain:'fabric'}});expect(document.body.textContent).toContain('已认领 ');
 });
 
 it.each(['resample','abandon','confirmed','archived'] as const)('locks the %s source, retaining history without counting it as open QC work',disposition=>{
@@ -225,7 +227,7 @@ it('keeps business resume available to business users and absent for QC-only acc
   expect(queryByRole(host,'button',{name:'确认继续生产'})).toBeNull();
   expect(host.textContent).not.toContain('由业务员确认恢复');
   render('resume','list');
-  expect((getByRole(host,'button',{name:'从来源发起QC'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(queryByRole(host,'button',{name:'从来源发起QC'})).toBeNull();expect(host.textContent).toContain('送检由业务员在准确来源发起');
   expect(queryByRole(document.body,'dialog')).toBeNull();
 });
 

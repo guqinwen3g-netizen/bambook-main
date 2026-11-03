@@ -78,7 +78,7 @@ export function DevRoundsCard({ state, dev, versionId, busy, onSelect, onCreate,
       {view.round && <p className="mist-sub" style={{ fontSize: 13, margin: '6px 0', whiteSpace: 'pre-wrap' }}>{view.round.requirements}</p>}
       {view.round && onEditRequirements && <div className="mist-row" style={{ margin: '0 0 6px' }}><Button size="sm" variant="quiet" icon={Pencil} disabled={busy || !!editBlocker} title={uiText(editBlocker || undefined)} onClick={() => onEditRequirements(view.round!)}>{uiText("修改共同要求")}</Button>{editBlocker && <span className="mist-note">{editBlocker}</span>}</div>}
       <div className="mist-rtl-row" role="list" aria-label={ui`第 ${view.number} 轮版本`}>{view.versions.map(version => {
-        const status = versionTimelineStatus(version), current = versionId === version.id;
+        const status = versionTimelineStatus(version, state), current = versionId === version.id;
         return <div key={version.id} role="listitem" className="mist-rtl-card" data-version={version.label} aria-current={current || undefined}>
           <button type="button" className="mist-rtl-open" aria-pressed={current} disabled={busy} onClick={() => onSelect(version.id)}>
             <Mono>{uiText(version.label)}</Mono><span className="mist-rtl-factory" title={uiText(version.stages ? devStageChainText(version.stages) : version.factory)}>{version.stages ? version.stages.map(stage => stage.factory).join(' → ') : version.factory || '待安排工厂'}</span>

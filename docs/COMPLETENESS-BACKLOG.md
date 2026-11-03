@@ -316,6 +316,8 @@
 
 ### P1-4 QC 闭环
 
+> 进度（2026-11-03，第一块）：`sup30` 已补（返样自动生成待认领任务、开发页录入写入同一任务、状态「待 QC 认领」）；`sup39`（无权限时显示可见说明）、`sup40`（认领成功提示）已补。`sup31` 中 Mist 运行入口内已是单一任务源，旧数据库层 `developmentSampleQualityService` 未接入 Mist，不再作为运行路径，未删除。其余 `sup32–37`、`sup14` 未做。
+
 - `sup30` **QC**（断链·中）开发案返样后显示“QC 中”，但 QC 工作台没有对应任务。核实结论：不是设计如此的完整闭环，而是缺自动建任务。返样只同步样品台账，不建 QC 任务；开发版本的 QC 结论在开发详情页直接录入，绕过工作台  
   建议：返样登记时自动生成“待认领”样品评审任务，开发页的录入改为跳转到该任务；状态改为“待 QC 认领”  
   证据：SH/mistDevelopmentCompare.ts:34（未录 QC 即显示 'QC 中'）；SH/mistWorkspace.ts:958-959（recordSample 只调用 samples.sync）；SH/mistWorkspace.ts:986-987（recordQc 直接写 version.qc，不建任务）；FE/DevDetailPage.tsx:109、:252
