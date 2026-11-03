@@ -209,7 +209,7 @@ it('records rejected goods returned to the supplier per receipt and shows replac
   await click(getByRole(detail,'button',{name:'登记退货 / 换货'}));
   const dialog=getByRole(document.body,'dialog');
   expect((getByRole(dialog,'spinbutton',{name:'退回数量（个）'}) as HTMLInputElement).value).toBe('6');
-  typeInto(getByRole(dialog,'textbox',{name:'退货单 / 供应商确认依据'}) as HTMLTextAreaElement,'退货单 RT-9');
+  typeInto(getByRole(dialog,'textbox',{name:'供应商确认依据'}) as HTMLTextAreaElement,'退货单 RT-9');
   await click(getByRole(dialog,'button',{name:'登记退换'}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.procurement.return',payload:expect.objectContaining({receiptId:'r1',quantity:6,disposition:'replace',evidence:'退货单 RT-9'})}));
 });
