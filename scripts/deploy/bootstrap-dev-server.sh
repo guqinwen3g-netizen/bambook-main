@@ -68,6 +68,7 @@ ensure_env BAMBOOK_PUBLIC_BASE_URL "$public_origin"
 ensure_env BAMBOOK_UPLOAD_DIR "$root/shared/uploads"
 ensure_env BAMBOOK_PRIVATE_FILES_DIR "$root/shared/private-files"
 ensure_env SYSTEM_CONFIG_ENCRYPTION_KEY "$(openssl rand -hex 32)"
+ensure_env BAMBOOK_MARKET_DIR "$root/shared/market"
 ensure_env BAMBOOK_COOKIE_SECRET "$(openssl rand -hex 32)"
 ensure_env BAMBOOK_CODEX_SUBSCRIPTION 1
 ensure_env BAMBOOK_IMAGE_CUTOUT_QUEUE "$root/shared/cutout-queue"

@@ -93,7 +93,8 @@ export async function fetchMarketSnapshot(now: Date, fetchImpl: typeof fetch = f
   return { fetchedAt: now.toISOString(), fx, materials, missing };
 }
 
-export function createMarketStore(dir = process.env.BAMBOOK_MARKET_DIR?.trim() || path.resolve(__dirname, '../../private/market')) {
+/** Kept beside the platform AI settings so a release swap never discards history. */
+export function createMarketStore(dir = process.env.BAMBOOK_MARKET_DIR?.trim() || (process.env.BAMBOOK_AI_SUBSCRIPTION_DIR?.trim() ? path.join(path.dirname(process.env.BAMBOOK_AI_SUBSCRIPTION_DIR.trim()), 'market') : path.resolve(__dirname, '../../private/market'))) {
   const file = path.join(dir, 'market-quotes.json');
   const read = (): MarketStoreFile => { try { const d = JSON.parse(fs.readFileSync(file, 'utf8')); if (d?.version === 1 && Array.isArray(d.snapshots)) return d; } catch { /* none yet */ } return { version: 1, snapshots: [] }; };
   return {
