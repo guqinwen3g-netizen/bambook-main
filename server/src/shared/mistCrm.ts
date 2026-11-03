@@ -100,7 +100,9 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       }
       const id = context.id(); let nextTaskId = '';
       const inv = link?.kind === 'invoice' ? root.invoices.find(i => i.id === link!.id) : undefined;
-      if (nextDate) { nextTaskId = context.id(); root.tasks.unshift({ id: nextTaskId, title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, due: nextDate, done: false, kind: 'crm-follow-up', target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id }, assigneeIds: context.actorId ? [context.actorId] : [] }); }
+      if (nextDate) { nextTaskId = context.id(); root.tasks.unshift({ id: nextTaskId, title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, due: nextDate, done: false, kind: 'crm-follow-up', target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id }, assigneeIds: context.actorId ? [context.actorId] : [] });
+        // mar62：与邮件跟进一致，下次跟进同时写入日历（本人日程）。
+        root.calendar.push({ id: context.id(), title: root.tasks[0].title, date: nextDate, time: '09:00', note: content.slice(0, 200), target: root.tasks[0].target, ...(context.actorId ? { ownerId: context.actorId, owner: context.actorName } : {}) }); }
       root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, createdAt: context.now, ...(collection ? { collection } : {}) });
       const what = collection && inv ? `${CRM_COLLECTION_LEVEL_LABEL[collection.level]} ${inv.code}${collection.promisedDate ? `，客户承诺 ${collection.promisedDate} 付 ${collection.promisedAmount} ${collection.currency}` : ''}` : '';
       log(root, context, c.id, `记录${CRM_METHOD_LABEL[p.method]}${what ? '催收：' + what : '跟进'}${nextDate ? `，下次跟进 ${nextDate}` : ''}`, { kind: 'followUp', id });

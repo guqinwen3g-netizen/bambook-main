@@ -297,13 +297,14 @@ export type MistTarget = { view: string; id?: string; section?: string; versionI
  * 工作事项必须写明由谁处理：assigneeIds 为指定账号；permission 为「持有该权限的任何人」（岗位事项，如财务开票、后勤接手）。
  * 两者都为空的事项不进入任何人的「我的工作」和侧栏数字。
  */
-export type MistTask = { id: string; title: string; due: string; done: boolean; kind: string; target: MistTarget; assigneeIds: string[]; permission?: string; /** 勾选完成的时间与人（周报统计用；旧事项无此字段）。 */ doneAt?: string; doneBy?: string };
+export type MistTask = { id: string; title: string; due: string; done: boolean; kind: string; target: MistTarget; assigneeIds: string[]; permission?: string; note?: string; /** 勾选完成的时间与人（周报统计用；旧事项无此字段）。 */ doneAt?: string; doneBy?: string };
 /** 后勤岗位标识（logistics:handle）：只决定出运交接、待物流接手等事项归谁，不授予任何操作；与清关等操作权限分开调整。 */
 export const MIST_LOGISTICS_DUTY = 'logistics:handle';
 /** 订单负责人账号（变更、取消、客诉后续由订单负责人跟进）。 */
 export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: string): string[] { const owner = root.orders.find(order => order.id === orderId)?.ownerId; return owner ? [owner] : []; }
 export type MistNotification = { id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
-export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget };
+/** ownerId：日程归属人（mar60，只看我的）；旧日程没有时视为公司共享。 */
+export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget; ownerId?: string; owner?: string };
 export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;registeredAddress?:string;registeredEnglishAddress?:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAddress?:string;bankAccount:string;swift:string;defaultCurrency:string};
 export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示公司：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
 export type MistState = {
@@ -428,7 +429,9 @@ export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand
   | { type: 'notification.read'; payload: { id: string } }
   | { type: 'notification.readAll'; payload: Record<string, never> }
   | { type: 'task.complete'; payload: { id: string; done: boolean } }
-  | { type: 'calendar.save'; payload: { id?: string; title: string; date: string; time: string; note: string; target?: MistTarget } }
+  | { type: 'calendar.save'; payload: { id?: string; title: string; date: string; time: string; note: string; target?: MistTarget; personal?: boolean } }
+  | { type: 'calendar.delete'; payload: { id: string } }
+  | { type: 'task.save'; payload: { id?: string; title: string; due: string; assigneeId?: string; note?: string; target?: MistTarget } }
   | { type: 'files.add'; payload: { file: MistFile } };
 
 /** 付款凭证能否在付款凭证页冲回：返回不能冲回的原因，可冲回时返回 null。供应商付款生成的凭证走应付冲回。 */
@@ -880,7 +883,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('finance.'))throw new MistCommandError('VALIDATION','未知财务操作');
   if(command.type.startsWith('customer.')||command.type.startsWith('contact.'))return 'relations:write';
   // member.groups.set：权限 null 由仓储层限定为公司所有者（与成员授权一致）。
-  if(['settings.update','notification.read','notification.readAll','task.complete','calendar.save','member.groups.set'].includes(command.type))return null;
+  if(['settings.update','notification.read','notification.readAll','task.complete','calendar.save','calendar.delete','task.save','member.groups.set'].includes(command.type))return null;
   throw new MistCommandError('VALIDATION','未知操作');
 }
 /** 「核对出运交接」：后勤已实际接手该订单的出运（订舱、装箱、单据、报关任一已登记，或已备妥/已出运）即视为核对完毕，自动办结。 */
@@ -1684,7 +1687,22 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'calendar.save': {
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
-      state.calendar=state.calendar.filter(e=>e.id!==id);state.calendar.push({id,title:text(p.title,'日程'),date:date(p.date),time:p.time,note:text(p.note,'说明',false),...(p.target?{target:p.target}:{})});result={id};break;
+      const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?context.actorId:undefined;
+      state.calendar=state.calendar.filter(e=>e.id!==id);state.calendar.push({id,title:text(p.title,'日程'),date:date(p.date),time:p.time,note:text(p.note,'说明',false),...(p.target?{target:p.target}:{}),...(mine?{ownerId:mine,owner:mine===old?.ownerId?old.owner:context.actorName}:{})});result={id};break;
+    }
+    case 'calendar.delete': {
+      // mar59：删除日程（个人日程只能本人删）。派生的季节 / 展会日程不在 state.calendar 中，不能删。
+      const e=find(state.calendar,p.id,'日程');if(e.ownerId&&e.ownerId!==context.actorId)throw new MistCommandError('FORBIDDEN','只能删除本人的个人日程',403);
+      state.calendar=state.calendar.filter(x=>x.id!==e.id);result={id:e.id};break;
+    }
+    case 'task.save': {
+      // mar64：个人待办新建、改期、转派、加备注；系统生成的业务待办只改期限与指派，不改标题。
+      const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');
+      const assignee=p.assigneeId?resolveMember(context,p.assigneeId,'负责人'):{id:context.actorId||'',name:context.actorName};
+      const due=date(p.due),note=text(p.note||'','备注',false,1000);
+      if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(note)old.note=note;event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:''}`);result={id:old.id};}
+      else{const id=context.id();state.tasks.unshift({id,title:text(p.title,'事项',true,200),due,done:false,kind:'personal',target:p.target||{view:'cockpit'},assigneeIds:assignee.id?[assignee.id]:[],...(note?{note}:{})});result={id};}
+      break;
     }
     case 'files.add': {
       const f=p.file;

@@ -175,8 +175,12 @@ describe('my work queue sources', () => {
 });
 
 describe('weekly team report reminder', () => {
+  it('skips the weekly report when last week had no business activity', () => {
+    const state = base(); state.events = []; state.tasks = [];
+    expect(mistWorkQueue(state, { canRead: all, can: (p: string) => p === 'relations:admin', me: 'boss', today: '2026-10-19' }).some(i => i.source === 'report')).toBe(false);
+  });
   it('appears from Monday for supervisors until they archive last week', () => {
-    const state = base();
+    const state = base(); state.events.unshift({ id: 'last-week', entityType: 'order', entityId: 'x', actor: '业务员', at: '2026-10-14T02:00:00Z', text: '上周动态', fileIds: [] });
     const opts = { canRead: all, can: (p: string) => p === 'relations:admin', me: 'boss', today: '2026-10-19' };
     const item = mistWorkQueue(state, opts).find(i => i.source === 'report')!;
     expect(item).toMatchObject({ id: 'report:2026-10-12', sourceLabel: '周报', title: '生成上周团队周报（10-12 至 10-18）', target: { view: 'dashboard', section: 'team-weekly' }, module: 'dashboard' });

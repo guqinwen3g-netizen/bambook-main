@@ -6,7 +6,7 @@ import React from 'react';
 import { ArrowUpRight, CalendarDays, ChevronLeft, ChevronRight, Plus, RefreshCw } from 'lucide-react';
 import {
   Agenda, Banner, Button, Card, CardBody, CardFooter, CardHeader, EmptyState, Field, FormGrid,
-  MistPage, PageHeader, Select, Skeleton, TextArea, TextInput, TextLink, Toolbar, WeekStrip, useToast,
+  MistPage, PageHeader, Select, Skeleton, TextArea, TextInput, TextLink, Toolbar, WeekStrip, useToast, Segmented, Checkbox,
 } from '../../../../components/mist';
 import type { MistCalendarEvent, MistTarget } from '../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../runtime/workspace';
@@ -28,10 +28,19 @@ export function calendarFormError(form: {title:string;date:string;time:string}) 
   return null;
 }
 
+/** mar60：月视图。点日期切到当天列表。 */
+function MonthGrid({ selected, counts, onPick }: { selected: string; counts: Map<string, number>; onPick: (day: string) => void }) {
+  const first = new Date(selected.slice(0, 8) + '01T00:00:00Z'), lead = (first.getUTCDay() + 6) % 7, total = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
+  const keys = Array.from({ length: total }, (_, i) => selected.slice(0, 8) + String(i + 1).padStart(2, '0')), weeks: string[][] = [];
+  const cells = [...Array(lead).fill(''), ...keys]; for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+  return <div aria-label={uiText('月视图')}>{weeks.map((w, n) => <div key={n} className="mist-week">{w.map((d, i) => d ? <button key={d} type="button" aria-pressed={d === selected} onClick={() => onPick(d)}><span>{uiText(['一', '二', '三', '四', '五', '六', '日'][i])}</span><b>{Number(d.slice(8))}</b><span className="mist-week-dots">{Array.from({ length: Math.min(counts.get(d) || 0, 3) }, (_, k) => <i key={k} />)}</span></button> : <span key={'e' + i} />)}</div>)}</div>;
+}
 export function CalendarPage() {
   const {go,route}=useNav();const {state,workspace,loading,error,run,refresh,pending,recover,saving}=useMistWorkspace();const session=useMistSession();const toast=useToast();
   const scopeKey=`${session.sessionKey}:${workspace?.id||''}`;
   const [selected,setSelected]=React.useState(()=>dayKey(businessNow()));
+  const [mode,setMode]=React.useState<'week'|'month'>('week'),[mineOnly,setMineOnly]=React.useState(false),[personal,setPersonal]=React.useState(false);
+  const me=session.user?.id||'';
   React.useEffect(()=>{if(!route.section)setSelected(dayKey(businessNow()));},[scopeKey,state?.settings.businessClock?.at,route.section]);
   const [editing,setEditing]=React.useState<string|null|undefined>(undefined);
   const [form,setForm]=React.useState({title:'',date:selected,time:'09:00',note:'',targetKey:''});
@@ -44,18 +53,22 @@ export function CalendarPage() {
   const visibleFailure=formScope===scopeKey?failure:'';
   React.useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
   React.useEffect(()=>{setEditing(undefined);setForm({title:'',date:dayKey(businessNow()),time:'09:00',note:'',targetKey:''});setOriginalTarget(undefined);setFailure('');setBusy(false);setFormScope(scopeKey);},[scopeKey]);
-  const allEvents=calendarWithDerived(state),events=allEvents.filter(event=>event.date===selected).slice().sort((a,b)=>a.time.localeCompare(b.time)||a.title.localeCompare(b.title));
+  const allEvents=calendarWithDerived(state).filter(event=>!event.ownerId||event.ownerId===me).filter(event=>!mineOnly||event.ownerId===me),events=allEvents.filter(event=>event.date===selected).slice().sort((a,b)=>a.time.localeCompare(b.time)||a.title.localeCompare(b.title));
   const week=calendarWeek(selected).map(day=>({...day,dots:allEvents.filter(event=>event.date===day.key).length}));
   React.useEffect(()=>{if(route.section&&!calendarFormError({title:'日期',date:route.section,time:'09:00'}))setSelected(route.section);},[route.section]);
   React.useEffect(()=>{if(activeEditing!==undefined){const editor=document.getElementById('mist-calendar-editor');editor?.scrollIntoView?.({behavior:'smooth',block:'start'});editor?.querySelector<HTMLInputElement>('input')?.focus();}},[activeEditing]);
   const targets: Array<{value:string;label:string;target:MistTarget}>= [
     ...(state?.devs.map(dev=>({value:`development:${dev.id}`,label:`${dev.code} · ${dev.name}`,target:{view:'development/detail',id:dev.id,versionId:dev.currentVersionId||undefined}}))||[]),
     ...(state?.orders.map(order=>({value:`order:${order.id}`,label:`${order.code} · ${order.customer}`,target:{view:'orders/detail',id:order.id}}))||[]),
+    ...(state?.customers.map(c=>({value:`customer:${c.id}`,label:`客户 · ${c.name}`,target:{view:'crm',id:c.id,customerId:c.id} as MistTarget}))||[]),
+    ...(state?.market.suppliers.map(x=>({value:`supplier:${x.id}`,label:`供应商 · ${x.name}`,target:{view:'suppliers',id:x.id} as MistTarget}))||[]),
+    ...(state?.market.quotations.map(q=>({value:`quotation:${q.id}`,label:`报价 · ${q.code}`,target:{view:'quotations',id:q.id,detail:'full'} as MistTarget}))||[]),
+    ...(state?.fulfillment.shipments.filter(x=>x.state!=='cancelled').map(x=>({value:`shipment:${x.id}`,label:`出运 · ${x.code} · ${x.customer}`,target:{view:'shipments',id:x.id} as MistTarget}))||[]),
   ];
   const open = (event?: MistCalendarEvent) => {
     if(locked.current||activeEditing!==undefined||loading||saving||pending||!state)return;
     const targetKey=event?.target ? 'original' : '';
-    setFormScope(scopeKey);setEditing(event?.id??null);setForm({title:event?.title||'',date:event?.date||selected,time:event?.time||'09:00',note:event?.note||'',targetKey});setOriginalTarget(event?.target);setFailure('');
+    setFormScope(scopeKey);setEditing(event?.id??null);setForm({title:event?.title||'',date:event?.date||selected,time:event?.time||'09:00',note:event?.note||'',targetKey});setOriginalTarget(event?.target);setPersonal(!!event?.ownerId);setFailure('');
   };
   const link = (target:MistTarget) => go(target.view,target.id,target);
   const save = async () => {
@@ -64,7 +77,7 @@ export function CalendarPage() {
     if(form.targetKey&&form.targetKey!=='original'&&!target){setFailure('关联业务已不可用，请重新选择或取消关联');return;}
     const ticket=++sequence.current,owns=()=>live.current&&scope.current===scopeKey&&sequence.current===ticket;
     locked.current=true;setBusy(true);setFailure('');
-    try {await run({type:'calendar.save',payload:{...(editing?{id:editing}:{}),title:form.title.trim(),date:form.date,time:form.time,note:form.note,...(target?{target}:{})}});if(owns()){setSelected(form.date);setEditing(undefined);toast(editing?'日程已更新':'日程已创建');}}
+    try {await run({type:'calendar.save',payload:{...(editing?{id:editing}:{}),title:form.title.trim(),date:form.date,time:form.time,note:form.note,...(target?{target}:{}),...(personal?{personal:true}:editing&&state?.calendar.find(e=>e.id===editing)?.ownerId?{personal:false}:{})}});if(owns()){setSelected(form.date);setEditing(undefined);toast(editing?'日程已更新':'日程已创建');}}
     catch(cause){if(owns())setFailure(cause instanceof Error?cause.message:'日程保存失败，请重试');}
     finally{if(owns()){locked.current=false;setBusy(false);}}
   };
@@ -77,12 +90,14 @@ export function CalendarPage() {
       <Button icon={ChevronLeft} aria-label={uiText("上一周")} onClick={()=>setSelected(date=>shiftDay(date,-7))}>{uiText("上一周")}</Button>
       <Button onClick={()=>setSelected(dayKey(businessNow()))}>{uiText("今天")}</Button>
       <Button iconRight={ChevronRight} aria-label={uiText("下一周")} onClick={()=>setSelected(date=>shiftDay(date,7))}>{uiText("下一周")}</Button>
+      <Segmented ariaLabel={uiText('视图')} value={mode} onChange={v=>setMode(v as 'week'|'month')} options={[{value:'week',label:'周'},{value:'month',label:'月'}]} />
+      <Checkbox label={uiText('只看我的')} checked={mineOnly} onChange={setMineOnly} />
     </Toolbar>
     {!pending&&(visibleFailure||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("日程操作未完成")} actions={<Button onClick={()=>void retry()}>{uiText("重试读取")}</Button>}>{visibleFailure||error}</Banner></div>}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("核对原请求后再继续保存。")}</Banner></div>}
     <Card>
       <CardHeader title={uiText(parseDay(selected).toLocaleDateString(interfaceLocale(),{year:'numeric',month:'long',day:'numeric',weekday:'long'}))} tools={<span className="mist-muted">{events.length}{uiText(" 项安排")}</span>} />
-      <WeekStrip days={week} value={selected} onChange={setSelected} />
+      {mode==='week'?<WeekStrip days={week} value={selected} onChange={setSelected} />:<MonthGrid selected={selected} counts={allEvents.reduce((m,e)=>m.set(e.date,(m.get(e.date)||0)+1),new Map<string,number>())} onPick={setSelected} />}
       {loading?<div className="mist-card-body"><Skeleton height={56} /><Skeleton height={56} /></div>:events.length?<Agenda events={events.map(event=>({time:event.time,title:isDerivedCalendarEvent(event)?<TextLink onClick={()=>event.target&&link(event.target)}>{event.title}</TextLink>:<TextLink disabled={activeEditing!==undefined||saving||!!pending} onClick={()=>open(event)}>{event.title}</TextLink>,meta:<><span>{event.note}</span>{event.target&&<TextLink iconRight={ArrowUpRight} onClick={()=>link(event.target!)}>{uiText("打开关联业务")}</TextLink>}</>}))} />:<EmptyState icon={CalendarDays} title={uiText("当天暂无日程")} description={uiText("可以添加会议、跟进或工作安排。")} action={<Button disabled={!state||loading||saving||!!pending||activeEditing!==undefined} onClick={()=>open()}>{uiText("添加日程")}</Button>} />}
     </Card>
     {activeEditing!==undefined&&<Card as="section" id="mist-calendar-editor" className="mist-section" aria-label={uiText(editing?'编辑日程':'新建日程')} data-calendar-editor>
@@ -90,13 +105,14 @@ export function CalendarPage() {
       <form onSubmit={event=>{event.preventDefault();void save();}}><CardBody>
       {visibleFailure&&<Banner tone={pending?'warn':'bad'} title={uiText(pending?'保存结果待核对':'日程未保存')}>{pending?uiText('请先核对原请求，不要重复保存。'):visibleFailure}</Banner>}
       <fieldset disabled={busy||saving||!!pending} style={{border:0,padding:0,margin:0}}><FormGrid>
-        <Field label={uiText("日程名称")} required full><TextInput value={form.title} onChange={event=>setForm(previous=>({...previous,title:event.target.value}))} /></Field>
-        <Field label={uiText("日期")} required><TextInput type="date" value={form.date} onChange={event=>setForm(previous=>({...previous,date:event.target.value}))} /></Field>
-        <Field label={uiText("时间")} required><TextInput type="time" value={form.time} onChange={event=>setForm(previous=>({...previous,time:event.target.value}))} /></Field>
-        <Field label={uiText("关联业务")} full><Select value={form.targetKey} onChange={event=>setForm(previous=>({...previous,targetKey:event.target.value}))} options={[{value:'',label:'不关联业务'},...(form.targetKey==='original'?[{value:'original',label:'保留原业务关联'}]:[]),...targets.map(({value,label})=>({value,label}))]} /></Field>
-        <Field label={uiText("安排说明")} full><TextArea value={form.note} onChange={event=>setForm(previous=>({...previous,note:event.target.value}))} /></Field>
+        <Field label={uiText("日程名称")} required full><TextInput aria-label={uiText("日程名称")} value={form.title} onChange={event=>setForm(previous=>({...previous,title:event.target.value}))} /></Field>
+        <Field label={uiText("日期")} required><TextInput aria-label={uiText("日期")} type="date" value={form.date} onChange={event=>setForm(previous=>({...previous,date:event.target.value}))} /></Field>
+        <Field label={uiText("时间")} required><TextInput aria-label={uiText("时间")} type="time" value={form.time} onChange={event=>setForm(previous=>({...previous,time:event.target.value}))} /></Field>
+        <Field label={uiText("关联业务")} full><Select aria-label={uiText("关联业务")} value={form.targetKey} onChange={event=>setForm(previous=>({...previous,targetKey:event.target.value}))} options={[{value:'',label:'不关联业务'},...(form.targetKey==='original'?[{value:'original',label:'保留原业务关联'}]:[]),...targets.map(({value,label})=>({value,label}))]} /></Field>
+        <Field label={uiText("安排说明")} full><TextArea aria-label={uiText("安排说明")} value={form.note} onChange={event=>setForm(previous=>({...previous,note:event.target.value}))} /></Field>
+        <Checkbox label={uiText('仅本人可见')} checked={personal} onChange={setPersonal} />
       </FormGrid></fieldset>
-      </CardBody><CardFooter>{recovery}<span className="mist-spacer" /><Button variant="quiet" disabled={busy} onClick={()=>setEditing(undefined)}>{uiText("取消")}</Button><Button type="submit" variant="primary" loading={busy} disabled={!state||loading||saving||!!pending}>{uiText("保存日程")}</Button></CardFooter></form>
+      </CardBody><CardFooter>{recovery}<span className="mist-spacer" />{editing&&<Button variant="danger" disabled={busy||saving||!!pending} onClick={()=>{if(!editing)return;void (async()=>{locked.current=true;setBusy(true);try{await run({type:'calendar.delete',payload:{id:editing}});if(live.current){setEditing(undefined);toast('日程已删除');}}catch(cause){if(live.current)setFailure(cause instanceof Error?cause.message:'日程删除失败');}finally{locked.current=false;if(live.current)setBusy(false);}})();}}>{uiText('删除日程')}</Button>}<Button variant="quiet" disabled={busy} onClick={()=>setEditing(undefined)}>{uiText("取消")}</Button><Button type="submit" variant="primary" loading={busy} disabled={!state||loading||saving||!!pending}>{uiText("保存日程")}</Button></CardFooter></form>
     </Card>}
   </MistPage>;
 }

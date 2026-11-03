@@ -24,8 +24,13 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistAgentTasks.ts"
  },
  {
+  "type": "calendar.delete",
+  "payload": "{ id: string }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
   "type": "calendar.save",
-  "payload": "{ id?: string; title: string; date: string; time: string; note: string; target?: MistTarget }",
+  "payload": "{ id?: string; title: string; date: string; time: string; note: string; target?: MistTarget; personal?: boolean }",
   "types": {
    "MistTarget": "{ view: string; id?: string; section?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string }"
   },
@@ -2209,6 +2214,14 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  {
   "type": "task.complete",
   "payload": "{ id: string; done: boolean }",
+  "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "task.save",
+  "payload": "{ id?: string; title: string; due: string; assigneeId?: string; note?: string; target?: MistTarget }",
+  "types": {
+   "MistTarget": "{ view: string; id?: string; section?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string }"
+  },
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
