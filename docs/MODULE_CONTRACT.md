@@ -57,6 +57,13 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 开发案状态：有未认领任务时为「待 QC 认领」，否则「QC 待评审」；工作台的 `fulfillment.qc.*` 命令作用于版本来源任务时同步刷新开发案（`applyMistCommand`）。版本卡片 `versionTimelineStatus(version, state)` 同样区分「待 QC 认领 / QC 中」。
 - 尚未合并：旧数据库层 `server/src/development/developmentSampleQualityService.ts`（`sup31`）不在 Mist 运行入口内，未改动。
 
+## 当前 Mist 生产 QC 不合格处置（P1-4 第二块）
+
+- `server/src/shared/mistQcDisposition.ts`：`fulfillment.qc.dispose` 只对最新报告不通过、状态 `blocked` 的生产检验任务，由订单负责人登记；`FulfillmentQcTask.dispositions` 只追加。`rework` 记工厂与完成日并把任务 `due` 改为完成日，复验仍走原 `fulfillment.qc.report`；`concession` 必须有让步范围、客户书面同意依据和附件，按订单审批人（`orderReviewerIds`，`context.ts` 对这两条命令加载）建 `qcConcession` 审批，`fulfillment.qc.concession.decide` 批准后任务回到 `reported` 并记 `businessContinued`；`chargeback` 记工厂合同、金额与币种。
+- 生产门禁 `requireProductionQc`：当前报告为不通过但有已批准让步（`qcConcessionReleases`，限同一 reportId）时放行，并跳过逐码覆盖检查；新报告需重新决定。
+- 工厂扣款不直接生成应付：`payable.settlement.submit` 自动把 `openQcChargebacks` 追加为 `disputes`（带 `qcDispositionId`），结算撤回或退回后会重新出现在下一次结算。已最终结算的合同拒绝新扣款。
+- Agent 风险：`fulfillment.qc.dispose` 登记为高风险，`concession.decide` 按动词规则为高风险。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

@@ -265,3 +265,23 @@ it('keeps the permanent report notice without claiming a passed report automatic
 it('keeps confirmation and continuation evidence in expandable records',async()=>{
  store.state!.fulfillment.qcTasks.push(task('evidence',{state:'reported',businessConfirmation:{result:'approved',actor:'业务员',at:'2026-10-08',note:'燕麦布样批准依据'},businessContinued:{reportId:'r',actor:'业务员',at:'2026-10-08',note:'本批继续依据'}}));render('evidence');expect(host.textContent).not.toContain('燕麦布样批准依据');expect(host.textContent).not.toContain('本批继续依据');await click(getByRole(host,'button',{name:'需求方确认'}));expect(host.textContent).toContain('燕麦布样批准依据');await click(getByRole(host,'button',{name:'业务继续记录'}));expect(host.textContent).toContain('本批继续依据');
 });
+
+it('lets the order owner choose a rework and requires the customer file for a concession',async()=>{
+  store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',unit:'件',qty:10} as any);
+  store.state!.productions.push({id:'prod',code:'FUL-1',orderId:'o',lineId:'l',order:'SO-G',name:'风衣',factory:'华美制衣',qty:10,due:'2026-10-30',pct:100,img:'coat',col:'qc'} as any);
+  store.state!.fulfillment.qcReports.push({id:'r1',taskId:'nok',result:'reject',report:'PQC-1',opinion:'门襟跳针',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T09:00:00Z'} as any);
+  store.state!.fulfillment.qcTasks.push(task('nok',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'prod'},state:'blocked',reportIds:['r1'],assignee:'QC甲',assigneeId:'qc-a'}));
+  render('nok');expect(queryByRole(host,'button',{name:'选择处置方式'})).toBeNull();
+  session.id='sales';render('nok');
+  await click(getByRole(host,'button',{name:'选择处置方式'}));
+  const dialog=getByRole(document.body,'dialog',{name:'不合格处置'});
+  typeInto(within(dialog).getByRole('textbox',{name:'处置说明'}) as HTMLTextAreaElement,'全检返修');
+  await click(within(dialog).getByRole('button',{name:'保存'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.dispose',payload:expect.objectContaining({id:'nok',kind:'rework',factory:'华美制衣',note:'全检返修'})});
+  store.run.mockClear();await click(getByRole(host,'button',{name:'选择处置方式'}));
+  const again=getByRole(document.body,'dialog',{name:'不合格处置'});
+  await click(within(again).getByRole('radio',{name:/让步接收/}));
+  typeInto(within(again).getByRole('textbox',{name:'处置说明'}) as HTMLTextAreaElement,'色差');typeInto(within(again).getByRole('textbox',{name:'让步范围'}) as HTMLInputElement,'M 码 4 件');typeInto(within(again).getByRole('textbox',{name:'客户书面同意依据'}) as HTMLInputElement,'买手邮件');
+  await click(within(again).getByRole('button',{name:'提交审批'}));
+  expect(store.run).not.toHaveBeenCalled();expect(again.textContent).toContain('附文件');
+});

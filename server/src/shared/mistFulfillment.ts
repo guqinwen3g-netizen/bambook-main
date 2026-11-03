@@ -1,6 +1,7 @@
 import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorError,packingPhysicalKey,packingSkuError,canonicalPackingSkus,canSupplementPacking,type PackingSku} from './mistPackingBreakdown';
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
+import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, type QcDispositionCommand } from './mistQcDisposition';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
@@ -126,6 +127,8 @@ export type FulfillmentQcTask = {
         at: string;
     };
     businessContinued?: { reportId: string; actor: string; at: string; note: string };
+    /** Production NOK handling (rework / concession / chargeback), append-only. */
+    dispositions?: QcDisposition[];
 };
 export type FulfillmentQcReport = {
     id: string;
@@ -417,7 +420,7 @@ export type FulfillmentState = {
 type PurchaseInput = Pick<FulfillmentPurchase, 'orderId' | 'lineId' | 'kind' | 'materialKind' | 'stageTerms' | 'supplierId' | 'supplier' | 'description' | 'quantity' | 'unit' | 'price' | 'currency' | 'due' | 'terms' | 'destination' | 'note' | 'fileIds'>;
 type SampleInput = Pick<FulfillmentSample, 'name' | 'category' | 'form' | 'unit' | 'quantity' | 'location' | 'size' | 'color' | 'source' | 'fileIds' | 'note' | 'role' | 'shipmentId' | 'sizeQuantities'>;
 type ShipmentInput = {packingDetailVersion?:2;packingColorVersion?:1} & Pick<FulfillmentShipment, 'consignee' | 'mode' | 'portOfLoading' | 'portOfDischarge' | 'incoterm' | 'plannedDate' | 'booking' | 'lines' | 'note' | 'fileIds'>;
-export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | {
+export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportCommand | QcDispositionCommand | {
     type: 'fulfillment.samples.create';
     payload: SampleInput;
 } | {
@@ -713,6 +716,7 @@ export const FULFILLMENT_CUSTOMS_CLEAR_SCOPE = 'customs:clear';
 export function fulfillmentCommandPermission(command: FulfillmentCommand): string | null {
     if (command.type === 'fulfillment.inventory.quarantine.noRecovery' || command.type === 'fulfillment.inventory.quarantine.noRecovery.revoke') return 'aftersales:approve';
     if (command.type === 'fulfillment.production.intake.decide') return 'orders:write';
+    if (command.type === 'fulfillment.qc.dispose' || command.type === 'fulfillment.qc.concession.decide') return 'orders:write';
     if (command.type === 'fulfillment.materials.confirm') return 'orders:write';
     if (command.type === 'fulfillment.materials.issue') return 'inventory:write';
     if (command.type === 'fulfillment.materials.deliver') return 'procurement:write';
@@ -955,8 +959,10 @@ function requireProductionQc(root: MistState, branch: MistProduction) {
     const fact = fulfillmentProductionFact(root, branch.id), sizes = fact?.completion?.sizeQuantities.length ? fact.completion.sizeQuantities : fact?.sizes || [];
     for (const task of tasks) {
         const latest = root.fulfillment.qcReports.find(report => report.id === task.reportIds.at(-1));
-        if (!latest || latest.result === 'reject' || task.state !== 'reported' || latest.scopeRevision !== scopeRevision(root, task)) fail('当前生产分支仍有未解除的质量门禁', 'PRECONDITION');
-        if (get(root.orders, branch.orderId, '订单').type === 'garment') {
+        // An approved concession accepts this exact failed report (customer agreed in writing); a newer report needs its own decision.
+        const conceded = qcConcessionReleases(task);
+        if (!latest || latest.result === 'reject' && !conceded || task.state !== 'reported' || latest.scopeRevision !== scopeRevision(root, task)) fail('当前生产分支仍有未解除的质量门禁', 'PRECONDITION');
+        if (!conceded && get(root.orders, branch.orderId, '订单').type === 'garment') {
             if (!sizes.length) fail('生产QC缺少准确尺码依据', 'PRECONDITION');
             const reports = task.reportIds.map(id => get(root.fulfillment.qcReports, id, '报告')).filter(report => report.scopeRevision === scopeRevision(root, task));
             for (const size of sizes) {
@@ -1115,6 +1121,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     f.productionFacts ||= [];
     fulfillmentCommandPermission(command);
     if (command.type === 'fulfillment.production.intake' || command.type === 'fulfillment.production.observe' || command.type === 'fulfillment.production.intake.decide') return applyProductionIntake(root, command, ctx);
+    if (command.type === 'fulfillment.qc.dispose' || command.type === 'fulfillment.qc.concession.decide') return applyQcDispositionCommand(root, command, ctx);
     if(command.type.startsWith('fulfillment.claimInventory.'))return applyClaimInventoryCommand(root,command as ClaimInventoryCommand,ctx);
     if((CUSTOMS_DECLARATION_COMMANDS as readonly string[]).includes(command.type))return applyCustomsDeclarationCommand(root,command as CustomsDeclarationCommand,ctx);
     const p: any = command.payload;

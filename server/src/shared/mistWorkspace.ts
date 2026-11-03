@@ -17,6 +17,7 @@ import {createMarketState,applyMarketCommand,backfillQuoteLineFamilies,marketCom
 import {createCrmState,applyCrmCommand,crmCommandPermission,type CrmState,type CrmCommand} from './mistCrm';
 import {seedDemoModules,DEMO_SEED_VERSION} from './mistDemoSeed';
 import {mistBusinessDate} from './mistBusinessClock';
+import {getQcConcessionReviews} from './mistQcDisposition';
 import {devStageHandoverBlocker,devStagePendingHandovers,devStagePlanError,devStagesOf,normalizeDevStagePlan,type DevStage,type DevStageHandover,type DevStagePlan} from './mistDevelopmentStages';
 import {createEmailState,applyEmailCommand,emailCommandPermission,seedEmailExamples,type EmailState,type EmailCommand} from './mistEmail';
 import {createPlatformState,applyPlatformCommand,platformCommandPermission,getPlatformReviews,platformCreditAppliedMinor,getRequiredBusinessNumberPlan as platformBusinessNumberPlan,platformBusinessDate,type PlatformState,type PlatformCommand} from './mistPlatform';
@@ -1603,7 +1604,7 @@ export function normalizeMistState(state:MistState,context:MistContext):void {
   backfillQuoteLineFamilies(state,state.market);
   recalculate(state);
 }
-export function getMistReviewTasks(state:MistState):MistReviewTask[]{return [...getOrderGovernanceReviews(state),...getFulfillmentReviews(state),...getProductionIntakeReviews(state),...getMarketReviews(state),...getPlatformReviews(state),...getPayableReviews(state)];}
+export function getMistReviewTasks(state:MistState):MistReviewTask[]{return [...getOrderGovernanceReviews(state),...getFulfillmentReviews(state),...getProductionIntakeReviews(state),...getQcConcessionReviews(state),...getMarketReviews(state),...getPlatformReviews(state),...getPayableReviews(state)];}
 export { renderDemoFile } from './mistDemoFiles';
 
 /** 线索一键转 CRM：选已有客户或按线索公司新建客户（含联系人），可同时建立商机；整个过程在同一次命令内完成，任一步失败都不落库。 */
