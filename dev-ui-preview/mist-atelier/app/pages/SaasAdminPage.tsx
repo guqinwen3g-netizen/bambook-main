@@ -2,7 +2,7 @@ import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { Building2, Plus, RefreshCw, ShieldCheck, Users } from 'lucide-react';
-import { Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, TextInput, Toolbar } from '../../../../components/mist';
+import { Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, MistPage, Mono, PageHeader, Pill, Select, StatCard, StatGrid, TextInput, Toolbar, useToast } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { enterCompanyManagement, platformAdminApi, type Invitation, type PlatformCompany, type PlatformMember, type CompanyDraft } from '../runtime/platformAdmin';
@@ -20,7 +20,7 @@ export function memberState(m:{accountStatus?:string;memberStatus?:string}):{lab
 }
 export function SaasAdminPage(){
  const nav=useNav();
- const session=useMistSession(),allowed=session.user?.platformRole==='platform_admin';
+ const session=useMistSession(),allowed=session.user?.platformRole==='platform_admin',toast=useToast();
  const [companies,setCompanies]=React.useState<PlatformCompany[]>([]),[loading,setLoading]=React.useState(true),[error,setError]=React.useState('');
  const [query,setQuery]=React.useState(''),[filter,setFilter]=React.useState('all'),[selected,setSelected]=React.useState<string|null>(nav?.route?.id??null);
  const [members,setMembers]=React.useState<PlatformMember[]>([]),[membersLoading,setMembersLoading]=React.useState(false),[memberEmail,setMemberEmail]=React.useState('');
@@ -40,17 +40,17 @@ export function SaasAdminPage(){
  async function mutate(work:()=>Promise<void>){const key=session.sessionKey;setBusy(true);setFormError('');try{await work();}catch(e){if(identity.current===key)setFormError(message(e));}finally{if(identity.current===key)setBusy(false);}}
  async function create(){if(!draft.name.trim()||!draft.ownerName.trim()||!/^\S+@\S+\.\S+$/.test(draft.ownerEmail)||! /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/.test(draft.slug)){setFormError('请填写公司名称、3–50 位公司标识、公司管理员姓名和有效登录邮箱。');return;}
   if(draft.deliveryMode==='password'&&!draft.initialPassword){setFormError('请设置初始密码。');return;}
-  await mutate(async()=>{const key=session.sessionKey;const result=await platformAdminApi.create(draft);if(identity.current!==key)return;setCreating(false);setDraft(blank);await reload();setSelected(result.company.id);setCredentials({email:result.owner.email,invitation:result.invitation});});
+  await mutate(async()=>{const key=session.sessionKey;const result=await platformAdminApi.create(draft);if(identity.current!==key)return;setCreating(false);setDraft(blank);await reload();setSelected(result.company.id);setCredentials({email:result.owner.email,invitation:result.invitation});toast(uiText('公司已开通'));});
  }
  async function save(){if(edit.seats!==''&&(!/^\d+$/.test(edit.seats)||Number(edit.seats)<1)){setFormError('席位上限须为正整数，留空表示不限。');return;}if(!edit.plan.trim()){setFormError('请填写服务方案。');return;}if(company&&edit.status!==company.status&&edit.status!=='active'){setConfirmation({kind:'status'});return;}await persist();}
- async function persist(){if(!company)return;const id=company.id;await mutate(async()=>{await platformAdminApi.update(id,{status:edit.status,plan:edit.plan.trim(),seatLimit:edit.seats===''?null:Number(edit.seats)});setConfirmation(null);await reload();});}
+ async function persist(){if(!company)return;const id=company.id;await mutate(async()=>{await platformAdminApi.update(id,{status:edit.status,plan:edit.plan.trim(),seatLimit:edit.seats===''?null:Number(edit.seats)});setConfirmation(null);await reload();toast(uiText('服务设置已保存'));});}
  const visible=companies.filter(c=>(filter==='all'||c.status===filter)&&`${c.name} ${c.slug} ${c.legalName??''}`.toLowerCase().includes(query.toLowerCase()));
  if(!allowed)return <MistPage><EmptyState icon={ShieldCheck} title={uiText("需要平台管理员身份")}/></MistPage>;
  return <MistPage width="wide"><PageHeader eyebrow={uiText("平台运营")} title={uiText("平台管理")} actions={<><Button onClick={()=>nav?.go('system-settings')}>{uiText("平台设置")}</Button><Button variant="primary" icon={Plus} onClick={()=>{setFormError('');setDraft(blank);setCreating(true);}}>{uiText("开通公司")}</Button></>}/>
   <StatGrid><StatCard icon={Building2} label={uiText("公司")} value={companies.length}/><StatCard icon={ShieldCheck} label={uiText("运行中")} value={companies.filter(c=>c.status==='active').length}/><StatCard icon={Users} label={uiText("有效成员归属")} value={companies.reduce((n,c)=>n+c.members,0)}/></StatGrid>
   <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={()=>void reload()}>{uiText("刷新")}</Button>}><TextInput aria-label={uiText("搜索公司")} placeholder={uiText("搜索公司名称或标识")} value={query} onChange={e=>setQuery(e.target.value)}/><Select aria-label={uiText("公司状态")} value={filter} onChange={e=>setFilter(e.target.value)} options={[{value:'all',label:'全部状态'},...statuses]}/></Toolbar>
   {error&&<Banner tone="bad" title={uiText("读取公司失败")}>{uiText(error)}</Banner>}
-  <Card><DataTable ariaLabel={uiText("公司列表")} rows={visible} rowKey={c=>c.id} loading={loading} selectedKey={selected} onRowClick={c=>setSelected(c.id)} columns={[{key:'name',header:'公司',render:c=><><b>{c.name}</b><div className="mist-caption"><Mono>{c.slug}</Mono></div></>},{key:'status',header:'状态',render:c=><Pill tone={c.status==='active'?'ok':c.status==='suspended'?'warn':'neutral'}>{statusLabel(c.status)}</Pill>},{key:'plan',header:'服务方案',render:c=>c.plan==='standard'?'标准服务':c.plan},{key:'members',header:'成员 / 席位',render:c=>`${c.members} / ${c.seatLimit??'不限'}`},{key:'action',header:'',render:c=><Button size="sm" onClick={()=>setSelected(c.id)} aria-label={uiText('管理'+c.name)}>{uiText("管理")}</Button>}]} empty={<EmptyState title={uiText(query||filter!=='all'?'没有匹配的公司':'尚未开通公司')} description={uiText(query||filter!=='all'?'调整搜索条件后重试。':'开通公司后，在这里管理成员归属与服务状态。')}/>}/></Card>
+  <Card><DataTable ariaLabel={uiText("公司列表")} rows={visible} rowKey={c=>c.id} loading={loading} selectedKey={selected} onRowClick={c=>setSelected(c.id)} columns={[{key:'seats',header:'席位',render:c=>c.seatLimit===null?`${c.members} / 不限`:<span className={c.members>=c.seatLimit?'mist-tone-warn':undefined}>{c.members} / {c.seatLimit}</span>},{key:'name',header:'公司',render:c=><><b>{c.name}</b><div className="mist-caption"><Mono>{c.slug}</Mono></div></>},{key:'status',header:'状态',render:c=><Pill tone={c.status==='active'?'ok':c.status==='suspended'?'warn':'neutral'}>{statusLabel(c.status)}</Pill>},{key:'plan',header:'服务方案',render:c=>c.plan==='standard'?'标准服务':c.plan},{key:'members',header:'成员 / 席位',render:c=>`${c.members} / ${c.seatLimit??'不限'}`},{key:'action',header:'',render:c=><Button size="sm" onClick={()=>setSelected(c.id)} aria-label={uiText('管理'+c.name)}>{uiText("管理")}</Button>}]} empty={<EmptyState title={uiText(query||filter!=='all'?'没有匹配的公司':'尚未开通公司')} description={uiText(query||filter!=='all'?'调整搜索条件后重试。':'开通公司后，在这里管理成员归属与服务状态。')}/>}/></Card>
   <Drawer open={!!company} onClose={()=>{if(!busy)setSelected(null);}} title={uiText(company?.name??'公司管理')} sub={uiText(company?.slug)} size="lg">
    {company&&<div className="mist-col">{formError&&<Banner tone="bad" title={uiText("操作未完成")}>{formError}</Banner>}
     <KeyValue items={[{label:'法定名称',value:legalName||company.legalName||'尚未填写'},{label:'开通日期',value:new Date(company.createdAt).toLocaleDateString(interfaceLocale())}]}/>
