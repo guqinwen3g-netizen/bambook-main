@@ -81,6 +81,14 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 数据范围：`fulfillment.stockCounts` / `stockTransfers` 随所涉批次可见。Agent 风险：`stock.release`、`stock.count.decide` 按动词规则为高风险，其余为中风险。
 - 装箱箱号段 / 码单录入只在前端展开为逐箱行（`PackingRangeDialog`），`fulfillment.shipments.pack` 契约不变。
 
+## 当前 Mist 单据生成（P1-3）
+
+- `server/src/shared/mistDocumentTypes.ts`：我方单据 CI、PL、SO 订舱委托、SI 补料、DN 出货通知、SA 装船通知、BC 受益人证明、DFT 汇票、CD 报关单草稿、CDA 报关委托书；外部单据 BL、CO、INS、IC、OTHER 只归档原件。SA/BC/DFT 离港后仍可出具；离港门禁仍只看 CI/PL，作废 SO/SI 等不让出运退回准备。
+- `mistDocumentGeneration.ts` + `mistGeneratedDocument.ts` + `templates/generatedDocument.ts`：同一冻结快照结构和一个中英双语模板。`fulfillment.documents.generate`（`customs:write`）建 / 刷新草稿并挂生成文件（重新生成只替换上次生成的文件），CI/PL 仍走 `documents.issue` 的应收规则；`order.document.generate`（`orders:write`）只读批准快照出 PI / SC，内容未变拒绝重复；`market.lookbook.document`（`marketing:write`）只对已准备画册；`fulfillment.documents.bl` 登记提单号、放货方式、正本份数、补料、草稿核对与电放。
+- 仓储层 `GENERATING_COMMANDS` 先渲染、写私有文件、绑定 `generatedDocument` 产物，命令按同一快照指纹核对；不支持预演；客户端带内容一律拒绝。
+- 前端去智能邮箱：`runtime/composeIntent.ts` 只在本标签页内存交接收件人、主题、附件和关联，邮箱打开后建一次草稿，发送仍由用户在邮箱完成。
+- 报表 Excel：`downloadModuleXlsx`（懒加载 `xlsx`，公式样文本前置单引号）。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

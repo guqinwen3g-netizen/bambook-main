@@ -1,12 +1,13 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 报关申报资料：商品归类库（款号 → HS、申报品名、申报要素、法定单位）与按出运生成的申报商品项。 */
 import React from 'react';
-import { Ban, ListChecks, Pencil, Plus } from 'lucide-react';
+import { Ban, Download, FileText, ListChecks, Pencil, Plus } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, DataTable, Facts, Mono, Pill, type Column } from '../../../../../components/mist';
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentCustoms } from '../../../../../server/src/shared/mistFulfillment';
 import { CUSTOMS_BRAND_TYPES, CUSTOMS_ELEMENT_LABELS, CUSTOMS_FIELD_LABEL, CUSTOMS_FAMILY_LABEL, CUSTOMS_PREFERENCES, customsItemsStale, defaultLegalUnits, draftCustomsDeclaration, generatedItem, readCustomsClassifications, type CustomsClassification, type CustomsDeclarationItem, type CustomsFamily } from '../../../../../server/src/shared/mistCustomsDeclaration';
-import type { ModuleEditorSpec, ModuleValues } from './ModuleWorkbench';
+import { downloadModuleXlsx, type ModuleEditorSpec, type ModuleValues } from './ModuleWorkbench';
+import { documentGenerationBlocker } from '../../../../../server/src/shared/mistDocumentGeneration';
 import { field, number, text } from './fulfillmentKit';
 import { ActionBar, DetailBlock, businessWhen,type ReasonedAction } from './pageKit';
 import { CUSTOMS_ELEMENT_OPTIONS, CUSTOMS_UNITS } from '../../runtime/tradeOptions';
@@ -100,6 +101,11 @@ export function CustomsItemsBlock({ record: c, state, can, locked, run, open, on
     {can && c.status !== 'cleared' && <ActionBar busy={locked} actions={[
       { label: items.length ? '重新生成商品项' : '生成申报商品项', icon: ListChecks, primary: !items.length || stale, reason, onClick: () => void run({ type: 'fulfillment.customs.items', payload: { id: c.id } } as MistCommand) },
       { label: '维护商品归类', onClick: onClassify },
+    ] as ReasonedAction[]} />}
+    {s && <ActionBar busy={locked} actions={[
+      { label: '导出商品项 Excel', icon: Download, onClick: () => downloadModuleXlsx(`${c.code}-申报商品项.xlsx`, [{ name: '申报商品项', headers: ['项号', '商品编号', '商品名称', '申报要素', '成交数量', '成交单位', '法定数量', '法定单位', '第二数量', '第二单位', '单价', '总价', '币制', '原产国', '最终目的国'], rows: items.map(i => [i.no, hsText(i.hsCode), i.declaredName, i.elements, i.quantity, i.unit, i.legalQty, i.legalUnit, i.secondQty ?? '', i.secondUnit, i.unitPrice, i.amount, i.currency, i.origin, i.destination]) }, { name: '表头', headers: ['项目', '内容'], rows: [['出运', s.code], ['收货人', s.consignee], ['起运港', s.portOfLoading], ['目的港', s.portOfDischarge], ['成交方式', s.incoterm], ['件数', c.packages ?? ''], ['毛重 kg', c.grossWeight ?? ''], ['净重 kg', c.netWeight ?? ''], ['报关行', c.broker], ['贸易方式', c.tradeMode]] }]), reason: !items.length ? '请先生成申报商品项' : false },
+      { label: '生成报关单草稿', icon: FileText, onClick: () => void run({ type: 'fulfillment.documents.generate', payload: { shipmentId: s.id, type: 'CD' } } as MistCommand), reason: !can ? '需要报关单证权限' : documentGenerationBlocker(state, s, 'CD') || false },
+      { label: '生成报关委托书', icon: FileText, onClick: () => void run({ type: 'fulfillment.documents.generate', payload: { shipmentId: s.id, type: 'CDA' } } as MistCommand), reason: !can ? '需要报关单证权限' : documentGenerationBlocker(state, s, 'CDA') || false },
     ] as ReasonedAction[]} />}
   </DetailBlock>;
 }

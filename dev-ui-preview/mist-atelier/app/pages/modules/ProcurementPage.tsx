@@ -62,7 +62,7 @@ function purchaseFlags(purchase: FulfillmentPurchase, day: string) {
 const round = (value: number) => Math.round(value * 10000) / 10000;
 
 export function ProcurementPage() {
-  const { state, workspace, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), { go, route } = useNav();
+  const { state, workspace, run, error, refresh, loading, saving, pending, downloadFile } = useMistWorkspace(), session = useMistSession(), editor = useEditor(), { go, route } = useNav();
   const [domainChoice, setDomainChoice] = React.useState<Domain | null>(null), [entryChoice, setEntryChoice] = React.useState<Entry | null>(null);
   const [stageFilter, setStageFilter] = React.useState<StageFilter>('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const full = useListDetailRoute();
@@ -211,7 +211,7 @@ export function ProcurementPage() {
         onDecide={decision => setDialog(decideSpec(selected, decision))}
         onSend={() => setDialog(sendSpec(selected))} onConfirm={() => setDialog(confirmSpec(selected))} onReceive={() => setDialog(receiveSpec(selected))} onRejectReceived={r => setDialog(rejectReceivedSpec(selected, r))}
         onReturn={r => setDialog(returnSpec(selected, r))} onReturnReverse={(r, row) => setDialog(returnReverseSpec(selected, r, row))}
-        onDownload={() => void act(() => run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }))}
+        onDownload={() => void act(async () => { const receipt = await run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }); const fileId = receipt.result.fileId; if (typeof fileId === 'string') await downloadFile({ id: fileId, name: `${selected.code}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }); })}
         onAttach={ids => run({ type: 'fulfillment.procurement.save', payload: { ...selected, fileIds: ids } })}
         onInventory={() => go('inventory', undefined, { section: selected.id })} onSupplier={() => go('suppliers', selected.supplierId)}
         onCancel={() => setDialog(cancelSpec(selected))} onTransfer={() => setDialog(transferSpec(selected))} onOpenPurchase={id => go('procurement', id)} onPayables={() => { const plan = state.payables?.plans?.find(x => x.purchaseId === selected.id && (x.stage || 'prepayment') === 'prepayment'); go('payment-vouchers', plan?.id, { section: 'payables' }); }} />

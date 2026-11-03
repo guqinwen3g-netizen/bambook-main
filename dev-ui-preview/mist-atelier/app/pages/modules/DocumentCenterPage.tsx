@@ -57,7 +57,7 @@ function voidBlocker(root: MistState, d: FulfillmentDocument) {
 
 export function DocumentCenterPage() {
   const presentedError = React.useContext(MistPresentedErrorContext);
-  const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
+  const { state, run, error, refresh, loading, saving, pending, downloadFile } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const can = session.hasPermission('customs:write'), canInvoices = session.hasPermission('invoices:read');
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [tab, setTab] = React.useState<Tab>('documents'), [domainChoice, setDomainChoice] = React.useState<Domain | null>(null);
@@ -117,8 +117,9 @@ export function DocumentCenterPage() {
         const blocked = state ? documentGenerationBlocker(state, f?.shipments.find(row => row.id === shipmentId), type, orderId) : null;
         if (blocked) throw new Error(blocked);
         const receipt = await run({ type: 'fulfillment.documents.generate', payload: { shipmentId, type, ...(orderId ? { orderId } : {}), ...(type === 'CI' && text(v, 'dueDate') ? { dueDate: text(v, 'dueDate') } : {}) } });
-        const id = String(receipt?.result?.id || '');
+        const id = String(receipt?.result?.id || ''), fileId = receipt?.result?.fileId;
         if (id) { setPicked(id); setDrawer(true); }
+        if (typeof fileId === 'string') void downloadFile({ id: fileId, name: `${TYPE_LABEL[type]}-${target?.code || ''}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }).catch(() => undefined);
       } };
   };
   const blSpec = (d: FulfillmentDocument): ModuleEditorSpec => {

@@ -8,7 +8,7 @@ import { Banner, Button, Card, CardBody, CardHeader, Checkbox, DataTable, Dialog
 import type { MistCommand, MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { FX_BASIS_LABEL, type FxBasis } from '../../../../../server/src/shared/mistFxRates';
 import { ALLOCATION_BASES, EXPENSE_CATEGORIES, activeExpenses, expensePayableBill, orderActualCost, orderExpenses, type AllocationBasis, type ExpenseCategory, type OrderActualCost, type OrderCostLine, type OrderExpense } from '../../../../../server/src/shared/mistOrderCost';
-import { downloadModuleCsv } from './ModuleWorkbench';
+import { downloadModuleCsv, downloadModuleXlsx } from './ModuleWorkbench';
 import { REBATE_ACCESS_TEXT, rebateAccess, type RebateAccess } from './RebatePanel';
 
 const money = (v: number) => v.toLocaleString(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -51,12 +51,12 @@ export function OrderActualCostPanel({ state, asOf, canWrite, busy, run,material
     { key: 'payable', header: '应付', render: e => { const bill = expensePayableBill(state, e); return bill ? <Pill tone="ok">{bill.code}</Pill> : e.voided ? null : canWrite ? <Button size="sm" variant="quiet" disabled={busy} aria-label={ui`转应付 ${e.code}`} onClick={() => { setPayForm({ supplierId: (state.market?.suppliers || []).find(x => x.name === e.vendor)?.id || '', invoiceNo: e.ref, due: '', taxAmount: '' }); setPaying(e); }}>{uiText("转应付")}</Button> : <span className="mist-note">{uiText("未转")}</span>; } },
     { key: 'state', header: '', render: e => e.voided ? <Pill tone="neutral">{uiText("已作废")}</Pill> : canWrite && !expensePayableBill(state, e) ? <Button size="sm" variant="quiet" disabled={busy} aria-label={ui`作废 ${e.code}`} onClick={() => { setReason(''); setVoiding(e); }}>{uiText("作废")}</Button> : null },
   ];
-  const exportCsv = () => downloadModuleCsv(`订单核算-${FX_BASIS_LABEL[basis]}-${asOf}.csv`, ['订单', '客户', '类型', '收入CNY', '采购CNY', '费用CNY', '退税CNY', '毛利不含退税', '毛利含退税', '毛利率%', '状态'],
+  const exportCsv = (format: 'csv' | 'xlsx' = 'csv') => (format === 'xlsx' ? (name: string, headers: string[], rows: unknown[][]) => downloadModuleXlsx(name.replace(/\.csv$/, '.xlsx'), [{ name: '订单核算', headers, rows }]) : downloadModuleCsv)(`订单核算-${FX_BASIS_LABEL[basis]}-${asOf}.csv`, ['订单', '客户', '类型', '收入CNY', '采购CNY', '费用CNY', '退税CNY', '毛利不含退税', '毛利含退税', '毛利率%', '状态'],
     rows.map(r => [r.code, r.customer, r.internal ? '内部订单' : '对外订单', r.internal ? '' : r.revenueCny ?? '', r.purchaseCny ?? '', r.expenseCny ?? '', r.internal ? '' : shown ? r.rebate.used : hiddenText, r.marginEx ?? '', shown ? r.marginIn ?? '' : hiddenText, rateOf(r) === null ? '' : (rateOf(r)! * 100).toFixed(1), r.status === 'norate' ? '缺汇率' : r.estimated ? '含暂估' : '无暂估']));
   const doPayable = async () => { if (!paying) return; await run({ type: 'cost.expense.payable', payload: { id: paying.id, supplierId: payForm.supplierId, invoiceNo: payForm.invoiceNo, due: payForm.due, taxAmount: payForm.taxAmount } } as MistCommand); setPaying(null); toast('已转入应付待办，可按票申请付款'); };
   const doVoid = async () => { if (!voiding) return; await run({ type: 'cost.expense.void', payload: { id: voiding.id, reason } } as MistCommand); setVoiding(null); toast('费用已作废'); };
   return <div data-order-actual-cost>
-    <Toolbar right={<span className="mist-row">{canWrite && <Button icon={Plus} variant="primary" disabled={busy} onClick={() => setRegister(true)}>{uiText("登记费用")}</Button>}<Button onClick={exportCsv}>{uiText("导出核算")}</Button></span>}>
+    <Toolbar right={<span className="mist-row">{canWrite && <Button icon={Plus} variant="primary" disabled={busy} onClick={() => setRegister(true)}>{uiText("登记费用")}</Button>}<Button onClick={() => exportCsv('csv')}>{uiText("导出 CSV")}</Button><Button onClick={() => exportCsv('xlsx')}>{uiText("导出 Excel")}</Button></span>}>
       <Field label={uiText("折算口径")}><Select aria-label={uiText("核算折算口径")} value={basis} onChange={e => setBasis(e.target.value as FxBasis)} options={(['actual', 'period', 'quote'] as FxBasis[]).map(b => ({ value: b, label: `人民币 · ${FX_BASIS_LABEL[b]}` }))} /></Field>
       {basis !== 'quote' && <Field label={uiText("暂估月份")}><TextInput type="month" aria-label={uiText("核算暂估月份")} value={month} onChange={e => setMonth(e.target.value)} /></Field>}
     </Toolbar>

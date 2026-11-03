@@ -11,6 +11,7 @@ import { EMAIL_LINK_LABEL, emailAddresses, emailLinkTarget, emailSendEffectiveSt
 import { useMistWorkspace, type MistMailAction, type MistMailResult } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
+import { takeComposeIntent } from '../../runtime/composeIntent';
 import { Events } from './fulfillmentKit';
 import { ActionBar, DetailBlock, DetailBody, DetailSurface, shortWhen, todayIso, useCompactLayout, type ReasonedAction } from './pageKit';
 import { FileName } from '../../runtime/files';
@@ -237,6 +238,13 @@ export function EmailsPage() {
   const downloadAttachment = async (fileId: string) => { const file = state?.files.find(row => row.id === fileId); if (!file) { setFailure('附件文件不可用，请重新同步'); return; } setFailure(''); try { await downloadFile(file); } catch (problem) { setFailure(problemText(problem, '附件下载失败，请重试')); } };
   const blankInput = (account?: EmailAccount): EmailDraftInput => ({ accountId: account?.id || '', from: account?.address || '', to: '', cc: '', bcc: '', subject: '', body: account?.signature ? `\n\n--\n${account.signature}` : '', template: '', links: [], fileIds: [] });
   const defaultAccount = accounts.find(a => a.id === accountId) || accounts.find(a => a.kind === 'personal') || accounts[0];
+  // A business page asked to send something (quote, lookbook, statement): start one draft from it.
+  React.useEffect(() => {
+    if (!state || !can || compose) return;
+    const intent = takeComposeIntent(); if (!intent) return;
+    const base = blankInput(defaultAccount);
+    setCompose({ input: { ...base, to: intent.to || '', subject: intent.subject, body: (intent.body || '') + base.body, fileIds: (intent.fileIds || []).filter(id => state.files.some(f => f.id === id)), links: intent.links || [] } });
+  }, [!!state, can]);
   const respond = (m: EmailMessage, mode: 'reply' | 'all' | 'forward') => {
     const account = accounts.find(a => a.id === m.accountId) || defaultAccount;
     const mine = new Set([account?.address || '', ...(account?.aliases || [])].filter(Boolean).map(value => value.toLowerCase()));

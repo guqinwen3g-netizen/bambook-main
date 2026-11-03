@@ -24,7 +24,7 @@ export function ExportConfirmHost({ scope }: { scope: string }) {
     footer={<><Button onClick={() => setPending(null)}>{uiText('取消')}</Button><Button variant="primary" onClick={() => {
       if (!current || current.scope !== scopeRef.current || executing.current) return;
       executing.current = true;
-      try { current.run(); setPending(null); } catch { executing.current = false; setError(uiText('导出未能开始，请重试')); }
+      try { const done = current.run(); setPending(null); if (done) void done.catch(() => undefined); } catch { executing.current = false; setError(uiText('导出未能开始，请重试')); }
     }}>{uiText('导出')}</Button></>}>
     {current && <div className="mist-col" style={{ gap: 8 }}><span>{current.filename}</span><span>{current.rowCount} {uiText('条记录')}</span>{error && <span role="alert">{error}</span>}</div>}
   </Dialog>;
