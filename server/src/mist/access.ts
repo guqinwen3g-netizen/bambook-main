@@ -103,7 +103,7 @@ export const isOwner = (row: { ownerId: string }, actor: TokenPayload) => row.ow
 export const isMember = (row: { state: MistState }, actor: TokenPayload) => memberIds(row.state).includes(actor.userId);
 export function hiddenSections(actor: TokenPayload) { return MIST_READ_SECTIONS.filter(section => section.permissions.some(scope => !hasScope(actor, scope))); }
 /** 无权限点命令仅限个人提醒及本人授权清理；命令仍校验归属，不能修改公司设置。 */
-export const MEMBER_PERSONAL_COMMANDS = ['notification.read', 'notification.readAll', 'task.complete', 'calendar.save', 'agent.proposal.reject', 'agent.task.cancel'];
+export const MEMBER_PERSONAL_COMMANDS = ['notification.read', 'notification.readAll', 'task.complete', 'calendar.save', 'calendar.delete', 'task.save', 'agent.proposal.reject', 'agent.task.cancel'];
 /** 读取与提醒动作使用同一来源边界；未知路由不能绕过受限账号的读投影。 */
 function targetVisibility(hidden: Section[]) {
   if (!hidden.length) return (_target?: { view?: string }) => true;

@@ -48,6 +48,8 @@ const NULL_PERMISSION_ALLOWLIST: Record<string, string> = {
   'agent.proposal.reject': '撤销本人待办提议，不依赖 AI 权限；领域层只认 ownerId 本人且拒绝 Agent（mistAgentProposals.ts）',
   'agent.task.cancel': '停止本人任务是安全动作，收回 ai:chat 后仍须能停；仓储拒绝 Agent，changeTask 只认任务创建人（agentTasks.ts#owner），REST 停止与 /commands 同一路径',
   'calendar.save': 'MEMBER_PERSONAL_COMMANDS：仓储按当前账号可见日程与可读来源核对',
+  'calendar.delete': 'MEMBER_PERSONAL_COMMANDS：只能删本账号可见的日程；个人日程领域层只认本人',
+  'task.save': 'MEMBER_PERSONAL_COMMANDS：新建本人待办；改期转派只作用于本账号可见事项，转派对象按成员目录解析',
   'notification.read': 'MEMBER_PERSONAL_COMMANDS：仓储按当前账号可见通知核对',
   'notification.readAll': 'MEMBER_PERSONAL_COMMANDS：只处理当前账号可见通知',
   'task.complete': 'MEMBER_PERSONAL_COMMANDS：仓储按当前账号可见事项核对',
