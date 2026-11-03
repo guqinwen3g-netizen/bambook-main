@@ -34,6 +34,13 @@ describe('receivable settlement', () => {
     f.run({ type: 'finance.receivable.writeoff.reverse', payload: { invoiceId: 'i2', writeoffId: w.id, reason: '客户补付' } });
     expect(f.state.invoices.find(i => i.id === 'i2')!.open).toBe(10);
   });
+  it('red-corrects an over-billed invoice that already has receipts, with approval authority', () => {
+    const f = setup(), r = f.state.receipts[0].id;
+    f.run({ type: 'finance.reconcile', payload: { receiptId: r, lines: [{ invoiceId: 'i1', amount: 100 }] } });
+    expect(mistCommandPermission({ type: 'finance.receivable.writeoff', payload: { invoiceId: 'i1', kind: 'correction', amount: 1, reason: 'x' } })).toBe('invoices:approve:writeoff');
+    f.run({ type: 'finance.receivable.writeoff', payload: { invoiceId: 'i1', kind: 'correction', amount: 150, reason: '单价开错 USD 1.5/米' } });
+    expect(f.state.invoices.find(i => i.id === 'i1')!.open).toBe(50);
+  });
 });
 describe('advance receipts', () => {
   it('lists the order advance and applies it to the oldest open invoices', async () => {

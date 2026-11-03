@@ -71,7 +71,9 @@ export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.pa
   // 按定价试算改写报价单价（2026-11-03）。
   'platform.pricing.apply',
   // 坏账 / 尾差核销与预收冲抵改变应收余额（2026-11-03）。
-  'finance.receivable.writeoff', 'finance.advance.apply']);
+  'finance.receivable.writeoff', 'finance.advance.apply',
+  // 期末结账锁定当月及以前的财务事实，重开解除锁定（2026-11-04）。
+  'finance.period.close', 'finance.period.reopen']);
 /** 审批、决定、驳回、减免、核销、放行、冲销、作废、退款、结清、分配、对账、清除。 */
 export const HIGH_RISK_VERB = /(^|\.)(approve|decide|reject|waive|writeoff|release|reverse|void|refund|settle|allocate|reconcile|purge)/i;
 export const agentCommandRisk = (type: string | undefined): AgentCommandRisk => {

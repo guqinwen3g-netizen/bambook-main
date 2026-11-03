@@ -20,6 +20,7 @@ import {mistBusinessDate} from './mistBusinessClock';
 import {getQcConcessionReviews} from './mistQcDisposition';
 import {getStockCountReviews} from './mistStockOperations';
 import {applyDocumentGeneration,documentGenerationPermission,type DocumentGenerationCommand} from './mistDocumentGeneration';
+import {applyPeriodClose,assertClosedPeriodsUntouched,periodClosePermission,type PeriodClose,type PeriodCloseCommand} from './mistPeriodClose';
 import {devStageHandoverBlocker,devStagePendingHandovers,devStagePlanError,devStagesOf,normalizeDevStagePlan,type DevStage,type DevStageHandover,type DevStagePlan} from './mistDevelopmentStages';
 import {createEmailState,applyEmailCommand,emailCommandPermission,seedEmailExamples,type EmailState,type EmailCommand} from './mistEmail';
 import {createPlatformState,applyPlatformCommand,platformCommandPermission,getPlatformReviews,platformCreditAppliedMinor,getRequiredBusinessNumberPlan as platformBusinessNumberPlan,platformBusinessDate,type PlatformState,type PlatformCommand} from './mistPlatform';
@@ -271,8 +272,9 @@ export const mistInvoiceBankChargeMinor = (invoice: Pick<MistInvoice, 'bankCharg
 export type MistAllocation = { id: string; receiptId: string; invoiceId: string; amount: number; currency: string; createdAt: string; actor: string; payerBasis?:string; receiptAmount?: number; receiptCurrency?: string; rate?: string; rateBasis?: string };
 export const mistAllocationReceiptMinor = (a: Pick<MistAllocation, 'amount' | 'receiptAmount'>) => mistMoneyMinor(a.receiptAmount ?? a.amount);
 /** Small difference (尾差) or bad debt written off on an invoice; reduces the open balance, reversible with a reason. */
-export type MistInvoiceWriteoff = { id: string; kind: 'difference' | 'badDebt'; amount: number; currency: string; reason: string; at: string; actor: string; actorId?: string; reversed?: { at: string; actor: string; reason: string } };
+export type MistInvoiceWriteoff = { id: string; kind: 'difference' | 'badDebt' | 'correction'; amount: number; currency: string; reason: string; at: string; actor: string; actorId?: string; reversed?: { at: string; actor: string; reason: string } };
 export const MIST_WRITEOFF_DIFFERENCE_LIMIT = 50;
+export const WRITEOFF_LABEL: Record<MistInvoiceWriteoff['kind'], string> = { difference: '尾差核销', badDebt: '坏账核销', correction: '红冲更正' };
 export const mistInvoiceWriteoffMinor = (invoice: { writeoffs?: MistInvoiceWriteoff[] }) => (invoice.writeoffs || []).filter(w => !w.reversed).reduce((n, w) => n + mistMoneyMinor(w.amount), 0);
 /**
  * 核销 / 付款冲回记录。原记录不删除不改写：核销冲回后原核销整条快照保存在 allocation 中、
@@ -317,6 +319,8 @@ export type MistState = {
   /** Response-only partial statement summaries, without the archived full PDF or total. */
   partialStatements?: Array<{ id: string; customerId: string; statementNo: string; asOf: string; hiddenCount: number; sections: Array<{ currency: string; lines: import('./mistCustomerStatement').StatementLine[]; hiddenCount: number }> }>;
   financeReversals?: MistFinanceReversal[];
+  /** Month-end closes (finance.period.close / reopen). */
+  periodCloses?: PeriodClose[];
   bankAccounts?: MistBankAccount[];
   fxRecords?: MistFxRecord[];
   /** 月末汇率（报表暂估用），见 mistFxRates。 */
@@ -343,7 +347,7 @@ export type MistState = {
   teamScopes?:MistTeamScope[];
 };
 export type MistOrderInput = { type: 'garment' | 'fabric'; customerId: string; season: string; currency: string; due: string; ownerId: string; governance?:OrderGovernanceInput; lines: Array<Omit<MistOrderLine, 'id' | 'orderId' | 'made' | 'qc'> & OrderLineSource & {breakdown?:OrderLineBreakdown}> };
-export type MistCommand = Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
+export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand, { type: 'order.document.generate' | 'market.lookbook.document' }> | AgentTaskCommand | AgentProposalCommand | InternalFabricCommand | InternalDeliveryCommand | FulfillmentCommand | MarketCommand | PlatformCommand | EmailCommand | CrmCommand | OrderGovernanceCommand | OrderFundingCommand | PayablesCommand | ExportRebateCommand | FxRateCommand | CustomerStatementCommand | LcCommand | RfqCommand | HandoverCommand | TeamCommand | TeamScopeCommand | OrderCostCommand | OpeningCommand
   | { type: 'development.saveDraft'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.submit'; payload: { draftId?: string; values: DevelopmentValues; fileIds: string[] } }
   | { type: 'development.update'; payload: { devId: string; patch: Partial<DevelopmentValues> } }
@@ -390,7 +394,7 @@ export type MistCommand = Extract<DocumentGenerationCommand, { type: 'order.docu
   | { type: 'finance.reconcile'; payload: { receiptId: string; invoiceId?: string; amount?: number; payerBasis?:string; rate?: string; rateBasis?: string; lines?: Array<{ invoiceId: string; amount: number; rate?: string }> } }
   /** Apply an order's earmarked advance to its open invoices, oldest due first. */
   | { type: 'finance.advance.apply'; payload: { assignmentId: string } }
-  | { type: 'finance.receivable.writeoff'; payload: { invoiceId: string; kind: 'difference' | 'badDebt'; amount: number; reason: string } }
+  | { type: 'finance.receivable.writeoff'; payload: { invoiceId: string; kind: 'difference' | 'badDebt' | 'correction'; amount: number; reason: string } }
   | { type: 'finance.receivable.writeoff.reverse'; payload: { invoiceId: string; writeoffId: string; reason: string } }
   | { type: 'finance.receivable.bankCharge'; payload: { invoiceId: string; receiptId: string; amount: number; reason: string } }
   | { type: 'finance.receivable.bankCharge.reverse'; payload: { invoiceId: string; chargeId: string; reason: string } }
@@ -842,6 +846,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type==='agent.task.cancel')return null;
   if(command.type==='finance.statement.generate')return customerStatementCommandPermission(command as CustomerStatementCommand);
   if(command.type==='order.document.generate'||command.type==='market.lookbook.document')return documentGenerationPermission(command as DocumentGenerationCommand);
+  if(command.type==='finance.period.close'||command.type==='finance.period.reopen')return periodClosePermission(command as PeriodCloseCommand);
   if(command.type.startsWith('lc.'))return lcCommandPermission(command as LcCommand);
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.'))return rfqCommandPermission(command as RfqCommand);
   if(command.type.startsWith('handover.'))return handoverCommandPermission(command as HandoverCommand);
@@ -859,7 +864,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type==='finance.receivable.confirm'||command.type==='finance.receivable.reject')return MIST_FINANCE_SCOPES.invoice;
   if(command.type==='finance.importReceipts'||command.type==='finance.payment.save'||command.type==='finance.payment.reverse'||command.type==='finance.account.save'||command.type==='finance.account.assign'||command.type==='finance.account.close'||command.type==='finance.account.reopen'||command.type.startsWith('finance.fx.'))return command.type==='finance.fx.lock'?'fx:lock':MIST_FINANCE_SCOPES.voucher;
   if(command.type==='finance.advance.apply')return MIST_FINANCE_SCOPES.reconcile;
-  if(command.type==='finance.receivable.writeoff')return command.payload?.kind==='badDebt'?'invoices:approve:writeoff':MIST_FINANCE_SCOPES.reconcile;
+  if(command.type==='finance.receivable.writeoff')return command.payload?.kind==='badDebt'||command.payload?.kind==='correction'?'invoices:approve:writeoff':MIST_FINANCE_SCOPES.reconcile;
   if(command.type==='finance.receivable.writeoff.reverse')return 'invoices:approve:writeoff';
   if(command.type==='finance.reconcile'||command.type==='finance.acceptSuggestions'||command.type==='finance.allocation.reverse'||command.type==='finance.receivable.bankCharge'||command.type==='finance.receivable.bankCharge.reverse')return MIST_FINANCE_SCOPES.reconcile;
   if(command.type.startsWith('finance.'))throw new MistCommandError('VALIDATION','未知财务操作');
@@ -897,6 +902,8 @@ export function createMistOrderRecords(state:MistState,p:MistOrderInput,context:
 
 export function applyMistCommand(original: MistState, command: MistCommand, context: MistContext): {state:MistState;result:MistCommandResult} {
   const result=applyMistCommandUnbound(original, command, context);
+  // Closed months stay final whatever command ran (reopening is the only way back).
+  if(command.type!=='finance.period.reopen')assertClosedPeriodsUntouched(original,result.state);
   syncClaimReplacementShipments(result.state,context);
   assertInternalDeliveryIntegrity(result.state);
   syncInternalDeliveryTasks(result.state,context);
@@ -923,6 +930,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   }
   if(command.type==='finance.statement.generate'){const result=applyCustomerStatementCommand(state,command as CustomerStatementCommand,context);return {state,result};}
   if(command.type==='order.document.generate'||command.type==='market.lookbook.document'){const result=applyDocumentGeneration(state,command as DocumentGenerationCommand,context);return {state,result};}
+  if(command.type==='finance.period.close'||command.type==='finance.period.reopen'){const result=applyPeriodClose(state,command as PeriodCloseCommand,context);return {state,result};}
   if(command.type.startsWith('lc.')){const result=applyLcCommand(state,command as LcCommand,context);return {state,result};}
   if(command.type.startsWith('handover.')){const result=applyHandoverCommand(state,command as HandoverCommand,context);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('team.')){const result=applyTeamCommand(state,command as TeamCommand,context);return {state,result};}
@@ -1434,16 +1442,17 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     }
     case 'finance.receivable.writeoff': {
       // 尾差 (small rounding / unexplained difference) and 坏账 (uncollectible) close an invoice's open balance without cash.
+      // 红冲更正 (fin16) reverses over-billed revenue on an invoice that already has receipts, so it can no longer be voided and reissued.
       const i=find(state.invoices,text(p.invoiceId,'应收'),'应收');
       if(!isRecognizedMistInvoice(i))throw new MistCommandError('PRECONDITION','仅财务已确认的有效应收可核销');
-      if(p.kind!=='difference'&&p.kind!=='badDebt')throw new MistCommandError('VALIDATION','请选择尾差或坏账');
-      const amount=positive(p.amount,'核销金额'),minor=mistMoneyMinor(amount),reason=text(p.reason,p.kind==='badDebt'?'坏账依据（催收记录、破产或诉讼文件）':'尾差说明',true,1000);
+      if(p.kind!=='difference'&&p.kind!=='badDebt'&&p.kind!=='correction')throw new MistCommandError('VALIDATION','请选择尾差、坏账或红冲更正');
+      const amount=positive(p.amount,'核销金额'),minor=mistMoneyMinor(amount),reason=text(p.reason,p.kind==='badDebt'?'坏账依据（催收记录、破产或诉讼文件）':p.kind==='correction'?'更正原因（开错项目、单价或数量）':'尾差说明',true,1000);
       if(minor>mistMoneyMinor(i.open))throw new MistCommandError('VALIDATION',`核销 ${amount} 超出发票未收 ${i.open} ${i.currency}`);
       if(p.kind==='difference'&&mistInvoiceWriteoffMinor({writeoffs:(i.writeoffs||[]).filter(w=>w.kind==='difference')})+minor>mistMoneyMinor(MIST_WRITEOFF_DIFFERENCE_LIMIT))throw new MistCommandError('PRECONDITION',`单张发票尾差累计不超过 ${MIST_WRITEOFF_DIFFERENCE_LIMIT} ${i.currency}；更大的短收请按坏账或索赔处理`);
       if(p.kind==='badDebt'&&!state.allocations.some(a=>a.invoiceId===i.id)&&!state.crm?.followUps.some(f=>f.link?.kind==='invoice'&&f.link.id===i.id&&f.collection))throw new MistCommandError('PRECONDITION','坏账核销前须有催收记录或已收部分款项');
       const id=context.id();i.writeoffs=[...(i.writeoffs||[]),{id,kind:p.kind,amount,currency:i.currency,reason,at:context.now,actor:context.actorName,...(context.actorId?{actorId:context.actorId}:{})}];
       recalculate(state);
-      event(state,context,'invoice',i.id,`${p.kind==='badDebt'?'坏账核销':'尾差核销'} ${amount} ${i.currency}：${reason}`,{view:'invoices',id:i.id});
+      event(state,context,'invoice',i.id,`${WRITEOFF_LABEL[p.kind as MistInvoiceWriteoff["kind"]]} ${amount} ${i.currency}：${reason}`,{view:'invoices',id:i.id});
       result={id,invoiceId:i.id};break;
     }
     case 'finance.receivable.writeoff.reverse': {
@@ -1451,7 +1460,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(!w)throw new MistCommandError('NOT_FOUND','核销记录不存在',404);
       if(w.reversed)throw new MistCommandError('PRECONDITION','该核销已冲回');
       const reason=text(p.reason,'冲回原因',true,500);w.reversed={at:context.now,actor:context.actorName,reason};recalculate(state);
-      event(state,context,'invoice',i.id,`冲回${w.kind==='badDebt'?'坏账':'尾差'}核销 ${w.amount} ${w.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id});
+      event(state,context,'invoice',i.id,`冲回${WRITEOFF_LABEL[w.kind]} ${w.amount} ${w.currency}：${reason}；原记录保留`,{view:'invoices',id:i.id});
       result={id:w.id,invoiceId:i.id};break;
     }
     case 'finance.allocation.reverse': {

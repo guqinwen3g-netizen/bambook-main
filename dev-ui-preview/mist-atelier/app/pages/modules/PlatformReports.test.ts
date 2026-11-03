@@ -20,6 +20,12 @@ describe('报表中心', () => {
     expect(rows.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open])).toEqual([['A', 'CNY', 1, 50, 50, 0, 50], ['B', 'USD', 1, 300, 0, 0, 0], ['A', 'USD', 2, 200, 100, 60, 40]]);
     expect(buildCustomerSales(s, '2026-10-02')).toEqual([]);
   });
+  it('counts sales by shipment departure or invoice date when asked, skipping orders without that date', () => {
+    const s = { ...state([order('1'), order('2')], [invoice('i1', '1', { issuedAt: '2026-10-15T02:00:00Z' })]), fulfillment: { shipments: [{ id: 's1', state: 'departed', departedAt: '2026-10-20T02:00:00Z', lines: [{ orderId: '2' }] }] } };
+    expect(buildCustomerSales(s, '2026-10-10', '', '', 'invoice').map(r => r.orders)).toEqual([1]);
+    expect(buildCustomerSales(s, '2026-10-16', '', '', 'invoice')).toEqual([]);
+    expect(buildCustomerSales(s, '2026-10-16', '', '', 'shipment').map(r => [r.orders, r.amount])).toEqual([[1, 100]]);
+  });
   it('buckets open receivables by days past due and skips settled or void invoices', () => {
     expect(['2026-10-15', '2026-10-14', '2026-09-15', '2026-08-16', '2026-07-17', '2026-07-16'].map(d => agingBucket(d, '2026-10-15'))).toEqual(['current', 'd30', 'd30', 'd60', 'd90', 'over']);
     const rows = buildReceivableAging(state([], [invoice('a', 'x', { due: '2026-10-20' }), invoice('b', 'x', { due: '2026-06-01', open: 25.5 }), invoice('c', 'x', { open: 0 }), invoice('d', 'x', { voidedAt: '2026-10-01T00:00:00Z' }), invoice('e', 'x', { currency: 'EUR', open: 7 })]), '2026-10-15');

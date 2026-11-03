@@ -9,6 +9,7 @@ import { ModuleEditorDialog, type ModuleEditorSpec } from './modules/ModuleWorkb
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { mistCommandPermission, mistFxLockUsage, mistFxRate, mistReceiptSettledMinor, type MistBankAccount, type MistCommand, type MistFxRecord, type MistPayment, type MistReceipt, type MistState } from '../../../../server/src/shared/mistWorkspace';
 import { platformBusinessDate } from '../../../../server/src/shared/mistPlatform';
+import { latestClosedMonth } from '../../../../server/src/shared/mistPeriodClose';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { OptionInput } from './OptionInput';
@@ -308,4 +309,26 @@ export function AccountStatusCell({ account, balance }: { account: MistBankAccou
     {canWrite && (account.closed ? <Button size="sm" disabled={busy} onClick={() => setSpec(reopen)}>{uiText("恢复")}</Button> : <Button size="sm" disabled={busy} title={uiText(Math.round(balance * 100) ? '余额须为零才能销户' : undefined)} onClick={() => setSpec(close)}>{uiText("销户")}</Button>)}
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
   </span>;
+}
+
+/** Month-end close: after bank, receivable and payable checks, finance closes the month; later changes need a reopen. */
+export function PeriodCloseCard() {
+  const { state, run, loading, saving, pending } = useMistWorkspace(), session = useMistSession();
+  const canClose = session.hasPermission(MIST_FINANCE_SCOPES.voucher), canReopen = session.hasPermission('invoices:approve:writeoff' as never), busy = loading || saving || !!pending;
+  const [spec, setSpec] = React.useState<ModuleEditorSpec | null>(null);
+  const rows = [...(state?.periodCloses || [])].sort((a, b) => b.month.localeCompare(a.month) || b.closedAt.localeCompare(a.closedAt));
+  const latest = latestClosedMonth(state || {}), today = platformBusinessDate(businessNow()).slice(0, 7);
+  const next = latest ? (() => { const [y, m] = latest.split('-').map(Number); return `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, '0')}`; })() : fxPrevMonth(today);
+  const close: ModuleEditorSpec = { title: `结账 ${next}`, submitLabel: '结账', description: `结账后 ${next} 及以前日期的到账、核销、付款、结汇、票据和月末汇率不能再补登或修改。`, fields: [{ key: 'note', label: '结账核对说明', type: 'textarea', required: true }], initialValues: { note: '' }, submit: v => run({ type: 'finance.period.close', payload: { month: next, note: String(v.note ?? '') } }) };
+  const reopen: ModuleEditorSpec = { title: `反结账 ${latest}`, submitLabel: '反结账', submitVariant: 'danger', fields: [{ key: 'reason', label: '反结账原因', type: 'textarea', required: true }], initialValues: { reason: '' }, submit: v => run({ type: 'finance.period.reopen', payload: { month: latest, reason: String(v.reason ?? '') } }) };
+  return <Card>
+    <CardHeader title={uiText('期末结账')} tools={<span className="mist-row">{canReopen && latest && <Button size="sm" disabled={busy} onClick={() => setSpec(reopen)}>{uiText(`反结账 ${latest}`)}</Button>}{canClose && next < today && <Button size="sm" variant="primary" disabled={busy} onClick={() => setSpec(close)}>{uiText(`结账 ${next}`)}</Button>}</span>} />
+    {rows.length ? <DataTable ariaLabel={uiText('结账记录')} rows={rows} rowKey={r => r.month + r.closedAt} density="comfy" columns={[
+      { key: 'm', header: '月份', render: r => r.month },
+      { key: 's', header: '状态', render: r => <Pill tone={r.reopened ? 'neutral' : 'ok'}>{uiText(r.reopened ? '已反结账' : '已结账')}</Pill> },
+      { key: 'by', header: '结账', render: r => `${r.closedBy} · ${r.closedAt.slice(0, 10)}` },
+      { key: 'n', header: '说明', render: r => r.reopened ? `${r.note}；反结账：${r.reopened.reason}（${r.reopened.actor}）` : r.note },
+    ]} /> : <EmptyState compact title={uiText('还没有结账月份')} />}
+    <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />
+  </Card>;
 }

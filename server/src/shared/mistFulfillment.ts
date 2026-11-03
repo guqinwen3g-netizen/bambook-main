@@ -232,7 +232,8 @@ export type FulfillmentReceipt = {
     /** Keep original acceptance quantities and evidence when goods fail a later receiving check. */
     postReceiptRejections?: { id: string; quantity: number; previousQuantity: number; previousRejected: number; location: string; evidence: string; actor: string; at: string; stockMovementId: string }[];
 };
-export type FulfillmentReceiptReturn = { id: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string; actor: string; at: string; reversed?: { at: string; actor: string; reason: string } };
+/** sup19: returnNo / freight / deduction give finance a basis; a deduction (and supplier-borne freight) is carried into the next settlement of the purchase as a dispute line. */
+export type FulfillmentReceiptReturn = { id: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string; returnNo?: string; freight?: number; freightBy?: 'supplier' | 'us'; deduction?: number; actor: string; at: string; reversed?: { at: string; actor: string; reason: string } };
 /** 某次收货中已登记退换（未冲回）的拒收数量。 */
 export function receiptReturnedQuantity(receipt: FulfillmentReceipt, disposition?: FulfillmentReceiptReturn['disposition']) { return (receipt.returns || []).filter(r => !r.reversed && (!disposition || r.disposition === disposition)).reduce((n, r) => Math.round((n + r.quantity) * 1e6) / 1e6, 0); }
 export type FulfillmentStock = {
@@ -598,7 +599,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     payload: { receiptId: string; quantity: number; location: string; evidence: string; sourceLocation?: string };
 } | {
     type: 'fulfillment.procurement.return';
-    payload: { receiptId: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string };
+    payload: { receiptId: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string; returnNo?: string; freight?: number; freightBy?: 'supplier' | 'us'; deduction?: number };
 } | {
     type: 'fulfillment.procurement.return.reverse';
     payload: { receiptId: string; returnId: string; reason: string };
@@ -1837,9 +1838,14 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (date < receipt.date) fail('退换日期不能早于收货日期');
             const left = sum([receipt.rejected, -receiptReturnedQuantity(receipt)]);
             if (quantity > left) fail(`该次收货拒收 ${receipt.rejected} ${purchase.unit}，尚可登记退换 ${left} ${purchase.unit}`);
+            const optMoney = (v: unknown, label: string) => { if (v === undefined || v === null || v === '' || v === 0) return undefined; if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1e9 || Math.abs(v * 100 - Math.round(v * 100)) > 1e-6) fail(`${label}须为不小于零的金额，最多两位小数`); return Math.round((v as number) * 100) / 100; };
+            const returnNo = typeof p.returnNo === 'string' && p.returnNo.trim() ? p.returnNo.trim().slice(0, 80) : undefined;
+            const freight = optMoney(p.freight, '退货运费'), deduction = optMoney(p.deduction, '扣款金额');
+            if (freight && p.freightBy !== 'supplier' && p.freightBy !== 'us') fail('请选择退货运费由谁承担');
             const id = ctx.id();
-            (receipt.returns ||= []).push({ id, quantity, disposition: p.disposition, date, evidence, actor: ctx.actorName, at: ctx.now });
-            audit(root, ctx, 'procurement', purchase.id, `拒收货物退回供应商 ${quantity} ${purchase.unit} · ${p.disposition === 'replace' ? '供应商补发，补货另行收货' : '不再补发，按实收结算'} · ${evidence}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
+            (receipt.returns ||= []).push({ id, quantity, disposition: p.disposition, date, evidence, ...(returnNo ? { returnNo } : {}), ...(freight ? { freight, freightBy: p.freightBy } : {}), ...(deduction ? { deduction } : {}), actor: ctx.actorName, at: ctx.now });
+            const money = [freight ? `运费 ${freight} ${purchase.currency}（${p.freightBy === 'supplier' ? '供应商承担' : '我方承担'}）` : '', deduction ? `扣款 ${deduction} ${purchase.currency}` : ''].filter(Boolean).join(' · ');
+            audit(root, ctx, 'procurement', purchase.id, `拒收货物退回供应商 ${quantity} ${purchase.unit}${returnNo ? ` · 退货单 ${returnNo}` : ''} · ${p.disposition === 'replace' ? '供应商补发，补货另行收货' : '不再补发，按实收结算'}${money ? ' · ' + money : ''} · ${evidence}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
             return { id, purchaseId: purchase.id };
         }
         case 'fulfillment.procurement.return.reverse': {
@@ -1849,6 +1855,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if (row.reversed) fail('该退换记录已冲回', 'PRECONDITION');
             const reason = text(p.reason, '冲回原因');
             assertMaterialReturnReversal(root, receipt.id, row.id);
+            const carriedBy = (root.payables?.settlements || []).find(s => (s.state === 'pending' || s.state === 'confirmed') && s.disputes.some(d => d.returnId === row.id));
+            if (carriedBy) fail(`该退货扣款已带入结算 ${carriedBy.code}，请先撤回或退回该结算`, 'PRECONDITION');
             row.reversed = { at: ctx.now, actor: ctx.actorName, reason };
             audit(root, ctx, 'procurement', purchase.id, `冲回退换登记 ${row.quantity} ${purchase.unit}：${reason}`, { view: 'orders/detail', id: purchase.orderId, orderLineId: purchase.lineId });
             return { id: row.id, purchaseId: purchase.id };

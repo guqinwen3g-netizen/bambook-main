@@ -1,5 +1,6 @@
 import {recoveryOtherFulfilledMinor} from './mistClaimRecoveryReceipts';
 import {openQcChargebacks} from './mistQcDisposition';
+import {openReturnCharges} from './mistReturnCharges';
 import { hasMaterialAtFactory, materialDeliveryRows } from './mistInternalFabric';
 import { receiptReturnedQuantity } from './mistFulfillment';
 /**
@@ -117,7 +118,7 @@ export type PaymentRequest = {
 };
 /** 结算争议 / 未确认扣款：单列记录，不自动抵减。 */
 /** qcDispositionId: carried from a production QC chargeback (mistQcDisposition) rather than typed by hand. */
-export type SettlementDispute = { description: string; amount: number; qcDispositionId?: string };
+export type SettlementDispute = { description: string; amount: number; qcDispositionId?: string; returnId?: string };
 /** 供应商结算：业务员按实际收货提交，财务复核确认；确认时决定预付抵扣。 */
 export type SupplierSettlement = {
   id: string; code: string; purchaseId: string; purchaseCode: string; supplierId: string; supplier: string; currency: string;
@@ -998,6 +999,7 @@ export function applyPayablesCommand(root: Root, command: PayablesCommand, c: Mi
       const disputes: SettlementDispute[] = ((p.disputes || []) as SettlementDispute[]).map(d => ({ description: text(d?.description, '争议 / 扣款说明', true, 500), amount: major(minor(d?.amount, '争议 / 扣款金额')) }));
       // Production QC chargebacks against this contract are carried automatically so finance reviews them with the settlement.
       for (const c of openQcChargebacks(root, po.id)) disputes.push({ description: `QC 扣款：${c.note}`, amount: c.amount!, qcDispositionId: c.id });
+      for (const r of openReturnCharges(root, po.id)) disputes.push({ description: r.description, amount: r.amount, returnId: r.id });
       const id = c.id(), code = nextCode('ST', s.settlements, c.now);
       s.settlements.push({ id, code, purchaseId: po.id, purchaseCode: po.code, supplierId: po.supplierId, supplier: po.supplier, currency: po.currency, unit: po.unit, price: po.price, receiptIds: ids, quantity, rejected, amount: major(amount), final, disputes, note: text(p.note, '结算说明', false, 1000), fileIds: files(root, p.fileIds), state: 'pending', submitterId: c.actorId, submittedBy: c.actorName, submittedAt: c.now });
       event(root, c, id, `提交 ${po.code} 结算 ${code}（实收 ${quantity} ${po.unit} · ${fx(major(amount))} ${po.currency}），待财务复核`);

@@ -536,6 +536,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "finance.period.close",
+  "payload": "{ month: string; note: string }",
+  "source": "server/src/shared/mistPeriodClose.ts"
+ },
+ {
+  "type": "finance.period.reopen",
+  "payload": "{ month: string; reason: string }",
+  "source": "server/src/shared/mistPeriodClose.ts"
+ },
+ {
   "type": "finance.receivable.bankCharge",
   "payload": "{ invoiceId: string; receiptId: string; amount: number; reason: string }",
   "source": "server/src/shared/mistWorkspace.ts"
@@ -557,7 +567,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "finance.receivable.writeoff",
-  "payload": "{ invoiceId: string; kind: 'difference' | 'badDebt'; amount: number; reason: string }",
+  "payload": "{ invoiceId: string; kind: 'difference' | 'badDebt' | 'correction'; amount: number; reason: string }",
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
@@ -780,7 +790,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.procurement.return",
-  "payload": "{ receiptId: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string }",
+  "payload": "{ receiptId: string; quantity: number; disposition: 'replace' | 'noReplace'; date: string; evidence: string; returnNo?: string; freight?: number; freightBy?: 'supplier' | 'us'; deduction?: number }",
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
@@ -1826,7 +1836,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "payable.settlement.submit",
   "payload": "{ purchaseId: string; receiptIds: string[]; final?: boolean; disputes?: SettlementDispute[]; note?: string; fileIds?: string[] }",
   "types": {
-   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string }"
+   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string; returnId?: string }"
   },
   "source": "server/src/shared/mistPayables.ts"
  },
