@@ -105,7 +105,19 @@ GitHub 的 deployment / ops 工作流均已停用，旧服务器授权及仓库 
 
 服务器直连不到 `chatgpt.com` / `api.openai.com`。平台 ChatGPT 套餐（登录、令牌刷新、模型调用）及 OpenAI API 服务经出站代理访问：服务器本机 `sing-box.service` 提供 mixed 入站 `127.0.0.1:7890`，`backend.env` 设 `BAMBOOK_AI_HTTPS_PROXY=http://127.0.0.1:7890`。代码只对 `*.openai.com`、`*.chatgpt.com` 走代理（`server/src/ai/outboundProxy.ts`），国内模型接口仍直连；未设置该变量时行为不变。Node 内置 fetch 不读取 `HTTPS_PROXY`，不要用它代替。
 
-## 智能邮箱服务器地址限制（2026-11-02）
+### 平台模型网关 magpie（2026-11-04）
+
+用户要求在后端加装 magpie，补充平台可用的模型订阅。magpie 是开源（MIT）的模型网关，把多个订阅和 API 服务汇成一个 OpenAI / Anthropic 兼容入口，额度用完或出错时转到下一个，并记录用量。
+
+- 安装：官方 Linux 终端版二进制，按官方发布清单核对 SHA-256 后放在 `/usr/local/bin/magpie`；系统服务 `magpie.service`，专用系统用户 `magpie`，数据目录 `/var/lib/magpie`（0700），`ProtectSystem=strict`、`MemoryMax=384M`。
+- 监听：网关 `127.0.0.1:3425`、管理页 `127.0.0.1:3430`，只在本机回环，不开放公网端口。管理页需 `MAGPIE_WEB_KEY`（`/etc/magpie/magpie.env`，0600），运维从本机用 SSH 端口转发打开。
+- 出站：设置 `proxy=http://127.0.0.1:7890`，经现有 sing-box 分流；关闭自动更新与自动下载（升级由运维核对后手动做），关闭统计上报。
+- 接入 Bambook：已为后端生成专用网关密钥（`/etc/magpie/bambook-gateway.key`，0600）。在“平台设置 › 平台 AI 模型”新增 API 服务：接口地址 `http://127.0.0.1:3425/v1`，模型填 magpie 列出的 `provider/model` 或路由组 id，Key 填该网关密钥。后端只对回环地址允许 http（`normalizeBaseUrl`）。
+- 订阅与 Key：登录订阅或添加 API 服务都在 magpie 管理页或 `magpie provider add` 完成，凭据只存在 `/var/lib/magpie`。个人订阅用作平台共享额度前，须确认其服务条款允许。
+- 密钥：本机回环来的请求不带网关密钥也能调用，安全边界是只监听回环；网关密钥用于按调用方区分用量和设限额（`magpie gateway-key limit`）。
+- 备份：`/var/lib/magpie` 暂未纳入每日备份；接入正式订阅后再加入。
+
+
 
 公司在智能邮箱接入时填写的 IMAP/SMTP 地址，服务端会先解析：解析结果含回环、私网、链路本地（含云元数据 169.254.169.254）、CGNAT、基准测试（198.18/15）、组播或 IPv6 唯一本地/链路本地地址时一律拒绝（`MAIL_HOST_NOT_ALLOWED`），解析失败返回 `MAIL_HOST_UNRESOLVED`。只有运维在 `backend.env` 的 `MIST_MAIL_ALLOWED_HOSTS` 中显式登记的主机名才可指向内部地址，登记后其他主机仍须为允许端口（143/465/587/993）。
 
