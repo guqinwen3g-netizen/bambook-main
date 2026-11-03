@@ -68,6 +68,19 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistCrm.ts"
  },
  {
+  "type": "crm.followUp.void",
+  "payload": "{ id: string; reason: string }",
+  "source": "server/src/shared/mistCrm.ts"
+ },
+ {
+  "type": "crm.opportunity.reopen",
+  "payload": "{ id: string; stage: Exclude<CrmStage, 'won' | 'lost'>; note: string }",
+  "types": {
+   "CrmStage": "'intent' | 'sampling' | 'quoting' | 'won' | 'lost'"
+  },
+  "source": "server/src/shared/mistCrm.ts"
+ },
+ {
   "type": "crm.opportunity.save",
   "payload": "{ id?: string; input: CrmOpportunityInput }",
   "types": {
@@ -2149,6 +2162,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistSourcing.ts"
  },
  {
+  "type": "rfq.reopen",
+  "payload": "{ id: string; reason: string; deadline: string }",
+  "source": "server/src/shared/mistSourcing.ts"
+ },
+ {
   "type": "rfq.save",
   "payload": "{ input: RfqInput }",
   "types": {
@@ -2156,6 +2174,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "FulfillmentPurchase": "{ id: string; code: string; orderId: string; lineId: string; kind: 'material' | 'finished' | 'processing'; materialKind?: MistMaterialKind; stageTerms?: FabricStageTerms; iqcRequired?: boolean; domain: 'garment' | 'fabric'; supplierId: string; supplier: string; description: string; quantity: number; unit: string; price: number; currency: string; due: string; terms: string; destination: string; note: string; fileIds: string[]; state: 'draft' | 'pending' | 'approved' | 'rejected' | 'cancelled'; cancellation?: { at: string; actor: string; reason: string; prepaid: number; prepayment?: 'refund' | 'transfer'; targetPurchaseId?: string; targetPurchaseCode?: string }; transferredTo?: { purchaseId: string; purchaseCode: string; supplierId: string; supplier: string; reason: string; at: string; actor: string }; transferredFrom?: { purchaseId: string; purchaseCode: string; supplierId: string; supplier: string; reason: string }; requesterId: string; createdBy: string; createdAt: string; submittedAt?: string; reviewerIds: string[]; configVersions: Record<string, number>; decision?: { actorId: string; actor: string; at: string; decision: 'approved' | 'rejected'; note: string; }; received: number; documents?: PurchaseDocumentRecord[]; revisionHistory?: FulfillmentPurchaseRevision[]; offlineSend?: { at: string; actor: string; evidence: string; fileIds: string[]; revision: number }; supplierConfirmation?: { at: string; actor: string; evidence: string; confirmedDue: string; fileIds: string[]; r",
    "MistMaterialKind": "'fabric' | 'greige' | 'trims' | 'packaging' | 'other'"
   },
+  "source": "server/src/shared/mistSourcing.ts"
+ },
+ {
+  "type": "rfq.unaward",
+  "payload": "{ id: string; reason: string }",
+  "source": "server/src/shared/mistSourcing.ts"
+ },
+ {
+  "type": "rfq.update",
+  "payload": "{ id: string; quantity: string | number; due: string; deadline: string; reason: string }",
   "source": "server/src/shared/mistSourcing.ts"
  },
  {

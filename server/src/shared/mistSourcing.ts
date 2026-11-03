@@ -26,6 +26,8 @@ export type MistRfq = {
   due: string; destination: string; deadline: string; supplierIds: string[]; quotes: MistRfqQuote[]; note: string; state: 'open' | 'awarded' | 'cancelled'; createdAt: string; actor: string;
   award?: { quoteId: string; supplierId: string; supplier: string; reason: string; flags: string[]; purchaseId: string; purchaseCode: string; at: string; actor: string };
   cancelled?: { reason: string; at: string; actor: string };
+  /** mar42：发出后修改需求、撤销定标与重开都留痕。 */
+  changes?: Array<{ kind: 'edit' | 'unaward' | 'reopen'; note: string; at: string; actor: string }>;
 };
 export type RfqInput = { orderId: string; lineId: string; kind: FulfillmentPurchase['kind']; materialKind?: MistMaterialKind; description: string; quantity: string | number; unit: string; currency: string; due: string; destination: string; deadline: string; supplierIds: string[]; note?: string };
 export type RfqCommand =
@@ -34,6 +36,9 @@ export type RfqCommand =
   | { type: 'rfq.quote'; payload: { id: string; supplierId: string; declined?: boolean; declineReason?: string; price?: string | number; currency?: string; moq?: string | number; promisedDue?: string; terms?: string; validUntil?: string; note?: string; fileIds?: string[] } }
   | { type: 'rfq.award'; payload: { id: string; quoteId: string; reason?: string } }
   | { type: 'rfq.cancel'; payload: { id: string; reason: string } }
+  | { type: 'rfq.update'; payload: { id: string; quantity: string | number; due: string; deadline: string; reason: string } }
+  | { type: 'rfq.unaward'; payload: { id: string; reason: string } }
+  | { type: 'rfq.reopen'; payload: { id: string; reason: string; deadline: string } }
   | { type: 'sourcing.purchase.transfer'; payload: { purchaseId: string; supplierId: string; price: string | number; currency: string; due: string; terms?: string; reason: string } };
 type Root = MistState & { rfqs?: MistRfq[] };
 export const RFQ_STATE_LABEL: Record<MistRfq['state'], string> = { open: '询价中', awarded: '已定标', cancelled: '已取消' };
@@ -163,6 +168,42 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       const r = find(root, p.id); open(r);
       r.state = 'cancelled'; r.cancelled = { reason: text(p.reason, '取消原因', true, 2000), at: c.now, actor: c.actorName };
       event(root, c, r, `取消询价：${r.cancelled.reason}`);
+      return { id: r.id };
+    }
+    case 'rfq.update': {
+      // mar42：询价中可改数量、需求交期与报价截止日，写原因；已收到的报价保留，供应商可按新需求重新报价。
+      const r = find(root, p.id); open(r);
+      const quantity = positive(p.quantity, '需求数量'), due = day(p.due, '需求交期'), deadline = day(p.deadline, '报价截止日'), reason = text(p.reason, '修改原因', true, 1000);
+      if (deadline < today) fail('报价截止日不能早于今天');
+      const note = [quantity !== r.quantity && `数量 ${r.quantity} → ${quantity}`, due !== r.due && `交期 ${r.due} → ${due}`, deadline !== r.deadline && `截止 ${r.deadline} → ${deadline}`].filter(Boolean).join('；');
+      if (!note) fail('需求没有变化');
+      r.quantity = quantity; r.due = due; r.deadline = deadline;
+      (r.changes ||= []).push({ kind: 'edit', note: `${note}：${reason}`, at: c.now, actor: c.actorName });
+      event(root, c, r, `修改询价需求：${note}（${reason}）`);
+      return { id: r.id };
+    }
+    case 'rfq.unaward': {
+      // 定标后生成的采购草稿尚未提交审批时可撤销定标：草稿作废，询价回到询价中。
+      const r = find(root, p.id);
+      if (r.state !== 'awarded' || !r.award) fail('询价单未定标', 'PRECONDITION');
+      const po = root.fulfillment.purchases.find(x => x.id === r.award!.purchaseId);
+      if (po && po.state !== 'draft' && po.state !== 'rejected' && po.state !== 'cancelled') fail(`采购单 ${po.code} 已提交审批或已批准，不能撤销定标`, 'PRECONDITION');
+      const reason = text(p.reason, '撤销原因', true, 1000);
+      if (po && po.state !== 'cancelled') { po.state = 'cancelled'; po.cancellation = { at: c.now, actor: c.actorName, reason: `撤销询价 ${r.code} 定标：${reason}`, prepaid: 0 }; }
+      (r.changes ||= []).push({ kind: 'unaward', note: `撤销定标 ${r.award!.supplier}：${reason}`, at: c.now, actor: c.actorName });
+      delete r.award; r.state = 'open';
+      event(root, c, r, `撤销定标：${reason}`);
+      return { id: r.id };
+    }
+    case 'rfq.reopen': {
+      const r = find(root, p.id);
+      if (r.state !== 'cancelled') fail('只有已取消的询价可以重开', 'PRECONDITION');
+      const reason = text(p.reason, '重开原因', true, 1000), deadline = day(p.deadline, '报价截止日');
+      if (deadline < today) fail('报价截止日不能早于今天');
+      assertMistOrderOpen(root, r.orderId);
+      (r.changes ||= []).push({ kind: 'reopen', note: `${reason}（原取消原因：${r.cancelled?.reason || ''}）`, at: c.now, actor: c.actorName });
+      delete r.cancelled; r.state = 'open'; r.deadline = deadline;
+      event(root, c, r, `重开询价：${reason}`);
       return { id: r.id };
     }
     case 'sourcing.purchase.transfer': {

@@ -3,7 +3,7 @@ import {businessNow} from '../../runtime/businessClock';
 /** 报价管理：成衣 / 面料两个板块分开；阶段流水线 + 报价单详情（版本链、审批、发送与客户反馈、转订单）。所有对外事实都登记真实依据。 */
 import React from 'react';
 import { Ban, Building2, CheckCircle2, CopyPlus, Download, FileText, Printer, Pencil, Plus, SearchX, Send, ShoppingBag, ThumbsDown, ThumbsUp, TimerOff, Undo2 } from 'lucide-react';
-import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, Segmented, Timeline, Toolbar, type Column, type Tone } from '../../../../../components/mist';
+import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, ObjectCell, PageHeader, Pill, Pipeline, SearchField, Segmented, Timeline, Toolbar, type Column, type Tone, TextLink } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { developmentDomain } from '../../../../../server/src/shared/mistDevelopmentDomain';
 import { marketBusinessDate, quotationConversionBlockerText, quotationConversionBlockers, quotationNeedsApproval, quoteLineFamily, quotationVersions, type MarketQuotation } from '../../../../../server/src/shared/mistMarket';
@@ -89,7 +89,9 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
   const routed = all.find(q => q.id === route.id);
   const domainOf = (q: MarketQuotation) => quotationDomain(state, q);
   const domain: QuoteDomain = domainChoice || (routed ? domainOf(routed) : all.some(q => domainOf(q) === 'garment') || !all.some(q => domainOf(q) === 'fabric') ? 'garment' : 'fabric');
-  const domainRows = all.filter(q => domainOf(q) === domain);
+  // mar23：从客户页进入时只看该客户的报价，可清除。
+  const [customerOnly, setCustomerOnly] = React.useState(route.customerId || '');
+  const domainRows = all.filter(q => domainOf(q) === domain && (!customerOnly || q.customerId === customerOnly));
   const needle = query.trim().toLowerCase();
   const searched = domainRows.filter(q => (!needle || `${q.code} ${customerName(q.customerId)} ${q.season} ${q.deliveryTerms} ${q.lines.map(l => l.name + ' ' + l.style).join(' ')}`.toLowerCase().includes(needle)) && (flagFilter === 'all' || quotationFlags(all, q, day).some(f => f.key === flagFilter)));
   const stageCount = (s: StageFilter) => searched.filter(q => s === 'all' || quotationStage(q) === s).length;
@@ -203,6 +205,7 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
     <div className="mist-section"><Segmented<QuoteDomain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${all.filter(q => domainOf(q) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${all.filter(q => domainOf(q) === 'fabric').length}` }]} /></div>
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索报价号、客户、款号或季节")} />
+      {customerOnly && <Pill tone="accent">{customerName(customerOnly)} <TextLink onClick={() => setCustomerOnly('')}>{uiText('清除')}</TextLink></Pill>}
       <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'expiring', label: `${NEAR_DAYS} 天内到期` }, { value: 'overdue', label: '已过有效期' }, { value: 'belowCost', label: '低于成本或成本待核' }, { value: 'superseded', label: '已有新版本' }]} />
     </Toolbar>
     <Pipeline<StageFilter> value={stageFilter} onChange={setStageFilter} items={[

@@ -38,3 +38,23 @@ describe('客户关系：跟进与商机',()=>{
     expect(()=>f.run({type:'crm.opportunity.save',payload:{id,input:opp(f.customer.id)}})).toThrow('已结束');
   });
 });
+
+describe('mar19/mar20 void follow-up, reopen opportunity',()=>{
+  it('voids a follow-up with a reason, keeps the text and closes its next task',()=>{
+    const f=fixture();
+    f.run({type:'crm.followUp.save',payload:{customerId:f.customer.id,method:'call',content:'写错客户',at:'2026-10-14T01:00:00Z',nextDate:'2026-10-20',link:null}});
+    const row=f.state.crm.followUps[0];
+    expect(()=>f.run({type:'crm.followUp.void',payload:{id:row.id,reason:''}})).toThrow('作废原因');
+    f.run({type:'crm.followUp.void',payload:{id:row.id,reason:'记到了别的客户'}});
+    expect(f.state.crm.followUps[0]).toMatchObject({content:'写错客户',voided:{reason:'记到了别的客户'}});
+    expect(f.state.tasks.find(t=>t.id===row.nextTaskId)!.done).toBe(true);
+  });
+  it('reopens a lost opportunity with a reason and keeps the stage history',()=>{
+    const f=fixture();const {id}=f.run({type:'crm.opportunity.save',payload:{input:opp(f.customer.id)}});
+    expect(()=>f.run({type:'crm.opportunity.reopen',payload:{id,stage:'quoting',note:'x'}})).toThrow('未结束');
+    f.run({type:'crm.opportunity.stage',payload:{id,stage:'lost',note:'价格'}});
+    f.run({type:'crm.opportunity.reopen',payload:{id,stage:'quoting',note:'客户回头要新报价'}});
+    const o=f.state.crm.opportunities.find(x=>x.id===id)!;
+    expect(o).toMatchObject({stage:'quoting',lossReason:''});expect(o.history.map(h=>h.to).slice(-2)).toEqual(['lost','quoting']);
+  });
+});

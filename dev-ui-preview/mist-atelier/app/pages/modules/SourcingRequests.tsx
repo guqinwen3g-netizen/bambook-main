@@ -1,3 +1,5 @@
+/** 报价截止日默认今天起 3 个工作日（跳过周六日）。 */
+const plusWorkdays = (day: string, n: number) => { const d = new Date(day + 'T00:00:00Z'); while (n > 0) { d.setUTCDate(d.getUTCDate() + 1); if (d.getUTCDay() % 6) n--; } return d.toISOString().slice(0, 10); };
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 采购管理 · 询价比价：按订单条目向多家供应商询价，逐家登记报价或谢绝，按折人民币单价比价并定标；定标生成采购草稿，仍走采购审批。 */
 import React from 'react';
@@ -44,7 +46,7 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
     fields: [field('source', '来源条目', 'select', true, sourceOptions(state || null, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('description', '询价内容'), field('quantity', '需求数量', 'number'), choiceField('unit', '单位', UNITS), choiceField('currency', '比价币种', CURRENCIES, true, true),
       field('due', '需求交期', 'date'), field('destination', '交付地点'), field('deadline', '报价截止日', 'date'), field('note', '技术要求 / 备注', 'textarea', false),
       ...available.map(s => field(`s:${s.id}`, `${s.name} · ${s.type}`, 'checkbox', false))],
-    initialValues: { source: sourceLine ? 'line:' + sourceLine.id : '', kind: domain === 'garment' ? 'processing' : '', description: sourceLine?.name || '', quantity: sourceLine?.qty || '', unit: sourceLine?.unit || (domain === 'garment' ? '件' : '米'), currency: 'CNY', due: sourceOrder?.due || '', destination: sourceOrder?.governance?.contract.deliveryPlace || '', deadline: today(), note: '', ...Object.fromEntries(available.map(s => [`s:${s.id}`, s.id === preset?.id])) },
+    initialValues: { source: sourceLine ? 'line:' + sourceLine.id : '', kind: domain === 'garment' ? 'processing' : '', description: sourceLine?.name || '', quantity: sourceLine?.qty || '', unit: sourceLine?.unit || (domain === 'garment' ? '件' : '米'), currency: 'CNY', due: sourceOrder?.due || '', destination: sourceOrder?.governance?.contract.deliveryPlace || '', deadline: plusWorkdays(today(), 3), note: '', ...Object.fromEntries(available.map(s => [`s:${s.id}`, s.id === preset?.id])) },
     submit: async v => {
       if (!state) return;
       const source = parseSource(state, text(v, 'source'));
@@ -67,6 +69,10 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
     return { title: `定标 ${row.quote.supplier}`, submitLabel: '定标并生成采购草稿', description: `${price(row.quote.price)} ${row.quote.currency}/${r.unit} · 承诺交期 ${row.quote.promisedDue} · ${row.quote.terms}${flags.length ? ` · ${flags.join('；')}` : ''}`,
       fields: [field('reason', '定标理由', 'textarea', flags.length > 0)], initialValues: { reason: '' },
       submit: async v => { const saved = await run({ type: 'rfq.award', payload: { id: r.id, quoteId: row.quote.id, reason: text(v, 'reason') } }) as { result?: { purchaseId?: string } } | undefined; if (saved?.result?.purchaseId) onPurchase(saved.result.purchaseId); } }; };
+  const editSpec = (r: MistRfq): ModuleEditorSpec => ({ title: '修改询价需求', submitLabel: '保存修改', fields: [field('quantity', `需求数量（${r.unit}）`, 'number'), field('due', '需求交期', 'date'), field('deadline', '报价截止日', 'date'), field('reason', '修改原因', 'textarea')], initialValues: { quantity: r.quantity, due: r.due, deadline: r.deadline, reason: '' },
+    submit: v => run({ type: 'rfq.update', payload: { id: r.id, quantity: String(v.quantity), due: text(v, 'due'), deadline: text(v, 'deadline'), reason: text(v, 'reason') } }) });
+  const unawardSpec = (r: MistRfq): ModuleEditorSpec => ({ title: '撤销定标', submitLabel: '撤销定标', submitVariant: 'danger', description: r.award ? `${r.award.supplier} · 采购草稿 ${r.award.purchaseCode} 将作废` : undefined, fields: [field('reason', '撤销原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'rfq.unaward', payload: { id: r.id, reason: text(v, 'reason') } }) });
+  const reopenSpec = (r: MistRfq): ModuleEditorSpec => ({ title: '重开询价', submitLabel: '重开', fields: [field('deadline', '报价截止日', 'date'), field('reason', '重开原因', 'textarea')], initialValues: { deadline: '', reason: '' }, submit: v => run({ type: 'rfq.reopen', payload: { id: r.id, deadline: text(v, 'deadline'), reason: text(v, 'reason') } }) });
   const cancelSpec = (r: MistRfq): ModuleEditorSpec => ({ title: '取消询价', submitLabel: '取消询价', fields: [field('reason', '取消原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'rfq.cancel', payload: { id: r.id, reason: text(v, 'reason') } }) });
 
   const columns: Column<MistRfq>[] = [
@@ -76,7 +82,7 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
     { key: 'state', header: '状态', width: '110px', render: r => <div className="mist-col" style={{ gap: 2, alignItems: 'flex-start' }}><Pill tone={STATE_TONE[r.state]}>{RFQ_STATE_LABEL[r.state]}</Pill>{r.award && <small className="mist-muted">{r.award.supplier}</small>}</div> },
   ];
   const detail = selected && state ? <RfqDetail rfq={selected} state={state} day={day} can={can} locked={locked} label={uiText(label(selected))} onPurchase={onPurchase} onSupplier={onSupplier}
-      onQuote={() => open(quoteSpec(selected))} onDecline={() => open(declineSpec(selected))} onInvite={() => open(inviteSpec(selected))} onAward={row => open(awardSpec(selected, row))} onCancel={() => open(cancelSpec(selected))} canInvite={available.some(s => !selected.supplierIds.includes(s.id))} />
+      onQuote={() => open(quoteSpec(selected))} onDecline={() => open(declineSpec(selected))} onInvite={() => open(inviteSpec(selected))} onAward={row => open(awardSpec(selected, row))} onCancel={() => open(cancelSpec(selected))} onEdit={() => open(editSpec(selected))} onUnaward={() => open(unawardSpec(selected))} onReopen={() => open(reopenSpec(selected))} canInvite={available.some(s => !selected.supplierIds.includes(s.id))} />
     : <EmptyState icon={Scale} title={uiText("选择询价单")} compact />;
   return <>
     {preset && productionSupplierUnavailableReason(preset,day) && <div className="mist-section"><Banner tone="warn" title={preset.name}>{uiText(productionSupplierUnavailableReason(preset,day))}</Banner></div>}
@@ -90,9 +96,9 @@ export function RfqLedger({ state, day, domain, needle, can, locked, loading, op
   </>;
 }
 
-function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote, onDecline, onInvite, onAward, onCancel, onPurchase, onSupplier }: {
+function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote, onDecline, onInvite, onAward, onCancel, onEdit, onUnaward, onReopen, onPurchase, onSupplier }: {
   rfq: MistRfq; state: MistState; day: string; can: boolean; locked: boolean; label: string; canInvite: boolean;
-  onQuote: () => void; onDecline: () => void; onInvite: () => void; onAward: (row: RfqComparisonRow) => void; onCancel: () => void; onPurchase: (id: string) => void; onSupplier: (id: string) => void;
+  onQuote: () => void; onDecline: () => void; onInvite: () => void; onAward: (row: RfqComparisonRow) => void; onCancel: () => void; onEdit: () => void; onUnaward: () => void; onReopen: () => void; onPurchase: (id: string) => void; onSupplier: (id: string) => void;
 }) {
   const { go } = useNav();
   const cmp = rfqComparison(state, r, day), isOpen = r.state === 'open', history = r.quotes.filter(q => q.supersededAt);
@@ -106,8 +112,12 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
       { label: '登记报价', icon: MessageSquareQuote, onClick: onQuote, primary: true, reason: closedReason },
       { label: '登记谢绝', icon: XCircle, onClick: onDecline, reason: closedReason },
       { label: '追加邀请', icon: UserPlus, onClick: onInvite, reason: closedReason || (canInvite ? false : '没有其他可合作供应商') },
+      { label: '修改需求', onClick: onEdit, reason: closedReason },
       { label: '取消询价', icon: Ban, onClick: onCancel, reason: closedReason, hidden: !isOpen },
     ] as ReasonedAction[]} />}
+    {can && r.state === 'awarded' && (() => { const po = state.fulfillment.purchases.find(x => x.id === r.award?.purchaseId); return <ActionBar busy={locked} actions={[{ label: '撤销定标', onClick: onUnaward, reason: po && !['draft', 'rejected', 'cancelled'].includes(po.state) ? '采购单已提交审批或已批准' : false }] as ReasonedAction[]} />; })()}
+    {can && r.state === 'cancelled' && <ActionBar busy={locked} actions={[{ label: '重开询价', onClick: onReopen }] as ReasonedAction[]} />}
+    {!!r.changes?.length && <DetailBlock title={uiText('变更记录')}>{r.changes.map((c, i) => <div key={i} className="mist-note">{c.at.slice(0, 10)} · {c.actor} · {c.note}</div>)}</DetailBlock>}
     <Facts items={[
       { label: '来源条目', value: label },
       { label: '需求', value: `${r.quantity} ${r.unit} · ${purchaseContent(r)}` },

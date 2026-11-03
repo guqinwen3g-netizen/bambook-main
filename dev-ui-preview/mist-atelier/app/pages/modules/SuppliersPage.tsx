@@ -1,3 +1,6 @@
+import { supplierPayableSummary, supplierPayments } from '../../../../../server/src/shared/mistPayables';
+import { readRfqs, RFQ_STATE_LABEL } from '../../../../../server/src/shared/mistSourcing';
+import { CURRENCIES } from '../../runtime/tradeOptions';
 import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
@@ -17,7 +20,7 @@ import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { MIST_BUSINESS_GROUPS, MIST_BUSINESS_GROUP_LABEL } from '../../../../../server/src/shared/mistAccounts';
 import { useNav } from '../../nav';
 import { setComposeIntent } from '../../runtime/composeIntent';
-import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec , moduleFileIds } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, businessDay, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { CAPACITY_UNITS, CERTIFICATES, COUNTRIES } from '../../runtime/tradeOptions';
@@ -68,7 +71,7 @@ export type SupplierWorkbenchProps = {
 export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchProps) {
   const { state, run, error, refresh, loading, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const members = workspaceMembers(workspace, state, session.user);
-  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [typeFilter, setTypeFilter] = React.useState('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all'), [typeFilter, setTypeFilter] = React.useState('all'), [gradeFilter, setGradeFilter] = React.useState('all'), [countryFilter, setCountryFilter] = React.useState('all'), [flagFilter, setFlagFilter] = React.useState<FlagFilter>('all'), [query, setQuery] = React.useState('');
   const [picked, setPicked] = React.useState<string | null>(route.id || null), [drawer, setDrawer] = React.useState(!!route.id);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const full = useListDetailRoute();
@@ -79,7 +82,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const needle = query.trim().toLowerCase();
   const legacyTypes = [...new Set(all.map(s => s.type).filter(t => !(SUPPLIER_TYPES as readonly string[]).includes(t)))];
   const searched = all.filter(s => (!needle || `${s.code} ${s.name} ${s.type} ${s.capabilities} ${s.address} ${s.contacts.map(c => c.name).join(' ')}`.toLowerCase().includes(needle))
-    && (typeFilter === 'all' || s.type === typeFilter) && (flagFilter === 'all' || supplierFlags(s, day).some(f => f.key === flagFilter)));
+    && (typeFilter === 'all' || s.type === typeFilter) && (flagFilter === 'all' || supplierFlags(s, day).some(f => f.key === flagFilter))
+    && (gradeFilter === 'all' || (supplierGrade(s)?.grade || 'none') === gradeFilter) && (countryFilter === 'all' || s.country === countryFilter));
   const statusCount = (v: StatusFilter) => searched.filter(s => v === 'all' || statusNow(s) === v).length;
   const perf = React.useMemo(() => new Map(all.map(s => [s.id, supplierPerformance(state, s.id)])), [state, all, interfaceLocale()]);
   const rows = searched.filter(s => statusFilter === 'all' || statusNow(s) === statusFilter).sort((a, b) => ['active', 'paused', 'blocked'].indexOf(statusNow(a)) - ['active', 'paused', 'blocked'].indexOf(statusNow(b)) || a.code.localeCompare(b.code));
@@ -110,9 +114,9 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   });
   const certSpec = (s: MarketSupplier, c?: SupplierCertificate): ModuleEditorSpec => ({
     title: c ? `更新认证 ${c.name}` : `登记 ${s.name} 的认证`, submitLabel: '保存',
-    initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil } : { name: '', number: '', issuer: '', validUntil: '' },
-    fields: [{ key: 'name', label: '认证名称', type: 'choice', options: CERTIFICATES, required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }],
-    submit: v => run({ type: 'market.supplier.certificate.save', payload: { supplierId: s.id, id: c?.id, name: String(v.name ?? ''), number: String(v.number ?? ''), issuer: String(v.issuer ?? ''), validUntil: String(v.validUntil ?? ''), fileIds: c?.fileIds || [] } }),
+    initialValues: c ? { name: c.name, number: c.number, issuer: c.issuer, validUntil: c.validUntil, files: (c.fileIds || []).join(',') } : { name: '', number: '', issuer: '', validUntil: '', files: '' },
+    fields: [{ key: 'name', label: '认证名称', type: 'choice', options: CERTIFICATES, required: true }, { key: 'number', label: '证书编号' }, { key: 'issuer', label: '发证机构' }, { key: 'validUntil', label: '有效期至', type: 'date', required: true }, { key: 'files', label: '证书扫描件', type: 'files' }],
+    submit: v => run({ type: 'market.supplier.certificate.save', payload: { supplierId: s.id, id: c?.id, name: String(v.name ?? ''), number: String(v.number ?? ''), issuer: String(v.issuer ?? ''), validUntil: String(v.validUntil ?? ''), fileIds: moduleFileIds(v.files) } }),
   });
   // 收款账户：财务登记；更换须写明核实方式（按合同或既有记录中的电话回拨、盖章变更函），原账户保留为已替换。
   const bankSpec = (s: MarketSupplier, currency = 'CNY'): ModuleEditorSpec => {
@@ -120,14 +124,14 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     return { title: current ? `变更 ${s.name} 的收款账户` : `登记 ${s.name} 的收款账户`, submitLabel: '保存',
       description: current ? '变更后，按原账户提交的付款申请需撤回重新审批。' : undefined,
       initialValues: { currency, accountName: current?.accountName || s.name, bankName: '', accountNo: '', swift: '', verification: '' },
-      fields: [{ key: 'currency', label: '币种', type: 'select', required: true, options: ['CNY', 'USD', 'EUR', 'HKD', 'JPY', 'GBP'].map(c => ({ value: c, label: c })) }, { key: 'accountName', label: '账户名称', required: true }, { key: 'bankName', label: '开户行', required: true },
+      fields: [{ key: 'currency', label: '币种', type: 'select', required: true, options: CURRENCIES.map(c => ({ value: c.value, label: c.label })) }, { key: 'accountName', label: '账户名称', required: true }, { key: 'bankName', label: '开户行', required: true },
         { key: 'accountNo', label: '账号', required: true }, { key: 'swift', label: 'SWIFT（境外）' }, { key: 'verification', label: '核实记录', type: 'textarea', required: true, hint: '向谁、通过合同或既有记录中的电话核实，或盖章变更函' }],
       submit: v => run({ type: 'market.supplier.bank.save', payload: { supplierId: s.id, currency: String(v.currency ?? 'CNY'), accountName: String(v.accountName ?? ''), bankName: String(v.bankName ?? ''), accountNo: String(v.accountNo ?? ''), swift: String(v.swift ?? ''), verification: String(v.verification ?? '') } }) };
   };
   const deleteCertSpec = (s: MarketSupplier, c: SupplierCertificate): ModuleEditorSpec => ({ title: `删除认证 ${c.name}`, submitLabel: '删除', description: '仅在登记错误时删除；过期认证请保留，以便追溯。', initialValues: {}, fields: [], submit: () => run({ type: 'market.supplier.certificate.delete', payload: { supplierId: s.id, id: c.id } }) });
   const rateSpec = (s: MarketSupplier): ModuleEditorSpec => ({
     title: `评级 ${s.name}`, submitLabel: '保存评级', description: '每次评级单独记录，历史评级保留。',
-    initialValues: { grade: supplierGrade(s)?.grade || 'B', period: '', note: '' },
+    initialValues: { grade: supplierGrade(s)?.grade || 'B', period: '', note: (() => { const p = perf.get(s.id); return p ? [p.completed.length ? `准交 ${rate(p.onTime, p.completed.length)}（${p.onTime}/${p.completed.length} 单）` : '', p.receipts ? `来料无退货 ${rate(p.clean, p.receipts)}（${p.clean}/${p.receipts} 次）` : ''].filter(Boolean).join('；') : ''; })() },
     fields: [{ key: 'grade', label: '评级', type: 'select', required: true, options: SUPPLIER_GRADES.map(g => ({ value: g, label: g })) }, { key: 'period', label: '评级周期', required: true, hint: '例如 2026 Q3' }, { key: 'note', label: '评级依据', type: 'textarea', required: true, hint: '准交、品质、响应等事实依据' }],
     submit: v => run({ type: 'market.supplier.rate', payload: { supplierId: s.id, grade: String(v.grade) as typeof SUPPLIER_GRADES[number], period: String(v.period ?? ''), note: String(v.note ?? '') } }),
   });
@@ -159,7 +163,7 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
   const detail = selected && state
     ? <SupplierDetail s={selected} state={state} day={day} can={can} canAdmin={canAdmin} canContacts={canContacts} locked={locked} perf={perf.get(selected.id)!} canProcure={session.hasPermission('procurement:write')} canBank={session.hasPermission('invoices:write')} onBank={currency => setDialog(bankSpec(selected, currency))} onRfq={() => go('procurement', undefined, { section: 'rfq:' + selected.id })}
         onEdit={() => setDialog(profileSpec(selected))} onRate={() => setDialog(rateSpec(selected))} onCert={c => setDialog(certSpec(selected, c))} onDeleteCert={c => setDialog(deleteCertSpec(selected, c))}
-        onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onOpen={(view, id) => go(view, id)}
+        onStatus={n => setDialog(statusSpec(selected, n))} onContact={c => setDialog(contactSpec(selected, c))} onContactDelete={c => setDialog({ title: `删除联系人 ${c.name}`, submitLabel: '删除', submitVariant: 'danger', fields: [], initialValues: {}, submit: () => run({ type: 'market.contact.delete', payload: { kind: 'supplier', parentId: selected.id, id: c.id } }) })} onOpen={(view, id) => go(view, id)}
         attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title={uiText("供应商档案")} description={uiText("从左侧列表选择一家供应商，查看认证、评级、在手业务与交付表现。")} compact />;
   const summary = selected ? (() => {
@@ -188,6 +192,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
     {error && <div className="mist-section"><Banner tone="bad" title={uiText("供应商数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索名称、编码、工艺、地址或联系人")} />
+      <Dropdown label={uiText("评级")} value={gradeFilter} onChange={setGradeFilter} options={[{ value: 'all', label: '全部' }, ...SUPPLIER_GRADES.map(g => ({ value: g, label: g })), { value: 'none', label: '未评级' }]} />
+      <Dropdown label={uiText("国家地区")} value={countryFilter} onChange={setCountryFilter} options={[{ value: 'all', label: '全部' }, ...[...new Set(all.map(x => x.country).filter(Boolean))].sort().map(c => ({ value: c, label: c }))]} />
       <Dropdown label={uiText("类型")} value={typeFilter} onChange={setTypeFilter} options={[{ value: 'all', label: '全部' }, ...[...SUPPLIER_TYPES, ...legacyTypes].map(t => ({ value: t, label: `${t} · ${all.filter(s => s.type === t).length}` }))]} />
       <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'certExpired', label: '认证已过期' }, { value: 'certExpiring', label: `认证 ${CERT_NEAR_DAYS} 天内到期` }, { value: 'noCert', label: '未登记认证' }, { value: 'unrated', label: '未评级' }, { value: 'scheduled', label: '即将暂停 / 停用' }]} />
     </Toolbar>
@@ -214,10 +220,10 @@ function SupplierMail({ s, state }: { s: MarketSupplier; state: MistState }) {
     {rows.length ? <div className="mist-col" style={{ gap: 4 }}>{rows.map(m => <TextLink key={m.id} onClick={() => go('emails', m.id)}>{m.subject || '（无主题）'} · {m.folder === 'sent' ? m.to.map(t => t.name || t.address).join('、') : m.from.name || m.from.address} · {m.at.slice(0, 10)}</TextLink>)}</div> : <span className="mist-muted">{uiText('还没有往来邮件。')}</span>}
   </DetailBlock>;
 }
-function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onOpen, attachments, history }: {
+function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure, canBank, onBank, onRfq, locked, perf, onEdit, onRate, onCert, onDeleteCert, onStatus, onContact, onContactDelete, onOpen, attachments, history }: {
   s: MarketSupplier; state: MistState; day: string; can: boolean; canAdmin: boolean; canContacts: boolean; canProcure: boolean; canBank: boolean; onBank: (currency?: string) => void; onRfq: () => void; locked: boolean; perf: ReturnType<typeof supplierPerformance>;
   onEdit: () => void; onRate: () => void; onCert: (c?: SupplierCertificate) => void; onDeleteCert: (c: SupplierCertificate) => void; onStatus: (s: MarketSupplier['status']) => void;
-  onContact: (c?: MarketSupplier['contacts'][number]) => void; onOpen: (view: string, id?: string) => void; attachments: React.ReactNode; history: React.ReactNode;
+  onContact: (c?: MarketSupplier['contacts'][number]) => void; onContactDelete: (c: MarketSupplier['contacts'][number]) => void; onOpen: (view: string, id?: string) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
   const service=isServiceSupplier(s);
   const now = supplierStatusOn(s, day), grade = supplierGrade(s), flags = supplierFlags(s, day), certs = s.certificates || [];
@@ -280,9 +286,14 @@ function SupplierDetail({ s, state, day, can, canAdmin, canContacts, canProcure,
         <Mono>{c.purchase.code}</Mono><span style={{ flex: '1 1 160px', minWidth: 0 }}>{c.purchase.description}<small className="mist-cell-sub">{uiText("到货 ")}{c.last}{uiText(" · 承诺 ")}{c.promised}</small></span><Pill tone={c.onTime ? 'ok' : 'bad'}>{uiText(c.onTime ? '准时' : '延迟')}</Pill>
       </div>)}</div>
     </DetailBlock>}
+    {/* mar36：应付余额、近期付款与询价历史（只读，有财务或采购读权限才有数据）。 */}
+    {(() => { const pay = supplierPayableSummary(state, day).filter(r => r.supplierId === s.id), payments = supplierPayments(state, day).filter(p => p.supplierId === s.id).slice(0, 5), rfqs = readRfqs(state).filter(r => r.supplierIds.includes(s.id)).slice(0, 5);
+      return <>{!!pay.length && <DetailBlock title={uiText('应付余额')} aside={<TextLink onClick={() => onOpen('payment-vouchers', undefined)}>{uiText('应付待办')}</TextLink>}>{pay.map(r => <div key={r.currency} className="mist-row"><span>{r.currency}</span><span className="mist-spacer" /><span className="mist-num">{uiText('未付 ')}{(r.open / 100).toLocaleString()}{r.overdue ? ` · ${uiText('逾期')} ${r.overdue}` : ''}</span></div>)}</DetailBlock>}
+        {!!payments.length && <DetailBlock title={uiText('近期付款')}>{payments.map(p => <div key={p.id} className="mist-row"><Mono>{p.code}</Mono><span className="mist-note">{p.date}</span><span className="mist-spacer" /><span className="mist-num">{p.amount.toLocaleString()} {p.currency}</span></div>)}</DetailBlock>}
+        {!!rfqs.length && <DetailBlock title={uiText('询价历史')}>{rfqs.map(r => <div key={r.id} className="mist-row"><TextLink onClick={() => onOpen('procurement', r.id)}>{r.code}</TextLink><span className="mist-note">{r.description}</span><span className="mist-spacer" /><Pill tone={r.award?.supplierId === s.id ? 'ok' : 'neutral'}>{uiText(r.award?.supplierId === s.id ? '中标' : RFQ_STATE_LABEL[r.state])}</Pill></div>)}</DetailBlock>}</>; })()}
     <DetailBlock title={ui`联系人 · ${s.contacts.length}`} aside={canContacts ? <Button variant="quiet" icon={UserPlus} disabled={locked} onClick={() => onContact()}>{uiText("添加")}</Button> : undefined}>
       {s.contacts.length ? <div className="mist-col" style={{ gap: 0 }}>{s.contacts.map(c => <div key={c.id} className="mist-row mist-quote-line" style={{ gap: 8, padding: '8px 0' }}>
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{uiText(c.role ? ' · ' + c.role : '')}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>{uiText("主联系人")}</Pill>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContact(c)}>{uiText("编辑")}</Button>}
+        <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{c.name}{uiText(c.role ? ' · ' + c.role : '')}<small className="mist-cell-sub">{[c.phone, c.email].filter(Boolean).join(' · ') || '未填联系方式'}</small></span>{c.primary && <Pill>{uiText("主联系人")}</Pill>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContact(c)}>{uiText("编辑")}</Button>}{canContacts && <Button variant="quiet" disabled={locked} onClick={() => onContactDelete(c)}>{uiText("删除")}</Button>}
       </div>)}</div> : <span className="mist-muted">{uiText("未登记联系人。")}</span>}
     </DetailBlock>
     <SupplierMail s={s} state={state} />

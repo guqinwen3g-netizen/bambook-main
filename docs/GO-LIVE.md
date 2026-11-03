@@ -149,6 +149,7 @@
 - **P1-3（2026-11-03，PR #640，be6e981f，已部署开发服务器，公网未实走）· 单据与文件生成**：出运单据（CI、PL、订舱委托、补料、出货 / 装船通知、受益人证明、汇票、报关单草稿与委托书）、订单 PI / 销售合同、画册 PDF 由服务端按业务记录生成；提单号与电放；报表与报关商品项 Excel；画册经智能邮箱发送。P1-3 完成。
 - **P1-2（2026-11-03，PR #640，已部署开发服务器）· 邮件与业务打通**：邮件可挂供应商 / 采购 / 报价 / 询价，提交与跟进进客户档案，跟进派给选定成员；客户、供应商、报价、询价、画册、营销都从智能邮箱发；批量操作、彻底删除、邮箱移除、本地上传附件、公司模板与占位自动带入。真实邮箱收发待用户授权后实走。
 - **P1-8（2026-11-03，PR #640，已部署开发服务器）· 定价与成本**：定价试算可挂报价条目并写回拟报价、可选外币；参考成本可挂订单条目 / 产品 / 开发版本，报价核算可引用已确认参考成本；平台市场参考每日经 Exa MCP 取中行现汇买入价与棉花、涤纶短纤现货成交价，定价页一键填入中行结汇价。P1-8 完成。
+- **P2-4（2026-11-04，分支 `codex/p2-batch1`）· 客户、供应商与询价**：客户列表与商机总览、客户停用后隐藏、跟进作废、商机重开与多关联、询价修改 / 撤销定标 / 重开、供应商应付与询价历史、认证附件与评级指标。
 - **P2-1 / P2-2 / P2-3（2026-11-04，分支 `codex/p2-batch1`）· 采购执行、样品与开发、货运与报关**：采购附件与交期变更；样品单位、成套与多件、报废退厂、寄样签收与费用、寻样候选；出运船期集装箱唛头、订舱变更、到港与签收、报关改单退关与快件方式。各包第二版项见 BACKLOG 进度。
 - **P1-7（2026-11-04，PR #644，7013af0a，已部署开发服务器）· 报价与订单**：部分接受、部分转单后出新版本、按还价建新版本、到期提醒、核算币种 / 单位折算、变更与取消的下游提醒和冻结、跨组内部供布加成核算、生产延期提醒、看板拖动确认、订单详情关联入口。`ord23`、`ord30` 拆合单留第二版。合入与部署状态见进度记录。
 - **P1-6（2026-11-04，PR #641，b7e58c30）· 财务与结算**：多票核销、跨币种核销与汇兑差、预收冲抵、尾差 / 坏账 / 红冲更正、按月结账与重开、建议凭证导出、供应商对账单、付款计划总览、应付账龄、资金月报、销售额口径切换、信用证不符点处理、退税申报期限与缺失单证、退货扣款带入结算、银行账户先看详情。`fin31`/`fin34`/`fin37` 为走查台账，待岗位走查。合入与部署状态见进度记录。
@@ -651,7 +652,7 @@
 ## 7. 进度记录
 
 - 2026-11-04：P1-6（#641）、权限码登记修正（#642 服务端、#643 前端）已部署开发服务器（fe7206d2）；P1-7（#644，7013af0a）已部署开发服务器。公网未实走。
-- 2026-11-04：P2-1/P2-2/P2-3（分支 `codex/p2-batch1`）。新命令 `development.sample.dispatchReceived`、`fabric.update`、`fabric.cancel`、`fulfillment.shipments.arrive/deliver`、`fulfillment.customs.amend`；样品单位规则 `sampleUnitsFor` / `sampleUnitAllowsDecimal`（mistDevelopmentDomain）；ModuleEditorDialog 增加 `files` 字段类型（`moduleFileIds`）。
+- 2026-11-04：P2-1/P2-2/P2-3（分支 `codex/p2-batch1`）。新命令 `development.sample.dispatchReceived`、`fabric.update`、`fabric.cancel`、`fulfillment.shipments.arrive/deliver`、`fulfillment.customs.amend`、`crm.followUp.void`、`crm.opportunity.reopen`、`rfq.update/unaward/reopen`；样品单位规则 `sampleUnitsFor` / `sampleUnitAllowsDecimal`（mistDevelopmentDomain）；ModuleEditorDialog 增加 `files` 字段类型（`moduleFileIds`）。
 
 - 2026-11-04：P1-6 PR #641 合入（b7e58c30）。首次 `dev:deploy` 本机验证失败：权限码登记测试仍把 `invoices:approve:writeoff` 列为仅 UI 标签（服务端 #642、前端 #643 修正）。后台完整验证脚本此前只跑类型、命令目录、mist:check、npm test、test:mist，已补 test:access、tooling 与 build，与部署门禁一致。
 - 2026-11-04：P1-7 报价与订单（分支 `codex/p17-quote-order`）。`market.quotation.status` 增加 `acceptLineIds`；报价核算输入增加 `conversion`（模型版本加 `+fx`）；内部供料 `internalSupply.markupPercent`；`OrderActualCost.internalSale`；`createOrderChangeTasks` 增加单价、条目增删与交期（`order-change-due:*`）；生产延期 `production-late:*`。浏览器未实走。
