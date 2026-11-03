@@ -77,6 +77,12 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
       {campaignReminder(current, leads, day).overBudget && <Banner tone="warn" title={uiText("实际费用超出预算")}>{uiText("同一活动原币比较；不与其他币种活动合计。")}</Banner>}
     </DetailBlock>
     <DetailBlock title={uiText("来源与产品")}><div className="mist-row">{current.seasonId && <Button onClick={() => go('seasons', current.seasonId)}>{uiText("关联季节")}</Button>}{current.showId && <Button onClick={() => go('seasons', current.showId, { section: 'shows' })}>{uiText("关联展会")}</Button>}</div>{products(current, can && ['Draft', 'Paused'].includes(current.status))}</DetailBlock>
+    {/* mar54：投入产出（原币）：实际费用对比已转 CRM 线索的实际成交额与转出商机的预计金额，币种不同不合计。 */}
+    {(() => { const ls = campaignLeads(leads, current.id), won = ls.filter(l => l.status === 'Converted'), opps = (w.state?.crm?.opportunities || []).filter(o => won.some(l => l.opportunityId === o.id));
+      const sum = (rows: Array<{ currency: string; amount: number }>) => [...rows.reduce((m, r) => m.set(r.currency, (m.get(r.currency) || 0) + r.amount), new Map<string, number>())].map(([c, n]) => `${c} ${n.toLocaleString()}`).join(' / ') || '—';
+      const actual = sum(won.filter(l => Number(l.actualValue) > 0).map(l => ({ currency: l.currency, amount: Number(l.actualValue) }))), pipeline = sum(opps.filter(o => o.stage !== 'lost').map(o => ({ currency: o.currency, amount: Number(o.amount) })));
+      const sameCurrency = won.filter(l => l.currency === current.currency).reduce((n, l) => n + (Number(l.actualValue) || 0), 0), cost = Number(current.actualCost) || 0;
+      return <DetailBlock title={uiText('投入产出')}><Facts items={[{ label: '实际费用', value: `${current.currency} ${current.actualCost}` }, { label: '已成交（线索实际额）', value: actual }, { label: '转出商机（预计）', value: pipeline }, ...(cost > 0 && sameCurrency > 0 ? [{ label: `同币种产出 / 费用`, value: `${(sameCurrency / cost).toFixed(1)} 倍` }] : [])]} /></DetailBlock>; })()}
     <DetailBlock title={uiText("线索接续")}><Facts items={[{ label: '来源线索', value: campaignLeads(leads, current.id).length }, { label: '已转 CRM', value: campaignLeads(leads, current.id).filter(l => l.status === 'Converted').length }, { label: '跟进逾期', value: campaignReminder(current, leads, day).overdue }]} /><span className="mist-note">{uiText("预计金额不是成交收入；转 CRM 后由客户主线继续跟进。")}</span></DetailBlock>
     {attachments(current, !can)}{history(current.id)}
   </DetailBody> : <EmptyState compact title={uiText("活动详情")} description={uiText("选择活动，核对费用、线索与下一步操作。")} />;

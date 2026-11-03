@@ -1,3 +1,4 @@
+import { calendarWithDerived } from '../runtime/derivedCalendar';
 import { isRecognizedMistInvoice } from '../../../../server/src/shared/mistWorkspace';
 import {isInternalDeliveryTask} from '../../../../server/src/shared/mistInternalDelivery';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
@@ -125,9 +126,9 @@ export function HomePage() {
         </Card>
         <Card className="mist-col-4">
           <CardHeader title={uiText(day===today?'今日安排':`${day.slice(5)} 安排`)} tools={<TextLink iconRight={ArrowUpRight} onClick={() => go('calendar',undefined,{section:day})}>{uiText("日历")}</TextLink>} />
-          <WeekStrip days={days.map(value => ({ ...value, dots: state?.calendar.filter(event => event.date === value.key).length ?? 0 }))} value={day} onChange={setDay} />
-          <Agenda events={(state?.calendar.filter(event => event.date === day).slice().sort((a, b) => a.time.localeCompare(b.time)) ?? []).map(event => ({ time: event.time, title: event.target ? <TextLink onClick={() => openTarget(event.target!)}>{event.title}</TextLink> : event.title, meta: event.note }))} />
-          {!loading && !state?.calendar.some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
+          <WeekStrip days={days.map(value => ({ ...value, dots: calendarWithDerived(state).filter(event => event.date === value.key).length ?? 0 }))} value={day} onChange={setDay} />
+          <Agenda events={(calendarWithDerived(state).filter(event => event.date === day).slice().sort((a, b) => a.time.localeCompare(b.time)) ?? []).map(event => ({ time: event.time, title: event.target ? <TextLink onClick={() => openTarget(event.target!)}>{event.title}</TextLink> : event.title, meta: event.note }))} />
+          {!loading && !calendarWithDerived(state).some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
         </Card>
       </section>
       <AgentProposalDialog state={workspace.state} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={(command, options) => workspace.run(command, options)} onDone={message => toast(uiText(message))} />

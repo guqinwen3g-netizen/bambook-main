@@ -1275,7 +1275,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketLead": "RecordBase & { name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string }"
+   "MarketLead": "RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1283,7 +1283,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.lead.transition",
   "payload": "{id:string;status:MarketLead['status'];customerId?:string;actualValue?:string;note:string}",
   "types": {
-   "MarketLead": "RecordBase & { name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string }",
+   "MarketLead": "RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }"
   },
   "source": "server/src/shared/mistMarket.ts"
@@ -1459,6 +1459,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
    "MarketSeason": "RecordBase & { code:string; name:string; startDate:string; endDate:string; status:'Planning'|'Active'|'Closed'; milestones:Array<{label:string;date:string}>; review?:{at:string;orderCount:number;developmentCount:number;productCount:number;amounts:Array<{currency:string;amount:string}>} }"
   },
+  "source": "server/src/shared/mistMarket.ts"
+ },
+ {
+  "type": "market.season.void",
+  "payload": "{kind:'season'|'trend'|'show';id:string;reason:string}",
   "source": "server/src/shared/mistMarket.ts"
  },
  {

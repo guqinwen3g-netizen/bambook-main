@@ -1,3 +1,4 @@
+import { calendarWithDerived, isDerivedCalendarEvent } from '../runtime/derivedCalendar';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import {businessNow} from '../runtime/businessClock';
@@ -43,8 +44,8 @@ export function CalendarPage() {
   const visibleFailure=formScope===scopeKey?failure:'';
   React.useEffect(()=>{live.current=true;return()=>{live.current=false;};},[]);
   React.useEffect(()=>{setEditing(undefined);setForm({title:'',date:dayKey(businessNow()),time:'09:00',note:'',targetKey:''});setOriginalTarget(undefined);setFailure('');setBusy(false);setFormScope(scopeKey);},[scopeKey]);
-  const events=(state?.calendar||[]).filter(event=>event.date===selected).slice().sort((a,b)=>a.time.localeCompare(b.time)||a.title.localeCompare(b.title));
-  const week=calendarWeek(selected).map(day=>({...day,dots:(state?.calendar||[]).filter(event=>event.date===day.key).length}));
+  const allEvents=calendarWithDerived(state),events=allEvents.filter(event=>event.date===selected).slice().sort((a,b)=>a.time.localeCompare(b.time)||a.title.localeCompare(b.title));
+  const week=calendarWeek(selected).map(day=>({...day,dots:allEvents.filter(event=>event.date===day.key).length}));
   React.useEffect(()=>{if(route.section&&!calendarFormError({title:'日期',date:route.section,time:'09:00'}))setSelected(route.section);},[route.section]);
   React.useEffect(()=>{if(activeEditing!==undefined){const editor=document.getElementById('mist-calendar-editor');editor?.scrollIntoView?.({behavior:'smooth',block:'start'});editor?.querySelector<HTMLInputElement>('input')?.focus();}},[activeEditing]);
   const targets: Array<{value:string;label:string;target:MistTarget}>= [
@@ -82,7 +83,7 @@ export function CalendarPage() {
     <Card>
       <CardHeader title={uiText(parseDay(selected).toLocaleDateString(interfaceLocale(),{year:'numeric',month:'long',day:'numeric',weekday:'long'}))} tools={<span className="mist-muted">{events.length}{uiText(" 项安排")}</span>} />
       <WeekStrip days={week} value={selected} onChange={setSelected} />
-      {loading?<div className="mist-card-body"><Skeleton height={56} /><Skeleton height={56} /></div>:events.length?<Agenda events={events.map(event=>({time:event.time,title:<TextLink disabled={activeEditing!==undefined||saving||!!pending} onClick={()=>open(event)}>{event.title}</TextLink>,meta:<><span>{event.note}</span>{event.target&&<TextLink iconRight={ArrowUpRight} onClick={()=>link(event.target!)}>{uiText("打开关联业务")}</TextLink>}</>}))} />:<EmptyState icon={CalendarDays} title={uiText("当天暂无日程")} description={uiText("可以添加会议、跟进或工作安排。")} action={<Button disabled={!state||loading||saving||!!pending||activeEditing!==undefined} onClick={()=>open()}>{uiText("添加日程")}</Button>} />}
+      {loading?<div className="mist-card-body"><Skeleton height={56} /><Skeleton height={56} /></div>:events.length?<Agenda events={events.map(event=>({time:event.time,title:isDerivedCalendarEvent(event)?<TextLink onClick={()=>event.target&&link(event.target)}>{event.title}</TextLink>:<TextLink disabled={activeEditing!==undefined||saving||!!pending} onClick={()=>open(event)}>{event.title}</TextLink>,meta:<><span>{event.note}</span>{event.target&&<TextLink iconRight={ArrowUpRight} onClick={()=>link(event.target!)}>{uiText("打开关联业务")}</TextLink>}</>}))} />:<EmptyState icon={CalendarDays} title={uiText("当天暂无日程")} description={uiText("可以添加会议、跟进或工作安排。")} action={<Button disabled={!state||loading||saving||!!pending||activeEditing!==undefined} onClick={()=>open()}>{uiText("添加日程")}</Button>} />}
     </Card>
     {activeEditing!==undefined&&<Card as="section" id="mist-calendar-editor" className="mist-section" aria-label={uiText(editing?'编辑日程':'新建日程')} data-calendar-editor>
       <CardHeader title={uiText(editing?'编辑日程':'新建日程')} sub={uiText("日程保存到本公司。")} />
