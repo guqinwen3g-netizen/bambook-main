@@ -23,7 +23,7 @@ describe('ord19 客户索样申请 / ord18 样品费', () => {
     const id = f.run(request()).id;
     const r = () => readSampleRequests(f.state).find(x => x.id === id)!;
     expect(r()).toMatchObject({ code: 'SR-2026-0001', state: 'open', fee: { amount: 30, currency: 'USD' } });
-    expect(f.state.tasks.find(t => t.kind === 'sample-request:' + id)).toMatchObject({ done: false, permission: 'sample:room:write', target: { view: 'samples', section: 'requests' } });
+    expect(f.state.tasks.find(t => t.kind === 'sample-request:' + id)).toMatchObject({ done: false, assigneeIds: ['sales'], target: { view: 'samples', section: 'requests' } });
     expect(() => f.run({ type: 'sample.request.invoice', payload: { id, number: 'SF-1', due: '2026-12-01', fileIds: ['inv-file'] } })).toThrow('寄出后');
     f.run({ type: 'sample.request.fulfill', payload: { id, sampleId: f.sampleId, quantity: 1, carrier: 'DHL', trackingNo: '123', complete: false } }, { actorName: '样品间-李', actorId: 'room' });
     expect(r().state).toBe('open');

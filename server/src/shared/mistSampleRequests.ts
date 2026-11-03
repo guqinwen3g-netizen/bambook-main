@@ -34,7 +34,7 @@ const customerArchived = (root: MistState, customerId: string) => (root.market?.
 
 export const readSampleRequests = (root: Pick<Root, 'sampleRequests'>) => root.sampleRequests || [];
 export const SAMPLE_REQUEST_STATE_LABEL: Record<MistSampleRequest['state'], string> = { open: '待寄出', sent: '已寄出', cancelled: '已取消' };
-/** 提单、取消、开票归业务（products:write）；据单寄出归样品间（products:write + sample:room:write 由路由层与岗位共同保证）。 */
+/** 提单、取消、据单寄出按样品写权限（products:write）；开票按开票权限。样品间权限（sample:room:write）由界面限定寄出入口。 */
 export function sampleRequestPermission(command: SampleRequestCommand): string { return command.type === 'sample.request.invoice' ? 'invoices:write' : 'products:write'; }
 export const sampleRequestSent = (r: Pick<MistSampleRequest, 'shipments'>) => r.shipments.reduce((n, s) => n + s.quantity, 0);
 
@@ -67,7 +67,7 @@ export function applySampleRequestCommand(root: Root, command: SampleRequestComm
       if (existing && !fee) delete existing.fee;
       if (existing && !orderId) delete existing.orderId;
       root.events.unshift({ id: c.id(), entityType: 'sampleRequest', entityId: row.id, actor: c.actorName, at: c.now, text: `${existing ? '修改' : '提交'}索样申请 ${row.code}：${customer.name} · ${row.description} ${quantity} ${unit}`, fileIds: [] });
-      if (!existing) root.tasks.unshift({ id: c.id(), title: `索样 ${row.code} · ${customer.name}：${row.description} ${quantity} ${unit}，${row.neededBy} 前寄出`, due: row.neededBy, done: false, kind: `sample-request:${row.id}`, target: { view: 'samples', section: 'requests', id: row.id }, assigneeIds: [], permission: 'sample:room:write' });
+      if (!existing) root.tasks.unshift({ id: c.id(), title: `索样 ${row.code} · ${customer.name}：${row.description} ${quantity} ${unit}，${row.neededBy} 前寄出`, due: row.neededBy, done: false, kind: `sample-request:${row.id}`, target: { view: 'samples', section: 'requests', id: row.id }, assigneeIds: c.actorId ? [c.actorId] : [] });
       return { id: row.id };
     }
     case 'sample.request.fulfill': {

@@ -9,9 +9,11 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { activeCustomers } from '../../runtime/activeCustomers';
-import { CURRENCIES, UNITS } from '../../runtime/tradeOptions';
+import { CURRENCIES } from '../../runtime/tradeOptions';
+import { SAMPLE_COUNT_UNITS, SAMPLE_MEASURED_UNITS } from '../../../../../server/src/shared/mistDevelopmentDomain';
+const SAMPLE_UNITS = [...new Set([...SAMPLE_MEASURED_UNITS, ...SAMPLE_COUNT_UNITS.fabric, ...SAMPLE_COUNT_UNITS.garment])].map(u => ({ value: u, label: u }));
 import { ModuleEditorDialog, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
-import { choiceField, emptyOption, field, number, text, today, useEditor } from './fulfillmentKit';
+import { emptyOption, field, number, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -31,9 +33,10 @@ export function SampleRequests() {
   const pick = (r: MistSampleRequest) => { setDrawer(true); go('samples', r.id, { section: 'requests' }, { keepScroll: true }); };
 
   const saveSpec = (r?: MistSampleRequest): ModuleEditorSpec => ({ title: r ? `修改索样 ${r.code}` : '新建索样申请', submitLabel: r ? '保存' : '提交',
+    sections: [{ id: 'sample', label: '样品', fields: ['customerId', 'orderId', 'description', 'quantity', 'unit', 'neededBy'] }, { id: 'ship', label: '寄送与收费', fields: ['recipient', 'address', 'feeAmount', 'feeCurrency', 'note'] }],
     fields: [field('customerId', '客户', 'select', true, [emptyOption, ...activeCustomers(state, r?.customerId).map(c => ({ value: c.id, label: c.name }))]),
       field('orderId', '关联订单', 'select', false, [emptyOption, ...(state?.orders || []).filter(o => !o.governance || !['cancelled', 'void'].includes(o.governance.status)).map(o => ({ value: o.id, label: `${o.code} · ${o.customer}` }))]),
-      field('description', '样品要求', 'textarea'), { ...field('quantity', '数量', 'number'), min: 0.0001 }, choiceField('unit', '单位', UNITS),
+      field('description', '样品要求', 'textarea'), { ...field('quantity', '数量', 'number'), min: 0.0001 }, field('unit', '单位', 'select', true, SAMPLE_UNITS),
       field('recipient', '收件人'), field('address', '寄送地址', 'textarea'), field('neededBy', '需要日期', 'date'),
       { ...field('feeAmount', '样品费', 'number', false), min: 0 }, field('feeCurrency', '样品费币种', 'select', false, CURRENCIES.map(c => ({ value: c.value, label: c.label }))), field('note', '备注', 'textarea', false)],
     initialValues: r ? { customerId: r.customerId, orderId: r.orderId || '', description: r.description, quantity: r.quantity, unit: r.unit, recipient: r.recipient, address: r.address, neededBy: r.neededBy, feeAmount: r.fee?.amount ?? '', feeCurrency: r.fee?.currency || 'USD', note: r.note }
@@ -46,7 +49,7 @@ export function SampleRequests() {
     return { title: `据单寄出 ${r.code}`, submitLabel: '登记寄出',
       fields: [field('sampleId', '寄出样品', 'select', true, [emptyOption, ...options]), { ...field('quantity', `本次数量（${r.unit}）`, 'number'), min: 0.0001 }, field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), field('complete', '本次寄完', 'checkbox', false)],
       initialValues: { sampleId: '', quantity: left || r.quantity, carrier: '', trackingNo: '', complete: true },
-      submit: v => run({ type: 'sample.request.fulfill', payload: { id: r.id, sampleId: text(v, 'sampleId'), quantity: number(v, 'quantity'), carrier: text(v, 'carrier'), trackingNo: text(v, 'trackingNo'), complete: v.complete === true } }) };
+      submit: async v => { await run({ type: 'sample.request.fulfill', payload: { id: r.id, sampleId: text(v, 'sampleId'), quantity: number(v, 'quantity'), carrier: text(v, 'carrier'), trackingNo: text(v, 'trackingNo'), complete: v.complete === true } }); go('samples', r.id, { section: 'requests' }); } };
   };
   const cancelSpec = (r: MistSampleRequest): ModuleEditorSpec => ({ title: `取消索样 ${r.code}`, submitLabel: '取消申请', submitVariant: 'danger', fields: [field('reason', '取消原因', 'textarea')], initialValues: { reason: '' },
     submit: v => run({ type: 'sample.request.cancel', payload: { id: r.id, reason: text(v, 'reason') } }) });
