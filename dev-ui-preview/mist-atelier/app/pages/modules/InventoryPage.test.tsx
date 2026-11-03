@@ -146,7 +146,7 @@ it('shows failed quarantine disposal choices and records their evidence on the e
   f.run({type:'fulfillment.qc.report',payload:{id:task,domain:'fabric',result:'reject',report:'FAIL-1',opinion:'Defect',location:'Hold A',reviewedAt:f.context.now,measurements:[],fileIds:[]}},'qc');
   store.state=f.state;render(f.state.fulfillment.stock[0].id);
   expect(getByRole(host,'button',{name:'报废'})).toBeTruthy();await click(getByRole(host,'button',{name:'退供应商'}));
-  const dialog=getByRole(document.body,'dialog',{name:'登记退供应商'});typeInto(getByRole(dialog,'textbox',{name:'供应商接收依据'}) as HTMLTextAreaElement,'模拟供应商确认收回');await click(getByRole(dialog,'button',{name:'确认登记'}));
+  const dialog=getByRole(document.body,'dialog',{name:'登记退供应商'});typeInto(getByRole(dialog,'textbox',{name:'供应商接收依据'}) as HTMLTextAreaElement,'模拟供应商确认收回');await click(getByRole(dialog,'checkbox',{name:'退回后不可撤销'}));await click(getByRole(dialog,'button',{name:'确认登记'}));
   expect(store.run).toHaveBeenCalledWith({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:ret,decision:'supplierReturn',evidence:'模拟供应商确认收回'}});
 });
 
@@ -184,7 +184,8 @@ it('binds a material issue to the existing processing branch instead of a free-t
   const stock=store.state.fulfillment.stock[0];render(stock.id);await click(getByRole(host,'button',{name:'登记出库',exact:true}));
   const dialog=getByRole(document.body,'dialog',{name:'登记发料'});expect((getByRole(dialog,'combobox',{name:'接收加工单'}) as HTMLSelectElement).value).toBe(f.productionId);
   typeInto(getByRole(dialog,'textbox',{name:'交接地点'}) as HTMLInputElement,'Factory');typeInto(getByRole(dialog,'textbox',{name:'交接联系人'}) as HTMLInputElement,'Factory receiver');typeInto(getByRole(dialog,'textbox',{name:'交接依据'}) as HTMLTextAreaElement,'Delivery note');
-  await click(getByRole(dialog,'button',{name:'登记发料',exact:true}));
+  await click(getByRole(dialog,'button',{name:'登记发料',exact:true}));expect(dialog.textContent).toContain('请勾选确认');expect(store.run).not.toHaveBeenCalled();
+  await click(getByRole(dialog,'checkbox',{name:'出库后不能撤销，只能按原出库退回'}));await click(getByRole(dialog,'button',{name:'登记发料',exact:true}));
   expect(store.run).toHaveBeenCalledWith(expect.objectContaining({type:'fulfillment.materials.issue',payload:expect.objectContaining({id:stock.id,targetProductionId:f.productionId,quantity:100.3})}));
 });
 it('uses the minimal authorized destination hint when the other team order is hidden',async()=>{
@@ -197,4 +198,35 @@ it('uses the minimal authorized destination hint when the other team order is hi
 it('lets a garment-line account handle internal fabric stock (P4: no line restriction)',()=>{
   const f=materialDeliveryFixture();store.state=f.state;store.state.memberGroups!.push({userId:'biz',name:'Business',groups:['garment'],updatedAt:'',updatedBy:'owner'});render(store.state.fulfillment.stock[0].id);
   expect((getByRole(host,'button',{name:'登记出库',exact:true}) as HTMLButtonElement).disabled).toBe(false);
+});
+it('shows dye lot, rolls, reservation and transit, and sends reserve, transfer and count commands',async()=>{
+  store.state!.fulfillment.warehouses.push({id:'wh2',code:'WH-2',name:'宁波仓',address:'宁波',active:true});
+  store.state!.fulfillment.stock.push(stock('r',{orderId:'of',lineId:'lf',name:'府绸',unit:'米',available:300,quantity:300,dyeLot:'D-7',rolls:[{roll:'R1',quantity:180,weightKg:21},{roll:'R2',quantity:120}],reservations:[{id:'res',orderId:'of',lineId:'lf',purpose:'SO-F 大货',quantity:100,at:'2026-10-11T08:00:00Z',actor:'经办人'}]}));
+  store.state!.fulfillment.stockTransfers=[{id:'tr',code:'TR-2026-00001',stockId:'r',fromLocation:'A-1',toWarehouseId:'wh2',toLocation:'N-1',quantity:50,carrier:'车队',note:'调仓',state:'inTransit',sentAt:'2026-10-12T08:00:00Z',sentBy:'经办人'}];
+  render('r');
+  expect(host.textContent).toContain('缸号 D-7');expect(host.textContent).toContain('码单 · 2 卷');expect(host.textContent).toContain('已预留 100');expect(host.textContent).toContain('在途 50');
+  await click(getByRole(host,'button',{name:'预留'}));
+  let dialog=getByRole(document.body,'dialog',{name:'预留库存'});choose(getByRole(dialog,'combobox',{name:'预留给订单条目'}) as HTMLSelectElement,'lf');typeInto(getByRole(dialog,'textbox',{name:'用途 / 单号'}) as HTMLInputElement,'打样');
+  expect((getByRole(dialog,'spinbutton',{name:'数量（米）'}) as HTMLInputElement).value).toBe('200');
+  await click(getByRole(dialog,'button',{name:'确认预留'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.stock.reserve',payload:{stockId:'r',orderId:'of',lineId:'lf',quantity:200,purpose:'打样'}});
+  await click(getByRole(host,'button',{name:'仓库调拨'}));
+  dialog=getByRole(document.body,'dialog',{name:'仓库调拨'});expect((getByRole(dialog,'combobox',{name:'调入仓库'}) as HTMLSelectElement).value).toBe('wh2');
+  typeInto(getByRole(dialog,'textbox',{name:'调入库位'}) as HTMLInputElement,'N-2');typeInto(getByRole(dialog,'textbox',{name:'承运 / 经手'}) as HTMLInputElement,'车队');typeInto(getByRole(dialog,'textbox',{name:'调拨依据'}) as HTMLTextAreaElement,'宁波出货');
+  await click(getByRole(dialog,'button',{name:'登记调出'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.stock.transfer',payload:{stockId:'r',quantity:200,toWarehouseId:'wh2',toLocation:'N-2',carrier:'车队',note:'宁波出货'}});
+  await click(getByRole(host,'button',{name:'到仓'}));
+  dialog=getByRole(document.body,'dialog',{name:'调拨到仓'});typeInto(getByRole(dialog,'textbox',{name:'点收依据'}) as HTMLTextAreaElement,'点收无误');await click(getByRole(dialog,'button',{name:'确认到仓'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.stock.transfer.receive',payload:{id:'tr',note:'点收无误'}});
+  await click(getByRole(host,'button',{name:'盘点'}));
+  dialog=getByRole(document.body,'dialog',{name:'库存盘点'});typeInto(getByRole(dialog,'spinbutton',{name:/A-1 实盘/}) as HTMLInputElement,'297.5');typeInto(getByRole(dialog,'textbox',{name:'盘点说明'}) as HTMLTextAreaElement,'月末盘点');
+  await click(getByRole(dialog,'button',{name:'提交盘点'}));
+  expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.stock.count',payload:{lines:[{stockId:'r',location:'A-1',counted:297.5}],note:'月末盘点'}});
+});
+it('records other receipts with source, evidence and packing list',async()=>{
+  render();await click(getByRole(host,'button',{name:'其他入库'}));
+  const form=document.body;
+  choose(getByRole(form,'combobox',{name:'来源类型'}) as HTMLSelectElement,'customer');choose(getByRole(form,'combobox',{name:'订单条目'}) as HTMLSelectElement,'lf');
+  typeInto(getByRole(form,'textbox',{name:'来源单位 / 单号'}) as HTMLInputElement,'客户来料 DN-88');typeInto(getByRole(form,'textbox',{name:'入库依据'}) as HTMLTextAreaElement,'送货单');
+  expect(form.textContent).toContain('其他入库');
 });

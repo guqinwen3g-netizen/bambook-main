@@ -2,6 +2,7 @@ import {packingBreakdownBlocker,packingFabricSpecification,packingFabricColorErr
 import {recordReplacementExportReview,replacementDeclaredUnitPrice,type ReplacementExportCommand,type ReplacementExportReview} from './mistClaimReplacement';
 import { normalizeFabricStageTerms, fabricStageSubmitProblem, fabricStageTermsText, type FabricStageTerms } from './mistFabricStage';
 import { aqlOutcome, assertConclusionMatches, fabricOutcome, normalizeAql, normalizeFabricInspection, type AqlInspection, type AqlOutcome, type FabricInspection, type FabricOutcome } from './mistQcInspection';
+import { applyStockOperation, autoIssueForDeparture, stockOperationPermission, STOCK_OPERATION_COMMANDS, type StockCount, type StockOperationCommand, type StockTransfer } from './mistStockOperations';
 import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, type QcDispositionCommand } from './mistQcDisposition';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
 import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
@@ -235,7 +236,15 @@ export type FulfillmentStock = {
     id: string;
     purchaseId?: string;
     receiptId?: string;
-    sourceKind?: 'purchase' | 'claimReturn';
+    sourceKind?: 'purchase' | 'claimReturn' | 'other';
+    /** Other receipts (customer-supplied material, sample cloth, leftover or production returns): reason and evidence. */
+    otherReceipt?: { reason: OtherReceiptReason; source: string; evidence: string; unitCost?: number; currency?: string };
+    /** Dye lot / shade and roll list (fabric packing list) as delivered. */
+    dyeLot?: string;
+    shade?: string;
+    rolls?: StockRoll[];
+    /** Quantities held for an order line or processing contract; still in stock but not freely usable. */
+    reservations?: StockReservation[];
     claimId?: string;
     dispositionId?: string;
     goodsId?: string;
@@ -261,11 +270,19 @@ export type FulfillmentStock = {
     owner: string;
     createdAt: string;
 };
+export type StockRoll = { roll: string; quantity: number; weightKg?: number };
+/** `issued` is the part already taken out by issues against this reservation; the rest stays held until issued or released. */
+export type StockReservation = { id: string; orderId: string; lineId: string; purpose: string; quantity: number; issued?: number; at: string; actor: string; releasedAt?: string; releasedBy?: string; releaseReason?: string };
+export const OTHER_RECEIPT_REASONS = { customer: '客供料', sample: '样布 / 样品料', leftover: '余料退回', productionReturn: '生产退料', other: '其他' } as const;
+export type OtherReceiptReason = keyof typeof OTHER_RECEIPT_REASONS;
 export type FulfillmentStockMovement = {
     id: string;
     materialDelivery?: MaterialDeliveryLink;
     stockId: string;
-    kind: 'receive' | 'issue' | 'return' | 'move' | 'lock' | 'unlock' | 'scrap' | 'reject';
+    kind: 'receive' | 'issue' | 'return' | 'move' | 'lock' | 'unlock' | 'scrap' | 'reject' | 'adjust' | 'transferOut' | 'transferIn' | 'reserve' | 'release';
+    /** Stock count adjustment: the signed difference and the count it belongs to. */
+    countId?: string;
+    transferId?: string;
     quantity: number;
     location: string;
     person: string;
@@ -419,6 +436,9 @@ export type FulfillmentState = {
     receipts: FulfillmentReceipt[];
     stock: FulfillmentStock[];
     stockMovements: FulfillmentStockMovement[];
+    /** Stock counts and warehouse transfers (P1-5); absent in states created before them. */
+    stockCounts?: StockCount[];
+    stockTransfers?: StockTransfer[];
     shipments: FulfillmentShipment[];
     packing: FulfillmentPacking[];
     customs: FulfillmentCustoms[];
@@ -550,6 +570,11 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     type: 'fulfillment.procurement.receive';
     payload: {
         id: string;
+        /** Warehouse receipt: the warehouse, and for fabric the dye lot, shade and roll list. */
+        warehouseId?: string;
+        dyeLot?: string;
+        shade?: string;
+        rolls?: StockRoll[];
         targetProductionId?: string;
         /** Intermediate fabric processing contract receiving the goods (it has no production branch). */
         targetPurchaseId?: string;
@@ -609,7 +634,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
         issueId?: string;
         sourceLocation?: string;
     };
-} | {
+} | StockOperationCommand | {
     type: 'fulfillment.inventory.shipment.link';
     payload: { issueId: string; shipmentId: string; evidence: string };
 } | {
@@ -744,6 +769,7 @@ export function fulfillmentCommandPermission(command: FulfillmentCommand): strin
         return 'products:write';
     if (command.type === 'fulfillment.qc.patrol') return 'qc:inspect';
     if (command.type === 'fulfillment.qc.incoming.close') return 'inventory:write';
+    if ((STOCK_OPERATION_COMMANDS as readonly string[]).includes(command.type)) return stockOperationPermission(command as StockOperationCommand);
     if (command.type === 'fulfillment.qc.claim' || command.type === 'fulfillment.qc.report' || command.type === 'fulfillment.qc.transfer' || command.type === 'fulfillment.qc.reschedule')
         return `qc:${command.payload.domain}_chain:write`;
     if (command.type === 'fulfillment.qc.request')
@@ -861,13 +887,13 @@ function sourcePosition(row: PositionedStock, requested?: string) {
     if (!position) return fail('本次位置没有可用库存');
     return position;
 }
-function removeAtPosition(row: PositionedStock, quantity: number, requested?: string) {
+export function removeAtPosition(row: PositionedStock, quantity: number, requested?: string) {
     const position = sourcePosition(row, requested);
     if (quantity > position.available) fail('所选位置的可用数量不足');
     position.available = sum([position.available, -quantity]); refreshPositionSummary(row);
     return position.location;
 }
-function addAtPosition(row: PositionedStock, quantity: number, location: string) {
+export function addAtPosition(row: PositionedStock, quantity: number, location: string) {
     const positions = mutablePositions(row);
     let position = positions.find(position => position.location === location);
     if (!position) { position = { location, available: 0 }; positions.push(position); }
@@ -877,6 +903,16 @@ export function sampleLoanRemaining(root: MistState, id: string) {
     const loan = root.fulfillment.sampleMovements.find(movement => movement.id === id && movement.kind === 'lend');
     return loan ? sum([loan.quantity, -sum(root.fulfillment.sampleMovements.filter(movement => movement.kind === 'return' && movement.loanId === id).map(movement => movement.quantity))]) : 0;
 }
+/** Active reservations hold stock for one order line; issue for that line consumes them first (see stock.release). */
+export const reservationOpen = (r: StockReservation) => r.releasedAt ? 0 : sum([r.quantity, -(r.issued || 0)]);
+export const stockReservedQuantity = (stock: Pick<FulfillmentStock, 'reservations'>) => sum((stock.reservations || []).map(reservationOpen));
+/** Issue for an order line draws on that line's own reservations first, so reserved goods can still go to their purpose. */
+export function consumeReservations(stock: FulfillmentStock, quantity: number, line?: { orderId: string; lineId: string }) {
+    let left = quantity;
+    if (line) for (const r of stock.reservations || []) { if (left <= 0) break; if (r.orderId !== line.orderId || r.lineId !== line.lineId) continue; const take = Math.min(left, reservationOpen(r)); if (take > 0) { r.issued = sum([r.issued || 0, take]); left = sum([left, -take]); } }
+    if (left > freeQuantity(stock)) fail(`可用量不足：已预留 ${stockReservedQuantity(stock)} ${stock.unit}`);
+}
+export const freeQuantity = (stock: FulfillmentStock) => sum([stock.available, -stockReservedQuantity(stock)]);
 export function stockIssueRemaining(root: MistState, id: string) {
     const issue = root.fulfillment.stockMovements.find(movement => movement.id === id && movement.kind === 'issue');
     return issue ? sum([issue.quantity, -sum(root.fulfillment.stockMovements.filter(movement => movement.kind === 'return' && movement.issueId === id).map(movement => movement.quantity))]) : 0;
@@ -901,6 +937,25 @@ function shipmentForIssue(root: MistState, issue: FulfillmentStockMovement, ship
     const linked = sum(f.stockMovements.filter(row => row.id !== issue.id && row.shipmentLink?.shipmentId === shipment.id && row.shipmentLink.productionId === branch!.id).map(row => stockIssueRemaining(root, row.id)));
     if (sum([linked, remaining]) > matches[0].quantity) fail('关联数量超过本次出运数量');
     return { stock, branch: branch!, shipment };
+}
+/** Warehouse, dye lot and roll list for a lot entering our stock. Rolls must add up to the received quantity. */
+function receiptLot(root: MistState, p: { warehouseId?: unknown; dyeLot?: unknown; shade?: unknown; rolls?: unknown }, quantity: number, unit: string): Partial<FulfillmentStock> {
+    const out: Partial<FulfillmentStock> = {};
+    if (p.warehouseId !== undefined) {
+        const w = root.fulfillment.warehouses.find(row => row.id === p.warehouseId);
+        if (!w || !w.active) fail('请选择启用中的仓库');
+        out.warehouseId = w!.id;
+    }
+    if (p.dyeLot !== undefined) out.dyeLot = text(p.dyeLot, '缸号', true, 60);
+    if (p.shade !== undefined) out.shade = text(p.shade, '色号', true, 60);
+    if (p.rolls !== undefined) {
+        if (!Array.isArray(p.rolls) || !p.rolls.length || p.rolls.length > 1000) fail('码单最多 1000 卷');
+        const rolls = (p.rolls as unknown[]).map((raw, i) => { const r = (raw || {}) as Record<string, unknown>; return { roll: text(r.roll, `第 ${i + 1} 卷卷号`, true, 60), quantity: qty(r.quantity, `第 ${i + 1} 卷数量`), ...(r.weightKg !== undefined && r.weightKg !== null && r.weightKg !== '' ? { weightKg: qty(r.weightKg, `第 ${i + 1} 卷重量`) } : {}) }; });
+        if (new Set(rolls.map(r => r.roll)).size !== rolls.length) fail('码单卷号不能重复');
+        if (sum(rolls.map(r => r.quantity)) !== quantity) fail(`码单合计 ${sum(rolls.map(r => r.quantity))} ${unit} 与实收 ${quantity} ${unit} 不一致`);
+        out.rolls = rolls;
+    }
+    return out;
 }
 function purchaseSnapshot(purchase: FulfillmentPurchase): FulfillmentPurchaseRevision['snapshot'] {
     const { orderId, lineId, kind, materialKind, stageTerms, iqcRequired, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
@@ -1145,6 +1200,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
     if (command.type === 'fulfillment.production.intake' || command.type === 'fulfillment.production.observe' || command.type === 'fulfillment.production.intake.decide') return applyProductionIntake(root, command, ctx);
     if (command.type === 'fulfillment.qc.dispose' || command.type === 'fulfillment.qc.concession.decide') return applyQcDispositionCommand(root, command, ctx);
     if(command.type.startsWith('fulfillment.claimInventory.'))return applyClaimInventoryCommand(root,command as ClaimInventoryCommand,ctx);
+    if ((STOCK_OPERATION_COMMANDS as readonly string[]).includes(command.type)) return applyStockOperation(root, command as StockOperationCommand, ctx);
     if((CUSTOMS_DECLARATION_COMMANDS as readonly string[]).includes(command.type))return applyCustomsDeclarationCommand(root,command as CustomsDeclarationCommand,ctx);
     const p: any = command.payload;
     if (['fulfillment.procurement.submit','fulfillment.procurement.send','fulfillment.procurement.confirm','fulfillment.procurement.receive'].includes(command.type) || command.type === 'fulfillment.procurement.decide' && p.decision === 'approved') {
@@ -1716,13 +1772,15 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 branch.col = 'qc';
                 for (const task of f.qcTasks) if (task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch.id && task.state === 'reported') task.state = 'working';
             }
+            if (p.destination !== 'warehouse' && (p.warehouseId !== undefined || p.rolls !== undefined || p.dyeLot !== undefined)) fail('仅入我方仓库时登记仓库、缸号与码单');
             if (p.destination === 'warehouse' && quantity > 0) {
                 const stockId = ctx.id();
                 // A processing return is the processed fabric itself, not the service description.
                 const stockName = purchase.kind === 'processing' && !intermediate ? get(root.orderLines, purchase.lineId, '订单条目').name : purchase.description;
                 // Material received into stock on a contract that requires incoming inspection waits for IQC before it can be used.
                 const iqc = purchase.kind === 'material' && purchase.iqcRequired === true;
-                f.stock.push({ id: stockId, purchaseId: purchase.id, receiptId: id, orderId: purchase.orderId, lineId: purchase.lineId, name: stockName, unit: purchase.unit, quantity, available: iqc ? 0 : quantity, ...(iqc ? { locked: quantity, positions: [{ location, available: 0 }] } : {}), location, owner: '公司', createdAt: ctx.now });
+                const lot = receiptLot(root, p, quantity, purchase.unit);
+                f.stock.push({ id: stockId, purchaseId: purchase.id, receiptId: id, orderId: purchase.orderId, lineId: purchase.lineId, name: stockName, unit: purchase.unit, quantity, available: iqc ? 0 : quantity, ...(iqc ? { locked: quantity, positions: [{ location, available: 0 }] } : {}), ...lot, location, owner: '公司', createdAt: ctx.now });
                 f.stockMovements.push({ id: ctx.id(), stockId, kind: 'receive', quantity, location, person: purchase.supplier, note: evidence, at: ctx.now, actor: ctx.actorName });
                 if (iqc) {
                     const taskId = ctx.id();
@@ -1792,7 +1850,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             if(stock.sourceKind==='claimReturn')fail('退回隔离库存仅可按案件实际处置，不能通用出库、退回或移位');
             if (!['issue', 'return', 'move'].includes(p.kind))
                 fail('库存操作无效');
-            let quantity = p.kind === 'move' ? 0 : qty(p.quantity);
+            // A move takes the whole position unless a partial quantity is given.
+            let quantity = p.kind === 'move' ? (p.quantity ? qty(p.quantity) : 0) : qty(p.quantity);
             const location = text(p.location, '实际地点'), person = text(p.person, '接收/交付方'), note = text(p.note, '交接依据');
             const sourcePurchaseId = stock.purchaseId || '';
             const linkedMaterial = !!root.orders.find(order => order.id === stock.orderId)?.governance?.contract.internalSupply || materialDeliveryRequired(root, sourcePurchaseId);
@@ -1828,7 +1887,9 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             }
             else {
                 const position = sourcePosition(stock, p.sourceLocation);
-                if (p.kind === 'move') quantity = position.available;
+                if (p.kind === 'move' && !quantity) quantity = position.available;
+                if (p.kind === 'move' && position.location === location) fail('移入位置与原位置相同');
+                if (p.kind === 'issue') consumeReservations(stock, quantity, materialDelivery ? { orderId: materialDelivery.orderId, lineId: materialDelivery.lineId } : undefined);
                 sourceLocation = removeAtPosition(stock, quantity, position.location);
                 if (p.kind === 'move') addAtPosition(stock, quantity, location);
             }
@@ -2094,6 +2155,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             s.fileIds = [...new Set([...s.fileIds, ...files(root, p.fileIds)])];
             s.departedAt = at;
             s.state = 'departed';
+            // Finished goods held in our warehouse for these lines leave stock with the shipment.
+            autoIssueForDeparture(root, s, ctx);
             audit(root, ctx, 'shipment', s.id, '已登记实际出运', { view: 'orders/detail', id: s.lines[0].orderId, orderLineId: s.lines[0].lineId });
             if (hold.risk?.release) { Object.assign(hold.risk.release, { shipmentId: s.id, shipmentCode: s.code, usedAt: ctx.now }); audit(root, ctx, 'risk', hold.risk.id, `带风险放行已用于 ${s.code}（往来冻结中，下一票须重新申请）`, { view: 'risks', id: hold.risk.id }); }
             return { id: s.id };
