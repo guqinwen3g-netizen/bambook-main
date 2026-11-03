@@ -61,7 +61,7 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
     if (error) return <Banner tone="warn" title={uiText(title)}>{uiText(error)}</Banner>;
     // 读取中与服务器未启用都要有交代，不能留一整页空白。
     const body = <div className="mist-card-body">{status
-      ? <Banner title={uiText("服务器未启用 ChatGPT 订阅连接")}>{uiText(mode === 'platform' ? '平台 AI 使用服务器配置的企业 API。测试期如需使用 ChatGPT 订阅，请由管理员在服务器启用后再连接。' : '服务器尚未开放个人订阅连接。')}</Banner>
+      ? <Banner title={uiText("未启用 ChatGPT 订阅连接")} />
       : <p className="mist-note">{uiText("正在读取订阅连接…")}</p>}</div>;
     return bare ? body : <Card>{body}</Card>;
   }

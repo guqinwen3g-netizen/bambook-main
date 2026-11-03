@@ -131,7 +131,7 @@ export function PlatformAiProvidersPanel({ sessionKey }: { sessionKey: string })
       {view.supportsApi ? <div className="mist-row">
         <Button variant="ai" icon={Plus} disabled={busy || view.api.providers.length >= MAX} onClick={() => { setError(''); setDraft({ name: '', baseUrl: '', model: '', apiKey: '' }); }}>{uiText("添加 API 服务")}</Button>
         <span className="mist-note">{uiText("支持 OpenAI 兼容接口：OpenAI、火山方舟、DeepSeek、智谱、通义千问或自建服务。")}</span>
-      </div> : <Banner tone="neutral" title={uiText("当前服务器版本尚不支持 API 服务")}>{uiText("服务器更新后即可在此添加 OpenAI 兼容的 API 服务；ChatGPT 套餐可先在下方连接。")}</Banner>}
+      </div> : <Banner tone="neutral" title={uiText("API 服务未启用")} />}
     </div>
     <AiSubscriptionPanel mode="platform" bare sessionKey={sessionKey} onChange={() => void read()} />
     <Drawer open={!!draft} onClose={() => { if (!busy) setDraft(null); }} title={uiText(draft?.id ? '编辑 API 服务' : '添加 API 服务')} sub={uiText("Key 只保存在服务器，保存后不再显示。")}
