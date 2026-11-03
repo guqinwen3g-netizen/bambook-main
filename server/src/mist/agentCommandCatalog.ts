@@ -620,6 +620,22 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
+  "type": "fulfillment.documents.bl",
+  "payload": "{ id: string; blNo: string; kind: BillOfLadingKind; originals: number; siDocumentId?: string; confirmDraft?: string; release?: string }",
+  "types": {
+   "BillOfLadingKind": "'original' | 'telex' | 'seaway'"
+  },
+  "source": "server/src/shared/mistDocumentGeneration.ts"
+ },
+ {
+  "type": "fulfillment.documents.generate",
+  "payload": "{ shipmentId: string; type: OwnDocumentType; orderId?: string; dueDate?: string }",
+  "types": {
+   "OwnDocumentType": "typeof OWN_DOCUMENT_TYPES[number]"
+  },
+  "source": "server/src/shared/mistDocumentGeneration.ts"
+ },
+ {
   "type": "fulfillment.documents.issue",
   "payload": "{ id: string; }",
   "source": "server/src/shared/mistFulfillment.ts"
@@ -628,7 +644,10 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "fulfillment.documents.save",
   "payload": "{ id?: string; baseDocumentId?: string; shipmentId: string; orderId: string; type: FulfillmentDocument['type']; number: string; title: string; dueDate: string; content: string; fileIds: string[]; }",
   "types": {
-   "FulfillmentDocument": "{ replacementDeclaredAmount?:number; id: string; familyId?: string; shipmentId: string; orderId: string; type: 'CI' | 'PL' | 'BL' | 'CO' | 'OTHER'; number: string; version: number; title: string; dueDate: string; content: string; fileIds: string[]; status: 'draft' | 'issued' | 'void'; createdAt: string; issuedAt?: string; actor: string; invoiceId?: string; externalIssue?: { issuer: string; at: string; evidence: string; recordedBy: string }; financeRejection?: { reason: string; at: string; actor: string; invoiceId: string }; }"
+   "FulfillmentDocument": "{ replacementDeclaredAmount?:number; id: string; familyId?: string; shipmentId: string; orderId: string; type: ShipmentDocumentType; number: string; version: number; generated?: GeneratedDocRecord[]; bl?: BillOfLadingDetails; title: string; dueDate: string; content: string; fileIds: string[]; status: 'draft' | 'issued' | 'void'; createdAt: string; issuedAt?: string; actor: string; invoiceId?: string; externalIssue?: { issuer: string; at: string; evidence: string; recordedBy: string }; financeRejection?: { reason: string; at: string; actor: string; invoiceId: string }; }",
+   "ShipmentDocumentType": "typeof DOCUMENT_TYPES[number]",
+   "GeneratedDocRecord": "{ id: string; kind: string; number: string; fileId: string; fileName: string; sha256: string; bytes: number; templateVersion: number; snapshotFingerprint: string; snapshot: GeneratedDocSnapshot; generatedAt: string; generatedBy: string }",
+   "BillOfLadingDetails": "{ blNo: string; kind: BillOfLadingKind; originals: number; siDocumentId?: string; draftConfirmed?: { at: string; actor: string; evidence: string }; released?: { at: string; actor: string; evidence: string }; updatedAt: string; updatedBy: string; }"
   },
   "source": "server/src/shared/mistFulfillment.ts"
  },
@@ -1162,6 +1181,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistMarket.ts"
  },
  {
+  "type": "market.lookbook.document",
+  "payload": "{ id: string }",
+  "source": "server/src/shared/mistDocumentGeneration.ts"
+ },
+ {
   "type": "market.lookbook.save",
   "payload": "{id?:string;input:Omit<Input<MarketLookbook>,'preparedAt'|'snapshots'>}",
   "types": {
@@ -1485,6 +1509,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "OrderLineBreakdown": "GarmentBreakdown|FabricBreakdown"
   },
   "source": "server/src/shared/mistWorkspace.ts"
+ },
+ {
+  "type": "order.document.generate",
+  "payload": "{ orderId: string; kind: 'PI' | 'SC' }",
+  "source": "server/src/shared/mistDocumentGeneration.ts"
  },
  {
   "type": "order.fabric.allocate",

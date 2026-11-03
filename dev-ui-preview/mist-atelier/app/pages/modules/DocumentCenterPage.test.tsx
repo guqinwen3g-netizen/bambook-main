@@ -30,7 +30,7 @@ afterEach(()=>{act(()=>root.unmount());host.remove();});
 it('explains every issue precondition the backend enforces before a draft can be issued',()=>{
   const st=store.state!,f=st.fulfillment;
   const pl=doc('pl','PL',{fileIds:[]});
-  expect(issueBlocker(st,pl)).toBe('请先上传核对后的正式单据文件');
+  expect(issueBlocker(st,pl)).toBe('请先生成或上传正式单据文件');
   pl.fileIds=['file'];expect(issueBlocker(st,pl)).toBe('装箱分配与计划数量不一致');
   f.packing.push(pack(10));expect(issueBlocker(st,pl)).toBe('');
   f.documents.push(doc('pl0','PL',{status:'issued'}));expect(issueBlocker(st,pl)).toBe('相同来源已有有效版本，请先作废');
@@ -96,9 +96,9 @@ it('keeps users without document permission read-only and shows the letterhead s
   store.state!.settings.companyProfile={legalName:'竹衍服饰',englishName:'Bambook Apparel',address:'上海',englishAddress:'',phone:'',email:'',taxId:'TAX1',customsCode:'',bankName:'',bankAccount:'',swift:'',defaultCurrency:'USD'};
   render('pl');
   expect(host.textContent).not.toContain('只读查看');
-  expect(queryByRole(host,'button',{name:'新建单据'})).toBeNull();
+  expect(queryByRole(host,'button',{name:'登记单据'})).toBeNull();
   expect(queryByRole(host.querySelector('[data-document-detail="pl"]') as HTMLElement,'button',{name:'签发'})).toBeNull();
-  await click(getByRole(host,'tab',{name:/抬头与模板/}));
+  await click(getByRole(host,'tab',{name:/公司抬头/}));
   expect(host.textContent).toContain('竹衍服饰');expect(host.textContent).not.toContain('印章图样、编号规则预览与打印打包尚未接入');
 });
 
@@ -117,14 +117,14 @@ it('shows a replacement CI customs amount without claiming a customer receivable
 });
 
 it('asks for a collection date only on a billable CI and never submits hidden collection fields',async()=>{
- store.state!.orders.push({...store.state!.orders[0],id:'free',code:'SO-FREE',replacementSource:{schemaVersion:1,claimId:'claim'}} as any);store.state!.fulfillment.shipments[0].lines.push({orderId:'free',lineId:'free-line',quantity:1} as any);render(undefined,'s');await click(getAllByRole(host,'button',{name:'新建单据'})[0]);const dialog=getByRole(document.body,'dialog');
+ store.state!.orders.push({...store.state!.orders[0],id:'free',code:'SO-FREE',replacementSource:{schemaVersion:1,claimId:'claim'}} as any);store.state!.fulfillment.shipments[0].lines.push({orderId:'free',lineId:'free-line',quantity:1} as any);render(undefined,'s');await click(getAllByRole(host,'button',{name:'登记单据'})[0]);const dialog=getByRole(document.body,'dialog');
  const choose=(label:string,value:string)=>act(()=>fireEvent.change(getByRole(dialog,'combobox',{name:label}),{target:{value}}));
  expect(queryByRole(dialog,'combobox',{name:'对应订单'})).toBeNull();expect(queryByLabelText(dialog,'应收到期日')).toBeNull();choose('单据类型','CI');choose('对应订单','o');expect(getByLabelText(dialog,'应收到期日')).toBeTruthy();fireEvent.change(getByLabelText(dialog,'应收到期日'),{target:{value:'2026-11-01'}});choose('单据类型','PL');expect(queryByLabelText(dialog,'应收到期日')).toBeNull();choose('单据类型','CI');choose('对应订单','free');expect(queryByLabelText(dialog,'应收到期日')).toBeNull();
  typeInto(getByRole(dialog,'textbox',{name:'实际单据编号'}) as HTMLInputElement,'CI-FREE');typeInto(getByRole(dialog,'textbox',{name:'标题'}) as HTMLInputElement,'商业发票');typeInto(getByRole(dialog,'textbox',{name:'单据正文'}) as HTMLTextAreaElement,'Replacement, no charge.');await click(getByRole(dialog,'button',{name:'保存为草稿'}));expect(store.run).toHaveBeenLastCalledWith({type:'fulfillment.documents.save',payload:expect.objectContaining({type:'CI',orderId:'free',dueDate:''})});
 });
 
 it('shows company maintenance only to accounts that can read company settings',async()=>{
- session.denied.add('settings:system:read');render();await click(getByRole(host,'tab',{name:'抬头与模板'}));expect(queryByRole(host,'button',{name:'公司资料'})).toBeNull();session.denied.clear();render();await click(getByRole(host,'button',{name:'公司资料'}));expect(go).toHaveBeenLastCalledWith('system-settings',undefined,{section:'company'});
+ session.denied.add('settings:system:read');render();await click(getByRole(host,'tab',{name:'公司抬头'}));expect(queryByRole(host,'button',{name:'公司资料'})).toBeNull();session.denied.clear();render();await click(getByRole(host,'button',{name:'公司资料'}));expect(go).toHaveBeenLastCalledWith('system-settings',undefined,{section:'company'});
 });
 
 it('keeps unrelated factory and booking originals visible as separate current documents',()=>{
@@ -139,4 +139,16 @@ it('keeps workspace conflicts in their existing presentation without reporting a
  expect(host.querySelectorAll('[role="alert"]')).toHaveLength(0);
  presentedError=undefined;render();expect(host.textContent).toContain('单据操作未完成');
  expect(host.querySelectorAll('[role="alert"]')).toHaveLength(1);
+});
+it('generates a CI from the shipment with its due date and shows the receivable consequence before issuing',async()=>{
+  store.run.mockResolvedValue({result:{id:'gen',fileId:'gf'}});store.state!.settings.companyProfile={legalName:'竹语'} as any;
+  render(undefined,'s');
+  await click(getAllByRole(host,'button',{name:'生成单据'})[0]);
+  const dialog=getByRole(document.body,'dialog',{name:'生成单据'});
+  typeInto(getByLabelText(dialog,'应收到期日') as HTMLInputElement,'2026-12-01');
+  await click(getByRole(dialog,'button',{name:'生成'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.documents.generate',payload:{shipmentId:'s',type:'CI',orderId:'o',dueDate:'2026-12-01'}});
+  store.state!.fulfillment.documents.push(doc('ci','CI',{dueDate:'2026-12-01'}));render('ci','s');
+  await click(getByRole(host.querySelector('[data-document-detail="ci"]') as HTMLElement,'button',{name:'签发'}));
+  expect(getByRole(document.body,'dialog',{name:/签发/}).textContent).toContain('将生成应收 USD 100.00，到期 2026-12-01');
 });
