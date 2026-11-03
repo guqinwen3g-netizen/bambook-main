@@ -1812,7 +1812,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "platform.bom.save",
-  "payload": "{id?:string;orderId:string;description:string;currency:string;lines:PlatformBomLine[];labor:number;overhead:number}",
+  "payload": "{id?:string;orderId?:string;lineId?:string;productId?:string;devId?:string;versionId?:string;unit?:string;description:string;currency:string;lines:PlatformBomLine[];labor:number;overhead:number}",
   "types": {
    "PlatformBomLine": "{description:string;quantity:number;unit:string;wastagePercent:number;unitCost:number}"
   },
@@ -1954,8 +1954,13 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistPlatform.ts"
  },
  {
+  "type": "platform.pricing.apply",
+  "payload": "{id:string;note:string}",
+  "source": "server/src/shared/mistPlatform.ts"
+ },
+ {
   "type": "platform.pricing.save",
-  "payload": "{orderId:string;purchaseCostCny:number;refundRate:number;exchangeRate:number;profitMargin:number;commissionRate:number;basis:string;deviationReason?:string}",
+  "payload": "{orderId?:string;quotationId?:string;lineId?:string;currency?:string;purchaseCostCny:number;refundRate:number;exchangeRate:number;profitMargin:number;commissionRate:number;basis:string;deviationReason?:string}",
   "source": "server/src/shared/mistPlatform.ts"
  },
  {

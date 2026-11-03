@@ -96,6 +96,12 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - `email.bulk`（≤200 封：已读 / 未读 / 归档 / 删除 / 恢复 / 关联）、`email.purge`（只限已删除、未提交过资料的邮件，同时清掉无人引用的附件文件，高风险）、`email.account.remove`（须先断开，开通人办理，`removed` 后历史保留、禁止新草稿 / 凭据 / 同步，高风险）、`email.template.save`（`emails:admin`，`fillEmailTemplate` 按关联订单 / 报价 / 客户填 {客户}{订单号}{款号}{交期}{报价号}{出运号}）。
 - 业务页发信统一经 `runtime/composeIntent.ts` 打开智能邮箱草稿：客户、供应商、报价（附正式报价单）、询价函、画册、营销推广（线索密送）。发送仍由用户在邮箱确认。
 
+## 当前 Mist 定价、参考成本与市场参考（P1-8）
+
+- `platform.pricing.save`：来源为订单（`orderId`）或报价条目（`quotationId`+`lineId`）二选一；`currency` 默认 USD，报价来源必须等于报价币种；标准参数按订单类型或报价条目 `family`。`platform.pricing.apply`（`pricing:write`）把报价来源试算的单价四舍五入到两位写回草稿条目，归档原审批、`requiresApproval=true`。
+- `platform.bom.save`：锚点为订单（可含 `lineId`）、`productId` 或 `devId`+`versionId`，至少一个；`unit` 取订单条目或产品档案。数据范围：报价来源试算随报价可见，开发版本参考成本随开发案可见。报价分项核算只列同币种、同单位、同产品 / 版本（或未限定）的已确认参考成本，引用时逐项写入并在依据中注明参考成本编号。
+- 平台市场参考 `server/src/ai/marketQuotes.ts`：`MarketQuoteWorker` 每北京日 10 点后取一次（`BAMBOOK_MARKET_FETCH=0` 关闭），经 Exa MCP（`https://mcp.exa.ai/mcp`，JSON-RPC `web_fetch_exa` / `web_search_exa`，可选 `EXA_API_KEY`）。汇率只取中国银行外汇牌价现汇买入价（每 100 外币折 1 外币存），中行折算价仅对照；原料只取标明日期与“元/吨”成交价的现货页面（7 天内），否则记为缺失。结果存平台私有文件 `BAMBOOK_MARKET_DIR`（本地模式在数据目录 `market/`），`GET /api/mist/market/quotes` 供登录账号读取。只用于定价试算一键填入与参考展示，不写入月末汇率或任何账务。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

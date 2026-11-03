@@ -20,6 +20,7 @@ import * as mistContract from '../shared/mistWorkspace';
 import { AGENT_DELEGATION_HEADER } from './agentDelegation';
 import { TASK_HEADER, TASK_CONTROL_HEADER } from './agentTasks';
 import{MistPlatformTaskWorker,type PlatformTaskWorkerOptions}from'./platformTaskWorker';
+import { createMarketStore, MarketQuoteWorker } from '../ai/marketQuotes';
 import{defaultAgentDelegation}from'./route';
 import type{AgentDelegation}from'./agentDelegation';
 export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;host?:string;mailTransport?:MailTransport;mailResolve?:(host:string)=>Promise<string[]>;mailReceive?:Pick<MailReceiverOptions,'tickMs'|'concurrency'>&{intervalMs?:number;leaseMs?:number;timeoutMs?:number};agentTasks?:Omit<PlatformTaskWorkerOptions,'makeCredential'>}={}) {
@@ -37,6 +38,8 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     return{mail,mailReceiver};
   };
   const agentRuntime=(repository:MistRepository,delegation:AgentDelegation)=>{const worker=new MistPlatformTaskWorker(repository,{onError:code=>console.error('[platform-agent]',code),...options.agentTasks,makeCredential:delegation.makeTaskCredential});app.locals.platformTaskWorker=worker;app.locals.mistRepository=repository;repository.setPlatformTaskRuntime(()=>worker.available,delegation.hydrateServiceActor);};
+  const marketStore=createMarketStore(process.env.BAMBOOK_MARKET_DIR?.trim()||(local?path.join(local.database.directory,'market'):undefined));
+  app.locals.marketStore=marketStore;app.locals.marketWorker=new MarketQuoteWorker(marketStore,{onError:code=>console.error('[market-quotes]',code)});
   const configured = new Set((local?'':process.env.MIST_CORS_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean));
   app.use((req, res, next) => cors({ credentials: true, origin(origin, callback) {
     const requestHost = String(req.headers.host ?? '');
@@ -58,7 +61,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     app.get('/api/mist/session',local.sessionGet);app.post('/api/mist/session',local.sessionPost);
     const repository=new MistRepository(local.database,mistContract as MistContract,new MistPrivateFiles(path.join(local.database.directory,'files')),local.authorize,undefined,undefined,undefined,(db,userId,password)=>local.verifyPassword(db,userId,password));
     agentRuntime(repository,local.agentDelegation);
-    app.use('/api/mist',createMistRouter({repository,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
+    app.use('/api/mist',createMistRouter({repository,marketStore,...mailRuntime(repository),authenticate:local.authenticate,delegation:local.agentDelegation,delegationGuard:local.requestGuard}));
   }else{
     if(!prisma)throw new Error('Mist server requires an explicit database outside local mode');
     const requireEmailVerification = process.env.AUTH_REQUIRE_EMAIL_VERIFY ? !/^(0|false|no)$/i.test(process.env.AUTH_REQUIRE_EMAIL_VERIFY.trim()) : true;
@@ -71,7 +74,7 @@ export function createMistServer(prisma?: any,options:{local?:MistLocalRuntime;h
     const filesRoot=process.env.MIST_FILES_DIR||path.resolve(__dirname,'../../private/mist-files');
     const repository=new MistRepository(prisma,mistContract as MistContract,new MistPrivateFiles(filesRoot));
     agentRuntime(repository,defaultAgentDelegation());
-    app.use('/api/mist', createMistRouter({ prisma,repository,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
+    app.use('/api/mist', createMistRouter({ prisma,repository,marketStore,...mailRuntime(repository),contract:mistContract as MistContract,filesRoot }));
   }
   app.use((error: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const tooLarge = error?.type === 'entity.too.large';
