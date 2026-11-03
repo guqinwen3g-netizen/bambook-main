@@ -106,7 +106,6 @@ const EXEMPT: ReadonlyArray<{ scope: string; reason: Reason; note: string }> = [
   { scope: 'orders:approve:cancel', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'shipments:approve', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
   { scope: 'knowledge:approve', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
-  { scope: 'invoices:approve:writeoff', reason: 'ui-label-only', note: '审批走 approvals/ 内核；本码仅 UI 能力标签（口径 B1，2026-09-17 业务方拍板）' },
 ];
 
 /** 已知被强制的码 —— 用于**阳性对照**，防止扫描逻辑退化成恒真/恒假 */
@@ -364,12 +363,11 @@ describe('★ 专项：审批权限码 = UI 能力标签（口径 B1）', () => 
     'orders:approve:cancel',
     'shipments:approve',
     'knowledge:approve',
-    'invoices:approve:writeoff',
   ];
 
-  it('清单为 7 个（防漏列/误删）—— ⚠️ 不含 aftersales:approve（它由 A 组模块按其专项单独钉）；procurement:approve / finance:payment_request:approve / vouchers:approve:pay_* 已由 Mist 平台命令门禁消费，见下方专项', () => {
-    expect(UI_LABEL_APPROVE_CODES).toHaveLength(7);
-    expect(new Set(UI_LABEL_APPROVE_CODES).size).toBe(7);
+  it('清单为 6 个（防漏列/误删）—— ⚠️ 不含 aftersales:approve（它由 A 组模块按其专项单独钉）；procurement:approve / finance:payment_request:approve / vouchers:approve:pay_* 已由 Mist 平台命令门禁消费，见下方专项', () => {
+    expect(UI_LABEL_APPROVE_CODES).toHaveLength(6);
+    expect(new Set(UI_LABEL_APPROVE_CODES).size).toBe(6);
   });
 
   it.each(UI_LABEL_APPROVE_CODES)('%s 在册且 reason=ui-label-only', (scope) => {
@@ -434,6 +432,8 @@ describe('★ 专项：Mist 平台命令门禁消费的码', () => {
     ['vouchers:approve:pay_lt5', 'shared/mistPayables.ts', "pay_lt5: 'vouchers:approve:pay_lt5'"],
     ['vouchers:approve:pay_gt5', 'shared/mistPayables.ts', "pay_gt5: 'vouchers:approve:pay_gt5'"],
     ['vouchers:approve:pay_new_supplier', 'shared/mistPayables.ts', "pay_new_supplier: 'vouchers:approve:pay_new_supplier'"],
+    // 2026-11 P1-6：坏账核销、红冲更正与重开结账月须持有核销审批码。
+    ['invoices:approve:writeoff', 'shared/mistWorkspace.ts', "command.payload?.kind==='badDebt'||command.payload?.kind==='correction'?'invoices:approve:writeoff'"],
   ];
   it.each(GATES)('%s 不在豁免表且有真实门禁（%s）', (scope, file, needle) => {
     expect(EXEMPT.find((e) => e.scope === scope)).toBeUndefined();
