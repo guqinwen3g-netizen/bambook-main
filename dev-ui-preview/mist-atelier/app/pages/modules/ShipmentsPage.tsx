@@ -9,7 +9,7 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 货运管理：业务发起出运 → 后勤核实装箱、订舱与单证 → 资料回业务对客发送 → 实际离港；按面料 / 成衣业务组分开。 */
 import React from 'react';
 import { Anchor, Boxes, CheckCircle2, Download, FileText, Pencil, Plane, Plus, ScrollText, SearchX, Send, Ship, X } from 'lucide-react';
-import { FormFooter, BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, TextArea, TextInput, TextLink, Timeline, Toolbar, VerticalSteps, type Column, type Tone } from '../../../../../components/mist';
+import { useToast, FormFooter, BackLink, Banner, Button, Card, CardHeader, Checklist, DataTable, Dropdown, EmptyState, Facts, Field, FormGrid, FormSection, KeyValue, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Select, TextArea, TextInput, TextLink, Timeline, Toolbar, VerticalSteps, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
 import { fulfillmentSourceLabel, shipmentCancelBlockers, shipmentHandoverBlocker, stockIssueRemaining } from '../../../../../server/src/shared/mistFulfillment';
@@ -18,7 +18,7 @@ import { OVER_SHIP_REQUIRED, SHORT_SHIP_HINT, pendingOverShip, shipmentTolerance
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
-import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
 import { documentTypeLabel, emptyOption, Events, exportRecords, field, localNow, parseSource, RecordFiles, SourceLink, sourceOptions, status, text, today, useEditor } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ShipmentDepartureDialog } from './ShipmentDepartureDialog';
@@ -211,9 +211,27 @@ export function ShipmentsPage() {
 
   const pick = (s: FulfillmentShipment) => { setPicked(s.id); setDrawer(true); const { view, id: _id, ...target } = route; go(view, s.id, target, { keepScroll: true }); };
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStageFilter('all'); setPicked(null); };
-  const act = async (work: () => Promise<unknown>) => { setFailure(''); try { await work(); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
+  const toast = useToast();
+  const act = async (work: () => Promise<unknown>, done?: string) => { setFailure(''); try { await work(); if (done) toast(done); } catch (e) { setFailure(e instanceof Error ? e.message : String(e)); } };
   const termsSpec = (): ModuleEditorSpec => ({ title: '核对来源合同收货与分批条款', fields: [field('orderId', '来源订单', 'select', true, [emptyOption, ...(state?.orders || []).filter(o => !hasOrderContext || o.id === sourceOrder?.id).map(o => ({ value: o.id, label: o.code }))]), field('consignee', '合同收货方'), field('partialAllowed', '合同允许分批', 'checkbox', false), field('mode', '约定运输方式', 'select', true, [{ value: 'sea', label: '海运' }, { value: 'air', label: '空运' }]), field('confirmedAt', '条款核实日', 'date'), field('evidence', '合同 / 信用证依据', 'textarea')], initialValues: { orderId: sourceOrder?.id || '', consignee: '', partialAllowed: false, mode: 'sea', confirmedAt: today(), evidence: '' }, submit: v => run({ type: 'fulfillment.shipments.sourceTerms', payload: { orderId: text(v, 'orderId'), consignee: text(v, 'consignee'), partialAllowed: !!v.partialAllowed, mode: text(v, 'mode') as 'sea' | 'air', confirmedAt: text(v, 'confirmedAt'), evidence: text(v, 'evidence') } }) });
-  const transportSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '更新运输安排', fields: [field('booking', '订舱号', 'text', false), field('plannedDate', '计划出运日', 'date', false), { ...field('note', '运输安排说明', 'textarea', false), hint: s.booking ? '更换已登记的订舱号时须写明原因。' : undefined }], initialValues: { booking: s.booking, plannedDate: s.plannedDate, note: s.note }, submit: v => run({ type: 'fulfillment.shipments.updateTransport', payload: { id: s.id, booking: text(v, 'booking'), plannedDate: text(v, 'plannedDate'), note: text(v, 'note') } }) });
+  // sup41/42/43/mar34：运输与集装箱、唛头、改订舱费用；货代可从关系智库的代理选。
+  const forwarders = (state?.market.relations || []).filter(r => r.category === 'Agent' && r.status === 'active').map(r => ({ value: r.id, label: r.name }));
+  const containersText = (s: FulfillmentShipment) => (s.transport?.containers || []).map(c => [c.type, c.number, c.seal].join(' ')).join('\n');
+  const parseContainers = (v: string) => v.split(/\n+/).map(l => l.trim()).filter(Boolean).map(l => { const [type = '', number = '', seal = ''] = l.split(/\s+/); return { type, number, seal }; });
+  const transportSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '更新运输安排',
+    sections: [{ id: 'book', label: '订舱', fields: ['booking', 'plannedDate', 'note', 'changeFee', 'changeFeeCurrency'] }, { id: 'vessel', label: '船期与货代', fields: ['vessel', 'voyage', 'etd', 'eta', 'cutoff', 'forwarderRelationId', 'forwarder'] }, { id: 'box', label: '集装箱与唛头', fields: ['containers', 'mainMark', 'sideMark'] }],
+    fields: [field('booking', '订舱号', 'text', false), field('plannedDate', '计划出运日', 'date', false), { ...field('note', '运输安排说明', 'textarea', false), hint: s.booking ? '更换已登记的订舱号时须写明原因。' : undefined },
+      ...(s.booking ? [{ ...field('changeFee', '改船费用', 'number', false), min: 0 }, field('changeFeeCurrency', '改船费用币种', 'select', false, ['USD', 'CNY', 'EUR'].map(c => ({ value: c, label: c })))] : []),
+      field('vessel', '船名 / 航班', 'text', false), field('voyage', '航次', 'text', false), field('etd', 'ETD', 'date', false), field('eta', 'ETA', 'date', false), field('cutoff', '截关 / 截港时间', 'text', false),
+      field('forwarderRelationId', '货代（关系智库）', 'select', false, [{ value: '', label: '手填' }, ...forwarders]), { ...field('forwarder', '货代', 'text', false), when: { key: 'forwarderRelationId', values: [''] } },
+      { ...field('containers', '柜型 柜号 封条号（每柜一行）', 'textarea', false), hint: '如 40HQ CBHU1234567 SL001' }, field('mainMark', '正唛', 'textarea', false), field('sideMark', '侧唛', 'textarea', false)],
+    initialValues: { booking: s.booking, plannedDate: s.plannedDate, note: s.note, changeFee: '', changeFeeCurrency: 'USD', vessel: s.transport?.vessel || '', voyage: s.transport?.voyage || '', etd: s.transport?.etd || '', eta: s.transport?.eta || '', cutoff: s.transport?.cutoff || '', forwarderRelationId: s.transport?.forwarderRelationId || '', forwarder: s.transport?.forwarder || '', containers: containersText(s), mainMark: s.transport?.mainMark || '', sideMark: s.transport?.sideMark || '' },
+    submit: v => run({ type: 'fulfillment.shipments.updateTransport', payload: { id: s.id, booking: text(v, 'booking'), plannedDate: text(v, 'plannedDate'), note: text(v, 'note'),
+      ...(Number(v.changeFee) > 0 ? { changeFee: { amount: Number(v.changeFee), currency: text(v, 'changeFeeCurrency') || 'USD' } } : {}),
+      transport: { vessel: text(v, 'vessel'), voyage: text(v, 'voyage'), etd: text(v, 'etd'), eta: text(v, 'eta'), cutoff: text(v, 'cutoff'), ...(text(v, 'forwarderRelationId') ? { forwarderRelationId: text(v, 'forwarderRelationId') } : { forwarder: text(v, 'forwarder') }), containers: parseContainers(text(v, 'containers')), mainMark: text(v, 'mainMark'), sideMark: text(v, 'sideMark') } } }) });
+  // sup46：离港后的到港与客户签收（POD）。
+  const arriveSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '登记到港', submitLabel: '登记到港', fields: [field('at', '实际到港时间', 'datetime-local'), field('evidence', '到港依据', 'textarea')], initialValues: { at: localNow(), evidence: '' }, submit: v => run({ type: 'fulfillment.shipments.arrive', payload: { id: s.id, at: new Date(text(v, 'at')).toISOString(), evidence: text(v, 'evidence') } }) });
+  const deliverSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '登记客户签收', submitLabel: '登记签收', fields: [field('at', '签收时间', 'datetime-local'), field('receiver', '签收人'), field('evidence', '签收依据（POD）', 'textarea'), field('files', 'POD 附件', 'files', false)], initialValues: { at: localNow(), receiver: '', evidence: '', files: '' }, submit: v => run({ type: 'fulfillment.shipments.deliver', payload: { id: s.id, at: new Date(text(v, 'at')).toISOString(), receiver: text(v, 'receiver'), evidence: text(v, 'evidence'), fileIds: moduleFileIds(v.files) } }) });
 
   const sentSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '登记已向客户发送 CI / PL', submitLabel: '登记发送', fields: [{ ...field('at', '向客户发送时间', 'datetime-local'), hint: '发送的是当前有效签发版本；作废或重签后需重新登记。' }], initialValues: { at: localNow() }, submit: v => run({ type: 'fulfillment.shipments.sent', payload: { id: s.id, at: new Date(text(v, 'at')).toISOString() } }) });
   const cancelSpec = (s: FulfillmentShipment): ModuleEditorSpec => ({ title: '取消本次出运请求', submitLabel: '确认取消', fields: [field('reason', '取消原因', 'textarea')], initialValues: { reason: '' }, submit: v => run({ type: 'fulfillment.shipments.cancel', payload: { id: s.id, reason: text(v, 'reason') } }) });
@@ -231,9 +249,10 @@ export function ShipmentsPage() {
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的出运")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStageFilter('all'); setFlagFilter('all'); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Ship} title={uiText(invalidSource ? '来源不匹配' : sourceOrder ? '本订单还没有出运' : `还没有${domain === 'fabric' ? '面料' : '成衣'}出运`)} description={uiText(invalidSource ? '请返回来源订单重新进入。' : '出运由业务员从完工的生产分支发起：先核对合同收货与分批条款，再填写本次计划数量；后勤接手装箱、订舱与单证。')} action={canCreate && !invalidSource ? <Button icon={Plus} onClick={() => setEditing('new')}>{uiText("新建出运")}</Button> : undefined} />;
   const detail = selected && state
-    ? <ShipmentDetail shipment={selected} state={state} day={day} me={me} business={business} logistics={logistics} inventory={session.hasPermission('inventory:read')} locked={locked}
+    ? <ShipmentDetail shipment={selected} state={state} day={day} me={me} business={business} logistics={logistics} inventory={session.hasPermission('inventory:read')} locked={locked} canReviewOrders={session.hasPermission('orders:approve:cancel')}
         onEdit={() => setEditing(selected)} onPack={() => setPacking(selected)} onTransport={() => setDialog(transportSpec(selected))}
-        onReady={() => void act(() => run({ type: 'fulfillment.shipments.ready', payload: { id: selected.id } }))}
+        onReady={() => void act(() => run({ type: 'fulfillment.shipments.ready', payload: { id: selected.id } }), '单证准备已完成，已交回业务发送')}
+        onArrive={() => setDialog(arriveSpec(selected))} onDeliver={() => setDialog(deliverSpec(selected))}
         onSent={() => setDialog(sentSpec(selected))} onDepart={() => setDeparture(selected)} onCancel={() => setDialog(cancelSpec(selected))}
         onCustoms={() => go('customs', undefined, { section: selected.id })} onDocuments={() => go('document-center', undefined, { section: selected.id })}
         onSamples={() => go('samples', undefined, { section: 'shipment:' + selected.id, customerId: selected.customerId })} />
@@ -281,9 +300,9 @@ export function ShipmentsPage() {
   </MistPage>;
 }
 
-function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inventory, locked, onEdit, onPack, onTransport, onReady, onSent, onDepart, onCancel, onCustoms, onDocuments, onSamples }: {
-  shipment: FulfillmentShipment; state: MistState; day: string; me: string; business: boolean; logistics: boolean; inventory: boolean; locked: boolean;
-  onEdit: () => void; onPack: () => void; onTransport: () => void; onReady: () => void; onSent: () => void; onDepart: () => void; onCancel: () => void; onCustoms: () => void; onDocuments: () => void; onSamples: () => void;
+function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inventory, locked, canReviewOrders = false, onEdit, onPack, onTransport, onReady, onSent, onDepart, onCancel, onCustoms, onDocuments, onSamples, onArrive, onDeliver }: {
+  shipment: FulfillmentShipment; state: MistState; day: string; me: string; business: boolean; logistics: boolean; inventory: boolean; locked: boolean; canReviewOrders?: boolean;
+  onEdit: () => void; onPack: () => void; onTransport: () => void; onReady: () => void; onSent: () => void; onDepart: () => void; onCancel: () => void; onCustoms: () => void; onDocuments: () => void; onSamples: () => void; onArrive: () => void; onDeliver: () => void;
 }) {
   if (s.hiddenCount) return <DetailBody data-shipment-detail={s.id} heading={<div><span className="mist-mono mist-muted">{s.code}</span><div className="mist-h2">{s.customer}</div></div>}>
     <Pill>{uiText('部分可见')}</Pill><DetailBlock title={uiText('来源范围')} aside={<span>{ui`另有 ${s.hiddenCount} 笔其他范围业务`}</span>}>
@@ -305,7 +324,9 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inve
   const logisticsReason = logistics ? false : '需要后勤出运权限';
   const businessReason = business ? false : '需要订单业务权限';
   const editReason = businessReason || (f.stockMovements.some(m=>m.shipmentLink?.shipmentId===s.id) ? '已有库存出库关联，请先解除关联' : packingRows.length || issued.length || customsFiled ? '已有装箱、有效单据或申报记录，不能再改请求' : false);
-  const cancelReason = businessReason || (s.requesterId !== me ? '仅原业务发起人可取消' : shipmentCancelBlockers(state, s).join('；') || false);
+  // 主管是否在订单审批名单由服务端判定；页面对其他业务员也显示，提交时由服务端拒绝。
+  const canCancel = s.requesterId === me || s.lines.some(l => state.orders.find(o => o.id === l.orderId)?.ownerId === me) || canReviewOrders;
+  const cancelReason = businessReason || shipmentCancelBlockers(state, s).join('；') || (!canCancel ? '仅原业务发起人、订单负责人或业务主管可取消' : false);
   const supplement=canSupplementPacking(state,s);
   const packReason = logisticsReason || (issuedCiPl&&!supplement ? '已有有效 CI 或装箱单，请先在单据中心作废原件' : customsFiled ? '已有实际申报或清关记录，请先完成外部更正' : false);
   const hold = heldShipmentRelease(state as any, s.customerId);
@@ -320,6 +341,7 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inve
     { label: '单证准备完毕 · 交回业务', done: s.state === 'ready' || s.state === 'departed', note: s.state === 'ready' || s.state === 'departed' ? '已交回' : '未完成' },
     { label: '业务对客发送', done: !!s.documentsSentAt, note: s.documentsSentAt ? shortWhen(s.documentsSentAt) : '未登记' },
     { label: s.mode === 'air' ? '实际起飞' : '实际离港', done: !!s.departedAt, note: s.departedAt ? `ATD ${shortWhen(s.departedAt)}` : '未登记' },
+    ...(s.state === 'departed' ? [{ label: '到港', done: !!s.arrival, note: s.arrival ? `ATA ${shortWhen(s.arrival.at)}` : s.transport?.eta ? `ETA ${s.transport.eta}` : '未登记' }, { label: '客户签收', done: !!s.delivered, note: s.delivered ? `${shortWhen(s.delivered.at)} · ${s.delivered.receiver}` : '未登记' }] : []),
   ];
   return <DetailBody data-shipment-detail={s.id} heading={<div>
       <span className="mist-mono mist-muted">{s.code}</span>
@@ -327,12 +349,16 @@ function ShipmentDetail({ shipment: s, state, day, me, business, logistics, inve
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STAGE_TONE[stage]}>{shipmentStageLabel(s, stage)}</Pill><Pill>{uiText(s.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill><Pill>{MODE_LABEL[s.mode]}</Pill>{flags.map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
     {stage === 'cancelled' && s.cancelReason && <RecordDisclosure title="取消记录">{s.cancelReason}</RecordDisclosure>}
+    {s.transport && <DetailBlock title={uiText('船期与集装箱')}><Facts items={[{ label: '船名 / 航次', value: [s.transport.vessel, s.transport.voyage].filter(Boolean).join(' ') || '—' }, { label: 'ETD / ETA', value: `${s.transport.etd || '—'} / ${s.transport.eta || '—'}` }, { label: '货代', value: s.transport.forwarder || '—' }, { label: '截关', value: s.transport.cutoff || '—' }, ...(s.transport.containers?.length ? [{ label: '集装箱', value: s.transport.containers.map(c => [c.type, c.number, c.seal].filter(Boolean).join(' ')).join('；') }] : []), ...(s.transport.mainMark ? [{ label: '正唛', value: <span style={{ whiteSpace: 'pre-line' }}>{s.transport.mainMark}</span> }] : []), ...(s.transport.sideMark ? [{ label: '侧唛', value: <span style={{ whiteSpace: 'pre-line' }}>{s.transport.sideMark}</span> }] : [])]} /></DetailBlock>}
+    {!!s.bookingChanges?.length && <RecordDisclosure title={ui`订舱变更 · ${s.bookingChanges.length}`}>{s.bookingChanges.map((c, i) => <div key={i} className="mist-note">{shortWhen(c.at)} · {c.from} → {c.to || '取消订舱'} · {c.reason}{c.fee ? ` · ${c.fee.amount} ${c.fee.currency}` : ''}</div>)}</RecordDisclosure>}
     {(business || logistics) && <ActionBar busy={locked} actions={[
       ...(logistics ? [
         { label: supplement?(s.domain==='fabric'?'补充颜色明细':'补充分色分码'):'分配装箱', icon: Boxes, onClick: onPack, primary: stage === 'intake' || (stage === 'logistics' && !matched), reason: packReason, hidden: closed },
         { label: '更新运输安排', icon: Anchor, onClick: onTransport, reason: logisticsReason, hidden: closed },
         { label: '完成单证准备', icon: CheckCircle2, onClick: onReady, primary: stage === 'logistics' && !blocker, reason: logisticsReason || blocker || false, hidden: s.state !== 'preparing' },
         { label: s.mode === 'air' ? '登记实际起飞' : '登记实际离港', icon: s.mode === 'air' ? Plane : Ship, onClick: onDepart, primary: stage === 'departure', reason: departReason, hidden: s.state !== 'ready' },
+        { label: '登记到港', onClick: onArrive, hidden: s.state !== 'departed' || !!s.arrival },
+        { label: '登记客户签收', onClick: onDeliver, hidden: s.state !== 'departed' || !!s.delivered },
       ] as ReasonedAction[] : []),
       ...(business ? [
         { label: '编辑出运请求', icon: Pencil, onClick: onEdit, reason: businessReason, hidden: s.state !== 'preparing' || !!editReason },

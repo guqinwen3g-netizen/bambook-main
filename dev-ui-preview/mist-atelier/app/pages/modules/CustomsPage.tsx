@@ -11,7 +11,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { fmt } from '../../data';
-import { ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec } from './ModuleWorkbench';
+import { ModuleEditorDialog, ModuleEditorPage, moduleFileIds, type ModuleEditorSpec } from './ModuleWorkbench';
 import { documentTypeLabel, emptyOption, Events, exportRecords, field, RecordFiles, SourceLink, text, today } from './fulfillmentKit';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
@@ -101,18 +101,23 @@ export function CustomsPage() {
   const changeDomain = (value: Domain) => { setDomainChoice(value); setStatusFilter('all'); setPicked(null); };
   const changeTab = (value: Tab) => { setTab(value); setPicked(null); setDrawer(false); };
   const eligibleShipments = () => (f?.shipments || []).filter(s => isOpenShipment(s) && !f!.customs.some(c => c.shipmentId === s.id) && (!hasContext || s.id === route.section));
-  const payload = (c: FulfillmentCustoms | undefined, patch: Partial<FulfillmentCustoms>) => ({ ...(c ? { id: c.id } : {}), shipmentId: c?.shipmentId || '', status: c?.status || 'draft', declarationNo: c?.declarationNo || '', broker: c?.broker || '', hsCode: c?.hsCode || '', origin: c?.origin || '', tradeMode: c?.tradeMode || '', declaredAt: c?.declaredAt || '', clearedAt: c?.clearedAt || '', evidence: c?.evidence || '', fileIds: c?.fileIds || [], note: c?.note || '', ...patch });
+  const payload = (c: FulfillmentCustoms | undefined, patch: Partial<FulfillmentCustoms>) => ({ ...(c ? { id: c.id } : {}), shipmentId: c?.shipmentId || '', status: c?.status || 'draft', declarationNo: c?.declarationNo || '', broker: c?.broker || '', hsCode: c?.hsCode || '', origin: c?.origin || '', tradeMode: c?.tradeMode || '', declaredAt: c?.declaredAt || '', clearedAt: c?.clearedAt || '', evidence: c?.evidence || '', fileIds: c?.fileIds || [], note: c?.note || '', ...(c?.channel ? { channel: c.channel } : {}), ...patch });
   const prepFields = [field('broker', '报关行', 'text', false), field('hsCode', 'HS 编码', 'text', false), field('origin', '原产地', 'choice', false, COUNTRIES), field('tradeMode', '贸易方式 / 成交方式', 'choice', false, CUSTOMS_TRADE_MODES), field('note', '备注', 'textarea', false)];
   const createSpec = (shipmentId = ''): ModuleEditorSpec => ({ title: '建立报关记录', submitLabel: '建立记录',
-    fields: [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...eligibleShipments().map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))]), ...prepFields],
-    initialValues: { shipmentId: shipmentId || (hasContext ? route.section || '' : ''), broker: '', hsCode: '', origin: '', tradeMode: '', note: '' },
-    submit: v => run({ type: 'fulfillment.customs.save', payload: payload(undefined, { shipmentId: text(v, 'shipmentId'), broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
-  const editSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '编辑报关资料', fields: prepFields, initialValues: { broker: c.broker, hsCode: c.hsCode, origin: c.origin, tradeMode: c.tradeMode, note: c.note },
+    fields: [field('shipmentId', '准确出运', 'select', true, [emptyOption, ...eligibleShipments().map(s => ({ value: s.id, label: `${s.code} · ${s.customer}` }))]), field('channel', '报关方式', 'select', true, [{ value: 'general', label: '一般贸易报关' }, { value: 'express', label: '快件 / 邮寄（无需正式报关单）' }]), ...prepFields],
+    initialValues: { shipmentId: shipmentId || (hasContext ? route.section || '' : ''), channel: 'general', broker: '', hsCode: '', origin: '', tradeMode: '', note: '' },
+    submit: v => run({ type: 'fulfillment.customs.save', payload: payload(undefined, { shipmentId: text(v, 'shipmentId'), channel: text(v, 'channel') as 'general' | 'express', broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
+  const hsField = (c: FulfillmentCustoms) => c.items?.length ? { ...field('hsCode', 'HS 编码（按商品项汇总）', 'text', false), readonly: true } : field('hsCode', 'HS 编码', 'text', false);
+  const editSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '编辑报关资料', fields: prepFields.map(f => f.key === 'hsCode' ? hsField(c) : f), initialValues: { broker: c.broker, hsCode: c.hsCode, origin: c.origin, tradeMode: c.tradeMode, note: c.note },
     submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), note: text(v, 'note') }) }) });
   const declareSpec = (c: FulfillmentCustoms, correcting: boolean): ModuleEditorSpec => ({ title: correcting ? '更正申报信息' : '登记已向海关申报', submitLabel: correcting ? '保存更正' : '登记已申报',
-    fields: [field('declarationNo', '报关单号'), field('broker', '报关行'), field('hsCode', 'HS 编码'), field('origin', '原产地'), field('tradeMode', '贸易方式 / 成交方式'), field('declaredAt', '实际申报日', 'date'), field('note', '备注', 'textarea', false)],
+    fields: c.channel === 'express' ? [field('declarationNo', '快件运单号'), field('broker', '快递 / 承运商'), field('declaredAt', '交寄日', 'date'), field('note', '备注', 'textarea', false)] : [field('declarationNo', '报关单号'), field('broker', '报关行'), c.items?.length ? hsField(c) : field('hsCode', 'HS 编码'), field('origin', '原产地'), field('tradeMode', '贸易方式 / 成交方式'), field('declaredAt', '实际申报日', 'date'), field('note', '备注', 'textarea', false)],
     initialValues: { declarationNo: c.declarationNo, broker: c.broker, hsCode: c.hsCode, origin: c.origin, tradeMode: c.tradeMode, declaredAt: c.declaredAt || day, note: c.note },
     submit: v => run({ type: 'fulfillment.customs.save', payload: payload(c, { status: 'submitted', declarationNo: text(v, 'declarationNo'), broker: text(v, 'broker'), hsCode: text(v, 'hsCode'), origin: text(v, 'origin'), tradeMode: text(v, 'tradeMode'), declaredAt: text(v, 'declaredAt'), note: text(v, 'note') }) }) });
+  // sup50：已放行记录不覆盖，改单、退关、补附件各留一条记录。
+  const amendSpec = (c: FulfillmentCustoms, kind: 'amend' | 'withdraw' | 'attach'): ModuleEditorSpec => ({ title: ({ amend: '登记改单', withdraw: '登记退关', attach: '补充附件' })[kind], submitLabel: '保存', submitVariant: kind === 'withdraw' ? 'danger' : 'primary',
+    fields: [field('reason', ({ amend: '改单内容与海关回执', withdraw: '退关原因', attach: '附件说明' })[kind], 'textarea'), field('files', '附件', 'files', kind === 'attach')], initialValues: { reason: '', files: '' },
+    submit: v => run({ type: 'fulfillment.customs.amend', payload: { id: c.id, kind, reason: text(v, 'reason'), fileIds: moduleFileIds(v.files) } }) });
   const releaseSpec = (c: FulfillmentCustoms): ModuleEditorSpec => ({ title: '登记海关放行', submitLabel: '登记放行',
     fields: [field('clearedAt', '实际放行日', 'date'), field('evidence', '放行依据', 'textarea')],
     initialValues: { clearedAt: day, evidence: c.evidence },
@@ -144,7 +149,7 @@ export function CustomsPage() {
       ? <EmptyState icon={Receipt} title={uiText("还没有可核对的退税资料")} description={uiText("报关单登记为已申报或已放行后，会在这里核对放行、本票 CI 收汇与增值税专票，并由财务登记退税申报。")} />
       : <EmptyState icon={Stamp} title={uiText(invalidContext ? '来源出运不存在' : hasContext ? '本票还没有报关记录' : `还没有${domain === 'fabric' ? '面料' : '成衣'}报关记录`)} description={invalidContext ? uiText('来源出运不可用') : undefined} action={createButton && !invalidContext && eligible.length ? <Button icon={Plus} onClick={() => setDialog(createSpec())}>{uiText("建立报关记录")}</Button> : undefined} />;
   const detail = selected && state
-    ? <CustomsDetail record={selected} state={state} can={can} canClear={canClear} canInvoices={canInvoices&&canTaxRead} canRebate={canRebate} canRebateApprove={canRebateApprove} canReconcile={canReconcile} locked={locked} open={setDialog} run={run}
+    ? <CustomsDetail record={selected} state={state} onAmend={kind => setDialog(amendSpec(selected, kind))} can={can} canClear={canClear} canInvoices={canInvoices&&canTaxRead} canRebate={canRebate} canRebateApprove={canRebateApprove} canReconcile={canReconcile} locked={locked} open={setDialog} run={run}
         onBill={id => go('payment-vouchers', id, { section: 'payables' })} onReceipt={id => go('payment-vouchers', id)}
         onEdit={() => setDialog(editSpec(selected))} onDeclare={() => setDialog(declareSpec(selected, selected.status === 'submitted'))} onRelease={() => { if (canClear) setDialog(releaseSpec(selected)); }}
         onAttach={ids => run({ type: 'fulfillment.customs.save', payload: payload(selected, { fileIds: ids }) })}
@@ -202,10 +207,10 @@ export function CustomsPage() {
   </MistPage>;
 }
 
-function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate, canRebateApprove = false, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onClassify, onShipment, onDocuments, onInvoice }: {
+function CustomsDetail({ record: c, state, onAmend, can, canClear, canInvoices, canRebate, canRebateApprove = false, canReconcile, locked, open, run, onBill, onReceipt, onEdit, onDeclare, onRelease, onAttach, onClassify, onShipment, onDocuments, onInvoice }: {
   record: FulfillmentCustoms; state: MistState; can: boolean; canClear: boolean; canInvoices: boolean; canRebate: boolean; canRebateApprove?: boolean; canReconcile: boolean; locked: boolean;
   open: (spec: ModuleEditorSpec) => void; run: (command: MistCommand) => Promise<unknown>; onBill: (id: string) => void; onReceipt: (id: string) => void;
-  onEdit: () => void; onDeclare: () => void; onRelease: () => void; onAttach: (ids: string[]) => Promise<unknown>; onClassify: () => void; onShipment: () => void; onDocuments: () => void; onInvoice: (id: string) => void;
+  onAmend: (kind: 'amend' | 'withdraw' | 'attach') => void; onEdit: () => void; onDeclare: () => void; onRelease: () => void; onAttach: (ids: string[]) => Promise<unknown>; onClassify: () => void; onShipment: () => void; onDocuments: () => void; onInvoice: (id: string) => void;
 }) {
   const f = state.fulfillment, s = f.shipments.find(row => row.id === c.shipmentId), flags = customsFlags(state, c);
   const packingRows = f.packing.filter(row => row.shipmentId === c.shipmentId), documents = f.documents.filter(row => row.shipmentId === c.shipmentId);
@@ -228,13 +233,19 @@ function CustomsDetail({ record: c, state, can, canClear, canInvoices, canRebate
       { label: '更正申报信息', icon: Pencil, onClick: onDeclare, reason: baseReason, hidden: c.status !== 'submitted' || !canClear },
     ] as ReasonedAction[]} />}
     {(c.status === 'draft' || c.status === 'submitted') && !canClear && <span className="mist-note" data-customs-clear-hint>{uiText("申报与清关须由后勤/单证登记")}</span>}
-    {c.status === 'cleared' && <span className="mist-note">{uiText("已放行记录不可覆盖；如需更正，请先在海关办理改单后补充附件说明。")}</span>}
+    {c.status === 'cleared' && can && !closed && <ActionBar busy={locked} actions={[
+      { label: '补充附件', onClick: () => onAmend('attach') },
+      { label: '登记改单', onClick: () => onAmend('amend'), hidden: !canClear },
+      { label: '登记退关', onClick: () => onAmend('withdraw'), hidden: !canClear || s?.state === 'departed' },
+    ] as ReasonedAction[]} />}
+    {!!c.amendments?.length && <DetailBlock title={uiText('改单与补充')}>{c.amendments.map((a, i) => <div key={i} className="mist-note">{a.at.slice(0, 10)} · {({ amend: '改单', withdraw: '退关', attach: '补充附件' })[a.kind]} · {a.reason} · {a.actor}</div>)}</DetailBlock>}
     <Facts items={[
       { label: '出运', value: s ? <TextLink onClick={onShipment}>{s.code}</TextLink> : '出运不可用' },
       { label: '客户', value: s?.customer || '—' },
       { label: '运输', value: s ? `${MODE_LABEL[s.mode]} · ${s.portOfLoading} → ${s.portOfDischarge} · ${s.incoterm}` : '—' },
-      { label: '报关单号', value: c.declarationNo || '未申报' },
-      { label: '报关行', value: c.broker || '未填写' },
+      ...(c.channel === 'express' ? [{ label: '报关方式', value: '快件 / 邮寄' }] : []),
+      { label: c.channel === 'express' ? '快件运单号' : '报关单号', value: c.declarationNo || '未申报' },
+      { label: c.channel === 'express' ? '快递 / 承运商' : '报关行', value: c.broker || '未填写' },
       { label: 'HS 编码', value: c.hsCode || '待核实' },
       { label: '原产地', value: c.origin || '未填写' },
       { label: '贸易方式 / 成交方式', value: c.tradeMode || '未填写' },

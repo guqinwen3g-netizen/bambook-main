@@ -235,3 +235,33 @@ describe('ord5/6/15/16 sample warehouse',()=>{
   expect(f.root.fulfillment.sampleMovements.find(m=>m.sampleId===id&&m.kind==='send')).toMatchObject({trackingNo:'SF123',carrier:'顺丰',destination:'伦敦'});
  });
 });
+
+describe('P2-3 shipment transport, booking history, arrival and customs amendments',()=>{
+ it('keeps transport fields and a booking change with its fee, and refuses ETA before ETD',()=>{
+  const f=setup();terms(f);const id=shipment(f);
+  f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-10-30',note:'',transport:{vessel:'COSCO STAR',voyage:'012E',etd:'2026-10-30',eta:'2026-11-28',containers:[{type:'40HQ',number:'cbhu1234567',seal:'SL001'}],mainMark:'CEDAR\nPO 123'}}});
+  const s=()=>f.root.fulfillment.shipments.find(x=>x.id===id)!;
+  expect(s().transport).toMatchObject({vessel:'COSCO STAR',containers:[{type:'40HQ',number:'CBHU1234567',seal:'SL001'}],mainMark:'CEDAR\nPO 123'});
+  expect(()=>f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-10-30',note:'',transport:{etd:'2026-10-30',eta:'2026-10-01'}}})).toThrow('ETA');
+  f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-2',plannedDate:'2026-11-05',note:'原船甩柜改下一班',changeFee:{amount:150,currency:'usd'}}});
+  expect(s().bookingChanges).toEqual([expect.objectContaining({from:'BK-1',to:'BK-2',reason:'原船甩柜改下一班',fee:{amount:150,currency:'USD'}})]);
+ });
+ it('records arrival and POD only after departure, in order',()=>{
+  const f=setup();terms(f);const id=shipment(f),s=()=>f.root.fulfillment.shipments.find(x=>x.id===id)!;
+  expect(()=>f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-13T08:00:00Z',evidence:'到港通知'}})).toThrow('尚未离港');
+  s().state='departed';s().departedAt='2026-10-10T08:00:00Z';
+  f.run({type:'fulfillment.shipments.arrive',payload:{id,at:'2026-10-12T08:00:00Z',evidence:'到港通知'}});
+  expect(()=>f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-11T08:00:00Z',receiver:'仓库',evidence:'POD',fileIds:[]}})).toThrow('不得早于');
+  f.run({type:'fulfillment.shipments.deliver',payload:{id,at:'2026-10-13T08:00:00Z',receiver:'客户仓库',evidence:'POD 签字',fileIds:[]}});
+  expect(s().delivered).toMatchObject({receiver:'客户仓库'});
+ });
+ it('adds amendments to a cleared declaration and lets a not-yet-departed shipment withdraw it',()=>{
+  const f=setup();terms(f);const id=shipment(f);
+  f.root.fulfillment.customs.push({id:'cus',shipmentId:id,code:'CUS-1',status:'cleared',declarationNo:'D1',broker:'B',hsCode:'6203',origin:'CN',tradeMode:'FOB',declaredAt:'2026-10-12',clearedAt:'2026-10-12',evidence:'放行',fileIds:[],note:''} as never);
+  expect(()=>f.run({type:'fulfillment.customs.amend',payload:{id:'cus',kind:'attach',reason:'补放行单',fileIds:[]}})).toThrow('请上传');
+  f.run({type:'fulfillment.customs.amend',payload:{id:'cus',kind:'amend',reason:'改毛重，海关回执 R-1',fileIds:[]}});
+  f.run({type:'fulfillment.customs.amend',payload:{id:'cus',kind:'withdraw',reason:'客户取消本票',fileIds:[]}});
+  const c=f.root.fulfillment.customs.find(x=>x.id==='cus')!;
+  expect(c.status).toBe('draft');expect(c.amendments!.map(a=>a.kind)).toEqual(['amend','withdraw']);
+ });
+});

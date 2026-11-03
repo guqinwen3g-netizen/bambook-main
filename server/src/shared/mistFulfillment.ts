@@ -360,6 +360,18 @@ export type FulfillmentShipment = {
     departedAt?: string;
     departureEvidence?: string;
     cancelReason?: string;
+    /** sup41：运输与集装箱信息；sup43：唛头。都由后勤维护，订舱号仍在 booking。 */
+    transport?: ShipmentTransport;
+    /** sup42：订舱变更历史（原订舱、新订舱、原因、改船费用）。 */
+    bookingChanges?: Array<{ from: string; to: string; reason: string; fee?: { amount: number; currency: string }; at: string; actor: string }>;
+    /** sup46：离港后的到港与客户签收（POD）。 */
+    arrival?: { at: string; evidence: string; actor: string };
+    delivered?: { at: string; receiver: string; evidence: string; fileIds: string[]; actor: string };
+};
+export type ShipmentTransport = {
+    vessel?: string; voyage?: string; forwarder?: string; forwarderRelationId?: string; etd?: string; eta?: string; cutoff?: string;
+    containers?: Array<{ type: string; number: string; seal: string }>;
+    mainMark?: string; sideMark?: string;
 };
 export type FulfillmentPacking = {
     assortment?: PackingSku[];
@@ -391,6 +403,10 @@ export type FulfillmentCustoms = {
     evidence: string;
     fileIds: string[];
     note: string;
+    /** sup52：报关方式；express（快件 / 邮寄）不需要正式报关单，登记快件运单即可离港。旧记录为 general。 */
+    channel?: 'general' | 'express';
+    /** sup50：放行后的改单 / 退关记录与补充附件，原记录不改写。 */
+    amendments?: Array<{ kind: 'amend' | 'withdraw' | 'attach'; reason: string; fileIds: string[]; at: string; actor: string }>;
     /** 按出运明细与商品归类生成的申报商品项（快照）及装箱合计。 */
     items?: CustomsDeclarationItem[];
     itemsAt?: string;
@@ -620,7 +636,6 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     payload: { id: string; at: string; evidence: string; fileIds: string[] };
 } | {
     type: 'fulfillment.procurement.confirm';
-    /** sup11：供应商回复交期不同时填 dueChangeReason，按供应商确认交期改写合同交期并留痕。 */
     payload: { id: string; at: string; evidence: string; confirmedDue: string; fileIds: string[]; dueChangeReason?: string };
 } | {
     type: 'fulfillment.production.plan';
@@ -704,7 +719,13 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     };
 } | {
     type: 'fulfillment.shipments.updateTransport';
-    payload: { id: string; booking: string; plannedDate: string; note: string };
+    payload: { id: string; booking: string; plannedDate: string; note: string; transport?: ShipmentTransport; changeFee?: { amount: number; currency: string } };
+} | {
+    type: 'fulfillment.shipments.arrive';
+    payload: { id: string; at: string; evidence: string };
+} | {
+    type: 'fulfillment.shipments.deliver';
+    payload: { id: string; at: string; receiver: string; evidence: string; fileIds: string[] };
 } | {
     type: 'fulfillment.shipments.ready';
     payload: {
@@ -746,7 +767,11 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
         fileIds: string[];
         note: string;
         status: FulfillmentCustoms['status'];
+        channel?: 'general' | 'express';
     };
+} | {
+    type: 'fulfillment.customs.amend';
+    payload: { id: string; kind: 'amend' | 'withdraw' | 'attach'; reason: string; fileIds: string[] };
 } | {
     type: 'fulfillment.documents.save';
     payload: {
@@ -982,11 +1007,31 @@ function purchaseSnapshot(purchase: FulfillmentPurchase): FulfillmentPurchaseRev
     const { orderId, lineId, kind, materialKind, stageTerms, iqcRequired, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
     return { orderId, lineId, kind, ...(materialKind?{materialKind}:{}), ...(stageTerms?{stageTerms:{...stageTerms}}:{}), ...(iqcRequired?{iqcRequired:true}:{}), supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds: [...fileIds] };
 }
+/** sup41 / mar34：运输字段；货代可从关系智库的代理类组织中选。 */
+function normalizeTransport(root: MistState, t: ShipmentTransport): ShipmentTransport {
+    const opt = (v: unknown, label: string, max = 120) => v === undefined || v === null || v === '' ? undefined : text(v, label, false, max);
+    const date = (v: unknown, label: string) => v ? day(v, label) : undefined;
+    if (t.containers !== undefined && (!Array.isArray(t.containers) || t.containers.length > 50)) fail('集装箱明细格式无效');
+    const relation = t.forwarderRelationId ? (root.market?.relations || []).find(r => r.id === t.forwarderRelationId) : undefined;
+    if (t.forwarderRelationId && !relation) fail('货代不在关系智库中');
+    const out: ShipmentTransport = {
+        vessel: opt(t.vessel, '船名'), voyage: opt(t.voyage, '航次'), forwarder: relation?.name || opt(t.forwarder, '货代'), ...(relation ? { forwarderRelationId: relation.id } : {}),
+        etd: date(t.etd, 'ETD'), eta: date(t.eta, 'ETA'), cutoff: opt(t.cutoff, '截关 / 截港时间', 40),
+        containers: (t.containers || []).map(c => ({ type: text(c?.type, '柜型', true, 20), number: text(c?.number || '', '柜号', false, 20).toUpperCase(), seal: text(c?.seal || '', '封条号', false, 40) })),
+        mainMark: opt(t.mainMark, '正唛', 2000), sideMark: opt(t.sideMark, '侧唛', 2000),
+    };
+    if (out.etd && out.eta && out.eta < out.etd) fail('ETA 不得早于 ETD');
+    return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined && !(Array.isArray(v) && !v.length))) as ShipmentTransport;
+}
 function addSample(root: MistState, input: SampleInput, ctx: MistContext) {
     const f = root.fulfillment, s = source(root, input.source), category = text(input.category, '类别'), quantity = qty(input.quantity), unit = text(input.unit, '单位');
     if (s.kind === 'version' && get(root.devs, s.devId, '来源开发案').billing?.request) fail(DEVELOPMENT_BILLING_LOCK, 'PRECONDITION');
     const groupedShipping=input.sizeQuantities!==undefined;
     if(groupedShipping&&category!=='成衣')fail('尺码件数组合仅用于成衣样品');
+    // 订单产前样逐件建档供 QC 判定，只有船样可按尺码成组登记；其他来源（客户来样、开发样等）可成套或多件。
+    const orderPp=s.kind==='orderLine'&&input.role!=='shipping';
+    if(groupedShipping&&orderPp)fail('尺码件数组合仅用于成衣船样');
+    if(orderPp&&category==='成衣'&&(quantity!==1||unit!=='件'))fail('订单产前样逐件建档，数量为1件');
     const sizeQuantities=groupedShipping?normalizeShippingSampleSizes(input.sizeQuantities,quantity):undefined;
     // ord6：成衣样品可一档多件（按尺码逐码登记件数）或一档一套（数量 1 套）；单件仍可直接登记 1 件。
     if (category === '成衣') {
@@ -2155,9 +2200,35 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             const booking = text(p.booking, '订舱号', false), plannedDate = day(p.plannedDate, '计划出运日', false);
             const note = text(p.note, '运输安排说明', !!shipment.booking && shipment.booking !== booking);
             const previous = shipment.booking;
+            if (p.transport !== undefined) shipment.transport = normalizeTransport(root, p.transport);
+            // sup42：已有订舱号被改写时留一条变更记录，可带改船费用。
+            if (previous && previous !== booking) {
+                const fee = p.changeFee && p.changeFee.amount ? { amount: Math.round(qty(p.changeFee.amount, '改船费用') * 100) / 100, currency: text(p.changeFee.currency, '改船费用币种').toUpperCase() } : undefined;
+                (shipment.bookingChanges ||= []).push({ from: previous, to: booking, reason: note, ...(fee ? { fee } : {}), at: ctx.now, actor: ctx.actorName });
+            }
             shipment.booking = booking; shipment.plannedDate = plannedDate; shipment.note = note;
             audit(root, ctx, 'shipment', shipment.id, `更新运输安排：${previous || '未订舱'} → ${booking || '未订舱'}；计划 ${plannedDate || '未定'}${note ? '；' + note : ''}`, { view: 'shipments', id: shipment.id });
             return { id: shipment.id };
+        }
+        case 'fulfillment.shipments.arrive': {
+            const s = get(f.shipments, p.id, '出运');
+            if (s.state !== 'departed') fail('出运尚未离港');
+            if (s.arrival) fail('已登记到港');
+            const at = instant(p.at, ctx, '实际到港时间');
+            if (s.departedAt && at < s.departedAt) fail('到港不得早于离港');
+            s.arrival = { at, evidence: text(p.evidence, '到港依据'), actor: ctx.actorName };
+            audit(root, ctx, 'shipment', s.id, '已登记到港', { view: 'shipments', id: s.id });
+            return { id: s.id };
+        }
+        case 'fulfillment.shipments.deliver': {
+            const s = get(f.shipments, p.id, '出运');
+            if (s.state !== 'departed') fail('出运尚未离港');
+            if (s.delivered) fail('已登记客户签收');
+            const at = instant(p.at, ctx, '签收时间');
+            if ((s.arrival?.at || s.departedAt || '') > at) fail('签收不得早于到港 / 离港');
+            s.delivered = { at, receiver: text(p.receiver, '签收人'), evidence: text(p.evidence, '签收依据（POD）'), fileIds: files(root, p.fileIds), actor: ctx.actorName };
+            audit(root, ctx, 'shipment', s.id, `客户已签收：${s.delivered.receiver}`, { view: 'shipments', id: s.id });
+            return { id: s.id };
         }
         case 'fulfillment.shipments.ready': {
             const s = get(f.shipments, p.id, '出运');
@@ -2219,8 +2290,11 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         case 'fulfillment.shipments.cancel': {
             const s = get(f.shipments, p.id, '出运');
             requireEditableShipment(s);
-            if (s.requesterId !== ctx.actorId)
-                fail('仅原业务发起人可取消');
+            // sup47：原发起人、本票订单的当前负责人或订单审批人（主管）可取消。
+            const owners = new Set(s.lines.flatMap(l => mistOrderOwnerIds(root, l.orderId)));
+            const reviewers = new Set(Object.values(ctx.authority?.orderReviewerIds || {}).flat());
+            if (s.requesterId !== ctx.actorId && !owners.has(ctx.actorId || '') && !reviewers.has(ctx.actorId || ''))
+                fail('仅原业务发起人、订单负责人或业务主管可取消');
             const cancelBlockers = shipmentCancelBlockers(root, s);
             if (cancelBlockers.length)
                 fail(`不能取消：${cancelBlockers.join('；')}`);
@@ -2247,7 +2321,12 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 throw new MistCommandError('FORBIDDEN', '清关完成须由后勤/单证登记', 403);
             if(p.status!=='draft')for(const line of s.lines)if(root.orders.find(o=>o.id===line.orderId)?.replacementSource){assertMistOrderApproved(root,line.orderId);replacementDeclaredUnitPrice(root,s.id,line.orderId,line.lineId);}
             const id = old?.id || ctx.id(), fileIds = files(root, p.fileIds);
-            const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, declarationNo: text(p.declarationNo, '报关单号', p.status !== 'draft'), broker: text(p.broker, '报关行', p.status !== 'draft'), hsCode: text(p.hsCode, 'HS编码', p.status !== 'draft'), origin: text(p.origin, '原产地', p.status !== 'draft'), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft'), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
+            if (p.channel !== undefined && !['general', 'express'].includes(p.channel)) fail('报关方式无效');
+            const express = (p.channel ?? old?.channel) === 'express';
+            // sup51：已生成商品项时表头 HS 由商品项汇总，不再手填。
+            const itemHs = [...new Set((old?.items || []).map(i => i.hsCode).filter(Boolean))];
+            const hsCode = itemHs.length ? itemHs.join(' / ') : text(p.hsCode, 'HS编码', p.status !== 'draft' && !express);
+            const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, ...(express ? { channel: 'express' as const } : {}), declarationNo: text(p.declarationNo, express ? '快件运单号' : '报关单号', p.status !== 'draft'), broker: text(p.broker, express ? '快递 / 承运商' : '报关行', p.status !== 'draft'), hsCode, origin: text(p.origin, '原产地', p.status !== 'draft' && !express), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft' && !express), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
             if (row.clearedAt && row.declaredAt && row.clearedAt < row.declaredAt)
                 fail('清关不能早于申报');
             if (row.clearedAt > platformBusinessDate(ctx.now) || row.declaredAt > platformBusinessDate(ctx.now))
@@ -2258,6 +2337,22 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 f.customs.push(row);
             audit(root, ctx, 'customs', id, `登记外部报关事实：${p.status}`, { view: 'shipments', id: s.id });
             return { id };
+        }
+        case 'fulfillment.customs.amend': {
+            const c = get(f.customs, p.id, '报关单');
+            if (c.status !== 'cleared') fail('未放行的报关单请直接修改');
+            if (!['amend', 'withdraw', 'attach'].includes(p.kind)) fail('请选择改单、退关或补充附件');
+            const shipment = get(f.shipments, c.shipmentId, '出运');
+            if (p.kind === 'withdraw' && shipment.state === 'departed') fail('已离港出运不能退关');
+            const fileIds = files(root, p.fileIds);
+            if (p.kind === 'attach' && !fileIds.length) fail('请上传补充附件');
+            const reason = text(p.reason, p.kind === 'attach' ? '附件说明' : p.kind === 'amend' ? '改单内容与海关回执' : '退关原因');
+            (c.amendments ||= []).push({ kind: p.kind, reason, fileIds, at: ctx.now, actor: ctx.actorName });
+            c.fileIds = [...new Set([...c.fileIds, ...fileIds])];
+            // 退关：报关单不再作为本票离港依据，出运回到准备中。
+            if (p.kind === 'withdraw') { c.status = 'draft'; if (shipment.state === 'ready') shipment.state = 'preparing'; }
+            audit(root, ctx, 'customs', c.id, `${({ amend: '改单', withdraw: '退关', attach: '补充附件' } as Record<string, string>)[p.kind as string]}：${reason}`, { view: 'shipments', id: shipment.id });
+            return { id: c.id };
         }
         case 'fulfillment.documents.save': {
             const s = get(f.shipments, p.shipmentId, '出运');

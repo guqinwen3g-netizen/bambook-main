@@ -121,7 +121,7 @@ it('registers the declaration and then the release in dialogs, and stops edits o
   Object.assign(f.customs[0],{status:'cleared',clearedAt:'2026-10-13',evidence:'海关放行通知'});store.state={...store.state!};render('cus-s');
   detail=host.querySelector('[data-customs-detail="cus-s"]') as HTMLElement;
   expect(queryByRole(detail,'button',{name:'登记海关放行'})).toBeNull();
-  expect(detail.textContent).toContain('已放行记录不可覆盖');
+  expect(getByRole(detail,'button',{name:'登记改单'})).toBeTruthy();expect(getByRole(detail,'button',{name:'补充附件'})).toBeTruthy();
   expect(detail.textContent).toContain('增值税专用发票');
 });
 
