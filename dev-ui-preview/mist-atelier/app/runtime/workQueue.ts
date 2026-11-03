@@ -10,17 +10,20 @@ import { SETTLEMENT_SCOPES, PAYMENT_REQUEST_SCOPES, settlementReceipts, purchase
 import { MIST_FINANCE_SCOPES } from '../../../../server/src/shared/mistFinancePermissions';
 import { businessDate } from './businessClock';
 import { quotationPendingLines } from '../../../../server/src/shared/mistQuotationLineConversion';
+import { calendarVisibleTo, expandRepeats } from './derivedCalendar';
 
 type CanRead = (view: string) => boolean;
-export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task';
+export type MistWorkSource = 'review' | 'agent' | 'qc' | 'shipping' | 'finance' | 'report' | 'material' | 'task' | 'calendar';
 /**
  * 等我处理的一条事项。module 是它计入的侧栏模块（与模块页「待我处理」同一归属）；
  * 其他公司的审批归到 approvals，只进「我的工作」合计。
  */
 export type MistWorkItem = { id: string; source: MistWorkSource; sourceLabel: string; title: string; meta: string; when: string; urgent: boolean; at: string; due?: string; target: MistTarget & { detail?: 'full' }; module: string };
-export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', agent: 'Agent 提议', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项' };
+export const MIST_WORK_SOURCE_LABEL: Record<MistWorkSource, string> = { review: '待我审批', agent: 'Agent 提议', qc: 'QC', shipping: '出运', finance: '财务', report: '周报', material: '物料', task: '工作事项', calendar: '日程提醒' };
 export type MistWorkOptions = {
   canRead: CanRead; me: string; today: string; reviews?: MistReview[];
+  /** 当前业务时刻（ISO），用于日程提醒；不传时不出提醒。 */
+  now?: string;
   /** 当前账号是否持有某项权限；不传时岗位事项（按权限分派）一律不算我的。 */
   can?: (permission: string) => boolean;
   /** 本公司；只有本公司的审批按业务模块归类。 */
@@ -281,6 +284,16 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
         && (other.purchaseId ?? other.settlementId ?? other.planId ?? '') === (request.purchaseId ?? request.settlementId ?? request.planId ?? ''));
       if (resubmitted) continue;
       push({ id: 'finance:' + request.id, source: 'finance', title: ui`${request.code} · 付款申请被退回`, meta: [request.supplier, request.decision?.actor && '退回人 ' + request.decision.actor, request.decision?.note].filter(Boolean).join(' · '), when: '被退回', urgent: true, at: request.decision?.at || request.submittedAt, target: { view: 'payment-vouchers', id: request.id, section: 'payables' } });
+    }
+  }
+  // mar60：设了提醒的日程，在当天进入提醒窗口后列为待我处理，开始时刻过后自动消失。
+  if (me && options.now && state.calendar) {
+    const now = Date.parse(options.now);
+    for (const event of expandRepeats(state.calendar)) {
+      if (!event.remindMinutes || event.date !== today || !calendarVisibleTo(event, me) || !/^\d{2}:\d{2}$/.test(event.time)) continue;
+      const start = Date.parse(`${event.date}T${event.time}:00+08:00`);
+      if (now < start - event.remindMinutes * 60000 || now > start) continue;
+      push({ id: 'calendar:' + event.id, source: 'calendar', title: event.title, meta: [event.time, event.participants?.length ? ui`${event.participants.length + 1} 人参加` : ''].filter(Boolean).join(' · '), when: '即将开始', urgent: true, at: `${event.date}T${event.time}`, due: event.date, target: { view: 'calendar', section: event.date } as MistTarget, module: 'calendar' });
     }
   }
   // 每周一起：主管把上周团队周报生成并存档（服务端冻结此刻数据）；存档后自动消失。

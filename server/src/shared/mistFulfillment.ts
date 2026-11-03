@@ -212,6 +212,14 @@ export type FulfillmentPurchase = {
     supplierConfirmation?: { at: string; actor: string; evidence: string; confirmedDue: string; fileIds: string[]; revision: number };
     /** 供应商确认时改写的合同交期（原交期保留）。 */
     dueChanges?: { from: string; to: string; reason: string; at: string; actor: string }[];
+    /** sup11：已批准合同的变更（数量 / 单价 / 交期），交供应商承诺审批人审批，批准后生效并形成新的合同版本。 */
+    amendments?: FulfillmentPurchaseAmendment[];
+};
+export type FulfillmentPurchaseTerms = { quantity: number; price: number; due: string };
+export type FulfillmentPurchaseAmendment = {
+    id: string; from: FulfillmentPurchaseTerms; to: FulfillmentPurchaseTerms; reason: string; evidence: string; fileIds: string[];
+    state: 'pending' | 'approved' | 'rejected' | 'withdrawn'; requesterId: string; requester: string; submittedAt: string; reviewerIds: string[]; configVersions: Record<string, number>;
+    decision?: { actorId: string; actor: string; at: string; decision: 'approved' | 'rejected'; note: string }; withdrawnAt?: string;
 };
 export type FulfillmentPurchaseRevision = {
     revision: number;
@@ -638,6 +646,15 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     type: 'fulfillment.procurement.confirm';
     payload: { id: string; at: string; evidence: string; confirmedDue: string; fileIds: string[]; dueChangeReason?: string };
 } | {
+    type: 'fulfillment.procurement.amend';
+    payload: { id: string; quantity: number; price: number; due: string; reason: string; evidence: string; fileIds: string[] };
+} | {
+    type: 'fulfillment.procurement.amend.decide';
+    payload: { id: string; decision: 'approved' | 'rejected'; note: string };
+} | {
+    type: 'fulfillment.procurement.amend.withdraw';
+    payload: { id: string };
+} | {
     type: 'fulfillment.production.plan';
     payload: { productionId: string; sizes: FulfillmentSizeQuantity[] };
 } | {
@@ -822,7 +839,7 @@ export function fulfillmentCommandPermission(command: FulfillmentCommand): strin
         return command.payload.source.kind === 'version' ? 'products:write' : 'orders:write';
     if (command.type.startsWith('fulfillment.qc.'))
         return 'orders:write';
-    if (command.type === 'fulfillment.procurement.decide')
+    if (command.type === 'fulfillment.procurement.decide' || command.type === 'fulfillment.procurement.amend.decide')
         return 'procurement:approve';
     if (command.type.startsWith('fulfillment.procurement.'))
         return 'procurement:write';
@@ -1002,6 +1019,30 @@ function receiptLot(root: MistState, p: { warehouseId?: unknown; dyeLot?: unknow
         out.rolls = rolls;
     }
     return out;
+}
+const purchaseCommitmentKey = (p: FulfillmentPurchase) => `supplierCommitment.approvers.${p.kind === 'processing' ? 'processing' : 'purchase'}.${p.domain}`;
+/** sup11：变更前置条件，申请和批准时都按当时事实重新核对；返回首个阻断原因。 */
+function purchaseAmendmentProblem(root: MistState, p: FulfillmentPurchase, to: FulfillmentPurchaseTerms): string {
+    if (p.state !== 'approved') return '仅已批准的合同可以变更';
+    const payables = root.payables, settlements = (payables?.settlements || []).filter(s => s.purchaseId === p.id);
+    const settled = sum(settlements.filter(s => s.state === 'confirmed').map(s => s.quantity)), settling = settlements.some(s => s.state === 'pending');
+    const billed = (payables?.bills || []).filter(b => b.state === 'open').flatMap(b => b.lines).filter(l => l.purchaseId === p.id).reduce((n, l) => n + mistMoneyMinor(l.amount), 0);
+    const planned = (payables?.plans || []).filter(x => x.purchaseId === p.id && x.state === 'active').reduce((n, x) => n + mistMoneyMinor(x.amount), 0);
+    if (to.quantity < p.received) return `变更后数量不能少于已收 ${p.received} ${p.unit}`;
+    if (to.quantity < settled) return `变更后数量不能少于已结算 ${settled} ${p.unit}`;
+    if (to.price !== p.price && (settled > 0 || settling || billed > 0)) return '已有结算或供应商票据，单价不能再变更；差价在结算中处理';
+    const amount = Math.round(to.quantity * to.price * 100);
+    if (amount < billed) return '变更后合同金额低于已登记的供应商票据';
+    if (amount < planned) return '变更后合同金额低于付款计划合计，请先调整付款计划';
+    if (to.quantity !== p.quantity) {
+        const branch = root.productions.find(job => job.sourcePurchaseId === p.id && !job.closed), fact = branch && fulfillmentProductionFact(root, branch.id);
+        if (fact?.release || fact?.completion) return '生产已放行，数量不能再变更；追加数量请另下采购合同';
+        if (branch && p.domain === 'fabric') return '面料工厂分支须覆盖完整订单条目数量，数量变化请先变更订单';
+        const line = branch && root.orderLines.find(l => l.id === p.lineId);
+        const other = root.fulfillment.purchases.filter(x => x.id !== p.id && x.lineId === p.lineId && x.state === 'approved' && x.kind !== 'material' && !isFabricIntermediateProcessing(x));
+        if (line && sum([...other.map(x => x.quantity), to.quantity]) > line.qty) return '变更后生产分配总量超过订单条目数量';
+    }
+    return '';
 }
 function purchaseSnapshot(purchase: FulfillmentPurchase): FulfillmentPurchaseRevision['snapshot'] {
     const { orderId, lineId, kind, materialKind, stageTerms, iqcRequired, supplierId, supplier, description, quantity, unit, price, currency, due, terms, destination, note, fileIds } = purchase;
@@ -1224,7 +1265,19 @@ function purchaseSaleReference(root: MistState, p: { orderId: string; lineId: st
   if (!order || !line || !(line.price > 0)) return [];
   return [{ label: '订单售价参考', value: `${line.qty} ${line.unit} × ${line.price} = ${reviewMoney(lineAmount(line.qty, line.price))} ${order.currency}` }];
 }
-export function getFulfillmentReviews(root: MistState): MistReviewTask[] { return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => ({ id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id, title: `${p.code} · ${p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds, status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected', submittedAt: p.submittedAt!, requiredPermission: 'procurement:approve', fileIds: [...p.fileIds], target: { view: 'procurement', id: p.id }, details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '采购内容', value: p.description }, { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` }, { label: '金额', value: `${p.quantity} × ${p.price} = ${reviewMoney(lineAmount(p.quantity, p.price))} ${p.currency}` }, ...purchaseSaleReference(root, p), { label: '付款条件', value: p.terms }, { label: '交付地点', value: p.destination }, { label: '交期', value: p.due }, ...(fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) ? [{ label: '工序约定', value: fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) }] : []), ...((p.revisionHistory?.at(-1)?.snapshot ?? p).iqcRequired ? [{ label: '来料检验', value: '入库前检验，合格后放行' }] : []), ...((p.revisionHistory?.at(-1)?.snapshot.note ?? p.note).trim() ? [{ label: '规格与交付要求', value: p.revisionHistory?.at(-1)?.snapshot.note ?? p.note }] : [])] })); }
+export function getFulfillmentReviews(root: MistState): MistReviewTask[] { return [...purchaseReviews(root), ...purchaseAmendmentReviews(root)]; }
+export function purchaseAmendmentText(p: Pick<FulfillmentPurchase, 'unit' | 'currency'>, a: Pick<FulfillmentPurchaseAmendment, 'from' | 'to'>): string {
+    return [a.from.quantity !== a.to.quantity ? `数量 ${a.from.quantity} → ${a.to.quantity} ${p.unit}` : '', a.from.price !== a.to.price ? `单价 ${a.from.price} → ${a.to.price} ${p.currency}` : '', a.from.due !== a.to.due ? `交期 ${a.from.due} → ${a.to.due}` : ''].filter(Boolean).join('；');
+}
+function purchaseAmendmentReviews(root: MistState): MistReviewTask[] {
+    return (root.fulfillment?.purchases || []).flatMap(p => (p.amendments || []).filter(a => a.state !== 'withdrawn').map((a): MistReviewTask => ({
+        id: `procurement-amendment:${a.id}`, kind: 'procurementAmendment', entityId: a.id, title: `${p.code} · ${p.supplier} 合同变更`, requesterId: a.requesterId, reviewerIds: [...a.reviewerIds],
+        status: a.state === 'pending' ? 'pending' : a.state === 'approved' ? 'approved' : 'rejected', submittedAt: a.submittedAt, requiredPermission: 'procurement:approve', fileIds: [...a.fileIds], target: { view: 'procurement', id: p.id },
+        details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '供应商', value: p.supplier }, { label: '变更内容', value: purchaseAmendmentText(p, a) },
+            { label: '合同金额', value: `${reviewMoney(lineAmount(a.from.quantity, a.from.price))} → ${reviewMoney(lineAmount(a.to.quantity, a.to.price))} ${p.currency}` }, { label: '已收', value: `${p.received} ${p.unit}` }, { label: '变更原因', value: a.reason }, { label: '供应商同意依据', value: a.evidence }],
+    })));
+}
+function purchaseReviews(root: MistState): MistReviewTask[] { return (root.fulfillment?.purchases || []).filter(p => p.submittedAt).map(p => ({ id: `procurement:${p.id}`, kind: 'procurement', entityId: p.id, title: `${p.code} · ${p.supplier}`, requesterId: p.requesterId, reviewerIds: p.reviewerIds, status: p.state === 'pending' ? 'pending' : p.state === 'approved' || p.state === 'cancelled' ? 'approved' : 'rejected', submittedAt: p.submittedAt!, requiredPermission: 'procurement:approve', fileIds: [...p.fileIds], target: { view: 'procurement', id: p.id }, details: [{ label: '来源', value: fulfillmentSourceLabel(root, { kind: 'orderLine', orderId: p.orderId, lineId: p.lineId }) }, { label: '采购内容', value: p.description }, { label: '供应商', value: p.supplier }, { label: '数量', value: `${p.quantity} ${p.unit}` }, { label: '金额', value: `${p.quantity} × ${p.price} = ${reviewMoney(lineAmount(p.quantity, p.price))} ${p.currency}` }, ...purchaseSaleReference(root, p), { label: '付款条件', value: p.terms }, { label: '交付地点', value: p.destination }, { label: '交期', value: p.due }, ...(fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) ? [{ label: '工序约定', value: fabricStageTermsText(p.revisionHistory?.at(-1)?.snapshot ?? p) }] : []), ...((p.revisionHistory?.at(-1)?.snapshot ?? p).iqcRequired ? [{ label: '来料检验', value: '入库前检验，合格后放行' }] : []), ...((p.revisionHistory?.at(-1)?.snapshot.note ?? p.note).trim() ? [{ label: '规格与交付要求', value: p.revisionHistory?.at(-1)?.snapshot.note ?? p.note }] : [])] })); }
 /** Called only on the aggregate's transaction clone; throws before its snapshot is committed. */
 /** A disposed development version keeps its original report; further inspection belongs to the successor. */
 export function fulfillmentQcSourceBlocker(root: MistState, source: FulfillmentSource): string | null {
@@ -1722,6 +1775,67 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (order && confirmedDue > order.due) root.tasks.unshift({ id: ctx.id(), title: `采购 ${purchase.code} 供应商确认交期 ${confirmedDue} 晚于订单 ${order.code} 交期 ${order.due}，请核对订单交期`, due: order.due, done: false, kind: `purchase-late:${purchase.id}`, target: { view: 'orders/detail', id: order.id, orderLineId: purchase.lineId }, assigneeIds: mistOrderOwnerIds(root, order.id) });
             }
             audit(root, ctx, 'procurement', purchase.id, '已登记供应商线下确认');
+            return { id: purchase.id };
+        }
+        case 'fulfillment.procurement.amend': {
+            const purchase = get(f.purchases, p.id, '采购合同');
+            assertMistOrderApproved(root, purchase.orderId);
+            if (purchase.amendments?.some(a => a.state === 'pending')) fail('已有待审批的合同变更', 'CONFLICT');
+            const to = { quantity: qty(p.quantity), price: qty(p.price, '单价', true), due: day(p.due, '交期') }, from = { quantity: purchase.quantity, price: purchase.price, due: purchase.due };
+            lineAmount(to.quantity, to.price);
+            if (to.quantity === from.quantity && to.price === from.price && to.due === from.due) fail('数量、单价、交期都没有变化');
+            const problem = purchaseAmendmentProblem(root, purchase, to);
+            if (problem) fail(problem, 'PRECONDITION');
+            if (!ctx.actorId) return fail('审批需要当前真实账号');
+            const key = purchaseCommitmentKey(purchase), config = ctx.authority?.supplier?.[key];
+            const reviewerIds = [...new Set(config?.userIds || [])].filter(id => id !== ctx.actorId);
+            if (!config || !reviewerIds.length) return fail('尚未配置当前业务的供应商承诺审批人', 'PRECONDITION');
+            const amendment: FulfillmentPurchaseAmendment = { id: ctx.id(), from, to, reason: text(p.reason, '变更原因', true, 1000), evidence: text(p.evidence, '供应商同意依据', true, 2000), fileIds: files(root, p.fileIds ?? []), state: 'pending', requesterId: ctx.actorId, requester: ctx.actorName, submittedAt: ctx.now, reviewerIds, configVersions: { [key]: config.version } };
+            (purchase.amendments ||= []).push(amendment);
+            audit(root, ctx, 'procurement', purchase.id, `提交合同变更：${purchaseAmendmentText(purchase, amendment)}；${amendment.reason}`);
+            return { id: amendment.id };
+        }
+        case 'fulfillment.procurement.amend.decide': {
+            const purchase = f.purchases.find(x => x.amendments?.some(a => a.id === p.id)) || fail('合同变更不存在', 'NOT_FOUND');
+            const amendment = purchase.amendments!.find(a => a.id === p.id)!;
+            if (amendment.state !== 'pending') fail('合同变更已处理', 'CONFLICT');
+            if (!['approved', 'rejected'].includes(p.decision)) fail('审批决定无效');
+            const key = Object.keys(amendment.configVersions)[0], config = ctx.authority?.supplier?.[key];
+            if (!ctx.actorId || ctx.actorId === amendment.requesterId || !amendment.reviewerIds.includes(ctx.actorId) || !config?.userIds.includes(ctx.actorId)) fail('当前账号不在提交时及当前有效供应商审批名单', 'FORBIDDEN');
+            const note = text(p.note, '审批意见');
+            if (p.decision === 'approved') {
+                assertMistOrderApproved(root, purchase.orderId);
+                if (purchase.quantity !== amendment.from.quantity || purchase.price !== amendment.from.price || purchase.due !== amendment.from.due) fail('合同已在申请后变化，请撤回后按当前合同重新提交', 'CONFLICT');
+                const problem = purchaseAmendmentProblem(root, purchase, amendment.to);
+                if (problem) fail(problem, 'PRECONDITION');
+            }
+            amendment.state = p.decision;
+            amendment.decision = { actorId: ctx.actorId!, actor: ctx.actorName, at: ctx.now, decision: p.decision, note };
+            if (p.decision === 'approved') {
+                const to = amendment.to;
+                if (to.due !== purchase.due) (purchase.dueChanges ||= []).push({ from: purchase.due, to: to.due, reason: amendment.reason, at: ctx.now, actor: ctx.actorName });
+                purchase.quantity = to.quantity; purchase.price = to.price; purchase.due = to.due;
+                if (purchase.supplierConfirmation) purchase.supplierConfirmation.confirmedDue = to.due;
+                const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id && !job.closed);
+                if (branch) {
+                    branch.due = to.due;
+                    if (branch.qty !== to.quantity) { branch.qty = to.quantity; const fact = fulfillmentProductionFact(root, branch.id); if (fact?.sizes.length) { fact.sizes = []; fact.revision++; } }
+                }
+                purchase.revisionHistory ||= [];
+                purchase.revisionHistory.push({ revision: purchase.revisionHistory.length + 1, submittedAt: amendment.submittedAt, requesterId: amendment.requesterId, reviewerIds: [...amendment.reviewerIds], configVersions: { ...amendment.configVersions }, snapshot: purchaseSnapshot(purchase), decision: { ...amendment.decision } });
+                const order = root.orders.find(o => o.id === purchase.orderId);
+                if (order && to.due !== amendment.from.due && to.due > order.due) root.tasks.unshift({ id: ctx.id(), title: `采购 ${purchase.code} 变更后交期 ${to.due} 晚于订单 ${order.code} 交期 ${order.due}，请核对订单交期`, due: order.due, done: false, kind: `purchase-late:${purchase.id}`, target: { view: 'orders/detail', id: order.id, orderLineId: purchase.lineId }, assigneeIds: mistOrderOwnerIds(root, order.id) });
+            }
+            audit(root, ctx, 'procurement', purchase.id, `合同变更${p.decision === 'approved' ? '已批准' : '退回'}：${purchaseAmendmentText(purchase, amendment)}；${note}`, { view: 'procurement', id: purchase.id });
+            return { id: purchase.id };
+        }
+        case 'fulfillment.procurement.amend.withdraw': {
+            const purchase = f.purchases.find(x => x.amendments?.some(a => a.id === p.id)) || fail('合同变更不存在', 'NOT_FOUND');
+            const amendment = purchase.amendments!.find(a => a.id === p.id)!;
+            if (amendment.state !== 'pending') fail('合同变更已处理', 'CONFLICT');
+            if (ctx.actorId !== amendment.requesterId) fail('只有申请人可以撤回', 'FORBIDDEN');
+            amendment.state = 'withdrawn'; amendment.withdrawnAt = ctx.now;
+            audit(root, ctx, 'procurement', purchase.id, `撤回合同变更：${purchaseAmendmentText(purchase, amendment)}`);
             return { id: purchase.id };
         }
         case 'fulfillment.procurement.save': {

@@ -33,7 +33,7 @@ function receiptFundingUse(root:Root,receipt:Root['receipts'][number]){
   for(const allocation of root.allocations.filter(a=>a.receiptId===receipt.id)){
    const invoice=root.invoices.find(i=>i.id===allocation.invoiceId);
    const crossCurrency=allocation.receiptAmount!==undefined&&allocation.receiptCurrency===receipt.currency;
-   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {opening?:unknown}).opening||crossCurrency)){if(invoice.currency!==allocation.currency||!crossCurrency&&allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistAllocationReceiptMinor(allocation);continue;}
+   if(invoice&&((invoice as {devId?:string}).devId||(invoice as {sampleRequestId?:string}).sampleRequestId||(invoice as {opening?:unknown}).opening||crossCurrency)){if(invoice.currency!==allocation.currency||!crossCurrency&&allocation.currency!==receipt.currency)fail('核销来源或币种不一致');development+=mistAllocationReceiptMinor(allocation);continue;}
    const order=root.orders.find(o=>o.id===invoice?.orderId);
    if(!invoice||!order||invoice.currency!==receipt.currency||allocation.currency!==receipt.currency)fail('核销来源或币种不一致');
    orderBucket(order.customerId,order.id).allocated+=mistMoneyMinor(allocation.amount);
@@ -61,7 +61,7 @@ export function orderFundingReconciliationLimit(root:Root,receiptId:string,invoi
  const {customers,reserved}=receiptFundingUse(root,receipt);
  const free=mistMoneyMinor(receipt.amount)-reserved;
  let allowed=free;
- if(!(invoice as {devId?:string;opening?:unknown}).devId&&!(invoice as {opening?:unknown}).opening){
+ if(!(invoice as {devId?:string;opening?:unknown}).devId&&!(invoice as {sampleRequestId?:string}).sampleRequestId&&!(invoice as {opening?:unknown}).opening){
   const order=root.orders.find(o=>o.id===invoice.orderId);if(!order)return 0;
   const customer=customers.get(order.customerId),bucket=customer?.orders.get(order.id);
   const assignedRoom=Math.max(0,(bucket?.assigned??0)-(bucket?.allocated??0));

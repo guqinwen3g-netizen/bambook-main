@@ -12,7 +12,7 @@ import { CheckCircle2, Download, FileSignature, PackageCheck, Pencil, Plus, Sear
 import { Banner, Button, Card, Checklist, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Timeline, Toolbar, useToast, type Column, type Tone } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentPurchase, FulfillmentReceipt, FulfillmentReceiptReturn } from '../../../../../server/src/shared/mistFulfillment';
-import { fulfillmentPositions, fulfillmentSourceLabel, receiptRejectionBlocker, receiptReturnedQuantity } from '../../../../../server/src/shared/mistFulfillment';
+import { fulfillmentPositions, fulfillmentSourceLabel, purchaseAmendmentText, receiptRejectionBlocker, receiptReturnedQuantity } from '../../../../../server/src/shared/mistFulfillment';
 import { prepaymentTransferTargets, purchaseContractMinor, purchasePayableReadback, purchasePrepaymentReadback, supplierSettlements } from '../../../../../server/src/shared/mistPayables';
 import { supplierBusinessDay, productionSupplierUnavailableReason } from '../../../../../server/src/shared/mistSupplierStatus';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -28,6 +28,7 @@ import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBloc
 import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
 
 type ProcurementEditorSpec = ModuleEditorSpec & { approvalFor?: string };
+const AMENDMENT_STATE = { pending: '待审批', approved: '已生效', rejected: '已退回', withdrawn: '已撤回' } as const;
 type Domain = FulfillmentPurchase['domain'];
 type Entry = 'purchase' | 'processing';
 type Stage = 'draft' | 'pending' | 'supplier' | 'fulfilling' | 'done';
@@ -97,6 +98,10 @@ export function ProcurementPage() {
   const dialogApproval = dialog?.approvalFor ? all.find(p=>p.id===dialog.approvalFor) : undefined;
   const canDialog = dialog?.approvalFor ? canApprove && !!dialogApproval && dialogApproval.state==='pending' && dialogApproval.reviewerIds.includes(me) : can;
   React.useEffect(()=>{if(!can)editor.open(null);if(dialog&&!canDialog)setDialog(null);},[can,canDialog,dialog]);
+  // ord12：从辅料档案「采购下单」进入时，按档案预填辅料采购（来源订单条目由采购选择）。
+  const trimId = route.section?.startsWith('trim:') ? route.section.slice(5) : '', trimOpened = React.useRef('');
+  React.useEffect(() => { const prod = trimId && state ? state.market.products.find(x => x.id === trimId && x.category === 'trimming') : undefined; if (!prod || !can || trimOpened.current === trimId) return; trimOpened.current = trimId;
+    const base = purchaseSpec(); editor.open({ ...base, initialValues: { ...base.initialValues, kind: 'material:trims', supplierId: prod.supplierId, description: `${prod.sku} ${prod.name}${prod.color ? ' · ' + prod.color : ''}`, unit: prod.unit, price: Number(prod.refPrice || prod.cost) || 0, currency: prod.currency } }); }, [trimId, state, can]);
   if (editor.spec && can) return editor.view;
   if (dialog?.sections?.length && canDialog) return <ModuleEditorPage spec={dialog} onClose={()=>setDialog(null)}/>;
 
@@ -192,6 +197,11 @@ export function ProcurementPage() {
       initialValues: { supplierId: '', price: p.price, currency: p.currency, due: p.due, terms: p.terms, reason: '' },
       submit: async values => { const r = await run({ type: 'sourcing.purchase.transfer', payload: { purchaseId: p.id, supplierId: text(values, 'supplierId'), price: number(values, 'price'), currency: text(values, 'currency'), due: text(values, 'due'), terms: text(values, 'terms'), reason: text(values, 'reason') } } as any); const id = String((r.result as { id?: string }).id || ''); if (id) go('procurement', id); } };
   };
+  // sup11：已批准合同变更数量、单价或交期，审批通过后生效。
+  const amendSpec = (p: FulfillmentPurchase): ModuleEditorSpec => ({ title: `变更合同 ${p.code}`, submitLabel: '提交审批',
+    fields: [{ ...field('quantity', `数量（${p.unit}）`, 'number'), min: 0.0001 }, field('price', `单价（${p.currency}）`, 'number'), field('due', '交期', 'date'), field('reason', '变更原因', 'textarea'), field('evidence', '供应商同意依据', 'textarea'), field('files', '供应商确认件', 'files', false)],
+    initialValues: { quantity: p.quantity, price: p.price, due: p.due, reason: '', evidence: '', files: '' },
+    submit: values => run({ type: 'fulfillment.procurement.amend', payload: { id: p.id, quantity: number(values, 'quantity'), price: number(values, 'price'), due: text(values, 'due'), reason: text(values, 'reason'), evidence: text(values, 'evidence'), fileIds: moduleFileIds(values.files) } }) });
   const decideSpec = (p: FulfillmentPurchase, decision: 'approved' | 'rejected'): ProcurementEditorSpec => ({ approvalFor:p.id, title: decision === 'approved' ? '批准采购承诺' : '退回采购', submitLabel: decision === 'approved' ? '批准' : '退回修改', fields: [field('note', '审批意见', 'textarea')], initialValues: { note: '' }, submit: values => run({ type: 'fulfillment.procurement.decide', payload: { id: p.id, decision, note: text(values, 'note') } }) });
 
   const stageCount = (value: StageFilter) => value === 'all' ? searched.length : searched.filter(p => purchaseStage(p) === value).length;
@@ -211,7 +221,7 @@ export function ProcurementPage() {
     ? <PurchaseDetail purchase={selected} state={state} incoming={Object.values(workspace?.scopedFabricAccess||{}).flatMap(a=>a.deliveries)} day={day} me={me} can={can} canApprove={canApprove} inventory={session.hasPermission('inventory:read')} finance={session.hasPermission('invoices:read')&&session.hasPermission('vouchers:read')} locked={locked}
         onEdit={() => editor.open(purchaseSpec(selected))}
         onSubmit={() => void act(() => run({ type: 'fulfillment.procurement.submit', payload: { id: selected.id } }), '已提交审批')}
-        onDecide={decision => setDialog(decideSpec(selected, decision))}
+        onDecide={decision => setDialog(decideSpec(selected, decision))} onAmend={() => setDialog(amendSpec(selected))} onAmendWithdraw={id => void act(() => run({ type: 'fulfillment.procurement.amend.withdraw', payload: { id } }), '已撤回变更')}
         onSend={() => setDialog(sendSpec(selected))} onConfirm={() => setDialog(confirmSpec(selected))} onReceive={() => setDialog(receiveSpec(selected))} onRejectReceived={r => setDialog(rejectReceivedSpec(selected, r))}
         onReturn={r => setDialog(returnSpec(selected, r))} onReturnReverse={(r, row) => setDialog(returnReverseSpec(selected, r, row))}
         onDownload={() => void act(async () => { const receipt = await run({ type: 'fulfillment.procurement.document', payload: { id: selected.id } }); const fileId = receipt.result.fileId; if (typeof fileId === 'string') await downloadFile({ id: fileId, name: `${selected.code}.pdf`, mimeType: 'application/pdf', size: 0, storageKey: '', createdAt: '' }); }, '采购单已生成')}
@@ -294,9 +304,9 @@ function FabricStageBalancePanel({ balance: b }: { balance: FabricStageBalance }
     ]} />}
   </DetailBlock>;
 }
-function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove, inventory, finance, locked, onEdit, onSubmit, onDecide, onSend, onConfirm, onReceive, onRejectReceived, onReturn, onReturnReverse, onDownload, onAttach, onInventory, onSupplier, onCancel, onTransfer, onOpenPurchase, onPayables }: {
+function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove, inventory, finance, locked, onEdit, onSubmit, onDecide, onAmend, onAmendWithdraw, onSend, onConfirm, onReceive, onRejectReceived, onReturn, onReturnReverse, onDownload, onAttach, onInventory, onSupplier, onCancel, onTransfer, onOpenPurchase, onPayables }: {
   purchase: FulfillmentPurchase; state: MistState; incoming:import('../../../../../server/src/shared/mistInternalFabric').MaterialDeliveryRow[]; day: string; me: string; can: boolean; canApprove: boolean; inventory: boolean; finance: boolean; locked: boolean;
-  onEdit: () => void; onSubmit: () => void; onDecide: (decision: 'approved' | 'rejected') => void; onSend: () => void; onConfirm: () => void; onReceive: () => void; onDownload: () => void;
+  onEdit: () => void; onSubmit: () => void; onDecide: (decision: 'approved' | 'rejected') => void; onAmend: () => void; onAmendWithdraw: (id: string) => void; onSend: () => void; onConfirm: () => void; onReceive: () => void; onDownload: () => void;
   onRejectReceived: (receipt: FulfillmentReceipt) => void; onReturn: (receipt: FulfillmentReceipt) => void; onReturnReverse: (receipt: FulfillmentReceipt, row: FulfillmentReceiptReturn) => void;
   onAttach: (ids: string[]) => Promise<unknown>; onInventory: () => void; onSupplier: () => void; onCancel: () => void; onTransfer: () => void; onOpenPurchase: (id: string) => void; onPayables: () => void;
 }) {
@@ -313,6 +323,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
   const amt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const writeReason = can ? false : '需要采购写权限';
   const canReview = canApprove && p.reviewerIds.includes(me);
+  const pendingAmendment = p.amendments?.find(a => a.state === 'pending');
   const cancelReason = writeReason || (hasMaterialAtFactory(state, p.id) ? '已有物料交给该分支，须先退回' : false) || (receipts.length ? '已有收货记录，不能直接取消；请走结算或拒收退换' : settled.some(x => x.state === 'pending' || x.state === 'confirmed') ? '有待复核或已确认的结算，不能取消' : billed.length ? '已登记供应商票据，请先由财务作废票据' : false);
   const transferReason = writeReason || purchaseTransferBlocker(state, p) || (settled.some(x => x.state === 'pending' || x.state === 'confirmed') ? '有待复核或已确认的结算，不能转移' : billed.length ? '已登记供应商票据，请先由财务作废票据' : false);
   const next: { tone: Tone; title: string; text: string } = p.state === 'cancelled' ? { tone: 'neutral', title: p.transferredTo ? `已转给 ${p.transferredTo.supplier}（${p.transferredTo.purchaseCode}）` : '合同已取消', text: `${p.cancellation?.actor || ''} · ${p.cancellation ? shortWhen(p.cancellation.at) : ''} · ${p.cancellation?.reason || ''}。${p.cancellation?.prepayment === 'refund' ? `已付预付 ${amt(p.cancellation.prepaid)} ${p.currency} 选择让工厂退款${prepay.available > 0 ? `，待退回 ${amt(prepay.available)}，到账后由财务登记。` : '，已全部退回。'}` : p.cancellation?.prepayment === 'transfer' ? `已付预付 ${amt(p.cancellation.prepaid)} ${p.currency} 选择转抵到 ${p.cancellation.targetPurchaseCode}${prepay.available > 0 ? '，待财务办理。' : '，已处理。'}` : '取消时没有已付预付。'}取消后不恢复，需要时重新建单。` }
@@ -351,8 +362,10 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={p.state === 'rejected' ? 'bad' : p.state === 'cancelled' ? 'neutral' : STAGE_TONE[stage]}>{uiText(p.state === 'rejected' ? '已退回' : p.state === 'cancelled' ? '已取消' : STAGE_LABEL[stage])}</Pill><Pill>{uiText(purchaseContent(p))}</Pill><Pill>{uiText(p.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>{flags.filter(flag => flag.key !== 'returned').map(flag => <Pill key={flag.key} tone="bad">{uiText(flag.label)}</Pill>)}</div>
     <Banner tone={next.tone} title={uiText(next.title)} actions={p.transferredTo ? <Button variant="quiet" onClick={() => onOpenPurchase(p.transferredTo!.purchaseId)}>{uiText("查看 ")}{p.transferredTo.purchaseCode}</Button> : undefined}>{next.text}</Banner>
+    {pendingAmendment && <Banner tone="warn" title={uiText('合同变更待审批')} actions={can && pendingAmendment.requesterId === me ? <Button variant="quiet" disabled={locked} onClick={() => onAmendWithdraw(pendingAmendment.id)}>{uiText('撤回')}</Button> : undefined}>{purchaseAmendmentText(p, pendingAmendment)}</Banner>}
     <ActionBar busy={locked} actions={[
       { label: '编辑草稿', icon: Pencil, onClick: onEdit, reason: writeReason, hidden: !can || stage !== 'draft' },
+      { label: '变更合同', icon: Pencil, onClick: onAmend, reason: writeReason || (pendingAmendment ? '已有待审批的变更' : false), hidden: !can || p.state !== 'approved' },
       { label: '提交审批', icon: Send, onClick: onSubmit, primary: true, reason: writeReason || (p.state === 'rejected' ? '退回的单据请先修订草稿再提交' : false), hidden: !can || stage !== 'draft' },
       { label: '批准承诺', icon: CheckCircle2, onClick: () => onDecide('approved'), primary: true, hidden: !canReview || stage !== 'pending' },
       { label: '退回修改', icon: Undo2, onClick: () => onDecide('rejected'), hidden: !canReview || stage !== 'pending' },
@@ -405,6 +418,9 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
     </DetailBlock>
     {!!p.revisionHistory?.length && <RecordDisclosure title="审批版本">
       <Timeline events={p.revisionHistory.slice().reverse().map(revision => ({ who: revision.decision?.actor || p.createdBy, when: new Date(revision.decision?.at || revision.submittedAt).toLocaleString(), text: <><div>{uiText("第 ")}{revision.revision}{uiText(" 版 · ")}{uiText(revision.decision ? status[revision.decision.decision] : '待审批')}</div><div>{revision.snapshot.supplier} · {revision.snapshot.description} · {revision.snapshot.quantity} {uiText(revision.snapshot.unit)} × {revision.snapshot.price} {revision.snapshot.currency}</div><div>{revision.snapshot.terms} · {revision.snapshot.destination} · {revision.snapshot.due}</div>{revision.decision && <div>{revision.decision.note}</div>}<RecordFiles ids={revision.snapshot.fileIds} /></> }))} />
+    </RecordDisclosure>}
+    {!!p.amendments?.length && <RecordDisclosure title="合同变更">
+      <Timeline events={p.amendments.slice().reverse().map(a => ({ who: a.decision?.actor || a.requester, when: shortWhen(a.decision?.at || a.withdrawnAt || a.submittedAt), text: <><div>{uiText(AMENDMENT_STATE[a.state])} · {purchaseAmendmentText(p, a)}</div><div>{a.reason}</div>{a.decision && <div>{a.decision.note}</div>}<RecordFiles ids={a.fileIds} /></> }))} />
     </RecordDisclosure>}
     <RecordDisclosure title="处理记录"><Events entity="procurement" id={p.id} /></RecordDisclosure>
   </DetailBody>;

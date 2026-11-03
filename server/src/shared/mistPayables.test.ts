@@ -95,6 +95,18 @@ describe('付款申请与主管审批', () => {
     const pay = (st: MistState) => as('财务-林', st, { type: 'payable.payment.register', payload: { requestId: id, date: '2026-10-14', amount: 30000, reference: 'BANK-1', allocations: [{ billId: a.id, amount: 30000 }] } });
     expect(err(() => pay(changed))).toContain('收款账户在申请后已变更');
     expect(() => pay(s)).not.toThrow();
+    // 停用：只停在用账户，须写原因；停用后按原申请不能付款，同币种可再登记新账户。
+    expect(mistCommandPermission({ type: 'market.supplier.bank.disable', payload: {} } as any)).toBe('invoices:write');
+    const accounts = changed.market.suppliers.find(x => x.id === po1.supplierId)!.bankAccounts!;
+    const disable = (st: MistState, accountId: string, reason = '供应商来函该账户已销户') => as('财务-林', st, { type: 'market.supplier.bank.disable', payload: { supplierId: po1.supplierId, accountId, reason } });
+    expect(err(() => disable(changed, accounts[0].id))).toContain('已不在使用中');
+    expect(err(() => disable(changed, accounts[1].id, '错'))).toContain('停用原因');
+    const off = disable(s, s.market.suppliers.find(x => x.id === po1.supplierId)!.bankAccounts!.find(x => x.state === 'active')!.id).state;
+    const row = off.market.suppliers.find(x => x.id === po1.supplierId)!;
+    expect(row.bankAccounts!.map(x => x.state)).toEqual(['disabled']);
+    expect(row.bankAccounts![0]).toMatchObject({ disabledBy: '财务-林', disableReason: '供应商来函该账户已销户' });
+    expect(err(() => pay(off))).toContain('收款账户在申请后已变更');
+    expect(bank(off, '1900011122233344').state.market.suppliers.find(x => x.id === po1.supplierId)!.bankAccounts!.map(x => x.state)).toEqual(['disabled', 'active']);
   });
   it('权限沿用矩阵：申请需付款申请创建权，审批需付款申请审批权；没有已批准申请不能登记任何付款', () => {
     expect(mistCommandPermission({ type: 'payable.request.submit', payload: {} } as any)).toBe('finance:payment_request:create');

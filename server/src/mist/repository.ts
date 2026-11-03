@@ -10,7 +10,7 @@ import { fail, MistApiError } from './errors';
 import { mistApprovalAuthority } from './context';
 import type { MistReviewTask } from '../shared/mistReview';
 const REVIEW_COMMAND_BY_KIND = {
-  procurement:'fulfillment.procurement.decide',quotation:'market.quotation.decide',
+  procurement:'fulfillment.procurement.decide',procurementAmendment:'fulfillment.procurement.amend.decide',quotation:'market.quotation.decide',
   claim:'platform.claim.decide',order:'order.governance.decide',
   payment:'payable.request.decide',risk:'platform.risk.decide',
   productionIntake:'fulfillment.production.intake.decide',

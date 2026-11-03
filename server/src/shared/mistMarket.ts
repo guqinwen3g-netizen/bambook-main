@@ -23,7 +23,9 @@ function quoteLineImage(root: MistState, m: { products: Array<{ id: string; sour
  const devId = line.sourceDevId || m.products.find(p => p.id === line.productId)?.sourceDevId;
  return (devId && root.devs.find(d => d.id === devId)?.img) || mistPlaceholderImage(type);
 }
-export type MarketProduct = RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string };
+export type MarketProduct = RecordBase & { sku:string; name:string; category:'garment'|'fabric'|'trimming'; status:'active'|'archived'; season:string; supplierId:string; supplierCode:string; composition:string; specification:string; color:string; unit:string; cost:string; currency:string; sourceDevId:string; sourceVersionId:string; specs?:Record<string,string>; customerCodes?:Array<{customerId:string;code:string}>; refPrice?:string; /** mar56：同一档案的其他可供工厂与各自报价；价格变动留历史。 */ sources?:ProductSource[]; priceHistory?:ProductPriceChange[] };
+export type ProductSource={supplierId:string;supplierCode:string;price:string;currency:string;moq:string;leadDays:number;note:string;updatedAt:string;updatedBy:string};
+export type ProductPriceChange={supplierId:string;from:string;to:string;currency:string;at:string;actor:string;note:string};
 /** 数字档案按板块的结构化规格；面料不预设“件”，单位以实际计价单位为准。 */
 export const PRODUCT_SPEC_FIELDS:Record<MarketProduct['category'],Array<{key:string;label:string;unit?:string}>>={
  fabric:[{key:'weight',label:'克重',unit:'g/m²'},{key:'width',label:'门幅',unit:'cm'},{key:'weave',label:'组织'},{key:'yarn',label:'纱支 / 原料'},{key:'finish',label:'后整理'}],
@@ -33,7 +35,7 @@ export const PRODUCT_SPEC_FIELDS:Record<MarketProduct['category'],Array<{key:str
 function productSpecs(category:MarketProduct['category'],value:unknown):Record<string,string>{if(value!==undefined&&(typeof value!=='object'||value===null||Array.isArray(value)))fail('规格格式无效');const out:Record<string,string>={};for(const f of PRODUCT_SPEC_FIELDS[category]){const v=(value as Record<string,unknown>|undefined)?.[f.key];if(v===undefined||v==='')continue;if(typeof v!=='string'||v.length>200)fail(f.label+'格式无效');if(v.trim())out[f.key]=v.trim();}if((category==='fabric')&&out.weight&&!/^\d{1,4}(\.\d{1,2})?$/.test(out.weight))fail('克重须为数字（g/m²）');if(category==='fabric'&&out.width&&!/^\d{1,4}(\.\d{1,2})?$/.test(out.width))fail('门幅须为数字（cm）');return out;}
 export type MarketSupplier = RecordBase & { code:string; name:string; type:string; country:string; address:string; capabilities:string; capacity:number; capacityUnit:string; leadDays:number; status:'active'|'paused'|'blocked'; blockReason:string; statusFrom?:string; statusHistory?:SupplierStatusChange[]; certificates?:SupplierCertificate[]; ratings?:SupplierRating[]; /** 包 A / P5：每个业务组一名经手人（账号 ID + 显示名快照），须为本公司有效成员且属于该组。 */ handlers?:Partial<Record<MistBusinessGroup,MistAccountRef>>; bankAccounts?:SupplierBankAccount[]; contacts:Array<{id:string;name:string;role:string;email:string;phone:string;primary:boolean}> };
 /** 供应商收款账户：财务登记并核实；更换时原账户保留为已替换，付款申请提交时冻结当时的账户。 */
-export type SupplierBankAccount={id:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string;addedAt:string;addedBy:string;state:'active'|'replaced';replacedAt?:string};
+export type SupplierBankAccount={id:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string;addedAt:string;addedBy:string;state:'active'|'replaced'|'disabled';replacedAt?:string;disabledAt?:string;disabledBy?:string;disableReason?:string};
 export type RelationHoldChange={action:'freeze'|'release';reason:string;at:string;actor:string};
 export const SUPPLIER_TYPES=['织造','染整','印花','成衣加工','辅料','面料贸易','服务商'] as const;
 export const SUPPLIER_GRADES=['A','B','C','D'] as const;
@@ -64,11 +66,14 @@ export type MarketCommand =
  | {type:'market.showLead.save';payload:Extract<MarketCommand,{type:'market.lead.save'}>['payload']}
  | {type:'market.showLead.transition';payload:Extract<MarketCommand,{type:'market.lead.transition'}>['payload']}
  | {type:'market.product.save';payload:{id?:string;input:Input<MarketProduct>}}
+ | {type:'market.product.source.save';payload:{productId:string;supplierId:string;supplierCode?:string;price:string;currency:string;moq?:string;leadDays?:number;note?:string}}
+ | {type:'market.product.source.remove';payload:{productId:string;supplierId:string;reason:string}}
  | {type:'market.product.fromVersion';payload:{devId:string;versionId:string;sku:string;name?:string;supplierId?:string;supplierCode?:string}}
  | {type:'market.product.status';payload:{id:string;status:MarketProduct['status']}}
  | {type:'market.supplier.save';payload:{id?:string;input:Pick<MarketSupplier,'name'|'type'>&Partial<Omit<Input<MarketSupplier>,'name'|'type'|'contacts'|'blockReason'|'statusFrom'|'statusHistory'|'certificates'|'ratings'|'handlers'>>&{/** 各业务组经手人账号 ID；省略的组保持不变，空字符串表示清除。 */handlerIds?:Partial<Record<MistBusinessGroup,string>>}}}
  | {type:'market.supplier.status';payload:{id:string;status:MarketSupplier['status'];reason:string;effectiveDate?:string}}
  | {type:'market.supplier.bank.save';payload:{supplierId:string;currency:string;accountName:string;bankName:string;accountNo:string;swift?:string;verification:string}}
+ | {type:'market.supplier.bank.disable';payload:{supplierId:string;accountId:string;reason:string}}
  | {type:'market.supplier.certificate.save';payload:{supplierId:string;id?:string;name:string;number:string;issuer:string;validUntil:string;fileIds:string[]}}
  | {type:'market.supplier.certificate.delete';payload:{supplierId:string;id:string}}
  | {type:'market.supplier.rate';payload:{supplierId:string;grade:SupplierRating['grade'];period:string;note:string}}
@@ -76,6 +81,8 @@ export type MarketCommand =
  | {type:'market.relation.status';payload:{id:string;status:MarketRelation['status']}}
  | {type:'market.relation.hold';payload:{id:string;frozen:boolean;reason:string}}
  | {type:'market.relation.linkSupplier';payload:{id:string;supplierId:string}}
+ | {type:'market.relation.linkCustomer';payload:{id:string;customerId:string}}
+ | {type:'market.relation.unlinkSupplier';payload:{id:string;reason:string}}
  | {type:'market.contact.save';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id?:string;name:string;role:string;email:string;phone:string;primary:boolean}}
  | {type:'market.season.save';payload:{id?:string;input:Input<MarketSeason>&{status:MarketSeason['status']}}}
  | {type:'market.season.void';payload:{kind:'season'|'trend'|'show';id:string;reason:string}}
@@ -119,7 +126,7 @@ export function marketCommandPermission(command:MarketCommand):string|null {
  // 包 A / P6：评级、暂停、停用、恢复须 suppliers:admin（并须填原因）；档案、认证、联系人维护为 suppliers:write。
  if(command.type==='market.supplier.rate'||command.type==='market.supplier.status')return 'suppliers:admin';
  // 收款账户由财务登记与核实，与供应商档案维护分岗。
- if(command.type==='market.supplier.bank.save')return 'invoices:write';
+ if(command.type.startsWith('market.supplier.bank.'))return 'invoices:write';
  if(command.type.startsWith('market.supplier.'))return 'suppliers:write';
  if(command.type==='market.contact.save'&&command.payload?.kind==='supplier')return 'suppliers:write';
  if(command.type.startsWith('market.relation.')||command.type==='market.contact.save')return 'relations:write';
@@ -322,7 +329,19 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const specs=productSpecs(row.category,input.specs===undefined?(old?.category===row.category?old?.specs:undefined):input.specs);if(Object.keys(specs).length)row.specs=specs;
    if(input.customerCodes!==undefined){if(!Array.isArray(input.customerCodes)||input.customerCodes.length>50)fail('客户编码表格式无效');const seen=new Set<string>();const codes:Array<{customerId:string;code:string}>=[];for(const c of input.customerCodes as unknown[]){const r=c as {customerId?:unknown;code?:unknown};if(!r||typeof r.customerId!=='string'||!root.customers.some(x=>x.id===r.customerId))fail('客户编码引用的客户不存在');if(seen.has(r.customerId as string))fail('同一客户只能登记一个客户编码');seen.add(r.customerId as string);codes.push({customerId:r.customerId as string,code:str(r.code,'客户编码',true,80)});}if(codes.length)row.customerCodes=codes;}else if(old?.customerCodes)row.customerCodes=old.customerCodes.map(c=>({...c}));
    const refPrice=input.refPrice===undefined?(old?.refPrice||''):String(input.refPrice).trim();if(refPrice)row.refPrice=decimal(refPrice,'参考价').text;
+   if(old?.sources)row.sources=old.sources.map(x=>({...x}));if(old?.priceHistory)row.priceHistory=old.priceHistory.map(x=>({...x}));
    put(m.products,row,old);result={id:row.id};break;}
+  case 'market.product.source.save':{const i=command.payload,p=find(m.products,i.productId,'数字档案');if(p.status==='archived')fail('归档产品须先恢复再编辑');
+   const supplierId=supplierRef(m,str(i.supplierId,'供应商'),ctx.now);const price=decimal(i.price,'报价').text;if(!(Number(price)>0))fail('报价须大于零');const cur=currency(i.currency);
+   const moq=i.moq===undefined||i.moq===''?'':decimal(i.moq,'MOQ').text;const lead=i.leadDays===undefined?0:Number(i.leadDays);if(!Number.isInteger(lead)||lead<0||lead>365)fail('交期天数无效');
+   const list=p.sources||[],old=list.find(x=>x.supplierId===supplierId);
+   const row:ProductSource={supplierId,supplierCode:str(i.supplierCode||'','供应商编码',false,80),price,currency:cur,moq,leadDays:lead,note:str(i.note||'','备注',false,500),updatedAt:ctx.now,updatedBy:ctx.actorName};
+   if(old&&(old.price!==price||old.currency!==cur))p.priceHistory=[...(p.priceHistory||[]),{supplierId,from:`${old.price} ${old.currency}`,to:`${price} ${cur}`,currency:cur,at:ctx.now,actor:ctx.actorName,note:row.note}];
+   if(!old)p.priceHistory=[...(p.priceHistory||[]),{supplierId,from:'',to:`${price} ${cur}`,currency:cur,at:ctx.now,actor:ctx.actorName,note:row.note}];
+   p.sources=old?list.map(x=>x===old?row:x):[...list,row];p.updatedAt=ctx.now;
+   const sup=find(m.suppliers,supplierId,'供应商');history(root,ctx,'product',p.id,`${old?'更新':'登记'}供应来源 ${sup.name}：${price} ${cur}/${p.unit}${moq?` · MOQ ${moq}`:''}${lead?` · ${lead} 天`:''}`);result={id:p.id};break;}
+  case 'market.product.source.remove':{const i=command.payload,p=find(m.products,i.productId,'数字档案');const old=(p.sources||[]).find(x=>x.supplierId===i.supplierId)||fail('该供应来源不存在');const reason=str(i.reason,'移除原因');
+   p.sources=(p.sources||[]).filter(x=>x!==old);p.updatedAt=ctx.now;history(root,ctx,'product',p.id,`移除供应来源 ${find(m.suppliers,old!.supplierId,'供应商').name}：${reason}`);result={id:p.id};break;}
   case 'market.product.fromVersion':{const {devId,versionId}=command.payload;validateSource(root,devId,versionId,true);const previous=m.products.find(x=>x.sourceVersionId===versionId);if(previous)return {id:previous.id,devId,versionId};const d=find(root.devs,devId,'开发案'),v=find(root.versions,versionId,'版本');
    const isFabric=developmentDomain(d.values)==='fabric',fr=v.fabricRequirements||d.values.fabricRequirements,known=(x:string|undefined)=>x&&x!=='待工厂分析'?x:'';
    const specs:Record<string,string>=isFabric?{weight:fr&&(!fr.weightUnit||fr.weightUnit==='g/m²')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.weightValue)?fr.weightValue:'',width:fr&&(!fr.widthUnit||fr.widthUnit==='cm')&&/^\d{1,4}(\.\d{1,2})?$/.test(fr.widthValue)?fr.widthValue:'',weave:known(fr?.weave),yarn:known(fr?.yarn),finish:known(fr?.finish)}:{style:d.values.style||'',garmentCategory:d.values.category||'',sizeRange:v.size||'',mainFabric:v.fabric||''};
@@ -355,6 +374,11 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const account:SupplierBankAccount={id:ctx.id(),currency,accountName,bankName,accountNo,...(swift?{swift}:{}),verification,addedAt:ctx.now,addedBy:ctx.actorName,state:'active'};
    row.bankAccounts=[...list.map(a=>a===current?{...a,state:'replaced' as const,replacedAt:ctx.now}:a),account];row.updatedAt=ctx.now;
    history(root,ctx,'supplier',row.id,`${current?'变更':'登记'}收款账户（${currency}）：${accountName} · ${bankName} · 尾号 ${accountNo.slice(-4)}；核实：${verification}`);result={id:account.id};break;}
+  case 'market.supplier.bank.disable':{const i=command.payload,row=find(m.suppliers,i.supplierId,'供应商'),list=row.bankAccounts||[];
+   const account=list.find(a=>a.id===i.accountId);if(!account)fail('收款账户不存在');if(account!.state!=='active')fail('该收款账户已不在使用中');
+   const reason=str(i.reason,'停用原因');if(reason.length<4)fail('请写明停用原因');
+   row.bankAccounts=list.map(a=>a===account?{...a,state:'disabled' as const,disabledAt:ctx.now,disabledBy:ctx.actorName,disableReason:reason}:a);row.updatedAt=ctx.now;
+   history(root,ctx,'supplier',row.id,`停用收款账户（${account!.currency}）：${account!.accountName} · ${account!.bankName} · 尾号 ${account!.accountNo.slice(-4)}；原因：${reason}`);result={id:account!.id};break;}
   case 'market.supplier.certificate.save':{const i=command.payload,row=find(m.suppliers,i.supplierId,'供应商'),list=row.certificates||[],old=i.id?find(list,i.id,'认证'):undefined;
    const cert:SupplierCertificate={id:old?.id||ctx.id(),name:str(i.name,'认证名称'),number:str(i.number,'证书编号',false),issuer:str(i.issuer,'发证机构',false),validUntil:day(i.validUntil,'有效期至'),fileIds:attachmentIds(root,i.fileIds),updatedAt:ctx.now};
    if(list.some(c=>c.id!==cert.id&&c.name.toLowerCase()===cert.name.toLowerCase()&&c.number===cert.number))fail('该认证已登记');row.certificates=old?list.map(c=>c===old?cert:c):[...list,cert];row.updatedAt=ctx.now;history(root,ctx,'supplier',row.id,(old?'更新认证 ':'登记认证 ')+cert.name+'（有效期至 '+cert.validUntil+'）',cert.fileIds);result={id:row.id,certificateId:cert.id};break;}
@@ -374,6 +398,15 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const other=m.relations.find(x=>x.supplierId===supplier.id);if(other?.customerId)fail('该供应商已关联到其它客户');if(other&&other.hold)fail('该供应商的关系档案已冻结，请先解冻');
    r.supplierId=supplier.id;r.aliases=[...new Set([...r.aliases,...(other?.aliases||[]),...(supplier.name!==r.name?[supplier.name]:[])])];r.fileIds=[...new Set([...r.fileIds,...(other?.fileIds||[])])];r.updatedAt=ctx.now;
    if(other){r.holdHistory=[...(r.holdHistory||[]),...(other.holdHistory||[])].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));r.mergedRelationIds=[...new Set([...(r.mergedRelationIds||[]),other.id,...(other.mergedRelationIds||[])])].filter(id=>id!==r.id);m.relations.splice(m.relations.indexOf(other),1);}history(root,ctx,'relation',r.id,'关联供应商身份 '+supplier.code+' '+supplier.name);result={id:r.id};break;}
+  // mar32：从供应商一侧关联客户身份——并入该客户的关系档案（同一合并规则）；撤销关联把供应商拆回独立关系档案。
+  case 'market.relation.linkCustomer':{const r=find(m.relations,command.payload.id,'关系档案');if(r.customerId)fail('该组织已关联客户身份');if(!r.supplierId)fail('只有供应商关系档案可以关联客户身份');
+   const target=customerRelation(root,m,command.payload.customerId,ctx);if(target.supplierId)fail('该客户已关联其它供应商');
+   result=execute(root,{type:'market.relation.linkSupplier',payload:{id:target.id,supplierId:r.supplierId}},ctx);break;}
+  case 'market.relation.unlinkSupplier':{const r=find(m.relations,command.payload.id,'关系档案');if(!r.customerId||!r.supplierId)fail('该组织没有同时关联客户与供应商身份');if(r.hold)fail('关系档案已冻结，请先解冻');
+   const reason=str(command.payload.reason,'撤销原因');const supplier=find(m.suppliers,r.supplierId,'供应商');
+   r.supplierId='';r.aliases=r.aliases.filter(a=>a!==supplier.name);r.updatedAt=ctx.now;
+   const split:MarketRelation={...base(root,ctx,{}),name:supplier.name,category:'Supplier',customerId:'',supplierId:supplier.id,country:supplier.country,address:supplier.address,aliases:[],status:'active',contacts:supplier.contacts.map(c=>({...c}))};m.relations.push(split);
+   history(root,ctx,'relation',r.id,`撤销关联供应商身份 ${supplier.code} ${supplier.name}：${reason}`);history(root,ctx,'relation',split.id,`由 ${r.name} 拆出为独立供应商关系档案：${reason}`);result={id:split.id};break;}
   case 'market.contact.save':{const i=command.payload;if(!['customer','supplier','relation'].includes(i.kind))fail('联系人所属类型无效');const parent=i.kind==='customer'?customerRelation(root,m,i.parentId,ctx):i.kind==='supplier'?find(m.suppliers,i.parentId,'供应商'):find(m.relations,i.parentId,'关系档案');if(i.kind==='relation'&&(parent as MarketRelation).customerId)customerRelation(root,m,(parent as MarketRelation).customerId,ctx);const email=str(i.email,'邮箱',false);if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))fail('邮箱格式无效');const old=i.id?find(parent.contacts,i.id,'联系人'):undefined;
    const row={id:old?.id||ctx.id(),name:str(i.name,'联系人姓名'),role:str(i.role,'岗位',false),email,phone:str(i.phone,'电话',false),primary:!!i.primary};if(row.primary)parent.contacts.forEach(c=>c.primary=false);if(old)parent.contacts[parent.contacts.indexOf(old)]=row;else parent.contacts.push(row);parent.updatedAt=ctx.now;
    if(i.kind==='supplier'){const related=m.relations.find(r=>r.supplierId===parent.id&&!r.customerId);if(related)related.contacts=parent.contacts.map(c=>({...c}));}else{const relation=parent as MarketRelation;if(relation.supplierId&&!relation.customerId)find(m.suppliers,relation.supplierId,'供应商').contacts=parent.contacts.map(c=>({...c}));if(relation.customerId){const existing=root.contacts.find(c=>c.id===row.id);const saved={id:row.id,customerId:relation.customerId,name:row.name,role:row.role,email:row.email,phone:row.phone,tone:'neutral' as const};if(existing)Object.assign(existing,saved);else root.contacts.push(saved);}}const linked=parent as MarketRelation;history(root,ctx,linked.customerId?'customer':'relation',linked.customerId||linked.supplierId||parent.id,'保存联系人 '+row.name);result={id:parent.id,contactId:row.id};break;}
