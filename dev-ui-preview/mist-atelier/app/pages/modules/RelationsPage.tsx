@@ -88,6 +88,17 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     initialValues: { supplierId: '' }, fields: [{ key: 'supplierId', label: '供应商', type: 'select', required: true, options: linkable.map(s => ({ value: s.id, label: `${s.code} · ${s.name}` })) }],
     submit: v => run({ type: 'market.relation.linkSupplier', payload: { id: r.id, supplierId: String(v.supplierId ?? '') } }),
   });
+  const linkableCustomers = (state?.customers || []).filter(c => !all.some(r => r.customerId === c.id && r.supplierId));
+  const linkCustomerSpec = (r: MarketRelation): ModuleEditorSpec => ({
+    title: `为 ${r.name} 关联客户身份`, submitLabel: '关联', description: '该供应商的关系档案并入所选客户的关系档案，别名与附件保留。',
+    initialValues: { customerId: '' }, fields: [{ key: 'customerId', label: '客户', type: 'select', required: true, options: linkableCustomers.map(c => ({ value: c.id, label: `${c.code} · ${c.name}` })) }],
+    submit: v => run({ type: 'market.relation.linkCustomer', payload: { id: r.id, customerId: String(v.customerId ?? '') } }),
+  });
+  const unlinkSpec = (r: MarketRelation): ModuleEditorSpec => ({
+    title: `撤销 ${r.name} 的供应商关联`, submitLabel: '撤销关联', submitVariant: 'danger', description: '供应商拆回独立的关系档案；客户与供应商的业务记录不变。',
+    initialValues: { reason: '' }, fields: [{ key: 'reason', label: '撤销原因', type: 'textarea', required: true }],
+    submit: v => run({ type: 'market.relation.unlinkSupplier', payload: { id: r.id, reason: String(v.reason ?? '') } }),
+  });
   const contactSpec = (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]): ModuleEditorSpec => ({
     title: c ? `编辑联系人 ${c.name}` : `添加 ${owner} 联系人`, submitLabel: '保存', initialValues: c ? { ...c } : { name: '', role: '', email: '', phone: '', primary: false },
     // mar31：编辑时可勾选删除该联系人（后端 market.contact.delete）。
@@ -122,7 +133,7 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
     : <EmptyState icon={Users} title={uiText("还没有关系档案")} description={uiText("新建客户或供应商时会自动生成；货代、报关行等其它组织可在这里登记。")} action={can ? <Button icon={Plus} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button> : undefined} />;
   const detail = selected && state
     ? <RelationDetail r={selected} state={state} can={can} canAdmin={canAdmin} onHandover={() => { const spec = handoverSpec(selected); if (spec) setDialog(spec); }} locked={locked} business={business.get(selected.id)!} identityPills={identityPills(selected)} linkableCount={linkable.length}
-        onEdit={() => setDialog(profileSpec(selected))} onHold={f => setDialog(holdSpec(selected, f))} onLink={() => setDialog(linkSpec(selected))}
+        onEdit={() => setDialog(profileSpec(selected))} onHold={f => setDialog(holdSpec(selected, f))} onLink={() => setDialog(linkSpec(selected))} onLinkCustomer={() => setDialog(linkCustomerSpec(selected))} onUnlink={() => setDialog(unlinkSpec(selected))} linkableCustomerCount={linkableCustomers.length}
         onContact={(kind, parentId, owner, c) => setDialog(contactSpec(kind, parentId, owner, c))} onScreen={() => setDialog({ title: `登记合规筛查 · ${selected.name}`, submitLabel: '登记', fields: [{ key: 'kind', label: '筛查类型', type: 'select', required: true, options: [{ value: 'sanctions', label: '制裁名单' }, { value: 'export_control', label: '出口管制' }, { value: 'annual', label: '年度合规检查' }, { value: 'other', label: '其他' }] }, { key: 'result', label: '结论', type: 'select', required: true, options: [{ value: 'clear', label: '未命中' }, { value: 'review', label: '待人工复核' }, { value: 'hit', label: '命中' }] }, { key: 'screenedOn', label: '筛查日期', type: 'date', required: true }, { key: 'nextReview', label: '下次复查日', type: 'date', required: true }, { key: 'basis', label: '依据（名单来源与查询结果）', type: 'textarea', required: true }, { key: 'files', label: '查询截图 / 报告', type: 'files' }], initialValues: { kind: 'sanctions', result: 'clear', screenedOn: '', nextReview: '', basis: '', files: '' }, submit: v => run({ type: 'market.relation.screening', payload: { id: selected.id, kind: String(v.kind) as 'sanctions', result: String(v.result) as 'clear', screenedOn: String(v.screenedOn || ''), nextReview: String(v.nextReview || ''), basis: String(v.basis || ''), fileIds: moduleFileIds(v.files) } }) })} onArchive={() => setDialog({ title: `${selected.status === 'active' ? '归档' : '恢复'} ${selected.name}`, submitLabel: selected.status === 'active' ? '归档' : '恢复', submitVariant: selected.status === 'active' ? 'danger' : 'primary', fields: [], initialValues: {}, submit: () => run({ type: 'market.relation.status', payload: { id: selected.id, status: selected.status === 'active' ? 'archived' : 'active' } }) })}
         onOpen={(view, id, extra) => go(view, id, extra)} attachments={attachments(selected, !can)} history={history(selected.id)} />
     : <EmptyState icon={Building2} title={uiText("组织档案")} description={uiText("从左侧列表选择一个组织，查看身份、联系人、信用与在手业务。")} compact />;
@@ -176,8 +187,8 @@ function ContactRows({ contacts, edit }: { contacts: MarketRelation['contacts'];
   </div>)}</div> : <span className="mist-muted">{uiText("未登记联系人。")}</span>;
 }
 
-function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business, identityPills, linkableCount, onEdit, onHold, onLink, onContact, onScreen, onArchive, onOpen, attachments, history }: {
-  r: MarketRelation; state: MistState; can: boolean; canAdmin: boolean; onHandover: () => void; locked: boolean; business: ReturnType<typeof relationBusiness>; identityPills: React.ReactNode; linkableCount: number;
+function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business, identityPills, linkableCount, linkableCustomerCount, onEdit, onHold, onLink, onLinkCustomer, onUnlink, onContact, onScreen, onArchive, onOpen, attachments, history }: {
+  r: MarketRelation; state: MistState; can: boolean; canAdmin: boolean; onHandover: () => void; locked: boolean; business: ReturnType<typeof relationBusiness>; identityPills: React.ReactNode; linkableCount: number; linkableCustomerCount: number; onLinkCustomer: () => void; onUnlink: () => void;
   onEdit: () => void; onHold: (frozen: boolean) => void; onLink: () => void; onContact: (kind: 'relation' | 'supplier', parentId: string, owner: string, c?: MarketRelation['contacts'][number]) => void;
   onScreen: () => void; onArchive: () => void; onOpen: (view: string, id?: string, extra?: Record<string, string | undefined>) => void; attachments: React.ReactNode; history: React.ReactNode;
 }) {
@@ -193,6 +204,8 @@ function RelationDetail({ r, state, can, canAdmin, onHandover, locked, business,
       { label: '冻结往来', icon: Lock, onClick: () => onHold(true), hidden: !!r.hold||!canAdmin },
       { label: '解冻', icon: Unlock, onClick: () => onHold(false), primary: true, hidden: !r.hold||!canAdmin },
       { label: '关联供应商身份', icon: Link2, onClick: onLink, reason: writeReason || (!linkableCount ? '没有可关联的供应商' : false), hidden: !can || !customer || !!supplier },
+      { label: '关联客户身份', icon: Link2, onClick: onLinkCustomer, reason: writeReason || (!linkableCustomerCount ? '没有可关联的客户' : r.hold ? '关系档案已冻结，请先解冻' : false), hidden: !can || !!customer || !supplier },
+      { label: '撤销供应商关联', onClick: onUnlink, reason: writeReason || (r.hold ? '关系档案已冻结，请先解冻' : false), hidden: !can || !customer || !supplier },
       { label: '打开客户业务', icon: Users, onClick: () => onOpen('crm', r.customerId, { customerId: r.customerId }), hidden: !customer },
       { label: '打开供应商', icon: Building2, onClick: () => onOpen('suppliers', r.supplierId), hidden: !supplier },
       { label: '在手业务交接', icon: Undo2, onClick: onHandover, hidden: !canAdmin || !customer },

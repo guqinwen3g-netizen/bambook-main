@@ -307,7 +307,9 @@ export const MIST_LOGISTICS_DUTY = 'logistics:handle';
 export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: string): string[] { const owner = root.orders.find(order => order.id === orderId)?.ownerId; return owner ? [owner] : []; }
 export type MistNotification = { id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
 /** ownerId：日程归属人（mar60，只看我的）；旧日程没有时视为公司共享。 */
-export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget; ownerId?: string; owner?: string };
+/** mar60：参与人（本公司成员）、提前提醒（分钟）、重复（每周 / 每月，至结束日；读取时展开）。 */
+export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget; ownerId?: string; owner?: string;
+  participants?: Array<{ id: string; name: string }>; remindMinutes?: number; repeat?: { every: 'week' | 'month'; until: string } };
 export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;registeredAddress?:string;registeredEnglishAddress?:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAddress?:string;bankAccount:string;swift:string;defaultCurrency:string};
 export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示公司：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
 export type MistState = {
@@ -434,7 +436,7 @@ export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand
   | { type: 'notification.read'; payload: { id: string } }
   | { type: 'notification.readAll'; payload: Record<string, never> }
   | { type: 'task.complete'; payload: { id: string; done: boolean } }
-  | { type: 'calendar.save'; payload: { id?: string; title: string; date: string; time: string; note: string; target?: MistTarget; personal?: boolean } }
+  | { type: 'calendar.save'; payload: { id?: string; title: string; date: string; time: string; note: string; target?: MistTarget; personal?: boolean; participantIds?: string[]; remindMinutes?: number; repeat?: { every: 'week' | 'month'; until: string } | null } }
   | { type: 'calendar.delete'; payload: { id: string } }
   | { type: 'task.save'; payload: { id?: string; title: string; due: string; assigneeId?: string; note?: string; target?: MistTarget } }
   | { type: 'files.add'; payload: { file: MistFile } };
@@ -1700,7 +1702,13 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
       const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?context.actorId:undefined;
-      state.calendar=state.calendar.filter(e=>e.id!==id);state.calendar.push({id,title:text(p.title,'日程'),date:date(p.date),time:p.time,note:text(p.note,'说明',false),...(p.target?{target:p.target}:{}),...(mine?{ownerId:mine,owner:mine===old?.ownerId?old.owner:context.actorName}:{})});result={id};break;
+      if(old?.ownerId&&old.ownerId!==context.actorId&&!old.participants?.some(x=>x.id===context.actorId))throw new MistCommandError('FORBIDDEN','只能修改本人或参与的个人日程',403);
+      const participants=p.participantIds===undefined?old?.participants:[...new Set(strings(p.participantIds,'参与人'))].filter(x=>x!==(mine||context.actorId)).map(x=>resolveMember(context,x,'参与人'));
+      if((participants?.length||0)>50)throw new MistCommandError('VALIDATION','参与人最多 50 位');
+      const remind=p.remindMinutes===undefined?old?.remindMinutes:p.remindMinutes;if(remind!==undefined&&remind!==0&&(!Number.isInteger(remind)||remind<0||remind>10080))throw new MistCommandError('VALIDATION','提醒时间无效');
+      const repeat=p.repeat===undefined?old?.repeat:p.repeat||undefined;const day=date(p.date);
+      if(repeat){if(!['week','month'].includes(repeat.every))throw new MistCommandError('VALIDATION','重复方式无效');const until=date(repeat.until);if(until<day)throw new MistCommandError('VALIDATION','重复结束日不能早于开始日期');if(Date.parse(until)-Date.parse(day)>366*86400000)throw new MistCommandError('VALIDATION','重复最长一年');}
+      state.calendar=state.calendar.filter(e=>e.id!==id);state.calendar.push({id,title:text(p.title,'日程'),date:day,time:p.time,note:text(p.note,'说明',false),...(p.target?{target:p.target}:{}),...(mine?{ownerId:mine,owner:mine===old?.ownerId?old.owner:context.actorName}:{}),...(participants?.length?{participants}:{}),...(remind?{remindMinutes:remind}:{}),...(repeat?{repeat:{every:repeat.every,until:repeat.until}}:{})});result={id};break;
     }
     case 'calendar.delete': {
       // mar59：删除日程（个人日程只能本人删）。派生的季节 / 展会日程不在 state.calendar 中，不能删。

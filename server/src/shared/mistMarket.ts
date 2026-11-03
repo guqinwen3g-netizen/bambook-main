@@ -77,6 +77,8 @@ export type MarketCommand =
  | {type:'market.relation.status';payload:{id:string;status:MarketRelation['status']}}
  | {type:'market.relation.hold';payload:{id:string;frozen:boolean;reason:string}}
  | {type:'market.relation.linkSupplier';payload:{id:string;supplierId:string}}
+ | {type:'market.relation.linkCustomer';payload:{id:string;customerId:string}}
+ | {type:'market.relation.unlinkSupplier';payload:{id:string;reason:string}}
  | {type:'market.contact.save';payload:{kind:'customer'|'supplier'|'relation';parentId:string;id?:string;name:string;role:string;email:string;phone:string;primary:boolean}}
  | {type:'market.season.save';payload:{id?:string;input:Input<MarketSeason>&{status:MarketSeason['status']}}}
  | {type:'market.season.void';payload:{kind:'season'|'trend'|'show';id:string;reason:string}}
@@ -380,6 +382,15 @@ function execute(root:MistState,command:MarketCommand,ctx:MistContext):MistComma
    const other=m.relations.find(x=>x.supplierId===supplier.id);if(other?.customerId)fail('该供应商已关联到其它客户');if(other&&other.hold)fail('该供应商的关系档案已冻结，请先解冻');
    r.supplierId=supplier.id;r.aliases=[...new Set([...r.aliases,...(other?.aliases||[]),...(supplier.name!==r.name?[supplier.name]:[])])];r.fileIds=[...new Set([...r.fileIds,...(other?.fileIds||[])])];r.updatedAt=ctx.now;
    if(other){r.holdHistory=[...(r.holdHistory||[]),...(other.holdHistory||[])].sort((a,b)=>Date.parse(a.at)-Date.parse(b.at));r.mergedRelationIds=[...new Set([...(r.mergedRelationIds||[]),other.id,...(other.mergedRelationIds||[])])].filter(id=>id!==r.id);m.relations.splice(m.relations.indexOf(other),1);}history(root,ctx,'relation',r.id,'关联供应商身份 '+supplier.code+' '+supplier.name);result={id:r.id};break;}
+  // mar32：从供应商一侧关联客户身份——并入该客户的关系档案（同一合并规则）；撤销关联把供应商拆回独立关系档案。
+  case 'market.relation.linkCustomer':{const r=find(m.relations,command.payload.id,'关系档案');if(r.customerId)fail('该组织已关联客户身份');if(!r.supplierId)fail('只有供应商关系档案可以关联客户身份');
+   const target=customerRelation(root,m,command.payload.customerId,ctx);if(target.supplierId)fail('该客户已关联其它供应商');
+   result=execute(root,{type:'market.relation.linkSupplier',payload:{id:target.id,supplierId:r.supplierId}},ctx);break;}
+  case 'market.relation.unlinkSupplier':{const r=find(m.relations,command.payload.id,'关系档案');if(!r.customerId||!r.supplierId)fail('该组织没有同时关联客户与供应商身份');if(r.hold)fail('关系档案已冻结，请先解冻');
+   const reason=str(command.payload.reason,'撤销原因');const supplier=find(m.suppliers,r.supplierId,'供应商');
+   r.supplierId='';r.aliases=r.aliases.filter(a=>a!==supplier.name);r.updatedAt=ctx.now;
+   const split:MarketRelation={...base(root,ctx,{}),name:supplier.name,category:'Supplier',customerId:'',supplierId:supplier.id,country:supplier.country,address:supplier.address,aliases:[],status:'active',contacts:supplier.contacts.map(c=>({...c}))};m.relations.push(split);
+   history(root,ctx,'relation',r.id,`撤销关联供应商身份 ${supplier.code} ${supplier.name}：${reason}`);history(root,ctx,'relation',split.id,`由 ${r.name} 拆出为独立供应商关系档案：${reason}`);result={id:split.id};break;}
   case 'market.contact.save':{const i=command.payload;if(!['customer','supplier','relation'].includes(i.kind))fail('联系人所属类型无效');const parent=i.kind==='customer'?customerRelation(root,m,i.parentId,ctx):i.kind==='supplier'?find(m.suppliers,i.parentId,'供应商'):find(m.relations,i.parentId,'关系档案');if(i.kind==='relation'&&(parent as MarketRelation).customerId)customerRelation(root,m,(parent as MarketRelation).customerId,ctx);const email=str(i.email,'邮箱',false);if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))fail('邮箱格式无效');const old=i.id?find(parent.contacts,i.id,'联系人'):undefined;
    const row={id:old?.id||ctx.id(),name:str(i.name,'联系人姓名'),role:str(i.role,'岗位',false),email,phone:str(i.phone,'电话',false),primary:!!i.primary};if(row.primary)parent.contacts.forEach(c=>c.primary=false);if(old)parent.contacts[parent.contacts.indexOf(old)]=row;else parent.contacts.push(row);parent.updatedAt=ctx.now;
    if(i.kind==='supplier'){const related=m.relations.find(r=>r.supplierId===parent.id&&!r.customerId);if(related)related.contacts=parent.contacts.map(c=>({...c}));}else{const relation=parent as MarketRelation;if(relation.supplierId&&!relation.customerId)find(m.suppliers,relation.supplierId,'供应商').contacts=parent.contacts.map(c=>({...c}));if(relation.customerId){const existing=root.contacts.find(c=>c.id===row.id);const saved={id:row.id,customerId:relation.customerId,name:row.name,role:row.role,email:row.email,phone:row.phone,tone:'neutral' as const};if(existing)Object.assign(existing,saved);else root.contacts.push(saved);}}const linked=parent as MarketRelation;history(root,ctx,linked.customerId?'customer':'relation',linked.customerId||linked.supplierId||parent.id,'保存联系人 '+row.name);result={id:parent.id,contactId:row.id};break;}

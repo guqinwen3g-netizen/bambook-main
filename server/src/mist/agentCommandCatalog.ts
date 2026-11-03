@@ -30,7 +30,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "calendar.save",
-  "payload": "{ id?: string; title: string; date: string; time: string; note: string; target?: MistTarget; personal?: boolean }",
+  "payload": "{ id?: string; title: string; date: string; time: string; note: string; target?: MistTarget; personal?: boolean; participantIds?: string[]; remindMinutes?: number; repeat?: { every: 'week' | 'month'; until: string } | null }",
   "types": {
    "MistTarget": "{ view: string; id?: string; section?: string; versionId?: string; customerId?: string; orderLineId?: string; productionId?: string }"
   },
@@ -1441,6 +1441,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistMarket.ts"
  },
  {
+  "type": "market.relation.linkCustomer",
+  "payload": "{id:string;customerId:string}",
+  "source": "server/src/shared/mistMarket.ts"
+ },
+ {
   "type": "market.relation.linkSupplier",
   "payload": "{id:string;supplierId:string}",
   "source": "server/src/shared/mistMarket.ts"
@@ -1474,6 +1479,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
    "RelationScreening": "{ id:string; kind:'sanctions'|'export_control'|'annual'|'other'; result:'clear'|'hit'|'review'; basis:string; screenedOn:string; nextReview:string; fileIds:string[]; at:string; actor:string }",
    "RelationHoldChange": "{action:'freeze'|'release';reason:string;at:string;actor:string}"
   },
+  "source": "server/src/shared/mistMarket.ts"
+ },
+ {
+  "type": "market.relation.unlinkSupplier",
+  "payload": "{id:string;reason:string}",
   "source": "server/src/shared/mistMarket.ts"
  },
  {
