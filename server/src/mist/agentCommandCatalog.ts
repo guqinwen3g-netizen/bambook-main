@@ -1905,7 +1905,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "payable.settlement.submit",
   "payload": "{ purchaseId: string; receiptIds: string[]; final?: boolean; disputes?: SettlementDispute[]; note?: string; fileIds?: string[] }",
   "types": {
-   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string; returnId?: string }"
+   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string; returnId?: string; overLoss?: boolean }"
   },
   "source": "server/src/shared/mistPayables.ts"
  },

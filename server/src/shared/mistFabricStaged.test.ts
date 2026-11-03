@@ -64,6 +64,16 @@ describe('staged fabric input, output and loss',()=>{
   const g=fixture({lossPercent:5});count(g,g.deliver(),3800);g.release();
   g.run({type:'fulfillment.procurement.receive',payload:{id:g.dyeing,quantity:3550,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'码单',fileIds:[]}});
   expect(fabricStageBalance(g.state,g.dyeing)).toMatchObject({lossPercent:6.58,overAllowance:true});
+  // P1-1 损耗成本：损耗 250 米 × 坯布 8.6 = 2150；超出约定 1.58% × 3800 = 60.04 米 × 8.6 = 516.34。
+  expect(fabricStageBalance(g.state,g.dyeing)!.lossCost).toEqual({currency:'CNY',amount:2150,overAmount:516.34,overQuantity:60.04});
+  expect(fabricStageBalance(f.state,f.dyeing)!.lossCost).toMatchObject({amount:1634,overAmount:0});
+ });
+ it('carries the over-allowance loss value into the final dyeing settlement as a deduction line',()=>{
+  const g=fixture({lossPercent:5});count(g,g.deliver(),3800);g.release();
+  const receiptId=g.run({type:'fulfillment.procurement.receive',payload:{id:g.dyeing,quantity:3550,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'码单',fileIds:[]}}).id!;
+  g.run({type:'payable.settlement.submit',payload:{purchaseId:g.dyeing,receiptIds:[receiptId],final:true}});
+  const st=g.state.payables!.settlements!.find(x=>x.purchaseId===g.dyeing)!;
+  expect(st.disputes).toEqual([expect.objectContaining({overLoss:true,amount:516.34,description:expect.stringContaining('超耗扣款')})]);
  });
  it('does not report a negative loss when more fabric is returned than greige was counted',()=>{
   const f=fixture();count(f,f.deliver(),3000);f.release();

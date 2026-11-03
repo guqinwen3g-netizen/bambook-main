@@ -284,6 +284,7 @@ function FabricStageBalancePanel({ balance: b }: { balance: FabricStageBalance }
       { label: '实际损耗', value: loss },
       { label: '约定损耗', value: b.agreedLossPercent === undefined ? '未约定' : `${b.agreedLossPercent}%` },
       ...(b.plannedInput !== null ? [{ label: '按约定应投来料', value: qty(b.plannedInput) }] : []),
+      ...(b.lossCost ? [{ label: '损耗货值', value: `${b.lossCost.amount.toLocaleString()} ${b.lossCost.currency}` }, ...(b.lossCost.overAmount > 0 ? [{ label: '超耗扣款建议', value: `${b.lossCost.overAmount.toLocaleString()} ${b.lossCost.currency}（${b.lossCost.overQuantity} ${b.unit}）` }] : [])] : []),
     ]} />
     {b.inputs.length > 0 && <DataTable ariaLabel={uiText('投入来料')} rows={b.inputs} rowKey={row => row.purchaseId} columns={[
       { key: 'code', header: '来料单', render: row => <Mono>{row.code}</Mono> },
