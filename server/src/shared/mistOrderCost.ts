@@ -20,7 +20,7 @@ import { orderRebate } from './mistExportRebate';
 import { createPayablesState, nextPayableCode, type SupplierBill } from './mistPayables';
 import { internalFabricCostShare,type InternalFabricCostBasis } from './mistInternalFabric';
 
-export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', other: '其他' } as const;
+export const EXPENSE_CATEGORIES = { freight: '海运/空运费', trucking: '拖车/内陆运输', customs: '报关/港杂', inspection: '商检/验货', courier: '快递/寄样', insurance: '保险', commission: '佣金', bank: '银行手续费', claim: '客户索赔赔付', sample: '样品/打样', cancelLoss: '订单取消损失', other: '其他' } as const;
 export type ExpenseCategory = keyof typeof EXPENSE_CATEGORIES;
 export const ALLOCATION_BASES = { volume: '按体积', weight: '按毛重', value: '按货值', quantity: '按件数', equal: '平均', manual: '手工指定' } as const;
 export type AllocationBasis = keyof typeof ALLOCATION_BASES;

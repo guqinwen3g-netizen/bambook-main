@@ -166,3 +166,13 @@ it('keeps an explicit final completion at 100 percent while allowing subsequent 
  expect(f.state.productions[0].pct).toBe(100);expect(f.state.fulfillment.productionFacts[0].completion).toEqual(before);
  expect(()=>f.run({type:'production.update',payload:{id:productionId,pct:100,note:'等待提货'}})).not.toThrow();
 });
+
+it('asks the order owner to change the order due date when production is pushed past it, and clears once back in time',()=>{
+ const f=fixture(),{productionId}=f.released(),job=f.state.productions.find(p=>p.id===productionId)!,order=f.state.orders.find(o=>o.id===job.orderId)!;
+ const late=new Date(Date.parse(order.due+'T00:00:00Z')+5*86400000).toISOString().slice(0,10);
+ f.run({type:'production.update',payload:{id:productionId,pct:job.pct,due:late,risk:'面料晚到'}});
+ const task=()=>f.state.tasks.find(t=>t.kind==='production-late:'+productionId)!;
+ expect(task()).toMatchObject({done:false,target:{view:'orders/detail',id:order.id}});expect(task().title).toContain(late);
+ f.run({type:'production.update',payload:{id:productionId,pct:job.pct,due:order.due}});
+ expect(task().done).toBe(true);
+});

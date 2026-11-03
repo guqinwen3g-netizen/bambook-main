@@ -46,6 +46,14 @@ describe('BB-ORD-7 void drafts and cancel approved orders',()=>{
   expect(()=>savePurchase(f)).toThrow('已取消，不能再进行采购');
   expect(()=>f.run({type:'order.governance.saveDraft',payload:{orderId:'order',input:f.contract}})).toThrow('订单已取消');
  });
+ it('voids purchase drafts and closes unstarted production on approval, leaving started work as tasks',()=>{
+  const f=approved();f.state.fulfillment.purchases.push({id:'po-draft',code:'PO-D',orderId:'order',lineId:'line',state:'draft',supplierId:'s',supplier:'S',quantity:10,unit:'条',price:1,currency:'USD'} as never);
+  f.state.productions.push({id:'job-a',code:'PR-A',orderId:'order',lineId:'line',order:'',name:'',factory:'F',qty:5,due:'2026-11-01',pct:0,img:'coat',col:'cut'} as never,{id:'job-b',code:'PR-B',orderId:'order',lineId:'line',order:'',name:'',factory:'F',qty:5,due:'2026-11-01',pct:30,img:'coat',col:'sew'} as never);
+  requestCancel(f);f.run({type:'order.governance.decide',payload:{id:cancelId(f),decision:'approved',note:'客户书面撤单'}},leader(f));
+  expect(f.state.fulfillment.purchases.filter(p=>p.orderId==='order').map(p=>p.state)).toEqual(['cancelled']);
+  expect(f.state.productions.find(p=>p.id==='job-a')!.closed).toBeTruthy();expect(f.state.productions.find(p=>p.id==='job-b')!.closed).toBeFalsy();
+  expect(f.state.tasks.filter(t=>t.kind?.startsWith('order-cancelled:order:')).map(t=>t.kind)).toEqual(['order-cancelled:order:production:job-b']);
+ });
  it('restores the order when cancellation is rejected',()=>{
   const f=approved();requestCancel(f);
   f.run({type:'order.governance.decide',payload:{id:cancelId(f),decision:'rejected',note:'继续履约'}},leader(f));

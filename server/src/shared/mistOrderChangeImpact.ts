@@ -3,7 +3,7 @@
  * 现有完工/出运事实只记录到"条目 / 尺码"，没有按颜色记录，所以颜色维度无法单独设下限（如实说明，不臆造）。
  * 低于生产分配总量只提示"需同步调整生产分配"，不阻止；不自动改采购或生产数据。 */
 import{stableJson}from'./stableJson';
-import {MistCommandError,mistOrderOwnerIds,type MistContext,type MistOrder,type MistState} from './mistWorkspace';
+import {MistCommandError,MIST_LOGISTICS_DUTY,mistOrderOwnerIds,type MistContext,type MistOrder,type MistState,type MistTask} from './mistWorkspace';
 import {breakdownSizeTotals,type OrderLineBreakdown} from './mistOrderBreakdown';
 
 type ChangeLine={id:string;name:string;style:string;qty:number;unit:string;breakdown?:OrderLineBreakdown};
@@ -60,12 +60,28 @@ export function assertOrderChangeAllowed(root:MistState,order:Pick<MistOrder,'id
 }
 
 /** 变更审批通过后：对受影响的采购单、生产分支各生成一条核对待办（不改采购或生产数据）。 */
-export function createOrderChangeTasks(root:MistState,context:MistContext,order:Pick<MistOrder,'id'|'code'|'due'>,before:ChangeLine[],after:ChangeLine[]){
+type ChangeLineFull=ChangeLine&{price?:number};
+/**
+ * 变更批准后给下游发核对待办（ord31）：数量 / 分码变化通知采购与生产；单价变化通知发票（财务）；
+ * 新增或删除条目通知订单负责人安排采购与出运；交期变化（beforeDue → order.due）通知该单全部未关闭的采购、生产与未离港出运（ord32，交期不自动改写）。
+ * 同一对象同类未完成待办只保留最新一条。
+ */
+export function createOrderChangeTasks(root:MistState,context:MistContext,order:Pick<MistOrder,'id'|'code'|'due'>,before:ChangeLineFull[],after:ChangeLineFull[],beforeDue?:string){
+ let created=0;const owners=mistOrderOwnerIds(root,order.id);
+ const put=(kind:string,title:string,target:MistTask['target'],extra:Partial<MistTask>={})=>{root.tasks=root.tasks.filter(t=>!(t.kind===kind&&!t.done));root.tasks.unshift({id:context.id(),title,due:order.due,done:false,kind,target,assigneeIds:owners,...extra});created++;};
  const changed=after.filter(line=>{const prior=before.find(l=>l.id===line.id);return prior&&(prior.qty!==line.qty||stableJson(prior.breakdown||null)!==stableJson(line.breakdown||null));});
- let created=0;
  for(const line of changed){const facts=orderLineFacts(root,line.id),prior=before.find(l=>l.id===line.id)!,what=`${prior.qty} → ${line.qty} ${line.unit}`;
-  for(const p of facts.purchases){const kind=`order-change-review:${order.id}:purchase:${p.id}`;root.tasks=root.tasks.filter(t=>!(t.kind===kind&&!t.done));root.tasks.unshift({id:context.id(),title:`订单 ${order.code} 数量已变更，请核对采购 ${p.code}（${line.style} ${what}）`,due:order.due,done:false,kind,target:{view:'procurement',id:p.id,orderLineId:line.id},assigneeIds:mistOrderOwnerIds(root,order.id)});created++;}
-  for(const job of facts.productions){const kind=`order-change-review:${order.id}:production:${job.id}`;root.tasks=root.tasks.filter(t=>!(t.kind===kind&&!t.done));root.tasks.unshift({id:context.id(),title:`订单 ${order.code} 数量已变更，请核对生产 ${job.code}（${line.style} ${what}）`,due:order.due,done:false,kind,target:{view:'production-board',productionId:job.id,orderLineId:line.id},assigneeIds:mistOrderOwnerIds(root,order.id)});created++;}
+  for(const p of facts.purchases)put(`order-change-review:${order.id}:purchase:${p.id}`,`订单 ${order.code} 数量已变更，请核对采购 ${p.code}（${line.style} ${what}）`,{view:'procurement',id:p.id,orderLineId:line.id});
+  for(const job of facts.productions)put(`order-change-review:${order.id}:production:${job.id}`,`订单 ${order.code} 数量已变更，请核对生产 ${job.code}（${line.style} ${what}）`,{view:'production-board',productionId:job.id,orderLineId:line.id});
+ }
+ const repriced=after.filter(line=>{const prior=before.find(l=>l.id===line.id);return prior&&prior.price!==undefined&&line.price!==undefined&&prior.price!==line.price;});
+ if(repriced.length&&root.invoices.some(i=>i.orderId===order.id&&!i.voidedAt))put(`order-change-review:${order.id}:invoice`,`订单 ${order.code} 单价已变更，请核对已开发票（${repriced.map(l=>`${l.style} ${before.find(b=>b.id===l.id)!.price} → ${l.price}`).join('；')}）`,{view:'invoices',section:'order:'+order.id},{assigneeIds:[],permission:'invoices:write'});
+ const added=after.filter(l=>!before.some(b=>b.id===l.id)),removed=before.filter(l=>!after.some(a=>a.id===l.id));
+ if(added.length||removed.length)put(`order-change-review:${order.id}:lines`,`订单 ${order.code} 条目已变更（${[added.length?`新增 ${added.map(l=>l.style).join('、')}`:'',removed.length?`删除 ${removed.map(l=>l.style).join('、')}`:''].filter(Boolean).join('；')}），请安排采购与出运`,{view:'orders/detail',id:order.id});
+ if(beforeDue&&beforeDue!==order.due){const lineIds=new Set(root.orderLines.filter(l=>l.orderId===order.id).map(l=>l.id));
+  for(const p of (root.fulfillment?.purchases||[]).filter(x=>x.orderId===order.id&&x.state!=='cancelled'))put(`order-change-due:${order.id}:purchase:${p.id}`,`订单 ${order.code} 交期 ${beforeDue} → ${order.due}，请核对采购 ${p.code} 交期（当前 ${p.due}）`,{view:'procurement',id:p.id,orderLineId:p.lineId});
+  for(const job of root.productions.filter(x=>x.orderId===order.id&&!x.closed))put(`order-change-due:${order.id}:production:${job.id}`,`订单 ${order.code} 交期 ${beforeDue} → ${order.due}，请核对生产 ${job.code} 交期（当前 ${job.due}）`,{view:'production-board',productionId:job.id,orderLineId:job.lineId});
+  for(const s of (root.fulfillment?.shipments||[]).filter(x=>x.state!=='cancelled'&&x.state!=='departed'&&x.lines.some(l=>lineIds.has(l.lineId))))put(`order-change-due:${order.id}:shipment:${s.id}`,`订单 ${order.code} 交期 ${beforeDue} → ${order.due}，请核对出运 ${s.code}`,{view:'shipments',id:s.id},{assigneeIds:[],permission:MIST_LOGISTICS_DUTY});
  }
  return created;
 }

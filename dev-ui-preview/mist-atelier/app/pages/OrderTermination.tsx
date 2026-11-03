@@ -36,6 +36,15 @@ export function orderFulfilled(state: MistState, order: Pick<MistOrder, 'id'>) {
   return lines.length > 0 && lines.every(line => isLineClosed(line) || departed.reduce((sum, s) => sum + s.lines.filter(item => item.lineId === line.id).reduce((n, item) => n + Math.round(item.quantity * 10000), 0), 0) >= Math.round(line.qty * 10000));
 }
 
+/** Lines not closed and not fully departed, with the quantity still to ship. */
+function openLines(state: MistState, order: Pick<MistOrder, 'id'>) {
+  const departed = (state.fulfillment?.shipments || []).filter(s => s.state === 'departed');
+  return state.orderLines.filter(line => line.orderId === order.id && !isLineClosed(line)).map(line => {
+    const shipped = departed.reduce((sum, s) => sum + s.lines.filter(item => item.lineId === line.id).reduce((n, item) => n + Math.round(item.quantity * 10000), 0), 0);
+    return { line, left: Math.max(0, Math.round(line.qty * 10000) - shipped) / 10000 };
+  }).filter(row => row.left > 0);
+}
+
 export function OrderTerminationButton({ state, order, busy, run, go }: { state: MistState; order: Governed; busy: boolean; run: (command: MistCommand) => Promise<unknown>; go: Go }) {
   const g = order.governance, [open, setOpen] = React.useState(false), [reason, setReason] = React.useState(''), [failure, setFailure] = React.useState(''), [working, setWorking] = React.useState(false);
   if (order.replacementSource || !g || g.status === 'void' || g.status === 'cancelled' || g.cancellation?.status === 'pending') return null;
@@ -59,7 +68,9 @@ export function OrderTerminationButton({ state, order, busy, run, go }: { state:
       {mode === 'void'
         ? <Banner tone="warn" title={uiText("作废后订单只读")}>{uiText("记录保留，停止采购与履约。")}</Banner>
         : blockers.length
-          ? <Banner tone="bad" title={uiText(ORDER_CANCEL_ALTERNATIVE)}>{ui`${blockers.join('；')}。已出运或已开票的订单不能整单取消，请在条目详情中按实际数量结案。`}</Banner>
+          ? <><Banner tone="bad" title={uiText(ORDER_CANCEL_ALTERNATIVE)}>{ui`${blockers.join('；')}。`}</Banner>
+            {/* ord34：列出尚未出足的条目，直接到条目详情结案。 */}
+            <div className="mist-col">{openLines(state, order).map(row => <div key={row.line.id} className="mist-row mist-module-actions"><span>{row.line.name} · {row.line.style}</span><span className="mist-note">{ui`未出运 ${row.left} ${row.line.unit}`}</span><span className="mist-spacer" /><Button size="sm" onClick={() => { setOpen(false); go('orders/detail', order.id, { orderLineId: row.line.id }); }}>{uiText('去结案')}</Button></div>)}</div></>
           : <Banner tone="warn" title={uiText("取消须经订单审批人批准")}>{uiText("审批期间暂停新的采购、生产与出运。")}</Banner>}
       {changePending && <Banner tone="warn" title={uiText("有待审批的变更")}>{uiText("请先处理变更审批，再申请取消。")}</Banner>}
       {mode === 'cancel' && <KeyValue items={[{ label: '订单', value: `${order.code} · ${order.customer}` }, { label: '交期', value: order.due }]} />}

@@ -28,6 +28,11 @@ describe('approved quotation business continuation',()=>{
  it('hands an approved draft back to its requester for issue and removes it once sent',()=>{
   const state=fixture(),before=structuredClone(state);expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-issue:quote-ready',module:'quotations',source:'task',sourceLabel:'工作事项',when:'待发送',meta:'客户 · 同意报价',target:{view:'quotations',id:'quote-ready',detail:'full'}})]);expect(state).toEqual(before);state.market.quotations[0].status='Sent';expect(mistWorkQueue(state,options)).toEqual([]);
  });
+ it('reminds the requester a week before a sent quotation expires and after it lapses',()=>{
+  const state=fixture(),quote=state.market.quotations[0];quote.status='Sent';quote.validUntil='2026-11-10';expect(mistWorkQueue(state,options)).toEqual([]);
+  quote.validUntil='2026-11-05';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-expiry:quote-ready',when:'即将到期',urgent:false})]);
+  quote.validUntil='2026-10-28';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({when:'已过有效期',urgent:true})]);
+ });
  it('waits for customer acceptance, then retains only genuinely pending conversion lines',()=>{
   const state=fixture(),quote=state.market.quotations[0];quote.status='Accepted';expect(mistWorkQueue(state,options)).toEqual([expect.objectContaining({id:'quote-convert:quote-ready',when:'待转订单',meta:'客户 · 2 个待转条目'})]);
   quote.lines[0].conversion={orderId:'order',orderCode:'SO-1',at:'2026-10-29T00:00:00Z',by:'业务员',byId:'sales'};quote.convertedOrderId='order';expect(mistWorkQueue(state,options)[0].meta).toBe('客户 · 1 个待转条目');
