@@ -64,6 +64,7 @@ export function SeasonTimeline({ seasons, day, selected, onPick }: { seasons: Ma
 
 export type SeasonWorkbenchProps = { attachments: (kind: 'season' | 'trend' | 'show' | 'showLead', row: { id: string; fileIds: string[] }, locked: boolean) => React.ReactNode; history: (id: string) => React.ReactNode };
 
+const MILESTONE_ROWS = 6;
 export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) {
   const { state, run, error, refresh, loading, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav();
   const legacyShow = route.section?.startsWith('show-leads:') ? route.section.slice('show-leads:'.length) : '';
@@ -79,26 +80,33 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   const seasonOptions = [{ value: '', label: '未关联季节' }, ...seasons.map(s => ({ value: s.id, label: `${s.code} · ${s.name}` }))];
   const switchTab = (t: Tab) => { setPicked(null); setDrawer(false); go('seasons', undefined, { section: t }); };
   const pick = (id: string) => { setPicked(id); setDrawer(true); go('seasons', id, { section: tab }, { keepScroll: true }); };
-  const seasonSpec = (s?: MarketSeason): ModuleEditorSpec => ({
+  // mar47：里程碑按行录入名称与日期，空行忽略。
+  const seasonSpec = (s?: MarketSeason): ModuleEditorSpec => {
+    const rows = Math.min(12, Math.max(MILESTONE_ROWS, (s?.milestones.length || 0) + 2)), slots = Array.from({ length: rows }, (_, i) => i);
+    return {
     title: s ? `编辑 ${s.code}` : '新建季节', submitLabel: '保存',
-    initialValues: s ? { code: s.code, name: s.name, startDate: s.startDate, endDate: s.endDate, status: s.status, milestones: s.milestones.map(x => `${x.label} | ${x.date}`).join('\n'), note: s.note } : { code: '', name: '', startDate: '', endDate: '', status: 'Planning', milestones: '', note: '' },
-    fields: [{ key: 'code', label: '季节编码', required: true, readonly: !!s, hint: 'SS27 或 AW27；保存后不可改，订单、开发、报价按此编码归季' }, { key: 'name', label: '季节名称', required: true },
+    sections: [{ id: 'season', label: '季节', fields: ['code', 'name', 'startDate', 'endDate', 'status', 'note'] }, { id: 'milestones', label: '里程碑', fields: slots.flatMap(i => [`m${i}`, `d${i}`]) }],
+    initialValues: { ...(s ? { code: s.code, name: s.name, startDate: s.startDate, endDate: s.endDate, status: s.status, note: s.note } : { code: '', name: '', startDate: '', endDate: '', status: 'Planning', note: '' }), ...Object.fromEntries(slots.flatMap(i => [[`m${i}`, s?.milestones[i]?.label || ''], [`d${i}`, s?.milestones[i]?.date || '']])) },
+    fields: [{ key: 'code', label: '季节编码', required: true, readonly: !!s, hint: 'SS27 或 AW27；保存后不可改' }, { key: 'name', label: '季节名称', required: true },
       { key: 'startDate', label: '开始日期', type: 'date', required: true }, { key: 'endDate', label: '结束日期', type: 'date', required: true },
       { key: 'status', label: '状态', type: 'select', options: (['Planning', 'Active', 'Closed'] as const).map(v => ({ value: v, label: SEASON_STATUS[v].label })) },
-      { key: 'milestones', label: '里程碑', type: 'textarea', hint: '每行一个：名称 | YYYY-MM-DD，须在季节日期内' }, { key: 'note', label: '备注', type: 'textarea' }],
-    submit: v => { const milestones = String(v.milestones ?? '').split('\n').map(x => x.trim()).filter(Boolean).map(line => { const [label, date] = line.split('|').map(x => x.trim()); if (!label || !date) throw new Error(`里程碑格式应为“名称 | 日期”：${line}`); return { label, date }; });
+      { key: 'note', label: '备注', type: 'textarea' },
+      ...slots.flatMap(i => [{ key: `m${i}`, label: `里程碑 ${i + 1}` }, { key: `d${i}`, label: `日期 ${i + 1}`, type: 'date' as const }])],
+    submit: v => { const milestones = slots.flatMap(i => { const label = String(v[`m${i}`] ?? '').trim(), date = String(v[`d${i}`] ?? '').trim(); if (!label && !date) return []; if (!label || !date) throw new Error(`里程碑 ${i + 1} 须同时填写名称与日期`); return [{ label, date }]; });
       return run({ type: 'market.season.save', payload: { id: s?.id, input: { code: String(v.code ?? ''), name: String(v.name ?? ''), startDate: String(v.startDate ?? ''), endDate: String(v.endDate ?? ''), status: String(v.status) as MarketSeason['status'], milestones, note: String(v.note ?? ''), fileIds: s?.fileIds || [] } } }); },
-  });
+  }; };
   const fabricProducts = (m?.products || []).filter(p => p.category === 'fabric');
-  const trendSpec = (t?: MarketTrend): ModuleEditorSpec => ({
+  // mar47：趋势关联面料改为勾选（使用中的面料档案及已关联的）。
+  const trendSpec = (t?: MarketTrend): ModuleEditorSpec => { const pickable = fabricProducts.filter(p => p.status === 'active' || t?.productIds.includes(p.id)); return {
     title: t ? `编辑趋势 ${t.name}` : '记录趋势', submitLabel: '保存',
-    initialValues: t ? { name: t.name, type: t.type, seasonId: t.seasonId, source: t.source, products: t.productIds.map(id => m?.products.find(p => p.id === id)?.sku || '').filter(Boolean).join('、'), note: t.note } : { name: '', type: 'fabric', seasonId: seasons.find(s => s.status === 'Active')?.id || seasons[0]?.id || '', source: '', products: '', note: '' },
+    sections: [{ id: 'trend', label: '趋势', fields: ['name', 'type', 'seasonId', 'source', 'note'] }, { id: 'products', label: '关联面料', fields: pickable.map(p => `p:${p.id}`) }],
+    initialValues: { ...(t ? { name: t.name, type: t.type, seasonId: t.seasonId, source: t.source, note: t.note } : { name: '', type: 'fabric', seasonId: seasons.find(s => s.status === 'Active')?.id || seasons[0]?.id || '', source: '', note: '' }), ...Object.fromEntries(pickable.map(p => [`p:${p.id}`, !!t?.productIds.includes(p.id)])) },
     fields: [{ key: 'name', label: '趋势名称', required: true }, { key: 'type', label: '类别', type: 'select', options: (Object.keys(TREND_TYPE) as MarketTrend['type'][]).map(k => ({ value: k, label: TREND_TYPE[k] })) },
       { key: 'seasonId', label: '季节', type: 'select', required: true, options: seasonOptions.slice(1) }, { key: 'source', label: '来源依据', required: true, hint: '例如展会趋势区、色彩报告、客户简报' },
-      { key: 'products', label: '关联面料档案', hint: `填写面料档案编码，用顿号分隔${fabricProducts.length ? '；可选：' + fabricProducts.slice(0, 6).map(p => p.sku).join('、') : ''}` }, { key: 'note', label: '观察内容', type: 'textarea' }],
-    submit: v => { const skus = String(v.products ?? '').split(/[、,\s]+/).map(x => x.trim()).filter(Boolean); const productIds = skus.map(sku => { const p = m?.products.find(x => x.sku.toLowerCase() === sku.toLowerCase()); if (!p) throw new Error(`找不到数字档案 ${sku}`); if (p.category !== 'fabric') throw new Error(`${sku} 不是面料档案，趋势只关联面料`); return p.id; });
+      { key: 'note', label: '观察内容', type: 'textarea' }, ...pickable.map(p => ({ key: `p:${p.id}`, label: `${p.sku} · ${p.name}`, type: 'checkbox' as const }))],
+    submit: v => { const productIds = pickable.filter(p => v[`p:${p.id}`] === true).map(p => p.id);
       return run({ type: 'market.trend.save', payload: { id: t?.id, input: { name: String(v.name ?? ''), type: String(v.type) as MarketTrend['type'], seasonId: String(v.seasonId ?? ''), source: String(v.source ?? ''), productIds, note: String(v.note ?? ''), fileIds: t?.fileIds || [] } } }); },
-  });
+  }; };
   const showSpec = (x?: MarketShow): ModuleEditorSpec => ({
     title: x ? `编辑 ${x.name}` : '新建展会', submitLabel: '保存',
     initialValues: x ? { name: x.name, location: x.location, seasonId: x.seasonId, startDate: x.startDate, endDate: x.endDate, booth: x.booth, attendees: x.attendees, cost: x.cost, currency: x.currency, status: x.status, note: x.note } : { name: '', location: '', seasonId: '', startDate: '', endDate: '', booth: '', attendees: '', cost: '0', currency: 'USD', status: 'Planned', note: '' },

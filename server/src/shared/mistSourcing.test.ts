@@ -132,3 +132,22 @@ describe('mar42 edit, un-award and reopen',()=>{
     expect(f.rfq.changes!.map(c=>c.kind)).toEqual(['edit','unaward','reopen']);
   });
 });
+
+describe('mar41 开发阶段询价', () => {
+  it('挂开发案发起询价，定标只记录选定供应商与价格，不生成采购单', () => {
+    const f = fixture();
+    const dev = { id: 'dev1', code: 'DV-1', name: '羊毛双面呢开发', values: { domain: 'fabric' }, closure: undefined } as any;
+    (f.state.devs as any[]).push(dev);
+    const before = f.state.fulfillment.purchases.length;
+    f.run({ type: 'rfq.save', payload: { input: { devId: 'dev1', orderId: '', lineId: '', kind: 'material', materialKind: 'greige', description: '坯布打样询价', quantity: 50, unit: '米', currency: 'CNY', due: '2026-11-20', destination: '嘉兴', deadline: '2026-10-25', supplierIds: [f.sup('华盛毛纺'), f.sup('江南成衣')] } } } as MistCommand);
+    const r = f.rfq;
+    expect(r).toMatchObject({ devId: 'dev1', orderId: '', domain: 'fabric', materialKind: 'greige' });
+    f.run(quote(r.id, f.sup('华盛毛纺'), { price: '20', moq: '10' }));f.run(quote(r.id, f.sup('江南成衣'), { price: '22', moq: '10' }));
+    const low = readRfqs(f.state)[0].quotes.find(q => q.price === 20)!;
+    f.run({ type: 'rfq.award', payload: { id: r.id, quoteId: low.id } } as MistCommand);
+    expect(readRfqs(f.state)[0]).toMatchObject({ state: 'awarded', award: { supplierId: f.sup('华盛毛纺'), price: 20, currency: 'CNY', purchaseId: '' } });
+    expect(f.state.fulfillment.purchases.length).toBe(before);
+    expect(f.state.events.some(e => e.entityType === 'development' && e.entityId === 'dev1' && e.text.includes('定标'))).toBe(true);
+  });
+});
+

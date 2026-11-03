@@ -16,20 +16,23 @@ import { applyPayablesCommand, purchasePrepaymentAvailableMinor } from './mistPa
 import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
 import { relationHoldReason } from './mistRelationHold';
 import { fxRateFor } from './mistFxRates';
+import { developmentDomain } from './mistDevelopmentDomain';
 
 export type MistRfqQuote = {
   id: string; supplierId: string; supplier: string; declined: boolean; declineReason: string; price: number; currency: string; moq: number; promisedDue: string; terms: string; validUntil: string;
   note: string; fileIds: string[]; at: string; actor: string; supersededAt?: string;
 };
 export type MistRfq = {
+  /** mar41：开发打样阶段的询价没有订单，挂开发案（orderId / lineId 为空）；定标只记录选定供应商与价格，不生成采购单。 */
+  devId?: string;
   id: string; code: string; orderId: string; lineId: string; kind: FulfillmentPurchase['kind']; materialKind?: MistMaterialKind; domain: 'garment' | 'fabric'; description: string; quantity: number; unit: string; currency: string;
   due: string; destination: string; deadline: string; supplierIds: string[]; quotes: MistRfqQuote[]; note: string; state: 'open' | 'awarded' | 'cancelled'; createdAt: string; actor: string;
-  award?: { quoteId: string; supplierId: string; supplier: string; reason: string; flags: string[]; purchaseId: string; purchaseCode: string; at: string; actor: string };
+  award?: { quoteId: string; supplierId: string; supplier: string; reason: string; flags: string[]; purchaseId: string; purchaseCode: string; at: string; actor: string; price?: number; currency?: string };
   cancelled?: { reason: string; at: string; actor: string };
   /** mar42：发出后修改需求、撤销定标与重开都留痕。 */
   changes?: Array<{ kind: 'edit' | 'unaward' | 'reopen'; note: string; at: string; actor: string }>;
 };
-export type RfqInput = { orderId: string; lineId: string; kind: FulfillmentPurchase['kind']; materialKind?: MistMaterialKind; description: string; quantity: string | number; unit: string; currency: string; due: string; destination: string; deadline: string; supplierIds: string[]; note?: string };
+export type RfqInput = { devId?: string; orderId: string; lineId: string; kind: FulfillmentPurchase['kind']; materialKind?: MistMaterialKind; description: string; quantity: string | number; unit: string; currency: string; due: string; destination: string; deadline: string; supplierIds: string[]; note?: string };
 export type RfqCommand =
   | { type: 'rfq.save'; payload: { input: RfqInput } }
   | { type: 'rfq.invite'; payload: { id: string; supplierIds: string[] } }
@@ -103,9 +106,11 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
   switch (command.type) {
     case 'rfq.save': {
       const i = (p.input || {}) as RfqInput;
-      const order = root.orders.find(o => o.id === i.orderId) || fail('订单不存在', 'NOT_FOUND');
-      assertMistOrderOpen(root, order.id);
-      const line = root.orderLines.find(l => l.id === i.lineId && l.orderId === order.id) || fail('订单条目不存在', 'NOT_FOUND');
+      const dev = i.devId ? root.devs.find(d => d.id === i.devId) || fail('开发案不存在', 'NOT_FOUND') : undefined;
+      if (dev?.closure) fail('开发案已结案，不能再询价', 'PRECONDITION');
+      const order = dev ? undefined : root.orders.find(o => o.id === i.orderId) || fail('订单不存在', 'NOT_FOUND');
+      if (order) assertMistOrderOpen(root, order.id);
+      const line = order ? root.orderLines.find(l => l.id === i.lineId && l.orderId === order.id) || fail('订单条目不存在', 'NOT_FOUND') : undefined;
       if (!['material', 'finished', 'processing'].includes(i.kind)) fail('采购类型无效');
       const due = day(i.due, '需求交期'), deadline = day(i.deadline, '报价截止日');
       if (deadline < today) fail('报价截止日不能早于今天');
@@ -114,7 +119,7 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       if (ids.length < 2) fail('请至少邀请两家供应商报价');
       ids.forEach(id => supplierOk(root, id, today));
       const head = 'RFQ-' + today.slice(0, 4) + '-'; let n = list.filter(r => r.code.startsWith(head)).length + 1; while (list.some(r => r.code === head + String(n).padStart(4, '0'))) n++;
-      const r: MistRfq = { id: c.id(), code: head + String(n).padStart(4, '0'), orderId: order.id, lineId: line.id, kind: i.kind, ...(assertGarmentProcurement(order,line,i.kind,i.materialKind,root)?{materialKind:i.materialKind}:{}), domain: order.type, description: text(i.description, '询价内容', true, 500), quantity: positive(i.quantity, '需求数量'), unit: text(i.unit, '单位', true, 20), currency: currencyOf(i.currency),
+      const r: MistRfq = { id: c.id(), code: head + String(n).padStart(4, '0'), ...(dev ? { devId: dev.id } : {}), orderId: order?.id || '', lineId: line?.id || '', kind: i.kind, ...(order && line ? (assertGarmentProcurement(order,line,i.kind,i.materialKind,root)?{materialKind:i.materialKind}:{}) : i.kind === 'material' && i.materialKind ? { materialKind: i.materialKind } : {}), domain: order ? order.type : developmentDomain(dev!.values), description: text(i.description, '询价内容', true, 500), quantity: positive(i.quantity, '需求数量'), unit: text(i.unit, '单位', true, 20), currency: currencyOf(i.currency),
         due, destination: text(i.destination, '交付地点', true, 200), deadline, supplierIds: ids, quotes: [], note: text(i.note, '备注', false, 2000), state: 'open', createdAt: c.now, actor: c.actorName };
       list.unshift(r);
       event(root, c, r, `发起询价 ${r.code}：${r.description} ${r.quantity} ${r.unit}，邀请 ${ids.map(id => root.market.suppliers.find(s => s.id === id)!.name).join('、')}，${deadline} 截止报价`);
@@ -157,6 +162,13 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       supplierOk(root, q.supplierId, today);
       const flags = rfqAwardFlags(root, r, q.id, today), reason = text(p.reason, '定标理由', false, 2000);
       if (flags.length && !reason) fail(`请写明定标理由：${flags.join('；')}`);
+      if (r.devId) {
+        // 开发阶段定标：记录选定的供应商与价格，下单时按订单另行建采购。
+        r.state = 'awarded'; r.award = { quoteId: q.id, supplierId: q.supplierId, supplier: q.supplier, reason, flags, purchaseId: '', purchaseCode: '', at: c.now, actor: c.actorName, price: q.price, currency: q.currency };
+        event(root, c, r, `开发询价定标 ${q.supplier}（${q.price} ${q.currency}/${r.unit}）${flags.length ? `；${flags.join('；')}；理由：${reason}` : ''}`);
+        root.events.unshift({ id: c.id(), entityType: 'development', entityId: r.devId, actor: c.actorName, at: c.now, text: `询价 ${r.code} 定标 ${q.supplier}：${q.price} ${q.currency}/${r.unit}`, fileIds: [] });
+        return { id: r.id };
+      }
       const saved = applyFulfillmentCommand(root, { type: 'fulfillment.procurement.save', payload: { orderId: r.orderId, lineId: r.lineId, kind: r.kind, ...(r.materialKind?{materialKind:r.materialKind}:{}), supplierId: q.supplierId, supplier: q.supplier, description: r.description, quantity: r.quantity, unit: r.unit, price: q.price, currency: q.currency, due: q.promisedDue, terms: q.terms, destination: r.destination,
         note: [r.note, q.note && `报价备注：${q.note}`, `询价 ${r.code} 定标（${rfqCurrentQuotes(r).filter(x => !x.declined).length} 家报价）${reason ? '：' + reason : ''}`].filter(note => note?.trim()).join('\n\n'), fileIds: q.fileIds } }, c) as { id: string };
       const purchase = root.fulfillment.purchases.find(x => x.id === saved.id)!;
@@ -200,7 +212,7 @@ export function applyRfqCommand(root: Root, command: RfqCommand, c: MistContext)
       if (r.state !== 'cancelled') fail('只有已取消的询价可以重开', 'PRECONDITION');
       const reason = text(p.reason, '重开原因', true, 1000), deadline = day(p.deadline, '报价截止日');
       if (deadline < today) fail('报价截止日不能早于今天');
-      assertMistOrderOpen(root, r.orderId);
+      if (r.orderId) assertMistOrderOpen(root, r.orderId);
       (r.changes ||= []).push({ kind: 'reopen', note: `${reason}（原取消原因：${r.cancelled?.reason || ''}）`, at: c.now, actor: c.actorName });
       delete r.cancelled; r.state = 'open'; r.deadline = deadline;
       event(root, c, r, `重开询价：${reason}`);
