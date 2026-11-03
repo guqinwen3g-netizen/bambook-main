@@ -44,8 +44,8 @@ it('marks approval codes that do not choose reviewers, matching the server regis
   const serverLabels = [...registry.matchAll(/\{ scope: '([^']+)', reason: 'ui-label-only'/g)].map(m => m[1]).sort();
   expect([...APPROVAL_LABEL_ONLY_SCOPES].sort()).toEqual(serverLabels);
   expect(labelOnlyApprovals(JOB_MODULES.find(m => m.key === 'orders')!)).toEqual(['orders:approve:change_delivery', 'orders:approve:change_qty', 'orders:approve:change_price', 'orders:approve:cancel']);
-  // 付款分档码已由服务端判定，不再标为“不控制审批人”。
-  expect(labelOnlyApprovals(JOB_MODULES.find(m => m.key === 'finance')!)).toEqual(['invoices:approve:writeoff']);
+  // 付款分档码与核销审批码（坏账、红冲、重开结账）已由服务端判定，不再标为“不控制审批人”。
+  expect(labelOnlyApprovals(JOB_MODULES.find(m => m.key === 'finance')!)).toEqual([]);
 });
 
 it('lets business and finance templates confirm AI writes at their risk level', () => {

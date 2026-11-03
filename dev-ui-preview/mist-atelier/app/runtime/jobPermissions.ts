@@ -79,7 +79,7 @@ export function setModuleLevel(module: JobModule, granted: readonly string[], le
  * 只作能力标签的审批权限码（口径 B1）：勾选不会让该岗位成为审批人，审批人由审批规则（部门主管路由、审批配置）决定。
  * 与 server/src/auth/__tests__/danglingScopeConsumption.test.ts 中 reason='ui-label-only' 的登记一致。
  */
-export const APPROVAL_LABEL_ONLY_SCOPES: readonly string[] = ['orders:approve:change_delivery', 'orders:approve:change_qty', 'orders:approve:change_price', 'orders:approve:cancel', 'shipments:approve', 'knowledge:approve', 'invoices:approve:writeoff'];
+export const APPROVAL_LABEL_ONLY_SCOPES: readonly string[] = ['orders:approve:change_delivery', 'orders:approve:change_qty', 'orders:approve:change_price', 'orders:approve:cancel', 'shipments:approve', 'knowledge:approve'];
 export const APPROVAL_LABEL_ONLY_NOTE = '该权限不控制审批人，审批人由审批规则决定';
 export const labelOnlyApprovals = (module: JobModule) => module.approve.filter(scope => APPROVAL_LABEL_ONLY_SCOPES.includes(scope));
 
