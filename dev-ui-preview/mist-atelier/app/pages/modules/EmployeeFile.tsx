@@ -2,8 +2,9 @@ import { uiText, ui } from '../../../../../services/interfaceLanguage';
 import {businessNow} from '../../runtime/businessClock';
 /** 员工档案与在职变动：人员详情里的人事部分，账号与人事两处共用同一份。 */
 import React from 'react';
-import { Banner, Button, CardHeader, Checkbox, DataTable, Drawer, EmptyState, Field, FormGrid, KeyValue, Select, TextArea, TextInput, useToast } from '../../../../../components/mist';
+import { TextLink, Banner, Button, CardHeader, Checkbox, DataTable, Drawer, EmptyState, Field, FormGrid, KeyValue, Select, TextArea, TextInput, useToast } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
+import { useNav } from '../../nav';
 import { ACTIVE_EMPLOYMENT, CONTRACT_TYPES, departmentOptions, EMPLOYMENT_EVENTS, EMPLOYMENT_STATUS, eventLabel, organizationApi, type EmployeeProfile, type EmploymentEvent, type OrgDepartment, type OrgJob } from '../../runtime/organization';
 
 export type EmployeePerson = { id: string; displayName: string; departmentId: string | null; roleIds?: string[]; roles: string[] };
@@ -19,6 +20,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
   person: EmployeePerson; departments: OrgDepartment[]; jobs: OrgJob[]; positionNames: Record<string, string>;
   nameOf: (userId: string) => string | undefined; onChanged?: () => unknown;
 }) {
+  const nav = useNav();
   const session = useMistSession(), toast = useToast();
   const canWrite = session.hasPermission('hr:write'), canAssignJobs = session.hasPermission('users:admin'), company = !!session.user?.companyId;
   const [profile, setProfile] = React.useState<{ userId: string; value: EmployeeProfile | null; error?: string } | null>(null);
@@ -103,7 +105,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
           {def?.position && <Field label={uiText("任职部门")} required><Select aria-label={uiText("调入部门")} value={form.toDeptId} disabled={busy} placeholder={uiText("选择部门")} onChange={e => setForm({ ...form, toDeptId: e.target.value })} options={departmentOptions(departments)} /></Field>}
           <Field label={uiText("原因 / 说明")} full><TextArea value={form.reason} disabled={busy} onChange={e => setForm({ ...form, reason: e.target.value })} /></Field>
           {def?.position && form.toDeptId && form.toDeptId !== (person.departmentId ?? '') && <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={ui`部门将从 ${deptName(person.departmentId)} 调为 ${deptName(form.toDeptId)}`}>{uiText("同时退出原部门的小组。")}</Banner></div>}
-          {stopsAccess && <div style={{ gridColumn: '1 / -1' }}><Banner tone="bad" title={uiText(company ? "办理后暂停本公司访问" : "办理后系统账号立即停用")}>{uiText("请先完成业务交接。")}</Banner>
+          {stopsAccess && <div style={{ gridColumn: '1 / -1' }}><Banner tone="bad" title={uiText(company ? "办理后暂停本公司访问" : "办理后系统账号立即停用")}>{uiText("请先完成业务交接。")} <TextLink onClick={() => nav.go('settings', undefined, { section: 'workspace' })}>{uiText('去办理交接')}</TextLink></Banner>
             <Checkbox label={uiText(company ? "我已确认，暂停此人在本公司的访问" : "我已确认，办理后立即停用该员工的系统账号")} checked={form.acknowledged} disabled={busy} onChange={on => setForm({ ...form, acknowledged: on })} /></div>}
           {form.type === 'Onboard' && <div style={{ gridColumn: '1 / -1' }}><Banner tone="warn" title={uiText(company ? "返聘将恢复本公司访问" : "返聘会恢复系统账号")}>{uiText("原有岗位保留。")}</Banner></div>}
         </FormGrid> : <FormGrid>

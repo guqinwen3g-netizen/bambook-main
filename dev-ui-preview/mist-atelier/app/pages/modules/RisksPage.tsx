@@ -83,14 +83,18 @@ export function RisksPage() {
 
   const registerSpec = (s?: RiskSignal): ModuleEditorSpec => ({
     title: s ? '登记风险' : '手工登记风险', submitLabel: '登记',
-    description: s ? `来源：${SOURCE_LABEL[s.source.kind]} ${s.source.label}。登记后由负责人接手推进；预警本身不会冻结付款、删单或修改原记录。` : '只能挂在真实订单上；其他来源请从“预警”页登记，保留准确来源。',
-    initialValues: s ? { title: s.title, level: s.level, owner: me, basis: s.basis } : { orderId: ownOrders[0]?.id || '', type: 'delivery', title: '', level: 'warning', owner: me, basis: '' },
-    fields: [...(s ? [] : [{ key: 'orderId', label: '来源订单', type: 'select' as const, required: true, hint: canAll ? undefined : '只能选择你负责的订单', options: ownOrders.map(o => ({ value: o.id, label: `${o.code} · ${o.customer}` })) }, { key: 'type', label: '风险类型', type: 'select' as const, options: (Object.keys(RISK_TYPE_LABEL) as RiskType[]).map(t => ({ value: t, label: RISK_TYPE_LABEL[t] })) }]),
+    description: s ? `来源：${SOURCE_LABEL[s.source.kind]} ${s.source.label}。登记后由负责人接手推进；预警本身不会冻结付款、删单或修改原记录。` : undefined,
+    initialValues: s ? { title: s.title, level: s.level, owner: me, basis: s.basis } : { sourceKind: 'order', orderId: ownOrders[0]?.id || '', customerId: '', supplierId: '', type: 'delivery', title: '', level: 'warning', owner: me, basis: '' },
+    // fin39：手工登记可挂订单、客户或供应商。
+    fields: [...(s ? [] : [{ key: 'sourceKind', label: '来源类型', type: 'select' as const, required: true, options: [{ value: 'order', label: '订单' }, { value: 'customer', label: '客户' }, { value: 'supplier', label: '供应商' }] },
+      { key: 'orderId', label: '来源订单', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['order'] }, hint: canAll ? undefined : '只能选择你负责的订单', options: ownOrders.map(o => ({ value: o.id, label: `${o.code} · ${o.customer}` })) },
+      { key: 'customerId', label: '来源客户', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['customer'] }, options: (state?.customers || []).filter(c => canAll || c.ownerId === me).map(c => ({ value: c.id, label: c.name })) },
+      { key: 'supplierId', label: '来源供应商', type: 'select' as const, required: true, when: { key: 'sourceKind', values: ['supplier'] }, options: (state?.market.suppliers || []).map(x => ({ value: x.id, label: x.name })) }, { key: 'type', label: '风险类型', type: 'select' as const, options: (Object.keys(RISK_TYPE_LABEL) as RiskType[]).map(t => ({ value: t, label: RISK_TYPE_LABEL[t] })) }]),
       { key: 'title', label: '风险标题', required: true }, { key: 'level', label: '风险等级', type: 'select', hint: s ? '不能低于预警等级；严重为高风险，关闭须经部门主管审批' : '严重为高风险，关闭须经部门主管审批', options: (['critical', 'warning', 'info'] as const).filter(l => !s || levelRank[l] <= levelRank[s.level]).map(l => ({ value: l, label: LEVEL[l].label })) },
       { key: 'owner', label: '负责人', required: true, readonly: !canAll, hint: canAll ? '单一主负责人，统筹各岗位处理' : '登记本人客户或订单的风险，负责人为本人；需转交请联系主管' }, { key: 'basis', label: '事实与依据', type: 'textarea', required: true }],
     submit: async v => {
       const base = { title: String(v.title ?? ''), level: String(v.level) as RiskRecord['level'], owner: canAll ? String(v.owner ?? '') : me, basis: String(v.basis ?? '') };
-      const r = await run(s ? { type: 'platform.risk.save', payload: { ...base, type: s.type, source: { kind: s.source.kind, id: s.source.id }, signalKey: s.key } } : { type: 'platform.risk.save', payload: { ...base, type: String(v.type) as RiskType, source: { kind: 'order', id: String(v.orderId ?? '') } } });
+      const r = await run(s ? { type: 'platform.risk.save', payload: { ...base, type: s.type, source: { kind: s.source.kind, id: s.source.id }, signalKey: s.key } } : { type: 'platform.risk.save', payload: { ...base, type: String(v.type) as RiskType, source: { kind: (String(v.sourceKind || 'order')) as 'order' | 'customer' | 'supplier', id: String((v.sourceKind === 'customer' ? v.customerId : v.sourceKind === 'supplier' ? v.supplierId : v.orderId) ?? '') } } });
       const id = (r as { result?: { id?: string } } | undefined)?.result?.id; if (id) openRisk(id);
     },
   });

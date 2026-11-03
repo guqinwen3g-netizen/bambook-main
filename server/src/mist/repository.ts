@@ -856,9 +856,10 @@ export class MistRepository {
         if (MEMBER_PERSONAL_COMMANDS.includes(input.command?.type)) {
           const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), scopeOf(row)).state;
           const { type, payload } = input.command;
-          const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' ? visible.tasks : type === 'calendar.save' && payload.id ? visible.calendar : undefined;
+          // calendar.delete / task.save（改已有事项）同样只能作用于本账号可见的日程与事项。
+          const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' || (type === 'task.save' && payload.id) ? visible.tasks : (type === 'calendar.save' && payload.id) || type === 'calendar.delete' ? visible.calendar : undefined;
           if (collection && !collection.some(item => item.id === payload.id)) fail('NOT_FOUND', '记录不存在或当前账号无权访问', 404);
-          if (type === 'calendar.save' && !canReadTarget(actor, payload.target)) fail('FORBIDDEN', '无权关联该业务来源', 403);
+          if ((type === 'calendar.save' || type === 'task.save') && payload.target && !canReadTarget(actor, payload.target)) fail('FORBIDDEN', '无权关联该业务来源', 403);
           if (type === 'notification.readAll') context.visibleNotificationIds = visible.notifications.map(item => item.id);
         }
         if(input.command) {

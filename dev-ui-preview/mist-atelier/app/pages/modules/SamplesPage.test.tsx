@@ -66,7 +66,7 @@ it('opens a quick movement dialog over the ledger instead of replacing the page'
   await act(async()=>getByRole(host,'button',{name:'寄出'}).click());
   expect(getByRole(document.body,'dialog',{name:/登记永久寄出/})).toBeTruthy();
   expect(getByRole(host,'table',{name:'样品台账'})).toBeTruthy();
-  expect((getByRole(document.body,'textbox',{name:'寄送去向 / 运单号'}) as HTMLInputElement).value).toBe('');
+  expect((getByRole(document.body,'textbox',{name:'运单号'}) as HTMLInputElement).value).toBe('');
 });
 
 it('keeps a fully dispatched sample readable without inapplicable movement buttons or repeated notes',()=>{

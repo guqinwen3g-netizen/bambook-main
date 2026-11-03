@@ -1,3 +1,7 @@
+import { ModuleEditorDialog } from './modules/ModuleWorkbench';
+import { SetupChecklist } from './SetupChecklist';
+import { memberSelectOptions, workspaceMembers } from '../runtime/members';
+import { calendarWithDerived } from '../runtime/derivedCalendar';
 import { isRecognizedMistInvoice } from '../../../../server/src/shared/mistWorkspace';
 import {isInternalDeliveryTask} from '../../../../server/src/shared/mistInternalDelivery';
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
@@ -39,6 +43,8 @@ export function HomePage() {
   const [day, setDay] = React.useState(today);
   const [sort, setSort] = React.useState<'due' | 'title'>('due');
   const [taskDialog, setTaskDialog] = React.useState(false), [selectedTask, setSelectedTask] = React.useState(''), [taskDone, setTaskDone] = React.useState(false);
+  // mar64：新建 / 改期 / 转派待办。
+  const me = session.user?.id || '', [todo, setTodo] = React.useState<{ id: string; title: string; due: string; assigneeId: string; note: string } | null>(null), members = workspaceMembers(workspace.workspace, workspace.state, session.user);
   const [reportVersion, setReportVersion] = React.useState<string | null>(null), [error, setError] = React.useState('');
   const [statView,setStatView]=React.useState<'development'|'qc'|'shipping'|'invoices'|null>(null);
   const hidden = new Set(workspace.workspace?.access?.hidden?.map(section => section.key) ?? []);
@@ -103,7 +109,8 @@ export function HomePage() {
     <MistPage>
       <PageHeader description={!state ? uiText(loading ? '正在读取公司业务…' : '公司业务尚未读取成功，请重试。') : undefined} variant="greeting" eyebrow={uiText(`${dateLabel} · ${workspace.workspace?.name ?? '公司工作台'}`)} title={<>{uiText(greeting)}{interfaceLocale() === 'en-US' ? ', ' : '，'}<em>{myName || uiText('同事')}</em></>}
         actions={<><Segmented<'today' | 'week'> ariaLabel={uiText("时间范围")} value={range} onChange={setRange} options={[{ value: 'today', label: '今天' }, { value: 'week', label: '本周' }]} />
-          <Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建")}</Button></>} />
+          <Button icon={Plus} disabled={busy || !state} onClick={() => setTodo({ id: '', title: '', due: today, assigneeId: me, note: '' })}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
+      {state && <SetupChecklist state={state} workspace={workspace.workspace} canAdmin={session.hasPermission('users:admin')} go={go} />}
       {(error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
       {pending && !saving && <Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(problem=>setError(problem instanceof Error?problem.message:'原请求核对失败'))}>{uiText("核对原请求")}</Button>}>{uiText("核对完成前，暂停提交新的操作。")}</Banner>}
       {Object.values(hiddenStats).some(value=>!value)&&<StatGrid cols={Object.values(hiddenStats).filter(value=>!value).length}>
@@ -125,11 +132,13 @@ export function HomePage() {
         </Card>
         <Card className="mist-col-4">
           <CardHeader title={uiText(day===today?'今日安排':`${day.slice(5)} 安排`)} tools={<TextLink iconRight={ArrowUpRight} onClick={() => go('calendar',undefined,{section:day})}>{uiText("日历")}</TextLink>} />
-          <WeekStrip days={days.map(value => ({ ...value, dots: state?.calendar.filter(event => event.date === value.key).length ?? 0 }))} value={day} onChange={setDay} />
-          <Agenda events={(state?.calendar.filter(event => event.date === day).slice().sort((a, b) => a.time.localeCompare(b.time)) ?? []).map(event => ({ time: event.time, title: event.target ? <TextLink onClick={() => openTarget(event.target!)}>{event.title}</TextLink> : event.title, meta: event.note }))} />
-          {!loading && !state?.calendar.some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
+          <WeekStrip days={days.map(value => ({ ...value, dots: calendarWithDerived(state).filter(event => event.date === value.key).length ?? 0 }))} value={day} onChange={setDay} />
+          <Agenda events={(calendarWithDerived(state).filter(event => event.date === day).slice().sort((a, b) => a.time.localeCompare(b.time)) ?? []).map(event => ({ time: event.time, title: event.target ? <TextLink onClick={() => openTarget(event.target!)}>{event.title}</TextLink> : event.title, meta: event.note }))} />
+          {!loading && !calendarWithDerived(state).some(event => event.date === day) && <EmptyState compact title={uiText("这一天没有安排")} action={<TextLink onClick={() => go('calendar',undefined,{section:day})}>{uiText("添加日程")}</TextLink>} />}
         </Card>
       </section>
+      <ModuleEditorDialog spec={todo ? { title: todo.id ? '调整待办' : '新建待办', submitLabel: '保存', fields: [{ key: 'title', label: '事项', required: true, readonly: !!todo.id && state?.tasks.find(t => t.id === todo.id)?.kind !== 'personal' }, { key: 'due', label: '期限', type: 'date', required: true }, { key: 'assigneeId', label: '负责人', type: 'select', required: true, options: memberSelectOptions(members) }, { key: 'note', label: '备注', type: 'textarea' }], initialValues: { ...todo },
+        submit: async v => { await workspace.run({ type: 'task.save', payload: { ...(todo.id ? { id: todo.id } : {}), title: String(v.title || ''), due: String(v.due || ''), assigneeId: String(v.assigneeId || ''), note: String(v.note || '') } }); toast(uiText(todo.id ? '待办已调整' : '待办已创建')); } } : null} onClose={() => setTodo(null)} />
       <AgentProposalDialog state={workspace.state} proposal={workspace.state?.agentProposals?.find(p => p.id === proposalId && p.state === 'pending')} onClose={() => setProposalId('')} run={(command, options) => workspace.run(command, options)} onDone={message => toast(uiText(message))} />
       <Dialog open={taskDialog} onClose={() => setTaskDialog(false)} title={uiText("任务状态")} footer={<><Button variant="quiet" onClick={() => setTaskDialog(false)}>{uiText("关闭")}</Button>{taskControlled?<Button variant="primary" disabled={busy||!chosenTask?.target} onClick={()=>{setTaskDialog(false);if(chosenTask?.target)openTarget(chosenTask.target);}}>{uiText("打开事项")}</Button>:<Button variant="primary" disabled={busy || !chosenTask || chosenTask.done === taskDone} onClick={() => void run(async () => { await workspace.run({ type: 'task.complete', payload: { id: selectedTask, done: taskDone } }); if (alive.current && activeScope.current === scope) setTaskDialog(false); }, taskDone ? '已完成事项' : '已重新打开事项')}>{uiText("保存状态")}</Button>}</>}>
         <FormGrid cols={1}><Field label={uiText("事项")}><Select aria-label={uiText("选择事项")} value={selectedTask} onChange={event => { const task = state?.tasks.find(item => item.id === event.target.value); setSelectedTask(event.target.value); setTaskDone(task?.done ?? false); }} options={(chosenTask && !allTasks.some(task=>task.id===chosenTask.id) ? [chosenTask, ...allTasks] : allTasks).map(task => ({ value: task.id, label: task.title }))} /></Field><Switch label={uiText("已完成")} checked={taskDone} disabled={busy||taskControlled} onChange={setTaskDone} /></FormGrid>

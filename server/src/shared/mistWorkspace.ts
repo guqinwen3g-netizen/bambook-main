@@ -7,7 +7,7 @@ import type {MistBusinessClock} from './mistBusinessClock';
 import{stableJson}from'./stableJson';
 import { MIST_FINANCE_SCOPES } from './mistFinancePermissions';
 import {applyOpeningCommand,mistPayerMatchesInvoice,openingCommandPermission,type OpeningCommand} from './mistOpeningBalance';
-import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricRequirements,fabricRequirementError,validFabricSample,type DevelopmentDomain,type DevelopmentInitiator,type DevelopmentRequestType,type FabricDevelopmentRequirements} from './mistDevelopmentDomain';
+import {developmentCharged,developmentDomain,developmentInitiator,emptyFabricRequirements,fabricRequirementError,validFabricSample,sampleUnitAllowsDecimal,type DevelopmentDomain,type DevelopmentInitiator,type DevelopmentRequestType,type FabricDevelopmentRequirements} from './mistDevelopmentDomain';
 import { relationHoldReason } from './mistRelationHold';
 import {demoAccountRef,ownerChangeText,resolveMember,setMemberGroups,type MistMemberDirectoryEntry,type MistMemberGroupAssignment} from './mistAccounts';
 import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
@@ -152,7 +152,10 @@ export type MistDev = {
   /** BB-DEV-9：开发费用（制作费）、开票申请与销账结案；只有收费案使用。 */
   billing?: MistDevBilling;
 };
-export type MistFabric = { id: string; code: string; name: string; owner: string; ownerId: string; due: string; state: string; tone: MistTone; sub: string; request: string; answer: string; confirmed: boolean; fileIds: string[] };
+/** ord10：寻样答复的候选面料，可关联供应商与面料档案。 */
+export type MistFabricCandidate = { id: string; supplierId: string; supplier: string; productId?: string; article: string; price: string; currency: string; moq: string; leadDays: string; note: string };
+export type MistFabric = { id: string; code: string; name: string; owner: string; ownerId: string; due: string; state: string; tone: MistTone; sub: string; request: string; answer: string; confirmed: boolean; fileIds: string[];
+  candidates?: MistFabricCandidate[]; chosenCandidateId?: string; cancelled?: { reason: string; at: string; actor: string } };
 export type MistOrderLine = GarmentFulfillmentFields & { id: string; orderId: string; name: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number };
 export type MistChecklistItem = { id: string; label: string; done: boolean; note: string; actor?: string; at?: string };
 export type MistOrder = {
@@ -294,13 +297,14 @@ export type MistTarget = { view: string; id?: string; section?: string; versionI
  * 工作事项必须写明由谁处理：assigneeIds 为指定账号；permission 为「持有该权限的任何人」（岗位事项，如财务开票、后勤接手）。
  * 两者都为空的事项不进入任何人的「我的工作」和侧栏数字。
  */
-export type MistTask = { id: string; title: string; due: string; done: boolean; kind: string; target: MistTarget; assigneeIds: string[]; permission?: string; /** 勾选完成的时间与人（周报统计用；旧事项无此字段）。 */ doneAt?: string; doneBy?: string };
+export type MistTask = { id: string; title: string; due: string; done: boolean; kind: string; target: MistTarget; assigneeIds: string[]; permission?: string; note?: string; /** 勾选完成的时间与人（周报统计用；旧事项无此字段）。 */ doneAt?: string; doneBy?: string };
 /** 后勤岗位标识（logistics:handle）：只决定出运交接、待物流接手等事项归谁，不授予任何操作；与清关等操作权限分开调整。 */
 export const MIST_LOGISTICS_DUTY = 'logistics:handle';
 /** 订单负责人账号（变更、取消、客诉后续由订单负责人跟进）。 */
 export function mistOrderOwnerIds(root: Pick<MistState, 'orders'>, orderId: string): string[] { const owner = root.orders.find(order => order.id === orderId)?.ownerId; return owner ? [owner] : []; }
 export type MistNotification = { id: string; title: string; detail: string; at: string; readAt: string | null; target: MistTarget; category?:'qc'|'shipping'|'suggestion'|'general' };
-export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget };
+/** ownerId：日程归属人（mar60，只看我的）；旧日程没有时视为公司共享。 */
+export type MistCalendarEvent = { id: string; title: string; date: string; time: string; note: string; target?: MistTarget; ownerId?: string; owner?: string };
 export type MistCompanyProfile={legalName:string;englishName:string;address:string;englishAddress:string;registeredAddress?:string;registeredEnglishAddress?:string;phone:string;email:string;taxId:string;customsCode:string;bankName:string;bankAddress?:string;bankAccount:string;swift:string;defaultCurrency:string};
 export type MistSettings = { businessClock?: MistBusinessClock; companyProfile?:MistCompanyProfile; theme: 'light' | 'dark' | 'system'; density: 'compact' | 'default' | 'comfy'; reducedMotion: boolean; notifications: { qc: boolean; shipping: boolean; suggestions: boolean; digest: boolean }; workspaceName: string; profileName: string; profileEmail: string; locale: string; /** 仅演示公司：示例数据版本；客户端不可设置。 */ demoSeed?: { version: number; seededAt: string }; /** 开发 / 验收公司经营基线的内部版本；只由服务端种子写入。 */ companyBaseline?: { version: number; seededAt: string; dataset: string } };
 export type MistState = {
@@ -369,6 +373,7 @@ export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand
   | { type: 'development.version.addSampleForm'; payload: { devId: string; versionId: string; form: string; quantity: number; unit: string; location?: string; color?: string; note?: string } }
   | { type: 'development.sample.dispatch'; payload: { devId: string; versionId: string; sampleId: string; quantity: number; purpose?:SampleSendPurpose;recipient: string; trackingNo?: string; fee?: MistSampleFee | null; note?: string; sourceLocation?: string } }
   | { type: 'development.sample.dispatchFee'; payload: { devId: string; versionId: string; dispatchId: string; fee: MistSampleFee } }
+  | { type: 'development.sample.dispatchReceived'; payload: { devId: string; versionId: string; dispatchId: string; date: string; feedback?: string } }
   | { type: 'development.fee.recordMaking'; payload: { devId: string; sampleId: string; amount: number; currency: string } }
   | { type: 'development.expense.add'; payload: { devId: string; versionId?: string; amount: number; currency: string; description: string; date: string } }
   | { type: 'development.charge.add'; payload: { devId: string; versionIds: string[]; description: string; amount: number; currency: string; evidence: string } }
@@ -381,8 +386,10 @@ export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand
   /** 分段委外：登记前道工厂已把坯样交给下一道。 */
   | { type: 'development.stage.handover'; payload: { devId: string; versionId: string; stageIndex: number; quantity: number; unit: string; date: string; note: string } }
   | { type: 'fabric.create'; payload: { name: string; request: string; ownerId: string; due: string } }
-  | { type: 'fabric.answer'; payload: { id: string; answer: string; fileIds: string[] } }
-  | { type: 'fabric.confirm'; payload: { id: string; approved: boolean; note: string } }
+  | { type: 'fabric.answer'; payload: { id: string; answer: string; fileIds: string[]; candidates?: Array<Omit<MistFabricCandidate, 'id' | 'supplier'>> } }
+  | { type: 'fabric.confirm'; payload: { id: string; approved: boolean; note: string; candidateId?: string } }
+  | { type: 'fabric.update'; payload: { id: string; name: string; request: string; ownerId: string; due: string } }
+  | { type: 'fabric.cancel'; payload: { id: string; reason: string } }
   | { type: 'order.create'; payload: MistOrderInput }
   | { type: 'order.update'; payload: { orderId: string; due?: string; season?: string; ownerId?: string } }
   | { type: 'order.checklist'; payload: { orderId: string; itemId: string; done: boolean } }
@@ -422,7 +429,9 @@ export type MistCommand = PeriodCloseCommand | Extract<DocumentGenerationCommand
   | { type: 'notification.read'; payload: { id: string } }
   | { type: 'notification.readAll'; payload: Record<string, never> }
   | { type: 'task.complete'; payload: { id: string; done: boolean } }
-  | { type: 'calendar.save'; payload: { id?: string; title: string; date: string; time: string; note: string; target?: MistTarget } }
+  | { type: 'calendar.save'; payload: { id?: string; title: string; date: string; time: string; note: string; target?: MistTarget; personal?: boolean } }
+  | { type: 'calendar.delete'; payload: { id: string } }
+  | { type: 'task.save'; payload: { id?: string; title: string; due: string; assigneeId?: string; note?: string; target?: MistTarget } }
   | { type: 'files.add'; payload: { file: MistFile } };
 
 /** 付款凭证能否在付款凭证页冲回：返回不能冲回的原因，可冲回时返回 null。供应商付款生成的凭证走应付冲回。 */
@@ -559,7 +568,7 @@ function values(input: DevelopmentValues, complete: boolean): DevelopmentValues 
   if(v.domain!==undefined&&!['garment','fabric'].includes(v.domain))throw new MistCommandError('VALIDATION','开发业务域无效');
   if(developmentDomain(v)==='fabric'){
     for(const key of ['sampleForm','sampleUnit','targetCurrency','targetUnit'] as const)v[key]=text(v[key]||'',key,false,120);
-    if(complete&&!validFabricSample(v.sampleQuantity,v.sampleForm||'',v.sampleUnit||''))throw new MistCommandError('VALIDATION','面料计划样品须记录实际形态与单位：米样按米，其他剪片类按整数份');
+    if(complete&&!validFabricSample(v.sampleQuantity,v.sampleForm||'',v.sampleUnit||''))throw new MistCommandError('VALIDATION','面料计划样品须记录实际形态与单位：米样按米或码，按份 / 张 / 个 / 色位计须为整数');
     if(v.fabricRequirements){if(typeof v.fabricRequirements!=='object'||Array.isArray(v.fabricRequirements))throw new MistCommandError('VALIDATION','面料目标规格格式无效');v.fabricRequirements={...emptyFabricRequirements(),...v.fabricRequirements};for(const key of Object.keys(v.fabricRequirements) as Array<keyof FabricDevelopmentRequirements>)v.fabricRequirements[key]=text(v.fabricRequirements[key],key,false);const problem=fabricRequirementError(v.fabricRequirements);if(complete&&problem)throw new MistCommandError('VALIDATION',problem);}
     if(complete&&v.target&&(!v.targetCurrency||!v.targetUnit))throw new MistCommandError('VALIDATION','面料目标价须同时填写币种与计价单位');
     v.sizeBase='';
@@ -874,7 +883,7 @@ export function mistCommandPermission(command: MistCommand): string | null {
   if(command.type.startsWith('finance.'))throw new MistCommandError('VALIDATION','未知财务操作');
   if(command.type.startsWith('customer.')||command.type.startsWith('contact.'))return 'relations:write';
   // member.groups.set：权限 null 由仓储层限定为公司所有者（与成员授权一致）。
-  if(['settings.update','notification.read','notification.readAll','task.complete','calendar.save','member.groups.set'].includes(command.type))return null;
+  if(['settings.update','notification.read','notification.readAll','task.complete','calendar.save','calendar.delete','task.save','member.groups.set'].includes(command.type))return null;
   throw new MistCommandError('VALIDATION','未知操作');
 }
 /** 「核对出运交接」：后勤已实际接手该订单的出运（订舱、装箱、单据、报关任一已登记，或已备妥/已出运）即视为核对完毕，自动办结。 */
@@ -1151,7 +1160,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'development.version.addSampleForm': {
       const [dev,v]=versionOf(state,p.devId,p.versionId), blocked=sampleFormBlocker(state,dev,v);
       if(blocked)throw new MistCommandError('PRECONDITION',blocked);
-      if(!validFabricSample(p.quantity,p.form,p.unit))throw new MistCommandError('VALIDATION','面料实物须明确形态、数量和单位：米样按米，其他形态按整数份');
+      if(!validFabricSample(p.quantity,p.form,p.unit))throw new MistCommandError('VALIDATION','面料实物须明确形态、数量和单位：米样按米或码，按份 / 张 / 个 / 色位计须为整数');
       const form=text(p.form,'实物形态',true,60), unit=text(p.unit,'单位',true,20);
       const {id}=applyFulfillmentCommand(state,{type:'fulfillment.samples.create',payload:{name:dev.name,category:'面料',form,unit,quantity:p.quantity,location:text(p.location||'','位置',false,240),size:'',color:text(p.color||v.sampleColor||dev.values.color||'','颜色',false,120),source:{kind:'version',devId:dev.id,versionId:v.id},fileIds:[],note:text(p.note||'','备注',false,1000)||('来源实物 '+v.sample+' 追加'+form)}},context) as {id:string};
       const sample=find(state.fulfillment.samples,id,'样品');
@@ -1166,7 +1175,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const sample=developmentVersionSamples(state,v).find(s=>s.id===p.sampleId);
       if(!sample)throw new MistCommandError('VALIDATION','请选择本版的准确实物');
       if(typeof p.quantity!=='number'||!Number.isFinite(p.quantity)||p.quantity<=0)throw new MistCommandError('VALIDATION','寄出数量必须为有效正数');
-      if(sample.unit!=='米'&&!Number.isInteger(p.quantity))throw new MistCommandError('VALIDATION','按份/件的实物必须整数寄出');
+      if(!sampleUnitAllowsDecimal(sample.unit)&&!Number.isInteger(p.quantity))throw new MistCommandError('VALIDATION','按'+sample.unit+'计的实物必须整数寄出');
       if(p.quantity>sample.available)throw new MistCommandError('PRECONDITION','寄出数量超过可用余额（'+sample.available+' '+sample.unit+'）');
       const recipient=text(p.recipient,'收件方',true,240), trackingNo=text(p.trackingNo||'','运单号',false,120), fee=p.fee==null?null:sampleFee(p.fee), note=text(p.note||'','备注',false,1000);
       const sendBlocked=sampleSendBlocker(state,sample,purpose,note,p.purpose!==undefined);if(sendBlocked)throw new MistCommandError('PRECONDITION',sendBlocked);
@@ -1177,6 +1186,15 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,v.label+' 寄样 '+sample.form+' '+movement.quantity+' '+sample.unit+' → '+recipient+(trackingNo?'（运单 '+trackingNo+'）':''),{view:'development/detail',id:dev.id,versionId:v.id});
       result={devId:dev.id,versionId:v.id,id:dispatchId};break;
+    }
+    case 'development.sample.dispatchReceived': {
+      const [dev,v]=versionOf(state,p.devId,p.versionId), row=(v.dispatches||[]).find(d=>d.id===p.dispatchId);
+      if(!row)throw new MistCommandError('NOT_FOUND','寄样记录不存在',404);
+      if(row.receipt)throw new MistCommandError('PRECONDITION','已登记签收，不能覆盖');
+      const day=date(p.date);if(day<row.recordedAt.slice(0,10))throw new MistCommandError('VALIDATION','签收日期不能早于寄出');if(day>platformBusinessDate(context.now))throw new MistCommandError('VALIDATION','签收日期不能在未来');
+      row.receipt={date:day,feedback:text(p.feedback||'','客户意见',false,2000),at:context.now,actor:context.actorName};dev.updatedAt=context.now;
+      event(state,context,'development',dev.id,v.label+' 寄样 '+row.sampleCode+' 客户 '+day+' 签收'+(row.receipt.feedback?'：'+row.receipt.feedback:''),{view:'development/detail',id:dev.id,versionId:v.id});
+      result={devId:dev.id,versionId:v.id,id:row.id};break;
     }
     case 'development.sample.dispatchFee': {
       const [dev,v]=versionOf(state,p.devId,p.versionId), row=(v.dispatches||[]).find(d=>d.id===p.dispatchId);
@@ -1285,13 +1303,30 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       event(state,context,'fabric',id,'创建面料寻样 '+code);result={id};break;
     }
     case 'fabric.answer': {
-      const f=find(state.fabrics,p.id,'寻样任务');f.answer=text(p.answer,'答复');f.fileIds=files(state,p.fileIds);f.state='待发起人确认';f.tone='accent';f.sub='已提交答复';
-      event(state,context,'fabric',f.id,'提交寻样答复');result={id:f.id};break;
+      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled||f.confirmed)throw new MistCommandError('PRECONDITION','寻样已结案或已取消');
+      if(p.candidates!==undefined&&(!Array.isArray(p.candidates)||p.candidates.length>30))throw new MistCommandError('VALIDATION','候选面料格式无效');
+      // ord10：候选逐条登记供应商、品号、价格、MOQ、交期；供应商须在档案中，面料档案可选。
+      const candidates=((p.candidates||[]) as Array<Omit<MistFabricCandidate,'id'|'supplier'>>).map(c=>{const sup=find(state.market.suppliers,text(c.supplierId,'候选供应商'),'候选供应商');if(c.productId)find(state.market.products,c.productId,'面料档案');const price=text(c.price||'','价格',false,40);if(price&&!/^\d+(\.\d{1,4})?$/.test(price))throw new MistCommandError('VALIDATION','候选价格须为数字');return{id:context.id(),supplierId:sup.id,supplier:sup.name,...(c.productId?{productId:c.productId}:{}),article:text(c.article,'品号',true,80),price,currency:text(c.currency||'CNY','币种',false,3).toUpperCase(),moq:text(c.moq||'','MOQ',false,40),leadDays:text(c.leadDays||'','交期',false,40),note:text(c.note||'','说明',false,500)};});
+      f.answer=text(p.answer,'答复',!candidates.length);f.fileIds=files(state,p.fileIds);if(candidates.length)f.candidates=candidates;f.state='待发起人确认';f.tone='accent';f.sub=candidates.length?`${candidates.length} 个候选`:'已提交答复';
+      event(state,context,'fabric',f.id,'提交寻样答复'+(candidates.length?`（${candidates.length} 个候选）`:''));result={id:f.id};break;
     }
     case 'fabric.confirm': {
-      const f=find(state.fabrics,p.id,'寻样任务');if(!f.answer)throw new MistCommandError('PRECONDITION','尚无可确认答复');
-      f.confirmed=!!p.approved;f.state=p.approved?'已结案':'待补充';f.tone=p.approved?'ok':'warn';f.sub=text(p.note,'确认意见',!p.approved);
-      event(state,context,'fabric',f.id,p.approved?'确认寻样答复':'退回补充寻样');result={id:f.id};break;
+      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled)throw new MistCommandError('PRECONDITION','寻样已取消');if(!f.answer&&!f.candidates?.length)throw new MistCommandError('PRECONDITION','尚无可确认答复');
+      if(p.approved&&f.candidates?.length&&!f.candidates.some(c=>c.id===p.candidateId))throw new MistCommandError('VALIDATION','请选择确认采用的候选面料');
+      f.confirmed=!!p.approved;if(p.approved&&p.candidateId)f.chosenCandidateId=p.candidateId;f.state=p.approved?'已结案':'待补充';f.tone=p.approved?'ok':'warn';f.sub=text(p.note,'确认意见',!p.approved);
+      const chosen=f.candidates?.find(c=>c.id===f.chosenCandidateId);
+      event(state,context,'fabric',f.id,p.approved?'确认寻样答复'+(chosen?`：采用 ${chosen.supplier} ${chosen.article}`:''):'退回补充寻样');result={id:f.id};break;
+    }
+    case 'fabric.update': {
+      // ord9：未结案的寻样可改需求、日期与负责人。
+      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled||f.confirmed)throw new MistCommandError('PRECONDITION','寻样已结案或已取消，不能修改');
+      const o=resolveMember(context,p.ownerId,'寻样负责人');f.name=text(p.name,'面料');f.request=text(p.request,'需求');f.owner=o.name;f.ownerId=o.id;f.due=date(p.due);
+      event(state,context,'fabric',f.id,'修改寻样需求');result={id:f.id};break;
+    }
+    case 'fabric.cancel': {
+      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled)throw new MistCommandError('PRECONDITION','寻样已取消');if(f.confirmed)throw new MistCommandError('PRECONDITION','寻样已结案，不能取消');
+      const reason=text(p.reason,'取消原因',true,500);f.cancelled={reason,at:context.now,actor:context.actorName};f.state='已取消';f.tone='neutral';f.sub=reason;
+      event(state,context,'fabric',f.id,'取消寻样：'+reason);result={id:f.id};break;
     }
     case 'order.create': {result=createMistOrderRecords(state,p,context);break;}
     case 'order.files.add': {
@@ -1652,7 +1687,22 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'calendar.save': {
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
-      state.calendar=state.calendar.filter(e=>e.id!==id);state.calendar.push({id,title:text(p.title,'日程'),date:date(p.date),time:p.time,note:text(p.note,'说明',false),...(p.target?{target:p.target}:{})});result={id};break;
+      const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?context.actorId:undefined;
+      state.calendar=state.calendar.filter(e=>e.id!==id);state.calendar.push({id,title:text(p.title,'日程'),date:date(p.date),time:p.time,note:text(p.note,'说明',false),...(p.target?{target:p.target}:{}),...(mine?{ownerId:mine,owner:mine===old?.ownerId?old.owner:context.actorName}:{})});result={id};break;
+    }
+    case 'calendar.delete': {
+      // mar59：删除日程（个人日程只能本人删）。派生的季节 / 展会日程不在 state.calendar 中，不能删。
+      const e=find(state.calendar,p.id,'日程');if(e.ownerId&&e.ownerId!==context.actorId)throw new MistCommandError('FORBIDDEN','只能删除本人的个人日程',403);
+      state.calendar=state.calendar.filter(x=>x.id!==e.id);result={id:e.id};break;
+    }
+    case 'task.save': {
+      // mar64：个人待办新建、改期、转派、加备注；系统生成的业务待办只改期限与指派，不改标题。
+      const old=p.id?find(state.tasks,p.id,'事项'):undefined;if(old?.done)throw new MistCommandError('PRECONDITION','已完成的事项请先重开');
+      const assignee=p.assigneeId?resolveMember(context,p.assigneeId,'负责人'):{id:context.actorId||'',name:context.actorName};
+      const due=date(p.due),note=text(p.note||'','备注',false,1000);
+      if(old){if(old.kind==='personal')old.title=text(p.title,'事项',true,200);old.due=due;old.assigneeIds=assignee.id?[assignee.id]:old.assigneeIds;if(note)old.note=note;event(state,context,'task',old.id,`调整事项 ${old.title}：${due}${assignee.name?' · '+assignee.name:''}${note?' · '+note:''}`);result={id:old.id};}
+      else{const id=context.id();state.tasks.unshift({id,title:text(p.title,'事项',true,200),due,done:false,kind:'personal',target:p.target||{view:'cockpit'},assigneeIds:assignee.id?[assignee.id]:[],...(note?{note}:{})});result={id};}
+      break;
     }
     case 'files.add': {
       const f=p.file;

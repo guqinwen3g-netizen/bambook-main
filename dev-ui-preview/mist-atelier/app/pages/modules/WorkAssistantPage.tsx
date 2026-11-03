@@ -360,7 +360,7 @@ export function WorkAssistantPage({ tabs }: { tabs?: React.ReactNode }) {
             {live.text ? <BusinessText text={live.text} onOpen={openBusiness} /> : !live.confirms.length && <p className="mist-note">{uiText("正在处理…")}</p>}
           </div>}
           {live?.confirms.map(c => <Banner key={c.token} tone="warn" title={uiText('需要你确认：' + (RISK_LABEL[c.risk] ?? c.tool))} actions={<><Button variant="primary" onClick={() => void resolve(c, true)}>{uiText("确认执行")}</Button><Button onClick={() => void resolve(c, false)}>{uiText("不执行")}</Button></>}>{c.summary}</Banner>)}
-          {!messages.length && !live && <EmptyState title={uiText("告诉助手要做什么")} description={uiText("例如：查找某个订单，展开关联开发单，并附上原记录编号供我核对。业务写入、邮箱和文档能力尚未开放。")} compact />}
+          {!messages.length && !live && <EmptyState title={uiText("告诉助手要做什么")} description={uiText("例如：查找某个订单，展开关联开发单，并附上原记录编号。")} compact />}
         </div>
         <div className="mist-wa-composer">
           <TextArea aria-label={uiText("给工作助手的指令")} rows={3} maxLength={20000} value={input} disabled={!accountReady || !canChat} placeholder={uiText("输入指令，Ctrl+Enter 发送")} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void send(); } }} />

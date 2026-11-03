@@ -128,3 +128,16 @@ describe('post-receipt rejection',()=>{
   t.f.state.fulfillment.qcTasks[0].state='blocked';t.reject(1);expect(t.f.state.fulfillment.qcTasks[0].state).toBe('blocked');
  });
 });
+
+describe('sup11 supplier confirms a different due date',()=>{
+ it('requires a reason, keeps the original due and reminds the order owner when it slips past the order',()=>{
+  const f=fixture('fabric',true),purchaseId=f.pending();f.approve(purchaseId);
+  f.run({type:'fulfillment.procurement.send',payload:{id:purchaseId,at:f.context.now,evidence:'测试发出',fileIds:[]}});
+  const po=()=>f.state.fulfillment.purchases.find(p=>p.id===purchaseId)!,original=po().due,order=f.state.orders.find(o=>o.id===f.orderId)!;
+  const later=new Date(Date.parse(order.due+'T00:00:00Z')+3*86400000).toISOString().slice(0,10);
+  expect(()=>f.run({type:'fulfillment.procurement.confirm',payload:{id:purchaseId,at:f.context.now,confirmedDue:later,evidence:'回签',fileIds:[]}})).toThrow('交期变更原因');
+  f.run({type:'fulfillment.procurement.confirm',payload:{id:purchaseId,at:f.context.now,confirmedDue:later,evidence:'回签',fileIds:[],dueChangeReason:'染厂排期满'}});
+  expect(po()).toMatchObject({due:later,dueChanges:[{from:original,to:later,reason:'染厂排期满'}]});
+  expect(f.state.tasks.find(t=>t.kind==='purchase-late:'+purchaseId)).toMatchObject({done:false,target:{view:'orders/detail',id:f.orderId}});
+ });
+});

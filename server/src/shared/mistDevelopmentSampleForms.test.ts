@@ -44,7 +44,7 @@ describe('BB-DEV-6 fabric version physical forms',()=>{
   expect(f.state.events[0].text).toContain('米样 '+metre.code);expect(colour.form).toBe('色样');
  });
  it.each([
-  [{form:'色样',quantity:1.5,unit:'份'},/整数份/],[{form:'米样',quantity:2,unit:'份'},/米样按米/],[{form:'',quantity:2,unit:'份'},/形态/],[{form:'米样',quantity:0,unit:'米'},/数量/],
+  [{form:'色样',quantity:1.5,unit:'份'},/须为整数/],[{form:'米样',quantity:2,unit:'份'},/米样按米/],[{form:'',quantity:2,unit:'份'},/形态/],[{form:'米样',quantity:0,unit:'米'},/数量/],
  ])('rejects invalid appended forms without writing: %j',(input,pattern)=>{const f=fixture();f.record(3,'色样','份');f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,...input}}),pattern);});
  it('blocks appending before return and on cancelled developments',()=>{
   const f=fixture();f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/先登记本版返样/);
@@ -67,6 +67,14 @@ describe('BB-DEV-8 dispatch from version detail',()=>{
   expect(f.version().dispatches).toEqual([expect.objectContaining({id:r.id,sampleId:metre.id,sampleCode:metre.code,form:'米样',unit:'米',quantity:2,recipient:'测试客户 Anna',trackingNo:'SF123',fee:null,movementId:move.id})]);
   // 无需仓库二次确认：没有待处理任务，余额即时扣减。
   expect(f.state.tasks.filter(t=>t.title.includes('寄'))).toHaveLength(0);
+ });
+ it('records the customer sign-off once, not before dispatch or in the future',()=>{
+  const f=fixture();f.record(5,'米样','米');f.qc();const [metre]=f.samples();
+  const r=f.run({type:'development.sample.dispatch',payload:{...f.at,sampleId:metre.id,quantity:1,recipient:'测试客户',trackingNo:'SF1',fee:null}});
+  expect(()=>f.run({type:'development.sample.dispatchReceived',payload:{...f.at,dispatchId:r.id,date:'2099-01-01'}})).toThrow('未来');
+  f.run({type:'development.sample.dispatchReceived',payload:{...f.at,dispatchId:r.id,date:f.state.fulfillment.sampleMovements.find(m=>m.kind==='send')!.at.slice(0,10),feedback:'手感偏硬'}});
+  expect(f.version().dispatches![0].receipt).toMatchObject({feedback:'手感偏硬'});
+  expect(()=>f.run({type:'development.sample.dispatchReceived',payload:{...f.at,dispatchId:r.id,date:'2026-10-14'}})).toThrow('不能覆盖');
  });
  it('dispatches only from the selected position and preserves the other balance',()=>{
   const f=fixture();f.record(5,'米样','米');f.qc();const [metre]=f.samples();

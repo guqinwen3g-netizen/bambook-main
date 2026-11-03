@@ -109,6 +109,17 @@ export function riskSignals(state: MistState | null, day: string): RiskSignal[] 
     const late = days(i.due, day);
     out.push({ key: 'invoice-overdue:' + i.id, type: 'credit', level: late > 30 ? 'critical' : 'warning', title: `${mistInvoiceCustomerName(state, i)} 应收逾期 ${late} 天`, basis: `${i.code} 到期 ${i.due}，未收 ${i.currency} ${i.open.toFixed(2)}（原币，未换算）。`, source: { kind: 'invoice', id: i.id, label: i.code + ' · ' + i.customer }, orderId: i.orderId, since: i.due });
   }
+  // fin40：合规筛查到期未复查、或结论命中 / 待复核时进预警。
+  for (const r of state.market?.relations || []) {
+    if (r.status === 'archived') continue;
+    const latest = new Map<string, NonNullable<typeof r.screenings>[number]>();
+    for (const s of r.screenings || []) { const prev = latest.get(s.kind); if (!prev || s.screenedOn >= prev.screenedOn) latest.set(s.kind, s); }
+    for (const s of latest.values()) {
+      const label = ({ sanctions: '制裁名单', export_control: '出口管制', annual: '年度合规检查', other: '合规筛查' } as Record<string, string>)[s.kind];
+      if (s.result !== 'clear') out.push({ key: `screening-${s.result}:${r.id}:${s.kind}`, type: 'compliance', level: s.result === 'hit' ? 'critical' : 'warning', title: `${r.name} ${label}${s.result === 'hit' ? '命中' : '待复核'}`, basis: `${s.screenedOn} 筛查：${s.basis}`, source: { kind: 'relation', id: r.id, label: r.name }, orderId: '', since: s.screenedOn });
+      else if (s.nextReview <= day) out.push({ key: `screening-due:${r.id}:${s.kind}`, type: 'compliance', level: 'warning', title: `${r.name} ${label}到期复查`, basis: `上次 ${s.screenedOn} 筛查未命中，复查日 ${s.nextReview}。`, source: { kind: 'relation', id: r.id, label: r.name }, orderId: '', since: s.nextReview });
+    }
+  }
   for (const r of state.market?.relations || []) {
     if (!r.hold || r.status === 'archived') continue;
     out.push({ key: 'relation-hold:' + r.id, type: 'credit', level: 'warning', title: `${r.name} 往来已冻结`, basis: `冻结原因：${r.hold.reason}（${r.hold.actor} · ${riskBusinessDay(r.hold.at)}）。新报价、订单与采购会被拦截，已有业务需逐项确认。`, source: { kind: 'relation', id: r.id, label: r.name }, orderId: '', since: riskBusinessDay(r.hold.at) });

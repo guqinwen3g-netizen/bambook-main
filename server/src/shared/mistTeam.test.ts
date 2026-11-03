@@ -89,6 +89,9 @@ describe('主管团队视角', () => {
     const f = fixture();
     const arc = (weekStart: string, c: Partial<MistContext> = {}) => { const r = applyMistCommand(f.state, { type: 'team.weekly.archive', payload: { weekStart } } as MistCommand, { id: () => 'wr-1', now: '2026-10-19T01:00:00Z', actorName: '周敏', actorId: 'demo-reviewer', members: MIST_DEMO_ACCOUNTS, ...c } as unknown as MistContext); return r; };
     expect(pendingWeeklyArchive(f.state, 'demo-reviewer', '2026-10-19')).toBe('2026-10-12');
+    // fin10：只有当周有业务动态才提醒；10-05 那周补一条动态。
+    expect(pendingWeeklyArchive({ ...f.state, events: f.state.events.filter(e => e.at >= '2026-10-12') }, 'demo-reviewer', '2026-10-18')).toBeNull();
+    f.state.events.unshift({ id: 'wk-1005', entityType: 'order', entityId: 'x', actor: '业务员', at: '2026-10-07T02:00:00Z', text: '动态', fileIds: [] });
     expect(pendingWeeklyArchive(f.state, 'demo-reviewer', '2026-10-18')).toBe('2026-10-05');
     expect(() => arc('2026-10-13')).toThrow('周一');
     expect(() => arc('2026-10-19')).toThrow('还没结束');

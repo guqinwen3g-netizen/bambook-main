@@ -13,7 +13,7 @@ import { FileName } from '../runtime/files';
 import { OptionInput } from './OptionInput';
 import { DevSampleModeChoice, DevStageChainEditor, emptyStagePlan } from './DevStageChain';
 import { devStageChainText, devStagePlanError, type DevStagePlan } from '../../../../server/src/shared/mistDevelopmentStages';
-import { FABRIC_SAMPLE_FORMS, GARMENT_SAMPLE_FORMS, SAMPLE_UNITS, sampleFormUnit } from '../runtime/tradeOptions';
+import { FABRIC_SAMPLE_FORMS, GARMENT_SAMPLE_FORMS, SAMPLE_UNITS, sampleFormUnit, sampleUnitAllowsDecimal, sampleUnitsFor } from '../runtime/tradeOptions';
 
 export type NewRoundInput = { factories: string[]; requirements: string; fileIds: string[]; referenceVersionIds: string[]; targetDate: string; resampleFromVersionId?: string; factoryTasks?: FactoryTaskInput[]; stages?: DevStagePlan[] };
 export const NEW_ROUND_STEPS = ['参考版本', '参与工厂', '共同要求', '逐厂要求'] as const;
@@ -160,9 +160,9 @@ export function NewRoundDialog({ open, state, dev, busy, failure, factoryOptions
         <div className="mist-row"><Mono>{preview[index]}</Mono><b>{factoryLabel(state, task.factory)}</b></div>
         <FormGrid>
           <Field label={uiText("差异要求")} full hint={uiText("只写本厂与共同要求不同的部分，可留空")}><TextArea value={task.extraRequirements} onChange={event => setTask(task, { extraRequirements: event.target.value })} /></Field>
-          <Field label={uiText("样品形态")} required hint={uiText(fabric ? '米样按米，剪片类按份' : undefined)}><OptionInput ariaLabel="样品形态" options={fabric ? FABRIC_SAMPLE_FORMS : GARMENT_SAMPLE_FORMS} value={task.sampleForm} onChange={sampleForm => setTask(task, fabric ? { sampleForm, sampleUnit: sampleFormUnit(sampleForm) } : { sampleForm })} /></Field>
-          <Field label={uiText("数量")} required><TextInput type="number" min={0} step={fabric ? 0.1 : 1} value={String(task.sampleQuantity)} onChange={event => setTask(task, { sampleQuantity: event.target.value === '' ? 0 : Number(event.target.value) })} /></Field>
-          <Field label={uiText("单位")} required><OptionInput ariaLabel="单位" options={fabric ? SAMPLE_UNITS.fabric : SAMPLE_UNITS.garment} value={task.sampleUnit} onChange={sampleUnit => setTask(task, { sampleUnit })} /></Field>
+          <Field label={uiText("样品形态")} required hint={uiText(fabric ? '米样按米或码；件数类单位为整数' : undefined)}><OptionInput ariaLabel="样品形态" options={fabric ? FABRIC_SAMPLE_FORMS : GARMENT_SAMPLE_FORMS} value={task.sampleForm} onChange={sampleForm => setTask(task, fabric ? { sampleForm, sampleUnit: sampleFormUnit(sampleForm) } : { sampleForm })} /></Field>
+          <Field label={uiText("数量")} required><TextInput type="number" min={0} step={sampleUnitAllowsDecimal(task.sampleUnit) ? 0.1 : 1} value={String(task.sampleQuantity)} onChange={event => setTask(task, { sampleQuantity: event.target.value === '' ? 0 : Number(event.target.value) })} /></Field>
+          <Field label={uiText("单位")} required><OptionInput ariaLabel="单位" strict options={(fabric ? sampleUnitsFor('fabric', task.sampleForm) : SAMPLE_UNITS.garment.map(o => o.value)).map(u => ({ value: u, label: u }))} value={task.sampleUnit} onChange={sampleUnit => setTask(task, { sampleUnit })} /></Field>
           <Field label={uiText("要求日期")} required><TextInput type="date" value={task.dueDate} onChange={event => setTask(task, { dueDate: event.target.value })} /></Field>
         </FormGrid>
       </section>)}

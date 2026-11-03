@@ -76,6 +76,11 @@ export type FabricStageBalance = {
   lossPercent: number | null; agreedLossPercent?: number; overAllowance: boolean; outputExceedsInput: boolean;
   /** Greige needed for the contract quantity at the agreed loss, in the contract unit. */
   plannedInput: number | null;
+  /**
+   * P1-1 损耗成本：实际损耗的来料货值（投入 − 产出，按来料单价），以及超出约定损耗部分的扣款建议金额。
+   * 只在来料都折算得出、币种与加工单一致时计算；否则为 null（跨币种不折算）。
+   */
+  lossCost: { currency: string; amount: number; overAmount: number; overQuantity: number } | null;
 };
 /** Null when the purchase is not a fabric processing contract. */
 export function fabricStageBalance(root: MistState, processingId: string): FabricStageBalance | null {
@@ -97,8 +102,16 @@ export function fabricStageBalance(root: MistState, processingId: string): Fabri
   // Output above input is a counting or recording error, never a negative loss.
   const lossPercent = input && input > 0 && output > 0 && output <= input ? round((input - output) / input * 100, 2) : null;
   const plannedInput = agreed !== undefined && agreed < 100 && unitKind(contract.unit) ? round(contract.quantity / (1 - agreed / 100), 2) : null;
+  // 来料按投入占比的加权单价（每加工单位）；来料币种须与加工单一致才计算金额。
+  let lossCost: FabricStageBalance['lossCost'] = null;
+  const sources = inputs.map(row => ({ row, po: root.fulfillment.purchases.find(p => p.id === row.purchaseId)! }));
+  if (input && input > 0 && lossPercent !== null && sources.length && sources.every(x => x.row.converted && x.po.currency === contract.currency)) {
+    const value = sources.reduce((n, x) => n + x.row.accepted * x.po.price, 0), perUnit = value / input;
+    const lostQty = round(input - output), overQty = agreed !== undefined && lossPercent > agreed ? round(input * (lossPercent - agreed) / 100, 2) : 0;
+    lossCost = { currency: contract.currency, amount: Math.round(lostQty * perUnit * 100) / 100, overAmount: Math.round(overQty * perUnit * 100) / 100, overQuantity: overQty };
+  }
   return { unit: contract.unit, inputs, input, output, lossPercent, ...(agreed !== undefined ? { agreedLossPercent: agreed } : {}),
-    overAllowance: lossPercent !== null && agreed !== undefined && lossPercent > agreed, outputExceedsInput: input !== null && output > input, plannedInput };
+    overAllowance: lossPercent !== null && agreed !== undefined && lossPercent > agreed, outputExceedsInput: input !== null && output > input, plannedInput, lossCost };
 }
 
 /**

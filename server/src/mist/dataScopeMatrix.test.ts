@@ -11,7 +11,7 @@ import { MemoryMistDatabase, testAuthority } from './__tests__/support';
 
 // 规格 §2 / P3：岗位 × 越权读写矩阵。示例数据：customer-0、customer-2 跟进人 demo-sales，customer-1 跟进人 demo-buyer。
 const COMPANY = '11111111-1111-4111-8111-111111111111';
-const ALL_ORDERS = ['id-325', 'id-305', 'id-170', 'SO-G-2026-018', 'SO-G-2026-017', 'SO-G-2026-015', 'SO-G-2026-012', 'SO-G-2026-009'];
+const ALL_ORDERS = ['id-326', 'id-306', 'id-170', 'SO-G-2026-018', 'SO-G-2026-017', 'SO-G-2026-015', 'SO-G-2026-012', 'SO-G-2026-009'];
 const contract: MistContract = { createMistState, applyMistCommand, mistCommandPermission };
 const PEOPLE: Record<string, { role: SystemRoleId | 'owner' }> = {
   boss: { role: 'owner' }, finance: { role: SYSTEM_ROLE_IDS.FINANCE }, qc: { role: SYSTEM_ROLE_IDS.QC }, logistics: { role: SYSTEM_ROLE_IDS.LOGISTICS },
@@ -107,7 +107,7 @@ describe('row-level data scope by role', () => {
     expect(source.events.some(row => row.id === 'hidden-order-event')).toBe(true);
   });
   it('a department head sees members of the department and its sub-departments', async () => {
-    expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-017', 'id-325', 'id-305']));
+    expect(await orders('head')).toEqual(expect.arrayContaining(['SO-G-2026-017', 'id-326', 'id-306']));
     expect(await orders('head')).not.toContain('SO-G-2026-018');
   });
   it('a group member sees the group scope and nothing else', async () => {
