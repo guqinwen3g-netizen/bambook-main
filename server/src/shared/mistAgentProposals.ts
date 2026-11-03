@@ -61,7 +61,9 @@ export const HIGH_RISK_COMMANDS: ReadonlySet<string> = new Set(['cost.expense.pa
   'fulfillment.qc.confirm', 'fabric.confirm', 'development.confirm', 'platform.claim.disposition', 'platform.claim.execute', 'platform.claim.verify',
   'fulfillment.inventory.quarantine.dispose', 'fulfillment.claimInventory.scrap',
   // 放弃追偿属减免；修改邮箱成员与发信凭据属权限类（2026-11-02 复核补充）。
-  'fulfillment.inventory.quarantine.noRecovery', 'email.account.save']);
+  'fulfillment.inventory.quarantine.noRecovery', 'email.account.save',
+  // 生产QC不合格处置：工厂扣款进入应付结算、让步接收放行有缺陷的大货（2026-11-03）。
+  'fulfillment.qc.dispose']);
 /** 审批、决定、驳回、减免、核销、放行、冲销、作废、退款、结清、分配、对账、清除。 */
 export const HIGH_RISK_VERB = /(^|\.)(approve|decide|reject|waive|writeoff|release|reverse|void|refund|settle|allocate|reconcile|purge)/i;
 export const agentCommandRisk = (type: string | undefined): AgentCommandRisk => {

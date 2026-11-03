@@ -812,6 +812,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
+  "type": "fulfillment.qc.concession.decide",
+  "payload": "{ id: string; decision: 'approved' | 'rejected'; note: string }",
+  "source": "server/src/shared/mistQcDisposition.ts"
+ },
+ {
   "type": "fulfillment.qc.confirm",
   "payload": "{ id: string; result: 'approved' | 'rejected'; note: string; }",
   "source": "server/src/shared/mistFulfillment.ts"
@@ -820,6 +825,14 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "fulfillment.qc.continue",
   "payload": "{ id: string; note: string; }",
   "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.qc.dispose",
+  "payload": "{ id: string; kind: QcDispositionKind; note: string; fileIds?: string[]; factory?: string; due?: string; scope?: string; customerEvidence?: string; purchaseId?: string; amount?: number }",
+  "types": {
+   "QcDispositionKind": "'rework' | 'concession' | 'chargeback'"
+  },
+  "source": "server/src/shared/mistQcDisposition.ts"
  },
  {
   "type": "fulfillment.qc.report",
@@ -1676,7 +1689,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "payable.settlement.submit",
   "payload": "{ purchaseId: string; receiptIds: string[]; final?: boolean; disputes?: SettlementDispute[]; note?: string; fileIds?: string[] }",
   "types": {
-   "SettlementDispute": "{ description: string; amount: number }"
+   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string }"
   },
   "source": "server/src/shared/mistPayables.ts"
  },

@@ -16,6 +16,7 @@ import { emptyOption, Events, field, localNow, parseSource, RecordFiles, SourceL
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, RecordDisclosure, shortWhen, useListDetailRoute } from './pageKit';
 import { ProductionSampleNotes } from '../ProductionSampleNotes';
+import { QcDispositionPanel } from './QcDispositionPanel';
 
 type Domain = FulfillmentQcTask['domain'];
 type Kind = FulfillmentQcTask['kind'];
@@ -260,6 +261,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
   const reportReason = !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : task.quarantine?.disposedAt ? '本批已处置' : sourceBlocker || (!task.assigneeId ? '请先认领任务' : !mine ? `仅当前QC（${task.assignee}）可提交` : false);
   const handoverReason = (verb: string) => !canQc ? `需要${DOMAIN_LABEL[task.domain]}权限` : sourceBlocker || (task.state === 'reported' ? `已出结论，不能${verb}；需复验请追加报告` : task.assigneeId && !mine ? `仅当前QC（${task.assignee}）可${verb}` : false);
   const confirmable = task.kind === 'sample' && task.source.kind === 'orderLine' && task.state === 'reported';
+  const ownerId = task.source.kind === 'orderLine' ? state.orders.find(order => order.id === (task.source as { orderId: string }).orderId)?.ownerId : undefined;
   const continuable = task.state === 'awaiting_business' || (task.kind === 'sample' && task.businessConfirmation?.result === 'approved' && !task.businessContinued);
   return <DetailBody data-qc-detail={task.id} heading={<div>
       <span className="mist-mono mist-muted">{task.code}</span>
@@ -303,6 +305,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, locked, onClaim, on
         { label: task.kind === 'production' ? '确认继续生产' : '业务确认继续', onClick: onContinue, reason: canBusiness ? false : '由业务员确认恢复', hidden: !continuable, primary: true },
       ]} />
     </DetailBlock>}
+    <QcDispositionPanel task={task} state={state} canDispose={canBusiness && (!ownerId || ownerId === me)} locked={locked} />
     <DetailBlock title={uiText(task.kind === 'production' ? `持续检查记录（${reports.length}）` : `评审报告（${reports.length}）`)}>
       {reports.length ? reports.map((report, index) => <QcReportCard key={report.id} report={report} domain={task.domain} production={task.kind === 'production'} latest={index === 0} />) : <span className="mist-note">{uiText("暂无报告")}</span>}
     </DetailBlock>
