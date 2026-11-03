@@ -12,7 +12,7 @@ import { relationHoldReason } from './mistRelationHold';
 import {demoAccountRef,ownerChangeText,resolveMember,setMemberGroups,type MistMemberDirectoryEntry,type MistMemberGroupAssignment} from './mistAccounts';
 import { supplierBusinessDay, productionSupplierUnavailableReason } from './mistSupplierStatus';
 import {assignFactoryLetters,defaultFactoryTask,developmentClosure,developmentRoundBlocker,duplicateRoundFactories,factoryTaskError,factoryTaskNote,factoryTaskSync,factoryTaskSyncBlocker,minorVersionBlocker,minorVersionLabel,minorVersions,nextRoundNumber,nextPhysicalVersionNumber,physicalVersionLabel,roundVersionLabel,type FactoryTaskInput} from './mistDevelopmentRounds';
-import {createFulfillmentState,applyFulfillmentCommand,fulfillmentCommandPermission,getFulfillmentReviews,assertProductionTransition,fulfillmentProductionFact,fulfillmentProductionColumn,type FulfillmentState,type FulfillmentCommand} from './mistFulfillment';
+import {createFulfillmentState,applyFulfillmentCommand,ensureDevelopmentQcTasks,recordDevelopmentQcOnTasks,fulfillmentCommandPermission,getFulfillmentReviews,assertProductionTransition,fulfillmentProductionFact,fulfillmentProductionColumn,type FulfillmentState,type FulfillmentCommand} from './mistFulfillment';
 import {createMarketState,applyMarketCommand,backfillQuoteLineFamilies,marketCommandPermission,getMarketReviews,type MarketState,type MarketCommand} from './mistMarket';
 import {createCrmState,applyCrmCommand,crmCommandPermission,type CrmState,type CrmCommand} from './mistCrm';
 import {seedDemoModules,DEMO_SEED_VERSION} from './mistDemoSeed';
@@ -705,7 +705,7 @@ function updateDev(state: MistState, dev: MistDev, context: MistContext) {
   else if(version?.qc?.result==='reject'){dev.stage=2;dev.state='QC 不通过';dev.tone='bad';}
   else if(version?.qc){dev.stage=3;dev.state=version.qc.result==='conditional'?'有保留通过 · 待确认':'待需求方确认';dev.tone='accent';}
   else if(version?.returnedAt&&version.qcHistory?.length){dev.stage=2;dev.state='整改中 · 待复检';dev.tone='warn';}
-  else if(version?.returnedAt){dev.stage=2;dev.state='QC 待评审';dev.tone='warn';}
+  else if(version?.returnedAt){dev.stage=2;dev.state=(state.fulfillment?.qcTasks||[]).some(t=>t.source.kind==='version'&&t.source.versionId===version.id&&t.state==='pending'&&!t.assigneeId)?'待 QC 认领':'QC 待评审';dev.tone='warn';}
   else if(version&&devStagePendingHandovers(version).length){dev.stage=1;dev.state='前道打样中';dev.tone='neutral';}
   else if(version){dev.stage=1;dev.state=developmentDomain(dev.values)==='fabric'?'待工厂试样':'工厂制作中';dev.tone='neutral';}
   else {dev.stage=0;dev.state='开发计划';dev.tone='neutral';}
@@ -905,7 +905,10 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
   if(command.type.startsWith('cost.')){const result=applyOrderCostCommand(state,command as OrderCostCommand,context);return {state,result};}
   if(command.type.startsWith('rfq.')||command.type.startsWith('sourcing.')){const result=applyRfqCommand(state,command as RfqCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type.startsWith('rebate.')){const result=applyExportRebateCommand(state,command as ExportRebateCommand,context);recalculate(state);assertOrderFundingIntegrity(state);return {state,result};}
-  if(command.type.startsWith('fulfillment.')){const result=applyFulfillmentCommand(state,command as FulfillmentCommand,context);closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
+  if(command.type.startsWith('fulfillment.')){const result=applyFulfillmentCommand(state,command as FulfillmentCommand,context);
+    // Workbench QC on a development sample keeps the case status in step (待 QC 认领 / QC 待评审 / QC result).
+    if(command.type.startsWith('fulfillment.qc.')){const task=state.fulfillment.qcTasks.find(t=>t.id===(command.payload as {id?:string}).id||t.id===result?.id);if(task?.source.kind==='version'){const dev=state.devs.find(d=>d.id===(task.source as {devId:string}).devId);if(dev)updateDev(state,dev,context);}}
+    closeTakenOverHandoffs(state);normalizeMistState(state,context);recalculate(state);return {state,result};}
   if(command.type==='market.lead.convertToCrm'){const result=convertLeadToCrm(state,command.payload as Extract<MarketCommand,{type:'market.lead.convertToCrm'}>['payload'],context);recalculate(state);return {state,result};}
   if(command.type.startsWith('market.')){const result=applyMarketCommand(state,command as MarketCommand,context);
     // 报价转单：报价的贸易术语、指定地点与付款条件作为订单合同初稿，仍走主单审批。
@@ -980,7 +983,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(developmentDomain(dev.values)==='fabric'){if(!validFabricSample(p.quantity,p.form||'',p.unit||''))throw new MistCommandError('VALIDATION','面料返样须明确形态、数量和单位：米样按米，剪片类按整数份');v.sampleForm=text(p.form,'实际形态');v.sampleUnit=text(p.unit,'实际单位');v.sampleLocation=text(p.location||'','实际位置',false);v.sampleColor=text(p.color||dev.values.color,'实际颜色',false);v.size='';}
       else if(!Number.isInteger(p.quantity))throw new MistCommandError('VALIDATION','成衣返样须为正整数件数');
       v.sample=text(p.sample,'样品编号',true,120);v.sampleQuantity=positive(p.quantity,'返样数量');v.returnedAt=instant(p.returnedAt,context);
-      updateDev(state,dev,context);applyFulfillmentCommand(state,{type:'fulfillment.samples.sync',payload:{}},context);event(state,context,'development',dev.id,'记录 '+v.label+' 返样');result={devId:dev.id,versionId:v.id};break;
+      applyFulfillmentCommand(state,{type:'fulfillment.samples.sync',payload:{}},context);ensureDevelopmentQcTasks(state,dev.id,v.id,context);updateDev(state,dev,context);event(state,context,'development',dev.id,'记录 '+v.label+' 返样');result={devId:dev.id,versionId:v.id};break;
     }
     case 'development.recordQc': {
       const [dev,v]=versionOf(state,p.devId,p.versionId);
@@ -1008,6 +1011,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(p.qc.appearanceDefects!==undefined&&(!Number.isSafeInteger(p.qc.appearanceDefects)||p.qc.appearanceDefects<0))throw new MistCommandError('VALIDATION','外观缺陷数量须为非负整数');
       if(v.qc)v.qcHistory=[...(v.qcHistory||[]),v.qc];
       v.qc={result:p.qc.result,reviewer:text(p.qc.reviewer,'评审人',true,120),reviewedAt:instant(p.qc.reviewedAt,context),report:text(p.qc.report,'报告编号',true,120),opinion:text(p.qc.opinion,'专业意见'),measurements:facts,...(developmentDomain(dev.values)==='fabric'?{fabricMeasurements:fabricFacts}:{}),...(p.qc.appearanceDefects===undefined?{}:{appearanceDefects:p.qc.appearanceDefects})};
+      recordDevelopmentQcOnTasks(state,dev.id,v.id,v.qc,context);
       updateDev(state,dev,context);event(state,context,'development',dev.id,'记录 '+v.label+' QC评审',{view:'development/detail',id:dev.id,versionId:v.id},'qc');result={devId:dev.id,versionId:v.id};break;
     }
     case 'development.move': {
@@ -1114,6 +1118,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const form=text(p.form,'实物形态',true,60), unit=text(p.unit,'单位',true,20);
       const {id}=applyFulfillmentCommand(state,{type:'fulfillment.samples.create',payload:{name:dev.name,category:'面料',form,unit,quantity:p.quantity,location:text(p.location||'','位置',false,240),size:'',color:text(p.color||v.sampleColor||dev.values.color||'','颜色',false,120),source:{kind:'version',devId:dev.id,versionId:v.id},fileIds:[],note:text(p.note||'','备注',false,1000)||('来源实物 '+v.sample+' 追加'+form)}},context) as {id:string};
       const sample=find(state.fulfillment.samples,id,'样品');
+      ensureDevelopmentQcTasks(state,dev.id,v.id,context);
       updateDev(state,dev,context);
       event(state,context,'development',dev.id,v.label+' 追加实物形态 '+form+' '+sample.quantity+' '+unit+'（'+sample.code+'）',{view:'development/detail',id:dev.id,versionId:v.id});
       result={devId:dev.id,versionId:v.id,id};break;

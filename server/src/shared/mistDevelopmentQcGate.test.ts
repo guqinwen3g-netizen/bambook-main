@@ -20,7 +20,8 @@ function disposedWorkbenchVersion(disposition:'resample'|'abandon'|'confirmed'|'
   f.run({type:'development.recordSample',payload:{devId,versionId,sample:'FAB-1',quantity:2,form:'米样',unit:'米',returnedAt:f.ctx.now}});
   const source={kind:'version' as const,devId,versionId};
   const request={type:'fulfillment.qc.request' as const,payload:{source,domain:'fabric' as const,kind:'sample' as const,factory:'实际测试面料厂',location:'样品间',contact:'业务员',due:'2026-10-16'}};
-  const id=f.run(request).id!;f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}});
+  // The returned sample already created its pending workbench task.
+  const id=f.state.fulfillment.qcTasks.find(t=>t.source.kind==='version'&&t.source.versionId===versionId)!.id;f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}});
   f.run({type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:disposition==='confirmed'||disposition==='archived'?'pass':'reject',report:'FIRST-FAIL',opinion:'原始评审',measurements:[],fileIds:[],reviewedAt:f.ctx.now}});
   if(disposition==='resample')f.run({type:'development.round.create',payload:{devId,factories:['实际测试面料厂'],requirements:'调整预缩后返样',targetDate:'2026-10-30',resampleFromVersionId:versionId}});
   else if(disposition==='abandon')f.run({type:'development.qc.decide',payload:{devId,versionId,decision:'abandon',note:'不再采用'}});
@@ -42,7 +43,7 @@ describe('QC workbench preserves disposed development versions',()=>{
   it('allows the new round to proceed while preserving the first failed report',()=>{
     const {f,source}=disposedWorkbenchVersion('resample'),version=f.state.versions.find(v=>v.id!==source.versionId)!;
     f.run({type:'development.recordSample',payload:{devId:source.devId,versionId:version.id,sample:'FAB-2',quantity:2,form:'米样',unit:'米',returnedAt:f.ctx.now}});
-    const id=f.run({type:'fulfillment.qc.request',payload:{source:{...source,versionId:version.id},domain:'fabric',kind:'sample',factory:'实际测试面料厂',location:'样品间',contact:'业务员',due:'2026-10-16'}}).id!;
+    const id=f.state.fulfillment.qcTasks.find(t=>t.source.kind==='version'&&t.source.versionId===version.id)!.id;
     f.run({type:'fulfillment.qc.claim',payload:{id,domain:'fabric'}});f.run({type:'fulfillment.qc.report',payload:{id,domain:'fabric',result:'pass',report:'SECOND-PASS',opinion:'新实物复验通过',measurements:[],fileIds:[],reviewedAt:f.ctx.now}});
     expect(f.state.versions.find(v=>v.id===source.versionId)!.qc).toMatchObject({result:'reject',report:'FIRST-FAIL'});expect(f.state.versions.find(v=>v.id===version.id)!.qc).toMatchObject({result:'pass',report:'SECOND-PASS'});expect(f.state.fulfillment.qcReports.map(r=>r.report)).toEqual(['FIRST-FAIL','SECOND-PASS']);
   });

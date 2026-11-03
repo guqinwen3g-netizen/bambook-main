@@ -50,6 +50,13 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 第四块：面料加工单 `stageTerms.intermediate=true` 为前道加工——审批不生成生产分支（`fulfillment.procurement.decide`），也不计入同条目履约数量；回交可直送下一道或入库。`MaterialDeliveryLink` 新增 `contractId`（接收方为前道加工单，此时无 `productionId`）；`deliveryContractId` 统一解析接收加工单，`hasMaterialAtFactory`、`fabricStageBalance`、物料接收待办与交接面板都按它取。`materialDeliveryTargets` 对面料工序来源（坯布、前道加工）列出本条目已接单的前道加工单（选项值 `contract:<id>`）和最后一道的生产分支，排除自身和已向本单交货的加工单；`fulfillment.materials.deliver/issue` 与 `procurement.receive` 用 `targetPurchaseId` 指向前道加工单。订单核算标「前道加工」。
 - 未做：损耗成本金额与超耗扣款、收货方结构化字段。受限范围账号从库存发料的跨范围白名单（`repository.ts` `crossTarget`）仍只认 `targetProductionId`，发给前道加工单会被拒（不放宽权限）；面料负责人本人范围内办理不受影响。设计稿 `docs/design/P1-1-fabric-staged-outsourcing.md`；测试 `server/src/shared/mistFabricStaged.test.ts`。
 
+## 当前 Mist 开发样品 QC 任务（P1-4 第一块）
+
+- `development.recordSample` 与 `development.version.addSampleForm` 入库实物后调用 `ensureDevelopmentQcTasks`（`mistFulfillment.ts`）：每件开发实物一条 `kind:'sample'`、`state:'pending'` 的 QC 任务，按 `sampleId` 去重；小版本和已处置版本（`fulfillmentQcSourceBlocker`）不建。手动 `fulfillment.qc.request` 同一实物会被“已有QC任务”拒绝。
+- `development.recordQc`（开发页直接录入）经 `recordDevelopmentQcOnTasks` 在该版本未结任务上追加报告、补认领人、按结论置 `reported` / `blocked`；任务已被他人认领时拒绝（CONFLICT），原状态不变。工作台报告仍沿原逻辑写 `version.qc`。
+- 开发案状态：有未认领任务时为「待 QC 认领」，否则「QC 待评审」；工作台的 `fulfillment.qc.*` 命令作用于版本来源任务时同步刷新开发案（`applyMistCommand`）。版本卡片 `versionTimelineStatus(version, state)` 同样区分「待 QC 认领 / QC 中」。
+- 尚未合并：旧数据库层 `server/src/development/developmentSampleQualityService.ts`（`sup31`）不在 Mist 运行入口内，未改动。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。

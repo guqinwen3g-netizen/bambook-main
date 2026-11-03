@@ -17,7 +17,8 @@ export const QC_RESULT_LABEL: Record<MistQc['result'], string> = { pass: '通过
 export const CONFIRMATION_RESULT_LABEL: Record<MistConfirmation['result'], string> = { approved: '认可', needs_adjustment: '需修改', rejected: '不采用' };
 
 /** 版本卡片状态：主状态 + 附加标记（有保留通过始终标“需关注”，并保留小版本 / 留档事实）。 */
-export function versionTimelineStatus(version: MistVersion): VersionTimelineStatus {
+/** Pass the workspace to tell an unclaimed workbench task (待 QC 认领) apart from a review in progress. */
+export function versionTimelineStatus(version: MistVersion, state?: Pick<MistState, 'fulfillment'>): VersionTimelineStatus {
   const flags: VersionTimelineStatus['flags'] = [];
   if (version.qc?.result === 'conditional') flags.push({ label: '需关注', tone: 'warn' });
   if (version.minor) flags.push({ label: '小版本', tone: 'neutral' });
@@ -31,7 +32,7 @@ export function versionTimelineStatus(version: MistVersion): VersionTimelineStat
   if (version.qcDecision?.kind === 'resample') return status('resampled', '已重新打样', 'neutral');
   if (version.qc?.result === 'reject') return status('qc_reject', 'QC 不通过', 'bad');
   if (!version.returnedAt) return status('awaiting_return', '待返样', 'neutral');
-  if (!version.qc) return version.qcHistory?.length ? status('rework_pending', '整改待复检', 'warn') : status('qc_pending', 'QC 中', 'accent');
+  if (!version.qc) return version.qcHistory?.length ? status('rework_pending', '整改待复检', 'warn') : state?.fulfillment?.qcTasks.some(t => t.source.kind === 'version' && t.source.versionId === version.id && t.state === 'pending' && !t.assigneeId) ? status('qc_pending', '待 QC 认领', 'warn') : status('qc_pending', 'QC 中', 'accent');
   return status('awaiting_confirmation', '待确认', 'accent');
 }
 
@@ -82,7 +83,7 @@ export function developmentVersionComparison(state: MistState, dev: MistDev, ver
     row('round', '来源', '轮次', version => source(version).roundLabel),
     row('factory', '来源', '工厂', version => source(version).factory),
     row('label', '来源', '版本', version => version.label + (version.minor ? `（小版本，沿用 ${source(version).parentLabel || '大版本'} 实物与 QC）` : '')),
-    row('status', '来源', '当前状态', version => { const status = versionTimelineStatus(version); return [status.label, ...status.flags.map(flag => flag.label)].join(' · '); }),
+    row('status', '来源', '当前状态', version => { const status = versionTimelineStatus(version, state); return [status.label, ...status.flags.map(flag => flag.label)].join(' · '); }),
     row('sample', '实物', '返样', version => version.returnedAt ? [version.sample || '未登记编号', `${version.sampleQuantity} ${fabric ? version.sampleUnit || '单位未登记' : '件'}`, time(version.returnedAt)].filter(Boolean).join(' · ') : '未返样'),
     row('qcResult', 'QC', 'QC 结论', version => version.qc ? QC_RESULT_LABEL[version.qc.result] : !version.returnedAt ? '未返样，无 QC' : version.qcHistory?.length ? '整改待复检' : 'QC 待评审'),
     row('qcReview', 'QC', '评审人 / 时间', version => version.qc ? [version.qc.reviewer, time(version.qc.reviewedAt)].filter(Boolean).join(' · ') : ''),

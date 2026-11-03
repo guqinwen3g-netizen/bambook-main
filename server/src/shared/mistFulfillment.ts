@@ -1083,6 +1083,32 @@ export function fulfillmentQcSourceBlocker(root: MistState, source: FulfillmentS
     return null;
 }
 
+/** A returned development sample waits for QC in the workbench: one pending sample task per physical sample, created once. */
+export function ensureDevelopmentQcTasks(root: MistState, devId: string, versionId: string, ctx: MistContext): string[] {
+    const f = root.fulfillment, version = root.versions.find(v => v.id === versionId && v.devId === devId), dev = root.devs.find(d => d.id === devId);
+    if (!version || !dev || !version.returnedAt || version.minor || fulfillmentQcSourceBlocker(root, { kind: 'version', devId, versionId })) return [];
+    const created: string[] = [];
+    for (const sample of f.samples.filter(s => s.source.kind === 'version' && s.source.devId === devId && s.source.versionId === versionId)) {
+        if (f.qcTasks.some(t => t.sampleId === sample.id)) continue;
+        const id = ctx.id();
+        f.qcTasks.push({ id, code: code('QC', f.qcTasks, ctx), source: { kind: 'version', devId, versionId }, sampleId: sample.id, domain: developmentDomain(dev.values) === 'fabric' ? 'fabric' : 'garment', kind: 'sample', factory: version.factory || '待安排工厂', location: sample.location || '样品间', contact: '', due: platformBusinessDate(ctx.now), requestedBy: ctx.actorName, assignee: '', state: 'pending', reportIds: [], createdAt: ctx.now });
+        audit(root, ctx, 'qc', id, `${version.label} 返样待 QC 认领`, { view: 'qc-workbench', id });
+        created.push(id);
+    }
+    return created;
+}
+/** The development page's direct QC entry is recorded on the same workbench task(s), so both views show one result. */
+export function recordDevelopmentQcOnTasks(root: MistState, devId: string, versionId: string, qc: MistQc, ctx: MistContext): void {
+    const f = root.fulfillment, open = f.qcTasks.filter(t => t.kind === 'sample' && t.source.kind === 'version' && t.source.devId === devId && t.source.versionId === versionId && ['pending', 'working', 'blocked'].includes(t.state));
+    for (const t of open) {
+        if (t.assigneeId && t.assigneeId !== ctx.actorId) fail(`${t.code} 已由 ${t.assignee} 认领，请在 QC 工作台由认领人提交`, 'CONFLICT');
+        const id = ctx.id(), previous = t.reportIds.at(-1);
+        f.qcReports.push({ id, taskId: t.id, location: t.location, result: qc.result, report: qc.report, opinion: qc.opinion, measurements: qc.measurements || [], fileIds: [], reviewer: qc.reviewer, reviewedAt: qc.reviewedAt, scopeRevision: scopeRevision(root, t), sizeChecks: [], ...(previous ? { previousReportId: previous } : {}) });
+        t.reportIds.push(id);
+        if (!t.assigneeId && ctx.actorId) { t.assignee = ctx.actorName; t.assigneeId = ctx.actorId; }
+        t.state = qc.result === 'reject' ? 'blocked' : 'reported';
+    }
+}
 export function applyFulfillmentCommand(root: MistState, command: FulfillmentCommand, ctx: MistContext): MistCommandResult {
     const f = root.fulfillment || (root.fulfillment = createFulfillmentState(ctx, root));
     f.shippingTerms ||= [];

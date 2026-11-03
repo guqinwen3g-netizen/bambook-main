@@ -119,11 +119,11 @@ it('records external testing separately from a confirmation send while preservin
 
 it('binds a one-item development QC request and requires an explicit item when multiple forms exist',()=>{
  const f=fixture();f.record(1,'色样','份');const sample=f.samples()[0];
- const request=()=>f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架A',contact:'',due:'2026-10-16'}});
- const first=request().id;expect(f.state.fulfillment.qcTasks.find(task=>task.id===first)!.sampleId).toBe(sample.id);
+ // Each physical form gets exactly one pending workbench task; a manual request cannot duplicate it.
+ expect(f.state.fulfillment.qcTasks.map(task=>[task.sampleId,task.state])).toEqual([[sample.id,'pending']]);
+ f.unchanged(()=>f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架A',contact:'',due:'2026-10-16'}}),/已有QC任务/);
  f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:2,unit:'米',location:'架B'}});
- f.unchanged(request,/准确实物/);
  const second=f.samples().find(row=>row.id!==sample.id)!;
- f.run({type:'fulfillment.qc.request',payload:{source:{kind:'version',...f.at},sampleId:second.id,domain:'fabric',kind:'sample',factory:'测试面料厂',location:'架B',contact:'',due:'2026-10-16'}});
  expect(f.state.fulfillment.qcTasks.map(task=>task.sampleId)).toEqual([sample.id,second.id]);
+ expect(f.state.fulfillment.qcTasks[1]).toMatchObject({location:'架B',kind:'sample',domain:'fabric'});
 });
