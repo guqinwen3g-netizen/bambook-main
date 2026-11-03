@@ -22,7 +22,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 
 type Domain = 'fabric' | 'garment';
-type StateFilter = 'all' | 'available' | 'isolated' | 'cleared';
+type StateFilter = 'all' | 'available' | 'inspecting' | 'isolated' | 'cleared';
 type SourceFilter = 'all' | 'purchase' | 'claimReturn';
 const DOMAIN_LABEL: Record<Domain, string> = { fabric: '面料库存', garment: '成衣库存' };
 const MOVE_LABEL: Record<string, string> = { receive: '实际入库', issue: '出库', return: '按原出库退回', move: '移位', lock: '隔离锁定', unlock: '批准解锁', scrap: '报废出库', reject: '转为拒收' };
@@ -34,13 +34,15 @@ export function stockOutstanding(root: MistState, stock: FulfillmentStock) {
   return round(root.fulfillment.stockMovements.filter(movement => movement.stockId === stock.id && movement.kind === 'issue').reduce((sum, movement) => sum + stockIssueRemaining(root, movement.id), 0));
 }
 /** Quality / availability state from recorded quantities only. */
+/** Lot held by an open incoming inspection (IQC), not a failed lot. */
+export const stockAwaitingIqc = (root: MistState, stock: FulfillmentStock) => root.fulfillment.qcTasks.some(task => task.kind === 'incoming' && task.incoming?.stockId === stock.id && !task.incoming.releasedAt);
 export function stockState(root: MistState, stock: FulfillmentStock): Exclude<StateFilter, 'all'> {
-  if ((stock.locked || 0) > 0) return 'isolated';
+  if ((stock.locked || 0) > 0) return stockAwaitingIqc(root, stock) ? 'inspecting' : 'isolated';
   return stock.available > 0 ? 'available' : 'cleared';
 }
-const STATE_LABEL: Record<Exclude<StateFilter, 'all'>, string> = { available: '可用', isolated: '隔离待处置', cleared: '已出清' };
-const STATE_PILL: Record<Exclude<StateFilter, 'all'>, string> = { available: '可用', isolated: '隔离中', cleared: '已出清' };
-const STATE_TONE: Record<Exclude<StateFilter, 'all'>, Tone> = { available: 'ok', isolated: 'warn', cleared: 'neutral' };
+const STATE_LABEL: Record<Exclude<StateFilter, 'all'>, string> = { available: '可用', inspecting: '待来料检验', isolated: '隔离待处置', cleared: '已出清' };
+const STATE_PILL: Record<Exclude<StateFilter, 'all'>, string> = { available: '可用', inspecting: '待检', isolated: '隔离中', cleared: '已出清' };
+const STATE_TONE: Record<Exclude<StateFilter, 'all'>, Tone> = { available: 'ok', inspecting: 'accent', isolated: 'warn', cleared: 'neutral' };
 const domainOf = (root: MistState, stock: FulfillmentStock): Domain | undefined => root.orders.find(order => order.id === stock.orderId)?.type as Domain | undefined || root.fulfillment.purchases.find(purchase => purchase.id === stock.purchaseId)?.domain;
 /** Per-unit totals; different units are never added together. */
 function byUnit(rows: FulfillmentStock[], value: (stock: FulfillmentStock) => number) {
@@ -79,7 +81,7 @@ export function InventoryPage() {
   const warehouseName = (id?: string) => id ? f?.warehouses.find(row => row.id === id)?.name || '仓库不可用' : '';
   const searched = domainRows.filter(stock => (!warehouseFilter || stock.warehouseId === warehouseFilter) && (sourceFilter === 'all' || (sourceFilter === 'claimReturn') === isReturn(stock))
     && (!needle || `${stock.name} ${stock.batchNumber || ''} ${stock.location} ${stock.owner} ${fulfillmentPositions(stock).map(position => position.location).join(' ')} ${purchaseOf(stock)?.code || ''} ${purchaseOf(stock)?.supplier || ''} ${returnCode(stock) || ''} ${warehouseName(stock.warehouseId)}`.toLowerCase().includes(needle)));
-  const priority: Record<Exclude<StateFilter, 'all'>, number> = { isolated: 0, available: 1, cleared: 2 };
+  const priority: Record<Exclude<StateFilter, 'all'>, number> = { isolated: 0, inspecting: 1, available: 2, cleared: 3 };
   const rows = !state ? [] : searched.filter(stock => stateFilter === 'all' || stockState(state, stock) === stateFilter)
     .sort((a, b) => priority[stockState(state, a)] - priority[stockState(state, b)] || b.createdAt.localeCompare(a.createdAt));
   const selected = rows.find(stock => stock.id === picked) || (picked ? scoped.find(stock => stock.id === picked) : undefined);
@@ -195,6 +197,7 @@ export function InventoryPage() {
     <Pipeline<StateFilter> value={stateFilter} onChange={setStateFilter} items={[
       { value: 'all', label: '全部批次', count: stateCount('all'), color: 'var(--mist-ink-2)' },
       { value: 'available', label: '可用', count: stateCount('available'), color: 'var(--mist-ok)' },
+      { value: 'inspecting', label: '待来料检验', count: stateCount('inspecting'), color: 'var(--mist-accent)' },
       { value: 'isolated', label: '隔离待处置', count: stateCount('isolated'), color: 'var(--mist-warn)' },
       { value: 'cleared', label: '已出清', count: stateCount('cleared'), color: 'var(--mist-ink-3)' },
     ]} />
@@ -227,6 +230,7 @@ function StockDetail({ stock, state, can, locked, canClaims, canQc, canFinance, 
   const claimOpen = !!sourceClaim && !['Closed', 'Cancelled'].includes(sourceClaim.state);
   const next: { tone: Tone; title: string; text: string } = returned
     ? isRepair ? {tone:record?.releasedRepairId?'ok':repair?.qc?.result==='fail'?'bad':'warn',title:record?.releasedRepairId?'已交还':!repair?'待维修':!repair.qc?'待复检':repair.qc.result==='pass'?'待交还':'复检不合格',text:''} : record && !record.disposal ? { tone: 'warn', title: '退回隔离库存', text: '待按批准去向处置' } : { tone: 'ok', title: '已按批准去向处置', text: record?.disposal ? `${record.disposal.actor} · ${shortWhen(record.disposal.at)} · ${record.disposal.basis}` : '本批没有待处置数量。' }
+    : current === 'inspecting' ? { tone: 'accent', title: `待来料检验 ${stock.locked} ${stock.unit}`, text: '' }
     : current === 'isolated' ? { tone: 'warn', title: `隔离待处置 ${stock.locked} ${stock.unit}`, text: '' }
     : current === 'available' ? { tone: 'accent', title: `可用 ${stock.available} ${stock.unit}`, text: '' }
     : out > 0 && !disposedQuantity ? { tone: 'neutral', title: `已全部出库 · ${out} ${stock.unit}`, text: '' }

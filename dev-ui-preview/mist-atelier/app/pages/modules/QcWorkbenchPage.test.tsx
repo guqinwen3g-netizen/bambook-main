@@ -285,3 +285,21 @@ it('lets the order owner choose a rework and requires the customer file for a co
   await click(within(again).getByRole('button',{name:'提交审批'}));
   expect(store.run).not.toHaveBeenCalled();expect(again.textContent).toContain('附文件');
 });
+
+it('computes the AQL decision in the production report and lets the warehouse release an inspected incoming lot',async()=>{
+  store.state!.orders.push({id:'o',code:'SO-G',type:'garment',ownerId:'sales'} as any);store.state!.orderLines.push({id:'l',orderId:'o',name:'风衣',style:'TR-1',unit:'件',qty:1200} as any);
+  store.state!.productions.push({id:'prod',code:'FUL-1',orderId:'o',lineId:'l',order:'SO-G',name:'风衣',factory:'华美制衣',qty:1200,due:'2026-10-30',pct:50,img:'coat',col:'sew'} as any);
+  store.state!.fulfillment.qcTasks.push(task('prod-qc',{kind:'production',source:{kind:'orderLine',orderId:'o',lineId:'l',productionId:'prod'},state:'working',assignee:'QC甲',assigneeId:'qc-a'}));
+  render('prod-qc');await click(getByRole(host,'button',{name:'提交 / 追加复验报告'}));
+  expect(host.textContent).toContain('AQL 抽样');
+  typeInto(getByRole(host,'spinbutton',{name:'实际抽检件数'}) as HTMLInputElement,'80');typeInto(getByRole(host,'spinbutton',{name:'严重缺陷'}) as HTMLInputElement,'6');
+  expect(host.textContent).toContain('80 件（字码 J）');expect(host.textContent).toContain('5 / 6');expect(host.textContent).toContain('抽样拒收');
+  act(()=>root.unmount());root=createRoot(host);
+  store.state!.fulfillment.qcReports.push({id:'ir',taskId:'iqc',result:'pass',report:'IQC-1',opinion:'合格',measurements:[],fileIds:[],reviewer:'QC甲',reviewedAt:'2026-10-13T09:00:00Z'} as any);
+  store.state!.fulfillment.qcTasks.push(task('iqc',{kind:'incoming',incoming:{receiptId:'rc',stockId:'st',quantity:100,unit:'米',name:'坯布'},state:'reported',reportIds:['ir']}));
+  render('iqc');expect(host.textContent).toContain('待检锁定');
+  await click(getByRole(host,'button',{name:'放行入库'}));
+  const dialog=getByRole(document.body,'dialog',{name:'放行入库'});typeInto(within(dialog).getByRole('textbox',{name:'放行依据'}) as HTMLTextAreaElement,'IQC-1 合格');
+  await click(within(dialog).getByRole('button',{name:'放行'}));
+  expect(store.run).toHaveBeenCalledWith({type:'fulfillment.qc.incoming.close',payload:{id:'iqc',evidence:'IQC-1 合格'}});
+});
