@@ -40,8 +40,8 @@ describe('营销推广工作台', () => {
   it('工作台筛选无结果可清除，详情展示原币预算与禁用发送原因', async () => {
     const c = state.market.campaigns.find(c => c.name.startsWith('AW27'))!; await mount(c.id);
     const detail = host.querySelector(`[data-campaign-detail="${c.id}"]`)!;
-    expect(detail.textContent).toContain('USD 3000.00'); expect(detail.textContent).toContain('外部推广发送服务');
-    expect(button('发送推广邮件', detail)!.disabled).toBe(true);
+    expect(detail.textContent).toContain('USD 3000.00'); expect(detail.textContent).toContain('发送推广邮件');
+    expect(button('发送推广邮件', detail)).toBeTruthy();
     const search = host.querySelector('input[placeholder="搜索活动、编号、负责人或目标群体"]')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '不存在活动'); search.dispatchEvent(new Event('input', { bubbles: true })); });
     expect(host.textContent).toContain('没有符合条件的活动'); await click('清除筛选'); expect(host.textContent).not.toContain('没有符合条件的活动');
@@ -76,11 +76,11 @@ describe('营销推广工作台', () => {
     await act(async () => root!.unmount()); root = undefined; host.remove(); l.status = 'Lost'; await mount(l.id, `campaign-leads:${c.id}`);
     expect(button('转入 CRM')!.disabled).toBe(true); expect(host.textContent).toContain('请先恢复联系');
   });
-  it('画册预览 Prepared 使用冻结快照，PDF/发送明确未接入', async () => {
+  it('画册预览 Prepared 使用冻结快照；生成 PDF 后才能用邮箱发送', async () => {
     const b = state.market.lookbooks[0]; b.status = 'Prepared'; b.snapshots = [{ id: b.productIds[0], sku: 'FROZEN-SKU', name: '冻结产品名称', specification: '冻结规格' }];
     await mount(b.id, 'lookbooks', 'full'); expect(host.textContent).toContain('冻结产品名称'); expect(host.textContent).toContain('冻结规格');
-    expect(button('导出画册 PDF')!.disabled).toBe(true); expect(button('发送画册')!.disabled).toBe(true);
-    expect(host.textContent).toContain('CSV'); expect(bridge.current.run).not.toHaveBeenCalled();
+    expect(button('生成画册 PDF')!.disabled).toBe(false); expect(button('用邮箱发送')!.disabled).toBe(true);
+    expect(bridge.current.run).not.toHaveBeenCalled();
   });
   it('失效来源深链不提供新建线索入口', async () => {
     await mount(undefined, 'campaign-leads:missing'); expect(host.textContent).toContain('来源活动不存在'); expect(button('新建')).toBeUndefined();

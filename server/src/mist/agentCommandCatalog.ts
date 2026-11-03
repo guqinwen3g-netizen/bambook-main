@@ -275,11 +275,25 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistWorkspace.ts"
  },
  {
+  "type": "email.account.remove",
+  "payload": "{ id: string; reason: string }",
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
   "type": "email.account.save",
   "payload": "{ id?: string; input: EmailAccountInput }",
   "types": {
    "EmailAccountInput": "{ address: string; displayName: string; kind: 'personal' | 'shared'; memberIds: string[]; aliases: string[]; signature: string; transport: EmailTransport }",
    "EmailTransport": "{ imapHost: string; imapPort: number; imapSecure: boolean; smtpHost: string; smtpPort: number; smtpSecure: boolean; username: string }"
+  },
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
+  "type": "email.bulk",
+  "payload": "{ ids: string[]; action: 'read' | 'unread' | 'archive' | 'trash' | 'restore' | 'link'; link?: EmailLink }",
+  "types": {
+   "EmailLink": "{ kind: EmailLinkKind; id: string }",
+   "EmailLinkKind": "'customer' | 'development' | 'order' | 'invoice' | 'supplier' | 'purchase' | 'quotation' | 'rfq'"
   },
   "source": "server/src/shared/mistEmail.ts"
  },
@@ -317,7 +331,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "email.followUp",
-  "payload": "{ id: string; owner: string; due: string; note: string }",
+  "payload": "{ id: string; owner?: string; ownerId?: string; due: string; note: string }",
   "source": "server/src/shared/mistEmail.ts"
  },
  {
@@ -325,13 +339,18 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "payload": "{ id: string; link: EmailLink }",
   "types": {
    "EmailLink": "{ kind: EmailLinkKind; id: string }",
-   "EmailLinkKind": "'customer' | 'development' | 'order' | 'invoice'"
+   "EmailLinkKind": "'customer' | 'development' | 'order' | 'invoice' | 'supplier' | 'purchase' | 'quotation' | 'rfq'"
   },
   "source": "server/src/shared/mistEmail.ts"
  },
  {
   "type": "email.move",
   "payload": "{ id: string; folder: 'inbox' | 'archive' | 'trash' | 'restore' }",
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
+  "type": "email.purge",
+  "payload": "{ ids: string[] }",
   "source": "server/src/shared/mistEmail.ts"
  },
  {
@@ -405,8 +424,13 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "payload": "{ id: string; link: EmailLink }",
   "types": {
    "EmailLink": "{ kind: EmailLinkKind; id: string }",
-   "EmailLinkKind": "'customer' | 'development' | 'order' | 'invoice'"
+   "EmailLinkKind": "'customer' | 'development' | 'order' | 'invoice' | 'supplier' | 'purchase' | 'quotation' | 'rfq'"
   },
+  "source": "server/src/shared/mistEmail.ts"
+ },
+ {
+  "type": "email.template.save",
+  "payload": "{ id?: string; name: string; subject: string; body: string; archived?: boolean }",
   "source": "server/src/shared/mistEmail.ts"
  },
  {
@@ -414,7 +438,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "payload": "{ id: string; link: EmailLink }",
   "types": {
    "EmailLink": "{ kind: EmailLinkKind; id: string }",
-   "EmailLinkKind": "'customer' | 'development' | 'order' | 'invoice'"
+   "EmailLinkKind": "'customer' | 'development' | 'order' | 'invoice' | 'supplier' | 'purchase' | 'quotation' | 'rfq'"
   },
   "source": "server/src/shared/mistEmail.ts"
  },

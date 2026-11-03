@@ -9,6 +9,7 @@ import { marketBusinessDate } from '../../../../../server/src/shared/mistMarket'
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
+import { setComposeIntent } from '../../runtime/composeIntent';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail } from './pageKit';
@@ -70,7 +71,7 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
       { label: '编辑活动', icon: Pencil, onClick: () => onEdit(input(current)), reason: !can ? '没有营销写权限' : !['Draft', 'Paused'].includes(current.status) ? '仅策划中或暂停的活动可编辑' : false },
       { label: '管理线索', icon: Users, onClick: () => go('marketing', undefined, { section: `campaign-leads:${current.id}` }) },
       ...CAMPAIGN_NEXT[current.status].map(next => ({ label: transitionLabel[next]!, onClick: () => transition(current, next), reason: !can && '没有营销写权限' })),
-      { label: '发送推广邮件', onClick: () => {}, reason: '尚未接入外部推广发送服务；活动状态不代表邮件已发送' },
+      { label: '发送推广邮件', onClick: () => { const to = campaignLeads(leads, current.id).filter(l => l.email && l.status !== 'Lost').map(l => l.email); setComposeIntent({ subject: current.name, body: current.target ? current.target + '\n' : '', ...(to.length ? { bcc: to.join(', ') } : {}) }); go('emails'); }, reason: !can ? '没有营销写权限' : !session.hasPermission('emails:write') ? '需要邮件权限' : !campaignLeads(leads, current.id).some(l => l.email && l.status !== 'Lost') ? '本活动线索没有邮箱' : false },
     ]} />
     <DetailBlock title={uiText("实际费用与目标")}><Facts items={[{ label: '预算', value: `${current.currency} ${current.budget}` }, { label: '实际费用', value: `${current.currency} ${current.actualCost}` }, { label: '负责人', value: current.owner }, { label: '期间', value: `${current.startDate} — ${current.endDate}` }, { label: '目标客户群', value: current.target }, { label: '说明', value: current.note || '未填写' }]} />
       {campaignReminder(current, leads, day).overBudget && <Banner tone="warn" title={uiText("实际费用超出预算")}>{uiText("同一活动原币比较；不与其他币种活动合计。")}</Banner>}

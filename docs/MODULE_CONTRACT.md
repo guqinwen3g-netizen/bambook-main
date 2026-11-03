@@ -89,6 +89,13 @@ Author: Bamboo（基于优先级 1 端到端联调踩坑沉淀）
 - 前端去智能邮箱：`runtime/composeIntent.ts` 只在本标签页内存交接收件人、主题、附件和关联，邮箱打开后建一次草稿，发送仍由用户在邮箱完成。
 - 报表 Excel：`downloadModuleXlsx`（懒加载 `xlsx`，公式样文本前置单引号）。
 
+## 当前 Mist 邮件与业务打通（P1-2）
+
+- `EmailLinkKind` 增加 supplier / purchase / quotation / rfq；`emailBusinessOwner`（提交资料的接收人）与 `emailLinkCustomerId`（写入客户动态与跟进记录）。提交资料同时写业务对象事件和所属客户事件；关联客户的邮件跟进写一条 `crm.followUps`（method=email，nextTaskId 指向跟进待办）。
+- `email.followUp` 改为 `ownerId`（本公司成员且可见该邮箱），旧 `owner` 文本不再作派单依据。
+- `email.bulk`（≤200 封：已读 / 未读 / 归档 / 删除 / 恢复 / 关联）、`email.purge`（只限已删除、未提交过资料的邮件，同时清掉无人引用的附件文件，高风险）、`email.account.remove`（须先断开，开通人办理，`removed` 后历史保留、禁止新草稿 / 凭据 / 同步，高风险）、`email.template.save`（`emails:admin`，`fillEmailTemplate` 按关联订单 / 报价 / 客户填 {客户}{订单号}{款号}{交期}{报价号}{出运号}）。
+- 业务页发信统一经 `runtime/composeIntent.ts` 打开智能邮箱草稿：客户、供应商、报价（附正式报价单）、询价函、画册、营销推广（线索密送）。发送仍由用户在邮箱确认。
+
 ## 当前 Mist 后勤交接显示
 
 - 客户交期是出运目标，不是后勤承接的开始日期。已分派、未完成且具有 `logistics:handle` 的出运交接事项在本人首页即时可见，原交期与任务事实不改写。
