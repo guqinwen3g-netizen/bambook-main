@@ -378,7 +378,7 @@ export function scopedTargetViolation(state: MistState, scope: MistDataScope, co
   if(['order.internal.cancel','order.internal.returnRejected'].includes(type)){path='internalDeliveries';id=payload.id;}
   if (type.startsWith('finance.account.') || type.startsWith('finance.fx.') || type.startsWith('fxrate.')) return {path:'bankAccounts', id:'company-finance'};
   if (claimId) { path='platform.claims'; id=claimId; }
-  else if (['order.update','order.checklist','order.handoff','order.files.add'].includes(type) || type.startsWith('order.governance.') && type !== 'order.governance.decide') { path='orders'; id=payload.orderId; }
+  else if (['order.update','order.checklist','order.handoff','order.files.add','order.split','order.merge'].includes(type) || type.startsWith('order.governance.') && type !== 'order.governance.decide') { path='orders'; id=payload.orderId; }
   else if (type === 'development.saveDraft' || type === 'development.submit') { path='drafts'; id=payload.draftId; }
   else if (type.startsWith('development.')) { path='devs'; id=payload.devId; }
   else if (['production.move','production.update'].includes(type)) { path='productions'; id=payload.id; }

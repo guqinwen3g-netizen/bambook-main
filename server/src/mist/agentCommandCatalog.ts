@@ -1789,6 +1789,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistInternalDelivery.ts"
  },
  {
+  "type": "order.merge",
+  "payload": "{ orderId: string; sourceOrderId: string; reason: string }",
+  "source": "server/src/shared/mistOrderSplit.ts"
+ },
+ {
+  "type": "order.split",
+  "payload": "{ orderId: string; lines: Array<{ lineId: string; qty?: number }>; due?: string; reason: string }",
+  "source": "server/src/shared/mistOrderSplit.ts"
+ },
+ {
   "type": "order.update",
   "payload": "{ orderId: string; due?: string; season?: string; ownerId?: string }",
   "source": "server/src/shared/mistWorkspace.ts"
