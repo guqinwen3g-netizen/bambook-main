@@ -93,4 +93,23 @@ describe('explicit stock issue and shipment reconciliation', () => {
     expect(scopedWriteViolation(before, f.root, own)).toBeNull();
     expect(scopedWriteViolation(before, f.root, outsider)).toMatchObject({ path: 'fulfillment.stockMovements', id: 'ia' });
   });
+
+  it('keeps moved positions and exact net issues when correcting a partially returned issue to another departure',()=>{
+    const f=fixture();
+    const returned=f.run({type:'fulfillment.inventory.move',payload:{id:'a',kind:'return',issueId:'ia',quantity:500,location:'仓库',person:'后勤',note:'Actual surplus returned'}}).id!;
+    f.run({type:'fulfillment.inventory.move',payload:{id:'a',kind:'move',quantity:200,location:'B-02',person:'后勤',note:'移位'}});
+    const newIssue=f.run({type:'fulfillment.inventory.move',payload:{id:'a',kind:'issue',quantity:150,sourceLocation:'B-02',location:'码头',person:'货代',note:'Actual second issue'}}).id!;
+    f.link('ia');f.link(newIssue);
+    f.root.fulfillment.shipments.push({...structuredClone(f.root.fulfillment.shipments[0]),id:'s2',code:'SHP-2',lines:[{orderId:'o',lineId:'l',productionId:'p',quantity:2000}]} as any);
+    const physicalBefore=structuredClone({stock:f.root.fulfillment.stock,returns:f.root.fulfillment.stockMovements.filter(m=>m.kind!=='issue'),shipments:f.root.fulfillment.shipments,packing:f.root.fulfillment.packing,documents:f.root.fulfillment.documents});
+    f.run({type:'fulfillment.inventory.shipment.correct',payload:{issueId:'ia',shipmentId:'s2',reason:'按实际装船更正',evidence:'原出库2500，实退500，本票2000'}});
+    expect(f.root.fulfillment.stockMovements.find(m=>m.id==='ia')).toMatchObject({quantity:2500,shipmentLink:{shipmentId:'s2'},shipmentLinkHistory:[{shipmentId:'s',correctedShipmentId:'s2'}]});
+    expect(f.root.fulfillment.stockMovements.find(m=>m.id===newIssue)).toMatchObject({quantity:150,sourceLocation:'B-02',shipmentLink:{shipmentId:'s'}});
+    expect(f.root.fulfillment.stockMovements.find(m=>m.id===returned)).toMatchObject({quantity:500,issueId:'ia'});
+    expect(f.root.fulfillment.stock[0]).toMatchObject({available:350,positions:[{location:'仓库',available:300},{location:'B-02',available:50}]});
+    expect({stock:f.root.fulfillment.stock,returns:f.root.fulfillment.stockMovements.filter(m=>m.kind!=='issue'),shipments:f.root.fulfillment.shipments,packing:f.root.fulfillment.packing,documents:f.root.fulfillment.documents}).toEqual(physicalBefore);
+    const before=structuredClone(f.root);
+    expect(()=>f.run({type:'fulfillment.inventory.shipment.correct',payload:{issueId:newIssue,shipmentId:'s2',reason:'超容量',evidence:'核对'}})).toThrow('超过本次出运');
+    expect(f.root).toEqual(before);
+  });
 });
