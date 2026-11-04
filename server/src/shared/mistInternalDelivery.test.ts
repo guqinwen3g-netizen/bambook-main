@@ -139,3 +139,31 @@ it('moves an open delivery to the successor on a staff handover, keeps the origi
  expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
  expect(f.state.events.some(e=>e.text.startsWith('内部交付接收人：Warehouse→Leader'))).toBe(true);
 });
+
+
+it('rolls a cancelled handover back to its source and blocks all further receiving commands on that record',()=>{
+ const f=internalDeliveryFixture(),id=f.send(),before=structuredClone(f.state.fulfillment);
+ f.run({type:'order.internal.cancel',payload:{id,expectedRevision:0,reason:'Goods recalled before receipt'}});
+ expect(internalDeliveryTotals(f.state.internalDeliveries![0])).toMatchObject({accepted:0,pending:0,reserved:0});
+ expect(internalDeliverySources(f.state,f.target.orderId)).toMatchObject([{remaining:10}]);
+ expect(f.state.tasks.find(t=>t.id==='internal-delivery:'+id)?.done).toBe(true);
+ const cancelled=structuredClone(f.state);
+ expect(()=>f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:1,evidence:'Late receipt'}},'warehouse')).toThrow('已撤回');
+ expect(f.state).toEqual(cancelled);expect(f.state.fulfillment).toEqual(before);
+ const replacement=f.send();
+ f.run({type:'order.internal.receive',payload:{id:replacement,accepted:10,rejected:0,expectedRevision:0,evidence:'Fresh handover counted'}},'warehouse');
+ expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
+});
+
+it('blocks inactive recipients and cancelled source orders without changing deliveries or inventory',()=>{
+ const f=internalDeliveryFixture(),id=f.send();
+ f.context.members!.find(m=>m.id==='warehouse')!.active=false;
+ const before=structuredClone(f.state);
+ expect(()=>f.run({type:'order.internal.receive',payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted'}},'warehouse')).toThrow('停用');
+ expect(f.state).toEqual(before);
+ const cancelled=internalDeliveryFixture();
+ cancelled.state.orders.find(o=>o.id===cancelled.target.orderId)!.governance!.status='cancelled';
+ const snapshot=structuredClone(cancelled.state);
+ expect(()=>cancelled.send()).toThrow();expect(cancelled.state).toEqual(snapshot);
+ expect(internalDeliverySources(cancelled.state,cancelled.target.orderId)).toEqual([]);
+});
