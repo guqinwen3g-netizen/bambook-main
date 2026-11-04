@@ -1,5 +1,5 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
-import { MistPresentedErrorContext, usePendingRecoveryClaim } from '../runtime/errorPresentation';
+import { MistPresentedErrorContext, usePendingRecoveryClaim, usePageFailure } from '../runtime/errorPresentation';
 import {businessDate,businessNow,businessToday} from '../runtime/businessClock';
 /** T6 收款核销：保留原 Mist 双栏，对账结果由公司共享数据保存。 */
 import { AccessHiddenNotice } from './AccessHiddenNotice';
@@ -88,6 +88,8 @@ export function FinancePage() {
   const [payment, setPayment] = useRouteDraft({ date: businessToday(), payee: '', amount: '', currency: 'USD', ref: '', accountId: '' });
   const fileInput = React.useRef<HTMLInputElement>(null);
   const [fundingDialog,setFundingDialog]=useRouteDraft<{receiptId:string;id?:string;release?:boolean}|null>(null);
+  // Dialog failures stay in their dialog; only page-level failures go to the shell card.
+  usePageFailure('操作尚未完成', (failure||error)&&(failure||error)!==presentedError&&!fundingDialog&&!reversal&&!paymentOpen&&!importRows.length?failure||error:'', error?()=>void refresh():undefined);
   const [multi,setMulti]=React.useState(false),[suggestConfirm,setSuggestConfirm]=React.useState(false);
   const [funding,setFunding]=useRouteDraft({customerId:'',orderId:'',amount:'',note:''});
   const fundingRows=state?.orderFunding?.assignments??[],canFund=session.hasPermission(MIST_FINANCE_SCOPES.reconcile),canVoucher=session.hasPermission(MIST_FINANCE_SCOPES.voucher);
@@ -163,13 +165,12 @@ export function FinancePage() {
       actions={<>{(area==='receivables'||area==='records')&&<>{area==='records'&&canVoucher&&<Button icon={Upload} disabled={busy} onClick={()=>fileInput.current?.click()}>{uiText("导入流水")}</Button>}{canVoucher&&<Button icon={Upload} disabled={busy||!canVoucher} onClick={() => tab === 'pay'||area==='records' ? setPaymentOpen(true) : fileInput.current?.click()}>{uiText(tab === 'pay'||area==='records' ? '登记付款' : '导入流水')}</Button>}{area==='receivables'&&<Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>}</>}<Button disabled={busy} onClick={()=>void refresh()}>{uiText("刷新")}</Button></>} />
     <AccessHiddenNotice keys={['receivables','receipts','payments','payables','funding']} />
     <FinanceEntrances state={state} area={area} onChange={openArea} accounts={canSeeAccounts}/>
-    {sourceInvoiceId&&<Banner tone={sourceInvoice?'neutral':'bad'} title={sourceInvoice?sourceInvoice.code:'来源发票不可用'} actions={sourceInvoice?<Button onClick={()=>go('invoices',sourceInvoice.id)}>{uiText('返回发票')}</Button>:undefined}>{sourceInvoice?`${sourceInvoice.customer} · ${isPendingFinanceMistInvoice(sourceInvoice)?uiText('待财务确认'):`${fmt(sourceInvoice.open,2)} ${sourceInvoice.currency}`}`:undefined}</Banner>}
+    {sourceInvoiceId&&<Banner variant={sourceInvoice?'status':'notice'} tone={sourceInvoice?'neutral':'bad'} title={sourceInvoice?sourceInvoice.code:'来源发票不可用'} actions={sourceInvoice?<Button onClick={()=>go('invoices',sourceInvoice.id)}>{uiText('返回发票')}</Button>:undefined}>{sourceInvoice?`${sourceInvoice.customer} · ${isPendingFinanceMistInvoice(sourceInvoice)?uiText('待财务确认'):`${fmt(sourceInvoice.open,2)} ${sourceInvoice.currency}`}`:undefined}</Banner>}
     <input ref={fileInput} hidden type="file" accept=".csv,text/csv" aria-label={uiText("银行流水文件")} disabled={!canVoucher||busy} onChange={async event => { const input=event.target,file=input.files?.[0];if(!file||busy||!canVoucher)return;const bound=scope,sequence=++fileSequence.current;setWorking(true);setFailure('');try{const rows=parseMistReceiptCsv(await fileText(file));if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent()){setImportRows(rows);setFileName(file.name);}}catch(problem){if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence&&routeScope.isCurrent())setFailure(problem instanceof Error?problem.message:'文件读取失败');}finally{input.value='';if(alive.current&&activeScope.current===bound&&fileSequence.current===sequence)setWorking(false);} }} />
-    {(failure || error) && (failure || error)!==presentedError && !fundingDialog && !reversal && !paymentOpen && !importRows.length && <Banner tone="bad" title={uiText("操作尚未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner>}
-    {sourceOrder&&deposit&&<Banner title={uiText('来源订单 '+sourceOrder.code)} actions={<Button onClick={()=>go('orders/detail',sourceOrder.id)}>{uiText("返回来源订单")}</Button>}>{uiText(deposit.required===null?'合同付款方式或定金比例尚未明确，不能判定定金已满足。':deposit.status==='not_required'?'当前合同付款方式不适用T/T定金门槛。':`合同定金要求 ${fmt(deposit.required,2)} ${sourceOrder.currency} · 已核实归属 ${fmt(deposit.received,2)} ${sourceOrder.currency}`)}</Banner>}
-    {unknownTarget&&<Banner tone="warn" title={uiText("未找到目标票据或流水")} actions={<Button onClick={()=>go('payment-vouchers')}>{uiText("返回财务台账")}</Button>}>{uiText("请从本公司重新选择，未自动切换到其他流水。")}</Banner>}
-    {pending&&!saving&&<Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button disabled={working||saving} onClick={()=>void resolvePending()}>{uiText("核对原操作结果")}</Button>}>{uiText("核对原请求后再继续操作。")}</Banner>}
-    {hasInvoiceFilter&&tab==='inv'&&<Banner title={uiText(overdueScope?'当前仅显示对应范围的逾期未结发票':'当前仅显示对应范围的未结发票')} actions={<Button onClick={()=>go('payment-vouchers')}>{uiText("查看全部发票")}</Button>}/>}
+    {sourceOrder&&deposit&&<Banner variant="status" tone="neutral" title={uiText('来源订单 '+sourceOrder.code)} actions={<Button onClick={()=>go('orders/detail',sourceOrder.id)}>{uiText("返回来源订单")}</Button>}>{uiText(deposit.required===null?'合同付款方式或定金比例尚未明确，不能判定定金已满足。':deposit.status==='not_required'?'当前合同付款方式不适用T/T定金门槛。':`合同定金要求 ${fmt(deposit.required,2)} ${sourceOrder.currency} · 已核实归属 ${fmt(deposit.received,2)} ${sourceOrder.currency}`)}</Banner>}
+    {unknownTarget&&<Banner variant="notice" tone="warn" title={uiText("未找到目标票据或流水")} actions={<Button onClick={()=>go('payment-vouchers')}>{uiText("返回财务台账")}</Button>}>{uiText("请从本公司重新选择，未自动切换到其他流水。")}</Banner>}
+    {pending&&!saving&&<Banner variant="notice" tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button disabled={working||saving} onClick={()=>void resolvePending()}>{uiText("核对原操作结果")}</Button>}>{uiText("核对原请求后再继续操作。")}</Banner>}
+    {hasInvoiceFilter&&tab==='inv'&&<Banner variant="status" tone="neutral" title={uiText(overdueScope?'当前仅显示对应范围的逾期未结发票':'当前仅显示对应范围的未结发票')} actions={<Button onClick={()=>go('payment-vouchers')}>{uiText("查看全部发票")}</Button>}/>}
     {area==='receivables'?<>
     <SummaryBar items={[
       { label: '待核销到账', value: state?.partialReceipts?.length ? '—' : fmt(pendingAmount, 2), unit: state?.partialReceipts?.length ? undefined : displayCurrency, hint: state?.partialReceipts?.length ? '部分到账余额不可见' : otherPending || `${pendingReceipts.length} 笔流水` },

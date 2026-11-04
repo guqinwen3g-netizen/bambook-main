@@ -136,8 +136,8 @@ export function FinanceAccounts() {
   const used = (id?: string) => !!id && !!bank.accounts.find(a => a.account.id === id && a.receiptCount + a.paymentCount > 0);
   const [viewing, setViewing] = React.useState(''), viewingRow = bank.accounts.find(r => r.account.id === viewing);
   return <div className="mist-col">
-    {!bank.accounts.length ? <Banner tone="warn" title={uiText("还没有登记公司银行账户")} />
-      : unassigned > 0 ? <Banner tone="warn" title={ui`待归属 · ${unassigned}`}>{uiText("余额未含待归属流水")}</Banner> : null}
+    {!bank.accounts.length ? <Banner variant="notice" tone="warn" title={uiText("还没有登记公司银行账户")} />
+      : unassigned > 0 ? <Banner variant="status" tone="warn" title={ui`待归属 · ${unassigned}`}>{uiText("余额未含待归属流水")}</Banner> : null}
     <ActionBar actions={[{ label: '新增账户', onClick: () => setEditing(newAccountDraft()), hidden:!canWrite }, { label: '查看未归属流水', onClick: () => go('payment-vouchers', undefined, { section: 'records:unassigned' }), hidden: !unassigned }, { label: '登记锁汇', onClick: () => setFx(newFxDraft('lock', state)), hidden:!canLock }, { label: '登记结汇', onClick: () => setFx(newFxDraft('settlement', state)), hidden:!canWrite, reason:canSettle ? undefined : '先登记原币和本币两个不同币种的账户' }]} />
     <Card><DataTable ariaLabel={uiText("公司银行账户")} rows={bank.accounts} rowKey={r => r.account.id} loading={loading} onRowClick={r => setViewing(r.account.id)} columns={[
       { key: 'account', header: '账户', width: 'minmax(200px,1.6fr)', render: r => <ObjectCell name={<><Mono>{r.account.code}</Mono> {r.account.name}</>} meta={`${r.account.bankName} · ${r.account.accountNo} · 期初日 ${r.account.openingDate}`} /> },

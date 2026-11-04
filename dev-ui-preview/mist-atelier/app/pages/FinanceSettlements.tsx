@@ -45,10 +45,10 @@ export function SettlementDetail({ settlement: st, state, me, busy, canSettle, c
       ...(st.state === 'pending' ? [{ label: '建议预付抵扣', value: money(st.suggested, st.currency) + ` · 合同剩余可抵扣 ${money(st.available, st.currency)}` }] : []),
       ...(st.note ? [{ label: '结算说明', value: st.note }] : []),
     ]} />
-    {st.confirmation && <Banner tone="ok" title={uiText("财务已确认")}>{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{uiText(st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : '')}{uiText(st.confirmation.note ? `。${st.confirmation.note}` : '')}</Banner>}
-    {st.returned && <Banner tone="bad" title={uiText("财务已退回")}>{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}{uiText("）。收货记录已释放，可修正后重新提交。")}</Banner>}
-    {st.cancelled && <Banner title={uiText("已撤回")}>{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
-    {st.reversed && <Banner title={uiText("已冲回")}>{st.reversed.reason}（{st.reversed.actor} · {fmtDay(st.reversed.at)}{uiText("）。原记录保留；收货记录和预付抵扣已释放。")}</Banner>}
+    {st.confirmation && <Banner variant="status" tone="ok" title={uiText("财务已确认")}>{st.confirmation.actor} · {fmtDay(st.confirmation.at)}{uiText(st.confirmation.adjustReason ? `。抵扣调整原因：${st.confirmation.adjustReason}` : '')}{uiText(st.confirmation.note ? `。${st.confirmation.note}` : '')}</Banner>}
+    {st.returned && <Banner variant="status" tone="bad" title={uiText("财务已退回")}>{st.returned.reason}（{st.returned.actor} · {fmtDay(st.returned.at)}{uiText("）。收货记录已释放，可修正后重新提交。")}</Banner>}
+    {st.cancelled && <Banner variant="status" tone="neutral" title={uiText("已撤回")}>{st.cancelled.reason}（{st.cancelled.actor} · {fmtDay(st.cancelled.at)}）</Banner>}
+    {st.reversed && <Banner variant="status" tone="neutral" title={uiText("已冲回")}>{st.reversed.reason}（{st.reversed.actor} · {fmtDay(st.reversed.at)}{uiText("）。原记录保留；收货记录和预付抵扣已释放。")}</Banner>}
     <ActionBar busy={busy} actions={[
       { label: '确认结算', onClick: onConfirm, reason: !canConfirm ? '需要核销权限（财务）' : own ? '不能复核本人提交的结算' : undefined, hidden: !canConfirm || st.state !== 'pending' },
       { label: '退回结算', onClick: () => onReason('return-settlement'), reason: !canConfirm ? '需要核销权限（财务）' : own ? '不能复核本人提交的结算' : undefined, hidden: !canConfirm || st.state !== 'pending' },
