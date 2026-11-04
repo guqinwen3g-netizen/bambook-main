@@ -185,7 +185,7 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     const failed = row.quarantineAction === 'dispose' || task?.state === 'blocked' && report?.result === 'reject';
     const passed = row.quarantineAction === 'release' || task?.state === 'reported' && report?.result === 'pass';
     const dispose = !disposition && can('inventory:write') && (failed || passed);
-    const decide = disposition && disposition.decision !== 'release' && !disposition.noRecoveryDecision && can('aftersales:approve');
+    const decide = disposition && disposition.decision !== 'release' && !disposition.noRecoveryDecision && !disposition.recoveryDecision && can('aftersales:approve');
     if (!inspect && !dispose && !decide) continue;
     const action = inspect ? '待送复检' : decide ? '待追偿决定' : passed ? '待恢复可用' : '待处置';
     push({ id:'quarantine:'+row.id, source:'material', title:`${f.purchases.find(purchase => purchase.id === stock.purchaseId)?.code || stock.id} · ${uiText(action)}`, meta:[stock.name,`${row.quarantinedQuantity} ${stock.unit}`].join(' · '), when:action, urgent:!!dispose && failed, at:disposition?.at || row.at,
@@ -194,9 +194,10 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
   if (canRead('payment-vouchers') && canRead('procurement') && can('invoices:read') && can('vouchers:read') && can('procurement:read') && can(MIST_FINANCE_SCOPES.reconcile)) {
     const disposals = options.financialDisposals ?? financialDisposalViews(state, new Set((f.purchases || []).map(row => row.id)));
     for (const row of disposals) {
-      if (!row.noRecovery || row.review || !me || row.noRecovery.actorId === me) continue;
+      const decision=row.recovery || row.noRecovery;
+      if (!decision || row.review || !me || decision.actorId === me) continue;
       const blocker = disposalReviewBlocker(state, row);
-      push({ id:'disposal-review:'+row.returnId, source:'finance', title:`${row.purchaseCode} · ${uiText('退料核对')}`, meta:[row.supplier,blocker && uiText(blocker)].filter(Boolean).join(' · '), when:blocker || '待核对', urgent:false, at:row.noRecovery.at || row.disposedAt || '',
+      push({ id:'disposal-review:'+row.returnId, source:'finance', title:`${row.purchaseCode} · ${uiText('退料核对')}`, meta:[row.supplier,blocker && uiText(blocker)].filter(Boolean).join(' · '), when:blocker || '待核对', urgent:false, at:decision.at || row.disposedAt || '',
         target:{view:'payment-vouchers',id:blocker ? row.purchaseId : row.returnId,section:'payables'} });
     }
   }

@@ -767,6 +767,16 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistFulfillment.ts"
  },
  {
+  "type": "fulfillment.inventory.quarantine.recovery",
+  "payload": "{ returnId: string; amount: number; reason: string }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
+  "type": "fulfillment.inventory.quarantine.recovery.revoke",
+  "payload": "{ returnId: string; reason: string }",
+  "source": "server/src/shared/mistFulfillment.ts"
+ },
+ {
   "type": "fulfillment.inventory.quarantine.request",
   "payload": "{ returnId: string; due: string }",
   "source": "server/src/shared/mistFulfillment.ts"
@@ -1957,7 +1967,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "payable.settlement.submit",
   "payload": "{ purchaseId: string; receiptIds: string[]; final?: boolean; disputes?: SettlementDispute[]; note?: string; fileIds?: string[] }",
   "types": {
-   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string; returnId?: string; overLoss?: boolean }"
+   "SettlementDispute": "{ description: string; amount: number; qcDispositionId?: string; quarantineRecoveryId?: string; returnId?: string; overLoss?: boolean }"
   },
   "source": "server/src/shared/mistPayables.ts"
  },

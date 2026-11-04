@@ -1,3 +1,4 @@
+import {financialDisposalViews} from '../../../../server/src/shared/mistPayables';
 import {projectState} from '../../../../server/src/mist/access';
 import {materialDeliveryFixture} from '../../../../server/src/mist/__tests__/materialDelivery';
 import { describe, expect, it } from 'vitest';
@@ -424,6 +425,26 @@ describe('quarantine handoffs',()=>{
   const review=f.state.fulfillment.stockMovements.find(r=>r.id===returned)!.quarantineDisposition!.financeReviews![0];
   f.run({type:'payable.disposal.reverse',payload:{returnId:returned,reviewId:review.id,reason:'Correction'}});
   expect(queue(f,financial)).toHaveLength(1);
+ });
+ it('hands recovery to finance and restores the manager task on revocation',()=>{
+  const {f,returned}=fixture(),manager=opts(['aftersales:approve'],'reviewer'),financial=opts(finance,'finance');
+  f.run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId:returned,decision:'scrap',evidence:'Disposed'}});
+  expect(queue(f,manager)).toMatchObject([{when:'待追偿决定'}]);
+  f.run({type:'fulfillment.inventory.quarantine.recovery',payload:{returnId:returned,amount:272,reason:'Supplier liable'}},'reviewer');
+  expect(queue(f,manager)).toEqual([]);expect(queue(f,financial)).toMatchObject([{when:'待结算确认'}]);
+  expect(queue(f,opts(finance,'reviewer'))).toEqual([]);
+  const financialDisposals=financialDisposalViews(f.state,new Set([f.purchaseId]));
+  const hidden=structuredClone(f.state);hidden.fulfillment.stock=[];hidden.fulfillment.stockMovements=[];
+  expect(mistWorkQueue(hidden,{...financial,financialDisposals}).filter(x=>x.id==='disposal-review:'+returned)).toHaveLength(1);
+  const receiptId=f.state.fulfillment.stock[0].receiptId!;
+  f.state.payables.settlements!.push({id:'st',purchaseId:f.purchaseId,state:'confirmed',receiptIds:[receiptId],disputes:[]} as any);
+  expect(queue(f,financial)).toMatchObject([{when:'待核对',target:{id:returned}}]);
+  const reviewId=f.run({type:'payable.disposal.review',payload:{returnId:returned,evidence:'Recovery verified'}}).id!;
+  expect(queue(f,financial)).toEqual([]);
+  f.run({type:'payable.disposal.reverse',payload:{returnId:returned,reviewId,reason:'Recheck'}});
+  expect(queue(f,financial)).toHaveLength(1);
+  f.run({type:'fulfillment.inventory.quarantine.recovery.revoke',payload:{returnId:returned,reason:'Recheck'}},'reviewer');
+  expect(queue(f,financial)).toEqual([]);expect(queue(f,manager)).toMatchObject([{when:'待追偿决定'}]);
  });
  it('keeps a warehouse-only handoff without exposing QC records and removes it after disposal',()=>{
   const {f,returned}=fixture();

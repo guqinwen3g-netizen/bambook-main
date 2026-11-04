@@ -326,7 +326,7 @@ export type FulfillmentStockMovement = {
     quarantineTaskId?: string;
     /** Response-only warehouse handoff; never grants access to the QC report. */
     quarantineAction?: 'release' | 'dispose';
-    quarantineDisposition?: { decision: 'release' | 'supplierReturn' | 'scrap'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string; noRecoveryDecision?: {actorId:string;actor:string;at:string;evidence:string}; noRecoveryHistory?: Array<{actorId:string;actor:string;at:string;evidence:string;revokedAt:string;revokedBy:string;reason:string}>; financeReviews?: Array<{ id:string; outcome:'noRecovery'; evidence:string; actorId:string; actor:string; at:string; reversed?:{actorId:string;actor:string;at:string;reason:string} }> };
+    quarantineDisposition?: { decision: 'release' | 'supplierReturn' | 'scrap'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string; recoveryDecision?: {id:string;actorId:string;actor:string;at:string;amount:number;currency:string;reason:string}; recoveryHistory?: Array<{id:string;actorId:string;actor:string;at:string;amount:number;currency:string;reason:string;revokedAt:string;revokedBy:string;revokeReason:string}>; noRecoveryDecision?: {actorId:string;actor:string;at:string;evidence:string}; noRecoveryHistory?: Array<{actorId:string;actor:string;at:string;evidence:string;revokedAt:string;revokedBy:string;reason:string}>; financeReviews?: Array<{ id:string; outcome:'noRecovery'|'recovery'; evidence:string; actorId:string; actor:string; at:string; reversed?:{actorId:string;actor:string;at:string;reason:string} }> };
     quarantineReturnId?: string;
     /** Explicitly reconciled physical issue; independent of shipment documents. */
     shipmentLink?: { shipmentId: string; productionId: string; evidence: string; actor: string; at: string };
@@ -707,6 +707,12 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
     type: 'fulfillment.inventory.quarantine.dispose';
     payload: { returnId: string; decision: 'release' | 'supplierReturn' | 'scrap'; evidence: string };
 } | {
+    type: 'fulfillment.inventory.quarantine.recovery';
+    payload: { returnId: string; amount: number; reason: string };
+} | {
+    type: 'fulfillment.inventory.quarantine.recovery.revoke';
+    payload: { returnId: string; reason: string };
+} | {
     type: 'fulfillment.inventory.quarantine.noRecovery';
     payload: { returnId: string; evidence: string };
 } | {
@@ -825,7 +831,7 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
 export function createFulfillmentState(_context: MistContext, _rootState: unknown): FulfillmentState { return { warehouses:[],returnReceipts:[],receivedRecords:[],productionFacts: [], shippingTerms: [], samples: [], sampleMovements: [], qcTasks: [], qcReports: [], purchases: [], receipts: [], stock: [], stockMovements: [], shipments: [], packing: [], customs: [], customsClassifications: [], documents: [] }; }
 export const FULFILLMENT_CUSTOMS_CLEAR_SCOPE = 'customs:clear';
 export function fulfillmentCommandPermission(command: FulfillmentCommand): string | null {
-    if (command.type === 'fulfillment.inventory.quarantine.noRecovery' || command.type === 'fulfillment.inventory.quarantine.noRecovery.revoke') return 'aftersales:approve';
+    if (command.type === 'fulfillment.inventory.quarantine.recovery' || command.type === 'fulfillment.inventory.quarantine.recovery.revoke' || command.type === 'fulfillment.inventory.quarantine.noRecovery' || command.type === 'fulfillment.inventory.quarantine.noRecovery.revoke') return 'aftersales:approve';
     if (command.type === 'fulfillment.production.intake.decide') return 'orders:write';
     if (command.type === 'fulfillment.qc.dispose' || command.type === 'fulfillment.qc.concession.decide') return 'orders:write';
     if (command.type === 'fulfillment.materials.confirm') return 'orders:write';
@@ -2212,9 +2218,31 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             audit(root,ctx,'inventory',stock.id, p.decision==='release'?'隔离料复检通过后恢复可用':p.decision==='scrap'?'不合格隔离料已报废':'不合格隔离料已退供应商');
             return { id:movementId, stockId:stock.id };
         }
+        case 'fulfillment.inventory.quarantine.recovery': {
+            const row=get(f.stockMovements,p.returnId,'隔离退回'),d=row.quarantineDisposition;
+            if(!d||d.decision==='release')fail('仅已退供或报废批次可决定追偿');
+            if(d!.recoveryDecision||d!.noRecoveryDecision)fail('该批次已有追偿或不追偿决定');
+            if(!ctx.actorId)fail('缺少负责人');
+            const stock=get(f.stock,row.stockId,'库存'),purchase=get(f.purchases,stock.purchaseId||'','来源采购');
+            if(typeof p.amount!=='number'||!Number.isFinite(p.amount))fail('追偿金额必须是数字');
+            let amountMinor=0;try{amountMinor=mistMoneyMinor(p.amount);}catch{fail('追偿金额最多两位小数');}
+            if(amountMinor<=0)fail('追偿金额必须大于零');
+            const reason=text(p.reason,'追偿依据');
+            d!.recoveryDecision={id:ctx.id(),actorId:ctx.actorId!,actor:ctx.actorName,at:ctx.now,amount:amountMinor/100,currency:purchase.currency,reason};
+            audit(root,ctx,'inventory',row.stockId,'负责人确认隔离料追偿');return {id:row.id};
+        }
+        case 'fulfillment.inventory.quarantine.recovery.revoke': {
+            const row=get(f.stockMovements,p.returnId,'隔离退回'),d=row.quarantineDisposition,decision=d?.recoveryDecision;
+            if(!d||!decision)fail('没有有效的追偿决定');
+            if((root.payables?.settlements||[]).some(s=>(s.state==='pending'||s.state==='confirmed')&&s.disputes.some(x=>x.quarantineRecoveryId===decision!.id)))fail('追偿已带入结算，请先撤回或退回结算');
+            if(d!.financeReviews?.some(r=>!r.reversed))fail('请先撤回对应财务核对');
+            (d!.recoveryHistory ||= []).push({...decision!,revokedAt:ctx.now,revokedBy:ctx.actorName,revokeReason:text(p.reason,'撤回原因')});
+            delete d!.recoveryDecision;audit(root,ctx,'inventory',row.stockId,'撤回隔离料追偿决定');return {id:row.id};
+        }
         case 'fulfillment.inventory.quarantine.noRecovery': {
             const row=get(f.stockMovements,p.returnId,'隔离退回'),d=row.quarantineDisposition;
             if(!d||d.decision==='release')fail('仅已退供或报废批次可决定不追偿');
+            if(d!.recoveryDecision)fail('该批次已有追偿决定');
             if(d!.noRecoveryDecision)fail('该批次已有不追偿决定');
             if(!ctx.actorId)fail('缺少负责人');
             d!.noRecoveryDecision={actorId:ctx.actorId!,actor:ctx.actorName,at:ctx.now,evidence:text(p.evidence,'不追偿决定依据')};
