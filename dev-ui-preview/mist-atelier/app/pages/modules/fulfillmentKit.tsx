@@ -13,6 +13,7 @@ import { useNav } from '../../nav';
 import { useRouteDraft } from './useRouteDraft';
 import { ModuleEditorDialog, ModuleEditorPage, downloadModuleCsv, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
 import { FileName } from '../../runtime/files';
+import { businessWhen } from './pageKit';
 export const documentTypeLabel = (type: FulfillmentDocument['type']) => type === 'OTHER' ? uiText('其他') : type;
 export const today = businessToday;
 export const localNow = () => { const d = businessNow(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
@@ -117,7 +118,7 @@ export function DraftFiles({ ids, onChange, onBusyChange, disabled, hint = '上�
 export function Events({ entity, id }: {
     entity: string;
     id: string;
-}) { const { state } = useMistWorkspace(); return <Timeline events={(state?.events || []).filter(e => e.entityType === entity && e.entityId === id).map(e => ({ who: e.actor, when: new Date(e.at).toLocaleString(), text: e.text.replace(/^登记外部报关事实：(draft|submitted|cleared)$/,(_,status:'draft'|'submitted'|'cleared')=>({draft:'报关资料已保存',submitted:'已登记申报',cleared:'已登记放行'}[status]||status)) }))}/>; }
+}) { const { state } = useMistWorkspace(); return <Timeline events={(state?.events || []).filter(e => e.entityType === entity && e.entityId === id).map(e => ({ who: e.actor, when: businessWhen(e.at), text: e.text.replace(/^登记外部报关事实：(draft|submitted|cleared)$/,(_,status:'draft'|'submitted'|'cleared')=>({draft:'报关资料已保存',submitted:'已登记申报',cleared:'已登记放行'}[status]||status)) }))}/>; }
 export function PositionSummary({ row }: { row: FulfillmentSample | FulfillmentStock }) {
     const positions = fulfillmentPositions(row);
     if (positions.length < 2) return null;

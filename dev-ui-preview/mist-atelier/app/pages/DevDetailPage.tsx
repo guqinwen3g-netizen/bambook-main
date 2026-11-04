@@ -30,6 +30,7 @@ import { ImageRoleTag } from './modules/PrimaryImage';
 import { FileName } from '../runtime/files';
 import { OptionInput } from './OptionInput';
 import { FABRIC_SAMPLE_FORMS, sampleFormUnit, sampleUnitAllowsDecimal, sampleUnitsFor } from '../runtime/tradeOptions';
+import { businessWhen } from './modules/pageKit';
 
 export function localConfirmationTime(date=businessNow()){return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60_000).toISOString().slice(0,16);}
 export function confirmationFormError(values:{confirmer:string;organization:string;confirmedAt:string;basis:string;originalText:string}){
@@ -266,14 +267,14 @@ export function DevDetailPage(){
           {fabricDomain&&measurements.length>0&&<MeasurementTable rows={measurements} unit="" />}
           {fabricDomain&&!version?.qc?.fabricMeasurements?.length&&!measurements.length&&<p className="mist-note">{uiText("暂无实测记录")}</p>}
           {version?.qc?<><KeyValue items={[{label:'报告',value:state?.files.find(file=>file.id===version.qc!.report)?.name||version.qc.report},{label:'评审意见',value:version.qc.opinion||'未记录'}]} />{state?.files.find(file=>file.id===version.qc!.report)&&<CardFooter><FileName file={state.files.find(file=>file.id===version.qc!.report)!} label={uiText("预览本版报告")} /><TextLink icon={Download} onClick={()=>void downloadFile(state.files.find(file=>file.id===version.qc!.report)!).catch(cause=>setFailure(String(cause)))}>{uiText("下载本版报告")}</TextLink></CardFooter>}</>:<CardFooter><span className="mist-note">{uiText("暂无 QC 报告")}</span></CardFooter>}
-          {!!version?.qcHistory?.length&&<div className="mist-section"><CardHeader title={uiText("历次 QC")} /><Timeline events={version.qcHistory.slice().reverse().map(item=>({who:item.reviewer,when:new Date(item.reviewedAt).toLocaleString(),text:`${qcLabel[item.result]} · ${item.report}\n${item.opinion||'未记录意见'}${item.decision?`\n处理：${item.decision.kind==='rework'?'整改复检':item.decision.kind==='abandon'?'放弃本版':'重新打样'}${item.decision.note?` · ${item.decision.note}`:''}`:''}`}))} /></div>}
+          {!!version?.qcHistory?.length&&<div className="mist-section"><CardHeader title={uiText("历次 QC")} /><Timeline events={version.qcHistory.slice().reverse().map(item=>({who:item.reviewer,when:businessWhen(item.reviewedAt),text:`${qcLabel[item.result]} · ${item.report}\n${item.opinion||'未记录意见'}${item.decision?`\n处理：${item.decision.kind==='rework'?'整改复检':item.decision.kind==='abandon'?'放弃本版':'重新打样'}${item.decision.note?` · ${item.decision.note}`:''}`:''}`}))} /></div>}
         </Card>
         {state&&version&&<DevSampleFormsCard state={state} dev={dev} version={version} disabled={busy||!!pending} run={run}/>}
         {state&&<div data-dev-billing><DevBillingCard state={state} dev={dev} disabled={busy||!!pending} run={run}/></div>}
       </div>
       <div className="mist-detail-rail">
-        <Card><CardHeader title={uiText("动态")} tools={<IconButton icon={History} label={uiText("定位动态记录")} size="sm" onClick={()=>document.getElementById('mist-dev-history')?.scrollIntoView({behavior:'smooth'})} />} /><div id="mist-dev-history">{history.length?<Timeline events={history.map(event=>({who:event.actor,when:new Date(event.at).toLocaleString(),text:event.text}))} />:<EmptyState compact title={uiText("暂无业务动态")} />}</div></Card>
-        <Card><CardHeader title={uiText("确认记录")} />{version?.confirmations.length?<Timeline events={version.confirmations.slice().reverse().map(item=>({who:item.confirmer,when:new Date(item.confirmedAt).toLocaleString(),text:`${resultLabel[item.result]} · ${item.organization}${item.samples?.length?`\n针对形态：${item.samples.map(ref=>`${ref.form} ${ref.code}`).join('、')}`:''}\n${item.basis}${item.originalText?`\n${item.originalText}`:''}`}))} />:<EmptyState compact title={uiText("本版暂无确认记录")} />}</Card>
+        <Card><CardHeader title={uiText("动态")} tools={<IconButton icon={History} label={uiText("定位动态记录")} size="sm" onClick={()=>document.getElementById('mist-dev-history')?.scrollIntoView({behavior:'smooth'})} />} /><div id="mist-dev-history">{history.length?<Timeline events={history.map(event=>({who:event.actor,when:businessWhen(event.at),text:event.text}))} />:<EmptyState compact title={uiText("暂无业务动态")} />}</div></Card>
+        <Card><CardHeader title={uiText("确认记录")} />{version?.confirmations.length?<Timeline events={version.confirmations.slice().reverse().map(item=>({who:item.confirmer,when:businessWhen(item.confirmedAt),text:`${resultLabel[item.result]} · ${item.organization}${item.samples?.length?`\n针对形态：${item.samples.map(ref=>`${ref.form} ${ref.code}`).join('、')}`:''}\n${item.basis}${item.originalText?`\n${item.originalText}`:''}`}))} />:<EmptyState compact title={uiText("本版暂无确认记录")} />}</Card>
         <Card id="mist-dev-archive"><CardHeader title={uiText("关联")} /><RelatedList items={[
             ...(links.product?[{icon:Archive,title:links.product.sku,sub:`产品档案 · ${links.product.name}`,onClick:()=>go('products',links.product!.id)}]:[]),
             ...links.samples.map(sample=>({icon:PackageCheck,title:sample.code,sub:`本版实物样品 · ${sample.name}`,onClick:()=>go('samples',sample.id)})),

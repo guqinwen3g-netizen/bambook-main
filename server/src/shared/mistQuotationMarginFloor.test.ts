@@ -68,7 +68,7 @@ describe('BB-QUO-3 最低毛利率底价线',()=>{
   const {ctx,s}=setup(),demo=createMistState(ctx);s.devs=demo.devs;s.versions=demo.versions;
   const p=run(s,{type:'market.product.save',payload:{input:garment}},ctx).id!,p2=run(s,{type:'market.product.save',payload:{input:{...garment,sku:'G2',name:'外套'}}},ctx).id!;
   const fab=run(s,{type:'market.product.save',payload:{input:{...garment,sku:'F1',name:'府绸',category:'fabric' as const,unit:'米'}}},ctx).id!;
-  const dev=s.devs.find(d=>developmentDomain(d.values)==='garment'&&d.versionIds.length)!,devLine={productId:'',sourceDevId:dev.id,sourceVersionId:dev.versionIds[0],name:'开发款',style:'DV1',specification:'',qty:'10',unit:'件',price:'100.00',cost:'88.00'};
+  const dev=s.devs.find(d=>developmentDomain(d.values)==='garment'&&d.versionIds.length)!;dev.customerId='c';const devLine={productId:'',sourceDevId:dev.id,sourceVersionId:dev.versionIds[0],name:'开发款',style:'DV1',specification:'',qty:'10',unit:'件',price:'100.00',cost:'88.00'};
   const fabLine={productId:fab,sourceDevId:'',sourceVersionId:'',name:'府绸',style:'F1',specification:'',qty:'100',unit:'米',price:'100.00',cost:'88.00'};
   const base=quote(p),id=run(s,{type:'market.quotation.save',payload:{input:base}},ctx).id!;const q=()=>s.market.quotations.find(x=>x.id===id)!;
   setFloor(s,ctx,'15');run(s,{type:'market.marginFloor.set',payload:{family:'fabric',minMarginPercent:'20',effectiveFrom:'2026-10-13',reason:'面料定价会'}},ctx);

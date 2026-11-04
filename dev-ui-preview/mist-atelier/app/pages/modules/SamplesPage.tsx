@@ -21,6 +21,7 @@ import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pag
 import { SAMPLE_FORMS } from '../../runtime/tradeOptions';
 import { SampleRequests } from './SampleRequests';
 import { readSampleRequests } from '../../../../../server/src/shared/mistSampleRequests';
+import { businessWhen } from './pageKit';
 
 type Shelf = 'fabric' | 'garment' | 'other';
 type SampleTab = Shelf | 'requests';
@@ -316,7 +317,7 @@ function SampleDetail({ row, state, day, can, locked, onMove, onEdit, onQc, onAt
       {row.samples.slice(1).filter(sample => sample.fileIds.length).map(sample => <RecordFiles key={sample.id} ids={sample.fileIds} />)}
     </DetailBlock>
     <DetailBlock title={uiText("流转记录")}>
-      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.destination ? ' · ' + movement.destination : ''}${movement.carrier || movement.trackingNo ? ` · ${[movement.carrier, movement.trackingNo].filter(Boolean).join(' ')}` : ''}${movement.fee ? ` · 寄样费 ${movement.fee.amount} ${movement.fee.currency}` : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}`, link = movement.development; return ({ who: movement.actor, when: new Date(movement.at).toLocaleString(), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
+      {events.length ? <Timeline events={events.map(({ movement, sample }) => { const line = `${MOVE_LABEL[movement.kind]}${row.samples.length > 1 ? ' · ' + sample.form : ''}${movement.quantity ? ` ${movement.quantity}${sample.unit}` : ''}${movement.sendPurpose?' · '+uiText(SAMPLE_SEND_PURPOSES[movement.sendPurpose]):''}${movement.person ? ' · ' + movement.person : ''}${movement.location ? ' · ' + movement.location : ''}${movement.destination ? ' · ' + movement.destination : ''}${movement.carrier || movement.trackingNo ? ` · ${[movement.carrier, movement.trackingNo].filter(Boolean).join(' ')}` : ''}${movement.fee ? ` · 寄样费 ${movement.fee.amount} ${movement.fee.currency}` : ''}${movement.expectedReturn ? ` · 预计 ${movement.expectedReturn} 归还` : ''}${movement.note ? ' · ' + movement.note : ''}`, link = movement.development; return ({ who: movement.actor, when: businessWhen(movement.at), text: link ? <>{line} <TextLink onClick={() => go('development/detail', link.devId, { versionId: link.versionId })}>{uiText("查看开发案 ")}{state.devs.find(dev => dev.id === link.devId)?.code || ''}</TextLink></> : line }); })} />
         : <span className="mist-note">{uiText("还没有流转记录")}</span>}
     </DetailBlock>
   </DetailBody>;

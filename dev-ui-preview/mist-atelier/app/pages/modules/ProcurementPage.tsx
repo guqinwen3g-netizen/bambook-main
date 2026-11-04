@@ -26,6 +26,7 @@ import { RfqLedger } from './SourcingRequests';
 import { purchaseTransferBlocker, readRfqs } from '../../../../../server/src/shared/mistSourcing';
 import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
 import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
+import { businessWhen } from './pageKit';
 
 type ProcurementEditorSpec = ModuleEditorSpec & { approvalFor?: string };
 const AMENDMENT_STATE = { pending: '待审批', approved: '已生效', rejected: '已退回', withdrawn: '已撤回' } as const;
@@ -417,7 +418,7 @@ function PurchaseDetail({ purchase: p, state, incoming, day, me, can, canApprove
       <RecordFiles key={p.id} ids={p.fileIds} onAttach={can && stage === 'draft' ? onAttach : undefined} />
     </DetailBlock>
     {!!p.revisionHistory?.length && <RecordDisclosure title="审批版本">
-      <Timeline events={p.revisionHistory.slice().reverse().map(revision => ({ who: revision.decision?.actor || p.createdBy, when: new Date(revision.decision?.at || revision.submittedAt).toLocaleString(), text: <><div>{uiText("第 ")}{revision.revision}{uiText(" 版 · ")}{uiText(revision.decision ? status[revision.decision.decision] : '待审批')}</div><div>{revision.snapshot.supplier} · {revision.snapshot.description} · {revision.snapshot.quantity} {uiText(revision.snapshot.unit)} × {revision.snapshot.price} {revision.snapshot.currency}</div><div>{revision.snapshot.terms} · {revision.snapshot.destination} · {revision.snapshot.due}</div>{revision.decision && <div>{revision.decision.note}</div>}<RecordFiles ids={revision.snapshot.fileIds} /></> }))} />
+      <Timeline events={p.revisionHistory.slice().reverse().map(revision => ({ who: revision.decision?.actor || p.createdBy, when: businessWhen(revision.decision?.at || revision.submittedAt), text: <><div>{uiText("第 ")}{revision.revision}{uiText(" 版 · ")}{uiText(revision.decision ? status[revision.decision.decision] : '待审批')}</div><div>{revision.snapshot.supplier} · {revision.snapshot.description} · {revision.snapshot.quantity} {uiText(revision.snapshot.unit)} × {revision.snapshot.price} {revision.snapshot.currency}</div><div>{revision.snapshot.terms} · {revision.snapshot.destination} · {revision.snapshot.due}</div>{revision.decision && <div>{revision.decision.note}</div>}<RecordFiles ids={revision.snapshot.fileIds} /></> }))} />
     </RecordDisclosure>}
     {!!p.amendments?.length && <RecordDisclosure title="合同变更">
       <Timeline events={p.amendments.slice().reverse().map(a => ({ who: a.decision?.actor || a.requester, when: shortWhen(a.decision?.at || a.withdrawnAt || a.submittedAt), text: <><div>{uiText(AMENDMENT_STATE[a.state])} · {purchaseAmendmentText(p, a)}</div><div>{a.reason}</div>{a.decision && <div>{a.decision.note}</div>}<RecordFiles ids={a.fileIds} /></> }))} />

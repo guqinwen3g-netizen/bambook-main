@@ -18,6 +18,7 @@ import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, Preview
 import { ProductionSampleNotes } from '../ProductionSampleNotes';
 import { QcDispositionPanel } from './QcDispositionPanel';
 import { AqlCard, FabricInspectionCard, aqlFromDraft, emptyAql, emptyFabric, fabricFromDraft, type AqlDraft, type FabricDraft } from './QcSampling';
+import { businessWhen } from './pageKit';
 
 type Domain = FulfillmentQcTask['domain'];
 type Kind = FulfillmentQcTask['kind'];
@@ -331,7 +332,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
 
 function QcReportCard({ report, domain, production, latest }: { report: FulfillmentQcReport; domain: Domain; production: boolean; latest: boolean }) {
   return <div className="mist-col" data-qc-report={report.id}>
-    <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {new Date(report.reviewedAt).toLocaleString()}</span></div>
+    <div className="mist-row" style={{ flexWrap: 'wrap' }}><b>{report.report}</b><Pill tone={RESULT_TONE[report.result]}>{RESULT_LABEL[report.result]}</Pill>{report.previousReportId && <span className="mist-note">{uiText("复验")}</span>}{latest && <span className="mist-note">{uiText("当前")}</span>}<span className="mist-spacer" /><span className="mist-note">{report.reviewer} · {businessWhen(report.reviewedAt)}</span></div>
     {report.location && <div className="mist-row"><span>{uiText("检查地点")}</span><span>{report.location}</span></div>}
     {report.opinion && <p className="mist-sub">{report.opinion}</p>}
     {(production||!!report.sizeChecks?.length) && domain === 'garment' && <DataTable ariaLabel={ui`${report.report} · 生产尺码检查`} rows={report.sizeChecks || []} rowKey={check => check.size} columns={[{ key: 'size', header: '实际尺码', render: check => check.size }, { key: 'inspected', header: '实际检查件数', align: 'right', render: check => check.inspected }, { key: 'result', header: '各码结论', render: check => check.result === 'pass' ? '通过' : '不通过' }, { key: 'basis', header: '检查依据', render: check => check.evidence }]} empty={<EmptyState title={uiText("未记录本次实际尺码检查")} compact />} />}

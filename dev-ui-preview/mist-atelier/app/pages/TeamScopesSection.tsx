@@ -8,6 +8,7 @@ import { Banner, Button, Field, FormGrid, FormSection, Pill, Select, SettingRow,
 import { uiText } from '../../../../services/interfaceLanguage';
 import type { MistTeamScope, TeamScopeNodeKind, TeamScopePreview, TeamScopeRef } from '../../../../server/src/shared/mistTeamScope';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
+import { businessWhen } from './modules/pageKit';
 
 type Row = { id: string; name: string; scope: MistTeamScope | null; counts: Record<TeamScopeNodeKind, number> | null };
 type Condition = { customerId: string; line: string; season: string; supplierId: string };
@@ -106,7 +107,7 @@ export function TeamScopesSection({ canEdit, initialTeamId, onReturnToTeam }: { 
         <Field label={uiText('调整说明')}><TextInput aria-label={uiText('调整说明')} value={note} onChange={event => setNote(event.target.value)} /></Field>
         <Button variant="primary" loading={busy} disabled={busy || !!workspace.pending} onClick={() => void save()}>{uiText('保存范围')}</Button>
       </div>}
-      {!!team.scope?.history.length && <div className="mist-col"><b>{uiText('调整记录')}</b>{team.scope.history.slice(0, 20).map(h => <small key={h.at + h.summary}>{new Date(h.at).toLocaleString()} · {h.actorName} · {uiText(h.summary)}{h.note ? ' · ' + h.note : ''}</small>)}</div>}
+      {!!team.scope?.history.length && <div className="mist-col"><b>{uiText('调整记录')}</b>{team.scope.history.slice(0, 20).map(h => <small key={h.at + h.summary}>{businessWhen(h.at)} · {h.actorName} · {uiText(h.summary)}{h.note ? ' · ' + h.note : ''}</small>)}</div>}
       </div>
     </FormSection>}
   </>;
