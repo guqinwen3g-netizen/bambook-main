@@ -223,3 +223,23 @@ describe('fin40 compliance screening',()=>{
   expect(riskSignals(s,'2026-10-12').find(x=>x.key===`screening-hit:${r.id}:export_control`)).toMatchObject({level:'critical',type:'compliance'});
  });
 });
+
+describe('market history and lookbook specifications',()=>{
+ it('records business actions rather than raw status commands',()=>{
+  const {s,ctx}=setup();const p=run(s,{type:'market.product.save',payload:{input:productInput}},ctx).id!;
+  expect(s.events[0].text).toBe('创建产品档案');
+  for(const status of ['archived','active'] as const){run(s,{type:'market.product.status',payload:{id:p,status}},ctx);expect(s.events[0].text).toBe((status==='archived'?'归档':'恢复')+'产品档案 P1');}
+  const id=run(s,{type:'market.campaign.save',payload:{input:{name:'展品推广',type:'catalog',seasonId:'',showId:'',startDate:'2026-10-01',endDate:'2026-10-30',target:'新客户',budget:'100',actualCost:'10',currency:'USD',owner:'业务员',productIds:[]}}},ctx).id!;
+  for(const [status,text] of [['Active','活动 策划中 → 进行中'],['Paused','暂停活动'],['Active','恢复活动'],['Completed','活动 进行中 → 已完成']] as const){run(s,{type:'market.campaign.status',payload:{id,status}},ctx);expect(s.events[0].text).toBe(text);}
+  expect(s.events.every(e=>!e.text.startsWith('market.'))).toBe(true);
+ });
+ it('freezes all structured fields for export and keeps an explicit specification authoritative',()=>{
+  const {s,ctx}=setup();const ids=[run(s,{type:'market.product.save',payload:{input:{...productInput,specification:'',specs:{weight:'240',width:'150',weave:'斜纹',yarn:'32S',finish:'磨毛'}}}},ctx).id!,run(s,{type:'market.product.save',payload:{input:{...productInput,sku:'P2',specification:'客户签认规格',specs:{weight:'240'}}}},ctx).id!];
+  const id=run(s,{type:'market.lookbook.save',payload:{input:{name:'画册',customerId:'c',productIds:ids}}},ctx).id!;
+  run(s,{type:'market.lookbook.status',payload:{id,status:'Prepared'}},ctx);
+  const snapshots=s.market.lookbooks[0].snapshots;
+  expect(snapshots[0].specification).toBe('棉 · 克重 240 g/m² · 门幅 150 cm · 组织 斜纹 · 纱支 / 原料 32S · 后整理 磨毛');
+  expect(snapshots[1].specification).toBe('客户签认规格');expect(s.events[0].text).toBe('准备画册');
+  s.market.products.find(p=>p.id===ids[0])!.specs!.finish='防泼水';expect(snapshots[0].specification).toContain('磨毛');
+ });
+});

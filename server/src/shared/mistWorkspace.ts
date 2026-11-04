@@ -1792,12 +1792,12 @@ function convertLeadToCrm(state:MistState,p:Extract<MarketCommand,{type:'market.
   if(customerId){if(!state.customers.some(c=>c.id===customerId))throw new MistCommandError('NOT_FOUND','客户不存在',404);}
   else{
     const same=state.customers.find(c=>c.name.trim().toLowerCase()===lead.company.trim().toLowerCase());if(same)throw new MistCommandError('CONFLICT',`已有同名客户 ${same.name}（${same.code}），请选择该客户`,409);
-    const created=applyMarketCommand(state,{type:'market.customer.create',payload:{input:{name:lead.company,country:'',city:'',industry:'',ownerId:context.actorId||'',grade:'',currency:lead.currency||'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:context.now.slice(0,10)}}},context);customerId=String(created.customerId||created.id);
+    const created=applyMarketCommand(state,{type:'market.customer.create',payload:{input:{name:lead.company,country:'',city:'',industry:'',ownerId:lead.ownerId||context.actorId||'',grade:'',currency:lead.currency||'USD',terms:'',incoterm:'',categories:'',creditLimit:0,since:context.now.slice(0,10)}}},context);customerId=String(created.customerId||created.id);
     applyMarketCommand(state,{type:'market.contact.save',payload:{kind:'customer',parentId:customerId,name:lead.name,role:'',email:lead.email,phone:lead.phone,primary:true}},context);
   }
   let opportunityId='';
   if(p.opportunity){const parent=lead.source==='show'?state.market.shows.find(x=>x.id===lead.parentId)?.name:state.market.campaigns.find(x=>x.id===lead.parentId)?.name;
-    const r=applyCrmCommand(state,{type:'crm.opportunity.save',payload:{input:{customerId,title:p.opportunity.title,domain:p.opportunity.domain,amount:p.opportunity.amount,currency:p.opportunity.currency,expectedDate:p.opportunity.expectedDate,ownerId:context.actorId||'',note:`来源线索：${lead.name} · ${lead.company}（${parent||'来源活动'}）\n${lead.demand}`,devIds:[],quotationIds:[],orderIds:[]}}},context);opportunityId=String(r.id);}
+    const r=applyCrmCommand(state,{type:'crm.opportunity.save',payload:{input:{customerId,title:p.opportunity.title,domain:p.opportunity.domain,amount:p.opportunity.amount,currency:p.opportunity.currency,expectedDate:p.opportunity.expectedDate,ownerId:lead.ownerId||context.actorId||'',note:`来源线索：${lead.name} · ${lead.company}（${parent||'来源活动'}）\n${lead.demand}`,devIds:[],quotationIds:[],orderIds:[]}}},context);opportunityId=String(r.id);}
   applyMarketCommand(state,{type:'market.lead.transition',payload:{id:lead.id,status:'Converted',customerId,actualValue:'0',note:opportunityId?'转为 CRM 客户并建立商机':'转为 CRM 客户'}},context);
   const row=state.market.leads.find(l=>l.id===lead.id)!;if(opportunityId)row.opportunityId=opportunityId;
   return {id:lead.id,customerId,opportunityId};

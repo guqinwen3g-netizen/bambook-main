@@ -100,6 +100,8 @@ export type SampleMovement = {
     actor: string;
     loanId?: string;
     expectedReturn?: string;
+    /** Bound borrower account; empty means explicitly unbound, absent means a legacy name-only loan. */
+    borrowerId?: string;
     sourceLocation?: string;
     /** BB-DEV-8：由开发案版本详情寄样生成的寄出流水，回链准确开发案、版本与寄样记录。 */
     development?: { devId: string; versionId: string; dispatchId: string };
@@ -523,6 +525,8 @@ export type FulfillmentCommand = ProductionIntakeCommand | ReplacementExportComm
         fee?: { amount: number; currency: string };
         quantity: number;
         person: string;
+        /** Company borrower account; display name is resolved server-side. */
+        borrowerId?: string;
         location: string;
         note: string;
         loanId?: string;
@@ -1443,7 +1447,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     fail('归还量超过未还量');
             }
             else if (quantity > s.available) fail('可用样品不足');
-            const person = text(p.person, p.kind === 'returnFactory' ? '退回工厂' : '借用人/收件人', p.kind === 'lend' || p.kind === 'send' || p.kind === 'returnFactory'), location = text(p.location, '位置', false), note = text(p.note, p.kind === 'scrap' || p.kind === 'returnFactory' ? '原因' : '备注', p.kind === 'scrap' || p.kind === 'returnFactory'), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
+            const borrower = p.kind === 'lend' && p.borrowerId ? resolveMember(ctx, p.borrowerId, '借用人') : undefined;
+            const person = borrower?.name || text(p.person, p.kind === 'returnFactory' ? '退回工厂' : '借用人/收件人', p.kind === 'lend' || p.kind === 'send' || p.kind === 'returnFactory'), location = text(p.location, '位置', false), note = text(p.note, p.kind === 'scrap' || p.kind === 'returnFactory' ? '原因' : '备注', p.kind === 'scrap' || p.kind === 'returnFactory'), expectedReturn = p.expectedReturn ? day(p.expectedReturn, '预计归还日') : undefined;
             if (expectedReturn && expectedReturn < platformBusinessDate(ctx.now))
                 fail('预计归还日不能早于借出日');
             const sendPurpose=p.kind==='send'?sampleSendPurpose(p.sendPurpose,s):undefined;
@@ -1464,7 +1469,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (!/^[A-Z]{3}$/.test(currency)) fail('寄样费币种须为三位英文字母');
                 fee = { amount: Math.round(amount * 100) / 100, currency };
             }
-            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
+            const borrowers = borrower ? [borrower] : (ctx.members || (ctx.actorId ? [{ id: ctx.actorId, name: ctx.actorName, active: true }] : [])).filter(member => member.active && member.name === person);
+            f.sampleMovements.push({ id, sampleId: s.id, kind: p.kind, quantity, person, location, note, at: ctx.now, actor: ctx.actorName, ...shipping, ...(p.kind === 'lend' ? { borrowerId: borrowers.length === 1 ? borrowers[0].id : '' } : {}), ...(fee ? { fee } : {}), ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(loan ? { loanId: loan.id } : {}), ...(expectedReturn ? { expectedReturn } : {}),...(sendPurpose?{sendPurpose}:{}) });
             // ord17：订单样品的寄样费记入该订单费用台账，客户样品等无订单来源的只记在流水上。
             if (fee && s.source.kind === 'orderLine') {
                 const order = get(root.orders, s.source.orderId, '订单'), costs = ((root as MistState & { orderCosts?: { expenses: unknown[] } }).orderCosts ||= { expenses: [] }) as { expenses: Array<Record<string, unknown>> };

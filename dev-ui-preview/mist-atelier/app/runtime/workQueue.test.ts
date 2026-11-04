@@ -532,3 +532,63 @@ describe('outstanding forward FX work',()=>{
   expect(rows(state,{...options,canRead:()=>false})).toEqual([]);expect(rows(state,{...options,can:()=>false})).toEqual([]);
  });
 });
+
+describe('rejected development samples and outstanding sample loans', () => {
+  const options = { canRead: all, can: (p: string) => p === 'orders:write', me: 'sales', today: '2026-10-15' };
+  const rejected = () => {
+    const state = base();
+    state.devs = [{ id: 'd', ownerId: 'sales' }] as any;
+    state.versions = [{ id: 'v', devId: 'd', qc: { result: 'reject' }, confirmations: [] }] as any;
+    state.fulfillment.qcTasks = [qc({ source: { kind: 'version', devId: 'd', versionId: 'v' }, state: 'blocked' })] as any;
+    state.fulfillment.qcReports = [{ id: 'r', result: 'reject' }] as any;
+    return state;
+  };
+  it('returns a rejected version to its development owner until a business decision', () => {
+    const state = rejected(), before = structuredClone(state);
+    expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ id: 'qc:qc-1', urgent: true, module: 'development', target: { view: 'development/detail', id: 'd', versionId: 'v' } })]);
+    expect(state).toEqual(before);
+    for (const kind of ['resample', 'abandon'] as const) {
+      state.versions[0].qcDecision = { kind, note: '', decidedAt: ctx().now, decidedBy: '业务员' };
+      expect(mistWorkQueue(state, options)).toEqual([]);
+    }
+  });
+  it('requires exact rejected report, owner and both read permissions; closed versions no longer need decisions', () => {
+    const state = rejected();
+    expect(mistWorkQueue(state, { ...options, me: 'other' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, can: () => false })).toEqual([]);
+    for (const view of ['development', 'qc-workbench']) expect(mistWorkQueue(state, { ...options, canRead: v => v !== view })).toEqual([]);
+    state.fulfillment.qcReports[0].result = 'pass'; expect(mistWorkQueue(state, options)).toEqual([]);
+    state.fulfillment.qcReports[0].result = 'reject'; state.devs[0].closure = { kind: 'cancelled' } as any; expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  const borrowed = () => {
+    const state = base();
+    state.fulfillment.samples = [{ id: 's', name: '借用样布', unit: '米' }] as any;
+    state.fulfillment.sampleMovements = [{ id: 'loan', kind: 'lend', sampleId: 's', quantity: 1.25, person: '借用人', borrowerId: 'sales', at: '2026-10-10', expectedReturn: '2026-10-14' }] as any;
+    return state;
+  };
+  it('tracks partial returns against the exact loan, with overdue urgency only after its due day', () => {
+    const state = borrowed();
+    expect(mistWorkQueue(state, options)).toEqual([expect.objectContaining({ id: 'sample-return:loan', module: 'samples', urgent: true, when: '待归还', due: '2026-10-14' })]);
+    expect(mistWorkQueue(state, { ...options, today: '2026-10-14' })[0].urgent).toBe(false);
+    state.fulfillment.sampleMovements.push({ id: 'return', kind: 'return', sampleId: 's', loanId: 'loan', quantity: 0.25 } as any);
+    expect(mistWorkQueue(state, options)[0].meta).toBe('1 米');
+    state.fulfillment.sampleMovements.push({ id: 'other-return', kind: 'return', sampleId: 's', loanId: 'other-loan', quantity: 1 } as any);
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
+    state.fulfillment.sampleMovements.push({ id: 'final-return', kind: 'return', sampleId: 's', loanId: 'loan', quantity: 1 } as any);
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+  it('does not notify the lender or unreadable users and matches legacy names only if unique', () => {
+    const state = borrowed();
+    expect(mistWorkQueue(state, { ...options, me: 'lender' })).toEqual([]);
+    expect(mistWorkQueue(state, { ...options, canRead: v => v !== 'samples' })).toEqual([]);
+    delete state.fulfillment.sampleMovements[0].borrowerId;
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    state.members = [{ userId: 'sales', name: '借用人' }] as any;
+    expect(mistWorkQueue(state, options)).toHaveLength(1);
+    state.fulfillment.sampleMovements[0].borrowerId = '';
+    expect(mistWorkQueue(state, options)).toEqual([]);
+    delete state.fulfillment.sampleMovements[0].borrowerId;
+    state.members!.push({ userId: 'other', name: '借用人' } as any);
+    expect(mistWorkQueue(state, options)).toEqual([]);
+  });
+});

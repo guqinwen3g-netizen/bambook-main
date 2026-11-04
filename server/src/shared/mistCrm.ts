@@ -15,7 +15,7 @@ export const CRM_COLLECTION_LEVEL_LABEL: Record<CrmCollectionLevel, string> = { 
 export type CrmCollection = { level: CrmCollectionLevel; promisedDate: string; promisedAmount: string; currency: string; openAtLog: number };
 export type CrmLink = { kind: CrmLinkKind; id: string };
 /** voided：作废的跟进保留原文与原因，不计入统计。 */
-export type CrmFollowUp = { id: string; customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; nextTaskId: string; link: CrmLink | null; actor: string; createdAt: string; collection?: CrmCollection; voided?: { reason: string; at: string; actor: string } };
+export type CrmFollowUp = { id: string; customerId: string; method: CrmFollowUpMethod; content: string; at: string; nextDate: string; nextTaskId: string; link: CrmLink | null; actor: string; actorId?: string; createdAt: string; collection?: CrmCollection; voided?: { reason: string; at: string; actor: string } };
 export type CrmStage = 'intent' | 'sampling' | 'quoting' | 'won' | 'lost';
 export type CrmOpportunity = { id: string; customerId: string; title: string; domain: 'garment' | 'fabric'; stage: CrmStage; amount: string; currency: string; expectedDate: string; /** 负责人显示名快照；ownerId 为负责人账号。 */ owner: string; ownerId: string; note: string; lossReason: string; devIds: string[]; quotationIds: string[]; orderIds: string[]; history: Array<{ at: string; actor: string; from: CrmStage | null; to: CrmStage; note: string }>; createdAt: string; updatedAt: string };
 export type CrmState = { followUps: CrmFollowUp[]; opportunities: CrmOpportunity[] };
@@ -73,6 +73,14 @@ function ids(root: MistState, customerId: string, kind: Exclude<CrmLinkKind, 'op
 /** Keep the customer timeline anchor, but authorize business activity by its concrete source record. */
 function log(root: MistState, context: MistContext, entityId: string, value: string, businessRef: { kind: 'opportunity' | 'followUp'; id: string }) { root.events.unshift({ id: context.id(), entityType: 'customer', entityId, actor: context.actorName, at: context.now, text: value, fileIds: [], businessRef }); }
 
+/** Shared by manual follow-ups and imported lead history; historical overdue dates remain actionable. */
+export function scheduleCrmFollowUp(root: MistState, context: MistContext, input: { title: string; content: string; nextDate: string; target: import('./mistWorkspace').MistTarget }) {
+  const id = context.id();
+  root.tasks.unshift({ id, title: input.title, due: input.nextDate, done: false, kind: 'crm-follow-up', target: input.target, assigneeIds: context.actorId ? [context.actorId] : [] });
+  root.calendar.push({ id: context.id(), title: input.title, date: input.nextDate, time: '09:00', note: input.content.slice(0, 200), target: input.target, ...(context.actorId ? { ownerId: context.actorId, owner: context.actorName } : {}) });
+  return id;
+}
+
 export function applyCrmCommand(root: MistState, command: CrmCommand, context: MistContext): { id: string } {
   switch (command.type) {
     case 'crm.followUp.save': {
@@ -100,10 +108,8 @@ export function applyCrmCommand(root: MistState, command: CrmCommand, context: M
       }
       const id = context.id(); let nextTaskId = '';
       const inv = link?.kind === 'invoice' ? root.invoices.find(i => i.id === link!.id) : undefined;
-      if (nextDate) { nextTaskId = context.id(); root.tasks.unshift({ id: nextTaskId, title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, due: nextDate, done: false, kind: 'crm-follow-up', target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id }, assigneeIds: context.actorId ? [context.actorId] : [] });
-        // mar62：与邮件跟进一致，下次跟进同时写入日历（本人日程）。
-        root.calendar.push({ id: context.id(), title: root.tasks[0].title, date: nextDate, time: '09:00', note: content.slice(0, 200), target: root.tasks[0].target, ...(context.actorId ? { ownerId: context.actorId, owner: context.actorName } : {}) }); }
-      root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, createdAt: context.now, ...(collection ? { collection } : {}) });
+      if (nextDate) nextTaskId = scheduleCrmFollowUp(root, context, { title: collection && inv ? `催收 ${inv.code}：${c.name}` : `跟进客户：${c.name}`, content, nextDate, target: collection && inv ? { view: 'invoices', id: inv.id } : { view: 'crm', id: c.id, customerId: c.id } });
+      root.crm.followUps.unshift({ id, customerId: c.id, method: p.method, content, at: new Date(stamp).toISOString(), nextDate, nextTaskId, link, actor: context.actorName, ...(context.actorId ? { actorId: context.actorId } : {}), createdAt: context.now, ...(collection ? { collection } : {}) });
       const what = collection && inv ? `${CRM_COLLECTION_LEVEL_LABEL[collection.level]} ${inv.code}${collection.promisedDate ? `，客户承诺 ${collection.promisedDate} 付 ${collection.promisedAmount} ${collection.currency}` : ''}` : '';
       log(root, context, c.id, `记录${CRM_METHOD_LABEL[p.method]}${what ? '催收：' + what : '跟进'}${nextDate ? `，下次跟进 ${nextDate}` : ''}`, { kind: 'followUp', id });
       if (collection && inv) root.events.unshift({ id: context.id(), entityType: 'invoice', entityId: inv.id, actor: context.actorName, at: context.now, text: `${CRM_METHOD_LABEL[p.method]}${what}`, fileIds: [] });
