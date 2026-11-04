@@ -117,9 +117,12 @@ export function InventoryPage() {
   const canStockWrite = (_stock: FulfillmentStock) => {
     return can;
   };
+  const issueTargets = (stock: FulfillmentStock) => !!state && materialDeliveryRequired(state, stock.purchaseId || '') ? workspace?.materialIssueTargets?.[stock.id] ?? materialDeliveryTargets(state, stock.purchaseId || '', stock.id) : null;
+  // When every receiving contract is blocked by the source's quality state, say why before the form is opened.
+  const issueBlocker = (stock: FulfillmentStock) => { const targets = issueTargets(stock); return targets?.length && targets.every(target => target.blocker) ? targets[0].blocker! : ''; };
   const moveSpec = (stock: FulfillmentStock, kind: 'issue' | 'return' | 'move'): ModuleEditorSpec => {
     const linked = kind === 'issue' && !!state && materialDeliveryRequired(state, stock.purchaseId || '');
-    const targets = linked ? workspace?.materialIssueTargets?.[stock.id] ?? materialDeliveryTargets(state!, stock.purchaseId || '') : [];
+    const targets = (linked ? issueTargets(stock) ?? [] : []).map(target => target.blocker ? { ...target, label: `${target.label} · ${target.blocker}` } : target);
     const quantity = targets.length === 1 && targets[0].remaining ? Math.min(stock.available, Number(targets[0].remaining)) : linked && targets.length !== 1 ? 0 : stock.available;
     return {
       title: ({ issue: linked ? '登记发料' : '登记出库', return: '按原出库退回', move: '登记库存移位' })[kind],
@@ -204,7 +207,7 @@ export function InventoryPage() {
     ? <EmptyState icon={SearchX} title={uiText("没有符合条件的库存")} description={uiText("换个关键词或清除筛选。")} action={<Button onClick={() => { setQuery(''); setStateFilter('all'); setSourceFilter('all'); setWarehouseFilter(''); }}>{uiText("清除筛选")}</Button>} />
     : <EmptyState icon={Boxes} title={uiText(invalidSource ? '来源不匹配' : sourceMode ? '本来源还没有入库批次' : `${DOMAIN_LABEL[domain]}还没有库存`)} description={uiText(invalidSource ? '请返回来源案件重新选择准确退货单。' : '')} action={!sourceMode && session.canAccessView(View.Procurement) ? <Button onClick={() => go('procurement')}>{uiText("前往采购管理")}</Button> : undefined} />;
   const detail = selected && state
-    ? <StockDetail stock={selected} state={state} can={canStockWrite(selected)} canFinance={session.hasPermission('invoices:read')&&session.hasPermission('vouchers:read')} locked={locked}
+    ? <StockDetail stock={selected} issueBlocker={issueBlocker(selected)} state={state} can={canStockWrite(selected)} canFinance={session.hasPermission('invoices:read')&&session.hasPermission('vouchers:read')} locked={locked}
         onMove={kind => setDialog(moveSpec(selected, kind))} onScrap={() => setDialog(scrapSpec(selected))} onRepair={() => {const spec=repairSpec(selected);if(spec)editor.open(spec);}} onHandback={() => {const spec=repairSpec(selected,true);if(spec)editor.open(spec);}} onDispatch={()=>{const spec=custodySpec(selected);if(spec)editor.open(spec);}} onRepairReturn={()=>{const spec=custodySpec(selected,true);if(spec)editor.open(spec);}}
         onInspect={returnId => setDialog({title:'隔离料送复检',submitLabel:'发起复检',fields:[field('due','预计检查日','date')],initialValues:{due:today()},submit:v=>run({type:'fulfillment.inventory.quarantine.request',payload:{returnId,due:text(v,'due')}})})}
         onRelease={returnId => setDialog({title:'恢复可用库存',submitLabel:'确认恢复',fields:[field('evidence','处置依据','textarea')],initialValues:{evidence:''},submit:v=>run({type:'fulfillment.inventory.quarantine.dispose',payload:{returnId,decision:'release',evidence:text(v,'evidence')}})})}
@@ -263,8 +266,8 @@ export function InventoryPage() {
   </MistPage></Nav.Provider>;
 }
 
-function StockDetail({ stock, state, can, locked, canClaims, canQc, canFinance, canDecideRecovery, canReserve, canCost, canTransfer, onTransfer, onTransferReceive, onCount, onReserve, onReleaseReservation, onMove, onScrap, onRepair, onHandback, onDispatch, onRepairReturn, onInspect, onRelease, onDispose, onNoRecovery, onRevokeRecovery, onQc, onPurchase, onClaim, onLinkShipment, onUnlinkShipment, onCorrectShipment }: {
-  stock: FulfillmentStock; state: MistState; can: boolean; locked: boolean; canClaims: boolean; canFinance: boolean;
+function StockDetail({ stock, issueBlocker, state, can, locked, canClaims, canQc, canFinance, canDecideRecovery, canReserve, canCost, canTransfer, onTransfer, onTransferReceive, onCount, onReserve, onReleaseReservation, onMove, onScrap, onRepair, onHandback, onDispatch, onRepairReturn, onInspect, onRelease, onDispose, onNoRecovery, onRevokeRecovery, onQc, onPurchase, onClaim, onLinkShipment, onUnlinkShipment, onCorrectShipment }: {
+  stock: FulfillmentStock; issueBlocker?: string; state: MistState; can: boolean; locked: boolean; canClaims: boolean; canFinance: boolean;
   onMove: (kind: 'issue' | 'return' | 'move') => void; onScrap: () => void; onRepair:()=>void; onHandback:()=>void; onDispatch:()=>void; onRepairReturn:()=>void; onPurchase: (id: string) => void; onClaim: (id: string, section?: string) => void;
   onInspect:(id:string)=>void; onRelease:(id:string)=>void; onQc:(id:string)=>void; canQc:boolean;
   onLinkShipment:(id:string)=>void; onUnlinkShipment:(id:string)=>void;
@@ -302,7 +305,7 @@ function StockDetail({ stock, state, can, locked, canClaims, canQc, canFinance, 
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[current]}>{STATE_LABEL[current]}</Pill><Pill>{uiText(returned ? '退货入库' : other ? OTHER_RECEIPT_REASONS[stock.otherReceipt!.reason] : '采购交付入库')}</Pill>{current === 'available' && age > SLOW_DAYS && <Pill tone="warn">{uiText(`呆滞 ${age} 天`)}</Pill>}{counting && <Pill tone="warn">{uiText('盘点待审批')}</Pill>}{domain && <Pill>{uiText(domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}{out > 0 && <Pill>{uiText("已出库 ")}{out} {uiText(stock.unit)}</Pill>}</div>
     {(!isRepair||!repair&&!dispatch&&!unrecorded)&&<Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>}
     <ActionBar busy={locked} actions={[
-      { label: '登记出库', icon: PackageMinus, onClick: () => onMove('issue'), primary: !returned && stock.available > 0, reason: writeReason || (returned ? returnedReason : stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
+      { label: '登记出库', icon: PackageMinus, onClick: () => onMove('issue'), primary: !returned && stock.available > 0, reason: writeReason || (returned ? returnedReason : stock.available <= 0 ? '当前没有可用数量' : issueBlocker || false), hidden: returned },
       { label: '按原出库退回', icon: Undo2, onClick: () => onMove('return'), primary: !returned && stock.available <= 0 && openIssues.some(m=>!m.shipmentLink&&!m.shipmentCorrectionHold), reason: writeReason || (!openIssues.some(m=>!m.shipmentLink&&!m.shipmentCorrectionHold) ? '没有可退回的出库' : false), hidden: returned },
       { label: '登记移位', icon: ArrowRightLeft, onClick: () => onMove('move'), reason: writeReason || (stock.available <= 0 ? '当前没有可用数量' : false), hidden: returned },
       { label: '仓库调拨', icon: Truck, onClick: onTransfer, reason: writeReason || (free <= 0 ? '当前没有可调拨数量' : !canTransfer ? '没有其他启用仓库' : false), hidden: returned },
