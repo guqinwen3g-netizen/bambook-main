@@ -79,6 +79,30 @@ describe('staged fabric development chain',()=>{
   expect(revised.stageHandovers).toBeUndefined();
   expect(()=>f.run({type:'development.round.create',payload:{devId:r.devId!,factories:['weaver','mill'],stages:[{factoryId:'weaver',process:'织造'},{factoryId:'dyer',process:'染整'}],requirements:'换厂',targetDate:'2026-11-01'}})).toThrow('工序链一致');
  });
+ it('requires each upstream handover in sequence and rejects reversed business dates atomically',()=>{
+  const f=fixture(),r=f.submit({...f.values,stages:[{factoryId:'weaver',process:'织造'},{factoryId:'dyer',process:'染整'},{factoryId:'mill',process:'后整理'}]});
+  const before=JSON.stringify(f.state);
+  expect(()=>f.handover(r.devId!,r.versionId!,1)).toThrow(/前道交接/);
+  expect(JSON.stringify(f.state)).toBe(before);
+  f.handover(r.devId!,r.versionId!);
+  const handed=JSON.stringify(f.state);
+  expect(()=>f.run({type:'development.stage.handover',payload:{devId:r.devId!,versionId:r.versionId!,stageIndex:1,quantity:3,unit:'米',date:'2026-10-12',note:'后整理收样'}})).toThrow(/早于前道/);
+  expect(JSON.stringify(f.state)).toBe(handed);
+  f.handover(r.devId!,r.versionId!,1);f.recordSample(r.devId!,r.versionId!);
+  expect(f.state.versions[0].stageHandovers?.map(row=>row.stageIndex)).toEqual([0,1]);
+ });
+ it('does not borrow the previous round handover when a staged version is revised',()=>{
+  const f=fixture(),r=f.submit();f.handover(r.devId!,r.versionId!);f.recordSample(r.devId!,r.versionId!);
+  const next=f.run({type:'development.revise',payload:{devId:r.devId!,versionId:r.versionId!,note:'调整手感'}});
+  const before=JSON.stringify(f.state);
+  expect(()=>f.recordSample(r.devId!,next.versionId!)).toThrow(/前道交接/);
+  expect(JSON.stringify(f.state)).toBe(before);
+  f.handover(r.devId!,next.versionId!);f.recordSample(r.devId!,next.versionId!);
+  const [old,revised]=f.state.versions;
+  expect(old.stageHandovers).toHaveLength(1);expect(revised.stageHandovers).toHaveLength(1);
+  expect(old.stageHandovers![0].id).not.toBe(revised.stageHandovers![0].id);
+  expect(old.sample).toBe('S-1');expect(revised.qc).toBeNull();
+ });
  it('names the whole chain on the dyeing mill notice',()=>{
   const f=fixture(),r=f.submit(),dev=f.state.devs[0],version=f.state.versions.find(v=>v.id===r.versionId)!;
   expect(developmentNoticeContent(f.state,dev,version)).toMatchObject({factory:'盛泽染整',stageChain:'吴江织造（织造） → 盛泽染整（染整 · 出样）'});

@@ -50,6 +50,19 @@ describe('ord19 客户索样申请 / ord18 样品费', () => {
     f.state.receipts.push({ id: 'r1', code: 'RCV-1', date: '2026-11-04', payer: 'Nordic Wear AB', amount: 30, remaining: 30, currency: 'USD', ref: '', state: 'unmatched' } as any);
     expect(orderFundingReconciliationLimit(f.state as any, 'r1', again)).toBe(30);
   });
+  it('借出未还的实物不可报废，归还后可报废且不能再据索样单寄出', () => {
+    const f = fixture(), id = f.run(request()).id;
+    const loanId = f.run({ type: 'fulfillment.samples.move', payload: { id: f.sampleId, kind: 'lend', quantity: 5, person: '样品借用人', location: '', note: '展示借样' } }).id;
+    const borrowed = JSON.stringify(f.state);
+    expect(() => f.run({ type: 'fulfillment.samples.move', payload: { id: f.sampleId, kind: 'scrap', quantity: 5, person: '', location: '', note: '损坏' } })).toThrow('可用样品不足');
+    expect(JSON.stringify(f.state)).toBe(borrowed);
+    f.run({ type: 'fulfillment.samples.move', payload: { id: f.sampleId, kind: 'return', loanId, quantity: 5, person: '样品借用人', location: 'A1', note: '归还' } });
+    f.run({ type: 'fulfillment.samples.move', payload: { id: f.sampleId, kind: 'scrap', quantity: 5, person: '', location: '', note: '归还后确认损坏' } });
+    const scrapped = JSON.stringify(f.state);
+    expect(() => f.run({ type: 'sample.request.fulfill', payload: { id, sampleId: f.sampleId, quantity: 2, complete: true } })).toThrow('可用样品不足');
+    expect(JSON.stringify(f.state)).toBe(scrapped);
+    expect(readSampleRequests(f.state)[0]).toMatchObject({ state: 'open', shipments: [] });
+  });
   it('未寄出前可修改或取消；订单须属于该客户', () => {
     const f = fixture(), id = f.run(request({ feeAmount: undefined })).id;
     expect(readSampleRequests(f.state)[0].fee).toBeUndefined();
