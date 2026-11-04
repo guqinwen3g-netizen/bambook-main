@@ -8,7 +8,7 @@ import { applyDocumentGeneration, type DocumentGenerationCommand } from './mistD
 import { applyStockOperation, autoIssueForDeparture, stockOperationPermission, STOCK_OPERATION_COMMANDS, type StockCount, type StockOperationCommand, type StockTransfer } from './mistStockOperations';
 import { applyQcDispositionCommand, qcConcessionReleases, type QcDisposition, type QcDispositionCommand } from './mistQcDisposition';
 import { applyProductionIntake, productionIntake, type ProductionIntakeCommand, type ProductionIntakeRound, type ProductionObservation } from './mistProductionIntake';
-import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
+import {garmentMaterialFingerprint,assertGarmentMaterial,assertGarmentProcurement,normalizeInternalSupply,materialDeliveryRequired,isFabricStageMaterial,isFabricIntermediateProcessing,isFabricStageSource,prepareMaterialDelivery,confirmMaterialDelivery,assertMaterialSender,assertMaterialReturnReversal,materialIssueReturnTotals,type MaterialDeliveryLink,type MistMaterialKind,type InternalFabricContext} from './mistInternalFabric';
 import {sampleSendPurpose,sampleSendBlocker,SAMPLE_SEND_PURPOSES,type SampleSendPurpose} from './mistSampleSending';
 import {assertOrderShipmentPaymentCovered} from './mistOrderFunding';
 import { preparePurchaseDocumentSnapshot, purchaseDocumentFingerprint, type PurchaseDocumentArtifact, type PurchaseDocumentRecord } from './mistPurchaseDocument';
@@ -319,7 +319,7 @@ export type FulfillmentStockMovement = {
     onHandAfter?: number;
     lockedBefore?: number;
     lockedAfter?: number;
-    /** Part of an original issue returned after receiver rejection; not available until disposed. */
+    /** Rejected part frozen at return time; explicit 0 means accepted surplus, absent preserves legacy interpretation. Not available until disposed. */
     quarantinedQuantity?: number;
     quarantineTaskId?: string;
     quarantineDisposition?: { decision: 'release' | 'supplierReturn' | 'scrap'; taskId: string; reportId: string; movementId: string; evidence: string; actor: string; at: string; noRecoveryDecision?: {actorId:string;actor:string;at:string;evidence:string}; noRecoveryHistory?: Array<{actorId:string;actor:string;at:string;evidence:string;revokedAt:string;revokedBy:string;reason:string}>; financeReviews?: Array<{ id:string; outcome:'noRecovery'; evidence:string; actorId:string; actor:string; at:string; reversed?:{actorId:string;actor:string;at:string;reason:string} }> };
@@ -2089,7 +2089,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                     const checked = issue.materialDelivery.receivingChecks.reduce((n, check) => n + Number(check.acceptedQuantity) + Number(check.rejectedQuantity), 0);
                     if (quantity > sum([checked, -returned])) fail('尚未点收的物料不能登记退回');
                     const rejected = sum(issue.materialDelivery.receivingChecks.map(check => Number(check.rejectedQuantity)));
-                    quarantinedQuantity = Math.min(quantity, Math.max(0, sum([rejected, -returned])));
+                    const rejectedReturned = Number(materialIssueReturnTotals(root, issue.id).rejectedReturned);
+                    quarantinedQuantity = Math.min(quantity, Math.max(0, sum([rejected, -rejectedReturned])));
                 }
             }
             else if (quantity > stock.available)
@@ -2108,7 +2109,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 if (p.kind === 'move') addAtPosition(stock, quantity, location);
             }
             const id = ctx.id();
-            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(quarantinedQuantity ? { quarantinedQuantity } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
+            f.stockMovements.push({ id, stockId: stock.id, kind: p.kind, quantity, location, person, note, at: ctx.now, actor: ctx.actorName, ...(sourceLocation === undefined ? {} : { sourceLocation }), ...(issue ? { issueId: issue.id } : {}), ...(issue?.materialDelivery?.receivingChecks?.length ? { quarantinedQuantity } : {}), ...(materialDelivery ? { materialDelivery } : {}) });
             audit(root, ctx, 'inventory', stock.id, '登记实际库存交接');
             return { id };
         }

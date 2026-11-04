@@ -202,14 +202,17 @@ export function applyClaimInventoryCommand(root:MistState,command:ClaimInventory
  if(command.type==='fulfillment.claimInventory.repair.record'||command.type==='fulfillment.claimInventory.repair.qc'||command.type==='fulfillment.claimInventory.repair.handback')return applyRepairCommand(root,command,context);
  if(command.type==='fulfillment.claimInventory.warehouse.save'){
   const p=command.payload,code=text(p.code,'仓库代码',80),name=text(p.name,'仓库名称',200),address=text(p.address,'实际仓库地址',1000);if(typeof p.active!=='boolean')fail('仓库启用状态无效');if(f.warehouses.some(row=>row.id!==p.id&&row.code.toLocaleLowerCase()===code.toLocaleLowerCase()))fail('仓库代码已被使用');
-  const old=p.id?f.warehouses.find(row=>row.id===p.id):undefined;if(p.id&&!old)fail('仓库不存在','NOT_FOUND');if(old&&!p.active&&f.stock.some(row=>row.warehouseId===old.id&&((row.onHand??0)>0||(row.locked??0)>0)))fail('仓库仍有实际库存或隔离数量，不能停用');
+  const old=p.id?f.warehouses.find(row=>row.id===p.id):undefined;if(p.id&&!old)fail('仓库不存在','NOT_FOUND');
+  // Ordinary purchase lots track available/locked rather than the claim-return onHand field.
+  const hasStock=!!old&&f.stock.some(row=>row.warehouseId===old.id&&(row.available>0||(row.onHand??0)>0||(row.locked??0)>0));
+  if(old&&!p.active&&hasStock)fail('仓库仍有实际库存或隔离数量，不能停用');
   const awaitingHome=!!old&&f.receivedRecords.some(record=>record.warehouseId===old.id&&!record.releasedRepairId&&!record.disposal&&root.platform.claimGoods.some(goods=>goods.id===record.goodsId&&pendingRepairDispatch(goods,record.id)));
   if(awaitingHome&&!p.active)fail('仓库仍有待返库批次，不能停用');
   if(p.custodian!==undefined&&!['company','supplier'].includes(p.custodian))fail('请选择保管方');
   const custodian=p.custodian??(p.supplierId?'supplier':p.supplierId===undefined?old?.custodian:'company');
   if(custodian==='company'&&p.supplierId)fail('公司保管点不能选择合作方');
   const supplierId=custodian==='supplier'?text(p.supplierId??old?.supplierId,'保管单位'):'';if(supplierId&&!root.market.suppliers.some(row=>row.id===supplierId))fail('请选择本公司已建档的保管单位');
-  if(old&&(old.supplierId||'')!==supplierId&&(awaitingHome||f.stock.some(row=>row.warehouseId===old.id&&((row.onHand??0)>0||(row.locked??0)>0))))fail('仓库仍有实际库存，不能变更保管单位');
+  if(old&&(old.supplierId||'')!==supplierId&&(awaitingHome||hasStock))fail('仓库仍有实际库存，不能变更保管单位');
   const id=old?.id||context.id();if(old){Object.assign(old,{code,name,address,active:p.active,updatedAt:context.now,...(custodian?{custodian}:{})});if(supplierId)old.supplierId=supplierId;else delete old.supplierId;}else f.warehouses.push({id,code,name,address,active:p.active,...(supplierId?{supplierId}:{}),...(custodian?{custodian}:{}),createdAt:context.now,updatedAt:context.now});root.events.unshift({id:context.id(),entityType:'inventory',entityId:id,actor:who.actor,at:context.now,text:'保存真实仓库资料 '+name,fileIds:[]});return{id};
  }
  if(command.type==='fulfillment.claimInventory.receive'){

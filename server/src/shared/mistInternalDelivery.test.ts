@@ -40,6 +40,29 @@ it('corrects a receiving record with history, detects stale revisions and restor
  expect(internalDeliveryRevision(f.state.internalDeliveries![0])).toBe(2);
 });
 
+it('corrects only an independent partial count after a rejection return and preserves the remaining source capacity',()=>{
+ const f=internalDeliveryFixture(),id=f.send();
+ const count=(accepted:number,rejected:number,expectedRevision:number)=>f.run({type:'order.internal.receive',payload:{id,accepted,rejected,expectedRevision,evidence:'Actual partial count'}},'warehouse');
+ const returned=(quantity:number,expectedRevision:number)=>f.run({type:'order.internal.returnRejected',payload:{id,quantity,expectedRevision,date:'2026-10-30',evidence:'Actual rejected return'}});
+ count(4,1,0);count(3,2,1);returned(1,2);
+ const row=f.state.internalDeliveries![0],first=row.checks[0].id,second=row.checks[1].id;
+ // The first rejection is already covered by a physical return; another independent check may still be corrected.
+ f.run({type:'order.internal.reverseCheck',payload:{id,checkId:second,expectedRevision:3,reason:'Second count corrected'}},'warehouse');
+ expect(internalDeliveryTotals(f.state.internalDeliveries![0])).toMatchObject({accepted:4,rejected:1,returned:1,pending:5,reserved:9});
+ const before=structuredClone(f.state);
+ expect(()=>f.run({type:'order.internal.reverseCheck',payload:{id,checkId:first,expectedRevision:4,reason:'Cannot erase returned rejection'}},'warehouse')).toThrow('退回记录');
+ expect(()=>f.run({type:'order.internal.cancel',payload:{id,expectedRevision:4,reason:'Already partly accepted'}})).toThrow('已有接收');
+ expect(()=>returned(1,4)).toThrow('未退拒收量');
+ expect(f.state).toEqual(before);
+ count(2,3,4);returned(3,5);
+ expect(internalDeliverySources(f.state,f.target.orderId)).toMatchObject([{remaining:4}]);
+ const replacement=f.send(4);
+ f.run({type:'order.internal.receive',payload:{id:replacement,accepted:4,rejected:0,expectedRevision:0,evidence:'Replacement counted'}},'warehouse');
+ expect(f.state.orders.find(o=>o.id===f.target.orderId)?.state).toBe('内部交付完成');
+ expect(f.state.internalDeliveries![0].checks.find(c=>c.id===second)?.reversed?.evidence).toBe('Second count corrected');
+ expect(internalDeliverySources(f.state,f.target.orderId)).toEqual([]);
+});
+
 it('requires approved internal purpose, current QC, actual completion, delivered source and active recipient',()=>{
  for(const mutate of [
   (f:ReturnType<typeof internalDeliveryFixture>)=>{f.state.fulfillment.productionFacts.find(x=>x.productionId===f.productionId)!.completion=undefined;},
