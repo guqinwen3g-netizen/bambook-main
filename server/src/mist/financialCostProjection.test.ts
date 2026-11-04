@@ -31,3 +31,17 @@ it('keeps minimal workspaces readable before a fulfillment module exists',()=>{c
 it('does not return full-company cost weights to a row-scoped account',()=>{const {f}=fixture();const view=projectState(f.state,actor(),()=>createMistState(f.context,'empty'),undefined,{userIds:['finance'],teamIds:[]});expect(view.costMaterialBasis).toBeNull();});
 
 it('does not expose or compute company bank balances from a row-scoped ledger',()=>{const {f}=fixture();const scopedActor=actor([...scopes,'vouchers:write']);const view=projectState(f.state,scopedActor,()=>createMistState(f.context,'empty'),undefined,{userIds:['finance'],teamIds:[]});expect(view.state.bankAccounts ?? []).toEqual([]);expect(view.hidden.some(section=>section.key==='bankAccounts')).toBe(true);});
+
+
+it('keeps marked-up internal sale and recipient cost identical in the financial projection without warehouse access',()=>{
+ const {f,view}=fixture(),id=f.issue(50);
+ f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'Counted'}},'garment');
+ f.state.orders.find(o=>o.id===f.source.orderId)!.governance!.contract.internalSupply!.markupPercent=12;
+ const before=structuredClone(f.state),v=view();
+ const fabric=cost(v.state,f.source.orderId,v.costMaterialBasis),garment=cost(v.state,f.target.orderId,v.costMaterialBasis);
+ expect(fabric.internalSale).toEqual({revenueCny:3808,profitCny:408,markupPercent:12});
+ expect(garment.purchaseCny).toBe(3828);
+ expect(fabric.internalSale).toEqual(cost(f.state,f.source.orderId).internalSale);
+ expect(garment.purchaseCny).toEqual(cost(f.state,f.target.orderId).purchaseCny);
+ expect(v.state.fulfillment.stockMovements).toEqual([]);expect(f.state).toEqual(before);
+});

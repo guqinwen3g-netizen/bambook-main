@@ -53,6 +53,21 @@ function fixture(sourceQty = 100.3) {
 }
 
 describe('current Mist internal fabric contract', () => {
+  it('accepts decimal internal markups without binary floating-point rejection and rejects invalid precision or bounds', () => {
+    const f = fixture();
+    for (const markupPercent of [0, 10.12, 14.57, 100]) {
+      const input = f.contract(true); input.internalSupply!.markupPercent = markupPercent;
+      const { orderId } = f.create('fabric', undefined, 10, f.fabric, input);
+      expect(f.state.orders.find(o => o.id === orderId)!.governance!.contract.internalSupply!.markupPercent).toBe(markupPercent);
+    }
+    for (const markupPercent of [-1, 100.01, 10.123, NaN, Infinity]) {
+      const input = f.contract(true); input.internalSupply!.markupPercent = markupPercent;
+      const before = structuredClone(f.state);
+      expect(() => f.create('fabric', undefined, 10, f.fabric, input)).toThrow('内部加成率');
+      expect(f.state).toEqual(before);
+    }
+  });
+
   it('uses inventory handover rather than export shipments or CI for internal supply',()=>{
     const f=fixture(),before=structuredClone(f.state);
     expect(()=>f.run({type:'fulfillment.shipments.save',payload:{consignee:'Production',mode:'sea',portOfLoading:'Warehouse',portOfDischarge:'Factory',incoterm:'Internal',plannedDate:'2026-10-24',booking:'',lines:[{...f.source,quantity:1,factoryConfirmedAt:'2026-10-24'}],note:'',fileIds:[]}})).toThrow('内部订单请登记库存交接');

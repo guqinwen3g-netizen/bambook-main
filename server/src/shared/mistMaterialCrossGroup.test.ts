@@ -48,3 +48,17 @@ it('projects current PP review for the exact recipient without exposing the hidd
  f.state.orderLines.find(l=>l.id===f.target.lineId)!.cmtIncludedItems=['trims'];
  expect(scopedFabricAccess(f.state,scope,'garment','Garment',true)[f.target.lineId].sampleRequirements?.[f.productionId]).toMatchObject([{ok:false,reason:'未登记'}]);
 });
+
+
+it('does not expose fabric purchase prices, source cost detail or supplier bills to the receiving garment group',()=>{
+ const f=materialDeliveryFixture(20),id=f.issue(5);
+ f.state.payables!.bills.push({id:'private-fabric-bill',state:'open',amount:1360,currency:'CNY',lines:[{purchaseId:f.purchaseId,amount:1360}]} as any);
+ f.run({type:'fulfillment.materials.confirm',payload:{kind:'issue',id,evidence:'Counted'}},'garment');
+ const projected=applyDataScope(f.state,{userIds:['garment'],teamIds:[]},'garment');
+ expect(projected.orders.map(o=>o.id)).not.toContain(f.source.orderId);
+ expect(projected.orderLines.map(l=>l.id)).not.toContain(f.source.lineId);
+ expect(projected.fulfillment.purchases.map(p=>p.id)).not.toContain(f.purchaseId);
+ expect(projected.payables!.bills.map(b=>b.id)).not.toContain('private-fabric-bill');
+ expect(projected.fulfillment.stock).toEqual([]);
+ expect(projected.fulfillment.purchases.map(p=>p.id)).toContain(f.processingId);
+});
