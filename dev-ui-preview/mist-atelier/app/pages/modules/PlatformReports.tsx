@@ -152,6 +152,7 @@ export function PlatformReportsPage() {
   const cnyOk = cny.filter(r => r.status === 'ok'), sum = (pick: (r: OrderMarginCnyRow) => number | null) => cnyOk.reduce((t, r) => t + minor(pick(r) ?? 0), 0) / 100;
   const cnyTotals = { revenue: sum(r => r.revenueCny), ex: sum(r => r.marginEx), rebate: sum(r => r.rebate.approved), inc: sum(r => r.marginIn), estimated: cnyOk.filter(r => r.estimated).length };
   // 退税金额不可读（无 tax:read 或无 sensitive:tax_base）时，退税与含退税毛利都不显示，避免从毛利差额反推退税。
+  const rebateClaimsReceived = (state?.exportRebate?.claims || []).filter(c => (c.receipts || []).some(x => !x.reversed)).length;
   const rebateView = state ? rebateAccess(state, workspace.workspace?.access?.hidden) : 'full', rebateShown = rebateView === 'full', rebateHidden = rebateView === 'full' ? '' : REBATE_ACCESS_TEXT[rebateView];
   const marginTotals = [...new Set(margin.map(r => r.currency))].map(c => { const rows = margin.filter(r => r.currency === c && r.status === 'ok'), rev = rows.reduce((t, r) => t + minor(r.revenue), 0), m = rows.reduce((t, r) => t + minor(r.margin ?? 0), 0); return { currency: c, revenue: rev / 100, margin: m / 100, rate: rev ? m / rev : null, orders: rows.length }; });
   const aging = state ? buildReceivableAging(state, asOf).filter(r => !currency || r.currency === currency) : [];
@@ -213,7 +214,7 @@ export function PlatformReportsPage() {
     if (tab === 'sales') out('客户销售额.csv', ['客户', '币种', '订单数', '订单金额', '已开票', '已收', '未收'], sales.map(r => [r.customer, r.currency, r.orders, r.amount, r.invoiced, r.received, r.open]));
     else if (tab === 'margin' && view !== 'none') out(`订单毛利-人民币-${FX_BASIS_LABEL[view]}.csv`, ['订单', '客户', '币种', '原币收入', '汇率口径', '汇率', '暂估', '收入CNY', '采购成本CNY', '毛利不含退税', '毛利率不含退税%', '退税核准或应退', '退税应退', '退税到账', '毛利含退税', '毛利率含退税%', '说明'], cny.map(r => [r.code, r.customer, r.currency, r.revenue, FX_BASIS_LABEL[view], r.fx ? Math.round(r.fx.rate * 1e6) / 1e6 : '', r.estimated ? '是' : '', r.revenueCny ?? '', r.costCny ?? '', r.marginEx ?? '', r.rateEx === null ? '' : Math.round(r.rateEx * 1000) / 10, ...(rebateShown ? [r.rebate.approved, r.rebate.expected, r.rebate.received, r.marginIn ?? '', r.rateIn === null ? '' : Math.round(r.rateIn * 1000) / 10] : Array(5).fill(rebateHidden)), CNY_STATUS[r.status].label + (r.missing.length ? ' ' + r.missing.join('/') : '')]));
     else if (tab === 'margin') out('订单毛利.csv', ['订单', '客户', '币种', '销售收入', '采购成本', '毛利', '毛利率%', '已到票', '说明', '异币种采购', '未批准采购数'], margin.map(r => [r.code, r.customer, r.currency, r.revenue, r.purchases ? r.cost : '', r.margin ?? '', r.rate === null ? '' : Math.round(r.rate * 1000) / 10, r.billed, MARGIN_STATUS[r.status].label, r.foreign, r.pending]));
-    else if (tab === 'cash') out('资金月报.csv', ['月份', '币种', '收款', '付款', '净流入', '退税到账', '汇兑损益', '费用'], cash.map(r => [r.month, r.currency, r.cashIn, r.cashOut, r.net, r.rebate, r.fx, r.expense]));
+    else if (tab === 'cash') out('资金月报.csv', ['月份', '币种', '收款', '付款', '净流入', '退税到账', '汇兑损益', '费用'], cash.map(r => [r.month, r.currency, r.cashIn, r.cashOut, r.net, rebateShown ? r.rebate : rebateHidden, r.fx, r.expense]));
     else if (tab === 'aging') out(`应收账龄-${asOf}.csv`, ['客户', '币种', ...AGING_BUCKETS.map(b => b.label), '未收合计'], aging.map(r => [r.customer, r.currency, ...AGING_BUCKETS.map(b => r[b.key]), r.total]));
     else out(`订单进度-${asOf}.csv`, ['订单', '客户', '交期', '进度%', '交期状态', '逾期天数', '当前环节'], shownProgress.map(r => [r.code, r.customer, r.due, r.progress, PROGRESS_STATUS[r.status].label, r.lateDays, r.state]));
   };
@@ -259,10 +260,12 @@ export function PlatformReportsPage() {
         { key: 'in', header: '收款', align: 'right', render: r => money(r.cashIn) },
         { key: 'out', header: '付款', align: 'right', render: r => money(r.cashOut) },
         { key: 'net', header: '净流入', align: 'right', render: r => <b className={r.net < 0 ? 'mist-tone-bad' : undefined}>{money(r.net)}</b> },
-        { key: 'rb', header: '退税到账', align: 'right', render: r => r.rebate ? money(r.rebate) : <span className="mist-note">—</span> },
+        // 无退税计税依据权限时，退税到账流水整笔不下发（access.maskTaxBase），收款与退税都不含这部分：标“已隐藏”而不是“—”。
+        { key: 'rb', header: '退税到账', align: 'right', render: r => !rebateShown ? <span className="mist-note">{uiText(rebateHidden)}</span> : r.rebate ? money(r.rebate) : <span className="mist-note">—</span> },
         { key: 'fx', header: '汇兑损益', align: 'right', render: r => r.fx ? <span className={r.fx < 0 ? 'mist-tone-bad' : undefined}>{money(r.fx)}</span> : <span className="mist-note">—</span> },
         { key: 'ex', header: '费用', align: 'right', render: r => r.expense ? money(r.expense) : <span className="mist-note">—</span> },
       ]} empty={<EmptyState title={uiText("当前范围没有资金记录")} />} /></Card></section>
+      {!rebateShown && rebateClaimsReceived > 0 && <p className="mist-note">{uiText("收款不含出口退税到账")}</p>}
     </> : tab === 'actual' ? (state ? <OrderActualCostPanel key={route.id || ''} initialOrderId={route.id} state={state} rebate={rebateView} materialCostBasis={workspace.workspace?.costMaterialBasis === null ? null : workspace.workspace?.costMaterialBasis??(workspace.workspace?.access?.hidden.some(section=>section.key==='inventory')?null:undefined)} asOf={asOf} canWrite={!!session.localMode || session.hasPermission('invoices:write')} busy={workspace.loading || workspace.saving || !!workspace.pending} run={c => workspace.run(c)} /> : <EmptyState title={uiText("正在读取数据")} compact />) : tab === 'aging' ? <>
       <Toolbar right={<span className="mist-note">{uiText("截至 ")}{asOf}</span>}>{currencyFilter}</Toolbar>
       <StatGrid>{AGING_BUCKETS.map(b => <StatCard key={b.key} icon={Clock} label={uiText(b.label)} value={totals(aging, r => r[b.key])} />)}</StatGrid>
