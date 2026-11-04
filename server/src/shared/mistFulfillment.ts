@@ -27,7 +27,7 @@ import { supplierBusinessDay, productionSupplierUnavailableReason } from './mist
 import {procurementCurrencyProblem} from './mistProcurementCurrency';
 import { heldShipmentRelease, relationHoldReason } from './mistRelationHold';
 import { assertOrderLineOpen, assertShipmentWithinTolerance } from './mistOrderClosure';
-import {applyCustomsDeclarationCommand,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
+import {applyCustomsDeclarationCommand,customsItemsStale,CUSTOMS_DECLARATION_COMMANDS,type CustomsClassification,type CustomsDeclarationCommand,type CustomsDeclarationItem} from './mistCustomsDeclaration';
 import {applyClaimInventoryCommand,claimInventoryPermission,type ClaimInventoryCommand,type ClaimInventoryWarehouse,type ClaimReturnReceipt,type ClaimReceivedRecord} from './mistClaimInventory';
 export type FulfillmentSource = {
     kind: 'version';
@@ -2433,6 +2433,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
                 throw new MistCommandError('FORBIDDEN', '登记已申报须由后勤/单证办理', 403);
             if (p.status === 'cleared' && !ctx.can?.(FULFILLMENT_CUSTOMS_CLEAR_SCOPE))
                 throw new MistCommandError('FORBIDDEN', '清关完成须由后勤/单证登记', 403);
+            if (p.status !== 'draft' && old && customsItemsStale(root, old))
+                fail('出运、装箱或商品归类已变更，请重新生成申报商品项', 'PRECONDITION');
             if(p.status!=='draft')for(const line of s.lines)if(root.orders.find(o=>o.id===line.orderId)?.replacementSource){assertMistOrderApproved(root,line.orderId);replacementDeclaredUnitPrice(root,s.id,line.orderId,line.lineId);}
             const id = old?.id || ctx.id(), fileIds = files(root, p.fileIds);
             if (p.channel !== undefined && !['general', 'express'].includes(p.channel)) fail('报关方式无效');
@@ -2440,7 +2442,7 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
             // sup51：已生成商品项时表头 HS 由商品项汇总，不再手填。
             const itemHs = [...new Set((old?.items || []).map(i => i.hsCode).filter(Boolean))];
             const hsCode = itemHs.length ? itemHs.join(' / ') : text(p.hsCode, 'HS编码', p.status !== 'draft' && !express);
-            const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, ...(express ? { channel: 'express' as const } : {}), declarationNo: text(p.declarationNo, express ? '快件运单号' : '报关单号', p.status !== 'draft'), broker: text(p.broker, express ? '快递 / 承运商' : '报关行', p.status !== 'draft'), hsCode, origin: text(p.origin, '原产地', p.status !== 'draft' && !express), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft' && !express), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
+            const row: FulfillmentCustoms = { id, shipmentId: s.id, code: old?.code || code('CUS', f.customs, ctx), status: p.status, channel: express ? 'express' : 'general', declarationNo: text(p.declarationNo, express ? '快件运单号' : '报关单号', p.status !== 'draft'), broker: text(p.broker, express ? '快递 / 承运商' : '报关行', p.status !== 'draft'), hsCode, origin: text(p.origin, '原产地', p.status !== 'draft' && !express), tradeMode: text(p.tradeMode, '成交方式', p.status !== 'draft' && !express), declaredAt: day(p.declaredAt, '申报日', p.status !== 'draft'), clearedAt: day(p.clearedAt, '清关日', p.status === 'cleared'), evidence: text(p.evidence, '外部申报/清关依据', p.status === 'cleared'), fileIds, note: text(p.note, '备注', false) };
             if (row.clearedAt && row.declaredAt && row.clearedAt < row.declaredAt)
                 fail('清关不能早于申报');
             if (row.clearedAt > platformBusinessDate(ctx.now) || row.declaredAt > platformBusinessDate(ctx.now))
