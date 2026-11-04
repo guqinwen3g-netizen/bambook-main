@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistContext, type MistState } from './mistWorkspace';
 import { shortClosureBlocker, supplierSettlements, invoiceableSettlements, payablesCommandPermission, payableBills, payableSources, supplierPayableSummary, supplierPayments, purchasePayableReadback, prepaymentPlans, paymentRequests, purchasePrepaymentReadback, getPayableReviews, payablesCommandPermissions, supplierDeductions, deductibleRecoveries, prepaymentMoves, prepaymentTransferTargets } from './mistPayables';
 import { getMistReviewTasks } from './mistWorkspace';
+import { payablesAging, paymentOutlook, supplierStatement } from './mistPayableViews';
 
 function ctx(actorName = '财务-林', now = '2026-10-14T02:00:00.000Z'): MistContext { let n = 0; return { id: () => `ap-${actorName}-${++n}`, now, actorName, actorId: actorName } as MistContext; }
 const today = '2026-10-14';
@@ -160,6 +161,42 @@ describe('付款申请与主管审批', () => {
   });
 });
 
+describe('应付冲正场景回归', () => {
+  it('部分核销后仅冲回其中一笔，其他票据、资金与供应商对账余额不变', () => {
+    const { state, po1 } = demo();
+    let s = run(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 1000 }])).state;
+    s = run(s, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 800 }], { invoiceNo: 'PART-2' })).state;
+    const [a, b] = payableBills(s, today);
+    const paid = approvedPay(s, po1.supplierId, [{ billId: a.id, amount: 600 }, { billId: b.id, amount: 500 }], 'PARTIAL'); s = paid.state;
+    const snapshot = supplierStatement(s, po1.supplierId, '2026-10-01', today);
+    const allocation = s.payables!.allocations.find(x => x.billId === a.id)!;
+    s = run(s, { type: 'payable.allocation.reverse', payload: { allocationId: allocation.id, reason: '对应错误' } }).state;
+    expect(payableBills(s, today).find(x => x.id === a.id)).toMatchObject({ paid: 0, open: 1000 });
+    expect(payableBills(s, today).find(x => x.id === b.id)).toMatchObject({ paid: 500, open: 300 });
+    expect(supplierPayments(s).find(x => x.id === paid.paymentId)).toMatchObject({ allocated: 500, unallocated: 600 });
+    expect(supplierStatement(s, po1.supplierId, '2026-10-01', today)).toEqual(snapshot);
+    s = run(s, { type: 'payable.payment.reverse', payload: { supplierPaymentId: paid.paymentId, reason: '银行退汇' } }).state;
+    expect(s.payables!.reversals!.filter(x => x.targetId === allocation.id)).toHaveLength(1);
+    expect(supplierStatement(s, po1.supplierId, '2026-10-01', today)[0].closing).toBe(1800);
+    expect(payablesAging(s, today)[0].total).toBe(1800);
+    expect(paymentOutlook(s, today).flatMap(w => w.items).filter(x => x.kind === 'bill').map(x => x.amount).sort((a,b) => a-b)).toEqual([800, 1000]);
+  });
+
+  it.each(['payable.payment.reverse', 'payable.allocation.reverse'] as const)('%s 不得跨月绕过原付款月份结账，反结账后才可办理', type => {
+    const { state, po1 } = demo();
+    let s = run(state, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 1000 }])).state;
+    const paid = approvedPay(s, po1.supplierId, [{ billId: payableBills(s, today)[0].id, amount: 600 }], 'CLOSED'); s = paid.state;
+    const now = '2026-11-05T02:00:00Z';
+    s = as('财务-林', s, { type: 'finance.period.close', payload: { month: '2026-10', note: '往来核对一致' } }, now).state;
+    const command = { type, payload: { supplierPaymentId: paid.paymentId, allocationId: s.payables!.allocations[0].id, reason: '对应错误' } };
+    const before = structuredClone(s);
+    expect(() => as('财务-林', s, command, now)).toThrow('2026-10 已结账');
+    expect(s).toEqual(before);
+    s = as('财务-林', s, { type: 'finance.period.reopen', payload: { month: '2026-10', reason: '更正往来' } }, now).state;
+    expect(as('财务-林', s, command, now).result.id).toBeTruthy();
+  });
+});
+
 describe('合同预付款计划与预付', () => {
   it('财务按合同登记预付计划；申请经批准后实付，预付挂在合同上不分配到票据，也不减少票据应付', () => {
     const { state, po1, draft } = demo();
@@ -312,6 +349,49 @@ describe('结算确认、预付抵扣与票据关联', () => {
     expect(submit(s, po1.id, [r1]).result.id).toBeTruthy();
   });
 
+  it('退回后按更正收货重提，重新计算金额、争议和预付；旧退回记录不可复核', () => {
+    let { s, po1 } = prepaid();
+    const receiptId = receive(s, po1.id, 500);
+    const first = submit(s, po1.id, [receiptId], { disputes: [{ description: '质量待定', amount: 200 }] }); s = first.state;
+    s = as('财务-林', s, { type: 'payable.settlement.return', payload: { id: first.result.id, reason: '更正收货数量' } }).state;
+    s.fulfillment.receipts.find(r => r.id === receiptId)!.quantity = 400;
+    const next = submit(s, po1.id, [receiptId]); s = next.state;
+    expect(next.result.id).not.toBe(first.result.id);
+    expect(supplierSettlements(s).find(x => x.id === next.result.id)).toMatchObject({ amount: 18600, quantity: 400, disputes: [], suggested: 5580, state: 'pending' });
+    expect(s.payables!.settlements!.find(x => x.id === next.result.id)!.confirmation).toBeUndefined();
+    expect(() => confirm(s, String(first.result.id), 0)).toThrow('已处理');
+    s = confirm(s, String(next.result.id), 5580).state;
+    expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ applied: 5580, available: 27900 });
+    expect(supplierSettlements(s).find(x => x.id === first.result.id)).toMatchObject({ state: 'returned', amount: 23250, disputes: [{ amount: 200 }], returned: { reason: '更正收货数量' } });
+  });
+
+  it('已抵扣预付先冲回结算再冲回付款，付款计划恢复未付额度', () => {
+    let { s, po1, prepaymentId } = prepaid();
+    s.payables!.plans![0].due = '2026-10-20';
+    const submitted = submit(s, po1.id, [receive(s, po1.id, 500)]); s = confirm(submitted.state, String(submitted.result.id), 6975).state;
+    expect(() => run(s, { type: 'payable.settlement.cancel', payload: { id: submitted.result.id, reason: '更正' } })).toThrow('只有待复核');
+    expect(() => run(s, { type: 'payable.payment.reverse', payload: { supplierPaymentId: prepaymentId, reason: '更正' } })).toThrow('先冲回相关记录');
+    s = run(s, { type: 'payable.settlement.reverse', payload: { id: submitted.result.id, reason: '更正' } }).state;
+    s = run(s, { type: 'payable.payment.reverse', payload: { supplierPaymentId: prepaymentId, reason: '更正' } }).state;
+    expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ paid: 0, applied: 0, available: 0 });
+    expect(prepaymentPlans(s)[0]).toMatchObject({ paid: 0 });
+    expect(paymentOutlook(s, today).flatMap(w => w.items).filter(x => x.kind === 'plan')).toEqual([expect.objectContaining({ amount: 33480 })]);
+  });
+
+  it('已确认结算冲回须先反结账，原预付抵扣与收货占用在失败时不变', () => {
+    let { s, po1 } = prepaid();
+    const submitted = submit(s, po1.id, [receive(s, po1.id, 500)]); s = confirm(submitted.state, String(submitted.result.id), 6975).state;
+    const now = '2026-11-05T02:00:00Z';
+    s = as('财务-林', s, { type: 'finance.period.close', payload: { month: '2026-10', note: '核对一致' } }, now).state;
+    const command = { type: 'payable.settlement.reverse', payload: { id: submitted.result.id, reason: '更正结算' } };
+    const before = structuredClone(s);
+    expect(() => as('财务-林', s, command, now)).toThrow('2026-10 已结账');
+    expect(s).toEqual(before);
+    s = as('财务-林', s, { type: 'finance.period.reopen', payload: { month: '2026-10', reason: '更正结算' } }, now).state;
+    s = as('财务-林', s, command, now).state;
+    expect(purchasePrepaymentReadback(s, po1.id)).toMatchObject({ applied: 0, available: 33480 });
+  });
+
   it('发票先于结算到达：先登记为待关联结算并暂挂，不计逾期、不能申请付款；结算确认后关联即可申请', () => {
     let { s, po1 } = prepaid();
     expect(err(() => run(s, bill(po1.supplierId, [{ purchaseId: po1.id, amount: 23250 }])))).toContain('待关联结算');
@@ -460,6 +540,22 @@ describe('索赔工厂扣款抵应付', () => {
     expect(err(() => as('财务-林', s, { type: 'payable.deduction.reverse', payload: { id: d1.result.id, reason: '再冲' } }))).toContain('已冲回');
     // 协调人不能手工登记“从货款中扣”的落实
     expect(err(() => as('财务-林', s, { type: 'platform.claim.recovery.settle', payload: { id: 'rec-1', amount: 1000, reference: 'x', date: today } }))).toContain('应付票据');
+  });
+
+  it('已结账月份的扣款不得在次月冲回，反结账后恢复应付与账龄', () => {
+    let { s, billId } = withClaim();
+    const deducted = deduct(s, billId, 1000); s = deducted.state;
+    const now = '2026-11-05T02:00:00Z';
+    s = as('财务-林', s, { type: 'finance.period.close', payload: { month: '2026-10', note: '核对一致' } }, now).state;
+    const command = { type: 'payable.deduction.reverse', payload: { id: deducted.result.id, reason: '扣款通知更正' } };
+    const before = structuredClone(s);
+    expect(() => as('财务-林', s, command, now)).toThrow('2026-10 已结账');
+    expect(s).toEqual(before);
+    s = as('财务-林', s, { type: 'finance.period.reopen', payload: { month: '2026-10', reason: '更正扣款' } }, now).state;
+    s = as('财务-林', s, command, now).state;
+    expect(payableBills(s, today).find(x => x.id === billId)).toMatchObject({ deducted: 0, open: 20000 });
+    expect(recOf(s)).toMatchObject({ state: 'Agreed' });
+    expect(payablesAging(s, today)[0].total).toBe(20000);
   });
 
   it('拒绝：非货款扣方式、超过票据可扣、别家票据、案件已结束不能冲回', () => {
