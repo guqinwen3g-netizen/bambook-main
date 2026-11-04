@@ -1138,11 +1138,12 @@
     "fulfillment.procurement.return",
     "fulfillment.procurement.return.reverse"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
    "pages": [
     "65-退料处置与财务核对.md"
-   ]
+   ],
+   "note": "2026-11-04 采购经办走查 PO-2026-00002：入库后转拒收 300 粒、登记退换（补发、运费供应商承担）、冲回后按正确单号重登；库存可用量与交付进度随之恢复"
   },
   {
    "id": "no-resupply",
