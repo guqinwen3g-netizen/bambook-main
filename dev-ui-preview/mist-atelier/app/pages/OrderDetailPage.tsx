@@ -1,7 +1,7 @@
 import { interfaceLocale } from '../../../../services/interfaceLanguage';
 import { useTeamOrigins } from '../runtime/teamView';
 import { uiText, ui } from '../../../../services/interfaceLanguage';
-import {MistPresentedErrorContext} from '../runtime/errorPresentation';
+import {MistPresentedErrorContext,usePendingRecoveryClaim} from '../runtime/errorPresentation';
 import {RecordDisclosure} from './modules/pageKit';
 import {OrderProductThumb} from './OrderProductThumb';
 /** T5 单据详情：沿用原 Mist 结构，全部内容属于当前订单。 */
@@ -143,6 +143,7 @@ export function OrderDetailPage() {
   const density = useDevice('density');
   const { go, route } = useNav(), toast = useToast();
   const workspace=useMistWorkspace(),{ state, loading, error, run, refresh, saving, pending, recover } = workspace;
+  usePendingRecoveryClaim(!!pending);
   const session = useOptionalMistSession(),members=workspaceMembers(workspace.workspace,state,session?.user);
   const canWriteOrders=!!session?.hasPermission('orders:write');
   const canReadShipping=!!session?.canAccessView?.('shipments' as View);

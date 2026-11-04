@@ -118,7 +118,6 @@ export function SettingsPage() {
     <MistPage>
       <PageHeader title={uiText("公司管理")} />
       {workspaceSection && (error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
-      {workspaceSection && pending && !saving && <Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(failure=>setError(failure instanceof Error?failure.message:'原请求核对失败'))}>{uiText("核对原请求")}</Button>} />}
       {!sec ? <Banner tone="neutral" title={uiText("当前账号没有公司管理权限")} /> : <div className="mist-wizard">
         <VerticalSteps mode="page" current={sec} onSelect={id => setChosen(id as CompanySection)} steps={steps} />
         <div className="mist-col" style={{ minWidth: 0 }}>

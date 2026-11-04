@@ -57,12 +57,12 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   );
 });
 
-export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: LucideIcon; label: string; size?: 'sm' | 'md'; dot?: boolean };
-/** 纯图标按钮。label 必填（无障碍 + tooltip）。dot = 右上角红点（未读通知）。 */
-export function IconButton({ icon, label, size = 'md', dot, className, type = 'button', ...rest }: IconButtonProps) {
+export type IconButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> & { icon: LucideIcon; label: string; size?: 'sm' | 'md'; dot?: boolean; count?: number };
+/** 纯图标按钮。label 必填（无障碍 + tooltip）。dot = 右上角红点（未读通知）；count > 0 时改为数字角标（待处理条数）。 */
+export function IconButton({ icon, label, size = 'md', dot, count, className, type = 'button', ...rest }: IconButtonProps) {
   return (
     <button type={type} className={cx('mist-icon-btn', className)} aria-label={uiText(label)} title={uiText(label)} data-size={size === 'sm' ? 'sm' : undefined} {...rest}>
-      <Icon icon={icon} size={size === 'sm' ? 'sm' : 'md'} />{dot && <span className="mist-pip" />}
+      <Icon icon={icon} size={size === 'sm' ? 'sm' : 'md'} />{count ? <span className="mist-pip-count" aria-hidden="true">{count > 99 ? '99+' : count}</span> : dot && <span className="mist-pip" />}
     </button>
   );
 }

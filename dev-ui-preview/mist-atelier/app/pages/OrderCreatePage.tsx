@@ -13,7 +13,7 @@ import { ArrowLeft, ArrowRight, Plus, Trash2 } from 'lucide-react';
 import { FormFooter, BackLink, Banner, Button, Card, Field, FormGrid, FormSection, IconButton, KeyValue, MistPage, PageHeader, Select, TextArea, TextInput, UploadZone, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistOrderInput } from '../../../../server/src/shared/mistWorkspace';
 import { useNav } from '../nav';
-import {MistPresentedErrorContext} from '../runtime/errorPresentation';
+import {MistPresentedErrorContext,usePendingRecoveryClaim} from '../runtime/errorPresentation';
 import {relationHoldReason} from '../../../../server/src/shared/mistRelationHold';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useOptionalMistSession } from '../runtime/auth';
@@ -37,6 +37,7 @@ export function OrderCreatePage() {
   const presentedError=React.useContext(MistPresentedErrorContext);
   const { go, route } = useNav(), toast = useToast(), workspace=useMistWorkspace();
   const { state, loading, error, run, saving, pending, recover, uploadFile, downloadFile }=workspace;
+  usePendingRecoveryClaim(!!pending);
   const session = useOptionalMistSession(),members=workspaceMembers(workspace.workspace,state,session?.user),viewerOwner=defaultMemberId(members,session?.user?.id);
   const scope=`${workspace.workspace?.id||''}:${workspace.workspace?.ownerId||''}:${session?.sessionKey||''}:${session?.user?.id||''}:${!!state}`,activeScope=React.useRef(scope);activeScope.current=scope;
   const alive=React.useRef(true);React.useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);

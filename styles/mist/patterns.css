@@ -108,7 +108,26 @@
 .mist-app[data-collapsed] .mist-nav-group[data-closed] .mist-nav-items { grid-template-rows: 1fr; }
 }
 
-.mist-canvas { margin: var(--mist-canvas-inset) var(--mist-canvas-inset) var(--mist-canvas-inset) 0; background: var(--mist-canvas); border-radius: var(--mist-r-canvas); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.mist-canvas { margin: var(--mist-canvas-inset) var(--mist-canvas-inset) var(--mist-canvas-inset) 0; background: var(--mist-canvas); border-radius: var(--mist-r-canvas); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; position: relative; }
+/* Shell status notices: a small card at the top right under the topbar, over the scroll area. They take no page-flow
+   space, so the page title never moves. The card is neutral; the state colour only marks the leading dot. */
+.mist-shell-notices { position: absolute; top: calc(var(--mist-topbar-h) + 4px); right: 24px; z-index: var(--mist-z-sticky); display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(420px, calc(100% - 48px)); pointer-events: none; }
+.mist-shell-notice { pointer-events: auto; width: 100%; border-radius: var(--mist-r-lg); background: var(--mist-card); box-shadow: var(--mist-shadow-overlay); animation: mist-shell-notice .18s ease-out; }
+.mist-shell-notice .mist-banner { background: transparent; color: var(--mist-ink); padding: 12px 14px; gap: 10px; align-items: center; flex-wrap: wrap; }
+.mist-shell-notice .mist-banner::before { content: ''; flex: none; align-self: flex-start; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--mist-accent); }
+.mist-shell-notice .mist-banner[data-tone="warn"]::before { background: var(--mist-warn); }
+.mist-shell-notice .mist-banner[data-tone="bad"]::before { background: var(--mist-bad); }
+.mist-shell-notice .mist-banner[data-tone="ok"]::before { background: var(--mist-ok); }
+.mist-shell-notice .mist-banner[data-tone="neutral"]::before { background: var(--mist-ink-3); }
+.mist-shell-notice .mist-banner > div:first-of-type { flex: 1 1 200px; min-width: 0; }
+.mist-shell-notice .mist-banner b { font-size: var(--mist-text-md); }
+.mist-shell-notice .mist-banner p { font-size: var(--mist-text-sm); }
+.mist-shell-notice .mist-banner .mist-banner-act { margin-left: auto; }
+.mist-shell-notices { padding-top: 0; }
+.mist-shell-notices-close { pointer-events: auto; position: absolute; top: 8px; right: 8px; }
+.mist-shell-notices:has(.mist-shell-notices-close) .mist-shell-notice:first-child .mist-banner { padding-right: 40px; }
+@keyframes mist-shell-notice { from { opacity: 0; transform: translateY(-6px); } }
+@media (prefers-reduced-motion: reduce) { .mist-shell-notice { animation: none; } }
 .mist-topbar { display: flex; align-items: center; gap: 12px; height: var(--mist-topbar-h); padding: 0 24px 0 32px; flex: none; border-bottom: 1px solid transparent; transition: border-color .2s; }
 .mist-topbar[data-scrolled] { border-bottom-color: var(--mist-line); }
 .mist-crumbs { display: flex; align-items: center; gap: 8px; font-size: var(--mist-text-sm); color: var(--mist-ink-3); min-width: 0; white-space: nowrap; overflow: hidden; }
@@ -126,6 +145,8 @@
 .mist-crumbs button:hover { color: var(--mist-ink); }
 .mist-top-actions { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 .mist-sync { display: flex; align-items: center; gap: 7px; font-size: var(--mist-text-xs); color: var(--mist-ink-3); margin-right: 8px; white-space: nowrap; }
+button.mist-sync { padding: 6px 10px; margin-right: 2px; border-radius: var(--mist-r-sm); color: var(--mist-ink-2); }
+button.mist-sync:hover { background: var(--mist-fill); color: var(--mist-ink); }
 .mist-sync i { width: 6px; height: 6px; border-radius: 50%; background: var(--mist-ok); }
 .mist-sync[data-state="offline"] i { background: var(--mist-bad); }
 .mist-sync[data-state="syncing"] i { background: var(--mist-warn); }
@@ -551,6 +572,7 @@
   .mist-side[data-menu-open] .mist-nav-item { height: 44px; }
   .mist-app[data-menu-open] { overflow: hidden; height: 100dvh; }
   .mist-canvas { margin: 0; border-radius: 0; min-height: 100dvh; overflow: clip; }
+  .mist-shell-notices { position: fixed; top: calc(56px + env(safe-area-inset-top) + 4px); left: calc(12px + env(safe-area-inset-left)); right: calc(12px + env(safe-area-inset-right)); width: auto; }
   .mist-scroll { padding: 6px calc(16px + env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); overflow: visible; }
   .mist-canvas:has(> .mist-form-dock:not(:empty)) > .mist-scroll { padding-bottom: calc(40px + var(--mist-form-footer-height)); }
   .mist-form-dock:not(:empty) { position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--mist-z-sticky); }
@@ -566,7 +588,8 @@
   .mist-app:has(.mist-topbar[data-has-back]) .mist-scroll .mist-back { display: none; }
   /* iOS 聚焦字号小于 16px 的输入框会自动放大页面：手机端输入控件统一 16px。 */
   .mist-root :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) { font-size: 16px !important; }
-  .mist-sync, .mist-ask > span:not(.mist-badge), .mist-crumbs [data-hide-sm] { display: none; }
+  span.mist-sync, .mist-ask > span:not(.mist-badge), .mist-crumbs [data-hide-sm] { display: none; }
+  button.mist-sync { font-size: 0; gap: 0; padding: 10px; }
   .mist-ask { padding: 0 6px; }
   .mist-page-head { flex-direction: column; align-items: flex-start; } .mist-page-head-acts { margin-left: 0; justify-content: flex-start; }
   .mist-page-head[data-variant="greeting"] .mist-h1 { font-size: 30px; }

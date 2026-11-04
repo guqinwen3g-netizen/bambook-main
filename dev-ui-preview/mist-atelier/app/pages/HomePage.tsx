@@ -113,7 +113,6 @@ export function HomePage() {
           <Button icon={Plus} disabled={busy || !state} onClick={() => setTodo({ id: '', title: '', due: today, assigneeId: me, note: '' })}>{uiText("新建待办")}</Button><Button variant="primary" icon={Plus} disabled={busy || !state || !session.hasPermission('products:write')} onClick={() => go('development/new')}>{uiText("新建开发案")}</Button></>} />
       {state && <SetupChecklist state={state} workspace={workspace.workspace} canAdmin={session.hasPermission('users:admin')} go={go} />}
       {(error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
-      {pending && !saving && <Banner tone="warn" title={uiText("上一次操作结果待核对")} actions={<Button size="sm" disabled={saving} onClick={() => void workspace.recover().catch(problem=>setError(problem instanceof Error?problem.message:'原请求核对失败'))}>{uiText("核对原请求")}</Button>}>{uiText("核对完成前，暂停提交新的操作。")}</Banner>}
       {Object.values(hiddenStats).some(value=>!value)&&<StatGrid cols={Object.values(hiddenStats).filter(value=>!value).length}>
         {!hiddenStats.development&&<StatCard icon={Layers} label={uiText("在途开发案")} value={state ? activeDevs.length : '—'} unit={uiText('个')} onClick={() => setStatView('development')} />}
         {!hiddenStats.qc&&<StatCard icon={BadgeCheck} label={uiText("待 QC 评审")} value={state ? qcTasks.length+qcVersions.length : '—'} unit={uiText('项')} onClick={() => setStatView('qc')} />}
