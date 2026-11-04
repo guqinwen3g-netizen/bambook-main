@@ -287,6 +287,8 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   const actualDocuments = new Set((next.fulfillment?.documents ?? []).map((row: any) => row.id));
   const actualCustoms = new Set((next.fulfillment?.customs ?? []).map((row: any) => row.id));
   const targetOk = (target?: { view?: string; id?: string;section?:string }) => {
+    // Sample-request notices use the samples route, not an order/development target.
+    if (target?.view === 'samples') return !!target.id && hasAny(target.id, target.section === 'requests' ? ['sampleRequests'] : ['fulfillment.samples']);
     if(target?.section==='internal-deliveries'&&['orders','orders/list'].includes(target.view||''))return !!target.id&&hasAny(target.id,['internalDeliveries']);
     if (!target?.id) return !target?.view || !(target.view in VIEW_COLLECTION || ['payment-vouchers', 'finance', 'crm', 'inventory'].includes(target.view));
     if (target.view === 'payment-vouchers' || target.view === 'finance') return safeReceiptIds.has(target.id) || hasAny(target.id, financePaths);
