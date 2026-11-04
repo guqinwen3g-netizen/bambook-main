@@ -19,7 +19,7 @@ const REVIEW_COMMAND_BY_KIND = {
 } as const satisfies Record<MistReviewTask['kind'],MistCommand['type']>;
 const REVIEW_KIND_BY_COMMAND = new Map<string,MistReviewTask['kind']>(Object.entries(REVIEW_COMMAND_BY_KIND).map(([kind,type])=>[type,kind as MistReviewTask['kind']]));
 import { hasScope } from '../auth/permissionService';
-import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
+import { isMember, isOwner, memberIds, members, MEMBER_PERSONAL_COMMANDS, projectState, canReadFile, canReadTarget, canHandleTask, isTaxBaseCommand, maskTaxBaseText, type MistWorkspaceAccess, type MistMemberLog } from './access';
 import { payablesCommandPermissions, financialDisposalViews } from '../shared/mistPayables';
 import { marketCommandExtraPermissions } from '../shared/mistMarket';
 import { exportRebateExtraPermissions } from '../shared/mistExportRebate';
@@ -888,6 +888,8 @@ export class MistRepository {
           // calendar.delete / task.save（改已有事项）同样只能作用于本账号可见的日程与事项。
           const collection = type === 'notification.read' ? visible.notifications : type === 'task.complete' || (type === 'task.save' && payload.id) ? visible.tasks : (type === 'calendar.save' && payload.id) || type === 'calendar.delete' ? visible.calendar : undefined;
           if (collection && !collection.some(item => item.id === payload.id)) fail('NOT_FOUND', '记录不存在或当前账号无权访问', 404);
+          // 可见不等于可办理：修改已有待办须是指派人、公共待办池的岗位办理人，或有调度他人待办的主管权限（见 canHandleTask）。
+          if ((type === 'task.complete' || (type === 'task.save' && payload.id)) && !canHandleTask(actor, visible.tasks.find(item => item.id === payload.id)!)) fail('FORBIDDEN', '只能办理指派给本人的事项', 403);
           if ((type === 'calendar.save' || type === 'task.save') && payload.target && !canReadTarget(actor, payload.target)) fail('FORBIDDEN', '无权关联该业务来源', 403);
           if (type === 'notification.readAll') context.visibleNotificationIds = visible.notifications.map(item => item.id);
         }
@@ -1134,6 +1136,12 @@ export class MistRepository {
   });}
   async reviewReceipt(prior:TokenPayload,workspaceId:string,requestId:string){return this.transact(async db=>{
     const actor=await this.authorize(db,prior);requestIdentifier(requestId);
+    if(!/^[0-9a-f-]{36}$/i.test(workspaceId))fail('NOT_FOUND','原审批回执不存在',404);
+    // 公司边界与 decideReview / own 一致：工作区须存在、属于当前会话的公司且未移入回收站。只读归属字段和回收站标记，不加载整份状态。
+    const row=await db.mistWorkspace.findFirst({where:{id:workspaceId},select:{id:true,companyId:true,ownerId:true}});
+    if(!row||(row.companyId||actor.companyId)&&(row.companyId??null)!==(actor.companyId??null))fail('NOT_FOUND','原审批回执不存在',404);
+    // 回收站只适用于非公司空间（archived()）；其标记在 state 内，Prisma 无法只选 JSON 子字段，故仅对非公司空间读取 state 判断，公司库从不加载。
+    if(!row.companyId){const legacy=await db.mistWorkspace.findFirst({where:{id:workspaceId},select:{id:true,companyId:true,ownerId:true,state:true}});if(!legacy||archived(legacy))fail('NOT_FOUND','原审批回执不存在',404);}
     const item=await db.mistCommandReceipt.findUnique({where:{workspaceId_requestId:{workspaceId,requestId}}});
     if(!item||item.actorId!==actor.userId)fail('NOT_FOUND','原审批回执不存在',404);
     return {requestId:item.requestId,...publicCommandReceiptResult(item.result)};

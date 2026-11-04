@@ -22,7 +22,9 @@ PUBLIC = 'https://bambook-dev.sylway.cloud'
 PUBLIC_HEADERS = {'Cache-Control': 'no-cache', 'User-Agent': 'Bambook-Development-Delivery/1.0'}
 VERIFY = ['npm', 'run', 'verify:mist']
 CHECKS = [[sys.executable, 'scripts/deploy/test_direct_dev.py'],
-          [sys.executable, 'scripts/deploy/test_bambook_dev_receiver.py'], VERIFY]
+          [sys.executable, 'scripts/deploy/test_bambook_dev_receiver.py'],
+          [sys.executable, 'scripts/deploy/test_bambook_dev_release.py'],
+          [sys.executable, 'scripts/deploy/test_bambook_dev_backup.py'], VERIFY]
 
 def git(*args):
     return subprocess.check_output(['git', *args], cwd=ROOT, text=True).strip()

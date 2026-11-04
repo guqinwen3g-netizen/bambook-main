@@ -1,6 +1,11 @@
 /** Employee audit viewer terminology; existing reviewed terms retain precedence. */
 export const auditEnglish:Record<string,string>={
   '复制操作编号':'Copy operation ID','操作编号':'Operation ID','已复制':'Copied','Agent 提议':'Agent proposal','文件夹':'Folder',
+  // Agent proposal confirmation (high-risk detail and password re-check).
+  '确认 Agent 提议':'Confirm Agent proposal','将要改动的字段':'Fields to change','收款账户':'Payee account','原':'Current','核实记录':'Verification record','SWIFT':'SWIFT',
+  '执行身份':'Acting as','稍后':'Later','没有执行':'Not executed','本人登录密码':'Your sign-in password','原文依据':'Source quote',
+  '低风险':'Low risk','中风险':'Medium risk','高风险':'High risk',
+  '付款、核销、审批、作废等资金或不可逆操作，确认前须重新验证本人密码':'Payments, write-offs, approvals, voids and other irreversible actions require your password before confirming',
   '有操作记录暂不可读取':'Some activity records are temporarily unavailable',
   '记录暂不可用':'Records temporarily unavailable',
   '人工确认':'Human confirmation','人工拒绝':'Human rejection',

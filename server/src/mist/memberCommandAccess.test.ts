@@ -82,6 +82,8 @@ describe('个人通知已读与共享事项动作均受当前账号可见来源�
 
   it('可见通知、任务、日程仍可办理，隐藏记录保持完整', async () => {
     const hidden = structuredClone(db.workspaces.get(workspaceId).state.calendar[1]);
+    // 可见之外还须有办理资格：本事项指派给执行人（未指派且无岗位权限的事项需来源写入权限，见 securityScopeFixes.test.ts）。
+    db.workspaces.get(workspaceId).state.tasks.find((item: any) => item.id === 'visible-task').assigneeIds = ['other'];
     await execute({ type: 'notification.read', payload: { id: 'visible-notice' } });
     await execute({ type: 'task.complete', payload: { id: 'visible-task', done: true } });
     await execute({ type: 'calendar.save', payload: { id: 'visible-calendar', title: '可见日程更新', date: '2026-10-14', time: '12:00', note: '', target: { view: 'orders/list', id: 'order' } } });

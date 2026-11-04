@@ -37,7 +37,10 @@ it('shows the risk tier; medium lists fields to change, high requires the login 
 
     show({ ...base, id: 'p2', command: { type: 'payable.payment.register', payload: { requestId: 'r', amount: 100 } } });
     expect(document.querySelector('[data-agent-proposal-risk]')?.getAttribute('data-agent-proposal-risk')).toBe('high');
-    expect(document.body.textContent).toContain('ai:write:high');
+    // 权限码是实现细节，界面只显示风险等级（服务端仍校验 ai:write:high）。
+    expect(document.body.textContent).not.toContain('ai:write');
+    // 高风险同样列出将要执行的内容，不能只给摘要和密码框。
+    expect(document.querySelector('[data-agent-proposal-changes]')?.textContent).toContain('amount · 100');
     const input = document.querySelector('input[type="password"]') as HTMLInputElement; expect(input).toBeTruthy();
     expect(confirmButton().disabled).toBe(true);
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Secret-1'); input.dispatchEvent(new Event('input', { bubbles: true })); });
@@ -49,5 +52,30 @@ it('shows the risk tier; medium lists fields to change, high requires the login 
     run.mockClear(); show({ ...base, id: 'p3', command: { type: 'unregistered.command', payload: {} } });
     expect(document.querySelector('[data-agent-proposal-risk]')?.getAttribute('data-agent-proposal-risk')).toBe('medium');
     expect(document.querySelector('input[type="password"]')).toBeNull();
+  } finally { act(() => root.unmount()); host.remove(); }
+});
+
+it('high-risk bank account changes show the full new account beside the current one before the password is entered', () => {
+  (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+  const state = createMistState({ id: () => 'id', now: '2026-11-01T00:00:00Z', actorName: 'Test' }, 'demo');
+  state.bankAccounts = [{ id: 'ba1', code: 'BA-001', name: '美元户', bankName: '中国银行上海分行', accountNo: '4567000011112222', currency: 'USD', openingDate: '2026-10-01', openingBalance: 0, createdAt: '', actor: '' }];
+  const base = { ownerId: 'u', owner: '林舒', summary: ['修改银行账户 BA-001'], state: 'pending' as const, createdAt: '2026-11-01T00:00:00Z' };
+  const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
+  const show = (proposal: any) => act(() => root.render(<MistRoot><AgentProposalDialog proposal={proposal} state={state} run={vi.fn()} onClose={() => {}} onDone={() => {}} /></MistRoot>));
+  try {
+    show({ ...base, id: 'b1', command: { type: 'finance.account.save', payload: { id: 'ba1', name: '美元户', bankName: '招商银行苏州分行', accountNo: '6214 8899 0000 1234', currency: 'usd', openingDate: '2026-10-01', openingBalance: 0 } } });
+    expect(document.querySelector('[data-agent-proposal-risk]')?.getAttribute('data-agent-proposal-risk')).toBe('high');
+    const account = document.querySelector('[data-agent-proposal-account]')!;
+    expect(account.textContent).toContain('6214889900001234'); expect(account.textContent).toContain('4567000011112222');
+    expect(account.textContent).toContain('招商银行苏州分行'); expect(account.textContent).toContain('中国银行上海分行');
+    expect(account.querySelectorAll('[data-changed]').length).toBe(2);
+    expect(document.querySelector('[data-agent-proposal-changes]')).toBeNull();
+    expect(document.querySelector('input[type="password"]')).toBeTruthy();
+
+    state.market.suppliers[0].bankAccounts = [{ id: 'sb1', currency: 'CNY', accountName: '江南成衣', bankName: '工商银行', accountNo: '1111222233334444', verification: '电话核实', addedAt: '', addedBy: '', state: 'active' }];
+    show({ ...base, id: 'b2', command: { type: 'market.supplier.bank.save', payload: { supplierId: state.market.suppliers[0].id, currency: 'CNY', accountName: '江南成衣', bankName: '农业银行', accountNo: '9999888877776666', verification: '按合同电话回拨核实' } } });
+    const supplier = document.querySelector('[data-agent-proposal-account]')!;
+    expect(supplier.textContent).toContain(state.market.suppliers[0].name); expect(supplier.textContent).toContain('9999888877776666');
+    expect(supplier.textContent).toContain('1111222233334444'); expect(supplier.textContent).toContain('按合同电话回拨核实');
   } finally { act(() => root.unmount()); host.remove(); }
 });
