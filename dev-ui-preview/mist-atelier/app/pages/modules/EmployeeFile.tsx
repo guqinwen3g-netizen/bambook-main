@@ -6,6 +6,7 @@ import { TextLink, Banner, Button, CardHeader, Checkbox, DataTable, Drawer, Empt
 import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ACTIVE_EMPLOYMENT, CONTRACT_TYPES, departmentOptions, EMPLOYMENT_EVENTS, EMPLOYMENT_STATUS, eventLabel, organizationApi, type EmployeeProfile, type EmploymentEvent, type OrgDepartment, type OrgJob } from '../../runtime/organization';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 export type EmployeePerson = { id: string; displayName: string; departmentId: string | null; roleIds?: string[]; roles: string[] };
 type ProfileForm = { kind: 'profile'; exists: boolean; hireDate: string; regularDate: string; contractType: string; contractEnd: string; phone: string; emergencyContact: string; workLocation: string; notes: string };
@@ -76,7 +77,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
       {(!value || ACTIVE_EMPLOYMENT.includes(value.employmentStatus)) && <Button size="sm" variant={value ? 'secondary' : 'primary'} onClick={() => { setFormError(''); setForm(profileForm(value)); }}>{uiText(value ? '修改员工档案' : '建立员工档案')}</Button>}
       {value && eventChoices(value.employmentStatus).length > 0 && <Button size="sm" onClick={() => { const first = eventChoices(value.employmentStatus)[0]; setFormError(''); setForm({ kind: 'event', fromStatus: value.employmentStatus, type: first.value, effectiveDate: today(), toDeptId: person.departmentId ?? '', toRoleId: person.roleIds?.[0] ?? '', reason: '', acknowledged: false }); }}>{uiText("办理在职变动")}</Button>}
     </div> : undefined} />
-    {!current ? null : current.error ? <Banner tone="bad" title={uiText("档案读取失败")}>{current.error}</Banner> : value ? <KeyValue items={[
+    {!current ? null : current.error ? <FailureNotice title={"档案读取失败"} detail={current.error} /> : value ? <KeyValue items={[
       { label: '在职状态', value: EMPLOYMENT_STATUS[value.employmentStatus] ?? value.employmentStatus },
       { label: '入职日期', value: value.hireDate ?? '—' }, { label: '转正日期', value: value.regularDate ?? '—' },
       { label: '合同类型', value: CONTRACT_TYPES.find(c => c.value === value.contractType)?.label ?? '—' }, { label: '合同到期', value: value.contractEnd ?? '—' },
@@ -85,7 +86,7 @@ export function EmployeeFile({ person, departments, jobs, positionNames, nameOf,
     ]} /> : <EmptyState compact title={uiText("尚未建立员工档案")} />}
     {value && <>
       <CardHeader title={uiText("在职变动记录")} sub={uiText(events?.userId === person.id && events.rows ? `${events.rows.length} 条` : undefined)} />
-      {events?.userId !== person.id || !events.rows ? <p className="mist-note">{uiText("读取中…")}</p> : events.error ? <Banner tone="bad" title={uiText("变动记录读取失败")}>{events.error}</Banner> : events.rows.length ? <DataTable ariaLabel={uiText("在职变动记录")} rows={events.rows} rowKey={e => e.id} columns={[
+      {events?.userId !== person.id || !events.rows ? <p className="mist-note">{uiText("读取中…")}</p> : events.error ? <FailureNotice title={"变动记录读取失败"} detail={events.error} /> : events.rows.length ? <DataTable ariaLabel={uiText("在职变动记录")} rows={events.rows} rowKey={e => e.id} columns={[
         { key: 'date', header: '生效日期', width: '110px', render: e => e.effectiveDate },
         { key: 'type', header: '变动', width: '110px', render: e => <b>{eventLabel(e.type, e.fromStatus)}</b> },
         { key: 'detail', header: '说明', render: e => <>{(e.type === 'Transfer' || e.type === 'Promote') && <div>{positionTitle(e.fromPositionId)} → {positionTitle(e.toPositionId)}</div>}{e.toDeptId && e.toDeptId !== e.fromDeptId && <div>{uiText("部门：")}{deptName(e.fromDeptId)} → {deptName(e.toDeptId)}</div>}{e.reason && <div className="mist-note">{e.reason}</div>}</> },

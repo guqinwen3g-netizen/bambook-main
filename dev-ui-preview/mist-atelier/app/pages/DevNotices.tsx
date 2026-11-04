@@ -2,7 +2,7 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** BB-DEV-4：本版（本轮本厂）试样通知单——生成、重新生成（旧版保留）、下载、打印。不记录发送状态。 */
 import React from 'react';
 import { Download, FileText, Printer, RefreshCw } from 'lucide-react';
-import { Banner, Button, Card, CardHeader, Mono, Pill } from '../../../../components/mist';
+import { Button, Card, CardHeader, Mono, Pill } from '../../../../components/mist';
 import type { MistDev, MistState, MistVersion } from '../../../../server/src/shared/mistWorkspace';
 import { developmentNoticeBlocker, developmentNoticeOutdated, developmentNotices, developmentNoticeTitle, developmentNoticeTime } from '../../../../server/src/shared/mistDevelopmentNotice';
 import {useMistWorkspace} from '../runtime/workspace';
@@ -12,6 +12,7 @@ import {developmentNoticeBundle} from './developmentNoticeBundle';
 import type {DevNoticeRecord} from '../../../../server/src/shared/mistDevelopmentNotice';
 import { developmentDomain } from '../../../../server/src/shared/mistDevelopmentDomain';
 import { PreviewButton } from '../runtime/files';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 export function DevNoticeCard({ state, dev, version, busy, onGenerate, onDownload, onPrint }: {
   state: MistState; dev: MistDev; version: MistVersion; busy: boolean;
@@ -36,7 +37,7 @@ export function DevNoticeCard({ state, dev, version, busy, onGenerate, onDownloa
   const title = developmentNoticeTitle(developmentDomain(dev.values)), notices = developmentNotices(version);
   const blocker = developmentNoticeBlocker(state, dev, version), outdated = developmentNoticeOutdated(state, dev, version);
   return <Card id="mist-dev-notice">
-    {failure&&<Banner tone="bad" title={uiText("附件包下载失败")}>{uiText(failure)}</Banner>}
+    {failure&&<FailureNotice title={"附件包下载失败"} detail={failure} />}
     <CardHeader title={uiText(title)} sub={ui`${version.label} · ${version.factory}`} tools={<Button size="sm" icon={notices.length ? RefreshCw : FileText} disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={onGenerate}>{uiText(notices.length ? '重新生成' : '生成通知单')}</Button>} />
     {(blocker || outdated) && <div className="mist-row" style={{ padding: '0 22px 8px', gap: 8, flexWrap: 'wrap' }}>
       {outdated && <Pill tone="warn">{uiText("工厂任务已更新，可重新生成")}</Pill>}{blocker && <span className="mist-note">{blocker}</span>}</div>}

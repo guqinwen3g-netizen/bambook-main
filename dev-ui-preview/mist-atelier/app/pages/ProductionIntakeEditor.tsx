@@ -7,6 +7,7 @@ import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { DraftFiles, RecordFiles } from './modules/fulfillmentKit';
 import { MistPresentedErrorContext } from '../runtime/errorPresentation';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 export function ProductionIntakeEditor({ productionId, initial, onClose }: { productionId: string; initial: boolean; onClose: () => void }) {
   const workspace = useMistWorkspace(), session = useMistSession(), toast = useToast();
@@ -50,7 +51,7 @@ export function ProductionIntakeEditor({ productionId, initial, onClose }: { pro
   };
   return <MistPage><BackLink onClick={() => { if (!busy) onClose(); }}>{uiText('返回生产单')}</BackLink>
     <PageHeader title={uiText(initial ? '登记线下在制' : '登记实际进度')} />
-    {failure && presentedError!==failure && <Banner tone="bad" title={uiText('未能保存')}>{failure}</Banner>}
+    {failure && presentedError!==failure && <FailureNotice title={'未能保存'} detail={failure} />}
     {(workspace.pending || workspace.pendingCreate) && <Banner tone="warn" title={uiText('请先核对上次操作')} actions={<Button disabled={busy || workspace.saving} onClick={()=>void recover()}>{uiText('核对原请求')}</Button>} />}
     <div className="mist-wizard"><VerticalSteps current={String(step)} onSelect={id => { if (!blocked && Number(id) < step) setStep(Number(id)); }} steps={[{ id: '0', label: '生产事实', done: step > 0 }, { id: '1', label: '来源依据', done: step > 1 }, { id: '2', label: '确认' }]} /><Card>
       <FormSection title={uiText(['生产事实','来源依据','确认'][step])}>{step === 2 ? <><KeyValue items={[{label:'生产单',value:branch?.code||''},{label:'工厂',value:branch?.factory||''},{label:'计划数量',value:branch?`${branch.qty} ${unit}`:''},{label:'进度截至日',value:values.asOf},{label:'实际开产日',value:values.startedOn||'待核'},{label:'实际工序',value:values.stage?labels[values.stage as keyof typeof OBSERVED_PRODUCTION_STAGES]:'待核'},{label:'工厂进度',value:values.percent===''?'待核':values.percent+'%'},{label:'本工序已完成数量',value:values.quantity?`${values.quantity} ${unit}`:'待核'},{label:'资料来源',value:values.sourceName},{label:'事实依据',value:values.evidence}]}/><RecordFiles ids={fileIds}/></> : step === 0 ? <FormGrid>

@@ -23,7 +23,8 @@ describe('主管团队视角', () => {
     const sales = teamRow(s, { id: 'demo-sales', name: '顾言' }, today);
     expect(sales.orders.map(o => o.code)).toEqual(['SO-G-2026-018', 'SO-F-2026-0006', 'SO-G-2026-015']);
     expect(sales.orders.every(o => o.status === 'ontrack')).toBe(true);
-    expect(sales.tasks.filter(t => t.overdue).length).toBe(2);
+    // Two overdue order tasks plus the CRM follow-up carried over from the converted show lead.
+    expect(sales.tasks.filter(t => t.overdue).length).toBe(3);
     expect(sales.receivables.length).toBeGreaterThan(0);
     expect(sales.overdueReceivable.every(r => r.amount > 0)).toBe(true);
     expect(sales.attention).not.toBe('ok');

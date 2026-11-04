@@ -4,7 +4,7 @@ import { interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** 管理后台 · 账号：公司成员身份只在这里新建或经注册审批产生（2026-10-08 决定）；岗位即权限角色，每人一个岗位，岗位权限仅老板可调整（2026-10-16 起），审计只读。 */
 import React from 'react';
-import { Download, KeyRound, Pencil, Plus, RefreshCw, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { Download, KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, Checkbox, DataTable, Dialog, Drawer, EmptyState, Field, FormGrid, KeyValue, Mono, Pill, Select, TextArea, TextInput, Toolbar, useToast, type Column } from '../../../../../components/mist';
 import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -12,6 +12,7 @@ import { ACCOUNT_STATUS, departmentOptions, organizationApi, type AccountInvitat
 import { passwordOk } from '../../runtime/passwordRule';
 import { JOB_TEMPLATES } from '../../runtime/jobPermissions';
 import { JobPermissionEditor, jobSummary } from './JobPermissionEditor';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const SUPER_ADMIN = new Set(['role-super-admin', '老板', '超级管理员', 'SuperAdmin', 'super-admin']);
 const isSuperAdmin = (role: AdminRole) => SUPER_ADMIN.has(role.id.split('@')[0]) || SUPER_ADMIN.has(role.name);
@@ -127,7 +128,7 @@ export function AdminAccounts() {
   ];
   const self = current?.id === session.user?.id;
   return <>
-    {error && <Banner tone="bad" title={uiText("账号读取失败")} actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={"账号读取失败"} detail={error} retry={() => void load()} />}
     {pending.length > 0 && <Banner tone="warn" title={ui`${pending.length} 个注册申请待审批`}>{uiText("审批时确定任职部门与岗位；通过后对方才能登录。")}</Banner>}
     <Toolbar right={<Button variant="primary" icon={UserPlus} disabled={!data} onClick={() => { setFormError(''); setForm(blank()); }}>{uiText("新建账号")}</Button>}>
       <Field label={uiText("搜索")}><TextInput aria-label={uiText("搜索账号")} placeholder={uiText("姓名、邮箱或部门")} value={query} onChange={e => setQuery(e.target.value)} /></Field>
@@ -249,7 +250,7 @@ export function AdminRoles() {
   };
   const removingHolders = removing ? holders(removing.id) : [];
   return <>
-    {error && <Banner tone="bad" title={uiText("岗位读取失败")} actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={"岗位读取失败"} detail={error} retry={() => void load()} />}
     {!owner && <Pill plain>{uiText("只读")}</Pill>}
     {owner && <Toolbar right={<Button variant="primary" icon={Plus} onClick={() => void openCreate()}>{uiText("新建岗位")}</Button>}><span className="mist-note">{uiText("共 ")}{data?.roles.length ?? 0}{uiText(" 个岗位 · 自定义 ")}{(data?.roles ?? []).filter(r => !r.isSystem).length}{uiText(" 个")}</span></Toolbar>}
     <Card><DataTable ariaLabel={uiText("岗位")} rows={data?.roles ?? []} rowKey={r => r.id} loading={loading && !data} onRowClick={r => void openEditor(r)} columns={[
@@ -325,7 +326,7 @@ export function AdminAuditLog() {
     finally { setExporting(false); }
   };
   return <>
-    {error && <Banner tone="bad" title={uiText("审计日志读取失败")} actions={<Button size="sm" icon={RefreshCw} onClick={() => void load()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={"审计日志读取失败"} detail={error} retry={() => void load()} />}
     <Toolbar right={<span className="mist-note">{uiText("共 ")}{total}{uiText(" 条 · 第 ")}{uiText(page + 1)} / {Math.max(1, Math.ceil(total / size))}{uiText(" 页")}</span>}>
       <Field label={uiText("对象")}><Select aria-label={uiText("审计对象")} value={targetType} onChange={e => { setPage(0); setTargetType(e.target.value); }} options={[{ value: '', label: '全部对象' }, ...Object.entries(AUDIT_TARGETS).map(([value, label]) => ({ value, label }))]} /></Field>
       {session.hasPermission('users:admin') && session.hasPermission('audit:export') && <Button icon={Download} loading={exporting} disabled={loading || exporting} onClick={() => void exportCsv()}>{uiText("导出 CSV")}</Button>}

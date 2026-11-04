@@ -9,6 +9,7 @@ import { ArrowDown, ArrowUp, Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import { Banner, Button, CardHeader, Dialog, Drawer, Field, FormGrid, IconButton, Pill, Select, Switch, TextInput, useToast } from '../../../../../components/mist';
 import { apiService } from '../../../../../services/apiService';
 import { AiSubscriptionPanel, type ChatgptSubscriptionStatus } from './AiSubscriptionPanel';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type ApiProvider = { id: string; name: string; baseUrl: string; model: string; enabled: boolean; keyHint: string };
 type ChainView = { chatgpt: ChatgptSubscriptionStatus | null; api: { providers: ApiProvider[]; order: string[] }; env: Array<{ id: string; host: string; model: string }>; supportsApi: boolean };
@@ -95,7 +96,7 @@ export function PlatformAiProvidersPanel({ sessionKey }: { sessionKey: string })
   return <>
     <CardHeader title={uiText("平台 AI 模型")} sub={uiText("所有公司的平台 AI（小竹问答、报价审阅、自动汇总、财务对账）按下列顺序调用，前一项不可用时自动换下一项。")} />
     <div className="mist-card-body">
-      {error && !draft && !removing && <Banner tone="bad" title={uiText("平台 AI 配置未保存")}>{uiText(error)}</Banner>}
+      {error && !draft && !removing && <FailureNotice title={"平台 AI 配置未保存"} detail={error} />}
       <ol className="mist-ai-chain" aria-label={uiText("平台 AI 调用顺序")}>
         {order.map((id, i) => {
           const arrows = <><IconButton size="sm" icon={ArrowUp} label={uiText("上移")} disabled={busy || i === 0} onClick={() => move(id, -1)} /><IconButton size="sm" icon={ArrowDown} label={uiText("下移")} disabled={busy || i === order.length - 1} onClick={() => move(id, 1)} /></>;
@@ -131,7 +132,7 @@ export function PlatformAiProvidersPanel({ sessionKey }: { sessionKey: string })
       {view.supportsApi ? <div className="mist-row">
         <Button variant="ai" icon={Plus} disabled={busy || view.api.providers.length >= MAX} onClick={() => { setError(''); setDraft({ name: '', baseUrl: '', model: '', apiKey: '' }); }}>{uiText("添加 API 服务")}</Button>
         <span className="mist-note">{uiText("支持 OpenAI 兼容接口：OpenAI、火山方舟、DeepSeek、智谱、通义千问或自建服务。")}</span>
-      </div> : <Banner tone="neutral" title={uiText("API 服务未启用")} />}
+      </div> : <Banner variant="status" tone="neutral" title={uiText("API 服务未启用")} />}
     </div>
     <AiSubscriptionPanel mode="platform" bare sessionKey={sessionKey} onChange={() => void read()} />
     <Drawer open={!!draft} onClose={() => { if (!busy) setDraft(null); }} title={uiText(draft?.id ? '编辑 API 服务' : '添加 API 服务')} sub={uiText("Key 只保存在服务器，保存后不再显示。")}

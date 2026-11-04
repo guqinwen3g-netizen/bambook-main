@@ -18,6 +18,7 @@ import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, useListDetailRoute, businessDay, businessWhen, shortWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Tab = 'signals' | 'ledger';
 type LedgerFilter = 'open' | 'escalated' | 'closed' | 'all';
@@ -148,13 +149,13 @@ export function RisksPage() {
           ...(e ? [{ label: '审批中', value: RISK_ACTION_LABEL[e.action || 'authorize'] }] : []),
         ] }} />; })()
     : null;
-  const roleBanner = !can ? <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}/></div> : null;
+  const roleBanner = !can ? <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}/></div> : null;
   if (full.active && detail) return <ListDetailPage backLabel={tab === 'signals' ? '风险预警' : '风险台账'} onBack={full.back} before={roleBanner} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow={uiText("财务与成本 · 风险")} title={uiText("风险管理与合规")}
       actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{(canAll || canOrders) && <Button variant="primary" icon={Plus} disabled={locked || !ownOrders.length} title={uiText(ownOrders.length ? undefined : canAll ? '还没有订单' : '没有负责人绑定为你账号的订单')} onClick={() => setDialog(registerSpec())}>{uiText("手工登记")}</Button>}</>} />
     {roleBanner}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {error && <FailureNotice title={"数据未加载"} detail={error} retry={() => void refresh()} />}
     <div className="mist-section" data-risk-summary><SummaryBar items={[
       { label: '未登记预警', value: unregistered.length, hint: unregistered.filter(s => s.level === 'critical').length ? `其中严重 ${unregistered.filter(s => s.level === 'critical').length}` : undefined, hintTone: 'bad' },
       { label: '未关闭风险', value: open.length, hint: open.filter(r => r.planDue && r.planDue < day).length ? `方案逾期 ${open.filter(r => r.planDue && r.planDue < day).length}` : undefined, hintTone: 'warn' },
@@ -208,7 +209,7 @@ function RiskDetail({ r, state, day, me, meId, locked, writeReason, onAck, onPla
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{uiText(r.disposition === 'waived' ? '已豁免' : RISK_STATE_LABEL[r.state])}</Pill><Pill tone={LEVEL[level].tone}>{uiText(LEVEL[level].label)}{uiText(high && !done ? ' · 高风险' : '')}</Pill><Pill>{uiText("负责人 ")}{r.owner}</Pill>{r.release && !done && <Pill tone="warn">{uiText(r.release.shipmentId ? `带风险放行已用于 ${r.release.shipmentCode || '一票出运'}` : '已获准带风险放行（可放行一票）')}</Pill>}</div>
     {raised && !done && <p className="mist-note">{uiText("登记时为")}{uiText(LEVEL[r.level].label)}{uiText("，来源预警当前已升为")}{uiText(LEVEL[level].label)}{uiText("，按当前等级处理。")}</p>}
     {esc && <div className="mist-col" data-risk-escalation>
-      <Banner tone="warn" title={ui`待部门主管审批 · ${RISK_ACTION_LABEL[esc.action || 'authorize']}`}>{esc.requestedBy} · {shortWhen(esc.requestedAt)}：{esc.reason}</Banner>
+      <Banner variant="status" tone="warn" title={ui`待部门主管审批 · ${RISK_ACTION_LABEL[esc.action || 'authorize']}`}>{esc.requestedBy} · {shortWhen(esc.requestedAt)}：{esc.reason}</Banner>
       <ActionBar busy={locked} actions={[{ label: '到审批中心', icon: ArrowUpRight, onClick: onApprovals }, { label: '撤回申请', icon: Undo2, onClick: onWithdraw, hidden: !mine || !!writeReason }]} />
     </div>}
     {!done && !writeReason && <ActionBar busy={locked} actions={[

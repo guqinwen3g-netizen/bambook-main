@@ -17,6 +17,7 @@ import { choiceField, emptyOption, Events, field, parseSource, sourceOptions, te
 import { parsePurchaseContent, purchaseChoices, purchaseContent, sourceOrderBlocker } from './purchaseContent';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { CURRENCIES, SUPPLIER_PAYMENT_TERMS, UNITS } from '../../runtime/tradeOptions';
+import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 
 const STATE_TONE: Record<MistRfq['state'], Tone> = { open: 'accent', awarded: 'ok', cancelled: 'neutral' };
 
@@ -109,9 +110,9 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
   const closedReason = isOpen ? false : `询价单${RFQ_STATE_LABEL[r.state]}`;
   return <DetailBody data-rfq-detail={r.id} heading={<div><span className="mist-mono mist-muted">{r.code}</span><div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{r.description}</div></div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[r.state]}>{RFQ_STATE_LABEL[r.state]}</Pill>{isOpen && r.deadline < day && <Pill tone="warn">{uiText("已过报价截止日")}</Pill>}</div>
-    {r.award && r.devId && <Banner tone="ok" title={ui`已定标 ${r.award.supplier}`}>{r.award.price} {r.award.currency}/{uiText(r.unit)}{uiText(r.award.flags.length ? `；${r.award.flags.join('；')}；理由：${r.award.reason}` : '')}</Banner>}
-    {r.award && !r.devId && <Banner tone="ok" title={ui`已定标 ${r.award.supplier}`}>{uiText("生成采购草稿 ")}<TextLink onClick={() => onPurchase(r.award!.purchaseId)}>{r.award.purchaseCode}</TextLink>{uiText(r.award.flags.length ? `；${r.award.flags.join('；')}；理由：${r.award.reason}` : '')}。</Banner>}
-    {r.cancelled && <Banner tone="neutral" title={uiText("询价已取消")}>{r.cancelled.reason}</Banner>}
+    {r.award && r.devId && <Banner variant="status" tone="ok" title={ui`已定标 ${r.award.supplier}`}>{r.award.price} {r.award.currency}/{uiText(r.unit)}{uiText(r.award.flags.length ? `；${r.award.flags.join('；')}；理由：${r.award.reason}` : '')}</Banner>}
+    {r.award && !r.devId && <Banner variant="status" tone="ok" title={ui`已定标 ${r.award.supplier}`}>{uiText("生成采购草稿 ")}<TextLink onClick={() => onPurchase(r.award!.purchaseId)}>{r.award.purchaseCode}</TextLink>{uiText(r.award.flags.length ? `；${r.award.flags.join('；')}；理由：${r.award.reason}` : '')}。</Banner>}
+    {r.cancelled && <Banner variant="status" tone="neutral" title={uiText("询价已取消")}>{r.cancelled.reason}</Banner>}
     {can && isOpen && <ActionBar busy={locked} actions={[
       { label: '登记报价', icon: MessageSquareQuote, onClick: onQuote, primary: true, reason: closedReason },
       { label: '登记谢绝', icon: XCircle, onClick: onDecline, reason: closedReason },
@@ -121,7 +122,7 @@ function RfqDetail({ rfq: r, state, day, can, locked, label, canInvite, onQuote,
     ] as ReasonedAction[]} />}
     {can && r.state === 'awarded' && (() => { const po = state.fulfillment.purchases.find(x => x.id === r.award?.purchaseId); return <ActionBar busy={locked} actions={[{ label: '撤销定标', onClick: onUnaward, reason: po && !['draft', 'rejected', 'cancelled'].includes(po.state) ? '采购单已提交审批或已批准' : false }] as ReasonedAction[]} />; })()}
     {can && r.state === 'cancelled' && <ActionBar busy={locked} actions={[{ label: '重开询价', onClick: onReopen }] as ReasonedAction[]} />}
-    {!!r.changes?.length && <DetailBlock title={uiText('变更记录')}>{r.changes.map((c, i) => <div key={i} className="mist-note">{c.at.slice(0, 10)} · {c.actor} · {c.note}</div>)}</DetailBlock>}
+    {!!r.changes?.length && <DetailBlock title={uiText('变更记录')}>{r.changes.map((c, i) => <div key={i} className="mist-note">{platformBusinessDate(c.at)} · {c.actor} · {c.note}</div>)}</DetailBlock>}
     <Facts items={[
       { label: r.devId ? '来源开发案' : '来源条目', value: label },
       { label: '需求', value: `${r.quantity} ${r.unit} · ${purchaseContent(r)}` },

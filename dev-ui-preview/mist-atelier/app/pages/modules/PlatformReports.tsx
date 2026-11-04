@@ -18,6 +18,7 @@ import { FX_BASIS_LABEL, fxOrderActual, fxRateFor, fxUnallocatedSettlements, typ
 import { orderRebate } from '../../../../../server/src/shared/mistExportRebate';
 import { monthlyFinanceSummary } from '../../../../../server/src/shared/mistFinanceReports';
 import { mistInvoiceCustomerId, mistInvoiceCustomerName } from '../../../../../server/src/shared/mistOpeningBalance';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const money = (n: number) => new Intl.NumberFormat(interfaceLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const minor = (n: number) => mistMoneyMinor(n);
@@ -221,7 +222,7 @@ export function PlatformReportsPage() {
 
   return <MistPage>
     <PageHeader title={uiText("报表中心")} actions={<>{tab !== 'actual' && <><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('csv')}>{uiText("导出 CSV")}</Button><Button icon={Download} disabled={!state || ((tab === 'sales' || tab === 'margin') && invalid)} onClick={() => exportCurrent('xlsx')}>{uiText("导出 Excel")}</Button></>}</>} />
-    {workspace.error && <Banner tone="bad" title={uiText("读取失败")}>{workspace.error}</Banner>}
+    {workspace.error && <FailureNotice title={"读取失败"} detail={workspace.error} />}
     {state && <ReportSchedules state={state} canAdmin={canSeeMargin} asOf={asOf} />}
     <Tabs<ReportTab> value={tab} onChange={next => go('reports', undefined, { section: next })} options={[{ value: 'sales', label: '客户销售额' }, ...(canSeeMargin ? [{ value: 'margin' as const, label: '订单毛利' }, { value: 'actual' as const, label: '订单核算' }] : []), { value: 'aging', label: '应收账龄' }, ...(canSeeMargin ? [{ value: 'cash' as const, label: '资金月报' }] : []), { value: 'orders', label: '订单进度与逾期', count: progress.filter(r => r.status === 'overdue').length || undefined }]} />
     <section className="mist-section">{tab === 'sales' ? <>

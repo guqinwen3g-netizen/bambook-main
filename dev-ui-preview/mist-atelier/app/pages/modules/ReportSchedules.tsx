@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { Mail, Plus, Square } from 'lucide-react';
-import { Banner, Button, Card, CardHeader, DataTable, EmptyState, Pill } from '../../../../../components/mist';
+import { Button, Card, CardHeader, DataTable, EmptyState, Pill } from '../../../../../components/mist';
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { dueReportSchedules, readReportSchedules, REPORT_SCHEDULE_ADMIN_KINDS, REPORT_SCHEDULE_KINDS, reportSchedulePeriod, type MistReportSchedule, type ReportScheduleKind } from '../../../../../server/src/shared/mistReportSchedules';
 import { monthlyFinanceSummary } from '../../../../../server/src/shared/mistFinanceReports';
@@ -15,6 +15,7 @@ import { setComposeIntent } from '../../runtime/composeIntent';
 import { buildModuleXlsxFile, ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { AGING_BUCKETS, buildCustomerSales, buildOrderMargin, buildOrderProgress, buildReceivableAging, PROGRESS_STATUS } from './PlatformReports';
 import { uiText } from '../../../../../services/interfaceLanguage';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const WEEKDAY = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 /** 与页面导出相同的列；毛利按原币口径（含成本，只给报表管理者）。 */
@@ -52,7 +53,7 @@ export function ReportSchedules({ state, canAdmin, asOf }: { state: MistState; c
   };
   return <Card className="mist-section">
     <CardHeader title={uiText('定时发送')} tools={<Button size="sm" icon={Plus} disabled={locked} onClick={() => setDialog(spec())}>{uiText('订阅报表')}</Button>} />
-    {error && <Banner tone="bad" title={uiText('未完成')}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={'未完成'} detail={error} />}
     <DataTable ariaLabel={uiText('报表订阅')} rows={rows} rowKey={r => r.id} density="compact" columns={[
       { key: 'kind', header: '报表', width: 'minmax(120px,1fr)', render: r => REPORT_SCHEDULE_KINDS[r.kind] },
       { key: 'when', header: '频率', width: '110px', render: r => r.every === 'week' ? `每${WEEKDAY[r.day - 1]}` : `每月 ${r.day} 号` },

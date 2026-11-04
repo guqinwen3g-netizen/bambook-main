@@ -8,6 +8,7 @@ import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
 import { uiText } from '../../../../../services/interfaceLanguage';
 import { DetailBlock, shortWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Exec = (command: MistCommand, done?: string) => Promise<unknown>;
 const keyOf = (l: EmailLink) => l.kind + ':' + l.id;
@@ -37,7 +38,7 @@ export function MailReviewPanel({ message: m, state, can, locked, exec, onOpen }
   const submit = async () => { const link = options.find(l => keyOf(l) === target); if (link && await exec({ type: 'email.submitExtraction', payload: { id: m.id, link } }, '已交业务负责人处理')) setTarget(''); };
   const resolve = async () => { if (handling && await exec({ type: 'email.extraction.resolve', payload: { id: m.id, taskId: handling, outcome, note: handlingNote } }, '已记录处理结果')) setHandling(null); };
   return <DetailBlock title={uiText('分类与抽取')} aside={<Pill tone={reviewed ? 'ok' : analysis ? 'ai' : 'neutral'}>{uiText(reviewed ? '已复核' : analysis ? '待复核' : '未整理')}</Pill>}>
-    {failure && <Banner tone="bad" title={failure} />}
+    {failure && <FailureNotice title="整理未完成" detail={failure} />}
     {analysis ? <>
       <p className="mist-sub">{analysis.summary}</p>
       {(analysis.attachmentCount > 0 || analysis.truncated) && <Banner tone="warn" title={uiText(analysis.truncated ? '仅整理了部分正文' : '附件未参与整理')}>{uiText(analysis.truncated ? '请核对完整原文及附件。' : `请另行核对 ${analysis.attachmentCount} 份附件。`)}</Banner>}

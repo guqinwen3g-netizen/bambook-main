@@ -12,6 +12,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { uiText, interfaceLocale } from '../../../../../services/interfaceLanguage';
 import { businessNow } from '../../runtime/businessClock';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 const STATE: Record<AgentTaskView['state'], [string, Tone]> = { queued: ['待执行', 'accent'], running: ['执行中', 'accent'], waiting_time: ['等待继续', 'neutral'], waiting_condition: ['等待资料变化', 'neutral'], waiting_human: ['待我确认', 'warn'], paused: ['已暂停', 'neutral'], succeeded: ['已完成', 'ok'], failed: ['未完成', 'bad'], cancelled: ['已停止', 'neutral'], expired: ['已到期', 'neutral'], budget_exhausted: ['达到限额', 'warn'], access_changed: ['权限已变化', 'warn'] };
 type Usage = { month: string; scope: 'mine' | 'company'; items: Array<{ ownerId: string; ownerName: string; tasks: number; modelTurns: number; runtimeMs: number }> };
@@ -53,7 +54,7 @@ export function PersonalAgentPage({ tabs }: { tabs?: React.ReactNode }) {
   const stopped = identity?.state === 'disabled';
   return <MistPage>
     {header}{tabs}
-    {error && <Banner tone="bad" title={uiText('未完成')}>{uiText(error)}</Banner>}
+    {error && <FailureNotice title={'未完成'} detail={error} />}
     {!available && <Banner tone="warn" title={uiText('平台模型暂不可用')} />}
     {stopped && <Banner tone="warn" title={uiText('我的 Agent 已被管理员停用')} />}
     <Card>

@@ -18,6 +18,7 @@ import { DEVELOPMENT_LIST_TABS, SOURCING_CREATE_ID, developmentCreateTarget, dev
 import { firstWorkspaceImage, useWorkspaceImage } from '../runtime/useWorkspaceImage';
 import { FileName } from '../runtime/files';
 import { businessWhen } from './modules/pageKit';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 type CsvDev = Pick<MistDev,'id'|'name'|'style'|'customer'|'owner'|'due'|'stage'|'state'|'ver'|'factory'> & {code?:string};
 export function developmentCsv(rows:CsvDev[]):string {
@@ -111,7 +112,7 @@ function DevListTabPage({tab}:{tab:DevelopmentListTab}){
       {domain&&<Dropdown label={uiText("发起方")} value={initiator} onChange={setInitiator} options={[{value:'all',label:'全部'},{value:'customer',label:'客户要求'},{value:'internal',label:'内部需求'}]} />}
       {domain&&<Dropdown label={uiText(domain==='fabric'?'面料分类':'品类')} value={category} onChange={setCategory} options={[{value:'all',label:'全部'},...categories.map(name=>({value:name,label:name}))]} />}
     </Toolbar>
-    {(failure||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("操作未完成")}>{failure||error}</Banner></div>}
+    {(failure||error)&&<FailureNotice title={"操作未完成"} detail={failure||error} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("已保留原请求，请先核对后再继续操作。")}</Banner></div>}
     {!domain?<Card><DataTable ariaLabel={uiText("面料寻样")} loading={loading} rows={fabricRows} rowKey={fabric=>fabric.id} onRowClick={fabric=>showFabric(fabric)} columns={[
       {key:'n',header:'面料',width:'minmax(200px,2fr)',render:fabric=><ObjectCell thumb={<Thumb icon={Layers} />} name={fabric.name} meta={<><Mono>{fabric.code}</Mono> · {uiText(fabric.sub)}</>} />},

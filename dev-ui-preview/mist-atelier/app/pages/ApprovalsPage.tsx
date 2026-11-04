@@ -14,6 +14,7 @@ import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistReviews, type MistReview } from '../runtime/reviews';
 import { ActionBar, DetailBlock, DetailBody, ListDetail } from './modules/pageKit';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 export type ApprovalTab = 'mine' | 'sent' | 'done' | 'others';
 type Kind = MistReviewTask['kind'];
@@ -84,12 +85,12 @@ export function ApprovalsPage() {
   const detail = selected ? <DetailBody data-approval={selected.id} heading={<h2 className="mist-h2">{localizedPageTitle(selected.title)}</h2>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATUS[selected.status].tone}>{uiText(STATUS[selected.status].label)}</Pill><Pill tone="neutral">{APPROVAL_KIND_LABEL[selected.kind]}</Pill></div>
     <Facts items={[{ label: '发起人', value: requester(selected) }, { label: '提交时间', value: day(selected.submittedAt) }, { label: '审批人', value: selected.reviewerIds.includes(me) ? (selected.reviewerIds.length > 1 ? `我及另外 ${selected.reviewerIds.length - 1} 人` : '我') : `${selected.reviewerIds.length} 人` }]} />
-    {selected.kind === 'payment' && tierNote(selected) && <Banner tone={selected.status === 'pending' ? 'warn' : 'neutral'} title={uiText('付款审批档位')}><span data-payment-tier>{tierNote(selected)}</span></Banner>}
+    {selected.kind === 'payment' && tierNote(selected) && <Banner variant="status" tone={selected.status === 'pending' ? 'warn' : 'neutral'} title={uiText('付款审批档位')}><span data-payment-tier>{tierNote(selected)}</span></Banner>}
     <DetailBlock title={uiText("审批内容")}>{selected.details.length ? <KeyValue items={selected.details.map(item=>['处置方式','退回去向','审批内容','订单用途','客户收款','溢短装','数量口径'].includes(item.label)?{...item,value:uiText(item.value)}:item)} /> : <span className="mist-note">{uiText("缺少审批内容")}</span>}
       </DetailBlock>
     {!!selected.files?.length && <DetailBlock title={uiText("随附依据")}>{selected.files.map(f => <div className="mist-row" key={f.id}><Button size="sm" icon={Paperclip} onClick={() => void reviews.download(selected, f)}>{f.name}</Button></div>)}</DetailBlock>}
     {selected.status === 'pending' && !decideReason && <Field label={uiText("审批意见")} required><TextArea aria-label={uiText("审批意见")} rows={3} maxLength={4000} value={note} disabled={reviews.busy} onChange={e => setNote(e.target.value)} /></Field>}
-    {local && <Banner tone="bad" title={uiText("还不能保存决定")}>{local}</Banner>}
+    {local && <Banner variant="notice" tone="bad" title={uiText("还不能保存决定")}>{local}</Banner>}
     <ActionBar busy={reviews.busy} actions={[
       { label: '批准', icon: Check, primary: true, onClick: () => void decide('approved'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },
       { label: '退回', icon: CornerUpLeft, onClick: () => void decide('rejected'), reason: decideReason, hidden: selected.status !== 'pending'||!selected.canDecide },
@@ -98,7 +99,7 @@ export function ApprovalsPage() {
   </DetailBody> : <EmptyState title={uiText("选择一项审批")} />;
   return <MistPage>
     <PageHeader eyebrow={uiText("我的事务 · 审批与放行")} title={uiText("审批与放行")} actions={<Button icon={RefreshCw} disabled={reviews.busy} onClick={() => void reviews.refresh()}>{uiText("刷新")}</Button>} />
-    {reviews.error && <Banner tone="bad" title={uiText(reviews.error)} actions={<Button size="sm" onClick={reviews.clearError}>{uiText("知道了")}</Button>} />}
+    {reviews.error && <FailureNotice title="审批未完成" detail={reviews.error} retry={reviews.clearError} retryLabel="知道了" />}
     {reviews.intent&&!reviews.busy && <Banner tone="warn" title={uiText("有审批结果待核对")} actions={<Button size="sm" loading={reviews.busy} onClick={() => void reviews.recover()}>{uiText("核对原请求")}</Button>}>{uiText("审批结果未确认，请核对。")}</Banner>}
     <Tabs<ApprovalTab> value={tab} onChange={next => { setDrawer(false); go('approvals', undefined, { section: next }); }} options={[
       { value: 'mine', label: '待我审批', count: counts.mine }, { value: 'sent', label: '我发起的', count: counts.sent }, { value: 'done', label: '已处理', count: counts.done },

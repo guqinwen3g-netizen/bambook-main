@@ -7,7 +7,7 @@ import { View } from '../../../../../types';
 /** 单据中心：按准确出运与合同保留单据版本（新版本不覆盖旧版本）、正式文件与签发 / 归档记录；我方签发 CI / PL，外部机构单据只归档原件；CI 签发回到财务应收。 */
 import React from 'react';
 import { Anchor, Archive, Building2, Download, FileText, FilePlus2, Pencil, Plus, Receipt, SearchX, Sparkles, Stamp, XCircle } from 'lucide-react';
-import { Banner, Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Toolbar, type Column, type Tone } from '../../../../../components/mist';
+import { Button, Card, DataTable, Dropdown, EmptyState, Facts, MistPage, Mono, PageHeader, Pill, Pipeline, SearchField, Segmented, Tabs, TextLink, Toolbar, type Column, type Tone } from '../../../../../components/mist';
 import { isPendingFinanceMistInvoice, isRecognizedMistInvoice, type MistState } from '../../../../../server/src/shared/mistWorkspace';
 import type { FulfillmentDocument, FulfillmentShipment } from '../../../../../server/src/shared/mistFulfillment';
 import { useMistWorkspace } from '../../runtime/workspace';
@@ -20,6 +20,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen, type ReasonedAction } from './pageKit';
 import { MODE_LABEL, packingMatched } from './ShipmentsPage';
 import { DOCUMENT_ISSUERS } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Tab = 'documents' | 'letterhead';
 type Domain = FulfillmentShipment['domain'];
@@ -168,7 +169,7 @@ export function DocumentCenterPage() {
         {tab === 'documents' && <Button icon={Download} disabled={!rows.length} onClick={() => exportRecords('单据目录', ['编号', '标题', '类型', '版本', '出运', '订单', '状态', '签发时间'], rows.map(d => [d.number, d.title, d.type, d.version, shipmentOf(d)?.code || '', orderCode(d.orderId), documentStatus(d).label, d.issuedAt || '']))}>{uiText("导出")}</Button>}
         {tab === 'documents' && createButton}
       </>} />
-    {error && error !== presentedError && <div className="mist-section"><Banner tone="bad" title={uiText(state ? "单据操作未完成" : "单据未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {error && error !== presentedError && <FailureNotice title={state ? "单据操作未完成" : "单据未读取"} detail={error} retry={() => void refresh()} />}
     {!hasContext && <div className="mist-section"><Tabs<Tab> value={tab} onChange={value => { setTab(value); setDrawer(false); }} options={[{ value: 'documents', label: '出运单据', count: docs.filter(d => d.status !== 'void').length }, { value: 'letterhead', label: '公司抬头' }]} /></div>}
     {tab === 'letterhead' && !hasContext ? <Card><div className="mist-col" style={{ padding: 20, gap: 16 }}>
         {profile?.legalName ? <Facts items={[

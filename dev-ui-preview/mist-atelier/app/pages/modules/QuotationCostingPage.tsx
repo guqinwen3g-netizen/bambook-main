@@ -53,6 +53,7 @@ import { downloadModuleCsv } from "./ModuleWorkbench";
 import { shortWhen } from "./pageKit";
 import { OptionInput } from '../OptionInput';
 import { CHARGE_UNITS, UNITS } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 const kinds: Record<QuoteCostComponent["kind"], string> = {
   yarn: "纱线 / 原料",
   weaving: "织造",
@@ -468,7 +469,7 @@ export function QuotationCostingPage() {
           title={uiText("报价核算历史")}
           eyebrow={<Mono>{q.code}</Mono>}
         />
-        <Banner title={uiText("历史只读")}>{uiText("新条目与新版本需重新核算，不能把旧单价、规格或策略自动沿用。")}</Banner>
+        <Banner variant="status" title={uiText("历史只读")}>{uiText("新条目与新版本需重新核算，不能把旧单价、规格或策略自动沿用。")}</Banner>
         {snapshots.length ? (
           <div className="mist-col">
             {[...snapshots].reverse().map((r) => (
@@ -485,26 +486,13 @@ export function QuotationCostingPage() {
       <MistPage>
         <PageHeader title={uiText("报价条目核算")} />
         {w.error && (
-          <Banner
-            tone="bad"
-            title={uiText("读取失败")}
-            actions={
-              <Button
-                onClick={() =>
+          <FailureNotice title={"读取失败"} detail={w.error} retry={() =>
                   void w.refresh().catch((e) => {
                     if (scope.isCurrent()) setFailure(e.message);
-                  })
-                }
-              >{uiText("重试读取")}</Button>
-            }
-          >
-            {w.error}
-          </Banner>
+                  })} retryLabel="重试读取" />
         )}
         {failure && (
-          <Banner tone="bad" title={uiText("重试未完成")}>
-            {failure}
-          </Banner>
+          <FailureNotice title={"重试未完成"} detail={failure} />
         )}
         <EmptyState
           title={uiText(w.loading ? "正在读取准确条目" : "未找到指定报价条目")}
@@ -542,26 +530,13 @@ export function QuotationCostingPage() {
         }
       />
       {w.error && (
-        <Banner
-          tone="bad"
-          title={uiText("读取失败")}
-          actions={
-            <Button
-              onClick={() =>
+        <FailureNotice title={"读取失败"} detail={w.error} retry={() =>
                 void w.refresh().catch((e) => {
                   if (scope.isCurrent()) setFailure(e.message);
-                })
-              }
-            >{uiText("重试读取")}</Button>
-          }
-        >
-          {w.error}
-        </Banner>
+                })} retryLabel="重试读取" />
       )}
       {failure && (
-        <Banner tone="bad" title={uiText("核算未完成")}>
-          {failure}
-        </Banner>
+        <FailureNotice title={"核算未完成"} detail={failure} />
       )}
       {w.pending && !w.saving && (
         <Banner
@@ -573,7 +548,7 @@ export function QuotationCostingPage() {
         >{uiText("核对原请求，不重新保存或写入报价。")}</Banner>
       )}
       {(!can || frozen) && (
-        <Banner title={uiText(can ? "本版本只读" : "没有报价写权限")}>{uiText("审批中、已发送或已转单的报价不能改核算；需要改价时从报价主线建立适用新版本。")}</Banner>
+        <Banner variant="status" title={uiText(can ? "本版本只读" : "没有报价写权限")}>{uiText("审批中、已发送或已转单的报价不能改核算；需要改价时从报价主线建立适用新版本。")}</Banner>
       )}
       {editing && can && !frozen ? (
         <div className="mist-wizard">
@@ -1024,7 +999,7 @@ export function QuotationCostingPage() {
                     disabled={disabled}
                     onChange={setApplyPrice}
                   />
-                  <Banner tone="warn" title={uiText("待业务审批")} />
+                  <Banner variant="status" tone="warn" title={uiText("待业务审批")} />
                 </div>
               </>
             )}

@@ -13,6 +13,7 @@ import type { MistCalendarEvent, MistTarget } from '../../../../server/src/share
 import { useMistWorkspace } from '../runtime/workspace';
 import { useMistSession } from '../runtime/auth';
 import { useNav } from '../nav';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 const dayKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 const parseDay = (date: string) => new Date(`${date}T12:00:00`);
@@ -101,7 +102,7 @@ export function CalendarPage() {
       <Segmented ariaLabel={uiText('视图')} value={mode} onChange={v=>setMode(v as 'week'|'month')} options={[{value:'week',label:'周'},{value:'month',label:'月'}]} />
       <Checkbox label={uiText('只看我的')} checked={mineOnly} onChange={setMineOnly} />
     </Toolbar>
-    {!pending&&(visibleFailure||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("日程操作未完成")} actions={<Button onClick={()=>void retry()}>{uiText("重试读取")}</Button>}>{visibleFailure||error}</Banner></div>}
+    {!pending&&(visibleFailure||error)&&<FailureNotice title={"日程操作未完成"} detail={visibleFailure||error} retry={()=>void retry()} retryLabel="重试读取" />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("核对原请求后再继续保存。")}</Banner></div>}
     <Card>
       <CardHeader title={uiText(parseDay(selected).toLocaleDateString(interfaceLocale(),{year:'numeric',month:'long',day:'numeric',weekday:'long'}))} tools={<span className="mist-muted">{events.length}{uiText(" 项安排")}</span>} />

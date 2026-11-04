@@ -5,6 +5,7 @@ import {uiText,interfaceLocale} from '../../../../services/interfaceLanguage';
 import {useMistSession} from '../runtime/auth';
 import {mistApiRequest,useMistWorkspace} from '../runtime/workspace';
 import type {AgentConnectionView,AgentConnectionPage} from '../../../../server/src/shared/mistAgentConnections';
+import { FailureNotice } from '../runtime/FailureNotice';
 const stamp=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 type Action={kind:'create';id:string;name:string;mode:'read'|'operate'}|{kind:'renew'|'revoke';row:AgentConnectionView;requestId:string};
 type Issued={connection:AgentConnectionView;delegation:{token:string;expiresAt:string}};
@@ -34,7 +35,7 @@ export function ConnectionList({workspaceId,endpoint}:{workspaceId:string;endpoi
  const expired=!!issued&&Date.parse(issued.delegation.expiresAt)<=clock;
  return <div className="mist-col">
   <div className="mist-row" data-wrap><Button icon={RefreshCw} disabled={loading} onClick={()=>void load()}>{uiText('刷新')}</Button>{canConnect&&<Button variant="primary" icon={Plus} onClick={()=>begin({kind:'create',id:crypto.randomUUID(),name:'',mode:'read'})}>{uiText('新建连接')}</Button>}</div>
-  {error&&<Banner tone="bad" title={uiText('连接读取失败')}>{uiText(error)} <Button onClick={()=>void load()}>{uiText('重试')}</Button></Banner>}
+  {error&&<FailureNotice title="连接读取失败" detail={error} retry={()=>void load()} />}
   <DataTable ariaLabel={uiText('Agent 连接')} rows={rows} rowKey={r=>r.id} loading={loading&&!rows.length} minWidth={300} columns={[
    {key:'name',header:uiText('连接'),width:'minmax(120px,2fr)',render:r=>{const state=r.state==='active'&&Date.parse(r.expiresAt)<=clock?'expired':r.state;return <div><div className="mist-row" data-wrap><span>{r.name}</span><Pill tone={state==='active'?'ok':'neutral'}>{uiText(state==='active'?'有效':state==='expired'?'已过期':state==='invalid'?'已失效':'已撤销')}</Pill></div><span className="mist-note">{uiText(r.mode==='read'?'只读':'可办理')} · {uiText('到期')} {stamp(r.expiresAt)}</span></div>;}},
    {key:'actions',header:uiText('操作'),width:'130px',render:r=>r.state==='revoked'?null:<div className="mist-row" data-wrap>{canConnect&&<Button size="sm" onClick={()=>begin({kind:'renew',row:r,requestId:crypto.randomUUID()})}>{uiText('续签')}</Button>}<Button size="sm" onClick={()=>begin({kind:'revoke',row:r,requestId:crypto.randomUUID()})}>{uiText('撤销')}</Button></div>},

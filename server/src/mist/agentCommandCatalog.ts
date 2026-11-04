@@ -1028,7 +1028,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "fulfillment.samples.move",
-  "payload": "{ id: string; kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory'; sendPurpose?:SampleSendPurpose; trackingNo?: string; carrier?: string; destination?: string; fee?: { amount: number; currency: string }; quantity: number; person: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
+  "payload": "{ id: string; kind: 'lend' | 'return' | 'send' | 'move' | 'scrap' | 'returnFactory'; sendPurpose?:SampleSendPurpose; trackingNo?: string; carrier?: string; destination?: string; fee?: { amount: number; currency: string }; quantity: number; person: string; /** Company borrower account; display name is resolved server-side. */ borrowerId?: string; location: string; note: string; loanId?: string; expectedReturn?: string; sourceLocation?: string; }",
   "types": {
    "SampleSendPurpose": "'confirmation'|'testing'|'rework'|'other'"
   },
@@ -1301,11 +1301,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
  },
  {
   "type": "market.lead.save",
-  "payload": "{id?:string;input:Omit<Input<MarketLead>,'convertedAt'>}",
+  "payload": "{id?:string;input:Omit<Input<MarketLead>,'convertedAt'|'communication'|'followUps'>}",
   "types": {
    "Input": "Omit<T,keyof RecordBase|'status'> & {fileIds?:string[];note?:string}",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }",
-   "MarketLead": "RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string }"
+   "MarketLead": "RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string; communication?:{actor:string;actorId?:string;at:string}; followUps?:Array<{at:string;actor:string;actorId?:string;status:string;note:string}> }"
   },
   "source": "server/src/shared/mistMarket.ts"
  },
@@ -1313,7 +1313,7 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "type": "market.lead.transition",
   "payload": "{id:string;status:MarketLead['status'];customerId?:string;actualValue?:string;note:string}",
   "types": {
-   "MarketLead": "RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string }",
+   "MarketLead": "RecordBase & { ownerId?:string; owner?:string; name:string; company:string; email:string; phone:string; demand:string; source:'campaign'|'show'; parentId:string; customerId:string; status:'New'|'Contacted'|'Qualified'|'Following'|'Converted'|'Lost'; followUpDate:string; estimatedValue:string; actualValue:string; currency:string; convertedAt:string|null; opportunityId?:string; communication?:{actor:string;actorId?:string;at:string}; followUps?:Array<{at:string;actor:string;actorId?:string;status:string;note:string}> }",
    "RecordBase": "{ id:string; createdAt:string; updatedAt:string; fileIds:string[]; note:string }"
   },
   "source": "server/src/shared/mistMarket.ts"

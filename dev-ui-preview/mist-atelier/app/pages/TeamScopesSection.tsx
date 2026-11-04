@@ -9,6 +9,7 @@ import { uiText } from '../../../../services/interfaceLanguage';
 import type { MistTeamScope, TeamScopeNodeKind, TeamScopePreview, TeamScopeRef } from '../../../../server/src/shared/mistTeamScope';
 import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
 import { businessWhen } from './modules/pageKit';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 type Row = { id: string; name: string; scope: MistTeamScope | null; counts: Record<TeamScopeNodeKind, number> | null };
 type Condition = { customerId: string; line: string; season: string; supplierId: string };
@@ -78,7 +79,7 @@ export function TeamScopesSection({ canEdit, initialTeamId, onReturnToTeam }: { 
     {onReturnToTeam && team && <Button variant="quiet" size="sm" onClick={() => onReturnToTeam(team.id)}>{uiText('返回小组')}</Button>}
     <FormSection title={uiText('小组范围')}>
       {rows === null && <Skeleton height={64} />}
-      {error && <Banner tone="bad" title={uiText(error)} actions={<Button size="sm" onClick={() => void load()}>{uiText('重新读取')}</Button>} />}
+      {error && <FailureNotice title="小组范围读取失败" detail={error} retry={() => void load()} retryLabel="重新读取" />}
       {rows && !rows.length && !error && <p className="mist-note">{uiText('本公司还没有在用的小组。')}</p>}
       {rows?.map(row => <SettingRow key={row.id} title={uiText(row.name)} description={uiText(countText(row.counts))}
         control={<Button size="sm" aria-pressed={row.id === teamId} variant={row.id === teamId ? 'secondary' : 'quiet'} onClick={() => edit(row)}>{uiText(canEdit ? '调整范围' : '查看范围')}</Button>} />)}

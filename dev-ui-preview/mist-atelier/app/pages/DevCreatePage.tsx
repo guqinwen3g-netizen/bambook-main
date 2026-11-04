@@ -17,6 +17,7 @@ import { DevSampleModeChoice, DevStageChainEditor, emptyStagePlan } from './DevS
 import { devStageChainText, devStagePlanError, devStagesOf } from '../../../../server/src/shared/mistDevelopmentStages';
 import { businessNow } from '../runtime/businessClock';
 import { CURRENCIES, FABRIC_CATEGORIES, FABRIC_PRICE_UNITS, FABRIC_SAMPLE_FORMS, FINISHES, GARMENT_CATEGORIES, WEAVES, WEIGHT_UNITS, WIDTH_UNITS, sampleFormUnit, seasonOptions } from '../runtime/tradeOptions';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 const STEPS = [{id:'basic',label:'基本信息'},{id:'style',label:'款式与面料'},{id:'plan',label:'工厂与计划'},{id:'files',label:'附件'},{id:'review',label:'确认提交'}];
 type DevelopmentFormValues = Omit<DevelopmentValues,'collaborators'|'sampleQuantity'> & {collaborators:string;sampleQuantity:string};
@@ -119,7 +120,7 @@ export function DevCreatePage(){
   return <MistPage>
     <BackLink onClick={back}>{uiText(route.customerId?'返回客户档案':'开发与寻样')}</BackLink>
     <PageHeader eyebrow={ui`订单履约 · ${fabricDomain?'面料开发':'成衣开发'}`} title={uiText(draftId?'继续开发草稿':fabricDomain?'新建面料开发案':'新建成衣开发案')} actions={<Button variant="quiet" loading={busy} disabled={!state} onClick={()=>void save(false)}>{uiText("存为草稿")}</Button>} />
-    {(message||error)&&<div className="mist-section"><Banner tone="bad" title={uiText("暂时无法保存")}>{message||error}</Banner></div>}
+    {(message||error)&&<FailureNotice title={"暂时无法保存"} detail={message||error} />}
     {pending&&!saving&&<div className="mist-section"><Banner tone="warn" title={uiText("原操作结果尚待核对")} actions={recovery}>{uiText("请先核对已发出的请求，避免重复创建。")}</Banner></div>}
     <div className="mist-wizard">
       <VerticalSteps steps={steps.map(item=>({...item,done:done[item.id]}))} current={step} onSelect={id=>{if(busy)return;setStep(id);setTouched(false);}} />

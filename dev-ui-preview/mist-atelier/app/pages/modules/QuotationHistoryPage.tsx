@@ -28,6 +28,7 @@ import { useRouteScope } from "./useRouteDraft";
 import { downloadModuleCsv } from "./ModuleWorkbench";
 import { quotationStageLabel } from "./QuotationsPage";
 import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 import {
   QUOTE_FEEDBACK_KINDS,
   QUOTE_FEEDBACK_REASONS,
@@ -108,13 +109,7 @@ export function QuotationHistoryPage() {
       <MistPage>
         <PageHeader title={uiText("历史报价条件对照")} />
         {w.error && (
-          <Banner
-            tone="bad"
-            title={uiText("读取未完成")}
-            actions={<Button onClick={() => void retry()}>{uiText("重试读取")}</Button>}
-          >
-            {w.error}
-          </Banner>
+          <FailureNotice title={"读取未完成"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
         )}
         <EmptyState
           title={uiText("未找到指定报价条目")}
@@ -122,9 +117,7 @@ export function QuotationHistoryPage() {
           action={<Button onClick={back}>{uiText("返回报价")}</Button>}
         />
         {failure && (
-          <Banner tone="bad" title={uiText("读取失败")}>
-            {failure}
-          </Banner>
+          <FailureNotice title={"读取失败"} detail={failure} />
         )}
       </MistPage>
     );
@@ -321,18 +314,10 @@ export function QuotationHistoryPage() {
       />
       <Banner title={uiText("人工证据对照，不是推荐报价")}>{uiText("只读取当前授权公司；列表客户名称沿当前档案显示，不冒充历史冻结名称。默认同客户、同来源标识、同币种同单位；标识相同不代表规格与商业条件相同。草稿及审批中记录不作为已对客历史，本次整份报价不列入候选。不自动取均价、换算、复制价格或推算客户承受区间；税费、MOQ、品质、交期及其他费用仍需从原始依据人工核对。")}</Banner>
       {w.error && (
-        <Banner
-          tone="bad"
-          title={uiText("历史读取未完成")}
-          actions={<Button onClick={() => void retry()}>{uiText("重试读取")}</Button>}
-        >
-          {w.error}
-        </Banner>
+        <FailureNotice title={"历史读取未完成"} detail={w.error} retry={() => void retry()} retryLabel="重试读取" />
       )}
       {failure && (
-        <Banner tone="bad" title={uiText("读取失败")}>
-          {failure}
-        </Banner>
+        <FailureNotice title={"读取失败"} detail={failure} />
       )}
       <Card>
         <CardHeader title={uiText("本次准确条目")} sub={uiText(name(q.customerId))} />

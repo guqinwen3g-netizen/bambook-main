@@ -5,8 +5,8 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
  * 旧地址（system-settings / admin-panel 及其分区）仍打开本页对应分区；各分区按本人权限出现，服务端照常复核。
  */
 import React from 'react';
-import { Bell,Bot, Briefcase, History, Landmark, Laptop, RefreshCw, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
-import { Banner, Button, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
+import { Bell, Bot, Briefcase, History, Landmark, Laptop, ScrollText, ShieldCheck, Stamp, Users, UsersRound } from 'lucide-react';
+import { Banner, Card, DataTable, EmptyState, Field, FormGrid, FormSection, MistPage, PageHeader, Select, SettingRow, Skeleton, Switch, TextInput, VerticalSteps, useToast } from '../../../../components/mist';
 import type { MistCompanyProfile, MistSettings } from '../../../../server/src/shared/mistWorkspace';
 import { View } from '../../../../types';
 import { useMistSession } from '../runtime/auth';
@@ -20,6 +20,7 @@ import { AdminApprovalAuthorities } from './modules/AdminApprovalAuthorities';
 import { LocalAdminPanel } from './modules/LocalAdminPanel';
 import { ExporterProfilePanel } from './modules/ExporterProfilePanel';
 import {AgentIdentities} from './AgentIdentities';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 type TextKey = 'workspaceName';
 type TextValues = Pick<MistSettings, TextKey>;
@@ -117,8 +118,8 @@ export function SettingsPage() {
   return (
     <MistPage>
       <PageHeader title={uiText("公司管理")} />
-      {workspaceSection && (error || workspace.error) && <Banner tone="bad" title={uiText(error || workspace.error)} actions={<Button size="sm" icon={RefreshCw} onClick={() => { setError(''); void workspace.refresh(); }}>{uiText("重新读取")}</Button>} />}
-      {!sec ? <Banner tone="neutral" title={uiText("当前账号没有公司管理权限")} /> : <div className="mist-wizard">
+      {workspaceSection && (error || workspace.error) && <FailureNotice title="设置未完成" detail={error || workspace.error} retry={() => { setError(''); void workspace.refresh(); }} retryLabel="重新读取" />}
+      {!sec ? <Banner variant="status" tone="neutral" title={uiText("当前账号没有公司管理权限")} /> : <div className="mist-wizard">
         <VerticalSteps mode="page" current={sec} onSelect={id => setChosen(id as CompanySection)} steps={steps} />
         <div className="mist-col" style={{ minWidth: 0 }}>
           {sec === 'accounts' && <AdminAccounts />}
@@ -129,7 +130,7 @@ export function SettingsPage() {
           {sec === 'local' && <LocalAdminPanel embedded />}
           {workspaceSection && <Card>
             {!settings || !values ? <FormSection title={uiText("正在读取设置")}><Skeleton height={120} /></FormSection> : <>
-            {member && sec === 'notify' && <Banner tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看。")}</Banner>}
+            {member && sec === 'notify' && <Banner variant="status" tone="neutral" title={uiText("公司设置由管理人员维护")}>{uiText("这些设置作用于整个公司，当前账号只能查看。")}</Banner>}
             {sec === 'profile' && <FormSection title={uiText("公司基本设置")}>
             <FormGrid><Field label={uiText("名称")}><TextInput aria-label={uiText("公司显示名称")} value={values.workspaceName} disabled={settingsLocked} onChange={event => edit('workspaceName', event.target.value)} onBlur={() => saveField('workspaceName')} /></Field><Field label={uiText("默认币种")} hint={uiText("用于新建资料；客户与来源单据的币种优先")}><Select aria-label={uiText("默认币种")} disabled={settingsLocked} value={settings.companyProfile?.defaultCurrency||'USD'} options={[...new Set(['USD','EUR','CNY','GBP','HKD',settings.companyProfile?.defaultCurrency||'USD'])]} onChange={event=>saveCurrency(event.target.value)} /></Field>
             </FormGrid>

@@ -244,7 +244,7 @@
 .mist-banner[data-variant="notice"][data-tone="neutral"]::before { background: var(--mist-ink-4); }
 .mist-banner[data-variant="notice"][data-tone="neutral"] > .mist-icon { color: var(--mist-ink-3); }
 .mist-banner[data-variant="notice"] p { color: var(--mist-ink-2); }
-.mist-card > .mist-banner[data-variant="notice"], .mist-card-body > .mist-banner[data-variant="notice"] { background: var(--mist-card-2); }
+.mist-card > .mist-banner[data-variant="notice"], .mist-card-body > .mist-banner[data-variant="notice"], .mist-dialog-body .mist-banner[data-variant="notice"], .mist-drawer-body .mist-banner[data-variant="notice"] { background: var(--mist-card-2); }
 /* status: the record's current state as one line under the title. Only the dot carries the tone. */
 .mist-status-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-height: 28px; font-size: var(--mist-text-md); color: var(--mist-ink); }
 .mist-status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--mist-accent); }

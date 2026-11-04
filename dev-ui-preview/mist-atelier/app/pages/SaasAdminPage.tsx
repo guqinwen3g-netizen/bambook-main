@@ -6,6 +6,7 @@ import { Banner, Button, Card, CardHeader, DataTable, Dialog, Drawer, EmptyState
 import { useNav } from '../nav';
 import { useMistSession } from '../runtime/auth';
 import { enterCompanyManagement, platformAdminApi, type Invitation, type PlatformCompany, type PlatformMember, type CompanyDraft } from '../runtime/platformAdmin';
+import { FailureNotice } from '../runtime/FailureNotice';
 const statuses=[{value:'active',label:'运行中'},{value:'suspended',label:'已暂停'},{value:'closed',label:'已关闭'}];
 const statusLabel=(value:string)=>statuses.find(s=>s.value===value)?.label??value;
 const message=(e:unknown)=>e instanceof Error?e.message:'操作未完成，请重试。';
@@ -49,7 +50,7 @@ export function SaasAdminPage(){
  return <MistPage width="wide"><PageHeader eyebrow={uiText("平台运营")} title={uiText("平台管理")} actions={<><Button onClick={()=>nav?.go('system-settings')}>{uiText("平台设置")}</Button><Button variant="primary" icon={Plus} onClick={()=>{setFormError('');setDraft(blank);setCreating(true);}}>{uiText("开通公司")}</Button></>}/>
   <StatGrid><StatCard icon={Building2} label={uiText("公司")} value={companies.length}/><StatCard icon={ShieldCheck} label={uiText("运行中")} value={companies.filter(c=>c.status==='active').length}/><StatCard icon={Users} label={uiText("有效成员归属")} value={companies.reduce((n,c)=>n+c.members,0)}/></StatGrid>
   <Toolbar right={<Button icon={RefreshCw} loading={loading} onClick={()=>void reload()}>{uiText("刷新")}</Button>}><TextInput aria-label={uiText("搜索公司")} placeholder={uiText("搜索公司名称或标识")} value={query} onChange={e=>setQuery(e.target.value)}/><Select aria-label={uiText("公司状态")} value={filter} onChange={e=>setFilter(e.target.value)} options={[{value:'all',label:'全部状态'},...statuses]}/></Toolbar>
-  {error&&<Banner tone="bad" title={uiText("读取公司失败")}>{uiText(error)}</Banner>}
+  {error&&<FailureNotice title={"读取公司失败"} detail={error} />}
   <Card><DataTable ariaLabel={uiText("公司列表")} rows={visible} rowKey={c=>c.id} loading={loading} selectedKey={selected} onRowClick={c=>setSelected(c.id)} columns={[{key:'seats',header:'席位',render:c=>c.seatLimit===null?`${c.members} / 不限`:<span className={c.members>=c.seatLimit?'mist-tone-warn':undefined}>{c.members} / {c.seatLimit}</span>},{key:'name',header:'公司',render:c=><><b>{c.name}</b><div className="mist-caption"><Mono>{c.slug}</Mono></div></>},{key:'status',header:'状态',render:c=><Pill tone={c.status==='active'?'ok':c.status==='suspended'?'warn':'neutral'}>{statusLabel(c.status)}</Pill>},{key:'plan',header:'服务方案',render:c=>c.plan==='standard'?'标准服务':c.plan},{key:'members',header:'成员 / 席位',render:c=>`${c.members} / ${c.seatLimit??'不限'}`},{key:'action',header:'',render:c=><Button size="sm" onClick={()=>setSelected(c.id)} aria-label={uiText('管理'+c.name)}>{uiText("管理")}</Button>}]} empty={<EmptyState title={uiText(query||filter!=='all'?'没有匹配的公司':'尚未开通公司')} description={uiText(query||filter!=='all'?'调整搜索条件后重试。':'开通公司后，在这里管理成员归属与服务状态。')}/>}/></Card>
   <Drawer open={!!company} onClose={()=>{if(!busy)setSelected(null);}} title={uiText(company?.name??'公司管理')} sub={uiText(company?.slug)} size="lg">
    {company&&<div className="mist-col">{formError&&<Banner tone="bad" title={uiText("操作未完成")}>{formError}</Banner>}

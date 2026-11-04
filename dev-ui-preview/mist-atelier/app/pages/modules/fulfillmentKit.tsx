@@ -14,6 +14,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ModuleEditorDialog, ModuleEditorPage, downloadModuleCsv, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
 import { FileName } from '../../runtime/files';
 import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 export const documentTypeLabel = (type: FulfillmentDocument['type']) => type === 'OTHER' ? uiText('其他') : type;
 export const today = businessToday;
 export const localNow = () => { const d = businessNow(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
@@ -101,7 +102,7 @@ export function RecordFiles({ ids, onAttach }: {
   };
   return <div className="mist-section">
     {owned && !saving && <Banner tone="warn" title={uiText("附件上传结果待核对")} actions={<Button disabled={busy} onClick={() => void verify()}>{uiText("核对并关联")}</Button>}>{uiText(failure || '核对后关联到本记录，不会重复上传。')}</Banner>}
-    {failure && !owned && <Banner tone="bad" title={uiText("附件未完成保存")}>{failure}</Banner>}
+    {failure && !owned && <FailureNotice title={"附件未完成保存"} detail={failure} />}
     {ids.map(id => { const f = state?.files.find(f => f.id === id); return f ? <div className="mist-row" key={id}><FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /><TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink></div> : null; })}
     {onAttach && <UploadZone hint={uiText("上传当前记录的原始照片或附件")} onFiles={files => { if (!busy && !saving && (!pending || owned)) void add(files); }}/>}
     {!!staged.length && <Button disabled={busy || saving || !!pending} onClick={() => void add([])}>{uiText("重试关联已上传附件")}</Button>}
@@ -111,7 +112,7 @@ export function RecordFiles({ ids, onAttach }: {
 export function DraftFiles({ ids, onChange, onBusyChange, disabled, hint = '上传报价单、邮件截图等原始凭据', max = 20 }: { ids: string[]; onChange: (ids: string[]) => void; onBusyChange?: (busy: boolean) => void; disabled?: boolean; hint?: string; max?: number }) {
     const { state, uploadFile, downloadFile } = useMistWorkspace(); const [failure, setFailure] = React.useState(''), [busy, setBusy] = React.useState(false);
     const add = async (files: File[]) => { if (ids.length + files.length > max) { setFailure(`附件不得超过 ${max} 个`); return; } setBusy(true); onBusyChange?.(true); setFailure(''); const added: string[] = []; try { for (const file of files) added.push((await uploadFile(file)).id); } catch (e) { setFailure(e instanceof Error ? e.message : '附件上传失败'); } finally { setBusy(false); onBusyChange?.(false); if (added.length) onChange([...ids, ...added]); } };
-    return <div className="mist-col" style={{ gap: 6 }}>{failure && <Banner tone="bad" title={uiText("附件未上传")}>{failure}</Banner>}
+    return <div className="mist-col" style={{ gap: 6 }}>{failure && <FailureNotice title={"附件未上传"} detail={failure} />}
         {ids.map(id => { const f = state?.files.find(file => file.id === id); return <div className="mist-row" key={id}>{f ? <FileName file={f} files={ids.map(x => state?.files.find(y => y.id === x))} /> : <span>{uiText("附件已不可见")}</span>}{f && <TextLink icon={Download} onClick={() => void downloadFile(f).catch(e => setFailure(String(e)))}>{uiText("下载")}</TextLink>}{!disabled && <TextLink onClick={() => onChange(ids.filter(x => x !== id))}>{uiText("移除")}</TextLink>}</div>; })}
         {!disabled && <UploadZone hint={uiText(busy ? '正在上传…' : hint)} onFiles={files => { if (!busy) void add(files); }} />}</div>;
 }

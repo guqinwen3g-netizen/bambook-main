@@ -1,3 +1,4 @@
+import { sampleLoanRemaining } from '../../../../server/src/shared/mistFulfillment';
 import { uiText, ui, localizedPageTitle } from '../../../../services/interfaceLanguage';
 import { isPendingFinanceMistInvoice, mistFxLockUsage, mistMoneyMinor, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
@@ -218,17 +219,34 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     if (remaining <= 0) continue;
     push({id:'fx-lock:'+lock.id,source:'finance',title:`${lock.ref} · ${remaining.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} ${lock.currency}`,meta:lock.bankName,when:lock.settleBy || '',urgent:!!lock.settleBy && lock.settleBy <= addDays(today,3),at:lock.createdAt,due:lock.settleBy,target:{view:'payment-vouchers',id:lock.id,section:'accounts'}});
   }
+  if (me && canRead('samples')) for (const loan of f.sampleMovements || []) {
+    if (loan.kind !== 'lend' || sampleLoanRemaining(state, loan.id) <= 0) continue;
+    // Legacy name-only loans are matched only when the company member list is unambiguous.
+    const members = (state.members || []).filter(member => member.name === loan.person);
+    const borrowerId = loan.borrowerId ?? (members.length === 1 ? members[0].userId : '');
+    if (borrowerId !== me) continue;
+    const sample = f.samples.find(sample => sample.id === loan.sampleId);
+    if (!sample) continue;
+    push({ id: 'sample-return:' + loan.id, source: 'task', title: sample.name, meta: `${sampleLoanRemaining(state, loan.id)} ${sample.unit}`, when: '待归还', urgent: !!loan.expectedReturn && loan.expectedReturn < today,
+      at: loan.at, due: loan.expectedReturn, target: { view: 'samples', id: sample.id, detail: 'full' } });
+  }
   if (canRead('qc-workbench')) for (const task of state.fulfillment.qcTasks) {
     // 待认领/检验中只给专业 QC（qc:inspect，且有该业务线登记权）；业务主管虽有登记权但不是检验岗。
     const qcRole = can('qc:inspect') && can(`qc:${task.domain}_chain:write`), business = can('orders:write');
     const open = qcRole && task.state === 'pending', working = qcRole && task.state === 'working' && !!me && task.assigneeId === me;
-    const sampleBack = business && task.kind === 'sample' && task.state === 'reported' && !sampleBusinessFinished(state, task)
+    const source = task.source;
+    const version = source.kind === 'version' ? state.versions.find(version => version.id === source.versionId && version.devId === source.devId) : undefined;
+    const dev = source.kind === 'version' ? state.devs.find(dev => dev.id === source.devId) : undefined;
+    const rejectedSample = business && !!me && task.kind === 'sample' && source.kind === 'version' && task.state === 'blocked'
+      && state.fulfillment.qcReports.some(report => report.id === task.reportIds.at(-1) && report.result === 'reject')
+      && !!version && !version.qcDecision && !version.archivedAt && !!dev && !dev.closure && dev.ownerId === me && canRead('development');
+    const sampleBack = rejectedSample || business && task.kind === 'sample' && task.state === 'reported' && !sampleBusinessFinished(state, task)
       && (task.source.kind !== 'version' || canRead('development'));
     const productionBack = business && (task.kind === 'production' || task.kind === 'patrol') && (task.state === 'awaiting_business' || task.state === 'blocked');
     // A reported incoming lot waits for the warehouse to release or reject it.
     const incomingBack = can('inventory:write') && task.kind === 'incoming' && !!task.incoming && !task.incoming.releasedAt && (task.state === 'reported' || task.state === 'blocked');
     if (!open && !working && !sampleBack && !productionBack && !incomingBack) continue;
-    const what = open ? '待认领' : working ? '检验中' : incomingBack ? (task.state === 'blocked' ? '来料不合格，待登记拒收' : '来料待放行入库') : task.kind === 'sample' ? task.source.kind === 'orderLine' && task.businessConfirmation?.result === 'approved' ? '待业务确认' : '待需求方确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
+    const what = open ? '待认领' : working ? '检验中' : rejectedSample ? '检验不通过，待业务决定' : incomingBack ? (task.state === 'blocked' ? '来料不合格，待登记拒收' : '来料待放行入库') : task.kind === 'sample' ? task.source.kind === 'orderLine' && task.businessConfirmation?.result === 'approved' ? '待业务确认' : '待需求方确认' : task.state === 'blocked' ? '检验不通过，待业务决定' : '检验结果待业务确认';
     push({ id: 'qc:' + task.id, source: 'qc', title: `${task.code} · ${uiText(what)}`, meta: [task.factory, task.requestedBy && uiText('发起人') + ' ' + task.requestedBy].filter(Boolean).join(' · '),
       when: task.state === 'blocked' ? '已阻断' : open ? '待认领' : working ? '处理中' : '待确认', urgent: task.state === 'blocked' || (!!task.due && task.due <= today), at: task.due || task.createdAt, due: task.due || undefined,
       target: sampleBack && task.source.kind === 'version' ? { view: 'development/detail', id: task.source.devId, versionId: task.source.versionId } : { view: 'qc-workbench', id: task.id } });

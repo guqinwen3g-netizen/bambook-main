@@ -35,3 +35,19 @@ describe('mistNavCounts', () => {
     expect(mistNavCounts(null, { canRead: () => true, me: 'u1', today: '2026-10-17' })).toEqual({});
   });
 });
+
+describe('sample handoff counts', () => {
+  it('uses the same owner, return and permission rules as 我的工作', () => {
+    const state = { ...base, devs: [{ id: 'd', ownerId: 'u1' }], versions: [{ id: 'v', devId: 'd', confirmations: [] }],
+      fulfillment: { qcTasks: [{ id: 'q', code: 'QC', source: { kind: 'version', devId: 'd', versionId: 'v' }, kind: 'sample', domain: 'fabric', state: 'blocked', reportIds: ['r'] }], qcReports: [{ id: 'r', result: 'reject' }], shipments: [],
+        samples: [{ id: 's', name: '样布', unit: '米' }], sampleMovements: [{ id: 'loan', kind: 'lend', sampleId: 's', quantity: 2, borrowerId: 'u1', expectedReturn: '2026-10-14' }] } } as any;
+    const options = { canRead: () => true, can: p => p === 'orders:write', me: 'u1', today: '2026-10-15' };
+    expect(mistNavCounts(state, options)).toEqual({ cockpit: 2, development: 1, samples: 1 });
+    expect(mistNavCounts(state, { ...options, me: 'other' })).toEqual({});
+    expect(mistNavCounts(state, { ...options, canRead: v => v !== 'samples' && v !== 'development' })).toEqual({});
+    state.versions[0].qcDecision = { kind: 'resample' };
+    expect(mistNavCounts(state, options)).toEqual({ cockpit: 1, samples: 1 });
+    state.fulfillment.sampleMovements.push({ id: 'return', kind: 'return', sampleId: 's', loanId: 'loan', quantity: 2 });
+    expect(mistNavCounts(state, options)).toEqual({});
+  });
+});

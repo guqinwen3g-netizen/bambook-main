@@ -9,6 +9,7 @@ import { useMistSession } from '../runtime/auth';
 import { useNav } from '../nav';
 import { AgentIdentities } from './AgentIdentities';
 import { agentConnectionEndpoint } from './AgentConnections';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 const LABEL:Record<AgentTaskView['state'],string>={queued:'待领取',running:'执行中',waiting_time:'等待继续',waiting_condition:'等待资料变化',waiting_human:'待本人确认',paused:'已暂停',succeeded:'执行结束',failed:'执行失败',cancelled:'已停止',expired:'已到期',budget_exhausted:'达到限额',access_changed:'权限已变化'};
 const ACTION:Record<string,string>={created:'安排任务',connected:'签发任务连接',claimed:'执行器领取',checkpoint:'保存检查点',waiting_human:'等待本人确认',question:'请求补充资料',waiting_time:'等待约定时间',waiting_condition:'等待资料变化',condition_changed:'资料已变化',condition_deadline:'到达最晚时间',answered:'本人补充资料',model_retry:'模型重试',model_paused:'模型已暂停',recovering:'等待接续',confirmed:'本人确认',rejected:'本人拒绝',pause:'暂停任务',resume:'继续任务',cancel:'停止任务',finished:'执行结束'};
@@ -78,9 +79,9 @@ function TaskPanel({workspaceId,onConnections}:{workspaceId:string;onConnections
  </div>;
  return <div className="mist-col">
   <div className="mist-row"><span className="mist-spacer"/><Button icon={RefreshCw} disabled={loading||busy} onClick={()=>void currentLoad.current()}>{uiText('刷新')}</Button><Button variant="primary" icon={Plus} disabled={busy||loading||!active.length} title={uiText(aiUnavailable?'当前无AI使用权限':!active.length?'请先启用Agent连接':undefined)} onClick={()=>begin({kind:'create',requestId:crypto.randomUUID(),identityId:'',name:'',instructions:'',executor:'external'})}>{uiText('新建任务')}</Button></div>
-  {error&&<Banner tone="bad" title={error}/>}<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r)} empty={<EmptyState icon={Bot} title={uiText(active.length?'暂无任务':'暂无可用的Agent连接')} action={!active.length?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />
+  {error&&<FailureNotice title="任务读取失败" detail={error} />}<DataTable ariaLabel={uiText('Agent任务')} loading={loading} columns={columns} rows={page.items} rowKey={r=>r.id} onRowClick={r=>void openDetail(r)} empty={<EmptyState icon={Bot} title={uiText(active.length?'暂无任务':'暂无可用的Agent连接')} action={!active.length?<Button onClick={onConnections}>{uiText('管理连接')}</Button>:undefined}/>} />
   {page.nextCursor&&<Button onClick={()=>void load(true)}>{uiText('加载更多')}</Button>}
-  {detailError&&<Banner tone="bad" title={detailError}/>}
+  {detailError&&<FailureNotice title="任务详情读取失败" detail={detailError} />}
   <Drawer open={!!detail||opening} onClose={()=>{detailGeneration.current++;setDetail(null);setOpening(false);if(routeTaskId)nav.go('account',undefined,{section:'agents'});}} title={detail?.name??uiText('任务')} footer={detail&&detail.canControl?control(detail):undefined}>
    {opening&&!detail&&<Skeleton/>}
    {detail&&<div className="mist-col"><div className="mist-row"><Pill tone={tone(detail.state)}>{uiText(statusLabel(detail))}</Pill></div>
