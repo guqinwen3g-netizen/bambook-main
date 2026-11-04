@@ -306,7 +306,7 @@ function StockDetail({ stock, issueBlocker, state, can, locked, canClaims, canQc
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{stockName(state, stock)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STATE_TONE[current]}>{STATE_LABEL[current]}</Pill><Pill>{uiText(returned ? '退货入库' : other ? OTHER_RECEIPT_REASONS[stock.otherReceipt!.reason] : '采购交付入库')}</Pill>{current === 'available' && age > SLOW_DAYS && <Pill tone="warn">{uiText(`呆滞 ${age} 天`)}</Pill>}{counting && <Pill tone="warn">{uiText('盘点待审批')}</Pill>}{domain && <Pill>{uiText(domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill>}{out > 0 && <Pill>{uiText("已出库 ")}{out} {uiText(stock.unit)}</Pill>}</div>
-    {(!isRepair||!repair&&!dispatch&&!unrecorded)&&<Banner tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>}
+    {(!isRepair||!repair&&!dispatch&&!unrecorded)&&<Banner variant="status" tone={next.tone} title={uiText(next.title)}>{next.text}</Banner>}
     <ActionBar busy={locked} actions={[
       { label: '登记出库', icon: PackageMinus, onClick: () => onMove('issue'), primary: !returned && stock.available > 0, reason: writeReason || (returned ? returnedReason : stock.available <= 0 ? '当前没有可用数量' : issueBlocker || false), hidden: returned },
       { label: '按原出库退回', icon: Undo2, onClick: () => onMove('return'), primary: !returned && stock.available <= 0 && openIssues.some(m=>!m.shipmentLink&&!m.shipmentCorrectionHold), reason: writeReason || (!openIssues.some(m=>!m.shipmentLink&&!m.shipmentCorrectionHold) ? '没有可退回的出库' : false), hidden: returned },

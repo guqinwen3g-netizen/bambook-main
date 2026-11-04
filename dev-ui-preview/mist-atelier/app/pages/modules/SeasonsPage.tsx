@@ -12,7 +12,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
-import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
+import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, businessWhen, shortWhen, useListDetailRoute } from './pageKit';
 import { quotationStage } from './QuotationsPage';
 import { CURRENCIES } from '../../runtime/tradeOptions';
 import { FailureNotice } from '../../runtime/FailureNotice';
@@ -261,6 +261,7 @@ function ShowDetail({ x, leads, day, season, can, canCrm, locked, onEdit, onLead
           {l.status === 'Converted' && <Button variant="quiet" onClick={() => onOpen('crm', l.customerId, { customerId: l.customerId })}>{uiText("客户业务")}{uiText(l.opportunityId ? ' · 商机' : '')}</Button>}
         </div>
         {l.note && <small className="mist-note" style={{ whiteSpace: 'pre-line' }}>{l.note}</small>}
+        {!!l.followUps?.length && <div className="mist-col" style={{ gap: 2 }} data-lead-followups>{l.followUps.map((f, i) => <small key={i} className="mist-note">{f.actor} · {businessWhen(f.at)} · {uiText(LEAD_STATUS[f.status as MarketLead['status']]?.label || f.status)}{f.note ? ' · ' + f.note : ''}</small>)}</div>}
       </div>; })}</div> : <span className="mist-muted">{uiText("还没有线索。展会现场交换的名片可在这里录入。")}</span>}
       {!canCrm && <span className="mist-note">{uiText("转入 CRM 需要客户关系写权限。")}</span>}
     </DetailBlock>

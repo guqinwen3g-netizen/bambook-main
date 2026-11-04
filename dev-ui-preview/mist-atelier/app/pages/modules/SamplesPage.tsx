@@ -13,6 +13,7 @@ import { developmentDomain } from '../../../../../server/src/shared/mistDevelopm
 import type { MistState } from '../../../../../server/src/shared/mistWorkspace';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { useMistSession } from '../../runtime/auth';
+import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { useNav } from '../../nav';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { choiceField, choices, emptyOption, exportRecords, field, number, parseSource, PositionSummary, RecordFiles, shipmentReturnTarget, SourceLink, sourceOptions, text, today, useEditor } from './fulfillmentKit';
@@ -75,7 +76,8 @@ const locationSummary = (row: LedgerRow) => {
 
 export function SamplesPage() {
   const presentedError = React.useContext(MistPresentedErrorContext);
-  const { state, loading, error, run, saving, pending } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
+  const { state, loading, error, run, saving, pending, workspace } = useMistWorkspace(), session = useMistSession(), { go, route } = useNav(), editor = useEditor();
+  const members = workspaceMembers(workspace, state, session.user);
   const [dialog, setDialog] = useRouteDraft<ModuleEditorSpec | null>(null);
   const [syncError, setSyncError] = useRouteDraft(''), [syncing, setSyncing] = React.useState(false);
   const [query, setQuery] = React.useState(''), [form, setForm] = React.useState('all'), [origin, setOrigin] = React.useState('all'), [statusFilter, setStatusFilter] = React.useState<StatusFilter>('all');
@@ -178,12 +180,12 @@ export function SamplesPage() {
       fields: [...(kind==='send'?[field('sendPurpose','寄送用途','select',true,Object.entries(SAMPLE_SEND_PURPOSES).map(([value,label])=>({value,label})))]:[]),...(kind !== 'return' && positions.length > 1 ? [field('sourceLocation', '本次出库位置', 'select', true, [{ value: '__choose__', label: '请选择位置' }, ...positions.map(position => ({ value: position.location, label: `${position.location || '位置未记录'} · ${position.available}${sample.unit}` }))])] : []),
         ...(kind === 'return' ? [field('loanId', '原借出', 'select', true, [emptyOption, ...loans.map(loan => ({ value: loan.id, label: `${loan.person} · 未还 ${sampleLoanRemaining(state, loan.id)}${sample.unit} · ${platformBusinessDate(loan.at)}` }))])] : []),
         ...(kind !== 'move' ? [field('quantity', `本次数量（${sample.unit}）`, 'number')] : []),
-        ...(kind !== 'scrap' ? [field('person', kind === 'send' ? '收件人 / 公司' : kind === 'lend' ? '借用人' : kind === 'returnFactory' ? '退回工厂' : '经手人', 'text', kind === 'lend' || kind === 'send' || kind === 'returnFactory')] : []),
+        ...(kind === 'lend' ? [field('borrowerId', '借用人', 'select', true, [emptyOption, ...memberSelectOptions(members)])] : kind !== 'scrap' ? [field('person', kind === 'send' ? '收件人 / 公司' : kind === 'returnFactory' ? '退回工厂' : '经手人', 'text', kind === 'send' || kind === 'returnFactory')] : []),
         ...(kind === 'send' ? [field('destination', '寄送去向', 'text', false), field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), { ...field('feeAmount', '寄样费', 'number', false), min: 0 }, field('feeCurrency', '寄样费币种', 'select', false, ['CNY', 'USD', 'EUR'].map(c => ({ value: c, label: c })))] : kind === 'move' || kind === 'return' ? [field('location', '新位置', 'text', false)] : []),
         ...(kind === 'lend' ? [field('expectedReturn', '预计归还日', 'date', false)] : []), field('note', kind === 'scrap' || kind === 'returnFactory' ? '原因' : '交接说明', 'textarea', kind === 'scrap' || kind === 'returnFactory')],
-      initialValues: {sendPurpose:sample.source.kind==='manual'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', destination: '', carrier: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
+      initialValues: {sendPurpose:sample.source.kind==='manual'?'other':'confirmation',quantity: kind === 'return' ? 0 : sample.available, person: '', borrowerId: '', destination: '', carrier: '', trackingNo: '', feeAmount: '', feeCurrency: 'CNY', location: kind === 'return' || kind === 'send' || sample.location === '多个位置' ? '' : sample.location, note: '', loanId: '', expectedReturn: '', sourceLocation: '__choose__' },
       submitLabel: '保存流转',
-      submit: values => run({ type: 'fulfillment.samples.move', payload: { id: sample.id, kind,...(kind==='send'?{sendPurpose:sampleSendPurpose(text(values,'sendPurpose'),sample)}:{}),quantity: kind === 'move' ? 0 : number(values, 'quantity'), person: text(values, 'person'), location: text(values, 'location'), note: text(values, 'note'),
+      submit: values => run({ type: 'fulfillment.samples.move', payload: { id: sample.id, kind,...(kind==='send'?{sendPurpose:sampleSendPurpose(text(values,'sendPurpose'),sample)}:{}),quantity: kind === 'move' ? 0 : number(values, 'quantity'), ...(kind === 'lend' ? { borrowerId: text(values, 'borrowerId'), person: members.find(m => m.id === text(values, 'borrowerId'))?.name || '' } : { person: text(values, 'person') }), location: text(values, 'location'), note: text(values, 'note'),
         ...(kind === 'send' ? { destination: text(values, 'destination'), carrier: text(values, 'carrier'), trackingNo: text(values, 'trackingNo'), ...(Number(values.feeAmount) > 0 ? { fee: { amount: Number(values.feeAmount), currency: text(values, 'feeCurrency') || 'CNY' } } : {}) } : {}),
         ...(text(values, 'loanId') ? { loanId: text(values, 'loanId') } : {}), ...(text(values, 'expectedReturn') ? { expectedReturn: text(values, 'expectedReturn') } : {}), ...(text(values, 'sourceLocation') !== '__choose__' ? { sourceLocation: text(values, 'sourceLocation') } : {}) } }) });
   };

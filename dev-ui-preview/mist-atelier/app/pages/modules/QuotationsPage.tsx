@@ -272,7 +272,7 @@ function QuotationDetail({ q, state, canMaintainCompany, all, day, me, can, canO
       <Pill>{uiText(quotationDomain(state, q) === 'fabric' ? '面料业务' : '成衣业务')}</Pill>
       {flags.filter(f => f.key !== 'returned' && f.key !== 'superseded').map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}
     </div>
-    <Banner tone={banner.tone} title={uiText(banner.title)}>{banner.text}</Banner>
+    <Banner variant="status" tone={banner.tone} title={uiText(banner.title)}>{banner.text}</Banner>
     {blockers.length > 0 && <Banner tone="warn" title={uiText(allBlocked ? '开发版本未获需求方认可 · 暂不能转订单' : '部分条目的开发版本未获需求方认可 · 这些条目暂不能转')}><span data-convert-blockers>{blockers.map(b => <span key={b.lineId} style={{ display: 'block' }}>{quotationConversionBlockerText(b)}</span>)}{uiText("请先在开发模块记录需求方认可后再转单；没有开发来源的产品档案条目不受此限制。")}</span></Banner>}
     <ActionBar busy={locked} actions={[
       { label: '编辑草稿', icon: Pencil, onClick: onEdit, reason: writeReason, hidden: stage !== 'draft' },

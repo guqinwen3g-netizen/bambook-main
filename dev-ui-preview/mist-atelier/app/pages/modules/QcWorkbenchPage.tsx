@@ -220,7 +220,7 @@ export function QcWorkbenchPage() {
         { label: 'QC', value: current.assignee || '未认领' }, { label: '发起人', value: current.requestedBy },
         { label: '报告', value: current.reportIds.length ? `${current.reportIds.length} 份` : '未回传' },
       ],
-      extra: <Banner tone={gate.tone} title={uiText(gate.title)} />,
+      extra: <Banner variant="status" tone={gate.tone} title={uiText(gate.title)} />,
     }} />; })() : null;
   if (full.active && current && state) return <ListDetailPage backLabel="QC 工作台" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{detail}</ListDetailPage>;
   return <MistPage width="wide">
@@ -282,7 +282,7 @@ function QcTaskDetail({ task, state, me, canQc, canBusiness, canRelease, locked,
       <div className="mist-h2" style={{ fontSize: 19, marginTop: 4 }}>{fulfillmentSourceLabel(state, task.source)}</div>
     </div>}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={QC_STATE_TONE[task.state]}>{QC_STATE_LABEL[task.state]}</Pill><Pill>{DOMAIN_LABEL[task.domain]}</Pill><Pill tone="accent">{KIND_LABEL[task.kind]}</Pill></div>
-    <Banner tone={gate.tone} title={uiText(gate.title)}>{gate.text}</Banner>
+    <Banner variant={gate.title === sourceBlocker ? 'notice' : 'status'} tone={gate.tone} title={uiText(gate.title)}>{gate.text}</Banner>
     <DetailBlock title={uiText("来源与送审实物")}>
       <Facts items={[
         { label: '准确来源', value: <SourceLink source={task.source} /> },

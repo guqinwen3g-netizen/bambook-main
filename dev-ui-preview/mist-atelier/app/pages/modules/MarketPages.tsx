@@ -30,7 +30,7 @@ import { ImageRoleTag, imageRole, imageUploadTitle } from './PrimaryImage';
 import { withPrimaryImage } from '../../../../../server/src/shared/mistPrimaryImage';
 import { SeasonWorkbench } from './SeasonsPage';
 import { CampaignWorkbench, leadOverdue } from './MarketingPage';
-import { ActionBar, DetailBlock } from './pageKit';
+import { ActionBar, businessWhen, DetailBlock } from './pageKit';
 import { PRODUCT_CATEGORY_LABEL, ProductProfile, ProductThumb, useProductImage, productPriceText, productSpecSummary } from './ProductParts';
 import { downloadModuleCsv, ModuleWorkbench, ModuleEditorDialog, ModuleEditorPage, type ModuleEditorSpec, type ModuleField, type ModuleValues } from './ModuleWorkbench';
 import { FileName } from '../../runtime/files';
@@ -140,7 +140,7 @@ function LeadList({source,parentId,onBack}:{source:'campaign'|'show';parentId:st
  <ModuleWorkbench title={uiText((parent?.name||'来源未找到')+' · 线索')} rows={rows} create={can&&parent?leadInput(w,source,parentId):undefined} edit={can?r=>r.status!=='Converted'?leadInput(w,source,parentId,r):undefined:undefined}
  columns={[{key:'name',header:'联系人',width:'minmax(180px,1fr)',render:r=><ObjectCell name={r.name} meta={r.company}/>},{key:'demand',header:'需求',width:'minmax(150px,1fr)',render:r=>r.demand},{key:'follow',header:'下次跟进',width:'120px',sortValue:r=>r.followUpDate,render:r=><span className={leadOverdue(r,day)?'mist-tone-bad':''}>{r.followUpDate||'未计划'}{leadOverdue(r,day)&&' · 逾期'}</span>},{key:'status',header:'状态',width:'100px',render:r=>status(r.status)}]}
  exportRows={filtered=>csv('线索',['联系人','公司','邮箱','电话','需求','状态','预计金额','实际金额','币种'],filtered.map(r=>[r.name,r.company,r.email,r.phone,r.demand,labels[r.status],r.estimatedValue,r.actualValue,r.currency]))}
- detailSurface="sections" detail={r=><><MarketDetailCard><KeyValue items={[{label:'公司',value:r.company},{label:'来源活动',value:parent?.name||'来源未找到'},{label:'邮箱 / 电话',value:[r.email,r.phone].filter(Boolean).join(' / ')||'未填写'},{label:'需求',value:r.demand},{label:'预计金额',value:r.currency+' '+r.estimatedValue},{label:'跟进说明',value:r.note||'未填写'}]}/>
+ detailSurface="sections" detail={r=><><MarketDetailCard><KeyValue items={[{label:'公司',value:r.company},{label:'来源活动',value:parent?.name||'来源未找到'},{label:'邮箱 / 电话',value:[r.email,r.phone].filter(Boolean).join(' / ')||'未填写'},{label:'需求',value:r.demand},{label:'预计金额',value:r.currency+' '+r.estimatedValue},{label:'录入说明',value:r.note||'未填写'},...(r.followUps?.length?[{label:'跟进记录',value:<div className="mist-col" style={{gap:2}} data-lead-followups>{r.followUps.map((f,i)=><span key={i}>{f.actor} · {businessWhen(f.at)} · {uiText(labels[f.status as MarketLead['status']]||f.status)}{f.note?' · '+f.note:''}</span>)}</div>}]:[])]}/>
  <ActionBar busy={w.saving||!!w.pending} actions={[
  {label:'记录进展',onClick:()=>setDialog(progress(r)),reason:!can?'没有线索写权限':r.status==='Converted'?'已转 CRM，请从客户主线跟进':false},
  {label:'转入 CRM',onClick:()=>setDialog(convert(r)),reason:!canCrm?'需要客户关系写权限':r.status==='Converted'?'已转 CRM，无需重复转入':r.status==='Lost'?'请先恢复联系，再转入 CRM':false},
