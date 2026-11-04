@@ -1703,8 +1703,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'calendar.save': {
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
-      const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?context.actorId:undefined;
-      if(old?.ownerId&&old.ownerId!==context.actorId&&!old.participants?.some(x=>x.id===context.actorId))throw new MistCommandError('FORBIDDEN','只能修改本人或参与的个人日程',403);
+      const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?(old?.ownerId||context.actorId):undefined;
+      if(old?.ownerId&&old.ownerId!==context.actorId){
+        if(!old.participants?.some(x=>x.id===context.actorId))throw new MistCommandError('FORBIDDEN','只能修改本人或参与的个人日程',403);
+        if(p.personal===false)throw new MistCommandError('FORBIDDEN','只能由本人将个人日程改为共享日程',403);
+      }
       const participants=p.participantIds===undefined?old?.participants:[...new Set(strings(p.participantIds,'参与人'))].filter(x=>x!==(mine||context.actorId)).map(x=>resolveMember(context,x,'参与人'));
       if((participants?.length||0)>50)throw new MistCommandError('VALIDATION','参与人最多 50 位');
       const remind=p.remindMinutes===undefined?old?.remindMinutes:p.remindMinutes;if(remind!==undefined&&remind!==0&&(!Number.isInteger(remind)||remind<0||remind>10080))throw new MistCommandError('VALIDATION','提醒时间无效');
@@ -1774,7 +1777,7 @@ export {orderDownstreamFacts};
 function convertLeadToCrm(state:MistState,p:Extract<MarketCommand,{type:'market.lead.convertToCrm'}>['payload'],context:MistContext):MistCommandResult{
   const lead=state.market.leads.find(l=>l.id===p?.id);if(!lead)throw new MistCommandError('NOT_FOUND','线索不存在',404);
   if(lead.status==='Converted')throw new MistCommandError('PRECONDITION','线索已转化');if(lead.status==='Lost')throw new MistCommandError('PRECONDITION','已流失的线索请先恢复跟进');
-  let customerId=p.customerId||'';
+  let customerId=p.customerId||lead.customerId||'';
   if(customerId){if(!state.customers.some(c=>c.id===customerId))throw new MistCommandError('NOT_FOUND','客户不存在',404);}
   else{
     const same=state.customers.find(c=>c.name.trim().toLowerCase()===lead.company.trim().toLowerCase());if(same)throw new MistCommandError('CONFLICT',`已有同名客户 ${same.name}（${same.code}），请选择该客户`,409);
