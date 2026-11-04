@@ -1,8 +1,9 @@
 import { uiText, ui, localizedPageTitle } from '../../../../services/interfaceLanguage';
-import { isPendingFinanceMistInvoice, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
+import { isPendingFinanceMistInvoice, mistMoneyMinor, MIST_LOGISTICS_DUTY, type MistState, type MistTarget, type MistTask } from '../../../../server/src/shared/mistWorkspace';
 import type { MistReview } from './reviews';
 import { addBusinessDays, pendingWeeklyArchive } from '../../../../server/src/shared/mistTeam';
 import { shipmentStage } from './shipmentStage';
+import { advanceBalances } from '../../../../server/src/shared/mistOrderFunding';
 import { financeReceiptDisplay } from './financeReceiptDisplay';
 import { materialDeliveryRows, materialReceiverIds } from '../../../../server/src/shared/mistInternalFabric';
 import { developmentVersionSamples } from '../../../../server/src/shared/mistDevelopmentSamples';
@@ -266,8 +267,10 @@ export function mistWorkQueue(state: MistState | null | undefined, options: Mist
     }
     if (can('invoices:reconcile')) for (const receipt of state.receipts ?? []) {
       const display = financeReceiptDisplay(receipt, state.orderFunding?.assignments ?? [], state.allocations ?? []);
-      if (receipt.remaining <= 0 || (display.label !== '未认领' && display.label !== '匹配建议')) continue;
-      push({ id: 'receipt:' + receipt.id, source: 'finance', title: `${receipt.payer || '到账'} · ${uiText(display.label === '未认领' ? '到账未认领' : '匹配建议待确认')}`, meta: [`${receipt.currency} ${receipt.remaining.toLocaleString('en-US')}`, receipt.date].filter(Boolean).join(' · '),
+      const reserved = advanceBalances(state).filter(row => row.receiptId === receipt.id && row.currency === receipt.currency).reduce((sum, row) => sum + mistMoneyMinor(row.remaining), 0);
+      const remaining = mistMoneyMinor(receipt.remaining) - reserved;
+      if (remaining <= 0 || !['未认领', '匹配建议', '部分核销'].includes(display.label)) continue;
+      push({ id: 'receipt:' + receipt.id, source: 'finance', title: `${receipt.payer || '到账'} · ${display.label === '部分核销' ? `${receipt.currency} ${(remaining / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : uiText(display.label === '未认领' ? '到账未认领' : '匹配建议待确认')}`, meta: [`${receipt.currency} ${receipt.remaining.toLocaleString('en-US')}`, receipt.date].filter(Boolean).join(' · '),
         when: display.label, urgent: display.label === '未认领', at: receipt.date || '', target: { view: 'payment-vouchers', id: receipt.id } });
     }
     if (can('invoices:write')) for (const invoice of (state.invoices ?? []).filter(isPendingFinanceMistInvoice))

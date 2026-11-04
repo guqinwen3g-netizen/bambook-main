@@ -5,9 +5,10 @@
  * Accounting staff review and post them; nothing here is a posted ledger. Foreign amounts are converted at the month's
  * registered period rate when there is one, otherwise the CNY columns are left for the bookkeeper.
  */
-import { WRITEOFF_LABEL, mistMoneyMinor, mistAllocationReceiptMinor, type MistState } from './mistWorkspace';
+import { WRITEOFF_LABEL, mistMoneyMinor, type MistState } from './mistWorkspace';
 import { fxCnyMinor, fxPeriodRateFor } from './mistFxRates';
 import { mistBusinessDate } from './mistBusinessClock';
+import { allocationFacts, allocationDate } from './mistAllocationFacts';
 
 export const ACCOUNTS = {
   bank: ['1002', '银行存款'], receivable: ['1122', '应收账款'], advance: ['2203', '预收账款'], payable: ['2202', '应付账款'],
@@ -48,19 +49,37 @@ export function monthlyVouchers(root: MistState, month: string): VoucherLine[] {
   const inMonth = (d: string | undefined) => !!d && d.slice(0, 7) === month;
   for (const i of root.invoices || []) if (!i.voidedAt && i.financeStatus !== 'pending' && i.financeStatus !== 'rejected' && inMonth(i.issuedAt)) pair(i.issuedAt!, `确认应收 ${i.code} ${i.customer}`, i.currency, i.amount, ACCOUNTS.receivable, ACCOUNTS.revenue, i.code);
   const receipts = new Map((root.receipts || []).map(r => [r.id, r]));
-  for (const a of root.allocations || []) {
+  // Reversed allocations remain immutable facts through the reversal snapshot.
+  const allocations = allocationFacts(root);
+  for (const a of allocations) {
     const r = receipts.get(a.receiptId), i = root.invoices.find(x => x.id === a.invoiceId);
-    if (!r || !i || !inMonth(r.date)) continue;
+    if (!r || !i) continue;
+    const date = allocationDate(a, r.date);
+    if (!inMonth(date)) continue;
     const summary = `收款核销 ${r.code} → ${i.code}`, source = `${r.code}/${i.code}`;
-    if ((a.receiptCurrency || a.currency) !== a.currency) exchange(r.date, summary, source,
-      { account: ACCOUNTS.bank, currency: a.receiptCurrency!, amount: a.receiptAmount! },
+    const debit = ACCOUNTS.advance;
+    if ((a.receiptCurrency || a.currency) !== a.currency) exchange(date, summary, source,
+      { account: debit, currency: a.receiptCurrency!, amount: a.receiptAmount! },
       { account: ACCOUNTS.receivable, currency: a.currency, amount: a.amount });
-    else pair(r.date, summary, a.currency, a.amount, ACCOUNTS.bank, ACCOUNTS.receivable, source);
+    else pair(date, summary, a.currency, a.amount, debit, ACCOUNTS.receivable, source);
+  }
+  for (const reversal of root.financeReversals || []) {
+    const a = reversal.allocation;
+    if (reversal.kind !== 'allocation' || !a) continue;
+    const r = receipts.get(a.receiptId), i = root.invoices.find(x => x.id === a.invoiceId);
+    const date = mistBusinessDate(reversal.at);
+    if (!r || !i || !inMonth(date)) continue;
+    const summary = `冲回核销 ${a.id} ${r.code} → ${i.code}`, source = reversal.id;
+    // Restore the receipt-side advance, never reverse the bank's actual receipt.
+    if ((a.receiptCurrency || a.currency) !== a.currency) exchange(date, summary, source,
+      { account: ACCOUNTS.receivable, currency: a.currency, amount: a.amount },
+      { account: ACCOUNTS.advance, currency: a.receiptCurrency!, amount: a.receiptAmount! });
+    else pair(date, summary, a.currency, a.amount, ACCOUNTS.receivable, ACCOUNTS.advance, source);
   }
   for (const r of root.receipts || []) {
     if (!inMonth(r.date)) continue;
-    const used = (root.allocations || []).filter(a => a.receiptId === r.id).reduce((n, a) => n + mistAllocationReceiptMinor(a), 0), left = mistMoneyMinor(r.amount) - used;
-    if (left > 0) pair(r.date, `到账待核销 ${r.code} ${r.payer}`, r.currency, left / 100, ACCOUNTS.bank, ACCOUNTS.advance, r.code);
+    // Recognize the full bank receipt once. Applications only move the advance.
+    pair(r.date, `到账待核销 ${r.code} ${r.payer}`, r.currency, mistMoneyMinor(r.amount) / 100, ACCOUNTS.bank, ACCOUNTS.advance, r.code);
   }
   for (const i of root.invoices || []) {
     for (const c of i.bankCharges || []) if (!c.reversed && inMonth(mistBusinessDate(c.at))) pair(mistBusinessDate(c.at), `银行扣费 ${i.code}`, c.currency, c.amount, ACCOUNTS.fee, ACCOUNTS.receivable, i.code);
