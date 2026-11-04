@@ -231,6 +231,30 @@
 .mist-banner b { font-weight: var(--mist-fw-medium); }
 .mist-banner p { color: var(--mist-ink-2); margin-top: 2px; font-size: var(--mist-text-sm); }
 .mist-banner .mist-banner-act { margin-left: auto; display: flex; gap: 8px; flex: none; }
+/* notice: a must-read blocker kept in place. Neutral surface; a short straight tone rail and the icon carry the tone. */
+.mist-banner[data-variant="notice"] { position: relative; background: var(--mist-card); color: var(--mist-ink); border-radius: var(--mist-r-md); padding: 12px 14px 12px 18px; align-items: flex-start; }
+.mist-banner[data-variant="notice"]::before { content: ''; position: absolute; left: 6px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--mist-accent); }
+.mist-banner[data-variant="notice"] > .mist-icon { color: var(--mist-accent-ink); margin-top: 1px; }
+.mist-banner[data-variant="notice"][data-tone="warn"]::before { background: var(--mist-warn); }
+.mist-banner[data-variant="notice"][data-tone="warn"] > .mist-icon { color: var(--mist-warn-ink); }
+.mist-banner[data-variant="notice"][data-tone="bad"]::before { background: var(--mist-bad); }
+.mist-banner[data-variant="notice"][data-tone="bad"] > .mist-icon { color: var(--mist-bad-ink); }
+.mist-banner[data-variant="notice"][data-tone="ok"]::before { background: var(--mist-ok); }
+.mist-banner[data-variant="notice"][data-tone="ok"] > .mist-icon { color: var(--mist-ok-ink); }
+.mist-banner[data-variant="notice"][data-tone="neutral"]::before { background: var(--mist-ink-4); }
+.mist-banner[data-variant="notice"][data-tone="neutral"] > .mist-icon { color: var(--mist-ink-3); }
+.mist-banner[data-variant="notice"] p { color: var(--mist-ink-2); }
+.mist-card > .mist-banner[data-variant="notice"], .mist-card-body > .mist-banner[data-variant="notice"] { background: var(--mist-card-2); }
+/* status: the record's current state as one line under the title. Only the dot carries the tone. */
+.mist-status-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-height: 28px; font-size: var(--mist-text-md); color: var(--mist-ink); }
+.mist-status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--mist-accent); }
+.mist-status-line[data-tone="warn"] .mist-status-dot { background: var(--mist-warn); }
+.mist-status-line[data-tone="bad"] .mist-status-dot { background: var(--mist-bad); }
+.mist-status-line[data-tone="ok"] .mist-status-dot { background: var(--mist-ok); }
+.mist-status-line[data-tone="neutral"] .mist-status-dot { background: var(--mist-ink-3); }
+.mist-status-line > b { font-weight: var(--mist-fw-medium); }
+.mist-status-text { color: var(--mist-ink-2); min-width: 0; }
+.mist-status-act { margin-left: auto; display: inline-flex; gap: 6px; }
 
 /* ── 表单 ── */
 .mist-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
