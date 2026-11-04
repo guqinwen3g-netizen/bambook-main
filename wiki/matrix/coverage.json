@@ -2184,9 +2184,9 @@
    "commands": [
     "platform.assistant.saveDraft"
    ],
-   "impl": "unchecked",
+   "impl": "walked",
    "lessons": [],
-   "note": "模型可用性须按部署环境核对"
+   "note": "模型可用性须按部署环境核对；2026-11-04 本机以模拟模型走通引用记录→提问→回答→保存草稿，真实模型待配置后复走"
   },
   {
    "id": "work-assistant",
