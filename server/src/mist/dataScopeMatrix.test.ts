@@ -7,6 +7,9 @@ import { createMistState, applyMistCommand, mistCommandPermission } from '../sha
 import { getDefaultScopeListForRole, SYSTEM_ROLE_IDS, type SystemRoleId } from '../_shared/rolePermissionMatrix';
 import { MistRepository, type MistContract } from './repository';
 import { MistPrivateFiles } from './files';
+import { agentGet, agentQuery, agentRelated } from './agentRead';
+import { handleMcpMessage } from './agentMcp';
+import { runMistAssistant } from './assistant';
 import { MemoryMistDatabase, testAuthority } from './__tests__/support';
 
 // 规格 §2 / P3：岗位 × 越权读写矩阵。示例数据：customer-0、customer-2 跟进人 demo-sales，customer-1 跟进人 demo-buyer。
@@ -286,5 +289,94 @@ describe('row-level data scope by role', () => {
   it('hides files referenced only by records outside the scope', async () => {
     const full = (await repo.get(actor('boss'), workspaceId)).state.files.length, scoped = (await repo.get(actor('loner'), workspaceId)).state.files.length;
     expect(scoped).toBeLessThan(full);
+  });
+});
+
+
+describe('read-only exits use the current repository projection', () => {
+  it.each(['demo-sales', 'teammate', 'head', 'loner'])('%s cannot discover hidden orders by query count, reference, or MCP get', async userId => {
+    const subject = actor(userId), first = await repo.getForAgent(subject, workspaceId);
+    const before = agentQuery(first.workspace.state, first.actor, { type: 'order', limit: 1 });
+    const source = db.workspaces.get(workspaceId)!.state;
+    source.orders.push({ ...source.orders[0], id: 'outside-order', code: 'PRIVATE-ORDER-98765', customerId: 'outside-customer', ownerId: 'outside-user' });
+    const current = await repo.getForAgent(subject, workspaceId);
+    expect(agentQuery(current.workspace.state, current.actor, { type: 'order', limit: 1 })).toEqual(before);
+    expect(agentQuery(current.workspace.state, current.actor, { q: 'PRIVATE-ORDER-98765' }).total).toBe(0);
+    const errorOf = (id: string) => { try { agentGet(current.workspace.state, current.actor, 'order', id); } catch (error) { return error; } };
+    expect(errorOf('outside-order')).toMatchObject({ code: 'NOT_FOUND', status: 404, message: (errorOf('never-existed') as Error).message });
+    expect(() => agentRelated(current.workspace.state, current.actor, 'order', 'outside-order')).toThrow('不存在');
+    const call = async (id: string) => handleMcpMessage(repo, subject, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'bambook_get', arguments: { workspaceId, type: 'order', id } } }, error => (error as Error).message);
+    expect(await call('outside-order')).toEqual(await call('never-existed'));
+    const response: any = await handleMcpMessage(repo, subject, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'bambook_query', arguments: { workspaceId, type: 'order', limit: 1 } } }, error => (error as Error).message);
+    expect(response.result.structuredContent).toMatchObject(before);
+  });
+
+  it.each(['demo-sales', 'teammate', 'head', 'loner'])('%s sends only visible AI source facts and counts, and rejects hidden citations like missing ones', async userId => {
+    const subject = actor(userId), complete = vi.fn(async (_input: any) => '只读建议');
+    const deps = { complete, providers: () => [], subscription: () => ({ connected: true, model: 'test-model' }) };
+    const request = async (sourceIds: string[]) => {
+      const current = await repo.getForAssistant(subject, workspaceId);
+      return runMistAssistant({ ...current, body: { message: '请核对来源', sourceIds } }, deps);
+    };
+    await request([]);
+    const before = complete.mock.calls.at(-1)![0].messages[0].content;
+    const source = db.workspaces.get(workspaceId)!.state;
+    source.orders.push({ ...source.orders[0], id: 'outside-ai', code: 'PRIVATE-AI-98765', customerId: 'outside-customer', ownerId: 'outside-user' });
+    await request([]);
+    expect(complete.mock.calls.at(-1)![0].messages[0].content).toBe(before);
+    complete.mockClear();
+    for (const id of ['outside-ai', 'never-existed', 'another-company-id']) await expect(request(['orders:' + id])).rejects.toMatchObject({ status: 404, code: 'SOURCE_NOT_FOUND', message: '选择的业务来源已不存在，请刷新后重选' });
+    expect(complete).not.toHaveBeenCalled();
+    const view = await repo.getForAssistant(subject, workspaceId), visible = view.workspace.state.orders[0];
+    if (visible) {
+      const result = await request(['orders:' + visible.id]);
+      expect(result.sources).toEqual([{ id: 'orders:' + visible.id, entityId: visible.id, label: visible.code, view: 'orders/detail' }]);
+      expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain('PRIVATE-AI-98765');
+    }
+  });
+
+  it('hides an out-of-scope sample request notification, including its title and attachment', async () => {
+    const state = db.workspaces.get(workspaceId)!.state;
+    (state.sampleRequests ??= []).push({ id: 'private-sample', code: 'SR-PRIVATE', requesterId: 'demo-buyer', customerId: 'customer-1' } as any);
+    state.notifications.push({ id: 'sample-notice', title: '财务驳回样品费 SR-PRIVATE 98765 USD', detail: 'private sample terms', at: '', readAt: null, target: { view: 'samples', section: 'requests', id: 'private-sample' } });
+    state.files.push({ id: 'sample-file', name: 'private sample terms.pdf', uploadedBy: 'demo-sales', size: 10, mimeType: 'application/pdf', storageKey: 'test/sample', createdAt: '' } as any);
+    state.invoices.push({ id: 'sample-invoice', code: 'SI-PRIVATE', sampleRequestId: 'private-sample', fileIds: ['sample-file'] } as any);
+    const view = (await repo.get(actor('demo-sales'), workspaceId)).state;
+    expect(view.sampleRequests.some(row => row.id === 'private-sample')).toBe(false);
+    expect(view.notifications.some(row => row.id === 'sample-notice')).toBe(false);
+    expect(view.files.some(row => row.id === 'sample-file')).toBe(false);
+    await expect(repo.download(actor('demo-sales'), workspaceId, 'sample-file')).rejects.toMatchObject({ status: 404, code: 'FILE_NOT_FOUND' });
+    expect((await repo.get(actor('demo-buyer'), workspaceId)).state.notifications.some(row => row.id === 'sample-notice')).toBe(true);
+  });
+
+  it('does not let a finance reader without tax-base permission download a tax original', async () => {
+    const state = db.workspaces.get(workspaceId)!.state, id = randomUUID();
+    state.files.push({ id, name: 'vat-original.pdf', uploadedBy: 'finance', size: 10, mimeType: 'application/pdf', storageKey: workspaceId + '/' + id, createdAt: '' });
+    (state.payables ??= {} as any).bills = [{ id: 'tax-bill', invoiceType: 'vat-special', taxAmount: 13000, fileIds: [id] } as any];
+    const permissions = auth.users.get('finance')!.permissions;
+    auth.users.get('finance')!.permissions = permissions.filter(p => p !== 'sensitive:tax_base');
+    const read = vi.spyOn(MistPrivateFiles.prototype, 'read').mockResolvedValue(Buffer.from('tax original'));
+    try {
+      expect((await repo.get(actor('finance'), workspaceId)).state.files.some(file => file.id === id)).toBe(false);
+      await expect(repo.download(actor('finance'), workspaceId, id)).rejects.toMatchObject({ status: 404, code: 'FILE_NOT_FOUND' });
+      expect(read).not.toHaveBeenCalled();
+      auth.users.get('finance')!.permissions.push('sensitive:tax_base');
+      expect((await repo.download(actor('finance'), workspaceId, id)).bytes.toString()).toBe('tax original');
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally { read.mockRestore(); }
+  });
+
+  it('denies hidden, missing and other-company file ids before reading any bytes', async () => {
+    const state = db.workspaces.get(workspaceId)!.state;
+    const file = { id: 'private-file', name: 'private.pdf', uploadedBy: 'demo-sales', size: 10, mimeType: 'application/pdf', storageKey: 'test/private', createdAt: '' };
+    state.files.push(file);
+    state.orders.find(row => row.id === 'SO-G-2026-017')!.fileIds = [file.id];
+    const read = vi.spyOn(MistPrivateFiles.prototype, 'read');
+    try {
+      for (const id of [file.id, 'other-company-file', 'missing-file']) await expect(repo.download(actor('demo-sales'), workspaceId, id)).rejects.toMatchObject({ status: 404, code: 'FILE_NOT_FOUND' });
+      for (const method of ['getForAgent', 'getForAssistant'] as const) await expect(repo[method]({ ...actor('demo-sales'), companyId: '22222222-2222-4222-8222-222222222222' }, workspaceId)).rejects.toMatchObject({ status: 404 });
+      await expect(repo.download({ ...actor('demo-sales'), companyId: '22222222-2222-4222-8222-222222222222' }, workspaceId, file.id)).rejects.toMatchObject({ status: 404 });
+      expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); }
   });
 });

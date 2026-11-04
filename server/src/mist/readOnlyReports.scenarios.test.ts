@@ -3,6 +3,8 @@ import type { TokenPayload } from '../auth/service';
 import { createMistState, type MistState } from '../shared/mistWorkspace';
 import { monthlyFinanceSummary } from '../shared/mistFinanceReports';
 import { projectState, MIST_READ_SECTIONS } from './access';
+import { buildXlsx } from '../templates/xlsxExport';
+import * as XLSX from 'xlsx';
 
 const context = { id: () => 'fixture', now: '2026-10-14T00:00:00Z', actorName: '模拟业务员' };
 const empty = () => createMistState(context, 'empty');
@@ -42,6 +44,11 @@ describe('read-only report sources respect module and row scope', () => {
       { month: '2026-10', currency: 'USD', cashIn: 120, cashOut: 0, net: 120, rebate: 0, fx: 0, expense: 10 },
     ]);
     expect(monthlyFinanceSummary(after, '', '')).toEqual(monthlyFinanceSummary(before, '', ''));
+    const columns = ['month', 'currency', 'cashIn', 'cashOut', 'net', 'rebate', 'fx', 'expense'];
+    const exported = buildXlsx([{ name: 'Finance', columns, columnLabels: columns, rows: monthlyFinanceSummary(after, '', '') }]);
+    const workbook = XLSX.read(exported, { type: 'buffer' });
+    expect(XLSX.utils.sheet_to_json(workbook.Sheets.Finance)).toEqual(monthlyFinanceSummary(before, '', ''));
+    expect(JSON.stringify(XLSX.utils.sheet_to_json(workbook.Sheets.Finance))).not.toContain('98765');
     expect(state).toEqual(source);
   });
 
