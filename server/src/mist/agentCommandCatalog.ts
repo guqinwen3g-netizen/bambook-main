@@ -2062,6 +2062,11 @@ export const MIST_COMMAND_CATALOG: ReadonlyArray<{ type: string; payload: string
   "source": "server/src/shared/mistClaimCoordination.ts"
  },
  {
+  "type": "platform.claim.recovery.withdraw",
+  "payload": "{ id: string; reason: string }",
+  "source": "server/src/shared/mistClaimCoordination.ts"
+ },
+ {
   "type": "platform.claim.replacement.createOrder",
   "payload": "{id:string;due:string;incoterm:string;deliveryPlace:string;confirmationFileIds:string[]}",
   "source": "server/src/shared/mistClaimReplacement.ts"

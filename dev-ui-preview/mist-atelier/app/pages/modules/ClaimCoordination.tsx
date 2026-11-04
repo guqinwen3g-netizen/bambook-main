@@ -102,6 +102,10 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
     });
   };
   const reverse=(r:ClaimRecovery,entry:ClaimRecoverySettlement)=>openEditor({title:'冲回对应',description:(entry.receiptCode||entry.reference)+' · '+money(entry.amount,entry.currency),fields:[f('reason','冲回原因','textarea')],initialValues:{reason:''},submitLabel:'确认冲回',submit:v=>command({type:'platform.claim.recovery.settlement.reverse',payload:{id:r.id,settlementId:entry.id,reason:s(v,'reason')}})});
+  const withdraw = (r: ClaimRecovery) => openEditor({
+    title: '撤回追偿', description: r.supplierName + ' · ' + money(r.requested, r.currency), fields: [f('reason', '撤回原因', 'textarea')], initialValues: { reason: '' }, submitLabel: '撤回',
+    submit: v => command({ type: 'platform.claim.recovery.withdraw', payload: { id: r.id, reason: s(v, 'reason') } } as PlatformCommand),
+  });
   const waive = (r: ClaimRecovery) => openEditor({
     title: '放弃追偿', fields: [f('reason', '放弃的原因', 'textarea')], initialValues: { reason: '' }, submitLabel: '批准放弃',
     submit: v => command({ type: 'platform.claim.recovery.waive', payload: { id: r.id, reason: s(v, 'reason') } }),
@@ -154,6 +158,7 @@ export function ClaimCoordinationPanel({ claim, state, actorId, busy, can, comma
             {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && onPayables && deductRoom(r) && <Button variant="quiet" disabled={busy} onClick={onPayables}>{uiText("去应付扣款")}</Button>}
             {open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && !deductRoom(r) && <span className="mist-note">{uiText("暂无可扣余额")}</span>}
             {can.write && open && r.state === 'Agreed' && (r.method === 'deduction' || r.method === 'mixed') && (r.agreed ?? 0) - deducted(r)-recoveryOtherFulfilledMinor(r)/100 > 0 && <Button variant="quiet" disabled={busy} onClick={() => switchToPayment(r)}>{uiText("改为工厂付款")}</Button>}
+            {can.write && open && r.state === 'Negotiating' && r.createdById === actorId && <Button variant="quiet" disabled={busy} onClick={() => withdraw(r)}>{uiText("撤回")}</Button>}
             {can.approve && open && ['Negotiating', 'Agreed'].includes(r.state) && r.createdById !== actorId && <Button variant="quiet" disabled={busy} onClick={() => waive(r)}>{uiText("批准放弃")}</Button>}
           </div> },
         ]} />}

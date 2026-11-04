@@ -40,9 +40,10 @@ export type ClaimCoordinationCommand =
   | { type: 'platform.claim.recovery.settle'; payload: { id: string; amount: number; reference?: string; date?: string; receiptId?:string; payerBasis?:string } }
   | { type: 'platform.claim.recovery.receipt.allocate'; payload:{id:string;amount:number;receiptId:string;payerBasis?:string;reference?:string;date?:string} }
   | { type: 'platform.claim.recovery.settlement.reverse'; payload:{id:string;settlementId:string;reason:string} }
-  | { type: 'platform.claim.recovery.waive'; payload: { id: string; reason: string } };
+  | { type: 'platform.claim.recovery.waive'; payload: { id: string; reason: string } }
+  | { type: 'platform.claim.recovery.withdraw'; payload: { id: string; reason: string } };
 
-export const CLAIM_COORDINATION_COMMANDS = ['platform.claim.notify', 'platform.claim.verify', 'platform.claim.recovery.open', 'platform.claim.recovery.agree', 'platform.claim.recovery.method', 'platform.claim.recovery.settle', 'platform.claim.recovery.receipt.allocate', 'platform.claim.recovery.settlement.reverse', 'platform.claim.recovery.waive'] as const;
+export const CLAIM_COORDINATION_COMMANDS = ['platform.claim.notify', 'platform.claim.verify', 'platform.claim.recovery.open', 'platform.claim.recovery.agree', 'platform.claim.recovery.method', 'platform.claim.recovery.settle', 'platform.claim.recovery.receipt.allocate', 'platform.claim.recovery.settlement.reverse', 'platform.claim.recovery.waive', 'platform.claim.recovery.withdraw'] as const;
 export const CLAIM_GOODS_LOCATIONS: ClaimGoodsLocation[] = ['factory', 'transit', 'customer', 'sold', 'unknown'];
 export const CLAIM_RECOVERY_METHODS: ClaimRecoveryMethod[] = ['deduction', 'payment', 'replacement', 'mixed'];
 export const CLAIM_LOCATION_LABEL: Record<ClaimGoodsLocation, string> = { factory: '还在工厂', transit: '运输途中', customer: '已到客户仓库', sold: '已上架 / 已销售', unknown: '尚不清楚' };
@@ -224,6 +225,17 @@ export function applyClaimCoordinationCommand(root: MistState, claims: ClaimLike
       row.events.push({at:c.now,by:c.actorName,action:'settle-reverse',note:entry!.reference+' · '+reason});
       task(root,c,claim.id,'claim-recovery:'+row.id,'工厂补偿 · '+claim.code,{assigneeIds:[row.createdById],permission:'invoices:reconcile'});
       emit(root,c,claim.id,'冲回工厂补偿对应：'+reason);return{id:row.id,claimId:claim.id,settlementId:entry!.id};
+    }
+    case 'platform.claim.recovery.withdraw': {
+      // fin44 走查：提错工厂或重复提出时，协商中的追偿由提出人撤回（不是放弃追偿，不计公司自担）。
+      const v = command.payload, { claim, row } = recoveryOf(claims, v.id); active(claim); const byId = actor(c);
+      if (row.state !== 'Negotiating') fail('工厂已同意或已结束的追偿不能撤回，请改走放弃追偿', 'PRECONDITION');
+      if (byId !== row.createdById) fail('只有提出人可以撤回', 'FORBIDDEN');
+      const reason = text(v.reason, '撤回原因'); row.state = 'Withdrawn';
+      row.events.push({ at: c.now, by: c.actorName, action: 'withdraw', note: reason });
+      done(root, claim.id, 'claim-recovery:' + row.id);
+      emit(root, c, claim.id, '撤回向 ' + row.supplierName + ' 的追偿：' + reason);
+      return { id: row.id, claimId: claim.id };
     }
     case 'platform.claim.recovery.waive': {
       const v = command.payload, { claim, row } = recoveryOf(claims, v.id); active(claim); const byId = actor(c);
