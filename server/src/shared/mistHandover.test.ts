@@ -106,6 +106,25 @@ it('locks customer and whole-account handover throughout cancellation review wit
  o.governance.cancellation.status='rejected';expect(accountHandoverBlockers(f.state,o.ownerId)).not.toContain(`订单 ${o.code} 审批中，审批完成后再交接`);
 });
 
+it('only reassigns pending tasks of selected business and the customer relation, not other business carrying the same customerId',()=>{
+ const f=fixture(),customer=f.state.customers.find(row=>row.id==='customer-1')!,selected=order(f.state,'SO-G-2026-009'),other=order(f.state,'SO-G-2026-017');
+ const relation=f.state.market.relations.find(row=>row.customerId===customer.id)!;
+ const task=(id:string,target:NonNullable<MistState['tasks'][number]['target']>,done=false)=>({id,title:id,due:'2026-10-20',done,kind:'handover-test',target,assigneeIds:[customer.ownerId,'demo-new']});
+ f.state.tasks.push(task('selected',{view:'orders/detail',id:selected.id,customerId:customer.id}),task('unselected',{view:'orders/detail',id:other.id,customerId:customer.id}),task('relation',{view:'relations',id:relation.id}),task('done',{view:'crm',id:customer.id},true),task('customer-only',{view:'crm',customerId:customer.id}));
+ const before=structuredClone(f.state);
+ f.run({customerId:customer.id,toUserId:'demo-new',reason:'调岗',orderIds:[selected.id]});
+ for(const id of ['selected','relation','customer-only'])expect(f.state.tasks.find(row=>row.id===id)?.assigneeIds,id).toEqual(['demo-new']);
+ for(const id of ['unselected','done'])expect(f.state.tasks.find(row=>row.id===id),id).toEqual(before.tasks.find(row=>row.id===id));
+ expect(order(f.state,other.code)).toEqual(before.orders.find(row=>row.id===other.id));
+ expect(customerHandovers(f.state.customers.find(row=>row.id===customer.id)!)[0].tasks).toBe(3);
+});
+
+it.each(['foreign-company-user','gone'])('rejects invalid customer handover recipient %s without modifying any records',toUserId=>{
+ const f=fixture(),before=structuredClone(f.state);
+ expect(()=>f.run({customerId:'customer-1',toUserId,reason:'离职',orderIds:[order(f.state,'SO-G-2026-009').id]})).toThrow();
+ expect(f.state).toEqual(before);
+});
+
 it('moves selected old orders to the existing customer owner without changing commercial facts or unrelated tasks',()=>{
  const f=fixture(),customer=f.state.customers.find(row=>row.id==='customer-1')!,selected=order(f.state,'SO-G-2026-009'),other=order(f.state,'SO-G-2026-017');expect(selected.ownerId).not.toBe(customer.ownerId);
  f.state.tasks.push({id:'old-order-task',title:'核对原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:selected.id},assigneeIds:[selected.ownerId]},{id:'other-order-task',title:'另一原单',due:'2026-10-20',done:false,kind:'order',target:{view:'orders/detail',id:other.id},assigneeIds:['demo-sales']});const before=structuredClone(f.state),ownerId=customer.ownerId;
