@@ -68,3 +68,24 @@ it('treats NOK disposition and its approval as high-risk Agent commands',()=>{
  expect(agentCommandRisk('fulfillment.qc.dispose')).toBe('high');
  expect(agentCommandRisk('fulfillment.qc.concession.decide')).toBe('high');
 });
+
+describe('NOK rework and repeated inspection scenarios',()=>{
+ it('requires explicit business recovery after a passing recheck and a fresh disposition after another failure',()=>{
+  const t=failed();
+  const rework=()=>t.run({type:'fulfillment.qc.dispose',payload:{id:t.taskId,kind:'rework',note:'返修后复验',due:'2026-10-20'}});
+  rework();const first=currentQcDisposition(t.task())!;
+  expect(()=>t.run({type:'fulfillment.qc.continue',payload:{id:t.taskId,note:'尚未复验'}})).toThrow('待业务恢复');
+  t.f.report(t.taskId,'reject');
+  expect(currentQcDisposition(t.task())).toBeUndefined();rework();
+  expect(t.task().dispositions).toHaveLength(2);
+  expect(t.task().dispositions![0]).toEqual(first);
+  t.f.report(t.taskId,'pass');
+  expect(()=>assertProductionTransition(t.f.state,t.branch(),'done',100)).toThrow('质量问题暂停');
+  t.run({type:'fulfillment.qc.continue',payload:{id:t.taskId,note:'整改复验通过，业务确认'}});
+  expect(()=>assertProductionTransition(t.f.state,t.branch(),'done',100)).not.toThrow();
+  t.f.report(t.taskId,'reject');
+  expect(t.task().businessContinued).toBeUndefined();
+  expect(()=>assertProductionTransition(t.f.state,t.branch(),'done',100)).toThrow('质量问题暂停');
+  rework();expect(t.task().dispositions).toHaveLength(3);
+ });
+});
