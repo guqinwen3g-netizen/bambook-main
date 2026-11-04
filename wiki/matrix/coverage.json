@@ -841,8 +841,9 @@
     "order.governance.submit",
     "order.governance.discardChange"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：业务员改交期写原因→变更草稿与影响清单→提交→主管在审批中心批准→交期生效并给三个生产分支派交期核对待办（修正只改交期时影响清单仍写“新数量生效”）"
   },
   {
    "id": "order-cancel",
