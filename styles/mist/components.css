@@ -41,7 +41,7 @@
 .mist-tone-ok { color: var(--mist-ok-ink); } .mist-tone-warn { color: var(--mist-warn-ink); } .mist-tone-bad { color: var(--mist-bad-ink); } .mist-tone-accent { color: var(--mist-accent-ink); } .mist-tone-ai { color: var(--mist-ai-ink); }
 
 /* ── 按钮 ── */
-.mist-btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: var(--mist-control-h); padding: 0 16px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); font-weight: var(--mist-fw-medium); white-space: nowrap; transition: background var(--mist-dur), color var(--mist-dur), transform var(--mist-dur-fast); background: var(--mist-fill); color: var(--mist-ink); }
+.mist-btn { text-decoration: none; display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; gap: 8px; height: var(--mist-control-h); padding: 0 16px; border-radius: var(--mist-r-md); font-size: var(--mist-text-md); font-weight: var(--mist-fw-medium); white-space: nowrap; transition: background var(--mist-dur), color var(--mist-dur), transform var(--mist-dur-fast); background: var(--mist-fill); color: var(--mist-ink); }
 .mist-btn:hover { background: var(--mist-fill-2); }
 .mist-btn:active { transform: scale(.98); }
 .mist-btn[data-variant="primary"] { background: var(--mist-accent); color: var(--mist-on-accent); }

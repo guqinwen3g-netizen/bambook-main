@@ -76,6 +76,8 @@ describe('报价管理', () => {
   });
   it('基于已发送报价新建版本：沿用客户与条目，保存时带上来源版本，不改写原报价', async () => {
     const near = code('QT-2026-0005');
+    // The demo holds this customer (no new quotations); release it so the version can be saved.
+    for (const relation of state.market.relations) if (relation.customerId === near.customerId) delete relation.hold;
     await mount(near.id);
     await click('新建版本');
     expect(host.textContent).toContain('新建版本 V2 · QT-2026-0005');
@@ -86,6 +88,15 @@ describe('报价管理', () => {
     await click('下一步'); await click('下一步'); await click('保存报价草稿');
     expect(bridge.current.run).toHaveBeenCalledWith({ type: 'market.quotation.save', payload: { id: undefined, input: expect.objectContaining({ previousId: near.id, customerId: near.customerId, validUntil: '2026-11-30', lines: [expect.objectContaining({ productId: near.lines[0].productId, qty: '1200', price: '29.80' })] }) } });
     expect(near.status).toBe('Sent');
+  });
+  it('冻结客户不能基于原报价新建版本', async () => {
+    const near = code('QT-2026-0005');
+    await mount(near.id);
+    await click('新建版本');
+    expect(host.textContent).toContain('客户往来已冻结');
+    const next = [...host.querySelectorAll('button')].find(b => b.textContent?.trim() === '下一步') as HTMLButtonElement;
+    expect(next.disabled).toBe(true);
+    expect(bridge.current.run).not.toHaveBeenCalled();
   });
   it('已过有效期的已发送报价才能标记失效；未到期时说明原因', async () => {
     await mount(code('QT-2026-0005').id);
