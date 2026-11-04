@@ -163,6 +163,7 @@ describe('order line external English name',()=>{
    expect(f.state.orderLines[0].nameEn).toBe(before);
    f.run({type:'order.governance.submit',payload:{orderId:'order'}});
    expect(f.order.governance.rounds.at(-1)?.kind).toBe('change');
+   const review=getOrderGovernanceReviews(f.state).at(-1)!;expect(review.details.some(item=>item.value.includes('英文品名 COTTON COAT'))).toBe(nameEn.trim()==='COTTON COAT');
    expect(f.state.orderLines[0].nameEn).toBe(before);
    f.run({type:'order.governance.decide',payload:{id:'order',decision:'approved',note:'通过'}},{...f.c,actorId:'leader'});
    expect(f.state.orderLines[0].nameEn).toBe(nameEn.trim()||undefined);

@@ -108,6 +108,7 @@ function event(root:MistState,c:MistContext,order:GovernedOrder,message:string){
 export function assertOrderApproved(root:MistState,orderId:string){const order=getOrder(root,orderId);assertOrderNotTerminated(order);if(order.governance?.status!=='approved'||!order.governance.approvedSnapshot)fail('订单主单尚未批准，不能进入采购或履约','PRECONDITION');if(!sameCommercialSnapshot(snapshot(root,order),order.governance.approvedSnapshot))fail('订单生效内容与批准快照不一致，不能进入履约','PRECONDITION');return order;}
 function reviewLine(snapshot:OrderGovernanceSnapshot,line:OrderGovernanceLine):string{
  const parts=[`${line.qty} ${line.unit} × ${line.price} ${snapshot.currency}`];
+ if(line.nameEn)parts.push('英文品名 '+line.nameEn);
  if(line.breakdown)parts.push(breakdownSummary(line.breakdown,line.unit));
  if(snapshot.type==='garment'){
   parts.push(line.fulfillmentMode?GARMENT_FULFILLMENT_LABELS[line.fulfillmentMode]:'履约模式未记录');
