@@ -663,6 +663,7 @@
 
 ## 7. 进度记录
 
+- 2026-11-04：#649 第二类个人 Agent 合入 main（a124173a），合入前后台完整验证 e9a79d92 通过（前端 2111、test:mist、test:access、tooling、build、双端 tsc、mist:check），已启动 `npm run dev:deploy`。
 - 2026-11-04：第二类个人 Agent（分支 `codex/v2-personal-agent`）：新接口 `POST /personal-agent`、`POST /personal-agent/tasks`、`GET /personal-agent/usage`；后端 2 项、前端 2 项新测试，相关 Agent 套件通过；后台完整验证见 PR。
 - 2026-11-04：#647（第二版第一批）合入 main 并 `npm run dev:deploy` 部署开发服务器，版本 7c601b9e，合入前后台完整验证 788d7da6 通过（前端 2109、test:mist、test:access、tooling、build、双端 tsc、mist:check）。公网未实走。
 - 2026-11-04：AI 政策与三类 Agent 定案写入（#646）；开发服务器装 magpie 模型网关（只听本机回环，未登录订阅）。第二版第一批（分支 `codex/v2-batch`）后台完整验证分段通过（7c9c6e9a、105b6669、01b3ee13、1926f873），本机浏览器实走：索样提单与据单寄出、合同变更提交与审批、收款账户停用、季节里程碑编辑、档案供应来源、订单拆分、辅料采购下单。
