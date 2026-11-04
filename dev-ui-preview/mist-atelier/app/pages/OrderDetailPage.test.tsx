@@ -498,9 +498,14 @@ it('keeps the original handover note in a collapsed record for this exact order'
  const order=store.state!.orders[0];order.handoffAt=context.now;const note='本票一件CPT客户约定及完整交接说明';store.state!.events.unshift({id:'handoff',entityType:'order',entityId:order.id,actor:'原业务员',at:context.now,text:'交接后勤：'+note,fileIds:[]},{id:'other-handoff',entityType:'order',entityId:'another-order',actor:'他人',at:context.now,text:'交接后勤：别的订单说明',fileIds:[]});render();expect(host.textContent).not.toContain(note);act(()=>getByRole(host,'button',{name:'后勤交接记录'}).click());expect(host.textContent).toContain(note);expect(host.textContent).toContain('原业务员');expect(host.textContent).not.toContain('别的订单说明');
 });
 
+it('toggles a shipping-preparation item from its label text',()=>{
+ render();const item=store.state!.orders[0].checklist[0];act(()=>getByText(host,item.label,{selector:'label'}).click());
+ expect(store.run).toHaveBeenCalledWith({type:'order.checklist',payload:{orderId:store.state!.orders[0].id,itemId:item.id,done:!item.done}});
+});
+
 it('keeps a read-only order inspectable and shipping reachable without commercial mutation controls',()=>{
  permissions.ordersWrite=false;store.state!.orders[0].handoffAt=context.now;render();expect(queryByRole(host,'button',{name:'编辑',exact:true})).toBeNull();expect(queryByRole(host,'button',{name:'合同与审批资料',exact:true})).toBeNull();expect(queryByRole(host,'button',{name:'提交主单审批',exact:true})).toBeNull();expect(getByRole(host,'button',{name:'出运准备',exact:true})).toBeTruthy();
- const check=getByRole(host,'checkbox',{name:'拟发范围确认'});expect(check.hasAttribute('disabled')).toBe(true);act(()=>check.click());expect(store.run).not.toHaveBeenCalled();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'编辑条目',exact:true})).toBeNull();
+ const check=getByRole(host,'checkbox',{name:'拟发范围确认'});expect(check.hasAttribute('disabled')).toBe(true);act(()=>check.click());act(()=>getByText(host,'拟发范围确认',{selector:'label'}).click());expect(store.run).not.toHaveBeenCalled();act(()=>getByText(host,'精确金额条目').click());expect(queryByRole(document.body,'button',{name:'编辑条目',exact:true})).toBeNull();
 });
 it('closes a commercial editor when order write authority is revoked and hides unreadable shipping entry',()=>{
  render();act(()=>getByRole(host,'button',{name:'编辑',exact:true}).click());expect(queryByRole(document.body,'dialog')).not.toBeNull();permissions.ordersWrite=false;permissions.shippingRead=false;store.state!.orders[0].handoffAt=context.now;render();expect(queryByRole(document.body,'dialog')).toBeNull();expect(queryByRole(host,'button',{name:'出运准备',exact:true})).toBeNull();expect(store.run).not.toHaveBeenCalled();
