@@ -123,11 +123,11 @@ describe('日常协作场景回归', () => {
     expect(f.state.calendar[0].repeat).toBeUndefined();
   });
   it('通知全部已读只修改可见 ID，空可见集合不修改任何通知', () => {
-    const f = fixture(); f.state.notifications.push(...['mine', 'hidden'].map(id => ({ id, title: id, detail: '', at: f.context.now, readAt: null, target: { view: 'marketing' }, category: 'general' as const })));
+    const f = fixture(); f.state.notifications.push(...['mine', 'hidden'].map(id => ({ recipientIds: [f.context.actorId!], id, title: id, detail: '', at: f.context.now, readAt: null, target: { view: 'marketing' }, category: 'general' as const })));
     f.run({ type: 'notification.readAll', payload: {} }, { ...f.context, visibleNotificationIds: [] });
     expect(f.state.notifications.every(n => n.readAt === null)).toBe(true);
     f.run({ type: 'notification.readAll', payload: {} }, { ...f.context, visibleNotificationIds: ['mine'] });
-    expect(f.state.notifications.find(n => n.id === 'mine')!.readAt).toBe(f.context.now);
+    expect(f.state.notifications.find(n => n.id === 'mine')!.readBy?.[f.context.actorId!]).toBe(f.context.now);
     expect(f.state.notifications.find(n => n.id === 'hidden')!.readAt).toBeNull();
   });
 });
