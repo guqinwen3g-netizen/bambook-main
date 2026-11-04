@@ -937,6 +937,11 @@ export class MistRepository {
         let applied: ReturnType<MistContract['applyMistCommand']>;
         try { applied = this.contract.applyMistCommand(structuredClone(row.state), command, context); }
         catch (error) { if (taxBaseHidden && error instanceof Error && typeof error.message === 'string') error.message = maskTaxBaseText(error.message); throw error; }
+        if (command.type === 'agent.proposal.create') {
+          // External proposals need the same stale-source guard as task proposals. Bind the preview's source version, not the later human confirmation request's version.
+          const proposal = applied.state.agentProposals?.find(p => p.id === applied.result.id);
+          if (proposal && proposal.sourceRevision === undefined) proposal.sourceRevision = input.expectedRevision;
+        }
         if (command.type === 'handover.customer' || command.type === 'handover.account') {
           // Validate against the recipient's current company job, not the manager's grants.
           // Run after domain validation (on the clone), before persisting any change or receipt.
