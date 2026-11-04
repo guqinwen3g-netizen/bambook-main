@@ -112,3 +112,19 @@ it('keeps replacement customs valuation and tax attachments behind customs readi
  const claimReader=projectState(state,actor(['aftersales:read']),empty).state;expect(claimReader.files.map(f=>f.id)).toEqual(['private-claim']);
  const customsReader=projectState(state,actor(['customs:read']),empty).state;expect(customsReader.fulfillment.customs[0].replacementReviews).toHaveLength(1);expect(customsReader.files.map(f=>f.id)).toEqual(['tax-proof']);
 });
+
+describe('lead follow-up history projection', () => {
+  it('ships nested followUps with marketing read access, and hides them without read access', () => {
+    const state = empty(), followUps = [{ at: context.now, actor: '经办人', actorId: 'sales', status: 'Following', note: '客户要求寄样' }];
+    state.market.leads = [{ id: 'lead', source: 'show', note: '最初说明', followUps }, { id: 'legacy', source: 'campaign', note: '旧线索说明' }] as any;
+    const before = structuredClone(state);
+    const visible = projectState(state, actor(['marketing:read']), empty).state;
+    expect(visible.market.leads[0].followUps).toEqual(followUps);
+    expect(visible.market.leads[1].followUps).toBeUndefined();
+    const scoped = projectState(state, actor(['marketing:read']), empty, 'owner', { userIds: ['member'], teamIds: [] }).state;
+    expect(scoped.market.leads[0].followUps).toEqual(followUps);
+    expect(projectState(state, actor(['marketing:write']), empty).state.market.leads).toEqual([]);
+    expect(projectState(state, actor(['seasons:read']), empty).state.market.leads).toEqual([]);
+    expect(state).toEqual(before);
+  });
+});

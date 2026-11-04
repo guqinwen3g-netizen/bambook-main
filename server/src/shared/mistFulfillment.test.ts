@@ -384,3 +384,22 @@ describe('往来冻结的下单与在途边界', () => {
   expect(f.root.fulfillment.purchases.find(p=>p.id===purchaseId)).toEqual(existing);
  });
 });
+
+describe('sample borrower account binding',()=>{
+ it('binds the borrower rather than the lending operator and leaves ambiguous names unbound',()=>{
+  const f=setup();const id=f.run({type:'fulfillment.samples.create',payload:{name:'面料实物',category:'面料',form:'米样',quantity:10,unit:'米',location:'A',size:'',color:'',source:{kind:'manual',description:'实际来样'},fileIds:[],note:''}}).id!;
+  const payload={id,kind:'lend' as const,quantity:1,person:'借用同事',location:'外借',note:'',expectedReturn:'2026-10-15'};
+  const directory=[...f.ctx.members!,{id:'borrower',name:'借用同事',active:true,groups:[] as ('fabric'|'garment')[]}];
+  const loan=f.run({type:'fulfillment.samples.move',payload},{...f.ctx,members:directory}).id!;
+  expect(f.root.fulfillment.sampleMovements.find(m=>m.id===loan)).toMatchObject({borrowerId:'borrower',actor:'业务员',expectedReturn:'2026-10-15'});
+  const ambiguous=f.run({type:'fulfillment.samples.move',payload},{...f.ctx,members:[...directory,{id:'duplicate',name:'借用同事',active:true,groups:[]}]}).id!;
+  expect(f.root.fulfillment.sampleMovements.find(m=>m.id===ambiguous)?.borrowerId).toBe('');
+  const sameNames=[...directory,{id:'duplicate',name:'借用同事',active:true,groups:[] as ('fabric'|'garment')[]}];
+  const bound=f.run({type:'fulfillment.samples.move',payload:{...payload,borrowerId:'duplicate',person:'伪造显示名'}},{...f.ctx,members:sameNames}).id!;
+  expect(f.root.fulfillment.sampleMovements.find(m=>m.id===bound)).toMatchObject({borrowerId:'duplicate',person:'借用同事'});
+  const before=structuredClone(f.root);
+  expect(()=>f.run({type:'fulfillment.samples.move',payload:{...payload,borrowerId:'foreign'}},{...f.ctx,members:directory})).toThrow(/本公司/);
+  expect(()=>f.run({type:'fulfillment.samples.move',payload:{...payload,borrowerId:'duplicate'}},{...f.ctx,members:[...directory,{id:'duplicate',name:'停用人',active:false,groups:[]}]})).toThrow(/停用/);
+  expect(f.root).toEqual(before);
+ });
+});
