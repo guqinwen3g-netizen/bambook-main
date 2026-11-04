@@ -11,6 +11,8 @@ type ReleaseRisk = { id: string; signalKey?: string; state: string; release?: { 
 export function heldShipmentRelease(state: HoldState & { platform?: { risks?: ReleaseRisk[] } }, customerId: string): { held: string; risk?: ReleaseRisk } {
   const r = (state.market?.relations || []).find(x => x.hold && x.customerId === customerId);
   if (!r?.hold) return { held: '' };
-  const risk = (state.platform?.risks || []).find(x => x.signalKey === 'relation-hold:' + r.id && x.state !== 'Resolved' && !!x.release && !x.release.shipmentId);
+  // An unused approval from a previous freeze is not authority for a new hold.
+  // Keep the historical approval intact; only approvals made during this hold qualify.
+  const risk = (state.platform?.risks || []).find(x => x.signalKey === 'relation-hold:' + r.id && x.state !== 'Resolved' && !!x.release && !x.release.shipmentId && Date.parse(x.release.at) >= Date.parse(r.hold!.at));
   return { held: `${r.name} 往来已冻结：${r.hold.reason}`, risk };
 }

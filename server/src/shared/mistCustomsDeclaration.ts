@@ -103,7 +103,11 @@ export function draftCustomsDeclaration(root: MistState, shipment: FulfillmentSh
     const minor=splitAmountMinor(portions.map(row=>row.quantity),price,line.quantity);
     for(let i=0;i<portions.length;i++){
       const part=portions[i],cls=classificationForStyle(root,ol.style,part.color);
-      if(!cls){blockers.push(`款号 ${ol.style || '（未填写）'}${part.color?` · ${part.color}`:` · ${ol.name}`} 尚未建立商品归类`);continue;}
+      if(!cls){
+        // A colour-scoped classification cannot match goods packed without a colour; say so instead of "missing".
+        const scoped=!part.color&&readCustomsClassifications(root).some(c=>!c.voided&&c.colors?.length&&c.styles.some(s=>styleKey(s)===styleKey(ol.style)));
+        blockers.push(scoped?`款号 ${ol.style}：已有归类限定了颜色，但本票装箱未登记颜色；请把归类改为适用全部颜色，或在装箱中登记面料颜色`:`款号 ${ol.style || '（未填写）'}${part.color?` · ${part.color}`:` · ${ol.name}`} 尚未建立商品归类`);continue;
+      }
       const gk=`${cls.id}|${unit}|${order.currency}`,g=groups.get(gk)||{cls,unit,currency:order.currency,lines:[]};
       g.lines.push({key:part.color?`${key}:${colorKey(part.color)}`:key,style:ol.style,quantity:part.quantity,amountMinor:minor[i],net:part.net});groups.set(gk,g);
     }

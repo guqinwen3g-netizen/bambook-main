@@ -43,7 +43,7 @@ import { auditFromReceipt, auditMatchesParent, auditEntry, projectAgentAudit, re
 import { markAgentProposalConfirmed, agentCommandRisk, AI_WRITE_SCOPES, AGENT_RISK_LABEL } from '../shared/mistAgentProposals';
 import { canGenerateScopedStatement, scopedMaterialIssueTargets, scopedFabricAccess, scopedReferenceViolation, scopedTargetViolation, scopedVisibility, scopedWriteViolation, type MistDataScope } from '../shared/mistDataScope';
 import { buildTeamScopeGraph, resolveTeamScope, normalizeTeamScopeInput, previewTeamScope } from '../shared/mistTeamScope';
-import { buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
+import { accountOwnedObjects, buildMemberDirectory, MIST_MEMBER_DIRECTORY_COMMANDS } from '../shared/mistAccounts';
 import { buildLoadedAuthTokenPayload, loadUserWithRoles } from '../auth/tokenHelpers';
 import { createLoginRateLimiter, type LoginRateLimiter } from '../auth/loginRateLimiter';
 import { primaryImageIds } from '../shared/mistPrimaryImage';
@@ -937,6 +937,28 @@ export class MistRepository {
         let applied: ReturnType<MistContract['applyMistCommand']>;
         try { applied = this.contract.applyMistCommand(structuredClone(row.state), command, context); }
         catch (error) { if (taxBaseHidden && error instanceof Error && typeof error.message === 'string') error.message = maskTaxBaseText(error.message); throw error; }
+        if (command.type === 'agent.proposal.create') {
+          // External proposals need the same stale-source guard as task proposals. Bind the preview's source version, not the later human confirmation request's version.
+          const proposal = applied.state.agentProposals?.find(p => p.id === applied.result.id);
+          if (proposal && proposal.sourceRevision === undefined) proposal.sourceRevision = input.expectedRevision;
+        }
+        if (command.type === 'handover.customer' || command.type === 'handover.account') {
+          // Validate against the recipient's current company job, not the manager's grants.
+          // Run after domain validation (on the clone), before persisting any change or receipt.
+          const modules = new Set<string>();
+          if (command.type === 'handover.customer') {
+            modules.add('relations');
+            if (command.payload.orderIds?.length) modules.add('orders');
+          } else {
+            const moduleByKind = { customer: 'relations', opportunity: 'relations', order: 'orders', development: 'products', fabric: 'products', supplier: 'suppliers' };
+            for (const object of accountOwnedObjects(row.state, command.payload.fromUserId.trim())) modules.add(moduleByKind[object.kind]);
+            if (row.state.internalDeliveries?.some(delivery => delivery.receiverId === command.payload.fromUserId && applied.state.internalDeliveries?.find(next => next.id === delivery.id)?.receiverId !== delivery.receiverId)) modules.add('orders');
+          }
+          if (modules.size) {
+            const recipient = await this.reviewSubject(db, actor, command.payload.toUserId.trim(), '新负责人');
+            if ([...modules].some(module => !hasScope(recipient, `${module}:read` as any) || !hasScope(recipient, `${module}:write` as any))) fail('PRECONDITION', '新负责人缺少接手业务的查看或办理权限', 422);
+          }
+        }
         const remoteQueued = await enqueueMailState(db, row, applied.state, command, actor, prior, Date.now(),humanTaskProposal?.taskId);
         if (remoteQueued) applied.result = {...applied.result, remoteQueued:true};
         if (command?.type === 'email.server.state') await completeMailState(db,workspaceId,command.payload.operationId,command.payload.attemptId,command.payload.observation,(prior as MailSyncActor).mailSyncLease!.id);

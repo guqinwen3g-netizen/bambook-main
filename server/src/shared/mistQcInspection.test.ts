@@ -71,6 +71,15 @@ describe('incoming inspection (IQC)',()=>{
   expect(f.state.fulfillment.stock[0]).toMatchObject({available:0,locked:0});
   f.run({type:'fulfillment.procurement.return',payload:{receiptId:receipt.id,quantity:3800,disposition:'replace',date:'2026-10-13',evidence:'退回织厂重织'}});
  });
+ it.each(['pass','reject'] as const)('does not rewrite an already disposed incoming %s lot with a later report',(result)=>{
+  const {f,task,qc}=iqc();
+  qc({type:'fulfillment.qc.claim',payload:{id:task.id,domain:'fabric'}});
+  const report=(result:'pass'|'reject')=>qc({type:'fulfillment.qc.report',payload:{id:task.id,domain:'fabric',result,report:'IQC-FINAL',opinion:'实际验布',measurements:[],fileIds:[],reviewedAt:'2026-10-13T12:00:00Z'}});
+  report(result);f.run({type:'fulfillment.qc.incoming.close',payload:{id:task.id,evidence:'按检验结论处置'}});
+  const before=structuredClone(f.state);
+  expect(()=>report(result==='pass'?'reject':'pass')).toThrow('来料已处置');
+  expect(f.state).toEqual(before);
+ });
  it('leaves stock usable when the purchase does not require IQC',()=>{
   const f=fabricStagedFixture();
   f.run({type:'fulfillment.procurement.receive',payload:{id:f.greige,quantity:100,rejected:0,destination:'warehouse',location:'仓',date:'2026-10-13',evidence:'送货单',fileIds:[]}});

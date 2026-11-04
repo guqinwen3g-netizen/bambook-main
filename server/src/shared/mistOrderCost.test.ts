@@ -73,6 +73,32 @@ describe('订单实际成本与费用分摊', () => {
     f.run('cost.expense.void', { id, reason: '货代重开发票' });
     expect(activeExpenses(f.state).some(x => x.id === id)).toBe(false);
   });
+  it('费用已部分付款时须先冲回付款、撤回申请、作废票据，才可作废费用', () => {
+    const f = fixture(), supplier = f.state.market.suppliers[0];
+    const expense = f.run('cost.expense.register', { category: 'freight', vendor: '模拟货代', ref: 'EXP-PARTIAL', date: '2026-10-15', currency: 'CNY', amount: 1000.01, scope: 'orders', orderIds: [f.o17.id], basis: 'equal' });
+    const bill = f.run('cost.expense.payable', { id: expense.id, supplierId: supplier.id, due: '2026-11-15' });
+    let s: MistState = f.state, n = 0;
+    const run = (type: string, payload: Record<string, unknown>, actor = 'finance') => {
+      const r = applyMistCommand(s, { type, payload } as MistCommand, { id: () => `expense-payment-${++n}`, now: '2026-10-18T02:00:00Z', actorId: actor, actorName: actor, authority: { supplier: {}, paymentTierReviewerIds: { pay_lt5: ['manager'], pay_gt5: ['manager'], pay_new_supplier: ['director'] } } } as MistContext);
+      s = r.state; return r.result;
+    };
+    const request = run('payable.request.submit', { purpose: 'bill', supplierId: supplier.id, currency: 'CNY', lines: [{ billId: bill.id, amount: 600.01 }], reason: '按票分期付款' }, 'buyer');
+    run('payable.request.decide', { id: request.id, decision: 'approved', note: '核对一致' }, 'manager');
+    if (s.payables!.requests!.find(r => r.id === request.id)!.state === 'pending') run('payable.request.decide', { id: request.id, decision: 'approved', note: '首笔加签' }, 'director');
+    const paid = run('payable.payment.register', { requestId: request.id, date: '2026-10-18', amount: 600.01, reference: 'EXP-BANK', allocations: [{ billId: bill.id, amount: 600.01 }] });
+    const before = structuredClone(s);
+    expect(() => run('cost.expense.void', { id: expense.id, reason: '更正' })).toThrow('请先在应付待办作废');
+    expect(() => run('payable.bill.void', { id: bill.id, reason: '更正' })).toThrow('先冲回');
+    expect(s).toEqual(before);
+    run('payable.payment.reverse', { supplierPaymentId: paid.id, reason: '银行退回' });
+    expect(() => run('payable.bill.void', { id: bill.id, reason: '更正' })).toThrow('先撤回申请');
+    run('payable.request.cancel', { id: request.id, reason: '重新登记费用' }, 'buyer');
+    run('payable.bill.void', { id: bill.id, reason: '更正' });
+    run('cost.expense.void', { id: expense.id, reason: '更正' });
+    expect(activeExpenses(s).some(e => e.id === expense.id)).toBe(false);
+    expect(() => run('cost.expense.payable', { id: expense.id, supplierId: supplier.id, due: '2026-11-15' })).toThrow('已作废');
+  });
+
   it('最大余数法分摊到分，合计不差一分', () => {
     expect(splitMinor(100, [1, 1, 1])).toEqual([34, 33, 33]);
     expect(splitMinor(1001, [2, 1]).reduce((a, b) => a + b, 0)).toBe(1001);

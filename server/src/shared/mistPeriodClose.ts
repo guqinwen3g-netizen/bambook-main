@@ -44,9 +44,17 @@ function datedFacts(root: Root): Dated[] {
     for (const c of i.bankCharges || []) put('charge:' + c.id, instantMonth(c.reversed?.at || c.at), c);
     for (const w of i.writeoffs || []) put('writeoff:' + w.id, instantMonth(w.reversed?.at || w.at), w);
   }
-  const pay = (root as unknown as { payables?: { bills?: Array<{ id: string; date?: string; invoiceDate?: string }>; payments?: Array<{ id: string; date?: string }> } }).payables;
-  for (const b of pay?.bills || []) put('bill:' + b.id, month(b.invoiceDate || b.date), b);
+  const pay = root.payables;
+  for (const b of pay?.bills || []) put('bill:' + b.id, month(b.invoiceDate), b);
   for (const p of pay?.payments || []) put('supplierPayment:' + p.id, month(p.date), p);
+  const supplierPaymentDate = new Map((pay?.payments || []).map(p => [p.id, p.date]));
+  const allocationDate = new Map((pay?.allocations || []).map(a => [a.id, supplierPaymentDate.get(a.supplierPaymentId)]));
+  for (const a of pay?.allocations || []) put('supplierAllocation:' + a.id, month(allocationDate.get(a.id)), a);
+  // Reversals are separate records, not mutations of the original payment/allocation.
+  // Their effect belongs to the original month even when registered after its close.
+  for (const r of pay?.reversals || []) put('supplierReversal:' + r.id, month(r.kind === 'payment' ? supplierPaymentDate.get(r.targetId) : allocationDate.get(r.targetId)), r);
+  for (const s of pay?.settlements || []) if (s.confirmation) put('supplierSettlement:' + s.id, instantMonth(s.confirmation.at), s);
+  for (const d of pay?.deductions || []) put('supplierDeduction:' + d.id, instantMonth(d.at), d);
   for (const r of (root as unknown as { fxPeriodRates?: Array<{ id: string; month: string }> }).fxPeriodRates || []) put('fxRate:' + r.id, r.month, r);
   return out;
 }

@@ -25,6 +25,15 @@ describe('报关申报资料',()=>{
     expect(customsItemsStale(f.state,c)).toBe(false);
     (f.state.fulfillment.packing.find(row=>row.id==='navy') as any).fabricColor='本白';expect(customsItemsStale(f.state,c)).toBe(true);
   });
+  it('says a colour-scoped classification does not match single-colour goods packed without a colour',()=>{
+    const f=fixture(),s=f.state,ship=s.fulfillment.shipments[0],line=s.orderLines.find(l=>l.id===ship.lines[0].lineId)!;
+    s.orders.find(o=>o.id===line.orderId)!.type='fabric';Object.assign(line,{style:'FAB-3',unit:'米'});Object.assign(ship,{domain:'fabric'});
+    const cls={family:'fabric',hsCode:'5209320000',declaredName:'染色棉弹力斜纹机织物',brandType:'0',preference:'0',styles:['FAB-3'],elements:['机织','染色','棉 97% 氨纶 3%','148cm，285g/m²','无品牌'],legalUnit:'米'};
+    f.run('fulfillment.customs.classify.save',{...cls,colors:['藏青']});
+    expect(draftCustomsDeclaration(f.state,ship).blockers).toEqual(['款号 FAB-3：已有归类限定了颜色，但本票装箱未登记颜色；请把归类改为适用全部颜色，或在装箱中登记面料颜色']);
+    f.run('fulfillment.customs.classify.save',{...cls,id:readCustomsClassifications(f.state)[0].id,colors:[]});
+    expect(draftCustomsDeclaration(f.state,ship).blockers).toEqual([]);
+  });
   it('requires disjoint colour scopes for duplicate fabric styles and retains legacy wildcard protection',()=>{
     const f=fixture(),base={family:'fabric',hsCode:'5513110000',declaredName:'面料',brandType:'0',preference:'0',styles:['FAB-1'],elements:['机织','漂白','65%涤纶/35%棉','150cm','无品牌']};
     f.run('fulfillment.customs.classify.save',{...base,colors:['本白']});

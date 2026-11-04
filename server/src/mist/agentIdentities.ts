@@ -38,7 +38,7 @@ export async function identityRecord(db:any,workspaceId:string,id:string){const 
 export function identityView(c:AgentIdentity,actor:TokenPayload,now:number,ownerActive=true,ownerName=c.ownerName):AgentIdentityView{
   const key=c.key,own=c.ownerId===actor.userId;
   const state=!c.enabled?'disabled':!ownerActive?'invalid':!key?'pending':key.revokedAt?'revoked':key.expiresAt<=now?'expired':own&&(!hasScope(actor,'ai:chat')||key.credentialVersion!==actor.credentialVersion)?'invalid':'active';
-  return{id:c.id,name:c.name,ownerId:c.ownerId,ownerName,mode:c.mode,version:c.version,...(c.kind?{kind:c.kind}:{}),state,createdAt:c.createdAt,...(key?{expiresAt:new Date(key.expiresAt).toISOString(),activatedAt:new Date(key.issuedAt).toISOString()}:{}),canManage:serviceCanManage(actor),canIssue:own&&c.enabled&&hasScope(actor,'ai:chat'),canRevoke:(own||serviceCanManage(actor))&&!!key&&!key.revokedAt};
+  return{id:c.id,name:c.name,ownerId:c.ownerId,ownerName,mode:c.mode,version:c.version,...(c.kind?{kind:c.kind}:{}),state,createdAt:c.createdAt,...(key?{expiresAt:new Date(key.expiresAt).toISOString(),activatedAt:new Date(key.issuedAt).toISOString()}:{}),canManage:serviceCanManage(actor),canIssue:own&&c.kind!=='personal'&&c.enabled&&hasScope(actor,'ai:chat'),canRevoke:(own||serviceCanManage(actor))&&!!key&&!key.revokedAt};
 }
 async function save(db:any,row:any,c:AgentIdentity,next:AgentIdentity){
   const updated=await db.mistCommandReceipt.updateMany({where:{id:row.id,workspaceId:c.workspaceId,inputHash:SERVICE_HASH,result:{path:[SERVICE_FIELD,'version'],equals:c.version}},data:{actorId:next.ownerId,result:{revision:0,[SERVICE_FIELD]:next}}});
@@ -110,6 +110,8 @@ export async function issueServiceKey(db:any,actor:TokenPayload,workspaceId:stri
   if(Object.keys(input).some(k=>!['requestId','version'].includes(k)))fail('INVALID_INPUT','密钥字段无效',400);
   const rid=requestId(input.requestId),{row,value:c}=await identityRecord(db,workspaceId,id);
   if(c.ownerId!==actor.userId)fail('FORBIDDEN','长期凭据须由责任人本人启用',403);
+  // Personal credentials belong to the platform executor and must never be exported through external Agent activation (including idempotent retries).
+  if(c.kind==='personal')fail('FORBIDDEN','个人 Agent 密钥仅供服务端使用',403);
   if(!c.enabled||!hasScope(actor,'ai:chat'))fail('FORBIDDEN','Agent身份或责任人权限已停用',403);
   if(c.lastRequestId===rid&&c.lastAction==='issued'&&c.key){
     if(input.version!==c.lastExpectedVersion||c.key.revokedAt||c.key.expiresAt<=now||c.key.credentialVersion!==actor.credentialVersion||now-c.key.issuedAt>5*60_000)fail('AGENT_IDENTITY_CHANGED','密钥已更新，请重新轮换',409);

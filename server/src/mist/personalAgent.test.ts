@@ -3,6 +3,10 @@ import request from 'supertest';import {mkdtemp,rm} from 'node:fs/promises';impo
 import {createMistLocalRuntime} from './local';import {createMistServer} from './server';
 import type {MistPlatformTaskWorker} from './platformTaskWorker';
 import type {LlmCompletionInput} from '../ai/llmProviders';
+import {identityRecord,resolveServiceCredential,ensurePersonalIdentity,assertServiceLease,serviceActorFromIdentity} from './agentIdentities';
+import {MemoryMistDatabase} from './__tests__/support';
+import {AGENT_OPERATE_CEILING} from './agentDelegation';
+import {createHash} from 'node:crypto';
 
 let directory:string;const workers:MistPlatformTaskWorker[]=[];
 beforeEach(async()=>{directory=await mkdtemp(path.join(tmpdir(),'mist-personal-agent-'));vi.stubEnv('MIST_LOCAL_WORKSPACE','1');vi.stubEnv('NODE_ENV','test');});
@@ -49,4 +53,59 @@ it('administrators can stop a personal Agent but cannot hand it to someone else;
  await admin.client.post(admin.base+'/agent-identities/'+mine.id+'/configure').send({requestId:randomUUID(),version:mine.version,name:mine.name,ownerId:'demo-sales',mode:'operate',enabled:false}).expect(200);
  await sales.client.post(sales.base+'/personal-agent').send({}).expect(403);
  await sales.client.post(sales.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'x',instructions:'y'}).expect(403);
+});
+
+it('never exports a personal Agent key through the external service identity issue endpoint',async()=>{
+ const {app,local}=server(vi.fn(async()=>'')),sales=await human(app,'demo-sales');
+ const mine=(await sales.client.post(sales.base+'/personal-agent').send({}).expect(200)).body.identity;
+ expect(mine.canIssue).toBe(false);
+ const before=(await identityRecord(local.database,sales.workspace.id,mine.id)).value;
+ for(const input of [{requestId:randomUUID(),version:mine.version},{requestId:before.lastRequestId,version:before.lastExpectedVersion}]){
+  const response=await sales.client.post(sales.base+'/agent-identities/'+mine.id+'/issue').send(input).expect(403);
+  expect(JSON.stringify(response.body)).not.toMatch(/bma1_/);
+ }
+ expect((await identityRecord(local.database,sales.workspace.id,mine.id)).value).toEqual(before);
+});
+
+it.each(['password','permissions'] as const)('rotates personal credentials after %s changes and invalidates both the old key and an in-flight lease',async(change)=>{
+ const db=new MemoryMistDatabase(),workspaceId=randomUUID(),now=Date.now();
+ const actor:any={userId:'staff',displayName:'模拟员工',roles:[],permissions:[...AGENT_OPERATE_CEILING],authorizationLoaded:true,credentialVersion:'v1'};
+ // Deterministic test-only signer; no model, network or real credential is used.
+ const make=(workspace:string,id:string,generation:string)=>'bma1_'+workspace+'_'+id+'_'+createHash('sha256').update(generation).digest('base64url');
+ const first=await ensurePersonalIdentity(db,actor,workspaceId,make,now);
+ const original=(await identityRecord(db,workspaceId,first.id)).value;
+ const token=make(workspaceId,first.id,original.key!.generation),old=await resolveServiceCredential(db,token);
+ if(change==='password')actor.credentialVersion='v2';else actor.permissions=['ai:chat','emails:read'];
+ const next=await ensurePersonalIdentity(db,actor,workspaceId,make,now+1);
+ expect(next.version).toBe(first.version+1);expect(JSON.stringify(next)).not.toMatch(/bma1_|generation|credentialVersion|ceiling/);
+ await expect(resolveServiceCredential(db,token)).rejects.toMatchObject({code:'AGENT_KEY_INVALID',status:401});
+ await expect(assertServiceLease(db,actor,old.agentServiceLease!,now+1)).rejects.toMatchObject({code:'AGENT_KEY_INVALID',status:401});
+ const current=(await identityRecord(db,workspaceId,first.id)).value;
+ expect(current.key!.generation).not.toBe(original.key!.generation);
+ expect(current.key!.credentialVersion).toBe(actor.credentialVersion);
+ expect(current.key!.ceiling.every(scope=>actor.permissions.includes(scope))).toBe(true);
+ expect((await resolveServiceCredential(db,make(workspaceId,first.id,current.key!.generation))).userId).toBe(actor.userId);
+ expect((await ensurePersonalIdentity(db,actor,workspaceId,make,now+2)).version).toBe(next.version);
+});
+
+it('stops an in-flight personal task on administrator disable, without executing the pending model tool',async()=>{
+ let release!:(value:string)=>void,entered!:()=>void;
+ const held=new Promise<string>(resolve=>{release=resolve;}),started=new Promise<void>(resolve=>{entered=resolve;});
+ const complete=vi.fn(async()=>{entered();return held;});
+ const {app,local,worker}=server(complete),sales=await human(app,'demo-sales'),admin=await human(app,'demo-admin');
+ worker.start(3_600_000);
+ const mine=(await sales.client.post(sales.base+'/personal-agent').send({}).expect(200)).body.identity;
+ const before=(await identityRecord(local.database,sales.workspace.id,mine.id)).value;
+ const lease=serviceActorFromIdentity(before,before.key!.hash).agentServiceLease!;
+ const task=(await sales.client.post(sales.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'核对',instructions:'只核对资料'}).expect(201)).body.item;
+ await worker.tick();await started;
+ await admin.client.post(admin.base+'/agent-identities/'+mine.id+'/configure').send({requestId:randomUUID(),version:mine.version,name:mine.name,ownerId:mine.ownerId,mode:mine.mode,enabled:false}).expect(200);
+ await expect(assertServiceLease(local.database,{userId:mine.ownerId} as any,lease,Date.now())).rejects.toMatchObject({code:'AGENT_KEY_INVALID'});
+ release(tool('bambook_execute',{command:{type:'calendar.save',payload:{title:'不应写入',date:'2026-11-05',time:'10:00',note:''}}}));
+ await worker.settled();
+ expect(complete).toHaveBeenCalledTimes(1);
+ expect((await sales.client.get(sales.base+'/agent-tasks/'+task.id).expect(200)).body.item.state).toBe('access_changed');
+ const ws=(await sales.client.get(sales.base).expect(200)).body.workspace;
+ expect(ws.state.calendar.some((item:any)=>item.title==='不应写入')).toBe(false);
+ await sales.client.post(sales.base+'/personal-agent/tasks').send({requestId:randomUUID(),name:'新任务',instructions:'不应受理'}).expect(403);
 });

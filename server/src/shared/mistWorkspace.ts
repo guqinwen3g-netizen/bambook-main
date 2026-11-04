@@ -1120,6 +1120,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const blocked=developmentRoundBlocker(state,dev)||devStageHandoverBlocker(v,p.stageIndex);if(blocked)throw new MistCommandError('PRECONDITION',blocked);
       if((v.stageHandovers||[]).some(row=>row.stageIndex===p.stageIndex))throw new MistCommandError('CONFLICT','该道工序已登记交接',409);
       const handoverDate=date(p.date,'交接日期');if(handoverDate>mistBusinessDate(context.now))throw new MistCommandError('VALIDATION','交接日期不得在未来');
+      if((v.stageHandovers||[]).some(row=>row.stageIndex<p.stageIndex&&row.date>handoverDate))throw new MistCommandError('VALIDATION','交接日期不能早于前道交接日期');
       const row:DevStageHandover={id:context.id(),stageIndex:p.stageIndex,quantity:positive(Number(p.quantity),'交接数量'),unit:text(p.unit,'交接单位',true,20),date:handoverDate,note:text(p.note,'交接依据',true,1000),at:context.now,actor:context.actorName};
       v.stageHandovers=[...(v.stageHandovers||[]),row];updateDev(state,dev,context);
       const from=v.stages![p.stageIndex],to=v.stages![p.stageIndex+1];
@@ -1323,12 +1324,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(p.candidates!==undefined&&(!Array.isArray(p.candidates)||p.candidates.length>30))throw new MistCommandError('VALIDATION','候选面料格式无效');
       // ord10：候选逐条登记供应商、品号、价格、MOQ、交期；供应商须在档案中，面料档案可选。
       const candidates=((p.candidates||[]) as Array<Omit<MistFabricCandidate,'id'|'supplier'>>).map(c=>{const sup=find(state.market.suppliers,text(c.supplierId,'候选供应商'),'候选供应商');if(c.productId)find(state.market.products,c.productId,'面料档案');const price=text(c.price||'','价格',false,40);if(price&&!/^\d+(\.\d{1,4})?$/.test(price))throw new MistCommandError('VALIDATION','候选价格须为数字');return{id:context.id(),supplierId:sup.id,supplier:sup.name,...(c.productId?{productId:c.productId}:{}),article:text(c.article,'品号',true,80),price,currency:text(c.currency||'CNY','币种',false,3).toUpperCase(),moq:text(c.moq||'','MOQ',false,40),leadDays:text(c.leadDays||'','交期',false,40),note:text(c.note||'','说明',false,500)};});
-      f.answer=text(p.answer,'答复',!candidates.length);f.fileIds=files(state,p.fileIds);if(candidates.length)f.candidates=candidates;f.state='待发起人确认';f.tone='accent';f.sub=candidates.length?`${candidates.length} 个候选`:'已提交答复';
+      f.answer=text(p.answer,'答复',!candidates.length);f.fileIds=files(state,p.fileIds);if(p.candidates!==undefined)f.candidates=candidates;f.state='待发起人确认';f.tone='accent';f.sub=candidates.length?`${candidates.length} 个候选`:'已提交答复';
       event(state,context,'fabric',f.id,'提交寻样答复'+(candidates.length?`（${candidates.length} 个候选）`:''));result={id:f.id};break;
     }
     case 'fabric.confirm': {
-      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled)throw new MistCommandError('PRECONDITION','寻样已取消');if(!f.answer&&!f.candidates?.length)throw new MistCommandError('PRECONDITION','尚无可确认答复');
-      if(p.approved&&f.candidates?.length&&!f.candidates.some(c=>c.id===p.candidateId))throw new MistCommandError('VALIDATION','请选择确认采用的候选面料');
+      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled||f.confirmed)throw new MistCommandError('PRECONDITION','寻样已结案或已取消');if(!f.answer&&!f.candidates?.length)throw new MistCommandError('PRECONDITION','尚无可确认答复');
+      if(p.approved&&(f.candidates?.length||p.candidateId)&&!f.candidates?.some(c=>c.id===p.candidateId))throw new MistCommandError('VALIDATION','请选择确认采用的候选面料');
       f.confirmed=!!p.approved;if(p.approved&&p.candidateId)f.chosenCandidateId=p.candidateId;f.state=p.approved?'已结案':'待补充';f.tone=p.approved?'ok':'warn';f.sub=text(p.note,'确认意见',!p.approved);
       const chosen=f.candidates?.find(c=>c.id===f.chosenCandidateId);
       event(state,context,'fabric',f.id,p.approved?'确认寻样答复'+(chosen?`：采用 ${chosen.supplier} ${chosen.article}`:''):'退回补充寻样');result={id:f.id};break;
@@ -1462,8 +1463,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const currency=text(p.currency,'币种',true,3).toUpperCase();if(!/^[A-Z]{3}$/.test(currency))throw new MistCommandError('VALIDATION','币种无效');
       const payDay=date(p.date),from=p.accountId===undefined||p.accountId===''?undefined:find(state.bankAccounts||[],text(p.accountId,'付款账户'),'付款账户');
       if(from)assertAccountUsable(from,currency,payDay);
-      state.payments.push({id,code:'PAY-'+context.now.slice(0,4)+'-'+String(state.payments.length+1).padStart(4,'0'),date:payDay,payee:text(p.payee,'收款方'),amount,currency,ref:text(p.ref,'备注',false),origin:'finance',...(from?{accountId:from.id}:{})});
-      event(state,context,'payment',id,'登记付款凭证'+(from?'（付出 '+from.code+'）':''));result={id};break;
+      const payee=text(p.payee,'收款方');
+      // 直接登记只有收款方文字，没有组织 ID：按组织名称、别名或供应商名称精确匹配，留登记时冻结事实，不拦银行实付。
+      const payeeKey=payee.trim().toLowerCase();
+      const held=(state.market?.relations||[]).filter(r=>r.hold&&r.supplierId&&[r.name,...r.aliases,state.market.suppliers.find(s=>s.id===r.supplierId)?.name].some(name=>name?.trim().toLowerCase()===payeeKey)).map(r=>relationHoldReason(state,{supplierId:r.supplierId})).filter(Boolean);
+      state.payments.push({id,code:'PAY-'+context.now.slice(0,4)+'-'+String(state.payments.length+1).padStart(4,'0'),date:payDay,payee,amount,currency,ref:text(p.ref,'备注',false),origin:'finance',...(from?{accountId:from.id}:{})});
+      event(state,context,'payment',id,'登记付款凭证'+(from?'（付出 '+from.code+'）':'')+(held.length?'；登记时：'+held.join('；'):''));result={id};break;
     }
     case 'finance.receivable.bankCharge': {
       const i=find(state.invoices,text(p.invoiceId,'应收'),'应收'),r=find(state.receipts,text(p.receiptId,'到账流水'),'到账流水');
@@ -1654,19 +1659,14 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       event(state,context,'finance',r.id,'冲回'+(r.kind==='lock'?'锁汇 ':'结汇 ')+r.code+'：'+reason+'；原记录保留');result={id:r.id};break;
     }
     case 'customer.update': {
-      const c=find(state.customers,p.id,'客户');
-      if(p.patch&&(p.patch as Record<string,unknown>).owner!==undefined)throw new MistCommandError('VALIDATION','负责人须按账号选择');
-      for(const key of ['name','country','city','industry','grade','currency','terms','incoterm','categories','since'] as const)if(p.patch[key]!==undefined)c[key]=text(p.patch[key],key,key==='name');
-      let ownerText='';if(p.patch.ownerId!==undefined&&p.patch.ownerId!==c.ownerId){const next=resolveMember(context,p.patch.ownerId,'客户负责人');ownerText=ownerChangeText('负责人',c.owner,next.name);c.owner=next.name;c.ownerId=next.id;}
-      if(p.patch.creditLimit!==undefined){mistMoneyMinor(p.patch.creditLimit);c.creditLimit=p.patch.creditLimit;}
-      state.devs.filter(d=>d.customerId===c.id).forEach(d=>{d.customer=c.name;d.values.customer=c.name;});state.orders.filter(o=>o.customerId===c.id).forEach(o=>{o.customer=c.name;});
-      event(state,context,'customer',c.id,ownerText?'更新客户档案 · '+ownerText:'更新客户档案');result={id:c.id,customerId:c.id};break;
+      // Both public entry points must share validation and the linked relation update.
+      result=applyMarketCommand(state,{type:'market.customer.update',payload:p},context);break;
     }
     case 'member.groups.set': {
       result=setMemberGroups(state,p,context);break;
     }
     case 'contact.save': {
-      find(state.customers,p.customerId,'客户');const id=p.id||context.id();if(p.id)find(state.contacts,id,'联系人');
+      find(state.customers,p.customerId,'客户');const id=p.id||context.id();if(p.id){const old=find(state.contacts,id,'联系人');if(old.customerId!==p.customerId)throw new MistCommandError('VALIDATION','联系人不能改到其他客户');}
       const email=text(p.email,'邮箱',false,254);if(email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new MistCommandError('VALIDATION','邮箱格式无效');
       const row:MistContact={id,customerId:p.customerId,name:text(p.name,'姓名',true,120),role:text(p.role,'职务',false,240),email,phone:text(p.phone,'电话',false,80),tone:'accent'};
       state.contacts=state.contacts.filter(c=>c.id!==id);state.contacts.push(row);event(state,context,'customer',p.customerId,'保存联系人 '+row.name);result={id,contactId:id};break;
@@ -1708,8 +1708,11 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
     case 'calendar.save': {
       const id=p.id||context.id();if(p.id)find(state.calendar,id,'日程');
       if(!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(p.time))throw new MistCommandError('VALIDATION','时间无效');
-      const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?context.actorId:undefined;
-      if(old?.ownerId&&old.ownerId!==context.actorId&&!old.participants?.some(x=>x.id===context.actorId))throw new MistCommandError('FORBIDDEN','只能修改本人或参与的个人日程',403);
+      const old=state.calendar.find(e=>e.id===id),mine=p.personal===undefined?old?.ownerId:p.personal?(old?.ownerId||context.actorId):undefined;
+      if(old?.ownerId&&old.ownerId!==context.actorId){
+        if(!old.participants?.some(x=>x.id===context.actorId))throw new MistCommandError('FORBIDDEN','只能修改本人或参与的个人日程',403);
+        if(p.personal===false)throw new MistCommandError('FORBIDDEN','只能由本人将个人日程改为共享日程',403);
+      }
       const participants=p.participantIds===undefined?old?.participants:[...new Set(strings(p.participantIds,'参与人'))].filter(x=>x!==(mine||context.actorId)).map(x=>resolveMember(context,x,'参与人'));
       if((participants?.length||0)>50)throw new MistCommandError('VALIDATION','参与人最多 50 位');
       const remind=p.remindMinutes===undefined?old?.remindMinutes:p.remindMinutes;if(remind!==undefined&&remind!==0&&(!Number.isInteger(remind)||remind<0||remind>10080))throw new MistCommandError('VALIDATION','提醒时间无效');
@@ -1779,7 +1782,7 @@ export {orderDownstreamFacts};
 function convertLeadToCrm(state:MistState,p:Extract<MarketCommand,{type:'market.lead.convertToCrm'}>['payload'],context:MistContext):MistCommandResult{
   const lead=state.market.leads.find(l=>l.id===p?.id);if(!lead)throw new MistCommandError('NOT_FOUND','线索不存在',404);
   if(lead.status==='Converted')throw new MistCommandError('PRECONDITION','线索已转化');if(lead.status==='Lost')throw new MistCommandError('PRECONDITION','已流失的线索请先恢复跟进');
-  let customerId=p.customerId||'';
+  let customerId=p.customerId||lead.customerId||'';
   if(customerId){if(!state.customers.some(c=>c.id===customerId))throw new MistCommandError('NOT_FOUND','客户不存在',404);}
   else{
     const same=state.customers.find(c=>c.name.trim().toLowerCase()===lead.company.trim().toLowerCase());if(same)throw new MistCommandError('CONFLICT',`已有同名客户 ${same.name}（${same.code}），请选择该客户`,409);

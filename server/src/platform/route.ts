@@ -273,7 +273,11 @@ export function createPlatformRouter(options: PlatformRouterOptions) {
       }
       data.status = body.status;
     }
-    if (typeof body.plan === 'string') data.plan = body.plan;
+    if (body.plan !== undefined) {
+      // Match the platform defaults contract; never persist blank or unbounded service labels.
+      if (typeof body.plan !== 'string' || !body.plan.trim() || body.plan.trim().length > 80) return res.status(400).json({ ok: false, error: 'VALIDATION_FAILED', message: '请填写1至80字的服务方案。' });
+      data.plan = body.plan.trim();
+    }
     if (body.seatLimit !== undefined) {
       if (body.seatLimit !== null && (!Number.isInteger(body.seatLimit) || body.seatLimit < 1)) return res.status(400).json({ ok: false, error: 'INVALID_SEAT_LIMIT', message: '席位上限须为正整数。' });
       data.seatLimit = body.seatLimit;

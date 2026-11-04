@@ -291,3 +291,46 @@ describe('M1 计税依据：退税预演与提议说明', () => {
     expect((await read()).state.agentProposals.find((p: any) => p.id === proposal.id).summary.join('')).toContain('已隐藏');
   });
 });
+
+describe('External Agent confirmation uses the proposed source version',()=>{
+  async function proposalFixture(){
+    const app=createMistServer(undefined,{local:createMistLocalRuntime({directory})});
+    const {client,workspace,tool}=await as(app,'demo-sales');
+    const customer=workspace.state.customers.find((c:any)=>c.ownerId==='demo-sales')!;
+    expect(customer).toBeDefined();
+    const command={type:'customer.update',payload:{id:customer.id,patch:{terms:'T/T 30% 预付'}}};
+    const result=await tool('bambook_execute',{workspaceId:workspace.id,command});
+    expect(result.isError).not.toBe(true);expect(result.structuredContent.status).toBe('awaiting_confirmation');
+    const base='/api/mist/workspaces/'+workspace.id;
+    const current=async()=>(await client.get(base).expect(200)).body.workspace;
+    const run=async(command:any)=>client.post(base+'/commands').send({requestId:randomUUID(),expectedRevision:(await current()).revision,command});
+    const id=result.structuredContent.receipt.result.id;
+    return{client,base,current,run,id,customer};
+  }
+  it('refuses confirmation after another writer changes the same proposed customer field',async()=>{
+    const f=await proposalFixture();
+    expect((await f.run({type:'customer.update',payload:{id:f.customer.id,patch:{terms:'T/T 50% 预付'}}})).status).toBe(200);
+    const before=await f.current();expect(before.state.customers.find((c:any)=>c.id===f.customer.id).terms).toBe('T/T 50% 预付');
+    const response=await f.run({type:'agent.proposal.confirm',payload:{id:f.id}});
+    expect(response.status).toBe(409);expect(response.body.error.code).toBe('REVISION_CONFLICT');
+    const after=await f.current();expect(after.revision).toBe(before.revision);
+    expect(after.state.customers.find((c:any)=>c.id===f.customer.id).terms).toBe('T/T 50% 预付');
+    expect(after.state.agentProposals.find((p:any)=>p.id===f.id).state).toBe('pending');
+  });
+  it('allows an unrelated update, but a second confirmation cannot execute the proposal again',async()=>{
+    const f=await proposalFixture();
+    expect((await f.run({type:'calendar.save',payload:{title:'独立日程',date:'2026-11-05',time:'10:00',note:''}})).status).toBe(200);
+    expect((await f.run({type:'agent.proposal.confirm',payload:{id:f.id}})).status).toBe(200);
+    const before=await f.current();
+    expect((await f.run({type:'agent.proposal.confirm',payload:{id:f.id}})).status).toBe(404);
+    const after=await f.current();expect(after.revision).toBe(before.revision);expect(after.state.events).toEqual(before.state.events);
+    expect(after.state.customers.find((c:any)=>c.id===f.customer.id).terms).toBe('T/T 30% 预付');
+  });
+  it('never executes a rejected proposal',async()=>{
+    const f=await proposalFixture();
+    expect((await f.run({type:'agent.proposal.reject',payload:{id:f.id}})).status).toBe(200);
+    const before=await f.current();expect((await f.run({type:'agent.proposal.confirm',payload:{id:f.id}})).status).toBe(404);
+    const after=await f.current();expect(after.revision).toBe(before.revision);
+    expect(after.state.customers).toEqual(before.state.customers);expect(after.state.agentProposals.find((p:any)=>p.id===f.id).state).toBe('rejected');
+  });
+});

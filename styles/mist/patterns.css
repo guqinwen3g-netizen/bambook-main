@@ -403,7 +403,8 @@
 .mist-checklist-bx { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--mist-fill-2); }
 .mist-checklist > div[data-done] .mist-checklist-bx { background: var(--mist-ok); color: #fff; }
 .mist-root[data-theme="dark"] .mist-checklist > div[data-done] .mist-checklist-bx, :is(.dark,[data-theme="dark"]) .mist-root:not([data-theme="light"]) .mist-checklist > div[data-done] .mist-checklist-bx { color: var(--mist-brand-deep-1); }
-.mist-checklist > div[data-done] > span:nth-child(2) { color: var(--mist-ink-3); }
+.mist-checklist > div[data-done] > label { color: var(--mist-ink-3); }
+.mist-checklist label[data-toggle] { cursor: pointer; }
 .mist-checklist small { margin-left: auto; font-size: var(--mist-text-xs); color: var(--mist-ink-3); white-space: nowrap; }
 /* 窄栏（详情侧栏）里说明过长时换到下一行右对齐，不挤压步骤名。 */
 .mist-checklist > div { flex-wrap: wrap; row-gap: 2px; } .mist-checklist small { white-space: normal; text-align: right; max-width: 100%; }

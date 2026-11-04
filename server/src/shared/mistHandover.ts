@@ -106,11 +106,14 @@ export function applyHandoverCommand(root: MistState, command: HandoverCommand, 
   if (customer.ownerId === to.id && !changedOrders.length && !changedOpps.length) fail(`${to.name} 已是该客户及所选业务的负责人`);
   const fromId = customer.ownerId, from = customer.owner;
   // 改派指向这些对象、且由原负责人（客户或所交接订单/商机的负责人）处理的未完成待办。
-  const objects = new Set([customer.id, ...changedOrders.map(o => o.id), ...changedOpps.map(o => o.id)]);
+  const relation = root.market?.relations?.find(r => r.customerId === customer.id);
+  const objects = new Set([customer.id, ...(relation ? [relation.id] : []), ...changedOrders.map(o => o.id), ...changedOpps.map(o => o.id)]);
   const previous = new Set([fromId, ...changedOrders.map(o => o.ownerId), ...changedOpps.map(o => o.ownerId)].filter(id => id && id !== to.id));
   let tasks = 0;
   for (const t of root.tasks) {
-    if (t.done || !(objects.has(t.target?.id || '') || objects.has(t.target?.customerId || ''))) continue;
+    // customerId is a navigation anchor, not proof that a specific order/opportunity was selected.
+    const targetId = t.target?.id || t.target?.customerId || '';
+    if (t.done || !objects.has(targetId)) continue;
     if (!t.assigneeIds.some(id => previous.has(id))) continue;
     t.assigneeIds = [...new Set(t.assigneeIds.map(id => previous.has(id) ? to.id : id))]; tasks++;
   }
@@ -119,7 +122,6 @@ export function applyHandoverCommand(root: MistState, command: HandoverCommand, 
   for (const o of changedOpps) { o.owner = to.name; o.ownerId = to.id; }
   const record: MistCustomerHandover = { id: c.id(), at: c.now, actor: c.actorName, fromId, from, toId: to.id, to: to.name, reason, orders: changedOrders.map(o => o.code), opportunities: changedOpps.map(o => o.title), tasks };
   ((customer as MistCustomer & { handovers?: MistCustomerHandover[] }).handovers ||= []).push(record);
-  const relation = root.market?.relations?.find(r => r.customerId === customer.id);
   const heading=fromId===to.id?`在手业务交接给 ${to.name}`:`客户交接：${from || '未指定'}→${to.name}`;
   const summary = `${heading}；订单 ${record.orders.length} 张${record.orders.length ? `（${record.orders.join('、')}）` : ''}、商机 ${record.opportunities.length} 个、改派待办 ${tasks} 条。原因：${reason}`;
   for (const entityId of new Set([customer.id, relation?.id].filter(Boolean) as string[])) root.events.unshift({ id: c.id(), entityType: entityId === customer.id ? 'customer' : 'market.relation', entityId, actor: c.actorName, at: c.now, text: summary, fileIds: [] });

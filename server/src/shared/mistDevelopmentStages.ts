@@ -55,5 +55,6 @@ export function devStageHandoverBlocker(version: MistVersion, stageIndex: number
   if (!Number.isInteger(stageIndex) || stageIndex < 0 || stageIndex >= version.stages.length - 1) return '请选择前道工序';
   if (version.returnedAt) return '本版已登记返样，不再登记前道交接';
   if (version.qcDecision) return '本版已处理，不能再登记交接';
+  if (devStagePendingHandovers(version).some(index => index < stageIndex)) return '请先登记前道交接，再登记后道交接';
   return null;
 }

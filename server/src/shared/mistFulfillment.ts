@@ -862,7 +862,7 @@ export function fulfillmentCommandPermission(command: FulfillmentCommand): strin
     throw new MistCommandError('VALIDATION', '未知履约操作');
 }
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
-const text = (v: unknown, label: string, required = true, max = 8000): string => typeof v === 'string' && v.length <= max && (!required || v.trim()) ? v.trim() : fail(`${label}未填写或格式无效`);
+const text = (v: unknown, label: string, required = true, max = 8000): string => typeof v === 'string' && v.length > max ? fail(`${label}不能超过 ${max} 字`) : typeof v === 'string' && (!required || v.trim()) ? v.trim() : fail(`${label}未填写或格式无效`);
 const qty = (v: unknown, label = '数量', zero = false): number => typeof v === 'number' && Number.isFinite(v) && v >= (zero ? 0 : 0.0001) && v <= 1e9 && Math.abs(v * 10000 - Math.round(v * 10000)) < 0.00001 ? v : fail(`${label}须为${zero ? '非负' : '正'}数，最多四位小数`);
 const sum = (values: number[]) => Math.round(values.reduce((a, b) => a + Math.round(b * 10000), 0)) / 10000;
 const get = <T extends {
@@ -1557,6 +1557,8 @@ export function applyFulfillmentCommand(root: MistState, command: FulfillmentCom
         }
         case 'fulfillment.qc.report': {
             const t = get(f.qcTasks, p.id, 'QC任务');
+            // A closed IQC has already changed usable/rejected stock; another report cannot undo that physical disposition.
+            if (t.kind === 'incoming' && t.incoming?.releasedAt) fail('来料已处置，请按新的收货或库存复检流程办理', 'PRECONDITION');
             if (t.domain !== p.domain)
                 fail('QC业务域不一致');
             const sourceBlocker = fulfillmentQcSourceBlocker(root, t.source); if (sourceBlocker) fail(sourceBlocker);

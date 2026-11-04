@@ -133,7 +133,7 @@ async function callTool(repository: McpRepository, actor: TokenPayload, name: st
         const original = prior ? workspace.state.agentProposals?.find(item => item.id === prior.result?.id && item.ownerId === actor.userId) : undefined;
         if (prior && !original) throw new ToolInputError('请求编号已用于另一项操作，不能重复使用');
         const summary = original ? original.summary : preview?.events?.length ? preview.events.slice(0, 10) : [`执行 ${command.type}`];
-        const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : workspace.revision, command: { type: 'agent.proposal.create', payload: { command, summary } } });
+        const { receipt, replayed } = await repository.execute(actor, workspaceId, { requestId, expectedRevision: prior ? prior.expectedRevision : expected, command: { type: 'agent.proposal.create', payload: { command, summary } } });
         const status = original?.state === 'confirmed' ? 'confirmed' : original?.state === 'rejected' ? 'rejected' : 'awaiting_confirmation';
         const message = status === 'confirmed' ? '此提议已由本人确认执行，本次只回放原回执。' : status === 'rejected' ? '此提议已被本人拒绝，本次没有执行。' : '已提交给用户确认：用户在「接着完成」里确认后才会执行。';
         return { status, message, summary, receipt, replayed: !!replayed };
