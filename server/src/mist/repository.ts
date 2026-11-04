@@ -29,12 +29,12 @@ import { isAgentActor, type AgentActor } from './agentDelegation';
 import { TASK_HASH, TASK_PREFIX, assertHumanTaskProposal, assertTaskControl, assertTaskLease, assertTaskAuthority, assertTaskViewAuthority, acknowledgePlatformStep, advanceTaskSources, answerTaskQuestion, askTaskQuestion, changeTask, checkpointTask, claimTask, deferPlatformJob, duePlatformTasks, createTask, finishTask, finishTaskSession, heartbeatTask, issueTaskControl, listTasks, readTaskRecord, reserveTaskStep, resolveTaskControl, resolveTaskCredential, releasePlatformTask, savePlatformPlan, saveTaskSources, settleTaskProposal, taskHistory, taskRecord, taskView, waitTaskForProposal, type MakeTaskCredential, type MakeTaskControl, type TaskRecord, type PlatformTaskJob } from './agentTasks';
 import { collectTaskSources, knownCommandSourcesVisible, taskScopeHash, taskSourcesVisible } from './agentTaskVisibility';
 import {taskNotice,taskNoticeCandidates} from './agentTaskAttention';
-import {markTaskNoticeRead,waitTaskUntil} from './agentTasks';
+import {markTaskNoticeRead,waitTaskUntil,platformTaskUsage} from './agentTasks';
 import {assertTaskBusinessRead,checkTaskCondition,type PlatformTaskScanCursor} from './agentTasks';
 import {prepareTaskCondition,taskConditionChanged} from './agentTaskConditions';
 import type {PlatformTaskContext,PlatformTaskPlan} from './platformTaskPlan';
 import {assertConnection,listConnections,getConnection,createConnection,changeConnection,type MakeAgentLease} from './agentConnections';
-import {assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
+import {ensurePersonalIdentity,assertServiceLease,listIdentities,createIdentity,configureIdentity,issueServiceKey,revokeServiceKey,resolveServiceCredential,identityRecord,identityHistory,serviceActorFromIdentity,serviceCanManage,type MakeServiceCredential} from './agentIdentities';
 import { assertReceivingLease, receivingRecord, receivingView, setReceiving, claimReceiving, finishReceiving, blockReceiving, invalidateReceiving, dueReceiving, RECEIVE_LEASE_MS, RECEIVE_INTERVAL_MS, type MailSyncActor, type MailSyncLease, type ReceivingJob, receiveSource } from './mail/receiverRegistry';
 import { enqueueMailState, taskHasPendingMail, mailStateViews, pendingMailFields, dueMailState, readMailState, claimMailState, planMailState, rememberMailState, failMailState, completeMailState, type MailStateRecord, type MailStateAttempt } from './mail/stateQueue';
 import type { MailStateObservation } from '../shared/mistMailState';
@@ -443,6 +443,19 @@ export class MistRepository {
   async issueAgentServiceKey(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,make:MakeServiceCredential,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能启用长期凭据',403);return this.connectionTransaction(async db=>{const{actor}=await this.own(db,prior,workspaceId,'ai:chat');return issueServiceKey(db,actor,workspaceId,id,input,make,now);});}
   async revokeAgentServiceKey(prior:TokenPayload,workspaceId:string,id:string,input:Record<string,unknown>,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','Agent不能管理长期凭据',403);return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId);return revokeServiceKey(db,this.identityManager(actor,row),workspaceId,id,input,now);});}
   async resolveAgentServiceKey(token:unknown){return this.transact(db=>resolveServiceCredential(db,token));}
+  /** 第二类个人 Agent：本人开通（或续期）并直接安排平台执行任务。 */
+  async ensurePersonalAgent(prior:TokenPayload,workspaceId:string,make:MakeServiceCredential,now=Date.now()){if(isAgentActor(prior))fail('FORBIDDEN','个人 Agent 须由本人开通',403);return this.connectionTransaction(async db=>{const{actor,row}=await this.own(db,prior,workspaceId,'ai:chat');return ensurePersonalIdentity(db,actor,workspaceId,make,now,row.companyId??undefined);});}
+  async assignPersonalAgentTask(prior:TokenPayload,workspaceId:string,input:Record<string,unknown>,make:MakeServiceCredential){
+    if(isAgentActor(prior))fail('FORBIDDEN','任务须由本人安排',403);
+    if(Object.keys(input).some(k=>!['requestId','name','instructions','locale'].includes(k)))fail('INVALID_INPUT','任务字段无效',400);
+    const identity=await this.ensurePersonalAgent(prior,workspaceId,make);
+    return this.createAgentTask(prior,workspaceId,{requestId:input.requestId,identityId:identity.id,name:input.name,instructions:input.instructions,executor:'platform',...(input.locale!==undefined?{locale:input.locale}:{})});
+  }
+  /** 个人 Agent 用量：本人看自己的；公司管理员（users:write）看全公司。 */
+  async personalAgentUsage(prior:TokenPayload,workspaceId:string,month:unknown){
+    if(typeof month!=='string'||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))fail('INVALID_INPUT','月份格式为 YYYY-MM',400);
+    return this.transact(async db=>{const{actor}=await this.own(db,prior,workspaceId);const all=!isAgentActor(prior)&&serviceCanManage(actor);return{month,scope:all?'company':'mine',items:await platformTaskUsage(db,workspaceId,month as string,all?undefined:actor.userId)};});
+  }
   /** Heartbeat/control traffic reads company metadata, never the shared business JSON. */
   private async taskAccess(db:any,prior:TokenPayload,workspaceId:string,permission?:string){
     if(isAgentActor(prior)&&prior.agentWorkspaceId!==workspaceId)fail('NOT_FOUND','公司不存在或无权访问',404);
