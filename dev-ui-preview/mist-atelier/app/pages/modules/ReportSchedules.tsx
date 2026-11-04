@@ -14,7 +14,7 @@ import { useNav } from '../../nav';
 import { setComposeIntent } from '../../runtime/composeIntent';
 import { buildModuleXlsxFile, ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
 import { AGING_BUCKETS, buildCustomerSales, buildOrderMargin, buildOrderProgress, buildReceivableAging, PROGRESS_STATUS } from './PlatformReports';
-import { uiText, ui } from '../../../../../services/interfaceLanguage';
+import { uiText } from '../../../../../services/interfaceLanguage';
 
 const WEEKDAY = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 /** 与页面导出相同的列；毛利按原币口径（含成本，只给报表管理者）。 */
@@ -46,8 +46,7 @@ export function ReportSchedules({ state, canAdmin, asOf }: { state: MistState; c
     try {
       const period = reportSchedulePeriod(s, asOf).period, sheet = reportSheet(state, s.kind, asOf);
       const file = await uploadFile(await buildModuleXlsxFile(`${sheet.name}-${period}.xlsx`, [sheet]));
-      setComposeIntent({ to: s.to, subject: `${sheet.name} · ${period}`, body: `${s.note ? s.note + '\n\n' : ''}附件为截至 ${asOf} 的${sheet.name}。\n`, fileIds: [file.id] });
-      await run({ type: 'report.schedule.sent', payload: { id: s.id, period } });
+      setComposeIntent({ to: s.to, subject: `${sheet.name} · ${period}`, body: `${s.note ? s.note + '\n\n' : ''}附件为截至 ${asOf} 的${sheet.name}。\n`, fileIds: [file.id], afterSent: { type: 'report.schedule.sent', payload: { id: s.id, period } } });
       go('emails');
     } catch (e) { setError(e instanceof Error ? e.message : '未能生成报表'); } finally { setBusy(''); }
   };
@@ -65,7 +64,6 @@ export function ReportSchedules({ state, canAdmin, asOf }: { state: MistState; c
         <Button size="sm" variant="quiet" icon={Square} disabled={locked} onClick={() => void run({ type: 'report.schedule.stop', payload: { id: r.id } }).catch(e => setError(e instanceof Error ? e.message : '停用未完成'))}>{uiText('停用')}</Button>
       </span> },
     ]} empty={<EmptyState compact title={uiText('还没有订阅')} />} />
-    {rows.length > 0 && <p className="mist-note">{ui`到期后在「待我处理」提醒；发送前在智能邮箱核对。`}</p>}
     <ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />
   </Card>;
 }
