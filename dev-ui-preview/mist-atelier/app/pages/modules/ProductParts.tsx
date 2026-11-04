@@ -9,6 +9,7 @@ import { useNav } from '../../nav';
 import { businessDate } from '../../runtime/businessClock';
 import { PRODUCT_SPEC_FIELDS, type MarketProduct, type MarketQuotation, type MarketState } from '../../../../../server/src/shared/mistMarket';
 import { ModuleEditorDialog, type ModuleEditorSpec } from './ModuleWorkbench';
+import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 
 export const PRODUCT_CATEGORY_LABEL: Record<MarketProduct['category'], string> = { fabric: '面料', garment: '成衣', trimming: '辅料' };
 
@@ -26,7 +27,7 @@ const QUOTE_STATUS: Record<MarketQuotation['status'], string> = { Draft: '草稿
 export function productReferences(product: MarketProduct, market: MarketState, orders: Array<{ id: string; code: string; createdAt: string; state: string }>, orderLines: Array<{ orderId: string; style: string }>, go: (view: string, id?: string) => void): Reference[] {
   const refs: Reference[] = [];
   const quoted = market.quotations.filter(q => q.lines.some(l => l.productId === product.id));
-  for (const q of quoted) refs.push({ key: 'q-' + q.id, kind: '报价', code: q.code, date: q.updatedAt.slice(0, 10), status: QUOTE_STATUS[q.status], basis: '报价行引用本档案', open: () => go('quotations', q.id) });
+  for (const q of quoted) refs.push({ key: 'q-' + q.id, kind: '报价', code: q.code, date: platformBusinessDate(q.updatedAt), status: QUOTE_STATUS[q.status], basis: '报价行引用本档案', open: () => go('quotations', q.id) });
   const seen = new Set<string>();
   for (const q of quoted) { const o = q.convertedOrderId ? orders.find(x => x.id === q.convertedOrderId) : undefined; if (o && !seen.has(o.id)) { seen.add(o.id); refs.push({ key: 'o-' + o.id, kind: '订单', code: o.code, date: o.createdAt.slice(0, 10), status: o.state, basis: '由引用报价转单', open: () => go('orders', o.id) }); } }
   const sku = product.sku.trim().toLowerCase();

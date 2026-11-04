@@ -22,6 +22,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { FileName, PreviewButton } from '../../runtime/files';
 import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 /** 报价金额是十进制字符串；只在显示时加千分位，导出与计算仍用原值。 */
 const quoteMoney = (value: string) => { const n = Number(value); return value && Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : value; };
@@ -194,15 +195,15 @@ export function QuotationWorkbench({ onCreate, onEdit, onRevise, attachments, hi
       facts: [{ label: '金额', value: <span className="mist-num">{selected.currency} {quoteMoney(selected.total)}</span> }, { label: '条目', value: `${selected.lines.length} 行` }, { label: '贸易术语', value: selected.deliveryTerms || '未填' }, { label: '付款条件', value: selected.paymentTerms || '未填' }, { label: '有效期至', value: selected.validUntil || '未填' }],
       extra: flags.length ? <div className="mist-row" style={{ flexWrap: 'wrap' }}>{flags.map(f => <Pill key={f.key} tone={f.tone}>{uiText(f.label)}</Pill>)}</div> : undefined }} />;
   })() : null;
-  if (full.active && selected && state) return <ListDetailPage backLabel="报价管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <div className="mist-card-body"><Banner tone="bad" title={uiText("报价操作未完成")}>{failure || error}</Banner></div>}{detail}</ListDetailPage>;
+  if (full.active && selected && state) return <ListDetailPage backLabel="报价管理" onBack={full.back} after={<ModuleEditorDialog spec={dialog} onClose={() => setDialog(null)} />}>{(error || failure) && <FailureNotice title={"报价操作未完成"} detail={failure || error} />}{detail}</ListDetailPage>;
   return <MistPage>
     <PageHeader eyebrow={uiText("订单履约 · 报价")} title={uiText("报价管理")}
       actions={<>
         <Button icon={Download} onClick={() => downloadModuleCsv('报价台账.csv', ['报价号', '版本', '客户', '板块', '币种', '金额', '贸易术语', '付款条件', '有效期', '状态'], rows.map(q => [q.code, version(q), customerName(q.customerId), domainOf(q) === 'fabric' ? '面料' : '成衣', q.currency, q.total, q.deliveryTerms, q.paymentTerms, q.validUntil, quotationStageLabel(q)]))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={onCreate}>{uiText("新建报价")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有报价写权限，可以查看报价单、版本与审批记录。")}</Banner></div>}
-    {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("报价操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
+    {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有报价写权限，可以查看报价单、版本与审批记录。")}</Banner></div>}
+    {(error || failure) && <FailureNotice title="报价操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
     <div className="mist-section"><Segmented<QuoteDomain> ariaLabel={uiText("业务板块")} value={domain} onChange={changeDomain} options={[{ value: 'garment', label: `成衣业务 · ${all.filter(q => domainOf(q) === 'garment').length}` }, { value: 'fabric', label: `面料业务 · ${all.filter(q => domainOf(q) === 'fabric').length}` }]} /></div>
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索报价号、客户、款号或季节")} />

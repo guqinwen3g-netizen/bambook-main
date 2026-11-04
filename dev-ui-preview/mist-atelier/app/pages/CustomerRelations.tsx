@@ -109,7 +109,7 @@ function OpportunityDetail({ row, state, customer, can, busy, next, onEdit, onSt
   const wonReason = next === 'won' && !row.orderIds.length ? '请先在编辑中关联实际订单' : '';
   return <div className="mist-col" style={{ gap: 16 }}>
     <div className="mist-row" style={{ flexWrap: 'wrap' }}><Pill tone={STAGE_TONE[row.stage]}>{CRM_STAGE_LABEL[row.stage]}</Pill><Pill>{uiText(row.domain === 'fabric' ? '面料业务' : '成衣业务')}</Pill></div>
-    {!open && <Banner tone={row.stage === 'won' ? 'ok' : 'neutral'} title={uiText(row.stage === 'won' ? '已下单 · 商机结束' : '已流失 · 商机结束')}>{uiText(row.stage === 'lost' ? `流失原因：${row.lossReason}` : '后续请在关联订单中跟进。')}</Banner>}
+    {!open && <Banner variant="status" tone={row.stage === 'won' ? 'ok' : 'neutral'} title={uiText(row.stage === 'won' ? '已下单 · 商机结束' : '已流失 · 商机结束')}>{uiText(row.stage === 'lost' ? `流失原因：${row.lossReason}` : '后续请在关联订单中跟进。')}</Banner>}
     {can && !open && <div className="mist-row"><Button disabled={busy} onClick={onReopen}>{uiText('重新打开')}</Button></div>}
     {can && open && <div className="mist-col" style={{ gap: 6 }}>
       <div className="mist-row mist-module-actions" style={{ flexWrap: 'wrap' }}>

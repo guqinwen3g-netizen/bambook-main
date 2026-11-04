@@ -13,6 +13,7 @@ import { setComposeIntent } from '../../runtime/composeIntent';
 import { ModuleEditorDialog, downloadModuleCsv, type ModuleEditorSpec } from './ModuleWorkbench';
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 export const CAMPAIGN_STATUS: Record<MarketCampaign['status'], { label: string; tone: Tone }> = {
   Draft: { label: '策划中', tone: 'neutral' }, Active: { label: '进行中', tone: 'accent' }, Paused: { label: '已暂停', tone: 'warn' }, Completed: { label: '已完成', tone: 'ok' }, Cancelled: { label: '已取消', tone: 'neutral' },
@@ -87,7 +88,7 @@ export function CampaignWorkbench({ tabs, input, onEdit, products, attachments, 
     {attachments(current, !can)}{history(current.id)}
   </DetailBody> : <EmptyState compact title={uiText("活动详情")} description={uiText("选择活动，核对费用、线索与下一步操作。")} />;
   return <MistPage width="wide"><PageHeader eyebrow={uiText("客户与市场 · 营销")} title={uiText("营销推广")} actions={<><Button icon={Download} onClick={() => downloadModuleCsv('营销活动.csv', ['活动', '状态', '负责人', '预算', '费用', '币种'], shown.map(c => [c.name, CAMPAIGN_STATUS[c.status].label, c.owner, c.budget, c.actualCost, c.currency]))}>{uiText("导出")}</Button><Button icon={RefreshCw} disabled={busy} onClick={() => void w.refresh()}>{uiText("刷新")}</Button>{can && <Button variant="primary" icon={Plus} disabled={busy} onClick={() => onEdit(input())}>{uiText("创建活动")}</Button>}</>} />
-    {tabs}{!can && <Banner tone="neutral" title={uiText("只读查看")}>{uiText("没有营销写权限，活动和线索仍可阅读。")}</Banner>}{w.error && <Banner tone="bad" title={uiText("读取或操作未完成")} actions={<Button onClick={() => void w.refresh()}>{uiText("重试")}</Button>}>{w.error}</Banner>}
+    {tabs}{!can && <Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("没有营销写权限，活动和线索仍可阅读。")}</Banner>}{w.error && <FailureNotice title={"读取或操作未完成"} detail={w.error} retry={() => void w.refresh()} />}
     <Toolbar><SearchField value={query} onChange={setQuery} placeholder={uiText("搜索活动、编号、负责人或目标群体")} /><Segmented<'list' | 'board'> value={mode} onChange={setMode} options={[{ value: 'list', label: '列表' }, { value: 'board', label: '看板' }]} /></Toolbar>
     <div className="mist-section mist-col"><Segmented<'all' | MarketCampaign['status']> value={stage} onChange={setStage} options={[{ value: 'all', label: `全部 · ${campaigns.length}` }, ...(Object.keys(CAMPAIGN_STATUS) as MarketCampaign['status'][]).map(s => ({ value: s, label: `${CAMPAIGN_STATUS[s].label} · ${campaigns.filter(c => c.status === s).length}` }))]} />
       <Segmented<'all' | 'overdue' | 'ended' | 'budget'> value={reminder} onChange={setReminder} options={[{ value: 'all', label: '全部提醒' }, { value: 'overdue', label: '跟进逾期' }, { value: 'ended', label: '到期未复盘' }, { value: 'budget', label: '费用超预算' }]} /></div>

@@ -22,6 +22,8 @@ import { SAMPLE_FORMS } from '../../runtime/tradeOptions';
 import { SampleRequests } from './SampleRequests';
 import { readSampleRequests } from '../../../../../server/src/shared/mistSampleRequests';
 import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
+import { platformBusinessDate } from '../../../../../server/src/shared/mistPlatform';
 
 type Shelf = 'fabric' | 'garment' | 'other';
 type SampleTab = Shelf | 'requests';
@@ -174,7 +176,7 @@ export function SamplesPage() {
     const positions = fulfillmentPositions(sample);
     setDialog({ title: ({ lend: '登记借出', return: '登记分次归还', send: '登记永久寄出', move: '登记移位', scrap: '登记报废', returnFactory: '登记退还工厂' })[kind] + ` · ${sample.form}`,
       fields: [...(kind==='send'?[field('sendPurpose','寄送用途','select',true,Object.entries(SAMPLE_SEND_PURPOSES).map(([value,label])=>({value,label})))]:[]),...(kind !== 'return' && positions.length > 1 ? [field('sourceLocation', '本次出库位置', 'select', true, [{ value: '__choose__', label: '请选择位置' }, ...positions.map(position => ({ value: position.location, label: `${position.location || '位置未记录'} · ${position.available}${sample.unit}` }))])] : []),
-        ...(kind === 'return' ? [field('loanId', '原借出', 'select', true, [emptyOption, ...loans.map(loan => ({ value: loan.id, label: `${loan.person} · 未还 ${sampleLoanRemaining(state, loan.id)}${sample.unit} · ${loan.at.slice(0, 10)}` }))])] : []),
+        ...(kind === 'return' ? [field('loanId', '原借出', 'select', true, [emptyOption, ...loans.map(loan => ({ value: loan.id, label: `${loan.person} · 未还 ${sampleLoanRemaining(state, loan.id)}${sample.unit} · ${platformBusinessDate(loan.at)}` }))])] : []),
         ...(kind !== 'move' ? [field('quantity', `本次数量（${sample.unit}）`, 'number')] : []),
         ...(kind !== 'scrap' ? [field('person', kind === 'send' ? '收件人 / 公司' : kind === 'lend' ? '借用人' : kind === 'returnFactory' ? '退回工厂' : '经手人', 'text', kind === 'lend' || kind === 'send' || kind === 'returnFactory')] : []),
         ...(kind === 'send' ? [field('destination', '寄送去向', 'text', false), field('carrier', '快递公司', 'text', false), field('trackingNo', '运单号', 'text', false), { ...field('feeAmount', '寄样费', 'number', false), min: 0 }, field('feeCurrency', '寄样费币种', 'select', false, ['CNY', 'USD', 'EUR'].map(c => ({ value: c, label: c })))] : kind === 'move' || kind === 'return' ? [field('location', '新位置', 'text', false)] : []),
@@ -235,8 +237,8 @@ export function SamplesPage() {
         <Button icon={Download} disabled={!filtered.length} onClick={() => exportRecords('样品仓库', ['编号', '名称', '来源', '形态', '总量', '可用', '单位', '位置'], filtered.flatMap(row => row.samples).map(sample => [sample.code, sample.name, state ? fulfillmentSourceLabel(state, sample.source) : '', sample.form, sample.quantity, sample.available, sample.unit, fulfillmentPositions(sample).map(position => `${position.location || '位置未记录'} ${position.available}${sample.unit}`).join('；')]))}>{uiText("导出")}</Button>
         {canCreate && !invalidShipment && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => editor.open(createSpec)}>{uiText("新建样品")}</Button>}
       </>} />
-    {syncError && <div className="mist-section"><Banner tone="bad" title={uiText("来源实物同步失败")}>{syncError}</Banner></div>}
-    {error && error !== presentedError && <div className="mist-section"><Banner tone="bad" title={uiText(state ? "样品操作未完成" : "读取失败")}>{uiText(error)}</Banner></div>}
+    {syncError && <FailureNotice title={"来源实物同步失败"} detail={syncError} />}
+    {error && error !== presentedError && <FailureNotice title={state ? "样品操作未完成" : "读取失败"} detail={error} />}
     {overdueLoans.length > 0 && <div className="mist-section"><Banner tone="warn" title={ui`${overdueLoans.length} 笔借出已超过预计归还日`} actions={<Button onClick={() => { const first = overdueLoans[0]; changeShelf(shelfOf(first.sample)); setStatusFilter('overdue'); }}>{uiText("只看逾期")}</Button>}>
       {overdueLoans.slice(0, 3).map(({ loan, sample }) => `${sample.name} · ${loan.person} · 应还 ${loan.expectedReturn}`).join('；')}{uiText(overdueLoans.length > 3 ? ' …' : '')}</Banner></div>}
     <Tabs<SampleTab> value={requestsTab ? 'requests' : shelf} onChange={value => { if (value === 'requests') { go('samples', undefined, { section: 'requests' }); return; } if (requestsTab) go('samples'); changeShelf(value); }} options={[{ value: 'fabric', label: '面料', count: counts.fabric }, { value: 'garment', label: '成衣', count: counts.garment }, { value: 'other', label: '其他类别', count: counts.other }, ...(hasShipmentContext || hasProductionContext ? [] : [{ value: 'requests' as const, label: '索样申请', count: openRequests }])]} />

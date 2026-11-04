@@ -16,6 +16,7 @@ import { memberSelectOptions, workspaceMembers } from '../../runtime/members';
 import { customerHandoverScope, customerHandovers } from '../../../../../server/src/shared/mistHandover';
 import { relationBusiness } from '../../../../../server/src/shared/mistRelationBusiness';
 import { COUNTRIES } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Identity = 'all' | 'customer' | 'supplier' | 'agent' | 'partner' | 'other';
 type FlagFilter = 'all' | 'hold' | 'dual' | 'noContact';
@@ -159,8 +160,8 @@ export function RelationWorkbench({ attachments, history }: RelationWorkbenchPro
         <Button icon={Download} onClick={() => downloadModuleCsv('关系智库.csv', ['组织', '身份', '别名', '地区', '地址', '联系人', '在手业务', '状态', '冻结原因'], rows.map(r => [r.name, relationIdentities(r).map(i => ({ customer: '客户', supplier: '供应商', agent: '代理', partner: '合作伙伴', other: '其他' })[i]).join(' + '), r.aliases.join('、'), r.country, r.address, relationContacts(state, r).map(c => c.name).join('、'), business.get(r.id)?.total || 0, r.hold ? '已冻结' : r.status === 'archived' ? '已归档' : '正常', r.hold?.reason || '']))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("建立关系档案")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有关系档案写权限，可以查看组织、联系人与在手业务。")}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("关系数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有关系档案写权限，可以查看组织、联系人与在手业务。")}</Banner></div>}
+    {error && <FailureNotice title={"关系数据未加载"} detail={error} retry={() => void refresh()} />}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索组织、别名、编码、地址或联系人")} />
       <Dropdown<FlagFilter> label={uiText("提醒")} value={flagFilter} onChange={setFlagFilter} options={[{ value: 'all', label: '全部' }, { value: 'hold', label: '已冻结' }, { value: 'dual', label: '既是客户也是供应商' }, { value: 'noContact', label: '没有联系人' }]} />

@@ -15,6 +15,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { quotationStage } from './QuotationsPage';
 import { CURRENCIES } from '../../runtime/tradeOptions';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Tab = 'seasons' | 'trends' | 'shows';
 const SEASON_STATUS: Record<MarketSeason['status'], { label: string; tone: Tone }> = { Planning: { label: '规划中', tone: 'neutral' }, Active: { label: '进行中', tone: 'accent' }, Closed: { label: '已结束', tone: 'neutral' } };
@@ -181,8 +182,8 @@ export function SeasonWorkbench({ attachments, history }: SeasonWorkbenchProps) 
   return <MistPage>
     <PageHeader eyebrow={uiText("客户与市场 · 季节与趋势")} title={uiText("季节性与趋势")}
       actions={<><Button icon={Download} onClick={exportRows}>{uiText("导出")}</Button>{can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(tab === 'seasons' ? seasonSpec() : tab === 'trends' ? trendSpec() : showSpec())}>{createLabel}</Button>}</>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有季节与趋势写权限。")}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有季节与趋势写权限。")}</Banner></div>}
+    {error && <FailureNotice title={"数据未加载"} detail={error} retry={() => void refresh()} />}
     <div className="mist-section"><Segmented<Tab> ariaLabel={uiText("内容")} value={tab} onChange={switchTab} options={[{ value: 'seasons', label: `季节 · ${seasons.length}` }, { value: 'trends', label: `趋势 · ${trends.length}` }, { value: 'shows', label: `展会与线索 · ${shows.length}` }]} /></div>
     {tab === 'seasons' && <div className="mist-section"><SeasonTimeline seasons={seasons} day={day} selected={selSeason?.id} onPick={s => pick(s.id)} /></div>}
     <ListDetail drawerOpen={drawer && !!detail} onDrawerClose={() => setDrawer(false)} drawerTitle={selSeason ? `${selSeason.code} · ${selSeason.name}` : selTrend?.name || selShow?.name || ''}

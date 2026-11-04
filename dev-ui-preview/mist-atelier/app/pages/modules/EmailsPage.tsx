@@ -15,6 +15,7 @@ import { takeComposeIntent } from '../../runtime/composeIntent';
 import { Events } from './fulfillmentKit';
 import { ActionBar, DetailBlock, DetailBody, DetailSurface, shortWhen, todayIso, useCompactLayout, type ReasonedAction } from './pageKit';
 import { FileName } from '../../runtime/files';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 export type MailFolder = 'inbox' | 'drafts' | 'outbox' | 'sent' | 'archive' | 'trash';
 export type MailView = 'unread' | 'starred' | 'important' | 'followup' | 'unlinked';
@@ -343,12 +344,12 @@ export function EmailsPage() {
 
   return <div className="mist-mail-page">
     <h1 className="mist-sr-only">{uiText("智能邮箱")}</h1>
-    {!can && <Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有邮件编辑权限，可以阅读邮件与业务关联，不能标记、关联、跟进或写邮件。")}</Banner>}
-    {error && <Banner tone="bad" title={uiText("邮箱未读取")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner>}
+    {!can && <Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有邮件编辑权限，可以阅读邮件与业务关联，不能标记、关联、跟进或写邮件。")}</Banner>}
+    {error && <FailureNotice title={"邮箱未读取"} detail={error} retry={() => void refresh()} />}
     {mailPending?.review && <Banner tone="bad" icon={AlertTriangle} title={ui`发送「${String(mailPending.input.subject || '（无主题）')}」待人工核对`} actions={<Button size="sm" loading={saving} disabled={saving || !closeMailReview} onClick={() => void closeReview()}>{uiText("已人工核对，关闭记录")}</Button>}>
       {mailPending.review}{uiText("。这次发送不会被算作已发送，系统也不会再自动核对或重发。请在待发送 / 已发送中按发件账号、主题与收件人核对这封邮件；关闭记录不会发送任何邮件。")}</Banner>}
     {mailPending && !mailPending.review && <Banner tone="warn" icon={AlertTriangle} title={ui`上次发送「${String(mailPending.input.subject || '（无主题）')}」未收到服务器回执`} actions={<Button size="sm" variant="primary" loading={saving} disabled={saving} onClick={() => void checkPendingSend()}>{uiText("核对发送结果")}</Button>}>{uiText("收件人：")}{[mailPending.input.to, mailPending.input.cc, mailPending.input.bcc].map(value => String(value || '').trim()).filter(Boolean).join('；') || '未填写'}{uiText("。邮件可能已发出，也可能没有到达服务器。核对时使用原发送请求：已登记的只显示原记录、不会重复投递；服务器从未收到时才按原内容发送一次。核对完成前不能发起其他邮件操作。")}</Banner>}
-    {failure && <Banner tone="bad" title={uiText("操作未完成")}>{failure}</Banner>}
+    {failure && <FailureNotice title={"操作未完成"} detail={failure} />}
     {notice && <Banner tone={notice.tone} title={uiText(notice.title)} actions={<Button size="sm" onClick={() => setNotice(null)}>{uiText("知道了")}</Button>}>{notice.text}</Banner>}
     <div className="mist-mail" data-compact={compact || undefined}>
       {nav}
@@ -454,7 +455,7 @@ function MessageDetail({ message: m, state, can, locked, exec, onOpen, onRespond
         ...(m.cc.length ? [{ label: '抄送', value: <Addresses rows={m.cc} /> }] : []), { label: '时间', value: when(m.at) },
       ]} /></details>
     </header>
-    {m.folder === 'sent' && <Banner tone={record ? (emailSendEffectiveStatus(record) === 'sent' ? 'ok' : 'warn') : 'neutral'} title={uiText("发送记录")}>{uiText(m.example ? '示例已发送邮件，没有真实投递或回执记录。'
+    {m.folder === 'sent' && <Banner variant="status" tone={record ? (emailSendEffectiveStatus(record) === 'sent' ? 'ok' : 'warn') : 'neutral'} title={uiText("发送记录")}>{uiText(m.example ? '示例已发送邮件，没有真实投递或回执记录。'
       : record && emailSendEffectiveStatus(record) !== 'sent' ? sentPartialText(record)
       : record ? `${record.createdBy} 于 ${when(record.updatedAt)} 发送，发件服务器已接受全部收件人${record.response ? `（${record.response}）` : ''}。“已接受”表示发件服务器收下，不代表对方最终收到或已阅读。`
       : '从邮箱服务器的已发送文件夹同步，不是经本系统发出，没有投递回执。')}</Banner>}
@@ -532,7 +533,7 @@ function SendDetail({ send: row, state, can, me, locked, onRetry, onVerify, onCo
     {status === 'unknown' && <Banner tone="warn" title={uiText("不会自动重发")}>{uiText("投递过程中连接中断或没有收到服务器的明确答复，对方可能已经收到。可先核对本邮箱的已发送；仍不确定时请向收件人确认后再重发。")}</Banner>}
     {status === 'partial' && <Banner tone="warn" title={uiText("部分收件人未被接收")}>{uiText("发信服务器接受了 ")}{accepted.length}{uiText(" 位收件人，")}{open.length}{uiText(" 位被拒或未送出。重发只发给未接收的收件人，已接受的不会再收到第二封。“已接受”表示发信服务器收下，不代表对方最终收到或阅读。")}</Banner>}
     {status === 'failed' && <Banner tone="bad" title={uiText("服务器明确拒绝或未能连接")}>{row.response || row.attempts[row.attempts.length - 1]?.message || '发送失败'}{uiText("。修正邮箱设置或收件人后可重发。")}</Banner>}
-    {status === 'sending' && <Banner tone="neutral" title={uiText("正在发送")}>{uiText("稍后刷新查看结果；超过 5 分钟仍无结果会转为“结果不确定”。")}</Banner>}
+    {status === 'sending' && <Banner variant="status" tone="neutral" title={uiText("正在发送")}>{uiText("稍后刷新查看结果；超过 5 分钟仍无结果会转为“结果不确定”。")}</Banner>}
     <Facts items={[{ label: '发件身份', value: row.from }, { label: '发起人', value: `${row.createdBy} · ${when(row.createdAt)}` }]} />
     <DetailBlock title={ui`收件人结果（${recipients.length}）`}>{recipients.map(item => <div key={item.address} className="mist-row" data-recipient={item.address} style={{ flexWrap: 'wrap' }}><Pill tone={RECIPIENT_STATUS[item.status].tone}>{uiText(RECIPIENT_STATUS[item.status].label)}</Pill><span className="mist-sub">{item.address}</span><small className="mist-muted">{ROLE_LABEL[item.role]}</small>{item.reply && <small className="mist-muted" style={{ flexBasis: '100%', overflowWrap: 'anywhere' }}>{item.reply}</small>}</div>)}</DetailBlock>
     <div className="mist-mail-body">{row.body || '正文为空'}</div>
@@ -673,7 +674,7 @@ function TemplateManager({ state, locked, run }: { state: MistState; locked: boo
   const save = async (archived = false) => { if (!edit) return; setProblem(''); try { await run({ type: 'email.template.save', payload: { ...(edit.id ? { id: edit.id } : {}), name: edit.name, subject: edit.subject, body: edit.body, ...(archived ? { archived: true } : {}) } }); toast(archived ? '模板已停用' : '模板已保存'); setEdit(null); } catch (e) { setProblem(problemText(e, '模板未保存')); } };
   return <Card className="mist-col" style={{ gap: 8, marginTop: 12 }} data-mail-templates>
     <div className="mist-row"><b>{uiText('公司邮件模板')}</b><span className="mist-spacer" />{!edit && <Button size="sm" icon={Plus} disabled={locked} onClick={() => setEdit({ name: '', subject: '', body: '' })}>{uiText('新增模板')}</Button>}</div>
-    {problem && <Banner tone="bad" title={uiText('未能保存')}>{uiText(problem)}</Banner>}
+    {problem && <FailureNotice title={'未能保存'} detail={problem} />}
     {edit ? <FormGrid cols={1}>
       <Field label={uiText('模板名称')} required><TextInput aria-label={uiText('模板名称')} value={edit.name} onChange={e => setEdit({ ...edit, name: e.target.value })} /></Field>
       <Field label={uiText('主题')}><TextInput aria-label={uiText('模板主题')} value={edit.subject} onChange={e => setEdit({ ...edit, subject: e.target.value })} /></Field>

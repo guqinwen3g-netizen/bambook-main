@@ -1,11 +1,12 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 import React from 'react';
 import { BAMBOOK_BRAND } from '../../../../server/src/shared/brand';
-import { Banner, Button, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink } from '../../../../components/mist';
+import { Button, Field, MistMark, MistWordmark, PasswordInput, TextInput, TextLink } from '../../../../components/mist';
 import { useNav } from '../nav';
 import { accountAccessApi } from '../runtime/accountAccess';
 import { PASSWORD_HINT, passwordOk } from '../runtime/passwordRule';
 import { useRecoveryCooldown } from '../runtime/recoveryCooldown';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 /** 找回密码对公司员工与平台人员通用（同一 /auth/account-access 链路；邮件链接按账号类型指向各自入口）。
  * GET never consumes a link. A request acknowledgement is not proof of email delivery. */
@@ -49,7 +50,7 @@ export function AccountAccessPage(){
   {done?<Button variant="primary" onClick={returnToLogin}>{uiText("返回登录")}</Button>
    :linkInvalid?<><p className="mist-sub">{uiText(kind==='invite'?'请联系管理员重新发送邀请。':'请重新申请重置邮件。')}</p>{kind==='recovery'&&<Button variant="primary" onClick={()=>nav.go('account-recovery')}>{uiText("重新申请")}</Button>}<TextLink onClick={returnToLogin}>{uiText("返回登录")}</TextLink></>
    :<>
-    {error&&<Banner tone="bad" title={uiText(error)}/>}
+    {error&&<FailureNotice title="操作未完成" detail={error} />}
     <Field label={uiText("工作邮箱")}><TextInput aria-label={uiText("工作邮箱")} type="email" autoComplete="username" autoCapitalize="none" spellCheck={false} maxLength={254} required disabled={busy||!requestMode} value={email} onChange={e=>{setEmail(e.target.value);setNotice('');setAccepted(false);}}/></Field>
     {!requestMode&&<>
      <Field label={uiText("新密码")} hint={<span id="account-new-password-help">{PASSWORD_HINT}</span>} error={weak?<span id="account-new-password-help" role="alert">{uiText(new TextEncoder().encode(password).length>72?'密码过长，请缩短后重试。':PASSWORD_HINT)}</span>:undefined}><PasswordInput aria-label={uiText("新密码")} aria-describedby="account-new-password-help" aria-invalid={weak||undefined} autoComplete="new-password" required minLength={8} maxLength={72} disabled={busy} value={password} onChange={e=>setPassword(e.target.value)}/></Field>

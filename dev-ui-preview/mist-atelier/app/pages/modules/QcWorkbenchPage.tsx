@@ -19,6 +19,7 @@ import { ProductionSampleNotes } from '../ProductionSampleNotes';
 import { QcDispositionPanel } from './QcDispositionPanel';
 import { AqlCard, FabricInspectionCard, aqlFromDraft, emptyAql, emptyFabric, fabricFromDraft, type AqlDraft, type FabricDraft } from './QcSampling';
 import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Domain = FulfillmentQcTask['domain'];
 type Kind = FulfillmentQcTask['kind'];
@@ -229,7 +230,7 @@ export function QcWorkbenchPage() {
         {canPatrol && <Button icon={Plus} onClick={() => setDialog(patrolSpec())}>{uiText('新建巡检')}</Button>}
         {canRequest ? <Button variant="primary" icon={Plus} onClick={request}>{uiText("从来源发起QC")}</Button> : <span className="mist-note">{uiText('送检由业务员在准确来源发起')}</span>}
       </>} />
-    {(error || failure) && <div className="mist-section"><Banner tone="bad" title={uiText("QC操作未完成")} actions={error ? <Button onClick={() => void refresh()}>{uiText("重试")}</Button> : undefined}>{failure || error}</Banner></div>}
+    {(error || failure) && <FailureNotice title="QC操作未完成" detail={failure || error} retry={error ? () => void refresh() : undefined} />}
     <div className="mist-domains" role="tablist" aria-label={uiText("QC 专业板块")}>
       {(['fabric', 'garment'] as const).map(value => { const m = metrics[value]; return <CardButton key={value} role="tab" aria-selected={domain === value} className="mist-domain" onClick={() => changeDomain(value)}>
         <span className="mist-domain-h"><Tile icon={value === 'fabric' ? Layers : Shirt} tone={domain === value ? 'accent' : undefined} /><b>{DOMAIN_LABEL[value]}</b><span className="mist-spacer" /><span className="mist-note">{uiText(canQc(value) ? '可处理' : '只读')}{uiText(" · 共 ")}{m.total}{uiText(" 条")}</span></span>
@@ -397,7 +398,7 @@ export function QcReportEditor({ task, onClose }: { task: FulfillmentQcTask; onC
   return <MistPage>
     <BackLink onClick={onClose}>{uiText("返回QC工作台")}</BackLink>
     <PageHeader description={uiText(`${task.code} · ${state ? fulfillmentSourceLabel(state, task.source) : ''}`)} eyebrow={uiText(`${DOMAIN_LABEL[task.domain]} · ${KIND_LABEL[task.kind]}`)} title={uiText("提交专业QC报告")} />
-    {failure && <div className="mist-section"><Banner tone="bad" title={uiText("报告未保存")}>{failure}</Banner></div>}
+    {failure && <FailureNotice title={"报告未保存"} detail={failure} />}
     {missingSizes && <div className="mist-section"><Banner variant="notice" tone="warn" title={uiText("生产尺码未登记")} actions={productionId ? <Button onClick={() => go('production-board', productionId)}>{uiText("查看生产单")}</Button> : undefined}>{uiText("由业务员在生产进度登记尺码与数量后再提交报告。")}</Banner></div>}
     {sampleConcerns.length > 0 && <div className="mist-section"><ProductionSampleNotes checks={sampleConcerns} /></div>}
     <div className="mist-detail" data-layout="main-rail">

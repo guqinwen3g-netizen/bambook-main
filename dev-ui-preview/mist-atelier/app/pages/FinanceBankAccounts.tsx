@@ -326,7 +326,7 @@ export function PeriodCloseCard() {
     {rows.length ? <DataTable ariaLabel={uiText('结账记录')} rows={rows} rowKey={r => r.month + r.closedAt} density="comfy" columns={[
       { key: 'm', header: '月份', render: r => r.month },
       { key: 's', header: '状态', render: r => <Pill tone={r.reopened ? 'neutral' : 'ok'}>{uiText(r.reopened ? '已反结账' : '已结账')}</Pill> },
-      { key: 'by', header: '结账', render: r => `${r.closedBy} · ${r.closedAt.slice(0, 10)}` },
+      { key: 'by', header: '结账', render: r => `${r.closedBy} · ${platformBusinessDate(r.closedAt)}` },
       { key: 'n', header: '说明', render: r => r.reopened ? `${r.note}；反结账：${r.reopened.reason}（${r.reopened.actor}）` : r.note },
     ]} /> : <EmptyState compact title={uiText('还没有结账月份')} />}
     <ModuleEditorDialog spec={spec} onClose={() => setSpec(null)} />

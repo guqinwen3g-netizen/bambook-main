@@ -25,6 +25,7 @@ import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, businessDay, DetailBlock, DetailBody, ListDetail, ListDetailPage, PreviewSummary, shortWhen, useListDetailRoute } from './pageKit';
 import { CAPACITY_UNITS, CERTIFICATES, COUNTRIES } from '../../runtime/tradeOptions';
 import { fmt } from '../../data';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'blocked';
 type FlagFilter = 'all' | 'certExpiring' | 'certExpired' | 'noCert' | 'unrated' | 'scheduled';
@@ -195,8 +196,8 @@ export function SupplierWorkbench({ attachments, history }: SupplierWorkbenchPro
         <Button icon={Download} onClick={() => downloadModuleCsv('供应商.csv', ['编码', '名称', '类型', '地址', '工艺与能力', '月产能', '产能单位', '交付周期天', '评级', '认证', '在手单', '准交', '状态'], rows.map(s => { const p = perf.get(s.id); return [s.code, s.name, s.type, s.address, s.capabilities, s.capacity, s.capacityUnit, s.leadDays, supplierGrade(s)?.grade || '', (s.certificates || []).map(c => `${c.name}(${c.validUntil})`).join('；'), p?.open.length || 0, p?.completed.length ? `${p.onTime}/${p.completed.length}` : '', STATUS_LABEL[statusNow(s)]]; }))}>{uiText("导出")}</Button>
         {can && <Button variant="primary" icon={Plus} disabled={locked} onClick={() => setDialog(profileSpec())}>{uiText("新增供应商")}</Button>}
       </>} />
-    {!can && <div className="mist-section"><Banner tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有供应商写权限，可以查看档案、认证与交付表现。")}</Banner></div>}
-    {error && <div className="mist-section"><Banner tone="bad" title={uiText("供应商数据未加载")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {!can && <div className="mist-section"><Banner variant="status" tone="neutral" title={uiText("只读查看")}>{uiText("你的账号没有供应商写权限，可以查看档案、认证与交付表现。")}</Banner></div>}
+    {error && <FailureNotice title={"供应商数据未加载"} detail={error} retry={() => void refresh()} />}
     <Toolbar>
       <SearchField value={query} onChange={setQuery} placeholder={uiText("搜索名称、编码、工艺、地址或联系人")} />
       <Dropdown label={uiText("评级")} value={gradeFilter} onChange={setGradeFilter} options={[{ value: 'all', label: '全部' }, ...SUPPLIER_GRADES.map(g => ({ value: g, label: g })), { value: 'none', label: '未评级' }]} />

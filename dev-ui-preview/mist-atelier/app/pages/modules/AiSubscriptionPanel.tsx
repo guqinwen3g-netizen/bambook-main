@@ -9,6 +9,7 @@ import React from 'react';
 import { ExternalLink, Link2, RefreshCw, Unlink } from 'lucide-react';
 import { Banner, Button, Card, CardHeader, KeyValue, Pill, useToast } from '../../../../../components/mist';
 import { apiService } from '../../../../../services/apiService';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 export type ChatgptSubscriptionStatus = { provider: 'chatgpt'; enabled: boolean; connected: boolean; email: string | null; plan: string | null; model: string; reasoning?: string; connectedAt: string | null };
 type LoginView = { loginId: string; state: 'pending' | 'connected' | 'failed' | 'expired' | 'cancelled'; userCode: string; verificationUrl: string; expiresAt: string; message: string | null };
@@ -61,7 +62,7 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
     if (error) return <Banner tone="warn" title={uiText(title)}>{uiText(error)}</Banner>;
     // 读取中与服务器未启用都要有交代，不能留一整页空白。
     const body = <div className="mist-card-body">{status
-      ? <Banner title={uiText("未启用 ChatGPT 订阅连接")} />
+      ? <Banner variant="status" title={uiText("未启用 ChatGPT 订阅连接")} />
       : <p className="mist-note">{uiText("正在读取订阅连接…")}</p>}</div>;
     return bare ? body : <Card>{body}</Card>;
   }
@@ -82,7 +83,7 @@ export function AiSubscriptionPanel({ sessionKey, mode, onChange, bare }: { sess
   const Wrap = bare ? React.Fragment : Card;
   return <Wrap>
     <CardHeader title={uiText(mode === 'platform' ? 'ChatGPT 套餐连接' : '我的 ChatGPT 订阅')} sub={uiText(mode === 'platform' ? '用管理员的 ChatGPT 套餐作为平台模型之一，在上方调用顺序中排位。登录在 OpenAI 页面完成，凭据只保存在服务器。' : '供工作助手使用你自己的 ChatGPT 账号；登录在 OpenAI 页面完成，凭据只保存在服务器。')} tools={status.connected ? <Pill tone="ok">{uiText("已连接")}</Pill> : <Pill>{uiText("未连接")}</Pill>} />
-    {error && <div className="mist-card-body"><Banner tone="bad" title={uiText("订阅连接未完成")}>{uiText(error)}</Banner></div>}
+    {error && <FailureNotice title={"订阅连接未完成"} detail={error} />}
     {status.connected ? <>
       <KeyValue items={[{ label: '账号', value: status.email ?? '—' }, { label: '套餐', value: planLabel(status.plan) }, { label: '模型', value: status.model, mono: true }, ...(mode === 'personal' ? [{ label: '推理强度', value: status.reasoning ? REASONING[status.reasoning] ?? status.reasoning : '—' }] : []), { label: '连接时间', value: time(status.connectedAt) }, ...profiles.map(p => ({ label: p.label, value: '推理 ' + (REASONING[p.reasoning] ?? p.reasoning) }))]} />
       <div className="mist-card-body"><div className="mist-row"><Button icon={Unlink} disabled={busy} loading={busy} onClick={() => void disconnect()}>{uiText("断开连接")}</Button></div></div>

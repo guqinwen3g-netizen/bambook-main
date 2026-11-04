@@ -24,6 +24,7 @@ import { choiceField, deliveryTargetPayload, emptyOption, exportRecords, field, 
 import { useRouteDraft } from './useRouteDraft';
 import { ActionBar, DetailBlock, DetailBody, ListDetail, shortWhen } from './pageKit';
 import { businessWhen } from './pageKit';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 type Domain = 'fabric' | 'garment';
 type StateFilter = 'all' | 'available' | 'inspecting' | 'isolated' | 'cleared';
@@ -229,7 +230,7 @@ export function InventoryPage() {
   return <Nav.Provider value={{ ...nav, route: { ...route, id: receipt || invalidSource ? undefined : route.id } }}><MistPage width="wide">
     <PageHeader description={uiText(hasClaim ? invalidSource ? '退货来源不匹配' : claim?.code : route.section ? f?.purchases.find(purchase => purchase.id === route.section)?.code : undefined)} eyebrow={uiText("订单履约 · 库存")} title={uiText("库存与仓储")}
       actions={<>{back}<Button icon={Download} disabled={!rows.length} onClick={exportRows}>{uiText("导出")}</Button><Button icon={Warehouse} onClick={() => setCatalog(true)}>{uiText("仓库目录")}</Button>{can && <Button icon={Plus} disabled={locked} onClick={() => editor.open(warehouseSpec())}>{uiText("新增仓库")}</Button>}{can && !hasClaim && <Button variant="primary" icon={PackagePlus} disabled={locked} onClick={() => editor.open(otherReceiptSpec())}>{uiText("其他入库")}</Button>}</>} />
-    {error&&error!==presentedError && <div className="mist-section"><Banner tone="bad" title={uiText("库存读取未完成")} actions={<Button onClick={() => void refresh()}>{uiText("重试")}</Button>}>{uiText(error)}</Banner></div>}
+    {error&&error!==presentedError && <FailureNotice title={"库存读取未完成"} detail={error} retry={() => void refresh()} />}
     {hasClaim && !f?.warehouses.length && <div className="mist-section"><Banner tone="warn" title={uiText("尚无真实仓库")}>{uiText("请先登记，再返回案件选择退货仓库。")}</Banner></div>}
     {hasClaim && !invalidSource && <div className="mist-section"><Card><div className="mist-card-body mist-col">
       <div className="mist-row" style={{ flexWrap: 'wrap' }}><span className="mist-eyebrow">{uiText("退货收货 · ")}{claim?.code}</span><span className="mist-spacer" /></div>

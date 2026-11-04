@@ -8,6 +8,7 @@ import { mistApiRequest, useMistWorkspace } from '../runtime/workspace';
 import {useNav} from '../nav';
 import {workspaceMembers} from '../runtime/members';
 import { AGENT_AUDIT_FIELD_LABELS, agentAuditActionLabel, type AgentAuditDetail, type AgentAuditEntry, type AgentAuditPage } from '../../../../server/src/shared/mistAgentAudit';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 const when=(at:string)=>new Date(at).toLocaleString(interfaceLocale(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 const source=(r:AgentAuditEntry)=>r.source==='human_confirmation'?'人工确认':r.source==='human_rejection'?'人工拒绝':r.phase==='proposed'?'Agent 提议':'Agent 办理';
@@ -94,7 +95,7 @@ export function AuditHistoryView({workspaceId,members=[]}:{workspaceId:string;me
       <Button icon={RefreshCw} disabled={loading} onClick={()=>void load()}>{uiText('刷新')}</Button>
       {related&&<><Pill>{uiText(related.key==='proposalId'?'同一提议':'同一会话')}</Pill><Button onClick={()=>setRelated(null)}>{uiText('清除关联')}</Button></>}
     </div>
-    {failure&&<Banner tone="bad" title={uiText('操作记录读取失败')}>{uiText(failure)} <Button onClick={()=>scope==='company'&&!canCompany?setScope('mine'):void load()}>{uiText(scope==='company'&&!canCompany?'查看本人':'重试')}</Button></Banner>}
+    {failure&&<FailureNotice title="操作记录读取失败" detail={failure} retry={()=>scope==='company'&&!canCompany?setScope('mine'):void load()} retryLabel={scope==='company'&&!canCompany?'查看本人':'重试'} />}
     {unavailable>0&&<Banner tone="warn" title={uiText('有操作记录暂不可读取')}/>}
     <DataTable ariaLabel={uiText('Agent 操作记录')} loading={loading&&!items.length} rows={items} rowKey={r=>r.requestId} onRowClick={open} minWidth={300} columns={[
       {key:'action',header:uiText('操作'),width:'minmax(170px,2fr)',render:r=><div><div>{action(r)}</div><span className="mist-note">{uuid(r.actor.name)?uiText('未命名账号'):r.actor.name} · {when(r.at)}</span></div>},

@@ -21,6 +21,7 @@ import { useFilePreview } from '../runtime/files';
 import { useDevice } from '../runtime/devicePreferences';
 import { IncotermPlaceInput, OptionInput } from './OptionInput';
 import { COUNTRIES, CURRENCIES, CUSTOMER_GRADES, CUSTOMER_PAYMENT_TERMS, INDUSTRIES, PRODUCT_CATEGORIES, withCurrent, type TradeOption } from '../runtime/tradeOptions';
+import { FailureNotice } from '../runtime/FailureNotice';
 const CUSTOMER_CHOICES: Partial<Record<string, TradeOption[]>> = { country: COUNTRIES, industry: INDUSTRIES, grade: CUSTOMER_GRADES, terms: CUSTOMER_PAYMENT_TERMS, categories: PRODUCT_CATEGORIES };
 
 export function CustomerPage() {
@@ -100,7 +101,7 @@ export function CustomerPage() {
       meta={[`${customer.country} · ${customer.city}`, customer.industry, <Mono key="code">{customer.code}</Mono>]} title={uiText(customer.name)}
       facts={[{ label: '客户经理', value: <><Avatar name={customer.owner} identityKey={customer.ownerId} size="xs" />{customer.owner}</> }, { label: '等级', value: <Pill tone="accent">{customer.grade}</Pill> }]}
       actions={<>{customerActions}{canMail&&<Button icon={Mail} disabled={!customerEmail} title={uiText(customerEmail?'使用本机邮件应用撰写，Bambook不会发送邮件':'请先添加含有效邮箱的联系人')} onClick={() => writeMail(customerEmail)}>{uiText("写邮件")}</Button>}{canDevelop&&<Button variant="primary" icon={Plus} onClick={() => go('development/new', undefined, { customerId: customer.id })}>{uiText("新建开发案")}</Button>}{canMaintainCustomer&&<IconButton icon={Ellipsis} label={uiText("编辑客户资料")} onClick={() => { setEdit({ ...customer }); setFailure(''); }} />}</>} />
-    {(error || failure) && <Banner tone="bad" title={uiText("操作尚未完成")}>{failure || error}</Banner>}
+    {(error || failure) && <FailureNotice title={"操作尚未完成"} detail={failure || error} />}
     <Tabs value={tab} onChange={setTab} options={[{ value: 'overview', label: '概览' }, { value: 'orders', label: '订单', count: orders.length }, { value: 'dev', label: '开发', count: devs.length }, { value: 'followups', label: '跟进', count: (state?.crm?.followUps ?? []).filter(row => row.customerId === customer.id).length }, { value: 'opportunities', label: '商机', count: (state?.crm?.opportunities ?? []).filter(row => row.customerId === customer.id && !['won', 'lost'].includes(row.stage)).length }, { value: 'mail', label: '邮件' }, { value: 'contacts', label: '联系人', count: contacts.length }, { value: 'files', label: '文件', count: files.length }]} />
     <StatGrid>
       <StatCard icon={BadgeDollarSign} label={uiText("今年下单")} value={fmt(currencyOrders.filter(order => new Date(order.createdAt).getFullYear() === businessNow().getFullYear()).reduce((sum, order) => sum + order.amount, 0), 2)} unit={uiText(customer.currency)} foot={`共 ${orders.length} 个订单`} />

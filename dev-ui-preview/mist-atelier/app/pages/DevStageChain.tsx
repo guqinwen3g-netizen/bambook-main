@@ -2,9 +2,10 @@ import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** Fabric staged outsourcing: choose parallel comparison or a process chain, and edit the chain in order. */
 import React from 'react';
 import { ArrowDown, ArrowUp, Plus, Trash2, Workflow } from 'lucide-react';
-import { Banner, Button, ChoiceCards, Field, FormGrid, Pill, Select, TextArea, TextInput } from '../../../../components/mist';
+import { Button, ChoiceCards, Field, FormGrid, Pill, Select, TextArea, TextInput } from '../../../../components/mist';
 import type { MistState, MistVersion } from '../../../../server/src/shared/mistWorkspace';
 import { DEV_STAGE_PROCESSES, defaultStageProcess, devStageChainText, devStageHandoverBlocker, devStagePendingHandovers, devStagePlanError, type DevStagePlan } from '../../../../server/src/shared/mistDevelopmentStages';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 export type DevSampleMode = 'parallel' | 'staged';
 type FactoryOption = { id: string; name: string; unavailable: boolean };
@@ -53,7 +54,7 @@ export function DevStageChainCard({ version, today, canWrite, busy, onHandover }
     </li>; })}</ol>
     {canWrite && next !== undefined && !form && <div className="mist-row" style={{ marginTop: 6 }}><Button size="sm" disabled={busy || !!blocker} title={uiText(blocker || undefined)} onClick={() => setForm({ quantity: '', unit: version.task?.sampleUnit || '米', date: today, note: '' })}>{ui`登记 ${stages[next].factory} 交接`}</Button></div>}
     {form && next !== undefined && <div className="mist-col" style={{ marginTop: 8 }}>
-      {error && <Banner tone="bad" title={uiText('交接尚未保存')}>{error}</Banner>}
+      {error && <FailureNotice title={'交接尚未保存'} detail={error} />}
       <FormGrid>
         <Field label={uiText('交接数量')} required><TextInput aria-label={uiText('交接数量')} type="number" min={0} step="0.01" value={form.quantity} onChange={event => setForm({ ...form, quantity: event.target.value })} /></Field>
         <Field label={uiText('单位')} required><TextInput aria-label={uiText('交接单位')} value={form.unit} onChange={event => setForm({ ...form, unit: event.target.value })} /></Field>

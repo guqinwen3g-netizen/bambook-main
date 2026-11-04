@@ -1,7 +1,7 @@
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
 /** T10 local company settings. Saves exclusively through the active Mist workspace. */
 import React from 'react';
-import { Building2, FolderOpen, Landmark, Laptop, RefreshCw, Sparkles } from 'lucide-react';
+import { Building2, FolderOpen, Landmark, Laptop, Sparkles } from 'lucide-react';
 import { FormFooter,
   Banner, Button, Card, EmptyState, Field, FormGrid, FormSection, KeyValue, MistPage,
   PageHeader, Pill, Skeleton, TextInput, VerticalSteps, useToast,
@@ -12,6 +12,7 @@ import { useMistSession } from '../../runtime/auth';
 import { useMistWorkspace } from '../../runtime/workspace';
 import { AiSubscriptionPanel } from './AiSubscriptionPanel';
 import { PlatformAiProvidersPanel } from './PlatformAiProviders';
+import { FailureNotice } from '../../runtime/FailureNotice';
 
 /** 与系统设置共用同一份 Mist 公司资料字段定义。 */
 export type LocalCompanyProfile = MistCompanyProfile;
@@ -120,7 +121,7 @@ export function LocalAdminPanel({ embedded = false }: { embedded?: boolean } = {
 
   const footer = <FormFooter><span className="mist-note">{uiText(busy || workspace.saving ? '正在保存本地资料…' : '保存后应用于本机演示公司')}</span><span className="mist-spacer" /><Button variant="primary" loading={busy} disabled={blocked} onClick={() => void save()}>{uiText("保存资料")}</Button></FormFooter>;
   if (embedded) return <>
-    {error && <Banner tone="bad" title={uiText("资料尚未保存")}>{error}</Banner>}
+    {error && <FailureNotice title={"资料尚未保存"} detail={error} />}
     <Card>
       {!workspace.state ? <FormSection title={uiText("正在读取本地空间")}><Skeleton height={120} /></FormSection> : <>
         <FormSection title={uiText("本机身份")}>
@@ -141,7 +142,7 @@ export function LocalAdminPanel({ embedded = false }: { embedded?: boolean } = {
   const fields = section === 'company' ? COMPANY_FIELDS : EXPORT_FIELDS;
   return <MistPage>
     <PageHeader eyebrow={uiText("平台 · 本机演示公司")} title={uiText("管理后台")} actions={<Pill tone="neutral">{uiText("本地开发模式")}</Pill>} />
-    {(error || workspace.error) && <Banner tone="bad" title={uiText("资料尚未保存")} actions={workspace.error ? <Button icon={RefreshCw} disabled={busy} onClick={() => void workspace.refresh()}>{uiText("重新读取")}</Button> : undefined}>{error || workspace.error}</Banner>}
+    {(error || workspace.error) && <FailureNotice title="资料尚未保存" detail={error || workspace.error} retry={workspace.error && !busy ? () => void workspace.refresh() : undefined} retryLabel="重新读取" />}
     {workspace.pending && <Banner tone="warn" title={uiText("上一次保存结果待核对")} actions={<Button disabled={busy || workspace.saving} onClick={() => void recover()}>{uiText("核对原请求")}</Button>}>{uiText("输入已保留，核对完成后再继续保存。")}</Banner>}
     <div className="mist-wizard">
       <VerticalSteps mode="page" current={section} onSelect={setSection} steps={[
@@ -167,7 +168,7 @@ export function LocalAdminPanel({ embedded = false }: { embedded?: boolean } = {
             </FormGrid>
           </FormSection>}
           {section === 'local' && <FormSection title={uiText("本地开发模式")} description={uiText("用于在当前设备上录入与验证完整业务。")}>
-            <Banner tone="neutral" title={uiText("资料保存在当前设备")}>{uiText("本地身份与公司资料独立于原服务器账号。业务记录保存到本机演示公司，切换设备不会自动带走这些资料。")}</Banner>
+            <Banner variant="status" tone="neutral" title={uiText("资料保存在当前设备")}>{uiText("本地身份与公司资料独立于原服务器账号。业务记录保存到本机演示公司，切换设备不会自动带走这些资料。")}</Banner>
             <KeyValue items={[
               { label: '当前身份', value: session.user?.displayName || '本地用户' },
               { label: '本公司', value: workspace.workspace?.name || values.workspaceName },

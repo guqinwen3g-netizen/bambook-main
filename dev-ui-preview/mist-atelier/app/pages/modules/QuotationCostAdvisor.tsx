@@ -21,6 +21,7 @@ import {
   type QuoteCostAdvisorResponse,
 } from "../../../../../server/src/shared/mistQuoteCostAdvisor";
 import type { QuoteHistoryReference } from "../../../../../server/src/shared/mistQuotationHistoryEvidence";
+import { FailureNotice } from '../../runtime/FailureNotice';
 export function QuotationCostAdvisor(p: {
   workspaceId: string;
   revision: number;
@@ -226,15 +227,7 @@ export function QuotationCostAdvisor(p: {
         {!p.permitted ? (
           <Banner title={uiText("没有报价 AI 审阅权限")}>{uiText("需要助手及报价读取权限；人工核算仍可继续。")}</Banner>
         ) : statusError ? (
-          <Banner
-            tone="bad"
-            title={uiText("模型状态未读取")}
-            actions={
-              <Button onClick={() => setReload((x) => x + 1)}>{uiText("重试状态")}</Button>
-            }
-          >
-            {statusError}
-          </Banner>
+          <FailureNotice title={"模型状态未读取"} detail={statusError} retry={() => setReload((x) => x + 1)} retryLabel="重试状态" />
         ) : configured === null ? (
           <Banner title={uiText("正在读取模型状态")} />
         ) : !configured ? (
@@ -271,9 +264,7 @@ export function QuotationCostAdvisor(p: {
               )}
             </div>
             {error && (
-              <Banner tone="bad" title={uiText("AI 审阅未完成")}>
-                {uiText(error)}
-              </Banner>
+              <FailureNotice title={"AI 审阅未完成"} detail={error} />
             )}
             {result && (
               <>

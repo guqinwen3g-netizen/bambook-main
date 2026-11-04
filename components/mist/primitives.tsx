@@ -226,7 +226,9 @@ export function Skeleton({ width = '100%', height = 12, radius }: { width?: numb
  * - notice：动手前必须看清的阻断或风险，白底、左侧细色条，保留在原位。
  */
 export type BannerVariant = 'inline' | 'status' | 'notice';
-export function Banner({ tone = 'accent', icon, title, children, actions, variant = 'inline' }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode; variant?: BannerVariant }) {
+export function Banner({ tone = 'accent', icon, title, children, actions, variant: requested }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode; variant?: BannerVariant }) {
+  // Unmarked banners read as notices; AI suggestions keep their own surface; 'inline' stays for the shell's floating card.
+  const variant = requested ?? (tone === 'ai' ? 'inline' : 'notice');
   if (variant === 'status') return <div className="mist-status-line" data-tone={toneAttr(tone)} role="status"><span className="mist-status-dot" aria-hidden="true" /><b>{uiText(title)}</b>{children && <span className="mist-status-text">{uiText(children)}</span>}{actions && <span className="mist-status-act">{actions}</span>}</div>;
   // Notices always lead with an icon so every blocker reads the same: a warning triangle for warn/bad, info otherwise.
   const lead = icon ?? (variant === 'notice' ? (tone === 'warn' || tone === 'bad' ? AlertTriangle : Info) : undefined);

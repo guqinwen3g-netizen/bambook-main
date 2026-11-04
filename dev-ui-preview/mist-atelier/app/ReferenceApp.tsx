@@ -27,7 +27,7 @@ import { onThemePreference, readThemePreference, resolveTheme, writeThemePrefere
 import { useDevice } from './runtime/devicePreferences';
 import { LegacyStartup } from '../../../components/mist/LegacyStartup';
 import { MistWorkspaceProvider, useMistWorkspace } from './runtime/workspace';
-import {MistPresentedErrorContext,useClaimedUploadRecovery,usePendingRecoveryClaimed,usePageFailures} from './runtime/errorPresentation';
+import {MistPresentedErrorContext,useClaimedUploadRecovery,usePendingRecoveryClaimed,usePageFailures,usePageFailureHost} from './runtime/errorPresentation';
 import { clearPrivateImages, schedulePrivateImagePrefetch } from './runtime/usePrivateImage';
 import { useOrganizationContext } from './runtime/organizationContext';
 import { TeamViewScope, useTeamView } from './runtime/teamView';
@@ -148,6 +148,7 @@ function crumbsFor(route: Route, go: (view: string, id?: string) => void, object
 function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: ThemeMode) => void }) {
   const locale = useInterfaceLanguage();
   const session = useMistSession(), toast = useToast(), workspace = useMistWorkspace(), claimedUpload = useClaimedUploadRecovery(), pendingClaimed = usePendingRecoveryClaimed(), pageFailures = usePageFailures();
+  usePageFailureHost();
   const [hiddenNoticeKey, setHiddenNoticeKey] = React.useState('');
   const {state} = workspace;
   const platformOnly = session.user?.platformRole === 'platform_admin' && !session.user.roleIds?.length;
@@ -387,12 +388,12 @@ function AppInner({ theme, setTheme }: { theme: ThemeMode; setTheme: (theme: The
   const roles = platformOnly ? '平台管理员' : platformCompany ? '平台管理' : user.roleLabels?.filter(role => !role.name.endsWith('标准岗位补充')).map(role => role.name).join(' · ') || user.roles.map(role => ({ owner: '负责人', admin: '管理员', manager: '管理者', merchandiser: '业务员', finance: '财务', sales: '业务员', viewer: '查看人员', agent_operator: '助手操作员' })[role]).join(' · ');
   // Shell status floats under the topbar (MistAppShell notices) instead of pushing the page title down.
   const shellNoticeList = [
-    platformCompany && <Banner key="platform" tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>,
-    workspace.pendingCreate && !workspace.saving && <Banner key="create" tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>,
-    workspace.pending && !workspace.saving && !pendingClaimed && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner key="pending" tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>,
-    workspace.error && !workspace.pending && <Banner key="error" tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />,
+    platformCompany && <Banner variant="inline" key="platform" tone="neutral" title={ui`公司管理 · ${platformCompany.companyName}`} actions={<Button loading={exitingSupport} onClick={()=>void exitManagement()}>{uiText("返回平台")}</Button>}/>,
+    workspace.pendingCreate && !workspace.saving && <Banner variant="inline" key="create" tone="warn" title={uiText("历史数据创建结果需要核对")} actions={<Button onClick={()=>void workspace.createWorkspace(workspace.pendingCreate!.name,workspace.pendingCreate!.seed).catch(report)}>{uiText("核对创建结果")}</Button>}>{workspace.pendingCreate.name}{uiText("：将查询并继续同一次创建。")}</Banner>,
+    workspace.pending && !workspace.saving && !pendingClaimed && !(workspace.pending.kind==='mail-send'&&route.view==='emails') && !(workspace.pending.kind==='command'&&route.view==='calendar') && !(workspace.pending.kind==='upload'&&claimedUpload===workspace.pending.requestId) && <Banner variant="inline" key="pending" tone="warn" title={uiText("上次操作的结果需要核对")} actions={<Button loading={workspace.saving} onClick={()=>void workspace.recover().catch(report)}>{uiText("核对原请求")}</Button>}>{uiText("核对前会保留原请求，避免重复保存。")}{uiText(workspace.pending.kind==='upload'?'如尚未上传成功，请在原页面重新选择同一附件。':workspace.pending.kind==='mail-send'?'上次邮件发送未收到服务器回执；核对时使用原发送请求，已登记的不会重复投递。':'')}</Banner>,
+    workspace.error && !workspace.pending && <Banner variant="inline" key="error" tone="bad" title={uiText(workspace.error)} actions={<Button onClick={()=>void workspace.refresh()}>{uiText("重新读取")}</Button>} />,
     // A page's own failure that the shell already shows (same text) is not repeated.
-    ...pageFailures.filter(item => item.detail !== workspace.error).map(item => <Banner key={'page:'+item.id} tone="bad" title={uiText(item.title)} actions={item.retry ? <Button onClick={item.retry}>{uiText("重试")}</Button> : undefined}>{item.detail}</Banner>)
+    ...pageFailures.filter(item => item.detail !== workspace.error).map(item => <Banner variant="inline" key={'page:'+item.id} tone="bad" title={uiText(item.title)} actions={item.retry ? <Button onClick={item.retry}>{uiText("重试")}</Button> : undefined}>{item.detail}</Banner>)
   ].filter(Boolean);
   // Collapsing remembers which notices were seen; a new or changed notice shows again. The topbar status reopens them.
   const shellNoticeKey = shellNoticeList.map(item => (item as React.ReactElement).key).join('|') + '|' + (workspace.error || '') + '|' + pageFailures.map(item => item.detail).join('|');

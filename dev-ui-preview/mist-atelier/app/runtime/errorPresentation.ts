@@ -44,3 +44,10 @@ export function usePageFailure(title: string, detail: string | null | undefined,
   }, [id, title, detail, !!retry]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 export const usePageFailures = () => useSyncExternalStore(listener => { failureListeners.add(listener); return () => { failureListeners.delete(listener); }; }, () => pageFailures, () => pageFailures);
+/** Set by the app shell while it renders the bottom-right card; without it (tests, standalone pages) failures stay in place. */
+let shellHosts = 0;
+const hostListeners = new Set<() => void>();
+export function usePageFailureHost() {
+  useEffect(() => { shellHosts++; hostListeners.forEach(listener => listener()); return () => { shellHosts--; hostListeners.forEach(listener => listener()); }; }, []);
+}
+export const usePageFailureHosted = () => useSyncExternalStore(listener => { hostListeners.add(listener); return () => { hostListeners.delete(listener); }; }, () => shellHosts > 0, () => false);

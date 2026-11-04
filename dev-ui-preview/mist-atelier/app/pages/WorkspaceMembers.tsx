@@ -9,6 +9,7 @@ import { useMistSession } from '../runtime/auth';
 import { useMistWorkspace } from '../runtime/workspace';
 import { MemberHandover } from './MemberHandover';
 import { businessWhen } from './modules/pageKit';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 const when = (at: string) => businessWhen(at);
 export function WorkspaceMembers({ busy: outerBusy }: { busy: boolean }) {
@@ -52,8 +53,8 @@ export function WorkspaceMembers({ busy: outerBusy }: { busy: boolean }) {
     finally { if (current()) { inFlight.current = false; setBusy(false); } }
   };
   return <>{company ? <FormSection title={uiText("公司成员")} description={uiText("公司在职成员自动进入本公司，离职或停用即不能进入。看到哪些模块按岗位权限，看到哪些业务按本人、所在部门与小组的数据范围决定。成员在人事中维护。")}><p className="mist-note">{uiText(`当前在职成员 ${directory.length} 人。`)}</p></FormSection> : <FormSection title={uiText("授权访问")} description={uiText("授权只让对方进入公司。对方能看到哪些数据、能办理哪些动作，仍按其本人岗位权限决定，由服务端校验。")}>
-    {!owner && <Banner tone="neutral" title={uiText("你是被授权成员")}>{uiText("公司成员管理与授权由公司管理人员办理；你可以按本人岗位权限查看和办理业务。")}</Banner>}
-    {error && <Banner tone="bad" title={uiText("授权未完成")}>{uiText(error)}</Banner>}
+    {!owner && <Banner variant="status" tone="neutral" title={uiText("你是被授权成员")}>{uiText("公司成员管理与授权由公司管理人员办理；你可以按本人岗位权限查看和办理业务。")}</Banner>}
+    {error && <FailureNotice title={"授权未完成"} detail={error} />}
     <SettingRow title={uiText("公司管理人员")} description={uiText(envelope.ownerId === session.user?.id ? '当前账号' : '创建公司的账号')} control={<span className="mist-mono">{uiText(envelope.ownerId === session.user?.id ? session.user?.displayName : envelope.ownerId)}</span>} />
     {members.map(m => <SettingRow key={m.userId} title={uiText(m.name)} description={ui`${m.addedByName} 于 ${when(m.addedAt)} 授权`} control={owner ? <Button size="sm" disabled={disabled} onClick={() => void change('remove', m.userId)}>{uiText("撤销授权")}</Button> : <span className="mist-note">{uiText(m.userId === session.user?.id ? '当前账号' : '已授权')}</span>} />)}
     {!members.length && <p className="mist-note">{uiText("尚未授权其他账号。")}</p>}

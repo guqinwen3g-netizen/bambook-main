@@ -9,6 +9,7 @@ import type { MistState } from '../../../../server/src/shared/mistWorkspace';
 import type { MistMemberOption } from '../runtime/members';
 import { useMistWorkspace } from '../runtime/workspace';
 import { businessWhen } from './modules/pageKit';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 const when = (at: string) => businessWhen(at);
 export function MemberHandover({ state, directory, busy: outerBusy }: { state: MistState; directory: MistMemberOption[]; busy: boolean }) {
@@ -33,8 +34,8 @@ export function MemberHandover({ state, directory, busy: outerBusy }: { state: M
   };
   const records = [...accountHandovers(state)].reverse().slice(0, 10);
   return <FormSection title={uiText("成员交接")} description={uiText("成员离职或调岗时，把其名下的客户、订单、开发案、面料寻样、商机、供应商经手与未完成待办一次交给新负责人。只交接负责关系，不改单据内容；审批中的订单须审批后再交接。")}>
-    {error && <Banner tone="bad" title={uiText("交接未完成")}>{uiText(error)}</Banner>}
-    {done && <Banner tone="ok" title={uiText("交接完成")}>{done}</Banner>}
+    {error && <FailureNotice title={"交接未完成"} detail={error} />}
+    {done && <Banner variant="status" tone="ok" title={uiText("交接完成")}>{done}</Banner>}
     <div className="mist-row" data-member-handover>
       <Field label={uiText("原负责人")} hint={uiText("含已撤销授权的前成员")}><Select aria-label={uiText("交接原负责人")} value={fromId} disabled={busy} placeholder={uiText(fromOptions.length ? '选择账号' : '没有需要交接的账号')} options={fromOptions.map(o => ({ value: o.id, label: `${o.name}（${o.count} 项${member(o.id) ? '' : '，已不在本公司'}）` }))} onChange={e => { setFromId(e.target.value); setDone(''); }} /></Field>
       <Field label={uiText("新负责人")} hint={uiText("须为在用成员")}><Select aria-label={uiText("交接新负责人")} value={toId} disabled={busy} placeholder={uiText("选择成员")} options={directory.filter(m => m.id !== fromId).map(m => ({ value: m.id, label: m.name }))} onChange={e => setToId(e.target.value)} /></Field>

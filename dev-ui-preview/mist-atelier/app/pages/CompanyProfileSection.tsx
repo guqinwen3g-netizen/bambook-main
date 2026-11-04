@@ -1,7 +1,7 @@
 import { uiText, ui } from '../../../../services/interfaceLanguage';
 /** 公司资料：系统设置中的唯一维护入口，写入 settings.companyProfile；报价单、CI/PL 生成时读取当前值并冻结快照。 */
 import React from 'react';
-import { ArrowLeft, Copy, RefreshCw, Save } from 'lucide-react';
+import { ArrowLeft, Copy, Save } from 'lucide-react';
 import { FormFooter, Banner, Button, Field, FormGrid, FormSection, Mono, TextInput, useToast } from '../../../../components/mist';
 import { apiService } from '../../../../services/apiService';
 import { getAuthApiBase } from '../../../../services/authService';
@@ -11,6 +11,7 @@ import { useMistWorkspace } from '../runtime/workspace';
 import { useNav } from '../nav';
 import { OptionInput } from './OptionInput';
 import { CURRENCIES } from '../runtime/tradeOptions';
+import { FailureNotice } from '../runtime/FailureNotice';
 
 /** 公司代码：同事在登录页「立即注册 › 加入公司」时填写；读不到（如本地模式）时不显示。 */
 function CompanyJoinCode() {
@@ -120,7 +121,7 @@ export function CompanyProfileSection({ member, active = true }: { member: boole
       {member && empty && <Banner tone="neutral" title={uiText("公司资料待补全")}>{uiText("请联系管理员")}</Banner>}
       {!member && empty && <Banner tone="neutral" title={uiText("尚未填写公司资料")}>{uiText("生成报价单需中文抬头。")}</Banner>}
       {!member && !empty && !stored?.legalName?.trim() && <Banner tone="warn" title={uiText("缺少公司中文抬头")}>{uiText("报价单需要中文抬头，补全后才能生成。")}</Banner>}
-      {problem && !problem.key && <Banner tone="bad" title={uiText("公司资料未保存")} actions={<Button size="sm" icon={RefreshCw} disabled={locked} onClick={() => { setProblem(null); void workspace.refresh(); }}>{uiText("重新读取")}</Button>}>{problem.message}</Banner>}
+      {problem && !problem.key && <FailureNotice title="公司资料未保存" detail={problem.message} retry={locked ? undefined : () => { setProblem(null); void workspace.refresh(); }} retryLabel="重新读取" />}
       </div>}
       <FormGrid>{COMPANY_FIELDS.map(field)}</FormGrid>
     </FormSection>
