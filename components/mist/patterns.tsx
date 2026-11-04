@@ -144,11 +144,13 @@ export function Timeline({ events }: { events: TimelineEvent[] }) {
 
 /** 核对清单（出运准备、上线检查）。note 可标红（tone='bad'）。 */
 export function Checklist({ items, onToggle }: { items: Array<{ label: React.ReactNode; done: boolean; note?: React.ReactNode; noteTone?: 'bad' }>; onToggle?: (index: number) => void }) {
+  const id = React.useId();
   return (
     <div className="mist-checklist">{items.map((it, i) => (
       <div key={i} data-done={it.done || undefined}>
-        <button type="button" className="mist-checklist-bx" role="checkbox" aria-checked={it.done} aria-label={uiText(typeof it.label === 'string' ? it.label : undefined)} onClick={() => onToggle?.(i)} disabled={!onToggle}>{it.done && <Icon icon={Check} size="xs" />}</button>
-        <span>{uiText(it.label)}</span>{it.note && <small data-tone={it.noteTone}>{it.note}</small>}
+        <button type="button" id={`${id}-${i}`} className="mist-checklist-bx" role="checkbox" aria-checked={it.done} aria-label={uiText(typeof it.label === 'string' ? it.label : undefined)} onClick={() => onToggle?.(i)} disabled={!onToggle}>{it.done && <Icon icon={Check} size="xs" />}</button>
+        {/* The label forwards clicks to the box, so the whole item text is a target. */}
+        <label htmlFor={`${id}-${i}`} data-toggle={onToggle ? '' : undefined}>{uiText(it.label)}</label>{it.note && <small data-tone={it.noteTone}>{it.note}</small>}
       </div>
     ))}</div>
   );
