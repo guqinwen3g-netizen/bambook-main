@@ -16,7 +16,10 @@ describe('strict decimal string formatter — original numeric template branches
     expect(formatDocumentDecimal(value)).toBe('—');
   });
   it('renders actual source DTO through PL/CO/BL/AWB/INS with string quantities and no original whole-order amount', async () => {
-    const s = storage(), data = (await assembleDocumentSetData(s.db, 'S', { trustedActor: actor })).data as any;
+    const s = storage();
+    // permissionService.getUserPermissionContext 现从关联 role.id 重载范围，夹具须与已存 roleId 一致。
+    for (const grant of s.tables.userAccount[0].roles) grant.role.id = grant.roleId;
+    const data = (await assembleDocumentSetData(s.db, 'S', { trustedActor: actor })).data as any;
     const pl = renderPackingListBody(data, exporter);
     expect(pl).toContain('20 m'); expect(pl).toContain('2.35'); expect(pl).not.toContain('100 m');
     for (const render of [renderCertificateOfOriginBody, renderBillOfLadingBody, renderAirWaybillBody, renderInsurancePolicyBody]) {
