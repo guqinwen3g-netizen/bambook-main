@@ -27,6 +27,7 @@ import { useNav } from "../../nav";
 import { useRouteScope } from "./useRouteDraft";
 import { downloadModuleCsv } from "./ModuleWorkbench";
 import { quotationStageLabel } from "./QuotationsPage";
+import { businessWhen } from './pageKit';
 import {
   QUOTE_FEEDBACK_KINDS,
   QUOTE_FEEDBACK_REASONS,
@@ -203,7 +204,7 @@ export function QuotationHistoryPage() {
         <div className="mist-card-body mist-col">
           <Facts
             items={[
-              { label: "创建时间（非交付时间）", value: quote.createdAt },
+              { label: "创建时间（非交付时间）", value: businessWhen(quote.createdAt) },
               {
                 label: "原报价单价",
                 value: l.price + " " + quote.currency + "/" + l.unit,
