@@ -72,7 +72,8 @@
 | `Mono` | — | `({ children }: { children: React.ReactNode })` |
 | `EmptyState` | — | `({ icon, title, description, action, compact }: { icon?: LucideIcon; title: React.ReactNode; description?: React.ReactNode; action?: React.ReactNode; compact?: boolean })` |
 | `Skeleton` | — | `({ width = '100%', height = 12, radius }: { width?: number \| string; height?: number; radius?: number })` |
-| `Banner` | 内联提示条（页面内的提醒/错误/AI 建议），不是弹窗。 | `({ tone = 'accent', icon, title, children, actions }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode })` |
+| `Banner` | `status` 为对象状态色点行，`notice` 为必须原位保留的中性阻断卡，`inline` 用于外壳悬浮卡与 AI 建议。默认 `notice`（`tone='ai'` 默认 `inline`）。 | `({ tone = 'accent', icon, title, children, actions, variant }: { tone?: Tone; icon?: LucideIcon; title: React.ReactNode; children?: React.ReactNode; actions?: React.ReactNode; variant?: 'inline' \| 'status' \| 'notice' })` |
+| `FailureNotice` | 运行前端专用：`app/runtime/FailureNotice.tsx`。有外壳时将页面级失败送入右下角状态卡；在 `Dialog` / `Drawer` 内或独立页面中原位显示。字段校验仍靠近字段。 | `{ title: ReactNode; detail?: ReactNode; retry?: () => void; retryLabel?: string }` |
 | `Pagination` | — | `({ page, pages, onChange }: { page: number; pages: number; onChange: (p: number) => void })` |
 
 ## 表单 · `components/mist/form.tsx`

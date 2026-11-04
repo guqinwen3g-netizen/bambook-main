@@ -48,8 +48,9 @@
     "approvals"
    ],
    "commands": [],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：主管退回低于成本的报价，业务员收到退回修改"
   },
   {
    "id": "notifications",
@@ -68,8 +69,9 @@
     "notification.read",
     "notification.readAll"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：通知只发相关账号，标记已读"
   },
   {
    "id": "search",
@@ -85,8 +87,9 @@
     "search"
    ],
    "commands": [],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：订单号、客户名、采购号全局搜索跳转"
   },
   {
    "id": "attachments",
@@ -306,8 +309,9 @@
     "market.customer.update",
     "customer.update"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：新建 Harbour Loom 客户档案、付款与贸易条件"
   },
   {
    "id": "customer-contacts",
@@ -327,8 +331,9 @@
     "crm.followUp.save",
     "crm.opportunity.save"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：主联系人与电话跟进、下次跟进生成待办"
   },
   {
    "id": "supplier-profile",
@@ -348,8 +353,9 @@
     "market.supplier.certificate.save",
     "market.supplier.status"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：澄禾织造档案与 OEKO-TEX 证书附件"
   },
   {
    "id": "supplier-bank",
@@ -411,8 +417,9 @@
     "development.saveDraft",
     "development.submit"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：新建 DEV-2026-0009 并提交需求"
   },
   {
    "id": "dev-rounds",
@@ -433,8 +440,9 @@
     "development.recordSample",
     "development.sample.dispatch"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：三轮打样、寄样，库存扣减正确"
   },
   {
    "id": "dev-qc",
@@ -454,8 +462,9 @@
     "development.recordQc",
     "development.qc.decide"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：QC 判不通过 / 通过 / 放弃本版（不通过的业务待办已修，未复走）"
   },
   {
    "id": "dev-confirm",
@@ -497,8 +506,9 @@
     "development.billing.issue",
     "development.charge.add"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：制作费与对客收费 150 USD 开票，财务确认应收"
   },
   {
    "id": "sample-library",
@@ -518,8 +528,9 @@
     "fulfillment.samples.create",
     "fulfillment.samples.move"
    ],
-   "impl": "source",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-05 本机走查：入库、寄出、移位、借用与归还（借出日期与待归还待办已修，未复走）"
   },
   {
    "id": "fabric-sourcing",
@@ -2532,9 +2543,9 @@
     "market.relation.save",
     "market.relation.status"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RelationsPage.tsx:87,135"
+   "note": "2026-11-05 本机走查：晴川面辅料合作伙伴建档"
   },
   {
    "id": "relation-contacts",
@@ -2552,9 +2563,9 @@
    "commands": [
     "market.contact.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RelationsPage.tsx:104"
+   "note": "2026-11-05 本机走查：往来组织联系人维护"
   },
   {
    "id": "relation-hold",
@@ -2592,9 +2603,9 @@
    "commands": [
     "market.relation.linkSupplier"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RelationsPage.tsx:99"
+   "note": "2026-11-05 本机走查：Harbour Loom 客户关联供应商档案（仅客户型档案提供入口）"
   },
   {
    "id": "relation-handover",
@@ -2612,9 +2623,9 @@
    "commands": [
     "handover.customer"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "RelationsPage.tsx:118"
+   "note": "2026-11-05 本机走查：周敏把 Cedar & Crown 及四笔订单、商机由顾言移交沈禾，待办随之改派"
   },
   {
    "id": "relation-attachments",
@@ -2632,9 +2643,9 @@
    "commands": [
     "market.attachment.set"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:56-61,113"
+   "note": "2026-11-05 本机走查：附件上传与变更历史"
   },
   {
    "id": "season-plan",
@@ -2654,9 +2665,9 @@
     "market.season.save",
     "market.season.review"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SeasonsPage.tsx:90,153"
+   "note": "2026-11-05 本机走查：SS28 季节计划与 6 个里程碑"
   },
   {
    "id": "season-trend",
@@ -2694,9 +2705,9 @@
    "commands": [
     "market.show.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SeasonsPage.tsx:108"
+   "note": "2026-11-05 本机走查：展会登记与费用 18,600 CNY"
   },
   {
    "id": "season-show-lead",
@@ -2715,9 +2726,9 @@
     "market.showLead.save",
     "market.showLead.transition"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SeasonsPage.tsx:115,128"
+   "note": "2026-11-05 本机走查：录入展会线索并记录跟进（跟进经办人与时间已修，未复走）"
   },
   {
    "id": "season-lead-to-crm",
@@ -2735,9 +2746,9 @@
    "commands": [
     "market.lead.convertToCrm"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "SeasonsPage.tsx:126"
+   "note": "2026-11-05 本机走查：线索转客户并建商机（跟进接续已修，未复走）"
   },
   {
    "id": "marketing-campaign",
@@ -2757,9 +2768,9 @@
     "market.campaign.save",
     "market.campaign.status"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:144；MarketingPage.tsx:54"
+   "note": "2026-11-05 本机走查：活动策划→进行→暂停→恢复（状态日志已改业务描述）"
   },
   {
    "id": "marketing-campaign-lead",
@@ -2779,9 +2790,9 @@
     "market.lead.transition",
     "market.lead.convertToCrm"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:115-127"
+   "note": "2026-11-05 本机走查：活动线索转客户并建 9,600 USD 商机"
   },
   {
    "id": "marketing-lookbook",
@@ -2800,9 +2811,9 @@
     "market.lookbook.save",
     "market.lookbook.status"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:145,148"
+   "note": "2026-11-05 本机走查：画册准备与 CSV 导出（结构化规格已修，未复走）"
   },
   {
    "id": "marketing-attachments",
@@ -2877,9 +2888,9 @@
    "commands": [
     "market.product.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:106"
+   "note": "2026-11-05 本机走查：手工面料档案规格与参考成本"
   },
   {
    "id": "product-from-version",
@@ -2897,9 +2908,9 @@
    "commands": [
     "market.product.fromVersion"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:107"
+   "note": "2026-11-05 本机走查：从 QC 通过版本建档，来源链完整"
   },
   {
    "id": "product-status",
@@ -2918,9 +2929,9 @@
    "commands": [
     "market.product.status"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:109"
+   "note": "2026-11-05 本机走查：归档与恢复（归档后详情保留、日志业务描述已修，未复走）"
   },
   {
    "id": "product-customer-codes",
@@ -2938,9 +2949,9 @@
    "commands": [
     "market.product.save"
    ],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "ProductParts.tsx:118"
+   "note": "2026-11-05 本机走查：维护客户编码"
   },
   {
    "id": "product-import",
@@ -2996,9 +3007,9 @@
     "products"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "仅跳转 development/new、orders/new（ProductParts.tsx:101-102）；辅料开发与辅料订单按钮禁用“尚未接入”"
+   "note": "2026-11-05 本机走查：未获客户认可的版本被拦截；手工档案下内部订单"
   },
   {
    "id": "dashboard-overview",
@@ -3017,7 +3028,7 @@
    "commands": [],
    "impl": "source",
    "lessons": [],
-   "note": "只读；PlatformPages.tsx:121"
+   "note": "只读；PlatformPages.tsx:121；2026-11-05 本机走查发现缺陷：履行中订单误含草稿与已取消（PlatformPages.tsx DashboardOverview 第130行），待修后复走"
   },
   {
    "id": "dashboard-team",
@@ -3176,7 +3187,7 @@
    "commands": [],
    "impl": "source",
    "lessons": [],
-   "note": "只读；PlatformPages.tsx:123"
+   "note": "只读；PlatformPages.tsx:123；2026-11-05 本机走查发现缺陷：“文件”行跳转到出运单据（DataCenterPage 第137行），待修后复走"
   },
   {
    "id": "data-center-issues",
@@ -3302,9 +3313,9 @@
     "business-tools"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；本地计算不写入（PlatformPages.tsx:124）"
+   "note": "2026-11-05 本机走查：米 / 码 / 英寸换算核对正确"
   },
   {
    "id": "tools-calculators",
@@ -3320,9 +3331,9 @@
     "business-tools"
    ],
    "commands": [],
-   "impl": "source",
+   "impl": "walked",
    "lessons": [],
-   "note": "只读；BusinessCalculators.tsx"
+   "note": "2026-11-05 本机走查：装箱体积、体积重与克重换算核对正确，非整数箱数被拦截"
   },
   {
    "id": "admin-accounts",
