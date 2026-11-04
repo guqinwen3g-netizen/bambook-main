@@ -31,7 +31,7 @@ export const SCOPED_COLLECTIONS = [
 ] as const;
 export type ScopedCollection = typeof SCOPED_COLLECTIONS[number];
 export type ScopedVisibility = Map<string, Set<string>>;
-export type ScopedMaterialIssueTargets = Record<string,Array<{value:string;label:string;remaining?:string}>>;
+export type ScopedMaterialIssueTargets = Record<string,ReturnType<typeof materialDeliveryTargets>>;
 export type ScopedSampleGate = Pick<ProductionSampleRequirement,'key'|'label'|'ok'|'reason'|'taskId'|'sampleId'>;
 export type ScopedFabricAccess = Record<string,{candidates:InternalFabricCandidate[];blocker:string;deliveries:MaterialDeliveryRow[];sampleRequirements:Record<string,ScopedSampleGate[]>}>;
 
@@ -154,7 +154,7 @@ export function scopedMaterialIssueTargets(state:MistState,scope:MistDataScope):
   const visible=scopedVisibility(state,scope,false).get('fulfillment.stock')!, result:ScopedMaterialIssueTargets={};
   for(const stock of state.fulfillment?.stock || []) {
     if(!visible.has(stock.id) || !stock.purchaseId || !materialDeliveryRequired(state,stock.purchaseId))continue;
-    const targets=materialDeliveryTargets(state,stock.purchaseId);
+    const targets=materialDeliveryTargets(state,stock.purchaseId,stock.id);
     if(targets.length)result[stock.id]=targets;
   }
   return result;
