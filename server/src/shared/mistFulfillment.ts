@@ -1170,13 +1170,31 @@ export function fulfillmentProductionColumn(root: MistState, branch: MistProduct
     if (fulfillmentProductionFact(root, branch.id)?.completion && fulfillmentProductionQcPassed(root, branch)) return 'done';
     return branch.col === 'done' ? 'qc' : branch.col;
 }
-function materialQualityProof(root: MistState, purchase: FulfillmentPurchase, delivery: MaterialDeliveryLink) {
-    // Greige going to the next mill is counted there; release QC applies to the finished internal fabric only.
-    if (isFabricStageSource(purchase) || !root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
+function materialQualityProof(root: MistState, purchase: FulfillmentPurchase, delivery?: MaterialDeliveryLink) {
+    // Bought materials have receipt/IQC evidence, not a production branch. IQC stock stays
+    // unavailable until incoming.close releases it; the stock issue gate enforces that balance.
+    // Greige going to the next mill is counted there; production QC applies to processed output.
+    if (purchase.kind === 'material' || isFabricStageSource(purchase) || !root.orders.find(order => order.id === purchase.orderId)?.governance?.contract.internalSupply) return;
     const branch = root.productions.find(job => job.sourcePurchaseId === purchase.id);
     if (!branch) fail('来源面料缺少准确生产分支');
     requireProductionQc(root, branch!);
-    delivery.sourceQcReportIds = root.fulfillment.qcTasks.filter(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch!.id).map(task => task.reportIds.at(-1)!);
+    if (delivery) delivery.sourceQcReportIds = root.fulfillment.qcTasks.filter(task => task.kind === 'production' && task.source.kind === 'orderLine' && task.source.productionId === branch!.id).map(task => task.reportIds.at(-1)!);
+}
+/** Read-only source gate for delivery choices; writes still enforce QC and actual stock balances. */
+export function materialDeliveryQualityBlocker(root: MistState, purchase: FulfillmentPurchase, stockId?: string): string {
+    try { materialQualityProof(root, purchase); }
+    catch (error) { if (error instanceof MistCommandError) return error.message; throw error; }
+    const stocks = root.fulfillment.stock.filter(stock => stock.purchaseId === purchase.id && (!stockId || stock.id === stockId));
+    // A sibling lot's release must never make this lot appear issuable. With no exact lot,
+    // only block when none of the source's stock is usable (e.g. purchase-level choices).
+    if (stocks.length && stocks.every(stock => stock.available <= 0)) {
+        const incoming = root.fulfillment.qcTasks.filter(task => task.kind === 'incoming' && stocks.some(stock => stock.id === task.incoming?.stockId));
+        if (incoming.some(task => !task.incoming?.releasedAt)) return '来源批次来料检验尚未放行';
+        if (incoming.some(task => task.incoming?.rejectedQuantity)) return '来源批次来料检验已拒收';
+        if (stocks.some(stock => (stock.locked || 0) > 0)) return '来源批次质量冻结，尚未放行';
+        return '来源批次没有可用库存';
+    }
+    return '';
 }
 function requireProductionRelease(root: MistState, branch: MistProduction, context: InternalFabricContext, recordingInspection = false) {
     assertGarmentMaterial(root, branch.orderId, branch.lineId, context);

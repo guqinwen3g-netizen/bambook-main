@@ -3,6 +3,7 @@ import { MistCommandError, type MistContext, type MistState, type MistOrder, typ
 import { resolveMember } from './mistAccounts';
 import { assertOrderApproved, assertOrderWritable, type OrderGovernanceInput, type OrderGovernanceLine } from './mistOrderGovernance';
 import { assertOrderLineOpen } from './mistOrderClosure';
+import { materialDeliveryQualityBlocker } from './mistFulfillment';
 
 export type GarmentFulfillmentMode = 'cmt' | 'trims_cmt' | 'full_package';
 export type CmtIncludedItem = 'trims' | 'packaging';
@@ -320,8 +321,10 @@ export const CONTRACT_TARGET_PREFIX = 'contract:';
 const readyProcessing = (c: FulfillmentPurchaseLike | undefined) => c?.kind === 'processing' && c.state === 'approved' && !!c.offlineSend && !!c.supplierConfirmation;
 /** Intermediate contracts that already delivered into `sourceId` cannot receive from it again (no loops). */
 const feedsInto = (root: MistState, fromId: string, intoId: string) => materialDeliveryRows(root).some(row => row.purchaseId === fromId && deliveryContractId(root, row.delivery) === intoId);
-export function materialDeliveryTargets(root: MistState, purchaseId: string): Array<{ value: string; label: string; remaining?: string }> {
+export type MaterialDeliveryTarget = { value: string; label: string; remaining?: string; blocker?: string };
+export function materialDeliveryTargets(root: MistState, purchaseId: string, stockId?: string): MaterialDeliveryTarget[] {
   const p = root.fulfillment.purchases.find(p => p.id === purchaseId); if (!p) return [];
+  const blocker = materialDeliveryQualityBlocker(root, p, stockId);
   const stage = isFabricStageSource(p), internal = !!root.orders.find(o => o.id === p.orderId)?.governance?.contract.internalSupply;
   const contracts = stage ? root.fulfillment.purchases.filter(c => c.id !== p.id && c.orderId === p.orderId && c.lineId === p.lineId && isFabricIntermediateProcessing(c) && readyProcessing(c) && !feedsInto(root, c.id, p.id))
     .map(c => ({ value: CONTRACT_TARGET_PREFIX + c.id, label: `${c.code} · ${c.supplier} · 前道加工` })) : [];
@@ -337,8 +340,8 @@ export function materialDeliveryTargets(root: MistState, purchaseId: string): Ar
       const available = metresMinor(allocation.metres) - used; if (available <= BigInt(0)) return [];
       remaining = metresText(available);
     } else if (p.domain !== 'garment' || p.kind !== 'material' || branch.orderId !== p.orderId || branch.lineId !== p.lineId) return [];
-    return [{ value: branch.id, label: `${contract.code} · ${contract.supplier}${remaining ? ` · 可发 ${remaining} 米` : ''}`, ...(remaining ? { remaining } : {}) }];
-  })];
+    return [{ value: branch.id, label: `${contract.code} · ${contract.supplier}${remaining && !blocker ? ` · 可发 ${remaining} 米` : ''}`, ...(remaining ? { remaining } : {}) }];
+  })].map(target => ({ ...target, ...(blocker ? { blocker } : {}) }));
 }
 /** Record/command permissions are enforced by the workspace boundary; verify active operators here. */
 export function assertMaterialSender(root: MistState, purchaseId: string, ctx: MistContext) {
