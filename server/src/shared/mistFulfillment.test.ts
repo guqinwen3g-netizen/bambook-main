@@ -303,3 +303,33 @@ describe('P2-3 shipment transport, booking history, arrival and customs amendmen
   expect(c.status).toBe('draft');expect(c.amendments!.map(a=>a.kind)).toEqual(['amend','withdraw']);
  });
 });
+
+describe('往来冻结的下单与在途边界', () => {
+ it('客户冻结拒绝新订单，解冻恢复；原订单保持不变', () => {
+  const f=setup(),customerId=f.root.orders[0].customerId;
+  const apply=(command:Parameters<typeof applyMistCommand>[1])=>{const next=applyMistCommand(f.root,command,f.ctx);f.root=next.state;return next.result;};
+  const id=String(apply({type:'market.relation.save',payload:{input:{name:'',category:'Customer',customerId,supplierId:'',country:'',address:'',aliases:[]}}}).id);
+  const existing=structuredClone(f.root.orders);
+  const command={type:'order.create' as const,payload:{type:'garment' as const,customerId,season:'AW',currency:'USD',due:'2026-12-01',ownerId:'business',lines:[{fulfillmentMode:'trims_cmt' as const,cmtIncludedItems:[],name:'场景衬衫',style:'HOLD-1',img:'coat' as const,qty:10,unit:'件',price:12}]}};
+  apply({type:'market.relation.hold',payload:{id,frozen:true,reason:'账期待核实'}});
+  expect(()=>apply(command)).toThrow(/往来已冻结/);
+  expect(f.root.orders).toEqual(existing);
+  apply({type:'market.relation.hold',payload:{id,frozen:false,reason:'账期已核实'}});
+  expect(apply(command).orderId).toBeTruthy();
+  expect(f.root.orders).toHaveLength(existing.length+1);
+ });
+ it('供应商冻结拒绝新增采购，但已有合同仍可按既定规则收货；解冻恢复新增', () => {
+  const f=setup(),purchaseId=purchase(f);approve(f,purchaseId);
+  const apply=(command:Parameters<typeof applyMistCommand>[1])=>{const next=applyMistCommand(f.root,command,f.ctx);f.root=next.state;return next.result;};
+  const id=String(apply({type:'market.relation.save',payload:{input:{name:'',category:'Supplier',customerId:'',supplierId:'supplier',country:'',address:'',aliases:[]}}}).id);
+  apply({type:'market.relation.hold',payload:{id,frozen:true,reason:'新增采购待核实'}});
+  expect(()=>purchase(f)).toThrow(/往来已冻结/);
+  f.run({type:'fulfillment.procurement.receive',payload:{id:purchaseId,quantity:2,rejected:0,destination:'warehouse',location:'上海仓',date:'2026-10-13',evidence:'冻结前合同实际收货',fileIds:[]}});
+  expect(f.root.fulfillment.purchases.find(p=>p.id===purchaseId)?.received).toBe(2);
+  const existing=structuredClone(f.root.fulfillment.purchases.find(p=>p.id===purchaseId));
+  expect(existing?.state).toBe('approved');
+  apply({type:'market.relation.hold',payload:{id,frozen:false,reason:'核实完成'}});
+  expect(purchase(f)).toBeTruthy();
+  expect(f.root.fulfillment.purchases.find(p=>p.id===purchaseId)).toEqual(existing);
+ });
+});
