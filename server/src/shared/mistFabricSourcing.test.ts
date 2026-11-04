@@ -22,6 +22,25 @@ describe('ord9/10 fabric sourcing', () => {
     expect(t.f).toMatchObject({ confirmed: true, chosenCandidateId: t.f.candidates![1].id });
     expect(() => t.run({ type: 'fabric.update', payload: { id: t.id, name: 'x', request: 'x', ownerId: 'u-a', due: '2026-11-05' } })).toThrow('已结案');
   });
+  it.each([true, false])('does not confirm or reopen an already chosen sourcing result (approved=%s)', approved => {
+    const t = fixture();
+    t.run({ type: 'fabric.answer', payload: { id: t.id, answer: '已找到符合要求的面料', fileIds: [] } });
+    t.run({ type: 'fabric.confirm', payload: { id: t.id, approved: true, note: '采用' } });
+    const before = JSON.stringify(t.state);
+    expect(() => t.run({ type: 'fabric.confirm', payload: { id: t.id, approved, note: '再次确认' } })).toThrow('已结案');
+    expect(JSON.stringify(t.state)).toBe(before);
+  });
+  it('can replace rejected candidates with an explicit empty candidate list', () => {
+    const t = fixture(), supplierId = t.state.market.suppliers[0].id;
+    t.run({ type: 'fabric.answer', payload: { id: t.id, answer: '', fileIds: [], candidates: [{ supplierId, article: 'F-OLD', price: '18', currency: 'CNY', moq: '', leadDays: '', note: '' }] } });
+    const oldId = t.f.candidates![0].id;
+    t.run({ type: 'fabric.confirm', payload: { id: t.id, approved: false, note: '候选不符合要求' } });
+    t.run({ type: 'fabric.answer', payload: { id: t.id, answer: '暂无符合要求的现货，继续寻找', fileIds: [], candidates: [] } });
+    expect(t.f.candidates).toEqual([]);
+    const before = JSON.stringify(t.state);
+    expect(() => t.run({ type: 'fabric.confirm', payload: { id: t.id, approved: true, note: '', candidateId: oldId } })).toThrow(/候选/);
+    expect(JSON.stringify(t.state)).toBe(before);
+  });
   it('cancels an open request with a reason and keeps it read-only', () => {
     const t = fixture();
     expect(() => t.run({ type: 'fabric.cancel', payload: { id: t.id, reason: '' } })).toThrow('取消原因');

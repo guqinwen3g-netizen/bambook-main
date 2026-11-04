@@ -51,6 +51,16 @@ describe('BB-DEV-6 fabric version physical forms',()=>{
   f.record(3,'色样','份');f.run({type:'development.close',payload:{devId:f.at.devId,kind:'cancelled',reason:'客户取消'}});
   f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/已取消/);
  });
+ it.each(['archived','resample','abandon'] as const)('does not append new physical forms to a %s version',disposition=>{
+  const f=fixture();f.record(3,'色样','份');
+  if(disposition==='archived'){f.qc();f.run({type:'development.archive',payload:f.at});}
+  else{
+   f.run({type:'development.recordQc',payload:{...f.at,domain:'fabric',qc:{result:'reject',reviewer:'QC',reviewedAt:f.ctx.now,report:'FAIL-1',opinion:'色差不合格'}}});
+   if(disposition==='abandon')f.run({type:'development.qc.decide',payload:{...f.at,decision:'abandon',note:'不再采用'}});
+   else f.run({type:'development.round.create',payload:{devId:f.at.devId,factories:['测试面料厂'],requirements:'调整染色',targetDate:'2026-11-01',resampleFromVersionId:f.at.versionId}});
+  }
+  f.unchanged(()=>f.run({type:'development.version.addSampleForm',payload:{...f.at,form:'米样',quantity:1,unit:'米'}}),/已留档|重新打样|已放弃/);
+ });
  it('uses the development write permission',()=>{
   expect(mistCommandPermission({type:'development.version.addSampleForm',payload:{} as any})).toBe('products:write');
   expect(mistCommandPermission({type:'development.sample.dispatch',payload:{} as any})).toBe('products:write');

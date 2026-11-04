@@ -1120,6 +1120,7 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       const blocked=developmentRoundBlocker(state,dev)||devStageHandoverBlocker(v,p.stageIndex);if(blocked)throw new MistCommandError('PRECONDITION',blocked);
       if((v.stageHandovers||[]).some(row=>row.stageIndex===p.stageIndex))throw new MistCommandError('CONFLICT','该道工序已登记交接',409);
       const handoverDate=date(p.date,'交接日期');if(handoverDate>mistBusinessDate(context.now))throw new MistCommandError('VALIDATION','交接日期不得在未来');
+      if((v.stageHandovers||[]).some(row=>row.stageIndex<p.stageIndex&&row.date>handoverDate))throw new MistCommandError('VALIDATION','交接日期不能早于前道交接日期');
       const row:DevStageHandover={id:context.id(),stageIndex:p.stageIndex,quantity:positive(Number(p.quantity),'交接数量'),unit:text(p.unit,'交接单位',true,20),date:handoverDate,note:text(p.note,'交接依据',true,1000),at:context.now,actor:context.actorName};
       v.stageHandovers=[...(v.stageHandovers||[]),row];updateDev(state,dev,context);
       const from=v.stages![p.stageIndex],to=v.stages![p.stageIndex+1];
@@ -1323,12 +1324,12 @@ function applyMistCommandUnbound(original: MistState, command: MistCommand, cont
       if(p.candidates!==undefined&&(!Array.isArray(p.candidates)||p.candidates.length>30))throw new MistCommandError('VALIDATION','候选面料格式无效');
       // ord10：候选逐条登记供应商、品号、价格、MOQ、交期；供应商须在档案中，面料档案可选。
       const candidates=((p.candidates||[]) as Array<Omit<MistFabricCandidate,'id'|'supplier'>>).map(c=>{const sup=find(state.market.suppliers,text(c.supplierId,'候选供应商'),'候选供应商');if(c.productId)find(state.market.products,c.productId,'面料档案');const price=text(c.price||'','价格',false,40);if(price&&!/^\d+(\.\d{1,4})?$/.test(price))throw new MistCommandError('VALIDATION','候选价格须为数字');return{id:context.id(),supplierId:sup.id,supplier:sup.name,...(c.productId?{productId:c.productId}:{}),article:text(c.article,'品号',true,80),price,currency:text(c.currency||'CNY','币种',false,3).toUpperCase(),moq:text(c.moq||'','MOQ',false,40),leadDays:text(c.leadDays||'','交期',false,40),note:text(c.note||'','说明',false,500)};});
-      f.answer=text(p.answer,'答复',!candidates.length);f.fileIds=files(state,p.fileIds);if(candidates.length)f.candidates=candidates;f.state='待发起人确认';f.tone='accent';f.sub=candidates.length?`${candidates.length} 个候选`:'已提交答复';
+      f.answer=text(p.answer,'答复',!candidates.length);f.fileIds=files(state,p.fileIds);if(p.candidates!==undefined)f.candidates=candidates;f.state='待发起人确认';f.tone='accent';f.sub=candidates.length?`${candidates.length} 个候选`:'已提交答复';
       event(state,context,'fabric',f.id,'提交寻样答复'+(candidates.length?`（${candidates.length} 个候选）`:''));result={id:f.id};break;
     }
     case 'fabric.confirm': {
-      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled)throw new MistCommandError('PRECONDITION','寻样已取消');if(!f.answer&&!f.candidates?.length)throw new MistCommandError('PRECONDITION','尚无可确认答复');
-      if(p.approved&&f.candidates?.length&&!f.candidates.some(c=>c.id===p.candidateId))throw new MistCommandError('VALIDATION','请选择确认采用的候选面料');
+      const f=find(state.fabrics,p.id,'寻样任务');if(f.cancelled||f.confirmed)throw new MistCommandError('PRECONDITION','寻样已结案或已取消');if(!f.answer&&!f.candidates?.length)throw new MistCommandError('PRECONDITION','尚无可确认答复');
+      if(p.approved&&(f.candidates?.length||p.candidateId)&&!f.candidates?.some(c=>c.id===p.candidateId))throw new MistCommandError('VALIDATION','请选择确认采用的候选面料');
       f.confirmed=!!p.approved;if(p.approved&&p.candidateId)f.chosenCandidateId=p.candidateId;f.state=p.approved?'已结案':'待补充';f.tone=p.approved?'ok':'warn';f.sub=text(p.note,'确认意见',!p.approved);
       const chosen=f.candidates?.find(c=>c.id===f.chosenCandidateId);
       event(state,context,'fabric',f.id,p.approved?'确认寻样答复'+(chosen?`：采用 ${chosen.supplier} ${chosen.article}`:''):'退回补充寻样');result={id:f.id};break;
