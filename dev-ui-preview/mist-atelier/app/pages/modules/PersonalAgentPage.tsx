@@ -44,7 +44,7 @@ export function PersonalAgentPage({ tabs }: { tabs?: React.ReactNode }) {
     if (busy || !base || !instructions.trim()) return;
     setBusy(true); setError('');
     try {
-      const r = await mistApiRequest(base + '/personal-agent/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: crypto.randomUUID(), name: (name.trim() || instructions.trim()).slice(0, 60), instructions: instructions.trim(), locale: interfaceLocale() }) }) as { item: AgentTaskView };
+      const r = await mistApiRequest(base + '/personal-agent/tasks', { method: 'POST', body: JSON.stringify({ requestId: crypto.randomUUID(), name: (name.trim() || instructions.trim()).slice(0, 60), instructions: instructions.trim(), locale: interfaceLocale() }) }) as { item: AgentTaskView };
       setTasks(old => [r.item, ...old]); setName(''); setInstructions(''); toast(uiText('已交给我的 Agent')); void load();
     } catch (e) { setError(e instanceof Error ? e.message : '未能交办'); } finally { setBusy(false); }
   };
