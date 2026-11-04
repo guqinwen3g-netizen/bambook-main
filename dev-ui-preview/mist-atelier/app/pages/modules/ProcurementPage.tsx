@@ -1,7 +1,7 @@
 import { MaterialDeliveryPanel } from '../MaterialDeliveryPanel';
 import {isDomesticSupplier, procurementCurrencyProblem} from '../../../../../server/src/shared/mistProcurementCurrency';
 export {isDomesticSupplier} from '../../../../../server/src/shared/mistProcurementCurrency';
-import { deliveryContractId, hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
+import { deliveryContractId, GARMENT_FULFILLMENT_LABELS, hasMaterialAtFactory, materialDeliveryRequired, materialDeliveryTargets, materialDeliveryRows } from '../../../../../server/src/shared/mistInternalFabric';
 import { purchaseName } from '../businessNames';
 import { fabricStageBalance, fabricStageLinks, fabricStageTermsText, type FabricStageBalance } from '../../../../../server/src/shared/mistFabricStage';
 import { uiText, ui } from '../../../../../services/interfaceLanguage';
@@ -124,6 +124,15 @@ export function ProcurementPage() {
     ],
     fields: [{ ...field('source', '来源条目', 'select', true, sourceOptions(state, false).filter(option => !option.value || state?.orderLines.some(line => option.value === `line:${line.id}` && state.orders.some(order => order.id === line.orderId && order.type === domain && !sourceOrderBlocker(order))))), hint: sourceHint }, field('kind', '采购内容', 'select', true, [emptyOption, ...purchaseChoices(domain)]), field('supplierId', '供应商', 'select', true, [emptyOption, ...supplierOptions(p?.supplierId)]), field('description', '采购品名'), field('quantity', '承诺数量', 'number'), choiceField('unit', '计量单位', UNITS), ...(domain === 'fabric' ? [{ ...field('kgPerMetre', '每米重量（公斤/米）', 'number'), when: [{ key: 'kind', values: ['material:greige'] }, { key: 'unit', values: ['公斤', '千克', 'kg', 'KG', 'kgs'] }] }, { ...field('lossPercent', '约定加工损耗（%）', 'number', false), when: { key: 'kind', values: ['processing'] } }, { ...field('intermediate', '前道加工（成品交下一道加工厂）', 'checkbox', false), when: { key: 'kind', values: ['processing'] } }] : []), field('price', '含税 / 约定单价', 'number'), choiceField('currency', '币种', CURRENCIES, true, true), field('due', '交期', 'date'), choiceField('terms', '付款条件', SUPPLIER_PAYMENT_TERMS), ...(domain === 'fabric' ? [{ ...field('deliverToSupplierId', '收货加工厂', 'select', false, [{ value: '', label: '不指定' }, ...supplierOptions(p?.stageTerms?.deliverToSupplierId)]), when: [{ key: 'kind', values: ['material:greige', 'processing'] }] }] : []), field('destination', '主要交付地点'), { ...field('iqcRequired', '入库前来料检验', 'checkbox', false), when: { key: 'kind', values: purchaseChoices(domain).filter(o => o.value.startsWith('material:')).map(o => o.value) } }, field('note', '规格与交付要求', 'textarea', false)],
     initialValues: { source: p ? 'line:' + p.lineId : sourceLine ? 'line:' + sourceLine.id : '', kind: p ? (p.kind === 'material' ? p.materialKind ? `material:${p.materialKind}` : '' : p.kind) : entry === 'processing' ? 'processing' : sourceLine?.fulfillmentMode === 'full_package' && domain === 'garment' ? 'finished' : '', supplierId: p?.supplierId || '', description: p?.description || '', quantity: p?.quantity || sourceLine?.qty || 1, unit: p?.unit || sourceLine?.unit || '', kgPerMetre: p?.stageTerms?.kgPerMetre ?? '', lossPercent: p?.stageTerms?.lossPercent ?? '', intermediate: !!p?.stageTerms?.intermediate, deliverToSupplierId: p?.stageTerms?.deliverToSupplierId || '', iqcRequired: !!p?.iqcRequired, price: p?.price || 0, currency: p?.currency || 'CNY', due: p?.due || factoryDueFor(sourceOrder?.due, today()), terms: p?.terms || '', destination: p?.destination || '', note: p?.note || '' },
+    // 与服务端 internalFabric 物料校验同口径：纯 CMT 由加工厂包料，不另行采购物料；CMT 已含的辅料 / 包装不能重复采购。
+    issue: values => {
+      const line = state?.orderLines.find(l => 'line:' + l.id === String(values.source || '')), choice = String(values.kind || '');
+      if (!line || domain !== 'garment' || !choice.startsWith('material:')) return '';
+      const material = choice.slice('material:'.length) as 'trims' | 'packaging';
+      if (line.fulfillmentMode === 'cmt') return `${line.style} 为${GARMENT_FULFILLMENT_LABELS.cmt}，辅料与包装由加工厂负责，不另行采购物料`;
+      if (line.cmtIncludedItems?.includes(material)) return `${line.style} 的 CMT 已包含${material === 'trims' ? '辅料' : '包装'}，不能重复采购`;
+      return '';
+    },
     submit: async values => {
       if (!state) return;
       const source = parseSource(state, text(values, 'source'));

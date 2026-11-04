@@ -72,6 +72,24 @@ it('offers garment supplies and processing without a fabric purchase shortcut',a
   expect(content.value).toBe('');
 });
 
+it('stops at the first step when trims are bought for a pure CMT line or a CMT that already includes them',async()=>{
+  store.state!.market.suppliers=[{id:'s',name:'青禾辅料',status:'active'} as any];
+  const line=store.state!.orderLines[0];Object.assign(line,{fulfillmentMode:'cmt',cmtIncludedItems:[]});
+  render();await click(getAllByRole(host,'button',{name:'新建采购订单'})[0]);
+  const set=(name:string,value:string)=>{const el=getByRole(host,'combobox',{name}) as HTMLSelectElement;act(()=>{el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}));});};
+  set('来源条目','line:l');set('采购内容','material:trims');set('供应商','s');
+  act(()=>{const d=getByRole(host,'textbox',{name:'采购品名'}) as HTMLInputElement;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(d,'纽扣');d.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect(host.textContent).toContain('TR-1 为纯 CMT，辅料与包装由加工厂负责，不另行采购物料');
+  expect(getByRole(host,'textbox',{name:'采购品名'})).toBeTruthy();
+  Object.assign(line,{fulfillmentMode:'trims_cmt',cmtIncludedItems:['trims']});act(()=>root.render(<MistRoot><ToastProvider><Nav.Provider value={{route:{view:'procurement'},go,theme:'light',toggleTheme:vi.fn(),openPalette:vi.fn(),openAI:vi.fn()}}><ProcurementPage/></Nav.Provider></ToastProvider></MistRoot>));
+  await click(getByRole(host,'button',{name:'下一步'}));
+  expect(host.textContent).toContain('TR-1 的 CMT 已包含辅料，不能重复采购');
+  set('采购内容','material:packaging');await click(getByRole(host,'button',{name:'下一步'}));
+  expect(getByRole(host,'spinbutton',{name:'承诺数量'})).toBeTruthy();
+  expect(store.run).not.toHaveBeenCalled();
+});
+
 it('preserves the material category when editing and sends it with the purchase kind',async()=>{
   store.state!.market.suppliers=[{id:'s',name:'青禾辅料',status:'active'} as any];
   store.state!.fulfillment.purchases.push(purchase('trims',{materialKind:'trims'}));
