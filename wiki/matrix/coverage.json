@@ -144,8 +144,9 @@
     "team.nudge",
     "team.weekly.archive"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机主管走查：团队在手→成员抽屉→对订单督办，被督办人“我的工作”出现督办；上周周报生成并存档（修复行内督办按钮误打开订单、存档时间按北京时间显示）"
   },
   {
    "id": "email-workspace",
@@ -266,8 +267,9 @@
     "handover.customer",
     "handover.account"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机所有者走查：公司管理·数据访问·成员交接，已离开成员名下业务整体交给在用成员，留记录并给接手人派待办"
   },
   {
    "id": "account-page",
@@ -386,8 +388,9 @@
    "commands": [
     "market.supplier.rate"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机主管走查：供应商详情评级（等级、周期、依据），评级历史与操作记录留痕"
   },
   {
    "id": "dev-create",
@@ -1954,8 +1957,9 @@
     "lc.present",
     "lc.presentation.result"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机财务走查：信用证登记修改书与修改历史"
   },
   {
    "id": "receivable-confirm",
@@ -2042,8 +2046,9 @@
     "rebate.claim.approve",
     "rebate.claim.receive"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机财务走查：申报→核准（差异原因）→导入退税到账→勾稽到账结清"
   },
   {
    "id": "receivable-reverse",
@@ -2088,8 +2093,9 @@
     "platform.bom.save",
     "platform.pricing.save"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机老板走查：订单核算与经营汇总（修复无已批准采购的订单按全额毛利计入）"
   },
   {
    "id": "claims",
@@ -2113,8 +2119,9 @@
     "platform.claim.decide",
     "platform.claim.recovery.open"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机走查：登记→判定折让→追偿协商与撤回（#651 修复来源发票随订单筛选、补撤回追偿）"
   },
   {
    "id": "internal-fabric-order",
@@ -2157,8 +2164,9 @@
    "commands": [
     "sourcing.purchase.transfer"
    ],
-   "impl": "unchecked",
-   "lessons": []
+   "impl": "walked",
+   "lessons": [],
+   "note": "2026-11-04 本机采购走查：已批准未收货的加工合同转给其他供应商，原单取消并回链，新单为草稿须重审（修复交付地点仍写原加工厂）"
   },
   {
    "id": "ai-assistant",
@@ -2288,9 +2296,9 @@
     "account"
    ],
    "commands": [],
-   "impl": "missing",
+   "impl": "source",
    "lessons": [],
-   "note": "长期运行循环与无人值守账号尚未交付"
+   "note": "#649 个人 Agent：交办即建平台执行任务，无人值守运行、本人确认回程；原生 Agent 业务员用管理员开设的服务身份。本机用模拟模型走通，真实模型待平台模型配置后复走"
   },
   {
    "id": "order-list-browse",
@@ -2803,9 +2811,9 @@
     "marketing"
    ],
    "commands": [],
-   "impl": "missing",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketingPage.tsx:73 按钮禁用：“尚未接入外部推广发送服务”"
+   "note": "2026-11-04 本机业务员走查：营销活动「发送推广邮件」打开智能邮箱写信，活动线索邮箱自动填入密送、主题与签名带入；对外实发须真实邮箱账户"
   },
   {
    "id": "marketing-lookbook-pdf",
@@ -2821,9 +2829,9 @@
     "marketing"
    ],
    "commands": [],
-   "impl": "missing",
+   "impl": "walked",
    "lessons": [],
-   "note": "MarketPages.tsx:148 “PDF 排版导出服务尚未接入”"
+   "note": "2026-11-04 本机业务员走查：画册「生成画册 PDF」由服务端排版生成并存为附件，「用邮箱发送」自动附上 PDF 与客户关联"
   },
   {
    "id": "product-archive-create",

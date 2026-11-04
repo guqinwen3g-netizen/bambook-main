@@ -35,6 +35,14 @@ export type DataTableProps<T> = {
   minWidth?: number;
   ariaLabel?: string;
 };
+/** 行内控件（按钮、链接、输入）与经 portal 冒泡上来的浮层点击只交给控件本身，不再触发整行点击。 */
+const ROW_CONTROLS = 'a,button,input,select,textarea,label,summary,[role="button"],[role="checkbox"],[role="switch"],[role="radio"],[role="menuitem"],[role="option"],[role="combobox"],[role="link"],[contenteditable="true"]';
+export function rowEventFromControl(event: React.SyntheticEvent<HTMLElement>): boolean {
+  const row = event.currentTarget, target = event.target as Element | null;
+  if (!target || !row.contains(target)) return true;
+  const control = target.closest?.(ROW_CONTROLS);
+  return !!control && control !== row && row.contains(control);
+}
 /**
  * 通用数据表（div grid 实现，行可整行点击）。
  * - 选中行 = 强调色浅底 + 左侧 3px 指示条（不是描边）。
@@ -102,9 +110,9 @@ export function DataTable<T>({ columns, rows, rowKey, selectedKey, onRowClick, o
           <div key={k} className="mist-tr" role="row" data-density={density === 'default' ? undefined : density}
             data-clickable={onRowClick ? true : undefined} aria-selected={selectedKey != null ? k === selectedKey : undefined}
             tabIndex={onRowClick ? 0 : undefined}
-            onClick={onRowClick ? () => onRowClick(r) : undefined}
-            onDoubleClick={onRowDoubleClick ? () => onRowDoubleClick(r) : undefined}
-            onKeyDown={onRowClick ? e => { if (e.key === 'Enter') (onRowDoubleClick ?? onRowClick)(r); } : undefined}>
+            onClick={onRowClick ? e => { if (!rowEventFromControl(e)) onRowClick(r); } : undefined}
+            onDoubleClick={onRowDoubleClick ? e => { if (!rowEventFromControl(e)) onRowDoubleClick(r); } : undefined}
+            onKeyDown={onRowClick ? e => { if (e.key === 'Enter' && e.target === e.currentTarget) (onRowDoubleClick ?? onRowClick)(r); } : undefined}>
             {columns.map((c, ci) => <div key={c.key} role="cell" className={c.align === 'right' ? 'mist-cell-r' : undefined} data-hide-sm={c.hideOnMobile || undefined} data-col={ci} style={{ minWidth: 0 }}>{uiText(c.render(r, i))}</div>)}
           </div>
         );

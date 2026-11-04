@@ -725,7 +725,8 @@ function beginSend(root: MistState, payload: Extract<EmailCommand, { type: 'emai
 /** 演示公司的合成邮件：全部标注示例、使用 example.invalid 地址，不代表真实收信。 */
 export function seedEmailExamples(root: MistState, context: MistContext) {
   const day = (offset: number, time: string) => { const date = new Date(context.now); date.setUTCDate(date.getUTCDate() - offset); return date.toISOString().slice(0, 10) + 'T' + time + ':00Z'; };
-  const me = context.actorName || '顾言';
+  // 示例个人邮箱是业务员顾言的地址（gu.yan@），显示名与签名固定为顾言，不随建公司的人变化。
+  const me = '顾言';
   root.email.accounts.push(
     { id: 'mail-personal', address: 'gu.yan@bambook.example.invalid', displayName: `${me}（示例个人邮箱）`, kind: 'personal', ownerName: me, memberNames: [], aliases: ['sales@bambook.example.invalid'], signature: `${me}\n竹衍服饰 · 业务部\n示例签名`, connection: 'example', lastSyncAt: day(0, '07:40'), failedFolders: [], example: true },
     { id: 'mail-shared', address: 'orders@bambook.example.invalid', displayName: '订单共享邮箱（示例）', kind: 'shared', ownerName: '沈禾', memberNames: [me, '沈禾'], aliases: [], signature: '竹衍服饰 · 订单组', connection: 'example', lastSyncAt: day(0, '07:35'), failedFolders: ['已发送'], example: true },
