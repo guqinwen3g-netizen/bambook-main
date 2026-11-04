@@ -172,7 +172,13 @@ export function projectState(state: MistState, actor: TokenPayload, empty: () =>
       next.calendar = (next.calendar || []).filter(item => allowed(item.target));
     }
   }
-  const restrictedFiles = scopedHiddenFiles(next);
+  const restrictedFiles = new Set(scopedHiddenFiles(next));
+  if (taxBaseHidden) {
+    // A PDF/image cannot use the structured tax mask. Use the full source state so
+    // another shared reference (or uploader ownership) cannot reopen its original.
+    for (const bill of state.payables?.bills || []) if (bill.invoiceType === 'vat-special' || bill.taxAmount > 0) for (const id of bill.fileIds || []) restrictedFiles.add(id);
+    for (const claim of state.exportRebate?.claims || []) for (const id of claim.fileIds || []) restrictedFiles.add(id);
+  }
   next.files = visibleFiles(state, next, actor.userId, ownerId).filter(file => !restrictedFiles.has(file.id));
   const costVisible=hasScope(actor,'reports:admin')&&!hidden.some(s=>['orders','procurement','receivables','payables'].includes(s.key));
   return { state: next, hidden,...(costVisible?{costMaterialBasis:scope ? null : financialMaterialCostBasis(state)}:{}) };

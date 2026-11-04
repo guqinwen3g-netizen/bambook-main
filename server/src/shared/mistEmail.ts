@@ -379,7 +379,15 @@ export function applyEmailCommand(root: MistState, command: EmailCommand, contex
       if (rows.some(row => row.submissions.length)) fail('已提交过业务资料的邮件需保留记录，不能彻底删除', 'PRECONDITION');
       const gone = new Set(rows.map(row => row.id)), files = new Set(rows.flatMap(row => row.attachments.map(a => a.fileId).filter(Boolean) as string[]));
       root.email.messages = root.email.messages.filter(row => !gone.has(row.id));
-      const stillUsed = new Set(root.email.messages.flatMap(row => row.attachments.map(a => a.fileId)).concat(root.email.drafts.flatMap(d => d.fileIds), root.email.sends.flatMap(s => s.fileIds)));
+      // Mail attachments can also be evidence on business records. Check all remaining
+      // references (not the file registry itself), matching the read projection's exact-ID rule.
+      const stillUsed = new Set<string>();
+      const walk = (value: unknown): void => {
+        if (typeof value === 'string') { if (files.has(value)) stillUsed.add(value); }
+        else if (Array.isArray(value)) value.forEach(walk);
+        else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+      };
+      walk({ ...root, files: [] });
       root.files = root.files.filter(file => !files.has(file.id) || stillUsed.has(file.id));
       log(root, context, rows[0].accountId, `彻底删除 ${rows.length} 封邮件`);
       return { id: rows[0].accountId, applied: rows.length };

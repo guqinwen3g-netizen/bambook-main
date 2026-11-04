@@ -211,7 +211,7 @@ it.each([
  const documents=getByRole(host,'table',{name:'S 单据'});expect(documents.textContent).toContain('PK-1');expect(documents.textContent).toContain('BOOK-1');
 });
 
-it('shows only scoped shipment lines and no full-document actions for a partial shipment',()=>{store.state!.fulfillment.shipments.push(shipment('partial',{hiddenCount:1,lines:[{orderId:'o',lineId:'l',quantity:3}]}));render('partial');const detail=host.querySelector('[data-shipment-detail=partial]') as HTMLElement;expect(detail.textContent).toContain('部分可见');expect(detail.textContent).toContain('另有 1 笔其他范围业务');expect(detail.textContent).not.toContain('编辑出运请求');expect(detail.textContent).not.toContain('附件');});
+it('shows only scoped shipment lines and no full-document actions for a partial shipment',()=>{store.state!.fulfillment.shipments.push(shipment('partial',{hiddenCount:1,lines:[{orderId:'o',lineId:'l',quantity:3}]}));render('partial');const detail=host.querySelector('[data-shipment-detail=partial]') as HTMLElement;expect(detail.textContent).toContain('部分可见');expect(detail.textContent).toContain('另含其他范围业务');expect(detail.textContent).not.toContain('编辑出运请求');expect(detail.textContent).not.toContain('附件');});
 
 it.each(['missing','qc','customer','business','other-shipment','complete'] as const)('shows the exact shipping sample prerequisite before documents-ready: %s',stage=>{
  const state=store.state!,f=state.fulfillment;

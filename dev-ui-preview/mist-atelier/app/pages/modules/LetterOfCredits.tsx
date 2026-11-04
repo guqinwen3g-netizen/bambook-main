@@ -114,7 +114,7 @@ export function LetterOfCreditLedger({ state, domain, needle, can, locked, loadi
           empty={needle && all.length ? <EmptyState icon={SearchX} title={uiText("没有符合条件的信用证")} description={uiText("换个关键词试试。")} /> : <EmptyState icon={Landmark} title={ui`还没有登记${domain === 'fabric' ? '面料' : '成衣'}信用证`} />} />
       </Card>}
       detail={detail} />
-    {partials.length > 0 && <div className="mist-section"><Card><CardHeader title={uiText('部分可见信用证')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见信用证')}>{partials.map(lc=><div className="mist-row" role="listitem" key={lc.id}><Mono>{lc.lcNo}</Mono><span>{lc.customer}</span><span className="mist-spacer"/><span>{ui`另有 ${lc.hiddenCount} 笔其他范围业务`}</span></div>)}</div></Card></div>}
+    {partials.length > 0 && <div className="mist-section"><Card><CardHeader title={uiText('部分可见信用证')} /><div className="mist-card-body mist-col" role="list" aria-label={uiText('部分可见信用证')}>{partials.map(lc=><div className="mist-row" role="listitem" key={lc.id}><Mono>{lc.lcNo}</Mono><span>{lc.customer}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>)}</div></Card></div>}
     <ExportedOrders orders={lcOrders} covered={covered} onOrder={onOrder} />
   </>;
 }

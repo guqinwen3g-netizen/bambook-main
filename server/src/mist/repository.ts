@@ -1,5 +1,5 @@
 import {mistBusinessInstant} from '../shared/mistBusinessClock';
-import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner } from '../shared/mistEmail';
+import { EMAIL_SERVER_COMMAND, emailAccountAccessible, emailBusinessOwner, emailLinkTarget } from '../shared/mistEmail';
 import { emailAnalysisHash } from './mail/intelligence';
 import { createHash, randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
@@ -824,6 +824,22 @@ export class MistRepository {
           if (customer && !earlyScope.userIds.includes(customer.ownerId)) fail('NOT_FOUND', '客户不在当前可交接范围内', 404);
         }
         if (input.command) {
+          const mailCommand = input.command;
+          const mailLinks = mailCommand.type === 'email.link' || mailCommand.type === 'email.submitExtraction' || mailCommand.type === 'email.bulk' && mailCommand.payload.action === 'link' ? [mailCommand.payload.link]
+            : mailCommand.type === 'email.draft.save' || mailCommand.type === 'email.server.send.begin' && mailCommand.payload.mode === 'new' ? mailCommand.payload.input?.links : undefined;
+          if (Array.isArray(mailLinks) && mailLinks.length) {
+            // Existence in company state is not enough: the target module and row
+            // must both be readable. Stale links may still be explicitly unlinked.
+            const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state;
+            for (const link of mailLinks) if (link && emailLinkTarget(row.state, link) && !emailLinkTarget(visible, link)) fail('NOT_FOUND', '关联对象不存在或当前账号无权查看', 404);
+          }
+          if (input.command.type === 'email.followUp') {
+            const ownerId = typeof input.command.payload.ownerId === 'string' && input.command.payload.ownerId ? input.command.payload.ownerId : actor.userId;
+            if (!candidateIds(row).includes(ownerId)) fail('PRECONDITION', '请选择本公司在职成员作为负责人', 422);
+            // Mailbox sharing alone does not grant the current role permission to handle mail.
+            const recipient = await this.reviewSubject(db, actor, ownerId, '跟进负责人');
+            if (!hasScope(recipient, 'emails:read') || !hasScope(recipient, 'emails:write')) fail('PRECONDITION', '负责人缺少邮件办理权限，请先核对岗位', 422);
+          }
           if (input.command.type === 'email.submitExtraction') {
             const visible = projectState(row.state, actor, this.emptyState(actor), fileOwner(row), earlyScope).state;
             const ownerId = emailBusinessOwner(visible, input.command.payload.link);

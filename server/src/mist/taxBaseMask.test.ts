@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { applyMistCommand, createMistState, mistCommandPermission, type MistCommand, type MistContext, type MistState } from '../shared/mistWorkspace';
 import { orderRebate } from '../shared/mistExportRebate';
 import { orderActualCost } from '../shared/mistOrderCost';
-import { projectState } from './access';
+import { canReadFile, projectState } from './access';
 import { agentGet, agentQuery } from './agentRead';
 import { createAgentCommandAudit } from './agentAudit';
 import { projectAgentAudit } from './agentAuditRead';
@@ -141,4 +141,23 @@ describe('M1 计税依据掩码：逐条出口', () => {
   it('通知与待办：退税命令不产生含金额的通知或待办', () => {
     expect(leaks(masked.notifications)).toEqual([]); expect(leaks(masked.tasks)).toEqual([]);
   });
+});
+
+
+it('does not expose unredactable tax originals via file metadata, shared references or direct file access', () => {
+  const { state } = filed();
+  state.files.push({ ...state.files.find(file => file.id === 'vat-original')!, id: 'rebate-original', name: 'rebate-original.pdf', uploadedBy: 'reader' });
+  state.exportRebate!.claims[0].fileIds = ['rebate-original'];
+  // Even a second, shared reference must not launder an original tax document.
+  state.market.products[0].fileIds = ['vat-original'];
+  for (const scope of [undefined, { userIds: ['demo-buyer'], teamIds: [] }]) {
+    const masked = projectState(state, actor(FIN), empty, 'reader', scope).state;
+    expect(masked.files.some(file => file.id === 'vat-original')).toBe(false);
+    expect(canReadFile(state, actor(FIN), 'vat-original', empty, 'reader', scope)).toBe(false);
+    expect(masked.files.some(file => file.id === 'rebate-original')).toBe(false);
+    expect(canReadFile(state, actor(FIN), 'rebate-original', empty, 'reader', scope)).toBe(false);
+  }
+  expect(canReadFile(state, actor([...FIN, 'sensitive:tax_base']), 'vat-original', empty)).toBe(true);
+  expect(canReadFile(state, actor([...FIN, 'sensitive:tax_base']), 'rebate-original', empty)).toBe(true);
+  expect(state.files.some(file => file.id === 'vat-original')).toBe(true);
 });

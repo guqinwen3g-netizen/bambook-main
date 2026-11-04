@@ -34,7 +34,7 @@ import {assertOrderLineSource,type OrderLineSource} from './mistOrderSource';
 import {lineQuantityFromBreakdown,type OrderLineBreakdown} from './mistOrderBreakdown';
 import {isLineClosed} from './mistOrderClosure';
 import {quotationContract} from './mistTradeTerms';
-import {createOrderGovernance,applyOrderGovernanceCommand,orderGovernancePermission,getOrderGovernanceReviews,assertOrderApproved,assertOrderWritable,assertOrderNotTerminated,type OrderGovernanceFields,type OrderGovernanceCommand,type OrderGovernanceInput} from './mistOrderGovernance';
+import {normalizeOrderLineNameEn,createOrderGovernance,applyOrderGovernanceCommand,orderGovernancePermission,getOrderGovernanceReviews,assertOrderApproved,assertOrderWritable,assertOrderNotTerminated,type OrderGovernanceFields,type OrderGovernanceCommand,type OrderGovernanceInput} from './mistOrderGovernance';
 import {createOrderFundingState,applyOrderFundingCommand,orderFundingCommandPermission,assertOrderDepositCovered,assertOrderFundingIntegrity,advanceBalances,type OrderFundingState,type OrderFundingCommand} from './mistOrderFunding';
 import {applyAgentProposalCommand,agentProposalCommandPermission,type AgentProposal,type AgentProposalCommand} from './mistAgentProposals';
 import type { AgentTaskCommand } from './mistAgentTasks';
@@ -159,7 +159,7 @@ export type MistDev = {
 export type MistFabricCandidate = { id: string; supplierId: string; supplier: string; productId?: string; article: string; price: string; currency: string; moq: string; leadDays: string; note: string };
 export type MistFabric = { id: string; code: string; name: string; owner: string; ownerId: string; due: string; state: string; tone: MistTone; sub: string; request: string; answer: string; confirmed: boolean; fileIds: string[];
   candidates?: MistFabricCandidate[]; chosenCandidateId?: string; cancelled?: { reason: string; at: string; actor: string } };
-export type MistOrderLine = GarmentFulfillmentFields & { id: string; orderId: string; name: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number };
+export type MistOrderLine = GarmentFulfillmentFields & { id: string; orderId: string; name: string; nameEn?: string; style: string; img: MistImage; qty: number; unit: string; price: number; made: number; qc: number };
 export type MistChecklistItem = { id: string; label: string; done: boolean; note: string; actor?: string; at?: string };
 export type MistOrder = {
   /** Supporting originals, separate from the approved commercial contract snapshot. */
@@ -920,7 +920,7 @@ export function createMistOrderRecords(state:MistState,p:MistOrderInput,context:
       const order:MistOrder={id,code,type:p.type,customerId:c?.id||'',customer:c?.name||governance.contract.receiver||'内部接收方待填写',governance,season:text(p.season,'季节'),lines:0,qty:0,amount:0,currency,due:date(p.due),progress:0,state:'订单草稿',tone:'neutral',owner:orderOwner.name,ownerId:orderOwner.id,img:p.type==='fabric'?'fabric':p.lines[0].img||'coat',checklist:MIST_ORDER_CHECKLIST.map((label,index)=>({id:id+'-check-'+index,label,done:false,note:''})),handoffAt:null,createdAt:context.now,updatedAt:context.now};
       // BB-ORD-2：来源与条目同一命令写入，先全部校验再落库，任何一条不合规整单拒绝
       const scope={type:p.type,customerId:c?.id||'',internal:governance.contract.kind==='internal'};
-      const rows=(p.lines as MistOrderInput['lines']).map((row,index)=>{const name=text(row.name,'品名'),fromBreakdown=lineQuantityFromBreakdown(p.type,row,`条目「${name||index+1}」`),qty=fromBreakdown.qty??positive(row.qty,'数量'),price=positive(row.price,'单价',true);lineAmount(qty,price);return {...(p.type==='garment'?normalizeGarmentFulfillment(row,false):{}),...(fromBreakdown.breakdown?{breakdown:fromBreakdown.breakdown}:{}),name,style:text(row.style,'款号'),img:p.type==='fabric'?'fabric':['coat','blazer','suit','clay'].includes(row.img)?row.img:'coat' as MistImage,qty,unit:text(row.unit,'单位',true,20),price,source:assertOrderLineSource(state,scope,row,name||String(index+1))};});
+      const rows=(p.lines as MistOrderInput['lines']).map((row,index)=>{const name=text(row.name,'品名'),fromBreakdown=lineQuantityFromBreakdown(p.type,row,`条目「${name||index+1}」`),qty=fromBreakdown.qty??positive(row.qty,'数量'),price=positive(row.price,'单价',true);lineAmount(qty,price);return {...(p.type==='garment'?normalizeGarmentFulfillment(row,false):{}),...(fromBreakdown.breakdown?{breakdown:fromBreakdown.breakdown}:{}),name,...(normalizeOrderLineNameEn(row.nameEn)?{nameEn:normalizeOrderLineNameEn(row.nameEn)}:{}),style:text(row.style,'款号'),img:p.type==='fabric'?'fabric':['coat','blazer','suit','clay'].includes(row.img)?row.img:'coat' as MistImage,qty,unit:text(row.unit,'单位',true,20),price,source:assertOrderLineSource(state,scope,row,name||String(index+1))};});
       state.orders.unshift(order);
       for(const {source,...row} of rows)state.orderLines.push({id:context.id(),orderId:id,...row,made:0,qc:0,...source} as MistOrderLine);
       event(state,context,'order',id,'创建订单 '+code,{view:'orders/detail',id});return{id,orderId:id};

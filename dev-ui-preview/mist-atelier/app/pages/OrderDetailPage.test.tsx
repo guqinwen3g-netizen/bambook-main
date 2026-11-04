@@ -239,6 +239,15 @@ async function lineInput(label:string,value:string){
   await act(async()=>{Object.getOwnPropertyDescriptor(control.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype,'value')!.set!.call(control,value);control.dispatchEvent(new Event('input',{bubbles:true}));});
 }
 
+it('saves and clears an English line name through the line editor',async()=>{
+  lineEditorFixture('rejected');render();await openLineEditor();
+  await lineInput('英文品名','  COTTON STRETCH TWILL NAVY ');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  expect(store.state!.orderLines[0].nameEn).toBe('COTTON STRETCH TWILL NAVY');
+  await openLineEditor();expect((getByLabelText(document.body,'英文品名') as HTMLInputElement).value).toBe('COTTON STRETCH TWILL NAVY');
+  await lineInput('英文品名','');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());
+  expect(store.state!.orderLines[0].nameEn).toBeUndefined();
+});
+
 it('corrects a rejected order from 10 at 11 to 10 at 12 and preserves the rejected snapshot through resubmission',async()=>{
   const actor=lineEditorFixture('rejected'),lineId=store.state!.orderLines[0].id;render();await openLineEditor();
   await lineInput('销售单价','12');await act(async()=>getByRole(document.body,'button',{name:'保存条目'}).click());

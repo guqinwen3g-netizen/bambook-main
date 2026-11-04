@@ -9,6 +9,8 @@ import {MemoryMistDatabase,testActor,testAuthority} from './__tests__/support';
 import {MistPrivateFiles} from './files';
 import {MistRepository} from './repository';
 import {scopedWriteViolation} from '../shared/mistDataScope';
+import {agentGet,agentQuery} from './agentRead';
+import {runMistAssistant} from './assistant';
 vi.mock('./context',()=>({mistApprovalAuthority:async()=>({supplier:{}})}));
 let dir:string;beforeEach(async()=>{dir=await mkdtemp(path.join(tmpdir(),'internal-delivery-'));});afterEach(async()=>{await rm(dir,{recursive:true,force:true});});
 
@@ -41,6 +43,14 @@ it('requires receiving write authority and exact assignment without granting sou
  expect(view.state.orders).toEqual([]);expect(view.state.fulfillment.purchases).toEqual([]);
  expect(view.state.internalDeliveries).toMatchObject([{id,receiverId:'warehouse',quantity:10}]);
  expect(JSON.stringify(view.state.internalDeliveries)).not.toMatch(/price|amount|currency/);
+ const agentView=await repo.getForAgent(actor('warehouse'),wid);
+ expect(agentQuery(agentView.workspace.state,agentView.actor,{type:'order'})).toMatchObject({results:[],total:0,truncated:false});
+ expect(()=>agentGet(agentView.workspace.state,agentView.actor,'order',f.target.orderId)).toThrow('不存在');
+ auth.users.get('warehouse')!.permissions.push('ai:chat');
+ const assistantView=await repo.getForAssistant(actor('warehouse'),wid),complete=vi.fn(async()=> 'Advice');
+ await expect(runMistAssistant({...assistantView,body:{message:'Source order',sourceIds:['orders:'+f.target.orderId]}},{providers:()=>[],subscription:()=>({connected:true,model:'test'}),complete})).rejects.toMatchObject({status:404,code:'SOURCE_NOT_FOUND'});
+ expect(complete).not.toHaveBeenCalled();
+ auth.users.get('warehouse')!.permissions=auth.users.get('warehouse')!.permissions.filter(p=>p!=='ai:chat');
  expect(view.state.tasks.some(t=>t.id==='internal-delivery:'+id)).toBe(true);
  const receive={requestId:'count',expectedRevision:1,command:{type:'order.internal.receive' as const,payload:{id,accepted:10,rejected:0,expectedRevision:0,evidence:'Counted by receiver'}}};
  auth.users.set('warehouse',{active:true,permissions:['orders:read']});

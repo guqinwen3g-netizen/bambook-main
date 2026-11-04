@@ -144,6 +144,14 @@ it('hides finance activity and notifications for an unrelated receipt', () => {
   expect(projected.events).toEqual([]);expect(projected.notifications).toEqual([]);
 });
 
+it('does not reveal how many out-of-scope orders share a letter of credit', () => {
+  const others=['o2','o3','o4'].map(id=>({id,customerId:'other',ownerId:'another',type:'garment'}));
+  const state:any={customers:[{id:'mine',ownerId:'member'},{id:'other',ownerId:'another'}],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[{id:'mine-order',customerId:'mine',ownerId:'member',type:'garment'},...others],orderLines:[],invoices:[],allocations:[],receipts:[],
+    letterOfCredits:[{id:'lc',code:'LC-1',lcNo:'LC-NO',customerId:'mine',customer:'Mine',currency:'USD',amount:1000,orderIds:['mine-order','o2','o3','o4'],fileIds:[],note:''}],files:[],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};
+  const projected:any=applyDataScope(state,{userIds:['member'],teamIds:[]},'member');
+  expect(projected.partialLettersOfCredit[0].hiddenCount).toBe(1);
+});
+
 it('hides the original amount and attachments of a letter of credit shared across scopes', () => {
   const state:any={customers:[{id:'mine',ownerId:'member'},{id:'other',ownerId:'another'}],crm:{opportunities:[],followUps:[]},devs:[],market:{quotations:[],suppliers:[]},orders:[{id:'mine-order',customerId:'mine',ownerId:'member',type:'garment'},{id:'other-order',customerId:'other',ownerId:'another',type:'garment'}],orderLines:[],invoices:[],allocations:[],receipts:[],
     letterOfCredits:[{id:'lc',code:'LC-1',lcNo:'LC-NO',customerId:'mine',customer:'Mine',currency:'USD',amount:1000,orderIds:['mine-order','other-order'],fileIds:['lc-file'],note:'whole bank amount'}],files:[{id:'lc-file',uploadedBy:'member'}],fulfillment:{},platform:{},events:[],tasks:[],notifications:[],calendar:[]};

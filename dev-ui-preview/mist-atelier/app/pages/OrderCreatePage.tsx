@@ -82,7 +82,7 @@ export function OrderCreatePage() {
     const bound=scope;locked.current=true;setWorking(true); setFailure('');
     try {
       // BB-ORD-2：来源随条目在同一条 order.create 命令中写入并由服务端校验，不再二次补写
-      const receipt = await run({ type: 'order.create', payload: { ...form, governance:contract, lines: lines.map(({ key, origin, seed, ...line }) => ({ ...line, ...(origin||{}) })) } });
+      const receipt = await run({ type: 'order.create', payload: { ...form, governance:contract, lines: lines.map(({ key, origin, seed, nameEn, ...line }) => ({ ...line, ...(contract.kind==='external'&&nameEn?.trim()?{nameEn:nameEn.trim()}:{}), ...(origin||{}) })) } });
       const id = receipt.result.orderId ?? receipt.result.id;
       if (!id) throw new Error('订单已提交，但回执缺少编号。请返回列表核对，勿重复创建。');
       if(alive.current&&activeScope.current===bound){toast('订单草稿已创建，待主单审批'); go('orders/detail', id,{customerId:form.customerId,section:form.type});}
@@ -110,7 +110,7 @@ export function OrderCreatePage() {
         </FormGrid></FormSection>}
         {step === 'items' && <FormSection title={uiText("产品条目")}>
           {lines.map((line, itemIndex) => <div key={line.key} className="mist-section"><div className="mist-row"><span className="mist-h2">{uiText("条目 ")}{uiText(itemIndex + 1)}</span><span className="mist-spacer" /><IconButton icon={Trash2} label={ui`删除条目 ${itemIndex + 1}`} disabled={lines.length === 1} onClick={() => setLines(items => items.filter(item => item.key !== line.key))} /></div><FormGrid>
-            <Field label={uiText("品名")} required><TextInput value={line.name} onChange={event => setLine(line.key, { name: event.target.value })} /></Field><Field label={uiText("款号 / 品号")} required><TextInput value={line.style} onChange={event => setLine(line.key, { style: event.target.value })} /></Field>
+            <Field label={uiText("品名")} required><TextInput value={line.name} onChange={event => setLine(line.key, { name: event.target.value })} /></Field><Field label={uiText("款号 / 品号")} required><TextInput value={line.style} onChange={event => setLine(line.key, { style: event.target.value })} /></Field>{contract.kind==='external'&&<Field label={uiText("英文品名")}><TextInput aria-label={uiText("英文品名")} maxLength={200} value={line.nameEn??''} onChange={event => setLine(line.key, { nameEn: event.target.value })} /></Field>}
             <Field label={uiText("数量")} required hint={uiText(line.breakdown ? '由分色分码合计' : undefined)}><OrderNumberInput min="0.0001" step="0.0001" value={line.qty} disabled={!!line.breakdown} onValueChange={qty => setLine(line.key, { qty })} /></Field><Field label={uiText("单位")} required><OptionInput ariaLabel="单位" options={UNITS} value={line.unit} onChange={unit => setLine(line.key, { unit })} /></Field>
             <Field label={ui`单价 ${form.currency}`} required><OrderNumberInput min="0" step="0.01" value={line.price} onValueChange={price => setLine(line.key, { price })} /></Field>
           {form.type==='garment'&&<GarmentFulfillmentFields value={line} onChange={value=>setLine(line.key,value)}/>}</FormGrid><OrderBreakdownEditor type={form.type} unit={uiText(line.unit)} label={ui`条目 ${itemIndex + 1}`} value={line.breakdown} seed={line.seed} onChange={breakdown => setLine(line.key, breakdown ? { breakdown, qty: breakdownTotal(breakdown) } : { breakdown: undefined })} /></div>)}<Button icon={Plus} onClick={() => setLines(items => [...items, newLine(form.type)])}>{uiText("添加条目")}</Button>

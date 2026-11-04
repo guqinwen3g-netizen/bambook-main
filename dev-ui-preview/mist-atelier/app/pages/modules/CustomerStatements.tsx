@@ -57,7 +57,7 @@ export function CustomerStatementCard({ customerId }: { customerId?: string }) {
         <Button size="sm" variant="quiet" icon={Download} disabled={busy} onClick={() => download(r.fileId)}>{uiText("下载")}</Button>
         <Button size="sm" variant="quiet" icon={ExternalLink} disabled={busy} onClick={() => open(r.fileId)}>{uiText("打开")}</Button>
       </div>)}
-      {partials.map(r => <div key={r.id} role="listitem" className="mist-col" data-statement={r.statementNo} style={{ gap: 8, padding: '8px 0' }}><div className="mist-row"><Mono>{r.statementNo}</Mono><span>{nameOf(r.customerId)} · {uiText("部分可见")}</span><span className="mist-spacer"/><span>{ui`另有 ${r.hiddenCount} 笔其他范围业务`}</span></div>{r.sections.flatMap(section => section.lines.map(line => <div className="mist-row" key={section.currency + ':' + line.invoiceId}><Mono>{line.code}</Mono><span className="mist-spacer"/><span>{line.open} {section.currency}</span></div>))}</div>)}
+      {partials.map(r => <div key={r.id} role="listitem" className="mist-col" data-statement={r.statementNo} style={{ gap: 8, padding: '8px 0' }}><div className="mist-row"><Mono>{r.statementNo}</Mono><span>{nameOf(r.customerId)} · {uiText("部分可见")}</span><span className="mist-spacer"/><span>{uiText('另含其他范围业务')}</span></div>{r.sections.flatMap(section => section.lines.map(line => <div className="mist-row" key={section.currency + ':' + line.invoiceId}><Mono>{line.code}</Mono><span className="mist-spacer"/><span>{line.open} {section.currency}</span></div>))}</div>)}
       {!records.length && !partials.length && <span className="mist-note">{uiText("尚未生成。生成后按当时台账冻结内容并归档原件；台账变动后重新生成新编号，旧份保留。")}</span>}
     </div>
   </Card>;

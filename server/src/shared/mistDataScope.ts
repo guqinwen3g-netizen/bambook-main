@@ -193,6 +193,7 @@ export function canGenerateScopedStatement(state: MistState, scope: MistDataScop
 }
 
 /** 按受限范围裁剪状态（不改原对象）。动态、待办、通知、日历按其指向的记录同步裁剪；本人被指派的待办始终保留。 */
+/** Partial projections carry hiddenCount 1/0 only: the exact number of out-of-scope rows is itself hidden data. */
 export function applyDataScope(state: MistState, scope: MistDataScope, actorId: string): MistState {
   const visible = scopedVisibility(state, scope), writable = scopedVisibility(state, scope, false), next: any = { ...state };
   const hiddenFiles = new Set<string>(), knownFiles = new Set((state.files ?? []).map(file => file.id));
@@ -213,12 +214,12 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   next.partialPayableBills = [];
   for (const bill of state.payables?.bills ?? []) {
     const lines = Array.isArray(bill.lines) ? bill.lines : [], shown = lines.filter(line => visible.get('fulfillment.purchases')!.has(line.purchaseId)), hiddenCount = lines.length - shown.length;
-    if (shown.length && hiddenCount) { hideFiles(bill); next.partialPayableBills.push({ id:bill.id,code:bill.code,supplier:bill.supplier,currency:bill.currency,lines:shown,hiddenCount,voided:bill.state==='void' }); }
+    if (shown.length && hiddenCount) { hideFiles(bill); next.partialPayableBills.push({ id:bill.id,code:bill.code,supplier:bill.supplier,currency:bill.currency,lines:shown,hiddenCount:1,voided:bill.state==='void' }); }
   }
   next.partialExpenses = [];
   for (const expense of (state as MistState & {orderCosts?: OrderCostState}).orderCosts?.expenses ?? []) {
     const shares = Array.isArray(expense.shares) ? expense.shares : [], shown = shares.filter(share => writable.get('orders')!.has(share.orderId)), hiddenCount = shares.length - shown.length;
-    if (shown.length && hiddenCount) next.partialExpenses.push({id:expense.id,code:expense.code,category:expense.category,date:expense.date,currency:expense.currency,shares:shown,hiddenCount,voided:!!expense.voided});
+    if (shown.length && hiddenCount) next.partialExpenses.push({id:expense.id,code:expense.code,category:expense.category,date:expense.date,currency:expense.currency,shares:shown,hiddenCount:1,voided:!!expense.voided});
   }
   // Partial receipts are separate response-only summaries: never counterfeit original totals or balances.
   next.partialReceipts = [];
@@ -227,7 +228,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
     if (!partial.partial) return true;
     const visibleAllocations = partial.allocations.filter(row => visible.get('invoices')!.has(row.invoiceId) && (row.receiptCurrency ?? row.currency) === receipt.currency);
     const cents = visibleAllocations.reduce((sum, row) => sum + Math.round((row.receiptAmount ?? row.amount) * 100), 0);
-    if (Number.isSafeInteger(cents)) next.partialReceipts.push({ id: receipt.id, code: receipt.code, date: receipt.date, payer: receipt.payer, currency: receipt.currency, visibleAllocatedAmount: cents / 100, hiddenCount: partial.hiddenCount });
+    if (Number.isSafeInteger(cents)) next.partialReceipts.push({ id: receipt.id, code: receipt.code, date: receipt.date, payer: receipt.payer, currency: receipt.currency, visibleAllocatedAmount: cents / 100, hiddenCount: partial.hiddenCount ? 1 : 0 });
     return false;
   });
   // 共用单据部分遮罩：出运只列可见订单的条目，信用证只列可见订单。
@@ -244,7 +245,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
       for (const document of state.fulfillment?.documents ?? []) if ((document as any).shipmentId === row.id) hideFiles(document);
       for (const customs of state.fulfillment?.customs ?? []) if ((customs as any).shipmentId === row.id) hideFiles(customs);
       const { departureEvidence: _evidence, cancelReason: _reason, packingDetailEvidence: _packingEvidence, ...safe } = row;
-      return { ...safe, lines: visibleLines, hiddenCount, note: '', fileIds: [], documentDispatches: [] };
+      return { ...safe, lines: visibleLines, hiddenCount: 1, note: '', fileIds: [], documentDispatches: [] };
     });
     next.fulfillment = { ...next.fulfillment, shipments,
       documents: (next.fulfillment.documents ?? []).filter((row: any) => !partialShipmentIds.has(row.shipmentId)),
@@ -263,11 +264,11 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
       const visibleLines = lines.filter((line: any) => visible.get('invoices')!.has(line.invoiceId));
       const hiddenCount = lines.length - visibleLines.length + unapplied.filter((row: any) => !receiptIds.has(row.receiptId)).length;
       hidden += hiddenCount; shown += visibleLines.length;
-      return { currency: section.currency, lines: visibleLines, hiddenCount };
+      return { currency: section.currency, lines: visibleLines, hiddenCount: hiddenCount ? 1 : 0 };
     });
     if (!hidden) return true;
     hideFiles(statement);
-    if (shown) next.partialStatements.push({ id: statement.id, customerId: statement.customerId, statementNo: statement.statementNo, asOf: statement.asOf, hiddenCount: hidden, sections: partialSections.filter((section: any) => section.lines.length) });
+    if (shown) next.partialStatements.push({ id: statement.id, customerId: statement.customerId, statementNo: statement.statementNo, asOf: statement.asOf, hiddenCount: hidden ? 1 : 0, sections: partialSections.filter((section: any) => section.lines.length) });
     return false;
   });
   next.partialLettersOfCredit = [];
@@ -277,7 +278,7 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
       const ids = Array.isArray(lc.orderIds) ? lc.orderIds : [], visibleIds = ids.filter((id: string) => orders.has(id)), hiddenCount = ids.length - visibleIds.length;
       if (!hiddenCount) return true;
       hideFiles(lc);
-      if (visibleIds.length) next.partialLettersOfCredit.push({ id: lc.id, code: lc.code, lcNo: lc.lcNo, customerId: lc.customerId, customer: lc.customer, currency: lc.currency, orderIds: visibleIds, hiddenCount, cancelled: !!lc.cancelled });
+      if (visibleIds.length) next.partialLettersOfCredit.push({ id: lc.id, code: lc.code, lcNo: lc.lcNo, customerId: lc.customerId, customer: lc.customer, currency: lc.currency, orderIds: visibleIds, hiddenCount: 1, cancelled: !!lc.cancelled });
       return false;
     });
   }
@@ -287,6 +288,8 @@ export function applyDataScope(state: MistState, scope: MistDataScope, actorId: 
   const actualDocuments = new Set((next.fulfillment?.documents ?? []).map((row: any) => row.id));
   const actualCustoms = new Set((next.fulfillment?.customs ?? []).map((row: any) => row.id));
   const targetOk = (target?: { view?: string; id?: string;section?:string }) => {
+    // Sample-request notices use the samples route, not an order/development target.
+    if (target?.view === 'samples') return !!target.id && hasAny(target.id, target.section === 'requests' ? ['sampleRequests'] : ['fulfillment.samples']);
     if(target?.section==='internal-deliveries'&&['orders','orders/list'].includes(target.view||''))return !!target.id&&hasAny(target.id,['internalDeliveries']);
     if (!target?.id) return !target?.view || !(target.view in VIEW_COLLECTION || ['payment-vouchers', 'finance', 'crm', 'inventory'].includes(target.view));
     if (target.view === 'payment-vouchers' || target.view === 'finance') return safeReceiptIds.has(target.id) || hasAny(target.id, financePaths);

@@ -525,7 +525,7 @@ it('locks the bill form while registration is in flight',async()=>{
   await act(async()=>finish());store.value.run=original;
 });
 
-it('shows only scoped purchase lines for a partially visible supplier invoice',()=>{store.value.state.partialPayableBills=[{id:'part',code:'AP-PART',supplier:'供应商',currency:'USD',lines:[{purchaseId:'p',purchaseCode:'PO-OWN',kind:'finished',amount:40}],hiddenCount:1,voided:false}];render();const list=getByRole(host,'list',{name:'部分可见应付票据'});expect(list.textContent).toContain('AP-PART');expect(list.textContent).toContain('PO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另有 1 笔其他范围业务');expect(list.textContent).not.toContain('100.00');});
+it('shows only scoped purchase lines for a partially visible supplier invoice',()=>{store.value.state.partialPayableBills=[{id:'part',code:'AP-PART',supplier:'供应商',currency:'USD',lines:[{purchaseId:'p',purchaseCode:'PO-OWN',kind:'finished',amount:40}],hiddenCount:1,voided:false}];render();const list=getByRole(host,'list',{name:'部分可见应付票据'});expect(list.textContent).toContain('AP-PART');expect(list.textContent).toContain('PO-OWN');expect(list.textContent).toContain('40.00');expect(list.textContent).toContain('另含其他范围业务');expect(list.textContent).not.toContain('100.00');});
 it('prefills the prepayment plan from a stated percentage in the contract terms only',()=>{
  expect(termsPrepayment({quantity:2400,price:46.5,terms:'30% 预付，余款到货验收后 30 天'})).toBe('33480');
  expect(termsPrepayment({quantity:500,price:452,terms:'定金 20%，出运前付清'})).toBe('45200');
