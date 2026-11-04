@@ -665,6 +665,7 @@
 
 ## 7. 进度记录
 
+- 2026-11-04：#651 报表定时发送（fin63）、索赔来源发票随订单列出与撤回追偿（fin44）、fin31/fin34 走查记录合入 main（52a34620），合入前后台完整验证 c7e6120e 通过，已 `npm run dev:deploy` 部署开发服务器，版本 52a34620（公网未实走）。#652 fin37 订单核算修正（无已批准采购的订单不按全额毛利计入）已推送，后台验证中。
 - 2026-11-04：#649 第二类个人 Agent 合入 main（a124173a），合入前后台完整验证 e9a79d92 通过（前端 2111、test:mist、test:access、tooling、build、双端 tsc、mist:check），已 `npm run dev:deploy` 部署开发服务器，版本 a124173a（公网未实走；真实模型待平台模型配置）。
 - 2026-11-04：第二类个人 Agent（分支 `codex/v2-personal-agent`）：新接口 `POST /personal-agent`、`POST /personal-agent/tasks`、`GET /personal-agent/usage`；后端 2 项、前端 2 项新测试，相关 Agent 套件通过；后台完整验证见 PR。
 - 2026-11-04：#647（第二版第一批）合入 main 并 `npm run dev:deploy` 部署开发服务器，版本 7c601b9e，合入前后台完整验证 788d7da6 通过（前端 2109、test:mist、test:access、tooling、build、双端 tsc、mist:check）。公网未实走。
