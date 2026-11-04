@@ -2,6 +2,8 @@ import type { PrismaClient } from '@prisma/client';
 
 export class CompanyAccessError extends Error {
   constructor(public code: string, message: string, public status = 403) { super(message); }
+  // safeRouteError recognizes statusCode; keep status for existing authentication consumers.
+  get statusCode() { return this.status; }
 }
 
 /** Validate membership on every reload, including tokens issued before migration. */

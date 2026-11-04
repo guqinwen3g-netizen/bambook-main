@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -114,6 +114,87 @@ describe('row-level data scope by role', () => {
     expect(await orders('teammate')).toEqual(['SO-G-2026-012']);
     db.teamMembers[0].leftAt = new Date();
     expect(await orders('teammate')).toEqual([]);
+  });
+  it.each(['leave', 'narrow', 'dissolve'])('revokes already-open group records immediately after %s, including writes at the current revision', async change => {
+    const subject = actor('teammate');
+    const opened = await repo.get(subject, workspaceId);
+    const orderId = 'SO-G-2026-012';
+    expect(opened.state.orders.map(row => row.id)).toContain(orderId);
+    if (change === 'leave') db.teamMembers[0].leftAt = new Date();
+    else if (change === 'dissolve') db.teams[0].deletedAt = 1n;
+    else {
+      auth.users.get('boss')!.permissions.push('hr:write');
+      await repo.execute(actor('boss'), workspaceId, { requestId: 'narrow-scope', expectedRevision: opened.revision,
+        command: { type: 'teamScope.save', payload: { teamId: 'team-lune', conditions: [], picks: [], exclusions: [] } } });
+    }
+    expect((await repo.get(subject, workspaceId)).state.orders.map(row => row.id)).not.toContain(orderId);
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(subject, workspaceId, { requestId: 'stale-open-order', expectedRevision: before.revision,
+      command: { type: 'order.checklist', payload: { orderId, itemId: `${orderId}-check-0`, done: true } } } as any)).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+  });
+  it('clears old managed-line access immediately through member.groups.set, without removing department access', async () => {
+    const setGroups = (groups: ('fabric' | 'garment')[], requestId: string) => repo.execute(actor('boss'), workspaceId, {
+      requestId, expectedRevision: db.workspaces.get(workspaceId)!.revision,
+      command: { type: 'member.groups.set', payload: { userId: 'head', groups } },
+    });
+    await setGroups(['fabric'], 'manage-fabric');
+    expect(await orders('head')).toContain('id-170');
+    await setGroups([], 'stop-managing-fabric');
+    expect(await orders('head')).not.toContain('id-170');
+    expect(await orders('head')).toContain('SO-G-2026-017');
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(actor('head'), workspaceId, { requestId: 'old-line-write', expectedRevision: before.revision,
+      command: { type: 'order.checklist', payload: { orderId: 'id-170', itemId: 'id-170-check-0', done: true } } } as any)).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+  });
+  it('does not retain write authority from an already-open session after the job loses its permission', async () => {
+    const subject = actor('demo-sales'), opened = await repo.get(subject, workspaceId);
+    auth.users.get('demo-sales')!.permissions = ['orders:read'];
+    const before = structuredClone(db.workspaces.get(workspaceId));
+    await expect(repo.execute(subject, workspaceId, { requestId: 'old-job-write', expectedRevision: opened.revision,
+      command: { type: 'order.checklist', payload: { orderId: 'SO-G-2026-018', itemId: 'SO-G-2026-018-check-0', done: true } } } as any)).rejects.toMatchObject({ status: 403 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(0);
+  });
+  it('customer handover immediately moves business visibility while leaving company-wide archives readable', async () => {
+    const source = db.workspaces.get(workspaceId)!.state;
+    const selected = source.orders.find((row: any) => row.id === 'SO-G-2026-017')!;
+    if (selected.governance) selected.governance.status = 'approved';
+    const subject = actor('demo-buyer');
+    vi.spyOn(repo as any, 'reviewSubject').mockResolvedValue({ ...actor('loner'), permissions: auth.users.get('loner')!.permissions });
+    expect(await orders('demo-buyer')).toContain(selected.id);
+    await repo.execute(actor('boss'), workspaceId, { requestId: 'customer-transfer', expectedRevision: 0,
+      command: { type: 'handover.customer', payload: { customerId: selected.customerId, toUserId: 'loner', reason: '调岗交接', orderIds: [selected.id] } } });
+    expect(await orders('loner')).toContain(selected.id);
+    expect(await orders('demo-buyer')).not.toContain(selected.id);
+    expect((await repo.get(subject, workspaceId)).state.customers.map(row => row.id)).toContain(selected.customerId);
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(subject, workspaceId, { requestId: 'old-owner-write', expectedRevision: before.revision,
+      command: { type: 'order.checklist', payload: { orderId: selected.id, itemId: `${selected.id}-check-0`, done: true } } } as any)).rejects.toMatchObject({ status: 404 });
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+  });
+  it.each([
+    ['handover.customer', 'relations:write'], ['handover.customer', 'orders:read'],
+    ['handover.account', 'products:write'], ['handover.account', 'suppliers:read'],
+  ])('%s rejects an active recipient missing %s without changing ownership, tasks or receipts', async (type, missing) => {
+    const source = db.workspaces.get(workspaceId)!.state;
+    for (const order of source.orders) if (order.ownerId === 'demo-buyer' && order.governance) order.governance.status = 'approved';
+    const permissions = ['relations:read', 'relations:write', 'orders:read', 'orders:write', 'products:read', 'products:write', 'suppliers:read', 'suppliers:write'].filter(scope => scope !== missing);
+    const loadRecipient = vi.spyOn(repo as any, 'reviewSubject').mockResolvedValue({ ...actor('loner'), permissions });
+    const command = type === 'handover.customer'
+      ? { type, payload: { customerId: 'customer-1', toUserId: 'loner', reason: '调岗', orderIds: ['SO-G-2026-017'] } }
+      : { type, payload: { fromUserId: 'demo-buyer', toUserId: 'loner', reason: '离职' } };
+    const before = structuredClone(db.workspaces.get(workspaceId)), receipts = db.receipts.size;
+    await expect(repo.execute(actor('boss'), workspaceId, { requestId: 'unqualified-recipient', expectedRevision: 0, command } as any)).rejects.toMatchObject({ status: 422, code: 'PRECONDITION' });
+    expect(loadRecipient).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ userId: 'boss', companyId: COMPANY }), 'loner', '新负责人');
+    expect(db.workspaces.get(workspaceId)).toEqual(before);
+    expect(db.receipts.size).toBe(receipts);
+    loadRecipient.mockResolvedValue({ ...actor('loner'), permissions: [...permissions, missing] });
+    await expect(repo.execute(actor('boss'), workspaceId, { requestId: 'qualified-recipient', expectedRevision: 0, command } as any)).resolves.toMatchObject({ workspace: { revision: 1 } });
   });
   it('rejects writes to records outside the scope and keeps the data unchanged', async () => {
     const before = structuredClone(db.workspaces.get(workspaceId));
