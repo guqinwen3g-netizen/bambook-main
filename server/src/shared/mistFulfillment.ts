@@ -862,7 +862,7 @@ export function fulfillmentCommandPermission(command: FulfillmentCommand): strin
     throw new MistCommandError('VALIDATION', '未知履约操作');
 }
 const fail = (message: string, code = 'VALIDATION'): never => { throw new MistCommandError(code, message); };
-const text = (v: unknown, label: string, required = true, max = 8000): string => typeof v === 'string' && v.length <= max && (!required || v.trim()) ? v.trim() : fail(`${label}未填写或格式无效`);
+const text = (v: unknown, label: string, required = true, max = 8000): string => typeof v === 'string' && v.length > max ? fail(`${label}不能超过 ${max} 字`) : typeof v === 'string' && (!required || v.trim()) ? v.trim() : fail(`${label}未填写或格式无效`);
 const qty = (v: unknown, label = '数量', zero = false): number => typeof v === 'number' && Number.isFinite(v) && v >= (zero ? 0 : 0.0001) && v <= 1e9 && Math.abs(v * 10000 - Math.round(v * 10000)) < 0.00001 ? v : fail(`${label}须为${zero ? '非负' : '正'}数，最多四位小数`);
 const sum = (values: number[]) => Math.round(values.reduce((a, b) => a + Math.round(b * 10000), 0)) / 10000;
 const get = <T extends {

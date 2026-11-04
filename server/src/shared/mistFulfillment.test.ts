@@ -283,6 +283,7 @@ describe('P2-3 shipment transport, booking history, arrival and customs amendmen
   const s=()=>f.root.fulfillment.shipments.find(x=>x.id===id)!;
   expect(s().transport).toMatchObject({vessel:'COSCO STAR',containers:[{type:'40HQ',number:'CBHU1234567',seal:'SL001'}],mainMark:'CEDAR\nPO 123'});
   expect(()=>f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-10-30',note:'',transport:{etd:'2026-10-30',eta:'2026-10-01'}}})).toThrow('ETA');
+  expect(()=>f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-1',plannedDate:'2026-10-30',note:'',transport:{cutoff:'截'.repeat(41)}}})).toThrow('截关 / 截港时间不能超过 40 字');
   f.run({type:'fulfillment.shipments.updateTransport',payload:{id,booking:'BK-2',plannedDate:'2026-11-05',note:'原船甩柜改下一班',changeFee:{amount:150,currency:'usd'}}});
   expect(s().bookingChanges).toEqual([expect.objectContaining({from:'BK-1',to:'BK-2',reason:'原船甩柜改下一班',fee:{amount:150,currency:'USD'}})]);
  });
